@@ -1,4 +1,4 @@
-// translation-source: 57b0fcb43db1c83f37043fc71c9fb312b807a1fb0c56d7a9781cef96f2b64ffb
+// translation-source: 1369786d303329f6e5230c06537e985a4c7735be65bcff1dc17670a9530129f9
 I18N.fi = localeValues([
   /* sys.nodata */ "Ei tietoja",
   /* sys.unreachable */ "Ei tavoiteta",
@@ -556,7 +556,7 @@ I18N.fi = localeValues([
   /* ref.target */ "Tavoitelämpötila",
   /* ref.timestamp_source */ "Aikaleiman lähde · valinnainen",
   /* ref.max_age */ "Enimmäisikä · sekuntia",
-  /* ref.temperature_source_help */ "Tarkka MQTT-topic ja valinnainen JSON-polku merkin $ jälkeen. Puuttuva tai väärä polku ilmoitetaan viestin saapuessa.",
+  /* ref.temperature_source_help */ "Tarkka MQTT-topic ja valinnainen JSON-polku merkin $ jälkeen. Puuttuva tai väärä polku ilmoitetaan viestin saapuessa. Kirjoita topicissa ja polussa kirjaimellinen $ muodossa \\$ ja \\ muodossa \\\\.",
   /* ref.target_help */ "Kiinteä °C-arvo tai tarkka MQTT-topic valinnaisella $-alkuisella JSON-polulla.",
   /* ref.timestamp_source_help */ "Valinnainen RFC3339-/Unix-lähdeaika muodossa topic$polku. Tyhjä käyttää MQTT-saapumisaikaa; säilytetty arvo hylätään turvallisesti.",
   /* ref.max_age_help */ "Lähdelukeman sallittu enimmäisikä 10–3600 sekuntia.",
@@ -653,7 +653,7 @@ I18N.fi = localeValues([
   /* wx.detail.unavailable */ "Viimeisin haku epäonnistui; mahdollinen vanha arvo näkyy vain diagnostiikkaa varten.",
   /* wx.detail.waiting */ "Ennustetta ei ole vielä saatu.",
   /* wx.detail.temperature_label */ "Lämpötila:",
-  /* wx.detail.temperature */ (v) => `${v} °C on seuraavan kahden kokonaisen tunnin ulkoilman keskilämpötilaennuste.`,
+  /* wx.detail.temperature */ (v) => `${v} °C on viimeisellä onnistuneella haulla valitun kahden tunnin jakson ulkoilman keskilämpötilaennuste.`,
   /* wx.detail.solar_label */ "Auringonsäteily:",
   /* wx.detail.solar */ (v) => `${v} Wh/m² on saman kahden tunnin vaakasuoran kokonaissäteilyn ennuste.`,
   /* wx.detail.source_label */ "Lähde:",

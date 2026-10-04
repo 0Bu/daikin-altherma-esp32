@@ -73,9 +73,8 @@ inline ModbusProfileDecision evaluate_probe_result(ModbusProfile current_profile
             if (is_valid_altherma4_probe_value(reg, raw_value)) {
                 return {ModbusProfile::Altherma4, true, false, true, true};
             }
-            if (raw_value == MB_UNSUPPORTED || raw_value == MB_UNAVAILABLE) {
-                // Device affirmatively answered that the extended register is unsupported
-                // or unavailable -> definitively HomeHub.
+            if (raw_value == MB_UNSUPPORTED) {
+                // Unsupported is capability evidence; temporarily unavailable is not.
                 return {ModbusProfile::HomeHub, true, false, true, true};
             }
             if (raw_value == MB_WAIT) {
@@ -199,8 +198,7 @@ struct ModbusProbeTracker {
             if (failure_type == MbFailureType::Exception &&
                 (failure_detail == 0x02 || failure_detail <= 0)) {
                 is_affirmative_homehub = true;
-            } else if (failure_type == MbFailureType::None &&
-                       (raw_value == MB_UNSUPPORTED || raw_value == MB_UNAVAILABLE)) {
+            } else if (failure_type == MbFailureType::None && raw_value == MB_UNSUPPORTED) {
                 is_affirmative_homehub = true;
             }
             if (!is_affirmative_homehub) {

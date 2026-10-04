@@ -49,6 +49,11 @@ namespace daik {
 // and ENV III), so lazy creation inside one of them would be a race on first boot.
 void history_start();
 
+// Allocation-free browser lifetime token. Any source/consent reset advances it, including A -> B
+// -> A between status polls; ordinary samples/flushes do not. It is independent of producer
+// generation checks, and is boot-local: clients also compare the device's per-boot identity.
+uint32_t history_epoch() noexcept;
+
 // Feed one poll cycle. Called from the poll task right after a sweep, with that cycle's values —
 // NOT under the cache mutex (this takes its own, and holding two would invert a lock order for no
 // reason). Cheap: it resolves the trended rows, folds one sample into the pending bucket per trend,

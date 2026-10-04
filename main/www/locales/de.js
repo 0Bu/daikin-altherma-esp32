@@ -1,4 +1,4 @@
-// translation-source: 57b0fcb43db1c83f37043fc71c9fb312b807a1fb0c56d7a9781cef96f2b64ffb
+// translation-source: 1369786d303329f6e5230c06537e985a4c7735be65bcff1dc17670a9530129f9
 I18N.de = localeValues([
   /* sys.nodata */ "Keine Daten",
   /* sys.unreachable */ "Nicht erreichbar",
@@ -556,7 +556,7 @@ I18N.de = localeValues([
   /* ref.target */ "Zieltemperatur",
   /* ref.timestamp_source */ "Zeitstempelquelle · optional",
   /* ref.max_age */ "Maximales Alter · Sekunden",
-  /* ref.temperature_source_help */ "Exaktes MQTT-Topic und optionaler JSON-Pfad nach $. Fehlende oder falsche Pfade werden beim Eintreffen einer Nachricht gemeldet.",
+  /* ref.temperature_source_help */ "Exaktes MQTT-Topic und optionaler JSON-Pfad nach $. Fehlende oder falsche Pfade werden beim Eintreffen einer Nachricht gemeldet. In Topics und Pfaden $ als \\$ und \\ als \\\\ eingeben.",
   /* ref.target_help */ "Fester Wert in °C oder exaktes MQTT-Topic mit optionalem JSON-Pfad nach $.",
   /* ref.timestamp_source_help */ "Optionale RFC3339-/Unix-Quellzeit als Topic$Pfad. Leer verwendet die Live-MQTT-Empfangszeit; retained Werte werden dann abgelehnt.",
   /* ref.max_age_help */ "So viele Sekunden darf die Quellmessung höchstens alt sein (10–3600).",
@@ -653,7 +653,7 @@ I18N.de = localeValues([
   /* wx.detail.unavailable */ "Der letzte Abruf ist fehlgeschlagen; ein älterer Wert wird, falls vorhanden, nur zur Diagnose angezeigt.",
   /* wx.detail.waiting */ "Es wurde noch keine Prognose empfangen.",
   /* wx.detail.temperature_label */ "Temperatur:",
-  /* wx.detail.temperature */ (v) => `${v} °C ist die mittlere prognostizierte Außenlufttemperatur für die nächsten zwei vollständigen Stunden.`,
+  /* wx.detail.temperature */ (v) => `${v} °C ist die mittlere prognostizierte Außenlufttemperatur für das beim letzten erfolgreichen Abruf gewählte Zweistundenfenster.`,
   /* wx.detail.solar_label */ "Globalstrahlung:",
   /* wx.detail.solar */ (v) => `${v} Wh/m² ist die prognostizierte Globalstrahlung auf eine horizontale Fläche im selben Zweistundenzeitraum.`,
   /* wx.detail.source_label */ "Quelle:",

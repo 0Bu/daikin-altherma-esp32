@@ -3,7 +3,7 @@
 // split-action contract, source status presentation and all configured/unconfigured use-cases.
 import assert from "node:assert/strict";
 import vm from "node:vm";
-import { readAppFragments } from "../tools/ui/read_app_source.mjs";
+import { readAppFragments, readUiLocale } from "../tools/ui/read_app_source.mjs";
 
 const source = readAppFragments(["dashboard.js"]);
 const labels = {
@@ -92,7 +92,7 @@ const labels = {
   "wx.detail.unavailable": "Der letzte Abruf ist fehlgeschlagen; ein älterer Wert wird, falls vorhanden, nur zur Diagnose angezeigt.",
   "wx.detail.waiting": "Es wurde noch keine Prognose empfangen.",
   "wx.detail.temperature_label": "Temperatur:",
-  "wx.detail.temperature": "{0} °C ist die mittlere prognostizierte Außenlufttemperatur für die nächsten zwei vollständigen Stunden.",
+  "wx.detail.temperature": "{0} °C ist die mittlere prognostizierte Außenlufttemperatur für das beim letzten erfolgreichen Abruf gewählte Zweistundenfenster.",
   "wx.detail.solar_label": "Globalstrahlung:",
   "wx.detail.solar": "{0} Wh/m² ist die prognostizierte Globalstrahlung auf eine horizontale Fläche im selben Zweistundenzeitraum.",
   "wx.detail.source_label": "Quelle:",
@@ -390,7 +390,7 @@ assert.equal((weatherTongue.match(/class="vdesc-p"/g) || []).length, 5,
   "the healthy weather tongue must keep four live-evidence paragraphs plus its configuration help");
 assert.match(weatherTongue, /<span class="vdesc-n">Status:<\/span> Aktuell — Die Prognose wurde erfolgreich abgerufen\./,
   "weather must explain its freshness instead of presenting an unexplained green line");
-assert.match(weatherTongue, /<span class="vdesc-n">Temperatur:<\/span> 22,6 °C ist die mittlere prognostizierte Außenlufttemperatur für die nächsten zwei vollständigen Stunden\./,
+assert.match(weatherTongue, /<span class="vdesc-n">Temperatur:<\/span> 22,6 °C ist die mittlere prognostizierte Außenlufttemperatur für das beim letzten erfolgreichen Abruf gewählte Zweistundenfenster\./,
   "weather must define the displayed two-hour temperature mean");
 assert.match(weatherTongue, /<span class="vdesc-n">Globalstrahlung:<\/span> 0 Wh\/m² ist die prognostizierte Globalstrahlung auf eine horizontale Fläche im selben Zweistundenzeitraum\./,
   "weather must define the accumulated global horizontal irradiation, including a valid zero");
@@ -640,5 +640,25 @@ assert.match(html, /id="e32Diagnostics"[^]*<option value="off" selected>Aus<\/op
   "off must be a visible persisted Firmware setting");
 assert.doesNotMatch(html, /<div class="section-label">(?:Anlagendiagnose|Heizkurven-Diagnose)/,
   "dependent diagnostic cards must be absent while the master setting is off");
+
+// The production catalog defines a window chosen at fetch time. Advancing the browser clock must
+// not relabel the stored aggregate as the next two complete hours. Pin that actual copy boundary,
+// alongside the manually entered topic/path grammar in every shipped locale.
+const copyContext = vm.createContext({
+  navigator: { language: "en" }, localStorage: { getItem: () => null },
+});
+vm.runInContext(readAppFragments(["i18n.js"]), copyContext);
+for (const code of ["de", "es", "fr", "it", "pl", "cs", "uk", "zh", "ja", "nb", "sv", "fi"])
+  vm.runInContext(readUiLocale(code), copyContext);
+vm.runInContext("this.__copy = (lang, key, ...args) => { LANG = lang; return t(key, ...args); };", copyContext);
+assert.match(copyContext.__copy("en", "wx.detail.temperature", "22.6"), /last successful fetch/);
+assert.doesNotMatch(copyContext.__copy("en", "wx.detail.temperature", "22.6"), /next two complete hours/);
+assert.match(copyContext.__copy("de", "wx.detail.temperature", "22,6"), /letzten erfolgreichen Abruf/);
+assert.doesNotMatch(copyContext.__copy("de", "wx.detail.temperature", "22,6"), /nächsten zwei vollständigen Stunden/);
+for (const code of ["en", "de", "es", "fr", "it", "pl", "cs", "uk", "zh", "ja", "nb", "sv", "fi"]) {
+  const help = copyContext.__copy(code, "ref.temperature_source_help");
+  assert.ok(help.includes(String.raw`\$`), `${code} must explain literal dollar escaping`);
+  assert.ok(help.includes(String.raw`\\`), `${code} must explain literal backslash escaping`);
+}
 
 console.log("settings source tongue use-cases: ok");

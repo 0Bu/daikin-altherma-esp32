@@ -916,17 +916,17 @@
       </label>
       <label class="field">
         <span class="field-label plain" data-i18n="ref.temperature_source">Temperature source</span>
-        <input class="input mono" id="rtTemperatureSource" maxlength="321" placeholder="shellyhtg3-…/status/temperature:0$tC" autocomplete="off" aria-describedby="rtTemperatureSourceHelp">
-        <span class="field-help" id="rtTemperatureSourceHelp" data-i18n="ref.temperature_source_help">Exact MQTT topic and optional JSON path after $. Missing or wrong paths are reported when a payload arrives.</span>
+        <input class="input mono" id="rtTemperatureSource" maxlength="641" placeholder="shellyhtg3-…/status/temperature:0$tC" autocomplete="off" aria-describedby="rtTemperatureSourceHelp">
+        <span class="field-help" id="rtTemperatureSourceHelp" data-i18n="ref.temperature_source_help">Exact MQTT topic and optional JSON path after $. Missing or wrong paths are reported when a payload arrives. Escape literal $ as \$ and literal \ as \\ in topics and paths.</span>
       </label>
       <label class="field">
         <span class="field-label plain" data-i18n="ref.target">Target temperature</span>
-        <input class="input mono" id="rtTarget" maxlength="321" placeholder="20 or thermostat/status$target_temperature_c" autocomplete="off" aria-describedby="rtTargetHelp">
+        <input class="input mono" id="rtTarget" maxlength="641" placeholder="20 or thermostat/status$target_temperature_c" autocomplete="off" aria-describedby="rtTargetHelp">
         <span class="field-help" id="rtTargetHelp" data-i18n="ref.target_help">A fixed value in °C, or an exact MQTT topic with an optional JSON path after $.</span>
       </label>
       <label class="field">
         <span class="field-label plain" data-i18n="ref.timestamp_source">Timestamp source · optional</span>
-        <input class="input mono" id="rtTimestampSource" maxlength="321" placeholder="Optional: topic$unixtime" autocomplete="off" aria-describedby="rtTimestampSourceHelp">
+        <input class="input mono" id="rtTimestampSource" maxlength="641" placeholder="Optional: topic$unixtime" autocomplete="off" aria-describedby="rtTimestampSourceHelp">
         <span class="field-help" id="rtTimestampSourceHelp" data-i18n="ref.timestamp_source_help">Optional RFC3339/Unix source time as topic$path. Empty uses live MQTT arrival time; retained values then fail closed.</span>
       </label>
       <label class="field">

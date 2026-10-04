@@ -12,7 +12,9 @@ namespace daik {
 
 // Create the write-serialization mutex before config_load or any producer task starts. Failure is
 // fail-stop: without it a factory reset could race a writer and boot with data it claimed erased.
-void nvs_storage_init();
+void nvs_storage_init(bool initialized);
+// Boot's initialization result; WiFi must not require a broken partition to expose recovery.
+bool nvs_storage_available();
 
 // The setters return the failing esp_err_t rather than a bare bool: config.cpp logs the key + the
 // error name to /diag + syslog, which is the only way to tell WHICH write failed and why (a full

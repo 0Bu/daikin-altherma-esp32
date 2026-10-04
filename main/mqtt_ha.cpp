@@ -81,6 +81,7 @@
 #include "logic/mqtt_group.hpp"
 #include "logic/mqtt_publish_gate.hpp"
 #include "logic/ota_quiesce.hpp" // stand aside while an OTA/weather TLS op owns the heap (legacy-380)
+#include "logic/payload_complete.hpp"
 #include "logic/reference_temperature.hpp"
 #include "logic/reset_reason.hpp"
 #include "logic/weather_mqtt.hpp"
@@ -202,6 +203,7 @@ static bool                s_ref_rx_active = false;
 static std::atomic<uint32_t> s_ref_dropped{0};
 static uint32_t            s_ref_dropped_reported = 0;
 static ReferenceTemperatureStatus s_ref_status;
+static SourceTimestampHighWater     s_ref_source_time; // guarded by s_mtx; survives invalid samples
 static logic::HeatingCurveDiagnosis s_heating_curve_diagnosis;  // guarded by s_mtx
 inline constexpr size_t REF_VALUE_TOPIC_COUNT = 3;
 using ReferenceTopicSet = std::array<std::string, REF_VALUE_TOPIC_COUNT>;
@@ -263,6 +265,7 @@ static uint64_t    s_last_x10a_digest = 0;            // per-topic dedup guards 
 static std::string s_last_modbus_json;
 static uint32_t    s_last_x10a_cache_gen   = 0;
 static uint32_t    s_last_modbus_cache_gen = 0;
+static bool        s_last_modbus_live      = false;
 static std::string s_last_weather_json;
 static std::string s_last_env3_json;
 // Rate-limit the hard-cap diagnostic. The payload itself is no longer boot-long storage: dev.12's
@@ -934,14 +937,16 @@ static bool publish_x10a_state(const Config& config, bool force) {
     return true;
 }
 
-static void publish_modbus_state() {
+static bool publish_modbus_state(bool& published_live) {
     bool live = false;
     const std::vector<GroupedValue> values = current_modbus_values(live);
     const std::string js = live ? build_flat_json(values) : std::string("{}");
-    if (js != s_last_modbus_json &&
-        mqtt_publish(s_modbus, js.c_str(), static_cast<int>(js.size()), 0, 1)) {
+    if (js != s_last_modbus_json) {
+        if (!mqtt_publish(s_modbus, js.c_str(), static_cast<int>(js.size()), 0, 1)) return false;
         s_last_modbus_json = js;
     }
+    published_live = live;
+    return true;
 }
 
 struct RetainedCleanupCycle {
@@ -1559,8 +1564,24 @@ static DecodedReferenceFrame decode_reference_frame(const ReferenceMqttFrame& fr
     const bool setpoint_frame = !setpoint_topic.empty() && frame.topic == setpoint_topic;
     const bool timestamp_frame = !timestamp_topic.empty() && frame.topic == timestamp_topic;
     if (!temperature_frame && !setpoint_frame && !timestamp_frame) return out;
-    JsonGuard root(cJSON_ParseWithLength(frame.payload, frame.payload_len));
+    if (frame.payload_len == 0) {
+        out.error = "payload is not valid JSON";
+        return out;
+    }
+    if (!json_payload_depth_ok(std::string_view(frame.payload, frame.payload_len))) {
+        out.error = "payload nesting depth exceeded";
+        return out;
+    }
+    const char* parse_end = nullptr;
+    JsonGuard root(cJSON_ParseWithLengthOpts(frame.payload, frame.payload_len, &parse_end, false));
     if (!root) { out.error = "payload is not valid JSON"; return out; }
+    const char* payload_end = frame.payload + frame.payload_len;
+    if (!parse_end || parse_end < frame.payload || parse_end > payload_end ||
+        !json_suffix_is_whitespace(
+            std::string_view(parse_end, static_cast<size_t>(payload_end - parse_end)))) {
+        out.error = "payload has trailing data";
+        return out;
+    }
     if (temperature_frame) {
         cJSON* item = reference_json_item(root.get(), temperature_path);
         if (!cJSON_IsNumber(item) || !std::isfinite(item->valuedouble)) {
@@ -1639,9 +1660,12 @@ static bool reference_timestamp_moved_backward(const DecodedReferenceFrame& deco
                                                 const std::string& timestamp_path) {
     if (!decoded.has_source_time) return false;
     Lock lk(s_mtx);
-    return timestamp_topic == s_ref_binding_time_topic &&
-           timestamp_path == s_ref_binding_time_path && s_ref_status.has_value &&
-           s_ref_status.has_source_time && decoded.source_unix_s < s_ref_status.source_unix_s;
+    const std::string& bound_time_topic =
+        s_ref_binding_time_topic.empty() && !s_ref_binding_time_path.empty()
+            ? s_ref_binding_topic
+            : s_ref_binding_time_topic;
+    return timestamp_topic == bound_time_topic && timestamp_path == s_ref_binding_time_path &&
+           !s_ref_source_time.allows(decoded.source_unix_s);
 }
 
 struct DecodedCirculationFrame {
@@ -1656,8 +1680,24 @@ static DecodedCirculationFrame decode_circulation_frame(const ReferenceMqttFrame
                                                         const std::string& power_path,
                                                         const std::string& timestamp_path) {
     DecodedCirculationFrame out;
-    JsonGuard               root(cJSON_ParseWithLength(frame.payload, frame.payload_len));
+    if (frame.payload_len == 0) {
+        out.error = "payload is not valid JSON";
+        return out;
+    }
+    if (!json_payload_depth_ok(std::string_view(frame.payload, frame.payload_len))) {
+        out.error = "payload nesting depth exceeded";
+        return out;
+    }
+    const char* parse_end = nullptr;
+    JsonGuard root(cJSON_ParseWithLengthOpts(frame.payload, frame.payload_len, &parse_end, false));
     if (!root) { out.error = "payload is not valid JSON"; return out; }
+    const char* payload_end = frame.payload + frame.payload_len;
+    if (!parse_end || parse_end < frame.payload || parse_end > payload_end ||
+        !json_suffix_is_whitespace(
+            std::string_view(parse_end, static_cast<size_t>(payload_end - parse_end)))) {
+        out.error = "payload has trailing data";
+        return out;
+    }
     cJSON* power = reference_json_item(root.get(), power_path);
     if (!cJSON_IsNumber(power) || !std::isfinite(power->valuedouble) ||
         power->valuedouble < 0.0 || power->valuedouble > CIRC_SOURCE_POWER_MAX_W) {
@@ -1935,6 +1975,7 @@ static void service_reference_subscription(const Config& c) {
         s_ref_last_logged_error.clear();
         s_ref_last_error_log_ms = 0;
         Lock lk(s_mtx);
+        s_ref_source_time.reset();
         s_ref_status.has_value = false;
         s_ref_status.has_source_time = false;
         s_ref_status.has_setpoint = c.ref_temp_fixed_setpoint_tenths != 0;
@@ -2203,6 +2244,7 @@ static void service_reference_frames(const Config& c) {
                 s_ref_status.has_source_time = true;
                 s_ref_status.source_unix_s = decoded.source_unix_s;
                 s_ref_status.timestamp_source = decoded.timestamp_source;
+                (void)s_ref_source_time.accept(decoded.source_unix_s);
             }
             s_ref_status.rejection_reason = ReferenceRoomReason::Eligible;
             s_ref_status.eligibility_error = decoded.control_error ? decoded.control_error : "";
@@ -2622,9 +2664,11 @@ static void mqtt_task(void*) {
                         // cycle.
                         s_modbus_disabled_cleaned = false;
                         const uint32_t mb_gen     = mb_cache_generation();
-                        if (mb_gen != s_last_modbus_cache_gen || s_last_modbus_json.empty()) {
-                            publish_modbus_state();
-                            s_last_modbus_cache_gen = mb_gen;
+                        if (mqtt_source_state_needs_publish(mb_gen, s_last_modbus_cache_gen,
+                                                            mb_values_live(), s_last_modbus_live,
+                                                            !s_last_modbus_json.empty())) {
+                            if (publish_modbus_state(s_last_modbus_live))
+                                s_last_modbus_cache_gen = mb_gen;
                         }
                     } else if (modbus_action == RetainedSourceAction::DeleteRetained) {
                         // Covers a live POST /set_hp disable. Discovery and the duplicate status
@@ -2740,7 +2784,7 @@ static bool build_client(bool publisher_lwt) {
 
     // Credentials must never travel in cleartext (docs/SECURITY.md) — require mqtts, no fallback.
     if (has_creds && !is_tls) {
-        set_status(false, "credentials require mqtts:// (won't send them in cleartext)");
+        set_status(false, "credentials require mqtts:// or wss:// (won't send them in cleartext)");
         diag_printf("mqtt: refusing plaintext broker with credentials — use mqtts://\n");
         return false;
     }
@@ -2884,6 +2928,7 @@ void mqtt_ha_start() {
 
     s_ref_queue = xQueueCreate(REF_QUEUE_DEPTH, sizeof(ReferenceMqttFrame));
     if (!s_ref_queue) {
+        Lock lk(s_mtx);
         s_ref_status.error = "receive queue alloc failed";
         s_ref_status.errors++;
         s_circulation_status.error = "receive queue alloc failed";

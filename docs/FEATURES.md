@@ -54,7 +54,7 @@ Ids are stable keys and are never reused — a gap means a feature was retired, 
 | 7 | Minified deterministic-gzip UI **embedded in the app image**: startup page under 160 KiB, each device-local locale under 32 KiB | ✅ 🧪 | [`main/CMakeLists.txt`](../main/CMakeLists.txt), [`test_ui_delivery_contract.mjs`](../test/test_ui_delivery_contract.mjs), [`test_ui_locale_catalogs.mjs`](../test/test_ui_locale_catalogs.mjs) |
 | 8 | HTTP handlers under an **OOM `try/catch` → 503** discipline + active-OTA / low-heap early rejection; clean connection abort once a streamed response has begun | ✅ 🧪 | [`http_common.cpp`](../main/http_common.cpp), [`logic/chunk_sink.hpp`](../main/logic/chunk_sink.hpp), [`logic/http_request.hpp`](../main/logic/http_request.hpp) |
 | 9 | Home Assistant MQTT auto-discovery, separate X10A/HomeHub state topics, LWT | ✅ 🧪 | [`mqtt_ha.cpp`](../main/mqtt_ha.cpp), [`logic/discovery.hpp`](../main/logic/discovery.hpp) |
-| 10 | **MQTTS + verified common-root CA bundle**; credentials never sent in cleartext, no silent fallback | ✅ | [`mqtt_ha.cpp`](../main/mqtt_ha.cpp), [`sdkconfig.defaults`](../sdkconfig.defaults) |
+| 10 | **MQTTS/WSS + verified common-root CA bundle**; credentials never sent in cleartext, no silent fallback | ✅ | [`mqtt_ha.cpp`](../main/mqtt_ha.cpp), [`sdkconfig.defaults`](../sdkconfig.defaults) |
 | 11 | Core dump to flash + offline symbolication, with a proven **orphan dump** erased so no undecodable download is ever offered | ✅ 🧪 | [`diag_crash.cpp`](../main/diag_crash.cpp), [`logic/crashinfo.hpp`](../main/logic/crashinfo.hpp), [`decode-coredump.sh`](../scripts/decode-coredump.sh) |
 | 12 | Reset-reason + crash classification, retained to MQTT and cleared when the boot is unremarkable | ✅ 🧪 | [`diag_crash.cpp`](../main/diag_crash.cpp), [`logic/crashinfo.hpp`](../main/logic/crashinfo.hpp) |
 | 13 | 22-entity device **heartbeat** diagnostics stream, published independently of profile detection | ✅ 🧪 | [`logic/heartbeat.hpp`](../main/logic/heartbeat.hpp) |
@@ -73,7 +73,7 @@ Ids are stable keys and are never reused — a gap means a feature was retired, 
 | 26 | **MQTT broker save-time pre-flight** (DNS/TCP/connect+auth, fail-closed under heap pressure) before persist | ✅ | [`http_config.cpp`](../main/http_config.cpp) |
 | 27 | **Task Watchdog** → clean reboot on a wedged poll/publish task | ✅ | [`hp_poll.cpp`](../main/hp_poll.cpp), [`mqtt_ha.cpp`](../main/mqtt_ha.cpp) |
 | 28 | **`/status.sys`** — always-on heap headroom + last-boot reason, needing no broker | ✅ 🧪 | [`http_status.cpp`](../main/http_status.cpp), [`logic/reset_reason.hpp`](../main/logic/reset_reason.hpp) |
-| 29 | **Boot-loop safe mode** — recover a bad config in-browser; distinct from OTA rollback | ✅ 🧪 | [`safe_mode.cpp`](../main/safe_mode.cpp), [`logic/boot_guard.hpp`](../main/logic/boot_guard.hpp) |
+| 29 | **Early boot-loop safe mode** — suppress optional workers for in-browser recovery; distinct from OTA rollback | ✅ 🧪 | [`safe_mode.cpp`](../main/safe_mode.cpp), [`logic/boot_guard.hpp`](../main/logic/boot_guard.hpp) |
 | 30 | **Config-write integrity** — one atomic CRC-checked NVS blob, field-owned commits, reserved-GPIO rejection, and an NVS failure that reaches the user | ✅ 🧪 | [`config.cpp`](../main/config.cpp), [`logic/config_store.hpp`](../main/logic/config_store.hpp), [`logic/board_pins.hpp`](../main/logic/board_pins.hpp) |
 | 31 | **Value-catalog domain audit** — real converters × real catalog vs the spec, each finding carrying a decode witness | ✅ | [`catalog_audit.cpp`](../tools/domain/catalog_audit.cpp), [`run-domain-audit.sh`](../scripts/run-domain-audit.sh) |
 | 32 | **SNTP wall clock**, runtime-configurable server — real UTC for syslog and `/status.ntp` | ✅ 🧪 | [`sntp_time.cpp`](../main/sntp_time.cpp), [`logic/timestamp.hpp`](../main/logic/timestamp.hpp) |
@@ -123,7 +123,7 @@ Ids are stable keys and are never reused — a gap means a feature was retired, 
 | 76 | **Central task-priority table** — relative priority is a property of the system, so it is declared in one place instead of as twelve bare literals the ordering had to be reconstructed from | ✅ | [`task_config.hpp`](../main/task_config.hpp) |
 | 77 | **Optional wired transport (W5500 / PoE)** — a second network transport detected at boot from one SPI identity register, with the boot fork (wire → radio → portal), the route priority, the pulled-cable reboot and the probe's refusal to drive a configured pad as host-tested rules | ✅ 🧪 | [`logic/net_link.hpp`](../main/logic/net_link.hpp), [`net.cpp`](../main/net.cpp), [`test_transport_contract.mjs`](../test/test_transport_contract.mjs) |
 | 78 | **Transport-independent HTTP trust surface** — the restricted provisioning route set follows the OPEN setup AP's existence rather than the WiFi mode, so a wired board is not locked out of its own API and a live AP cannot be widened by a cable | ✅ 🧪 | [`logic/http_surface.hpp`](../main/logic/http_surface.hpp), [`http_server.cpp`](../main/http_server.cpp) |
-| 80 | **Per-row state age** — how long every binary row (including neutral observation-only flags) has read what it reads, published as three separate facts (the seconds, whether the transition was *witnessed*, and how much of the run the bus did not answer for) so a consumer cannot state a stronger claim than the board made | ✅ 🧪 | [`logic/state_dwell.hpp`](../main/logic/state_dwell.hpp), [`state_dwell.cpp`](../main/state_dwell.cpp) |
+| 80 | **Per-row state age** — elapsed seconds, witnessed transition and blind time stay separate; normal profile cadence is observed, explicit pauses and their resumed tail are blind, and version 2 rejects older fold records | ✅ 🧪 | [`logic/state_dwell.hpp`](../main/logic/state_dwell.hpp), [`state_dwell.cpp`](../main/state_dwell.cpp) |
 | 89 | **Agent instruction and configuration integrity gate** — canonical `AGENTS.md` is byte-bounded; skill identity and OpenAI metadata, reviewer sandboxing, hook dispatch, the credential-safe GitHub CLI wrapper and explicit safety invariants fail closed on drift | ✅ | [`run-agent-instructions-budget.sh`](../scripts/run-agent-instructions-budget.sh), [`gh-with-git-credentials.sh`](../scripts/gh-with-git-credentials.sh), [`selftest.sh`](../tools/agent-config/selftest.sh) |
 | 97 | **PR-text hygiene gate** — exact-range commit messages and current PR text are checked mechanically, while every ordinary merge requires a current-head human privacy/language review | ✅ 🧪 | [`check_pr_hygiene.mjs`](../tools/pr_hygiene/check_pr_hygiene.mjs), [`pr-hygiene-review`](../.agents/skills/pr-hygiene-review/SKILL.md), [`require-pr-gates.sh`](../tools/agent-hooks/require-pr-gates.sh) |
 | 85 | **Browser serial-permission release** — the Pages installer exposes a granted, closed port's `forget()` action without opening a chooser when nothing can be revoked or interrupting an active flash | ✅ 🧪 | [`serial-port-release.mjs`](serial-port-release.mjs), [`serial_port_release.test.mjs`](../test/serial_port_release.test.mjs) |
@@ -315,19 +315,12 @@ Deep dive: [`ARCHITECTURE.md`](ARCHITECTURE.md), [`SECURITY.md`](SECURITY.md).
 - **✅ Version pipeline**: CI stamps the version *before* the build, so ESP-IDF bakes that exact
   string into the app descriptor, then reads it back out of the built image and **fails the build**
   if the image, the tag and the manifest disagree.
-- **✅ 🧪 Boot-loop safe mode** ([`logic/boot_guard.hpp`](../main/logic/boot_guard.hpp)): a
-  **different** failure class from image rollback — both OTA slots share one NVS, so rolling back
-  the *image* cannot fix a *config* crash-loop (wrong RX/TX pins). It counts **crash-only** boots and
-  past a threshold brings the device up minimally (WiFi + web UI + OTA, no poll/MQTT), so the bad
-  setting is fixable in the browser instead of over USB. It **latches**: the healthy-uptime timer
-  that ages the crash counter out is not armed while safe mode is active, because staying up with the
-  poll engine and MQTT switched off is evidence about the *recovery surface*, not about the fault
-  still sitting in the config. Arming it there produced a cycle rather than a latch — the counter
-  cleared 30 s into every recovery boot, so the next crash reset started from zero and brought the
-  full stack back up on the configuration already proven to crash. Nothing is stranded by refusing:
-  any non-crash reset zeroes the counter, and every intentional way out (a `/set_*` save, an OTA
-  install, a power cycle, the recovery button) is one — so safe mode ends when somebody acts on it,
-  and only then.
+- **✅ 🧪 Boot-loop safe mode** ([`logic/boot_guard.hpp`](../main/logic/boot_guard.hpp)): the guard
+  runs after NVS initialization and its static write lock, before Netif, OTA or configuration startup.
+  Four crash-only boots suppress optional workers; the healthy timer is not armed while latched.
+  Non-crash resets clear the count. NVS initialization errors preserve the partition and make
+  persistence fallible; only that failure disables WiFi-driver NVS before initialization. Recovery
+  still depends on mandatory startup and writable NVS for the crash counter.
 - **✅ An exception boundary around the boot sequence** ([`main.cpp`](../main/main.cpp)): `app_main`
   is a C frame boundary like every handler and task loop this firmware already guards, and boot
   allocates. An escape used to reach `std::terminate` anonymously. It now `abort()`s with the phase
@@ -436,10 +429,10 @@ other.
   live responses through a bounded 1 KiB sink; `/values` and MCP `get_hp_values` additionally stage
   their source snapshots and share the same representation. Growing live response bodies therefore
   do not require equally-growing contiguous allocations.
-- **🧪 Request bodies are reassembled, not assumed**
-  ([`logic/http_body.hpp`](../main/logic/http_body.hpp)): a POST body is a TCP stream, so the loop
-  runs until `content_len` is consumed. A timeout is retried only while progress resets the idle
-  count — unbounded patience would let one silent client park the single httpd task.
+- **🧪 Bounded request and JSON ingress** ([`logic/http_body.hpp`](../main/logic/http_body.hpp),
+  [`logic/payload_complete.hpp`](../main/logic/payload_complete.hpp)): body acceptance has idle and
+  absolute 30 s limits, checked after the final receive too. Config, MQTT and Weather JSON permit at
+  most 16 container levels and one document with whitespace-only trailing data.
 - **✅ gzip UI embedded in the app image**: the build inlines the page and its fragments,
   minifies, and pre-compresses them deterministically (`EMBED_FILES`). gzip is deliberate because
   the trusted-LAN origin is HTTP and browsers do not consistently negotiate Brotli there.
@@ -522,7 +515,7 @@ other.
   `pl_on`/`pl_off` and publishes the JSON **number** `1`/`0` — HA gets a real on/off entity, and a
   metrics consumer (which drops strings *and* bools) finally receives the ~30 binary rows per profile
   that were invisible to it.
-- **✅ TLS with ESP-IDF's common-root CA bundle**: credentials present ⇒ `mqtts://` + bundle
+- **✅ TLS with ESP-IDF's common-root CA bundle**: credentials present ⇒ `mqtts://` or `wss://` + bundle
   verification, and credentials are **never** sent over a plaintext broker — the client refuses to
   start and says so, with no silent fallback. The size-bounded bundle keeps ESP-IDF's documented
   approximately 99% public-root coverage; a broker chained only to a rarer excluded root is rejected.
@@ -534,7 +527,7 @@ other.
   so the probe dials the port the client will.
 - **✅ Explicit credential clearing**: empty username+password means *keep* (the modal never
   prefills), so `clear_creds` is the explicit removal signal — the only path from an authenticated
-  `mqtts://` broker back to an anonymous one.
+  TLS broker back to an anonymous one.
 - **✅ Availability (LWT)**: a retained `offline` last-will flipped to `online` on connect; after
   activation, X10A must remain unanswered for 15 s before it marks the installation offline, while
   shorter whole-sweep dropouts preserve availability without retaining an empty X10A document.
@@ -572,9 +565,9 @@ Everything needed to explain a crash *after the fact*, from the field, without a
   records to the upper-4-MiB partition. CRC, a last-written commit and rotating sectors fail closed
   on torn writes. After a successful scan, SNTP sync and first eligible commit, a power cut loses at
   most the open or just-closed bucket; before that commit flash has no RAM-only samples to restore.
-  Restore waits for SNTP,
-  batches four rings per poll tick and derives spans from journal buckets. Browser `sessionStorage`
-  is not a history medium, and there is no fallback for the former 8 KB partition.
+  Restore waits for SNTP, batches four rings per poll tick and derives spans from journal buckets.
+  Browser history epochs discard cached trends and pins on source resets or reboot, even for A → B
+  → A between polls; late replies cannot refill them. Browser `sessionStorage` is not a history medium.
   `.noinit` is sealed by the order-sensitive catalog fingerprint. Flash precedes each generation
   with daily-refreshed semantic-id manifests, so unchanged series survive insertion/reordering while
   new or reinterpreted series alone start empty; unknown/ambiguous layouts fail closed and the exact
@@ -726,17 +719,11 @@ Deep dives: [`X10A_PROTOCOL.md`](X10A_PROTOCOL.md), [`REGISTERS.md`](REGISTERS.m
   persists a result. Explicitly saving empty permanently disables Modbus and dependent diagnosis. The
   link is **READ-ONLY as a property of the code**: no write entry point, function-code builder or
   value encoder exists anywhere under `main/`.
-- **✅ 🧪 Batched reads on two cadences** ([`logic/modbus_plan.hpp`](../main/logic/modbus_plan.hpp)):
-  the hub is **shared** — Onecta, the MMI, evcc and any LAN collector use the same `:502` — so what
-  this firmware asks for is a question about someone else's device. The 32 EKRHH offsets fall into
-  ten contiguous runs (or 14 runs for 43 Altherma 4 registers). The two diagnosis gates (input 53 and 38) and the plant-outdoor context
-  (input 44) are time-sensitive, so a **full** cycle is ten requests (14 on Altherma 4) every fifth poll tick and the
-  ticks between it read their three batches alone: **32 → ~4.4 requests/s** (43 → ~5.2 requests/s on Altherma 4). A fast cycle commits
-  only those two gates and that context — its thirteen registers are not a general cache — and a
-  batch answered with a Modbus exception is re-read register by
-  register for the rest of the session, because an exception names one register and a batch cannot
-  say which. The plan is resolved at **compile time** into flash and `static_assert`ed where it is
-  built, so a register added into a gap re-prices the link visibly.
+- **✅ 🧪 Batched reads on two cadences** ([`logic/modbus_plan.hpp`](../main/logic/modbus_plan.hpp),
+  [`logic/modbus_snapshot.hpp`](../main/logic/modbus_snapshot.hpp)): the full map is read every fifth
+  tick; intervening ticks read diagnosis gates and outdoor context. Exception batches fall back to
+  individual reads. Live cache use requires matching target/session identity, full-cache age at most
+  546 s and independently recent replies at most 7 s; these are transport bounds, not same-sweep proof.
 - **The two sources meet in exactly one place** ([`logic/homehub_map.hpp`](../main/logic/homehub_map.hpp)):
   a register is paired to an X10A row **structurally**, reusing the trend ids and never the label —
   the catalog spells one quantity many ways and reuses tags across different quantities, so a label

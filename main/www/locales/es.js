@@ -1,4 +1,4 @@
-// translation-source: 57b0fcb43db1c83f37043fc71c9fb312b807a1fb0c56d7a9781cef96f2b64ffb
+// translation-source: 1369786d303329f6e5230c06537e985a4c7735be65bcff1dc17670a9530129f9
 I18N.es = localeValues([
   /* sys.nodata */ "Sin datos",
   /* sys.unreachable */ "No accesible",
@@ -556,7 +556,7 @@ I18N.es = localeValues([
   /* ref.target */ "Temperatura objetivo",
   /* ref.timestamp_source */ "Fuente de marca temporal · opcional",
   /* ref.max_age */ "Antigüedad máxima · segundos",
-  /* ref.temperature_source_help */ "Tema MQTT exacto y ruta JSON opcional después de $. Las rutas ausentes o incorrectas se notifican cuando llega un mensaje.",
+  /* ref.temperature_source_help */ "Tema MQTT exacto y ruta JSON opcional después de $. Las rutas ausentes o incorrectas se notifican cuando llega un mensaje. En temas y rutas, escriba $ literal como \\$ y \\ literal como \\\\.",
   /* ref.target_help */ "Un valor fijo en °C o un tema MQTT exacto con una ruta JSON opcional después de $.",
   /* ref.timestamp_source_help */ "Hora de origen RFC3339/Unix opcional como tema$ruta. Si se deja vacío, se usa la hora de llegada MQTT en directo; los valores retenidos se rechazan entonces por seguridad.",
   /* ref.max_age_help */ "Antigüedad máxima permitida de la lectura de origen, de 10 a 3600 segundos.",
@@ -653,7 +653,7 @@ I18N.es = localeValues([
   /* wx.detail.unavailable */ "La última obtención falló; si existe un valor anterior, se muestra solo para el diagnóstico.",
   /* wx.detail.waiting */ "Aún no se ha recibido ninguna previsión.",
   /* wx.detail.temperature_label */ "Temperatura:",
-  /* wx.detail.temperature */ (v) => `${v} °C es la temperatura media prevista del aire exterior para las dos próximas horas completas.`,
+  /* wx.detail.temperature */ (v) => `${v} °C es la temperatura media prevista del aire exterior para el periodo de dos horas seleccionado en la última consulta correcta.`,
   /* wx.detail.solar_label */ "Irradiación solar:",
   /* wx.detail.solar */ (v) => `${v} Wh/m² es la irradiación horizontal global prevista durante el mismo periodo de dos horas.`,
   /* wx.detail.source_label */ "Fuente:",

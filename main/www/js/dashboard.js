@@ -635,14 +635,29 @@ function dynamicInfoRow(key, label, value, valueCls, bodyHtml, action = "", titl
 // status paragraph says explicitly that they are no longer current.
 function weatherSourceDetailHtml(w, outdoor, solar) {
   let statusKey;
-  if (w.fetching) statusKey = "fetching";
-  else if (w.has_value && w.fresh) statusKey = "fresh";
-  else if (w.error) statusKey = "unavailable";
-  else if (w.has_value) statusKey = "stale";
-  else statusKey = "waiting";
+  let detailText;
+  const reason = w.freshness_reason || w.reason;
+  if (w.fetching) {
+    statusKey = "fetching";
+  } else if (w.has_value && w.fresh) {
+    statusKey = "fresh";
+  } else if (reason === "clock_unsynced") {
+    statusKey = "unavailable";
+    detailText = t("ref.clock_unsynced");
+  } else if (reason === "network_unavailable") {
+    statusKey = "unavailable";
+    detailText = t("card.offline");
+  } else if (w.error) {
+    statusKey = "unavailable";
+  } else if (w.has_value) {
+    statusKey = "stale";
+  } else {
+    statusKey = "waiting";
+  }
 
+  const detail = detailText || t(`wx.detail.${statusKey}`);
   let html = descNoteHtml(t("wx.detail.status"),
-    `${t(`wx.status.${statusKey}`)} — ${t(`wx.detail.${statusKey}`)}`);
+    `${t(`wx.status.${statusKey}`)} — ${detail}`);
   if (w.has_value) {
     html += descNoteHtml(t("wx.detail.temperature_label"), t("wx.detail.temperature", outdoor));
     html += descNoteHtml(t("wx.detail.solar_label"), t("wx.detail.solar", solar));

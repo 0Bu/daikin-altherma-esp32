@@ -50,16 +50,18 @@ static const char* TAG = "main";
 
 static void boot_sequence() {
     // --- NVS ---
-    // A full partition or a newer-IDF layout is recoverable: erase + retry. ANY other error (and the
-    // residual after a failed erase/retry) is NOT ignored — the old code checked only the two known
-    // codes and let every other one fall through, booting on with persistence silently unavailable.
+    // Preserve the partition on EVERY initialization error, including a full partition or a newer
+    // NVS layout. Automatic erase would destroy credentials/configuration during a recoverable
+    // firmware mismatch. Repair or erasure requires the owner's explicit recovery action.
     // We continue on purpose (the web-UI recovery surface must still come up, and nvs_get_* already
-    // fall back to their defaults when nvs_open fails) but make the degraded state LOUD, and replay it
-    // into the diag ring below once it exists so it also reaches /diag + syslog.
+    // fall back to their defaults when nvs_open fails) but make the degraded state LOUD, and replay
+    // it into the diag ring below once it exists so it also reaches /diag + syslog.
     esp_err_t nvs_err = nvs_flash_init();
-    if (nvs_err == ESP_ERR_NVS_NO_FREE_PAGES || nvs_err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
-        if (nvs_flash_erase() == ESP_OK) nvs_err = nvs_flash_init();
-    }
+    daik::diag_log_init();
+    // Allocation-free locks make the durable counter available before network/config/hardware
+    // initialization can fail. A failed NVS initialization still cannot persist that counter.
+    daik::nvs_storage_init(nvs_err == ESP_OK);
+    daik::safe_mode_begin();
     if (nvs_err != ESP_OK)
         ESP_LOGE(TAG, "nvs_flash_init failed: %s — continuing WITHOUT persistence this boot "
                       "(config, WiFi-rollback backup and the safe-mode crash counter are not durable)",
@@ -70,7 +72,6 @@ static void boot_sequence() {
     ESP_ERROR_CHECK(esp_netif_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
 
-    daik::diag_log_init();
     // One shared timer, static watchdog task and static synchronization set are initialized before
     // any network/TLS task exists. Boot also primes the watchdog's lwIP thread semaphore. OTA and
     // Weather fail closed if that absolute socket-deadline guard is not fully ready.
@@ -84,7 +85,6 @@ static void boot_sequence() {
         daik::diag_printf("nvs: init failed (%s) — running WITHOUT persistence this boot\n",
                           esp_err_to_name(nvs_err));
     daik::diag_crash_capture();          // read reset reason + core-dump summary once, before services
-    daik::nvs_storage_init();            // serialize all writes with the physical factory-reset latch
     daik::config_load();
     // --- Board-local hardware (status indicator + recovery button) ---
     // AFTER config_load, not before: both the indicator's pin/driver and the button's pin are
@@ -96,7 +96,6 @@ static void boot_sequence() {
     // factory reset is the only way back in.
     daik::status_led_start();
     daik::recovery_button_start();
-    daik::safe_mode_begin();             // crash-loop guard: count crash boots, latch safe mode past threshold
     daik::heap_guard_begin();            // read + clear the heap-watchdog restart breadcrumb this boot inherited
     daik::syslog_init();
     const daik::Config& cfg = daik::config();
@@ -185,22 +184,25 @@ static void boot_sequence() {
 // app_main is a C frame boundary like every HTTP handler and task loop this firmware already guards
 // (AGENTS.md → Memory, concurrency, and HTTP safety): an exception that leaves it
 // reaches std::terminate and abort()s ANONYMOUSLY, with the reset reason the only evidence that
-// anything happened. And boot is not a fanciful place to throw — config_load(), http_start() and the
-// service starts below it all allocate, on a device whose whole memory section is about
+// anything happened. And boot is not a fanciful place to throw — config_load(), http_start() and
+// the service starts below it all allocate, on a device whose whole memory section is about
 // std::bad_alloc being reachable.
 //
-// ABORT is the deliberate choice among the three endings, and the other two are actively wrong here:
+// ABORT is the deliberate choice among the three endings, and the other two are actively wrong
+// here:
 //   • RETURNING would leave a half-initialised firmware claiming to run — some services up, some
 //     not, and /status reporting a device that does not exist.
-//   • esp_restart() looks like the careful option and is the worst one: safe_mode_begin() classifies
-//     a "sw" reset as an INTENTIONAL reboot and CLEARS the crash counter on it (boot_reset_was_crash
-//     excludes it by name, so a provisioning burst cannot false-trip safe mode). A boot sequence
-//     that throws every time would therefore restart forever without ever accumulating a single
-//     crash boot — the one failure mode safe mode exists to end, made permanent by the mechanism
-//     meant to end it.
-//   • abort() panics, which is a crash reset: it writes a core dump, and it COUNTS. Four of them and
-//     safe_mode latches, the poll engine and MQTT stay down, and the device comes up on the web UI
-//     where the configuration that caused it can be fixed. The existing machinery does the work.
+//   • esp_restart() looks like the careful option and is the worst one: safe_mode_begin()
+//   classifies
+//     a "sw" reset as an INTENTIONAL reboot and CLEARS the crash counter on it
+//     (boot_reset_was_crash excludes it by name, so a provisioning burst cannot false-trip safe
+//     mode). A boot sequence that throws every time would therefore restart forever without ever
+//     accumulating a single crash boot — the one failure mode safe mode exists to end, made
+//     permanent by the mechanism meant to end it.
+//   • abort() panics, which is a crash reset. With initialized, writable NVS, the early guard
+//   counts
+//     it before risky subsystem startup; four crash boots latch safe mode and suppress the optional
+//     consumers. A fault in mandatory startup or unavailable NVS still requires separate recovery.
 [[noreturn]] static void boot_failed(const char* what) {
     // Serial first, because it is the only sink guaranteed to exist this early — the diag ring may
     // not be initialised, and syslog certainly is not.

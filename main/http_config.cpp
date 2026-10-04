@@ -173,8 +173,9 @@ static bool jb(cJSON* o, const char* k, bool def) {
 
 static esp_err_t set_wifi(httpd_req_t* req) {
     char body[512];
-    if (http_read_body(req, body, sizeof(body)) < 0) return send_err(req, "400 Bad Request", "bad body");
-    JsonGuard j(cJSON_Parse(body));
+    const int body_len = http_read_body(req, body, sizeof(body));
+    if (body_len < 0) return send_err(req, "400 Bad Request", "bad body");
+    JsonGuard j(json_parse_document(std::string_view(body, static_cast<size_t>(body_len))));
     if (!j) return send_err(req, "400 Bad Request", "bad json");
     std::string ssid = js(j, "ssid");
     std::string pass = js(j, "pass");
@@ -214,16 +215,18 @@ static esp_err_t set_wifi(httpd_req_t* req) {
 // ── /set_mqtt broker pre-flight ──────────────────────────────────────────────────────────────────
 // Unlike /set_wifi and /set_syslog (which persist + reboot and let the boot path surface failures),
 // /set_mqtt VALIDATES the broker synchronously on the request thread before persisting: DNS ->
-// TCP-port probe -> a short-lived esp-mqtt client that must actually CONNECT (and authenticate, when
-// creds are given). This turns a wrong host / closed port / bad password into an inline error at Save
-// instead of a silent post-reboot failure. It mirrors mqtt_ha.cpp build_client()'s scheme/credential
-// policy (creds require mqtts://) so the pre-flight and the real bridge agree.
+// TCP-port probe -> a short-lived esp-mqtt client that must actually CONNECT (and authenticate,
+// when creds are given). This turns a wrong host / closed port / bad password into an inline error
+// at Save instead of a silent post-reboot failure. It mirrors mqtt_ha.cpp build_client()'s
+// scheme/credential policy (creds require mqtts:// or wss://) so the pre-flight and the real bridge
+// agree.
 //
 // Cost & safety: the handler blocks up to ~3 s (TCP probe) + ~5 s (MQTT connect) — acceptable for a
-// user-initiated Save, and it runs under http_common.cpp's handle_all try/catch (an OOM throw becomes
-// a 503, not a crash). The temp client uses a distinct client_id ("daikin_val") so it never collides
-// with the live bridge. A TLS broker spins up a transient mbedTLS session; on this heap-tight target
-// that is the main memory cost of the probe, released as soon as the client is destroyed.
+// user-initiated Save, and it runs under http_common.cpp's handle_all try/catch (an OOM throw
+// becomes a 503, not a crash). The temp client uses a distinct client_id ("daikin_val") so it never
+// collides with the live bridge. A TLS broker spins up a transient mbedTLS session; on this
+// heap-tight target that is the main memory cost of the probe, released as soon as the client is
+// destroyed.
 struct MqttValidateCtx {
     SemaphoreHandle_t sem;
     bool connected;
@@ -318,8 +321,9 @@ static bool tcp_port_probe(const struct in_addr& ip, int port, int timeout_ms) {
 
 static esp_err_t set_mqtt(httpd_req_t* req) {
     char body[512];
-    if (http_read_body(req, body, sizeof(body)) < 0) return send_err(req, "400 Bad Request", "bad body");
-    JsonGuard j(cJSON_Parse(body));
+    const int body_len = http_read_body(req, body, sizeof(body));
+    if (body_len < 0) return send_err(req, "400 Bad Request", "bad body");
+    JsonGuard j(json_parse_document(std::string_view(body, static_cast<size_t>(body_len))));
     if (!j) return send_err(req, "400 Bad Request", "bad json");
     std::string broker      = js(j, "broker");
     std::string user        = js(j, "user");
@@ -379,7 +383,8 @@ static esp_err_t set_mqtt(httpd_req_t* req) {
 
         if (has_creds && !is_tls_check) {
             httpd_resp_set_status(req, "400 Bad Request");
-            return http_send_json(req, "{\"ok\":false,\"error\":\"Credentials require mqtts://\"}");
+            return http_send_json(
+                req, "{\"ok\":false,\"error\":\"Credentials require mqtts:// or wss://\"}");
         }
 
         // 3. Parse host and port
@@ -504,9 +509,12 @@ struct RefTempRequest {
 };
 
 static const char* parse_ref_temp_request(httpd_req_t* req, RefTempRequest& out) {
-    char body[1536];
-    if (http_read_body(req, body, sizeof(body)) < 0) return "bad body";
-    JsonGuard j(cJSON_Parse(body));
+    // Three independently escaped MQTT topic/path mappings can exceed 1536 JSON bytes.
+    // Keep the bounded body off the HTTP stack; the handler's OOM boundary returns 503.
+    std::vector<char> body(8192);
+    const int         body_len = http_read_body(req, body.data(), body.size());
+    if (body_len < 0) return "bad body";
+    JsonGuard j(json_parse_document(std::string_view(body.data(), static_cast<size_t>(body_len))));
     if (!j) return "bad json";
     out.name      = js(j, "name");
     out.topic     = js(j, "topic");
@@ -628,8 +636,9 @@ static bool parse_tenths_w(cJSON* root, const char* key, uint16_t fallback, uint
 
 static const char* parse_circulation_request(httpd_req_t* req, CirculationRequest& out) {
     char body[1280];
-    if (http_read_body(req, body, sizeof(body)) < 0) return "bad body";
-    JsonGuard j(cJSON_Parse(body));
+    const int body_len = http_read_body(req, body, sizeof(body));
+    if (body_len < 0) return "bad body";
+    JsonGuard j(json_parse_document(std::string_view(body, static_cast<size_t>(body_len))));
     if (!j) return "bad json";
     out.name = js(j, "name");
     out.topic = js(j, "topic");
@@ -702,9 +711,9 @@ static esp_err_t test_circulation(httpd_req_t* req) {
 // from an earlier interval fails closed even across a power loss immediately after this response.
 static esp_err_t set_diagnostics(httpd_req_t* req) {
     char body[128];
-    if (http_read_body(req, body, sizeof(body)) < 0)
-        return send_err(req, "400 Bad Request", "bad body");
-    JsonGuard j(cJSON_Parse(body));
+    const int body_len = http_read_body(req, body, sizeof(body));
+    if (body_len < 0) return send_err(req, "400 Bad Request", "bad body");
+    JsonGuard j(json_parse_document(std::string_view(body, static_cast<size_t>(body_len))));
     if (!j) return send_err(req, "400 Bad Request", "bad json");
     cJSON* item = cJSON_GetObjectItemCaseSensitive(j, "enabled");
     if (!cJSON_IsBool(item)) {
@@ -780,8 +789,9 @@ static esp_err_t set_circulation(httpd_req_t* req) {
 
 static esp_err_t set_hp(httpd_req_t* req) {
     char body[2048];
-    if (http_read_body(req, body, sizeof(body)) < 0) return send_err(req, "400 Bad Request", "bad body");
-    JsonGuard j(cJSON_Parse(body));
+    const int body_len = http_read_body(req, body, sizeof(body));
+    if (body_len < 0) return send_err(req, "400 Bad Request", "bad body");
+    JsonGuard j(json_parse_document(std::string_view(body, static_cast<size_t>(body_len))));
     if (!j) return send_err(req, "400 Bad Request", "bad json");
     Config c    = config();
     const bool modbus_was_enabled = config_modbus_enabled(c);
@@ -934,8 +944,9 @@ static esp_err_t discover_homehub_now(httpd_req_t* req) {
 
 static esp_err_t set_syslog(httpd_req_t* req) {
     char body[512];
-    if (http_read_body(req, body, sizeof(body)) < 0) return send_err(req, "400 Bad Request", "bad body");
-    JsonGuard j(cJSON_Parse(body));
+    const int body_len = http_read_body(req, body, sizeof(body));
+    if (body_len < 0) return send_err(req, "400 Bad Request", "bad body");
+    JsonGuard j(json_parse_document(std::string_view(body, static_cast<size_t>(body_len))));
     if (!j) return send_err(req, "400 Bad Request", "bad json");
     std::string host = js(j, "host");
     int port = ji(j, "port", 514);
@@ -978,8 +989,9 @@ static esp_err_t set_syslog(httpd_req_t* req) {
 // host does today).
 static esp_err_t set_ntp(httpd_req_t* req) {
     char body[256];
-    if (http_read_body(req, body, sizeof(body)) < 0) return send_err(req, "400 Bad Request", "bad body");
-    JsonGuard j(cJSON_Parse(body));
+    const int body_len = http_read_body(req, body, sizeof(body));
+    if (body_len < 0) return send_err(req, "400 Bad Request", "bad body");
+    JsonGuard j(json_parse_document(std::string_view(body, static_cast<size_t>(body_len))));
     if (!j) return send_err(req, "400 Bad Request", "bad json");
     std::string server = js(j, "server");
     j.reset();
@@ -1004,8 +1016,9 @@ static esp_err_t set_ntp(httpd_req_t* req) {
 // without changing or rewriting NVS.
 static esp_err_t set_weather(httpd_req_t* req) {
     char body[256];
-    if (http_read_body(req, body, sizeof(body)) < 0) return send_err(req, "400 Bad Request", "bad body");
-    JsonGuard j(cJSON_Parse(body));
+    const int body_len = http_read_body(req, body, sizeof(body));
+    if (body_len < 0) return send_err(req, "400 Bad Request", "bad body");
+    JsonGuard j(json_parse_document(std::string_view(body, static_cast<size_t>(body_len))));
     if (!j) return send_err(req, "400 Bad Request", "bad json");
     const std::string latitude = js(j, "latitude");
     const std::string longitude = js(j, "longitude");
@@ -1073,8 +1086,9 @@ static esp_err_t set_weather(httpd_req_t* req) {
 // action. A reboot is also what the four service endpoints already do, so the UI path is identical.
 static esp_err_t set_board(httpd_req_t* req) {
     char body[512];
-    if (http_read_body(req, body, sizeof(body)) < 0) return send_err(req, "400 Bad Request", "bad body");
-    JsonGuard j(cJSON_Parse(body));
+    const int body_len = http_read_body(req, body, sizeof(body));
+    if (body_len < 0) return send_err(req, "400 Bad Request", "bad body");
+    JsonGuard j(json_parse_document(std::string_view(body, static_cast<size_t>(body_len))));
     if (!j) return send_err(req, "400 Bad Request", "bad json");
     const Config& cur = config();
     Config c = cur;
@@ -1153,8 +1167,9 @@ static esp_err_t set_board(httpd_req_t* req) {
 // a wiring guess and reboot into a permanently unavailable sensor.
 static esp_err_t set_env3(httpd_req_t* req) {
     char body[256];
-    if (http_read_body(req, body, sizeof(body)) < 0) return send_err(req, "400 Bad Request", "bad body");
-    JsonGuard j(cJSON_Parse(body));
+    const int body_len = http_read_body(req, body, sizeof(body));
+    if (body_len < 0) return send_err(req, "400 Bad Request", "bad body");
+    JsonGuard j(json_parse_document(std::string_view(body, static_cast<size_t>(body_len))));
     if (!j) return send_err(req, "400 Bad Request", "bad json");
     const Config cur = config();
     Config c = cur;
@@ -1185,8 +1200,9 @@ static esp_err_t set_env3(httpd_req_t* req) {
 // REJECTED rather than defaulted: answering {"ok":true} to a typo would look like a saved setting.
 static esp_err_t set_ota(httpd_req_t* req) {
     char body[128];
-    if (http_read_body(req, body, sizeof(body)) < 0) return send_err(req, "400 Bad Request", "bad body");
-    JsonGuard j(cJSON_Parse(body));
+    const int body_len = http_read_body(req, body, sizeof(body));
+    if (body_len < 0) return send_err(req, "400 Bad Request", "bad body");
+    JsonGuard j(json_parse_document(std::string_view(body, static_cast<size_t>(body_len))));
     if (!j) return send_err(req, "400 Bad Request", "bad json");
     std::string channel = js(j, "channel");
     j.reset();
@@ -1210,8 +1226,9 @@ static esp_err_t set_ota(httpd_req_t* req) {
 // {"ok":true} to a typo would look like a saved setting.
 static esp_err_t set_lang(httpd_req_t* req) {
     char body[128];
-    if (http_read_body(req, body, sizeof(body)) < 0) return send_err(req, "400 Bad Request", "bad body");
-    JsonGuard j(cJSON_Parse(body));
+    const int body_len = http_read_body(req, body, sizeof(body));
+    if (body_len < 0) return send_err(req, "400 Bad Request", "bad body");
+    JsonGuard j(json_parse_document(std::string_view(body, static_cast<size_t>(body_len))));
     if (!j) return send_err(req, "400 Bad Request", "bad json");
     std::string lang = js(j, "lang");
     j.reset();
@@ -1303,8 +1320,9 @@ static void probe_append_decode(JsonOut& out, const ProbeDecode& d) {
 
 static esp_err_t hp_query_probe(httpd_req_t* req) {
     char body[192];
-    if (http_read_body(req, body, sizeof(body)) < 0) return send_err(req, "400 Bad Request", "bad body");
-    JsonGuard j(cJSON_Parse(body));
+    const int body_len = http_read_body(req, body, sizeof(body));
+    if (body_len < 0) return send_err(req, "400 Bad Request", "bad body");
+    JsonGuard j(json_parse_document(std::string_view(body, static_cast<size_t>(body_len))));
     if (!j) return send_err(req, "400 Bad Request", "bad json");
     ProbeRequest q;
     q.reg    = ji(j, "reg", -1);

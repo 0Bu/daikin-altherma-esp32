@@ -1,4 +1,4 @@
-// translation-source: 57b0fcb43db1c83f37043fc71c9fb312b807a1fb0c56d7a9781cef96f2b64ffb
+// translation-source: 1369786d303329f6e5230c06537e985a4c7735be65bcff1dc17670a9530129f9
 const plNoun = (n, one, few, many) => {
   const value = Math.abs(Number(n)), mod10 = value % 10, mod100 = value % 100;
   return value === 1 ? one
@@ -561,7 +561,7 @@ I18N.pl = localeValues([
   /* ref.target */ "Temperatura docelowa",
   /* ref.timestamp_source */ "Źródło znacznika czasu · opcjonalne",
   /* ref.max_age */ "Maksymalny wiek · sekundy",
-  /* ref.temperature_source_help */ "Dokładny temat MQTT i opcjonalna ścieżka JSON po $. Brakujące lub błędne ścieżki są zgłaszane po nadejściu payloadu.",
+  /* ref.temperature_source_help */ "Dokładny temat MQTT i opcjonalna ścieżka JSON po $. Brakujące lub błędne ścieżki są zgłaszane po nadejściu payloadu. W tematach i ścieżkach zapisuj dosłowne $ jako \\$ oraz \\ jako \\\\.",
   /* ref.target_help */ "Stała wartość w °C albo dokładny temat MQTT z opcjonalną ścieżką JSON po $.",
   /* ref.timestamp_source_help */ "Opcjonalny czas źródłowy RFC3339/Unix jako topic$path. Puste pole używa czasu nadejścia MQTT na żywo; wartości retained są wtedy bezpiecznie odrzucane.",
   /* ref.max_age_help */ "Maksymalny dozwolony wiek odczytu źródłowego, od 10 do 3600 sekund.",
@@ -658,7 +658,7 @@ I18N.pl = localeValues([
   /* wx.detail.unavailable */ "Ostatnie pobranie nie powiodło się; starsza wartość, jeśli istnieje, jest wyświetlana wyłącznie do diagnostyki.",
   /* wx.detail.waiting */ "Nie odebrano jeszcze prognozy.",
   /* wx.detail.temperature_label */ "Temperatura:",
-  /* wx.detail.temperature */ (v) => `${v} °C to prognozowana średnia temperatura powietrza zewnętrznego na następne dwie pełne godziny.`,
+  /* wx.detail.temperature */ (v) => `${v} °C to prognozowana średnia temperatura powietrza zewnętrznego dla dwugodzinnego okresu wybranego przy ostatnim pomyślnym pobraniu.`,
   /* wx.detail.solar_label */ "Napromienienie słoneczne:",
   /* wx.detail.solar */ (v) => `${v} Wh/m² to prognozowane globalne napromienienie poziome w tym samym okresie dwóch godzin.`,
   /* wx.detail.source_label */ "Źródło:",

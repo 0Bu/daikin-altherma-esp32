@@ -12,21 +12,26 @@
 namespace daik {
 
 static const char* NS = "daik_cfg";
+static StaticSemaphore_t s_write_mtx_storage;
 static SemaphoreHandle_t s_write_mtx = nullptr;
 static std::atomic<bool> s_writes_disabled{false};
+static std::atomic<bool> s_initialized{false};
 
 namespace {
 using Lock = SemGuard;
 }
 
-void nvs_storage_init() {
+void nvs_storage_init(bool initialized) {
+    s_initialized.store(initialized, std::memory_order_release);
     if (s_write_mtx) return;
-    s_write_mtx = xSemaphoreCreateMutex();
+    s_write_mtx = xSemaphoreCreateMutexStatic(&s_write_mtx_storage);
     if (!s_write_mtx) {
         ESP_LOGE("nvs", "write mutex alloc failed — aborting (factory reset cannot be serialized)");
         abort();
     }
 }
+
+bool nvs_storage_available() { return s_initialized.load(std::memory_order_acquire); }
 
 std::string nvs_get_str(const char* key, const std::string& def) {
     nvs_handle_t h;

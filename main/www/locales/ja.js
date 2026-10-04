@@ -1,4 +1,4 @@
-// translation-source: 57b0fcb43db1c83f37043fc71c9fb312b807a1fb0c56d7a9781cef96f2b64ffb
+// translation-source: 1369786d303329f6e5230c06537e985a4c7735be65bcff1dc17670a9530129f9
 I18N.ja = localeValues([
   /* sys.nodata */ "データなし",
   /* sys.unreachable */ "接続不可",
@@ -556,7 +556,7 @@ I18N.ja = localeValues([
   /* ref.target */ "目標温度",
   /* ref.timestamp_source */ "時刻ソース · 任意",
   /* ref.max_age */ "最大経過時間 · 秒",
-  /* ref.temperature_source_help */ "正確なMQTTトピックと、任意で $ 以降のJSONパスを指定します。欠落／誤ったパスは受信時に報告します。",
+  /* ref.temperature_source_help */ "正確なMQTTトピックと、任意で $ 以降のJSONパスを指定します。欠落／誤ったパスは受信時に報告します。 トピックとパスの文字 $ は \\$、文字 \\ は \\\\ と入力してください。",
   /* ref.target_help */ "固定温度（°C）、または任意の $ 以降のJSONパスを含む正確なMQTTトピック。",
   /* ref.timestamp_source_help */ "任意のRFC3339/Unix測定時刻をtopic$pathで指定。空ならMQTT到着時刻を使い、保持値は安全側で拒否します。",
   /* ref.max_age_help */ "ソース値の最大許容経過時間（10～3600秒）。",
@@ -653,7 +653,7 @@ I18N.ja = localeValues([
   /* wx.detail.unavailable */ "直近の取得に失敗しました。古い値があれば診断参考用にのみ表示します。",
   /* wx.detail.waiting */ "予報をまだ受信していません。",
   /* wx.detail.temperature_label */ "温度：",
-  /* wx.detail.temperature */ (v) => `${v} °Cは、次の完結した2時間の平均外気温予報です。`,
+  /* wx.detail.temperature */ (v) => `${v} °Cは、最後の正常な取得時に選択された2時間枠の平均外気温予報です。`,
   /* wx.detail.solar_label */ "日射量：",
   /* wx.detail.solar */ (v) => `${v} Wh/m²は、同じ2時間の全天日射量予報です。`,
   /* wx.detail.source_label */ "ソース：",

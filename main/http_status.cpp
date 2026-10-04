@@ -57,6 +57,7 @@
 #include "esp_http_server.h"
 #include "esp_timer.h"
 #include "esp_system.h"
+#include "esp_random.h"
 #include "esp_partition.h"
 #include "esp_core_dump.h"
 #include "freertos/FreeRTOS.h"
@@ -312,6 +313,10 @@ using HttpJsonChunks = BoundedChunkSink<HttpChunkEmitter, 1024>;
 // emission, the shared guard can return 503; once an emission is attempted
 // the bounded-stream helper returns ESP_FAIL so httpd closes a possibly-started response instead of
 // attempting a second one or throwing through C.
+// Non-secret boot identity: history leases must also retire when a reboot's first observed
+// uptime is already greater than the previous sample. Shared by streamed HTTP and MCP serializers.
+static const uint64_t s_status_boot_id = (static_cast<uint64_t>(esp_random()) << 32) | esp_random();
+
 template <typename JsonOut>
 static void append_status_json(JsonOut& j, bool redact) {
     const Config& c = config();
@@ -321,6 +326,12 @@ static void append_status_json(JsonOut& j, bool redact) {
     j += "\"version\":" + jstr(esp_app_get_description()->version) + ",";
     j += "\"platform\":" + jstr(CONFIG_IDF_TARGET) + ",";
     j += "\"uptime_s\":" + std::to_string(esp_timer_get_time() / 1000000) + ",";
+    char boot_id[17];
+    std::snprintf(boot_id, sizeof(boot_id), "%016llx",
+                  static_cast<unsigned long long>(s_status_boot_id));
+    j += "\"boot_id\":";
+    j += jstr(boot_id);
+    j += ",";
     // Build identity: the running app's ELF sha (hex) — matches a core dump to the exact firmware
     // that produced it (scripts/decode-coredump.sh), and pairs with last_crash below.
     char elf_sha[65] = {0};
@@ -1188,7 +1199,9 @@ static void append_status_json(JsonOut& j, bool redact) {
     // with successive += like everything else here: a `a + b + c` chain materialises every
     // intermediate at once, all live in one frame on the httpd task's stack (AGENTS.md → Memory,
     // concurrency, and HTTP safety; the v1.0.12 stack overflow happened on THIS task).
-    j += "\"history\":{\"dt\":";
+    j += "\"history\":{\"epoch\":";
+    j += std::to_string(history_epoch());
+    j += ",\"dt\":";
     j += std::to_string(logic::HISTORY_DT_S);
     // The .noinit-RAM adoption verdict for this boot. "accept" means a compatible reset kept the
     // sealed bytes; every other value names why RAM started empty. This is deliberately independent

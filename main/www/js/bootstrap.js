@@ -422,7 +422,7 @@ function wireRestOfApp() {
       return bad("rtTarget", t("ref.err_target"));
     if (targetFixed !== null && (targetFixed < 5 || targetFixed > 35))
       return bad("rtTarget", t("ref.err_target"));
-    if ($("rtTimestampSource").value.trim() && !timestamp)
+    if ($("rtTimestampSource").value && !timestamp)
       return bad("rtTimestampSource", t("ref.err_timestamp_source"));
     if (input.topic && (!Number.isInteger(input.max_age_s) || input.max_age_s < 10 || input.max_age_s > 3600))
       return bad("rtMaxAge", t("ref.err_max_age"));
@@ -589,6 +589,7 @@ function wireRestOfApp() {
       idle(); showCirculationRequestError(msg); return;
     }
     const res = await r.json().catch(() => ({}));
+    invalidateHistSources();
     idle(); closeCirculation();
     toast(t(res.saved === false ? "toast.no_changes" : "circ.saved"), res.saved === false ? "info" : "ok");
     await refreshStatus();
@@ -610,6 +611,7 @@ function wireRestOfApp() {
       const msg = await errorOf(r, t("toast.rejected"));
       idle(); showCirculationRequestError(msg); return;
     }
+    invalidateHistSources();
     S.status.circulation_source = { configured: false, max_age_s: 120 };
     idle(); closeCirculation();
     toast(t("circ.deleted"), "ok");

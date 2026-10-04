@@ -6,6 +6,7 @@
 #include "provisioning.hpp"
 #include "captive_dns.hpp"
 #include "diag_log.hpp"
+#include "nvs_storage.hpp"
 #include "logic/captive.hpp"
 
 #include "esp_log.h"
@@ -85,6 +86,7 @@ void provisioning_start_ap() {
     // (and the channel-hopping blip a scan inflicts on the associated phone) buys nothing — and
     // AP-only keeps the open radio to exactly the one job it has here.
     wifi_init_config_t ic = WIFI_INIT_CONFIG_DEFAULT();
+    ic.nvs_enable         = nvs_storage_available();
     ESP_ERROR_CHECK(esp_wifi_init(&ic));
     // Keep the setup AP configuration out of the driver's NVS too. `daik_cfg` is the one persistent
     // authority; the AP is reconstructed on every unprovisioned boot.

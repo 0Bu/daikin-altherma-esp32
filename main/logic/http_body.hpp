@@ -45,19 +45,30 @@ struct BodyChunk {
 // healthy client sends in one segment.
 inline constexpr int BODY_MAX_IDLE = 2;
 
+// Total timeouts tolerated across the entire body reassembly. Prevents slowloris attacks from
+// trickling 1 byte every 2 timeouts indefinitely and tying up the single httpd task.
+inline constexpr int BODY_MAX_TOTAL_IDLE = 20;
+
 // Read exactly `total` bytes into `buf` and NUL-terminate. Returns the byte count, or -1 if the
 // body does not fit `cap` (leaving room for the terminator), is empty, or the peer failed to
-// deliver it. `recv(dst, len)` must return a BodyChunk.
-template <typename Recv>
-int http_body_read(char* buf, size_t cap, size_t total, Recv recv) {
+// deliver it. `recv(dst, len)` must return a BodyChunk. An optional `deadline_reached` functor
+// can abort the read if the overall wall-clock budget expires.
+template <typename Recv, typename DeadlineReached = bool (*)()>
+int http_body_read(
+    char* buf, size_t cap, size_t total, Recv recv,
+    DeadlineReached deadline_reached = []() { return false; }) {
     if (!buf || total == 0 || total >= cap) return -1;
 
-    size_t got  = 0;
-    int    idle = 0;
+    size_t got        = 0;
+    int    idle       = 0;
+    int    total_idle = 0;
     while (got < total) {
+        if (deadline_reached()) return -1;
         const BodyChunk c = recv(buf + got, total - got);
+        if (deadline_reached()) return -1;
         if (c.kind == BodyRecv::Timeout) {
             if (++idle > BODY_MAX_IDLE) return -1;
+            if (++total_idle > BODY_MAX_TOTAL_IDLE) return -1;
             continue;
         }
         // A recv that reports more than we asked for would run off the buffer. It cannot happen

@@ -1,17 +1,19 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import http from "node:http";
+import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
-function runScript(scriptName, args) {
+function runScript(scriptName, args, env = process.env) {
   return new Promise((resolve) => {
     const proc = spawn(
       "bash",
       [path.join(root, "scripts", scriptName), ...args],
-      { stdio: ["ignore", "pipe", "pipe"] }
+      { stdio: ["ignore", "pipe", "pipe"], env }
     );
     let stdout = "";
     let stderr = "";
@@ -506,7 +508,7 @@ function createMockServer(handler) {
       res.end(JSON.stringify({
         version: "1.0.1",
         wifi: { connected: true },
-        mqtt: { connected: true },
+        mqtt: { configured: true, connected: true },
       }));
     } else {
       res.writeHead(404);
@@ -537,7 +539,7 @@ function createMockServer(handler) {
         app_elf_sha256: "1122334455667788",
         uptime_s: 42,
         wifi: { connected: true },
-        mqtt: { connected: true },
+        mqtt: { configured: true, connected: true },
         last_crash: null,
         sys: {
           safe_mode: false,
@@ -571,7 +573,7 @@ function createMockServer(handler) {
         app_elf_sha256: "1122334455667788",
         uptime_s: 42,
         wifi: { connected: true },
-        mqtt: { connected: true },
+        mqtt: { configured: true, connected: true },
         last_crash: null, // explicit clean boot
         sys: {
           safe_mode: false,
@@ -605,7 +607,7 @@ function createMockServer(handler) {
         app_elf_sha256: "1122334455667788",
         uptime_s: 42,
         wifi: { connected: true },
-        mqtt: { connected: true },
+        mqtt: { configured: true, connected: true },
         last_crash: {
           fault: true,
           reason: "panic",
@@ -642,7 +644,7 @@ function createMockServer(handler) {
         app_elf_sha256: "1122334455667788",
         uptime_s: 42,
         wifi: { connected: true },
-        mqtt: { connected: true },
+        mqtt: { configured: true, connected: true },
         last_crash: null,
         sys: {
           safe_mode: true,
@@ -677,7 +679,7 @@ function createMockServer(handler) {
         app_elf_sha256: "1122334455667788",
         uptime_s: 42,
         wifi: { connected: true },
-        mqtt: { connected: true },
+        mqtt: { configured: true, connected: true },
         last_crash: null,
         sys: {
           safe_mode: false,
@@ -715,7 +717,7 @@ function createMockServer(handler) {
         app_elf_sha256: "1122334455667788",
         uptime_s: 42,
         wifi: { connected: true },
-        mqtt: { connected: true },
+        mqtt: { configured: true, connected: true },
         last_crash: null,
         sys: {
           safe_mode: false,
@@ -729,7 +731,7 @@ function createMockServer(handler) {
       }));
     } else if (req.url === "/values") {
       res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify([{ id: "temp", value: 21.5 }]));
+      res.end(JSON.stringify({ values: [{ label: "Water temperature", value: "21.5", unit: "°C", reg: 96 }] }));
     } else {
       res.writeHead(404);
       res.end();
@@ -765,6 +767,87 @@ function createMockServer(handler) {
   } finally {
     await mockHpConnected.close();
   }
+}
+
+// Contract-shaped X10A evidence: null is unavailable, textual values remain legitimate.
+{
+  const healthy = {
+    version: "1.0.1", app_elf_sha256: "1122334455667788", uptime_s: 42,
+    wifi: { connected: true }, mqtt: { configured: false, connected: false },
+    last_crash: null, sys: { safe_mode: false, free_heap: 35000, max_alloc: 24000 },
+    hp: { connected: true, last_ok_s: 1 },
+  };
+  const row = { label: "Water temperature", value: "21.5", unit: "°C", reg: 96 };
+  let status = healthy, values = { values: [row] }, statusCode = 200, valuesCode = 200;
+  const mock = await createMockServer((req, res) => {
+    const isStatus = req.url === "/status";
+    res.writeHead(isStatus ? statusCode : valuesCode, { "Content-Type": "application/json" });
+    res.end(JSON.stringify(isStatus ? status : values));
+  });
+  const run = () => runScript("verify-device-health.sh", [
+    "--ip", `127.0.0.1:${mock.port}`, "--require-hp", "--timeout", "0", "--quiet",
+  ]);
+  try {
+    for (const value of ["21.5", "Normal", "0", "1"]) {
+      values = { values: [{ ...row, value }], modbus: [] };
+      assert.equal((await run()).status, 0, `real envelope value ${value} must pass`);
+    }
+    for (const payload of [[], {}, { values: [] }, { values: [{ ...row, value: null }] },
+      { values: [{ ...row, value: "" }] }, { values: [{ ...row, value: "  " }] },
+      { values: [{ ...row, value: {} }] }, { values: [{ ...row, value: [] }] },
+      { values: [{ ...row, value: true }] }, { values: [{ ...row, value: 21.5 }] },
+      { values: [{ ...row, value: "22", held: true }] },
+      { values: [{ ...row, held: "true" }] }, { values: [{ ...row, held: null }] }, { values: [{ value: "22" }] }]) {
+      values = payload;
+      assert.equal((await run()).status, 1, `unusable/malformed values must fail: ${JSON.stringify(payload)}`);
+    }
+    values = { values: [row] };
+    for (const mqtt of [{}, { configured: null }, { configured: "false" },
+      { configured: true }, { configured: true, connected: "true" },
+      { configured: true, connected: false }]) {
+      status = { ...healthy, mqtt };
+      assert.equal((await run()).status, 1, `missing/invalid MQTT evidence must fail: ${JSON.stringify(mqtt)}`);
+    }
+    for (const age of [undefined, null, -1, 15, 3600, "1", 1.5]) {
+      status = { ...healthy, hp: { connected: true, last_ok_s: age } };
+      assert.equal((await run()).status, 1, `missing/invalid/stale X10A age must fail: ${age}`);
+    }
+    for (const connected of ["true", 1, null, false]) {
+      status = { ...healthy, hp: { connected, last_ok_s: 1 } };
+      assert.equal((await run()).status, 1, `invalid/disconnected X10A state must fail: ${connected}`);
+    }
+    for (const field of ["free_heap", "max_alloc"]) {
+      for (const value of [1.5, 4294967296, 1e100, "24000", null]) {
+        status = { ...healthy, sys: { ...healthy.sys, [field]: value } };
+        assert.equal((await run()).status, 1, `invalid ${field} must fail: ${value}`);
+      }
+    }
+    status = healthy;
+    valuesCode = 503;
+    assert.equal((await run()).status, 1, "JSON received with HTTP503 is not successful evidence");
+    valuesCode = 200;
+    statusCode = 403;
+    assert.equal((await run()).status, 1, "a valid status body received with HTTP403 must fail");
+  } finally { await mock.close(); }
+
+  // curl may have received HTTP200 before its transfer fails. Neither endpoint may hide exit28.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "daikin-health-transport-"));
+  try {
+    fs.writeFileSync(path.join(dir, "curl"), `#!/usr/bin/env node
+const isStatus = process.argv.at(-1).endsWith('/status');
+process.stdout.write((isStatus ? process.env.TEST_STATUS : process.env.TEST_VALUES) + '\\n200');
+process.exit(isStatus ? +process.env.TEST_STATUS_EXIT : +process.env.TEST_VALUES_EXIT);
+`, { mode: 0o755 });
+    for (const [statusExit, valuesExit] of [[0, 0], [28, 0], [0, 28]]) {
+      const result = await runScript("verify-device-health.sh", [
+        "--ip", "synthetic.invalid", "--require-hp", "--timeout", "0", "--quiet",
+      ], { ...process.env, PATH: `${dir}:${process.env.PATH}`,
+        TEST_STATUS: JSON.stringify(healthy), TEST_VALUES: JSON.stringify({ values: [row] }),
+        TEST_STATUS_EXIT: String(statusExit), TEST_VALUES_EXIT: String(valuesExit) });
+      assert.equal(result.status, statusExit || valuesExit ? 1 : 0,
+        `HTTP200 plus curl exits ${statusExit}/${valuesExit} must retain transport outcome`);
+    }
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 }
 
 console.log("deployment scripts contract: R2, R3, R4, R5 offline scenarios clean");

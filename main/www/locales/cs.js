@@ -1,4 +1,4 @@
-// translation-source: 57b0fcb43db1c83f37043fc71c9fb312b807a1fb0c56d7a9781cef96f2b64ffb
+// translation-source: 1369786d303329f6e5230c06537e985a4c7735be65bcff1dc17670a9530129f9
 I18N.cs = localeValues([
   /* sys.nodata */ "Žádná data",
   /* sys.unreachable */ "Nedostupné",
@@ -556,7 +556,7 @@ I18N.cs = localeValues([
   /* ref.target */ "Cílová teplota",
   /* ref.timestamp_source */ "Zdroj časového údaje · volitelný",
   /* ref.max_age */ "Maximální stáří · sekundy",
-  /* ref.temperature_source_help */ "Přesné téma MQTT a volitelná cesta JSON za $. Chybějící nebo nesprávné cesty se ohlásí po přijetí dat.",
+  /* ref.temperature_source_help */ "Přesné téma MQTT a volitelná cesta JSON za $. Chybějící nebo nesprávné cesty se ohlásí po přijetí dat. V tématech a cestách zadávejte doslovné $ jako \\$ a \\ jako \\\\.",
   /* ref.target_help */ "Pevná hodnota v °C nebo přesné téma MQTT s volitelnou cestou JSON za $.",
   /* ref.timestamp_source_help */ "Volitelný zdrojový čas RFC3339/Unix ve formátu téma$cesta. Prázdné pole použije čas příchodu živé zprávy MQTT; uchované hodnoty se pak bezpečně odmítnou.",
   /* ref.max_age_help */ "Maximální povolené stáří zdrojové hodnoty od 10 do 3600 sekund.",
@@ -653,7 +653,7 @@ I18N.cs = localeValues([
   /* wx.detail.unavailable */ "Poslední načtení selhalo; starší hodnota, pokud existuje, se zobrazuje pouze pro diagnostiku.",
   /* wx.detail.waiting */ "Dosud nebyla přijata žádná předpověď.",
   /* wx.detail.temperature_label */ "Teplota:",
-  /* wx.detail.temperature */ (v) => `${v} °C je průměrná předpovídaná teplota venkovního vzduchu na další dvě celé hodiny.`,
+  /* wx.detail.temperature */ (v) => `${v} °C je průměrná předpovídaná teplota venkovního vzduchu pro dvouhodinové období vybrané při posledním úspěšném načtení.`,
   /* wx.detail.solar_label */ "Sluneční záření:",
   /* wx.detail.solar */ (v) => `${v} Wh/m² je předpověď globálního horizontálního ozáření za stejné dvouhodinové období.`,
   /* wx.detail.source_label */ "Zdroj:",

@@ -1,4 +1,4 @@
-// translation-source: 57b0fcb43db1c83f37043fc71c9fb312b807a1fb0c56d7a9781cef96f2b64ffb
+// translation-source: 1369786d303329f6e5230c06537e985a4c7735be65bcff1dc17670a9530129f9
 I18N.nb = localeValues([
   /* sys.nodata */ "Ingen data",
   /* sys.unreachable */ "Ikke tilgjengelig",
@@ -556,7 +556,7 @@ I18N.nb = localeValues([
   /* ref.target */ "Måltemperatur",
   /* ref.timestamp_source */ "Kilde for tidsstempel · valgfri",
   /* ref.max_age */ "Maksimal alder · sekunder",
-  /* ref.temperature_source_help */ "Nøyaktig MQTT-topic og valgfri JSON-sti etter $. Manglende/feil sti meldes når en melding kommer.",
+  /* ref.temperature_source_help */ "Nøyaktig MQTT-topic og valgfri JSON-sti etter $. Manglende/feil sti meldes når en melding kommer. I topic og stier skrives bokstavelig $ som \\$ og \\ som \\\\.",
   /* ref.target_help */ "Fast °C-verdi eller nøyaktig MQTT-topic med valgfri JSON-sti etter $.",
   /* ref.timestamp_source_help */ "Valgfri RFC3339-/Unix-kildetid som topic$sti. Tomt bruker direkte MQTT-mottakstid; retained verdier avvises da.",
   /* ref.max_age_help */ "Hvor gammel kildemålingen maksimalt kan være (10–3600 s).",
@@ -653,7 +653,7 @@ I18N.nb = localeValues([
   /* wx.detail.unavailable */ "Siste henting mislyktes; en eldre verdi vises eventuelt bare for diagnose.",
   /* wx.detail.waiting */ "Ingen prognose er mottatt ennå.",
   /* wx.detail.temperature_label */ "Temperatur:",
-  /* wx.detail.temperature */ (v) => `${v} °C er gjennomsnittlig prognose for uteluften de neste to hele timene.`,
+  /* wx.detail.temperature */ (v) => `${v} °C er gjennomsnittlig prognose for uteluften i totimersperioden valgt ved siste vellykkede henting.`,
   /* wx.detail.solar_label */ "Globalstråling:",
   /* wx.detail.solar */ (v) => `${v} Wh/m² er prognosen for globalstråling på en vannrett flate i samme totimersperiode.`,
   /* wx.detail.source_label */ "Kilde:",

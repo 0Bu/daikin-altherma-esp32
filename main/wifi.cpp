@@ -6,6 +6,7 @@
 #include "wifi.hpp"
 #include "config.hpp"
 #include "diag_log.hpp"
+#include "nvs_storage.hpp"
 #include "logic/config_model.hpp"
 #include "logic/link_watch.hpp"
 #include "logic/wifi_rollback.hpp"
@@ -296,6 +297,7 @@ bool wifi_start_sta() {
                         esp_err_to_name(hostname_err));
     }
     wifi_init_config_t ic = WIFI_INIT_CONFIG_DEFAULT();
+    ic.nvs_enable         = nvs_storage_available();
     ESP_ERROR_CHECK(esp_wifi_init(&ic));
     // `daik_cfg` is the sole persistence authority. IDF defaults to WIFI_STORAGE_FLASH, which would
     // silently duplicate SSID/password in its own NVS namespace and let them survive our factory

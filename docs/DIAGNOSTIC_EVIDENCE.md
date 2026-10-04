@@ -1,6 +1,6 @@
 # Evidence and limits of the plant diagnostics
 
-<!-- diagnostic-evidence-contract: 10ba52e56b882e9963dc123b8d85ab78d1415e26f10d7447769ce782d1da2781 -->
+<!-- diagnostic-evidence-contract: b21cb4b6a87ee898380c9eea5eae3bb0af25c9961333a3a09692597ead98fa48 -->
 
 For every row in the **Plant diagnostics · 24 h** card, this page answers four questions:
 
@@ -21,6 +21,14 @@ X10A observations are also scoped to the configured target generation. A link, w
 unit change invalidates an in-flight cycle before it can enter this evidence window; the old target's
 last sample is discarded rather than becoming the first sample attributed to the new target. This is
 an identity and freshness boundary, not evidence that an unreadable replacement unit is healthy.
+
+Transport liveness is separate from each rule's measurement evidence. X10A live use requires a reply
+less than 15 s old. HomeHub cache use requires matching target/session identity, a full-cache age at
+most 546 s and a separate reply age at most 7 s; these project bounds include slow fallback reads
+and do not establish that every row came from one sweep. State-age observation and blind time are
+also separate from the eight diagnosis counters; their version-2 format changes no threshold below.
+The [X10A gate](../main/logic/mqtt_publish_gate.hpp) and
+[HomeHub implementation](../main/hp_modbus.cpp) define those transport bounds.
 
 A manufacturer statement is not automatically a limit for every Daikin model. The installation
 manual for the exact indoor and outdoor units remains authoritative. The primary sources linked here

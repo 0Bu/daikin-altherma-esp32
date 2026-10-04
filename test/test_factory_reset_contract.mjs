@@ -38,8 +38,26 @@ assert.ok(erase.indexOf("Lock lk(s_write_mtx)") < erase.indexOf("s_writes_disabl
           erase.indexOf("s_writes_disabled.store(true") < erase.indexOf("nvs_open("),
   "factory erase must wait out old writers and latch new writers before opening NVS");
 const main = code("main/main.cpp");
-assert.ok(main.indexOf("nvs_storage_init()") < main.indexOf("config_load()"),
+assert.ok(main.indexOf("nvs_storage_init(") < main.indexOf("config_load()"),
   "the NVS write mutex must exist before config loading or producer tasks");
+assert.doesNotMatch(main, /nvs_flash_erase\s*\(/,
+  "a failed NVS initialization must preserve the partition, including full/new-version errors");
+assert.match(nvs, /xSemaphoreCreateMutexStatic\(&s_write_mtx_storage\)/,
+  "the NVS write lock must be available without heap allocation before the crash counter");
+for (const risky of ["esp_netif_init()", "ota_update_init()", "config_load()",
+                    "status_led_start()", "recovery_button_start()"]) {
+  assert.ok(main.indexOf("safe_mode_begin()") >= 0 &&
+            main.indexOf("safe_mode_begin()") < main.indexOf(risky),
+    `the crash guard must record this boot before ${risky}`);
+}
+
+assert.match(main, /nvs_storage_init\(nvs_err == ESP_OK\)/,
+  "WiFi must know whether NVS initialized before choosing its driver storage");
+for (const source of [wifi, provisioning]) {
+  const driverStorage = source.search(/ic\.nvs_enable\s*=\s*nvs_storage_available\(\)/);
+  assert.ok(driverStorage >= 0 && driverStorage < source.indexOf("esp_wifi_init(&ic)"),
+    "failed NVS initialization must disable driver NVS before starting station or setup AP");
+}
 
 const recovery = code("main/recovery_button.cpp");
 assert.ok(recovery.indexOf("nvs_erase_all()") < recovery.indexOf("wifi_forget_persisted_config()") &&
