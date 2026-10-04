@@ -23,16 +23,20 @@ ROOT="$PWD"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
+mkdir -p "$TMP/t"
+# Copy only what the audit reads + compiles against.
+cp -R "$ROOT/main" "$ROOT/tools" "$ROOT/scripts" "$ROOT/docs" "$TMP/t/"
+cp "$ROOT/README.md" "$TMP/t/"
+cp "$ROOT/docs/HOME_ASSISTANT.md" "$TMP/HOME_ASSISTANT.md.pristine"
+
+# Build the audit binary once on the pristine tree; doc mutations reuse it
+(cd "$TMP/t" && scripts/run-doc-entity-audit.sh >/dev/null 2>&1) || true
+
 fail=0
 run_case() {   # run_case <name> <sed-expression> ; `grep -c '^run_case '` = the case count (anchored:
                # the bare word matches this definition line and the comments about it too)
     local name="$1" expr="$2"
-    rm -rf "$TMP/t"
-    mkdir -p "$TMP/t"
-    # Copy only what the audit reads + compiles against.
-    cp -R "$ROOT/main" "$ROOT/tools" "$ROOT/scripts" "$ROOT/docs" "$TMP/t/"
-    cp "$ROOT/README.md" "$TMP/t/"
-    rm -rf "$TMP/t/build_mock"
+    cp "$TMP/HOME_ASSISTANT.md.pristine" "$TMP/t/docs/HOME_ASSISTANT.md"
     sed -i.bak "$expr" "$TMP/t/docs/HOME_ASSISTANT.md" && rm -f "$TMP/t/docs/HOME_ASSISTANT.md.bak"
     local out rc
     set +e
@@ -45,6 +49,7 @@ run_case() {   # run_case <name> <sed-expression> ; `grep -c '^run_case '` = the
         printf '  FAIL  %s  (exit %d, expected 1)\n%s\n' "$name" "$rc" "$out"
         fail=1
     fi
+    cp "$TMP/HOME_ASSISTANT.md.pristine" "$TMP/t/docs/HOME_ASSISTANT.md"
 }
 
 echo "doc entity-id audit selftest — re-seeding each historical defect"

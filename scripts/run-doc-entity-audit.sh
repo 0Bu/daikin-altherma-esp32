@@ -30,8 +30,17 @@ if [ -z "$CXX" ]; then
     fi
 fi
 
-"$CXX" -std=c++17 -Wall -Wextra -Werror -Imain -o "$BUILD_DIR/entity_id_audit" \
-    tools/docs/entity_id_audit.cpp
+need_compile=false
+if [ ! -x "$BUILD_DIR/entity_id_audit" ]; then
+    need_compile=true
+elif [ -n "$(find tools/docs/entity_id_audit.cpp main/def main/logic/ha_device.hpp -newer "$BUILD_DIR/entity_id_audit" 2>/dev/null)" ]; then
+    need_compile=true
+fi
+
+if [ "$need_compile" = true ]; then
+    "$CXX" -std=c++17 -Wall -Wextra -Werror -Imain -o "$BUILD_DIR/entity_id_audit" \
+        tools/docs/entity_id_audit.cpp
+fi
 
 # The device-name prefix HA derives an entity_id from: the slugified device name. Kept here rather
 # than in the tool so the tool stays a general "resolve these ids" checker.

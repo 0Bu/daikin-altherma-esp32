@@ -563,19 +563,33 @@ jobs:
           # vendor/LICENSE into both feeds. A change there must therefore rebuild and republish.
           # production-ota-gate.py also binds local HEAD to manifest.source_sha; publishing its
           # changes without a new artifact would make the corrected gate impossible to execute.
-          relevant='^(LICENSE$|THIRD_PARTY_NOTICES[.]md$|main/|CMakeLists[.]txt$|sdkconfig[.]defaults$|dependencies[.]lock$|partitions[.]csv$|version[.]txt$|docs/(index[.]html|serial-port-release[.]mjs|web-installer[.]mjs)$|[.]github/workflows/build[.]yml$|scripts/(ci-build-all|build-pages|next-version|publish-pages-branch|require-signed|check-publish-version|idf-version|check-nonflashable-artifacts)[.]sh$|scripts/pages-commit-payload[.]mjs$|scripts/(generate-ota-changelog|check-sdkconfig-defaults|report-firmware-size|check-web-installer-plan|check-manifest-provenance|check-signing-key-continuity|check-stack-budget|check-reproducible-build|verify-published-artifacts|production-ota-gate)[.]py$|tools/(version|web_asset|release|stack)/)'
+          relevant='^(LICENSE$|THIRD_PARTY_NOTICES[.]md$|main/|CMakeLists[.]txt$|sdkconfig[.]defaults$|dependencies[.]lock$|partitions[.]csv$|version[.]txt$|docs/(index[.]html|serial-port-release[.]mjs|web-installer[.]mjs)$|[.]github/workflows/build[.]yml$|scripts/(ci-build-all|build-pages|next-version|publish-pages-branch|require-signed|check-publish-version|idf-version|check-nonflashable-artifacts|check-dev-manifest-source)[.]sh$|scripts/pages-commit-payload[.]mjs$|scripts/(generate-ota-changelog|check-sdkconfig-defaults|report-firmware-size|check-web-installer-plan|check-manifest-provenance|check-signing-key-continuity|check-stack-budget|check-reproducible-build|verify-published-artifacts|production-ota-gate)[.]py$|tools/(version|web_asset|release|stack)/)'
           case "${{ github.event_name }}" in
             pull_request)
               # HEAD is the PR's merge ref, so HEAD^1 is the base tip: the diff is exactly what
               # this PR changes, no matter how many commits it took or what landed on main since.
               range="HEAD^1 HEAD" ;;
             push)
-              # A force-push (or the first push of a branch) can leave `before` unresolvable —
-              # then build, rather than guess.
-              if [ -z "$BEFORE" ] || ! git cat-file -e "${BEFORE}^{commit}" 2>/dev/null; then
-                range=""
-              else
+              if [ "${{ github.ref }}" = "refs/heads/main" ]; then
+                # Compare against the source commit of the authoritative published dev manifest.
+                # If an earlier run was superseded, cancelled or failed, firmware changes remain
+                # visible until actually built and published to the dev feed.
+                set +e
+                dev_source="$(./scripts/check-dev-manifest-source.sh origin 2>/tmp/dev-source.log)"
+                rc=$?
+                set -e
+                if [ "$rc" -eq 0 ]; then
+                  range="$dev_source ${{ github.sha }}"
+                elif [ "$rc" -eq 1 ]; then
+                  range="same_source"
+                else
+                  echo "dev manifest source unresolvable: $(cat /tmp/dev-source.log 2>/dev/null || true)"
+                  range=""
+                fi
+              elif [ -n "$BEFORE" ] && git cat-file -e "${BEFORE}^{commit}" 2>/dev/null; then
                 range="$BEFORE ${{ github.sha }}"
+              else
+                range=""
               fi ;;
             *)
               # A manual dispatch is an explicit request to build (and possibly to cut a release).
@@ -588,6 +602,8 @@ jobs:
           # than the pipe.
           if [ -z "$range" ]; then
             changed=yes
+          elif [ "$range" = "same_source" ]; then
+            changed=no
           else
             git diff --name-only $range > /tmp/changed-files.txt
             if grep -qE "$relevant" /tmp/changed-files.txt; then

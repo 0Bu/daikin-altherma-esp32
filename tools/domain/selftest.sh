@@ -75,10 +75,12 @@ run_doc_case() {
         echo "  MISCONFIGURED: $name — docs patch did not apply (did §4.1 change upstream?)"
         fail=$((fail + 1)); return
     fi
-    if ! "$CXX" -std=c++17 -I"$WORK/main" -o "$WORK/audit" tools/domain/catalog_audit.cpp 2>"$WORK/cc.log"; then
-        echo "  MISCONFIGURED: $name — audit failed to compile"
-        sed -n '1,5p' "$WORK/cc.log"
-        fail=$((fail + 1)); return
+    if [ ! -x "$WORK/doc_audit" ]; then
+        if ! "$CXX" -std=c++17 -I"$WORK/main" -o "$WORK/doc_audit" tools/domain/catalog_audit.cpp 2>"$WORK/cc.log"; then
+            echo "  MISCONFIGURED: $name — audit failed to compile"
+            sed -n '1,5p' "$WORK/cc.log"
+            fail=$((fail + 1)); return
+        fi
     fi
     if [ -n "$exception_key" ]; then
         cp tools/domain/audit_exceptions.txt "$WORK/audit_exceptions.txt"
@@ -86,7 +88,7 @@ run_doc_case() {
         exceptions="$WORK/audit_exceptions.txt"
     fi
     local out rc
-    out="$("$WORK/audit" "$WORK/REGISTERS.md" "$exceptions" 2>&1)"; rc=$?
+    out="$("$WORK/doc_audit" "$WORK/REGISTERS.md" "$exceptions" 2>&1)"; rc=$?
 
     if [ "$rc" -eq 0 ]; then
         echo "  MISSED: $name — audit reported CLEAN on the re-introduced drift"

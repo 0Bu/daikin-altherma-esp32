@@ -93,7 +93,10 @@ else
 fi
 
 CXX="$selected_cxx"
-compile_properties "$CXX" "$SANITIZERS"
+# Reuse the binary successfully verified by probe_runtime; only compile if absent
+if [ ! -x "$BUILD_DIR/logic_property_tests" ]; then
+    compile_properties "$CXX" "$SANITIZERS"
+fi
 
 ASAN_OPTIONS="$ASAN_OPTIONS_VALUE" \
 LSAN_OPTIONS=exitcode=23 \

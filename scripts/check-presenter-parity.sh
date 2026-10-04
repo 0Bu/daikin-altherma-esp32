@@ -27,6 +27,20 @@ cd "$(dirname "$0")/.."
 OUT=build_mock          # matches .gitignore (/build_mock/)
 mkdir -p "$OUT"
 
+golden_tsv=""
+if [ "${1:-}" = "--golden" ]; then
+    [ "$#" -ge 2 ] || { echo "check-presenter-parity: --golden requires a path" >&2; exit 2; }
+    golden_tsv="$2"
+    shift 2
+fi
+
+if [ -n "$golden_tsv" ]; then
+    [ -f "$golden_tsv" ] || { echo "check-presenter-parity: golden file not found: $golden_tsv" >&2; exit 2; }
+    command -v node >/dev/null 2>&1 || { echo "check-presenter-parity: need node" >&2; exit 1; }
+    node tools/presenter/presenter_parity.mjs "$golden_tsv"
+    exit 0
+fi
+
 CXX="${CXX:-}"
 if [ -z "$CXX" ]; then
     if   command -v g++     >/dev/null 2>&1; then CXX=g++
@@ -38,8 +52,19 @@ command -v node >/dev/null 2>&1 || {
     echo "check-presenter-parity: need node" >&2; exit 1
 }
 
-"$CXX" -std=c++17 -Wall -Wextra -Werror -Imain \
-    -o "$OUT/presenter_golden_dump" test/presenter_golden_dump.cpp
-"$OUT/presenter_golden_dump" > "$OUT/presenter_golden.tsv"
+need_compile=false
+if [ ! -x "$OUT/presenter_golden_dump" ]; then
+    need_compile=true
+elif [ -n "$(find test/presenter_golden_dump.cpp main/logic main/def -newer "$OUT/presenter_golden_dump" 2>/dev/null)" ]; then
+    need_compile=true
+fi
+
+if [ "$need_compile" = true ]; then
+    "$CXX" -std=c++17 -Wall -Wextra -Werror -Imain \
+        -o "$OUT/presenter_golden_dump" test/presenter_golden_dump.cpp
+    "$OUT/presenter_golden_dump" > "$OUT/presenter_golden.tsv"
+elif [ ! -f "$OUT/presenter_golden.tsv" ]; then
+    "$OUT/presenter_golden_dump" > "$OUT/presenter_golden.tsv"
+fi
 
 node tools/presenter/presenter_parity.mjs "$OUT/presenter_golden.tsv"
