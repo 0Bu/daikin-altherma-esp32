@@ -228,7 +228,7 @@ echo "== 8. browser filter: --if-ui-changed scoping =="
 )
 out="$(cd "$T/work" && ./scripts/run-browser-render-tests.sh --if-ui-changed 2>&1)" || true
 check "docs-only commit skips browser render tests" \
-      "$(echo "$out" | grep -c "no UI/browser-relevant changes in diff; skipped")" "1"
+      "$(echo "$out" | grep -c "no UI/browser-relevant changes in diff")" "1"
 
 # Test tools/ui_localization/ modification triggers browser render test (does not skip)
 (
@@ -239,7 +239,75 @@ check "docs-only commit skips browser render tests" \
 )
 out_ui="$(cd "$T/work" && ./scripts/run-browser-render-tests.sh --if-ui-changed 2>&1)" || true
 check "tools/ui_localization/ change is NOT skipped" \
-      "$(echo "$out_ui" | grep -c "no UI/browser-relevant changes in diff; skipped")" "0"
+      "$(echo "$out_ui" | grep -c "no UI/browser-relevant changes in diff")" "0"
+
+# Test multi-commit push with BEFORE: UI change in earlier commit is detected
+before_multi="$(cd "$T/work" && git rev-parse HEAD)"
+(
+  cd "$T/work" || exit 1
+  echo "/* style */" >> main/www/test.css
+  git add main/www/test.css && git commit -qm "ui: update style"
+  echo "doc update" >> README.md
+  git add README.md && git commit -qm "docs: update readme"
+)
+out_multi="$(cd "$T/work" && BEFORE="$before_multi" ./scripts/run-browser-render-tests.sh --if-ui-changed 2>&1)" || true
+check "multi-commit push with earlier UI commit is NOT skipped" \
+      "$(echo "$out_multi" | grep -c "no UI/browser-relevant changes in diff")" "0"
+
+# Test multi-commit push with BEFORE: all commits docs-only is skipped
+before_docs="$(cd "$T/work" && git rev-parse HEAD)"
+(
+  cd "$T/work" || exit 1
+  echo "doc1" >> docs/REPORTING.md
+  git add docs/REPORTING.md && git commit -qm "docs: 1"
+  echo "doc2" >> docs/REPORTING.md
+  git add docs/REPORTING.md && git commit -qm "docs: 2"
+)
+out_multi_docs="$(cd "$T/work" && BEFORE="$before_docs" ./scripts/run-browser-render-tests.sh --if-ui-changed 2>&1)" || true
+check "multi-commit push with docs-only is skipped" \
+      "$(echo "$out_multi_docs" | grep -c "no UI/browser-relevant changes in diff")" "1"
+
+# Test PR merge tree (HEAD^2 exists): PR branch with UI change is detected
+base_for_pr="$(cd "$T/work" && git rev-parse HEAD)"
+(
+  cd "$T/work" || exit 1
+  git checkout -qb feature_ui
+  echo "/* component */" >> main/www/comp.js
+  git add main/www/comp.js && git commit -qm "feat: add ui component"
+  git checkout -q main
+  git merge --no-ff -qm "Merge PR with UI change" feature_ui
+)
+out_pr_ui="$(cd "$T/work" && ./scripts/run-browser-render-tests.sh --if-ui-changed 2>&1)" || true
+check "PR merge tree with UI change in PR branch is NOT skipped" \
+      "$(echo "$out_pr_ui" | grep -c "no UI/browser-relevant changes in diff")" "0"
+
+# Test PR merge tree (HEAD^2 exists): PR branch docs-only is skipped even if base moved
+(
+  cd "$T/work" || exit 1
+  git checkout -qb feature_docs
+  echo "new doc" >> docs/TEST.md
+  git add docs/TEST.md && git commit -qm "docs: new doc"
+  git checkout -q main
+  git merge --no-ff -qm "Merge PR with docs only" feature_docs
+)
+out_pr_docs="$(cd "$T/work" && ./scripts/run-browser-render-tests.sh --if-ui-changed 2>&1)" || true
+check "PR merge tree with docs-only in PR branch is skipped" \
+      "$(echo "$out_pr_docs" | grep -c "no UI/browser-relevant changes in diff")" "1"
+
+# Test unresolvable comparison explicitly handles and runs full suite
+rm -rf "$T/unresolvable"; git init -q "$T/unresolvable"
+(
+  cd "$T/unresolvable" || exit 1
+  git config user.email t@t; git config user.name t; git config commit.gpgsign false
+  mkdir -p scripts
+  cp "$REPO/scripts/run-browser-render-tests.sh" scripts/
+  chmod +x scripts/*.sh
+  # No commits, unresolvable HEAD
+  out_unres="$(./scripts/run-browser-render-tests.sh --if-ui-changed 2>&1)" || true
+  echo "$out_unres" > "$T/out_unres.log"
+)
+check "unresolvable comparison logs explicit reason and does not skip" \
+      "$(grep -c "unresolvable comparison range; running full suite" "$T/out_unres.log")" "1"
 
 echo "== 9. workflow concurrency and release serialization contract =="
 python3 - "$REPO/.github/workflows/build.yml" <<'PY'

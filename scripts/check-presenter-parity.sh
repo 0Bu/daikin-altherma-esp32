@@ -55,7 +55,7 @@ command -v node >/dev/null 2>&1 || {
 need_compile=false
 if [ ! -x "$OUT/presenter_golden_dump" ]; then
     need_compile=true
-elif [ -n "$(find test/presenter_golden_dump.cpp main/logic main/def -newer "$OUT/presenter_golden_dump" 2>/dev/null)" ]; then
+elif [ -n "$(find test/presenter_golden_dump.cpp main/logic main/def -type f -newer "$OUT/presenter_golden_dump" 2>/dev/null)" ]; then
     need_compile=true
 fi
 

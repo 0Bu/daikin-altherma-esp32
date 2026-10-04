@@ -33,7 +33,7 @@ fi
 need_compile=false
 if [ ! -x "$BUILD_DIR/entity_id_audit" ]; then
     need_compile=true
-elif [ -n "$(find tools/docs/entity_id_audit.cpp main/def main/logic/ha_device.hpp -newer "$BUILD_DIR/entity_id_audit" 2>/dev/null)" ]; then
+elif [ -n "$(find tools/docs/entity_id_audit.cpp main/def main/logic -type f -newer "$BUILD_DIR/entity_id_audit" 2>/dev/null)" ]; then
     need_compile=true
 fi
 

@@ -332,6 +332,8 @@ jobs:
       # modals at 320/1200 px in all 13 locales. Reduced motion covers Dashboard, Settings, WiFi,
       # progress and disclosure motion at the same locale/viewport matrix; console errors are fatal.
       - name: Run rendered browser and accessibility gate
+        env:
+          BEFORE: ${{ github.event.before }}
         run: ./scripts/run-browser-render-tests.sh --if-ui-changed
 
       # The source-boundary contracts: assertions about main/*.cpp that the host suite cannot make,
