@@ -23,43 +23,64 @@ ROOT="$PWD"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
+mkdir -p "$TMP/t"
+# Copy only what the audit reads + compiles against.
+cp -R "$ROOT/main" "$ROOT/tools" "$ROOT/scripts" "$ROOT/docs" "$TMP/t/"
+cp "$ROOT/README.md" "$TMP/t/"
+cp "$ROOT/docs/HOME_ASSISTANT.md" "$TMP/HOME_ASSISTANT.md.pristine"
+
+# A mutation can prove detection only after the pristine tree passes. Build its binary once, then
+# explicitly reuse it for document-only changes in this same throwaway tree.
+if ! (cd "$TMP/t" && scripts/run-doc-entity-audit.sh >"$TMP/pristine.log" 2>&1); then
+    echo "doc entity-id selftest: the audit is not green on the pristine tree" >&2
+    cat "$TMP/pristine.log" >&2
+    exit 1
+fi
+AUDIT_BINARY="$TMP/t/build_mock/entity_id_audit"
+
 fail=0
-run_case() {   # run_case <name> <sed-expression> ; `grep -c '^run_case '` = the case count (anchored:
+run_case() {   # run_case <name> <expected-id> <sed-expression>; `grep -c '^run_case '` = the case count (anchored:
                # the bare word matches this definition line and the comments about it too)
-    local name="$1" expr="$2"
-    rm -rf "$TMP/t"
-    mkdir -p "$TMP/t"
-    # Copy only what the audit reads + compiles against.
-    cp -R "$ROOT/main" "$ROOT/tools" "$ROOT/scripts" "$ROOT/docs" "$TMP/t/"
-    cp "$ROOT/README.md" "$TMP/t/"
-    rm -rf "$TMP/t/build_mock"
+    local name="$1" expected_id="$2" expr="$3"
+    cp "$TMP/HOME_ASSISTANT.md.pristine" "$TMP/t/docs/HOME_ASSISTANT.md"
     sed -i.bak "$expr" "$TMP/t/docs/HOME_ASSISTANT.md" && rm -f "$TMP/t/docs/HOME_ASSISTANT.md.bak"
-    local out rc
+    if cmp -s "$TMP/HOME_ASSISTANT.md.pristine" "$TMP/t/docs/HOME_ASSISTANT.md"; then
+        printf '  FAIL  %s  (mutation changed nothing)\n' "$name"
+        fail=1
+        return
+    fi
+    local out rc reported_ids
     set +e
-    out="$(cd "$TMP/t" && scripts/run-doc-entity-audit.sh 2>&1)"
+    out="$(cd "$TMP/t" && scripts/run-doc-entity-audit.sh --binary "$AUDIT_BINARY" 2>&1)"
     rc=$?
     set -e
-    if [ "$rc" -eq 1 ]; then
+    reported_ids="$(sed -n 's/^  \[E-ID\] docs\/HOME_ASSISTANT\.md:[0-9][0-9]*  //p' <<<"$out")"
+    if [ "$rc" -eq 1 ] && grep -Fxq "$expected_id" <<<"$reported_ids"; then
         printf '  PASS  %s\n' "$name"
     else
-        printf '  FAIL  %s  (exit %d, expected 1)\n%s\n' "$name" "$rc" "$out"
+        printf '  FAIL  %s  (exit %d, expected 1 with E-ID for %s)\n%s\n' \
+            "$name" "$rc" "$expected_id" "$out"
         fail=1
     fi
+    cp "$TMP/HOME_ASSISTANT.md.pristine" "$TMP/t/docs/HOME_ASSISTANT.md"
 }
 
 echo "doc entity-id audit selftest — re-seeding each historical defect"
 
 # 1. The slug that was never valid: ha_slug("(l/min)") yields `l_min`, never `lmin`.
 run_case "invalid slug (flow_rate_lmin)" \
+    'sensor.daikin_altherma_flow_rate_lmin' \
     's|sensor\.daikin_altherma_flow_sensor_l_min|sensor.daikin_altherma_flow_rate_lmin|g'
 
 # 2. A real label that lives ONLY on the undetectable host-test fixture. The audit must reject it;
 #    resolving against the whole registry instead of detectable profiles would accept it.
 run_case "id only on the test fixture (return_water_temp_before_phe_r4t)" \
+    'sensor.daikin_altherma_return_water_temp_before_phe_r4t' \
     's|sensor\.daikin_altherma_inlet_water_temp_r4t|sensor.daikin_altherma_return_water_temp_before_phe_r4t|g'
 
 # 3. An ordinary typo in an id that is otherwise correct — the commonest way this breaks.
 run_case "typo in a valid id" \
+    'sensor.daikin_altherma_leaving_water_temp_after_buh_r2x' \
     's|sensor\.daikin_altherma_leaving_water_temp_after_buh_r2t|sensor.daikin_altherma_leaving_water_temp_after_buh_r2x|g'
 
 if [ "$fail" -eq 0 ]; then
