@@ -1087,10 +1087,8 @@ python3 - "$TMP/main/mqtt_ha.cpp" <<'PY4'
 import sys
 p = sys.argv[1]
 s = open(p).read()
-old = ('    if (js != s_last_modbus_json &&\n'
-       '        mqtt_publish(s_modbus, js.c_str(), static_cast<int>(js.size()), 0, 1)) {\n')
-new = ('    if (js != s_last_modbus_json) {\n'
-       '        mqtt_publish(s_modbus, js.c_str(), static_cast<int>(js.size()), 0, 1);\n')
+old = ('        if (!mqtt_publish(s_modbus, js.c_str(), static_cast<int>(js.size()), 0, 1)) return false;\n')
+new = ('        mqtt_publish(s_modbus, js.c_str(), static_cast<int>(js.size()), 0, 1);\n')
 seed = s.replace(old, new, 1)
 assert seed != s, "seed 59 did not apply — HomeHub publish acknowledgement moved"
 open(p, "w").write(seed)
