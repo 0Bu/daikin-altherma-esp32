@@ -122,6 +122,8 @@ check_rc "production/HIL OTA gate self-test passes" 0 \
     python3 scripts/production-ota-gate.py --self-test
 check_rc "OTA changelog generator self-test passes" 0 \
     python3 scripts/generate-ota-changelog.py --self-test
+check_rc "build change detection acceptance tests pass" 0 \
+    ./scripts/run-build-change-detection-tests.sh
 python3 - "$REPO/.github/workflows/build.yml" <<'PY'
 import re
 import sys
