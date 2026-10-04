@@ -529,8 +529,8 @@
         "taken": 6
       },
       "main/logic/http_body.hpp": {
-        "outcomes": 126,
-        "taken": 58
+        "outcomes": 192,
+        "taken": 91
       },
       "main/logic/http_cache.hpp": {
         "outcomes": 58,
@@ -589,8 +589,8 @@
         "taken": 94
       },
       "main/logic/modbus_snapshot.hpp": {
-        "outcomes": 10,
-        "taken": 10
+        "outcomes": 12,
+        "taken": 12
       },
       "main/logic/mqtt_base.hpp": {
         "outcomes": 46,
@@ -657,8 +657,8 @@
         "taken": 23
       },
       "main/logic/payload_complete.hpp": {
-        "outcomes": 16,
-        "taken": 16
+        "outcomes": 40,
+        "taken": 40
       },
       "main/logic/profile_view.hpp": {
         "outcomes": 28,
@@ -895,8 +895,8 @@
         "taken": 6
       },
       "main/logic/http_body.hpp": {
-        "outcomes": 126,
-        "taken": 58
+        "outcomes": 192,
+        "taken": 91
       },
       "main/logic/http_cache.hpp": {
         "outcomes": 58,
@@ -955,8 +955,8 @@
         "taken": 94
       },
       "main/logic/modbus_snapshot.hpp": {
-        "outcomes": 10,
-        "taken": 10
+        "outcomes": 12,
+        "taken": 12
       },
       "main/logic/mqtt_base.hpp": {
         "outcomes": 46,
@@ -1023,8 +1023,8 @@
         "taken": 23
       },
       "main/logic/payload_complete.hpp": {
-        "outcomes": 16,
-        "taken": 16
+        "outcomes": 40,
+        "taken": 40
       },
       "main/logic/profile_view.hpp": {
         "outcomes": 28,
@@ -1261,8 +1261,8 @@
         "taken": 6
       },
       "main/logic/http_body.hpp": {
-        "outcomes": 126,
-        "taken": 58
+        "outcomes": 192,
+        "taken": 91
       },
       "main/logic/http_cache.hpp": {
         "outcomes": 58,
@@ -1321,8 +1321,8 @@
         "taken": 94
       },
       "main/logic/modbus_snapshot.hpp": {
-        "outcomes": 10,
-        "taken": 10
+        "outcomes": 12,
+        "taken": 12
       },
       "main/logic/mqtt_base.hpp": {
         "outcomes": 46,
@@ -1389,8 +1389,8 @@
         "taken": 23
       },
       "main/logic/payload_complete.hpp": {
-        "outcomes": 16,
-        "taken": 16
+        "outcomes": 40,
+        "taken": 40
       },
       "main/logic/profile_view.hpp": {
         "outcomes": 28,

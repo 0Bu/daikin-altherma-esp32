@@ -14,6 +14,9 @@
 #
 set -euo pipefail
 
+export NO_PROXY="*"
+export no_proxy="*"
+
 IP=""
 EXPECTED_VERSION=""
 EXPECTED_ELF_SHA=""
