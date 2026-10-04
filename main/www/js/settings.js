@@ -88,7 +88,7 @@ function fillRefTemp() {
   $("rtTarget").value = configured
     ? (Number.isFinite(r.fixed_setpoint_c)
       ? String(r.fixed_setpoint_c)
-      : formatRefSource(r.setpoint_topic || r.topic, r.setpoint_path)) : "";
+      : formatRefSource(r.setpoint_topic || r.topic, r.setpoint_path, true)) : "";
   $("rtTimestampSource").value = configured && (r.timestamp_topic || r.timestamp_path)
     ? formatRefSource(r.timestamp_topic || r.topic, r.timestamp_path) : "";
   $("rtMaxAge").value = configured && Number.isInteger(r.max_age_s) ? r.max_age_s : 600;
@@ -110,12 +110,12 @@ const validRefPath = (v) => v.length <= 128 && v.split(".").every((key) =>
   key.length > 0 && key.length <= 64 && !/[\s\x00-\x1f\x7f]/.test(key));
 const escapeRef = (s) => String(s || "").replace(/\\/g, "\\\\").replace(/\$/g, "\\$");
 const unescapeRef = (s) => String(s || "").replace(/\\([\\$])/g, "$1");
-const formatRefSource = (topic, path) =>
-  topic ? (path ? `${escapeRef(topic)}$${escapeRef(path)}` : escapeRef(topic)) : "";
+const formatRefSource = (topic, path, forcePath = false) =>
+  topic ? (path || forcePath ? `${escapeRef(topic)}$${escapeRef(path)}` : escapeRef(topic)) : "";
 // Split at the LAST unescaped dollar: MQTT reserves dollar-prefixed topics such as $SYS/..., and those must
 // remain configurable. Backslash escapes backslash and dollar to preserve dollar signs within topic or path.
 const parseRefSource = (value) => {
-  const text = String(value || "").trim();
+  const text = String(value || "");
   if (!text) return null;
   let split = text.lastIndexOf("$");
   if (text.includes("\\$") || text.includes("\\\\")) {
@@ -133,8 +133,8 @@ const parseRefSource = (value) => {
   const hasDelimiter = split > 0;
   const rawTopic = hasDelimiter ? text.slice(0, split) : text;
   const rawPath = hasDelimiter ? text.slice(split + 1) : "";
-  const topic = unescapeRef(rawTopic).trim();
-  const path = unescapeRef(rawPath).trim();
+  const topic = unescapeRef(rawTopic);
+  const path = unescapeRef(rawPath);
   return validRefTopic(topic) && path.length <= 128 ? { topic, path } : null;
 };
 const parseRefFixedTarget = (value) => {
@@ -596,6 +596,7 @@ async function applyLive(patch, okMsg) {
   try {
     const r = await post("/set_hp", patch);
     if (!r.ok) { const e = await r.json().catch(() => ({})); toast(e.error || t("toast.rejected"), "err"); return false; }
+    invalidateHistSources();
     if (okMsg) toast(okMsg, "ok");
     return true;
   } catch { toast(t("toast.unreachable"), "err"); return false; }
@@ -982,6 +983,7 @@ async function otaCacheRestore(otaStatus) {
   if (!valid) { otaCacheClear(); return false; }
 
   S.status = cached.status;
+  syncHistSources();
   S._values = cached.values;
   S._modbus = cached.modbus;
   S.otaCached = true;
@@ -1396,7 +1398,7 @@ function rebootPoll(then) {
     try { s = await j("/status", { signal: pollSignal(REBOOT_PROBE_TIMEOUT_MS) }); }
     catch { /* unreachable or mid-reboot: expected here, not a failure */ }
     if (s) {
-      S.status = s; S.busy = false;
+      S.status = s; syncHistSources(); S.busy = false;
       toast(t("toast.saved"), "ok");
       then();
       return;
@@ -1462,6 +1464,7 @@ async function saveReboot(url, body, { btn, showError, close, then, busyMsg, bus
     toast(t(res.saved ? "toast.saved" : "toast.no_changes"), res.saved ? "ok" : "info");
     return;
   }
+  invalidateHistSources();
   toast(t("toast.reboot"), "info");
   rebootPoll(then);   // stays busy until the device answers again (or the poll gives up)
 }

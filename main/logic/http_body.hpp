@@ -65,6 +65,7 @@ int http_body_read(
     while (got < total) {
         if (deadline_reached()) return -1;
         const BodyChunk c = recv(buf + got, total - got);
+        if (deadline_reached()) return -1;
         if (c.kind == BodyRecv::Timeout) {
             if (++idle > BODY_MAX_IDLE) return -1;
             if (++total_idle > BODY_MAX_TOTAL_IDLE) return -1;

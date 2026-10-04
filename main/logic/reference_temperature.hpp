@@ -24,6 +24,25 @@ inline constexpr uint16_t REF_ROOM_SETPOINT_MIN_TENTHS = 50;
 inline constexpr uint16_t REF_ROOM_SETPOINT_MAX_TENTHS = 350;
 inline constexpr const char* REF_ROOM_SOURCE_ID = "living_room";
 
+// Acceptance history belongs to the exact saved source binding, independently of whether the
+// latest visible sample was invalidated. A decoder rejection must not roll this high-water mark
+// back; changing the binding explicitly resets it.
+struct SourceTimestampHighWater {
+    bool    has_timestamp = false;
+    int64_t last_unix_s   = -1;
+
+    bool allows(int64_t candidate_unix_s) const {
+        return candidate_unix_s >= 0 && (!has_timestamp || candidate_unix_s >= last_unix_s);
+    }
+    bool accept(int64_t candidate_unix_s) {
+        if (!allows(candidate_unix_s)) return false;
+        has_timestamp = true;
+        last_unix_s   = candidate_unix_s;
+        return true;
+    }
+    void reset() { *this = SourceTimestampHighWater{}; }
+};
+
 // Exact topics only. Wildcards would let one small ESP32 subscription receive an unbounded set of
 // unrelated payloads and make "which sensor produced this value?" ambiguous.
 inline bool reference_topic_valid(std::string_view topic, const char** why = nullptr) {

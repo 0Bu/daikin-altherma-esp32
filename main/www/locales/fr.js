@@ -1,4 +1,4 @@
-// translation-source: 57b0fcb43db1c83f37043fc71c9fb312b807a1fb0c56d7a9781cef96f2b64ffb
+// translation-source: 1369786d303329f6e5230c06537e985a4c7735be65bcff1dc17670a9530129f9
 I18N.fr = localeValues([
   /* sys.nodata */ "Aucune donnée",
   /* sys.unreachable */ "Injoignable",
@@ -556,7 +556,7 @@ I18N.fr = localeValues([
   /* ref.target */ "Température cible",
   /* ref.timestamp_source */ "Source d’horodatage · facultative",
   /* ref.max_age */ "Ancienneté maximale · secondes",
-  /* ref.temperature_source_help */ "Sujet MQTT exact et chemin JSON facultatif après $. Les chemins absents ou incorrects sont signalés à la réception d’un message.",
+  /* ref.temperature_source_help */ "Sujet MQTT exact et chemin JSON facultatif après $. Les chemins absents ou incorrects sont signalés à la réception d’un message. Dans les sujets et chemins, écrivez $ littéral sous la forme \\$ et \\ littéral sous la forme \\\\.",
   /* ref.target_help */ "Une valeur fixe en °C, ou un sujet MQTT exact avec un chemin JSON facultatif après $.",
   /* ref.timestamp_source_help */ "Heure source RFC3339/Unix facultative sous la forme sujet$chemin. Si ce champ est vide, l’heure d’arrivée MQTT en direct est utilisée ; les valeurs conservées sont alors rejetées par sécurité.",
   /* ref.max_age_help */ "Ancienneté maximale autorisée du relevé source, de 10 à 3600 secondes.",
@@ -653,7 +653,7 @@ I18N.fr = localeValues([
   /* wx.detail.unavailable */ "La dernière récupération a échoué ; une valeur antérieure, si elle existe, est affichée uniquement pour le diagnostic.",
   /* wx.detail.waiting */ "Aucune prévision n’a encore été reçue.",
   /* wx.detail.temperature_label */ "Température :",
-  /* wx.detail.temperature */ (v) => `${v} °C est la température moyenne prévue de l’air extérieur pour les deux prochaines heures complètes.`,
+  /* wx.detail.temperature */ (v) => `${v} °C est la température moyenne prévue de l’air extérieur pour la période de deux heures choisie lors de la dernière récupération réussie.`,
   /* wx.detail.solar_label */ "Irradiation solaire :",
   /* wx.detail.solar */ (v) => `${v} Wh/m² est l’irradiation horizontale globale prévue sur la même période de deux heures.`,
   /* wx.detail.source_label */ "Source :",

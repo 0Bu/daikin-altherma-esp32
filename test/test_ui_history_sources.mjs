@@ -197,9 +197,11 @@ const context = {
   setTimeout, clearTimeout, Date, Map, Set, console,
 };
 vm.createContext(context);
-vm.runInContext(readAppFragments(["history.js"]) +
+const lifecycleSource = appState.slice(appState.indexOf("// ── History source lifecycle"),
+  appState.indexOf("// ── Navigation (dashboard ⇄ Settings)"));
+vm.runInContext(lifecycleSource + readAppFragments(["history.js"]) +
   "\nthis.__api = { hasHist, hasModbusHist, histCacheKey, historyView, histHtml, scrubText," +
-  " scrubMove, ensureHist, ensureHistPair, ensureDerived, DERIVED };", context,
+  " scrubMove, ensureHist, ensureHistPair, ensureDerived, DERIVED, syncHistSources, invalidateHistSources };", context,
   { filename: "main/www/js/history.js" });
 const h = context.__api;
 
@@ -776,5 +778,130 @@ assert.ok(fetchedUrls.includes("/history?row=smart_grid_mode&source=modbus"),
   "ensureHistPair(dhw_tank) must request smart_grid_mode");
 assert.ok(fetchedUrls.includes("/history?row=bsh_state&source=modbus"),
   "ensureHistPair(dhw_tank) must request modbus:bsh_state");
+
+// Lifecycle regression: changing away and back retires the cache even inside its one-minute TTL.
+// Every transition runs the same production synchronisation used when /status lands.
+S.status.profile = { id: "fixture-a" };
+S.status.hp = { proto: "I", rx: 1, tx: 2 };
+S.status.modbus = { host: "192.0.2.10", port: 502, unit_id: 1, enabled: true };
+S.status.uptime_s = 100;
+h.syncHistSources();
+fetchedUrls = [];
+historyResponse = { ...defaultHistoryResponse, v: [501] };
+await h.ensureHist("dhw_tank", "modbus");
+const homehubKey = h.histCacheKey("dhw_tank", "modbus");
+await h.ensureHist("dhw_tank", "modbus");
+assert.equal(fetchedUrls.length, 1, "unchanged source must retain the one-minute fetch limit");
+S.histPin.set("dhw_tank", { i: 0, gen: 1 });
+S.status.modbus.host = "192.0.2.11";
+h.syncHistSources();
+assert.equal(S.hist.size, 0);
+assert.equal(S.histPin.size, 0, "source changes must retire pins with the old measurement");
+S.status.modbus.host = "192.0.2.10";
+h.syncHistSources();
+historyResponse = { ...defaultHistoryResponse, v: [502] };
+await h.ensureHist("dhw_tank", "modbus");
+assert.deepEqual(Array.from(S.hist.get(homehubKey).v), [502],
+  "A → B → A must refetch instead of reusing the earlier A lifetime");
+for (const enabled of [false, true]) {
+  S.status.modbus.enabled = enabled;
+  h.syncHistSources();
+}
+assert.equal(S.hist.has(homehubKey), false, "disabled → A must retire the old A cache");
+
+// Row ids stay stable when the X10A instrument or circulation witness changes. Identity comes from
+// their actual status/configuration, never from a different label invented by the browser.
+S.hist.set("dhw_tank", x10a);
+S.status.hp.rx = 44;
+h.syncHistSources();
+assert.equal(S.hist.has("dhw_tank"), false, "repointing X10A pins must retire the old ring");
+S.hist.set("dhw_tank", x10a);
+S.status.profile.id = "fixture-b";
+h.syncHistSources();
+assert.equal(S.hist.has("dhw_tank"), false, "a new X10A profile must retire the old ring");
+S.status.circulation_source = { configured: true, topic: "fixture/pump-a", power_path: "power" };
+h.syncHistSources();
+S.hist.set("circulation_state", x10a);
+S.status.circulation_source.topic = "fixture/pump-b";
+h.syncHistSources();
+assert.equal(S.hist.has("circulation_state"), false,
+  "changing a circulation witness must retire history even though its row id is unchanged");
+S.hist.set("free_heap", x10a);
+S.histPin.set("free_heap", { i: 0, gen: 1 });
+S.status.uptime_s = 2;
+h.syncHistSources();
+assert.equal(S.hist.size, 0, "a reboot must retire all cached series before their monotonic epoch changes");
+assert.equal(S.histPin.size, 0);
+
+// Uptime alone cannot detect a reboot that returns after exceeding its last observed uptime.
+S.status.boot_id = "0000000000000001";
+h.syncHistSources();
+S.hist.set("free_heap", x10a);
+S.histPin.set("free_heap", { i: 0, gen: 1 });
+S.status.boot_id = "0000000000000002";
+S.status.uptime_s = 3;
+h.syncHistSources();
+assert.equal(S.hist.size, 0, "a new boot identity must retire history even with higher uptime");
+assert.equal(S.histPin.size, 0);
+
+// Another client can change A → B → A entirely between status polls. The firmware lifetime
+// token changes even if the final configuration and boot identity match the previous sample.
+S.status.history = { ...S.status.history, epoch: 7 };
+h.syncHistSources();
+S.hist.set(homehubKey, x10a);
+S.histPin.set("dhw_tank", { i: 0, gen: 1 });
+S.status.history.epoch = 9;
+h.syncHistSources();
+assert.equal(S.hist.size, 0, "an unobserved source ABA must retire the old firmware lifetime");
+assert.equal(S.histPin.size, 0);
+
+// Hold the transport while the source leaves and returns. Both success and failure of the retired
+// request must leave its successor's cache/lease alone, even though both use the same endpoint key.
+const pendingHistory = [];
+context.fetch = (url) => new Promise((resolve, reject) => pendingHistory.push({ url, resolve, reject }));
+const finishHistory = (pending, values) => pending.resolve({ json: async () => ({
+  ...defaultHistoryResponse, v: values,
+}) });
+for (const failOld of [false, true]) {
+  h.invalidateHistSources();
+  const old = h.ensureHist("dhw_tank", "modbus");
+  const oldTransport = pendingHistory.shift();
+  S.status.modbus.host = "192.0.2.11"; h.syncHistSources();
+  S.status.modbus.host = "192.0.2.10"; h.syncHistSources();
+  const current = h.ensureHist("dhw_tank", "modbus");
+  const newTransport = pendingHistory.shift();
+  if (failOld) oldTransport.reject(new Error("retired source error"));
+  else finishHistory(oldTransport, [601]);
+  await old;
+  assert.equal(S.hist.has(homehubKey), false, "late success/error must not reinsert the retired series");
+  assert.equal(S.histBusy.has(homehubKey), true,
+    "an old finally must not release the new request for the same cache key");
+  finishHistory(newTransport, [602]);
+  await current;
+  assert.deepEqual(Array.from(S.hist.get(homehubKey).v), [602]);
+  assert.equal(S.histBusy.has(homehubKey), false);
+}
+
+// A derived chart owns a lease too: awaiting its independent input fetches cannot revive an old
+// instrument lifetime after the source changed while those requests were outstanding.
+S.status.history.rows = [
+  { id: "leaving_water", label: "Leaving water temperature" },
+  { id: "return_water", label: "Return water temperature" },
+];
+h.invalidateHistSources();
+const oldDerived = h.ensureDerived("dt");
+const retiredInputs = pendingHistory.splice(0);
+assert.equal(retiredInputs.length, 2);
+S.status.profile.id = "fixture-c";
+h.syncHistSources();
+for (const input of retiredInputs) finishHistory(input, [400]);
+await oldDerived;
+assert.equal(S.hist.has("dt"), false, "late derived assembly must not revive a retired source");
+assert.equal(S.hist.size, 0, "late derived inputs must also stay retired");
+const currentDerived = h.ensureDerived("dt");
+for (const input of pendingHistory.splice(0))
+  finishHistory(input, input.url.includes("leaving_water") ? [410] : [390]);
+await currentDerived;
+assert.deepEqual(Array.from(S.hist.get("dt").v), [20], "the successor must derive only its own inputs");
 
 console.log("UI history sources: X10A and Modbus rings align, gap, render and fetch independently");

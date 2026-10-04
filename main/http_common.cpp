@@ -174,7 +174,7 @@ int http_read_body(httpd_req_t* req, char* buf, size_t max) {
             if (r <= 0) return {BodyRecv::Error, 0};
             return {BodyRecv::Data, static_cast<size_t>(r)};
         },
-        [deadline_us]() -> bool { return esp_timer_get_time() > deadline_us; });
+        [deadline_us]() -> bool { return esp_timer_get_time() >= deadline_us; });
 }
 
 } // namespace daik

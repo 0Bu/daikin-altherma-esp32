@@ -121,6 +121,10 @@ and the OTA-signing / key lifecycle.
   `/status.mqtt`) rather than falling back to plaintext. ESP-IDF documents approximately 99% public
   root coverage for this size-bounded subset; a broker chained only to a rarer excluded root is
   rejected. A credential-free broker may be plaintext on the trusted LAN.
+- **JSON ingress is bounded before recursive parsing.** Config, MQTT and Weather accept at most 16
+  container levels and one complete document; trailing non-whitespace, extra documents and raw NUL bytes
+  are rejected. HTTP request bodies also have a 30 s absolute acceptance budget checked before and
+  after every receive, including the last one; an active receive returns under its socket timeout.
 - **Syslog forwarding is cleartext, unauthenticated UDP** — opt-in and off by default (empty
   `syslog_host`). When enabled, every diag-log line (WiFi/MQTT/X10A state, timeouts, reset reasons)
   is sent as a plaintext RFC 5424 datagram to the configured host; there is no TLS option, unlike
@@ -631,19 +635,18 @@ performing its release round trip; it is neither a read-only preflight nor an ag
 
 ### Config crash-loop recovery (safe mode) — a distinct failure class
 
-The anti-brick model above protects the *firmware image*. It does **nothing** for a bad
-*configuration*: both OTA slots read the same `daik_cfg` NVS, so an image rollback keeps the
-offending setting (most plausibly wrong RX/TX pins, but any config that crashes a background task at
-start-up). Without a separate mechanism the only exit is `esptool erase_flash` over USB — the same
-cable-bound recovery the web-UI design exists to avoid.
+Image rollback retains the shared `daik_cfg` configuration. **Safe mode** (`safe_mode.cpp` over
+`logic/boot_guard.hpp`) handles faults in optional workers by suppressing ENV III, X10A, HomeHub,
+MQTT and Open-Meteo, while retaining network, HTTP and OTA recovery if mandatory startup succeeds.
+The guard runs after NVS initialization and the static write lock, before Netif, OTA or config load.
 
-**Safe mode** (`safe_mode.cpp` over the host-tested `logic/boot_guard.hpp`) is that mechanism. It
-counts **crash-only** boots (panic / interrupt-wdt / task-wdt / other-wdt / brownout — a clean or
-intentional config-save reboot resets the count, so provisioning never trips it) in the `boot_fails`
-NVS key; once `BOOT_FAIL_THRESHOLD` (4) accumulate, the device comes up **minimally** — WiFi + the
-web UI + the OTA health gate only, with the X10A poll engine and the MQTT bridge skipped. The user
-fixes the config in the browser and reboots; a healthy 30 s of uptime also clears the counter. This
-recovers a *config* crash-loop the image health gate cannot, and needs no USB cable.
+The `boot_fails` NVS key counts crash-only boots; four reach the latch. A non-crash reset clears the
+counter. The healthy 30 s timer runs only outside latched safe mode: uptime with workers suppressed
+does not establish that the original fault is fixed. Accumulation across boots needs writable NVS.
+NVS initialization never erases the partition automatically, including full or newer-version errors.
+Only a failed NVS initialization disables WiFi-driver NVS before STA/AP driver initialization;
+credentials use RAM storage on every boot. This removes that dependency but does not prove recovery
+from every NVS or mandatory-startup failure.
 
 Security note: safe mode **reduces** the running surface (it starts strictly fewer subsystems) and
 adds no new endpoint or privilege — the recovery controls are the same `/set_*` handlers already

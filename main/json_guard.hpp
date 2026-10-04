@@ -1,8 +1,18 @@
 #pragma once
 
 #include "cJSON.h"
+#include "logic/payload_complete.hpp"
 
 namespace daik {
+
+inline cJSON* json_parse_document(std::string_view payload) {
+    return json_parse_bounded(
+        payload,
+        [](const char* bytes, size_t length, const char** end) noexcept {
+            return cJSON_ParseWithLengthOpts(bytes, length, end, false);
+        },
+        [](cJSON* root) noexcept { cJSON_Delete(root); });
+}
 
 struct JsonGuard {
     explicit JsonGuard(cJSON* root = nullptr) : root(root) {}

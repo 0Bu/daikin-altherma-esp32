@@ -34,7 +34,7 @@ const group = code("main/logic/mqtt_group.hpp");
 
 // ── The per-second X10A cycle probes first, allocates once only when changed ────────────────────
 const publishStart = mqtt.indexOf("static bool publish_x10a_state(");
-const publishEnd = mqtt.indexOf("static void publish_modbus_state()", publishStart);
+const publishEnd = mqtt.indexOf("static bool publish_modbus_state(", publishStart);
 assert.ok(publishStart >= 0 && publishEnd > publishStart,
   "the X10A publish boundary must remain identifiable");
 const publish = mqtt.slice(publishStart, publishEnd);

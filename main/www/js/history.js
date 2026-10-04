@@ -189,6 +189,7 @@ const histCacheKey = (id, source) => {
   return source === "env3" ? `env3:${id}` : id;
 };
 async function ensureHist(id, source = "x10a", paint = true, signal = null) {
+  const epoch = syncHistSources();
   const key = histCacheKey(id, source);
   const offered = source === "modbus" ? hasModbusHist(id)
     : source === "env3" ? hasEnv3Hist(id) : hasHist(id);
@@ -197,6 +198,9 @@ async function ensureHist(id, source = "x10a", paint = true, signal = null) {
   if (c && Date.now() - c.at < 60000) return;
   if (source === "x10a" && DERIVED[id]) { await ensureDerived(id); return; }
   const previous = S.hist.get(key);
+  const sourceId = source === "modbus" ? (modbusEndpointId() || "modbus") : source;
+  const request = { epoch };
+  (S.histRequests ||= new Map()).set(key, request);
   S.histBusy.add(key);
   try {
     const suffix = source === "modbus" ? "&source=modbus"
@@ -204,6 +208,7 @@ async function ensureHist(id, source = "x10a", paint = true, signal = null) {
     const r = await fetch("/history?row=" + encodeURIComponent(id) + suffix,
                           signal ? { signal } : undefined);
     const j = await r.json();
+    if (syncHistSources() !== epoch || S.histRequests.get(key) !== request) return;
     // t0 = the unix instant of sample 0, present only when the device's SNTP clock is synced. Null
     // means the scrub readout falls back to an AGE ("vor 6.3 h") — never a fabricated wall-clock
     // time, the same rule logic/timestamp.hpp applies to an unsynced clock on the firmware side.
@@ -214,7 +219,6 @@ async function ensureHist(id, source = "x10a", paint = true, signal = null) {
     // A few legacy X10A rows carry their unit only in the catalog label. Normalise that at the
     // visual boundary too, otherwise the live row can say "22.8 L/min" while its own trend and
     // crosshair still say just "22.8". The API remains byte-for-byte compatible.
-    const sourceId = source === "modbus" ? (modbusEndpointId() || "modbus") : source;
     const device = { at: Date.now(), gen, source, sourceId, dt: +j.dt || 300, unit: displayUnit(j),
                      label: typeof j.label === "string" ? j.label : "",
                      t0: typeof j.t0 === "number" ? j.t0 : null,
@@ -223,11 +227,15 @@ async function ensureHist(id, source = "x10a", paint = true, signal = null) {
                      v: Array.isArray(j.v) ? j.v : [] };
     S.hist.set(key, device);
   } catch (e) {
-    const sourceId = source === "modbus" ? (modbusEndpointId() || "modbus") : source;
-    S.hist.set(key, { at: Date.now(), source, sourceId, err: true, v: [] });
+    if (syncHistSources() === epoch && S.histRequests.get(key) === request)
+      S.hist.set(key, { at: Date.now(), source, sourceId, err: true, v: [] });
   } finally {
-    S.histBusy.delete(key);
-    if (paint) renderApp();
+    // An obsolete request must not release a successor using the same cache key.
+    if (S.histRequests.get(key) === request) {
+      S.histRequests.delete(key);
+      S.histBusy.delete(key);
+      if (paint) renderApp();
+    }
   }
 }
 
@@ -260,13 +268,17 @@ async function ensureHistPair(id) {
 // than a guess; wall time is the next choice, and newest-tail alignment remains only for legacy
 // responses without either anchor.
 async function ensureDerived(id) {
+  const epoch = syncHistSources();
   const D = DERIVED[id];
   if (S.histBusy.has(id)) return;
+  const request = { epoch };
+  (S.histRequests ||= new Map()).set(id, request);
   S.histBusy.add(id);
   try {
     const has = Object.fromEntries(D.ins.map((k) => [k, hasDeviceHist(k)]));
     const use = D.ins.filter((k) => has[k]);
     await Promise.all(use.map((k) => ensureHist(k)));
+    if (syncHistSources() !== epoch || S.histRequests.get(id) !== request) return;
     const src = use.map((k) => [k, S.hist.get(k)]).filter(([, h]) => h && !h.err && h.v.length);
     if (!src.length) { S.hist.set(id, { at: Date.now(), err: true, v: [] }); return; }
     const dt = src[0][1].dt || 300;
@@ -322,9 +334,14 @@ async function ensureDerived(id) {
                      b0: Number.isInteger(b0) ? b0 : null,
                      held: heldRuns, v });
   } catch (e) {
-    S.hist.set(id, { at: Date.now(), err: true, v: [] });
+    if (syncHistSources() === epoch && S.histRequests.get(id) === request)
+      S.hist.set(id, { at: Date.now(), err: true, v: [] });
   } finally {
-    S.histBusy.delete(id); renderApp();
+    if (S.histRequests.get(id) === request) {
+      S.histRequests.delete(id);
+      S.histBusy.delete(id);
+      renderApp();
+    }
   }
 }
 

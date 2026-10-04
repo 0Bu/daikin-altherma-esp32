@@ -203,8 +203,7 @@ static bool                s_ref_rx_active = false;
 static std::atomic<uint32_t> s_ref_dropped{0};
 static uint32_t            s_ref_dropped_reported = 0;
 static ReferenceTemperatureStatus s_ref_status;
-static bool                         s_ref_has_accepted_source_time    = false; // guarded by s_mtx
-static int64_t                      s_ref_last_accepted_source_unix_s = -1;    // guarded by s_mtx
+static SourceTimestampHighWater     s_ref_source_time; // guarded by s_mtx; survives invalid samples
 static logic::HeatingCurveDiagnosis s_heating_curve_diagnosis;  // guarded by s_mtx
 inline constexpr size_t REF_VALUE_TOPIC_COUNT = 3;
 using ReferenceTopicSet = std::array<std::string, REF_VALUE_TOPIC_COUNT>;
@@ -266,6 +265,7 @@ static uint64_t    s_last_x10a_digest = 0;            // per-topic dedup guards 
 static std::string s_last_modbus_json;
 static uint32_t    s_last_x10a_cache_gen   = 0;
 static uint32_t    s_last_modbus_cache_gen = 0;
+static bool        s_last_modbus_live      = false;
 static std::string s_last_weather_json;
 static std::string s_last_env3_json;
 // Rate-limit the hard-cap diagnostic. The payload itself is no longer boot-long storage: dev.12's
@@ -937,14 +937,16 @@ static bool publish_x10a_state(const Config& config, bool force) {
     return true;
 }
 
-static void publish_modbus_state() {
+static bool publish_modbus_state(bool& published_live) {
     bool live = false;
     const std::vector<GroupedValue> values = current_modbus_values(live);
     const std::string js = live ? build_flat_json(values) : std::string("{}");
-    if (js != s_last_modbus_json &&
-        mqtt_publish(s_modbus, js.c_str(), static_cast<int>(js.size()), 0, 1)) {
+    if (js != s_last_modbus_json) {
+        if (!mqtt_publish(s_modbus, js.c_str(), static_cast<int>(js.size()), 0, 1)) return false;
         s_last_modbus_json = js;
     }
+    published_live = live;
+    return true;
 }
 
 struct RetainedCleanupCycle {
@@ -1658,9 +1660,12 @@ static bool reference_timestamp_moved_backward(const DecodedReferenceFrame& deco
                                                 const std::string& timestamp_path) {
     if (!decoded.has_source_time) return false;
     Lock lk(s_mtx);
-    return timestamp_topic == s_ref_binding_time_topic &&
-           timestamp_path == s_ref_binding_time_path && s_ref_has_accepted_source_time &&
-           decoded.source_unix_s < s_ref_last_accepted_source_unix_s;
+    const std::string& bound_time_topic =
+        s_ref_binding_time_topic.empty() && !s_ref_binding_time_path.empty()
+            ? s_ref_binding_topic
+            : s_ref_binding_time_topic;
+    return timestamp_topic == bound_time_topic && timestamp_path == s_ref_binding_time_path &&
+           !s_ref_source_time.allows(decoded.source_unix_s);
 }
 
 struct DecodedCirculationFrame {
@@ -1970,8 +1975,7 @@ static void service_reference_subscription(const Config& c) {
         s_ref_last_logged_error.clear();
         s_ref_last_error_log_ms = 0;
         Lock lk(s_mtx);
-        s_ref_has_accepted_source_time    = false;
-        s_ref_last_accepted_source_unix_s = -1;
+        s_ref_source_time.reset();
         s_ref_status.has_value = false;
         s_ref_status.has_source_time = false;
         s_ref_status.has_setpoint = c.ref_temp_fixed_setpoint_tenths != 0;
@@ -2240,8 +2244,7 @@ static void service_reference_frames(const Config& c) {
                 s_ref_status.has_source_time = true;
                 s_ref_status.source_unix_s = decoded.source_unix_s;
                 s_ref_status.timestamp_source = decoded.timestamp_source;
-                s_ref_has_accepted_source_time    = true;
-                s_ref_last_accepted_source_unix_s = decoded.source_unix_s;
+                (void)s_ref_source_time.accept(decoded.source_unix_s);
             }
             s_ref_status.rejection_reason = ReferenceRoomReason::Eligible;
             s_ref_status.eligibility_error = decoded.control_error ? decoded.control_error : "";
@@ -2661,9 +2664,11 @@ static void mqtt_task(void*) {
                         // cycle.
                         s_modbus_disabled_cleaned = false;
                         const uint32_t mb_gen     = mb_cache_generation();
-                        if (mb_gen != s_last_modbus_cache_gen || s_last_modbus_json.empty()) {
-                            publish_modbus_state();
-                            s_last_modbus_cache_gen = mb_gen;
+                        if (mqtt_source_state_needs_publish(mb_gen, s_last_modbus_cache_gen,
+                                                            mb_values_live(), s_last_modbus_live,
+                                                            !s_last_modbus_json.empty())) {
+                            if (publish_modbus_state(s_last_modbus_live))
+                                s_last_modbus_cache_gen = mb_gen;
                         }
                     } else if (modbus_action == RetainedSourceAction::DeleteRetained) {
                         // Covers a live POST /set_hp disable. Discovery and the duplicate status
@@ -2779,7 +2784,7 @@ static bool build_client(bool publisher_lwt) {
 
     // Credentials must never travel in cleartext (docs/SECURITY.md) — require mqtts, no fallback.
     if (has_creds && !is_tls) {
-        set_status(false, "credentials require mqtts:// (won't send them in cleartext)");
+        set_status(false, "credentials require mqtts:// or wss:// (won't send them in cleartext)");
         diag_printf("mqtt: refusing plaintext broker with credentials — use mqtts://\n");
         return false;
     }

@@ -102,14 +102,17 @@ ModbusStatus mb_status();
 // logic/homehub_map.hpp pairs on.
 //
 // `live` reports whether the LINK was still up once the copy had been taken AND whether the cache
-// was committed by that same TCP session. Rows come from its latest full cycle, at most
-// logic::MB_FULL_CYCLE_TICKS - 1 poll intervals old while the link remains live. A caller that
-// publishes them must honour `live`: false means the rows may predate a disconnect/reconnect and the
-// snapshot must not be served. It is an
-// out-param rather than a separate mb_status() call because that separate call is exactly the race
-// — the cache and link state are behind two mutexes, so only the accessor can tie them into one
-// generation-checked answer.
+// was committed by that same TCP session. Rows come from its latest full cycle; the age bound
+// includes the full/fast request budgets as well as the poll delays. A separate reply-age bound
+// expires a stalled worker even when no cache revision changes. A caller that
+// publishes them must honour `live`: false means the rows may predate a disconnect/reconnect and
+// the snapshot must not be served. It is an out-param rather than a separate mb_status() call
+// because that separate call is exactly the race — the cache and link state are behind two mutexes,
+// so only the accessor can tie them into one generation-checked answer.
 size_t mb_values_snapshot(CachedValue* out, size_t max, bool& live);
+
+// Allocation-free check of the exact snapshot liveness rule, for periodic expiry publication.
+bool mb_values_live();
 
 // The cache's upper bound (def::ALTHERMA4_REG_COUNT) — callers size their snapshot buffer from
 // this.

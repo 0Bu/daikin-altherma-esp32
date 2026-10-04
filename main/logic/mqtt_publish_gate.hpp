@@ -45,9 +45,22 @@ inline constexpr RetainedSourceAction retained_source_action(bool target_enabled
 // longer continuous evidence (logic/checkup.hpp).
 inline constexpr int32_t MQTT_X10A_OFFLINE_GRACE_S = 15;
 
+inline constexpr bool x10a_source_is_recent(int32_t last_ok_s) {
+    return last_ok_s >= 0 && last_ok_s < MQTT_X10A_OFFLINE_GRACE_S;
+}
+
 inline constexpr bool mqtt_x10a_available(bool x10a_connected, int32_t last_ok_s) {
-    if (last_ok_s >= MQTT_X10A_OFFLINE_GRACE_S) return false;
-    return x10a_connected || last_ok_s >= 0;
+    (void)x10a_connected; // current-cycle loss is debounced solely by the last real observation
+    return x10a_source_is_recent(last_ok_s);
+}
+
+// Cache expiry changes the wire state even when the worker committed no new revision. Retrying a
+// failed publication must also leave the previous revision/liveness marker in place.
+inline constexpr bool mqtt_source_state_needs_publish(uint32_t revision,
+                                                      uint32_t published_revision, bool live,
+                                                      bool published_live,
+                                                      bool have_published_payload) {
+    return !have_published_payload || revision != published_revision || live != published_live;
 }
 
 struct MqttPublishGateDecision {

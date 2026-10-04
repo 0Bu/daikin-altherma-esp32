@@ -59,6 +59,27 @@ warn() {
     echo "[verify-device-health] WARNING: $*" >&2
 }
 
+# Keep the transport result separate from the HTTP code: curl can fail after receiving a 200.
+read_response() {
+    response_body=""
+    response_code=""
+    response_error=""
+    local raw_response curl_exit
+    if raw_response=$(curl -sS --max-time 3 -w "\n%{http_code}" "$1" 2>/dev/null); then
+        response_code=$(printf '%s' "$raw_response" | tail -n 1)
+        response_body=$(printf '%s' "$raw_response" | sed '$d')
+    else
+        curl_exit=$?
+        response_error="curl failed (exit $curl_exit)"
+        return 1
+    fi
+    if [ "$response_code" != "200" ]; then
+        response_error="HTTP $response_code (expected 200)"
+        return 1
+    fi
+    return 0
+}
+
 start_time=$(date +%s)
 deadline=$((start_time + TIMEOUT))
 
@@ -68,11 +89,8 @@ status_json=""
 reachable=0
 
 while [ "$(date +%s)" -le "$deadline" ]; do
-    raw_res=$(curl -sS --max-time 3 -w "\n%{http_code}" "http://$IP/status" 2>/dev/null || true)
-    http_code=$(printf '%s' "$raw_res" | tail -n 1)
-    raw_status=$(printf '%s' "$raw_res" | sed '$d')
-    if [ "$http_code" = "200" ] && [ -n "$raw_status" ] && printf '%s' "$raw_status" | jq -e '.version' >/dev/null 2>&1; then
-        status_json="$raw_status"
+    if read_response "http://$IP/status" && [ -n "$response_body" ] && printf '%s' "$response_body" | jq -e '.version' >/dev/null 2>&1; then
+        status_json="$response_body"
         reachable=1
         if printf '%s' "$status_json" | jq -e '.mqtt.configured == true and .mqtt.connected == false' >/dev/null 2>&1; then
             if [ "$(date +%s)" -lt "$deadline" ]; then
@@ -154,10 +172,13 @@ fi
 if ! printf '%s' "$status_json" | jq -e 'has("mqtt") and (.mqtt | type == "object")' >/dev/null 2>&1; then
     err "Mandatory object 'mqtt' missing from status"
     failures=$((failures + 1))
+elif ! printf '%s' "$status_json" | jq -e '.mqtt.configured | type == "boolean"' >/dev/null 2>&1; then
+    err "Mandatory field 'mqtt.configured' missing or not a boolean"
+    failures=$((failures + 1))
 else
-    mqtt_configured=$(printf '%s' "$status_json" | jq -r '.mqtt.configured // false')
+    mqtt_configured=$(printf '%s' "$status_json" | jq -r '.mqtt.configured')
     if [ "$mqtt_configured" = "true" ]; then
-        if ! printf '%s' "$status_json" | jq -e '.mqtt.connected == true' >/dev/null 2>&1; then
+        if ! printf '%s' "$status_json" | jq -e '(.mqtt.connected | type == "boolean") and .mqtt.connected == true' >/dev/null 2>&1; then
             err "MQTT broker not connected (.mqtt.connected != true)"
             failures=$((failures + 1))
         else
@@ -216,14 +237,14 @@ else
     fi
 
     free_heap=""
-    if ! printf '%s' "$status_json" | jq -e '.sys.free_heap | type == "number" and . > 0' >/dev/null 2>&1; then
+    if ! printf '%s' "$status_json" | jq -e '.sys.free_heap | type == "number" and . > 0 and floor == . and . <= 4294967295' >/dev/null 2>&1; then
         err "Mandatory field 'sys.free_heap' missing or not a positive number"
         failures=$((failures + 1))
     else
         free_heap=$(printf '%s' "$status_json" | jq -r '.sys.free_heap')
     fi
 
-    if ! printf '%s' "$status_json" | jq -e '.sys.max_alloc | type == "number"' >/dev/null 2>&1; then
+    if ! printf '%s' "$status_json" | jq -e '.sys.max_alloc | type == "number" and . >= 0 and floor == . and . <= 4294967295' >/dev/null 2>&1; then
         err "Mandatory field 'sys.max_alloc' missing or not a number"
         failures=$((failures + 1))
     else
@@ -242,24 +263,31 @@ hp_connected=$(printf '%s' "$status_json" | jq -r '.hp.connected // false')
 hp_last_ok=$(printf '%s' "$status_json" | jq -r '.hp.last_ok_s // empty')
 
 if [ "$REQUIRE_HP" -eq 1 ]; then
-    if [ "$hp_connected" != "true" ]; then
+    if ! printf '%s' "$status_json" | jq -e '(.hp.connected | type == "boolean") and .hp.connected == true' >/dev/null 2>&1; then
         err "X10A Heat pump communication not connected (.hp.connected: false)"
+        failures=$((failures + 1))
+    elif ! printf '%s' "$status_json" | jq -e '.hp.last_ok_s | type == "number" and . >= 0 and . < 15 and floor == . and . <= 4294967295' >/dev/null 2>&1; then
+        err "X10A last successful response missing, invalid, or stale (last_ok_s must be 0..14)"
         failures=$((failures + 1))
     else
         log "✓ X10A bus: connected (last_ok_s: ${hp_last_ok:-0}s)"
         # Check /values endpoint
-        raw_val_res=$(curl -sS --max-time 3 -w "\n%{http_code}" "http://$IP/values" 2>/dev/null || true)
-        val_http_code=$(printf '%s' "$raw_val_res" | tail -n 1)
-        raw_values=$(printf '%s' "$raw_val_res" | sed '$d')
-        if [ "$val_http_code" != "200" ]; then
-            err "/values returned HTTP $val_http_code (expected 200)"
+        if ! read_response "http://$IP/values"; then
+            err "/values request failed: $response_error"
             failures=$((failures + 1))
-        elif ! printf '%s' "$raw_values" | jq -e 'type == "array"' >/dev/null 2>&1; then
-            err "/values is not a JSON array"
+        elif ! printf '%s' "$response_body" | jq -e '
+            type == "object" and (.values | type == "array") and
+            all(.values[];
+                type == "object" and has("value") and
+                (.label | type == "string") and (.unit | type == "string") and
+                (.reg | type == "number" and . >= 0 and . <= 255 and floor == .) and
+                (.value == null or (.value | type == "string")) and
+                ((has("held") | not) or (.held | type == "boolean")))' >/dev/null 2>&1; then
+            err "/values has an invalid X10A values envelope or metric type"
             failures=$((failures + 1))
         else
-            values_count=$(printf '%s' "$raw_values" | jq -r 'length' 2>/dev/null || echo 0)
-            usable_count=$(printf '%s' "$raw_values" | jq -r '[.[] | select(.value != null and (.value | tostring | length > 0))] | length' 2>/dev/null || echo 0)
+            values_count=$(printf '%s' "$response_body" | jq -r '.values | length')
+            usable_count=$(printf '%s' "$response_body" | jq -r '[.values[] | select(.value != null and (.value | test("\\S")) and .held != true)] | length')
             if [ "$values_count" -le 0 ]; then
                 err "/values returned an empty array"
                 failures=$((failures + 1))

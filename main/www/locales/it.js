@@ -1,4 +1,4 @@
-// translation-source: 57b0fcb43db1c83f37043fc71c9fb312b807a1fb0c56d7a9781cef96f2b64ffb
+// translation-source: 1369786d303329f6e5230c06537e985a4c7735be65bcff1dc17670a9530129f9
 I18N.it = localeValues([
   /* sys.nodata */ "Nessun dato",
   /* sys.unreachable */ "Non raggiungibile",
@@ -556,7 +556,7 @@ I18N.it = localeValues([
   /* ref.target */ "Temperatura obiettivo",
   /* ref.timestamp_source */ "Sorgente data/ora · facoltativa",
   /* ref.max_age */ "Età massima · secondi",
-  /* ref.temperature_source_help */ "Topic MQTT esatto e percorso JSON facoltativo dopo $. Percorsi mancanti o errati vengono segnalati alla ricezione di un payload.",
+  /* ref.temperature_source_help */ "Topic MQTT esatto e percorso JSON facoltativo dopo $. Percorsi mancanti o errati vengono segnalati alla ricezione di un payload. Nei topic e nei percorsi, scrivere $ letterale come \\$ e \\ letterale come \\\\.",
   /* ref.target_help */ "Un valore fisso in °C oppure un topic MQTT esatto con percorso JSON facoltativo dopo $.",
   /* ref.timestamp_source_help */ "Ora sorgente RFC3339/Unix facoltativa nel formato topic$path. Se vuoto, usa l'ora di arrivo MQTT in tempo reale; i valori retained vengono quindi rifiutati in sicurezza.",
   /* ref.max_age_help */ "Età massima consentita della lettura sorgente, da 10 a 3600 secondi.",
@@ -653,7 +653,7 @@ I18N.it = localeValues([
   /* wx.detail.unavailable */ "L'ultima acquisizione non è riuscita; un valore precedente, se presente, viene mostrato solo a scopo diagnostico.",
   /* wx.detail.waiting */ "Non è stata ancora ricevuta alcuna previsione.",
   /* wx.detail.temperature_label */ "Temperatura:",
-  /* wx.detail.temperature */ (v) => `${v} °C è la temperatura media prevista dell'aria esterna per le prossime due ore complete.`,
+  /* wx.detail.temperature */ (v) => `${v} °C è la temperatura media prevista dell’aria esterna per il periodo di due ore selezionato nell’ultimo recupero riuscito.`,
   /* wx.detail.solar_label */ "Irraggiamento solare:",
   /* wx.detail.solar */ (v) => `${v} Wh/m² è l'irraggiamento globale orizzontale previsto nello stesso periodo di due ore.`,
   /* wx.detail.source_label */ "Sorgente:",

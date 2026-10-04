@@ -4,7 +4,7 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import vm from "node:vm";
-import { readAppFragments, readUiLocale } from "../tools/ui/read_app_source.mjs";
+import { readAppFragments, readHistoryLifecycle, readUiLocale } from "../tools/ui/read_app_source.mjs";
 
 const html = fs.readFileSync(new URL("../main/www/index.html", import.meta.url), "utf8");
 const style = fs.readFileSync(new URL("../main/www/style.css", import.meta.url), "utf8");
@@ -137,7 +137,7 @@ const renderSandbox = vm.createContext({
   setTimeout,
   clearTimeout,
 });
-vm.runInContext(`${readAppFragments(["i18n.js"])}${readUiLocale("de")}${readAppFragments(["dashboard.js", "history.js"])}
+vm.runInContext(`${readAppFragments(["i18n.js"])}${readUiLocale("de")}${readHistoryLifecycle()}${readAppFragments(["dashboard.js", "history.js"])}
   this.__renderBoard = (lang) => { LANG = lang; return boardRow(); };
   this.__env3Tooltip = (lang, i) => { LANG = lang; return scrubText(historyView(ENV3_COMBINED_ID), i); };
   this.__toggleDesc = toggleDesc;`, renderSandbox,

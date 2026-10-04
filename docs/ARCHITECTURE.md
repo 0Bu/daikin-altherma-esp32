@@ -20,7 +20,7 @@ idioms are used throughout (`esp_http_server`, `uart_driver`, `esp-mqtt`).
 ## Component map
 
 ```
-main.cpp            → boot: NVS init, safe-mode guard, WiFi (STA or setup AP), start SNTP, start HTTP
+main.cpp            → boot: NVS init, static write lock + early safe-mode guard, WiFi (STA or setup AP), start SNTP, start HTTP
                        server, start poll engine + MQTT bridge (both SKIPPED in safe mode), arm OTA
                        health gate
 safe_mode.cpp/.hpp  → boot-loop safe mode (logic/boot_guard.hpp): crash-only boot counter in NVS
@@ -69,7 +69,8 @@ hp_detect.cpp/.hpp  → auto-detect glue: protocol sweep + page probe → bus fi
 hp_convert.cpp/.hpp → converter functions: raw bytes →
                        typed reading (temp, int, fixed-point, enum/label, on/off, pressure)
 hp_poll.cpp/.hpp    → poll engine task: builds the active register set from the profile,
-                       polls each interval, fills the thread-safe value cache, drives errors. It
+                       polls each interval, fills the thread-safe value cache, drives errors;
+                       live X10A use independently requires a reply less than 15 s old. It
                        PUBLISHES nothing to the browser — that was the /events broadcaster, and
                        removing it took the /status builder off this task with it (legacy-241)
 env3.cpp/.hpp       → OPTIONAL local climate sensor (the M5Stack ENV III: SHT30 + QMP6988 on one I2C
@@ -86,7 +87,8 @@ weather_forecast.cpp/.hpp
                       requests six hourly DWD ICON Seamless values over CA-verified HTTPS every
                       45 minutes (5-minute retry). The
                       bounded JSON response supplies temperature_2m and shortwave_radiation; the
-                      next two complete hours become a mean °C value and summed Wh/m². /status keeps
+                      two-hour window selected at the last successful fetch becomes a mean °C value
+                      and summed Wh/m²; it does not roll forward between fetches. /status keeps
                       fetch/decision provenance and freshness explicit; the provider does not expose
                       model-run issue time, so it remains null. If MQTT is configured, the single
                       publisher task mirrors an atomic retained evidence snapshot (without precise
@@ -174,7 +176,8 @@ config.cpp/.hpp     → runtime config (daik_cfg): WiFi/MQTT + the one-shot WiFi
                       `mqtt_uri`, `mqtt_user`, `mqtt_pass`, `syslog_host`, `syslog_port`,
                       `ntp_server`, `board_set`, `rx_pin`, `tx_pin`, and `proto`.
 nvs_storage.cpp     → thin NVS helpers (namespaces, blobs, migration); setters return esp_err_t and
-                       are [[nodiscard]] — a dropped write is silent (compare to ESP_OK, not bool)
+                       are [[nodiscard]]; a static mutex serializes writes and factory reset.
+                       nvs_storage_available() records initialization success, not write health
 http_server.cpp     → esp_http_server :80, wildcard dispatch; concerns register their own routes.
                       Picks the trust surface from the observed provisioning-AP state: the OPEN
                       setup AP registers ONLY the provisioning routes (GET / , /index.html, POST
@@ -252,8 +255,12 @@ hp_modbus.cpp/.hpp  → THE HOMEHUB MODBUS STACK — a SECOND, INDEPENDENT sourc
                       homehub-* from up to 64 _http._tcp responders per bounded attempt. The lwIP
                       client wraps logic/modbus.hpp framing; the response borrows a caller-owned ADU
                       so its payload cannot outlive the received bytes. logic/modbus_plan.hpp turns
-                      32 rows into ten contiguous batches: full map every 5 s, the two diagnosis-gate
-                      batches (input 53 + 38) at 1 Hz. Gate-only success cannot clear a map-wide error;
+                      32 rows into ten contiguous batches: full map every fifth poll tick, the two
+                      diagnosis gates and outdoor context on intervening ticks. Cache publication
+                      requires matching session/target generations, a full-cache age at most 546 s
+                      and an independently recent reply (at most 7 s). These project transport bounds
+                      include exception fallback and do not make every row a same-sweep observation.
+                      Gate-only success cannot clear a map-wide error;
                       only a clean full cycle proves recovery. READ-ONLY: no write function code is
                       issued anywhere, and no source file can build one (docs/MODBUS_PROTOCOL.md)
 def/homehub.hpp     → the HomeHub register map (input + holding), the Modbus counterpart of the X10A
@@ -907,9 +914,10 @@ host-testable core is unusually large and valuable, because the risky parts are 
   localized legend for every shipped locale. The whole table is 72 × 16 B = **1152 B** in `.noinit`; the current worst
   profile uses 63 slots, leaving nine spare. It is adopted across a
   power-preserving reset under the same seal, verdict vocabulary and union-storage rule as the trends
-  and the checkup.
+  and the checkup. Persistence version 2 rejects older dwell records: their fold could count known
+  skipped intervals as observed, and that claim cannot be repaired at adoption.
 
-  Three properties carry the honesty, and all three are published separately on `/values` rather than
+  Four properties carry the honesty; the three age facts are published separately on `/values` rather than
   folded into one number — a consumer that prints the number and drops the rest states something
   stronger than the device knows:
 
@@ -922,10 +930,10 @@ host-testable core is unusually large and valuable, because the risky parts are 
      gap happened somewhere inside it, and publishing an exact "for 0 s" about an instant nobody
      observed is the precision this feature exists to refuse.
   2. **Blind time is not unchanged time.** `poll_once` replaces the whole cache each cycle, so a page
-     that did not answer removes its rows outright — 47 timeouts in 8.2 h on the reference
-     installation. A flag can pulse and return inside such a gap, so the seconds are booked as
-     `dwell_blind_s` and travel with the run. Past `DWELL_MAX_GAP_S` (120 s, `CHECKUP_MAX_GAP_S`'s
-     number rather than a third opinion about how long the bus may be quiet) the slot reports
+     that did not answer removes its rows outright. Explicit OTA, Weather and OOM skips also fold an
+     unread observation, even when quantized elapsed time is zero. A flag can pulse and return during
+     a gap, so a continuing run's seconds, including the tail through its first resumed observation,
+     are booked as `dwell_blind_s`. Past `DWELL_MAX_GAP_S` (120 s, separate from the checkup's 15 s observation bound) the slot reports
      **nothing at all**, so a silent bus expires its ages instead of freezing them.
   3. **A reboot is not a change.** Adoption books `DWELL_REBOOT_BLIND_S` against every live run
      rather than pretending the downtime was watched; the device cannot time its own outage, and a
@@ -938,17 +946,11 @@ host-testable core is unusually large and valuable, because the risky parts are 
      refuse it: the firmware for the row it published as null, the browser for the rows it blanks on
      its own account (a dead bus, a held-over page).
 
-  Whole seconds are derived by quantising **absolute** monotonic instants, never by flooring each
-  interval — `checkup_step()`'s rule, and this file shipped the defect that comment warns about. The
-  poll loop sleeps a whole second *after* a serial sweep, so the real cadence is ~1.2–1.3 s; flooring
-  each interval discards that fraction every cycle and never recovers it (measured: 23% slow forever,
-  so a three-hour state would publish as "2 h 19 min"). Quantising the instants telescopes the
-  remainder into the next cycle and bounds the whole run's error under one second. That rule travels
-  with its **other half**: `checkup_step()` gates the whole computation on the elapsed time and
-  discards the previous state past `CHECKUP_MAX_GAP_S`, and taking only the quantisation would leave
-  the bound enforced solely for rows that went *missing*. A row present at both ends of a stall — the
-  poll task starved through an OTA install, a cycle dropped by `poll_task`'s `bad_alloc` guard — was
-  equally unwatched in between, so the bound applies to the **clock**, not only to the rows.
+  Whole seconds come from quantized **absolute** monotonic instants, retaining fractional intervals
+  across folds. Successful observations within the active profile's supported sweep cadence count
+  as observed. An interval beyond that cadence is first folded as unread, then the current sample
+  establishes the state at its end. Explicit skip calls always break continuity; a changed state
+  after a gap starts as a lower bound. No transport pause is proof that a state stayed unchanged.
 
   It publishes **no Home Assistant entities**: HA carries `last_changed` per entity for free, and
   thirty-four seconds-since-change sensors would be thirty-four permanently-writing recorder rows —
@@ -1139,6 +1141,9 @@ host-testable core is unusually large and valuable, because the risky parts are 
 - `logic/modbus_plan.hpp` — compile-time HomeHub request batching and two-cadence policy. It proves
   every row is covered once, both diagnosis gates and the named outdoor context remain on the 1 Hz path, and a clean fast-only
   cycle cannot falsely clear an error belonging to a row it did not sample.
+- `logic/payload_complete.hpp` — incoming config, MQTT and Weather JSON is limited to 16 nested
+  containers before recursive cJSON parse/delete. A parsed prefix is accepted only when the
+  remaining bytes are JSON whitespace; another document, garbage or a NUL suffix is rejected.
 - `logic/http_body.hpp` — request-body reassembly for `http_read_body`. A POST body is a TCP stream:
   `httpd_req_recv` returns what has arrived, and the IDF's own docs note a large body "may" take
   several calls. Reading once and calling it the whole body truncated any body split across segments,
@@ -1149,7 +1154,8 @@ host-testable core is unusually large and valuable, because the risky parts are 
   is genuinely IDF's — mapping `httpd_req_recv`'s return codes onto the three cases. A timeout is
   retried, but a **bounded** number of times: unbounded patience would let one client that announces a
   Content-Length and goes quiet park the single httpd task, taking the web UI and the OTA route out of
-  a bad config with it.
+  a bad config with it. A monotonic 30-second acceptance budget is checked before and after each
+  receive, including the final byte. An in-progress receive still returns under its socket timeout.
 - `logic/http_surface.hpp` — the HTTP trust-surface boundary (F01). `http_surface_serves(surface,
   path, is_post)` says which routes each surface exposes: on the trusted configured LAN (WiFi or
   Ethernet), everything; on the
@@ -1855,6 +1861,12 @@ The Home Assistant bridge:
   `POST /set_circulation`; its threshold state is derived from mapped watts, never relay `output`.
   Neither link can write: X10A has no write command by protocol, and no source file can
   build or issue a Modbus write frame for the HomeHub (see [MODBUS_PROTOCOL.md](MODBUS_PROTOCOL.md)).
+  The room-source UI combines topic and path as `topic$path`; literal `$` and backslash use `\$`
+  and `\\`. Each combined input allows 641 escaped characters while the decoded limits remain
+  192 topic bytes and 128 path bytes. Mapping whitespace is preserved and an absent timestamp stays
+  empty on save; an unchanged mapping also retains its existing advanced eligibility gates.
+  A source-based target always displays a delimiter (for example `20$`) so a numeric topic cannot
+  be mistaken for a fixed temperature.
 - **One HA installation device.** Its id is the slugified MQTT base topic
   (`daikin-altherma-esp32` → `daikin_altherma_esp32`, `logic/ha_device.hpp`), which is a **runtime**
   setting (`POST /set_mqtt` field `base`, `logic/mqtt_base.hpp`) precisely because it names the
@@ -2027,8 +2039,8 @@ The Home Assistant bridge:
   and HA renders them correctly with history.
 - **Binary values are `binary_sensor`s carrying 1/0.** A bit-flag row (converter family 300-307 —
   `conv_is_binary` in `logic/convert.hpp`) decodes directly to numeric `1`/`0`. The poll cache,
-  `/values`, web UI, history and MQTT therefore all share that representation; no value
-  surface emits the text `"ON"`/`"OFF"`. MQTT serializes it as a JSON **number** and discovery types
+  `/values`, web UI, history and MQTT share those 0/1 semantics. The X10A `/values` array carries
+  strings or null, including `"0"`/`"1"`; MQTT serializes flags as JSON **numbers** and discovery types
   the row as an HA `binary_sensor`
   (`ha_component`, `logic/discovery.hpp`) whose config spells out `"pl_on":"1"` / `"pl_off":"0"` —
   HA's defaults are `"ON"`/`"OFF"`, and a mismatch leaves the entity silently at `unknown`.
@@ -2207,10 +2219,10 @@ The Home Assistant bridge:
   cadence, but has no Home Assistant Discovery entities. The former flat heartbeat `room_*` and
   `heating_curve_*` keys are removed rather than duplicated; because heartbeat is not retained, no
   broker tombstone is needed. Direct consumers must move to the grouped paths.
-- **TLS default-on with credentials** (mqtts, CA-verified via ESP-IDF's common-root mbedTLS bundle).
+- **TLS default-on with credentials** (mqtts or wss, CA-verified via ESP-IDF's common-root mbedTLS bundle).
   ESP-IDF documents approximately 99% public-root coverage for this flash-bounded subset; a broker
   chained only to a rarer excluded root is rejected. If credentials are set but the URI is not
-  `mqtts://`, the bridge **refuses to connect** and reports the reason in `/status.mqtt` rather than
+  `mqtts://` or `wss://`, the bridge **refuses to connect** and reports the reason in `/status.mqtt` rather than
   sending them in cleartext — no silent plaintext fallback. A credential-free plaintext broker on
   the trusted LAN is allowed (nothing secret to leak).
 - **Task-Watchdog-subscribed.** The `mqtt_pub` publish task subscribes to the Task Watchdog and
@@ -2793,11 +2805,9 @@ Structure:
 
 ## Boot-loop safe mode (config recovery)
 
-The OTA rollback health gate recovers a bad *firmware image*. It does **not** help a bad *config* —
-both OTA slots read the same `daik_cfg` NVS, so rolling the image back keeps the offending setting
-(most plausibly wrong RX/TX pins, or anything that crashes a background task at start-up). Left
-alone, that is a reboot loop whose only exit is `esptool erase_flash` over USB — which breaks the
-"recover everything from the web UI" promise. Safe mode closes that gap:
+The OTA rollback health gate recovers a bad *firmware image*. Both OTA slots read the same
+`daik_cfg` NVS, so rollback retains a bad configuration. Safe mode can expose browser recovery for
+faults in skipped optional workers; it cannot repair failures in mandatory startup or persistence:
 
 - **Decision logic** is the pure, host-tested `logic/boot_guard.hpp`: `boot_reset_was_crash()`
   classifies a reset as a crash **only** for panic / interrupt-wdt / task-wdt / other-wdt / brownout
@@ -2805,14 +2815,19 @@ alone, that is a reboot loop whose only exit is `esptool erase_flash` over USB �
   can't fix does not count); `boot_next_fail_count()` is a saturating increment that treats a
   corrupt/first-run read as 0; `boot_should_enter_safe_mode()` is the threshold rule
   (`BOOT_FAIL_THRESHOLD`, default 4).
-- **Device glue** is `safe_mode.cpp`, called from `app_main` right after `config_load` and **before**
-  any risky subsystem. On a crash reset it increments the `boot_fails` counter in `daik_cfg` and
+- **Device glue** is `safe_mode.cpp`, called after NVS initialization and creation of the static
+  write mutex, **before** ESP-NETIF, OTA, configuration loading or board hardware starts. On a crash
+  reset it increments the `boot_fails` counter in `daik_cfg` and
   **commits it before** the poll engine / MQTT start (so the bump survives another crash), latching
   safe mode at the threshold. A clean or intentional reboot (power-on, a config-save restart, OTA)
   **resets the counter to 0** — this is the key correctness point, because provisioning is a rapid
-  burst of config-save reboots that must never be mistaken for a crash-loop. A one-shot timer clears
-  the counter after `BOOT_HEALTHY_S` (30 s) of continuous uptime, so a single old crash doesn't
-  accumulate with a much later, unrelated one.
+  burst of config-save reboots that must never be mistaken for a crash-loop. Outside latched safe
+  mode, a one-shot timer clears the counter after `BOOT_HEALTHY_S` (30 s) of continuous uptime.
+- **NVS initialization never erases automatically**, including full-partition and newer-version
+  errors. The failed partition remains intact, reads use defaults and persistence errors remain
+  explicit. WiFi STA and the setup AP disable driver NVS before `esp_wifi_init` only when NVS failed;
+  their configured credentials use RAM storage on every boot. This avoids that NVS dependency,
+  but unavailable persistence or a failure in mandatory startup can still require separate recovery.
 - **Safe mode has a second entry route.** Besides the crash counter, `heap_guard.cpp` latches it when
   the heap watchdog's restart ladder is exhausted (legacy-407) — the boot inheriting the full count comes up
   minimal instead of staying up wedged, and `/status.sys.safe_mode_cause` reports `"heap"` rather than
@@ -2840,10 +2855,9 @@ alone, that is a reboot loop whose only exit is `esptool erase_flash` over USB �
   unrelated crash boots and can false-trip safe mode on a healthy device, pausing poll + MQTT. Note
   the write failing does **not** stop safe mode engaging *this* boot — `boot_should_enter_safe_mode`
   runs on the value just read — it only stops it accumulating across boots.
-- **In safe mode** `main.cpp` starts only WiFi + the HTTP web UI + the OTA health gate and **skips**
-  the X10A poll engine and the MQTT bridge (the two background subsystems a bad config could crash
-  on). The full recovery surface (`/set_wifi`, `/set_mqtt`, `/set_hp`, and — once legacy-9 lands — factory
-  reset / import) stays available. `/status.sys.safe_mode` is `true` and the UI shows a warn-accented
+- **In safe mode** `main.cpp` keeps network, HTTP and OTA recovery while **skipping** ENV III,
+  X10A, HomeHub, MQTT and Open-Meteo workers. Existing trusted-LAN configuration endpoints remain
+  available if mandatory startup succeeds. `/status.sys.safe_mode` is `true` and the UI shows a warn-accented
   **Recovery mode** banner. The counter lives in `daik_cfg`, so a factory reset wipes it too.
 
 - **An exception escaping the boot sequence is routed into this same machinery.** `app_main` wraps
@@ -2854,7 +2868,8 @@ alone, that is a reboot loop whose only exit is `esptool erase_flash` over USB �
   what `boot_reset_was_crash()` classifies as *intentional* and uses to **clear** the counter, so a
   boot sequence that threw every time would restart forever without ever accumulating a single crash
   boot — the failure mode safe mode exists to end, made permanent by the mechanism meant to end it. A
-  panic counts, writes a core dump, and reaches safe mode after four.
+  panic counts toward safe mode when NVS is initialized and writable. Four crash boots suppress the
+  optional workers; a fault in mandatory startup is not made recoverable by that latch.
 
 This is distinct from the image anti-brick recovery above; both are covered in
 [SECURITY.md](SECURITY.md) → Boot recovery.
@@ -2912,6 +2927,16 @@ because safe mode has already shut down the five largest allocators and is itsel
 minimal state a restart would be trying to reach.
 
 ## Web UI config flow
+
+Browser history caches, index pins and pending requests share a lifecycle epoch. Changing a source
+configuration, detected identity, `history.epoch` or `boot_id` retires that epoch; a confirmed
+rebooting save retires it immediately. The firmware's boot-local history epoch advances on source
+or consent resets, making A → B → A between browser status polls visible. Late raw or derived
+history replies cannot refill a retired epoch or release a successor request's lease.
+The per-boot nonce also detects a reboot whose first observed uptime is already equal to or greater
+than the previous sample. Older firmware without `boot_id` falls back
+to a decrease in `uptime_s`, which cannot identify that case. Compatible device-journal restoration
+remains independent of these browser caches.
 
 `www/` is split for edit locality: `index.html`, `style.css` and the JavaScript fragments listed in
 `app.sources`. Firmware, tests and audits all consume that one ordered manifest; the fragments share
@@ -2984,10 +3009,8 @@ place:
   is what an unrelated broker edit sends). Clearing them therefore needs its own explicit signal:
   `clear_creds:true` (the modal's "remove stored credentials" checkbox, shown when
   `/status.mqtt.has_creds`) makes empty mean empty. A non-empty user/pass is an explicit set and wins
-  over the flag. Without that signal an authenticated `mqtts://` broker could never migrate to an
-  anonymous one — disabling MQTT and re-adding the broker both arrive with empty credentials, so both
-  keep, and the kept credentials then reject every plaintext broker with "Credentials require
-  mqtts://" (only a flash erase got out of it).
+  over the flag. Clearing permits an authenticated `mqtts://` or `wss://` broker to migrate to an
+  anonymous one; otherwise empty credentials retain the login and require TLS on the new URI.
 - **Syslog** → `/set_syslog` (edited from a modal off the Connections tile's Syslog row).
   Save only validates the port range (no request-path network block); an empty host disables
   forwarding. An **unchanged** host/port short-circuits to `{"ok":true,"reboot":false}` — no NVS
@@ -3115,8 +3138,9 @@ GET  /favicon.ico inert embedded setup/dashboard icon; also available on the ope
 GET  /heat-pump-icon.png embedded dashboard app icon; trusted-LAN only
 GET  /locale.js?lang=de|es|fr|it|pl|cs|uk|zh|ja|nb|sv|fi   query-selected, pre-compressed UI catalog from the
                   signed application image; trusted-LAN only, cached with the app-image ETag
-GET  /status      version, platform, uptime_s, app_elf_sha256 (build identity — matches a core dump
-                  to its .elf), pins_avail[] (the chip-safe X10A GPIOs for the RX/TX picker, minus the
+GET  /status      version, platform, uptime_s, boot_id (16 hex digits; non-secret 64-bit per-boot
+                  nonce, not persisted and not an authentication token), app_elf_sha256 (build identity
+                  — matches a core dump to its .elf), pins_avail[] (the chip-safe X10A GPIOs for the RX/TX picker, minus the
                   pins the firmware itself drives — the status indicator and the recovery button —
                   logic/board_pins.hpp),
                   board{led_gpio,led_type,led_inverted,btn_gpio,btn_active_low,user_set,preset_id,
@@ -3385,8 +3409,12 @@ GET  /status      version, platform, uptime_s, app_elf_sha256 (build identity �
                   reason/summary from the boot-time cache, `coredump` re-read from flash per request
                   so a cleared dump can't strand the banner; drives the crash banner, whose title keys
                   on `fault` — an orphan dump alone is NOT "restarted after a crash"),
-                  history{dt,persist,dwell_persist,rows[{id,label}],modbus_rows[{id,label}],
+                  history{epoch,dt,persist,dwell_persist,rows[{id,label}],modbus_rows[{id,label}],
                   env3_rows[{id,label}]}
+                  — `epoch` is a nonzero boot-local history lifetime counter, advanced on source or
+                  consent resets, not on ordinary samples. It retires browser caches even if a
+                  source changed away and back between status polls; it is not a producer admission
+                  token. Clients pair it with `boot_id` because it restarts on boot.
                   — `persist` is the `.noinit`-RAM adoption verdict for THIS boot: "accept" (adopted
                   across a compatible reset that kept power) or the named reason RAM started empty
                   ("power_cycle", "wrong_catalog" after an update moved the trend set, "bad_crc",
@@ -3658,7 +3686,7 @@ POST /set_wifi    {ssid,pass} -> validate (ssid 1-32 chars; pass empty[open] or 
                   for a rebooting router. wifi.cpp clears the reason on STA_CONNECTED, so an earlier
                   refusal can't outlive the association that disproved it.
 POST /set_mqtt    {broker,user,pass,clear_creds,base} -> pre-flight the broker synchronously (DNS -> TCP
-                  probe -> short-lived esp-mqtt CONNECT/auth, mirroring mqtt_ha's creds-require-mqtts://
+                  probe -> short-lived esp-mqtt CONNECT/auth, mirroring mqtt_ha's mqtts:// or wss://
                   policy) -> on success persist + reboot; on failure 400 {ok:false,error} and nothing is
                   saved. Unchanged settings short-circuit to {ok:true,reboot:false} (no probe, no reboot).
                   "" (empty broker) disables MQTT and skips the probe. Blocks up to ~8 s — the one
@@ -3667,10 +3695,8 @@ POST /set_mqtt    {broker,user,pass,clear_creds,base} -> pre-flight the broker s
                   stored ones (else an unrelated broker edit would wipe a working login). Empty can
                   therefore not also mean "clear" — clear_creds:true (the UI's "remove stored
                   credentials" checkbox, shown when /status.mqtt.has_creds) is the explicit signal; a
-                  non-empty user/pass is an explicit SET and wins over the flag. Without it an
-                  authenticated mqtts:// broker can never migrate to an anonymous mqtt:// one: disable
-                  + re-add both send empty creds -> both keep -> the kept creds then 400 every
-                  plaintext broker ("Credentials require mqtts://"). Only a flash erase escaped that.
+                  non-empty user/pass is an explicit SET and wins over the flag. Clearing permits
+                  migration to an anonymous broker; otherwise retained credentials require TLS.
                   BASE TOPIC: `base` is this INSTALLATION's MQTT base topic (logic/mqtt_base.hpp),
                   runtime because CI publishes ONE esp32s3 image while the base is a per-installation
                   fact — CONFIG_DAIKIN_MQTT_BASE_TOPIC is now only the DEFAULT, and an empty stored
