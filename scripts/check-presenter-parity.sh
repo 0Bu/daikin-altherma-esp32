@@ -18,6 +18,9 @@
 # and it has been paid once: a looser leaving-water pattern matched the bizone kit's MIXED row,
 # putting a correct number on the wrong sensor in ΔT, heat output and COP at once.
 #
+# Usage: scripts/check-presenter-parity.sh [--golden <fixture.tsv>]
+# The default always compiles the current C++ inputs. --golden is for JS-only mutations inside a
+# throwaway selftest tree whose pristine vectors were generated earlier in that same invocation.
 # Needs a C++17 compiler + node — both present in CI's `mechanical_gates` job. Run directly, or automatically at
 # the end of scripts/run-mock-tests.sh.
 set -euo pipefail
@@ -28,10 +31,12 @@ OUT=build_mock          # matches .gitignore (/build_mock/)
 mkdir -p "$OUT"
 
 golden_tsv=""
-if [ "${1:-}" = "--golden" ]; then
-    [ "$#" -ge 2 ] || { echo "check-presenter-parity: --golden requires a path" >&2; exit 2; }
+if [ "$#" -ne 0 ]; then
+    [ "$#" -eq 2 ] && [ "$1" = "--golden" ] && [ -n "$2" ] || {
+        echo "check-presenter-parity: expected no arguments or --golden <fixture.tsv>" >&2
+        exit 2
+    }
     golden_tsv="$2"
-    shift 2
 fi
 
 if [ -n "$golden_tsv" ]; then
@@ -52,19 +57,10 @@ command -v node >/dev/null 2>&1 || {
     echo "check-presenter-parity: need node" >&2; exit 1
 }
 
-need_compile=false
-if [ ! -x "$OUT/presenter_golden_dump" ]; then
-    need_compile=true
-elif [ -n "$(find test/presenter_golden_dump.cpp main/logic main/def -type f -newer "$OUT/presenter_golden_dump" 2>/dev/null)" ]; then
-    need_compile=true
-fi
-
-if [ "$need_compile" = true ]; then
-    "$CXX" -std=c++17 -Wall -Wextra -Werror -Imain \
-        -o "$OUT/presenter_golden_dump" test/presenter_golden_dump.cpp
-    "$OUT/presenter_golden_dump" > "$OUT/presenter_golden.tsv"
-elif [ ! -f "$OUT/presenter_golden.tsv" ]; then
-    "$OUT/presenter_golden_dump" > "$OUT/presenter_golden.tsv"
-fi
+# Modification times cannot bind a binary to source contents, removed headers or a changed compiler.
+# Only the explicit fixture option above reuses vectors; ordinary validation always builds them.
+"$CXX" -std=c++17 -Wall -Wextra -Werror -Imain \
+    -o "$OUT/presenter_golden_dump" test/presenter_golden_dump.cpp
+"$OUT/presenter_golden_dump" > "$OUT/presenter_golden.tsv"
 
 node tools/presenter/presenter_parity.mjs "$OUT/presenter_golden.tsv"

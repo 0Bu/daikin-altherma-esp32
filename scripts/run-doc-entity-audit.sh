@@ -13,7 +13,9 @@
 # Compiles tools/docs/entity_id_audit.cpp against the REAL catalog (main/def) and the REAL slug rule
 # (main/logic/ha_device.hpp ha_slug), so there is no second copy of the id rule to drift.
 #
-# Usage: scripts/run-doc-entity-audit.sh
+# Usage: scripts/run-doc-entity-audit.sh [--binary <fixture-binary>]
+# The default always compiles the current catalog and slug rule. --binary is for document-only
+# mutations in a throwaway selftest tree whose pristine binary was built in the same invocation.
 # Exit:  0 = clean, 1 = findings, 2 = usage/compile error.
 # Requires only a C++17 host compiler — no ESP-IDF, no Docker, no board, like run-mock-tests.sh.
 set -euo pipefail
@@ -22,23 +24,26 @@ cd "$(dirname "$0")/.."
 BUILD_DIR=build_mock   # matches .gitignore (/build_mock/)
 mkdir -p "$BUILD_DIR"
 
-CXX="${CXX:-}"
-if [ -z "$CXX" ]; then
-    if command -v g++ >/dev/null 2>&1; then CXX=g++
-    elif command -v clang++ >/dev/null 2>&1; then CXX=clang++
-    else echo "run-doc-entity-audit: need a C++17 compiler (g++/clang++)" >&2; exit 2
+audit_binary="$BUILD_DIR/entity_id_audit"
+if [ "$#" -ne 0 ]; then
+    [ "$#" -eq 2 ] && [ "$1" = "--binary" ] && [ -n "$2" ] || {
+        echo "run-doc-entity-audit: expected no arguments or --binary <fixture-binary>" >&2
+        exit 2
+    }
+    audit_binary="$2"
+    [ -f "$audit_binary" ] && [ -x "$audit_binary" ] || {
+        echo "run-doc-entity-audit: fixture binary is missing or not executable: $audit_binary" >&2
+        exit 2
+    }
+else
+    CXX="${CXX:-}"
+    if [ -z "$CXX" ]; then
+        if command -v g++ >/dev/null 2>&1; then CXX=g++
+        elif command -v clang++ >/dev/null 2>&1; then CXX=clang++
+        else echo "run-doc-entity-audit: need a C++17 compiler (g++/clang++)" >&2; exit 2
+        fi
     fi
-fi
-
-need_compile=false
-if [ ! -x "$BUILD_DIR/entity_id_audit" ]; then
-    need_compile=true
-elif [ -n "$(find tools/docs/entity_id_audit.cpp main/def main/logic -type f -newer "$BUILD_DIR/entity_id_audit" 2>/dev/null)" ]; then
-    need_compile=true
-fi
-
-if [ "$need_compile" = true ]; then
-    "$CXX" -std=c++17 -Wall -Wextra -Werror -Imain -o "$BUILD_DIR/entity_id_audit" \
+    "$CXX" -std=c++17 -Wall -Wextra -Werror -Imain -o "$audit_binary" \
         tools/docs/entity_id_audit.cpp
 fi
 
@@ -48,7 +53,7 @@ PREFIX="${DOC_ENTITY_PREFIX:-daikin_altherma}"
 
 # Every doc that can carry a copy-pasteable recipe. Not a glob: a new doc should be added
 # deliberately, and a doc that quotes no ids costs nothing to scan.
-"$BUILD_DIR/entity_id_audit" "$PREFIX" \
+"$audit_binary" "$PREFIX" \
     docs/HOME_ASSISTANT.md \
     docs/README.md \
     docs/ARCHITECTURE.md \

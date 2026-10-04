@@ -100,12 +100,15 @@ on:
         required: false
         default: ""
 
-# Serialize main so the release version + the two feeds can't race; cancel superseded PR runs.
+# Serialize the complete main version/build/publish chain, including waiting manual releases.
 # A release dispatch and a push to main share this group deliberately: they both derive a version
 # from the tag list, and a release must never be computed against a tag another run is creating.
+# GitHub's default single pending slot can replace a release; max retains up to 100 waiting runs.
+# PR workflows have unique groups; their expensive jobs cancel superseded work independently below.
 concurrency:
-  group: build-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' || github.ref != 'refs/heads/main' }}
+  group: build-${{ github.event_name == 'pull_request' && format('pr-{0}-{1}', github.event.pull_request.number, github.run_id) || github.ref }}
+  queue: max
+  cancel-in-progress: false
 
 permissions:
   contents: read
@@ -124,6 +127,13 @@ jobs:
     # A release is an explicit maintainer publication action for an already accepted main commit.
     # PR/main CI owns testing; do not rerun or make those tests a prerequisite for tagging it.
     if: github.event_name != 'workflow_dispatch' || inputs.release != true
+    concurrency:
+      group: build-mechanical-${{ github.event.pull_request.number || github.run_id }}
+      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+    permissions:
+      contents: read
+      pull-requests: read
+      actions: read
     runs-on: ubuntu-26.04
     timeout-minutes: 10
     outputs:
@@ -221,6 +231,7 @@ jobs:
             echo "  $1=$value"
           }
           echo "mutation self-test scope (all=$all):"
+          emit host_audits '^(tools/(presenter|docs)/|scripts/(check-presenter-parity|run-doc-entity-audit|run-host-audit-reuse-tests)[.]sh$|test/presenter_golden_dump[.]cpp$|main/logic/(lwt_select|discovery)[.]hpp$)'
           # agent-hooks drives the merge gate, which runs the UI, absence and UI-GIF suites; its
           # formatter cases copy the real .clang-format, and it pins the exact command shapes of
           # gh-with-git-credentials.sh and production-ota-gate.py.
@@ -463,6 +474,9 @@ jobs:
         run: ./scripts/run-doc-entity-audit.sh
       - name: Verify the doc entity-id audit still has teeth
         run: ./tools/docs/selftest.sh
+      - name: Verify fresh host audits and explicit fixture reuse
+        if: steps.scope.outputs.host_audits == 'yes'
+        run: ./scripts/run-host-audit-reuse-tests.sh
       # The README's dashboard recording (docs/media/dashboard.gif): the one artefact here that rots
       # INVISIBLY. A recording renders perfectly forever, whatever the UI has since become, so every
       # other gate on this page stays green while the first thing a new reader sees is last month's
@@ -558,6 +572,7 @@ jobs:
         id: changes
         env:
           BEFORE: ${{ github.event.before }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           # tools/web_asset/ is a BUILD/PUBLICATION INPUT, not tooling: main/CMakeLists.txt runs its
@@ -573,7 +588,7 @@ jobs:
               range="HEAD^1 HEAD" ;;
             push)
               if [ "${{ github.ref }}" = "refs/heads/main" ]; then
-                # Compare against the source commit of the authoritative published dev manifest.
+                # Compare against a valid dev feed bound to a completed publisher/readback proof.
                 # If an earlier run was superseded, cancelled or failed, firmware changes remain
                 # visible until actually built and published to the dev feed.
                 set +e
@@ -622,6 +637,9 @@ jobs:
   # named `build` because branch protection requires it; docs-only PRs pass it without compiling.
   build:
     needs: [mechanical_gates]
+    concurrency:
+      group: build-compile-${{ github.event.pull_request.number }}
+      cancel-in-progress: true
     if: always() && github.event_name == 'pull_request'
     runs-on: ubuntu-26.04
     timeout-minutes: 30
@@ -1001,10 +1019,13 @@ jobs:
 
       # This is the only cross-job handoff. It contains signed flashables, but never the private key;
       # the publisher downloads it with actions:read and owns the only contents:write token.
+      # A full rerun rebuilds the same run/source/version; replace only this run-local bundle.
+      # A failed-jobs-only publisher retry still downloads its original unchanged handoff.
       - name: Upload firmware artifacts
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
         with:
           name: daikin-altherma-esp32-${{ steps.stamp.outputs.disp }}
+          overwrite: true
           retention-days: ${{ steps.mode.outputs.mode == 'dev' && 3 || 90 }}
           if-no-files-found: error
           path: |
@@ -1110,6 +1131,23 @@ jobs:
             --pages-prefix "$PAGES_PREFIX" \
             --cache-buster "$GITHUB_RUN_ID" \
             --attempts 30
+
+      # This small, expiring artifact attests completion without another gh-pages push/Pages build.
+      # Its whole-slice digest prevents an older successful run from blessing changed feed bytes.
+      - name: Record dev publication proof
+        if: needs.trusted_build.outputs.mode == 'dev'
+        run: |
+          python3 tools/release/dev_publication.py record _site/dev \
+            "$(cat "$RUNNER_TEMP/pages-published-oid")" "$RUNNER_TEMP/dev-publication-proof"
+
+      - name: Upload dev publication proof
+        if: needs.trusted_build.outputs.mode == 'dev'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
+        with:
+          name: dev-publication-proof-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/dev-publication-proof/dev-publication-proof.json
+          retention-days: 90
+          if-no-files-found: error
 
       - name: Rebind release tag immediately before release mutation
         if: needs.trusted_build.outputs.mode == 'release'

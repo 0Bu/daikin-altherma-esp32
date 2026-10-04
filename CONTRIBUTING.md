@@ -361,6 +361,11 @@ looked at every table would have called it clean. It does **not** require an id 
 profile: the catalog genuinely disagrees across models, and the docs should state a majority id and
 name the alternatives beside it. `tools/docs/selftest.sh` re-seeds the defects it was built for.
 
+Ordinary presenter and entity-ID audits always compile the current C++ inputs. Their explicit
+`--golden` and `--binary` options are only for mutations inside a fresh selftest fixture whose
+pristine inputs have passed. Run `scripts/run-host-audit-reuse-tests.sh` after changing this reuse
+contract; it checks changed and removed inputs, preserved timestamps and compiler changes.
+
 `run-agent-instructions-budget.sh` is the canonical runner-neutral agent-integrity contract. It
 keeps the always-loaded [`AGENTS.md`](AGENTS.md) below 24 KiB, validates canonical skill identity and
 OpenAI metadata, focused-reviewer safety, hook dispatch, and the explicit project safety invariants.
@@ -623,6 +628,16 @@ holds for the maintainer too — `main` takes no direct pushes at all. Practical
   build-relevant is the path list in the *Detect build-relevant changes* step of
   [`build.yml`](.github/workflows/build.yml) — add to it if you introduce a file the image or the
   published site is made of.
+
+On `main`, change detection compares against the source of a valid dev feed with a completed
+publication proof. The proof binds the entire feed to the exact successful publisher and public
+readback; a manifest SHA alone is insufficient. Missing, expired (90-day retention), incompatible
+or unavailable evidence triggers a build. A full workflow rerun also builds to recover publication.
+Run `scripts/run-build-change-detection-tests.sh` after changing the comparison or browser filter.
+
+Main pushes and manual releases share one workflow-level queue across version selection, signing
+and publication. Up to 100 pending runs are retained instead of replacing a waiting release.
+Superseded PR work is cancelled separately in the mechanical and compile jobs.
 
 For fork PRs, `build.yml` executes the exact PR merge tree only under the ordinary `pull_request`
 event; GitHub withholds repository secrets and downgrades the token, and checkout does not persist

@@ -1,343 +1,152 @@
 #!/usr/bin/env bash
-# Tests for build change detection and browser filter scoping.
-#
-# Covers the acceptance matrix for CI change detection:
-# 1. Dev manifest source resolution on gh-pages (check-dev-manifest-source.sh)
-# 2. Missing references, unreachable remotes, malformed manifests, non-ancestors
-# 3. Same source repetition
-# 4. Failed publish / "Firmware-Push B, danach Dokumentations-Push C"
-# 5. Long changed file lists without pipefail SIGPIPE issues
-# 6. Multiple push commits
-# 7. Browser filter with tools/ui_localization/ and unresolvable diffs
-# 8. Main serialization and waiting release contract
-set -uo pipefail
-umask 0022
-cd "$(dirname "$0")/.." || exit 1
+# Exercise production browser routing with offline Git and Node fixtures. The Node stub proves
+# that every rendering stage is reached; real browser rendering remains a separate CI gate.
+set -euo pipefail
+cd "$(dirname "$0")/.."
 REPO="$PWD"
-
 T="$(mktemp -d)"
-trap 'rm -rf "$T"' EXIT
-pass=0; fail=0
-ok()   { echo "  PASS  $1"; pass=$((pass + 1)); }
-bad()  { echo "  FAIL  $1"; fail=$((fail + 1)); }
-check(){ if [ "$2" = "$3" ]; then ok "$1"; else bad "$1 (expected '$3', got '$2')"; fi; }
+trap 'rm -rf -- "$T"' EXIT
+python3 tools/release/test_dev_publication.py
 
-# Initialize bare origin and local working repository
-git init -q --bare "$T/origin.git"
-git init -q "$T/work"
-(
-  cd "$T/work" || exit 1
-  git config user.email t@t; git config user.name t; git config commit.gpgsign false
-  mkdir -p scripts tools/version main/logic main/www docs
-  cp "$REPO/scripts/check-dev-manifest-source.sh" scripts/
-  cp "$REPO/scripts/run-browser-render-tests.sh"   scripts/
-  chmod +x scripts/*.sh
-  echo "seed" > README.md
-  git add -A && git commit -qm "feat: initial commit"
-  git branch -M main && git remote add origin "$T/origin.git" && git push -q origin main
-)
+mkdir -p "$T/work/scripts" "$T/work/main/www" "$T/bin"
+cp scripts/run-browser-render-tests.sh "$T/work/scripts/"
+cat > "$T/bin/node" <<'NODE'
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$*" >> "$BROWSER_FIXTURE_LOG"
+if [ "$1" = tools/browser/find_browser.mjs ]; then printf '%s\n' /fixture/browser; fi
+NODE
+chmod +x "$T/bin/node"
+export PATH="$T/bin:$PATH"
+export BROWSER_FIXTURE_LOG="$T/node.log"
+export CI=true
+export DAIKIN_BROWSER_PARALLEL=1
+unset BEFORE GITHUB_EVENT_BEFORE EVENT_BASE_SHA BASE_SHA GITHUB_EVENT_NAME
+cd "$T/work"
+git init -q
+git config user.name Fixture
+git config user.email fixture@example.invalid
+git config commit.gpgsign false
+git branch -M main
+printf '%s\n' baseline > README.md
+printf '%s\n' baseline > main/www/fixture.css
+git add -A
+git commit -qm 'fixture: baseline'
 
-publish_dev_manifest() {
-  local dev_source="$1"
-  local malformed="${2:-false}"
-  rm -rf "$T/pages"; git init -q "$T/pages"
-  (
-    cd "$T/pages" || exit 1
-    git config user.email t@t; git config user.name t; git config commit.gpgsign false
-    mkdir -p dev
-    if [ "$malformed" = "bad_json" ]; then
-      echo "{ corrupt json" > dev/manifest.json
-    elif [ "$malformed" = "no_provenance" ]; then
-      printf '{"name":"x","version":"1.0.0-dev.1"}\n' > dev/manifest.json
-    elif [ "$malformed" = "bad_sha" ]; then
-      printf '{"name":"x","version":"1.0.0-dev.1","provenance":{"source_sha":"short"}}\n' > dev/manifest.json
-    else
-      printf '{"name":"x","version":"1.0.0-dev.1","provenance":{"source_sha":"%s"}}\n' "$dev_source" > dev/manifest.json
-    fi
-    git add -A && git commit -qm pages
-    git branch -M gh-pages && git remote add origin "$T/origin.git" && git push -qf origin gh-pages
-  )
+commit_fixture() {
+  git add -A
+  git commit -qm "$1"
+}
+checks=0
+check_scope() {
+  local name="$1" expected="$2" reason="${3:-}" output
+  : > "$BROWSER_FIXTURE_LOG"
+  output="$(bash scripts/run-browser-render-tests.sh --if-ui-changed)"
+  if [ "$expected" = skip ]; then
+    [[ "$output" = *'no UI/browser-relevant changes in diff'* ]]
+    [ ! -s "$BROWSER_FIXTURE_LOG" ]
+  else
+    [[ "$output" != *'no UI/browser-relevant changes in diff'* ]]
+    [[ "$output" = *'complete browser rendering and accessibility gate passed'* ]]
+    [ "$(grep -c '^tools/browser/find_browser.mjs$' "$BROWSER_FIXTURE_LOG")" -eq 1 ]
+    [ "$(grep -c '^tools/browser/assemble_page.mjs ' "$BROWSER_FIXTURE_LOG")" -eq 1 ]
+    [ "$(grep -c '^test/test_browser_render.mjs --viewport ' "$BROWSER_FIXTURE_LOG")" -eq 2 ]
+    [ "$(grep -c '^tools/browser/selftest.mjs$' "$BROWSER_FIXTURE_LOG")" -eq 1 ]
+  fi
+  if [ -n "$reason" ]; then [[ "$output" = *"$reason"* ]]; fi
+  checks=$((checks + 1))
+  printf '  PASS  %s\n' "$name"
 }
 
-echo "== 1. check-dev-manifest-source: missing branches and unresolvable references =="
-(
-  cd "$T/work" || exit 1
-  ./scripts/check-dev-manifest-source.sh origin >"$T/out.log" 2>&1
-)
-check "no gh-pages branch fails closed (rc=2)" "$?" "2"
+printf '%s\n' docs >> README.md
+commit_fixture 'fixture: docs only'
+check_scope 'local docs-only comparison skips every browser stage' skip
+mkdir -p tools/ui_localization
+printf '%s\n' locale > tools/ui_localization/fixture.txt
+commit_fixture 'fixture: localization input'
+check_scope 'localization tooling invokes every browser stage' run 'UI changes detected'
+multi_before="$(git rev-parse HEAD)"
+printf '%s\n' ui >> main/www/fixture.css
+commit_fixture 'fixture: earlier UI change'
+printf '%s\n' docs >> README.md
+commit_fixture 'fixture: last commit docs only'
+BEFORE="$multi_before" check_scope 'push includes UI before the last commit' run 'UI changes detected'
+GITHUB_EVENT_BEFORE="$multi_before" check_scope 'event BEFORE alias covers the whole push' run 'UI changes detected'
+EVENT_BASE_SHA="$multi_before" check_scope 'explicit base covers the whole branch' run 'UI changes detected'
+BASE_SHA="$multi_before" check_scope 'base alias covers the whole branch' run 'UI changes detected'
+BEFORE=1111111111111111111111111111111111111111 check_scope 'unknown BEFORE with valid HEAD runs full suite' run 'unresolvable comparison range'
+BEFORE=0000000000000000000000000000000000000000 check_scope 'initial-push BEFORE runs full suite' run 'unresolvable comparison range'
+BEFORE=1111111111111111111111111111111111111111 EVENT_BASE_SHA="$(git rev-parse HEAD^)" \
+  check_scope 'invalid push range cannot degrade to a smaller base range' run 'unresolvable comparison range'
+EVENT_BASE_SHA=1111111111111111111111111111111111111111 check_scope 'unknown explicit base runs full suite' run 'unresolvable comparison range'
+docs_before="$(git rev-parse HEAD)"
+printf '%s\n' docs >> README.md
+commit_fixture 'fixture: first docs commit'
+printf '%s\n' docs >> README.md
+commit_fixture 'fixture: second docs commit'
+BEFORE="$docs_before" check_scope 'multi-commit docs-only push skips' skip
 
-# Push gh-pages with NO dev/manifest.json
-rm -rf "$T/pages"; git init -q "$T/pages"
-(
-  cd "$T/pages" || exit 1
-  git config user.email t@t; git config user.name t; git config commit.gpgsign false
-  touch root_only.txt && git add -A && git commit -qm pages
-  git branch -M gh-pages && git remote add origin "$T/origin.git" && git push -qf origin gh-pages
-)
-(
-  cd "$T/work" || exit 1
-  ./scripts/check-dev-manifest-source.sh origin >"$T/out.log" 2>&1
-)
-check "gh-pages without dev/manifest.json fails closed (rc=2)" "$?" "2"
-
-echo "== 2. check-dev-manifest-source: unreachable remote =="
-(
-  cd "$T/work" || exit 1
-  ./scripts/check-dev-manifest-source.sh nonexistent >"$T/out.log" 2>&1
-)
-check "unreachable remote fails closed (rc=2)" "$?" "2"
-
-echo "== 3. check-dev-manifest-source: corrupt / malformed manifests =="
-publish_dev_manifest "dummy" "bad_json"
-(
-  cd "$T/work" || exit 1
-  ./scripts/check-dev-manifest-source.sh origin >"$T/out.log" 2>&1
-)
-check "corrupt JSON manifest fails closed (rc=2)" "$?" "2"
-
-publish_dev_manifest "dummy" "no_provenance"
-(
-  cd "$T/work" || exit 1
-  ./scripts/check-dev-manifest-source.sh origin >"$T/out.log" 2>&1
-)
-check "manifest without provenance fails closed (rc=2)" "$?" "2"
-
-publish_dev_manifest "dummy" "bad_sha"
-(
-  cd "$T/work" || exit 1
-  ./scripts/check-dev-manifest-source.sh origin >"$T/out.log" 2>&1
-)
-check "manifest with malformed sha fails closed (rc=2)" "$?" "2"
-
-echo "== 4. check-dev-manifest-source: unknown and divergent commits =="
-publish_dev_manifest "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-(
-  cd "$T/work" || exit 1
-  ./scripts/check-dev-manifest-source.sh origin >"$T/out.log" 2>&1
-)
-check "unknown source_sha not in repo fails closed (rc=2)" "$?" "2"
-
-# Create a divergent commit on an orphan branch
-divergent_sha="$(
-  cd "$T/work" || exit 1
-  git checkout -q --orphan divergent_branch
-  echo "divergent" > divergent.txt
-  git add -A && git commit -qm "divergent"
-  git rev-parse HEAD
-)"
-( cd "$T/work" && git checkout -q main )
-publish_dev_manifest "$divergent_sha"
-(
-  cd "$T/work" || exit 1
-  ./scripts/check-dev-manifest-source.sh origin >"$T/out.log" 2>&1
-)
-check "divergent source_sha not ancestor of target fails closed (rc=2)" "$?" "2"
-
-echo "== 5. check-dev-manifest-source: valid ancestor and same-source repetition =="
-commit_A="$(cd "$T/work" && git rev-parse HEAD)"
-publish_dev_manifest "$commit_A"
-(
-  cd "$T/work" || exit 1
-  ./scripts/check-dev-manifest-source.sh origin >"$T/out.log" 2>&1
-)
-check "same source as HEAD returns 1 (same_source)" "$?" "1"
-
-# Add commit B to main
-(
-  cd "$T/work" || exit 1
-  echo "firmware edit" >> main/hp_poll.cpp
-  git add main/hp_poll.cpp && git commit -qm "feat: firmware change"
-)
-commit_B="$(cd "$T/work" && git rev-parse HEAD)"
-res_sha="$(
-  cd "$T/work" || exit 1
-  ./scripts/check-dev-manifest-source.sh origin
-)"
-check "valid ancestor resolves to published source A" "$res_sha" "$commit_A"
-
-echo "== 6. scenario: Firmware-Push B, danach Dokumentations-Push C =="
-# Add commit C (docs only)
-(
-  cd "$T/work" || exit 1
-  echo "docs edit" >> README.md
-  git add README.md && git commit -qm "docs: update readme"
-)
-commit_C="$(cd "$T/work" && git rev-parse HEAD)"
-# Because publish for B never happened, published dev manifest still points to A!
-res_sha_C="$(
-  cd "$T/work" || exit 1
-  ./scripts/check-dev-manifest-source.sh origin
-)"
-check "dev manifest source for push C still resolves to A" "$res_sha_C" "$commit_A"
-
-# Verify that git diff A..C catches the firmware change from B
-relevant_pattern='^(LICENSE$|THIRD_PARTY_NOTICES[.]md$|main/|CMakeLists[.]txt$|sdkconfig[.]defaults$|dependencies[.]lock$|partitions[.]csv$|version[.]txt$|docs/(index[.]html|serial-port-release[.]mjs|web-installer[.]mjs)$|[.]github/workflows/build[.]yml$|scripts/(ci-build-all|build-pages|next-version|publish-pages-branch|require-signed|check-publish-version|idf-version|check-nonflashable-artifacts|check-dev-manifest-source)[.]sh$|scripts/pages-commit-payload[.]mjs$|scripts/(generate-ota-changelog|check-sdkconfig-defaults|report-firmware-size|check-web-installer-plan|check-manifest-provenance|check-signing-key-continuity|check-stack-budget|check-reproducible-build|verify-published-artifacts|production-ota-gate)[.]py$|tools/(version|web_asset|release|stack)/)'
-
-diff_files="$(cd "$T/work" && git diff --name-only "$res_sha_C" "$commit_C")"
-if printf '%s\n' "$diff_files" | grep -qE "$relevant_pattern"; then
-  ok "firmware change in B is visible in A..C diff"
-else
-  bad "firmware change in B was missed in A..C diff"
-fi
-
-# Now publish C
-publish_dev_manifest "$commit_C"
-# Now push D (docs only)
-(
-  cd "$T/work" || exit 1
-  echo "more docs" >> docs/ARCHITECTURE.md
-  git add docs/ARCHITECTURE.md && git commit -qm "docs: arch update"
-)
-commit_D="$(cd "$T/work" && git rev-parse HEAD)"
-res_sha_D="$(cd "$T/work" && ./scripts/check-dev-manifest-source.sh origin)"
-check "dev manifest source for push D resolves to C" "$res_sha_D" "$commit_C"
-
-diff_files_D="$(cd "$T/work" && git diff --name-only "$res_sha_D" "$commit_D")"
-if printf '%s\n' "$diff_files_D" | grep -qE "$relevant_pattern"; then
-  bad "docs-only push D unexpectedly matched firmware pattern"
-else
-  ok "docs-only push D correctly skipped firmware build"
-fi
-
-echo "== 7. long file lists without pipefail SIGPIPE =="
-(
-  cd "$T/work" || exit 1
-  mkdir -p many_files
-  for i in $(seq 1 300); do
-    echo "$i" > "many_files/file_$i.txt"
-  done
-  echo "firmware edit" >> main/hp_poll.cpp
-  git add -A && git commit -qm "test: 300 files"
-)
-long_commit="$(cd "$T/work" && git rev-parse HEAD)"
-# Test diff with pipefail
-set -e
-diff_out="$(cd "$T/work" && git diff --name-only HEAD^1 HEAD)"
-matched_relevant="no"
-if printf '%s\n' "$diff_out" | grep -qE "$relevant_pattern"; then
-  matched_relevant="yes"
-fi
-check "long file list parsed safely without pipefail failure" "$matched_relevant" "yes"
-
-echo "== 8. browser filter: --if-ui-changed scoping =="
-# Test docs-only commit skips browser render tests
-(
-  cd "$T/work" || exit 1
-  echo "doc" >> docs/REPORTING.md
-  git add docs/REPORTING.md && git commit -qm "docs: test reporting"
-)
-out="$(cd "$T/work" && ./scripts/run-browser-render-tests.sh --if-ui-changed 2>&1)" || true
-check "docs-only commit skips browser render tests" \
-      "$(echo "$out" | grep -c "no UI/browser-relevant changes in diff")" "1"
-
-# Test tools/ui_localization/ modification triggers browser render test (does not skip)
-(
-  cd "$T/work" || exit 1
-  mkdir -p tools/ui_localization
-  echo "i18n update" >> tools/ui_localization/test.txt
-  git add tools/ui_localization && git commit -qm "i18n update"
-)
-out_ui="$(cd "$T/work" && ./scripts/run-browser-render-tests.sh --if-ui-changed 2>&1)" || true
-check "tools/ui_localization/ change is NOT skipped" \
-      "$(echo "$out_ui" | grep -c "no UI/browser-relevant changes in diff")" "0"
-
-# Test multi-commit push with BEFORE: UI change in earlier commit is detected
-before_multi="$(cd "$T/work" && git rev-parse HEAD)"
-(
-  cd "$T/work" || exit 1
-  echo "/* style */" >> main/www/test.css
-  git add main/www/test.css && git commit -qm "ui: update style"
-  echo "doc update" >> README.md
-  git add README.md && git commit -qm "docs: update readme"
-)
-out_multi="$(cd "$T/work" && BEFORE="$before_multi" ./scripts/run-browser-render-tests.sh --if-ui-changed 2>&1)" || true
-check "multi-commit push with earlier UI commit is NOT skipped" \
-      "$(echo "$out_multi" | grep -c "no UI/browser-relevant changes in diff")" "0"
-
-# Test multi-commit push with BEFORE: all commits docs-only is skipped
-before_docs="$(cd "$T/work" && git rev-parse HEAD)"
-(
-  cd "$T/work" || exit 1
-  echo "doc1" >> docs/REPORTING.md
-  git add docs/REPORTING.md && git commit -qm "docs: 1"
-  echo "doc2" >> docs/REPORTING.md
-  git add docs/REPORTING.md && git commit -qm "docs: 2"
-)
-out_multi_docs="$(cd "$T/work" && BEFORE="$before_docs" ./scripts/run-browser-render-tests.sh --if-ui-changed 2>&1)" || true
-check "multi-commit push with docs-only is skipped" \
-      "$(echo "$out_multi_docs" | grep -c "no UI/browser-relevant changes in diff")" "1"
-
-# Test PR merge tree (HEAD^2 exists): PR branch with UI change is detected
-base_for_pr="$(cd "$T/work" && git rev-parse HEAD)"
-(
-  cd "$T/work" || exit 1
-  git checkout -qb feature_ui
-  echo "/* component */" >> main/www/comp.js
-  git add main/www/comp.js && git commit -qm "feat: add ui component"
-  git checkout -q main
-  git merge --no-ff -qm "Merge PR with UI change" feature_ui
-)
-out_pr_ui="$(cd "$T/work" && ./scripts/run-browser-render-tests.sh --if-ui-changed 2>&1)" || true
-check "PR merge tree with UI change in PR branch is NOT skipped" \
-      "$(echo "$out_pr_ui" | grep -c "no UI/browser-relevant changes in diff")" "0"
-
-# Test PR merge tree (HEAD^2 exists): PR branch docs-only is skipped even if base moved
-(
-  cd "$T/work" || exit 1
-  git checkout -qb feature_docs
-  echo "new doc" >> docs/TEST.md
-  git add docs/TEST.md && git commit -qm "docs: new doc"
-  git checkout -q main
-  git merge --no-ff -qm "Merge PR with docs only" feature_docs
-)
-out_pr_docs="$(cd "$T/work" && ./scripts/run-browser-render-tests.sh --if-ui-changed 2>&1)" || true
-check "PR merge tree with docs-only in PR branch is skipped" \
-      "$(echo "$out_pr_docs" | grep -c "no UI/browser-relevant changes in diff")" "1"
-
-# Test unresolvable comparison explicitly handles and runs full suite
-rm -rf "$T/unresolvable"; git init -q "$T/unresolvable"
-(
-  cd "$T/unresolvable" || exit 1
-  git config user.email t@t; git config user.name t; git config commit.gpgsign false
-  mkdir -p scripts
-  cp "$REPO/scripts/run-browser-render-tests.sh" scripts/
-  chmod +x scripts/*.sh
-  # No commits, unresolvable HEAD
-  out_unres="$(./scripts/run-browser-render-tests.sh --if-ui-changed 2>&1)" || true
-  echo "$out_unres" > "$T/out_unres.log"
-)
-check "unresolvable comparison logs explicit reason and does not skip" \
-      "$(grep -c "unresolvable comparison range; running full suite" "$T/out_unres.log")" "1"
-
-echo "== 9. workflow concurrency and release serialization contract =="
-python3 - "$REPO/.github/workflows/build.yml" <<'PY'
-import re, sys
+large_before="$(git rev-parse HEAD)"
+printf '%s\n' ui >> main/www/fixture.css
+python3 - <<'PY'
 from pathlib import Path
-
-text = Path(sys.argv[1]).read_text(encoding="utf-8")
-concurrency_match = re.search(r"(?m)^concurrency:\s*\n\s*group:\s*([^\n]+)\n\s*cancel-in-progress:\s*([^\n]+)", text)
-if not concurrency_match:
-    sys.exit("missing concurrency configuration in build.yml")
-
-group_expr = concurrency_match.group(1).strip()
-cancel_expr = concurrency_match.group(2).strip()
-
-# Check that group serializes on PR number or ref
-if "${{ github.event.pull_request.number || github.ref }}" not in group_expr:
-    sys.exit(f"concurrency group does not serialize on ref/PR: {group_expr}")
-
-# Check that cancel-in-progress is FALSE for refs/heads/main
-if "github.ref != 'refs/heads/main'" not in cancel_expr:
-    sys.exit(f"concurrency cancel-in-progress does not preserve main: {cancel_expr}")
-
-print("concurrency contract verified: main serializes without cancel-in-progress")
+folder = Path('zz_many_files')
+folder.mkdir()
+for number in range(3000):
+    (folder / (f'file_{number:04d}_' + 'x' * 180 + '.txt')).write_text('fixture\n')
 PY
-check "workflow concurrency protects main serialization" "$?" "0"
+commit_fixture 'fixture: large diff with early UI path'
+git diff --name-only "$large_before" HEAD > "$T/large-diff.txt"
+[ "$(wc -c < "$T/large-diff.txt")" -gt 500000 ]
+BEFORE="$large_before" check_scope 'over 500 KB of paths cannot SIGPIPE into a skip' run 'UI changes detected'
+real_git="$(command -v git)"
+cat > "$T/bin/git" <<'GIT'
+#!/usr/bin/env bash
+if [ "$1" = diff ]; then exit 2; fi
+exec "$BROWSER_FIXTURE_GIT" "$@"
+GIT
+chmod +x "$T/bin/git"
+export BROWSER_FIXTURE_GIT="$real_git"
+BEFORE="$large_before" check_scope 'Git diff failure invokes full suite' run 'git diff failed'
+rm "$T/bin/git"
+hash -r
 
-echo
-if [ "$fail" -eq 0 ]; then
-    echo "build change detection tests: all $pass checks passed"
-else
-    echo "build change detection tests: $fail of $((pass + fail)) checks FAILED" >&2
-fi
-[ "$fail" -eq 0 ]
+# The actual merge parent is authoritative even if the base independently changed its UI.
+git checkout -qb fixture_docs
+printf '%s\n' feature > feature-docs.md
+commit_fixture 'fixture: docs PR'
+git checkout -q main
+printf '%s\n' base >> main/www/fixture.css
+commit_fixture 'fixture: base UI moved'
+git merge --no-ff -qm 'fixture: docs merge tree' fixture_docs
+GITHUB_EVENT_NAME=pull_request check_scope 'docs PR skips despite independent base UI change' skip
+git checkout -qb fixture_ui
+printf '%s\n' feature >> main/www/fixture.css
+commit_fixture 'fixture: UI PR'
+git checkout -q main
+printf '%s\n' base >> README.md
+commit_fixture 'fixture: base docs moved'
+git merge --no-ff -qm 'fixture: UI merge tree' fixture_ui
+GITHUB_EVENT_NAME=pull_request check_scope 'UI PR tests its actual merge-parent range' run 'UI changes detected'
+
+# Pushes may end in a merge: its first parent describes only that merge, not the whole push.
+push_before="$(git rev-parse HEAD)"
+printf '%s\n' earlier-ui >> main/www/fixture.css
+commit_fixture 'fixture: UI before a docs merge'
+git checkout -qb fixture_push_docs
+printf '%s\n' feature > merged-docs.md
+commit_fixture 'fixture: docs merge branch'
+git checkout -q main
+printf '%s\n' docs >> README.md
+commit_fixture 'fixture: main docs'
+git merge --no-ff -qm 'fixture: docs-only final merge' fixture_push_docs
+GITHUB_EVENT_NAME=push BEFORE="$push_before" check_scope 'push ending in a merge includes its earlier UI commit' run 'UI changes detected'
+GITHUB_EVENT_NAME=push check_scope 'push without its event comparison runs full suite' run 'unresolvable comparison range'
+GITHUB_EVENT_NAME=push BEFORE=1111111111111111111111111111111111111111 \
+  check_scope 'unknown push comparison cannot use merge parents' run 'unresolvable comparison range'
+mkdir -p "$T/empty/scripts"
+cp "$REPO/scripts/run-browser-render-tests.sh" "$T/empty/scripts/"
+cd "$T/empty"
+git init -q
+check_scope 'missing HEAD cannot silently skip browser tests' run 'unresolvable comparison range'
+printf 'build change detection: all %s browser routing checks passed\n' "$checks"

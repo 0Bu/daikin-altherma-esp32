@@ -16,17 +16,23 @@ if [[ "${1:-}" == "--if-ui-changed" ]]; then
 
   # 1. PR merge tree: HEAD has two parents (HEAD^1 is base, HEAD^2 is PR head).
   # The diff HEAD^1..HEAD is exactly what this PR introduces relative to the base branch.
-  if git rev-parse --verify -q HEAD^2 >/dev/null 2>&1; then
+  if [ "${GITHUB_EVENT_NAME:-}" = pull_request ] && \
+       git rev-parse --verify -q HEAD^2 >/dev/null 2>&1; then
     range="HEAD^1 HEAD"
   # 2. Multi-commit push: BEFORE names the commit prior to the push on this branch.
-  elif [ -n "$before_candidate" ] && [ "$before_candidate" != "0000000000000000000000000000000000000000" ] && \
-       git cat-file -e "${before_candidate}^{commit}" 2>/dev/null; then
-    range="$before_candidate HEAD"
+  elif [ -n "$before_candidate" ]; then
+    if [ "$before_candidate" != "0000000000000000000000000000000000000000" ] && \
+         git cat-file -e "${before_candidate}^{commit}" 2>/dev/null; then
+      range="$before_candidate HEAD"
+    fi
   # 3. Explicit base SHA candidate (e.g. non-merge PR branch checkout)
-  elif [ -n "$base_candidate" ] && git cat-file -e "${base_candidate}^{commit}" 2>/dev/null; then
-    range="$base_candidate HEAD"
-  # 4. Single-commit fallback
-  elif git rev-parse --verify -q HEAD^1 >/dev/null 2>&1; then
+  elif [ -n "$base_candidate" ]; then
+    if git cat-file -e "${base_candidate}^{commit}" 2>/dev/null; then
+      range="$base_candidate HEAD"
+    fi
+  # 4. Local single-commit fallback, only when no event comparison was supplied.
+  # An unknown event SHA must run the full suite; HEAD^1 can hide an earlier UI commit.
+  elif [ -z "${GITHUB_EVENT_NAME:-}" ] && git rev-parse --verify -q HEAD^1 >/dev/null 2>&1; then
     range="HEAD^1 HEAD"
   fi
 
@@ -34,7 +40,9 @@ if [[ "${1:-}" == "--if-ui-changed" ]]; then
     echo "browser render gate: unresolvable comparison range; running full suite"
   elif ! changed_files="$(git diff --name-only $range 2>/dev/null)"; then
     echo "browser render gate: git diff failed for range '$range'; running full suite"
-  elif ! printf '%s\n' "$changed_files" | grep -qE "$ui_pattern"; then
+  # Read directly from a here-string: even a buffered printf producer can die of SIGPIPE
+  # when grep -q matches early in a long list and pipefail would turn that into a false skip.
+  elif ! grep -qE "$ui_pattern" <<< "$changed_files"; then
     echo "browser render gate: no UI/browser-relevant changes in diff ($range); skipped"
     exit 0
   else
