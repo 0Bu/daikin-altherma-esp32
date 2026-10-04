@@ -267,6 +267,7 @@ export async function launchBrowser() {
   const profile = fs.mkdtempSync(path.join(os.tmpdir(), "daikin-browser-gate-"));
   const child = spawn(executable, [
     "--headless=new",
+    ...(process.env.CI ? ["--no-sandbox"] : []),
     "--disable-background-networking",
     "--disable-component-update",
     "--disable-default-apps",
