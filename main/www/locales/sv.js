@@ -1,4 +1,4 @@
-// translation-source: 57b0fcb43db1c83f37043fc71c9fb312b807a1fb0c56d7a9781cef96f2b64ffb
+// translation-source: 1369786d303329f6e5230c06537e985a4c7735be65bcff1dc17670a9530129f9
 I18N.sv = localeValues([
   /* sys.nodata */ "Inga data",
   /* sys.unreachable */ "Inte tillgänglig",
@@ -556,7 +556,7 @@ I18N.sv = localeValues([
   /* ref.target */ "Måltemperatur",
   /* ref.timestamp_source */ "Källa för tidsstämpel · valfri",
   /* ref.max_age */ "Maximal ålder · sekunder",
-  /* ref.temperature_source_help */ "Exakt MQTT-topic och valfri JSON-sökväg efter $. Saknad eller felaktig sökväg rapporteras när ett meddelande kommer.",
+  /* ref.temperature_source_help */ "Exakt MQTT-topic och valfri JSON-sökväg efter $. Saknad eller felaktig sökväg rapporteras när ett meddelande kommer. I topic och sökvägar skrivs bokstavligt $ som \\$ och \\ som \\\\.",
   /* ref.target_help */ "Fast °C-värde eller exakt MQTT-topic med valfri JSON-sökväg efter $.",
   /* ref.timestamp_source_help */ "Valfri RFC3339-/Unix-källtid som topic$sökväg. Tomt fält använder MQTT-mottagningstiden; kvarhållna värden avvisas då.",
   /* ref.max_age_help */ "Högsta tillåtna ålder för källmätningen (10–3600 s).",
@@ -653,7 +653,7 @@ I18N.sv = localeValues([
   /* wx.detail.unavailable */ "Senaste hämtningen misslyckades; ett äldre värde kan visas endast för diagnos.",
   /* wx.detail.waiting */ "Ingen prognos är mottagen ännu.",
   /* wx.detail.temperature_label */ "Temperatur:",
-  /* wx.detail.temperature */ (v) => `${v} °C är medelprognosen för uteluften under de två närmaste hela timmarna.`,
+  /* wx.detail.temperature */ (v) => `${v} °C är medelprognosen för uteluften under tvåtimmarsperioden som valdes vid den senaste lyckade hämtningen.`,
   /* wx.detail.solar_label */ "Globalstrålning:",
   /* wx.detail.solar */ (v) => `${v} Wh/m² är prognosen för globalstrålning på en horisontell yta i samma tvåtimmarsperiod.`,
   /* wx.detail.source_label */ "Källa:",

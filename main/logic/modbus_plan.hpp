@@ -186,4 +186,17 @@ constexpr bool mb_batch_is_fast(const MbBatch& b) {
     return false;
 }
 
+// A batch may first return an exception and then be retried once per register. Bound that valid
+// fallback as well as the compact path; extended profile probing adds one request on full cycles.
+constexpr uint32_t mb_plan_max_requests(const MbBatch* batches, int count, bool full_cycle,
+                                        bool include_probe = true) {
+    uint32_t requests = full_cycle && include_probe ? 1 : 0;
+    for (int i = 0; i < count; ++i) {
+        const MbBatch& b = batches[i];
+        if (!full_cycle && !mb_batch_is_fast(b)) continue;
+        requests += b.count <= 1 ? 1 : static_cast<uint32_t>(b.count) + 1;
+    }
+    return requests;
+}
+
 } // namespace daik::logic

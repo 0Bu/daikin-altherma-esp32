@@ -58,6 +58,11 @@ namespace daik {
 // bounds the reassembly of the entire ADU, which is the part the Task Watchdog cares about (the poll
 // task resets once per register, so one read must stay well inside the 20 s TWDT budget).
 static constexpr int MB_READ_TIMEOUT_MS = 1500;
+// send() can use one timeout; a final recv() can overrun the whole-reply deadline by one timeout.
+// Allow that declared transport path while expiring a worker that makes no more network progress.
+static constexpr uint32_t MB_REQUEST_BUDGET_MS = 3 * MB_READ_TIMEOUT_MS;
+static constexpr uint32_t MB_REPLY_MAX_AGE_S =
+    (MB_REQUEST_BUDGET_MS + 2 * POLL_INTERVAL_S * 1000 + 999) / 1000;
 // The observed LAN advertises well over 20 HTTP services, while the old browse capped its result
 // list at 20. Since mDNS ordering is not stable, that could omit a perfectly healthy HomeHub. Keep
 // enough headroom for a busy home LAN and repeat a missed multicast query a few times, but stop the
@@ -70,6 +75,8 @@ static constexpr int MB_DISCOVERY_RETRY_MS    = 1000;
 static SemaphoreHandle_t s_mtx = nullptr;   // guards s_status; created in mb_init()
 static ModbusStatus      s_status;          // guarded by s_mtx
 static uint32_t          s_link_generation = 0; // guarded by s_mtx; zero = no connected session yet
+static int64_t           s_last_reply_ms = -1;  // guarded by s_mtx; this session's last valid reply
+static bool s_poll_observed = false;            // guarded by s_mtx; last attempted cycle completed
 
 // ── Poll-task-owned socket state (no lock — single owner, exactly like hp_comm.cpp's s_rx/s_tx) ─────
 static int         s_sock     = -1;   // open socket, or -1
@@ -92,7 +99,7 @@ static uint32_t    s_cycle_tick = 0;
 static bool s_batch_split[def::ALTHERMA4_REG_COUNT] = {false};
 // Currently detected or active Modbus profile. Starts in Auto, transitions affirmatively to
 // Altherma4 on valid water pressure on probe register 79, or to HomeHub on Modbus Exception 02,
-// sentinel unsupported/unavailable, or bounded fallback on transport/value retries. Managed
+// sentinel unsupported, or bounded fallback on transient/unavailable/value retries. Managed
 // across sessions by logic::ModbusProbeTracker.
 static std::atomic<ModbusProfile> s_active_profile{ModbusProfile::Auto};
 static logic::ModbusProbeTracker  s_probe_tracker;
@@ -105,6 +112,7 @@ static std::vector<CachedValue> s_cache;
 static uint32_t s_cache_generation = 0; // guarded by s_cache_mtx; session that committed s_cache
 static uint32_t s_cache_target_generation =
     0; // guarded by s_cache_mtx; configured HomeHub identity
+static int64_t s_cache_commit_ms = 0; // guarded by s_cache_mtx; timestamp of last successful commit
 
 // Task handle + the connect backoff. s_task is read/written under s_mtx so a /set_hp that lands
 // while the old task is retiring cannot race it into starting two tasks. Discovery is never part of
@@ -150,11 +158,29 @@ namespace {
 using Lock = SemGuard;
 } // namespace
 
+static uint32_t mb_reply_age_locked() {
+    const int64_t now_ms = esp_timer_get_time() / 1000;
+    const int64_t age_s  = s_last_reply_ms >= 0 && now_ms >= s_last_reply_ms
+                               ? (now_ms - s_last_reply_ms + 999) / 1000
+                               : INT64_MAX;
+    return age_s < UINT32_MAX ? static_cast<uint32_t>(age_s) : UINT32_MAX;
+}
+
 ModbusStatus mb_status() {
     if (!s_mtx) return ModbusStatus{};
     Lock lk(s_mtx);
     ModbusStatus s = s_status;
     s.profile      = s_active_profile.load(std::memory_order_acquire);
+    if (!s_poll_observed || mb_reply_age_locked() > MB_REPLY_MAX_AGE_S) {
+        // An open socket and a fresh observation are separate facts. Expire every diagnosis input
+        // alongside values without fabricating "inactive" from a skipped/paused worker.
+        s.values              = 0;
+        s.plant_gate_known    = false;
+        s.plant_gate_active   = false;
+        s.heating_mode_known  = false;
+        s.heating_mode_active = false;
+        s.plant_outdoor       = logic::OutdoorEvidence{};
+    }
     return s;
 }
 
@@ -171,6 +197,8 @@ static bool status_target(std::string host, int port, int unit, bool discovering
     s_status.unit_id     = unit;
     s_status.discovering = discovering;
     s_status.connected   = false;
+    s_last_reply_ms      = -1;
+    s_poll_observed      = false;
     return true;
 }
 static bool status_error(std::string code, std::string msg, int detail = -1, int reg = 0,
@@ -252,6 +280,8 @@ static bool status_socket_open(std::string host, int port, int unit,
     s_status.port          = port;
     s_status.unit_id       = unit;
     s_status.connected     = false;
+    s_last_reply_ms        = -1;
+    s_poll_observed        = false;
     s_status.discovering   = false;
     s_status.profile       = prof;
     s_status.profile_basis = s_probe_tracker.profile_basis;
@@ -657,6 +687,7 @@ static bool mb_read(MbFunc space, uint16_t addr, uint16_t qty, MbRead& io, MbFai
     if (p == MbParse::Ok) {
         Lock lk(s_mtx);
         s_status.rx_ok++;
+        s_last_reply_ms = esp_timer_get_time() / 1000;
         return true;
     }
     // An Exception is a VALID reply (the register is simply unreadable now) — count it but keep the
@@ -667,6 +698,10 @@ static bool mb_read(MbFunc space, uint16_t addr, uint16_t qty, MbRead& io, MbFai
         s_status.rx_fail++;
     }
     if (p == MbParse::Exception) {
+        {
+            Lock lk(s_mtx);
+            s_last_reply_ms = esp_timer_get_time() / 1000;
+        }
         failure.type = MbFailureType::Exception;
         failure.detail = out.exc_code;
     } else {
@@ -788,6 +823,10 @@ constexpr auto MB_PLAN_ALTHERMA4 = mb_plan_make_from<def::ALTHERMA4_REG_COUNT>(d
 static_assert(MB_PLAN_ALTHERMA4.ok, "Altherma 4 register table does not yield a usable read plan");
 static_assert(MB_PLAN_ALTHERMA4.count * 3 <= def::ALTHERMA4_REG_COUNT,
               "batching no longer collapses the Altherma 4 map — re-check the register offsets");
+static constexpr uint32_t MB_CACHE_MAX_AGE_S = logic::modbus_cache_max_age_s(
+    logic::MB_FULL_CYCLE_TICKS, POLL_INTERVAL_S * 1000, MB_REQUEST_BUDGET_MS,
+    logic::mb_plan_max_requests(MB_PLAN_ALTHERMA4.batch, MB_PLAN_ALTHERMA4.count, true),
+    logic::mb_plan_max_requests(MB_PLAN_ALTHERMA4.batch, MB_PLAN_ALTHERMA4.count, false));
 } // namespace
 
 // ── One poll cycle ───────────────────────────────────────────────────────────────────────────────
@@ -828,18 +867,19 @@ static void mb_poll_once() {
     if (!mb_ensure_connected(target, c.mb_port, c.mb_unit_id, cycle_target_generation)) {
         // THE CACHE GOES WITH THE LINK. Keeping it was a real defect: /values kept serving the last
         // good readings, the browser had no way to tell they were minutes old, and it went on
-        // printing them as the live second opinion — complete with a computed "difference" against a
-        // live X10A value, which is a number about two instants presented as a number about two
+        // printing them as the live second opinion — complete with a computed "difference" against
+        // a live X10A value, which is a number about two instants presented as a number about two
         // instruments. Everything else in this firmware refuses exactly that (a held-over outdoor
         // reading blanks rather than being shown dimmer). The LIVE cache is therefore dropped; the
         // separate trend rings retain only timestamped past samples and receive an explicit gap for
         // this failed cycle. The value cache is otherwise refreshed by full cycles and remains
-        // bounded to at most MB_FULL_CYCLE_TICKS - 1 poll intervals old.
+        // bounded by the full cadence, including the declared request and fallback budgets.
         {
             Lock lk(s_cache_mtx);
             s_cache.clear();
             s_cache_generation = 0;
             s_cache_target_generation = 0;
+            s_cache_commit_ms         = 0;
             s_mb_cache_revision.fetch_add(1, std::memory_order_release);
         }
         { Lock lk(s_mtx); s_status.values = 0; }
@@ -1127,10 +1167,11 @@ static void mb_poll_once() {
     };
     // A FAST CYCLE COMMITS NO VALUE CACHE. It read thirteen of the map's registers, so its
     // `fresh` is not a cache and its raster position is not a sample: committing it would publish a
-    // /values array of thirteen rows and hand the trend rings a bucket in which 19 of the 32 rows look
-    // like a failure to read. The cache and the rings stay with the last FULL cycle, which is at most
-    // MB_FULL_CYCLE_TICKS - 1 poll intervals old — and `values`/`connected` below still report this
-    // cycle's link, so a hub that went away is visible within a second rather than within a cadence.
+    // /values array of thirteen rows and hand the trend rings a bucket in which 19 of the 32 rows
+    // look like a failure to read. The cache and the rings stay with the last FULL cycle. Its age
+    // includes both poll delays and bounded requests — and `values`/`connected` below still report
+    // this cycle's link, so a hub that went away is visible within a second rather than within a
+    // cadence.
     if (!full) {
         bool final_current_session = false;
         {
@@ -1142,6 +1183,7 @@ static void mb_poll_once() {
             // reports 0 for the same reason the full path does — the cache is about to go with it.
             if (!final_current_session) s_status.values = 0;
             s_status.connected = final_current_session;
+            s_poll_observed              = final_current_session;
             s_status.profile             = s_active_profile.load(std::memory_order_relaxed);
             s_status.profile_basis       = s_probe_tracker.profile_basis;
             s_status.plant_gate_known = final_current_session && plant_gate_known;
@@ -1175,11 +1217,13 @@ static void mb_poll_once() {
             s_cache = std::move(fresh);            // move-assign: steals the buffer, cannot throw
             s_cache_generation = cycle_generation;
             s_cache_target_generation = cycle_target_generation;
+            s_cache_commit_ms         = esp_timer_get_time() / 1000;
             s_mb_cache_revision.fetch_add(1, std::memory_order_release);
         } else {
             s_cache.clear();
             s_cache_generation = 0;
             s_cache_target_generation = 0;
+            s_cache_commit_ms         = 0;
             s_mb_cache_revision.fetch_add(1, std::memory_order_release);
         }
     }
@@ -1204,6 +1248,7 @@ static void mb_poll_once() {
             s_target_generation.load(std::memory_order_acquire) == cycle_target_generation;
         s_status.values = final_current_session ? committed : 0;
         s_status.connected = final_current_session;
+        s_poll_observed              = final_current_session;
         s_status.profile             = s_active_profile.load(std::memory_order_relaxed);
         s_status.profile_basis       = s_probe_tracker.profile_basis;
         s_status.plant_gate_known = final_current_session && plant_gate_known;
@@ -1218,6 +1263,13 @@ static void mb_poll_once() {
 }
 
 static void mb_task_start_if_enabled() noexcept;
+
+static void mb_record_poll_gap() {
+    // No Config or formatted error allocation on an OOM path. An incomplete full sweep can have
+    // received replies before it threw; those replies prove a socket, not a refreshed value map.
+    Lock lk(s_mtx);
+    s_poll_observed = false;
+}
 
 // The task. Self-guarded like every other allocating FreeRTOS loop here (AGENTS.md → Memory,
 // concurrency, and HTTP safety): an escaping std::bad_alloc would reach std::terminate and reboot
@@ -1289,8 +1341,10 @@ static void mb_task(void*) {
                     // can throw when the exception was std::bad_alloc. Transport/protocol failures
                     // take the structured status_error() path before reaching this last-resort
                     // guard.
+                    mb_record_poll_gap();
                     diag_printf("modbus: cycle skipped (%s)\n", e.what());
                 } catch (...) {
+                    mb_record_poll_gap();
                     diag_printf("modbus: cycle skipped (oom?)\n");
                 }
             }
@@ -1298,17 +1352,14 @@ static void mb_task(void*) {
         vTaskDelay(pdMS_TO_TICKS(POLL_INTERVAL_S * 1000));
     }
     mb_disconnect();
-    {
-        Lock lk(s_mtx);
-        s_status.enabled = false;
-        s_status.values  = 0;
-        s_task           = nullptr;
-    }
+    // Complete every task-owned clear while s_task still excludes a successor. In particular an
+    // old cache clear must never run after the replacement task has committed its first sample.
     {
         Lock lk(s_cache_mtx);
         s_cache.clear();
         s_cache_generation = 0;
         s_cache_target_generation = 0;
+        s_cache_commit_ms         = 0;
         s_mb_cache_revision.fetch_add(1, std::memory_order_release);
     }
     diag_printf("modbus: HomeHub disabled by empty configuration — stack stopped\n");
@@ -1317,8 +1368,16 @@ static void mb_task(void*) {
     // once, on entry — possibly on the other core before this task resumes — so clearing it after
     // the restart would leave hp_modbus_ota_quiesced() reporting a stopped stack for the
     // successor's whole life, and OTA admission would stop waiting for a live Modbus socket.
-    s_ota_quiesced.store(false, std::memory_order_release);
-    s_mb_task_running.store(false, std::memory_order_release);
+    {
+        Lock lk(s_mtx);
+        s_status.enabled = false;
+        s_status.values  = 0;
+        s_last_reply_ms  = -1;
+        s_poll_observed  = false;
+        s_ota_quiesced.store(false, std::memory_order_release);
+        s_mb_task_running.store(false, std::memory_order_release);
+        s_task = nullptr; // publish the free slot LAST; no old-task shared writes follow
+    }
     // /set_hp may have saved a new address after this task decided to retire but before it
     // cleared s_task. Its mb_reconfigure() correctly saw a task still alive and did not duplicate it;
     // now re-check the latest intent so that request is not lost in the teardown window.
@@ -1396,6 +1455,8 @@ void mb_reconfigure(bool enabled) noexcept {
         s_status.last_error_detail   = -1;
         s_status.last_error_register = 0;
         s_status.connected           = false;
+        s_last_reply_ms              = -1;
+        s_poll_observed              = false;
         s_status.values              = 0;
         s_status.plant_gate_known    = false;
         s_status.plant_gate_active   = false;
@@ -1408,6 +1469,7 @@ void mb_reconfigure(bool enabled) noexcept {
         s_cache.clear();
         s_cache_generation        = 0;
         s_cache_target_generation = 0;
+        s_cache_commit_ms         = 0;
         s_mb_cache_revision.fetch_add(1, std::memory_order_release);
     }
     mb_task_start_if_enabled();
@@ -1426,12 +1488,18 @@ size_t mb_values_snapshot(CachedValue* out, size_t max, bool& live) {
     size_t   n                       = 0;
     uint32_t cache_generation        = 0;
     uint32_t cache_target_generation = 0;
+    uint32_t cache_age_s             = 0;
     {
         Lock lk(s_cache_mtx);
         n = s_cache.size() < max ? s_cache.size() : max;
         for (size_t i = 0; i < n; i++) out[i] = s_cache[i];
         cache_generation        = s_cache_generation;
         cache_target_generation = s_cache_target_generation;
+        const int64_t now_ms    = esp_timer_get_time() / 1000;
+        const int64_t age_s     = (s_cache_commit_ms > 0 && now_ms >= s_cache_commit_ms)
+                                      ? (now_ms - s_cache_commit_ms + 999) / 1000
+                                      : INT64_MAX;
+        cache_age_s             = age_s < UINT32_MAX ? static_cast<uint32_t>(age_s) : UINT32_MAX;
     }
     // The link is re-read AFTER the copy, and that order is what makes the payload invariant TRUE
     // rather than merely intended. The cache and the link state sit behind two different mutexes,
@@ -1447,15 +1515,25 @@ size_t mb_values_snapshot(CachedValue* out, size_t max, bool& live) {
         Lock lk(s_mtx);
         const uint32_t target_generation =
             s_target_generation.load(std::memory_order_acquire);
-        live = logic::modbus_cache_is_live(s_status.connected, s_link_generation,
+        const uint32_t reply_age_s = mb_reply_age_locked();
+        live = logic::modbus_cache_is_live(s_status.connected && s_poll_observed, s_link_generation,
                                            cache_generation, target_generation,
-                                           cache_target_generation);
+                                           cache_target_generation, cache_age_s, MB_CACHE_MAX_AGE_S,
+                                           reply_age_s, MB_REPLY_MAX_AGE_S);
     }
     // Seqlock-style retry boundary: a target change overlapping the two-lock snapshot is never live.
     if (live && cache_target_generation !=
                     s_target_generation.load(std::memory_order_acquire))
         live = false;
     return n;
+}
+
+bool mb_values_live() {
+    // Same two-lock/generation/age decision as the copying accessor, without allocating a vector
+    // merely to notice an expiry on the MQTT task's one-second tick.
+    bool live = false;
+    mb_values_snapshot(nullptr, 0, live);
+    return live;
 }
 
 bool hp_modbus_ota_quiesced() {

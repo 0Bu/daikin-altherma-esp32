@@ -75,6 +75,23 @@ export function readAppFragments(names, source = DEFAULT_APP_SOURCE) {
   return files.map((file) => fs.readFileSync(file, "utf8")).join("");
 }
 
+// Isolated renderer/settings harnesses supply their own S fixture, so loading all of app_state.js
+// would redeclare it and also pull in unrelated navigation. Keep the actual lifecycle functions in
+// their production order and fail closed if the explicit section boundaries ever move or duplicate.
+export function readHistoryLifecycle(source = DEFAULT_APP_SOURCE) {
+  const state = readAppFragments(["app_state.js"], source);
+  const startMarker = "// ── History source lifecycle";
+  const endMarker = "// ── Navigation (dashboard ⇄ Settings)";
+  const start = state.indexOf(startMarker);
+  const end = state.indexOf(endMarker);
+  if (start < 0 || end < 0 || end <= start ||
+      state.indexOf(startMarker, start + startMarker.length) !== -1 ||
+      state.indexOf(endMarker, end + endMarker.length) !== -1) {
+    fail("app_state.js history lifecycle section boundaries are missing, duplicated or out of order");
+  }
+  return state.slice(start, end);
+}
+
 // Locale modules are deliberately outside app.sources so they do not consume the dashboard's
 // 160 KiB single-response startup budget. Focused host tests can still execute the exact separately
 // shipped source rather than copying translations into fixtures.

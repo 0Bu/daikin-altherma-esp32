@@ -75,6 +75,7 @@ HEADER_ROWS = (
     ("esp_log.h", "U03"),
     ("esp_mac.h", "U03"),
     ("esp_system.h", "U03"),
+    ("esp_random.h", "U03"),
     ("esp_task_wdt.h", "U04"),
     ("esp_timer.h", "U04"),
     ("nvs.h", "U05"),

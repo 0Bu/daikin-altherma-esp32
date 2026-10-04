@@ -4,7 +4,7 @@
 // never again freeze Settings before its first card render or mislabel that window as unreachable.
 import assert from "node:assert/strict";
 import vm from "node:vm";
-import { readAppFragments } from "../tools/ui/read_app_source.mjs";
+import { readAppFragments, readHistoryLifecycle } from "../tools/ui/read_app_source.mjs";
 
 const otaSource = readAppFragments(["history.js", "settings.js", "bootstrap.js"]);
 assert.doesNotMatch(otaSource,
@@ -79,7 +79,7 @@ class Element {
   const S = {
     status: null, busy: false, otaBusy: false, otaInstalling: false, otaShown: false, otaView: null,
     otaAvail: null, otaCached: false, settingsHydrated: false, clickHold: false, scrub: null,
-    descOpen: new Set(),
+    descOpen: new Set(), hist: new Map(), histBusy: new Set(), histPin: new Map(),
   };
   let languageHydrations = 0;
   let dashboardStatusPaints = 0;
@@ -121,7 +121,7 @@ class Element {
     setTimeout: () => 1,
     clearTimeout: () => {},
   };
-  const source = readAppFragments(["dashboard.js", "settings.js"]);
+  const source = readHistoryLifecycle() + readAppFragments(["dashboard.js", "settings.js"]);
   const sandbox = vm.createContext(context);
   vm.runInContext(
     `${source}\nthis.__api = { resumeOta, renderSettings, otaCacheRestore };`,
@@ -177,6 +177,7 @@ function elementsFor(...ids) {
   const S = {
     status: null, busy: false, otaBusy: false, otaInstalling: false, otaShown: false, otaView: null,
     otaAvail: null, settingsHydrated: false, clickHold: false, scrub: null,
+    hist: new Map(), histBusy: new Set(), histPin: new Map(),
   };
   let dashboardStatusPaints = 0;
   const context = {
@@ -216,7 +217,7 @@ function elementsFor(...ids) {
     setTimeout: () => 1,
     clearTimeout: () => {},
   };
-  const source = readAppFragments(["dashboard.js", "settings.js"]);
+  const source = readHistoryLifecycle() + readAppFragments(["dashboard.js", "settings.js"]);
   const sandbox = vm.createContext(context);
   vm.runInContext(
     `${source}\nthis.__api = { resumeOta, renderSettings };`,

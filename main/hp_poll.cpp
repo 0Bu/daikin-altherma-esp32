@@ -25,6 +25,7 @@
 #include "logic/history.hpp"   // history_parse_tenths — the SAME parse history.cpp applies to the witness
 #include "logic/history_persist.hpp"  // source identity fingerprint for durable X10A history
 #include "logic/mqtt_group.hpp" // allocation-free grouped JSON probe/copy over the committed cache
+#include "logic/mqtt_publish_gate.hpp" // one age boundary for MQTT and HTTP X10A observations
 #include "logic/ou_stale.hpp"
 #include "logic/ota_quiesce.hpp"
 #include "logic/raw_capture.hpp"
@@ -504,7 +505,8 @@ static void poll_once() {
     // `fresh`, which is exactly the evidence the dwell needs to book blind seconds rather than
     // extend a run it did not watch. Reading it anywhere else would see a cache that has already
     // forgotten which rows were missing this cycle.
-    dwell_record(fresh.data(), fresh.size(), cycle_generation);
+    dwell_record(fresh.data(), fresh.size(), cycle_generation,
+                 static_cast<uint32_t>((service_max_gap_us + 999999) / 1000000));
 
     // One commit, one lock site, and deliberately non-allocating: the vector move-assign steals
     // fresh's buffer and last_error is swapped (noexcept) rather than assigned, so the critical
@@ -786,7 +788,10 @@ static void poll_task(void*) {
         const bool network_active = ota_active || weather_active;
         if (ota_quiesce_step(network_quiesce, network_active)) {
             s_network_quiesced.store(true, std::memory_order_release);
-            refrigerant_service_record_poll_gap(hp_poll_generation());
+            const uint32_t generation = hp_poll_generation();
+            checkup_record(nullptr, 0, false, false, logic::CheckupCoverage{}, generation);
+            dwell_record(nullptr, 0, generation);
+            refrigerant_service_record_poll_gap(generation);
             esp_task_wdt_reset();  // explicit on the held path; keep this true if code moves above it
             if (!network_quiesce_logged) {
                 diag_printf("poll: holding off X10A sweeps during %s\n",
@@ -877,11 +882,17 @@ static void poll_task(void*) {
             // records the cycle even when the log line describing it never makes it into the ring
             // (legacy-380: the ring was the ONLY evidence, and a chatty boot overwrites it).
             s_cycles_skipped.fetch_add(1, std::memory_order_relaxed);
-            refrigerant_service_record_poll_gap(hp_poll_generation());
+            const uint32_t generation = hp_poll_generation();
+            checkup_record(nullptr, 0, false, false, logic::CheckupCoverage{}, generation);
+            dwell_record(nullptr, 0, generation);
+            refrigerant_service_record_poll_gap(generation);
             diag_printf("poll: cycle skipped (%s)\n", e.what());
         } catch (...) {
             s_cycles_skipped.fetch_add(1, std::memory_order_relaxed);
-            refrigerant_service_record_poll_gap(hp_poll_generation());
+            const uint32_t generation = hp_poll_generation();
+            checkup_record(nullptr, 0, false, false, logic::CheckupCoverage{}, generation);
+            dwell_record(nullptr, 0, generation);
+            refrigerant_service_record_poll_gap(generation);
             diag_printf("poll: cycle skipped (oom?)\n");
         }
         // Serve at most one free probe after the sweep. Its Config access is POD-only and normally
@@ -970,6 +981,14 @@ size_t hp_values_capacity(uint32_t* revision_out) {
     return n > prof_cap ? n : prof_cap;
 }
 
+// Called only while s_mtx is held, so source time and cache identity are one snapshot decision.
+static bool x10a_cache_recent_locked() {
+    const int64_t now = esp_timer_get_time();
+    if (s_last_ok_us < 0 || now < s_last_ok_us) return false;
+    const int64_t age_s = (now - s_last_ok_us) / 1000000;
+    return age_s <= INT32_MAX && x10a_source_is_recent(static_cast<int32_t>(age_s));
+}
+
 size_t hp_values_snapshot(CachedValue* out, size_t max, size_t* total_out, uint32_t* revision_out) {
     if (!s_mtx) {
         if (total_out) *total_out = 0;
@@ -977,8 +996,12 @@ size_t hp_values_snapshot(CachedValue* out, size_t max, size_t* total_out, uint3
         return 0;
     }
     Lock lk(s_mtx);
-    if (total_out) *total_out = s_cache.size();
     if (revision_out) *revision_out = s_cache_revision;
+    if (!x10a_cache_recent_locked()) {
+        if (total_out) *total_out = 0;
+        return 0;
+    }
+    if (total_out) *total_out = s_cache.size();
     size_t n = s_cache.size() < max ? s_cache.size() : max;
     for (size_t i = 0; i < n; i++) out[i] = s_cache[i];
     return n;
@@ -988,6 +1011,7 @@ bool hp_values_snapshot_aligned(CachedValue* out, size_t count, const char* expe
                                 uint64_t expected_identity_fp) {
     if (!s_mtx) return false;
     Lock lk(s_mtx);
+    if (!x10a_cache_recent_locked()) return false;
     if (!logic::x10a_snapshot_source_matches(s_cache_profile, s_cache_identity_fp,
                                              expected_profile, expected_identity_fp))
         return false;
@@ -1000,6 +1024,7 @@ HpX10aJsonProbe hp_values_x10a_json_probe(const char* expected_profile,
     HpX10aJsonProbe result;
     if (!s_mtx) return result;
     Lock lk(s_mtx);
+    if (!x10a_cache_recent_locked()) return result;
     if (!logic::x10a_snapshot_source_matches(s_cache_profile, s_cache_identity_fp,
                                              expected_profile, expected_identity_fp)) return result;
     const X10aCacheJsonProbe probe = probe_x10a_cache_json(s_cache);
@@ -1020,6 +1045,7 @@ HpX10aJsonCopyResult hp_values_x10a_json_copy(std::string& out, size_t expected_
     if (out.capacity() < expected_bytes) return HpX10aJsonCopyResult::BufferTooSmall;
     if (!s_mtx) return HpX10aJsonCopyResult::SourceMismatch;
     Lock lk(s_mtx);
+    if (!x10a_cache_recent_locked()) return HpX10aJsonCopyResult::SourceMismatch;
     if (!logic::x10a_snapshot_source_matches(s_cache_profile, s_cache_identity_fp,
                                              expected_profile, expected_identity_fp))
         return HpX10aJsonCopyResult::SourceMismatch;
@@ -1040,6 +1066,9 @@ HpStats hp_stats() {
     st = s_stats;
     st.last_ok_s = s_last_ok_us < 0 ? -1
                  : static_cast<int32_t>((esp_timer_get_time() - s_last_ok_us) / 1000000);
+    const bool recent = x10a_source_is_recent(st.last_ok_s);
+    st.connected      = st.connected && recent;
+    if (!recent) st.values = 0;
     return st;
 }
 
@@ -1052,7 +1081,7 @@ logic::RefrigerantServiceSnapshot refrigerant_service_status() {
 bool hp_link_connected() {
     if (!s_mtx) return false;
     Lock lk(s_mtx);
-    return s_stats.connected;
+    return s_stats.connected && x10a_cache_recent_locked();
 }
 
 uint32_t hp_skipped_cycles() { return s_cycles_skipped.load(std::memory_order_relaxed); }

@@ -1,4 +1,4 @@
-// translation-source: 57b0fcb43db1c83f37043fc71c9fb312b807a1fb0c56d7a9781cef96f2b64ffb
+// translation-source: 1369786d303329f6e5230c06537e985a4c7735be65bcff1dc17670a9530129f9
 I18N.zh = localeValues([
   /* sys.nodata */ "无数据",
   /* sys.unreachable */ "无法访问",
@@ -556,7 +556,7 @@ I18N.zh = localeValues([
   /* ref.target */ "目标温度",
   /* ref.timestamp_source */ "时间戳来源 · 可选",
   /* ref.max_age */ "最大时效 · 秒",
-  /* ref.temperature_source_help */ "精确 MQTT 主题，可在 $ 后附加 JSON 路径。收到消息时会报告路径缺失或错误。",
+  /* ref.temperature_source_help */ "精确 MQTT 主题，可在 $ 后附加 JSON 路径。收到消息时会报告路径缺失或错误。 主题和路径中的字面 $ 请写成 \\$，字面 \\ 请写成 \\\\。",
   /* ref.target_help */ "固定 °C 数值，或精确 MQTT 主题并可在 $ 后附加 JSON 路径。",
   /* ref.timestamp_source_help */ "可选 RFC3339/Unix 源时间：主题$路径。留空用 MQTT 实时到达时间，并拒绝 retained 值。",
   /* ref.max_age_help */ "源读数允许的最大时效：10 到 3600 秒。",
@@ -653,7 +653,7 @@ I18N.zh = localeValues([
   /* wx.detail.unavailable */ "最近一次获取失败；若有旧值，也仅供诊断。",
   /* wx.detail.waiting */ "尚未收到预报。",
   /* wx.detail.temperature_label */ "温度：",
-  /* wx.detail.temperature */ (v) => `${v} °C 是未来两个完整小时的预测室外平均气温。`,
+  /* wx.detail.temperature */ (v) => `${v} °C 是上次成功获取时选定的两小时时段的预测室外平均气温。`,
   /* wx.detail.solar_label */ "太阳辐照量：",
   /* wx.detail.solar */ (v) => `${v} Wh/m² 是同一两小时时段的预测水平面总辐照量。`,
   /* wx.detail.source_label */ "来源：",

@@ -3,7 +3,7 @@
 // payload here recreates the production race even when the firmware API itself is correct.
 import assert from "node:assert/strict";
 import vm from "node:vm";
-import { readAppFragments } from "../tools/ui/read_app_source.mjs";
+import { readAppFragments, readHistoryLifecycle } from "../tools/ui/read_app_source.mjs";
 
 class Element {
   constructor(id = "") {
@@ -44,6 +44,7 @@ const storage = new Map();
 const S = {
   status: null, busy: false, otaBusy: false, otaInstalling: false, otaShown: false,
   otaView: null, otaAvail: null, otaCached: false,
+  hist: new Map(), histBusy: new Set(), histPin: new Map(),
 };
 let statuses = [];
 let checkResponse = null;
@@ -102,7 +103,7 @@ const context = {
 };
 sandbox = vm.createContext(context);
 vm.runInContext(
-  `${readAppFragments(["settings.js"])}\nthis.__api = { otaPoll, checkFirmwareUpdate, settleOtaDecision };`,
+  `${readHistoryLifecycle()}${readAppFragments(["settings.js"])}\nthis.__api = { otaPoll, checkFirmwareUpdate, settleOtaDecision };`,
   sandbox,
   { filename: "main/www/js/settings.js" },
 );

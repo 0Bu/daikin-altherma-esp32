@@ -76,7 +76,8 @@ struct HpStats {
 // TCP) — /values and the MQTT bridge size their snapshot buffers from this so no row is truncated.
 size_t hp_values_capacity(uint32_t* revision_out = nullptr);
 
-// Thread-safe snapshot copy of the current value cache. Returns count written.
+// Thread-safe snapshot copy of the current value cache. Returns count written; zero once the last
+// real X10A reply is 15 seconds old, including skipped/OOM polls that left connected/cache intact.
 size_t hp_values_snapshot(CachedValue* out, size_t max, size_t* total_out = nullptr,
                           uint32_t* revision_out = nullptr);
 

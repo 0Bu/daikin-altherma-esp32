@@ -14,6 +14,9 @@
 #
 set -euo pipefail
 
+export NO_PROXY="*"
+export no_proxy="*"
+
 IP=""
 CHANNEL="dev"
 EXPECTED_VERSION=""

@@ -3336,6 +3336,75 @@ static void test_weather_fetch_headroom() {
     CHECK(json_suffix_is_whitespace(" \t\r\n"));
     CHECK(!json_suffix_is_whitespace(" trailing"));
     CHECK(!json_suffix_is_whitespace(std::string_view("\0", 1)));
+    CHECK(json_payload_depth_ok("{}"));
+    CHECK(json_payload_depth_ok("}"));
+    CHECK(json_payload_depth_ok("]"));
+    CHECK(json_payload_depth_ok("{\"a\": [1, 2, {\"b\": 3}]}"));
+    CHECK(json_payload_depth_ok("{\"depth\": 1}", 1));
+    CHECK(!json_payload_depth_ok("{\"depth\": {\"nested\": 2}}", 1));
+    CHECK(json_payload_depth_ok("{\"depth\": {\"nested\": 2}}", 2));
+    CHECK(json_payload_depth_ok("{\"str\": \"{\\\"escaped\\\": {{{{}}}}\"}", 1));
+    std::string deep(17, '{');
+    deep += std::string(17, '}');
+    CHECK(!json_payload_depth_ok(deep, MQTT_JSON_MAX_DEPTH));
+    std::string ok_depth(16, '{');
+    ok_depth += std::string(16, '}');
+    CHECK(json_payload_depth_ok(ok_depth, MQTT_JSON_MAX_DEPTH));
+
+    // Valid nested documents exercise the preflight before any recursive parser is entered.
+    auto arrays = [](size_t depth) {
+        return std::string(depth, '[') + "0" + std::string(depth, ']');
+    };
+    CHECK(json_payload_depth_ok(arrays(JSON_MAX_DEPTH)));
+    CHECK(!json_payload_depth_ok(arrays(JSON_MAX_DEPTH + 1)));
+    CHECK(!json_payload_depth_ok(arrays(400)));
+    CHECK(json_payload_depth_ok(R"({"text":"[{\\\"}\\\\[]"})", 1));
+
+    int    object = 0, parses = 0, deletes = 0;
+    size_t consumed    = 0;
+    int    end_offset  = 0;
+    bool   parse_fails = false, missing_end = false;
+    auto   parse = [&](const char* bytes, size_t length, const char** end) noexcept -> int* {
+        parses++;
+        CHECK(length >= consumed);
+        *end = missing_end ? nullptr : bytes + consumed + end_offset;
+        return parse_fails ? nullptr : &object;
+    };
+    auto destroy = [&](int* root) noexcept {
+        CHECK(root == &object);
+        deletes++;
+    };
+    consumed = 2;
+    CHECK(json_parse_bounded("{} \t\r\n", parse, destroy) == &object);
+    CHECK(parses == 1 && deletes == 0);
+    for (const std::string& suffix :
+         {std::string("{}"), std::string("garbage"), std::string(1, '\0')}) {
+        CHECK(json_parse_bounded(std::string("{}") + suffix, parse, destroy) == nullptr);
+    }
+    CHECK(parses == 4 && deletes == 3);
+    CHECK(json_parse_bounded(arrays(17), parse, destroy) == nullptr);
+    CHECK(json_parse_bounded(arrays(400), parse, destroy) == nullptr);
+    CHECK(json_parse_bounded("", parse, destroy) == nullptr);
+    CHECK(parses == 4); // excessive nesting never reaches the parser or its recursive deleter
+    consumed = arrays(16).size();
+    CHECK(json_parse_bounded(arrays(16), parse, destroy) == &object);
+    missing_end = true;
+    CHECK(json_parse_bounded(arrays(16), parse, destroy) == nullptr);
+    CHECK(deletes == 4);
+    missing_end = false;
+    parse_fails = true;
+    CHECK(json_parse_bounded(arrays(16), parse, destroy) == nullptr);
+    CHECK(deletes == 4); // failed parsers do not transfer ownership
+    parse_fails                    = false;
+    const std::string      storage = "x{}y";
+    const std::string_view view(storage.data() + 1, 2);
+    consumed   = 0;
+    end_offset = -1;
+    CHECK(json_parse_bounded(view, parse, destroy) == nullptr);
+    consumed   = view.size();
+    end_offset = 1;
+    CHECK(json_parse_bounded(view, parse, destroy) == nullptr);
+    CHECK(deletes == 6);
 }
 
 // /values waits boundedly behind the short Weather TLS allocator, but a newly active OTA owner must
@@ -5348,20 +5417,45 @@ static void test_modbus_plan() {
 }
 
 static void test_modbus_snapshot() {
-    using daik::logic::modbus_cache_is_live;
-    // A disconnected link never publishes, even if the cache and last session happen to match.
-    CHECK(!modbus_cache_is_live(false, 7, 7, 3, 3));
-    // The load-bearing reconnect case: /values copied session 7's cache, then session 8 connected
-    // before it sampled status. A boolean-only post-check says "live"; the generation check refuses
-    // the previous session's rows until session 8 has committed its own poll.
-    CHECK(!modbus_cache_is_live(true, 8, 7, 3, 3));
-    CHECK(modbus_cache_is_live(true, 8, 8, 3, 3));
-    // A saved target invalidates the previous cache immediately, before the poll task gets CPU time
-    // to close its old socket and publish a replacement cycle.
-    CHECK(!modbus_cache_is_live(true, 8, 8, 4, 3));
-    // Generation zero is the pre-first-commit sentinel, not a coincidentally matching session.
-    CHECK(!modbus_cache_is_live(true, 0, 0, 3, 3));
-    CHECK(!modbus_cache_is_live(true, 8, 8, 0, 0));
+    using namespace daik::logic;
+    SourceTimestampHighWater source_time;
+    CHECK(!source_time.accept(-1));
+    CHECK(source_time.allows(0));
+    CHECK(source_time.accept(0));
+    CHECK(!source_time.allows(-1));
+    CHECK(source_time.accept(1000));
+    CHECK(!source_time.accept(-1));
+    CHECK(!source_time.allows(999));
+    CHECK(source_time.last_unix_s == 1000);
+    CHECK(!source_time.allows(0));
+    CHECK(source_time.accept(1000));
+    CHECK(source_time.accept(1001));
+    source_time.reset();
+    CHECK(source_time.accept(999));
+    CHECK(!modbus_cache_is_live(false, 7, 7, 3, 3, 0, 6));
+    CHECK(!modbus_cache_is_live(true, 8, 7, 3, 3, 0, 6));
+    CHECK(modbus_cache_is_live(true, 8, 8, 3, 3, 0, 6));
+    CHECK(!modbus_cache_is_live(true, 8, 8, 4, 3, 0, 6));
+    CHECK(!modbus_cache_is_live(true, 0, 0, 3, 3, 0, 6));
+    CHECK(!modbus_cache_is_live(true, 8, 8, 0, 0, 0, 6));
+    // Full-cycle age includes bounded full/fast requests and sleeps; transport reply age
+    // independently detects stalled/OOM polling without waiting for the full-map budget.
+    constexpr auto budget = modbus_cache_max_age_s(5, 1000, 4500, 56, 16);
+    CHECK(budget == 546);
+    CHECK(modbus_cache_is_live(true, 8, 8, 3, 3, 6, budget, 1, 7));
+    CHECK(modbus_cache_is_live(true, 8, 8, 3, 3, budget, budget, 7, 7));
+    CHECK(!modbus_cache_is_live(true, 8, 8, 3, 3, budget + 1, budget, 1, 7));
+    CHECK(!modbus_cache_is_live(true, 8, 8, 3, 3, 6, budget, 8, 7));
+    CHECK(modbus_cache_max_age_s(0, 1000, 0, 0, 0) == 1);
+    CHECK(modbus_cache_max_age_s(UINT32_MAX, UINT32_MAX, UINT32_MAX, 0, 0) == UINT32_MAX);
+    CHECK(daik::mqtt_source_state_needs_publish(4, 4, false, true, true));
+    CHECK(!daik::mqtt_source_state_needs_publish(4, 4, false, false, true));
+    CHECK(daik::mqtt_source_state_needs_publish(5, 4, false, true, false));
+    CHECK(daik::mqtt_source_state_needs_publish(4, 4, true, true, false));
+    volatile int32_t unknown_age = -1;
+    CHECK(!daik::mqtt_x10a_available(true, unknown_age));
+    CHECK(!daik::mqtt_x10a_available(true, 15));
+    CHECK(daik::mqtt_x10a_available(false, 14));
 }
 
 // The HomeHub Modbus register profile (def/homehub.hpp) — the DECODE MECHANICS (scaling, special
@@ -5920,7 +6014,7 @@ static void test_modbus_profile() {
     CHECK(!dec.is_definitive);
     CHECK(!dec.is_affirmative);
 
-    // Explicit unsupported or unavailable sentinels on extended register confirm HomeHub
+    // Explicit unsupported proves HomeHub; unavailable only spends the bounded retry budget.
     dec = evaluate_probe_result(ModbusProfile::Auto, MbFailureType::None, 0, 79, MB_UNSUPPORTED);
     CHECK(dec.next_profile == ModbusProfile::HomeHub);
     CHECK(dec.link_ok);
@@ -5929,11 +6023,11 @@ static void test_modbus_profile() {
     CHECK(dec.is_affirmative);
 
     dec = evaluate_probe_result(ModbusProfile::Auto, MbFailureType::None, 0, 79, MB_UNAVAILABLE);
-    CHECK(dec.next_profile == ModbusProfile::HomeHub);
+    CHECK(dec.next_profile == ModbusProfile::Auto);
     CHECK(dec.link_ok);
     CHECK(!dec.count_failure);
-    CHECK(dec.is_definitive);
-    CHECK(dec.is_affirmative);
+    CHECK(!dec.is_definitive);
+    CHECK(!dec.is_affirmative);
 
     // Successful read of standard (non-extended) register stays Auto
     dec = evaluate_probe_result(ModbusProfile::Auto, MbFailureType::None, 0, 43, 500);
@@ -6142,12 +6236,18 @@ static void test_modbus_profile() {
         CHECK(d.is_affirmative);
         CHECK(d.next_profile == ModbusProfile::HomeHub);
 
-        // Affirmative MB_UNAVAILABLE on tracker
+        // Unavailable never proves HomeHub; fallback remains eligible for a later valid probe.
         CHECK(tracker.on_socket_open("192.0.2.53", 502, 1) == ModbusProfile::Auto);
-        d = tracker.evaluate_probe(MbFailureType::None, 0, 79, MB_UNAVAILABLE);
-        CHECK(d.is_definitive);
+        for (int i = 0; i < MODBUS_PROBE_MAX_RETRIES; ++i)
+            d = tracker.evaluate_probe(MbFailureType::None, 0, 79, MB_UNAVAILABLE, 100);
+        CHECK(!d.is_affirmative);
+        CHECK(tracker.profile_basis == ModbusProfileBasis::Fallback);
+        CHECK(tracker.affirmative_profile == ModbusProfile::Auto);
+        CHECK(tracker.on_socket_open("192.0.2.53", 502, 1, 700) == ModbusProfile::Auto);
+        CHECK(tracker.should_probe(700));
+        d = tracker.evaluate_probe(MbFailureType::None, 0, 79, 150, 700);
         CHECK(d.is_affirmative);
-        CHECK(d.next_profile == ModbusProfile::HomeHub);
+        CHECK(tracker.active_profile == ModbusProfile::Altherma4);
 
         // Exception with failure_detail <= 0 confirms HomeHub
         CHECK(tracker.on_socket_open("192.0.2.54", 502, 1) == ModbusProfile::Auto);
@@ -7043,20 +7143,28 @@ static void test_http_body() {
     }
 
     // A timeout is "nothing arrived yet", not "give up" — and progress clears the idle count, so a
-    // body that keeps trickling in is never abandoned however long it takes overall.
+    // body that keeps trickling in is tolerated up to BODY_MAX_TOTAL_IDLE cumulative timeouts.
     {
-        const std::string body    = "0123456789";
-        char              buf[32] = {};
-        size_t            sent    = 0;
-        int               n       = 0;
-        const int         r =
-            http_body_read(buf, sizeof(buf), body.size(), [&](char* dst, size_t) -> BodyChunk {
-                if (n++ % 3 != 2) return {BodyRecv::Timeout, 0}; // 2 stalls, then a byte, forever
-                dst[0] = body[sent++];
-                return {BodyRecv::Data, 1};
-            });
+        std::string body    = "0123456789";
+        char        buf[32] = {};
+        size_t      sent    = 0;
+        int         n       = 0;
+        auto        trickle = [&](char* dst, size_t) -> BodyChunk {
+            if (n++ % 3 != 2) return {BodyRecv::Timeout, 0}; // 2 stalls, then a byte
+            dst[0] = body[sent++];
+            return {BodyRecv::Data, 1};
+        };
+        const int r = http_body_read(buf, sizeof(buf), body.size(), trickle);
         CHECK(r == static_cast<int>(body.size()));
         CHECK(std::string(buf) == body);
+
+        // Exceeding BODY_MAX_TOTAL_IDLE cumulative timeouts across progress aborts the read.
+        body = "01234567890"; // 11 bytes * 2 stalls = 22 stalls > 20
+        sent = 0;
+        n    = 0;
+        std::memset(buf, 0, sizeof(buf));
+        const int r_exceeded = http_body_read(buf, sizeof(buf), body.size(), trickle);
+        CHECK(r_exceeded == -1);
     }
 
     // A peer that announces a body and then goes silent must lose, and must lose BOUNDED: retrying
@@ -7075,6 +7183,29 @@ static void test_http_body() {
         // timeout (CONFIG_HTTPD_REQ_RECV_TMO, 5 s), so it must stay small enough that one silent
         // client cannot hold the httpd task for minutes, yet leave room to ride out a slow segment.
         CHECK(BODY_MAX_IDLE >= 1 && BODY_MAX_IDLE <= 4);
+    }
+
+    // A deadline aborts the read immediately.
+    {
+        char buf[32] = {};
+        int  calls   = 0;
+        auto recv    = [&](char* dst, size_t) -> BodyChunk {
+            calls++;
+            dst[0] = 'a';
+            return {BodyRecv::Data, 1};
+        };
+        auto      dl = [&]() -> bool { return calls >= 3; };
+        const int r  = http_body_read(buf, sizeof(buf), 10, recv, dl);
+        CHECK(r == -1);
+        CHECK(calls == 3);
+
+        calls = 0;
+        std::memset(buf, 0, sizeof(buf));
+        CHECK(http_body_read(buf, sizeof(buf), 2, recv, dl) == 2);
+        calls = 0;
+        // The last byte must not bypass an absolute deadline reached DURING recv.
+        CHECK(http_body_read(buf, sizeof(buf), 3, recv, dl) == -1);
+        CHECK(calls == 3);
     }
 
     // A peer that closes mid-body fails the read: half a JSON document must never reach a handler
@@ -7100,6 +7231,7 @@ static void test_http_body() {
         CHECK(http_body_read(buf, sizeof(buf), sizeof(buf) + 1, never) == -1);
         CHECK(http_body_read(buf, sizeof(buf), 0, never) == -1); // no body at all
         CHECK(http_body_read(nullptr, sizeof(buf), 4, never) == -1);
+        CHECK(http_body_read(buf, sizeof(buf), 1, never) == -1);
     }
 
     // `bytes` bounds a write into the caller's buffer, so a recv that reports more than it was
@@ -15524,7 +15656,28 @@ static void test_state_dwell() {
     // belongs to the run, not to the last cycle.
     dwell_step(slots, DWELL_MAX_SLOTS, on_row, 1, 1);
     r = dwell_lookup(slots, DWELL_MAX_SLOTS, 0x62, 2, 304);
-    CHECK(r.since_s == 10 && r.blind_s == 4 && r.exact);
+    CHECK(r.since_s == 10 && r.blind_s == 5 && r.exact);
+
+    // Healthy slow sweeps are observed; explicit gaps count even within one timer second.
+    {
+        DwellSlot cadence[DWELL_MAX_SLOTS]{};
+        dwell_step_with_cadence(cadence, DWELL_MAX_SLOTS, on_row, 1, 0, 6);
+        dwell_step_with_cadence(cadence, DWELL_MAX_SLOTS, on_row, 1, 1, 6);
+        dwell_step_with_cadence(cadence, DWELL_MAX_SLOTS, on_row, 1, 3, 6);
+        CHECK(dwell_lookup(cadence, DWELL_MAX_SLOTS, 0x62, 2, 304).blind_s == 0);
+        dwell_step(cadence, DWELL_MAX_SLOTS, nullptr, 0, 0);
+        dwell_step_with_cadence(cadence, DWELL_MAX_SLOTS, off_row, 1, 1, 6);
+        CHECK(!dwell_lookup(cadence, DWELL_MAX_SLOTS, 0x62, 2, 304).exact);
+        CHECK(dwell_lookup(cadence, DWELL_MAX_SLOTS, 0x62, 2, 304).blind_s == 0);
+        dwell_step_with_cadence(cadence, DWELL_MAX_SLOTS, off_row, 1, 7, 6);
+        CHECK(dwell_lookup(cadence, DWELL_MAX_SLOTS, 0x62, 2, 304).blind_s == 7);
+        dwell_step_with_cadence(cadence, DWELL_MAX_SLOTS, nullptr, 0, 0, 6);
+        dwell_step_with_cadence(cadence, DWELL_MAX_SLOTS, off_row, 1, 1, 6);
+        CHECK(dwell_lookup(cadence, DWELL_MAX_SLOTS, 0x62, 2, 304).blind_s == 8);
+    }
+    CHECK(DWELL_PERSIST_VERSION == 2);
+    CHECK(dwell_restore_verdict(static_cast<uint32_t>(CrashReason::SW), DWELL_PERSIST_MAGIC, 1, 5,
+                                5, 7, 7) == DwellRestore::WrongVersion);
 
     // ── the gap bound applies to the CLOCK, not only to the missing rows ────────────────────────
     // checkup_step() gates its whole computation on the elapsed time and discards the previous
@@ -17226,9 +17379,14 @@ static void test_mqtt_publish_gate() {
     d     = mqtt_publish_gate_step(state, false, 1, true);
     CHECK(d.next == MqttPublishGateState::Active && d.promote_publisher);
     CHECK(!mqtt_x10a_available(false, -1));
-    CHECK(mqtt_x10a_available(true, -1));
+    CHECK(!mqtt_x10a_available(true, -1));
     CHECK(mqtt_x10a_available(false, MQTT_X10A_OFFLINE_GRACE_S - 1));
     CHECK(!mqtt_x10a_available(false, MQTT_X10A_OFFLINE_GRACE_S));
+    CHECK(!mqtt_x10a_available(true, MQTT_X10A_OFFLINE_GRACE_S));
+    CHECK(!mqtt_x10a_available(true, MQTT_X10A_OFFLINE_GRACE_S + 5));
+    // A state outside the defined transition set grants no publication or promotion.
+    d = mqtt_publish_gate_step(static_cast<MqttPublishGateState>(99), true, 0, true);
+    CHECK(!d.publish_cycle && !d.publish_offline && !d.promote_publisher);
 }
 
 static void test_http_deadline() {

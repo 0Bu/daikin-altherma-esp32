@@ -27,6 +27,10 @@ const S = {
   // never a second authority for measurements.
   hist: new Map(),
   histBusy: new Set(),
+  histRequests: new Map(),
+  histEpoch: 0,
+  histIdentity: null,
+  histUptime: null,
   // A PINNED trend readout per concept: id -> {t} (the pinned sample's unix instant) or {i, gen} when
   // the device has no wall clock to anchor to. In app state, not the DOM, for the same reason
   // descOpen is: the panel is re-emitted on every poll, and a crosshair written imperatively would
@@ -102,6 +106,42 @@ const S = {
   // /status + /values pair lands; it must never silently masquerade as a live plant reading.
   otaCached: false,
 };
+
+// ── History source lifecycle ─────────────────────────────────────────────
+// Firmware rings reset when an instrument is disabled or repointed. An endpoint is not a lifetime:
+// A → B → A must fetch A again, and an old response must never populate the new lifetime's cache.
+// Retire all chart/pin leases together; derived charts can depend on several source rings.
+function invalidateHistSources() {
+  S.histEpoch = (S.histEpoch || 0) + 1;
+  S.hist.clear();
+  S.histBusy.clear();
+  (S.histRequests ||= new Map()).clear();
+  S.histPin.clear();
+  S.scrub = null;
+  S.inspHistSig = "";
+}
+function syncHistSources() {
+  const s = S.status;
+  if (!s) return S.histEpoch || 0;
+  const hp = s.hp || {}, detect = s.detect || {}, mb = s.modbus || {};
+  const env = s.env3 || {}, circ = s.circulation_source || {};
+  // Configuration/identity only: transient connected/fresh flags and changing measurements do not
+  // reset rings. A reboot retires index pins even if the device restores compatible history.
+  const identity = JSON.stringify([
+    s.boot_id, s.history?.epoch, s.version, s.app_elf_sha256, s.profile?.id, hp.proto, hp.rx, hp.tx,
+    detect.valid, detect.capacity_kw, detect.capacity_kw_iu, detect.ou_eeprom,
+    mb.host, mb.port, mb.unit_id, mb.enabled, mb.profile,
+    env.enabled, env.supported, env.sda, env.scl,
+    s.diagnostics?.enabled, circ.configured, circ.topic, circ.power_path, circ.timestamp_path,
+    circ.max_age_s, circ.on_threshold_w, circ.off_threshold_w, circ.confirm_s,
+  ]);
+  const uptime = Number.isFinite(s.uptime_s) ? s.uptime_s : null;
+  if ((S.histIdentity != null && identity !== S.histIdentity) ||
+      (uptime != null && S.histUptime != null && uptime < S.histUptime)) invalidateHistSources();
+  S.histIdentity = identity;
+  S.histUptime = uptime;
+  return S.histEpoch || 0;
+}
 
 // ── Navigation (dashboard ⇄ Settings) ────────────────────────────────────
 // Two screens, both in the DOM; only .active shows. Deliberately FLAT — the gear opens the whole
@@ -415,6 +455,7 @@ async function refreshStatus(paint = true) {
   let s;
   try { s = await j("/status", { signal: pollSignal() }); } catch { markUnreachable(); return false; }
   S.status = s;
+  syncHistSources();
   const profile = s?.profile?.id || "";
   if (hpProbeIsOpen() && profile !== S.hpProbeCatalogProfile && !S.hpProbeCatalogBusy)
     loadHpProbeCatalog(profile);

@@ -204,7 +204,8 @@ void dwell_reset_on_detect(const char* profile_id) {
     s_reset_requested.store(true);
 }
 
-void dwell_record(const CachedValue* v, size_t n, uint32_t source_generation) {
+void dwell_record(const CachedValue* v, size_t n, uint32_t source_generation,
+                  uint32_t max_observed_gap_s) {
     // dwell_start() creates it; absent means its alloc failed -> no state ages this boot. Saying so
     // once, there, rather than from this 1 Hz path: an unlatched line here would put ~86k copies of
     // itself through the 6 KB diag ring every day and evict the boot record, the crash records and
@@ -260,7 +261,8 @@ void dwell_record(const CachedValue* v, size_t n, uint32_t source_generation) {
     if (s_last_us >= 0 && now_us >= s_last_us)
         dt_s = static_cast<uint32_t>(now_us / 1000000 - s_last_us / 1000000);
     s_last_us = now_us;
-    logic::dwell_step(P().slots, logic::DWELL_MAX_SLOTS, obs, obs_n, dt_s);
+    logic::dwell_step_with_cadence(P().slots, logic::DWELL_MAX_SLOTS, obs, obs_n, dt_s,
+                                   max_observed_gap_s);
     persist_seal();
 }
 

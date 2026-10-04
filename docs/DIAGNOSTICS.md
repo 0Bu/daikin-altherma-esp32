@@ -47,6 +47,16 @@ aggregated event state. Those trends cannot reliably reconstruct second-by-secon
 the operating mode of a complete run, or an uninterrupted domestic-hot-water hour, so the firmware
 does not reuse them as diagnosis evidence.
 
+Changing or removing a source clears the browser's cached trends and pinned points; old replies
+cannot restore them. A reboot also starts a new browser lifetime, even when the device restores
+compatible saved trends. The state ages beside individual values are separate from the 24-hour
+card: normal polling cadence counts as observed, while known update, forecast or memory-pressure
+pauses and a continuing run's resumed tail count as blind time. The version-2 age format rejects
+older records, so those ages can restart after an update without proving that the plant changed state.
+
+The weather companion describes the two-hour window selected at the last successful fetch. That
+window stays fixed until another successful fetch; it is not continuously shifted forward.
+
 The 24-hour card is a passive watch of ordinary operation. It does not command a service mode,
 create a settled full-load operating point, or perform a controlled refrigerant test. A quiet card
 therefore means only that its eight bounded rules found nothing notable in the data they could
