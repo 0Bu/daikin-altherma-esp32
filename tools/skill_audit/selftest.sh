@@ -41,7 +41,7 @@ new_fixture() {
 }
 
 fixture_checksums() {
-    rg --files --hidden "$TMP/t/.agents" | LC_ALL=C sort | while IFS= read -r fixture_file; do
+    find "$TMP/t/.agents" -type f | LC_ALL=C sort | while IFS= read -r fixture_file; do
         cksum "$fixture_file"
     done
 }
@@ -95,7 +95,7 @@ run_optimize_case() {
         return
     fi
 
-    if [ -n "$expected_content" ] && ! rg -qF "$expected_content" "$TMP/t/.agents/skills/absence-review/SKILL.md"; then
+    if [ -n "$expected_content" ] && ! grep -qF "$expected_content" "$TMP/t/.agents/skills/absence-review/SKILL.md"; then
         printf '  FAIL  %s  (optimization changed unrelated content)\n' "$name"
         fail=1
         return
