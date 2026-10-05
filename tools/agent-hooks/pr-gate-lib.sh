@@ -161,7 +161,7 @@ agent_gate_checkbox_status() {
 import re, sys
 key = re.escape(sys.argv[1])
 pattern = re.compile(
-    rf"^[-*]\s+\[[ xX]\]\s+`?\${key}`?(?=\s|$).*\bmerge\s+gate\b",
+    rf"^[-*]\s+\[[ xX]\]\s+`?\${key}`?(?=\s|$).*\b(?:merge|create/push|push)\s+gate\b",
     re.IGNORECASE,
 )
 matches = [candidate for candidate in sys.stdin.read().splitlines() if pattern.search(candidate)]
@@ -180,7 +180,7 @@ else:
 import re, sys
 record = sys.stdin.read()
 direct = re.findall(
-    r"\bmerge\s+gate\s+@\s*([0-9a-f]{7,40})(?![0-9A-Za-z])",
+    r"\b(?:merge|create/push|push)\s+gate\s+@\s*([0-9a-f]{7,40})(?![0-9A-Za-z])",
     record,
     re.IGNORECASE,
 )
@@ -222,7 +222,11 @@ agent_gate_parse_payload() {
 agent_gate_origin_identity() {
     local root="$1" url
     url="$(git -C "$root" remote get-url origin 2>/dev/null)" || return 2
-    python3 - "$url" <<'PY'
+    agent_gate_url_identity "$url"
+}
+
+agent_gate_url_identity() {
+    python3 - "$1" <<'PY'
 import re, sys
 from urllib.parse import urlparse
 
@@ -298,13 +302,67 @@ agent_gate_workdir_matches() {
     esac
 }
 
+# Native pushes discover the actual destination branch, including repository provenance.
+# Return 1 only for a successfully decoded empty result; ambiguity and transport/data errors are 2.
+agent_gate_discover_branch_pr() {
+    local branch="$1" root="$2" body_file="$3" files_file="$4" slug="$5"
+    local gh_runner query list json rc token
+    gh_runner="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/scripts/gh-with-git-credentials.sh" || return 2
+    query="$(python3 -c 'import sys, urllib.parse; print(urllib.parse.quote(sys.argv[1].split("/")[0] + ":" + sys.argv[2], safe=""))' "$slug" "$branch")" || return 2
+    if [ -x "$gh_runner" ]; then
+        list="$(agent_gate_run_bounded 30 env GH_HOST=github.com GH_REPO="github.com/$slug" \
+            "$gh_runner" api --hostname github.com --method GET \
+            "repos/$slug/pulls?head=$query&state=open&per_page=100" 2>/dev/null)" || return 2
+    else
+        token="${GH_TOKEN:-${GITHUB_TOKEN:-}}"
+        [ -n "$token" ] && command -v curl >/dev/null 2>&1 || return 2
+        printf '%s' "$token" | grep -Eq '^[A-Za-z0-9_.=-]+$' || return 2
+        list="$(printf 'Authorization: Bearer %s\n' "$token" | curl -fsSL --connect-timeout 5 --max-time 10 -H @- \
+            -H 'Accept: application/vnd.github+json' \
+            "https://api.github.com/repos/$slug/pulls?head=$query&state=open&per_page=100" 2>/dev/null)" || return 2
+    fi
+    json="$(printf '%s' "$list" | python3 -c '
+import json, re, sys
+try:
+    values = json.load(sys.stdin)
+    if not isinstance(values, list):
+        raise ValueError("PR response is not a list")
+    if not values:
+        sys.exit(1)
+    if len(values) != 1:
+        raise ValueError("ambiguous PR response")
+    value = values[0]
+    head = value["head"]
+    number, body, sha = value["number"], value.get("body"), head["sha"]
+    if (not isinstance(number, int) or isinstance(number, bool) or number <= 0
+            or not isinstance(sha, str) or re.fullmatch(r"[0-9a-fA-F]{40}", sha) is None
+            or body is not None and not isinstance(body, str)
+            or value.get("state") != "open" or head.get("ref") != sys.argv[2]
+            or head["repo"]["full_name"].lower() != sys.argv[1].lower()):
+        raise ValueError("PR provenance or record fields do not match the destination")
+    print(json.dumps({"body": body or "", "head": sha}))
+except (KeyError, TypeError, ValueError, AttributeError):
+    sys.exit(2)
+' "$slug" "$branch")"; rc=$?
+    [ "$rc" -eq 0 ] || return "$rc"
+    AGENT_DISCOVERED_HEAD="$(printf '%s' "$json" | python3 -c 'import json,sys; print(json.load(sys.stdin)["head"])')" || return 2
+    printf '%s' "$json" | python3 -c 'import json,sys; sys.stdout.write(json.load(sys.stdin)["body"])' >"$body_file" || return 2
+    : >"$files_file" || return 2
+}
+
 # Discover a PR into caller-owned files. Sets AGENT_DISCOVERED_HEAD and returns 0 on success.
 agent_gate_discover_pr() {
-    local selector="$1" root="$2" body_file="$3" files_file="$4"
+    local selector="$1" root="$2" body_file="$3" files_file="$4" explicit_branch="${5:-}"
     local json number branch slug token owner list count page page_json page_count
     local changed_count pages_file policy_extractor retrieved_count separator gh_runner
     AGENT_DISCOVERED_HEAD=""
     slug="$(agent_gate_repo_slug "$root")"; [ -n "$slug" ] || return 2
+    if [ -n "$explicit_branch" ]; then
+        [ -z "$selector" ] || return 2
+        git check-ref-format "refs/heads/$explicit_branch" >/dev/null 2>&1 || return 2
+        agent_gate_discover_branch_pr "$explicit_branch" "$root" "$body_file" "$files_file" "$slug"
+        return $?
+    fi
     policy_extractor="$(cd "$(dirname "${BASH_SOURCE[0]}")/../agent-policy" && pwd)/extract_changed_files.py" \
         || return 2
     gh_runner="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/scripts/gh-with-git-credentials.sh" \
@@ -318,6 +376,7 @@ agent_gate_discover_pr() {
             list="$(agent_gate_run_bounded 30 env GH_HOST=github.com GH_REPO="github.com/$slug" "$gh_runner" pr list --head "$branch" --state open --json number,body,headRefOid,changedFiles 2>/dev/null)" || return 2
             count="$(printf '%s' "$list" | python3 -c 'import json,sys; print(len(json.load(sys.stdin)))' 2>/dev/null)" || return 2
             [ "$count" != "0" ] || return 1
+            [ "$count" = "1" ] || return 2
             json="$(printf '%s' "$list" | python3 -c 'import json,sys; print(json.dumps(json.load(sys.stdin)[0]))')" || return 2
         fi
         AGENT_DISCOVERED_HEAD="$(printf '%s' "$json" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("headRefOid") or "")')" || return 2
@@ -371,6 +430,7 @@ print(value)
             "https://api.github.com/repos/$slug/pulls?head=$owner:$branch&state=open" 2>/dev/null)" || return 2
         count="$(printf '%s' "$list" | python3 -c 'import json,sys; print(len(json.load(sys.stdin)))' 2>/dev/null)" || return 2
         [ "$count" != "0" ] || return 1
+        [ "$count" = "1" ] || return 2
         json="$(printf '%s' "$list" | python3 -c 'import json,sys; print(json.dumps(json.load(sys.stdin)[0]))')" || return 2
         number="$(printf '%s' "$json" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("number") or "")')" || return 2
     fi

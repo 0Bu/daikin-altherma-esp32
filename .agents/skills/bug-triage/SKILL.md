@@ -107,6 +107,13 @@ when the backtrace in `last_crash` is genuinely not enough (step 5).
 
    In the comment, separate **what the reporter states** from **what you reproduced locally**.
 
+## Self-analysis and triage report self-optimization
+
+Before drafting or submitting the triage response:
+   - **Privacy and redaction audit:** Verify that no real WiFi SSIDs, local IP addresses, private credentials, or core dump traces are exposed or quoted in the triage summary.
+   - **Evidence vs hypothesis check:** Review each claim in the draft: is it clearly labeled as reported by the user, observed in telemetry, or verified/reproduced via host mock tests?
+   - **Single-turn consolidation:** Check whether all diagnostic requests (missing fields, specific logs) are consolidated into a single, respectful, actionable checklist rather than multiple back-and-forth prompts.
+
 ## Refuse
 
 - **No restart history without syslog.** If `Do you forward the device's log…` says "not configured",

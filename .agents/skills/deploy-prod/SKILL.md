@@ -34,20 +34,26 @@ It does **NOT** authorize:
 Run the applicable local gates for the change set before merge:
 ```bash
 scripts/run-mock-tests.sh --coverage
+scripts/run-sanitizer-fuzz-tests.sh
+scripts/run-runtime-integration-tests.sh
+scripts/run-format-check.sh
 scripts/run-contract-tests.sh
 scripts/run-domain-audit.sh
 scripts/run-description-audit.sh
 scripts/run-user-docs-audit.sh
 scripts/run-schematic-audit.sh
+scripts/run-ui-localization-audit.sh
 scripts/run-ui-use-case-tests.sh
+scripts/run-browser-render-tests.sh
 scripts/run-redaction-audit.sh
+scripts/run-pr-hygiene-audit.sh
 scripts/run-ui-gif-audit.sh
 scripts/run-doc-entity-audit.sh
 ```
 
-Ensure `$project-review`, `$domain-review` and any conditional review skills (e.g. `$schematic-review`,
-`$ui-use-case-review`) are completed and their checkboxes in the PR body are checked with the current
-full head SHA.
+Ensure `$project-review`, `$pr-hygiene-review`, `$domain-review` and any conditional review skills
+(e.g. `$schematic-review`, `$ui-use-case-review`, `$heap-safety-review`, `$feature-docs`) are completed
+and their checkboxes in the PR body are checked with the current short SHA (`git rev-parse --short=12 HEAD`).
 
 ### 2. Merge PR to main
 
@@ -76,9 +82,9 @@ Execute the canonical role-bound bench update transaction:
 ```bash
 scripts/production-ota-gate.py \
   --manifest-url https://0bu.github.io/daikin-altherma-esp32/dev/manifest.json \
-  --expected-source-sha <commit-sha> \
-  --expected-version <target-version> \
-  --expected-app-sha256 <app-elf-sha256> \
+  --expected-source-sha <full-40-hex-commit-sha> \
+  --expected-version <target-version-dev.N> \
+  --expected-app-sha256 <full-64-hex-app-sha256> \
   --expected-current-version <current-bench-version> \
   --confirm-bench bench \
   --install-bench
@@ -94,9 +100,9 @@ Once the bench gate has passed cleanly, execute the distinct production promotio
 ```bash
 scripts/production-ota-gate.py \
   --manifest-url https://0bu.github.io/daikin-altherma-esp32/dev/manifest.json \
-  --expected-source-sha <commit-sha> \
-  --expected-version <target-version> \
-  --expected-app-sha256 <app-elf-sha256> \
+  --expected-source-sha <full-40-hex-commit-sha> \
+  --expected-version <target-version-dev.N> \
+  --expected-app-sha256 <full-64-hex-app-sha256> \
   --expected-current-version <current-production-version> \
   --confirm-production production \
   --execute
@@ -140,6 +146,18 @@ After the successful deployment and verification:
    rm -f /private/tmp/pr-body.md /private/tmp/changed-files.txt /tmp/dt_status.json
    ```
 
+### 7b. Self-analysis and rollout self-optimization
+
+Before concluding the deployment task:
+1. **Telemetry & baseline self-analysis:**
+   - Compare post-rollout `/status` and `/values` on production against pre-rollout baselines.
+   - Assert contiguous heap headroom (`.sys.max_alloc >= 10000`), zero crash record (`.last_crash == null` or `.last_crash.fault == false`), and that published metric count has not dropped.
+   - Confirm active MQTT heartbeats and uninterrupted X10A query cadence.
+2. **Process reflection & workflow optimization:**
+   - If the failure recovery loop (Step 8) was invoked during this deployment: analyze why the initial candidate failed, verify that regression tests were added to prevent recurrence, and confirm that no temporary debugging code, unneeded comments, or relaxed timeouts remain.
+   - Remove only scratch files created by this deployment that are no longer needed. Retain rollout,
+     signing and diagnostic evidence, and preserve pre-existing user artifacts.
+
 ### 8. Failure recovery loop ("on findings/errors, fix, run deploy-test until green, then repeat deploy-prod from start")
 
 If an error or finding occurs at any point during this workflow:
@@ -163,9 +181,9 @@ If an error or finding occurs at any point during this workflow:
    ```bash
    scripts/production-ota-gate.py \
      --manifest-url https://0bu.github.io/daikin-altherma-esp32/dev/manifest.json \
-     --expected-source-sha <known-good-source-sha> \
-     --expected-version <known-good-version> \
-     --expected-app-sha256 <known-good-app-sha256> \
+     --expected-source-sha <full-40-hex-known-good-source-sha> \
+     --expected-version <known-good-version-dev.N> \
+     --expected-app-sha256 <full-64-hex-known-good-app-sha256> \
      --expected-current-version <installed-version> \
      --confirm-production production \
      --execute

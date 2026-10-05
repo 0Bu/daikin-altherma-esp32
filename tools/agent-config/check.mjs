@@ -135,6 +135,7 @@ const expectedSkills = [
   "project-review",
   "renovate-review",
   "schematic-review",
+  "skill-audit",
   "ui-gif",
   "ui-use-case-review",
   "user-docs-review",

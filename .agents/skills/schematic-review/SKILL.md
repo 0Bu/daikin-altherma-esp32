@@ -30,6 +30,15 @@ half of `main/www/js/schematic.js` plus `i18n.js`, or `docs/DESIGN.md` §5.3 / �
 cannot reach the drawing does not need it. Report findings; apply fixes only when the user explicitly
 requests them.
 
+## 0. Step 0 — pin the baseline
+
+Record `git rev-parse HEAD`, the intended comparison base, and `git status --short` before
+auditing. For a PR, verify that the checkout matches the exact target PR head; refresh remote
+refs with `git fetch origin` when needed and available. For an authorized local implementation,
+include the intended tracked diff and untracked new files in the review and identify them in
+the report; no commit, PR or equality with `origin/main` is required. Preserve unrelated user
+changes. Stamp a merge pass only after the reviewed content matches the exact committed PR head.
+
 ## 1. Run the audit (the mechanical half)
 
 ```bash
@@ -144,6 +153,13 @@ Report findings grouped by the sections above. If fixes were explicitly requeste
 re-run the verification. Block the merge on: any
 live audit finding, a reading attributed to a part that does not measure it, a new pill that cannot
 blank when its page goes stale, or a ledger entry added to quiet a finding this change created.
+
+## 4b. Self-analysis and review audit
+
+Before ticking or stamping the gate:
+1. **Hydraulic and sensor reality check:** Did this review verify the actual hydraulic order (installer reference §16.2) and sensor attribution (e.g. R1T pre-BUH, correct branch assignment across 3-way valve)?
+2. **Bilingual copy & fit check:** Verify that both English and German labels fit without text overflow or clipping at minimum viewports, and that inspector texts distinguish stale states from missing sensors.
+3. **Stamp integrity check:** Confirm the stamp uses the bare short SHA (`git rev-parse --short=12 HEAD`) without backticks or extra formatting.
 
 ## Recording the pass (merge gate — no file marker)
 

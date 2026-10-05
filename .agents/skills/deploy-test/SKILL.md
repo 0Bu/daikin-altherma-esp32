@@ -10,7 +10,7 @@ description: Build firmware via Docker, sign with local OTA key, update/flash co
 Treat review and audit requests as read-only. A request to test or flash the test bench (or `deploy-test`)
 authorizes:
 - A local Docker firmware build (`scripts/idf-docker.sh idf.py build`)
-- Signing the resulting binary with the local offline key `/Users/oleg/Projects/daikin_ota_signing_key.pem`
+- Signing the resulting binary with the offline RSA-3072 key (via `$OTA_SIGNING_KEY_FILE`)
 - Flashing the connected test board over USB (`/dev/cu.usbmodem*`) preserving NVS for bootstrap/recovery
 - Running HTTP health checks against the test bench device (`<bench-host>`)
 - When errors, test failures, or crashes occur: diagnosing the root cause (`$device-triage`), fixing the code, re-testing, and re-verifying until green (or asking the user if ambiguous)
@@ -49,11 +49,11 @@ It does **NOT** authorize:
    This firmware requires Secure Boot v2-compatible RSA-3072 signing. An unsigned image will crash-loop
    at boot before `app_main`:
    ```bash
-   espsecure.py sign_data --version 2 --keyfile "/Users/oleg/Projects/daikin_ota_signing_key.pem" \
+   espsecure.py sign_data --version 2 --keyfile "$OTA_SIGNING_KEY_FILE" \
      --output build/daikin-signed.bin build/daikin-altherma-esp32.bin
    cp build/daikin-signed.bin build/daikin-altherma-esp32.bin
    ```
-   *(Note: newer esptool uses `espsecure sign-data` with a hyphen.)*
+   *(Note: set `OTA_SIGNING_KEY_FILE=/path/to/key.pem` or pass key path; newer esptool uses `espsecure sign-data` with a hyphen.)*
 
 4. **Verify signature guard.**
    Refuse to flash an unsigned image:
@@ -63,21 +63,30 @@ It does **NOT** authorize:
 
 5. **Flash the board via USB** preserving NVS (skips `nvs@0x9000`):
    ```bash
-   cd build && esptool --chip esp32s3 -p <port> write_flash "@flash_args"
+   (cd build && esptool --chip esp32s3 -p <port> write_flash "@flash_args")
    ```
 
 6. **Verify health on the bench device.**
    Allow the board to reboot and verify its HTTP API, network, MQTT and crash state:
    ```bash
+   # Basic health verification:
    scripts/verify-device-health.sh --ip <bench-host> --timeout 60
+
+   # Or strict version- and ELF-pinned verification:
+   scripts/verify-device-health.sh --ip <bench-host> \
+     --expected-version <version> \
+     --expected-elf-sha <elf-sha-prefix> \
+     --timeout 60
    ```
    The script asserts:
    - HTTP 200 on `/status` with valid JSON and mandatory fields
    - WiFi connection and valid IP
-   - MQTT connection to broker (`.mqtt.connected: true`)
+   - MQTT connection when configured (`.mqtt.connected: true`); an explicitly unconfigured broker
+     is accepted as disabled
    - Clean boot (`.last_crash: null` or `.last_crash.fault: false`)
    - Safe mode inactive (`.sys.safe_mode: false`)
    - Sufficient contiguous heap headroom (`.sys.max_alloc >= 10000`)
+   - Matches expected version and ELF SHA when provided
 
 7. **Report.**
    Summarize the build version, ELF SHA, uptime, heap, and test result.
@@ -101,3 +110,13 @@ It does **NOT** authorize:
      Re-run the cycle from Step 2 (Build -> Sign -> Flash -> Verify) until the bench device is completely healthy.
    - **Ask user on ambiguous issues:**
      If an issue involves hardware failure, ambiguous requirements, or non-deterministic behavior, ask the user for clarification.
+
+## Self-analysis and test optimization
+
+After achieving a green bench result:
+   - **Examine runtime margins:** Inspect `/status` to confirm that contiguous heap headroom (`.sys.max_alloc`) exceeds the 10 KiB floor with margin, and check stack headroom.
+   - **Inspect `/diag` for silent anomalies:** Confirm there are no unexpected bus retry floods, silent queue overflows, or repeated reconnection warnings in `/diag?verbose=1`.
+   - **Review artifacts and diff:** Remove only temporary signing artifacts created by this workflow
+     (such as a duplicate `build/daikin-signed.bin`), retaining requested validation evidence and
+     pre-existing user artifacts. Check that authorized corrections are scoped and have relevant
+     regression coverage.

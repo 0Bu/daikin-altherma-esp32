@@ -126,6 +126,13 @@ the IP and use it verbatim. Put the host in `H` for the commands below: `H=daiki
    `wifi.bssid`) — that means the board is on an **older** build than `main`, so code you are reading
    may not be the code that ran. Say so rather than reasoning from the wrong source.
 
+## Self-analysis and diagnostic self-optimization
+
+Before delivering the triage findings:
+   - **Boundary and attribution audit:** Double-check that telemetry-derived facts (e.g. WiFi reconnect count, last crash reason, decoded stack frames) are clearly distinguished from inferences or device-reported claims.
+   - **Risk assessment of recommendations:** Ensure proposed remedies (e.g. checking wiring, verifying broker hostname) do not involve destructive actions (no premature `POST /coredump/clear` or NVS wipes).
+   - **Conciseness and clarity:** Tighten the summary so the maintainer or user sees the direct root cause and actionable next step immediately without wading through unparsed JSON.
+
 ## Notes
 - **Live board → this skill. A GitHub issue → `$bug-triage`.** An external user's report is a frozen
   snapshot from a device you cannot reach, so step 3's external-history reconstruction and step 4's

@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+# Verify the exact updates Git supplies, without reconstructing a shell command.
+set -euo pipefail
+
+root="$(git rev-parse --show-toplevel)"
+remote_url="${2:-}"
+zero_sha="0000000000000000000000000000000000000000"
+
+while IFS= read -r update || [ -n "$update" ]; do
+    local_ref=""; local_sha=""; remote_ref=""; remote_sha=""; extra=""
+    read -r local_ref local_sha remote_ref remote_sha extra <<<"$update"
+    if [ -z "$local_ref" ] || [ -z "$local_sha" ] || [ -z "$remote_ref" ] \
+        || [ -z "$remote_sha" ] || [ -n "$extra" ] \
+        || ! printf '%s\n' "$local_sha" "$remote_sha" | python3 -c '
+import re, sys
+raise SystemExit(0 if all(re.fullmatch(r"[0-9a-f]{40}", line.strip()) for line in sys.stdin) else 1)
+'; then
+        echo "BLOCKED by pre-push: malformed Git update record." >&2
+        exit 1
+    fi
+    if [ "$local_sha" = "$zero_sha" ]; then
+        case "$remote_ref" in
+            refs/heads/main|refs/heads/master|refs/heads/gh-pages|refs/heads/HEAD)
+                echo "BLOCKED by pre-push: deletion of protected branch '$remote_ref' is prohibited." >&2
+                exit 1 ;;
+        esac
+        continue
+    fi
+    case "$local_ref" in
+        refs/heads/main|refs/heads/master)
+            echo "BLOCKED by pre-push: direct push from '$local_ref' is prohibited." >&2
+            exit 1 ;;
+    esac
+    if ! bash "$root/tools/agent-hooks/require-pr-gates.sh" \
+        --push-update "$local_sha" "$remote_ref" "$remote_url"; then
+        echo "BLOCKED by pre-push: gates rejected '$remote_ref' at $local_sha." >&2
+        exit 1
+    fi
+done

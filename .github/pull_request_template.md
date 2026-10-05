@@ -30,6 +30,7 @@ alone — those are repository-maintainer reviews and gate records, and are not 
 - [ ] `scripts/run-browser-render-tests.sh` passes (real Chrome at 320/1200 px in all 13 locales: Dashboard/Settings/all routed modals get DOM/layout/native-AX plus keyboard focus/Tab/Escape coverage; reduced motion covers Dashboard/Settings/WiFi/progress/disclosures)
 - [ ] `tools/absence/selftest.sh` passes (the source-absence matrix can still go red — a CI `mechanical_gates` step; the matrix itself rides the contract + UI suites)
 - [ ] `scripts/run-pr-hygiene-audit.sh` passes (commit messages and, in CI, current PR text)
+- [ ] `scripts/run-skill-audit.sh` clean (skill drift audit and agent contracts)
 - [ ] `scripts/run-agent-instructions-budget.sh` passes (agent policy, configuration and instruction budget)
 - [ ] Firmware built (`scripts/idf-docker.sh idf.py build`, or relied on CI) — N/A in a cloud session (no Docker daemon / no USB)
 - [ ] Exercised against a real heat pump / device where relevant (or noted why not)
@@ -52,6 +53,7 @@ alone — those are repository-maintainer reviews and gate records, and are not 
      `.github/workflows/renovate.yaml`; the data-only trusted-base `pr-policy.yml` workflow never
      loads PR code. -->
 
+- [ ] `$skill-audit` clean — push gate @ <short-sha> (required before pushing an update to an open PR: canonical skills and reviewers checked against the commit being sent)
 - [ ] `$project-review` clean — merge gate @ <short-sha> (required on every ordinary or local/manual merge: doc drift, memory safety, tests and target/build implications)
 - [ ] `$pr-hygiene-review` clean — merge gate @ <short-sha> (required on every ordinary merge: commit range, current PR text and diff checked for personal information and non-English prose)
 - [ ] `$heap-safety-review` clean — merge gate @ <short-sha> (required for HTTP, MQTT, OTA, TLS, JSON, X10A-publisher, firmware-polling or heap-allocation changes; an independent read-only `heap_safety_reviewer` must find no blocker)

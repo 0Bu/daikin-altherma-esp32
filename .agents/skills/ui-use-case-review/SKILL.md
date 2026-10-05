@@ -16,6 +16,15 @@ Treat a rendered control as working only after its action changes the expected s
 enabled button is not evidence; the ENV III dialog shipped with both buttons visible while their
 shared close callback called an undefined function.
 
+## 0. Step 0 — pin the baseline
+
+Record `git rev-parse HEAD`, the intended comparison base, and `git status --short` before
+auditing. For a PR, verify that the checkout matches the exact target PR head; refresh remote
+refs with `git fetch origin` when needed and available. For an authorized local implementation,
+include the intended tracked diff and untracked new files in the review and identify them in
+the report; no commit, PR or equality with `origin/main` is required. Preserve unrelated user
+changes. Stamp a merge pass only after the reviewed content matches the exact committed PR head.
+
 ## 1. Establish the affected paths
 
 Read the PR diff and list each user path it can reach: dashboard/settings navigation, dynamic cards,
@@ -30,6 +39,9 @@ list; adding a modal without a lifecycle case must fail.
 
 ```bash
 scripts/run-ui-use-case-tests.sh
+scripts/run-ui-localization-audit.sh
+# When Chrome/Chromium is installed (or DAIKIN_BROWSER_BIN is set), also run:
+scripts/run-browser-render-tests.sh
 ```
 
 Require exit 0. The command executes all `test/test_ui_*.mjs` contracts plus HomeHub discovery, the
@@ -72,6 +84,13 @@ is insufficient for an interaction defect; execute the handler and assert its ou
 
 Block the merge on any uncaught exception, missing handler, action without the promised state change,
 unrepresented new use case, live UI assertion failure, or visual/accessibility regression.
+
+## 4b. Self-analysis and review audit
+
+Before ticking or stamping the gate:
+1. **Interactive lifecycle check:** Did this review verify the actual action outcome (state transition, endpoint call, error recovery on rejection), rather than only that the button exists and is clickable?
+2. **Viewport and accessibility check:** Verify that phone (320px) and desktop (1200px) layouts are clean, focus is trapped and released properly, and no console errors occurred.
+3. **Stamp integrity check:** Confirm the stamp uses the bare short SHA (`git rev-parse --short=12 HEAD`) without backticks.
 
 ## 5. Record the pass
 
