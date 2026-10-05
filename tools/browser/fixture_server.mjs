@@ -103,6 +103,10 @@ export async function startFixtureServer({ pageFile, projectRoot }) {
   const address = server.address();
   return {
     url: `http://127.0.0.1:${address.port}/`,
-    close: () => new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve())),
+    close: () => new Promise((resolve, reject) => {
+      server.closeIdleConnections?.();
+      server.closeAllConnections?.();
+      server.close((error) => error ? reject(error) : resolve());
+    }),
   };
 }

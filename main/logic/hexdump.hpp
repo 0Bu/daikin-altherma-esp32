@@ -20,10 +20,10 @@
 //
 // HISTORICAL LIMITATION: this dump is emitted ONLY on a detect pass — at boot, or on POST /detect.
 // A detect pass essentially never coincides with a compressor run, and Target Evap. Temp. was only
-// wrong WHILE the compressor ran. #209 added the complementary runtime capture and the resulting
-// wire evidence resolved #194 through logic/conv_override.hpp. The detect dump remains intentionally
-// separate: it answers page/layout questions during discovery, while raw_capture.hpp samples a
-// bounded number of running-state frames.
+// wrong WHILE the compressor ran. legacy-209 added the complementary runtime capture and the
+// resulting wire evidence resolved legacy-194 through logic/conv_override.hpp. The detect dump
+// remains intentionally separate: it answers page/layout questions during discovery, while
+// raw_capture.hpp samples a bounded number of running-state frames.
 #include <cstdint>
 
 namespace daik {

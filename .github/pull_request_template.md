@@ -53,6 +53,7 @@ alone — those are repository-maintainer reviews and gate records, and are not 
      `.github/workflows/renovate.yaml`; the data-only trusted-base `pr-policy.yml` workflow never
      loads PR code. -->
 
+- [ ] `$skill-audit` clean — push gate @ <short-sha> (required before pushing an update to an open PR: canonical skills and reviewers checked against the commit being sent)
 - [ ] `$project-review` clean — merge gate @ <short-sha> (required on every ordinary or local/manual merge: doc drift, memory safety, tests and target/build implications)
 - [ ] `$pr-hygiene-review` clean — merge gate @ <short-sha> (required on every ordinary merge: commit range, current PR text and diff checked for personal information and non-English prose)
 - [ ] `$heap-safety-review` clean — merge gate @ <short-sha> (required for HTTP, MQTT, OTA, TLS, JSON, X10A-publisher, firmware-polling or heap-allocation changes; an independent read-only `heap_safety_reviewer` must find no blocker)

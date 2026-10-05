@@ -155,7 +155,8 @@ Before concluding the deployment task:
    - Confirm active MQTT heartbeats and uninterrupted X10A query cadence.
 2. **Process reflection & workflow optimization:**
    - If the failure recovery loop (Step 8) was invoked during this deployment: analyze why the initial candidate failed, verify that regression tests were added to prevent recurrence, and confirm that no temporary debugging code, unneeded comments, or relaxed timeouts remain.
-   - Verify that all scratch files and local artifacts have been completely purged from the workspace.
+   - Remove only scratch files created by this deployment that are no longer needed. Retain rollout,
+     signing and diagnostic evidence, and preserve pre-existing user artifacts.
 
 ### 8. Failure recovery loop ("on findings/errors, fix, run deploy-test until green, then repeat deploy-prod from start")
 

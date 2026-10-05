@@ -2,7 +2,7 @@
   "safety-guards": {
     "PreToolUse": [
       {
-        "matcher": "run_command|view_file|replace_file_content|write_to_file",
+        "matcher": "run_command|view_file|replace_file_content|write_to_file|Bash|Read|Edit|Write|apply_patch|exec_command|shell|shell_command",
         "hooks": [
           {
             "type": "command",
@@ -12,7 +12,7 @@
         ]
       },
       {
-        "matcher": "run_command",
+        "matcher": "run_command|Bash|exec_command|shell|shell_command|mcp__.+(?:merge_pull_request|enable_auto_merge|enable_pull_request_auto_merge|enqueue_pull_request)",
         "hooks": [
           {
             "type": "command",
@@ -24,7 +24,7 @@
     ],
     "PostToolUse": [
       {
-        "matcher": "replace_file_content|write_to_file",
+        "matcher": "replace_file_content|write_to_file|Edit|Write|apply_patch",
         "hooks": [
           {
             "type": "command",

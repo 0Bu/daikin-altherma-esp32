@@ -188,12 +188,12 @@ inline void weather_refresh_cancel_outstanding(uint64_t  requested_token,
 // on a fragmentation trough and pushed the boot's `min_free_heap` low-water to 800 B; it survived
 // only because the claim is brief. The gate below keeps the next fetch OUT of such a trough. Its
 // 20 KiB contiguous floor rejects the measured 15.9 KiB trough while admitting the production
-// board's repeatable 22 KiB post-MQTT-quiesce block. The 56 KiB aggregate floor is unchanged and
-// still leaves roughly 16 KiB outside the measured ~40 KiB transient claim. Requiring 24 KiB made
-// Weather permanently unavailable on a fully populated 129-value plant even with 60 KiB aggregate
-// free. A refusal uses the ordinary 5-minute retry, not a full 45-minute raster skip, so a valid
-// forecast does not cross its 90-minute stale boundary.
-inline constexpr size_t WEATHER_FETCH_MIN_FREE_BYTES          = 56 * 1024;
+// board's repeatable 22 KiB post-MQTT-quiesce block. The 48 KiB aggregate floor leaves roughly
+// 8-12 KiB outside the measured ~35-40 KiB transient claim while accommodating the resting
+// footprint with Modbus TCP and syslog connected. Requiring 56 KiB made Weather permanently
+// unavailable when Modbus was connected. A refusal uses the ordinary 5-minute retry, not a full
+// 45-minute raster skip, so a valid forecast does not cross its 90-minute stale boundary.
+inline constexpr size_t WEATHER_FETCH_MIN_FREE_BYTES          = 48 * 1024;
 inline constexpr size_t WEATHER_FETCH_MIN_LARGEST_BLOCK_BYTES = 20 * 1024;
 
 inline bool weather_fetch_headroom_ok(size_t free_bytes, size_t largest_free_block) {
@@ -238,7 +238,8 @@ inline WeatherValidation weather_validate(const WeatherForecastSample& s,
     if (s.fetched_unix_s < 0 || s.decision_unix_s < 0)
         return fail("missing_timestamp");
     // The features describe the two hours following a decision instant. An adapter may align that
-    // instant to the next hour (the #288 example does), but may not relabel arbitrary later weather.
+    // instant to the next hour (the legacy-288 example does), but may not relabel arbitrary later
+    // weather.
     if (s.decision_unix_s < s.fetched_unix_s - WEATHER_FUTURE_TOLERANCE_S ||
         s.decision_unix_s > s.fetched_unix_s + 60 * 60)
         return fail("invalid_decision_time");

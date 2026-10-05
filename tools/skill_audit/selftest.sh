@@ -16,60 +16,70 @@ TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
 fail=0
-run_case() {
-    local name="$1" setup_cmd="$2" expect_text="$3"
+cases=0
+
+new_fixture() {
     rm -rf "$TMP/t"
     mkdir -p "$TMP/t"
-    # Symlink read-only parts of repo, copy .agents and .codex
+    # Symlink read-only sources; copy every surface that a canary may mutate.
     ln -s "$ROOT/scripts" "$TMP/t/scripts"
     ln -s "$ROOT/tools" "$TMP/t/tools"
     ln -s "$ROOT/docs" "$TMP/t/docs"
     ln -s "$ROOT/main" "$TMP/t/main"
     ln -s "$ROOT/test" "$TMP/t/test"
     ln -s "$ROOT/AGENTS.md" "$TMP/t/AGENTS.md"
+    ln -s "$ROOT/CONTRIBUTING.md" "$TMP/t/CONTRIBUTING.md"
+    ln -s "$ROOT/.githooks" "$TMP/t/.githooks"
     ln -s "$ROOT/.github" "$TMP/t/.github"
     ln -s "$ROOT/sdkconfig.defaults" "$TMP/t/sdkconfig.defaults"
     cp "$ROOT/partitions.csv" "$TMP/t/partitions.csv"
-    mkdir -p "$TMP/t/.agents" "$TMP/t/.codex"
+    mkdir -p "$TMP/t/.agents"
     [ -f "$ROOT/.agents/hooks.json" ] && cp "$ROOT/.agents/hooks.json" "$TMP/t/.agents/"
-    [ -f "$ROOT/.codex/hooks.json" ] && cp "$ROOT/.codex/hooks.json" "$TMP/t/.codex/"
     cp -R "$ROOT/.agents/skills" "$TMP/t/.agents/"
-    cp -R "$ROOT/.codex/agents" "$TMP/t/.codex/"
+    cp -R "$ROOT/.agents/agents" "$TMP/t/.agents/"
+
+}
+
+fixture_checksums() {
+    rg --files --hidden "$TMP/t/.agents" | LC_ALL=C sort | while IFS= read -r fixture_file; do
+        cksum "$fixture_file"
+    done
+}
+
+run_case() {
+    local name="$1" setup_cmd="$2" expect_text="$3" expected_rc="${4:-1}" mode="${5:-}"
+    cases=$((cases + 1))
+    new_fixture
 
     # Execute defect injection
     (cd "$TMP/t" && eval "$setup_cmd")
 
-    local out rc
+    local out rc before after
+    local -a args=(--repo-root "$TMP/t")
+    [ -z "$mode" ] || args+=("$mode")
+    before="$(fixture_checksums)"
     set +e
-    out="$(node "$ROOT/tools/skill_audit/check_skills.mjs" --repo-root "$TMP/t" 2>&1)"
+    out="$(node "$ROOT/tools/skill_audit/check_skills.mjs" "${args[@]}" 2>&1)"
     rc=$?
     set -e
-    if [ "$rc" -eq 1 ] && printf '%s' "$out" | grep -qF "$expect_text"; then
+    after="$(fixture_checksums)"
+    if [ -z "$mode" ] && [ "$before" != "$after" ]; then
+        printf '  FAIL  %s  (read-only audit mutated its inputs)\n' "$name"
+        fail=1
+        return
+    fi
+    if [ "$rc" -eq "$expected_rc" ] && printf '%s' "$out" | grep -qF "$expect_text"; then
         printf '  PASS  %s\n' "$name"
     else
-        printf '  FAIL  %s  (exit %d, expected 1 with pattern "%s")\n%s\n' "$name" "$rc" "$expect_text" "$out"
+        printf '  FAIL  %s  (exit %d, expected %d with pattern "%s")\n%s\n' "$name" "$rc" "$expected_rc" "$expect_text" "$out"
         fail=1
     fi
 }
 
 run_optimize_case() {
-    local name="$1" setup_cmd="$2"
-    rm -rf "$TMP/t"
-    mkdir -p "$TMP/t"
-    ln -s "$ROOT/scripts" "$TMP/t/scripts"
-    ln -s "$ROOT/tools" "$TMP/t/tools"
-    ln -s "$ROOT/docs" "$TMP/t/docs"
-    ln -s "$ROOT/main" "$TMP/t/main"
-    ln -s "$ROOT/test" "$TMP/t/test"
-    ln -s "$ROOT/AGENTS.md" "$TMP/t/AGENTS.md"
-    ln -s "$ROOT/.github" "$TMP/t/.github"
-    ln -s "$ROOT/sdkconfig.defaults" "$TMP/t/sdkconfig.defaults"
-    cp "$ROOT/partitions.csv" "$TMP/t/partitions.csv"
-    mkdir -p "$TMP/t/.agents" "$TMP/t/.codex"
-    [ -f "$ROOT/.agents/hooks.json" ] && cp "$ROOT/.agents/hooks.json" "$TMP/t/.agents/"
-    [ -f "$ROOT/.codex/hooks.json" ] && cp "$ROOT/.codex/hooks.json" "$TMP/t/.codex/"
-    cp -R "$ROOT/.agents/skills" "$TMP/t/.agents/"
-    cp -R "$ROOT/.codex/agents" "$TMP/t/.codex/"
+    local name="$1" setup_cmd="$2" expected_content="${3:-}"
+    cases=$((cases + 1))
+    new_fixture
 
     # Execute drift injection
     (cd "$TMP/t" && eval "$setup_cmd")
@@ -81,6 +91,12 @@ run_optimize_case() {
     set -e
     if [ "$rc" -ne 0 ]; then
         printf '  FAIL  %s  (--optimize exited %d, expected 0)\n%s\n' "$name" "$rc" "$out"
+        fail=1
+        return
+    fi
+
+    if [ -n "$expected_content" ] && ! rg -qF "$expected_content" "$TMP/t/.agents/skills/absence-review/SKILL.md"; then
+        printf '  FAIL  %s  (optimization changed unrelated content)\n' "$name"
         fail=1
         return
     fi
@@ -132,7 +148,7 @@ run_case "mismatched frontmatter name" \
 
 # 7. Non-read-only reviewer agent configuration
 run_case "reviewer agent non-read-only sandbox mode" \
-    "sed -i.bak 's|sandbox_mode = \"read-only\"|sandbox_mode = \"read-write\"|g' .codex/agents/heap-safety-reviewer.toml" \
+    "sed -i.bak 's|sandbox_mode = \"read-only\"|sandbox_mode = \"read-write\"|g' .agents/agents/heap-safety-reviewer.toml" \
     "sandbox_mode must be 'read-only'"
 
 # 8. Dynamic partition offset discovery from partitions.csv
@@ -196,8 +212,57 @@ run_optimize_case "self-optimization prunes removed skill from checklist and pas
 run_optimize_case "self-optimization synchronizes partition offset examples in skill-audit" \
     "sed -i.bak 's|coredump,  data, coredump, 0x12000|coredump,  data, coredump, 0x14000|g' partitions.csv"
 
+# Correct only each partition claim, preserving valid claims and unrelated identical numbers.
+run_optimize_case "partition phrase fixes preserve other offsets and numeric literals" \
+    "echo 'NVS at 0x12000; preserve coredump@0x12000 and mask 0x12000; history offset 0xf000; preserve otadata@0xf000.' >> .agents/skills/absence-review/SKILL.md" \
+    "NVS at 0x9000; preserve coredump@0x12000 and mask 0x12000; history offset 0x400000; preserve otadata@0xf000."
+
+run_case "swapped board pins cannot satisfy each other" \
+    "sed -i.bak 's|XIAO ESP32-S3 RX=44/TX=43, M5Stack AtomS3 Lite RX=1/TX=2|XIAO ESP32-S3 RX=1/TX=2, M5Stack AtomS3 Lite RX=44/TX=43|' .agents/skills/skill-audit/SKILL.md" \
+    "XIAO ESP32-S3 pin assignment must cite RX=44/TX=43"
+
+run_case "a correct board claim does not hide a conflicting claim" \
+    "echo 'XIAO ESP32-S3 RX=1/TX=2.' >> .agents/skills/skill-audit/SKILL.md" \
+    "XIAO ESP32-S3 pin assignment must cite RX=44/TX=43"
+
+run_case "wrapped and reversed board pin pairs remain valid" \
+    "printf '\nXIAO ESP32-S3:\nTX=43/RX=44.\nAtomS3 Lite: TX=2/RX=1.\n' >> .agents/skills/absence-review/SKILL.md" \
+    "18 skills and 3 reviewer agents clean" 0
+
+run_case "nested reviewer file references are checked" \
+    "sed -i.bak 's|main/logic/convert.hpp|main/logic/nonexistent.hpp|' .agents/agents/x10a-decode-reviewer.toml" \
+    "referenced file does not exist: main/logic/nonexistent.hpp"
+
+run_case "missing canonical reviewer directory fails closed" \
+    "rm -rf .agents/agents" \
+    "reviewer directory missing" 2
+
+run_case "optimization cannot prune a missing reviewer inventory" \
+    "rm -rf .agents/agents" \
+    "reviewer directory missing" 2 --optimize
+
+run_case "empty canonical reviewer directory fails closed" \
+    "rm .agents/agents/*.toml" \
+    "reviewer inventory is empty" 2
+
+run_case "malformed YAML collection is rejected" \
+    "sed -i.bak 's|^description:|description: [|' .agents/skills/absence-review/SKILL.md" \
+    "invalid restricted YAML string for frontmatter description"
+
+run_case "duplicate YAML key is rejected" \
+    "sed -i.bak 's|^name: absence-review|name: absence-review\nname: absence-review|' .agents/skills/absence-review/SKILL.md" \
+    "duplicate frontmatter key: name"
+
+run_case "quoted YAML strings are accepted" \
+    "sed -i.bak 's|^name: absence-review|name: \"absence-review\"|' .agents/skills/absence-review/SKILL.md" \
+    "18 skills and 3 reviewer agents clean" 0
+
+run_case "optimization verifies final content when repair is unavailable" \
+    "sed -i.bak '/^- a \*\*wrong number\*\*/d' .agents/skills/skill-audit/SKILL.md" \
+    "final read-only verification after optimization failed" 1 --optimize
+
 if [ "$fail" -eq 0 ]; then
-    echo "selftest ok: all 20 canaries and self-optimization cases verified."
+    echo "selftest ok: all $cases canaries and self-optimization cases verified."
 else
     echo "selftest FAILED — skill-audit no longer catches a defect it was built for." >&2
 fi

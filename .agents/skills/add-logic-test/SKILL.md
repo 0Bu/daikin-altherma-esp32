@@ -38,6 +38,10 @@ result). Keep that discipline.
 
 Before declaring work complete, analyze and self-optimize the implementation:
    - **Branch and edge-coverage analysis:** Run `scripts/run-mock-tests.sh --coverage` and inspect whether all branches and error paths in the new or modified `main/logic/` header are covered. If branch ratchets or taken/total edge counts regress, add targeted `CHECK` assertions.
-   - **Zero-allocation & `constexpr` audit:** Confirm the logic function is strictly `constexpr` or `inline`, header-only, and free of dynamic heap allocations (no `std::string` or dynamic heap containers; use `std::string_view` or fixed-size buffers).
+   - **Allocation and `constexpr` audit:** Keep the logic IDF-free and header-only with `inline` or
+     `constexpr` functions. Prefer allocation-free computations and fixed-size buffers where the
+     existing API supports them. Pure builders and validators may use the established `std::string`
+     APIs; review their allocation bounds and ensure firmware callers retain exception boundaries
+     and do not allocate while holding a raw mutex.
    - **Boundary value audit:** Verify that tests assert edge cases (e.g. empty buffers, zero values, maximum width values, invalid characters, CRC mismatches), not just the happy path.
    - **Self-optimize:** Prune dead branches, remove redundant intermediate variables or copies, and refine both the logic and the tests to be as concise, fast, and robust as possible.

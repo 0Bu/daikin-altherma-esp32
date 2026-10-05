@@ -28,9 +28,10 @@
 //     ONE HA device and its entities; this board's MAC-derived id stays on as the MQTT client id
 //     and a second dev.ids entry (HA merges on it, so an install upgrading from a MAC-identified
 //     build keeps its device). The entity id carries the REGISTER GROUP because uniq_id and the
-//     discovery topic are flat namespaces while a label is unique only within its page (#221). The
-//     configs an older build published under a superseded identity — the MAC node id, and the
-//     un-grouped entity ids — are retracted in one pass before any replacement goes out.
+//     discovery topic are flat namespaces while a label is unique only within its page
+//     (legacy-221). The configs an older build published under a superseded identity — the MAC node
+//     id, and the un-grouped entity ids — are retracted in one pass before any replacement goes
+//     out.
 //   • Every HEARTBEAT_INTERVAL_S (10 s): rebuild + publish board/link diagnostics
 //     (logic/heartbeat.hpp) to <base>/heartbeat and the separately grouped
 //     room-source/heating-curve evidence (logic/heating_curve_mqtt.hpp) to <base>/heating_curve.
@@ -79,7 +80,8 @@
 #include "logic/mqtt_cleanup.hpp"
 #include "logic/mqtt_group.hpp"
 #include "logic/mqtt_publish_gate.hpp"
-#include "logic/ota_quiesce.hpp"   // stand aside while an OTA/weather TLS op owns the heap (#380)
+#include "logic/ota_quiesce.hpp" // stand aside while an OTA/weather TLS op owns the heap (legacy-380)
+#include "logic/payload_complete.hpp"
 #include "logic/reference_temperature.hpp"
 #include "logic/reset_reason.hpp"
 #include "logic/weather_mqtt.hpp"
@@ -160,19 +162,19 @@ static bool promote_client_to_publisher();
 
 // MQTT_EVENT_DATA runs on esp-mqtt's unguarded event task. It therefore only copies into this one
 // bounded frame and posts it to a queue; JSON parsing and all std::string work stay on the
-// exception-guarded mqtt_task. 1024 B comfortably covers the 435 B Shelly test payload while keeping
-// an accidentally huge subscribed document from consuming the ESP32 heap.
+// exception-guarded mqtt_task. 1024 B comfortably covers the 435 B Shelly test payload while
+// keeping an accidentally huge subscribed document from consuming the ESP32 heap.
 //
 // THE QUEUE HOLDS MORE THAN ONE FRAME, and that is not headroom for its own sake. It was length 1
-// with xQueueOverwrite (keep-newest) when exactly ONE topic was subscribed (#318). Since then the
-// circulation witness (#361) added a second SAVED source and a pre-save probe, while the
+// with xQueueOverwrite (keep-newest) when exactly ONE topic was subscribed (legacy-318). Since then
+// the circulation witness (legacy-361) added a second SAVED source and a pre-save probe, while the
 // retained-cleanup migration added four more subscriptions — and the drain still happens once per
 // mqtt_task cycle, i.e. once a SECOND. Every frame arriving inside one cycle but the last was
 // discarded, unread, with nothing logged.
 //
-// That is not a rare race: the circulation witness is a smart plug publishing at roughly 1 Hz, which
-// is precisely what #367's pulse tracking is written for. With a three-topic room source configured
-// beside it, room frames would otherwise be dropped continuously.
+// That is not a rare race: the circulation witness is a smart plug publishing at roughly 1 Hz,
+// which is precisely what legacy-367's pulse tracking is written for. With a three-topic room
+// source configured beside it, room frames would otherwise be dropped continuously.
 //
 // Eight slots (8 x ~1.2 KB, allocated once at MQTT start) cover the room source's three independent
 // value topics, the saved/probed circulation source and cleanup bursts inside one drain interval.
@@ -201,6 +203,7 @@ static bool                s_ref_rx_active = false;
 static std::atomic<uint32_t> s_ref_dropped{0};
 static uint32_t            s_ref_dropped_reported = 0;
 static ReferenceTemperatureStatus s_ref_status;
+static SourceTimestampHighWater     s_ref_source_time; // guarded by s_mtx; survives invalid samples
 static logic::HeatingCurveDiagnosis s_heating_curve_diagnosis;  // guarded by s_mtx
 inline constexpr size_t REF_VALUE_TOPIC_COUNT = 3;
 using ReferenceTopicSet = std::array<std::string, REF_VALUE_TOPIC_COUNT>;
@@ -262,6 +265,7 @@ static uint64_t    s_last_x10a_digest = 0;            // per-topic dedup guards 
 static std::string s_last_modbus_json;
 static uint32_t    s_last_x10a_cache_gen   = 0;
 static uint32_t    s_last_modbus_cache_gen = 0;
+static bool        s_last_modbus_live      = false;
 static std::string s_last_weather_json;
 static std::string s_last_env3_json;
 // Rate-limit the hard-cap diagnostic. The payload itself is no longer boot-long storage: dev.12's
@@ -317,10 +321,10 @@ static uint32_t s_mqtt_pub_fail = 0;
 static std::atomic<uint32_t> s_mqtt_reconnects{0};
 
 // Publish cycles that produced NOTHING, split by cause — the heartbeat's mqtt_skipped/mqtt_quiesced
-// (#380). Both are written only on the publish task, but they are read by the /status builder on the
-// httpd task, so they are atomic rather than plain like pub_ok/pub_fail above. `skipped` is bumped
-// from inside the OOM catch handler, where an atomic add is the only kind of bookkeeping that is
-// guaranteed not to throw a second time.
+// (legacy-380). Both are written only on the publish task, but they are read by the /status builder
+// on the httpd task, so they are atomic rather than plain like pub_ok/pub_fail above. `skipped` is
+// bumped from inside the OOM catch handler, where an atomic add is the only kind of bookkeeping
+// that is guaranteed not to throw a second time.
 static std::atomic<uint32_t> s_mqtt_skipped{0};
 static std::atomic<uint32_t> s_mqtt_quiesced{0};
 static std::atomic<bool> s_x10a_publish_required{false};
@@ -709,15 +713,16 @@ static void retract_legacy_fixed() {   // heartbeat + crash entities (no profile
     s_legacy_fixed_retracted = true;
 }
 
-// ── Ungrouped (pre-#221) value discovery configs ─────────────────────────────────────────────────
-// Builds up to this one put only the LABEL SLUG in a value's entity id and discovery topic, leaving
-// out the register group. Two rows sharing a label on different pages therefore landed on ONE topic
-// under ONE uniq_id, and HA created one entity where the device publishes two — a unit reporting an
-// outdoor fault and a hydronic one showed a single "Error Code" (#221). Both are now group-scoped.
+// ── Ungrouped (pre-legacy-221) value discovery configs
+// ───────────────────────────────────────────────── Builds up to this one put only the LABEL SLUG
+// in a value's entity id and discovery topic, leaving out the register group. Two rows sharing a
+// label on different pages therefore landed on ONE topic under ONE uniq_id, and HA created one
+// entity where the device publishes two — a unit reporting an outdoor fault and a hydronic one
+// showed a single "Error Code" (legacy-221). Both are now group-scoped.
 //
-// So every row has up to TWO stale retained configs per node id — the `sensor` form every build ever
-// wrote, plus the `binary_sensor` form post-split builds wrote for a bit-flag row — and they are
-// retained, so they outlive the upgrade as permanently-unavailable duplicates unless deleted.
+// So every row has up to TWO stale retained configs per node id — the `sensor` form every build
+// ever wrote, plus the `binary_sensor` form post-split builds wrote for a bit-flag row — and they
+// are retained, so they outlive the upgrade as permanently-unavailable duplicates unless deleted.
 static void retract_ungrouped_values(const logic::ProfileView& prof, const std::string& node) {
     for (size_t i = 0; i < prof.count(); i++) {
         const ValueDef  d = logic::adjudicated(prof[i]);   // wire truth, not the generator label
@@ -730,26 +735,28 @@ static void retract_ungrouped_values(const logic::ProfileView& prof, const std::
     }
 }
 
-// ── Relabelled (pre-label-override) value discovery configs (#230 A) ───────────────────────────────
-// logic/label_override.hpp republishes a row under a spec-correct label when the generator's was
-// wrong — today the four "Fan 1 (10 rpm)" fan-step rows, now announced as "Fan 1 (step)". The label
-// is the entity id, so a build before the override published each such row under a DIFFERENT grouped
-// id (actuators_fan_1_10_rpm), whose retained config would otherwise survive the upgrade as a
-// permanently-unavailable duplicate. Delete it — built from the RAW (pre-override) label, which is
-// exactly the "frozen literal" the migration needs: it is NOT what this build writes (that is now the
-// adjudicated label), so discovery_topic(raw) targets the superseded config and nothing live.
-// General over any future label override; fires only on a row a label override actually changed.
-// (Unlike a rename, a VictoriaMetrics series cannot be carried across by any firmware action —
-// actuators_fan_1_10_rpm simply stops and actuators_fan_1_step starts at zero for a unit on one of
-// the four profiles; the reference install already published the majority _step spelling.)
+// ── Relabelled (pre-label-override) value discovery configs (legacy-230 A)
+// ─────────────────────────────── logic/label_override.hpp republishes a row under a spec-correct
+// label when the generator's was wrong — today the four "Fan 1 (10 rpm)" fan-step rows, now
+// announced as "Fan 1 (step)". The label is the entity id, so a build before the override published
+// each such row under a DIFFERENT grouped id (actuators_fan_1_10_rpm), whose retained config would
+// otherwise survive the upgrade as a permanently-unavailable duplicate. Delete it — built from the
+// RAW (pre-override) label, which is exactly the "frozen literal" the migration needs: it is NOT
+// what this build writes (that is now the adjudicated label), so discovery_topic(raw) targets the
+// superseded config and nothing live. General over any future label override; fires only on a row a
+// label override actually changed. (Unlike a rename, a VictoriaMetrics series cannot be carried
+// across by any firmware action — actuators_fan_1_10_rpm simply stops and actuators_fan_1_step
+// starts at zero for a unit on one of the four profiles; the reference install already published
+// the majority _step spelling.)
 static void retract_relabeled_values(const logic::ProfileView& prof, const std::string& node) {
     for (size_t i = 0; i < prof.count(); i++) {
         const ValueDef raw = prof[i];
         if (logic::label_str_eq(raw.label, logic::adjudicated(raw).label)) continue;  // no override here
         if (!conv_publishable(raw.conv) || object_id(raw.label).empty()) continue;
-        // Every superseded shape the OLD label was ever published under: the #221 GROUPED id
-        // (actuators_fan_1_10_rpm — every build since #232), and the pre-#221 UNGROUPED bare slug
-        // (fan_1_10_rpm — for a device upgrading straight from before #221, skipping the grouped era).
+        // Every superseded shape the OLD label was ever published under: the legacy-221 GROUPED id
+        // (actuators_fan_1_10_rpm — every build since legacy-232), and the pre-legacy-221 UNGROUPED
+        // bare slug (fan_1_10_rpm — for a device upgrading straight from before legacy-221,
+        // skipping the grouped era).
         mqtt_publish(discovery_topic(s_prefix, node, raw), "", 0, 0, 1);
         mqtt_publish(ungrouped_discovery_topic(s_prefix, node, "sensor", raw), "", 0, 0, 1);
         if (conv_is_binary(raw.conv))
@@ -772,9 +779,9 @@ static void retract_relabeled_values(const logic::ProfileView& prof, const std::
 // error visible anywhere. Retrying is free and idempotent (a zero-length retained publish to a topic
 // already cleared is a no-op), so the failure mode should be "does it again", not "silently stops".
 static void retract_stale_values(const logic::ProfileView& prof, const std::string& profile_id) {
-    retract_ungrouped_values(prof, s_node);                          // #221: the un-grouped ids
+    retract_ungrouped_values(prof, s_node); // legacy-221: the un-grouped ids
     if (s_board != s_node) retract_ungrouped_values(prof, s_board);  // ...and the MAC-era device
-    retract_relabeled_values(prof, s_node);                          // #230 A: superseded label ids
+    retract_relabeled_values(prof, s_node); // legacy-230 A: superseded label ids
     if (s_board != s_node) retract_relabeled_values(prof, s_board);
     s_stale_values_profile = profile_id;
 }
@@ -788,24 +795,26 @@ static void publish_x10a_discovery() {
     // applicable overlay blocks (def/overlay.hpp) are part of that row set. Announcing fewer rows than the
     // X10A topic carries would leave the extra values in MQTT with no HA entity to land in.
     const auto prof = def::resolved(def::lookup(profile_id.c_str()));
-    // Delete every config published under a superseded identity FIRST — the un-grouped ids (#221)
-    // and, on a board that predates the base-topic device id, the MAC-era ones. The freed entity_id
-    // is what the replacements below reclaim. Runs once per profile, not once per (re)connect: a
-    // broker restart must not re-send ~200 deletes for entities that no longer exist under those ids.
+    // Delete every config published under a superseded identity FIRST — the un-grouped ids
+    // (legacy-221) and, on a board that predates the base-topic device id, the MAC-era ones. The
+    // freed entity_id is what the replacements below reclaim. Runs once per profile, not once per
+    // (re)connect: a broker restart must not re-send ~200 deletes for entities that no longer exist
+    // under those ids.
     if (s_stale_values_profile != profile_id) retract_stale_values(prof, profile_id);
     for (size_t i = 0; i < prof.count(); i++) {
         const ValueDef  d = logic::adjudicated(prof[i]);   // wire truth, not the generator label
-        // A row the firmware does not publish — the generator's detect-only flag, or the availability
-        // ledger's Unproven verdict (logic/availability.hpp). RETRACT rather than merely skip: an
-        // install upgrading from a build that DID publish this row already has a RETAINED discovery
-        // config in the broker, which would survive forever as a permanently-unavailable HA entity —
-        // and for a QUARANTINED row it is worse than an orphan, since HA would keep the last false
-        // value it was ever sent (145-200 °C for Target Evap. Temp.) as that entity's state until
-        // something replaced it. A zero-length retained payload deletes it, and is harmless on a
-        // fresh install where the topic never existed. Only the CURRENT (grouped) topic is retracted
-        // here: this is a live rule about a row THIS build stopped publishing, not a migration, and
-        // the row's pre-#221 shapes are the bulk pass's job above — which covers it, since that pass
-        // deliberately ignores row_publishable (an older build announced it as an ordinary sensor).
+        // A row the firmware does not publish — the generator's detect-only flag, or the
+        // availability ledger's Unproven verdict (logic/availability.hpp). RETRACT rather than
+        // merely skip: an install upgrading from a build that DID publish this row already has a
+        // RETAINED discovery config in the broker, which would survive forever as a
+        // permanently-unavailable HA entity — and for a QUARANTINED row it is worse than an orphan,
+        // since HA would keep the last false value it was ever sent (145-200 °C for Target Evap.
+        // Temp.) as that entity's state until something replaced it. A zero-length retained payload
+        // deletes it, and is harmless on a fresh install where the topic never existed. Only the
+        // CURRENT (grouped) topic is retracted here: this is a live rule about a row THIS build
+        // stopped publishing, not a migration, and the row's pre-legacy-221 shapes are the bulk
+        // pass's job above — which covers it, since that pass deliberately ignores row_publishable
+        // (an older build announced it as an ordinary sensor).
         if (!row_publishable(d)) {
             if (!object_id(d.label).empty())
                 mqtt_publish(discovery_topic(s_prefix, s_node, d), "", 0, 0, 1);
@@ -817,10 +826,10 @@ static void publish_x10a_discovery() {
         const std::string ct  = discovery_topic(s_prefix, s_node, d);
         const std::string cfg = discovery_config(s_node, s_board, s_x10a, s_avail, d);
         mqtt_publish(ct, cfg.c_str(), 0, 0, 1);   // retained
-        // The DERIVED numeric fault flags that ride beside a textual error class (#209 defect 4).
-        // Announced here, from the same row loop that publishes the class itself, so the entity set
-        // and the payload cannot drift apart — the direct cache encoder emits these keys for exactly
-        // the rows this branch announces.
+        // The DERIVED numeric fault flags that ride beside a textual error class (legacy-209 defect
+        // 4). Announced here, from the same row loop that publishes the class itself, so the entity
+        // set and the payload cannot drift apart — the direct cache encoder emits these keys for
+        // exactly the rows this branch announces.
         if (d.conv == 203) {
             const std::string group = group_for_page(d.reg);
             for (size_t k = 0; k < FAULT_COMPANION_COUNT; k++) {
@@ -928,14 +937,16 @@ static bool publish_x10a_state(const Config& config, bool force) {
     return true;
 }
 
-static void publish_modbus_state() {
+static bool publish_modbus_state(bool& published_live) {
     bool live = false;
     const std::vector<GroupedValue> values = current_modbus_values(live);
     const std::string js = live ? build_flat_json(values) : std::string("{}");
-    if (js != s_last_modbus_json &&
-        mqtt_publish(s_modbus, js.c_str(), static_cast<int>(js.size()), 0, 1)) {
+    if (js != s_last_modbus_json) {
+        if (!mqtt_publish(s_modbus, js.c_str(), static_cast<int>(js.size()), 0, 1)) return false;
         s_last_modbus_json = js;
     }
+    published_live = live;
+    return true;
 }
 
 struct RetainedCleanupCycle {
@@ -1331,8 +1342,9 @@ static void publish_heartbeat() {
     f.mqtt_count      = s_mqtt_pub_ok;
     f.mqtt_fails      = s_mqtt_pub_fail;
     f.mqtt_reconnects = s_mqtt_reconnects;
-    // The cycles that produced nothing (#380). poll_skipped comes from the OTHER task's counter, not
-    // from `hp` above: hp_stats() describes cycles that RAN, and a sweep that threw never committed.
+    // The cycles that produced nothing (legacy-380). poll_skipped comes from the OTHER task's
+    // counter, not from `hp` above: hp_stats() describes cycles that RAN, and a sweep that threw
+    // never committed.
     f.mqtt_skipped    = s_mqtt_skipped.load(std::memory_order_relaxed);
     f.mqtt_quiesced   = s_mqtt_quiesced.load(std::memory_order_relaxed);
     f.poll_skipped    = hp_skipped_cycles();
@@ -1552,8 +1564,24 @@ static DecodedReferenceFrame decode_reference_frame(const ReferenceMqttFrame& fr
     const bool setpoint_frame = !setpoint_topic.empty() && frame.topic == setpoint_topic;
     const bool timestamp_frame = !timestamp_topic.empty() && frame.topic == timestamp_topic;
     if (!temperature_frame && !setpoint_frame && !timestamp_frame) return out;
-    JsonGuard root(cJSON_ParseWithLength(frame.payload, frame.payload_len));
+    if (frame.payload_len == 0) {
+        out.error = "payload is not valid JSON";
+        return out;
+    }
+    if (!json_payload_depth_ok(std::string_view(frame.payload, frame.payload_len))) {
+        out.error = "payload nesting depth exceeded";
+        return out;
+    }
+    const char* parse_end = nullptr;
+    JsonGuard root(cJSON_ParseWithLengthOpts(frame.payload, frame.payload_len, &parse_end, false));
     if (!root) { out.error = "payload is not valid JSON"; return out; }
+    const char* payload_end = frame.payload + frame.payload_len;
+    if (!parse_end || parse_end < frame.payload || parse_end > payload_end ||
+        !json_suffix_is_whitespace(
+            std::string_view(parse_end, static_cast<size_t>(payload_end - parse_end)))) {
+        out.error = "payload has trailing data";
+        return out;
+    }
     if (temperature_frame) {
         cJSON* item = reference_json_item(root.get(), temperature_path);
         if (!cJSON_IsNumber(item) || !std::isfinite(item->valuedouble)) {
@@ -1632,9 +1660,12 @@ static bool reference_timestamp_moved_backward(const DecodedReferenceFrame& deco
                                                 const std::string& timestamp_path) {
     if (!decoded.has_source_time) return false;
     Lock lk(s_mtx);
-    return timestamp_topic == s_ref_binding_time_topic &&
-           timestamp_path == s_ref_binding_time_path && s_ref_status.has_value &&
-           s_ref_status.has_source_time && decoded.source_unix_s < s_ref_status.source_unix_s;
+    const std::string& bound_time_topic =
+        s_ref_binding_time_topic.empty() && !s_ref_binding_time_path.empty()
+            ? s_ref_binding_topic
+            : s_ref_binding_time_topic;
+    return timestamp_topic == bound_time_topic && timestamp_path == s_ref_binding_time_path &&
+           !s_ref_source_time.allows(decoded.source_unix_s);
 }
 
 struct DecodedCirculationFrame {
@@ -1649,8 +1680,24 @@ static DecodedCirculationFrame decode_circulation_frame(const ReferenceMqttFrame
                                                         const std::string& power_path,
                                                         const std::string& timestamp_path) {
     DecodedCirculationFrame out;
-    JsonGuard               root(cJSON_ParseWithLength(frame.payload, frame.payload_len));
+    if (frame.payload_len == 0) {
+        out.error = "payload is not valid JSON";
+        return out;
+    }
+    if (!json_payload_depth_ok(std::string_view(frame.payload, frame.payload_len))) {
+        out.error = "payload nesting depth exceeded";
+        return out;
+    }
+    const char* parse_end = nullptr;
+    JsonGuard root(cJSON_ParseWithLengthOpts(frame.payload, frame.payload_len, &parse_end, false));
     if (!root) { out.error = "payload is not valid JSON"; return out; }
+    const char* payload_end = frame.payload + frame.payload_len;
+    if (!parse_end || parse_end < frame.payload || parse_end > payload_end ||
+        !json_suffix_is_whitespace(
+            std::string_view(parse_end, static_cast<size_t>(payload_end - parse_end)))) {
+        out.error = "payload has trailing data";
+        return out;
+    }
     cJSON* power = reference_json_item(root.get(), power_path);
     if (!cJSON_IsNumber(power) || !std::isfinite(power->valuedouble) ||
         power->valuedouble < 0.0 || power->valuedouble > CIRC_SOURCE_POWER_MAX_W) {
@@ -1928,6 +1975,7 @@ static void service_reference_subscription(const Config& c) {
         s_ref_last_logged_error.clear();
         s_ref_last_error_log_ms = 0;
         Lock lk(s_mtx);
+        s_ref_source_time.reset();
         s_ref_status.has_value = false;
         s_ref_status.has_source_time = false;
         s_ref_status.has_setpoint = c.ref_temp_fixed_setpoint_tenths != 0;
@@ -2196,6 +2244,7 @@ static void service_reference_frames(const Config& c) {
                 s_ref_status.has_source_time = true;
                 s_ref_status.source_unix_s = decoded.source_unix_s;
                 s_ref_status.timestamp_source = decoded.timestamp_source;
+                (void)s_ref_source_time.accept(decoded.source_unix_s);
             }
             s_ref_status.rejection_reason = ReferenceRoomReason::Eligible;
             s_ref_status.eligibility_error = decoded.control_error ? decoded.control_error : "";
@@ -2403,12 +2452,12 @@ static void mqtt_task(void*) {
                 std::max(0, publisher_promotion_retry_countdown_s - delay_s);
         }
 
-        // STAND ASIDE while an OTA or weather HTTPS operation owns the heap (#380). Placed above
-        // the try, before the first allocation of the cycle: everything below this point builds
-        // std::strings, and on the heap a TLS session leaves behind, the largest of them is what
-        // throws. Skipping
-        // the cycle on purpose costs the same second of data the bad_alloc cost, spends none of the
-        // block the download needs, and — unlike the throw — says so in a counter.
+        // STAND ASIDE while an OTA or weather HTTPS operation owns the heap (legacy-380). Placed
+        // above the try, before the first allocation of the cycle: everything below this point
+        // builds std::strings, and on the heap a TLS session leaves behind, the largest of them is
+        // what throws. Skipping the cycle on purpose costs the same second of data the bad_alloc
+        // cost, spends none of the block the download needs, and — unlike the throw — says so in a
+        // counter.
         //
         // The watchdog is fed ABOVE this, so a long download cannot false-trip it. The esp-mqtt
         // transport is cleanly stopped below as well: that removes MQTTS record churn and yields a
@@ -2615,9 +2664,11 @@ static void mqtt_task(void*) {
                         // cycle.
                         s_modbus_disabled_cleaned = false;
                         const uint32_t mb_gen     = mb_cache_generation();
-                        if (mb_gen != s_last_modbus_cache_gen || s_last_modbus_json.empty()) {
-                            publish_modbus_state();
-                            s_last_modbus_cache_gen = mb_gen;
+                        if (mqtt_source_state_needs_publish(mb_gen, s_last_modbus_cache_gen,
+                                                            mb_values_live(), s_last_modbus_live,
+                                                            !s_last_modbus_json.empty())) {
+                            if (publish_modbus_state(s_last_modbus_live))
+                                s_last_modbus_cache_gen = mb_gen;
                         }
                     } else if (modbus_action == RetainedSourceAction::DeleteRetained) {
                         // Covers a live POST /set_hp disable. Discovery and the duplicate status
@@ -2690,13 +2741,13 @@ static void mqtt_task(void*) {
             // throw again, and a throw inside a catch handler is std::terminate (the reboot this
             // guard exists to prevent). The atomic add cannot fail, so the cycle is recorded even
             // when the line describing it never reaches the ring — which is the whole complaint in
-            // #380: the ring was the only evidence, and a chatty boot overwrites it.
+            // legacy-380: the ring was the only evidence, and a chatty boot overwrites it.
             //
             // The heap snapshot rides the SAME line (private issue 10 E): both sampler calls are
-            // allocation-free, and the throw second's free/largest-block pair is what identifies the
-            // collision partner (status build, TLS teardown tail, …) that split the block mid-cycle
-            // — the one datum every earlier `publish skipped` line lacked, which made the events
-            // provably heap-healthy at 10-s sampling and unprovable at the throw instant.
+            // allocation-free, and the throw second's free/largest-block pair is what identifies
+            // the collision partner (status build, TLS teardown tail, …) that split the block
+            // mid-cycle — the one datum every earlier `publish skipped` line lacked, which made the
+            // events provably heap-healthy at 10-s sampling and unprovable at the throw instant.
             s_mqtt_skipped.fetch_add(1, std::memory_order_relaxed);
             diag_printf("mqtt: publish skipped at %s (%s; free=%u B largest=%u B)\n", publish_stage,
                         e.what(),
@@ -2733,7 +2784,7 @@ static bool build_client(bool publisher_lwt) {
 
     // Credentials must never travel in cleartext (docs/SECURITY.md) — require mqtts, no fallback.
     if (has_creds && !is_tls) {
-        set_status(false, "credentials require mqtts:// (won't send them in cleartext)");
+        set_status(false, "credentials require mqtts:// or wss:// (won't send them in cleartext)");
         diag_printf("mqtt: refusing plaintext broker with credentials — use mqtts://\n");
         return false;
     }
@@ -2850,21 +2901,34 @@ void mqtt_ha_start() {
     const Config& c = config();
     s_x10a_publish_required.store(!c.mqtt_uri.empty(), std::memory_order_release);
     s_mtx = xSemaphoreCreateMutex();
-    if (!s_mtx) diag_printf("mqtt: status mutex alloc failed — status reads run unsynchronized\n");
-    s_status.configured = !c.mqtt_uri.empty();
-    s_status.broker     = c.mqtt_uri;
-    s_ref_status.configured = !c.ref_temp_topic.empty();
-    s_circulation_status.configured = !c.circulation_topic.empty();
-    s_circulation_runtime_max_age_s = c.circulation_max_age_s;
-    // The circulation test shares std::strings with the HTTP task, so it is safe only when both
-    // synchronization objects exist.
-    s_circulation_probe_sem = s_mtx ? xSemaphoreCreateBinary() : nullptr;
+    if (!s_mtx) {
+        // HTTP is already serving /status, and the bridge writes std::strings (broker, the
+        // reference error text) that it copies. Without the mutex every such write would race a
+        // reader, so the bridge stays off this boot rather than running unsynchronized; the
+        // statuses keep their defaults, which no one writes.
+        diag_printf("mqtt: status mutex alloc failed — MQTT bridge disabled this boot\n");
+        return;
+    }
+    {
+        // Under the lock even at startup: mqtt_status() and friends start locking the moment s_mtx
+        // exists, and httpd was started before this bridge.
+        Lock lk(s_mtx);
+        s_status.configured             = !c.mqtt_uri.empty();
+        s_status.broker                 = c.mqtt_uri;
+        s_ref_status.configured         = !c.ref_temp_topic.empty();
+        s_circulation_status.configured = !c.circulation_topic.empty();
+        s_circulation_runtime_max_age_s = c.circulation_max_age_s;
+    }
+    // The circulation test shares std::strings with the HTTP task, so it also needs its own
+    // hand-off semaphore; s_mtx is guaranteed above.
+    s_circulation_probe_sem = xSemaphoreCreateBinary();
     if (!s_circulation_probe_sem)
         diag_printf("mqtt: circulation-source test semaphore alloc failed\n");
     if (!s_status.configured) return;
 
     s_ref_queue = xQueueCreate(REF_QUEUE_DEPTH, sizeof(ReferenceMqttFrame));
     if (!s_ref_queue) {
+        Lock lk(s_mtx);
         s_ref_status.error = "receive queue alloc failed";
         s_ref_status.errors++;
         s_circulation_status.error = "receive queue alloc failed";

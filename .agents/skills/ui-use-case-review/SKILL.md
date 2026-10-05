@@ -18,9 +18,12 @@ shared close callback called an undefined function.
 
 ## 0. Step 0 — pin the baseline
 
-Ensure the local repository is synchronized before auditing. Run `git fetch origin` and verify
-`HEAD` matches `origin/main` (or the target PR head commit). Fail-fast on divergence or untracked
-local drift — never audit an unpinned or stale baseline. State reviewed SHA in report.
+Record `git rev-parse HEAD`, the intended comparison base, and `git status --short` before
+auditing. For a PR, verify that the checkout matches the exact target PR head; refresh remote
+refs with `git fetch origin` when needed and available. For an authorized local implementation,
+include the intended tracked diff and untracked new files in the review and identify them in
+the report; no commit, PR or equality with `origin/main` is required. Preserve unrelated user
+changes. Stamp a merge pass only after the reviewed content matches the exact committed PR head.
 
 ## 1. Establish the affected paths
 

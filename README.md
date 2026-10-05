@@ -7,7 +7,7 @@ embedded web UI.
 ## Requirements
 
 - A Daikin Altherma with an **X10A** header.
-- A ESP32-S3 board with ≥8 MB flash.
+- An ESP32-S3 board with ≥8 MB flash.
 - A JST-EH 2.5 mm 5-pin connector to reach the X10A header.
 - A browser with Web Serial to flash.
 

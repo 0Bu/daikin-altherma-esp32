@@ -133,14 +133,12 @@ server would be harmless if ever wanted; library docs are already covered by `co
 
 ## Repository agent tooling
 
-This developer-only integration is separate from the device's `/mcp` endpoint. The canonical Codex
-configuration in [`.codex/config.toml`](../.codex/config.toml) and the compatible `mcpServers`
-configuration in [`.mcp.json`](../.mcp.json) both start
-`@upstash/context7-mcp@4.0.2`. Version `4.0.2` is the reviewed public-main pin;
-pinning it instead of `@latest` makes a checkout use the same server across runners and prevents an
-unreviewed registry release from changing the agent's documentation surface. Keep both files on the
-same explicit version and update them deliberately after reviewing the new package version.
+This developer-only integration is separate from the device's `/mcp` endpoint. The canonical
+configuration in [`.mcp.json`](../.mcp.json) starts `@upstash/context7-mcp@4.0.2`. Version `4.0.2` is
+the reviewed public-main pin; pinning it instead of `@latest` makes a checkout use the same server
+across runners and prevents an unreviewed registry release from changing the agent's documentation
+surface. Update it deliberately after reviewing the new package version.
 
 Context7 is for library-documentation lookup only. It neither exposes the heat pump nor changes the
-read-only device MCP contract above. `.mcp.json` remains supported for Claude and other compatible
-clients while `.codex/config.toml` is the canonical Codex entry point.
+read-only device MCP contract above. `.mcp.json` is the standard MCP client descriptor supported
+across agentic tools.

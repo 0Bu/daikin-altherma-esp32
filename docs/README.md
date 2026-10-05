@@ -16,14 +16,6 @@ to the visible 24-hour results and what a user can do next is in [**DIAGNOSTICS.
 the source, threshold and claim boundary for every check is recorded in
 [**DIAGNOSTIC_EVIDENCE.md**](DIAGNOSTIC_EVIDENCE.md).
 
-Maintainer review: [12 September 2026 code and workflow findings](reviews/2026-09-12-code-audit.md)
-records open defects, source references, reproduction evidence and verification limits at a fixed
-source revision. It does not change firmware behavior.
-[13 September 2026 project review](reviews/2026-09-13-project-review.md) is the whole-project pass
-over the same areas plus the gate suite, CI trust boundaries and documentation consistency; its
-findings are in the verification apparatus rather than in firmware. It does not change firmware
-behavior either.
-
 ---
 
 ## Hardware
@@ -345,13 +337,15 @@ GET  /status[?redact=1]            # ?redact=1 = the bug-report form: 27 reporte
                                    #   hp:{proto,rx,tx,connected,last_ok_s,
                                    #        registers,values,crc_err,timeout_err},
                                    #   profile:{id},
-                                   #   modbus:{enabled,connected,discovering,host,port,unit_id,rx,
-                                   #           fails,values,task_stack_min_free_bytes, # null until
+                                   #   modbus:{enabled,connected,discovering,searched,profile,
+                                   #           host,port,unit_id,rx,fails,values,
+                                   #           task_stack_min_free_bytes, # null until
                                    #           the task runs — never 0, which would read as
                                    #           "no stack left" on every board with no HomeHub
                                    #           plant_gate_known,plant_gate_active,
                                    #           error?,error_code?,error_detail?,error_register?},
-                                   #        # link diagnostics; read-only, no write API
+                                   #        # link diagnostics (profile: auto|homehub|altherma4);
+                                   #        # read-only, no write API
                                    #        field is a command. Empty host disables polling/search.
                                    #   history:{dt,persist,dwell_persist,rows:[{id,label}],
                                    #        modbus_rows:[{id,label}],env3_rows:[{id,label}]},
@@ -498,6 +492,8 @@ GET  /history?row=<trend id>       # one trended row's 24 h series, oldest sampl
                                    #   first eligible commit, flash cannot restore RAM-only samples. The
                                    #   factory reset erases both media. During OTA this route returns the
                                    #   same early 503 as /values; retry the complete request later.
+                                   #   A query too long to parse completely answers 414 (also /diag),
+                                   #   never an unredacted body.
 GET  /models                       # profile catalog + pin hint (detection is automatic; no manual picker)
 GET  /diag[?verbose=0|1][?redact=1]
                                    # plain-text in-memory diag log (raw RX frames when verbose).

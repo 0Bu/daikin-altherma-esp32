@@ -342,12 +342,12 @@ def build(channel: str, version: str, source_sha: str, published_ref: str) -> di
 
 
 def self_test() -> None:
-    assert normalize_subject("feat(ui): add OTA notes (#12)") == "Add OTA notes"
+    assert normalize_subject("feat(ui): add OTA notes (#12)") == "Add OTA notes"  # audit-allow-issue-ref
     assert normalize_subject("fix!: prevent reboot loop") == "Prevent reboot loop"
     assert normalize_subject("chore(repo): shuffle files") is None
     assert normalize_subject("Add an unclassified internal change") is None
     assert normalize_subject("Merge branch 'main'") is None
-    assert normalize_subject("fix: retain issue #441 details") is None
+    assert normalize_subject("fix: retain issue #441 details") is None  # audit-allow-issue-ref
     assert normalize_subject("fix: pin deadbeef while testing") is None
     assert normalize_subject("fix: read refs/heads/private") is None
     assert fit_notes([], "1.2.3") == "Maintenance and reliability improvements."

@@ -213,9 +213,9 @@ const DESCRIPTIONS = [
     normal: "use the setpoint configured for your tank and operating mode. Higher temperatures generally use more energy and may require an electric heater. Disinfection temperature and schedule are installer settings that must follow the tank manual and local regulations.",
     de: { what: "Die Solltemperatur des Warmwasserspeichers oder Wärmespeichers. Der Regler lädt den Speicher, bis der zugehörige Fühler diesen Wert erreicht.",
           normal: "maßgeblich ist der Sollwert, der für deinen Speicher und die gewählte Betriebsart eingestellt wurde. Höhere Temperaturen benötigen meist mehr Energie und können einen elektrischen Heizer erfordern. Temperatur und Zeitplan der Desinfektion müssen passend zum Speicher und zu den örtlichen Vorschriften festgelegt werden." } },
-  { re: /2nd domestic hot water/i,
-    what: "The reading from a second temperature sensor in the hot-water tank, for example the lower sensor in a tank with sensors at the top and bottom.",
-    de: { what: "Der Messwert eines zweiten Temperaturfühlers im Warmwasserspeicher, zum Beispiel des unteren Fühlers bei einem Speicher mit Fühlern oben und unten." } },
+  { re: /2nd domestic hot water|domestic hot water temperature (?:upper|lower)/i,
+    what: "The reading from a secondary or dual temperature sensor in the hot-water tank, for example the upper or lower sensor in a tank configuration with sensors at both levels.",
+    de: { what: "Der Messwert eines zweiten oder doppelten Temperaturfühlers im Warmwasserspeicher, zum Beispiel des oberen oder unteren Fühlers bei einem Speicher mit Fühlern auf beiden Höhen." } },
   { re: /dhw tank temp|dhw tank/i,
     what: "The temperature reported by tank sensor R5T. Depending on the tank design, this is the domestic hot water or the water in a thermal store.",
     normal: "it normally rises during a tank-heating cycle and falls as heat or hot water is used. If it does not rise while the tank is being heated, compare it with the other tank sensors and the active heat source.",
@@ -275,26 +275,26 @@ const DESCRIPTIONS = [
     normal: "Use it as observational telemetry only. Correlate edges with thermostat inputs, operating mode and compressor activity before drawing conclusions.",
     de: { what: "Ein proprietäres Anforderungsbit der Außengeräte-Regelung. Der Katalog legt nicht fest, welche Anforderung oder Regelungsebene es setzt.",
           normal: "Nur als Beobachtungstelemetrie verwenden. Flanken mit Thermostateingängen, Betriebsart und Verdichteraktivität korrelieren, bevor Schlussfolgerungen gezogen werden." } },
-  { exact: true, re: /^4 way valve$/i,
+  { exact: true, re: /^(?:4 way valve|20s \(4-way\) output)$/i,
     what: "The outdoor controller's 4-way-valve command/status bit used when reversing the refrigerant circuit. It is not feedback of the valve's mechanical position.",
     normal: "Correlate polarity with Heating, Cooling and Defrost; then compare changes with temperature response.",
     de: { what: "Das Befehls- oder Statusbit der Außengeräte-Regelung für das 4-Wege-Ventil zur Umkehr des Kältekreises. Es bestätigt nicht die mechanische Ventilstellung.",
           normal: "Polarität mit Heizen, Kühlen und Abtauen korrelieren; Änderungen danach mit der Temperaturwirkung vergleichen." } },
-  { exact: true, re: /^crank case heater$/i,
-    what: "The controller's crankcase-heater output/status bit. It reports the command state, not heater current or compressor temperature.",
+  { exact: true, re: /^(?:crank ?case heater|comp\. preheat)$/i,
+    what: "Compressor heating status — either the physical crankcase heater element or electronic motor winding preheating (Comp. Preheat). Keeps refrigerant out of the compressor oil during cold standby.",
     normal: "It may be ON while the compressor is stopped to limit refrigerant migration. Compare it with compressor state and measured electrical power.",
-    de: { what: "Das Ausgangs- oder Statusbit der Kurbelgehäuseheizung. Es meldet den Schaltzustand, nicht Heizstrom oder Verdichtertemperatur.",
+    de: { what: "Verdichterbeheizung — entweder das physische Kurbelwannenheizband oder elektronische Statorwicklungs-Vorwärmung (Comp. Preheat). Hält bei kaltem Stillstand Kältemittel aus dem Verdichteröl fern.",
           normal: "Es kann bei stehendem Verdichter ON sein, um Kältemittelverlagerung zu begrenzen. Mit Verdichterstatus und gemessener elektrischer Leistung vergleichen." } },
-  { exact: true, re: /^(?:hot gas bypass valve \(y3s\)|lp bypass valve \(y2s\)|y3s)$/i,
-    what: "One of three proprietary solenoid/output bits sharing the outdoor actuator byte. The catalog name identifies the signal but does not prove the physical valve moved or establish its active polarity.",
+  { exact: true, re: /^(?:hot gas bypass valve \(y3s\)|lp bypass valve \(y2s\)|y3s|20r \(sv\) output|52c output|ener-cut output)$/i,
+    what: "Proprietary outdoor actuator / relay output bit (e.g. 52C compressor contactor, 20R solenoid valve, Ener-Cut, or bypass valve). The catalog name identifies the signal but does not prove mechanical movement.",
     normal: "Keep the ON/OFF series separate and correlate them with pressure, temperatures and phase.",
-    de: { what: "Eines von drei proprietären Magnetventil- oder Ausgangsbits im gemeinsamen Außengeräte-Aktorbyte. Der Katalogname bezeichnet das Signal, bestätigt aber weder eine mechanische Ventilbewegung noch die aktive Polarität.",
+    de: { what: "Proprietäres Außengeräte-Aktor- oder Relaisausgangsbit (z. B. 52C Verdichterschütz, 20R Magnetventil, Ener-Cut oder Bypassventil). Der Katalogname bezeichnet das Signal, bestätigt aber keine mechanische Bewegung.",
           normal: "ON/OFF-Reihen getrennt halten und mit Druck, Temperaturen und Betriebsphase korrelieren." } },
-  { exact: true, re: /^error detailed code$/i,
-    what: "A numeric detailed-error subcode from the indoor controller. It supplements the main Daikin fault code but this firmware has no validated lookup for its model-specific values.",
-    normal: "Record the raw number together with the main fault code, error class and timestamp. Zero must not be treated as proof that no main fault exists.",
-    de: { what: "Ein numerischer Detail-Fehlercode der Innengeräte-Regelung. Er ergänzt den Daikin-Hauptfehlercode; für seine modellspezifischen Werte besitzt die Firmware keine validierte Zuordnung.",
-          normal: "Den Rohwert gemeinsam mit Hauptfehlercode, Fehlerklasse und Zeitpunkt aufzeichnen. Null ist kein Beweis dafür, dass kein Hauptfehler vorliegt." } },
+  { exact: true, re: /^(?:error detailed code|warning code|caution code|thermo off error)$/i,
+    what: "A detailed error, warning, caution or thermo-off code from the controller. Depending on the model and protocol, it is either a numeric subcode or an alphanumeric Daikin fault code.",
+    normal: "Record the code together with the main fault code, error class and timestamp. Zero or clear must not be treated as proof that no other fault exists.",
+    de: { what: "Ein Detail-Fehler-, Warn-, Hinweis- oder Thermo-Off-Code der Regelung. Je nach Modell und Protokoll handelt es sich um einen numerischen Subcode oder einen alphanumerischen Daikin-Fehlercode.",
+          normal: "Den Code gemeinsam mit Hauptfehlercode, Fehlerklasse und Zeitpunkt aufzeichnen. Null oder Störungsfreiheit ist kein Beweis dafür, dass keine andere Störung vorliegt." } },
   { exact: true, re: /^floor loop shut off valve$/i,
     what: "The controller flag for an optional floor-loop shut-off valve. It is a logical command/status, not position feedback or measured flow.",
     normal: "Until polarity is confirmed, compare ON/OFF with hydraulic layout, pump and flow.",
@@ -304,7 +304,7 @@ const DESCRIPTIONS = [
     what: "The indoor controller's system-off flag; the catalog explicitly defines ON as System off. It is a controller state, not proof that every pump, heater or protection routine is de-energised.",
     normal: "ON should coincide with the controller being switched off. Auxiliary frost protection, pump exercise or other safeguards can still need separate interpretation.",
     de: { what: "Das System-Aus-Bit der Innengeräte-Regelung; laut Katalog bedeutet ON ausdrücklich „System aus“. Es beweist nicht, dass jede Pumpe, Heizung oder Schutzfunktion spannungslos ist.",
-          normal: "ON sollte mit dem Reglerzustand System OFF zusammenfallen. Frostschutz, Pumpenübung oder andere Schutzfunktionen müssen dennoch getrennt bewertet werden." } },
+          normal: "ON sollte mit dem Reglerzustand System OFF zusammenfallen. Frostschutz, regelmäßige Schutzläufe der Pumpe (Antiblockierschutz) oder andere Schutzfunktionen müssen dennoch getrennt bewertet werden." } },
   { exact: true, re: /^add\. ext\. rt input (?:cool|heat)\.$/i,
     what: "The additional zone's external room-thermostat input for Cooling or Heating. It reports an electrical controller input, not measured room temperature or compressor operation.",
     normal: "ON should follow the corresponding external thermostat contact when that control method is configured. Compare Heat and Cool inputs for contradictory requests.",
@@ -350,14 +350,14 @@ const DESCRIPTIONS = [
     normal: "The UI therefore shows ON/OFF unchanged. OFF alone neither proves Cooling nor contradicts a configured Heating mode, especially while space operation is idle. The value also neither measures terminal voltage nor confirms the physical valve position.",
     de: { what: "Logischer X10A-Zustand des Reglerausgangs für ein optionales bauseitiges 2-Wege-Ventil. Der historische X10A-Katalog bezeichnet das Bit mit ON: Heizen und OFF: Kühlen. Die gewählte Betriebsart und die Frage, ob der Raumbetrieb aktiv ist, sind jedoch eigene Reglerzustände.",
           normal: "Die Oberfläche zeigt ON/OFF deshalb unverändert. OFF allein beweist weder Kühlbetrieb noch widerspricht es der eingestellten Betriebsart Heizen – besonders wenn der Raumbetrieb ruht. Der Wert misst außerdem weder die Spannung an den Klemmen noch bestätigt er die mechanische Ventilstellung." } },
-  { re: /mix valve position|bizone kit mix valve/i,
-    what: "How far the mixing valve for a second heating zone is open. It blends hot flow water with cooler return water, for example to supply an underfloor-heating zone at a lower temperature.",
-    normal: "moves between fully closed and fully open as needed to hold the second zone's target temperature.",
-    de: { what: "Wie weit das Mischventil einer zweiten Heizzone geöffnet ist. Es mischt heißes Vorlaufwasser mit kühlerem Rücklauf, um zum Beispiel eine Fußbodenheizung mit niedrigerer Temperatur zu versorgen.",
-          normal: "regelt je nach Bedarf zwischen ganz geschlossen und ganz geöffnet, um die Solltemperatur der zweiten Zone zu halten." } },
+  { re: /mix valve position|bizone kit mix valve|(?:bypass|tank) valve position/i,
+    what: "How far the mixing or modulating valve is open. On systems with a Bizone kit, it blends hot flow water with cooler return water to supply a second heating zone (such as underfloor heating) at a lower temperature; on modulating units it regulates bypass or tank flow.",
+    normal: "moves between fully closed and fully open as needed to hold the second zone's target temperature or regulate flow.",
+    de: { what: "Wie weit das Misch- oder Modulierventil geöffnet ist. Bei Anlagen mit Bizone-Kit mischt es heißes Vorlaufwasser mit kühlerem Rücklauf für eine zweite Heizzone (z. B. Fußbodenheizung) mit niedrigerer Temperatur; bei modulierenden Anlagen regelt es Bypass- oder Speicherfluss.",
+          normal: "regelt je nach Bedarf zwischen ganz geschlossen und ganz geöffnet, um die Solltemperatur der zweiten Zone zu halten oder den Durchfluss zu steuern." } },
 
   // ── Leaving / return / mixed water ──
-  { re: /(leaving water|lw) set ?point/i,
+  { re: /(?:leaving water|lw) set ?point|heating\/cooling target/i,
     what: "The leaving-water target for the selected heating or cooling mode. It may be fixed or determined by that mode's weather-dependent control settings.",
     normal: "Compare it only with the selected operating mode and its configured limits; heating and cooling use different target logic.",
     de: { what: "Die Soll-Austrittstemperatur für den gewählten Heiz- oder Kühlbetrieb. Sie kann fest sein oder aus den witterungsabhängigen Einstellungen der jeweiligen Betriebsart folgen.",
@@ -370,10 +370,10 @@ const DESCRIPTIONS = [
     normal: "With the backup heater OFF, compare it with the pre-heater temperature. With the heater ON, interpret the difference together with flow and the reported heater stage. The selected water route is a separate valve state.",
     de: { what: "Wassertemperatur nach dem elektrischen Zusatzheizer, üblicherweise gemessen von Fühler R2T. Sie enthält einen vom Zusatzheizer erzeugten Temperaturanstieg. Die genaue Lage von Fühler und Ventilen hängt von der Hydraulikeinheit ab; die Temperatur an den Heiz- oder Kühlflächen belegt der Wert nicht.",
           normal: "Bei Zusatzheizer OFF mit der Temperatur vor dem Heizer vergleichen. Bei ON die Differenz nur zusammen mit Durchfluss und gemeldeter Heizstufe bewerten. Den gewählten Wasserweg zeigt ein separater Ventilstatus." } },
-  { re: /before buh|after phe|outlet water heat exch|leaving water.*\(?r1t\)?|tv inflow|outlet water heat exchanger/i,
-    what: "Water leaving the heat pump's exchanger before the electric backup heater, usually measured by sensor R1T. With a running compressor it is above R4T in heating/DHW and below R4T in cooling. Together with R4T and flow it supports a mode-aware capacity estimate. Its exact physical location depends on the hydraulic unit.",
+  { re: /before buh|after phe|outlet water heat exch|leaving water.*\(?r1t\)?|tv inflow|outlet water heat exchanger|leaving water temperature (?:outdoor|tank valve)/i,
+    what: "Water leaving the heat pump's exchanger before the electric backup heater (sensor R1T on X10A) or at the outdoor unit / tank valve (Modbus extended telemetry). With a running compressor it is above R4T in heating/DHW and below R4T in cooling. Together with R4T and flow it supports a mode-aware capacity estimate. Its exact physical location depends on the hydraulic unit.",
     normal: "Interpret it with compressor state, flow and operating mode. During active compressor heating or cooling it should move toward the applicable controller target; with the compressor stopped, residual heat after DHW can leave a hot value even while Cooling is selected.",
-    de: { what: "Wassertemperatur am Austritt des Wärmepumpen-Wärmetauschers vor dem elektrischen Zusatzheizer, üblicherweise gemessen von Fühler R1T. Bei laufendem Verdichter liegt sie beim Heizen beziehungsweise bei Warmwasser über R4T, beim Kühlen unter R4T. Zusammen mit R4T und Durchfluss ermöglicht sie eine betriebsartabhängige Leistungsschätzung. Die genaue Einbauposition hängt von der Hydraulikeinheit ab.",
+    de: { what: "Wassertemperatur am Austritt des Wärmepumpen-Wärmetauschers vor dem elektrischen Zusatzheizer (Fühler R1T über X10A) oder am Außengerät / Speicherventil (erweiterte Modbus-Telemetrie). Bei laufendem Verdichter liegt sie beim Heizen beziehungsweise bei Warmwasser über R4T, beim Kühlen unter R4T. Zusammen mit R4T und Durchfluss ermöglicht sie eine betriebsartabhängige Leistungsschätzung. Die genaue Einbauposition hängt von der Hydraulikeinheit ab.",
           normal: "Nur zusammen mit Verdichterstatus, Durchfluss und Betriebsart bewerten. Bei aktivem Verdichterbetrieb sollte sie sich dem jeweils geltenden Reglerziel annähern. Bei stehendem Verdichter kann nach einer Warmwasserladung Restwärme anliegen, obwohl bereits Kühlen gewählt ist." } },
   { re: /inlet water|return water|tr return/i,
     what: "Water entering the PHE at sensor R4T on the common internal return after the branches merge. R1T minus R4T is the signed water-side ΔT across the PHE, not a direct emitter ΔT.",
@@ -407,7 +407,7 @@ const DESCRIPTIONS = [
     normal: "ON while the solar controller requests circulation. Interpret it with the solar configuration and temperatures; it says nothing about compressor operation.",
     de: { what: "Status der Pumpe eines konfigurierten Solarthermie-Kreises. Sie ist von der hydraulischen Umwälzpumpe der Wärmepumpe getrennt.",
           normal: "ON, solange die Solarregelung Umwälzung anfordert. Zusammen mit Solarkonfiguration und Temperaturen bewerten; über den Verdichterbetrieb sagt der Status nichts aus." } },
-  { exact: true, re: /^pump speed$/i,
+  { exact: true, re: /^(?:circulation )?pump speed$/i,
     what: "The reported speed value of the pump named by this profile. Its scale and controlled circuit are model-specific.",
     normal: "Compare it only with the same model and operating mode; use the separate flow reading to determine how much water is actually moving.",
     de: { what: "Der gemeldete Drehzahlwert der in diesem Profil bezeichneten Pumpe. Skalierung und zugeordneter Kreis sind modellspezifisch.",
@@ -427,10 +427,10 @@ const DESCRIPTIONS = [
   // `exact` is enforced by the description audit: this HomeHub enum must win before the broad X10A
   // "operation mode" entry below. Without that ordering the Modbus card described the SG modes as the
   // outdoor unit's Heating/Cooling thermodynamic state, which is a different register and meaning.
-  { exact: true, re: /^smart[- ]grid operation mode$/i,
-    what: "The Smart-Grid request: Free running, Forced off, Recommended on or Forced on. The HomeHub reports it directly; the X10A row derives the same four states from contacts 1 and 2. It is an energy-management command, not the outdoor unit's Heating/Cooling mode.",
+  { exact: true, re: /^(?:smart[- ]grid operation mode|demand response mode)$/i,
+    what: "The Smart-Grid / demand-response request: Free running, Forced off, Recommended on or Forced on. The HomeHub and Altherma 4 report it directly (as Smart-Grid or Demand Response mode); the X10A row derives the same four states from contacts 1 and 2. It is an energy-management command, not the outdoor unit's Heating/Cooling mode.",
     normal: "Free running during ordinary autonomous operation. The other modes should appear only while an external energy manager deliberately blocks, recommends or forces operation.",
-    de: { what: "Die Smart-Grid-Anforderung: Freier Betrieb, Zwangsabschaltung, Empfehlung ein oder Erzwungen ein. Der HomeHub meldet sie direkt; die X10A-Zeile leitet dieselben vier Zustände aus Kontakt 1 und 2 ab. Das ist ein Energiemanagement-Befehl und nicht der Heiz- oder Kühlmodus der Außeneinheit.",
+    de: { what: "Die Smart-Grid-/Demand-Response-Anforderung: Freier Betrieb, Zwangsabschaltung, Empfehlung ein oder Erzwungen ein. HomeHub und Altherma 4 melden sie direkt (als Smart-Grid- bzw. Demand-Response-Modus); die X10A-Zeile leitet dieselben vier Zustände aus Kontakt 1 und 2 ab. Das ist ein Energiemanagement-Befehl und nicht der Heiz- oder Kühlmodus der Außeneinheit.",
           normal: "Freier Betrieb im normalen autonomen Betrieb. Die anderen Modi sollten nur erscheinen, wenn ein externes Energiemanagement den Betrieb bewusst sperrt, empfiehlt oder erzwingt." } },
   { exact: true, re: /^current operation mode$/i,
     what: "The currently reported space-conditioning mode: Heating or Cooling. Unlike the configured Operation mode, this live input has no Auto value and is the witness used to exclude cooling windows from heating-curve samples; it still does not prove that the compressor is running.",
@@ -474,7 +474,7 @@ const DESCRIPTIONS = [
   // same status byte as the I/U operation mode and it says the hydro module wants the compressor,
   // whichever load that is for. Measured over three days on a live unit, every single ON minute was
   // a DHW charge and none had the 3-way valve on space heating — so copy that promised "the room is
-  // calling for heat" described the wrong thing entirely (#199).
+  // calling for heat" described the wrong thing entirely (legacy-199).
   { exact: true, re: /^room thermostat control (heating|cooling) setpoint main$/i,
     what: "The target room temperature for the main zone in Heating or Cooling mode. This is a temperature setpoint, not the unit's ON/OFF thermo-demand signal.",
     normal: "Use the configured comfort target for the selected mode. Whether the unit starts also depends on the measured room temperature and controller logic.",
@@ -495,10 +495,10 @@ const DESCRIPTIONS = [
     normal: "Can be ON in Cooling with the thermostat and compressor OFF, for example during controller-managed circulation.",
     de: { what: "Ob normaler Raumheiz-/kühlbetrieb freigegeben oder in Betrieb ist. Trotz der historischen Katalogbezeichnung ist der Wert weder heizungsexklusiv noch eine Thermostatanforderung; I/U-Modus sowie Verdichter- und Pumpenstatus zeigen die tatsächliche Aufgabe.",
           normal: "Kann im Modus Kühlen auch bei Thermostat OFF und stehendem Verdichter ON sein, etwa bei reglergeführter Umwälzung." } },
-  { re: /rt set ?point/i,
-    what: "The target room temperature you've set for the zone the unit's own room sensor controls.",
-    de: { what: "Die von dir eingestellte Ziel-Raumtemperatur für die Zone, die der eigene Raumfühler des Geräts regelt." } },
-  { re: /\brt temp|indoor ambient|ext\. indoor ambient/i,   // \b so "po(rt temp)erature" doesn't hit this
+  { re: /rt set ?point|r\/c setpoint|delta-tr/i,
+    what: "The target room temperature or thermostat setpoint deviation (Delta-Tr) for the zone the unit's room sensor controls.",
+    de: { what: "Die eingestellte Ziel-Raumtemperatur oder Thermostat-Sollwertabweichung (Delta-Tr) für die Zone, die der Raumfühler des Geräts regelt." } },
+  { re: /\brt temp|indoor ambient|ext\. indoor ambient|indoor suction air/i,   // \b so "po(rt temp)erature" doesn't hit this
     what: "The room temperature measured by the unit's built-in or wired room sensor.",
     normal: "Compare it with an independent thermometer and consider the sensor's mounting location. Whether this sensor actually controls the zone depends on the configured control method.",
     de: { what: "Die vom eingebauten oder verdrahteten Raumfühler des Geräts gemessene Raumtemperatur.",
@@ -508,7 +508,7 @@ const DESCRIPTIONS = [
   // These 11 rows are the ONLY catalog labels that reached the UI with no explainer — and two of
   // them ("Fin Temp. Drop Control", "Fin Temp. Protection Retry Qty") had something worse: they fell
   // through to the "fin temp" heatsink-TEMPERATURE entry below, so a protection FLAG and a retry
-  // COUNT were both explained as a temperature reading. That is the #35-#39 shape in explainer copy —
+  // COUNT were both explained as a temperature reading. That is the legacy-35–legacy-39 shape in explainer copy —
   // well-formed, plausible, and false — so this section MUST stay ahead of the outdoor/refrigerant
   // and electrical sections that contain the entries it out-ranks (first match wins).
   // One entry per PROTECTION rather than per row: the flag and the counter for the same quantity are
@@ -519,32 +519,32 @@ const DESCRIPTIONS = [
   { re: /discharge temp\.? ?(drop|protection retry)/i,
     what: "Internal discharge-temperature protection status. \"Drop\" is the current ON/OFF flag; \"Retry Qty\" is a 3-bit value from 0 to 7. Public Daikin documentation does not define this service field's threshold, reset or wrap behaviour.",
     normal: "Do not diagnose from one absolute counter value. Only an increase between uninterrupted comparable samples establishes reported protection activity, not its cause; use the fault code and service measurements for diagnosis.",
-    de: { what: "Interner Schutzstatus zur Druckgastemperatur. „Drop“ ist das aktuelle ON/OFF-Flag; „Retry Qty“ ist ein 3-Bit-Wert von 0 bis 7. Schwelle, Rücksetzung und Überlauf dieses Servicefelds sind öffentlich nicht dokumentiert.",
+    de: { what: "Interner Schutzstatus zur Druckgastemperatur. „Drop“ (Schutz-Rückregelung / automatische Leistungsabsenkung) ist das aktuelle ON/OFF-Flag; „Retry Qty“ ist ein 3-Bit-Wert von 0 bis 7. Schwelle, Rücksetzung und Überlauf dieses Servicefelds sind öffentlich nicht dokumentiert.",
           normal: "Aus einem einzelnen absoluten Zählerwert keine Ursache ableiten. Nur ein Anstieg zwischen lückenlosen vergleichbaren Messungen belegt gemeldete Schutzaktivität, nicht deren Ursache. Zur Diagnose Fehlercode und Servicemesswerte heranziehen." } },
   { re: /comp\.? inv current (drop|protection retry)/i,
     what: "Internal compressor-inverter-current protection status. \"Drop\" is the current ON/OFF flag; \"Retry Qty\" is a 3-bit value from 0 to 7. Public Daikin documentation does not define this service field's threshold, reset or wrap behaviour.",
     normal: "Do not diagnose from one absolute counter value. Only an increase between uninterrupted comparable samples establishes reported protection activity, not its cause; use the fault code and service measurements for diagnosis.",
-    de: { what: "Interner Schutzstatus zum Strom des Verdichter-Inverters. „Drop“ ist das aktuelle ON/OFF-Flag; „Retry Qty“ ist ein 3-Bit-Wert von 0 bis 7. Schwelle, Rücksetzung und Überlauf dieses Servicefelds sind öffentlich nicht dokumentiert.",
+    de: { what: "Interner Schutzstatus zum Strom des Verdichter-Inverters. „Drop“ (Schutz-Rückregelung / automatische Leistungsabsenkung) ist das aktuelle ON/OFF-Flag; „Retry Qty“ ist ein 3-Bit-Wert von 0 bis 7. Schwelle, Rücksetzung und Überlauf dieses Servicefelds sind öffentlich nicht dokumentiert.",
           normal: "Aus einem einzelnen absoluten Zählerwert keine Ursache ableiten. Nur ein Anstieg zwischen lückenlosen vergleichbaren Messungen belegt gemeldete Schutzaktivität, nicht deren Ursache. Zur Diagnose Fehlercode und Servicemesswerte heranziehen." } },
   { re: /^hp (drop|protection retry)/i,
     what: "Internal high-pressure protection status. \"Drop Control\" is the current ON/OFF flag; \"Retry Qty\" is a 3-bit value from 0 to 7. Public Daikin documentation does not define this service field's threshold, reset or wrap behaviour.",
     normal: "Do not diagnose from one absolute counter value. Only an increase between uninterrupted comparable samples establishes reported protection activity, not its hydraulic or refrigerant-side cause.",
-    de: { what: "Interner Hochdruck-Schutzstatus. „Drop Control“ ist das aktuelle ON/OFF-Flag; „Retry Qty“ ist ein 3-Bit-Wert von 0 bis 7. Schwelle, Rücksetzung und Überlauf dieses Servicefelds sind öffentlich nicht dokumentiert.",
+    de: { what: "Interner Hochdruck-Schutzstatus. „Drop Control“ (Schutz-Rückregelung / automatische Leistungsabsenkung) ist das aktuelle ON/OFF-Flag; „Retry Qty“ ist ein 3-Bit-Wert von 0 bis 7. Schwelle, Rücksetzung und Überlauf dieses Servicefelds sind öffentlich nicht dokumentiert.",
           normal: "Aus einem einzelnen absoluten Zählerwert keine Ursache ableiten. Nur ein Anstieg zwischen lückenlosen vergleichbaren Messungen belegt gemeldete Schutzaktivität, nicht eine hydraulische oder kälteseitige Ursache." } },
   { re: /^lp (drop|protection retry)/i,
     what: "Internal low-pressure protection status. \"Drop Control\" is the current ON/OFF flag; \"Retry Qty\" is a 3-bit value from 0 to 7. Public Daikin documentation does not define this service field's threshold, reset or wrap behaviour.",
     normal: "Do not diagnose from one absolute counter value. Only an increase between uninterrupted comparable samples establishes reported protection activity, not its cause.",
-    de: { what: "Interner Niederdruck-Schutzstatus. „Drop Control“ ist das aktuelle ON/OFF-Flag; „Retry Qty“ ist ein 3-Bit-Wert von 0 bis 7. Schwelle, Rücksetzung und Überlauf dieses Servicefelds sind öffentlich nicht dokumentiert.",
+    de: { what: "Interner Niederdruck-Schutzstatus. „Drop Control“ (Schutz-Rückregelung / automatische Leistungsabsenkung) ist das aktuelle ON/OFF-Flag; „Retry Qty“ ist ein 3-Bit-Wert von 0 bis 7. Schwelle, Rücksetzung und Überlauf dieses Servicefelds sind öffentlich nicht dokumentiert.",
           normal: "Aus einem einzelnen absoluten Zählerwert keine Ursache ableiten. Nur ein Anstieg zwischen lückenlosen vergleichbaren Messungen belegt gemeldete Schutzaktivität, nicht deren Ursache." } },
   { re: /fin temp\.? ?(drop|protection retry)/i,
     what: "Internal inverter-heatsink-temperature protection status. \"Drop Control\" is the current ON/OFF flag; \"Retry Qty\" is a 3-bit value from 0 to 7. The separate \"INV fin temp.\" row is the temperature itself; threshold, reset and wrap behaviour are not publicly documented.",
     normal: "Do not diagnose from one absolute counter value. Only an increase between uninterrupted comparable samples establishes reported protection activity, not its cause.",
-    de: { what: "Interner Schutzstatus zur Temperatur des Inverter-Kühlkörpers. „Drop Control“ ist das aktuelle ON/OFF-Flag; „Retry Qty“ ist ein 3-Bit-Wert von 0 bis 7. Die separate Zeile „INV fin temp.“ zeigt die Temperatur; Schwelle, Rücksetzung und Überlauf sind öffentlich nicht dokumentiert.",
+    de: { what: "Interner Schutzstatus zur Temperatur des Inverter-Kühlkörpers. „Drop Control“ (Schutz-Rückregelung / automatische Leistungsabsenkung) ist das aktuelle ON/OFF-Flag; „Retry Qty“ ist ein 3-Bit-Wert von 0 bis 7. Die separate Zeile „INV fin temp.“ zeigt die Temperatur; Schwelle, Rücksetzung und Überlauf sind öffentlich nicht dokumentiert.",
           normal: "Aus einem einzelnen absoluten Zählerwert keine Ursache ableiten. Nur ein Anstieg zwischen lückenlosen vergleichbaren Messungen belegt gemeldete Schutzaktivität, nicht deren Ursache." } },
   { re: /other drop control/i,
     what: "An internal catch-all drop-control flag not assigned to the five named protection rows. The public documentation does not identify the underlying condition.",
     normal: "ON establishes only that this unspecified flag is active. Read it with the fault code and service data; it is not a root-cause diagnosis.",
-    de: { what: "Ein internes Sammel-Flag für eine Rückregelung, die keiner der fünf benannten Schutzzeilen zugeordnet ist. Die öffentliche Dokumentation nennt die zugrunde liegende Bedingung nicht.",
+    de: { what: "Ein internes Sammel-Flag für eine Schutz-Rückregelung (automatische Leistungsabsenkung), die keiner der fünf benannten Schutzzeilen zugeordnet ist. Die öffentliche Dokumentation nennt die zugrunde liegende Bedingung nicht.",
           normal: "ON belegt nur, dass dieses unspezifische Flag aktiv ist. Zusammen mit Fehlercode und Servicedaten lesen; es ist keine Ursachen-Diagnose." } },
 
   // ── Outdoor / refrigerant circuit ──
@@ -558,7 +558,7 @@ const DESCRIPTIONS = [
     normal: "It can fall below 0 °C during cold-weather heating. Frost formation and defrost need humidity and operating context as well, so this temperature alone does not prove that the coil is iced.",
     de: { what: "Von einem Fühler am Außenwärmetauscher gemeldete Temperatur. Dort tauscht das Kältemittel Energie mit der Außenluft aus; beim Heizen arbeitet der Wärmetauscher als Verdampfer, beim Kühlen als Verflüssiger.",
           normal: "Beim Heizen im Kalten kann der Wert unter 0 °C fallen. Für Reifbildung und Abtaubedarf sind zusätzlich Feuchte und Betriebskontext entscheidend; die Temperatur allein belegt keine Vereisung." } },
-  { re: /outside air|outdoor air|outdoor ambient|r1t-outdoor|^outdoor(?! heat exchanger)/i,
+  { re: /outside air|outdoor air|outdoor ambient|r1t-outdoor|^outdoor(?! heat exchanger| fan)/i,
     what: "The outside air temperature measured at the unit. The controller can use it for weather-dependent control and operating decisions.",
     normal: "Compare it with local outdoor conditions; placement, sun and airflow can make it differ from a nearby weather station.",
     de: { what: "Die am Gerät gemessene Außenlufttemperatur. Der Regler kann sie für die witterungsabhängige Regelung und Betriebsentscheidungen verwenden.",
@@ -574,9 +574,9 @@ const DESCRIPTIONS = [
   { re: /liquid (pipe )?temp|liquid temperature|refrig\. temp\. liquid/i,
     what: "Refrigerant temperature on the liquid line between the heat exchangers.",
     de: { what: "Kältemitteltemperatur in der Flüssigkeitsleitung zwischen den Wärmetauschern." } },
-  { re: /refrig\. temp\. evap/i,
-    what: "Refrigerant temperature entering/leaving the evaporator (the heat exchanger absorbing heat).",
-    de: { what: "Kältemitteltemperatur beim Ein- oder Austritt des Verdampfers, also des wärmeaufnehmenden Wärmetauschers." } },
+  { re: /refrig\. temp\. evap|indoor heat exchanger temp/i,
+    what: "Refrigerant temperature at the heat exchanger coil (indoor coil or evaporator). Absorbs heat during cooling/defrost and releases heat during heating.",
+    de: { what: "Kältemitteltemperatur am Wärmetauscher (Innenwärmetauscher oder Verdampfer). Nimmt beim Kühlen/Abtauen Wärme auf und gibt beim Heizen Wärme ab." } },
   { re: /injection tube/i,
     what: "Temperature on the refrigerant-injection line. The outdoor unit uses it internally to control compressor injection and protect the refrigerant cycle.",
     de: { what: "Temperatur an der Kältemittel-Einspritzleitung. Die Außeneinheit nutzt sie intern zur Regelung der Verdichtereinspritzung und zum Schutz des Kältekreises." } },
@@ -593,17 +593,17 @@ const DESCRIPTIONS = [
     normal: "Use it as the pressure-equivalent evaporating or condensing temperature. Which role applies depends on the pressure side and operating mode.",
     de: { what: "Die aus einem Kältemitteldruck berechnete Sättigungstemperatur für das hinterlegte Kältemittel. Sie stammt nicht von einem eigenen Temperaturfühler und ist kein Druckwert in bar.",
           normal: "Sie zeigt die zum Druck gehörende Verdampfungs- oder Verflüssigungstemperatur. Welche Rolle gilt, hängt von Druckseite und Betriebsart ab." } },
-  { re: /(high|low) pressure/i,
+  { re: /(high|low) pressure|^[hl]p sensor/i,
     what: "Refrigerant pressure on the high (compressor discharge) or low (compressor suction) side. The gap between them is what the compressor works against, and it drives efficiency.",
     normal: "Varies with mode, compressor speed, load and outdoor conditions. Judge only a sustained trend during a stable run of the same model; startup, oil return, defrost and mode changes can move it quickly. There is no universal normal bar range.",
     de: { what: "Kältemitteldruck auf der Druck- oder Saugseite des Verdichters. Die Differenz zwischen Hoch- und Niederdruck bestimmt, wogegen der Verdichter arbeitet, und beeinflusst die Effizienz.",
           normal: "Hängt von Betriebsart, Verdichterdrehzahl, Last und Außenbedingungen ab. Nur einen anhaltenden Verlauf im stabilen Lauf desselben Modells bewerten; Anlauf, Ölrückführung, Abtauen und Betriebsartwechsel können den Druck rasch ändern. Einen allgemeinen Normalbereich in bar gibt es nicht." } },
-  { re: /compressor speed|inv frequency|frequency \(rps\)/i,
+  { re: /compressor speed|inv (?:comp\. )?frequency|frequency \(rps\)/i,
     what: "How fast the inverter-driven compressor is spinning, in revolutions per second. This is the unit's main output control.",
     normal: "0 when stopped and modulating while running. The permitted range is model-specific; a higher speed generally means the controller is requesting more compressor output, but it is not a direct heat-output measurement.",
     de: { what: "Wie schnell der invertergeregelte Verdichter dreht, in Umdrehungen pro Sekunde. Das ist die wichtigste Leistungsstellgröße des Geräts.",
           normal: "0 im Stillstand und im Betrieb geregelt. Der zulässige Bereich ist modellspezifisch; eine höhere Drehzahl bedeutet meist, dass der Regler mehr Verdichterleistung anfordert, ist aber keine direkte Messung der Wärmeleistung." } },
-  { re: /expansion valve/i,
+  { re: /expansion valve|^ev \(/i,
     what: "Controller command for an electronic expansion valve, reported in motor steps or pulses. It is not independent feedback that the valve reached or mechanically holds that position, and it is neither an opening percentage nor direct mass flow.",
     normal: "The command adjusts while the compressor runs and can take a control-specific value when stopped or during defrost. Compare only the same valve, model and operating mode. The command alone proves neither movement, a stuck valve nor refrigerant shortage.",
     de: { what: "Reglerbefehl für ein elektronisches Expansionsventil, angegeben in Motorschritten oder Impulsen. Das ist keine unabhängige Rückmeldung, dass das Ventil die Stellung erreicht oder mechanisch hält, und weder Öffnungsprozentsatz noch direkter Massenstrom.",
@@ -611,7 +611,7 @@ const DESCRIPTIONS = [
   { re: /fan\d? fin temp|fan \d fin/i,
     what: "Temperature of the outdoor fan motor's driver electronics.",
     de: { what: "Temperatur der Leistungselektronik des Außenlüftermotors." } },
-  { re: /^fan ?\d|fan \d \(/i,
+  { re: /^fan ?\d|fan \d \(|outdoor fan/i,
     what: "Outdoor fan speed, as a step or in rpm. The fan pulls outside air across the coil.",
     normal: "ramps up with compressor load; drops to 0 when idle and during parts of a defrost.",
     de: { what: "Drehzahl des Außenlüfters, als Stufe oder in U/min. Der Lüfter zieht Außenluft über die Lamellen.",
@@ -643,7 +643,7 @@ const DESCRIPTIONS = [
   { re: /ct sensor|current measured by ct/i,
     what: "Mains current for one phase (L1/L2/L3) from a current transformer (CT). Only a complete declared CT set is summed and multiplied by an assumed 230 V for a rough input estimate.",
     normal: "depends on supply layout and which loads the CTs cover. The derived kW value is not a calibrated energy meter and ignores power factor and actual line voltage.",
-    de: { what: "Netzstrom einer Phase (L1/L2/L3) vom Stromwandler (CT). Nur ein vollständiger gemeldeter CT-Satz wird addiert und mit angenommenen 230 V grob geschätzt.",
+    de: { what: "Netzstrom einer Phase (L1/L2/L3) vom Stromwandler (CT). Nur ein vollständiger gemeldeter CT-Satz wird addiert und mit angenommenen 230 V multipliziert, um die Leistungsaufnahme grob zu schätzen.",
           normal: "hängt von Netzform und den durch die Stromwandler erfassten Verbrauchern ab. Der abgeleitete kW-Wert ist kein geeichter Energiezähler und berücksichtigt weder Leistungsfaktor noch tatsächliche Netzspannung." } },
   { re: /inv (primary|secondary|compressor) current|inv .*current \(a\)/i,
     what: "Current drawn by the compressor inverter — a proxy for how hard the compressor is working.",
@@ -888,7 +888,7 @@ const mbFallbackFor = (cid) => (x10aDown() && mbLive() ? mbByConcept(cid) : null
 // perfectly plausible temperature can be hours old (logic/ou_stale.hpp).
 //
 // The DEVICE's own marker is preferred: /values carries `held` precisely so a consumer need not
-// re-derive the page rule (#209 defect 5), and it travels WITH the row instead of being recomputed
+// re-derive the page rule (legacy-209 defect 5), and it travels WITH the row instead of being recomputed
 // against a snapshot taken elsewhere. rowHeldOver stays as the fallback for a board on an older
 // build that does not send the marker yet — the same rule either way, never a looser second copy.
 const rowNotMeasuring = (v) => !!v && (v.held === true || rowHeldOver(v, S.live));
@@ -897,7 +897,7 @@ const rowNotMeasuring = (v) => !!v && (v.held === true || rowHeldOver(v, S.live)
 // current reading: the link is silent, or the unit is no longer refreshing it. From a reader's side
 // those are one fact — the number under that label is not being measured now — and one answer
 // follows: an independent sensor that IS still measuring may stand in, and nothing else may. The
-// schematic and the inspector have refused a held reading since #209; this is what lets the value
+// schematic and the inspector have refused a held reading since legacy-209; this is what lets the value
 // tables refuse it the same way instead of printing it as an ordinary current row.
 const mbStandInFor = (v) =>
   v && (x10aDown() || rowNotMeasuring(v)) && mbLive() ? mbByConcept(v.concept) : null;

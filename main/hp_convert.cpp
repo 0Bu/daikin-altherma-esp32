@@ -14,16 +14,17 @@ bool hp_format(const ValueDef& def, const uint8_t* payload, int payload_len, int
     Reading r = convert(def, payload + def.offset, rtype);   // rtype selects the conv-405 curve
     if (r.unimpl) return false;
     // Drop impossible placeholders: a °C reading off the physical envelope (576 °C, ±3276.x), or a
-    // refrigerant pressure at 0 bar (an unreported transducer — a sealed circuit is never at vacuum).
+    // refrigerant pressure at 0 kgf/cm²G (an absent/unreported transducer on the observed X10A
+    // path).
     if (!reading_plausible(def, r, profile, count)) return false;
-    // Then the adjudicated per-row availability ledger (logic/availability.hpp): a value the envelope
-    // above cannot see is wrong because it is perfectly ordinary — a target temperature of exactly
-    // 0 °C on a row that is simply not populated on this unit (#209 defect 2). Applied here, beside
-    // reading_plausible and for the same reason, so convert() keeps its intrinsic per-converter
-    // semantics and the domain audit still sees them unchanged.
-    // The PAGE-level rules need the same payload this value was decoded from: an all-zero 0xA1
-    // reply, or a 0xA0 reply reporting no O/U MPU id and asserting no output, identifies an absent
-    // second outdoor unit — while a zero in one populated thermistor row does not. Passing the whole
+    // Then the adjudicated per-row availability ledger (logic/availability.hpp): a value the
+    // envelope above cannot see is wrong because it is perfectly ordinary — a target temperature of
+    // exactly 0 °C on a row that is simply not populated on this unit (legacy-209 defect 2).
+    // Applied here, beside reading_plausible and for the same reason, so convert() keeps its
+    // intrinsic per-converter semantics and the domain audit still sees them unchanged. The
+    // PAGE-level rules need the same payload this value was decoded from: an all-zero 0xA1 reply,
+    // or a 0xA0 reply reporting no O/U MPU id and asserting no output, identifies an absent second
+    // outdoor unit — while a zero in one populated thermistor row does not. Passing the whole
     // current reply keeps that distinction structural, and it is what lets the verdict reach a row
     // that carries a value rule of its own (0xA0/8, the expansion valve).
     // The CROSS-PAGE witness rides along for the same reason the page does, one page wider: a
@@ -40,6 +41,7 @@ bool hp_format(const ValueDef& def, const uint8_t* payload, int payload_len, int
         else out = (def.conv == 204) ? format_error_code(r.text) : r.text;
         return true;
     }
+    r.value = value_for_publication(def.type, r.value);
     char b[32];
     // Per-converter decimal precision (logic/convert.hpp): 2 for ×0.01, 1 for scaled, 0 for integers.
     snprintf(b, sizeof(b), "%.*f", display_decimals(def.conv), r.value);

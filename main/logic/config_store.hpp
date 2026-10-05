@@ -92,9 +92,10 @@ struct ConfigBlob {
     // decide" with no Kconfig fallback to consult.
     int32_t     ui_lang = 0;
     bool        has_lang = false;   // FALSE when the decoded blob predates v4 (no language byte)
-    // ── v5: the HomeHub Modbus stack (issue #32) ─────────────────────────────────────────────────
-    // Here for the same reason as the board block, the channel and the language: exactly ONE writer
-    // (the httpd task, POST /set_hp), so no self-healing per-key treatment is needed.
+    // ── v5: the HomeHub Modbus stack (issue legacy-32)
+    // ───────────────────────────────────────────────── Here for the same reason as the board
+    // block, the channel and the language: exactly ONE writer (the httpd task, POST /set_hp), so no
+    // self-healing per-key treatment is needed.
     //
     // This is v5 and NOT v4 on purpose: this block and the UI-language byte were developed in
     // parallel and BOTH claimed v4. main's language byte landed first and is already on published
@@ -223,31 +224,49 @@ inline constexpr uint8_t  CONFIG_BLOB_VERSION_MIN = 1;
 inline constexpr uint16_t CONFIG_BLOB_MAX_STR = 512;
 
 // THE WRITE SIDE OF THAT SAME BOUND. The decoder rejects the WHOLE BLOB when any string exceeds it,
-// so a serializer that writes one is not producing a slightly-wrong config — it is producing a config
-// that cannot be read back at all, and the fallback is the legacy per-key layout a blob-era device has
-// never populated. The board then boots into the setup portal having silently lost WiFi, MQTT, syslog,
-// NTP, board hardware, OTA channel, language, ENV III, both MQTT sources and the weather location.
+// so a serializer that writes one is not producing a slightly-wrong config — it is producing a
+// config that cannot be read back at all, and the fallback is the legacy per-key layout a blob-era
+// device has never populated. The board then boots into the setup portal having silently lost WiFi,
+// MQTT, syslog, NTP, board hardware, OTA channel, language, ENV III, both MQTT sources and the
+// weather location.
 //
 // It was reachable: every other string here is bounded by its own validator or by its route's body
-// buffer, but `mb_host` was documented as "free text like syslog_host" while its route reads a 2048-byte
-// body — so a >512-character HomeHub address saved with {"ok":true} and destroyed the config on the
-// next boot. Checked HERE rather than only in validate() because this is where the constant that
-// decides it lives: a bound enforced next to the decode rule it must agree with cannot drift from it,
-// and a future field added to ConfigBlob is covered without anyone remembering to add a check.
-// Every std::string in ConfigBlob, in declaration order. A new string field belongs in this list AND
-// in test_config_blob_strings_fit()'s own field list, which is what proves the invariant this exists
-// for (fit() ⟹ the blob round-trips). Stated precisely because the test cannot discover a member
-// nobody added to it: C++ gives it no way to enumerate the struct, so the `== 23` pin catches a field
-// dropped from the TEST, not one added to the STRUCT and forgotten in both places.
+// buffer, but `mb_host` was documented as "free text like syslog_host" while its route reads a
+// 2048-byte body — so a >512-character HomeHub address saved with {"ok":true} and destroyed the
+// config on the next boot. Checked HERE rather than only in validate() because this is where the
+// constant that decides it lives: a bound enforced next to the decode rule it must agree with
+// cannot drift from it, and a future field added to ConfigBlob is covered without anyone
+// remembering to add a check. Every std::string in ConfigBlob, in declaration order. A new string
+// field belongs in this list AND in test_config_blob_strings_fit()'s own field list, which is what
+// proves the invariant this exists for (fit() ⟹ the blob round-trips). Stated precisely because the
+// test cannot discover a member nobody added to it: C++ gives it no way to enumerate the struct, so
+// the `== 24` pin catches a field dropped from the TEST, not one added to the STRUCT and forgotten
+// in both places.
 inline bool config_blob_strings_fit(const ConfigBlob& c) {
-    for (const std::string* s : {
-             &c.wifi_ssid, &c.wifi_pass, &c.wifi_ssid_backup, &c.wifi_pass_backup,
-             &c.mqtt_uri, &c.mqtt_user, &c.mqtt_pass, &c.syslog_host, &c.ntp_server,
-             &c.mb_host,
-             &c.ref_temp_name, &c.ref_temp_topic, &c.ref_temp_path, &c.ref_temp_setpoint_path,
-             &c.ref_temp_time_path, &c.ref_temp_enabled_path, &c.ref_temp_hvac_mode_path,
-             &c.circulation_name, &c.circulation_topic, &c.circulation_power_path,
-             &c.circulation_time_path, &c.ref_temp_setpoint_topic, &c.ref_temp_time_topic })
+    for (const std::string* s : {&c.wifi_ssid,
+                                 &c.wifi_pass,
+                                 &c.wifi_ssid_backup,
+                                 &c.wifi_pass_backup,
+                                 &c.mqtt_uri,
+                                 &c.mqtt_user,
+                                 &c.mqtt_pass,
+                                 &c.mqtt_base,
+                                 &c.syslog_host,
+                                 &c.ntp_server,
+                                 &c.mb_host,
+                                 &c.ref_temp_name,
+                                 &c.ref_temp_topic,
+                                 &c.ref_temp_path,
+                                 &c.ref_temp_setpoint_path,
+                                 &c.ref_temp_time_path,
+                                 &c.ref_temp_enabled_path,
+                                 &c.ref_temp_hvac_mode_path,
+                                 &c.circulation_name,
+                                 &c.circulation_topic,
+                                 &c.circulation_power_path,
+                                 &c.circulation_time_path,
+                                 &c.ref_temp_setpoint_topic,
+                                 &c.ref_temp_time_topic})
         if (s->size() > CONFIG_BLOB_MAX_STR) return false;
     return true;
 }
@@ -344,8 +363,9 @@ inline std::vector<uint8_t> config_blob_serialize(const ConfigBlob& c) {
     detail::blob_put_str(v, c.mb_host);
     detail::blob_put_u32(v, static_cast<uint32_t>(c.mb_port));
     detail::blob_put_u32(v, static_cast<uint32_t>(c.mb_unit_id));
-    // Bit0 was the v9 actuation-consent flag. The write path is RETIRED (#294), so it is written
-    // as 0 forever and ignored on decode; the byte itself stays so the blob layout is unchanged.
+    // Bit0 was the v9 actuation-consent flag. The write path is RETIRED (legacy-294), so it is
+    // written as 0 forever and ignored on decode; the byte itself stays so the blob layout is
+    // unchanged.
     v.push_back(static_cast<uint8_t>(!c.mb_host.empty() ? 2 : 0));
     detail::blob_put_str(v, c.ref_temp_name);
     detail::blob_put_str(v, c.ref_temp_topic);
@@ -462,8 +482,8 @@ inline bool config_blob_deserialize(const uint8_t* d, size_t n, ConfigBlob& out)
         c.mb_port           = static_cast<int32_t>(mb_port);
         c.mb_unit_id        = static_cast<int32_t>(mb_unit_id);
         // Bit0 (v9 actuation consent) is deliberately DISCARDED: the write path it gated no longer
-        // exists (#294). Reading it back would resurrect consent for a capability the firmware has
-        // dropped, so a stored 1 must not survive into any decoded config.
+        // exists (legacy-294). Reading it back would resurrect consent for a capability the
+        // firmware has dropped, so a stored 1 must not survive into any decoded config.
         (void)mb_flags;
         // Keep the legacy member coherent for round-trip diagnostics, but do not let either v5's
         // ambiguous bit or v6's short-lived Auto mode override the current empty-host rule.

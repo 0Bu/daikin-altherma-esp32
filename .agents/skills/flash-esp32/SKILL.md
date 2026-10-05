@@ -43,21 +43,28 @@ passthrough).
    ```bash
    scripts/require-signed.sh build/daikin-altherma-esp32.bin
    ```
-5. **Flash** from the host (preserves nvs — `@flash_args` skips `nvs@0x9000`):
+5. **Flash** from the host (preserves nvs — `@flash_args` skips `nvs@0x9000`). Keep the directory
+   change inside a subshell so the verification command still runs from the repository root:
    ```bash
-   cd build && esptool --chip esp32s3 -p <port> write_flash "@flash_args"
+   (cd build && esptool --chip esp32s3 -p <port> write_flash "@flash_args")
    ```
-6. **Verify.** After reboot, run the automated health check:
+6. **Verify.** After reboot and any initial network provisioning, use the resolved host of the board
+   just flashed and pin the expected build version and ELF SHA:
    ```bash
-   scripts/verify-device-health.sh --ip daikin-altherma-esp32.local --timeout 60
+   scripts/verify-device-health.sh --ip <flashed-board-host> \
+     --expected-version <version> --expected-elf-sha <elf-sha-prefix> --timeout 60
    ```
-   (or read the serial log: `screen <port> 115200`, exit `Ctrl-A K`). Confirm WiFi/MQTT/hp status.
+   MQTT must connect when configured; an explicitly unconfigured broker is accepted as disabled.
+   Add `--require-hp` when the board is wired to a heat pump and X10A behavior is in the requested
+   scope. Serial logs (`screen <port> 115200`, exit `Ctrl-A K`) supplement the API result; they do
+   not replace version, crash, safe-mode, heap or requested link verification.
 
 ## Self-analysis and cleanup
 
 Before concluding the flash operation:
    - Confirm clean boot from `/status`: verify `.last_crash.fault == false` (or null), `.sys.safe_mode == false`, and contiguous heap `.sys.max_alloc >= 10000`.
-   - Remove temporary signed binary artifact (`rm -f build/daikin-signed.bin`).
+   - Remove `build/daikin-signed.bin` only if this workflow created it as a temporary duplicate.
+     Retain requested build, signing and device evidence, and preserve pre-existing user artifacts.
 
 ## Notes
 - **Unsigned = crash-loop**, not a brick: this scheme burns no eFuses and leaves ROM download mode

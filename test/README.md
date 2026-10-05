@@ -29,7 +29,9 @@ branch-bearing header's aggregated gcov `taken/total` branch-edge counts with th
 silently. These totals do not identify individual edges, so equal counts are not proof that the same
 branches ran. It intentionally excludes this test driver, generated profiles and system headers:
 none of those can prove that another production branch ran. GCC uses `gcov`; Clang uses `llvm-cov
-gcov` (via `xcrun` on macOS). Local profiles use compiler family and major; authoritative GitHub
+gcov` (via `xcrun` on macOS). Local profiles use compiler family and major (maintained profiles:
+`clang-17-darwin` on macOS with Apple Clang 17, `gcc-13-linux-ubuntu24` on Ubuntu 24.04 with GCC 13,
+and `gcc-15-linux-ubuntu26` / `gcc-15-github-linux-ubuntu26` on Ubuntu 26 / GitHub Actions); authoritative GitHub
 coverage additionally binds the hosted runner OS and image name because its packaged toolchain can
 instrument different outcome counts from a container with the same upstream compiler release. An
 unknown runner image has no fallback profile and therefore fails closed pending review.
@@ -59,7 +61,7 @@ separately authorized hardware acceptance remain distinct proof layers.
 `scripts/run-format-check.sh` always supplies the dependency-free baseline format gate: UTF-8, LF
 endings, one final newline, no tabs or trailing whitespace on maintained `main/`, `test/` and
 `tools/` C/C++ sources, while excluding generated `main/def/` tables. CI additionally installs exact
-clang-format 18.1.3 and rejects formatter changes on every new file and changed hunk. A local run may
+clang-format 18.1.8 and rejects formatter changes on every new file and changed hunk. A local run may
 omit that second layer when the pinned executable is unavailable; `CI=true` fails closed without the
 pinned executable or on a different version. Run the complete local gate, including `tools/`, as
 `CLANG_FORMAT=clang-format-18 scripts/run-format-check.sh`.
@@ -135,6 +137,27 @@ calls the same top-level policy rather than maintaining a second gate list.
 The credential-wrapper selftest separately allows PR publication only with the fixed repository,
 the checked-out and already-pushed `agent/*` head, base `main`, one literal title, and one regular
 body file; direct `gh`, prompt/fill/editor/web forms, stale heads, and extra arguments stay negative.
+
+`node test/test_ui_history_sources.mjs` exercises source lifecycle epochs, cached rings and index
+pins, including A → B → A, a firmware epoch change between polls, disable/re-enable, changed X10A
+identity, lower-uptime and higher-uptime reboots with `boot_id`, and delayed raw/derived replies.
+A retired request cannot refill the cache or
+release its successor's busy lease. Settings regressions also preserve absent source timestamps and
+round-trip literal `$`, backslashes and mapping whitespace in the 641-character escaped MQTT fields,
+while preserving hidden eligibility gates on an unchanged save.
+
+`node test/test_json_ingress_contract.mjs` pins every config JSON body's actual byte count, the
+bounded cJSON adapter and Weather's preflight/suffix checks. It also checks the bounded heap-based
+room-source body and shared boot identity. `test_factory_reset_contract.mjs` pins early crash-guard
+ordering, the static NVS mutex, absence of automatic NVS erase and conditional WiFi-driver NVS
+selection before initialization. These source checks do not prove physical recovery or measure the
+real cJSON parser's target stack.
+
+`node test/test_deployment_scripts_contract.mjs` drives the health helper with the production
+`{values:[...]}` envelope and string/null X10A values. Malformed or held values, missing MQTT
+configuration evidence, stale/invalid X10A ages, invalid heap fields, non-200 HTTP responses and curl
+failure after HTTP 200 are negative cases. Synthetic endpoints prove acceptance rules, not device
+health or sustained physical communication.
 
 `node test/test_ui_fan_icon.mjs` pins the header to the supplied static three-blade PNG mark at 48 px.
 It separately keeps the live `#scFan` rotation in the system schematic and rejects a second header
@@ -298,13 +321,13 @@ contract also pins the post-claim OTA race: only the local Weather attempt is de
 outstanding causal token must be reclaimed after OTA instead of being failed or replaced. A separate
 host-only path retains only an exact completed `waiting/heap_headroom` refusal through the full
 pressure window. It proves every worker stopped and all stress evidence passed before revalidating the
-failed token. It then waits passively for at most 420 seconds for two stable host-visible 56 KiB / 20
+failed token. It then waits passively for at most 420 seconds for two stable host-visible 48 KiB / 20
 KiB samples before issuing exactly one different non-persistent token with a new success baseline and
 a separate 120-second deadline. A natural retry may change ordinary Weather state but not the failed
 HIL token. A second refusal, reused or foreign token, deadline reset, a worker still alive after the
 bounded request-completion grace, missing MQTT/X10A recovery, changed counter or uptime regression
 remains terminal. The
-firmware logic test separately pins the measured 56 KiB aggregate / 20 KiB contiguous admission floor.
+firmware logic test separately pins the measured 48 KiB aggregate / 20 KiB contiguous admission floor.
 Its paired
 `tools/production_ota/selftest.mjs` requires every bench-delivery, release-HIL and
 production-promotion stage-removal mutation to turn that same contract red.
@@ -381,11 +404,14 @@ One entry per `test_*()` in [`test_logic.cpp`](test_logic.cpp), in the order `ma
 - `logic/lwt_select.hpp` — the web UI's leaving-water MEASUREMENT picker (twin of `www/js/schematic.js`
   `vLwt`): the pre-BUH heat-exchanger outlet (R1T) is chosen over a setpoint, a mixed-zone R1T, or
   the post-BUH (R2T) twin, across the four alias label forms — and, catalog-wide, every detectable
-  profile resolves a real measurement and never a setpoint (issue legacy-121, the legacy-35–39 failure shape).
+  profile resolves a real measurement and never a setpoint (issue legacy-121, the legacy-35–legacy-39 failure shape).
 - `logic/mqtt_publish_gate.hpp` — an unwired board may connect/subscribe without an installation
   LWT but cannot publish; the first X10A proof promotes it, a one-cycle dropout is absorbed using the
   monotonic last-good age, and an active board publishes one offline transition only after 15 seconds
   of X10A loss before ordinary publication stays silent until recovery.
+- `logic/modbus_snapshot.hpp` — matching target/session generations, the derived 546-second full
+  cache budget and an independent seven-second reply budget gate live use; boundary and stale cases
+  remain separate from measurement plausibility.
 - `logic/profile_view.hpp` + `def/overlay.hpp` — the generated table plus the temporary page-`0x10`
   supplement as one row sequence, and the **overlay rule** (a block applies only if the base already
   references its page). Asserted: the block is withheld when the page is absent, base rows keep their
@@ -524,9 +550,11 @@ One entry per `test_*()` in [`test_logic.cpp`](test_logic.cpp), in the order `ma
   respect the caller's length on a response cut short mid-value.
 - `logic/http_body.hpp` — request-body reassembly: a body delivered one byte per `recv` arrives
   whole (the fragmented POST that used to 400 as "bad json"), a timeout is retried while progress
-  resets the idle count, a peer that stalls forever is dropped after a **bounded** wait rather than
-  parking the httpd task, a mid-body close fails instead of handing over half a document, and the
-  size cap still leaves room for the terminator.
+  resets the idle count, and an absolute acceptance deadline also rejects a final receive that
+  reaches the deadline. A mid-body close fails and the size cap leaves room for the terminator.
+- `logic/payload_complete.hpp` — depth-16 preflight and single-document suffix rejection, including
+  embedded NULs and extra documents. A fake parser/deleter tests callback ordering and ownership;
+  excessive nesting reaches neither recursive callback, and invalid parse-end pointers fail closed.
 - `logic/uart_plan.hpp` — the X10A UART (re)init decision: probing the SAME pins is a `Noop` (no
   reinstall, no heap), the detect sweep's `{44,43}↔{43,44}` alternation is a register-only `Remap`
   (**not** an `Install`) — the exact turn that used to reinstall the driver ~2×/s and fragment the
@@ -549,6 +577,9 @@ One entry per `test_*()` in [`test_logic.cpp`](test_logic.cpp), in the order `ma
 - `logic/refrigerant_service.hpp` — required profile coverage, heating-only fresh-sweep eligibility,
   EEV-command/pressure/temperature window statistics, special-phase and fault exclusions, latched
   optional-context limitations, generation/time/poll-gap interruption and stale read-only snapshots.
+- `logic/state_dwell.hpp` — normal profile cadence stays observed, explicit zero-second gaps break
+  transition evidence, a resumed unchanged tail remains blind and longer stalls cannot become
+  observed time. Persistence version 2 refuses older fold records.
 
 `logic/value_def.hpp` has no `test_*()` of its own — it is the profile row type, exercised through
 `def/registry.hpp` and the converter tests.
@@ -560,6 +591,6 @@ One entry per `test_*()` in [`test_logic.cpp`](test_logic.cpp), in the order `ma
 2. Add a `CHECK(...)` in `test_logic.cpp` asserting against a known-good reference (for converters,
    a known-good reference output for the same raw bytes; for CRC, a real captured frame).
 3. `scripts/run-mock-tests.sh` — must pass; run it explicitly before handoff, and CI enforces it.
-   The Codex Stop lifecycle hook repeats it through the same runner-neutral core.
+   The Stop lifecycle hook repeats it through the same runner-neutral core.
 
 See the `$add-logic-test` skill (`.agents/skills/add-logic-test/`).

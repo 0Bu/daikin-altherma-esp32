@@ -63,7 +63,7 @@ It does **NOT** authorize:
 
 5. **Flash the board via USB** preserving NVS (skips `nvs@0x9000`):
    ```bash
-   cd build && esptool --chip esp32s3 -p <port> write_flash "@flash_args"
+   (cd build && esptool --chip esp32s3 -p <port> write_flash "@flash_args")
    ```
 
 6. **Verify health on the bench device.**
@@ -81,7 +81,8 @@ It does **NOT** authorize:
    The script asserts:
    - HTTP 200 on `/status` with valid JSON and mandatory fields
    - WiFi connection and valid IP
-   - MQTT connection to broker (`.mqtt.connected: true`)
+   - MQTT connection when configured (`.mqtt.connected: true`); an explicitly unconfigured broker
+     is accepted as disabled
    - Clean boot (`.last_crash: null` or `.last_crash.fault: false`)
    - Safe mode inactive (`.sys.safe_mode: false`)
    - Sufficient contiguous heap headroom (`.sys.max_alloc >= 10000`)
@@ -115,4 +116,7 @@ It does **NOT** authorize:
 After achieving a green bench result:
    - **Examine runtime margins:** Inspect `/status` to confirm that contiguous heap headroom (`.sys.max_alloc`) exceeds the 10 KiB floor with margin, and check stack headroom.
    - **Inspect `/diag` for silent anomalies:** Confirm there are no unexpected bus retry floods, silent queue overflows, or repeated reconnection warnings in `/diag?verbose=1`.
-   - **Self-optimize artifacts and diff:** Clean up temporary signing artifacts (`build/daikin-signed.bin`), ensure any code corrections made during the diagnostic loop are minimal and idiomatic, and verify that regression coverage was added in `test/test_logic.cpp`.
+   - **Review artifacts and diff:** Remove only temporary signing artifacts created by this workflow
+     (such as a duplicate `build/daikin-signed.bin`), retaining requested validation evidence and
+     pre-existing user artifacts. Check that authorized corrections are scoped and have relevant
+     regression coverage.

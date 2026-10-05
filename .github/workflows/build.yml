@@ -100,12 +100,15 @@ on:
         required: false
         default: ""
 
-# Serialize main so the release version + the two feeds can't race; cancel superseded PR runs.
+# Serialize the complete main version/build/publish chain, including waiting manual releases.
 # A release dispatch and a push to main share this group deliberately: they both derive a version
 # from the tag list, and a release must never be computed against a tag another run is creating.
+# GitHub's default single pending slot can replace a release; max retains up to 100 waiting runs.
+# PR workflows have unique groups; their expensive jobs cancel superseded work independently below.
 concurrency:
-  group: build-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' || github.ref != 'refs/heads/main' }}
+  group: build-${{ github.event_name == 'pull_request' && format('pr-{0}-{1}', github.event.pull_request.number, github.run_id) || github.ref }}
+  queue: max
+  cancel-in-progress: false
 
 permissions:
   contents: read
@@ -124,7 +127,14 @@ jobs:
     # A release is an explicit maintainer publication action for an already accepted main commit.
     # PR/main CI owns testing; do not rerun or make those tests a prerequisite for tagging it.
     if: github.event_name != 'workflow_dispatch' || inputs.release != true
-    runs-on: ubuntu-24.04
+    concurrency:
+      group: build-mechanical-${{ github.event.pull_request.number || github.run_id }}
+      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+    permissions:
+      contents: read
+      pull-requests: read
+      actions: read
+    runs-on: ubuntu-26.04
     timeout-minutes: 10
     outputs:
       firmware: ${{ steps.changes.outputs.firmware }}
@@ -221,13 +231,14 @@ jobs:
             echo "  $1=$value"
           }
           echo "mutation self-test scope (all=$all):"
+          emit host_audits '^(tools/(presenter|docs)/|scripts/(check-presenter-parity|run-doc-entity-audit|run-host-audit-reuse-tests)[.]sh$|test/presenter_golden_dump[.]cpp$|main/logic/(lwt_select|discovery)[.]hpp$)'
           # agent-hooks drives the merge gate, which runs the UI, absence and UI-GIF suites; its
           # formatter cases copy the real .clang-format, and it pins the exact command shapes of
           # gh-with-git-credentials.sh and production-ota-gate.py.
-          emit agent_hooks '^(tools/(agent-hooks|agent-policy|absence|ui|uigif)/|(\.codex|\.agents)/hooks\.json$|\.clang-format$|\.github/pull_request_template\.md$|scripts/(run-(agent-policy|ui-use-case-tests|ui-gif-audit)|gh-with-git-credentials|production-ota-gate)\.(sh|py)$)'
+          emit agent_hooks '^(tools/(agent-hooks|agent-policy|absence|ui|uigif|skill_audit)/|\.githooks/|\.agents/hooks\.json$|\.clang-format$|\.github/pull_request_template\.md$|scripts/(run-(agent-policy|ui-use-case-tests|ui-gif-audit|skill-audit)|gh-with-git-credentials|production-ota-gate)\.(sh|py)$)'
           # agent-config's canaries run scripts/run-agent-instructions-budget.sh over a fixture built
-          # from .agents/, .codex/, AGENTS.md and .mcp.json.
-          emit agent_config '^(tools/(agent-config|skill_audit)/|\.codex/|\.agents/|AGENTS\.md$|\.mcp\.json$|scripts/(gh-with-git-credentials|run-agent-instructions-budget|run-skill-audit)\.sh$)'
+          # from .agents/, AGENTS.md and .mcp.json.
+          emit agent_config '^(tools/(agent-config|skill_audit)/|\.agents/|AGENTS\.md$|\.mcp\.json$|scripts/(gh-with-git-credentials|run-agent-instructions-budget|run-skill-audit)\.sh$)'
           # agent-policy drives require-pr-gates.sh and reads both Renovate records.
           emit agent_policy '^(tools/agent-policy/|tools/agent-hooks/require-pr-gates\.sh$|\.github/(workflows/(pr-policy|renovate)\.ya?ml|renovate\.json)$|scripts/(run-agent-policy|gh-with-git-credentials)\.sh$)'
           # the domain canaries compile catalog_audit.cpp against main/logic and test/test_logic.cpp.
@@ -332,6 +343,8 @@ jobs:
       # modals at 320/1200 px in all 13 locales. Reduced motion covers Dashboard, Settings, WiFi,
       # progress and disclosure motion at the same locale/viewport matrix; console errors are fatal.
       - name: Run rendered browser and accessibility gate
+        env:
+          BEFORE: ${{ github.event.before }}
         run: ./scripts/run-browser-render-tests.sh --if-ui-changed
 
       # The source-boundary contracts: assertions about main/*.cpp that the host suite cannot make,
@@ -380,7 +393,7 @@ jobs:
       # Domain-correctness gate: are the published values physically RIGHT? The logic tests above
       # verify the logic they are handed; they cannot see a well-formed value that is simply
       # false — a wrong converter compiles, passes them all, and publishes -971.5 °C to Home
-      # Assistant (issues #35-#39). This runs the real converters over the real catalog against
+      # Assistant (issues legacy-35–legacy-39). This runs the real converters over the real catalog against
       # docs/REGISTERS.md. The human half of the gate is the $domain-review skill + its PR
       # checkbox; this is the mechanical half.
       - name: Audit the value catalog
@@ -454,13 +467,16 @@ jobs:
       # same quantity several ways across models. A wrong id errors NOWHERE: HA builds the template
       # sensor, its availability guard never becomes true, and it sits at `unavailable`, which reads
       # as "my heat pump doesn't support this" rather than as a typo in the docs. Shipped that way
-      # since #206 — the heat-meter recipe named one id that was never a valid slug and one that
+      # since legacy-206 — the heat-meter recipe named one id that was never a valid slug and one that
       # exists only on the host-test FIXTURE profile detection can never assign. C++ host compiler
       # only, seconds long.
       - name: Audit the entity ids quoted in the docs
         run: ./scripts/run-doc-entity-audit.sh
       - name: Verify the doc entity-id audit still has teeth
         run: ./tools/docs/selftest.sh
+      - name: Verify fresh host audits and explicit fixture reuse
+        if: steps.scope.outputs.host_audits == 'yes'
+        run: ./scripts/run-host-audit-reuse-tests.sh
       # The README's dashboard recording (docs/media/dashboard.gif): the one artefact here that rots
       # INVISIBLY. A recording renders perfectly forever, whatever the UI has since become, so every
       # other gate on this page stays green while the first thing a new reader sees is last month's
@@ -479,7 +495,7 @@ jobs:
       #
       # What the old arrangement cost is measurable rather than theoretical: with the recording's
       # currency nobody's merge condition, the README went stale ONE merge after it was last made
-      # (#462 swapped the schematic's circuits on 2026-08-13, against a stamp written the same day),
+      # (legacy-462 swapped the schematic's circuits on 2026-08-13, against a stamp written the same day),
       # and no gate anywhere could say so. The judgement half — are the nine operating scenes still
       # true, are the readings still honest — remains the canonical $ui-gif skill's, now a merge
       # gate of its own.
@@ -535,6 +551,7 @@ jobs:
         if: steps.scope.outputs.agent_hooks == 'yes'
         run: |
           python3 ./tools/agent-hooks/test_agent_hooks.py
+          python3 ./tools/agent-hooks/test_push_gate.py
           ./tools/agent-hooks/selftest.sh
 
       # Review evidence is PR state, not a file marker. The canaries prove missing inputs, missing or
@@ -557,10 +574,35 @@ jobs:
       #
       # A push to main additionally decides the DEV PUBLISH with this flag (see the build job): a
       # docs-only merge must not move the version and hand every dev device a byte-identical image.
+      - name: Resolve completed dev publication
+        id: dev_publication
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && github.repository == '0Bu/daikin-altherma-esp32'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -uo pipefail
+          set +e
+          dev_source="$(./scripts/check-dev-manifest-source.sh origin)"
+          rc=$?
+          set -e
+          # Only finite helper states and an exact source SHA can influence build selection.
+          if [ "$rc" -eq 0 ] && [[ "$dev_source" =~ ^[0-9a-f]{40}$ ]]; then
+            state=ancestor
+          elif [ "$rc" -eq 1 ]; then
+            state=same
+            dev_source=""
+          else
+            state=unknown
+            dev_source=""
+          fi
+          printf 'state=%s\nsource=%s\n' "$state" "$dev_source" >> "$GITHUB_OUTPUT"
+
       - name: Detect build-relevant changes
         id: changes
         env:
           BEFORE: ${{ github.event.before }}
+          DEV_STATE: ${{ steps.dev_publication.outputs.state }}
+          DEV_SOURCE: ${{ steps.dev_publication.outputs.source }}
         run: |
           set -euo pipefail
           # tools/web_asset/ is a BUILD/PUBLICATION INPUT, not tooling: main/CMakeLists.txt runs its
@@ -568,19 +610,29 @@ jobs:
           # vendor/LICENSE into both feeds. A change there must therefore rebuild and republish.
           # production-ota-gate.py also binds local HEAD to manifest.source_sha; publishing its
           # changes without a new artifact would make the corrected gate impossible to execute.
-          relevant='^(LICENSE$|THIRD_PARTY_NOTICES[.]md$|main/|CMakeLists[.]txt$|sdkconfig[.]defaults$|dependencies[.]lock$|partitions[.]csv$|version[.]txt$|docs/(index[.]html|serial-port-release[.]mjs|web-installer[.]mjs)$|[.]github/workflows/build[.]yml$|scripts/(ci-build-all|build-pages|next-version|publish-pages-branch|require-signed|check-publish-version|idf-version|check-nonflashable-artifacts)[.]sh$|scripts/pages-commit-payload[.]mjs$|scripts/(generate-ota-changelog|check-sdkconfig-defaults|report-firmware-size|check-web-installer-plan|check-manifest-provenance|check-signing-key-continuity|check-stack-budget|check-reproducible-build|verify-published-artifacts|production-ota-gate)[.]py$|tools/(version|web_asset|release|stack)/)'
+          relevant='^(LICENSE$|THIRD_PARTY_NOTICES[.]md$|main/|CMakeLists[.]txt$|sdkconfig[.]defaults$|dependencies[.]lock$|partitions[.]csv$|version[.]txt$|docs/(index[.]html|serial-port-release[.]mjs|web-installer[.]mjs)$|[.]github/workflows/build[.]yml$|scripts/(ci-build-all|build-pages|next-version|publish-pages-branch|require-signed|check-publish-version|idf-version|check-nonflashable-artifacts|check-dev-manifest-source)[.]sh$|scripts/pages-commit-payload[.]mjs$|scripts/(generate-ota-changelog|check-sdkconfig-defaults|report-firmware-size|check-web-installer-plan|check-manifest-provenance|check-signing-key-continuity|check-stack-budget|check-reproducible-build|verify-published-artifacts|production-ota-gate)[.]py$|tools/(version|web_asset|release|stack)/)'
           case "${{ github.event_name }}" in
             pull_request)
               # HEAD is the PR's merge ref, so HEAD^1 is the base tip: the diff is exactly what
               # this PR changes, no matter how many commits it took or what landed on main since.
               range="HEAD^1 HEAD" ;;
             push)
-              # A force-push (or the first push of a branch) can leave `before` unresolvable —
-              # then build, rather than guess.
-              if [ -z "$BEFORE" ] || ! git cat-file -e "${BEFORE}^{commit}" 2>/dev/null; then
-                range=""
-              else
+              if [ "${{ github.ref }}" = "refs/heads/main" ]; then
+                # Compare against a valid dev feed bound to a completed publisher/readback proof.
+                # If an earlier run was superseded, cancelled or failed, firmware changes remain
+                # visible until actually built and published to the dev feed.
+                if [ "$DEV_STATE" = ancestor ] && [[ "$DEV_SOURCE" =~ ^[0-9a-f]{40}$ ]]; then
+                  range="$DEV_SOURCE ${{ github.sha }}"
+                elif [ "$DEV_STATE" = same ]; then
+                  range="same_source"
+                else
+                  echo 'dev publication evidence unproven: build conservatively'
+                  range=""
+                fi
+              elif [ -n "$BEFORE" ] && git cat-file -e "${BEFORE}^{commit}" 2>/dev/null; then
                 range="$BEFORE ${{ github.sha }}"
+              else
+                range=""
               fi ;;
             *)
               # A manual dispatch is an explicit request to build (and possibly to cut a release).
@@ -593,6 +645,8 @@ jobs:
           # than the pipe.
           if [ -z "$range" ]; then
             changed=yes
+          elif [ "$range" = "same_source" ]; then
+            changed=no
           else
             git diff --name-only $range > /tmp/changed-files.txt
             if grep -qE "$relevant" /tmp/changed-files.txt; then
@@ -609,8 +663,11 @@ jobs:
   # named `build` because branch protection requires it; docs-only PRs pass it without compiling.
   build:
     needs: [mechanical_gates]
+    concurrency:
+      group: build-compile-${{ github.event.pull_request.number }}
+      cancel-in-progress: true
     if: always() && github.event_name == 'pull_request'
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 30
     permissions:
       contents: read
@@ -763,7 +820,7 @@ jobs:
       ((github.event_name == 'workflow_dispatch' && inputs.release == true) ||
       (needs.mechanical_gates.result == 'success' &&
       needs.mechanical_gates.outputs.firmware == 'yes'))
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 30
     permissions:
       contents: read
@@ -901,7 +958,7 @@ jobs:
       # The cache key must change when the cached objects go stale — and NOT otherwise. It used to
       # be hashFiles('.github/workflows/build.yml', 'sdkconfig.defaults'), i.e. the hash of this
       # WHOLE FILE, so every edit to this workflow threw the cache away. Most edits to it change no
-      # build input at all: PR #189 deleted a two-line comment and paid a full cold compile (~3 of
+      # build input at all: legacy-189 deleted a two-line comment and paid a full cold compile (~3 of
       # the build job's ~5 minutes) for it, and this file is edited often.
       #
       # What actually invalidates the objects is the TOOLCHAIN (esp_idf_version, which decides the
@@ -988,10 +1045,13 @@ jobs:
 
       # This is the only cross-job handoff. It contains signed flashables, but never the private key;
       # the publisher downloads it with actions:read and owns the only contents:write token.
+      # A full rerun rebuilds the same run/source/version; replace only this run-local bundle.
+      # A failed-jobs-only publisher retry still downloads its original unchanged handoff.
       - name: Upload firmware artifacts
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
         with:
           name: daikin-altherma-esp32-${{ steps.stamp.outputs.disp }}
+          overwrite: true
           retention-days: ${{ steps.mode.outputs.mode == 'dev' && 3 || 90 }}
           if-no-files-found: error
           path: |
@@ -1013,7 +1073,7 @@ jobs:
     # `always()` prevents GitHub's implicit success() from propagating that transitive skip while
     # the explicit result check still fails closed when the signed build itself did not succeed.
     if: always() && needs.trusted_build.result == 'success'
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 10
     permissions:
       actions: read
@@ -1097,6 +1157,23 @@ jobs:
             --pages-prefix "$PAGES_PREFIX" \
             --cache-buster "$GITHUB_RUN_ID" \
             --attempts 30
+
+      # This small, expiring artifact attests completion without another gh-pages push/Pages build.
+      # Its whole-slice digest prevents an older successful run from blessing changed feed bytes.
+      - name: Record dev publication proof
+        if: needs.trusted_build.outputs.mode == 'dev'
+        run: |
+          python3 tools/release/dev_publication.py record _site/dev \
+            "$(cat "$RUNNER_TEMP/pages-published-oid")" "$RUNNER_TEMP/dev-publication-proof"
+
+      - name: Upload dev publication proof
+        if: needs.trusted_build.outputs.mode == 'dev'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
+        with:
+          name: dev-publication-proof-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/dev-publication-proof/dev-publication-proof.json
+          retention-days: 90
+          if-no-files-found: error
 
       - name: Rebind release tag immediately before release mutation
         if: needs.trusted_build.outputs.mode == 'release'

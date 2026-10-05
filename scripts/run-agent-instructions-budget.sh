@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Canonical contract for agent instructions and Codex configuration.
+# Canonical contract for agent instructions and configuration.
 #
 # Despite the historical "budget" suffix, this entry point deliberately keeps the cheap contracts
 # together: parsed TOML, canonical hook dispatch, the AGENTS.md byte budget and safety invariants,

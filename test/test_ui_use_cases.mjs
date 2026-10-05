@@ -149,6 +149,8 @@ const fetch = async (url, options = {}) => {
       error: "Base topic violates a rule this UI predates",
     }, 400);
   if (fetchState.mode === "reject") return response(false, { error: "rejected by test" });
+  if (fetchState.mode === "reboot" && url === "/set_ntp")
+    return response(true, { reboot: true, saved: true });
   if (url === "/status") return response(true, {});
   return response(true, { reboot: false, saved: false });
 };
@@ -699,6 +701,76 @@ assert.equal(fetchState.calls[0]?.body?.timestamp_topic, "");
 assert.equal(fetchState.calls[0]?.body?.timestamp_path, "");
 assert.equal(fetchState.calls[0]?.body?.fixed_setpoint_c, 20);
 
+// Opening and immediately saving an existing source must preserve absence, advanced eligibility
+// gates and exact topic/path bytes. Exercise the production fill → submit → /set_ref_temp path.
+const roundtripSource = cases.find((item) => item.modal === "refTempModal");
+const roomSourceBeforeRoundtrips = ui.S.status.reference_temperature;
+const roundtripMappings = [
+  { topic: "fixture/room", temperature_path: "", setpoint_topic: "20", setpoint_path: "",
+    timestamp_topic: "", timestamp_path: "", fixed_setpoint_c: null },
+  { topic: "fixture/room", temperature_path: "", setpoint_topic: " 20 ", setpoint_path: "",
+    timestamp_topic: "", timestamp_path: "", fixed_setpoint_c: null },
+  { topic: " ", temperature_path: "", setpoint_topic: " ", setpoint_path: "",
+    timestamp_topic: " ", timestamp_path: "", fixed_setpoint_c: null },
+  { topic: "fixture/temperature", temperature_path: "tC", setpoint_topic: "", setpoint_path: "",
+    timestamp_topic: "", timestamp_path: "", fixed_setpoint_c: 20 },
+  { topic: "$SYS/room", temperature_path: "tC", setpoint_topic: "", setpoint_path: "",
+    timestamp_topic: "", timestamp_path: "", fixed_setpoint_c: 20 },
+  { topic: "fixture/room$temperature", temperature_path: "", setpoint_topic: "", setpoint_path: "",
+    timestamp_topic: "", timestamp_path: "", fixed_setpoint_c: 20 },
+  { topic: "fixture/room$temperature", temperature_path: "value$reading",
+    setpoint_topic: "fixture/target\\setpoint", setpoint_path: "value$target",
+    timestamp_topic: "fixture/time$source", timestamp_path: "value\\time", fixed_setpoint_c: null },
+  { topic: " sensor/room ", temperature_path: " temperature ", setpoint_topic: "", setpoint_path: "",
+    fixed_setpoint_c: 20, timestamp_topic: "", timestamp_path: "", enabled_path: "enabled", hvac_mode_path: "hvac_mode" },
+  { topic: "$".repeat(192), temperature_path: "\\".repeat(128), setpoint_topic: "", setpoint_path: "",
+    timestamp_topic: "", timestamp_path: "", fixed_setpoint_c: 20 },
+];
+const template = fs.readFileSync(new URL("../main/www/index.html", import.meta.url), "utf8");
+for (const mapping of roundtripMappings) {
+  const original = { ...mapping, configured: true, name: "Roundtrip fixture", max_age_s: 600,
+    enabled_path: "enabled", hvac_mode_path: "hvac_mode" };
+  ui.S.status.reference_temperature = original;
+  fetchState.mode = "ok";
+  fetchState.calls.length = 0;
+  ui.S.busy = false;
+  open(roundtripSource);
+  for (const id of ["rtTemperatureSource", "rtTarget", "rtTimestampSource"]) {
+    const maxLength = Number(template.match(new RegExp(`id="${id}" maxlength="(\\d+)"`))?.[1]);
+    assert.equal(maxLength, 641, `${id} must allow the maximum escaped topic/path representation`);
+    assert.ok(document.getElementById(id).value.length <= maxLength,
+      `${id} prefilled mapping must fit the real input's editing/paste limit`);
+  }
+  if (!mapping.timestamp_topic && !mapping.timestamp_path)
+    assert.equal(document.getElementById("rtTimestampSource").value, "",
+      "an absent source timestamp must stay absent when the form opens");
+  await document.getElementById("refTempForm").fire("submit");
+  await settle();
+  assert.deepEqual(fetchState.calls.map((call) => call.url), ["/set_ref_temp"]);
+  const body = fetchState.calls[0].body;
+  for (const key of ["topic", "temperature_path", "setpoint_topic", "setpoint_path",
+    "timestamp_topic", "timestamp_path", "enabled_path", "hvac_mode_path"])
+    assert.equal(body[key], original[key], `unchanged Save must preserve ${key} for ${mapping.topic}`);
+  assert.equal(body.fixed_setpoint_c, original.fixed_setpoint_c ?? 0);
+  assert.equal(document.getElementById("refTempModal").hidden, true);
+}
+ui.S.status.reference_temperature = roomSourceBeforeRoundtrips;
+
+// The displayed escape grammar must also work when entered manually, instead of relying only on
+// the formatter's prefilled text. A changed mapping deliberately drops invisible old gates.
+fetchState.calls.length = 0;
+ui.S.busy = false;
+open(roundtripSource);
+document.getElementById("rtTemperatureSource").value = String.raw`fixture/room\$temperature\\sensor$value\$reading`;
+document.getElementById("rtTarget").value = "20";
+document.getElementById("rtTimestampSource").value = "";
+await document.getElementById("refTempForm").fire("submit");
+await settle();
+assert.equal(fetchState.calls[0]?.body?.topic, "fixture/room$temperature\\sensor");
+assert.equal(fetchState.calls[0]?.body?.temperature_path, "value$reading");
+assert.equal(fetchState.calls[0]?.body?.enabled_path, "");
+assert.equal(fetchState.calls[0]?.body?.hvac_mode_path, "");
+
 // Missing and malformed paths are saved as operator intent. The durable subscriber reports their
 // failure only after a real MQTT frame arrives. Delete remains a separate destructive action.
 const roomSource = cases.find((item) => item.modal === "refTempModal");
@@ -839,10 +911,23 @@ fetchState.mode = "ok";
 fetchState.calls.length = 0;
 ui.S.busy = false;
 open(circulationSource);
+// Accepted circulation Save retires the old chart/pin before /status catches up.
+configureValid(circulationSource);
+ui.S.hist.set("circulation_state", { at: Date.now(), v: [10] });
+ui.S.histPin.set("circulation_state", { i: 0, gen: 1 });
+await document.getElementById("circulationForm").fire("submit");
+await settle();
+assert.equal(ui.S.hist.has("circulation_state"), false);
+assert.equal(ui.S.histPin.has("circulation_state"), false);
+fetchState.calls.length = 0;
+ui.S.busy = false;
+open(circulationSource);
 assert.equal(document.getElementById("circDeleteBtn").disabled, false);
 document.getElementById("circTopic").value = "unsaved/draft";
+ui.S.hist.set("circulation_state", { at: Date.now(), v: [10] });
 await document.getElementById("circDeleteBtn").fire("click");
 await settle();
+assert.equal(ui.S.hist.has("circulation_state"), false, "accepted pump-source Delete must retire old history immediately");
 assert.deepEqual(fetchState.calls.map((call) => call.url), ["/set_circulation"],
   "circulation Delete must not run the live-test endpoint");
 assert.deepEqual(fetchState.calls[0]?.body, {
@@ -1044,5 +1129,24 @@ assert.equal(document.getElementById("bugStep2").hidden, false, "valid report mu
 assert.equal(typeof document.getElementById("bugCopy").onclick, "function", "prepared report must wire Copy");
 await document.getElementById("bugClose").onclick();
 assert.equal(document.getElementById("bugModal").hidden, true, "bug review Close must dismiss");
+
+// A confirmed reboot retires history before the first status probe. An unchanged save keeps it.
+const ntpCase = cases.find(item => item.modal === "ntpModal");
+for (const mode of ["ok", "reboot"]) {
+  ui.S.busy = false;
+  fetchState.mode = mode;
+  ui.S.hist.set("fixture", { v: [1] });
+  ui.S.histPin.set("fixture", { i: 0, gen: 1 });
+  const epoch = ui.S.histEpoch;
+  open(ntpCase);
+  document.getElementById("ntpServer").value = "fixture.ntp.invalid";
+  await document.getElementById("ntpForm").fire("submit");
+  await settle();
+  assert.equal(ui.S.hist.has("fixture"), mode !== "reboot");
+  assert.equal(ui.S.histPin.has("fixture"), mode !== "reboot");
+  assert.equal(ui.S.histEpoch, epoch + (mode === "reboot" ? 1 : 0));
+}
+ui.S.busy = false;
+fetchState.mode = "ok";
 
 console.log(`UI use cases: ${cases.length} routed modals + ${ui.TRANSIENT_MODALS.length} transient decision, navigation, Cancel/backdrop/Escape, accepted/rejected/invalid Save paths`);

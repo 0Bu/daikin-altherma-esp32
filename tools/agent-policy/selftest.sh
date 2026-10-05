@@ -125,7 +125,26 @@ if '"$MECHANICAL_RESULT" = success' not in untrusted_build:
     raise SystemExit("required build job does not fail when mechanical gates fail")
 if "allow-unsafe-pr-checkout" in untrusted_build:
     raise SystemExit("ordinary pull_request build must not use unsafe target opt-ins")
-for untrusted_job in (mechanical_job, untrusted_build):
+# The shared mechanical job has one token-bearing step, executable only on authoritative main.
+# Bind its entire header before permitting that single step-local read token. PR code receives none.
+resolver_header = (
+    "      - name: Resolve completed dev publication\n"
+    "        id: dev_publication\n"
+    "        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && github.repository == '0Bu/daikin-altherma-esp32'\n"
+    "        env:\n"
+    "          GH_TOKEN: ${{ github.token }}\n"
+    "        run: |\n"
+)
+resolvers = re.findall(r"^      - name: Resolve completed dev publication\n.*?(?=^      - name: |\Z)",
+                      mechanical_job, re.MULTILINE | re.DOTALL)
+if len(resolvers) != 1 or not resolvers[0].startswith(resolver_header):
+    raise SystemExit("publication resolver must have one exact authoritative-main token boundary")
+if any(line and not line.startswith("          ")
+       for line in resolvers[0][len(resolver_header):].splitlines()):
+    raise SystemExit("publication resolver gained an unreviewed step-level field")
+mechanical_without_main_token = mechanical_job.replace(
+    resolvers[0], resolvers[0].replace("          GH_TOKEN: ${{ github.token }}\n", "", 1), 1)
+for untrusted_job in (mechanical_without_main_token, untrusted_build):
     if "secrets." in untrusted_job or "github.token" in untrusted_job:
         raise SystemExit("untrusted PR-code job gained a secret or token expression")
 if "\n  gates:\n" not in policy or "working-directory: .trusted-policy" not in policy:
@@ -149,6 +168,11 @@ print("Renovate automerge activation contract is narrow")
 PY
 )" || fail "Renovate automerge activation contract failed: $output"
 echo "  PASS  Renovate automerge activation is runner-pin-scoped"
+pass=$((pass + 1))
+
+output="$(python3 "$ROOT/tools/agent-policy/test_build_token_boundary.py" 2>&1)" \
+  || fail "main-only publication token canaries failed: $output"
+echo "  PASS  publication read token remains exclusive to authoritative main"
 pass=$((pass + 1))
 
 echo "== canonical records =="

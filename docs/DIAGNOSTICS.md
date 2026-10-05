@@ -1,6 +1,6 @@
 # Plant diagnostics in plain language
 
-<!-- user-docs-contract: ad86fdf65223ced2d2aef83016ab273d8e4d4ce56026fc2c1e6feff1c46606dd -->
+<!-- user-docs-contract: 8b982ef62c9c3cd278b972a26d701c8507185ad08869d67246b1e0c700fea25a -->
 
 This guide is for owners who want to understand their heat pump without being heating specialists.
 Plant diagnostics are **off by default**. They run only after **Plant diagnostics** is explicitly
@@ -46,6 +46,16 @@ The saved five-minute trends remain separate. Each interval retains only its fin
 aggregated event state. Those trends cannot reliably reconstruct second-by-second compressor starts,
 the operating mode of a complete run, or an uninterrupted domestic-hot-water hour, so the firmware
 does not reuse them as diagnosis evidence.
+
+Changing or removing a source clears the browser's cached trends and pinned points; old replies
+cannot restore them. A reboot also starts a new browser lifetime, even when the device restores
+compatible saved trends. The state ages beside individual values are separate from the 24-hour
+card: normal polling cadence counts as observed, while known update, forecast or memory-pressure
+pauses and a continuing run's resumed tail count as blind time. The version-2 age format rejects
+older records, so those ages can restart after an update without proving that the plant changed state.
+
+The weather companion describes the two-hour window selected at the last successful fetch. That
+window stays fixed until another successful fetch; it is not continuously shifted forward.
 
 The 24-hour card is a passive watch of ordinary operation. It does not command a service mode,
 create a settled full-load operating point, or perform a controlled refrigerant test. A quiet card

@@ -51,7 +51,7 @@ void     ota_health_gate_arm(); // main.cpp: arm rollback health gate
 
 // Is an OTA network operation in flight RIGHT NOW — manifest TLS check or image download? Read
 // every second by the MQTT publish task so it can stand aside instead of losing the allocation race
-// and throwing std::bad_alloc (#380, logic/ota_quiesce.hpp).
+// and throwing std::bad_alloc (legacy-380, logic/ota_quiesce.hpp).
 //
 // Deliberately NOT `ota_status().state == "updating"`: even its fixed-capacity snapshot takes the
 // OTA and Config mutexes. Asked once per second by the task standing aside, this question must be a

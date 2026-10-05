@@ -28,9 +28,12 @@ So for these two, **"CI is green" is not a merge argument**. The evidence has to
 
 ## 0. Step 0 — pin the baseline
 
-Ensure the local repository is synchronized before auditing. Run `git fetch origin` and verify
-`HEAD` matches `origin/main` (or the target PR head commit). Fail-fast on divergence or untracked
-local drift — never audit an unpinned or stale baseline. State reviewed SHA in report.
+Record `git rev-parse HEAD`, the intended comparison base, and `git status --short` before
+auditing. For a PR, verify that the checkout matches the exact target PR head; refresh remote
+refs with `git fetch origin` when needed and available. For an authorized local implementation,
+include the intended tracked diff and untracked new files in the review and identify them in
+the report; no commit, PR or equality with `origin/main` is required. Preserve unrelated user
+changes. Stamp a merge pass only after the reviewed content matches the exact committed PR head.
 
 ## 1. Which kind of PR is this?
 
@@ -51,7 +54,7 @@ scripts/gh-with-git-credentials.sh --repo github.com/0Bu/daikin-altherma-esp32 p
 The authority is `.github/renovate.json`, not this table: the combined
 `matchManagers: ["github-actions"]` + `matchDepNames: ["renovatebot/github-action"]` rule is the
 sole positive automerge rule, while the negative `matchDepNames` rule keeps the tracked firmware
-dependencies manual. This intentionally includes semantic runner version upgrades such as #45, not only Renovate's
+dependencies manual. This intentionally includes semantic runner version upgrades such as PR 45, not only Renovate's
 `digest` update type; safety comes from the exact pin-line patch classifier. Read the file if either
 set changes.
 

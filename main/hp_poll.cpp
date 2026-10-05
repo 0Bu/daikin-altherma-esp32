@@ -25,6 +25,7 @@
 #include "logic/history.hpp"   // history_parse_tenths — the SAME parse history.cpp applies to the witness
 #include "logic/history_persist.hpp"  // source identity fingerprint for durable X10A history
 #include "logic/mqtt_group.hpp" // allocation-free grouped JSON probe/copy over the committed cache
+#include "logic/mqtt_publish_gate.hpp" // one age boundary for MQTT and HTTP X10A observations
 #include "logic/ou_stale.hpp"
 #include "logic/ota_quiesce.hpp"
 #include "logic/raw_capture.hpp"
@@ -103,10 +104,11 @@ static std::atomic<uint32_t>  s_probe_ticket{0};         // last ticket handed o
 static std::atomic<uint32_t>  s_probe_reply_ticket{0};   // whose answer s_probe_reply holds
 static HpProbeReply           s_probe_reply;
 
-// Poll cycles the OOM guard below dropped (#380, hp_poll.hpp → hp_skipped_cycles). Written from the
-// catch handler and read from the MQTT publish task, so it is atomic; relaxed is enough because
-// nothing is ordered against it and a reader one cycle behind is reading a counter that moves once
-// a second at worst. Not in s_stats: that mutex must not be taken on the path out of an OOM.
+// Poll cycles the OOM guard below dropped (legacy-380, hp_poll.hpp → hp_skipped_cycles). Written
+// from the catch handler and read from the MQTT publish task, so it is atomic; relaxed is enough
+// because nothing is ordered against it and a reader one cycle behind is reading a counter that
+// moves once a second at worst. Not in s_stats: that mutex must not be taken on the path out of an
+// OOM.
 static std::atomic<uint32_t> s_cycles_skipped{0};
 static std::atomic<uint32_t> s_target_generation{1};
 static std::atomic<uint32_t> s_cache_generation{1};
@@ -115,15 +117,15 @@ static std::atomic<bool>     s_network_quiesced{false};
 
 // Consecutive bus-answering sweeps that matched no profile. Poll-task-owned, RAM only, like the
 // backoff above. Falling back to `generic` costs ~46 rows including every derived figure, so it
-// waits for corroboration rather than acting on one sweep (detect_commit_no_match, #214).
+// waits for corroboration rather than acting on one sweep (detect_commit_no_match, legacy-214).
 static int                   s_no_match = 0;
 static int                   s_incomplete_detect = 0;
 static std::string           s_incomplete_profile;
 
 // Raw page-dump budget for the RUNNING compressor (logic/raw_capture.hpp) — poll-task-owned, RAM
 // only, never refilled within a boot. The detect-pass dump in hp_detect.cpp captures the same pages
-// at REST; this one supplied #194's decisive running-state evidence and remains available for the
-// next converter/layout mismatch.
+// at REST; this one supplied legacy-194's decisive running-state evidence and remains available for
+// the next converter/layout mismatch.
 static logic::RawCaptureState s_raw_capture;
 
 // The CROSS-PAGE saturation witness, carried from the PREVIOUS cycle (logic/availability.hpp).
@@ -395,10 +397,10 @@ static void poll_once() {
         // Capture the CROSS-PAGE saturation witness as its page goes by, for the NEXT cycle's
         // page-0x20 rows (logic/availability.hpp). Decoded through the ordinary converter with this
         // profile's own refrigerant curve, so the witness is the same number the row publishes —
-        // never a second, looser decode of the same bytes. conv 405 refuses bar <= 0, so a unit
-        // whose pressure sensor does not report leaves r.ok false and the witness stays absent.
-        // GATED on the profile declaring the row: on a model that does not, these bytes are whatever
-        // that model puts there, and a witness read off them would be invented.
+        // never a second, looser decode of the same bytes. conv 405 refuses kgf/cm²G <= 0, so a
+        // unit whose pressure sensor does not report leaves r.ok false and the witness stays
+        // absent. GATED on the profile declaring the row: on a model that does not, these bytes are
+        // whatever that model puts there, and a witness read off them would be invented.
         if (reg == SAT_WITNESS_REG && has_sat_witness_row &&
             SAT_WITNESS_OFFSET + 2 <= paylen) {
             const ValueDef w{SAT_WITNESS_REG, SAT_WITNESS_OFFSET, SAT_WITNESS_CONV, 2, 1, "sat"};
@@ -416,7 +418,7 @@ static void poll_once() {
             const ValueDef def = logic::adjudicated(view[k]);
             CachedValue cv;
             cv.label = def.label;
-            cv.unit  = unit_for_datatype(def.type);
+            cv.unit  = unit_for_row(def);
             cv.reg   = def.reg;
             cv.off   = def.offset;
             cv.conv  = def.conv;
@@ -432,13 +434,14 @@ static void poll_once() {
 
     // Publish this cycle's capture for the next one. Unconditional, so a witness page that went
     // silent expires within one cycle instead of authorizing a withholding forever.
-    // ── SOURCE freshness: which of these readings is the outdoor unit still measuring? ────────────
-    // The outdoor unit refreshes its OWN pages (0x20 sensors, 0x21 inverter) only while it RUNS;
-    // stopped, it answers with the last run's numbers (logic/ou_stale.hpp, measured). The web UI has
-    // applied that rule since v1.0.13 — the FIRMWARE had not, so the MQTT state topic kept
-    // republishing the last run's outdoor air in a freshly-timestamped payload, and #209 measured the
-    // consequence against a HomeHub reference: exact agreement at every point while the compressor
-    // ran, a mean 1.19 K (max 2.0 K) error over the 195 points while it rested.
+    // ── SOURCE freshness: which of these readings is the outdoor unit still measuring?
+    // ──────────── The outdoor unit refreshes its OWN pages (0x20 sensors, 0x21 inverter) only
+    // while it RUNS; stopped, it answers with the last run's numbers (logic/ou_stale.hpp,
+    // measured). The web UI has applied that rule since v1.0.13 — the FIRMWARE had not, so the MQTT
+    // state topic kept republishing the last run's outdoor air in a freshly-timestamped payload,
+    // and legacy-209 measured the consequence against a HomeHub reference: exact agreement at every
+    // point while the compressor ran, a mean 1.19 K (max 2.0 K) error over the 195 points while it
+    // rested.
     //
     // The value is MARKED, not dropped. history.cpp needs the number to distinguish HELD_OVER from
     // NO_READING (a gap in the chart for the right reason), and the browser already renders "—" on
@@ -464,10 +467,11 @@ static void poll_once() {
     refrigerant_service_sample(fresh.data(), fresh.size(), rps_known, rps_running,
                                service_coverage, s_refrigerant_service_cycle_sample);
 
-    // ── RAW page bytes WHILE THE COMPRESSOR RUNS (#194 evidence, added by #209) ───────────────────
-    // This supplied the wire evidence that separated #194's wrong converter scale from a wrong
-    // offset; hp_detect.cpp alone had covered only rest-state frames. Keep the bounded running-state
-    // sampler for future converter/layout mismatches without flooding the 6 KB diag ring.
+    // ── RAW page bytes WHILE THE COMPRESSOR RUNS (legacy-194 evidence, added by legacy-209)
+    // ─────────────────── This supplied the wire evidence that separated legacy-194's wrong
+    // converter scale from a wrong offset; hp_detect.cpp alone had covered only rest-state frames.
+    // Keep the bounded running-state sampler for future converter/layout mismatches without
+    // flooding the 6 KB diag ring.
     if (hp_poll_generation_matches(cycle_generation) &&
         logic::raw_capture_due(s_raw_capture, rps_running, esp_timer_get_time())) {
         const struct { uint8_t reg; const uint8_t* buf; int len; } run_raw[] = {
@@ -501,7 +505,8 @@ static void poll_once() {
     // `fresh`, which is exactly the evidence the dwell needs to book blind seconds rather than
     // extend a run it did not watch. Reading it anywhere else would see a cache that has already
     // forgotten which rows were missing this cycle.
-    dwell_record(fresh.data(), fresh.size(), cycle_generation);
+    dwell_record(fresh.data(), fresh.size(), cycle_generation,
+                 static_cast<uint32_t>((service_max_gap_us + 999999) / 1000000));
 
     // One commit, one lock site, and deliberately non-allocating: the vector move-assign steals
     // fresh's buffer and last_error is swapped (noexcept) rather than assigned, so the critical
@@ -569,13 +574,13 @@ static bool poll_detect() {                         // false only when an attemp
     // be saving credentials, and a whole-struct save would carry this snapshot's stale wifi/mqtt
     // fields over a /set_wifi that landed during the sweep — silently reverting it after the user
     // already got {"ok":true}. logic/config_model.hpp holds the ownership rule.
-    // Read with the best-fit representative. The ranking is deterministic and — since #230 B —
-    // independent of the order the registry is written in (the last tie-break is the lowest profile
-    // id), so a reordered table cannot move the entity ids and series this unit publishes. Where the
-    // ranking genuinely ties, the survivors are NOT guaranteed to decode alike: that tie is on the
-    // page count and the kW-class span, coarser than the row tables (logic/detect.hpp carries the
-    // measurement), and the exact variant is not knowable from bus data — which is why /status reports
-    // the candidate set and `ambiguous` rather than asserting one model.
+    // Read with the best-fit representative. The ranking is deterministic and — since legacy-230 B
+    // — independent of the order the registry is written in (the last tie-break is the lowest
+    // profile id), so a reordered table cannot move the entity ids and series this unit publishes.
+    // Where the ranking genuinely ties, the survivors are NOT guaranteed to decode alike: that tie
+    // is on the page count and the kW-class span, coarser than the row tables (logic/detect.hpp
+    // carries the measurement), and the exact variant is not knowable from bus data — which is why
+    // /status reports the candidate set and `ambiguous` rather than asserting one model.
     //
     // Nothing matched, but the bus answered: that is either a unit this catalog does not know, or a
     // fingerprint with a page bit missing. The two are indistinguishable in a single sweep and cost
@@ -746,14 +751,16 @@ static void poll_probe_service() {
 }
 
 // The cycle body allocates freely — poll_once builds one CachedValue per resolved profile row
-// every second, hp_detect_run grows more — so the whole body is guarded like mqtt_task's: an OOM in a
-// fragmented moment (concurrent MQTT TLS reconnect, /set_mqtt's probe client) must skip the cycle and
-// keep the last good cache, not throw through this FreeRTOS task into std::terminate() and reboot.
+// every second, hp_detect_run grows more — so the whole body is guarded like mqtt_task's: an OOM in
+// a fragmented moment (concurrent MQTT TLS reconnect, /set_mqtt's probe client) must skip the cycle
+// and keep the last good cache, not throw through this FreeRTOS task into std::terminate() and
+// reboot.
 //
 // This task no longer PUBLISHES to the browser at all. It used to end each cycle in
 // ws_broadcast_values() and every fourth in ws_broadcast_status(), which is how the /status builder
-// came to run here (#241) — the dashboard now polls /status and /values on the httpd task instead
-// (docs/ARCHITECTURE.md "Push vs. poll"). What this task does is read the bus and commit the cache.
+// came to run here (legacy-241) — the dashboard now polls /status and /values on the httpd task
+// instead (docs/ARCHITECTURE.md "Push vs. poll"). What this task does is read the bus and commit
+// the cache.
 static void poll_task(void*) {
     s_poll_task_running.store(true, std::memory_order_release);
     esp_task_wdt_add(NULL);                                    // this task owns the link — watch it
@@ -762,7 +769,7 @@ static void poll_task(void*) {
     bool network_quiesce_cap_logged = false;
     for (;;) {
         esp_task_wdt_reset();                                  // top of cycle; poll_once also resets per register
-        // This task's own stack headroom — the budget that killed it in #241 and that nothing
+        // This task's own stack headroom — the budget that killed it in legacy-241 and that nothing
         // reported while the board was alive. The mark is RETROSPECTIVE (FreeRTOS keeps the lowest
         // free stack ever), so the top of the loop records the deepest frame of the PREVIOUS cycle
         // and no branch below can skip it. Outside the try: it allocates nothing and must still be
@@ -781,7 +788,10 @@ static void poll_task(void*) {
         const bool network_active = ota_active || weather_active;
         if (ota_quiesce_step(network_quiesce, network_active)) {
             s_network_quiesced.store(true, std::memory_order_release);
-            refrigerant_service_record_poll_gap(hp_poll_generation());
+            const uint32_t generation = hp_poll_generation();
+            checkup_record(nullptr, 0, false, false, logic::CheckupCoverage{}, generation);
+            dwell_record(nullptr, 0, generation);
+            refrigerant_service_record_poll_gap(generation);
             esp_task_wdt_reset();  // explicit on the held path; keep this true if code moves above it
             if (!network_quiesce_logged) {
                 diag_printf("poll: holding off X10A sweeps during %s\n",
@@ -867,16 +877,22 @@ static void poll_task(void*) {
             if (config_profile() != "auto") poll_once(); // then poll it (same cycle if resolved)
         } catch (const std::exception& e) {
             // COUNT FIRST, then log. diag_printf allocates, so on the heap that caused this it can
-            // throw again — and a second throw inside the handler is std::terminate, i.e. the reboot
-            // this guard exists to avoid. An atomic increment cannot fail, so the counter records the
-            // cycle even when the log line describing it never makes it into the ring (#380: the ring
-            // was the ONLY evidence, and a chatty boot overwrites it).
+            // throw again — and a second throw inside the handler is std::terminate, i.e. the
+            // reboot this guard exists to avoid. An atomic increment cannot fail, so the counter
+            // records the cycle even when the log line describing it never makes it into the ring
+            // (legacy-380: the ring was the ONLY evidence, and a chatty boot overwrites it).
             s_cycles_skipped.fetch_add(1, std::memory_order_relaxed);
-            refrigerant_service_record_poll_gap(hp_poll_generation());
+            const uint32_t generation = hp_poll_generation();
+            checkup_record(nullptr, 0, false, false, logic::CheckupCoverage{}, generation);
+            dwell_record(nullptr, 0, generation);
+            refrigerant_service_record_poll_gap(generation);
             diag_printf("poll: cycle skipped (%s)\n", e.what());
         } catch (...) {
             s_cycles_skipped.fetch_add(1, std::memory_order_relaxed);
-            refrigerant_service_record_poll_gap(hp_poll_generation());
+            const uint32_t generation = hp_poll_generation();
+            checkup_record(nullptr, 0, false, false, logic::CheckupCoverage{}, generation);
+            dwell_record(nullptr, 0, generation);
+            refrigerant_service_record_poll_gap(generation);
             diag_printf("poll: cycle skipped (oom?)\n");
         }
         // Serve at most one free probe after the sweep. Its Config access is POD-only and normally
@@ -911,21 +927,22 @@ void hp_poll_start() {
     if (!s_probe_gate || !s_probe_done)
         diag_printf("hp_poll: probe semaphore init failed — POST /hp/query unavailable this boot\n");
     // The poll engine is the core of the device; if its task can't be created there is no heat-pump
-    // polling at all. Report it loudly — the web UI + OTA still come up, so the board stays fixable.
+    // polling at all. Report it loudly — the web UI + OTA still come up, so the board stays
+    // fixable.
     //
     // 8192, and it STAYS 8192 because the HomeHub link is a separate task with its own stack.
     //
     // That is worth stating, because a previous revision of the Modbus work had this at 12288: it
     // polled both links from THIS task, which added getaddrinfo()/mdns_query_*()/socket calls to a
     // stack sized without them. syslog.cpp has measured that same chain at 6144 ("4096 is too thin
-    // for that call chain"), so the raise was correct — but it charged 4 KB of heap to EVERY device,
-    // including the majority with no HomeHub at all. Splitting the two sources into independent
-    // stacks moved that call chain to hp_modbus.cpp's own task, which exists only when a HomeHub is
-    // configured. The devices that do not have one pay nothing.
+    // for that call chain"), so the raise was correct — but it charged 4 KB of heap to EVERY
+    // device, including the majority with no HomeHub at all. Splitting the two sources into
+    // independent stacks moved that call chain to hp_modbus.cpp's own task, which exists only when
+    // a HomeHub is configured. The devices that do not have one pay nothing.
     //
-    // What remains on this task is what it ran on for months: poll_once + hp_detect_run. #241's
-    // overflow was http_append_status_json() reached from the WebSocket broadcaster that used to
-    // live here, and that is gone (docs/ARCHITECTURE.md "Push vs. poll"):
+    // What remains on this task is what it ran on for months: poll_once + hp_detect_run.
+    // legacy-241's overflow was http_append_status_json() reached from the WebSocket broadcaster
+    // that used to live here, and that is gone (docs/ARCHITECTURE.md "Push vs. poll"):
     //
     //     TCB             NAME PRIO C/B  STACK USED/FREE
     //     0x3fcc84cc   hp_poll      5/5      7664/520          <- died on the stack watchpoint
@@ -943,9 +960,10 @@ void hp_poll_start() {
         diag_printf("hp_poll: poll task alloc failed — X10A polling disabled this boot\n");
 }
 
-// The MAXIMUM number of rows THIS cache can hold, so /values and the MQTT bridge size their snapshot
-// buffers correctly. Under-sizing silently TRUNCATES rows out of a snapshot — the #35-#39
-// absent-value shape. The HomeHub is a separate stack with its own mb_values_capacity().
+// The MAXIMUM number of rows THIS cache can hold, so /values and the MQTT bridge size their
+// snapshot buffers correctly. Under-sizing silently TRUNCATES rows out of a snapshot — the
+// legacy-35–legacy-39 absent-value shape. The HomeHub is a separate stack with its own
+// mb_values_capacity().
 size_t hp_values_capacity(uint32_t* revision_out) {
     if (!s_mtx) {
         if (revision_out) *revision_out = 0;
@@ -954,10 +972,21 @@ size_t hp_values_capacity(uint32_t* revision_out) {
     Lock lk(s_mtx);
     if (revision_out) *revision_out = s_cache_revision;
     const size_t n = s_cache.size();
-    const char*  prof =
-        (s_cache_profile && *s_cache_profile) ? s_cache_profile : config_profile().c_str();
+    // Named, not a temporary: `config_profile().c_str()` inside the conditional would dangle once
+    // the full-expression ends, and the empty-cache case (boot, after a profile reset) takes it.
+    const bool        cached     = s_cache_profile && *s_cache_profile;
+    const std::string configured = cached ? std::string{} : config_profile();
+    const char*       prof       = cached ? s_cache_profile : configured.c_str();
     const size_t prof_cap = def::lookup_view(prof).count();
     return n > prof_cap ? n : prof_cap;
+}
+
+// Called only while s_mtx is held, so source time and cache identity are one snapshot decision.
+static bool x10a_cache_recent_locked() {
+    const int64_t now = esp_timer_get_time();
+    if (s_last_ok_us < 0 || now < s_last_ok_us) return false;
+    const int64_t age_s = (now - s_last_ok_us) / 1000000;
+    return age_s <= INT32_MAX && x10a_source_is_recent(static_cast<int32_t>(age_s));
 }
 
 size_t hp_values_snapshot(CachedValue* out, size_t max, size_t* total_out, uint32_t* revision_out) {
@@ -967,8 +996,12 @@ size_t hp_values_snapshot(CachedValue* out, size_t max, size_t* total_out, uint3
         return 0;
     }
     Lock lk(s_mtx);
-    if (total_out) *total_out = s_cache.size();
     if (revision_out) *revision_out = s_cache_revision;
+    if (!x10a_cache_recent_locked()) {
+        if (total_out) *total_out = 0;
+        return 0;
+    }
+    if (total_out) *total_out = s_cache.size();
     size_t n = s_cache.size() < max ? s_cache.size() : max;
     for (size_t i = 0; i < n; i++) out[i] = s_cache[i];
     return n;
@@ -978,6 +1011,7 @@ bool hp_values_snapshot_aligned(CachedValue* out, size_t count, const char* expe
                                 uint64_t expected_identity_fp) {
     if (!s_mtx) return false;
     Lock lk(s_mtx);
+    if (!x10a_cache_recent_locked()) return false;
     if (!logic::x10a_snapshot_source_matches(s_cache_profile, s_cache_identity_fp,
                                              expected_profile, expected_identity_fp))
         return false;
@@ -990,6 +1024,7 @@ HpX10aJsonProbe hp_values_x10a_json_probe(const char* expected_profile,
     HpX10aJsonProbe result;
     if (!s_mtx) return result;
     Lock lk(s_mtx);
+    if (!x10a_cache_recent_locked()) return result;
     if (!logic::x10a_snapshot_source_matches(s_cache_profile, s_cache_identity_fp,
                                              expected_profile, expected_identity_fp)) return result;
     const X10aCacheJsonProbe probe = probe_x10a_cache_json(s_cache);
@@ -1010,6 +1045,7 @@ HpX10aJsonCopyResult hp_values_x10a_json_copy(std::string& out, size_t expected_
     if (out.capacity() < expected_bytes) return HpX10aJsonCopyResult::BufferTooSmall;
     if (!s_mtx) return HpX10aJsonCopyResult::SourceMismatch;
     Lock lk(s_mtx);
+    if (!x10a_cache_recent_locked()) return HpX10aJsonCopyResult::SourceMismatch;
     if (!logic::x10a_snapshot_source_matches(s_cache_profile, s_cache_identity_fp,
                                              expected_profile, expected_identity_fp))
         return HpX10aJsonCopyResult::SourceMismatch;
@@ -1030,6 +1066,9 @@ HpStats hp_stats() {
     st = s_stats;
     st.last_ok_s = s_last_ok_us < 0 ? -1
                  : static_cast<int32_t>((esp_timer_get_time() - s_last_ok_us) / 1000000);
+    const bool recent = x10a_source_is_recent(st.last_ok_s);
+    st.connected      = st.connected && recent;
+    if (!recent) st.values = 0;
     return st;
 }
 
@@ -1042,7 +1081,7 @@ logic::RefrigerantServiceSnapshot refrigerant_service_status() {
 bool hp_link_connected() {
     if (!s_mtx) return false;
     Lock lk(s_mtx);
-    return s_stats.connected;
+    return s_stats.connected && x10a_cache_recent_locked();
 }
 
 uint32_t hp_skipped_cycles() { return s_cycles_skipped.load(std::memory_order_relaxed); }

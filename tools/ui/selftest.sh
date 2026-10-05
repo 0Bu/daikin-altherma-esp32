@@ -6,12 +6,10 @@ tmp="$(mktemp -d)"
 hook_tmp=""
 trap 'rm -rf "$tmp"; [ -z "${hook_tmp:-}" ] || rm -rf "$hook_tmp"' EXIT
 
-# Assert the canonical skill and Codex wiring are present and route through the neutral gate core.
+# Assert the canonical skill and agent wiring are present and route through the neutral gate core.
 for required in \
   ".agents/skills/ui-use-case-review/SKILL.md" \
-  ".agents/skills/ui-use-case-review/agents/openai.yaml" \
-  ".codex/config.toml" \
-  ".codex/hooks.json" \
+  ".agents/hooks.json" \
   "tools/agent-hooks/require-pr-gates.sh"; do
   [ -f "$proj/$required" ] || { echo "ui selftest: missing agent UI-review surface $required" >&2; exit 1; }
 done
@@ -21,19 +19,19 @@ if grep -q '^model:' "$proj/.agents/skills/ui-use-case-review/SKILL.md"; then
   echo "ui selftest: canonical UI skill contains runner-specific model routing" >&2
   exit 1
 fi
-node - "$proj/.codex/hooks.json" <<'NODE'
+node - "$proj/.agents/hooks.json" <<'NODE'
 const fs = require("node:fs");
 const file = process.argv[2];
 let hooks;
 try { hooks = JSON.parse(fs.readFileSync(file, "utf8")); }
 catch (error) { console.error(`ui selftest: ${file} is not valid JSON: ${error.message}`); process.exit(1); }
 const wiring = JSON.stringify(hooks);
-if (!wiring.includes("tools/agent-hooks/require-pr-gates.sh")) {
-  console.error("ui selftest: Codex merge hooks do not route through the runner-neutral PR gate");
+if (!wiring.includes("tools/agent-hooks/agent_hook.py") || !wiring.includes("pr-gates")) {
+  console.error("ui selftest: merge hooks do not route through the runner-neutral PR gate");
   process.exit(1);
 }
 NODE
-echo "ui selftest: canonical .agents/.codex UI-review wiring exists"
+echo "ui selftest: canonical .agents UI-review wiring exists"
 
 mkdir -p "$tmp/main" "$tmp/test" "$tmp/tools"
 cp -R "$proj/main/www" "$tmp/main/www"
@@ -86,7 +84,7 @@ git -C "$hook_tmp" remote add origin https://github.com/0Bu/daikin-altherma-esp3
 # The hook failing closed is only half of it: the PR TEMPLATE has to teach a stamp the hook can
 # actually read. It shipped the sha wrapped in backticks, which the `@[[:space:]]*[0-9a-f]{7,40}`
 # matcher sees as no stamp at all, so a body filled in literally from the template was refused —
-# three times (PR #99, #343, #381) before anyone fixed the template rather than remembering. Fill
+# three times (PR legacy-99, legacy-343, legacy-381) before anyone fixed the template rather than remembering. Fill
 # the real template's own line with a real sha and require the gate to accept it.
 # THIS hook's own line, selected by name — not merely the first "merge gate @" in the file. The
 # template teaches one stamp per gate and their order is nobody's contract: when a later change made
@@ -210,7 +208,7 @@ set -e
 [ "$stale_rc" -eq 2 ] \
   || { echo "ui selftest: neutral local merge gate accepted stale canonical UI proof" >&2; exit 1; }
 
-# The end-to-end check above covers exactly ONE line, and the template teaches a stamp per merge
+# The end-to-end check above covers exactly ONE line, and the template teaches a stamp per push/merge
 # gate. Name the complete expected set explicitly: selecting only lines which already contain
 # "merge gate @" makes a regressed prose-only line disappear from both the input and the count.
 # Put every expected key through the SHARED matcher, and reject missing or surprise gate entries.
@@ -220,7 +218,7 @@ set -e
 # a gate means adding it here in the
 # same commit, which is the point: a gate whose template line nobody checks is a gate whose stamp
 # nobody can be sure is readable.
-expected_gate_keys=(project-review pr-hygiene-review heap-safety-review feature-docs domain-review schematic-review ui-use-case-review absence-review diagnostic-evidence-review user-docs-review ui-gif)
+expected_gate_keys=(skill-audit project-review pr-hygiene-review heap-safety-review feature-docs domain-review schematic-review ui-use-case-review absence-review diagnostic-evidence-review user-docs-review ui-gif)
 tpl_content="$(cat "$proj/.github/pull_request_template.md")"
 tpl_lines="$(printf '%s\n' "$tpl_content" | agent_gate_task_lines | grep -iE 'gate')"
 tpl_n=0
@@ -229,9 +227,11 @@ for key in "${expected_gate_keys[@]}"; do
     [ -n "$line" ] || { echo "ui selftest: the PR template is missing the $key gate line" >&2; exit 1; }
     [ "$(printf '%s\n' "$line" | wc -l | tr -d ' ')" -eq 1 ] || {
         echo "ui selftest: the PR template has duplicate $key gate lines" >&2; exit 1; }
+    stamp_kind="merge gate @"
+    [ "$key" != skill-audit ] || stamp_kind="push gate @"
     case "$line" in
-      *"merge gate @"*) ;;
-      *) echo "ui selftest: the $key template line teaches no 'merge gate @' stamp" >&2; exit 1 ;;
+      *"$stamp_kind"*) ;;
+      *) echo "ui selftest: the $key template line teaches no '$stamp_kind' stamp" >&2; exit 1 ;;
     esac
     filled="$(printf '%s' "$line" | sed 's/\[ \]/[x]/; s/<short-sha>/abcdef123456/')"
     filled_file="$hook_tmp/template-$key.md"

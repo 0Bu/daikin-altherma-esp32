@@ -32,6 +32,7 @@ if ! (cd "$tmp" && scripts/check-presenter-parity.sh >/dev/null 2>&1); then
   exit 1
 fi
 echo "presenter selftest: green on the unmodified tree"
+GOLDEN="$tmp/build_mock/presenter_golden.tsv"
 
 # Mutate the browser copy, require the gate to notice, restore.
 #   $1 = what was broken   $2 = sed expression against schematic.js
@@ -46,7 +47,7 @@ expect_red() {
     exit 1
   fi
   mv "$SCHEM.mutated" "$SCHEM"
-  if (cd "$tmp" && scripts/check-presenter-parity.sh >/dev/null 2>&1); then
+  if (cd "$tmp" && scripts/check-presenter-parity.sh --golden "$GOLDEN" >/dev/null 2>&1); then
     echo "presenter selftest: '$what' escaped the parity gate" >&2
     exit 1
   fi
@@ -99,7 +100,7 @@ expect_red "an unknown tank-heater state is treated as off" \
 # The same mistake on the backup heater, which reaches the answer by the other route: an unknown BUH
 # then reads as quiet and the pre-BUH numerator stands in for a post-BUH row that does not exist.
 expect_red "an unknown backup-heater state is treated as off" \
-  's/const heaterQuiet = (buh1 != null || buh2 != null) \&\& !(buh1 === true || buh2 === true);/const heaterQuiet = !(buh1 === true || buh2 === true);/'
+  's/const heaterQuiet = buh1 != null \&\& buh2 != null \&\& !(buh1 === true || buh2 === true);/const heaterQuiet = !(buh1 === true || buh2 === true);/'
 
 # The second BUH step dropped from the collapse: a unit firing step 2 alone reads as quiet.
 expect_red "the second backup-heater step drops out of the collapse" \
@@ -122,7 +123,7 @@ cp "$PRISTINE" "$SCHEM"
 sed 's/^const copPlan = /const copPlanRenamed = /' "$SCHEM" > "$SCHEM.mutated"
 mv "$SCHEM.mutated" "$SCHEM"
 set +e
-(cd "$tmp" && scripts/check-presenter-parity.sh >/dev/null 2>&1)
+(cd "$tmp" && scripts/check-presenter-parity.sh --golden "$GOLDEN" >/dev/null 2>&1)
 rc=$?
 set -e
 if [ "$rc" -ne 2 ]; then

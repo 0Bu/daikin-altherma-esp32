@@ -71,14 +71,19 @@ Before updating the audit fingerprint:
 1. **Four-question structure check:** Confirm that each visible diagnosis section answers the four questions in sequence: (1) what was counted/observed, (2) what it means, (3) what cannot be established, and (4) safe owner next steps.
 2. **Owner perspective & jargon audit:** Verify that acronyms are introduced before abbreviations, language is accessible to a homeowner (not just an HVAC technician), and no single check implies whole-plant wellness.
 3. **English-only documentation check:** Confirm that all text in `docs/` and review files is strictly English, leaving German localized strings exclusively in `main/www/`.
-4. **Self-optimize:** Prune passive voice, eliminate vague advice like "call service" without context, and make instructions direct and actionable.
+4. **Actionable wording review:** Report vague advice such as "call service" without supporting
+   context. Revise wording only when fixes are explicitly authorized; review-only work leaves prose
+   and audit fingerprints unchanged.
 
 ## Run the gate
 
 0. **Step 0 — pin the baseline.**
-   Ensure the local repository is synchronized before auditing. Run `git fetch origin` and verify
-   `HEAD` matches `origin/main` (or the target PR head commit). Fail-fast on divergence or untracked
-   local drift — never audit an unpinned or stale baseline. State reviewed SHA in report.
+   Record `git rev-parse HEAD`, the intended comparison base, and `git status --short` before
+   auditing. For a PR, verify that the checkout matches the exact target PR head; refresh remote
+   refs with `git fetch origin` when needed and available. For an authorized local implementation,
+   include the intended tracked diff and untracked new files in the review and identify them in
+   the report; no commit, PR or equality with `origin/main` is required. Preserve unrelated user
+   changes. Stamp a merge pass only after the reviewed content matches the exact committed PR head.
 
 Run the normal check first:
 

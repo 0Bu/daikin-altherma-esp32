@@ -18,9 +18,10 @@
 namespace daik {
 
 enum class HealthVerdict {
-    Wait,    // keep observing; not enough evidence either way yet
-    Commit,  // proven healthy -> cancel rollback, seal this image in as valid
-    GiveUp,  // no health within the hard cap -> leave PENDING_VERIFY; a reboot rolls back
+    Wait,   // keep observing; not enough evidence either way yet
+    Commit, // proven healthy -> cancel rollback, seal this image in as valid
+    GiveUp, // no health within the hard cap -> triggers active reboot while PENDING_VERIFY to roll
+            // back
 };
 
 // A connected socket is necessary but no longer sufficient evidence for committing an OTA image.

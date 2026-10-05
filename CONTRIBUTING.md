@@ -9,7 +9,8 @@ By participating you agree to the [Code of Conduct](CODE_OF_CONDUCT.md).
 The project was developed in a private predecessor repository before its public launch. References
 such as `legacy-209` identify work items from that private tracker; the discussions themselves were
 not copied because they can contain installation data. Likewise, `(#N)` suffixes in the immutable,
-signed commit history refer to predecessor pull requests, not to issue numbers in this repository.
+signed commit history prior to the public repository launch refer to predecessor pull requests,
+whereas subsequent PR numbers correspond to pull requests in this repository.
 The current source and documentation are authoritative; open a new public issue when old context is
 needed for a present problem.
 
@@ -38,7 +39,7 @@ not what CI happened to skip.
 
 The interpreter floors are **node ≥ 18** and **python ≥ 3.11** — the latter because
 [`tools/agent-config/check_toml.py`](tools/agent-config/check_toml.py) imports `tomllib`, which
-entered the standard library in 3.11. CI runs `ubuntu-24.04` (python 3.12), so a gate that needs a
+entered the standard library in 3.11. CI runs `ubuntu-26.04` (python 3.14), so a gate that needs a
 newer interpreter than these floors passes there and fails only on a contributor's machine; keep new
 tooling inside them rather than letting one file quietly raise the floor for the whole tree.
 
@@ -99,7 +100,7 @@ desktop widths, across every locale, with
 keyboard, accessibility-tree, reduced-motion, overflow and console-error checks.
 
 `run-format-check.sh` always enforces portable whole-tree invariants. CI additionally installs exact
-clang-format 18.1.3 and checks every new file and changed C/C++ hunk; it does not reformat legacy
+clang-format 18.1.8 and checks every new file and changed C/C++ hunk; it does not reformat legacy
 lines outside the diff. A local run may skip that layer when the pinned executable is unavailable,
 but `CI=true` requires the pinned executable and fails closed on another version. The canonical full
 gate, including maintained C/C++ under `tools/`, is
@@ -360,6 +361,11 @@ looked at every table would have called it clean. It does **not** require an id 
 profile: the catalog genuinely disagrees across models, and the docs should state a majority id and
 name the alternatives beside it. `tools/docs/selftest.sh` re-seeds the defects it was built for.
 
+Ordinary presenter and entity-ID audits always compile the current C++ inputs. Their explicit
+`--golden` and `--binary` options are only for mutations inside a fresh selftest fixture whose
+pristine inputs have passed. Run `scripts/run-host-audit-reuse-tests.sh` after changing this reuse
+contract; it checks changed and removed inputs, preserved timestamps and compiler changes.
+
 `run-agent-instructions-budget.sh` is the canonical runner-neutral agent-integrity contract. It
 keeps the always-loaded [`AGENTS.md`](AGENTS.md) below 24 KiB, validates canonical skill identity and
 OpenAI metadata, focused-reviewer safety, hook dispatch, and the explicit project safety invariants.
@@ -377,6 +383,19 @@ mutation canaries are:
 
 Run `tools/agent-config/selftest.sh` after changing agent instructions, skills, subagent definitions,
 hook mappings, or the checker itself.
+
+`scripts/run-skill-audit.sh` checks canonical skills and reviewers against repository paths,
+partitions, routes and board wiring. Run `tools/skill_audit/selftest.sh` when its implementation or
+audited contracts change. The audit is read-only; `--optimize` changes skill files and requires an
+explicit request to apply fixes. Inspect its diff and rerun the read-only audit after an update.
+
+Enable the versioned native Git push hook once per clone with
+`git config --local core.hooksPath .githooks`. It verifies each destination branch and the commit
+Git is sending. Updates to an open PR need `$skill-audit` and `$pr-hygiene-review` records stamped
+with that commit in the PR body before the push. A successfully queried branch with no open PR may
+be pushed after the local audit; a failed PR query blocks the push. Merge reviews remain separate.
+Push from a clean checkout of the commit being sent so the local audit verifies that exact tree.
+Git hooks are local checks; remote CI and branch protection enforce merge readiness.
 
 The mechanical job runs `tools/agent-policy/selftest.sh` whenever a diff reaches it; the separate `pr-policy.yml` workflow
 provides the required `gates` check and invokes protected-base `scripts/run-agent-policy.sh` with the
@@ -622,6 +641,16 @@ holds for the maintainer too — `main` takes no direct pushes at all. Practical
   build-relevant is the path list in the *Detect build-relevant changes* step of
   [`build.yml`](.github/workflows/build.yml) — add to it if you introduce a file the image or the
   published site is made of.
+
+On `main`, change detection compares against the source of a valid dev feed with a completed
+publication proof. The proof binds the entire feed to the exact successful publisher and public
+readback; a manifest SHA alone is insufficient. Missing, expired (90-day retention), incompatible
+or unavailable evidence triggers a build. A full workflow rerun also builds to recover publication.
+Run `scripts/run-build-change-detection-tests.sh` after changing the comparison or browser filter.
+
+Main pushes and manual releases share one workflow-level queue across version selection, signing
+and publication. Up to 100 pending runs are retained instead of replacing a waiting release.
+Superseded PR work is cancelled separately in the mechanical and compile jobs.
 
 For fork PRs, `build.yml` executes the exact PR merge tree only under the ordinary `pull_request`
 event; GitHub withholds repository secrets and downgrades the token, and checkout does not persist

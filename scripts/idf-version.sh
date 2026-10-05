@@ -25,9 +25,14 @@ ci_yml="$repo_root/.github/workflows/build.yml"
 
 # A `# v6.1`-style trailing comment elsewhere in the file is not matched: the pattern is
 # anchored on the `esp_idf_version:` KEY, and the value must be a vN.N[.N] tag.
-idf_version="$(grep -oE 'esp_idf_version:[[:space:]]*v[0-9]+\.[0-9]+(\.[0-9]+)?' "$ci_yml" \
-  | grep -oE 'v[0-9]+\.[0-9]+(\.[0-9]+)?' | head -n1)"
-[ -n "${idf_version:-}" ] || {
+# Multiple occurrences (e.g. across build jobs) must agree; a divergence must fail loudly.
+versions="$(grep -oE 'esp_idf_version:[[:space:]]*v[0-9]+\.[0-9]+(\.[0-9]+)?' "$ci_yml" \
+  | grep -oE 'v[0-9]+\.[0-9]+(\.[0-9]+)?' | sort -u)"
+[ -n "${versions:-}" ] || {
   echo "idf-version: could not read esp_idf_version from $ci_yml" >&2; exit 1; }
+count="$(printf '%s\n' "$versions" | wc -l | tr -d ' ')"
+[ "$count" -eq 1 ] || {
+  echo "idf-version: conflicting esp_idf_version values in $ci_yml: $versions" >&2; exit 1; }
+idf_version="$versions"
 
 printf '%s\n' "$idf_version"

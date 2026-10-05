@@ -30,7 +30,7 @@ const OU_HELD_PAGES = [0x20, 0x21];
 const rowHeldOver = (r, d) => !!(d && d.ouHeldOver && r && OU_HELD_PAGES.includes(r.reg));
 
 // Leaving-water MEASUREMENT for ΔT / heat output / COP — NOT a plain vNum, because a measurement
-// regex that can also match a setpoint row poisons all three (issue #121, the #35-#39 failure
+// regex that can also match a setpoint row poisons all three (issue legacy-121, the legacy-35–legacy-39 failure
 // shape). Host-tested twin: main/logic/lwt_select.hpp + test/test_logic.cpp test_lwt_select() —
 // keep the token lists below byte-for-byte in sync (lowercase substring, no regex).
 //   Tier 1 = the pre-BUH heat-exchanger outlet (R1T) under any label form — "before BUH (R1T)",
@@ -38,8 +38,8 @@ const rowHeldOver = (r, d) => !!(d && d.ouHeldOver && r && OU_HELD_PAGES.include
 //     keying on the (R1T) tag (not a "heat exch" keyword, which also hits outdoor/refrigerant rows)
 //     lights up the alias-labelled profiles that "leaving water.*before" alone missed.
 //   Tier 2 = any leaving/outlet-water measurement that is NOT a setpoint / mixed-zone / post-BUH.
-const lwtWater = (l) => l.includes("leaving water") || l.includes("outlet water") || l.includes("inflow");
-const lwtReject = (l) => l.includes("setpoint") || l.includes("mixed") || l.includes("r2t") || l.includes("after buh") || l.includes("after buffer");
+const lwtWater = (l) => l.includes("leaving water") || l.includes("outlet water") || l.includes("water heat exchanger outlet") || l.includes("inflow");
+const lwtReject = (l) => l.includes("setpoint") || l.includes("mixed") || l.includes("r2t") || l.includes("after buh") || l.includes("after buffer") || l.includes("raw data") || l.includes("dlwb2") || l.includes("hydro split");
 // The two tiers as NAMED predicates over a raw label, one per C++ twin (lwt_is_pre_buh /
 // lwt_is_measurement). Named rather than inlined into the find() callbacks below because
 // scripts/check-presenter-parity.sh calls them directly with the whole def/ catalog's labels and
@@ -48,7 +48,7 @@ const lwtReject = (l) => l.includes("setpoint") || l.includes("mixed") || l.incl
 const lwtIsPreBuh = (l) => lwtWater(l) && !lwtReject(l) && l.includes("r1t");
 const lwtIsMeasurement = (l) => lwtWater(l) && !lwtReject(l);
 const lwtRow = () => {
-  const vals = (S._values || []).filter((x) => x.value != null);
+  const vals = S._values || [];
   const low = (x) => (x.label || "").toLowerCase();
   let r = vals.find((x) => lwtIsPreBuh(low(x)));
   if (!r) r = vals.find((x) => lwtIsMeasurement(low(x)));
@@ -56,7 +56,30 @@ const lwtRow = () => {
 };
 const vLwt = () => {
   const r = lwtRow();
-  if (!r) return null;
+  if (!r || r.value == null) return null;
+  const n = parseFloat(r.value);
+  return Number.isFinite(n) ? n : null;
+};
+// Return-water MEASUREMENT for ΔT / heat output / COP. Host-tested twin:
+// main/logic/rwt_select.hpp + test/test_logic.cpp test_rwt_select() — keep the token lists
+// byte-for-byte in sync (lowercase substring, no regex).
+//   Tier 1 = the PHE return water inlet (R4T) under any catalog label form ("inlet water temp.(r4t)",
+//     "return water temp before phe (r4t)", "[hpsu] tr return temp (r4t)").
+//   Tier 2 = any return/inlet-water measurement that is NOT raw data (0xA1), outdoor, or brine.
+const rwtWater = (l) => l.includes("inlet water") || l.includes("return water") || l.includes("return temp") || l.includes("water heat exchanger inlet");
+const rwtReject = (l) => l.includes("raw data") || l.includes("o/u") || l.includes("deicer") || l.includes("phase") || l.includes("outdoor") || l.includes("brine");
+const rwtIsR4t = (l) => rwtWater(l) && !rwtReject(l) && l.includes("r4t");
+const rwtIsMeasurement = (l) => rwtWater(l) && !rwtReject(l);
+const rwtRow = () => {
+  const vals = S._values || [];
+  const low = (x) => (x.label || "").toLowerCase();
+  let r = vals.find((x) => rwtIsR4t(low(x)));
+  if (!r) r = vals.find((x) => rwtIsMeasurement(low(x)));
+  return r || null;
+};
+const vRwt = () => {
+  const r = rwtRow();
+  if (!r || r.value == null) return null;
   const n = parseFloat(r.value);
   return Number.isFinite(n) ? n : null;
 };
@@ -75,7 +98,7 @@ const isPostBuhRow = (l, reg) =>
   !OU_HELD_PAGES.includes(reg) && l.includes("r2t") &&
   !l.includes("setpoint") && !l.includes("mixed") && lwtWater(l);
 const postBuhRow = () => {
-  const vals = (S._values || []).filter((x) => x.value != null);
+  const vals = S._values || [];
   return vals.find((x) => isPostBuhRow((x.label || "").toLowerCase(), x.reg)) || null;
 };
 // WHICH COP a quotient would be, and when it is none — the addressable twin of
@@ -93,7 +116,7 @@ const postBuhRow = () => {
 // make the gate a third copy of the very thing it is comparing. Measured: while these two lines sat
 // in liveData(), the selftest's "unknown tank heater treated as off" mutation passed the gate.
 const copPlan = (pelSrc, buh1, buh2, bsh, pbOk) => {
-  const heaterQuiet = (buh1 != null || buh2 != null) && !(buh1 === true || buh2 === true);
+  const heaterQuiet = buh1 != null && buh2 != null && !(buh1 === true || buh2 === true);
   const tankQuiet   = bsh != null && bsh !== true;
   if (pelSrc == null)    return { scope: null,    block: "no_pel",      postBuh: false };
   if (pelSrc === "INV")  return { scope: "hp",    block: null,          postBuh: false };
@@ -191,7 +214,7 @@ function liveData() {
   // the BUH off (the normal case) before/after are equal, and the derived heat output must not
   // credit the resistive heater to the heat pump.
   const lwt = vLwt();   // pre-BUH R1T measurement, never a setpoint (see vLwt / logic/lwt_select.hpp)
-  const ret = vNum(/inlet water/i);
+  const ret = vRwt();   // PHE inlet R4T measurement, never 0xA1 raw data (see vRwt / logic/rwt_select.hpp)
   const ctRows = (S._values || []).filter((x) => /current measured by ct/i.test(x.label || ""));
   // A phase withheld by the firmware is not a zero-current phase. In particular, CT-L3 is null
   // while its byte's overlaid HP-Forced bit is asserted. Summing only the surviving phases would
@@ -298,7 +321,7 @@ function liveData() {
   // then stepped to 25.5 at the instant the compressor started, while the hydronic pages decayed
   // smoothly throughout. Those readings must therefore not be drawn as current — DESIGN.md's
   // dead-bus rule ("an idle plant with no readings, not a stale one"), applied to one sleeping unit.
-  // A held-over 19.0 °C is exactly the #35-#39 shape: well-formed, plausible, and false — and it is
+  // A held-over 19.0 °C is exactly the legacy-35–legacy-39 shape: well-formed, plausible, and false — and it is
   // what made an idle plant look like a running one next to a "not running" headline.
   // UNKNOWN rps (a profile with no such row) reads as CURRENT, never as held over: that is absence
   // of evidence, and blanking on a guess would cost a reading that may well be live.
@@ -317,7 +340,7 @@ function liveData() {
   if (d.ouHeldOver) takeMb("out", "outdoor_air");
   // Circuit refrigerant pressure for the schematic's high-side badge. The outdoor unit's own High
   // Pressure transducer (reg 0x20) reads 0 bar while the compressor is off — but a sealed R32 circuit
-  // is never at 0 bar, so "0.0 bar" paints a live-looking fault on an idle unit. Fall back to the
+  // use exact 0.0 as an absent value, so publishing it paints a live-looking fault. Fall back to the
   // always-live Refrigerant pressure sensor (reg 0x62/15), which reports the real equalised system
   // pressure at rest (~14 bar for R32 near 20 °C). When the compressor runs, High Pressure is the true
   // discharge pressure and wins. Neither present (17 profiles carry no pressure row) → null → "—".
@@ -339,7 +362,7 @@ function liveData() {
   // therefore blanks the working-point claim just like a measured zero does.
   d.dtStale = waterMoving(d) !== true;
   // Derived figures, marked "est." in the UI — the bus has no energy registers. Thermal output from
-  // flow × ΔT (water ≈ 4.186 kJ/kg·K); electrical from the CT phase currents at an assumed 230 V,
+  // flow/60 × ΔT × ρ·cp (water ≈ 4.186 kJ/l·K); electrical from the CT phase currents at an assumed 230 V,
   // falling back to the inverter primary current when the profile has no CT rows. applyThermalPlan
   // keeps the signed raw balance for defrost, turns active cooling into positive cooling capacity,
   // and refuses to call pump-only residual-heat circulation an output.
@@ -351,7 +374,7 @@ function liveData() {
   // the catalog carries it, only about half carry CT clamps, and an idle plant reads ct == 0, so the
   // ungated fallback fired on the majority of installs almost all of the time. It drew last run's
   // amps as a live kW figure right beside the "not running" headline: plausible, well-formed, false
-  // — the #35-#39 shape, and the same reason d.circP already gates. Asserted against the whole
+  // — the legacy-35–legacy-39 shape, and the same reason d.circP already gates. Asserted against the whole
   // catalog by logic/ou_stale.hpp's test (which page each of these two rows lives on).
   const invLive = !d.ouHeldOver && inv != null;
   const ctLive  = ctComplete && ct > 0;
@@ -434,7 +457,7 @@ function liveData() {
     // measured consumption at input 51 and the two power-LIMIT setpoints at holding 57/58 — so a
     // first-match on the unit promoted a configured ceiling to the plant's measured draw the moment
     // 51 was unavailable or answered a sentinel. A limit is a number the installer typed; drawing it
-    // as a measurement is the #35-#39 shape wearing a plausible value, and the Modbus card would go
+    // as a measurement is the legacy-35–legacy-39 shape wearing a plausible value, and the Modbus card would go
     // on labelling it correctly one card below.
     const pw = mbPower();
     if (pw) { const n = parseFloat(pw.value);
@@ -630,8 +653,8 @@ function renderLive() {
   // comment above warns about. The zero is arithmetically true (flow 0 carries nothing) and reads
   // as a measured plant output anyway: with the tank heater firing, "≈ 0.0 kW" sat beside a tank
   // climbing at ~2.7 kW. No working point is not an output of zero. Note this gates the LIVE pill
-  // only, not the 24-hour curve (DERIVED.pth): there a flat zero is the honest shape of a day that
-  // delivered nothing, and a gap would be indistinguishable from missing data.
+  // pill's instantaneous mode/direction gate. DERIVED.pth keeps measured no-flow buckets at zero
+  // but also requires the compressor witness when water moves, so pump overrun becomes a gap.
   setTxt("svPth", fmt1(d.pth));   // derived — applyThermalPlan already refuses pump-only circulation
   // THREE-VALUED, and that is the whole fix. `d.valveDhw === true` collapsed "I cannot read the
   // valve" into "heating", which is a positive claim: with X10A silent during a DHW run the drawing
@@ -846,7 +869,7 @@ const INSPECT = {
           ? { en: `Running — compressor at ${fmt0(d.rps)} rps${d.quiet ? ", capped by quiet mode" : ""}.`,
               de: `Läuft — Verdichter mit ${fmt0(d.rps)} rps${d.quiet ? ", durch den Leise-Modus begrenzt" : ""}.` }
           : { en: "Running — the HomeHub reports the compressor ON; speed and detailed outdoor-unit readings require X10A.",
-              de: "Läuft — der HomeHub meldet den Verdichter ON; Drehzahl und detaillierte Außengerätewerte benötigen X10A." }
+              de: "Läuft — der HomeHub meldet laufenden Verdichter; Drehzahl und detaillierte Außengerätewerte benötigen X10A." }
         // Says why held X10A readings are not repeated at rest (logic/ou_stale.hpp). A structurally
         // paired HomeHub outdoor register may replace the held value; unpaired fields stay "—".
         : d.ouHeldOver && d.mbFields && d.mbFields.has("out")
@@ -952,7 +975,7 @@ const INSPECT = {
           de: `Dem Wasser werden rund ${fmt1(d.pth)} kW entzogen: ${fmt1(d.flow)} l/min bei ΔT ${fmt1(d.dt)} K.` }
       : { en: `About ${fmt1(d.pth)} kW transferred into the water (${fmt1(d.flow)} l/min at ΔT ${fmt1(d.dt)} K).`,
           de: `Rund ${fmt1(d.pth)} kW gehen ins Wasser über: ${fmt1(d.flow)} l/min bei ΔT ${fmt1(d.dt)} K.` },
-    rows: [lwtRow, /inlet water/i, /flow sensor/i],
+    rows: [lwtRow, rwtRow, /flow sensor/i],
   },
   lwt: {
     t: { en: "PHE water outlet (pre-BUH, R1T)", de: "PHE-Wasseraustritt · vor BUH · R1T" },
@@ -968,7 +991,7 @@ const INSPECT = {
       de: "Hinter dem Zusatzheizer gemeldete Wassertemperatur. Anders als der R1T-Wert vor dem BUH kann sie die vom elektrischen Heizer eingebrachte Wärme enthalten. Die genaue Lage zu Pumpe und bauseitigen Ventilen hängt von der Hydraulikeinheit ab.",
     },
   },
-  rwt: { t: { en: "PHE water inlet (R4T)", de: "PHE-Wassereintritt · R4T" }, re: /inlet water/i, sample: "Inlet Water Temp. (R4T)" },
+  rwt: { t: { en: "PHE water inlet (R4T)", de: "PHE-Wassereintritt · R4T" }, pick: rwtRow, sample: "Inlet Water Temp. (R4T)" },
   dt: {
     t: { en: "Water-side ΔT across the PHE", de: "Wasserseitiges ΔT am PHE" },
     trend: "dt",   // computed series — see DERIVED
@@ -991,7 +1014,7 @@ const INSPECT = {
           de: `${fmt1(d.dt)} K. Beim aktiven Kühlen soll R1T unter R4T liegen; die vorzeichenbehaftete Differenz ist daher negativ.` }
       : { en: `${fmt1(d.dt)} K${d.dtSet != null ? ` against a ${fmt1(d.dtSet)} K heating target` : ""}. Positive means the PHE is adding heat to the water.`,
           de: `${fmt1(d.dt)} K${d.dtSet != null ? ` bei ${fmt1(d.dtSet)} K Heiz-Ziel` : ""}. Positiv bedeutet, dass der PHE dem Wasser Wärme zuführt.` },
-    rows: [lwtRow, /inlet water/i, /target delta t heating/i],
+    rows: [lwtRow, rwtRow, /target delta t heating/i],
   },
   pth: {
     t: (d) => d && d.pthKind === "cooling"
@@ -1000,10 +1023,10 @@ const INSPECT = {
     aria: { en: "Thermal capacity at the PHE (estimated)", de: "Geschätzte thermische Leistung am PHE" },
     trend: (d) => d && d.pthKind === "cooling" ? "" : "pth",
     what: (d) => d && d.pthKind === "cooling"
-      ? { en: "An ESTIMATE of heat removed from the water: flow × (R4T−R1T) × 4.186 kJ/kg·K, assuming water. Accuracy depends on the flow sensor, both temperature sensors and the actual fluid; glycol mixtures need different density and heat capacity. It is shown only with a running compressor and the cooling-direction temperature difference. R1T/R4T are internal PHE sensors, not downstream emitter sensors.",
-          de: "Eine SCHÄTZUNG der dem Wasser entzogenen Wärme: Durchfluss × (R4T−R1T) × 4,186 kJ/kg·K unter Annahme von Wasser. Die Genauigkeit hängt vom Durchflusssensor, beiden Temperaturfühlern und dem tatsächlichen Medium ab; Glykolgemische benötigen andere Dichte und Wärmekapazität. Sie erscheint nur bei laufendem Verdichter und Temperaturdifferenz in Kühlrichtung. R1T/R4T sind interne PHE-Fühler und keine Fühler an den nachgeschalteten Flächen." }
-      : { en: "An ESTIMATE of heat transferred into the water: flow × (R1T−R4T) × 4.186 kJ/kg·K, assuming water. Accuracy depends on the flow sensor, both temperature sensors and the actual fluid; glycol mixtures need different density and heat capacity. It is shown only with a running compressor and the heating-direction temperature difference. The backup heater sits after R1T and is outside this figure.",
-          de: "Eine SCHÄTZUNG der ins Wasser übertragenen Wärme: Durchfluss × (R1T−R4T) × 4,186 kJ/kg·K unter Annahme von Wasser. Die Genauigkeit hängt vom Durchflusssensor, beiden Temperaturfühlern und dem tatsächlichen Medium ab; Glykolgemische benötigen andere Dichte und Wärmekapazität. Sie erscheint nur bei laufendem Verdichter und Temperaturdifferenz in Heizrichtung. Der Zusatzheizer sitzt hinter R1T und ist in diesem Wert nicht enthalten." },
+      ? { en: "An ESTIMATE of heat removed from the water: flow/60 × (R4T−R1T) × ρ·cp (≈ 4.186 kJ/(l·K)), assuming water. Accuracy depends on the flow sensor, both temperature sensors and the actual fluid; glycol mixtures need different density and heat capacity. It is shown only with a running compressor and the cooling-direction temperature difference. R1T/R4T are internal PHE sensors, not downstream emitter sensors.",
+          de: "Eine SCHÄTZUNG der dem Wasser entzogenen Wärme: Durchfluss/60 × (R4T−R1T) × ρ·cp (≈ 4,186 kJ/(l·K)) unter Annahme von Wasser. Die Genauigkeit hängt vom Durchflusssensor, beiden Temperaturfühlern und dem tatsächlichen Medium ab; Glykolgemische benötigen andere Dichte und Wärmekapazität. Sie erscheint nur bei laufendem Verdichter und Temperaturdifferenz in Kühlrichtung. R1T/R4T sind interne PHE-Fühler und keine Fühler an den nachgeschalteten Flächen." }
+      : { en: "An ESTIMATE of heat transferred into the water: flow/60 × (R1T−R4T) × ρ·cp (≈ 4.186 kJ/(l·K)), assuming water. Accuracy depends on the flow sensor, both temperature sensors and the actual fluid; glycol mixtures need different density and heat capacity. It is shown only with a running compressor and the heating-direction temperature difference. The backup heater sits after R1T and is outside this figure.",
+          de: "Eine SCHÄTZUNG der ins Wasser übertragenen Wärme: Durchfluss/60 × (R1T−R4T) × ρ·cp (≈ 4,186 kJ/(l·K)) unter Annahme von Wasser. Die Genauigkeit hängt vom Durchflusssensor, beiden Temperaturfühlern und dem tatsächlichen Medium ab; Glykolgemische benötigen andere Dichte und Wärmekapazität. Sie erscheint nur bei laufendem Verdichter und Temperaturdifferenz in Heizrichtung. Der Zusatzheizer sitzt hinter R1T und ist in diesem Wert nicht enthalten." },
     head: (d) => (d.dtStale || d.pth == null ? "—" : "≈ " + fmt1(d.pth) + " kW"),
     // The COP is quoted here only while it is built on THIS figure. With a whole-unit electrical
     // input the quotient moves to the post-BUH outlet (logic/cop_scope.hpp), so it is no longer
@@ -1052,7 +1075,7 @@ const INSPECT = {
     trend: (d) => d && d.efficiencyKind === "eer" ? "" : "cop",
     what: (d) => d && d.efficiencyKind === "eer"
       ? { en: "Estimated cooling capacity divided by estimated electrical input. The cooling numerator uses internal PHE sensors and is accepted only with a running compressor and R1T below R4T. The result inherits the water/glycol, sensor, voltage and power-factor assumptions of both estimates. Daikin also describes calculated energy figures as estimates whose accuracy is not guaranteed. This is an instantaneous EER, not a seasonal efficiency figure; metered seasonal energy is more meaningful.",
-          de: "Geschätzte Kälteleistung geteilt durch geschätzte elektrische Aufnahme. Der Kühlzähler nutzt die internen PHE-Fühler und wird nur bei laufendem Verdichter sowie R1T unter R4T gewertet. Das Ergebnis übernimmt alle Annahmen zu Wasser oder Glykol, Fühlern, Spannung und Leistungsfaktor aus beiden Schätzungen. Auch Daikin bezeichnet berechnete Energiewerte als Schätzungen ohne garantierte Genauigkeit. Das ist ein momentaner EER und keine saisonale Effizienzkennzahl; aussagekräftiger ist saisonal gemessene Energie." }
+          de: "Geschätzte Kälteleistung geteilt durch geschätzte elektrische Aufnahme. Die Kälteleistung im Zähler nutzt die internen PHE-Fühler und wird nur bei laufendem Verdichter sowie R1T unter R4T gewertet. Das Ergebnis übernimmt alle Annahmen zu Wasser oder Glykol, Fühlern, Spannung und Leistungsfaktor aus beiden Schätzungen. Auch Daikin bezeichnet berechnete Energiewerte als Schätzungen ohne garantierte Genauigkeit. Das ist ein momentaner EER und keine saisonale Effizienzkennzahl; aussagekräftiger ist saisonal gemessene Energie." }
       : {
       en: "Estimated heat output divided by estimated electrical input. The two values must describe compatible boundaries: with CT currents the UI uses heat after the backup heater when that sensor exists; with inverter current it shows the heat pump alone. Whether the CTs include every relevant electrical load depends on their installation, so this is not automatically a whole-plant meter. The result inherits the fluid, sensor, voltage and power-factor assumptions of both estimates. Use it as a live indication; metered seasonal energy is more meaningful. With the compressor stopped it shows \"—\".",
       de: "Geschätzte Wärmeleistung geteilt durch geschätzte elektrische Aufnahme. Beide Werte müssen zueinander passende Bilanzgrenzen beschreiben: Bei Stromwandlern verwendet die UI die Wärme hinter dem Zusatzheizer, sofern dieser Fühler vorhanden ist; beim Inverterstrom zeigt sie nur die Wärmepumpe. Ob die Stromwandler alle relevanten elektrischen Verbraucher erfassen, hängt von ihrem Einbau ab; der Wert ist daher nicht automatisch ein Gesamtanlagen-Zähler. Das Ergebnis übernimmt die Annahmen zu Medium, Fühlern, Spannung und Leistungsfaktor aus beiden Schätzungen. Als Live-Hinweis verwenden; aussagekräftiger ist saisonal gemessene Energie. Bei stehendem Verdichter zeigt er „—“.",
@@ -1292,7 +1315,7 @@ const INSPECT = {
             de: `Durchströmt — Expansionsventil bei ${fmt0(d.eev)} Impulsen.` }
         : { en: "Flowing — the HomeHub confirms compressor operation; expansion-valve position requires X10A.",
             de: "Durchströmt — der HomeHub bestätigt Verdichterbetrieb; die Stellung des Expansionsventils benötigt X10A." }
-      : { en: "Still — the compressor is stopped.", de: "Steht — der Verdichter ist OFF." },
+      : { en: "Still — the compressor is stopped.", de: "Kein Durchfluss — der Verdichter steht." },
     rows: [/^low pressure$/i, /expansion valve ?1/i],
   },
   wsup: {
@@ -1342,12 +1365,12 @@ const INSPECT = {
       : waterMoving(d)
         ? d.thermalMode === "cool" && !compressorRunning(d, 5) && d.pthRaw != null && d.pthRaw > 0
           ? { en: `Residual-heat circulation toward the hydraulic space branch at ${fmt1(d.flow)} l/min; no active cooling. Internal PHE sensors read R1T ${degC(d.lwt)} and R4T ${degC(d.ret)}; the field-side temperature is not measured.`,
-              de: `Restwärme-Umlauf zum hydraulischen Raumzweig mit ${fmt1(d.flow)} l/min; keine aktive Kühlung. Die internen PHE-Fühler messen R1T ${degC(d.lwt)} und R4T ${degC(d.ret)}; die Temperatur auf der Feldseite wird nicht gemessen.` }
+              de: `Restwärme-Umlauf zum hydraulischen Raumzweig mit ${fmt1(d.flow)} l/min; keine aktive Kühlung. Die internen PHE-Fühler messen R1T ${degC(d.lwt)} und R4T ${degC(d.ret)}; die Temperatur an den Heiz-/Kühlflächen des Gebäudes wird nicht gemessen.` }
           : { en: `Circulating toward the space branch at ${fmt1(d.flow)} l/min. Internal PHE sensors read R1T ${degC(d.lwt)} and R4T ${degC(d.ret)}.`,
               de: `Zirkulation zum Raumkreis mit ${fmt1(d.flow)} l/min. Die internen PHE-Fühler messen R1T ${degC(d.lwt)} und R4T ${degC(d.ret)}.` }
         : { en: "Current pump and flow readings do not establish circulation through the space branch.",
             de: "Die aktuellen Pumpen- und Durchflusswerte belegen keine Zirkulation durch den Raumzweig." },
-    rows: [lwtRow, /inlet water/i, /^space heating operation/i],
+    rows: [lwtRow, rwtRow, /^space heating operation/i],
   },
   wret: {
     t: { en: "PHE inlet pipe", de: "Leitung zum PHE-Eintritt" },
@@ -1360,7 +1383,7 @@ const INSPECT = {
           de: `Kommt mit ${degC(d.ret)} zurück, ${fmt1(d.flow)} l/min, ${fmt1(d.wp)} bar.` }
       : { en: "Current pump and flow readings do not establish circulation in the return pipe.",
           de: "Die aktuellen Pumpen- und Durchflusswerte belegen keine Zirkulation in der Rücklaufleitung." },
-    rows: [/inlet water/i, /flow sensor/i, /^water pressure$/i],
+    rows: [rwtRow, /flow sensor/i, /^water pressure$/i],
   },
   flow: {
     t: { en: "Flow rate", de: "Durchfluss" },
@@ -1411,7 +1434,7 @@ const inspFieldText = (e, field, d) => {
 
 // A row selector is either a label pattern or a PICKER FUNCTION. Quantities whose selection is a
 // judgement rather than a match — leaving water, where a setpoint / mixed-zone / post-BUH row must
-// never be substituted for the measurement (issue #121) — name their picker, so the rule lives in
+// never be substituted for the measurement (issue legacy-121) — name their picker, so the rule lives in
 // exactly one place and stays the one CI gates through logic/lwt_select.hpp.
 const pickRow = (sel) => (typeof sel === "function" ? sel() : vRow(sel));
 const inspRow = (e) => (e.pick ? e.pick() : e.re ? vRow(e.re) : null);
@@ -1626,6 +1649,12 @@ function renderInspectHist(e, row) {
   if (id) {
     if (trendSource) ensureHist(id, trendSource);
     else ensureHistPair(id);                // throttled to once a minute inside; no-op once cached
+    if (id === "dhw_tank") {
+      ensureHist("smart_grid_mode");
+      ensureHist("smart_grid_mode", "modbus");
+      ensureHist("bsh_state");
+      ensureHist("bsh_state", "modbus");
+    }
   }
   const h = id && trendSource !== "modbus" ? S.hist.get(id) : null;
   const mh = id && trendSource !== "x10a" ? S.hist.get(histCacheKey(id, "modbus")) : null;
@@ -1635,10 +1664,16 @@ function renderInspectHist(e, row) {
   // still leave a tooltip/crosshair DOM completely alone.
   const liveGen = id && typeof STATE_HIST !== "undefined" && STATE_HIST[id]
     ? historyView(id, trendSource)?.gen || "" : "";
+  const auxGen = id === "dhw_tank"
+    ? `${S.hist.get("smart_grid_mode")?.gen || ""}/` +
+      `${S.hist.get(histCacheKey("smart_grid_mode", "modbus"))?.gen || ""}/` +
+      `${S.hist.get("bsh_state")?.gen || ""}/` +
+      `${S.hist.get(histCacheKey("bsh_state", "modbus"))?.gen || ""}`
+    : "";
   // histHtml carries localised axis/readout copy. A language switch must therefore invalidate the
   // inspector chart even when the series generation and pinned sample are unchanged.
   const sig = [LANG, id, trendSource, h ? (h.err ? "e" : h.gen) : "", mh ? (mh.err ? "e" : mh.gen) : "",
-               liveGen, pin ? (pin.t ?? `${pin.i}/${pin.gen}`) : ""].join("|");
+               liveGen, auxGen, pin ? (pin.t ?? `${pin.i}/${pin.gen}`) : ""].join("|");
   if (sig === S.inspHistSig) return;
   S.inspHistSig = sig;
   const el = $("inspHist");

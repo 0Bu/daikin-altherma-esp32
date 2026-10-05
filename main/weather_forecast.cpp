@@ -362,6 +362,10 @@ bool json_unit(cJSON* units, const char* key, const char* expected) {
 
 __attribute__((noinline)) bool parse_forecast(const std::string& payload, int64_t fetched_unix_s,
                                               WeatherForecastSample& sample, std::string& error) {
+    if (!json_payload_depth_ok(payload, JSON_MAX_DEPTH)) {
+        error = "json_invalid";
+        return false;
+    }
     const char* parse_end = nullptr;
     cJSON*      root = cJSON_ParseWithLengthOpts(payload.data(), payload.size(), &parse_end, false);
     if (!root) {

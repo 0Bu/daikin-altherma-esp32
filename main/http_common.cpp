@@ -16,6 +16,7 @@
 #include "logic/http_request.hpp"
 #include "wifi.hpp"
 #include "esp_err.h"
+#include "esp_timer.h"
 #include <cstring>
 #include <new>          // std::bad_alloc
 
@@ -26,7 +27,7 @@ namespace daik {
 // threw. A destructor rather than three call sites: it also covers a future early return, and this
 // task carries the deepest call chain in the firmware
 // (mcp_post -> http_send_status_json -> append_status_json), which
-// overflowed twice (v1.0.12, #318) and was diagnosed both times from a core dump. Costs one
+// overflowed twice (v1.0.12, legacy-318) and was diagnosed both times from a core dump. Costs one
 // FreeRTOS read per request; the number leaves the board on the MQTT heartbeat (stack_watch.hpp).
 namespace {
 struct SampleHttpdStackOnExit {
@@ -164,12 +165,16 @@ esp_err_t http_send_gzip(httpd_req_t* req, const char* content_type,
 // are host-tested in logic/http_body.hpp; what stays here is the part that is IDF's: translating
 // httpd_req_recv's return codes into the three cases the policy reasons about.
 int http_read_body(httpd_req_t* req, char* buf, size_t max) {
-    return http_body_read(buf, max, req->content_len, [req](char* dst, size_t len) -> BodyChunk {
-        const int r = httpd_req_recv(req, dst, len);
-        if (r == HTTPD_SOCK_ERR_TIMEOUT) return { BodyRecv::Timeout, 0 };
-        if (r <= 0)                      return { BodyRecv::Error,   0 };
-        return { BodyRecv::Data, static_cast<size_t>(r) };
-    });
+    const int64_t deadline_us = esp_timer_get_time() + 30'000'000LL;
+    return http_body_read(
+        buf, max, req->content_len,
+        [req](char* dst, size_t len) -> BodyChunk {
+            const int r = httpd_req_recv(req, dst, len);
+            if (r == HTTPD_SOCK_ERR_TIMEOUT) return {BodyRecv::Timeout, 0};
+            if (r <= 0) return {BodyRecv::Error, 0};
+            return {BodyRecv::Data, static_cast<size_t>(r)};
+        },
+        [deadline_us]() -> bool { return esp_timer_get_time() >= deadline_us; });
 }
 
 } // namespace daik

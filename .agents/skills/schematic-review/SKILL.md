@@ -21,7 +21,7 @@ puts that correct reading on the wrong pipe.
 That is not hypothetical. This drawing has shipped a fan spinning around a point beside its own
 axle, a leaving-water pill floating 40 px above the run it names, the return temperature drawn on
 the heating-only section (claiming a branch no sensor there reads), and "HEIZUNG" struck through by
-the heating riser so it rendered as "HEIZUNC". Each is the #35–#39 failure shape drawn in SVG:
+the heating riser so it rendered as "HEIZUNC". Each is the legacy-35–legacy-39 failure shape drawn in SVG:
 well-formed, plausible, and attributing a real number to the wrong thing.
 
 **This review unlike `$domain-review` is conditional** — it is for changes that reach the drawing:
@@ -32,9 +32,12 @@ requests them.
 
 ## 0. Step 0 — pin the baseline
 
-Ensure the local repository is synchronized before auditing. Run `git fetch origin` and verify
-`HEAD` matches `origin/main` (or the target PR head commit). Fail-fast on divergence or untracked
-local drift — never audit an unpinned or stale baseline. State reviewed SHA in report.
+Record `git rev-parse HEAD`, the intended comparison base, and `git status --short` before
+auditing. For a PR, verify that the checkout matches the exact target PR head; refresh remote
+refs with `git fetch origin` when needed and available. For an authorized local implementation,
+include the intended tracked diff and untracked new files in the review and identify them in
+the report; no commit, PR or equality with `origin/main` is required. Preserve unrelated user
+changes. Stamp a merge pass only after the reviewed content matches the exact committed PR head.
 
 ## 1. Run the audit (the mechanical half)
 
@@ -169,7 +172,7 @@ review asks means putting the new questions to the current drawing before it lan
 filter is defined by the runner-neutral gate. This page deliberately does not repeat the filter.
 
 That filter is defensible here in a way it deliberately is **not** for `$domain-review`, and the
-difference is the point: a value's meaning can change from almost anywhere — #35–#39 reached Home
+difference is the point: a value's meaning can change from almost anywhere — legacy-35–legacy-39 reached Home
 Assistant through the ordinary discovery path — while the drawing is one inline SVG, one stylesheet
 and one binding table. If that ever stops being true, the regex must grow with it, or it will quietly
 opt exactly the risky PRs out.

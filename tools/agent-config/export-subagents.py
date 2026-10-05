@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Export canonical subagents from .codex/agents/*.toml for Antigravity / Gemini CLI."""
+"""Export canonical subagents from .agents/agents/*.toml for Antigravity / Gemini CLI."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ import sys
 import tomllib
 
 ROOT = Path(__file__).resolve().parents[2]
-AGENTS_DIR = ROOT / ".codex" / "agents"
+AGENTS_DIR = ROOT / ".agents" / "agents"
 
 
 def load_subagents() -> list[dict[str, object]]:

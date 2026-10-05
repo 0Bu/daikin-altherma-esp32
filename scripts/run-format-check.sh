@@ -5,7 +5,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-PINNED_CLANG_FORMAT_VERSION=18.1.3
+PINNED_CLANG_FORMAT_VERSION=18.1.8
 python3 tools/format/check_style_config.py "$PWD/.clang-format"
 python3 tools/format/check_format.py --root "$PWD" "$@"
 

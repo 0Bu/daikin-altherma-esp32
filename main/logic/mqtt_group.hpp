@@ -42,6 +42,14 @@ inline const char* group_for_page(uint8_t reg) {
         case 0x20: return "outdoor_sensors";
         case 0x21: return "inverter";
         case 0x30: return "actuators";
+        case 0x50:
+            return "split_pressures";
+        case 0x53:
+            return "split_actuators";
+        case 0x54:
+            return "split_sensors";
+        case 0x55:
+            return "split_state";
         case 0xA0: return "outdoor_aux";
         case 0xA1: return "water_hx";
         case 0x60: return "hydronic";
@@ -104,9 +112,9 @@ inline bool is_json_number(std::string_view s) {
 // `kind` is the field's JSON TYPE and it comes from the row's converter (logic/convert.hpp
 // published_kind), NOT from inspecting `value`. That is the whole point of carrying it: formatting
 // collapses a typed decode into a string, and a publisher that then re-infers the type from the
-// string lets ONE logical field change JSON type between states — measured in #209, where fan step
-// alternated between the number 30 and the string "OFF" and the metrics consumer silently kept the
-// stale 30. Type is a property of the field; the value is not allowed a vote.
+// string lets ONE logical field change JSON type between states — measured in legacy-209, where fan
+// step alternated between the number 30 and the string "OFF" and the metrics consumer silently kept
+// the stale 30. Type is a property of the field; the value is not allowed a vote.
 struct GroupedValue {
     std::string   group;   // group_for_page(reg)
     std::string   key;     // object_id(label)

@@ -175,7 +175,7 @@ for (const f of ["main/history.cpp", "main/checkup.cpp", "main/state_dwell.cpp"]
 // the device could never fill and the Diagnostics card drew "no readings yet" under a row reading
 // "not configured". Its two siblings were already gated; this is that rule for the third.
 // The window is bounded rather than "the very next line": the branch also carries the persistence
-// seal's dirty bookkeeping (#391), and pinning adjacency would make this fail for a change that
+// seal's dirty bookkeeping (legacy-391), and pinning adjacency would make this fail for a change that
 // cannot affect what it asserts. What it still asserts is the thing that matters — inside the
 // not-configured branch, the label is cleared.
 assert.match(history,
@@ -568,11 +568,11 @@ assert.match(setHp.slice(mbReconfigure, mbCleanupRequest + 80),
 
 // Retained dedup state is an acknowledgement cache, not a build cache. A failed broker publish must
 // leave it unchanged so the next cycle retries the exact current document/discovery.
-const modbusPublishStart = mqtt.indexOf("static void publish_modbus_state()");
+const modbusPublishStart = mqtt.indexOf("static bool publish_modbus_state(bool& published_live)");
 const modbusPublishEnd = mqtt.indexOf("\n}\n\nstruct RetainedCleanupCycle", modbusPublishStart) + 2;
 const modbusPublish = mqtt.slice(modbusPublishStart, modbusPublishEnd);
 assert.match(modbusPublish,
-  /if \(js != s_last_modbus_json &&\s*mqtt_publish\(s_modbus,[\s\S]*?\)\) \{\s*s_last_modbus_json = js;\s*\}/,
+  /if \(js != s_last_modbus_json\) \{\s*if \(!mqtt_publish\(s_modbus,[\s\S]*?\)\) return false;\s*s_last_modbus_json = js;\s*\}/,
   "HomeHub dedup may advance only after the broker accepts current state");
 const weatherPublishStart = mqtt.indexOf("static void publish_weather_state(");
 const weatherPublishEnd = mqtt.indexOf("\n}\n\n// ENV III", weatherPublishStart) + 2;
@@ -708,13 +708,13 @@ assert.match(poll, /if \(!hp_uart_init\([\s\S]{0,900}?dwell_record\(nullptr, 0, 
 assert.match(poll, /if \((?:config\(\)\.profile|config_profile\(\)) == "auto"\)[\s\S]{0,2200}?dwell_record\(nullptr, 0, generation\);/,
   "a board whose X10A never resolves a profile must age its restored state ages out, or a reboot " +
   "would present the frozen pre-reboot durations as current");
-assert.match(poll, /checkup_record\(fresh\.data\(\)[\s\S]{0,900}?dwell_record\(fresh\.data\(\), fresh\.size\(\),\s*cycle_generation\);/,
+assert.match(poll, /checkup_record\(fresh\.data\(\)[\s\S]{0,900}?dwell_record\(fresh\.data\(\), fresh\.size\(\),\s*cycle_generation,\s*static_cast<uint32_t>\(\(service_max_gap_us \+ 999999\) \/ 1000000\)\);/,
   "the normal cycle must fold the state ages beside the checkup, from the same row set");
 // The reduction has to read `fresh` — the rows that ANSWERED this cycle — and not the committed
 // cache, which no longer knows which rows were missing. A row absent from `fresh` IS the evidence.
 const commitAt = poll.search(/s_cache\s*=\s*std::move\(fresh\)/);
 assert.ok(commitAt > 0, "poll_once must still commit the cache by moving `fresh`");
-assert.ok(poll.indexOf("dwell_record(fresh.data(), fresh.size(), cycle_generation);") < commitAt,
+assert.ok(poll.indexOf("dwell_record(fresh.data(), fresh.size(), cycle_generation,") < commitAt,
   "dwell_record must see `fresh` before the commit moves it away, or absent rows read as unchanged");
 
 // ── 8. `known == false` renders as an ABSENT key, never as a zero ───────────────────────────────
@@ -821,7 +821,7 @@ console.log("source absence: board trends own their producer, absent sources sta
             "armed-but-inactive is named, state ages expire rather than freeze, " +
             "redaction invents nothing, TLS pressure is coordinated");
 
-// #407 — the END of the restart ladder. The boot that inherited the full count must come up MINIMAL,
+// legacy-407 — the END of the restart ladder. The boot that inherited the full count must come up MINIMAL,
 // and that decision has to be made in heap_guard_begin(), which main.cpp runs BEFORE its
 // `if (!safe_mode_active())` gate. Made anywhere later it would arrive after the poll engine and the
 // MQTT bridge had already started and taken the heap the minimal boot exists to leave free.
@@ -837,3 +837,17 @@ const mainSrc = fs.readFileSync(new URL("../main/main.cpp", import.meta.url), "u
 assert.ok(mainSrc.indexOf("heap_guard_begin()") < mainSrc.indexOf("safe_mode_active()"),
   "heap_guard_begin() must run BEFORE main.cpp's safe-mode gate, or the minimal boot starts the very "
   + "subsystems it exists to leave unstarted");
+
+// Browser lifetime and producer admission are independent. Public source/consent changes publish
+// a new lifetime even if a second client restores identical config before the next status poll.
+const historySource = read("main/history.cpp");
+for (const fn of ["history_reset()", "history_reset_on_detect(uint32_t identity_fp)",
+  "history_modbus_reset(uint32_t target_fp) noexcept", "history_circulation_reset()",
+  "history_checkup_reset()", "history_flash_forget()"]) {
+  const at = historySource.indexOf(fn);
+  const next = historySource.indexOf("\n}", at);
+  assert.ok(at >= 0 && next > at && historySource.slice(at, next).includes("bump_history_epoch()"),
+    `${fn} must retire browser leases at its lifecycle boundary`);
+}
+assert.match(historySource, /uint32_t history_epoch\(\) noexcept[\s\S]*?memory_order_acquire/);
+assert.match(historySource, /compare_exchange_weak[\s\S]*?memory_order_release/);

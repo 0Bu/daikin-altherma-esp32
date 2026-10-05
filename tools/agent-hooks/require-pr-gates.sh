@@ -28,6 +28,7 @@ head_commit_pages_file="${AGENT_PR_HEAD_COMMIT_PAGES_FILE:-}"
 selector="${AGENT_PR_SELECTOR:-}"
 requested_root="${AGENT_PROJECT_DIR:-${PROJECT_DIR:-$canonical_root}}"
 payload_file=""
+push_mode=0; push_sha=""; push_ref=""; push_url=""
 force_check="${AGENT_POLICY_CI:-0}"
 allow_discovery=1
 [ "${AGENT_POLICY_CI:-0}" = "1" ] && allow_discovery=0
@@ -40,6 +41,9 @@ while [ "$#" -gt 0 ]; do
         --pr) [ "$#" -ge 2 ] || exit 2; selector="$2"; force_check=1; shift 2 ;;
         --project-dir) [ "$#" -ge 2 ] || exit 2; requested_root="$2"; shift 2 ;;
         --payload-file) [ "$#" -ge 2 ] || exit 2; payload_file="$2"; shift 2 ;;
+        --push-update)
+            [ "$#" -ge 4 ] && [ "$push_mode" -eq 0 ] || exit 2
+            push_mode=1; push_sha="$2"; push_ref="$3"; push_url="$4"; shift 4 ;;
         --check) force_check=1; shift ;;
         --no-discovery) allow_discovery=0; shift ;;
         *) echo "agent PR gates: unknown argument: $1" >&2; exit 2 ;;
@@ -52,7 +56,7 @@ if [ -n "$payload_file" ]; then
     payload_expected=1
     [ -f "$payload_file" ] && [ -r "$payload_file" ] || { echo "agent PR gates: payload file missing or unreadable: $payload_file" >&2; exit 2; }
     payload="$(cat "$payload_file")" || { echo "agent PR gates: could not read payload file: $payload_file" >&2; exit 2; }
-elif [ "$force_check" != "1" ] && [ -z "$body_file$head_sha$files_file" ]; then
+elif [ "$push_mode" -eq 0 ] && [ "$force_check" != "1" ] && [ -z "$body_file$head_sha$files_file" ]; then
     payload_expected=1
     payload="$(cat 2>/dev/null)" || { echo "agent PR gates: could not read hook payload" >&2; exit 2; }
 fi
@@ -79,6 +83,57 @@ cleanup() {
 }
 trap cleanup EXIT
 
+# Only Git's native pre-push hook supplies this structured mode. The audited checkout must be
+# exactly the transferred commit; a PR's evidence is discovered by its destination branch.
+if [ "$push_mode" -eq 1 ]; then
+    [ -z "$payload_file$body_file$head_sha$files_file$pr_metadata_file$head_commit_file$head_commit_pages_file$selector" ] \
+        && [ "$force_check" = "0" ] \
+        || { echo "BLOCKED: push-update mode cannot use merge/CI input overrides." >&2; exit 2; }
+    printf '%s' "$push_sha" | grep -Eq '^[0-9a-f]{40}$' \
+        || { echo "BLOCKED: push-update requires one full commit SHA." >&2; exit 2; }
+    case "$push_ref" in
+        refs/heads/main|refs/heads/master|refs/heads/gh-pages|refs/heads/HEAD)
+            echo "BLOCKED: direct push to protected branch '$push_ref' is prohibited." >&2; exit 2 ;;
+        refs/heads/*) ;;
+        *) echo "BLOCKED: push-update requires an explicit destination branch ref." >&2; exit 2 ;;
+    esac
+    git check-ref-format "$push_ref" >/dev/null 2>&1 \
+        || { echo "BLOCKED: invalid destination branch ref." >&2; exit 2; }
+    origin_identity="$(agent_gate_origin_identity "$canonical_root")" \
+        || { echo "BLOCKED: cannot resolve this repository's origin identity." >&2; exit 2; }
+    push_identity="$(agent_gate_url_identity "$push_url")" \
+        || { echo "BLOCKED: cannot resolve the actual push destination identity." >&2; exit 2; }
+    [ "$(printf '%s' "$origin_identity" | tr 'A-Z' 'a-z')" = "$(printf '%s' "$push_identity" | tr 'A-Z' 'a-z')" ] \
+        || { echo "BLOCKED: actual push destination is outside this repository." >&2; exit 2; }
+    checkout_head="$(git -C "$canonical_root" rev-parse --verify 'HEAD^{commit}' 2>/dev/null)" \
+        || { echo "BLOCKED: cannot resolve the audited checkout commit." >&2; exit 2; }
+    [ "$push_sha" = "$checkout_head" ] \
+        || { echo "BLOCKED: transferred commit differs from the audited checkout HEAD; check out that commit first." >&2; exit 2; }
+    checkout_status="$(git -c core.fsmonitor=false -C "$canonical_root" status --porcelain=v1 --untracked-files=normal 2>/dev/null)" \
+        || { echo "BLOCKED: cannot verify the audited checkout state." >&2; exit 2; }
+    [ -z "$checkout_status" ] \
+        || { echo "BLOCKED: push audit requires a clean checkout of the transferred commit." >&2; exit 2; }
+    "$canonical_root/scripts/run-skill-audit.sh" \
+        || { echo "BLOCKED: skill audit failed before push." >&2; exit 2; }
+    tmp="$(mktemp -d)" || exit 2
+    push_body="$tmp/body.md"; push_files="$tmp/files.txt"; pr_rc=0
+    agent_gate_discover_pr "" "$canonical_root" "$push_body" "$push_files" "${push_ref#refs/heads/}" || pr_rc=$?
+    case "$pr_rc" in
+        1) exit 0 ;; # A successful query proved that the destination has no open PR yet.
+        0) ;;
+        *) echo "BLOCKED: cannot read one unambiguous open PR for the destination branch." >&2; exit 2 ;;
+    esac
+    for push_key in skill-audit pr-hygiene-review; do
+        push_status="$(agent_gate_checkbox_status "$push_body" "$push_key")" || exit 2
+        push_state="${push_status%% *}"; push_stamp="${push_status#checked }"
+        if [ "$push_state" != checked ] || ! agent_gate_sha_matches "$push_stamp" "$push_sha"; then
+            echo "BLOCKED: destination PR requires current \$$push_key evidence for $push_sha ($push_status)." >&2
+            exit 2
+        fi
+    done
+    exit 0
+fi
+
 action=""; payload_cwd=""; target_repo=""; target_host=""; parse_error=""; expected_head=""
 if [ -n "$payload" ]; then
     parsed_payload="$(mktemp)" || exit 2
@@ -99,66 +154,12 @@ if [ -n "$payload" ]; then
     target_host="${fields[4]:-}"
     parse_error="${fields[5]:-}"
     expected_head="${fields[6]:-}"
-    if [ -z "$action" ]; then
-        raw_cmd="$(printf '%s' "$payload" | python3 -c '
-import json, sys
-try:
-    val = json.load(sys.stdin)
-    tc = val.get("toolCall") or {}
-    args = tc.get("args") or val.get("tool_input") or val.get("tool_args") or {}
-    cmds = [args.get(k) for k in ("CommandLine", "commandline", "command", "cmd") if args.get(k)]
-    print(cmds[0] if cmds else "")
-except Exception:
-    pass
-' 2>/dev/null)"
-        if printf '%s' "$raw_cmd" | grep -Eq '(^|[;&|[:space:]])git([[:space:]]+.*)?[[:space:]]+push\b'; then
-            action="git push"
-        fi
-    fi
     [ -n "$action" ] || exit 0
     if [ "$action" = "gh pr create" ]; then
         [ -z "$parse_error" ] \
             || { echo "BLOCKED: PR creation transport could not be bound safely: $parse_error" >&2; exit 2; }
-        exit 0
-    fi
-    if [ "$action" = "git push" ]; then
-        if [ "${AGENT_PR_GATES_SKIP:-0}" = "1" ]; then
-            echo "WARNING: AGENT_PR_GATES_SKIP=1 set; bypassing pre-push checks." >&2
-            exit 0
-        fi
-        if ! "$canonical_root/scripts/run-skill-audit.sh"; then
-            echo "BLOCKED by pre-push: skill audit failed before push. Fix skill drift before pushing." >&2
-            exit 2
-        fi
-        push_tmp="$(mktemp -d)" || exit 2
-        push_body="$push_tmp/body.md"; push_files="$push_tmp/files.txt"
-        pr_rc=0
-        agent_gate_discover_pr "" "$canonical_root" "$push_body" "$push_files" 2>/dev/null || pr_rc=$?
-        if [ "$pr_rc" -eq 0 ]; then
-            push_head="$(git -C "$canonical_root" rev-parse --verify 'HEAD^{commit}' 2>/dev/null || echo "$AGENT_DISCOVERED_HEAD")"
-            push_failures=""
-            status_sa="$(agent_gate_checkbox_status "$push_body" "skill-audit")"
-            state_sa="${status_sa%% *}"
-            stamped_sa=""
-            [ "$state_sa" = "checked" ] && stamped_sa="$(printf '%s' "$status_sa" | awk '{print $2}')"
-            if [ "$state_sa" != "checked" ] || ! agent_gate_sha_matches "$stamped_sa" "$push_head"; then
-                push_failures="${push_failures}  - \$skill-audit (skill audit): $status_sa\n"
-            fi
-            status_prh="$(agent_gate_checkbox_status "$push_body" "pr-hygiene-review")"
-            state_prh="${status_prh%% *}"
-            stamped_prh=""
-            [ "$state_prh" = "checked" ] && stamped_prh="$(printf '%s' "$status_prh" | awk '{print $2}')"
-            if [ "$state_prh" != "checked" ] || ! agent_gate_sha_matches "$stamped_prh" "$push_head"; then
-                push_failures="${push_failures}  - \$pr-hygiene-review (PR hygiene review): $status_prh\n"
-            fi
-            if [ -n "$push_failures" ]; then
-                rm -rf "$push_tmp"
-                echo "BLOCKED by pre-push: git push to an open PR requires current \$skill-audit and \$pr-hygiene-review records for $push_head:" >&2
-                printf '%b' "$push_failures" >&2
-                exit 2
-            fi
-        fi
-        rm -rf "$push_tmp"
+        "$canonical_root/scripts/run-skill-audit.sh" \
+            || { echo "BLOCKED: skill audit failed before PR creation." >&2; exit 2; }
         exit 0
     fi
     if [ -n "$selector" ] && [ "$selector" != "$parsed_selector" ]; then
@@ -279,13 +280,13 @@ if [ "$verified_renovate_actions" -eq 0 ]; then
     check_gate "pr-hygiene-review" "PR hygiene review"
     check_gate "domain-review" "domain correctness review"
     check_gate "heap-safety-review" "independent heap safety review" \
-        '^(main/(http_.*|mcp_server|mqtt_ha|ota_update|weather_forecast|hp_poll|hp_modbus|hp_comm|heap_guard|net|syslog|history|config|nvs_storage)\.(cpp|hpp)$|main/logic/[^/]*(json|http|mqtt|ota|tls|heap|chunk|fixed_text|config_store|history_persist|modbus|x10a)[^/]*\.hpp$|test/(runtime/|test_(x10a_publish_heap_contract|ota_heap_contract|production_ota_gate_contract).*\.mjs$)|scripts/(production-ota-gate\.py|run-runtime-integration-tests\.sh|run-sanitizer-fuzz-tests\.sh)$|tools/(runtime|fuzz|ota|production_ota|agent-hooks)/|\.codex/agents/heap-safety-reviewer\.toml$|docs/(ARCHITECTURE|SECURITY|FEATURES)\.md$)'
+        '^(main/(http_.*|mcp_server|mqtt_ha|ota_update|weather_forecast|hp_poll|hp_modbus|hp_comm|heap_guard|net|syslog|history|config|nvs_storage)\.(cpp|hpp)$|main/logic/[^/]*(json|http|mqtt|ota|tls|heap|chunk|fixed_text|config_store|history_persist|modbus|x10a)[^/]*\.hpp$|test/(runtime/|test_(x10a_publish_heap_contract|ota_heap_contract|production_ota_gate_contract).*\.mjs$)|scripts/(production-ota-gate\.py|run-runtime-integration-tests\.sh|run-sanitizer-fuzz-tests\.sh)$|tools/(runtime|fuzz|ota|production_ota|agent-hooks)/|\.agents/agents/heap-safety-reviewer\.toml$|docs/(ARCHITECTURE|SECURITY|FEATURES)\.md$)'
     check_gate "feature-docs" "feature documentation sync" \
         '^(main/|test/|CMakeLists\.txt$|sdkconfig\.defaults$|dependencies\.lock$|partitions\.csv$|\.github/workflows/(build|pr-policy)\.yml$|scripts/(ci-build-all|require-signed|check-signing-key-continuity|check-stack-budget|check-reproducible-build|verify-published-artifacts|production-ota-gate|run-runtime-integration-tests|run-sanitizer-fuzz-tests|run-browser-render-tests)\.(sh|py)$|tools/(release|stack|runtime|fuzz|browser)/)'
     check_gate "schematic-review" "schematic review" \
         '^(main/www/|docs/DESIGN\.md$|tools/schematic/|\.agents/skills/schematic-review/)'
     check_gate "ui-use-case-review" "complete UI use-case review" \
-        '^(main/www/|test/test_ui_|test/test_homehub_discovery_contract\.mjs$|test/test_mcp_dashboard\.mjs$|scripts/run-ui-use-case-tests\.sh$|tools/ui/|\.agents/skills/ui-use-case-review/|tools/agent-hooks/|\.codex/hooks\.json$|\.github/(pull_request_template\.md|workflows/build\.yml)$|docs/DESIGN\.md$)' \
+        '^(main/www/|test/test_ui_|test/test_homehub_discovery_contract\.mjs$|test/test_mcp_dashboard\.mjs$|scripts/run-ui-use-case-tests\.sh$|tools/ui/|\.agents/skills/ui-use-case-review/|tools/agent-hooks/|\.agents/hooks\.json$|\.github/(pull_request_template\.md|workflows/build\.yml)$|docs/DESIGN\.md$)' \
         ui_suite_relevant
     check_gate "absence-review" "source-absence review" \
         '^(main/(http_status|http_config|history|mqtt_ha|hp_modbus|hp_poll|env3|weather_forecast|safe_mode|main)\.(cpp|hpp)$|main/logic/(redact|heating_curve_diagnosis|circulation_source|history|env3|mqtt_publish_gate|health_gate|ota_channel)\.hpp$|main/www/|test/(runtime/|test_(ui_absence_matrix|source_absence_contract).*\.mjs$)|tools/(absence|browser)/|scripts/run-browser-render-tests\.sh$|\.agents/skills/absence-review/)' \

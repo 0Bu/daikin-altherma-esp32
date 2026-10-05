@@ -61,7 +61,7 @@ const GROUPS = [
                      "floor loop shut off"]],
   // Bare "pressure" is safe HERE and only here: the two water-pressure spellings are claimed by the
   // group above, so what is left ("Pressure", "Pressure sensor(T)", …) is refrigerant — the same
-  // generically-named rows logic/hp_convert.cpp documents as its known is_refrigerant_pressure gap.
+  // generically-named rows logic/convert.hpp documents as its known is_refrigerant_pressure gap.
   ["Refrigerant / outdoor", ["outdoor", "heat-exchanger", "heat exchanger", "o/u heat exch",
                              "pressure", "refrigerant", "refrig.", "compressor", "fan",
                              "expansion valve", "discharge", "suction", "liquid", "deicer",
@@ -302,10 +302,10 @@ function hpProbeRegNumber(value) {
 const HP_PROBE_CONVERTERS = Object.freeze([
   [105, 2], [106, 2], [107, 2], [108, 2], [114, 2], [119, 2],
   [101, 2], [102, 2], [103, 2], [104, 2], [109, 2], [110, 2], [111, 2], [118, 2],
-  [151, 2], [152, 2], [161, 2], [405, 2],
-  [105, 1], [101, 1], [152, 1], [161, 1],
-  [211, 1], [219, 1], [214, 1], [215, 1], [310, 1], [311, 1],
-  [217, 1], [203, 1], [204, 1], [315, 1], [316, 1],
+  [151, 2], [152, 2], [161, 2], [164, 2], [405, 2],
+  [105, 1], [101, 1], [152, 1], [161, 1], [164, 1], [312, 1],
+  [211, 1], [219, 1], [214, 1], [215, 1], [200, 1], [310, 1], [311, 1],
+  [217, 1], [201, 1], [203, 1], [204, 1], [315, 1], [316, 1],
   [300, 1], [301, 1], [302, 1], [303, 1], [304, 1], [305, 1], [306, 1], [307, 1],
 ]);
 
@@ -635,14 +635,29 @@ function dynamicInfoRow(key, label, value, valueCls, bodyHtml, action = "", titl
 // status paragraph says explicitly that they are no longer current.
 function weatherSourceDetailHtml(w, outdoor, solar) {
   let statusKey;
-  if (w.fetching) statusKey = "fetching";
-  else if (w.has_value && w.fresh) statusKey = "fresh";
-  else if (w.error) statusKey = "unavailable";
-  else if (w.has_value) statusKey = "stale";
-  else statusKey = "waiting";
+  let detailText;
+  const reason = w.freshness_reason || w.reason;
+  if (w.fetching) {
+    statusKey = "fetching";
+  } else if (w.has_value && w.fresh) {
+    statusKey = "fresh";
+  } else if (reason === "clock_unsynced") {
+    statusKey = "unavailable";
+    detailText = t("ref.clock_unsynced");
+  } else if (reason === "network_unavailable") {
+    statusKey = "unavailable";
+    detailText = t("card.offline");
+  } else if (w.error) {
+    statusKey = "unavailable";
+  } else if (w.has_value) {
+    statusKey = "stale";
+  } else {
+    statusKey = "waiting";
+  }
 
+  const detail = detailText || t(`wx.detail.${statusKey}`);
   let html = descNoteHtml(t("wx.detail.status"),
-    `${t(`wx.status.${statusKey}`)} — ${t(`wx.detail.${statusKey}`)}`);
+    `${t(`wx.status.${statusKey}`)} — ${detail}`);
   if (w.has_value) {
     html += descNoteHtml(t("wx.detail.temperature_label"), t("wx.detail.temperature", outdoor));
     html += descNoteHtml(t("wx.detail.solar_label"), t("wx.detail.solar", solar));
@@ -998,7 +1013,7 @@ function dynamicControlCardHtml() {
   rows += dynamicInfoRow("strategy", t("dyn.strategy"), t("dyn.shadow_strategy"), "",
     `<div class="vdesc-p">${esc(t("dyn.strategy_help"))}</div>`);
   // No "Safety & output → read-only" row. It was a hardcoded constant that could never say anything
-  // else, and since the write path was deleted (#294) it can never BECOME anything else either —
+  // else, and since the write path was deleted (legacy-294) it can never BECOME anything else either —
   // the same reason bus_tx_writes was dropped from the heartbeat. The card's own copy carries it.
   if (r.error) rows += vrow(t("ref.error"), r.error, { cls: "err settings-wrap" });
   if (w.error) rows += vrow(t("wx.error"), w.error, { cls: "err settings-wrap" });
@@ -1038,7 +1053,7 @@ const uptimeRow = (s) => vrow(t("card.uptime"), fmtUptime(s), { cls: "mono num" 
 const fmtKiB = (b) => (b == null ? "—" : `${Math.round(b / 1024)} KiB`);
 
 // The board's own memory: free heap and the largest CONTIGUOUS free block. These two are back on the
-// card after #186 dropped them, and the reason they are worth their space now is the reason they
+// card after legacy-186 dropped them, and the reason they are worth their space now is the reason they
 // were not then: each carries a 24-HOUR TREND. As spot numbers they were a diagnosis nobody could
 // make — "148 KiB" says nothing without the last day of it — and a diagnosis is what the /status
 // endpoint and the MQTT heartbeat are for. As curves they answer the one memory question this
@@ -1179,7 +1194,7 @@ function statusCardsHtml() {
   return hp.connected ? vcard(t("card.model"), model) : "";
 }
 
-// ── The diagnosis card — "is anything worth reporting?" (logic/checkup.hpp, #208/#349) ─────────
+// ── The diagnosis card — "is anything worth reporting?" (logic/checkup.hpp, legacy-208/legacy-349) ─────────
 // The dashboard already answers what the plant is doing NOW (the schematic) and what one reading did
 // today (a value row's trend). This is the third question, and the only one that needs counting
 // rather than reading: how often the compressor started, what share of runtime went into defrosting,

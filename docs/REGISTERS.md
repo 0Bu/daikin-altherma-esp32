@@ -28,15 +28,16 @@ matching `daik::ValueDef` in [`logic/value_def.hpp`](../main/logic/value_def.hpp
 | `offset` | Byte offset of the value **within the reply payload** (payload starts at byte 3 for protocol `I`) |
 | `conv` | Converter id — how the bytes become a number/enum (see [§3](#3-converter-reference)) |
 | `size` | Field width in bytes (1 or 2) |
-| `type` | Unit/`device_class` hint: `1`=°C, `2`=bar, `3`=A, `-1`=generic. Independent of `conv` |
+| `type` | Publication unit/`device_class`: `1`=°C, `2`=bar, `3`=A, `-1`=generic. Independent of `conv` |
 | `label` | Human label (English) |
 
 A model profile is just an array of these rows. One register request feeds many rows (all the
 values whose `reg` matches), each sliced out by `(offset, size)` and decoded by `conv`.
 
-> **`type` vs `conv`.** `conv` decides the *math* (sign, scale, enum). `type` only decides the HA
-> unit/`device_class` shown. Current values often carry `type = -1` and put "(A)" in the label; the
-> numeric scale still comes from `conv`.
+> **`type` vs `conv`.** `conv` decides the intrinsic wire decode (sign, scale, enum). `type` decides
+> the HA unit/`device_class` and normalizes pressure from wire kgf/cm² to published bar. Current
+> values often carry `type = -1` and put "(A)" in the label; their numeric scale still comes from
+> `conv`.
 
 ---
 
@@ -73,26 +74,31 @@ just `data[0]`. Sign is chosen by the converter. This is `read_u16`/`read_s16` i
 | 153 / 154 | u16 | `raw ÷ 256` | |
 | 155 / 156 | u16 | `raw × 0.1` | |
 | 157 / 158 | u16 | `raw ÷ 256 × 2` | |
-| 159 / 160 / 164 | u16 | `raw` | unsigned raw |
+| 159 / 160 | u16 | `raw` | unsigned raw |
+| **164** | u16 BE | `raw × 5.0` | **fan speed (Protocol S)** |
 | **161 / 162** | u16 | `raw × 0.5` | **CT current sensor (0.5 A/step)** |
 | 163 | u16 | `raw × 0.25` | |
 | 401–418 | s16 | same maths as 101–118 | **pressure/current family** — `type` selects display unit |
-| **405 / 406** | s16 | `raw × 0.1` (kgf/cm² ≈ bar) | **refrigerant pressure**; where the value is labelled "(T)" it is shown as **saturation temperature** — see below |
+| **405 / 406** | s16 | `raw × 0.1` kgf/cm² | **refrigerant pressure**; where the value is labelled "(T)" it is shown as **saturation temperature** — see below |
 | 451–465 | u16 | same maths as 151–165 | pressure family, unsigned |
 | 881–885 | s16 | `raw × 0.1` | |
 
-**Base units.** Temperatures are **°C**; pressures are **kgf/cm²** at the wire (0.098 → MPa,
-0.981 → bar, 14.223 → psi if a different display unit is wanted). The firmware works in °C and
-bar. `114 / 119` are target temperatures with a **"no data" marker** — raw little-endian bytes
+**Base units.** Temperatures are **°C**; pressures are **kgf/cm²** at the wire. `hp_format()` applies
+the exact `0.980665` factor before publishing a type-2 value as bar (`0.0980665` converts one raw
+tenth to bar). The gauge/absolute reference of the recovered X10A pressure field remains project
+evidence pending an independent service-gauge comparison. `114 / 119` are target temperatures with
+a **"no data" marker** — raw little-endian bytes
 `00 80`, i.e. the signed 16-bit value `0x8000` = `-3276.8` (matched on the decoded value in
 `logic/convert.hpp`), rendered as `---` — otherwise `raw × 0.1`.
 
 The same raw refrigerant-pressure bytes appear twice in a model: once as the pressure itself
 (`conv 105`, `type = 2` → bar) and once as the **saturation temperature** (`conv 405`, `type = 1` →
 °C). For the "(T)" saturation form, `conv 405` in [`logic/convert.hpp`](../main/logic/convert.hpp)
-takes `raw × 0.1` and applies a per-refrigerant pressure→saturation-temperature polynomial
-(R410A / R32 / R22), selected by the refrigerant from page `0x00`. A **0-bar** input (an absent/idle
-pressure sensor) is dropped rather than published as its `press2temp(0) ≈ -51 °C` placeholder.
+takes `raw × 0.1 kgf/cm²G` and applies a per-refrigerant pressure→saturation-temperature polynomial
+(R410A / R32 / R22), selected by the refrigerant from page `0x00`. Each correlation has a conservative
+monotonicity ceiling (40.0 / 47.0 / 28.0 kgf/cm²G respectively); zero, higher values, missing type
+metadata and unsupported R407C/R134a correlations are dropped instead of being extrapolated or
+substituted.
 
 **Publish-time plausibility (`reading_plausible`).** Beyond the per-converter `-3276.8` marker above,
 a decoded **°C** reading (`type = 1`) outside a physical envelope (`[-60, 200]`) is dropped at publish
@@ -133,6 +139,8 @@ Startup / Defrost / … / Low-noise).
 |-----:|---------|-----|
 | 310 | `(byte & 0x70) >> 4` | 3-bit protection-retry counter (bits 4–6) |
 | 311 | `byte & 0x07` | 3-bit counter / BUH output-capacity step (bits 0–2) |
+| 312 | `(byte & 0x7F) ÷ 16`, bit 7 sign | temperature deviation / delta (1/16 K steps, Protocol S) |
+| 200 | raw numeric byte | raw byte / output / frequency (Protocol S) |
 | 211 | raw numeric byte (`0` = stopped) | fan step |
 | 212 / 213 | byte as hex | MPU / option code |
 | 214 / 215 | raw byte (no name table) | model/software EEPROM identification digits — 215 a digit pair, 214 a single digit. Exposed as the raw byte; page `0x11` is rendered as space-separated hex for display (`logic/detect.hpp` `eeprom_render`) and used only as an auto-detection hint, never decoded to a model name. |
@@ -141,6 +149,7 @@ Startup / Defrost / … / Low-noise).
 
 | Conv | Field | Values |
 |-----:|-------|--------|
+| **201** | byte | Operation mode (Protocol S) — same values as conv 217 |
 | **217** | byte | Operation mode — see [§4.1](#41-operation-mode-conv-217) |
 | **315** | `(byte & 0xF0) >> 4` (**high nibble**) | Indoor/hydronic operation mode — see [§4.2](#42-indoorhydronic-operation-mode-conv-315) |
 | **203** | byte | Error class: `0` Normal, `1` Error, `2` Warning, `3` Caution |
@@ -519,6 +528,12 @@ the I/U capacity code (`0x60` offset 6).
 > deliberately a **page** rule: an individual inlet, outlet or target of exactly 0 °C remains
 > publishable when any other byte proves the page populated, and a short reply that does not reach
 > the flags proves nothing. Page `0xA0` above carries the same finding under a different signature.
+>
+> **Primary vs. raw data.** The rows on page `0xA1` (`(Raw data)...`) carry uncalibrated raw thermistor
+> values (or belong to an auxiliary/second outdoor unit on multi-unit systems). The primary hydronic
+> circuit water temperatures used for space heating/cooling ΔT, thermal output, and COP are the calibrated
+> sensors on page `0x61` (`0x61/2` R1T leaving water before BUH, and `0x61/8` R4T inlet water). Both
+> `logic/lwt_select.hpp` and `logic/rwt_select.hpp` ensure primary sensors take precedence over raw data.
 
 #### Register `0x60`
 
@@ -663,6 +678,64 @@ the I/U capacity code (`0x60` offset 6).
 | 0 | 2 | 105 |  | °C | Outlet water heat exchanger temp (hydro split model) DLWB2 |
 | 0 | 2 | 105 |  | °C | [EKMIK] Bizone kit mixed leaving water temperature R1T |
 | 0 | 1 | 101 |  |  | [EKMIK] Bizone kit mix valve position M1S |
+
+### Protocol S Registers (UNVERIFIED)
+
+> [!WARNING]
+> Protocol S registers (`0x50`, `0x53`, `0x54`, `0x55`) and profile `protocol_s` are derived from reverse-engineered community tables without verified hardware traces or official manufacturer documentation. All mappings and conversions remain unverified on physical hardware.
+
+#### Register `0x50` (UNVERIFIED)
+
+Protocol S refrigerant pressure sensors.
+
+| Off | Len | Conv | Bit | Type | Value |
+|----:|----:|:----:|:---:|:----:|-------|
+| 0 | 2 | 103 |  | bar | HP Sensor(bar) |
+| 2 | 2 | 103 |  | bar | LP Sensor(bar) |
+
+#### Register `0x53` (UNVERIFIED)
+
+Protocol S outdoor unit actuators and inverter states.
+
+| Off | Len | Conv | Bit | Type | Value |
+|----:|----:|:----:|:---:|:----:|-------|
+| 0 | 2 | 152 |  |  | EV (pls) |
+| 2 | 1 | 164 |  |  | Outdoor Fan (Upper)(rps) |
+| 3 | 1 | 164 |  |  | Outdoor Fan (Lower)(rps) |
+| 4 | 1 | 200 |  |  | INV Comp. Frequency(Hz) |
+| 5 | 1 | 200 |  |  | Comp. Preheat |
+| 6 | 1 | 200 |  |  | 52C Output |
+| 7 | 1 | 200 |  |  | 20S (4-way) Output |
+| 8 | 1 | 200 |  |  | 20R (SV) Output |
+| 10 | 1 | 200 |  |  | Crankcase Heater |
+| 11 | 1 | 200 |  |  | Ener-Cut Output |
+
+#### Register `0x54` (UNVERIFIED)
+
+Protocol S temperatures and setpoints.
+
+| Off | Len | Conv | Bit | Type | Value |
+|----:|----:|:----:|:---:|:----:|-------|
+| 0 | 2 | 103 |  | °C | Indoor Suction Air Temp.(C) |
+| 2 | 2 | 103 |  | °C | Indoor Heat Exchanger Temp.(C) |
+| 4 | 2 | 103 |  | °C | Outdoor air temp.(C) |
+| 6 | 2 | 103 |  | °C | Outdoor heat exchanger temp.(C) |
+| 8 | 2 | 109 |  | °C | Discharge pipe temp.(C) |
+| 10 | 2 | 103 |  | °C | Fin Temp.(C) |
+| 12 | 1 | 312 |  |  | Delta-Tr(deg) |
+| 13 | 1 | 200 |  |  | R/C Setpoint(C) |
+
+#### Register `0x55` (UNVERIFIED)
+
+Protocol S operation mode and diagnostic fault codes.
+
+| Off | Len | Conv | Bit | Type | Value |
+|----:|----:|:----:|:---:|:----:|-------|
+| 0 | 1 | 201 |  |  | Operation Mode |
+| 1 | 1 | 204 |  |  | Error Code |
+| 2 | 1 | 204 |  |  | Thermo Off Error |
+| 3 | 1 | 204 |  |  | Warning Code |
+| 4 | 1 | 204 |  |  | Caution Code |
 
 ---
 

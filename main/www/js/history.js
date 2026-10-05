@@ -104,13 +104,21 @@ const DERIVED = {
     fn: (s) => (s.leaving_water == null || s.return_water == null ? null
                                                                   : s.leaving_water - s.return_water),
   },
-  // Water ≈ 4.186 kJ/kg·K, flow in l/min — d.pth's formula, and SIGNED for its reason: during a
+  // Water ρ·cp ≈ 4.186 kJ/l·K, flow in l/min — d.pth's formula, and SIGNED for its reason: during a
   // defrost the unit pulls heat back out of the water and the curve must show that, not a floor.
+  // A stopped circuit with measured zero flow is zero transfer. With water still moving, however,
+  // the compressor witness is mandatory: pump overrun can redistribute stored heat and a non-zero
+  // arithmetic balance in that bucket is not heat-pump output (the same rule as thermalValue()).
   pth: {
-    unit: "kW", ins: ["flow", "leaving_water", "return_water"],
-    ready: (h) => h.flow && h.leaving_water && h.return_water,
-    fn: (s) => (s.flow == null || s.leaving_water == null || s.return_water == null
-                  ? null : (s.flow / 60) * 4.186 * (s.leaving_water - s.return_water)),
+    unit: "kW", ins: ["flow", "leaving_water", "return_water", "comp_rps"],
+    ready: (h) => h.flow && h.leaving_water && h.return_water && h.comp_rps,
+    fn: (s) => {
+      if (s.flow == null) return null;
+      if (!(s.flow > 0.5)) return 0;
+      if (s.leaving_water == null || s.return_water == null || s.comp_rps == null) return null;
+      if (!(s.comp_rps > 5)) return null;
+      return (s.flow / 60) * 4.186 * (s.leaving_water - s.return_water);
+    },
   },
   // Amps × an assumed 230 V, a complete declared CT set preferred over inverter current —
   // liveData()'s rule, one sample at a time. The live version needs `d.ouHeldOver` to gate the INV
@@ -169,9 +177,19 @@ function histHeld(h, i) {
 // per-poll refetch would send ~300 identical responses per new data point — and each response is a
 // ~1 KB contiguous string on the single httpd task (AGENTS.md → Memory, concurrency, and HTTP
 // safety).
-const histCacheKey = (id, source) => source === "modbus" ? `modbus:${id}`
-  : source === "env3" ? `env3:${id}` : id;
+const modbusEndpointId = () => {
+  const mb = S.status?.modbus || {};
+  return mb.host ? `${mb.host}:${mb.port || 502}:${mb.unit_id || 1}` : "";
+};
+const histCacheKey = (id, source) => {
+  if (source === "modbus") {
+    const ep = modbusEndpointId();
+    return ep ? `modbus:${ep}:${id}` : `modbus:${id}`;
+  }
+  return source === "env3" ? `env3:${id}` : id;
+};
 async function ensureHist(id, source = "x10a", paint = true, signal = null) {
+  const epoch = syncHistSources();
   const key = histCacheKey(id, source);
   const offered = source === "modbus" ? hasModbusHist(id)
     : source === "env3" ? hasEnv3Hist(id) : hasHist(id);
@@ -180,6 +198,9 @@ async function ensureHist(id, source = "x10a", paint = true, signal = null) {
   if (c && Date.now() - c.at < 60000) return;
   if (source === "x10a" && DERIVED[id]) { await ensureDerived(id); return; }
   const previous = S.hist.get(key);
+  const sourceId = source === "modbus" ? (modbusEndpointId() || "modbus") : source;
+  const request = { epoch };
+  (S.histRequests ||= new Map()).set(key, request);
   S.histBusy.add(key);
   try {
     const suffix = source === "modbus" ? "&source=modbus"
@@ -187,6 +208,7 @@ async function ensureHist(id, source = "x10a", paint = true, signal = null) {
     const r = await fetch("/history?row=" + encodeURIComponent(id) + suffix,
                           signal ? { signal } : undefined);
     const j = await r.json();
+    if (syncHistSources() !== epoch || S.histRequests.get(key) !== request) return;
     // t0 = the unix instant of sample 0, present only when the device's SNTP clock is synced. Null
     // means the scrub readout falls back to an AGE ("vor 6.3 h") — never a fabricated wall-clock
     // time, the same rule logic/timestamp.hpp applies to an unsynced clock on the firmware side.
@@ -197,7 +219,7 @@ async function ensureHist(id, source = "x10a", paint = true, signal = null) {
     // A few legacy X10A rows carry their unit only in the catalog label. Normalise that at the
     // visual boundary too, otherwise the live row can say "22.8 L/min" while its own trend and
     // crosshair still say just "22.8". The API remains byte-for-byte compatible.
-    const device = { at: Date.now(), gen, source, dt: +j.dt || 300, unit: displayUnit(j),
+    const device = { at: Date.now(), gen, source, sourceId, dt: +j.dt || 300, unit: displayUnit(j),
                      label: typeof j.label === "string" ? j.label : "",
                      t0: typeof j.t0 === "number" ? j.t0 : null,
                      b0: Number.isInteger(j.b0) ? j.b0 : null,
@@ -205,10 +227,15 @@ async function ensureHist(id, source = "x10a", paint = true, signal = null) {
                      v: Array.isArray(j.v) ? j.v : [] };
     S.hist.set(key, device);
   } catch (e) {
-    S.hist.set(key, { at: Date.now(), source, err: true, v: [] });
+    if (syncHistSources() === epoch && S.histRequests.get(key) === request)
+      S.hist.set(key, { at: Date.now(), source, sourceId, err: true, v: [] });
   } finally {
-    S.histBusy.delete(key);
-    if (paint) renderApp();
+    // An obsolete request must not release a successor using the same cache key.
+    if (S.histRequests.get(key) === request) {
+      S.histRequests.delete(key);
+      S.histBusy.delete(key);
+      if (paint) renderApp();
+    }
   }
 }
 
@@ -219,6 +246,10 @@ async function ensureHistPair(id) {
     hasHist(id) ? ensureHist(id) : null,
     hasModbusHist(id) ? ensureHist(id, "modbus") : null,
     hasEnv3Hist(id) ? ensureHist(id, "env3") : null,
+    id === "dhw_tank" ? ensureHist("smart_grid_mode") : null,
+    id === "dhw_tank" ? ensureHist("smart_grid_mode", "modbus") : null,
+    id === "dhw_tank" ? ensureHist("bsh_state") : null,
+    id === "dhw_tank" ? ensureHist("bsh_state", "modbus") : null,
   ]);
 }
 
@@ -237,13 +268,17 @@ async function ensureHistPair(id) {
 // than a guess; wall time is the next choice, and newest-tail alignment remains only for legacy
 // responses without either anchor.
 async function ensureDerived(id) {
+  const epoch = syncHistSources();
   const D = DERIVED[id];
   if (S.histBusy.has(id)) return;
+  const request = { epoch };
+  (S.histRequests ||= new Map()).set(id, request);
   S.histBusy.add(id);
   try {
     const has = Object.fromEntries(D.ins.map((k) => [k, hasDeviceHist(k)]));
     const use = D.ins.filter((k) => has[k]);
     await Promise.all(use.map((k) => ensureHist(k)));
+    if (syncHistSources() !== epoch || S.histRequests.get(id) !== request) return;
     const src = use.map((k) => [k, S.hist.get(k)]).filter(([, h]) => h && !h.err && h.v.length);
     if (!src.length) { S.hist.set(id, { at: Date.now(), err: true, v: [] }); return; }
     const dt = src[0][1].dt || 300;
@@ -299,9 +334,14 @@ async function ensureDerived(id) {
                      b0: Number.isInteger(b0) ? b0 : null,
                      held: heldRuns, v });
   } catch (e) {
-    S.hist.set(id, { at: Date.now(), err: true, v: [] });
+    if (syncHistSources() === epoch && S.histRequests.get(id) === request)
+      S.hist.set(id, { at: Date.now(), err: true, v: [] });
   } finally {
-    S.histBusy.delete(id); renderApp();
+    if (S.histRequests.get(id) === request) {
+      S.histRequests.delete(id);
+      S.histBusy.delete(id);
+      renderApp();
+    }
   }
 }
 
@@ -730,7 +770,7 @@ function dwellDuration(seconds, bound = false) {
 //   dwell_s        seconds the current state has stood, as far as the board could tell
 //   dwell_min      the transition was never witnessed, so the true age is at LEAST that. Rendered
 //                  as "at least", never dropped: a run this board joined in progress is a weaker
-//                  claim than one it watched arrive, and printing them identically is the #35-#39
+//                  claim than one it watched arrive, and printing them identically is the legacy-35–legacy-39
 //                  shape — a true number carrying more authority than its evidence.
 //   dwell_blind_s  how much of the run the bus did not answer for. A flag can pulse and return
 //                  inside a gap, so a run spanning one is not a run that was watched.
@@ -864,6 +904,48 @@ function stateHistHtml(id, name, view, wrap, cfg) {
   , "vhist-state");
 }
 
+function alignAuxSample(view, h, i) {
+  if (!h || !Array.isArray(h.v) || !h.v.length) return null;
+  let idx = -1;
+  if (Number.isInteger(view.b0) && Number.isInteger(h.b0)) {
+    idx = (view.b0 + i) - h.b0;
+  } else if (typeof view.t0 === "number" && typeof h.t0 === "number") {
+    const dt = h.dt || view.dt || 300;
+    idx = Math.round(((view.t0 + i * (view.dt || 300)) - h.t0) / dt);
+  } else {
+    idx = h.v.length - view.v.length + i;
+  }
+  return (idx >= 0 && idx < h.v.length) ? h.v[idx] : null;
+}
+
+function dhwAuxPhases(view) {
+  if (!view || view.id !== "dhw_tank" || !Array.isArray(view.v)) return null;
+  const sgM = S.hist?.get?.(histCacheKey("smart_grid_mode", "modbus"));
+  const sgX = S.hist?.get?.("smart_grid_mode");
+  const bshX = S.hist?.get?.("bsh_state");
+  const bshM = S.hist?.get?.(histCacheKey("bsh_state", "modbus"));
+  if (!sgM && !sgX && !bshX && !bshM) return null;
+
+  const n = view.v.length;
+  const boost = Array(n).fill(false);
+  const bsh = Array(n).fill(false);
+  let boostCount = 0, bshCount = 0;
+
+  for (let i = 0; i < n; i++) {
+    const vSg = alignAuxSample(view, sgM, i) ?? alignAuxSample(view, sgX, i);
+    if (vSg != null && vSg === 20) {
+      boost[i] = true;
+      boostCount++;
+    }
+    const vBsh = alignAuxSample(view, bshX, i) ?? alignAuxSample(view, bshM, i);
+    if (vBsh != null && vBsh === 10) {
+      bsh[i] = true;
+      bshCount++;
+    }
+  }
+  return { boost, bsh, boostCount, bshCount, dt: view.dt || 300 };
+}
+
 // One historied row's trend, as the markup appended under its explainer text. Every state is a
 // SENTENCE rather than an empty box: not fetched, no readings yet, fetch failed. `null` samples are
 // GAPS (a timed-out register, or a reading reading_plausible() refused) and must break the line —
@@ -991,9 +1073,52 @@ function histHtml(id, unit, name, source = "") {
     pinTip = `<div class="vhist-tip vhist-pinned ${tipSideClass(frac)} mono num" ` +
       `style="--tip-p:${px}">${esc(scrubText(view, pi))}</div>`;
   }
-  const legend = view.series.length > 1 || view.series[0].source === "modbus"
-    ? `<div class="vhist-legend">${view.series.map((s) =>
-        `<span class="vhist-source${s.source === "modbus" ? " mb" : ""}"><i></i>${esc(s.name)}</span>`).join("")}</div>`
+  const aux = id === "dhw_tank" ? dhwAuxPhases(view) : null;
+  let phaseBands = "";
+  const legendItems = (view.series.length > 1 || view.series[0].source === "modbus")
+    ? view.series.map((s) =>
+        `<span class="vhist-source${s.source === "modbus" ? " mb" : ""}"><i></i>${esc(s.name)}</span>`)
+    : [];
+  if (aux) {
+    const toRuns = (flags) => {
+      const out = [];
+      for (let i = 0; i < flags.length; i++) {
+        if (!flags[i]) continue;
+        const from = i;
+        while (i + 1 < flags.length && flags[i + 1]) i++;
+        out.push([from, i - from + 1]);
+      }
+      return out;
+    };
+    const step = n > 1 ? HIST_W / (n - 1) : HIST_W;
+    const renderRuns = (runs, cls) => {
+      let s = "";
+      for (const [from, count] of runs) {
+        const x0 = n > 1 ? Math.max(0, X(from) - step / 2) : 0;
+        const x1 = n > 1 ? Math.min(HIST_W, X(from + count - 1) + step / 2) : HIST_W;
+        const w = Math.max(1, x1 - x0);
+        s += `<rect class="vhist-phase ${cls}" x="${x0.toFixed(1)}" y="0" width="${w.toFixed(1)}" height="${HIST_H}"/>`;
+      }
+      return s;
+    };
+    phaseBands += renderRuns(toRuns(aux.boost), "vhist-phase-boost");
+    phaseBands += renderRuns(toRuns(aux.bsh), "vhist-phase-bsh");
+
+    if (aux.boostCount > 0) {
+      legendItems.push(
+        `<span class="vhist-source vhist-legend-boost"><i></i>${esc(t("hist.boost_active"))}` +
+        ` <small class="mono num">(${histDuration(aux.boostCount * aux.dt)})</small></span>`
+      );
+    }
+    if (aux.bshCount > 0) {
+      legendItems.push(
+        `<span class="vhist-source vhist-legend-bsh"><i></i>${esc(t("hist.heater_active"))}` +
+        ` <small class="mono num">(${histDuration(aux.bshCount * aux.dt)})</small></span>`
+      );
+    }
+  }
+  const legend = legendItems.length
+    ? `<div class="vhist-legend">${legendItems.join("")}</div>`
     : "";
   return wrap(
     `<div class="vhist-head"><span class="vhist-t">${esc(full ? t("hist.title") : t("hist.recorded", spanH))}</span>` +
@@ -1002,7 +1127,7 @@ function histHtml(id, unit, name, source = "") {
       `<div class="vhist-tip vhist-live vhist-tip-right mono num" hidden></div>` + pinTip +
       `<div class="vhist-plot" data-hist="${esc(id)}"${sourceAttr} data-n="${n}" tabindex="0" role="img"` +
         ` aria-label="${esc(t(pi >= 0 ? "hist.aria_pinned" : "hist.aria", name || id, pi >= 0 ? scrubText(view, pi) : ""))}">` +
-        `<svg viewBox="0 0 ${HIST_W} ${HIST_H}" preserveAspectRatio="none" aria-hidden="true">${area}${line}${dots}</svg>` +
+        `<svg viewBox="0 0 ${HIST_W} ${HIST_H}" preserveAspectRatio="none" aria-hidden="true">${phaseBands}${area}${line}${dots}</svg>` +
         nowDots + pinCross + pinMarks +
         `<span class="vhist-cross vhist-live" hidden></span>` +
         view.series.map((s) => `<span class="vhist-mark vhist-live${s.source === "modbus" ? " mb" : ""}" data-source="${s.source}" hidden></span>`).join("") +
@@ -1406,7 +1531,17 @@ function scrubText(h, i) {
   const val = h.series && (h.series.length > 1 || h.series[0].source === "modbus")
     ? h.series.map(sourceText).join(h.id === "outdoor_air" ? "\n" : " · ")
     : valueText(h.series ? h.series[0] : h);
-  return pointWhen() + " · " + val;
+  let res = pointWhen() + " · " + val;
+  if (h.id === "dhw_tank") {
+    const aux = dhwAuxPhases(h);
+    if (aux) {
+      const active = [];
+      if (aux.boost[i]) active.push(t("hist.boost_active"));
+      if (aux.bsh[i]) active.push(t("hist.heater_active"));
+      if (active.length) res += " · " + active.join(" + ");
+    }
+  }
+  return res;
 }
 
 // The combined ENV III tooltip is the one place where three independently scaled instruments are
@@ -1797,7 +1932,7 @@ function vDescRow(v) {
 //
 // The Model card's rows are the ones that most need explaining and were the last with no explainer:
 // they answer questions the reader did not ask ("possible models" — why more than one? "outdoor unit
-// ID" — for what?) in vocabulary taken from the bus. #184 added the two rows precisely so an
+// ID" — for what?) in vocabulary taken from the bus. legacy-184 added the two rows precisely so an
 // ambiguous detection reads as a detection that succeeded as far as the wire permits — but the card
 // states the FACT and never the reason, so it still reads as a failure to anyone who does not
 // already know why a heat pump cannot name itself.
@@ -1831,7 +1966,7 @@ const MODEL_DESCRIPTIONS = {
     what: "Measures quiet-hour R5T without charge/draw/heat. R5T is one point in a stratified tank. K/h is the greatest hourly drop, not mean/day total; pump tag is correlation, not cause.",
     normal: "NOTE ≥0.8 K/h is a project heuristic; volume/room-temperature gap affects rate. Detection ends near 1.85 K/h; faster loss may look like a draw. OK proves neither insulation nor valves. 200 l assumes uniform cooling. 24 h sets each window=maximum and assumes COP 2.5–3.0: replacement-electricity direction, not measured daily use.",
     de: { what: "Misst ruhige R5T-Stunden ohne Laden/Zapfen/Heizen. R5T: ein Punkt im geschichteten Speicher. K/h: höchster Stundenabfall, kein Mittel-/Tageswert; Pumpenangabe: Zusammenhang, keine Ursache.",
-          normal: "HINWEIS ≥0,8 K/h ist Projektheuristik; Volumen/Abstand zur Raumtemperatur ändern den Wert. Erkennung endet nahe 1,85 K/h; mehr Verlust kann wie Zapfung wirken. OK belegt weder Dämmung noch Ventile. 200 l nimmt gleichmäßige Abkühlung an. 24 h setzt jedes Fenster=Maximum und COP 2,5–3,0 an: Ersatzstrom-Richtung, kein Messwert." } },
+          normal: "HINWEIS ≥0,8 K/h ist Projektheuristik; Volumen/Abstand zur Raumtemperatur ändern den Wert. Erkennung endet nahe 1,85 K/h; mehr Verlust wirkt wie Zapfung. OK belegt weder Dämmung noch Ventile. 200 l nimmt gleichmäßige Abkühlung an. 24 h setzt jedes Fenster=Maximum und COP 2,5–3,0 an: elektrischer Nachheizbedarf, kein Messwert." } },
   health_cycling: {
     what: "Counts each compressor change from OFF to ON and how long a complete run lasted. Where the signals permit, runs are separated into space heating, hot water and cooling. Mixed or unread runs are shown as unclassified.",
     normal: "Confirmed heating runs average at least 10 min. With 12 or more averaging under 10 min, NOTE appears. Hot water and cooling are excluded. If too many runs are unclassified, all runs are assessed together. This is not a Daikin limit.",
@@ -1869,7 +2004,7 @@ const MODEL_DESCRIPTIONS = {
     what: "RAM that is currently unused by the firmware. Short changes are normal because WiFi, MQTT and web requests allocate temporary memory; the 24-hour trend is more useful than one reading.",
     normal: "a broadly stable line with temporary dips that recover. A persistent downward trend can indicate retained allocations and should be investigated. A restart that kept power carries the trend over in RAM; a normal reboot, firmware update or sudden power loss restores completed five-minute buckets from device flash. Only the bucket open at the interruption may be missing.",
     de: { what: "Arbeitsspeicher, den die Firmware gerade nicht verwendet. Kurze Schwankungen sind normal, weil WLAN, MQTT und Web-Anfragen vorübergehend Speicher belegen; der 24-Stunden-Verlauf ist aussagekräftiger als ein Einzelwert.",
-          normal: "eine insgesamt stabile Linie mit vorübergehenden Einbrüchen, die sich erholen. Ein dauerhaft fallender Verlauf kann auf nicht freigegebenen Speicher hinweisen und sollte untersucht werden. Ein Neustart mit erhaltener Spannung übernimmt den Verlauf im RAM; ein normaler Neustart, Firmware-Update oder plötzlicher Spannungsverlust stellt abgeschlossene Fünf-Minuten-Buckets aus dem Geräte-Flash wieder her. Nur der beim Abbruch offene Bucket kann fehlen." } },
+          normal: "eine insgesamt stabile Linie mit vorübergehenden Einbrüchen, die sich erholen. Ein dauerhaft fallender Verlauf kann auf nicht freigegebenen Speicher hinweisen und sollte untersucht werden. Ein Neustart mit erhaltener Spannung übernimmt den Verlauf im RAM; ein normaler Neustart, Firmware-Update oder plötzlicher Spannungsverlust stellt abgeschlossene 5-Minuten-Messintervalle aus dem Geräte-Flash wieder her. Nur das beim Abbruch offene Messintervall kann fehlen." } },
   max_alloc: {
     what: "The largest contiguous block of free RAM. Some operations, including TLS setup and OTA work, need one sufficiently large block even when the total free RAM is higher.",
     normal: "it is always at or below total free RAM. If total free RAM stays stable while this value keeps falling, the heap is becoming fragmented; that can make a large allocation fail before all RAM is used.",
@@ -1889,7 +2024,7 @@ const MODEL_DESCRIPTIONS = {
   // "the candidate set spans DIFFERENT kW classes, so it is NOT register-identical and the
   // representative choice does affect the values". Asserting the reassuring version in both states
   // would put a false claim on screen in exactly the state that produces this row most often (a
-  // short 0x00 descriptor), which is the #35-#39 shape in copy rather than in a converter.
+  // short 0x00 descriptor), which is the legacy-35–legacy-39 shape in copy rather than in a converter.
   candidates: {
     what: "Several Daikin model families expose the same registers and values on the service interface, so the exact marketing name cannot be distinguished there. The heading deliberately stays \"Daikin Altherma\" instead of guessing a model.",
     normal: "the readings are unaffected: the outdoor unit reported its rated capacity, and all remaining candidates use the same capacity class and register layout. To identify the exact model, compare the outdoor-unit ID below with the nameplate.",

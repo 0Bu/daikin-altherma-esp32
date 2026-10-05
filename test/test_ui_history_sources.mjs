@@ -134,32 +134,32 @@ const context = {
     if (key === "hist.boost_active") return "Boost aktiv";
     if (key === "hist.boost_inactive") return "Boost aus";
     if (key === "hist.boost_aria") return `${arg} — Boost-Verlauf. ${arg2}`;
-    if (key === "hist.defrost_total") return `Abtauen aktiv erfasst · ${arg} Rasterzeit`;
+    if (key === "hist.defrost_total") return `Abtauen aktiv erfasst · ${arg} im 5-Minuten-Raster`;
     if (key === "hist.defrost_none") return "Kein Abtauvorgang erfasst.";
     if (key === "hist.defrost_active") return "Abtauen aktiv";
     if (key === "hist.defrost_inactive") return "Abtauen aus";
     if (key === "hist.defrost_aria") return `${arg} — Abtauverlauf. ${arg2}`;
-    if (key === "hist.quiet_total") return `Leise-Modus aktiv erfasst · ${arg} Rasterzeit`;
+    if (key === "hist.quiet_total") return `Leise-Modus aktiv erfasst · ${arg} im 5-Minuten-Raster`;
     if (key === "hist.quiet_none") return "Kein Leise-Modus erfasst.";
     if (key === "hist.quiet_active") return "Leise-Modus aktiv";
     if (key === "hist.quiet_inactive") return "Leise-Modus aus";
     if (key === "hist.quiet_aria") return `${arg} — Verlauf des Leise-Modus. ${arg2}`;
-    if (key === "hist.heater_total") return `Heizstab aktiv erfasst · ${arg} Rasterzeit`;
+    if (key === "hist.heater_total") return `Heizstab aktiv erfasst · ${arg} im 5-Minuten-Raster`;
     if (key === "hist.heater_none") return "Kein Heizstabeinsatz erfasst.";
     if (key === "hist.heater_active") return "Heizstab aktiv";
     if (key === "hist.heater_inactive") return "Heizstab aus";
     if (key === "hist.heater_aria") return `${arg} — Heizstab-Verlauf. ${arg2}`;
-    if (key === "hist.preheat_total") return `Speichervorheizung aktiv erfasst · ${arg} Rasterzeit`;
+    if (key === "hist.preheat_total") return `Speichervorheizung aktiv erfasst · ${arg} im 5-Minuten-Raster`;
     if (key === "hist.preheat_none") return "Keine Speichervorheizung erfasst.";
     if (key === "hist.preheat_active") return "Speichervorheizung aktiv";
     if (key === "hist.preheat_inactive") return "Speichervorheizung aus";
     if (key === "hist.preheat_aria") return `${arg} — X10A-Vorheizverlauf. ${arg2}`;
-    if (key === "hist.disinfection_total") return `Desinfektion aktiv erfasst · ${arg} Rasterzeit`;
+    if (key === "hist.disinfection_total") return `Desinfektion aktiv erfasst · ${arg} im 5-Minuten-Raster`;
     if (key === "hist.disinfection_none") return "Keine Speicherdesinfektion erfasst.";
     if (key === "hist.disinfection_active") return "Desinfektion aktiv";
     if (key === "hist.disinfection_inactive") return "Desinfektion aus";
     if (key === "hist.disinfection_aria") return `${arg} — HomeHub-Desinfektionsverlauf. ${arg2}`;
-    if (key === "hist.buh_total") return `Zusatzheizer aktiv erfasst · ${arg} Rasterzeit`;
+    if (key === "hist.buh_total") return `Zusatzheizer aktiv erfasst · ${arg} im 5-Minuten-Raster`;
     if (key === "hist.buh_none") return "Kein Zusatzheizereinsatz erfasst.";
     if (key === "hist.buh_active") return "Zusatzheizer aktiv";
     if (key === "hist.buh_inactive") return "Zusatzheizer aus";
@@ -172,7 +172,7 @@ const context = {
     if (key === "hist.valve_dhw") return "Warmwasser";
     if (key === "hist.valve_space") return "Raumkreis";
     if (key === "hist.valve_aria") return `${arg} — 3-Wege-Ventil-Verlauf. ${arg2}`;
-    if (key === "hist.circ_total") return `Pumpe laufend erfasst · ${arg} Rasterzeit`;
+    if (key === "hist.circ_total") return `Pumpe laufend erfasst · ${arg} im 5-Minuten-Raster`;
     if (key === "hist.circ_none") return "Kein Pumpenlauf erfasst.";
     if (key === "hist.circ_on") return "Läuft";
     if (key === "hist.circ_off") return "Steht";
@@ -197,9 +197,11 @@ const context = {
   setTimeout, clearTimeout, Date, Map, Set, console,
 };
 vm.createContext(context);
-vm.runInContext(readAppFragments(["history.js"]) +
+const lifecycleSource = appState.slice(appState.indexOf("// ── History source lifecycle"),
+  appState.indexOf("// ── Navigation (dashboard ⇄ Settings)"));
+vm.runInContext(lifecycleSource + readAppFragments(["history.js"]) +
   "\nthis.__api = { hasHist, hasModbusHist, histCacheKey, historyView, histHtml, scrubText," +
-  " scrubMove, ensureHist, ensureHistPair, ensureDerived, DERIVED };", context,
+  " scrubMove, ensureHist, ensureHistPair, ensureDerived, DERIVED, syncHistSources, invalidateHistSources };", context,
   { filename: "main/www/js/history.js" });
 const h = context.__api;
 
@@ -293,6 +295,27 @@ assert.equal(h.DERIVED.cop.fn({
   ct_l1: 1, ct_l2: 1, ct_l3: 1,
 }, threeCtPhases), null,
   "a complete positive CT set must still suppress the mismatched historical COP boundary");
+
+// Thermal output has the same compressor boundary as the live pill. Preserve a no-flow bucket as
+// zero, retain signed active/defrost transfer, and refuse pump-overrun redistribution.
+assert.equal(h.DERIVED.pth.ready({
+  flow: true, leaving_water: true, return_water: true, comp_rps: false,
+}), false, "thermal output is unavailable when the profile has no compressor witness");
+assert.equal(h.DERIVED.pth.fn({
+  flow: 0, leaving_water: 35, return_water: 30, comp_rps: 0,
+}), 0, "a stopped circuit with measured zero flow is zero transfer");
+assert.equal(h.DERIVED.pth.fn({
+  flow: 0, leaving_water: null, return_water: null, comp_rps: null,
+}), 0, "measured no flow proves zero transfer without temperature or compressor samples");
+assert.equal(h.DERIVED.pth.fn({
+  flow: 20, leaving_water: 35, return_water: 30, comp_rps: 0,
+}), null, "pump overrun must not be drawn as heat-pump output");
+assert.ok(h.DERIVED.pth.fn({
+  flow: 20, leaving_water: 35, return_water: 30, comp_rps: 45,
+}) > 0, "a running compressor keeps the signed water-side transfer");
+assert.ok(h.DERIVED.pth.fn({
+  flow: 20, leaving_water: 30, return_water: 35, comp_rps: 45,
+}) < 0, "defrost and cooling retain the signed reverse transfer");
 
 // A successful HomeHub poll proves transport freshness, not when the controller last refreshed its
 // outdoor-temperature register. Keep that qualification in the graph popup: the chart must remain
@@ -480,7 +503,7 @@ const bshView = h.historyView("bsh_state");
 const bshHtml = h.histHtml("bsh_state", "", "Heizstab");
 assert.match(bshHtml, /vhist-state-track/);
 assert.doesNotMatch(bshHtml, /vhist-line/);
-assert.match(bshHtml, /Heizstab aktiv erfasst · 10 min Rasterzeit/);
+assert.match(bshHtml, /Heizstab aktiv erfasst · 10 min im 5-Minuten-Raster/);
 assert.match(bshHtml, /vhist-state-on state-off/);
 assert.match(bshHtml, /vhist-state-on heater-on/);
 assert.doesNotMatch(bshHtml, /vhist-state-runs|· Phasen/);
@@ -529,7 +552,7 @@ const defrostView = h.historyView("defrost_state");
 const defrostHtml = h.histHtml("defrost_state", "", "Abtauen");
 assert.match(defrostHtml, /vhist-state-track/);
 assert.doesNotMatch(defrostHtml, /vhist-line/);
-assert.match(defrostHtml, /Abtauen aktiv erfasst · 10 min Rasterzeit/);
+assert.match(defrostHtml, /Abtauen aktiv erfasst · 10 min im 5-Minuten-Raster/);
 assert.match(defrostHtml, /vhist-state-on state-off/);
 assert.match(defrostHtml, /vhist-state-on defrost-on/);
 assert.doesNotMatch(defrostHtml, /vhist-state-runs|· Phasen/);
@@ -544,7 +567,7 @@ const quietHtml = h.histHtml("quiet_state", "", "Leise-Modus");
 assert.equal(quietView.series.length, 2);
 assert.match(quietHtml, /vhist-state-track/);
 assert.doesNotMatch(quietHtml, /vhist-line/);
-assert.match(quietHtml, /Leise-Modus aktiv erfasst · 10 min Rasterzeit/);
+assert.match(quietHtml, /Leise-Modus aktiv erfasst · 10 min im 5-Minuten-Raster/);
 assert.equal((quietHtml.match(/vhist-state-track/g) || []).length, 2);
 assert.match(quietHtml, /vhist-state-lane-label">X10A/);
 assert.match(quietHtml, /vhist-state-lane-label mb">Modbus/);
@@ -571,7 +594,7 @@ const buhView = h.historyView("buh_state");
 const buhHtml = h.histHtml("buh_state", "", "Zusatzheizer · BUH");
 assert.match(buhHtml, /vhist-state-track/);
 assert.doesNotMatch(buhHtml, /vhist-line/);
-assert.match(buhHtml, /Zusatzheizer aktiv erfasst · 15 min Rasterzeit/);
+assert.match(buhHtml, /Zusatzheizer aktiv erfasst · 15 min im 5-Minuten-Raster/);
 assert.match(buhHtml, /vhist-state-on step1/);
 assert.match(buhHtml, /vhist-state-on step2/);
 assert.match(buhHtml, /vhist-state-on state-off/);
@@ -680,7 +703,7 @@ for (const [id, primarySource, expected] of liveStateCases) {
     `${id} must expose the current state at the right edge tooltip`);
 }
 assert.match(h.histHtml("bsh_state", "", "Heizstab"),
-  /Heizstab aktiv erfasst · 10 min Rasterzeit/,
+  /Heizstab aktiv erfasst · 10 min im 5-Minuten-Raster/,
   "the live BSH observation must not add a fabricated five-minute bucket to its total");
 delete S._values;
 delete S._modbus;
@@ -708,5 +731,177 @@ S.hist.delete("modbus:dhw_tank");
 await h.ensureHist("dhw_tank", "modbus");
 assert.equal(fetched, "/history?row=dhw_tank&source=modbus");
 assert.deepEqual(Array.from(S.hist.get("modbus:dhw_tank").v), [457]);
+
+// DHW tank (R5T) single integrated chart: Smart-Grid Boost and Heizstab (BSH) phases
+// are drawn directly into the temperature chart and displayed in the tooltip and legend.
+S.status.history.rows = [
+  { id: "dhw_tank", label: "Domestic Hot Water temperature" },
+  { id: "smart_grid_mode", label: "Smart Grid operation mode" },
+];
+S.status.history.modbus_rows = [
+  { id: "dhw_tank", label: "Domestic Hot Water temperature" },
+  { id: "smart_grid_mode", label: "Smart Grid operation mode" },
+  { id: "bsh_state", label: "Booster heater run" },
+];
+S.hist.set("dhw_tank", { dt: 300, unit: "°C", b0: 100, v: [450, 460, 470, 480], held: [] });
+S.hist.set("modbus:smart_grid_mode", { dt: 300, b0: 100, v: [0, 20, 20, 0] }); // Mode 2 = Boost (2 buckets = 10 min)
+S.hist.set("modbus:bsh_state", { dt: 300, b0: 100, v: [0, 0, 10, 0] });        // BSH active (1 bucket = 5 min)
+
+view = h.historyView("dhw_tank");
+const dhwHtml = h.histHtml("dhw_tank", "°C", "Warmwasserspeicher");
+assert.match(dhwHtml, /class="vhist-phase vhist-phase-boost"/, "DHW chart must render Boost phase bands");
+assert.match(dhwHtml, /class="vhist-phase vhist-phase-bsh"/, "DHW chart must render BSH phase bands");
+assert.doesNotMatch(dhwHtml, /class="vhist-phase-bar/, "DHW chart must not render top phase bar");
+assert.match(dhwHtml, /vhist-legend-boost/, "DHW legend must display Boost indicator");
+assert.match(dhwHtml, /vhist-legend-bsh/, "DHW legend must display BSH indicator");
+assert.match(dhwHtml, /10 min/, "DHW legend must include Boost duration");
+assert.match(dhwHtml, /5 min/, "DHW legend must include BSH duration");
+
+// Verify tooltips include active phases
+assert.doesNotMatch(h.scrubText(view, 0), /Boost|Heizstab/, "Sample 0 without active phases");
+assert.match(h.scrubText(view, 1), /· Boost aktiv$/, "Sample 1 with active Boost");
+assert.match(h.scrubText(view, 2), /· Boost aktiv \+ Heizstab aktiv$/, "Sample 2 with both active");
+assert.doesNotMatch(h.scrubText(view, 3), /Boost|Heizstab/, "Sample 3 without active phases");
+
+// ensureHistPair("dhw_tank") fetches auxiliary series
+fetchedUrls = [];
+S.hist.delete("dhw_tank");
+S.hist.delete("modbus:dhw_tank");
+S.hist.delete("smart_grid_mode");
+S.hist.delete("modbus:smart_grid_mode");
+S.hist.delete("bsh_state");
+S.hist.delete("modbus:bsh_state");
+await h.ensureHistPair("dhw_tank");
+assert.ok(fetchedUrls.includes("/history?row=smart_grid_mode"),
+  "ensureHistPair(dhw_tank) must request x10a smart_grid_mode");
+assert.ok(fetchedUrls.includes("/history?row=smart_grid_mode&source=modbus"),
+  "ensureHistPair(dhw_tank) must request smart_grid_mode");
+assert.ok(fetchedUrls.includes("/history?row=bsh_state&source=modbus"),
+  "ensureHistPair(dhw_tank) must request modbus:bsh_state");
+
+// Lifecycle regression: changing away and back retires the cache even inside its one-minute TTL.
+// Every transition runs the same production synchronisation used when /status lands.
+S.status.profile = { id: "fixture-a" };
+S.status.hp = { proto: "I", rx: 1, tx: 2 };
+S.status.modbus = { host: "192.0.2.10", port: 502, unit_id: 1, enabled: true };
+S.status.uptime_s = 100;
+h.syncHistSources();
+fetchedUrls = [];
+historyResponse = { ...defaultHistoryResponse, v: [501] };
+await h.ensureHist("dhw_tank", "modbus");
+const homehubKey = h.histCacheKey("dhw_tank", "modbus");
+await h.ensureHist("dhw_tank", "modbus");
+assert.equal(fetchedUrls.length, 1, "unchanged source must retain the one-minute fetch limit");
+S.histPin.set("dhw_tank", { i: 0, gen: 1 });
+S.status.modbus.host = "192.0.2.11";
+h.syncHistSources();
+assert.equal(S.hist.size, 0);
+assert.equal(S.histPin.size, 0, "source changes must retire pins with the old measurement");
+S.status.modbus.host = "192.0.2.10";
+h.syncHistSources();
+historyResponse = { ...defaultHistoryResponse, v: [502] };
+await h.ensureHist("dhw_tank", "modbus");
+assert.deepEqual(Array.from(S.hist.get(homehubKey).v), [502],
+  "A → B → A must refetch instead of reusing the earlier A lifetime");
+for (const enabled of [false, true]) {
+  S.status.modbus.enabled = enabled;
+  h.syncHistSources();
+}
+assert.equal(S.hist.has(homehubKey), false, "disabled → A must retire the old A cache");
+
+// Row ids stay stable when the X10A instrument or circulation witness changes. Identity comes from
+// their actual status/configuration, never from a different label invented by the browser.
+S.hist.set("dhw_tank", x10a);
+S.status.hp.rx = 44;
+h.syncHistSources();
+assert.equal(S.hist.has("dhw_tank"), false, "repointing X10A pins must retire the old ring");
+S.hist.set("dhw_tank", x10a);
+S.status.profile.id = "fixture-b";
+h.syncHistSources();
+assert.equal(S.hist.has("dhw_tank"), false, "a new X10A profile must retire the old ring");
+S.status.circulation_source = { configured: true, topic: "fixture/pump-a", power_path: "power" };
+h.syncHistSources();
+S.hist.set("circulation_state", x10a);
+S.status.circulation_source.topic = "fixture/pump-b";
+h.syncHistSources();
+assert.equal(S.hist.has("circulation_state"), false,
+  "changing a circulation witness must retire history even though its row id is unchanged");
+S.hist.set("free_heap", x10a);
+S.histPin.set("free_heap", { i: 0, gen: 1 });
+S.status.uptime_s = 2;
+h.syncHistSources();
+assert.equal(S.hist.size, 0, "a reboot must retire all cached series before their monotonic epoch changes");
+assert.equal(S.histPin.size, 0);
+
+// Uptime alone cannot detect a reboot that returns after exceeding its last observed uptime.
+S.status.boot_id = "0000000000000001";
+h.syncHistSources();
+S.hist.set("free_heap", x10a);
+S.histPin.set("free_heap", { i: 0, gen: 1 });
+S.status.boot_id = "0000000000000002";
+S.status.uptime_s = 3;
+h.syncHistSources();
+assert.equal(S.hist.size, 0, "a new boot identity must retire history even with higher uptime");
+assert.equal(S.histPin.size, 0);
+
+// Another client can change A → B → A entirely between status polls. The firmware lifetime
+// token changes even if the final configuration and boot identity match the previous sample.
+S.status.history = { ...S.status.history, epoch: 7 };
+h.syncHistSources();
+S.hist.set(homehubKey, x10a);
+S.histPin.set("dhw_tank", { i: 0, gen: 1 });
+S.status.history.epoch = 9;
+h.syncHistSources();
+assert.equal(S.hist.size, 0, "an unobserved source ABA must retire the old firmware lifetime");
+assert.equal(S.histPin.size, 0);
+
+// Hold the transport while the source leaves and returns. Both success and failure of the retired
+// request must leave its successor's cache/lease alone, even though both use the same endpoint key.
+const pendingHistory = [];
+context.fetch = (url) => new Promise((resolve, reject) => pendingHistory.push({ url, resolve, reject }));
+const finishHistory = (pending, values) => pending.resolve({ json: async () => ({
+  ...defaultHistoryResponse, v: values,
+}) });
+for (const failOld of [false, true]) {
+  h.invalidateHistSources();
+  const old = h.ensureHist("dhw_tank", "modbus");
+  const oldTransport = pendingHistory.shift();
+  S.status.modbus.host = "192.0.2.11"; h.syncHistSources();
+  S.status.modbus.host = "192.0.2.10"; h.syncHistSources();
+  const current = h.ensureHist("dhw_tank", "modbus");
+  const newTransport = pendingHistory.shift();
+  if (failOld) oldTransport.reject(new Error("retired source error"));
+  else finishHistory(oldTransport, [601]);
+  await old;
+  assert.equal(S.hist.has(homehubKey), false, "late success/error must not reinsert the retired series");
+  assert.equal(S.histBusy.has(homehubKey), true,
+    "an old finally must not release the new request for the same cache key");
+  finishHistory(newTransport, [602]);
+  await current;
+  assert.deepEqual(Array.from(S.hist.get(homehubKey).v), [602]);
+  assert.equal(S.histBusy.has(homehubKey), false);
+}
+
+// A derived chart owns a lease too: awaiting its independent input fetches cannot revive an old
+// instrument lifetime after the source changed while those requests were outstanding.
+S.status.history.rows = [
+  { id: "leaving_water", label: "Leaving water temperature" },
+  { id: "return_water", label: "Return water temperature" },
+];
+h.invalidateHistSources();
+const oldDerived = h.ensureDerived("dt");
+const retiredInputs = pendingHistory.splice(0);
+assert.equal(retiredInputs.length, 2);
+S.status.profile.id = "fixture-c";
+h.syncHistSources();
+for (const input of retiredInputs) finishHistory(input, [400]);
+await oldDerived;
+assert.equal(S.hist.has("dt"), false, "late derived assembly must not revive a retired source");
+assert.equal(S.hist.size, 0, "late derived inputs must also stay retired");
+const currentDerived = h.ensureDerived("dt");
+for (const input of pendingHistory.splice(0))
+  finishHistory(input, input.url.includes("leaving_water") ? [410] : [390]);
+await currentDerived;
+assert.deepEqual(Array.from(S.hist.get("dt").v), [20], "the successor must derive only its own inputs");
 
 console.log("UI history sources: X10A and Modbus rings align, gap, render and fetch independently");

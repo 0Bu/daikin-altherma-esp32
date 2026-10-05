@@ -18,8 +18,8 @@
 //
 // An explicit X10A re-detection onto a DIFFERENT unit empties the table: the slots are addressed by
 // (register page, byte offset, converter), and the same coordinates on another model are another
-// flag — continuing a run across that would be the #35-#39 substitution with a duration in front
-// of it.
+// flag — continuing a run across that would be the legacy-35–legacy-39 substitution with a duration
+// in front of it.
 #include "hp_poll.hpp"          // CachedValue
 #include "logic/state_dwell.hpp"
 
@@ -35,7 +35,10 @@ namespace daik {
 // cycle went by with nothing readable, so every slot books blind seconds and eventually stops
 // claiming a run. Skipping it on a silent bus would freeze every dwell at its last value and go on
 // presenting it as current — the failure this whole feature exists to avoid.
-void dwell_record(const CachedValue* v, size_t n, uint32_t source_generation);
+// Successful sweeps supply their profile-specific query/sleep bound. Explicit unread samples
+// always break continuity, including short OTA/weather holds, independently of that allowance.
+void dwell_record(const CachedValue* v, size_t n, uint32_t source_generation,
+                  uint32_t max_observed_gap_s = logic::DWELL_MAX_GAP_S);
 
 // Judge what the previous boot left in .noinit and adopt or wipe it. app_main calls this ONCE,
 // before any producer task exists, which is what makes the decision single-threaded and lock-free.

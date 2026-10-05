@@ -1,6 +1,6 @@
 ---
 name: skill-audit
-description: Read-only drift audit and self-optimizing validator of every canonical skill under .agents/skills and read-only reviewer in .codex/agents against daikin-altherma-esp32 facts, partitions, endpoints, and hardware. Supports automatic inventory synchronization and self-optimization via scripts/run-skill-audit.sh --optimize.
+description: Audit canonical skills and reviewers against daikin-altherma-esp32 repository contracts. Report drift by default; synchronize checklists and partition claims with scripts/run-skill-audit.sh --optimize only when repository edits are explicitly authorized.
 ---
 
 > **Canonical runner-neutral skill.** Read [`AGENTS.md`](../../../AGENTS.md) before acting.
@@ -11,12 +11,11 @@ description: Read-only drift audit and self-optimizing validator of every canoni
 
 # skill-audit — keep skills and reviewer prompts honest against the project
 
-The `.agents/skills/*/SKILL.md` files and read-only reviewers under `.codex/agents/` are
+The `.agents/skills/*/SKILL.md` files and read-only reviewers under `.agents/agents/` are
 documents that **drift**. A wrong partition offset, stale command count, removed endpoint, renamed
 script, or superseded pin assignment silently mis-teaches a future session. `$skill-audit` catches and
-reports that drift, dynamically reacting to repository evolution. In audit mode it is strictly
-read-only; when repository facts, skills, reviewers, or partitions evolve, it provides self-optimization
-via `scripts/run-skill-audit.sh --optimize` to synchronize checklists and partition facts automatically.
+reports that drift. The default audit is read-only. `--optimize` writes skill files and requires
+explicit authorization to apply the proposed repository edits; invoking this skill does not authorize it.
 
 It is the skills/agents subset of `$project-review`. A clean `$project-review` can establish
 readiness for merge, but neither audit mutates the PR body without explicit instruction. Use `$skill-audit`
@@ -43,22 +42,18 @@ finding must name the project fact it contradicts; otherwise omit it.
 
 Work in this order — it is a **single read-only pass**: pin baseline → enumerate → check → report → stop.
 
-0. **Step 0 — pin the baseline.**
-   Ensure the local repository is synchronized before auditing. Run `git fetch origin` and verify
-   `HEAD` matches `origin/main` (or the target PR head commit). Fail-fast on divergence or untracked
-   local drift — never audit an unpinned or stale baseline. State reviewed SHA in report.
+0. **Step 0 — pin the baseline.** Record the reviewed target SHA and comparison base, then inspect
+   the scoped local diff and intended untracked files. Use the PR head when reviewing a PR, or the
+   current working tree for authorized implementation. Record local changes separately from committed
+   evidence. Refresh remote refs when needed and available; an offline audit can use verified local refs.
 1. **Enumerate — discover, do not hardcode.** Read every `.agents/skills/*/SKILL.md` and every
-   reviewer in `.codex/agents/*.toml`. Inventory `AGENTS.md`, `.agents/hooks.json`, `.codex/hooks.json`,
+   reviewer in `.agents/agents/*.toml`. Inventory `AGENTS.md`, `.agents/hooks.json`,
    `tools/agent-hooks/`, `scripts/`, `main/`, `partitions.csv`, `main/idf_component.yml`, and `version.txt`.
 2. **Extract concrete claims.** List numbers, paths, counts, flags, target pins, script names,
    authorization boundaries, and described hook behavior.
 3. **Verify claims against the tree.** Run the deterministic check:
    ```bash
    scripts/run-skill-audit.sh
-   ```
-   To synchronize checklists, update partition offsets, and self-optimize against live repository facts:
-   ```bash
-   scripts/run-skill-audit.sh --optimize
    ```
    Cross-check claims using runner-neutral file reads/search (`rg` preferred). Never contact a live
    device or perform an unauthorized mutation to prove an audit claim.
@@ -73,6 +68,21 @@ Work in this order — it is a **single read-only pass**: pin baseline → enume
 A `$skill-audit` invocation reads, checks, reports, and stops. It does not invoke itself, edit a
 finding, or re-audit an edit. A separately authorized implementation may address accepted findings;
 an independent later audit verifies the result.
+
+### Separately authorized synchronization
+
+When the user explicitly requests repository corrections, apply accepted inventory and partition
+claim changes with `scripts/run-skill-audit.sh --optimize`. This mode changes skill files, preserves
+unrelated occurrences of numeric offsets, and runs a fresh read-only validation before reporting success.
+Inspect its resulting diff and run the independent review required by `AGENTS.md`. It does not commit,
+push, edit a PR, or authorize delivery. A failed invocation can leave proposed edits for inspection.
+
+The deterministic frontmatter check supports the canonical restricted format: exactly `name` and
+`description`, each a one-line string. Plain strings, single-quoted strings, and double-quoted strings
+with JSON-compatible escapes are supported. It rejects duplicate keys and unsupported YAML constructs.
+Reviewer syntax and exact inventory are also checked by the canonical agent-config gate; this audit
+checks reviewer metadata and concrete referenced paths. A passing scan covers these contracts and does
+not prove every prose claim, hardware fact, number, or command is correct; review those against their sources.
 
 ## Per-target checklist (what each skill/agent must stay true to)
 
@@ -128,42 +138,55 @@ skill/reviewer asserts:
   `main/www/index.html`, `main/www/style.css`, `main/www/js/schematic.js`, and `docs/DESIGN.md`.
 - **`$skill-audit`** — this skill: keeps all skills and reviewer prompts honest against repository facts.
 - **`$ui-gif`** — dashboard recording audit. Verify against `scripts/run-ui-gif-audit.sh`,
-  `scripts/record-dashboard-gif.sh`, and `docs/media/dashboard.gif` (135 frames, 100 ms dwell).
+  `scripts/record-dashboard-gif.sh`, `tools/uigif/scenes.js`, and `docs/media/dashboard.gif`.
 - **`$ui-use-case-review`** — complete device UI interaction review. Verify against
   `scripts/run-ui-use-case-tests.sh`, `scripts/run-ui-localization-audit.sh`, and `scripts/run-browser-render-tests.sh`.
 - **`$user-docs-review`** — English-only user documentation review. Verify against
   `scripts/run-user-docs-audit.sh` and `docs/DIAGNOSTICS.md`.
 
-**Reviewers** (`.codex/agents/`):
+**Reviewers** (`.agents/agents/`):
 
-- **`doc_drift_checker`** (`.codex/agents/doc-drift-checker.toml`) — checks documentation consistency
+- **`doc_drift_checker`** (`.agents/agents/doc-drift-checker.toml`) — checks documentation consistency
   between `AGENTS.md` and detailed markdown references under `docs/`.
-- **`heap_safety_reviewer`** (`.codex/agents/heap-safety-reviewer.toml`) — checks contiguous heap limits,
+- **`heap_safety_reviewer`** (`.agents/agents/heap-safety-reviewer.toml`) — checks contiguous heap limits,
   streaming responses, RAII locking, stack budgets, and 503 on OOM.
-- **`x10a_decode_reviewer`** (`.codex/agents/x10a-decode-reviewer.toml`) — checks X10A protocol decode,
+- **`x10a_decode_reviewer`** (`.agents/agents/x10a-decode-reviewer.toml`) — checks X10A protocol decode,
   converter IDs, sign/scale, and byte layout against `docs/REGISTERS.md`.
 
 ## Self-analysis and audit self-optimization
 
 Before ticking or stamping the gate:
-1. **Self-audit first against repository ground truth:** `$skill-audit` verifies its own checklist, rules, and partition offsets against discovered canonical skills (`.agents/skills/`), reviewers (`.codex/agents/`), partition offsets (`partitions.csv`), HTTP endpoints (`main/`), and hardware pin definitions.
+1. **Self-audit first against repository ground truth:** Compare this checklist with discovered canonical
+   skills (`.agents/skills/`), reviewers (`.agents/agents/`), partition offsets (`partitions.csv`), HTTP
+   endpoints (`main/`), and hardware pin definitions. Missing or empty reviewer directories fail the audit.
 2. **Reactivity to repository evolution:** When new skills or reviewers are introduced, partitions are adjusted, or endpoints are added/retired, `$skill-audit` dynamically detects the drift.
-3. **Execute self-optimization:** When changes in the repository require synchronization, run:
-   ```bash
-   scripts/run-skill-audit.sh --optimize
-   ```
-   This automatically synchronizes `$skill-audit`'s internal checklists, updates partition offsets, and eliminates manual drift.
-4. **Fact vs assertion verification:** Confirm that every referenced file path, partition offset, board pin, endpoint, and command in each audited skill was verified against current repository files.
+3. **Propose synchronization:** Report the exact edits when drift exists. Execute the separate
+   `--optimize` workflow only when repository edits are explicitly authorized.
+4. **Fact vs assertion verification:** State which file paths, partition claims, board pin assignments,
+   endpoints, and commands were checked, and distinguish mechanical checks from manual source review.
 5. **Stamp integrity check:** Confirm the stamp uses the bare short SHA (`git rev-parse --short=12 HEAD`) without backticks.
 
-## Recording the pass (PR create/push gate — no file marker)
+## Recording the pass (open-PR push gate)
 
-The runner-neutral [`require-pr-gates.sh`](../../../tools/agent-hooks/require-pr-gates.sh) hook
-refuses PR creation and `git push` to an open PR until this review is recorded in the PR body as a
-ticked, SHA-stamped checkbox whose stamp matches the push HEAD.
+The native [`.githooks/pre-push`](../../../.githooks/pre-push) hook dispatches to
+[`require-pr-gates.sh`](../../../tools/agent-hooks/require-pr-gates.sh). Activate it explicitly per
+clone with `git config --local core.hooksPath .githooks`, as described in
+[`CONTRIBUTING.md`](../../../CONTRIBUTING.md) and
+[`docs/AGENT_MIGRATION.md`](../../../docs/AGENT_MIGRATION.md); project lifecycle registration alone
+does not install the native Git hook.
 
-When the audit passes with **no blocking findings**, tick + stamp the PR's `$skill-audit` box:
+The native hook checks Git's actual destination repository, branch, and commit being sent. Push from
+a clean checkout whose `HEAD` is that commit so its mechanical audit examines the exact pushed tree.
+For an update to an already-open PR, prepare both the `$skill-audit` and `$pr-hygiene-review` records
+in the PR body for that prospective commit before pushing it. Record this review only after the audit
+and manual source review pass with no blocking findings; derive its bare stamp with
+`git rev-parse --short=12 HEAD`:
 
 ```text
-- [x] `$skill-audit` clean — PR create/push gate @ <short-sha>    # <short-sha> = git rev-parse --short=12 HEAD
+- [x] `$skill-audit` clean — push gate @ <short-sha>
 ```
+
+An initial branch push with no open PR may proceed after a successful PR lookup confirms that absence
+and the local mechanical audit passes. A failed lookup blocks the push. PR creation runs the mechanical
+skill audit; it does not require a stamp in a PR that has not yet been created. An audit request alone
+never authorizes editing a PR body; report the proposed records for a separately authorized update.

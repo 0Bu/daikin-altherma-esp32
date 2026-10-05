@@ -24,20 +24,21 @@
 //  1. BEFORE THE FIRST OBSERVATION IS UNKNOWN. A board up for ten minutes whose row read OFF
 //     throughout has established "OFF for at LEAST ten minutes" and nothing more. Reported as
 //     `exact = false`, which the UI must render as a lower bound. Stating a bare "OFF for 10 min"
-//     would be the #35-#39 shape: a true number presented as a stronger claim than it is.
+//     would be the legacy-35–legacy-39 shape: a true number presented as a stronger claim than it
+//     is.
 //
 //  2. BLIND TIME IS NOT UNCHANGED TIME. hp_poll replaces the whole cache each cycle
 //     (`s_cache = std::move(fresh)`), so a page that does not answer removes its rows outright —
 //     measured on the reference installation, 47 timeouts in 8.2 h. A flag can go ON and back OFF
 //     inside such a gap, and a counter that simply kept adding seconds would report an unbroken run
-//     straight through it. This is #413/#414's finding one row at a time: a sample the firmware
-//     could not READ is blind, not unchanged. Short gaps are absorbed and COUNTED (`blind_s`, so the
-//     caveat travels with the number); a gap past DWELL_MAX_GAP_S breaks continuity and the slot
-//     stops claiming anything until it is seen again.
+//     straight through it. This is legacy-413/legacy-414's finding one row at a time: a sample the
+//     firmware could not READ is blind, not unchanged. Short gaps are absorbed and COUNTED
+//     (`blind_s`, so the caveat travels with the number); a gap past DWELL_MAX_GAP_S breaks
+//     continuity and the slot stops claiming anything until it is seen again.
 //
 //  3. THE RASTER IS 1 Hz. A pulse entirely between two sweeps is invisible, exactly as
-//     docs/DESIGN.md already says of the state timelines ("sampled raster time, not exact runtime").
-//     Nothing here can fix that; the wording downstream must not overstate it.
+//     docs/DESIGN.md already says of the state timelines ("sampled raster time, not exact
+//     runtime"). Nothing here can fix that; the wording downstream must not overstate it.
 //
 //  4. A REBOOT IS NOT A CHANGE. RAM-only, the dwell would restart at zero on every OTA — on the
 //     `dev` channel, often. The slots are carried across a reset that kept power (see
@@ -98,14 +99,14 @@ static_assert(DWELL_SEEN_WORDS == 2, "state-dwell observed mask footprint change
 // How long a row may go unread before its run stops being believable. A flag can pulse and return
 // inside a gap, so past this the slot reports NOTHING rather than a run it cannot vouch for — the
 // absence rule this project applies everywhere else (a value the unit is not measuring is never
-// reported). Two minutes matches CHECKUP_MAX_GAP_S / DHW_LOSS_BLIND_RUN_MAX_S rather than inventing
-// a third idea of how long the bus may be quiet.
+// reported). Two minutes matches the DHW-loss blind-run budget. The continuity allowance of an
+// ordinary successful sweep is separate and supplied from that profile's bounded query cadence.
 inline constexpr uint32_t DWELL_MAX_GAP_S = 120;
 
 // ── The state code ──────────────────────────────────────────────────────────────────────────────
 // A small dense integer, because comparing FORMATTED TEXT is how a field comes to change type
-// between states (#209 defect 3). 0 is reserved for "no usable state": the row answered, but with
-// something this header refuses to call a state — an empty value (the row was refused by
+// between states (legacy-209 defect 3). 0 is reserved for "no usable state": the row answered, but
+// with something this header refuses to call a state — an empty value (the row was refused by
 // reading_plausible/value_available upstream) or conv 203's "?" class, which must never read as
 // "no fault". A 0 code is treated exactly like a row that did not answer at all: blind, not
 // unchanged.
@@ -114,7 +115,7 @@ inline constexpr uint8_t DWELL_CODE_NONE = 0;
 inline uint8_t dwell_code(int conv, const char* text) {
     if (!text || !text[0]) return DWELL_CODE_NONE;
     if (conv_is_binary(conv)) {
-        // Binary rows are the firmware-wide numeric 1/0 boundary (#210). Anything else is a
+        // Binary rows are the firmware-wide numeric 1/0 boundary (legacy-210). Anything else is a
         // contract break upstream, and answering "state 0" for it would invent one.
         if (text[1] == '\0' && text[0] == '0') return 1;
         if (text[1] == '\0' && text[0] == '1') return 2;
@@ -143,6 +144,7 @@ struct DwellObservation {
 inline constexpr uint8_t DWELL_F_USED  = 0x01;  // this slot addresses a row
 inline constexpr uint8_t DWELL_F_EXACT = 0x02;  // the transition INTO the current state was seen
 inline constexpr uint8_t DWELL_F_STALE = 0x04;  // unread past DWELL_MAX_GAP_S — claims nothing
+inline constexpr uint8_t DWELL_F_GAP   = 0x08;  // an unread sample, even below one whole second
 
 // Field order is chosen for SIZE, not for reading order: 64 of these sit in .noinit and a slip that
 // pads each one costs the whole table. 4+4+2+2+1+1+1+1 packs to exactly 16 with no hole.
@@ -279,15 +281,21 @@ inline void dwell_step(DwellSlot* slots, size_t n, const DwellObservation* obs, 
                 // have gone stale for this to be wrong, which is why the test is `gap_s == 0` and
                 // not `!was_stale`. Reported as a lower bound instead, which is exactly true and
                 // self-corrects: every observed second afterwards raises the floor.
-                const bool witnessed = (s.gap_s == 0);
+                const bool witnessed = (s.gap_s == 0 && !(s.flags & DWELL_F_GAP));
                 s.since_s = 0;
                 s.blind_s = 0;
                 s.code    = ob.code;
                 s.flags   = static_cast<uint8_t>(DWELL_F_USED | (witnessed ? DWELL_F_EXACT : 0));
             } else {
                 s.since_s = dwell_add_u32(s.since_s, dt_s);
+                // The first observation after an unread sample cannot vouch for the interval
+                // ending here. Resume observation at this instant, rather than filling the tail
+                // of a known gap with apparently watched seconds.
+                if (s.gap_s != 0 || (s.flags & DWELL_F_GAP))
+                    s.blind_s = dwell_add_u32(s.blind_s, dt_s);
             }
             s.gap_s = 0;
+            s.flags &= static_cast<uint8_t>(~DWELL_F_GAP);
         }
         const size_t si = static_cast<size_t>(i);
         seen[si / 64u] |= (uint64_t{1} << static_cast<unsigned>(si % 64u));
@@ -299,9 +307,24 @@ inline void dwell_step(DwellSlot* slots, size_t n, const DwellObservation* obs, 
         if (seen[k / 64u] & (uint64_t{1} << static_cast<unsigned>(k % 64u))) continue;
         if (s.flags & DWELL_F_STALE) continue;       // already saying nothing; nothing to add
         s.gap_s   = dwell_add_u16(s.gap_s, dt_s);
+        // A known missing sample breaks continuity even when two calls quantise to the same
+        // second. Keep that fact separate from the quantised duration rather than inventing time.
+        s.flags |= DWELL_F_GAP;
         s.since_s = dwell_add_u32(s.since_s, dt_s);
         s.blind_s = dwell_add_u32(s.blind_s, dt_s);
         if (s.gap_s > DWELL_MAX_GAP_S) s.flags |= DWELL_F_STALE;
+    }
+}
+
+inline void dwell_step_with_cadence(DwellSlot* slots, size_t n, const DwellObservation* obs,
+                                    size_t obs_n, uint32_t dt_s, uint32_t max_observed_gap_s) {
+    if (obs_n > 0 && dt_s > max_observed_gap_s) {
+        // No explicit skip call arrived, but this interval exceeds every supported sweep on the
+        // active profile. Book the interval as unread and establish the current state at its end.
+        dwell_step(slots, n, nullptr, 0, dt_s);
+        dwell_step(slots, n, obs, obs_n, 0);
+    } else {
+        dwell_step(slots, n, obs, obs_n, dt_s);
     }
 }
 
@@ -318,7 +341,9 @@ inline void dwell_step(DwellSlot* slots, size_t n, const DwellObservation* obs, 
 // the device cannot time its own downtime, and a fabricated duration is the one thing
 // logic/timestamp.hpp already refuses to produce for an unsynced clock.
 inline constexpr uint32_t DWELL_PERSIST_MAGIC   = 0x4c4c5744u;   // "DWLL" little-endian
-inline constexpr uint16_t DWELL_PERSIST_VERSION = 1;
+// Version 2 rejects records produced by the older fold, which could label known skipped intervals
+// as continuously observed. The layout is unchanged, but those claims cannot be repaired at boot.
+inline constexpr uint16_t DWELL_PERSIST_VERSION = 2;
 inline constexpr uint32_t DWELL_REBOOT_BLIND_S  = 5;
 
 enum class DwellRestore : uint8_t {

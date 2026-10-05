@@ -4,7 +4,7 @@
 #
 # Usage:
 #   scripts/run-skill-audit.sh                     # Read-only audit of all skills and reviewers
-#   scripts/run-skill-audit.sh --optimize          # Self-optimize and auto-sync checklists & partitions
+#   scripts/run-skill-audit.sh --optimize          # Writes skills; use only for authorized corrections
 #   scripts/run-skill-audit.sh [extra args forwarded to check_skills.mjs]
 # Exit: 0 = clean, 1 = drift findings, 2 = usage/runtime error. Requires node >=18.
 set -euo pipefail

@@ -194,7 +194,7 @@ assertPersistentBannerRepaints(
   { sys: { safe_mode: true } },
 );
 
-// The SAME banner is reached from two causes that need OPPOSITE advice (#407): a crash loop points
+// The SAME banner is reached from two causes that need OPPOSITE advice (legacy-407): a crash loop points
 // at the configuration — the RX/TX pins first — while the heap watchdog giving up means the
 // configuration is almost certainly fine and a newer build is the fix. Naming the pins there sends
 // the reader to correct something that is already correct, which is the failure the absence rules

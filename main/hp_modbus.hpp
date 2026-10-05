@@ -1,27 +1,28 @@
 #pragma once
 // THE HOMEHUB MODBUS STACK — a second, INDEPENDENT source of readings beside the X10A one
-// (issue #32). Its own task, its own cache, its own link state; it shares nothing with hp_poll.cpp
-// but the heat pump it describes.
+// (issue legacy-32). Its own task, its own cache, its own link state; it shares nothing with
+// hp_poll.cpp but the heat pump it describes.
 //
 // That independence is the whole design (docs/MODBUS_PROTOCOL.md). The two links fail for entirely
-// unrelated reasons — X10A at the cable, the pin or the framing; Modbus at the LAN, mDNS or the hub —
-// so coupling them would let either failure mask the other. Pulled service cable: the HomeHub keeps
-// reporting. LAN down: X10A keeps polling. Neither notices the other.
+// unrelated reasons — X10A at the cable, the pin or the framing; Modbus at the LAN, mDNS or the hub
+// — so coupling them would let either failure mask the other. Pulled service cable: the HomeHub
+// keeps reporting. LAN down: X10A keeps polling. Neither notices the other.
 //
 // It has no STEADY-STATE cost when absent: a fresh device performs one bounded automatic discovery
 // before HTTP starts, persists that decision, and an empty address thereafter creates no task or
 // traffic. The user may still run a manual search from the HomeHub dialog.
 //
 // The stack is READ-ONLY, and that is now a property of the code rather than of a guard: the
-// register-54 actuator built for #300 was REMOVED with the retirement of dynamic LWT actuation
-// (#294 — SHADOW is the terminal state of that epic). No Modbus write function code is issued
-// anywhere in this firmware, there is no intent API, and there is no HTTP/MQTT/MCP write route.
-// The observation-only pieces kept from that work are the two PLANT GATES below: ordinary FC04
-// reads that prove normal space operation and distinguish heating from cooling.
+// register-54 actuator built for legacy-300 was REMOVED with the retirement of dynamic LWT
+// actuation (legacy-294 — SHADOW is the terminal state of that epic). No Modbus write function code
+// is issued anywhere in this firmware, there is no intent API, and there is no HTTP/MQTT/MCP write
+// route. The observation-only pieces kept from that work are the two PLANT GATES below: ordinary
+// FC04 reads that prove normal space operation and distinguish heating from cooling.
 #include <cstddef>
 #include <cstdint>
 #include <string>
 #include "hp_poll.hpp"      // CachedValue — the shared row shape, so /values needs no second type
+#include "logic/config_model.hpp"
 #include "logic/modbus.hpp"
 #include "logic/outdoor_evidence.hpp"
 
@@ -30,10 +31,13 @@ namespace daik {
 // Link diagnostics for /status.modbus and the MQTT heartbeat. `enabled` is runtime task existence
 // and therefore requires a saved host.
 struct ModbusStatus {
-    bool        enabled     = false;   // task active (a configured address is being polled)
-    bool        connected   = false;   // current socket has committed a full cycle and is still live
-    bool        discovering = false;   // compatibility field; explicit UI search is request-local
-    std::string host;                  // configured address ("" = disabled)
+    bool          enabled   = false; // task active (a configured address is being polled)
+    bool          connected = false; // current socket has committed a full cycle and is still live
+    bool          discovering = false; // compatibility field; explicit UI search is request-local
+    ModbusProfile profile     = ModbusProfile::Auto; // detected/active Modbus profile
+    ModbusProfileBasis profile_basis =
+        ModbusProfileBasis::Probing; // basis: probing, affirmative, fallback
+    std::string host;                // configured address ("" = disabled)
     int         port    = 0;
     int         unit_id = 0;
     uint32_t    rx_ok   = 0;           // successful register reads since boot
@@ -98,17 +102,24 @@ ModbusStatus mb_status();
 // logic/homehub_map.hpp pairs on.
 //
 // `live` reports whether the LINK was still up once the copy had been taken AND whether the cache
-// was committed by that same TCP session. Rows come from its latest full cycle, at most
-// logic::MB_FULL_CYCLE_TICKS - 1 poll intervals old while the link remains live. A caller that
-// publishes them must honour `live`: false means the rows may predate a disconnect/reconnect and the
-// snapshot must not be served. It is an
-// out-param rather than a separate mb_status() call because that separate call is exactly the race
-// — the cache and link state are behind two mutexes, so only the accessor can tie them into one
-// generation-checked answer.
+// was committed by that same TCP session. Rows come from its latest full cycle; the age bound
+// includes the full/fast request budgets as well as the poll delays. A separate reply-age bound
+// expires a stalled worker even when no cache revision changes. A caller that
+// publishes them must honour `live`: false means the rows may predate a disconnect/reconnect and
+// the snapshot must not be served. It is an out-param rather than a separate mb_status() call
+// because that separate call is exactly the race — the cache and link state are behind two mutexes,
+// so only the accessor can tie them into one generation-checked answer.
 size_t mb_values_snapshot(CachedValue* out, size_t max, bool& live);
 
-// The cache's upper bound (def::HOMEHUB_REG_COUNT) — callers size their snapshot buffer from this.
+// Allocation-free check of the exact snapshot liveness rule, for periodic expiry publication.
+bool mb_values_live();
+
+// The cache's upper bound (def::ALTHERMA4_REG_COUNT) — callers size their snapshot buffer from
+// this.
 size_t mb_values_capacity();
+
+// Active/detected Modbus profile (Auto, HomeHub, Altherma4).
+ModbusProfile mb_active_profile();
 
 // Has the running Modbus task observed OTA's lock-free quiesce request and left its allocation-rich
 // cycle? True also when no Modbus task exists, because there is then no cycle for OTA to wait on.

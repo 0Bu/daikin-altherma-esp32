@@ -180,7 +180,7 @@ class CdpPage {
 async function connectSocket(url) {
   const socket = new WebSocket(url);
   await new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error("timed out connecting to Chrome DevTools")), 10000);
+    const timer = setTimeout(() => reject(new Error("timed out connecting to Chrome DevTools")), 20000);
     socket.addEventListener("open", () => { clearTimeout(timer); resolve(); }, { once: true });
     socket.addEventListener("error", () => { clearTimeout(timer); reject(new Error("Chrome DevTools WebSocket failed")); }, { once: true });
   });
@@ -190,7 +190,7 @@ async function connectSocket(url) {
 async function devToolsEndpoint(child) {
   return new Promise((resolve, reject) => {
     let output = "";
-    const timer = setTimeout(() => reject(new Error(`Chrome did not expose DevTools\n${output}`)), 15000);
+    const timer = setTimeout(() => reject(new Error(`Chrome did not expose DevTools\n${output}`)), 30000);
     const inspect = (chunk) => {
       output += chunk.toString();
       const match = output.match(/DevTools listening on (ws:\/\/[^\s]+)/);
@@ -267,9 +267,11 @@ export async function launchBrowser() {
   const profile = fs.mkdtempSync(path.join(os.tmpdir(), "daikin-browser-gate-"));
   const child = spawn(executable, [
     "--headless=new",
+    ...(process.env.CI ? ["--no-sandbox"] : []),
     "--disable-background-networking",
     "--disable-component-update",
     "--disable-default-apps",
+    "--disable-dev-shm-usage",
     "--disable-features=Translate,MediaRouter,OptimizationHints",
     "--disable-gpu",
     "--disable-sync",

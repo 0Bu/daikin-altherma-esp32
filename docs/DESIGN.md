@@ -473,9 +473,11 @@ Body, ordered:
    the emitter box remains the generic **space circuit**, and the moving water paths are neutral grey.
    The valve and measured flow still show the hydraulic route toward the space branch; hiding that
    would discard a real controller state, while calling the branch Cooling would invent active heat
-   removal. The **24-hour curve is deliberately not
-   gated**: there a flat zero is the honest shape of a day that delivered nothing, while a gap would
-   be indistinguishable from missing data — the live pill and the curve answer different questions.
+   removal. The **24-hour curve uses the same compressor witness whenever water is moving**. A
+   bucket with measured no flow is zero transfer; a bucket with flow but no running compressor is a
+   gap because pump overrun can redistribute stored heat without heat-pump output. Profiles that do
+   not expose compressor frequency do not offer the derived heat-output curve. The live pill and the
+   curve use different time resolutions, but they keep the same physical boundary.
    The **electrical input** is the same whenever it is falling back to the
    inverter current (a `0x21` row that freezes too): a stopped compressor is not drawing the 1.4 kW
    the held current implies, it is drawing ~0. It simply blanks, like every other held pill — the one
@@ -575,7 +577,8 @@ Body, ordered:
    horizontal gap between PHE and space circuit into equal left, middle and right clearances.
    The one exception is the **"≈"** on the two derived pills: it is part of the reading rather than a
    note about it, and without it a bare "4.6 kW" reads as measured whenever the inspector is closed.
-   Both are *derived*, never measured — thermal from flow × ΔT (≈4.186 kJ/kg·K, assuming water;
+   Both are *derived*, never measured — thermal from flow/60 × ΔT × ρ·cp
+   (≈4.186 kJ/(l·K), assuming water and ρ≈1 kg/l;
    glycol mixtures have different density and heat capacity), electrical from current at an assumed
    230 V. The X10A rows used by this view expose no direct live power measurement, so the inspector
    entries are titled "(estimated)" and open on saying so; a derived number must never read as a
@@ -732,11 +735,15 @@ Body, ordered:
    **A COMPUTED pill charts its own figure, never one of its inputs.** Pump speed (the inverse of the
    raw `0=max, 100=stop` signal), ΔT, heat output, electrical input and COP have no directly matching
    displayed register value, so the firmware buffers what each is computed FROM and the curve
-   is assembled in the browser (`DERIVED` in `www/js/history.js`) by the same expressions `liveData()` uses
-   for the live number — one definition of each figure, rather than a firmware copy and a browser
-   copy free to drift. Drawing the flow rate under a heat-output headline would be the §5.3-item-3
+   is assembled in the browser (`DERIVED` in `www/js/history.js`). Heat output uses the same
+   primitive formula and compressor boundary as `liveData()` while retaining the signed balance
+   across heating, cooling and defrost buckets; the instantaneous pill additionally applies its
+   current mode and useful-direction gates. Drawing the flow rate under a heat-output headline would be the §5.3-item-3
    substitution with a 24-hour axis in front of it, and that is precisely what is not done here: the
-   series carries the figure's own unit and its own gaps. Two properties fall out of composing rings
+   series carries the figure's own unit and its own gaps. The heat-output curve additionally requires
+   compressor frequency: measured no flow records zero, while flow with a stopped compressor leaves
+   a gap instead of naming pump-overrun heat transport as heat-pump output. Two properties fall out
+   of composing rings
    rather than re-deriving from `/values`: a sample is null wherever any input is, so a gap stays a
    gap; and it is marked *resting* only when EVERY missing input was — one input that genuinely
    failed to measure outranks "nothing failed", since that is the stronger claim.

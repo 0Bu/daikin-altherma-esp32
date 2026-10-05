@@ -1,4 +1,4 @@
-// Whole-component contract for the read-only heating-curve diagnosis (#294), named for its current
+// Whole-component contract for the read-only heating-curve diagnosis (legacy-294), named for its current
 // observation-only scope rather than the retired dynamic-LWT actuator project.
 // Host C++ tests own the sampling maths; this file owns source boundaries that linking a pure header
 // cannot prove: derived arming, heating-only gate order, durable telemetry and absence of any Modbus

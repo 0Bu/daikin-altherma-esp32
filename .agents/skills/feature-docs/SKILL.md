@@ -18,7 +18,7 @@ component inventory, diagnostics, WiFi resilience). It is a project-specific rec
 other projects. It rots silently: a new component gets linked, a `CONFIG_*` gets flipped, a `🔭` stub
 becomes real — and the catalog still describes the old world. This skill closes that gap. It is the
 feature-level companion to [`project-review`](../project-review/SKILL.md) (broad pre-merge drift) and
-[`doc_drift_checker`](../../../.codex/agents/doc-drift-checker.toml) (AGENTS.md ↔ deep-dive docs).
+[`doc_drift_checker`](../../agents/doc-drift-checker.toml) (AGENTS.md ↔ deep-dive docs).
 
 [`docs/ESP_IDF_MATRIX.md`](../../../docs/ESP_IDF_MATRIX.md) is the detailed source-linked ESP-IDF
 inventory. Its mechanical gate covers explicit components, managed dependencies, active defaults,
@@ -49,11 +49,17 @@ If the diff touches none of these, FEATURES.md probably needs nothing — say so
 ## Steps
 
 0. **Step 0 — pin the baseline.**
-   Ensure the local repository is synchronized before auditing. Run `git fetch origin` and verify
-   `HEAD` matches `origin/main` (or the target PR head commit). Fail-fast on divergence or untracked
-   local drift — never audit an unpinned or stale baseline. State reviewed SHA in report.
-1. **Diff the surface.** `git diff main...HEAD -- main/ sdkconfig.defaults partitions.csv scripts/ .github/` and
-   scan for the signals above. Read the *actual* new code — do not infer a feature from a commit message.
+   Record `git rev-parse HEAD`, the intended comparison base, and `git status --short` before
+   auditing. For a PR, verify that the checkout matches the exact target PR head; refresh remote
+   refs with `git fetch origin` when needed and available. For an authorized local implementation,
+   include the intended tracked diff and untracked new files in the review and identify them in
+   the report; no commit, PR or equality with `origin/main` is required. Preserve unrelated user
+   changes. Stamp a merge pass only after the reviewed content matches the exact committed PR head.
+1. **Diff the surface.** Use the recorded base in
+   `git diff <base>...HEAD -- main/ sdkconfig.defaults partitions.csv scripts/ .github/`. For a local
+   implementation, also inspect `git diff HEAD -- main/ sdkconfig.defaults partitions.csv scripts/ .github/`
+   and the intended untracked new files. Scan for the signals above and read the actual new code;
+   do not infer a feature from a commit message.
 2. **Locate both records.** Find the matching section **and** the feature-matrix row at the top of
    FEATURES.md. Most product features appear in both. If ESP-IDF surface changed, also update the
    stable row, evidence, official link and active-config appendix in ESP_IDF_MATRIX.md.
@@ -91,8 +97,10 @@ If the diff touches none of these, FEATURES.md probably needs nothing — say so
 
 Before recording the pass:
    - **Conciseness budget audit:** Audit added lines against the catalog rule: strictly one line in the summary matrix table, at most 2-3 lines in the feature section. Reject any tutorial, issue backstory, or narrative text.
-   - **Prose pruning:** If an entry was modified, inspect surrounding paragraphs and prune any obsolete remarks or redundant explanations to leave the catalog no longer than you found it.
-   - **Link and count validation:** Re-check that all links are repo-relative from `docs/` and all cited sensor or `CHECK` numbers match exact source code counts.
+   - **Prose review:** Identify obsolete remarks or redundant explanations near the changed entry.
+     Revise them only within an explicitly authorized documentation change.
+   - **Link and count validation:** Re-check that repository links resolve relative to `docs/`,
+     official external references remain valid, and cited sensor or `CHECK` numbers match source.
 
 ## Guardrails
 

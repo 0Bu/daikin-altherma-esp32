@@ -59,7 +59,7 @@ Source: *EKRHH Daikin HomeHub — Installer reference guide 4P744838-1E*, §2.5,
 | `32767` | unsupported by this device |
 
 `mb_is_special()` catches all three before any scaling, so a sentinel can never leak out as a large
-number — the `legacy-35–39` failure shape this project exists to avoid.
+number — the `legacy-35–legacy-39` failure shape this project exists to avoid.
 
 **Compatibility is not unconditional.** The Modbus register set requires Unified MMI2 firmware
 ≥ 7.8.0 on the audited ERGA-EV / EHBH / X-E family, and individual registers can be inoperative per
@@ -240,6 +240,49 @@ whatever the first cycle read.
 `hp_modbus.cpp` `static_assert`s that batching still collapses the map, so a future register added
 into a gap re-prices the link visibly instead of quietly restoring the per-register sweep.
 
+## Daikin Altherma 4 Modbus TCP support
+
+In addition to the legacy EKRHH (Altherma 3) 32-register map, this firmware supports native **Daikin Altherma 4** Modbus TCP telemetry.
+
+### Extended register catalog
+
+> **UNVERIFIED CATALOG / REFERENCE DERIVED**
+> Altherma 4 Modbus registers (`65–68`, `74–77`, `79`, `80`, `83`) and profile `MB_PLAN_ALTHERMA4` are derived from reverse-engineered community tables without verified hardware traces or official manufacturer documentation. All mappings and conversions remain unverified on physical hardware.
+
+Altherma 4 introduces 11 additional registers beyond the base 32 registers (total 43 registers):
+
+| Register (FC04 Input) | Type | Unit | Meaning | Description / Pairing |
+|---|---|---|---|---|
+| `65` | `Int16` | | Demand response mode | Smart grid / demand response operating mode |
+| `66` | `Int16` | `%` | Bypass valve position | Bypass 3-way/mixing valve position |
+| `67` | `Int16` | `%` | Tank valve position | DHW tank valve position |
+| `68` | `Int16` | `%` | Circulation pump speed | Variable-speed water pump modulation |
+| `74` | `Temp16` | `°C` | Leaving water temp outdoor | Outdoor unit leaving water temperature |
+| `75` | `Temp16` | `°C` | Leaving water temp tank valve | Leaving water temperature at tank valve |
+| `76` | `Temp16` | `°C` | DHW temp upper | Dual-sensor DHW tank upper temperature |
+| `77` | `Temp16` | `°C` | DHW temp lower | Dual-sensor DHW tank lower temperature |
+| `79` | `Int16` (÷100) | `bar` | Water pressure | Circuit water pressure (formatted with 2 decimal places, e.g. `1.85 bar`), paired to X10A concept `water_pressure` (`0x62/11`) |
+| `80` | `Temp16` | `°C` | Heating/cooling target | Active flow temperature target |
+| `83` | `Int16` | | Unit operation mode | Current operational state |
+
+### Batch compression
+
+The 43 registers of the Altherma 4 map collapse into **14 contiguous batches** (5 holding, 9 input). Batch compression satisfies `count * 3 <= 43` ($14 \times 3 = 42 \le 43$).
+
+### Automatic profile detection and fail-closed fallback
+
+Detection is **100% automatic** at runtime without requiring any UI configuration:
+
+1. **Initial session state (`Auto`):** When connecting to a new target host, port, or unit ID (`status_socket_open`), the active profile begins in `Auto`.
+2. **Safe baseline polling & probing:** In `Auto`, the firmware reads the safe 32-register base HomeHub map (`MB_PLAN`) and performs a single probe request on register 79 (water pressure, `MODBUS_PROBE_REGISTER`) at the end of each full cycle.
+3. **Promotion to `Altherma4`:** If probe register 79 successfully returns valid data in the plausible hydronic range (0 < pressure <= 6.0 bar), `s_probe_tracker` transitions affirmatively to `ModbusProfile::Altherma4`, enabling the 43-register `MB_PLAN_ALTHERMA4` on subsequent cycles.
+4. **Fallback behavior:**
+   - **Affirmative `HomeHub` answer:** When connected to an Altherma 3 / EKRHH unit, register 79 returns `32767` (`MB_UNSUPPORTED`, verified on hardware), `32766` (`MB_UNAVAILABLE`), or Modbus Exception 02 (*Illegal Data Address*). The firmware evaluates this affirmative response via `logic::evaluate_probe_result()`, definitively setting `ModbusProfile::HomeHub` without incrementing `rx_fail` or dropping the link. The UI and `/status` remain green and healthy, reporting the 32 valid base registers.
+   - **Transport failure branch:** If a probe request encounters a transport error (timeout, connection closed), the connection is dropped (`link_ok = false`, socket closed) without incrementing `rx_fail`. The profile stays in `Auto` across reconnects until `MODBUS_PROBE_MAX_RETRIES` (3) consecutive probe failures are reached, after which it falls back to `ModbusProfile::HomeHub` (`profile_basis: fallback`). During probe-cycle transport drops, `/values` remains unrefreshed for that cycle (`connected = false`).
+   - **Invalid value branch:** If probe register 79 returns an implausible value (`0` or `> 6.0 bar`), the connection remains open, but after 3 consecutive invalid readings it exhausts the probe retry budget and falls back to `ModbusProfile::HomeHub` (`profile_basis: fallback`).
+   - **Hub syncing (`MB_WAIT`):** While register 79 returns `32765` (`MB_WAIT`, hub syncing/booting), the probe continues to run on every full cycle, but does not consume the retry budget and leaves the profile in `Auto` without counting as a failure.
+5. **Sticky profile across reconnects & periodic back-off:** While connected to the same target endpoint (`host:port:unit_id`), an affirmatively detected profile (`HomeHub` or `Altherma4`, `profile_basis: affirmative`) is remembered in RAM across TCP reconnects to avoid repetitive probe churn. Non-affirmative exhaustion fallback defaults to `HomeHub` for safety, then periodically re-probes with exponential backoff (starting at 10 minutes, doubling up to a 4-hour cap) to accommodate transient startup conditions such as circuit filling or temporary network drops. Changing the target host, port, or unit ID resets all tracker state immediately.
+
 ## How the two sources meet
 
 In exactly one place: [`main/logic/homehub_map.hpp`](../main/logic/homehub_map.hpp), which says which
@@ -387,7 +430,8 @@ combined link state with X10A, since either can be down alone and one merged "co
 exactly the case worth seeing. Its value is the active `host:port`, and its colour follows the shared
 connection-state vocabulary. Config and diagnostics only; there are no pump controls, by design.
 
-**API:** `/status.modbus` carries the link/config fields, `task_stack_min_free_bytes` (this task's
+**API:** `/status.modbus` carries the link/config fields (including `searched` and detected `profile`:
+`auto` \| `homehub` \| `altherma4`), `task_stack_min_free_bytes` (this task's
 worst stack headroom in bytes, from the one sampler all five watched stacks report through
 — `main/stack_watch.hpp` — so this surface and the MQTT heartbeat's `modbus_stack_min_free_bytes`
 cannot answer the same question with two numbers; `null`, not `0`, when the task has never run,

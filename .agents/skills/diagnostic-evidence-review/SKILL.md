@@ -19,9 +19,12 @@ heuristic.
 ## Review the change
 
 0. **Step 0 — pin the baseline.**
-   Ensure the local repository is synchronized before auditing. Run `git fetch origin` and verify
-   `HEAD` matches `origin/main` (or the target PR head commit). Fail-fast on divergence or untracked
-   local drift — never audit an unpinned or stale baseline. State reviewed SHA in report.
+   Record `git rev-parse HEAD`, the intended comparison base, and `git status --short` before
+   auditing. For a PR, verify that the checkout matches the exact target PR head; refresh remote
+   refs with `git fetch origin` when needed and available. For an authorized local implementation,
+   include the intended tracked diff and untracked new files in the review and identify them in
+   the report; no commit, PR or equality with `origin/main` is required. Preserve unrelated user
+   changes. Stamp a merge pass only after the reviewed content matches the exact committed PR head.
 1. Run the gate before editing the stamp:
 
    ```bash
@@ -68,7 +71,9 @@ heuristic.
 Before running `--update` and closing the review:
 1. **Primary source citation check:** Verify that every cited URL resolves to an authoritative source (official manufacturer manual, peer-reviewed paper, official regulation) with exact section numbers.
 2. **Claim boundary audit:** Ensure that no project-selected threshold or heuristic is described as a manufacturer limit, and that limitations ("Not established") are explicit.
-3. **Self-optimize:** Remove speculative prose or extraneous commentary, ensuring that the evidence ledger remains crisp and directly verifiable.
+3. **Evidence prose review:** Report speculative prose or commentary that obscures the evidence.
+   Edit it only when fixes are explicitly authorized; review-only work does not refresh the ledger
+   or its fingerprint.
 
 ## Close the review
 

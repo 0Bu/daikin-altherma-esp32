@@ -46,9 +46,12 @@ re-record and apply the fixes; for review-only work, report the findings without
 
 ## 0. Step 0 — pin the baseline
 
-Ensure the local repository is synchronized before auditing. Run `git fetch origin` and verify
-`HEAD` matches `origin/main` (or the target PR head commit). Fail-fast on divergence or untracked
-local drift — never audit an unpinned or stale baseline. State reviewed SHA in report.
+Record `git rev-parse HEAD`, the intended comparison base, and `git status --short` before
+auditing. For a PR, verify that the checkout matches the exact target PR head; refresh remote
+refs with `git fetch origin` when needed and available. For an authorized local implementation,
+include the intended tracked diff and untracked new files in the review and identify them in
+the report; no commit, PR or equality with `origin/main` is required. Preserve unrelated user
+changes. Stamp a merge pass only after the reviewed content matches the exact committed PR head.
 
 ## 1. Run the gate (the mechanical half)
 
@@ -156,7 +159,7 @@ Look at the finished GIF. Then ask:
 3. **Are the numbers physically coherent?** They are invented, but they are read as real: leaving
    water above the tank temperature during a charge, ΔT and flow consistent with the stated kW
    (`flow/60 × 4.186 × ΔT`), a DHW COP near 2.5–3 and a 38 °C heating COP near 4–5, the CT current
-   matching the electrical estimate. A COP of 8 in the README is the #35–#39 failure shape with a
+   matching the electrical estimate. A COP of 8 in the README is the legacy-35–legacy-39 failure shape with a
    marketing budget.
 4. **Do the labels come from the real catalog?** `tools/uigif/scenes.js` uses the exact rows of a
    real profile (`main/def/altherma_erga_e_ehv_ehb_ehvz_e_ej_series_04_08kw.hpp`). A label invented
@@ -169,7 +172,7 @@ Look at the finished GIF. Then ask:
    wrong from the next release onwards with nothing able to see it. A UI change that alters the
    card's height leaves it clipped, or leaves a sliver of the header or the next card in frame —
    adjust `CROP` in the recorder rather than living with it. This is the checklist item that has
-   actually fired: #462 raised `#schem` by 6 px and shortened it by 6, and the crop it left behind
+   actually fired: legacy-462 raised `#schem` by 6 px and shortened it by 6, and the crop it left behind
    sat 17 px under the card, catching the top edge of the next one in every frame. Nothing
    mechanical can see that — the stamp only proves the recording is of these sources, and a GIF
    with a stray sliver renders exactly as well as one without. **Measure, don't guess**, and don't
@@ -209,11 +212,14 @@ semantic review in §4 can establish that it is a good picture of the firmware.
 Before concluding or stamping:
 1. **Asset budget analysis:** Inspect `docs/media/dashboard.gif` size and dimensions:
    - File size must remain reasonable (~2.0–2.5 MB). If exceeded, optimize palette or adjust `DWELL_FRAMES` before considering frame rate reductions.
-   - Frame count must be exactly 135 frames with smooth 100 ms transitions.
+   - Frame count must match `SCENES × (DWELL_FRAMES + TRANSITION_FRAMES)` in the recorder
+     (currently 135), and frame timing must match `STEP_MS` (currently 100 ms).
 2. **Loop continuity & visual truth:**
-   - Confirm that frame 135 blends seamlessly back into frame 1 with no jerk or visible restart jump.
+   - Confirm that the final frame blends seamlessly back into frame 1 with no visible restart jump.
    - Verify that no browser error banner, scrollbar, or unwanted element from adjacent cards appears in the cropped viewport.
-3. **Self-optimize:** If visual or size defects are identified, refine recorder parameters, re-record, and re-verify with `scripts/run-ui-gif-audit.sh`.
+3. **Review outcome:** Report visual or size defects. When fixes or a new recording are explicitly
+   authorized, refine recorder parameters, re-record and re-verify with `scripts/run-ui-gif-audit.sh`.
+   Review-only work leaves the recording and stamp unchanged.
 
 ## 6. Keep the contract in sync
 
@@ -236,4 +242,3 @@ SHA-stamped checkbox whose stamp still matches the PR head:
 ```text
 - [x] `$ui-gif` clean — merge gate @ <short-sha>    # <short-sha> = git rev-parse --short=12 HEAD
 ```
-

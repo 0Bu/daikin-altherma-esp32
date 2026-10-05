@@ -57,6 +57,7 @@
 #include "esp_http_server.h"
 #include "esp_timer.h"
 #include "esp_system.h"
+#include "esp_random.h"
 #include "esp_partition.h"
 #include "esp_core_dump.h"
 #include "freertos/FreeRTOS.h"
@@ -201,6 +202,9 @@ static esp_err_t h_index(httpd_req_t* req) {
     bool not_modified = false;
     const esp_err_t cache_err = static_asset_cache(req, "dashboard", etag, sizeof(etag), not_modified);
     if (cache_err != ESP_OK || not_modified) return cache_err;
+    httpd_resp_set_hdr(req, "X-Content-Type-Options", "nosniff");
+    httpd_resp_set_hdr(req, "X-Frame-Options", "DENY");
+    httpd_resp_set_hdr(req, "Referrer-Policy", "no-referrer");
     return http_send_gzip(req, "text/html", index_html_gz_start, index_html_gz_end);
 }
 
@@ -300,15 +304,19 @@ using HttpJsonChunks = BoundedChunkSink<HttpChunkEmitter, 1024>;
 // No count here on purpose: this file IS the set (every jstr_r below is one member), and stating
 // how many would be the sixth restatement of a number that had already drifted in four places.
 //
-// broadcaster), and that second runner is what overflowed hp_poll's stack (#241). GET /status now
-// instantiates this serializer with a 1 KiB bounded sink: the live payload is already ~8.7 KiB and a
-// growing whole-body std::string needed a ~15 KiB contiguous reallocation under OTA/weather TLS,
-// making the shared OOM guard return 503. MCP get_status now streams its small JSON-RPC prefix and
-// suffix around the same bounded serializer too. This serializer still takes ordinary small
+// broadcaster), and that second runner is what overflowed hp_poll's stack (legacy-241). GET /status
+// now instantiates this serializer with a 1 KiB bounded sink: the live payload is already ~8.7 KiB
+// and a growing whole-body std::string needed a ~15 KiB contiguous reallocation under OTA/weather
+// TLS, making the shared OOM guard return 503. MCP get_status now streams its small JSON-RPC prefix
+// and suffix around the same bounded serializer too. This serializer still takes ordinary small
 // snapshots and formats temporary strings. If one of those allocations fails before the first
 // emission, the shared guard can return 503; once an emission is attempted
 // the bounded-stream helper returns ESP_FAIL so httpd closes a possibly-started response instead of
 // attempting a second one or throwing through C.
+// Non-secret boot identity: history leases must also retire when a reboot's first observed
+// uptime is already greater than the previous sample. Shared by streamed HTTP and MCP serializers.
+static const uint64_t s_status_boot_id = (static_cast<uint64_t>(esp_random()) << 32) | esp_random();
+
 template <typename JsonOut>
 static void append_status_json(JsonOut& j, bool redact) {
     const Config& c = config();
@@ -318,6 +326,12 @@ static void append_status_json(JsonOut& j, bool redact) {
     j += "\"version\":" + jstr(esp_app_get_description()->version) + ",";
     j += "\"platform\":" + jstr(CONFIG_IDF_TARGET) + ",";
     j += "\"uptime_s\":" + std::to_string(esp_timer_get_time() / 1000000) + ",";
+    char boot_id[17];
+    std::snprintf(boot_id, sizeof(boot_id), "%016llx",
+                  static_cast<unsigned long long>(s_status_boot_id));
+    j += "\"boot_id\":";
+    j += jstr(boot_id);
+    j += ",";
     // Build identity: the running app's ELF sha (hex) — matches a core dump to the exact firmware
     // that produced it (scripts/decode-coredump.sh), and pairs with last_crash below.
     char elf_sha[65] = {0};
@@ -535,7 +549,8 @@ static void append_status_json(JsonOut& j, bool redact) {
              // Sticky until the next POST /set_wifi, because a rollback leaves no other trace: the
              // reboot it takes wipes the diag ring and the card just shows the old SSID again. The
              // dashboard does not render this yet (a banner lands with the web-UI write-feedback
-             // work, PR #65) — for now it is the API's answer to "did my save actually stick?".
+             // work, PR legacy-65) — for now it is the API's answer to "did my save actually
+             // stick?".
              ",\"rolled_back\":" + std::string(c.wifi_rolled_back ? "true" : "false") + "},";
         // WHICH TRANSPORT carries the device, and what the optional wire is doing. A separate block
         // from "wifi" rather than a widening of it, because the two describe different hardware and
@@ -1117,17 +1132,22 @@ static void append_status_json(JsonOut& j, bool redact) {
     j += jstr(c.profile);
     j += "},";
 
-    // The HomeHub Modbus stack — a SECOND, INDEPENDENT source, never an alternative to the X10A link
-    // reported above (docs/MODBUS_PROTOCOL.md). `enabled` reports whether its runtime task exists;
-    // `host` is the active target; empty after `searched:true` means persistently disabled. Manual
-    // discovery is request-local and never appears here as a runtime mode. The link is READ-ONLY:
-    // there is no actuator object and no actuation flag, because the write path was removed (#294).
-    // Successive += with bare literals — the httpd-stack rule the rest of this builder follows.
+    // The HomeHub Modbus stack — a SECOND, INDEPENDENT source, never an alternative to the X10A
+    // link reported above (docs/MODBUS_PROTOCOL.md). `enabled` reports whether its runtime task
+    // exists; `host` is the active target; empty after `searched:true` means persistently disabled.
+    // Manual discovery is request-local and never appears here as a runtime mode. The link is
+    // READ-ONLY: there is no actuator object and no actuation flag, because the write path was
+    // removed (legacy-294). Successive += with bare literals — the httpd-stack rule the rest of
+    // this builder follows.
     const ModbusStatus mb = mb_status();
     j += "\"modbus\":{\"enabled\":";  j += mb.enabled ? "true" : "false";
     j += ",\"connected\":";            j += mb.connected ? "true" : "false";
     j += ",\"discovering\":";          j += mb.discovering ? "true" : "false";
     j += ",\"searched\":";             j += c.mb_discovery_done ? "true" : "false";
+    j += ",\"profile\":";
+    j += jstr(modbus_profile_name(mb.profile));
+    j += ",\"profile_basis\":";
+    j += jstr(modbus_profile_basis_name(mb.profile_basis));
     // The ADDRESS comes from the CONFIG, the STATE from the live link.
     // Reading the address off the link status was wrong before the first connect ever succeeded:
     // ModbusStatus is zero-initialised, so a device that had never dialled reported port 0 and unit
@@ -1179,7 +1199,9 @@ static void append_status_json(JsonOut& j, bool redact) {
     // with successive += like everything else here: a `a + b + c` chain materialises every
     // intermediate at once, all live in one frame on the httpd task's stack (AGENTS.md → Memory,
     // concurrency, and HTTP safety; the v1.0.12 stack overflow happened on THIS task).
-    j += "\"history\":{\"dt\":";
+    j += "\"history\":{\"epoch\":";
+    j += std::to_string(history_epoch());
+    j += ",\"dt\":";
     j += std::to_string(logic::HISTORY_DT_S);
     // The .noinit-RAM adoption verdict for this boot. "accept" means a compatible reset kept the
     // sealed bytes; every other value names why RAM started empty. This is deliberately independent
@@ -1523,9 +1545,9 @@ static void append_status_json(JsonOut& j, bool redact) {
     // block exists to prevent. 0 on any ordinary boot. Small numbers + a short slug appended to the
     // existing builder — no large contiguous allocation, and nothing here is a `+` chain.
     //
-    // Beside them, what that headroom already COST while the board DID survive (#380): cycles the
-    // two 1 s task loops produced nothing on. mqtt_skipped/poll_skipped are OOM-guard catches — a
-    // reading dropped, or (poll) never read at all; mqtt_quiesced is the publisher standing aside
+    // Beside them, what that headroom already COST while the board DID survive (legacy-380): cycles
+    // the two 1 s task loops produced nothing on. mqtt_skipped/poll_skipped are OOM-guard catches —
+    // a reading dropped, or (poll) never read at all; mqtt_quiesced is the publisher standing aside
     // on purpose while an OTA/weather TLS operation owns the heap (logic/ota_quiesce.hpp), the same
     // gap with a stated cause. The three of them complete the sequence the two figures above start:
     // min_free_heap says how close the board came, these say what it lost getting there, and
@@ -1692,32 +1714,40 @@ static void append_status_json(JsonOut& j, bool redact) {
         int         total = 0;
         std::string cand, fams;
         if (c.fp_valid) {
-            Fingerprint fp{};
-            fp.page_mask = c.fp_pages;
-            fp.kw_tenths = c.fp_kw_tenths;
-            // Carried so this recomputed fingerprint stays a faithful copy of the one detection
-            // used — and since #225 it is LOAD-BEARING here, not merely faithful: detect_candidates
-            // narrows by the I/U capacity when the O/U figure is absent, so omitting this field
-            // would make /status report a set the device never considered (the live unit: 8
-            // candidates across 4 families instead of 3 across 2, which is the over-broad reading
-            // that put a wrong family into #213).
-            fp.iu_kw_tenths       = c.fp_iu_kw_tenths;
-            int              nsig = 0;
-            const Signature* sigs = def::signatures(nsig);
-            const char*      out[64];
-            total                          = detect_candidates(sigs, nsig, fp, out,
-                                                               static_cast<int>(sizeof(out) / sizeof(out[0])));
-            const int                shown = total < 64 ? total : 64;
-            std::vector<std::string> seen;
-            for (int i = 0; i < shown; i++) {
-                if (i) cand += ",";
-                cand += jstr(out[i]);
-                const def::ModelName* mn  = def::model_name(out[i]);
-                std::string           fam = mn ? mn->family : "Altherma";
-                if (std::find(seen.begin(), seen.end(), fam) == seen.end()) {
-                    if (!seen.empty()) fams += ",";
-                    fams += jstr(fam);
-                    seen.push_back(fam);
+            if (c.proto == Protocol::S) {
+                if (c.fp_pages != 0) {
+                    total = 1;
+                    cand  = jstr("protocol_s");
+                    fams  = jstr("Legacy / Protocol S");
+                }
+            } else {
+                Fingerprint fp{};
+                fp.page_mask = c.fp_pages;
+                fp.kw_tenths = c.fp_kw_tenths;
+                // Carried so this recomputed fingerprint stays a faithful copy of the one detection
+                // used — and since legacy-225 it is LOAD-BEARING here, not merely faithful:
+                // detect_candidates narrows by the I/U capacity when the O/U figure is absent, so
+                // omitting this field would make /status report a set the device never considered
+                // (the live unit: 8 candidates across 4 families instead of 3 across 2, which is
+                // the over-broad reading that put a wrong family into legacy-213).
+                fp.iu_kw_tenths       = c.fp_iu_kw_tenths;
+                int              nsig = 0;
+                const Signature* sigs = def::signatures(nsig);
+                const char*      out[64];
+                total                          = detect_candidates(sigs, nsig, fp, out,
+                                                                   static_cast<int>(sizeof(out) / sizeof(out[0])));
+                const int                shown = total < 64 ? total : 64;
+                std::vector<std::string> seen;
+                for (int i = 0; i < shown; i++) {
+                    if (i) cand += ",";
+                    cand += jstr(out[i]);
+                    const def::ModelName* mn  = def::model_name(out[i]);
+                    std::string           fam = mn ? mn->family : "Altherma";
+                    if (std::find(seen.begin(), seen.end(), fam) == seen.end()) {
+                        if (!seen.empty()) fams += ",";
+                        fams += jstr(fam);
+                        seen.push_back(fam);
+                    }
                 }
             }
         }
@@ -1747,21 +1777,37 @@ esp_err_t http_send_status_json(httpd_req_t* req, std::string_view prefix,
     }) ? ESP_OK : ESP_FAIL;
 }
 
+// Copies the request's query into `q` ("" when there is none). False when it did not fit: the
+// caller must refuse (414), never parse the truncated query as absent — otherwise ?redact=1 plus
+// padding fails OPEN and ships the unscrubbed body under a URL that asked for the scrubbed one.
+template <size_t N> static bool read_query(httpd_req_t* req, char (&q)[N]) {
+    const esp_err_t err = httpd_req_get_url_query_str(req, q, N);
+    if (err == ESP_ERR_HTTPD_RESULT_TRUNC) return false;
+    if (err != ESP_OK) q[0] = '\0';
+    return true;
+}
+
+static esp_err_t query_too_long(httpd_req_t* req) {
+    return httpd_resp_send_err(req, HTTPD_414_URI_TOO_LONG, "query too long");
+}
+
+// Same flag policy as ?clear / ?verbose / ?downgrade: fires on exactly "1" (logic/query_flag.hpp).
+static bool query_flag(const char* q, const char* key) {
+    char v[4];
+    return httpd_query_key_value(q, key, v, sizeof(v)) == ESP_OK && query_flag_on(v);
+}
+
 static esp_err_t h_status(httpd_req_t* req) {
     // The browser deliberately switches to the compact /ota/status surface once installation is
     // accepted. Refuse before Config/status snapshots or JSON temporaries are created: admitting
     // this large poll after the transfer headroom sample recreated the exact X509-fragmentation
     // race the admission gate is meant to prevent.
     if (ota_download_active()) return network_tls_busy(req);
-    // ?redact=1 -> the bug-report form of this payload (logic/redact.hpp). Same flag policy as
-    // ?clear / ?verbose / ?downgrade: fires on exactly "1", so ?redact=0 is not a near-miss that
-    // silently ships the unscrubbed body under a name that promised otherwise.
-    bool redact = false;
+    // ?redact=1 -> the bug-report form of this payload (logic/redact.hpp); ?redact=0 is not a
+    // near-miss that silently ships the unscrubbed body under a name that promised otherwise.
     char q[48];
-    if (httpd_req_get_url_query_str(req, q, sizeof(q)) == ESP_OK) {
-        char v[4];
-        if (httpd_query_key_value(q, "redact", v, sizeof(v)) == ESP_OK) redact = query_flag_on(v);
-    }
+    if (!read_query(req, q)) return query_too_long(req);
+    const bool redact = query_flag(q, "redact");
     return http_send_status_json(req, {}, {}, redact);
 }
 
@@ -1885,12 +1931,13 @@ static void append_values_array(JsonOut& j, const std::vector<CachedValue>& v,
             if (const char* sid = logic::binary_semantic_for(v[i].reg, v[i].off, v[i].conv))
                 { j += ",\"binary_semantic\":"; json_append_quoted(j, sid); }
         }
-        // The DEVICE's own answer to "is this reading still current?" — logic/ou_stale.hpp applied on
-        // the poll task (#209 defect 5), emitted only when true so the many live rows cost no bytes.
-        // The browser still derives the same fact from `reg` + the compressor row, and the catalog
-        // test gates both against every profile; this is here so a non-browser consumer of /values
-        // (a script, the MCP surface) gets the answer without reimplementing the rule, and so the
-        // marker travels with the row rather than being recomputed from a snapshot taken elsewhere.
+        // The DEVICE's own answer to "is this reading still current?" — logic/ou_stale.hpp applied
+        // on the poll task (legacy-209 defect 5), emitted only when true so the many live rows cost
+        // no bytes. The browser still derives the same fact from `reg` + the compressor row, and
+        // the catalog test gates both against every profile; this is here so a non-browser consumer
+        // of /values (a script, the MCP surface) gets the answer without reimplementing the rule,
+        // and so the marker travels with the row rather than being recomputed from a snapshot taken
+        // elsewhere.
         if (v[i].held) j += ",\"held\":true";
         // HOW LONG THIS STATE HAS STOOD (logic/state_dwell.hpp). Emitted only for the switched rows
         // the table tracks, so the ~65 measurement rows cost no bytes — the same rule `binary`,
@@ -2190,7 +2237,7 @@ static esp_err_t h_history(httpd_req_t* req) {
     j += std::to_string(logic::HISTORY_DT_S);
     // The ROW's unit, never a hardcoded "°C": the trends mix °C, bar and unitless rows, and the
     // browser prints this string straight into the range readout and the crosshair. A bar row
-    // labelled °C is exactly the #35-#39 shape.
+    // labelled °C is exactly the legacy-35–legacy-39 shape.
     j += ",\"unit\":";
     j += jstr(unit);
     const TimeStatus ts = time_status();
@@ -2247,15 +2294,15 @@ static esp_err_t h_history(httpd_req_t* req) {
 }
 
 static esp_err_t h_diag(httpd_req_t* req) {
-    bool redact = false;
     char q[64];
-    if (httpd_req_get_url_query_str(req, q, sizeof(q)) == ESP_OK) {
-        char v[4];
-        // GET is read-only. Destructive clearing is POST /diag/clear, so a link, prefetch or image
-        // request can never erase the evidence it was trying to retrieve.
-        if (httpd_query_key_value(q, "verbose", v, sizeof(v)) == ESP_OK) diag_set_verbose(query_flag_on(v));
-        if (httpd_query_key_value(q, "redact", v, sizeof(v)) == ESP_OK) redact = query_flag_on(v);
-    }
+    if (!read_query(req, q)) return query_too_long(req); // never downgrade a requested redaction
+    // GET is read-only. Destructive clearing is POST /diag/clear, so a link, prefetch or image
+    // request can never erase the evidence it was trying to retrieve. ?verbose only changes the
+    // setting when present.
+    char v[4];
+    if (httpd_query_key_value(q, "verbose", v, sizeof(v)) == ESP_OK)
+        diag_set_verbose(query_flag_on(v));
+    const bool redact = query_flag(q, "redact");
     // Plain /diag copies into static storage and is useful while OTA is in flight. Redaction owns
     // per-line strings and a 1280-byte growable chunk, so only that allocation-rich variant waits.
     if (redact && ota_download_active()) return network_tls_busy(req);

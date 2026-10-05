@@ -96,24 +96,24 @@ check_status "format tokens inside strings and comments are ignored" 0 "$?"
 
 seed_good
 printf '%s\n' '#!/usr/bin/env bash' \
-    'if [ "$1" = --version ]; then echo "Ubuntu clang-format version 18.1.3 (1ubuntu1)"; exit 0; fi' \
+    'if [ "$1" = --version ]; then echo "Ubuntu clang-format version 18.1.8 (1ubuntu1)"; exit 0; fi' \
     'test "$1" = --dry-run && test "$2" = --Werror && test "$3" = --style=file' \
     >"$TMP/fake-clang-format"
 chmod 0755 "$TMP/fake-clang-format"
-run_check --clang-format "$TMP/fake-clang-format" --clang-format-version 18.1.3
+run_check --clang-format "$TMP/fake-clang-format" --clang-format-version 18.1.8
 check_status "the pinned read-only clang-format adapter receives dry-run flags" 0 "$?"
 
 printf '%s\n' '#!/usr/bin/env bash' \
-    'if [ "$1" = --version ]; then echo "Ubuntu clang-format version 18.1.3 (1ubuntu1)"; exit 0; fi' \
+    'if [ "$1" = --version ]; then echo "Ubuntu clang-format version 18.1.8 (1ubuntu1)"; exit 0; fi' \
     'exit 1' >"$TMP/failing-clang-format"
 chmod 0755 "$TMP/failing-clang-format"
-run_check --clang-format "$TMP/failing-clang-format" --clang-format-version 18.1.3
+run_check --clang-format "$TMP/failing-clang-format" --clang-format-version 18.1.8
 check_status "clang-format style drift fails the gate" 1 "$?"
 
 printf '%s\n' '#!/usr/bin/env bash' \
     'echo "Ubuntu clang-format version 17.0.6"' >"$TMP/wrong-clang-format"
 chmod 0755 "$TMP/wrong-clang-format"
-run_check --clang-format "$TMP/wrong-clang-format" --clang-format-version 18.1.3
+run_check --clang-format "$TMP/wrong-clang-format" --clang-format-version 18.1.8
 check_status "an unpinned clang-format release fails closed" 2 "$?"
 
 CI=true env -u CLANG_FORMAT "$RUNNER" tools/fuzz/logic_property_tests.cpp >/dev/null 2>&1
@@ -131,31 +131,31 @@ git -C "$TMP" add .clang-format main test tools/audit
 git -C "$TMP" commit -qm baseline
 printf '%s\n' 'inline int added_cleanly() { return 7; }' >>"$TMP/main/logic/good.hpp"
 printf '%s\n' '#!/usr/bin/env bash' \
-    'if [ "$1" = --version ]; then echo "Ubuntu clang-format version 18.1.3 (1ubuntu1)"; exit 0; fi' \
+    'if [ "$1" = --version ]; then echo "Ubuntu clang-format version 18.1.8 (1ubuntu1)"; exit 0; fi' \
     'for arg in "$@"; do [ "$arg" = --lines=3:3 ] && exit 0; done' \
     'exit 1' >"$TMP/range-clang-format"
 chmod 0755 "$TMP/range-clang-format"
-run_check --clang-format "$TMP/range-clang-format" --clang-format-version 18.1.3 \
+run_check --clang-format "$TMP/range-clang-format" --clang-format-version 18.1.8 \
     --changed-since HEAD
 check_status "changed-line discovery isolates the new hunk from legacy formatting" 0 "$?"
 
 if command -v clang-format-18 >/dev/null 2>&1; then
-    run_check --clang-format clang-format-18 --clang-format-version 18.1.3 \
+    run_check --clang-format clang-format-18 --clang-format-version 18.1.8 \
         --changed-since HEAD
     check_status "real clang-format-18 accepts a clean new hunk beside legacy drift" 0 "$?"
 
     printf '%s\n' 'int       newly_bad( ) { return (  2 ); }' >>"$TMP/main/logic/good.hpp"
-    run_check --clang-format clang-format-18 --clang-format-version 18.1.3 \
+    run_check --clang-format clang-format-18 --clang-format-version 18.1.8 \
         --changed-since HEAD
     check_status "real clang-format-18 rejects bad spacing in a new hunk" 1 "$?"
 
     seed_good
-    run_check --clang-format clang-format-18 --clang-format-version 18.1.3
+    run_check --clang-format clang-format-18 --clang-format-version 18.1.8
     check_status "real clang-format-18 accepts the canonical fixture" 0 "$?"
 
     printf '%s\n' 'int       badly_formatted( ) { return (  1 ); }' \
         >"$TMP/main/logic/good.hpp"
-    run_check --clang-format clang-format-18 --clang-format-version 18.1.3
+    run_check --clang-format clang-format-18 --clang-format-version 18.1.8
     check_status "real clang-format-18 rejects nontrivial token spacing" 1 "$?"
 elif [ -n "${CI:-}" ]; then
     echo "FAIL: CI selftest requires clang-format-18" >&2

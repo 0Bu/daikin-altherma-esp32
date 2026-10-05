@@ -349,7 +349,7 @@ assert.equal(
   "13 starts · space 0 · hot water 0 · 9 unclassified",
 );
 
-// THE FALLBACK (#443 live review): the valve row exists in the catalog but was too sparse to judge
+// THE FALLBACK (legacy-443 live review): the valve row exists in the catalog but was too sparse to judge
 // with. The pooled mean is what decided, so it stays on the line, the class figures ride along as
 // observation, and the copy says which one carried the verdict.
 const cyclingPooled = {
@@ -752,7 +752,7 @@ assert.match(dhwCopy, /Zusammenhang, keine Ursache/);
 assert.match(dhwCopy, /each window=maximum.*COP 2\.5–3\.0/);
 assert.match(dhwCopy, /jedes Fenster=Maximum.*COP 2,5–3,0/);
 assert.match(dhwCopy, /replacement-electricity direction, not measured daily use/);
-assert.match(dhwCopy, /Ersatzstrom-Richtung, kein Messwert/);
+assert.match(dhwCopy, /elektrischer Nachheizbedarf, kein Messwert/);
 
 const flowCopy = JSON.stringify(descriptionContext.__copy.model.health_flow);
 assert.match(flowCopy, /observed part-load minimum.*not the nominal or design flow/);

@@ -113,7 +113,7 @@ const DEMO = (() => {
              label: id, dt: 300, unit, t0: 1768720920, b0: 5895736,
              v, held: source === "x10a" && id === "outdoor_air" ? [[3, 2]] : [] };
   };
-  // A BIT-FLAG row exactly as the firmware serves it since #210: the value is the NUMBER 1/0, and
+  // A BIT-FLAG row exactly as the firmware serves it since legacy-210: the value is the NUMBER 1/0, and
   // `binary: true` is the structural marker that lets the browser render it as ON/OFF without
   // treating every numeric 0/1 as a switch (http_status.cpp, conv_is_binary). Emitting the old
   // "ON"/"OFF" text here silently produced a plausible-looking but WRONG recording: `vOn` returned

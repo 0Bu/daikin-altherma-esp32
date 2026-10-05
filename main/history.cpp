@@ -56,8 +56,8 @@ struct Trend {
     char             label[kLabelMax] = {0};
     // The row's OWN unit, captured with the label — never assumed to be °C. The catalog mixes them
     // freely (bar for the two pressures, none at all for flow/rps/pump, where the unit lives in the
-    // label text), and a chart whose range readout and crosshair print "°C" over a bar series is the
-    // #35-#39 shape: well-formed, plausible, wrongly labelled.
+    // label text), and a chart whose range readout and crosshair print "°C" over a bar series is
+    // the legacy-35–legacy-39 shape: well-formed, plausible, wrongly labelled.
     char             unit[8] = {0};
 };
 
@@ -145,7 +145,23 @@ std::atomic<bool> s_mb_reset_requested{false};
 std::atomic<uint32_t> s_mb_identity_generation{1};
 std::atomic<uint32_t> s_mb_target_fp{0};
 std::atomic<bool> s_circulation_reset_requested{false};
+// Browser cache lifetime, separate from every producer's source-generation admission token. It
+// changes only when a history lifetime is retired, so A -> B -> A between status polls is visible
+// even though the final configuration has the same bytes as before.
+std::atomic<uint32_t> s_history_epoch{1};
+static_assert(std::atomic<uint32_t>::is_always_lock_free,
+              "history browser epoch must remain allocation- and lock-free");
 SemaphoreHandle_t s_mtx = nullptr;
+
+inline void bump_history_epoch() noexcept {
+    uint32_t previous = s_history_epoch.load(std::memory_order_relaxed);
+    uint32_t next;
+    do {
+        next = previous + 1;
+        if (next == 0) next = 1; // zero is never a valid browser lifetime
+    } while (!s_history_epoch.compare_exchange_weak(previous, next, std::memory_order_release,
+                                                    std::memory_order_relaxed));
+}
 
 // The ONE unwind-safe mutex guard, shared by every file in this firmware (main/rtos_guard.hpp).
 // This used to be a private copy here; nine of them had drifted into two different shapes.
@@ -310,11 +326,12 @@ inline void advance_raster_locked(int64_t now_us, uint32_t bucket) {
         }
     } else if (bucket > s_bucket) {
         // `>`, not `!=`. Both callers read the clock and compute the bucket BEFORE taking s_mtx, so
-        // if the other task crosses a five-minute boundary inside that window the loser arrives with
-        // a bucket BEHIND the raster. history_skipped() correctly answers 0 there, but commit(0)
-        // still ran: every ring took a spurious NO_READING sample and s_bucket moved BACKWARDS,
-        // skewing the whole time axis by one slot and making history_newest_age_s() read from an
-        // older instant. Only reachable since #367 gave the raster a second, independent advancer.
+        // if the other task crosses a five-minute boundary inside that window the loser arrives
+        // with a bucket BEHIND the raster. history_skipped() correctly answers 0 there, but
+        // commit(0) still ran: every ring took a spurious NO_READING sample and s_bucket moved
+        // BACKWARDS, skewing the whole time axis by one slot and making history_newest_age_s() read
+        // from an older instant. Only reachable since legacy-367 gave the raster a second,
+        // independent advancer.
         const uint32_t skipped = logic::history_skipped(s_bucket, bucket);
         for (auto& tr : P().ring) tr.ring.commit(skipped);
         s_persist_dirty = true;
@@ -590,6 +607,8 @@ void history_start() {
 
 const char* history_persist_state() { return logic::history_restore_slug(s_persist_verdict); }
 
+uint32_t history_epoch() noexcept { return s_history_epoch.load(std::memory_order_acquire); }
+
 void history_reset() {
     if (!s_mtx) return;
     // Same lock order as the journal service. Waiting for an in-flight fold before arming the reset
@@ -608,6 +627,7 @@ void history_reset() {
         s_flash_oldest_bucket[src] = INT64_MIN;
         s_flash_restore_slot_count[src] = 0;
     }
+    bump_history_epoch();
 }
 
 // The DETECTION path's reset — hp_detect_run's only entry, and separate from history_reset() for a
@@ -657,6 +677,7 @@ void history_reset_on_detect(uint32_t identity_fp) {
         s_flash_oldest_bucket[src] = INT64_MIN;
         s_flash_restore_slot_count[src] = 0;
     }
+    bump_history_epoch();
 }
 
 void history_modbus_reset(uint32_t target_fp) noexcept {
@@ -684,24 +705,35 @@ void history_modbus_reset(uint32_t target_fp) noexcept {
         s_flash_oldest_bucket[src] = INT64_MIN;
         s_flash_restore_slot_count[src] = 0;
     }
+    bump_history_epoch();
 }
 
 uint32_t history_modbus_generation() { return s_mb_identity_generation.load(); }
 
 void history_circulation_reset() {
     s_circulation_reset_requested.store(true);
+    bump_history_epoch();
 }
 
 void history_checkup_reset() {
-    if (!s_flash_mtx) return;
+    // The caller already retired the diagnostic producer generation. That remains a browser
+    // lifecycle change even when this board has no compatible flash journal/index to clear.
+    if (!s_flash_mtx) {
+        bump_history_epoch();
+        return;
+    }
     Lock lk(s_flash_mtx);
-    if (!lk.acquired()) return;
+    if (!lk.acquired()) {
+        bump_history_epoch();
+        return;
+    }
     const size_t src = static_cast<size_t>(logic::HistoryJournalSource::Checkup);
     // The generation embedded in each payload is the durable identity. Resetting the cursor also
     // permits the first completed hour of the new generation to replace a same-hour predecessor.
     s_flash_last_bucket[src] = INT64_MIN;
     s_flash_restore_slot_count[src] = 0;
     s_flash_checkup_restore_done = true;
+    bump_history_epoch();
 }
 
 // The BOARD's own 24-hour trends (free heap, largest contiguous block) — their ONE producer.
@@ -857,7 +889,8 @@ void history_record(const CachedValue* v, size_t n, uint32_t source_generation) 
             break;
         }
     }
-    if (s_reset_requested.exchange(false) || identity_changed) {
+    const bool reset_requested = s_reset_requested.exchange(false);
+    if (reset_requested || identity_changed) {
         const size_t completed = logic::history_completed_samples(bucket);
         for (size_t t = 0; t < TREND_COUNT; t++) {
             if (independent_trend(logic::TRENDS[t])) continue;
@@ -867,6 +900,9 @@ void history_record(const CachedValue* v, size_t n, uint32_t source_generation) 
         }
         P().x10a_target_fp = s_x10a_target_fp.load();
         s_persist_dirty = true;
+        // Public reset requests published their epoch before the deferred clear. Only a newly
+        // discovered row-identity mismatch needs another retirement event here.
+        if (!reset_requested && identity_changed) bump_history_epoch();
     }
     reset_circulation_locked(bucket);
 
@@ -1888,6 +1924,9 @@ void history_flash_save() {
 // Erasing all 4 MiB costs one cycle per sector and is deliberately reserved for this explicit action.
 bool history_flash_forget() {
     s_flash_forgotten.store(true);
+    // Readers are suppressed immediately, even if the subsequent physical erase fails. Retire
+    // browser leases at that privacy boundary rather than letting them display the forgotten data.
+    bump_history_epoch();
     const auto wipe_ram_and_index = []() {
         if (!s_mtx) return false;
         Lock history_lk(s_mtx);

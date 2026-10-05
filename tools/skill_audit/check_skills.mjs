@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Canonical runner-neutral skill and reviewer audit tool.
-// Audits every canonical skill under .agents/skills/ and reviewer in .codex/agents/ against repository facts:
-// - Valid YAML frontmatter (name, description)
+// Audits every canonical skill under .agents/skills/ and reviewer in .agents/agents/ against repository facts:
+// - Valid restricted scalar YAML frontmatter (name, description)
 // - Frontmatter name matches directory name
 // - All relative markdown file links resolve to real files
 // - All referenced scripts in scripts/ exist and are executable
@@ -13,13 +13,14 @@
 // - Stamp format contracts (bare short SHA: git rev-parse --short=12 HEAD)
 // - Self-analysis and self-optimization section present
 // - Completeness of skill-audit checklist against discovered skills and reviewers
-// - Reviewer TOML configuration validity and referenced paths
+// - Reviewer metadata and referenced paths (TOML syntax is checked by the agent-config gate)
 //
 // Usage: node tools/skill_audit/check_skills.mjs [--repo-root DIR] [--optimize | --fix]
 // Exit: 0 = clean, 1 = drift/findings, 2 = usage/runtime error
 
 import fs from "node:fs";
 import path from "node:path";
+import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 const moduleDir = path.dirname(fileURLToPath(import.meta.url));
@@ -35,7 +36,9 @@ let optimizeMode = false;
 for (let i = 2; i < process.argv.length; i++) {
   const arg = process.argv[i];
   if (arg === "--repo-root") {
-    repoRoot = path.resolve(process.argv[++i] || "");
+    const directory = process.argv[++i];
+    if (!directory || directory.startsWith("--")) die(2, "--repo-root requires a directory");
+    repoRoot = path.resolve(directory);
   } else if (arg === "--optimize" || arg === "--fix") {
     optimizeMode = true;
   } else if (arg === "-h" || arg === "--help") {
@@ -147,15 +150,19 @@ const discoveredSkills = fs.readdirSync(skillsDir, { withFileTypes: true })
   .sort();
 
 // 5. Discover all reviewer configurations
-const codexAgentsDir = path.join(repoRoot, ".codex/agents");
+const agentsDir = path.join(repoRoot, ".agents/agents");
 const discoveredReviewers = [];
-if (fs.existsSync(codexAgentsDir) && fs.statSync(codexAgentsDir).isDirectory()) {
-  const agentFiles = fs.readdirSync(codexAgentsDir)
+if (!fs.existsSync(agentsDir) || !fs.statSync(agentsDir).isDirectory()) {
+  die(2, `reviewer directory missing: ${agentsDir}`);
+}
+{
+  const agentFiles = fs.readdirSync(agentsDir)
     .filter((f) => f.endsWith(".toml"))
     .sort();
+  if (agentFiles.length === 0) die(2, `reviewer inventory is empty: ${agentsDir}`);
 
   for (const agentFile of agentFiles) {
-    const agentPath = path.join(codexAgentsDir, agentFile);
+    const agentPath = path.join(agentsDir, agentFile);
     const content = fs.readFileSync(agentPath, "utf8");
     const nameMatch = content.match(/^name\s*=\s*"([^"]+)"/m);
     const descMatch = content.match(/^description\s*=\s*"([^"]+)"/m);
@@ -197,6 +204,30 @@ function recordOptimization(message) {
   optimizationsCount++;
 }
 
+// Match the canonical frontmatter's restricted one-line string contract, rather than
+// treating collections, block scalars, duplicate keys or unterminated quotes as prose.
+function frontmatterString(raw) {
+  if (raw.startsWith('"')) {
+    const quoted = raw.match(/^"(?:[^"\\]|\\.)*"(?=\s*(?:#.*)?$)/);
+    if (!quoted) return undefined;
+    try {
+      return JSON.parse(quoted[0]);
+    } catch {
+      return undefined;
+    }
+  }
+  if (raw.startsWith("'")) {
+    const quoted = raw.match(/^'((?:[^']|'')*)'\s*(?:#.*)?$/);
+    return quoted ? quoted[1].replaceAll("''", "'") : undefined;
+  }
+  const value = raw.replace(/\s+#.*$/, "").trim();
+  if (/^[\[\]{}&*!|>@`%#,'"]/.test(value) || /^[-?:](?:\s|$)/.test(value) || /:\s/.test(value)) {
+    return undefined;
+  }
+  if (/^(?:null|true|false|~)$/i.test(value) || /^[-+]?\d+(?:\.\d+)?$/.test(value)) return undefined;
+  return value;
+}
+
 // Audit each discovered skill
 for (const skillName of discoveredSkills) {
   const skillFile = path.join(skillsDir, skillName, "SKILL.md");
@@ -229,7 +260,18 @@ for (const skillName of discoveredSkills) {
       finding(skillName, `invalid frontmatter line: ${fml}`);
       continue;
     }
-    fm.set(match[1], match[2].trim());
+    if (fm.has(match[1])) {
+      finding(skillName, `duplicate frontmatter key: ${match[1]}`);
+      continue;
+    }
+    const value = frontmatterString(match[2].trim());
+    if (value === undefined) {
+      finding(skillName, `invalid restricted YAML string for frontmatter ${match[1]}`);
+    }
+    fm.set(match[1], value);
+  }
+  if ([...fm.keys()].sort().join("\0") !== "description\0name") {
+    finding(skillName, "frontmatter keys must be exactly name and description");
   }
 
   if (fm.get("name") !== skillName) {
@@ -275,62 +317,62 @@ for (const skillName of discoveredSkills) {
 
   // D. Dynamically discovered partition offset checks
   const partOffsetRegex = /\b([a-zA-Z0-9_]+)@(0x[0-9a-fA-F]+)\b/g;
-  while ((match = partOffsetRegex.exec(content)) !== null) {
-    const part = match[1].toLowerCase();
-    const actualOffset = normalizeHex(match[2]);
+  content = content.replace(partOffsetRegex, (claim, originalPart, offset) => {
+    const part = originalPart.toLowerCase();
+    const actualOffset = normalizeHex(offset);
     const partition = discoveredPartitions.get(part);
     if (!partition) {
-      finding(skillName, `unknown partition '${match[0]}' (not in partitions.csv)`);
+      finding(skillName, `unknown partition '${claim}' (not in partitions.csv)`);
     } else {
       const expectedOffset = partition.offset;
       if (actualOffset !== expectedOffset) {
         if (optimizeMode) {
-          content = content.replaceAll(match[0], `${part}@${expectedOffset}`);
           fileModified = true;
           recordOptimization(`${skillName}: corrected partition offset ${part}@${actualOffset} -> ${part}@${expectedOffset}`);
+          return `${originalPart}@${expectedOffset}`;
         } else {
-          finding(skillName, `wrong ${part} offset '${match[0]}' (expected ${part}@${expectedOffset})`);
+          finding(skillName, `wrong ${part} offset '${claim}' (expected ${part}@${expectedOffset})`);
         }
       }
     }
-  }
+    return claim;
+  });
 
-  const partPhraseRegex = /\b(nvs|otadata|phy_init|coredump|ota_0|ota_1|history)\s+(?:at|offset|\()\s*`?(0x[0-9a-fA-F]+)`?/gi;
-  while ((match = partPhraseRegex.exec(content)) !== null) {
-    const part = match[1].toLowerCase();
-    const actualOffset = normalizeHex(match[2]);
+  const partPhraseRegex = /(\b(nvs|otadata|phy_init|coredump|ota_0|ota_1|history)\s+(?:at|offset|\()\s*`?)(0x[0-9a-fA-F]+)(`?)/gi;
+  content = content.replace(partPhraseRegex, (claim, prefix, originalPart, offset, suffix) => {
+    const part = originalPart.toLowerCase();
+    const actualOffset = normalizeHex(offset);
     const partition = discoveredPartitions.get(part);
     if (partition) {
       const expectedOffset = partition.offset;
       if (actualOffset !== expectedOffset) {
         if (optimizeMode) {
-          content = content.replaceAll(match[2], expectedOffset);
           fileModified = true;
           recordOptimization(`${skillName}: corrected partition offset ${part} ${actualOffset} -> ${expectedOffset}`);
+          return `${prefix}${expectedOffset}${suffix}`;
         } else {
           finding(skillName, `wrong ${part} offset '${actualOffset}' (expected ${expectedOffset})`);
         }
       }
     }
-  }
+    return claim;
+  });
 
-  // E. Board pin references check
-  if (content.includes("XIAO ESP32-S3") || content.includes("XIAO")) {
-    if (content.match(/XIAO.*?(?:RX\s*=\s*(\d+).*?TX\s*=\s*(\d+)|TX\s*=\s*(\d+).*?RX\s*=\s*(\d+))/s)) {
-      const rx44 = /RX\s*=\s*44/.test(content);
-      const tx43 = /TX\s*=\s*43/.test(content);
-      if (!rx44 || !tx43) {
-        finding(skillName, "XIAO ESP32-S3 pin assignment must cite RX=44/TX=43");
-      }
-    }
-  }
-  if (content.includes("AtomS3")) {
-    if (content.match(/AtomS3.*?(?:RX\s*=\s*(\d+).*?TX\s*=\s*(\d+)|TX\s*=\s*(\d+).*?RX\s*=\s*(\d+))/s)) {
-      const rx1 = /RX\s*=\s*1\b/.test(content);
-      const tx2 = /TX\s*=\s*2\b/.test(content);
-      if (!rx1 || !tx2) {
-        finding(skillName, "AtomS3 Lite pin assignment must cite RX=1/TX=2");
-      }
+  // E. Associate RX/TX claims with their board; another board's pins cannot satisfy them.
+  const boardMentions = [...content.matchAll(/\b(?:XIAO(?: ESP32-S3)?|AtomS3(?: Lite)?)\b/gi)];
+  for (let i = 0; i < boardMentions.length; i++) {
+    const mention = boardMentions[i];
+    const nextBoard = boardMentions[i + 1]?.index ?? content.length;
+    const claim = content.slice(mention.index + mention[0].length, nextBoard)
+      .split(/\n\s*\n|[.;](?:\s|$)/, 1)[0];
+    const pins = [...claim.matchAll(/\b(RX|TX)\s*=\s*(\d+)\b/gi)];
+    if (pins.length === 0) continue;
+    const xiao = /^XIAO/i.test(mention[0]);
+    const expected = xiao ? { RX: 44, TX: 43 } : { RX: 1, TX: 2 };
+    if (!pins.some((pin) => pin[1].toUpperCase() === "RX") ||
+        !pins.some((pin) => pin[1].toUpperCase() === "TX") ||
+        pins.some((pin) => Number(pin[2]) !== expected[pin[1].toUpperCase()])) {
+      finding(skillName, `${xiao ? "XIAO ESP32-S3" : "AtomS3 Lite"} pin assignment must cite RX=${expected.RX}/TX=${expected.TX}`);
     }
   }
 
@@ -344,7 +386,7 @@ for (const skillName of discoveredSkills) {
 
   // G. Dynamic HTTP endpoint references check
   const candidateEndpoints = new Set();
-  const filePrefixes = ["docs/", "main/", "scripts/", "tools/", "test/", ".agents/", ".codex/", ".github/"];
+  const filePrefixes = ["docs/", "main/", "scripts/", "tools/", "test/", ".agents/", ".github/"];
 
   function addCandidate(raw) {
     if (!raw) return;
@@ -399,7 +441,6 @@ for (const skillName of discoveredSkills) {
     "tools/",
     "test/",
     ".agents/",
-    ".codex/",
     ".github/",
   ];
   while ((match = fileRefRegex.exec(content)) !== null) {
@@ -464,7 +505,7 @@ for (const reviewer of discoveredReviewers) {
   if (!instructions.trim()) {
     finding(`reviewer:${reviewer.file}`, "empty developer_instructions");
   } else {
-    const filePattern = /\b((?:docs|main|scripts|tools|test|\.agents|\.codex)\/[A-Za-z0-9_.-]+\.[a-zA-Z0-9]+|AGENTS\.md)\b/g;
+    const filePattern = /(?<![A-Za-z0-9_./-])((?:docs|main|scripts|tools|test|\.agents)\/(?:[A-Za-z0-9_.-]+\/)*[A-Za-z0-9_.-]+\.[a-zA-Z0-9]+|AGENTS\.md)\b/g;
     let fMatch;
     while ((fMatch = filePattern.exec(instructions)) !== null) {
       const candidate = fMatch[1].replace(/[.,:;]+$/, "");
@@ -587,7 +628,7 @@ if (fs.existsSync(skillAuditFile)) {
           updatedReviewerItems.push(listedReviewers.get(r.name));
         } else {
           const desc = (r.desc || "read-only reviewer").replace(/\.+$/, "");
-          updatedReviewerItems.push(`- **\`${r.name}\`** (\`.codex/agents/${r.file}\`) — ${desc}.`);
+          updatedReviewerItems.push(`- **\`${r.name}\`** (\`.agents/agents/${r.file}\`) — ${desc}.`);
           recordOptimization(`skill-audit: added missing reviewer '${r.name}' to Per-target checklist`);
           checklistModified = true;
         }
@@ -609,7 +650,7 @@ if (fs.existsSync(skillAuditFile)) {
         "",
         updatedSkillItems.join("\n"),
         "",
-        "**Reviewers** (`.codex/agents/`):",
+        "**Reviewers** (`.agents/agents/`):",
         "",
         updatedReviewerItems.join("\n"),
         "",
@@ -641,6 +682,17 @@ if (fs.existsSync(skillAuditFile)) {
   }
 }
 
+// Re-read the completed edits without --optimize. This also validates newly generated
+// checklist entries and catches any drift introduced by synchronization itself.
+if (optimizeMode) {
+  const verified = spawnSync(process.execPath, [fileURLToPath(import.meta.url), "--repo-root", repoRoot], { encoding: "utf8" });
+  if (verified.error || verified.status !== 0) {
+    if (verified.stdout) process.stdout.write(verified.stdout);
+    if (verified.stderr) process.stderr.write(verified.stderr);
+    die(verified.status === 1 ? 1 : 2, "final read-only verification after optimization failed");
+  }
+}
+
 if (findingsCount > 0) {
   console.error(`\nskill-audit failed with ${findingsCount} finding(s).`);
   process.exit(1);
@@ -654,5 +706,5 @@ if (optimizeMode) {
   }
 }
 
-console.log(`skill-audit: all ${discoveredSkills.length} skills and reviewer agents clean and verified against repository facts.`);
+console.log(`skill-audit: all ${discoveredSkills.length} skills and ${discoveredReviewers.length} reviewer agents clean against the checked repository contracts.`);
 process.exit(0);

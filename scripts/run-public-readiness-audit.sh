@@ -5,44 +5,16 @@ cd "$(dirname "$0")/.."
 
 node <<'JS'
 const fs = require("node:fs");
+const { execFileSync } = require("node:child_process");
 const { createHash } = require("node:crypto");
 
 const mcp = JSON.parse(fs.readFileSync(".mcp.json", "utf8"));
 const args = mcp?.mcpServers?.context7?.args;
-if (!Array.isArray(args) || !args.some((arg) => /^@upstash\/context7-mcp@\d+\.\d+\.\d+$/.test(arg))) {
-  throw new Error("context7 must be pinned to one exact npm version");
-}
 if (args.some((arg) => /@latest\b/.test(arg))) {
   throw new Error("floating @latest dependency in .mcp.json");
 }
-
-const codexConfig = fs.readFileSync(".codex/config.toml", "utf8");
-function tomlSection(name) {
-  const lines = [];
-  let active = false;
-  for (const line of codexConfig.split(/\r?\n/)) {
-    const header = line.match(/^\s*\[([^\]]+)\]\s*$/);
-    if (header) {
-      active = header[1] === name;
-      continue;
-    }
-    if (active && line.trim() && !line.trimStart().startsWith("#")) lines.push(line.trim());
-  }
-  return lines.sort();
-}
-const agentConfig = tomlSection("agents");
-if (JSON.stringify(agentConfig) !== JSON.stringify([
-  "enabled = true",
-  "max_concurrent_threads_per_session = 3",
-])) {
-  throw new Error(`canonical multi-agent settings drifted: ${JSON.stringify(agentConfig)}`);
-}
-const context7Config = tomlSection("mcp_servers.context7");
-if (JSON.stringify(context7Config) !== JSON.stringify([
-  'args = ["-y", "@upstash/context7-mcp@4.0.2"]',
-  'command = "npx"',
-])) {
-  throw new Error(`canonical Context7 settings drifted: ${JSON.stringify(context7Config)}`);
+if (!Array.isArray(args) || !args.some((arg) => /^@upstash\/context7-mcp@\d+\.\d+\.\d+$/.test(arg))) {
+  throw new Error("context7 must be pinned to one exact npm version");
 }
 
 // Project hooks are executable by design, but their configuration-side surface is an exact list:
@@ -50,47 +22,56 @@ if (JSON.stringify(context7Config) !== JSON.stringify([
 // trusted without changing this audit. Secret/partition guards and all PR-review gates remain
 // consolidated behind canonical dispatches. This does not authenticate hook source after project
 // trust. It keeps the tracked configuration narrow, deterministic and reviewable.
-const expectedHookDispatches = {
+const preToolMatcher = "run_command|view_file|replace_file_content|write_to_file|Bash|Read|Edit|Write|apply_patch|exec_command|shell|shell_command";
+const prGatesMatcher = "run_command|Bash|exec_command|shell|shell_command|mcp__.+(?:merge_pull_request|enable_auto_merge|enable_pull_request_auto_merge|enqueue_pull_request)";
+const formatMatcher = "replace_file_content|write_to_file|Edit|Write|apply_patch";
+
+const expectedGuards = {
   PreToolUse: [
-    ["^(?:Read|Edit|Write|Bash|apply_patch|exec_command|shell|shell_command)$", 'python3 "$(git rev-parse --show-toplevel)/tools/agent-hooks/agent_hook.py" pre-tool-guards', "Checking secrets and partition safety", 10],
-    ["^(?:Bash|exec_command|shell|shell_command|mcp__.+(?:merge_pull_request|enable_auto_merge|enable_pull_request_auto_merge|enqueue_pull_request))$", 'bash "$(git rev-parse --show-toplevel)/tools/agent-hooks/require-pr-gates.sh"', "Checking current PR review evidence", 600],
+    [preToolMatcher, 'python3 "$(git rev-parse --show-toplevel)/tools/agent-hooks/agent_hook.py" pre-tool-guards', 10],
+    [prGatesMatcher, 'python3 "$(git rev-parse --show-toplevel)/tools/agent-hooks/agent_hook.py" pr-gates', 600],
   ],
-  SessionStart: [["^(?:startup|resume|clear|compact)$", 'python3 "$(git rev-parse --show-toplevel)/tools/agent-hooks/agent_hook.py" capabilities', "Detecting repository capabilities", 15]],
-  SubagentStart: [[undefined, 'python3 "$(git rev-parse --show-toplevel)/tools/agent-hooks/agent_hook.py" subagent-context', "Loading repository subagent boundaries", 10]],
-  UserPromptSubmit: [[undefined, 'python3 "$(git rev-parse --show-toplevel)/tools/agent-hooks/agent_hook.py" prompt-context', "Checking whether crash-triage context applies", 10]],
-  Stop: [[undefined, 'python3 "$(git rev-parse --show-toplevel)/tools/agent-hooks/agent_hook.py" stop-logic-tests', "Running changed host logic tests", 600]],
-  PostToolUse: [["^(?:Edit|Write|apply_patch)$", 'python3 "$(git rev-parse --show-toplevel)/tools/agent-hooks/agent_hook.py" format', "Formatting edited C and C++ files", 30]],
+  PostToolUse: [
+    [formatMatcher, 'python3 "$(git rev-parse --show-toplevel)/tools/agent-hooks/agent_hook.py" format', 30],
+  ],
 };
-const hooksFile = JSON.parse(fs.readFileSync(".codex/hooks.json", "utf8"));
-const hooks = hooksFile?.hooks;
-if (!hooks || typeof hooks !== "object" || Array.isArray(hooks)) {
-  throw new Error("canonical Codex hook configuration must define hook dispatches");
+const hooksDoc = JSON.parse(fs.readFileSync(".agents/hooks.json", "utf8"));
+const guards = hooksDoc?.["safety-guards"];
+if (!guards || typeof guards !== "object" || Array.isArray(guards)) {
+  throw new Error("canonical hook configuration must define safety-guards");
 }
-const actualEvents = Object.keys(hooks).sort();
-const expectedEvents = Object.keys(expectedHookDispatches).sort();
+const actualEvents = Object.keys(guards).sort();
+const expectedEvents = ["PostToolUse", "PreToolUse", "Stop"].sort();
 if (JSON.stringify(actualEvents) !== JSON.stringify(expectedEvents)) {
-  throw new Error(`canonical Codex hook event set drifted: ${JSON.stringify(actualEvents)}`);
+  throw new Error(`canonical hook event set drifted: ${JSON.stringify(actualEvents)}`);
 }
-for (const [event, expectedGroups] of Object.entries(expectedHookDispatches)) {
-  const groups = hooks[event];
+for (const [event, expectedGroups] of Object.entries(expectedGuards)) {
+  const groups = guards[event];
   if (!Array.isArray(groups) || groups.length !== expectedGroups.length) {
-    throw new Error(`${event} Codex hook dispatch count drifted`);
+    throw new Error(`${event} hook dispatch count drifted`);
   }
   for (let index = 0; index < expectedGroups.length; index += 1) {
     const group = groups[index];
-    const [expectedMatcher, expectedCommand, expectedStatus, expectedTimeout] = expectedGroups[index];
+    const [expectedMatcher, expectedCommand, expectedTimeout] = expectedGroups[index];
     if ((group?.matcher ?? undefined) !== expectedMatcher) {
-      throw new Error(`${event}[${index}] Codex hook matcher drifted`);
+      throw new Error(`${event}[${index}] hook matcher drifted`);
     }
     if (!Array.isArray(group?.hooks) || group.hooks.length !== 1) {
-      throw new Error(`${event}[${index}] must contain exactly one canonical Codex hook`);
+      throw new Error(`${event}[${index}] must contain exactly one canonical hook`);
     }
     const hook = group.hooks[0];
     if (hook?.type !== "command" || hook?.command !== expectedCommand ||
-        hook?.statusMessage !== expectedStatus || hook?.timeout !== expectedTimeout) {
-      throw new Error(`${event}[${index}] unapproved canonical Codex hook definition`);
+        hook?.timeout !== expectedTimeout) {
+      throw new Error(`${event}[${index}] unapproved canonical hook definition`);
     }
   }
+}
+const stopHook = guards.Stop?.[0];
+if (!Array.isArray(guards.Stop) || guards.Stop.length !== 1 ||
+    stopHook?.type !== "command" ||
+    stopHook?.command !== 'python3 "$(git rev-parse --show-toplevel)/tools/agent-hooks/agent_hook.py" stop-logic-tests' ||
+    stopHook?.timeout !== 600) {
+  throw new Error("unapproved canonical Stop hook definition");
 }
 
 const routeDocs = ["docs/ARCHITECTURE.md", ".agents/skills/device-triage/SKILL.md"];
@@ -249,10 +230,10 @@ for (const file of ["docs/REPORTING.md", ".github/ISSUE_TEMPLATE/bug_report.yml"
   }
 }
 
-// Public documentation must not send readers to numbered work items in the private predecessor
-// repository, nor let bare `#N` prose silently auto-link to unrelated issues in this fresh public
-// tracker. Section anchors are deliberately exempt: their `#` is immediately preceded by `](` or
-// by a word character in `file.md#anchor`.
+// Public documentation and tracked repository files must not send readers to numbered work items
+// in the private predecessor repository, nor let bare `#N` prose silently auto-link to unrelated
+// issues in this fresh public tracker. Section anchors are deliberately exempt: their `#` is
+// immediately preceded by `](` or by a word character in `file.md#anchor`.
 const publicMarkdown = [
   "README.md",
   "CONTRIBUTING.md",
@@ -264,8 +245,25 @@ for (const file of publicMarkdown) {
   if (/https:\/\/github\.com\/0Bu\/daikin-altherma-esp32\/(?:issues|pull)\/\d+/.test(text)) {
     throw new Error(`${file} links to a numbered private-predecessor work item`);
   }
-  if (/(?<!\]\()(?<!\w)#\d{1,3}\b/.test(text)) {
-    throw new Error(`${file} contains a bare predecessor #N reference that GitHub would mis-link`);
+}
+const auditedFiles = execFileSync("git", ["ls-files", "-z"])
+  .toString("utf8")
+  .split("\0")
+  .filter(Boolean)
+  .filter((file) => !file.startsWith("main/def/") && file !== "test/test_public_readiness_contract.mjs");
+
+for (const file of auditedFiles) {
+  if (!fs.existsSync(file)) continue;
+  const raw = fs.readFileSync(file);
+  if (raw.includes(0)) continue;
+  const text = raw.toString("utf8");
+  const lines = text.split(/\r?\n/);
+  for (let lineNo = 1; lineNo <= lines.length; lineNo++) {
+    const line = lines[lineNo - 1];
+    if (line.includes("audit-allow-issue-ref")) continue;
+    if (/(?<!\]\()(?<!\w)(?<!&)#\d{1,3}\b/.test(line)) {
+      throw new Error(`${file}:${lineNo} contains a bare predecessor #N reference that GitHub would mis-link`);
+    }
   }
 }
 if (!fs.readFileSync("CONTRIBUTING.md", "utf8").includes("legacy-209")) {
@@ -286,7 +284,7 @@ if (!/if: always\(\)[\s\S]{0,160}run: rm -f ota_signing_key\.pem/.test(buildWork
 JS
 
 # Keep this audit on the runner's declared Node + Git baseline. In particular, do not add an
-# undeclared ripgrep dependency: ubuntu-24.04 does not preinstall `rg`, and treating exit 127 like
+# undeclared ripgrep dependency: ubuntu-26.04 does not preinstall `rg`, and treating exit 127 like
 # "pattern absent" produces a misleading documentation failure instead of auditing the tree.
 node <<'JS'
 const fs = require("node:fs");
@@ -436,4 +434,4 @@ if git grep -nE -- '-----BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY-----' -- . >/dev/
   exit 1
 fi
 
-echo "Public-readiness audit passed: exact MCP version, canonical Codex configuration and hooks, public contracts, synthetic fixtures, notices, no tracked private key"
+echo "Public-readiness audit passed: exact MCP version, canonical agent configuration and hooks, public contracts, synthetic fixtures, notices, no tracked private key"
