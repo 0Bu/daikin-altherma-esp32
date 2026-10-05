@@ -28,7 +28,7 @@ passthrough).
    scheme (`CONFIG_SECURE_SIGNED_ON_UPDATE_NO_SECURE_BOOT`), so an **unsigned** image
    **crash-loops at boot** (`esp_secure_boot_init_checks` abort, before `app_main`) — see
    [docs/SECURITY.md](../../../docs/SECURITY.md). Sign with the offline RSA-3072 key
-   (`ota_signing_key.pem`, never in the repo), then point `@flash_args` at the signed image:
+   (`ota_signing_key.pem`, never in the repo; set `OTA_SIGNING_KEY_FILE=/path/to/key.pem` or pass your offline key path), then point `@flash_args` at the signed image:
    ```bash
    espsecure.py sign_data --version 2 --keyfile "$OTA_SIGNING_KEY_FILE" \
      --output build/daikin-signed.bin build/daikin-altherma-esp32.bin
@@ -47,8 +47,17 @@ passthrough).
    ```bash
    cd build && esptool --chip esp32s3 -p <port> write_flash "@flash_args"
    ```
-6. **Verify.** After reboot, `curl http://daikin-altherma-esp32.local/status | jq .version` (or read
-   the serial log: `screen <port> 115200`, exit `Ctrl-A K`). Confirm WiFi/MQTT/hp status.
+6. **Verify.** After reboot, run the automated health check:
+   ```bash
+   scripts/verify-device-health.sh --ip daikin-altherma-esp32.local --timeout 60
+   ```
+   (or read the serial log: `screen <port> 115200`, exit `Ctrl-A K`). Confirm WiFi/MQTT/hp status.
+
+## Self-analysis and cleanup
+
+Before concluding the flash operation:
+   - Confirm clean boot from `/status`: verify `.last_crash.fault == false` (or null), `.sys.safe_mode == false`, and contiguous heap `.sys.max_alloc >= 10000`.
+   - Remove temporary signed binary artifact (`rm -f build/daikin-signed.bin`).
 
 ## Notes
 - **Unsigned = crash-loop**, not a brick: this scheme burns no eFuses and leaves ROM download mode

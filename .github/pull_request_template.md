@@ -30,6 +30,7 @@ alone — those are repository-maintainer reviews and gate records, and are not 
 - [ ] `scripts/run-browser-render-tests.sh` passes (real Chrome at 320/1200 px in all 13 locales: Dashboard/Settings/all routed modals get DOM/layout/native-AX plus keyboard focus/Tab/Escape coverage; reduced motion covers Dashboard/Settings/WiFi/progress/disclosures)
 - [ ] `tools/absence/selftest.sh` passes (the source-absence matrix can still go red — a CI `mechanical_gates` step; the matrix itself rides the contract + UI suites)
 - [ ] `scripts/run-pr-hygiene-audit.sh` passes (commit messages and, in CI, current PR text)
+- [ ] `scripts/run-skill-audit.sh` clean (skill drift audit and agent contracts)
 - [ ] `scripts/run-agent-instructions-budget.sh` passes (agent policy, configuration and instruction budget)
 - [ ] Firmware built (`scripts/idf-docker.sh idf.py build`, or relied on CI) — N/A in a cloud session (no Docker daemon / no USB)
 - [ ] Exercised against a real heat pump / device where relevant (or noted why not)

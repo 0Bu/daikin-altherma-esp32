@@ -161,7 +161,7 @@ agent_gate_checkbox_status() {
 import re, sys
 key = re.escape(sys.argv[1])
 pattern = re.compile(
-    rf"^[-*]\s+\[[ xX]\]\s+`?\${key}`?(?=\s|$).*\bmerge\s+gate\b",
+    rf"^[-*]\s+\[[ xX]\]\s+`?\${key}`?(?=\s|$).*\b(?:merge|create/push|push)\s+gate\b",
     re.IGNORECASE,
 )
 matches = [candidate for candidate in sys.stdin.read().splitlines() if pattern.search(candidate)]
@@ -180,7 +180,7 @@ else:
 import re, sys
 record = sys.stdin.read()
 direct = re.findall(
-    r"\bmerge\s+gate\s+@\s*([0-9a-f]{7,40})(?![0-9A-Za-z])",
+    r"\b(?:merge|create/push|push)\s+gate\s+@\s*([0-9a-f]{7,40})(?![0-9A-Za-z])",
     record,
     re.IGNORECASE,
 )

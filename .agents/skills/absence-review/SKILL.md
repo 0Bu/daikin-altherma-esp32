@@ -47,6 +47,12 @@ one place: the pair (what is configured, what is answering).
 canonical gate rather than trusting a copied list, and grow it if an optional source moves.
 Report findings; apply fixes only when the user explicitly requests them.
 
+## 0. Step 0 — pin the baseline
+
+Ensure the local repository is synchronized before auditing. Run `git fetch origin` and verify
+`HEAD` matches `origin/main` (or the target PR head commit). Fail-fast on divergence or untracked
+local drift — never audit an unpinned or stale baseline. State reviewed SHA in report.
+
 ## 1. Run the deterministic half
 
 ```bash
@@ -136,10 +142,17 @@ the browser where it is a fact about presentation, and in `main/logic/` where it
 for the rule, an entry in the matrix for the state, and a seed in `tools/absence/selftest.sh` for any
 check you add. Then re-run all three commands in §1 plus `scripts/run-mock-tests.sh`.
 
+## 3b. Self-analysis and review audit
+
+Before ticking or stamping the gate:
+1. **Cross-product completeness check:** Did this review verify that removing one source leaves all other independent sources, charts, and board trends intact (e.g. no board trend suppression when X10A is absent)?
+2. **Honest absence presentation:** Confirm that an absent source renders as absent (`—` or hidden), rather than fabricating zero, an empty chart ("no readings yet"), or a substitute value.
+3. **Stamp integrity check:** Confirm the stamp uses the bare short SHA (`git rev-parse --short=12 HEAD`) without backticks.
+
 ## 4. Record the gate
 
-```
-- [x] `$absence-review` clean — merge gate @ <short-sha>
+```text
+- [x] `$absence-review` clean — merge gate @ <short-sha>    # <short-sha> = git rev-parse --short=12 HEAD
 ```
 
 Stamped with the PR head, like every other gate here; any later commit re-stales it.

@@ -48,6 +48,10 @@ If the diff touches none of these, FEATURES.md probably needs nothing — say so
 
 ## Steps
 
+0. **Step 0 — pin the baseline.**
+   Ensure the local repository is synchronized before auditing. Run `git fetch origin` and verify
+   `HEAD` matches `origin/main` (or the target PR head commit). Fail-fast on divergence or untracked
+   local drift — never audit an unpinned or stale baseline. State reviewed SHA in report.
 1. **Diff the surface.** `git diff main...HEAD -- main/ sdkconfig.defaults partitions.csv scripts/ .github/` and
    scan for the signals above. Read the *actual* new code — do not infer a feature from a commit message.
 2. **Locate both records.** Find the matching section **and** the feature-matrix row at the top of
@@ -82,6 +86,13 @@ If the diff touches none of these, FEATURES.md probably needs nothing — say so
    - No `✅`/`🧪` claim is unbacked; no shipped feature left as `🔭`.
 7. **Keep the framing hooks current.** FEATURES.md opens with a status legend and closes with a
    pointer back to this skill — leave both intact.
+
+## Self-analysis and prose self-optimization
+
+Before recording the pass:
+   - **Conciseness budget audit:** Audit added lines against the catalog rule: strictly one line in the summary matrix table, at most 2-3 lines in the feature section. Reject any tutorial, issue backstory, or narrative text.
+   - **Prose pruning:** If an entry was modified, inspect surrounding paragraphs and prune any obsolete remarks or redundant explanations to leave the catalog no longer than you found it.
+   - **Link and count validation:** Re-check that all links are repo-relative from `docs/` and all cited sensor or `CHECK` numbers match exact source code counts.
 
 ## Guardrails
 

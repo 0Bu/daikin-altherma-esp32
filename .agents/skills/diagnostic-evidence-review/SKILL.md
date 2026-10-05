@@ -18,6 +18,10 @@ heuristic.
 
 ## Review the change
 
+0. **Step 0 — pin the baseline.**
+   Ensure the local repository is synchronized before auditing. Run `git fetch origin` and verify
+   `HEAD` matches `origin/main` (or the target PR head commit). Fail-fast on divergence or untracked
+   local drift — never audit an unpinned or stale baseline. State reviewed SHA in report.
 1. Run the gate before editing the stamp:
 
    ```bash
@@ -59,6 +63,13 @@ heuristic.
 - Do not infer one root cause from a pattern that has several plausible causes, and do not turn one
   row's `OK` into a healthy-plant claim.
 
+## Self-analysis and evidence self-optimization
+
+Before running `--update` and closing the review:
+1. **Primary source citation check:** Verify that every cited URL resolves to an authoritative source (official manufacturer manual, peer-reviewed paper, official regulation) with exact section numbers.
+2. **Claim boundary audit:** Ensure that no project-selected threshold or heuristic is described as a manufacturer limit, and that limitations ("Not established") are explicit.
+3. **Self-optimize:** Remove speculative prose or extraneous commentary, ensuring that the evidence ledger remains crisp and directly verifiable.
+
 ## Close the review
 
 Run the mechanical checks only after the claims and sources are correct:
@@ -77,3 +88,21 @@ it does not prove source truth by itself.
 
 In the handoff, name the changed diagnoses and sources, state which thresholds remain project-owned,
 and separate code/CI evidence from manual, device or live-plant verification that was not performed.
+
+## Recording the pass (merge gate — no file marker)
+
+The runner-neutral [`require-pr-gates.sh`](../../../tools/agent-hooks/require-pr-gates.sh) refuses
+supported PR merge paths until this review is recorded in the PR body as a ticked,
+SHA-stamped checkbox whose stamp still matches the PR head. It fires when diagnostic evaluation,
+persistence, registers, evidence prose, or audit tooling change.
+
+When the review passes with **no blocking findings**, tick + stamp it with the reviewed commit:
+
+```text
+- [x] `$diagnostic-evidence-review` clean — merge gate @ <short-sha>    # <short-sha> = git rev-parse --short=12 HEAD
+```
+
+Edit the PR body with
+`scripts/gh-with-git-credentials.sh --repo github.com/0Bu/daikin-altherma-esp32 pr edit <pr> --body-file <absolute-physical-temp-path>/review-body.md`.
+Any later commit re-stales the stamp, forcing a fresh review before the next merge.
+Don't tick it if findings block the merge — fix first.

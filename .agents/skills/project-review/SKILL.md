@@ -16,6 +16,10 @@ A holistic pass before a PR merges. Not a linter — it checks the things that r
 
 ## Checklist
 
+0. **Step 0 — pin the baseline.**
+   Ensure the local repository is synchronized before auditing. Run `git fetch origin` and verify
+   `HEAD` matches `origin/main` (or the target PR head commit). Fail-fast on divergence or untracked
+   local drift — never audit an unpinned or stale baseline. State reviewed SHA in report.
 1. **Doc drift.** If the diff changed the component map, NVS keys, the HTTP API, the config
    model, or the poll/OTA/MQTT behaviour, are `AGENTS.md`, `docs/README.md` and
    `docs/ARCHITECTURE.md` updated to match? They must not disagree with the code.
@@ -30,6 +34,13 @@ A holistic pass before a PR merges. Not a linter — it checks the things that r
    of truth. Value/CRC/converter changes are verified against known-good reference outputs.
 
 Report findings grouped by the above; block on doc drift and untested logic.
+
+## Self-analysis and review audit
+
+Before ticking or stamping the gate:
+1. **Memory safety & exception boundary check:** Verify that every non-trivial HTTP handler wrapped large allocations in try/catch returning 503 on OOM, streams responses, and never allocates while holding a raw mutex.
+2. **Architecture and doc synchronization:** Verify that any changes to component boundaries, REST endpoints, NVS keys, or FreeRTOS task models are matched in `docs/ARCHITECTURE.md` and `AGENTS.md`.
+3. **Stamp integrity check:** Confirm the stamp uses the bare short SHA (`git rev-parse --short=12 HEAD`) without backticks.
 
 ## Recording the pass (merge gate — no file marker)
 

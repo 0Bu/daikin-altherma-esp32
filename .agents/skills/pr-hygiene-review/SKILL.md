@@ -25,6 +25,10 @@ exists beside its own mechanical English check.
 
 ## Review the change
 
+0. **Step 0 — pin the baseline.**
+   Ensure the local repository is synchronized before auditing. Run `git fetch origin` and verify
+   `HEAD` matches `origin/main` (or the target PR head commit). Fail-fast on divergence or untracked
+   local drift — never audit an unpinned or stale baseline. State reviewed SHA in report.
 1. Read the commit range (`git log <base>..<head>`) and the PR title/description as GitHub will
    render them, not only the working tree — a rebase or squash can carry prose the tree never held.
 2. Look specifically for what the mechanical gate cannot key on: a contributor's real name, employer
@@ -74,7 +78,19 @@ time it is green.
 ## Record the merge review
 
 After both the mechanical audit and the human pass are clean at the exact PR head, record the result
-in the PR's maintainer-gates section as `$pr-hygiene-review` with the bare current head SHA. A later
-commit invalidates the record; rerun both halves and update the stamp. Never stamp only the
+in the PR's maintainer-gates section as `$pr-hygiene-review` with the bare current head SHA:
+
+```text
+- [x] `$pr-hygiene-review` clean — merge gate @ <short-sha>    # <short-sha> = git rev-parse --short=12 HEAD
+```
+
+A later commit invalidates the record; rerun both halves and update the stamp. Never stamp only the
 mechanical result: the required record exists specifically for the personal information, diff
 content and non-English prose the shape checks cannot recognize.
+
+## Self-analysis and review audit
+
+Before concluding or stamping:
+1. **Scope completeness check:** Confirm all three surfaces were checked: the commit log range (`git log origin/main..HEAD`), the live PR title/description, and the actual code diff (`git diff origin/main..HEAD`).
+2. **False-positive exception audit:** If `tools/pr_hygiene/audit_exceptions.txt` was modified, confirm that only the SHA-256 fingerprint was entered, without quoting or exposing any sensitive text.
+3. **Stamp validity check:** Confirm the stamp uses the bare short SHA (`git rev-parse --short=12 HEAD`) without backticks.

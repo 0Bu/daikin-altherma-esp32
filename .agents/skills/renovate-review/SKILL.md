@@ -26,6 +26,12 @@ either bump raises.
 
 So for these two, **"CI is green" is not a merge argument**. The evidence has to come from a board.
 
+## 0. Step 0 — pin the baseline
+
+Ensure the local repository is synchronized before auditing. Run `git fetch origin` and verify
+`HEAD` matches `origin/main` (or the target PR head commit). Fail-fast on divergence or untracked
+local drift — never audit an unpinned or stale baseline. State reviewed SHA in report.
+
 ## 1. Which kind of PR is this?
 
 Read the diff — don't infer from the title:
@@ -185,6 +191,13 @@ required gate and decision is resolved. `main` stays linear and GPG-signed via G
 
 When a PR-body edit was separately authorized, record the hardware result there so it survives the
 squash. Otherwise return the result locally and state that GitHub was not mutated.
+
+## 4b. Self-analysis and review audit
+
+Before ticking, stamping, or merging:
+1. **Scope and eligibility verification:** Verify whether this PR is truly eligible for the CI-attested automerge exception (exact Renovate runner pin-line in `renovate.yaml` only) or requires full manual review and hardware validation.
+2. **Lockfile and dependency purity check:** For toolchain bumps, verify that `dependencies.lock` was regenerated cleanly without trailing edits or uncommitted files in `dist/`.
+3. **Stamp integrity check:** Confirm that all applied review stamps use the bare short SHA (`git rev-parse --short=12 HEAD`) of the exact current Renovate commit.
 
 ## Notes
 - **A red flag worth blocking on:** the bump needs a manifest change (a required new field, a dropped

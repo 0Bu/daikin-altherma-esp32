@@ -99,10 +99,66 @@ if [ -n "$payload" ]; then
     target_host="${fields[4]:-}"
     parse_error="${fields[5]:-}"
     expected_head="${fields[6]:-}"
+    if [ -z "$action" ]; then
+        raw_cmd="$(printf '%s' "$payload" | python3 -c '
+import json, sys
+try:
+    val = json.load(sys.stdin)
+    tc = val.get("toolCall") or {}
+    args = tc.get("args") or val.get("tool_input") or val.get("tool_args") or {}
+    cmds = [args.get(k) for k in ("CommandLine", "commandline", "command", "cmd") if args.get(k)]
+    print(cmds[0] if cmds else "")
+except Exception:
+    pass
+' 2>/dev/null)"
+        if printf '%s' "$raw_cmd" | grep -Eq '(^|[;&|[:space:]])git([[:space:]]+.*)?[[:space:]]+push\b'; then
+            action="git push"
+        fi
+    fi
     [ -n "$action" ] || exit 0
     if [ "$action" = "gh pr create" ]; then
         [ -z "$parse_error" ] \
             || { echo "BLOCKED: PR creation transport could not be bound safely: $parse_error" >&2; exit 2; }
+        exit 0
+    fi
+    if [ "$action" = "git push" ]; then
+        if [ "${AGENT_PR_GATES_SKIP:-0}" = "1" ]; then
+            echo "WARNING: AGENT_PR_GATES_SKIP=1 set; bypassing pre-push checks." >&2
+            exit 0
+        fi
+        if ! "$canonical_root/scripts/run-skill-audit.sh"; then
+            echo "BLOCKED by pre-push: skill audit failed before push. Fix skill drift before pushing." >&2
+            exit 2
+        fi
+        push_tmp="$(mktemp -d)" || exit 2
+        push_body="$push_tmp/body.md"; push_files="$push_tmp/files.txt"
+        pr_rc=0
+        agent_gate_discover_pr "" "$canonical_root" "$push_body" "$push_files" 2>/dev/null || pr_rc=$?
+        if [ "$pr_rc" -eq 0 ]; then
+            push_head="$(git -C "$canonical_root" rev-parse --verify 'HEAD^{commit}' 2>/dev/null || echo "$AGENT_DISCOVERED_HEAD")"
+            push_failures=""
+            status_sa="$(agent_gate_checkbox_status "$push_body" "skill-audit")"
+            state_sa="${status_sa%% *}"
+            stamped_sa=""
+            [ "$state_sa" = "checked" ] && stamped_sa="$(printf '%s' "$status_sa" | awk '{print $2}')"
+            if [ "$state_sa" != "checked" ] || ! agent_gate_sha_matches "$stamped_sa" "$push_head"; then
+                push_failures="${push_failures}  - \$skill-audit (skill audit): $status_sa\n"
+            fi
+            status_prh="$(agent_gate_checkbox_status "$push_body" "pr-hygiene-review")"
+            state_prh="${status_prh%% *}"
+            stamped_prh=""
+            [ "$state_prh" = "checked" ] && stamped_prh="$(printf '%s' "$status_prh" | awk '{print $2}')"
+            if [ "$state_prh" != "checked" ] || ! agent_gate_sha_matches "$stamped_prh" "$push_head"; then
+                push_failures="${push_failures}  - \$pr-hygiene-review (PR hygiene review): $status_prh\n"
+            fi
+            if [ -n "$push_failures" ]; then
+                rm -rf "$push_tmp"
+                echo "BLOCKED by pre-push: git push to an open PR requires current \$skill-audit and \$pr-hygiene-review records for $push_head:" >&2
+                printf '%b' "$push_failures" >&2
+                exit 2
+            fi
+        fi
+        rm -rf "$push_tmp"
         exit 0
     fi
     if [ -n "$selector" ] && [ "$selector" != "$parsed_selector" ]; then

@@ -44,6 +44,12 @@ edit that cannot move a pixel must not cost anybody a 10-minute re-record. So **
 whether it applies** — run it first. When the user asked to make or finalize relevant changes,
 re-record and apply the fixes; for review-only work, report the findings without mutating files.
 
+## 0. Step 0 — pin the baseline
+
+Ensure the local repository is synchronized before auditing. Run `git fetch origin` and verify
+`HEAD` matches `origin/main` (or the target PR head commit). Fail-fast on divergence or untracked
+local drift — never audit an unpinned or stale baseline. State reviewed SHA in report.
+
 ## 1. Run the gate (the mechanical half)
 
 ```bash
@@ -198,6 +204,17 @@ Then perform the mandatory all-frame and seam inspection in §3. The gate proves
 only the decoded-frame review can prove that the recording contains no capture failure, and only the
 semantic review in §4 can establish that it is a good picture of the firmware.
 
+## 5b. Self-analysis and asset self-optimization
+
+Before concluding or stamping:
+1. **Asset budget analysis:** Inspect `docs/media/dashboard.gif` size and dimensions:
+   - File size must remain reasonable (~2.0–2.5 MB). If exceeded, optimize palette or adjust `DWELL_FRAMES` before considering frame rate reductions.
+   - Frame count must be exactly 135 frames with smooth 100 ms transitions.
+2. **Loop continuity & visual truth:**
+   - Confirm that frame 135 blends seamlessly back into frame 1 with no jerk or visible restart jump.
+   - Verify that no browser error banner, scrollbar, or unwanted element from adjacent cards appears in the cropped viewport.
+3. **Self-optimize:** If visual or size defects are identified, refine recorder parameters, re-record, and re-verify with `scripts/run-ui-gif-audit.sh`.
+
 ## 6. Keep the contract in sync
 
 `README.md` § Web UI is the copy that surrounds the recording — if a scene changes, the sentence
@@ -209,3 +226,14 @@ covers means widening what `check_ui_gif.mjs` fingerprints, never a list in pros
 If the schematic itself changed, this skill is the *second* half of that work —
 `$schematic-review` decides whether the drawing is true, and this one makes sure the README stops
 showing the old one.
+
+## 7. Recording the pass (merge gate — no file marker)
+
+The runner-neutral [`require-pr-gates.sh`](../../../tools/agent-hooks/require-pr-gates.sh) refuses
+supported PR merge paths until this review is recorded in the PR body as a ticked,
+SHA-stamped checkbox whose stamp still matches the PR head:
+
+```text
+- [x] `$ui-gif` clean — merge gate @ <short-sha>    # <short-sha> = git rev-parse --short=12 HEAD
+```
+
