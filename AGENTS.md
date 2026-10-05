@@ -64,6 +64,8 @@ conditional workflows and are not necessarily PR checkbox gates.
   ordinary `pull_request` event in `build.yml`. Local/manual merges never use that
   exception;
   `tools/agent-policy/renovate_action_pr.py` is its fail-closed definition.
+- `$skill-audit`: required before PR creation or push, to keep every canonical skill and reviewer
+  honest against repository facts, partition offsets, pins, endpoints, and scripts.
 - `$heap-safety-review`: required before merge when HTTP, MQTT, OTA, TLS, JSON, X10A publishing,
   firmware polling, or heap-allocation paths change.
 - `$feature-docs`: required when technical feature surface changes.
@@ -187,6 +189,7 @@ scripts/run-ui-use-case-tests.sh
 scripts/run-browser-render-tests.sh
 scripts/run-redaction-audit.sh
 scripts/run-pr-hygiene-audit.sh
+scripts/run-skill-audit.sh
 scripts/run-ui-gif-audit.sh
 scripts/run-doc-entity-audit.sh
 scripts/idf-docker.sh idf.py build

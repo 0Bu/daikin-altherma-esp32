@@ -384,6 +384,19 @@ mutation canaries are:
 Run `tools/agent-config/selftest.sh` after changing agent instructions, skills, subagent definitions,
 hook mappings, or the checker itself.
 
+`scripts/run-skill-audit.sh` checks canonical skills and reviewers against repository paths,
+partitions, routes and board wiring. Run `tools/skill_audit/selftest.sh` when its implementation or
+audited contracts change. The audit is read-only; `--optimize` changes skill files and requires an
+explicit request to apply fixes. Inspect its diff and rerun the read-only audit after an update.
+
+Enable the versioned native Git push hook once per clone with
+`git config --local core.hooksPath .githooks`. It verifies each destination branch and the commit
+Git is sending. Updates to an open PR need `$skill-audit` and `$pr-hygiene-review` records stamped
+with that commit in the PR body before the push. A successfully queried branch with no open PR may
+be pushed after the local audit; a failed PR query blocks the push. Merge reviews remain separate.
+Push from a clean checkout of the commit being sent so the local audit verifies that exact tree.
+Git hooks are local checks; remote CI and branch protection enforce merge readiness.
+
 The mechanical job runs `tools/agent-policy/selftest.sh` whenever a diff reaches it; the separate `pr-policy.yml` workflow
 provides the required `gates` check and invokes protected-base `scripts/run-agent-policy.sh` with the
 current PR body, head SHA and complete changed-file list from GitHub. Missing/partial inputs, an event SHA that is no longer

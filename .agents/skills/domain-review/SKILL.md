@@ -39,7 +39,16 @@ Renovate head contain nothing but the fully pinned Renovate runner replacement i
 The exception is unavailable to local/manual merge paths and fails closed for missing metadata or
 any mixed edit.
 
-## 0. If the PR has no value surface
+## 0. Step 0 — pin the baseline
+
+Record `git rev-parse HEAD`, the intended comparison base, and `git status --short` before
+auditing. For a PR, verify that the checkout matches the exact target PR head; refresh remote
+refs with `git fetch origin` when needed and available. For an authorized local implementation,
+include the intended tracked diff and untracked new files in the review and identify them in
+the report; no commit, PR or equality with `origin/main` is required. Preserve unrelated user
+changes. Stamp a merge pass only after the reviewed content matches the exact committed PR head.
+
+## 0b. If the PR has no value surface
 
 Run the audit anyway (§1 — it takes seconds), then look at the diff and confirm it cannot reach a
 published value. Ask specifically: does it touch `main/def/`, the converter/register/discovery/
@@ -133,6 +142,13 @@ changed, `tools/domain/selftest.sh` must still catch all four historical bugs.
 Report findings grouped by section above. **Block the merge** on: any live audit finding, an
 invented/unsourced value, a converter or spec change without evidence, or a new exceptions entry
 that lacks one.
+
+## 4b. Self-analysis and review audit
+
+Before ticking or stamping the gate:
+1. **Physical reality meta-check:** Did this review verify that numbers make sense on a real machine (temperatures within physical operating envelope, sensible units, valid converter IDs) rather than only verifying that scripts exited zero?
+2. **Audit exceptions validation:** If `tools/domain/audit_exceptions.txt` was modified, confirm that the addition is a genuine hardware variance backed by evidence, not a suppression of an uninvestigated discrepancy.
+3. **Stamp integrity check:** Confirm the stamp uses the bare short SHA (`git rev-parse --short=12 HEAD`) without backticks or extra formatting.
 
 ## Recording the pass (merge gate — no file marker)
 

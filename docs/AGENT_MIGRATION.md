@@ -154,10 +154,22 @@ Run these checks after changing agent instructions, skills, reviewers, configura
 4. Parse `.agents/hooks.json` and require registered lifecycle events to dispatch to the
    runner-neutral core under `tools/agent-hooks/`.
 5. Run `scripts/run-agent-instructions-budget.sh`, `tools/agent-config/selftest.sh`, and
-   `tools/agent-hooks/selftest.sh`, then the repository gate set relevant to the changed surface.
+   `scripts/run-skill-audit.sh`, `tools/skill_audit/selftest.sh`,
+   `python3 tools/agent-hooks/test_push_gate.py`, and `tools/agent-hooks/selftest.sh`, then the
+   repository gate set relevant to the changed surface.
 6. Push the exact reviewed head through a pull request and require the remote `gates` check and every
    applicable build check to finish green. A local run, an older CI run, or a review stamp for an
    earlier head does not complete the cutover acceptance.
+
+The native Git push hook lives in `.githooks/pre-push` and dispatches to
+`tools/agent-hooks/require-pr-gates.sh`. Activate it per clone with
+`git config --local core.hooksPath .githooks`; project lifecycle hook registration alone does not
+install a Git hook. The native hook receives Git's actual ref updates, binds them to the destination
+repository and branch, and checks review records against the commit being sent. Prepare the
+`$skill-audit` and `$pr-hygiene-review` stamps in an open PR's body before pushing that commit.
+The checked-out `HEAD` must be that commit and the worktree must be clean for its local audit.
+An unsuccessful PR lookup must block; it is not evidence that no PR exists. This local push check
+does not replace the protected-base merge policy or the required CI checks.
 
 ## Phase 7 cutover and rollback
 

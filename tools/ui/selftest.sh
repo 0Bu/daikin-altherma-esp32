@@ -208,7 +208,7 @@ set -e
 [ "$stale_rc" -eq 2 ] \
   || { echo "ui selftest: neutral local merge gate accepted stale canonical UI proof" >&2; exit 1; }
 
-# The end-to-end check above covers exactly ONE line, and the template teaches a stamp per merge
+# The end-to-end check above covers exactly ONE line, and the template teaches a stamp per push/merge
 # gate. Name the complete expected set explicitly: selecting only lines which already contain
 # "merge gate @" makes a regressed prose-only line disappear from both the input and the count.
 # Put every expected key through the SHARED matcher, and reject missing or surprise gate entries.
@@ -218,7 +218,7 @@ set -e
 # a gate means adding it here in the
 # same commit, which is the point: a gate whose template line nobody checks is a gate whose stamp
 # nobody can be sure is readable.
-expected_gate_keys=(project-review pr-hygiene-review heap-safety-review feature-docs domain-review schematic-review ui-use-case-review absence-review diagnostic-evidence-review user-docs-review ui-gif)
+expected_gate_keys=(skill-audit project-review pr-hygiene-review heap-safety-review feature-docs domain-review schematic-review ui-use-case-review absence-review diagnostic-evidence-review user-docs-review ui-gif)
 tpl_content="$(cat "$proj/.github/pull_request_template.md")"
 tpl_lines="$(printf '%s\n' "$tpl_content" | agent_gate_task_lines | grep -iE 'gate')"
 tpl_n=0
@@ -227,9 +227,11 @@ for key in "${expected_gate_keys[@]}"; do
     [ -n "$line" ] || { echo "ui selftest: the PR template is missing the $key gate line" >&2; exit 1; }
     [ "$(printf '%s\n' "$line" | wc -l | tr -d ' ')" -eq 1 ] || {
         echo "ui selftest: the PR template has duplicate $key gate lines" >&2; exit 1; }
+    stamp_kind="merge gate @"
+    [ "$key" != skill-audit ] || stamp_kind="push gate @"
     case "$line" in
-      *"merge gate @"*) ;;
-      *) echo "ui selftest: the $key template line teaches no 'merge gate @' stamp" >&2; exit 1 ;;
+      *"$stamp_kind"*) ;;
+      *) echo "ui selftest: the $key template line teaches no '$stamp_kind' stamp" >&2; exit 1 ;;
     esac
     filled="$(printf '%s' "$line" | sed 's/\[ \]/[x]/; s/<short-sha>/abcdef123456/')"
     filled_file="$hook_tmp/template-$key.md"

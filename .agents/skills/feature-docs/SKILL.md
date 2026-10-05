@@ -48,8 +48,18 @@ If the diff touches none of these, FEATURES.md probably needs nothing — say so
 
 ## Steps
 
-1. **Diff the surface.** `git diff main...HEAD -- main/ sdkconfig.defaults partitions.csv scripts/ .github/` and
-   scan for the signals above. Read the *actual* new code — do not infer a feature from a commit message.
+0. **Step 0 — pin the baseline.**
+   Record `git rev-parse HEAD`, the intended comparison base, and `git status --short` before
+   auditing. For a PR, verify that the checkout matches the exact target PR head; refresh remote
+   refs with `git fetch origin` when needed and available. For an authorized local implementation,
+   include the intended tracked diff and untracked new files in the review and identify them in
+   the report; no commit, PR or equality with `origin/main` is required. Preserve unrelated user
+   changes. Stamp a merge pass only after the reviewed content matches the exact committed PR head.
+1. **Diff the surface.** Use the recorded base in
+   `git diff <base>...HEAD -- main/ sdkconfig.defaults partitions.csv scripts/ .github/`. For a local
+   implementation, also inspect `git diff HEAD -- main/ sdkconfig.defaults partitions.csv scripts/ .github/`
+   and the intended untracked new files. Scan for the signals above and read the actual new code;
+   do not infer a feature from a commit message.
 2. **Locate both records.** Find the matching section **and** the feature-matrix row at the top of
    FEATURES.md. Most product features appear in both. If ESP-IDF surface changed, also update the
    stable row, evidence, official link and active-config appendix in ESP_IDF_MATRIX.md.
@@ -82,6 +92,15 @@ If the diff touches none of these, FEATURES.md probably needs nothing — say so
    - No `✅`/`🧪` claim is unbacked; no shipped feature left as `🔭`.
 7. **Keep the framing hooks current.** FEATURES.md opens with a status legend and closes with a
    pointer back to this skill — leave both intact.
+
+## Self-analysis and prose self-optimization
+
+Before recording the pass:
+   - **Conciseness budget audit:** Audit added lines against the catalog rule: strictly one line in the summary matrix table, at most 2-3 lines in the feature section. Reject any tutorial, issue backstory, or narrative text.
+   - **Prose review:** Identify obsolete remarks or redundant explanations near the changed entry.
+     Revise them only within an explicitly authorized documentation change.
+   - **Link and count validation:** Re-check that repository links resolve relative to `docs/`,
+     official external references remain valid, and cited sensor or `CHECK` numbers match source.
 
 ## Guardrails
 

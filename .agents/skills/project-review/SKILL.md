@@ -16,6 +16,13 @@ A holistic pass before a PR merges. Not a linter — it checks the things that r
 
 ## Checklist
 
+0. **Step 0 — pin the baseline.**
+   Record `git rev-parse HEAD`, the intended comparison base, and `git status --short` before
+   auditing. For a PR, verify that the checkout matches the exact target PR head; refresh remote
+   refs with `git fetch origin` when needed and available. For an authorized local implementation,
+   include the intended tracked diff and untracked new files in the review and identify them in
+   the report; no commit, PR or equality with `origin/main` is required. Preserve unrelated user
+   changes. Stamp a merge pass only after the reviewed content matches the exact committed PR head.
 1. **Doc drift.** If the diff changed the component map, NVS keys, the HTTP API, the config
    model, or the poll/OTA/MQTT behaviour, are `AGENTS.md`, `docs/README.md` and
    `docs/ARCHITECTURE.md` updated to match? They must not disagree with the code.
@@ -30,6 +37,13 @@ A holistic pass before a PR merges. Not a linter — it checks the things that r
    of truth. Value/CRC/converter changes are verified against known-good reference outputs.
 
 Report findings grouped by the above; block on doc drift and untested logic.
+
+## Self-analysis and review audit
+
+Before ticking or stamping the gate:
+1. **Memory safety & exception boundary check:** Verify that every non-trivial HTTP handler wrapped large allocations in try/catch returning 503 on OOM, streams responses, and never allocates while holding a raw mutex.
+2. **Architecture and doc synchronization:** Verify that any changes to component boundaries, REST endpoints, NVS keys, or FreeRTOS task models are matched in `docs/ARCHITECTURE.md` and `AGENTS.md`.
+3. **Stamp integrity check:** Confirm the stamp uses the bare short SHA (`git rev-parse --short=12 HEAD`) without backticks.
 
 ## Recording the pass (merge gate — no file marker)
 

@@ -65,7 +65,25 @@ Keep these surfaces aligned:
   **Experimental boundary**;
 - `test/test_ui_checkup.mjs`: behavior and load-bearing wording.
 
+## Self-analysis and prose self-optimization
+
+Before updating the audit fingerprint:
+1. **Four-question structure check:** Confirm that each visible diagnosis section answers the four questions in sequence: (1) what was counted/observed, (2) what it means, (3) what cannot be established, and (4) safe owner next steps.
+2. **Owner perspective & jargon audit:** Verify that acronyms are introduced before abbreviations, language is accessible to a homeowner (not just an HVAC technician), and no single check implies whole-plant wellness.
+3. **English-only documentation check:** Confirm that all text in `docs/` and review files is strictly English, leaving German localized strings exclusively in `main/www/`.
+4. **Actionable wording review:** Report vague advice such as "call service" without supporting
+   context. Revise wording only when fixes are explicitly authorized; review-only work leaves prose
+   and audit fingerprints unchanged.
+
 ## Run the gate
+
+0. **Step 0 — pin the baseline.**
+   Record `git rev-parse HEAD`, the intended comparison base, and `git status --short` before
+   auditing. For a PR, verify that the checkout matches the exact target PR head; refresh remote
+   refs with `git fetch origin` when needed and available. For an authorized local implementation,
+   include the intended tracked diff and untracked new files in the review and identify them in
+   the report; no commit, PR or equality with `origin/main` is required. Preserve unrelated user
+   changes. Stamp a merge pass only after the reviewed content matches the exact committed PR head.
 
 Run the normal check first:
 
@@ -88,3 +106,21 @@ Do not weaken length, localization, English-only documentation, section, action,
 bounded-claim checks to clear a finding. Fix the missing explanation or evidence. In the handoff,
 name the user-visible wording that changed and distinguish code/CI verification from anything not
 checked on a physical heat pump.
+
+## Recording the pass (merge gate — no file marker)
+
+The runner-neutral [`require-pr-gates.sh`](../../../tools/agent-hooks/require-pr-gates.sh) refuses
+supported PR merge paths until this review is recorded in the PR body as a ticked,
+SHA-stamped checkbox whose stamp still matches the PR head. It fires when user-facing documentation,
+diagnostics explainers, visible copy, or doc audits change.
+
+When the review passes with **no blocking findings**, tick + stamp it with the reviewed commit:
+
+```text
+- [x] `$user-docs-review` clean — merge gate @ <short-sha>    # <short-sha> = git rev-parse --short=12 HEAD
+```
+
+Edit the PR body with
+`scripts/gh-with-git-credentials.sh --repo github.com/0Bu/daikin-altherma-esp32 pr edit <pr> --body-file <absolute-physical-temp-path>/review-body.md`.
+Any later commit re-stales the stamp, forcing a fresh review before the next merge.
+Don't tick it if findings block the merge — fix first.

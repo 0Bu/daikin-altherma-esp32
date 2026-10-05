@@ -235,10 +235,10 @@ jobs:
           # agent-hooks drives the merge gate, which runs the UI, absence and UI-GIF suites; its
           # formatter cases copy the real .clang-format, and it pins the exact command shapes of
           # gh-with-git-credentials.sh and production-ota-gate.py.
-          emit agent_hooks '^(tools/(agent-hooks|agent-policy|absence|ui|uigif)/|\.agents/hooks\.json$|\.clang-format$|\.github/pull_request_template\.md$|scripts/(run-(agent-policy|ui-use-case-tests|ui-gif-audit)|gh-with-git-credentials|production-ota-gate)\.(sh|py)$)'
+          emit agent_hooks '^(tools/(agent-hooks|agent-policy|absence|ui|uigif|skill_audit)/|\.githooks/|\.agents/hooks\.json$|\.clang-format$|\.github/pull_request_template\.md$|scripts/(run-(agent-policy|ui-use-case-tests|ui-gif-audit|skill-audit)|gh-with-git-credentials|production-ota-gate)\.(sh|py)$)'
           # agent-config's canaries run scripts/run-agent-instructions-budget.sh over a fixture built
           # from .agents/, AGENTS.md and .mcp.json.
-          emit agent_config '^(tools/agent-config/|\.agents/|AGENTS\.md$|\.mcp\.json$|scripts/(gh-with-git-credentials|run-agent-instructions-budget)\.sh$)'
+          emit agent_config '^(tools/(agent-config|skill_audit)/|\.agents/|AGENTS\.md$|\.mcp\.json$|scripts/(gh-with-git-credentials|run-agent-instructions-budget|run-skill-audit)\.sh$)'
           # agent-policy drives require-pr-gates.sh and reads both Renovate records.
           emit agent_policy '^(tools/agent-policy/|tools/agent-hooks/require-pr-gates\.sh$|\.github/(workflows/(pr-policy|renovate)\.ya?ml|renovate\.json)$|scripts/(run-agent-policy|gh-with-git-credentials)\.sh$)'
           # the domain canaries compile catalog_audit.cpp against main/logic and test/test_logic.cpp.
@@ -539,13 +539,19 @@ jobs:
       # skill, reviewer, hook and safety-invariant checks.
       - name: Check agent instruction and configuration integrity
         run: ./scripts/run-agent-instructions-budget.sh
+      - name: Audit canonical skills and reviewer prompts against repository facts
+        run: ./scripts/run-skill-audit.sh
       - name: Verify the agent configuration gate still has teeth
         if: steps.scope.outputs.agent_config == 'yes'
         run: ./tools/agent-config/selftest.sh
+      - name: Verify the skill-audit gate still has teeth
+        if: steps.scope.outputs.agent_config == 'yes'
+        run: ./tools/skill_audit/selftest.sh
       - name: Verify runner-neutral hook guards and merge binding
         if: steps.scope.outputs.agent_hooks == 'yes'
         run: |
           python3 ./tools/agent-hooks/test_agent_hooks.py
+          python3 ./tools/agent-hooks/test_push_gate.py
           ./tools/agent-hooks/selftest.sh
 
       # Review evidence is PR state, not a file marker. The canaries prove missing inputs, missing or

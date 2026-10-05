@@ -86,5 +86,16 @@ class AgentHookFastTests(unittest.TestCase):
                 self.assertEqual(data["decision"], "allow")
 
 
+    def test_pr_gates_read_only_push_text_is_not_a_push(self):
+        payload = {"toolCall": {"name": "run_command", "args": {"CommandLine": 'git log --grep="a git push"'}}}
+        with patch("sys.stdin", io.StringIO(json.dumps(payload))):
+            with patch("sys.stdout", new_callable=io.StringIO) as fake_out:
+                args = unittest.mock.MagicMock()
+                rc = agent_hook.run_pr_gates(args)
+                self.assertEqual(rc, 0)
+                data = json.loads(fake_out.getvalue().strip())
+                self.assertEqual(data["decision"], "allow")
+
+
 if __name__ == "__main__":
     unittest.main()
