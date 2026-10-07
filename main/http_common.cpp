@@ -77,7 +77,8 @@ bool json_post_allowed(httpd_req_t* req) {
 
 // Settle the body bytes the client still owes after its response (logic/http_body.hpp explains why
 // IDF's own purge must never receive an unbounded remainder). noinline keeps the scratch buffer out
-// of handle_all's frame, which sits under the deepest call chain on this task.
+// of handle_then_settle_body's frame, which inlines handle_all under the deepest call chain on this
+// task.
 __attribute__((noinline)) bool discard_unread_body(httpd_req_t* req) {
     char          scratch[128];
     const int64_t deadline_us = esp_timer_get_time() + BODY_DISCARD_BUDGET_US;
