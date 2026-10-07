@@ -125,6 +125,9 @@ and the OTA-signing / key lifecycle.
   container levels and one complete document; trailing non-whitespace, extra documents and raw NUL bytes
   are rejected. HTTP request bodies also have a 30 s absolute acceptance budget checked before and
   after every receive, including the last one; an active receive returns under its socket timeout.
+  A body the client still owes after the response is discarded only up to 8 KiB within 2 s; anything
+  larger or slower closes the connection instead of reaching ESP-IDF's unbounded purge, so one
+  trickling LAN client cannot hold the single HTTP worker after a rejected or unread request.
 - **Syslog forwarding is cleartext, unauthenticated UDP** — opt-in and off by default (empty
   `syslog_host`). When enabled, every diag-log line (WiFi/MQTT/X10A state, timeouts, reset reasons)
   is sent as a plaintext RFC 5424 datagram to the configured host; there is no TLS option, unlike

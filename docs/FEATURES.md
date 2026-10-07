@@ -139,7 +139,7 @@ Ids are stable keys and are never reused — a gap means a feature was retired, 
 | 98 | **Per-header branch-count coverage ratchet** — the 95% aggregate line floor is joined by execution-profile-specific aggregate gcov `taken/total` branch-edge floors; hosted CI also binds runner OS/image and it does not claim branch identity | ✅ 🧪 | [`branch_baseline.json`](../tools/coverage/branch_baseline.json), [`profile.sh`](../tools/coverage/profile.sh), [`check_gcov_report.py`](../tools/coverage/check_gcov_report.py) |
 | 99 | **Sanitized hostile-input property gate** — deterministic malformed frames, JSON, URLs and boundary values use a capability-probed sanitizer runtime; CI requires ASan+UBSan and a local host falls back to UBSan only when ASan is unavailable | ✅ 🧪 | [`logic_property_tests.cpp`](../tools/fuzz/logic_property_tests.cpp), [`run-sanitizer-fuzz-tests.sh`](../scripts/run-sanitizer-fuzz-tests.sh) |
 | 100 | **Ratcheted source-format gate** — whole-tree UTF-8/LF/exactly-one-final-newline/whitespace invariants plus exact clang-format 18.1.8 on new files and changed C/C++ hunks | ✅ 🧪 | [`check_format.py`](../tools/format/check_format.py), [`run-format-check.sh`](../scripts/run-format-check.sh) |
-| 101 | **Host runtime-scenario harness** — eight scenarios run selected production parsers and serializers through simulated clock/storage/transport/broker adapters; two real POSIX socket scenarios prove joined absolute deadline aborts for trickling headers and bodies. It remains hardware-free and does not execute target glue, NVS or MCP | ✅ 🧪 | [`runtime_integration_tests.cpp`](../test/runtime/runtime_integration_tests.cpp), [`run-runtime-integration-tests.sh`](../scripts/run-runtime-integration-tests.sh) |
+| 101 | **Host runtime-scenario harness** — eight scenarios run selected production parsers and serializers through simulated clock/storage/transport/broker adapters; three real POSIX socket scenarios prove joined absolute deadline aborts for trickling headers and bodies and the bounded leftover-body discard after a response. It remains hardware-free and does not execute target glue, NVS or MCP | ✅ 🧪 | [`runtime_integration_tests.cpp`](../test/runtime/runtime_integration_tests.cpp), [`run-runtime-integration-tests.sh`](../scripts/run-runtime-integration-tests.sh) |
 | 102 | **Real-browser rendering and accessibility gate** — the assembled production UI runs in Chrome across all locales and mobile/desktop widths, including native accessibility, keyboard, overflow, reduced-motion and console contracts | ✅ 🧪 | [`test_browser_render.mjs`](../test/test_browser_render.mjs), [`run-browser-render-tests.sh`](../scripts/run-browser-render-tests.sh) |
 | 103 | **Signed release artifact construction** — a trusted-main job isolates the signing key, pins signing-key continuity and manifest provenance, then hands the exact artifact to a separate write-capable publisher that binds and verifies the release tag against the requested source SHA | ✅ 🧪 | [`ci-build-all.sh`](../scripts/ci-build-all.sh), [`check-signing-key-continuity.py`](../scripts/check-signing-key-continuity.py), [`check-manifest-provenance.py`](../scripts/check-manifest-provenance.py), [`build.yml`](../.github/workflows/build.yml) |
 | 104 | **Hardware acceptance separated from publication** — the canonical private-inventory bench and production OTA transactions remain explicit maintainer operations; a manual release skips the PR test suite, never contacts a board and depends on no lab runner, private inventory or hardware policy | ✅ 🧪 | [`production-ota-gate.py`](../scripts/production-ota-gate.py), [`build.yml`](../.github/workflows/build.yml) |
@@ -431,8 +431,10 @@ other.
   do not require equally-growing contiguous allocations.
 - **🧪 Bounded request and JSON ingress** ([`logic/http_body.hpp`](../main/logic/http_body.hpp),
   [`logic/payload_complete.hpp`](../main/logic/payload_complete.hpp)): body acceptance has idle and
-  absolute 30 s limits, checked after the final receive too. Config, MQTT and Weather JSON permit at
-  most 16 container levels and one document with whitespace-only trailing data.
+  absolute 30 s limits, checked after the final receive too. A body still owed after the response is
+  discarded up to 8 KiB within 2 s, otherwise the connection closes instead of entering ESP-IDF's
+  unbounded purge. Config, MQTT and Weather JSON permit at most 16 container levels and one document
+  with whitespace-only trailing data.
 - **✅ gzip UI embedded in the app image**: the build inlines the page and its fragments,
   minifies, and pre-compresses them deterministically (`EMBED_FILES`). gzip is deliberate because
   the trusted-LAN origin is HTTP and browsers do not consistently negotiate Brotli there.
@@ -776,10 +778,12 @@ Docker, in seconds ([`test/README.md`](../test/README.md)).
   call selected production config serializers, X10A/Modbus parsers, MQTT publish gating and bounded
   body/chunk logic through host-only fake time, storage, serial, TCP, broker and HTTP adapters. Eight
   scenarios model failed persistence, reconstruction, allocation failure, interleavings,
-  fragmentation and reconnects. Two more use real POSIX `socketpair`/`recv` traffic to prove that
-  `shutdown(SHUT_RDWR)` aborts trickling headers and bodies at an absolute deadline and is joined
-  before descriptor reuse. These ten scenarios do not execute ESP-IDF target glue, real NVS or the
-  production MCP/HTTP/MQTT stacks. Target compilation and hardware evidence remain separate gates.
+  fragmentation and reconnects. Three more use real POSIX `socketpair`/`recv` traffic: two prove
+  that `shutdown(SHUT_RDWR)` aborts trickling headers and bodies at an absolute deadline and is
+  joined before descriptor reuse; one proves that a body still owed after the response is settled
+  only within its byte cap and budget. These eleven scenarios do not execute ESP-IDF target glue,
+  real NVS or the production MCP/HTTP/MQTT stacks. Target compilation and hardware evidence remain
+  separate gates.
 - **The browser loop** — the deterministic DOM suite covers interaction contracts, while
   [`run-browser-render-tests.sh`](../scripts/run-browser-render-tests.sh) opens the assembled UI in a
   real Chrome engine for all shipped locales at mobile and desktop widths. It checks actual layout,

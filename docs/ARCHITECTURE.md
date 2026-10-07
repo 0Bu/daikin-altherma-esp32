@@ -1156,6 +1156,14 @@ host-testable core is unusually large and valuable, because the risky parts are 
   Content-Length and goes quiet park the single httpd task, taking the web UI and the OTA route out of
   a bad config with it. A monotonic 30-second acceptance budget is checked before and after each
   receive, including the final byte. An in-progress receive still returns under its socket timeout.
+  The same header bounds what a client still owes AFTER the response. ESP-IDF purges an unread
+  remainder itself before reusing the session (`httpd_req_delete`), with only the per-receive
+  timeout and no overall limit, and that purge runs after the handler returned — outside the 30 s
+  budget. Rejections before any read (403, 415, 503), failed or oversized reads and routes that
+  expect no body all reached it, so one peer announcing a large Content-Length and trickling it held
+  the httpd task indefinitely. `http_body_discard()` now settles at most 8 KiB within 2 s (plus one
+  in-progress socket timeout) from `handle_then_settle_body`, the function IDF actually calls; any
+  remainder it cannot settle returns `ESP_FAIL`, so IDF closes the session instead of purging.
 - `logic/http_surface.hpp` — the HTTP trust-surface boundary (F01). `http_surface_serves(surface,
   path, is_post)` says which routes each surface exposes: on the trusted configured LAN (WiFi or
   Ethernet), everything; on the

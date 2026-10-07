@@ -21,18 +21,29 @@
 // Content-Length and then goes quiet park the single httpd task indefinitely, taking the whole web
 // UI (and the OTA route that is the way out of a bad config) down with it. A body that cannot
 // finish within a couple of socket timeouts is not a body worth waiting for.
+//
+// Why the leftover is settled here too. A handler may answer without reading the whole body: a
+// rejection before any read (403, 415, 503), a failed or oversized read, a route that expects no
+// body. esp_http_server then purges the rest itself before it reuses the session
+// (httpd_req_delete), reading every announced byte with only the per-receive socket timeout and NO
+// overall limit — and after the handler returned, so the budget above never applies to it. A peer
+// that announces a large Content-Length and trickles a byte inside every timeout therefore held the
+// single httpd task for as long as it liked. http_body_discard() bounds that remainder; whatever it
+// cannot settle makes the trampoline return ESP_FAIL, which IDF answers by closing the session
+// instead of purging.
 #include <cstddef>
 #include <cstdint>
 
 namespace daik {
 
-// One recv attempt, classified. esp_http_server returns bytes>0, 0 for a peer that closed,
-// HTTPD_SOCK_ERR_TIMEOUT (-3) for "nothing arrived in time", and other negatives for hard errors.
-// Keeping that mapping in the caller is what keeps this header IDF-free.
+// One recv attempt, classified. esp_http_server returns bytes>0, 0 for a peer that closed or a
+// request with nothing left to read, HTTPD_SOCK_ERR_TIMEOUT (-3) for "nothing arrived in time", and
+// other negatives for hard errors. Keeping that mapping in the caller keeps this header IDF-free.
 enum class BodyRecv : uint8_t {
-    Data,      // `bytes` bytes were written into the buffer
-    Timeout,   // nothing arrived within the socket timeout — recoverable, bounded by BODY_MAX_IDLE
-    Error,     // peer closed, or an unrecoverable socket error
+    Data,    // `bytes` bytes were written into the buffer
+    Timeout, // nothing arrived within the socket timeout — recoverable, bounded by BODY_MAX_IDLE
+    Error,   // peer closed, or an unrecoverable socket error
+    End,     // the request owes no further body bytes (http_body_discard only)
 };
 
 struct BodyChunk {
@@ -80,6 +91,30 @@ int http_body_read(
     }
     buf[got] = '\0';
     return static_cast<int>(got);
+}
+
+// The leftover a session may still discard after its response: the largest route buffer
+// (/set_ref_temp), within a budget checked before each receive. A receive in progress still returns
+// under its socket timeout, so the worst case is the budget plus one socket timeout.
+inline constexpr size_t  BODY_DISCARD_MAX_BYTES = 8192;
+inline constexpr int64_t BODY_DISCARD_BUDGET_US = 2000000;
+
+// Settle the body bytes a request still owes after its response. Returns true when nothing remains
+// and the session may be reused; false when the caller must close it instead. `recv()` performs one
+// receive into the caller's scratch buffer and reports End once nothing remains. A timeout is not
+// retried: the response has been sent, and a silent peer is owed nothing more.
+template <typename Recv, typename DeadlineReached>
+bool http_body_discard(Recv recv, DeadlineReached deadline_reached,
+                       size_t max_bytes = BODY_DISCARD_MAX_BYTES) {
+    size_t discarded = 0;
+    for (;;) {
+        if (deadline_reached()) return false;
+        const BodyChunk c = recv();
+        if (c.kind == BodyRecv::End) return true;
+        if (c.kind != BodyRecv::Data || c.bytes == 0) return false;
+        if (c.bytes > max_bytes - discarded) return false;
+        discarded += c.bytes;
+    }
 }
 
 } // namespace daik
