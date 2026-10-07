@@ -9,7 +9,8 @@
 #   --expected-version <ver>     Expected version string (e.g. 1.0.4-dev.13)
 #   --expected-elf-sha <sha>     Expected ELF SHA256 prefix
 #   --require-hp                 Require hp.connected == true and valid /values
-#   --timeout <sec>              Maximum seconds to wait for health (default: 60)
+#   --timeout <sec>              Maximum seconds to keep retrying (default: 60); a non-negative
+#                                integer. The first request is always made, so 0 means one attempt.
 #   --quiet                      Only print errors and final result
 #
 set -euo pipefail
@@ -44,6 +45,13 @@ if [ -z "$IP" ]; then
     echo "error: --ip <ip> is required" >&2
     exit 2
 fi
+
+# A malformed timeout is a usage error (exit 2), not an unreachable device: shell arithmetic would
+# otherwise abort with exit 1 or treat the word as a variable name.
+case "$TIMEOUT" in
+    ''|*[!0-9]*) echo "error: --timeout must be a non-negative integer number of seconds" >&2; exit 2 ;;
+esac
+TIMEOUT=$((10#$TIMEOUT))   # decimal: shell arithmetic would read 010 as octal and reject 09
 
 log() {
     if [ "$QUIET" -eq 0 ]; then
@@ -87,8 +95,13 @@ log "Waiting for device at http://$IP/status (timeout: ${TIMEOUT}s)..."
 
 status_json=""
 reachable=0
+attempted=0
 
-while [ "$(date +%s)" -le "$deadline" ]; do
+# The timeout bounds how long the script keeps retrying, not whether it asks at all. Checking the
+# deadline before the first request let a one-second boundary between the two clock reads above
+# skip every request under --timeout 0 and report a healthy board as unreachable.
+while [ "$attempted" -eq 0 ] || [ "$(date +%s)" -le "$deadline" ]; do
+    attempted=1
     if read_response "http://$IP/status" && [ -n "$response_body" ] && printf '%s' "$response_body" | jq -e '.version' >/dev/null 2>&1; then
         status_json="$response_body"
         reachable=1
