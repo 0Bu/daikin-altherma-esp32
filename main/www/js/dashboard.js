@@ -709,6 +709,7 @@ function roomSourceStatus(r, mqtt) {
     return { key: "waiting", detail: t("ref.detail.waiting"), cls: "warn" };
   if (!r.fresh) {
     const freshnessDetail = ({
+      missing_source_time: t("dyn.room_no_time"),
       retained_without_timestamp: t("ref.time_untrusted"),
       clock_unsynced: t("ref.clock_unsynced"),
       future_timestamp: t("dyn.room_future_time"),

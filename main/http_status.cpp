@@ -646,9 +646,10 @@ static void append_status_json(JsonOut& j, bool redact) {
         int64_t now_unix_s = -1;
         int32_t now_sub_ms = 0;
         time_now(now_unix_s, now_sub_ms);
-        ReferenceFreshness freshness =
-            reference_freshness(rt.has_value, rt.retained, rt.has_source_time, rt.source_unix_s,
-                                rt.received_ms, now_unix_s, now_ms, c.ref_temp_max_age_s);
+        ReferenceFreshness freshness = reference_room_freshness(
+            reference_source_time_mapped(c.ref_temp_time_topic, c.ref_temp_time_path), rt.has_value,
+            rt.retained, rt.has_source_time, rt.source_unix_s, rt.received_ms, now_unix_s, now_ms,
+            c.ref_temp_max_age_s);
         ReferenceRoomRaw room_raw;
         room_raw.configured      = !c.ref_temp_topic.empty();
         room_raw.has_temperature = rt.has_value;

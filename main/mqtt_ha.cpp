@@ -1226,9 +1226,10 @@ static logic::HeatingCurveSnapshot evaluate_heating_curve(const Config& cfg, con
     int64_t now_unix_s = -1;
     int32_t now_sub_ms = 0;
     time_now(now_unix_s, now_sub_ms);
-    const ReferenceFreshness freshness = reference_freshness(
-        rt.has_value, rt.retained, rt.has_source_time, rt.source_unix_s, rt.received_ms,
-        now_unix_s, now_ms, cfg.ref_temp_max_age_s);
+    const ReferenceFreshness freshness = reference_room_freshness(
+        reference_source_time_mapped(cfg.ref_temp_time_topic, cfg.ref_temp_time_path), rt.has_value,
+        rt.retained, rt.has_source_time, rt.source_unix_s, rt.received_ms, now_unix_s, now_ms,
+        cfg.ref_temp_max_age_s);
     ReferenceRoomRaw room_raw;
     room_raw.configured = !cfg.ref_temp_topic.empty();
     room_raw.has_temperature = rt.has_value;
@@ -1389,9 +1390,10 @@ static void publish_heating_curve_telemetry(const Config& cfg) {
     time_now(room_now_unix_s, room_now_sub_ms);
     ReferenceFreshness room_freshness;
     ReferenceRoomRaw room_raw;
-    room_freshness =
-        reference_freshness(rt.has_value, rt.retained, rt.has_source_time, rt.source_unix_s,
-                            rt.received_ms, room_now_unix_s, room_now_ms, cfg.ref_temp_max_age_s);
+    room_freshness = reference_room_freshness(
+        reference_source_time_mapped(cfg.ref_temp_time_topic, cfg.ref_temp_time_path), rt.has_value,
+        rt.retained, rt.has_source_time, rt.source_unix_s, rt.received_ms, room_now_unix_s,
+        room_now_ms, cfg.ref_temp_max_age_s);
     room_raw.configured      = !cfg.ref_temp_topic.empty();
     room_raw.has_temperature = rt.has_value;
     room_raw.payload_valid   = rt.error.empty();
@@ -1954,7 +1956,7 @@ static ReferenceTopicSet reference_topics(const Config& c) {
     if (c.ref_temp_fixed_setpoint_tenths == 0)
         reference_topic_set_add(topics, c.ref_temp_setpoint_topic.empty()
             ? c.ref_temp_topic : c.ref_temp_setpoint_topic);
-    if (!c.ref_temp_time_topic.empty() || !c.ref_temp_time_path.empty())
+    if (reference_source_time_mapped(c.ref_temp_time_topic, c.ref_temp_time_path))
         reference_topic_set_add(topics, c.ref_temp_time_topic.empty()
             ? c.ref_temp_topic : c.ref_temp_time_topic);
     return topics;
@@ -2038,7 +2040,8 @@ static void service_reference_subscription(const Config& c, uint32_t epoch) {
     const char* invalid = nullptr;
     const std::string setpoint_topic = c.ref_temp_setpoint_topic.empty() &&
             c.ref_temp_fixed_setpoint_tenths == 0 ? c.ref_temp_topic : c.ref_temp_setpoint_topic;
-    const bool time_mapped = !c.ref_temp_time_topic.empty() || !c.ref_temp_time_path.empty();
+    const bool        time_mapped =
+        reference_source_time_mapped(c.ref_temp_time_topic, c.ref_temp_time_path);
     const std::string time_topic = !time_mapped ? "" :
         (c.ref_temp_time_topic.empty() ? c.ref_temp_topic : c.ref_temp_time_topic);
     if (!reference_temperature_config_valid(c.ref_temp_name, c.ref_temp_topic,
@@ -2208,7 +2211,8 @@ static void service_reference_frames(const Config& c) {
     }
     const std::string setpoint_topic = c.ref_temp_fixed_setpoint_tenths != 0 ? "" :
         (c.ref_temp_setpoint_topic.empty() ? c.ref_temp_topic : c.ref_temp_setpoint_topic);
-    const bool timestamp_mapped = !c.ref_temp_time_topic.empty() || !c.ref_temp_time_path.empty();
+    const bool        timestamp_mapped =
+        reference_source_time_mapped(c.ref_temp_time_topic, c.ref_temp_time_path);
     const std::string timestamp_topic = !timestamp_mapped ? "" :
         (c.ref_temp_time_topic.empty() ? c.ref_temp_topic : c.ref_temp_time_topic);
     const ReferenceTopicSet saved_topics = reference_topics(c);
@@ -2285,10 +2289,10 @@ static void service_reference_frames(const Config& c) {
             int64_t        now_unix_s = -1;
             int32_t        now_sub_ms = 0;
             time_now(now_unix_s, now_sub_ms);
-            const ReferenceFreshness freshness = reference_freshness(
-                candidate.has_value, candidate.retained, candidate.has_source_time,
-                candidate.source_unix_s, candidate.received_ms, now_unix_s, now_ms,
-                c.ref_temp_max_age_s);
+            const ReferenceFreshness freshness = reference_room_freshness(
+                timestamp_mapped, candidate.has_value, candidate.retained,
+                candidate.has_source_time, candidate.source_unix_s, candidate.received_ms,
+                now_unix_s, now_ms, c.ref_temp_max_age_s);
             ReferenceRoomRaw room_raw;
             room_raw.configured      = true;
             room_raw.has_temperature = candidate.has_value;

@@ -1862,7 +1862,10 @@ The Home Assistant bridge:
   exact-topic subscription captures the circulation pump's active-power witness,
   but no averaging or control path reads it. A configured payload timestamp (RFC3339 or Unix
   seconds) supplies age across retained delivery and restarts; without one, only a non-retained live
-  delivery may age from monotonic MQTT arrival. `POST /set_ref_temp` records the mapping immediately,
+  delivery may age from monotonic MQTT arrival. A mapped timestamp is the mapping's only age
+  authority: until its own topic or path has delivered, the temperature has no known age, is not
+  fresh and cannot become eligible (`missing_source_time`), even when it arrived live
+  (`logic/reference_temperature.hpp` `reference_room_freshness()`). `POST /set_ref_temp` records the mapping immediately,
   including an empty or unverified JSON path, and rebinds the existing authenticated client only
   while the device-wide v19 diagnostics master is enabled. With that master off, the mapping remains
   saved but dormant: there is no subscription or decoding. Once enabled, the next real MQTT frame

@@ -299,6 +299,29 @@ inline ReferenceFreshness reference_freshness(bool has_value, bool retained,
     return f;
 }
 
+// The room source's temperature, setpoint and timestamp topics arrive independently. Once a source
+// timestamp is mapped (its own topic, or a path inside the temperature payload), that timestamp is
+// the mapping's only age authority. Falling back to MQTT arrival would let a timestamp topic that
+// never delivers turn a live temperature into apparently fresh, eligible evidence, so until the
+// mapped time has arrived the value has no known age.
+inline bool reference_source_time_mapped(std::string_view time_topic, std::string_view time_path) {
+    return !time_topic.empty() || !time_path.empty();
+}
+
+inline ReferenceFreshness reference_room_freshness(bool source_time_mapped, bool has_value,
+                                                   bool retained, bool has_source_time,
+                                                   int64_t source_unix_s, uint64_t received_ms,
+                                                   int64_t now_unix_s, uint64_t now_ms,
+                                                   uint32_t max_age_s) {
+    if (has_value && source_time_mapped && !has_source_time) {
+        ReferenceFreshness f;
+        f.reason = "missing_source_time";
+        return f;
+    }
+    return reference_freshness(has_value, retained, has_source_time, source_unix_s, received_ms,
+                               now_unix_s, now_ms, max_age_s);
+}
+
 // Stable numeric vocabulary stored in the heartbeat. Code 0 is the only eligible state; all other
 // values are explicit reasons why no room error may reach a later controller. Never renumber these:
 // VictoriaMetrics history and alerts key on the integer while /status exposes the matching slug.
@@ -350,6 +373,7 @@ inline const char* reference_room_reason_name(ReferenceRoomReason reason) {
 }
 
 inline ReferenceRoomReason reference_room_freshness_reason(std::string_view reason) {
+    if (reason == "missing_source_time") return ReferenceRoomReason::MissingSourceTime;
     if (reason == "clock_unsynced") return ReferenceRoomReason::ClockUnsynced;
     if (reason == "future_timestamp") return ReferenceRoomReason::FutureTimestamp;
     if (reason == "retained_without_timestamp") return ReferenceRoomReason::RetainedWithoutTimestamp;

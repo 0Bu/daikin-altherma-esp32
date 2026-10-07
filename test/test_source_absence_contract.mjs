@@ -923,3 +923,30 @@ for (const fn of ["history_reset()", "history_reset_on_detect(uint32_t identity_
 }
 assert.match(historySource, /uint32_t history_epoch\(\) noexcept[\s\S]*?memory_order_acquire/);
 assert.match(historySource, /compare_exchange_weak[\s\S]*?memory_order_release/);
+
+// A mapped room timestamp that never arrives must not let MQTT arrival time stand in for it
+// (MQTT-05/a). Every room-source age decision therefore goes through the mapping-aware helper; the
+// bare helper stays legitimate only for the circulation witness, whose payload carries its own time.
+{
+  const bare = (src) => (src.match(/\breference_freshness\(/g) || []).length;
+  const room = (src) => (src.match(/\breference_room_freshness\(/g) || []).length;
+  const bodyOf = (src, signature) => {
+    const at = src.indexOf(signature);
+    const end = src.indexOf("\n}\n", at);
+    assert.ok(at >= 0 && end > at, `missing ${signature}`);
+    return src.slice(at, end);
+  };
+  const circulationCalls = [
+    "static ReferenceFreshness circulation_frame_freshness(",
+    "CirculationSourceStatus circulation_source_status(const Config& c)",
+    "CirculationPumpSample circulation_pump_sample()",
+  ].reduce((n, signature) => n + bare(bodyOf(mqtt, signature)), 0);
+  assert.equal(bare(status), 0, "/status must not age a room value without its timestamp mapping");
+  assert.equal(room(status), 1, "/status must judge room freshness through the mapping-aware helper");
+  assert.equal(bare(mqtt), circulationCalls,
+    "outside the circulation witness, mqtt_ha.cpp must not age a room value by MQTT arrival alone");
+  assert.equal(room(mqtt), 3,
+    "the heating-curve evaluation, its telemetry and the frame loop must use the mapping-aware helper");
+  assert.equal((mqtt.match(/ref_temp_time_topic\.empty\(\) \|\| !c\.ref_temp_time_path/g) || []).length,
+    0, "the room timestamp mapping must be derived by reference_source_time_mapped() alone");
+}

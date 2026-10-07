@@ -550,7 +550,9 @@ POST /set_ref_temp                 # { name, topic, temperature_path,
                                    #   error in /status.reference_temperature.error and /diag; the analysis
                                    #   stays fail-closed until a readable, fresh aggregate exists. With no
                                    #   timestamp mapping, live non-retained MQTT arrival time is used;
-                                   #   retained data without trusted source time remains rejected. An empty
+                                   #   retained data without trusted source time remains rejected. A
+                                   #   mapped timestamp that has not arrived yet leaves the value
+                                   #   without age (missing_source_time), never arrival-aged. An empty
                                    #   topic is the explicit Disable operation.
 POST /set_diagnostics              # { enabled: boolean } → persist the default-off master opt-in and
                                    #   apply live without reboot. It owns the 24-hour plant checkup,

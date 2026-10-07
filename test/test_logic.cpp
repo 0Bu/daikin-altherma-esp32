@@ -9222,6 +9222,35 @@ static void test_reference_temperature_config() {
     raw.payload_valid  = false;
     raw.payload_reason = ReferenceRoomReason::BackwardTimestamp;
     CHECK(reference_room_sample(raw, fresh).reason == ReferenceRoomReason::BackwardTimestamp);
+    raw.payload_valid = true;
+
+    // MQTT-05/a: a mapped source timestamp is the only age authority. A live temperature whose
+    // separate timestamp topic has not delivered must not age from MQTT arrival, so it can neither
+    // read as fresh nor produce a room error; once the time arrives the ordinary rules apply.
+    CHECK(!reference_source_time_mapped("", ""));
+    CHECK(reference_source_time_mapped("room/clock", ""));
+    CHECK(reference_source_time_mapped("", "ts"));
+    const ReferenceFreshness awaiting_time =
+        reference_room_freshness(true, true, false, false, -1, 5000, 1000, 65000, 600);
+    CHECK(!awaiting_time.fresh && !awaiting_time.age_known && awaiting_time.age_s == 0);
+    CHECK(std::string(awaiting_time.reason) == "missing_source_time");
+    CHECK(reference_room_freshness_reason(awaiting_time.reason) ==
+          ReferenceRoomReason::MissingSourceTime);
+    raw.has_source_time                     = false;
+    const ReferenceRoomSample awaiting_room = reference_room_sample(raw, awaiting_time);
+    CHECK(!awaiting_room.temperature_valid && !awaiting_room.control_eligible);
+    CHECK(!awaiting_room.has_room_error);
+    CHECK(awaiting_room.reason == ReferenceRoomReason::MissingSourceTime);
+    // Unmapped time keeps the live-arrival rule; a mapped time that arrived keeps the source rule.
+    const ReferenceFreshness unmapped_live =
+        reference_room_freshness(false, true, false, false, -1, 5000, -1, 65000, 600);
+    CHECK(unmapped_live.fresh && unmapped_live.age_s == 60);
+    const ReferenceFreshness mapped_arrived =
+        reference_room_freshness(true, true, true, true, 1000, 0, 1030, 0, 600);
+    CHECK(mapped_arrived.fresh && mapped_arrived.age_known && mapped_arrived.age_s == 30);
+    const ReferenceFreshness mapped_empty =
+        reference_room_freshness(true, false, false, false, -1, 0, 1000, 0, 600);
+    CHECK(!mapped_empty.fresh && std::string(mapped_empty.reason) == "no_value");
 }
 
 static void test_circulation_source() {
