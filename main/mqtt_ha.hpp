@@ -14,6 +14,8 @@
 
 namespace daik {
 
+struct Config;
+
 void mqtt_ha_start();
 
 // For /status.mqtt
@@ -66,7 +68,9 @@ struct ReferenceTemperatureStatus {
     ReferenceRoomReason rejection_reason=ReferenceRoomReason::InvalidPayload;
     std::string hvac_mode, timestamp_source, eligibility_error, error;
 };
-ReferenceTemperatureStatus reference_temperature_status();
+// Read against the caller's configuration snapshot. A saved replacement source cannot expose its
+// predecessor's raw sample while subscription work is pending, paused or failed.
+ReferenceTemperatureStatus reference_temperature_status(const Config& expected);
 
 // Last write-free controller evaluation. The state machine is owned by mqtt_task and guarded by
 // the MQTT status mutex; HTTP/status readers receive a copy. No actuator object crosses this API.
@@ -90,7 +94,10 @@ struct CirculationSourceStatus {
     CirculationPowerState state=CirculationPowerState::Unknown;
     std::string timestamp_source, freshness_reason, error;
 };
-CirculationSourceStatus circulation_source_status();
+// Only a Config-taking getter exists: a convenience overload would copy the whole Config on every
+// call and invite that churn back into per-cycle poll/telemetry paths.
+CirculationSourceStatus circulation_source_status(const Config& expected);
+uint32_t                circulation_source_generation();
 
 struct CirculationPumpSample { bool configured=false, known=false, on=false; };
 CirculationPumpSample circulation_pump_sample();
@@ -111,7 +118,7 @@ CirculationSourceTestResult mqtt_circulation_test(const CirculationSourceTestCon
                                                   uint32_t timeout_ms);
 bool mqtt_circulation_test_proof_valid(uint32_t proof,
                                        const CirculationSourceTestConfig& candidate);
-void mqtt_circulation_reconfigure();
+void                        mqtt_circulation_reconfigure(bool configured);
 
 // Explicit source/consent changes own these retained-topic tombstones. They are the only outbound
 // MQTT operations allowed before X10A proves installation publication authority; ordinary state,

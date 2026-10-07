@@ -639,16 +639,17 @@ static void append_status_json(JsonOut& j, bool redact) {
     // One exact MQTT-backed living-room source. Freshness and canonical eligibility remain separate:
     // a disabled thermostat may still expose a trustworthy temperature but cannot emit room_error_k.
     {
-        const ReferenceTemperatureStatus rt = reference_temperature_status();
+        const ReferenceTemperatureStatus rt = reference_temperature_status(c);
         const uint64_t now_ms               = static_cast<uint64_t>(esp_timer_get_time() / 1000);
         const uint64_t ref_age_s =
             rt.has_value && now_ms >= rt.received_ms ? (now_ms - rt.received_ms) / 1000 : 0;
         int64_t now_unix_s = -1;
         int32_t now_sub_ms = 0;
         time_now(now_unix_s, now_sub_ms);
-        ReferenceFreshness freshness =
-            reference_freshness(rt.has_value, rt.retained, rt.has_source_time, rt.source_unix_s,
-                                rt.received_ms, now_unix_s, now_ms, c.ref_temp_max_age_s);
+        ReferenceFreshness freshness = reference_room_freshness(
+            reference_source_time_mapped(c.ref_temp_time_topic, c.ref_temp_time_path), rt.has_value,
+            rt.retained, rt.has_source_time, rt.source_unix_s, rt.received_ms, now_unix_s, now_ms,
+            c.ref_temp_max_age_s);
         ReferenceRoomRaw room_raw;
         room_raw.configured      = !c.ref_temp_topic.empty();
         room_raw.has_temperature = rt.has_value;
@@ -885,7 +886,7 @@ static void append_status_json(JsonOut& j, bool redact) {
     // identifying installation data and therefore follow the same redaction boundary as the room
     // source. Power and source-time remain non-secret diagnostic evidence.
     {
-        const CirculationSourceStatus circulation           = circulation_source_status();
+        const CirculationSourceStatus circulation           = circulation_source_status(c);
         char                          circulation_power[32] = {0};
         if (circulation.has_value)
             std::snprintf(circulation_power, sizeof(circulation_power), "%.6g",
@@ -2203,11 +2204,14 @@ static esp_err_t h_history(httpd_req_t* req) {
     // Safe because esp_http_server dispatches requests one at a time on that single task.
     static logic::HistorySample samples[logic::HISTORY_SAMPLES];
     static uint16_t             runs[logic::HISTORY_MAX_RUNS][2];
-    const size_t n = modbus
-        ? history_modbus_snapshot(static_cast<size_t>(mb_t), samples, logic::HISTORY_SAMPLES)
-        : env3_source
-            ? history_env3_snapshot(static_cast<size_t>(env_t), samples, logic::HISTORY_SAMPLES)
-            : history_snapshot(t, samples, logic::HISTORY_SAMPLES);
+    uint32_t                    history_snapshot_epoch = 0;
+    const size_t                n =
+        modbus ? history_modbus_snapshot(static_cast<size_t>(mb_t), samples, logic::HISTORY_SAMPLES,
+                                                        &history_snapshot_epoch)
+                       : env3_source
+                           ? history_env3_snapshot(static_cast<size_t>(env_t), samples, logic::HISTORY_SAMPLES,
+                                                   &history_snapshot_epoch)
+                           : history_snapshot(t, samples, logic::HISTORY_SAMPLES, &history_snapshot_epoch);
     const size_t nruns = (modbus || env3_source) ? 0
         : logic::history_held_runs(samples, n, runs, logic::HISTORY_MAX_RUNS);
 
@@ -2231,6 +2235,15 @@ static esp_err_t h_history(httpd_req_t* req) {
     const bool mqtt_source = !modbus && !env3_source &&
                              def_->kind == logic::TrendKind::CirculationState;
     j += jstr(modbus ? "modbus" : env3_source ? "env3" : mqtt_source ? "mqtt" : "x10a");
+    // Bind the body to the lifetime captured with its samples, not a successor observed while
+    // serializing it. The per-boot token also distinguishes equal epochs on different boots.
+    j += ",\"epoch\":";
+    j += std::to_string(history_snapshot_epoch);
+    char boot_id[17];
+    std::snprintf(boot_id, sizeof(boot_id), "%016llx",
+                  static_cast<unsigned long long>(s_status_boot_id));
+    j += ",\"boot_id\":";
+    j += jstr(boot_id);
     j += ",\"label\":";
     j += jstr(lbl);
     j += ",\"dt\":";
@@ -2263,6 +2276,18 @@ static esp_err_t h_history(httpd_req_t* req) {
         j += std::to_string(b0);
     }
     j += ",\"v\":[";
+    // Labels and raster metadata use separate bounded getters. If a reset intervened, refuse the
+    // assembled header before any chunk is sent rather than mixing predecessor samples with it.
+    // Epoch 0 means no snapshot identity at all (no history mutex, or its lock was not obtained);
+    // that is reported as unavailable, not as a change a retry would resolve.
+    if (history_snapshot_epoch == 0) {
+        httpd_resp_set_status(req, "503 Service Unavailable");
+        return http_send_json(req, "{\"ok\":false,\"error\":\"history unavailable\"}");
+    }
+    if (history_snapshot_epoch != history_epoch()) {
+        httpd_resp_set_status(req, "503 Service Unavailable");
+        return http_send_json(req, "{\"ok\":false,\"error\":\"history changed; retry\"}");
+    }
     httpd_resp_set_type(req, "application/json");
     for (size_t i = 0; i < n; i++) {
         if (i) j += ",";

@@ -320,7 +320,7 @@ assert.match(deSource, /\/\* ref\.delete \*\/ "Löschen"/,
   "Delete must remain explicit in the English/German baseline catalogs");
 assert.doesNotMatch(httpConfig, /test_ref_temp|mqtt_reference_test/,
   "the room-source API must persist without a probe or proof gate");
-assert.match(mqttHa, /set_reference_error[\s\S]*reference temperature payload rejected[\s\S]*decode_reference_frame/,
+assert.match(mqttHa, /decode_reference_frame[\s\S]*reference temperature payload rejected/,
   "the durable subscriber must expose and log payload/path failures at runtime");
 assert.doesNotMatch(mqttHa, /service_reference_probe|s_ref_probe|mqtt_reference_test/,
   "the MQTT task must not retain a separate room-source probe state machine");

@@ -1535,7 +1535,8 @@ vocabulary exactly:
    master is enabled; its Save hint names that dormant state and explains that a readable, fresh
    MQTT frame is still required before the source becomes usable. Delete removes the saved mapping
    and captured value. A blank timestamp mapping uses live non-retained MQTT arrival time;
-   retained data without trusted source time fails closed,
+   retained data without trusted source time fails closed, and a mapped timestamp that has not
+   arrived yet is named as missing measurement time rather than as a stale value,
    and `/status` plus the grouped numeric
    `<base>/heating_curve` topic retain the full canonical and diagnosis evidence. No UI path sends a
    setpoint or HomeHub write.

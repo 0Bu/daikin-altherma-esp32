@@ -95,7 +95,7 @@ const context = vm.createContext({
 
 vm.runInContext(`${readAppSource().replace(/\nboot\(\);\s*$/, "\n")}
   this.__ui = { S, t, esp32CardHtml, dynamicControlCardHtml, circulationSettingsCardHtml,
-                refrigerantServiceRowHtml, connLinks, liveData, histHtml, INSPECT };`, context,
+                refrigerantServiceRowHtml, connLinks, liveData, histHtml, INSPECT, roomSourceStatus };`, context,
   { filename: "main/www/app.sources" });
 const ui = context.__ui;
 
@@ -603,6 +603,34 @@ for (const c of WIRED) {
 }
 assert.notEqual(ui.t("conn.eth_no_cable"), ui.t("conn.eth_no_lease"),
   "no cable and no address are different problems and must read differently");
+
+// A room temperature whose separately mapped timestamp has not arrived has no known age. The
+// firmware reports `missing_source_time`; the row must name that absence instead of calling a
+// value of unknown age stale.
+{
+  const healthy = HEALTHY();
+  const awaiting = { ...healthy.reference_temperature, fresh: false,
+    freshness_reason: "missing_source_time", age_s: null, temperature_valid: false,
+    setpoint_valid: false, control_eligible: false, room_error_k: null,
+    reason: "missing_source_time", reason_code: 4 };
+  const room = ui.roomSourceStatus(awaiting, healthy.mqtt);
+  assert.equal(room.key, "unusable", "a missing mapped timestamp must block the room source");
+  assert.equal(room.detail, ui.t("dyn.room_no_time"),
+    "a missing mapped timestamp must be named, not reported as a stale value");
+  assert.notEqual(room.detail, ui.t("ref.detail.stale"));
+  // A reading without a trusted age (age_s null) must not show its MQTT arrival time as its age,
+  // whatever the reason: a missing, unusable or unsynced source time, or a retained replay.
+  for (const reason of ["missing_source_time", "future_timestamp", "clock_unsynced",
+    "retained_without_timestamp"]) {
+    ui.S.status = { ...healthy, reference_temperature: { ...awaiting, freshness_reason: reason,
+      reason, received_ago_s: 10, retained: reason === "retained_without_timestamp" } };
+    const card = ui.dynamicControlCardHtml();
+    assert.ok(card.includes(ui.t("ref.age_unknown")), `${reason}: a reading without a trusted age shows unknown`);
+    assert.ok(!card.includes(ui.t("ref.ago", 10)),
+      `${reason}: the arrival age must not stand in for the reading age`);
+  }
+  checks++;
+}
 
 console.log(`UI absence matrix: ${SCENARIOS.length} source combinations, ${checks} rules held`);
 

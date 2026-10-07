@@ -738,9 +738,8 @@ static esp_err_t set_diagnostics(httpd_req_t* req) {
 
     checkup_set_diagnostics(enabled, c.diagnostics_generation);
     history_checkup_reset();
-    history_circulation_reset();
     mqtt_reference_reconfigure();
-    mqtt_circulation_reconfigure();
+    mqtt_circulation_reconfigure(!c.circulation_topic.empty());
     if (weather_was_publishable && !enabled) mqtt_request_weather_cleanup();
     weather_forecast_reconfigure();
     diag_printf("diagnostics: %s (generation %lu)\n", enabled ? "enabled" : "disabled",
@@ -782,7 +781,7 @@ static esp_err_t set_circulation(httpd_req_t* req) {
     c.circulation_off_tenths_w = in.off_tenths_w;
     c.circulation_confirm_s = in.confirm_s;
     if (!config_save(c)) return send_err(req, "500 Internal Server Error", "config write failed");
-    if (evidence_mapping_changed) mqtt_circulation_reconfigure();
+    if (evidence_mapping_changed) mqtt_circulation_reconfigure(!c.circulation_topic.empty());
     diag_printf("mqtt: circulation power mapping saved%s\n", in.topic.empty() ? " (disabled)" : "");
     return http_send_json(req, "{\"ok\":true,\"saved\":true,\"reboot\":false}");
 }

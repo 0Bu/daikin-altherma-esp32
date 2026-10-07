@@ -271,6 +271,11 @@ inline void dwell_step(DwellSlot* slots, size_t n, const DwellObservation* obs, 
             s.flags = DWELL_F_USED;          // deliberately NOT exact — joined in progress
         } else {
             DwellSlot& s = slots[static_cast<size_t>(i)];
+            // The resumed tail still belongs to the blind run. Check the cumulative gap before
+            // clearing it: 120 unread seconds plus one second to the next observation is stale.
+            if ((s.gap_s != 0 || (s.flags & DWELL_F_GAP)) &&
+                static_cast<uint64_t>(s.gap_s) + dt_s > DWELL_MAX_GAP_S)
+                s.flags |= DWELL_F_STALE;
             const bool was_stale = (s.flags & DWELL_F_STALE) != 0;
             if (was_stale || s.code != ob.code) {
                 // WITNESSED means the previous state was seen in the IMMEDIATELY PRECEDING cycle, so
@@ -341,9 +346,9 @@ inline void dwell_step_with_cadence(DwellSlot* slots, size_t n, const DwellObser
 // the device cannot time its own downtime, and a fabricated duration is the one thing
 // logic/timestamp.hpp already refuses to produce for an unsynced clock.
 inline constexpr uint32_t DWELL_PERSIST_MAGIC   = 0x4c4c5744u;   // "DWLL" little-endian
-// Version 2 rejects records produced by the older fold, which could label known skipped intervals
-// as continuously observed. The layout is unchanged, but those claims cannot be repaired at boot.
-inline constexpr uint16_t DWELL_PERSIST_VERSION = 2;
+// Version 3 also rejects runs preserved across a cumulative blind gap past the continuity bound.
+// The layout is unchanged, but the older fold's continuity claims cannot be repaired at boot.
+inline constexpr uint16_t DWELL_PERSIST_VERSION = 3;
 inline constexpr uint32_t DWELL_REBOOT_BLIND_S  = 5;
 
 enum class DwellRestore : uint8_t {
