@@ -194,6 +194,7 @@ else `{reason,reason_code,fault,coredump,task,pc,backtrace[],corrupted,elf_sha25
 crash banner),
 `detect{proto,valid,capacity_kw,capacity_kw_iu,ou_eeprom,candidates[],families[],ambiguous,
 model{name,family,marketing}}` (drives the dashboard ESP32 board card + the read-only model card;
+`model` carries only the fields the candidate set establishes, `null` otherwise;
 the two capacities are the outdoor unit's own report and the indoor unit's rated code — separate
 figures for separate halves of the plant, never one with a silent fallback).
 
@@ -875,13 +876,17 @@ Body, ordered:
    fingerprint is valid, the **outdoor unit ID** (`ou_eeprom`) verbatim in mono. Those digits are the
    one identifier that can settle it, and only a person holding the nameplate can: the firmware has
    no digit→name table and must not invent one. A *unique* identification shows neither row — it
-   needs no list of what it isn't.
+   needs no list of what it isn't. When one family remains but neither a model nor a marketing name
+   is established (several same-family profiles that do not share one marketing name), the heading names that
+   **family** instead of the brand: the families row only appears for more than one family, so the
+   brand alone would again read as a failed detection.
    **And every row on this card explains itself** (same expander as item 6). The two rows above exist
    *because* an ambiguous detection needs explaining, but on their own they state the fact and never
    the reason — a generic brand name over a list of models it might be is also exactly what a failed
    detection would look like. So tapping a row says why the indoor unit's figure is labelled as such,
-   why no single model name can be asserted (several families are register-identical, so it affects
-   no reading), and what the ID digits are for. The copy is a **separate table** (`MODEL_DESCRIPTIONS`,
+   why no single model name can be asserted (the bus cannot tell the candidates apart; whether the
+   pick can change a reading depends on whether the outdoor unit reported its capacity — the
+   `candidates` and `candidates_nocap` explainers), and what the ID digits are for. The copy is a **separate table** (`MODEL_DESCRIPTIONS`,
    keyed by row id) rather than `DESCRIPTIONS`: these labels are *translated*, so an English label
    pattern would silently stop matching on a German page, and they are not catalog labels — see
    item 6.

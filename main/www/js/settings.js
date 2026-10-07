@@ -579,15 +579,20 @@ function signalBars(rssi) {
 
 // ── Heat pump (model identity + wiring) ──────────────────────────────────
 
-// Dashboard header / Model-card name: the auto-detected model, asserted ONLY when detection is
-// unambiguous. Several register-identical families (ambiguous) or a generic fallback read as the
-// brand — matching the honest Model card, never claiming e.g. an EBLA monobloc for a register-
-// identical ERGA split. Driven purely by /status.detect; there is no manual selection.
+// Dashboard header / Model-card name: the most specific identity /status.detect.model ESTABLISHES
+// (logic/detect_identity.hpp), asserted only while one family remains. The firmware already nulls
+// whatever the candidate set does not support, so this picks the first established field: the
+// marketing name, else the exact model (a unique match), else the family alone (several same-family
+// profiles without a marketing name — naming the family beats an unexplained brand heading, since
+// the families row below only appears for more than one family). Several families or a generic
+// fallback read as the brand, never claiming e.g. an EBLA monobloc for a register-identical ERGA
+// split. Driven purely by /status.detect; there is no manual selection.
 function hpModelName() {
-  // Assert a concrete model ONLY while the bus is live AND detection is unambiguous — never name a
-  // specific unit from a cached fingerprint while the link is silent (offline → the brand only).
+  // Assert identity ONLY while the bus is live AND one family remains — never name a specific unit
+  // from a cached fingerprint while the link is silent (offline → the brand only).
   const s = S.status || {}, hp = s.hp || {}, d = s.detect, m = d?.model;
-  if (hp.connected && d?.valid && (d.families || []).length === 1 && m && (m.marketing || m.name)) return m.marketing || m.name;
+  const named = m && (m.marketing || m.name || m.family);
+  if (hp.connected && d?.valid && (d.families || []).length === 1 && named) return named;
   return "Daikin Altherma";
 }
 

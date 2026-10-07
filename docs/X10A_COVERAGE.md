@@ -81,7 +81,8 @@ supplied by `def/overlay.hpp` and are therefore not part of this gap.
 
 ### Page `0x30` — page read; complete for the reference field list
 
-The five actuator fields at offsets 11–13 are supplied by the profile-specific overlay.
+The five actuator fields at offsets 11–13 are supplied by the overlay block that applies to the
+reference table (the active profile and its row-identical ERGA E 04–08 kW twin).
 
 ### Page `0x60` — page read; 6 fields not decoded/displayed
 

@@ -86,12 +86,12 @@ inline constexpr size_t RETRY_ROW_COUNT = sizeof(retry_rows) / sizeof(retry_rows
 // evidence or model documentation.
 //
 // WHICH UNIT THE AUDIT RAN ON. The reference unit is an Altherma 3 R split (an ERGA E outdoor unit
-// with an EHB hydrobox). Detection reads it with OBSERVABILITY_PROFILE, the EBLA/EDLA monobloc id,
-// only because that id wins a tie between register-identical tables (logic/detect.hpp
-// detect_best, lowest id) — the bus cannot tell the two apart. Binding the rows to that one id
-// would tie audited telemetry to a tie-break: the day detection reads the same unit through the
-// ERGA E id, 27 entities would vanish from Home Assistant with nothing about the unit changed.
-// The rows therefore follow the TABLE they were audited against, not the id.
+// with an EHBX E hydrobox). Detection reads it with OBSERVABILITY_PROFILE, the EBLA/EDLA monobloc
+// id, only because that id is the lowest of the three tied 4-8 kW candidates (logic/detect.hpp
+// detect_best's last criterion) — the bus cannot tell them apart. Binding the rows to that one id
+// would tie audited telemetry to a tie-break. The rows therefore follow the GENERATED TABLE they
+// were audited against, not the id: a pick of the row-identical ERGA E id keeps all 27 entities.
+// (A pick of ERGA D DJ would not — see observability_applies.)
 inline constexpr const char* OBSERVABILITY_PROFILE =
     "altherma_ebla_edla_d_series_4_8kw_monobloc";
 
@@ -159,11 +159,12 @@ static_assert(observability_rows_are_safe(),
               "observability rows must stay publishable dimensionless 1-byte non-405 values");
 
 // Does the observability block apply to this profile? Exactly when its generated table IS the
-// reference table — under the reference id or any other. Identity, not similarity
-// (logic::value_rows_identical in logic/profile_view.hpp): the ERGA D 04-08 table differs from it
-// by one re-spelled fan label
-// and stays outside, as does every table the audit never saw. Today the class is the reference id
-// plus altherma_erga_e_ehv_ehb_ehvz_e_ej_series_04_08kw, pinned by test_observability_class().
+// reference table — under the reference id or any other. Identity of the GENERATED table, not
+// similarity (logic::value_rows_identical in logic/profile_view.hpp): the ERGA D DJ 04-08 table
+// re-spells one fan label in its generated rows — logic/label_override.hpp then publishes the same
+// name, but that is a different table the audit never covered — so it stays outside, as does every
+// table the audit never saw. Today the class is the reference id plus
+// altherma_erga_e_ehv_ehb_ehvz_e_ej_series_04_08kw, pinned by test_observability_class().
 inline bool observability_applies(const Profile& p) {
     if (std::strcmp(p.id, OBSERVABILITY_PROFILE) == 0) return true;
     const Profile& ref = lookup(OBSERVABILITY_PROFILE);

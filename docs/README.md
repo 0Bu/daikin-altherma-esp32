@@ -430,7 +430,10 @@ GET  /status[?redact=1]            # ?redact=1 = the bug-report form: 27 reporte
                                    #        task,pc,backtrace[],corrupted,elf_sha256},
                                    #   detect:{proto,valid,capacity_kw,capacity_kw_iu,ou_eeprom,
                                    #        candidates[],families[],ambiguous,
-                                   #        model:{name,family,marketing}} }
+                                   #        model: null | {name,family,marketing}} }
+                                   #   model = only what candidates[] establishes (name for <=1
+                                   #        candidate, family/marketing when all agree; unestablished
+                                   #        fields null); the table actually read is profile.id
                                    #   capacity_kw = the outdoor unit's own report (null when its
                                    #        0x00 descriptor is too short to carry it);
                                    #        capacity_kw_iu = the indoor unit's rated code. Different

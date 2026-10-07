@@ -17746,7 +17746,8 @@ static void test_observability_class() {
     CHECK(value_rows_identical(a, 2, b, 2));
     CHECK(value_rows_identical(a, 2, a, 2));
     CHECK(!value_rows_identical(a, 2, b, 1));
-    b[1].label = "Fan 1 (10 rpm)"; // the one difference that keeps ERGA D outside the class
+    b[1].label = "Fan 1 (10 rpm)"; // ERGA D DJ's generated spelling: a different generated table
+                                   // (label_override.hpp later publishes it as "Fan 1 (step)")
     CHECK(!value_rows_identical(a, 2, b, 2));
     b[1].label = "Fan 1 (step)";
     b[1].conv  = 153;

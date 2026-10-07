@@ -1735,7 +1735,7 @@ static void append_status_json(JsonOut& j, bool redact) {
                 // used — and since legacy-225 it is LOAD-BEARING here, not merely faithful:
                 // detect_candidates narrows by the I/U capacity when the O/U figure is absent, so
                 // omitting this field would make /status report a set the device never considered
-                // (the live unit: 8 candidates across 4 families instead of 3 across 2, which is
+                // (the live unit: 8 candidates across 4 families instead of 5 across 3, which is
                 // the over-broad reading that put a wrong family into legacy-213).
                 fp.iu_kw_tenths       = c.fp_iu_kw_tenths;
                 int              nsig = 0;
@@ -1769,11 +1769,26 @@ static void append_status_json(JsonOut& j, bool redact) {
         const logic::EstablishedIdentity who =
             logic::established_identity(wm ? wm->name : nullptr, wm ? wm->family : nullptr,
                                         wm ? wm->marketing : nullptr, agree, total);
-        auto opt = [](const char* s) { return s ? jstr(s) : std::string("null"); };
+        // Successive += with bare literals, like kw_field above: a + chain holds every
+        // intermediate at once on the tight httpd stack.
+        auto opt = [&j](const char* s) {
+            if (s)
+                j += jstr(s);
+            else
+                j += "null";
+        };
         j += ",\"model\":";
-        j += who.any() ? "{\"name\":" + opt(who.name) + ",\"family\":" + opt(who.family) +
-                             ",\"marketing\":" + opt(who.marketing) + "}"
-                       : "null";
+        if (who.any()) {
+            j += "{\"name\":";
+            opt(who.name);
+            j += ",\"family\":";
+            opt(who.family);
+            j += ",\"marketing\":";
+            opt(who.marketing);
+            j += "}";
+        } else {
+            j += "null";
+        }
         j += "}";
     }
     j += "}";

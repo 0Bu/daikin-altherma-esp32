@@ -25,11 +25,12 @@
 namespace daik::logic {
 
 // True when two value tables are the SAME table: equal length and every row equal in every field
-// the firmware acts on, the label and the publish flag included. Identity, not similarity: a single
-// re-spelled label is a different published identifier (logic/discovery.hpp), so it is a different
-// table. def/overlay.hpp uses this to give rows audited against one generated table to every
-// profile that is that table under another id, instead of to whichever id detection happened to
-// read the audited unit with.
+// the firmware acts on, the label and the publish flag included. Identity of the GENERATED rows,
+// not similarity: a single re-spelled generated label makes a different table, even where
+// logic/label_override.hpp later publishes both spellings under one name — a table the audit never
+// saw stays a different table. def/overlay.hpp uses this to give rows audited against one generated
+// table to every profile that is that table under another id, instead of to whichever id detection
+// happened to read the audited unit with.
 inline bool value_rows_identical(const ValueDef* a, size_t na, const ValueDef* b, size_t nb) {
     if (na != nb) return false;
     if (a == b) return true;

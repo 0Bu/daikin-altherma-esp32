@@ -456,7 +456,7 @@ host-testable core is unusually large and valuable, because the risky parts are 
   against per-profile signatures to a candidate set (see the Auto-detection section). Pure, so the
   narrowing rule is asserted on the host against the real derived signatures.
 - `logic/detect_identity.hpp` — which parts of a model identity a candidate set establishes
-  (name only when unique, family / marketing only when every candidate agrees); the rule behind
+  (name only with at most one candidate, family / marketing only when every candidate agrees); the rule behind
   `/status.detect.model`, so the tie-break representative is never reported as the unit.
 - `logic/board_pins.hpp` — the ESP32-S3 chip-safe GPIO set (excludes SPI flash, strapping, USB-JTAG
   and dedicated JTAG pins; an `octal_spi` flag additionally excludes GPIO33-37 on builds whose
@@ -529,7 +529,9 @@ host-testable core is unusually large and valuable, because the risky parts are 
   is a read-only migration hint: an exact historical field match recovers the same name the old UI
   displayed, while untouched defaults never acquire an identity.
 - `logic/profile_view.hpp` — the active model's rows **as every consumer must see them**: the
-  generated table plus the applicable hand-written `def/overlay.hpp` blocks, as one indexable sequence. Four
+  generated table plus the applicable hand-written `def/overlay.hpp` blocks, as one indexable sequence
+  (`value_rows_identical` decides which tables count as the reference table for the observability
+  block). Four
   call sites read the row set and they are not independent — `hp_poll` decodes them, `mqtt_ha`
   announces one HA discovery config per row, and both `http_status` and `mqtt_ha` size their snapshot
   buffer from the row **count**. Grow the cache without growing the count and the extra values are
@@ -1246,8 +1248,10 @@ The single biggest UX change: **no editing a config header + a `def/*.h` by hand
   row-identical to the one that unit is read with (`def::observability_applies`,
   `logic::value_rows_identical`): today the EBLA/EDLA D 4–8 kW id and the ERGA E 04–08 kW id. The
   reference unit itself is an Altherma 3 R split; detection reads it with the EBLA/EDLA monobloc id
-  only because that id wins the tie between the two identical tables, so the rows follow the table,
-  not the tie-break. 19 are P1 diagnostic inputs and eight retain neutral P2 observation semantics. `HP Forced FG` is withheld because its bit aliases the
+  only because that id is the lowest of the three tied 4–8 kW candidates (EBLA/EDLA D, ERGA D DJ,
+  ERGA E), so the rows follow the generated table, not the tie-break. ERGA D DJ stays outside: its
+  generated table re-spells one fan label (label adjudication publishes the same name, but the audit
+  never covered that table), so a pick of ERGA E keeps the rows and a pick of ERGA D DJ would not. 19 are P1 diagnostic inputs and eight retain neutral P2 observation semantics. `HP Forced FG` is withheld because its bit aliases the
   complete one-byte CT-L3 field; the availability ledger withholds CT-L3 while that bit is asserted,
   and neither the flag nor a simultaneous current is claimed until a mask is evidenced.
   `logic/profile_view.hpp` presents *generated + applicable blocks* as one row sequence to every
@@ -1610,14 +1614,16 @@ which own the credential/service fields and are serialized on the single httpd t
 - **Protocol S legacy unit** → directly applied with the dedicated `protocol_s` profile (no signature matching or capacity class ranking).
 - **exactly one candidate** → applied; the UI shows "Detected: <family> · ~kW".
 - **several candidates** → the best-fit representative is read with. The 39 detectable Altherma models collapse
-  to a few page-mask classes, and within a class they often differ only by untestable flag bits (e.g.
-  an ERGA split vs an EBLA monobloc differ by one bit with identical labels), so the exact model
+  to a few page-mask classes, and within a class they often differ only by untestable flag bits or
+  not at all (e.g. the 4–8 kW ERGA E split and EBLA/EDLA D monobloc tables are row-identical; ERGA D
+  DJ differs from them by one label), so the exact model
   **cannot** be determined from bus data. The UI reports this honestly — the distinct candidate
   **families** plus the O/U EEPROM digits to match the nameplate — rather than asserting a guessed
   name, and `/status.detect.model` (also MCP `get_status`) reports only the fields the whole set
   agrees on, so no consumer receives the tie-break's name as the unit's. The reference unit shows
   why this matters: an Altherma 3 R split whose five candidates span three families, read with the
-  EBLA/EDLA *monobloc* id because that id sorts first among identical tables. If a sweep experienced actual transport frame corruption (such as `BadCrc`, `ShortReply`,
+  EBLA/EDLA *monobloc* id because that id sorts first among the tied candidates (detect_best's last
+  criterion). If a sweep experienced actual transport frame corruption (such as `BadCrc`, `ShortReply`,
   `UnexpectedReply`, or `InvalidLength`, setting `transport_incomplete`),
   committing the detected model requires confirmation by 2 consecutive agreeing sweeps (`detect_incomplete_step`),
   preventing noise-induced page loss from locking in a wrong model class. Unpopulated probe pages that time out
@@ -1675,8 +1681,9 @@ only in the in-RAM config
 pump is always re-detected; no stale model survives a reset). The `proto`/`rx_pin`/`tx_pin` link cache
 *is* persisted (see above). Within the session, `/status.detect` recomputes the candidates, their
 distinct `families`, and the
-`model{name,family,marketing}` display name from the in-RAM fingerprint cheaply (no re-probe; names
-from `def/model_names.hpp`). `POST /detect` resets `profile` to `"auto"` and invalidates the
+`model{name,family,marketing}` identity as far as the candidate set establishes it
+(`logic/detect_identity.hpp`) from the in-RAM fingerprint cheaply (no re-probe; names from
+`def/model_names.hpp`). `POST /detect` resets `profile` to `"auto"` and invalidates the
 fingerprint to force a fresh pass immediately (no reboot needed). Detection is **fully automatic** —
 there is no manual model selection or protocol control in the UI, and the UI shows model/protocol
 only while the link is live (a cached fingerprint is never presented as a live reading).
@@ -3497,12 +3504,16 @@ GET  /status      version, platform, uptime_s, boot_id (16 hex digits; non-secre
                   detect{proto,valid,capacity_kw,capacity_kw_iu,ou_eeprom,candidates[],families[],
                   ambiguous,
                   model{name,family,marketing}} — drives the dashboard's Model card. model carries
-                  only what the candidate set ESTABLISHES (logic/detect_identity.hpp): name only when
-                  there is at most one candidate, family / marketing only when every candidate shares
-                  the read profile's value (marketing never as ""); an unestablished field is null and
-                  an object with nothing established is null. The profile actually read — the
-                  lowest-id tie-break among register-identical candidates — stays in profile.id, and
-                  is not a statement about the unit. TWO capacities,
+                  only what the candidate set ESTABLISHES (logic/detect_identity.hpp). With at most one
+                  candidate all three fields are copied from the read profile, so marketing may be ""
+                  (a manual /set_hp profile is reported as that explicit statement, even against a
+                  one-candidate set). With several candidates, name is null and family / marketing
+                  are reported only when every candidate shares the read profile's value (a shared
+                  empty marketing name is not reported); an unestablished field is null, and an
+                  object with nothing established is null. The profile actually read — detect_best's
+                  representative (page overlap, kW class, then lowest id; tied candidates need not be
+                  register-identical), or auto / generic / protocol_s / a /set_hp profile — stays in
+                  profile.id and is not a statement about the unit. TWO capacities,
                   separate fields, never merged:
                   capacity_kw is the OUTDOOR unit's own report (page 0x00/12) and is null whenever the
                   variable-length descriptor is too short to carry offset 12; capacity_kw_iu is the
