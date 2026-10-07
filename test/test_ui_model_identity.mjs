@@ -90,6 +90,8 @@ const heading = (detect, connected) => {
 };
 
 // 1. A unique identification names the marketing name, else the exact model.
+//    (Illustrative shapes: in the real catalog ERGA E never stands alone — it ties with EBLA/EDLA D
+//    and ERGA D DJ — but the heading rule only reads the fields, not the ids.)
 assert.equal(heading({ ...BASE, candidates: ["altherma_erga_e_ehv_ehb_ehvz_e_ej_series_04_08kw"],
   families: ["Altherma 3 R"], ambiguous: false,
   model: { name: "Altherma ERGA E EHV-EHB-EHVZ E EJ series 04-08kW", family: "Altherma 3 R",

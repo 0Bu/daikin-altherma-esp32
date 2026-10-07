@@ -884,9 +884,9 @@ Body, ordered:
    *because* an ambiguous detection needs explaining, but on their own they state the fact and never
    the reason — a generic brand name over a list of models it might be is also exactly what a failed
    detection would look like. So tapping a row says why the indoor unit's figure is labelled as such,
-   why no single model name can be asserted (the bus cannot tell the candidates apart; whether the
-   pick can change a reading depends on whether the outdoor unit reported its capacity — the
-   `candidates` and `candidates_nocap` explainers), and what the ID digits are for. The copy is a **separate table** (`MODEL_DESCRIPTIONS`,
+   why no single model name can be asserted (the bus cannot tell the candidates apart, and the pick
+   can change which rows are decoded — legacy-230 B in [`ARCHITECTURE.md`](ARCHITECTURE.md); the
+   `candidates` / `candidates_nocap` explainers), and what the ID digits are for. The copy is a **separate table** (`MODEL_DESCRIPTIONS`,
    keyed by row id) rather than `DESCRIPTIONS`: these labels are *translated*, so an English label
    pattern would silently stop matching on a German page, and they are not catalog labels — see
    item 6.

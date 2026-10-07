@@ -583,7 +583,7 @@ function signalBars(rssi) {
 // (logic/detect_identity.hpp), asserted only while one family remains. The firmware already nulls
 // whatever the candidate set does not support, so this picks the first established field: the
 // marketing name, else the exact model (a unique match), else the family alone (several same-family
-// profiles without a marketing name — naming the family beats an unexplained brand heading, since
+// profiles that do not share one marketing name — naming the family beats an unexplained brand heading, since
 // the families row below only appears for more than one family). Several families or a generic
 // fallback read as the brand, never claiming e.g. an EBLA monobloc for a register-identical ERGA
 // split. Driven purely by /status.detect; there is no manual selection.

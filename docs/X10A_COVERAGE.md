@@ -26,7 +26,8 @@ MQTT, HA and UI contracts.
 
 ## Diagnostic observability supplement
 
-The active profile now publishes 27 additional rows from pages it already queried. They are split
+The active profile (and the row-identical ERGA E 04–08 kW id) now publishes 27 additional rows from
+pages it already queried. They are split
 by evidence strength, not by whether they are visible:
 
 | Class | Rows | Firmware state age | Long-term use |
