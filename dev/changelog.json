@@ -1,1 +1,1 @@
-{"version":"1.0.7-dev.0","changelog":"v1.0.7-dev.0 — Maintenance and reliability improvements."}
+{"version":"1.0.7-dev.1","changelog":"v1.0.7-dev.0 — Maintenance and reliability improvements.\nv1.0.7-dev.1 — Close sessions whose leftover request body cannot be settled"}
