@@ -17713,6 +17713,21 @@ static void test_mqtt_publish_gate() {
     // A state outside the defined transition set grants no publication or promotion.
     d = mqtt_publish_gate_step(static_cast<MqttPublishGateState>(99), true, 0, true);
     CHECK(!d.publish_cycle && !d.publish_offline && !d.promote_publisher);
+
+    // MQTT-02/a: a clean stop discards the LWT, so an OTA pause withdraws `online` first. Volatile
+    // inputs keep every combination a runtime branch for gcov instead of a folded constant.
+    volatile bool yes = true;
+    volatile bool no  = false;
+    CHECK(mqtt_pause_withdraws_online(yes, yes, yes));
+    // A Weather pause never precedes a restart and keeps the no-churn gap.
+    CHECK(!mqtt_pause_withdraws_online(no, yes, yes));
+    // The no-LWT subscriber-only client never speaks for the installation, connected or not.
+    CHECK(!mqtt_pause_withdraws_online(yes, no, yes));
+    CHECK(!mqtt_pause_withdraws_online(yes, no, no));
+    // A disconnected publisher cannot order the marker ahead of a DISCONNECT; esp-mqtt would only
+    // queue it in the outbox that the stop then deletes.
+    CHECK(!mqtt_pause_withdraws_online(yes, yes, no));
+    CHECK(!mqtt_pause_withdraws_online(no, no, no));
 }
 
 static void test_http_deadline() {

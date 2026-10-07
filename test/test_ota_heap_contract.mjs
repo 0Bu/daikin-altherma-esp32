@@ -1061,6 +1061,31 @@ const resumeStep = mqtt.slice(resumeStart, resumeEnd);
 assert.match(pauseStep,
   /s_transport_pause_requested\.load\(std::memory_order_acquire\)[\s\S]{0,220}?esp_mqtt_client_stop\(s_client\)[\s\S]{0,260}?s_client_running\.store\(false,\s*std::memory_order_release\)[\s\S]{0,260}?s_transport_paused\.store\(true,\s*std::memory_order_release\)/,
   "the MQTT owner must stop and acknowledge esp-mqtt before a competing TLS session starts");
+// The clean stop discards the installation LWT, and an OTA install restarts the board while the
+// client is stopped. The connected publisher must therefore retain `offline` itself, on the same
+// stream and ahead of the DISCONNECT, and only for the OTA lease (logic/mqtt_publish_gate.hpp).
+const withdrawStart = mqtt.indexOf(
+  "static __attribute__((noinline)) void mqtt_ota_withdraw_online(");
+assert.ok(withdrawStart >= 0 && withdrawStart < pauseStart,
+  "the OTA availability withdrawal must remain a scalar helper ahead of the pause step");
+const withdrawStep = mqtt.slice(withdrawStart, pauseStart);
+assert.match(withdrawStep,
+  /s_transport_pause_withdraws_online\.exchange\(false,\s*std::memory_order_acq_rel\);\s*if\s*\(!mqtt_pause_withdraws_online\(ota_pause,\s*s_client_is_publisher\.load\(std::memory_order_acquire\),\s*s_connected\.load\(std::memory_order_acquire\)\)\)\s*return;\s*if\s*\(mqtt_publish\(s_avail,\s*"offline",\s*0,\s*1,\s*1\)\)/,
+  "an OTA pause must consume its intent and retain QoS-1 `offline` only from a connected publisher");
+assert.doesNotMatch(withdrawStep, /std::string|esp_mqtt_client_(?:stop|start|enqueue)|"online"/,
+  "the withdrawal must stay allocation-free on the firmware side and must never claim `online`");
+const pauseQuiescedAt = pauseStep.indexOf("s_publish_network_quiesced.store(false");
+const pauseWithdrawAt = pauseStep.indexOf("mqtt_ota_withdraw_online();");
+const pauseStopAt = pauseStep.indexOf("esp_mqtt_client_stop(s_client)");
+assert.ok(pauseQuiescedAt >= 0 && pauseWithdrawAt > pauseQuiescedAt && pauseStopAt > pauseWithdrawAt,
+  "the withdrawal must run inside the unacknowledged pause, before the clean DISCONNECT");
+assert.equal(occurrences(mqtt, "mqtt_ota_withdraw_online();"), 1,
+  "only the network-heap pause stop may withdraw installation availability");
+assert.equal(occurrences(mqtt, "s_transport_pause_withdraws_online.store(true"), 1,
+  "only the public OTA entry point may raise the withdrawal intent");
+assert.match(mqtt,
+  /void mqtt_transport_resume_after_network_heap\(\)\s*\{\s*s_transport_pause_withdraws_online\.store\(false,\s*std::memory_order_release\);\s*s_transport_pause_requested\.store\(false,\s*std::memory_order_release\);\s*\}/,
+  "the end of a network lease must discard a withdrawal intent that no stop consumed");
 assert.match(holdStep,
   /ota_quiesce_step\(quiesce, network_busy\)[\s\S]{0,600}?mqtt_transport_pause_if_requested\(\)[\s\S]{0,180}?s_publish_network_quiesced\.store\(true,\s*std::memory_order_release\)[\s\S]{0,120}?vTaskDelay\([\s\S]{0,100}?return true;/,
   "the held MQTT helper must stop transport, acknowledge quiescence and leave before allocation");
@@ -1282,6 +1307,13 @@ assert.ok(pollBarrierCall >= 0 && mqttBarrierCall > pollBarrierCall &&
 assert.match(ota,
   /struct\s+OtaNetworkFlag[\s\S]{0,260}?mqtt_transport_pause_for_network_heap\(\)[\s\S]{0,260}?mqtt_transport_resume_after_network_heap\(\)[\s\S]{0,120}?s_network_active\.store\(false/,
   "the OTA network lease must pause esp-mqtt and request resume before releasing its own flag");
+assert.match(ota,
+  /struct\s+OtaNetworkFlag\s*\{\s*OtaNetworkFlag\(\)\s*\{\s*s_network_active\.store\(true,\s*std::memory_order_release\);\s*mqtt_transport_withdraw_online_on_pause\(\);\s*mqtt_transport_pause_for_network_heap\(\);/,
+  "the OTA lease must raise the availability withdrawal immediately before its MQTT pause request");
+assert.equal(occurrences(ota, "mqtt_transport_withdraw_online_on_pause()"), 1,
+  "the OTA lease is the only OTA owner of the availability withdrawal");
+assert.doesNotMatch(weather, /mqtt_transport_withdraw_online_on_pause/,
+  "a Weather pause is never followed by a restart and must keep its gap without availability churn");
 const weatherLeaseStart = weather.indexOf("struct NetworkActivity {");
 const weatherLeaseEnd = weather.indexOf("\n};", weatherLeaseStart);
 const weatherLease = weather.slice(weatherLeaseStart, weatherLeaseEnd);

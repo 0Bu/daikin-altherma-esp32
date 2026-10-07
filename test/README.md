@@ -311,9 +311,10 @@ the fixed task lease, the boot-resident static delivery stack and wake-up, the
 publisher-to-firmware manifest-size contract,
 whole-stream SHA comparison, fail-closed IDF image-state
 mapping, both OTA task-path stack budgets, the MQTT task's size-build call-boundary and
-fixed-frame-ceiling contracts, and the rule that after an MQTT client start only esp-mqtt's
-event handler, or the start's own failure branch, writes the reported connection state) and
-proves the source contract turns red;
+fixed-frame-ceiling contracts, the rule that after an MQTT client start only esp-mqtt's
+event handler, or the start's own failure branch, writes the reported connection state, and the
+rule that only the OTA lease makes a connected publisher retain `offline` before the clean
+transport stop) and proves the source contract turns red;
 every seeded regression is required. The allocation-free
 `FixedText`/`FixedBuffer` bounds and overflow refusal are exercised by `test/test_logic.cpp`.
 
@@ -421,7 +422,9 @@ One entry per `test_*()` in [`test_logic.cpp`](test_logic.cpp), in the order `ma
 - `logic/mqtt_publish_gate.hpp` — an unwired board may connect/subscribe without an installation
   LWT but cannot publish; the first X10A proof promotes it, a one-cycle dropout is absorbed using the
   monotonic last-good age, and an active board publishes one offline transition only after 15 seconds
-  of X10A loss before ordinary publication stays silent until recovery.
+  of X10A loss before ordinary publication stays silent until recovery. Separately,
+  `mqtt_pause_withdraws_online()` allows the OTA-pause `offline` only for a connected LWT-bearing
+  publisher and refuses Weather, subscriber-only and disconnected cases.
 - `logic/modbus_snapshot.hpp` — matching target/session generations, the derived 546-second full
   cache budget and an independent seven-second reply budget gate live use; boundary and stale cases
   remain separate from measurement plausibility.

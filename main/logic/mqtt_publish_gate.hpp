@@ -11,7 +11,7 @@
 // returns; inbound subscriptions and the same delete-only cleanup exception stay alive. X10A
 // occasionally loses a whole poll sweep, so the current-cycle bit alone is not outage evidence.
 // The monotonic age of the last answering sweep provides the debounce without hiding a sustained
-// cable/unit failure.
+// cable/unit failure. The only other `offline` is the OTA-pause withdrawal at the end of this file.
 
 namespace daik {
 
@@ -102,6 +102,24 @@ inline MqttPublishGateDecision mqtt_publish_gate_step(MqttPublishGateState state
         break;
     }
     return d;
+}
+
+// The network-heap pause stops esp-mqtt cleanly. Its DISCONNECT makes the broker discard the
+// installation LWT while the retained availability still reads `online`. An OTA install ends in
+// esp_restart() with that transport still stopped, and the next boot connects without an LWT until
+// X10A answers, so the stale `online` would outlive the boot, indefinitely if X10A never returns.
+// Every OTA pause therefore withdraws it first, the check too: an install always consumes a
+// completed check, and when the install follows before an MQTTS client has passed its resume gate,
+// the install's own pause finds the client already stopped. Otherwise the resumed publisher's
+// ordinary reconnect announce restores `online` once X10A is live and the install withdraws it
+// again; a check or failed install resumes the same way. A pause that finds the client stopped or
+// reconnecting after an earlier stop cannot withdraw anything (docs/ARCHITECTURE.md).
+// A Weather pause is never followed by a restart and keeps its short gap without availability
+// churn. Only the LWT-bearing publisher speaks for the installation, and only a connected client
+// can still put the marker on the stream ahead of the DISCONNECT.
+inline constexpr bool mqtt_pause_withdraws_online(bool ota_pause, bool publisher_client,
+                                                  bool mqtt_connected) {
+    return ota_pause && publisher_client && mqtt_connected;
 }
 
 } // namespace daik
