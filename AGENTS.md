@@ -18,6 +18,12 @@ measurements, incident history, and field-by-field reference material in the lin
 - A request to merge, deploy, OTA, or flash authorizes only that named delivery chain. Report CI/host
   evidence, binary/signature evidence, device injection, reboot health, API behavior, and rendered UI
   evidence separately; one does not prove another.
+- A `$deploy-prod` request's chain includes the `$deploy-test` pre-merge bench test of its PR head
+  and its failure loop: fix or revert branches, commits, pushes and PRs, their reviews and merges,
+  the `$deploy-test` test of every fix head, and the roll-forward delivery to bench and production.
+- An explicit `$deploy-test` or `$flash-esp32` request, and a `$deploy-test` run inside a
+  `$deploy-prod` chain, authorizes the unchained key-by-path signing command and the unchanged
+  repository flash plan described below.
 - Never contact or modify an unrelated device, repository, cluster, or production system. Preserve
   user-owned dirty worktree changes and secrets.
 
@@ -80,8 +86,12 @@ conditional workflows and are not necessarily PR checkbox gates.
 - `$pr-hygiene-review`: required before opening a PR and before every ordinary PR merge, to check
   the commit range and PR title/description for personal information or non-English prose beyond what
   `scripts/run-pr-hygiene-audit.sh` catches by shape alone.
-- `$deploy-test`: use for test-bench updates — builds via Docker, signs, updates/flashes test bench, verifies health, and runs automated diagnostic/fix loop on findings.
-- `$deploy-prod`: use for production delivery — verifies gates, merges PR, waits for CI dev build, runs canonical bench delivery and production promotion gates via `production-ota-gate.py`, and runs automated diagnostic/fix loop on findings.
+- `$deploy-test`: use for the pre-merge bench test of an exact local head — builds via Docker, signs
+  on the host, USB-flashes the private-inventory bench with the repository flash plan, verifies
+  health and the changed behavior, and runs the diagnostic/fix loop on findings.
+- `$deploy-prod`: use for production delivery — verifies gates, merges the PR, waits for the CI dev
+  build, runs the bench delivery and production promotion gates via `production-ota-gate.py`, and on
+  findings runs the fix loop, which re-enters `$deploy-test` for every fix head.
 
 The canonical agentic setup uses `AGENTS.md`, `.agents/skills/`, `.agents/agents/`, `.agents/hooks.json`,
 `tools/agent-hooks/`, and `.mcp.json` as the canonical project surfaces; operating notes are in
@@ -124,7 +134,10 @@ documentation.
 - Firmware builds run through `scripts/idf-docker.sh`. A cloud sandbox without Docker cannot prove a
   firmware build. Host logic, Node, and Python gates may still be available.
 - Docker on macOS does not provide USB passthrough. Use host `esptool` for an explicitly authorized
-  flash. Detect the actual port; never assume a stale `/dev/cu.*` path.
+  flash. Detect the actual port; never assume a stale `/dev/cu.*` path. Identify the target by its
+  MAC (`esptool chip-id`, compared case-insensitively) and require exactly one port whose MAC
+  matches. Every esptool connection resets the probed chip, so probe only ports that can be the
+  target, and repeat the check immediately before the write.
 - The documented boards have different X10A defaults: Seeed XIAO ESP32-S3 uses RX=44/TX=43; M5Stack
   AtomS3 Lite wiring uses RX=1/TX=2 selected in the UI. Do not infer the connected board from build
   success or flash a board selected only by guesswork.
@@ -146,9 +159,11 @@ documentation.
   inspect, or wrap that invocation with unrelated commands.
 - This firmware requires a Secure Boot v2-compatible signed application image. An unsigned image
   fails before `app_main` and can crash-loop. Run `scripts/require-signed.sh` before every flash.
-- Preserve NVS on ordinary flashes. The project flash arguments intentionally skip `nvs` at 0x9000.
-  `erase_flash`, NVS erasure, partition-table writes, coredump clearing, and destructive recovery
-  require explicit user authorization and a backup where applicable.
+- Preserve NVS on ordinary flashes. The repository flash plan (`build/flash_args`) rewrites the
+  bootloader, the unchanged partition table, `otadata` and `ota_0`, and skips `nvs` at 0x9000 and
+  `coredump`. `erase_flash`, NVS erasure, a partition table that differs from the one the target
+  runs, coredump clearing, and destructive recovery require explicit user authorization and a
+  backup where applicable.
 - Do not change the NVS offset or size in `partitions.csv`. NVS at 0x9000 contains WiFi/MQTT config
   and the X10A link cache; moving or resizing it can silently wipe deployed configuration on the next
   non-OTA reflash. Resolve the exact table and migration impact before any partition edit.
@@ -158,9 +173,20 @@ documentation.
 - Every agent-run OTA write must use the direct, unchained `scripts/production-ota-gate.py` command.
   Ordinary private-inventory `bench` delivery uses `--confirm-bench bench --install-bench`; it binds
   the exact signed dev artifact, performs one un-retried POST only to `bench`, survives rollback
-  probation and stress, and cannot contact `production`. Use OTA, not USB, for ordinary bench
-  updates; signed USB is bootstrap/recovery only.
-- Completed validation, positive heap minima, `ota_stack_min_free_bytes` checks, target probation and stress remain mandatory across all updates.
+  probation and stress, and cannot contact `production`. Delivering an official dev artifact to a
+  bench that can take an OTA always uses this mode.
+- Signed, NVS-preserving USB writes to the inventory roles are limited to bootstrap, recovery, and
+  the explicitly requested pre-merge test of an exact local head on the bench (`$deploy-test`, or
+  `$flash-esp32` naming the bench under the same rules). Production takes USB only for bootstrap and
+  recovery. `$flash-esp32` may write a local head to a board outside the inventory that the user
+  names. None of these is a delivery of the artifact.
+- The firmware installs only a strictly newer version unless a trusted-LAN
+  `POST /ota/update?...&downgrade=1` requests the channel-switch downgrade
+  (`main/logic/version_cmp.hpp`). Agents cannot send it, because direct `/ota/update` writes are
+  blocked and the gate binds only the current official dev manifest. A faulty production build
+  that passed rollback probation is therefore rolled forward through a reviewed revert or fix and
+  the same bench-first chain; one that failed probation was already reverted by the bootloader.
+- Completed validation, positive heap minima, `ota_stack_min_free_bytes` checks, target probation and stress remain mandatory across all OTA updates.
 - Production promotion remains a distinct `--confirm-production production --execute` transaction:
   bench staging and stress precede one production POST plus read-only canary and retained-X10A
   checks. Direct `/ota/update` writes and release creation remain outside both modes.
