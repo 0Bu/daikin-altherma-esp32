@@ -275,8 +275,8 @@ inline constexpr uint32_t diagnostics_next_generation(uint32_t current) {
 //   LINK  (rx/tx/proto)                  — persisted; owned by detection, overridable via /set_hp
 //   MODEL (profile + fingerprint fp_*)   — RAM-only, re-derived every boot; owned by detection
 //
-// Whole-struct config_save() stays for the HTTP handlers: they own the credential fields and are
-// serialized against each other on the single httpd task.
+// Whole-struct config_save() / config_save_link() stay for the HTTP handlers: they own the
+// credential fields and are serialized against each other on the single httpd task.
 //
 // The revision check reconciles concurrent writes in both directions: detection commits patch
 // only detection-owned fields (never reverting user credentials), while an HTTP service save
@@ -303,9 +303,9 @@ inline void reconcile_detected_config(Config& c, const Config& current) {
 // blob and the self-healing X10A link cache are deliberately different durability domains:
 //
 //   * ordinary /set_wifi|mqtt|syslog|ntp|board|ota saves own only blob fields; once that one atomic
-//     write lands, a link-cache maintenance failure must not turn the already-committed request into
-//     a false HTTP 500;
-//   * /set_hp owns the link and therefore requires all three link keys as well.
+//     write lands, a link-cache maintenance failure must not turn the already-committed request
+//     into a false HTTP 500;
+//   * an X10A /set_hp owns the link and therefore requires its atomic link entry as well.
 //
 // Kept pure so the distinction cannot silently collapse back to "any cache error means nothing was
 // saved" in config.cpp.
@@ -313,9 +313,10 @@ inline bool config_save_succeeded(bool blob_ok, bool link_ok, bool require_link)
     return blob_ok && (!require_link || link_ok);
 }
 
-// How a whole-struct save treats a snapshot older than the live config. Every whole-struct writer
-// runs on the httpd task, so only auto-detection can advance the revision between a handler's
-// config() snapshot and its save:
+// How a whole-struct save treats a snapshot older than the live config. Every runtime whole-struct
+// writer runs on the httpd task (the boot-time WiFi-rollback and initial HomeHub saves finish
+// before httpd and the poll task start), so only auto-detection can advance the revision between a
+// handler's config() snapshot and its save:
 //
 //   * a service save owns no detection field, so it carries the newly detected link and model
 //     forward (reconcile_detected_config) and still commits its own fields;

@@ -1,4 +1,4 @@
-// Source-boundary regression test for concurrent configuration ownership (#134 CFG-04).
+// Source-boundary regression test for concurrent configuration ownership (tracker card CFG-04).
 //
 // test/test_logic.cpp proves what logic/config_model.hpp DECIDES: an X10A /set_hp save of a snapshot
 // that a detection commit has overtaken is Stale, a service save carries detection forward, and

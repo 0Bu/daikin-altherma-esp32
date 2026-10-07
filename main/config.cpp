@@ -489,7 +489,7 @@ static ConfigSaveResult save_whole(const Config& requested, bool owns_link) {
     const esp_err_t e = nvs_set_blob("cfg", blob.data(), blob.size());
     if (e != ESP_OK) {
         // The atomic write failed, so the PREVIOUS blob is still intact — nothing net saved. Don't
-        // publish RAM; the caller turns `false` into a 500 and skips the reboot.
+        // publish RAM; the caller turns Failed into a 500 and skips the reboot.
         diag_printf("config: NVS blob write failed key=cfg err=%s — nothing saved\n", esp_err_to_name(e));
         return ConfigSaveResult::Failed;
     }

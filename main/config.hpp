@@ -73,9 +73,9 @@ void config_load();
 [[nodiscard]] bool config_save(const Config& c);
 
 // The X10A /set_hp save. That route owns the link, so it succeeds only when the atomic link-cache
-// entry lands as well; on Failed nothing is published to RAM. It also derived the model fields from
-// its snapshot, so a snapshot older than a detection commit is refused as Stale before any NVS
-// write, and the caller derives the request again from a fresh config().
+// entry lands as well; on Failed nothing is published to RAM. It also derived its model and
+// link-identity fields from its snapshot, so a snapshot older than a detection commit is refused as
+// Stale before any NVS write, and the caller derives the request again from a fresh config().
 enum class ConfigSaveResult : uint8_t { Saved, Stale, Failed };
 [[nodiscard]] ConfigSaveResult config_save_link(const Config& c);
 
