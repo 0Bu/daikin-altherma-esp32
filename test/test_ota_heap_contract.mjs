@@ -1097,6 +1097,78 @@ assert.match(mqtt,
 assert.match(resumeStep,
   /state\.backoff_s < kMqttResumeBackoffMaxS \/ 2[\s\S]{0,180}?kMqttResumeBackoffMaxS/,
   "direct esp-mqtt restart failures must have a bounded exponential retry interval");
+// Once the client has started, the connection status belongs to esp-mqtt's event handler: a LAN
+// broker can deliver MQTT_EVENT_CONNECTED before esp_mqtt_client_start() returns, so a status write
+// after the start pinned /status — and the bench delivery gate — at "disconnected" while the client
+// was connected (seen after an OTA check on the bench). Both start paths reset the status first and
+// never write it on success; neither do their callers once a start has succeeded. Every call site is
+// counted (any spacing) and each one's whole source line is compared, so neither a string literal
+// containing ';' nor a second statement on the same line can hide a write.
+const statusCalls = (text) => [...text.matchAll(/\bset_status\s*\(/g)].map((match) => ({
+  index: match.index,
+  line: text.slice(match.index, text.indexOf("\n", match.index)).trim(),
+}));
+const resumeBeforeStart = statusCalls(resumeStep.slice(stableResumeAt, startResumeAt));
+assert.ok(resumeBeforeStart.length > 0 && resumeBeforeStart.at(-1).line === 'set_status(false, "");',
+  "resume must reset the MQTT status before starting the client, never after");
+const resumeAfterStart = resumeStep.slice(startResumeAt);
+const resumeFailOpen = resumeAfterStart.indexOf("if (start_rc != ESP_OK) {");
+const resumeFailReturn = resumeAfterStart.indexOf("return false;", resumeFailOpen);
+const resumeAfterStartCalls = statusCalls(resumeAfterStart);
+assert.ok(resumeFailOpen >= 0 && resumeFailReturn > resumeFailOpen &&
+          resumeAfterStartCalls.length === 1 &&
+          resumeAfterStartCalls[0].line === 'set_status(false, "transport resume failed");' &&
+          resumeAfterStartCalls[0].index > resumeFailOpen &&
+          resumeAfterStartCalls[0].index < resumeFailReturn,
+  "after the resume start only the failure branch may write the MQTT status, and it states why");
+const startCurrentStart = mqtt.indexOf("static bool start_current_client() {");
+const startCurrentEnd = mqtt.indexOf("\n}\n", startCurrentStart);
+const startCurrent = mqtt.slice(startCurrentStart, startCurrentEnd);
+const startCurrentStartAt = startCurrent.indexOf("start_client_transport()");
+const startCurrentOkAt = startCurrent.indexOf("if (rc == ESP_OK) {", startCurrentStartAt);
+const startCurrentOkEnd = startCurrent.indexOf("return true;", startCurrentOkAt);
+const startCurrentBeforeStart = statusCalls(startCurrent.slice(0, startCurrentStartAt));
+assert.ok(startCurrentStart >= 0 && startCurrentOkAt > startCurrentStartAt &&
+          startCurrentOkEnd > startCurrentOkAt && startCurrentBeforeStart.length > 0 &&
+          startCurrentBeforeStart.at(-1).line === 'set_status(false, "");',
+  "start_current_client must reset the MQTT status before starting the client");
+assert.equal(statusCalls(startCurrent.slice(startCurrentStartAt, startCurrentOkEnd)).length, 0,
+  "a successful client start must leave the connection state to MQTT_EVENT_CONNECTED");
+// The callers: mqtt_task (initial start and the OTA/Weather resume) writes no status at all, and the
+// publisher promotion writes none after its replacement client started.
+assert.equal(statusCalls(mqttTask).length, 0,
+  "mqtt_task must leave the connection state to the start paths and MQTT_EVENT_CONNECTED");
+const promoteStatusStart = mqtt.indexOf("static bool promote_client_to_publisher() {");
+const promoteStatusEnd = mqtt.indexOf("void mqtt_ha_start()", promoteStatusStart);
+const promoteStatus = mqtt.slice(promoteStatusStart, promoteStatusEnd);
+const promoteStartAt = promoteStatus.indexOf("start_current_client()");
+assert.ok(promoteStatusStart >= 0 && promoteStatusEnd > promoteStatusStart && promoteStartAt >= 0 &&
+          statusCalls(promoteStatus.slice(promoteStartAt)).length === 0,
+  "publisher promotion must not write the MQTT status after the replacement client started");
+const publicStatusStart = mqtt.indexOf("void mqtt_ha_start()");
+const publicStatusEnd = mqtt.indexOf("MqttStatus mqtt_status()", publicStatusStart);
+const publicStatus = mqtt.slice(publicStatusStart, publicStatusEnd);
+const publicTaskAt = publicStatus.indexOf("xTaskCreate(mqtt_task");
+const publicTaskElseAt = publicStatus.indexOf("} else {", publicTaskAt);
+const publicAfterTask = statusCalls(publicStatus.slice(publicTaskAt));
+assert.ok(publicStatusStart >= 0 && publicTaskAt >= 0 && publicTaskElseAt > publicTaskAt &&
+          publicAfterTask.length === 1 &&
+          publicAfterTask[0].line === 'set_status(false, "publish task alloc failed");' &&
+          publicAfterTask[0].index < publicTaskElseAt - publicTaskAt,
+  "once mqtt_task may run, mqtt_ha_start writes the status only when the task could not start");
+// The resume step runs outside mqtt_task's exception boundary and set_status also runs on esp-mqtt's
+// unguarded event task, so the stored reason must stay a literal pointer that cannot allocate, the
+// std::string MqttStatus::error must stay unwritten, and only set_status may write the connected flag.
+assert.match(mqtt, /static const char\*\s+s_error\s*=\s*"";/,
+  "the MQTT status reason must stay a non-allocating literal pointer");
+assert.equal([...mqtt.matchAll(/\bs_status\.error\s*=(?!=)/g)].length, 0,
+  "the MQTT status reason must never be stored in the allocating MqttStatus::error");
+const connectedWrites = [...mqtt.matchAll(/\bs_status\.connected\s*=(?!=)/g)];
+const setStatusStart = mqtt.indexOf("static void set_status(bool connected, const char* err) {");
+const setStatusEnd = mqtt.indexOf("\n}\n", setStatusStart);
+assert.ok(setStatusStart >= 0 && connectedWrites.length === 1 &&
+          connectedWrites[0].index > setStatusStart && connectedWrites[0].index < setStatusEnd,
+  "only set_status may write the reported MQTT connection flag");
 assert.match(mainCmake,
   /set_source_files_properties\(mqtt_ha\.cpp PROPERTIES COMPILE_OPTIONS\s*"-fno-inline-functions-called-once;-Werror=frame-larger-than=2048"\)/,
   "the size-optimised MQTT object must retain helper boundaries and fail above its measured fixed-frame ceiling");
