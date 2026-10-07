@@ -422,7 +422,9 @@ One entry per `test_*()` in [`test_logic.cpp`](test_logic.cpp), in the order `ma
 - `logic/mqtt_publish_gate.hpp` — an unwired board may connect/subscribe without an installation
   LWT but cannot publish; the first X10A proof promotes it, a one-cycle dropout is absorbed using the
   monotonic last-good age, and an active board publishes one offline transition only after 15 seconds
-  of X10A loss before ordinary publication stays silent until recovery.
+  of X10A loss before ordinary publication stays silent until recovery. Separately,
+  `mqtt_pause_withdraws_online()` allows the OTA-pause `offline` only for a connected LWT-bearing
+  publisher and refuses Weather, subscriber-only and disconnected cases.
 - `logic/modbus_snapshot.hpp` — matching target/session generations, the derived 546-second full
   cache budget and an independent seven-second reply budget gate live use; boundary and stale cases
   remain separate from measurement plausibility.

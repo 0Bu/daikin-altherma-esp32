@@ -457,8 +457,10 @@ static void source_cleanup_outbox_cleared_after_transport_stop() noexcept {
 // The clean stop below discards the installation LWT, and an OTA install can restart the board
 // before this client reconnects (logic/mqtt_publish_gate.hpp). Publish the retained `offline` on
 // the same ordered stream first: esp-mqtt writes a connected publish synchronously, so the broker
-// stores it before it reads the DISCONNECT. No std::string is built; esp-mqtt adds one small outbox
-// entry. A failed publish only leaves the previous, unwithdrawn behaviour.
+// stores it before it reads the DISCONNECT. No std::string is built; esp-mqtt makes two small
+// outbox allocations (freed by the stop) plus the TLS record any write needs. A failed write aborts
+// the session without DISCONNECT, so the broker fires the LWT instead; a refused publish only
+// leaves the previous, unwithdrawn behaviour.
 static __attribute__((noinline)) void mqtt_ota_withdraw_online() {
     const bool ota_pause =
         s_transport_pause_withdraws_online.exchange(false, std::memory_order_acq_rel);
@@ -466,10 +468,12 @@ static __attribute__((noinline)) void mqtt_ota_withdraw_online() {
                                      s_client_is_publisher.load(std::memory_order_acquire),
                                      s_connected.load(std::memory_order_acquire)))
         return;
+    // esp-mqtt also accepts a QoS-1 publish that a racing disconnect left queued; the stop then
+    // deletes it, but that dropped session already fired the LWT.
     if (mqtt_publish(s_avail, "offline", 0, 1, 1))
-        diag_printf("mqtt: availability offline before the OTA transport stop\n");
+        diag_printf("mqtt: availability offline accepted before the OTA transport stop\n");
     else
-        diag_printf("mqtt: availability could not be set offline before the OTA stop\n");
+        diag_printf("mqtt: availability offline refused before the OTA transport stop\n");
 }
 
 // Stop the complete esp-mqtt transport before acknowledging a competing OTA/Weather TLS owner.

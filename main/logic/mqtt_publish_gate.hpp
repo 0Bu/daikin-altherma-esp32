@@ -11,7 +11,7 @@
 // returns; inbound subscriptions and the same delete-only cleanup exception stay alive. X10A
 // occasionally loses a whole poll sweep, so the current-cycle bit alone is not outage evidence.
 // The monotonic age of the last answering sweep provides the debounce without hiding a sustained
-// cable/unit failure.
+// cable/unit failure. The only other `offline` is the OTA-pause withdrawal at the end of this file.
 
 namespace daik {
 
@@ -108,10 +108,12 @@ inline MqttPublishGateDecision mqtt_publish_gate_step(MqttPublishGateState state
 // installation LWT while the retained availability still reads `online`. An OTA install ends in
 // esp_restart() with that transport still stopped, and the next boot connects without an LWT until
 // X10A answers, so the stale `online` would outlive the boot, indefinitely if X10A never returns.
-// Every OTA pause therefore withdraws it first, the check too: an install always consumes a check
-// that finished seconds earlier, usually before a TLS broker has passed its resume gate, so the
-// install's own pause finds the client already stopped. A check that is not followed by an install
-// resumes the same client, and the ordinary reconnect announce restores `online` once X10A is live.
+// Every OTA pause therefore withdraws it first, the check too: an install always consumes a
+// completed check, and when the install follows before an MQTTS client has passed its resume gate,
+// the install's own pause finds the client already stopped. Otherwise the resumed publisher's
+// ordinary reconnect announce restores `online` once X10A is live and the install withdraws it
+// again; a check or failed install resumes the same way. A pause that finds the client stopped or
+// reconnecting after an earlier stop cannot withdraw anything (docs/ARCHITECTURE.md).
 // A Weather pause is never followed by a restart and keeps its short gap without availability
 // churn. Only the LWT-bearing publisher speaks for the installation, and only a connected client
 // can still put the marker on the stream ahead of the DISCONNECT.

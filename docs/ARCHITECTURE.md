@@ -2123,11 +2123,18 @@ The Home Assistant bridge:
   discards that will while the retained `online` stays. An OTA install restarts the board inside
   that stop, and the next boot has no will until X10A answers. Every OTA pause (check and install)
   therefore lets a connected publisher retain `offline` on the same stream just before the stop
-  (`logic/mqtt_publish_gate.hpp`). An install always consumes a check that finished seconds
-  earlier, usually before an MQTTS client has passed its resume gate, so the check's marker is the
-  one an install normally keeps. A check without an install resumes the client, and the ordinary
-  reconnect announce restores `online` once X10A is live. Weather pauses are never followed by a
-  restart and keep their short gap without availability churn.
+  (`logic/mqtt_publish_gate.hpp`). An install always consumes a completed check. While the MQTTS
+  client is still behind its resume gate when the install starts, the install's own pause finds it
+  stopped and the check's marker stands. Otherwise (plaintext MQTT, or a slower confirmation) the
+  resumed publisher republishes `online` through the ordinary reconnect announce once X10A is
+  live, and the install's pause withdraws it again. A check, or an install that fails before its
+  restart, resumes the client the same way. Weather pauses are never followed by a restart and keep
+  their short gap without availability churn. Remaining gap: an OTA pause that finds the publisher
+  stopped or reconnecting after an earlier stop (a Weather pause or the cleanup-evidence recovery)
+  cannot withdraw anything. A check that starts right after a Weather refresh, followed by an
+  install before MQTT reconnects, therefore leaves the stale `online` across the restart until X10A
+  answers. With a wedged broker, the extra write can push the transport acknowledgement past the
+  OTA's bounded quiesce wait; OTA then refuses with a retry message instead of proceeding.
 - **Heartbeat topic** `<base>/heartbeat` (not retained) carries board/link diagnostics, separate from
   heat-pump values, built by `logic/heartbeat.hpp` (host-tested). The payload is a **flat** JSON object
   — each field carried under its block name as a prefix rather than nested `wifi`/`mqtt`/`bus`
