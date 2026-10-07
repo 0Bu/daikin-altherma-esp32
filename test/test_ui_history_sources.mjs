@@ -192,7 +192,8 @@ const context = {
     fetched = url;
     fetchedUrls.push(url);
     if (historyFetchError) throw new Error("temporary reboot window");
-    return { json: async () => historyResponse };
+    return { json: async () => ({ ...historyResponse,
+      epoch: S.status?.history?.epoch, boot_id: S.status?.boot_id }) };
   },
   setTimeout, clearTimeout, Date, Map, Set, console,
 };
@@ -861,6 +862,7 @@ const pendingHistory = [];
 context.fetch = (url) => new Promise((resolve, reject) => pendingHistory.push({ url, resolve, reject }));
 const finishHistory = (pending, values) => pending.resolve({ json: async () => ({
   ...defaultHistoryResponse, v: values,
+  epoch: S.status?.history?.epoch, boot_id: S.status?.boot_id,
 }) });
 for (const failOld of [false, true]) {
   h.invalidateHistSources();

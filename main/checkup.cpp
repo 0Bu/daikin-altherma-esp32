@@ -96,6 +96,7 @@ daik::FaultClass      s_fault_now = daik::FaultClass::Unknown;
 SemaphoreHandle_t     s_mtx = nullptr;
 std::atomic<bool>     s_reset_requested{false};
 std::atomic<bool>     s_dhw_reset_requested{false};
+std::atomic<uint32_t>  s_dhw_identity_generation{1};
 std::atomic<bool>     s_diagnostics_enabled{false};
 uint32_t              s_diagnostics_generation = 0; // guarded by s_mtx after startup
 bool                  s_reboot_saved_this_boot = false;
@@ -428,6 +429,7 @@ void checkup_reset_on_detect(const char* profile_id) {
 }
 
 void checkup_dhw_reset() {
+    s_dhw_identity_generation.fetch_add(1);
     s_dhw_reset_requested.store(true);
 }
 
@@ -469,6 +471,10 @@ void checkup_record(const CachedValue* v, size_t n, bool rps_known, bool rps_run
         s.outdoor = logic::outdoor_x10a_evidence(
             true, rps_known, rps_running, static_cast<double>(outdoor_tenths) / 10.0);
     }
+    const uint32_t dhw_generation         = s_dhw_identity_generation.load();
+    const uint32_t circulation_generation = circulation_source_generation();
+    // Allocation-free, including on the OOM catch and TLS hold paths: the applied source epoch
+    // alone withdraws a replaced witness, so no Config copy is needed on this per-cycle path.
     const CirculationPumpSample circulation = circulation_pump_sample();
     s.circulation_configured = circulation.configured;
     s.circulation_known = circulation.known;
@@ -518,7 +524,9 @@ void checkup_record(const CachedValue* v, size_t n, bool rps_known, bool rps_run
     // the whole sample after clearing state; otherwise the tail of old poll A would seed the window
     // that new-link poll B continues. Dropping at most the first new sample is the conservative side.
     if (apply_reset_locked()) return;
-    const bool discard_dhw_sample = apply_dhw_reset_locked();
+    const bool discard_dhw_sample = apply_dhw_reset_locked() ||
+                                    dhw_generation != s_dhw_identity_generation.load() ||
+                                    circulation_generation != circulation_source_generation();
     s_cov       = coverage;
     s_fault_now = s.fault;
     P().ring.observe(now);

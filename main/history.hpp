@@ -118,14 +118,19 @@ void history_circulation_reset();
 // journal cursor/restore index without touching the independent X10A/HomeHub/ENV III trend records.
 void history_checkup_reset();
 
-// Copy trend `t`'s samples OLDEST-FIRST into `out`. Returns the count written (0 .. HISTORY_SAMPLES,
-// and 0 when the profile carries no such row or nothing has been recorded yet). Non-allocating under
-// the lock — a plain copy of int16s, per AGENTS.md → Memory, concurrency, and HTTP safety.
-size_t history_snapshot(size_t t, logic::HistorySample* out, size_t max);
+// Copy trend `t`'s samples OLDEST-FIRST into `out`. Returns the count written (0 ..
+// HISTORY_SAMPLES, and 0 when the profile carries no such row or nothing has been recorded yet).
+// Non-allocating under the lock — a plain copy of int16s, per AGENTS.md → Memory, concurrency, and
+// HTTP safety. Optional `epoch` is captured under that same lock, even for an empty/pending-reset
+// series; zero means no snapshot lock was acquired. Callers must not tag a copied series with a
+// later lifetime.
+size_t history_snapshot(size_t t, logic::HistorySample* out, size_t max, uint32_t* epoch = nullptr);
 
 // Copy the HomeHub series for history slot `t` (logic::HOMEHUB_HISTORIES), oldest first.
-size_t history_modbus_snapshot(size_t t, logic::HistorySample* out, size_t max);
-size_t history_env3_snapshot(size_t t, logic::HistorySample* out, size_t max);
+size_t history_modbus_snapshot(size_t t, logic::HistorySample* out, size_t max,
+                               uint32_t* epoch = nullptr);
+size_t history_env3_snapshot(size_t t, logic::HistorySample* out, size_t max,
+                             uint32_t* epoch = nullptr);
 
 // Seconds since the newest sample was committed, or -1 when nothing has been committed yet. The
 // route needs it to state the series' t0 independently of when the request arrived — see

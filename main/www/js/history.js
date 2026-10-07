@@ -193,13 +193,15 @@ async function ensureHist(id, source = "x10a", paint = true, signal = null) {
   const key = histCacheKey(id, source);
   const offered = source === "modbus" ? hasModbusHist(id)
     : source === "env3" ? hasEnv3Hist(id) : hasHist(id);
-  if (!offered || S.histBusy.has(key)) return;
+  if (!offered) return;
+  if (S.histBusy.has(key)) return S.histRequests.get(key)?.done;
   const c = S.hist.get(key);
   if (c && Date.now() - c.at < 60000) return;
   if (source === "x10a" && DERIVED[id]) { await ensureDerived(id); return; }
   const previous = S.hist.get(key);
   const sourceId = source === "modbus" ? (modbusEndpointId() || "modbus") : source;
-  const request = { epoch };
+  let finish;
+  const request = { epoch, done: new Promise((resolve) => { finish = resolve; }) };
   (S.histRequests ||= new Map()).set(key, request);
   S.histBusy.add(key);
   try {
@@ -209,6 +211,12 @@ async function ensureHist(id, source = "x10a", paint = true, signal = null) {
                           signal ? { signal } : undefined);
     const j = await r.json();
     if (syncHistSources() !== epoch || S.histRequests.get(key) !== request) return;
+    // /status owns the source lease. A reply composed after an unseen reset or reboot must wait
+    // for that status lifetime before becoming a chart; a recent fetch alone proves no identity.
+    const expectedEpoch = S.status?.history?.epoch;
+    const expectedBoot = S.status?.boot_id;
+    if ((Number.isInteger(expectedEpoch) && j.epoch !== expectedEpoch) ||
+        (typeof expectedBoot === "string" && j.boot_id !== expectedBoot)) return;
     // t0 = the unix instant of sample 0, present only when the device's SNTP clock is synced. Null
     // means the scrub readout falls back to an AGE ("vor 6.3 h") — never a fabricated wall-clock
     // time, the same rule logic/timestamp.hpp applies to an unsynced clock on the firmware side.
@@ -230,6 +238,7 @@ async function ensureHist(id, source = "x10a", paint = true, signal = null) {
     if (syncHistSources() === epoch && S.histRequests.get(key) === request)
       S.hist.set(key, { at: Date.now(), source, sourceId, err: true, v: [] });
   } finally {
+    finish();
     // An obsolete request must not release a successor using the same cache key.
     if (S.histRequests.get(key) === request) {
       S.histRequests.delete(key);
@@ -270,8 +279,9 @@ async function ensureHistPair(id) {
 async function ensureDerived(id) {
   const epoch = syncHistSources();
   const D = DERIVED[id];
-  if (S.histBusy.has(id)) return;
-  const request = { epoch };
+  if (S.histBusy.has(id)) return S.histRequests.get(id)?.done;
+  let finish;
+  const request = { epoch, done: new Promise((resolve) => { finish = resolve; }) };
   (S.histRequests ||= new Map()).set(id, request);
   S.histBusy.add(id);
   try {
@@ -337,6 +347,7 @@ async function ensureDerived(id) {
     if (syncHistSources() === epoch && S.histRequests.get(id) === request)
       S.hist.set(id, { at: Date.now(), err: true, v: [] });
   } finally {
+    finish();
     if (S.histRequests.get(id) === request) {
       S.histRequests.delete(id);
       S.histBusy.delete(id);

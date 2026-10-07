@@ -917,8 +917,9 @@ host-testable core is unusually large and valuable, because the risky parts are 
   localized legend for every shipped locale. The whole table is 72 × 16 B = **1152 B** in `.noinit`; the current worst
   profile uses 63 slots, leaving nine spare. It is adopted across a
   power-preserving reset under the same seal, verdict vocabulary and union-storage rule as the trends
-  and the checkup. Persistence version 2 rejects older dwell records: their fold could count known
-  skipped intervals as observed, and that claim cannot be repaired at adoption.
+  and the checkup. Persistence version 3 rejects older dwell records: their fold could count known
+  skips as observed or preserve a run past the cumulative blind-gap bound, including its resumed
+  tail. Those continuity claims cannot be repaired at adoption.
 
   Four properties carry the honesty; the three age facts are published separately on `/values` rather than
   folded into one number — a consumer that prints the number and drops the rest states something
@@ -1878,6 +1879,10 @@ The Home Assistant bridge:
   empty on save; an unchanged mapping also retains its existing advanced eligibility gates.
   A source-based target always displays a delimiter (for example `20$`) so a numeric topic cannot
   be mistaken for a fixed temperature.
+  Room and circulation readers match raw samples to their exact configuration snapshot and applied
+  source-binding epoch. Reconfiguration withdraws raw state immediately; frames queued under an older
+  request are refused. Owner-loop commits stage every fallible string before replacing the complete
+  status and accepted source clock together, so OOM retains the last complete state.
 - **One HA installation device.** Its id is the slugified MQTT base topic
   (`daikin-altherma-esp32` → `daikin_altherma_esp32`, `logic/ha_device.hpp`), which is a **runtime**
   setting (`POST /set_mqtt` field `base`, `logic/mqtt_base.hpp`) precisely because it names the
@@ -2943,7 +2948,9 @@ Browser history caches, index pins and pending requests share a lifecycle epoch.
 configuration, detected identity, `history.epoch` or `boot_id` retires that epoch; a confirmed
 rebooting save retires it immediately. The firmware's boot-local history epoch advances on source
 or consent resets, making A → B → A between browser status polls visible. Late raw or derived
-history replies cannot refill a retired epoch or release a successor request's lease.
+history replies cannot refill a retired epoch or release a successor request's lease. Each reply
+carries the epoch captured with its samples and the current `boot_id`; the browser admits it only
+against the matching status identity. Derived histories await shared in-flight input requests.
 The per-boot nonce also detects a reboot whose first observed uptime is already equal to or greater
 than the previous sample. Older firmware without `boot_id` falls back
 to a decrease in `uptime_s`, which cannot identify that case. Compatible device-journal restoration
@@ -3560,7 +3567,9 @@ GET  /history?row=<trend id>[&source=x10a|modbus|env3]   one source's 24-hour se
                   `mqtt` is not a separate query value. Modbus accepts thirteen histories: the eleven paired
                   concepts (logic/homehub_map.hpp), Smart Grid, and its Modbus-only disinfection
                   state. `env3` accepts only the three accessory rings. Payload:
-                  {id,source,label,dt,unit[,t0][,b0],v[],held[[from,count],…]}. `unit` is the ROW's own unit, read
+                  {id,source,label,epoch,boot_id,dt,unit[,t0][,b0],v[],held[[from,count],…]}.
+                  `epoch` is captured with the sample snapshot; `boot_id` matches `/status`.
+                  `unit` is the ROW's own unit, read
                   from the cached value — never a hardcoded "°C": the default-source trends mix °C,
                   bar, KiB
                   and unitless rows, and the browser prints this string into the range readout and the

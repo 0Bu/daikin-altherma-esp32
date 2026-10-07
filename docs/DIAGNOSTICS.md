@@ -1,6 +1,6 @@
 # Plant diagnostics in plain language
 
-<!-- user-docs-contract: 8b982ef62c9c3cd278b972a26d701c8507185ad08869d67246b1e0c700fea25a -->
+<!-- user-docs-contract: 96456d214600b9796a969e224f6ec7c5809bac09d95c97e252265bb790b5dce4 -->
 
 This guide is for owners who want to understand their heat pump without being heating specialists.
 Plant diagnostics are **off by default**. They run only after **Plant diagnostics** is explicitly
@@ -51,7 +51,8 @@ Changing or removing a source clears the browser's cached trends and pinned poin
 cannot restore them. A reboot also starts a new browser lifetime, even when the device restores
 compatible saved trends. The state ages beside individual values are separate from the 24-hour
 card: normal polling cadence counts as observed, while known update, forecast or memory-pressure
-pauses and a continuing run's resumed tail count as blind time. The version-2 age format rejects
+pauses and a continuing run's resumed tail count as blind time. A blind gap longer than two minutes,
+including the interval until the first returning sample, starts a new age. The version-3 format rejects
 older records, so those ages can restart after an update without proving that the plant changed state.
 
 The weather companion describes the two-hour window selected at the last successful fetch. That

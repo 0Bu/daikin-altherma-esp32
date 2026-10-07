@@ -154,10 +154,10 @@ function refTempFormPayload() {
   const saved = S.status?.reference_temperature || {};
   const sameMapping = !!saved.configured && temperature.topic === (saved.topic || "") &&
     temperature.path === (saved.temperature_path || "") &&
-    setpoint.topic === (saved.setpoint_topic || "") &&
+    setpoint.topic === (saved.setpoint_topic || (saved.setpoint_path ? saved.topic : "") || "") &&
     setpoint.path === (saved.setpoint_path || "") &&
     (fixedSetpoint ?? 0) === (saved.fixed_setpoint_c ?? 0) &&
-    timestamp.topic === (saved.timestamp_topic || "") &&
+    timestamp.topic === (saved.timestamp_topic || (saved.timestamp_path ? saved.topic : "") || "") &&
     timestamp.path === (saved.timestamp_path || "");
   return {
     name: $("rtName").value.trim(),

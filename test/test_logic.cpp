@@ -9046,6 +9046,57 @@ static void test_env3() {
     CHECK(env3_presets_offerable(presets, ENV3_PRESETS_MAX, seeed, false) == 0);
 }
 
+static void test_reference_binding_epochs() {
+    daik::ReferenceSourceBinding original{"Room A", "temp/a",  "t.c",  "set/a", "s.c", "time/a",
+                                          "epoch",  "enabled", "hvac", 0,       true};
+    CHECK(daik::reference_binding_matches(original, original));
+    std::string_view daik::ReferenceSourceBinding::*fields[] = {
+        &daik::ReferenceSourceBinding::name,
+        &daik::ReferenceSourceBinding::topic,
+        &daik::ReferenceSourceBinding::temperature_path,
+        &daik::ReferenceSourceBinding::setpoint_topic,
+        &daik::ReferenceSourceBinding::setpoint_path,
+        &daik::ReferenceSourceBinding::timestamp_topic,
+        &daik::ReferenceSourceBinding::timestamp_path,
+        &daik::ReferenceSourceBinding::enabled_path,
+        &daik::ReferenceSourceBinding::hvac_mode_path,
+    };
+    for (auto field : fields) {
+        auto changed   = original;
+        changed.*field = "replacement";
+        CHECK(!daik::reference_binding_matches(original, changed));
+    }
+    auto changed                  = original;
+    changed.fixed_setpoint_tenths = 215;
+    CHECK(!daik::reference_binding_matches(original, changed));
+    changed                 = original;
+    changed.capture_enabled = false;
+    CHECK(!daik::reference_binding_matches(original, changed));
+    CHECK(daik::reference_binding_matches(original, changed, false, false));
+    changed.name = "Room B";
+    CHECK(!daik::reference_binding_matches(original, changed, false));
+    CHECK(daik::reference_binding_matches(original, changed, false, false));
+    changed.timestamp_path = "other_epoch";
+    CHECK(!daik::reference_binding_matches(original, changed, false, false));
+    CHECK(!daik::reference_epoch_current(0, 0, 0));
+    CHECK(daik::reference_epoch_current(3, 3, 3));
+    CHECK(!daik::reference_epoch_current(2, 3, 3));
+    CHECK(!daik::reference_epoch_current(3, 2, 3));
+    CHECK(!daik::reference_epoch_current(2, 2, 3));
+    auto legacy                    = original;
+    legacy.setpoint_topic          = "";
+    legacy.timestamp_topic         = "";
+    auto explicit_topic            = original;
+    explicit_topic.setpoint_topic  = original.topic;
+    explicit_topic.timestamp_topic = original.topic;
+    CHECK(
+        daik::reference_binding_matches(daik::reference_effective_binding(legacy), explicit_topic));
+    legacy.timestamp_path = "";
+    CHECK(daik::reference_effective_binding(legacy).timestamp_topic.empty());
+    legacy.fixed_setpoint_tenths = 215;
+    CHECK(daik::reference_effective_binding(legacy).setpoint_topic.empty());
+}
+
 static void test_reference_temperature_config() {
     const char* why = nullptr;
     CHECK(reference_temperature_config_valid("Example sensor", "fixture/room-temperature/status",
@@ -15757,9 +15808,32 @@ static void test_state_dwell() {
         dwell_step_with_cadence(cadence, DWELL_MAX_SLOTS, off_row, 1, 1, 6);
         CHECK(dwell_lookup(cadence, DWELL_MAX_SLOTS, 0x62, 2, 304).blind_s == 8);
     }
-    CHECK(DWELL_PERSIST_VERSION == 2);
+    CHECK(DWELL_PERSIST_VERSION == 3);
     CHECK(dwell_restore_verdict(static_cast<uint32_t>(CrashReason::SW), DWELL_PERSIST_MAGIC, 1, 5,
                                 5, 7, 7) == DwellRestore::WrongVersion);
+    CHECK(dwell_restore_verdict(static_cast<uint32_t>(CrashReason::SW), DWELL_PERSIST_MAGIC, 2, 5,
+                                5, 7, 7) == DwellRestore::WrongVersion);
+
+    // Returning completes the blind interval; its tail must participate in the 120-second limit.
+    for (uint32_t tail : {0u, 1u}) {
+        DwellSlot gap[DWELL_MAX_SLOTS] = {};
+        dwell_step(gap, DWELL_MAX_SLOTS, on_row, 1, 0);
+        dwell_step(gap, DWELL_MAX_SLOTS, nullptr, 0, DWELL_MAX_GAP_S);
+        dwell_step(gap, DWELL_MAX_SLOTS, on_row, 1, tail);
+        const DwellReading returned = dwell_lookup(gap, DWELL_MAX_SLOTS, 0x62, 2, 304);
+        CHECK(returned.known && !returned.exact);
+        CHECK(returned.since_s == (tail == 0 ? DWELL_MAX_GAP_S : 0));
+        CHECK(returned.blind_s == (tail == 0 ? DWELL_MAX_GAP_S : 0));
+    }
+    {
+        DwellSlot gap[DWELL_MAX_SLOTS] = {};
+        dwell_step(gap, DWELL_MAX_SLOTS, on_row, 1, 0);
+        dwell_step(gap, DWELL_MAX_SLOTS, nullptr, 0, DWELL_MAX_GAP_S - 1);
+        dwell_step(gap, DWELL_MAX_SLOTS, nullptr, 0, 0);
+        dwell_step(gap, DWELL_MAX_SLOTS, off_row, 1, 2);
+        const DwellReading returned = dwell_lookup(gap, DWELL_MAX_SLOTS, 0x62, 2, 304);
+        CHECK(returned.known && !returned.exact && returned.since_s == 0 && returned.blind_s == 0);
+    }
 
     // ── the gap bound applies to the CLOCK, not only to the missing rows ────────────────────────
     // checkup_step() gates its whole computation on the elapsed time and discards the previous
@@ -17622,6 +17696,7 @@ int main() {
     test_config_store();
     test_config_blob_strings_fit();
     test_env3();
+    test_reference_binding_epochs();
     test_reference_temperature_config();
     test_circulation_source();
     test_heating_curve_diagnosis();

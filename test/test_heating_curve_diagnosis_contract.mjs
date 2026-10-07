@@ -109,8 +109,10 @@ assert.match(checkup, /void checkup_record\([^)]*\)[\s\S]*if \(!s_diagnostics_en
   "the rolling 24-hour checkup must not collect while diagnostics are off");
 const httpConfig = read("main/http_config.cpp");
 assert.match(httpConfig,
-  /set_diagnostics[\s\S]*diagnostics_next_generation[\s\S]*checkup_set_diagnostics[\s\S]*history_checkup_reset[\s\S]*history_circulation_reset[\s\S]*mqtt_reference_reconfigure[\s\S]*mqtt_circulation_reconfigure[\s\S]*weather_forecast_reconfigure/,
+  /set_diagnostics[\s\S]*diagnostics_next_generation[\s\S]*checkup_set_diagnostics[\s\S]*history_checkup_reset[\s\S]*mqtt_reference_reconfigure[\s\S]*mqtt_circulation_reconfigure[\s\S]*weather_forecast_reconfigure/,
   "a master transition must retire every diagnostic evidence producer live");
+assert.match(mqtt, /void mqtt_circulation_reconfigure\(bool configured\)[\s\S]*checkup_dhw_reset\(\)[\s\S]*history_circulation_reset\(\)/,
+  "the circulation owner retires its consumers together with its raw source");
 
 const taskStart = mqtt.indexOf("static void mqtt_task(void*)");
 const taskEnd = mqtt.indexOf("static bool build_client(", taskStart);
@@ -121,7 +123,7 @@ const publishGate = task.indexOf("if (gate.publish_cycle)");
 assert.ok(frames >= 0 && evaluate > frames && publishGate > evaluate,
   "diagnosis must consume inbound room data before evaluation and outside the publish gate");
 const heartbeatPublish = task.indexOf("publish_heartbeat()", publishGate);
-const telemetryPublish = task.indexOf("publish_heating_curve_telemetry()", publishGate);
+const telemetryPublish = task.indexOf("publish_heating_curve_telemetry(ref_config)", publishGate);
 assert.ok(heartbeatPublish > publishGate && telemetryPublish > heartbeatPublish,
   "technical heartbeat and grouped heating-curve telemetry must publish together inside the X10A gate");
 
@@ -140,7 +142,7 @@ assert.match(telemetry, /plant_outdoor_source/);
 assert.match(telemetry, /last_sample_outdoor_source/);
 assert.doesNotMatch(telemetry, /lwt_controller_|proposal_produced|last_decision_ms/,
   "retired one-cycle proposal events and actuator telemetry must not survive the diagnosis migration");
-assert.match(mqtt, /publish_heating_curve_telemetry\(\)/);
+assert.match(mqtt, /publish_heating_curve_telemetry\(ref_config\)/);
 assert.match(mqtt, /mqtt_publish\(s_heating_curve_topic/);
 
 const outdoorEvidence = read("main/logic/outdoor_evidence.hpp");

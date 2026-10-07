@@ -3,6 +3,7 @@
 // It remains read-only: no function in this header calls the HomeHub actuator. Kept IDF-free so POST
 // validation, RFC3339 parsing, retained/restart behavior, plausibility and eligibility are host-tested.
 #include <cstddef>
+#include <array>
 #include <cstdint>
 #include <string_view>
 
@@ -42,6 +43,46 @@ struct SourceTimestampHighWater {
     }
     void reset() { *this = SourceTimestampHighWater{}; }
 };
+
+// Views of the exact saved source identity. Maximum age changes freshness policy, not provenance;
+// capture consent also has to match for a getter, but toggling it does not establish a new clock.
+struct ReferenceSourceBinding {
+    std::string_view name, topic, temperature_path, setpoint_topic, setpoint_path;
+    std::string_view timestamp_topic, timestamp_path, enabled_path, hvac_mode_path;
+    uint16_t         fixed_setpoint_tenths = 0;
+    bool             capture_enabled       = false;
+};
+
+inline ReferenceSourceBinding reference_effective_binding(ReferenceSourceBinding b) {
+    if (b.fixed_setpoint_tenths == 0 && b.setpoint_topic.empty()) b.setpoint_topic = b.topic;
+    if (b.timestamp_topic.empty() && !b.timestamp_path.empty()) b.timestamp_topic = b.topic;
+    return b;
+}
+
+inline std::array<std::string_view, 9> reference_binding_fields(const ReferenceSourceBinding& b) {
+    return {b.name,           b.topic,         b.temperature_path,
+            b.setpoint_topic, b.setpoint_path, b.timestamp_topic,
+            b.timestamp_path, b.enabled_path,  b.hvac_mode_path};
+}
+
+inline bool reference_binding_matches(const ReferenceSourceBinding& a,
+                                      const ReferenceSourceBinding& b, bool compare_capture = true,
+                                      bool compare_name = true) {
+    if (a.fixed_setpoint_tenths != b.fixed_setpoint_tenths ||
+        (compare_capture && a.capture_enabled != b.capture_enabled))
+        return false;
+    const auto left = reference_binding_fields(a), right = reference_binding_fields(b);
+    for (size_t i = compare_name ? 0 : 1; i < left.size(); ++i)
+        if (left[i] != right[i]) return false;
+    return true;
+}
+
+// Zero is reserved for a source that has never been applied. A queued frame is accepted only by
+// the very request under which its first fragment arrived, after that request was applied.
+inline constexpr bool reference_epoch_current(uint32_t frame_epoch, uint32_t applied_epoch,
+                                              uint32_t requested_epoch) {
+    return frame_epoch != 0 && frame_epoch == applied_epoch && applied_epoch == requested_epoch;
+}
 
 // Exact topics only. Wildcards would let one small ESP32 subscription receive an unbounded set of
 // unrelated payloads and make "which sensor produced this value?" ambiguous.

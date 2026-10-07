@@ -32,6 +32,78 @@ const weatherLogic = read("main/logic/weather_forecast.hpp");
 const weatherMqtt = read("main/logic/weather_mqtt.hpp");
 const mqttPublishGate = read("main/logic/mqtt_publish_gate.hpp");
 
+// Pure binding/epoch/watermark CHECKs prove the rules; these pin their production owner/callback
+// placement, including commits after parsing has yielded to a concurrent HTTP reconfigure.
+const captureFrame = mqtt.slice(mqtt.indexOf("static void capture_reference_frame("),
+  mqtt.indexOf("static cJSON* reference_json_item("));
+assert.match(captureFrame,
+  /if \(e->current_data_offset == 0\) \{\s*s_ref_rx\.reference_epoch\s*=\s*s_ref_requested_epoch\.load/,
+  "a fragmented MQTT frame must keep the request epoch of its first fragment");
+const referenceFrames = mqtt.slice(mqtt.indexOf("static void service_reference_frames("),
+  mqtt.indexOf("static void mqtt_transport_before_connect("));
+assert.ok(referenceFrames.indexOf("service_circulation_frame(frame, c)") <
+  referenceFrames.indexOf("reference_request_current_locked(frame.reference_epoch, c)"),
+  "independent circulation frames must be served before a stale room-source epoch is discarded");
+const invalidReference = referenceFrames.slice(referenceFrames.indexOf("if (!decoded.valid)"),
+  referenceFrames.indexOf("prepared_error_log;"));
+assert.match(invalidReference,
+  /candidate\.has_value = false/,
+  "invalid payload withdrawal must be staged in the uncommitted candidate");
+assert.match(referenceFrames,
+  /candidate_watermark\.accept\(decoded\.source_unix_s\)/,
+  "acceptance must stage the timestamp highwatermark independently of the committed one");
+assert.match(referenceFrames,
+  /Lock lk\(s_mtx\);\s*if \(!reference_request_current_locked\(frame\.reference_epoch, c\)\) continue;[\s\S]*?s_ref_status\s*=\s*std::move\(candidate\);\s*s_ref_source_time\s*=\s*candidate_watermark;/,
+  "valid and invalid status/clock candidates must commit together after the guarded epoch check");
+assert.doesNotMatch(referenceFrames, /s_ref_status\.[a-z_]+\s*=/,
+  "no field of the committed raw aggregate may change before all throwing staging has finished");
+const referenceGetter = mqtt.slice(
+  mqtt.indexOf("ReferenceTemperatureStatus reference_temperature_status(const Config&"),
+  mqtt.indexOf("logic::HeatingCurveSnapshot heating_curve_status()"));
+assert.match(referenceGetter,
+  /Lock lk\(s_mtx\);[\s\S]*?reference_request_current_locked\(requested, expected\)[\s\S]*?return s_ref_status/,
+  "the room getter must bind raw observations to the caller's exact Config and applied request");
+const referenceReconfigure = mqtt.slice(mqtt.indexOf("void mqtt_reference_reconfigure()"),
+  mqtt.indexOf("CirculationSourceStatus circulation_source_status()"));
+assert.match(referenceReconfigure,
+  /Lock\s+lk\(s_mtx\);[\s\S]*?s_ref_requested_epoch\.store[\s\S]*?s_ref_status = ReferenceTemperatureStatus\{\}/,
+  "reconfigure must atomically withdraw the old raw sample before the owner task resumes");
+assert.doesNotMatch(referenceReconfigure, /s_ref_source_time\.(reset|accept)/,
+  "a no-op wakeup must not discard the accepted source timestamp highwatermark");
+const configEpochCapture = mqtt.search(/const uint32_t\s+reference_epoch\s*=\s*s_ref_requested_epoch\.load/);
+const referenceConfigCopy = mqtt.indexOf("const Config ref_config = config()", configEpochCapture);
+assert.ok(configEpochCapture >= 0 && referenceConfigCopy > configEpochCapture,
+  "the owner must capture its request epoch before copying Config");
+for (const [begin, end] of [
+  ["static DecodedReferenceFrame decode_reference_frame(", "struct DecodedCirculationFrame"],
+  ["static DecodedCirculationFrame decode_circulation_frame(", "static ReferenceFreshness circulation_frame_freshness("],
+]) {
+  const decoder = mqtt.slice(mqtt.indexOf(begin), mqtt.indexOf(end));
+  assert.match(decoder, /JsonGuard root\(cJSON_ParseWithLengthOpts/,
+    "MQTT parsed input trees must unwind through a scoped owner on string allocation failure");
+  assert.doesNotMatch(decoder, /cJSON_Delete\(root\)/,
+    "MQTT scoped input trees must not also be deleted manually");
+}
+
+const circulationFrames = mqtt.slice(mqtt.indexOf("static void service_circulation_frame("),
+  mqtt.indexOf("static void service_reference_frames("));
+assert.match(circulationFrames,
+  /circulation_request_current_locked\(frame\.circulation_epoch, c\)[\s\S]*?candidate\s*=\s*s_circulation_status/,
+  "circulation decoding must snapshot only the matching applied Config and frame request");
+assert.match(circulationFrames,
+  /if \(!circulation_request_current_locked\(frame\.circulation_epoch, c\)\) return;\s*s_circulation_status\s*=\s*std::move\(candidate\);\s*s_circulation_tracker\s*=\s*tracker;\s*s_circulation_source_time\s*=\s*source_time;/,
+  "circulation raw values, counters, tracker and source clock must commit atomically after staging");
+assert.doesNotMatch(circulationFrames, /s_circulation_status\.[a-z_]+\s*(?:=|\+\+)/,
+  "circulation allocation failure must preserve every field of the previous raw aggregate");
+const circulationReconfigure = mqtt.slice(mqtt.indexOf("void mqtt_circulation_reconfigure("),
+  mqtt.indexOf("void mqtt_request_weather_cleanup()"));
+assert.ok(circulationReconfigure.indexOf("reset_circulation_status_locked(configured)") >= 0 &&
+  circulationReconfigure.indexOf("history_circulation_reset()") >
+    circulationReconfigure.indexOf("reset_circulation_status_locked(configured)"),
+  "circulation reconfigure must withdraw the old witness before invalidating its consumers");
+assert.doesNotMatch(circulationReconfigure, /s_circulation_source_time\.(reset|accept)/,
+  "policy/consent/label wakeups cannot roll back the circulation accepted source clock");
+
 // ── 1. The BOARD's own trends have ONE owner, and it is not the heat pump ───────────────────────
 // free_heap/max_alloc describe the ESP32. They used to be folded inside history_record(), which is
 // reached only from poll_once(), which the poll task calls only once a profile is RESOLVED — so a

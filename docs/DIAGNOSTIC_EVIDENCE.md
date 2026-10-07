@@ -1,6 +1,6 @@
 # Evidence and limits of the plant diagnostics
 
-<!-- diagnostic-evidence-contract: b21cb4b6a87ee898380c9eea5eae3bb0af25c9961333a3a09692597ead98fa48 -->
+<!-- diagnostic-evidence-contract: 51a66a578a155a9dbb5b5de73b989de86fb34ce24eb3a14dc33d4ebacf1ad932 -->
 
 For every row in the **Plant diagnostics · 24 h** card, this page answers four questions:
 
@@ -26,7 +26,8 @@ Transport liveness is separate from each rule's measurement evidence. X10A live 
 less than 15 s old. HomeHub cache use requires matching target/session identity, a full-cache age at
 most 546 s and a separate reply age at most 7 s; these project bounds include slow fallback reads
 and do not establish that every row came from one sweep. State-age observation and blind time are
-also separate from the eight diagnosis counters; their version-2 format changes no threshold below.
+also separate from the eight diagnosis counters; their version-3 format includes the resumed tail
+in the cumulative blind-gap limit and changes no diagnosis threshold below.
 The [X10A gate](../main/logic/mqtt_publish_gate.hpp) and
 [HomeHub implementation](../main/hp_modbus.cpp) define those transport bounds.
 
