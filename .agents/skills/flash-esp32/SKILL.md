@@ -97,7 +97,7 @@ passthrough).
 ## Self-analysis and cleanup
 
 Before concluding the flash operation:
-   - Confirm clean boot from `/status`: verify `.last_crash.fault == false` (or null), `.sys.safe_mode == false`, a `.sys.reset_reason` that is not a fault (`usb`, `ext`, `poweron` and `sw` are normal after a USB write), contiguous heap `.sys.max_alloc >= 10000`, and at least 1 KiB free in every non-null `.sys.stack_min_free_bytes` entry (null means the task was never sampled).
+   - Confirm clean boot from `/status`: verify `.last_crash.fault == false` (or null), `.sys.safe_mode == false`, a `.sys.reset_reason` that is not a fault (`usb`, `ext`, `poweron` and `sw` are normal after a USB write), `.sys.heap_restarts == 0` (a heap-watchdog restart also reads `sw`), contiguous heap `.sys.max_alloc >= 10000`, and at least 1 KiB free in every non-null `.sys.stack_min_free_bytes` entry (null means the task was never sampled).
    - Remove `build/daikin-signed.bin` only if this workflow created it as a temporary duplicate.
      Retain requested build, signing and device evidence, and preserve pre-existing user artifacts.
 

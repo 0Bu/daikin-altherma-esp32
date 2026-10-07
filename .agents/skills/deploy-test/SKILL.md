@@ -116,9 +116,15 @@ OTA gate (`--confirm-bench bench --install-bench`), never through this skill.
 
 8. **Exercise the changed behavior** on the bench. Start read-only, then drive the path the change
    touches through the non-persistent bench requests that trigger it, and repeat timing-sensitive
-   checks several times. A generic boot smoke test does not replace this. Follow with a bounded
-   soak: at least two minutes, and longer for networking, OTA, memory or reconnect behavior. If a
-   hardware negative control exists (the same check failing on the previous image), record it.
+   checks several times. A generic boot smoke test does not replace this. When the test drives
+   `/ota/check`, read `/ota/status` afterwards. Its `ota_stack_min_free_bytes` must be non-null and
+   at least 1 KiB, and its heap minima must be positive. Follow with a bounded soak: at least two
+   minutes, longer for networking, OTA or reconnect behavior, and longer than
+   `HEAP_CRITICAL_HOLD_MS` (`main/logic/heap_watchdog.hpp`) for memory-related changes. Across the
+   soak, `uptime_s` must keep rising, `.sys.heap_restarts` must stay 0, and `.sys.mqtt_skipped` and
+   `.sys.poll_skipped` must not rise. If a hardware negative control exists (the same check failing
+   on the previous image), record it. A USB soak is not pressure or stress evidence; the bench
+   gate provides that after the merge.
 
 9. **Report** the pinned SHA, ELF hash, signature check, flashed version, health result,
    change-specific result, soak duration and every unverified boundary. The USB identity (MAC and
@@ -141,9 +147,12 @@ OTA gate (`--confirm-bench bench --install-bench`), never through this skill.
   - `.sys.safe_mode` is false;
   - `.sys.reset_reason` is not a fault: `usb`, `ext`, `poweron` and `sw` are normal after a USB
     write;
+  - `.sys.heap_restarts` is 0, because a heap-watchdog restart also reads `sw` and is otherwise
+    invisible;
   - `.sys.max_alloc` stays above the health script's floor with margin;
-  - every non-null entry of `.sys.stack_min_free_bytes` keeps at least 1 KiB free. A null entry means
-    the task was never sampled, for example `modbus` on a bench without HomeHub.
+  - every non-null entry of `.sys.stack_min_free_bytes` keeps at least 1 KiB free. A null entry
+    means the task was never sampled, for example `modbus` on a bench without HomeHub. The slot of
+    every task the test exercised must be non-null; read `/status` again if needed.
 - Check `/diag?verbose=1` for retry floods, queue overflows or reconnect loops.
 - Remove only the temporary signed duplicate this workflow created (`build/daikin-signed.bin`).
   Keep the requested evidence and pre-existing user artifacts.
