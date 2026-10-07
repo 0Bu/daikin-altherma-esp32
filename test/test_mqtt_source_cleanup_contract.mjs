@@ -264,7 +264,7 @@ assert.match(modbus,
 const setHpStart = http.indexOf("static esp_err_t set_hp(");
 const setHpEnd = http.indexOf("static esp_err_t discover_homehub_now", setHpStart);
 const setHp = http.slice(setHpStart, setHpEnd);
-const hpSave = setHp.indexOf("config_save(c, /*require_link=*/x10a_sent)");
+const hpSave = setHp.indexOf("} else if (!config_save(c))");
 const hpReconfigure = setHp.indexOf("mb_reconfigure(modbus_enabled)", hpSave);
 const hpRequest = setHp.indexOf("mqtt_request_modbus_cleanup()", hpReconfigure);
 assert.ok(hpSave >= 0 && hpReconfigure > hpSave && hpRequest > hpReconfigure,

@@ -78,7 +78,7 @@ assert.match(pollSource,
 // together — one left behind would go on describing the previous physical identity under the new
 // one's name.
 assert.match(configSource,
-             /set_hp_resets_checkup\([^;]+;\s*[\s\S]*?if \(reset_checkup\) \{\s*hp_poll_reconfigure\(\);\s*checkup_reset\(\);\s*dwell_reset\(\);\s*history_reset\(\);/m,
+             /set_hp_apply_x10a\(c, x10a, reset_checkup\)[\s\S]*?if \(reset_checkup\) \{\s*hp_poll_reconfigure\(\);\s*checkup_reset\(\);\s*dwell_reset\(\);\s*history_reset\(\);/m,
              "/set_hp must route the pure identity predicate into all three X10A reset requests");
 assert.match(configSource,
              /static esp_err_t do_detect[\s\S]*?hp_poll_reconfigure\(\);\s*checkup_reset\(\);\s*dwell_reset\(\);\s*history_reset\(\);/m,

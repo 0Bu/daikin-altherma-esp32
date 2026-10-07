@@ -65,13 +65,19 @@ void config_load();
 
 // Persist the given config to NVS. The credential/service/board/channel fields are one atomic blob;
 // the X10A link cache (RX/TX/proto/history identity) is a separate self-healing durability domain.
-// Ordinary callers
-// succeed once the blob lands even if best-effort cache maintenance fails afterwards; /set_hp passes
-// require_link=true because that route owns the link and must not apply it unless its atomic cache
-// entry landed. The model (profile + fingerprint) is NOT written. For the whole-struct writers only:
-// the /set_* handlers, serialized on the single httpd task. The poll task must NOT use this — see
-// the compare-and-commit detection helpers below.
-[[nodiscard]] bool config_save(const Config& c, bool require_link = false);
+// Callers succeed once the blob lands even if best-effort cache maintenance fails afterwards. A
+// snapshot older than a detection commit carries the newly detected link and model forward
+// (logic/config_model.hpp, config_save_revision). The model (profile + fingerprint) is NOT written.
+// For the whole-struct writers only: the /set_* handlers, serialized on the single httpd task. The
+// poll task must NOT use this — see the compare-and-commit detection helpers below.
+[[nodiscard]] bool config_save(const Config& c);
+
+// The X10A /set_hp save. That route owns the link, so it succeeds only when the atomic link-cache
+// entry lands as well; on Failed nothing is published to RAM. It also derived its model and
+// link-identity fields from its snapshot, so a snapshot older than a detection commit is refused as
+// Stale before any NVS write, and the caller derives the request again from a fresh config().
+enum class ConfigSaveResult : uint8_t { Saved, Stale, Failed };
+[[nodiscard]] ConfigSaveResult config_save_link(const Config& c);
 
 // Atomically commit the link proven by one detection sweep, but only if the live config still has
 // the revision captured before that sweep. The NVS link write and RAM publication are

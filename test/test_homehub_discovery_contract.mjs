@@ -59,7 +59,7 @@ assert.ok(autoCall >= 0 && httpStart > autoCall,
 const setHpStart = http.indexOf("static esp_err_t set_hp(");
 const setHpEnd = http.indexOf("static esp_err_t discover_homehub_now", setHpStart);
 const setHp = http.slice(setHpStart, setHpEnd);
-assert.match(setHp, /if \(host_sent\) \{[\s\S]*c\.mb_host = hostItem->valuestring;[\s\S]*c\.mb_discovery_done = true;/,
+assert.match(setHp, /mb_host\s*=\s*host_sent \? hostItem->valuestring : "";[\s\S]*if \(host_sent\) \{\s*c\.mb_host\s*=\s*mb_host;\s*c\.mb_discovery_done\s*=\s*true;/,
   "an explicit host save, including empty delete, must permanently complete discovery");
 assert.match(status, /searched[\s\S]{0,120}c\.mb_discovery_done/,
   "status must expose whether the one-shot decision has been persisted");

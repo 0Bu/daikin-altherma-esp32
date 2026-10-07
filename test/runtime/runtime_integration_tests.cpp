@@ -152,17 +152,37 @@ void test_config_detection_http_interleaving() {
         CHECK_EQ(coordinator.snapshot().service.wifi_ssid, std::string("new-net"));
     }
 
-    // Case C: Explicit set_hp (require_link=true) overrides link even on revision difference
+    // Case C (CFG-04): an X10A /set_hp owns the link but derived its model fields from its
+    // snapshot. A detection commit after that snapshot makes the save Stale: nothing is written and
+    // the detected link and model survive. The handler's retry from a fresh snapshot then commits
+    // its pins without reverting the model.
     {
         RuntimeConfigSnapshot stale_hp = coordinator.snapshot();
         stale_hp.link                  = daik::LinkBlob{10, 11, 'I', 0x99887766u};
-        CHECK(coordinator.commit_detected_model(coordinator.snapshot().revision, "altherma3_geo",
+        CHECK(coordinator.commit_detected_link(stale_hp.revision,
+                                               daik::LinkBlob{3, 4, 'I', 0x55667788u}));
+        CHECK(coordinator.commit_detected_model(coordinator.snapshot().revision, "altherma3_r_erga",
                                                 true));
         CHECK(stale_hp.revision != coordinator.snapshot().revision);
-        CHECK(coordinator.save_http(stale_hp, /*require_link=*/true));
+        CHECK(!coordinator.save_http(stale_hp, /*owns_link=*/true));
+        CHECK_EQ(coordinator.snapshot().link.rx_pin, 3);
+        CHECK_EQ(coordinator.snapshot().link.tx_pin, 4);
+        CHECK_EQ(coordinator.snapshot().profile, std::string("altherma3_r_erga"));
+        CHECK_EQ(coordinator.snapshot().fp_valid, true);
+        ConfigPersistenceAdapter after_refusal(nvs, allocations);
+        daik::LinkBlob           refused_link;
+        CHECK(after_refusal.load_link(refused_link));
+        CHECK_EQ(refused_link.rx_pin, 3);
+        CHECK_EQ(refused_link.identity_fp, uint32_t{0x55667788u});
+
+        RuntimeConfigSnapshot fresh_hp = coordinator.snapshot();
+        fresh_hp.link                  = daik::LinkBlob{10, 11, 'I', 0x99887766u};
+        CHECK(coordinator.save_http(fresh_hp, /*owns_link=*/true));
         CHECK_EQ(coordinator.snapshot().link.rx_pin, 10);
         CHECK_EQ(coordinator.snapshot().link.tx_pin, 11);
         CHECK_EQ(coordinator.snapshot().link.proto, 'I');
+        CHECK_EQ(coordinator.snapshot().profile, std::string("altherma3_r_erga"));
+        CHECK_EQ(coordinator.snapshot().fp_valid, true);
     }
 }
 
