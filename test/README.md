@@ -47,14 +47,16 @@ boundary-heavy logic inputs and probes the ASan+UBSan compile/runtime capability
 name. CI fails unless both sanitizers work; a local host falls back to UBSan only when the ASan probe
 fails. This is a bounded, reproducible hostile-input corpus, not an unbounded random fuzzer.
 
-`scripts/run-runtime-integration-tests.sh` runs the IDF-free runtime harness in `test/runtime/`. Ten
+`scripts/run-runtime-integration-tests.sh` runs the IDF-free runtime harness in `test/runtime/`. Eleven
 scenarios call selected production config serializers, X10A/Modbus parsers, MQTT publish gating and
 bounded body/chunk logic through simulated clock, storage, serial, TCP, broker and HTTP adapters.
 Eight model failed saves and reconstruction, allocation failure, task interleavings, fragmentation,
 reconnect/retain/LWT behavior and incomplete HTTP framing. Two deadline scenarios use real POSIX `socketpair`/`recv`
 traffic: a writer trickles an incomplete header or body beyond the absolute deadline, while the
-watchdog applies `shutdown(SHUT_RDWR)` and is joined before the descriptors are closed. Mutations
-independently disable the header and body watchdog. The harness remains hardware-free and does not
+watchdog applies `shutdown(SHUT_RDWR)` and is joined before the descriptors are closed. A third
+socket scenario trickles a body still owed after the response: `http_body_discard()` must stop at its
+budget, settle a small buffered remainder and refuse more than its byte cap. Mutations
+independently disable the header and body watchdog and the discard deadline. The harness remains hardware-free and does not
 execute ESP-IDF target glue, real NVS or the production MCP/HTTP/MQTT stacks; target builds and
 separately authorized hardware acceptance remain distinct proof layers.
 

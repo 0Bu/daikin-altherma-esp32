@@ -17,6 +17,7 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <cerrno>
 #include <chrono>
 #include <cstdint>
 #include <cstring>
@@ -191,6 +192,88 @@ inline HttpTrickleResult run_http_socket_trickle(HttpBlockingCall call, uint64_t
     if (watchdog.joinable()) watchdog.join();
     writer.join();
     close(sockets[0]);
+    close(sockets[1]);
+    return result;
+}
+
+// The leftover-body discard after a response (http_common.cpp → daik::http_body_discard) on a real
+// socket. The peer still owes `owed` bytes; `trickle_ms == 0` sends them at once, otherwise one
+// byte per interval. The receive mapping mirrors production: End once nothing is owed, Timeout when
+// SO_RCVTIMEO expires, Error on a close or failure.
+struct HttpDiscardResult {
+    bool     settled    = false;
+    size_t   received   = 0;
+    uint64_t elapsed_ms = 0;
+};
+
+inline HttpDiscardResult run_http_body_discard(size_t owed, uint64_t trickle_ms,
+                                               uint64_t transport_timeout_ms, uint64_t budget_ms,
+                                               bool deadline_enabled) {
+    int sockets[2] = {-1, -1};
+    if (socketpair(AF_UNIX, SOCK_STREAM, 0, sockets) != 0)
+        throw std::runtime_error("socketpair failed");
+    const timeval timeout{static_cast<time_t>(transport_timeout_ms / 1000),
+                          static_cast<suseconds_t>((transport_timeout_ms % 1000) * 1000)};
+    if (setsockopt(sockets[0], SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout)) != 0) {
+        close(sockets[0]);
+        close(sockets[1]);
+        throw std::runtime_error("SO_RCVTIMEO failed");
+    }
+#ifdef SO_NOSIGPIPE
+    const int no_sigpipe = 1;
+    (void)setsockopt(sockets[1], SOL_SOCKET, SO_NOSIGPIPE, &no_sigpipe, sizeof(no_sigpipe));
+#endif
+
+    const auto started = std::chrono::steady_clock::now();
+    const auto elapsed = [&] {
+        return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
+                                         std::chrono::steady_clock::now() - started)
+                                         .count());
+    };
+    std::atomic<bool> stop_writer{false};
+    std::thread       writer([&] {
+        const std::string bytes(owed, 'b');
+        int               send_flags = 0;
+#ifdef MSG_NOSIGNAL
+        send_flags = MSG_NOSIGNAL;
+#endif
+        size_t sent = 0;
+        while (sent < bytes.size() && !stop_writer.load()) {
+            size_t chunk = bytes.size() - sent;
+            if (trickle_ms != 0) {
+                std::this_thread::sleep_until(started +
+                                              std::chrono::milliseconds((sent + 1) * trickle_ms));
+                if (stop_writer.load()) break;
+                chunk = 1;
+            }
+            const ssize_t n = send(sockets[1], bytes.data() + sent, chunk, send_flags);
+            if (n <= 0) break;
+            sent += static_cast<size_t>(n);
+        }
+    });
+
+    HttpDiscardResult result;
+    char              scratch[128];
+    result.settled = daik::http_body_discard(
+        [&]() -> daik::BodyChunk {
+            if (result.received == owed) return {daik::BodyRecv::End, 0};
+            const size_t  want = std::min(sizeof(scratch), owed - result.received);
+            const ssize_t n    = recv(sockets[0], scratch, want, 0);
+            if (n > 0) {
+                result.received += static_cast<size_t>(n);
+                return {daik::BodyRecv::Data, static_cast<size_t>(n)};
+            }
+            if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK))
+                return {daik::BodyRecv::Timeout, 0};
+            return {daik::BodyRecv::Error, 0};
+        },
+        [&] { return deadline_enabled && elapsed() >= budget_ms; });
+    result.elapsed_ms = elapsed();
+
+    // Closing the reader is what releases a writer blocked on a full socket buffer.
+    stop_writer.store(true);
+    close(sockets[0]);
+    writer.join();
     close(sockets[1]);
     return result;
 }
