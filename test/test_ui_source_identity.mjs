@@ -53,6 +53,7 @@ const status = async (value) => {
 const reset = async () => {
   for (const key of ["hist", "histRequests", "histPin"]) ui.S[key].clear();
   ui.S.histBusy.clear();
+  ui.S.histAwait?.clear();
   ui.S.histIdentity = null;
   ui.S.histUptime = null;
   ui.S.scrub = null;
@@ -153,7 +154,9 @@ for (const mapping of [
 }
 
 // A history response carries its own snapshot lifetime. A request begun under the last status
-// cannot admit samples from a reset or a reboot that status has not observed yet.
+// cannot admit samples from a reset or a reboot that status has not observed yet. A refusal neither
+// caches a one-minute error nor re-asks at once: production re-renders after every request, so an
+// immediate retry only repeated the refusal against the single httpd task until /status caught up.
 for (const [epoch, boot, missing] of [[2, "boot-a", false], [1, "boot-b", false],
   [1, "boot-a", true]]) {
   await reset();
@@ -165,13 +168,51 @@ for (const [epoch, boot, missing] of [[2, "boot-a", false], [1, "boot-b", false]
   await loading;
   assert.equal(ui.S.hist.has("dhw_tank"), false, "unmatched snapshot identity is refused");
   assert.equal(ui.S.histBusy.has("dhw_tank"), false, "refusal releases the request");
+  await ui.ensureHist("dhw_tank");
+  assert.equal(pending.length, 0, "a refused identity waits instead of re-asking at once");
+  const next = fixture(); next.history.epoch = 2;
+  await status(next);
   const retry = ui.ensureHist("dhw_tank");
-  assert.equal(pending.length, 1, "identity refusal does not cache a one-minute error");
-  reply(pending.shift(), 222); await retry;
+  assert.equal(pending.length, 1, "the next status lifetime retries the refused row");
+  reply(pending.shift(), 222, 2); await retry;
   assert.equal(ui.S.hist.get("dhw_tank").v[0], 222);
 }
+// Without a new lifetime, one status period releases the wait as well.
 await reset();
 let loading = ui.ensureHist("dhw_tank");
+reply(pending.shift(), 111, 2); await loading;
+await ui.ensureHist("dhw_tank");
+assert.equal(pending.length, 0);
+ui.S.histAwait.get("dhw_tank").at -= 8000;
+loading = ui.ensureHist("dhw_tank");
+assert.equal(pending.length, 1, "a refused row is retried after one status period");
+reply(pending.shift(), 222); await loading;
+assert.equal(ui.S.hist.get("dhw_tank").v[0], 222);
+
+// The inspector re-enters ensureHist from every render. The firmware's own epoch-less 503 body
+// ("history changed; retry") must not turn that re-entry into a back-to-back request loop.
+await reset();
+const quietRender = context.renderApp;
+context.renderApp = () => { ui.ensureHist("dhw_tank"); };
+loading = ui.ensureHist("dhw_tank");
+pending.shift().resolve({ json: async () => ({ ok: false, error: "history changed; retry" }) });
+await loading;
+for (let i = 0; i < 5; i++) await new Promise((resolve) => setImmediate(resolve));
+assert.equal(pending.length, 0, "a refused reply does not re-enter as a request loop");
+context.renderApp = quietRender;
+
+// A derived chart whose input was refused for identity is pending, not "Trend unavailable.".
+await reset();
+const refusedDerived = ui.ensureHist("dt");
+const [leavingRefused, returnRefused] = [pending.shift(), pending.shift()];
+reply(leavingRefused, 250, 2); reply(returnRefused, 200, 2);
+await refusedDerived;
+assert.equal(ui.S.hist.has("dt"), false, "a refused input leaves the derived chart pending");
+await ui.ensureHist("dt");
+assert.equal(pending.length, 0, "the pending derived chart does not re-ask at once");
+
+await reset();
+loading = ui.ensureHist("dhw_tank");
 reply(pending.shift(), 222); await loading;
 assert.equal(ui.S.hist.get("dhw_tank").v[0], 222);
 

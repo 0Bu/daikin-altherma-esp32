@@ -618,6 +618,11 @@ assert.notEqual(ui.t("conn.eth_no_cable"), ui.t("conn.eth_no_lease"),
   assert.equal(room.detail, ui.t("dyn.room_no_time"),
     "a missing mapped timestamp must be named, not reported as a stale value");
   assert.notEqual(room.detail, ui.t("ref.detail.stale"));
+  // Such a reading has no known age: the card must not substitute its MQTT arrival time.
+  ui.S.status = { ...healthy, reference_temperature: { ...awaiting, received_ago_s: 10 } };
+  const card = ui.dynamicControlCardHtml();
+  assert.ok(card.includes(ui.t("ref.age_unknown")), "a reading without source time has no known age");
+  assert.ok(!card.includes(ui.t("ref.ago", 10)), "the arrival age must not stand in for the reading age");
   checks++;
 }
 

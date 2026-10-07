@@ -2278,7 +2278,13 @@ static esp_err_t h_history(httpd_req_t* req) {
     j += ",\"v\":[";
     // Labels and raster metadata use separate bounded getters. If a reset intervened, refuse the
     // assembled header before any chunk is sent rather than mixing predecessor samples with it.
-    if (history_snapshot_epoch == 0 || history_snapshot_epoch != history_epoch()) {
+    // Epoch 0 means no snapshot identity at all (no history mutex, or its lock was not obtained);
+    // that is reported as unavailable, not as a change a retry would resolve.
+    if (history_snapshot_epoch == 0) {
+        httpd_resp_set_status(req, "503 Service Unavailable");
+        return http_send_json(req, "{\"ok\":false,\"error\":\"history unavailable\"}");
+    }
+    if (history_snapshot_epoch != history_epoch()) {
         httpd_resp_set_status(req, "503 Service Unavailable");
         return http_send_json(req, "{\"ok\":false,\"error\":\"history changed; retry\"}");
     }

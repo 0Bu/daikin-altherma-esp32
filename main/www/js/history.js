@@ -188,6 +188,16 @@ const histCacheKey = (id, source) => {
   }
   return source === "env3" ? `env3:${id}` : id;
 };
+// A reply refused for its source identity (a newer history epoch or boot than the last /status, or
+// the firmware's own "history changed" 503) waits for the next /status lifetime or one status
+// period, whichever comes first. renderApp re-enters ensureHist, so retrying at once only repeated
+// the refusal as a back-to-back /history loop on the single httpd task. One status period mirrors
+// bootstrap.js POLL_STATUS_MS without depending on that later bundle fragment.
+const HIST_IDENTITY_WAIT_MS = 8000;
+const histAwaiting = (key, epoch) => {
+  const waiting = S.histAwait?.get(key);
+  return !!waiting && waiting.epoch === epoch && Date.now() - waiting.at < HIST_IDENTITY_WAIT_MS;
+};
 async function ensureHist(id, source = "x10a", paint = true, signal = null) {
   const epoch = syncHistSources();
   const key = histCacheKey(id, source);
@@ -195,6 +205,7 @@ async function ensureHist(id, source = "x10a", paint = true, signal = null) {
     : source === "env3" ? hasEnv3Hist(id) : hasHist(id);
   if (!offered) return;
   if (S.histBusy.has(key)) return S.histRequests.get(key)?.done;
+  if (histAwaiting(key, epoch)) return;
   const c = S.hist.get(key);
   if (c && Date.now() - c.at < 60000) return;
   if (source === "x10a" && DERIVED[id]) { await ensureDerived(id); return; }
@@ -216,7 +227,11 @@ async function ensureHist(id, source = "x10a", paint = true, signal = null) {
     const expectedEpoch = S.status?.history?.epoch;
     const expectedBoot = S.status?.boot_id;
     if ((Number.isInteger(expectedEpoch) && j.epoch !== expectedEpoch) ||
-        (typeof expectedBoot === "string" && j.boot_id !== expectedBoot)) return;
+        (typeof expectedBoot === "string" && j.boot_id !== expectedBoot)) {
+      (S.histAwait ||= new Map()).set(key, { epoch, at: Date.now() });
+      return;
+    }
+    S.histAwait?.delete(key);
     // t0 = the unix instant of sample 0, present only when the device's SNTP clock is synced. Null
     // means the scrub readout falls back to an AGE ("vor 6.3 h") — never a fabricated wall-clock
     // time, the same rule logic/timestamp.hpp applies to an unsynced clock on the firmware side.
@@ -280,6 +295,7 @@ async function ensureDerived(id) {
   const epoch = syncHistSources();
   const D = DERIVED[id];
   if (S.histBusy.has(id)) return S.histRequests.get(id)?.done;
+  if (histAwaiting(id, epoch)) return;
   let finish;
   const request = { epoch, done: new Promise((resolve) => { finish = resolve; }) };
   (S.histRequests ||= new Map()).set(id, request);
@@ -289,6 +305,13 @@ async function ensureDerived(id) {
     const use = D.ins.filter((k) => has[k]);
     await Promise.all(use.map((k) => ensureHist(k)));
     if (syncHistSources() !== epoch || S.histRequests.get(id) !== request) return;
+    // An input refused for its source identity is pending, not failed: wait with it rather than
+    // caching "Trend unavailable." for up to one status period. Marking the derived id as awaiting
+    // too keeps the finally-block render from re-entering this function at once.
+    if (use.some((k) => !S.hist.get(k) && histAwaiting(k, epoch))) {
+      (S.histAwait ||= new Map()).set(id, { epoch, at: Date.now() });
+      return;
+    }
     const src = use.map((k) => [k, S.hist.get(k)]).filter(([, h]) => h && !h.err && h.v.length);
     if (!src.length) { S.hist.set(id, { at: Date.now(), err: true, v: [] }); return; }
     const dt = src[0][1].dt || 300;

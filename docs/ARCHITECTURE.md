@@ -3613,6 +3613,11 @@ GET  /history?row=<trend id>[&source=x10a|modbus|env3]   one source's 24-hour se
                   carry is omitted, an absent feature stated by absence rather than an empty chart.
                   During OTA the route returns the common early busy-503 before parsing/snapshot
                   allocation; the client retries the complete read after the network operation
+                  ends. Two further 503s are answered before any series byte is sent:
+                  `{"ok":false,"error":"history changed; retry"}` when a history reset intervened
+                  between sampling and sending (the sample epoch no longer matches), and
+                  `{"ok":false,"error":"history unavailable"}` when no snapshot identity could be
+                  taken at all (no history mutex, or its lock was not obtained).
 (no /events)      There is NO live-push route. The web UI POLLS: GET /values every 2 s and
                   GET /status every 8 s, one chain, backing off to 30 s while the device is
                   unreachable and suspended entirely while the browser tab is hidden. The /events

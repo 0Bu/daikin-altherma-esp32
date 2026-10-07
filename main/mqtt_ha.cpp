@@ -3074,10 +3074,6 @@ bool mqtt_transport_network_quiesced() {
            s_transport_paused.load(std::memory_order_acquire);
 }
 
-ReferenceTemperatureStatus reference_temperature_status() {
-    return reference_temperature_status(config());
-}
-
 ReferenceTemperatureStatus reference_temperature_status(const Config& expected) {
     ReferenceTemperatureStatus empty;
     empty.configured = !expected.ref_temp_topic.empty();
@@ -3102,10 +3098,10 @@ void mqtt_reference_reconfigure() {
     s_ref_reconfigure = true;
     // Withdraw immediately even if mqtt_task is paused or its next Config/string copy throws.
     // The independent timestamp watermark is retained until a real mapping change is applied.
-    s_ref_status = ReferenceTemperatureStatus{};
+    // Without the mutex (safe mode, or its allocation failed at boot) no task publishes a status,
+    // so the defaults stay untouched; the bumped epoch already withdraws every reader.
+    if (lk.acquired()) s_ref_status = ReferenceTemperatureStatus{};
 }
-
-CirculationSourceStatus circulation_source_status() { return circulation_source_status(config()); }
 
 CirculationSourceStatus circulation_source_status(const Config& c) {
     CirculationSourceStatus st;
@@ -3249,9 +3245,13 @@ void mqtt_circulation_reconfigure(bool configured) {
         s_circulation_requested_epoch.store(next ? next : 1, std::memory_order_release);
         s_circulation_reconfigure       = true;
         s_circulation_probe_reconfigure = true;
-        reset_circulation_status_locked(configured);
-        s_circulation_probe.active = false;
-        s_circulation_probe.passed = false;
+        // Without the mutex no task publishes a status; leave the defaults and the probe untouched
+        // rather than writing state a poll-task reader could observe unsynchronised.
+        if (lk.acquired()) {
+            reset_circulation_status_locked(configured);
+            s_circulation_probe.active = false;
+            s_circulation_probe.passed = false;
+        }
     }
     // Withdraw the old witness first, then change consumer identity without nesting their locks.
     checkup_dhw_reset();

@@ -30,6 +30,10 @@ assert.match(http, /&history_snapshot_epoch/);
 assert.match(http, /std::to_string\(history_snapshot_epoch\)/);
 assert.match(http, /history_snapshot_epoch != history_epoch\(\)/,
   "a reset during label/raster assembly must refuse the response before chunks");
+// Epoch 0 is "no snapshot identity" (no history mutex or no lock), not a change a retry resolves.
+assert.match(http,
+  /if \(history_snapshot_epoch == 0\) \{[\s\S]{0,160}?history unavailable[\s\S]{0,200}?if \(history_snapshot_epoch != history_epoch\(\)\) \{[\s\S]{0,160}?history changed; retry/,
+  "a missing snapshot identity must not be reported as a retryable history change");
 assert.match(http, /reference_temperature_status\(c\)/,
   "status must bind the room sample to the same configuration snapshot");
 assert.match(http, /circulation_source_status\(c\)/);

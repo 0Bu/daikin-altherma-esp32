@@ -116,6 +116,7 @@ function invalidateHistSources() {
   S.hist.clear();
   S.histBusy.clear();
   (S.histRequests ||= new Map()).clear();
+  (S.histAwait ||= new Map()).clear();
   S.histPin.clear();
   S.scrub = null;
   S.inspHistSig = "";

@@ -1,6 +1,6 @@
 # Evidence and limits of the plant diagnostics
 
-<!-- diagnostic-evidence-contract: 2eb7679406970aead4a06936417fe68c001cf5ce220aae86752800e99304e93c -->
+<!-- diagnostic-evidence-contract: 167c5399fb45355fcf6944cc867fb58f9d112fbc8ff60f1fb579b6f12fafec53 -->
 
 For every row in the **Plant diagnostics · 24 h** card, this page answers four questions:
 
@@ -135,8 +135,11 @@ reassuring result requires six clean hours in a complete 24-hour lifecycle. The 
 [`checkup.hpp`](../main/logic/checkup.hpp). The retained aggregate publishes only the greatest
 completed-hour R5T rate plus window counts and circulation correlation; it does not retain a mean,
 sum, or every window's individual rate. Changing the circulation-pump evidence mapping (topic, value
-paths, age limit, on/off thresholds or confirmation time) restarts this lifecycle, and the tank
-sample in flight at that moment is discarded rather than counted under the new mapping.
+paths, age limit, on/off thresholds or confirmation time) clears this check's window evidence:
+completed windows, observed clean hours and the window in progress. The tank sample in flight at
+that moment is discarded rather than counted under the new mapping. The overall checkup's 24-hour
+span is not reset, so once it is complete a reassuring result needs six new clean hours, not a new
+24-hour lifecycle.
 
 **Project boundary:** `0.8 K/h`, the 45-minute settling period, six clean hours, and the detectable
 upper range of about `1.85 K/h` are **project heuristics**, not Daikin limits or an implementation of

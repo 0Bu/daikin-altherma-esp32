@@ -466,7 +466,10 @@ GET  /values                       # decoded readings
                                    #   the complete read-only request later.
 GET  /history?row=<trend id>       # one trended row's 24 h series, oldest sample first. Optional
      [&source=x10a|modbus|env3]    # source defaults to the backwards-compatible `x10a` wire name:
-                                   #   {id,source,label,dt,unit[,t0][,b0],v[],held[[from,count],…]}
+                                   #   {id,source,label,epoch,boot_id,dt,unit[,t0][,b0],v[],
+                                   #   held[[from,count],…]}. epoch is captured with the samples
+                                   #   and boot_id matches /status; the browser admits a reply only
+                                   #   against that status identity.
                                    #   unit = the ROW's own unit (never a hardcoded °C).
                                    #   v = TENTHS of that unit (the browser scales by 10) or null.
                                    #   held run-length-marks WHICH nulls were the outdoor unit
@@ -492,6 +495,11 @@ GET  /history?row=<trend id>       # one trended row's 24 h series, oldest sampl
                                    #   first eligible commit, flash cannot restore RAM-only samples. The
                                    #   factory reset erases both media. During OTA this route returns the
                                    #   same early 503 as /values; retry the complete request later.
+                                   #   A history reset between sampling and sending answers 503
+                                   #   {"ok":false,"error":"history changed; retry"} before any
+                                   #   series byte; retry after the next /status. When no snapshot
+                                   #   identity can be taken at all, it answers 503
+                                   #   {"ok":false,"error":"history unavailable"}.
                                    #   A query too long to parse completely answers 414 (also /diag),
                                    #   never an unredacted body.
 GET  /models                       # profile catalog + pin hint (detection is automatic; no manual picker)

@@ -964,7 +964,10 @@ function dynamicControlCardHtml() {
       LANG, { maximumFractionDigits: 2 });
     if (r.has_setpoint) setpoint = Number(r.setpoint_c).toLocaleString(
       LANG, { maximumFractionDigits: 2 });
-    const seconds = Number.isFinite(r.age_s) ? r.age_s : r.received_ago_s;
+    // A mapped source time that has not arrived leaves the reading without a known age; the MQTT
+    // arrival clock must not stand in for it.
+    const seconds = Number.isFinite(r.age_s) ? r.age_s
+      : r.freshness_reason === "missing_source_time" ? null : r.received_ago_s;
     age = Number.isFinite(seconds) ? (seconds < 2 ? t("ref.now") : t("ref.ago", seconds))
       : t("ref.age_unknown");
   }

@@ -68,7 +68,6 @@ struct ReferenceTemperatureStatus {
     ReferenceRoomReason rejection_reason=ReferenceRoomReason::InvalidPayload;
     std::string hvac_mode, timestamp_source, eligibility_error, error;
 };
-ReferenceTemperatureStatus reference_temperature_status();
 // Read against the caller's configuration snapshot. A saved replacement source cannot expose its
 // predecessor's raw sample while subscription work is pending, paused or failed.
 ReferenceTemperatureStatus reference_temperature_status(const Config& expected);
@@ -95,7 +94,8 @@ struct CirculationSourceStatus {
     CirculationPowerState state=CirculationPowerState::Unknown;
     std::string timestamp_source, freshness_reason, error;
 };
-CirculationSourceStatus circulation_source_status();
+// Only a Config-taking getter exists: a convenience overload would copy the whole Config on every
+// call and invite that churn back into per-cycle poll/telemetry paths.
 CirculationSourceStatus circulation_source_status(const Config& expected);
 uint32_t                circulation_source_generation();
 

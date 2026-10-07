@@ -64,10 +64,20 @@ assert.match(referenceGetter,
   /Lock lk\(s_mtx\);[\s\S]*?reference_request_current_locked\(requested, expected\)[\s\S]*?return s_ref_status/,
   "the room getter must bind raw observations to the caller's exact Config and applied request");
 const referenceReconfigure = mqtt.slice(mqtt.indexOf("void mqtt_reference_reconfigure()"),
-  mqtt.indexOf("CirculationSourceStatus circulation_source_status()"));
+  mqtt.indexOf("CirculationSourceStatus circulation_source_status(const Config& c)"));
 assert.match(referenceReconfigure,
   /Lock\s+lk\(s_mtx\);[\s\S]*?s_ref_requested_epoch\.store[\s\S]*?s_ref_status = ReferenceTemperatureStatus\{\}/,
   "reconfigure must atomically withdraw the old raw sample before the owner task resumes");
+// Without the mutex (safe mode, failed boot allocation) no task publishes a status: the epoch bump
+// withdraws readers, and the shared defaults are not written unsynchronised.
+assert.match(referenceReconfigure,
+  /if \(lk\.acquired\(\)\) s_ref_status = ReferenceTemperatureStatus\{\};/,
+  "the room status may be reset only under a held mutex");
+const circulationReconfigureBody = mqtt.slice(mqtt.indexOf("void mqtt_circulation_reconfigure("),
+  mqtt.indexOf("void mqtt_request_weather_cleanup()"));
+assert.match(circulationReconfigureBody,
+  /if \(lk\.acquired\(\)\) \{\s*reset_circulation_status_locked\(configured\);/,
+  "the circulation status may be reset only under a held mutex");
 assert.doesNotMatch(referenceReconfigure, /s_ref_source_time\.(reset|accept)/,
   "a no-op wakeup must not discard the accepted source timestamp highwatermark");
 const configEpochCapture = mqtt.search(/const uint32_t\s+reference_epoch\s*=\s*s_ref_requested_epoch\.load/);
@@ -965,4 +975,9 @@ assert.match(historySource, /compare_exchange_weak[\s\S]*?memory_order_release/)
   assert.match(frames,
     /if \(candidate\.error\.empty\(\)\) candidate\.rejection_reason = ReferenceRoomReason::Eligible;/,
     "the frame loop must restore Eligible only once the decoder error has cleared");
+  // Status getters take the caller's Config; a no-argument overload would copy the whole Config per
+  // call and invite that churn back into per-cycle paths.
+  const mqttHeader = read("main/mqtt_ha.hpp");
+  assert.doesNotMatch(mqttHeader, /\b(reference_temperature_status|circulation_source_status)\(\);/,
+    "room/circulation status getters must not regain a Config-copying no-argument overload");
 }
