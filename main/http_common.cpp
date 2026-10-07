@@ -74,10 +74,31 @@ bool json_post_allowed(httpd_req_t* req) {
     return read_header(req, "Content-Type", content_type, sizeof(content_type), present) && present &&
            http_json_content_type(content_type);
 }
+
+// Settle the body bytes the client still owes after its response (logic/http_body.hpp explains why
+// IDF's own purge must never receive an unbounded remainder). noinline keeps the scratch buffer out
+// of handle_then_settle_body's frame, which inlines handle_all under the deepest call chain on this
+// task.
+__attribute__((noinline)) bool discard_unread_body(httpd_req_t* req) {
+    char          scratch[128];
+    const int64_t deadline_us = esp_timer_get_time() + BODY_DISCARD_BUDGET_US;
+    return http_body_discard(
+        [req, &scratch]() -> BodyChunk {
+            // 0: nothing remains, or the peer closed — then IDF's purge fails at once and closes
+            // the session itself. Either way nothing can block.
+            const int r = httpd_req_recv(req, scratch, sizeof(scratch));
+            if (r == 0) return {BodyRecv::End, 0};
+            if (r == HTTPD_SOCK_ERR_TIMEOUT) return {BodyRecv::Timeout, 0};
+            if (r < 0) return {BodyRecv::Error, 0};
+            return {BodyRecv::Data, static_cast<size_t>(r)};
+        },
+        [deadline_us]() -> bool { return esp_timer_get_time() >= deadline_us; });
+}
 }  // namespace
 
 // The single OOM/exception guard every HTTP handler runs under. http_register() stashes the real
-// handler in user_ctx and installs this trampoline as the route handler; we call the real handler
+// handler in user_ctx and installs this trampoline (behind handle_then_settle_body) as the route
+// handler; we call the real handler
 // inside try/catch so an out-of-memory throw (std::string / cJSON / TLS) turns into a 503 rather
 // than crashing the device (which would also drop the poll cycle + MQTT availability).
 static esp_err_t handle_all(httpd_req_t* req) {
@@ -125,13 +146,23 @@ static esp_err_t handle_all(httpd_req_t* req) {
     }
 }
 
+// What esp_http_server calls. Every answer — route, early rejection or the OOM/exception guard —
+// passes here, so a body the client still owes is settled in one place: a session that cannot
+// settle it within the bound returns ESP_FAIL and is closed instead of reaching IDF's unbounded
+// purge.
+static esp_err_t handle_then_settle_body(httpd_req_t* req) {
+    const esp_err_t result = handle_all(req);
+    if (result != ESP_OK) return result;
+    return discard_unread_body(req) ? ESP_OK : ESP_FAIL;
+}
+
 void http_register(httpd_handle_t s, const char* uri, httpd_method_t method,
                    esp_err_t (*fn)(httpd_req_t*)) {
     httpd_uri_t u = {};
-    u.uri      = uri;
-    u.method   = method;
-    u.handler  = handle_all;
-    u.user_ctx = reinterpret_cast<void*>(fn);
+    u.uri         = uri;
+    u.method      = method;
+    u.handler     = handle_then_settle_body;
+    u.user_ctx    = reinterpret_cast<void*>(fn);
     // SAY SO when a route doesn't get in. The only realistic failure is ESP_ERR_HTTPD_HANDLERS_FULL
     // (cfg.max_uri_handlers is sized exactly to the route count in http_server.cpp), and discarding it
     // made the symptom appear somewhere else entirely: the casualty is whatever registers LAST — the

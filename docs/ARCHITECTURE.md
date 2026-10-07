@@ -191,9 +191,12 @@ http_server.cpp     → esp_http_server :80, wildcard dispatch; concerns registe
                       the symptom would be deep links breaking rather than the new route 404ing).
                       http_register() now logs a failed registration instead of discarding it
 http_common.cpp     → shared HTTP helpers + the single OOM guard: http_register() stashes the real
-                      handler in user_ctx and installs the handle_all trampoline, which calls it
-                      inside try/catch — std::bad_alloc → 503, any other throw → 500, instead of
-                      unwinding through esp_http_server's C frames to std::terminate → reboot.
+                      handler in user_ctx and installs handle_then_settle_body. It runs the
+                      handle_all trampoline, which calls the handler inside try/catch —
+                      std::bad_alloc → 503, any other throw → 500, instead of unwinding through
+                      esp_http_server's C frames to std::terminate → reboot — and then settles a
+                      leftover request body (≤ 8 KiB within 2 s, otherwise ESP_FAIL closes the
+                      session instead of IDF's unbounded purge).
                       Non-OTA routes are early-rejected with 503 during active OTA download or when
                       heap_largest_internal_block() < 6144 B (via logic/http_request.hpp http_is_ota_route()).
                       No route is exempt any more: the one that was (/events, raw-registered
@@ -1156,6 +1159,14 @@ host-testable core is unusually large and valuable, because the risky parts are 
   Content-Length and goes quiet park the single httpd task, taking the web UI and the OTA route out of
   a bad config with it. A monotonic 30-second acceptance budget is checked before and after each
   receive, including the final byte. An in-progress receive still returns under its socket timeout.
+  The same header bounds what a client still owes AFTER the response. ESP-IDF purges an unread
+  remainder itself before reusing the session (`httpd_req_delete`), with only the per-receive
+  timeout and no overall limit, and that purge runs after the handler returned — outside the 30 s
+  budget. Rejections before any read (403, 415, 503), failed or oversized reads and routes that
+  expect no body all reached it, so one peer announcing a large Content-Length and trickling it held
+  the httpd task indefinitely. `http_body_discard()` now settles at most 8 KiB within 2 s (plus one
+  in-progress socket timeout) from `handle_then_settle_body`, the function IDF actually calls; any
+  remainder it cannot settle returns `ESP_FAIL`, so IDF closes the session instead of purging.
 - `logic/http_surface.hpp` — the HTTP trust-surface boundary (F01). `http_surface_serves(surface,
   path, is_post)` says which routes each surface exposes: on the trusted configured LAN (WiFi or
   Ethernet), everything; on the
