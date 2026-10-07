@@ -201,6 +201,17 @@ for (let i = 0; i < 5; i++) await new Promise((resolve) => setImmediate(resolve)
 assert.equal(pending.length, 0, "a refused reply does not re-enter as a request loop");
 context.renderApp = quietRender;
 
+// A refusal that is not a history change ("history unavailable": no snapshot identity at all) is a
+// cached error for the usual period, not a chart left loading and re-asked every status period.
+await reset();
+loading = ui.ensureHist("dhw_tank");
+pending.shift().resolve({ json: async () => ({ ok: false, error: "history unavailable" }) });
+await loading;
+assert.equal(ui.S.hist.get("dhw_tank")?.err, true, "an unavailable history is an error state");
+ui.S.histAwait?.delete("dhw_tank");
+await ui.ensureHist("dhw_tank");
+assert.equal(pending.length, 0, "the error state is cached, not re-asked at once");
+
 // A derived chart whose input was refused for identity is pending, not "Trend unavailable.".
 await reset();
 const refusedDerived = ui.ensureHist("dt");

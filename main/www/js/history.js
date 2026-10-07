@@ -222,6 +222,13 @@ async function ensureHist(id, source = "x10a", paint = true, signal = null) {
                           signal ? { signal } : undefined);
     const j = await r.json();
     if (syncHistSources() !== epoch || S.histRequests.get(key) !== request) return;
+    // A JSON refusal that is not a history change (no snapshot identity, an unknown row) is an
+    // error for this cache period, not a reason to re-ask every status period; only "history
+    // changed" waits for the next status lifetime below.
+    if (j && j.ok === false && j.error !== "history changed; retry") {
+      S.hist.set(key, { at: Date.now(), source, sourceId, err: true, v: [] });
+      return;
+    }
     // /status owns the source lease. A reply composed after an unseen reset or reboot must wait
     // for that status lifetime before becoming a chart; a recent fetch alone proves no identity.
     const expectedEpoch = S.status?.history?.epoch;
