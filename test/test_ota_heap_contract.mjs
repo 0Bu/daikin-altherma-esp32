@@ -1102,27 +1102,38 @@ assert.match(resumeStep,
 // after the start pinned /status — and the bench delivery gate — at "disconnected" while the client
 // was connected (seen after an OTA check on the bench). Both start paths reset the status first and
 // never write it on success.
-const resumeStatusAt = resumeStep.indexOf('set_status(false, "")', stableResumeAt);
-assert.ok(resumeStatusAt > stableResumeAt && resumeStatusAt < startResumeAt,
+const statusWrites = (text) => [...text.matchAll(/set_status\([^;]*\);/g)];
+const resumeBeforeStart = statusWrites(resumeStep.slice(stableResumeAt, startResumeAt));
+assert.ok(resumeBeforeStart.length > 0 &&
+          resumeBeforeStart.at(-1)[0] === 'set_status(false, "");',
   "resume must reset the MQTT status before starting the client, never after");
-assert.doesNotMatch(resumeStep.slice(runningResumeAt), /set_status\(/,
-  "a successful resume must leave the connection state to MQTT_EVENT_CONNECTED");
-assert.match(resumeStep.slice(startResumeAt, backoffResumeAt),
-  /set_status\(false, "transport resume failed"\)/,
-  "a failed resume must state why the client is not connected");
+const resumeAfterStart = resumeStep.slice(startResumeAt);
+const resumeFailOpen = resumeAfterStart.indexOf("if (start_rc != ESP_OK) {");
+const resumeFailReturn = resumeAfterStart.indexOf("return false;", resumeFailOpen);
+const resumeAfterStartWrites = statusWrites(resumeAfterStart);
+assert.ok(resumeFailOpen >= 0 && resumeFailReturn > resumeFailOpen &&
+          resumeAfterStartWrites.length === 1 &&
+          resumeAfterStartWrites[0][0] === 'set_status(false, "transport resume failed");' &&
+          resumeAfterStartWrites[0].index > resumeFailOpen &&
+          resumeAfterStartWrites[0].index < resumeFailReturn,
+  "after the resume start only the failure branch may write the MQTT status, and it states why");
 const startCurrentStart = mqtt.indexOf("static bool start_current_client() {");
 const startCurrentEnd = mqtt.indexOf("\n}\n", startCurrentStart);
 const startCurrent = mqtt.slice(startCurrentStart, startCurrentEnd);
-const startCurrentStatusAt = startCurrent.indexOf('set_status(false, "")');
 const startCurrentStartAt = startCurrent.indexOf("start_client_transport()");
 const startCurrentOkAt = startCurrent.indexOf("if (rc == ESP_OK) {", startCurrentStartAt);
 const startCurrentOkEnd = startCurrent.indexOf("return true;", startCurrentOkAt);
-assert.ok(startCurrentStart >= 0 && startCurrentStatusAt >= 0 &&
-          startCurrentStartAt > startCurrentStatusAt && startCurrentOkAt > startCurrentStartAt &&
-          startCurrentOkEnd > startCurrentOkAt,
+const startCurrentBeforeStart = statusWrites(startCurrent.slice(0, startCurrentStartAt));
+assert.ok(startCurrentStart >= 0 && startCurrentOkAt > startCurrentStartAt &&
+          startCurrentOkEnd > startCurrentOkAt && startCurrentBeforeStart.length > 0 &&
+          startCurrentBeforeStart.at(-1)[0] === 'set_status(false, "");',
   "start_current_client must reset the MQTT status before starting the client");
-assert.doesNotMatch(startCurrent.slice(startCurrentOkAt, startCurrentOkEnd), /set_status\(/,
+assert.equal(statusWrites(startCurrent.slice(startCurrentStartAt, startCurrentOkEnd)).length, 0,
   "a successful client start must leave the connection state to MQTT_EVENT_CONNECTED");
+// The resume step runs outside mqtt_task's exception boundary and set_status also runs on esp-mqtt's
+// unguarded event task, so the stored reason must stay a literal pointer that cannot allocate.
+assert.match(mqtt, /static const char\*\s+s_error\s*=\s*"";/,
+  "the MQTT status reason must stay a non-allocating literal pointer");
 assert.match(mainCmake,
   /set_source_files_properties\(mqtt_ha\.cpp PROPERTIES COMPILE_OPTIONS\s*"-fno-inline-functions-called-once;-Werror=frame-larger-than=2048"\)/,
   "the size-optimised MQTT object must retain helper boundaries and fail above its measured fixed-frame ceiling");

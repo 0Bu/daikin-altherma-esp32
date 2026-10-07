@@ -512,6 +512,29 @@ try {
       replaceOnce("main/mqtt_ha.cpp",
         "state.wait_s = state.backoff_s;",
         "state.wait_s = 0;")],
+    ["a successful MQTT resume overwrites MQTT_EVENT_CONNECTED", () =>
+      replaceOnce("main/mqtt_ha.cpp",
+        "s_client_running.store(true, std::memory_order_release);\n    s_transport_paused.store(false, std::memory_order_release);\n    state = {};",
+        "set_status(false, \"\");\n    s_client_running.store(true, std::memory_order_release);\n    s_transport_paused.store(false, std::memory_order_release);\n    state = {};")],
+    ["the MQTT resume writes the status right after the start", () =>
+      replaceOnce("main/mqtt_ha.cpp", "const esp_err_t start_rc = start_client_transport();",
+        "const esp_err_t start_rc = start_client_transport();\n    set_status(false, \"\");")],
+    ["a failed MQTT resume no longer states its reason", () =>
+      replaceOnce("main/mqtt_ha.cpp", "set_status(false, \"transport resume failed\");", "")],
+    ["the MQTT resume starts without resetting a stale status", () =>
+      replaceOnce("main/mqtt_ha.cpp",
+        "set_status(false, \"\");\n    const esp_err_t start_rc = start_client_transport();",
+        "const esp_err_t start_rc = start_client_transport();")],
+    ["the client start writes the status before checking its result", () =>
+      replaceOnce("main/mqtt_ha.cpp", "const esp_err_t rc = start_client_transport();",
+        "const esp_err_t rc = start_client_transport();\n    set_status(false, \"\");")],
+    ["a successful client start overwrites MQTT_EVENT_CONNECTED", () =>
+      replaceOnce("main/mqtt_ha.cpp",
+        "s_transport_paused.store(false, std::memory_order_release);\n        return true;",
+        "s_transport_paused.store(false, std::memory_order_release);\n        set_status(false, \"\");\n        return true;")],
+    ["the MQTT status reason becomes an allocating string", () =>
+      replaceOnce("main/mqtt_ha.cpp", "static const char*              s_error   = \"\";",
+        "static std::string             s_error   = \"\";")],
     ["Weather no longer requests the MQTT transport pause", () =>
       replaceOnce("main/weather_forecast.cpp", "mqtt_transport_pause_for_network_heap();",
         "mqtt_transport_pause_bypassed();")],
