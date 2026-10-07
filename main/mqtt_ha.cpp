@@ -8,7 +8,8 @@
 //     the normal LWT-bearing publisher. After activation, a bus loss lasting 15 seconds marks
 //     availability offline once and then suppresses every ordinary publish until X10A returns;
 //     subscriptions stay alive. A shorter whole-sweep dropout neither flaps availability nor emits
-//     an empty X10A document.
+//     an empty X10A document. A clean transport stop for an OTA check or install retains `offline`
+//     first, since its DISCONNECT discards the LWT and an install restarts the board.
 //   • On (re)connect: mark availability "online", stream retained discovery configs for the active
 //     X10A profile, diagnostics and enabled ENV III, and retract every retired HomeHub/weather
 //     discovery config. HomeHub values stay on MQTT for non-HA consumers, but are deliberately not
@@ -160,6 +161,9 @@ static bool build_client(bool publisher_lwt);
 static esp_err_t start_client_transport();
 static bool start_current_client();
 static bool promote_client_to_publisher();
+// Counted publish wrapper, defined with mqtt_publish_id() below; the OTA pause step precedes both.
+static bool mqtt_publish(const std::string& topic, const char* payload, int len, int qos,
+                         int retain);
 
 // MQTT_EVENT_DATA runs on esp-mqtt's unguarded event task. It therefore only copies into this one
 // bounded frame and posts it to a queue; JSON parsing and all std::string work stay on the
@@ -339,6 +343,8 @@ static std::atomic<bool> s_x10a_publish_proven{false};
 static std::atomic<bool> s_publish_network_quiesced{true};
 static std::atomic<bool> s_transport_connecting{false};
 static std::atomic<bool> s_transport_pause_requested{false};
+// Raised by the OTA lease before its pause request; consumed by the stop that it precedes.
+static std::atomic<bool> s_transport_pause_withdraws_online{false};
 static std::atomic<bool> s_transport_paused{false};
 static std::atomic<bool> s_client_running{false};
 static_assert(std::atomic<bool>::is_always_lock_free,
@@ -448,6 +454,28 @@ static void source_cleanup_outbox_cleared_after_transport_stop() noexcept {
     s_connected_client_epoch.store(0, std::memory_order_release);
 }
 
+// The clean stop below discards the installation LWT, and an OTA install can restart the board
+// before this client reconnects (logic/mqtt_publish_gate.hpp). Publish the retained `offline` on
+// the same ordered stream first: esp-mqtt writes a connected publish synchronously, so the broker
+// stores it before it reads the DISCONNECT. No std::string is built; esp-mqtt makes two small
+// outbox allocations (freed by the stop) plus the TLS record any write needs. A failed write aborts
+// the session without DISCONNECT, so the broker fires the LWT instead; a refused publish only
+// leaves the previous, unwithdrawn behaviour.
+static __attribute__((noinline)) void mqtt_ota_withdraw_online() {
+    const bool ota_pause =
+        s_transport_pause_withdraws_online.exchange(false, std::memory_order_acq_rel);
+    if (!mqtt_pause_withdraws_online(ota_pause,
+                                     s_client_is_publisher.load(std::memory_order_acquire),
+                                     s_connected.load(std::memory_order_acquire)))
+        return;
+    // esp-mqtt also accepts a QoS-1 publish that a racing disconnect left queued; the stop then
+    // deletes it, but that dropped session already fired the LWT.
+    if (mqtt_publish(s_avail, "offline", 0, 1, 1))
+        diag_printf("mqtt: availability offline accepted before the OTA transport stop\n");
+    else
+        diag_printf("mqtt: availability offline refused before the OTA transport stop\n");
+}
+
 // Stop the complete esp-mqtt transport before acknowledging a competing OTA/Weather TLS owner.
 // esp-mqtt owns a separate task which can otherwise keep allocating record/keepalive/subscription
 // state after mqtt_task stopped publishing. This helper is deliberately scalar-only and is called
@@ -457,6 +485,7 @@ static __attribute__((noinline)) void mqtt_transport_pause_if_requested() {
         !s_client_running.load(std::memory_order_acquire) || !s_client) return;
 
     s_publish_network_quiesced.store(false, std::memory_order_release);
+    mqtt_ota_withdraw_online();
     const esp_err_t stop_rc = esp_mqtt_client_stop(s_client);
     if (stop_rc == ESP_OK) {
         source_cleanup_outbox_cleared_after_transport_stop();
@@ -2519,6 +2548,8 @@ static void mqtt_task(void*) {
         // The watchdog is fed ABOVE this, so a long download cannot false-trip it. The esp-mqtt
         // transport is cleanly stopped below as well: that removes MQTTS record churn and yields a
         // short deliberate broker gap without publishing the LWT, then the same client is resumed.
+        // Only an OTA pause first retains `offline`, because an install restarts the board inside
+        // that gap (mqtt_ota_withdraw_online()).
         // Bounded by logic/ota_quiesce.hpp — an operation that never finishes must not silence the
         // bridge for the rest of the boot.
         const bool ota_busy = ota_download_active();
@@ -3075,7 +3106,12 @@ void mqtt_transport_pause_for_network_heap() {
 }
 
 void mqtt_transport_resume_after_network_heap() {
+    s_transport_pause_withdraws_online.store(false, std::memory_order_release);
     s_transport_pause_requested.store(false, std::memory_order_release);
+}
+
+void mqtt_transport_withdraw_online_on_pause() {
+    s_transport_pause_withdraws_online.store(true, std::memory_order_release);
 }
 
 bool mqtt_transport_network_quiesced() {

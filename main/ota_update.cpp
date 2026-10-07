@@ -202,9 +202,13 @@ const char* ota_runtime_image_state_name(OtaRuntimeImageState state) {
 // proved that the small response is irrelevant to the binding allocation — TLS setup itself failed
 // while the MQTT publisher still competed for the largest contiguous block. The guard lives around
 // the whole task operation so every manifest/download exit and exception clears it in one place.
+// Unlike Weather, the lease also withdraws a connected publisher's retained `online` before the
+// clean MQTT stop: an install restarts the board while that client is stopped, and an install
+// always follows a check (logic/mqtt_publish_gate.hpp).
 struct OtaNetworkFlag {
     OtaNetworkFlag() {
         s_network_active.store(true, std::memory_order_release);
+        mqtt_transport_withdraw_online_on_pause();
         mqtt_transport_pause_for_network_heap();
     }
     ~OtaNetworkFlag() {

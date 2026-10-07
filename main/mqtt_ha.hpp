@@ -51,6 +51,10 @@ bool mqtt_publish_network_quiesced();
 void mqtt_transport_pause_for_network_heap();
 void mqtt_transport_resume_after_network_heap();
 bool mqtt_transport_network_quiesced();
+// OTA only, immediately before its pause request: a connected publisher retains `offline` ahead of
+// the clean stop, because an install can restart the board before that client reconnects
+// (logic/mqtt_publish_gate.hpp). Resume discards an intent that no stop consumed.
+void mqtt_transport_withdraw_online_on_pause();
 
 // Observation + decision-readiness status for the one configured living-room source. `received_ms` is
 // monotonic MQTT arrival time; source_unix_s is present only when the configured payload field was
