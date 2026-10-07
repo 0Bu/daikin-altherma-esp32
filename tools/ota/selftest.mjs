@@ -498,6 +498,30 @@ try {
     ["MQTT keepalive transport remains live beside OTA TLS", () =>
       replaceOnce("main/mqtt_ha.cpp", "esp_mqtt_client_stop(s_client);",
         "esp_mqtt_client_stop_bypassed(s_client);")],
+    ["the OTA lease no longer withdraws retained online before its MQTT stop", () =>
+      replaceOnce("main/ota_update.cpp", "mqtt_transport_withdraw_online_on_pause();\n", "")],
+    ["a Weather pause withdraws availability every refresh", () =>
+      replaceOnce("main/weather_forecast.cpp", "mqtt_transport_pause_for_network_heap();",
+        "mqtt_transport_withdraw_online_on_pause();\n        mqtt_transport_pause_for_network_heap();")],
+    ["the availability withdrawal follows the clean DISCONNECT", () =>
+      replaceOnce("main/mqtt_ha.cpp",
+        "    mqtt_ota_withdraw_online();\n    const esp_err_t stop_rc = esp_mqtt_client_stop(s_client);",
+        "    const esp_err_t stop_rc = esp_mqtt_client_stop(s_client);\n    mqtt_ota_withdraw_online();")],
+    ["the no-LWT subscriber client withdraws installation availability", () =>
+      replaceOnce("main/mqtt_ha.cpp",
+        "s_client_is_publisher.load(std::memory_order_acquire),\n", "true,\n")],
+    ["a disconnected publisher queues the marker into the outbox the stop deletes", () =>
+      replaceOnce("main/mqtt_ha.cpp", "s_connected.load(std::memory_order_acquire)))", "true))")],
+    ["the availability withdrawal is not retained", () =>
+      replaceOnce("main/mqtt_ha.cpp", "mqtt_publish(s_avail, \"offline\", 0, 1, 1))",
+        "mqtt_publish(s_avail, \"offline\", 0, 1, 0))")],
+    ["the withdrawal intent is read without being consumed", () =>
+      replaceOnce("main/mqtt_ha.cpp",
+        "s_transport_pause_withdraws_online.exchange(false, std::memory_order_acq_rel)",
+        "s_transport_pause_withdraws_online.load(std::memory_order_acquire)")],
+    ["an unconsumed withdrawal intent outlives its network lease", () =>
+      replaceOnce("main/mqtt_ha.cpp",
+        "    s_transport_pause_withdraws_online.store(false, std::memory_order_release);\n", "")],
     ["MQTT transport pause is never acknowledged", () =>
       replaceOnce("main/mqtt_ha.cpp",
         "s_transport_paused.store(true, std::memory_order_release);",

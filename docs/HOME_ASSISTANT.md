@@ -20,6 +20,13 @@ suspends every other publish until the bus responds again; a shorter whole-sweep
 changes availability nor publishes an empty retained X10A state. Recovery publishes `online` and a
 fresh state seed. Local HTTP diagnostics remain available throughout.
 
+A firmware update check or install pauses MQTT so that the update's TLS session gets the memory.
+Before that pause the firmware publishes `offline`, so the entities show as unavailable during the
+update and do not keep a stale `online` if the updated firmware never reaches the heat pump. After a
+check without an install, MQTT reconnects and publishes `online` again. After an install, `online`
+returns with the new firmware's first valid X10A reply. The periodic weather refresh also pauses
+MQTT for a few seconds, but leaves availability unchanged.
+
 ## Topics
 
 `<base>` defaults to `daikin-altherma-esp32`, `<prefix>` to `homeassistant`. The device's message

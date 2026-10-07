@@ -104,4 +104,20 @@ inline MqttPublishGateDecision mqtt_publish_gate_step(MqttPublishGateState state
     return d;
 }
 
+// The network-heap pause stops esp-mqtt cleanly. Its DISCONNECT makes the broker discard the
+// installation LWT while the retained availability still reads `online`. An OTA install ends in
+// esp_restart() with that transport still stopped, and the next boot connects without an LWT until
+// X10A answers, so the stale `online` would outlive the boot, indefinitely if X10A never returns.
+// Every OTA pause therefore withdraws it first, the check too: an install always consumes a check
+// that finished seconds earlier, usually before a TLS broker has passed its resume gate, so the
+// install's own pause finds the client already stopped. A check that is not followed by an install
+// resumes the same client, and the ordinary reconnect announce restores `online` once X10A is live.
+// A Weather pause is never followed by a restart and keeps its short gap without availability
+// churn. Only the LWT-bearing publisher speaks for the installation, and only a connected client
+// can still put the marker on the stream ahead of the DISCONNECT.
+inline constexpr bool mqtt_pause_withdraws_online(bool ota_pause, bool publisher_client,
+                                                  bool mqtt_connected) {
+    return ota_pause && publisher_client && mqtt_connected;
+}
+
 } // namespace daik

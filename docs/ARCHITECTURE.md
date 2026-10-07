@@ -2118,7 +2118,16 @@ The Home Assistant bridge:
   per-cycle build is wrapped in a try/catch: an OOM `std::string` build skips the cycle rather than
   throwing through the FreeRTOS task and rebooting.
 - **Availability / LWT** on `<base>/status` (`online`/`offline`, retained) — the broker's
-  last-will marks the device offline if it drops, and every sensor's `avty_t` points at it.
+  last-will marks the device offline if it drops, and every sensor's `avty_t` points at it. A
+  deliberate clean stop (the OTA/Weather network-heap pause) sends DISCONNECT, so the broker
+  discards that will while the retained `online` stays. An OTA install restarts the board inside
+  that stop, and the next boot has no will until X10A answers. Every OTA pause (check and install)
+  therefore lets a connected publisher retain `offline` on the same stream just before the stop
+  (`logic/mqtt_publish_gate.hpp`). An install always consumes a check that finished seconds
+  earlier, usually before an MQTTS client has passed its resume gate, so the check's marker is the
+  one an install normally keeps. A check without an install resumes the client, and the ordinary
+  reconnect announce restores `online` once X10A is live. Weather pauses are never followed by a
+  restart and keep their short gap without availability churn.
 - **Heartbeat topic** `<base>/heartbeat` (not retained) carries board/link diagnostics, separate from
   heat-pump values, built by `logic/heartbeat.hpp` (host-tested). The payload is a **flat** JSON object
   — each field carried under its block name as a prefix rather than nested `wifi`/`mqtt`/`bus`
@@ -2745,7 +2754,9 @@ Structure:
   it runs under esp-mqtt's API lock and waiting there would deadlock the publisher's clean
   `esp_mqtt_client_stop()` against the task watchdog. OTA and Weather instead request a transport
   pause, then wait up to 15 seconds for the MQTT owner task to stop/join the complete client and
-  acknowledge it before their own TLS open. This also removes keepalive, subscribed-message and
+  acknowledge it before their own TLS open. Only the OTA lease also raises an availability
+  withdrawal, which a connected publisher executes as one retained QoS-1 `offline` just before the
+  stop (see *Availability / LWT*). This also removes keepalive, subscribed-message and
   MQTTS dynamic-record churn for the whole network-heap interval; the same client resumes only after
   the owner flag is clear. A TLS broker then needs four stable 56/24-KiB INTERNAL-heap samples
   before restart, and a direct start failure uses exponential backoff capped at 60 seconds instead
