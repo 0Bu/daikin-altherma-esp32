@@ -797,7 +797,7 @@ jobs:
 
       - name: Upload compile diagnostics
         if: needs.mechanical_gates.result == 'success' && needs.mechanical_gates.outputs.firmware == 'yes'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7
         with:
           name: daikin-altherma-esp32-${{ steps.stamp.outputs.disp }}
           retention-days: 7
@@ -1048,7 +1048,7 @@ jobs:
       # A full rerun rebuilds the same run/source/version; replace only this run-local bundle.
       # A failed-jobs-only publisher retry still downloads its original unchanged handoff.
       - name: Upload firmware artifacts
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7
         with:
           name: daikin-altherma-esp32-${{ steps.stamp.outputs.disp }}
           overwrite: true
@@ -1168,7 +1168,7 @@ jobs:
 
       - name: Upload dev publication proof
         if: needs.trusted_build.outputs.mode == 'dev'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7
         with:
           name: dev-publication-proof-${{ github.run_attempt }}
           path: ${{ runner.temp }}/dev-publication-proof/dev-publication-proof.json
