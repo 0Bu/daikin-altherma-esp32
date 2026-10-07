@@ -1097,6 +1097,32 @@ assert.match(mqtt,
 assert.match(resumeStep,
   /state\.backoff_s < kMqttResumeBackoffMaxS \/ 2[\s\S]{0,180}?kMqttResumeBackoffMaxS/,
   "direct esp-mqtt restart failures must have a bounded exponential retry interval");
+// Once the client has started, the connection status belongs to esp-mqtt's event handler: a LAN
+// broker can deliver MQTT_EVENT_CONNECTED before esp_mqtt_client_start() returns, so a status write
+// after the start pinned /status — and the bench delivery gate — at "disconnected" while the client
+// was connected (seen after an OTA check on the bench). Both start paths reset the status first and
+// never write it on success.
+const resumeStatusAt = resumeStep.indexOf('set_status(false, "")', stableResumeAt);
+assert.ok(resumeStatusAt > stableResumeAt && resumeStatusAt < startResumeAt,
+  "resume must reset the MQTT status before starting the client, never after");
+assert.doesNotMatch(resumeStep.slice(runningResumeAt), /set_status\(/,
+  "a successful resume must leave the connection state to MQTT_EVENT_CONNECTED");
+assert.match(resumeStep.slice(startResumeAt, backoffResumeAt),
+  /set_status\(false, "transport resume failed"\)/,
+  "a failed resume must state why the client is not connected");
+const startCurrentStart = mqtt.indexOf("static bool start_current_client() {");
+const startCurrentEnd = mqtt.indexOf("\n}\n", startCurrentStart);
+const startCurrent = mqtt.slice(startCurrentStart, startCurrentEnd);
+const startCurrentStatusAt = startCurrent.indexOf('set_status(false, "")');
+const startCurrentStartAt = startCurrent.indexOf("start_client_transport()");
+const startCurrentOkAt = startCurrent.indexOf("if (rc == ESP_OK) {", startCurrentStartAt);
+const startCurrentOkEnd = startCurrent.indexOf("return true;", startCurrentOkAt);
+assert.ok(startCurrentStart >= 0 && startCurrentStatusAt >= 0 &&
+          startCurrentStartAt > startCurrentStatusAt && startCurrentOkAt > startCurrentStartAt &&
+          startCurrentOkEnd > startCurrentOkAt,
+  "start_current_client must reset the MQTT status before starting the client");
+assert.doesNotMatch(startCurrent.slice(startCurrentOkAt, startCurrentOkEnd), /set_status\(/,
+  "a successful client start must leave the connection state to MQTT_EVENT_CONNECTED");
 assert.match(mainCmake,
   /set_source_files_properties\(mqtt_ha\.cpp PROPERTIES COMPILE_OPTIONS\s*"-fno-inline-functions-called-once;-Werror=frame-larger-than=2048"\)/,
   "the size-optimised MQTT object must retain helper boundaries and fail above its measured fixed-frame ceiling");

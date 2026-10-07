@@ -554,8 +554,14 @@ static __attribute__((noinline)) bool mqtt_transport_resume_step(MqttTransportRe
             return false;
         }
     }
+    // Reset the status BEFORE the start, as in start_current_client(): after it,
+    // MQTT_EVENT_CONNECTED can arrive at any moment, and a later "disconnected" write would stick
+    // while the client is in fact connected (/status and the delivery gate then wait for a
+    // reconnect that never comes).
+    set_status(false, "");
     const esp_err_t start_rc = start_client_transport();
     if (start_rc != ESP_OK) {
+        set_status(false, "transport resume failed");
         diag_printf("mqtt: transport resume failed (%s) — retry in %u s\n",
                     esp_err_to_name(start_rc), state.backoff_s);
         state.wait_s = state.backoff_s;
@@ -569,7 +575,6 @@ static __attribute__((noinline)) bool mqtt_transport_resume_step(MqttTransportRe
     s_client_running.store(true, std::memory_order_release);
     s_transport_paused.store(false, std::memory_order_release);
     state = {};
-    set_status(false, "");
     diag_printf("mqtt: transport resumed after network heap operation\n");
     return true;
 }
@@ -2883,11 +2888,15 @@ static bool start_current_client() {
         set_status(false, "mqtt init failed");
         return false;
     }
+    // Reset the status BEFORE the start. By the time start_client_transport() returns, esp-mqtt's
+    // own task may already have delivered MQTT_EVENT_CONNECTED — a LAN broker answers within
+    // milliseconds — and a status write here would overwrite that truth with "disconnected" until
+    // some later reconnect. From the start on, only the event handler writes the connection state.
+    set_status(false, "");
     const esp_err_t rc = start_client_transport();
     if (rc == ESP_OK) {
         s_client_running.store(true, std::memory_order_release);
         s_transport_paused.store(false, std::memory_order_release);
-        set_status(false, "");
         return true;
     }
     set_status(false, "client start failed");
