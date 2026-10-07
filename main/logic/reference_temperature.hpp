@@ -3,6 +3,7 @@
 // It remains read-only: no function in this header calls the HomeHub actuator. Kept IDF-free so POST
 // validation, RFC3339 parsing, retained/restart behavior, plausibility and eligibility are host-tested.
 #include <cstddef>
+#include <array>
 #include <cstdint>
 #include <string_view>
 
@@ -42,6 +43,46 @@ struct SourceTimestampHighWater {
     }
     void reset() { *this = SourceTimestampHighWater{}; }
 };
+
+// Views of the exact saved source identity. Maximum age changes freshness policy, not provenance;
+// capture consent also has to match for a getter, but toggling it does not establish a new clock.
+struct ReferenceSourceBinding {
+    std::string_view name, topic, temperature_path, setpoint_topic, setpoint_path;
+    std::string_view timestamp_topic, timestamp_path, enabled_path, hvac_mode_path;
+    uint16_t         fixed_setpoint_tenths = 0;
+    bool             capture_enabled       = false;
+};
+
+inline ReferenceSourceBinding reference_effective_binding(ReferenceSourceBinding b) {
+    if (b.fixed_setpoint_tenths == 0 && b.setpoint_topic.empty()) b.setpoint_topic = b.topic;
+    if (b.timestamp_topic.empty() && !b.timestamp_path.empty()) b.timestamp_topic = b.topic;
+    return b;
+}
+
+inline std::array<std::string_view, 9> reference_binding_fields(const ReferenceSourceBinding& b) {
+    return {b.name,           b.topic,         b.temperature_path,
+            b.setpoint_topic, b.setpoint_path, b.timestamp_topic,
+            b.timestamp_path, b.enabled_path,  b.hvac_mode_path};
+}
+
+inline bool reference_binding_matches(const ReferenceSourceBinding& a,
+                                      const ReferenceSourceBinding& b, bool compare_capture = true,
+                                      bool compare_name = true) {
+    if (a.fixed_setpoint_tenths != b.fixed_setpoint_tenths ||
+        (compare_capture && a.capture_enabled != b.capture_enabled))
+        return false;
+    const auto left = reference_binding_fields(a), right = reference_binding_fields(b);
+    for (size_t i = compare_name ? 0 : 1; i < left.size(); ++i)
+        if (left[i] != right[i]) return false;
+    return true;
+}
+
+// Zero is reserved for a source that has never been applied. A queued frame is accepted only by
+// the very request under which its first fragment arrived, after that request was applied.
+inline constexpr bool reference_epoch_current(uint32_t frame_epoch, uint32_t applied_epoch,
+                                              uint32_t requested_epoch) {
+    return frame_epoch != 0 && frame_epoch == applied_epoch && applied_epoch == requested_epoch;
+}
 
 // Exact topics only. Wildcards would let one small ESP32 subscription receive an unbounded set of
 // unrelated payloads and make "which sensor produced this value?" ambiguous.
@@ -258,6 +299,29 @@ inline ReferenceFreshness reference_freshness(bool has_value, bool retained,
     return f;
 }
 
+// The room source's temperature, setpoint and timestamp topics arrive independently. Once a source
+// timestamp is mapped (its own topic, or a path inside the temperature payload), that timestamp is
+// the mapping's only age authority. Falling back to MQTT arrival would let a timestamp topic that
+// never delivers turn a live temperature into apparently fresh, eligible evidence, so until the
+// mapped time has arrived the value has no known age.
+inline bool reference_source_time_mapped(std::string_view time_topic, std::string_view time_path) {
+    return !time_topic.empty() || !time_path.empty();
+}
+
+inline ReferenceFreshness reference_room_freshness(bool source_time_mapped, bool has_value,
+                                                   bool retained, bool has_source_time,
+                                                   int64_t source_unix_s, uint64_t received_ms,
+                                                   int64_t now_unix_s, uint64_t now_ms,
+                                                   uint32_t max_age_s) {
+    if (has_value && source_time_mapped && !has_source_time) {
+        ReferenceFreshness f;
+        f.reason = "missing_source_time";
+        return f;
+    }
+    return reference_freshness(has_value, retained, has_source_time, source_unix_s, received_ms,
+                               now_unix_s, now_ms, max_age_s);
+}
+
 // Stable numeric vocabulary stored in the heartbeat. Code 0 is the only eligible state; all other
 // values are explicit reasons why no room error may reach a later controller. Never renumber these:
 // VictoriaMetrics history and alerts key on the integer while /status exposes the matching slug.
@@ -309,6 +373,7 @@ inline const char* reference_room_reason_name(ReferenceRoomReason reason) {
 }
 
 inline ReferenceRoomReason reference_room_freshness_reason(std::string_view reason) {
+    if (reason == "missing_source_time") return ReferenceRoomReason::MissingSourceTime;
     if (reason == "clock_unsynced") return ReferenceRoomReason::ClockUnsynced;
     if (reason == "future_timestamp") return ReferenceRoomReason::FutureTimestamp;
     if (reason == "retained_without_timestamp") return ReferenceRoomReason::RetainedWithoutTimestamp;
@@ -358,7 +423,12 @@ inline ReferenceRoomSample reference_room_sample(const ReferenceRoomRaw& raw,
     auto reject = [&](ReferenceRoomReason reason) { out.reason = reason; return out; };
     if (!raw.configured) return reject(ReferenceRoomReason::NotConfigured);
     if (!raw.has_temperature) return reject(ReferenceRoomReason::NoValue);
-    if (!raw.payload_valid) return reject(raw.payload_reason);
+    // Code 0 is reserved for an eligible sample. An invalid payload whose producer left the reason
+    // at Eligible is still a rejection, so it reports the generic invalid-payload reason instead.
+    if (!raw.payload_valid)
+        return reject(raw.payload_reason == ReferenceRoomReason::Eligible
+                          ? ReferenceRoomReason::InvalidPayload
+                          : raw.payload_reason);
     if (!freshness.fresh) return reject(reference_room_freshness_reason(freshness.reason));
     if (raw.temperature_c < REF_ROOM_TEMPERATURE_MIN_C ||
         raw.temperature_c > REF_ROOM_TEMPERATURE_MAX_C)

@@ -711,6 +711,9 @@ void history_modbus_reset(uint32_t target_fp) noexcept {
 uint32_t history_modbus_generation() { return s_mb_identity_generation.load(); }
 
 void history_circulation_reset() {
+    if (!s_mtx) return;
+    Lock lk(s_mtx);
+    if (!lk.acquired()) return;
     s_circulation_reset_requested.store(true);
     bump_history_epoch();
 }
@@ -776,13 +779,15 @@ void history_record_board() {
 
 void history_record_circulation() {
     if (!s_mtx) return;
-    const CirculationPumpSample circulation = circulation_pump_sample();
+    const uint32_t              circulation_generation = circulation_source_generation();
+    const CirculationPumpSample circulation            = circulation_pump_sample();
     const int64_t now_us = esp_timer_get_time();
     const uint32_t bucket = logic::history_bucket(now_us);
 
     Lock lk(s_mtx);
     if (!lk.acquired()) return;
     if (s_flash_forgotten.load()) return;
+    if (circulation_generation != circulation_source_generation()) return;
     advance_raster_locked(now_us, bucket);
     reset_circulation_locked(bucket);
     fold_circulation_locked(circulation);
@@ -869,7 +874,8 @@ void history_record(const CachedValue* v, size_t n, uint32_t source_generation) 
     const int64_t now_us = esp_timer_get_time();
     const uint32_t bucket = logic::history_bucket(now_us);
 
-    const CirculationPumpSample circulation = circulation_pump_sample();
+    const uint32_t              circulation_generation = circulation_source_generation();
+    const CirculationPumpSample circulation            = circulation_pump_sample();
 
     Lock lk(s_mtx);
     if (!lk.acquired()) return;
@@ -904,7 +910,7 @@ void history_record(const CachedValue* v, size_t n, uint32_t source_generation) 
         // discovered row-identity mismatch needs another retirement event here.
         if (!reset_requested && identity_changed) bump_history_epoch();
     }
-    reset_circulation_locked(bucket);
+    if (circulation_generation == circulation_source_generation()) reset_circulation_locked(bucket);
 
     for (size_t t = 0; t < TREND_COUNT; t++) {
         Trend& tr = P().ring[t];
@@ -944,7 +950,8 @@ void history_record(const CachedValue* v, size_t n, uint32_t source_generation) 
         if (d.kind == logic::TrendKind::BinaryEvent) tr.ring.fold_binary_event(sample);
         else tr.ring.fold(sample);
     }
-    fold_circulation_locked(circulation);
+    if (circulation_generation == circulation_source_generation())
+        fold_circulation_locked(circulation);
     persist_seal_locked();
 }
 
@@ -1047,9 +1054,11 @@ void history_record_env3(bool valid, float temperature_c, float humidity_pct, fl
     persist_seal_locked();
 }
 
-size_t history_snapshot(size_t t, HistorySample* out, size_t max) {
+size_t history_snapshot(size_t t, HistorySample* out, size_t max, uint32_t* epoch) {
+    if (epoch) *epoch = 0;
     if (t >= TREND_COUNT || !out || !max || !s_mtx) return 0;
     Lock lk(s_mtx);
+    if (lk.acquired() && epoch) *epoch = history_epoch();
     // Do not expose the old physical identity while its deferred reset is waiting for the poll task.
     if (!lk.acquired() || s_flash_forgotten.load() ||
         (s_reset_requested.load() && !independent_trend(logic::TRENDS[t])) ||
@@ -1057,16 +1066,20 @@ size_t history_snapshot(size_t t, HistorySample* out, size_t max) {
     return P().ring[t].ring.snapshot(out, max);
 }
 
-size_t history_modbus_snapshot(size_t t, HistorySample* out, size_t max) {
+size_t history_modbus_snapshot(size_t t, HistorySample* out, size_t max, uint32_t* epoch) {
+    if (epoch) *epoch = 0;
     if (t >= HOMEHUB_HISTORY_COUNT || !out || !max || !s_mtx) return 0;
     Lock lk(s_mtx);
+    if (lk.acquired() && epoch) *epoch = history_epoch();
     if (!lk.acquired() || s_flash_forgotten.load() || s_mb_reset_requested.load()) return 0;
     return P().mb_ring[t].snapshot(out, max);
 }
 
-size_t history_env3_snapshot(size_t t, HistorySample* out, size_t max) {
+size_t history_env3_snapshot(size_t t, HistorySample* out, size_t max, uint32_t* epoch) {
+    if (epoch) *epoch = 0;
     if (t >= ENV3_HISTORY_COUNT || !out || !max || !s_mtx) return 0;
     Lock lk(s_mtx);
+    if (lk.acquired() && epoch) *epoch = history_epoch();
     if (!lk.acquired() || s_flash_forgotten.load()) return 0;
     return P().env3_ring[t].snapshot(out, max);
 }

@@ -1,5 +1,5 @@
 {
-  "method": "Exact taken/outcome counts measured at this revision with Apple Clang 17.0.0 and GCC 13.3.0. Local profiles bind compiler family/major and platform slug (e.g. clang-17-darwin, gcc-13-darwin, gcc-13-linux-ubuntu24); authoritative GitHub profiles additionally bind runner OS/image because packaging can alter instrumentation. The gate compares repository history and rejects decreases; improvements require an immediate versioned update.",
+  "method": "Exact taken/outcome counts measured at this revision with Apple Clang 17.0.0 and GCC 13.3.0. Local profiles bind compiler family/major and platform slug (e.g. clang-17-darwin, gcc-13-darwin, gcc-13-linux-ubuntu24); authoritative GitHub profiles additionally bind runner OS/image because packaging can alter instrumentation. The gate compares repository history and rejects decreases; improvements require an immediate versioned update. Rebased AREA BASE headers were measured with Apple Clang 17, ESP-IDF-container GCC 13 and Ubuntu 26.04 GCC 15; changed GNU inventories match between local GNU profiles. The updated hosted GCC 15 expectations use that measured inventory and require confirmation by authoritative CI. No prior ratio is reduced.",
   "profiles": {
     "clang-17-darwin": {
       "main/logic/availability.hpp": {
@@ -311,8 +311,8 @@
         "taken": 27
       },
       "main/logic/reference_temperature.hpp": {
-        "outcomes": 288,
-        "taken": 184
+        "outcomes": 318,
+        "taken": 213
       },
       "main/logic/refrigerant_service.hpp": {
         "outcomes": 246,
@@ -327,8 +327,8 @@
         "taken": 45
       },
       "main/logic/state_dwell.hpp": {
-        "outcomes": 112,
-        "taken": 105
+        "outcomes": 116,
+        "taken": 109
       },
       "main/logic/syslog_policy.hpp": {
         "outcomes": 2,
@@ -677,8 +677,8 @@
         "taken": 37
       },
       "main/logic/reference_temperature.hpp": {
-        "outcomes": 322,
-        "taken": 208
+        "outcomes": 366,
+        "taken": 251
       },
       "main/logic/refrigerant_service.hpp": {
         "outcomes": 298,
@@ -693,8 +693,8 @@
         "taken": 56
       },
       "main/logic/state_dwell.hpp": {
-        "outcomes": 120,
-        "taken": 113
+        "outcomes": 126,
+        "taken": 119
       },
       "main/logic/syslog_policy.hpp": {
         "outcomes": 2,
@@ -1043,8 +1043,8 @@
         "taken": 37
       },
       "main/logic/reference_temperature.hpp": {
-        "outcomes": 322,
-        "taken": 208
+        "outcomes": 366,
+        "taken": 251
       },
       "main/logic/refrigerant_service.hpp": {
         "outcomes": 298,
@@ -1059,8 +1059,8 @@
         "taken": 56
       },
       "main/logic/state_dwell.hpp": {
-        "outcomes": 120,
-        "taken": 113
+        "outcomes": 126,
+        "taken": 119
       },
       "main/logic/syslog_policy.hpp": {
         "outcomes": 2,
@@ -1409,8 +1409,8 @@
         "taken": 37
       },
       "main/logic/reference_temperature.hpp": {
-        "outcomes": 322,
-        "taken": 208
+        "outcomes": 366,
+        "taken": 251
       },
       "main/logic/refrigerant_service.hpp": {
         "outcomes": 298,
@@ -1425,8 +1425,8 @@
         "taken": 56
       },
       "main/logic/state_dwell.hpp": {
-        "outcomes": 120,
-        "taken": 113
+        "outcomes": 126,
+        "taken": 119
       },
       "main/logic/syslog_policy.hpp": {
         "outcomes": 2,

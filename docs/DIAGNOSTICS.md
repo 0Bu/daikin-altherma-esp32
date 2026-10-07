@@ -1,6 +1,6 @@
 # Plant diagnostics in plain language
 
-<!-- user-docs-contract: 8b982ef62c9c3cd278b972a26d701c8507185ad08869d67246b1e0c700fea25a -->
+<!-- user-docs-contract: 801fd7d20569defa01e9bf64a4d798b8b3f92b60c96c4bc8d4823167b723ccc4 -->
 
 This guide is for owners who want to understand their heat pump without being heating specialists.
 Plant diagnostics are **off by default**. They run only after **Plant diagnostics** is explicitly
@@ -51,7 +51,8 @@ Changing or removing a source clears the browser's cached trends and pinned poin
 cannot restore them. A reboot also starts a new browser lifetime, even when the device restores
 compatible saved trends. The state ages beside individual values are separate from the 24-hour
 card: normal polling cadence counts as observed, while known update, forecast or memory-pressure
-pauses and a continuing run's resumed tail count as blind time. The version-2 age format rejects
+pauses and a continuing run's resumed tail count as blind time. A blind gap longer than two minutes,
+including the interval until the first returning sample, starts a new age. The version-3 format rejects
 older records, so those ages can restart after an update without proving that the plant changed state.
 
 The weather companion describes the two-hour window selected at the last successful fetch. That
@@ -109,7 +110,9 @@ discarded.
 loss in the detectable range from 0.8 K/h upward. It does not exclude faster continuous loss. **NOT
 AVAILABLE** after many discarded windows also does not identify the reason: charging, pump activity,
 a draw, unreadable data, and continuous loss that resembles a draw cannot be separated from the
-stored totals alone.
+stored totals alone. Changing the circulation-pump measurement's topic, value paths, age limit,
+on/off thresholds or confirmation time starts this check over; renaming it does not. **CHECKING**
+afterwards is expected and says nothing about the tank.
 
 **What this result does not establish:** A rapid temperature drop alone proves neither a leaking
 three-way valve nor poor insulation. The sensor measures one location in a stratified tank; hot-water

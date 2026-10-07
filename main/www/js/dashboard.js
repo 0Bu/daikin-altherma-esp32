@@ -709,6 +709,7 @@ function roomSourceStatus(r, mqtt) {
     return { key: "waiting", detail: t("ref.detail.waiting"), cls: "warn" };
   if (!r.fresh) {
     const freshnessDetail = ({
+      missing_source_time: t("dyn.room_no_time"),
       retained_without_timestamp: t("ref.time_untrusted"),
       clock_unsynced: t("ref.clock_unsynced"),
       future_timestamp: t("dyn.room_future_time"),
@@ -963,7 +964,10 @@ function dynamicControlCardHtml() {
       LANG, { maximumFractionDigits: 2 });
     if (r.has_setpoint) setpoint = Number(r.setpoint_c).toLocaleString(
       LANG, { maximumFractionDigits: 2 });
-    const seconds = Number.isFinite(r.age_s) ? r.age_s : r.received_ago_s;
+    // The firmware sends age_s exactly when it has a trusted age (source time, or a live non-retained
+    // arrival). Otherwise (missing, unusable or unsynced source time, or a retained replay) the
+    // reading has no known age, and the MQTT arrival clock must not stand in for it.
+    const seconds = Number.isFinite(r.age_s) ? r.age_s : null;
     age = Number.isFinite(seconds) ? (seconds < 2 ? t("ref.now") : t("ref.ago", seconds))
       : t("ref.age_unknown");
   }
