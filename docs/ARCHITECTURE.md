@@ -2559,8 +2559,9 @@ Structure:
   manifest-TLS pressure with MQTT recovery. It returns before release staging or production target
   construction. Only read-only observer GETs interrupted by reboot are sampled again; a complete
   malformed response fails hard, and the update POST has no retry or compensating write. The unwired bench does not require
-  X10A or optional weather. Ordinary updates use OTA; signed NVS-preserving USB remains
-  bootstrap/recovery only. Current firmware exposes its boot-latched pending/valid state through
+  X10A or optional weather. Ordinary updates use OTA; signed NVS-preserving USB remains limited to
+  bootstrap, recovery and an explicitly requested pre-merge test of an exact local head, which is
+  never a delivery. Current firmware exposes its boot-latched pending/valid state through
   compact `/ota/status`; the ordinary bench dwell still proves the documented service conditions and
   remains compatible with the older stable image used during its rollback exercise.
 - **Production promotion is a staged, one-write transaction.**
