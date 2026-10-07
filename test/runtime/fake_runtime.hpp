@@ -6,6 +6,7 @@
 // in the IDF-free headers included below and are called by the adapters.
 
 #include "logic/chunk_sink.hpp"
+#include "logic/config_model.hpp"
 #include "logic/config_store.hpp"
 #include "logic/crc.hpp"
 #include "logic/http_body.hpp"
@@ -425,15 +426,23 @@ public:
         return true;
     }
 
-    bool save_http(RuntimeConfigSnapshot requested, bool require_link) {
-        if (!require_link && requested.revision != current_.revision) {
+    // config.cpp's save_whole: the revision decision is the production one; only the NVS and RAM
+    // plumbing is modelled here. A Stale X10A save returns false before any write.
+    bool save_http(RuntimeConfigSnapshot requested, bool owns_link) {
+        switch (daik::config_save_revision(owns_link, requested.revision, current_.revision)) {
+        case daik::ConfigSaveRevision::Current:
+            break;
+        case daik::ConfigSaveRevision::ReconcileDetected:
             requested.link     = current_.link;
             requested.profile  = current_.profile;
             requested.fp_valid = current_.fp_valid;
+            break;
+        case daik::ConfigSaveRevision::Stale:
+            return false;
         }
         if (persistence_.save_config(requested.service) != NvsResult::Ok) return false;
         const bool link_ok = persistence_.save_link(requested.link) == NvsResult::Ok;
-        if (require_link && !link_ok) return false;
+        if (owns_link && !link_ok) return false;
         current_.service = std::move(requested.service);
         if (link_ok) current_.link = requested.link;
         current_.profile  = requested.profile;

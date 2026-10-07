@@ -970,8 +970,8 @@ import sys
 p = sys.argv[1]
 s = open(p).read()
 seed = s.replace(
-    "        if (modbus_was_enabled) mqtt_request_modbus_cleanup();\n",
-    "        if (modbus_was_enabled && !config_modbus_enabled(c)) mqtt_request_modbus_cleanup();\n",
+    "            if (modbus_was_enabled) mqtt_request_modbus_cleanup();\n",
+    "            if (modbus_was_enabled && !config_modbus_enabled(c)) mqtt_request_modbus_cleanup();\n",
     1)
 assert seed != s, "seed 51 did not apply — HomeHub identity cleanup condition moved"
 open(p, "w").write(seed)
@@ -1028,13 +1028,14 @@ python3 - "$TMP/main/http_config.cpp" <<'PY4'
 import sys
 p = sys.argv[1]
 s = open(p).read()
-needle = "        if (modbus_was_enabled) mqtt_request_modbus_cleanup();\n"
+needle = "            if (modbus_was_enabled) mqtt_request_modbus_cleanup();\n"
 assert needle in s, "seed 55 did not apply — ordered HomeHub cleanup moved"
 s = s.replace(needle, "", 1)
-save = ('    if (!config_save(c, /*require_link=*/x10a_sent))\n'
-        '        return send_err(req, "500 Internal Server Error", "config write failed");\n')
+save = ('        } else if (!config_save(c)) {\n'
+        '            return send_err(req, "500 Internal Server Error", "config write failed");\n'
+        '        }\n')
 assert save in s, "seed 55 did not apply — HomeHub save boundary moved"
-s = s.replace(save, save + "    if (modbus_was_enabled) mqtt_request_modbus_cleanup();\n", 1)
+s = s.replace(save, save + "        if (modbus_was_enabled) mqtt_request_modbus_cleanup();\n", 1)
 open(p, "w").write(s)
 PY4
 expect_red "HomeHub cleanup admitted before cache/source cutover" run_contract
@@ -1046,8 +1047,8 @@ python3 - "$TMP/main/http_config.cpp" <<'PY4'
 import sys
 p = sys.argv[1]
 s = open(p).read()
-old = "        mb_reconfigure(modbus_enabled);\n"
-new = "        mb_reconfigure(config_modbus_enabled(config()));\n"
+old = "            mb_reconfigure(modbus_enabled);\n"
+new = "            mb_reconfigure(config_modbus_enabled(config()));\n"
 seed = s.replace(old, new, 1)
 assert seed != s, "seed 56 did not apply — staged HomeHub enable cutover moved"
 open(p, "w").write(seed)

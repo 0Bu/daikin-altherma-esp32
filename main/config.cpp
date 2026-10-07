@@ -383,7 +383,9 @@ void config_load() {
     publish(c);
 }
 
-bool config_save(const Config& requested, bool require_link) {
+// The one whole-struct save behind config_save (owns_link=false) and config_save_link (true); see
+// config.hpp for each caller's contract.
+static ConfigSaveResult save_whole(const Config& requested, bool owns_link) {
     // Persist user settings (WiFi + MQTT + syslog + NTP) and the X10A link cache (RX/TX pins +
     // protocol). The MODEL is intentionally NOT written — profile + fingerprint (fp_*) are re-derived
     // every boot.
@@ -403,13 +405,15 @@ bool config_save(const Config& requested, bool require_link) {
     // and may hold readers briefly, but this is the only way RAM and the atomic link entry can keep
     // one ordering when /set_hp races a long-running detection sweep.
     Lock lk(g_mtx);
+    // The only concurrent writer is auto-detection. An unrelated HTTP form owns service fields, not
+    // the detected X10A session, so a snapshot taken before detection must carry forward the newly
+    // proven model/link rather than silently reverting them on publication. An X10A /set_hp derived
+    // its model fields from that older snapshot and must derive them again (config_save_revision).
+    const ConfigSaveRevision revision =
+        config_save_revision(owns_link, requested.runtime_revision, g_cfg.runtime_revision);
+    if (revision == ConfigSaveRevision::Stale) return ConfigSaveResult::Stale;
     Config c = requested;
-    if (!require_link && requested.runtime_revision != g_cfg.runtime_revision) {
-        // The only concurrent writer is auto-detection. An unrelated HTTP form owns service fields,
-        // not the detected X10A session, so a snapshot taken before detection must carry forward the
-        // newly proven model/link rather than silently reverting them on publication.
-        reconcile_detected_config(c, g_cfg);
-    }
+    if (revision == ConfigSaveRevision::ReconcileDetected) reconcile_detected_config(c, g_cfg);
     ConfigBlob b;
     b.wifi_ssid = c.wifi_ssid;                 b.wifi_pass = c.wifi_pass;
     b.wifi_ssid_backup = c.wifi_ssid_backup;   b.wifi_pass_backup = c.wifi_pass_backup;
@@ -468,7 +472,7 @@ bool config_save(const Config& requested, bool require_link) {
     if (!config_blob_strings_fit(b)) {
         diag_printf("config: refusing to save — a setting exceeds the %u-byte field limit\n",
                     static_cast<unsigned>(CONFIG_BLOB_MAX_STR));
-        return false;
+        return ConfigSaveResult::Failed;
     }
     // Stage every allocation and the exact RAM successor before the first durable write. A
     // bad_alloc after nvs_set_blob("cfg") would otherwise report an unchanged 503/500 to the HTTP
@@ -487,7 +491,7 @@ bool config_save(const Config& requested, bool require_link) {
         // The atomic write failed, so the PREVIOUS blob is still intact — nothing net saved. Don't
         // publish RAM; the caller turns `false` into a 500 and skips the reboot.
         diag_printf("config: NVS blob write failed key=cfg err=%s — nothing saved\n", esp_err_to_name(e));
-        return false;
+        return ConfigSaveResult::Failed;
     }
 
     // The link remains a separate ownership domain, but its four fields are ONE atomic entry. It is
@@ -497,15 +501,21 @@ bool config_save(const Config& requested, bool require_link) {
     if (!link_ok)
         diag_printf("config: atomic link-cache write failed after service save (%s; previous link "
                     "remains intact)\n", esp_err_to_name(link_err));
-    if (!config_save_succeeded(/*blob_ok=*/true, link_ok, require_link)) {
+    if (!config_save_succeeded(/*blob_ok=*/true, link_ok, owns_link)) {
         // /set_hp owns the link and cannot call this a save when its cache did not land. Do not
         // publish its requested pins to RAM or wake the poll task. (The atomic blob also landed, but
         // /set_hp changed none of its fields; for every other route that blob is the requested save.)
-        return false;
+        return ConfigSaveResult::Failed;
     }
     g_cfg = std::move(published);
-    return true;
+    return ConfigSaveResult::Saved;
 }
+
+bool config_save(const Config& c) {
+    return save_whole(c, /*owns_link=*/false) == ConfigSaveResult::Saved;
+}
+
+ConfigSaveResult config_save_link(const Config& c) { return save_whole(c, /*owns_link=*/true); }
 
 // ── Field-owned commits (the detection path) ─────────────────────────────────────────────────────
 // These exist so the poll task never writes a field it doesn't own. It snapshots the config, then

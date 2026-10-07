@@ -236,6 +236,12 @@ suite cannot link: fresh firmware runs one persisted search before HTTP, the Mod
 browses mDNS, and an explicitly empty address creates no task or future boot search. The dialog's
 manual endpoint returns a found address to the form but cannot persist it behind Save/Cancel.
 
+`node test/test_config_ownership_contract.mjs` pins where the firmware calls the configuration
+ownership rule the host suite decides: `config.cpp` compares revisions with `config_save_revision`
+under the config mutex and returns Stale before any copy or NVS write; `/set_hp` is the only
+link-owning saver; every attempt derives the X10A patch from its own fresh `config()`; and only a
+saved request reconfigures the poll task. It also binds the runtime harness to the same decision.
+
 `node test/test_transport_contract.mjs` also pins the device's static LAN identity on both
 transports: DHCP options 12 and 60 come from the hostname installed before the client starts, with
 no live DHCP stop/start mutation, while the `_http._tcp` mDNS record exposes only the fixed product,
@@ -402,7 +408,10 @@ One entry per `test_*()` in [`test_logic.cpp`](test_logic.cpp), in the order `ma
   rules, the `/set_hp` fingerprint and X10A-observation reset scopes (profile/RX/TX reset it;
   HomeHub-only changes do not), and the field-owned detection patches (`apply_link` /
   `apply_model` touch only the link / model — a link commit must not revert a concurrent
-  `/set_wifi`).
+  `/set_wifi`). In the other direction, `config_save_revision` and `set_hp_apply_x10a` cover an
+  HTTP save whose snapshot a detection commit overtook: a service save carries detection forward,
+  and an X10A `/set_hp` is refused as Stale and re-derived from the fresh snapshot, with a
+  conflicting-save witness that fails on the old "stale snapshot wins" rule.
 - `logic/lwt_select.hpp` — the web UI's leaving-water MEASUREMENT picker (twin of `www/js/schematic.js`
   `vLwt`): the pre-BUH heat-exchanger outlet (R1T) is chosen over a setpoint, a mixed-zone R1T, or
   the post-BUH (R2T) twin, across the four alias label forms — and, catalog-wide, every detectable

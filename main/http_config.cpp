@@ -786,52 +786,44 @@ static esp_err_t set_circulation(httpd_req_t* req) {
     return http_send_json(req, "{\"ok\":true,\"saved\":true,\"reboot\":false}");
 }
 
+// An X10A /set_hp derives its model fields from one config() snapshot, and a detection commit can
+// land between that snapshot and the save; config_save_link then refuses the save as Stale. One
+// sweep commits at most a link and a model back to back, so a fresh snapshot settles within a few
+// attempts.
+static constexpr int SET_HP_SAVE_ATTEMPTS = 3;
+
 static esp_err_t set_hp(httpd_req_t* req) {
     char body[2048];
     const int body_len = http_read_body(req, body, sizeof(body));
     if (body_len < 0) return send_err(req, "400 Bad Request", "bad body");
     JsonGuard j(json_parse_document(std::string_view(body, static_cast<size_t>(body_len))));
     if (!j) return send_err(req, "400 Bad Request", "bad json");
-    Config c    = config();
-    const bool modbus_was_enabled = config_modbus_enabled(c);
-    const std::string old_mb_host = c.mb_host;
-    const int old_mb_port = c.mb_port;
-    const int old_mb_unit = c.mb_unit_id;
     // The RX/TX pins are the physical X10A wiring: PERSISTED so a manual override survives a reboot
-    // (config_save below). The model "profile" is session-only — only touched when the request
-    // explicitly sends "profile"; a wiring-only patch omits it so it does not re-select the model or
-    // invalidate a settled fingerprint (which would force a spurious re-detect next poll).
-    cJSON* profItem     = cJSON_GetObjectItem(j, "profile");
-    bool   profile_sent = cJSON_IsString(profItem);
-    cJSON* rxItem       = cJSON_GetObjectItem(j, "rx");
-    cJSON* txItem       = cJSON_GetObjectItem(j, "tx");
-    const bool x10a_sent = set_hp_updates_x10a(
-        profile_sent, cJSON_IsNumber(rxItem), cJSON_IsNumber(txItem));
-    const int old_rx = c.rx_pin;
-    const int old_tx = c.tx_pin;
+    // (config_save_link below). The model "profile" is session-only — only touched when the request
+    // explicitly sends "profile"; a wiring-only patch omits it so it does not re-select the model
+    // or invalidate a settled fingerprint (which would force a spurious re-detect next poll). The
+    // request is parsed once into a patch; logic/config_model.hpp's set_hp_apply_x10a applies it to
+    // each snapshot this handler reads.
+    cJSON*         profItem = cJSON_GetObjectItem(j, "profile");
+    cJSON*         rxItem   = cJSON_GetObjectItem(j, "rx");
+    cJSON*         txItem   = cJSON_GetObjectItem(j, "tx");
+    SetHpX10aPatch x10a;
+    x10a.profile_sent    = cJSON_IsString(profItem);
+    x10a.rx_sent         = cJSON_IsNumber(rxItem);
+    x10a.tx_sent         = cJSON_IsNumber(txItem);
+    x10a.rx              = ji(j, "rx", -1);
+    x10a.tx              = ji(j, "tx", -1);
+    const bool x10a_sent = set_hp_updates_x10a(x10a.profile_sent, x10a.rx_sent, x10a.tx_sent);
     // "auto" (the UI's only value) requests a fresh detection; a concrete id pins the model for this
     // session (accepted for API flexibility, never offered in the UI).
-    if (profile_sent) {
-        c.profile = profItem->valuestring;
-        if (c.profile != "auto" && !def::has_profile(c.profile.c_str())) {
+    if (x10a.profile_sent) {
+        x10a.profile = profItem->valuestring;
+        if (x10a.profile != "auto" && !def::has_profile(x10a.profile.c_str())) {
             j.reset();
             return send_err(req, "400 Bad Request", "unknown profile id");
         }
-        if (!set_hp_profile_compatible(c.profile, c.proto, c.fp_valid)) {
-            j.reset();
-            return send_err(req, "400 Bad Request", "profile incompatible with detected protocol");
-        }
-        if (c.profile != "auto") {
-            c.proto = protocol_for_profile(c.profile, c.proto);
-        }
     }
-    if (set_hp_clears_fingerprint(profile_sent, c.profile)) c.fp_valid = false;
     // proto is auto-detected (hp_detect.cpp), not set from the UI.
-    c.rx_pin    = ji(j, "rx", c.rx_pin);
-    c.tx_pin    = ji(j, "tx", c.tx_pin);
-    const bool reset_checkup =
-        set_hp_resets_checkup(profile_sent, old_rx, old_tx, c.rx_pin, c.tx_pin);
-    if (reset_checkup) c.x10a_identity_fp = 0;  // replaced below only for a committed manual model
     // The HomeHub Modbus stack (issue legacy-32). All optional — an omitted key keeps its stored
     // value, so a wiring-only patch (rx/tx) leaves the HomeHub untouched and the pin picker's
     // {profile:"auto",rx,tx} POST cannot switch anything on. This is a SECOND source, not an
@@ -851,80 +843,111 @@ static esp_err_t set_hp(httpd_req_t* req) {
         return send_err(req, "400 Bad Request",
                         "update X10A and HomeHub in separate requests");
     }
-    if (host_sent) {
-        c.mb_host = hostItem->valuestring;
-        c.mb_discovery_done = true;
-    }
-    c.mb_port           = ji(j, "mb_port", c.mb_port);
-    c.mb_unit_id        = ji(j, "mb_unit_id", c.mb_unit_id);
+    const bool        port_sent = cJSON_IsNumber(portItem);
+    const bool        unit_sent = cJSON_IsNumber(unitItem);
+    const std::string mb_host   = host_sent ? hostItem->valuestring : "";
+    const int         mb_port   = ji(j, "mb_port", 0);
+    const int         mb_unit   = ji(j, "mb_unit_id", 0);
     // `actuation_enabled` is deliberately NOT accepted: the register-54 write path is retired
     // (legacy-294) and an accepted-but-inert field would read like a capability that still exists.
-    const bool reset_mb_history = homehub_history_identity_changed(
-        old_mb_host, old_mb_port, old_mb_unit, c.mb_host, c.mb_port, c.mb_unit_id);
     j.reset();
-    std::string reason;
-    // Pass the real Kconfig-derived octal-SPI + status-LED facts (config.cpp) so validate() rejects a
-    // chip-reserved GPIO — a flash/strapping/JTAG pad the UI dropdown never offers but a raw curl POST
-    // could send — with the pin named, instead of range-accepting it and persisting a crash-loop pair.
-    if (!validate(c, reason, SOC_GPIO_PIN_COUNT - 1, hw_octal_spi(),
-                  config_reserved_pins(c).plus(net_eth_reserved_pins())))
-        return send_err(req, "400 Bad Request", reason.c_str());
-    // A selected preset adds the PCB fact the generic ESP32-S3 validator cannot know: only pads
-    // physically routed to this board's headers may carry X10A. Apply it only when THIS PATCH makes
-    // an X10A statement. /set_hp also owns the independent HomeHub fields; rejecting an empty-host
-    // disable because untouched legacy pins do not belong to a later-selected board makes HomeHub
-    // impossible to turn off. A raw/stale X10A request still cannot persist such a pair.
-    if (x10a_sent) {
-        if (const BoardPreset* board = board_selected_preset(c)) {
-            const ReservedPins used = config_reserved_pins(c).plus(net_eth_reserved_pins());
-            if (!board_preset_x10a_pin_offerable(board, c.rx_pin, hw_octal_spi(), used))
-                return send_err(req, "400 Bad Request", "rx_pin is not available on selected board");
-            if (!board_preset_x10a_pin_offerable(board, c.tx_pin, hw_octal_spi(), used))
-                return send_err(req, "400 Bad Request", "tx_pin is not available on selected board");
+    for (int attempt = 1;; ++attempt) {
+        Config            c                  = config();
+        const bool        modbus_was_enabled = config_modbus_enabled(c);
+        const std::string old_mb_host        = c.mb_host;
+        const int         old_mb_port        = c.mb_port;
+        const int         old_mb_unit        = c.mb_unit_id;
+        bool              reset_checkup      = false;
+        if (x10a_sent && !set_hp_apply_x10a(c, x10a, reset_checkup))
+            return send_err(req, "400 Bad Request", "profile incompatible with detected protocol");
+        if (host_sent) {
+            c.mb_host           = mb_host;
+            c.mb_discovery_done = true;
         }
-    }
-    // A concrete API profile is a committed decoding contract even though the UI always requests
-    // auto-detection. Give that manual contract the same stable profile/link scope as detection;
-    // otherwise history_reset() would leave target_fp=0 forever because no detect cycle runs. A
-    // wiring-only raw patch while a concrete profile is already active follows the same rule.
-    if (reset_checkup && c.profile != "auto")
-        c.x10a_identity_fp = logic::history_x10a_target_fingerprint(
-            c.profile.c_str(), c.rx_pin, c.tx_pin, static_cast<char>(c.proto));
-    // Stage every HomeHub value needed after persistence while the handler may still report an OOM
-    // honestly. The post-save path below accepts only POD and is noexcept: a successful durable
-    // write can therefore never become a false 503 or lose predecessor cleanup to a Config copy.
-    const uint32_t modbus_target_fp = logic::history_homehub_target_fingerprint(
-        config_modbus_host(c).c_str(), static_cast<uint32_t>(c.mb_port),
-        static_cast<uint32_t>(c.mb_unit_id));
-    const bool modbus_enabled = config_modbus_enabled(c);
-    // This route owns TWO independent durability domains. An explicit X10A statement requires all
-    // the atomic link-cache entry; a HomeHub-only request succeeds with the service blob and treats the
-    // unchanged X10A cache as best-effort maintenance. Mixed requests were rejected above, so a 500
-    // can no longer hide a HomeHub blob that already landed before a link-key failure.
-    if (!config_save(c, /*require_link=*/x10a_sent))
-        return send_err(req, "500 Internal Server Error", "config write failed");
-    if (reset_checkup) {
-        hp_poll_reconfigure();
-        checkup_reset();
-        dwell_reset();
-        history_reset();
-        if (c.x10a_identity_fp != 0) {
-            checkup_reset_on_detect(c.profile.c_str());
-            dwell_reset_on_detect(c.profile.c_str());
-            history_reset_on_detect(c.x10a_identity_fp);
+        if (port_sent) c.mb_port = mb_port;
+        if (unit_sent) c.mb_unit_id = mb_unit;
+        const bool reset_mb_history = homehub_history_identity_changed(
+            old_mb_host, old_mb_port, old_mb_unit, c.mb_host, c.mb_port, c.mb_unit_id);
+        std::string reason;
+        // Pass the real Kconfig-derived octal-SPI + status-LED facts (config.cpp) so validate()
+        // rejects a chip-reserved GPIO — a flash/strapping/JTAG pad the UI dropdown never offers
+        // but a raw curl POST could send — with the pin named, instead of range-accepting it and
+        // persisting a crash-loop pair.
+        if (!validate(c, reason, SOC_GPIO_PIN_COUNT - 1, hw_octal_spi(),
+                      config_reserved_pins(c).plus(net_eth_reserved_pins())))
+            return send_err(req, "400 Bad Request", reason.c_str());
+        // A selected preset adds the PCB fact the generic ESP32-S3 validator cannot know: only pads
+        // physically routed to this board's headers may carry X10A. Apply it only when THIS PATCH
+        // makes an X10A statement. /set_hp also owns the independent HomeHub fields; rejecting an
+        // empty-host disable because untouched legacy pins do not belong to a later-selected board
+        // makes HomeHub impossible to turn off. A raw/stale X10A request still cannot persist such
+        // a pair.
+        if (x10a_sent) {
+            if (const BoardPreset* board = board_selected_preset(c)) {
+                const ReservedPins used = config_reserved_pins(c).plus(net_eth_reserved_pins());
+                if (!board_preset_x10a_pin_offerable(board, c.rx_pin, hw_octal_spi(), used))
+                    return send_err(req, "400 Bad Request",
+                                    "rx_pin is not available on selected board");
+                if (!board_preset_x10a_pin_offerable(board, c.tx_pin, hw_octal_spi(), used))
+                    return send_err(req, "400 Bad Request",
+                                    "tx_pin is not available on selected board");
+            }
         }
+        // A concrete API profile is a committed decoding contract even though the UI always
+        // requests auto-detection. Give that manual contract the same stable profile/link scope as
+        // detection; otherwise history_reset() would leave target_fp=0 forever because no detect
+        // cycle runs. A wiring-only raw patch while a concrete profile is already active follows
+        // the same rule.
+        if (reset_checkup && c.profile != "auto")
+            c.x10a_identity_fp = logic::history_x10a_target_fingerprint(
+                c.profile.c_str(), c.rx_pin, c.tx_pin, static_cast<char>(c.proto));
+        // Stage every HomeHub value needed after persistence while the handler may still report an
+        // OOM honestly. The post-save path below accepts only POD and is noexcept: a successful
+        // durable write can therefore never become a false 503 or lose predecessor cleanup to a
+        // Config copy.
+        const uint32_t modbus_target_fp = logic::history_homehub_target_fingerprint(
+            config_modbus_host(c).c_str(), static_cast<uint32_t>(c.mb_port),
+            static_cast<uint32_t>(c.mb_unit_id));
+        const bool modbus_enabled = config_modbus_enabled(c);
+        // This route owns TWO independent durability domains. An explicit X10A statement requires
+        // the atomic link-cache entry and a snapshot no detection commit has overtaken; a
+        // HomeHub-only request succeeds with the service blob and treats the unchanged X10A cache
+        // as best-effort maintenance. Mixed requests were rejected above, so a 500 can no longer
+        // hide a HomeHub blob that already landed before a link-key failure.
+        if (x10a_sent) {
+            const ConfigSaveResult saved = config_save_link(c);
+            if (saved == ConfigSaveResult::Stale) {
+                if (attempt < SET_HP_SAVE_ATTEMPTS) continue;
+                return send_err(req, "409 Conflict", "configuration changed during save; retry");
+            }
+            if (saved != ConfigSaveResult::Saved)
+                return send_err(req, "500 Internal Server Error", "config write failed");
+        } else if (!config_save(c)) {
+            return send_err(req, "500 Internal Server Error", "config write failed");
+        }
+        if (reset_checkup) {
+            hp_poll_reconfigure();
+            checkup_reset();
+            dwell_reset();
+            history_reset();
+            if (c.x10a_identity_fp != 0) {
+                checkup_reset_on_detect(c.profile.c_str());
+                dwell_reset_on_detect(c.profile.c_str());
+                history_reset_on_detect(c.x10a_identity_fp);
+            }
+        }
+        if (reset_mb_history) {
+            history_modbus_reset(modbus_target_fp);
+            // The HomeHub stack is told separately, because it IS separate: this starts or stops
+            // its task and re-resolves its address without touching the X10A poll engine above.
+            mb_reconfigure(modbus_enabled);
+            // Publish the tombstone only after generation, status and cache have crossed to the new
+            // identity. mqtt_task can then never consume this request and republish predecessor A
+            // from the same cycle before the HomeHub owner notices B/disabled.
+            if (modbus_was_enabled) mqtt_request_modbus_cleanup();
+        }
+        return http_send_json(req, "{\"ok\":true}");
     }
-    if (reset_mb_history) {
-        history_modbus_reset(modbus_target_fp);
-        // The HomeHub stack is told separately, because it IS separate: this starts or stops its task
-        // and re-resolves its address without touching the X10A poll engine above.
-        mb_reconfigure(modbus_enabled);
-        // Publish the tombstone only after generation, status and cache have crossed to the new
-        // identity. mqtt_task can then never consume this request and republish predecessor A from
-        // the same cycle before the HomeHub owner notices B/disabled.
-        if (modbus_was_enabled) mqtt_request_modbus_cleanup();
-    }
-    return http_send_json(req, "{\"ok\":true}");
 }
 
 // Manual HomeHub discovery for the edit dialog. Unlike the one initial boot search, this does not

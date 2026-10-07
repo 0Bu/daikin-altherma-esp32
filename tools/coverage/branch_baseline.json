@@ -1,5 +1,5 @@
 {
-  "method": "Exact taken/outcome counts measured at this revision with Apple Clang 17.0.0 and GCC 13.3.0. Local profiles bind compiler family/major and platform slug (e.g. clang-17-darwin, gcc-13-darwin, gcc-13-linux-ubuntu24); authoritative GitHub profiles additionally bind runner OS/image because packaging can alter instrumentation. The gate compares repository history and rejects decreases; improvements require an immediate versioned update. The new detect_identity.hpp and the table-identity helper in profile_view.hpp were measured with Apple Clang 17, ESP-IDF-container GCC 13 and Ubuntu 26.04 GCC 15; both GNU inventories match. The updated hosted GCC 15 expectations use that measured inventory and require confirmation by authoritative CI. No prior ratio is reduced.",
+  "method": "Exact taken/outcome counts measured at this revision with Apple Clang 17.0.0 and GCC 13.3.0. Local profiles bind compiler family/major and platform slug (e.g. clang-17-darwin, gcc-13-darwin, gcc-13-linux-ubuntu24); authoritative GitHub profiles additionally bind runner OS/image because packaging can alter instrumentation. The gate compares repository history and rejects decreases; improvements require an immediate versioned update. The /set_hp revision decision and patch application added to config_model.hpp were measured with Apple Clang 17, ESP-IDF-container GCC 13 and Ubuntu 26.04 GCC 15; both GNU inventories match, and every new outcome is taken in all three. The updated hosted GCC 15 expectations use that measured inventory and require confirmation by authoritative CI. No prior ratio is reduced.",
   "profiles": {
     "clang-17-darwin": {
       "main/logic/availability.hpp": {
@@ -51,8 +51,8 @@
         "taken": 45
       },
       "main/logic/config_model.hpp": {
-        "outcomes": 238,
-        "taken": 185
+        "outcomes": 254,
+        "taken": 201
       },
       "main/logic/config_store.hpp": {
         "outcomes": 464,
@@ -421,8 +421,8 @@
         "taken": 45
       },
       "main/logic/config_model.hpp": {
-        "outcomes": 252,
-        "taken": 208
+        "outcomes": 270,
+        "taken": 226
       },
       "main/logic/config_store.hpp": {
         "outcomes": 434,
@@ -791,8 +791,8 @@
         "taken": 45
       },
       "main/logic/config_model.hpp": {
-        "outcomes": 252,
-        "taken": 208
+        "outcomes": 270,
+        "taken": 226
       },
       "main/logic/config_store.hpp": {
         "outcomes": 434,
@@ -1161,8 +1161,8 @@
         "taken": 45
       },
       "main/logic/config_model.hpp": {
-        "outcomes": 252,
-        "taken": 208
+        "outcomes": 270,
+        "taken": 226
       },
       "main/logic/config_store.hpp": {
         "outcomes": 434,

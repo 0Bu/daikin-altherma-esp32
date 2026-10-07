@@ -165,7 +165,11 @@ config.cpp/.hpp     → runtime config (daik_cfg): WiFi/MQTT + the one-shot WiFi
                       cache is also ONE CRC-checked atomic `link` blob, so a failed pin swap leaves the
                       previous complete link intact. A link-blob failure after a successful service
                       blob is logged but does not falsely fail an unrelated service save; /set_hp
-                      requires its link write and leaves RAM untouched on failure.
+                      requires its link write (config_save_link) and leaves RAM untouched on
+                      failure. A save whose snapshot a detection commit overtook is resolved by
+                      config_save_revision: a service save carries the detected link and model
+                      forward, while an X10A /set_hp is refused before any write and re-derived
+                      from a fresh snapshot (see Auto-detection).
                       config_commit_detected_link still applies a revision-current proven link to
                       RAM if only its cache write fails, so detection need merely run again after
                       reboot. config_load reads `cfg` and `link`
@@ -1610,6 +1614,15 @@ stale sweep is discarded — it cannot write old credentials or a previous link 
 received `{"ok":true}`. These helpers patch only detection-owned fields (`apply_link` / `apply_model`
 in `logic/config_model.hpp`, host-tested); whole-struct `config_save` remains for the HTTP handlers,
 which own the credential/service fields and are serialized on the single httpd task.
+The converse race, a detection commit landing between an HTTP handler's `config()` snapshot and its
+save, is decided under the same config mutex by `config_save_revision` (host-tested). A service
+route owns no detection field, so its save carries the newly detected link and model forward
+(`reconcile_detected_config`). An X10A `/set_hp` owns the link but derives profile, protocol,
+fingerprint validity, the observation identity and whether the pins changed from the snapshot it
+read; committing that snapshot would revert the detection, and patching it would mix two
+derivations. `config_save_link` therefore refuses it as Stale before any NVS write, and the handler
+applies its parsed patch (`set_hp_apply_x10a`, host-tested) to a fresh snapshot. One sweep commits at
+most a link and a model, so the handler gives up after three attempts with 409.
 
 - **Protocol S legacy unit** → directly applied with the dedicated `protocol_s` profile (no signature matching or capacity class ranking).
 - **exactly one candidate** → applied; the UI shows "Detected: <family> · ~kW".
@@ -3924,6 +3937,11 @@ POST /set_hp      {profile,rx,tx,mb_host,mb_port,mb_unit_id}
                   here — the UI language is its own setting now (POST /set_lang), no longer a /set_hp
                   field. RX/TX are auto-detected; when the bus is silent the Protocol card's pin dropdown
                   posts {profile:"auto",rx,tx} to re-run detection.
+                  An X10A request is judged against the config it is committed to: when a detection
+                  commit lands between the handler's snapshot and its save, the save is refused
+                  unwritten and the request is applied again to a fresh snapshot. After three such
+                  refusals it answers 409 {ok:false,error:"configuration changed during save; retry"}
+                  with nothing saved.
 POST /discover_homehub   {} -> run the bounded, manual `_http._tcp` mDNS browse and return
                   {ok:true,host:"<resolved IPv4>"}. Trusted-LAN only, no configuration write and no
                   Modbus-task reconfigure: the dialog fills its ordinary address field, and only its

@@ -313,6 +313,25 @@ inline bool config_save_succeeded(bool blob_ok, bool link_ok, bool require_link)
     return blob_ok && (!require_link || link_ok);
 }
 
+// How a whole-struct save treats a snapshot older than the live config. Every whole-struct writer
+// runs on the httpd task, so only auto-detection can advance the revision between a handler's
+// config() snapshot and its save:
+//
+//   * a service save owns no detection field, so it carries the newly detected link and model
+//     forward (reconcile_detected_config) and still commits its own fields;
+//   * an X10A /set_hp owns the link and derives profile, protocol, fingerprint validity and the
+//     observation identity from the snapshot it read. Committing that snapshot would revert the
+//     detection that landed meanwhile, and patching it with newer detection fields would mix two
+//     derivations. Its save is refused unchanged as Stale; the handler derives the request again
+//     from a fresh snapshot.
+enum class ConfigSaveRevision : uint8_t { Current, ReconcileDetected, Stale };
+
+inline ConfigSaveRevision config_save_revision(bool owns_link, uint32_t snapshot_revision,
+                                               uint32_t live_revision) {
+    if (snapshot_revision == live_revision) return ConfigSaveRevision::Current;
+    return owns_link ? ConfigSaveRevision::Stale : ConfigSaveRevision::ReconcileDetected;
+}
+
 // The address the Modbus stack should dial. Empty is disabled. Keeping this accessor makes the
 // task, /status and UI share that single rule instead of reintroducing an implicit Auto state.
 inline const std::string& config_modbus_host(const Config& c) {
@@ -618,6 +637,41 @@ inline bool set_hp_updates_x10a(bool profile_present, bool rx_present, bool tx_p
 // change appeared after reboot. One request must own exactly one domain for its result to be honest.
 inline bool set_hp_update_domains_compatible(bool x10a_present, bool homehub_present) {
     return !(x10a_present && homehub_present);
+}
+
+// The X10A half of one /set_hp request, parsed once so the handler can apply it to more than one
+// snapshot (config_save_revision). An absent key keeps the snapshot's value.
+struct SetHpX10aPatch {
+    bool        profile_sent = false;
+    std::string profile;
+    bool        rx_sent = false;
+    int         rx      = -1;
+    bool        tx_sent = false;
+    int         tx      = -1;
+};
+
+// Apply that patch to `c`, a snapshot of the live config, by the rules above. Every decision is
+// made against THIS snapshot: protocol compatibility, the protocol a concrete profile implies, and
+// whether the pins differ from the ones it holds. The caller has already rejected an unknown
+// profile id. Returns false when the profile is incompatible with the snapshot's detected protocol;
+// `c` is then partly patched and must be discarded. `reset_checkup` reports whether the request
+// changes the X10A observation identity; when it does, the identity is cleared for the caller to
+// re-derive.
+inline bool set_hp_apply_x10a(Config& c, const SetHpX10aPatch& p, bool& reset_checkup) {
+    reset_checkup    = false;
+    const int old_rx = c.rx_pin;
+    const int old_tx = c.tx_pin;
+    if (p.profile_sent) {
+        c.profile = p.profile;
+        if (!set_hp_profile_compatible(c.profile, c.proto, c.fp_valid)) return false;
+        if (c.profile != "auto") c.proto = protocol_for_profile(c.profile, c.proto);
+    }
+    if (set_hp_clears_fingerprint(p.profile_sent, c.profile)) c.fp_valid = false;
+    if (p.rx_sent) c.rx_pin = p.rx;
+    if (p.tx_sent) c.tx_pin = p.tx;
+    reset_checkup = set_hp_resets_checkup(p.profile_sent, old_rx, old_tx, c.rx_pin, c.tx_pin);
+    if (reset_checkup) c.x10a_identity_fp = 0;
+    return true;
 }
 
 // HomeHub history belongs to one physical Modbus target. Actuation consent and other /set_hp fields
