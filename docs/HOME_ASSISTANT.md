@@ -574,7 +574,8 @@ Whether the unit *clamps* at 7 or *wraps* to 0 is not documented and has not bee
 unit; until it has been, a delta of exactly −7 should be read as "unknown", not as a reset.
 
 **Verified live** — dated evidence, not a closed counter question. On 2026-07-26, a live 4-8 kW
-monobloc detected as `altherma_ebla_edla_d_series_4_8kw_monobloc` and running firmware
+unit (an Altherma 3 R split, read with the register-identical
+`altherma_ebla_edla_d_series_4_8kw_monobloc` table) running firmware
 `1.0.0-dev.188` published all 11 entities. All survived the Telegraf → VictoriaMetrics path as
 numbers rather than being dropped as strings: 11 of 11 series were continuous over an 18-hour
 window, with 28 390–28 394 samples each. Every counter and flag was `0`; the raw page dump on

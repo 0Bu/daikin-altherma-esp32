@@ -34,6 +34,7 @@
 #include "logic/mqtt_group.hpp" // is_json_number — keep numeric HomeHub values numeric in /values
 #include "logic/crashinfo.hpp"
 #include "logic/detect.hpp"
+#include "logic/detect_identity.hpp"
 #include "logic/json.hpp"
 #include "logic/query_flag.hpp"
 #include "logic/reference_temperature.hpp"
@@ -1714,6 +1715,11 @@ static void append_status_json(JsonOut& j, bool redact) {
         // identifiable" rather than asserting the (arbitrary) best-fit's name.
         int         total = 0;
         std::string cand, fams;
+        // The profile actually read (best-fit representative, generic, Protocol S or a manual
+        // choice) and a running tally of whether the candidates agree with it — model{} below
+        // reports only what that agreement establishes (logic/detect_identity.hpp).
+        const def::ModelName*    wm = def::model_name(c.profile.c_str());
+        logic::IdentityAgreement agree;
         if (c.fp_valid) {
             if (c.proto == Protocol::S) {
                 if (c.fp_pages != 0) {
@@ -1743,6 +1749,9 @@ static void append_status_json(JsonOut& j, bool redact) {
                     if (i) cand += ",";
                     cand += jstr(out[i]);
                     const def::ModelName* mn  = def::model_name(out[i]);
+                    logic::identity_agree(agree, wm ? wm->family : nullptr,
+                                          wm ? wm->marketing : nullptr, mn ? mn->family : nullptr,
+                                          mn ? mn->marketing : nullptr);
                     std::string           fam = mn ? mn->family : "Altherma";
                     if (std::find(seen.begin(), seen.end(), fam) == seen.end()) {
                         if (!seen.empty()) fams += ",";
@@ -1755,13 +1764,16 @@ static void append_status_json(JsonOut& j, bool redact) {
         j += ",\"candidates\":[" + cand + "]";
         j += ",\"families\":[" + fams + "]";
         j += ",\"ambiguous\":" + std::string(total > 1 ? "true" : "false");
-        // Display metadata for the profile actually being read (best-fit representative or
-        // generic).
-        const def::ModelName* wm = def::model_name(c.profile.c_str());
+        // Identity as far as the candidate set establishes it — not the tie-break's guess. The
+        // profile actually read stays in the top-level `profile.id`.
+        const logic::EstablishedIdentity who =
+            logic::established_identity(wm ? wm->name : nullptr, wm ? wm->family : nullptr,
+                                        wm ? wm->marketing : nullptr, agree, total);
+        auto opt = [](const char* s) { return s ? jstr(s) : std::string("null"); };
         j += ",\"model\":";
-        j += wm ? "{\"name\":" + jstr(wm->name) + ",\"family\":" + jstr(wm->family) +
-                      ",\"marketing\":" + jstr(wm->marketing) + "}"
-                : "null";
+        j += who.any() ? "{\"name\":" + opt(who.name) + ",\"family\":" + opt(who.family) +
+                             ",\"marketing\":" + opt(who.marketing) + "}"
+                       : "null";
         j += "}";
     }
     j += "}";

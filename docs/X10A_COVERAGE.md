@@ -163,7 +163,7 @@ as a detection signature.
 ### Page `0x65` — page not polled cyclically; 5 fields not displayed
 
 The reference table assigns these fields to hydrosplit/bizone accessories; they are not part of the
-active monobloc profile.
+active profile.
 
 | Off | Len | Conv | Field |
 |---:|---:|---:|---|

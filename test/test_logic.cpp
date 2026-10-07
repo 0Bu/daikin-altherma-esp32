@@ -45,6 +45,7 @@
 #include "logic/diag_tail.hpp"
 #include "logic/detect.hpp"
 #include "logic/detect_backoff.hpp"
+#include "logic/detect_identity.hpp"
 #include "logic/discovery.hpp"
 #include "logic/heating_curve_diagnosis.hpp"
 #include "logic/heating_curve_mqtt.hpp"
@@ -113,6 +114,7 @@
 #include "def/overlay.hpp"
 #include "def/registry.hpp"
 #include "def/signatures.hpp"
+#include "def/model_names.hpp"
 #include "def/homehub.hpp"
 #include "logic/homehub_map.hpp"
 
@@ -2066,7 +2068,7 @@ static void test_demand_flag_catalog() {
                     CHECK(d.reg == 0x10);
                     CHECK(d.offset == 1);
                     CHECK(d.conv == 307);
-                    CHECK(std::string(p.id) == def::OBSERVABILITY_PROFILE);
+                    CHECK(def::observability_applies(p));
                     outdoor_thermostat++;
                 }
             }
@@ -2083,7 +2085,13 @@ static void test_demand_flag_catalog() {
     // Traversal proof: both rows are near-universal, so a selection that silently stops finding
     // either (a renamed label, a dropped row) fails here rather than blanking a pill in the field.
     CHECK(indoor_thermostat >= 35);
-    CHECK(outdoor_thermostat == 1);
+    // The outdoor flag is an observability row: once per profile in the reference-table class
+    // (today the EBLA/EDLA id and the register-identical ERGA E id, test_observability_class).
+    int observability_members = 0;
+    for (const auto& p : def::profiles)
+        if (def::observability_applies(p)) observability_members++;
+    CHECK(observability_members == 2);
+    CHECK(outdoor_thermostat == observability_members);
     CHECK(space_heating >= 40);
 }
 
@@ -2291,7 +2299,8 @@ static void test_detect() {
         int clo = -1, chi = -1;
         if (parse_kw_class(out[i], clo, chi)) CHECK(clo <= 80 && 80 <= chi);
     }
-    // The unit really installed is an Altherma 3 R W (ERGA04-08E / EHBH-E). It must survive the
+    // The unit really installed is an Altherma 3 R split (ERGA E 04-08 outdoor unit with an EHBX E
+    // hydrobox, verified against the nameplates). It must survive the
     // narrowing — a filter that dropped the true model would be far worse than the broad set.
     CHECK(has_candidate(out, lcount, "altherma_erga_e_ehv_ehb_ehvz_e_ej_series_04_08kw"));
     // A class-less profile SURVIVES: nothing about it contradicts 8.0 kW, and dropping it would be
@@ -14198,7 +14207,7 @@ static void test_profile_view() {
             CHECK(v.extra2_count == 0);
             continue;
         }
-        const bool   observation_profile = std::string(p.id) == def::OBSERVABILITY_PROFILE;
+        const bool   observation_profile = def::observability_applies(p);
         const size_t expected            = p.count + def::RETRY_ROW_COUNT +
                                 (observation_profile ? def::OBSERVABILITY_ROW_COUNT : 0);
         CHECK(v.count() == expected);
@@ -17725,6 +17734,180 @@ static void test_diag_tail() {
     CHECK(std::string(out, n) == std::string(kDiagTruncatedMarker, 10));
 }
 
+// The 27 observability rows were audited on the reference unit, which detection reads with the
+// EBLA/EDLA id only because that id wins a tie between register-identical tables. They follow the
+// TABLE (def::observability_applies), so the class is fixed by row identity, not by the tie-break.
+static void test_observability_class() {
+    // value_rows_identical: identity, not similarity — every field, the label and flag included.
+    const ValueDef a[] = {{0x10, 0, 217, 1, -1, "Operation Mode"},
+                          {0x30, 1, 152, 1, -1, "Fan 1 (step)"}};
+    ValueDef b[] = {{0x10, 0, 217, 1, -1, "Operation Mode"}, {0x30, 1, 152, 1, -1, "Fan 1 (step)"}};
+    using logic::value_rows_identical;
+    CHECK(value_rows_identical(a, 2, b, 2));
+    CHECK(value_rows_identical(a, 2, a, 2));
+    CHECK(!value_rows_identical(a, 2, b, 1));
+    b[1].label = "Fan 1 (10 rpm)"; // the one difference that keeps ERGA D outside the class
+    CHECK(!value_rows_identical(a, 2, b, 2));
+    b[1].label = "Fan 1 (step)";
+    b[1].conv  = 153;
+    CHECK(!value_rows_identical(a, 2, b, 2));
+    b[1].conv       = 152;
+    b[1].no_publish = true;
+    CHECK(!value_rows_identical(a, 2, b, 2));
+    b[1].no_publish = false;
+    b[1].type       = 1;
+    CHECK(!value_rows_identical(a, 2, b, 2));
+    b[1].type  = -1;
+    b[1].label = nullptr;
+    CHECK(!value_rows_identical(a, 2, b, 2));
+    CHECK(!value_rows_identical(b, 2, a, 2));
+    b[1].label = "Fan 1 (step)";
+    CHECK(value_rows_identical(a, 2, b, 2));
+    // Every remaining field is part of the identity as well.
+    b[0].reg = 0x11;
+    CHECK(!value_rows_identical(a, 2, b, 2));
+    b[0].reg    = 0x10;
+    b[0].offset = 1;
+    CHECK(!value_rows_identical(a, 2, b, 2));
+    b[0].offset = 0;
+    b[0].size   = 2;
+    CHECK(!value_rows_identical(a, 2, b, 2));
+    b[0].size = 1;
+    CHECK(value_rows_identical(a, 2, b, 2));
+    // Two distinct tables whose rows carry no label at all are still the same table.
+    const ValueDef nolabel_a[] = {{0x10, 0, 217, 1, -1}};
+    const ValueDef nolabel_b[] = {{0x10, 0, 217, 1, -1}};
+    CHECK(value_rows_identical(nolabel_a, 1, nolabel_b, 1));
+
+    // The class in the real catalog: exactly the reference id and the ERGA E table it duplicates.
+    const char* const ebla   = "altherma_ebla_edla_d_series_4_8kw_monobloc";
+    const char* const erga_e = "altherma_erga_e_ehv_ehb_ehvz_e_ej_series_04_08kw";
+    const char* const erga_d = "altherma_erga_d_ehv_ehb_ehvz_dj_series_04_08_kw";
+    CHECK(std::string(def::OBSERVABILITY_PROFILE) == ebla);
+    int  members  = 0;
+    bool has_ebla = false, has_erga_e = false;
+    for (const auto& p : def::profiles) {
+        if (!def::observability_applies(p)) continue;
+        members++;
+        has_ebla |= std::string(p.id) == ebla;
+        has_erga_e |= std::string(p.id) == erga_e;
+    }
+    CHECK(members == 2);
+    CHECK(has_ebla && has_erga_e);
+    CHECK(!def::observability_applies(def::lookup(erga_d))); // one re-spelled fan label
+    CHECK(def::resolved(def::lookup(erga_d)).extra2_count == 0);
+
+    // Both members publish the same resolved view, overlay included: a detection that one day reads
+    // the reference unit through the ERGA E id keeps every entity it has today.
+    const auto ve = def::resolved(def::lookup(ebla));
+    const auto vr = def::resolved(def::lookup(erga_e));
+    CHECK(vr.extra2_count == def::OBSERVABILITY_ROW_COUNT);
+    CHECK(ve.count() == vr.count());
+    for (size_t i = 0; i < ve.count() && i < vr.count(); i++) {
+        CHECK(ve[i].reg == vr[i].reg && ve[i].offset == vr[i].offset && ve[i].conv == vr[i].conv);
+        CHECK(std::string(ve[i].label) == vr[i].label);
+    }
+}
+
+// /status.detect.model reports only what the candidate set establishes (logic/detect_identity.hpp),
+// never the tie-break's guess.
+static void test_detect_identity() {
+    using logic::established_identity;
+    using logic::identity_agree;
+    using logic::IdentityAgreement;
+
+    // A unique identification — or no set at all (a manual or Protocol S choice) — keeps every
+    // field.
+    const IdentityAgreement none;
+    const auto              unique = established_identity("N", "F", "M", none, 1);
+    CHECK(unique.name && std::string(unique.name) == "N");
+    CHECK(unique.family && std::string(unique.family) == "F");
+    CHECK(unique.marketing && std::string(unique.marketing) == "M");
+    const auto manual = established_identity("N", "F", "", none, 0);
+    CHECK(manual.name && manual.marketing && std::string(manual.marketing).empty());
+    // No display metadata for the profile read (generic): nothing, whatever the set says.
+    CHECK(!established_identity(nullptr, nullptr, nullptr, none, 3).any());
+
+    // Ambiguous across families: nothing is established — model is null.
+    IdentityAgreement mixed;
+    identity_agree(mixed, "Altherma 3 M", "Altherma 3 M (EBLA/EDLA)", "Altherma 3 M",
+                   "Altherma 3 M (EBLA/EDLA)");
+    identity_agree(mixed, "Altherma 3 M", "Altherma 3 M (EBLA/EDLA)", "Altherma 3 R",
+                   "Altherma 3 R (ERGA)");
+    CHECK(
+        !established_identity("EBLA", "Altherma 3 M", "Altherma 3 M (EBLA/EDLA)", mixed, 2).any());
+
+    // Ambiguous inside one family: the family and its marketing name, never the exact model.
+    IdentityAgreement same;
+    identity_agree(same, "Altherma 3 R", "Altherma 3 R (ERGA)", "Altherma 3 R",
+                   "Altherma 3 R (ERGA)");
+    identity_agree(same, "Altherma 3 R", "Altherma 3 R (ERGA)", "Altherma 3 R",
+                   "Altherma 3 R (ERGA)");
+    const auto fam = established_identity("ERGA D", "Altherma 3 R", "Altherma 3 R (ERGA)", same, 2);
+    CHECK(fam.name == nullptr);
+    CHECK(fam.family && std::string(fam.family) == "Altherma 3 R");
+    CHECK(fam.marketing && std::string(fam.marketing) == "Altherma 3 R (ERGA)");
+    // A truncated tally (more candidates than were seen) establishes nothing.
+    CHECK(!established_identity("ERGA D", "Altherma 3 R", "Altherma 3 R (ERGA)", same, 3).any());
+
+    // One family without a marketing name (LT / older): the family only. The UI's heading falls
+    // back to the brand here instead of naming whichever LT profile won the tie.
+    IdentityAgreement lt;
+    identity_agree(lt, "Altherma LT / older", "", "Altherma LT / older", "");
+    identity_agree(lt, "Altherma LT / older", "", "Altherma LT / older", "");
+    const auto older = established_identity("LT-D7", "Altherma LT / older", "", lt, 2);
+    CHECK(older.any() && older.name == nullptr && older.marketing == nullptr);
+    CHECK(older.family && std::string(older.family) == "Altherma LT / older");
+
+    // Family and marketing name are judged independently: a shared marketing name across differing
+    // family labels establishes the marketing name alone.
+    IdentityAgreement split;
+    identity_agree(split, "F", "M", "G", "M");
+    identity_agree(split, "F", "M", "F", "M");
+    const auto mkt = established_identity("N", "F", "M", split, 2);
+    CHECK(mkt.any() && mkt.name == nullptr && mkt.family == nullptr);
+    CHECK(mkt.marketing && std::string(mkt.marketing) == "M");
+
+    // A representative without a family or marketing name cannot be agreed with.
+    IdentityAgreement norep;
+    identity_agree(norep, nullptr, nullptr, "F", "M");
+    CHECK(norep.seen == 1 && !norep.family && !norep.marketing);
+    CHECK(!established_identity("N", nullptr, nullptr, norep, 2).any());
+
+    // A candidate without display metadata breaks agreement.
+    IdentityAgreement unknown;
+    identity_agree(unknown, "F", "M", nullptr, nullptr);
+    identity_agree(unknown, "F", "M", "F", "M");
+    CHECK(!established_identity("N", "F", "M", unknown, 2).any());
+
+    // The reference unit through the real catalog: the read profile is still the EBLA/EDLA
+    // tie-break (no installed device re-labels anything), but its monobloc name, family and
+    // marketing name are no longer reported for what is a split unit.
+    int              nsig = 0;
+    const Signature* sigs = def::signatures(nsig);
+    Fingerprint      live{};
+    live.page_mask =
+        mask_of({0x00, 0x10, 0x20, 0x21, 0x30, 0x60, 0x61, 0x62, 0x63, 0x64, 0xA0, 0xA1});
+    live.kw_tenths    = -1;
+    live.iu_kw_tenths = 80;
+    const char* out[64];
+    const int   n    = detect_candidates(sigs, nsig, live, out, 64);
+    const char* best = detect_best(sigs, nsig, live);
+    CHECK(n == 5);
+    CHECK(best && std::string(best) == "altherma_ebla_edla_d_series_4_8kw_monobloc");
+    CHECK(has_candidate(out, n, "altherma_erga_e_ehv_ehb_ehvz_e_ej_series_04_08kw"));
+    const def::ModelName* rep = def::model_name(best);
+    CHECK(rep != nullptr);
+    if (!rep) return;
+    IdentityAgreement real;
+    for (int i = 0; i < n; i++) {
+        const def::ModelName* mn = def::model_name(out[i]);
+        identity_agree(real, rep->family, rep->marketing, mn ? mn->family : nullptr,
+                       mn ? mn->marketing : nullptr);
+    }
+    CHECK(!established_identity(rep->name, rep->family, rep->marketing, real, n).any());
+}
+
 int main() {
     test_diag_tail();
     test_http_cache();
@@ -17773,6 +17956,8 @@ int main() {
     test_binary_semantics();
     test_refrigerant_pressure_catalog();
     test_demand_flag_catalog();
+    test_observability_class();
+    test_detect_identity();
     test_bsh_flag_catalog();
     test_registry();
     test_detect();

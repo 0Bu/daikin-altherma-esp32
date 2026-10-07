@@ -1,7 +1,8 @@
 #pragma once
 // HAND-WRITTEN supplement to the GENERATED per-model profiles — audited rows the offline catalog
 // currently omits. The catalog-wide page-0x10 protection words remain the first block; the second
-// block adds audited control/safety/actuator telemetry for the reference 4-8 kW monobloc.
+// block adds control/safety/actuator telemetry audited on the reference unit, for every profile
+// whose generated table is the one that unit is read with (see observability_applies below).
 //
 // ── Why this file exists at all ───────────────────────────────────────────────────────────────────
 // Every generated profile carries exactly SIX rows for page 0x10 (offsets 0, 1, 4, 5, 6, 8) while
@@ -74,15 +75,23 @@ inline constexpr ValueDef retry_rows[] = {
 
 inline constexpr size_t RETRY_ROW_COUNT = sizeof(retry_rows) / sizeof(retry_rows[0]);
 
-// The active reference profile's generated table intentionally exposes a curated subset. These 27
-// rows are all present in docs/REGISTERS.md and live on pages that profile already polls, so adding
-// them changes neither detection nor bus traffic. They are telemetry, not diagnoses: several
-// proprietary flags (Demand Signal, valve energisation and protector polarity) must be correlated
-// with live operating edges before an alert assigns them a stronger meaning. HP Forced FG is
-// deliberately absent: it aliases bit 7 of the current profile's one-byte CT-L3 measurement. The
-// availability ledger rejects that row while bit 7 is asserted, preventing a fictitious +64 A
-// current step, but the flag itself remains unpublished until its polarity and the current mask are
-// backed by wire evidence or model documentation.
+// The reference profile's generated table intentionally exposes a curated subset. These 27 rows are
+// all present in docs/REGISTERS.md and live on pages that profile already polls, so adding them
+// changes neither detection nor bus traffic. They are telemetry, not diagnoses: several proprietary
+// flags (Demand Signal, valve energisation and protector polarity) must be correlated with live
+// operating edges before an alert assigns them a stronger meaning. HP Forced FG is deliberately
+// absent: it aliases bit 7 of the current profile's one-byte CT-L3 measurement. The availability
+// ledger rejects that row while bit 7 is asserted, preventing a fictitious +64 A current step, but
+// the flag itself remains unpublished until its polarity and the current mask are backed by wire
+// evidence or model documentation.
+//
+// WHICH UNIT THE AUDIT RAN ON. The reference unit is an Altherma 3 R split (an ERGA E outdoor unit
+// with an EHB hydrobox). Detection reads it with OBSERVABILITY_PROFILE, the EBLA/EDLA monobloc id,
+// only because that id wins a tie between register-identical tables (logic/detect.hpp
+// detect_best, lowest id) — the bus cannot tell the two apart. Binding the rows to that one id
+// would tie audited telemetry to a tie-break: the day detection reads the same unit through the
+// ERGA E id, 27 entities would vanish from Home Assistant with nothing about the unit changed.
+// The rows therefore follow the TABLE they were audited against, not the id.
 inline constexpr const char* OBSERVABILITY_PROFILE =
     "altherma_ebla_edla_d_series_4_8kw_monobloc";
 
@@ -149,13 +158,26 @@ inline constexpr bool observability_rows_are_safe() {
 static_assert(observability_rows_are_safe(),
               "observability rows must stay publishable dimensionless 1-byte non-405 values");
 
+// Does the observability block apply to this profile? Exactly when its generated table IS the
+// reference table — under the reference id or any other. Identity, not similarity
+// (logic::value_rows_identical in logic/profile_view.hpp): the ERGA D 04-08 table differs from it
+// by one re-spelled fan label
+// and stays outside, as does every table the audit never saw. Today the class is the reference id
+// plus altherma_erga_e_ehv_ehb_ehvz_e_ej_series_04_08kw, pinned by test_observability_class().
+inline bool observability_applies(const Profile& p) {
+    if (std::strcmp(p.id, OBSERVABILITY_PROFILE) == 0) return true;
+    const Profile& ref = lookup(OBSERVABILITY_PROFILE);
+    if (std::strcmp(ref.id, OBSERVABILITY_PROFILE) != 0) return false; // renamed: fail closed
+    return logic::value_rows_identical(p.values, p.count, ref.values, ref.count);
+}
+
 // The rows the firmware actually decodes, announces and sizes its buffers from: this model's
 // generated table plus the block above when the model already reads page 0x10 (it does on all 43
 // generated profiles and on `generic`; the rule is enforced, not assumed).
 inline logic::ProfileView resolved(const Profile& p) {
     logic::ProfileView v =
         logic::profile_view(p.values, p.count, retry_rows, RETRY_ROW_COUNT, OVERLAY_PAGE);
-    if (std::strcmp(p.id, OBSERVABILITY_PROFILE) != 0) return v;
+    if (!observability_applies(p)) return v;
     return logic::profile_view_extend_existing_pages(v, observability_rows,
                                                      OBSERVABILITY_ROW_COUNT);
 }

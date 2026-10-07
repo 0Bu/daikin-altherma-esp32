@@ -85,7 +85,7 @@ Ids are stable keys and are never reused — a gap means a feature was retired, 
 | 38 | **Explicit board identity + runtime hardware config** — a stable preset id persisted with indicator/button pins, never inferred from matching GPIOs | ✅ 🧪 | [`logic/board_presets.hpp`](../main/logic/board_presets.hpp), [`http_config.cpp`](../main/http_config.cpp) |
 | 39 | **Stack-overflow watchpoint** — the *first* write past a stack limit panics at the offending instruction | ✅ | [`sdkconfig.defaults`](../sdkconfig.defaults), [`http_server.cpp`](../main/http_server.cpp) |
 | 40 | **Cost-shaped CI** — fast mechanical gates as steps of one job, skipped compile steps when nothing relevant changed, carried ccache, no per-PR publish | ✅ | [`build.yml`](../.github/workflows/build.yml) |
-| 41 | **Audited X10A telemetry supplements** — 11 outdoor protection/retry entities for all profiles plus 27 reference-monobloc control, safety and actuator fields, without new page queries | ✅ 🧪 | [`def/overlay.hpp`](../main/def/overlay.hpp), [`logic/profile_view.hpp`](../main/logic/profile_view.hpp), [`X10A_COVERAGE.md`](X10A_COVERAGE.md) |
+| 41 | **Audited X10A telemetry supplements** — 11 outdoor protection/retry entities for all profiles plus 27 control, safety and actuator fields for every profile row-identical to the reference table, without new page queries | ✅ 🧪 | [`def/overlay.hpp`](../main/def/overlay.hpp), [`logic/profile_view.hpp`](../main/logic/profile_view.hpp), [`X10A_COVERAGE.md`](X10A_COVERAGE.md) |
 | 42 | **24-hour trend rings** — fixed-cadence `int16` rings in static storage, addressed structurally by (page, offset, unit), distinguishing *no reading* from *held over*; derived heat output requires a compressor witness while water is moving | ✅ 🧪 | [`logic/history.hpp`](../main/logic/history.hpp), [`history.cpp`](../main/history.cpp), [`history.js`](../main/www/js/history.js) |
 | 43 | **Value-description coverage gate** — every catalog label the UI can show must have an explainer, asserted against the real table in a JS engine | ✅ | [`check_descriptions.mjs`](../tools/descriptions/check_descriptions.mjs), [`run-description-audit.sh`](../scripts/run-description-audit.sh) |
 | 44 | **Digest-pinned CI supply chain** — every third-party Action is SHA-pinned; only the Renovate runner pin may omit human records after protected-base policy proves its immutable one-line head patch | ✅ 🧪 | [`pr-policy.yml`](../.github/workflows/pr-policy.yml), [`renovate_action_pr.py`](../tools/agent-policy/renovate_action_pr.py) |
@@ -792,7 +792,7 @@ Docker, in seconds ([`test/README.md`](../test/README.md)).
 |---------|---------|
 | Wire decode | `crc`, `convert`, `registers`, `value_def`, `error_codes`, `hexdump`, `raw_capture`, `hp_probe` |
 | Value adjudication | `availability`, `conv_override`, `label_override`, `fault_state`, `ou_stale`, `lwt_select`, `cop_scope`, `feature_gate`, `profile_view` |
-| Detection | `detect`, `detect_backoff`, `uart_plan` |
+| Detection | `detect`, `detect_backoff`, `detect_identity`, `uart_plan` |
 | Config & board | `config_model`, `config_store`, `board_pins`, `board_presets`, `env3`, `ui_lang` |
 | MQTT / HA | `discovery`, `ha_device`, `mqtt_base`, `mqtt_cleanup`, `mqtt_group`, `mqtt_uri`, `heartbeat`, `homehub_map`, `modbus`, `weather_mqtt` |
 | HTTP | `http_body`, `http_request`, `payload_complete`, `http_surface`, `query_flag`, `captive`, `json`, `mcp`, `chunk_sink`, `redact` |
