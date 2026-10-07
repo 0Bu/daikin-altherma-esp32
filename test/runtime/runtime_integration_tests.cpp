@@ -416,6 +416,29 @@ void test_http_absolute_deadline_stops_trickling_body(bool mutate_watchdog) {
     CHECK(result.elapsed_ms <= uint64_t{5000});
 }
 
+void test_http_leftover_body_bounded_after_response(bool mutate_deadline) {
+    // A peer announced a body the handler did not read and now trickles it, one byte every 40 ms,
+    // each well inside the 1000 ms socket timeout. IDF's own purge would follow it to the end; the
+    // discard must stop at its 200 ms budget so the trampoline closes the session instead.
+    const HttpDiscardResult trickle = run_http_body_discard(64, 40, 1000, 200, !mutate_deadline);
+    CHECK(!trickle.settled);
+    CHECK(trickle.received < size_t{64});
+    CHECK(trickle.elapsed_ms >= uint64_t{150});
+    CHECK(trickle.elapsed_ms <= uint64_t{1500});
+
+    // A small remainder already in the buffer — a JSON body behind a 503 or 415 — is settled at
+    // once, so the connection stays reusable and the answer is not cut off by a reset.
+    const HttpDiscardResult buffered = run_http_body_discard(300, 0, 1000, 200, true);
+    CHECK(buffered.settled);
+    CHECK_EQ(buffered.received, size_t{300});
+
+    // More than the largest route buffer is never followed, even when it arrives promptly.
+    const HttpDiscardResult oversized =
+        run_http_body_discard(daik::BODY_DISCARD_MAX_BYTES + 1000, 0, 1000, 2000, true);
+    CHECK(!oversized.settled);
+    CHECK(oversized.received <= daik::BODY_DISCARD_MAX_BYTES + 128);
+}
+
 void test_weather_rejects_incomplete_http_body(bool mutate_completion_gate) {
     auto accepted = [&](int64_t claimed, size_t received, bool parser_complete) {
         return mutate_completion_gate ||
@@ -442,6 +465,7 @@ int main(int argc, char** argv) {
     bool mutate_atomicity            = false;
     bool mutate_http_header_deadline = false;
     bool mutate_http_body_deadline   = false;
+    bool mutate_http_discard         = false;
     bool mutate_weather_completion   = false;
     for (int i = 1; i < argc; ++i) {
         const std::string_view arg(argv[i]);
@@ -451,6 +475,8 @@ int main(int argc, char** argv) {
             mutate_http_header_deadline = true;
         else if (arg == "--mutate-http-body-deadline")
             mutate_http_body_deadline = true;
+        else if (arg == "--mutate-http-discard-deadline")
+            mutate_http_discard = true;
         else if (arg == "--mutate-weather-body-completion")
             mutate_weather_completion = true;
         else {
@@ -475,6 +501,8 @@ int main(int argc, char** argv) {
          [=] { test_http_absolute_deadline_stops_trickling_headers(mutate_http_header_deadline); }},
         {"HTTP absolute deadline stops trickling body",
          [=] { test_http_absolute_deadline_stops_trickling_body(mutate_http_body_deadline); }},
+        {"HTTP leftover body bounded after response",
+         [=] { test_http_leftover_body_bounded_after_response(mutate_http_discard); }},
         {"Weather rejects incomplete HTTP body",
          [=] { test_weather_rejects_incomplete_http_body(mutate_weather_completion); }},
     };

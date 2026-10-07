@@ -7244,6 +7244,88 @@ static void test_http_body() {
     }
 }
 
+// ── leftover body after the response (logic/http_body.hpp → http_body_discard) ──────────────────
+// One receive/deadline type serves every case: each distinct lambda would be a separate template
+// instantiation with its own branch outcomes, which the coverage ratchet counts individually.
+struct DiscardScript {
+    std::vector<BodyChunk> chunks; // played in order, then End
+    size_t                 calls          = 0;
+    size_t                 deadline_after = SIZE_MAX; // receives allowed before the budget expires
+
+    BodyChunk recv() {
+        const size_t i = calls++;
+        return i < chunks.size() ? chunks[i] : BodyChunk{BodyRecv::End, 0};
+    }
+};
+
+static bool run_discard(DiscardScript& s) {
+    return http_body_discard([&s] { return s.recv(); },
+                             [&s] { return s.calls >= s.deadline_after; });
+}
+
+static void test_http_body_discard() {
+    // The ordinary request: the handler consumed its body (or there was none), so the first receive
+    // already reports End and the session stays reusable.
+    {
+        DiscardScript s;
+        CHECK(run_discard(s));
+        CHECK(s.calls == 1);
+    }
+
+    // A small remainder already in the socket buffer — a JSON body behind a 503/415 — is drained
+    // promptly instead of closing, so the client still sees its answer on a reusable connection.
+    {
+        DiscardScript s;
+        s.chunks.assign(3, BodyChunk{BodyRecv::Data, 128});
+        CHECK(run_discard(s));
+        CHECK(s.calls == 4);
+    }
+
+    // The byte cap is inclusive: exactly the largest route buffer still settles, one byte more is
+    // the caller's signal to close.
+    {
+        DiscardScript exact;
+        exact.chunks.assign(BODY_DISCARD_MAX_BYTES / 128, BodyChunk{BodyRecv::Data, 128});
+        CHECK(run_discard(exact));
+        DiscardScript over = exact;
+        over.calls         = 0;
+        over.chunks.push_back(BodyChunk{BodyRecv::Data, 1});
+        CHECK(!run_discard(over));
+        CHECK(over.calls == over.chunks.size());
+        DiscardScript huge;
+        huge.chunks.push_back(BodyChunk{BodyRecv::Data, BODY_DISCARD_MAX_BYTES + 1});
+        CHECK(!run_discard(huge));
+        CHECK(BODY_DISCARD_MAX_BYTES == 8192); // /set_ref_temp's body buffer, the largest route's
+    }
+
+    // THE regression: a peer announcing a large Content-Length and trickling one byte inside every
+    // socket timeout. IDF's own purge followed it forever; the discard stops at its deadline.
+    {
+        DiscardScript trickle;
+        trickle.chunks.assign(100, BodyChunk{BodyRecv::Data, 1});
+        trickle.deadline_after = 5;
+        CHECK(!run_discard(trickle));
+        CHECK(trickle.calls == 5);
+        // Checked before the first receive too: an expired budget performs no receive at all.
+        DiscardScript expired  = trickle;
+        expired.calls          = 0;
+        expired.deadline_after = 0;
+        CHECK(!run_discard(expired));
+        CHECK(expired.calls == 0);
+        // The budget is a short tail after a response, never another body-length wait.
+        CHECK(BODY_DISCARD_BUDGET_US > 0 && BODY_DISCARD_BUDGET_US <= 5000000);
+    }
+
+    // Silence, a socket error and a zero-byte "success" all close at once — no retry.
+    for (const BodyRecv kind : {BodyRecv::Timeout, BodyRecv::Error, BodyRecv::Data}) {
+        DiscardScript s;
+        s.chunks.push_back(BodyChunk{kind, 0});
+        s.chunks.push_back(BodyChunk{BodyRecv::Data, 1});
+        CHECK(!run_discard(s));
+        CHECK(s.calls == 1);
+    }
+}
+
 static void test_uart_plan() {
     // Volatile copies keep constexpr from folding every constant call away: the coverage gate must
     // observe the production branches at runtime, not merely the CHECK expressions that name them.
@@ -17611,6 +17693,7 @@ int main() {
     test_health_gate();
     test_captive();
     test_http_body();
+    test_http_body_discard();
     test_uart_plan();
     test_detect_backoff();
     test_version_cmp();

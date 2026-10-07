@@ -69,6 +69,10 @@ assert_mutation_detected \
     "HTTP absolute deadline stops trickling body" \
     "HTTP slow-body deadline"
 assert_mutation_detected \
+    --mutate-http-discard-deadline \
+    "HTTP leftover body bounded after response" \
+    "HTTP leftover-body discard deadline"
+assert_mutation_detected \
     --mutate-weather-body-completion \
     "Weather rejects incomplete HTTP body" \
     "Weather incomplete-body rejection"
