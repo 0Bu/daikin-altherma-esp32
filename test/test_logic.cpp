@@ -9251,6 +9251,18 @@ static void test_reference_temperature_config() {
     const ReferenceFreshness mapped_empty =
         reference_room_freshness(true, false, false, false, -1, 0, 1000, 0, 600);
     CHECK(!mapped_empty.fresh && std::string(mapped_empty.reason) == "no_value");
+
+    // MQTT-05/b: code 0 is reserved for an eligible sample. A rejected payload whose producer left
+    // the reason at Eligible still reports a rejection reason; a specific reason passes through.
+    raw.has_source_time                    = true;
+    raw.payload_valid                      = false;
+    raw.payload_reason                     = ReferenceRoomReason::Eligible;
+    const ReferenceRoomSample stale_reason = reference_room_sample(raw, fresh);
+    CHECK(!stale_reason.control_eligible && !stale_reason.has_room_error);
+    CHECK(stale_reason.reason == ReferenceRoomReason::InvalidPayload);
+    raw.payload_reason = ReferenceRoomReason::MissingSourceTime;
+    CHECK(reference_room_sample(raw, fresh).reason == ReferenceRoomReason::MissingSourceTime);
+    raw.payload_valid = true;
 }
 
 static void test_circulation_source() {

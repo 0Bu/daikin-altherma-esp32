@@ -311,8 +311,8 @@
         "taken": 27
       },
       "main/logic/reference_temperature.hpp": {
-        "outcomes": 316,
-        "taken": 211
+        "outcomes": 318,
+        "taken": 213
       },
       "main/logic/refrigerant_service.hpp": {
         "outcomes": 246,
@@ -677,8 +677,8 @@
         "taken": 37
       },
       "main/logic/reference_temperature.hpp": {
-        "outcomes": 364,
-        "taken": 249
+        "outcomes": 366,
+        "taken": 251
       },
       "main/logic/refrigerant_service.hpp": {
         "outcomes": 298,
@@ -1043,8 +1043,8 @@
         "taken": 37
       },
       "main/logic/reference_temperature.hpp": {
-        "outcomes": 364,
-        "taken": 249
+        "outcomes": 366,
+        "taken": 251
       },
       "main/logic/refrigerant_service.hpp": {
         "outcomes": 298,
@@ -1409,8 +1409,8 @@
         "taken": 37
       },
       "main/logic/reference_temperature.hpp": {
-        "outcomes": 364,
-        "taken": 249
+        "outcomes": 366,
+        "taken": 251
       },
       "main/logic/refrigerant_service.hpp": {
         "outcomes": 298,

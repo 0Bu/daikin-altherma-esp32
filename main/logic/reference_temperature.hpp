@@ -423,7 +423,12 @@ inline ReferenceRoomSample reference_room_sample(const ReferenceRoomRaw& raw,
     auto reject = [&](ReferenceRoomReason reason) { out.reason = reason; return out; };
     if (!raw.configured) return reject(ReferenceRoomReason::NotConfigured);
     if (!raw.has_temperature) return reject(ReferenceRoomReason::NoValue);
-    if (!raw.payload_valid) return reject(raw.payload_reason);
+    // Code 0 is reserved for an eligible sample. An invalid payload whose producer left the reason
+    // at Eligible is still a rejection, so it reports the generic invalid-payload reason instead.
+    if (!raw.payload_valid)
+        return reject(raw.payload_reason == ReferenceRoomReason::Eligible
+                          ? ReferenceRoomReason::InvalidPayload
+                          : raw.payload_reason);
     if (!freshness.fresh) return reject(reference_room_freshness_reason(freshness.reason));
     if (raw.temperature_c < REF_ROOM_TEMPERATURE_MIN_C ||
         raw.temperature_c > REF_ROOM_TEMPERATURE_MAX_C)

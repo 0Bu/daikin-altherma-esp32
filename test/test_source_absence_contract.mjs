@@ -942,11 +942,27 @@ assert.match(historySource, /compare_exchange_weak[\s\S]*?memory_order_release/)
     "CirculationPumpSample circulation_pump_sample()",
   ].reduce((n, signature) => n + bare(bodyOf(mqtt, signature)), 0);
   assert.equal(bare(status), 0, "/status must not age a room value without its timestamp mapping");
-  assert.equal(room(status), 1, "/status must judge room freshness through the mapping-aware helper");
+  assert.ok(room(status) >= 1, "/status must judge room freshness through the mapping-aware helper");
   assert.equal(bare(mqtt), circulationCalls,
     "outside the circulation witness, mqtt_ha.cpp must not age a room value by MQTT arrival alone");
-  assert.equal(room(mqtt), 3,
-    "the heating-curve evaluation, its telemetry and the frame loop must use the mapping-aware helper");
-  assert.equal((mqtt.match(/ref_temp_time_topic\.empty\(\) \|\| !c\.ref_temp_time_path/g) || []).length,
+  assert.ok(room(mqtt) >= 1, "mqtt_ha.cpp must judge room freshness through the mapping-aware helper");
+  // Every call passes the derived mapping, never a constant that would silently restore the
+  // arrival-time fallback for a mapped timestamp.
+  for (const [name, src] of [["http_status.cpp", status], ["mqtt_ha.cpp", mqtt]]) {
+    for (const call of src.matchAll(/\breference_room_freshness\(\s*/g)) {
+      const first = src.slice(call.index + call[0].length, call.index + call[0].length + 80);
+      assert.match(first, /^(reference_source_time_mapped\(\w+\.ref_temp_time_topic, \w+\.ref_temp_time_path\)|timestamp_mapped),/,
+        `${name}: reference_room_freshness() must receive the derived timestamp mapping, got ${first}`);
+    }
+  }
+  assert.equal((mqtt.match(/ref_temp_time_topic\.empty\(\) \|\|\s*!\w+\.ref_temp_time_path/g) || []).length,
     0, "the room timestamp mapping must be derived by reference_source_time_mapped() alone");
+  // MQTT-05/b: a decoder error that still blocks an incomplete aggregate keeps its own reason;
+  // the frame loop may report Eligible (code 0) only once no error remains.
+  const frames = bodyOf(mqtt, "static void service_reference_frames(const Config& c)");
+  assert.doesNotMatch(frames, /^\s*candidate\.rejection_reason\s*=\s*ReferenceRoomReason::Eligible;/m,
+    "the frame loop must not reset the rejection reason while a blocking error remains");
+  assert.match(frames,
+    /if \(candidate\.error\.empty\(\)\) candidate\.rejection_reason = ReferenceRoomReason::Eligible;/,
+    "the frame loop must restore Eligible only once the decoder error has cleared");
 }

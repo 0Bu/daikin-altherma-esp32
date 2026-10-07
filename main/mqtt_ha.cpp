@@ -2275,7 +2275,6 @@ static void service_reference_frames(const Config& c) {
                 candidate.source_unix_s    = decoded.source_unix_s;
                 candidate.timestamp_source = decoded.timestamp_source;
             }
-            candidate.rejection_reason  = ReferenceRoomReason::Eligible;
             candidate.eligibility_error = decoded.control_error ? decoded.control_error : "";
             const bool complete =
                 candidate.has_value &&
@@ -2283,6 +2282,10 @@ static void service_reference_frames(const Config& c) {
                 (!timestamp_mapped || candidate.has_source_time);
             recovered_mapping = complete && !candidate.error.empty();
             if (complete) candidate.error.clear();
+            // A retained decoder error still blocks this incomplete aggregate, so it keeps the
+            // reason that set it: reporting Eligible (code 0) beside a blocking error would break
+            // the rule that code 0 is the only eligible state (MQTT-05/b).
+            if (candidate.error.empty()) candidate.rejection_reason = ReferenceRoomReason::Eligible;
             if (decoded.control_parse_error) candidate.errors++;
 
             const uint64_t now_ms     = static_cast<uint64_t>(esp_timer_get_time() / 1000);
