@@ -118,13 +118,14 @@ Pull-request CI is deliberately **compile-only** and publishes only ELF/size dia
 not receive the offline signing key and does not produce a flashable application, merged image or
 installer manifest. Never request or accept a purported signed PR CI artifact.
 
-Pre-merge USB flashing is therefore available only when the user separately authorizes both the
-hardware flash and direct host use of the offline OTA signing key. Use the global
-`$daikin-esp32-premerge-hardware` workflow for that exact-head local build/sign/flash chain. The key
-must never enter Docker or the repository, and the signing command must remain a direct, unchained
-host `espsecure sign-data` invocation. Without that separate authorization and key access, report
-pre-merge hardware flashing as unavailable. A later merge plus dev-channel flash is post-merge
-evidence and cannot be backdated into this review.
+Pre-merge USB flashing of the exact PR head is therefore a local build, signed on the host:
+`$deploy-test` for the private-inventory bench, `$flash-esp32` for another board the user names. A
+review request never runs either one. An explicit request for that workflow authorizes the
+key-by-path signing command and the unchanged repository flash plan (`AGENTS.md`). The key never
+enters Docker or the repository, and the signing command stays a direct, unchained host
+`espsecure sign-data` invocation. Without that request or without key access, report pre-merge
+hardware flashing as unavailable. A later merge plus dev-channel flash is post-merge evidence and
+cannot be backdated into this review.
 
 ### 2.3 Do not invent a substitute browser-flash plan
 
@@ -165,11 +166,11 @@ That is a compile check. It says nothing about the behaviour the renovate.json n
 (mbedTLS, component moves, `esp-mqtt` / `esp_https_ota` TLS). On a **major** bump Renovate attaches a
 migration-guide reminder to the PR body — follow it.
 
-Hardware validation needs its own explicit user authorization, including separate authorization for
-host use of the offline signing key. When granted, use [`flash-esp32`](../flash-esp32/SKILL.md) and
-then [`device-triage`](../device-triage/SKILL.md) to confirm WiFi, MQTT, X10A and heap behavior. When
-not granted or unavailable, record the missing hardware evidence; do not perform the flash as an
-implicit part of review.
+Hardware validation needs an explicit user request for the §2.2 workflow at the exact PR head:
+[`deploy-test`](../deploy-test/SKILL.md) on the bench, or [`flash-esp32`](../flash-esp32/SKILL.md)
+on another named board. Then use [`device-triage`](../device-triage/SKILL.md) to confirm WiFi, MQTT,
+X10A and heap behavior. Without that request, or when it is unavailable, record the missing hardware
+evidence; do not perform the flash as an implicit part of review.
 
 ## 4. Merging
 

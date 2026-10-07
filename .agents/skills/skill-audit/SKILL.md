@@ -107,10 +107,14 @@ skill/reviewer asserts:
 - **`$deploy-prod`** — canonical production delivery lifecycle. Verify against `scripts/production-ota-gate.py`,
   bench staging with `--confirm-bench bench --install-bench`, and production promotion with
   `--confirm-production production --execute`. Verify required deterministic pre-merge gates, exact 40-hex
-  commit SHAs, 64-hex ELF SHAs, and rollback/probation checks.
-- **`$deploy-test`** — test-bench update and hardware validation loop. Verify against `scripts/idf-docker.sh`,
+  commit SHAs, 64-hex ELF SHAs, and rollback/probation checks. Its merge, CI, gate and signing commands
+  must keep the hook-accepted literal one-line forms. Its production failure path must stay a
+  roll-forward, because the hook blocks direct `/ota/update` writes, including the `downgrade=1`
+  switch in `main/logic/version_cmp.hpp`, and the gate binds only the current dev manifest.
+- **`$deploy-test`** — pre-merge USB bench test of an exact local head. Verify against `scripts/idf-docker.sh`,
   Secure Boot v2 signing with `$OTA_SIGNING_KEY_FILE`, `scripts/require-signed.sh`, flash args skipping
-  `nvs@0x9000`, `scripts/verify-device-health.sh`, and automated diagnostic loop via `$device-triage`.
+  `nvs@0x9000`, MAC identity via `esptool chip-id`, `scripts/verify-device-health.sh`, and the automated
+  diagnostic loop via `$device-triage`. Its boundary must match `AGENTS.md`'s USB cases.
 - **`$device-triage`** — live device network triage. Verify endpoints `/status`, `/values`, `/diag`,
   `/coredump`, `/crash/dismiss`. Verify that `last_crash.fault` is read before diagnosing a crash, that
   orphan dumps from earlier boots are distinguished, and that `scripts/decode-coredump.sh` is used with the
@@ -125,7 +129,7 @@ skill/reviewer asserts:
   Verify against `main/CMakeLists.txt`, `sdkconfig.defaults`, `partitions.csv`, `main/logic/*.hpp`, and
   `scripts/run-esp-idf-matrix-audit.sh`.
 - **`$flash-esp32`** — host USB flash preserving NVS. Verify target `esp32s3`, `scripts/idf-docker.sh`,
-  `scripts/require-signed.sh`, and `partitions.csv` (`nvs@0x9000` preserved).
+  `scripts/require-signed.sh`, MAC identity via `esptool chip-id`, and `partitions.csv` (`nvs@0x9000` preserved).
 - **`$pr-hygiene-review`** — screens commit messages and PR text for personal information and non-English
   prose. Verify against `scripts/run-pr-hygiene-audit.sh` and `tools/pr_hygiene/audit_exceptions.txt`.
 - **`$project-review`** — whole-firmware coherence review. Verify doc drift checks (`AGENTS.md`, `docs/README.md`,

@@ -483,7 +483,8 @@ MQTT. X10A and optional weather are intentionally not required on the unwired be
 Only read-only observer GETs interrupted by reboot are sampled again; a complete malformed response
 fails hard. No compensating write or update-POST retry follows a failed acceptance check. Ordinary bench updates
 must use this OTA mode, not USB. Signed, NVS-preserving USB remains only a bootstrap path for firmware
-that predates the generation/artifact handshake or a recovery path when OTA cannot run. The current
+that predates the generation/artifact handshake, a recovery path when OTA cannot run, or an
+explicitly requested pre-merge test of an exact local head, which is never a delivery. The current
 compact HTTP API exposes the boot-latched ESP-IDF image state and `rollback_pending` flag directly;
 the latter is JSON `null` while the image state is unknown, rather than claiming that rollback is
 absent without an ESP-IDF observation.
@@ -629,7 +630,8 @@ scripts/production-ota-gate.py \
 ```
 
 Do not wrap, chain, shorten or retry either command; the agent hook admits only these canonical
-role-pinned shapes. A production staging invocation without `--execute` still mutates the bench while
+role-pinned shapes, and only on one line (it rejects a newline, including the backslash
+continuations shown here for readability). A production staging invocation without `--execute` still mutates the bench while
 performing its release round trip; it is neither a read-only preflight nor an agent-admitted shape.
 
 > **Manual updates and rollback:** only the OTA path (`esp_ota_*`, which writes the *inactive* slot

@@ -1,122 +1,165 @@
 ---
 name: deploy-test
-description: Build firmware via Docker, sign with local OTA key, update/flash connected test board preserving NVS, and verify device health. Use when asked to flash and test test bench or run local hardware integration test.
+description: Pre-merge bench test of an exact local head — build via Docker, sign on the host, USB-flash the private-inventory bench preserving NVS, verify health and the changed behavior, and fix and repeat on findings. Use when asked to test a change on the test bench before merge; deploy-prod also runs it for its PR head and every fix head.
 ---
 
 # deploy-test
 
 ## Authorization boundary
 
-Treat review and audit requests as read-only. A request to test or flash the test bench (or `deploy-test`)
-authorizes:
-- A local Docker firmware build (`scripts/idf-docker.sh idf.py build`)
-- Signing the resulting binary with the offline RSA-3072 key (via `$OTA_SIGNING_KEY_FILE`)
-- Flashing the connected test board over USB (`/dev/cu.usbmodem*`) preserving NVS for bootstrap/recovery
-- Running HTTP health checks against the test bench device (`<bench-host>`)
-- When errors, test failures, or crashes occur: diagnosing the root cause (`$device-triage`), fixing the code, re-testing, and re-verifying until green (or asking the user if ambiguous)
+Treat review and audit requests as read-only. An explicit request to run `deploy-test`, or
+`$deploy-prod` running it for its PR head (Step 0) or a fix head (Step 8), authorizes for the
+**bench role only**:
+- a local Docker firmware build of the exact, clean head (`scripts/idf-docker.sh idf.py build`);
+- one unchained host signing command per image that passes the offline OTA key **by path**;
+- a USB write of the unchanged repository flash plan (`build/flash_args`: bootloader, the unchanged
+  partition table, `otadata`, `ota_0`; `nvs` and `coredump` untouched) to the identified bench;
+- read-only HTTP checks against the bench, plus non-persistent bench requests the changed behavior
+  needs for its test (for example `GET /ota/check` to exercise an OTA/TLS path);
+- on findings: diagnosis (`$device-triage`), a scoped code fix with a regression test, and a repeat
+  of this workflow until the bench is green.
 
-It does **NOT** authorize:
-- Touching, configuring or flashing the production board
-- Erasing NVS (`0x9000`), wiping link cache or running `erase_flash`
-- Modifying remote GitHub state, creating PRs, merging, or pushing branches
+It does **not** authorize:
+- contacting the production role, or an OTA write (`/ota/update`) of any kind;
+- a request that writes configuration or NVS on the bench (that needs the user's explicit request),
+  `erase_flash`, NVS erasure, a partition table that differs from the one the bench runs, or
+  coredump clearing;
+- pushing, opening or editing PRs, or merging. When `$deploy-prod` runs this skill, `$deploy-prod`
+  owns those steps.
+
+This is the only ordinary path for unmerged code to reach the inventory bench; `$flash-esp32`
+naming the bench follows the same rules, and `$flash-esp32` covers boards outside the inventory.
+It is a test, not a delivery: an official dev artifact reaches the bench through `$deploy-prod`'s
+OTA gate (`--confirm-bench bench --install-bench`), never through this skill.
 
 ## Target identity
 
-- **Test Device (Bench)**: Configured bench role in private inventory `~/.config/daikin-altherma-esp32/production-ota.json` (or `<bench-host>`).
-  `hp.connected` may be `false` because the test bench is not wired to a physical heat pump.
+- The bench is the `bench` role of the private inventory
+  (`~/.config/daikin-altherma-esp32/production-ota.json`: host and MAC). Never flash any other board.
+- The board on USB can be running another project's firmware. Establish what runs **before**
+  touching USB: `/status` from the inventory host must report the inventory MAC (compare
+  case-insensitively). If it answers as another project, or not at all, stop and ask the user.
+  Exception: if the board stopped answering after this run's own write (same port, MAC matched
+  before that write, board not unplugged since), the step-6 MAC check suffices, so the fix loop
+  can recover an image of its own that fails at boot.
+- Every esptool connection resets the chip it probes. Probe only the port that can be the bench; if
+  two ESP32 ports are present and neither can be excluded, stop and ask.
+- `hp.connected` may be `false`: the bench need not be wired to a heat pump. All-timeout X10A on an
+  unwired bench is expected and is not X10A evidence.
 
-## Delivery mode distinction
+## Steps
 
-- **Ordinary bench updates**: Per AGENTS.md, ordinary bench updates must use the canonical role-bound transaction:
-  `scripts/production-ota-gate.py --confirm-bench bench --install-bench`
-- **USB bootstrap & recovery**: USB flashing via host `esptool` is reserved for bootstrap (initial provisioning) or recovery (unbootable firmware, partition table repair, or boot loop).
+1. **Pin the head.** The worktree must be clean. Record `git rev-parse HEAD` and the changed files
+   against `origin/main`. Every build, signature and device record below refers to this commit; a
+   new commit restarts from step 2.
 
-## Steps for USB Bootstrap / Recovery
+2. **Check the version floor.** A local build reports the committed `version.txt` version, and the
+   next official dev OTA replaces it only if that dev version compares higher
+   (`main/logic/version_cmp.hpp`; a release outranks its own pre-releases). After
+   `git fetch --tags origin`, compare `scripts/next-version.sh --dev` with `version.txt`. If their
+   numeric cores are equal, for example right after a `version.txt` floor bump, stop and ask instead
+   of flashing.
 
-1. **Confirm the USB port.**
-   Locate the connected ESP32-S3 USB serial device:
-   ```bash
-   ls /dev/cu.usbmodem*
-   ```
-   If no device is found, verify the USB connection before proceeding.
-
-2. **Build the firmware** using the CI-pinned ESP-IDF Docker container:
+3. **Run the host gates** for the affected surface (the list and their scripts are in `AGENTS.md`),
+   then build:
    ```bash
    scripts/idf-docker.sh idf.py build
    ```
+   Record the ELF hash: `shasum -a 256 build/daikin-altherma-esp32.elf`.
 
-3. **Sign the application image.**
-   This firmware requires Secure Boot v2-compatible RSA-3072 signing. An unsigned image will crash-loop
-   at boot before `app_main`:
+4. **Sign on the host.** Pass this one command on one line, with no pipe, chain, substitution or
+   backslash continuation; the hook rejects a signing command that contains a newline:
    ```bash
-   espsecure.py sign_data --version 2 --keyfile "$OTA_SIGNING_KEY_FILE" \
-     --output build/daikin-signed.bin build/daikin-altherma-esp32.bin
-   cp build/daikin-signed.bin build/daikin-altherma-esp32.bin
+   espsecure sign-data --version 2 --keyfile "$OTA_SIGNING_KEY_FILE" --output build/daikin-signed.bin build/daikin-altherma-esp32.bin
    ```
-   *(Note: set `OTA_SIGNING_KEY_FILE=/path/to/key.pem` or pass key path; newer esptool uses `espsecure sign-data` with a hyphen.)*
-
-4. **Verify signature guard.**
-   Refuse to flash an unsigned image:
+   `--keyfile` must be the literal `"$OTA_SIGNING_KEY_FILE"` or a path whose file name is
+   `ota_signing_key.pem` or `daikin_ota_signing_key.pem`; the hook admits no other key file name or
+   position. Then, as separate commands, copy the signed image over the application path that
+   `build/flash_args` references and guard it:
    ```bash
+   cp build/daikin-signed.bin build/daikin-altherma-esp32.bin
    scripts/require-signed.sh build/daikin-altherma-esp32.bin
    ```
+   No key available: report the USB test as unavailable. Never flash an unsigned image.
 
-5. **Flash the board via USB** preserving NVS (skips `nvs@0x9000`):
+5. **Check the flash plan.** Read `build/flash_args` and confirm that no part, rounded up to the 4 KiB
+   erase sector, overlaps the `nvs` or `coredump` partitions of `partitions.csv`. Confirm that
+   `partitions.csv` is unchanged against the source the bench runs:
+   - For a release `X.Y.Z`, that is tag `vX.Y.Z`.
+   - For an official `X.Y.Z-dev.N`, it is the commit on the linear `origin/main` that is `N` commits
+     after the highest `v*` tag (`scripts/next-version.sh`), or simply the manifest `source_sha`
+     while the feed still carries that version.
+   - For a local image left by an earlier `deploy-test`, it is the pinned SHA that test reported.
+
+   If the source is unknown, or the table differs, stop: a partition change needs separate explicit
+   authorization.
+
+6. **Identify the board, then write.** Run `esptool --port <port> chip-id` on the candidate port and
+   require exactly one port whose MAC matches the inventory bench MAC (case-insensitively). Repeat
+   that check immediately before the write, then:
    ```bash
-   (cd build && esptool --chip esp32s3 -p <port> write_flash "@flash_args")
+   (cd build && esptool --chip esp32s3 -p <port> write-flash "@flash_args")
    ```
+   If the port is silent, the board may be wedged; a physical USB replug is the fix. Do not switch to
+   a different port without identifying it again.
 
-6. **Verify health on the bench device.**
-   Allow the board to reboot and verify its HTTP API, network, MQTT and crash state:
+7. **Verify by identity, not by name.** The board must be running *this* image: compare
+   `/status.app_elf_sha256` from the inventory host, a 9-hex prefix, with the ELF hash from step 3,
+   or read the serial boot line `ELF file SHA256`. Never verify through
+   `daikin-altherma-esp32.local`, which can resolve to another board. Then:
    ```bash
-   # Basic health verification:
-   scripts/verify-device-health.sh --ip <bench-host> --timeout 60
-
-   # Or strict version- and ELF-pinned verification:
-   scripts/verify-device-health.sh --ip <bench-host> \
-     --expected-version <version> \
-     --expected-elf-sha <elf-sha-prefix> \
-     --timeout 60
+   scripts/verify-device-health.sh --ip <bench-host> --expected-version <version> --expected-elf-sha <elf-sha-prefix> --timeout 90
    ```
-   The script asserts:
-   - HTTP 200 on `/status` with valid JSON and mandatory fields
-   - WiFi connection and valid IP
-   - MQTT connection when configured (`.mqtt.connected: true`); an explicitly unconfigured broker
-     is accepted as disabled
-   - Clean boot (`.last_crash: null` or `.last_crash.fault: false`)
-   - Safe mode inactive (`.sys.safe_mode: false`)
-   - Sufficient contiguous heap headroom (`.sys.max_alloc >= 10000`)
-   - Matches expected version and ELF SHA when provided
+   Record the reported version: the next `$deploy-prod` bench gate needs it as
+   `--expected-current-version`. A USB-flashed image has no rollback record (`image_state`
+   unknown); that is expected for this path.
 
-7. **Report.**
-   Summarize the build version, ELF SHA, uptime, heap, and test result.
+8. **Exercise the changed behavior** on the bench. Start read-only, then drive the path the change
+   touches through the non-persistent bench requests that trigger it, and repeat timing-sensitive
+   checks several times. A generic boot smoke test does not replace this. `GET /ota/check` only
+   queues a check and returns its `generation`. When the test drives it, read `/ota/status` once
+   that generation has finished (`busy: false`, no error `state`). At that point
+   `ota_stack_min_free_bytes` must be non-null and at least 1 KiB, and `heap_min_free_bytes` and
+   `heap_min_largest_block_bytes` must be positive. Follow with a bounded soak: at least two
+   minutes, longer for networking, OTA or reconnect behavior, and for memory-related changes
+   clearly longer than `HEAP_CRITICAL_HOLD_MS` (`main/logic/heap_watchdog.hpp`) after the
+   exercise ends. Across the soak, `uptime_s` must keep rising. At the end of the run,
+   `.sys.mqtt_skipped` and `.sys.poll_skipped` (both start at 0 on every boot) must be 0, and so must
+   `.sys.heap_restarts`. The latter counts consecutive heap-watchdog restarts across reboots in
+   NVS, so a non-zero value already present right after the write points at the previous image:
+   record it and investigate before attributing it to the new one. If a hardware negative control
+   exists (the same check failing on the previous image), record it. A USB soak is not pressure or stress evidence; the bench gate provides that
+   after the merge.
 
-8. **Automated diagnostic and fix loop ("on findings/errors, fix and repeat from start").**
-   If a failure occurs during build, flashing, or health verification:
-   - **Diagnose root cause (`$device-triage`):**
-     Snapshot `/status` and `/diag?verbose=1`:
-     ```bash
-     curl -sS "http://<bench-host>/status" | jq .
-     curl -sS "http://<bench-host>/diag?verbose=1"
-     ```
-     If a crash occurred (`fault: true`), download the core dump and symbolize it against the local ELF:
-     ```bash
-     curl -sS "http://<bench-host>/coredump" -o coredump.bin
-     scripts/decode-coredump.sh coredump.bin build/daikin-altherma-esp32.elf
-     ```
-   - **Fix root cause in code:**
-     Correct the defect in the firmware code and add or update corresponding host tests in `test/test_logic.cpp` or `main/logic/`.
-   - **Re-flash and re-verify:**
-     Re-run the cycle from Step 2 (Build -> Sign -> Flash -> Verify) until the bench device is completely healthy.
-   - **Ask user on ambiguous issues:**
-     If an issue involves hardware failure, ambiguous requirements, or non-deterministic behavior, ask the user for clarification.
+9. **Report** the pinned SHA, ELF hash, signature check, flashed version, health result,
+   change-specific result, soak duration and every unverified boundary. The USB identity (MAC and
+   port) stays in local notes and out of GitHub. Report host, build, device, API and visual evidence
+   separately. When `$deploy-prod` runs this skill, it records the pinned SHA and the result in the
+   PR body.
 
-## Self-analysis and test optimization
+10. **On findings: fix and repeat.**
+    - Snapshot `/status` and `/diag?verbose=1` from the bench host. If `last_crash.fault` is true,
+      fetch `/coredump` and symbolize it against this build's ELF (`$device-triage`).
+    - Fix the root cause with a regression test (logic under `main/logic/` with a `CHECK` in
+      `test/test_logic.cpp`, or a contract test), commit, and restart from step 1.
+    - Ask the user only when the cause is hardware, the requirement is ambiguous, or the behavior is
+      not reproducible.
 
-After achieving a green bench result:
-   - **Examine runtime margins:** Inspect `/status` to confirm that contiguous heap headroom (`.sys.max_alloc`) exceeds the 10 KiB floor with margin, and check stack headroom.
-   - **Inspect `/diag` for silent anomalies:** Confirm there are no unexpected bus retry floods, silent queue overflows, or repeated reconnection warnings in `/diag?verbose=1`.
-   - **Review artifacts and diff:** Remove only temporary signing artifacts created by this workflow
-     (such as a duplicate `build/daikin-signed.bin`), retaining requested validation evidence and
-     pre-existing user artifacts. Check that authorized corrections are scoped and have relevant
-     regression coverage.
+## Self-analysis and cleanup
+
+- Confirm all of the following:
+  - `.last_crash.fault` is false or absent;
+  - `.sys.safe_mode` is false;
+  - `.sys.reset_reason` is not a fault: `usb`, `ext`, `poweron` and `sw` are normal after a USB
+    write;
+  - `.sys.heap_restarts` is 0, because a heap-watchdog restart also reads `sw` and is otherwise
+    invisible;
+  - `.sys.max_alloc` stays above the health script's floor with margin;
+  - every non-null entry of `.sys.stack_min_free_bytes` keeps at least 1 KiB free. A null entry
+    means the task was never sampled, for example `modbus` on a bench without HomeHub. The slot of
+    every task the test exercised must be non-null; read `/status` again if needed.
+- Check `/diag?verbose=1` for retry floods, queue overflows or reconnect loops.
+- Remove only the temporary signed duplicate this workflow created (`build/daikin-signed.bin`).
+  Keep the requested evidence and pre-existing user artifacts.
+- The bench keeps running the tested local image until the next `$deploy-prod` bench gate replaces
+  it with the official dev artifact.

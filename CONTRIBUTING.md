@@ -502,13 +502,19 @@ diagnostic artifacts. Say in the PR what you did and didn't verify.
 > Signing needs an offline key that is not in this repo; see
 > [`docs/SECURITY.md`](docs/SECURITY.md). For a contributor the practical path is: build to check it
 > compiles, and let the maintainer test on hardware — or generate your own key for your own board.
+> `scripts/require-signed.sh` and the maintainer flash workflows accept only this project's pinned
+> key, so an own-key image is flashed outside them, and that board then trusts only your key: it
+> refuses the project's signed OTA images until it is USB-reflashed with one.
 
 Maintainer OTA writes use the direct, unchained `scripts/production-ota-gate.py`; never call
 `/ota/update` directly. For an ordinary private-inventory `bench` update, use the exact signed
 official dev artifact with `--confirm-bench bench --install-bench`. This mode requires a clean
 matching source tree, host contracts, a generation-bound one-shot write, verifier/heap evidence,
 rollback probation and fixed live pressure. It cannot contact `production`; ordinary bench delivery
-is OTA-only, with signed NVS-preserving USB reserved for bootstrap or recovery.
+is OTA-only, with signed NVS-preserving USB reserved for bootstrap or recovery. The one other USB
+case is an explicitly requested pre-merge test of an exact local head on the bench (`$deploy-test`,
+or `$flash-esp32` naming the bench under the same rules). It tests unmerged code and never counts as
+delivery.
 
 Production promotion is the separate `--confirm-production production --execute` transaction. It
 first exercises a complete signed release download under pressure on the MAC-bound bench, restores
