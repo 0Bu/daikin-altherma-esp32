@@ -376,7 +376,7 @@ the rest in, so an install created by an older, MAC-identified build keeps its e
 > *Error Code* / *Error type* pairs), with six names qualified — the other four labels appeared only
 > once on that profile, so they gained a qualified name but no sibling.
 >
-> The later profile-specific diagnostic overlay adds the second `Thermostat ON/OFF` row. The current
+> The later reference-table diagnostic overlay adds the second `Thermostat ON/OFF` row. The current
 > reference profile publishes **129 X10A rows** and shows **eight group-qualified names**. Existing
 > installations keep the already group-scoped hydronic entity's `unique_id` and discovery topic;
 > only its friendly name becomes `Hydronic Thermostat ON/OFF`, while the outdoor entity is new.
@@ -574,7 +574,8 @@ Whether the unit *clamps* at 7 or *wraps* to 0 is not documented and has not bee
 unit; until it has been, a delta of exactly −7 should be read as "unknown", not as a reset.
 
 **Verified live** — dated evidence, not a closed counter question. On 2026-07-26, a live 4-8 kW
-monobloc detected as `altherma_ebla_edla_d_series_4_8kw_monobloc` and running firmware
+unit (an Altherma 3 R split, read with the register-identical
+`altherma_ebla_edla_d_series_4_8kw_monobloc` table) running firmware
 `1.0.0-dev.188` published all 11 entities. All survived the Telegraf → VictoriaMetrics path as
 numbers rather than being dropped as strings: 11 of 11 series were continuous over an 18-hour
 window, with 28 390–28 394 samples each. Every counter and flag was `0`; the raw page dump on
@@ -852,7 +853,8 @@ integrate($P[$__range]) / 3600 / increase(heatpump_energy_kwh[$__range])
   out over months — the systematic part (a wrong `Cf` for a glycol loop) does not, so set that. Read
   the live gauge as a working indication and the JAZ as the result.
 - A live COP that is wildly off usually means the **wrong model profile** (mismatched flow/temperature
-  registers) — check the detected model on the dashboard **Model** card, or `POST /detect` to re-run
+  registers) — compare the dashboard **Model** card (family, outdoor unit ID) with your nameplate and
+  check the profile actually read in `/status` → `profile.id`, or `POST /detect` to re-run
   auto-detection. A COP that looks fine but **collapses whenever the backup heater runs** is the
   boundary mismatch instead — see [step 2](#both-sides-must-describe-the-same-system).
 

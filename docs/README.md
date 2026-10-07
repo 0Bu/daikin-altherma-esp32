@@ -222,7 +222,9 @@ them. This project keeps that data but makes it **runtime-selectable**:
   and converter reference are in [REGISTERS.md](REGISTERS.md).
 - **One temporary supplement file sits beside those profiles**: `main/def/overlay.hpp` carries the
   outdoor unit's page-`0x10` protection words for every profile plus 27 control/safety/actuator rows
-  for the reference 4–8 kW monobloc, which the offline profile generator does not emit yet. Each
+  for every profile whose generated table is row-identical to the reference table (today the
+  EBLA/EDLA D 4–8 kW and ERGA E 04–08 kW ids), which the offline profile generator does not emit
+  yet. Each
   block is applied only when every register page it needs already exists in the generated table, so
   it cannot change model detection or add a bus round-trip. Delete a block once the generator emits
   those rows byte-identically; see
@@ -428,7 +430,10 @@ GET  /status[?redact=1]            # ?redact=1 = the bug-report form: 27 reporte
                                    #        task,pc,backtrace[],corrupted,elf_sha256},
                                    #   detect:{proto,valid,capacity_kw,capacity_kw_iu,ou_eeprom,
                                    #        candidates[],families[],ambiguous,
-                                   #        model:{name,family,marketing}} }
+                                   #        model: null | {name,family,marketing}} }
+                                   #   model = only what candidates[] establishes (name for <=1
+                                   #        candidate, family/marketing when all agree; unestablished
+                                   #        fields null); the table actually read is profile.id
                                    #   capacity_kw = the outdoor unit's own report (null when its
                                    #        0x00 descriptor is too short to carry it);
                                    #        capacity_kw_iu = the indoor unit's rated code. Different

@@ -59,6 +59,13 @@ requests. Its restrictive CSP includes `connect-src 'none'`.
 | `get_status` | none | `structuredContent` with the complete device/WiFi/MQTT/heat-pump status (same shape as `GET /status`) |
 | `get_hp_values` | none | `structuredContent` with the complete current X10A and, when live, HomeHub snapshot (same shape as `GET /values`) |
 
+`get_status.detect.model` reports only the identity the detection candidate set establishes: fields
+it does not establish are `null`, and the whole object is `null` when an ambiguous set establishes
+nothing. `profile.id` names the table actually being read — when several candidates remain,
+detect_best's pick among candidates the bus cannot tell apart — and is not a statement about the
+unit — see
+[`ARCHITECTURE.md`](ARCHITECTURE.md) → HTTP API, `/status.detect`.
+
 Each call result also contains a short `TextContent` summary. The full snapshot is emitted once as
 `structuredContent`: serialising and JSON-escaping the same multi-kilobyte value array a second time
 would create avoidable contiguous-heap pressure on the ESP32-S3. Transport chunks do not change the

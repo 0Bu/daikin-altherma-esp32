@@ -176,7 +176,7 @@ plain-language explainer — decided at render time by a first-match-wins regex 
 plain, un-tappable row: no error, no log, just a missing chevron among a hundred rows.
 The first 11 rows in [`main/def/overlay.hpp`](main/def/overlay.hpp) shipped exactly so — nine with no
 explainer, and two that matched the *fin temp* heatsink-**temperature** entry, describing a
-protection flag and a retry counter as a °C reading. Its later profile-specific diagnostic block is
+protection flag and a retry counter as a °C reading. Its later reference-table diagnostic block is
 subject to the same gate. Since the profiles are machine-generated, the gap re-opens whenever the
 generator emits a label the copy has never seen, without anyone touching this repo's JS.
 
