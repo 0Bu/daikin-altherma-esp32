@@ -116,15 +116,20 @@ OTA gate (`--confirm-bench bench --install-bench`), never through this skill.
 
 8. **Exercise the changed behavior** on the bench. Start read-only, then drive the path the change
    touches through the non-persistent bench requests that trigger it, and repeat timing-sensitive
-   checks several times. A generic boot smoke test does not replace this. When the test drives
-   `/ota/check`, read `/ota/status` afterwards. Its `ota_stack_min_free_bytes` must be non-null and
-   at least 1 KiB, and its heap minima must be positive. Follow with a bounded soak: at least two
-   minutes, longer for networking, OTA or reconnect behavior, and longer than
-   `HEAP_CRITICAL_HOLD_MS` (`main/logic/heap_watchdog.hpp`) for memory-related changes. Across the
-   soak, `uptime_s` must keep rising, `.sys.heap_restarts` must stay 0, and `.sys.mqtt_skipped` and
-   `.sys.poll_skipped` must not rise. If a hardware negative control exists (the same check failing
-   on the previous image), record it. A USB soak is not pressure or stress evidence; the bench
-   gate provides that after the merge.
+   checks several times. A generic boot smoke test does not replace this. `GET /ota/check` only
+   queues a check and returns its `generation`. When the test drives it, read `/ota/status` once
+   that generation has finished (`busy: false`, no error `state`). At that point
+   `ota_stack_min_free_bytes` must be non-null and at least 1 KiB, and `heap_min_free_bytes` and
+   `heap_min_largest_block_bytes` must be positive. Follow with a bounded soak: at least two
+   minutes, longer for networking, OTA or reconnect behavior, and for memory-related changes
+   clearly longer than `HEAP_CRITICAL_HOLD_MS` (`main/logic/heap_watchdog.hpp`) after the
+   exercise ends. Across the soak, `uptime_s` must keep rising. At the end of the run,
+   `.sys.mqtt_skipped` and `.sys.poll_skipped` (both start at 0 on every boot) must be 0, and so must
+   `.sys.heap_restarts`. The latter counts consecutive heap-watchdog restarts across reboots in
+   NVS, so a non-zero value already present right after the write points at the previous image:
+   record it and investigate before attributing it to the new one. If a hardware negative control
+   exists (the same check failing on the previous image), record it. A USB soak is not pressure or stress evidence; the bench gate provides that
+   after the merge.
 
 9. **Report** the pinned SHA, ELF hash, signature check, flashed version, health result,
    change-specific result, soak duration and every unverified boundary. The USB identity (MAC and
