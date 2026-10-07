@@ -1,5 +1,5 @@
 {
-  "method": "Exact taken/outcome counts measured at this revision with Apple Clang 17.0.0 and GCC 13.3.0. Local profiles bind compiler family/major and platform slug (e.g. clang-17-darwin, gcc-13-darwin, gcc-13-linux-ubuntu24); authoritative GitHub profiles additionally bind runner OS/image because packaging can alter instrumentation. The gate compares repository history and rejects decreases; improvements require an immediate versioned update. Rebased AREA BASE headers were measured with Apple Clang 17, ESP-IDF-container GCC 13 and Ubuntu 26.04 GCC 15; changed GNU inventories match between local GNU profiles. The updated hosted GCC 15 expectations use that measured inventory and require confirmation by authoritative CI. No prior ratio is reduced.",
+  "method": "Exact taken/outcome counts measured at this revision with Apple Clang 17.0.0 and GCC 13.3.0. Local profiles bind compiler family/major and platform slug (e.g. clang-17-darwin, gcc-13-darwin, gcc-13-linux-ubuntu24); authoritative GitHub profiles additionally bind runner OS/image because packaging can alter instrumentation. The gate compares repository history and rejects decreases; improvements require an immediate versioned update. The new detect_identity.hpp and the table-identity helper in profile_view.hpp were measured with Apple Clang 17, ESP-IDF-container GCC 13 and Ubuntu 26.04 GCC 15; both GNU inventories match. The updated hosted GCC 15 expectations use that measured inventory and require confirmation by authoritative CI. No prior ratio is reduced.",
   "profiles": {
     "clang-17-darwin": {
       "main/logic/availability.hpp": {
@@ -85,6 +85,10 @@
       "main/logic/detect_backoff.hpp": {
         "outcomes": 10,
         "taken": 10
+      },
+      "main/logic/detect_identity.hpp": {
+        "outcomes": 30,
+        "taken": 29
       },
       "main/logic/diag_tail.hpp": {
         "outcomes": 28,
@@ -295,8 +299,8 @@
         "taken": 52
       },
       "main/logic/profile_view.hpp": {
-        "outcomes": 26,
-        "taken": 21
+        "outcomes": 50,
+        "taken": 45
       },
       "main/logic/query_flag.hpp": {
         "outcomes": 4,
@@ -451,6 +455,10 @@
       "main/logic/detect_backoff.hpp": {
         "outcomes": 10,
         "taken": 10
+      },
+      "main/logic/detect_identity.hpp": {
+        "outcomes": 32,
+        "taken": 31
       },
       "main/logic/diag_tail.hpp": {
         "outcomes": 28,
@@ -661,8 +669,8 @@
         "taken": 58
       },
       "main/logic/profile_view.hpp": {
-        "outcomes": 28,
-        "taken": 23
+        "outcomes": 52,
+        "taken": 47
       },
       "main/logic/query_flag.hpp": {
         "outcomes": 6,
@@ -817,6 +825,10 @@
       "main/logic/detect_backoff.hpp": {
         "outcomes": 10,
         "taken": 10
+      },
+      "main/logic/detect_identity.hpp": {
+        "outcomes": 32,
+        "taken": 31
       },
       "main/logic/diag_tail.hpp": {
         "outcomes": 28,
@@ -1027,8 +1039,8 @@
         "taken": 58
       },
       "main/logic/profile_view.hpp": {
-        "outcomes": 28,
-        "taken": 23
+        "outcomes": 52,
+        "taken": 47
       },
       "main/logic/query_flag.hpp": {
         "outcomes": 6,
@@ -1183,6 +1195,10 @@
       "main/logic/detect_backoff.hpp": {
         "outcomes": 10,
         "taken": 10
+      },
+      "main/logic/detect_identity.hpp": {
+        "outcomes": 32,
+        "taken": 31
       },
       "main/logic/diag_tail.hpp": {
         "outcomes": 28,
@@ -1393,8 +1409,8 @@
         "taken": 58
       },
       "main/logic/profile_view.hpp": {
-        "outcomes": 28,
-        "taken": 23
+        "outcomes": 52,
+        "taken": 47
       },
       "main/logic/query_flag.hpp": {
         "outcomes": 6,

@@ -26,7 +26,8 @@ MQTT, HA and UI contracts.
 
 ## Diagnostic observability supplement
 
-The active profile now publishes 27 additional rows from pages it already queried. They are split
+The active profile (and the row-identical ERGA E 04–08 kW id) now publishes 27 additional rows from
+pages it already queried. They are split
 by evidence strength, not by whether they are visible:
 
 | Class | Rows | Firmware state age | Long-term use |
@@ -81,7 +82,8 @@ supplied by `def/overlay.hpp` and are therefore not part of this gap.
 
 ### Page `0x30` — page read; complete for the reference field list
 
-The five actuator fields at offsets 11–13 are supplied by the profile-specific overlay.
+The five actuator fields at offsets 11–13 are supplied by the overlay block that applies to the
+reference table (the active profile and its row-identical ERGA E 04–08 kW twin).
 
 ### Page `0x60` — page read; 6 fields not decoded/displayed
 
@@ -163,7 +165,7 @@ as a detection signature.
 ### Page `0x65` — page not polled cyclically; 5 fields not displayed
 
 The reference table assigns these fields to hydrosplit/bizone accessories; they are not part of the
-active monobloc profile.
+active profile.
 
 | Off | Len | Conv | Field |
 |---:|---:|---:|---|

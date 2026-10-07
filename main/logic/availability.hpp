@@ -377,8 +377,8 @@ inline constexpr AvailabilityRule AVAILABILITY_RULES[] = {
      "ambient "
      ">=17.5"},
     {0x21, 8, 105, "Fan2 Fin temp.", AvailabilityPolicy::ZeroMeansAbsent, 0.0,
-     "legacy-224: same, and a 4-8 kW monobloc has one fan — there is no second fan inverter to "
-     "measure"},
+     "legacy-224: same 0.0 in 1140/1140 running samples — the reference unit (an Altherma 3 R "
+     "split, read with the register-identical EBLA/EDLA table) reports no second fan inverter"},
     {0x21, 10, 105, "Compressor outlet temperature", AvailabilityPolicy::ZeroMeansAbsent, 0.0,
      "legacy-224: exactly 0.0 in 1140/1140 running samples while the discharge pipe it feeds read "
      "101 "
