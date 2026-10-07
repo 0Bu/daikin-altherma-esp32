@@ -535,6 +535,31 @@ try {
     ["the MQTT status reason becomes an allocating string", () =>
       replaceOnce("main/mqtt_ha.cpp", "static const char*              s_error   = \"\";",
         "static std::string             s_error   = \"\";")],
+    ["publisher promotion overwrites MQTT_EVENT_CONNECTED after its start", () =>
+      replaceOnce("main/mqtt_ha.cpp", "diag_printf(\"mqtt: X10A proven",
+        "set_status(false, \"\");\n    diag_printf(\"mqtt: X10A proven")],
+    ["mqtt_task overwrites MQTT_EVENT_CONNECTED after the initial start", () =>
+      replaceOnce("main/mqtt_ha.cpp", "diag_printf(\"mqtt: subscriber-only client started",
+        "set_status(false, \"\");\n    diag_printf(\"mqtt: subscriber-only client started")],
+    ["mqtt_task overwrites MQTT_EVENT_CONNECTED after a resume", () =>
+      replaceOnce("main/mqtt_ha.cpp",
+        "if (!mqtt_transport_resume_step(transport_resume, delay_s)) continue;",
+        "if (!mqtt_transport_resume_step(transport_resume, delay_s)) continue;\n        set_status(false, \"\");")],
+    ["mqtt_ha_start writes the status while mqtt_task already runs", () =>
+      replaceOnce("main/mqtt_ha.cpp", "startup_activity.hand_off();",
+        "set_status(false, \"\");\n        startup_activity.hand_off();")],
+    ["a resume status write hides a semicolon in its reason", () =>
+      replaceOnce("main/mqtt_ha.cpp", "state = {};\n    diag_printf(\"mqtt: transport resumed",
+        "state = {};\n    set_status(false, \"resumed; awaiting CONNECTED\");\n    diag_printf(\"mqtt: transport resumed")],
+    ["a resume status write hides behind a space before its parenthesis", () =>
+      replaceOnce("main/mqtt_ha.cpp", "state = {};\n    diag_printf(\"mqtt: transport resumed",
+        "state = {};\n    set_status (false, \"\");\n    diag_printf(\"mqtt: transport resumed")],
+    ["a resume writes the connected flag directly", () =>
+      replaceOnce("main/mqtt_ha.cpp", "state = {};\n    diag_printf(\"mqtt: transport resumed",
+        "state = {};\n    { Lock lk(s_mtx); s_status.connected = false; }\n    diag_printf(\"mqtt: transport resumed")],
+    ["set_status stores its reason in the allocating MqttStatus::error", () =>
+      replaceOnce("main/mqtt_ha.cpp", "if (err) s_error = err;",
+        "if (err) { s_error = err; s_status.error = err; }")],
     ["Weather no longer requests the MQTT transport pause", () =>
       replaceOnce("main/weather_forecast.cpp", "mqtt_transport_pause_for_network_heap();",
         "mqtt_transport_pause_bypassed();")],
