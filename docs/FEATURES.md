@@ -431,10 +431,8 @@ other.
   do not require equally-growing contiguous allocations.
 - **🧪 Bounded request and JSON ingress** ([`logic/http_body.hpp`](../main/logic/http_body.hpp),
   [`logic/payload_complete.hpp`](../main/logic/payload_complete.hpp)): body acceptance has idle and
-  absolute 30 s limits, checked after the final receive too. A body still owed after the response is
-  discarded up to 8 KiB within 2 s, otherwise the connection closes instead of entering ESP-IDF's
-  unbounded purge. Config, MQTT and Weather JSON permit at most 16 container levels and one document
-  with whitespace-only trailing data.
+  absolute 30 s limits; an unread rest after the response closes the session past 8 KiB or 2 s.
+  Config, MQTT and Weather JSON allow 16 container levels and one whitespace-terminated document.
 - **✅ gzip UI embedded in the app image**: the build inlines the page and its fragments,
   minifies, and pre-compresses them deterministically (`EMBED_FILES`). gzip is deliberate because
   the trusted-LAN origin is HTTP and browsers do not consistently negotiate Brotli there.
@@ -778,12 +776,10 @@ Docker, in seconds ([`test/README.md`](../test/README.md)).
   call selected production config serializers, X10A/Modbus parsers, MQTT publish gating and bounded
   body/chunk logic through host-only fake time, storage, serial, TCP, broker and HTTP adapters. Eight
   scenarios model failed persistence, reconstruction, allocation failure, interleavings,
-  fragmentation and reconnects. Three more use real POSIX `socketpair`/`recv` traffic: two prove
-  that `shutdown(SHUT_RDWR)` aborts trickling headers and bodies at an absolute deadline and is
-  joined before descriptor reuse; one proves that a body still owed after the response is settled
-  only within its byte cap and budget. These eleven scenarios do not execute ESP-IDF target glue,
-  real NVS or the production MCP/HTTP/MQTT stacks. Target compilation and hardware evidence remain
-  separate gates.
+  fragmentation and reconnects. Three more use real POSIX `socketpair`/`recv` traffic: a joined
+  `shutdown(SHUT_RDWR)` deadline aborts trickling headers and bodies, and a leftover body is settled
+  only within its cap and budget. These eleven do not execute ESP-IDF target glue, real NVS or the
+  production MCP/HTTP/MQTT stacks. Target compilation and hardware evidence remain separate gates.
 - **The browser loop** — the deterministic DOM suite covers interaction contracts, while
   [`run-browser-render-tests.sh`](../scripts/run-browser-render-tests.sh) opens the assembled UI in a
   real Chrome engine for all shipped locales at mobile and desktop widths. It checks actual layout,

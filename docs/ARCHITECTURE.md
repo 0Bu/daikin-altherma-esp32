@@ -191,9 +191,12 @@ http_server.cpp     → esp_http_server :80, wildcard dispatch; concerns registe
                       the symptom would be deep links breaking rather than the new route 404ing).
                       http_register() now logs a failed registration instead of discarding it
 http_common.cpp     → shared HTTP helpers + the single OOM guard: http_register() stashes the real
-                      handler in user_ctx and installs the handle_all trampoline, which calls it
-                      inside try/catch — std::bad_alloc → 503, any other throw → 500, instead of
-                      unwinding through esp_http_server's C frames to std::terminate → reboot.
+                      handler in user_ctx and installs handle_then_settle_body. It runs the
+                      handle_all trampoline, which calls the handler inside try/catch —
+                      std::bad_alloc → 503, any other throw → 500, instead of unwinding through
+                      esp_http_server's C frames to std::terminate → reboot — and then settles a
+                      leftover request body (≤ 8 KiB within 2 s, otherwise ESP_FAIL closes the
+                      session instead of IDF's unbounded purge).
                       Non-OTA routes are early-rejected with 503 during active OTA download or when
                       heap_largest_internal_block() < 6144 B (via logic/http_request.hpp http_is_ota_route()).
                       No route is exempt any more: the one that was (/events, raw-registered
