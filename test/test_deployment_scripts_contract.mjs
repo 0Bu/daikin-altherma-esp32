@@ -847,6 +847,27 @@ process.exit(isStatus ? +process.env.TEST_STATUS_EXIT : +process.env.TEST_VALUES
       assert.equal(result.status, statusExit || valuesExit ? 1 : 0,
         `HTTP200 plus curl exits ${statusExit}/${valuesExit} must retain transport outcome`);
     }
+
+    // The wall clock may cross a second between start_time and the first deadline check. A fake
+    // `date` makes that boundary deterministic: the first call returns 1000, every later call 1001.
+    // With --timeout 0 the deadline is 1000, so a guard evaluated before the first request would
+    // report a healthy device as unreachable without ever contacting it.
+    const calls = path.join(dir, "date-calls");
+    fs.writeFileSync(path.join(dir, "date"), `#!/usr/bin/env node
+const fs = require("fs");
+const n = fs.existsSync(${JSON.stringify(calls)}) ? +fs.readFileSync(${JSON.stringify(calls)}, "utf8") : 0;
+fs.writeFileSync(${JSON.stringify(calls)}, String(n + 1));
+process.stdout.write(n === 0 ? "1000\\n" : "1001\\n");
+`, { mode: 0o755 });
+    const ticked = await runScript("verify-device-health.sh", [
+      "--ip", "synthetic.invalid", "--require-hp", "--timeout", "0", "--quiet",
+    ], { ...process.env, PATH: `${dir}:${process.env.PATH}`,
+      TEST_STATUS: JSON.stringify(healthy), TEST_VALUES: JSON.stringify({ values: [row] }),
+      TEST_STATUS_EXIT: "0", TEST_VALUES_EXIT: "0" });
+    assert.equal(ticked.status, 0,
+      `a second boundary before the first request must not skip it: ${ticked.stderr}`);
+    assert.ok(fs.existsSync(calls) && +fs.readFileSync(calls, "utf8") >= 1,
+      "the fake clock must have been consulted");
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 }
 

@@ -88,19 +88,24 @@ log "Waiting for device at http://$IP/status (timeout: ${TIMEOUT}s)..."
 status_json=""
 reachable=0
 
-while [ "$(date +%s)" -le "$deadline" ]; do
+# Always make the first request before consulting the deadline. A guard evaluated first would make
+# zero attempts whenever the wall clock crosses a second between start_time and that guard, which
+# with --timeout 0 reports a healthy device as unreachable without ever contacting it.
+while :; do
     if read_response "http://$IP/status" && [ -n "$response_body" ] && printf '%s' "$response_body" | jq -e '.version' >/dev/null 2>&1; then
         status_json="$response_body"
         reachable=1
         if printf '%s' "$status_json" | jq -e '.mqtt.configured == true and .mqtt.connected == false' >/dev/null 2>&1; then
             if [ "$(date +%s)" -lt "$deadline" ]; then
                 sleep 2
+                [ "$(date +%s)" -le "$deadline" ] || break
                 continue
             fi
         fi
         break
     fi
     sleep 2
+    [ "$(date +%s)" -le "$deadline" ] || break
 done
 
 if [ "$reachable" -eq 0 ] || [ -z "$status_json" ]; then
