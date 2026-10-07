@@ -535,8 +535,9 @@ assert.match(weather,
 
 // config_save() must not discover another allocation failure after the first durable write. Stage
 // both serialized blobs and the exact RAM successor first; publication after NVS is a noexcept move.
-const configSaveStart = configSource.indexOf("bool config_save(");
-const configSaveEnd = configSource.indexOf("\n}\n\n// ── Field-owned commits", configSaveStart);
+// Its body is save_whole(), shared with the X10A config_save_link().
+const configSaveStart = configSource.indexOf("static ConfigSaveResult save_whole(");
+const configSaveEnd = configSource.indexOf("\nbool config_save(const Config& c)", configSaveStart);
 const configSaveBody = configSource.slice(configSaveStart, configSaveEnd);
 const serviceSerialize = configSaveBody.indexOf("config_blob_serialize(b)");
 const linkSerialize = configSaveBody.indexOf("link_blob_serialize(", serviceSerialize);
@@ -606,7 +607,7 @@ const setHpEnd = httpConfig.indexOf("static esp_err_t discover_homehub_now", set
 const setHp = httpConfig.slice(setHpStart, setHpEnd);
 const mbFingerprint = setHp.indexOf("const uint32_t modbus_target_fp");
 const mbEnabled = setHp.indexOf("const bool modbus_enabled", mbFingerprint);
-const mbSave = setHp.indexOf("config_save(c, /*require_link=*/x10a_sent)", mbEnabled);
+const mbSave = setHp.indexOf("} else if (!config_save(c))", mbEnabled);
 const mbHistoryReset = setHp.indexOf("history_modbus_reset(modbus_target_fp)", mbSave);
 const mbReconfigure = setHp.indexOf("mb_reconfigure(modbus_enabled)", mbHistoryReset);
 const mbCleanupRequest = setHp.indexOf("mqtt_request_modbus_cleanup()", mbReconfigure);

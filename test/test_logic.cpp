@@ -1283,6 +1283,126 @@ static void test_config_model() {
         CHECK(stale_snapshot.fp_valid == true);
     }
 
+    // A whole-struct save of an older snapshot: a service save carries detection forward, an X10A
+    // /set_hp save is refused so the handler derives it again (CFG-04).
+    CHECK(config_save_revision(false, 7, 7) == ConfigSaveRevision::Current);
+    CHECK(config_save_revision(true, 7, 7) == ConfigSaveRevision::Current);
+    CHECK(config_save_revision(false, 7, 9) == ConfigSaveRevision::ReconcileDetected);
+    CHECK(config_save_revision(true, 7, 9) == ConfigSaveRevision::Stale);
+    CHECK(config_save_revision(true, UINT32_MAX, 1) == ConfigSaveRevision::Stale);
+
+    // set_hp_apply_x10a applies one parsed /set_hp X10A patch to a snapshot.
+    {
+        Config detected;
+        detected.profile          = "altherma_erga_e_ehv_ehb_ehvz_e_ej_series_04_08kw";
+        detected.proto            = Protocol::I;
+        detected.rx_pin           = 1;
+        detected.tx_pin           = 2;
+        detected.x10a_identity_fp = 0xA1B2C3D4u;
+        detected.fp_valid         = true;
+        bool reset                = true;
+
+        // A wiring-only patch naming the live pins changes nothing it does not own.
+        SetHpX10aPatch same_pins;
+        same_pins.rx_sent = true;
+        same_pins.tx_sent = true;
+        same_pins.rx      = 1;
+        same_pins.tx      = 2;
+        Config c          = detected;
+        CHECK(set_hp_apply_x10a(c, same_pins, reset));
+        CHECK(!reset);
+        CHECK(c.profile == detected.profile);
+        CHECK(c.fp_valid);
+        CHECK(c.x10a_identity_fp == 0xA1B2C3D4u);
+
+        // Moving one wire is an identity change; the model stays a detection field.
+        SetHpX10aPatch rx_only;
+        rx_only.rx_sent = true;
+        rx_only.rx      = 44;
+        c               = detected;
+        CHECK(set_hp_apply_x10a(c, rx_only, reset));
+        CHECK(reset);
+        CHECK(c.rx_pin == 44);
+        CHECK(c.tx_pin == 2);
+        CHECK(c.x10a_identity_fp == 0);
+        CHECK(c.profile == detected.profile);
+        CHECK(c.fp_valid);
+
+        // "auto" is an explicit re-detect: fingerprint cleared, identity reset, pins kept.
+        SetHpX10aPatch redetect;
+        redetect.profile_sent = true;
+        redetect.profile      = "auto";
+        c                     = detected;
+        CHECK(set_hp_apply_x10a(c, redetect, reset));
+        CHECK(reset);
+        CHECK(c.profile == "auto");
+        CHECK(!c.fp_valid);
+        CHECK(c.proto == Protocol::I);
+        CHECK(c.rx_pin == 1);
+        CHECK(c.x10a_identity_fp == 0);
+
+        // A concrete id implies its protocol and keeps the fingerprint; compatibility is judged
+        // against THIS snapshot's settled protocol.
+        SetHpX10aPatch pin_s;
+        pin_s.profile_sent = true;
+        pin_s.profile      = "protocol_s";
+        c                  = detected;
+        reset              = true;
+        CHECK(!set_hp_apply_x10a(c, pin_s, reset));
+        CHECK(!reset);
+        c          = detected;
+        c.fp_valid = false;
+        CHECK(set_hp_apply_x10a(c, pin_s, reset));
+        CHECK(reset);
+        CHECK(c.proto == Protocol::S);
+        CHECK(!c.fp_valid);
+    }
+
+    // The conflicting-save witness. /set_hp reads a snapshot before detection settles, detection
+    // commits a new link and model, then /set_hp saves. The stale derivation would revert the model
+    // and, judging the pins against the old link, keep the new link's identity on other wires.
+    {
+        Config live;
+        live.profile          = "auto";
+        live.proto            = Protocol::I;
+        live.rx_pin           = 44;
+        live.tx_pin           = 43;
+        live.runtime_revision = 5;
+        const Config snapshot = live;
+
+        apply_link(live, 1, 2, Protocol::I, 0xA1B2C3D4u);
+        apply_model(live, "altherma_erga_e_ehv_ehb_ehvz_e_ej_series_04_08kw", 0x1bff, -1, 80,
+                    "01 50 29 63 07 02");
+        live.runtime_revision = 7;
+
+        SetHpX10aPatch wiring;
+        wiring.rx_sent = true;
+        wiring.tx_sent = true;
+        wiring.rx      = 44;
+        wiring.tx      = 43;
+
+        Config stale       = snapshot;
+        bool   stale_reset = true;
+        CHECK(set_hp_apply_x10a(stale, wiring, stale_reset));
+        CHECK(!stale_reset); // judged against the old pins: no identity change
+        CHECK(stale.profile == "auto");
+        CHECK(config_save_revision(true, stale.runtime_revision, live.runtime_revision) ==
+              ConfigSaveRevision::Stale);
+
+        Config fresh       = live;
+        bool   fresh_reset = false;
+        CHECK(set_hp_apply_x10a(fresh, wiring, fresh_reset));
+        CHECK(config_save_revision(true, fresh.runtime_revision, live.runtime_revision) ==
+              ConfigSaveRevision::Current);
+        CHECK(fresh_reset); // 44/43 is a different link from the detected 1/2
+        CHECK(fresh.rx_pin == 44);
+        CHECK(fresh.tx_pin == 43);
+        CHECK(fresh.x10a_identity_fp == 0);
+        CHECK(fresh.profile == "altherma_erga_e_ehv_ehb_ehvz_e_ej_series_04_08kw");
+        CHECK(fresh.fp_valid);
+        CHECK(fresh.fp_eeprom == "01 50 29 63 07 02");
+    }
+
     Config c;
     c.rx_pin = 44;
     c.tx_pin = 43;

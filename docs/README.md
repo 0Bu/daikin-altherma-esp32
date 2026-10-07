@@ -621,7 +621,11 @@ POST /set_hp                       # { profile?, rx?, tx?, mb_host?, mb_port?,
                                    #   persistence, RAM apply or task reconfiguration.
                                    #   rx/tx PERSIST (atomic link blob), profile session-only; proto
                                    #   auto-detected. The Settings Protocol card's pin dropdown posts
-                                   #   {profile:"auto",rx,tx} to re-detect.
+                                   #   {profile:"auto",rx,tx} to re-detect. An X10A save that
+                                   #   auto-detection overtakes is re-validated on a fresh snapshot;
+                                   #   after SET_HP_SAVE_ATTEMPTS (http_config.cpp) such refusals it
+                                   #   returns 409 "configuration changed during save; retry", with
+                                   #   nothing saved.
                                    #   mb_host controls the SECOND, independent Modbus stack — it does
                                    #   NOT stop the X10A poll. Non-empty polls that address; empty
                                    #   disables task, discovery and requests, including after reboot.
