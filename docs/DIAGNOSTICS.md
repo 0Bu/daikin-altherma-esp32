@@ -1,6 +1,6 @@
 # Plant diagnostics in plain language
 
-<!-- user-docs-contract: 96456d214600b9796a969e224f6ec7c5809bac09d95c97e252265bb790b5dce4 -->
+<!-- user-docs-contract: 801fd7d20569defa01e9bf64a4d798b8b3f92b60c96c4bc8d4823167b723ccc4 -->
 
 This guide is for owners who want to understand their heat pump without being heating specialists.
 Plant diagnostics are **off by default**. They run only after **Plant diagnostics** is explicitly
@@ -110,7 +110,9 @@ discarded.
 loss in the detectable range from 0.8 K/h upward. It does not exclude faster continuous loss. **NOT
 AVAILABLE** after many discarded windows also does not identify the reason: charging, pump activity,
 a draw, unreadable data, and continuous loss that resembles a draw cannot be separated from the
-stored totals alone.
+stored totals alone. Changing the circulation-pump measurement's topic, value paths, age limit,
+on/off thresholds or confirmation time starts this check over; renaming it does not. **CHECKING**
+afterwards is expected and says nothing about the tank.
 
 **What this result does not establish:** A rapid temperature drop alone proves neither a leaking
 three-way valve nor poor insulation. The sensor measures one location in a stratified tank; hot-water

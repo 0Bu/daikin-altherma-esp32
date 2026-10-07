@@ -1,6 +1,6 @@
 # Evidence and limits of the plant diagnostics
 
-<!-- diagnostic-evidence-contract: 51a66a578a155a9dbb5b5de73b989de86fb34ce24eb3a14dc33d4ebacf1ad932 -->
+<!-- diagnostic-evidence-contract: 2eb7679406970aead4a06936417fe68c001cf5ce220aae86752800e99304e93c -->
 
 For every row in the **Plant diagnostics · 24 h** card, this page answers four questions:
 
@@ -134,7 +134,9 @@ reassuring result requires six clean hours in a complete 24-hour lifecycle. The 
 `DHW_LOSS_*` constants and the `DhwLoss` branch in
 [`checkup.hpp`](../main/logic/checkup.hpp). The retained aggregate publishes only the greatest
 completed-hour R5T rate plus window counts and circulation correlation; it does not retain a mean,
-sum, or every window's individual rate.
+sum, or every window's individual rate. Changing the circulation-pump evidence mapping (topic, value
+paths, age limit, on/off thresholds or confirmation time) restarts this lifecycle, and the tank
+sample in flight at that moment is discarded rather than counted under the new mapping.
 
 **Project boundary:** `0.8 K/h`, the 45-minute settling period, six clean hours, and the detectable
 upper range of about `1.85 K/h` are **project heuristics**, not Daikin limits or an implementation of
