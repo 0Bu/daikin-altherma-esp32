@@ -848,6 +848,52 @@ process.exit(isStatus ? +process.env.TEST_STATUS_EXIT : +process.env.TEST_VALUES
         `HTTP200 plus curl exits ${statusExit}/${valuesExit} must retain transport outcome`);
     }
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+
+  // --timeout bounds retries, not the first request. This clock advances one second on every read,
+  // so a deadline check before the first request would already be past a zero timeout.
+  const clockDir = fs.mkdtempSync(path.join(os.tmpdir(), "daikin-health-clock-"));
+  try {
+    fs.writeFileSync(path.join(clockDir, "date"), `#!/usr/bin/env node
+const fs = require('fs');
+let n = 0;
+try { n = +fs.readFileSync(process.env.TEST_CLOCK, 'utf8'); } catch {}
+fs.writeFileSync(process.env.TEST_CLOCK, String(n + 1));
+process.stdout.write(String(1700000000 + n) + '\\n');
+`, { mode: 0o755 });
+    fs.writeFileSync(path.join(clockDir, "curl"), `#!/usr/bin/env node
+require('fs').appendFileSync(process.env.TEST_REQUESTS, process.argv.at(-1) + '\\n');
+process.stdout.write(process.env.TEST_STATUS + '\\n200');
+process.exit(+process.env.TEST_CURL_EXIT);
+`, { mode: 0o755 });
+    fs.writeFileSync(path.join(clockDir, "sleep"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+    const clock = path.join(clockDir, "clock");
+    const requests = path.join(clockDir, "requests");
+    const runClocked = (timeout, curlExit) => {
+      fs.rmSync(clock, { force: true });
+      fs.writeFileSync(requests, "");
+      return runScript("verify-device-health.sh", [
+        "--ip", "synthetic.invalid", "--timeout", timeout, "--quiet",
+      ], { ...process.env, PATH: `${clockDir}:${process.env.PATH}`, TEST_CLOCK: clock,
+        TEST_REQUESTS: requests, TEST_STATUS: JSON.stringify(healthy),
+        TEST_CURL_EXIT: String(curlExit) });
+    };
+    const requestCount = () => fs.readFileSync(requests, "utf8").split("\n").filter(Boolean).length;
+    let result = await runClocked("0", 0);
+    assert.equal(result.status, 0, `a healthy board must pass under --timeout 0: ${result.stderr}`);
+    assert.equal(requestCount(), 1, "--timeout 0 must make exactly one /status request");
+    result = await runClocked("0", 7);
+    assert.equal(result.status, 1, "an unreachable board must fail under --timeout 0");
+    assert.equal(requestCount(), 1, "an unreachable board must still be asked once");
+    for (const timeout of ["09", "010"]) {
+      result = await runClocked(timeout, 0);
+      assert.equal(result.status, 0, `--timeout ${timeout} is a decimal number of seconds: ${result.stderr}`);
+    }
+    for (const timeout of ["", "abc", "-1", "1.5", "60s"]) {
+      result = await runClocked(timeout, 0);
+      assert.equal(result.status, 2, `malformed --timeout ${JSON.stringify(timeout)} is a usage error`);
+      assert.equal(requestCount(), 0, `malformed --timeout ${JSON.stringify(timeout)} must not contact the board`);
+    }
+  } finally { fs.rmSync(clockDir, { recursive: true, force: true }); }
 }
 
 console.log("deployment scripts contract: R2, R3, R4, R5 offline scenarios clean");
