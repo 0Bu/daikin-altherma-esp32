@@ -646,12 +646,14 @@ constexpr uint32_t DHW_LOSS_DRAW_WINDOW_S = 10 * 60;
 // justification, that a tank charge cannot start, run and finish inside 120 seconds. This is that
 // same claim used in the other direction, so the two cannot disagree about what a charge is.
 //
-// A SHORT witness is still a DISTURBANCE and still discards the candidate hour — the hydronics moved
-// and the tank is no longer standing. What it no longer does is assert that heat went in. The
-// asymmetry is deliberate and is the safe direction: the worst case of being wrong here is a
-// candidate hour that starts 45 minutes earlier than the old rule allowed, on a tank that received
-// at most ~120 s of charge — and the window measures a DROP (`drop_tenths` floors at 0), so a tank
-// still warming from it reports no loss at all rather than a false one.
+// A SHORT witness is still a DISTURBANCE and still discards the candidate hour — the hydronics
+// moved and the tank is no longer standing. What it no longer does is assert that heat went in. The
+// asymmetry is deliberate and is the safe direction for a witness the board watched throughout: the
+// worst case of being wrong here is a candidate hour that starts 45 minutes earlier than the old
+// rule allowed, on a tank that received at most ~120 s of charge — and the window measures a DROP
+// (`drop_tenths` floors at 0), so a tank still warming from it reports no loss at all rather than a
+// false one. A witness the board saw only IN PART is a different case with a known limit; see the
+// RUN-bound note at DHW_LOSS_BLIND_RUN_MAX_S.
 //
 // An unmeasured gap counts as proven: a witness seen across an interval nobody watched could have
 // been running for all of it, and that is the one direction in which guessing short would admit a
@@ -722,10 +724,14 @@ constexpr int      DHW_LOSS_HIGH_TENTHS_K_H = 8;         // project heuristic, n
 // honest — SUBTRACTED from the seconds the window claims to have observed.
 //
 // Both bounds exist to stop a window being assembled out of absence. The RUN bound is the load-
-// bearing one: a tank charge cannot start, run and finish inside it, so no unobserved stretch
-// WITHIN the bound can hide the event that arms the settle timer. A stretch PAST the bound ends the
-// candidate, but a charge lying entirely inside it is not seen either, so the settle is not armed
-// and the next candidate can open on that charge's settling tail — a known limit stated in
+// bearing one: a tank charge cannot start, run and finish inside it, so no single unobserved
+// stretch WITHIN the bound can hide a whole charge from the witness. What no bound covers is a
+// charge the witness saw only IN PART. The settle arms only after DHW_LOSS_CHARGE_MIN_S of SEEN
+// witness, and it counts down from the last sample that saw the charge, also through unread samples
+// (dhw_loss_step's settle branch runs before its blind branch). So a charge seen for less than that
+// in total — e.g. one lying entirely inside a stretch PAST the bound — arms no settle, and one
+// whose end falls inside an unread stretch has its settle shortened by the unseen part. Either way
+// the next candidate can open on that charge's settling tail — a known limit stated in
 // docs/DIAGNOSTIC_EVIDENCE.md (dhw_loss, Not established). The TOTAL is the same 90%-evidence shape
 // the circulation witness already uses.
 constexpr uint32_t DHW_LOSS_BLIND_RUN_MAX_S = 120;

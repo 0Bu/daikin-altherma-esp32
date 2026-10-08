@@ -132,10 +132,13 @@ when readings return. A stretch that exceeds the budget ends the candidate as a 
 charge or pump run inside that stretch that is still under way when readings return meets no live
 candidate and is never recorded, because the next candidate opens only on the first clean reading
 (after any settle that charge arms). The part of a draw's drop that fell inside the stretch is lost
-because the draw anchor restarts at the first clean reading; a drop that continues past it, or an
-event that starts after the new candidate has opened, is recorded against that candidate. A charge
-lying entirely inside such a stretch is not seen at all, so its settle is never armed and the next
-candidate can open on the charge's settling tail. And `blind` itself only means unobserved time: the readings the check
+because the draw anchor restarts at the first clean reading; a draw-sized drop that continues past
+it, or an event that starts after the new candidate has opened, is recorded against that candidate.
+The settle arms only after two minutes of charge witness the board has seen, and counts down from
+the last sample that saw the charge, also through unread time. A charge seen for less than two
+minutes in total, such as one lying entirely inside the stretch, therefore arms no settle, and a
+charge whose end fell inside an unread stretch has its settle shortened by the unseen part; either
+way the next candidate can open on the charge's settling tail. And `blind` itself only means unobserved time: the readings the check
 needs (the tank temperature, or the valve, heater and pump states, which sit on a different X10A
 page) went unread. That time comes from X10A timeouts and also from the board pausing its own
 polling (the OTA or weather network hold, model detection, a poll cycle skipped after a caught
@@ -171,8 +174,9 @@ owed to heat entering the tank, and a one-cycle valve blip put none in; before t
 cost the identical 105 minutes as a 40-minute charge, and one blip every 90 minutes took a
 measured, otherwise perfect 24 h from 23 completed windows to zero. A short witness still discards
 the candidate hour — the hydronics moved, so the tank was not standing — it just no longer asserts
-that heat went in. Two rules keep the bound from failing in the direction that reports a leak where
-there is none. A witness seen across a gap between samples longer than `CHECKUP_MAX_GAP_S` counts
+that heat went in. For a charge the board actually watched, two rules keep the bound from failing
+in the direction that reports a leak where there is none; a charge it saw only in part is the
+limit disclosed in the blocked-verdict paragraph above. A witness seen across a gap between samples longer than `CHECKUP_MAX_GAP_S` counts
 as **proven** rather than short (an empty sample from a polling pause does not open such a gap). And an **unreadable** row is not proof the charge ended: both witnesses ride page 0x60, so
 one silent page inside a real 40-minute charge would otherwise restart the two-minute clock, and a
 charge finishing soon after that timeout would arm no settle at all and have its own tail measured

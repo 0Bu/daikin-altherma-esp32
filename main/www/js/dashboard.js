@@ -1328,8 +1328,8 @@ function checkupDetailHtml(c, fullSpan = c.full_span === true) {
     // live and a hidden draw or charge is recorded on return. A stretch past the budget ends the
     // candidate as blind; a charge or pump run still under way at the first reading after it is
     // never recorded (the next candidate opens only on the first clean reading, after any settle
-    // that charge arms), and the part of a draw's drop inside the stretch is lost, while a drop
-    // continuing past the first clean reading, or an event starting after the next candidate has
+    // that charge arms), and the part of a draw's drop inside the stretch is lost, while a draw-sized
+    // drop continuing past the first clean reading, or an event starting after the next candidate has
     // opened, is recorded. Nor does it prove a link fault: "blind" is unobserved time
     // (R5T, or the page-0x60 valve, heater and pump rows, went unread), which X10A timeouts and
     // board-side pauses (OTA/weather network hold, model detection, a skipped poll cycle, a
