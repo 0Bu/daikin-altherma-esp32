@@ -17402,9 +17402,10 @@ static void test_history_persist() {
     CHECK(history_anchor_commit_us(123, 456, 789, 0) == 123);
 
     // --- a cursor from the future (HIST-02/b) ----------------------------------------------------
-    // One boot synchronised to a wrong far-future time leaves records ahead of every later clock.
-    // Equal is never future, an unknown cursor or anchor proves nothing, and the slack absorbs the
-    // one-bucket jitter of an anchor derived from two whole-second readings.
+    // A cursor beyond its clock means one of two things: an earlier boot synchronised to a wrong
+    // far-future time, or THIS boot synchronised to a wrong past time. Equal is never future, an
+    // unknown cursor or anchor proves nothing, and the slack absorbs the one-bucket jitter of an
+    // anchor derived from two whole-second readings.
     CHECK(!history_cursor_in_future(100, 100));
     CHECK(history_cursor_in_future(101, 100));
     CHECK(!history_cursor_in_future(99, 100));
@@ -17419,105 +17420,22 @@ static void test_history_persist() {
     CHECK(history_cursor_in_future(5000 + HISTORY_SAMPLES, 5000,
                                    HISTORY_CURSOR_FUTURE_SLACK_BUCKETS));
 
-    // What the firmware does with such a cursor depends on WHICH clock is wrong, and the journal
-    // cannot tell: records beyond the clock look the same whether they were stamped by a far-future
-    // boot or belong to a good journal that a boot with a wrong PAST time is looking at. It acts
-    // only when the walk below the clock finds a believable record.
-    CHECK(history_reindex_step(110, 120, 0, false) == HistoryReindexStep::Idle); // not ahead
-    CHECK(history_reindex_step(110, 110, 0, false) == HistoryReindexStep::Idle); // equal
-    CHECK(history_reindex_step(111, 110, 1, false) == HistoryReindexStep::Idle); // inside the slack
-    CHECK(history_reindex_step(112, 110, 1, false) == HistoryReindexStep::Walk);
-    CHECK(history_reindex_step(112, 110, 1, true) == HistoryReindexStep::Wait); // walked: wait
-    CHECK(history_reindex_step(INT64_MIN, 110, 0, true) == HistoryReindexStep::Idle); // reset
-    CHECK(history_reindex_step(110, 120, 0, true) == HistoryReindexStep::Idle); // clock caught up
-    CHECK(history_reindex_step(110, INT64_MIN, 0, false) == HistoryReindexStep::Idle); // no clock
-    {
-        HistoryWindowIndex none;
-        CHECK(!history_reindex_publishes(none));
-        HistoryWindowIndex found;
-        CHECK(history_window_index_offer(found, 7, 10, HISTORY_SAMPLES) == HistoryWindowTake::Take);
-        CHECK(history_reindex_publishes(found));
-        // A record beyond the bound is not believable: it leaves the window empty.
-        HistoryWindowIndex beyond;
-        CHECK(history_window_index_offer(beyond, 11, 10, HISTORY_SAMPLES) ==
-              HistoryWindowTake::Skip);
-        CHECK(!history_reindex_publishes(beyond));
-    }
-    {
-        // One source's journal in physical order (the head is the back), driven through exactly the
-        // decisions history.cpp takes: the clock-free boot scan, then the walk below the clock.
-        struct Model {
-            int64_t cursor = INT64_MIN, newest = INT64_MIN;
-            size_t  count = 0, walks = 0;
-            bool    spent = false;
-        };
-        const auto boot = [](const std::vector<int64_t>& journal) {
-            Model              m;
-            HistoryWindowIndex w;
-            for (auto it = journal.rbegin(); it != journal.rend(); ++it)
-                (void)history_window_index_offer(w, *it, INT64_MAX, HISTORY_SAMPLES);
-            m.cursor = m.newest = w.newest;
-            m.count             = w.count;
-            return m;
-        };
-        // `believable_only` false is the retired rule: publish whatever the walk found.
-        const auto reindex = [](Model& m, const std::vector<int64_t>& journal, int64_t bound,
-                                uint32_t slack, bool believable_only) {
-            const HistoryReindexStep step = history_reindex_step(m.cursor, bound, slack, m.spent);
-            if (step == HistoryReindexStep::Idle) m.spent = false;
-            if (step != HistoryReindexStep::Walk) return step;
-            m.walks++;
-            HistoryWindowIndex w;
-            for (auto it = journal.rbegin(); it != journal.rend(); ++it)
-                (void)history_window_index_offer(w, *it, bound, HISTORY_SAMPLES);
-            if (!believable_only || history_reindex_publishes(w)) {
-                m.cursor = m.newest = w.newest;
-                m.count             = w.count;
-                m.spent             = false;
-            } else {
-                m.spent = true;
-            }
-            return step;
-        };
-
-        // The far-future fault: valid buckets 100..110, then a boot that took a time far ahead.
-        std::vector<int64_t> far_future;
-        for (int64_t b = 100; b <= 110; ++b) far_future.push_back(b);
-        for (int64_t b = 5000; b <= 5004; ++b) far_future.push_back(b);
-        Model m = boot(far_future);
-        CHECK(m.cursor == 5004 && m.newest == 5004 && m.count == 5); // the scan believes the head
-        CHECK(reindex(m, far_future, 120, 0, true) == HistoryReindexStep::Walk);
-        CHECK(m.cursor == 110 && m.newest == 110 && m.count == 11 && m.walks == 1); // older ones
-        CHECK(reindex(m, far_future, 120, 0, true) == HistoryReindexStep::Idle);    // resumes
-        CHECK(m.walks == 1);
-
-        // The mirror: a good journal, and a boot that synchronised to a wrong PAST time. Nothing in
-        // it is at or below that clock, so NOTHING may change — not the cursor, not the index —
-        // and the walk is not repeated on every tick.
-        std::vector<int64_t> good;
-        for (int64_t b = 100; b <= 110; ++b) good.push_back(b);
-        m = boot(good);
-        CHECK(m.cursor == 110 && m.count == 11);
-        CHECK(reindex(m, good, 50, 0, true) == HistoryReindexStep::Walk);
-        CHECK(m.cursor == 110 && m.newest == 110 && m.count == 11 && m.spent && m.walks == 1);
-        for (int tick = 0; tick < 10; ++tick)
-            CHECK(reindex(m, good, 50, 0, true) == HistoryReindexStep::Wait);
-        CHECK(m.walks == 1 && m.cursor == 110 && m.count == 11);
-        // The clock is corrected, or simply passes the cursor: the verdict is released.
-        CHECK(reindex(m, good, 112, 0, true) == HistoryReindexStep::Idle);
-        CHECK(!m.spent && m.cursor == 110 && m.count == 11 && m.walks == 1);
-        // The retired rule published an EMPTY window here, which put the cursor at INT64_MIN: the
-        // writer then appended the live window under the wrong buckets.
-        Model retired = boot(good);
-        CHECK(reindex(retired, good, 50, 0, false) == HistoryReindexStep::Walk);
-        CHECK(retired.cursor == INT64_MIN && retired.count == 0);
-
-        // A past clock that is only hours behind still has older records below it; the journal
-        // cannot tell that from the far-future case, so it is handled the same way.
-        m = boot(good);
-        CHECK(reindex(m, good, 105, 0, true) == HistoryReindexStep::Walk);
-        CHECK(m.cursor == 105 && m.count == 6);
-    }
+    // The detection decision is all the journal has to go on: it cannot say WHICH clock is wrong.
+    // Records beyond the clock look the same whether a far-future boot stamped them or a boot with
+    // a wrong PAST time is looking at a good journal, and on a mature journal (days of history)
+    // there are always believable older records below a wrong past clock. So the firmware only
+    // REPORTS the situation and neither re-indexes nor rewinds (history.cpp, "A bucket from the
+    // future").
+    //
+    // The anchor jitters by one bucket from tick to tick, so for a cursor two buckets above the
+    // lower reading the DECISION itself flips between adjacent anchors. That is why the writer's
+    // "ahead of the clock" line is latched per episode and released only by that source's next
+    // successful data append — never by a "not ahead" observation, which would make it flap.
+    CHECK(history_cursor_in_future(102, 100, HISTORY_CURSOR_FUTURE_SLACK_BUCKETS));
+    CHECK(!history_cursor_in_future(102, 101, HISTORY_CURSOR_FUTURE_SLACK_BUCKETS));
+    // The restore compares the indexed newest bucket with the wall bucket without slack: equal is
+    // current, one bucket beyond is stamped ahead of the clock.
+    CHECK(!history_cursor_in_future(100, 100) && history_cursor_in_future(101, 100));
 
     // --- locating the journal-backed span --------------------------------------------------------
     // The record buckets, not their values, define the restored span. This is load-bearing for a
@@ -17556,66 +17474,6 @@ static void test_history_persist() {
             steps++;
         }
         CHECK(ring == HISTORY_FLASH_TOTAL_RINGS && steps == 3);
-    }
-
-    // --- indexing a source's last window newest-first (boot scan and restore-time re-index) ------
-    // A record beyond the upper bound is SKIPPED: it neither defines the window's newest bucket nor
-    // ends the walk, so valid records behind a block of future-stamped ones are still found.
-    {
-        const auto walk = [](const int64_t* buckets, size_t n, int64_t upper, size_t retain,
-                             size_t* taken_at = nullptr) {
-            HistoryWindowIndex w;
-            for (size_t i = 0; i < n; ++i)
-                if (history_window_index_offer(w, buckets[i], upper, retain) ==
-                        HistoryWindowTake::Take &&
-                    taken_at)
-                    taken_at[w.count - 1] = i;
-            return w;
-        };
-
-        // Boot scan (clock unknown, no upper bound): the window is the last `retain` buckets.
-        const int64_t      plain[] = {10, 9, 8, 7, 6, 5, 4};
-        HistoryWindowIndex w       = walk(plain, 7, INT64_MAX, 5);
-        CHECK(w.newest == 10 && w.oldest == 6 && w.count == 5 && w.done);
-        w = walk(plain, 3, INT64_MAX, 5); // a young journal: window not full
-        CHECK(w.newest == 10 && w.oldest == 8 && w.count == 3 && !w.done);
-
-        // The fault: the newest records were stamped far ahead. Without a bound they ARE the window
-        // and the valid ones fall outside it, so a restore would find nothing it may believe.
-        const int64_t stamped[] = {5000, 4999, 4998, 100, 99, 98, 50};
-        w                       = walk(stamped, 7, INT64_MAX, 288);
-        CHECK(w.newest == 5000 && w.count == 3 && w.oldest == 4998);
-        HistoryWindowIndex probe; // one future record alone leaves the window untouched
-        CHECK(history_window_index_offer(probe, 5000, 100, 288) == HistoryWindowTake::Skip);
-        CHECK(probe.newest == INT64_MIN && probe.count == 0 && !probe.done);
-        size_t at[8] = {};
-        w            = walk(stamped, 7, 100, 288, at); // bounded by the wall bucket
-        CHECK(w.newest == 100 && w.oldest == 50 && w.count == 4 && !w.done);
-        CHECK(at[0] == 3 && at[1] == 4 && at[2] == 5 && at[3] == 6);
-        w = walk(stamped, 7, 100, 3); // a short window ends at the old gap
-        CHECK(w.newest == 100 && w.oldest == 98 && w.count == 3 && w.done);
-        w = walk(stamped, 3, 100, 288); // nothing believable at all
-        CHECK(w.newest == INT64_MIN && w.oldest == INT64_MIN && w.count == 0 && !w.done);
-        w = walk(stamped, 7, 4999, 288); // the bound itself is not future
-        CHECK(w.newest == 4999 && w.oldest == 4998 && w.count == 2 && w.done);
-
-        // A bucket above the window's newest (a clock that stepped back between boots) is skipped,
-        // a duplicate bucket is taken (restore replays oldest-first, the newer record wins), and
-        // the retention limit counts records, not distinct buckets.
-        const int64_t odd[] = {10, 12, 9, 9, 8};
-        w                   = walk(odd, 5, INT64_MAX, 288);
-        CHECK(w.newest == 10 && w.oldest == 8 && w.count == 4);
-        w = walk(odd, 5, INT64_MAX, 3);
-        CHECK(w.count == 3 && w.oldest == 9 && !w.done);
-        HistoryWindowIndex degenerate;
-        CHECK(history_window_index_offer(degenerate, 7, INT64_MAX, 0) == HistoryWindowTake::Skip);
-        CHECK(history_window_index_offer(degenerate, INT64_MIN, INT64_MAX, 5) ==
-              HistoryWindowTake::Skip);
-        CHECK(degenerate.newest == INT64_MIN);
-        // Once the window has ended nothing further counts, even a bucket inside it.
-        w = walk(plain, 7, INT64_MAX, 5);
-        CHECK(history_window_index_offer(w, 10, INT64_MAX, 5) == HistoryWindowTake::Skip);
-        CHECK(w.count == 5);
     }
 
     // --- the splice -----------------------------------------------------------------------------

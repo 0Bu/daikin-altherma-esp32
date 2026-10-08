@@ -87,60 +87,82 @@ assert.match(functionBody("bool flash_manifest_due(", "bool flash_build_manifest
 assert.match(functionBody("esp_err_t flash_append_record_at(", "void flash_note_append_failure("),
   /flash_manifest_cache_add\(verify\)/, "an appended manifest is adopted from the read-back record");
 
-// HIST-02/b: a cursor stamped beyond its clock is REPORTED by both builders — never rewound, never
-// walked, never logged from there (the trend builder holds s_mtx, and rewinding to "nothing
-// journalled" assumed the CURRENT clock is the right one). The journal service decides, outside
-// s_mtx, by walking the journal below the clock; both restores re-index a future-stamped window
-// before any record is read out of it.
+// HIST-02/b: a cursor (or restore window) stamped beyond its clock is REPORTED and never acted on.
+// The journal cannot tell a wrong far-future boot from a wrong PAST clock now, and on a mature
+// journal there are always believable records below a wrong past clock, so a re-index or rewind
+// publishes them, the writer appends the live window under wrong buckets, and the next correctly
+// synchronised boot hides the genuine newest records. Both builders only report (to the journal
+// service, which logs outside s_mtx); the restores only log; nothing rewinds or walks the journal.
 const checkupBuilder = functionBody("bool flash_build_next_checkup_record(",
   "esp_err_t flash_append_record_at(");
 for (const [what, body] of [["trend", builder], ["checkup", checkupBuilder]]) {
-  assert.match(body, /logic::history_cursor_in_future\(/, "the " + what + " builder tests its cursor");
+  assert.match(body,
+    /logic::history_cursor_in_future\([^;]*logic::HISTORY_CURSOR_FUTURE_SLACK_BUCKETS\)/,
+    "the " + what + " builder tests its cursor with the anchor slack");
   assert.match(body, /note\.future\s*=\s*true/, "the " + what + " builder reports a future cursor");
-  assert.doesNotMatch(body,
-    /flash_rewind_cursor|flash_reindex|flash_publish_window|diag_printf|s_flash_last_bucket\[[^\]]*\]\s*=[^=]/,
-    "the " + what + " builder must not rewind, walk or log a future cursor");
+  assert.doesNotMatch(body, /diag_printf/, "the " + what + " builder must not log from a builder");
+  assert.doesNotMatch(body, /s_flash_(?:last|newest|oldest)_bucket\[[^\]]*\]\s*=(?!=)/,
+    "the " + what + " builder must not rewind or move any cursor");
 }
+// The detection is reported only for the source whose clock it was compared with.
+assert.match(builder, /note\.bound\s*=\s*anchor/, "the trend builder bounds by the live anchor");
+assert.match(checkupBuilder, /note\.bound\s*=\s*wall_bucket/,
+  "the checkup builder bounds by the wall hour bucket");
 const forService = functionBody("bool flash_build_for_service(", "} // namespace");
-assert.match(forService, /flash_build_next_checkup_record\(\s*r,\s*wait_ticks,\s*note\)/);
+assert.match(forService, /flash_build_next_checkup_record\(r,\s*wait_ticks,\s*note\)/);
 assert.match(forService,
-  /flash_build_next_record\(\s*static_cast<HistorySource>\(src_i\),\s*r,\s*wait_ticks,\s*note\)/);
-assert.match(forService, /flash_reindex_if_future\(/, "the service walks the journal for a future cursor");
-assert.doesNotMatch(forService, /\bs_mtx\b/, "the walk must not run under the history mutex");
-// The walk REPLACES the index and the cursor only when it met a believable record. Publishing an
-// empty window on a wrong PAST clock put the cursor at INT64_MIN, the writer appended the live
-// window under the wrong buckets, and those became the head that hides the genuine ones.
-const reindex = functionBody("FlashReindex flash_reindex_source(", "// The one place a source's cursor");
-const reindexIfBody = functionBody("FlashReindex flash_reindex_if_future(", "// Pass 1 finds");
-assert.match(reindex, /logic::history_reindex_publishes\(/);
-assert.ok(reindex.indexOf("history_reindex_publishes(") < reindex.indexOf("flash_publish_window(src, w)"),
-  "the window is published only after the believable-record test");
-assert.doesNotMatch(reindex, /flash_publish_window\(src,\s*logic::HistoryWindowIndex\s*\{\s*\}/,
-  "a re-index must never publish an empty window");
-assert.match(reindexIfBody, /logic::history_reindex_step\(/);
-assert.ok(reindexIfBody.indexOf("HistoryReindexStep::Wait") < reindexIfBody.indexOf("flash_reindex_source("),
-  "a source that was walked and has nothing believable waits instead of walking every tick");
-const reindexIf = (body, what) => {
-  const at = body.indexOf("flash_reindex_if_future(");
-  assert.ok(at >= 0, what + " must re-index a future-stamped window");
-  return at;
-};
+  /flash_build_next_record\(static_cast<HistorySource>\(src_i\),\s*r,\s*wait_ticks,\s*note\)/);
+assert.match(forService, /flash_note_cursor_ahead\(src_i,\s*note\)/,
+  "the service reports a future cursor once the builder has returned");
+assert.doesNotMatch(forService, /\bs_mtx\b/, "the report must not run under the history mutex");
+// Nothing of the retired re-index/rewind machinery may remain anywhere in the file: no journal
+// walk, no republished window, no second window rule beside the boot scan, no cursor rewind.
+assert.doesNotMatch(history,
+  /flash_reindex|flash_publish_window|flash_rewind_cursor|history_reindex_|history_window_index_offer|s_flash_reindex_spent|may_reindex|FlashReindex|s_flash_valid_records/,
+  "records beyond the clock are reported, never re-indexed or rewound");
+// A cursor field is assigned INT64_MIN only by the boot scan's initialisation, the identity resets
+// and the factory forget. Anywhere else would be a rewind.
+const cursorReset = /s_flash_(?:last|newest|oldest)_bucket\[[^\]]*\]\s*=\s*INT64_MIN\s*;/g;
+const countResets = (text) => (text.match(cursorReset) || []).length;
+const resetOwners = [
+  functionBody("void history_reset()", "void history_reset_on_detect"),
+  functionBody("void history_reset_on_detect", "void history_modbus_reset"),
+  functionBody("void history_modbus_reset", "uint32_t history_modbus_generation"),
+  functionBody("void history_checkup_reset", "// The BOARD's own 24-hour trends"),
+  functionBody("bool flash_journal_scan()", "esp_err_t flash_region_erased("),
+  functionBody("bool history_flash_forget()", "static void history_flash_start()"),
+];
+assert.equal(countResets(history), resetOwners.reduce((n, body) => n + countResets(body), 0),
+  "a cursor is reset to INT64_MIN only by the scan, the identity resets and the factory forget");
+// The cursor fields are otherwise written from the record just appended (and by the scan).
+const appendAt = functionBody("esp_err_t flash_append_record_at(", "// One sector is abandoned");
+assert.match(appendAt, /s_flash_last_bucket\[src\]\s*=\s*r\.header\.bucket/);
 const trendRestore = functionBody("void history_service_flash_restore()",
   "static size_t history_flash_service_journal(");
-assert.ok(reindexIf(trendRestore, "the trend restore") < trendRestore.indexOf("flash_read_record("),
-  "the trend restore must re-index before reading records");
 const checkupRestore = functionBody("static void history_restore_checkup_flash()",
   "// Restore at most four rings");
-assert.ok(reindexIf(checkupRestore, "the diagnostic restore") <
-  checkupRestore.indexOf("records[count++]"),
-  "the diagnostic restore must re-index before it fills the shared scratch");
-// The re-index runs on the poll task: it reads through the static scratch, not a second stack record.
-assert.doesNotMatch(reindex, /FlashJournalRecord\s+\w+\s*;/,
-  "the re-index must not put a 256-byte record on the poll task's stack");
-// The boot scan and the re-index share ONE window rule.
-assert.match(functionBody("bool flash_journal_scan()", "esp_err_t flash_region_erased("),
-  /logic::history_window_index_offer\(/);
-assert.match(reindex, /logic::history_window_index_offer\(/);
+for (const [what, body] of [["trend", trendRestore], ["diagnostic", checkupRestore]]) {
+  assert.match(body, /flash_note_restore_ahead\(/, "the " + what + " restore reports a future window");
+  assert.doesNotMatch(body, /s_flash_(?:last|newest|oldest)_bucket\[[^\]]*\]\s*=(?!=)|s_flash_restore_slot(?:s|_count)\[[^\]]*\](?:\[[^\]]*\])?\s*=(?!=)/,
+    "the " + what + " restore must not move the cursor or rebuild the index");
+}
+// The report latches. The writer's latch is cleared ONLY by a successful DATA append: the anchor
+// jitters by one bucket, so releasing it on a "not ahead" observation would make the line flap.
+const noteAhead = functionBody("void flash_note_cursor_ahead(", "// The restore's counterpart");
+assert.match(noteAhead, /if \(s_flash_ahead_logged\[src_i\]\) return;[\s\S]*s_flash_ahead_logged\[src_i\]\s*=\s*true;[\s\S]*diag_printf\(/,
+  "the writer's report is logged once per episode");
+const releases = history.match(/s_flash_ahead_logged\[[^\]]*\]\s*=\s*false/g) || [];
+assert.equal(releases.length, 1, "exactly one site releases the writer's latch");
+const appendFn = functionBody("esp_err_t flash_append_record(FlashJournalRecord& r) {",
+  "// Log, once per source and episode");
+assert.match(appendFn,
+  /flash_note_append_success\(slot\);[\s\S]*if \(!flash_is_manifest\(r\.header\)\) s_flash_ahead_logged\[r\.header\.source\] = false;/,
+  "the latch is released by a successful data append, not by a manifest or an observation");
+const noteRestore = functionBody("void flash_note_restore_ahead(", "// The next record of source");
+assert.match(noteRestore, /s_flash_restore_ahead_logged\[src_i\]\s*\|\|\s*!logic::history_cursor_in_future\(newest,\s*wall_bucket\)/,
+  "the restore's report compares the indexed newest bucket with the wall bucket, without slack");
+assert.equal((history.match(/s_flash_restore_ahead_logged\[[^\]]*\]\s*=\s*false/g) || []).length, 0,
+  "the restore's report is once per source and boot");
 
 // HIST-02/c: a failing slot is accounted per slot, abandoned after the retry limit and logged per
 // episode — the service loop itself must not print a line for every failed tick. One episode may
@@ -152,8 +174,19 @@ assert.match(noteFailure, /step\.paused/);
 // flash_prepare_next_slot can move the cursor to the next sector by itself (a slot that was
 // programmed but never committed): that abandons a sector too and counts against the same budget.
 assert.match(noteFailure,
-  /slot != s_flash_fail_slot\)\s*\{[\s\S]{0,800}?s_flash_fail_slot != SIZE_MAX[\s\S]{0,160}?s_flash_fail_skipped\+\+/,
+  /slot != s_flash_fail_slot\)\s*\{[\s\S]{0,800}?s_flash_fail_slot != SIZE_MAX\)\s*flash_count_abandoned_sector\(s_flash_fail_slot,\s*slot\)/,
   "a cursor that moved to another sector between two failures counts as an abandoned sector");
+// Both paths count through ONE helper, which logs the first abandon of an episode: the torn jump
+// used to count silently, so an episode that began with one never printed the line.
+assert.match(noteFailure, /flash_count_abandoned_sector\(slot,\s*step\.next_slot\)/,
+  "the explicit skip counts through the same helper");
+assert.doesNotMatch(noteFailure, /s_flash_fail_skipped\+\+/,
+  "no path counts an abandoned sector without the helper that logs the first one");
+const countAbandon = functionBody("void flash_count_abandoned_sector(",
+  "// An append failed at `slot`.");
+assert.match(countAbandon,
+  /s_flash_fail_skipped\+\+;\s*if \(s_flash_fail_skipped == 1\)\s*diag_printf\(\s*"history: journal abandoned the sector/,
+  "the first abandoned sector of an episode is logged whichever path found it");
 assert.match(functionBody("esp_err_t flash_append_record(FlashJournalRecord& r) {",
   "bool flash_build_for_service("), /flash_note_append_failure\(/);
 // The service definition (the forward declaration at the top has no body).
@@ -166,10 +199,10 @@ assert.match(service, /flash_append_record\(r\)\s*!=\s*ESP_OK\)\s*return written
 assert.match(service, /logic::history_journal_retry_due\(/, "a paused journal retries at most once a minute");
 assert.ok(service.indexOf("history_journal_retry_due(") < service.indexOf("flash_build_for_service("),
   "the pause gate precedes every build and append attempt");
-assert.match(service, /flash_build_for_service\(src_i, r, wait_ticks, may_reindex\)/);
-// The shutdown drain is a bounded final flush: it never starts a journal walk.
+assert.match(service, /flash_build_for_service\(src_i, r, wait_ticks\)/);
+// The shutdown drain is the same bounded final flush as before: no journal walk exists any more.
 assert.match(functionBody("void history_flash_save()", "// The factory reset"),
-  /reindex=\*\/\s*false/);
+  /history_flash_service_journal\(\s*\/\*max_records=\*\/12,\s*pdMS_TO_TICKS\(200\)\)/);
 
 // HIST-02/d: a source whose identity reset is pending is stepped OVER. Returning at its first ring
 // left the restore unfinished for good (a disabled HomeHub never consumes its reset), and the

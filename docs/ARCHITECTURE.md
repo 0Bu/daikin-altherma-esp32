@@ -1425,17 +1425,23 @@ A single task owns the X10A UART (there is exactly one link). Each cycle:
    profile) — waiting would leave every other source unrestored and the journal unwritten until
    the next reboot.
 
-   A journal cursor, or a restore window, ahead of the clock is acted on only when an older record
-   at or below that clock is believable — the case of one boot that took a far-future time. The
-   writer compares its cursor with the source's own clock anchor (one bucket of slack) and the
-   restore compares the window with the wall bucket; the journal service then re-indexes the
-   source below that clock, outside the history mutex, so future-stamped records are never restored
-   and never hide the valid older ones, and appends resume from the newest believable record. When
-   nothing at or below the clock is believable, the journal looks the same as a good journal seen
-   by a boot that took a wrong *past* time, so it is left exactly as it is: no index, cursor or
-   append is touched, the one walk is not repeated, and one diagnostic line says so, until the clock
-   passes the cursor or the device reboots. A past clock that is only hours behind still leaves
-   older records below it, which the journal cannot tell from the far-future case.
+   A journal cursor, or a restore window, ahead of the clock is **reported, never rewritten**.
+   Records beyond the clock are never restored, and the writer of the affected source appends
+   nothing until the clock passes its cursor; it says so once per source and episode (the writer
+   compares its cursor with the source's own clock anchor, one bucket of slack, and logs outside
+   the history mutex; the restore compares the indexed window with the wall bucket and logs once
+   per source and boot). The episode ends only at that source's next successful data append, so the
+   anchor's one-bucket jitter cannot make the line flap.
+
+   This is deliberate. The journal cannot tell a wrong *future* stamped by an earlier boot from a
+   wrong *past* clock now, and on a mature journal (days of history) there are always believable
+   older records below a wrong past clock. Re-indexing or rewinding on "an older record exists"
+   would let that boot append its live window under wrong past buckets, and the next correctly
+   synchronised boot would then hide the genuine newest records or show the wrong-clock samples in
+   their place. Leaving the journal alone turns the same fault into missing history rather than
+   misdated history: after a far-future boot the source neither restores nor persists until the
+   corrected clock reaches the stamped buckets, and after a wrong past clock the journal is exactly
+   what it was.
 
    A slot that fails to erase or program is retried once and then abandoned with its sector; the
    first failure of an episode and the recovery are logged, not every poll tick. Abandoning erases

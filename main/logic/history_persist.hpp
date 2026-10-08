@@ -856,86 +856,35 @@ inline constexpr int64_t history_anchor_commit_us(int64_t now_us, int64_t unix_s
 }
 
 // ── A bucket from the future ────────────────────────────────────────────────────────────────────
-// One boot that synchronised to a wrong, far-future time (a user-set NTP server is enough) writes
-// records whose buckets lie ahead of every later clock. Two things then stop working until the
-// corrected clock catches up: the writer's cursor (the newest bucket already journalled) is beyond
-// its own live anchor, so it never has anything to append; and the restore index, which is built
-// newest-first, is dominated by the future records and hides every valid older one.
+// A journal record whose bucket lies AHEAD of the clock is evidence of one of two faults, and the
+// journal cannot tell which. Either an earlier boot synchronised to a wrong, far-future time (a
+// user-set NTP server is enough) and stamped its records with buckets no later clock has reached,
+// or THIS boot synchronised to a wrong PAST time and is looking at a perfectly good journal.
 //
-// The journal cannot tell WHICH clock is wrong, though: the same picture (records beyond the
-// current clock) is also what a boot that synchronised to a wrong PAST time sees of a perfectly
-// good journal. So "ahead of the clock" is acted on only when the walk of history_reindex_step
-// finds at least one believable record at or below the clock — the far-future case, where older
-// valid records exist. If everything lies beyond the clock, nothing is rewound, re-indexed or
-// appended: the journal is left exactly as it is until the clock passes it, which is also what a
-// journal that was right all along needs. (A past clock that is only hours behind still leaves
-// older records below it; the journal's own content cannot distinguish that from the far-future
-// case, so it is treated like it.)
+// Acting on either reading is unsafe. Re-indexing below the clock and rewinding the writer's
+// cursor to the records found there trusts the current clock, and a mature journal (days of
+// history) always has believable records below a wrong past clock, so "an older record exists"
+// proves nothing. The writer would then append the live window under wrong past buckets; those
+// records become the physical head, and the next correctly synchronised boot trusts them over the
+// genuine newest ones (or shows them in place of genuine values). That turns MISSING history into
+// MISDATED history, which this firmware never publishes.
 //
-// `slack` is tolerance for the anchor itself, which is derived from two whole-second readings and
-// can sit one bucket either side of where a record was stamped (and for a small clock step). A
-// cursor inside the slack just waits, as it always did; only a cursor beyond it is treated as
-// written under a clock that no longer holds. Equal is never future, and an unknown cursor or
-// anchor (INT64_MIN) is not evidence of anything.
+// So the rule is: records beyond the clock are never restored (the splice refuses a snapshot newer
+// than the live ring) and never rewritten. The writer of an affected source appends nothing until
+// the clock passes its cursor, and says so once; the episode ends with that source's next
+// successful data append. After a far-future boot the source therefore neither restores nor
+// persists until the corrected clock reaches the stamped buckets; after a wrong past clock the
+// journal is left exactly as it was and only that boot's own window goes unpersisted.
+//
+// This is the detection decision only. `slack` is tolerance for the anchor itself, which is
+// derived from two whole-second readings and can sit one bucket either side of where a record was
+// stamped (and for a small clock step). A cursor inside the slack just waits, as it always did;
+// only a cursor beyond it is reported as ahead of the clock. Equal is never future, and an unknown
+// cursor or anchor (INT64_MIN) is not evidence of anything.
 inline constexpr uint32_t HISTORY_CURSOR_FUTURE_SLACK_BUCKETS = 1;
 inline constexpr bool history_cursor_in_future(int64_t cursor, int64_t anchor, uint32_t slack = 0) {
     if (cursor == INT64_MIN || anchor == INT64_MIN || cursor <= anchor) return false;
     return static_cast<uint64_t>(cursor) - static_cast<uint64_t>(anchor) > slack;
-}
-
-// ── Indexing a source's last window newest-first ────────────────────────────────────────────────
-// The boot scan and the restore-time re-index walk the journal from its head backwards and keep,
-// for each source, only the slots of its final `retain` buckets. This is that decision for one
-// record, shared so the two cannot disagree.
-//
-// `upper_bucket` is the newest bucket that may be believed. The boot scan runs before the clock is
-// known and passes INT64_MAX; the re-index passes the current wall bucket, and a record beyond it
-// is SKIPPED — it neither defines the window's newest bucket nor ends the walk, so the valid
-// records behind it are still found.
-struct HistoryWindowIndex {
-    int64_t newest = INT64_MIN; // bucket of the first believable record met
-    int64_t oldest = INT64_MIN; // oldest bucket taken so far
-    size_t  count  = 0;         // slots taken
-    bool    done   = false;     // a record older than the window was met: nothing further counts
-};
-enum class HistoryWindowTake : uint8_t { Skip, Take, End };
-
-inline HistoryWindowTake history_window_index_offer(HistoryWindowIndex& w, int64_t bucket,
-                                                    int64_t upper_bucket, size_t retain) {
-    if (w.done || !retain || bucket == INT64_MIN || bucket > upper_bucket)
-        return HistoryWindowTake::Skip;
-    if (w.newest == INT64_MIN) w.newest = bucket;
-    if (bucket < w.newest - static_cast<int64_t>(retain - 1)) {
-        w.done = true;
-        return HistoryWindowTake::End;
-    }
-    // A bucket above the window's newest (a clock that stepped backwards between two boots) is not
-    // part of this window; a duplicate bucket is taken — restore replays oldest-first, newest wins.
-    if (bucket > w.newest || w.count >= retain) return HistoryWindowTake::Skip;
-    w.count++;
-    if (w.oldest == INT64_MIN || bucket < w.oldest) w.oldest = bucket;
-    return HistoryWindowTake::Take;
-}
-
-// What to do about a source whose cursor may be ahead of the clock. `bound` is the newest bucket
-// the clock can vouch for (the live anchor for a trend writer, the wall bucket for the restore and
-// for the checkup writer). Idle: the cursor is not ahead, so there is nothing to do and an earlier
-// "found nothing" verdict (`spent`) is released. Walk: re-index below the bound. Wait: a walk
-// already found nothing to act on (or failed) while the cursor stayed ahead; a wrong clock must not
-// cost a full journal walk per poll tick, so the source waits until the cursor is no longer ahead
-// (the clock caught up, or an identity reset cleared it) or the device reboots.
-enum class HistoryReindexStep : uint8_t { Idle, Wait, Walk };
-inline constexpr HistoryReindexStep history_reindex_step(int64_t cursor, int64_t bound,
-                                                         uint32_t slack, bool spent) {
-    if (!history_cursor_in_future(cursor, bound, slack)) return HistoryReindexStep::Idle;
-    return spent ? HistoryReindexStep::Wait : HistoryReindexStep::Walk;
-}
-
-// Does a finished walk replace the source's index and cursor? Only when it met a believable record.
-// Otherwise the existing index and cursor stay exactly as they were (the walk took nothing, so it
-// did not touch the slot array either).
-inline constexpr bool history_reindex_publishes(const HistoryWindowIndex& w) {
-    return w.newest != INT64_MIN;
 }
 
 // ── Locating the journal-backed span ────────────────────────────────────────────────────────────
