@@ -1,6 +1,6 @@
 # Plant diagnostics in plain language
 
-<!-- user-docs-contract: 801fd7d20569defa01e9bf64a4d798b8b3f92b60c96c4bc8d4823167b723ccc4 -->
+<!-- user-docs-contract: 38127a2fd2f401cf56663e893bb2247241765340ef35b81f6d7309608e964180 -->
 
 This guide is for owners who want to understand their heat pump without being heating specialists.
 Plant diagnostics are **off by default**. They run only after **Plant diagnostics** is explicitly
@@ -40,7 +40,16 @@ An ordinary reset while power remains available normally retains the diagnosis w
 RAM. Completed diagnosis hours are also stored in the device's append-only history journal, so a
 power interruption or firmware update restores them once the clock and detected model match. Only
 the hour that was still open can be missing. An update still discards older records when the meaning
-or layout of their counters changed.
+or layout of their counters changed. An intentional restart, such as a firmware update, also hands
+over the domestic-hot-water check's unfinished quiet hour; a power interruption or crash does not.
+The restart and the start-up before the board can watch the tank again count as unwatched time, up
+to the point where the check resumes. When the restart and that start-up leave the tank unwatched
+for more than two minutes in total (less when the restart interrupted a stretch of unread readings,
+or when that hour already had more than four minutes of them), for example during a long wait for
+the network, the unfinished hour starts over. That restart is not counted as a discarded hour, so
+the count of discarded hours can fall short after restarts. It says nothing about the tank. Unread
+readings after the check resumes count like any other unread time, and a discard they cause is
+counted.
 
 The saved five-minute trends remain separate. Each interval retains only its final measurement or an
 aggregated event state. Those trends cannot reliably reconstruct second-by-second compressor starts,
@@ -51,9 +60,11 @@ Changing or removing a source clears the browser's cached trends and pinned poin
 cannot restore them. A reboot also starts a new browser lifetime, even when the device restores
 compatible saved trends. The state ages beside individual values are separate from the 24-hour
 card: normal polling cadence counts as observed, while known update, forecast or memory-pressure
-pauses and a continuing run's resumed tail count as blind time. A blind gap longer than two minutes,
-including the interval until the first returning sample, starts a new age. The version-3 format rejects
-older records, so those ages can restart after an update without proving that the plant changed state.
+pauses and a continuing run's resumed tail count as blind time. When a reset keeps those ages, the
+reset and the start-up before the first poll count as blind time too. A blind gap longer than two
+minutes, including the interval until the first returning sample, starts a new age. The version-4
+format rejects older records, so those ages can restart after an update without proving that the
+plant changed state.
 
 The weather companion describes the two-hour window selected at the last successful fetch. That
 window stays fixed until another successful fetch; it is not continuously shifted forward.

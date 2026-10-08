@@ -733,7 +733,9 @@ constexpr uint32_t DHW_LOSS_CIRC_OFF_SETTLE_S = 2 * 3600;
 constexpr uint32_t DHW_LOSS_REQUIRED_S = 6 * 3600;       // plus a complete 24 h lifecycle for clear
 // The device cannot measure its own downtime.  Intentional esp_restart() on this board is a few
 // seconds, so use the same bounded, explicit blind allowance as the persisted state-age table.  It
-// advances wall-clock age but never observed evidence.
+// advances wall-clock age but never observed evidence. It covers the downtime only; the uptime the
+// new boot has already spent before the adoption is measured and booked on top
+// (dhw_loss_adopt_blind_s).
 constexpr uint32_t DHW_LOSS_REBOOT_BLIND_S = 5;
 
 constexpr uint8_t DHW_LOSS_CARRY_SEGMENT = 1u << 0;
@@ -799,6 +801,29 @@ inline bool dhw_loss_blind_ok(DhwLossState& st, uint32_t blind) {
            st.segment_blind_s <= DHW_LOSS_WINDOW_S * DHW_LOSS_BLIND_MAX_PCT / 100;
 }
 
+// How much unobserved time an adoption at `now_us` has to book against the carried candidate.
+//
+// DHW_LOSS_REBOOT_BLIND_S covers the downtime, the stretch between the checkpoint and esp_timer's
+// zero. It does not cover the stretch after zero: esp_timer's zero is the start of this boot, and
+// the adoption happens in checkup_start(), behind app_main's network wait and ahead of every task
+// that could observe the tank. `now_us` at adoption therefore IS the uptime nobody watched, whole
+// seconds, floored like every other absolute-instant quantisation here. Booked as the constant
+// alone, a boot that spent longer than DHW_LOSS_BLIND_RUN_MAX_S waiting for the network carried the
+// candidate straight through an unobserved interval that the run bound exists to refuse.
+// Saturating, and a clock that has not started (or a test passing zero) books no uptime.
+inline uint32_t dhw_loss_adopt_blind_s(int64_t now_us) {
+    const uint64_t uptime_s = now_us > 0 ? static_cast<uint64_t>(now_us) / 1000000u : 0;
+    const uint64_t total    = uptime_s + DHW_LOSS_REBOOT_BLIND_S;
+    return total > UINT32_MAX ? UINT32_MAX : static_cast<uint32_t>(total);
+}
+
+// A carried candidate that the booked unobserved time pushes past the blind bounds ends here with
+// reset_segment(), not dhw_loss_abort(), and the adoption takes no bucket: that discard is left out
+// of the discarded-window count on purpose. The unobserved time is the restart allowance plus the
+// network start-up, a cause on the board's side, and as a DHW_ABORT_BLIND it would reach the UI as
+// "X10A not answering" and, when every discard carries it, as the link-only verdict "check the X10A
+// wiring" — a fault the evidence does not establish. The count therefore under-reports restarts
+// and never overclaims.
 inline void dhw_loss_adopt(DhwLossState& st, const DhwLossCarry& c, int64_t now_us) {
     st = DhwLossState{};
     st.last_us = now_us;
@@ -806,10 +831,13 @@ inline void dhw_loss_adopt(DhwLossState& st, const DhwLossCarry& c, int64_t now_
     st.charge_run_s = c.charge_run_s;
     if (!(c.flags & DHW_LOSS_CARRY_SEGMENT)) return;
 
+    // Elapsed AND blind, the same seconds on both sides: they advance the candidate's age and can
+    // never buy observed evidence. One value feeds the segment, the draw anchor and the blind
+    // budget so the three cannot disagree about how long this boot has been running unwatched.
+    const uint32_t blind = dhw_loss_adopt_blind_s(now_us);
+
     st.segment_start_us = now_us;
-    st.segment_carried_s = std::min<uint32_t>(UINT32_MAX - DHW_LOSS_REBOOT_BLIND_S,
-                                              c.segment_elapsed_s) +
-                           DHW_LOSS_REBOOT_BLIND_S;
+    st.segment_carried_s    = std::min<uint32_t>(UINT32_MAX - blind, c.segment_elapsed_s) + blind;
     st.segment_start_tenths = c.segment_start_tenths;
     st.segment_circulation_known_s = c.segment_circulation_known_s;
     st.segment_circulation_on_s = c.segment_circulation_on_s;
@@ -820,12 +848,11 @@ inline void dhw_loss_adopt(DhwLossState& st, const DhwLossCarry& c, int64_t now_
 
     if (c.flags & DHW_LOSS_CARRY_DRAW) {
         st.draw_anchor_us = now_us;
-        st.draw_anchor_carried_s = std::min<uint32_t>(UINT32_MAX - DHW_LOSS_REBOOT_BLIND_S,
-                                                       c.draw_anchor_age_s) +
-                                    DHW_LOSS_REBOOT_BLIND_S;
+        st.draw_anchor_carried_s =
+            std::min<uint32_t>(UINT32_MAX - blind, c.draw_anchor_age_s) + blind;
         st.draw_anchor_tenths = c.draw_anchor_tenths;
     }
-    if (!dhw_loss_blind_ok(st, DHW_LOSS_REBOOT_BLIND_S)) st.reset_segment();
+    if (!dhw_loss_blind_ok(st, blind)) st.reset_segment();
 }
 
 // Discard the candidate hour and RECORD that it happened. Only a LIVE candidate is an abort: the

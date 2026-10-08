@@ -935,9 +935,10 @@ host-testable core is unusually large and valuable, because the risky parts are 
   localized legend for every shipped locale. The whole table is 72 × 16 B = **1152 B** in `.noinit`; the current worst
   profile uses 63 slots, leaving nine spare. It is adopted across a
   power-preserving reset under the same seal, verdict vocabulary and union-storage rule as the trends
-  and the checkup. Persistence version 3 rejects older dwell records: their fold could count known
-  skips as observed or preserve a run past the cumulative blind-gap bound, including its resumed
-  tail. Those continuity claims cannot be repaired at adoption.
+  and the checkup. Persistence version 4 rejects older dwell records: their fold could count known
+  skips as observed, preserve a run past the cumulative blind-gap bound, including its resumed
+  tail, or carry a run across the stretch from `esp_timer`'s zero to a boot's first fold without
+  booking it. Those continuity claims cannot be repaired at adoption.
 
   Four properties carry the honesty; the three age facts are published separately on `/values` rather than
   folded into one number — a consumer that prints the number and drops the rest states something
@@ -962,6 +963,12 @@ host-testable core is unusually large and valuable, because the risky parts are 
      fabricated duration is what `logic/timestamp.hpp` already refuses for an unsynced clock. It
      *accumulates* into any gap already in flight rather than restarting it, or a slot that was
      mid-gap when the board went down would be vouched for across nearly twice the bound above.
+     The other unwatched stretch of a boot, from `esp_timer`'s zero to the first fold — which only
+     happens once `app_main` has left the network wait and started the poll task — is one the clock
+     *can* measure: an adopted table resumes from zero (`dwell_resume_origin_us`), so its first fold
+     books that stretch as elapsed **and** blind through the same step as any other gap, and past
+     `DWELL_MAX_GAP_S` (the reboot allowance included) every adopted run is stale. A table with
+     nothing adopted has no earlier observation, so its first fold only anchors.
   4. **No value, no age.** A row the sweep could not read is published as `"value":null` — the slot
      survives and books the seconds as blind, but the age is withheld, because an age beside a value
      that is not there describes nothing and renders as the literal "— for 3 h 20 min". Both sides
@@ -1522,7 +1529,17 @@ A single task owns the X10A UART (there is exactly one link). Each cycle:
    for OTA and power-loss recovery. Intentional `esp_restart()` additionally
    writes a separately sealed, one-shot DHW handoff under the same mutex: relative candidate ages,
    the settling guard and completed DHW windows still in the open generic hour. The next boot books
-   five blind seconds and consumes that handoff once; a panic never replays an older checkpoint.
+   `DHW_LOSS_REBOOT_BLIND_S` for the downtime plus its own uptime up to the adoption (`esp_timer`'s
+   zero is the boot, and the adoption runs behind the network wait) as blind time on top of the
+   blind run and blind total the candidate already carries. Past `DHW_LOSS_BLIND_RUN_MAX_S` in one
+   run, or past `DHW_LOSS_BLIND_MAX_PCT` of the window in total, the carried candidate is discarded.
+   That adoption discard is the one exception to the `aborts` count: `dhw_loss_adopt` takes no
+   bucket, so `aborts`, `abort_reasons[]` and `best_aborted_s` stay as restored. Its cause is the
+   board's own restart allowance and network start-up, and entered as `blind` it would reach the UI
+   as "X10A not answering" and, when it is the only reason, as the link-only blocked verdict. The
+   count therefore under-reports restarts and never overclaims; the same unobserved time ending a
+   candidate later, inside `dhw_loss_step`, is counted.
+   The boot consumes that handoff once; a panic never replays an older checkpoint.
    See *The host-tested logic core* for why a
    row is addressed by (page, offset, **converter**) here and by (page, offset, unit) in the trends.
 5. Serve at most one pending **free register probe** (`logic/hp_probe.hpp`, `POST /hp/query`) — a

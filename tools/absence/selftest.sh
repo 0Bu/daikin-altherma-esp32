@@ -126,6 +126,17 @@
 #    92. the Weather task handle becoming a post-http-start non-atomic data race
 #    93. a newly created Weather task snapshotting Config before its handle is published
 #    94. disabled ENV III history remaining directly addressable after status/UI hide the source
+#    95. an adopted dwell table resuming with its clock left at the sentinel, so the stretch from
+#        esp_timer's zero to the first fold is neither elapsed nor blind
+#    96. a bare literal 0 written to the dwell clock outside the origin rule
+#    97. a wiped dwell table resuming from the adopted origin and booking time against nothing
+#    98. the DHW adoption reading a second clock instead of the one the restart report uses
+#    99. the DHW adoption handed the restored pending bucket, so a restart discard is counted as
+#        a blind abort and read as an X10A fault
+#   100. the carried-candidate discard line keyed off nothing, so a discard reads as kept
+#   101. the discard line describing a different instant than the adoption booked
+#   102. the dwell elapsed guard tightened from `>= 0` to `> 0`, so the adopted table's zero origin
+#        reads as "no previous observation" and the first fold books nothing again
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -1652,6 +1663,120 @@ assert seed != s, "seed 94 did not apply — disabled ENV III history authority 
 open(p, "w").write(seed)
 PY4
 expect_red "disabled ENV III history still directly addressable" run_contract
+restore
+
+# 95. The adopted dwell table left on the -1 sentinel (seed 15's neighbour: the same clock, the other
+#     end of a boot). The first fold then books dt = 0, so the interval from esp_timer's zero to it
+#     — behind app_main's network wait — is neither elapsed nor blind and a run keeps `exact`
+#     across a boot nobody watched. The CHECKs cannot see it: they feed dwell_step directly.
+python3 - "$TMP/main/state_dwell.cpp" <<'PY4'
+import sys
+p = sys.argv[1]
+s = open(p).read()
+seed = s.replace("s_last_us = logic::dwell_resume_origin_us(true);", "s_last_us = -1;", 1)
+assert seed != s, "seed 95 did not apply — the adopted-table origin moved"
+open(p, "w").write(seed)
+PY4
+expect_red "an adopted dwell table resuming without the boot-to-first-fold interval" run_contract
+restore
+
+# 96. A bare literal in a writer that is NOT the origin rule. The Accept and wipe arms still read
+#     right, so only the writer multiset can see that something else hands the clock a number.
+python3 - "$TMP/main/state_dwell.cpp" <<'PY4'
+import sys
+p = sys.argv[1]
+s = open(p).read()
+seed = s.replace("    s_last_us = -1;\n    s_model_fp = 0;", "    s_last_us = 0;\n    s_model_fp = 0;", 1)
+assert seed != s, "seed 96 did not apply — dwell_forget's clock reset moved"
+open(p, "w").write(seed)
+PY4
+expect_red "a bare 0 written to the dwell clock outside the origin rule" run_contract
+restore
+
+# 97. The wiped table started from the adopted origin. Nothing was adopted, so there is no previous
+#     observation to have been blind since: the boot would be booked against an imagined one.
+python3 - "$TMP/main/state_dwell.cpp" <<'PY4'
+import sys
+p = sys.argv[1]
+s = open(p).read()
+seed = s.replace("s_last_us = logic::dwell_resume_origin_us(false);",
+                 "s_last_us = logic::dwell_resume_origin_us(true);", 1)
+assert seed != s, "seed 97 did not apply — the wipe-arm origin moved"
+open(p, "w").write(seed)
+PY4
+expect_red "a wiped dwell table counting from esp_timer's zero" run_contract
+restore
+
+# 98. The DHW adoption taking its own clock reading while the restart report keeps the local. The
+#     report then names the seconds of a different instant than the one the adoption booked.
+python3 - "$TMP/main/checkup.cpp" <<'PY4'
+import sys, re
+p = sys.argv[1]
+s = open(p).read()
+seed, n = re.subn(r"(logic::dhw_loss_adopt\(s_dhw_state,[^;]*?),\s*adopt_now_us\)",
+                  r"\1, esp_timer_get_time())", s, count=1)
+assert n == 1, "seed 98 did not apply — the DHW adoption call moved"
+open(p, "w").write(seed)
+PY4
+expect_red "the DHW adoption reading a second clock" run_contract
+restore
+
+# 99. The adoption handed the restored pending bucket. A restart discard would then be entered in
+#     the discarded-window count as a blind abort, and the UI words that reason as "X10A not
+#     answering" — a board-side cause (restart allowance, network start-up) read as a wiring fault.
+python3 - "$TMP/main/checkup.cpp" <<'PY4'
+import sys, re
+p = sys.argv[1]
+s = open(p).read()
+seed, n = re.subn(r"(logic::dhw_loss_adopt\(s_dhw_state,\s*)(P\(\)\.dhw_handoff\.payload\.candidate,)",
+                  r"\1P().dhw.pending, \2", s, count=1)
+assert n == 1, "seed 99 did not apply — the DHW adoption call moved"
+open(p, "w").write(seed)
+PY4
+expect_red "the DHW adoption handed the pending bucket" run_contract
+restore
+
+# 100. The discard line keyed off nothing: a carried candidate that the adoption ended is reported
+#      as "kept (0 min ...)", which told a syslog reader the opposite of what happened.
+python3 - "$TMP/main/checkup.cpp" <<'PY4'
+import sys
+p = sys.argv[1]
+s = open(p).read()
+seed = s.replace("if (carried_segment && s_dhw_state.segment_start_us < 0) {",
+                 "if (carried_segment && false) {", 1)
+assert seed != s, "seed 100 did not apply — the discard branch condition moved"
+open(p, "w").write(seed)
+PY4
+expect_red "a discarded DHW candidate logged as kept" run_contract
+restore
+
+# 101. The discard line recomputing its seconds from a fresh clock reading instead of the adoption's.
+python3 - "$TMP/main/checkup.cpp" <<'PY4'
+import sys
+p = sys.argv[1]
+s = open(p).read()
+seed = s.replace("dhw_loss_adopt_blind_s(adopt_now_us)",
+                 "dhw_loss_adopt_blind_s(esp_timer_get_time())", 1)
+assert seed != s, "seed 101 did not apply — the discard line's seconds moved"
+open(p, "w").write(seed)
+PY4
+expect_red "the DHW discard line naming a different instant" run_contract
+restore
+
+# 102. The elapsed guard tightened from `>= 0` to `> 0`, the "unset" reading of the clock. esp_timer's
+#      zero is the adopted table's origin (seed 95's neighbour), so the first fold books dt = 0 and
+#      the boot-to-first-fold interval is unbooked again. Seeds 95-97 pin who WRITES the clock and
+#      the CHECKs feed dwell_step() a dt directly, so nothing else reads this comparison.
+python3 - "$TMP/main/state_dwell.cpp" <<'PY4'
+import sys
+p = sys.argv[1]
+s = open(p).read()
+seed = s.replace("if (s_last_us >= 0 && now_us >= s_last_us)",
+                 "if (s_last_us > 0 && now_us >= s_last_us)", 1)
+assert seed != s, "seed 102 did not apply — the elapsed guard moved"
+open(p, "w").write(seed)
+PY4
+expect_red "an adopted dwell table's zero origin treated as no previous observation" run_contract
 restore
 
 if [ "$fail" -ne 0 ]; then

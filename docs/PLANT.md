@@ -93,10 +93,19 @@ the answer exists: the window is kept only if the resolved profile is the one it
 The in-flight **edge** state is deliberately not restored — a reboot is a discontinuity, and
 restoring it would book a compressor start that may never have happened. The DHW-loss candidate is
 not an edge: an intentional `esp_restart()` checkpoints its relative ages and any completed clean
-window still waiting in the open bucket. The next boot adds five seconds of explicit blind time,
-never observed evidence, then continues the candidate. `/status.health.checks[dhw_loss]` exposes
-`candidate_s` or `settle_remaining_s`, so a carried 59-minute candidate no longer looks like zero
-progress merely because only complete one-hour windows count toward the six-hour verdict gate.
+window still waiting in the open bucket. The next boot adds five seconds of explicit blind time
+for the restart plus the time it has already run up to the point where the check resumes (the wait
+for the network comes first), never observed evidence, then continues the candidate. Only that
+stretch is booked at the hand-over: start-up, model detection and empty samples after the check has
+resumed are booked like any other unread time, and a candidate they end is counted among the
+discarded hours with the reason `blind`. If the unwatched time booked at the hand-over, the five
+seconds included, passes the two-minute blind-run bound together with an unread stretch still open
+at the restart, or a tenth of the hour together with all unread time the candidate already
+carried, the carried candidate is discarded instead, and that restart discard is not counted among
+the discarded hours, so the count can under-report restarts. `/status.health.checks[dhw_loss]`
+exposes `candidate_s` or `settle_remaining_s`, so a carried 59-minute candidate no longer looks
+like zero progress merely because only complete one-hour windows count toward the six-hour verdict
+gate.
 
 **A check that cannot complete here says so, instead of collecting forever.** Only completed clean
 hours count, and each tank charge costs 105 undisturbed minutes (45 settling plus a 60-minute
@@ -106,7 +115,8 @@ them. The window now records what it **discarded**: how many candidate hours (`a
 (`abort_reasons[]` — the OR-ed set of reason kinds seen: charge, pump, draw, reading, blind) and how
 far the best one got (`best_aborted_s`), all decaying with the same 24-hour ring. It does **not**
 retain a count per reason, the reason of each individual candidate, or circulation evidence for an
-aborted candidate. A full lifecycle with no completed window and at least six discarded ones becomes
+aborted candidate, and it leaves out the one candidate that the next boot drops on adoption (above).
+A full lifecycle with no completed window and at least six discarded ones becomes
 `blocked`: reported as `Unavailable`, the verdict that already means "this check cannot adjudicate
 here" — it says nothing either way, does not outrank `Ok`, and stops one permanently unreachable
 check from holding the whole card at `collecting`. What separates it from a dead bus is `aborts`: a
@@ -470,7 +480,8 @@ of time and every way of overstating one looks identical on screen:
 - Past two minutes unread a row reports **nothing at all**, so a silent bus lets its ages expire
   rather than freezing them and presenting them as current.
 - A reboot is not a change: the ages ride `.noinit` across a reset that kept power, with the
-  unwatched reboot window booked as unobserved rather than as a duration nobody measured.
+  unwatched reboot window, and the start-up before the first poll of the new boot, booked as
+  unobserved rather than as a duration nobody measured.
 - A row the bus could not read this cycle shows **no age at all**, because it is showing no reading
   either — an age under a "—" describes nothing.
 

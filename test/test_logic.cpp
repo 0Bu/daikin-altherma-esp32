@@ -13510,6 +13510,130 @@ static void test_checkup() {
         dhw_loss_adopt(settle_adopted, settle_carry, 0);
         CHECK(settle_adopted.settle_remaining_s == DHW_LOSS_SETTLE_S - 10);
         CHECK(dhw_loss_progress(settle_adopted, 0).candidate_observed_s == 0);
+
+        // THE UPTIME BEFORE THE ADOPTION IS UNOBSERVED TOO. The checkpoint was taken at the old
+        // boot's esp_restart() and the adoption runs in checkup_start(), behind app_main's network
+        // wait, so `now_us` at adoption is how long this boot has run with nobody watching the
+        // tank. The constant covers the downtime only; the uptime is booked on top, as elapsed AND
+        // blind, on the segment, the draw anchor and the blind budget alike.
+        CHECK(carry.segment_blind_s == 0 && carry.blind_run_s == 0);
+        CHECK((carry.flags & DHW_LOSS_CARRY_SEGMENT) && (carry.flags & DHW_LOSS_CARRY_DRAW));
+        CHECK(dhw_loss_adopt_blind_s(0) == DHW_LOSS_REBOOT_BLIND_S);
+        CHECK(dhw_loss_adopt_blind_s(-1) ==
+              DHW_LOSS_REBOOT_BLIND_S); // a clock that has not started
+        CHECK(dhw_loss_adopt_blind_s(999'999) == DHW_LOSS_REBOOT_BLIND_S); // whole seconds, floored
+        CHECK(dhw_loss_adopt_blind_s(20'999'999) == 20 + DHW_LOSS_REBOOT_BLIND_S);
+        CHECK(dhw_loss_adopt_blind_s(INT64_MAX) == UINT32_MAX); // saturates, never wraps
+
+        // A short boot (the ordinary OTA) keeps the candidate: 25 s are added to its age and to
+        // its blind time, the evidence clock does not move, and the next clean half hour still
+        // completes the window.
+        const int64_t quick_us = 20LL * 1000000;
+        DhwLossState  quick;
+        DhwLossBucket quick_b;
+        dhw_loss_adopt(quick, carry, quick_us);
+        CHECK(quick.segment_start_us == quick_us && quick.draw_anchor_us == quick_us);
+        CHECK(quick.segment_carried_s == carry.segment_elapsed_s + 20 + DHW_LOSS_REBOOT_BLIND_S);
+        CHECK(quick.draw_anchor_carried_s ==
+              carry.draw_anchor_age_s + 20 + DHW_LOSS_REBOOT_BLIND_S);
+        CHECK(quick.segment_blind_s == 20 + DHW_LOSS_REBOOT_BLIND_S);
+        CHECK(quick.blind_run_s == 20 + DHW_LOSS_REBOOT_BLIND_S);
+        CHECK(dhw_loss_progress(quick, quick_us).candidate_observed_s == 1790);
+        for (int sec = 30; sec <= 1810; sec += 10) {
+            s.r5t_tenths = 498 - sec / 720;
+            dhw_loss_step(quick, quick_b, s, static_cast<int64_t>(sec) * 1000000);
+        }
+        CHECK(quick_b.windows == 1);
+        // Evidence is the watched seconds before the restart (1790 s) plus the post-adoption
+        // cadence (the host feeds fully read samples from the adoption on; production's first
+        // cycles are empty ones, which book their interval as blind): the 25 booked blind
+        // advanced the age to the hour and bought nothing.
+        CHECK(quick_b.observed_s == 1790 + (1810 - 20));
+        // A kept adoption leaves the discard record alone as well: the candidate is still running.
+        CHECK(quick_b.aborts == 0 && quick_b.abort_reasons == 0 && quick_b.best_aborted_s == 0);
+
+        // A boot that waited for the network longer than the blind-run bound cannot vouch for the
+        // candidate: the unobserved run is past DHW_LOSS_BLIND_RUN_MAX_S, so the segment is
+        // discarded and no window is assembled out of the old observation.
+        //
+        // That discard is NOT entered in the discarded-window count: the adoption takes no bucket,
+        // because the cause is the restart allowance and the network start-up, which the UI would
+        // otherwise word as "X10A not answering". The pending bucket the test owns holds what an
+        // earlier hour left, and it has to come out of the adoption, and out of the fresh candidate
+        // that follows, exactly as it went in.
+        const int64_t slow_us = 200LL * 1000000;
+        DhwLossState  slow;
+        DhwLossBucket slow_b;
+        slow_b.windows                  = 1;
+        slow_b.observed_s               = 3600;
+        slow_b.aborts                   = 2;
+        slow_b.abort_reasons            = DHW_ABORT_DRAW;
+        slow_b.best_aborted_s           = 3000;
+        const DhwLossBucket slow_before = slow_b;
+        dhw_loss_adopt(slow, carry, slow_us);
+        CHECK(slow.segment_start_us < 0 && slow.draw_anchor_us < 0);
+        CHECK(slow.blind_run_s == 200 + DHW_LOSS_REBOOT_BLIND_S);
+        CHECK(dhw_loss_progress(slow, slow_us).candidate_observed_s == 0);
+        CHECK(slow_b.aborts == slow_before.aborts &&
+              slow_b.abort_reasons == slow_before.abort_reasons &&
+              slow_b.best_aborted_s == slow_before.best_aborted_s);
+        for (int sec = 210; sec <= 2010; sec += 10) {
+            s.r5t_tenths = 498 - sec / 720;
+            dhw_loss_step(slow, slow_b, s, static_cast<int64_t>(sec) * 1000000);
+        }
+        CHECK(slow_b.windows == slow_before.windows);
+        CHECK(slow_b.observed_s == slow_before.observed_s);
+        // The fresh candidate after the discard is no abort either, so nothing in the record moved.
+        CHECK(slow_b.aborts == slow_before.aborts &&
+              slow_b.abort_reasons == slow_before.abort_reasons &&
+              slow_b.best_aborted_s == slow_before.best_aborted_s);
+
+        // The same unobserved time that ends the candidate AFTER the adoption is counted: the
+        // step's blind rule is the one place a blind discard is entered, with the seconds the
+        // candidate had really been watched. This is the under-count the adoption's exception
+        // leaves, pinned so that closing it is a decision and not a side effect.
+        DhwLossState  late;
+        DhwLossBucket late_b;
+        dhw_loss_adopt(late, carry, quick_us);
+        CHECK(late.segment_start_us >= 0);
+        CHECK(late_b.aborts == 0 && late_b.abort_reasons == 0 && late_b.best_aborted_s == 0);
+        dhw_loss_step(late, late_b, CheckupSample{}, quick_us + 100LL * 1000000);
+        CHECK(late.segment_start_us < 0);
+        CHECK(late_b.aborts == 1 && late_b.abort_reasons == DHW_ABORT_BLIND);
+        CHECK(late_b.best_aborted_s == 1790);
+
+        // The run bound is exact: the uptime plus the allowance may reach it, not pass it.
+        DhwLossState at_bound;
+        dhw_loss_adopt(at_bound, carry,
+                       static_cast<int64_t>(DHW_LOSS_BLIND_RUN_MAX_S - DHW_LOSS_REBOOT_BLIND_S) *
+                           1000000);
+        CHECK(at_bound.segment_start_us >= 0);
+        CHECK(at_bound.blind_run_s == DHW_LOSS_BLIND_RUN_MAX_S);
+        DhwLossState over_bound;
+        dhw_loss_adopt(
+            over_bound, carry,
+            static_cast<int64_t>(DHW_LOSS_BLIND_RUN_MAX_S - DHW_LOSS_REBOOT_BLIND_S + 1) * 1000000);
+        CHECK(over_bound.segment_start_us < 0);
+
+        // The per-window blind budget takes the same uptime: a candidate that arrives with all but
+        // 25 s of it spent survives a 20 s boot and not a 21 s one.
+        DhwLossCarry heavy = carry;
+        heavy.segment_blind_s =
+            DHW_LOSS_WINDOW_S * DHW_LOSS_BLIND_MAX_PCT / 100 - 20 - DHW_LOSS_REBOOT_BLIND_S;
+        DhwLossState heavy_ok;
+        dhw_loss_adopt(heavy_ok, heavy, 20LL * 1000000);
+        CHECK(heavy_ok.segment_start_us >= 0);
+        DhwLossState heavy_over;
+        dhw_loss_adopt(heavy_over, heavy, 21LL * 1000000);
+        CHECK(heavy_over.segment_start_us < 0);
+
+        // A carry without a candidate has nothing to book against, whatever the uptime.
+        DhwLossCarry idle;
+        idle.settle_remaining_s = 7;
+        DhwLossState idle_adopted;
+        dhw_loss_adopt(idle_adopted, idle, slow_us);
+        CHECK(idle_adopted.segment_start_us < 0 && idle_adopted.settle_remaining_s == 7);
+        CHECK(idle_adopted.segment_blind_s == 0 && idle_adopted.blind_run_s == 0);
     }
 
     {
@@ -16496,10 +16620,14 @@ static void test_state_dwell() {
         dwell_step_with_cadence(cadence, DWELL_MAX_SLOTS, off_row, 1, 1, 6);
         CHECK(dwell_lookup(cadence, DWELL_MAX_SLOTS, 0x62, 2, 304).blind_s == 8);
     }
-    CHECK(DWELL_PERSIST_VERSION == 3);
+    CHECK(DWELL_PERSIST_VERSION == 4);
     CHECK(dwell_restore_verdict(static_cast<uint32_t>(CrashReason::SW), DWELL_PERSIST_MAGIC, 1, 5,
                                 5, 7, 7) == DwellRestore::WrongVersion);
     CHECK(dwell_restore_verdict(static_cast<uint32_t>(CrashReason::SW), DWELL_PERSIST_MAGIC, 2, 5,
+                                5, 7, 7) == DwellRestore::WrongVersion);
+    // Version 3 is the table a build without the boot-to-first-fold booking wrote: its runs may
+    // have crossed that unbooked stretch, so it is refused rather than adopted.
+    CHECK(dwell_restore_verdict(static_cast<uint32_t>(CrashReason::SW), DWELL_PERSIST_MAGIC, 3, 5,
                                 5, 7, 7) == DwellRestore::WrongVersion);
 
     // Returning completes the blind interval; its tail must participate in the 120-second limit.
@@ -16652,6 +16780,120 @@ static void test_state_dwell() {
     CHECK(dwell_lookup(midgap, DWELL_MAX_SLOTS, 0x62, 2, 304).known); // one second of bound left
     dwell_adopt(midgap, DWELL_MAX_SLOTS);
     CHECK(!dwell_lookup(midgap, DWELL_MAX_SLOTS, 0x62, 2, 304).known); // the reboot spent it
+
+    // ── the stretch between esp_timer's zero and the first fold ─────────────────────────────────
+    // dwell_adopt() books the DOWNTIME. The first fold of the new boot comes only after app_main's
+    // network wait, and nothing folds the table before it, so unless that fold starts counting from
+    // esp_timer's zero the stretch is neither elapsed nor blind — a run then keeps `exact` across a
+    // boot nobody watched. `Boot` is the arithmetic of main/state_dwell.cpp's dwell_record() and
+    // dwell_start(); test_source_absence_contract.mjs pins the real glue to the same shape.
+    {
+        struct Boot {
+            DwellSlot slots[DWELL_MAX_SLOTS] = {};
+            int64_t   last_us                = -1;
+            void      fold(const DwellObservation* obs, size_t n, int64_t now_us,
+                           uint32_t max_observed_gap_s) {
+                uint32_t dt_s = 0;
+                if (last_us >= 0 && now_us >= last_us)
+                    dt_s = static_cast<uint32_t>(now_us / 1000000 - last_us / 1000000);
+                last_us = now_us;
+                dwell_step_with_cadence(slots, DWELL_MAX_SLOTS, obs, n, dt_s, max_observed_gap_s);
+            }
+            DwellReading reading() const {
+                return dwell_lookup(slots, DWELL_MAX_SLOTS, 0x62, 2, 304);
+            }
+        };
+        // The previous boot watched ON turn OFF and then 600 observed seconds of OFF, and a reset
+        // that kept RAM adopted the table: 605 s old, 5 of them blind, an exact run.
+        auto adopt_after_reset = [&](Boot& b, int64_t origin_us) {
+            dwell_step(b.slots, DWELL_MAX_SLOTS, on_row, 1, 1);
+            dwell_step(b.slots, DWELL_MAX_SLOTS, off_row, 1, 1);
+            for (int i = 0; i < 600; i++) dwell_step(b.slots, DWELL_MAX_SLOTS, off_row, 1, 1);
+            dwell_adopt(b.slots, DWELL_MAX_SLOTS);
+            b.last_us                  = origin_us;
+            const DwellReading adopted = b.reading();
+            CHECK(adopted.known && adopted.exact);
+            CHECK(adopted.since_s == 600 + DWELL_REBOOT_BLIND_S);
+            CHECK(adopted.blind_s == DWELL_REBOOT_BLIND_S);
+        };
+        const int64_t adopted_origin = dwell_resume_origin_us(true);
+        CHECK(adopted_origin == 0);                 // esp_timer's zero: this boot's first instant
+        CHECK(dwell_resume_origin_us(false) == -1); // nothing adopted: no previous observation
+        // The two arms are the whole rule; the checks below are what make each of them matter.
+
+        // 200 s pass before the first fold, which happens while the profile is still "auto" and so
+        // observes nothing. The BSH flag could have pulsed ON and back OFF in that time: the slot
+        // may no longer claim a run at all.
+        {
+            Boot b;
+            adopt_after_reset(b, adopted_origin);
+            b.fold(nullptr, 0, 200'000'000, DWELL_MAX_GAP_S);
+            CHECK(!b.reading().known);
+        }
+        // The first resolved poll then sees OFF again. The run it saw before is not the run it sees
+        // now: a fresh lower bound, and never the exact run the unfixed fold reported, which booked
+        // the 200 s of boot as nothing.
+        {
+            Boot b;
+            adopt_after_reset(b, adopted_origin);
+            b.fold(nullptr, 0, 200'000'000, DWELL_MAX_GAP_S);
+            for (int64_t t = 201'000'000; t <= 208'000'000; t += 1'000'000)
+                b.fold(nullptr, 0, t, DWELL_MAX_GAP_S);
+            b.fold(off_row, 1, 209'000'000, 10);
+            const DwellReading r200 = b.reading();
+            CHECK(r200.known && !r200.exact && r200.since_s == 0 && r200.blind_s == 0);
+        }
+        // Same when the first fold already carries the observation.
+        {
+            Boot b;
+            adopt_after_reset(b, adopted_origin);
+            b.fold(off_row, 1, 200'000'000, 10);
+            const DwellReading first = b.reading();
+            CHECK(first.known && !first.exact && first.since_s == 0 && first.blind_s == 0);
+        }
+        // A short boot is the ordinary OTA case and must keep its run: 20 s of boot are booked as
+        // elapsed AND blind on top of the reboot allowance, and the run stays a witnessed one.
+        {
+            Boot b;
+            adopt_after_reset(b, adopted_origin);
+            b.fold(off_row, 1, 20'999'999, 10); // whole seconds, floored: 20
+            const DwellReading r20 = b.reading();
+            CHECK(r20.known && r20.exact);
+            CHECK(r20.since_s == 600 + DWELL_REBOOT_BLIND_S + 20);
+            CHECK(r20.blind_s == DWELL_REBOOT_BLIND_S + 20);
+            // ... and the ordinary cycles after it add observed seconds only.
+            b.fold(off_row, 1, 21'000'000, 10);
+            const DwellReading r21 = b.reading();
+            CHECK(r21.since_s == r20.since_s + 1 && r21.blind_s == r20.blind_s);
+        }
+        // The boot stretch spends the SAME continuity bound as the reboot allowance: the allowance
+        // plus the boot may reach DWELL_MAX_GAP_S exactly and not one second more.
+        {
+            const int64_t at_bound = static_cast<int64_t>(DWELL_MAX_GAP_S - DWELL_REBOOT_BLIND_S);
+            Boot          b;
+            adopt_after_reset(b, adopted_origin);
+            b.fold(off_row, 1, at_bound * 1'000'000, 10);
+            const DwellReading kept = b.reading();
+            CHECK(kept.known && kept.exact && kept.blind_s == DWELL_MAX_GAP_S);
+            Boot over;
+            adopt_after_reset(over, adopted_origin);
+            over.fold(off_row, 1, (at_bound + 1) * 1'000'000, 10);
+            const DwellReading dropped = over.reading();
+            CHECK(dropped.known && !dropped.exact && dropped.since_s == 0);
+        }
+        // A table with NOTHING adopted has no previous observation to have been watching between.
+        // Its first fold only anchors; counting from zero would invent a run the board never saw.
+        {
+            Boot fresh_boot;
+            fresh_boot.last_us = dwell_resume_origin_us(false);
+            fresh_boot.fold(off_row, 1, 200'000'000, 10);
+            const DwellReading anchored = fresh_boot.reading();
+            CHECK(anchored.known && !anchored.exact && anchored.since_s == 0 &&
+                  anchored.blind_s == 0);
+            fresh_boot.fold(off_row, 1, 201'000'000, 10);
+            CHECK(fresh_boot.reading().since_s == 1 && fresh_boot.reading().blind_s == 0);
+        }
+    }
 
     // ── the real catalog ────────────────────────────────────────────────────────────────────────
     // The table is fixed-size, so the question is whether any shipped profile can overflow it — a

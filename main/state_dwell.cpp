@@ -138,11 +138,17 @@ void dwell_start() {
         logic::dwell_adopt(P().slots, logic::DWELL_MAX_SLOTS);
         s_model_fp = P().model_fp;
         s_adopt_detect_grace = true;
+        // The downtime is only half of what this boot has not watched. The first fold comes after
+        // app_main's network wait, and nothing folds the table before it, so the fold has to start
+        // counting from esp_timer's zero or that stretch is neither elapsed nor blind.
+        s_last_us = logic::dwell_resume_origin_us(true);
         persist_seal();
         diag_printf("dwell: state ages kept across a %s reset (RAM survived)\n",
                     crash_reason_slug(reason));
     } else {
         persist_wipe();
+        // Nothing adopted: the first fold only anchors, it books no elapsed time.
+        s_last_us = logic::dwell_resume_origin_us(false);
         // Not noise: "wrong_catalog" after an update explains durations that reset themselves for a
         // reason nobody could otherwise reconstruct, and "bad_crc" on a board that was never
         // power-cycled is a memory fault worth seeing.
@@ -235,8 +241,12 @@ void dwell_record(const CachedValue* v, size_t n, uint32_t source_generation,
     }
 
     // Elapsed seconds from the MONOTONIC clock, so an SNTP jump mid-boot cannot move a dwell. The
-    // first cycle of a boot books nothing: there is no previous observation to have been watching
-    // between, and counting from an imagined one is how a run comes to claim time nobody observed.
+    // first cycle on a table that was NOT adopted books nothing: there is no previous observation
+    // to have been watching between, and counting from an imagined one is how a run comes to claim
+    // time nobody observed. An ADOPTED table does have one, the previous boot's last fold, and
+    // dwell_start() sets s_last_us to esp_timer's zero for it (logic::dwell_resume_origin_us), so
+    // this boot's first cycle books the whole stretch that nobody folded: blind, and stale past
+    // DWELL_MAX_GAP_S.
     //
     // QUANTISE THE ABSOLUTE TIMESTAMPS, never the interval — checkup_step()'s rule, and it is here
     // because this file shipped exactly the defect that comment describes. The poll loop sleeps a
@@ -258,6 +268,10 @@ void dwell_record(const CachedValue* v, size_t n, uint32_t source_generation,
     if (!hp_poll_generation_matches(source_generation)) return;
     if (apply_reset_locked()) return;          // discard this sample with the identity it belonged to
     uint32_t dt_s = 0;
+    // `>= 0`, never `> 0`: esp_timer's zero is a real previous instant (an adopted table resumes
+    // from it, see above), and only -1 means "no previous observation".
+    // test_source_absence_contract pins this line because the host CHECKs hand dwell_step() its dt
+    // and cannot see it.
     if (s_last_us >= 0 && now_us >= s_last_us)
         dt_s = static_cast<uint32_t>(now_us / 1000000 - s_last_us / 1000000);
     s_last_us = now_us;

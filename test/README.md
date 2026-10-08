@@ -623,7 +623,7 @@ One entry per `test_*()` in [`test_logic.cpp`](test_logic.cpp), in the order `ma
   optional-context limitations, generation/time/poll-gap interruption and stale read-only snapshots.
 - `logic/state_dwell.hpp` — normal profile cadence stays observed, explicit zero-second gaps break
   transition evidence, a resumed unchanged tail remains blind and longer stalls cannot become
-  observed time. Persistence version 2 refuses older fold records.
+  observed time. Persistence version 4 refuses older fold records.
 
 `logic/value_def.hpp` has no `test_*()` of its own — it is the profile row type, exercised through
 `def/registry.hpp` and the converter tests.

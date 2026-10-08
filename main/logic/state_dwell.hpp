@@ -334,21 +334,27 @@ inline void dwell_step_with_cadence(DwellSlot* slots, size_t n, const DwellObser
 }
 
 // ── Persistence ─────────────────────────────────────────────────────────────────────────────────
-// Same machinery, same reasoning and the same seal as logic/checkup_persist.hpp: a magic, a version,
-// a fingerprint over what a stored byte MEANS, a reset-reason allowlist and a named verdict for
-// every way the answer can be no. .noinit DRAM only — a power cycle starts over and says so.
+// Same machinery, same reasoning and the same seal as logic/checkup_persist.hpp: a magic, a
+// version, a fingerprint over what a stored byte MEANS, a reset-reason allowlist and a named
+// verdict for every way the answer can be no. .noinit DRAM only — a power cycle starts over and
+// says so.
 //
 // The restore needs no clock, and that is a property of the medium rather than an assumption:
-// history_persist.hpp's argument transfers exactly — if the bytes survived, power was never lost, so
-// the downtime is a reset of about a second. The slots are adopted in place. What the reboot DID
-// cost is one unobserved window, so DWELL_REBOOT_BLIND_S is booked against every adopted run rather
-// than pretending the gap was watched. It is deliberately a small CONSTANT and not a measurement:
-// the device cannot time its own downtime, and a fabricated duration is the one thing
-// logic/timestamp.hpp already refuses to produce for an unsynced clock.
+// history_persist.hpp's argument transfers exactly — if the bytes survived, power was never lost,
+// so the downtime is a reset of about a second. The slots are adopted in place. What the reboot DID
+// cost is two unobserved windows, so both are booked against every adopted run rather than
+// pretending the gap was watched. The downtime itself is DWELL_REBOOT_BLIND_S, deliberately a small
+// CONSTANT and not a measurement: the device cannot time its own downtime, and a fabricated
+// duration is the one thing logic/timestamp.hpp already refuses to produce for an unsynced clock.
+// The second window, esp_timer's zero up to this boot's first fold, the clock CAN measure, and
+// dwell_resume_origin_us() below is how the first fold is made to book it.
 inline constexpr uint32_t DWELL_PERSIST_MAGIC   = 0x4c4c5744u;   // "DWLL" little-endian
 // Version 3 also rejects runs preserved across a cumulative blind gap past the continuity bound.
-// The layout is unchanged, but the older fold's continuity claims cannot be repaired at boot.
-inline constexpr uint16_t DWELL_PERSIST_VERSION = 3;
+// Version 4 also rejects tables whose runs may have crossed an unbooked boot gap: a table written
+// by an older build can carry a run that stayed `exact` across the stretch from esp_timer's zero to
+// that boot's first fold, with since_s understated by it. The layout is unchanged, but the older
+// fold's continuity claims cannot be repaired at boot.
+inline constexpr uint16_t DWELL_PERSIST_VERSION = 4;
 inline constexpr uint32_t DWELL_REBOOT_BLIND_S  = 5;
 
 enum class DwellRestore : uint8_t {
@@ -443,5 +449,28 @@ inline void dwell_adopt(DwellSlot* slots, size_t n) {
         if (s.gap_s > DWELL_MAX_GAP_S) s.flags |= DWELL_F_STALE;
     }
 }
+
+// The monotonic instant from which the FIRST fold of a boot measures its elapsed seconds.
+//
+// dwell_adopt() books the downtime, the stretch between the previous boot's last fold and
+// esp_timer's zero. It cannot book the stretch after zero, and that one is not small: the first
+// fold only happens once app_main reaches hp_poll_start(), behind the network wait
+// (WIFI_BOOT_WINDOW_S, or WIFI_ROLLBACK_GRACE_S while a credential change is on trial) and
+// whatever else runs ahead of it. Nothing folds the table in the meantime, so those seconds are
+// neither elapsed nor blind unless the first fold is told to start at zero.
+//
+//   ADOPTED   -> 0. The adopted table accounts for everything up to its last fold, and the
+//                downtime is the constant above; the first fold therefore books [0, now] through
+//                the ordinary step. Past DWELL_MAX_GAP_S it makes every adopted run stale, below it
+//                the seconds join since_s AND blind_s. Left at -1 instead, the first fold books
+//                nothing and a run keeps `exact` across a boot that was unwatched for longer than
+//                the continuity bound.
+//   OTHERWISE -> -1, "no previous observation". A fresh or wiped table has nothing it could have
+//                been watching between, and counting from an imagined start is how a run comes to
+//                claim time nobody observed. The first fold books nothing and only anchors.
+//
+// The same sentinel is what dwell_reset() and dwell_forget() leave behind, for the same reason:
+// the table they emptied has no earlier observation either.
+inline constexpr int64_t dwell_resume_origin_us(bool adopted) { return adopted ? 0 : -1; }
 
 } // namespace daik::logic
