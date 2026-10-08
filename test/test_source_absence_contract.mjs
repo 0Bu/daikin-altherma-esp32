@@ -223,6 +223,23 @@ assert.match(checkup,
   "boot must restore the separately sealed DHW handoff before producers start");
 assert.match(checkup, /esp_register_shutdown_handler\(checkup_reboot_save\)/,
   "checkup_start must register the intentional-reboot DHW handoff");
+// The adoption derives the unobserved boot uptime from its `now_us` (dhw_loss_adopt_blind_s:
+// esp_timer's zero is the boot, and checkup_start() runs behind app_main's network wait). The glue
+// therefore has to pass the real clock; a literal would put the defect back with every CHECK green.
+// The clock is read ONCE into a local declared directly above the call, and the same local is what
+// the restart report is judged against (below), so the line cannot describe a different instant
+// than the one the adoption booked. The call is deliberately three-argument: it takes no bucket,
+// because a candidate it discards is not entered in the discarded-window count (as a blind abort
+// the board-side restart cause would be worded "X10A not answering" by the UI).
+assert.match(checkup,
+  /const\s+int64_t\s+(\w+)\s*=\s*esp_timer_get_time\(\)\s*;\s*logic::dhw_loss_adopt\(\s*s_dhw_state,\s*P\(\)\.dhw_handoff\.payload\.candidate,\s*\1\s*\)/,
+  "the DHW adoption must be handed one esp_timer_get_time() reading so the boot uptime is booked as blind");
+// A carried candidate segment that the adoption ended (segment_start_us back at -1) must be reported
+// as discarded, with the unobserved seconds booked at the SAME instant; only the other outcomes may
+// read "kept". Logging the discard as "kept (0 min ...)" told a syslog reader the opposite.
+assert.match(checkup,
+  /logic::dhw_loss_adopt\([^;]*?(\w+)\s*\);[\s\S]*?DHW_LOSS_CARRY_SEGMENT[\s\S]*?s_dhw_state\.segment_start_us\s*<\s*0[\s\S]*?carried DHW candidate discarded[\s\S]*?dhw_loss_adopt_blind_s\(\s*\1\s*\)[\s\S]*?DHW candidate kept/,
+  "a carried DHW candidate that the adoption discarded must be logged as discarded with the booked blind seconds, not as kept");
 
 // ── 1c. Every .noinit region must be UNINITIALISED storage ─────────────────────────────────────
 // `__NOINIT_ATTR` places an object in a NOLOAD section; it does NOT stop C++ from initialising it.
@@ -838,6 +855,46 @@ assert.match(dwellSrc, /now_us \/ 1000000 - s_last_us \/ 1000000/,
   "the state ages must quantise absolute instants so the sub-second remainder telescopes");
 assert.doesNotMatch(dwellSrc, /\(now_us - s_last_us\) \/ 1000000/,
   "flooring the INTERVAL loses the remainder on every cycle — the defect this rule exists for");
+// esp_timer's ZERO is a valid previous instant: an adopted table resumes from it
+// (dwell_resume_origin_us(true) below), so its first fold has to book [0, now]. The only "no
+// previous observation" value is -1. Reading the guard as "unset" and tightening it to `> 0` looks
+// like a cleanup and silently re-opens the boot-to-first-fold gap, because the host CHECKs drive
+// dwell_step() with an explicit dt and never reach this line.
+assert.match(dwellSrc, /if \(s_last_us >= 0 && now_us >= s_last_us\)\s*dt_s = /,
+  "the elapsed guard must accept esp_timer's zero as a previous instant (>= 0, never > 0)");
+assert.doesNotMatch(dwellSrc, /\bs_last_us\s*>\s*0\b/,
+  "a `s_last_us > 0` test treats the adopted table's zero origin as unset and books nothing");
+
+// An ADOPTED table resumes from esp_timer's zero. dwell_adopt() books only the downtime; the first
+// fold of the boot comes after app_main's network wait, and with `s_last_us` left at its -1
+// initialiser that fold books dt = 0, so the whole stretch is neither elapsed nor blind and a run
+// keeps `exact` across a boot nobody watched. The origin is a host-tested rule, so the glue has to
+// ask it rather than hold a literal that the CHECKs cannot see.
+const dwellStartBody = dwellSrc.slice(dwellSrc.indexOf("void dwell_start()"),
+  dwellSrc.indexOf("const char* dwell_persist_state()"));
+const dwellAcceptBranch = dwellStartBody.slice(dwellStartBody.indexOf("DwellRestore::Accept) {"),
+  dwellStartBody.indexOf("} else {"));
+const dwellWipeBranch = dwellStartBody.slice(dwellStartBody.indexOf("} else {"));
+assert.match(dwellAcceptBranch,
+  /logic::dwell_adopt\([^;]*\);[\s\S]*?s_last_us = logic::dwell_resume_origin_us\(true\);[\s\S]*?persist_seal\(\);/,
+  "an adopted dwell table must resume from dwell_resume_origin_us(true), before the seal — " +
+  "otherwise the boot-to-first-fold interval is booked as nothing");
+assert.match(dwellWipeBranch,
+  /persist_wipe\(\);[\s\S]*?s_last_us = logic::dwell_resume_origin_us\(false\);/,
+  "a wiped dwell table has no previous observation: its first fold only anchors");
+assert.doesNotMatch(dwellWipeBranch, /dwell_resume_origin_us\(true\)/,
+  "only an ADOPTED table may start counting from esp_timer's zero");
+// No other writer may hand the clock a literal: the only values s_last_us takes are the sentinel
+// (the initialiser, apply_reset_locked(), dwell_forget()), the origin rule's two arms and the
+// fold's own `now_us`.
+const dwellOriginWrites = [...dwellSrc.matchAll(/\bs_last_us\s*=(?!=)\s*([^;]+);/g)]
+  .map((m) => m[1].trim()).sort();
+assert.deepEqual(dwellOriginWrites, [
+  "-1", "-1", "-1", "logic::dwell_resume_origin_us(false)", "logic::dwell_resume_origin_us(true)",
+  "now_us",
+].sort(), "s_last_us must be written only by the static sentinel, apply_reset_locked(), " +
+  "dwell_forget(), the two origin arms and the fold itself — never a bare 0");
+
 assert.match(status, /if \(!dw\.exact\) j \+= ",\\"dwell_min\\":true";/,
   "an unwitnessed run must carry its lower-bound marker, or the browser states a stronger claim " +
   "than the device made");
