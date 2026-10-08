@@ -1916,8 +1916,9 @@ void flash_note_cursor_ahead(size_t src_i, const FutureCursorNote& note) {
 
 // The restore's counterpart: one line per source and boot when the newest bucket the scan indexed
 // lies beyond the synchronised wall bucket. Nothing is changed. The trend splice refuses the whole
-// snapshot and checkup_flash_restore refuses the hours beyond the clock one by one (it still
-// restores that source's in-window hours), exactly as they always did, and the journal is not
+// snapshot and checkup_flash_restore refuses the hours beyond the clock one by one (it restores
+// in-window hours only when the boot scan indexed them, i.e. within a day below the newest stamped
+// hour), exactly as they always did, and the journal is not
 // re-indexed or rewritten, because it cannot tell stamps from a wrong far-future boot from a wrong
 // PAST clock now. Caller holds s_flash_mtx.
 void flash_note_restore_ahead(size_t src_i, int64_t newest, int64_t wall_bucket) {

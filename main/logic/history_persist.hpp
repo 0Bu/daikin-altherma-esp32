@@ -874,7 +874,8 @@ inline constexpr int64_t history_anchor_commit_us(int64_t now_us, int64_t unix_s
 // the clock passes its cursor, and says so once; the episode ends with that source's next
 // successful data append. After a far-future boot a trend source therefore neither restores nor
 // persists until the corrected clock reaches the stamped buckets (the diagnostic restore refuses
-// only the hours beyond the clock); after a wrong past clock the records of a source whose cursor
+// the hours beyond the clock and restores in-window hours only within a day below the newest
+// stamped hour); after a wrong past clock the records of a source whose cursor
 // is ahead are left exactly as they were and only that boot's own window goes unpersisted. A
 // source with no cursor (its identity was reset during that boot) or one older than the wrong
 // clock is indistinguishable from an ordinary boot and journals that boot's window as it always

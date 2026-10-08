@@ -197,9 +197,12 @@ assert.match(functionBody("esp_err_t flash_append_record(FlashJournalRecord& r) 
 const pausedAt = noteFailure.indexOf("if (step.paused) {");
 const pausedReturn = noteFailure.indexOf("return;", pausedAt);
 assert.ok(pausedAt >= 0 && pausedReturn > pausedAt, "the paused branch of the failure note");
+// EVERY paused failure must stamp, not only the first one: the stamp is the branch's first
+// statement, ahead of the first-pause-only block, or later paused failures never refresh the time
+// and the gate is due on every tick from one period after the pause.
 assert.match(noteFailure.slice(pausedAt, pausedReturn),
-  /s_flash_fail_last_us\s*=\s*esp_timer_get_time\(\)\s*;/,
-  "a paused failure stamps the attempt time before it returns, or the retry gate is always due");
+  /^if \(step\.paused\) \{\s*s_flash_fail_last_us\s*=\s*esp_timer_get_time\(\)\s*;\s*if \(!s_flash_fail_paused\)/,
+  "every paused failure stamps the attempt time first, before the first-pause-only block");
 assert.match(functionBody("void flash_note_append_success(", "esp_err_t flash_append_record(FlashJournalRecord& r) {"),
   /s_flash_fail_last_us\s*=\s*INT64_MIN\s*;/,
   "a successful append ends the pause episode and clears the attempt time");
