@@ -84,8 +84,13 @@ shared topic and pulls its value out with a `value_template`:
 
 ```yaml
 "stat_t": "daikin-altherma-esp32/x10a"
-"val_tpl": "{{ value_json['hydronic']['dhw_setpoint'] }}"
+"val_tpl": "{{ value_json.get('hydronic', {}).get('dhw_setpoint', 'None') }}"
 ```
+
+The `.get(…, 'None')` form is what makes an absent value read *unknown*. Home Assistant keeps
+showing a sensor's last value when its template renders empty, and a subscript such as
+`value_json['hydronic']['dhw_setpoint']` renders empty for a missing key and fails for a missing
+group. `None` is the payload Home Assistant itself maps to *unknown*.
 
 When the HomeHub stack is enabled, its available register values are published independently as a
 flat retained object on `<base>/modbus`; a disconnected HomeHub produces `{}` and disabling the

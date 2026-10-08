@@ -1984,9 +1984,11 @@ The Home Assistant bridge:
   builds a single JSON object of every value, grouped one level deep by X10A register page
   (`logic/mqtt_group.hpp`, host-tested): `{ "<group>": { "<object_id>": value, … }, … }` (max
   nesting depth 1, e.g. `hydronic`, `outdoor_state`, `inverter`). Every sensor's discovery config
-  points at the X10A topic and subscripts its value out with a `value_template`
-  (`value_json['<group>']['<object_id>']` — bracket notation, so a digit-leading slug like
-  `2way_valve…` stays valid). `<base>/env3` is a separate flat retained numeric observation payload:
+  points at the X10A topic and reads its value out with a `value_template`
+  (`value_json.get('<group>', {}).get('<object_id>', 'None')`; quoted arguments keep a
+  digit-leading slug like `2way_valve…` valid). An absent group or key therefore renders HA's
+  `None` and reads *unknown*. A subscript would render empty, so HA keeps the last value, or would
+  raise a template error for a missing group (`logic/discovery.hpp`). `<base>/env3` is a separate flat retained numeric observation payload:
   `{"temperature_c":20.25,"humidity_pct":45.50,"pressure_hpa":1008.75,"samples":N,"errors":M}`.
   Every new fresh 10 s sample is published, including an unchanged reading; error or staleness
   removes the three reading keys and retains only the pair of I2C bus-health counters, `samples` and
