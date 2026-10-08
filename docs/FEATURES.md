@@ -74,7 +74,7 @@ Ids are stable keys and are never reused — a gap means a feature was retired, 
 | 27 | **Task Watchdog** → clean reboot on a wedged poll/publish task | ✅ | [`hp_poll.cpp`](../main/hp_poll.cpp), [`mqtt_ha.cpp`](../main/mqtt_ha.cpp) |
 | 28 | **`/status.sys`** — always-on heap headroom + last-boot reason, needing no broker | ✅ 🧪 | [`http_status.cpp`](../main/http_status.cpp), [`logic/reset_reason.hpp`](../main/logic/reset_reason.hpp) |
 | 29 | **Early boot-loop safe mode** — suppress optional workers for in-browser recovery; distinct from OTA rollback | ✅ 🧪 | [`safe_mode.cpp`](../main/safe_mode.cpp), [`logic/boot_guard.hpp`](../main/logic/boot_guard.hpp) |
-| 30 | **Config-write integrity** — one atomic CRC-checked NVS blob, field-owned commits, reserved-GPIO rejection, and an NVS failure that reaches the user | ✅ 🧪 | [`config.cpp`](../main/config.cpp), [`logic/config_store.hpp`](../main/logic/config_store.hpp), [`logic/board_pins.hpp`](../main/logic/board_pins.hpp) |
+| 30 | **Config-write integrity** — one atomic CRC-checked NVS blob, field-owned commits, reserved-GPIO rejection, and an NVS failure that reaches the user | ✅ 🧪 | [`config.cpp`](../main/config.cpp), [`logic/config_store.hpp`](../main/logic/config_store.hpp), [`logic/config_transaction.hpp`](../main/logic/config_transaction.hpp), [`logic/board_pins.hpp`](../main/logic/board_pins.hpp) |
 | 31 | **Value-catalog domain audit** — real converters × real catalog vs the spec, each finding carrying a decode witness | ✅ | [`catalog_audit.cpp`](../tools/domain/catalog_audit.cpp), [`run-domain-audit.sh`](../scripts/run-domain-audit.sh) |
 | 32 | **SNTP wall clock**, runtime-configurable server — real UTC for syslog and `/status.ntp` | ✅ 🧪 | [`sntp_time.cpp`](../main/sntp_time.cpp), [`logic/timestamp.hpp`](../main/logic/timestamp.hpp) |
 | 33 | **Detect-sweep heap hardening** — install-once UART with a register-only pin remap, plus silent-bus backoff | ✅ 🧪 | [`hp_comm.cpp`](../main/hp_comm.cpp), [`logic/uart_plan.hpp`](../main/logic/uart_plan.hpp), [`logic/detect_backoff.hpp`](../main/logic/detect_backoff.hpp) |
@@ -139,7 +139,7 @@ Ids are stable keys and are never reused — a gap means a feature was retired, 
 | 98 | **Per-header branch-count coverage ratchet** — the 95% aggregate line floor is joined by execution-profile-specific aggregate gcov `taken/total` branch-edge floors; hosted CI also binds runner OS/image and it does not claim branch identity | ✅ 🧪 | [`branch_baseline.json`](../tools/coverage/branch_baseline.json), [`profile.sh`](../tools/coverage/profile.sh), [`check_gcov_report.py`](../tools/coverage/check_gcov_report.py) |
 | 99 | **Sanitized hostile-input property gate** — deterministic malformed frames, JSON, URLs and boundary values use a capability-probed sanitizer runtime; CI requires ASan+UBSan and a local host falls back to UBSan only when ASan is unavailable | ✅ 🧪 | [`logic_property_tests.cpp`](../tools/fuzz/logic_property_tests.cpp), [`run-sanitizer-fuzz-tests.sh`](../scripts/run-sanitizer-fuzz-tests.sh) |
 | 100 | **Ratcheted source-format gate** — whole-tree UTF-8/LF/exactly-one-final-newline/whitespace invariants plus exact clang-format 18.1.8 on new files and changed C/C++ hunks | ✅ 🧪 | [`check_format.py`](../tools/format/check_format.py), [`run-format-check.sh`](../scripts/run-format-check.sh) |
-| 101 | **Host runtime-scenario harness** — eight scenarios run selected production parsers and serializers through simulated clock/storage/transport/broker adapters; three real POSIX socket scenarios prove joined absolute deadline aborts for trickling headers and bodies and the bounded leftover-body discard after a response. It remains hardware-free and does not execute target glue, NVS or MCP | ✅ 🧪 | [`runtime_integration_tests.cpp`](../test/runtime/runtime_integration_tests.cpp), [`run-runtime-integration-tests.sh`](../scripts/run-runtime-integration-tests.sh) |
+| 101 | **Host runtime-scenario harness** — ten scenarios run selected production parsers, serializers and config save transactions through simulated clock/storage/transport/broker adapters; three real POSIX socket scenarios prove joined absolute deadline aborts for trickling headers and bodies and the bounded leftover-body discard after a response. It remains hardware-free and does not execute target glue, NVS or MCP | ✅ 🧪 | [`runtime_integration_tests.cpp`](../test/runtime/runtime_integration_tests.cpp), [`run-runtime-integration-tests.sh`](../scripts/run-runtime-integration-tests.sh) |
 | 102 | **Real-browser rendering and accessibility gate** — the assembled production UI runs in Chrome across all locales and mobile/desktop widths, including native accessibility, keyboard, overflow, reduced-motion and console contracts | ✅ 🧪 | [`test_browser_render.mjs`](../test/test_browser_render.mjs), [`run-browser-render-tests.sh`](../scripts/run-browser-render-tests.sh) |
 | 103 | **Signed release artifact construction** — a trusted-main job isolates the signing key, pins signing-key continuity and manifest provenance, then hands the exact artifact to a separate write-capable publisher that binds and verifies the release tag against the requested source SHA | ✅ 🧪 | [`ci-build-all.sh`](../scripts/ci-build-all.sh), [`check-signing-key-continuity.py`](../scripts/check-signing-key-continuity.py), [`check-manifest-provenance.py`](../scripts/check-manifest-provenance.py), [`build.yml`](../.github/workflows/build.yml) |
 | 104 | **Hardware acceptance separated from publication** — the canonical private-inventory bench and production OTA transactions remain explicit maintainer operations; a manual release skips the PR test suite, never contacts a board and depends on no lab runner, private inventory or hardware policy | ✅ 🧪 | [`production-ota-gate.py`](../scripts/production-ota-gate.py), [`build.yml`](../.github/workflows/build.yml) |
@@ -363,8 +363,9 @@ The device is a **stationary, mains-powered bridge** that must never need a huma
   it *snapshotted*. Writers now commit only the fields they **own**, via non-allocating host-tested
   patches, so a detection sweep cannot revert a credential change the user was already told
   succeeded. An NVS write failure **reaches the user** (`500`, no reboot) instead of reading as
-  saved. The service blob, link blob and exact RAM successor are fully allocated/serialized before
-  the first NVS write; after that boundary only checked writes and a noexcept move remain.
+  saved. The save sequence ([`logic/config_transaction.hpp`](../main/logic/config_transaction.hpp))
+  allocates/serializes its blobs and the exact RAM successor before the first NVS write; after that
+  boundary only checked writes and a noexcept move remain. An X10A `/set_hp` writes only the link entry.
 - **✅ 🧪 ICMP gateway watchdog.** A missed deauth leaves a ghost association — IP held, TCP timing
   out, no disconnect event ever. A background task probes the gateway and re-associates only for the
   proven ghost case. The probe is **three-valued**
@@ -774,12 +775,12 @@ Docker, in seconds ([`test/README.md`](../test/README.md)).
   local host falls back to UBSan only after the ASan probe fails. Its fixed corpus makes a failure
   reproducible; it is not a claim of open-ended fuzzing.
 - **The host runtime scenarios** — [`run-runtime-integration-tests.sh`](../scripts/run-runtime-integration-tests.sh)
-  call selected production config serializers, X10A/Modbus parsers, MQTT publish gating and bounded
-  body/chunk logic through host-only fake time, storage, serial, TCP, broker and HTTP adapters. Eight
-  scenarios model failed persistence, reconstruction, allocation failure, interleavings,
-  fragmentation and reconnects. Three more use real POSIX `socketpair`/`recv` traffic: a joined
+  call selected production config serializers and save transactions, X10A/Modbus parsers, MQTT
+  publish gating and bounded body/chunk logic through host-only fake time, storage, serial, TCP, broker and HTTP adapters. Ten
+  scenarios model failed persistence and config save boundaries, reconstruction, allocation failure,
+  interleavings, fragmentation and reconnects. Three more use real POSIX `socketpair`/`recv` traffic: a joined
   `shutdown(SHUT_RDWR)` deadline aborts trickling headers and bodies, and a leftover body is settled
-  only within its cap and budget. These eleven do not execute ESP-IDF target glue, real NVS or the
+  only within its cap and budget. These thirteen do not execute ESP-IDF target glue, real NVS or the
   production MCP/HTTP/MQTT stacks. Target compilation and hardware evidence remain separate gates.
 - **The browser loop** — the deterministic DOM suite covers interaction contracts, while
   [`run-browser-render-tests.sh`](../scripts/run-browser-render-tests.sh) opens the assembled UI in a
@@ -793,7 +794,7 @@ Docker, in seconds ([`test/README.md`](../test/README.md)).
 | Wire decode | `crc`, `convert`, `registers`, `value_def`, `error_codes`, `hexdump`, `raw_capture`, `hp_probe` |
 | Value adjudication | `availability`, `conv_override`, `label_override`, `fault_state`, `ou_stale`, `lwt_select`, `cop_scope`, `feature_gate`, `profile_view` |
 | Detection | `detect`, `detect_backoff`, `detect_identity`, `uart_plan` |
-| Config & board | `config_model`, `config_store`, `board_pins`, `board_presets`, `env3`, `ui_lang` |
+| Config & board | `config_model`, `config_store`, `config_transaction`, `board_pins`, `board_presets`, `env3`, `ui_lang` |
 | MQTT / HA | `discovery`, `ha_device`, `mqtt_base`, `mqtt_cleanup`, `mqtt_group`, `mqtt_uri`, `heartbeat`, `homehub_map`, `modbus`, `weather_mqtt` |
 | HTTP | `http_body`, `http_request`, `payload_complete`, `http_surface`, `query_flag`, `captive`, `json`, `mcp`, `chunk_sink`, `redact` |
 | OTA & boot | `health_gate`, `http_deadline`, `version_cmp`, `ota_manifest`, `ota_changelog_range`, `ota_hil_feed`, `ota_channel`, `ota_transport`, `boot_guard`, `crashinfo`, `bootlog`, `reset_reason`, `heap_watchdog` |

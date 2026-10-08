@@ -275,8 +275,10 @@ inline constexpr uint32_t diagnostics_next_generation(uint32_t current) {
 //   LINK  (rx/tx/proto)                  — persisted; owned by detection, overridable via /set_hp
 //   MODEL (profile + fingerprint fp_*)   — RAM-only, re-derived every boot; owned by detection
 //
-// Whole-struct config_save() / config_save_link() stay for the HTTP handlers: they own the
-// credential fields and are serialized against each other on the single httpd task.
+// Whole-struct config_save() / config_save_link() stay for the HTTP handlers, serialized against
+// each other on the single httpd task: config_save() for the service routes, which own the
+// credential fields, and config_save_link() for an X10A /set_hp, which owns the link and writes
+// nothing else.
 //
 // The revision check reconciles concurrent writes in both directions: detection commits patch
 // only detection-owned fields (never reverting user credentials), while an HTTP service save
@@ -305,10 +307,14 @@ inline void reconcile_detected_config(Config& c, const Config& current) {
 //   * ordinary /set_wifi|mqtt|syslog|ntp|board|ota saves own only blob fields; once that one atomic
 //     write lands, a link-cache maintenance failure must not turn the already-committed request
 //     into a false HTTP 500;
-//   * an X10A /set_hp owns the link and therefore requires its atomic link entry as well.
+//   * an X10A /set_hp owns the link and therefore requires its atomic link entry. It writes no
+//     service blob at all.
+//
+// config_save_transaction passes blob_ok = true for every caller: a failed service write returns
+// before the link is attempted, and an X10A save has no service blob to fail.
 //
 // Kept pure so the distinction cannot silently collapse back to "any cache error means nothing was
-// saved" in config.cpp.
+// saved" (logic/config_transaction.hpp).
 inline bool config_save_succeeded(bool blob_ok, bool link_ok, bool require_link) {
     return blob_ok && (!require_link || link_ok);
 }

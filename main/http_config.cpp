@@ -913,7 +913,9 @@ static esp_err_t set_hp(httpd_req_t* req) {
         // the atomic link-cache entry and a snapshot no detection commit has overtaken; a
         // HomeHub-only request succeeds with the service blob and treats the unchanged X10A cache
         // as best-effort maintenance. Mixed requests were rejected above, so a 500 can no longer
-        // hide a HomeHub blob that already landed before a link-key failure.
+        // hide a HomeHub blob that already landed before a link-key failure. That rejection also
+        // keeps the link-only X10A save honest: a HomeHub field in the same request would reach
+        // RAM through config_save_link yet never reach "cfg", which that save does not write.
         if (x10a_sent) {
             const ConfigSaveResult saved = config_save_link(c);
             if (saved == ConfigSaveResult::Stale) {
