@@ -1423,7 +1423,10 @@ A single task owns the X10A UART (there is exactly one link). Each cycle:
    samples under the new scope, and the restore steps over that whole source rather than waiting
    for a reset that may never be consumed (a disabled HomeHub, an X10A bus that never resolves a
    profile) — waiting would leave every other source unrestored and the journal unwritten until
-   the next reboot.
+   the next reboot. The board's own heap trends ride in the X10A record and therefore wait with
+   it while an X10A identity reset is pending, as they already do while no X10A target is
+   resolved; the live rings stay visible meanwhile, and their journal copy resumes once the
+   reset is consumed.
 
    A journal cursor, or a restore window, ahead of the clock is **reported, never rewritten**.
    Records beyond the clock are never restored, and the writer of the affected source appends
@@ -1439,9 +1442,13 @@ A single task owns the X10A UART (there is exactly one link). Each cycle:
    would let that boot append its live window under wrong past buckets, and the next correctly
    synchronised boot would then hide the genuine newest records or show the wrong-clock samples in
    their place. Leaving the journal alone turns the same fault into missing history rather than
-   misdated history: after a far-future boot the source neither restores nor persists until the
-   corrected clock reaches the stamped buckets, and after a wrong past clock the journal is exactly
-   what it was.
+   misdated history: after a far-future boot a trend source neither restores nor persists until the
+   corrected clock reaches the stamped buckets (the diagnostic restore refuses only the hours
+   beyond the clock and still restores that source's in-window hours), and after a wrong past
+   clock the records of a source whose cursor is ahead are left exactly as they were. The guard
+   recognises only a cursor that is ahead: a source with no cursor (its identity was reset during
+   that boot) or one whose cursor is older than the wrong clock looks like an ordinary boot, so it
+   journals that boot's window under the wrong buckets.
 
    A slot that fails to erase or program is retried once and then abandoned with its sector; the
    first failure of an episode and the recovery are logged, not every poll tick. Abandoning erases

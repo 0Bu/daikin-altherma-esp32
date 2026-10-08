@@ -189,6 +189,24 @@ assert.match(countAbandon,
   "the first abandoned sector of an episode is logged whichever path found it");
 assert.match(functionBody("esp_err_t flash_append_record(FlashJournalRecord& r) {",
   "bool flash_build_for_service("), /flash_note_append_failure\(/);
+// The paused-retry throttle is only as good as its clock. The pure gate (history_journal_retry_due)
+// is host-tested with its own model of the last attempt; what the host suite cannot see is that the
+// firmware STAMPS that time. Without the stamp the last attempt stays INT64_MIN, the gate is due on
+// every tick, and a paused episode re-reads, re-erases and re-programs the same sector once per poll
+// tick for good — the flash churn the pause exists to prevent, only without the log spam.
+const pausedAt = noteFailure.indexOf("if (step.paused) {");
+const pausedReturn = noteFailure.indexOf("return;", pausedAt);
+assert.ok(pausedAt >= 0 && pausedReturn > pausedAt, "the paused branch of the failure note");
+assert.match(noteFailure.slice(pausedAt, pausedReturn),
+  /s_flash_fail_last_us\s*=\s*esp_timer_get_time\(\)\s*;/,
+  "a paused failure stamps the attempt time before it returns, or the retry gate is always due");
+assert.match(functionBody("void flash_note_append_success(", "esp_err_t flash_append_record(FlashJournalRecord& r) {"),
+  /s_flash_fail_last_us\s*=\s*INT64_MIN\s*;/,
+  "a successful append ends the pause episode and clears the attempt time");
+// The service hands the gate the flag, the current time and THAT stamp, in this order.
+assert.match(history,
+  /logic::history_journal_retry_due\(\s*s_flash_fail_paused,\s*esp_timer_get_time\(\),\s*s_flash_fail_last_us\s*\)/,
+  "the service gates a paused journal on the stamped attempt time");
 // The service definition (the forward declaration at the top has no body).
 const serviceAt = history.search(/static size_t history_flash_service_journal\([^;{]*\)\s*\{/);
 assert.ok(serviceAt >= 0, "history_flash_service_journal definition found");

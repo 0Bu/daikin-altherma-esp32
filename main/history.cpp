@@ -1915,8 +1915,9 @@ void flash_note_cursor_ahead(size_t src_i, const FutureCursorNote& note) {
 }
 
 // The restore's counterpart: one line per source and boot when the newest bucket the scan indexed
-// lies beyond the synchronised wall bucket. Nothing is changed. The trend splice and
-// checkup_flash_restore refuse such a window exactly as they always did, and the journal is not
+// lies beyond the synchronised wall bucket. Nothing is changed. The trend splice refuses the whole
+// snapshot and checkup_flash_restore refuses the hours beyond the clock one by one (it still
+// restores that source's in-window hours), exactly as they always did, and the journal is not
 // re-indexed or rewritten, because it cannot tell stamps from a wrong far-future boot from a wrong
 // PAST clock now. Caller holds s_flash_mtx.
 void flash_note_restore_ahead(size_t src_i, int64_t newest, int64_t wall_bucket) {
@@ -1924,8 +1925,8 @@ void flash_note_restore_ahead(size_t src_i, int64_t newest, int64_t wall_bucket)
         !logic::history_cursor_in_future(newest, wall_bucket))
         return;
     s_flash_restore_ahead_logged[src_i] = true;
-    diag_printf("history: journal source %u stamped ahead of the clock (bucket %lld > %lld) — not "
-                "restored\n",
+    diag_printf("history: journal source %u has records stamped ahead of the clock (bucket %lld > "
+                "%lld) — those are not restored\n",
                 static_cast<unsigned>(src_i), static_cast<long long>(newest),
                 static_cast<long long>(wall_bucket));
 }

@@ -872,9 +872,13 @@ inline constexpr int64_t history_anchor_commit_us(int64_t now_us, int64_t unix_s
 // So the rule is: records beyond the clock are never restored (the splice refuses a snapshot newer
 // than the live ring) and never rewritten. The writer of an affected source appends nothing until
 // the clock passes its cursor, and says so once; the episode ends with that source's next
-// successful data append. After a far-future boot the source therefore neither restores nor
-// persists until the corrected clock reaches the stamped buckets; after a wrong past clock the
-// journal is left exactly as it was and only that boot's own window goes unpersisted.
+// successful data append. After a far-future boot a trend source therefore neither restores nor
+// persists until the corrected clock reaches the stamped buckets (the diagnostic restore refuses
+// only the hours beyond the clock); after a wrong past clock the records of a source whose cursor
+// is ahead are left exactly as they were and only that boot's own window goes unpersisted. A
+// source with no cursor (its identity was reset during that boot) or one older than the wrong
+// clock is indistinguishable from an ordinary boot and journals that boot's window as it always
+// did.
 //
 // This is the detection decision only. `slack` is tolerance for the anchor itself, which is
 // derived from two whole-second readings and can sit one bucket either side of where a record was
