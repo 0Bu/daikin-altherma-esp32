@@ -3,6 +3,7 @@
 #include "nvs_storage.hpp"
 #include "diag_log.hpp"
 #include "logic/config_store.hpp"   // ConfigBlob (de)serialize — the atomic CRC-checked config blob
+#include "logic/config_transaction.hpp" // the save/commit transactions executed here over NVS
 #include "logic/weather_forecast.hpp"
 #include "logic/board_presets.hpp"
 #include "logic/env3.hpp"
@@ -13,7 +14,6 @@
 #include "freertos/semphr.h"
 #include "rtos_guard.hpp"   // SemGuard — the ONE unwind-safe mutex guard
 #include <cstdlib>          // abort() — the fail-stop when the config mutex can't be created
-#include <type_traits>
 #include <vector>
 
 namespace daik {
@@ -106,14 +106,10 @@ std::string config_profile() {
     Lock lk(g_mtx);
     return g_cfg.profile;
 }
-static uint32_t next_revision(uint32_t current) {
-    uint32_t next = current + 1;
-    return next ? next : 1;
-}
 
 static void publish_locked(const Config& requested) {
     Config c = requested;
-    c.runtime_revision = next_revision(g_cfg.runtime_revision);
+    c.runtime_revision = config_next_revision(g_cfg.runtime_revision);
     g_cfg = std::move(c);
 }
 
@@ -384,132 +380,52 @@ void config_load() {
     publish(c);
 }
 
+// The NVS side of the logic/config_transaction.hpp transactions; esp_err_t is their store code.
+namespace {
+struct NvsBlobStore {
+    int write_blob(const char* key, const uint8_t* data, size_t len) {
+        return nvs_set_blob(key, data, len);
+    }
+};
+static_assert(ESP_OK == 0, "the transactions read a zero store code as success");
+} // namespace
+
 // The one whole-struct save behind config_save (owns_link=false) and config_save_link (true); see
-// config.hpp for each caller's contract.
+// config.hpp for each caller's contract and logic/config_transaction.hpp for the transaction. The
+// MODEL (profile + fingerprint fp_*) is never written — it is re-derived every boot. Every runtime
+// call is serialized on the httpd task; initial HomeHub discovery is the one boot call and finishes
+// before httpd starts. The lock also serializes the write with detection's field-owned commit, so
+// RAM and the atomic link entry keep one ordering when /set_hp races a long detection sweep; the
+// flash write is rare and may hold readers briefly.
 static ConfigSaveResult save_whole(const Config& requested, bool owns_link) {
-    // Persist user settings (WiFi + MQTT + syslog + NTP) and the X10A link cache (RX/TX pins +
-    // protocol). The MODEL is intentionally NOT written — profile + fingerprint (fp_*) are re-derived
-    // every boot.
-    //
-    // ATOMIC credential/service save (F02). The credential + service fields go into ONE CRC-checked
-    // blob (logic/config_store.hpp) written with a single nvs_set_blob. That entry is atomic — either
-    // the whole new blob lands or the previous one survives — so the save is all-or-nothing across
-    // both a mid-write NVS failure AND a power cut, with no per-key rollback and no write-ordering to
-    // get right (the old multi-commit save needed both, and still left a partial state on a rollback
-    // that could not complete). Every runtime call is serialized on the httpd task; initial HomeHub
-    // discovery is the one boot call and finishes before httpd starts. The poll task uses a
-    // revision-checked field-owned commit, so it can never revert a credential change.
-    // Diagnostics consent and its generation ride atomically with every dependent source. The
-    // heating-curve diagnosis still derives its remaining prerequisites from the MQTT room source
-    // and active HomeHub on every evaluation; forecast remains optional comparison evidence.
-    // Serialize the NVS transaction with detection's field-owned commit. The flash write is rare
-    // and may hold readers briefly, but this is the only way RAM and the atomic link entry can keep
-    // one ordering when /set_hp races a long-running detection sweep.
-    Lock lk(g_mtx);
-    // The only concurrent writer is auto-detection. An unrelated HTTP form owns service fields, not
-    // the detected X10A session, so a snapshot taken before detection must carry forward the newly
-    // proven model/link rather than silently reverting them on publication. An X10A /set_hp derived
-    // its model fields from that older snapshot and must derive them again (config_save_revision).
-    const ConfigSaveRevision revision =
-        config_save_revision(owns_link, requested.runtime_revision, g_cfg.runtime_revision);
-    if (revision == ConfigSaveRevision::Stale) return ConfigSaveResult::Stale;
-    Config c = requested;
-    if (revision == ConfigSaveRevision::ReconcileDetected) reconcile_detected_config(c, g_cfg);
-    ConfigBlob b;
-    b.wifi_ssid = c.wifi_ssid;                 b.wifi_pass = c.wifi_pass;
-    b.wifi_ssid_backup = c.wifi_ssid_backup;   b.wifi_pass_backup = c.wifi_pass_backup;
-    b.wifi_rollback_active = c.wifi_rollback_active; b.wifi_rolled_back = c.wifi_rolled_back;
-    b.mqtt_uri = c.mqtt_uri;   b.mqtt_user = c.mqtt_user;   b.mqtt_pass = c.mqtt_pass;
-    b.mqtt_base = c.mqtt_base;
-    b.ref_temp_name = c.ref_temp_name; b.ref_temp_topic = c.ref_temp_topic;
-    b.ref_temp_path = c.ref_temp_path; b.ref_temp_time_path = c.ref_temp_time_path;
-    b.ref_temp_setpoint_topic = c.ref_temp_setpoint_topic;
-    b.ref_temp_time_topic = c.ref_temp_time_topic;
-    b.ref_temp_fixed_setpoint_tenths = c.ref_temp_fixed_setpoint_tenths;
-    b.ref_temp_setpoint_path = c.ref_temp_setpoint_path;
-    b.ref_temp_enabled_path = c.ref_temp_enabled_path;
-    b.ref_temp_hvac_mode_path = c.ref_temp_hvac_mode_path;
-    b.ref_temp_max_age_s = c.ref_temp_max_age_s;
-    b.circulation_name = c.circulation_name;
-    b.circulation_topic = c.circulation_topic;
-    b.circulation_power_path = c.circulation_power_path;
-    b.circulation_time_path = c.circulation_time_path;
-    b.circulation_max_age_s = c.circulation_max_age_s;
-    b.circulation_on_tenths_w = c.circulation_on_tenths_w;
-    b.circulation_off_tenths_w = c.circulation_off_tenths_w;
-    b.circulation_confirm_s = c.circulation_confirm_s;
-    b.weather_enabled = c.weather_enabled;
-    b.weather_latitude_e6 = c.weather_latitude_e6;
-    b.weather_longitude_e6 = c.weather_longitude_e6;
-    b.diagnostics_enabled = c.diagnostics_enabled;
-    b.diagnostics_generation = c.diagnostics_generation;
-    b.env3_enabled = c.env3_enabled; b.env3_sda = c.env3_sda; b.env3_scl = c.env3_scl;
-    b.board_preset_id = static_cast<int32_t>(c.board_preset_id);
-    b.board_user_set = c.board_user_set;
-    b.syslog_host = c.syslog_host; b.syslog_port = c.syslog_port; b.ntp_server = c.ntp_server;
-    // Board-local hardware rides the same atomic blob: like the credentials it has exactly ONE
-    // writer (the httpd task, POST /set_board), so it needs no self-healing per-key treatment — and
-    // being in the blob is what makes "save the indicator pin" all-or-nothing rather than a pin
-    // written without its polarity.
-    b.led_gpio = c.led_gpio; b.led_type = c.led_type; b.led_inverted = c.led_inverted;
-    b.btn_gpio = c.btn_gpio; b.btn_active_low = c.btn_active_low;
-    // The OTA channel rides the same blob for the same reason: one writer (POST /set_ota, httpd).
-    b.ota_channel = ota_channel_to_int(c.ota_channel);
-    // The UI language likewise: one writer (POST /set_lang, httpd), one persistent user choice.
-    b.ui_lang = ui_lang_to_int(c.ui_lang);
-    // The HomeHub Modbus stack rides the same blob. POST /set_hp is its normal writer; the one-time
-    // boot discovery writes before httpd starts, so the whole-blob ownership remains serialized.
-    b.mb_host           = c.mb_host;
-    b.mb_port           = c.mb_port;
-    b.mb_unit_id        = c.mb_unit_id;
-    b.mb_discovery_done = c.mb_discovery_done;
-    // REFUSE TO WRITE A BLOB THIS BUILD COULD NOT READ BACK. The decoder rejects the whole blob if any
-    // string exceeds CONFIG_BLOB_MAX_STR, and the fallback is the legacy per-key layout a blob-era
-    // device never populated — so writing one does not save a slightly-wrong config, it silently
-    // destroys the whole config at the next boot (WiFi, MQTT, syslog, NTP, board, OTA channel,
-    // language, ENV III, both MQTT sources, the weather location) and comes up in the setup portal.
-    // Checked here rather than trusted from the routes because this is the last point where every
-    // field is together, and it is the one guarantee the atomic-blob design rests on.
-    if (!config_blob_strings_fit(b)) {
+    ConfigSaveOutcome out;
+    {
+        Lock         lk(g_mtx);
+        NvsBlobStore store;
+        out = config_save_transaction(g_cfg, requested, owns_link, store);
+    }
+    switch (out.failed) {
+    case ConfigSaveStep::None:
+        break;
+    case ConfigSaveStep::FieldTooLong:
         diag_printf("config: refusing to save — a setting exceeds the %u-byte field limit\n",
                     static_cast<unsigned>(CONFIG_BLOB_MAX_STR));
-        return ConfigSaveResult::Failed;
+        break;
+    case ConfigSaveStep::ServiceWrite:
+        diag_printf("config: NVS blob write failed key=cfg err=%s — nothing saved\n",
+                    esp_err_to_name(out.store_error));
+        break;
+    case ConfigSaveStep::LinkWrite:
+        if (owns_link)
+            diag_printf("config: NVS blob write failed key=link err=%s — nothing saved\n",
+                        esp_err_to_name(out.store_error));
+        else
+            diag_printf("config: atomic link-cache write failed after service save (%s; previous "
+                        "link remains intact)\n",
+                        esp_err_to_name(out.store_error));
+        break;
     }
-    // Stage every allocation and the exact RAM successor before the first durable write. A
-    // bad_alloc after nvs_set_blob("cfg") would otherwise report an unchanged 503/500 to the HTTP
-    // caller even though consent/location was already persisted. Moving the staged Config into
-    // g_cfg below is statically required to be non-throwing.
-    const std::vector<uint8_t> blob = config_blob_serialize(b);
-    const std::vector<uint8_t> link = link_blob_serialize(
-        LinkBlob{c.rx_pin, c.tx_pin, static_cast<char>(c.proto), c.x10a_identity_fp});
-    Config published           = c;
-    published.runtime_revision = next_revision(g_cfg.runtime_revision);
-    static_assert(std::is_nothrow_move_assignable_v<Config>,
-                  "post-NVS Config publication must not allocate or throw");
-
-    const esp_err_t e = nvs_set_blob("cfg", blob.data(), blob.size());
-    if (e != ESP_OK) {
-        // The atomic write failed, so the PREVIOUS blob is still intact — nothing net saved. Don't
-        // publish RAM; the caller turns Failed into a 500 and skips the reboot.
-        diag_printf("config: NVS blob write failed key=cfg err=%s — nothing saved\n", esp_err_to_name(e));
-        return ConfigSaveResult::Failed;
-    }
-
-    // The link remains a separate ownership domain, but its four fields are ONE atomic entry. It is
-    // written after the service blob so a cache failure never taints an unrelated credential save.
-    const esp_err_t link_err = nvs_set_blob("link", link.data(), link.size());
-    const bool link_ok = link_err == ESP_OK;
-    if (!link_ok)
-        diag_printf("config: atomic link-cache write failed after service save (%s; previous link "
-                    "remains intact)\n", esp_err_to_name(link_err));
-    if (!config_save_succeeded(/*blob_ok=*/true, link_ok, owns_link)) {
-        // /set_hp owns the link and cannot call this a save when its cache did not land. Do not
-        // publish its requested pins to RAM or wake the poll task. (The atomic blob also landed, but
-        // /set_hp changed none of its fields; for every other route that blob is the requested save.)
-        return ConfigSaveResult::Failed;
-    }
-    g_cfg = std::move(published);
-    return ConfigSaveResult::Saved;
+    return out.result;
 }
 
 bool config_save(const Config& c) {
@@ -527,46 +443,26 @@ bool config_commit_detected_link(const Config& expected, int rx_pin, int tx_pin,
                                  uint32_t identity_fp, bool& link_saved,
                                  uint32_t& committed_revision) {
     Lock lk(g_mtx);
-    if (g_cfg.runtime_revision != expected.runtime_revision) {
-        link_saved = false;
-        committed_revision = 0;
-        return false;
-    }
-
-    const bool link_changed = g_cfg.rx_pin != rx_pin || g_cfg.tx_pin != tx_pin ||
-                              g_cfg.proto != proto || g_cfg.x10a_identity_fp != identity_fp;
-    link_saved = true;
-    if (link_changed) {
-        const std::vector<uint8_t> link = link_blob_serialize(
-            LinkBlob{rx_pin, tx_pin, static_cast<char>(proto), identity_fp});
-        link_saved = nvs_set_blob("link", link.data(), link.size()) == ESP_OK;
-    }
-
-    // The link is proven by this sweep, so keep using it for the current session even if its cache
-    // write failed. The history reset performed by the caller scopes every new RAM/flash record to
-    // `identity_fp`; on reboot a stale cached identity mismatches and is rejected fail-closed.
-    apply_link(g_cfg, rx_pin, tx_pin, proto, identity_fp);
-    g_cfg.runtime_revision = next_revision(g_cfg.runtime_revision);
-    committed_revision = g_cfg.runtime_revision;
-    return true;
+    NvsBlobStore store;
+    return config_commit_detected_link_transaction(g_cfg, expected.runtime_revision, rx_pin, tx_pin,
+                                                   proto, identity_fp, store, link_saved,
+                                                   committed_revision);
 }
 
 bool config_commit_detected_model(uint32_t expected_revision, std::string profile,
                                   uint32_t fp_pages, int fp_kw_tenths, int fp_iu_kw_tenths,
                                   std::string fp_eeprom) {
     Lock lk(g_mtx);
-    if (g_cfg.runtime_revision != expected_revision) return false;
-    apply_model(g_cfg, std::move(profile), fp_pages, fp_kw_tenths, fp_iu_kw_tenths,
-                std::move(fp_eeprom));
-    g_cfg.runtime_revision = next_revision(g_cfg.runtime_revision);
-    return true;
+    return config_commit_detected_model_if_current(g_cfg, expected_revision, std::move(profile),
+                                                   fp_pages, fp_kw_tenths, fp_iu_kw_tenths,
+                                                   std::move(fp_eeprom));
 }
 
 void config_reset_detection() {
     Lock lk(g_mtx);
     g_cfg.profile          = "auto";
     g_cfg.fp_valid         = false;
-    g_cfg.runtime_revision = next_revision(g_cfg.runtime_revision);
+    g_cfg.runtime_revision = config_next_revision(g_cfg.runtime_revision);
 }
 
 // Kconfig-derived hardware facts (see config.hpp). Kept here — the one file that already owns the

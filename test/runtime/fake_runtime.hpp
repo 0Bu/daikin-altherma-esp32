@@ -8,6 +8,7 @@
 #include "logic/chunk_sink.hpp"
 #include "logic/config_model.hpp"
 #include "logic/config_store.hpp"
+#include "logic/config_transaction.hpp"
 #include "logic/crc.hpp"
 #include "logic/http_body.hpp"
 #include "logic/http_deadline.hpp"
@@ -303,35 +304,64 @@ private:
     std::string last_label_;
 };
 
-enum class NvsResult { Ok, NoSpace, CommitFailed };
+// ── Allocation witness ──────────────────────────────────────────────────────────────────────────
+// runtime_integration_tests.cpp replaces the global allocation functions and calls
+// allocation_trap_hit() from each of them. The trap is per thread, so the helper threads of the
+// socket scenarios cannot disturb a count. While armed it counts allocations; the fakes pause it
+// around their own bookkeeping so that only the code under test is measured.
+struct AllocationTrap {
+    bool   armed  = false;
+    int    paused = 0;
+    size_t count  = 0;
+};
 
+inline AllocationTrap& allocation_trap() {
+    static thread_local AllocationTrap trap;
+    return trap;
+}
+
+inline void allocation_trap_hit() {
+    AllocationTrap& trap = allocation_trap();
+    if (trap.armed && trap.paused == 0) ++trap.count;
+}
+
+class AllocationPause {
+public:
+    AllocationPause() { ++allocation_trap().paused; }
+    ~AllocationPause() { --allocation_trap().paused; }
+    AllocationPause(const AllocationPause&)            = delete;
+    AllocationPause& operator=(const AllocationPause&) = delete;
+};
+
+enum class NvsResult { Ok, NoSpace };
+
+// ESP-IDF v6.1 semantics, verified in the pinned image: nvs_set_blob is write-through and atomic
+// per entry, a failed set leaves the previous value in place, and nvs_commit is a no-op for a valid
+// handle (NVSHandleSimple::commit() returns ESP_OK), so there is no staged state that a later
+// commit could fail to apply. The runner's mutation selftest violates exactly that atomicity — a
+// failed set still replaces the value — so the reboot test, not an assertion on the mutation flag,
+// must catch it.
 class FakeNvs {
 public:
     explicit FakeNvs(bool mutate_atomicity = false) : mutate_atomicity_(mutate_atomicity) {}
 
-    void fail_next_set_no_space() { fail_set_ = true; }
-    void fail_next_commit() { fail_commit_ = true; }
+    // The next set fails with NoSpace. A non-empty `key` arms it for that entry only, so a write to
+    // another entry neither fails nor consumes it.
+    void fail_next_set_no_space(std::string key = "") {
+        fail_set_ = true;
+        fail_key_ = std::move(key);
+    }
+    bool failure_pending() const { return fail_set_; }
 
-    NvsResult atomic_put(std::string key, std::vector<uint8_t> value) {
+    NvsResult set_blob(std::string key, std::vector<uint8_t> value) {
         ++set_calls_;
-        if (fail_set_) {
+        ++sets_by_key_[key];
+        if (fail_set_ && (fail_key_.empty() || fail_key_ == key)) {
             fail_set_ = false;
+            if (mutate_atomicity_) durable_[std::move(key)] = std::move(value);
             return NvsResult::NoSpace;
         }
-
-        // NVS stages the new value and changes the durable entry only after commit.  The mutation
-        // used by the runner selftest violates precisely this property, so the reboot test—not an
-        // explicit "mutation flag" assertion—must catch it.
-        pending_ = Entry{std::move(key), std::move(value)};
-        if (mutate_atomicity_) durable_[pending_->key] = pending_->value;
-        if (fail_commit_) {
-            fail_commit_ = false;
-            pending_.reset();
-            return NvsResult::CommitFailed;
-        }
-        durable_[pending_->key] = pending_->value;
-        pending_.reset();
-        ++commit_calls_;
+        durable_[std::move(key)] = std::move(value);
         return NvsResult::Ok;
     }
 
@@ -342,118 +372,146 @@ public:
     }
 
     size_t set_calls() const { return set_calls_; }
-    size_t commit_calls() const { return commit_calls_; }
+    size_t sets(std::string_view key) const {
+        const auto it = sets_by_key_.find(std::string(key));
+        return it == sets_by_key_.end() ? 0 : it->second;
+    }
 
 private:
-    struct Entry {
-        std::string          key;
-        std::vector<uint8_t> value;
-    };
-
     bool                                                  mutate_atomicity_ = false;
     bool                                                  fail_set_         = false;
-    bool                                                  fail_commit_      = false;
+    std::string                                           fail_key_;
     size_t                                                set_calls_        = 0;
-    size_t                                                commit_calls_     = 0;
-    std::optional<Entry>                                  pending_;
+    std::unordered_map<std::string, size_t>               sets_by_key_;
     std::unordered_map<std::string, std::vector<uint8_t>> durable_;
 };
 
-// Executes the real on-flash serializers around the fake NVS transaction.  Reconstructing this
-// object with the same FakeNvs is the host equivalent of a reboot: no RAM state is carried over.
+// What one transaction did, as the allocation witness saw it.
+struct TransactionWitness {
+    size_t writes              = 0; // durable write attempts
+    size_t staging_allocations = 0; // allocations before the first write (or all, if none)
+    size_t late_allocations    = 0; // allocations after the first write: must stay zero
+};
+
+// The Store the production transactions (logic/config_transaction.hpp) run over here, backed by
+// FakeNvs. Constructing one arms the allocation trap for the thread: allocations up to the first
+// durable write are staging, everything after it is the window the code under test must keep
+// allocation-free. The fake's own copy of the value is its bookkeeping, not the firmware's, and
+// runs paused. `allocate_late` is the runner's mutation: it allocates after the first write, as a
+// transaction that serialized too late would, and the witness test must see it.
+class FakeNvsBlobStore {
+public:
+    FakeNvsBlobStore(FakeNvs& nvs, bool allocate_late) : nvs_(nvs), allocate_late_(allocate_late) {
+        AllocationTrap& trap = allocation_trap();
+        trap.armed           = true;
+        trap.paused          = 0;
+        trap.count           = 0;
+    }
+    ~FakeNvsBlobStore() { allocation_trap().armed = false; }
+    FakeNvsBlobStore(const FakeNvsBlobStore&)            = delete;
+    FakeNvsBlobStore& operator=(const FakeNvsBlobStore&) = delete;
+
+    int write_blob(const char* key, const uint8_t* data, size_t len) {
+        AllocationTrap& trap = allocation_trap();
+        if (writes_ == 0) {
+            staging_allocations_ = trap.count;
+            trap.count           = 0;
+        }
+        ++writes_;
+        NvsResult result;
+        {
+            AllocationPause pause;
+            result = nvs_.set_blob(key, std::vector<uint8_t>(data, data + len));
+        }
+        if (allocate_late_) late_.assign(16, 'x');
+        return result == NvsResult::Ok ? 0 : static_cast<int>(result);
+    }
+
+    TransactionWitness witness() const {
+        const size_t count = allocation_trap().count;
+        return TransactionWitness{writes_, writes_ == 0 ? count : staging_allocations_,
+                                  writes_ == 0 ? 0 : count};
+    }
+
+private:
+    FakeNvs&          nvs_;
+    bool              allocate_late_;
+    size_t            writes_              = 0;
+    size_t            staging_allocations_ = 0;
+    std::vector<char> late_;
+};
+
+// Decodes what is durable in the fake NVS with the production decoders.  Reconstructing this object
+// over the same FakeNvs is the host equivalent of a reboot: no RAM state is carried over.
 class ConfigPersistenceAdapter {
 public:
-    ConfigPersistenceAdapter(FakeNvs& nvs, AllocationFailpoint& allocations)
-        : nvs_(nvs), allocations_(allocations) {}
-
-    NvsResult save_config(const daik::ConfigBlob& config) {
-        if (!daik::config_blob_strings_fit(config)) return NvsResult::NoSpace;
-        allocations_.checkpoint("config serialize");
-        return nvs_.atomic_put("cfg", daik::config_blob_serialize(config));
-    }
-
-    NvsResult save_link(const daik::LinkBlob& link) {
-        allocations_.checkpoint("link serialize");
-        return nvs_.atomic_put("link", daik::link_blob_serialize(link));
-    }
+    explicit ConfigPersistenceAdapter(FakeNvs& nvs) : nvs_(nvs) {}
 
     bool load_config(daik::ConfigBlob& out) const {
-        const auto raw = nvs_.get("cfg");
+        const auto raw = nvs_.get(daik::CONFIG_KEY_SERVICE);
         return raw && daik::config_blob_deserialize(raw->data(), raw->size(), out);
     }
 
     bool load_link(daik::LinkBlob& out) const {
-        const auto raw = nvs_.get("link");
+        const auto raw = nvs_.get(daik::CONFIG_KEY_LINK);
         return raw && daik::link_blob_deserialize(raw->data(), raw->size(), out);
     }
 
 private:
-    FakeNvs&             nvs_;
-    AllocationFailpoint& allocations_;
+    FakeNvs& nvs_;
 };
 
-struct RuntimeConfigSnapshot {
-    daik::ConfigBlob service;
-    daik::LinkBlob   link;
-    uint32_t         revision = 0;
-    std::string      profile  = "auto";
-    bool             fp_valid = false;
+struct DetectedLinkCommit {
+    bool     committed = false;
+    bool     saved     = false;
+    uint32_t revision  = 0;
 };
 
-// Minimal executable form of config.cpp's ownership rule: detection owns link and model fields and
-// uses a revision compare-and-commit; an HTTP writer with a stale snapshot carries the newly
-// detected link and model (including fp_valid) forward.
+// The live config plus the entry points detection and the HTTP handlers use. Every one executes the
+// production transaction from logic/config_transaction.hpp over a FakeNvs-backed store: this class
+// holds no save or commit sequence of its own, so what the scenarios prove is what config.cpp runs.
 class ConfigCoordinator {
 public:
-    ConfigCoordinator(ConfigPersistenceAdapter& persistence, RuntimeConfigSnapshot initial)
-        : persistence_(persistence), current_(std::move(initial)) {}
+    ConfigCoordinator(FakeNvs& nvs, daik::Config initial, bool allocate_late = false)
+        : nvs_(nvs), live_(std::move(initial)), allocate_late_(allocate_late) {}
 
-    RuntimeConfigSnapshot snapshot() const { return current_; }
+    daik::Config              snapshot() const { return live_; }
+    const TransactionWitness& witness() const { return witness_; }
 
-    bool commit_detected_link(uint32_t expected_revision, const daik::LinkBlob& link) {
-        if (current_.revision != expected_revision) return false;
-        if (persistence_.save_link(link) != NvsResult::Ok) return false;
-        current_.link = link;
-        ++current_.revision;
-        return true;
+    // config_save (owns_link == false) and config_save_link (true).
+    daik::ConfigSaveOutcome save(const daik::Config& requested, bool owns_link) {
+        FakeNvsBlobStore store(nvs_, allocate_late_);
+        const auto outcome = daik::config_save_transaction(live_, requested, owns_link, store);
+        witness_           = store.witness();
+        return outcome;
     }
 
-    bool commit_detected_model(uint32_t expected_revision, std::string profile, bool fp_valid) {
-        if (current_.revision != expected_revision) return false;
-        current_.profile  = std::move(profile);
-        current_.fp_valid = fp_valid;
-        ++current_.revision;
-        return true;
+    DetectedLinkCommit commit_detected_link(uint32_t expected_revision, int rx, int tx,
+                                            daik::Protocol proto, uint32_t identity_fp) {
+        FakeNvsBlobStore   store(nvs_, allocate_late_);
+        DetectedLinkCommit result;
+        result.committed = daik::config_commit_detected_link_transaction(
+            live_, expected_revision, rx, tx, proto, identity_fp, store, result.saved,
+            result.revision);
+        witness_ = store.witness();
+        return result;
     }
 
-    // config.cpp's save_whole: the revision decision is the production one; only the NVS and RAM
-    // plumbing is modelled here. A Stale X10A save returns false before any write.
-    bool save_http(RuntimeConfigSnapshot requested, bool owns_link) {
-        switch (daik::config_save_revision(owns_link, requested.revision, current_.revision)) {
-        case daik::ConfigSaveRevision::Current:
-            break;
-        case daik::ConfigSaveRevision::ReconcileDetected:
-            requested.link     = current_.link;
-            requested.profile  = current_.profile;
-            requested.fp_valid = current_.fp_valid;
-            break;
-        case daik::ConfigSaveRevision::Stale:
-            return false;
-        }
-        if (persistence_.save_config(requested.service) != NvsResult::Ok) return false;
-        const bool link_ok = persistence_.save_link(requested.link) == NvsResult::Ok;
-        if (owns_link && !link_ok) return false;
-        current_.service = std::move(requested.service);
-        if (link_ok) current_.link = requested.link;
-        current_.profile  = requested.profile;
-        current_.fp_valid = requested.fp_valid;
-        ++current_.revision;
-        return true;
+    bool commit_detected_model(uint32_t expected_revision, std::string profile) {
+        return daik::config_commit_detected_model_if_current(
+            live_, expected_revision, std::move(profile), 0x5u, 60, 60, "1234");
     }
+
+    // config_load sanitises the RAM config (rejected board pins, a colliding ENV III mapping, an
+    // unusable weather location) without persisting the result. This applies such a sanitising step
+    // to the live config only, leaving everything durable as it was.
+    template <class Edit> void sanitize_ram_only(Edit&& edit) { edit(live_); }
 
 private:
-    ConfigPersistenceAdapter& persistence_;
-    RuntimeConfigSnapshot     current_;
+    FakeNvs&           nvs_;
+    daik::Config       live_;
+    bool               allocate_late_;
+    TransactionWitness witness_;
 };
 
 // ── OOM-safe HTTP and periodic task adapters ────────────────────────────────────────────────────

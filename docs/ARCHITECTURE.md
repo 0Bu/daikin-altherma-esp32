@@ -154,20 +154,27 @@ config.cpp/.hpp     → runtime config (daik_cfg): WiFi/MQTT + the one-shot WiFi
                       via config().
                       Writers commit only the fields they own
                       (config_commit_detected_link/config_commit_detected_model for revision-checked
-                      detection, config_save / config_save_link for the HTTP handlers). Both write the
+                      detection, config_save for the HTTP service routes, config_save_link for an
+                      X10A /set_hp). The save and link-commit sequences live in
+                      logic/config_transaction.hpp, which config.cpp runs over NVS and the host tests
+                      and the runtime harness run over fakes. config_save writes the
                       credential/service fields as ONE CRC-checked atomic blob (logic/config_store.hpp,
                       host-tested) — a single nvs_set_blob, so that blob is all-or-nothing across a
                       write failure AND a power cut; on failure the old blob is intact, the save
-                      reports failure and publishes nothing. Both blob serializers and the exact RAM
+                      reports failure and publishes nothing. Its blob serializers and the exact RAM
                       successor are fully staged before the first NVS write; after that boundary only
                       checked writes and a statically noexcept move remain, so allocation failure
                       cannot report failure after a service change is already durable. The separately-owned RX/TX/proto/identity
                       cache is also ONE CRC-checked atomic `link` blob, so a failed pin swap leaves the
                       previous complete link intact. A link-blob failure after a successful service
-                      blob is logged but does not falsely fail an unrelated service save; an X10A
-                      /set_hp requires its link write (config_save_link) and leaves RAM untouched on
-                      failure. A save whose snapshot a detection commit overtook is resolved by
-                      config_save_revision: a service save carries the detected link and model
+                      blob is logged but does not falsely fail an unrelated service save. An X10A
+                      /set_hp (config_save_link) changes only link and model fields, so it writes ONLY
+                      the `link` entry and never the service blob: its RAM view also carries what
+                      config_load sanitised without persisting (rejected board pins, a colliding ENV
+                      III mapping), and rewriting that would persist those fallbacks over the stored
+                      settings. It requires the link write and, on failure, changes nothing durable
+                      and leaves RAM untouched. A save whose snapshot a detection commit overtook is
+                      resolved by config_save_revision: a service save carries the detected link and model
                       forward, while an X10A /set_hp is refused before any write and re-derived
                       from a fresh snapshot (see Auto-detection).
                       config_commit_detected_link still applies a revision-current proven link to
@@ -1205,10 +1212,17 @@ host-testable core is unusually large and valuable, because the risky parts are 
   is entry-atomic, so the blob is all-or-nothing across BOTH a mid-write NVS failure AND a power cut
   — no per-key rollback, no write-ordering. `link_blob_serialize` / `deserialize` give the separately
   owned RX/TX/protocol/identity cache the same one-entry CRC boundary. Ordinary service routes succeed
-  once their `cfg` blob lands even if best-effort link maintenance fails; an X10A `/set_hp` explicitly
-  requires its `link` write (`config_save_succeeded`, host-tested). Each decoder returns false without
-  publishing a partial value, so a fresh device / pre-blob OTA falls back to that domain's legacy
-  per-key load. Host-tested: CRC golden vector, round-trips, and corruption/truncation paths.
+  once their `cfg` blob lands even if best-effort link maintenance fails; an X10A `/set_hp` writes
+  only its `link` entry and requires it (`config_save_succeeded`, host-tested). Each decoder returns
+  false without publishing a partial value, so a fresh device / pre-blob OTA falls back to that
+  domain's legacy per-key load. Host-tested: CRC golden vector, round-trips, and corruption/truncation
+  paths.
+- `logic/config_transaction.hpp` — the save sequences `config.cpp` runs over NVS: `config_blob_from`
+  (the `Config` → `cfg` field mapping), `config_save_transaction` (revision decision, everything
+  staged before the first write, `cfg` only for a save that does not own the link, `link`, RAM
+  published last) and `config_commit_detected_link_transaction`. The store is a template parameter, so
+  the host tests drive every write boundary over a recording store and the runtime harness drives it
+  over a fake NVS that also counts allocations, proving none follows the first durable write.
 - `logic/mcp.hpp` — the complete IDF-free core for `/mcp` (F14): a bounded, depth-aware JSON scanner;
   JSON-RPC structure/id validation and exact id echo; `initialize`, `tools/list`, and `tools/call`
   dispatch; MCP revision negotiation; the fixed two-tool no-argument catalog; and result/error
@@ -1500,10 +1514,11 @@ loaded first, tried first, re-saved on change — with the compile-time defaults
 cache self-heals.
 The loaded pins are re-checked with `link_pins_safe` — the **pair** rule plus the chip-reserved-pin
 rule, the same ground the request path covers via `validate` — and dropped for those defaults if they
-fail. Both write paths — HTTP's `config_save` and detection's revision-checked
-`config_commit_detected_link` — serialize the complete link into one
-CRC-protected `link` NVS blob. It remains separate from the atomic credential/service blob because it
-has two owners, not because its fields are separate: a **power cut** or failed write leaves the
+fail. All three write paths — HTTP's `config_save` (best-effort maintenance), an X10A `/set_hp`'s
+`config_save_link` and detection's revision-checked `config_commit_detected_link` — serialize the
+complete link into one CRC-protected `link` NVS blob. It remains separate from the atomic
+credential/service blob because it has two owners, not because its fields are separate: a **power
+cut** or failed write leaves the
 previous complete link intact instead of durably pairing one new pin with one old pin. Load still
 validates the decoded pair because a legacy per-key migration, corruption, a copied NVS image or a
 future format mistake is untrusted; the sweep already skips `rx == tx`, while this guard additionally
@@ -1612,9 +1627,9 @@ mutex and returns a fresh revision token. The model helper accepts the session-o
 that token is still current. Thus an HTTP save or `/set_hp` generation bump wins atomically and the
 stale sweep is discarded — it cannot write old credentials or a previous link back after the user
 received `{"ok":true}`. These helpers patch only detection-owned fields (`apply_link` / `apply_model`
-in `logic/config_model.hpp`, host-tested); whole-struct `config_save` / `config_save_link` remain for
-the HTTP handlers, which own the credential/service fields and are serialized on the single httpd
-task.
+in `logic/config_model.hpp`, host-tested); whole-struct `config_save` (the service routes, which own
+the credential/service fields) and `config_save_link` (an X10A `/set_hp`, which owns the link and
+writes nothing else) remain for the HTTP handlers, serialized on the single httpd task.
 The converse race, a detection commit landing between an HTTP handler's `config()` snapshot and its
 save, is decided under the same config mutex by `config_save_revision` (host-tested). A service
 route owns no detection field, so its save carries the newly detected link and model forward

@@ -74,7 +74,7 @@ Ids are stable keys and are never reused — a gap means a feature was retired, 
 | 27 | **Task Watchdog** → clean reboot on a wedged poll/publish task | ✅ | [`hp_poll.cpp`](../main/hp_poll.cpp), [`mqtt_ha.cpp`](../main/mqtt_ha.cpp) |
 | 28 | **`/status.sys`** — always-on heap headroom + last-boot reason, needing no broker | ✅ 🧪 | [`http_status.cpp`](../main/http_status.cpp), [`logic/reset_reason.hpp`](../main/logic/reset_reason.hpp) |
 | 29 | **Early boot-loop safe mode** — suppress optional workers for in-browser recovery; distinct from OTA rollback | ✅ 🧪 | [`safe_mode.cpp`](../main/safe_mode.cpp), [`logic/boot_guard.hpp`](../main/logic/boot_guard.hpp) |
-| 30 | **Config-write integrity** — one atomic CRC-checked NVS blob, field-owned commits, reserved-GPIO rejection, and an NVS failure that reaches the user | ✅ 🧪 | [`config.cpp`](../main/config.cpp), [`logic/config_store.hpp`](../main/logic/config_store.hpp), [`logic/board_pins.hpp`](../main/logic/board_pins.hpp) |
+| 30 | **Config-write integrity** — one atomic CRC-checked NVS blob, field-owned commits, reserved-GPIO rejection, and an NVS failure that reaches the user | ✅ 🧪 | [`config.cpp`](../main/config.cpp), [`logic/config_store.hpp`](../main/logic/config_store.hpp), [`logic/config_transaction.hpp`](../main/logic/config_transaction.hpp), [`logic/board_pins.hpp`](../main/logic/board_pins.hpp) |
 | 31 | **Value-catalog domain audit** — real converters × real catalog vs the spec, each finding carrying a decode witness | ✅ | [`catalog_audit.cpp`](../tools/domain/catalog_audit.cpp), [`run-domain-audit.sh`](../scripts/run-domain-audit.sh) |
 | 32 | **SNTP wall clock**, runtime-configurable server — real UTC for syslog and `/status.ntp` | ✅ 🧪 | [`sntp_time.cpp`](../main/sntp_time.cpp), [`logic/timestamp.hpp`](../main/logic/timestamp.hpp) |
 | 33 | **Detect-sweep heap hardening** — install-once UART with a register-only pin remap, plus silent-bus backoff | ✅ 🧪 | [`hp_comm.cpp`](../main/hp_comm.cpp), [`logic/uart_plan.hpp`](../main/logic/uart_plan.hpp), [`logic/detect_backoff.hpp`](../main/logic/detect_backoff.hpp) |
@@ -363,8 +363,9 @@ The device is a **stationary, mains-powered bridge** that must never need a huma
   it *snapshotted*. Writers now commit only the fields they **own**, via non-allocating host-tested
   patches, so a detection sweep cannot revert a credential change the user was already told
   succeeded. An NVS write failure **reaches the user** (`500`, no reboot) instead of reading as
-  saved. The service blob, link blob and exact RAM successor are fully allocated/serialized before
-  the first NVS write; after that boundary only checked writes and a noexcept move remain.
+  saved. The save sequence ([`logic/config_transaction.hpp`](../main/logic/config_transaction.hpp))
+  allocates/serializes its blobs and the exact RAM successor before the first NVS write; after that
+  boundary only checked writes and a noexcept move remain. An X10A `/set_hp` writes only the link entry.
 - **✅ 🧪 ICMP gateway watchdog.** A missed deauth leaves a ghost association — IP held, TCP timing
   out, no disconnect event ever. A background task probes the gateway and re-associates only for the
   proven ghost case. The probe is **three-valued**
@@ -775,11 +776,11 @@ Docker, in seconds ([`test/README.md`](../test/README.md)).
   reproducible; it is not a claim of open-ended fuzzing.
 - **The host runtime scenarios** — [`run-runtime-integration-tests.sh`](../scripts/run-runtime-integration-tests.sh)
   call selected production config serializers, X10A/Modbus parsers, MQTT publish gating and bounded
-  body/chunk logic through host-only fake time, storage, serial, TCP, broker and HTTP adapters. Eight
-  scenarios model failed persistence, reconstruction, allocation failure, interleavings,
-  fragmentation and reconnects. Three more use real POSIX `socketpair`/`recv` traffic: a joined
+  body/chunk logic through host-only fake time, storage, serial, TCP, broker and HTTP adapters. Ten
+  scenarios model failed persistence and config save boundaries, reconstruction, allocation failure,
+  interleavings, fragmentation and reconnects. Three more use real POSIX `socketpair`/`recv` traffic: a joined
   `shutdown(SHUT_RDWR)` deadline aborts trickling headers and bodies, and a leftover body is settled
-  only within its cap and budget. These eleven do not execute ESP-IDF target glue, real NVS or the
+  only within its cap and budget. These thirteen do not execute ESP-IDF target glue, real NVS or the
   production MCP/HTTP/MQTT stacks. Target compilation and hardware evidence remain separate gates.
 - **The browser loop** — the deterministic DOM suite covers interaction contracts, while
   [`run-browser-render-tests.sh`](../scripts/run-browser-render-tests.sh) opens the assembled UI in a
@@ -793,7 +794,7 @@ Docker, in seconds ([`test/README.md`](../test/README.md)).
 | Wire decode | `crc`, `convert`, `registers`, `value_def`, `error_codes`, `hexdump`, `raw_capture`, `hp_probe` |
 | Value adjudication | `availability`, `conv_override`, `label_override`, `fault_state`, `ou_stale`, `lwt_select`, `cop_scope`, `feature_gate`, `profile_view` |
 | Detection | `detect`, `detect_backoff`, `detect_identity`, `uart_plan` |
-| Config & board | `config_model`, `config_store`, `board_pins`, `board_presets`, `env3`, `ui_lang` |
+| Config & board | `config_model`, `config_store`, `config_transaction`, `board_pins`, `board_presets`, `env3`, `ui_lang` |
 | MQTT / HA | `discovery`, `ha_device`, `mqtt_base`, `mqtt_cleanup`, `mqtt_group`, `mqtt_uri`, `heartbeat`, `homehub_map`, `modbus`, `weather_mqtt` |
 | HTTP | `http_body`, `http_request`, `payload_complete`, `http_surface`, `query_flag`, `captive`, `json`, `mcp`, `chunk_sink`, `redact` |
 | OTA & boot | `health_gate`, `http_deadline`, `version_cmp`, `ota_manifest`, `ota_changelog_range`, `ota_hil_feed`, `ota_channel`, `ota_transport`, `boot_guard`, `crashinfo`, `bootlog`, `reset_reason`, `heap_watchdog` |

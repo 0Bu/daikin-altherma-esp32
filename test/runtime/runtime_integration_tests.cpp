@@ -34,8 +34,10 @@ public:
         }                                                                                          \
     } while (false)
 
-daik::ConfigBlob config_named(std::string name) {
-    daik::ConfigBlob config;
+// A configured, previously detected installation as config_load would hand it over. The revision is
+// the live one every snapshot of it carries.
+daik::Config config_named(std::string name) {
+    daik::Config config;
     config.wifi_ssid              = std::move(name);
     config.wifi_pass              = "secret";
     config.mqtt_uri               = "mqtt://broker.local";
@@ -46,88 +48,111 @@ daik::ConfigBlob config_named(std::string name) {
     config.mb_discovery_done      = true;
     config.diagnostics_enabled    = true;
     config.diagnostics_generation = 7;
+    config.env3_enabled           = true;
+    config.rx_pin                 = 44;
+    config.tx_pin                 = 43;
+    config.proto                  = daik::Protocol::I;
+    config.x10a_identity_fp       = 1;
+    config.runtime_revision       = 1;
     return config;
 }
 
+// First durable state of a device: both entries written by the production service save.
+void seed_durable(ConfigCoordinator& coordinator) {
+    CHECK_EQ(coordinator.save(coordinator.snapshot(), /*owns_link=*/false).result,
+             daik::ConfigSaveResult::Saved);
+}
+
+// The /set_hp X10A edit as the handler derives it: the parsed patch applied to a snapshot.
+daik::Config with_pins(daik::Config snapshot, int rx, int tx) {
+    daik::SetHpX10aPatch patch;
+    patch.rx_sent = true;
+    patch.rx      = rx;
+    patch.tx_sent = true;
+    patch.tx      = tx;
+    bool reset    = false;
+    CHECK(daik::set_hp_apply_x10a(snapshot, patch, reset));
+    return snapshot;
+}
+
 void test_nvs_atomic_save_reboot_and_failures(bool mutate_atomicity) {
-    AllocationFailpoint      allocations;
-    FakeNvs                  nvs(mutate_atomicity);
-    ConfigPersistenceAdapter running(nvs, allocations);
+    FakeNvs           nvs(mutate_atomicity);
+    ConfigCoordinator running(nvs, config_named("original"));
+    seed_durable(running);
 
-    const daik::ConfigBlob original = config_named("original");
-    CHECK_EQ(running.save_config(original), NvsResult::Ok);
-
-    // Re-create the adapter: only committed bytes, parsed by the production decoder, cross reboot.
-    ConfigPersistenceAdapter rebooted(nvs, allocations);
+    // Re-create the adapter: only durable bytes, parsed by the production decoder, cross reboot.
+    ConfigPersistenceAdapter rebooted(nvs);
     daik::ConfigBlob         loaded;
     CHECK(rebooted.load_config(loaded));
     CHECK_EQ(loaded.wifi_ssid, std::string("original"));
     CHECK_EQ(loaded.diagnostics_generation, uint32_t{7});
 
-    const daik::ConfigBlob replacement = config_named("replacement");
+    // A failed set leaves the previous entry in place, in RAM and after a reboot. There is no
+    // second failure point: nvs_commit is a no-op on IDF v6.1, so the set is the whole write.
+    daik::Config replacement = running.snapshot();
+    replacement.wifi_ssid    = "new-net";
     nvs.fail_next_set_no_space();
-    CHECK_EQ(rebooted.save_config(replacement), NvsResult::NoSpace);
-    ConfigPersistenceAdapter after_full_reboot(nvs, allocations);
-    CHECK(after_full_reboot.load_config(loaded));
+    const daik::ConfigSaveOutcome failed = running.save(replacement, false);
+    CHECK_EQ(failed.result, daik::ConfigSaveResult::Failed);
+    CHECK_EQ(failed.failed, daik::ConfigSaveStep::ServiceWrite);
+    CHECK_EQ(running.snapshot().wifi_ssid, std::string("original"));
+    ConfigPersistenceAdapter after_failure(nvs);
+    CHECK(after_failure.load_config(loaded));
     CHECK_EQ(loaded.wifi_ssid, std::string("original"));
 
-    nvs.fail_next_commit();
-    CHECK_EQ(after_full_reboot.save_config(replacement), NvsResult::CommitFailed);
-    ConfigPersistenceAdapter after_commit_failure_reboot(nvs, allocations);
-    CHECK(after_commit_failure_reboot.load_config(loaded));
-    CHECK_EQ(loaded.wifi_ssid, std::string("original"));
-
-    CHECK_EQ(after_commit_failure_reboot.save_config(replacement), NvsResult::Ok);
-    ConfigPersistenceAdapter final_reboot(nvs, allocations);
+    CHECK_EQ(running.save(replacement, false).result, daik::ConfigSaveResult::Saved);
+    ConfigPersistenceAdapter final_reboot(nvs);
     CHECK(final_reboot.load_config(loaded));
-    CHECK_EQ(loaded.wifi_ssid, std::string("replacement"));
+    CHECK_EQ(loaded.wifi_ssid, std::string("new-net"));
 
-    daik::LinkBlob link{44, 43, 'I', 0x12345678u};
-    CHECK_EQ(final_reboot.save_link(link), NvsResult::Ok);
+    const DetectedLinkCommit detected = running.commit_detected_link(
+        running.snapshot().runtime_revision, 16, 17, daik::Protocol::S, 0x12345678u);
+    CHECK(detected.committed);
+    CHECK(detected.saved);
     daik::LinkBlob loaded_link;
     CHECK(final_reboot.load_link(loaded_link));
-    CHECK_EQ(loaded_link.rx_pin, 44);
-    CHECK_EQ(loaded_link.tx_pin, 43);
+    CHECK_EQ(loaded_link.rx_pin, 16);
+    CHECK_EQ(loaded_link.tx_pin, 17);
+    CHECK_EQ(loaded_link.proto, 'S');
     CHECK_EQ(loaded_link.identity_fp, uint32_t{0x12345678u});
 }
 
 void test_config_detection_http_interleaving() {
-    AllocationFailpoint      allocations;
-    FakeNvs                  nvs;
-    ConfigPersistenceAdapter persistence(nvs, allocations);
-    RuntimeConfigSnapshot    initial{config_named("before"), daik::LinkBlob{44, 43, 'I', 1}, 1};
-    CHECK_EQ(persistence.save_config(initial.service), NvsResult::Ok);
-    CHECK_EQ(persistence.save_link(initial.link), NvsResult::Ok);
-    ConfigCoordinator coordinator(persistence, initial);
+    FakeNvs           nvs;
+    ConfigCoordinator coordinator(nvs, config_named("before"));
+    seed_durable(coordinator);
+    const uint32_t initial_revision = coordinator.snapshot().runtime_revision;
 
-    RuntimeConfigSnapshot stale_http_snapshot = coordinator.snapshot();
-    stale_http_snapshot.service.mqtt_uri      = "mqtts://new-broker.local";
+    daik::Config stale_http_snapshot = coordinator.snapshot();
+    stale_http_snapshot.mqtt_uri     = "mqtts://new-broker.local";
 
-    VirtualScheduler scheduler;
-    bool             detection_saved = false;
-    bool             model_saved     = false;
-    bool             http_saved      = false;
+    VirtualScheduler        scheduler;
+    DetectedLinkCommit      detection;
+    bool                    model_saved = false;
+    daik::ConfigSaveOutcome http;
     scheduler.after(10, [&] {
-        detection_saved =
-            coordinator.commit_detected_link(1, daik::LinkBlob{1, 2, 'S', 0xAABBCCDDu});
+        detection = coordinator.commit_detected_link(initial_revision, 1, 2, daik::Protocol::S,
+                                                     0xAABBCCDDu);
     });
-    scheduler.after(
-        15, [&] { model_saved = coordinator.commit_detected_model(2, "altherma3_r_erga", true); });
-    scheduler.after(20, [&] { http_saved = coordinator.save_http(stale_http_snapshot, false); });
+    scheduler.after(15, [&] {
+        model_saved = coordinator.commit_detected_model(detection.revision, "altherma3_r_erga");
+    });
+    scheduler.after(20, [&] { http = coordinator.save(stale_http_snapshot, false); });
     scheduler.run();
 
-    CHECK(detection_saved);
+    CHECK(detection.committed);
+    CHECK(detection.saved);
     CHECK(model_saved);
-    CHECK(http_saved);
+    CHECK_EQ(http.result, daik::ConfigSaveResult::Saved);
     CHECK_EQ(scheduler.now_ms(), uint64_t{20});
-    CHECK_EQ(coordinator.snapshot().service.mqtt_uri, std::string("mqtts://new-broker.local"));
-    CHECK_EQ(coordinator.snapshot().link.rx_pin, 1);
-    CHECK_EQ(coordinator.snapshot().link.tx_pin, 2);
-    CHECK_EQ(coordinator.snapshot().link.proto, 'S');
+    CHECK_EQ(coordinator.snapshot().mqtt_uri, std::string("mqtts://new-broker.local"));
+    CHECK_EQ(coordinator.snapshot().rx_pin, 1);
+    CHECK_EQ(coordinator.snapshot().tx_pin, 2);
+    CHECK(coordinator.snapshot().proto == daik::Protocol::S);
     CHECK_EQ(coordinator.snapshot().profile, std::string("altherma3_r_erga"));
     CHECK_EQ(coordinator.snapshot().fp_valid, true);
 
-    ConfigPersistenceAdapter rebooted(nvs, allocations);
+    ConfigPersistenceAdapter rebooted(nvs);
     daik::ConfigBlob         service;
     daik::LinkBlob           link;
     CHECK(rebooted.load_config(service));
@@ -137,52 +162,270 @@ void test_config_detection_http_interleaving() {
 
     // Case B: Save-before-detection (HTTP commits first, then detection commits)
     {
-        RuntimeConfigSnapshot snap = coordinator.snapshot();
-        snap.service.wifi_ssid     = "new-net";
-        CHECK(coordinator.save_http(snap, false));
-        CHECK_EQ(coordinator.snapshot().service.wifi_ssid, std::string("new-net"));
+        daik::Config snap = coordinator.snapshot();
+        snap.wifi_ssid    = "new-net";
+        CHECK_EQ(coordinator.save(snap, false).result, daik::ConfigSaveResult::Saved);
+        CHECK_EQ(coordinator.snapshot().wifi_ssid, std::string("new-net"));
         CHECK_EQ(coordinator.snapshot().profile, std::string("altherma3_r_erga"));
         CHECK_EQ(coordinator.snapshot().fp_valid, true);
 
         // Detection re-commits with new model
-        const uint32_t cur_rev = coordinator.snapshot().revision;
-        CHECK(coordinator.commit_detected_model(cur_rev, "altherma3_geo", true));
+        const uint32_t cur_rev = coordinator.snapshot().runtime_revision;
+        CHECK(coordinator.commit_detected_model(cur_rev, "altherma3_geo"));
         CHECK_EQ(coordinator.snapshot().profile, std::string("altherma3_geo"));
         CHECK_EQ(coordinator.snapshot().fp_valid, true);
-        CHECK_EQ(coordinator.snapshot().service.wifi_ssid, std::string("new-net"));
+        CHECK_EQ(coordinator.snapshot().wifi_ssid, std::string("new-net"));
     }
 
     // Case C (CFG-04): an X10A /set_hp owns the link but derived its model fields from its
     // snapshot. A detection commit after that snapshot makes the save Stale: nothing is written and
     // the detected link and model survive. The handler's retry from a fresh snapshot then commits
-    // its pins without reverting the model.
+    // its pins without reverting the model, and writes only the link entry (CFG-03).
     {
-        RuntimeConfigSnapshot stale_hp = coordinator.snapshot();
-        stale_hp.link                  = daik::LinkBlob{10, 11, 'I', 0x99887766u};
-        CHECK(coordinator.commit_detected_link(stale_hp.revision,
-                                               daik::LinkBlob{3, 4, 'I', 0x55667788u}));
-        CHECK(coordinator.commit_detected_model(coordinator.snapshot().revision, "altherma3_r_erga",
-                                                true));
-        CHECK(stale_hp.revision != coordinator.snapshot().revision);
-        CHECK(!coordinator.save_http(stale_hp, /*owns_link=*/true));
-        CHECK_EQ(coordinator.snapshot().link.rx_pin, 3);
-        CHECK_EQ(coordinator.snapshot().link.tx_pin, 4);
+        const daik::Config       stale_hp   = with_pins(coordinator.snapshot(), 10, 11);
+        const DetectedLinkCommit overtaking = coordinator.commit_detected_link(
+            stale_hp.runtime_revision, 3, 4, daik::Protocol::I, 0x55667788u);
+        CHECK(overtaking.committed);
+        CHECK(coordinator.commit_detected_model(overtaking.revision, "altherma3_r_erga"));
+        CHECK(stale_hp.runtime_revision != coordinator.snapshot().runtime_revision);
+        const size_t sets_before = nvs.set_calls();
+        CHECK_EQ(coordinator.save(stale_hp, /*owns_link=*/true).result,
+                 daik::ConfigSaveResult::Stale);
+        CHECK_EQ(nvs.set_calls(), sets_before);
+        CHECK_EQ(coordinator.snapshot().rx_pin, 3);
+        CHECK_EQ(coordinator.snapshot().tx_pin, 4);
         CHECK_EQ(coordinator.snapshot().profile, std::string("altherma3_r_erga"));
         CHECK_EQ(coordinator.snapshot().fp_valid, true);
-        ConfigPersistenceAdapter after_refusal(nvs, allocations);
+        ConfigPersistenceAdapter after_refusal(nvs);
         daik::LinkBlob           refused_link;
         CHECK(after_refusal.load_link(refused_link));
         CHECK_EQ(refused_link.rx_pin, 3);
         CHECK_EQ(refused_link.identity_fp, uint32_t{0x55667788u});
 
-        RuntimeConfigSnapshot fresh_hp = coordinator.snapshot();
-        fresh_hp.link                  = daik::LinkBlob{10, 11, 'I', 0x99887766u};
-        CHECK(coordinator.save_http(fresh_hp, /*owns_link=*/true));
-        CHECK_EQ(coordinator.snapshot().link.rx_pin, 10);
-        CHECK_EQ(coordinator.snapshot().link.tx_pin, 11);
-        CHECK_EQ(coordinator.snapshot().link.proto, 'I');
+        const daik::Config fresh_hp = with_pins(coordinator.snapshot(), 10, 11);
+        const size_t       cfg_sets = nvs.sets(daik::CONFIG_KEY_SERVICE);
+        CHECK_EQ(coordinator.save(fresh_hp, /*owns_link=*/true).result,
+                 daik::ConfigSaveResult::Saved);
+        CHECK_EQ(nvs.sets(daik::CONFIG_KEY_SERVICE), cfg_sets);
+        CHECK_EQ(coordinator.snapshot().rx_pin, 10);
+        CHECK_EQ(coordinator.snapshot().tx_pin, 11);
+        CHECK(coordinator.snapshot().proto == daik::Protocol::I);
         CHECK_EQ(coordinator.snapshot().profile, std::string("altherma3_r_erga"));
         CHECK_EQ(coordinator.snapshot().fp_valid, true);
+    }
+}
+
+void test_config_save_failure_boundaries() {
+    // Service save, "cfg" write fails: the first write is the only one attempted, nothing durable
+    // and nothing in RAM changes, and a reboot finds the previous entries.
+    {
+        FakeNvs           nvs;
+        ConfigCoordinator coordinator(nvs, config_named("original"));
+        seed_durable(coordinator);
+        const size_t link_sets = nvs.sets(daik::CONFIG_KEY_LINK);
+
+        daik::Config request = coordinator.snapshot();
+        request.wifi_ssid    = "new-net";
+        nvs.fail_next_set_no_space(daik::CONFIG_KEY_SERVICE);
+        const daik::ConfigSaveOutcome out = coordinator.save(request, false);
+        CHECK_EQ(out.result, daik::ConfigSaveResult::Failed);
+        CHECK_EQ(out.failed, daik::ConfigSaveStep::ServiceWrite);
+        CHECK_EQ(nvs.sets(daik::CONFIG_KEY_LINK), link_sets);
+        CHECK_EQ(coordinator.snapshot().wifi_ssid, std::string("original"));
+        CHECK_EQ(coordinator.snapshot().runtime_revision, request.runtime_revision);
+        daik::ConfigBlob service;
+        CHECK(ConfigPersistenceAdapter(nvs).load_config(service));
+        CHECK_EQ(service.wifi_ssid, std::string("original"));
+    }
+
+    // Service save, the best-effort "link" write fails after "cfg" landed: the request is saved.
+    {
+        FakeNvs           nvs;
+        ConfigCoordinator coordinator(nvs, config_named("original"));
+        seed_durable(coordinator);
+        daik::Config request = coordinator.snapshot();
+        request.wifi_ssid    = "new-net";
+        nvs.fail_next_set_no_space(daik::CONFIG_KEY_LINK);
+        const daik::ConfigSaveOutcome out = coordinator.save(request, false);
+        CHECK_EQ(out.result, daik::ConfigSaveResult::Saved);
+        CHECK_EQ(out.failed, daik::ConfigSaveStep::LinkWrite);
+        CHECK_EQ(coordinator.snapshot().wifi_ssid, std::string("new-net"));
+        daik::ConfigBlob         service;
+        daik::LinkBlob           link;
+        ConfigPersistenceAdapter rebooted(nvs);
+        CHECK(rebooted.load_config(service));
+        CHECK(rebooted.load_link(link));
+        CHECK_EQ(service.wifi_ssid, std::string("new-net"));
+        CHECK_EQ(link.rx_pin, 44);
+    }
+
+    // X10A save: only the link entry is ever set. The armed "cfg" failure stays unspent, which is
+    // what proves no "cfg" write was attempted; the next service save then trips it.
+    {
+        FakeNvs           nvs;
+        ConfigCoordinator coordinator(nvs, config_named("original"));
+        seed_durable(coordinator);
+        const size_t cfg_sets = nvs.sets(daik::CONFIG_KEY_SERVICE);
+        nvs.fail_next_set_no_space(daik::CONFIG_KEY_SERVICE);
+
+        const daik::ConfigSaveOutcome out =
+            coordinator.save(with_pins(coordinator.snapshot(), 10, 11), /*owns_link=*/true);
+        CHECK_EQ(out.result, daik::ConfigSaveResult::Saved);
+        CHECK_EQ(out.failed, daik::ConfigSaveStep::None);
+        CHECK_EQ(nvs.sets(daik::CONFIG_KEY_SERVICE), cfg_sets);
+        CHECK(nvs.failure_pending());
+        CHECK_EQ(coordinator.snapshot().rx_pin, 10);
+        daik::LinkBlob link;
+        CHECK(ConfigPersistenceAdapter(nvs).load_link(link));
+        CHECK_EQ(link.rx_pin, 10);
+        CHECK_EQ(link.tx_pin, 11);
+
+        CHECK_EQ(coordinator.save(coordinator.snapshot(), false).result,
+                 daik::ConfigSaveResult::Failed);
+        CHECK(!nvs.failure_pending());
+    }
+
+    // X10A save, the link write fails: no side effect at all. Nothing durable, no "cfg" attempt,
+    // RAM and the revision exactly as they were, so a retry starts from the same snapshot.
+    {
+        FakeNvs           nvs;
+        ConfigCoordinator coordinator(nvs, config_named("original"));
+        seed_durable(coordinator);
+        const size_t       cfg_sets = nvs.sets(daik::CONFIG_KEY_SERVICE);
+        const daik::Config before   = coordinator.snapshot();
+        nvs.fail_next_set_no_space(daik::CONFIG_KEY_LINK);
+
+        const daik::ConfigSaveOutcome out =
+            coordinator.save(with_pins(before, 10, 11), /*owns_link=*/true);
+        CHECK_EQ(out.result, daik::ConfigSaveResult::Failed);
+        CHECK_EQ(out.failed, daik::ConfigSaveStep::LinkWrite);
+        CHECK_EQ(nvs.sets(daik::CONFIG_KEY_SERVICE), cfg_sets);
+        CHECK_EQ(coordinator.snapshot().rx_pin, 44);
+        CHECK_EQ(coordinator.snapshot().tx_pin, 43);
+        CHECK_EQ(coordinator.snapshot().runtime_revision, before.runtime_revision);
+        daik::LinkBlob link;
+        CHECK(ConfigPersistenceAdapter(nvs).load_link(link));
+        CHECK_EQ(link.rx_pin, 44);
+        CHECK_EQ(link.tx_pin, 43);
+    }
+
+    // CFG-03/a: config_load sanitised the RAM config without persisting it (ENV III fell back to
+    // disabled, its stored mapping kept for repair). An X10A pin repair must not write that RAM
+    // view over the stored service settings, and a reboot afterwards must still find them.
+    {
+        FakeNvs           nvs;
+        ConfigCoordinator coordinator(nvs, config_named("original"));
+        seed_durable(coordinator);
+        const auto cfg_before = nvs.get(daik::CONFIG_KEY_SERVICE);
+        CHECK(cfg_before.has_value());
+        coordinator.sanitize_ram_only([](daik::Config& live) { live.env3_enabled = false; });
+        CHECK(!coordinator.snapshot().env3_enabled);
+
+        CHECK_EQ(coordinator.save(with_pins(coordinator.snapshot(), 10, 11), true).result,
+                 daik::ConfigSaveResult::Saved);
+        CHECK(nvs.get(daik::CONFIG_KEY_SERVICE) == cfg_before); // byte-identical
+        ConfigPersistenceAdapter rebooted(nvs);
+        daik::ConfigBlob         service;
+        daik::LinkBlob           link;
+        CHECK(rebooted.load_config(service));
+        CHECK(rebooted.load_link(link));
+        CHECK(service.env3_enabled);
+        CHECK_EQ(link.rx_pin, 10);
+        CHECK_EQ(link.tx_pin, 11);
+    }
+
+    // Detection's link commit: a failed cache write still applies the proven link to this session
+    // and says so; a reboot finds the previous cache, which the identity check then rejects.
+    {
+        FakeNvs           nvs;
+        ConfigCoordinator coordinator(nvs, config_named("original"));
+        seed_durable(coordinator);
+        nvs.fail_next_set_no_space(daik::CONFIG_KEY_LINK);
+        const DetectedLinkCommit out = coordinator.commit_detected_link(
+            coordinator.snapshot().runtime_revision, 16, 17, daik::Protocol::S, 0x77u);
+        CHECK(out.committed);
+        CHECK(!out.saved);
+        CHECK_EQ(coordinator.snapshot().rx_pin, 16);
+        CHECK(coordinator.snapshot().proto == daik::Protocol::S);
+        daik::LinkBlob link;
+        CHECK(ConfigPersistenceAdapter(nvs).load_link(link));
+        CHECK_EQ(link.rx_pin, 44);
+        CHECK_EQ(link.identity_fp, uint32_t{1});
+    }
+}
+
+void test_config_transactions_allocate_nothing_after_first_write(bool mutate_late_allocation) {
+    // The global allocation functions of this binary count every allocation while a transaction's
+    // store is alive. Whatever can throw must happen before the first durable write, so nothing may
+    // allocate once it has begun — on success or on any failure that follows it. Staging must have
+    // allocated, otherwise a zero would only show that the counter is blind.
+    auto expect_quiet = [&](const ConfigCoordinator& coordinator, size_t writes) {
+        const TransactionWitness& witness = coordinator.witness();
+        CHECK_EQ(witness.writes, writes);
+        CHECK(witness.staging_allocations > 0);
+        CHECK_EQ(witness.late_allocations, size_t{0});
+    };
+    struct Scenario {
+        FakeNvs           nvs;
+        ConfigCoordinator coordinator;
+        explicit Scenario(bool allocate_late)
+            : coordinator(nvs, config_named("original"), allocate_late) {}
+        daik::Config service_request() const {
+            daik::Config request = coordinator.snapshot();
+            request.wifi_ssid    = std::string(40, 'x'); // past the small-string buffer
+            return request;
+        }
+    };
+
+    { // service save: success
+        Scenario s(mutate_late_allocation);
+        CHECK_EQ(s.coordinator.save(s.service_request(), false).result,
+                 daik::ConfigSaveResult::Saved);
+        expect_quiet(s.coordinator, 2);
+    }
+    { // service save: the "cfg" write fails
+        Scenario s(mutate_late_allocation);
+        s.nvs.fail_next_set_no_space(daik::CONFIG_KEY_SERVICE);
+        CHECK_EQ(s.coordinator.save(s.service_request(), false).result,
+                 daik::ConfigSaveResult::Failed);
+        expect_quiet(s.coordinator, 1);
+    }
+    { // service save: the "link" write fails after "cfg" landed
+        Scenario s(mutate_late_allocation);
+        s.nvs.fail_next_set_no_space(daik::CONFIG_KEY_LINK);
+        CHECK_EQ(s.coordinator.save(s.service_request(), false).result,
+                 daik::ConfigSaveResult::Saved);
+        expect_quiet(s.coordinator, 2);
+    }
+    { // X10A save: success
+        Scenario s(mutate_late_allocation);
+        CHECK_EQ(s.coordinator.save(with_pins(s.coordinator.snapshot(), 10, 11), true).result,
+                 daik::ConfigSaveResult::Saved);
+        expect_quiet(s.coordinator, 1);
+    }
+    { // X10A save: the "link" write fails
+        Scenario s(mutate_late_allocation);
+        s.nvs.fail_next_set_no_space(daik::CONFIG_KEY_LINK);
+        CHECK_EQ(s.coordinator.save(with_pins(s.coordinator.snapshot(), 10, 11), true).result,
+                 daik::ConfigSaveResult::Failed);
+        expect_quiet(s.coordinator, 1);
+    }
+    { // detected link: success
+        Scenario                 s(mutate_late_allocation);
+        const DetectedLinkCommit out = s.coordinator.commit_detected_link(
+            s.coordinator.snapshot().runtime_revision, 16, 17, daik::Protocol::S, 0x77u);
+        CHECK(out.committed);
+        CHECK(out.saved);
+        expect_quiet(s.coordinator, 1);
+    }
+    { // detected link: the cache write fails but the session still takes the link
+        Scenario s(mutate_late_allocation);
+        s.nvs.fail_next_set_no_space(daik::CONFIG_KEY_LINK);
+        const DetectedLinkCommit out = s.coordinator.commit_detected_link(
+            s.coordinator.snapshot().runtime_revision, 16, 17, daik::Protocol::S, 0x77u);
+        CHECK(out.committed);
+        CHECK(!out.saved);
+        expect_quiet(s.coordinator, 1);
     }
 }
 
@@ -481,8 +724,20 @@ struct TestCase {
 
 } // namespace
 
+// Count every allocation of this binary for the allocation witness in fake_runtime.hpp. Counting is
+// per thread and only while a transaction's store is armed, so nothing else is affected; these are
+// the only global allocation functions the program defines.
+void* operator new(std::size_t size) {
+    runtime_test::allocation_trap_hit();
+    if (void* memory = std::malloc(size != 0 ? size : 1)) return memory;
+    throw std::bad_alloc();
+}
+void operator delete(void* memory) noexcept { std::free(memory); }
+void operator delete(void* memory, std::size_t) noexcept { std::free(memory); }
+
 int main(int argc, char** argv) {
     bool mutate_atomicity            = false;
+    bool mutate_late_allocation      = false;
     bool mutate_http_header_deadline = false;
     bool mutate_http_body_deadline   = false;
     bool mutate_http_discard         = false;
@@ -491,6 +746,8 @@ int main(int argc, char** argv) {
         const std::string_view arg(argv[i]);
         if (arg == "--mutate-nvs-atomicity")
             mutate_atomicity = true;
+        else if (arg == "--mutate-config-late-allocation")
+            mutate_late_allocation = true;
         else if (arg == "--mutate-http-header-deadline")
             mutate_http_header_deadline = true;
         else if (arg == "--mutate-http-body-deadline")
@@ -510,6 +767,11 @@ int main(int argc, char** argv) {
          [=] { test_nvs_atomic_save_reboot_and_failures(mutate_atomicity); }},
         {"config detection and HTTP controlled interleaving",
          test_config_detection_http_interleaving},
+        {"config save failure boundaries", test_config_save_failure_boundaries},
+        {"config transactions allocate nothing after the first write",
+         [=] {
+             test_config_transactions_allocate_nothing_after_first_write(mutate_late_allocation);
+         }},
         {"OOM-safe HTTP and periodic task", test_oom_http_and_task_guarantees},
         {"X10A fragmented, noisy and NAK replay", test_x10a_fragment_noise_and_nak},
         {"Modbus fragmented, exception and desync", test_modbus_fragment_exception_and_desync},

@@ -98,6 +98,7 @@
 #include "logic/query_flag.hpp"
 #include "logic/redact.hpp"
 #include "logic/config_store.hpp"
+#include "logic/config_transaction.hpp"
 #include "logic/env3.hpp"
 #include "logic/mcp.hpp"
 #include "logic/http_surface.hpp"
@@ -1744,6 +1745,485 @@ static void test_config_model() {
     CHECK(live.rx_pin == 16 && live.tx_pin == 17); // model patch leaves the link alone
     CHECK(live.wifi_ssid == "new-net");            // ...and the credentials
     CHECK(live.mqtt_uri == "mqtts://broker.lan");
+}
+
+// A store that records every write attempt and lets one key fail with a chosen code. A failed write
+// leaves the key's previous bytes, which is what NVS does on IDF v6.1 (write-through, no-op
+// commit).
+struct ConfigTxStore {
+    std::map<std::string, std::vector<uint8_t>> durable;
+    std::map<std::string, int>                  fail_with;
+    std::vector<std::string>                    attempts;
+
+    int write_blob(const char* key, const uint8_t* data, size_t len) {
+        attempts.emplace_back(key);
+        const auto failing = fail_with.find(key);
+        if (failing != fail_with.end()) return failing->second;
+        durable[key].assign(data, data + len);
+        return 0;
+    }
+    // The state a fresh boot would find after `c` was last saved.
+    void seed(const Config& c) {
+        durable[CONFIG_KEY_SERVICE] = config_blob_serialize(config_blob_from(c));
+        durable[CONFIG_KEY_LINK]    = link_blob_serialize(
+            LinkBlob{c.rx_pin, c.tx_pin, static_cast<char>(c.proto), c.x10a_identity_fp});
+    }
+};
+
+// Everything a save may touch in the RAM config, as comparable bytes: the persisted fields of both
+// blobs, the revision and the session-only model.
+static std::vector<uint8_t> config_tx_state(const Config& c) {
+    std::vector<uint8_t>       v    = config_blob_serialize(config_blob_from(c));
+    const std::vector<uint8_t> link = link_blob_serialize(
+        LinkBlob{c.rx_pin, c.tx_pin, static_cast<char>(c.proto), c.x10a_identity_fp});
+    v.insert(v.end(), link.begin(), link.end());
+    for (int shift = 0; shift < 32; shift += 8)
+        v.push_back(static_cast<uint8_t>(c.runtime_revision >> shift));
+    v.insert(v.end(), c.profile.begin(), c.profile.end());
+    v.push_back(c.fp_valid ? 1 : 0);
+    return v;
+}
+
+static Config config_tx_live() {
+    Config c;
+    c.wifi_ssid        = "home";
+    c.wifi_pass        = "secret-pass";
+    c.mqtt_uri         = "mqtt://broker.local";
+    c.syslog_host      = "logs.lan";
+    c.ntp_server       = "pool.ntp.org";
+    c.mb_host          = "homehub.local";
+    c.env3_enabled     = true;
+    c.rx_pin           = 44;
+    c.tx_pin           = 43;
+    c.proto            = Protocol::I;
+    c.x10a_identity_fp = 0x11111111u;
+    c.runtime_revision = 5;
+    return c;
+}
+
+static bool config_tx_attempts_are(const ConfigTxStore&               s,
+                                   std::initializer_list<const char*> keys) {
+    if (s.attempts.size() != keys.size()) return false;
+    size_t i = 0;
+    for (const char* key : keys)
+        if (s.attempts[i++] != key) return false;
+    return true;
+}
+
+static ConfigBlob config_tx_durable_service(const ConfigTxStore& s) {
+    ConfigBlob  b;
+    const auto& raw = s.durable.at(CONFIG_KEY_SERVICE);
+    CHECK(config_blob_deserialize(raw.data(), raw.size(), b));
+    return b;
+}
+
+static LinkBlob config_tx_durable_link(const ConfigTxStore& s) {
+    LinkBlob    l;
+    const auto& raw = s.durable.at(CONFIG_KEY_LINK);
+    CHECK(link_blob_deserialize(raw.data(), raw.size(), l));
+    return l;
+}
+
+// logic/config_transaction.hpp — the save transactions config.cpp executes over NVS, here over a
+// recording store. Each case asserts the result, the RAM config, the durable entries and the write
+// attempts together, because a failure boundary is only proven by all four at once.
+static void test_config_transaction() {
+    CHECK(std::string(CONFIG_KEY_SERVICE) == "cfg"); // config_load reads these exact keys
+    CHECK(std::string(CONFIG_KEY_LINK) == "link");
+
+    // The revision after one commit never lands on zero, the "no revision" a failed commit reports.
+    CHECK(config_next_revision(0) == 1);
+    CHECK(config_next_revision(41) == 42);
+    CHECK(config_next_revision(UINT32_MAX) == 1);
+
+    // config_blob_from maps every persisted field and carries nothing else: a field left out here
+    // would be silently dropped by every service save.
+    {
+        Config c;
+        c.wifi_ssid                      = "ExampleNet";
+        c.wifi_pass                      = "pass";
+        c.wifi_ssid_backup               = "ssid-bak";
+        c.wifi_pass_backup               = "pass-bak";
+        c.wifi_rollback_active           = true;
+        c.wifi_rolled_back               = true;
+        c.mqtt_uri                       = "mqtt://u";
+        c.mqtt_user                      = "mu";
+        c.mqtt_pass                      = "mp";
+        c.mqtt_base                      = "base/topic";
+        c.ref_temp_name                  = "Living room";
+        c.ref_temp_topic                 = "t/room";
+        c.ref_temp_path                  = "$.temp";
+        c.ref_temp_time_path             = "$.ts";
+        c.ref_temp_setpoint_topic        = "t/set";
+        c.ref_temp_time_topic            = "t/time";
+        c.ref_temp_fixed_setpoint_tenths = 215;
+        c.ref_temp_setpoint_path         = "$.set";
+        c.ref_temp_enabled_path          = "$.on";
+        c.ref_temp_hvac_mode_path        = "$.mode";
+        c.ref_temp_max_age_s             = 321;
+        c.circulation_name               = "DHW circulation pump";
+        c.circulation_topic              = "t/pump";
+        c.circulation_power_path         = "$.w";
+        c.circulation_time_path          = "$.pts";
+        c.circulation_max_age_s          = 99;
+        c.circulation_on_tenths_w        = 111;
+        c.circulation_off_tenths_w       = 22;
+        c.circulation_confirm_s          = 33;
+        c.weather_enabled                = true;
+        c.weather_latitude_e6            = 12345678;
+        c.weather_longitude_e6           = 23456789;
+        c.diagnostics_enabled            = true;
+        c.diagnostics_generation         = 17;
+        c.env3_enabled                   = true;
+        c.env3_sda                       = 7;
+        c.env3_scl                       = 8;
+        c.board_preset_id                = BoardPresetId::M5StackAtomS3Lite;
+        c.board_user_set                 = true;
+        c.syslog_host                    = "sl";
+        c.syslog_port                    = 1514;
+        c.ntp_server                     = "ntp";
+        c.led_gpio                       = 21;
+        c.led_type                       = 1;
+        c.led_inverted                   = true;
+        c.btn_gpio                       = 41;
+        c.btn_active_low                 = false;
+        c.ota_channel                    = OtaChannel::Dev;
+        c.ui_lang                        = UiLang::De;
+        c.mb_host                        = "hub";
+        c.mb_port                        = 1502;
+        c.mb_unit_id                     = 9;
+        c.mb_discovery_done              = true;
+        const ConfigBlob b               = config_blob_from(c);
+        CHECK(b.wifi_ssid == "ExampleNet" && b.wifi_pass == "pass");
+        CHECK(b.wifi_ssid_backup == "ssid-bak" && b.wifi_pass_backup == "pass-bak");
+        CHECK(b.wifi_rollback_active && b.wifi_rolled_back);
+        CHECK(b.mqtt_uri == "mqtt://u" && b.mqtt_user == "mu" && b.mqtt_pass == "mp");
+        CHECK(b.mqtt_base == "base/topic");
+        CHECK(b.ref_temp_name == "Living room" && b.ref_temp_topic == "t/room");
+        CHECK(b.ref_temp_path == "$.temp" && b.ref_temp_time_path == "$.ts");
+        CHECK(b.ref_temp_setpoint_topic == "t/set" && b.ref_temp_time_topic == "t/time");
+        CHECK(b.ref_temp_fixed_setpoint_tenths == 215u && b.ref_temp_setpoint_path == "$.set");
+        CHECK(b.ref_temp_enabled_path == "$.on" && b.ref_temp_hvac_mode_path == "$.mode");
+        CHECK(b.ref_temp_max_age_s == 321u);
+        CHECK(b.circulation_name == "DHW circulation pump" && b.circulation_topic == "t/pump");
+        CHECK(b.circulation_power_path == "$.w" && b.circulation_time_path == "$.pts");
+        CHECK(b.circulation_max_age_s == 99u && b.circulation_on_tenths_w == 111u);
+        CHECK(b.circulation_off_tenths_w == 22u && b.circulation_confirm_s == 33u);
+        CHECK(b.weather_enabled && b.weather_latitude_e6 == 12345678);
+        CHECK(b.weather_longitude_e6 == 23456789);
+        CHECK(b.diagnostics_enabled && b.diagnostics_generation == 17u);
+        CHECK(b.env3_enabled && b.env3_sda == 7 && b.env3_scl == 8);
+        CHECK(b.board_preset_id == static_cast<int32_t>(BoardPresetId::M5StackAtomS3Lite));
+        CHECK(b.board_user_set);
+        CHECK(b.syslog_host == "sl" && b.syslog_port == 1514 && b.ntp_server == "ntp");
+        CHECK(b.led_gpio == 21 && b.led_type == 1 && b.led_inverted);
+        CHECK(b.btn_gpio == 41 && !b.btn_active_low);
+        CHECK(b.ota_channel == ota_channel_to_int(OtaChannel::Dev));
+        CHECK(b.ui_lang == ui_lang_to_int(UiLang::De));
+        CHECK(b.mb_host == "hub" && b.mb_port == 1502 && b.mb_unit_id == 9);
+        CHECK(b.mb_discovery_done);
+        // Serialized and decoded, the mapped blob reads back as the same settings.
+        const std::vector<uint8_t> raw = config_blob_serialize(b);
+        ConfigBlob                 back;
+        CHECK(config_blob_deserialize(raw.data(), raw.size(), back));
+        CHECK(back.wifi_ssid == "ExampleNet" && back.mb_host == "hub" && back.env3_scl == 8);
+    }
+
+    // Service save of a current snapshot: "cfg" then "link", RAM published with the next revision.
+    {
+        Config        live = config_tx_live();
+        ConfigTxStore store;
+        store.seed(live);
+        Config req    = live;
+        req.wifi_ssid = "new-net";
+        req.mqtt_uri  = "mqtts://new-broker.local";
+        const ConfigSaveOutcome out =
+            config_save_transaction(live, req, /*owns_link=*/false, store);
+        CHECK(out.result == ConfigSaveResult::Saved);
+        CHECK(out.failed == ConfigSaveStep::None && out.store_error == 0);
+        CHECK(config_tx_attempts_are(store, {"cfg", "link"}));
+        CHECK(live.wifi_ssid == "new-net" && live.mqtt_uri == "mqtts://new-broker.local");
+        CHECK(live.runtime_revision == 6);
+        CHECK(config_tx_durable_service(store).wifi_ssid == "new-net");
+        CHECK(config_tx_durable_service(store).mqtt_uri == "mqtts://new-broker.local");
+        const LinkBlob link = config_tx_durable_link(store);
+        CHECK(link.rx_pin == 44 && link.tx_pin == 43 && link.proto == 'I');
+        CHECK(link.identity_fp == 0x11111111u);
+    }
+
+    // The field-length boundary: CONFIG_BLOB_MAX_STR is accepted, one more is refused with nothing
+    // written, because the decoder would reject that blob and drop the whole config at next boot.
+    {
+        Config        live = config_tx_live();
+        ConfigTxStore store;
+        store.seed(live);
+        Config req  = live;
+        req.mb_host = std::string(CONFIG_BLOB_MAX_STR, 'h');
+        CHECK(config_save_transaction(live, req, false, store).result == ConfigSaveResult::Saved);
+        CHECK(live.mb_host.size() == CONFIG_BLOB_MAX_STR);
+
+        store.attempts.clear();
+        const auto durable_before = store.durable;
+        const auto live_before    = config_tx_state(live);
+        req                       = live;
+        req.mb_host.push_back('h');
+        const ConfigSaveOutcome out = config_save_transaction(live, req, false, store);
+        CHECK(out.result == ConfigSaveResult::Failed && out.failed == ConfigSaveStep::FieldTooLong);
+        CHECK(out.store_error == 0);
+        CHECK(store.attempts.empty());
+        CHECK(store.durable == durable_before);
+        CHECK(config_tx_state(live) == live_before);
+    }
+
+    // Service save whose "cfg" write fails: nothing durable changed, RAM unchanged, and the link
+    // cache is not attempted behind a failed service write.
+    {
+        Config        live = config_tx_live();
+        ConfigTxStore store;
+        store.seed(live);
+        store.fail_with["cfg"]      = 0x101;
+        const auto durable_before   = store.durable;
+        const auto live_before      = config_tx_state(live);
+        Config     req              = live;
+        req.wifi_ssid               = "new-net";
+        const ConfigSaveOutcome out = config_save_transaction(live, req, false, store);
+        CHECK(out.result == ConfigSaveResult::Failed);
+        CHECK(out.failed == ConfigSaveStep::ServiceWrite && out.store_error == 0x101);
+        CHECK(config_tx_attempts_are(store, {"cfg"}));
+        CHECK(store.durable == durable_before);
+        CHECK(config_tx_state(live) == live_before);
+    }
+
+    // Service save whose best-effort "link" write fails after "cfg" landed: the request is saved.
+    {
+        Config        live = config_tx_live();
+        ConfigTxStore store;
+        store.seed(live);
+        store.fail_with["link"]     = 0x102;
+        Config req                  = live;
+        req.wifi_ssid               = "new-net";
+        const ConfigSaveOutcome out = config_save_transaction(live, req, false, store);
+        CHECK(out.result == ConfigSaveResult::Saved);
+        CHECK(out.failed == ConfigSaveStep::LinkWrite && out.store_error == 0x102);
+        CHECK(config_tx_attempts_are(store, {"cfg", "link"}));
+        CHECK(live.wifi_ssid == "new-net" && live.runtime_revision == 6);
+        CHECK(config_tx_durable_service(store).wifi_ssid == "new-net");
+        CHECK(config_tx_durable_link(store).identity_fp == 0x11111111u); // the old, intact entry
+    }
+
+    // A service save of a snapshot that a detection commit overtook carries the detected link and
+    // model forward: the link it writes is the live one, not the snapshot's.
+    {
+        Config        live = config_tx_live();
+        ConfigTxStore store;
+        store.seed(live);
+        const Config stale = live; // taken at revision 5
+        apply_link(live, 1, 2, Protocol::S, 0xAABBCCDDu);
+        apply_model(live, "altherma3_r_erga", 0x5u, 60, 80, "1234");
+        live.runtime_revision       = 7;
+        Config req                  = stale;
+        req.wifi_ssid               = "new-net";
+        const ConfigSaveOutcome out = config_save_transaction(live, req, false, store);
+        CHECK(out.result == ConfigSaveResult::Saved && out.failed == ConfigSaveStep::None);
+        const LinkBlob link = config_tx_durable_link(store);
+        CHECK(link.rx_pin == 1 && link.tx_pin == 2 && link.proto == 'S');
+        CHECK(link.identity_fp == 0xAABBCCDDu);
+        CHECK(live.rx_pin == 1 && live.tx_pin == 2 && live.proto == Protocol::S);
+        CHECK(live.profile == "altherma3_r_erga" && live.fp_valid && live.fp_pages == 0x5u);
+        CHECK(live.wifi_ssid == "new-net" && live.runtime_revision == 8);
+    }
+
+    // X10A save of a current snapshot: ONLY "link" is written, even when a "cfg" write would fail.
+    {
+        Config        live = config_tx_live();
+        ConfigTxStore store;
+        store.seed(live);
+        store.fail_with["cfg"]    = 0x103;
+        const auto     cfg_before = store.durable.at(CONFIG_KEY_SERVICE);
+        Config         req        = live;
+        SetHpX10aPatch patch;
+        patch.rx_sent = true;
+        patch.rx      = 10;
+        patch.tx_sent = true;
+        patch.tx      = 11;
+        bool reset    = false;
+        CHECK(set_hp_apply_x10a(req, patch, reset) && reset);
+        const ConfigSaveOutcome out = config_save_transaction(live, req, /*owns_link=*/true, store);
+        CHECK(out.result == ConfigSaveResult::Saved);
+        CHECK(out.failed == ConfigSaveStep::None && out.store_error == 0);
+        CHECK(config_tx_attempts_are(store, {"link"}));
+        CHECK(store.durable.at(CONFIG_KEY_SERVICE) == cfg_before);
+        const LinkBlob link = config_tx_durable_link(store);
+        CHECK(link.rx_pin == 10 && link.tx_pin == 11 && link.identity_fp == 0);
+        CHECK(live.rx_pin == 10 && live.tx_pin == 11 && live.runtime_revision == 6);
+        CHECK(live.wifi_ssid == "home"); // untouched fields survive the publication
+    }
+
+    // X10A save whose "link" write fails: a failure without side effects. No "cfg" write was even
+    // attempted, no durable entry changed and RAM is exactly what it was.
+    {
+        Config        live = config_tx_live();
+        ConfigTxStore store;
+        store.seed(live);
+        store.fail_with["link"]     = 0x104;
+        const auto durable_before   = store.durable;
+        const auto live_before      = config_tx_state(live);
+        Config     req              = live;
+        req.rx_pin                  = 10;
+        req.tx_pin                  = 11;
+        const ConfigSaveOutcome out = config_save_transaction(live, req, true, store);
+        CHECK(out.result == ConfigSaveResult::Failed);
+        CHECK(out.failed == ConfigSaveStep::LinkWrite && out.store_error == 0x104);
+        CHECK(config_tx_attempts_are(store, {"link"}));
+        CHECK(store.durable == durable_before);
+        CHECK(config_tx_state(live) == live_before);
+    }
+
+    // X10A save of a snapshot a detection commit overtook: refused before anything is written.
+    {
+        Config        live = config_tx_live();
+        ConfigTxStore store;
+        store.seed(live);
+        Config req                             = live;
+        req.rx_pin                             = 10;
+        req.tx_pin                             = 11;
+        live.runtime_revision                  = 6; // detection committed after the snapshot
+        const auto              durable_before = store.durable;
+        const auto              live_before    = config_tx_state(live);
+        const ConfigSaveOutcome out            = config_save_transaction(live, req, true, store);
+        CHECK(out.result == ConfigSaveResult::Stale);
+        CHECK(out.failed == ConfigSaveStep::None && out.store_error == 0);
+        CHECK(store.attempts.empty());
+        CHECK(store.durable == durable_before);
+        CHECK(config_tx_state(live) == live_before);
+    }
+
+    // CFG-03/a: config_load sanitises the RAM config without re-persisting it (here: ENV III fell
+    // back to disabled while its stored pins stay for repair). An X10A pin repair must not write
+    // that RAM view over the stored service settings, on any path.
+    {
+        Config stored     = config_tx_live(); // what the service blob holds: ENV III enabled
+        Config live       = stored;
+        live.env3_enabled = false; // what config_load made of it in RAM
+        ConfigTxStore store;
+        store.seed(stored);
+        const auto cfg_before = store.durable.at(CONFIG_KEY_SERVICE);
+        Config     req        = live;
+        req.rx_pin            = 10;
+        req.tx_pin            = 11;
+        CHECK(config_save_transaction(live, req, true, store).result == ConfigSaveResult::Saved);
+        CHECK(store.durable.at(CONFIG_KEY_SERVICE) == cfg_before); // byte-identical
+        CHECK(config_tx_durable_service(store).env3_enabled);
+        CHECK(!live.env3_enabled);
+        CHECK(live.rx_pin == 10 && live.tx_pin == 11);
+        CHECK(config_tx_durable_link(store).rx_pin == 10);
+    }
+
+    // An X10A save does not depend on the service blob at all, so a RAM value the service blob
+    // could not hold does not block a pin repair.
+    {
+        Config live  = config_tx_live();
+        live.mb_host = std::string(CONFIG_BLOB_MAX_STR + 1, 'h');
+        ConfigTxStore store;
+        store.seed(config_tx_live());
+        Config req = live;
+        req.rx_pin = 10;
+        CHECK(config_save_transaction(live, req, true, store).result == ConfigSaveResult::Saved);
+        CHECK(config_tx_attempts_are(store, {"link"}));
+    }
+
+    // The revision counter wraps past zero on publication.
+    {
+        Config live           = config_tx_live();
+        live.runtime_revision = UINT32_MAX;
+        ConfigTxStore store;
+        store.seed(live);
+        Config req = live;
+        CHECK(config_save_transaction(live, req, true, store).result == ConfigSaveResult::Saved);
+        CHECK(live.runtime_revision == 1);
+    }
+
+    // The detected-link commit. A stale revision changes nothing and writes nothing.
+    {
+        Config        live = config_tx_live();
+        ConfigTxStore store;
+        store.seed(live);
+        const auto live_before = config_tx_state(live);
+        bool       saved       = true;
+        uint32_t   committed   = 99;
+        CHECK(!config_commit_detected_link_transaction(live, 4, 1, 2, Protocol::S, 0xAAu, store,
+                                                       saved, committed));
+        CHECK(!saved && committed == 0);
+        CHECK(store.attempts.empty());
+        CHECK(config_tx_state(live) == live_before);
+    }
+    // An unchanged link is not written, but the revision still advances for the caller's token.
+    {
+        Config        live = config_tx_live();
+        ConfigTxStore store;
+        store.seed(live);
+        bool     saved     = false;
+        uint32_t committed = 0;
+        CHECK(config_commit_detected_link_transaction(live, 5, 44, 43, Protocol::I, 0x11111111u,
+                                                      store, saved, committed));
+        CHECK(saved && committed == 6 && live.runtime_revision == 6);
+        CHECK(store.attempts.empty());
+    }
+    // Each of the four link fields alone makes the link changed, written and applied.
+    for (int field = 0; field < 4; ++field) {
+        Config        live = config_tx_live();
+        ConfigTxStore store;
+        store.seed(live);
+        const int      rx        = field == 0 ? 16 : 44;
+        const int      tx        = field == 1 ? 17 : 43;
+        const Protocol proto     = field == 2 ? Protocol::S : Protocol::I;
+        const uint32_t fp        = field == 3 ? 0x22222222u : 0x11111111u;
+        bool           saved     = false;
+        uint32_t       committed = 0;
+        CHECK(config_commit_detected_link_transaction(live, 5, rx, tx, proto, fp, store, saved,
+                                                      committed));
+        CHECK(saved && committed == 6);
+        CHECK(config_tx_attempts_are(store, {"link"}));
+        const LinkBlob link = config_tx_durable_link(store);
+        CHECK(link.rx_pin == rx && link.tx_pin == tx && link.identity_fp == fp);
+        CHECK(link.proto == static_cast<char>(proto));
+        CHECK(live.rx_pin == rx && live.tx_pin == tx && live.proto == proto);
+        CHECK(live.x10a_identity_fp == fp && live.runtime_revision == 6);
+    }
+    // A failed cache write still applies the proven link to this session; only link_saved says so.
+    {
+        Config        live = config_tx_live();
+        ConfigTxStore store;
+        store.seed(live);
+        store.fail_with["link"]   = 0x105;
+        const auto durable_before = store.durable;
+        bool       saved          = true;
+        uint32_t   committed      = 0;
+        CHECK(config_commit_detected_link_transaction(live, 5, 16, 17, Protocol::S, 0xBBu, store,
+                                                      saved, committed));
+        CHECK(!saved && committed == 6);
+        CHECK(config_tx_attempts_are(store, {"link"}));
+        CHECK(store.durable == durable_before);
+        CHECK(live.rx_pin == 16 && live.tx_pin == 17 && live.proto == Protocol::S);
+        CHECK(live.x10a_identity_fp == 0xBBu && live.runtime_revision == 6);
+        CHECK(live.wifi_ssid == "home"); // detection owns the link and nothing else
+    }
+
+    // The detected-model commit is revision-checked and RAM only: a stale token changes nothing, a
+    // current one swaps the model in, advances the revision and leaves everything else alone.
+    {
+        Config     live        = config_tx_live();
+        const auto live_before = config_tx_state(live);
+        CHECK(!config_commit_detected_model_if_current(live, 4, "altherma3_r_erga", 0x5u, 60, 80,
+                                                       "1234"));
+        CHECK(config_tx_state(live) == live_before);
+        CHECK(config_commit_detected_model_if_current(live, 5, "altherma3_r_erga", 0x5u, 60, 80,
+                                                      "1234"));
+        CHECK(live.profile == "altherma3_r_erga" && live.fp_valid && live.fp_pages == 0x5u);
+        CHECK(live.fp_kw_tenths == 60 && live.fp_iu_kw_tenths == 80 && live.fp_eeprom == "1234");
+        CHECK(live.runtime_revision == 6);
+        CHECK(live.wifi_ssid == "home" && live.rx_pin == 44 && live.tx_pin == 43);
+    }
 }
 
 // The HA installation DEVICE identity (logic/ha_device.hpp). The one property that matters: it is a
@@ -18132,6 +18612,7 @@ int main() {
     test_checkup();
     test_no_publish();
     test_config_model();
+    test_config_transaction();
     test_board_pins();
     test_ha_device();
     test_board_pins_local();

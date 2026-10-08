@@ -47,16 +47,22 @@ boundary-heavy logic inputs and probes the ASan+UBSan compile/runtime capability
 name. CI fails unless both sanitizers work; a local host falls back to UBSan only when the ASan probe
 fails. This is a bounded, reproducible hostile-input corpus, not an unbounded random fuzzer.
 
-`scripts/run-runtime-integration-tests.sh` runs the IDF-free runtime harness in `test/runtime/`. Eleven
-scenarios call selected production config serializers, X10A/Modbus parsers, MQTT publish gating and
-bounded body/chunk logic through simulated clock, storage, serial, TCP, broker and HTTP adapters.
-Eight model failed saves and reconstruction, allocation failure, task interleavings, fragmentation,
-reconnect/retain/LWT behavior and incomplete HTTP framing. Two deadline scenarios use real POSIX `socketpair`/`recv`
+`scripts/run-runtime-integration-tests.sh` runs the IDF-free runtime harness in `test/runtime/`. Thirteen
+scenarios call selected production config transactions and serializers, X10A/Modbus parsers, MQTT publish
+gating and bounded body/chunk logic through simulated clock, storage, serial, TCP, broker and HTTP adapters.
+Ten model failed saves and reconstruction, the config save failure boundaries (RAM, durable entries and
+result asserted together, including that an X10A save never writes `cfg`), an allocation witness that
+counts every allocation of the binary and requires none after a config transaction's first durable
+write, allocation failure, task interleavings, fragmentation,
+reconnect/retain/LWT behavior and incomplete HTTP framing. The fake NVS follows IDF v6.1: `nvs_set_blob`
+is write-through and a failed set keeps the previous value, while `nvs_commit` is a no-op, so no
+staged-commit failure exists to model. Two deadline scenarios use real POSIX `socketpair`/`recv`
 traffic: a writer trickles an incomplete header or body beyond the absolute deadline, while the
 watchdog applies `shutdown(SHUT_RDWR)` and is joined before the descriptors are closed. A third
 socket scenario trickles a body still owed after the response: `http_body_discard()` must stop at its
 budget, settle a small buffered remainder and refuse more than its byte cap. Mutations
-independently disable the header and body watchdog and the discard deadline. The harness remains hardware-free and does not
+independently disable the header and body watchdog and the discard deadline, let a failed NVS set
+replace the stored value, and allocate after a config transaction's first write. The harness remains hardware-free and does not
 execute ESP-IDF target glue, real NVS or the production MCP/HTTP/MQTT stacks; target builds and
 separately authorized hardware acceptance remain distinct proof layers.
 
@@ -237,10 +243,13 @@ browses mDNS, and an explicitly empty address creates no task or future boot sea
 manual endpoint returns a found address to the form but cannot persist it behind Save/Cancel.
 
 `node test/test_config_ownership_contract.mjs` pins where the firmware calls the configuration
-ownership rule the host suite decides: `config.cpp` compares revisions with `config_save_revision`
-under the config mutex and returns Stale before any copy or NVS write; `/set_hp` is the only
-link-owning saver; every attempt derives the X10A patch from its own fresh `config()`; and only a
-saved request reconfigures the poll task. It also binds the runtime harness to the same decision.
+ownership rule and save transactions the host suite decides: `config_save_transaction` compares
+revisions with `config_save_revision` and returns Stale before any copy or write, stages every blob
+before its first write and writes `cfg` only behind `!owns_link`; `config.cpp` reaches NVS for the
+save and the detected-link commit only through those transactions, on the live config, under the
+config mutex; `/set_hp` is the only link-owning saver; every attempt derives the X10A patch from its
+own fresh `config()`; and only a saved request reconfigures the poll task. It also requires the
+runtime harness to execute the production transactions and to hold no sequence of its own.
 
 `node test/test_transport_contract.mjs` also pins the device's static LAN identity on both
 transports: DHCP options 12 and 60 come from the hostname installed before the client starts, with
@@ -415,6 +424,16 @@ One entry per `test_*()` in [`test_logic.cpp`](test_logic.cpp), in the order `ma
   HTTP save whose snapshot a detection commit overtook: a service save carries detection forward,
   and an X10A `/set_hp` is refused as Stale and re-derived from the fresh snapshot, with a
   conflicting-save witness that fails on the old "stale snapshot wins" rule.
+- `logic/config_transaction.hpp` — the save transactions `config.cpp` executes, here over a store that
+  records every write attempt and fails a chosen key. A service save writes `cfg` then `link` and
+  publishes RAM last; a failed `cfg` write changes nothing and never attempts `link`; a failed `link`
+  write after `cfg` still saves; an over-long string is refused with zero writes; a stale snapshot
+  carries detection forward. An X10A save writes ONLY `link` (zero `cfg` writes even when one would
+  fail), a failed `link` write leaves RAM and both durable entries untouched, a Stale one writes
+  nothing, and a RAM config that `config_load` sanitised (ENV III disabled) leaves the durable `cfg`
+  byte-identical. The detected-link commit refuses a stale revision, skips an unchanged link, writes
+  each of the four changed fields, and still applies the proven link when only the cache write
+  fails. `config_blob_from` is checked field by field.
 - `logic/lwt_select.hpp` — the web UI's leaving-water MEASUREMENT picker (twin of `www/js/schematic.js`
   `vLwt`): the pre-BUH heat-exchanger outlet (R1T) is chosen over a setpoint, a mixed-zone R1T, or
   the post-BUH (R2T) twin, across the four alias label forms — and, catalog-wide, every detectable

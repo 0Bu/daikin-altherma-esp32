@@ -2,6 +2,7 @@
 // Runtime configuration: the daik::Config model (logic/config_model.hpp) backed by NVS
 // (namespace "daik_cfg"). Loaded once at boot; the web UI mutates it via the /set_* handlers.
 #include "logic/config_model.hpp"
+#include "logic/config_transaction.hpp" // ConfigSaveResult
 #include <type_traits>
 #include <utility>
 
@@ -72,11 +73,12 @@ void config_load();
 // poll task must NOT use this — see the compare-and-commit detection helpers below.
 [[nodiscard]] bool config_save(const Config& c);
 
-// The X10A /set_hp save. That route owns the link, so it succeeds only when the atomic link-cache
-// entry lands as well; on Failed nothing is published to RAM. It also derived its model and
-// link-identity fields from its snapshot, so a snapshot older than a detection commit is refused as
-// Stale before any NVS write, and the caller derives the request again from a fresh config().
-enum class ConfigSaveResult : uint8_t { Saved, Stale, Failed };
+// The X10A /set_hp save (ConfigSaveResult: logic/config_transaction.hpp). That route owns the link
+// and changes nothing else that is persisted, so it writes ONLY the atomic link-cache entry — never
+// the service blob — and succeeds exactly when that entry lands; on Failed no durable entry changed
+// and nothing is published to RAM. It also derived its model and link-identity fields from its
+// snapshot, so a snapshot older than a detection commit is refused as Stale before any NVS write,
+// and the caller derives the request again from a fresh config().
 [[nodiscard]] ConfigSaveResult config_save_link(const Config& c);
 
 // Atomically commit the link proven by one detection sweep, but only if the live config still has

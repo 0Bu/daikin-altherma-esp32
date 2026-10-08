@@ -888,8 +888,9 @@ expect_red "a rejected Weather mutation cancelling the still-authoritative reque
 restore
 
 # 46. Reintroduce an allocation after cfg was durably written. bad_alloc would make HTTP report a
-#     failed save even though NVS already changed.
-python3 - "$TMP/main/config.cpp" <<'PY4'
+#     failed save even though NVS already changed. The sequence is the shared transaction that
+#     config.cpp, the host tests and the runtime harness all execute.
+python3 - "$TMP/main/logic/config_transaction.hpp" <<'PY4'
 import re, sys
 p = sys.argv[1]
 s = open(p).read()
@@ -899,7 +900,7 @@ match = re.search(pattern, s)
 assert match, "seed 46 did not apply — staged link serialization moved"
 declaration = match.group(0)
 seed = s[:match.start()] + s[match.end():]
-needle = '    const esp_err_t link_err = nvs_set_blob("link", link.data(), link.size());\n'
+needle = '    const int link_err = store.write_blob(CONFIG_KEY_LINK, link.data(), link.size());\n'
 assert needle in seed, "seed 46 did not apply — link write moved"
 seed = seed.replace(needle, declaration + needle, 1)
 open(p, "w").write(seed)
