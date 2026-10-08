@@ -727,11 +727,14 @@ constexpr int      DHW_LOSS_HIGH_TENTHS_K_H = 8;         // project heuristic, n
 // bearing one: a tank charge cannot start, run and finish inside it, so no single unobserved
 // stretch WITHIN the bound can hide a whole charge from the witness. What no bound covers is a
 // charge the witness saw only IN PART. The settle arms only after DHW_LOSS_CHARGE_MIN_S of SEEN
-// witness, and it counts down from the last sample that saw the charge, also through unread samples
-// (dhw_loss_step's settle branch runs before its blind branch). So a charge seen for less than that
-// in total — e.g. one lying entirely inside a stretch PAST the bound — arms no settle, and one
-// whose end falls inside an unread stretch has its settle shortened by the unseen part. Either way
-// the next candidate can open on that charge's settling tail — a known limit stated in
+// witness, and it counts down from the last sample that saw the charge, also through unread
+// samples: dhw_loss_step's settle branch runs after the gap branch (a gap past CHECKUP_MAX_GAP_S
+// holds it) but before the unread-row blind branch, and dhw_loss_adopt carries it unchanged across
+// an intentional restart (any other restart starts from a fresh state and drops it). So a charge
+// seen for less than that in total — e.g. one lying entirely inside a stretch PAST the bound — arms
+// no settle, one whose end falls inside an unread stretch has its settle shortened by the unread
+// samples, and a settle still running at an unclean restart is lost. Each way the next candidate
+// can open on that charge's settling tail — a known limit stated in
 // docs/DIAGNOSTIC_EVIDENCE.md (dhw_loss, Not established). The TOTAL is the same 90%-evidence shape
 // the circulation witness already uses.
 constexpr uint32_t DHW_LOSS_BLIND_RUN_MAX_S = 120;

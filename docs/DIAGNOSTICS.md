@@ -120,8 +120,9 @@ reference installation, not a Daikin limit. Tank volume and the temperature diff
 tank and its room both affect the cooling rate. The method can recognise notable clean hours only up
 to about **1.85 K/h**. A faster continuous loss can look like a draw and cause the hour to be
 discarded. If the tank was heated, wholly or partly, while the board could not read the unit (for
-example during a firmware update), the board can miss that heating or the end of it, and the next
-hour can show the tank settling after it as a fast loss. A NOTE from the first hour after such a
+example during a firmware update), or shortly before the board restarted unexpectedly, the board
+can lose track of that heating, and the next hour can show the tank settling after it as a fast
+loss. A NOTE from the first hour after such a
 period is therefore weaker evidence than a NOTE that repeats.
 
 **What do OK and NOT AVAILABLE mean here?** **OK** only says that the usable quiet hours contained no

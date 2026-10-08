@@ -167,15 +167,18 @@ window can show only its one-hour thermal size example.
 **Not established:** A notable drop proves neither a leaking three-way valve nor poor insulation.
 Draws, stratification, thermosiphoning, a check valve, and external circulation can produce similar
 traces. The 45-minute settling period arms only after the board has seen two minutes of charge
-witness (the three-way valve on DHW or the booster heater on; a witness first seen after a gap
-between samples longer than `CHECKUP_MAX_GAP_S` counts as two minutes), and it counts down from the
-last sample that saw the charge, also through time in which the valve and heater rows went unread
-(the unit not answering or the board pausing its polling). A charge seen for less than two minutes
-in total, such as one lying entirely inside such a stretch, therefore arms no settling period, and a
-charge whose end falls inside such a stretch has its settling period shortened by the unseen part
-and loses it entirely once that part reaches 45 minutes. In both cases the next candidate can open
-on the charge's settling tail, and a window completed there can report a settling artefact as a
-fast loss. A circulation label shows temporal correlation, not exclusive cause. `OK` also does not
+witness (the three-way valve on DHW or the booster heater on; a witness seen in the sample that
+closes a gap between samples longer than `CHECKUP_MAX_GAP_S` counts as two minutes). It counts down
+from the last sample that saw the charge, also through samples in which the valve and heater rows
+went unread (the unit not answering, or the board pausing its polling while it keeps sampling). A
+gap between samples longer than `CHECKUP_MAX_GAP_S` and an intentional restart hold it instead; any
+other restart (a panic, a power loss, or a handoff the next boot rejects) drops it. A charge seen
+for less than two minutes in total, such as one lying entirely inside an unread stretch, therefore
+arms no settling period; a charge whose end falls inside an unread stretch has its settling period
+shortened by the unread samples the board kept taking, and loses it entirely once those reach 45
+minutes; and a settling period still running at an unclean restart is lost. In each case the next
+candidate can open on the charge's settling tail, and a window completed there can report a
+settling artefact as a fast loss. A circulation label shows temporal correlation, not exclusive cause. `OK` also does not
 exclude faster continuous loss outside the detectable band. Because one point in a stratified tank
 does not establish uniform cooling and the individual window rates are not retained, the result
 establishes neither whole-tank/daily thermal kWh nor electrical kWh. The UI's multiplication is
