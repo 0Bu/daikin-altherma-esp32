@@ -1935,6 +1935,19 @@ static void test_discovery() {
         }
     }
     CHECK(x10a_templates > 0);
+    // The template's `None` default is HA's PAYLOAD_NONE (-> unknown), so no X10A text may ever be
+    // the literal "None": every converter text table and the refrigerant literals are checked here.
+    // The two-character fault codes (ERR_C1/ERR_C2) cannot spell it.
+    for (const char* s : OP_MODE) CHECK(std::string(s) != "None");
+    for (const char* s : IU_MODE) CHECK(std::string(s) != "None");
+    for (const char* s : ERR_TYPE) CHECK(std::string(s) != "None");
+    for (const char* s : HYBRID) CHECK(std::string(s) != "None");
+    for (int refrigerant_conv = 801; refrigerant_conv <= 805; ++refrigerant_conv) {
+        const ValueDef refrigerant{0x10, 0, refrigerant_conv, 1, -1, "Refrigerant type"};
+        const uint8_t  none_bytes[2] = {0, 0};
+        const Reading  r             = convert(refrigerant, none_bytes);
+        CHECK(r.text[0] != '\0' && std::string(r.text) != "None");
+    }
 
     CHECK(std::string(ha_component(way)) == "binary_sensor");
     CHECK(discovery_topic("homeassistant", node, way) ==
@@ -17474,12 +17487,15 @@ static void test_fault_state() {
     CHECK(ccfg.find("\"val_tpl\":\"{{ value_json.get('outdoor_state', {})"
                     ".get('error_active', 'None') }}\"") != std::string::npos);
     CHECK(ccfg.find("value_json['") == std::string::npos);
-    for (size_t c = 0; c < FAULT_COMPANION_COUNT; c++) {
-        const std::string hcomp =
-            companion_discovery_config("daikin_test", "daikin_board", "daikin/x10a",
-                                       "daikin/status", "hydronic", FAULT_COMPANIONS[c]);
-        CHECK(hcomp.find(std::string("value_json.get('hydronic', {}).get('") +
-                         FAULT_COMPANIONS[c].key + "', 'None')") != std::string::npos);
+    for (const char* fault_group : {"outdoor_state", "hydronic"}) {
+        for (size_t c = 0; c < FAULT_COMPANION_COUNT; c++) {
+            const std::string comp =
+                companion_discovery_config("daikin_test", "daikin_board", "daikin/x10a",
+                                           "daikin/status", fault_group, FAULT_COMPANIONS[c]);
+            CHECK(comp.find(std::string("value_json.get('") + fault_group + "', {}).get('" +
+                            FAULT_COMPANIONS[c].key + "', 'None')") != std::string::npos);
+            CHECK(comp.find("value_json['") == std::string::npos);
+        }
     }
     CHECK(ccfg.find("\"pl_on\":\"1\",\"pl_off\":\"0\"") != std::string::npos);
     CHECK(ccfg.find("\"dev_cla\":\"problem\"") != std::string::npos);

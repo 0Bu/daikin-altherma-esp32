@@ -224,15 +224,17 @@ inline std::string availability_topic(const std::string& base) {
 // The value template every X10A entity reads its state with. The firmware states absence BY
 // absence: a withheld, unread or unpopulated row is missing from <base>/x10a, and a whole register
 // page can be missing too (held-over outdoor pages, an unfitted second outdoor unit). Home
-// Assistant does not turn that gap into `unknown` by itself. A missing key renders the non-strict
-// template to an empty string, which both a numeric MQTT sensor ("Ignore empty state") and a binary
-// sensor ignore, so the entity keeps showing its LAST value as if it were current. A missing group
-// raises a template error instead: the entity again keeps its last value, and HA logs an error on
-// every X10A message. `.get(…, {})` and `.get(…, 'None')` never touch an undefined value, and the
-// literal `None` is HA's PAYLOAD_NONE, which MQTT sensors and binary sensors map to `unknown`
-// (`_update_state` in homeassistant/components/mqtt/sensor.py, and binary_sensor.py beside it).
-// Quoted string arguments keep a digit-leading slug such as "2way_valve…" valid. No X10A converter
-// text table contains "None"; a state that did would read `unknown` too.
+// Assistant does not turn that gap into `unknown` by itself. A subscripted missing key renders the
+// non-strict template to an empty string and logs a warning. A numeric MQTT sensor ("Ignore empty
+// state") and a binary sensor ignore that empty string, so they keep showing their LAST value as if
+// it were current; a text sensor shows an empty state instead. A missing group raises a template
+// error: every entity keeps its last value, and HA logs an error on every X10A message.
+// `.get(…, {})` and `.get(…, 'None')` never touch an undefined value, and the literal `None` is
+// HA's PAYLOAD_NONE, which MQTT sensors (before any numeric or text handling) and binary sensors
+// map to `unknown` (`_update_state` in homeassistant/components/mqtt/sensor.py and the state
+// handler in binary_sensor.py, Home Assistant core, read 2026-10-08). Quoted string arguments keep
+// a digit-leading slug such as "2way_valve…" valid. test_discovery pins that no converter text is
+// the literal "None", which would otherwise read `unknown` too.
 inline void append_x10a_value_template(std::string& j, const std::string& group, const char* key) {
     j += "{{ value_json.get('";
     j += group;

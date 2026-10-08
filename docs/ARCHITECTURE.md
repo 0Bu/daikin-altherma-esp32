@@ -1987,8 +1987,11 @@ The Home Assistant bridge:
   points at the X10A topic and reads its value out with a `value_template`
   (`value_json.get('<group>', {}).get('<object_id>', 'None')`; quoted arguments keep a
   digit-leading slug like `2way_valve…` valid). An absent group or key therefore renders HA's
-  `None` and reads *unknown*. A subscript would render empty, so HA keeps the last value, or would
-  raise a template error for a missing group (`logic/discovery.hpp`). `<base>/env3` is a separate flat retained numeric observation payload:
+  `None` and reads *unknown*. A subscript would not. For a missing key it renders empty: numeric
+  and binary entities then keep their last value, text entities show an empty state, and HA logs a
+  warning. For a missing group it raises a template error: every entity keeps its last value, and
+  HA logs an error (`logic/discovery.hpp`).
+  `<base>/env3` is a separate flat retained numeric observation payload:
   `{"temperature_c":20.25,"humidity_pct":45.50,"pressure_hpa":1008.75,"samples":N,"errors":M}`.
   Every new fresh 10 s sample is published, including an unchanged reading; error or staleness
   removes the three reading keys and retains only the pair of I2C bus-health counters, `samples` and

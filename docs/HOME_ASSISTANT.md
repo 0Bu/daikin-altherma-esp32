@@ -87,10 +87,13 @@ shared topic and pulls its value out with a `value_template`:
 "val_tpl": "{{ value_json.get('hydronic', {}).get('dhw_setpoint', 'None') }}"
 ```
 
-The `.get(…, 'None')` form is what makes an absent value read *unknown*. Home Assistant keeps
-showing a sensor's last value when its template renders empty, and a subscript such as
-`value_json['hydronic']['dhw_setpoint']` renders empty for a missing key and fails for a missing
-group. `None` is the payload Home Assistant itself maps to *unknown*.
+The `.get(…, 'None')` form is what makes an absent value read *unknown*: `None` is the payload Home
+Assistant itself maps to *unknown*, for sensors and binary sensors alike. A subscript such as
+`value_json['hydronic']['dhw_setpoint']` behaves differently:
+- For a missing key it renders empty. A numeric or binary entity ignores that and keeps its last
+  value. A text entity shows an empty state.
+- For a missing group it fails. Every entity keeps its last value, and Home Assistant logs an error
+  on every message.
 
 When the HomeHub stack is enabled, its available register values are published independently as a
 flat retained object on `<base>/modbus`; a disconnected HomeHub produces `{}` and disabling the
@@ -229,8 +232,8 @@ heartbeat itself is not retained. Consumers must move the former flat `room_*` a
 `heating_curve_*` selectors to the nested paths above; the fields are not duplicated across topics.
 
 Each value's `object_id` is a lowercase, alnum-only slug of its label (e.g. *"DHW Tank Temp
-(R5T)"* → `dhw_tank_temp_r5t`). The template uses bracket subscripts, so a slug that starts with a
-digit (*"2way valve…"* → `2way_valve_…`) stays valid.
+(R5T)"* → `dhw_tank_temp_r5t`). The group and key are quoted string arguments to `.get()`, so a
+slug that starts with a digit (*"2way valve…"* → `2way_valve_…`) stays valid.
 
 **The state key and the entity id are not the same string.** The `object_id` above is the **state
 key** — what the payload nests inside its group object, and what VictoriaMetrics is keyed on. The
@@ -569,6 +572,19 @@ nobody measured:
   *Outdoor Data Held Over*) says why — the link is fine, the device is publishing, the unit is just
   not measuring. Distinguishing this from a broken link is what a "time since last MQTT message"
   check cannot do, because the payload itself is fresh every second.
+
+> **Upgrading:** before the firmware that switched the X10A value template to `.get(…, 'None')`,
+> Home Assistant did not actually show *unknown* for these absences:
+> - an absent key left numeric and binary entities at their last value and text entities empty;
+> - an absent group left every entity of that page at its last value, with a template error in the
+>   Home Assistant log on each message. The outdoor sensor and inverter pages are absent during every
+>   compressor rest.
+>
+> These entities now read *unknown* while their values are withheld. Their history shows gaps,
+> long-term statistics skip those intervals, and `numeric_state` automations see *unknown*. Use
+> *Outdoor Data Held Over* to tell a compressor rest apart from a fault. An entity that sat at one
+> flat value since an earlier release now drops to *unknown* as well; the upgrade notes above apply
+> from this firmware on.
 
 ### Protection retries & drop control (new entities)
 

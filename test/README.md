@@ -444,9 +444,10 @@ One entry per `test_*()` in [`test_logic.cpp`](test_logic.cpp), in the order `ma
   placeholder never counts as coverage.
 - `logic/board_pins.hpp` — the ESP32-S3 chip-safe GPIO list (sorted, in range; excludes SPI
   flash/strapping/USB-JTAG/JTAG, plus GPIO33-37 on Octal-flash/PSRAM builds).
-- `logic/discovery.hpp` — object-id slugging + the discovery config JSON. Catalog-wide, every X10A
-  row and fault companion reads its state with `.get(group, {}).get(key, 'None')`, never a subscript,
-  so a withheld value reads `unknown` in HA instead of the last one.
+- `logic/discovery.hpp` — object-id slugging + the discovery config JSON. It pins the value-template
+  text, not Home Assistant's behaviour. The template reads `.get(group, {}).get(key, 'None')`, never
+  a subscript. That holds catalog-wide for every resolved profile row, and for the fault companions
+  of both groups. No converter text is the literal `None`.
 - `def/registry.hpp` — profile lookup + generic fallback.
 - `logic/detect.hpp` — capacity class parsed out of a profile id, page-mask fingerprint → candidate
   narrowing + the deterministic `detect_best` pick (Altherma-only), EEPROM hex render. Deterministic
