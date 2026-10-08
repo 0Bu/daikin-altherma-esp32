@@ -1325,16 +1325,17 @@ function checkupDetailHtml(c, fullSpan = c.full_span === true) {
     const reasons = Array.isArray(c.abort_reasons) ? c.abort_reasons : [];
     // In the all-blind case no plant-side reason was recorded for a live candidate in the retained
     // window. That does not rule plant-side events out: within the blind budget the candidate stays
-    // live and a hidden draw or charge is recorded on return, but one inside a stretch that exceeds
-    // the budget (which ends the candidate as blind), or right after it, meets no live candidate
-    // and is never recorded. Nor does it prove a link fault: "blind" is unobserved time (R5T, or
-    // the page-0x60 valve, heater and pump rows, went unread), which X10A timeouts and board-side
-    // pauses (OTA/weather
-    // network hold, model detection, a skipped poll cycle, a restart) both produce. Its sentence
-    // says "readings the check needs", names both and points at the wiring only conditionally. Every
-    // mixed/non-blind case stays non-causal. The report has an abort total and an OR-ed reason set,
-    // not per-reason counts or circulation evidence for aborted candidates, so it cannot honestly
-    // say which plant-side cause dominated.
+    // live and a hidden draw or charge is recorded on return. A stretch past the budget ends the
+    // candidate as blind; a charge or pump run still under way at the first reading after it is
+    // never recorded (the next candidate opens only on a clean reading), and the part of a draw's
+    // drop inside the stretch is lost, while a drop continuing past that reading, or any event
+    // starting after it, is recorded. Nor does it prove a link fault: "blind" is unobserved time
+    // (R5T, or the page-0x60 valve, heater and pump rows, went unread), which X10A timeouts and
+    // board-side pauses (OTA/weather network hold, model detection, a skipped poll cycle, a
+    // restart) both produce. Its sentence says "readings the check needs", names both and points
+    // at the wiring only conditionally. Every mixed/non-blind case stays non-causal. The report has
+    // an abort total and an OR-ed reason set, not per-reason counts or circulation evidence for
+    // aborted candidates, so it cannot honestly say which plant-side cause dominated.
     const blindOnly = reasons.length === 1 && reasons[0] === "blind";
     const sentence = blindOnly
       ? t("check.detail.dhw_blocked_link", Number(c.aborts) || 0,

@@ -175,8 +175,9 @@ it as the actual 24-hour total would fabricate a measurement. A candidate hour d
 (too much of it unobserved: R5T, or the valve, heater and pump rows from the other X10A page, went
 unread) does not establish an X10A link or wiring fault. Unobserved time comes from X10A timeouts
 and also from the board's own pauses, among them the network hold during a firmware update, a
-manual update check or a weather transfer, model detection (which also runs while the bus is dead), a poll cycle skipped after a
-caught exception, a UART that could not be started, and the allowance booked across a restart. The
+manual update check or a weather transfer, model detection (which also runs while the bus is
+dead), a poll cycle skipped after a caught exception, a UART that could not be started, and the
+allowance booked across a restart. The
 retained 24-hour aggregate keeps neither the source of that time nor a per-hour reason, only an
 OR-ed set of reason kinds. A day whose only recorded reason is `blind` therefore shows no
 plant-side discard reason but cannot tell a faulty link from a healthy one that was merely not

@@ -16,7 +16,9 @@ heuristics, and what the measurement cannot establish.
 
 While enabled, the web UI shows the **Plant diagnostics · 24 h** card immediately below the plant
 schematic. Open a row to see the reading, assessment, and normal context. The card deliberately does
-not recommend a next step because its bounded evidence may not establish the cause.
+not recommend a plant action because its bounded evidence may not establish the cause; the one
+conditional step it names is a check of the X10A wiring when the hot-water check keeps losing its
+readings day after day.
 
 ## What the statuses mean
 

@@ -819,11 +819,11 @@ inline uint32_t dhw_loss_adopt_blind_s(int64_t now_us) {
 
 // A carried candidate that the booked unobserved time pushes past the blind bounds ends here with
 // reset_segment(), not dhw_loss_abort(), and the adoption takes no bucket: that discard is left out
-// of the discarded-window count on purpose. The unobserved time is the restart allowance plus the
-// network start-up, a cause on the board's side, and as a DHW_ABORT_BLIND it would reach the UI as
-// "X10A not answering" and, when every discard carries it, as the link-only verdict "check the X10A
-// wiring" — a fault the evidence does not establish. The count therefore under-reports restarts
-// and never overclaims.
+// of the discarded-window count on purpose. The count stays a count of the discards dhw_loss_step
+// observed; the unobserved time ending this one is the restart allowance plus the network
+// start-up, a cause entirely on the board's side that the blind reason cannot separate from a
+// silent link, and counting it would add a board-side discard to every slow restart. The count
+// therefore under-reports restarts and never overclaims.
 inline void dhw_loss_adopt(DhwLossState& st, const DhwLossCarry& c, int64_t now_us) {
     st = DhwLossState{};
     st.last_us = now_us;

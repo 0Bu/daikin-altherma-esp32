@@ -128,17 +128,21 @@ The blocked verdict therefore has **one narrower sentence and one deliberately n
 When `blind` is the only reason kind recorded, no plant-side reason was recorded for a live
 candidate in the retained window. That is not proof that none occurred. Within the blind budget the
 candidate stays live, so a draw or charge hidden in a short unobserved stretch is still recorded
-when readings return; but a stretch that exceeds the budget ends the candidate as a `blind`
-discard, and a charge, pump run or draw inside that stretch, or starting right after it, meets no
-live candidate and is never recorded. And `blind` itself only means unobserved time: the readings
-the check needs (the tank temperature, or the valve, heater and pump states, which sit on a
-different X10A page) went unread. That time comes from X10A timeouts and also from the board pausing its own polling (the
-OTA or weather network hold, model detection, a poll cycle skipped after a caught exception, a
-restart), and the ring cannot tell them apart. The card therefore says "readings the check needs"
-rather than naming the tank temperature, names both sources, says nothing about the tank, and
-points at the X10A wiring and RX/TX pins only conditionally: if it keeps happening day after day.
-Every other mix says only what the stored totals establish. Charging, pump activity, draws, an implausible
-reading and a continuous loss fast enough to trip the draw filter can all prevent a clean hour; the
+when readings return. A stretch that exceeds the budget ends the candidate as a `blind` discard. A
+charge or pump run inside that stretch that is still under way when readings return meets no live
+candidate and is never recorded, because the next candidate opens only on a clean reading. The part
+of a draw's drop that fell inside the stretch is lost because the draw anchor restarts at the first
+reading; a drop that continues past it, or any event that starts after that reading, is recorded
+against the new candidate. And `blind` itself only means unobserved time: the readings the check
+needs (the tank temperature, or the valve, heater and pump states, which sit on a different X10A
+page) went unread. That time comes from X10A timeouts and also from the board pausing its own
+polling (the OTA or weather network hold, model detection, a poll cycle skipped after a caught
+exception, a restart), and the ring cannot tell them apart. The card therefore says "readings the
+check needs" rather than naming the tank temperature, names both sources, says nothing about the
+tank, and points at the X10A wiring and RX/TX pins only conditionally: if it keeps happening day
+after day. Every other mix says only what the stored totals establish. Charging, pump activity,
+draws, an implausible reading and a continuous loss fast enough to trip the draw filter can all
+prevent a clean hour; the
 ring cannot say which dominated. In particular it cannot claim "draw-dominant" or correlate
 circulation-off time with discarded candidates.
 

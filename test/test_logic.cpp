@@ -13557,10 +13557,10 @@ static void test_checkup() {
         // discarded and no window is assembled out of the old observation.
         //
         // That discard is NOT entered in the discarded-window count: the adoption takes no bucket,
-        // because the cause is the restart allowance and the network start-up, which the UI would
-        // otherwise word as "X10A not answering". The pending bucket the test owns holds what an
-        // earlier hour left, and it has to come out of the adoption, and out of the fresh candidate
-        // that follows, exactly as it went in.
+        // because the cause is the restart allowance and the network start-up, a board-side cause
+        // the blind reason cannot separate from a silent link. The pending bucket the test owns
+        // holds what an earlier hour left, and it has to come out of the adoption, and out of the
+        // fresh candidate that follows, exactly as it went in.
         const int64_t slow_us = 200LL * 1000000;
         DhwLossState  slow;
         DhwLossBucket slow_b;
