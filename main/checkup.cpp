@@ -322,13 +322,30 @@ void checkup_start(bool diagnostics_enabled, uint32_t diagnostics_generation) {
             P().dhw_handoff.payload);
         if (dhw_kept) {
             P().dhw.pending = P().dhw_handoff.payload.pending;
-            logic::dhw_loss_adopt(s_dhw_state, P().dhw_handoff.payload.candidate,
-                                  esp_timer_get_time());
-            const logic::DhwLossProgress progress = logic::dhw_loss_progress(
-                s_dhw_state, esp_timer_get_time());
-            diag_printf("checkup: DHW candidate kept (%u min, %u completed window(s))\n",
-                        static_cast<unsigned>(progress.candidate_observed_s / 60),
-                        static_cast<unsigned>(P().dhw.pending.windows));
+            // One clock reading serves the adoption AND the line that reports it: the unobserved
+            // seconds that line names are derived from this value, so a second reading would let
+            // the report drift from what the adoption actually booked.
+            const int64_t adopt_now_us = esp_timer_get_time();
+            logic::dhw_loss_adopt(s_dhw_state, P().dhw_handoff.payload.candidate, adopt_now_us);
+            // dhw_loss_adopt() ends a carried segment when this boot's unobserved time exhausts the
+            // blind bounds, and an ended segment leaves segment_start_us at -1. That outcome used
+            // to be logged as "kept (0 min ...)", which told a syslog reader the opposite of what
+            // happened, so a discard gets its own line. A carry that never held a segment has
+            // nothing to discard and keeps the ordinary line.
+            const bool carried_segment =
+                (P().dhw_handoff.payload.candidate.flags & logic::DHW_LOSS_CARRY_SEGMENT) != 0;
+            if (carried_segment && s_dhw_state.segment_start_us < 0) {
+                diag_printf("checkup: carried DHW candidate discarded (restart booked %u s "
+                            "unobserved, past the blind bounds; %u completed window(s) kept)\n",
+                            static_cast<unsigned>(logic::dhw_loss_adopt_blind_s(adopt_now_us)),
+                            static_cast<unsigned>(P().dhw.pending.windows));
+            } else {
+                const logic::DhwLossProgress progress =
+                    logic::dhw_loss_progress(s_dhw_state, adopt_now_us);
+                diag_printf("checkup: DHW candidate kept (%u min, %u completed window(s))\n",
+                            static_cast<unsigned>(progress.candidate_observed_s / 60),
+                            static_cast<unsigned>(P().dhw.pending.windows));
+            }
         } else {
             P().dhw.pending = logic::DhwLossBucket{};
             s_dhw_state = logic::DhwLossState{};

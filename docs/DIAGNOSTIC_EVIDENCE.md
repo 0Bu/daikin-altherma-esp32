@@ -1,6 +1,6 @@
 # Evidence and limits of the plant diagnostics
 
-<!-- diagnostic-evidence-contract: 167c5399fb45355fcf6944cc867fb58f9d112fbc8ff60f1fb579b6f12fafec53 -->
+<!-- diagnostic-evidence-contract: 990beec5fdc331d22e910ee84c1c60043c6f5e7c9a4cb052732dd6ff03cf2066 -->
 
 For every row in the **Plant diagnostics · 24 h** card, this page answers four questions:
 
@@ -26,8 +26,9 @@ Transport liveness is separate from each rule's measurement evidence. X10A live 
 less than 15 s old. HomeHub cache use requires matching target/session identity, a full-cache age at
 most 546 s and a separate reply age at most 7 s; these project bounds include slow fallback reads
 and do not establish that every row came from one sweep. State-age observation and blind time are
-also separate from the eight diagnosis counters; their version-3 format includes the resumed tail
-in the cumulative blind-gap limit and changes no diagnosis threshold below.
+also separate from the eight diagnosis counters; their version-4 format includes the resumed tail
+in the cumulative blind-gap limit, books the start-up before the first fold after a RAM-preserving
+reset as unobserved, and changes no diagnosis threshold below.
 The [X10A gate](../main/logic/mqtt_publish_gate.hpp) and
 [HomeHub implementation](../main/hp_modbus.cpp) define those transport bounds.
 
@@ -139,13 +140,23 @@ paths, age limit, on/off thresholds or confirmation time) clears this check's wi
 completed windows, observed clean hours and the window in progress. The tank sample in flight at
 that moment is discarded rather than counted under the new mapping. The overall checkup's 24-hour
 span is not reset, so once it is complete a reassuring result needs six new clean hours, not a new
-24-hour lifecycle.
+24-hour lifecycle. An intentional restart, such as a firmware update, hands the window in progress
+to the next boot through RAM; a power interruption or crash hands over none. The next boot books a
+fixed 5-second downtime allowance plus its own uptime when the check resumes, which includes the
+network start-up, as unobserved time: it advances the window's age and never counts as observed.
+When that pushes the window past the bound every unread stretch is held to (`120 s` in one run,
+counting an unread stretch still open at the restart, or 10% of the hour in total, counting all
+unobserved time the carried window already holds), the carried window is discarded instead of
+continued; this discard is not entered in the discarded-window
+count, so the count can under-report restarts.
 
 **Project boundary:** `0.8 K/h`, the 45-minute settling period, six clean hours, and the detectable
 upper range of about `1.85 K/h` are **project heuristics**, not Daikin limits or an implementation of
-the EU test method. A temperature drop in K/h is not directly comparable to a product-sheet loss in
-watts. The UI's kWh figure assumes `200 l ≈ 200 kg` of water, uniform whole-volume cooling, and the
-rounded `1.16 Wh/(kg·K)` heat capacity. It is an explanatory size example based on the greatest
+the EU test method. So are the `120 s` and 10% unobserved-time bounds and the 5-second restart
+allowance, which is an assumed restart length rather than a measurement. A temperature drop in K/h
+is not directly comparable to a product-sheet loss in watts. The UI's kWh figure assumes
+`200 l ≈ 200 kg` of water, uniform whole-volume cooling, and the rounded `1.16 Wh/(kg·K)` heat
+capacity. It is an explanatory size example based on the greatest
 single R5T drop, not an additional measurement or a configured tank volume. Its 24-hour orientation
 then assigns that maximum to every clean window and assumes a domestic-hot-water COP of `2.5–3.0`.
 Both are explicit project assumptions chosen to show scale, not a measured efficiency or a
