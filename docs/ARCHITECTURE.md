@@ -3069,9 +3069,10 @@ place:
   toast on the save flow: the verdict takes 60–180 s to reach, far past the save's ~21 s reconnect poll,
   so it almost always lands after the user has already reloaded the page. On the API the answer to "did
   my save stick?" stays `curl /status | jq .wifi.rolled_back`.
-  `config_save()` writes the backup + flag **before** the credentials when arming and **after** them when
-  clearing: each `nvs_set_*` commits separately, so this ordering is what keeps a power cut from arming
-  untried credentials with no way back.
+  Arming (`/set_wifi`), the restore and the clear after a successful connect are each **one**
+  `config_save()`: the credentials, the backup and the armed flag ride the same atomic `cfg` blob (a
+  single `nvs_set_blob`), so a power cut leaves the complete previous state or the complete new one,
+  never untried credentials armed without their way back.
 - **MQTT** → `/set_mqtt` (edited from a modal off the Connections tile's MQTT row). Unlike Syslog, Save
   **pre-flights the broker synchronously** (DNS → TCP port → a short-lived esp-mqtt connect/auth,
   heap-guarded) and only persists + reboots on success — a bad host/port/password is rejected inline.
