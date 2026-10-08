@@ -712,7 +712,7 @@ POST /hp/query                     # FREE REGISTER PROBE — read ONE caller-cho
                                    #   runs neither reading_plausible() nor the availability ledger,
                                    #   on purpose — a filter that hid an impossible answer would hide
                                    #   the evidence the probe exists to collect. So a probe can report
-                                   #   240.6 °C on a row Home Assistant correctly shows as unavailable.
+                                   #   240.6 °C on a row Home Assistant correctly shows as unknown.
                                    #   The two disagreeing is the tool working; never quote a probe
                                    #   number as a reading.
                                    #   While the X10A link is connected, Settings → Protocol → Protocol
@@ -842,9 +842,9 @@ command topics are subscribed. The bridge runs in its own task, independent of t
   decided by the value's converter, so **no key ever changes type** between states — a stopped fan
   publishes `0`, never `"OFF"`. Textual Daikin fault fields keep their text and gain permanently
   numeric `error_active` / `warning_active` companions, since a metrics store can hold neither
-  `"U4"` nor a bool. A value the firmware cannot honestly claim — a quarantined row, an unpopulated
-  field, or a reading the outdoor unit is no longer refreshing — is **omitted**, so Home Assistant
-  shows *unknown* rather than a plausible number nobody measured. See
+  `"U4"` nor a bool. A quarantined row gets no entity at all. A value the firmware cannot honestly
+  claim this cycle — an unpopulated field, or a reading the outdoor unit is no longer refreshing — is
+  **omitted**, and its entity reads *unknown* rather than a plausible number nobody measured. See
   [HOME_ASSISTANT.md](HOME_ASSISTANT.md#a-fields-json-type-never-changes).
 - **Diagnostics topics.** `<base>/heartbeat` (board/link health on a fixed 10 s cadence — a **flat**
   JSON of heap, uptime, WiFi/MQTT/bus counters, each field prefixed by its block name: `wifi_rssi`,
