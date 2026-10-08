@@ -116,8 +116,9 @@ history.cpp/.hpp    → the 24-hour trend rings: one fixed-cadence buffer per lo
                       host-tested logic/history.hpp. In .noinit DRAM rather than heap, so a reset
                       that KEPT POWER keeps the readings, and the five-minute append journal in
                       upper-flash `history` covers OTA and power loss. `.noinit` is sealed by the
-                      whole catalog fingerprint; flash also stores bounded semantic-id manifests,
-                      so unchanged series survive catalog insertion and reordering
+                      whole catalog fingerprint (a fold of every ring's semantic id) and the
+                      circulation witness's identity; flash also stores bounded semantic-id
+                      manifests, so unchanged series survive catalog insertion and reordering
 checkup.cpp/.hpp    → the 24-hour PLANT CHECKUP behind /status.health: counted EVENTS and window
                       MINIMA (compressor starts + mean run length, defrost share, pressure and flow
                       minima, backup-heater minutes, fault class, retry counters). Storage + mutex
@@ -1400,19 +1401,25 @@ A single task owns the X10A UART (there is exactly one link). Each cycle:
    instead of mistaking its recorded absences for unwritten leading scratch.
    Measurement history is no longer copied through browser `sessionStorage`; that storage keeps only
    the transient status/value render frame while an OTA is in flight. There is no sparse/coarse
-   fallback record. The `.noinit` path remains gated on a **catalog fingerprint** over every trend
-   id, kind, locator and the ring geometry, because its live rings are addressed only by index. Its
-   seal deliberately excludes the open bucket's `pending`: covering
-   it would leave the CRC stale for all but microseconds of every five minutes, so a crash — the case
-   this exists for most — would discard a day of intact readings essentially always.
+   fallback record. The `.noinit` path remains gated on a **catalog fingerprint**, because its live
+   rings are addressed only by index. The fingerprint is an order-sensitive fold of the ring geometry
+   and of every ring's semantic id (below) — one definition of what gives a ring its meaning, so a
+   field cannot be part of that meaning and missing from the fingerprint (the HomeHub event-folding
+   policy and the ENV III unit once were). Its seal deliberately excludes the open bucket's
+   `pending`: covering it would leave the CRC stale for all but microseconds of every five minutes,
+   so a crash — the case this exists for most — would discard a day of intact readings essentially
+   always.
 
    Flash keeps the same compact index-addressed five-minute records but makes each catalog generation
    self-describing with a separate **semantic-id manifest** per source. The id covers the public trend
-   id plus every field that changes a stored sample's meaning: source, locator, kind, converter and
-   unit for X10A; register and event-folding policy for HomeHub; id and unit for ENV III. Display
-   labels are deliberately excluded. Restore maps the current id to the stored index, so adding or
-   reordering a row preserves every unchanged curve while a genuinely new or reinterpreted series
-   alone starts empty. Duplicate ids, an unknown pre-manifest generation or a damaged manifest fail
+   id plus the fields of a stored sample's meaning that the catalog itself names: source, locator,
+   kind, the trend's own converter discriminator and unit for X10A (a row trend's decoding converter
+   lives in the per-profile `main/def/` row and is not in the id; see the X10A known limit below);
+   register, event-folding policy and the register's decoding (Modbus space, codec, divisor, unit)
+   for HomeHub; id and unit for ENV III. Display labels are deliberately excluded.
+   Restore maps the current id to the stored index, so adding or reordering a row preserves every
+   unchanged curve while a genuinely new or reinterpreted series alone starts empty. Duplicate ids,
+   an unknown pre-manifest generation or a damaged manifest fail
    closed. A manifest is written before a generation's next data record and refreshed once per
    24-hour ring, keeping a recent copy in the circular journal without repeating ids in every bucket.
    The current manifest is the one **appended last** (highest sequence, never highest bucket): a
@@ -1435,6 +1442,103 @@ A single task owns the X10A UART (there is exactly one link). Each cycle:
    while no X10A target is
    resolved; the live rings stay visible meanwhile, and their journal copy resumes once the
    reset is consumed.
+
+   **What a stored sample means is part of its identity where this firmware can name it.** Two facts
+   decide that and are not
+   repeated in every five-minute record, so each has a durable identity of its own:
+
+   * *The circulation witness.* Ring 31 (`circulation_state`) is not an X10A reading but the external
+     MQTT power witness of the DHW circulation pump, and an X10A record is scoped by the X10A target
+     alone. Remapping the witness (topic, JSON paths, freshness bound, ON/OFF thresholds,
+     confirmation time) or switching the diagnostics consent retired the RAM ring at once, but the
+     old topic's samples stayed in the journal under a scope that still matched and were spliced back
+     after the next boot. An X10A record therefore also names the **witness identity** its circulation
+     column was recorded under (`logic::history_circulation_identity`: a hash of exactly that mapping
+     plus the diagnostics generation — the display name and the broker connection are not part of it —
+     and zero when the source is not configured or not consented). It sits in the spare header bytes
+     `pad[8..11]` (header offsets 60..63), which every build left erased and none read: the writer
+     fills the slot with `0xff` first, the previous firmware's acceptance reads only the other fields
+     and the scope in `pad[0..3]` (offsets 52..55), and the record CRC hashes the header as stored, so
+     **a record that carries the identity is accepted and verified unchanged by the previous
+     firmware** (rollback-readable, pinned by a host test of the production predicates). Restore
+     accepts the circulation column of a record only for an exact match with the current non-zero
+     identity and never while a circulation reset is pending; a record of another witness, a record
+     from before the field (reads `0xffffffff`) and any record while the source is unconfigured or
+     opted out restore **no circulation samples**, while the other 31 X10A columns of the same record
+     restore as before. The splice re-checks the ring's identity under the history lock, so a reset
+     consumed between assembling a block and splicing it cannot let the retired witness's samples in.
+     The `.noinit` seal covers the identity of the ring it holds (persist version 3), and a mismatch
+     at startup retires only that ring. The writer stamps the identity of what the ring holds, not
+     the requested one, so a record written between a remap and the consumption of its reset still
+     names the retired witness. The identity is content-addressed: within one consent interval,
+     remapping the witness back to an earlier mapping makes that earlier period's samples restorable
+     again after a reboot, and a broker change that keeps the topic continues the series.
+   * *The HomeHub register's decoding.* The Modbus series id carries the register's space, codec,
+     divisor and unit, so a decode fix starts only that series empty. `logic/homehub_map.hpp` repeats
+     those columns (`logic/` takes no `def/` dependency) and the host gate closes the repetition
+     against both `def/` register tables, so a decode edit that does not reach it fails CI.
+
+   *The X10A scope ignores the trend catalog — a known limit.* The X10A target scope (profile id, RX
+   and TX pins, protocol; `logic::history_x10a_target_fingerprint`) deliberately takes no input from
+   `TRENDS` or from a profile's rows. It stamps every X10A record as a whole and is checked before the
+   manifest, so an input that moved with a trend insertion, reorder or single-row decode fix would
+   discard every X10A series at each such change instead of only the one that changed. As it is, an
+   inserted or reordered trend maps the unchanged series through the manifest, and a host test pins
+   both that and the scope's value. The cost: an X10A decode fix shipped under an unchanged series id
+   (a trend names its row by page, offset and unit and leaves the converter to the per-profile
+   `main/def/` row) keeps the old-scale samples of that series until they leave the 24-hour window,
+   at most a day after the update. A per-series decode identity closes this and is an open follow-up
+   pending an owner decision (whether the plant series may restore before the first detection of a
+   boot).
+
+   **Upgrade note — what restarts once.** This build moved the HomeHub series ids (they now carry the
+   register's decoding), the catalog fingerprint (now a fold of every ring's semantic id) and the
+   `.noinit` persist version. The X10A target scope and the X10A series ids did not move. On the
+   first boot of the build that introduced these identities:
+
+   * *X10A history carries over*: its scope is unchanged and the previous generation's records are
+     read through the manifest that build wrote. Their circulation column restores nothing — those
+     records carry no witness identity, which fails closed — so the circulation chart starts empty
+     once; the other 31 X10A columns of the same records restore.
+   * *HomeHub history starts empty once*: its series ids moved, so no record of the previous
+     generation maps.
+   * *ENV III history carries over*: its ids did not move.
+   * *The `.noinit` history copy is refused once*, and the flash journal refills what still matches.
+     The RAM-only stores that follow the history region (the open checkup hour, the DHW loss-candidate
+     handoff, the per-row state ages) restart once, as with any update that moves `.noinit`;
+     completed checkup hours come back from the checkup journal.
+
+   The heat pump, HomeHub and ENV III readings themselves are unaffected.
+
+   *Before a boot's first detection, and across a rollback.* Until the boot's first detection the
+   X10A scope is the identity persisted in the link blob. Both builds derive it from the same four
+   inputs, so each restores the other's X10A records from the first SNTP sync on, without waiting for
+   detection. Going back to the previous build: it accepts and verifies every record this build wrote
+   (the circulation identity sits in header bytes it never reads) and restores this build's X10A
+   records — same scope, same series ids — including the circulation column, which that build
+   restores without the identity gate (its old rule, so a witness retired here within the last 24
+   hours can reappear there). It cannot map this build's HomeHub records, whose ids differ, so the
+   period this build ran stays a gap there; its own HomeHub records from before the update still
+   restore while they are inside the 24-hour window. The rollback also refuses the `.noinit` history
+   copy again (persist version 3 against 2) and moves the stores after it back, so the RAM-only
+   stores restart a second time.
+
+   *ENV III has no target identity — a documented limit.* The sensor exposes no readable serial in
+   this firmware, and its history is neither scoped in flash nor in the `.noinit` seal. A swap or
+   relocation of the sensor is therefore not distinguishable and continues the series. Enabling,
+   disabling or moving the SDA/SCL pair is a configuration save that reboots (`/set_env3`) and never
+   reaches the history code: there is no reset. Flash is unscoped and wall-clock anchored, so when no
+   RAM copy of the ENV III ring survived the reboot (power loss, or an update that moved `.noinit`)
+   the stored records are spliced at their true buckets with explicit gaps where the sensor produced
+   nothing. Known limit: while the sensor is disabled nothing advances its raster, and every
+   power-preserving reboot (the `/set_env3` save itself, an update) re-adopts the frozen `.noinit`
+   ring and re-anchors its newest sample at the boot instant; the journal writer, which has no
+   enabled gate, then also records those samples under the recent buckets. After re-enabling a sensor
+   that was disabled across such reboots, samples from before the disable can therefore appear as the
+   hours just before the re-enable, and a later power cycle restores them from flash rather than
+   dropping them; they leave the chart only with the 24-hour window. A fix (an enabled flag in the
+   `.noinit` seal that retires the ring and stops its journal append) is an open follow-up. (Read
+   from the code path; not exercised on a board.)
 
    A journal cursor, or a restore window, ahead of the clock is **reported, never rewritten**.
    Records beyond the clock are never restored, and the writer of the affected source appends
@@ -3756,9 +3860,12 @@ GET  /history?row=<trend id>[&source=x10a|modbus|env3]   one source's 24-hour se
                   board and MQTT-witness arrays leave `held` empty. `b0`, when a raster anchor exists,
                   is the monotonic 5-minute bucket of sample zero and aligns all source rasters exactly;
                   `t0` is the wall-clock instant of sample 0, derived at SERVE time
-                  from the current clock and the sample count (the ring advances on the MONOTONIC
-                  clock, so it survives SNTP setting the time mid-boot) and OMITTED when the clock
-                  has never synced — the UI then reads out an age rather than a fabricated time,
+                  from the current clock and the age of the newest sample (the ring advances on the
+                  MONOTONIC clock, so it survives SNTP setting the time mid-boot). That age and
+                  `b0` are captured in the SAME critical section as the samples
+                  (`history_snapshot`'s `HistoryMeta`), so a bucket commit cannot land between the
+                  copy and its time axis and shift sample zero by one bucket. `t0` is OMITTED when
+                  the clock has never synced — the UI then reads out an age rather than a fabricated time,
                   the same refusal logic/timestamp.hpp makes. An unknown id is 404, never a
                   defaulted trend. Sent in CHUNKS (~1.1 kB body): smaller than the model-dependent
                   `/values` body, but still a new allocation on a heap whose largest contiguous block is the real

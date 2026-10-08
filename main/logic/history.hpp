@@ -400,6 +400,47 @@ constexpr int64_t history_t0(int64_t now_unix, uint32_t newest_age_s, size_t n, 
                     - static_cast<int64_t>(n ? n - 1 : 0) * static_cast<int64_t>(dt);
 }
 
+// The two facts the route needs BESIDE a series' samples to place them on the time axis: how long
+// ago the newest one was committed (-> t0, above) and the monotonic bucket of sample zero (-> b0,
+// the exact alignment key between sources). Both are functions of the SAME commit as the samples,
+// so they have to be read in the SAME critical section: taken afterwards, under a separate lock, a
+// bucket commit landing in between has already shifted the ring by one slot — sample zero is then
+// one bucket younger than the t0/b0 printed for it, and every timestamp in the response is a bucket
+// off with nothing to show it (HIST-01/e). history.cpp fills this next to the copy; the route uses
+// nothing else.
+struct HistoryMeta {
+    int32_t newest_age_s  = -1; // whole seconds since the newest commit; -1 = nothing committed
+    int64_t oldest_bucket = -1; // monotonic bucket of sample zero; -1 = empty or unknown
+};
+
+// "Nothing has been committed on this source" on the monotonic microsecond axis. It is INT64_MIN
+// rather than zero or -1 because a commit restored from flash legitimately predates this boot's
+// zero and so reads NEGATIVE: no ordinary value below zero can mean "none".
+constexpr int64_t HISTORY_NO_COMMIT_US = INT64_MIN;
+
+// `last_commit_us` is the newest commit on the monotonic clock (HISTORY_NO_COMMIT_US = none) and
+// `last_commit_bucket` its bucket (negative = none); `n` is the sample count copied. A clock that
+// reads before the commit yields age 0, never a negative age; an empty copy has no sample zero.
+constexpr int32_t history_meta_newest_age_s(int64_t now_us, int64_t last_commit_us) {
+    if (last_commit_us == HISTORY_NO_COMMIT_US) return -1;
+    const int64_t age_us = now_us - last_commit_us;
+    return age_us < 0 ? 0 : static_cast<int32_t>(age_us / 1000000);
+}
+
+constexpr int64_t history_meta_oldest_bucket(int64_t last_commit_bucket, size_t n) {
+    return last_commit_bucket >= 0 && n ? last_commit_bucket - static_cast<int64_t>(n - 1) : -1;
+}
+
+// Both at once, for the tests and any caller that wants the pair; history.cpp fills the two fields
+// directly so no struct temporary lands on the stack of the httpd task's /history path.
+constexpr HistoryMeta history_snapshot_meta(int64_t now_us, int64_t last_commit_us,
+                                            int64_t last_commit_bucket, size_t n) {
+    HistoryMeta m;
+    m.newest_age_s  = history_meta_newest_age_s(now_us, last_commit_us);
+    m.oldest_bucket = history_meta_oldest_bucket(last_commit_bucket, n);
+    return m;
+}
+
 // Which sample a PINNED readout refers to, after the ring may have rolled under it.
 //
 // The web UI lets a tap pin the crosshair so the value stays readable without holding a finger
