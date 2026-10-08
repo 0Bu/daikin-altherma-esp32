@@ -151,6 +151,13 @@ const failed = at(setHp, /if \(saved != ConfigSaveResult::Saved\)/, conflict);
 const reconfigure = at(setHp, /hp_poll_reconfigure\(\);/, failed);
 assert.ok(parsed >= 0 && released > parsed,
   "the request must be parsed once and its JSON released before the attempts");
+// A request that mixes X10A and HomeHub fields is refused before any attempt: the link-only X10A
+// save would publish the HomeHub fields to RAM without ever writing them to "cfg".
+const mixedReject = at(setHp,
+  /if \(!set_hp_update_domains_compatible\(x10a_sent, homehub_sent\)\) \{\s*j\.reset\(\);\s*return send_err\(req, "400 Bad Request",\s*"update X10A and HomeHub in separate requests"\);\s*\}/,
+  parsed);
+assert.ok(mixedReject > parsed && released > mixedReject,
+  "a mixed X10A + HomeHub /set_hp must answer 400 before the save attempts begin");
 assert.ok(snapshot > released && derive > snapshot && linkSave > derive,
   "each attempt must derive the X10A patch from its own fresh config() snapshot");
 assert.ok(retry > linkSave && conflict > retry && failed > conflict && reconfigure > failed,

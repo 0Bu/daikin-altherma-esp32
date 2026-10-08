@@ -308,7 +308,10 @@ inline void reconcile_detected_config(Config& c, const Config& current) {
 //     write lands, a link-cache maintenance failure must not turn the already-committed request
 //     into a false HTTP 500;
 //   * an X10A /set_hp owns the link and therefore requires its atomic link entry. It writes no
-//     service blob at all (config_save_transaction passes blob_ok = true for it).
+//     service blob at all.
+//
+// config_save_transaction passes blob_ok = true for every caller: a failed service write returns
+// before the link is attempted, and an X10A save has no service blob to fail.
 //
 // Kept pure so the distinction cannot silently collapse back to "any cache error means nothing was
 // saved" (logic/config_transaction.hpp).

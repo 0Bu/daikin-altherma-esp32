@@ -57,12 +57,13 @@ template <typename F> auto with_config(F&& f) -> decltype(f(std::declval<const C
 // Load from NVS, seeding any missing key from its Kconfig default.
 void config_load();
 
-// All three writers below are [[nodiscard]], for the reason nvs_storage.hpp's setters carry it one
-// layer down: a dropped result is silent, and only the caller knows what the failure costs. A
-// /set_* handler that ignores it answers 200 and reboots as if the write landed — precisely what
-// AGENTS.md's "Configuration writes are atomic and fallible. Check every result" forbids. Every
-// call site checks today; the attribute is what makes the next one a build error rather than a
-// review catch, and main/CMakeLists.txt already pins -Werror=unused-result on this component.
+// The four fallible writers below (config_save, config_save_link and the two detection commits) are
+// [[nodiscard]], for the reason nvs_storage.hpp's setters carry it one layer down: a dropped result
+// is silent, and only the caller knows what the failure costs. A /set_* handler that ignores it
+// answers 200 and reboots as if the write landed — precisely what AGENTS.md's "Configuration writes
+// are atomic and fallible. Check every result" forbids. Every call site checks today; the
+// attribute is what makes the next one a build error rather than a review catch, and
+// main/CMakeLists.txt already pins -Werror=unused-result on this component.
 
 // Persist the given config to NVS. The credential/service/board/channel fields are one atomic blob;
 // the X10A link cache (RX/TX/proto/history identity) is a separate self-healing durability domain.

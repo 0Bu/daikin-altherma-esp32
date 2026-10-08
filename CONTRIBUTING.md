@@ -86,8 +86,8 @@ sanitizer/property runner drives deterministic malformed frames, JSON, URLs and 
 through the same pure logic. It first probes ASan+UBSan as a runtime capability; CI requires both,
 while a local host falls back to UBSan only when its ASan compile/runtime probe fails.
 
-`run-runtime-integration-tests.sh` calls selected production parsers and serializers through
-host-only fake clock, storage, serial, TCP, broker and HTTP adapters. Its thirteen deterministic
+`run-runtime-integration-tests.sh` calls selected production parsers, serializers and config save
+transactions through host-only fake clock, storage, serial, TCP, broker and HTTP adapters. Its thirteen deterministic
 scenarios comprise ten adapter/body cases for failed saves, config save boundaries and their
 allocation witness, reconstruction, allocation failure,
 scheduling, fragmented X10A and Modbus, MQTT lifecycle and bounded body/chunk handling, plus three

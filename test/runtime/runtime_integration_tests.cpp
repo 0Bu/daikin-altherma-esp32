@@ -2,6 +2,7 @@
 
 #include <cstdlib>
 #include <iostream>
+#include <new>
 #include <sstream>
 
 namespace {
@@ -71,6 +72,17 @@ daik::Config with_pins(daik::Config snapshot, int rx, int tx) {
     patch.tx_sent = true;
     patch.tx      = tx;
     bool reset    = false;
+    CHECK(daik::set_hp_apply_x10a(snapshot, patch, reset));
+    return snapshot;
+}
+
+// The other X10A edit: pinning a concrete model profile. The id is a RAM-only string longer than
+// the small-string buffer, so a save that takes it must replace live's "auto" buffer.
+daik::Config with_profile(daik::Config snapshot, const char* profile) {
+    daik::SetHpX10aPatch patch;
+    patch.profile_sent = true;
+    patch.profile      = profile;
+    bool reset         = false;
     CHECK(daik::set_hp_apply_x10a(snapshot, patch, reset));
     return snapshot;
 }
@@ -355,10 +367,15 @@ void test_config_save_failure_boundaries() {
 }
 
 void test_config_transactions_allocate_nothing_after_first_write(bool mutate_late_allocation) {
-    // The global allocation functions of this binary count every allocation while a transaction's
-    // store is alive. Whatever can throw must happen before the first durable write, so nothing may
-    // allocate once it has begun — on success or on any failure that follows it. Staging must have
-    // allocated, otherwise a zero would only show that the counter is blind.
+    // The global allocation functions of this binary count the calling thread's allocations while a
+    // transaction's store is alive. Whatever can throw must happen before the first durable write,
+    // so nothing may allocate once it has begun — on success or on any failure that follows it.
+    // Staging must have allocated, otherwise a zero would only show that the counter is blind.
+    // Reach: the paths below only. A late allocation shows as soon as it happens, but a publication
+    // that copies instead of moving allocates only when the new value outgrows the buffer it
+    // replaces, so the scenarios that publish a longer string (the service saves and the X10A
+    // profile pin) are the ones that prove the move; the pin-only and detected-link scenarios
+    // publish no string.
     auto expect_quiet = [&](const ConfigCoordinator& coordinator, size_t writes) {
         const TransactionWitness& witness = coordinator.witness();
         CHECK_EQ(witness.writes, writes);
@@ -401,6 +418,19 @@ void test_config_transactions_allocate_nothing_after_first_write(bool mutate_lat
         Scenario s(mutate_late_allocation);
         CHECK_EQ(s.coordinator.save(with_pins(s.coordinator.snapshot(), 10, 11), true).result,
                  daik::ConfigSaveResult::Saved);
+        expect_quiet(s.coordinator, 1);
+    }
+    { // X10A save: publishing a longer string than live holds. Publication by copy would have to
+      // allocate here (copy-assigning an equal string reuses its buffer and would go unseen), so
+      // this scenario, like the service saves above, is what proves the move.
+        Scenario s(mutate_late_allocation);
+        CHECK_EQ(s.coordinator
+                     .save(with_profile(s.coordinator.snapshot(),
+                                        "altherma_erga_e_ehv_ehb_ehvz_e_ej_series_04_08kw"),
+                           true)
+                     .result,
+                 daik::ConfigSaveResult::Saved);
+        CHECK_EQ(s.coordinator.snapshot().profile.size(), size_t{48});
         expect_quiet(s.coordinator, 1);
     }
     { // X10A save: the "link" write fails
@@ -724,16 +754,38 @@ struct TestCase {
 
 } // namespace
 
-// Count every allocation of this binary for the allocation witness in fake_runtime.hpp. Counting is
-// per thread and only while a transaction's store is armed, so nothing else is affected; these are
-// the only global allocation functions the program defines.
+// Count the allocations of this binary for the allocation witness in fake_runtime.hpp. Counting is
+// per thread and only while a transaction's store is armed, so nothing else is affected. Every
+// replaceable plain form — scalar, array and nothrow — is defined here and forwards to the scalar
+// one, which is the only place that allocates or counts, so no allocation can be freed by a
+// mismatched deallocator should a sanitizer ever be added. Over-aligned forms are not replaced:
+// they keep their library allocator pair, are not counted, and are not used by the code under test.
 void* operator new(std::size_t size) {
     runtime_test::allocation_trap_hit();
     if (void* memory = std::malloc(size != 0 ? size : 1)) return memory;
     throw std::bad_alloc();
 }
+void* operator new[](std::size_t size) { return ::operator new(size); }
+void* operator new(std::size_t size, const std::nothrow_t&) noexcept {
+    try {
+        return ::operator new(size);
+    } catch (...) {
+        return nullptr;
+    }
+}
+void* operator new[](std::size_t size, const std::nothrow_t&) noexcept {
+    try {
+        return ::operator new(size);
+    } catch (...) {
+        return nullptr;
+    }
+}
 void operator delete(void* memory) noexcept { std::free(memory); }
 void operator delete(void* memory, std::size_t) noexcept { std::free(memory); }
+void operator delete[](void* memory) noexcept { ::operator delete(memory); }
+void operator delete[](void* memory, std::size_t) noexcept { ::operator delete(memory); }
+void operator delete(void* memory, const std::nothrow_t&) noexcept { ::operator delete(memory); }
+void operator delete[](void* memory, const std::nothrow_t&) noexcept { ::operator delete(memory); }
 
 int main(int argc, char** argv) {
     bool mutate_atomicity            = false;

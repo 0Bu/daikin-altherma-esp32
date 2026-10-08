@@ -52,8 +52,10 @@ scenarios call selected production config transactions and serializers, X10A/Mod
 gating and bounded body/chunk logic through simulated clock, storage, serial, TCP, broker and HTTP adapters.
 Ten model failed saves and reconstruction, the config save failure boundaries (RAM, durable entries and
 result asserted together, including that an X10A save never writes `cfg`), an allocation witness that
-counts every allocation of the binary and requires none after a config transaction's first durable
-write, allocation failure, task interleavings, fragmentation,
+counts the calling thread's `operator new` allocations (the array and nothrow forms forward to the
+scalar one) while a transaction's store is alive
+(the fake's own bookkeeping paused) and requires none after the transaction's first durable write
+on the witnessed paths, allocation failure, task interleavings, fragmentation,
 reconnect/retain/LWT behavior and incomplete HTTP framing. The fake NVS follows IDF v6.1: `nvs_set_blob`
 is write-through and a failed set keeps the previous value, while `nvs_commit` is a no-op, so no
 staged-commit failure exists to model. Two deadline scenarios use real POSIX `socketpair`/`recv`
@@ -62,7 +64,8 @@ watchdog applies `shutdown(SHUT_RDWR)` and is joined before the descriptors are 
 socket scenario trickles a body still owed after the response: `http_body_discard()` must stop at its
 budget, settle a small buffered remainder and refuse more than its byte cap. Mutations
 independently disable the header and body watchdog and the discard deadline, let a failed NVS set
-replace the stored value, and allocate after a config transaction's first write. The harness remains hardware-free and does not
+replace the stored value, allocate after a config transaction's first write, and disable the Weather
+body-completion gate. The harness remains hardware-free and does not
 execute ESP-IDF target glue, real NVS or the production MCP/HTTP/MQTT stacks; target builds and
 separately authorized hardware acceptance remain distinct proof layers.
 
@@ -431,9 +434,12 @@ One entry per `test_*()` in [`test_logic.cpp`](test_logic.cpp), in the order `ma
   carries detection forward. An X10A save writes ONLY `link` (zero `cfg` writes even when one would
   fail), a failed `link` write leaves RAM and both durable entries untouched, a Stale one writes
   nothing, and a RAM config that `config_load` sanitised (ENV III disabled) leaves the durable `cfg`
-  byte-identical. The detected-link commit refuses a stale revision, skips an unchanged link, writes
-  each of the four changed fields, and still applies the proven link when only the cache write
-  fails. `config_blob_from` is checked field by field.
+  byte-identical; an over-long RAM string the service blob could not hold does not block that pin
+  repair, and the revision counter wraps past zero on publication. The detected-link commit refuses
+  a stale revision, skips an unchanged link, writes each of the four changed fields, and still
+  applies the proven link when only the cache write fails; the detected-model commit is
+  revision-checked, RAM only and leaves every other field alone. `config_blob_from` is checked field
+  by field.
 - `logic/lwt_select.hpp` — the web UI's leaving-water MEASUREMENT picker (twin of `www/js/schematic.js`
   `vLwt`): the pre-BUH heat-exchanger outlet (R1T) is chosen over a setpoint, a mixed-zone R1T, or
   the post-BUH (R2T) twin, across the four alias label forms — and, catalog-wide, every detectable

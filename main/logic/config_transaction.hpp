@@ -13,8 +13,10 @@
 //
 // Two durability domains share one config mutex, which the CALLER holds around every call here:
 //
-//   "cfg"  — the credential/service blob (logic/config_store.hpp). Its writers are the HTTP /set_*
-//            routes; a service save requires it.
+//   "cfg"  — the credential/service blob (logic/config_store.hpp). Its writers are the service
+//            /set_* routes and the boot-time saves that finish before httpd starts (the WiFi
+//            rollback/success commits, the initial HomeHub discovery); a service save requires it.
+//            An X10A /set_hp never writes it.
 //   "link" — the X10A link cache (RX/TX pins, protocol, observation identity). Its writers are the
 //            detection commit and an X10A /set_hp; a service save only maintains it.
 #include <cstddef>
@@ -129,11 +131,13 @@ inline ConfigBlob config_blob_from(const Config& c) {
 //
 //  * A service save requires "cfg" and only maintains "link" (a cache failure after the service
 //    blob landed must not turn the committed request into a false failure). An X10A save changes
-//    only link and model fields, so it writes ONLY "link" and requires it. It neither builds nor
-//    writes "cfg": the RAM view it holds also carries the sanitising config_load applied without
-//    persisting (rejected board pins, a colliding ENV III mapping, an unusable weather location),
-//    and rewriting that view would persist the fallbacks over the user's stored settings. Its
-//    failure is also free of side effects: no durable entry changes and RAM stays as it was.
+//    only link and model fields (/set_hp rejects a request that mixes in HomeHub fields, which
+//    would reach RAM but never "cfg"), so it writes ONLY "link" and requires it. It neither builds
+//    nor writes "cfg": the RAM view it holds also carries the sanitising config_load applied
+//    without persisting (for example rejected board pins, a colliding ENV III mapping or an
+//    unusable weather location), and rewriting that view would persist the fallbacks over the
+//    user's stored settings. Its failure is also free of side effects: no durable entry changes
+//    and RAM stays as it was.
 //  * The only concurrent writer is auto-detection, so a snapshot older than a detection commit is
 //    decided by config_save_revision under the mutex: a service save carries the detected link and
 //    model forward, an X10A save (which derived its model fields from that snapshot) is refused as

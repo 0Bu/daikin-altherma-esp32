@@ -257,7 +257,7 @@ void config_load() {
     }
     // Before blob v12 the separate `board_set` key recorded only that the hardware form had been
     // submitted. Recover the same preset name that old UI derived from the stored fields, but never
-    // infer from untouched defaults (`board_set` absent/false). The next ordinary save writes the
+    // infer from untouched defaults (`board_set` absent/false). The next service save writes the
     // explicit id atomically into the current blob.
     if (blob_loaded && !b.has_board_identity) {
         c.board_user_set = nvs_get_i32("board_set", 0) != 0;
@@ -393,10 +393,10 @@ static_assert(ESP_OK == 0, "the transactions read a zero store code as success")
 // The one whole-struct save behind config_save (owns_link=false) and config_save_link (true); see
 // config.hpp for each caller's contract and logic/config_transaction.hpp for the transaction. The
 // MODEL (profile + fingerprint fp_*) is never written — it is re-derived every boot. Every runtime
-// call is serialized on the httpd task; initial HomeHub discovery is the one boot call and finishes
-// before httpd starts. The lock also serializes the write with detection's field-owned commit, so
-// RAM and the atomic link entry keep one ordering when /set_hp races a long detection sweep; the
-// flash write is rare and may hold readers briefly.
+// call is serialized on the httpd task; the boot-time saves (the WiFi rollback and success commits,
+// initial HomeHub discovery) finish before httpd and the poll task start. The lock also serializes
+// the write with detection's field-owned commit, so RAM and the atomic link entry keep one ordering
+// when /set_hp races a long detection sweep; the flash write is rare and may hold readers briefly.
 static ConfigSaveResult save_whole(const Config& requested, bool owns_link) {
     ConfigSaveOutcome out;
     {
