@@ -55,7 +55,9 @@ esp_err_t nvs_set_str(const char* key, const std::string& val) {
     esp_err_t e = ::nvs_open(NS, NVS_READWRITE, &h);
     if (e != ESP_OK) return e;
     e = ::nvs_set_str(h, key, val.c_str());
-    if (e == ESP_OK) e = ::nvs_commit(h);   // the set is only durable once committed
+    // The NVS API contract requires a commit and this wrapper honours it. On IDF v6.1 the set is
+    // already durable (write-through) and the commit returns ESP_OK for a valid handle.
+    if (e == ESP_OK) e = ::nvs_commit(h);
     ::nvs_close(h);
     return e;
 }
@@ -113,7 +115,8 @@ esp_err_t nvs_erase_all() {
         return e;
     }
     e = ::nvs_erase_all(h);
-    if (e == ESP_OK) e = ::nvs_commit(h);   // same as every setter: the erase is durable only on commit
+    // Same as every setter: the API requires the commit; on IDF v6.1 the erase is already durable.
+    if (e == ESP_OK) e = ::nvs_commit(h);
     ::nvs_close(h);
     if (e != ESP_OK) s_writes_disabled.store(false, std::memory_order_release);
     return e;

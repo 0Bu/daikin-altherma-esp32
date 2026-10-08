@@ -534,18 +534,23 @@ assert.match(weather,
   "a pending handoff must remain truthfully visible as an active Weather network interval");
 
 // config_save() must not discover another allocation failure after the first durable write. Stage
-// both serialized blobs and the exact RAM successor first; publication after NVS is a noexcept move.
-// Its body is save_whole(), shared with the X10A config_save_link().
-const configSaveStart = configSource.indexOf("static ConfigSaveResult save_whole(");
-const configSaveEnd = configSource.indexOf("\nbool config_save(const Config& c)", configSaveStart);
-const configSaveBody = configSource.slice(configSaveStart, configSaveEnd);
+// both serialized blobs and the exact RAM successor first; publication after the writes is a noexcept
+// move. The sequence is config_save_transaction(), which save_whole() runs for both config_save and
+// the X10A config_save_link() (the X10A path skips the service blob but stages the same way).
+const transactionSource = read("main/logic/config_transaction.hpp");
+const configSaveStart = transactionSource.indexOf("ConfigSaveOutcome config_save_transaction(");
+const configSaveEnd = transactionSource.indexOf("\ntemplate <class Store>", configSaveStart);
+const configSaveBody = transactionSource.slice(configSaveStart, configSaveEnd);
 const serviceSerialize = configSaveBody.indexOf("config_blob_serialize(b)");
 const linkSerialize = configSaveBody.indexOf("link_blob_serialize(", serviceSerialize);
-const stagedConfigMatch = configSaveBody.slice(linkSerialize).search(/Config\s+published\s*=\s*c/);
+const stagedConfigMatch = configSaveBody.slice(linkSerialize)
+  .search(/Config\s+published\s*=\s*std::move\(c\)/);
 const stagedConfig = stagedConfigMatch < 0 ? -1 : linkSerialize + stagedConfigMatch;
-const serviceWrite = configSaveBody.indexOf('nvs_set_blob("cfg"', stagedConfig);
-const linkWrite = configSaveBody.indexOf('nvs_set_blob("link"', serviceWrite);
-const ramPublish = configSaveBody.indexOf("g_cfg = std::move(published)", linkWrite);
+const serviceWrite = configSaveBody.indexOf("store.write_blob(CONFIG_KEY_SERVICE", stagedConfig);
+const linkWrite = configSaveBody.indexOf("store.write_blob(CONFIG_KEY_LINK", serviceWrite);
+const ramPublishMatch = configSaveBody.slice(linkWrite)
+  .search(/live\s*=\s*std::move\(published\)/);
+const ramPublish = ramPublishMatch < 0 ? -1 : linkWrite + ramPublishMatch;
 assert.ok(configSaveStart >= 0 && configSaveEnd > configSaveStart && serviceSerialize >= 0 &&
   linkSerialize > serviceSerialize && stagedConfig > linkSerialize && serviceWrite > stagedConfig &&
   linkWrite > serviceWrite && ramPublish > linkWrite,
@@ -553,6 +558,8 @@ assert.ok(configSaveStart >= 0 && configSaveEnd > configSaveStart && serviceSeri
 assert.match(configSaveBody,
   /static_assert\(std::is_nothrow_move_assignable_v<Config>/,
   "the only post-NVS Config publication operation must be statically non-throwing");
+assert.match(configSource, /config_save_transaction\(g_cfg, requested, owns_link, store\)/,
+  "save_whole must run the transaction whose staging order is pinned above");
 
 const cleanupStart = mqtt.indexOf("static RetainedCleanupCycle service_requested_topic_cleanup(");
 const cleanupEnd = mqtt.indexOf("\n}\n\nstatic void publish_weather_state", cleanupStart);

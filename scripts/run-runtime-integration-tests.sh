@@ -61,6 +61,10 @@ assert_mutation_detected \
     "nvs atomic save, reboot and failures" \
     "NVS atomicity"
 assert_mutation_detected \
+    --mutate-config-late-allocation \
+    "config transactions allocate nothing after the first write" \
+    "config late-allocation witness"
+assert_mutation_detected \
     --mutate-http-header-deadline \
     "HTTP absolute deadline stops trickling headers" \
     "HTTP slow-header deadline"
