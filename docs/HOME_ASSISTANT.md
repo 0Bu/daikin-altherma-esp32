@@ -578,13 +578,13 @@ nobody measured:
 > - an absent key left numeric and binary entities at their last value and text entities empty;
 > - an absent group left every entity of that page at its last value, with a template error in the
 >   Home Assistant log on each message. The outdoor sensor and inverter pages are absent during every
->   compressor rest.
+>   detected compressor rest.
 >
 > These entities now read *unknown* while their values are withheld. Their history shows gaps,
-> long-term statistics skip those intervals, and `numeric_state` automations see *unknown*. Use
-> *Outdoor Data Held Over* to tell a compressor rest apart from a fault. An entity that sat at one
-> flat value since an earlier release now drops to *unknown* as well; the upgrade notes above apply
-> from this firmware on.
+> entities with long-term statistics skip those intervals, and `numeric_state` automations see
+> *unknown*. Use *Outdoor Data Held Over* to tell a compressor rest apart from a fault. An entity
+> that sat at one flat value since an earlier release now drops to *unknown* as well; the upgrade
+> notes above apply from this firmware on.
 
 ### Protection retries & drop control (new entities)
 

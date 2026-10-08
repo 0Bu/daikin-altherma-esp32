@@ -232,9 +232,9 @@ inline std::string availability_topic(const std::string& base) {
 // `.get(…, {})` and `.get(…, 'None')` never touch an undefined value, and the literal `None` is
 // HA's PAYLOAD_NONE, which MQTT sensors (before any numeric or text handling) and binary sensors
 // map to `unknown` (`_update_state` in homeassistant/components/mqtt/sensor.py and the state
-// handler in binary_sensor.py, Home Assistant core, read 2026-10-08). Quoted string arguments keep
-// a digit-leading slug such as "2way_valve…" valid. test_discovery pins that no converter text is
-// the literal "None", which would otherwise read `unknown` too.
+// handler in binary_sensor.py, Home Assistant core dev branch as of 2026-10-08). Quoted strings
+// keep a digit-leading slug such as "2way_valve…" valid. test_discovery pins that no converter text
+// is the literal "None", which would otherwise read `unknown` too.
 inline void append_x10a_value_template(std::string& j, const std::string& group, const char* key) {
     j += "{{ value_json.get('";
     j += group;
