@@ -8,9 +8,9 @@
 namespace daik {
 
 // A consistent snapshot of the live config, copied under the internal mutex. Valid after
-// config_load(). Returns by value so concurrent writers (config_save / config_set_runtime, called
-// from the HTTP and poll tasks) can never expose a torn Config to a reader; bind it with
-// `const Config& c = config();` to keep the snapshot alive for the scope.
+// config_load(). Returns by value so concurrent writers (config_save / config_save_link on the
+// httpd task, the detection commits on the poll task) can never expose a torn Config to a reader;
+// bind it with `const Config& c = config();` to keep the snapshot alive for the scope.
 Config config();
 
 // Allocation-free snapshot for the UART owner. A full Config copy includes many std::strings and
@@ -99,10 +99,6 @@ enum class ConfigSaveResult : uint8_t { Saved, Stale, Failed };
 // fingerprint WITHOUT touching NVS or overwriting concurrently detected link settings. Used by POST
 // /detect.
 void config_reset_detection();
-
-// Publish a whole config to the in-RAM singleton WITHOUT touching NVS. Whole-struct like
-// config_save, so the same rule applies: httpd task only.
-void config_set_runtime(const Config& c);
 
 // ── Build/hardware facts read from Kconfig, exposed so logic/board_pins.hpp's octal_spi input comes
 // from ONE place (this file) instead of a #if block copied into each call site; logic/ must not see
