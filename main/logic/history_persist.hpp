@@ -357,6 +357,60 @@ inline constexpr size_t history_journal_write_slot(size_t next_slot, bool candid
         ? next_slot : history_journal_next_sector_slot(next_slot);
 }
 
+// A slot whose erase, program or readback fails is retried once — a transient SPI-flash error is
+// real — and then abandoned together with the rest of its sector. Without a limit the same slot was
+// re-erased, re-programmed and re-logged on EVERY poll tick (the diag ring is only 6 KB, so one bad
+// sector evicted every other line) while the cursor never advanced and nothing after it was ever
+// persisted. The next sector's first slot is the only safe landing: the sector the failure is in
+// may hold the head's committed predecessors, and that one is erased by the ordinary rotation
+// anyway.
+//
+// Abandoning is itself destructive, though: the landing sector is ERASED before the next program
+// attempt, which retires the oldest slots of the journal. A fault that is not local to one sector
+// (the erase succeeds, the program or its readback fails everywhere) would therefore carry the
+// cursor round the whole ring, erasing every sector on the way: one lap is the sector count times
+// HISTORY_JOURNAL_SLOT_RETRY_LIMIT poll ticks, and afterwards no retained history is left. One
+// failure episode — the failures since the last successful append — may thus abandon at most
+// HISTORY_JOURNAL_MAX_ABANDONED_SECTORS. Beyond that the cursor stays on the failing slot and the
+// writer is PAUSED: one attempt per HISTORY_JOURNAL_PAUSED_RETRY_S until an append succeeds. The
+// erase damage of an episode is bounded by that cap (one landing sector per abandon), however
+// long the fault lasts, and a fault that does clear heals by itself.
+inline constexpr size_t   HISTORY_JOURNAL_SLOT_RETRY_LIMIT      = 2;
+inline constexpr size_t   HISTORY_JOURNAL_MAX_ABANDONED_SECTORS = 2;
+inline constexpr uint32_t HISTORY_JOURNAL_PAUSED_RETRY_S        = 60;
+
+inline constexpr size_t history_journal_slot_after_failure(size_t slot,
+                                                           size_t consecutive_failures) {
+    return consecutive_failures >= HISTORY_JOURNAL_SLOT_RETRY_LIMIT
+               ? history_journal_next_sector_slot(slot)
+               : slot;
+}
+
+// The decision after one failed append at `slot`. `consecutive_failures` counts the failures at
+// that slot (this one included), `abandoned_in_episode` the sectors this episode has abandoned so
+// far. Once the budget is spent every failure pauses: the throttle (history_journal_retry_due)
+// already makes each later attempt a retry, so there is no immediate second try.
+struct HistoryJournalFailureStep {
+    size_t next_slot; // where the next append attempt goes
+    bool   paused;    // the abandon budget is spent: stay on `next_slot` and retry slowly
+};
+inline constexpr HistoryJournalFailureStep
+history_journal_failure_step(size_t slot, size_t consecutive_failures,
+                             size_t abandoned_in_episode) {
+    if (abandoned_in_episode >= HISTORY_JOURNAL_MAX_ABANDONED_SECTORS) return {slot, true};
+    return {history_journal_slot_after_failure(slot, consecutive_failures), false};
+}
+
+// May the writer attempt an append now? Always, unless it is paused: then at most one attempt per
+// HISTORY_JOURNAL_PAUSED_RETRY_S of the monotonic clock since the previous attempt.
+// `last_attempt_us` is INT64_MIN when no attempt has been recorded.
+inline constexpr bool history_journal_retry_due(bool paused, int64_t now_us,
+                                                int64_t last_attempt_us) {
+    if (!paused || last_attempt_us == INT64_MIN) return true;
+    return now_us - last_attempt_us >=
+           static_cast<int64_t>(HISTORY_JOURNAL_PAUSED_RETRY_S) * 1000000;
+}
+
 // A capacity guard for the CURRENT catalog. The journal retains at least 72 hours even if all three
 // trend sources close every five-minute bucket and checkup closes every hourly bucket. The remaining
 // slots are wear reserve: records are ignored by age, never erased merely because they passed 72 h.
@@ -583,6 +637,52 @@ inline bool history_journal_manifest_payload_matches(const HistoryJournalHeader&
                history_journal_schema_fingerprint(h);
 }
 
+// ── Which manifest is the CURRENT one ───────────────────────────────────────────────────────────
+// Before every data record the writer asks whether this catalog generation still has a recent
+// manifest in the journal. The answer rests on one remembered fact per source: the manifest the
+// journal appended LAST for this build's catalog.
+//
+// "Last" is the append SEQUENCE, never the bucket. A bucket is a wall-clock claim about the data
+// the manifest precedes, and the writer legitimately moves it BACKWARDS: every cursor reset (a new
+// unit, a new HomeHub target, a re-detect) restarts the backlog at the live ring's oldest bucket,
+// which is older than the manifest written for the previous backlog. Adopting by bucket refused the
+// manifest that had just been appended at that older bucket, so the data record behind it was due a
+// manifest again — three manifests per poll tick, no data for ANY source, until the live window
+// caught up with the old manifest (up to a day; until a reboot after a HomeHub disable).
+struct HistoryManifestCurrent {
+    uint32_t fp       = 0;         // catalog_fp of the adopted manifest (0: none yet)
+    int64_t  bucket   = INT64_MIN; // the bucket it was appended at: the refresh-distance origin
+    uint64_t sequence = 0;         // global append order; real sequences start at one, 0 is "none"
+};
+
+// Is a manifest due ahead of the data record for `data_bucket`? Yes when this catalog generation
+// has none, when the data lies before the current manifest (the cursor was reset — that is the
+// moment to re-anchor it, ONCE: the append below becomes current and the data is then no longer
+// before it), or when the manifest is a full ring old and would otherwise age out of the circular
+// journal.
+inline bool history_manifest_due(const HistoryManifestCurrent& cur, uint32_t catalog_fp,
+                                 int64_t data_bucket) {
+    if (data_bucket == INT64_MIN) return false;
+    if (cur.fp != catalog_fp || cur.bucket == INT64_MIN) return true;
+    if (data_bucket < cur.bucket) return true;
+    return static_cast<uint64_t>(data_bucket - cur.bucket) >= HISTORY_MANIFEST_REFRESH_BUCKETS;
+}
+
+// Adopt a manifest that is now in the journal (just appended and read back, or found by the boot
+// scan) as the source's current one. `current_generation` is "this build's catalog, ring geometry
+// and semantic-id list": a manifest of any other generation never becomes current, it is only
+// cached for mapping old data. The scan meets manifests in physical order, so the later append
+// wins by sequence; an equal or lower sequence is the same or an older record and changes nothing.
+inline bool history_manifest_adopt(HistoryManifestCurrent& cur, bool current_generation,
+                                   uint32_t catalog_fp, int64_t bucket, uint64_t sequence) {
+    if (!current_generation || bucket == INT64_MIN || sequence == 0 || sequence <= cur.sequence)
+        return false;
+    cur.fp       = catalog_fp;
+    cur.bucket   = bucket;
+    cur.sequence = sequence;
+    return true;
+}
+
 // The physical HomeHub observation identity. Flash and .noinit history must never cross this
 // boundary: a new host, port or unit id is a different plant even when the register catalog matches.
 inline uint32_t history_homehub_target_fingerprint(const char* host, uint32_t port, uint32_t unit) {
@@ -755,6 +855,43 @@ inline constexpr int64_t history_anchor_commit_us(int64_t now_us, int64_t unix_s
     return now_us - (unix_s - bucket_s) * 1000000LL;
 }
 
+// ── A bucket from the future ────────────────────────────────────────────────────────────────────
+// A journal record whose bucket lies AHEAD of the clock is evidence of one of two faults, and the
+// journal cannot tell which. Either an earlier boot synchronised to a wrong, far-future time (a
+// user-set NTP server is enough) and stamped its records with buckets no later clock has reached,
+// or THIS boot synchronised to a wrong PAST time and is looking at a perfectly good journal.
+//
+// Acting on either reading is unsafe. Re-indexing below the clock and rewinding the writer's
+// cursor to the records found there trusts the current clock, and a mature journal (days of
+// history) always has believable records below a wrong past clock, so "an older record exists"
+// proves nothing. The writer would then append the live window under wrong past buckets; those
+// records become the physical head, and the next correctly synchronised boot trusts them over the
+// genuine newest ones (or shows them in place of genuine values). That turns MISSING history into
+// MISDATED history, which this firmware never publishes.
+//
+// So the rule is: records beyond the clock are never restored (the splice refuses a snapshot newer
+// than the live ring) and never rewritten. The writer of an affected source appends nothing until
+// the clock passes its cursor, and says so once; the episode ends with that source's next
+// successful data append. After a far-future boot a trend source therefore neither restores nor
+// persists until the corrected clock reaches the stamped buckets (the diagnostic restore refuses
+// the hours beyond the clock and restores in-window hours only within a day below the newest
+// stamped hour); after a wrong past clock the records of a source whose cursor
+// is ahead are left exactly as they were and only that boot's own window goes unpersisted. A
+// source with no cursor (its identity was reset during that boot) or one older than the wrong
+// clock is indistinguishable from an ordinary boot and journals that boot's window as it always
+// did.
+//
+// This is the detection decision only. `slack` is tolerance for the anchor itself, which is
+// derived from two whole-second readings and can sit one bucket either side of where a record was
+// stamped (and for a small clock step). A cursor inside the slack just waits, as it always did;
+// only a cursor beyond it is reported as ahead of the clock. Equal is never future, and an unknown
+// cursor or anchor (INT64_MIN) is not evidence of anything.
+inline constexpr uint32_t HISTORY_CURSOR_FUTURE_SLACK_BUCKETS = 1;
+inline constexpr bool history_cursor_in_future(int64_t cursor, int64_t anchor, uint32_t slack = 0) {
+    if (cursor == INT64_MIN || anchor == INT64_MIN || cursor <= anchor) return false;
+    return static_cast<uint64_t>(cursor) - static_cast<uint64_t>(anchor) > slack;
+}
+
 // ── Locating the journal-backed span ────────────────────────────────────────────────────────────
 // Restore scratch always represents a complete 24-hour window and is initialised to NO_READING.
 // That sentinel is also a REAL journal sample: an unavailable register must retain the same
@@ -773,6 +910,19 @@ inline size_t history_flash_restore_start(int64_t oldest_record_bucket,
                           static_cast<uint64_t>(oldest_record_bucket);
     if (span >= width) return 0;
     return width - 1U - static_cast<size_t>(span);
+}
+
+// The restore walks the rings of all three trend sources in one global order: X10A, then HomeHub,
+// then ENV III (the order history.cpp's source_of_slot() decodes). A source whose identity reset is
+// pending has nothing it may restore — the reset normally cleared its index with it — and the reset
+// may never be consumed (a disabled HomeHub, an X10A bus that never resolves a profile), so the
+// restore must step OVER the whole source instead of waiting at its first ring. This is the first
+// ring of the source after the one `ring` belongs to; the total ring count when it was the last
+// source.
+inline constexpr size_t history_restore_next_source_ring(size_t ring) {
+    if (ring < TREND_COUNT) return TREND_COUNT;
+    if (ring < TREND_COUNT + HOMEHUB_HISTORY_COUNT) return TREND_COUNT + HOMEHUB_HISTORY_COUNT;
+    return HISTORY_FLASH_TOTAL_RINGS;
 }
 
 // ── The splice ──────────────────────────────────────────────────────────────────────────────────
