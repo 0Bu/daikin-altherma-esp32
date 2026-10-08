@@ -13,12 +13,13 @@
 # The former 8 KB `history` partition at 0x1e000 is intentionally gone; that gap remains unused so
 # ota_0 and every deployed address stay unchanged. The one canonical `history` partition begins
 # exactly where the old 4 MB table ended and reserves the ENTIRE upper 4 MiB for trends. It is a
-# circular append-only journal: one dense source record per completed five-minute bucket, currently
-# one 256-byte slot holding 31 X10A/board, 12 HomeHub or 3 ENV III int16 values. Sixteen slots share
-# one 4 KiB erase sector; the writer traverses all 1024 sectors before reusing one. CRC covers the
-# header and values, and a separate commit word is programmed last so a power cut cannot invalidate
-# its predecessors. Slot geometry grows by powers of two with the catalog and compilation requires
-# at least 72 hours with every source active. Space older than the visible window remains wear
+# circular append-only journal: one dense source record per completed five-minute bucket, in one
+# fixed-size slot. The slot size, the slots per 4 KiB erase sector and the retention are not stated
+# here because they follow from the current trend catalog; the derivation is in
+# main/logic/history_persist.hpp (HISTORY_JOURNAL_SLOT_BYTES, HISTORY_JOURNAL_SLOTS_PER_SECTOR and
+# the 72-hour static_assert). The writer traverses every sector of the partition before reusing
+# one. CRC covers the header and values, and a separate commit word is programmed last so a power
+# cut cannot invalidate its predecessors. Space older than the visible window remains wear
 # reserve and is erased only when the physical ring wraps, not merely because data aged out.
 #
 # This clean break deliberately has no fallback for the former table: esp_https_ota writes only the
