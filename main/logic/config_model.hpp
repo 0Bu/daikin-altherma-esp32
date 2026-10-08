@@ -225,9 +225,9 @@ struct Config {
     // SESSION-ONLY: applied via config_commit_detected_model after the detected-link commit returns
     // a still-current revision token, and NEVER persisted — the model is re-detected on every boot
     // (config_load seeds profile="auto"), so a swapped unit is re-identified. The fingerprint lets
-    // /status recompute the candidate set cheaply (no re-probe). config_set_runtime — whole-struct
-    // RAM publish — survives only for POST /detect's reset to "auto"; the poll task uses the
-    // revision-checked field-owned helpers so it never reverts credentials or a new link.
+    // /status recompute the candidate set cheaply (no re-probe). POST /detect's reset to "auto" is
+    // the field-owned config_reset_detection; the poll task uses the revision-checked field-owned
+    // helpers so it never reverts credentials or a new link.
     uint32_t    fp_pages     = 0;   // page mask that answered (logic/detect.hpp page_bit)
     int         fp_kw_tenths = -1;  // O/U capacity in 0.1 kW; -1 = unknown
     // I/U capacity code (reg 0x60 offset 6, same 0.1 kW units); -1 = unknown. Kept BESIDE the O/U

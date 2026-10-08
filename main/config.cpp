@@ -58,9 +58,10 @@ using Lock = SemGuard;
 }  // namespace
 
 // Return a CONSISTENT SNAPSHOT (by value) taken under the lock: a reader never observes a torn
-// Config while a writer swaps g_cfg (config_save / config_set_runtime run from the HTTP and poll
-// tasks). Callers bind `const Config& c = config();` -> the returned temporary is lifetime-extended,
-// giving them a stable copy for the rest of the scope.
+// Config while a writer swaps g_cfg (config_save / config_save_link on the httpd task, the
+// revision-checked detection commits on the poll task). Callers bind `const Config& c = config();`
+// -> the returned temporary is lifetime-extended, giving them a stable copy for the rest of the
+// scope.
 Config config() {
     Lock lk(g_mtx);
     return g_cfg;
@@ -567,12 +568,6 @@ void config_reset_detection() {
     g_cfg.fp_valid         = false;
     g_cfg.runtime_revision = next_revision(g_cfg.runtime_revision);
 }
-
-// Whole-struct RAM publish (no NVS). Acceptable as a whole-struct write because it runs on the
-// httpd task, which OWNS the credential fields (serialized against the other /set_* handlers), so
-// it cannot revert them. The poll task must NOT use this — it uses the revision-checked helpers
-// above.
-void config_set_runtime(const Config& c) { publish(c); }
 
 // Kconfig-derived hardware facts (see config.hpp). Kept here — the one file that already owns the
 // CONFIG_* → link mapping — so board_pins' octal_spi/reserved inputs have a single source of truth
