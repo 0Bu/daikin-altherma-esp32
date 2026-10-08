@@ -1874,9 +1874,12 @@ static void test_discovery() {
     CHECK(cfg.find("\"unit_of_meas\":\"°C\"") != std::string::npos);
     CHECK(cfg.find("\"stat_t\":\"daikin-altherma-esp32/x10a\"") != std::string::npos);
     CHECK(cfg.find("\"avty_t\":\"daikin-altherma-esp32/status\"") != std::string::npos);
-    // Shared JSON topic -> value_template subscripts group (page 0x61 -> hydronic_temps) + object.
-    CHECK(cfg.find("\"val_tpl\":\"{{ value_json['hydronic_temps']['dhw_tank_temp_r5t'] }}\"") !=
-          std::string::npos);
+    // Shared JSON topic -> value_template reads group (page 0x61 -> hydronic_temps) + object. An
+    // absent group or key defaults to HA's `None` (-> unknown): subscripting it would keep the
+    // LAST value in HA, or raise a template error for a missing group (MQTT-02/b).
+    CHECK(cfg.find("\"val_tpl\":\"{{ value_json.get('hydronic_temps', {})"
+                   ".get('dhw_tank_temp_r5t', 'None') }}\"") != std::string::npos);
+    CHECK(cfg.find("value_json['") == std::string::npos);
     // The node id identifies the DEVICE in uniq_id/dev.ids — just not in the message topic. It is
     // the BASE-TOPIC id, so a replacement board publishes the same unique_ids and HA keeps the
     // entities (and their statistics) instead of starting a second device from scratch.
@@ -1907,10 +1910,44 @@ static void test_discovery() {
     CHECK(cfg.find("\"pl_on\"") == std::string::npos);
 
     // --- Bit-flag rows are binary_sensors reading 1/0, not text sensors reading "ON"/"OFF" ---
-    // A slug that starts with a digit must stay valid — bracket notation, not attribute access.
+    // A slug that starts with a digit must stay valid — a quoted string argument, not attribute
+    // access.
     ValueDef    way{0x60, 12, 307, 1, -1, "2way valve(On:Heat_Off:Cool)"};
     std::string wc = discovery_config(node, board, st, availability_topic(base), way);
-    CHECK(wc.find("value_json['hydronic']['2way_valve_on_heat_off_cool']") != std::string::npos);
+    CHECK(wc.find("value_json.get('hydronic', {}).get('2way_valve_on_heat_off_cool', 'None')") !=
+          std::string::npos);
+
+    // MQTT-02/b, catalog-wide: every X10A entity any profile can announce defaults an absent group
+    // or key to `None`. A binary sensor ignores an empty template result just like a numeric
+    // sensor, so no component may fall back to subscripting.
+    size_t x10a_templates = 0;
+    for (const auto& prof : daik::def::profiles) {
+        const auto view = daik::def::resolved(prof);
+        for (size_t i = 0; i < view.count(); i++) {
+            const ValueDef&   row = view[i];
+            const std::string rc = discovery_config(node, board, st, availability_topic(base), row);
+            const std::string want = std::string("\"val_tpl\":\"{{ value_json.get('") +
+                                     group_for_page(row.reg) + "', {}).get('" +
+                                     object_id(row.label) + "', 'None') }}\"";
+            CHECK(rc.find(want) != std::string::npos);
+            CHECK(rc.find("value_json['") == std::string::npos);
+            ++x10a_templates;
+        }
+    }
+    CHECK(x10a_templates > 0);
+    // The template's `None` default is HA's PAYLOAD_NONE (-> unknown), so no X10A text may ever be
+    // the literal "None": every converter text table and the refrigerant literals are checked here.
+    // The two-character fault codes (ERR_C1/ERR_C2) cannot spell it.
+    for (const char* s : OP_MODE) CHECK(std::string(s) != "None");
+    for (const char* s : IU_MODE) CHECK(std::string(s) != "None");
+    for (const char* s : ERR_TYPE) CHECK(std::string(s) != "None");
+    for (const char* s : HYBRID) CHECK(std::string(s) != "None");
+    for (int refrigerant_conv = 801; refrigerant_conv <= 805; ++refrigerant_conv) {
+        const ValueDef refrigerant{0x10, 0, refrigerant_conv, 1, -1, "Refrigerant type"};
+        const uint8_t  none_bytes[2] = {0, 0};
+        const Reading  r             = convert(refrigerant, none_bytes);
+        CHECK(r.text[0] != '\0' && std::string(r.text) != "None");
+    }
 
     CHECK(std::string(ha_component(way)) == "binary_sensor");
     CHECK(discovery_topic("homeassistant", node, way) ==
@@ -1958,8 +1995,9 @@ static void test_discovery() {
     CHECK(oc.find("\"name\":\"Outdoor State Error Code\"") != std::string::npos);
     CHECK(hc.find("\"name\":\"Hydronic Error Code\"") != std::string::npos);
     // The STATE contract is untouched: same key, each already in its own group object (legacy-217).
-    CHECK(oc.find("value_json['outdoor_state']['error_code']") != std::string::npos);
-    CHECK(hc.find("value_json['hydronic']['error_code']") != std::string::npos);
+    CHECK(oc.find("value_json.get('outdoor_state', {}).get('error_code', 'None')") !=
+          std::string::npos);
+    CHECK(hc.find("value_json.get('hydronic', {}).get('error_code', 'None')") != std::string::npos);
 
     // --- HomeHub MQTT remains, but its exact historical 27-entity HA set is retired. ------------
     // Pin the complete broker ledger independently of today's larger HomeHub register catalog.
@@ -17444,8 +17482,21 @@ static void test_fault_state() {
                                    "outdoor_state", FAULT_COMPANIONS[0]);
     CHECK(ccfg.find("\"name\":\"Outdoor State Error Active\"") != std::string::npos);
     CHECK(ccfg.find("\"uniq_id\":\"daikin_test_outdoor_state_error_active\"") != std::string::npos);
-    CHECK(ccfg.find("\"val_tpl\":\"{{ value_json['outdoor_state']['error_active'] }}\"") !=
-          std::string::npos);
+    // A withheld fault row takes its companions with it; they must read `unknown`, not keep the
+    // last 1/0 (MQTT-02/b).
+    CHECK(ccfg.find("\"val_tpl\":\"{{ value_json.get('outdoor_state', {})"
+                    ".get('error_active', 'None') }}\"") != std::string::npos);
+    CHECK(ccfg.find("value_json['") == std::string::npos);
+    for (const char* fault_group : {"outdoor_state", "hydronic"}) {
+        for (size_t c = 0; c < FAULT_COMPANION_COUNT; c++) {
+            const std::string comp =
+                companion_discovery_config("daikin_test", "daikin_board", "daikin/x10a",
+                                           "daikin/status", fault_group, FAULT_COMPANIONS[c]);
+            CHECK(comp.find(std::string("value_json.get('") + fault_group + "', {}).get('" +
+                            FAULT_COMPANIONS[c].key + "', 'None')") != std::string::npos);
+            CHECK(comp.find("value_json['") == std::string::npos);
+        }
+    }
     CHECK(ccfg.find("\"pl_on\":\"1\",\"pl_off\":\"0\"") != std::string::npos);
     CHECK(ccfg.find("\"dev_cla\":\"problem\"") != std::string::npos);
 

@@ -7,7 +7,8 @@
 // grouped one level deep by their X10A register page:
 //     { "<group>": { "<object_id>": value, … }, … }   (max nesting depth 1)
 // Each HA discovery config points every sensor at this shared topic with a value_template that
-// subscripts the group + object (logic/discovery.hpp).
+// reads the group + object with `.get()` defaults (append_x10a_value_template,
+// logic/discovery.hpp).
 #include <cstdint>
 #include <string>
 #include <string_view>

@@ -221,11 +221,33 @@ inline std::string availability_topic(const std::string& base) {
     return base + "/status";
 }
 
-// Discovery config JSON for one X10A value. `state_topic` is the shared X10A grouped-JSON topic; the
-// value_template subscripts this value's group + object out of it (bracket notation, so a slug that
-// starts with a digit — "2way_valve…" — is still valid). `avail_topic` ties the sensor to device
-// availability. `node` is the stable installation id (logic/ha_device.hpp) and `board_id` this
-// board's own MAC-derived id — see device_json() for why the device carries both.
+// The value template every X10A entity reads its state with. The firmware states absence BY
+// absence: a withheld, unread or unpopulated row is missing from <base>/x10a, and a whole register
+// page can be missing too (held-over outdoor pages, an unfitted second outdoor unit). Home
+// Assistant does not turn that gap into `unknown` by itself. A subscripted missing key renders the
+// non-strict template to an empty string and logs a warning. A numeric MQTT sensor ("Ignore empty
+// state") and a binary sensor ignore that empty string, so they keep showing their LAST value as if
+// it were current; a text sensor shows an empty state instead. A missing group raises a template
+// error: every entity keeps its last value, and HA logs an error on every X10A message.
+// `.get(…, {})` and `.get(…, 'None')` never touch an undefined value, and the literal `None` is
+// HA's PAYLOAD_NONE, which MQTT sensors (before any numeric or text handling) and binary sensors
+// map to `unknown` (`_update_state` in homeassistant/components/mqtt/sensor.py and the state
+// handler in binary_sensor.py, Home Assistant core dev branch as of 2026-10-08). Quoted strings
+// keep a digit-leading slug such as "2way_valve…" valid. test_discovery pins that no converter text
+// is the literal "None", which would otherwise read `unknown` too.
+inline void append_x10a_value_template(std::string& j, const std::string& group, const char* key) {
+    j += "{{ value_json.get('";
+    j += group;
+    j += "', {}).get('";
+    j += key;
+    j += "', 'None') }}";
+}
+
+// Discovery config JSON for one X10A value. `state_topic` is the shared X10A grouped-JSON topic;
+// the value_template reads this value's group + object out of it (append_x10a_value_template
+// above). `avail_topic` ties the sensor to device availability. `node` is the stable installation
+// id (logic/ha_device.hpp) and `board_id` this board's own MAC-derived id — see device_json() for
+// why the device carries both.
 inline std::string discovery_config(const std::string& node, const std::string& board_id,
                                     const std::string& state_topic,
                                     const std::string& avail_topic, const ValueDef& def) {
@@ -240,7 +262,9 @@ inline std::string discovery_config(const std::string& node, const std::string& 
     j += "\"name\":\"";       j += entity_name(def); j += "\",";
     j += "\"uniq_id\":\"";    j += node; j += "_"; j += row_object_id(def); j += "\",";
     j += "\"stat_t\":\"";     j += state_topic; j += "\",";
-    j += "\"val_tpl\":\"{{ value_json['"; j += group; j += "']['"; j += obj; j += "'] }}\",";
+    j += "\"val_tpl\":\"";
+    append_x10a_value_template(j, group, obj.c_str());
+    j += "\",";
     j += "\"avty_t\":\"";     j += avail_topic; j += "\",";
     // A binary row's state is the number 1/0 (logic/convert.hpp), which the template renders as
     // "1"/"0" — so pl_on/pl_off must be spelled out; HA's defaults are "ON"/"OFF"
@@ -341,7 +365,9 @@ inline std::string companion_discovery_config(const std::string& node, const std
     j += "\"name\":\"";    j += group_display_name(group); j += ' '; j += c.name; j += "\",";
     j += "\"uniq_id\":\""; j += node; j += "_"; j += obj; j += "\",";
     j += "\"stat_t\":\"";  j += state_topic; j += "\",";
-    j += "\"val_tpl\":\"{{ value_json['"; j += group; j += "']['"; j += c.key; j += "'] }}\",";
+    j += "\"val_tpl\":\"";
+    append_x10a_value_template(j, group, c.key);
+    j += "\",";
     j += "\"avty_t\":\"";  j += avail_topic; j += "\",";
     j += "\"pl_on\":\"1\",\"pl_off\":\"0\",";
     j += "\"dev_cla\":\"problem\",";
