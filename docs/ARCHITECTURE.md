@@ -1408,11 +1408,24 @@ A single task owns the X10A UART (there is exactly one link). Each cycle:
    alone starts empty. Duplicate ids, an unknown pre-manifest generation or a damaged manifest fail
    closed. A manifest is written before a generation's next data record and refreshed once per
    24-hour ring, keeping a recent copy in the circular journal without repeating ids in every bucket.
-   Four generations per source are cached in bounded static memory. The exact 31/12/3 catalog before
+   The current manifest is the one **appended last** (highest sequence, never highest bucket): a
+   cursor reset restarts the backlog at a bucket older than the previous manifest, and that reset
+   costs exactly one new manifest rather than one per poll tick. Four generations per source are
+   cached in bounded static memory. The exact 31/12/3 catalog before
    the disinfection histories has an explicit legacy adapter; the two then-new disinfection series
    correctly have no predecessor. Existing 32/13/3 records from the current generation match its
    layout directly.
    Diagnostic checkup records carry their own fingerprint and remain independent of trend counts.
+
+   The writer and the restore each refuse what the journal cannot honestly say. A source whose
+   identity reset is still pending (a saved unit or HomeHub target not yet consumed by its poll
+   task, or a disabled HomeHub) appends nothing, because its rings still hold the previous unit's
+   samples under the new scope. A journal cursor, or a restore window, stamped beyond the
+   synchronised wall bucket — one boot that took a far-future time — is rewound by the writer and
+   re-indexed below the wall bucket by the restore, so future-stamped records are never restored and
+   never hide the valid older ones. A slot that fails to erase or program is retried once and then
+   abandoned with its sector; the first failure of an episode and the recovery are logged, not every
+   poll tick.
 
    `/status.history.persist` names how this boot's rings came to be, so a chart that emptied itself
    has a stated cause instead of looking like a defect. It describes the `.noinit` adoption decision;

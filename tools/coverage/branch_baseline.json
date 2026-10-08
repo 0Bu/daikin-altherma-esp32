@@ -1,5 +1,5 @@
 {
-  "method": "Exact taken/outcome counts measured at this revision with Apple Clang 17.0.0 and GCC 13.3.0. Local profiles bind compiler family/major and platform slug (e.g. clang-17-darwin, gcc-13-darwin, gcc-13-linux-ubuntu24); authoritative GitHub profiles additionally bind runner OS/image because packaging can alter instrumentation. The gate compares repository history and rejects decreases; improvements require an immediate versioned update. The X10A value-template helper in discovery.hpp moved inline string appends into one function and was measured with Apple Clang 17, ESP-IDF-container GCC 13 and Ubuntu 26.04 GCC 15; both GNU inventories match and every ratio rises. The updated hosted GCC 15 expectations use that measured inventory and require confirmation by authoritative CI. The new config_transaction.hpp was measured with Apple Clang 17 and ESP-IDF-container GCC 13; its two GCC 15 expectations copy the GCC 13 inventory and require the same confirmation. No prior ratio is reduced.",
+  "method": "Exact taken/outcome counts measured at this revision with Apple Clang 17.0.0 and GCC 13.3.0. Local profiles bind compiler family/major and platform slug (e.g. clang-17-darwin, gcc-13-darwin, gcc-13-linux-ubuntu24); authoritative GitHub profiles additionally bind runner OS/image because packaging can alter instrumentation. The gate compares repository history and rejects decreases; improvements require an immediate versioned update. The X10A value-template helper in discovery.hpp moved inline string appends into one function and was measured with Apple Clang 17, ESP-IDF-container GCC 13 and Ubuntu 26.04 GCC 15; both GNU inventories match and every ratio rises. The updated hosted GCC 15 expectations use that measured inventory and require confirmation by authoritative CI. The new config_transaction.hpp was measured with Apple Clang 17 and ESP-IDF-container GCC 13; its two GCC 15 expectations copy the GCC 13 inventory and require the same confirmation. The history-journal helpers added to history_persist.hpp (manifest currency, future-cursor test, window index, slot-failure skip) were measured with Apple Clang 17 (256/358), ESP-IDF-container GCC 13.3 (304/418) and Ubuntu 26.04 GCC 15.2 (302/416); both hosted GCC 15 expectations copy the measured Ubuntu GCC 15 inventory and require confirmation by authoritative CI. No prior ratio is reduced.",
   "profiles": {
     "clang-17-darwin": {
       "main/logic/availability.hpp": {
@@ -155,8 +155,8 @@
         "taken": 105
       },
       "main/logic/history_persist.hpp": {
-        "outcomes": 320,
-        "taken": 219
+        "outcomes": 358,
+        "taken": 256
       },
       "main/logic/homehub_map.hpp": {
         "outcomes": 36,
@@ -529,8 +529,8 @@
         "taken": 140
       },
       "main/logic/history_persist.hpp": {
-        "outcomes": 374,
-        "taken": 261
+        "outcomes": 418,
+        "taken": 304
       },
       "main/logic/homehub_map.hpp": {
         "outcomes": 36,
@@ -903,8 +903,8 @@
         "taken": 138
       },
       "main/logic/history_persist.hpp": {
-        "outcomes": 372,
-        "taken": 259
+        "outcomes": 416,
+        "taken": 302
       },
       "main/logic/homehub_map.hpp": {
         "outcomes": 36,
@@ -1277,8 +1277,8 @@
         "taken": 138
       },
       "main/logic/history_persist.hpp": {
-        "outcomes": 372,
-        "taken": 259
+        "outcomes": 416,
+        "taken": 302
       },
       "main/logic/homehub_map.hpp": {
         "outcomes": 36,

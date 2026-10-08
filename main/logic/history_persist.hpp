@@ -357,6 +357,21 @@ inline constexpr size_t history_journal_write_slot(size_t next_slot, bool candid
         ? next_slot : history_journal_next_sector_slot(next_slot);
 }
 
+// A slot whose erase, program or readback fails is retried once — a transient SPI-flash error is
+// real — and then abandoned together with the rest of its sector. Without a limit the same slot was
+// re-erased, re-programmed and re-logged on EVERY poll tick (the diag ring is only 6 KB, so one bad
+// sector evicted every other line) while the cursor never advanced and nothing after it was ever
+// persisted. The next sector's first slot is the only safe landing: the sector the failure is in
+// may hold the head's committed predecessors, and that one is erased by the ordinary rotation
+// anyway.
+inline constexpr size_t HISTORY_JOURNAL_SLOT_RETRY_LIMIT = 2;
+inline constexpr size_t history_journal_slot_after_failure(size_t slot,
+                                                           size_t consecutive_failures) {
+    return consecutive_failures >= HISTORY_JOURNAL_SLOT_RETRY_LIMIT
+               ? history_journal_next_sector_slot(slot)
+               : slot;
+}
+
 // A capacity guard for the CURRENT catalog. The journal retains at least 72 hours even if all three
 // trend sources close every five-minute bucket and checkup closes every hourly bucket. The remaining
 // slots are wear reserve: records are ignored by age, never erased merely because they passed 72 h.
@@ -583,6 +598,52 @@ inline bool history_journal_manifest_payload_matches(const HistoryJournalHeader&
                history_journal_schema_fingerprint(h);
 }
 
+// ── Which manifest is the CURRENT one ───────────────────────────────────────────────────────────
+// Before every data record the writer asks whether this catalog generation still has a recent
+// manifest in the journal. The answer rests on one remembered fact per source: the manifest the
+// journal appended LAST for this build's catalog.
+//
+// "Last" is the append SEQUENCE, never the bucket. A bucket is a wall-clock claim about the data
+// the manifest precedes, and the writer legitimately moves it BACKWARDS: every cursor reset (a new
+// unit, a new HomeHub target, a re-detect) restarts the backlog at the live ring's oldest bucket,
+// which is older than the manifest written for the previous backlog. Adopting by bucket refused the
+// manifest that had just been appended at that older bucket, so the data record behind it was due a
+// manifest again — three manifests per poll tick, no data for ANY source, until the live window
+// caught up with the old manifest (up to a day; until a reboot after a HomeHub disable).
+struct HistoryManifestCurrent {
+    uint32_t fp       = 0;         // catalog_fp of the adopted manifest (0: none yet)
+    int64_t  bucket   = INT64_MIN; // the bucket it was appended at: the refresh-distance origin
+    uint64_t sequence = 0;         // global append order; real sequences start at one, 0 is "none"
+};
+
+// Is a manifest due ahead of the data record for `data_bucket`? Yes when this catalog generation
+// has none, when the data lies before the current manifest (the cursor was reset — that is the
+// moment to re-anchor it, ONCE: the append below becomes current and the data is then no longer
+// before it), or when the manifest is a full ring old and would otherwise age out of the circular
+// journal.
+inline bool history_manifest_due(const HistoryManifestCurrent& cur, uint32_t catalog_fp,
+                                 int64_t data_bucket) {
+    if (data_bucket == INT64_MIN) return false;
+    if (cur.fp != catalog_fp || cur.bucket == INT64_MIN) return true;
+    if (data_bucket < cur.bucket) return true;
+    return static_cast<uint64_t>(data_bucket - cur.bucket) >= HISTORY_MANIFEST_REFRESH_BUCKETS;
+}
+
+// Adopt a manifest that is now in the journal (just appended and read back, or found by the boot
+// scan) as the source's current one. `current_generation` is "this build's catalog, ring geometry
+// and semantic-id list": a manifest of any other generation never becomes current, it is only
+// cached for mapping old data. The scan meets manifests in physical order, so the later append
+// wins by sequence; an equal or lower sequence is the same or an older record and changes nothing.
+inline bool history_manifest_adopt(HistoryManifestCurrent& cur, bool current_generation,
+                                   uint32_t catalog_fp, int64_t bucket, uint64_t sequence) {
+    if (!current_generation || bucket == INT64_MIN || sequence == 0 || sequence <= cur.sequence)
+        return false;
+    cur.fp       = catalog_fp;
+    cur.bucket   = bucket;
+    cur.sequence = sequence;
+    return true;
+}
+
 // The physical HomeHub observation identity. Flash and .noinit history must never cross this
 // boundary: a new host, port or unit id is a different plant even when the register catalog matches.
 inline uint32_t history_homehub_target_fingerprint(const char* host, uint32_t port, uint32_t unit) {
@@ -753,6 +814,58 @@ inline constexpr int64_t history_anchor_commit_us(int64_t now_us, int64_t unix_s
     if (dt == 0) return now_us;
     const int64_t bucket_s = newest_bucket * static_cast<int64_t>(dt);
     return now_us - (unix_s - bucket_s) * 1000000LL;
+}
+
+// ── A bucket from the future ────────────────────────────────────────────────────────────────────
+// One boot that synchronised to a wrong, far-future time (a user-set NTP server is enough) writes
+// records whose buckets lie ahead of every later clock. Two things then stop working until the
+// corrected clock catches up: the writer's cursor (the newest bucket already journalled) is beyond
+// its own live anchor, so it never has anything to append; and the restore index, which is built
+// newest-first, is dominated by the future records and hides every valid older one.
+//
+// `slack` is tolerance for the anchor itself, which is derived from two whole-second readings and
+// can sit one bucket either side of where a record was stamped (and for a small clock step). A
+// cursor inside the slack just waits, as it always did; only a cursor beyond it is treated as
+// written under a clock that no longer holds. Equal is never future, and an unknown cursor or
+// anchor (INT64_MIN) is not evidence of anything.
+inline constexpr uint32_t HISTORY_CURSOR_FUTURE_SLACK_BUCKETS = 1;
+inline constexpr bool history_cursor_in_future(int64_t cursor, int64_t anchor, uint32_t slack = 0) {
+    if (cursor == INT64_MIN || anchor == INT64_MIN || cursor <= anchor) return false;
+    return static_cast<uint64_t>(cursor) - static_cast<uint64_t>(anchor) > slack;
+}
+
+// ── Indexing a source's last window newest-first ────────────────────────────────────────────────
+// The boot scan and the restore-time re-index walk the journal from its head backwards and keep,
+// for each source, only the slots of its final `retain` buckets. This is that decision for one
+// record, shared so the two cannot disagree.
+//
+// `upper_bucket` is the newest bucket that may be believed. The boot scan runs before the clock is
+// known and passes INT64_MAX; the re-index passes the current wall bucket, and a record beyond it
+// is SKIPPED — it neither defines the window's newest bucket nor ends the walk, so the valid
+// records behind it are still found.
+struct HistoryWindowIndex {
+    int64_t newest = INT64_MIN; // bucket of the first believable record met
+    int64_t oldest = INT64_MIN; // oldest bucket taken so far
+    size_t  count  = 0;         // slots taken
+    bool    done   = false;     // a record older than the window was met: nothing further counts
+};
+enum class HistoryWindowTake : uint8_t { Skip, Take, End };
+
+inline HistoryWindowTake history_window_index_offer(HistoryWindowIndex& w, int64_t bucket,
+                                                    int64_t upper_bucket, size_t retain) {
+    if (w.done || !retain || bucket == INT64_MIN || bucket > upper_bucket)
+        return HistoryWindowTake::Skip;
+    if (w.newest == INT64_MIN) w.newest = bucket;
+    if (bucket < w.newest - static_cast<int64_t>(retain - 1)) {
+        w.done = true;
+        return HistoryWindowTake::End;
+    }
+    // A bucket above the window's newest (a clock that stepped backwards between two boots) is not
+    // part of this window; a duplicate bucket is taken — restore replays oldest-first, newest wins.
+    if (bucket > w.newest || w.count >= retain) return HistoryWindowTake::Skip;
+    w.count++;
+    if (w.oldest == INT64_MIN || bucket < w.oldest) w.oldest = bucket;
+    return HistoryWindowTake::Take;
 }
 
 // ── Locating the journal-backed span ────────────────────────────────────────────────────────────
