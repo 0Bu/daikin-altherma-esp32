@@ -1420,12 +1420,30 @@ A single task owns the X10A UART (there is exactly one link). Each cycle:
    The writer and the restore each refuse what the journal cannot honestly say. A source whose
    identity reset is still pending (a saved unit or HomeHub target not yet consumed by its poll
    task, or a disabled HomeHub) appends nothing, because its rings still hold the previous unit's
-   samples under the new scope. A journal cursor, or a restore window, stamped beyond the
-   synchronised wall bucket — one boot that took a far-future time — is rewound by the writer and
-   re-indexed below the wall bucket by the restore, so future-stamped records are never restored and
-   never hide the valid older ones. A slot that fails to erase or program is retried once and then
-   abandoned with its sector; the first failure of an episode and the recovery are logged, not every
-   poll tick.
+   samples under the new scope, and the restore steps over that whole source rather than waiting
+   for a reset that may never be consumed (a disabled HomeHub, an X10A bus that never resolves a
+   profile) — waiting would leave every other source unrestored and the journal unwritten until
+   the next reboot.
+
+   A journal cursor, or a restore window, ahead of the clock is acted on only when an older record
+   at or below that clock is believable — the case of one boot that took a far-future time. The
+   writer compares its cursor with the source's own clock anchor (one bucket of slack) and the
+   restore compares the window with the wall bucket; the journal service then re-indexes the
+   source below that clock, outside the history mutex, so future-stamped records are never restored
+   and never hide the valid older ones, and appends resume from the newest believable record. When
+   nothing at or below the clock is believable, the journal looks the same as a good journal seen
+   by a boot that took a wrong *past* time, so it is left exactly as it is: no index, cursor or
+   append is touched, the one walk is not repeated, and one diagnostic line says so, until the clock
+   passes the cursor or the device reboots. A past clock that is only hours behind still leaves
+   older records below it, which the journal cannot tell from the far-future case.
+
+   A slot that fails to erase or program is retried once and then abandoned with its sector; the
+   first failure of an episode and the recovery are logged, not every poll tick. Abandoning erases
+   the sector landed on, so one failure episode may abandon only
+   `HISTORY_JOURNAL_MAX_ABANDONED_SECTORS` of them. After that the cursor stays on the failing
+   slot, one line says the journal is paused, and the writer retries once per
+   `HISTORY_JOURNAL_PAUSED_RETRY_S` until an append succeeds: a persistent fault costs a bounded
+   number of the oldest sectors, not the retained history.
 
    `/status.history.persist` names how this boot's rings came to be, so a chart that emptied itself
    has a stated cause instead of looking like a defect. It describes the `.noinit` adoption decision;

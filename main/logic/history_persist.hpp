@@ -364,12 +364,51 @@ inline constexpr size_t history_journal_write_slot(size_t next_slot, bool candid
 // persisted. The next sector's first slot is the only safe landing: the sector the failure is in
 // may hold the head's committed predecessors, and that one is erased by the ordinary rotation
 // anyway.
-inline constexpr size_t HISTORY_JOURNAL_SLOT_RETRY_LIMIT = 2;
+//
+// Abandoning is itself destructive, though: the landing sector is ERASED before the next program
+// attempt, which retires the oldest slots of the journal. A fault that is not local to one sector
+// (the erase succeeds, the program or its readback fails everywhere) would therefore carry the
+// cursor round the whole ring, erasing every sector on the way: one lap is the sector count times
+// HISTORY_JOURNAL_SLOT_RETRY_LIMIT poll ticks, and afterwards no retained history is left. One
+// failure episode — the failures since the last successful append — may thus abandon at most
+// HISTORY_JOURNAL_MAX_ABANDONED_SECTORS. Beyond that the cursor stays on the failing slot and the
+// writer is PAUSED: one attempt per HISTORY_JOURNAL_PAUSED_RETRY_S until an append succeeds. The
+// erase damage of an episode is bounded by that cap (one landing sector per abandon), however
+// long the fault lasts, and a fault that does clear heals by itself.
+inline constexpr size_t   HISTORY_JOURNAL_SLOT_RETRY_LIMIT      = 2;
+inline constexpr size_t   HISTORY_JOURNAL_MAX_ABANDONED_SECTORS = 2;
+inline constexpr uint32_t HISTORY_JOURNAL_PAUSED_RETRY_S        = 60;
+
 inline constexpr size_t history_journal_slot_after_failure(size_t slot,
                                                            size_t consecutive_failures) {
     return consecutive_failures >= HISTORY_JOURNAL_SLOT_RETRY_LIMIT
                ? history_journal_next_sector_slot(slot)
                : slot;
+}
+
+// The decision after one failed append at `slot`. `consecutive_failures` counts the failures at
+// that slot (this one included), `abandoned_in_episode` the sectors this episode has abandoned so
+// far. Once the budget is spent every failure pauses: the throttle (history_journal_retry_due)
+// already makes each later attempt a retry, so there is no immediate second try.
+struct HistoryJournalFailureStep {
+    size_t next_slot; // where the next append attempt goes
+    bool   paused;    // the abandon budget is spent: stay on `next_slot` and retry slowly
+};
+inline constexpr HistoryJournalFailureStep
+history_journal_failure_step(size_t slot, size_t consecutive_failures,
+                             size_t abandoned_in_episode) {
+    if (abandoned_in_episode >= HISTORY_JOURNAL_MAX_ABANDONED_SECTORS) return {slot, true};
+    return {history_journal_slot_after_failure(slot, consecutive_failures), false};
+}
+
+// May the writer attempt an append now? Always, unless it is paused: then at most one attempt per
+// HISTORY_JOURNAL_PAUSED_RETRY_S of the monotonic clock since the previous attempt.
+// `last_attempt_us` is INT64_MIN when no attempt has been recorded.
+inline constexpr bool history_journal_retry_due(bool paused, int64_t now_us,
+                                                int64_t last_attempt_us) {
+    if (!paused || last_attempt_us == INT64_MIN) return true;
+    return now_us - last_attempt_us >=
+           static_cast<int64_t>(HISTORY_JOURNAL_PAUSED_RETRY_S) * 1000000;
 }
 
 // A capacity guard for the CURRENT catalog. The journal retains at least 72 hours even if all three
@@ -823,6 +862,16 @@ inline constexpr int64_t history_anchor_commit_us(int64_t now_us, int64_t unix_s
 // its own live anchor, so it never has anything to append; and the restore index, which is built
 // newest-first, is dominated by the future records and hides every valid older one.
 //
+// The journal cannot tell WHICH clock is wrong, though: the same picture (records beyond the
+// current clock) is also what a boot that synchronised to a wrong PAST time sees of a perfectly
+// good journal. So "ahead of the clock" is acted on only when the walk of history_reindex_step
+// finds at least one believable record at or below the clock — the far-future case, where older
+// valid records exist. If everything lies beyond the clock, nothing is rewound, re-indexed or
+// appended: the journal is left exactly as it is until the clock passes it, which is also what a
+// journal that was right all along needs. (A past clock that is only hours behind still leaves
+// older records below it; the journal's own content cannot distinguish that from the far-future
+// case, so it is treated like it.)
+//
 // `slack` is tolerance for the anchor itself, which is derived from two whole-second readings and
 // can sit one bucket either side of where a record was stamped (and for a small clock step). A
 // cursor inside the slack just waits, as it always did; only a cursor beyond it is treated as
@@ -868,6 +917,27 @@ inline HistoryWindowTake history_window_index_offer(HistoryWindowIndex& w, int64
     return HistoryWindowTake::Take;
 }
 
+// What to do about a source whose cursor may be ahead of the clock. `bound` is the newest bucket
+// the clock can vouch for (the live anchor for a trend writer, the wall bucket for the restore and
+// for the checkup writer). Idle: the cursor is not ahead, so there is nothing to do and an earlier
+// "found nothing" verdict (`spent`) is released. Walk: re-index below the bound. Wait: a walk
+// already found nothing to act on (or failed) while the cursor stayed ahead; a wrong clock must not
+// cost a full journal walk per poll tick, so the source waits until the cursor is no longer ahead
+// (the clock caught up, or an identity reset cleared it) or the device reboots.
+enum class HistoryReindexStep : uint8_t { Idle, Wait, Walk };
+inline constexpr HistoryReindexStep history_reindex_step(int64_t cursor, int64_t bound,
+                                                         uint32_t slack, bool spent) {
+    if (!history_cursor_in_future(cursor, bound, slack)) return HistoryReindexStep::Idle;
+    return spent ? HistoryReindexStep::Wait : HistoryReindexStep::Walk;
+}
+
+// Does a finished walk replace the source's index and cursor? Only when it met a believable record.
+// Otherwise the existing index and cursor stay exactly as they were (the walk took nothing, so it
+// did not touch the slot array either).
+inline constexpr bool history_reindex_publishes(const HistoryWindowIndex& w) {
+    return w.newest != INT64_MIN;
+}
+
 // ── Locating the journal-backed span ────────────────────────────────────────────────────────────
 // Restore scratch always represents a complete 24-hour window and is initialised to NO_READING.
 // That sentinel is also a REAL journal sample: an unavailable register must retain the same
@@ -886,6 +956,19 @@ inline size_t history_flash_restore_start(int64_t oldest_record_bucket,
                           static_cast<uint64_t>(oldest_record_bucket);
     if (span >= width) return 0;
     return width - 1U - static_cast<size_t>(span);
+}
+
+// The restore walks the rings of all three trend sources in one global order: X10A, then HomeHub,
+// then ENV III (the order history.cpp's source_of_slot() decodes). A source whose identity reset is
+// pending has nothing it may restore — the reset normally cleared its index with it — and the reset
+// may never be consumed (a disabled HomeHub, an X10A bus that never resolves a profile), so the
+// restore must step OVER the whole source instead of waiting at its first ring. This is the first
+// ring of the source after the one `ring` belongs to; the total ring count when it was the last
+// source.
+inline constexpr size_t history_restore_next_source_ring(size_t ring) {
+    if (ring < TREND_COUNT) return TREND_COUNT;
+    if (ring < TREND_COUNT + HOMEHUB_HISTORY_COUNT) return TREND_COUNT + HOMEHUB_HISTORY_COUNT;
+    return HISTORY_FLASH_TOTAL_RINGS;
 }
 
 // ── The splice ──────────────────────────────────────────────────────────────────────────────────

@@ -16990,6 +16990,87 @@ static void test_history_persist() {
         CHECK(attempts == HISTORY_JOURNAL_SLOT_RETRY_LIMIT);
         CHECK(slot == 32);
     }
+
+    // The abandon budget (HIST-02/c, review round 1). Abandoning a sector erases the sector landed
+    // on, so a fault that survives the skip (erase fine, program or readback failing everywhere)
+    // used to carry the cursor round the whole ring and erase every retained record. One episode
+    // may abandon HISTORY_JOURNAL_MAX_ABANDONED_SECTORS; then the writer stays put and pauses.
+    CHECK(HISTORY_JOURNAL_MAX_ABANDONED_SECTORS == 2);
+    CHECK(HISTORY_JOURNAL_PAUSED_RETRY_S == 60);
+    {
+        const auto at = [](size_t slot, size_t fails, size_t abandoned) {
+            return history_journal_failure_step(slot, fails, abandoned);
+        };
+        CHECK(at(5, 1, 0).next_slot == 5 && !at(5, 1, 0).paused);    // retry once, in place
+        CHECK(at(5, 2, 0).next_slot == 16 && !at(5, 2, 0).paused);   // skip on the second failure
+        CHECK(at(16, 2, 1).next_slot == 32 && !at(16, 2, 1).paused); // the last allowed abandon
+        CHECK(at(32, 1, 2).next_slot == 32 && at(32, 1, 2).paused);  // budget spent: stay, pause
+        CHECK(at(32, 2, 2).next_slot == 32 && at(32, 2, 2).paused);  // ... no skip, however often
+        CHECK(at(32, 200, 7).next_slot == 32 && at(32, 200, 7).paused);
+        CHECK(at(5, 1, 2).paused); // even the first failure there
+        // The last sector wraps to sector zero while the budget lasts, and pauses once it is spent.
+        CHECK(at(HISTORY_JOURNAL_SLOT_COUNT - 1, 2, 0).next_slot == 0);
+        CHECK(at(HISTORY_JOURNAL_SLOT_COUNT - 16, 2, 1).next_slot == 0);
+        CHECK(!at(HISTORY_JOURNAL_SLOT_COUNT - 16, 2, 1).paused);
+        CHECK(at(HISTORY_JOURNAL_SLOT_COUNT - 16, 2, 2).next_slot ==
+              HISTORY_JOURNAL_SLOT_COUNT - 16);
+        // The throttle: free while not paused, one attempt per period while paused.
+        const int64_t period_us = static_cast<int64_t>(HISTORY_JOURNAL_PAUSED_RETRY_S) * 1'000'000;
+        CHECK(history_journal_retry_due(false, 0, 0));
+        CHECK(history_journal_retry_due(false, 5, 4));          // not paused: every tick
+        CHECK(history_journal_retry_due(true, 123, INT64_MIN)); // no attempt recorded yet
+        CHECK(!history_journal_retry_due(true, 1'000'000, 1'000'000));
+        CHECK(!history_journal_retry_due(true, 1'000'000 + period_us - 1, 1'000'000));
+        CHECK(history_journal_retry_due(true, 1'000'000 + period_us, 1'000'000));
+        CHECK(history_journal_retry_due(true, 1'000'000 + 5 * period_us, 1'000'000));
+        CHECK(!history_journal_retry_due(true, 500, 1'000'000)); // a clock that went back waits
+
+        // A persistent fault from slot 21 on, one poll tick (1 s) per step, driven through the same
+        // two decisions history.cpp takes. The ring has HISTORY_FLASH_PARTITION_BYTES /
+        // HISTORY_FLASH_ERASE_BYTES sectors; the old rule (no budget) swept the cursor through
+        // every one of them and the new one lands on exactly two.
+        constexpr size_t kTicks = 3000;
+        struct Episode {
+            size_t           slot = 21, fails = 0, abandoned = 0, attempts = 0;
+            bool             paused  = false;
+            int64_t          last_us = INT64_MIN;
+            std::set<size_t> landed; // sectors the cursor was moved to (each one gets erased)
+        };
+        const auto run = [&](bool budget) {
+            Episode ep;
+            for (size_t tick = 0; tick < kTicks; ++tick) {
+                const int64_t now_us = static_cast<int64_t>(tick) * 1'000'000;
+                if (budget && !history_journal_retry_due(ep.paused, now_us, ep.last_us)) continue;
+                ep.attempts++;
+                ep.fails++; // every attempt fails
+                const HistoryJournalFailureStep step =
+                    budget ? history_journal_failure_step(ep.slot, ep.fails, ep.abandoned)
+                           : HistoryJournalFailureStep{
+                                 history_journal_slot_after_failure(ep.slot, ep.fails), false};
+                if (step.paused) {
+                    ep.paused  = true;
+                    ep.last_us = now_us;
+                    continue;
+                }
+                if (step.next_slot != ep.slot) {
+                    ep.slot  = step.next_slot;
+                    ep.fails = 0;
+                    ep.abandoned++;
+                    ep.landed.insert(ep.slot / HISTORY_JOURNAL_SLOTS_PER_SECTOR);
+                }
+            }
+            return ep;
+        };
+        const Episode capped = run(true);
+        CHECK(capped.landed.size() == HISTORY_JOURNAL_MAX_ABANDONED_SECTORS); // sectors 2 and 3
+        CHECK(capped.abandoned == HISTORY_JOURNAL_MAX_ABANDONED_SECTORS);
+        CHECK(capped.paused && capped.slot == 48);
+        // 2 + 2 attempts on the way and 1 at the sector the cursor stays on, then one per period.
+        CHECK(capped.attempts == 5 + (kTicks - 1 - 4) / HISTORY_JOURNAL_PAUSED_RETRY_S);
+        const Episode swept = run(false); // the retired rule, kept so this test has teeth
+        CHECK(swept.landed.size() == HISTORY_FLASH_PARTITION_BYTES / HISTORY_FLASH_ERASE_BYTES);
+        CHECK(swept.landed.size() > capped.landed.size() * 100);
+    }
     CHECK(HISTORY_FLASH_FUTURE_HOURS == 72);
     CHECK(HISTORY_FLASH_FUTURE_SAMPLES == 864);
     CHECK(HISTORY_FLASH_FUTURE_RECORDS == 2664);
@@ -17320,11 +17401,10 @@ static void test_history_persist() {
     CHECK(history_t0(1'786'459'116, restored_age_s, 1, HISTORY_DT_S) == 1'786'458'900);
     CHECK(history_anchor_commit_us(123, 456, 789, 0) == 123);
 
-    // --- a cursor from the future (HIST-02/b)
-    // ----------------------------------------------------- One boot synchronised to a wrong
-    // far-future time leaves records ahead of every later clock. Equal is never future, an unknown
-    // cursor or anchor proves nothing, and the slack absorbs the one-bucket jitter of an anchor
-    // derived from two whole-second readings.
+    // --- a cursor from the future (HIST-02/b) ----------------------------------------------------
+    // One boot synchronised to a wrong far-future time leaves records ahead of every later clock.
+    // Equal is never future, an unknown cursor or anchor proves nothing, and the slack absorbs the
+    // one-bucket jitter of an anchor derived from two whole-second readings.
     CHECK(!history_cursor_in_future(100, 100));
     CHECK(history_cursor_in_future(101, 100));
     CHECK(!history_cursor_in_future(99, 100));
@@ -17339,6 +17419,106 @@ static void test_history_persist() {
     CHECK(history_cursor_in_future(5000 + HISTORY_SAMPLES, 5000,
                                    HISTORY_CURSOR_FUTURE_SLACK_BUCKETS));
 
+    // What the firmware does with such a cursor depends on WHICH clock is wrong, and the journal
+    // cannot tell: records beyond the clock look the same whether they were stamped by a far-future
+    // boot or belong to a good journal that a boot with a wrong PAST time is looking at. It acts
+    // only when the walk below the clock finds a believable record.
+    CHECK(history_reindex_step(110, 120, 0, false) == HistoryReindexStep::Idle); // not ahead
+    CHECK(history_reindex_step(110, 110, 0, false) == HistoryReindexStep::Idle); // equal
+    CHECK(history_reindex_step(111, 110, 1, false) == HistoryReindexStep::Idle); // inside the slack
+    CHECK(history_reindex_step(112, 110, 1, false) == HistoryReindexStep::Walk);
+    CHECK(history_reindex_step(112, 110, 1, true) == HistoryReindexStep::Wait); // walked: wait
+    CHECK(history_reindex_step(INT64_MIN, 110, 0, true) == HistoryReindexStep::Idle); // reset
+    CHECK(history_reindex_step(110, 120, 0, true) == HistoryReindexStep::Idle); // clock caught up
+    CHECK(history_reindex_step(110, INT64_MIN, 0, false) == HistoryReindexStep::Idle); // no clock
+    {
+        HistoryWindowIndex none;
+        CHECK(!history_reindex_publishes(none));
+        HistoryWindowIndex found;
+        CHECK(history_window_index_offer(found, 7, 10, HISTORY_SAMPLES) == HistoryWindowTake::Take);
+        CHECK(history_reindex_publishes(found));
+        // A record beyond the bound is not believable: it leaves the window empty.
+        HistoryWindowIndex beyond;
+        CHECK(history_window_index_offer(beyond, 11, 10, HISTORY_SAMPLES) ==
+              HistoryWindowTake::Skip);
+        CHECK(!history_reindex_publishes(beyond));
+    }
+    {
+        // One source's journal in physical order (the head is the back), driven through exactly the
+        // decisions history.cpp takes: the clock-free boot scan, then the walk below the clock.
+        struct Model {
+            int64_t cursor = INT64_MIN, newest = INT64_MIN;
+            size_t  count = 0, walks = 0;
+            bool    spent = false;
+        };
+        const auto boot = [](const std::vector<int64_t>& journal) {
+            Model              m;
+            HistoryWindowIndex w;
+            for (auto it = journal.rbegin(); it != journal.rend(); ++it)
+                (void)history_window_index_offer(w, *it, INT64_MAX, HISTORY_SAMPLES);
+            m.cursor = m.newest = w.newest;
+            m.count             = w.count;
+            return m;
+        };
+        // `believable_only` false is the retired rule: publish whatever the walk found.
+        const auto reindex = [](Model& m, const std::vector<int64_t>& journal, int64_t bound,
+                                uint32_t slack, bool believable_only) {
+            const HistoryReindexStep step = history_reindex_step(m.cursor, bound, slack, m.spent);
+            if (step == HistoryReindexStep::Idle) m.spent = false;
+            if (step != HistoryReindexStep::Walk) return step;
+            m.walks++;
+            HistoryWindowIndex w;
+            for (auto it = journal.rbegin(); it != journal.rend(); ++it)
+                (void)history_window_index_offer(w, *it, bound, HISTORY_SAMPLES);
+            if (!believable_only || history_reindex_publishes(w)) {
+                m.cursor = m.newest = w.newest;
+                m.count             = w.count;
+                m.spent             = false;
+            } else {
+                m.spent = true;
+            }
+            return step;
+        };
+
+        // The far-future fault: valid buckets 100..110, then a boot that took a time far ahead.
+        std::vector<int64_t> far_future;
+        for (int64_t b = 100; b <= 110; ++b) far_future.push_back(b);
+        for (int64_t b = 5000; b <= 5004; ++b) far_future.push_back(b);
+        Model m = boot(far_future);
+        CHECK(m.cursor == 5004 && m.newest == 5004 && m.count == 5); // the scan believes the head
+        CHECK(reindex(m, far_future, 120, 0, true) == HistoryReindexStep::Walk);
+        CHECK(m.cursor == 110 && m.newest == 110 && m.count == 11 && m.walks == 1); // older ones
+        CHECK(reindex(m, far_future, 120, 0, true) == HistoryReindexStep::Idle);    // resumes
+        CHECK(m.walks == 1);
+
+        // The mirror: a good journal, and a boot that synchronised to a wrong PAST time. Nothing in
+        // it is at or below that clock, so NOTHING may change — not the cursor, not the index —
+        // and the walk is not repeated on every tick.
+        std::vector<int64_t> good;
+        for (int64_t b = 100; b <= 110; ++b) good.push_back(b);
+        m = boot(good);
+        CHECK(m.cursor == 110 && m.count == 11);
+        CHECK(reindex(m, good, 50, 0, true) == HistoryReindexStep::Walk);
+        CHECK(m.cursor == 110 && m.newest == 110 && m.count == 11 && m.spent && m.walks == 1);
+        for (int tick = 0; tick < 10; ++tick)
+            CHECK(reindex(m, good, 50, 0, true) == HistoryReindexStep::Wait);
+        CHECK(m.walks == 1 && m.cursor == 110 && m.count == 11);
+        // The clock is corrected, or simply passes the cursor: the verdict is released.
+        CHECK(reindex(m, good, 112, 0, true) == HistoryReindexStep::Idle);
+        CHECK(!m.spent && m.cursor == 110 && m.count == 11 && m.walks == 1);
+        // The retired rule published an EMPTY window here, which put the cursor at INT64_MIN: the
+        // writer then appended the live window under the wrong buckets.
+        Model retired = boot(good);
+        CHECK(reindex(retired, good, 50, 0, false) == HistoryReindexStep::Walk);
+        CHECK(retired.cursor == INT64_MIN && retired.count == 0);
+
+        // A past clock that is only hours behind still has older records below it; the journal
+        // cannot tell that from the far-future case, so it is handled the same way.
+        m = boot(good);
+        CHECK(reindex(m, good, 105, 0, true) == HistoryReindexStep::Walk);
+        CHECK(m.cursor == 105 && m.count == 6);
+    }
+
     // --- locating the journal-backed span --------------------------------------------------------
     // The record buckets, not their values, define the restored span. This is load-bearing for a
     // register that was unavailable for every sample: its all-NO_READING raster must still survive.
@@ -17349,6 +17529,34 @@ static void test_history_persist() {
     CHECK(history_flash_restore_start(INT64_MIN, 1000) == HISTORY_SAMPLES);
     CHECK(history_flash_restore_start(1001, 1000) == HISTORY_SAMPLES);
     CHECK(history_flash_restore_start(1000, 1000, 0) == 0);
+
+    // --- the restore skips a pending-reset source (HIST-02/d) ------------------------------------
+    // A source whose identity reset is pending (a disabled HomeHub, an X10A bus that never resolves
+    // a profile) must be stepped OVER, not waited for: returning at its first ring left the restore
+    // unfinished for good and with it every append of the journal.
+    constexpr size_t kModbusFirst = TREND_COUNT;
+    constexpr size_t kEnv3First   = TREND_COUNT + HOMEHUB_HISTORY_COUNT;
+    CHECK(history_restore_next_source_ring(0) == kModbusFirst);
+    CHECK(history_restore_next_source_ring(4) == kModbusFirst); // restore proceeds in batches of 4
+    CHECK(history_restore_next_source_ring(kModbusFirst - 1) == kModbusFirst);
+    CHECK(history_restore_next_source_ring(kModbusFirst) == kEnv3First);
+    CHECK(history_restore_next_source_ring(kEnv3First - 1) == kEnv3First);
+    CHECK(history_restore_next_source_ring(kEnv3First) == HISTORY_FLASH_TOTAL_RINGS);
+    CHECK(history_restore_next_source_ring(HISTORY_FLASH_TOTAL_RINGS - 1) ==
+          HISTORY_FLASH_TOTAL_RINGS);
+    for (size_t ring = 0; ring < HISTORY_FLASH_TOTAL_RINGS; ++ring) {
+        const size_t next = history_restore_next_source_ring(ring);
+        CHECK(next > ring && next <= HISTORY_FLASH_TOTAL_RINGS); // always makes progress
+    }
+    {
+        // Skipping every source in turn finishes the restore after one step per source.
+        size_t ring = 0, steps = 0;
+        while (ring < HISTORY_FLASH_TOTAL_RINGS && steps < 10) {
+            ring = history_restore_next_source_ring(ring);
+            steps++;
+        }
+        CHECK(ring == HISTORY_FLASH_TOTAL_RINGS && steps == 3);
+    }
 
     // --- indexing a source's last window newest-first (boot scan and restore-time re-index) ------
     // A record beyond the upper bound is SKIPPED: it neither defines the window's newest bucket nor
