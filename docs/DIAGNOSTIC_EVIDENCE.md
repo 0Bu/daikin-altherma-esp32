@@ -166,7 +166,10 @@ window can show only its one-hour thermal size example.
 
 **Not established:** A notable drop proves neither a leaking three-way valve nor poor insulation.
 Draws, stratification, thermosiphoning, a check valve, and external circulation can produce similar
-traces. A circulation label shows temporal correlation, not exclusive cause. `OK` also does not
+traces. A tank charge that lies entirely inside an unobserved stretch longer than the blind run
+bound (the unit unreadable or the board pausing its polling) is not seen, so its 45-minute settling
+period is not armed and the next candidate can open on the charge's settling tail; a window
+completed right after such a stretch can therefore report a settling artefact as a fast loss. A circulation label shows temporal correlation, not exclusive cause. `OK` also does not
 exclude faster continuous loss outside the detectable band. Because one point in a stratified tank
 does not establish uniform cooling and the individual window rates are not retained, the result
 establishes neither whole-tank/daily thermal kWh nor electrical kWh. The UI's multiplication is

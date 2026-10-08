@@ -130,10 +130,12 @@ candidate in the retained window. That is not proof that none occurred. Within t
 candidate stays live, so a draw or charge hidden in a short unobserved stretch is still recorded
 when readings return. A stretch that exceeds the budget ends the candidate as a `blind` discard. A
 charge or pump run inside that stretch that is still under way when readings return meets no live
-candidate and is never recorded, because the next candidate opens only on a clean reading. The part
-of a draw's drop that fell inside the stretch is lost because the draw anchor restarts at the first
-reading; a drop that continues past it, or any event that starts after that reading, is recorded
-against the new candidate. And `blind` itself only means unobserved time: the readings the check
+candidate and is never recorded, because the next candidate opens only on the first clean reading
+(after any settle that charge arms). The part of a draw's drop that fell inside the stretch is lost
+because the draw anchor restarts at the first clean reading; a drop that continues past it, or an
+event that starts after the new candidate has opened, is recorded against that candidate. A charge
+lying entirely inside such a stretch is not seen at all, so its settle is never armed and the next
+candidate can open on the charge's settling tail. And `blind` itself only means unobserved time: the readings the check
 needs (the tank temperature, or the valve, heater and pump states, which sit on a different X10A
 page) went unread. That time comes from X10A timeouts and also from the board pausing its own
 polling (the OTA or weather network hold, model detection, a poll cycle skipped after a caught
@@ -170,8 +172,8 @@ cost the identical 105 minutes as a 40-minute charge, and one blip every 90 minu
 measured, otherwise perfect 24 h from 23 completed windows to zero. A short witness still discards
 the candidate hour — the hydronics moved, so the tank was not standing — it just no longer asserts
 that heat went in. Two rules keep the bound from failing in the direction that reports a leak where
-there is none. A witness seen across an interval nobody watched counts as **proven** rather than
-short. And an **unreadable** row is not proof the charge ended: both witnesses ride page 0x60, so
+there is none. A witness seen across a gap between samples longer than `CHECKUP_MAX_GAP_S` counts
+as **proven** rather than short (an empty sample from a polling pause does not open such a gap). And an **unreadable** row is not proof the charge ended: both witnesses ride page 0x60, so
 one silent page inside a real 40-minute charge would otherwise restart the two-minute clock, and a
 charge finishing soon after that timeout would arm no settle at all and have its own tail measured
 as standing loss. At the reference installation's timeout rate that is not a corner case. Staying
@@ -205,7 +207,8 @@ about once an hour against a window needing sixty clean minutes. Replayed over t
 real 24 h, the old rule kept about half the achievable windows — so it roughly doubled the time to a
 verdict, and in the first hours of a boot, when only one or two windows are possible at all, it read
 "0 min of 6 h" with every row it needed present and correct. A sample the firmware could not read is
-therefore **blind time**, bounded so no unobserved stretch can hide a tank charge and subtracted
+therefore **blind time**, bounded so no unobserved stretch within the run bound can hide a tank
+charge (a longer one ends the candidate, see the blind verdict above) and subtracted
 from the seconds the window claims to have observed. A state the sweep *can* see still ends the
 window, and a draw hidden inside a blind stretch is still caught against the temperature anchor
 standing when vision was lost.

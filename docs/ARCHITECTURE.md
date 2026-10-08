@@ -1535,11 +1535,12 @@ A single task owns the X10A UART (there is exactly one link). Each cycle:
    run, or past `DHW_LOSS_BLIND_MAX_PCT` of the window in total, the carried candidate is discarded.
    That adoption discard is the one exception to the `aborts` count: `dhw_loss_adopt` takes no
    bucket, so `aborts`, `abort_reasons[]` and `best_aborted_s` stay as restored. The count stays a
-   count of the discards `dhw_loss_step` observed; this one's cause is entirely the board's own
-   restart allowance and network start-up, which the `blind` reason cannot separate from a silent
-   link, and counting it would add a board-side discard to every slow restart. The count therefore
-   under-reports restarts and never overclaims; the same unobserved time ending a candidate later,
-   inside `dhw_loss_step`, is counted.
+   count of the discards `dhw_loss_step` observed. The time this adoption books is the restart
+   allowance plus the network start-up, a board-side cause that the `blind` reason cannot separate
+   from a silent link (an unread stretch still open at the restart can add to it); counting the
+   discard would add a board-side entry whenever a slow restart carries a candidate. The count
+   therefore under-reports restarts and never overclaims; the same unobserved time ending a
+   candidate later, inside `dhw_loss_step`, is counted.
    The boot consumes that handoff once; a panic never replays an older checkpoint.
    See *The host-tested logic core* for why a
    row is addressed by (page, offset, **converter**) here and by (page, offset, unit) in the trends.

@@ -722,9 +722,12 @@ constexpr int      DHW_LOSS_HIGH_TENTHS_K_H = 8;         // project heuristic, n
 // honest — SUBTRACTED from the seconds the window claims to have observed.
 //
 // Both bounds exist to stop a window being assembled out of absence. The RUN bound is the load-
-// bearing one: a tank charge cannot start, run and finish inside it, so no unobserved stretch can
-// hide the event that arms the settle timer. The TOTAL is the same 90%-evidence shape the
-// circulation witness already uses.
+// bearing one: a tank charge cannot start, run and finish inside it, so no unobserved stretch
+// WITHIN the bound can hide the event that arms the settle timer. A stretch PAST the bound ends the
+// candidate, but a charge lying entirely inside it is not seen either, so the settle is not armed
+// and the next candidate can open on that charge's settling tail — a known limit stated in
+// docs/DIAGNOSTIC_EVIDENCE.md (dhw_loss, Not established). The TOTAL is the same 90%-evidence shape
+// the circulation witness already uses.
 constexpr uint32_t DHW_LOSS_BLIND_RUN_MAX_S = 120;
 constexpr uint32_t DHW_LOSS_BLIND_MAX_PCT   = 10;
 constexpr uint32_t DHW_LOSS_CIRC_KNOWN_PCT = 90;
@@ -820,10 +823,11 @@ inline uint32_t dhw_loss_adopt_blind_s(int64_t now_us) {
 // A carried candidate that the booked unobserved time pushes past the blind bounds ends here with
 // reset_segment(), not dhw_loss_abort(), and the adoption takes no bucket: that discard is left out
 // of the discarded-window count on purpose. The count stays a count of the discards dhw_loss_step
-// observed; the unobserved time ending this one is the restart allowance plus the network
-// start-up, a cause entirely on the board's side that the blind reason cannot separate from a
-// silent link, and counting it would add a board-side discard to every slow restart. The count
-// therefore under-reports restarts and never overclaims.
+// observed. The time this adoption books is the restart allowance plus the network start-up, a
+// board-side cause the blind reason cannot separate from a silent link (an unread stretch still
+// open at the restart can add to it); counting the discard would add a board-side entry whenever
+// a slow restart carries a candidate. The count therefore under-reports restarts and never
+// overclaims.
 inline void dhw_loss_adopt(DhwLossState& st, const DhwLossCarry& c, int64_t now_us) {
     st = DhwLossState{};
     st.last_us = now_us;
