@@ -141,7 +141,8 @@ completed windows, observed clean hours and the window in progress. The tank sam
 that moment is discarded rather than counted under the new mapping. The overall checkup's 24-hour
 span is not reset, so once it is complete a reassuring result needs six new clean hours, not a new
 24-hour lifecycle. An intentional restart, such as a firmware update, hands the window in progress
-to the next boot through RAM; a power interruption or crash hands over none. The next boot books a
+to the next boot through RAM when that boot accepts it (an update that changes the stored layout or
+moves it in RAM hands over none); a power interruption or crash hands over none. The next boot books a
 fixed 5-second downtime allowance plus its own uptime when the check resumes, which includes the
 network start-up, as unobserved time: it advances the window's age and never counts as observed.
 When that pushes the window past the bound every unread stretch is held to (`120 s` in one run,
@@ -168,15 +169,19 @@ window can show only its one-hour thermal size example.
 Draws, stratification, thermosiphoning, a check valve, and external circulation can produce similar
 traces. The 45-minute settling period arms only after the board has seen two minutes of charge
 witness (the three-way valve on DHW or the booster heater on; a witness seen in the sample that
-closes a gap between samples longer than `CHECKUP_MAX_GAP_S` counts as two minutes). It counts down
-from the last sample that saw the charge, also through samples in which the valve and heater rows
-went unread (the unit not answering, or the board pausing its polling while it keeps sampling). A
-gap between samples longer than `CHECKUP_MAX_GAP_S` and an intentional restart hold it instead; any
-other restart (a panic, a power loss, or a handoff the next boot rejects) drops it. A charge seen
-for less than two minutes in total, such as one lying entirely inside an unread stretch, therefore
-arms no settling period; a charge whose end falls inside an unread stretch has its settling period
-shortened by the unread samples the board kept taking, and loses it entirely once those reach 45
-minutes; and a settling period still running at an unclean restart is lost. In each case the next
+closes a gap between samples longer than `CHECKUP_MAX_GAP_S`, or in the first sample after the
+check starts afresh, counts as two minutes). It counts down from the last sample that saw the
+charge, also through samples in which the valve and heater rows went unread (the unit not
+answering, or the board pausing its polling while it keeps sampling). A gap between samples longer
+than `CHECKUP_MAX_GAP_S` holds it, and so does an intentional restart whose handoff the next boot
+adopts. Anything that starts the check afresh drops it: a panic, a power loss, an intentional
+restart whose handoff the next boot rejects or no longer finds (for example after a firmware update
+that changes the stored layout or moves it in RAM), or a reset of the check (for example after a
+changed circulation-pump mapping or a repeated model detection). A charge seen for less than two
+minutes in total, such as one lying entirely inside an unread stretch, therefore arms no settling
+period; a charge whose end falls inside an unread stretch has its settling period shortened by the
+unread samples the board kept taking, and loses it entirely once those reach 45 minutes; and a
+settling period still running when the check starts afresh is lost. In each case the next
 candidate can open on the charge's settling tail, and a window completed there can report a
 settling artefact as a fast loss. A circulation label shows temporal correlation, not exclusive cause. `OK` also does not
 exclude faster continuous loss outside the detectable band. Because one point in a stratified tank

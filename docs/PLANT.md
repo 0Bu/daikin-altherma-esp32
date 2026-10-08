@@ -135,12 +135,14 @@ candidate and is never recorded, because the next candidate opens only on the fi
 because the draw anchor restarts at the first clean reading; a draw-sized drop that continues past
 it, or an event that starts after the new candidate has opened, is recorded against that candidate.
 The settle arms only after two minutes of charge witness the board has seen, and counts down from
-the last sample that saw the charge, also through unread samples (a gap past `CHECKUP_MAX_GAP_S`
-and an intentional restart hold it; any other restart drops it). A charge seen for less than two
-minutes in total, such as one lying entirely inside the stretch, therefore arms no settle, a charge
-whose end fell inside an unread stretch has its settle shortened by the unread samples, and a
-settle still running at an unclean restart is lost; each way the next candidate can open on the
-charge's settling tail. And `blind` itself only means unobserved time: the readings the check
+the last sample that saw the charge, also through unread samples. A gap past `CHECKUP_MAX_GAP_S`
+holds it, and so does an intentional restart whose handoff the next boot adopts; anything that
+starts the check afresh drops it (a panic, a power loss, a handoff the next boot rejects or no
+longer finds, for example after a firmware update that changes the stored layout or moves it in
+RAM, or a reset of the check). A charge seen for less than two minutes in total, such as one lying
+entirely inside the stretch, therefore arms no settle, a charge whose end fell inside an unread
+stretch has its settle shortened by the unread samples, and a settle still running when the check
+starts afresh is lost; each way the next candidate can open on the charge's settling tail. And `blind` itself only means unobserved time: the readings the check
 needs (the tank temperature, or the valve, heater and pump states, which sit on a different X10A
 page) went unread. That time comes from X10A timeouts and also from the board pausing its own
 polling (the OTA or weather network hold, model detection, a poll cycle skipped after a caught

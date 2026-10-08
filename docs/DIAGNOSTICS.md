@@ -45,7 +45,8 @@ RAM. Completed diagnosis hours are also stored in the device's append-only histo
 power interruption or firmware update restores them once the clock and detected model match. Only
 the hour that was still open can be missing. An update still discards older records when the meaning
 or layout of their counters changed. An intentional restart, such as a firmware update, also hands
-over the domestic-hot-water check's unfinished quiet hour; a power interruption or crash does not.
+over the domestic-hot-water check's unfinished quiet hour when the new start can read it (an update
+that changes how it is kept cannot); a power interruption or crash does not.
 The restart and the start-up before the board can watch the tank again count as unwatched time, up
 to the point where the check resumes. When the restart and that start-up leave the tank unwatched
 for more than two minutes in total (less when the restart interrupted a stretch of unread readings,
