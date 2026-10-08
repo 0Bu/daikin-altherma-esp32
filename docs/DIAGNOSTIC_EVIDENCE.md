@@ -171,7 +171,16 @@ exclude faster continuous loss outside the detectable band. Because one point in
 does not establish uniform cooling and the individual window rates are not retained, the result
 establishes neither whole-tank/daily thermal kWh nor electrical kWh. The UI's multiplication is
 therefore labelled as the counterfactual case where every clean window equals the maximum; reading
-it as the actual 24-hour total would fabricate a measurement.
+it as the actual 24-hour total would fabricate a measurement. A candidate hour discarded as `blind`
+(too much of it unobserved: R5T, or the valve, heater and pump rows from the other X10A page, went
+unread) does not establish an X10A link or wiring fault. Unobserved time comes from X10A timeouts
+and also from the board's own pauses, among them the network hold during a firmware update, a
+manual update check or a weather transfer, model detection (which also runs while the bus is dead), a poll cycle skipped after a
+caught exception, a UART that could not be started, and the allowance booked across a restart. The
+retained 24-hour aggregate keeps neither the source of that time nor a per-hour reason, only an
+OR-ed set of reason kinds. A day whose only recorded reason is `blind` therefore shows no
+plant-side discard reason but cannot tell a faulty link from a healthy one that was merely not
+being read.
 
 <a id="diagnosis-cycling"></a>
 ### 3. Compressor cycling (`cycling`)

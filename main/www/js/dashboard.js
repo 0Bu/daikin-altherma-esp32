@@ -1323,12 +1323,20 @@ function checkupDetailHtml(c, fullSpan = c.full_span === true) {
   // rows, and needs the opposite advice — so it gets its own sentence rather than the generic one.
   if (statusKey === "unavailable" && c.id === "dhw_loss" && c.blocked) {
     const reasons = Array.isArray(c.abort_reasons) ? c.abort_reasons : [];
-    // The all-blind case can name the link: no other reason kind occurred anywhere in the retained
-    // window. Every mixed/non-blind case stays non-causal. The report has an abort total and an
-    // OR-ed reason set, not per-reason counts or circulation evidence for aborted candidates, so it
-    // cannot honestly say which plant-side cause dominated.
-    const linkOnly = reasons.length === 1 && reasons[0] === "blind";
-    const sentence = linkOnly
+    // In the all-blind case no plant-side reason was recorded for a live candidate in the retained
+    // window. That does not rule plant-side events out: within the blind budget the candidate stays
+    // live and a hidden draw or charge is recorded on return, but one inside a stretch that exceeds
+    // the budget (which ends the candidate as blind), or right after it, meets no live candidate
+    // and is never recorded. Nor does it prove a link fault: "blind" is unobserved time (R5T, or
+    // the page-0x60 valve, heater and pump rows, went unread), which X10A timeouts and board-side
+    // pauses (OTA/weather
+    // network hold, model detection, a skipped poll cycle, a restart) both produce. Its sentence
+    // says "readings the check needs", names both and points at the wiring only conditionally. Every
+    // mixed/non-blind case stays non-causal. The report has an abort total and an OR-ed reason set,
+    // not per-reason counts or circulation evidence for aborted candidates, so it cannot honestly
+    // say which plant-side cause dominated.
+    const blindOnly = reasons.length === 1 && reasons[0] === "blind";
+    const sentence = blindOnly
       ? t("check.detail.dhw_blocked_link", Number(c.aborts) || 0,
           checkupDuration(c.best_aborted_s))
       : t("check.detail.dhw_blocked", Number(c.aborts) || 0, checkupDhwReasons(c),

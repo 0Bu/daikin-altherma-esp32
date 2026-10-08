@@ -121,9 +121,13 @@ discarded.
 loss in the detectable range from 0.8 K/h upward. It does not exclude faster continuous loss. **NOT
 AVAILABLE** after many discarded windows also does not identify the reason: charging, pump activity,
 a draw, unreadable data, and continuous loss that resembles a draw cannot be separated from the
-stored totals alone. Changing the circulation-pump measurement's topic, value paths, age limit,
-on/off thresholds or confirmation time starts this check over; renaming it does not. **CHECKING**
-afterwards is expected and says nothing about the tank.
+stored totals alone. A discard for unread data the check needs (the tank temperature, or the
+valve, heater and pump states) can come from the X10A link not answering or from the board pausing
+its own polling (a firmware update, a weather download or other network transfer, a restart, model
+detection), so it does not by itself indicate a wiring fault. Changing the circulation-pump
+measurement's topic, value paths, age limit, on/off thresholds or confirmation time starts this
+check over; renaming it does not. **CHECKING** afterwards is expected and says nothing about the
+tank.
 
 **What this result does not establish:** A rapid temperature drop alone proves neither a leaking
 three-way valve nor poor insulation. The sensor measures one location in a stratified tank; hot-water
