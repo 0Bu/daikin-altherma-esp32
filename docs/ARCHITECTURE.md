@@ -1408,11 +1408,57 @@ A single task owns the X10A UART (there is exactly one link). Each cycle:
    alone starts empty. Duplicate ids, an unknown pre-manifest generation or a damaged manifest fail
    closed. A manifest is written before a generation's next data record and refreshed once per
    24-hour ring, keeping a recent copy in the circular journal without repeating ids in every bucket.
-   Four generations per source are cached in bounded static memory. The exact 31/12/3 catalog before
+   The current manifest is the one **appended last** (highest sequence, never highest bucket): a
+   cursor reset restarts the backlog at a bucket older than the previous manifest, and that reset
+   costs exactly one new manifest rather than one per poll tick. Four generations per source are
+   cached in bounded static memory. The exact 31/12/3 catalog before
    the disinfection histories has an explicit legacy adapter; the two then-new disinfection series
    correctly have no predecessor. Existing 32/13/3 records from the current generation match its
    layout directly.
    Diagnostic checkup records carry their own fingerprint and remain independent of trend counts.
+
+   The writer and the restore each refuse what the journal cannot honestly say. A source whose
+   identity reset is still pending (a saved unit or HomeHub target not yet consumed by its poll
+   task, or a disabled HomeHub) appends nothing, because its rings still hold the previous unit's
+   samples under the new scope, and the restore steps over that whole source rather than waiting
+   for a reset that may never be consumed (a disabled HomeHub, an X10A bus that never resolves a
+   profile) — waiting would leave every other source unrestored and the journal unwritten until
+   the next reboot. The board's own heap trends and the circulation-witness trend ride in the X10A
+   record and therefore wait with it while an X10A identity reset is pending, as they already do
+   while no X10A target is
+   resolved; the live rings stay visible meanwhile, and their journal copy resumes once the
+   reset is consumed.
+
+   A journal cursor, or a restore window, ahead of the clock is **reported, never rewritten**.
+   Records beyond the clock are never restored, and the writer of the affected source appends
+   nothing until the clock passes its cursor; it says so once per source and episode (the writer
+   compares its cursor with the source's own clock anchor, one bucket of slack, and logs outside
+   the history mutex; the restore compares the indexed window with the wall bucket and logs once
+   per source and boot). The episode ends only at that source's next successful data append, so the
+   anchor's one-bucket jitter cannot make the line flap.
+
+   This is deliberate. The journal cannot tell a wrong *future* stamped by an earlier boot from a
+   wrong *past* clock now, and on a mature journal (days of history) there are always believable
+   older records below a wrong past clock. Re-indexing or rewinding on "an older record exists"
+   would let that boot append its live window under wrong past buckets, and the next correctly
+   synchronised boot would then hide the genuine newest records or show the wrong-clock samples in
+   their place. Leaving the journal alone turns the same fault into missing history rather than
+   misdated history: after a far-future boot a trend source neither restores nor persists until the
+   corrected clock reaches the stamped buckets (the diagnostic restore refuses the hours beyond the
+   clock; it restores in-window hours only when they lie within a day below the newest stamped
+   hour, so a skew of more than a day restores none), and after a wrong past
+   clock the records of a source whose cursor is ahead are left exactly as they were. The guard
+   recognises only a cursor that is ahead: a source with no cursor (its identity was reset during
+   that boot) or one whose cursor is older than the wrong clock looks like an ordinary boot, so it
+   journals that boot's window under the wrong buckets.
+
+   A slot that fails to erase or program is retried once and then abandoned with its sector; the
+   first failure of an episode and the recovery are logged, not every poll tick. Abandoning erases
+   the sector landed on, so one failure episode may abandon only
+   `HISTORY_JOURNAL_MAX_ABANDONED_SECTORS` of them. After that the cursor stays on the failing
+   slot, one line says the journal is paused, and the writer retries once per
+   `HISTORY_JOURNAL_PAUSED_RETRY_S` until an append succeeds: a persistent fault costs a bounded
+   number of the oldest sectors, not the retained history.
 
    `/status.history.persist` names how this boot's rings came to be, so a chart that emptied itself
    has a stated cause instead of looking like a defect. It describes the `.noinit` adoption decision;

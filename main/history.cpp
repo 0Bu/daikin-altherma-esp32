@@ -525,8 +525,29 @@ struct FlashManifestCache {
 static_assert(sizeof(FlashManifestCache) <= 96,
               "four manifest generations per source must stay below 1.2 KiB total");
 FlashManifestCache s_flash_manifests[3][logic::HISTORY_MANIFEST_CACHE_PER_SOURCE];
-uint32_t s_flash_current_manifest_fp[3] = {};
-int64_t  s_flash_current_manifest_bucket[3] = {INT64_MIN, INT64_MIN, INT64_MIN};
+// The manifest the journal appended LAST for this build's catalog, per source — by sequence, not by
+// bucket (see logic::HistoryManifestCurrent).
+logic::HistoryManifestCurrent s_flash_manifest_current[3];
+
+// An append that keeps failing at one slot. Cleared by the next success; all of it is owned by
+// s_flash_mtx.
+size_t   s_flash_fail_slot    = SIZE_MAX; // the slot of the latest failure (SIZE_MAX: none)
+uint8_t  s_flash_fail_count   = 0;        // consecutive failures at that slot
+bool     s_flash_fail_episode = false;    // a failure was logged and no append has succeeded since
+uint16_t s_flash_fail_total   = 0;        // failures in this episode (saturating)
+uint16_t s_flash_fail_skipped = 0;        // sectors abandoned in this episode (saturating)
+bool     s_flash_fail_paused  = false;    // the episode spent its abandon budget: slow retries only
+int64_t  s_flash_fail_last_us = INT64_MIN; // esp_timer time of the latest failed attempt
+
+// A source whose append cursor lies beyond its clock is REPORTED, never rewritten (see "A bucket
+// from the future" in logic/history_persist.hpp). The writer's line is logged once per source and
+// episode: the latch is set by the report and cleared ONLY by that source's next successful data
+// append — not by a "cursor is no longer ahead" observation, because the anchor jitters by one
+// bucket and the line must not flap with it. The restore's line is once per source and boot (the
+// checkup restore is retried every tick until it settles, so it needs the latch as much as the
+// trend sources do). All of it is owned by s_flash_mtx.
+bool s_flash_ahead_logged[kJournalSources]         = {};
+bool s_flash_restore_ahead_logged[kJournalSources] = {};
 
 // Static scratch avoids adding a 4 KiB scan buffer or four 576-byte restore blocks to the poll
 // task's measured 8 KiB stack. All access is serialised on the poll task or s_flash_mtx.
@@ -1276,10 +1297,7 @@ bool flash_is_manifest(const logic::HistoryJournalHeader& h) {
 void flash_manifest_cache_reset() {
     for (auto& by_source : s_flash_manifests)
         for (auto& m : by_source) m = {};
-    for (size_t src = 0; src < 3; ++src) {
-        s_flash_current_manifest_fp[src] = 0;
-        s_flash_current_manifest_bucket[src] = INT64_MIN;
-    }
+    for (auto& current : s_flash_manifest_current) current = {};
 }
 
 const FlashManifestCache* flash_manifest_find(const logic::HistoryJournalHeader& h) {
@@ -1333,16 +1351,19 @@ bool flash_manifest_cache_add(const FlashJournalRecord& r) {
             break;
         }
     }
-    if (h.catalog_fp == P().catalog_fp &&
+    // The most recently APPENDED manifest of this build's generation is the current one. The
+    // append path hands in a record whose sequence is the highest in the journal, and the boot scan
+    // meets them in physical order, so the sequence comparison inside the helper picks the same one
+    // in both. Never compare buckets here: after a cursor reset the new manifest is deliberately
+    // OLDER than its predecessor, and refusing it livelocked the writer (HIST-02/a).
+    const bool current_generation =
+        h.catalog_fp == P().catalog_fp &&
         h.value_count == logic::history_journal_source_rings(
-            static_cast<logic::HistoryJournalSource>(h.source)) &&
+                             static_cast<logic::HistoryJournalSource>(h.source)) &&
         out.schema_fp == logic::history_current_series_list_fingerprint(
-            static_cast<logic::HistoryJournalSource>(h.source)) &&
-        (s_flash_current_manifest_bucket[h.source] == INT64_MIN ||
-         h.bucket >= s_flash_current_manifest_bucket[h.source])) {
-        s_flash_current_manifest_fp[h.source] = h.catalog_fp;
-        s_flash_current_manifest_bucket[h.source] = h.bucket;
-    }
+                             static_cast<logic::HistoryJournalSource>(h.source));
+    (void)logic::history_manifest_adopt(s_flash_manifest_current[h.source], current_generation,
+                                        h.catalog_fp, h.bucket, h.sequence);
     return true;
 }
 
@@ -1461,8 +1482,8 @@ bool flash_journal_scan() {
     s_flash_next_slot = highest_sequence
         ? (head_slot + 1) % logic::HISTORY_JOURNAL_SLOT_COUNT : 0;
 
-    bool done[kJournalSources] = {};
-    size_t remaining = kJournalSources;
+    bool   done[kJournalSources] = {};
+    size_t remaining             = kJournalSources;
     for (size_t src = 0; src < kJournalSources; src++) {
         newest_sequence[src] = 0;
     }
@@ -1484,16 +1505,17 @@ bool flash_journal_scan() {
             if (flash_record_valid(r)) {
                 const size_t src = r.header.source;
                 if (newest_sequence[src] == 0) {
-                    newest_sequence[src] = r.header.sequence;
+                    newest_sequence[src]       = r.header.sequence;
                     s_flash_newest_bucket[src] = r.header.bucket;
-                    s_flash_last_bucket[src] = r.header.bucket;
+                    s_flash_last_bucket[src]   = r.header.bucket;
                 }
                 if (!done[src]) {
-                    const size_t retain = src ==
-                        static_cast<size_t>(logic::HistoryJournalSource::Checkup)
-                            ? logic::CHECKUP_COMPLETED_BUCKETS : HISTORY_SAMPLES;
-                    const int64_t oldest = s_flash_newest_bucket[src] -
-                                           static_cast<int64_t>(retain - 1);
+                    const size_t retain =
+                        src == static_cast<size_t>(logic::HistoryJournalSource::Checkup)
+                            ? logic::CHECKUP_COMPLETED_BUCKETS
+                            : HISTORY_SAMPLES;
+                    const int64_t oldest =
+                        s_flash_newest_bucket[src] - static_cast<int64_t>(retain - 1);
                     if (r.header.bucket < oldest) {
                         done[src] = true;
                         remaining--;
@@ -1565,16 +1587,52 @@ esp_err_t flash_prepare_next_slot(size_t& slot) {
                                                         logic::HISTORY_FLASH_ERASE_BYTES);
 }
 
-bool flash_build_next_record(HistorySource src, FlashJournalRecord& out, TickType_t wait_ticks) {
+// What a builder found out about a cursor that is ahead of its clock. A builder only REPORTS it: it
+// returns "not built" and hands the numbers to flash_build_for_service, which logs them once the
+// history mutex is released. The trend builder runs under s_mtx, and critical sections in this file
+// stay plain integer copies: diag_printf takes the diag-ring mutex and does console I/O. Nothing is
+// rewound or rewritten — see "A bucket from the future" in logic/history_persist.hpp.
+struct FutureCursorNote {
+    bool    future = false;     // the builder had a clock and found the cursor ahead of it
+    int64_t cursor = INT64_MIN; // the source's append cursor
+    int64_t bound  = INT64_MIN; // the newest bucket its clock vouches for
+};
+
+// Builds the next trend record of `src`. Returns false when there is nothing to append — or when
+// the cursor is ahead of the source's own live anchor (`note`), which the builder only reports:
+// rewinding it here would assume the CURRENT clock is the right one, and a boot that synchronised
+// to a wrong past time would then rewrite the live window under wrong buckets.
+bool flash_build_next_record(HistorySource src, FlashJournalRecord& out, TickType_t wait_ticks,
+                             FutureCursorNote& note) {
     std::memset(&out, 0xff, sizeof(out));
     Lock lk(s_mtx, wait_ticks);
     if (!lk.acquired()) return false;
-    if (src == HistorySource::X10a && s_x10a_target_fp.load() == 0) return false;
+    // A source whose identity reset is still pending (a /set_hp or detection committed the new
+    // identity, the deferred clear has not run yet) still holds the OLD unit's samples in its rings
+    // while the scope stamped below is already the NEW unit's: the record would pass every check on
+    // the next boot and restore A's curve under B. The live readers, the splice and the restore all
+    // refuse in this state; the writer has to as well. For HomeHub this also covers a disabled hub,
+    // whose pending reset is never consumed — its backlog must not be written under the empty host.
+    if (src == HistorySource::X10a && (s_x10a_target_fp.load() == 0 || s_reset_requested.load()))
+        return false;
+    if (src == HistorySource::Modbus && s_mb_reset_requested.load()) return false;
 
     const size_t src_i = static_cast<size_t>(src);
     const size_t value_count = logic::history_journal_source_rings(journal_source(src));
     const int64_t anchor = source_anchor_bucket_locked(src);
     if (anchor == INT64_MIN || !value_count) return false;
+
+    // A cursor beyond the anchor can never be reached (target > anchor below), so every append is
+    // refused until the clock catches up with it — which is the intended outcome, not a fault to
+    // repair: the journal cannot tell stamps from a wrong far-future boot from a wrong PAST clock
+    // now. The slack keeps the anchor's one-bucket jitter from being reported as a fault.
+    if (logic::history_cursor_in_future(s_flash_last_bucket[src_i], anchor,
+                                        logic::HISTORY_CURSOR_FUTURE_SLACK_BUCKETS)) {
+        note.future = true;
+        note.cursor = s_flash_last_bucket[src_i];
+        note.bound  = anchor;
+        return false;
+    }
 
     size_t max_count = 0;
     for (size_t i = 0; i < value_count; i++) {
@@ -1625,12 +1683,8 @@ bool flash_build_next_record(HistorySource src, FlashJournalRecord& out, TickTyp
 
 bool flash_manifest_due(HistorySource src, int64_t bucket) {
     const size_t i = static_cast<size_t>(src);
-    if (i >= 3 || bucket == INT64_MIN) return false;
-    if (s_flash_current_manifest_fp[i] != P().catalog_fp ||
-        s_flash_current_manifest_bucket[i] == INT64_MIN) return true;
-    if (bucket < s_flash_current_manifest_bucket[i]) return true;  // wall clock moved backwards
-    return static_cast<uint64_t>(bucket - s_flash_current_manifest_bucket[i]) >=
-           logic::HISTORY_MANIFEST_REFRESH_BUCKETS;
+    if (i >= 3) return false;
+    return logic::history_manifest_due(s_flash_manifest_current[i], P().catalog_fp, bucket);
 }
 
 bool flash_build_manifest_record(HistorySource src, int64_t bucket, FlashJournalRecord& out) {
@@ -1667,7 +1721,8 @@ bool flash_build_manifest_record(HistorySource src, int64_t bucket, FlashJournal
     return true;
 }
 
-bool flash_build_next_checkup_record(FlashJournalRecord& out, TickType_t wait_ticks) {
+bool flash_build_next_checkup_record(FlashJournalRecord& out, TickType_t wait_ticks,
+                                     FutureCursorNote& note) {
     (void)wait_ticks; // checkup_flash_next uses the non-blocking independent owner lock
     std::memset(&out, 0xff, sizeof(out));
     int64_t unix_s = -1; int32_t ms = 0;
@@ -1675,6 +1730,20 @@ bool flash_build_next_checkup_record(FlashJournalRecord& out, TickType_t wait_ti
     if (unix_s < 0) return false;
 
     const size_t src_i = static_cast<size_t>(logic::HistoryJournalSource::Checkup);
+    // Same situation as the trend sources (HIST-02/b), checked against the wall clock rather than a
+    // live anchor: checkup_flash_next answers "nothing to write" both when the cursor is current
+    // and when it is ahead of everything it can ever produce, so a future-stamped record freezes
+    // the diagnostic journal until the corrected clock reaches it. The newest live hour never lies
+    // beyond the wall hour, which makes this a bound no legitimate cursor exceeds. Like the trend
+    // builder this only reports it; nothing is rewound.
+    const int64_t wall_bucket = logic::checkup_journal_bucket(unix_s);
+    if (logic::history_cursor_in_future(s_flash_last_bucket[src_i], wall_bucket,
+                                        logic::HISTORY_CURSOR_FUTURE_SLACK_BUCKETS)) {
+        note.future = true;
+        note.cursor = s_flash_last_bucket[src_i];
+        note.bound  = wall_bucket;
+        return false;
+    }
     int64_t bucket = INT64_MIN;
     logic::CheckupJournalPayload payload;
     if (!checkup_flash_next(unix_s, s_flash_last_bucket[src_i], bucket, payload)) return false;
@@ -1707,8 +1776,10 @@ bool flash_build_next_checkup_record(FlashJournalRecord& out, TickType_t wait_ti
     return true;
 }
 
-esp_err_t flash_append_record(FlashJournalRecord& r) {
-    size_t slot = 0;
+// One attempt to append `r`. `slot` is the slot the attempt targeted, whatever its outcome, so the
+// caller can account for a failure against it.
+esp_err_t flash_append_record_at(FlashJournalRecord& r, size_t& slot) {
+    slot        = 0;
     esp_err_t e = flash_prepare_next_slot(slot);
     if (e != ESP_OK) return e;
     const size_t offset = logic::history_journal_slot_offset(slot);
@@ -1742,7 +1813,147 @@ esp_err_t flash_append_record(FlashJournalRecord& r) {
     return ESP_OK;
 }
 
+// One sector is abandoned by either of two paths — the explicit skip in flash_note_append_failure,
+// or the cursor moving by itself in flash_prepare_next_slot — and the first abandon of an episode
+// is logged from whichever finds it (the torn jump used to count silently, so an episode that began
+// with one never printed the line).
+void flash_count_abandoned_sector(size_t from_slot, size_t to_slot) {
+    if (s_flash_fail_skipped < UINT16_MAX) s_flash_fail_skipped++;
+    if (s_flash_fail_skipped == 1)
+        diag_printf("history: journal abandoned the sector at slot %u, continuing at slot %u\n",
+                    static_cast<unsigned>(from_slot), static_cast<unsigned>(to_slot));
+}
+
+// An append failed at `slot`. The service retries on the next poll tick, and used to do so forever
+// at the same slot with one diag line per tick (the 6 KB diag ring then holds nothing else) while
+// the cursor never moved and nothing after it was persisted (HIST-02/c). Now: the first failure of
+// an episode is logged, the second consecutive one at the same slot abandons that sector
+// (logic::history_journal_failure_step), and the recovery is logged once. An episode may abandon
+// only HISTORY_JOURNAL_MAX_ABANDONED_SECTORS sectors: every landing sector is erased, so an
+// unbounded sweep would erase the whole retained history. After that the cursor stays on the
+// failing slot, one diag line says so, and the service retries once a minute (the throttle at the
+// top of history_flash_service_journal) until an append succeeds.
+void flash_note_append_failure(size_t slot, esp_err_t e, const logic::HistoryJournalHeader& h) {
+    if (slot != s_flash_fail_slot) {
+        // A failure at a slot other than the previous one: either the first of the episode, or the
+        // cursor moved by itself — flash_prepare_next_slot sacrifices the rest of a sector whose
+        // slot was programmed but never committed and lands on the next sector's first slot. That
+        // is an abandoned sector just like a skip below (our own skip clears the slot, so it is not
+        // counted twice) and it counts against the same budget.
+        if (s_flash_fail_slot != SIZE_MAX) flash_count_abandoned_sector(s_flash_fail_slot, slot);
+        s_flash_fail_slot  = slot;
+        s_flash_fail_count = 0;
+    }
+    if (s_flash_fail_count < UINT8_MAX) s_flash_fail_count++;
+    if (s_flash_fail_total < UINT16_MAX) s_flash_fail_total++;
+    if (!s_flash_fail_episode) {
+        s_flash_fail_episode = true;
+        diag_printf("history: journal %s append failed at slot %u (%s) — retrying; repeats stay "
+                    "silent until it recovers\n",
+                    flash_is_manifest(h) ? "manifest" : "record", static_cast<unsigned>(slot),
+                    esp_err_to_name(e));
+    }
+    const logic::HistoryJournalFailureStep step =
+        logic::history_journal_failure_step(slot, s_flash_fail_count, s_flash_fail_skipped);
+    if (step.paused) {
+        s_flash_fail_last_us = esp_timer_get_time();
+        if (!s_flash_fail_paused) {
+            s_flash_fail_paused = true;
+            diag_printf("history: journal paused after %u abandoned sectors; retrying every %u s\n",
+                        static_cast<unsigned>(s_flash_fail_skipped),
+                        static_cast<unsigned>(logic::HISTORY_JOURNAL_PAUSED_RETRY_S));
+        }
+        return; // the cursor stays on the failing slot
+    }
+    if (step.next_slot == slot) return;
+    s_flash_next_slot  = step.next_slot;
+    s_flash_fail_slot  = SIZE_MAX;
+    s_flash_fail_count = 0;
+    flash_count_abandoned_sector(slot, step.next_slot);
+}
+
+void flash_note_append_success(size_t slot) {
+    if (s_flash_fail_episode)
+        diag_printf("history: journal append recovered at slot %u after %u failed attempt(s), "
+                    "%u sector(s) abandoned\n",
+                    static_cast<unsigned>(slot), static_cast<unsigned>(s_flash_fail_total),
+                    static_cast<unsigned>(s_flash_fail_skipped));
+    s_flash_fail_slot    = SIZE_MAX;
+    s_flash_fail_count   = 0;
+    s_flash_fail_episode = false;
+    s_flash_fail_total   = 0;
+    s_flash_fail_skipped = 0;
+    s_flash_fail_paused  = false;
+    s_flash_fail_last_us = INT64_MIN;
+}
+
+esp_err_t flash_append_record(FlashJournalRecord& r) {
+    size_t          slot = 0;
+    const esp_err_t e    = flash_append_record_at(r, slot);
+    if (e == ESP_OK) {
+        flash_note_append_success(slot);
+        // The ONLY place an ahead-of-the-clock episode ends: the source appended data again. A
+        // manifest says nothing about the cursor, and a "no longer ahead" observation must not
+        // end it either (see s_flash_ahead_logged).
+        if (!flash_is_manifest(r.header)) s_flash_ahead_logged[r.header.source] = false;
+    } else {
+        flash_note_append_failure(slot, e, r.header);
+    }
+    return e;
+}
+
+// Log, once per source and episode, that its append cursor lies beyond its clock. Called with
+// s_flash_mtx held and s_mtx NOT held: the builder has returned, and diag_printf (the diag-ring
+// mutex, console I/O) never runs inside a history critical section.
+void flash_note_cursor_ahead(size_t src_i, const FutureCursorNote& note) {
+    if (s_flash_ahead_logged[src_i]) return;
+    s_flash_ahead_logged[src_i] = true;
+    diag_printf("history: journal source %u is ahead of the clock (bucket %lld > %lld) — flash "
+                "persistence for it waits until the clock passes; nothing is rewritten\n",
+                static_cast<unsigned>(src_i), static_cast<long long>(note.cursor),
+                static_cast<long long>(note.bound));
+}
+
+// The restore's counterpart: one line per source and boot when the newest bucket the scan indexed
+// lies beyond the synchronised wall bucket. Nothing is changed. The trend splice refuses the whole
+// snapshot and checkup_flash_restore refuses the hours beyond the clock one by one (it restores
+// in-window hours only when the boot scan indexed them, i.e. within a day below the newest stamped
+// hour), exactly as they always did, and the journal is not
+// re-indexed or rewritten, because it cannot tell stamps from a wrong far-future boot from a wrong
+// PAST clock now. Caller holds s_flash_mtx.
+void flash_note_restore_ahead(size_t src_i, int64_t newest, int64_t wall_bucket) {
+    if (s_flash_restore_ahead_logged[src_i] ||
+        !logic::history_cursor_in_future(newest, wall_bucket))
+        return;
+    s_flash_restore_ahead_logged[src_i] = true;
+    diag_printf("history: journal source %u has records stamped ahead of the clock (bucket %lld > "
+                "%lld) — those are not restored\n",
+                static_cast<unsigned>(src_i), static_cast<long long>(newest),
+                static_cast<long long>(wall_bucket));
+}
+
+// The next record of source `src_i` for the journal service, or false. A cursor that is ahead of
+// the source's clock yields false and one report (flash_note_cursor_ahead) — no rewind, no walk.
+bool flash_build_for_service(size_t src_i, FlashJournalRecord& r, TickType_t wait_ticks) {
+    FutureCursorNote note;
+    const bool       built =
+        src_i == static_cast<size_t>(logic::HistoryJournalSource::Checkup)
+                  ? flash_build_next_checkup_record(r, wait_ticks, note)
+                  : flash_build_next_record(static_cast<HistorySource>(src_i), r, wait_ticks, note);
+    if (note.future) flash_note_cursor_ahead(src_i, note);
+    return built;
+}
+
 } // namespace
+
+// Move the restore to `ring`; it is complete once it has passed the last ring. Poll task only.
+static void flash_restore_advance_to(size_t ring) {
+    s_flash_restore_ring = ring;
+    if (ring < kTotalRings) return;
+    s_flash_restore_done = true;
+    diag_printf("history: journal restore complete (%u/%u rings extended, 5-min raster)\n",
+                static_cast<unsigned>(s_flash_restored_rings), static_cast<unsigned>(kTotalRings));
+}
 
 static void history_restore_checkup_flash() {
     if (s_flash_checkup_restore_done || !s_flash_mtx) return;
@@ -1771,8 +1982,14 @@ static void history_restore_checkup_flash() {
         out.bucket = r.header.bucket;
         std::memcpy(&out.payload, r.payload, sizeof(out.payload));
     }
-    int64_t unix_s = -1; int32_t ms = 0;
+    int64_t unix_s = -1;
+    int32_t ms     = 0;
     time_now(unix_s, ms);
+    // Hours stamped beyond the wall hour are refused by checkup_flash_restore exactly as before;
+    // the journal is not touched. Only say so, once.
+    if (unix_s >= 0)
+        flash_note_restore_ahead(src, s_flash_newest_bucket[src],
+                                 logic::checkup_journal_bucket(unix_s));
     const CheckupFlashRestoreResult result =
         checkup_flash_restore(records, count, unix_s);
     if (result != CheckupFlashRestoreResult::Deferred)
@@ -1780,8 +1997,10 @@ static void history_restore_checkup_flash() {
 }
 
 // Restore at most four rings per poll tick. Each batch reads a source's indexed records once and
-// transposes four values into ring-shaped blocks; the largest burst is ~74 KiB of flash reads, but
-// only 2.3 KiB of static scratch and no heap allocation.
+// transposes four values into ring-shaped blocks: at most HISTORY_SAMPLES slot reads of
+// HISTORY_JOURNAL_SLOT_BYTES (~74 KiB), 2.3 KiB of static scratch and no heap allocation. A source
+// whose indexed window lies beyond the wall bucket is restored from nothing (the splice refuses it)
+// and reported once; it is never re-indexed or rewritten.
 void history_service_flash_restore() {
     if (s_flash_forgotten.load() || !s_flash_scan_ok || !time_synced()) return;
     history_restore_checkup_flash();
@@ -1791,7 +2010,22 @@ void history_service_flash_restore() {
     size_t first_idx = 0;
     const HistorySource src = source_of_slot(s_flash_restore_ring, first_idx);
     if ((src == HistorySource::X10a && s_reset_requested.load()) ||
-        (src == HistorySource::Modbus && s_mb_reset_requested.load())) return;
+        (src == HistorySource::Modbus && s_mb_reset_requested.load())) {
+        // Skip the WHOLE source instead of waiting for the reset to be consumed. A HomeHub disable
+        // never consumes its reset, and an X10A bus that never resolves a profile (/detect or
+        // /set_hp onto a dead bus) never does either; returning here left the restore stuck at this
+        // ring for good, so s_flash_restore_done stayed false and history_flash_service_journal
+        // appended nothing for ANY source until the next reboot. history_reset() and
+        // history_modbus_reset() clear the source's restore index together with arming the reset,
+        // so there is nothing to restore for it in this boot anyway. (history_reset_on_detect() for
+        // an UNCHANGED unit keeps its index, but that reset is consumed by the very poll cycle that
+        // armed it; a restore tick that does catch it pending only forgoes this source for this
+        // boot — its records stay in the journal for the next one — instead of stalling the rest.)
+        diag_printf("history: journal restore skips source %u (its identity reset is pending)\n",
+                    static_cast<unsigned>(src));
+        flash_restore_advance_to(logic::history_restore_next_source_ring(s_flash_restore_ring));
+        return;
+    }
     const size_t source_rings = logic::history_journal_source_rings(journal_source(src));
     size_t batch = source_rings - first_idx;
     if (batch > kRestoreRingsPerTick) batch = kRestoreRingsPerTick;
@@ -1799,13 +2033,22 @@ void history_service_flash_restore() {
         for (size_t i = 0; i < HISTORY_SAMPLES; i++)
             s_flash_restore_blocks[b][i] = HISTORY_NO_READING;
 
-    const size_t src_i = static_cast<size_t>(src);
-    const int64_t newest = s_flash_newest_bucket[src_i];
-    bool read_failed = false;
+    const size_t  src_i       = static_cast<size_t>(src);
+    const int64_t newest      = s_flash_newest_bucket[src_i];
+    bool          read_failed = false;
     if (newest != INT64_MIN) {
         Lock flash_lk(s_flash_mtx, 0);
         if (!flash_lk.acquired()) return;
         if (s_flash_forgotten.load()) return;
+        // HIST-02/b: a window stamped beyond the wall clock is not restored — the splice below
+        // refuses a snapshot newer than the live ring, as it always did — and not re-indexed
+        // either: the journal cannot tell a wrong far-future boot from a wrong PAST clock now. The
+        // latch makes the line once per source and boot, however many batches the source takes.
+        int64_t unix_s = -1;
+        int32_t ms     = 0;
+        time_now(unix_s, ms);
+        if (unix_s >= 0)
+            flash_note_restore_ahead(src_i, newest, logic::history_bucket_from_unix(unix_s));
         const int64_t oldest = newest - static_cast<int64_t>(HISTORY_SAMPLES - 1);
         // Index is newest-first; replay oldest-first so a newer duplicate bucket wins defensively.
         for (size_t k = s_flash_restore_slot_count[src_i]; k > 0; k--) {
@@ -1843,13 +2086,7 @@ void history_service_flash_restore() {
                 s_flash_restored_rings++;
         }
     }
-    s_flash_restore_ring += batch;
-    if (s_flash_restore_ring >= kTotalRings) {
-        s_flash_restore_done = true;
-        diag_printf("history: journal restore complete (%u/%u rings extended, 5-min raster)\n",
-                    static_cast<unsigned>(s_flash_restored_rings),
-                    static_cast<unsigned>(kTotalRings));
-    }
+    flash_restore_advance_to(s_flash_restore_ring + batch);
 }
 
 static size_t history_flash_service_journal(size_t max_records, TickType_t wait_ticks) {
@@ -1860,6 +2097,11 @@ static size_t history_flash_service_journal(size_t max_records, TickType_t wait_
     // The button task may have requested the wipe after the optimistic check but while this service
     // was waiting for the flash owner. Never append after the erase completed.
     if (s_flash_forgotten.load()) return 0;
+    // A failure episode that spent its abandon budget pauses the whole journal (the cursor is one
+    // shared position): one attempt per HISTORY_JOURNAL_PAUSED_RETRY_S, none in between.
+    if (!logic::history_journal_retry_due(s_flash_fail_paused, esp_timer_get_time(),
+                                          s_flash_fail_last_us))
+        return 0;
 
     size_t written = 0;
     while (written < max_records) {
@@ -1873,11 +2115,7 @@ static size_t history_flash_service_journal(size_t max_records, TickType_t wait_
                 !s_flash_checkup_restore_done)
                 continue;
             FlashJournalRecord r;
-            const bool built = src_i ==
-                static_cast<size_t>(logic::HistoryJournalSource::Checkup)
-                    ? flash_build_next_checkup_record(r, wait_ticks)
-                    : flash_build_next_record(static_cast<HistorySource>(src_i), r, wait_ticks);
-            if (!built) continue;
+            if (!flash_build_for_service(src_i, r, wait_ticks)) continue;
             if (src_i < 3 &&
                 flash_manifest_due(static_cast<HistorySource>(src_i), r.header.bucket)) {
                 const int64_t manifest_bucket = r.header.bucket;
@@ -1890,13 +2128,10 @@ static size_t history_flash_service_journal(size_t max_records, TickType_t wait_
                                 static_cast<unsigned>(src_i));
                     return written;
                 }
-                const esp_err_t manifest_e = flash_append_record(r);
-                if (manifest_e != ESP_OK) {
-                    diag_printf("history: catalog manifest append failed at slot %u (%s)\n",
-                                static_cast<unsigned>(s_flash_next_slot),
-                                esp_err_to_name(manifest_e));
-                    return written;
-                }
+                // A failure is accounted (and, once per episode, logged) inside
+                // flash_append_record; the early return stays so a failing slot costs one attempt
+                // per tick, not three.
+                if (flash_append_record(r) != ESP_OK) return written;
                 written++;
                 appended = true;
                 // Keep this source selected: the data vector whose manifest was just committed is
@@ -1904,12 +2139,7 @@ static size_t history_flash_service_journal(size_t max_records, TickType_t wait_
                 s_flash_service_source = src_i;
                 break;
             }
-            const esp_err_t e = flash_append_record(r);
-            if (e != ESP_OK) {
-                diag_printf("history: journal append failed at slot %u (%s)\n",
-                            static_cast<unsigned>(s_flash_next_slot), esp_err_to_name(e));
-                return written;
-            }
+            if (flash_append_record(r) != ESP_OK) return written;
             written++;
             appended = true;
             s_flash_service_source = (src_i + 1) % kJournalSources;
@@ -1926,8 +2156,7 @@ static size_t history_flash_service_journal(size_t max_records, TickType_t wait_
 void history_flash_save() {
     if (!s_flash_part || s_flash_shutdown_started || s_flash_forgotten.load()) return;
     s_flash_shutdown_started = true;
-    const size_t written = history_flash_service_journal(/*max_records=*/12,
-                                                         pdMS_TO_TICKS(200));
+    const size_t written = history_flash_service_journal(/*max_records=*/12, pdMS_TO_TICKS(200));
     if (written)
         diag_printf("history: journal flushed %u record(s) before reboot\n",
                     static_cast<unsigned>(written));

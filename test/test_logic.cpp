@@ -16963,6 +16963,114 @@ static void test_history_persist() {
     CHECK(history_journal_write_slot(5, false) == 16);  // torn slot preserves earlier sector
     CHECK(history_journal_write_slot(16, false) == 16); // sector start is erased in place
     CHECK(history_journal_write_slot(HISTORY_JOURNAL_SLOT_COUNT - 1, false) == 0);
+
+    // A slot that keeps failing is retried once and then abandoned with its sector (HIST-02/c); the
+    // sector the failure is in may hold the head's predecessors, so the landing is always the NEXT
+    // sector's first slot, never an erase of the current one.
+    CHECK(HISTORY_JOURNAL_SLOT_RETRY_LIMIT == 2);
+    CHECK(history_journal_slot_after_failure(5, 0) == 5);
+    CHECK(history_journal_slot_after_failure(5, 1) == 5);    // first failure: retry in place
+    CHECK(history_journal_slot_after_failure(5, 2) == 16);   // mid-sector: next sector's first slot
+    CHECK(history_journal_slot_after_failure(5, 200) == 16); // a saturated count behaves the same
+    CHECK(history_journal_slot_after_failure(16, 1) == 16);
+    CHECK(history_journal_slot_after_failure(16, 2) == 32); // sector-first: abandon that sector too
+    CHECK(history_journal_slot_after_failure(31, 2) == 32); // last slot of a sector
+    CHECK(history_journal_slot_after_failure(HISTORY_JOURNAL_SLOT_COUNT - 1, 2) == 0); // wraps
+    CHECK(history_journal_slot_after_failure(HISTORY_JOURNAL_SLOT_COUNT - 16, 2) == 0);
+    {
+        // One bad slot costs exactly two attempts, however many poll ticks follow.
+        size_t slot = 21, attempts = 0, consecutive = 0;
+        while (slot == 21 && attempts < 50) {
+            attempts++;
+            consecutive++;
+            const size_t next = history_journal_slot_after_failure(slot, consecutive);
+            if (next != slot) consecutive = 0;
+            slot = next;
+        }
+        CHECK(attempts == HISTORY_JOURNAL_SLOT_RETRY_LIMIT);
+        CHECK(slot == 32);
+    }
+
+    // The abandon budget (HIST-02/c, review round 1). Abandoning a sector erases the sector landed
+    // on, so a fault that survives the skip (erase fine, program or readback failing everywhere)
+    // used to carry the cursor round the whole ring and erase every retained record. One episode
+    // may abandon HISTORY_JOURNAL_MAX_ABANDONED_SECTORS; then the writer stays put and pauses.
+    CHECK(HISTORY_JOURNAL_MAX_ABANDONED_SECTORS == 2);
+    CHECK(HISTORY_JOURNAL_PAUSED_RETRY_S == 60);
+    {
+        const auto at = [](size_t slot, size_t fails, size_t abandoned) {
+            return history_journal_failure_step(slot, fails, abandoned);
+        };
+        CHECK(at(5, 1, 0).next_slot == 5 && !at(5, 1, 0).paused);    // retry once, in place
+        CHECK(at(5, 2, 0).next_slot == 16 && !at(5, 2, 0).paused);   // skip on the second failure
+        CHECK(at(16, 2, 1).next_slot == 32 && !at(16, 2, 1).paused); // the last allowed abandon
+        CHECK(at(32, 1, 2).next_slot == 32 && at(32, 1, 2).paused);  // budget spent: stay, pause
+        CHECK(at(32, 2, 2).next_slot == 32 && at(32, 2, 2).paused);  // ... no skip, however often
+        CHECK(at(32, 200, 7).next_slot == 32 && at(32, 200, 7).paused);
+        CHECK(at(5, 1, 2).paused); // even the first failure there
+        // The last sector wraps to sector zero while the budget lasts, and pauses once it is spent.
+        CHECK(at(HISTORY_JOURNAL_SLOT_COUNT - 1, 2, 0).next_slot == 0);
+        CHECK(at(HISTORY_JOURNAL_SLOT_COUNT - 16, 2, 1).next_slot == 0);
+        CHECK(!at(HISTORY_JOURNAL_SLOT_COUNT - 16, 2, 1).paused);
+        CHECK(at(HISTORY_JOURNAL_SLOT_COUNT - 16, 2, 2).next_slot ==
+              HISTORY_JOURNAL_SLOT_COUNT - 16);
+        // The throttle: free while not paused, one attempt per period while paused.
+        const int64_t period_us = static_cast<int64_t>(HISTORY_JOURNAL_PAUSED_RETRY_S) * 1'000'000;
+        CHECK(history_journal_retry_due(false, 0, 0));
+        CHECK(history_journal_retry_due(false, 5, 4));          // not paused: every tick
+        CHECK(history_journal_retry_due(true, 123, INT64_MIN)); // no attempt recorded yet
+        CHECK(!history_journal_retry_due(true, 1'000'000, 1'000'000));
+        CHECK(!history_journal_retry_due(true, 1'000'000 + period_us - 1, 1'000'000));
+        CHECK(history_journal_retry_due(true, 1'000'000 + period_us, 1'000'000));
+        CHECK(history_journal_retry_due(true, 1'000'000 + 5 * period_us, 1'000'000));
+        CHECK(!history_journal_retry_due(true, 500, 1'000'000)); // a clock that went back waits
+
+        // A persistent fault from slot 21 on, one poll tick (1 s) per step, driven through the same
+        // two decisions history.cpp takes. The ring has HISTORY_FLASH_PARTITION_BYTES /
+        // HISTORY_FLASH_ERASE_BYTES sectors; the old rule (no budget) swept the cursor through
+        // every one of them and the new one lands on exactly two.
+        constexpr size_t kTicks = 3000;
+        struct Episode {
+            size_t           slot = 21, fails = 0, abandoned = 0, attempts = 0;
+            bool             paused  = false;
+            int64_t          last_us = INT64_MIN;
+            std::set<size_t> landed; // sectors the cursor was moved to (each one gets erased)
+        };
+        const auto run = [&](bool budget) {
+            Episode ep;
+            for (size_t tick = 0; tick < kTicks; ++tick) {
+                const int64_t now_us = static_cast<int64_t>(tick) * 1'000'000;
+                if (budget && !history_journal_retry_due(ep.paused, now_us, ep.last_us)) continue;
+                ep.attempts++;
+                ep.fails++; // every attempt fails
+                const HistoryJournalFailureStep step =
+                    budget ? history_journal_failure_step(ep.slot, ep.fails, ep.abandoned)
+                           : HistoryJournalFailureStep{
+                                 history_journal_slot_after_failure(ep.slot, ep.fails), false};
+                if (step.paused) {
+                    ep.paused  = true;
+                    ep.last_us = now_us;
+                    continue;
+                }
+                if (step.next_slot != ep.slot) {
+                    ep.slot  = step.next_slot;
+                    ep.fails = 0;
+                    ep.abandoned++;
+                    ep.landed.insert(ep.slot / HISTORY_JOURNAL_SLOTS_PER_SECTOR);
+                }
+            }
+            return ep;
+        };
+        const Episode capped = run(true);
+        CHECK(capped.landed.size() == HISTORY_JOURNAL_MAX_ABANDONED_SECTORS); // sectors 2 and 3
+        CHECK(capped.abandoned == HISTORY_JOURNAL_MAX_ABANDONED_SECTORS);
+        CHECK(capped.paused && capped.slot == 48);
+        // 2 + 2 attempts on the way and 1 at the sector the cursor stays on, then one per period.
+        CHECK(capped.attempts == 5 + (kTicks - 1 - 4) / HISTORY_JOURNAL_PAUSED_RETRY_S);
+        const Episode swept = run(false); // the retired rule, kept so this test has teeth
+        CHECK(swept.landed.size() == HISTORY_FLASH_PARTITION_BYTES / HISTORY_FLASH_ERASE_BYTES);
+        CHECK(swept.landed.size() > capped.landed.size() * 100);
+    }
     CHECK(HISTORY_FLASH_FUTURE_HOURS == 72);
     CHECK(HISTORY_FLASH_FUTURE_SAMPLES == 864);
     CHECK(HISTORY_FLASH_FUTURE_RECORDS == 2664);
@@ -17172,6 +17280,103 @@ static void test_history_persist() {
     CHECK(history_journal_header_matches(ch, checkup_journal_fingerprint(), CHECKUP_JOURNAL_WORDS,
                                          CHECKUP_DT_S));
 
+    // --- which manifest is current (HIST-02/a) ---------------------------------------------------
+    // The writer re-anchors the catalog with a manifest before a data record that has none recent.
+    // The current manifest is the one appended LAST, by sequence. After a cursor reset the next
+    // data bucket is OLDER than the manifest written for the previous backlog; adopting by bucket
+    // then refused the manifest appended at that older bucket, the data was due another one, and
+    // the service looped three manifests per poll tick with no data for any source.
+    {
+        const uint32_t         cat = 0xC0FFEE01u;
+        uint64_t               seq = 1;
+        HistoryManifestCurrent cur;
+        size_t                 manifests = 0;
+        // One service step exactly as history_flash_service_journal takes it for one data bucket:
+        // append a manifest first when due (and adopt it), then the data record.
+        const auto service = [&](HistoryManifestCurrent& c, int64_t data_bucket) {
+            if (history_manifest_due(c, cat, data_bucket)) {
+                manifests++;
+                CHECK(history_manifest_adopt(c, true, cat, data_bucket, seq++));
+                CHECK(!history_manifest_due(c, cat, data_bucket)); // the livelock: due again
+            }
+            seq++; // the data record consumes a sequence number as well
+        };
+
+        CHECK(history_manifest_due(cur, cat, 100));        // no manifest of this generation yet
+        CHECK(!history_manifest_due(cur, cat, INT64_MIN)); // no bucket, nothing to anchor
+        service(cur, 100);
+        CHECK(manifests == 1);
+        CHECK(cur.bucket == 100 && cur.fp == cat);
+        service(cur, 101);
+        service(cur, 102);
+        CHECK(manifests == 1); // steady state: no manifest per record
+
+        // Cursor reset: the backlog restarts at the live ring's oldest bucket, far below M = 100.
+        manifests = 0;
+        for (int64_t b = 20; b <= 30; ++b) service(cur, b);
+        CHECK(manifests == 1);                      // exactly ONE manifest for the whole run
+        CHECK(cur.bucket == 20);                    // current although it is older than 100
+        CHECK(!history_manifest_due(cur, cat, 20)); // the record at B ...
+        CHECK(!history_manifest_due(cur, cat, 21)); // ... and the one at B + 1
+        CHECK(!history_manifest_due(
+            cur, cat, 20 + static_cast<int64_t>(HISTORY_MANIFEST_REFRESH_BUCKETS) - 1));
+        CHECK(history_manifest_due(cur, cat,
+                                   20 + static_cast<int64_t>(HISTORY_MANIFEST_REFRESH_BUCKETS)));
+        CHECK(history_manifest_due(cur, cat ^ 1u, 25)); // a catalog change still forces one
+        for (int64_t b = 31; b < 20 + static_cast<int64_t>(HISTORY_MANIFEST_REFRESH_BUCKETS); ++b)
+            service(cur, b);
+        CHECK(manifests == 1); // nothing until the refresh distance
+        service(cur, 20 + static_cast<int64_t>(HISTORY_MANIFEST_REFRESH_BUCKETS));
+        CHECK(manifests == 2); // ... and then exactly one
+
+        // The retired rule, modelled so this test keeps its teeth: adopt only when the bucket does
+        // not go backwards. The same reset then re-appends a manifest for EVERY record.
+        {
+            HistoryManifestCurrent old_rule;
+            old_rule.fp          = cat;
+            old_rule.bucket      = 100;
+            old_rule.sequence    = 1;
+            size_t old_manifests = 0;
+            for (int64_t b = 20; b <= 30; ++b) {
+                if (!history_manifest_due(old_rule, cat, b)) continue;
+                old_manifests++;
+                if (b >= old_rule.bucket) {
+                    old_rule.bucket = b;
+                    old_rule.sequence++;
+                }
+            }
+            CHECK(old_manifests == 11);
+        }
+
+        // The boot scan meets manifests in PHYSICAL order, which is not append order once the ring
+        // has wrapped: the highest sequence wins whichever comes first, an equal or lower one is
+        // the same record or an older one, and only this build's generation can become current.
+        HistoryManifestCurrent scan;
+        CHECK(history_manifest_adopt(scan, true, cat, 100, 5));
+        CHECK(history_manifest_adopt(scan, true, cat, 20, 9));   // later append, older bucket
+        CHECK(!history_manifest_adopt(scan, true, cat, 400, 7)); // earlier append, newer bucket
+        CHECK(!history_manifest_adopt(scan, true, cat, 20, 9));  // the same record again
+        CHECK(scan.sequence == 9 && scan.bucket == 20);
+        HistoryManifestCurrent reversed;
+        CHECK(history_manifest_adopt(reversed, true, cat, 20, 9));
+        CHECK(!history_manifest_adopt(reversed, true, cat, 100, 5));
+        CHECK(reversed.sequence == 9 && reversed.bucket == 20);
+        HistoryManifestCurrent other;
+        CHECK(!history_manifest_adopt(other, false, cat, 100, 5)); // another generation: cache only
+        CHECK(!history_manifest_adopt(other, true, cat, INT64_MIN, 5));
+        CHECK(!history_manifest_adopt(other, true, cat, 100, 0)); // sequence zero is "none"
+        CHECK(other.fp == 0 && other.bucket == INT64_MIN && other.sequence == 0);
+
+        // A manifest stamped under a far-future clock is adopted by the scan (highest sequence),
+        // and the first data record below it re-anchors once.
+        HistoryManifestCurrent stamped;
+        CHECK(history_manifest_adopt(stamped, true, cat, 1'000'000, 7));
+        manifests = 0;
+        for (int64_t b = 100; b < 110; ++b) service(stamped, b);
+        CHECK(manifests == 1);
+        CHECK(stamped.bucket == 100);
+    }
+
     // --- absolute buckets -----------------------------------------------------------------------
     CHECK(history_bucket_from_unix(0) == 0);
     CHECK(history_bucket_from_unix(299) == 0);
@@ -17196,6 +17401,42 @@ static void test_history_persist() {
     CHECK(history_t0(1'786'459'116, restored_age_s, 1, HISTORY_DT_S) == 1'786'458'900);
     CHECK(history_anchor_commit_us(123, 456, 789, 0) == 123);
 
+    // --- a cursor from the future (HIST-02/b) ----------------------------------------------------
+    // A cursor beyond its clock means one of two things: an earlier boot synchronised to a wrong
+    // far-future time, or THIS boot synchronised to a wrong past time. Equal is never future, an
+    // unknown cursor or anchor proves nothing, and the slack absorbs the one-bucket jitter of an
+    // anchor derived from two whole-second readings.
+    CHECK(!history_cursor_in_future(100, 100));
+    CHECK(history_cursor_in_future(101, 100));
+    CHECK(!history_cursor_in_future(99, 100));
+    CHECK(!history_cursor_in_future(INT64_MIN, 100));
+    CHECK(!history_cursor_in_future(100, INT64_MIN));
+    CHECK(!history_cursor_in_future(INT64_MIN, INT64_MIN));
+    CHECK(!history_cursor_in_future(101, 100, 1)); // inside the slack: it just waits
+    CHECK(history_cursor_in_future(102, 100, 1));
+    CHECK(history_cursor_in_future(INT64_MAX, INT64_MIN + 1, HISTORY_CURSOR_FUTURE_SLACK_BUCKETS));
+    CHECK(HISTORY_CURSOR_FUTURE_SLACK_BUCKETS >= 1); // the anchor can sit a bucket either side
+    // The scale of the real fault: a clock one day ahead is 288 buckets, far beyond any slack.
+    CHECK(history_cursor_in_future(5000 + HISTORY_SAMPLES, 5000,
+                                   HISTORY_CURSOR_FUTURE_SLACK_BUCKETS));
+
+    // The detection decision is all the journal has to go on: it cannot say WHICH clock is wrong.
+    // Records beyond the clock look the same whether a far-future boot stamped them or a boot with
+    // a wrong PAST time is looking at a good journal, and on a mature journal (days of history)
+    // there are always believable older records below a wrong past clock. So the firmware only
+    // REPORTS the situation and neither re-indexes nor rewinds (history.cpp, "A bucket from the
+    // future").
+    //
+    // The anchor jitters by one bucket from tick to tick, so for a cursor two buckets above the
+    // lower reading the DECISION itself flips between adjacent anchors. That is why the writer's
+    // "ahead of the clock" line is latched per episode and released only by that source's next
+    // successful data append — never by a "not ahead" observation, which would make it flap.
+    CHECK(history_cursor_in_future(102, 100, HISTORY_CURSOR_FUTURE_SLACK_BUCKETS));
+    CHECK(!history_cursor_in_future(102, 101, HISTORY_CURSOR_FUTURE_SLACK_BUCKETS));
+    // The restore compares the indexed newest bucket with the wall bucket without slack: equal is
+    // current, one bucket beyond is stamped ahead of the clock.
+    CHECK(!history_cursor_in_future(100, 100) && history_cursor_in_future(101, 100));
+
     // --- locating the journal-backed span --------------------------------------------------------
     // The record buckets, not their values, define the restored span. This is load-bearing for a
     // register that was unavailable for every sample: its all-NO_READING raster must still survive.
@@ -17206,6 +17447,34 @@ static void test_history_persist() {
     CHECK(history_flash_restore_start(INT64_MIN, 1000) == HISTORY_SAMPLES);
     CHECK(history_flash_restore_start(1001, 1000) == HISTORY_SAMPLES);
     CHECK(history_flash_restore_start(1000, 1000, 0) == 0);
+
+    // --- the restore skips a pending-reset source (HIST-02/d) ------------------------------------
+    // A source whose identity reset is pending (a disabled HomeHub, an X10A bus that never resolves
+    // a profile) must be stepped OVER, not waited for: returning at its first ring left the restore
+    // unfinished for good and with it every append of the journal.
+    constexpr size_t kModbusFirst = TREND_COUNT;
+    constexpr size_t kEnv3First   = TREND_COUNT + HOMEHUB_HISTORY_COUNT;
+    CHECK(history_restore_next_source_ring(0) == kModbusFirst);
+    CHECK(history_restore_next_source_ring(4) == kModbusFirst); // restore proceeds in batches of 4
+    CHECK(history_restore_next_source_ring(kModbusFirst - 1) == kModbusFirst);
+    CHECK(history_restore_next_source_ring(kModbusFirst) == kEnv3First);
+    CHECK(history_restore_next_source_ring(kEnv3First - 1) == kEnv3First);
+    CHECK(history_restore_next_source_ring(kEnv3First) == HISTORY_FLASH_TOTAL_RINGS);
+    CHECK(history_restore_next_source_ring(HISTORY_FLASH_TOTAL_RINGS - 1) ==
+          HISTORY_FLASH_TOTAL_RINGS);
+    for (size_t ring = 0; ring < HISTORY_FLASH_TOTAL_RINGS; ++ring) {
+        const size_t next = history_restore_next_source_ring(ring);
+        CHECK(next > ring && next <= HISTORY_FLASH_TOTAL_RINGS); // always makes progress
+    }
+    {
+        // Skipping every source in turn finishes the restore after one step per source.
+        size_t ring = 0, steps = 0;
+        while (ring < HISTORY_FLASH_TOTAL_RINGS && steps < 10) {
+            ring = history_restore_next_source_ring(ring);
+            steps++;
+        }
+        CHECK(ring == HISTORY_FLASH_TOTAL_RINGS && steps == 3);
+    }
 
     // --- the splice -----------------------------------------------------------------------------
     // The restored samples go BEHIND what this boot recorded, each at the absolute bucket it was
