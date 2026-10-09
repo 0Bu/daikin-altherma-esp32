@@ -49,15 +49,22 @@ class PublicationTests(unittest.TestCase):
         self.signature = mock.patch.object(dev.signing, 'check_image', return_value=[]).start()
         app = b'signed-app-fixture'
         self.document = {
+            'name': 'daikin-altherma-esp32',
             'version': '1.2.3-dev.1', 'new_install_prompt_erase': True,
             'builds': [{'chipFamily': 'ESP32-S3', 'parts': [
-                {'path': 'daikin-altherma-esp32.bin', 'offset': 0x10000}]}],
+                {'path': 'daikin-altherma-esp32-web-bootloader.bin', 'offset': 0},
+                {'path': 'daikin-altherma-esp32-web-partition-table.bin', 'offset': 0x8000},
+                {'path': 'daikin-altherma-esp32-web-ota_data_initial.bin', 'offset': 0xf000},
+                {'path': 'daikin-altherma-esp32.bin', 'offset': 0x20000}]}],
             'provenance': {'source_sha': self.source, 'idf_version': 'v6.1',
                            'dependencies_lock_sha256': hashlib.sha256((self.root / 'dependencies.lock').read_bytes()).hexdigest(),
                            'app_sha256': hashlib.sha256(app).hexdigest(),
                            'signing_key_sha256': dev.provenance.pinned_signing_digest()},
         }
         self.payloads = {name: b'fixture' for name in dev.readback.REQUIRED_SITE_FILES}
+        self.payloads['daikin-altherma-esp32-web-bootloader.bin'] = b'\xe9' * 0x6000
+        self.payloads['daikin-altherma-esp32-web-partition-table.bin'] = b'\x50' * 0xc00
+        self.payloads['daikin-altherma-esp32-web-ota_data_initial.bin'] = b'\xff' * 0x2000
         self.payloads['daikin-altherma-esp32.bin'] = app
         self.update_manifest()
         self.pages = self.make_pages()
