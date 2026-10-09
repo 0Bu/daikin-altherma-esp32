@@ -1,6 +1,6 @@
 # Plant diagnostics in plain language
 
-<!-- user-docs-contract: 38127a2fd2f401cf56663e893bb2247241765340ef35b81f6d7309608e964180 -->
+<!-- user-docs-contract: 59c8e9d43c79e9be04e4bfcb71f5f810adc9d335a2ef25900fa9344641f9ce35 -->
 
 This guide is for owners who want to understand their heat pump without being heating specialists.
 Plant diagnostics are **off by default**. They run only after **Plant diagnostics** is explicitly
@@ -16,7 +16,11 @@ heuristics, and what the measurement cannot establish.
 
 While enabled, the web UI shows the **Plant diagnostics · 24 h** card immediately below the plant
 schematic. Open a row to see the reading, assessment, and normal context. The card deliberately does
-not recommend a next step because its bounded evidence may not establish the cause.
+not recommend a plant action because its bounded evidence may not establish the cause. The steps it
+does name are to note, compare or check the board's connection: note when a cleared unit message
+keeps coming back, check the X10A link when the fault row cannot be read, compare the pressure with
+the exact unit manual, and check the X10A wiring when the hot-water check keeps losing its readings
+day after day.
 
 ## What the statuses mean
 
@@ -41,7 +45,8 @@ RAM. Completed diagnosis hours are also stored in the device's append-only histo
 power interruption or firmware update restores them once the clock and detected model match. Only
 the hour that was still open can be missing. An update still discards older records when the meaning
 or layout of their counters changed. An intentional restart, such as a firmware update, also hands
-over the domestic-hot-water check's unfinished quiet hour; a power interruption or crash does not.
+over the domestic-hot-water check's unfinished quiet hour when the new start can read it (an update
+that changes how it is kept cannot); a power interruption or crash does not.
 The restart and the start-up before the board can watch the tank again count as unwatched time, up
 to the point where the check resumes. When the restart and that start-up leave the tank unwatched
 for more than two minutes in total (less when the restart interrupted a stretch of unread readings,
@@ -115,15 +120,23 @@ windows are not represented.
 reference installation, not a Daikin limit. Tank volume and the temperature difference between the
 tank and its room both affect the cooling rate. The method can recognise notable clean hours only up
 to about **1.85 K/h**. A faster continuous loss can look like a draw and cause the hour to be
-discarded.
+discarded. If the tank was heated, wholly or partly, while the board could not read the unit (for
+example during a firmware update), or shortly before the board restarted unexpectedly, the board
+can lose track of that heating, and the next hour can show the tank settling after it as a fast
+loss. A NOTE from the first hour after such a
+period is therefore weaker evidence than a NOTE that repeats.
 
 **What do OK and NOT AVAILABLE mean here?** **OK** only says that the usable quiet hours contained no
 loss in the detectable range from 0.8 K/h upward. It does not exclude faster continuous loss. **NOT
 AVAILABLE** after many discarded windows also does not identify the reason: charging, pump activity,
 a draw, unreadable data, and continuous loss that resembles a draw cannot be separated from the
-stored totals alone. Changing the circulation-pump measurement's topic, value paths, age limit,
-on/off thresholds or confirmation time starts this check over; renaming it does not. **CHECKING**
-afterwards is expected and says nothing about the tank.
+stored totals alone. A discard for unread data the check needs (the tank temperature, or the
+valve, heater and pump states) can come from the X10A link not answering or from the board pausing
+its own polling (a firmware update, a weather download or other network transfer, a restart, model
+detection), so it does not by itself indicate a wiring fault. Changing the circulation-pump
+measurement's topic, value paths, age limit, on/off thresholds or confirmation time starts this
+check over; renaming it does not. **CHECKING** afterwards is expected and says nothing about the
+tank.
 
 **What this result does not establish:** A rapid temperature drop alone proves neither a leaking
 three-way valve nor poor insulation. The sensor measures one location in a stratified tank; hot-water

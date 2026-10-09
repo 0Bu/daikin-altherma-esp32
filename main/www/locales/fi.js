@@ -1,4 +1,4 @@
-// translation-source: 1369786d303329f6e5230c06537e985a4c7735be65bcff1dc17670a9530129f9
+// translation-source: 856c2ce7d1e297c3bcf8a20a2f1b4c8079ed68a2890bb1d0729997a0bd963c19
 I18N.fi = localeValues([
   /* sys.nodata */ "Ei tietoja",
   /* sys.unreachable */ "Ei tavoiteta",
@@ -197,12 +197,12 @@ I18N.fi = localeValues([
   /* check.detail.dhw_waiting */ (n, r) => `${n}/${r} ${n === 1 ? "puhdas tunnin ikkuna valmis" : "puhdasta tunnin ikkunaa valmiina"}; yhtään kokonaista ikkunaa ei vielä ole.`,
   /* check.detail.dhw_aborted */ (n, reasons, best) => ` ${n === 1 ? "1 ehdokasikkuna" : `${n} ehdokasikkunaa`} hylätty (${reasons}); pisin ${best}/60 min.`,
   /* check.detail.dhw_blocked */ (n, reasons, best) => `Ei arvioitavissa tällä menetelmällä: 24 tunnissa ei valmistunut yhtään puhdasta tunnin ikkunaa ja ${n === 1 ? "1 ehdokasikkuna" : `${n} ehdokasikkunaa`} hylättiin (${reasons}); pisin oli ${best}/60 min. Säiliön lataus vaatii 105 häiriötöntä minuuttia (45 min tasaantumista + 60 min ikkuna). Vedenotto, pumppu, lukukelvoton data tai vedenotolta näyttävä nopea jatkuva lämpöhäviö voi estää ikkunan. Tallennetut summat eivät osoita pääsyytä, joten nopeaa jatkuvaa lämpöhäviötä ei voi sulkea pois.`,
-  /* check.detail.dhw_blocked_link */ (n, best) => `Ei arvioitavissa: 24 tunnissa ei valmistunut yhtään puhdasta tunnin ikkunaa ja ${n === 1 ? "ainoa ehdokasikkuna" : `kaikki ${n} ehdokasikkunaa`} hylättiin, koska X10A lakkasi vastaamasta kesken ikkunan; pisin oli ${best}/60 min. Vika on yhteydessä, ei laitteistossa — tarkista X10A-johdotus ja RX/TX-nastat.`,
+  /* check.detail.dhw_blocked_link */ (n, best) => `Ei arvioitavissa: 24 tunnissa ei valmistunut yhtään puhdasta tunnin ikkunaa ja ${n === 1 ? "ainoa ehdokasikkuna" : `kaikki ${n} ehdokasikkunaa`} hylättiin, koska tarkistuksen tarvitsemia lukemia ei luettu liian pitkään aikaan — X10A ei vastannut tai kortti keskeytti lukemisen (laiteohjelmistopäivitys, säätietojen lataus tai muu verkkosiirto, uudelleenkäynnistys, mallin tunnistus); pisin oli ${best}/60 min. Tämä ei kerro mitään säiliöstä. Jos tämä toistuu päivästä toiseen, tarkista X10A-johdotus ja RX/TX-nastat.`,
   /* check.detail.dhw_reason.charge */ "säiliön lataus",
   /* check.detail.dhw_reason.pump */ "sisäinen pumppu",
   /* check.detail.dhw_reason.draw */ "vedenottoa muistuttava lasku",
   /* check.detail.dhw_reason.reading */ "epäuskottava R5T",
-  /* check.detail.dhw_reason.blind */ "X10A ei vastaa",
+  /* check.detail.dhw_reason.blind */ "lukemat puuttuvat: X10A ei vastaa tai lukeminen keskeytetty",
   /* check.detail.collecting_unknown */ "Arvioon kelpaavia mittaustietoja ei ole vielä tarpeeksi.",
   /* check.detail.observation */ "Vain mitattu arvo; yleistä OK/VAROITUS-rajaa ei ole.",
   /* check.detail.experimental */ "Kokeellinen havainto; vakaa laskuri ei todista, ettei rajoitusta tapahtunut.",

@@ -1,4 +1,4 @@
-// translation-source: 1369786d303329f6e5230c06537e985a4c7735be65bcff1dc17670a9530129f9
+// translation-source: 856c2ce7d1e297c3bcf8a20a2f1b4c8079ed68a2890bb1d0729997a0bd963c19
 I18N.ja = localeValues([
   /* sys.nodata */ "データなし",
   /* sys.unreachable */ "接続不可",
@@ -197,12 +197,12 @@ I18N.ja = localeValues([
   /* check.detail.dhw_waiting */ (n, r) => `正常な1時間窓 ${r}件中${n}件完了。まだ完全な1時間窓がありません。`,
   /* check.detail.dhw_aborted */ (n, reasons, best) => ` 候補窓${n}件を除外（${reasons}）。最長 ${best}/60分。`,
   /* check.detail.dhw_blocked */ (n, reasons, best) => `この方法では評価不能です。24時間で正常な1時間窓が完成せず、候補${n}件を除外（${reasons}）、最長 ${best}/60分でした。タンク加熱には連続105分（安定45分＋評価60分）が必要です。取湯、ポンプ動作、読取不能、取湯に見える速い連続熱損失でも窓が成立しません。保存集計では主因を特定できず、速い連続熱損失も除外できません。`,
-  /* check.detail.dhw_blocked_link */ (n, best) => `評価不能です。24時間で正常な1時間窓が完成せず、候補${n}件は途中でX10A応答が止まり全て除外、最長 ${best}/60分でした。設備ではなく接続の問題です。X10A配線とRX/TXピンを確認してください。`,
+  /* check.detail.dhw_blocked_link */ (n, best) => `評価不能です。24時間で正常な1時間窓が完成せず、候補${n}件は、このチェックに必要な値が長時間読み取れなかったため全て除外されました（X10Aの無応答、または基板のポーリング一時停止：ファームウェア更新、天気取得などのネットワーク転送、再起動、機種検出）。最長 ${best}/60分でした。タンク自体の状態は示していません。毎日続く場合は、X10A配線とRX/TXピンを確認してください。`,
   /* check.detail.dhw_reason.charge */ "タンク加熱",
   /* check.detail.dhw_reason.pump */ "内部ポンプ",
   /* check.detail.dhw_reason.draw */ "取湯様の低下",
   /* check.detail.dhw_reason.reading */ "不自然なR5T",
-  /* check.detail.dhw_reason.blind */ "X10A応答なし",
+  /* check.detail.dhw_reason.blind */ "未読取：X10A応答なしまたはポーリング一時停止",
   /* check.detail.collecting_unknown */ "評価に使える根拠がまだ不足しています。",
   /* check.detail.observation */ "測定値のみ。共通のOK/警告限界はありません。",
   /* check.detail.experimental */ "試験的観測です。カウンタが安定していても制限なしとは証明できません。",

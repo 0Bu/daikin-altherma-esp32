@@ -322,15 +322,20 @@ const I18N = {
     // The verdict that says this is not a matter of waiting longer. The generic path is deliberately
     // NON-CAUSAL: the persisted window has only an abort total, an OR-ed set of reason kinds and the
     // best duration. It cannot say which cause dominated, or pair circulation evidence with an
-    // aborted candidate. The all-blind case below is stronger because that one reason kind is the
-    // only evidence that occurred anywhere in the window.
+    // aborted candidate. The all-blind case below is narrower, not causal: "blind" means only that
+    // too much of a candidate hour went unobserved, and the unread input is NOT only the tank
+    // temperature (R5T) — the page-0x60 rows the check needs (3-way valve, BSH, internal pump) count
+    // too. That time comes from X10A timeouts AND from board-side pauses (OTA/weather network hold,
+    // model detection, a skipped poll cycle, a restart). It therefore says "readings the check
+    // needs" (docs/DIAGNOSTICS.md names them), names both sources and gives a next step that holds
+    // only if the pattern persists.
     "check.detail.dhw_blocked": (n, reasons, best) => `Not assessable with this method: over a full 24 hours not one clean one-hour window completed, and ${n} candidate ${n === 1 ? "window was" : "windows were"} discarded (${reasons}); the longest reached ${best} of 60 min. Tank charging needs 105 undisturbed minutes (45 min settling plus a 60-minute window); draws, pump activity, unreadable data, or continuous heat loss fast enough to look like a draw can also prevent a clean hour. The stored totals do not show which cause dominated, so fast continuous heat loss cannot be excluded.`,
-    "check.detail.dhw_blocked_link": (n, best) => `Not assessable: over a full 24 hours not one clean one-hour window completed, and all ${n} candidate ${n === 1 ? "window was" : "windows were"} discarded because the X10A link stopped answering mid-window; the longest reached ${best} of 60 min. This is the link, not the plant — check the X10A wiring and the RX/TX pins.`,
+    "check.detail.dhw_blocked_link": (n, best) => `Not assessable: over a full 24 hours not one clean one-hour window completed, and all ${n} candidate ${n === 1 ? "window was" : "windows were"} discarded because readings the check needs went unread for too long — the X10A link not answering, or the board pausing its polling (a firmware update, a weather download or other network transfer, a restart, model detection); the longest reached ${best} of 60 min. This says nothing about the tank. If it keeps happening day after day, check the X10A wiring and the RX/TX pins.`,
     "check.detail.dhw_reason.charge": "tank charging",
     "check.detail.dhw_reason.pump": "internal pump",
     "check.detail.dhw_reason.draw": "draw-like drop",
     "check.detail.dhw_reason.reading": "implausible R5T",
-    "check.detail.dhw_reason.blind": "X10A not answering",
+    "check.detail.dhw_reason.blind": "readings missing: X10A silent or polling paused",
     "check.detail.collecting_unknown": "Not enough usable evidence for an assessment yet.",
     "check.detail.observation": "Measured value only; there is no universal OK/WARNING limit.",
     "check.detail.experimental": "Experimental observation; a stable counter is not proof that no limiting occurred.",

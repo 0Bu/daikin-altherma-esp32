@@ -1,4 +1,4 @@
-// translation-source: 1369786d303329f6e5230c06537e985a4c7735be65bcff1dc17670a9530129f9
+// translation-source: 856c2ce7d1e297c3bcf8a20a2f1b4c8079ed68a2890bb1d0729997a0bd963c19
 I18N.nb = localeValues([
   /* sys.nodata */ "Ingen data",
   /* sys.unreachable */ "Ikke tilgjengelig",
@@ -197,12 +197,12 @@ I18N.nb = localeValues([
   /* check.detail.dhw_waiting */ (n, r) => `${n} av ${r} hele, rensede timevinduer; venter på første hele vindu.`,
   /* check.detail.dhw_aborted */ (n, reasons, best) => ` ${n} ${n === 1 ? "kandidat ble" : "kandidater ble"} forkastet (${reasons}); lengste nådde ${best} av 60 min.`,
   /* check.detail.dhw_blocked */ (n, reasons, best) => `Kan ikke vurderes: ingen renset time ble fullført på 24 timer; ${n} ${n === 1 ? "kandidat ble" : "kandidater ble"} forkastet (${reasons}), lengste nådde ${best}/60 min. Tanklading krever 105 rolige minutter (45 + 60); tapping, pumpe, uleselige data eller raskt, jevnt varmetap kan bryte vinduet. Summene viser ikke hvilken årsak som dominerte, så raskt kontinuerlig varmetap kan ikke utelukkes.`,
-  /* check.detail.dhw_blocked_link */ (n, best) => `Kan ikke vurderes: ${n === 1 ? "den eneste kandidaten ble" : `alle ${n} kandidater ble`} forkastet fordi X10A sluttet å svare midt i vinduet; lengste nådde ${best}/60 min. Dette skyldes forbindelsen, ikke anlegget — kontroller kabling og RX/TX-pinner.`,
+  /* check.detail.dhw_blocked_link */ (n, best) => `Kan ikke vurderes: ${n === 1 ? "den eneste kandidaten ble" : `alle ${n} kandidater ble`} forkastet fordi avlesninger kontrollen trenger ble stående for lenge uten å bli lest — X10A-forbindelsen svarte ikke, eller kortet satte avspørringen på pause (fastvareoppdatering, værhenting eller annen nettverksoverføring, omstart, modellgjenkjenning); lengste nådde ${best}/60 min. Dette sier ingenting om tanken. Hvis det gjentar seg dag etter dag, kontroller X10A-kabling og RX/TX-pinner.`,
   /* check.detail.dhw_reason.charge */ "tanklading",
   /* check.detail.dhw_reason.pump */ "intern pumpe",
   /* check.detail.dhw_reason.draw */ "tappelignende fall",
   /* check.detail.dhw_reason.reading */ "usannsynlig R5T",
-  /* check.detail.dhw_reason.blind */ "X10A svarer ikke",
+  /* check.detail.dhw_reason.blind */ "avlesninger mangler: X10A svarer ikke eller avspørring satt på pause",
   /* check.detail.collecting_unknown */ "Ikke nok brukbar dokumentasjon for en vurdering ennå.",
   /* check.detail.observation */ "Kun måling; det finnes ingen generell OK-/ADVARSEL-grense.",
   /* check.detail.experimental */ "Eksperimentell observasjon; en stabil teller beviser ikke at ingen begrensning skjedde.",

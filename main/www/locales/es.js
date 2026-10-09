@@ -1,4 +1,4 @@
-// translation-source: 1369786d303329f6e5230c06537e985a4c7735be65bcff1dc17670a9530129f9
+// translation-source: 856c2ce7d1e297c3bcf8a20a2f1b4c8079ed68a2890bb1d0729997a0bd963c19
 I18N.es = localeValues([
   /* sys.nodata */ "Sin datos",
   /* sys.unreachable */ "No accesible",
@@ -197,12 +197,12 @@ I18N.es = localeValues([
   /* check.detail.dhw_waiting */ (n, r) => `${n} de ${r} completados en ventanas limpias de una hora; aún no hay ninguna ventana limpia completa de una hora.`,
   /* check.detail.dhw_aborted */ (n, reasons, best) => ` ${n} ${n === 1 ? "ventana candidata descartada" : "ventanas candidatas descartadas"} (${reasons}); la más larga alcanzó ${best} de 60 min.`,
   /* check.detail.dhw_blocked */ (n, reasons, best) => `No evaluable con este método: durante 24 horas completas no terminó ninguna ventana limpia de una hora y ${n === 1 ? "se descartó 1 ventana candidata" : `se descartaron ${n} ventanas candidatas`} (${reasons}); la más larga alcanzó ${best} de 60 min. La carga del depósito necesita 105 minutos sin interrupciones (45 min de estabilización más una ventana de 60 minutos); las extracciones, la actividad de la bomba, datos ilegibles o una pérdida continua de calor suficientemente rápida para parecer una extracción también pueden impedir una hora limpia. Los totales guardados no muestran qué causa predominó, por lo que no se puede descartar una pérdida continua y rápida de calor.`,
-  /* check.detail.dhw_blocked_link */ (n, best) => `No evaluable: durante 24 horas completas no terminó ninguna ventana limpia de una hora y ${n === 1 ? "se descartó la única ventana candidata" : `se descartaron las ${n} ventanas candidatas`} porque la conexión X10A dejó de responder a mitad de la ventana; la más larga alcanzó ${best} de 60 min. Es un problema de conexión, no de la instalación: comprueba el cableado X10A y los pines RX/TX.`,
+  /* check.detail.dhw_blocked_link */ (n, best) => `No evaluable: durante 24 horas completas no terminó ninguna ventana limpia de una hora y ${n === 1 ? "se descartó la única ventana candidata" : `se descartaron las ${n} ventanas candidatas`} porque las lecturas necesarias para la comprobación estuvieron demasiado tiempo sin leerse: la conexión X10A no respondía o la placa tenía en pausa sus consultas (actualización de firmware, descarga de datos meteo u otra transferencia de red, reinicio, detección del modelo); la más larga alcanzó ${best} de 60 min. Esto no dice nada sobre el depósito. Si se repite día tras día, comprueba el cableado X10A y los pines RX/TX.`,
   /* check.detail.dhw_reason.charge */ "carga del depósito",
   /* check.detail.dhw_reason.pump */ "bomba interna",
   /* check.detail.dhw_reason.draw */ "caída similar a una extracción",
   /* check.detail.dhw_reason.reading */ "R5T no plausible",
-  /* check.detail.dhw_reason.blind */ "X10A no responde",
+  /* check.detail.dhw_reason.blind */ "faltan lecturas: X10A sin respuesta o consultas en pausa",
   /* check.detail.collecting_unknown */ "Aún no hay suficientes datos utilizables para realizar una evaluación.",
   /* check.detail.observation */ "Solo valor medido; no existe un límite universal de OK/AVISO.",
   /* check.detail.experimental */ "Observación experimental; un contador estable no demuestra que no se produjera ninguna limitación.",

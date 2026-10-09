@@ -1,4 +1,4 @@
-// translation-source: 1369786d303329f6e5230c06537e985a4c7735be65bcff1dc17670a9530129f9
+// translation-source: 856c2ce7d1e297c3bcf8a20a2f1b4c8079ed68a2890bb1d0729997a0bd963c19
 I18N.fr = localeValues([
   /* sys.nodata */ "Aucune donnée",
   /* sys.unreachable */ "Injoignable",
@@ -197,12 +197,12 @@ I18N.fr = localeValues([
   /* check.detail.dhw_waiting */ (n, r) => `${n} sur ${r} terminés dans des fenêtres propres d’une heure ; aucune fenêtre propre complète d’une heure pour le moment.`,
   /* check.detail.dhw_aborted */ (n, reasons, best) => ` ${n} ${n === 1 ? "fenêtre candidate rejetée" : "fenêtres candidates rejetées"} (${reasons}) ; la plus longue a atteint ${best} sur 60 min.`,
   /* check.detail.dhw_blocked */ (n, reasons, best) => `Non évaluable avec cette méthode : sur 24 heures complètes, aucune fenêtre propre d’une heure ne s’est terminée et ${n} ${n === 1 ? "fenêtre candidate a été rejetée" : "fenêtres candidates ont été rejetées"} (${reasons}) ; la plus longue a atteint ${best} sur 60 min. La charge du ballon exige 105 minutes sans interruption (45 min de stabilisation plus une fenêtre de 60 minutes) ; les puisages, l’activité de la pompe, des données illisibles ou une perte de chaleur continue assez rapide pour ressembler à un puisage peuvent aussi empêcher une heure propre. Les totaux enregistrés n’indiquent pas quelle cause a dominé, une perte de chaleur continue et rapide ne peut donc pas être exclue.`,
-  /* check.detail.dhw_blocked_link */ (n, best) => `Non évaluable : sur 24 heures complètes, aucune fenêtre propre d’une heure ne s’est terminée et ${n === 1 ? "l’unique fenêtre candidate a été rejetée" : `les ${n} fenêtres candidates ont été rejetées`}, car la liaison X10A a cessé de répondre en cours de fenêtre ; la plus longue a atteint ${best} sur 60 min. Le problème vient de la liaison, pas de l’installation — vérifiez le câblage X10A et les broches RX/TX.`,
+  /* check.detail.dhw_blocked_link */ (n, best) => `Non évaluable : sur 24 heures complètes, aucune fenêtre propre d’une heure ne s’est terminée et ${n === 1 ? "l’unique fenêtre candidate a été rejetée" : `les ${n} fenêtres candidates ont été rejetées`}, car des relevés nécessaires à la vérification sont restés trop longtemps sans lecture — liaison X10A sans réponse, ou carte ayant mis son interrogation en pause (mise à jour du micrologiciel, téléchargement météo ou autre transfert réseau, redémarrage, détection du modèle) ; la plus longue a atteint ${best} sur 60 min. Cela ne dit rien du ballon. Si cela se répète jour après jour, vérifiez le câblage X10A et les broches RX/TX.`,
   /* check.detail.dhw_reason.charge */ "charge du ballon",
   /* check.detail.dhw_reason.pump */ "pompe interne",
   /* check.detail.dhw_reason.draw */ "baisse semblable à un puisage",
   /* check.detail.dhw_reason.reading */ "R5T non plausible",
-  /* check.detail.dhw_reason.blind */ "X10A ne répond pas",
+  /* check.detail.dhw_reason.blind */ "relevés manquants : X10A sans réponse ou interrogation en pause",
   /* check.detail.collecting_unknown */ "Pas encore assez de données exploitables pour une évaluation.",
   /* check.detail.observation */ "Valeur mesurée uniquement ; il n’existe pas de limite universelle OK/AVERTISSEMENT.",
   /* check.detail.experimental */ "Observation expérimentale ; un compteur stable ne prouve pas qu’aucune limitation ne s’est produite.",

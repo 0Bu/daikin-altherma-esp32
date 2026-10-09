@@ -1,4 +1,4 @@
-// translation-source: 1369786d303329f6e5230c06537e985a4c7735be65bcff1dc17670a9530129f9
+// translation-source: 856c2ce7d1e297c3bcf8a20a2f1b4c8079ed68a2890bb1d0729997a0bd963c19
 I18N.cs = localeValues([
   /* sys.nodata */ "Žádná data",
   /* sys.unreachable */ "Nedostupné",
@@ -197,12 +197,12 @@ I18N.cs = localeValues([
   /* check.detail.dhw_waiting */ (n, r) => `${n} z ${r} dokončeno v čistých hodinových oknech; zatím není k dispozici celé čisté hodinové okno.`,
   /* check.detail.dhw_aborted */ (n, reasons, best) => ` ${n} ${n === 1 ? "kandidátní okno bylo vyřazeno" : n >= 2 && n <= 4 ? "kandidátní okna byla vyřazena" : "kandidátních oken bylo vyřazeno"} (${reasons}); nejdelší dosáhlo ${best} z 60 min.`,
   /* check.detail.dhw_blocked */ (n, reasons, best) => `Touto metodou nelze vyhodnotit: za celých 24 hodin nebylo dokončeno ani jedno čisté hodinové okno a ${n} ${n === 1 ? "kandidátní okno bylo vyřazeno" : n >= 2 && n <= 4 ? "kandidátní okna byla vyřazena" : "kandidátních oken bylo vyřazeno"} (${reasons}); nejdelší dosáhlo ${best} z 60 min. Nabíjení zásobníku vyžaduje 105 nerušených minut (45 min ustálení a 60minutové okno); čisté hodině mohou zabránit také odběry, činnost čerpadla, nečitelná data nebo souvislá tepelná ztráta dostatečně rychlá, aby vypadala jako odběr. Uložené součty neukazují, která příčina převládala, proto nelze vyloučit rychlou souvislou tepelnou ztrátu.`,
-  /* check.detail.dhw_blocked_link */ (n, best) => `Nelze vyhodnotit: za celých 24 hodin nebylo dokončeno ani jedno čisté hodinové okno a ${n === 1 ? "jedno kandidátní okno bylo vyřazeno" : n >= 2 && n <= 4 ? `všechna ${n} kandidátní okna byla vyřazena` : `všech ${n} kandidátních oken bylo vyřazeno`}, protože spojení X10A uprostřed okna přestalo odpovídat; nejdelší dosáhlo ${best} z 60 min. Jde o spojení, nikoli soustavu — zkontrolujte zapojení X10A a piny RX/TX.`,
+  /* check.detail.dhw_blocked_link */ (n, best) => `Nelze vyhodnotit: za celých 24 hodin nebylo dokončeno ani jedno čisté hodinové okno a ${n === 1 ? "jedno kandidátní okno bylo vyřazeno" : n >= 2 && n <= 4 ? `všechna ${n} kandidátní okna byla vyřazena` : `všech ${n} kandidátních oken bylo vyřazeno`}, protože údaje potřebné pro kontrolu zůstaly příliš dlouho nepřečteny — spojení X10A neodpovídalo, nebo deska pozastavila dotazování (aktualizace firmwaru, stahování počasí či jiný přenos po síti, restart, detekce modelu); nejdelší dosáhlo ${best} z 60 min. Nic to neříká o zásobníku. Pokud se to opakuje den po dni, zkontrolujte zapojení X10A a piny RX/TX.`,
   /* check.detail.dhw_reason.charge */ "nabíjení zásobníku",
   /* check.detail.dhw_reason.pump */ "vnitřní čerpadlo",
   /* check.detail.dhw_reason.draw */ "pokles podobný odběru",
   /* check.detail.dhw_reason.reading */ "nevěrohodná hodnota R5T",
-  /* check.detail.dhw_reason.blind */ "X10A neodpovídá",
+  /* check.detail.dhw_reason.blind */ "chybí údaje: X10A neodpovídá nebo je dotazování pozastaveno",
   /* check.detail.collecting_unknown */ "Pro vyhodnocení zatím není dostatek použitelných údajů.",
   /* check.detail.observation */ "Pouze naměřená hodnota; neexistuje univerzální limit V POŘÁDKU/VAROVÁNÍ.",
   /* check.detail.experimental */ "Experimentální pozorování; stabilní čítač nedokazuje, že nedošlo k omezení.",

@@ -1,4 +1,4 @@
-// translation-source: 1369786d303329f6e5230c06537e985a4c7735be65bcff1dc17670a9530129f9
+// translation-source: 856c2ce7d1e297c3bcf8a20a2f1b4c8079ed68a2890bb1d0729997a0bd963c19
 I18N.sv = localeValues([
   /* sys.nodata */ "Inga data",
   /* sys.unreachable */ "Inte tillgänglig",
@@ -197,12 +197,12 @@ I18N.sv = localeValues([
   /* check.detail.dhw_waiting */ (n, r) => `${n} av ${r} hela, rensade timfönster; väntar på det första hela fönstret.`,
   /* check.detail.dhw_aborted */ (n, reasons, bäst) => ` ${n} ${n === 1 ? "kandidat blev förkastad" : "kandidater blev förkastade"} (${reasons}); längsta nådde ${bäst} av 60 min.`,
   /* check.detail.dhw_blocked */ (n, reasons, bäst) => `Kan inte bedömas: ingen rensad timme på 24 t; ${n} ${n === 1 ? "kandidat förkastades" : "kandidater förkastades"} (${reasons}), längst ${bäst}/60 min. Tankladdning kräver 105 lugna min (45 + 60); tappning, pump, oläsbara data eller snabb jämn förlust kan bryta fönstret. Orsaken kan inte rangordnas, så kontinuerlig förlust utesluts inte.`,
-  /* check.detail.dhw_blocked_link */ (n, bäst) => `Kan inte bedömas: ${n === 1 ? "enda kandidaten" : `alla ${n} kandidater`} förkastades när X10A slutade svara; längst ${bäst}/60 min. Anslutningen, inte anläggningen, är orsaken — kontrollera kabel och RX/TX.`,
+  /* check.detail.dhw_blocked_link */ (n, bäst) => `Kan inte bedömas: ${n === 1 ? "enda kandidaten" : `alla ${n} kandidater`} förkastades eftersom avläsningar kontrollen behöver förblev olästa för länge — X10A svarade inte, eller kortet pausade sin avläsning (firmwareuppdatering, väderhämtning eller annan nätverksöverföring, omstart, modellidentifiering); längst ${bäst}/60 min. Det säger ingenting om tanken. Om det upprepas dag efter dag, kontrollera X10A-kabel och RX/TX.`,
   /* check.detail.dhw_reason.charge */ "tankladdning",
   /* check.detail.dhw_reason.pump */ "intern pump",
   /* check.detail.dhw_reason.draw */ "tappningsliknande fall",
   /* check.detail.dhw_reason.reading */ "osannolik R5T",
-  /* check.detail.dhw_reason.blind */ "X10A svarar inte",
+  /* check.detail.dhw_reason.blind */ "avläsningar saknas: X10A svarar inte eller avläsningen pausad",
   /* check.detail.collecting_unknown */ "Ännu saknas tillräckliga användbara data för bedömning.",
   /* check.detail.observation */ "Endast mätning; det finns ingen generell OK-/Varning-gräns.",
   /* check.detail.experimental */ "Experimentell observation; en stabil räknare bevisar inte att ingen begränsning inträffade.",
