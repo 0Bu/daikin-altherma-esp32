@@ -4,6 +4,24 @@ const MAX_MONITOR_CHARS = 100000;
 const DEVICE_PROBE_TIMEOUT_MS = 10000;
 const TRANSPORT_CLEANUP_TIMEOUT_MS = 2000;
 const ANSI_CONTROL_SEQUENCE = /\x1B\[[0-?]*[ -/]*[@-~]/g;
+const SHA256_PATTERN = /^[0-9a-f]{64}$/;
+const ARTIFACT_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*\.bin$/;
+const MAX_BINARY_BYTES = 0x800000;
+const FIRMWARE_DOWNLOAD_TIMEOUT_MS = 30000;
+const FLASH_SECTOR_BYTES = 0x1000;
+// Mirrors the official partitions.csv; the publisher derives its bounds from that file.
+const OFFICIAL_FLASH_PARTS = Object.freeze([
+  { path: "daikin-altherma-esp32-web-bootloader.bin", offset: 0, end: 0x8000 },
+  { path: "daikin-altherma-esp32-web-partition-table.bin", offset: 0x8000, end: 0x9000 },
+  { path: "daikin-altherma-esp32-web-ota_data_initial.bin", offset: 0xf000, end: 0x11000 },
+  { path: "daikin-altherma-esp32.bin", offset: 0x20000, end: 0x210000 }
+]);
+const PRESERVED_FLASH_RANGES = Object.freeze([
+  { name: "nvs", start: 0x9000, end: 0xf000 },
+  { name: "coredump", start: 0x12000, end: 0x1e000 },
+  { name: "history", start: 0x400000, end: 0x800000 }
+]);
+const verifiedOffers = new WeakMap();
 const sleep = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 
 function errorWithName(name, message) {
@@ -141,25 +159,289 @@ export function combinedProgress(fileArray, fileIndex, written, total) {
   return Math.min(100, Math.max(0, Math.floor(((completedBytes + currentBytes) / totalBytes) * 100)));
 }
 
-export async function fetchFirmwareParts(build, manifestUrl, fetchImpl = fetch) {
-  if (!build || !Array.isArray(build.parts) || build.parts.length === 0) {
-    throw errorWithName("InvalidManifestError", "The firmware manifest contains no flash parts.");
-  }
+function integrityError(message) {
+  return errorWithName("FirmwareIntegrityError", `${message} Reload this page to select the current firmware, then try again.`);
+}
 
-  return Promise.all(build.parts.map(async (part) => {
-    const url = new URL(part.path, manifestUrl).toString();
-    const response = await fetchImpl(url, { cache: "no-store" });
-    if (!response.ok) {
-      throw errorWithName(
-        "FirmwareDownloadError",
-        `Downloading ${part.path} failed with HTTP ${response.status}.`
-      );
+function parseMetadata(bytes, name) {
+  // JSON.parse silently accepts repeated object keys. Reject them before interpreting metadata.
+  const source = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+  let cursor = 0;
+  const whitespace = () => { while (/\s/.test(source[cursor] || "") && cursor < source.length) cursor++; };
+  const string = () => {
+    const start = cursor++;
+    while (cursor < source.length) {
+      const character = source[cursor++];
+      if (character === "\\") cursor++;
+      else if (character === '"') return JSON.parse(source.slice(start, cursor));
     }
-    return {
-      address: part.offset,
-      data: new Uint8Array(await response.arrayBuffer())
-    };
-  }));
+    throw new Error("unterminated string");
+  };
+  const value = (depth = 0) => {
+    if (depth > 16) throw new Error("metadata is too deeply nested");
+    whitespace();
+    const opener = source[cursor];
+    if (opener === "{" || opener === "[") {
+      cursor++;
+      whitespace();
+      const closer = opener === "{" ? "}" : "]";
+      const keys = new Set();
+      if (source[cursor] !== closer) {
+        while (true) {
+          if (opener === "{") {
+            if (source[cursor] !== '"') throw new Error("invalid object key");
+            const key = string();
+            if (keys.has(key)) throw new Error(`duplicate metadata key ${key}`);
+            keys.add(key);
+            whitespace();
+            if (source[cursor++] !== ":") throw new Error("missing object colon");
+          }
+          value(depth + 1);
+          whitespace();
+          if (source[cursor] !== ",") break;
+          cursor++;
+          whitespace();
+        }
+      }
+      if (source[cursor++] !== closer) throw new Error("invalid container");
+    } else if (opener === '"') {
+      string();
+    } else {
+      const primitive = /^(?:true|false|null|-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?)/.exec(source.slice(cursor));
+      if (!primitive) throw new Error("invalid value");
+      cursor += primitive[0].length;
+    }
+  };
+  try {
+    value();
+    whitespace();
+    if (cursor !== source.length) throw new Error("trailing metadata");
+    return JSON.parse(source);
+  } catch (error) {
+    throw integrityError(`${name} is invalid: ${errorMessage(error)}.`);
+  }
+}
+
+function freezeMetadata(value) {
+  if (value && typeof value === "object") {
+    Object.values(value).forEach(freezeMetadata);
+    Object.freeze(value);
+  }
+  return value;
+}
+
+function requireCrypto(cryptoImpl) {
+  if (!cryptoImpl || !cryptoImpl.subtle || typeof cryptoImpl.subtle.digest !== "function") {
+    throw errorWithName("FirmwareVerificationUnavailableError", "Firmware verification is unavailable in this browser. Use Chrome or Edge on a secure desktop page.");
+  }
+}
+
+async function sha256(bytes, cryptoImpl) {
+  const digest = new Uint8Array(await cryptoImpl.subtle.digest("SHA-256", bytes));
+  return Array.from(digest, (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+async function downloadBytes(url, fetchImpl, limit, siblingSignal) {
+  const controller = new AbortController();
+  let reader;
+  let timeoutId;
+  const timeoutError = () => integrityError("Firmware download exceeded its 30-second time limit.");
+  const deadline = performance.now() + FIRMWARE_DOWNLOAD_TIMEOUT_MS;
+  const abortFromSibling = () => controller.abort(siblingSignal.reason);
+  const interruption = new Promise((_, reject) => {
+    controller.signal.addEventListener("abort", () => {
+      const reason = controller.signal.reason || integrityError("Firmware download was cancelled.");
+      reject(reason);
+      if (reader) {
+        // Cancellation may itself stall in a broken source; abort and return without waiting for it.
+        try { Promise.resolve(reader.cancel(reason)).catch(() => {}); } catch (_error) {}
+      }
+    }, { once: true });
+    timeoutId = setTimeout(() => controller.abort(timeoutError()), FIRMWARE_DOWNLOAD_TIMEOUT_MS);
+  });
+  if (siblingSignal) {
+    siblingSignal.addEventListener("abort", abortFromSibling, { once: true });
+    if (siblingSignal.aborted) abortFromSibling();
+  }
+  const requireTime = () => {
+    if (!controller.signal.aborted && performance.now() >= deadline) controller.abort(timeoutError());
+    if (controller.signal.aborted) throw controller.signal.reason;
+  };
+  const consume = async () => {
+    requireTime();
+    const response = await fetchImpl(url, { cache: "no-store", redirect: "error", signal: controller.signal });
+    if (!response.body || typeof response.body.getReader !== "function") {
+      throw integrityError("The browser cannot stream firmware downloads safely.");
+    }
+    reader = response.body.getReader();
+    // A fetch implementation may finish after its abort signal. Cancel that late body too.
+    if (controller.signal.aborted) {
+      try { Promise.resolve(reader.cancel(controller.signal.reason)).catch(() => {}); } catch (_error) {}
+      try { reader.releaseLock(); } catch (_error) {}
+    }
+    requireTime();
+    if (!response.ok || response.redirected || response.url !== url) {
+      throw integrityError(`Firmware download changed location or failed with HTTP ${response.status}.`);
+    }
+    const declaredSize = response.headers?.get("content-length");
+    if (declaredSize !== undefined && declaredSize !== null &&
+        (!/^[0-9]+$/.test(declaredSize) || !Number.isSafeInteger(Number(declaredSize)) ||
+         Number(declaredSize) > limit)) {
+      throw integrityError("Firmware download declared an invalid size.");
+    }
+    const bytes = new Uint8Array(limit);
+    let size = 0;
+    while (true) {
+      requireTime();
+      const { value, done } = await reader.read();
+      requireTime();
+      if (done) break;
+      if (!(value instanceof Uint8Array) || value.byteLength > limit - size) {
+        throw integrityError("Firmware download exceeded its byte limit.");
+      }
+      bytes.set(value, size);
+      size += value.byteLength;
+    }
+    if (!size) throw integrityError("Firmware download has an invalid size.");
+    return bytes.subarray(0, size);
+  };
+  try {
+    return await Promise.race([consume(), interruption]);
+  } catch (error) {
+    const failure = error?.name === "FirmwareIntegrityError" ? error :
+      integrityError(`Downloading firmware metadata or bytes failed: ${errorMessage(error)}.`);
+    controller.abort(failure);
+    throw failure;
+  } finally {
+    clearTimeout(timeoutId);
+    if (siblingSignal) siblingSignal.removeEventListener("abort", abortFromSibling);
+    if (reader) {
+      try { reader.releaseLock(); } catch (_error) {}
+    }
+  }
+}
+
+function validateFlashBuild(build, entries, appSha256) {
+  if (!build || build.chipFamily !== "ESP32-S3" ||
+      (build.serialType !== undefined && !["cdc", "uart"].includes(build.serialType)) ||
+      !Array.isArray(build.parts) || build.parts.length !== OFFICIAL_FLASH_PARTS.length) {
+    throw integrityError("The firmware offer has an unsupported target or incomplete flash plan.");
+  }
+  const seen = new Set();
+  const eraseRanges = [];
+  for (const part of build.parts) {
+    const expected = OFFICIAL_FLASH_PARTS.find((candidate) => candidate.path === part?.path);
+    const entry = entries.get(part?.path);
+    if (!expected || !entry || seen.has(part.path) || part.offset !== expected.offset) {
+      throw integrityError("The firmware offer has a duplicate, unindexed or noncanonical flash part.");
+    }
+    seen.add(part.path);
+    const start = Math.floor(part.offset / FLASH_SECTOR_BYTES) * FLASH_SECTOR_BYTES;
+    const end = Math.ceil((part.offset + entry.size) / FLASH_SECTOR_BYTES) * FLASH_SECTOR_BYTES;
+    for (const preserved of PRESERVED_FLASH_RANGES) {
+      if (start < preserved.end && end > preserved.start) {
+        throw integrityError(`The firmware part would erase preserved ${preserved.name} data.`);
+      }
+    }
+    if (end > expected.end || eraseRanges.some((range) => start < range.end && end > range.start)) {
+      throw integrityError("The firmware offer has overlapping or oversized flash parts.");
+    }
+    eraseRanges.push({ start, end });
+    if (part.path === "daikin-altherma-esp32.bin" && entry.sha256 !== appSha256) {
+      throw integrityError("The selected application does not match the signed application provenance.");
+    }
+  }
+}
+
+export async function loadFirmwareOffer({ manifestUrl, fetchImpl = fetch, cryptoImpl = globalThis.crypto }) {
+  requireCrypto(cryptoImpl);
+  const url = new URL(manifestUrl);
+  if (url.protocol !== "https:" || url.username || url.password || url.search || url.hash ||
+      !url.pathname.endsWith("/manifest.json")) {
+    throw integrityError("Firmware metadata must come from its HTTPS feed directory.");
+  }
+  const rawManifest = await downloadBytes(url.href, fetchImpl, 1024);
+  const manifest = parseMetadata(rawManifest, "manifest.json");
+  const manifestSha256 = await sha256(rawManifest, cryptoImpl);
+  const rawIndex = await downloadBytes(new URL("artifacts.json", url).href, fetchImpl, 65536);
+  const index = parseMetadata(rawIndex, "artifacts.json");
+  if (!manifest || manifest.name !== "daikin-altherma-esp32" ||
+      typeof manifest.version !== "string" || !/^[0-9]+\.[0-9]+\.[0-9]+(?:-dev\.[0-9]+)?$/.test(manifest.version) ||
+      manifest.new_install_prompt_erase !== true || "artifacts" in manifest ||
+      typeof manifest.provenance?.app_sha256 !== "string" ||
+      !SHA256_PATTERN.test(manifest.provenance.app_sha256) ||
+      !Array.isArray(manifest.builds) || !manifest.builds.length) {
+    throw integrityError("The firmware manifest is incomplete or invalid.");
+  }
+  if (!index || Object.keys(index).sort().join(",") !== "artifacts,manifest_sha256,schema_version" ||
+      index.schema_version !== 1 || index.manifest_sha256 !== manifestSha256 ||
+      !Array.isArray(index.artifacts) || !index.artifacts.length) {
+    throw integrityError("The artifact index does not match the displayed firmware manifest.");
+  }
+  const entries = new Map();
+  for (const entry of index.artifacts) {
+    if (!entry || Object.keys(entry).sort().join(",") !== "path,sha256,size" ||
+        typeof entry.path !== "string" || !ARTIFACT_NAME_PATTERN.test(entry.path) || entries.has(entry.path) ||
+        typeof entry.sha256 !== "string" || !SHA256_PATTERN.test(entry.sha256) || !Number.isSafeInteger(entry.size) ||
+        entry.size <= 0 || entry.size > MAX_BINARY_BYTES) {
+      throw integrityError("The artifact index has unsafe, duplicate or invalid metadata.");
+    }
+    entries.set(entry.path, entry);
+  }
+  const targets = new Set();
+  for (const build of manifest.builds) {
+    validateFlashBuild(build, entries, manifest.provenance.app_sha256);
+    const target = `${build.chipFamily}:${build.serialType || "default"}`;
+    if (targets.has(target)) throw integrityError("The firmware manifest repeats a build target.");
+    targets.add(target);
+  }
+  const offer = freezeMetadata({ manifestUrl: url.href, manifestSha256, manifest, artifacts: index.artifacts });
+  verifiedOffers.set(offer, { entries, cryptoImpl });
+  return offer;
+}
+
+function requireOffer(offer) {
+  const verification = offer && verifiedOffers.get(offer);
+  if (!verification) throw integrityError("A verified firmware offer is required before installation.");
+  return verification;
+}
+
+export async function fetchFirmwareParts(build, offer, fetchImpl = fetch) {
+  const { entries, cryptoImpl } = requireOffer(offer);
+  if (!offer.manifest.builds.includes(build)) throw integrityError("The selected build is outside the verified firmware offer.");
+
+  const downloads = new AbortController();
+  const pending = build.parts.map(async (part) => {
+    try {
+      const entry = entries.get(part.path);
+      const url = new URL(part.path, offer.manifestUrl).href;
+      const data = await downloadBytes(url, fetchImpl, entry.size, downloads.signal);
+      if (data.length !== entry.size || await sha256(data, cryptoImpl) !== entry.sha256) {
+        throw integrityError(`Downloaded ${part.path} no longer matches the displayed firmware offer.`);
+      }
+      if (downloads.signal.aborted) throw downloads.signal.reason;
+      return { address: part.offset, data };
+    } catch (error) {
+      downloads.abort(error);
+      throw error;
+    }
+  });
+  try {
+    return await Promise.all(pending);
+  } catch (error) {
+    downloads.abort(error);
+    await Promise.allSettled(pending);
+    throw error;
+  }
+}
+
+async function requireOfficialFlashCapacity(loader) {
+  const flashSize = typeof loader.detectFlashSize === "function" ? await loader.detectFlashSize() : undefined;
+  // These are the >=8 MB values returned by the pinned esptool-js detectFlashSize API.
+  if (!["8MB", "16MB", "32MB", "64MB", "128MB", "256MB"].includes(flashSize)) {
+    throw errorWithName("UnsupportedFlashSizeError", "This firmware needs an ESP32-S3 with at least 8 MB of detected flash. Flash capacity could not be confirmed or is too small.");
+  }
+  return flashSize;
 }
 
 export async function probeDevice({
@@ -189,7 +471,8 @@ export async function probeDevice({
       if (!build) {
         throw errorWithName("UnsupportedChipError", `${chipFamily} is not supported by this firmware.`);
       }
-      return { chipFamily, build };
+      const flashSize = await requireOfficialFlashCapacity(loader);
+      return { chipFamily, flashSize, build };
     })(), timeoutMs, errorWithName(
       "DeviceProbeTimeoutError",
       "The serial device did not answer in flashing mode. Select an ESP32-S3 USB port; if it is an ESP32-S3, hold BOOT, tap RESET, then try again."
@@ -205,8 +488,7 @@ export async function probeDevice({
 
 export async function flashDevice({
   port,
-  manifest,
-  manifestUrl,
+  offer,
   eraseFirst,
   TransportCtor,
   ESPLoaderCtor,
@@ -214,6 +496,8 @@ export async function flashDevice({
   onState = () => {},
   onLog = () => {}
 }) {
+  requireOffer(offer);
+  const manifest = offer.manifest;
   const transport = new TransportCtor(port);
   const loader = new ESPLoaderCtor({
     transport,
@@ -237,9 +521,10 @@ export async function flashDevice({
         chipFamily ? `${chipFamily} is not supported by this firmware.` : "The ESP chip could not be identified."
       );
     }
+    await requireOfficialFlashCapacity(loader);
 
     onState({ stage: "preparing", percentage: 0, message: "Loading firmware" });
-    const fileArray = await fetchFirmwareParts(build, manifestUrl, fetchImpl);
+    const fileArray = await fetchFirmwareParts(build, offer, fetchImpl);
 
     if (eraseFirst) {
       onState({ stage: "erasing", percentage: 0, message: "Erasing flash" });
@@ -278,6 +563,7 @@ export function attachWebInstaller({
   TransportCtor,
   ESPLoaderCtor,
   fetchImpl = fetch,
+  cryptoImpl = globalThis.crypto,
   manifestPath = "manifest.json"
 }) {
   if (!root) throw new Error("The installer root is missing.");
@@ -307,6 +593,7 @@ export function attachWebInstaller({
 
   let selectedPort = null;
   let manifest = null;
+  let offer = null;
   let monitorReader = null;
   let monitorLoop = null;
   let monitorPendingLine = "";
@@ -526,7 +813,8 @@ export function attachWebInstaller({
   };
 
   const install = async () => {
-    if (!selectedPort || !manifest || busy) return;
+    if (!selectedPort || !offer || busy) return;
+    const selectedOffer = offer;
     busy = true;
     await stopMonitor();
     root.dataset.flashing = "true";
@@ -544,8 +832,7 @@ export function attachWebInstaller({
       const eraseFirst = Boolean(root.querySelector('input[name="install-mode"]:checked')?.value === "erase");
       await flashDevice({
         port: selectedPort,
-        manifest,
-        manifestUrl: new URL(manifestPath, location.href).toString(),
+        offer: selectedOffer,
         eraseFirst,
         TransportCtor,
         ESPLoaderCtor,
@@ -633,13 +920,10 @@ export function attachWebInstaller({
   }
 
   const manifestUrl = new URL(manifestPath, location.href).toString();
-  fetchImpl(manifestUrl, { cache: "no-store" })
-    .then((response) => response.ok ? response.json() : null)
-    .then((loadedManifest) => {
-      if (!loadedManifest || !Array.isArray(loadedManifest.builds)) {
-        throw new Error("Firmware manifest unavailable.");
-      }
-      manifest = loadedManifest;
+  const ready = loadFirmwareOffer({ manifestUrl, fetchImpl, cryptoImpl })
+    .then((loadedOffer) => {
+      offer = loadedOffer;
+      manifest = offer.manifest;
       if (typeof manifest.version === "string" && manifest.version) {
         versionValue.textContent = manifest.version;
         versionLine.hidden = false;
@@ -651,5 +935,5 @@ export function attachWebInstaller({
       setPageStatus(`Firmware metadata could not be loaded: ${errorMessage(error)}`, "error");
     });
 
-  return { connect, disconnect, install, resetDevice, startMonitor, stopMonitor };
+  return { connect, disconnect, install, resetDevice, startMonitor, stopMonitor, ready };
 }
