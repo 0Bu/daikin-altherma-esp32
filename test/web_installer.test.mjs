@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import test from "node:test";
 import { createHash, webcrypto } from "node:crypto";
+import { releaseSelectedSerialPort, serialPortLease } from "../docs/serial-port-release.mjs";
 
 import {
   attachWebInstaller,
@@ -529,13 +530,16 @@ function installerDom() {
   const elements = new Map();
   const makeElement = () => ({
     dataset: {}, style: {}, textContent: "", hidden: true, disabled: false,
-    addEventListener() {}, setAttribute() {},
+    attributes: new Map(), listeners: new Map(),
+    addEventListener(name, callback) { this.listeners.set(name, callback); },
+    setAttribute(name, value) { this.attributes.set(name, value); },
     append(child) { this.textContent += child.textContent; },
     replaceChildren() { this.textContent = ""; },
     ownerDocument: { createElement: () => makeElement() }
   });
   const root = {
-    dataset: {},
+    dataset: {}, attributes: new Map(),
+    setAttribute(name, value) { this.attributes.set(name, value); },
     querySelector(selector) {
       if (selector.startsWith("input")) return { value: "preserve" };
       if (!elements.has(selector)) elements.set(selector, makeElement());
@@ -626,7 +630,7 @@ test("device probing resets when loader startup fails after the flasher stub sta
   ]);
 });
 
-test("device probing times out and releases an unresponsive serial device", async () => {
+test("device probing times out without closing or releasing a still-running native startup", async () => {
   const calls = [];
   class Transport {
     constructor() { calls.push("transport"); }
@@ -653,7 +657,7 @@ test("device probing times out and releases an unresponsive serial device", asyn
     (error) => error.name === "DeviceProbeTimeoutError" && /did not answer in flashing mode/.test(error.message)
   );
 
-  assert.deepEqual(calls, ["transport", "loader", "main", "disconnect"]);
+  assert.deepEqual(calls, ["transport", "loader", "main"]);
 });
 
 test("a stuck transport cleanup cannot leave the compatibility page busy forever", async () => {
@@ -665,7 +669,8 @@ test("a stuck transport cleanup cannot leave the compatibility page busy forever
     }
   }
   class Loader {
-    async main() { return new Promise(() => {}); }
+    async main() { this.chip = { CHIP_NAME: "ESP32-S3" }; }
+    async detectFlashSize() { return "8MB"; }
   }
 
   const startedAt = Date.now();
@@ -676,7 +681,7 @@ test("a stuck transport cleanup cannot leave the compatibility page busy forever
     ESPLoaderCtor: Loader,
     timeoutMs: 10,
     cleanupTimeoutMs: 10
-  }), { name: "DeviceProbeTimeoutError" });
+  }), { name: "SerialCleanupTimeoutError" });
 
   assert.deepEqual(calls, ["disconnect"]);
   assert.ok(Date.now() - startedAt < 250, "probe and cleanup deadlines must release the UI promptly");
@@ -829,4 +834,429 @@ test("the published page keeps the monitor toggle in the connection tile and pin
   assert.match(html, /\.installer-monitor-line-error\s*\{[^}]*color:#FF6B6B;/s);
   assert.match(html, /https:\/\/cdn\.jsdelivr\.net\/npm\/esptool-js@\d+\.\d+\.\d+\/\+esm/);
   assert.doesNotMatch(html, /esp-web-install-button/);
+});
+
+function pendingNative() {
+  let resolve;
+  let reject;
+  const promise = new Promise((accept, fail) => { resolve = accept; reject = fail; });
+  promise.catch(() => {});
+  return { promise, resolve, reject };
+}
+
+async function drainNativeTasks() {
+  for (let turn = 0; turn < 60; turn++) await Promise.resolve();
+}
+
+function lifecyclePort(name) {
+  const port = {
+    name, readable: null, writable: null, opens: 0, closes: 0, signals: [], forgets: 0,
+    reads: 0, resets: 0, flashIds: 0, writes: 0,
+    getInfo() { return {}; },
+    async open() {
+      this.opens++;
+      if (this.openWait) await this.openWait.promise;
+      this.readable = this.readerSource || new ReadableStream({
+        start: (controller) => { this.readController = controller; }
+      });
+      this.writable = {};
+    },
+    async close() {
+      this.closes++;
+      if (this.closeWait) await this.closeWait.promise;
+      if (this.closeError) throw this.closeError;
+      if (this.readable?.locked) throw new Error("native readable stream is still locked");
+      this.readable = null;
+      this.writable = null;
+    },
+    async setSignals(value) {
+      this.signals.push(value);
+      this.signalEntered?.resolve();
+      if (this.signalWait) await this.signalWait.promise;
+    },
+    async forget() { this.forgets++; this.onForget?.(); }
+  };
+  return port;
+}
+
+function lifecycleEsptool() {
+  class Transport {
+    constructor(port) { this.port = port; }
+    async disconnect() { await this.port.close(); }
+  }
+  class Loader {
+    constructor(options) { this.options = options; this.port = options.transport.port; }
+    async main() {
+      await this.port.open();
+      this.port.mainEntered?.resolve();
+      if (this.port.mainWait) await this.port.mainWait.promise;
+      this.chip = { CHIP_NAME: "ESP32-S3" };
+      this.options.terminal.writeLine(`native ${this.port.name}`);
+    }
+    async flashId() { this.port.flashIds++; }
+    async detectFlashSize() { return "8MB"; }
+    async eraseFlash() { this.port.erases = (this.port.erases || 0) + 1; }
+    async writeFlash(options) {
+      this.port.writes++;
+      this.port.writeEntered?.resolve();
+      if (this.port.writeWait) await this.port.writeWait.promise;
+      options.reportProgress(0, 1, 1);
+      this.options.terminal.writeLine(`late write ${this.port.name}`);
+      if (this.port.writeError) throw this.port.writeError;
+    }
+    async after() {
+      this.port.resets++;
+      if (this.port.afterWait) await this.port.afterWait.promise;
+    }
+  }
+  return { Transport, Loader };
+}
+
+async function attachedLifecycle(t, ports) {
+  const priorLocation = globalThis.location;
+  const priorSecureContext = globalThis.isSecureContext;
+  globalThis.location = { href: "https://example.test/dev/index.html" };
+  globalThis.isSecureContext = true;
+  t.after(() => { globalThis.location = priorLocation; globalThis.isSecureContext = priorSecureContext; });
+  const fixture = firmwareFixture();
+  const dom = installerDom();
+  const fake = lifecycleEsptool();
+  const serial = {
+    choice: ports[0], grants: [...ports], chooserCalls: 0, listeners: new Map(),
+    async requestPort() { this.chooserCalls++; return this.choice; },
+    async getPorts() { return [...this.grants]; },
+    addEventListener(name, callback) {
+      if (!this.listeners.has(name)) this.listeners.set(name, []);
+      this.listeners.get(name).push(callback);
+    }
+  };
+  for (const port of ports) port.onForget = () => { serial.grants = serial.grants.filter((granted) => granted !== port); };
+  const controller = attachWebInstaller({
+    root: dom.root, serial, TransportCtor: fake.Transport, ESPLoaderCtor: fake.Loader,
+    fetchImpl: fixture.fetch, cryptoImpl: webcrypto
+  });
+  await controller.ready;
+  return { controller, serial, dom, fixture, fake };
+}
+
+async function finishSignalReset(t, operation) {
+  await drainNativeTasks();
+  t.mock.timers.tick(100);
+  await drainNativeTasks();
+  t.mock.timers.tick(250);
+  await drainNativeTasks();
+  await operation;
+}
+
+function lifecycleUi(dom) {
+  return JSON.stringify({
+    dataset: dom.root.dataset,
+    connection: dom.element("connection-label").textContent,
+    status: dom.element("page-status").textContent,
+    progress: dom.element("progress-stage").textContent,
+    monitor: dom.element("serial-monitor-live").textContent,
+    output: dom.element("serial-monitor-output").textContent
+  });
+}
+
+test("attached monitor cancellation captures A's delayed open and cannot close or reset connected B", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const a = lifecyclePort("A");
+  const b = lifecyclePort("B");
+  const { controller, serial, dom } = await attachedLifecycle(t, [a, b]);
+  await controller.connect();
+  a.openWait = pendingNative();
+  const starting = controller.startMonitor();
+  await drainNativeTasks();
+  assert.equal(dom.root.attributes.get("aria-busy"), "true");
+  assert.equal(dom.element("serial-monitor-button").attributes.get("aria-busy"), "true");
+  const disconnecting = controller.disconnect();
+  await drainNativeTasks();
+  t.mock.timers.tick(2000);
+  await disconnecting;
+  await starting;
+  assert.ok(serialPortLease(a), "the delayed native open must retain A's lease");
+  serial.choice = b;
+  await controller.connect();
+  const before = lifecycleUi(dom);
+  serial.choice = a;
+  await assert.rejects(releaseSelectedSerialPort(serial, { controller }), { name: "InvalidStateError" });
+  a.openWait.resolve();
+  await drainNativeTasks();
+  assert.equal(a.signals.length, 0, "cancelled monitor opening must never reset A");
+  assert.equal(a.readable, null);
+  assert.equal(serialPortLease(a), undefined);
+  assert.equal(controller.getSelectedPort(), b);
+  assert.equal(b.closes, 1, "only B's own compatibility probe may close B");
+  assert.equal(lifecycleUi(dom), before);
+});
+
+test("attached timed-out probe retains its lease until late native open and cleanup actually settle", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const a = lifecyclePort("A");
+  const b = lifecyclePort("B");
+  a.openWait = pendingNative();
+  const { controller, serial, dom } = await attachedLifecycle(t, [a, b]);
+  const probing = controller.connect();
+  await drainNativeTasks();
+  t.mock.timers.tick(10000);
+  await probing;
+  assert.match(dom.element("page-status").textContent, /native serial operation is still pending/);
+  assert.equal(a.closes, 0, "cleanup must not race an unresolved native startup");
+  assert.ok(serialPortLease(a));
+  assert.equal(dom.root.dataset.busy, "true", "native cleanup stays visibly busy after the foreground deadline");
+  assert.equal(dom.element("connect-button").attributes.get("aria-busy"), "true");
+  serial.choice = b;
+  await controller.connect();
+  const before = lifecycleUi(dom);
+  a.openWait.resolve();
+  await drainNativeTasks();
+  assert.equal(a.readable, null);
+  assert.equal(a.flashIds, 0, "no later probe stages may run after timeout");
+  assert.equal(serialPortLease(a), undefined);
+  assert.equal(controller.getSelectedPort(), b);
+  assert.equal(lifecycleUi(dom), before);
+});
+
+test("attached pending probe cleanup reports failure and prevents reuse until actual closure", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const a = lifecyclePort("A");
+  a.closeWait = pendingNative();
+  const { controller, dom } = await attachedLifecycle(t, [a]);
+  const probing = controller.connect();
+  await drainNativeTasks();
+  t.mock.timers.tick(2000);
+  await probing;
+  assert.match(dom.element("page-status").textContent, /cleanup timed out/);
+  assert.equal(dom.root.dataset.connected, "false");
+  assert.equal(dom.element("install-button").disabled, true);
+  assert.ok(serialPortLease(a));
+  await controller.connect();
+  assert.match(dom.element("page-status").textContent, /still owned/);
+  a.closeWait.resolve();
+  await drainNativeTasks();
+  assert.equal(serialPortLease(a), undefined);
+  assert.equal(dom.root.dataset.connected, "false", "late cleanup must not retroactively certify compatibility");
+  a.closeWait = null;
+  await controller.connect();
+  assert.equal(dom.root.dataset.connected, "true");
+});
+
+test("attached rejected flash cleanup retains the original failure and never claims installation success", async (t) => {
+  const a = lifecyclePort("A");
+  const { controller, dom } = await attachedLifecycle(t, [a]);
+  await controller.connect();
+  a.writeError = new Error("original native write failure");
+  a.closeError = new Error("native close rejected");
+  await controller.install();
+  assert.match(dom.element("page-status").textContent, /original native write failure.*native close rejected/);
+  assert.equal(dom.root.dataset.finished, "false");
+  assert.equal(serialPortLease(a).phase, "quarantined");
+  assert.equal(dom.element("install-button").disabled, true);
+  assert.equal(a.forgets, 0);
+});
+
+test("attached reset cannot report success when native close resolves without closing the port", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const a = lifecyclePort("A");
+  const { controller, dom } = await attachedLifecycle(t, [a]);
+  await controller.connect();
+  a.close = async () => { a.closes++; };
+  await finishSignalReset(t, controller.resetDevice());
+  assert.match(dom.element("page-status").textContent, /Reset failed:.*closure could not be confirmed/);
+  assert.equal(serialPortLease(a).phase, "quarantined");
+  assert.equal(dom.element("reset-button").disabled, true);
+  assert.equal(dom.element("page-status").dataset.kind, "error");
+});
+
+test("attached repeated monitor stop is bounded while native reader cancellation remains owned", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const a = lifecyclePort("A");
+  const { controller, dom } = await attachedLifecycle(t, [a]);
+  await controller.connect();
+  const reading = pendingNative();
+  const cancelling = pendingNative();
+  let cancels = 0;
+  a.readerSource = {
+    locked: false,
+    getReader() {
+      this.locked = true;
+      return {
+        read: () => reading.promise,
+        cancel() {
+          cancels++;
+          reading.resolve({ done: true });
+          return cancelling.promise;
+        },
+        releaseLock: () => { a.readerSource.locked = false; }
+      };
+    }
+  };
+  await finishSignalReset(t, controller.startMonitor());
+  const first = assert.rejects(controller.stopMonitor(), { name: "SerialCleanupTimeoutError" });
+  const second = assert.rejects(controller.stopMonitor(), { name: "SerialCleanupTimeoutError" });
+  await drainNativeTasks();
+  t.mock.timers.tick(2000);
+  await first;
+  await second;
+  assert.equal(cancels, 1, "repeated stop must reuse the captured cancellation promise");
+  assert.equal(serialPortLease(a).phase, "cleanup");
+  assert.equal(dom.root.attributes.get("aria-busy"), "true");
+  assert.equal(dom.element("reset-button").disabled, true);
+  assert.equal(a.closes, 1, "only the earlier successful probe has closed A yet");
+  cancelling.resolve();
+  await drainNativeTasks();
+  assert.equal(a.readable, null);
+  assert.equal(serialPortLease(a), undefined);
+  assert.equal(dom.element("serial-monitor-live").textContent, "Stopped");
+});
+
+test("attached late probe error and cleanup for A cannot change B's completed connection", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const a = lifecyclePort("A");
+  const b = lifecyclePort("B");
+  a.mainWait = pendingNative();
+  a.mainEntered = pendingNative();
+  const { controller, serial, dom } = await attachedLifecycle(t, [a, b]);
+  const probing = controller.connect();
+  await a.mainEntered.promise;
+  const disconnecting = controller.disconnect();
+  await drainNativeTasks();
+  t.mock.timers.tick(2000);
+  await disconnecting;
+  await probing;
+  serial.choice = b;
+  await controller.connect();
+  const before = lifecycleUi(dom);
+  a.mainWait.reject(new Error("obsolete A probe failure"));
+  await drainNativeTasks();
+  assert.equal(a.readable, null);
+  assert.equal(controller.getSelectedPort(), b);
+  assert.equal(lifecycleUi(dom), before);
+});
+
+test("attached late flash progress, terminal text and success for A cannot alter B or release B mid-flash", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const a = lifecyclePort("A");
+  const b = lifecyclePort("B");
+  const { controller, serial, dom } = await attachedLifecycle(t, [a, b]);
+  await controller.connect();
+  a.writeWait = pendingNative();
+  a.writeEntered = pendingNative();
+  const flashing = controller.install();
+  await a.writeEntered.promise;
+  serial.choice = b;
+  await assert.rejects(releaseSelectedSerialPort(serial, { controller }), { name: "InvalidStateError" });
+  assert.equal(b.forgets, 0);
+  const disconnecting = controller.disconnect();
+  await drainNativeTasks();
+  t.mock.timers.tick(2000);
+  await disconnecting;
+  await flashing;
+  await controller.connect();
+  const before = lifecycleUi(dom);
+  a.writeWait.resolve();
+  await drainNativeTasks();
+  assert.equal(a.readable, null);
+  assert.equal(controller.getSelectedPort(), b);
+  assert.equal(lifecycleUi(dom), before);
+  assert.equal(dom.root.dataset.finished, "false");
+});
+
+test("attached delayed reset of A cannot signal B or publish a stale success", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const a = lifecyclePort("A");
+  const b = lifecyclePort("B");
+  const { controller, serial, dom } = await attachedLifecycle(t, [a, b]);
+  await controller.connect();
+  a.signalWait = pendingNative();
+  a.signalEntered = pendingNative();
+  const resetting = controller.resetDevice();
+  await a.signalEntered.promise;
+  const disconnecting = controller.disconnect();
+  await drainNativeTasks();
+  t.mock.timers.tick(2000);
+  await disconnecting;
+  await resetting;
+  serial.choice = b;
+  await controller.connect();
+  const before = lifecycleUi(dom);
+  a.signalWait.resolve();
+  await drainNativeTasks();
+  assert.equal(a.signals.length, 1, "cancellation must prevent the next reset signal");
+  assert.equal(b.signals.length, 0);
+  assert.equal(a.readable, null);
+  assert.equal(lifecycleUi(dom), before);
+});
+
+test("attached stale monitor reader A cannot append into B's monitor output", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const a = lifecyclePort("A");
+  const b = lifecyclePort("B");
+  const { controller, serial, dom } = await attachedLifecycle(t, [a, b]);
+  await controller.connect();
+  const reading = pendingNative();
+  a.readerSource = {
+    locked: false,
+    getReader() {
+      this.locked = true;
+      return {
+        read: () => reading.promise,
+        async cancel() {},
+        releaseLock: () => { a.readerSource.locked = false; }
+      };
+    }
+  };
+  await finishSignalReset(t, controller.startMonitor());
+  const disconnecting = controller.disconnect();
+  await drainNativeTasks();
+  t.mock.timers.tick(2000);
+  await disconnecting;
+  assert.ok(serialPortLease(a));
+  serial.choice = b;
+  await controller.connect();
+  const before = lifecycleUi(dom);
+  reading.resolve({ value: new TextEncoder().encode("obsolete A output\n"), done: false });
+  await drainNativeTasks();
+  assert.equal(a.readable, null);
+  assert.equal(lifecycleUi(dom), before);
+});
+
+test("attached monitor A survives releasing unrelated closed B; reset stops monitor and the user can reopen it", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const a = lifecyclePort("A");
+  const b = lifecyclePort("B");
+  const { controller, serial, dom } = await attachedLifecycle(t, [a, b]);
+  await controller.connect();
+  await finishSignalReset(t, controller.startMonitor());
+  assert.equal(dom.element("serial-monitor-live").textContent, "Live");
+  assert.equal(dom.element("serial-monitor-button").attributes.get("aria-expanded"), "true");
+  assert.equal(dom.element("serial-monitor").attributes.get("aria-hidden"), "false");
+  assert.equal(dom.root.attributes.get("aria-busy"), "false");
+  serial.choice = b;
+  const forgotten = await releaseSelectedSerialPort(serial, { controller });
+  assert.equal(forgotten, b);
+  await controller.onPortReleased(forgotten);
+  assert.equal(controller.getSelectedPort(), a);
+  assert.equal(dom.element("serial-monitor-live").textContent, "Live");
+  assert.ok(serialPortLease(a));
+  await finishSignalReset(t, controller.resetDevice());
+  assert.match(dom.element("page-status").textContent, /serial monitor is stopped; reopen/);
+  assert.equal(dom.root.dataset.monitor, "closed");
+  assert.equal(dom.element("serial-monitor-button").attributes.get("aria-expanded"), "false");
+  assert.equal(dom.element("serial-monitor").attributes.get("aria-hidden"), "true");
+  assert.equal(a.readable, null);
+  await finishSignalReset(t, controller.startMonitor());
+  assert.equal(dom.element("serial-monitor-live").textContent, "Live");
+  await controller.stopMonitor();
+  await controller.install();
+  assert.equal(dom.root.dataset.finished, "true");
+  assert.equal(a.writes, 1);
+  assert.equal(a.readable, null);
+  const chooserBeforeRelease = serial.chooserCalls;
+  assert.equal(await releaseSelectedSerialPort(serial, { controller }), a);
+  assert.equal(serial.chooserCalls, chooserBeforeRelease, "the selected idle closed grant is preferred");
+  await controller.onPortReleased(a);
+  assert.equal(controller.getSelectedPort(), null);
+  assert.equal(dom.root.dataset.connected, "false");
 });

@@ -3,9 +3,11 @@ import test from "node:test";
 
 import {
   attachSerialPortRelease,
+  acquireSerialPortLease,
   grantedSerialPorts,
   releaseFeedback,
   releaseSelectedSerialPort,
+  releaseSerialPortLease,
   supportsSerialForget
 } from "../docs/serial-port-release.mjs";
 
@@ -64,8 +66,8 @@ test("a single granted closed port is released without opening the chooser", asy
     async requestPort() { calls.push("request"); }
   };
 
-  await releaseSelectedSerialPort(serial);
-  assert.deepEqual(calls, ["get", "forget"]);
+  assert.equal(await releaseSelectedSerialPort(serial), port);
+  assert.deepEqual(calls, ["get", "get", "forget"]);
 });
 
 test("the chooser disambiguates multiple previously granted ports", async () => {
@@ -232,5 +234,155 @@ test("the UI stays available when another granted port remains", async () => {
   await button.listeners.get("click")();
 
   assert.deepEqual(grantedPorts, [second]);
+  assert.equal(container.hidden, false);
+});
+
+function deferredRelease() {
+  let resolve;
+  const promise = new Promise((accept) => { resolve = accept; });
+  return { promise, resolve };
+}
+
+function closedGrant(name) {
+  return { name, readable: null, writable: null, forgotten: 0, async forget() { this.forgotten++; } };
+}
+
+test("an unknown chooser port is rejected even if the chooser just granted it", async () => {
+  const a = closedGrant("A");
+  const b = closedGrant("B");
+  const c = closedGrant("C");
+  let ports = [a, b];
+  const serial = {
+    async getPorts() { return ports; },
+    async requestPort() { ports = [a, b, c]; return c; }
+  };
+  await assert.rejects(releaseSelectedSerialPort(serial), (error) =>
+    error.name === "PermissionMismatchError" && /not already permitted/.test(error.message));
+  assert.equal(c.forgotten, 0);
+  assert.deepEqual(ports, [a, b, c], "a newly granted permission must not be silently undone or called released");
+});
+
+test("a chooser port must still be granted and closed at the leased final check", async () => {
+  for (const changed of ["revoked", "opened"]) {
+    const a = closedGrant("A");
+    const b = closedGrant("B");
+    let queries = 0;
+    const serial = {
+      async getPorts() {
+        if (++queries === 1) return [a, b];
+        if (changed === "opened") { b.readable = {}; return [a, b]; }
+        return [a];
+      },
+      async requestPort() { return b; }
+    };
+    await assert.rejects(releaseSelectedSerialPort(serial), {
+      name: changed === "revoked" ? "PermissionMismatchError" : "InvalidStateError"
+    });
+    assert.equal(b.forgotten, 0);
+  }
+});
+
+test("a closed port with unresolved ownership cannot be forgotten", async (t) => {
+  const port = closedGrant("A");
+  const lease = acquireSerialPortLease(port, "probe");
+  t.after(() => releaseSerialPortLease(lease));
+  const serial = { async getPorts() { return [port]; }, async requestPort() { return port; } };
+  await assert.rejects(releaseSelectedSerialPort(serial), { name: "InvalidStateError" });
+  assert.equal(port.forgotten, 0);
+});
+
+test("the selected idle closed grant is preferred over the multi-port chooser", async () => {
+  const a = closedGrant("A");
+  const b = closedGrant("B");
+  const serial = {
+    async getPorts() { return [a, b]; },
+    async requestPort() { throw new Error("the chooser must not open for selected idle B"); }
+  };
+  const controller = { getSelectedPort: () => b, isReleaseBlocked: () => false };
+  assert.equal(await releaseSelectedSerialPort(serial, { controller }), b);
+  assert.equal(a.forgotten, 0);
+  assert.equal(b.forgotten, 1);
+});
+
+test("release owns the native port before the fresh grant query and prevents reentrant claims", async () => {
+  const port = closedGrant("A");
+  const fresh = deferredRelease();
+  const freshEntered = deferredRelease();
+  let queries = 0;
+  const serial = {
+    getPorts() {
+      if (++queries === 1) return Promise.resolve([port]);
+      freshEntered.resolve();
+      return fresh.promise;
+    },
+    async requestPort() { return port; }
+  };
+  const releasing = releaseSelectedSerialPort(serial);
+  await freshEntered.promise;
+  assert.throws(() => acquireSerialPortLease(port, "monitor"), { name: "InvalidStateError" });
+  await assert.rejects(releaseSelectedSerialPort(serial), { name: "InvalidStateError" });
+  fresh.resolve([port]);
+  assert.equal(await releasing, port);
+  assert.equal(port.forgotten, 1);
+});
+
+test("double clicks keep one release in flight and deliver the exact forgotten port", async () => {
+  const port = closedGrant("A");
+  const forgetting = deferredRelease();
+  const forgetEntered = deferredRelease();
+  let granted = true;
+  port.forget = async () => {
+    port.forgotten++;
+    forgetEntered.resolve();
+    await forgetting.promise;
+    granted = false;
+  };
+  const serial = { async getPorts() { return granted ? [port] : []; }, async requestPort() { return port; } };
+  const button = fakeButton();
+  const container = { hidden: true };
+  const status = { hidden: true, dataset: {}, textContent: "" };
+  let released;
+  await attachSerialPortRelease({
+    serial, SerialPortCtor: ForgetCapablePort, container, button, status, refreshTarget: null,
+    onReleased: (value) => { released = value; }
+  });
+  const first = button.listeners.get("click")();
+  await forgetEntered.promise;
+  await button.listeners.get("click")();
+  assert.equal(button.disabled, true);
+  assert.equal(button.attributes.get("aria-busy"), "true");
+  assert.equal(port.forgotten, 1);
+  forgetting.resolve();
+  await first;
+  assert.equal(released, port);
+  assert.equal(button.attributes.has("aria-busy"), false);
+  assert.equal(status.dataset.kind, "success");
+});
+
+test("an older focus refresh cannot overwrite the latest grant visibility", async () => {
+  const port = closedGrant("A");
+  const older = deferredRelease();
+  const latest = deferredRelease();
+  let queries = 0;
+  const serial = {
+    getPorts() {
+      queries++;
+      return queries === 1 ? Promise.resolve([port]) : queries === 2 ? older.promise : latest.promise;
+    },
+    async requestPort() { return port; }
+  };
+  const listeners = new Map();
+  const container = { hidden: true };
+  await attachSerialPortRelease({
+    serial, SerialPortCtor: ForgetCapablePort, container, button: fakeButton(),
+    status: { hidden: true, dataset: {}, textContent: "" },
+    refreshTarget: { addEventListener(name, handler) { listeners.set(name, handler); } }
+  });
+  const oldRefresh = listeners.get("focus")();
+  const newRefresh = listeners.get("focus")();
+  latest.resolve([port]);
+  await newRefresh;
+  older.resolve([]);
+  await oldRefresh;
   assert.equal(container.hidden, false);
 });
