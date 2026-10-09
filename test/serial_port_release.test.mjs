@@ -8,6 +8,7 @@ import {
   releaseFeedback,
   releaseSelectedSerialPort,
   releaseSerialPortLease,
+  serialPortLease,
   supportsSerialForget
 } from "../docs/serial-port-release.mjs";
 
@@ -291,17 +292,19 @@ test("a closed port with unresolved ownership cannot be forgotten", async (t) =>
   assert.equal(port.forgotten, 0);
 });
 
-test("the selected idle closed grant is preferred over the multi-port chooser", async () => {
+test("multiple grants always use the chooser even when the installer has a selected idle port", async () => {
   const a = closedGrant("A");
   const b = closedGrant("B");
+  let chooserCalls = 0;
   const serial = {
     async getPorts() { return [a, b]; },
-    async requestPort() { throw new Error("the chooser must not open for selected idle B"); }
+    async requestPort() { chooserCalls++; return a; }
   };
   const controller = { getSelectedPort: () => b, isReleaseBlocked: () => false };
-  assert.equal(await releaseSelectedSerialPort(serial, { controller }), b);
-  assert.equal(a.forgotten, 0);
-  assert.equal(b.forgotten, 1);
+  assert.equal(await releaseSelectedSerialPort(serial, { controller }), a);
+  assert.equal(chooserCalls, 1);
+  assert.equal(a.forgotten, 1);
+  assert.equal(b.forgotten, 0);
 });
 
 test("release owns the native port before the fresh grant query and prevents reentrant claims", async () => {
@@ -385,4 +388,175 @@ test("an older focus refresh cannot overwrite the latest grant visibility", asyn
   older.resolve([]);
   await oldRefresh;
   assert.equal(container.hidden, false);
+});
+
+async function drainPermissionTasks() {
+  for (let turn = 0; turn < 60; turn++) await Promise.resolve();
+}
+
+test("a timed-out initial native grant query keeps the release request until true settlement", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const port = closedGrant("A");
+  const query = deferredRelease();
+  let queries = 0;
+  const serial = {
+    getPorts() { return ++queries === 1 ? query.promise : Promise.resolve([port]); },
+    async requestPort() { throw new Error("one grant must not open the chooser"); }
+  };
+  const foreground = assert.rejects(releaseSelectedSerialPort(serial), { name: "SerialPermissionTimeoutError" });
+  await drainPermissionTasks();
+  t.mock.timers.tick(10000);
+  await foreground;
+  await assert.rejects(releaseSelectedSerialPort(serial), { name: "InvalidStateError" });
+  assert.equal(queries, 1);
+  query.resolve([port]);
+  await drainPermissionTasks();
+  assert.equal(port.forgotten, 0, "late grants cannot resume an expired release transaction");
+  assert.equal(await releaseSelectedSerialPort(serial), port);
+  assert.equal(port.forgotten, 1);
+});
+
+test("a timed-out final grant query keeps its port lease and never forgets after late validation", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const port = closedGrant("A");
+  const fresh = deferredRelease();
+  const entered = deferredRelease();
+  let queries = 0;
+  const serial = {
+    getPorts() {
+      if (++queries === 2) { entered.resolve(); return fresh.promise; }
+      return Promise.resolve([port]);
+    },
+    async requestPort() { return port; }
+  };
+  const foreground = assert.rejects(releaseSelectedSerialPort(serial), { name: "SerialPermissionTimeoutError" });
+  await entered.promise;
+  t.mock.timers.tick(10000);
+  await foreground;
+  assert.equal(serialPortLease(port).kind, "release");
+  assert.throws(() => acquireSerialPortLease(port, "probe"), { name: "InvalidStateError" });
+  fresh.resolve([port]);
+  await drainPermissionTasks();
+  assert.equal(serialPortLease(port), undefined);
+  assert.equal(port.forgotten, 0);
+});
+
+test("the interactive native chooser has no arbitrary operation deadline", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const a = closedGrant("A");
+  const b = closedGrant("B");
+  const choosing = deferredRelease();
+  const entered = deferredRelease();
+  const serial = {
+    async getPorts() { return [a, b]; },
+    requestPort() { entered.resolve(); return choosing.promise; }
+  };
+  let completed = false;
+  const foreground = releaseSelectedSerialPort(serial).then((port) => { completed = true; return port; });
+  await entered.promise;
+  t.mock.timers.tick(60000);
+  await drainPermissionTasks();
+  assert.equal(completed, false);
+  assert.equal(a.forgotten + b.forgotten, 0);
+  choosing.resolve(b);
+  assert.equal(await foreground, b);
+});
+
+test("an initial visibility query has a bounded truthful failure instead of hanging attachment", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const query = deferredRelease();
+  const container = { hidden: true };
+  const button = fakeButton();
+  const status = { hidden: true, dataset: {}, textContent: "" };
+  const serial = { getPorts() { return query.promise; }, async requestPort() {} };
+  const attaching = attachSerialPortRelease({
+    serial, SerialPortCtor: ForgetCapablePort, container, button, status, refreshTarget: null
+  });
+  await drainPermissionTasks();
+  t.mock.timers.tick(10000);
+  assert.equal(await attaching, true);
+  assert.equal(container.hidden, false, "a failed query cannot prove that no permission exists");
+  assert.equal(status.dataset.kind, "error");
+  assert.match(status.textContent, /permissions could not be refreshed:.*timed out/);
+  query.resolve([]);
+  await drainPermissionTasks();
+  assert.equal(container.hidden, false, "an expired native query must not overwrite its foreground result");
+});
+
+test("forget timeout keeps native ownership and never invokes a late success callback", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const a = closedGrant("A");
+  const b = closedGrant("B");
+  const forgetting = deferredRelease();
+  const entered = deferredRelease();
+  let grants = [a, b];
+  a.forget = async () => {
+    a.forgotten++;
+    entered.resolve();
+    await forgetting.promise;
+    grants = [b];
+  };
+  const serial = { async getPorts() { return grants; }, async requestPort() { return a; } };
+  const button = fakeButton();
+  const status = { hidden: true, dataset: {}, textContent: "" };
+  let callbacks = 0;
+  await attachSerialPortRelease({
+    serial, SerialPortCtor: ForgetCapablePort, container: { hidden: true }, button, status,
+    refreshTarget: null, onReleased() { callbacks++; }
+  });
+  const foreground = button.listeners.get("click")();
+  await entered.promise;
+  t.mock.timers.tick(10000);
+  await foreground;
+  assert.match(status.textContent, /Removing.*timed out.*no release is confirmed/);
+  assert.equal(callbacks, 0);
+  assert.equal(serialPortLease(a).kind, "release");
+  assert.equal(button.disabled, true);
+  assert.equal(button.attributes.get("aria-busy"), "true");
+  await button.listeners.get("click")();
+  assert.equal(a.forgotten, 1);
+  const message = status.textContent;
+  forgetting.resolve();
+  await drainPermissionTasks();
+  assert.equal(serialPortLease(a), undefined);
+  assert.equal(button.attributes.has("aria-busy"), false);
+  assert.equal(callbacks, 0);
+  assert.equal(status.textContent, message);
+});
+
+test("final visibility refresh is bounded after a confirmed release and ignores its late snapshot", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const port = closedGrant("A");
+  const refresh = deferredRelease();
+  const entered = deferredRelease();
+  let queries = 0;
+  const serial = {
+    getPorts() {
+      if (++queries === 4) { entered.resolve(); return refresh.promise; }
+      return Promise.resolve([port]);
+    },
+    async requestPort() { return port; }
+  };
+  const button = fakeButton();
+  const container = { hidden: true };
+  const status = { hidden: true, dataset: {}, textContent: "" };
+  let callback;
+  await attachSerialPortRelease({
+    serial, SerialPortCtor: ForgetCapablePort, container, button, status, refreshTarget: null,
+    onReleased(value) { callback = value; }
+  });
+  const foreground = button.listeners.get("click")();
+  await entered.promise;
+  assert.equal(callback, port);
+  assert.equal(port.forgotten, 1);
+  assert.equal(serialPortLease(port), undefined);
+  t.mock.timers.tick(10000);
+  await foreground;
+  assert.match(status.textContent, /Serial port was released, but.*could not be refreshed:.*timed out/);
+  assert.equal(button.attributes.has("aria-busy"), false);
+  const message = status.textContent;
+  refresh.resolve([]);
+  await drainPermissionTasks();
+  assert.equal(container.hidden, false);
+  assert.equal(status.textContent, message);
 });

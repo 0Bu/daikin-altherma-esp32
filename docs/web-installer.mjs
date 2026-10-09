@@ -110,12 +110,20 @@ async function settleTransport(port, transport, loader, resetMode) {
   return { closed, error };
 }
 
-function cleanupFailure(error, limitation) {
-  const failure = error || errorWithName("SerialCleanupError", "Serial cleanup failed.");
-  if (!failure.cleanupError) {
-    failure.cleanupError = limitation;
-    failure.message += ` ${errorMessage(limitation)} The port stays reserved until its native operation and cleanup settle; if cleanup failed, reconnect the device and reload this page.`;
-  }
+function cleanupFailure(error, limitation, port) {
+  const primary = error || errorWithName("SerialCleanupError", "Serial cleanup failed.");
+  const lease = serialPortLease(port);
+  const reservation = lease
+    ? lease.phase === "quarantined"
+      ? "The port remains reserved because closure was not confirmed. Reconnect the device and reload this page."
+      : "The port stays reserved until its native operation and cleanup settle."
+    : "The serial port is closed; no reservation is held.";
+  // DOMException.message is read-only, and a primary Error may be frozen. Compose without
+  // changing it; the cause retains the original name, message and any earlier cause chain.
+  const details = primary === limitation ? errorMessage(primary) : `${errorMessage(primary)} ${errorMessage(limitation)}`;
+  const failure = new Error(`${details} ${reservation}`, { cause: primary });
+  failure.name = primary.name || "SerialCleanupError";
+  failure.cleanupError = limitation;
   return failure;
 }
 
@@ -168,7 +176,7 @@ async function awaitPortOperation(state, timeoutMs, timeoutError, cleanupTimeout
       outcome = await withTimeout(Promise.race([state.bodyOutcome, state.cancellation]), timeoutMs, timeoutError);
     } catch (error) {
       state.cancel(error);
-      if (!state.bodyFinished) throw cleanupFailure(error, new Error("The native serial operation is still pending."));
+      if (!state.bodyFinished) throw cleanupFailure(error, new Error("The native serial operation is still pending."), state.port);
       outcome = { error };
     }
     let completed;
@@ -177,9 +185,9 @@ async function awaitPortOperation(state, timeoutMs, timeoutError, cleanupTimeout
         errorWithName("SerialCleanupTimeoutError", "Serial cleanup timed out."));
     } catch (error) {
       state.cancel(error);
-      throw cleanupFailure(outcome.error || error, new Error("Native serial cleanup is still pending."));
+      throw cleanupFailure(outcome.error || error, new Error("Native serial cleanup is still pending."), state.port);
     }
-    if (completed.cleanupError) throw cleanupFailure(outcome.error || completed.error, completed.cleanupError);
+    if (completed.cleanupError) throw cleanupFailure(outcome.error || completed.error, completed.cleanupError, state.port);
     if (outcome.error || completed.error) throw outcome.error || completed.error;
     state.guard();
     return outcome.value;
@@ -802,8 +810,8 @@ export function attachWebInstaller({
     try {
       outcome = await withTimeout(operation.settled, TRANSPORT_CLEANUP_TIMEOUT_MS,
         errorWithName("SerialCleanupTimeoutError", "Serial monitor cleanup timed out."));
-    } catch (error) { throw cleanupFailure(error, new Error("Native monitor open, reset or cleanup is still pending.")); }
-    if (outcome.cleanupError) throw cleanupFailure(outcome.error, outcome.cleanupError);
+    } catch (error) { throw cleanupFailure(error, new Error("Native monitor open, reset or cleanup is still pending."), operation.port); }
+    if (outcome.cleanupError) throw cleanupFailure(outcome.error, outcome.cleanupError, operation.port);
     if (outcome.error && outcome.error.name !== "SerialOperationCancelledError") throw outcome.error;
     if (isCurrent(session)) {
       monitorLive.textContent = "Stopped";
@@ -828,7 +836,7 @@ export function attachWebInstaller({
       else if (session.operation) {
         const outcome = await withTimeout(session.operation.settled, TRANSPORT_CLEANUP_TIMEOUT_MS,
           errorWithName("SerialCleanupTimeoutError", "Serial cleanup is still pending."));
-        if (outcome.cleanupError) throw cleanupFailure(outcome.error, outcome.cleanupError);
+        if (outcome.cleanupError) throw cleanupFailure(outcome.error, outcome.cleanupError, session.port);
       }
     } catch (error) {
       if (!current && generation === disconnectGeneration) setPageStatus(`Disconnected; ${errorMessage(error)}`, "error");
@@ -896,12 +904,13 @@ export function attachWebInstaller({
     const readyMonitor = deferred();
     const stop = deferred();
     let reader;
+    let readerAttached = false;
     let loop;
     let cancelReader;
     let loopError;
     const cancelCapturedReader = () => {
-      if (reader && !cancelReader) {
-        cancelReader = Promise.resolve().then(() => reader.cancel());
+      if (readerAttached && !cancelReader) {
+        cancelReader = Promise.resolve().then(() => { if (readerAttached) return reader.cancel(); });
         cancelReader.catch(() => {});
       }
     };
@@ -914,6 +923,7 @@ export function attachWebInstaller({
         if (!isCurrent(session)) throw errorWithName("SerialOperationCancelledError", "Monitor selection changed.");
         if (!port.readable) throw new Error("The serial input stream is unavailable.");
         reader = port.readable.getReader();
+        readerAttached = true;
         const decoder = new TextDecoder();
         loop = (async () => {
           try {
@@ -926,7 +936,7 @@ export function attachWebInstaller({
             if (!owned.cancelled && isCurrent(session)) appendMonitor(decoder.decode(), { flush: true });
           } catch (error) { loopError = error; }
           finally {
-            try { reader.releaseLock(); } catch (_error) {}
+            try { reader.releaseLock(); readerAttached = false; } catch (error) { loopError ||= error; }
             stop.resolve();
           }
         })();
@@ -954,7 +964,7 @@ export function attachWebInstaller({
         readyMonitor.reject(outcome.error || outcome.cleanupError || new Error("The serial monitor stopped before it was ready."));
         if (!isCurrent(session) || session.monitor !== operation) return;
         collapseMonitor();
-        const error = outcome.cleanupError ? cleanupFailure(outcome.error, outcome.cleanupError) :
+        const error = outcome.cleanupError ? cleanupFailure(outcome.error, outcome.cleanupError, port) :
           outcome.error?.name !== "SerialOperationCancelledError" ? outcome.error : null;
         monitorLive.textContent = error ? "Error" : "Stopped";
         monitorLive.dataset.state = error ? "error" : "stopped";
@@ -977,14 +987,13 @@ export function attachWebInstaller({
       appendStatusLine("Serial monitor started at 115200 baud");
     } catch (error) {
       operation?.cancel(error);
-      if (operation && !operation.bodyFinished) {
-        cleanupFailure(error, new Error("Native monitor open or reset is still pending."));
-      }
+      const reported = operation && !operation.bodyFinished
+        ? cleanupFailure(error, new Error("Native monitor open or reset is still pending."), port) : error;
       if (isCurrent(session)) {
         collapseMonitor();
         monitorLive.textContent = "Error";
         monitorLive.dataset.state = "error";
-        setPageStatus(`Could not open serial monitor: ${errorMessage(error)}`, "error");
+        setPageStatus(`Could not open serial monitor: ${errorMessage(reported)}`, "error");
       }
     } finally {
       if (operation) operation.foreground = false;

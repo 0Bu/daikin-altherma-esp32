@@ -742,19 +742,29 @@ test("a post-write reset failure is preserved while cleanup still disconnects", 
   const offer = await fixture.load();
   const fake = fakeEsptool();
   const resetError = new Error("reset failed");
+  const port = { getInfo() { return { usbVendorId: 0x303a, usbProductId: 0x1001 }; } };
   fake.Loader.prototype.after = async function after(mode) {
     fake.calls.push(`reset:${mode}`);
     throw resetError;
   };
 
   await assert.rejects(flashDevice({
-    port: { getInfo() { return { usbVendorId: 0x303a, usbProductId: 0x1001 }; } },
+    port,
     offer,
     eraseFirst: false,
     TransportCtor: fake.Transport,
     ESPLoaderCtor: fake.Loader,
     fetchImpl: fixture.fetch
-  }), (error) => error === resetError);
+  }), (error) => {
+    assert.notEqual(error, resetError);
+    assert.equal(error.cause, resetError);
+    assert.equal(error.cleanupError, resetError);
+    assert.match(error.message, /reset failed.*serial port is closed/);
+    assert.doesNotMatch(error.message, /stays reserved|remains reserved/);
+    return true;
+  });
+  assert.equal(resetError.message, "reset failed");
+  assert.equal(serialPortLease(port), undefined);
 
   assert.deepEqual(fake.calls.slice(-4), [
     "write",
@@ -762,6 +772,42 @@ test("a post-write reset failure is preserved while cleanup still disconnects", 
     "reset:hard_reset",
     "disconnect"
   ]);
+});
+
+test("cleanup composition preserves DOMException and frozen primary errors without masking them", async (t) => {
+  const underlying = new Error("original lower-level cause");
+  for (const primary of [
+    new DOMException("native write denied", "OperationError"),
+    Object.freeze(new Error("frozen native write failed", { cause: underlying }))
+  ]) {
+    await t.test(primary.name, async () => {
+      const fixture = firmwareFixture();
+      const offer = await fixture.load();
+      const fake = fakeEsptool();
+      const originalMessage = primary.message;
+      const originalCause = primary.cause;
+      const closing = new DOMException("native close denied", "NetworkError");
+      fake.Loader.prototype.writeFlash = async () => { throw primary; };
+      fake.Transport.prototype.disconnect = async () => { throw closing; };
+      const port = { getInfo() { return {}; } };
+      await assert.rejects(flashDevice({
+        port, offer, eraseFirst: false, TransportCtor: fake.Transport, ESPLoaderCtor: fake.Loader,
+        fetchImpl: fixture.fetch
+      }), (error) => {
+        assert.notEqual(error, primary);
+        assert.equal(error.name, primary.name);
+        assert.equal(error.cause, primary);
+        assert.equal(error.cleanupError, closing);
+        assert.ok(error.message.includes(originalMessage));
+        assert.match(error.message, /native close denied.*remains reserved/);
+        return true;
+      });
+      assert.equal(primary.message, originalMessage);
+      assert.equal(primary.cause, originalCause);
+      assert.equal(primary.cleanupError, undefined);
+      assert.equal(serialPortLease(port).phase, "quarantined");
+    });
+  }
 });
 
 test("serial monitor resets into user firmware with IO0 high before reading logs", async () => {
@@ -1069,6 +1115,62 @@ test("attached reset cannot report success when native close resolves without cl
   assert.equal(dom.element("page-status").dataset.kind, "error");
 });
 
+test("attached failed firmware reset reports failure with confirmed closure and no reservation", async (t) => {
+  const a = lifecyclePort("A");
+  const { controller, dom, fake } = await attachedLifecycle(t, [a]);
+  await controller.connect();
+  const primary = new DOMException("firmware reset was rejected", "NotSupportedError");
+  fake.Loader.prototype.after = async () => { throw primary; };
+  await controller.install();
+  assert.equal(a.writes, 1);
+  assert.equal(a.readable, null);
+  assert.equal(serialPortLease(a), undefined);
+  assert.equal(primary.message, "firmware reset was rejected");
+  assert.match(dom.element("page-status").textContent, /Installation failed:.*firmware reset was rejected.*serial port is closed/);
+  assert.doesNotMatch(dom.element("page-status").textContent, /stays reserved|remains reserved|TypeError/);
+  assert.equal(dom.root.dataset.finished, "false");
+});
+
+test("attached natural monitor EOF releases its real reader and closes without a spurious cancellation error", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const a = lifecyclePort("A");
+  const { controller, dom } = await attachedLifecycle(t, [a]);
+  await controller.connect();
+  await finishSignalReset(t, controller.startMonitor());
+  const nativeStream = a.readable;
+  a.readController.enqueue(new TextEncoder().encode("normal completed log"));
+  a.readController.close();
+  await drainNativeTasks();
+  assert.equal(nativeStream.locked, false);
+  assert.equal(a.readable, null);
+  assert.equal(serialPortLease(a), undefined);
+  assert.equal(a.closes, 2);
+  assert.equal(dom.element("serial-monitor-live").textContent, "Stopped");
+  assert.notEqual(dom.element("page-status").dataset.kind, "error");
+  assert.match(dom.element("serial-monitor-output").textContent, /normal completed log/);
+  assert.doesNotMatch(dom.element("page-status").textContent, /TypeError|cleanup failed/);
+});
+
+test("attached natural monitor read error keeps the native error and still confirms closure", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const a = lifecyclePort("A");
+  const { controller, dom } = await attachedLifecycle(t, [a]);
+  await controller.connect();
+  await finishSignalReset(t, controller.startMonitor());
+  const nativeStream = a.readable;
+  const primary = new DOMException("native serial read lost", "NetworkError");
+  a.readController.error(primary);
+  await drainNativeTasks();
+  assert.equal(nativeStream.locked, false);
+  assert.equal(a.readable, null);
+  assert.equal(serialPortLease(a), undefined);
+  assert.equal(primary.message, "native serial read lost");
+  assert.equal(dom.element("serial-monitor-live").textContent, "Error");
+  assert.equal(dom.element("page-status").dataset.kind, "error");
+  assert.match(dom.element("page-status").textContent, /Serial monitor stopped: native serial read lost/);
+  assert.doesNotMatch(dom.element("page-status").textContent, /TypeError|stays reserved|remains reserved/);
+});
+
 test("attached repeated monitor stop is bounded while native reader cancellation remains owned", async (t) => {
   t.mock.timers.enable({ apis: ["setTimeout"] });
   const a = lifecyclePort("A");
@@ -1255,7 +1357,7 @@ test("attached monitor A survives releasing unrelated closed B; reset stops moni
   assert.equal(a.readable, null);
   const chooserBeforeRelease = serial.chooserCalls;
   assert.equal(await releaseSelectedSerialPort(serial, { controller }), a);
-  assert.equal(serial.chooserCalls, chooserBeforeRelease, "the selected idle closed grant is preferred");
+  assert.equal(serial.chooserCalls, chooserBeforeRelease, "the single remaining grant is released directly");
   await controller.onPortReleased(a);
   assert.equal(controller.getSelectedPort(), null);
   assert.equal(dom.root.dataset.connected, "false");
