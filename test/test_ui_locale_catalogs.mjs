@@ -123,6 +123,27 @@ for (const [count, cycle, start, gap] of [
 // observation. Pin the surfaces that render abort, paired, cooling and unclassified populations.
 assert.match(catalog.de["check.detail.dhw_blocked_link"](1, 20), /der einzige Kandidat wurde/);
 assert.match(catalog.de["check.detail.dhw_blocked_link"](2, 20), /alle 2 Kandidaten wurden/);
+// Structural markers only, not meaning: every locale's blind list item carries no parentheses (it
+// is inserted into an already parenthesised list), and every verdict names X10A and RX/TX. The
+// cause-neutral MEANING ("blind" is unobserved time from the X10A link or the board's own pauses;
+// the unread input is the readings the check needs) is pinned for EN and DE in test_ui_checkup.mjs
+// and for ZH, JA and CS below; the other locales rely on human review of each translation and on
+// the translation-source marker, which goes stale when the English source changes.
+for (const code of codes) {
+  const label = catalog[code]["check.detail.dhw_reason.blind"];
+  assert.doesNotMatch(label, /[()（）]/, `${code} blind reason label must not nest parentheses`);
+  const verdict = catalog[code]["check.detail.dhw_blocked_link"](2, 20);
+  assert.match(verdict, /X10A/, `${code} blind verdict must name the X10A link`);
+  assert.match(verdict, /RX\/TX/, `${code} blind verdict must keep the conditional wiring step`);
+}
+// ZH once said the tank "has no problem", a reassurance a NOT AVAILABLE result cannot give; it must
+// stay as neutral as the English "says nothing about the tank". JA uses one term for "paused" in
+// both the list item and the verdict. CS keeps the persistence of "keeps happening".
+assert.match(catalog.zh["check.detail.dhw_blocked_link"](2, 20), /这无法说明水箱的任何情况/);
+assert.doesNotMatch(catalog.zh["check.detail.dhw_blocked_link"](2, 20), /有问题|没有问题|正常/);
+assert.match(catalog.ja["check.detail.dhw_reason.blind"], /一時停止/);
+assert.match(catalog.ja["check.detail.dhw_blocked_link"](2, 20), /一時停止/);
+assert.match(catalog.cs["check.detail.dhw_blocked_link"](2, 20), /Pokud se to opakuje/);
 assert.equal(catalog.de["check.paired_cycles"](1), "1 zugeordnet");
 assert.match(catalog.es["check.detail.dhw_blocked"](1, "x", 20), /se descartó 1 ventana/);
 assert.match(catalog.es["check.detail.dhw_blocked"](2, "x", 20), /se descartaron 2 ventanas/);
@@ -435,8 +456,8 @@ try {
 } finally {
   fs.rmSync(work, { recursive: true, force: true });
 }
-assert.ok(localeGzipTotal <= 279552,
-  `locale assets use ${localeGzipTotal} bytes and exceed the 273 KiB aggregate-growth guard`);
+assert.ok(localeGzipTotal <= 280576,
+  `locale assets use ${localeGzipTotal} bytes and exceed the 274 KiB aggregate-growth guard`);
 
 const cmake = fs.readFileSync(path.join(root, "main/CMakeLists.txt"), "utf8");
 const status = fs.readFileSync(path.join(root, "main/http_status.cpp"), "utf8");

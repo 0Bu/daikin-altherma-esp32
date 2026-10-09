@@ -1,4 +1,4 @@
-// translation-source: 1369786d303329f6e5230c06537e985a4c7735be65bcff1dc17670a9530129f9
+// translation-source: 856c2ce7d1e297c3bcf8a20a2f1b4c8079ed68a2890bb1d0729997a0bd963c19
 I18N.zh = localeValues([
   /* sys.nodata */ "无数据",
   /* sys.unreachable */ "无法访问",
@@ -197,12 +197,12 @@ I18N.zh = localeValues([
   /* check.detail.dhw_waiting */ (n, r) => `已完成 ${n}/${r} 个干净的一小时时段；尚无完整的一小时干净时段。`,
   /* check.detail.dhw_aborted */ (n, reasons, best) => ` 已丢弃 ${n} 个候选时段（${reasons}）；最长达到 ${best}/60 分钟。`,
   /* check.detail.dhw_blocked */ (n, reasons, best) => `此方法无法评估：完整 24 小时内没有完成一个干净的一小时时段，且丢弃了 ${n} 个候选时段（${reasons}）；最长达到 ${best}/60 分钟。水箱加热后需连续 105 分钟不受干扰（稳定 45 分钟 + 测量 60 分钟）；取水、泵运行、读数不可用或快到像取水的持续热损失都可能中断时段。保存的汇总无法确定主因，因此不能排除快速持续热损失。`,
-  /* check.detail.dhw_blocked_link */ (n, best) => `无法评估：完整 24 小时内没有完成一个干净的一小时时段，且因 X10A 在时段内停止响应而丢弃了 ${n} 个候选时段；最长达到 ${best}/60 分钟。问题在连接而非设备，请检查 X10A 接线和 RX/TX 引脚。`,
+  /* check.detail.dhw_blocked_link */ (n, best) => `无法评估：完整 24 小时内没有完成一个干净的一小时时段，且全部 ${n} 个候选时段都因该检查所需的读数长时间未被读取而被丢弃（X10A 连接无响应，或控制板暂停了轮询：固件更新、天气下载或其他网络传输、重启、型号检测）；最长达到 ${best}/60 分钟。这无法说明水箱的任何情况。若日复一日反复出现，请检查 X10A 接线和 RX/TX 引脚。`,
   /* check.detail.dhw_reason.charge */ "水箱加热",
   /* check.detail.dhw_reason.pump */ "内部水泵",
   /* check.detail.dhw_reason.draw */ "类似取水的降温",
   /* check.detail.dhw_reason.reading */ "R5T 读数不可信",
-  /* check.detail.dhw_reason.blind */ "X10A 无响应",
+  /* check.detail.dhw_reason.blind */ "读数缺失：X10A 无响应或轮询暂停",
   /* check.detail.collecting_unknown */ "尚无足够可用数据进行评估。",
   /* check.detail.observation */ "仅为测量值；没有通用的正常/警告限值。",
   /* check.detail.experimental */ "实验性观察；计数器不变不能证明机组未发生限功率。",

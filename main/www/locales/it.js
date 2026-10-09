@@ -1,4 +1,4 @@
-// translation-source: 1369786d303329f6e5230c06537e985a4c7735be65bcff1dc17670a9530129f9
+// translation-source: 856c2ce7d1e297c3bcf8a20a2f1b4c8079ed68a2890bb1d0729997a0bd963c19
 I18N.it = localeValues([
   /* sys.nodata */ "Nessun dato",
   /* sys.unreachable */ "Non raggiungibile",
@@ -197,12 +197,12 @@ I18N.it = localeValues([
   /* check.detail.dhw_waiting */ (n, r) => `${n} di ${r} completati in finestre pulite di un'ora; nessuna finestra pulita completa di un'ora.`,
   /* check.detail.dhw_aborted */ (n, reasons, best) => ` ${n} ${n === 1 ? "finestra candidata scartata" : "finestre candidate scartate"} (${reasons}); la più lunga ha raggiunto ${best} di 60 min.`,
   /* check.detail.dhw_blocked */ (n, reasons, best) => `Non valutabile con questo metodo: in 24 ore complete non si è conclusa alcuna finestra pulita di un'ora e ${n} ${n === 1 ? "finestra candidata è stata scartata" : "finestre candidate sono state scartate"} (${reasons}); la più lunga ha raggiunto ${best} di 60 min. La carica del serbatoio richiede 105 minuti indisturbati (45 min di assestamento più una finestra di 60 min); anche prelievi, attività della pompa, dati illeggibili o una perdita di calore continua abbastanza rapida da sembrare un prelievo possono impedire un'ora pulita. I totali memorizzati non mostrano quale causa abbia prevalso, quindi non si può escludere una rapida perdita di calore continua.`,
-  /* check.detail.dhw_blocked_link */ (n, best) => `Non valutabile: in 24 ore complete non si è conclusa alcuna finestra pulita di un'ora e ${n} ${n === 1 ? "finestra candidata è stata scartata" : "finestre candidate sono state tutte scartate"} perché il collegamento X10A ha smesso di rispondere durante la finestra; la più lunga ha raggiunto ${best} di 60 min. Il problema riguarda il collegamento, non l'impianto — controllare il cablaggio X10A e i pin RX/TX.`,
+  /* check.detail.dhw_blocked_link */ (n, best) => `Non valutabile: in 24 ore complete non si è conclusa alcuna finestra pulita di un'ora e ${n} ${n === 1 ? "finestra candidata è stata scartata" : "finestre candidate sono state tutte scartate"} perché le letture necessarie al controllo sono rimaste troppo a lungo senza essere lette — il collegamento X10A non rispondeva, oppure la scheda aveva messo in pausa l'interrogazione (aggiornamento firmware, download meteo o altro trasferimento di rete, riavvio, rilevamento del modello); la più lunga ha raggiunto ${best} di 60 min. Questo non dice nulla sul serbatoio. Se si ripete giorno dopo giorno, controllare il cablaggio X10A e i pin RX/TX.`,
   /* check.detail.dhw_reason.charge */ "carica del serbatoio",
   /* check.detail.dhw_reason.pump */ "pompa interna",
   /* check.detail.dhw_reason.draw */ "calo simile a un prelievo",
   /* check.detail.dhw_reason.reading */ "R5T non plausibile",
-  /* check.detail.dhw_reason.blind */ "X10A non risponde",
+  /* check.detail.dhw_reason.blind */ "letture mancanti: X10A senza risposta o interrogazione in pausa",
   /* check.detail.collecting_unknown */ "Non ci sono ancora dati utilizzabili sufficienti per una valutazione.",
   /* check.detail.observation */ "Solo valore misurato; non esiste un limite universale OK/AVVISO.",
   /* check.detail.experimental */ "Osservazione sperimentale; un contatore stabile non dimostra che non si sia verificata alcuna limitazione.",
