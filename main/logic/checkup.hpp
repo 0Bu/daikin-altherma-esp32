@@ -646,12 +646,14 @@ constexpr uint32_t DHW_LOSS_DRAW_WINDOW_S = 10 * 60;
 // justification, that a tank charge cannot start, run and finish inside 120 seconds. This is that
 // same claim used in the other direction, so the two cannot disagree about what a charge is.
 //
-// A SHORT witness is still a DISTURBANCE and still discards the candidate hour — the hydronics moved
-// and the tank is no longer standing. What it no longer does is assert that heat went in. The
-// asymmetry is deliberate and is the safe direction: the worst case of being wrong here is a
-// candidate hour that starts 45 minutes earlier than the old rule allowed, on a tank that received
-// at most ~120 s of charge — and the window measures a DROP (`drop_tenths` floors at 0), so a tank
-// still warming from it reports no loss at all rather than a false one.
+// A SHORT witness is still a DISTURBANCE and still discards the candidate hour — the hydronics
+// moved and the tank is no longer standing. What it no longer does is assert that heat went in. The
+// asymmetry is deliberate and is the safe direction for a witness the board watched throughout: the
+// worst case of being wrong here is a candidate hour that starts 45 minutes earlier than the old
+// rule allowed, on a tank that received at most ~120 s of charge — and the window measures a DROP
+// (`drop_tenths` floors at 0), so a tank still warming from it reports no loss at all rather than a
+// false one. A witness the board saw only IN PART is a different case with a known limit; see the
+// RUN-bound note at DHW_LOSS_BLIND_RUN_MAX_S.
 //
 // An unmeasured gap counts as proven: a witness seen across an interval nobody watched could have
 // been running for all of it, and that is the one direction in which guessing short would admit a
@@ -722,9 +724,21 @@ constexpr int      DHW_LOSS_HIGH_TENTHS_K_H = 8;         // project heuristic, n
 // honest — SUBTRACTED from the seconds the window claims to have observed.
 //
 // Both bounds exist to stop a window being assembled out of absence. The RUN bound is the load-
-// bearing one: a tank charge cannot start, run and finish inside it, so no unobserved stretch can
-// hide the event that arms the settle timer. The TOTAL is the same 90%-evidence shape the
-// circulation witness already uses.
+// bearing one: a tank charge cannot start, run and finish inside it, so no single unobserved
+// stretch WITHIN the bound can hide a whole charge from the witness. What no bound covers is a
+// charge the witness saw only IN PART. The settle arms only after DHW_LOSS_CHARGE_MIN_S of SEEN
+// witness, and it counts down from the last sample that saw the charge, also through unread
+// samples: dhw_loss_step's settle branch runs after the gap branch (a gap past CHECKUP_MAX_GAP_S
+// holds it) but before the unread-row blind branch. dhw_loss_adopt carries it unchanged across an
+// intentional restart whose handoff checkup_start accepts; anything that starts the check from a
+// fresh DhwLossState drops it — a panic, a power loss, a handoff rejected or no longer found (e.g.
+// an OTA that changes the layout or moves .noinit), or a reset of the check. So a charge seen for
+// less than that in total — e.g. one lying entirely inside a stretch PAST the bound — arms no
+// settle, one whose end falls inside an unread stretch has its settle shortened by the unread
+// samples, and a settle still running when the check starts afresh is lost. Each way the next
+// candidate can open on that charge's settling tail — a known limit stated in
+// docs/DIAGNOSTIC_EVIDENCE.md (dhw_loss, Not established). The TOTAL is the same 90%-evidence shape
+// the circulation witness already uses.
 constexpr uint32_t DHW_LOSS_BLIND_RUN_MAX_S = 120;
 constexpr uint32_t DHW_LOSS_BLIND_MAX_PCT   = 10;
 constexpr uint32_t DHW_LOSS_CIRC_KNOWN_PCT = 90;
@@ -819,11 +833,12 @@ inline uint32_t dhw_loss_adopt_blind_s(int64_t now_us) {
 
 // A carried candidate that the booked unobserved time pushes past the blind bounds ends here with
 // reset_segment(), not dhw_loss_abort(), and the adoption takes no bucket: that discard is left out
-// of the discarded-window count on purpose. The unobserved time is the restart allowance plus the
-// network start-up, a cause on the board's side, and as a DHW_ABORT_BLIND it would reach the UI as
-// "X10A not answering" and, when every discard carries it, as the link-only verdict "check the X10A
-// wiring" — a fault the evidence does not establish. The count therefore under-reports restarts
-// and never overclaims.
+// of the discarded-window count on purpose. The count stays a count of the discards dhw_loss_step
+// observed. The time this adoption books is the restart allowance plus the network start-up, a
+// board-side cause the blind reason cannot separate from a silent link (an unread stretch still
+// open at the restart can add to it); counting the discard would add a board-side entry whenever
+// a slow restart carries a candidate. The count therefore under-reports restarts and never
+// overclaims.
 inline void dhw_loss_adopt(DhwLossState& st, const DhwLossCarry& c, int64_t now_us) {
     st = DhwLossState{};
     st.last_us = now_us;

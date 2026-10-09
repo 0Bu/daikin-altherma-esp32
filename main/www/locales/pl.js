@@ -1,4 +1,4 @@
-// translation-source: 1369786d303329f6e5230c06537e985a4c7735be65bcff1dc17670a9530129f9
+// translation-source: 856c2ce7d1e297c3bcf8a20a2f1b4c8079ed68a2890bb1d0729997a0bd963c19
 const plNoun = (n, one, few, many) => {
   const value = Math.abs(Number(n)), mod10 = value % 10, mod100 = value % 100;
   return value === 1 ? one
@@ -202,12 +202,12 @@ I18N.pl = localeValues([
   /* check.detail.dhw_waiting */ (n, r) => `${n} z ${r} zakończono w czystych oknach godzinnych; nie ma jeszcze pełnego czystego okna godzinnego.`,
   /* check.detail.dhw_aborted */ (n, reasons, best) => ` ${n} ${plNoun(n, "odrzucone okno kandydujące", "odrzucone okna kandydujące", "odrzuconych okien kandydujących")} (${reasons}); najdłuższe osiągnęło ${best} z 60 min.`,
   /* check.detail.dhw_blocked */ (n, reasons, best) => `Brak możliwości oceny tą metodą: przez pełne 24 godziny nie zakończyło się ani jedno czyste okno godzinne, a odrzucono ${n} ${plNoun(n, "okno kandydujące", "okna kandydujące", "okien kandydujących")} (${reasons}); najdłuższe osiągnęło ${best} z 60 min. Ładowanie zbiornika wymaga 105 niezakłóconych minut (45 min stabilizacji i okno 60 min); pobór wody, praca pompy, nieczytelne dane lub ciągła strata ciepła na tyle szybka, że przypomina pobór, również mogą uniemożliwić czystą godzinę. Zapisane sumy nie wskazują dominującej przyczyny, więc nie można wykluczyć szybkiej ciągłej straty ciepła.`,
-  /* check.detail.dhw_blocked_link */ (n, best) => `Brak możliwości oceny: przez pełne 24 godziny nie zakończyło się ani jedno czyste okno godzinne, a odrzucono ${n === 1 ? "jedyne okno kandydujące" : `wszystkie ${n} ${plNoun(n, "okno kandydujące", "okna kandydujące", "okien kandydujących")}`}, ponieważ połączenie X10A przestało odpowiadać w trakcie okna; najdłuższe osiągnęło ${best} z 60 min. Problem dotyczy połączenia, nie instalacji — sprawdź okablowanie X10A i piny RX/TX.`,
+  /* check.detail.dhw_blocked_link */ (n, best) => `Brak możliwości oceny: przez pełne 24 godziny nie zakończyło się ani jedno czyste okno godzinne, a odrzucono ${n === 1 ? "jedyne okno kandydujące" : `wszystkie ${n} ${plNoun(n, "okno kandydujące", "okna kandydujące", "okien kandydujących")}`}, ponieważ dane potrzebne tej kontroli zbyt długo nie były odczytywane — połączenie X10A nie odpowiadało albo płytka wstrzymała odpytywanie (aktualizacja firmware, pobieranie pogody lub inny transfer sieciowy, ponowne uruchomienie, wykrywanie modelu); najdłuższe osiągnęło ${best} z 60 min. To nic nie mówi o zbiorniku. Jeśli powtarza się to dzień po dniu, sprawdź okablowanie X10A i piny RX/TX.`,
   /* check.detail.dhw_reason.charge */ "ładowanie zbiornika",
   /* check.detail.dhw_reason.pump */ "pompa wewnętrzna",
   /* check.detail.dhw_reason.draw */ "spadek podobny do poboru",
   /* check.detail.dhw_reason.reading */ "niewiarygodne R5T",
-  /* check.detail.dhw_reason.blind */ "X10A nie odpowiada",
+  /* check.detail.dhw_reason.blind */ "brak odczytów: X10A milczy lub odpytywanie wstrzymane",
   /* check.detail.collecting_unknown */ "Za mało użytecznych danych do oceny.",
   /* check.detail.observation */ "Tylko wartość zmierzona; nie istnieje uniwersalny limit OK/OSTRZEŻENIE.",
   /* check.detail.experimental */ "Obserwacja eksperymentalna; stabilny licznik nie dowodzi, że nie wystąpiło ograniczenie.",

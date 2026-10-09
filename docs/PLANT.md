@@ -124,13 +124,36 @@ bus that measured nothing discarded nothing — a candidate cannot even open wit
 so `collecting` stays the honest answer there. A finding always outranks it: a high window is
 evidence, and evidence is never withheld because the plant is also busy.
 
-The blocked verdict therefore has **one specific sentence and one deliberately non-causal one**.
-When `blind` is the only reason kind recorded, the card can name the X10A link and point at wiring
-and RX/TX pins: no plant-side reason occurred anywhere in the retained window. Every other mix says
-only what the stored totals establish. Charging, pump activity, draws, an implausible reading and a
-continuous loss fast enough to trip the draw filter can all prevent a clean hour; the ring cannot
-say which dominated. In particular it cannot claim "draw-dominant" or correlate circulation-off
-time with discarded candidates.
+The blocked verdict therefore has **one narrower sentence and one deliberately non-causal one**.
+When `blind` is the only reason kind recorded, no plant-side reason was recorded for a live
+candidate in the retained window. That is not proof that none occurred. Within the blind budget the
+candidate stays live, so a draw or charge hidden in a short unobserved stretch is still recorded
+when readings return. A stretch that exceeds the budget ends the candidate as a `blind` discard. A
+charge or pump run inside that stretch that is still under way when readings return meets no live
+candidate and is never recorded, because the next candidate opens only on the first clean reading
+(after any settle that charge arms). The part of a draw's drop that fell inside the stretch is lost
+because the draw anchor restarts at the first clean reading; a draw-sized drop that continues past
+it, or an event that starts after the new candidate has opened, is recorded against that candidate.
+The settle arms only after two minutes of charge witness the board has seen, and counts down from
+the last sample that saw the charge, also through unread samples. A gap past `CHECKUP_MAX_GAP_S`
+holds it, and so does an intentional restart whose handoff the next boot adopts; anything that
+starts the check afresh drops it (a panic, a power loss, a handoff the next boot rejects or no
+longer finds, for example after a firmware update that changes the stored layout or moves it in
+RAM, or a reset of the check). A charge seen for less than two minutes in total, such as one lying
+entirely inside the stretch, therefore arms no settle, a charge whose end fell inside an unread
+stretch has its settle shortened by the unread samples, and a settle still running when the check
+starts afresh is lost; each way the next candidate can open on the charge's settling tail. And `blind` itself only means unobserved time: the readings the check
+needs (the tank temperature, or the valve, heater and pump states, which sit on a different X10A
+page) went unread. That time comes from X10A timeouts and also from the board pausing its own
+polling (the OTA or weather network hold, model detection, a poll cycle skipped after a caught
+exception, a restart), and the ring cannot tell them apart. The card therefore says "readings the
+check needs" rather than naming the tank temperature, names both sources, says nothing about the
+tank, and points at the X10A wiring and RX/TX pins only conditionally: if it keeps happening day
+after day. Every other mix says only what the stored totals establish. Charging, pump activity,
+draws, an implausible reading and a continuous loss fast enough to trip the draw filter can all
+prevent a clean hour; the
+ring cannot say which dominated. In particular it cannot claim "draw-dominant" or correlate
+circulation-off time with discarded candidates.
 
 The standing-loss judgement has a **bounded detection band**. `0.8 K/h` is the notable threshold —
 a project heuristic from the reference installation, not a Daikin limit and not transferable across
@@ -155,9 +178,10 @@ owed to heat entering the tank, and a one-cycle valve blip put none in; before t
 cost the identical 105 minutes as a 40-minute charge, and one blip every 90 minutes took a
 measured, otherwise perfect 24 h from 23 completed windows to zero. A short witness still discards
 the candidate hour — the hydronics moved, so the tank was not standing — it just no longer asserts
-that heat went in. Two rules keep the bound from failing in the direction that reports a leak where
-there is none. A witness seen across an interval nobody watched counts as **proven** rather than
-short. And an **unreadable** row is not proof the charge ended: both witnesses ride page 0x60, so
+that heat went in. For a charge whose witness the board saw for two minutes and whose end it saw,
+two rules keep the bound from failing in the direction that reports a leak where there is none; a
+charge it saw only in part is the limit disclosed in the blocked-verdict paragraph above. A witness seen across a gap between samples longer than `CHECKUP_MAX_GAP_S` counts
+as **proven** rather than short (an empty sample from a polling pause does not open such a gap). And an **unreadable** row is not proof the charge ended: both witnesses ride page 0x60, so
 one silent page inside a real 40-minute charge would otherwise restart the two-minute clock, and a
 charge finishing soon after that timeout would arm no settle at all and have its own tail measured
 as standing loss. At the reference installation's timeout rate that is not a corner case. Staying
@@ -191,7 +215,8 @@ about once an hour against a window needing sixty clean minutes. Replayed over t
 real 24 h, the old rule kept about half the achievable windows — so it roughly doubled the time to a
 verdict, and in the first hours of a boot, when only one or two windows are possible at all, it read
 "0 min of 6 h" with every row it needed present and correct. A sample the firmware could not read is
-therefore **blind time**, bounded so no unobserved stretch can hide a tank charge and subtracted
+therefore **blind time**, bounded so no unobserved stretch within the run bound can hide a tank
+charge (a longer one ends the candidate, see the blind verdict above) and subtracted
 from the seconds the window claims to have observed. A state the sweep *can* see still ends the
 window, and a draw hidden inside a blind stretch is still caught against the temperature anchor
 standing when vision was lost.

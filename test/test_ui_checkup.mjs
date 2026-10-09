@@ -239,6 +239,15 @@ assert.doesNotMatch(ui.detail(dhwSettling), /discarded/);
 // like a cause. The firmware sends names, so the browser never decodes a bitmask.
 assert.match(ui.detail({ ...dhwAborted, abort_reasons: ["charge", "from_the_future"] }),
              /discarded \(tank charging\)/);
+// A discard for unread data is cause-neutral: unobserved time comes from a silent X10A bus AND from
+// the board pausing its own polling, so the list item must not read as an X10A fault by itself. It
+// is also not a tank claim (the unread rows can be the page-0x60 valve/heater/pump states while R5T
+// was read), and it sits inside the sentence's one parenthesised list, so it carries no parentheses
+// of its own: the closing `\)` below is the list's, and a nested pair would leave `\)\)` here.
+assert.match(ui.detail({ ...dhwAborted, abort_reasons: ["blind"] }),
+             /9 candidate windows discarded \(readings missing: X10A silent or polling paused\); longest reached 40 min of 60 min\./);
+assert.doesNotMatch(ui.detail({ ...dhwAborted, abort_reasons: ["blind"] }), /X10A not answering/);
+assert.doesNotMatch(ui.detail({ ...dhwAborted, abort_reasons: ["blind"] }), /tank not read/);
 
 // THE VERDICT THAT SAYS WAITING WILL NOT HELP. Unavailable like a profile that cannot supply the
 // rows — it says nothing either way — but `blocked` gets its own sentence instead of the generic
@@ -263,15 +272,44 @@ assert.match(ui.detail(dhwBlocked), /schneller kontinuierlicher Wärmeverlust is
 assert.doesNotMatch(ui.detail(dhwBlocked), /Takt dieser Anlage/);
 // The SAME verdict is reachable from a flapping X10A link — a candidate opens, the bus goes quiet
 // mid-window, repeatedly — and that needs the opposite action from a plant that never stands still.
-// Blaming the duty cycle there sends the reader to the heat pump for a wiring fault.
+// Blaming the duty cycle there sends the reader to the heat pump for a wiring fault. But `blind`
+// only means the readings the check needs went UNREAD — R5T, or the page-0x60 valve, heater and
+// pump rows with R5T read fine — and the board's own pauses (a firmware update, a weather download
+// or other network transfer, a restart, model detection) book the same unobserved time as a silent
+// bus. So this sentence names both sources, says nothing about the tank, never claims the tank
+// temperature ALONE went unread, and keeps the wiring step CONDITIONAL instead of asserting the
+// link as the cause.
 const dhwBlockedByLink = { ...dhwBlocked, abort_reasons: ["blind"] };
 assert.match(ui.detail(dhwBlockedByLink),
-             /weil die X10A-Verbindung mitten im Fenster aufhörte zu antworten/);
-assert.match(ui.detail(dhwBlockedByLink), /prüfe die X10A-Verkabelung und die RX\/TX-Pins/);
+             /weil für die Prüfung nötige Messwerte zu lange nicht gelesen wurden — die X10A-Verbindung antwortete nicht, oder das Board pausierte seine Abfrage \(Firmware-Update, Wetter-Download oder andere Netzwerkübertragung, Neustart, Modellerkennung\)/);
+assert.match(ui.detail(dhwBlockedByLink), /Das sagt nichts über den Speicher aus\./);
+assert.match(ui.detail(dhwBlockedByLink),
+             /Wiederholt sich das Tag für Tag, prüfe die X10A-Verkabelung und die RX\/TX-Pins\./);
 assert.doesNotMatch(ui.detail(dhwBlockedByLink), /Takt dieser Anlage/);
+assert.doesNotMatch(ui.detail(dhwBlockedByLink), /Das liegt an der Verbindung, nicht an der Anlage/);
+assert.doesNotMatch(ui.detail(dhwBlockedByLink), /weil die Temperatur des Speichers zu lange nicht gelesen wurde/);
 ui.setLang("en");
-assert.match(ui.detail(dhwBlockedByLink), /This is the link, not the plant/);
+assert.match(ui.detail(dhwBlockedByLink),
+  /discarded because readings the check needs went unread for too long — the X10A link not answering, or the board pausing its polling \(a firmware update, a weather download or other network transfer, a restart, model detection\); the longest reached 50 min of 60 min\./);
+assert.match(ui.detail(dhwBlockedByLink),
+  /This says nothing about the tank\. If it keeps happening day after day, check the X10A wiring and the RX\/TX pins\./);
+// The old unconditional single-cause verdict must not return: neither the "this is the link" claim
+// nor the "stopped answering" cause, and the wiring step only ever appears behind its condition.
+assert.doesNotMatch(ui.detail(dhwBlockedByLink), /This is the link, not the plant/);
+assert.doesNotMatch(ui.detail(dhwBlockedByLink), /stopped answering/);
+assert.doesNotMatch(ui.detail(dhwBlockedByLink),
+  /(?<!If it keeps happening day after day, )check the X10A wiring/);
+// The reviewed defect: "because the tank temperature went unread" is false when R5T was read and
+// only the valve, heater or pump rows were missing (checkup.hpp books `blind` for both). The
+// verdict must not name the tank temperature as the only unread input, and it must not name the
+// link as the cause: the link is one of two listed sources, never the sentence's subject.
+assert.doesNotMatch(ui.detail(dhwBlockedByLink), /because the tank temperature went unread/);
+assert.doesNotMatch(ui.detail(dhwBlockedByLink), /tank temperature went unread/);
+assert.doesNotMatch(ui.detail(dhwBlockedByLink), /because the X10A link/);
+assert.match(ui.detail(dhwBlockedByLink), /because readings the check needs went unread/);
 // A mix names what was seen but cannot rank its causes.
+assert.match(ui.detail({ ...dhwBlocked, abort_reasons: ["charge", "blind"] }),
+             /discarded \(tank charging, readings missing: X10A silent or polling paused\); the longest/);
 assert.match(ui.detail({ ...dhwBlocked, abort_reasons: ["charge", "blind"] }),
              /stored totals do not show which cause dominated/);
 assert.doesNotMatch(ui.detail({ ...dhwBlocked, abort_reasons: ["charge", "blind"] }),

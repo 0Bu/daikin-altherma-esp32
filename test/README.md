@@ -233,8 +233,9 @@ arities must match; browser detection and the Firmware selector must name the sa
 all 125 value and 15 model-description rows must have native copy with no English prose fallback
 (compact locales may fold the normal context into their first field); concurrent loads coalesce onto
 `/locale.js`; every deterministic gzip asset stays within its 32 KiB response budget; and all locale
-assets together stay within a 273 KiB aggregate-growth guard. The one-KiB rebase accommodates the
-complete localized factory-reset warning; the separate firmware-size gate binds
+assets together stay within a 274 KiB aggregate-growth guard. The two one-KiB rebases accommodate the
+complete localized factory-reset warning and the cause-neutral wording of the DHW heat-loss
+unobserved-data discard in twelve languages; the separate firmware-size gate binds
 the actual signed application image and its slot headroom. A fingerprint over the canonical
 English/domain copy makes every locale stale when a source sentence changes without its translation;
 `node tools/ui_localization/selftest.mjs` proves that stale source copy, missing specialist/domain

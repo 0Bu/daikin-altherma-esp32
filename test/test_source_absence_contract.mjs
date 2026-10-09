@@ -229,8 +229,9 @@ assert.match(checkup, /esp_register_shutdown_handler\(checkup_reboot_save\)/,
 // The clock is read ONCE into a local declared directly above the call, and the same local is what
 // the restart report is judged against (below), so the line cannot describe a different instant
 // than the one the adoption booked. The call is deliberately three-argument: it takes no bucket,
-// because a candidate it discards is not entered in the discarded-window count (as a blind abort
-// the board-side restart cause would be worded "X10A not answering" by the UI).
+// because a candidate it discards is not entered in the discarded-window count (the count stays a
+// count of the discards dhw_loss_step observed; the booked time is board-side, and an unread
+// stretch still open at the restart can add to it).
 assert.match(checkup,
   /const\s+int64_t\s+(\w+)\s*=\s*esp_timer_get_time\(\)\s*;\s*logic::dhw_loss_adopt\(\s*s_dhw_state,\s*P\(\)\.dhw_handoff\.payload\.candidate,\s*\1\s*\)/,
   "the DHW adoption must be handed one esp_timer_get_time() reading so the boot uptime is booked as blind");

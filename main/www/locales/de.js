@@ -1,4 +1,4 @@
-// translation-source: 1369786d303329f6e5230c06537e985a4c7735be65bcff1dc17670a9530129f9
+// translation-source: 856c2ce7d1e297c3bcf8a20a2f1b4c8079ed68a2890bb1d0729997a0bd963c19
 I18N.de = localeValues([
   /* sys.nodata */ "Keine Daten",
   /* sys.unreachable */ "Nicht erreichbar",
@@ -197,12 +197,12 @@ I18N.de = localeValues([
   /* check.detail.dhw_waiting */ (n, r) => `${n} von ${r} als vollständige bereinigte Stundenfenster erfasst; noch kein vollständiges bereinigtes Stundenfenster.`,
   /* check.detail.dhw_aborted */ (n, reasons, best) => ` ${n} ${n === 1 ? "Kandidat wurde" : "Kandidaten wurden"} verworfen (${reasons}); längster erreichte ${best} von 60 min.`,
   /* check.detail.dhw_blocked */ (n, reasons, best) => `Mit diesem Verfahren nicht bewertbar: über volle 24 Stunden wurde kein einziges bereinigtes Stundenfenster fertig, ${n} ${n === 1 ? "Kandidat wurde" : "Kandidaten wurden"} verworfen (${reasons}); der längste erreichte ${best} von 60 min. Nach einer Speicherladung sind 45 min Abklingzeit plus ein 60-Minuten-Messfenster erforderlich (insgesamt 105 ungestörte Minuten). Auch Zapfungen, Pumpenlauf, unlesbare Daten oder ein schneller Dauerverlust, der wie eine Zapfung aussieht, können eine saubere Stunde verhindern. Die gespeicherten Summen zeigen nicht, welcher Grund überwog; schneller kontinuierlicher Wärmeverlust ist daher nicht ausgeschlossen.`,
-  /* check.detail.dhw_blocked_link */ (n, best) => `Nicht bewertbar: über volle 24 Stunden wurde kein einziges bereinigtes Stundenfenster fertig, ${n === 1 ? "der einzige Kandidat wurde" : `alle ${n} Kandidaten wurden`} verworfen, weil die X10A-Verbindung mitten im Fenster aufhörte zu antworten; der längste erreichte ${best} von 60 min. Das liegt an der Verbindung, nicht an der Anlage — prüfe die X10A-Verkabelung und die RX/TX-Pins.`,
+  /* check.detail.dhw_blocked_link */ (n, best) => `Nicht bewertbar: über volle 24 Stunden wurde kein einziges bereinigtes Stundenfenster fertig, ${n === 1 ? "der einzige Kandidat wurde" : `alle ${n} Kandidaten wurden`} verworfen, weil für die Prüfung nötige Messwerte zu lange nicht gelesen wurden — die X10A-Verbindung antwortete nicht, oder das Board pausierte seine Abfrage (Firmware-Update, Wetter-Download oder andere Netzwerkübertragung, Neustart, Modellerkennung); der längste erreichte ${best} von 60 min. Das sagt nichts über den Speicher aus. Wiederholt sich das Tag für Tag, prüfe die X10A-Verkabelung und die RX/TX-Pins.`,
   /* check.detail.dhw_reason.charge */ "Speicherladung",
   /* check.detail.dhw_reason.pump */ "interne Pumpe",
   /* check.detail.dhw_reason.draw */ "zapfungsähnlicher Abfall",
   /* check.detail.dhw_reason.reading */ "R5T unplausibel",
-  /* check.detail.dhw_reason.blind */ "X10A antwortet nicht",
+  /* check.detail.dhw_reason.blind */ "Messwerte fehlen: X10A schweigt oder Abfrage pausiert",
   /* check.detail.collecting_unknown */ "Noch nicht genug verwertbare Messdaten für eine Bewertung.",
   /* check.detail.observation */ "Nur Messwert; dafür gibt es keinen allgemeinen Grenzwert für OK oder WARNUNG.",
   /* check.detail.experimental */ "Experimentelle Beobachtung; ein stabiler Zähler beweist nicht, dass keine Begrenzung stattfand.",
