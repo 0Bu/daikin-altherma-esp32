@@ -1487,9 +1487,9 @@ A single task owns the X10A UART (there is exactly one link). Each cycle:
    both that and the scope's value. The cost: an X10A decode fix shipped under an unchanged series id
    (a trend names its row by page, offset and unit and leaves the converter to the per-profile
    `main/def/` row) keeps the old-scale samples of that series until they leave the 24-hour window,
-   at most a day after the update. A per-series decode identity closes this and is an open follow-up
-   pending an owner decision (whether the plant series may restore before the first detection of a
-   boot).
+   at most a day after the update. This limit is kept deliberately (owner decision): a per-series
+   decode identity would close it, but only by either holding back the plant series' restore until
+   a boot's first detection or restoring them unchecked before it.
 
    **Upgrade note — what restarts once.** This build moved the HomeHub series ids (they now carry the
    register's decoding), the catalog fingerprint (now a fold of every ring's semantic id) and the

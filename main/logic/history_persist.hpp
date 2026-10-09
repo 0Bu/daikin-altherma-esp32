@@ -842,8 +842,8 @@ inline uint32_t history_homehub_target_fingerprint(const char* host, uint32_t po
 // rollback able to restore the other build's X10A records. Pinned in test_logic.cpp.
 //
 // Known limit: an X10A decode fix shipped under an unchanged series id keeps the old-scale samples
-// of that series until they leave the 24-hour window. Closing it needs a per-series decode
-// identity, an open follow-up pending an owner decision (docs/ARCHITECTURE.md, history).
+// of that series until they leave the 24-hour window. Kept deliberately by owner decision; a
+// per-series decode identity would close it (docs/ARCHITECTURE.md, history).
 inline uint32_t history_x10a_target_fingerprint(const char* profile, int32_t rx_pin, int32_t tx_pin,
                                                 char proto) {
     uint32_t crc = CONFIG_CRC32_INIT;
