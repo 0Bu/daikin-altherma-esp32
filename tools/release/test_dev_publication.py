@@ -185,7 +185,7 @@ class PublicationTests(unittest.TestCase):
                 self.document = copy.deepcopy(pristine)
                 self.document['provenance'][field] = value
                 self.update_manifest()
-                with self.assertRaises(SystemExit):
+                with self.assertRaises((dev.Unproven, SystemExit)):
                     self.validate()
 
     def test_missing_feed_files_and_corrupt_json(self):
