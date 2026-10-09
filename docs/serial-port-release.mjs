@@ -179,10 +179,11 @@ export async function attachSerialPortRelease({
       container.hidden = !grants.length;
     } catch (error) {
       if (generation !== refreshing) return { visible: !container.hidden };
-      // Keep the last known grants; an unavailable query cannot prove the site has no permission.
-      container.hidden = false;
+      // Retain the known grants without presenting a release action until a current query succeeds.
+      // The separate status element reports the unknown permissions without claiming they are absent.
+      container.hidden = true;
       updateControls();
-      return { visible: true, error };
+      return { visible: false, error };
     }
     updateControls();
     return { visible: !container.hidden };

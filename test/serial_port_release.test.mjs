@@ -468,19 +468,29 @@ test("an initial visibility query has a bounded truthful failure instead of hang
   const container = { hidden: true };
   const button = fakeButton();
   const status = { hidden: true, dataset: {}, textContent: "" };
-  const serial = { getPorts() { return query.promise; }, async requestPort() {} };
+  const port = closedGrant("A");
+  const listeners = new Map();
+  let queries = 0;
+  const serial = {
+    getPorts() { return ++queries === 1 ? query.promise : Promise.resolve([port]); },
+    async requestPort() { return port; }
+  };
   const attaching = attachSerialPortRelease({
-    serial, SerialPortCtor: ForgetCapablePort, container, button, status, refreshTarget: null
+    serial, SerialPortCtor: ForgetCapablePort, container, button, status,
+    refreshTarget: { addEventListener(name, callback) { listeners.set(name, callback); } }
   });
   await drainPermissionTasks();
   t.mock.timers.tick(10000);
   assert.equal(await attaching, true);
-  assert.equal(container.hidden, false, "a failed query cannot prove that no permission exists");
+  assert.equal(container.hidden, true, "the release action requires a successful current grant query");
+  assert.equal(status.hidden, false, "the separate query error remains visible while the action is hidden");
   assert.equal(status.dataset.kind, "error");
   assert.match(status.textContent, /permissions could not be refreshed:.*timed out/);
   query.resolve([]);
   await drainPermissionTasks();
-  assert.equal(container.hidden, false, "an expired native query must not overwrite its foreground result");
+  assert.equal(container.hidden, true, "an expired native query must not overwrite its foreground result");
+  await listeners.get("focus")();
+  assert.equal(container.hidden, false, "a later successful positive query restores the release action");
 });
 
 test("forget timeout keeps native ownership and never invokes a late success callback", async (t) => {
@@ -553,10 +563,12 @@ test("final visibility refresh is bounded after a confirmed release and ignores 
   t.mock.timers.tick(10000);
   await foreground;
   assert.match(status.textContent, /Serial port was released, but.*could not be refreshed:.*timed out/);
+  assert.equal(container.hidden, true, "a failed latest query hides the action despite an older positive grant snapshot");
+  assert.equal(status.hidden, false);
   assert.equal(button.attributes.has("aria-busy"), false);
   const message = status.textContent;
   refresh.resolve([]);
   await drainPermissionTasks();
-  assert.equal(container.hidden, false);
+  assert.equal(container.hidden, true);
   assert.equal(status.textContent, message);
 });
