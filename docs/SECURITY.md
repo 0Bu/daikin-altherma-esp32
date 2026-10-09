@@ -335,12 +335,31 @@ always re-flashable over USB. The containment is therefore *prevention*, not rec
   reach: after building the canonical `-merged.bin`, it carves out the individual `flash_args`
   ranges, runs `require-signed.sh` on the final staged app and publishes those sparse parts. The
   build fails rather than publish an installer whose app is unsigned.
+- The browser loads the raw manifest and sibling `artifacts.json` together. The index's manifest
+  SHA-256 binds the displayed version to one immutable offer; every selected part must have its
+  indexed size and SHA-256 before any erase or write. The canonical application's hash must also
+  equal `provenance.app_sha256`. All filenames stay within the selected HTTPS feed directory;
+  redirects, duplicate metadata and incomplete or substituted plans fail with a reload instruction.
+  A page left open during publication cannot silently install a later generation. WebCrypto is
+  required; installation stays disabled when verification is unavailable. These checks trust the
+  HTTPS publisher and verify byte identity. Browser SHA-256 checks do not verify RSA signatures;
+  the producer's `require-signed.sh` verifies the exact staged application before publication.
 - The sparse Web Serial plan is also the configuration boundary: without **Erase**, no published
   part covers `nvs@0x9000`, so WiFi/MQTT/board/X10A settings survive. The build runs
-  `check-web-installer-plan.py`, which requires the user-facing Erase choice and compares every
-  part's rounded 4 KB erase interval with the NVS partition. Selecting **Erase** still deliberately
-  erases the whole chip. The separately published `-merged.bin` remains a manual factory-reset
-  image; writing it at offset 0 writes its `0xff` gap through NVS.
+  `check-web-installer-plan.py`, which requires the user-facing Erase choice and the complete
+  ESP32-S3 plan: canonical bootloader at 0, partition table at 0x8000, OTA data at 0xf000 and the
+  verified application at 0x20000. It binds their bytes to the manifest index and derives bounds
+  from `partitions.csv`, rejecting overlapping 4 KB erase sectors or writes into NVS, coredump and
+  history. The browser checks the same official geometry before downloads. Selecting **Erase**
+  still deliberately erases the whole chip. The separately published `-merged.bin` remains a
+  manual factory-reset image; writing it at offset 0 writes its `0xff` gap through NVS.
+- Compatibility requires a detected ESP32-S3 and at least 8 MB of recognized flash, both during
+  connection and again before installation. The pinned
+  [esptool-js capacity API](https://github.com/espressif/esptool-js/blob/v0.7.0/src/esploader.ts)
+  returns the flash-ID capacity; an unavailable or unknown result fails before binary downloads,
+  erase or write. Flash options retain `flashSize: "keep"` so signed image headers are unchanged.
+  Source and host tests establish these checks; physical flashing, boot health and persistence
+  still require separate evidence on the actual board.
 - The sole `history@0x400000` partition (4 MiB append journal) sits outside
   every published data part, so plant readings survive a non-Erase install exactly as the settings
   do. The former 8 KB partition at 0x1e000 is no longer part of the table. The journal is
