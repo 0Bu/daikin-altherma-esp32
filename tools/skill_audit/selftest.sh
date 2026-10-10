@@ -261,6 +261,42 @@ run_case "optimization verifies final content when repair is unavailable" \
     "sed -i.bak '/^- a \*\*wrong number\*\*/d' .agents/skills/skill-audit/SKILL.md" \
     "final read-only verification after optimization failed" 1 --optimize
 
+run_case "committed reviewer scope cannot disappear" \
+    "sed -i.bak 's|base_sha|removed_base|g' .agents/agents/doc-drift-checker.toml" \
+    "missing review-scope contract: base_sha"
+
+run_case "heap reviewer cannot omit mutex safety" \
+    "sed -i.bak 's|raw mutex|removed lock|g' .agents/agents/heap-safety-reviewer.toml" \
+    "missing heap safety coverage: raw mutex"
+
+run_case "reviewer cannot mistake a declaration for sandbox isolation" \
+    "sed -i.bak 's|effective read-only runtime permissions|declared permissions|g' .agents/agents/doc-drift-checker.toml" \
+    "missing review-scope contract: effective read-only runtime permissions"
+
+run_case "two-language schematic review contradicts production locales" \
+    "echo 'Copy, in both languages.' >> .agents/skills/schematic-review/SKILL.md" \
+    "two-language review claim contradicts"
+
+run_case "short API ELF identity claim contradicts the status builder" \
+    "echo '/status.app_elf_sha256 is a 9-hex prefix.' >> .agents/skills/flash-esp32/SKILL.md" \
+    "API ELF SHA claim contradicts"
+
+run_case "browserless CI claim contradicts the workflow" \
+    "echo 'CI has no browser.' >> .agents/skills/ui-gif/SKILL.md" \
+    "no-browser CI claim contradicts"
+
+run_case "moved reference links remain audited" \
+    "mkdir -p .agents/skills/absence-review/references; echo '[missing](not-present.md)' > .agents/skills/absence-review/references/broken.md" \
+    "broken relative link 'not-present.md'"
+
+run_case "angle-bracket external Markdown links stay external" \
+    "echo '[official](<https://example.invalid/source>)' >> .agents/skills/absence-review/SKILL.md" \
+    "18 skills and 3 reviewer agents clean" 0
+
+run_case "angle-bracket relative Markdown anchors stay resolvable" \
+    "echo '[background](<references/absence-failures.md#background>)' >> .agents/skills/absence-review/SKILL.md" \
+    "18 skills and 3 reviewer agents clean" 0
+
 if [ "$fail" -eq 0 ]; then
     echo "selftest ok: all $cases canaries and self-optimization cases verified."
 else

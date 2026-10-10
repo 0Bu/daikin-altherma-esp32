@@ -67,29 +67,30 @@ if len(guards["PreToolUse"]) != 2 or len(guards["PostToolUse"]) != 1 or len(guar
 
 git_root = "$(git rev-parse --show-toplevel)"
 pre_tool_matcher = (
-    "run_command|view_file|replace_file_content|write_to_file|Bash|Read|Edit|Write|apply_patch|exec_command|shell|shell_command"
+    r"run_command|view_file|replace_file_content|write_to_file|Bash|Read|Edit|Write|(?:functions\.)?apply_patch|(?:functions\.)?exec_command|shell|shell_command"
 )
 pr_gates_matcher = (
-    "run_command|Bash|exec_command|shell|shell_command|mcp__.+(?:merge_pull_request|enable_auto_merge|enable_pull_request_auto_merge|enqueue_pull_request)"
+    r"run_command|Bash|(?:functions\.)?exec_command|shell|shell_command|mcp__.+(?:merge_pull_request|enable_auto_merge|enable_pull_request_auto_merge|enqueue_pull_request)"
 )
-format_matcher = "replace_file_content|write_to_file|Edit|Write|apply_patch"
+format_matcher = r"replace_file_content|write_to_file|Edit|Write|(?:functions\.)?apply_patch"
+hook_command = f'"{git_root}/scripts/agent-python.sh" "{git_root}/tools/agent-hooks/agent_hook.py"'
 
 command_hook(
     guards["PreToolUse"][0],
     matcher=pre_tool_matcher,
-    command=f'python3 "{git_root}/tools/agent-hooks/agent_hook.py" pre-tool-guards',
+    command=f'{hook_command} pre-tool-guards',
     timeout=10,
 )
 command_hook(
     guards["PreToolUse"][1],
     matcher=pr_gates_matcher,
-    command=f'python3 "{git_root}/tools/agent-hooks/agent_hook.py" pr-gates',
+    command=f'{hook_command} pr-gates',
     timeout=600,
 )
 command_hook(
     guards["PostToolUse"][0],
     matcher=format_matcher,
-    command=f'python3 "{git_root}/tools/agent-hooks/agent_hook.py" format',
+    command=f'{hook_command} format',
     timeout=30,
 )
 
@@ -100,7 +101,7 @@ if not isinstance(stop_hook, dict):
 stop_expected_keys = {"type", "command", "timeout"}
 if not set(stop_hook).issuperset(stop_expected_keys) or not set(stop_hook).issubset(stop_expected_keys | {"statusMessage"}):
     fail("Stop hook command keys drifted")
-if stop_hook.get("type") != "command" or stop_hook.get("command") != f'python3 "{git_root}/tools/agent-hooks/agent_hook.py" stop-logic-tests':
+if stop_hook.get("type") != "command" or stop_hook.get("command") != f'{hook_command} stop-logic-tests':
     fail("Stop hook command drifted")
 if stop_hook.get("timeout") != 600:
     fail("Stop hook timeout drifted")

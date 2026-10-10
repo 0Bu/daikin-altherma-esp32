@@ -18,28 +18,8 @@ HomeHub Modbus link, the ENV III accessory, the Open-Meteo location, and the X10
 mode removes all of them at once. Absence is not one state — it is a **cross product**, and it is
 where this project's gates are structurally blind.
 
-That blindness is measured, not assumed. Every finding below was made while the firmware built, the
-host logic tests passed, the domain audit confirmed every value physically true, the description
-audit found copy for each, the schematic audit found the drawing correct, and the UI use-case suite
-drove every modal:
-
-* The board's own **memory trends stopped recording** when the X10A bus did not answer. They were
-  folded inside the heat pump's poll cycle, which only runs once a profile is resolved — so on
-  exactly the board someone was debugging, the two heap curves that answer "is the heap drifting"
-  were absent from `/status.history.rows` entirely. An unrelated feature disappeared because a
-  *different* subsystem was unreachable.
-* The heating-curve card told a reader to **"set up a room source"** while their configured room
-  source sat one row below it, because `off` is the evaluator's word for both "nothing is mapped"
-  and "the sampler never ran".
-* The circulation row answered a **cleared broker** with "waiting for a message", forever, with no
-  colour and no cause, while the room source one row up named the same cause outright.
-* An **unconfigured** circulation witness was still offered a 24-hour chart, so its tongue read "no
-  readings yet" under a row reading "not configured".
-* `?redact=1` **invented identifiers**: a device with no room source, no witness, no HomeHub and no
-  syslog collector produced a bug report indistinguishable from one that had all four and hid them.
-
-None of these is visible in a value, a converter, a payload schema or a pixel. They are visible in
-one place: the pair (what is configured, what is answering).
+Inspect configuration and response state together. For a recurrence of a prior source-lifecycle
+defect, read [absence failure examples](references/absence-failures.md).
 
 **This review is CONDITIONAL**, like `$feature-docs` and `$schematic-review` and unlike
 `$domain-review`. The canonical filter lives behind
@@ -73,7 +53,8 @@ one of its own checks written so that it could never fire.
 ## 2. Judge what the matrix cannot
 
 The matrix walks the states it knows. It cannot tell you whether a NEW source is in it, whether an
-absence is *honest*, or whether the German and English say the same thing. Work through these.
+absence is *honest*, or whether changed translations carry the same meaning. Derive all shipped
+locales from `UI_LANGS` in `main/www/js/i18n.js`, including `main/www/locales/`. Work through these.
 
 ### 2.1 Is every optional source in the matrix?
 
@@ -115,9 +96,10 @@ that looks like a reading, or a substituted second-best value. Check:
 ### 2.4 Does the copy name the real blocker?
 
 The rule the room-source row already follows: a row that cannot produce a value must say **which**
-thing to go and fix, and must not name a thing that is already done. Read every state string the diff
-can reach, in **both** languages, and ask of each: is this true when the user has configured
-everything except the one thing this names?
+thing to go and fix, and must not name a thing that is already done. Read every changed state string the diff
+can reach across **every shipped locale**, and ask of each: is this true when the user has
+configured everything except the one thing this names? Verify the complete locale matrix and
+report any changed translation whose meaning was not reviewed; key coverage alone cannot prove it.
 
 Watch for the shape that produced two of the five findings — **one word covering two states**.
 "Disabled", "waiting", "not available" each read as a single condition and are routinely reached from

@@ -17,7 +17,7 @@ Treat review and audit requests as read-only. An explicit request to run `deploy
 - read-only HTTP checks against the bench, plus non-persistent bench requests the changed behavior
   needs for its test (for example `GET /ota/check` to exercise an OTA/TLS path);
 - on findings: diagnosis (`$device-triage`), a scoped code fix with a regression test, and a repeat
-  of this workflow until the bench is green.
+  of this workflow once its exact, clean fix head is authorized and available.
 
 It does **not** authorize:
 - contacting the production role, or an OTA write (`/ota/update`) of any kind;
@@ -26,6 +26,12 @@ It does **not** authorize:
   coredump clearing;
 - pushing, opening or editing PRs, or merging. When `$deploy-prod` runs this skill, `$deploy-prod`
   owns those steps.
+
+A standalone `deploy-test` request does not authorize repository commits. Commit a fix only when
+the user separately authorized commits or this run inherits the `$deploy-prod` failure chain.
+Otherwise prepare the scoped fix and host verification, report the pending commit and bench retry,
+and retain the last tested SHA. Never call an uncommitted fix an exact, clean tested head. Do not
+request a routine reconfirmation for a commit already authorized by the current chain.
 
 This is the only ordinary path for unmerged code to reach the inventory bench; `$flash-esp32`
 naming the bench follows the same rules, and `$flash-esp32` covers boards outside the inventory.
@@ -104,8 +110,10 @@ OTA gate (`--confirm-bench bench --install-bench`), never through this skill.
    a different port without identifying it again.
 
 7. **Verify by identity, not by name.** The board must be running *this* image: compare
-   `/status.app_elf_sha256` from the inventory host, a 9-hex prefix, with the ELF hash from step 3,
-   or read the serial boot line `ELF file SHA256`. Never verify through
+   the full 64-hex `/status.app_elf_sha256` from the inventory host with the ELF hash from step 3.
+   If HTTP is unavailable, compare the serial boot line `ELF file SHA256` as its shorter printed
+   prefix and report that limit. The health script accepts an explicitly selected comparison
+   prefix; it does not imply that the API field is shortened. Never verify through
    `daikin-altherma-esp32.local`, which can resolve to another board. Then:
    ```bash
    scripts/verify-device-health.sh --ip <bench-host> --expected-version <version> --expected-elf-sha <elf-sha-prefix> --timeout 90
@@ -142,7 +150,10 @@ OTA gate (`--confirm-bench bench --install-bench`), never through this skill.
       use `$device-triage` with any available private dump and its verified matching ELF. Missing
       or undecodable dump evidence does not clear the current fault.
     - Fix the root cause with a regression test (logic under `main/logic/` with a `CHECK` in
-      `test/test_logic.cpp`, or a contract test), commit, and restart from step 1.
+      `test/test_logic.cpp`, or a contract test) and run the affected host checks. If commits are
+      separately authorized or inherited from `$deploy-prod`, commit and restart from step 1.
+      Otherwise report the prepared fix and the bench retry pending an authorized clean fix head;
+      the failed head's hardware result cannot certify the uncommitted fix.
     - Ask the user only when the cause is hardware, the requirement is ambiguous, or the behavior is
       not reproducible.
 

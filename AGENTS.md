@@ -24,6 +24,9 @@ measurements, incident history, and field-by-field reference material in the lin
 - An explicit `$deploy-test` or `$flash-esp32` request, and a `$deploy-test` run inside a
   `$deploy-prod` chain, authorizes the unchained key-by-path signing command and the unchanged
   repository flash plan described below.
+- A standalone `$deploy-test` authorizes scoped fixes and host checks, but commits require separate
+  explicit authorization. Repeat hardware testing only after an authorized clean fix head exists;
+  the inherited `$deploy-prod` chain already authorizes its fix commits.
 - Never contact or modify an unrelated device, repository, cluster, or production system. Preserve
   user-owned dirty worktree changes and secrets.
 
@@ -46,6 +49,12 @@ measurements, incident history, and field-by-field reference material in the lin
   independent reads; serialize hardware access, GitHub mutations, shared build trees, and writes.
 - Available focused project reviewers are `doc_drift_checker`, `heap_safety_reviewer`, and
   `x10a_decode_reviewer` under `.agents/agents/`. They are read-only evidence gatherers, not fixers.
+- Verify their effective permissions. Native roles can inherit a writable parent's sandbox despite
+  their profile declaration; use `scripts/run-codex-review.sh` for an isolated read-only review.
+  A writable reviewer context is incomplete review, not a sandbox pass.
+- Give reviewers the base SHA, head SHA, path scope and intended local changes. They must verify
+  the head and report committed, staged, unstaged and untracked evidence separately. A missing PR
+  base means incomplete review, never an unaffected change.
 
 ## Canonical skills
 
@@ -62,41 +71,28 @@ that directory except `$heap-safety-review`, which is a gate record only — no 
 its evidence comes from the independent read-only `heap_safety_reviewer`. Other entries below are
 conditional workflows and are not necessarily PR checkbox gates.
 
-- `$project-review` and `$domain-review`: required before every PR merge except GitHub-native
-  automerge of an authoritative-CI-attested, same-repository, one-commit Renovate PR whose immutable,
-  head-bound commit patches change only the fully pinned Renovate runner line in
-  `.github/workflows/renovate.yaml`. The decision runs in the separate protected-base
-  `pr-policy.yml` workflow, which never loads PR code; mechanical PR execution remains under the
-  ordinary `pull_request` event in `build.yml`. Local/manual merges never use that
-  exception;
-  `tools/agent-policy/renovate_action_pr.py` is its fail-closed definition.
-- `$skill-audit`: required before PR creation or push, to keep every canonical skill and reviewer
-  honest against repository facts, partition offsets, pins, endpoints, and scripts.
-- `$heap-safety-review`: required before merge when HTTP, MQTT, OTA, TLS, JSON, X10A publishing,
-  firmware polling, or heap-allocation paths change.
-- `$feature-docs`: required when technical feature surface changes.
-- `$schematic-review`: required when the dashboard schematic, its contract, or audit changes.
-- `$ui-use-case-review`: required when user-visible UI behavior or its test/audit surface changes.
-- `$absence-review`: required when an optional source lifecycle or its presentation changes.
-- `$diagnostic-evidence-review` and `$user-docs-review`: use when plant diagnoses, thresholds,
-  evidence, visible meaning, or owner actions change.
-- `$ui-gif`: the mechanical recording audit is a hard merge block when stale or unverifiable; a
-  PR that changes the GIF or its stamp also needs the current-head review. Re-record only locally.
-- `$flash-esp32`: use for an explicitly requested signed build-and-flash workflow.
-- `$pr-hygiene-review`: required before opening a PR and before every ordinary PR merge, to check
-  the commit range and PR title/description for personal information or non-English prose beyond what
-  `scripts/run-pr-hygiene-audit.sh` catches by shape alone.
-- `$deploy-test`: use for the pre-merge bench test of an exact local head — builds via Docker, signs
-  on the host, USB-flashes the private-inventory bench with the repository flash plan, verifies
-  health and the changed behavior, and runs the diagnostic/fix loop on findings.
-- `$deploy-prod`: use for production delivery — verifies gates, merges the PR, waits for the CI dev
-  build, runs the bench delivery and production promotion gates via `production-ota-gate.py`, and on
-  findings runs the fix loop, which re-enters `$deploy-test` for every fix head.
+| Skill or review record | Required scope |
+|---|---|
+| `$project-review`, `$domain-review` | Every local/manual merge and ordinary PR merge; the sole CI-attested Renovate exception is defined below. |
+| `$skill-audit` | Before PR creation or push; verify skills/reviewers against repository facts. |
+| `$heap-safety-review` | Before merge of HTTP, MQTT, OTA, TLS, JSON, X10A publishing, polling or allocation changes. |
+| `$feature-docs` | Technical feature surface changes. |
+| `$schematic-review` | Schematic, contract or schematic-audit changes. |
+| `$ui-use-case-review` | User-visible UI behavior or its test/audit surface changes. |
+| `$absence-review` | Optional-source lifecycle or presentation changes. |
+| `$diagnostic-evidence-review`, `$user-docs-review` | Diagnoses, thresholds, evidence, visible meaning or owner actions change. |
+| `$ui-gif` | Mechanical freshness is a hard merge block; GIF/stamp changes also require current-head visual review. Re-record only locally. |
+| `$pr-hygiene-review` | Before PR creation and ordinary merge; inspect commit range and PR prose for privacy and non-English text. |
+| `$flash-esp32` | Explicitly requested signed build-and-flash. |
+| `$deploy-test` | Explicit exact-head pre-merge bench test, signed NVS-preserving USB, health and changed behavior. |
+| `$deploy-prod` | Authorized gates, PR merge, CI artifact, bench and production promotion; every fix head re-enters `$deploy-test`. |
 
-The canonical agentic setup uses `AGENTS.md`, `.agents/skills/`, `.agents/agents/`, `.agents/hooks.json`,
-`tools/agent-hooks/`, and `.mcp.json` as the canonical project surfaces; operating notes are in
-`docs/AGENT_MIGRATION.md`. Do not introduce runner-specific copies of project policy, skills, reviewers,
-or gates.
+The maintained sources are `AGENTS.md`, `.agents/skills/`, `.agents/agents/`, `.agents/hooks.json`,
+`tools/agent-hooks/`, and `.mcp.json`. Codex registration under `.codex/` is generated from these
+sources; never edit generated adapters or maintain a second policy, skill, reviewer or gate.
+Do not add `AGENTS.override.md`; the source gate rejects hidden instruction replacements.
+Follow `docs/AGENT_MIGRATION.md` for setup, regeneration, trust review and runtime evidence.
+Use `agent/` for project branches: the repository PR wrapper requires this prefix.
 
 ## Sources of truth
 
@@ -116,6 +112,7 @@ Read only the references relevant to the task:
 - Security, signing, redaction, and reporting: `docs/SECURITY.md` and `docs/REPORTING.md`
 - Boards and wiring: `docs/BOARDS.md` and `docs/WIRING.md`
 - Contributor loop, review gates, and merge discipline: `CONTRIBUTING.md`
+- Agent setup, delivery details and runtime acceptance: `docs/AGENT_MIGRATION.md`
 - Host-test organization: `test/README.md`
 
 If code and prose disagree, trace the production path and report the mismatch. Do not silently make
@@ -128,9 +125,8 @@ documentation.
 
 ## Environment and verification boundaries
 
-- The firmware target is `esp32s3`. CI currently selects ESP-IDF v6.1 and the lock resolves 6.1.0;
-  use the version resolved by the
-  repository scripts and workflow rather than an arbitrary local SDK.
+- The firmware target is `esp32s3`. Resolve ESP-IDF through the repository scripts, workflow and
+  committed lock; do not substitute an arbitrary local SDK.
 - Firmware builds run through `scripts/idf-docker.sh`. A cloud sandbox without Docker cannot prove a
   firmware build. Host logic, Node, and Python gates may still be available.
 - Docker on macOS does not provide USB passthrough. Use host `esptool` for an explicitly authorized
@@ -170,31 +166,25 @@ documentation.
 - Never claim flash, OTA, persistence, or rollback success from a build artifact alone. After an
   authorized device update, verify version/signature, reboot reason, rollback/safe-mode state, heap
   and stack health, X10A/Modbus link state, connectivity, and the requested user-visible behavior.
-- Every agent-run OTA write must use the direct, unchained `scripts/production-ota-gate.py` command.
-  Ordinary private-inventory `bench` delivery uses `--confirm-bench bench --install-bench`; it binds
-  the exact signed dev artifact, performs one un-retried POST only to `bench`, survives rollback
-  probation and stress, and cannot contact `production`. Delivering an official dev artifact to a
-  bench that can take an OTA always uses this mode.
+- Every agent-run OTA write must use direct, unchained `scripts/production-ota-gate.py`.
+  Ordinary official dev delivery to `bench` uses `--confirm-bench bench --install-bench` and cannot
+  contact production. Production promotion uses the distinct `--confirm-production production
+  --execute` transaction. Each mode binds the signed artifact and source, permits one un-retried
+  target POST, and requires probation and stress; follow the complete runbook.
 - Signed, NVS-preserving USB writes to the inventory roles are limited to bootstrap, recovery, and
   the explicitly requested pre-merge test of an exact local head on the bench (`$deploy-test`, or
   `$flash-esp32` naming the bench under the same rules). Production takes USB only for bootstrap and
   recovery. `$flash-esp32` may write a local head to a board outside the inventory that the user
   names. None of these is a delivery of the artifact.
-- The firmware installs only a strictly newer version unless a trusted-LAN
-  `POST /ota/update?...&downgrade=1` requests the channel-switch downgrade
-  (`main/logic/version_cmp.hpp`). Agents cannot send it, because direct `/ota/update` writes are
-  blocked and the gate binds only the current official dev manifest. A faulty production build
-  that passed rollback probation is therefore rolled forward through a reviewed revert or fix and
-  the same bench-first chain; one that failed probation was already reverted by the bootloader.
-- Completed validation, positive heap minima, `ota_stack_min_free_bytes` checks, target probation and stress remain mandatory across all OTA updates.
-- Production promotion remains a distinct `--confirm-production production --execute` transaction:
-  bench staging and stress precede one production POST plus read-only canary and retained-X10A
-  checks. Direct `/ota/update` writes and release creation remain outside both modes.
-- A manual `workflow_dispatch` with `release: true` is the maintainer's explicit publication
-  authorization. It skips the mechanical PR suite, performs one signed firmware build, publishes
-  the release feed, and creates the exact-source tag and GitHub Release. It never contacts a board,
-  requires no self-hosted runner, inventory, environment approval or hardware evidence, and does
-  not repeat the separately authorized test-board/production-board acceptance chain.
+- Direct `/ota/update` writes, including `downgrade=1`, and release creation are outside both modes.
+  A faulty production image that passed probation requires a reviewed fix or revert and the same
+  bench-first roll-forward chain; failed probation is handled by bootloader rollback.
+- Completed validation, positive heap minima, `ota_stack_min_free_bytes`, target probation and
+  stress remain mandatory. Production requires bench staging first, a read-only canary and retained
+  X10A proof. A failed gate is a stop, never permission to retry or substitute a write.
+- Manual `workflow_dispatch` with `release: true` authorizes publication only: one signed build,
+  release feed, exact-source tag and GitHub Release, without the mechanical PR suite or board
+  contact. Hardware acceptance is a separate authorized chain; see the runbook.
 
 ## Build and deterministic gates
 
