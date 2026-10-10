@@ -1,5 +1,5 @@
 {
-  "safety-guards": {
+  "hooks": {
     "PreToolUse": [
       {
         "matcher": "run_command|view_file|replace_file_content|write_to_file|Bash|Read|Edit|Write|(?:functions\\.)?apply_patch|(?:functions\\.)?exec_command|shell|shell_command",
@@ -36,9 +36,13 @@
     ],
     "Stop": [
       {
-        "type": "command",
-        "command": "\"$(git rev-parse --show-toplevel)/scripts/agent-python.sh\" \"$(git rev-parse --show-toplevel)/tools/agent-hooks/agent_hook.py\" stop-logic-tests",
-        "timeout": 600
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$(git rev-parse --show-toplevel)/scripts/agent-python.sh\" \"$(git rev-parse --show-toplevel)/tools/agent-hooks/agent_hook.py\" stop-logic-tests",
+            "timeout": 600
+          }
+        ]
       }
     ]
   }

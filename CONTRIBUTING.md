@@ -43,6 +43,11 @@ entered the standard library in 3.11. CI runs `ubuntu-26.04` (python 3.14), so a
 newer interpreter than these floors passes there and fails only on a contributor's machine; keep new
 tooling inside them rather than letting one file quietly raise the floor for the whole tree.
 
+Agent setup tooling resolves a compatible interpreter through `scripts/agent-python.sh`. A checked
+`AGENT_PYTHON` override can select an installed Python executable; unsupported versions fail with an
+actionable error. `scripts/agent-python.sh --version` shows the selected runtime. This does not
+install Python or change personal shell configuration.
+
 ```bash
 scripts/run-mock-tests.sh --coverage # host logic tests + 95% floor + presenter parity
 scripts/run-sanitizer-fuzz-tests.sh # deterministic hostile-input properties under sanitizers
@@ -370,17 +375,21 @@ contract; it checks changed and removed inputs, preserved timestamps and compile
 
 `run-agent-instructions-budget.sh` is the canonical runner-neutral agent-integrity contract. It
 keeps the always-loaded [`AGENTS.md`](AGENTS.md) below 24 KiB, validates canonical skill identity and
-OpenAI metadata, focused-reviewer safety, hook dispatch, and the explicit project safety invariants.
+OpenAI metadata, focused-reviewer safety, hook definitions, generated Codex registration, effective
+repository instruction budgets and the explicit project safety invariants.
 Narrative belongs in `docs/`; do not trim a rule or raise the budget to clear a red gate. The
 mutation canaries are:
 
 | Canary | Expected evidence |
 |---|---|
-| Missing canonical instruction or configuration input | Exit 2; never a vacuous pass |
+| Missing canonical instruction or configuration input | Non-zero failure; never a vacuous pass |
 | `AGENTS.md` over 24 KiB | Exit 1 with the measured byte count |
 | Missing, duplicate or wrongly named canonical skill | Non-zero identity failure |
 | OpenAI metadata or focused-reviewer safety drift | Non-zero configuration failure |
 | Hook dispatch drift | Non-zero hook failure |
+| Generated Codex registration drift | Non-zero adapter mismatch; regenerate from canonical sources |
+| Repository instruction chain over its limit | Non-zero failure with the affected directory and byte count |
+| `AGENTS.override.md`, including ignored files | Non-zero rejection of hidden instruction replacement |
 | Required safety invariant absent | Non-zero failure naming the invariant |
 
 Run `tools/agent-config/selftest.sh` after changing agent instructions, skills, subagent definitions,
@@ -398,6 +407,10 @@ with that commit in the PR body before the push. A successfully queried branch w
 be pushed after the local audit; a failed PR query blocks the push. Merge reviews remain separate.
 Push from a clean checkout of the commit being sent so the local audit verifies that exact tree.
 Git hooks are local checks; remote CI and branch protection enforce merge readiness.
+
+Project branches use `agent/`, including when working from Codex. The PR wrapper requires that
+prefix. Native Codex setup and its separate trust/dispatch acceptance are documented in
+[`docs/AGENT_MIGRATION.md`](docs/AGENT_MIGRATION.md); a passing source gate is not runtime proof.
 
 The mechanical job runs `tools/agent-policy/selftest.sh` whenever a diff reaches it; the separate `pr-policy.yml` workflow
 provides the required `gates` check and invokes protected-base `scripts/run-agent-policy.sh` with the

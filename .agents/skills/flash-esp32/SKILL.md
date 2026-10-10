@@ -84,8 +84,11 @@ passthrough).
    ```
 6. **Verify.** After reboot and any initial network provisioning, use the resolved host of the board
    just flashed, never a shared mDNS name that may resolve to another board. Prove the identity by
-   `/status.app_elf_sha256` (a 9-hex prefix) or the serial boot line `ELF file SHA256` against
-   `shasum -a 256 build/daikin-altherma-esp32.elf`, and pin the expected build version and ELF SHA:
+   the full 64-hex `/status.app_elf_sha256` against
+   `shasum -a 256 build/daikin-altherma-esp32.elf`, and pin the expected build version and ELF SHA.
+   If HTTP is unavailable, compare the serial boot line `ELF file SHA256` as the shorter prefix it
+   prints and report that verification limit. The health script accepts an explicitly selected
+   comparison prefix; that does not change the full API field:
    ```bash
    scripts/verify-device-health.sh --ip <flashed-board-host> --expected-version <version> --expected-elf-sha <elf-sha-prefix> --timeout 60
    ```

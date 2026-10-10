@@ -24,6 +24,7 @@ from typing import Any, Iterable
 from urllib.parse import unquote
 
 from merge_payload import find_merge as classify_github_action
+import format_snapshot
 
 
 FILE_TOOLS = {"read", "edit", "write"}
@@ -1624,6 +1625,14 @@ def run_pre_tool_guards(args: argparse.Namespace) -> int:
         return 0
     if guard_partitions(payload, shell_only=args.partition_shell_only):
         return 0
+    tool = normalized_tool(payload.get("tool_name"))
+    if tool in {"edit", "write"} | PATCH_TOOLS:
+        targets = path_targets(payload)
+        if tool in PATCH_TOOLS:
+            targets.extend(patch_targets(command_from(payload)))
+        eligible = {target: path for target in targets
+                    if (path := eligible_format_path(HOOK_ROOT, target)) is not None}
+        format_snapshot.record(payload, HOOK_ROOT, tool, tool_input(payload), command_from(payload), eligible)
     if _CURRENT_IS_ANTIGRAVITY:
         print(json.dumps({"decision": "allow"}, separators=(",", ":")))
     return 0
@@ -1652,7 +1661,7 @@ FORMAT_HUNK_RE = re.compile(r"^@@ -[0-9]+(?:,[0-9]+)? \+([0-9]+)(?:,([0-9]+))? @
 
 
 def format_line_ranges(root: Path, path: Path) -> list[tuple[int, int]] | None:
-    """The lines THIS working-tree change touched, as clang-format --lines ranges.
+    """Changed-hunk report scope, usable only after the current-tool snapshot is verified.
 
     Mirrors tools/format/check_format.py's changed-hunk scope on purpose. The CI gate
     deliberately ratchets — "existing legacy drift outside the diff is not rewritten" — and a hook
@@ -1663,7 +1672,7 @@ def format_line_ranges(root: Path, path: Path) -> list[tuple[int, int]] | None:
 
     Returns None when the scope cannot be established (no git, not a work tree, unreadable diff).
     None means "format nothing": a hook that cannot tell new code from old must not rewrite either.
-    An untracked file is entirely new, so it has no legacy drift to protect and is formatted whole.
+    An untracked file is checked whole only when its correlated pre-event proved it absent.
     """
     if not shutil.which("git"):
         return None
@@ -1673,16 +1682,16 @@ def format_line_ranges(root: Path, path: Path) -> list[tuple[int, int]] | None:
         return None
     try:
         untracked = subprocess.run(
-            ["git", "-C", str(root), "ls-files", "--others", "--exclude-standard", "--", relative],
+            ["git", "-c", "core.fsmonitor=false", "-C", str(root), "ls-files", "--others", "--exclude-standard", "--", relative],
             check=False, capture_output=True, text=True, timeout=10,
         )
         if untracked.returncode != 0:
             return None
         if untracked.stdout.strip():
-            line_count = path.read_bytes().count(b"\n")
+            line_count = format_snapshot.read_source(path).count(b"\n")
             return [(1, max(1, line_count))]
         diff = subprocess.run(
-            ["git", "-C", str(root), "diff", "--unified=0", "--no-color", "HEAD", "--", relative],
+            ["git", "-c", "core.fsmonitor=false", "-C", str(root), "diff", "--unified=0", "--no-color", "HEAD", "--", relative],
             check=False, capture_output=True, text=True, timeout=10,
         )
         if diff.returncode != 0:
@@ -1710,20 +1719,42 @@ def run_format(_: argparse.Namespace) -> int:
     if tool in PATCH_TOOLS:
         targets.extend(patch_targets(command_from(payload)))
     root = HOOK_ROOT
-    for target in dict.fromkeys(targets):
-        path = eligible_format_path(root, target)
-        if path is None or not path.is_file():
+    eligible = {str(path): path for target in targets
+                if (path := eligible_format_path(root, target)) is not None}
+    evidence = format_snapshot.consume(payload, root, set(eligible))
+    notices: list[str] = []
+    for target, snapshot in evidence.items():
+        path = eligible[target]
+        if not path.is_file():
             continue
         ranges = format_line_ranges(root, path)
         if not ranges:
             # None (no scope) and [] (nothing changed) both mean: leave the file alone.
             continue
-        command = ["clang-format", "-i"]
+        command = ["clang-format", f"--assume-filename={path}"]
         command.extend(f"--lines={start}:{end}" for start, end in ranges)
-        command.append(str(path))
-        subprocess.run(command, check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        try:
+            original = format_snapshot.read_source(path)
+            if format_snapshot.digest(original) != snapshot["expected"]:
+                continue
+            result = subprocess.run(command, input=original, capture_output=True, check=False, timeout=10)
+            # A POSIX pathname offers no atomic compare-and-write against an unrelated editor.
+            # Report a proven current-tool format difference; never write the formatted contents.
+            if result.returncode == 0 and result.stdout != original \
+                    and format_snapshot.git(root, "rev-parse", "--verify", "HEAD") == snapshot["head"] \
+                    and format_snapshot.read_source(path) == original:
+                notices.append(f"agent-format: current-tool edit needs reviewed formatting: {path.relative_to(root)}")
+        except (OSError, subprocess.SubprocessError):
+            continue
     if _CURRENT_IS_ANTIGRAVITY:
+        if notices:
+            sys.stderr.write(("\n".join(notices))[:4000] + "\n")
         print("{}")
+    elif notices:
+        print(json.dumps({"hookSpecificOutput": {"hookEventName": "PostToolUse",
+                          "additionalContext": ("\n".join(notices)
+                                                + "\nApply only reviewed edits under explicit file ownership, then run scripts/run-format-check.sh.")[:4000]}},
+                         separators=(",", ":")))
     return 0
 
 
