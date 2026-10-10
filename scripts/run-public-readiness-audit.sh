@@ -22,17 +22,18 @@ if (!Array.isArray(args) || !args.some((arg) => /^@upstash\/context7-mcp@\d+\.\d
 // trusted without changing this audit. Secret/partition guards and all PR-review gates remain
 // consolidated behind canonical dispatches. This does not authenticate hook source after project
 // trust. It keeps the tracked configuration narrow, deterministic and reviewable.
-const preToolMatcher = "run_command|view_file|replace_file_content|write_to_file|Bash|Read|Edit|Write|apply_patch|exec_command|shell|shell_command";
-const prGatesMatcher = "run_command|Bash|exec_command|shell|shell_command|mcp__.+(?:merge_pull_request|enable_auto_merge|enable_pull_request_auto_merge|enqueue_pull_request)";
-const formatMatcher = "replace_file_content|write_to_file|Edit|Write|apply_patch";
+const preToolMatcher = "run_command|view_file|replace_file_content|write_to_file|Bash|Read|Edit|Write|(?:functions\\.)?apply_patch|(?:functions\\.)?exec_command|shell|shell_command";
+const prGatesMatcher = "run_command|Bash|(?:functions\\.)?exec_command|shell|shell_command|mcp__.+(?:merge_pull_request|enable_auto_merge|enable_pull_request_auto_merge|enqueue_pull_request)";
+const formatMatcher = "replace_file_content|write_to_file|Edit|Write|(?:functions\\.)?apply_patch";
+const hookCommand = '\"$(git rev-parse --show-toplevel)/scripts/agent-python.sh\" \"$(git rev-parse --show-toplevel)/tools/agent-hooks/agent_hook.py\" ';
 
 const expectedGuards = {
   PreToolUse: [
-    [preToolMatcher, 'python3 "$(git rev-parse --show-toplevel)/tools/agent-hooks/agent_hook.py" pre-tool-guards', 10],
-    [prGatesMatcher, 'python3 "$(git rev-parse --show-toplevel)/tools/agent-hooks/agent_hook.py" pr-gates', 600],
+    [preToolMatcher, hookCommand + 'pre-tool-guards', 10],
+    [prGatesMatcher, hookCommand + 'pr-gates', 600],
   ],
   PostToolUse: [
-    [formatMatcher, 'python3 "$(git rev-parse --show-toplevel)/tools/agent-hooks/agent_hook.py" format', 30],
+    [formatMatcher, hookCommand + 'format', 30],
   ],
 };
 const hooksDoc = JSON.parse(fs.readFileSync(".agents/hooks.json", "utf8"));
@@ -69,7 +70,7 @@ for (const [event, expectedGroups] of Object.entries(expectedGuards)) {
 const stopHook = guards.Stop?.[0];
 if (!Array.isArray(guards.Stop) || guards.Stop.length !== 1 ||
     stopHook?.type !== "command" ||
-    stopHook?.command !== 'python3 "$(git rev-parse --show-toplevel)/tools/agent-hooks/agent_hook.py" stop-logic-tests' ||
+    stopHook?.command !== hookCommand + 'stop-logic-tests' ||
     stopHook?.timeout !== 600) {
   throw new Error("unapproved canonical Stop hook definition");
 }

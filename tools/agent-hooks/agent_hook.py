@@ -24,6 +24,9 @@ from typing import Any, Iterable
 from urllib.parse import unquote
 
 from merge_payload import find_merge as classify_github_action
+from merge_payload import literal_rg_inspection
+from merge_payload import shell_executes_stdin
+import format_snapshot
 
 
 FILE_TOOLS = {"read", "edit", "write"}
@@ -670,7 +673,6 @@ def shell_dumps_environment(command: str) -> bool:
 
 
 def shell_dumps_credentials(command: str) -> bool:
-    shell = r"(?:bash|dash|sh|zsh)"
     if any(
         re.search(pattern, command, flags=re.IGNORECASE)
         for pattern in (
@@ -681,11 +683,7 @@ def shell_dumps_credentials(command: str) -> bool:
         )
     ):
         return True
-    if (
-        re.search(rf"\|[^|;\n]*\b{shell}\b", command)
-        or re.search(rf"\b{shell}\b[^;&|\n]*(?:<<<|(?<!<)<(?!<))", command)
-        or re.search(rf"\b{shell}\b(?:\s+-[^;&|\n]*)*\s+-s(?:\s|$)", command)
-    ):
+    if shell_executes_stdin(command):
         return True
     for tokens, _ in shell_token_sets(command):
         if not tokens:
@@ -1248,27 +1246,34 @@ def direct_ota_update_write(command: str) -> bool:
 
 def read_only_gate_inspection(command: str) -> bool:
     """Allow source inspection to name the gate without allowing an execution wrapper."""
+    if re.search(r"[$`<>]", command):
+        return False
     token_sets = [tokens for tokens, _ in shell_token_sets(command) if tokens]
     if not token_sets:
         return False
     for tokens in token_sets:
         executable = Path(tokens[0]).name
         args = tokens[1:]
-        if executable not in {"cat", "diff", "grep", "head", "rg", "sed", "tail"}:
+        if executable not in {"cat", "diff", "grep", "head", "nl", "rg", "sed", "tail"}:
             return False
         if executable == "diff" and any(
             arg == "--output" or arg.startswith("--output=") for arg in args
         ):
             return False
         if executable == "rg" and any(
-            arg == "--pre" or arg.startswith("--pre=") for arg in args
-        ):
-            return False
-        if executable == "sed" and any(
-            arg == "-i" or arg.startswith("-i") or arg == "--in-place" or arg.startswith("--in-place=")
+            arg in {"--pre", "--hostname-bin"} or arg.startswith(("--pre=", "--hostname-bin="))
             for arg in args
         ):
             return False
+        if executable == "sed":
+            # sed also executes commands and writes files without -i. Source inspection needs
+            # only a literal print selector; unknown scripts must not inherit reader permission.
+            if args and args[0] in {"-n", "--quiet", "--silent"}:
+                args = args[1:]
+            if not args or re.fullmatch(r"(?:[0-9]+|\$)?(?:,(?:[0-9]+|\$))?p", args[0]) is None:
+                return False
+            if any(arg.startswith("-") for arg in args[1:]):
+                return False
     return True
 
 
@@ -1397,7 +1402,10 @@ def secret_violation(payload: dict[str, Any]) -> str | None:
         github_action = classify_github_action(command)
         if github_action is not None and github_action.get("error"):
             return github_action["error"]
-        if SHELL_EXTGLOB.search(command):
+        # Decode ANSI-C quotes and join shell quote fragments conservatively before checking
+        # executable syntax. Reader proof must still come from the unmodified source.
+        extglob_source = re.sub(r"['\"]", "", normalize_ansi_c_quotes(command))
+        if SHELL_EXTGLOB.search(extglob_source) and not literal_rg_inspection(command):
             return "shell extglob expansion is not statically bounded by the credential/partition guard"
         if shell_dumps_environment(command):
             return "the command would dump process environment values, which may include credentials"
@@ -1497,7 +1505,14 @@ def partition_segment_is_read_only(tokens: list[str]) -> bool:
             return False
         return True
     if executable == "git" and args:
-        if args[0] not in {"diff", "grep", "log", "show", "status"}:
+        while args:
+            if args[:2] == ["-c", "core.fsmonitor=false"]:
+                args = args[2:]
+            elif args[0] == "--no-optional-locks":
+                args = args[1:]
+            else:
+                break
+        if not args or args[0] not in {"diff", "grep", "log", "ls-files", "show", "status"}:
             return False
         return not any(
             arg in {"--output", "--ext-diff", "--textconv"} or arg.startswith("--output=")
@@ -1624,6 +1639,14 @@ def run_pre_tool_guards(args: argparse.Namespace) -> int:
         return 0
     if guard_partitions(payload, shell_only=args.partition_shell_only):
         return 0
+    tool = normalized_tool(payload.get("tool_name"))
+    if tool in {"edit", "write"} | PATCH_TOOLS:
+        targets = path_targets(payload)
+        if tool in PATCH_TOOLS:
+            targets.extend(patch_targets(command_from(payload)))
+        eligible = {target: path for target in targets
+                    if (path := eligible_format_path(HOOK_ROOT, target)) is not None}
+        format_snapshot.record(payload, HOOK_ROOT, tool, tool_input(payload), command_from(payload), eligible)
     if _CURRENT_IS_ANTIGRAVITY:
         print(json.dumps({"decision": "allow"}, separators=(",", ":")))
     return 0
@@ -1652,7 +1675,7 @@ FORMAT_HUNK_RE = re.compile(r"^@@ -[0-9]+(?:,[0-9]+)? \+([0-9]+)(?:,([0-9]+))? @
 
 
 def format_line_ranges(root: Path, path: Path) -> list[tuple[int, int]] | None:
-    """The lines THIS working-tree change touched, as clang-format --lines ranges.
+    """Changed-hunk report scope, usable only after the current-tool snapshot is verified.
 
     Mirrors tools/format/check_format.py's changed-hunk scope on purpose. The CI gate
     deliberately ratchets — "existing legacy drift outside the diff is not rewritten" — and a hook
@@ -1663,7 +1686,7 @@ def format_line_ranges(root: Path, path: Path) -> list[tuple[int, int]] | None:
 
     Returns None when the scope cannot be established (no git, not a work tree, unreadable diff).
     None means "format nothing": a hook that cannot tell new code from old must not rewrite either.
-    An untracked file is entirely new, so it has no legacy drift to protect and is formatted whole.
+    An untracked file is checked whole only when its correlated pre-event proved it absent.
     """
     if not shutil.which("git"):
         return None
@@ -1673,16 +1696,16 @@ def format_line_ranges(root: Path, path: Path) -> list[tuple[int, int]] | None:
         return None
     try:
         untracked = subprocess.run(
-            ["git", "-C", str(root), "ls-files", "--others", "--exclude-standard", "--", relative],
+            ["git", "-c", "core.fsmonitor=false", "-C", str(root), "ls-files", "--others", "--exclude-standard", "--", relative],
             check=False, capture_output=True, text=True, timeout=10,
         )
         if untracked.returncode != 0:
             return None
         if untracked.stdout.strip():
-            line_count = path.read_bytes().count(b"\n")
+            line_count = format_snapshot.read_source(path).count(b"\n")
             return [(1, max(1, line_count))]
         diff = subprocess.run(
-            ["git", "-C", str(root), "diff", "--unified=0", "--no-color", "HEAD", "--", relative],
+            ["git", "-c", "core.fsmonitor=false", "-C", str(root), "diff", "--unified=0", "--no-color", "HEAD", "--", relative],
             check=False, capture_output=True, text=True, timeout=10,
         )
         if diff.returncode != 0:
@@ -1710,20 +1733,42 @@ def run_format(_: argparse.Namespace) -> int:
     if tool in PATCH_TOOLS:
         targets.extend(patch_targets(command_from(payload)))
     root = HOOK_ROOT
-    for target in dict.fromkeys(targets):
-        path = eligible_format_path(root, target)
-        if path is None or not path.is_file():
+    eligible = {str(path): path for target in targets
+                if (path := eligible_format_path(root, target)) is not None}
+    evidence = format_snapshot.consume(payload, root, set(eligible))
+    notices: list[str] = []
+    for target, snapshot in evidence.items():
+        path = eligible[target]
+        if not path.is_file():
             continue
         ranges = format_line_ranges(root, path)
         if not ranges:
             # None (no scope) and [] (nothing changed) both mean: leave the file alone.
             continue
-        command = ["clang-format", "-i"]
+        command = ["clang-format", f"--assume-filename={path}"]
         command.extend(f"--lines={start}:{end}" for start, end in ranges)
-        command.append(str(path))
-        subprocess.run(command, check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        try:
+            original = format_snapshot.read_source(path)
+            if format_snapshot.digest(original) != snapshot["expected"]:
+                continue
+            result = subprocess.run(command, input=original, capture_output=True, check=False, timeout=10)
+            # A POSIX pathname offers no atomic compare-and-write against an unrelated editor.
+            # Report a proven current-tool format difference; never write the formatted contents.
+            if result.returncode == 0 and result.stdout != original \
+                    and format_snapshot.git(root, "rev-parse", "--verify", "HEAD") == snapshot["head"] \
+                    and format_snapshot.read_source(path) == original:
+                notices.append(f"agent-format: current-tool edit needs reviewed formatting: {path.relative_to(root)}")
+        except (OSError, subprocess.SubprocessError):
+            continue
     if _CURRENT_IS_ANTIGRAVITY:
+        if notices:
+            sys.stderr.write(("\n".join(notices))[:4000] + "\n")
         print("{}")
+    elif notices:
+        print(json.dumps({"hookSpecificOutput": {"hookEventName": "PostToolUse",
+                          "additionalContext": ("\n".join(notices)
+                                                + "\nApply only reviewed edits under explicit file ownership, then run scripts/run-format-check.sh.")[:4000]}},
+                         separators=(",", ":")))
     return 0
 
 

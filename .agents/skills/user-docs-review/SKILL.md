@@ -22,7 +22,9 @@ non-specialist cannot tell what it means, what it does not prove, or what to do 
    ticket or commit message.
 2. Trace the result through `/status.health`, `CHECKUP_ROW`, its translated value/detail strings and
    `MODEL_DESCRIPTIONS.health_*`. Keep repository documentation in English. Verify localized UI copy
-   carries the same claim strength without copying localized prose into the documentation.
+   carries the same claim strength in every shipped `UI_LANGS` locale, including
+   `main/www/locales/`, without copying localized prose into the documentation. Check all changed
+   translations semantically; a mechanical localization pass does not prove their meaning.
 3. Update the inline explainer, [`docs/DIAGNOSTICS.md`](../../../docs/DIAGNOSTICS.md) and
    [`docs/DIAGNOSTIC_EVIDENCE.md`](../../../docs/DIAGNOSTIC_EVIDENCE.md) together. Preserve the
    `<!-- user-docs: health_* -->` marker and the evidence heading's stable wire id belonging to each
@@ -55,7 +57,9 @@ Keep these surfaces aligned:
 
 - `main/logic/checkup.hpp` and `main/checkup.cpp`: evaluator and published evidence;
 - `main/www/js/dashboard.js`: visible row and bounded status/detail;
-- `main/www/js/history.js`: English and German `what`, `normal`/`meaning` and `action`;
+- `main/www/js/history.js`: source `what`, `normal`/`meaning` and `action`;
+- `main/www/locales/`: corresponding copy in every external locale listed by `UI_LANGS`, including
+  the compact `MODEL_DESCRIPTION_I18N` tables for diagnosis explainers;
 - `main/www/js/i18n.js`: labels and status wording;
 - `docs/DIAGNOSTICS.md`: one marked English section with **In plain language** and
   **What you can do**, plus glossary/status updates when needed;
@@ -70,7 +74,7 @@ Keep these surfaces aligned:
 Before updating the audit fingerprint:
 1. **Four-question structure check:** Confirm that each visible diagnosis section answers the four questions in sequence: (1) what was counted/observed, (2) what it means, (3) what cannot be established, and (4) safe owner next steps.
 2. **Owner perspective & jargon audit:** Verify that acronyms are introduced before abbreviations, language is accessible to a homeowner (not just an HVAC technician), and no single check implies whole-plant wellness.
-3. **English-only documentation check:** Confirm that all text in `docs/` and review files is strictly English, leaving German localized strings exclusively in `main/www/`.
+3. **English-only documentation check:** Confirm that all text in `docs/` and review files is strictly English, leaving localized UI strings exclusively in `main/www/`. Verify completeness against `UI_LANGS` and state any limits of the changed translations' semantic review.
 4. **Actionable wording review:** Report vague advice such as "call service" without supporting
    context. Revise wording only when fixes are explicitly authorized; review-only work leaves prose
    and audit fingerprints unchanged.

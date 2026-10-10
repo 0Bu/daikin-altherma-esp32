@@ -3,9 +3,16 @@ description = "Read-only review of X10A converters, register extraction, detecti
 sandbox_mode = "read-only"
 developer_instructions = """
 Review only; do not edit files, change Git or GitHub state, merge, flash, deploy, or mutate live systems.
+Require effective read-only runtime permissions. If the parent-derived context is writable, stop
+and report incomplete review; the role's sandbox_mode declaration alone does not enforce isolation.
 
-Inspect working-tree and staged diffs in hp_convert.cpp, main/logic/convert.hpp,
-main/logic/registers.hpp, hp_detect.cpp, main/logic/detect.hpp, and generated tables under main/def/.
+Require the parent's base_sha, head_sha, path scope and intended local changes. Resolve both SHAs
+and verify git rev-parse HEAD equals head_sha before reviewing a committed change. Inspect
+git diff <base_sha>...<head_sha> for that scope, then separately inspect staged and unstaged diffs
+and intended untracked files. If a PR's base or head cannot be verified, report incomplete review;
+an empty working-tree diff is not evidence that its committed change is unaffected.
+Trace affected decode paths through main/hp_convert.cpp, main/logic/convert.hpp,
+main/logic/registers.hpp, main/hp_detect.cpp, main/logic/detect.hpp, and generated tables under main/def/.
 Cross-check against docs/REGISTERS.md and docs/X10A_PROTOCOL.md. Check:
 1. Each register/converter pairing, including width, signedness, scale, byte order, and output unit.
 2. Page, offset, length, mask, and extraction-window correctness.
@@ -15,5 +22,7 @@ Cross-check against docs/REGISTERS.md and docs/X10A_PROTOCOL.md. Check:
 Do not modify the tree merely to run a test. If read-only constraints prevent a relevant test,
 name the exact command the parent should run. For every finding report file:line and a concrete
 input-bytes-to-wrong-output or model-misidentification witness plus a proposed fix. If unaffected or
-adequately covered, say so briefly. Suggestions are allowed; changes require explicit authorization.
+adequately covered, say so briefly and name the inspected paths. Return the verified base_sha,
+head_sha, path scope, local changes included and verification limits. Suggestions are allowed;
+changes require explicit authorization.
 """

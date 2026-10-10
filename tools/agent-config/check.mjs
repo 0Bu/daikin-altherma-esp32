@@ -31,6 +31,11 @@ const canonicalBudget = positiveInteger(
   process.env.AGENT_INSTRUCTIONS_BUDGET_BYTES || "24576",
   "canonical instruction budget",
 );
+const effectiveBudget = positiveInteger(
+  process.env.AGENT_EFFECTIVE_INSTRUCTIONS_BUDGET_BYTES || "32768",
+  "effective instruction budget",
+);
+if (effectiveBudget > 32768) die(2, "effective instruction budget must not exceed Codex's default 32768 bytes");
 
 function repoPath(relative) {
   return path.join(root, ...relative.split("/"));
@@ -38,9 +43,18 @@ function repoPath(relative) {
 
 function regularFile(relative, label) {
   let stat;
-  try { stat = fs.statSync(repoPath(relative)); }
+  let current = root;
+  for (const component of relative.split("/")) {
+    current = path.join(current, component);
+    let info;
+    try { info = fs.lstatSync(current); }
+    catch { die(1, `${label} is missing: ${relative}`); }
+    if (info.isSymbolicLink()) die(1, `${label} is not a regular file (symlink path): ${relative}`);
+  }
+  try { stat = fs.lstatSync(repoPath(relative)); }
   catch { die(1, `${label} is missing: ${relative}`); }
   if (!stat.isFile()) die(1, `${label} is not a regular file: ${relative}`);
+  return stat;
 }
 
 function executableFile(relative, label) {
@@ -64,7 +78,7 @@ function readJson(relative, label) {
 
 function checkBudget(relative, budget, label) {
   let stat;
-  try { stat = fs.statSync(repoPath(relative)); }
+  try { stat = fs.lstatSync(repoPath(relative)); }
   catch { die(2, `${label} file ${relative} does not exist — refusing to report success`); }
   if (!stat.isFile()) die(2, `${label} path ${relative} is not a regular file`);
   if (stat.size > budget) {
@@ -268,6 +282,27 @@ if (credentialStoreMentions.length !== 1 ||
 
 regularFile(canonicalInstructions, "canonical instructions");
 const canonicalSize = checkBudget(canonicalInstructions, canonicalBudget, "canonical instructions");
+const instructionGlobs = ["AGENTS.md", "**/AGENTS.md", "AGENTS.override.md", "**/AGENTS.override.md"];
+const instructionFiles = spawnSync("git", ["-c", "core.fsmonitor=false", "-C", root, "ls-files", "--cached", "--others", "--exclude-standard", "-z", "--", ...instructionGlobs], { encoding: "utf8" });
+if (instructionFiles.error || instructionFiles.status !== 0) die(2, "git ls-files could not enumerate scoped instructions");
+const ignoredInstructions = spawnSync("git", ["-c", "core.fsmonitor=false", "-C", root, "ls-files", "--others", "--ignored", "--exclude-standard", "-z", "--", ...instructionGlobs], { encoding: "utf8" });
+if (ignoredInstructions.error || ignoredInstructions.status !== 0) die(2, "git ls-files could not enumerate ignored instruction overrides");
+const allInstructionPaths = [...new Set([...instructionFiles.stdout.split("\0"), ...ignoredInstructions.stdout.split("\0")].filter(Boolean))].sort();
+const overridePaths = allInstructionPaths.filter((relative) => path.posix.basename(relative) === "AGENTS.override.md");
+if (overridePaths.length) die(1, `AGENTS.override.md is forbidden by the canonical instruction contract: ${overridePaths.join(", ")}`);
+const instructionPaths = allInstructionPaths.filter((relative) => path.posix.basename(relative) === "AGENTS.md");
+for (const relative of instructionPaths) {
+  const directory = path.posix.dirname(relative);
+  const chain = instructionPaths.filter((candidate) => {
+    const scope = path.posix.dirname(candidate);
+    return scope === "." || directory === scope || directory.startsWith(`${scope}/`);
+  });
+  const bytes = chain.reduce((total, candidate) => {
+    return total + regularFile(candidate, "scoped instructions").size;
+  }, 0) + Math.max(0, chain.length - 1) * 2;
+  if (bytes > effectiveBudget) die(1, `repository effective instruction chain ${directory} is ${bytes} bytes, over the ${effectiveBudget}-byte budget (${chain.join(" + ")})`);
+  console.log(`agent-instructions: repository effective chain ${directory} ${bytes}/${effectiveBudget} bytes (${chain.join(" + ")})`);
+}
 const safety = readJson(invariantFile, "safety invariant contract");
 if (safety?.schema_version !== 1 || !Array.isArray(safety?.invariants)) {
   die(2, "safety invariant contract needs schema_version 1 and an invariants array");

@@ -111,6 +111,7 @@ to a used feature row.
 |---|---|---|
 | `CONFIG_IDF_TARGET` | `"esp32s3"` | U01 |
 | `CONFIG_APP_REPRODUCIBLE_BUILD` | `y` | U01 |
+| `CONFIG_APP_RETRIEVE_LEN_ELF_SHA` | `9` | U17 |
 | `CONFIG_ESPTOOLPY_FLASHSIZE_8MB` | `y` | U01 |
 | `CONFIG_PARTITION_TABLE_CUSTOM` | `y` | U06 |
 | `CONFIG_PARTITION_TABLE_CUSTOM_FILENAME` | `"partitions.csv"` | U06 |

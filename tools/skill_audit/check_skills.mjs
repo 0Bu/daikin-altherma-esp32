@@ -182,6 +182,56 @@ function finding(skill, message) {
   findingsCount++;
 }
 
+function checkRelativeLinks(label, file, content) {
+  const links = /\[([^\]]+)\]\(([^)]+)\)/g;
+  for (const match of content.matchAll(links)) {
+    const destination = match[2].trim();
+    const plainTarget = destination.startsWith("<") && destination.endsWith(">")
+      ? destination.slice(1, -1) : destination;
+    const target = plainTarget.split("#")[0].split("?")[0];
+    if (!target || /^(?:https?|mailto):/.test(target)) continue;
+    const resolved = path.resolve(path.dirname(file), target);
+    if (!fs.existsSync(resolved)) finding(label, `broken relative link '${match[2]}' (resolved to: ${resolved})`);
+  }
+}
+
+function checkReferenceLinks(skillName, directory) {
+  if (!fs.existsSync(directory)) return;
+  if (!fs.lstatSync(directory).isDirectory()) {
+    finding(skillName, "reference directory must be a regular directory");
+    return;
+  }
+  for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+    const file = path.join(directory, entry.name);
+    if (entry.isDirectory()) checkReferenceLinks(skillName, file);
+    else if (entry.isFile() && entry.name.endsWith(".md")) {
+      checkRelativeLinks(`${skillName}/references/${entry.name}`, file, fs.readFileSync(file, "utf8"));
+    }
+  }
+}
+
+// These source-bound contradictions previously escaped the structural scan. Historical rationale
+// remains in references; current SKILL.md instructions must describe the shipped surfaces.
+const localeSource = fs.readFileSync(path.join(repoRoot, "main/www/js/i18n.js"), "utf8");
+const languageList = localeSource.match(/const UI_LANGS\s*=\s*Object\.freeze\(\[([^\]]+)\]\)/);
+if (!languageList) die(2, "cannot establish shipped UI_LANGS for skill claims");
+const shippedLanguageCount = [...languageList[1].matchAll(/"[a-z]+"/g)].length;
+const elfSource = fs.readFileSync(path.join(repoRoot, "main/http_status.cpp"), "utf8");
+const elfBuffer = elfSource.match(/char\s+elf_sha\[([1-9][0-9]*)\][\s\S]{0,100}esp_app_get_elf_sha256\(elf_sha,\s*sizeof\(elf_sha\)\)/);
+const configSource = fs.readFileSync(path.join(repoRoot, "sdkconfig.defaults"), "utf8");
+const elfSettings = configSource.split(/\r?\n/).filter(line => /^\s*CONFIG_APP_RETRIEVE_LEN_ELF_SHA\s*=/.test(line));
+if (elfSettings.length !== 1 || !/^CONFIG_APP_RETRIEVE_LEN_ELF_SHA=([0-9]+)$/.test(elfSettings[0])) {
+  die(2, "cannot establish exactly one explicit CONFIG_APP_RETRIEVE_LEN_ELF_SHA assignment");
+}
+const apiElfShaLength = Number(elfSettings[0].split("=")[1]);
+// The pinned SDK's Kconfig range is 8..64; esp_app_get_elf_sha256 copies this configured prefix,
+// even when the caller supplies a larger buffer. Require room for its terminating NUL.
+if (apiElfShaLength < 8 || apiElfShaLength > 64 || !elfBuffer || Number(elfBuffer[1]) <= apiElfShaLength) {
+  die(2, "configured API ELF SHA length is outside the SDK range or status buffer capacity");
+}
+const browserCi = fs.readFileSync(path.join(repoRoot, ".github/workflows/build.yml"), "utf8")
+  .includes("scripts/run-browser-render-tests.sh");
+
 // Review skills that require baseline pinning and stamp format checks
 const reviewSkills = new Set([
   "absence-review",
@@ -287,17 +337,21 @@ for (const skillName of discoveredSkills) {
   }
 
   // B. Relative Markdown links check
-  const linkRegex = /\[([^\]]+)\]\(([^)]+)\)/g;
   let match;
-  while ((match = linkRegex.exec(content)) !== null) {
-    const rawTarget = match[2].split("#")[0].split("?")[0].trim();
-    if (!rawTarget || /^(?:https?|mailto):/.test(rawTarget)) continue;
-    if (rawTarget.startsWith("<") || rawTarget.endsWith(">")) continue;
-
-    const targetPath = path.resolve(path.join(skillsDir, skillName), rawTarget);
-    if (!fs.existsSync(targetPath)) {
-      finding(skillName, `broken relative link '${match[2]}' (resolved to: ${targetPath})`);
-    }
+  checkRelativeLinks(skillName, skillFile, content);
+  checkReferenceLinks(skillName, path.join(skillsDir, skillName, "references"));
+  if (shippedLanguageCount > 2 && /(?:copy, in both languages|copy & fit check[^\n]*both English and German|key EXISTS in both dicts)/i.test(content)) {
+    finding(skillName, `two-language review claim contradicts ${shippedLanguageCount} shipped UI_LANGS`);
+  }
+  const elfClaims = [
+    ...content.matchAll(/\/status\.app_elf_sha256[\s\S]{0,100}?\b([0-9]+)-hex\b/g),
+    ...content.matchAll(/\bCONFIG_APP_RETRIEVE_LEN_ELF_SHA=([0-9]+)\b/g),
+  ];
+  if (elfClaims.some(claim => Number(claim[1]) !== apiElfShaLength)) {
+    finding(skillName, `API ELF SHA claim contradicts the configured ${apiElfShaLength}-hex status prefix`);
+  }
+  if (browserCi && /CI has no browser/i.test(content)) {
+    finding(skillName, "no-browser CI claim contradicts the rendered browser workflow gate");
   }
 
   // C. Script references check (e.g. scripts/run-*.sh)
@@ -505,6 +559,14 @@ for (const reviewer of discoveredReviewers) {
   if (!instructions.trim()) {
     finding(`reviewer:${reviewer.file}`, "empty developer_instructions");
   } else {
+    for (const required of ["base_sha", "head_sha", "staged", "unstaged", "untracked", "incomplete", "effective read-only runtime permissions"]) {
+      if (!instructions.includes(required)) finding(`reviewer:${reviewer.file}`, `missing review-scope contract: ${required}`);
+    }
+    if (reviewer.name === "heap_safety_reviewer") {
+      for (const required of [/task loop/i, /raw mutex/i, /RAII/, /stack budgets/i]) {
+        if (!required.test(instructions)) finding(`reviewer:${reviewer.file}`, `missing heap safety coverage: ${required.source}`);
+      }
+    }
     const filePattern = /(?<![A-Za-z0-9_./-])((?:docs|main|scripts|tools|test|\.agents)\/(?:[A-Za-z0-9_.-]+\/)*[A-Za-z0-9_.-]+\.[a-zA-Z0-9]+|AGENTS\.md)\b/g;
     let fMatch;
     while ((fMatch = filePattern.exec(instructions)) !== null) {

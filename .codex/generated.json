@@ -1,0 +1,18 @@
+{
+  "generated_by": "tools/agent-config/export-subagents.py",
+  "outputs": {
+    ".codex/agents/doc-drift-checker.toml": "6ad3c25a9f2de638644161522820cbd8ec5f57afe64a28001dff2aacdfc30997",
+    ".codex/agents/heap-safety-reviewer.toml": "5a9ea356fe0c6ca6facb513e9fd9ac895af62851e0ae01a1d2d465d79817217e",
+    ".codex/agents/x10a-decode-reviewer.toml": "c3b60241521496eb6af1ec6d48b688ad791304dd0fd048eb503a7ae37f90c591",
+    ".codex/config.toml": "88882829a4d6d6cf24fc8e8fea4ba051f69cdecbcd863fe073079a219cee95b9",
+    ".codex/hooks.json": "66ef1684b6e4cbabb6fdd8459480df694352db476d215d5b65a5015e60a45d0e"
+  },
+  "schema_version": 1,
+  "sources": {
+    ".agents/agents/doc-drift-checker.toml": "29839f0f748959c3ee9f80a922457c0c1ef7d96618166a8b6d4250628b9a285d",
+    ".agents/agents/heap-safety-reviewer.toml": "e3511f94330ef44978d96f4eece6c135f19660810b75df0d49c63559791a2cc1",
+    ".agents/agents/x10a-decode-reviewer.toml": "05b94a5fa46c67e2667f3b563e9435a7bdda289508802d92fc34e36c0ceaee55",
+    ".agents/hooks.json": "5881a11651733837edf07a1f3dbd4a986cc64461a4b7f92f65e39eb31b11c5f4",
+    ".mcp.json": "029e9eac30104471181cdeb729428da5ae68827e9cde2b9845d0b693f97bb53c"
+  }
+}

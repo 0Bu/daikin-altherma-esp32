@@ -7,6 +7,7 @@
 set -euo pipefail
 
 proj="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-python3 "$proj/tools/agent-config/check_toml.py"
-python3 "$proj/tools/agent-config/check_hooks.py"
-exec node "$proj/tools/agent-config/check.mjs" "$@"
+"$proj/scripts/agent-python.sh" "$proj/tools/agent-config/check_toml.py"
+"$proj/scripts/agent-python.sh" "$proj/tools/agent-config/check_hooks.py"
+node "$proj/tools/agent-config/check.mjs" "$@"
+exec "$proj/scripts/agent-python.sh" "$proj/tools/agent-config/export-subagents.py" --check

@@ -736,7 +736,8 @@ requested up front (`/status.last_crash` gives current reset/fault and any avail
 is genuinely needed, it is sent through this private form and never attached to an issue.
 
 Please include the firmware version (`GET /status` → `version`, or the version shown in the web UI)
-and, where relevant, the `app_elf_sha256` from the same response — it pins the exact build.
+and, where relevant, `app_elf_sha256` from the same response — its configured nine-character ELF
+hash prefix helps correlate the build; full artifact verification remains separate.
 
 There is no bug bounty and no SLA: this is a hobby project maintained in spare time. Expect a first
 response within a couple of weeks, and note that the [trust boundary](#trust-boundary) above is

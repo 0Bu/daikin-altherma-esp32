@@ -1,0 +1,49 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "run_command|view_file|replace_file_content|write_to_file|Bash|Read|Edit|Write|(?:functions\\.)?apply_patch|(?:functions\\.)?exec_command|shell|shell_command",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$(git rev-parse --show-toplevel)/scripts/agent-python.sh\" \"$(git rev-parse --show-toplevel)/tools/agent-hooks/agent_hook.py\" pre-tool-guards",
+            "timeout": 10
+          }
+        ]
+      },
+      {
+        "matcher": "run_command|Bash|(?:functions\\.)?exec_command|shell|shell_command|mcp__.+(?:merge_pull_request|enable_auto_merge|enable_pull_request_auto_merge|enqueue_pull_request)",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$(git rev-parse --show-toplevel)/scripts/agent-python.sh\" \"$(git rev-parse --show-toplevel)/tools/agent-hooks/agent_hook.py\" pr-gates",
+            "timeout": 600
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "replace_file_content|write_to_file|Edit|Write|(?:functions\\.)?apply_patch",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$(git rev-parse --show-toplevel)/scripts/agent-python.sh\" \"$(git rev-parse --show-toplevel)/tools/agent-hooks/agent_hook.py\" format",
+            "timeout": 30
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$(git rev-parse --show-toplevel)/scripts/agent-python.sh\" \"$(git rev-parse --show-toplevel)/tools/agent-hooks/agent_hook.py\" stop-logic-tests",
+            "timeout": 600
+          }
+        ]
+      }
+    ]
+  }
+}

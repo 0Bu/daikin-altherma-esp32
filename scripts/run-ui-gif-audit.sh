@@ -7,7 +7,7 @@
 # the README goes on showing last month's pipes. A screenshot cannot fail a test — it can only be
 # out of date, and nothing else in this repo can tell.
 #
-# CI has no browser, so this cannot re-render and compare pixels. It fingerprints the SOURCES the
+# This freshness gate does not re-render or compare pixels. It fingerprints the SOURCES the
 # recording depends on — the schematic markup, the CSS that draws and animates it, the assembled UI
 # functions that paint it, the strings they print, the scenes, and the recorder's own
 # framing — and fails when that no longer matches the stamp recorded beside the GIF. It also reads

@@ -17,8 +17,11 @@ mkdir -p "$TEMPLATE"
     ".mcp.json" \
     ".agents/hooks.json" \
     "AGENTS.md" \
+    "scripts/agent-python.sh" \
     "scripts/gh-with-git-credentials.sh" \
     "tools/agent-config/safety-invariants.json"
+  git -c core.fsmonitor=false -C "$ROOT" ls-files -- '*/AGENTS.md'
+  find "$ROOT/.codex" -type f -print | sed "s#^$ROOT/##"
   find "$ROOT/.agents/agents" "$ROOT/.agents/skills" -type f -print \
     | sed "s#^$ROOT/##"
 } | sort -u > "$WORK/__template_files.txt"
@@ -45,7 +48,8 @@ run_gate() {
 expect_pass() {
   local name="$1" fixture="$WORK/$1"
   make_fixture "$fixture"
-  run_gate "$fixture" >/dev/null 2>&1 || fail "$name: clean fixture failed"
+  local output
+  output="$(run_gate "$fixture" 2>&1)" || fail "$name: clean fixture failed: $output"
   echo "  PASS  $name"
   pass=$((pass + 1))
 }
@@ -65,10 +69,36 @@ echo "== clean canonical contract =="
 expect_pass "current canonical configuration passes"
 fixture="$WORK/default-budget"
 make_fixture "$fixture"
-output="$(run_gate "$fixture" 2>&1)" || fail "default budget: clean fixture failed"
+output="$(run_gate "$fixture" 2>&1)" || fail "default budget: clean fixture failed: $output"
 printf '%s' "$output" | grep -Eq 'canonical budget [0-9]+/24576 bytes' \
   || fail "default budget: canonical default is not 24576 bytes"
 echo "  PASS  canonical default budget is 24576 bytes"
+pass=$((pass + 1))
+printf '%s' "$output" | grep -Eq 'effective chain main/www [0-9]+/32768 bytes' \
+  || fail "scoped budget: main/www effective chain was not reported"
+echo "  PASS  effective scoped instruction chains are reported"
+pass=$((pass + 1))
+
+echo "== interpreter preflight =="
+checked_python="$("$ROOT/scripts/agent-python.sh" --resolve)"
+AGENT_PYTHON="$checked_python" "$ROOT/scripts/agent-python.sh" -c 'import sys, tomllib; assert sys.version_info >= (3, 11)' \
+  || fail "supported explicit interpreter failed"
+echo "  PASS  supported AGENT_PYTHON override"
+pass=$((pass + 1))
+mkdir -p "$WORK/interpreter-bin"
+printf '#!/bin/sh\nexit 1\n' > "$WORK/interpreter-bin/python3"
+chmod +x "$WORK/interpreter-bin/python3"
+set +e
+output="$(AGENT_PYTHON="$WORK/interpreter-bin/python3" "$ROOT/scripts/agent-python.sh" --resolve 2>&1)"; rc=$?
+set -e
+[ "$rc" -eq 2 ] || fail "unsupported explicit interpreter was not rejected"
+printf '%s' "$output" | grep -qF 'Python >= 3.11 with tomllib' || fail "interpreter diagnostic omitted required version"
+echo "  PASS  unsupported AGENT_PYTHON fails with a version diagnostic"
+pass=$((pass + 1))
+ln -s "$checked_python" "$WORK/interpreter-bin/python3.11"
+selected_python="$(PATH="$WORK/interpreter-bin:$PATH" "$ROOT/scripts/agent-python.sh" --resolve)"
+[ "$selected_python" != "$WORK/interpreter-bin/python3" ] || fail "automatic selection chose unsupported default python3"
+echo "  PASS  automatic interpreter selection skips unsupported default python3"
 pass=$((pass + 1))
 
 echo "== instruction budget and cutover boundary =="
@@ -80,6 +110,116 @@ set -e
 [ "$rc" -eq 1 ] || fail "over budget: expected exit 1, got $rc"
 printf '%s' "$output" | grep -qF "over the 1-byte budget" || fail "over budget: no actionable error"
 echo "  PASS  over-budget canonical instructions"
+pass=$((pass + 1))
+
+fixture="$WORK/effective-budget"
+make_fixture "$fixture"
+node - "$fixture/main/www/AGENTS.md" <<'NODE'
+const fs = require("node:fs");
+fs.appendFileSync(process.argv[2], "x".repeat(32768));
+NODE
+expect_failure "oversized scoped instruction chain" "$fixture" "effective instruction chain main/www"
+
+fixture="$WORK/missing-scoped-instructions"
+make_fixture "$fixture"
+rm "$fixture/main/www/AGENTS.md"
+expect_failure "missing tracked scoped instructions" "$fixture" "scoped instructions is missing"
+
+for override in AGENTS.override.md main/nested/AGENTS.override.md; do
+  fixture="$WORK/override-${override//\//-}"
+  make_fixture "$fixture"
+  mkdir -p "$fixture/$(dirname "$override")"
+  printf 'Untracked override must not displace canonical policy.\n' > "$fixture/$override"
+  expect_failure "untracked $override rejected" "$fixture" "AGENTS.override.md is forbidden"
+done
+fixture="$WORK/ignored-override"
+make_fixture "$fixture"
+printf 'AGENTS.override.md\n' > "$fixture/.gitignore"
+printf 'Ignored override must not displace canonical policy.\n' > "$fixture/AGENTS.override.md"
+expect_failure "ignored root instruction override rejected" "$fixture" "AGENTS.override.md is forbidden"
+fixture="$WORK/ignored-nested-override"
+make_fixture "$fixture"
+printf '/ignored-scope/\n' > "$fixture/.gitignore"
+mkdir -p "$fixture/ignored-scope"
+printf 'Ignored nested override.\n' > "$fixture/ignored-scope/AGENTS.override.md"
+expect_failure "ignored nested instruction override rejected" "$fixture" "AGENTS.override.md is forbidden"
+
+fixture="$WORK/untracked-scoped-instructions"
+make_fixture "$fixture"
+mkdir -p "$fixture/local-scope"
+printf 'Untracked scoped instructions count toward the effective budget.\n' > "$fixture/local-scope/AGENTS.md"
+output="$(run_gate "$fixture" 2>&1)" || fail "valid untracked scoped instructions failed: $output"
+printf '%s' "$output" | grep -Eq 'effective chain local-scope [0-9]+/32768 bytes' \
+  || fail "valid untracked scoped instructions were omitted from the budget"
+echo "  PASS  untracked scoped instructions are measured"
+pass=$((pass + 1))
+node - "$fixture/local-scope/AGENTS.md" <<'NODE'
+require("node:fs").appendFileSync(process.argv[2], "x".repeat(32768));
+NODE
+expect_failure "oversized untracked scoped instructions rejected" "$fixture" "effective instruction chain local-scope"
+
+fixture="$WORK/ignored-scoped-instructions"
+make_fixture "$fixture"
+printf '/ignored-scope/\n' > "$fixture/.gitignore"
+mkdir -p "$fixture/ignored-scope"
+node - "$fixture/ignored-scope/AGENTS.md" <<'NODE'
+require("node:fs").writeFileSync(process.argv[2], "x".repeat(32768));
+NODE
+expect_failure "oversized ignored scoped instructions rejected" "$fixture" "effective instruction chain ignored-scope"
+
+for source in AGENTS.md main/www/AGENTS.md; do
+  fixture="$WORK/symlink-instructions-${source//\//-}"
+  make_fixture "$fixture"
+  mv "$fixture/$source" "$fixture/instructions-copy.md"
+  ln -s "$fixture/instructions-copy.md" "$fixture/$source"
+  expect_failure "symlinked $source rejected" "$fixture" "is not a regular file (symlink path)"
+done
+
+echo "== generated native registration =="
+for generated in config.toml hooks.json agents/doc-drift-checker.toml generated.json; do
+  fixture="$WORK/generated-${generated//\//-}"
+  make_fixture "$fixture"
+  printf '\n' >> "$fixture/.codex/$generated"
+  expect_failure "native $generated drift" "$fixture" "generated Codex registration drift"
+done
+fixture="$WORK/missing-generated-hooks"
+make_fixture "$fixture"
+rm "$fixture/.codex/hooks.json"
+expect_failure "missing native hook registration" "$fixture" "generated Codex registration drift"
+fixture="$WORK/extra-native-reviewer"
+make_fixture "$fixture"
+cp "$fixture/.codex/agents/doc-drift-checker.toml" "$fixture/.codex/agents/unreviewed.toml"
+expect_failure "extra native reviewer" "$fixture" "unregistered native reviewer files"
+fixture="$WORK/generated-local-modification"
+make_fixture "$fixture"
+printf '\n# local customisation\n' >> "$fixture/.codex/config.toml"
+set +e
+output="$(AGENT_CONFIG_ROOT="$fixture" "$ROOT/scripts/agent-python.sh" "$ROOT/tools/agent-config/export-subagents.py" --write 2>&1)"; rc=$?
+set -e
+[ "$rc" -ne 0 ] || fail "regeneration overwrote a local modification"
+printf '%s' "$output" | grep -qF 'refusing to overwrite locally modified or unowned file' || fail "regeneration lacked ownership diagnostic"
+echo "  PASS  regeneration preserves locally modified adapter files"
+pass=$((pass + 1))
+fixture="$WORK/regenerate-source-change"
+make_fixture "$fixture"
+printf '\n# Maintained-source change\n' >> "$fixture/.agents/agents/doc-drift-checker.toml"
+expect_failure "canonical reviewer change requires regeneration" "$fixture" "generated Codex registration drift"
+AGENT_CONFIG_ROOT="$fixture" "$ROOT/scripts/agent-python.sh" "$ROOT/tools/agent-config/export-subagents.py" --write >/dev/null
+run_gate "$fixture" >/dev/null || fail "regeneration did not restore canonical parity"
+echo "  PASS  deliberate source change regenerates native registrations"
+pass=$((pass + 1))
+fixture="$WORK/generated-symlink"
+make_fixture "$fixture"
+mv "$fixture/.codex/hooks.json" "$fixture/hooks-copy.json"
+ln -s ../hooks-copy.json "$fixture/.codex/hooks.json"
+expect_failure "symlinked native registration" "$fixture" "generated path must not be a symlink"
+"$ROOT/scripts/agent-python.sh" "$ROOT/tools/agent-config/test_doctor.py" \
+  || fail "doctor metadata fixture checks failed"
+echo "  PASS  doctor metadata remains separate from dispatch and trust authorization"
+pass=$((pass + 1))
+"$ROOT/scripts/agent-python.sh" "$ROOT/tools/agent-config/test_review.py" \
+  || fail "read-only reviewer launcher checks failed"
+echo "  PASS  reviewer launcher requests isolated read-only permissions without trust or live tools"
 pass=$((pass + 1))
 
 fixture="$WORK/tracked-claude"
