@@ -347,7 +347,8 @@ Body, ordered:
    happen. Then a meta line (reset reason · crashed task · fw version · short `app_elf_sha256`), the
    raw hex backtrace, and actions — **Download crash report** (`GET /coredump`, shown only while a
    dump actually exists — `/status` reports that live, so the button disappears once the dump is
-   cleared), **Copy diagnostics** (`/status` + `/diag` + summary to the clipboard for a bug report),
+   cleared), **Copy diagnostics** (cached build/crash summary + redacted `/diag` to the clipboard, with
+   explicit read failures),
    and **Delete report**. The delete is a **device** action (`POST /crash/dismiss`), not a per-page
    hide: the device erases the dump and stops reporting the crash, so the banner is gone from every
    browser and from Home Assistant's retained crash entity at once. It used to hide the banner in

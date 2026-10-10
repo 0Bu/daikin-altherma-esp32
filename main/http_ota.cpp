@@ -2,6 +2,7 @@
 #include "http_handlers.hpp"
 #include "ota_update.hpp"
 #include "logic/json.hpp" // json_append_quoted — the ONE RFC 8259 encoder every payload uses
+#include "logic/redact.hpp"
 #include "logic/query_flag.hpp" // query_flag_on — a flag fires on "1" and nothing else
 #include "esp_http_server.h"
 #include <cstdio>
@@ -136,6 +137,18 @@ static esp_err_t ota_do(httpd_req_t* req) {
 }
 
 static esp_err_t ota_stat(httpd_req_t* req) {
+    // Never fall back to raw URLs when a requested redaction query exceeds the buffer.
+    char query[48] = {0};
+    if (httpd_req_get_url_query_len(req) >= sizeof(query))
+        return httpd_resp_send_err(req, HTTPD_414_URI_TOO_LONG, "query too long");
+    const esp_err_t query_result = httpd_req_get_url_query_str(req, query, sizeof(query));
+    if (query_result != ESP_OK && query_result != ESP_ERR_NOT_FOUND)
+        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "query could not be read");
+    char            flag[4]     = {0};
+    const esp_err_t flag_result = httpd_query_key_value(query, "redact", flag, sizeof(flag));
+    if (flag_result == ESP_ERR_HTTPD_RESULT_TRUNC)
+        return httpd_resp_send_err(req, HTTPD_414_URI_TOO_LONG, "redaction flag too long");
+    const bool      redact = flag_result == ESP_OK && query_flag_on(flag);
     OtaFeedUrls     effective_feed{};
     const OtaStatus s = ota_status(&effective_feed);
     // Every string field goes through json_append_quoted (json.hpp), not raw concatenation:
@@ -188,9 +201,9 @@ static esp_err_t ota_stat(httpd_req_t* req) {
     j += ",\"current\":";
     json_append_quoted(j, std::string_view(s.current));
     j += ",\"effective_manifest_url\":";
-    json_append_quoted(j, std::string_view(effective_feed.manifest.data()));
+    json_append_quoted(j, redact_identifier_view(effective_feed.manifest.data(), redact));
     j += ",\"effective_firmware_base_url\":";
-    json_append_quoted(j, std::string_view(effective_feed.firmware_base.data()));
+    json_append_quoted(j, redact_identifier_view(effective_feed.firmware_base.data(), redact));
     j += ",\"image_state\":";
     json_append_quoted(j, std::string_view(s.image_state));
     j += ",\"rollback_pending\":";

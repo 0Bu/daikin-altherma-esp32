@@ -307,11 +307,13 @@ Origin/Fetch Metadata), and every POST body is `application/json`; see [SECURITY
 ```
 GET  /  (alias /index.html)        # embedded web UI (gzip-compressed in the app binary)
 GET  /locale.js?lang=<code>        # device-local de/es/fr/it/pl/cs/uk/zh/ja/nb/sv/fi UI catalog (gzip; trusted LAN)
-GET  /status[?redact=1]            # ?redact=1 = the bug-report form: 27 reporter-identifying values
+GET  /status[?redact=1]            # ?redact=1 = the bug-report form: 28 protected values
                                    #   During OTA TLS this allocation-rich snapshot fails fast with
                                    #   HTTP 503; use compact GET /ota/status for progress.
-                                   #   read "<redacted>" — network/location identifiers, user-typed
-                                   #   names/topics and all seven user-typed JSON paths. The exact
+                                   #   set identifiers read "<redacted>" — network/location identifiers,
+                                   #   user-typed names/topics and all seven user-typed JSON paths.
+                                   #   HVAC mode retains the fixed public vocabulary; unknown text
+                                   #   is redacted. Unset, null and empty states remain truthful. The exact
                                    #   machine-checked list is in logic/redact.hpp and REPORTING.md.
                                    #   (logic/redact.hpp). The KEY is always emitted — an omitted
                                    #   field is indistinguishable from an older build, and "which

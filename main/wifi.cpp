@@ -6,6 +6,7 @@
 #include "wifi.hpp"
 #include "config.hpp"
 #include "diag_log.hpp"
+#include "logic/redact.hpp"
 #include "nvs_storage.hpp"
 #include "logic/config_model.hpp"
 #include "logic/link_watch.hpp"
@@ -402,7 +403,7 @@ bool wifi_start_sta() {
             // re-read the rejected credentials and risk the loop this branch exists to avoid.
             diag_printf("wifi: rollback restore to '%s' was not persisted — opening the setup "
                         "portal rather than risk a reboot loop\n",
-                        rollback_cfg.wifi_ssid.c_str());
+                        DiagLogIdentifier(rollback_cfg.wifi_ssid).c_str());
         }
         ESP_LOGW(TAG, "STA connect failed on first boot — falling back to setup portal");
         wifi_stop_sta();
@@ -425,7 +426,8 @@ bool wifi_start_sta() {
         // connection is good, and refusing it over a stale flag would be the worse trade.
         if (!config_save(success_cfg))
             diag_printf("wifi: could not clear the rollback backup ('%s') — "
-                        "a later connect failure may restore it\n", stale_backup.c_str());
+                        "a later connect failure may restore it\n",
+                        DiagLogIdentifier(stale_backup).c_str());
     }
 
     net_mdns_start();

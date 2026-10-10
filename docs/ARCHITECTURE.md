@@ -1010,7 +1010,7 @@ host-testable core is unusually large and valuable, because the risky parts are 
   `www/js/app_state.js` that would drift. Two shapes, because the routes leak differently: `/status` leaks by
   **field** (named values, substituted where each is *written* — a post-processing pass over
   the finished JSON is what the httpd stack budget has no room for), `/diag` leaks by **line**,
-  which is the non-trivial half the `CHECK`s cover. The 27-field list in `logic/redact.hpp` is
+  which is the non-trivial half the `CHECK`s cover. The 28-field list in `logic/redact.hpp` is
   machine-readable; the audit compares its length with the call sites and its names with
   `REPORTING.md`, then rejects a raw Config string written through plain `jstr()` so a never-wrapped
   identifier cannot hide behind an unchanged wrapper count. Seven entries are user-typed JSON paths:
@@ -2471,7 +2471,8 @@ Structure:
     a dead download link. The running app's `app_elf_sha256` is also on `/status`. The web UI shows a
     crash **banner** (`renderCrashBanner()`) — titled on `fault`, so an orphan dump doesn't claim this
     boot crashed — with the reset reason + hex backtrace, a one-click `coredump.bin` download, and a
-    "copy diagnostics" bundle (`/status` + `/diag` + summary) for a bug report.
+    "copy diagnostics" bundle (cached build/crash summary + `/diag?redact=1`) for a bug report.
+    Failed HTTP or network reads remain explicit in that copied evidence.
   - **Deleting the report (`POST /crash/dismiss`).** The banner's third action. It is a *device*
     action, not a per-page hide: `diag_crash_dismiss()` erases the dump image and then sets
     `CrashInfo::dismissed`, so `crash_is_notable()` is false everywhere at once — `/status.last_crash`
@@ -3373,7 +3374,10 @@ GET  /status      version, platform, uptime_s, boot_id (16 hex digits; non-secre
                   source_unix_s,timestamp_source,age_s,fresh,freshness_reason,
                   temperature_valid,setpoint_valid,control_eligible,room_error_k,reason,reason_code,
                   retained,messages,errors,rejections[,error][,eligibility_error]} — the decoded and
-                  canonical MQTT living-room input. The `<base>/heating_curve` document's `room`
+                  canonical MQTT living-room input. In redacted reports, `hvac_mode` retains only
+                  off/heat/cool/heat_cool/auto/dry/fan_only; unknown source text is redacted without
+                  changing its operational payload or control evaluation. Null/empty states remain
+                  null/empty. The `<base>/heating_curve` document's `room`
                   object archives its numeric accepted
                   view. It is the required heating-curve-diagnosis input; `room_error_k` is recorded
                   raw and is not an LWT correction. It feeds no heat-pump write.
@@ -3802,10 +3806,16 @@ GET  /diag[?verbose=0|1][?redact=1]   in-memory diag log. Streams in 1 KiB chunk
                   static ring during OTA (dump volume clamped to 512 B to avoid multi-pbuf lwIP heap fragmentation); redact=1 returns the early busy-503 before its string chunk
                   A query too long for the handler's buffer answers 414 rather than being read as absent, so
                   a padded ?redact=1 can never fall back to the unscrubbed log (same rule on /status).
+                  Identifier producers use allocation-free 96-byte escaped representations; the real
+                  WiFi/NTP/syslog/OTA configuration remains unchanged. Quotes, delimiters, control and
+                  non-ASCII bytes cannot create another log record or terminate its privacy span.
+                  The 6144-byte ring is unchanged: wrapped/clipped tails discard an incomplete oldest
+                  record, incomplete final records are withheld, and truncation is marked explicitly.
+                  diag_printf also terminates and marks clipped records in its existing 256-byte buffer.
 POST /diag/clear  clear the in-memory diagnostic ring. Destructive actions are POST-only, so a link,
                   prefetch or crawler cannot erase evidence.
-GET  /status?redact=1   the bug-report form of /status: all 27 reporter-identifying values read
-                  "<redacted>". `logic/redact.hpp` owns the machine-readable ordered field list and
+GET  /status?redact=1   the bug-report form of /status: 28 protected fields; set identifiers read
+                  "<redacted>". HVAC mode retains only the fixed public vocabulary; unknown text is hidden. `logic/redact.hpp` owns the machine-readable ordered field list and
                   `REPORTING.md` owns its human explanations; the redaction audit compares both with
                   the builder. Besides network/location identifiers, names and topics, the set now
                   includes all seven user-typed JSON paths — `zones.<room>.temp` demonstrates why a
@@ -4153,7 +4163,11 @@ GET  /ota/status  {state:idle|checking|updating|done|error, progress, message, u
                   heap_min_largest_block_bytes, ota_stack_min_free_bytes,
                   effective_manifest_url, effective_firmware_base_url, image_state,
                   rollback_pending} — `busy`, `generation` and the effective feed are copied under the same
-                  OTA mutex; the UI polls this. FixedText fields plus `FixedBuffer<4096>` and
+                  OTA mutex; the UI polls this. `?redact=1` substitutes nonempty effective URLs with
+                  `<redacted>` through allocation-free `redact_identifier_view`; empty URLs stay empty.
+                  Oversized queries or flag values answer 414 before the private snapshot is taken.
+                  Public report collectors request this form; the operational API retains raw URLs.
+                  FixedText fields plus `FixedBuffer<4096>` and
                   `json_append_quoted` keep the whole progress path allocation-free and fail closed
                   on overflow. The two heap fields are operation-local minima; the OTA-task stack
                   field is a boot-local retained minimum across task incarnations. All three are

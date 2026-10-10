@@ -51,9 +51,10 @@ void diag_printf(const char* fmt, ...) {
     int n = vsnprintf(line + pre, sizeof(line) - pre, fmt, ap);
     va_end(ap);
     if (n <= 0) return;
-    // vsnprintf returns the length it *would* have written; clamp to what actually fit.
-    if (n > (int)sizeof(line) - pre - 1) n = (int)sizeof(line) - pre - 1;
-    int total = pre + n;
+    // Announce clipping and terminate every record; an unmarked continuation can leak on wrap.
+    const bool truncated = n > (int)sizeof(line) - pre - 1;
+    if (truncated) n = (int)sizeof(line) - pre - 1;
+    int total = static_cast<int>(diag_finish_record(line, pre + n, sizeof(line) - 1, truncated));
     {
         SemGuard lk(s_mtx);
         append(line, total);
