@@ -73,7 +73,7 @@ conditional workflows and are not necessarily PR checkbox gates.
 
 | Skill or review record | Required scope |
 |---|---|
-| `$project-review`, `$domain-review` | Every local/manual merge and ordinary PR merge; the sole CI-attested Renovate exception is defined below. |
+| `$project-review`, `$domain-review` | Every local/manual merge and ordinary PR merge; the sole CI-attested Renovate exception is defined in [the runbook](docs/AGENT_MIGRATION.md#operating-rules). |
 | `$skill-audit` | Before PR creation or push; verify skills/reviewers against repository facts. |
 | `$heap-safety-review` | Before merge of HTTP, MQTT, OTA, TLS, JSON, X10A publishing, polling or allocation changes. |
 | `$feature-docs` | Technical feature surface changes. |
@@ -288,7 +288,8 @@ scripts/idf-docker.sh idf.py build
 - Before every local/manual merge, run `$project-review` and `$domain-review`; run conditional skills
   according to the affected paths and behavior. Record only completed reviews against the exact head
   commit. The sole GitHub-native automerge exception is the mechanically attested Renovate
-  Action-pin-line-only class defined above; it never applies to firmware dependencies or mixed diffs.
+  Action-pin-line-only class defined in [the runbook](docs/AGENT_MIGRATION.md#operating-rules);
+  it never applies to firmware dependencies or mixed diffs.
 - A PR checkbox is evidence, not authorization. Use only the repository-bound, expected-head REST
   merge path documented in `docs/AGENT_MIGRATION.md`. `gh pr merge`, every other REST merge or
   mutation shape, GraphQL mutations, and all MCP merge, auto-merge, or queue-activation forms are
