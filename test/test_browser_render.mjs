@@ -370,6 +370,8 @@ async function assertNativeAltherma4(page, context) {
       S.histBusy = new Set();
       S.histRequests = new Map();
       S.insp = null;
+      S.inspSig = null;
+      S.inspHistSig = null;
       S.scrub = null;
       S.clickHold = false;
       renderApp();
@@ -546,12 +548,16 @@ async function assertNativeAltherma4(page, context) {
     assert.equal(await page.evaluate(`(() => {
       const original = window.__browserNativeAltherma4Original;
       Object.assign(S, original);
+      // Rendering caches describe DOM left by the fixture, not the restored logical state.
+      S.inspSig = null;
+      S.inspHistSig = null;
       renderApp();
       window.scrollTo(0, 0);
       delete window.__browserNativeAltherma4Original;
       return S.status === original.status && S._values === original._values &&
-        S._modbus === original._modbus && S.descOpen === original.descOpen;
-    })()`), true, `${context}: original status, values and disclosure state must be restored`);
+        S._modbus === original._modbus && S.descOpen === original.descOpen &&
+        document.getElementById("inspect").classList.contains("open") === !!INSPECT[S.insp];
+    })()`), true, `${context}: original status, values, disclosure and inspector DOM state must be restored`);
     await page.frame();
   }
 }
