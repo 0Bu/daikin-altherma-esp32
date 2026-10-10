@@ -82,7 +82,7 @@ try {
 
   const cases = [
     ["HTTP stack cannot hold the existing reviewed path ceilings plus reserve", () =>
-      replaceOnce("main/http_server.cpp", "cfg.stack_size       = 10240;", "cfg.stack_size       = 8192;")],
+      replaceOnce("main/http_server.cpp", /cfg\.stack_size\s*=\s*10240;/, "cfg.stack_size = 8192;")],
     ["an HTTP path consumes the fixed 2 KiB reserve", () =>
       replaceOnce("tools/stack/budgets.json", /("httpd_mcp_status": \{[\s\S]*?"max_bytes": )8192/, (_match, prefix) => `${prefix}8193`)],
     ["cJSON accepts unreviewed nesting depth", () =>

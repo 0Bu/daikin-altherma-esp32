@@ -36,7 +36,7 @@ void http_start() {
     cfg.max_uri_handlers = 39;
     cfg.lru_purge_enable = true;
     // Named ELF path ceilings include bounded JSON recursion and retain 2 KiB for headroom.
-    cfg.stack_size       = 10240;
+    cfg.stack_size = 10240;
     if (httpd_start(&s_server, &cfg) != ESP_OK) {
         ESP_LOGE("http", "server start failed");
         return;
