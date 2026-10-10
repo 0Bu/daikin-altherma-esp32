@@ -61,7 +61,7 @@ const catalog = catalogContext.__catalog;
 const lazyDomainCodes = ["zh", "ja", "nb", "sv", "fi"];
 const englishKeys = Object.keys(catalog.en).sort();
 const englishKeyOrder = Object.keys(catalog.en);
-assert.equal(englishKeys.length, 870, "the test must track the complete current UI catalog");
+assert.equal(englishKeys.length, 894, "the test must track the complete current UI catalog");
 for (const [code, source] of localeSources) {
   const specialist = source.indexOf(`INSPECT_I18N.${code}`);
   const baseSource = specialist < 0 ? source : source.slice(0, specialist);
@@ -456,10 +456,11 @@ try {
 } finally {
   fs.rmSync(work, { recursive: true, force: true });
 }
-// Localized stored-report copy and the cause-neutral fault title total 281045 measured bytes.
-// Retain a tight 275 KiB growth guard, the per-locale 32 KiB cap and the firmware image-size gate.
-assert.ok(localeGzipTotal <= 281600,
-  `locale assets use ${localeGzipTotal} bytes and exceed the 275 KiB aggregate-growth guard`);
+// Native Altherma 4 labels, enums and bounded explanations total 288626 measured locale bytes.
+// The three explicit interpretation limits add 1869 bytes. Retain a tight 283 KiB growth guard,
+// the per-locale 32 KiB cap and the independent firmware image-size gate.
+assert.ok(localeGzipTotal <= 289792,
+  `locale assets use ${localeGzipTotal} bytes and exceed the 283 KiB aggregate-growth guard`);
 
 const cmake = fs.readFileSync(path.join(root, "main/CMakeLists.txt"), "utf8");
 const status = fs.readFileSync(path.join(root, "main/http_status.cpp"), "utf8");

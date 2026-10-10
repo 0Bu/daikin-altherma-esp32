@@ -3365,6 +3365,23 @@ static void test_mqtt_group() {
           "{\"return_water_temperature\":35.5,"
           "\"smart_grid_operation_mode\":2,\"broken_numeric\":null}");
     CHECK(build_flat_json({}) == "{}");
+    const std::vector<GroupedValue> sparse_native = {
+        {"modbus", object_id(def::altherma4_find(54)->label), "0", PublishedKind::Number},
+        {"modbus", object_id(def::altherma4_find(74)->label), "1.0", PublishedKind::Number},
+        {"modbus", object_id(def::altherma4_find(80)->label), "1.0", PublishedKind::Number}};
+    CHECK(flat_json_size(sparse_native) == build_flat_json(sparse_native).size());
+    CHECK(flat_json_size(sparse_native) > sparse_native.size() * 32 + 16);
+    CHECK(flat_json_size({{"modbus", "code", "A\"\\\n", PublishedKind::Text}}) ==
+          build_flat_json({{"modbus", "code", "A\"\\\n", PublishedKind::Text}}).size());
+    CHECK(flat_json_size({}) == 2);
+    bool flat_oversize_refused = false;
+    try {
+        build_flat_json({{"modbus", "code", std::string(MODBUS_FLAT_JSON_MAX_BYTES, 'x'),
+                          PublishedKind::Text}});
+    } catch (const std::bad_alloc&) {
+        flat_oversize_refused = true;
+    }
+    CHECK(flat_oversize_refused);
 
     // The group key doubles as an HA entity-name fragment for the DERIVED companions, which have no
     // catalog label of their own (logic/fault_state.hpp).
@@ -6506,7 +6523,7 @@ static void test_altherma4() {
     using namespace daik::def;
     using namespace daik::logic;
 
-    CHECK(ALTHERMA4_REG_COUNT == 43);
+    CHECK(ALTHERMA4_REG_COUNT == 42);
     CHECK(ALTHERMA4_REG_COUNT > HOMEHUB_REG_COUNT);
 
     // Every register must remain independently addressable and findable
@@ -6517,10 +6534,80 @@ static void test_altherma4() {
             CHECK(object_id(ALTHERMA4_REGS[i].label) != object_id(ALTHERMA4_REGS[k].label));
     }
 
+    // Manufacturer-derived semantics must survive same-offset base/native snapshots.
+    CHECK(altherma4_find(57) == nullptr);
+    CHECK(homehub_find(57) != nullptr); // the independently documented EKRHH row remains
+    CHECK(std::string(altherma4_find(58)->label) == "Imposed power limit");
+    CHECK(std::string(altherma4_find(74)->label) == "Leaving water temperature pre-PHE outdoor");
+    CHECK(std::string(altherma4_find(80)->label) == "Space heating/cooling target Main zone");
+    const auto* current = altherma4_find(38);
+    const auto* quiet   = altherma4_find(9);
+    CHECK(current->kind == HomeHubValueKind::Altherma4CurrentOperationMode);
+    CHECK(std::string(homehub_enum_id(current->kind)) == "altherma4_current_operation_mode");
+    CHECK(quiet->kind == HomeHubValueKind::Altherma4QuietSelection && !homehub_is_binary(*quiet));
+    CHECK(std::string(homehub_enum_id(quiet->kind)) == "altherma4_quiet_selection");
+    CHECK(!homehub_has_quiet_activity(*quiet));
+    CHECK(homehub_concept_for(9, homehub_has_quiet_activity(*quiet)) == nullptr);
+    CHECK(homehub_history_for(9, homehub_has_quiet_activity(*quiet)) == nullptr);
+    const auto& quiet_history = HOMEHUB_HISTORIES[homehub_history_index("quiet_state")];
+    CHECK(!homehub_history_row_matches(quiet_history, *quiet, homehub_has_quiet_activity(*quiet)));
+    CHECK(homehub_history_row_matches(quiet_history, *homehub_find(9)));
+    volatile bool base_quiet_activity = true;
+    CHECK(homehub_history_decode_matches(HOMEHUB_REGS, HOMEHUB_REG_COUNT, base_quiet_activity));
+    CHECK(std::string(homehub_history_for(9, base_quiet_activity)) == "quiet_state");
+    volatile bool native_quiet_activity = false;
+    CHECK(
+        homehub_history_decode_matches(ALTHERMA4_REGS, ALTHERMA4_REG_COUNT, native_quiet_activity));
+    HomeHubReg incompatible = *homehub_find(9);
+    incompatible.space      = MbFunc::ReadInput;
+    CHECK(!homehub_history_row_matches(quiet_history, incompatible));
+    incompatible       = *homehub_find(9);
+    incompatible.scale = 100;
+    CHECK(!homehub_history_row_matches(quiet_history, incompatible));
+    incompatible        = *homehub_find(9);
+    incompatible.offset = 8;
+    CHECK(!homehub_history_row_matches(quiet_history, incompatible));
+    incompatible      = *homehub_find(9);
+    incompatible.type = MbType::Text16;
+    CHECK(!homehub_history_row_matches(quiet_history, incompatible));
+    incompatible      = *homehub_find(9);
+    incompatible.unit = "W";
+    CHECK(!homehub_history_row_matches(quiet_history, incompatible));
+
+    const auto check_tokens = [](const auto& rows, bool native) {
+        for (const auto& row : rows) {
+            const uint8_t token = homehub_definition_id(row);
+            CHECK(token != 0 && homehub_definition(token) == &row);
+            CHECK(homehub_definition_is_altherma4(token) == native);
+        }
+    };
+    check_tokens(HOMEHUB_REGS, false);
+    check_tokens(ALTHERMA4_REGS, true);
+    CHECK(homehub_definition(0) == nullptr && homehub_definition(255) == nullptr);
+    CHECK(!homehub_definition_is_altherma4(0) && !homehub_definition_is_altherma4(255));
+    HomeHubReg foreign                     = *quiet;
+    const HomeHubReg* volatile foreign_row = &foreign;
+    CHECK(homehub_definition_id(*foreign_row) == 0); // a copied definition is not a catalog owner
+    volatile uint8_t invalid_token = 0;
+    CHECK(homehub_definition(invalid_token) == nullptr);
+    invalid_token = 255;
+    CHECK(homehub_definition(invalid_token) == nullptr);
+    CHECK(homehub_definition(homehub_definition_id(*quiet)) != homehub_find(9));
+    CHECK(homehub_definition(homehub_definition_id(*current)) != homehub_find(38));
+    CHECK(homehub_definition(homehub_definition_id(*altherma4_find(58))) != homehub_find(58));
+    const HomeHubReg collision[] = {
+        {9, MbFunc::ReadHolding, MbType::Int16, 1, "", "selection"},
+        {9, MbFunc::ReadInput, MbType::Int16, 1, "", "activity"},
+    };
+    CHECK(
+        !modbus_offsets_unique(collision)); // public offset-only selectors cannot accept FC aliases
+    CHECK(modbus_offsets_unique(HOMEHUB_REGS) && modbus_offsets_unique(ALTHERMA4_REGS));
+
     // Extended registers: 65, 66, 67, 68, 74, 75, 76, 77, 79, 80, 83
     const HomeHubReg* r65 = altherma4_find(65);
-    CHECK(r65 && r65->space == MbFunc::ReadInput && r65->kind == HomeHubValueKind::SmartGridMode);
-    CHECK(std::string(homehub_enum_id(r65->kind)) == "smart_grid_mode");
+    CHECK(r65 && r65->space == MbFunc::ReadInput &&
+          r65->kind == HomeHubValueKind::Altherma4DemandResponse);
+    CHECK(std::string(homehub_enum_id(r65->kind)) == "altherma4_demand_response");
 
     const HomeHubReg* r66 = altherma4_find(66);
     CHECK(r66 && r66->space == MbFunc::ReadInput && r66->type == MbType::Int16 &&
@@ -6559,8 +6646,25 @@ static void test_altherma4() {
           std::string(r80->unit) == "°C");
 
     const HomeHubReg* r83 = altherma4_find(83);
-    CHECK(r83 && r83->space == MbFunc::ReadInput && r83->kind == HomeHubValueKind::OperationMode);
-    CHECK(std::string(homehub_enum_id(r83->kind)) == "operation_mode");
+    CHECK(r83 && r83->space == MbFunc::ReadInput &&
+          r83->kind == HomeHubValueKind::Altherma4UnitOperationMode);
+    CHECK(std::string(homehub_enum_id(r83->kind)) == "altherma4_unit_operation_mode");
+
+    for (const HomeHubReg* row : {r65, r83, current, quiet}) {
+        const int max = row == quiet ? 2 : row == current ? 2 : 4;
+        for (int raw = 0; raw <= max; ++raw) {
+            char    raw_text[24];
+            MbValue decoded;
+            CHECK(homehub_decode(*row, static_cast<uint16_t>(raw), decoded) &&
+                  approx(decoded.value, static_cast<double>(raw)));
+            CHECK(homehub_format(*row, static_cast<uint16_t>(raw), raw_text, sizeof(raw_text)) &&
+                  std::string(raw_text) == std::to_string(raw));
+        }
+        char raw_text[24];
+        CHECK(homehub_format(*row, 7, raw_text, sizeof(raw_text)) && std::string(raw_text) == "7");
+        for (uint16_t special : {MB_WAIT, MB_UNAVAILABLE, MB_UNSUPPORTED})
+            CHECK(!homehub_format(*row, special, raw_text, sizeof(raw_text)));
+    }
 
     // Water pressure decode and 2-decimal formatting (%.2f bar)
     char    buf[32];
@@ -6645,8 +6749,18 @@ static void test_altherma4() {
     CHECK(mb_plan_order(spaces, offsets, ALTHERMA4_REG_COUNT, order));
     int bcount =
         mb_plan_build(spaces, offsets, ALTHERMA4_REG_COUNT, order, batch, ALTHERMA4_REG_COUNT);
-    CHECK(bcount == 14);
-    CHECK(bcount * 3 <= ALTHERMA4_REG_COUNT);
+    CHECK(bcount == 15); // removing unlisted holding 57 splits the native 56..58 batch
+    int holding_batches = 0;
+    int input_batches   = 0;
+    for (int i = 0; i < bcount; ++i) {
+        if (batch[i].space == MbFunc::ReadHolding) {
+            holding_batches++;
+            // No native request may include unlisted holding offset 57.
+            CHECK(!(batch[i].first_offset <= 57 && batch[i].first_offset + batch[i].count > 57));
+        } else
+            input_batches++;
+    }
+    CHECK(holding_batches == 6 && input_batches == 9);
 
     // Verify ModbusProfile names including unknown fallback
     CHECK(std::string(modbus_profile_name(ModbusProfile::Auto)) == "auto");
@@ -18682,7 +18796,7 @@ static void test_history_identity() {
     // the logic table says, and any one-column edit of a copy breaks that.
     {
         CHECK(homehub_history_decode_matches(def::HOMEHUB_REGS, def::HOMEHUB_REG_COUNT));
-        CHECK(homehub_history_decode_matches(def::ALTHERMA4_REGS, def::ALTHERMA4_REG_COUNT));
+        CHECK(homehub_history_decode_matches(def::ALTHERMA4_REGS, def::ALTHERMA4_REG_COUNT, false));
         const auto breaks = [](auto edit) {
             std::vector<def::HomeHubReg> regs(def::HOMEHUB_REGS,
                                               def::HOMEHUB_REGS + def::HOMEHUB_REG_COUNT);

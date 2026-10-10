@@ -668,7 +668,8 @@ Body, ordered:
    three distinct vertical sections: description first, graphical history second, values last.
    For a leaf value target, that list omits the target's own X10A reading because it is already the
    headline, but keeps an available Modbus twin as its first divided value row, with the agreement or
-   difference directly underneath that row while both readings are current. A grouped target keeps
+   difference directly underneath that row while both readings are current and their conversion is
+   established. Native Altherma 4 flow/pressure show the conversion limit instead. A grouped target keeps
    its complete value list even when one member is also the headline: the DHW tank therefore lists
    X10A tank temperature, its Modbus
    twin, setpoint and both valve readings together below the chart. An inspector's explainer contains
@@ -679,6 +680,8 @@ Body, ordered:
    newer lazy locale modules carry a shorter inspector-specific explanation for every target so
    translated copy stays understandable inside this compact surface; their complete value/model
    accordion prose is stored separately in compact positional tables in the same locale asset.
+   A source-qualified native replacement explanation takes precedence over that generic inspector
+   copy in every locale, so an unverified conversion cannot lose its limitation in the compact view.
    Component copy (outdoor unit, PHE, ΔT, heat output, heating circuit) likewise lives in the
    inspector table. Both forms are keyed by the stable `data-insp` target; source selection and plant
    logic remain only in `INSPECT`.
@@ -788,7 +791,9 @@ Body, ordered:
    air, liquid refrigerant, flow and room temperature are the eight measurement concepts both sources
    structurally pair; BSH, the 3-way valve and Quiet are exact state pairs, the twelfth ring is the
    explicit Smart-Grid-mode timeline, and the thirteenth is HomeHub input 33's Modbus-only
-   disinfection timeline. X10A Tank preheat keeps a separate X10A-only timeline because preparation
+   disinfection timeline. Native Altherma 4 offers twelve histories and no Quiet activity
+   timeline: its holding 9 is Off/Automatic/Manual selection, not a live activity flag. The quiet pill
+   remains unknown without an independent X10A activity reading. X10A Tank preheat keeps a separate X10A-only timeline because preparation
    and active disinfection are not the same fact. Every categorical timeline uses the same
    grammar: one outlined track per available source, a separate labelled colour for every valid
    state, and hatching only for missing samples. Hover, touch pinning and keyboard navigation show a
@@ -1015,9 +1020,15 @@ Body, ordered:
    - **Tap a value → plain-language explainer.** Each value row whose label is recognised is a button
      (trailing chevron affordance, like the ESP32 card's Hardware row); tapping it slides open a short description
      beneath the row — what the reading means and, where useful, what is normal vs worth a look. The
-     text is keyed to the value **label** by a first-match-wins pattern table (`DESCRIPTIONS` in
+     text normally uses the value **label** through a first-match-wins pattern table (`DESCRIPTIONS` in
      `js/descriptions.js`), the same label-pattern technique the schematic/grouping already use, so one entry serves
-     every profile's spelling of a quantity; a label that matches nothing stays a plain row — unless
+     every profile's spelling of a quantity. Native Altherma 4 rows first select profile/offset-specific
+     `I18N` explanations through `descFor(label, row)`, including the unverified flow/pump/pressure
+     interpretation limits. Native stand-ins retain their own explanations under an X10A row;
+     native flow/pressure comparisons state the conversion limit instead of numeric agreement or
+     difference. The shared inspector comparison uses the same rule, and its repaint signature
+     includes the Modbus definition metadata even when a numeric value stays unchanged.
+     A row neither path covers stays plain — unless
      the firmware keeps a **trend** for it, which opens the same panel on its own (below).
      **The schematic inspector (§5.3 item 3) reads this same table**, so a quantity is explained
      identically whether the user arrives from the picture or from the value list — add a concept

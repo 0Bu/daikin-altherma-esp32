@@ -29,10 +29,11 @@ reset() {   # a pristine copy of everything the audit reads
     cp tools/descriptions/audit_exceptions.txt "$WORK/exc.txt"
 }
 
-# run_case <name> <expect-rc> <expect-needle>
+# run_case <name> <expect-rc> <expect-needle> [additional needles]
 # Runs the audit over the patched copy; asserts the exit code and that the report names the finding.
 run_case() {
-    local name="$1" want_rc="$2" needle="$3" out rc
+    local name="$1" want_rc="$2" needle="$3" out rc target
+    shift 3
     out="$(node "$CHECK" --app "$WORK/main/www/app.sources" --def "$WORK/main/def" \
                          --exceptions "$WORK/exc.txt" 2>&1)"; rc=$?
     if [ "$rc" -ne "$want_rc" ]; then
@@ -40,18 +41,21 @@ run_case() {
         printf '%s\n' "$out" | sed -n '1,3p' | sed 's/^/            /'
         fail=$((fail + 1)); return
     fi
-    if ! printf '%s' "$out" | grep -qF "$needle"; then
-        echo "  MISSED: $name — exit $rc was right, but the report never says \"$needle\""
-        printf '%s\n' "$out" | sed -n '1,3p' | sed 's/^/            /'
-        fail=$((fail + 1)); return
-    fi
+    for target in "$needle" "$@"; do
+        if ! printf '%s' "$out" | grep -qF "$target"; then
+            echo "  MISSED: $name — exit $rc was right, but the report never says \"$target\""
+            printf '%s\n' "$out" | sed -n '1,3p' | sed 's/^/            /'
+            fail=$((fail + 1)); return
+        fi
+    done
     echo "  PASS  $name"
     pass=$((pass + 1))
 }
 
 echo "== 0. the unpatched tree is clean (otherwise every case below proves nothing) =="
 reset
-run_case "clean tree passes" 0 "clean"
+run_case "clean tree passes, including every base/native source row" 0 "clean" \
+    "32/32 base rows" "42/42 native rows"
 
 echo "== 1. a NEW catalog label nobody wrote copy for =="
 # The generator emitting one new row is the routine way this gap re-opens.
@@ -186,6 +190,127 @@ s = s.replace('const DESCRIPTIONS = [',
 open(p, 'w').write(s)
 PY
 run_case "shadowed exact description is caught" 1 "D008"
+
+echo "== 12. native source copy works without a label-regex match; base rows remain covered =="
+reset
+python3 - "$WORK/main/def/altherma4.hpp" <<'PY'
+import sys
+p = sys.argv[1]; s = open(p).read()
+old = '"Weather-dependent Main Heating offset"'
+assert s.count(old) == 1
+open(p, 'w').write(s.replace(old, '"Native metadata fixture label"', 1))
+PY
+run_case "native offset/profile copy and the unchanged base countercontrol pass" 0 "clean" \
+    "32/32 base rows" "42/42 native rows"
+
+echo "== 13. a native mapping cannot borrow an identically named base explanation =="
+# Current operation mode still matches generic DESCRIPTIONS and is also an EKRHH label. Removing
+# only its source-qualified mapping must fail for THAT native helper, not an unrelated new label.
+reset
+python3 - "$WORK/main/www/js/descriptions.js" <<'PY'
+import sys, re
+p = sys.argv[1]; s = open(p).read()
+s, count = re.subn(r'\b38:\s*"a4\.current_help",\s*', '', s, count=1)
+assert count == 1
+open(p, 'w').write(s)
+PY
+run_case "missing native mapping is caught despite generic/base label coverage" 1 \
+    'native help "a4.current_help" is unreachable' "D009"
+
+echo "== 14. an I18N fallback key is not explanatory text =="
+reset
+python3 - "$WORK/main/www/js/i18n.js" <<'PY'
+import sys, re
+p = sys.argv[1]; s = open(p).read()
+s, count = re.subn(r'^\s*"a4\.heating_offset_help":.*\n', '', s, count=1, flags=re.M)
+assert count == 1
+open(p, 'w').write(s)
+PY
+run_case "missing native English key is caught through real t()" 1 \
+    'missing English I18N text "a4.heating_offset_help"' "D003"
+
+echo "== 15. native helpers must be reachable behind the actual profile guard =="
+reset
+python3 - "$WORK/main/www/js/descriptions.js" <<'PY'
+import sys
+p = sys.argv[1]; s = open(p).read()
+old = 'if (row?.profile === "altherma4") {'
+assert s.count(old) == 1
+open(p, 'w').write(s.replace(old, 'if (row?.profile === "homehub") {', 1))
+PY
+run_case "broken native guard is caught on source-qualified current-mode help" 1 \
+    'native help "a4.current_help" is unreachable' "D009"
+
+echo "== 16. native help must not leak into the independent base profile =="
+reset
+python3 - "$WORK/main/www/js/descriptions.js" <<'PY'
+import sys
+p = sys.argv[1]; s = open(p).read()
+old = 'if (row?.profile === "altherma4") {'
+assert s.count(old) == 1
+open(p, 'w').write(s.replace(old, 'if (row) {', 1))
+PY
+run_case "missing profile guard is caught by the base countercontrol" 1 \
+    'base row 38 "Current operation mode" uses native helper "a4.current_help"' "D008"
+
+echo "== 17. an uncovered native row cannot hide behind a fully covered label set =="
+reset
+python3 - "$WORK/main/www/js/descriptions.js" <<'PY'
+import sys
+p = sys.argv[1]; s = open(p).read()
+old = 'function descFor(label, row = null) {'
+assert s.count(old) == 1
+open(p, 'w').write(s.replace(old, old + '\n'
+    '  if (row?.profile === "altherma4" && row.off === 79) return null;', 1))
+PY
+run_case "every native catalog row is checked through descFor" 1 \
+    'no description for altherma4 row 79 "Water pressure"' "D001"
+
+echo "== 18. an empty native catalog must not pass through another catalog's labels =="
+reset
+python3 - "$WORK/main/def/altherma4.hpp" <<'PY'
+import sys
+p = sys.argv[1]; s = open(p).read()
+start = s.index('inline constexpr HomeHubReg ALTHERMA4_REGS[] = {')
+body = s.index('{', start) + 1
+end = s.index('\n};', body)
+open(p, 'w').write(s[:body] + s[end:])
+PY
+run_case "native vacuity is refused" 2 "empty ALTHERMA4_REGS catalog"
+
+echo "== 19. a native offset collision makes row provenance ambiguous =="
+reset
+python3 - "$WORK/main/def/altherma4.hpp" <<'PY'
+import sys
+p = sys.argv[1]; s = open(p).read()
+old = '{38, MbFunc::ReadInput'
+assert s.count(old) == 1
+open(p, 'w').write(s.replace(old, '{9, MbFunc::ReadInput', 1))
+PY
+run_case "duplicate native offsets are refused" 2 "invalid or duplicate HomeHub offsets"
+
+echo "== 20. a missing production resolver is a parser failure =="
+reset
+python3 - "$WORK/main/www/js/descriptions.js" <<'PY'
+import sys
+p = sys.argv[1]; s = open(p).read()
+old = 'function descFor(label, row = null) {'
+assert s.count(old) == 1
+open(p, 'w').write(s.replace(old, 'function renamedDescFor(label, row = null) {', 1))
+PY
+run_case "missing actual resolver is refused" 2 "function descFor(label, row = null) {"
+
+echo "== 21. unreachable native copy cannot be adjudicated away =="
+reset
+python3 - "$WORK/main/www/js/descriptions.js" <<'PY'
+import sys, re
+p = sys.argv[1]; s = open(p).read()
+s, count = re.subn(r'\b38:\s*"a4\.current_help",\s*', '', s, count=1)
+assert count == 1
+open(p, 'w').write(s)
+PY
+printf 'D009 a4.current_help\n' >> "$WORK/exc.txt"
+run_case "D009 suppression is refused" 2 "D009 cannot be adjudicated"
 
 echo
 if [ "$fail" -eq 0 ]; then
