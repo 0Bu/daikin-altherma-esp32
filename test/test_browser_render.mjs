@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
+import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { launchBrowser } from "../tools/browser/cdp_browser.mjs";
 import { startFixtureServer } from "../tools/browser/fixture_server.mjs";
@@ -470,6 +471,16 @@ try {
     throw new Error(`${error.message}; state=${JSON.stringify(state)}; diagnostics=${page.diagnostics.join(" | ")}`);
   }
   await page.evaluate("pollStop(); true");
+
+  assert.deepEqual(await page.evaluate(`(async () => {
+    const response = await fetch('/favicon.ico');
+    const decoded = await response.arrayBuffer();
+    const digest = await crypto.subtle.digest('SHA-256', decoded);
+    return { type: response.headers.get('Content-Type'), encoding: response.headers.get('Content-Encoding'),
+      sha256: Array.from(new Uint8Array(digest), b => b.toString(16).padStart(2, '0')).join('') };
+  })()`), { type: "image/vnd.microsoft.icon", encoding: "gzip",
+    sha256: createHash("sha256").update(fs.readFileSync(path.join(ROOT, "main/www/favicon.ico"))).digest("hex") },
+  "the real browser must decode the gzip favicon to every original ICO byte");
 
   const browserLocales = await page.evaluate("Array.from(UI_LANGS)");
   const fileLocales = fs.readdirSync(path.join(ROOT, "main/www/locales"))

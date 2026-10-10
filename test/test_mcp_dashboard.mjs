@@ -7,7 +7,10 @@ import vm from "node:vm";
 const read = (path) => fs.readFileSync(new URL(path, import.meta.url), "utf8");
 const html = read("../main/www/mcp_dashboard.html");
 const css = read("../main/www/mcp_dashboard.css");
-const js = read("../main/www/mcp_dashboard.js");
+const js = process.env.DAIKIN_MCP_PAGE
+  ? fs.readFileSync(process.env.DAIKIN_MCP_PAGE, "utf8").match(/<script>([\s\S]*?)<\/script>/)?.[1]
+  : read("../main/www/mcp_dashboard.js");
+assert.ok(js, "the tested MCP page must retain its inline script");
 const server = read("../main/mcp_server.cpp");
 const cmake = read("../main/CMakeLists.txt");
 

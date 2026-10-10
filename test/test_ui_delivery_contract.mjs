@@ -83,6 +83,66 @@ try {
     /http_send_gzip[\s\S]*httpd_resp_set_hdr\(req, "Content-Encoding", "gzip"\)/,
     "the gzip sender must declare the matching HTTP content encoding");
 
+  // Test the other shipped pages through the actual minifier too. Execute the setup form's
+  // credential and server-rejection paths, and reuse every MCP clipboard interleaving control
+  // against the shipped script, so a parseable but behavior-changing reduction cannot pass.
+  const setupSource = fs.readFileSync(path.join(root, "main/www/setup.html"), "utf8");
+  const mcpSource = fs.readFileSync(path.join(root, "main/www/mcp_dashboard.html"), "utf8")
+    .replace("/*@@INLINE:style.css@@*/\n", fs.readFileSync(path.join(root, "main/www/mcp_dashboard.css"), "utf8"))
+    .replace("//@@INLINE:app.js@@\n", fs.readFileSync(path.join(root, "main/www/mcp_dashboard.js"), "utf8"));
+  const shipped = {};
+  for (const [name, source, cap] of [["setup", setupSource, 4096], ["mcp", mcpSource, 8192]]) {
+    const src = path.join(work, `${name}.html`);
+    const gz = path.join(work, `${name}.html.gz`);
+    fs.writeFileSync(src, source);
+    const reduced = childProcess.spawnSync("python3", [tool, "--input", src, "--output", gz,
+      "--max-gzip-bytes", String(cap)], { cwd: root, encoding: "utf8" });
+    assert.equal(reduced.status, 0, reduced.stderr || reduced.stdout);
+    shipped[name] = zlib.gunzipSync(fs.readFileSync(gz)).toString("utf8");
+    assert.doesNotThrow(() => new vm.Script(shipped[name].match(/<script>([\s\S]*?)<\/script>/)[1]));
+    assert.match(cmake, new RegExp(`--output "\\$\\{CMAKE_CURRENT_BINARY_DIR\\}/${name}\\.html\\.gz"\\s+--max-gzip-bytes ${cap}`));
+  }
+  const mcpPath = path.join(work, "mcp.min.html");
+  fs.writeFileSync(mcpPath, shipped.mcp);
+  const mcpControls = childProcess.spawnSync(process.execPath, ["test/test_mcp_dashboard.mjs"], {
+    cwd: root, encoding: "utf8", env: { ...process.env, DAIKIN_MCP_PAGE: mcpPath },
+  });
+  assert.equal(mcpControls.status, 0, mcpControls.stderr || mcpControls.stdout);
+
+  for (const [ssid, pass, reply, expected, posts] of [
+    ["", "", null, "Enter a network name", 0],
+    ["test network", "short", null, "Password must be empty", 0],
+    ["  test network  ", "test-password", { status: 400, ok: false, text: async () => '{"error":"Rejected by server"}' }, "Rejected by server", 1],
+    ["test network", "test-password", { status: 503 }, "Device busy", 1],
+    ["  test network  ", "", { status: 200, ok: true }, "Saved — rebooting", 1],
+  ]) {
+    let submit;
+    const requests = [];
+    const nodes = Object.fromEntries(["f", "btn", "msg", "ssid", "pass"].map(id => [id, {
+      value: id === "ssid" ? ssid : id === "pass" ? pass : "", textContent: "", disabled: false,
+      addEventListener(type, handler) { assert.equal(type, "submit"); submit = handler; },
+    }]));
+    const context = vm.createContext({ document: { getElementById: id => nodes[id] },
+      fetch: async (url, options) => { requests.push({ url, options }); return reply; } });
+    vm.runInContext(shipped.setup.match(/<script>([\s\S]*?)<\/script>/)[1], context);
+    await submit({ preventDefault() {} });
+    assert.equal(requests.length, posts);
+    assert.ok(nodes.msg.textContent.includes(expected), nodes.msg.textContent);
+    if (posts) {
+      assert.equal(requests[0].url, "/set_wifi");
+      assert.deepEqual(JSON.parse(requests[0].options.body), { ssid, pass }, "opaque SSID/password bytes survive minification");
+      if (!reply.ok) assert.equal(nodes.btn.disabled, false, "rejected writes allow retry");
+    }
+  }
+
+  const iconSource = fs.readFileSync(path.join(root, "main/www/favicon.ico"));
+  const iconGzip = childProcess.spawnSync("gzip", ["-9", "-n", "-c", path.join(root, "main/www/favicon.ico")]);
+  assert.equal(iconGzip.status, 0, iconGzip.stderr?.toString());
+  assert.deepEqual(zlib.gunzipSync(iconGzip.stdout), iconSource, "HTTP-decoded icon retains every original byte");
+  assert.ok(iconGzip.stdout.length < iconSource.length, "compressing the icon must actually reduce its flash footprint");
+  assert.match(cmake, /"\$\{CMAKE_CURRENT_BINARY_DIR\}\/favicon\.ico\.gz"/);
+  assert.match(status, /http_send_gzip\(req, "image\/vnd\.microsoft\.icon", favicon_ico_gz_start, favicon_ico_gz_end\)/);
+
   // rJSmin supports only unnested template literals.  The wrapper must preserve their raw text,
   // including the leading spaces in nested translated clauses; syntax-only validation missed this
   // exact regression when " for register" became "for register" in a valid bundle.

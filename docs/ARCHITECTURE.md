@@ -3423,7 +3423,11 @@ because a page that is 14 KB too big renders exactly as well as one that is not;
 build-breaking, so the cost arrives as an unrelated feature's CI failure months later. Only
 comments are stripped from markup; HTML indentation stays (whitespace between inline elements is
 significant, and ~1.1 KB is not worth a layout defect that renders correctly on the machine that
-made it). Locale assets use the same JavaScript minifier and a separate 32768-byte gzip cap. gzip is
+made it). Locale assets use the same JavaScript minifier and a separate 32768-byte gzip cap.
+The setup portal and MCP information page use the same offline HTML/CSS/JS minifier, with 4096-byte
+and 8192-byte gzip caps respectively. The favicon is losslessly gzipped; HTTP decoding restores
+its original ICO bytes and all three resolutions. These reductions preserve the signed image's
+existing partition budget without removing UI content. gzip is
 used because the trusted-LAN origin is plain HTTP and browsers do not consistently negotiate Brotli
 there. The UI is
 **two screens**:

@@ -77,8 +77,8 @@ extern const unsigned char index_html_gz_start[] asm("_binary_index_html_gz_star
 extern const unsigned char index_html_gz_end[]   asm("_binary_index_html_gz_end");
 extern const unsigned char setup_html_gz_start[] asm("_binary_setup_html_gz_start");
 extern const unsigned char setup_html_gz_end[]   asm("_binary_setup_html_gz_end");
-extern const unsigned char favicon_ico_start[]   asm("_binary_favicon_ico_start");
-extern const unsigned char favicon_ico_end[]     asm("_binary_favicon_ico_end");
+extern const unsigned char favicon_ico_gz_start[] asm("_binary_favicon_ico_gz_start");
+extern const unsigned char favicon_ico_gz_end[] asm("_binary_favicon_ico_gz_end");
 extern const unsigned char heat_pump_icon_png_start[] asm("_binary_heat_pump_icon_png_start");
 extern const unsigned char heat_pump_icon_png_end[]   asm("_binary_heat_pump_icon_png_end");
 extern const unsigned char locale_de_js_gz_start[] asm("_binary_locale_de_js_gz_start");
@@ -214,9 +214,8 @@ static esp_err_t h_favicon(httpd_req_t* req) {
     bool not_modified = false;
     const esp_err_t cache_err = static_asset_cache(req, "favicon", etag, sizeof(etag), not_modified);
     if (cache_err != ESP_OK || not_modified) return cache_err;
-    httpd_resp_set_type(req, "image/vnd.microsoft.icon");
-    return httpd_resp_send(req, reinterpret_cast<const char*>(favicon_ico_start),
-                           favicon_ico_end - favicon_ico_start);
+    return http_send_gzip(req, "image/vnd.microsoft.icon", favicon_ico_gz_start,
+                          favicon_ico_gz_end);
 }
 
 static esp_err_t h_heat_pump_icon(httpd_req_t* req) {

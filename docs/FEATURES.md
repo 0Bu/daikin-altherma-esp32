@@ -437,6 +437,8 @@ other.
 - **✅ gzip UI embedded in the app image**: the build inlines the page and its fragments,
   minifies, and pre-compresses them deterministically (`EMBED_FILES`). gzip is deliberate because
   the trusted-LAN origin is HTTP and browsers do not consistently negotiate Brotli there.
+  The setup portal and MCP information page use the same offline minifier; their gzip caps are
+  4 KiB and 8 KiB. The favicon is losslessly compressed and retains its original decoded bytes.
 - **✅ 🧪 OOM discipline & early rejection** ([`http_common.cpp`](../main/http_common.cpp),
   [`logic/http_request.hpp`](../main/logic/http_request.hpp)): every route runs under one
   trampoline whose `try/catch` returns **503 instead of crashing** while it still owns the response
