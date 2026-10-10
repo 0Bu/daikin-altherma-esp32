@@ -73,11 +73,18 @@ and the OTA-signing / key lifecycle.
   banner's **Delete report** (`POST /crash/dismiss`), which erases the same image *and* stops the
   device reporting the crash. All destructive actions are POSTs: they must not be triggerable by a
   link, prefetch or crawler.
+  A proven foreign-build dump is preserved at boot but its summary/download are suppressed for
+  that boot. Boot capture never erases evidence automatically; explicit clear/dismiss/factory-reset actions
+  still destroy it. The offline helper rejects missing, empty, short, malformed, duplicate or
+  mismatching ELF identity before GDB. Preserve private originals when decoding fails.
   - **The crash *summary* is deliberately not sensitive.** What the firmware surfaces automatically —
     `/status.last_crash`, the web-UI banner, and the retained `<base>/crash` MQTT topic — is
-    only the reset reason, the crashed task name, and raw program-counter/backtrace **addresses**.
+    the current reset/fault and optional stored task name, ELF identity and raw PC/backtrace
+    **addresses**. Stored incident age and relationship to this reset remain unknown.
     Those hold no credentials, so it is safe to publish them to Home Assistant / VictoriaLogs. The
     full memory image stays behind the manual `GET /coredump` pull; the automation never egresses it.
+    Reset reason describes the current boot; task and backtrace describe the stored dump. Even a
+    matching ELF cannot establish incident age or prove those frames caused the current reset.
   - **The archived `.elf` reveals symbols, not secrets.** CI keeps the unstripped ELF per build (to
     decode dumps, `scripts/decode-coredump.sh`). It exposes function names and layout — expected for
     an open-source firmware — but contains **no** runtime secrets (WiFi/MQTT credentials live only in
@@ -132,9 +139,12 @@ and the OTA-signing / key lifecycle.
   `syslog_host`). When enabled, every diag-log line (WiFi/MQTT/X10A state, timeouts, reset reasons)
   is sent as a plaintext RFC 5424 datagram to the configured host; there is no TLS option, unlike
   MQTT. Once per boot the syslog task additionally replays two record types that are **not** diag-log
-  lines (`logic/bootlog.hpp`): a build-identity line (firmware version + `elf_sha256`) and, after a
-  fault, the crash records (reset reason, crashed task name, exception PC, raw backtrace PCs). Like
-  the MQTT crash topic, these carry **reason/backtrace only — never the raw core dump** (that stays
+  lines (`logic/bootlog.hpp`): one build-identity line and up to five records for a current fault or
+  reportable stored dump. Current reset facts and stored task/PC/ELF/backtrace have separate source
+  labels; every stored record has unknown age/reset relationship. Task/ELF values are bounded and
+  quoted, records stay below 200 bytes, and replay timestamps do not date the stored incident. Like
+  the MQTT crash topic, these carry current reset/fault and optional stored task, PC, ELF identity
+  and backtrace addresses — **never the raw core dump** (that stays
   on flash behind `GET /coredump`) and never a secret. So the whole flow — diag lines and replay
   alike — carries **no credentials** (no WiFi/MQTT passwords or TLS material pass through it) and is
   operational metadata rather than secret disclosure; it does reveal your firmware version and
@@ -335,12 +345,31 @@ always re-flashable over USB. The containment is therefore *prevention*, not rec
   reach: after building the canonical `-merged.bin`, it carves out the individual `flash_args`
   ranges, runs `require-signed.sh` on the final staged app and publishes those sparse parts. The
   build fails rather than publish an installer whose app is unsigned.
+- The browser loads the raw manifest and sibling `artifacts.json` together. The index's manifest
+  SHA-256 binds the displayed version to one immutable offer; every selected part must have its
+  indexed size and SHA-256 before any erase or write. The canonical application's hash must also
+  equal `provenance.app_sha256`. All filenames stay within the selected HTTPS feed directory;
+  redirects, duplicate metadata and incomplete or substituted plans fail with a reload instruction.
+  A page left open during publication cannot silently install a later generation. WebCrypto is
+  required; installation stays disabled when verification is unavailable. These checks trust the
+  HTTPS publisher and verify byte identity. Browser SHA-256 checks do not verify RSA signatures;
+  the producer's `require-signed.sh` verifies the exact staged application before publication.
 - The sparse Web Serial plan is also the configuration boundary: without **Erase**, no published
   part covers `nvs@0x9000`, so WiFi/MQTT/board/X10A settings survive. The build runs
-  `check-web-installer-plan.py`, which requires the user-facing Erase choice and compares every
-  part's rounded 4 KB erase interval with the NVS partition. Selecting **Erase** still deliberately
-  erases the whole chip. The separately published `-merged.bin` remains a manual factory-reset
-  image; writing it at offset 0 writes its `0xff` gap through NVS.
+  `check-web-installer-plan.py`, which requires the user-facing Erase choice and the complete
+  ESP32-S3 plan: canonical bootloader at 0, partition table at 0x8000, OTA data at 0xf000 and the
+  verified application at 0x20000. It binds their bytes to the manifest index and derives bounds
+  from `partitions.csv`, rejecting overlapping 4 KB erase sectors or writes into NVS, coredump and
+  history. The browser checks the same official geometry before downloads. Selecting **Erase**
+  still deliberately erases the whole chip. The separately published `-merged.bin` remains a
+  manual factory-reset image; writing it at offset 0 writes its `0xff` gap through NVS.
+- Compatibility requires a detected ESP32-S3 and at least 8 MB of recognized flash, both during
+  connection and again before installation. The pinned
+  [esptool-js capacity API](https://github.com/espressif/esptool-js/blob/v0.7.0/src/esploader.ts)
+  returns the flash-ID capacity; an unavailable or unknown result fails before binary downloads,
+  erase or write. Flash options retain `flashSize: "keep"` so signed image headers are unchanged.
+  Source and host tests establish these checks; physical flashing, boot health and persistence
+  still require separate evidence on the actual board.
 - The sole `history@0x400000` partition (4 MiB append journal) sits outside
   every published data part, so plant readings survive a non-Erase install exactly as the settings
   do. The former 8 KB partition at 0x1e000 is no longer part of the table. The journal is
@@ -697,12 +726,13 @@ Found a security issue?
 
 **One non-security thing is also sent here: a core dump.** An ordinary bug report is filed as a
 public issue and carries its device data with it, because the device redacts that data before it
-leaves the board (`GET /status?redact=1` / `GET /diag?redact=1`, `main/logic/redact.hpp` — see
+leaves the board (`GET /status?redact=1`, `GET /diag?redact=1` and `GET /ota/status?redact=1`,
+`main/logic/redact.hpp` — see
 [REPORTING.md](REPORTING.md)). A **core dump is the exception the redaction cannot cover**: it is raw
 task-stack and TCB memory, and although `CONFIG_ESP_COREDUMP_CAPTURE_DRAM` is off, a password of 15
 characters or fewer lives *inside* its `std::string` object by small-string optimisation rather than
 on the heap — so a stack frame holding a config snapshot can carry one. Dumps are therefore never
-requested up front (`/status.last_crash` already gives reason, task, PC and backtrace) and, when one
+requested up front (`/status.last_crash` gives current reset/fault and any available stored summary) and, when one
 is genuinely needed, it is sent through this private form and never attached to an issue.
 
 Please include the firmware version (`GET /status` → `version`, or the version shown in the web UI)

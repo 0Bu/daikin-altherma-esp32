@@ -1,5 +1,5 @@
 {
-  "method": "Exact taken/outcome counts measured at this revision with Apple Clang 17.0.0 and GCC 13.3.0. Local profiles bind compiler family/major and platform slug (e.g. clang-17-darwin, gcc-13-darwin, gcc-13-linux-ubuntu24); authoritative GitHub profiles additionally bind runner OS/image because packaging can alter instrumentation. The gate compares repository history and rejects decreases; improvements require an immediate versioned update. The X10A value-template helper in discovery.hpp moved inline string appends into one function and was measured with Apple Clang 17, ESP-IDF-container GCC 13 and Ubuntu 26.04 GCC 15; both GNU inventories match and every ratio rises. The updated hosted GCC 15 expectations use that measured inventory and require confirmation by authoritative CI. The new config_transaction.hpp was measured with Apple Clang 17 and ESP-IDF-container GCC 13; its two GCC 15 expectations copy the GCC 13 inventory and require the same confirmation. The history-journal helpers added to history_persist.hpp (manifest currency, future-cursor detection, slot-failure skip with its abandon budget and paused-retry throttle, restore source skip) were measured with Apple Clang 17 (245/348), ESP-IDF-container GCC 13.3 (294/408) and Ubuntu 26.04 GCC 15.2 (292/406); both hosted GCC 15 expectations copy the measured Ubuntu GCC 15 inventory and require confirmation by authoritative CI. No ratio is reduced relative to the protected base (main: 219/320, 261/374, 259/372). The boot-gap rules (dwell_resume_origin_us in state_dwell.hpp, dhw_loss_adopt_blind_s in checkup.hpp) were measured with Apple Clang 17.0.0, ESP-IDF-container GCC 13.3.0 and Ubuntu 26.04 GCC 15.2.0; the hosted GCC 15 expectations copy the local GCC 15 inventory and require confirmation by authoritative CI. Relative to main before this change (neither file changed between a32c700f and 7af49885), checkup.hpp outcomes rise from 703 to 707 (Apple Clang 17), from 813 to 817 (GCC 13) and from 815 to 819 (GCC 15), and its taken counts rise by 7 (Apple Clang 17) and by 8 (GCC 13 and GCC 15); state_dwell.hpp outcomes stay at 116 (Apple Clang 17) and rise from 126 to 128 (GCC 13 and GCC 15), and its taken counts rise by 1 (Apple Clang 17) and by 2 (GCC 13 and GCC 15). The restart-adoption test steps a kept adoption through a 100 s unread gap, so the blind discard that dhw_loss_step records for a carried candidate is exercised. The HIST-01 identity helpers (the circulation witness identity and its restore rules, the catalog fingerprint as a fold of every ring's series id, the HomeHub decode columns with their closure check against both def/ register tables, the X10A scope pin against the pre-HIST-01 formula, the rejection table of the three journal-header acceptance predicates, and the snapshot time-axis metadata) in history.hpp, history_persist.hpp and homehub_map.hpp were measured with Apple Clang 17 (history.hpp 113/120, history_persist.hpp 319/372, homehub_map.hpp 52/52, and config_model.hpp 203/256 because the test now evaluates diagnostics_next_generation at run time, covering its wrap), ESP-IDF-container GCC 13.3 (148/154, 382/442, 54/54) and Ubuntu 26.04 GCC 15.2 (146/152, 380/440, 54/54); the hosted GCC 15 expectation copies the Ubuntu 26.04 inventory and requires confirmation by authoritative CI. Relative to the protected base no ratio is reduced (history.hpp 105/112, 140/146, 138/144; history_persist.hpp 245/348, 294/408, 292/406; homehub_map.hpp 36/36; config_model.hpp 201/254).",
+  "method": "Exact taken/outcome counts measured at this revision with Apple Clang 17.0.0 and GCC 13.3.0. Local profiles bind compiler family/major and platform slug (e.g. clang-17-darwin, gcc-13-darwin, gcc-13-linux-ubuntu24); authoritative GitHub profiles additionally bind runner OS/image because packaging can alter instrumentation. The gate compares repository history and rejects decreases; improvements require an immediate versioned update. The X10A value-template helper in discovery.hpp moved inline string appends into one function and was measured with Apple Clang 17, ESP-IDF-container GCC 13 and Ubuntu 26.04 GCC 15; both GNU inventories match and every ratio rises. The updated hosted GCC 15 expectations use that measured inventory and require confirmation by authoritative CI. The new config_transaction.hpp was measured with Apple Clang 17 and ESP-IDF-container GCC 13; its two GCC 15 expectations copy the GCC 13 inventory and require the same confirmation. The history-journal helpers added to history_persist.hpp (manifest currency, future-cursor detection, slot-failure skip with its abandon budget and paused-retry throttle, restore source skip) were measured with Apple Clang 17 (245/348), ESP-IDF-container GCC 13.3 (294/408) and Ubuntu 26.04 GCC 15.2 (292/406); both hosted GCC 15 expectations copy the measured Ubuntu GCC 15 inventory and require confirmation by authoritative CI. No ratio is reduced relative to the protected base (main: 219/320, 261/374, 259/372). The boot-gap rules (dwell_resume_origin_us in state_dwell.hpp, dhw_loss_adopt_blind_s in checkup.hpp) were measured with Apple Clang 17.0.0, ESP-IDF-container GCC 13.3.0 and Ubuntu 26.04 GCC 15.2.0; the hosted GCC 15 expectations copy the local GCC 15 inventory and require confirmation by authoritative CI. Relative to main before this change (neither file changed between a32c700f and 7af49885), checkup.hpp outcomes rise from 703 to 707 (Apple Clang 17), from 813 to 817 (GCC 13) and from 815 to 819 (GCC 15), and its taken counts rise by 7 (Apple Clang 17) and by 8 (GCC 13 and GCC 15); state_dwell.hpp outcomes stay at 116 (Apple Clang 17) and rise from 126 to 128 (GCC 13 and GCC 15), and its taken counts rise by 1 (Apple Clang 17) and by 2 (GCC 13 and GCC 15). The restart-adoption test steps a kept adoption through a 100 s unread gap, so the blind discard that dhw_loss_step records for a carried candidate is exercised. The HIST-01 identity helpers (the circulation witness identity and its restore rules, the catalog fingerprint as a fold of every ring's series id, the HomeHub decode columns with their closure check against both def/ register tables, the X10A scope pin against the pre-HIST-01 formula, the rejection table of the three journal-header acceptance predicates, and the snapshot time-axis metadata) in history.hpp, history_persist.hpp and homehub_map.hpp were measured with Apple Clang 17 (history.hpp 113/120, history_persist.hpp 319/372, homehub_map.hpp 52/52, and config_model.hpp 203/256 because the test now evaluates diagnostics_next_generation at run time, covering its wrap), ESP-IDF-container GCC 13.3 (148/154, 382/442, 54/54) and Ubuntu 26.04 GCC 15.2 (146/152, 380/440, 54/54); the hosted GCC 15 expectation copies the Ubuntu 26.04 inventory and requires confirmation by authoritative CI. Relative to the protected base no ratio is reduced (history.hpp 105/112, 140/146, 138/144; history_persist.hpp 245/348, 294/408, 292/406; homehub_map.hpp 36/36; config_model.hpp 201/254).SEC-01 report-privacy helpers were measured with canonical scripts/run-mock-tests.sh --coverage: native Apple Clang 17.0.0 (diag_tail.hpp 72/72, redact.hpp 64/72), pinned ESP-IDF-container GCC 13.3.0 (82/82, 80/96), and an isolated Ubuntu 26.04.1 aarch64 container with GCC/gcov 15.2.0-16ubuntu1 (82/82, 80/96). The GCC 15 full local canonical gate passed after updating only these expectations; its hosted profile repeats the measured local inventory and still requires authoritative CI confirmation. diag_tail.hpp stays at 100 percent and every redact.hpp ratio rises; no other header expectations or checker thresholds change. SEC-02 stored-report identity, bounded log values and provenance records were measured with canonical scripts/run-mock-tests.sh --coverage: Apple Clang 17.0.0 (bootlog.hpp 63/88, crashinfo.hpp 167/259), pinned ESP-IDF v6.1 container GCC 13.3.0 (68/94, 189/288), and isolated Ubuntu 26.04.1 aarch64 GCC/gcov 15.2.0-16ubuntu1 (68/94, 189/288). Every changed ratio rises; the hosted GCC 15 profile uses the measured local inventory pending authoritative CI confirmation. Other header expectations and the 95-percent line floor are unchanged.",
   "profiles": {
     "clang-17-darwin": {
       "main/logic/availability.hpp": {
@@ -23,8 +23,8 @@
         "taken": 8
       },
       "main/logic/bootlog.hpp": {
-        "outcomes": 80,
-        "taken": 55
+        "outcomes": 88,
+        "taken": 63
       },
       "main/logic/button.hpp": {
         "outcomes": 18,
@@ -75,8 +75,8 @@
         "taken": 22
       },
       "main/logic/crashinfo.hpp": {
-        "outcomes": 233,
-        "taken": 140
+        "outcomes": 259,
+        "taken": 167
       },
       "main/logic/crc.hpp": {
         "outcomes": 97,
@@ -95,8 +95,8 @@
         "taken": 29
       },
       "main/logic/diag_tail.hpp": {
-        "outcomes": 28,
-        "taken": 28
+        "outcomes": 72,
+        "taken": 72
       },
       "main/logic/discovery.hpp": {
         "outcomes": 302,
@@ -315,8 +315,8 @@
         "taken": 8
       },
       "main/logic/redact.hpp": {
-        "outcomes": 34,
-        "taken": 27
+        "outcomes": 72,
+        "taken": 64
       },
       "main/logic/reference_temperature.hpp": {
         "outcomes": 318,
@@ -397,8 +397,8 @@
         "taken": 8
       },
       "main/logic/bootlog.hpp": {
-        "outcomes": 88,
-        "taken": 62
+        "outcomes": 94,
+        "taken": 68
       },
       "main/logic/button.hpp": {
         "outcomes": 22,
@@ -449,8 +449,8 @@
         "taken": 33
       },
       "main/logic/crashinfo.hpp": {
-        "outcomes": 244,
-        "taken": 149
+        "outcomes": 288,
+        "taken": 189
       },
       "main/logic/crc.hpp": {
         "outcomes": 113,
@@ -469,8 +469,8 @@
         "taken": 31
       },
       "main/logic/diag_tail.hpp": {
-        "outcomes": 28,
-        "taken": 28
+        "outcomes": 82,
+        "taken": 82
       },
       "main/logic/discovery.hpp": {
         "outcomes": 324,
@@ -689,8 +689,8 @@
         "taken": 10
       },
       "main/logic/redact.hpp": {
-        "outcomes": 52,
-        "taken": 37
+        "outcomes": 96,
+        "taken": 80
       },
       "main/logic/reference_temperature.hpp": {
         "outcomes": 366,
@@ -771,8 +771,8 @@
         "taken": 8
       },
       "main/logic/bootlog.hpp": {
-        "outcomes": 88,
-        "taken": 62
+        "outcomes": 94,
+        "taken": 68
       },
       "main/logic/button.hpp": {
         "outcomes": 22,
@@ -823,8 +823,8 @@
         "taken": 33
       },
       "main/logic/crashinfo.hpp": {
-        "outcomes": 244,
-        "taken": 149
+        "outcomes": 288,
+        "taken": 189
       },
       "main/logic/crc.hpp": {
         "outcomes": 111,
@@ -843,8 +843,8 @@
         "taken": 31
       },
       "main/logic/diag_tail.hpp": {
-        "outcomes": 28,
-        "taken": 28
+        "outcomes": 82,
+        "taken": 82
       },
       "main/logic/discovery.hpp": {
         "outcomes": 324,
@@ -1063,8 +1063,8 @@
         "taken": 10
       },
       "main/logic/redact.hpp": {
-        "outcomes": 52,
-        "taken": 37
+        "outcomes": 96,
+        "taken": 80
       },
       "main/logic/reference_temperature.hpp": {
         "outcomes": 366,
@@ -1145,8 +1145,8 @@
         "taken": 8
       },
       "main/logic/bootlog.hpp": {
-        "outcomes": 88,
-        "taken": 62
+        "outcomes": 94,
+        "taken": 68
       },
       "main/logic/button.hpp": {
         "outcomes": 22,
@@ -1197,8 +1197,8 @@
         "taken": 33
       },
       "main/logic/crashinfo.hpp": {
-        "outcomes": 244,
-        "taken": 149
+        "outcomes": 288,
+        "taken": 189
       },
       "main/logic/crc.hpp": {
         "outcomes": 111,
@@ -1217,8 +1217,8 @@
         "taken": 31
       },
       "main/logic/diag_tail.hpp": {
-        "outcomes": 28,
-        "taken": 28
+        "outcomes": 82,
+        "taken": 82
       },
       "main/logic/discovery.hpp": {
         "outcomes": 324,
@@ -1437,8 +1437,8 @@
         "taken": 10
       },
       "main/logic/redact.hpp": {
-        "outcomes": 52,
-        "taken": 37
+        "outcomes": 96,
+        "taken": 80
       },
       "main/logic/reference_temperature.hpp": {
         "outcomes": 366,

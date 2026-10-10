@@ -189,9 +189,9 @@ served to `/status` readers, the MQTT heartbeat's diagnostic entities and `/diag
 `ota{channel}` (`"release"` | `"dev"` — which published feed the next update check reads; the
 SETTING, not the running build, since a device can be set to a channel it has not installed from
 yet — drives the Firmware card's Update-channel select, §5.4),
-`last_crash` (`null` on a clean boot **or once the report is deleted** via `POST /crash/dismiss`,
-else `{reason,reason_code,fault,coredump,task,pc,backtrace[],corrupted,elf_sha256}` — drives the
-crash banner),
+`last_crash` (`null` without a current fault or reportable stored image, or once the report is
+deleted via `POST /crash/dismiss`; current-boot `{reason,reason_code,fault}`, live `coredump`
+availability and optional stored `{task,pc,backtrace[],corrupted,elf_sha256}` drive the crash banner),
 `detect{proto,valid,capacity_kw,capacity_kw_iu,ou_eeprom,candidates[],families[],ambiguous,
 model{name,family,marketing}}` (drives the dashboard ESP32 board card + the read-only model card;
 `model` carries only the fields the candidate set establishes, `null` otherwise;
@@ -340,14 +340,16 @@ Body, ordered:
    which is exactly the "until the user acts on it" lifetime wanted. Without it the failure is
    invisible — the device simply reappears on the old SSID and the dashboard looks normal.
 0. **Crash banner** (only when `last_crash` is set — a fault reset or a core dump waiting; hidden on a
-   clean boot). An `--err`-accented card **above the system card**. The title is keyed on `fault`, i.e. on
-   whether *this* boot was itself a crash: "Device restarted after a crash" when it was, else "Crash
-   report waiting from an earlier restart" — an orphan dump left in flash raises the banner on every
-   later boot (including a clean power-on or a USB re-plug), and must not claim a crash that did not
-   happen. Then a meta line (reset reason · crashed task · fw version · short `app_elf_sha256`), the
-   raw hex backtrace, and actions — **Download crash report** (`GET /coredump`, shown only while a
+   normal boot without stored evidence). An `--err`-accented card **above the system card**. The title
+   is keyed on the current `fault`: "Device restarted after a fault" includes panic/watchdogs and
+   power faults; otherwise "Crash report waiting from an earlier restart" describes stored evidence.
+   Current reset/build metadata is separate from stored task, PC and call stack. Copied diagnostics
+   also include the stored ELF identity, separately from the running build.
+   The stored report's age and relationship to this reset are explicitly unknown, even with matching
+   ELF identity. An orphan can therefore raise a banner after a normal reset. Actions — **Download crash report** (`GET /coredump`, shown only while a
    dump actually exists — `/status` reports that live, so the button disappears once the dump is
-   cleared), **Copy diagnostics** (`/status` + `/diag` + summary to the clipboard for a bug report),
+   cleared), **Copy diagnostics** (cached build/crash summary + redacted `/diag` to the clipboard, with
+   explicit read failures),
    and **Delete report**. The delete is a **device** action (`POST /crash/dismiss`), not a per-page
    hide: the device erases the dump and stops reporting the crash, so the banner is gone from every
    browser and from Home Assistant's retained crash entity at once. It used to hide the banner in
@@ -1398,8 +1400,9 @@ vocabulary exactly:
    The third is **Uptime** (`uptime_s`), a plain row directly above them, and it comes back for a
    different reason than they do: it is not a quantity anyone reads for its value, it is the answer
    to *did this board restart while I wasn't looking* — which no other part of this screen gives.
-   The crash banner (§5.5) fires only when the reboot was a **fault**; a config save, an OTA install,
-   a brownout or a pulled plug leave the UI looking exactly as it did before. It is also what makes
+   The crash banner (§5.5) identifies a current fault, including brownout or a power glitch, or
+   stored crash evidence. A config save, OTA install or clean power-on is a normal reset, but a
+   retained dump can still show the earlier-report banner. It is also what makes
    the two rows under it legible: both curves live in RAM and start over at a reboot, so a heap line
    that begins mid-chart is explained by the row above it instead of reading as lost data. Rendered
    at **two units at most, coarsest first** (`3 d 2 h`, `5 h 12 min`, `47 min`, `38 s`) — at three
@@ -1756,7 +1759,7 @@ page under near-identical cards). Specific:
   item 0) shows above the system card and the heat-pump cards stay collapsed (polling is paused); the WiFi,
   MQTT and Protocol (RX/TX) config controls behind the gear remain usable so the bad setting can be
   corrected, then a reboot returns to normal.
-- **Post-crash**: if the last reset was a fault (or a core dump is waiting), the crash banner (§5.3
+- **Fault or stored report**: if the last reset was a fault (including power faults) or a core dump is waiting, the crash banner (§5.3
   item 0) appears above the system card until the report is deleted on the device (or the next clean
   reboot makes the boot un-notable) — with the title distinguishing the two triggers, so
   a leftover dump alone doesn't report a crash that didn't happen this boot. "Copy diagnostics" toasts

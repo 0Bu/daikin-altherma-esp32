@@ -1,8 +1,9 @@
 # Reporting a bug
 
 Everything goes into one public GitHub issue: what you saw, plus a report the device writes about
-itself. **The device removes your network name, addresses, broker and server names before you ever
-see that report**, so there is nothing left in it that needs hiding — see
+itself. **The device removes configured network identifiers and effective update-feed URLs from the
+report**. Read it before posting: your description and any separate logs can still contain private
+details — see
 [What is removed](#what-is-removed-and-what-deliberately-is-not).
 
 ---
@@ -46,7 +47,7 @@ results into the **Device report** field under the headings shown. Replace
 ```
 http://daikin-altherma-esp32.local/status?redact=1
 http://daikin-altherma-esp32.local/values
-http://daikin-altherma-esp32.local/ota/status
+http://daikin-altherma-esp32.local/ota/status?redact=1
 http://daikin-altherma-esp32.local/diag?verbose=1&redact=1
 ```
 
@@ -82,7 +83,8 @@ below and edit them out by hand before you post.
 
 ## What is removed, and what deliberately is not
 
-The device replaces these 27 values with `<redacted>` and **keeps the field itself**.
+The device protects these 28 values and **keeps the field itself**. Set identifiers become
+`<redacted>`; the MQTT HVAC mode retains only the fixed public vocabulary listed below.
 A value you have **not set** is the exception: it stays empty rather than becoming
 `<redacted>`, because an unset field has nothing to hide and substituting one would claim you
 have a broker, a room source or a HomeHub that you do not — which is the first thing anyone
@@ -110,6 +112,7 @@ reading your report needs to know.
 | `reference_temperature.timestamp_path` | user-typed JSON path; may contain room, person or device names |
 | `reference_temperature.enabled_path` | user-typed JSON path; may contain room, person or device names |
 | `reference_temperature.hvac_mode_path` | user-typed JSON path; may contain room, person or device names |
+| `reference_temperature.hvac_mode` | unknown MQTT source text; the fixed public modes off, heat, cool, heat_cool, auto, dry and fan_only remain visible |
 | `circulation_source.name` | a name you typed for the circulation-pump meter |
 | `circulation_source.topic` | a path through your own broker — normally embeds the smart plug's device id |
 | `circulation_source.power_path` | user-typed JSON path; may contain room, person or device names |
@@ -124,7 +127,15 @@ reading your report needs to know.
 The coordinates identify a place; source names and JSON paths are words you typed and can name a
 room or person. The remaining values identify devices or paths through your own network.
 
-The `/diag` log is scrubbed line by line for the same things.
+The `/diag` log is scrubbed line by line for the same things. WiFi, clock-server, log-server and OTA download
+identifiers are escaped when logged, so quotes, line breaks and non-ASCII bytes cannot split a
+private identifier out of its redaction span. The log drops incomplete oldest records after a ring
+wrap or a shortened read; `[... truncated ...]` announces missing records. A clipped record also
+carries that marker. Intact raw X10A records and error details remain available.
+
+The crash banner's **Copy diagnostics** action uses the redacted log too. If a read fails, the
+copied report states **Could not be read from the device**; this is missing evidence, not an empty
+log or proof that nothing happened.
 
 Everything else stays, on purpose: the firmware version, the build fingerprint, signal strength,
 whether MQTT is connected, the error counters, the detected model, heap and uptime. Those describe
@@ -134,8 +145,12 @@ emptied rather than deleted, because a missing field is indistinguishable from a
 that never had it — and "which build produced this?" is the first question anyone looking at your
 report has to answer.
 
-`/values` are your heat pump's readings at one moment, and `/ota/status` carries no personal data
-at all.
+`/values` are your heat pump's readings at one moment. `/ota/status?redact=1` hides
+`effective_manifest_url` and `effective_firmware_base_url` when present; an empty URL stays empty.
+The operational `/ota/status` route retains those URLs and can reveal a private feed origin or path
+during a temporary test override. The redacted log also hides the effective download URL while
+retaining its running/offered versions and channel. Always use the redacted form for a public report. Oversized
+redaction queries or flags are refused rather than returning an operational response.
 
 ### The one exception: crash dumps
 
@@ -144,10 +159,16 @@ of the device's task memory, and a password of 15 characters or fewer is stored 
 object rather than elsewhere — so it can end up in a stack frame that the dump captures. No
 field-level redaction can reach into that.
 
-You are not asked for one up front: the device report already contains the crash reason, the task,
-the program counter and the backtrace, which is usually enough. If a dump turns out to be needed,
+You are not asked for one up front: the device report contains the current reset/fault and, when
+available, stored task, program counter and backtrace. The copied task is quoted on one line so
+damaged text cannot create another report record. If a dump turns out to be needed,
 you will be asked to send it through the [private advisory
 form](https://github.com/0Bu/daikin-altherma-esp32/security/advisories/new) instead.
+
+The reset reason describes why the device started this time. A stored dump can be older: its task
+and backtrace describe that stored evidence, even when it belongs to the same firmware build.
+Missing or undecodable evidence does not prove there was no fault. Keep a private original until
+its meaning is understood; do not delete it just because decoding failed.
 
 ---
 

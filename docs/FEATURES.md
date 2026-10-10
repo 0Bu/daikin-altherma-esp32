@@ -55,7 +55,7 @@ Ids are stable keys and are never reused — a gap means a feature was retired, 
 | 8 | HTTP handlers under an **OOM `try/catch` → 503** discipline + active-OTA / low-heap early rejection; clean connection abort once a streamed response has begun | ✅ 🧪 | [`http_common.cpp`](../main/http_common.cpp), [`logic/chunk_sink.hpp`](../main/logic/chunk_sink.hpp), [`logic/http_request.hpp`](../main/logic/http_request.hpp) |
 | 9 | Home Assistant MQTT auto-discovery, separate X10A/HomeHub state topics, LWT | ✅ 🧪 | [`mqtt_ha.cpp`](../main/mqtt_ha.cpp), [`logic/discovery.hpp`](../main/logic/discovery.hpp) |
 | 10 | **MQTTS/WSS + verified common-root CA bundle**; credentials never sent in cleartext, no silent fallback | ✅ | [`mqtt_ha.cpp`](../main/mqtt_ha.cpp), [`sdkconfig.defaults`](../sdkconfig.defaults) |
-| 11 | Core dump to flash + offline symbolication, with a proven **orphan dump** erased so no undecodable download is ever offered | ✅ 🧪 | [`diag_crash.cpp`](../main/diag_crash.cpp), [`logic/crashinfo.hpp`](../main/logic/crashinfo.hpp), [`decode-coredump.sh`](../scripts/decode-coredump.sh) |
+| 11 | Core dump to flash + offline symbolication, with proven foreign evidence preserved and suppressed, and strict offline ELF identity checks | ✅ 🧪 | [`diag_crash.cpp`](../main/diag_crash.cpp), [`logic/crashinfo.hpp`](../main/logic/crashinfo.hpp), [`decode-coredump.sh`](../scripts/decode-coredump.sh) |
 | 12 | Reset-reason + crash classification, retained to MQTT and cleared when the boot is unremarkable | ✅ 🧪 | [`diag_crash.cpp`](../main/diag_crash.cpp), [`logic/crashinfo.hpp`](../main/logic/crashinfo.hpp) |
 | 13 | 22-entity device **heartbeat** diagnostics stream, published independently of profile detection | ✅ 🧪 | [`logic/heartbeat.hpp`](../main/logic/heartbeat.hpp) |
 | 14 | Strongest-AP scan + SAE tuning + **endless reconnect** (a router reboot never strands the bridge) | ✅ | [`wifi.cpp`](../main/wifi.cpp) |
@@ -92,7 +92,7 @@ Ids are stable keys and are never reused — a gap means a feature was retired, 
 | 45 | **Dashboard-schematic audit** — parses the real SVG and evaluates the real bindings to catch a correct value drawn on the wrong pipe | ✅ | [`check_schematic.mjs`](../tools/schematic/check_schematic.mjs), [`run-schematic-audit.sh`](../scripts/run-schematic-audit.sh) |
 | 46 | **On-device redaction of a diagnostic snapshot** — so a bug report can be a *public* issue; in the firmware, so the UI and a manual `curl` cannot become two privacy rules | ✅ 🧪 | [`logic/redact.hpp`](../main/logic/redact.hpp), [`REPORTING.md`](REPORTING.md) |
 | 47 | **Redaction-coverage gate** — the only gate whose subject is the *user's data*: flags a diag line carrying a config or identity value with no matching rule | ✅ | [`check_diag_coverage.py`](../tools/redact/check_diag_coverage.py), [`run-redaction-audit.sh`](../scripts/run-redaction-audit.sh) |
-| 48 | **Device-assembled bug report** — the board collects its own redacted status, values and log into one pasteable report | ✅ | [`www/js/app_state.js`](../main/www/js/app_state.js), [`REPORTING.md`](REPORTING.md) |
+| 48 | **Device-assembled bug report** — collects redacted status, update-feed URLs and logs plus values; read failures remain explicit | ✅ | [`www/js/app_state.js`](../main/www/js/app_state.js), [`REPORTING.md`](REPORTING.md) |
 | 49 | **Typed telemetry contract** — a field's JSON type comes from its *converter*, so one MQTT key can never change type between states | ✅ 🧪 | [`logic/convert.hpp`](../main/logic/convert.hpp), [`logic/mqtt_group.hpp`](../main/logic/mqtt_group.hpp) |
 | 50 | **Availability ledger** — is a decoded number a *measurement*, or merely something the firmware could decode? Adjudicated per structural `(page, offset, converter)` key — plus the exact generated label where one coordinate carries multiple quantities, page-keyed absent-hardware verdicts, a conditional zero refuted by a same-cycle saturation witness, and a raw-page bit-overlay rule that withholds CT-L3 instead of turning `HP Forced FG` into a fictitious +64 A | ✅ 🧪 | [`logic/availability.hpp`](../main/logic/availability.hpp) |
 | 51 | **Converter adjudication** — which converter a generated row is actually *encoded* with, when the generator's id is demonstrably wrong | ✅ 🧪 | [`logic/conv_override.hpp`](../main/logic/conv_override.hpp) |
@@ -109,7 +109,7 @@ Ids are stable keys and are never reused — a gap means a feature was retired, 
 | 66 | **Complete UI interaction merge gate** — the assembled production UI is *executed* in a deterministic DOM harness, covering every modal in the production registry | ✅ 🧪 | [`test_ui_use_cases.mjs`](../test/test_ui_use_cases.mjs), [`run-ui-use-case-tests.sh`](../scripts/run-ui-use-case-tests.sh) |
 | 68 | **Source-boundary contract gate** — source-text assertions about `main/*.cpp` the host suite structurally cannot make (task, order, and which file is entitled) | ✅ | [`run-contract-tests.sh`](../scripts/run-contract-tests.sh), [`test_heating_curve_diagnosis_contract.mjs`](../test/test_heating_curve_diagnosis_contract.mjs) |
 | 69 | **Source-absence matrix gate** — every optional source (broker, room source, circulation witness, HomeHub, ENV III, weather, X10A, safe mode) can be absent independently, so the firmware invariants and the browser copy are checked over that cross product, not one feature at a time | ✅ | [`test_source_absence_contract.mjs`](../test/test_source_absence_contract.mjs), [`test_ui_absence_matrix.mjs`](../test/test_ui_absence_matrix.mjs), [`selftest.sh`](../tools/absence/selftest.sh) |
-| 71 | **Pinned stack compiler contracts on `/status` and MQTT publishing** — `http_status.cpp` stays at `-Os` and scopes subsystem locals (+2836 B free stack) in `http_append_status_json()` with chunked streaming, while `mqtt_ha.cpp` keeps called-once helper boundaries and a fatal 2 KiB per-function frame ceiling so size optimisation cannot silently fold transient publish state back into the fixed MQTT task frame | ✅ | [`main/CMakeLists.txt`](../main/CMakeLists.txt), [`http_status.cpp`](../main/http_status.cpp), [`mqtt_ha.cpp`](../main/mqtt_ha.cpp) |
+| 71 | **Stack compiler and ELF contracts** — a 10 KiB HTTP task with 2 KiB above every named path ceiling, bounded JSON recursion, and MQTT helper boundaries with a fatal 2 KiB per-function frame ceiling | ✅ | [`http_server.cpp`](../main/http_server.cpp), [`check-stack-budget.py`](../scripts/check-stack-budget.py), [`main/CMakeLists.txt`](../main/CMakeLists.txt), [`mqtt_ha.cpp`](../main/mqtt_ha.cpp) |
 | 81 | **Stack-headroom telemetry** — the second memory budget, made reportable: five deep tasks record their own FreeRTOS high-water mark and the heartbeat carries all five, so a growing call frame is a falling line rather than a core dump nobody has yet | ✅ | [`stack_watch.hpp`](../main/stack_watch.hpp), [`stack_watch.cpp`](../main/stack_watch.cpp) |
 | 72 | **Power-loss-surviving 24-hour trends and opt-in plant checkup** — `.noinit` DRAM covers power-preserving resets; the upper-4-MiB append journal stores dense five-minute X10A/HomeHub/ENV III records, daily semantic-id manifests that preserve unchanged series across catalog edits, and enabled hourly diagnosis records. CRC, last-written commit and rotating sectors fail closed on torn writes; the build guards 72-hour capacity. The official 8 MB table is required; browser storage is not a measurement source | ✅ 🧪 | [`logic/history_persist.hpp`](../main/logic/history_persist.hpp), [`history.cpp`](../main/history.cpp), [`partitions.csv`](../partitions.csv) |
 | 82 | **Reproducible ESP-IDF build inputs** — exact transitive component lock, explicit ESP-IDF/CMake/C++ floors and wall-clock-free app metadata | ✅ | [`dependencies.lock`](../dependencies.lock), [`CMakeLists.txt`](../CMakeLists.txt), [`sdkconfig.defaults`](../sdkconfig.defaults) |
@@ -417,8 +417,8 @@ other.
 
 ## 4. Web server & the live transport
 
-- **`esp_http_server` on `:80`**, with `CONFIG_HTTPD_WS_SUPPORT=n` — stated explicitly because this
-  firmware deliberately has **no** push transport. The full HTTP surface is in
+- **`esp_http_server` on `:80`**, with a 10 KiB task stack, 2 KiB above every named ELF path
+  ceiling, and `CONFIG_HTTPD_WS_SUPPORT=n`. The full HTTP surface is in
   [`ARCHITECTURE.md`](ARCHITECTURE.md) and [`docs/README.md`](README.md).
 - **✅ The live UI is a POLL, and the absence of a push is the feature.** The browser fetches
   `/values` and `/status` on one recursive-`setTimeout` chain (never `setInterval`: a slow answer
@@ -544,8 +544,9 @@ Everything needed to explain a crash *after the fact*, from the field, without a
 - **✅ Core dump to flash.** The reset reason and `esp_core_dump_get_summary()` are read **once at
   boot** and cached, never re-parsed on a request path. The cheap presence flag is deliberately *not*
   cached, so a dump erased mid-session cannot strand a banner. A dump whose `app_elf_sha256` does not
-  match the **running** build — an orphan that survived an OTA — is erased on **proof**, so
-  `coredump` never advertises a download the decoder would reject.
+  match the **running** build is preserved but its summary/download are suppressed on proof.
+  Missing identity remains unresolved. The summary API uses IDF v6.1's flash-enable guard. Reset
+  reason describes this boot; stored task/backtrace evidence can be older, even with matching ELF.
 - **✅ 🧪 The 24-hour plant checkup survives a reboot** ([`logic/checkup_persist.hpp`](../main/logic/checkup_persist.hpp)).
   `.noinit` preserves the active window across power-preserving resets; the upper-flash append
   journal additionally records completed enabled diagnosis hours and restores compatible coverage
@@ -570,10 +571,11 @@ Everything needed to explain a crash *after the fact*, from the field, without a
   Browser history epochs discard cached trends and pins on source resets or reboot, even for A → B →
   A between polls; replies carry their sample epoch and boot identity for admission. `.noinit` is
   sealed by the order-sensitive catalog fingerprint. Flash precedes each generation with
-  daily-refreshed semantic-id manifests, so unchanged series survive insertion/reordering while new
-  or reinterpreted series alone start empty; unknown/ambiguous layouts fail closed and the exact
+  daily-refreshed semantic-id manifests, so unchanged series survive insertion/reordering while
+  series whose stored semantic identity changes start empty; unknown/ambiguous layouts fail closed and the exact
   pre-disinfection 31/12/3 catalog has an adapter. A series whose identity changes (the circulation
-  witness, HomeHub decoding) starts empty once ([ARCHITECTURE.md](ARCHITECTURE.md)).
+  witness, HomeHub decoding) starts empty once. An X10A decode change under an unchanged series ID
+  retains the previous scale for at most the 24-hour window ([ARCHITECTURE.md](ARCHITECTURE.md)).
   `/status.history.persist` reports RAM adoption; compatible flash can still refill it after SNTP.
 - **✅ 🧪 The heap watchdog** ([`logic/heap_watchdog.hpp`](../main/logic/heap_watchdog.hpp),
   [`heap_guard.cpp`](../main/heap_guard.cpp)). Every other OOM guard in this firmware turns "out of
@@ -606,26 +608,31 @@ Everything needed to explain a crash *after the fact*, from the field, without a
   five largest allocators and is itself the reachable state a restart would be trying to produce.
 - **✅ Offline symbolication** ([`decode-coredump.sh`](../scripts/decode-coredump.sh)): the raw image
   is symbolized against the matching **unstripped `.elf`** CI archives per build. The dump embeds
-  `app_elf_sha256` and the device reports the same, so a wrong ELF is *caught*, not silently
-  mis-decoded.
+  `app_elf_sha256`; the helper requires exactly one valid identity note with at least eight hex
+  characters, rejects missing or mismatching provenance, and checks the actual ELF bytes.
+  Synthetic fixtures exercise real pinned GDB symbolization plus failure/cleanup paths. Matching
+  identity associates a build and cannot date the stored incident.
 - **✅ 🧪 Reset/crash classification** ([`logic/crashinfo.hpp`](../main/logic/crashinfo.hpp)): the
-  summary becomes `/status.last_crash` and a **retained** crash topic driving one diagnostic entity
-  (a "dump waiting" flag — reason and backtrace only, never the raw dump or any secret). The topic is
-  **crash-only**: a normal boot publishes nothing on a clean broker, while a stale record is deleted
-  once the device reboots cleanly. `static_assert`s pin the IDF reset enum so a renumbering fails the
+  current reset/fault plus optional stored task/PC/backtrace/ELF become `/status.last_crash` and a
+  retained topic driving the "dump waiting" entity; the raw memory image is excluded. Stored incident
+  age and relation to this reset remain unknown. A normal boot without a reportable stored image
+  publishes nothing on a clean broker and deletes an older retained record when it exists. `static_assert`s pin the IDF reset enum so a renumbering fails the
   build rather than mislabeling every crash.
 - **✅ 🧪 Deleting a crash report** (`POST /crash/dismiss`): a *device* action rather than a per-page
   hide — status, the retained topic and every browser agree at once. **Erase first, mark second**, so
   a failed erase answers `500` and marks nothing rather than reporting "no crash" with the dump still
   downloadable. RAM-only by design: a persisted dismissal could suppress a *new* crash. The one
-  erase result that does **not** block it is `ESP_ERR_NOT_FOUND`, which means the board has no
+  missing-partition result that does **not** block it is `ESP_ERR_NOT_FOUND`, which means the board has no
   `coredump` partition at all — the state of every device flashed before one existed and upgraded
   over the air since, because OTA writes the inactive app slot and never the partition table
   ([`partitions.csv`](../partitions.csv) states the same premise for `history`). There is nothing to
   destroy there, so the dismissal's other job — clearing the report — must still happen; treating it
   as a failure answered `500` forever, and a fault reset carries no dump often enough (a stack
-  overflow overruns it) that those boards saw exactly the banner no action could clear. Every other
-  error still blocks, because then a dump may genuinely still be downloadable.
+  overflow overruns it) that those boards saw exactly the banner no action could clear. A proven
+  foreign residue is also already suppressed: failed erasure of that residue cannot pin a separate
+  current-fault banner. Other failures retain the report when current or unresolved evidence may
+  still be downloadable. Boot capture preserves foreign bytes; clear/dismiss/factory-reset remain explicit
+  destructive actions.
 - **✅ 🧪 22-entity device heartbeat** ([`logic/heartbeat.hpp`](../main/logic/heartbeat.hpp)): a
   **flat** JSON of heap (free / min-free / largest-free-block, the true OOM limit), uptime, reset
   reason, WiFi RSSI + reconnects + MAC/BSSID, MQTT counters and X10A bus stats — published
@@ -661,7 +668,10 @@ Everything needed to explain a crash *after the fact*, from the field, without a
 - **✅ Build identity** — `/status.app_elf_sha256` ties a running device to the firmware that
   produced any dump, and the syslog boot line puts the same hash in the **log stream**.
 - **✅ 🧪 Getting the evidence off the board — and what must not come with it.** *Settings → Report a
-  bug* collects status, values and log into one pasteable report and opens the prefilled issue form.
+  bug* collects redacted status, update-feed URLs and logs plus values into one pasteable report
+  and opens the prefilled issue form. The crash banner also uses redacted logs. Failed reads are
+  explicit, identifier log bytes are escaped without changing configuration, and partial ring
+  records are discarded with a truncation marker.
   It is filed as a *public* issue, which is defensible only because the board **redacts first**
   ([`logic/redact.hpp`](../main/logic/redact.hpp)) — in the *firmware*, so the UI collector and a
   manual `curl` cannot become two privacy rules. The value is replaced and the **key kept**, since a
@@ -893,20 +903,20 @@ Four properties of that core are worth naming because they are not obvious from 
   **11776 bytes** against ~2.2 KB of actual locals — the rest one stack slot per string temporary in
   a 760-line function. The original `-Os` change took it to **3744** and the deepest httpd path from
   14512 to 6480 bytes. The release image now also uses size optimisation globally to fit its
-  embedded catalogs. After
-  the refrigerant-service object and bounded MCP status sender, the 2026-08-28 ESP-IDF 6.1 ELF measures
-  the sole bounded serializer at **4896**. The historical manual call-path walk measured **7552**
-  bytes, while the automated conservative MCP gate sums **7664** of 16384 and leaves **8720 bytes**;
-  the stack itself remains unchanged. The trade — less exact backtraces in
-  the one file whose core dumps mattered — and the
-  reproduce command are stated where the pin lives and in
+  embedded catalogs. The HTTP task now allocates **10240 bytes**, with every named ELF path
+  ceiling retaining at least **2048 bytes**; required Config/probe/MCP parser frames include their
+  depth-bounded JSON paths, with the shared adapter explicitly bound to `JSON_MAX_DEPTH`. Save,
+  scan and MQTT setup/stop/destroy have separate SDK-NVS, radio and TLS allowances (including
+  renegotiation), above the surrounding HTTP allowance. The historical measurements, compiler
+  trade-off and reproduce command
+  are stated where the pin lives and in
   [`ARCHITECTURE.md`](ARCHITECTURE.md#memory-constraints).
   [`check-stack-budget.py`](../scripts/check-stack-budget.py) now performs that conservative call-path
   calculation on every CI-pinned ELF and fails when a required symbol disappears or a frame/path
   exceeds its committed budget. The ratchets include nested OTA manifest fetch, compact OTA status,
   the HIL-aware `/ota/check` acceptance path, the rollback-critical `ota_health` task, and both
   Weather task branches (download and JSON parse). All three task families' path ceilings leave at
-  least 1 KiB of their configured stacks; the health path carries a
+  least 1 KiB of their configured stacks, with HTTP retaining 2 KiB; the health path carries a
   separate reviewed 2048-byte IDF/logging/exception allowance. Live FreeRTOS high-water marks remain
   separate hardware evidence; the standalone lab-HIL harness can capture the resident delivery
   worker before reboot and rejects missing or sub-1-KiB Weather evidence after the deterministic

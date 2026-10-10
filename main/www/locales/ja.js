@@ -1,4 +1,4 @@
-// translation-source: 856c2ce7d1e297c3bcf8a20a2f1b4c8079ed68a2890bb1d0729997a0bd963c19
+// translation-source: bcd4ff0bb5bf1f2e454eb0f7e5c00ea352bcbb9f1f0c080ef5225bc85210fa0b
 I18N.ja = localeValues([
   /* sys.nodata */ "データなし",
   /* sys.unreachable */ "接続不可",
@@ -34,13 +34,16 @@ I18N.ja = localeValues([
   /* recovery.meta */ "再起動を繰り返したため復旧モードに入り、ヒートポンプ通信とMQTTを停止しています。設定、特に設定のプロトコル欄にあるRX/TXピンを確認して再起動してください。",
   /* rollback.title */ "WiFi変更失敗 — 元に戻しました",
   /* rollback.meta */ (back) => `新しいWiFiに接続できなかったため、以前のネットワーク${back}へ戻して再起動しました。設定 → 接続でネットワーク名とパスワードを確認し、再試行してください。`,
-  /* crash.title_fault */ "クラッシュ後に再起動しました",
+  /* crash.title_fault */ "障害の後に再起動しました",
   /* crash.title_orphan */ "以前のクラッシュ報告があります",
   /* crash.reset */ "リセット",
   /* crash.task */ "タスク",
   /* crash.fw */ "FW",
   /* crash.elf */ "ELF",
   /* crash.corrupted */ "破損",
+  /* crash.stored_dump */ "保存されたクラッシュレポート",
+  /* crash.stored_hint */ "このレポートがいつ作成され、この再起動とどう関係するかは不明です。",
+  /* crash.backtrace */ "呼び出し履歴",
   /* crash.download */ "クラッシュ報告を保存",
   /* crash.copy */ "診断情報をコピー",
   /* crash.dismiss */ "報告を削除",

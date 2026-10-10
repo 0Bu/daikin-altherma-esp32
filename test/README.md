@@ -20,6 +20,15 @@ CLANG_FORMAT=clang-format-18 scripts/run-format-check.sh
 scripts/run-browser-render-tests.sh
 ```
 
+`scripts/run-decode-coredump-tests.sh` checks archive selection, cleanup, subprocess status and
+interruption using a substituted outer handoff. `scripts/run-decode-coredump-integration-tests.sh`
+runs the actual pinned SDK loader and GDB against tiny synthetic Xtensa ELF/core fixtures in
+container-local temporary storage: matching symbols, wrong ELF, absent/empty/short/nonhex/duplicate
+identity, malformed descriptors, version/integrity failures and failed subprocess cleanup. No board,
+real RAM dump or intentional crash is involved. CI adds this as a scoped step in `mechanical_gates`,
+with main-push backstop behavior; no separate job is added. This proves decoder behavior, not real
+flash capture, API/download behavior, incident age or hardware crash unwinding.
+
 Uses `cmake` + `ctest` when present, else a direct `g++`/`clang++` compile of the single
 translation unit ([`test_logic.cpp`](test_logic.cpp)) with `-std=c++17 -Wall -Wextra -Werror`.
 `--coverage` uses the compiler's gcov instrumentation and enforces at least 95% aggregate executable
@@ -228,14 +237,15 @@ right-hand value column. The global reduced-motion contract removes that non-ess
 
 `scripts/run-ui-localization-audit.sh` is the named CI gate for complete device-local copy. Its core,
 `node test/test_ui_locale_catalogs.mjs`, evaluates the separately shipped de/es/fr/it/pl/cs/uk/zh/ja/nb/sv/fi
-modules against the embedded English fallback. All 867 keys, value types and parameter-function
+modules against the embedded English fallback. All 870 keys, value types and parameter-function
 arities must match; browser detection and the Firmware selector must name the same thirteen languages;
 all 125 value and 15 model-description rows must have native copy with no English prose fallback
 (compact locales may fold the normal context into their first field); concurrent loads coalesce onto
 `/locale.js`; every deterministic gzip asset stays within its 32 KiB response budget; and all locale
-assets together stay within a 274 KiB aggregate-growth guard. The two one-KiB rebases accommodate the
+assets together stay within a 275 KiB aggregate-growth guard. Three one-KiB rebases accommodate the
 complete localized factory-reset warning and the cause-neutral wording of the DHW heat-loss
-unobserved-data discard in twelve languages; the separate firmware-size gate binds
+unobserved-data discard, and the stored-report provenance/cause-neutral fault copy in twelve languages;
+the separate firmware-size gate binds
 the actual signed application image and its slot headroom. A fingerprint over the canonical
 English/domain copy makes every locale stale when a source sentence changes without its translation;
 `node tools/ui_localization/selftest.mjs` proves that stale source copy, missing specialist/domain

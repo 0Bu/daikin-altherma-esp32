@@ -1,4 +1,4 @@
-// translation-source: 856c2ce7d1e297c3bcf8a20a2f1b4c8079ed68a2890bb1d0729997a0bd963c19
+// translation-source: bcd4ff0bb5bf1f2e454eb0f7e5c00ea352bcbb9f1f0c080ef5225bc85210fa0b
 const plNoun = (n, one, few, many) => {
   const value = Math.abs(Number(n)), mod10 = value % 10, mod100 = value % 100;
   return value === 1 ? one
@@ -39,13 +39,16 @@ I18N.pl = localeValues([
   /* recovery.meta */ "Urządzenie wielokrotnie uruchomiło się ponownie i weszło w tryb odzyskiwania. Komunikacja z pompą ciepła i MQTT jest wstrzymana. Sprawdź konfigurację — zwłaszcza piny RX/TX na karcie Protokół w Ustawieniach — a następnie uruchom urządzenie ponownie.",
   /* rollback.title */ "Zmiana WiFi nie powiodła się — przywrócono poprzednie ustawienia",
   /* rollback.meta */ (back) => `Urządzenie nie mogło połączyć się z użyciem nowych ustawień WiFi. Przywróciło poprzednią sieć${back} i uruchomiło się ponownie. Sprawdź nazwę sieci i hasło w Ustawienia → Połączenia, a następnie spróbuj ponownie.`,
-  /* crash.title_fault */ "Urządzenie uruchomiło się ponownie po awarii",
+  /* crash.title_fault */ "Urządzenie uruchomiło się ponownie po błędzie",
   /* crash.title_orphan */ "Raport awarii oczekuje od wcześniejszego ponownego uruchomienia",
   /* crash.reset */ "Reset",
   /* crash.task */ "zadanie",
   /* crash.fw */ "FW",
   /* crash.elf */ "elf",
   /* crash.corrupted */ "uszkodzony",
+  /* crash.stored_dump */ "Zapisany raport awarii",
+  /* crash.stored_hint */ "Wiek raportu i jego związek z tym ponownym uruchomieniem są nieznane.",
+  /* crash.backtrace */ "Stos wywołań",
   /* crash.download */ "Pobierz raport awarii",
   /* crash.copy */ "Kopiuj diagnostykę",
   /* crash.dismiss */ "Usuń raport",

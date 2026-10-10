@@ -2,6 +2,7 @@
 #include "sntp_time.hpp"
 #include "config.hpp"
 #include "diag_log.hpp"
+#include "logic/redact.hpp"
 #include "esp_err.h"
 #include "esp_netif_sntp.h"
 #include "sdkconfig.h"
@@ -26,7 +27,7 @@ static std::string s_server;
 static std::atomic<bool> s_synced{false};
 
 static void on_sync(struct timeval*) {
-    if (!s_synced) diag_printf("sntp: time synced (%s)\n", s_server.c_str());
+    if (!s_synced) diag_printf("sntp: time synced (%s)\n", DiagLogIdentifier(s_server).c_str());
     s_synced = true;
 }
 
@@ -36,7 +37,9 @@ void sntp_time_start() {
     cfg.sync_cb      = on_sync;
     cfg.wait_for_sync = false;   // nobody blocks on the sync semaphore here — skip allocating one
     esp_err_t err = esp_netif_sntp_init(&cfg);
-    if (err != ESP_OK) diag_printf("sntp: init failed (%s): %s\n", s_server.c_str(), esp_err_to_name(err));
+    if (err != ESP_OK)
+        diag_printf("sntp: init failed (%s): %s\n", DiagLogIdentifier(s_server).c_str(),
+                    esp_err_to_name(err));
 }
 
 bool time_synced() { return s_synced; }

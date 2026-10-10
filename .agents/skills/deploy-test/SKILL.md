@@ -139,7 +139,8 @@ OTA gate (`--confirm-bench bench --install-bench`), never through this skill.
 
 10. **On findings: fix and repeat.**
     - Snapshot `/status` and `/diag?verbose=1` from the bench host. If `last_crash.fault` is true,
-      fetch `/coredump` and symbolize it against this build's ELF (`$device-triage`).
+      use `$device-triage` with any available private dump and its verified matching ELF. Missing
+      or undecodable dump evidence does not clear the current fault.
     - Fix the root cause with a regression test (logic under `main/logic/` with a `CHECK` in
       `test/test_logic.cpp`, or a contract test), commit, and restart from step 1.
     - Ask the user only when the cause is hardware, the requirement is ambiguous, or the behavior is

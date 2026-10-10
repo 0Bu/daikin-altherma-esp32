@@ -41,7 +41,7 @@ namespace daik {
 // nothing, e.g. bssid while offline) and from an absent key (an older build).
 inline constexpr const char* REDACTED = "<redacted>";
 
-// The twenty-seven /status values http_status.cpp passes through redact_identifier (via its jstr_r
+// The twenty-eight /status values http_status.cpp passes through redact_identifier (via its jstr_r
 // wrapper). This array is the machine-readable source for tools/redact/check_diag_coverage.py
 // (`--list` prints it); the audit also compares docs/REPORTING.md's public table with it:
 //   wifi.ssid  wifi.ip  wifi.bssid  wifi.mac  mqtt.broker  mqtt.base
@@ -50,6 +50,7 @@ inline constexpr const char* REDACTED = "<redacted>";
 //   reference_temperature.setpoint_topic  reference_temperature.setpoint_path
 //   reference_temperature.timestamp_topic  reference_temperature.timestamp_path
 //   reference_temperature.enabled_path  reference_temperature.hvac_mode_path
+//   reference_temperature.hvac_mode (conditional: unknown source text only)
 //   circulation_source.name  circulation_source.topic  circulation_source.power_path
 //   circulation_source.timestamp_path
 //   weather_forecast.latitude  weather_forecast.longitude
@@ -75,19 +76,36 @@ inline constexpr const char* REDACTED = "<redacted>";
 // The audit separately flags a Config string emitted through plain jstr(): that is the direction a
 // call-site count alone cannot see — a new identifying field that was never wrapped at all.
 inline constexpr std::string_view REDACTED_STATUS_FIELD_NAMES[] = {
-    "wifi.ssid", "wifi.ip", "wifi.bssid", "wifi.mac", "mqtt.broker", "mqtt.base",
-    "net.ip", "net.eth.ip", "net.eth.mac",
-    "reference_temperature.name", "reference_temperature.topic",
-    "reference_temperature.temperature_path", "reference_temperature.setpoint_topic",
-    "reference_temperature.setpoint_path", "reference_temperature.timestamp_topic",
-    "reference_temperature.timestamp_path", "reference_temperature.enabled_path",
+    "wifi.ssid",
+    "wifi.ip",
+    "wifi.bssid",
+    "wifi.mac",
+    "mqtt.broker",
+    "mqtt.base",
+    "net.ip",
+    "net.eth.ip",
+    "net.eth.mac",
+    "reference_temperature.name",
+    "reference_temperature.topic",
+    "reference_temperature.temperature_path",
+    "reference_temperature.setpoint_topic",
+    "reference_temperature.setpoint_path",
+    "reference_temperature.timestamp_topic",
+    "reference_temperature.timestamp_path",
+    "reference_temperature.enabled_path",
     "reference_temperature.hvac_mode_path",
-    "circulation_source.name", "circulation_source.topic", "circulation_source.power_path",
+    "reference_temperature.hvac_mode",
+    "circulation_source.name",
+    "circulation_source.topic",
+    "circulation_source.power_path",
     "circulation_source.timestamp_path",
-    "weather_forecast.latitude", "weather_forecast.longitude",
-    "syslog.host", "ntp.server", "modbus.host",
+    "weather_forecast.latitude",
+    "weather_forecast.longitude",
+    "syslog.host",
+    "ntp.server",
+    "modbus.host",
 };
-inline constexpr std::size_t REDACTED_STATUS_FIELDS = 27;
+inline constexpr std::size_t REDACTED_STATUS_FIELDS = 28;
 static_assert(REDACTED_STATUS_FIELDS ==
               sizeof(REDACTED_STATUS_FIELD_NAMES) / sizeof(REDACTED_STATUS_FIELD_NAMES[0]));
 
@@ -121,7 +139,54 @@ inline std::string redact_identifier(const std::string& value, bool on) {
     return on && !value.empty() ? std::string(REDACTED) : value;
 }
 
-// One diag-line rule: everything between the end of `marker` and the next `end` is replaced.
+// The MQTT source accepts arbitrary short text. Only this fixed public vocabulary is safe to
+// retain in a public report; recognizing it here does not change source acceptance or evaluation.
+inline constexpr bool report_hvac_mode_public(std::string_view value) {
+    return value == "off" || value == "heat" || value == "cool" || value == "heat_cool" ||
+           value == "auto" || value == "dry" || value == "fan_only";
+}
+
+// Allocation-free form for fixed-buffer serializers such as /ota/status.
+inline std::string_view redact_identifier_view(std::string_view value, bool on) {
+    return on && !value.empty() ? std::string_view(REDACTED) : value;
+}
+
+// Log identifiers cannot create a physical record or imitate a redaction terminator. Keep the
+// original config untouched; only its diagnostic representation escapes delimiters/control bytes.
+// Fixed storage bounds both the producer's stack and the eventual 256-byte diagnostic record.
+struct DiagLogIdentifier {
+    char text[96]{};
+
+    explicit DiagLogIdentifier(std::string_view value) {
+        constexpr char hex[] = "0123456789abcdef";
+        size_t         out   = 0;
+        for (unsigned char c : value) {
+            const bool escape = c < 0x20 || c >= 0x7f || c == '\'' || c == '"' || c == '(' ||
+                                c == ')' || c == ',' || c == '\\';
+            const size_t need = escape ? 4 : 1;
+            if (out + need + 3 >= sizeof(text)) {
+                text[out++] = '.';
+                text[out++] = '.';
+                text[out++] = '.';
+                break;
+            }
+            if (escape) {
+                text[out++] = '\\';
+                text[out++] = 'x';
+                text[out++] = hex[c >> 4];
+                text[out++] = hex[c & 15];
+            } else {
+                text[out++] = static_cast<char>(c);
+            }
+        }
+        text[out] = '\0';
+    }
+
+    const char* c_str() const { return text; }
+};
+
+// One diag-line rule: everything between the end of `marker` and the final trusted `end` is
+// replaced.
 struct DiagRedaction {
     const char* marker;   // matched anywhere in the line; the value starts right after it
     const char* end;      // the value ends here (exclusive). Empty = run to the end of the line.
@@ -138,16 +203,20 @@ inline constexpr DiagRedaction DIAG_REDACTIONS[] = {
     // syslog.cpp "syslog: forwarding to %s (%s), reachable=%s" — host AND resolved IP in one span;
     // reachable= survives, which is the half that says whether the collector answers.
     {"syslog: forwarding to ", ", reachable="},
-    // syslog.cpp "syslog: DNS lookup failed for %s (error %d)" — the errno is the diagnosis, keep it.
+    // syslog.cpp "syslog: DNS lookup failed for %s (error %d)" — the errno is the diagnosis, keep
+    // it.
     {"syslog: DNS lookup failed for ", " (error"},
     // wifi.cpp "wifi: rollback restore to '%s' was not persisted — ..."
-    {"wifi: rollback restore to '", "'"},
+    {"wifi: rollback restore to '", "' was not persisted"},
     // wifi.cpp "wifi: could not clear the rollback backup ('%s') — ..."
-    {"wifi: could not clear the rollback backup ('", "'"},
+    {"wifi: could not clear the rollback backup ('", "') — "},
     // sntp_time.cpp "sntp: time synced (%s)" and "sntp: init failed (%s): %s" — the trailing
     // esp_err_to_name() of the failure case survives, only the server name goes.
     {"sntp: time synced (", ")"},
-    {"sntp: init failed (", ")"},
+    {"sntp: init failed (", "): "},
+    // ota_update.cpp's effective firmware URL can carry a private HIL origin/path. The escaped
+    // identifier cannot contain this terminator; versions and channel remain diagnostic evidence.
+    {"ota: downloading ", " ("},
     // hp_modbus.cpp "modbus: %s mDNS search found gateway %s" — the DISCOVERED HomeHub IPv4.
     // /status?redact=1 already withholds it as
     // modbus.host, and without this rule the same string was printed in /diag a few sections below
@@ -184,8 +253,10 @@ inline std::string redact_diag_line(std::string_view line) {
         if (start == std::string::npos || start + marker.size() > limit) continue;
         start += marker.size();
         std::string_view end_tok(r.end);
-        std::size_t stop = end_tok.empty() ? std::string::npos : out.find(end_tok, start);
-        if (stop == std::string::npos || stop > limit) stop = limit;   // fail closed, keep the newline
+        // The producer escapes delimiters; prefer the final trusted suffix as a second defense
+        // against a delimiter-bearing identifier from an older producer.
+        std::size_t stop = end_tok.empty() ? std::string::npos : out.rfind(end_tok, limit);
+        if (stop == std::string::npos || stop < start || stop > limit) stop = limit;
         std::size_t before = stop - start;
         out.replace(start, before, REDACTED);
         limit = limit - before + std::string_view(REDACTED).size();

@@ -1,6 +1,6 @@
 ---
 name: device-triage
-description: Triage a live daikin-altherma-esp32 over the network — pull /status, /values and /diag, use an explicitly available durable syslog collector when configured, summarize WiFi/MQTT/X10A health, and if a crash is flagged, download /coredump and symbolize it against the matching-version .elf. Use for a misbehaving board, crash banner, reboot loop, or "why is it offline".
+description: Triage a live daikin-altherma-esp32 over the network — pull /status, /values and /diag, use an explicitly available durable syslog collector when configured, summarize WiFi/MQTT/X10A health, and if a fault is flagged, inspect available private dump evidence and symbolize only with its verified matching ELF. Use for a misbehaving board, crash banner, reboot loop, or "why is it offline".
 ---
 
 # device-triage
@@ -25,7 +25,7 @@ the IP and use it verbatim. Put the host in `H` for the commands below: `H=daiki
 1. **Snapshot health.** Pull the three read endpoints and keep the JSON:
    ```bash
    curl -sS --max-time 5 "http://$H/status" | tee /tmp/dt_status.json | jq .
-   curl -sS --max-time 5 "http://$H/values" | jq '.[] | {label,value,unit}'
+   curl -sS --max-time 5 "http://$H/values" | jq .
    curl -sS --max-time 5 "http://$H/diag?verbose=1"
    ```
    If `/status` times out, record that the live HTTP snapshot and coredump checks are unavailable,
@@ -39,7 +39,8 @@ the IP and use it verbatim. Put the host in `H` for the commands below: `H=daiki
      `hp.timeout_err` (timeouts = wrong RX/TX pins or a silent bus; crc_err = noise/wrong proto).
    - **Model** — `detect.model` + `profile.id`; note if `detect.ambiguous`.
    - **Heap/uptime** — low heap or an uptime that keeps resetting hints at a reboot loop.
-   - **Build** — `version` + `app_elf_sha256` (needed to fetch the matching .elf in step 4).
+   - **Running build** — `version` + `app_elf_sha256`; these identify the current firmware.
+     The stored dump needs its own verified ELF identity in step 5.
 
 3. **History — use it when a durable collector is explicitly available.** `/status` and `/diag` only
    show **now**: uptime is one number and the bounded RAM ring can be overwritten within minutes by a
@@ -64,8 +65,8 @@ the IP and use it verbatim. Put the host in `H` for the commands below: `H=daiki
 
    **Keep absence bounded.** `diag_crash_capture()` runs before WiFi and the syslog task exist, so the
    live line first reaches only RAM. Once collector DNS resolves, `syslog.cpp` sends one `boot:` record
-   and up to three `crash:` records directly. Replayed crash records have no uptime prefix and their
-   timestamp dates replay, not the previous crash. Allocation, send and DNS failures can skip them,
+   and up to five `crash:` records directly. Each stored record identifies unknown age and reset
+   relationship. Their timestamp dates replay, not the stored incident. Allocation, send and DNS failures can skip them,
    so an absent replay never proves that no crash happened; cross-check `/status.last_crash` and the
    reconstructed uptime epochs.
 
@@ -74,7 +75,8 @@ the IP and use it verbatim. Put the host in `H` for the commands below: `H=daiki
    ```bash
    jq '.last_crash | {reason,fault,task,pc,backtrace,corrupted,elf_sha256}' /tmp/dt_status.json
    ```
-   **Read `fault` before you say the word "crash".** `fault:true` = a real fault (panic/watchdog).
+   **Read `fault` before describing this restart.** `fault:true` covers panic/watchdogs and power
+   faults, including brownout/power glitches; it does not always mean an application crash.
    `fault:false` means **this boot did not crash** — `reason:"usb"` is just an ESP32-S3 USB
    re-enumeration reset (plugging the cable in), `poweron`/`sw` are normal too. `last_crash` is also
    populated for a *non-fault* boot when an orphan dump from an **earlier** crash is still in flash,
@@ -82,14 +84,14 @@ the IP and use it verbatim. Put the host in `H` for the commands below: `H=daiki
 
    **Consistency check.** `coredump:true` claims a dump is downloadable — verify rather than relay it:
    ```bash
-   curl -sS -o /dev/null -w '%{http_code}\n' "http://$H/coredump"   # 200 = real, 404 = no dump
+   curl -sS -o /dev/null -w '%{http_code}\n' "http://$H/coredump"   # 200 = reportable image, 404 = none reportable
    ```
    A `coredump:true` + `404` disagreement means the flag is stale (fixed on current main by re-reading
    it live; older firmware can cache it at boot and fail to invalidate it after the image is erased).
    Report the disagreement — don't trust either side alone.
 
    If `coredump:true` **and** the 404 check says 200, a full dump is waiting — continue to step 5. If
-   there's no dump, the reason + backtrace above is all there is.
+   there's no dump, record the current fault and any optional cached summary as bounded evidence.
 
 5. **Symbolize the dump** (needs Docker for `decode-coredump.sh`; a cloud/no-Docker session can
    download the dump but not decode it — hand it off or note that). Paths must be **inside the
@@ -97,8 +99,9 @@ the IP and use it verbatim. Put the host in `H` for the commands below: `H=daiki
    ```bash
    curl -sS --max-time 20 "http://$H/coredump" -o coredump.bin   # repo root; 404 if none
    ```
-   The dump is useless without the **matching-version** unstripped `.elf` — CI archives one per
-   build (`dist/*.elf.xz`, keyed by `app_elf_sha256` from step 2). Fetch that build's ELF into
+   The private dump needs its exact matching unstripped ELF. The running `app_elf_sha256` from
+   step 2 identifies the running build; an optional stored `elf_sha256` is only an identity hint,
+   often a nine-character prefix. It can describe an older incident. Fetch the corresponding ELF into
    `build/` through an explicitly authorized maintainer handoff (the credential wrapper refuses
    local artifact downloads),
    then — the decoder unwraps the `.xz` itself, so either name works:
@@ -107,14 +110,15 @@ the IP and use it verbatim. Put the host in `H` for the commands below: `H=daiki
    ```
    If the download 404s, check the age/state: a dev build's artifact is kept 3 days; a PR's is
    deleted when it merges or after at most 7 days (a release's ELF is a Release asset and never
-   expires). Past that the dump is not decodable —
-   say so plainly rather than symbolizing against a near-miss build, which `esp-coredump` would
-   warn about and which yields confidently wrong frames.
-   `esp-coredump` warns on an ELF/dump `app_elf_sha256` mismatch — if it does, you grabbed the wrong
-   build; refetch the one matching step 2. Summarize the crashed task + symbolized backtrace and
-   point at the likely frame.
+   expires). If no exact ELF remains available, decoding is an evidence gap —
+   say so plainly rather than symbolizing against a near-miss build. The repository helper
+   rejects absent, empty, short, malformed, duplicated or mismatching ELF identity before GDB.
+   A mismatch is a hard failure; preserve the private dump and obtain its exact matching ELF.
+   Summarize the stored task + symbolized backtrace. Reset reason describes this boot, while the
+   dump can be older: even matching ELF identity cannot establish incident age or prove those
+   frames caused the current reset. A failed decode is missing evidence, never proof of no fault.
 
-6. **Report.** Lead with the verdict, and make it answer *did it actually crash?* — a fault, a clean
+6. **Report.** Lead with the verdict, and make it answer *what is known about this restart?* — a fault, a clean
    boot with a stale/orphan dump, a reboot burst (step 3), or healthy. Then the supporting numbers.
    Say plainly which claims are device-reported vs. verified, and flag any `/status` ↔ `/coredump`
    disagreement. Suggest the next action (e.g. re-run detection via `POST /detect`, check broker

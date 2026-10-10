@@ -330,8 +330,9 @@ syslog.cpp          → optional syslog UDP client (RFC 5424, off when syslog_ho
                       the async esp_ping callback from a use-after-free. Self-loop-guarded (drops
                       "syslog:" lines); syslog_status() feeds /status. On the FIRST resolve of a boot
                       it replays the boot records once (logic/bootlog.hpp): a build-identity line
-                      (version/elf_sha256/reset/safe_mode) plus, after a crash, the reset reason +
-                      crashed task/PC/backtrace — captured at the top of app_main, long before this
+                      (version/elf_sha256/reset/safe_mode) plus current fault or stored-dump records.
+                      The reset belongs to this boot; stored task/PC/backtrace have unknown age and
+                      relationship to it. Capture runs at the top of app_main, long before this
                       task or the network exists, so without the replay they reached only the in-RAM
                       ring and were overwritten there within a minute. A send failure is CLASSIFIED
                       (logic/syslog_policy.hpp): only a HARD errno (ENETUNREACH/EHOSTUNREACH/...)
@@ -344,9 +345,9 @@ diag_crash.cpp/.hpp → one-shot boot capture of the reset reason + the core-dum
                       task/PC/backtrace/app-elf-sha) into a cached CrashInfo (logic/crashinfo.hpp),
                       read by /status.last_crash and the MQTT crash topic — the summary is NEVER
                       re-parsed on a request path. An ORPHAN dump (its app-elf-sha does not match the
-                      RUNNING build, since the coredump partition survives an OTA) is erased at
-                      capture, so `coredump` means "a dump for THIS firmware is downloadable" rather
-                      than a download espcoredump rejects on a SHA mismatch
+                      RUNNING build, since the coredump partition survives an OTA) is preserved but
+                      its summary/download are suppressed for this boot. Missing identity stays
+                      unresolved. Matching identity does not establish the stored incident's age
 status_led.cpp/.hpp → onboard status-indicator task with TWO back-ends behind one host-tested
                       pattern table (logic/led_pattern.hpp): a level-driven GPIO LED and an
                       addressable WS2812 (RMT, espressif/led_strip). Pin + driver + polarity are
@@ -1011,7 +1012,7 @@ host-testable core is unusually large and valuable, because the risky parts are 
   `www/js/app_state.js` that would drift. Two shapes, because the routes leak differently: `/status` leaks by
   **field** (named values, substituted where each is *written* — a post-processing pass over
   the finished JSON is what the httpd stack budget has no room for), `/diag` leaks by **line**,
-  which is the non-trivial half the `CHECK`s cover. The 27-field list in `logic/redact.hpp` is
+  which is the non-trivial half the `CHECK`s cover. The 28-field list in `logic/redact.hpp` is
   machine-readable; the audit compares its length with the call sites and its names with
   `REPORTING.md`, then rejects a raw Config string written through plain `jstr()` so a never-wrapped
   identifier cannot hide behind an unchanged wrapper count. Seven entries are user-typed JSON paths:
@@ -1107,8 +1108,9 @@ host-testable core is unusually large and valuable, because the risky parts are 
   deleting the room source disarms and clears sample memory. No actuator or Modbus write vocabulary
   exists anywhere in the firmware.
 - `logic/crashinfo.hpp` — reset-reason slug + fault classification, and the `last_crash` / MQTT crash
-  payload + paste-friendly text bundle (incl. the backtrace clamp) built from a captured summary. The
-  retained MQTT crash payload (`build_crash_mqtt_payload`) is **crash-only**: the JSON when the boot is
+  payload + paste-friendly text bundle (incl. the backtrace clamp). Reset reason/fault describe this
+  boot; optional task/PC/backtrace/ELF describe stored evidence with unknown age/reset relationship. The
+  retained MQTT crash payload (`build_crash_mqtt_payload`) is **notable-only**: the JSON when the boot is
   *notable* (a real fault or a core-dump still in flash), else `""` — the bridge then probes for and
   deletes an older retained crash, but publishes nothing when the broker is already clean.
 - `logic/reset_reason.hpp` — maps a raw `esp_reset_reason()` code to the stable slug used by
@@ -1120,9 +1122,11 @@ host-testable core is unusually large and valuable, because the risky parts are 
 - `logic/bootlog.hpp` — the boot records `syslog.cpp` replays once per boot: a build-identity line
   (`build_boot_line`) and the crash rendered as **single-line, datagram-sized** records
   (`build_crash_log_lines`). Separate from `crashinfo.hpp`'s multi-line `build_crash_text()` on
-  purpose: at worst case (16-deep backtrace + 64-char ELF hash) that block is ~340 bytes and would
-  truncate through the backtrace and lose `elf_sha256` in diag's 256-byte line buffer. The host test
-  asserts each record fits one datagram, and that a non-notable boot yields **zero** crash lines.
+  purpose: the full block exceeds diag's 256-byte capture buffer and can be explicitly clipped.
+  Replay uses at most five records below 200 bytes each: current reset, task/PC, optional ELF and
+  two groups of eight PCs. Every stored record repeats source/unknown-age/reset-relationship fields;
+  task and ELF are bounded and JSON-quoted. Host checks retain all sixteen PCs and the full valid
+  64-character hash, enforce each record budget and yield zero records for a non-notable boot.
 - `logic/link_watch.hpp` — the ICMP gateway-watchdog policy behind `wifi.cpp`: the three-valued probe
   result (reachable / proven-silent / unmeasurable) and the consecutive-observation counters that
   decide when to force a re-association. Keeping "could not measure" distinct from "reachable" is the
@@ -1418,7 +1422,7 @@ A single task owns the X10A UART (there is exactly one link). Each cycle:
    register, event-folding policy and the register's decoding (Modbus space, codec, divisor, unit)
    for HomeHub; id and unit for ENV III. Display labels are deliberately excluded.
    Restore maps the current id to the stored index, so adding or reordering a row preserves every
-   unchanged curve while a genuinely new or reinterpreted series alone starts empty. Duplicate ids,
+   unchanged curve while a series whose semantic ID changes starts empty. Duplicate ids,
    an unknown pre-manifest generation or a damaged manifest fail
    closed. A manifest is written before a generation's next data record and refreshed once per
    24-hour ring, keeping a recent copy in the circular journal without repeating ids in every bucket.
@@ -2533,15 +2537,18 @@ Structure:
     `logic/crashinfo.hpp` (host-tested); the summary is parsed **once** and cached — never re-read
     from flash on a request path, which is where `append_status_json()` runs (and, until the
     WebSocket push was removed, also on the poll task — see "Push vs. poll"). A dump whose parsed
-    `app_elf_sha256` does **not** match the running build (`coredump_is_foreign()`, host-tested) is an
-    **orphan** — it survived an OTA, or a panic that could not write its own dump left the previous
-    build's dump in place — and is erased at capture, with the reason logged to `/diag`. If that
-    best-effort erase fails, its proven foreign identity remains latched for this boot: both
-    `diag_crash_info_live()` and `GET /coredump` suppress the residue, so it cannot reappear as a
-    download `espcoredump` rejects. Without
-    this an orphan passes `esp_core_dump_image_check()` (it is a valid image, just of another binary),
-    so `coredump` reads true and `/status` offers a download that `espcoredump` then rejects on a
-    SHA-256 mismatch (legacy-215). Successful erasure also clears the partition for the next real panic. The
+    `app_elf_sha256` is a valid, meaningful identity that does **not** match the running build
+    (`coredump_is_foreign()`, host-tested) is foreign evidence. Boot capture preserves its bytes,
+    logs the mismatch, and latches suppression for this boot: `diag_crash_info_live()` and
+    `GET /coredump` use the same predicate, so a preserved foreign image cannot reappear as a
+    current-build download. Only explicit clear/dismiss/factory-reset actions erase evidence. Missing,
+    malformed or short identity is unresolved, never proof of foreign origin.
+    **Incident attribution is bounded:** the reset reason describes this boot, while task/PC/
+    backtrace describe the stored image. Even matching ELF identity cannot establish its age or
+    prove it came from this reset; a failed same-build dump write can leave an older image.
+    The IDF v6.1 summary API is guarded by `CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH`; the removed
+    `CONFIG_ESP_COREDUMP_DATA_FORMAT_ELF` symbol must not hide this capture path.
+    The
     `coredump` **presence flag** is the one exception: it IS re-checked from flash per request
     (`diag_crash_info_live()` — a 4-byte size-word read, not the summary reparse), because the image
     can be erased mid-session via `POST /coredump/clear` and a cached flag would then advertise a dump
@@ -2558,7 +2565,7 @@ Structure:
     and an installation whose MQTT is misconfigured is exactly where someone is asking why values
     keep disappearing), the `reset_reason` slug (via
     `logic/reset_reason.hpp`, reusing the same vocabulary as `last_crash`) and a `safe_mode` flag
-    (always `false` until the boot-loop safe-mode feature lands). These answer "why did it reboot?"
+    (the latched boot-loop recovery state). These answer "why did it reboot?"
     and "is the heap leaking?" from the LAN **on every boot** and **without a
     broker** — the MQTT heartbeat carries the same heap figures, but only when MQTT is configured. The
     web UI reads `safe_mode` (the recovery banner) plus `free_heap` and `max_alloc`, the two trended
@@ -2567,15 +2574,19 @@ Structure:
     `min_free_heap` and `reset_reason` stayed out: the day's minimum is already on the chart, and a
     reboot's cause is diagnosed from `/status`, `/diag` and the heartbeat rather than read at a
     glance. Above them the card states the top-level `uptime_s` — not a `sys` field, and the only
-    thing on that screen that says the board restarted at all, since the crash banner renders solely
-    on a `fault` (DESIGN.md §5.6).
-  - **How a user hands a crash over.** `GET /status.last_crash` is `null` on a clean boot, else the
-    boot-time cached reason/summary — with `coredump` re-read live from flash on every request
+    thing on that screen that says every board restart occurred; the crash banner covers current
+    faults and stored reports rather than all normal resets (DESIGN.md §5.6).
+  - **How a user hands a crash over.** `GET /status.last_crash` is null without a current fault or
+    reportable stored image, or after dismissal. Reason/fault describe this boot; optional summary
+    fields describe the stored image, whose age and relation to this reset are unknown. Matching
+    ELF identity establishes only a build. `coredump` is re-read live from flash on every request
     (`diag_crash_info_live()`), so a dump cleared via `POST /coredump/clear` can't leave a stale banner or
     a dead download link. The running app's `app_elf_sha256` is also on `/status`. The web UI shows a
     crash **banner** (`renderCrashBanner()`) — titled on `fault`, so an orphan dump doesn't claim this
-    boot crashed — with the reset reason + hex backtrace, a one-click `coredump.bin` download, and a
-    "copy diagnostics" bundle (`/status` + `/diag` + summary) for a bug report.
+    boot had a fault — with separate current and stored fields, a `coredump.bin` download only for
+    `coredump:true`, and a
+    "copy diagnostics" bundle (cached build/crash summary + `/diag?redact=1`) for a bug report.
+    Failed HTTP or network reads remain explicit in that copied evidence.
   - **Deleting the report (`POST /crash/dismiss`).** The banner's third action. It is a *device*
     action, not a per-page hide: `diag_crash_dismiss()` erases the dump image and then sets
     `CrashInfo::dismissed`, so `crash_is_notable()` is false everywhere at once — `/status.last_crash`
@@ -2595,7 +2606,8 @@ Structure:
     ([REPORTING.md](REPORTING.md)) and must not be reachable by a link or a prefetch; trusted-LAN
     only like every other write (`logic/http_surface.hpp`). The MQTT bridge
     additionally **retains** the summary on `<base>/crash` as **one** diagnostic HA entity — a "dump
-    waiting" flag (reason/backtrace only, never secrets or the raw dump), so Home Assistant (or
+    waiting" flag with current reset/fault and optional stored task, PC, ELF identity and backtrace
+    addresses (never secrets or the raw dump), so Home Assistant (or
     Telegraf → VictoriaLogs) sees crashes over time. The reset reason is *not* a crash entity: it is
     the heartbeat's own "Reset Reason" sensor, so a crash entity for it would be a duplicate — the old
     "Last Reset Reason" crash entity was dropped and is now actively retired (its stale retained
@@ -2618,8 +2630,17 @@ Structure:
     `.elf` (the shipped `.bin` has no symbols), so CI archives `daikin-altherma-esp32.elf.xz` + the
     sha256 of the ELF *inside* it per build (artifact + Release asset, `scripts/ci-build-all.sh`).
     `scripts/decode-coredump.sh coredump.bin [app.elf[.xz]]` unwraps the container, then runs
-    `esp-coredump info_corefile` inside the CI-pinned ESP-IDF Docker image and matches the dump to
-    the ELF by `app_elf_sha256` (warns on mismatch). The xz wrapper is deliberately OUTER — the ELF
+    the real pinned decoder inside the CI-pinned ESP-IDF Docker image. The helper
+    `tools/coredump/decode.py` first validates raw integrity through the SDK loader, then requires
+    exactly one 72-byte application-identity note from the pinned SDK writer: a version word,
+    a terminated 66-byte identity field containing 8–64 lowercase hexadecimal characters, and
+    two ignored ABI tail-padding bytes. A matching ELF hash prefix/core version is required.
+    The upstream parser's shorter 68-byte view does not establish writer compatibility.
+    Missing, empty, short, malformed, duplicated or
+    mismatching identity fails closed before GDB. Matching identity proves build association only,
+    not incident age. Temporary extracted core files and unwrapped ELF files are removed on errors
+    too. Info-mode GDB commands must complete successfully and supply backtrace/thread data;
+    interactive GDB failure propagates its exit code. The xz wrapper is deliberately OUTER — the ELF
     bytes inside are the linker's own, which is what keeps that match meaningful, and is why
     `objcopy --compress-debug-sections` is not used despite being the simpler-looking option.
     **How long an archived ELF lives depends on the build.** A release keeps its copy indefinitely
@@ -3477,7 +3498,10 @@ GET  /status      version, platform, uptime_s, boot_id (16 hex digits; non-secre
                   source_unix_s,timestamp_source,age_s,fresh,freshness_reason,
                   temperature_valid,setpoint_valid,control_eligible,room_error_k,reason,reason_code,
                   retained,messages,errors,rejections[,error][,eligibility_error]} — the decoded and
-                  canonical MQTT living-room input. The `<base>/heating_curve` document's `room`
+                  canonical MQTT living-room input. In redacted reports, `hvac_mode` retains only
+                  off/heat/cool/heat_cool/auto/dry/fan_only; unknown source text is redacted without
+                  changing its operational payload or control evaluation. Null/empty states remain
+                  null/empty. The `<base>/heating_curve` document's `room`
                   object archives its numeric accepted
                   view. It is the required heating-curve-diagnosis input; `room_error_k` is recorded
                   raw and is not an LWT correction. It feeds no heat-pump write.
@@ -3676,9 +3700,10 @@ GET  /status      version, platform, uptime_s, boot_id (16 hex digits; non-secre
                   last_crash (null unless this boot was a FAULT or a dump is still in flash — and
                   null again once POST /crash/dismiss DELETES the report, else
                   {reason,reason_code,fault,coredump,task,pc,backtrace[],corrupted,elf_sha256} — the
-                  reason/summary from the boot-time cache, `coredump` re-read from flash per request
-                  so a cleared dump can't strand the banner; drives the crash banner, whose title keys
-                  on `fault` — an orphan dump alone is NOT "restarted after a crash"),
+                  current reason/code/fault and optional stored task/PC/backtrace/ELF from the boot
+                  cache; stored incident age/reset relationship remain unknown. `coredump` is the
+                  live reportability flag. The banner distinguishes a current fault from a waiting
+                  report; an orphan alone does not prove a fault at this reset),
                   history{epoch,dt,persist,dwell_persist,rows[{id,label}],modbus_rows[{id,label}],
                   env3_rows[{id,label}]}
                   — `epoch` is a nonzero boot-local history lifetime counter, advanced on source or
@@ -3909,10 +3934,16 @@ GET  /diag[?verbose=0|1][?redact=1]   in-memory diag log. Streams in 1 KiB chunk
                   static ring during OTA (dump volume clamped to 512 B to avoid multi-pbuf lwIP heap fragmentation); redact=1 returns the early busy-503 before its string chunk
                   A query too long for the handler's buffer answers 414 rather than being read as absent, so
                   a padded ?redact=1 can never fall back to the unscrubbed log (same rule on /status).
+                  Identifier producers use allocation-free 96-byte escaped representations; the real
+                  WiFi/NTP/syslog/OTA configuration remains unchanged. Quotes, delimiters, control and
+                  non-ASCII bytes cannot create another log record or terminate its privacy span.
+                  The 6144-byte ring is unchanged: wrapped/clipped tails discard an incomplete oldest
+                  record, incomplete final records are withheld, and truncation is marked explicitly.
+                  diag_printf also terminates and marks clipped records in its existing 256-byte buffer.
 POST /diag/clear  clear the in-memory diagnostic ring. Destructive actions are POST-only, so a link,
                   prefetch or crawler cannot erase evidence.
-GET  /status?redact=1   the bug-report form of /status: all 27 reporter-identifying values read
-                  "<redacted>". `logic/redact.hpp` owns the machine-readable ordered field list and
+GET  /status?redact=1   the bug-report form of /status: 28 protected fields; set identifiers read
+                  "<redacted>". HVAC mode retains only the fixed public vocabulary; unknown text is hidden. `logic/redact.hpp` owns the machine-readable ordered field list and
                   `REPORTING.md` owns its human explanations; the redaction audit compares both with
                   the builder. Besides network/location identifiers, names and topics, the set now
                   includes all seven user-typed JSON paths — `zones.<room>.temp` demonstrates why a
@@ -3935,10 +3966,11 @@ GET  /scan        WiFi scan {"networks":[{ssid,rssi}]} — TRUSTED-LAN ONLY and 
                   client: the setup portal takes a TYPED SSID (no dropdown, no fetch), so this is a
                   humans/scripts diagnostic like /models, not part of the provisioning surface.
                   During OTA it returns the early busy-503 before radio work or list allocation
-GET  /coredump      stream the current-firmware core-dump image (chunked octet-stream; 404 if
+GET  /coredump      stream the raw core-dump image (chunked octet-stream; 404 if
                   none or if the only raw image is a proven foreign-build orphan). Decode offline against the matching-version
                   .elf: scripts/decode-coredump.sh coredump.bin (CI archives the .elf per build). The
-                  UI surfaces a crash banner + one-click download when /status.last_crash is set.
+                  UI surfaces a banner for notable state; download requires last_crash.coredump=true.
+                  Downloadability does not certify identity, incident age or the current reset relation.
 POST /coredump/clear erase only the coredump partition while preserving the reset/crash record.
 POST /crash/dismiss   ACKNOWLEDGE + DELETE this boot's crash report: erase the core-dump image and
                   mark the cached CrashInfo dismissed (diag_crash_dismiss), so crash_is_notable() is
@@ -4260,7 +4292,11 @@ GET  /ota/status  {state:idle|checking|updating|done|error, progress, message, u
                   heap_min_largest_block_bytes, ota_stack_min_free_bytes,
                   effective_manifest_url, effective_firmware_base_url, image_state,
                   rollback_pending} — `busy`, `generation` and the effective feed are copied under the same
-                  OTA mutex; the UI polls this. FixedText fields plus `FixedBuffer<4096>` and
+                  OTA mutex; the UI polls this. `?redact=1` substitutes nonempty effective URLs with
+                  `<redacted>` through allocation-free `redact_identifier_view`; empty URLs stay empty.
+                  Oversized queries or flag values answer 414 before the private snapshot is taken.
+                  Public report collectors request this form; the operational API retains raw URLs.
+                  FixedText fields plus `FixedBuffer<4096>` and
                   `json_append_quoted` keep the whole progress path allocation-free and fail closed
                   on overflow. The two heap fields are operation-local minima; the OTA-task stack
                   field is a boot-local retained minimum across task incarnations. All three are
@@ -4407,7 +4443,8 @@ builder, and the two signed CI ELFs show exactly what that cost: the httpd handl
 grew from 0x2630 (9776) bytes in dev.295 to 0x2950 (10576) in dev.296, leaving 1712 bytes of a
 12288 stack for `config()`'s nested `Config`/`std::string` copy, httpd itself and interrupts. The
 dev.296 OTA double-faulted inside `config()` with the running task's TCB overwritten, and rolled
-back. It is now **16384**, chosen to leave 5808 bytes above the measured frame. Two lessons beyond
+back. That revision raised the stack to **16384**, leaving 5808 bytes above its measured frame.
+Two lessons beyond
 the number, both about method: a stack budget is read off the ELF's frame size and a decoded dump,
 never off an idle heap reading (an idle board looks fine at every one of these sizes), and the
 crash arrived through OTA — the one path where a too-small stack takes down a fleet rather than a
@@ -4470,6 +4507,32 @@ deliberately uses the more conservative direct sum `1536 + 1232 + 4896 = 7664` b
 below proves the original `-Os` change, not this newer payload, whose live high-water mark remains a
 device-validation boundary.
 
+**Current HTTP stack contract.** The HTTP task allocates **10240 bytes**. Every committed
+`httpd_*` path ceiling must be at most that allocation minus **2048 bytes**. The margin check
+fails when a reduced allocation or raised path ceiling leaves less headroom. Required named
+frames cover the largest
+configuration handlers, circulation's caller/parser pair, the register probe and MCP's parser,
+beside the existing status and OTA paths. Configuration parsing budgets both **17** live cJSON
+`parse_value` frames and **17** `cJSON_Delete` frames during rejection cleanup (root plus the
+shared depth limit of 16), plus `cJSON_ParseWithLengthOpts`, `parse_string` and the existing
+1536-byte surrounding HTTP allowance. The shared adapter explicitly passes `JSON_MAX_DEPTH`
+as its fourth argument; the source contracts reject an override that would exceed these frame
+multipliers. MCP's depth-16 scanner includes **18** value frames, counting the early-rejection
+frame. The four named cJSON prologues may be decoded from a packed little-endian first word
+(with an empty mnemonic or an identical `.word`) only at the exact symbol address; later words
+and new out-of-line container parsers cannot supply an unreviewed bound.
+
+Separate persistence paths conservatively retain the largest configuration caller (3200 bytes),
+32-byte service/link wrapper, 48-byte `save_whole`, 1600-byte native `NvsBlobStore` transaction
+and 48-byte project NVS wrapper. Their **4928-byte** project sum plus **1536 bytes for HTTP**
+and **1536 bytes for SDK-NVS** totals **8000 / 8192 bytes**. The scan path uses its 768-byte
+caller and 1920-byte scan frame, plus 1536 HTTP and 1024 SDK-radio bytes: **5248 / 6144**.
+MQTT setup/stop/destroy separately budgets 2336 caller + 1536 HTTP + **4096 SDK-TLS** bytes:
+**7968 / 8192**, including renegotiation and RSA-PSS/ECDSA paths. These allowances are conservative
+reviews of the pinned SDK, not a complete symbolic C/ROM call graph. The final ELF and native
+save, scan and MQTT lifecycle high-water marks remain separate device acceptance; a real TLS
+renegotiation transaction is not established by the static allowance.
+
 **That ELF measurement is now an executable build gate.**
 [`scripts/check-stack-budget.py`](../scripts/check-stack-budget.py) parses the demangled ESP32-S3
 disassembly's `entry a1,N` frames after every canonical firmware build. It fails closed when a
@@ -4502,7 +4565,8 @@ reviewed allowances, FreeRTOS scheduling or runtime high-water behavior, which i
 also captures the delivery OTA task's compact pre-reboot high-water mark and the Weather task's
 post-refresh mark, requiring at least 1 KiB of observed reserve for each. `ota_health` is too
 short-lived and post-reboot for that delivery sample, so
-its separate conservative ELF path is mandatory; a decoded core dump remains authoritative after a fault.
+its separate conservative ELF path is mandatory. A provenance-verified decoded dump provides stack
+evidence for its stored incident; it cannot by itself date or explain the latest reset.
 
 **Verified ON HARDWARE, not just on the ELF.** Both images were built from ONE source base
 (`main` @ 7524b4c), signed and USB-flashed to the XIAO bench board in turn — distinct ELF shas
@@ -4533,7 +4597,8 @@ costs 736, so the *peak* got 304 bytes WORSE; adding `history` gave 10816 + max(
 i.e. 64 bytes better than where it started. The frame is a SUM of block contributions while the peak
 is `builder + max(helper)`, so extraction only pays once ~10 blocks are out (~4 KB, extrapolated) —
 a large mechanical edit to the most stack-critical function in the firmware, for half of what one
-build line buys. **`cfg.stack_size` stays 16384 and was deliberately NOT raised**: 4 KB of permanent
+build line buys. **That experiment kept `cfg.stack_size` at 16384 rather than raising it**:
+4 KB of permanent
 RAM on a board whose binding limit is the largest CONTIGUOUS free block, spent on a compiler
 artefact, while `-Os` buys twice as much for one line. Should the `-Os` scoping ever be reverted,
 the stack must go to 20480 in the same commit — ~1872 bytes measured before ISR and unwind demands

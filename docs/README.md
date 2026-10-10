@@ -307,11 +307,13 @@ Origin/Fetch Metadata), and every POST body is `application/json`; see [SECURITY
 ```
 GET  /  (alias /index.html)        # embedded web UI (gzip-compressed in the app binary)
 GET  /locale.js?lang=<code>        # device-local de/es/fr/it/pl/cs/uk/zh/ja/nb/sv/fi UI catalog (gzip; trusted LAN)
-GET  /status[?redact=1]            # ?redact=1 = the bug-report form: 27 reporter-identifying values
+GET  /status[?redact=1]            # ?redact=1 = the bug-report form: 28 protected values
                                    #   During OTA TLS this allocation-rich snapshot fails fast with
                                    #   HTTP 503; use compact GET /ota/status for progress.
-                                   #   read "<redacted>" — network/location identifiers, user-typed
-                                   #   names/topics and all seven user-typed JSON paths. The exact
+                                   #   set identifiers read "<redacted>" — network/location identifiers,
+                                   #   user-typed names/topics and all seven user-typed JSON paths.
+                                   #   HVAC mode retains the fixed public vocabulary; unknown text
+                                   #   is redacted. Unset, null and empty states remain truthful. The exact
                                    #   machine-checked list is in logic/redact.hpp and REPORTING.md.
                                    #   (logic/redact.hpp). The KEY is always emitted — an omitted
                                    #   field is indistinguishable from an older build, and "which
@@ -427,6 +429,8 @@ GET  /status[?redact=1]            # ?redact=1 = the bug-report form: 27 reporte
                                    #        # publish is X10A-gated, so a board with a silent bus
                                    #        # would report it nowhere.
                                    #   last_crash: null | {reason,reason_code,fault,coredump,
+                                   #        # reason/code/fault=current boot; coredump=live availability;
+                                   #        # task/pc/backtrace/corrupted/elf=optional stored summary
                                    #        task,pc,backtrace[],corrupted,elf_sha256},
                                    #   detect:{proto,valid,capacity_kw,capacity_kw_iu,ou_eeprom,
                                    #        candidates[],families[],ambiguous,
@@ -529,9 +533,10 @@ GET  /scan                         # WiFi scan → {"networks":[{ssid,rssi}]} (n
                                    #   humans/scripts, like /models. Returns the early busy-503
                                    #   during OTA before starting a scan or building the list.
 POST /diag/clear                   # clear the in-memory diagnostic ring; destructive action is POST
-GET  /coredump                     # stream this firmware's core-dump image (chunked; 404 if none or
+GET  /coredump                     # stream a reportable raw core-dump image (chunked; 404 if none or
                                    #   if raw flash only holds a proven foreign-build orphan). Decode offline with
-                                   #   scripts/decode-coredump.sh coredump.bin (matching-version .elf).
+                                   #   scripts/decode-coredump.sh coredump.bin (exact matching unstripped ELF).
+                                   #   Downloadability does not prove identity or current incident attribution.
 POST /coredump/clear               # erase only the coredump partition; keep the reset/crash record
 POST /crash/dismiss                # DELETE this boot's crash report: erase the dump AND stop
                                    #   reporting the crash, so /status.last_crash goes null, the
@@ -869,8 +874,9 @@ command topics are subscribed. The bridge runs in its own task, independent of t
   flag *or the notability* changes, so neither clearing a dump nor deleting the report in the web UI
   (`POST /crash/dismiss`) can leave it latched ON).
   Heartbeat and crash expose `entity_category: diagnostic` HA sensors; the heating-curve topic is
-  MQTT/metrics-only. The crash topic carries only the
-  reason + a hex backtrace — never a secret or the raw dump; pull the full dump from `GET /coredump`
+  MQTT/metrics-only. The crash topic carries the current reset/fault and live dump availability,
+  with optional stored task/PC/backtrace/ELF, never the raw memory image. Stored incident age and
+  current-reset relationship remain unknown; pull a reportable full dump from `GET /coredump`
   and decode it with `scripts/decode-coredump.sh`.
   Two heartbeat entities — *Device Time* and *WiFi Quality* — were retired under the same rule as
   *Last Reset Reason* above: each only repeated what another entity on the same device already said.

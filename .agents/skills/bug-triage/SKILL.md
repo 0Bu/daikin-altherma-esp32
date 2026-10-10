@@ -30,10 +30,10 @@ when the backtrace in `last_crash` is genuinely not enough (step 5).
 
 ## Steps
 
-1. **Read the issue.**
+1. **Read the issue.** Use the literal issue number in both GitHub commands below; `123` is an example.
    ```bash
    scripts/gh-with-git-credentials.sh --repo github.com/0Bu/daikin-altherma-esp32 \
-     issue view "$N" --json number,title,body,labels,createdAt
+     issue view 123 --json number,title,body,labels,createdAt
    ```
    Pull the `Device report` section out of the body with the extraction below. If it is absent, or
    the user answered that the device was unreachable, **say so and stop before diagnosing**. A report
@@ -64,21 +64,24 @@ when the backtrace in `last_crash` is genuinely not enough (step 5).
 
    Ask for what is missing **once**, in a single comment — a round trip per gap is how a report dies.
 
-4. **Read `last_crash.fault` before you use the word "crash."** `fault:true` is a real fault.
+4. **Read `last_crash.fault` before you use the word "crash."** `fault:true` includes panic/watchdogs and brownout/power glitches.
    `fault:false` means *this boot did not crash* — `reason:"usb"` is a cable being plugged in,
    `poweron`/`sw` are normal. `last_crash` is also populated on a non-fault boot when an orphan dump
    from an earlier crash is still in flash, so its presence never proves this boot crashed.
 
 5. **Ask for the dump only when the summary is not enough, and only privately.** The report omits it
    on purpose — it is raw task-stack memory that can carry a short password (`docs/SECURITY.md`), and
-   `last_crash` already gives reason, task, PC, backtrace and `elf_sha256`. When the backtrace is
+   `last_crash` gives current reset/fault and optional stored task/PC/backtrace/ELF. A stored
+   report has unknown age and relation to this reset, including with matching build identity. When the backtrace is
    genuinely insufficient, ask the reporter to send `/coredump` through the **private advisory form**,
    **zipped** (GitHub rejects `.bin` as an attachment outright). Never ask for it in the public issue
    and never accept it there. The credential wrapper intentionally blocks artifact downloads, so an
-   explicitly authorized maintainer must provide the build matching `app_elf_sha256`; then symbolize
+   explicitly authorized maintainer must provide the exact ELF matching the dump identity; the
+   running `app_elf_sha256` is not proof of that stored identity. Then symbolize
    offline with `scripts/decode-coredump.sh coredump.bin build/daikin-altherma-esp32.elf.xz`
-   (CI archives the ELF xz-wrapped; the decoder unwraps it). A mismatch warning from `esp-coredump`
-   means you fetched the wrong build. A dev-build artifact older than 3 days is gone; a PR artifact
+   (CI archives the ELF xz-wrapped; the decoder unwraps it). The repository helper rejects absent,
+   malformed, short or mismatching identity before GDB. A failed decode is missing evidence,
+   never proof that there was no fault; preserve the private original. A dev-build artifact older than 3 days is gone; a PR artifact
    is gone as soon as the PR merges or after at most 7 days — report that the dump cannot be decoded
    instead of using a nearby build.
 
@@ -135,7 +138,7 @@ GitHub renders each issue-form answer under `### <label>`; the field `id` never 
 
 ```bash
 scripts/gh-with-git-credentials.sh --repo github.com/0Bu/daikin-altherma-esp32 \
-  issue view "$N" --json body
+  issue view 123 --json body
 # After checking that the returned issue body contains no private attachment or credential,
 # place only its JSON body string in /tmp/issue.md for the local parsing steps below.
 sec() { awk -v h="### $1" '$0==h{f=1;next} /^### /{f=0} f' /tmp/issue.md; }

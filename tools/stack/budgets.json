@@ -72,6 +72,98 @@
     "ota_health_task": {
       "pattern": "^daik::.*health_gate_task\\(void\\*\\)$",
       "max_bytes": 1024
+    },
+    "config_hp": {
+      "pattern": "^daik::set_hp\\(",
+      "max_bytes": 3200
+    },
+    "config_mqtt": {
+      "pattern": "^daik::set_mqtt\\(",
+      "max_bytes": 2336
+    },
+    "config_board": {
+      "pattern": "^daik::set_board\\(",
+      "max_bytes": 2176
+    },
+    "config_env3": {
+      "pattern": "^daik::set_env3\\(",
+      "max_bytes": 1792
+    },
+    "config_weather": {
+      "pattern": "^daik::set_weather\\(",
+      "max_bytes": 1776
+    },
+    "config_diagnostics": {
+      "pattern": "^daik::set_diagnostics\\(",
+      "max_bytes": 1536
+    },
+    "config_circulation": {
+      "pattern": "^daik::set_circulation\\(",
+      "max_bytes": 976
+    },
+    "circulation_parser": {
+      "pattern": "^daik::parse_circulation_request\\(",
+      "max_bytes": 1408
+    },
+    "hp_query_probe": {
+      "pattern": "^daik::hp_query_probe\\(",
+      "max_bytes": 2720
+    },
+    "mcp_parser": {
+      "pattern": "^daik::mcp_parse\\(",
+      "max_bytes": 256
+    },
+    "mcp_json_value": {
+      "pattern": "^daik::mcp_detail::JsonReader::value\\(int\\)$",
+      "max_bytes": 32
+    },
+    "mcp_json_string": {
+      "pattern": "^daik::mcp_detail::JsonReader::string\\(",
+      "max_bytes": 64
+    },
+    "cjson_parse_length_opts": {
+      "pattern": "^cJSON_ParseWithLengthOpts$",
+      "max_bytes": 64
+    },
+    "cjson_parse_value": {
+      "pattern": "^parse_value$",
+      "max_bytes": 64
+    },
+    "cjson_delete": {
+      "pattern": "^cJSON_Delete$",
+      "max_bytes": 32
+    },
+    "cjson_parse_string": {
+      "pattern": "^parse_string$",
+      "max_bytes": 48
+    },
+    "config_save": {
+      "pattern": "^daik::config_save\\(",
+      "max_bytes": 32
+    },
+    "config_save_link": {
+      "pattern": "^daik::config_save_link\\(",
+      "max_bytes": 32
+    },
+    "config_save_whole": {
+      "pattern": "^daik::save_whole\\(",
+      "max_bytes": 48
+    },
+    "config_transaction": {
+      "pattern": "^_ZN4daik23config_save_transactionINS_12_GLOBAL__N_112NvsBlobStoreEEENS_17ConfigSaveOutcomeERNS_6ConfigERKS4_bRT_\\$constprop\\$[0-9]+$",
+      "max_bytes": 1600
+    },
+    "config_nvs_blob": {
+      "pattern": "^daik::nvs_set_blob\\(",
+      "max_bytes": 48
+    },
+    "http_scan": {
+      "pattern": "^daik::h_scan\\(",
+      "max_bytes": 768
+    },
+    "wifi_scan": {
+      "pattern": "^daik::wifi_scan\\(",
+      "max_bytes": 1920
     }
   },
   "paths": {
@@ -128,6 +220,84 @@
       "multipliers": {},
       "base_bytes": 2048,
       "max_bytes": 3072
+    },
+    "httpd_config_hp": {
+      "symbols": ["config_hp", "cjson_parse_length_opts", "cjson_parse_value", "cjson_delete", "cjson_parse_string"],
+      "multipliers": {"cjson_parse_value": 17, "cjson_delete": 17},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_config_mqtt": {
+      "symbols": ["config_mqtt", "cjson_parse_length_opts", "cjson_parse_value", "cjson_delete", "cjson_parse_string"],
+      "multipliers": {"cjson_parse_value": 17, "cjson_delete": 17},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_config_board": {
+      "symbols": ["config_board", "cjson_parse_length_opts", "cjson_parse_value", "cjson_delete", "cjson_parse_string"],
+      "multipliers": {"cjson_parse_value": 17, "cjson_delete": 17},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_config_env3": {
+      "symbols": ["config_env3", "cjson_parse_length_opts", "cjson_parse_value", "cjson_delete", "cjson_parse_string"],
+      "multipliers": {"cjson_parse_value": 17, "cjson_delete": 17},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_config_weather": {
+      "symbols": ["config_weather", "cjson_parse_length_opts", "cjson_parse_value", "cjson_delete", "cjson_parse_string"],
+      "multipliers": {"cjson_parse_value": 17, "cjson_delete": 17},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_config_diagnostics": {
+      "symbols": ["config_diagnostics", "cjson_parse_length_opts", "cjson_parse_value", "cjson_delete", "cjson_parse_string"],
+      "multipliers": {"cjson_parse_value": 17, "cjson_delete": 17},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_config_circulation": {
+      "symbols": ["config_circulation", "circulation_parser", "cjson_parse_length_opts", "cjson_parse_value", "cjson_delete", "cjson_parse_string"],
+      "multipliers": {"cjson_parse_value": 17, "cjson_delete": 17},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_hp_query_probe": {
+      "symbols": ["hp_query_probe"],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 6144
+    },
+    "httpd_mcp_parse": {
+      "symbols": ["mcp_post", "mcp_parser", "mcp_json_value", "mcp_json_string"],
+      "multipliers": {"mcp_json_value": 18},
+      "base_bytes": 1536,
+      "max_bytes": 4096
+    },
+    "httpd_config_save": {
+      "symbols": ["config_hp", "config_save", "config_save_whole", "config_transaction", "config_nvs_blob"],
+      "multipliers": {},
+      "base_bytes": 3072,
+      "max_bytes": 8192
+    },
+    "httpd_config_save_link": {
+      "symbols": ["config_hp", "config_save_link", "config_save_whole", "config_transaction", "config_nvs_blob"],
+      "multipliers": {},
+      "base_bytes": 3072,
+      "max_bytes": 8192
+    },
+    "httpd_wifi_scan": {
+      "symbols": ["http_scan", "wifi_scan"],
+      "multipliers": {},
+      "base_bytes": 2560,
+      "max_bytes": 6144
+    },
+    "httpd_mqtt_tls": {
+      "symbols": ["config_mqtt"],
+      "multipliers": {},
+      "base_bytes": 5632,
+      "max_bytes": 8192
     }
   }
 }

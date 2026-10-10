@@ -11,7 +11,7 @@ inline cJSON* json_parse_document(std::string_view payload) {
         [](const char* bytes, size_t length, const char** end) noexcept {
             return cJSON_ParseWithLengthOpts(bytes, length, end, false);
         },
-        [](cJSON* root) noexcept { cJSON_Delete(root); });
+        [](cJSON* root) noexcept { cJSON_Delete(root); }, JSON_MAX_DEPTH);
 }
 
 struct JsonGuard {
