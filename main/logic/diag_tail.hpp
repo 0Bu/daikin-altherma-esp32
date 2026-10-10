@@ -8,71 +8,53 @@ namespace daik {
 inline constexpr char   kDiagTruncatedMarker[] = "[... truncated ...]\n";
 inline constexpr size_t kDiagMarkerLen         = sizeof(kDiagTruncatedMarker) - 1;
 
-// Dump the diagnostic ring buffer into `out`, bounded by `max` bytes.
-// If the ring content fits in `max`, the entire ring is copied from oldest to newest.
-// If the ring content exceeds `max`, the newest bounded tail is returned, prepended by
-// kDiagTruncatedMarker, and aligned to start at a complete line when possible.
+// A clipped printf must still end its record. Otherwise the next record becomes an unmarked
+// continuation, and a wrapped tail may later expose an identifier without its redaction prefix.
+inline size_t diag_finish_record(char* line, size_t len, size_t capacity, bool truncated) {
+    if (!line || !capacity) return 0;
+    if (len > capacity) len = capacity;
+    if (truncated || (len == capacity && line[len - 1] != '\n')) {
+        const size_t suffix = capacity < kDiagMarkerLen ? capacity : kDiagMarkerLen;
+        if (len > capacity - suffix) len = capacity - suffix;
+        std::memcpy(line + len, kDiagTruncatedMarker + kDiagMarkerLen - suffix, suffix);
+        return len + suffix;
+    }
+    if (len && line[len - 1] != '\n') line[len++] = '\n';
+    return len;
+}
+
+// Return only complete physical records, oldest to newest. A wrapped ring's oldest byte may
+// already be inside an identifier whose marker was overwritten: discard through the next newline
+// even when the ring fits the output. A size-clipped tail follows the same rule. If no complete
+// boundary survives, return only the explicit truncation marker, never an unrecognizable suffix.
 inline size_t diag_dump_tail(const char* ring, size_t ring_size, size_t len, bool wrapped,
                              char* out, size_t max) {
-    if (!out || max == 0) return 0;
+    if (!ring || !ring_size || !out || !max || len > ring_size || (wrapped && len == ring_size))
+        return 0;
     const size_t total = wrapped ? ring_size : len;
-    if (total == 0) return 0;
+    if (!total) return 0;
+    auto char_at = [&](size_t i) -> char { return ring[wrapped ? (len + i) % ring_size : i]; };
 
-    auto char_at = [&](size_t logical_idx) -> char {
-        if (!wrapped) return ring[logical_idx];
-        return ring[(len + logical_idx) % ring_size];
-    };
-
-    if (total <= max) {
-        if (!wrapped) {
-            std::memcpy(out, ring, len);
-            return len;
-        }
-        const size_t tail = ring_size - len;
-        std::memcpy(out, ring + len, tail);
-        std::memcpy(out + tail, ring, len);
-        return ring_size;
+    size_t end = total;
+    while (end && char_at(end - 1) != '\n') --end;
+    const bool clipped = wrapped || total > max || end != total;
+    if (!clipped) {
+        std::memcpy(out, ring, total);
+        return total;
     }
+    const size_t marker = max < kDiagMarkerLen ? max : kDiagMarkerLen;
+    std::memcpy(out, kDiagTruncatedMarker, marker);
+    if (max <= kDiagMarkerLen) return marker;
 
-    // Truncated: output kDiagTruncatedMarker + newest bytes
-    if (max <= kDiagMarkerLen) {
-        std::memcpy(out, kDiagTruncatedMarker, max);
-        return max;
+    const size_t budget = max - marker;
+    size_t       start  = total > budget ? total - budget : 0;
+    if ((wrapped && start == 0) || (start && char_at(start - 1) != '\n')) {
+        while (start < total && char_at(start) != '\n') ++start;
+        if (start < total) ++start;
     }
-
-    const size_t payload_budget = max - kDiagMarkerLen;
-    size_t       logical_start  = total - payload_budget;
-
-    // Prefer starting at a complete line: if logical_start is mid-line, find next newline
-    if (char_at(logical_start - 1) != '\n') {
-        for (size_t i = logical_start; i < total; ++i) {
-            if (char_at(i) == '\n') {
-                if (i + 1 < total) {
-                    logical_start = i + 1;
-                }
-                break;
-            }
-        }
-    }
-
-    std::memcpy(out, kDiagTruncatedMarker, kDiagMarkerLen);
-    const size_t payload_len = total - logical_start;
-
-    if (!wrapped) {
-        std::memcpy(out + kDiagMarkerLen, ring + logical_start, payload_len);
-    } else {
-        const size_t phys_start = (len + logical_start) % ring_size;
-        if (phys_start + payload_len <= ring_size) {
-            std::memcpy(out + kDiagMarkerLen, ring + phys_start, payload_len);
-        } else {
-            const size_t chunk1 = ring_size - phys_start;
-            const size_t chunk2 = payload_len - chunk1;
-            std::memcpy(out + kDiagMarkerLen, ring + phys_start, chunk1);
-            std::memcpy(out + kDiagMarkerLen + chunk1, ring, chunk2);
-        }
-    }
-
-    return kDiagMarkerLen + payload_len;
+    if (start >= end) return marker;
+    for (size_t i = start; i < end; ++i) out[marker + i - start] = char_at(i);
+    return marker + end - start;
 }
 
 } // namespace daik

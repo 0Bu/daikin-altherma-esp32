@@ -4,6 +4,7 @@
 #include "ota_update.hpp"
 #include "diag_crash.hpp"
 #include "diag_log.hpp"
+#include "logic/redact.hpp"
 #include "safe_mode.hpp"
 #include "sntp_time.hpp"
 #include "weather_forecast.hpp"
@@ -429,8 +430,8 @@ void syslog_init() {
                             logged_state = false;
                             have_checked = false;
                             set_status(false, false, "");
-                            diag_printf("syslog: target set to %s:%d\n", last_host.c_str(),
-                                        last_port);
+                            diag_printf("syslog: target set to %s:%d\n",
+                                        DiagLogIdentifier(last_host).c_str(), last_port);
                         }
 
                         // Throttle the resolve+probe to check_interval. NOTE: gate on have_checked,
@@ -459,7 +460,7 @@ void syslog_init() {
                                     char ip_str[32];
                                     inet_ntop(AF_INET, &dest_addr.sin_addr, ip_str, sizeof(ip_str));
                                     diag_printf("syslog: forwarding to %s (%s), reachable=%s\n",
-                                                syslog_host.c_str(), ip_str,
+                                                DiagLogIdentifier(syslog_host).c_str(), ip_str,
                                                 reachable ? "yes" : "no-ping-reply");
                                     logged_state = true;
                                 }
@@ -477,7 +478,7 @@ void syslog_init() {
                                 set_status(false, false, "DNS lookup failed");
                                 if (!logged_state) {
                                     diag_printf("syslog: DNS lookup failed for %s (error %d)\n",
-                                                syslog_host.c_str(), err);
+                                                DiagLogIdentifier(syslog_host).c_str(), err);
                                     logged_state = true;
                                 }
                             }

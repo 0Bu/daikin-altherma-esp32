@@ -818,8 +818,14 @@ async function copyText(text) {
 // Assemble a paste-ready diagnostics bundle (identity + crash summary + the /diag ring) and copy it
 // to the clipboard, so a user can drop it straight into a bug report without pulling the binary dump.
 async function copyDiagnostics() {
-  let diag = "";
-  try { diag = await (await fetch("/diag")).text(); } catch { /* keep the rest of the bundle */ }
+  let diag;
+  try {
+    const r = await fetch("/diag?redact=1");
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    diag = (await r.text()).trim();
+  } catch (e) {
+    diag = `Could not be read from the device: ${e && e.message ? e.message : e}`;
+  }
   const s = S.status || {}, c = s.last_crash || {}, bt = Array.isArray(c.backtrace) ? c.backtrace : [];
   const lines = [
     "daikin-altherma-esp32 crash report",
@@ -901,7 +907,7 @@ async function collectBugReport() {
   const parts = [
     ["Device report (/status)", "/status?redact=1", "json"],
     ["Readings (/values)", "/values", "json"],
-    ["Update status (/ota/status)", "/ota/status", "json"],
+    ["Update status (/ota/status)", "/ota/status?redact=1", "json"],
     ["Device log (/diag)", "/diag?verbose=1&redact=1", "text"],
   ];
   const fetched = [];

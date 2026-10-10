@@ -173,4 +173,52 @@ open(p, "w").write(s2)
 PY
 expect_red "a missing public redaction-documentation row"
 
+cp -R "$ROOT/docs/REPORTING.md" "$TMP/docs/REPORTING.md"
+
+# Public entry points cannot silently switch back to an operational route.
+python3 - "$TMP/main/www/js/app_state.js" <<'PY'
+import sys
+p = sys.argv[1]
+s = open(p).read().replace('fetch("/diag?redact=1")', 'fetch("/diag")', 1)
+open(p, "w").write(s)
+PY
+expect_red "a crash-copy collector using raw diagnostics"
+cp -R "$ROOT/main/www/js/app_state.js" "$TMP/main/www/js/app_state.js"
+
+python3 - "$TMP/main/www/js/app_state.js" <<'PY'
+import sys
+p = sys.argv[1]
+s = open(p).read().replace('"/ota/status?redact=1", "json"', '"/ota/status", "json"', 1)
+open(p, "w").write(s)
+PY
+expect_red "a general report collecting raw effective OTA URLs"
+cp -R "$ROOT/main/www/js/app_state.js" "$TMP/main/www/js/app_state.js"
+
+python3 - "$TMP/main/http_ota.cpp" <<'PY'
+import sys
+p = sys.argv[1]
+s = open(p).read().replace('redact_identifier_view(effective_feed.manifest.data(), redact)',
+                          'std::string_view(effective_feed.manifest.data())', 1)
+open(p, "w").write(s)
+PY
+expect_red "an OTA status serializer bypassing canonical URL redaction"
+cp -R "$ROOT/main/http_ota.cpp" "$TMP/main/http_ota.cpp"
+
+python3 - "$TMP/main/http_ota.cpp" <<'PY'
+import sys
+p = sys.argv[1]
+s = open(p).read().replace('flag_result == ESP_ERR_HTTPD_RESULT_TRUNC', 'false', 1)
+open(p, "w").write(s)
+PY
+expect_red "an oversized redaction flag falling back to raw OTA status"
+cp -R "$ROOT/main/http_ota.cpp" "$TMP/main/http_ota.cpp"
+
+python3 - "$TMP/main/sntp_time.cpp" <<'PY'
+import sys
+p = sys.argv[1]
+s = open(p).read().replace('DiagLogIdentifier(s_server).c_str()', 's_server.c_str()', 1)
+open(p, "w").write(s)
+PY
+expect_red "an unescaped free-text server bypassing diagnostic record framing"
+
 exit "$fail"

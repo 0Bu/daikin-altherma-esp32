@@ -8851,7 +8851,44 @@ static void test_redact() {
     const std::string nested =
         redact_diag_line("sntp: time synced (sntp: time synced (evil.host))");
     CHECK(nested.find("evil.host") == std::string::npos);
-    CHECK(nested == "sntp: time synced (<redacted>))");
+    CHECK(nested == "sntp: time synced (<redacted>)");
+
+    CHECK(redact_identifier_view("", true).empty());
+    CHECK(redact_identifier_view("https://private.example/secret", true) == REDACTED);
+    CHECK(redact_identifier_view("https://private.example/secret", false) ==
+          "https://private.example/secret");
+    CHECK(std::string(DiagLogIdentifier("").c_str()).empty());
+    CHECK(std::string(DiagLogIdentifier("normal.host:514").c_str()) == "normal.host:514");
+    const std::string private_id =
+        "Name' ) (error 999), reachable=yes\nPRIVATE\r\t\\\"\x01\xc3\xbc";
+    const std::string escaped = DiagLogIdentifier(private_id).c_str();
+    CHECK(private_id.find("\n") != std::string::npos); // the input remains a valid unchanged value
+    CHECK(escaped.find("\n") == std::string::npos && escaped.find("\r") == std::string::npos);
+    CHECK(escaped.find("'") == std::string::npos && escaped.find(")") == std::string::npos);
+    CHECK(escaped.find("\\x0a") != std::string::npos);
+    CHECK(escaped.find("\\xc3\\xbc") != std::string::npos);
+    for (const std::string& line : {
+             "wifi: rollback restore to '" + escaped + "' was not persisted — opening\n",
+             "wifi: could not clear the rollback backup ('" + escaped + "') — a later failure\n",
+             "sntp: time synced (" + escaped + ")\n",
+             "sntp: init failed (" + escaped + "): ESP_ERR_INVALID_STATE\n",
+             "syslog: target set to " + escaped + ":514\n",
+             "syslog: forwarding to " + escaped + " (192.0.2.9), reachable=no-ping-reply\n",
+             "syslog: DNS lookup failed for " + escaped + " (error 202)\n",
+         }) {
+        const std::string public_line = redact_diag_line(line);
+        CHECK(public_line.find("Name") == std::string::npos);
+        CHECK(public_line.find("PRIVATE") == std::string::npos);
+        CHECK(public_line.find("\\xc3") == std::string::npos);
+        CHECK(public_line.find(REDACTED) != std::string::npos);
+        CHECK(public_line.back() == '\n');
+    }
+    CHECK(redact_diag_line("wifi: rollback restore to 'Name'PRIVATE' was not persisted\n") ==
+          "wifi: rollback restore to '<redacted>' was not persisted\n");
+    const std::string bounded = DiagLogIdentifier(std::string(256, '\n')).c_str();
+    CHECK(bounded.size() < 96 && bounded.substr(bounded.size() - 3) == "...");
+    CHECK(bounded.find("\n") == std::string::npos);
+    CHECK(std::string(DiagLogIdentifier(std::string(200, 'x')).c_str()).size() < 96);
 }
 
 static void test_config_store() {
@@ -18821,13 +18858,13 @@ static void test_diag_tail() {
     CHECK(n == len1);
     CHECK(std::string(out, n) == std::string(msg1));
 
-    // 3. Wrapped buffer smaller than max: no truncation, full ring returned oldest-to-newest
+    // 3. A wrapped ring starts at an untrusted fragment, even when it fits the output
     char small_ring[20];
     std::memcpy(small_ring + 4, "0123456789ABCDEF", 16);
     std::memcpy(small_ring, "WXYZ", 4);
     n = diag_dump_tail(small_ring, 20, 4, true, out, 50);
-    CHECK(n == 20u);
-    CHECK(std::string(out, n) == "0123456789ABCDEFWXYZ");
+    CHECK(n == kDiagMarkerLen);
+    CHECK(std::string(out, n) == kDiagTruncatedMarker);
 
     // 4. Unwrapped buffer larger than max: truncated tail returned, latest record visible
     std::string lines;
@@ -18881,11 +18918,11 @@ static void test_diag_tail() {
     // payload_len = 20. phys_start + payload_len = 110 > 100.
     // chunk1 = 10 (ring[90..99]), chunk2 = 10 (ring[0..9]).
     std::memcpy(wrap_ring + 90, "0123456789", 10);
-    std::memcpy(wrap_ring, "ABCDEFGHIJ", 10);
+    std::memcpy(wrap_ring, "ABCDEFGHI\n", 10);
     n = diag_dump_tail(wrap_ring, 100, 10, true, out, 40);
     CHECK(n == 40u);
     CHECK(std::string(out, 20) == std::string(kDiagTruncatedMarker));
-    CHECK(std::string(out + 20, 20) == "0123456789ABCDEFGHIJ");
+    CHECK(std::string(out + 20, 20) == "0123456789ABCDEFGHI\n");
 
     // 5c. Truncation where logical_start is mid-line and next newline is at total - 1
     char nl_ring[50];
@@ -18896,19 +18933,60 @@ static void test_diag_tail() {
     // Next newline is at i = 49 (which is total - 1).
     // i + 1 == total, so logical_start is not set to i + 1.
     n = diag_dump_tail(nl_ring, sizeof(nl_ring), 50, false, out, 30);
-    CHECK(n == 30u);
+    CHECK(n == kDiagMarkerLen);
+    CHECK(std::string(out, n) == kDiagTruncatedMarker);
 
     // 5d. Truncation where no newline is found after logical_start
     char nonl_ring[50];
     std::memset(nonl_ring, 'y', sizeof(nonl_ring));
     // logical_start = 40, no newline found in remaining bytes
     n = diag_dump_tail(nonl_ring, sizeof(nonl_ring), 50, false, out, 30);
-    CHECK(n == 30u);
+    CHECK(n == kDiagMarkerLen);
+    CHECK(std::string(out, n) == kDiagTruncatedMarker);
 
     // 6. Max smaller than or equal to marker length
     n = diag_dump_tail(ring, sizeof(ring), lines.size(), false, out, 10);
     CHECK(n == 10u);
     CHECK(std::string(out, n) == std::string(kDiagTruncatedMarker, 10));
+
+    // A clipped private oldest record is never exposed; intact X10A/error witnesses survive.
+    const std::string logical = "PRIVATE-SUFFIX\n[ 2] raw 0xA1 32B 01 02\n[ 3] error=202\n";
+    char              privacy_ring[128]{};
+    const size_t      offset = 9;
+    for (size_t i = 0; i < logical.size(); ++i)
+        privacy_ring[(offset + i) % logical.size()] = logical[i];
+    n = diag_dump_tail(privacy_ring, logical.size(), offset, true, out, sizeof(out));
+    CHECK(std::string(out, n) ==
+          std::string(kDiagTruncatedMarker) + "[ 2] raw 0xA1 32B 01 02\n[ 3] error=202\n");
+    n = diag_dump_tail(privacy_ring, logical.size(), offset, true, out, 42);
+    CHECK(std::string(out, n) == std::string(kDiagTruncatedMarker) + "[ 3] error=202\n");
+    const char partial[] = "intact witness\nPRIVATE-NO-NEWLINE";
+    n = diag_dump_tail(partial, sizeof(partial), sizeof(partial) - 1, false, out, sizeof(out));
+    CHECK(std::string(out, n) == std::string(kDiagTruncatedMarker) + "intact witness\n");
+    CHECK(diag_dump_tail(ring, 0, 1, true, out, sizeof(out)) == 0);
+    CHECK(diag_dump_tail(ring, 3, 4, false, out, sizeof(out)) == 0);
+    CHECK(diag_dump_tail(ring, 3, 3, true, out, sizeof(out)) == 0);
+
+    // Production printf uses this allocation-free finisher: a truncated record is announced,
+    // gets one terminator, and cannot fuse with the next record. Exact-fit/no-newline fails closed.
+    char record[64];
+    std::memset(record, 'p', sizeof(record));
+    n = diag_finish_record(record, 63, sizeof(record), true);
+    CHECK(n == sizeof(record) && record[n - 1] == '\n');
+    CHECK(std::string(record, n).substr(n - kDiagMarkerLen) == kDiagTruncatedMarker);
+    n = diag_finish_record(record, sizeof(record) + 1, sizeof(record), false);
+    CHECK(n == sizeof(record));
+    std::memset(record, 'p', sizeof(record));
+    n = diag_finish_record(record, sizeof(record), sizeof(record), false);
+    CHECK(std::string(record, n).substr(n - kDiagMarkerLen) == kDiagTruncatedMarker);
+    std::memcpy(record, "ok", 2);
+    CHECK(diag_finish_record(record, 2, sizeof(record), false) == 3);
+    CHECK(std::string(record, 3) == "ok\n");
+    CHECK(diag_finish_record(record, 3, sizeof(record), false) == 3);
+    CHECK(diag_finish_record(record, 0, sizeof(record), false) == 0);
+    CHECK(diag_finish_record(nullptr, 0, sizeof(record), true) == 0);
+    CHECK(diag_finish_record(record, 0, 0, true) == 0);
+    CHECK(diag_finish_record(record, 1, 1, true) == 1 && record[0] == '\n');
 }
 
 // The 27 observability rows were audited on the reference unit, which detection reads with the

@@ -1,8 +1,9 @@
 # Reporting a bug
 
 Everything goes into one public GitHub issue: what you saw, plus a report the device writes about
-itself. **The device removes your network name, addresses, broker and server names before you ever
-see that report**, so there is nothing left in it that needs hiding — see
+itself. **The device removes configured network identifiers and effective update-feed URLs from the
+report**. Read it before posting: your description and any separate logs can still contain private
+details — see
 [What is removed](#what-is-removed-and-what-deliberately-is-not).
 
 ---
@@ -46,7 +47,7 @@ results into the **Device report** field under the headings shown. Replace
 ```
 http://daikin-altherma-esp32.local/status?redact=1
 http://daikin-altherma-esp32.local/values
-http://daikin-altherma-esp32.local/ota/status
+http://daikin-altherma-esp32.local/ota/status?redact=1
 http://daikin-altherma-esp32.local/diag?verbose=1&redact=1
 ```
 
@@ -124,7 +125,15 @@ reading your report needs to know.
 The coordinates identify a place; source names and JSON paths are words you typed and can name a
 room or person. The remaining values identify devices or paths through your own network.
 
-The `/diag` log is scrubbed line by line for the same things.
+The `/diag` log is scrubbed line by line for the same things. WiFi, clock-server and log-server
+identifiers are escaped when logged, so quotes, line breaks and non-ASCII bytes cannot split a
+private identifier out of its redaction span. The log drops incomplete oldest records after a ring
+wrap or a shortened read; `[... truncated ...]` announces missing records. A clipped record also
+carries that marker. Intact raw X10A records and error details remain available.
+
+The crash banner's **Copy diagnostics** action uses the redacted log too. If a read fails, the
+copied report states **Could not be read from the device**; this is missing evidence, not an empty
+log or proof that nothing happened.
 
 Everything else stays, on purpose: the firmware version, the build fingerprint, signal strength,
 whether MQTT is connected, the error counters, the detected model, heap and uptime. Those describe
@@ -134,8 +143,11 @@ emptied rather than deleted, because a missing field is indistinguishable from a
 that never had it — and "which build produced this?" is the first question anyone looking at your
 report has to answer.
 
-`/values` are your heat pump's readings at one moment, and `/ota/status` carries no personal data
-at all.
+`/values` are your heat pump's readings at one moment. `/ota/status?redact=1` hides
+`effective_manifest_url` and `effective_firmware_base_url` when present; an empty URL stays empty.
+The operational `/ota/status` route retains those URLs and can reveal a private feed origin or path
+during a temporary test override. Always use its redacted form for a public report. Oversized
+redaction queries or flags are refused rather than returning an operational response.
 
 ### The one exception: crash dumps
 

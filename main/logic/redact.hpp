@@ -121,6 +121,45 @@ inline std::string redact_identifier(const std::string& value, bool on) {
     return on && !value.empty() ? std::string(REDACTED) : value;
 }
 
+// Allocation-free form for fixed-buffer serializers such as /ota/status.
+inline std::string_view redact_identifier_view(std::string_view value, bool on) {
+    return on && !value.empty() ? std::string_view(REDACTED) : value;
+}
+
+// Log identifiers cannot create a physical record or imitate a redaction terminator. Keep the
+// original config untouched; only its diagnostic representation escapes delimiters/control bytes.
+// Fixed storage bounds both the producer's stack and the eventual 256-byte diagnostic record.
+struct DiagLogIdentifier {
+    char text[96]{};
+
+    explicit DiagLogIdentifier(std::string_view value) {
+        constexpr char hex[] = "0123456789abcdef";
+        size_t         out   = 0;
+        for (unsigned char c : value) {
+            const bool escape = c < 0x20 || c >= 0x7f || c == '\'' || c == '"' || c == '(' ||
+                                c == ')' || c == ',' || c == '\\';
+            const size_t need = escape ? 4 : 1;
+            if (out + need + 3 >= sizeof(text)) {
+                text[out++] = '.';
+                text[out++] = '.';
+                text[out++] = '.';
+                break;
+            }
+            if (escape) {
+                text[out++] = '\\';
+                text[out++] = 'x';
+                text[out++] = hex[c >> 4];
+                text[out++] = hex[c & 15];
+            } else {
+                text[out++] = static_cast<char>(c);
+            }
+        }
+        text[out] = '\0';
+    }
+
+    const char* c_str() const { return text; }
+};
+
 // One diag-line rule: everything between the end of `marker` and the next `end` is replaced.
 struct DiagRedaction {
     const char* marker;   // matched anywhere in the line; the value starts right after it
@@ -138,16 +177,17 @@ inline constexpr DiagRedaction DIAG_REDACTIONS[] = {
     // syslog.cpp "syslog: forwarding to %s (%s), reachable=%s" — host AND resolved IP in one span;
     // reachable= survives, which is the half that says whether the collector answers.
     {"syslog: forwarding to ", ", reachable="},
-    // syslog.cpp "syslog: DNS lookup failed for %s (error %d)" — the errno is the diagnosis, keep it.
+    // syslog.cpp "syslog: DNS lookup failed for %s (error %d)" — the errno is the diagnosis, keep
+    // it.
     {"syslog: DNS lookup failed for ", " (error"},
     // wifi.cpp "wifi: rollback restore to '%s' was not persisted — ..."
-    {"wifi: rollback restore to '", "'"},
+    {"wifi: rollback restore to '", "' was not persisted"},
     // wifi.cpp "wifi: could not clear the rollback backup ('%s') — ..."
-    {"wifi: could not clear the rollback backup ('", "'"},
+    {"wifi: could not clear the rollback backup ('", "') — "},
     // sntp_time.cpp "sntp: time synced (%s)" and "sntp: init failed (%s): %s" — the trailing
     // esp_err_to_name() of the failure case survives, only the server name goes.
     {"sntp: time synced (", ")"},
-    {"sntp: init failed (", ")"},
+    {"sntp: init failed (", "): "},
     // hp_modbus.cpp "modbus: %s mDNS search found gateway %s" — the DISCOVERED HomeHub IPv4.
     // /status?redact=1 already withholds it as
     // modbus.host, and without this rule the same string was printed in /diag a few sections below
@@ -184,8 +224,10 @@ inline std::string redact_diag_line(std::string_view line) {
         if (start == std::string::npos || start + marker.size() > limit) continue;
         start += marker.size();
         std::string_view end_tok(r.end);
-        std::size_t stop = end_tok.empty() ? std::string::npos : out.find(end_tok, start);
-        if (stop == std::string::npos || stop > limit) stop = limit;   // fail closed, keep the newline
+        // The producer escapes delimiters; prefer the final trusted suffix as a second defense
+        // against a delimiter-bearing identifier from an older producer.
+        std::size_t stop = end_tok.empty() ? std::string::npos : out.rfind(end_tok, limit);
+        if (stop == std::string::npos || stop < start || stop > limit) stop = limit;
         std::size_t before = stop - start;
         out.replace(start, before, REDACTED);
         limit = limit - before + std::string_view(REDACTED).size();
