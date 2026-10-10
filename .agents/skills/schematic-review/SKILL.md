@@ -1,6 +1,6 @@
 ---
 name: schematic-review
-description: Review the dashboard schematic — the inline SVG in main/www/index.html, its CSS, and its bindings. Run the mechanical audit and judge whether the drawing tells the truth about the plant, places elements correctly, and has correct bilingual copy. Use after schematic, pill, pipe, binding, or inspector-copy changes. Report findings by default; apply fixes only when explicitly requested.
+description: Review the dashboard schematic — the inline SVG in main/www/index.html, its CSS, and its bindings. Run the mechanical audit and judge whether the drawing tells the truth about the plant, places elements correctly, and has correct copy in every shipped locale. Use after schematic, pill, pipe, binding, or inspector-copy changes. Report findings by default; apply fixes only when explicitly requested.
 ---
 
 # schematic-review
@@ -12,17 +12,9 @@ files, update GitHub state, merge, flash, deploy, clear evidence, or mutate a li
 because this skill activated. When a mutation is explicitly requested, keep it within that scope and
 report analysis, changes, and verification separately.
 
-The dashboard schematic is the whole "what is the plant doing right now" answer (`docs/DESIGN.md`
-§5.3). It is also the one artefact in this repo where **every gate can be green and the picture can
-still be false**: the firmware builds, the host logic tests pass, the domain audit confirms the
-value is physically right, the description audit confirms there is copy for it — and the drawing
-puts that correct reading on the wrong pipe.
-
-That is not hypothetical. This drawing has shipped a fan spinning around a point beside its own
-axle, a leaving-water pill floating 40 px above the run it names, the return temperature drawn on
-the heating-only section (claiming a branch no sensor there reads), and "HEIZUNG" struck through by
-the heating riser so it rendered as "HEIZUNC". Each is the legacy-35–legacy-39 failure shape drawn in SVG:
-well-formed, plausible, and attributing a real number to the wrong thing.
+The schematic must attribute each reading to the real component and measuring point. Mechanical
+geometry and binding checks cannot establish that meaning. Read
+[review background](references/review-background.md) when investigating a prior defect class.
 
 **This review unlike `$domain-review` is conditional.** Derive applicability from
 `tools/agent-hooks/require-pr-gates.sh`: any `main/www/` change, `docs/DESIGN.md`, schematic tooling
@@ -50,24 +42,8 @@ It parses the **real** SVG and evaluates the **real** binding tables — there i
 the coordinates or the regexes to drift. **Exit 2 is not a pass**: it means the drawing could not be
 read (a renamed class, a missing marker), so nothing was checked.
 
-| Code | Means |
-|---|---|
-| `S001` | A hit target with no `INSPECT` entry — tapping it opens an empty panel. **Not adjudicable.** |
-| `S002` | An `INSPECT` entry with no hit target — copy nobody can reach. |
-| `S003` / `S010` | A `sample` that names no catalog register / matches no `DESCRIPTIONS` entry (a blank explainer). |
-| `S004` / `S005` | An `id` the SVG declares and the assembled UI never writes, or the reverse — a silent no-op either way. |
-| `S006` | A `data-i18n` key missing from a language dict — the German page prints English, or the raw key. |
-| `S007` / `S008` / `S009` | Duplicate id / dangling `<use>` / character data adrift in the SVG. |
-| `S011` | A drawn pipe inside no hit target — unhoverable, and it fails by absence: nothing looks wrong. |
-| `G001`–`G005` | Outside the viewBox, overlapping, struck through by a pipe, overflowing its pill, skewed. |
-| `G006` | A pill too far from — or not over — the run it names. The defect class the gate exists for. |
-| `G007` / `G012` | A rotor whose bounding box is not centred on its hub, or the pump rotating counter-clockwise instead of clockwise. |
-| `G008` / `G009` | A run off the two-level grid, or a box whose margins no longer match it. |
-| `G010` | An animated flow overlay tracing no drawn pipe — the two copies of one path have drifted. |
-| `G011` | A run's *invisible* tap area reaching into a fitting drawn earlier. The hit lines are `stroke-linecap: round`, so each covers half a stroke past its declared endpoint; every trim had been computed as if the cap were flat, and the 3-way valve outlined itself on hover and then opened the DHW branch. Says nothing about two hit lines meeting — that place is genuinely shared, and `E004` decides whose it is. |
-| `E001` | A pill whose unit repeats in the drawing and which carries no name. |
-| `E002` | A reading drawn past a junction, on a branch its sensor does not read. **Not adjudicable.** |
-| `E003` / `E004` | A flow overlay, or a hit target, spanning a junction — one animation (or one highlight) asserting two branches' states at once. |
+When an audit reports a finding, read its [finding definitions](references/audit-findings.md).
+The findings include missing bindings/copy, geometry, sensor attribution and branch ownership.
 
 A finding is a **question, not a verdict** — except `S001` and `E002`, which the ledger refuses
 outright. A finding that is correct as it stands goes in `tools/schematic/audit_exceptions.txt` as an
@@ -111,11 +87,11 @@ it, and this is where the review earns its keep.
    **name**. The one exception is the "≈" on the two derived pills: without it a bare "4.6 kW" reads
    as measured.
 
-5. **Copy, in both languages.** The audit checks a key EXISTS in both dicts; it cannot read German.
-   Check the new string is right, is terse in the house register, fits its pill in the longer
-   language, and — for an inspector entry — that `now` still distinguishes the cases it must (the
-   `pel` entry's "held over from the last run" versus "this profile has no current row" is the
-   worked example: suppressing one wrong claim must not stand a second one in front of it).
+5. **Copy, in every shipped locale.** Derive the set from `UI_LANGS` in `main/www/js/i18n.js`,
+   including `main/www/locales/`. The audit checks keys and geometry across the loaded locale
+   catalogs; it cannot establish translation meaning. Review every changed string for source
+   meaning, claim strength and fit. Inspector `now` copy must distinguish held/stale input from a
+   missing profile row; record any translation not semantically reviewed.
 
 6. **Does it degrade honestly per model?** Every value maps over `/values` label patterns, so a
    model without the row must hide the branch or show "—", never a confident 0.0. A new element
@@ -158,7 +134,7 @@ blank when its page goes stale, or a ledger entry added to quiet a finding this 
 
 Before ticking or stamping the gate:
 1. **Hydraulic and sensor reality check:** Did this review verify the actual hydraulic order (installer reference §16.2) and sensor attribution (e.g. R1T pre-BUH, correct branch assignment across 3-way valve)?
-2. **Bilingual copy & fit check:** Verify that both English and German labels fit without text overflow or clipping at minimum viewports, and that inspector texts distinguish stale states from missing sensors.
+2. **Locale copy & fit check:** Verify every shipped `UI_LANGS` locale fits without overflow or clipping at minimum viewports. Review all changed translations for the same meaning and stale/missing distinction; a green catalog/geometry check does not establish semantic equivalence.
 3. **Stamp integrity check:** Confirm the stamp uses the bare short SHA (`git rev-parse --short=12 HEAD`) without backticks or extra formatting.
 
 ## Recording the pass (merge gate — no file marker)

@@ -1,8 +1,9 @@
 # Agent migration and operation runbook
 
-Phase 7 of the migration is complete. Project policy, skills, focused reviewers, configuration, and
-enforcement now use the canonical layout below. Transitional files used during the canary have been
-retired; Git history preserves the migration record and the last known-good pre-cutover state.
+Project policy, skills, focused reviewers and enforcement definitions use the canonical layout
+below. Native Codex registration is generated from these sources and checked separately from live
+activation. Transitional files used during the canary have been retired; Git history preserves the
+migration record and the last known-good pre-cutover state.
 
 ## Canonical layout
 
@@ -14,11 +15,13 @@ retired; Git history preserves the migration record and the last known-good pre-
 | Project-hook registration | `.agents/hooks.json` |
 | Runner-neutral hook and merge policy | `tools/agent-hooks/` |
 | Shared MCP client configuration | `.mcp.json` |
+| Generated native Codex registration | `.codex/config.toml`, `.codex/hooks.json`, `.codex/agents/*.toml` |
 
-There is one maintained definition for each policy, skill, reviewer, and gate. Agent integrations
-must consume those canonical sources or dispatch to the runner-neutral hook core; do not add
-runner-specific policy or workflow copies. `.mcp.json` remains a shared client descriptor as
-documented in [`MCP.md`](MCP.md), not a second project-policy source.
+There is one maintained definition for each policy, skill, reviewer and gate. Native adapters are
+deterministic generated output; edit their canonical inputs and regenerate them. They only register
+the canonical reviewers, map the lifecycle schema and dispatch to the runner-neutral core. Never
+maintain a second runner-specific policy or workflow. `.mcp.json` remains the shared MCP source as
+documented in [`MCP.md`](MCP.md).
 
 This layout covers repository-scoped workflows only. Maintainer-specific plant, LAN, observability,
 private-inventory, or Mac workflows are installed in the user's global skill directory and are not
@@ -31,13 +34,16 @@ fails closed on both missing and extra project skills.
 - Review, audit, and triage requests are read-only. A review may recommend a patch, but it must not
   edit files or mutate GitHub, hardware, deployments, evidence, or live systems unless the user
   explicitly requested that action.
-- Focused reviewers under `.agents/agents/` run with a read-only sandbox and no model pin. The root
-  agent retains integration, mutation, and final-verification ownership.
+- Focused reviewers under `.agents/agents/` declare a read-only sandbox and no model pin. Their
+  native registrations must be current, and the actual spawned mode must be checked before relying
+  on sandbox isolation. The root owns integration, mutation and final verification. Every review
+  reports its base/head SHAs, committed range and intended staged/unstaged/untracked scope.
 - Project concurrency is capped at three concurrent subagent threads, plus the primary/root thread.
   Assign disjoint paths and serialize writes, hardware access, GitHub mutation, and shared build
   directories.
-- Context7 is the only project MCP configured globally via `.mcp.json`. GitHub and device capabilities
-  remain explicit, task-scoped actions.
+- Context7 is the only repository-configured MCP; `.mcp.json` is its source and the generated Codex
+  config registers it natively. Personal MCP defaults are separate. GitHub and device use remain
+  explicit, task-scoped actions; listing configuration is not permission to contact a live system.
 - Merge policy comes from the runner-neutral aggregate gate under `tools/agent-hooks/`; it is the
   single policy definition.
 - The supported local merge form is exactly this synchronous, repository-bound REST CAS action:
@@ -141,6 +147,101 @@ agent configurations or hook harnesses.
 
 ## Configuration checks
 
+### Native Codex setup and evidence
+
+The generated `.codex/` files register Context7, cap concurrency at three spawned agents, translate
+the canonical lifecycle schema into Codex hook groups, and expose the three canonical reviewer
+TOMLs. They do not pin a model, grant hardware access or change personal configuration.
+
+```bash
+scripts/setup-codex.sh
+scripts/run-agent-instructions-budget.sh
+scripts/check-codex-setup.sh
+scripts/check-codex-setup.sh --runtime
+```
+
+Run setup again after changing a canonical MCP, hook or reviewer input. Generation refuses to
+silently replace unrelated local adapter contents; inspect conflicts rather than discarding them.
+The source gate checks exact generated parity and reports repository-only `AGENTS.md` chains,
+including scoped instructions. It keeps the root 24-KiB limit and a separate 32-KiB repository-chain
+limit. These byte counts do not observe global instructions, the native `project_doc_max_bytes`
+setting or configured instruction fallback filenames; they do not prove the full native context fits.
+Scoped `AGENTS.md` files count even when untracked or ignored. `AGENTS.override.md` is forbidden, including
+ignored files, because it would replace the canonical instructions in Codex's discovery order.
+
+The setup check separates canonical validity, native registration and live evidence. Its runtime
+mode makes bounded read-only `config/read` and `hooks/list` app-server requests. It checks the
+effective Context7 pin and enabled status, subagent limit and enabled status, current-worktree config
+origin, and native hook discovery and trust without starting a model turn, connecting to device MCPs or
+printing credentials. These inventory requests prove discovery, not actual hook execution.
+`--runtime --require-runtime` exits non-zero while fresh-task acceptance evidence remains pending;
+the default check reports this limit without claiming full runtime acceptance.
+
+Start Codex CLI in the project and use `/hooks` to inspect the exact generated definitions.
+First require discovery of all four project handlers: an active project config layer with only
+user hooks is a discovery failure, not evidence that the project hooks merely need trust. In the
+validated native client (Codex CLI `0.162.0-alpha.17.2`), linked worktrees load project hook definitions
+from the primary checkout's `.codex/`, while their current-worktree `.codex/config.toml` can be active
+independently. The Doctor resolves that primary checkout through Git metadata and compares its
+`.codex/hooks.json` with the current worktree's generated adapter. It reports missing, unsafe,
+unreadable or differing adapters and foreign native hook sources. A differing adapter may be stale
+or belong to another configuration; the Doctor does not infer its ownership from its contents or
+print those contents. Setup writes only
+the current checkout: it never copies adapters into the primary checkout or changes its configuration.
+Before accepting native hooks, arrange a reviewed matching adapter in that checkout or use a primary
+checkout with the generated setup, then rerun discovery. Recheck this client behavior after upgrades;
+copying hooks into personal config or bypassing trust does not validate the project setup.
+Non-managed hooks are skipped until their current hashes are trusted; setup never grants trust or
+bypasses that review. After discovery and review, verify a harmless allowed operation and a blocked synthetic
+operation, including a nested code-mode tool call. Confirm the matching PreToolUse and PostToolUse
+events, and that a blocked call has no side effect. Do not use a real secret, device request or
+destructive action as a negative control. Spawn each focused reviewer and record the requested
+base/head range and actual permission mode. In the validated client, the native role loader does
+not accept `sandbox_mode` or permission policy overrides from role TOMLs: all three roles inherited
+`workspace-write` from a writable parent. The canonical `sandbox_mode = "read-only"` declaration
+records intent; it does not constrain that parent or prove the child's effective sandbox. Use an
+explicitly read-only parent session and verify the actual child permission mode. A smoke test under
+that parent proves only that invocation. Report skipped hooks, missing events or unobserved sandbox
+or approval-policy evidence as pending.
+
+The focused native review entry point creates that separate parent without changing configuration:
+
+```bash
+scripts/run-codex-review.sh doc_drift_checker <full-base-sha> <full-head-sha> AGENTS.md docs \
+  --intent 'Describe the intended scoped changes and their resulting behavior'
+```
+
+Choose `doc_drift_checker`, `heap_safety_reviewer` or `x10a_decode_reviewer`. The entry point requires
+the current `HEAD` to equal the requested full head SHA, a non-empty bounded plain-text `--intent`
+description and existing relative path scopes
+without traversal, symlinks, credential directories, key files or raw memory artifacts. It reads
+bounded effective configuration metadata before starting a review and fails closed when metadata
+is unavailable or subagent tools are disabled. It disables every observed MCP name, web search, app
+tools and plugin tools for that invocation, sets `--ephemeral --sandbox read-only`, and requests
+approval policy `never`
+both through the CLI option and an explicit configuration override. It grants no trust or bypass.
+The parent must spawn only the selected actual role with `fork_context=false`, wait for its response
+and close it when the toolset supports closing. Otherwise it must verify completion and report
+the lifecycle limit. The task separates the scoped committed range from staged, unstaged and intended
+untracked changes and prohibits file-changing tests, builds, GitHub operations and live-system
+contact. The launcher does not pin a model or persist settings. Its argument tests prove requested
+configuration; only a native run with actual permission and approval-policy evidence proves the
+effective restrictions for that run.
+Report `approval_policy` separately from `approvals_reviewer`: `auto_review` names the reviewer,
+not the policy. An unexposed actual approval policy remains unobserved.
+The process exit status alone does not prove that the selected reviewer completed its work. A usable
+review record must identify the actual named role, verified read-only mode, exact base/head and scope,
+local changes included, findings and completed review. Check that evidence independently before
+recording a review; the launcher never checks PR boxes or creates an acceptance stamp.
+
+The formatter records a correlated pre-edit state only for eligible project source files and
+computes formatting in memory. It emits a bounded suggestion, never writes a source file. Existing
+user changes, missing correlation or concurrent changes cause it to skip the suggestion. Apply
+formatting through the ordinary edit workflow under explicit file ownership, then run the normal
+format gate; a post-edit hook is not permission to reformat another author's changes.
+
+### Canonical checks
+
 Run these checks after changing agent instructions, skills, reviewers, configuration, or hooks:
 
 1. Confirm `AGENTS.md` stays below the project target of 24 KiB.
@@ -151,11 +252,12 @@ Run these checks after changing agent instructions, skills, reviewers, configura
    merely to duplicate the binding repository gate.
 3. Parse `.mcp.json` and all three `.agents/agents/*.toml` files. Reviewer TOMLs must keep
    `sandbox_mode = "read-only"` and contain no `model` key.
-4. Parse `.agents/hooks.json` and require registered lifecycle events to dispatch to the
-   runner-neutral core under `tools/agent-hooks/`.
+4. Parse `.agents/hooks.json` and require its lifecycle definitions to dispatch to the runner-neutral
+   core under `tools/agent-hooks/`. Verify generated adapter parity as a separate registration check;
+   valid source files alone do not prove native discovery, hook trust or execution.
 5. Run `scripts/run-agent-instructions-budget.sh`, `tools/agent-config/selftest.sh`, and
    `scripts/run-skill-audit.sh`, `tools/skill_audit/selftest.sh`,
-   `python3 tools/agent-hooks/test_push_gate.py`, and `tools/agent-hooks/selftest.sh`, then the
+   `scripts/agent-python.sh tools/agent-hooks/test_push_gate.py`, and `tools/agent-hooks/selftest.sh`, then the
    repository gate set relevant to the changed surface.
 6. Push the exact reviewed head through a pull request and require the remote `gates` check and every
    applicable build check to finish green. A local run, an older CI run, or a review stamp for an
@@ -173,12 +275,12 @@ does not replace the protected-base merge policy or the required CI checks.
 
 ## Phase 7 cutover and rollback
 
-The cutover is complete when the canonical configuration passes locally and in exact-head CI, the
-reviewed repository skill inventory is discoverable, all three focused reviewers remain read-only,
-the project hooks are reviewed at their current hashes, and no required workflow depends on a
-retired adapter. The final
-local check verifies dispatch in a fresh agent task and hook inspection; an older trusted hash is not evidence for a changed
-hook.
+Acceptance has three separate outcomes: canonical sources pass locally and in exact-head CI;
+native registration is current and discoverable; live execution has been observed. The last requires
+all three reviewers in the expected mode, hooks reviewed at their current hashes, and positive and
+negative dispatch controls in a fresh task. Old hook trust is not evidence for a changed definition.
+No required workflow may depend on a retired adapter. Report any unavailable runtime evidence as
+pending rather than marking the entire setup complete from a source-only gate.
 
 Existing clones may retain ignored local files below `.claude/` after the tracked tree is removed.
 The canonical configuration gate intentionally rejects even an untracked `.claude` path. Inspect
@@ -191,3 +293,36 @@ mutation, or hardware claims. Those remain separate, explicitly authorized workf
 Rollback is a normal reviewed revert or follow-up pull request that restores the last known-good
 pre-cutover state from Git history. Do not rewrite history or selectively reconstruct policy from
 retired copies. A rollback must rerun the configuration, hook, policy, and exact-head CI gates.
+
+## Delivery details
+
+Ordinary official dev delivery to an OTA-capable inventory bench uses the direct, unchained
+`scripts/production-ota-gate.py --confirm-bench bench --install-bench` shape described by the
+delivery skills, with all artifact/source/current-version lease arguments. It binds the exact
+signed artifact, owns one un-retried POST only to the bench, survives rollback probation and stress,
+and cannot contact production. This is artifact delivery; an explicitly requested pre-merge USB
+test of an exact local head is a separate acceptance path.
+
+Production promotion is a distinct `--confirm-production production --execute` transaction. Bench
+staging and stress precede the production POST, then read-only canary and retained-X10A checks.
+Staging without `--execute` still mutates the bench and needs its authorized delivery scope. The
+gate accepts only the current official dev manifest. Direct `/ota/update`, including a channel
+switch with `downgrade=1`, is never an agent alternative. A production image that passed probation
+is corrected through a reviewed fix or revert and the same bench-first roll-forward chain; an image
+that failed probation is reverted by the bootloader. Preserve failed-gate evidence and obtain
+fresh authorization for a blocked complete rerun rather than retrying a write.
+
+Signed, NVS-preserving USB writes to inventory roles are limited to bootstrap, recovery and the
+explicit bench exact-head pre-merge test. Production takes USB only for bootstrap or recovery.
+The repository flash plan skips NVS and coredump; a differing partition table, erasure or evidence
+clearing needs separate explicit authorization. Full commands and artifact, signature, identity,
+probation, heap, stack and changed-behavior checks remain in the delivery skills and
+[SECURITY.md](SECURITY.md).
+
+A manual `workflow_dispatch` with `release: true` authorizes publication, skips the mechanical PR
+suite, performs one signed firmware build, publishes the release feed and creates the exact-source
+tag and GitHub Release. It contacts no board and requires no self-hosted runner, private inventory,
+environment approval or hardware evidence. Test-board and production-board acceptance are separate
+authorized chains. A standalone `$deploy-test` fix does not grant commit or publication permission;
+prepare the scoped correction and host evidence, then repeat the clean-head bench test only after
+its commit is authorized. The inherited `$deploy-prod` chain already includes its fix commits.

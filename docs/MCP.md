@@ -141,11 +141,13 @@ server would be harmless if ever wanted; library docs are already covered by `co
 ## Repository agent tooling
 
 This developer-only integration is separate from the device's `/mcp` endpoint. The canonical
-configuration in [`.mcp.json`](../.mcp.json) starts `@upstash/context7-mcp@4.0.2`. Version `4.0.2` is
+configuration in [`.mcp.json`](../.mcp.json) declares `@upstash/context7-mcp@4.0.2`. Version `4.0.2` is
 the reviewed public-main pin; pinning it instead of `@latest` makes a checkout use the same server
 across runners and prevents an unreviewed registry release from changing the agent's documentation
-surface. Update it deliberately after reviewing the new package version.
+surface. Update it deliberately after reviewing the new package version, then regenerate the native
+Codex registration described in [AGENT_MIGRATION.md](AGENT_MIGRATION.md).
 
 Context7 is for library-documentation lookup only. It neither exposes the heat pump nor changes the
-read-only device MCP contract above. `.mcp.json` is the standard MCP client descriptor supported
-across agentic tools.
+read-only device MCP contract above. `.mcp.json` is the shared client descriptor; Codex uses its
+generated `[mcp_servers.context7]` registration in `.codex/config.toml`. Confirm effective discovery
+with the setup check rather than assuming that a valid JSON descriptor starts the server.
