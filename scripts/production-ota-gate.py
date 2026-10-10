@@ -3856,7 +3856,7 @@ def self_test() -> None:
         read_compact_json_response(
             drip_client, "fixture.invalid", "/ota/status", drip_started + 0.25,
         )
-    except TimeoutError:
+    except (TimeoutError, socket.timeout):
         pass
     else:
         raise AssertionError("compact status slow-drip exceeded its whole-request deadline")
