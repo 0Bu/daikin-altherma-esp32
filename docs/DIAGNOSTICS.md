@@ -1,6 +1,6 @@
 # Plant diagnostics in plain language
 
-<!-- user-docs-contract: d45c1c3fae3ca7d947c68d9e8d0d3f35f3024d2a7891b1bebff84a23deb08902 -->
+<!-- user-docs-contract: a82282eb86cf82dde2f08478375478ed3944b93e895163e38cbc3d22893ddee7 -->
 
 This guide is for owners who want to understand their heat pump without being heating specialists.
 Plant diagnostics are **off by default**. They run only after **Plant diagnostics** is explicitly
@@ -46,6 +46,8 @@ hours not yet saved to flash can be missing. Without a clock or compatible journ
 starts fresh. Only compatible saved hours that fit the current window return; current readings
 take precedence. Older formats or another source are rejected. Restored evidence expires exactly
 24 hours after its stored endpoint, including while waiting for the next hourly update.
+An explicit profile or link reset retires any pending diagnosis restore for that boot, even if
+the same profile is selected again. New observations then build a fresh window.
 An intentional restart can retain the domestic-hot-water check's ongoing quiet-hour candidate and
 the settling period after a tank charge, through a separately checked one-shot handoff. Completed
 statistics still in the open hour are discarded because they have no durable age. A changed source,

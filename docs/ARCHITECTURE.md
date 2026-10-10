@@ -1521,8 +1521,10 @@ A single task owns the X10A UART (there is exactly one link). Each cycle:
    only for SNTP and can seed an empty live ring immediately; elapsed buckets after the stored anchor
    become explicit gaps. The seed attributes the newest restored sample to the last monotonic
    raster boundary, the grid every later commit lands on, so the first live commit falls into the
-   next wall bucket (within a second of a wall-bucket boundary the anchor's whole-second
-   arithmetic can still put the two in one); seeding the start of the open wall bucket put it on another grid, and in a
+   next wall bucket. The anchor combines the clock's milliseconds with the full monotonic age
+   before flooring, avoiding a duplicate cell near the wall boundary. Millisecond clock precision,
+   separately sampled clocks and genuine clock steps remain timing limits. Seeding the start of
+   the open wall bucket put it on another grid, and in a
    share of restores the first commit then fell into the very bucket the seed had claimed, which
    duplicated that bucket and read every restored sample one bucket early. The boot scan indexes
    only the final 24-hour source windows; restore reads each indexed record once per four-ring

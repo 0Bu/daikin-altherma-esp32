@@ -1935,6 +1935,34 @@ PY4
 expect_red "zero selected flash intervals advertised as restored evidence" run_contract
 restore
 
+# 113. Manual same-source selection and an empty poll consumed the reset, but a pending
+#      journal still reintroduced pre-reset diagnosis hours into the new lifecycle.
+python3 - "$TMP/main/checkup.cpp" <<'PY4'
+import sys
+p = sys.argv[1]
+s = open(p).read()
+seed = s.replace("if (logic::checkup_flash_restore_retired(s_persist_verdict))", "if (false)", 1)
+assert seed != s, "seed 113 did not apply - the reset lifecycle guard moved"
+open(p, "w").write(seed)
+PY4
+expect_red "pending diagnosis restore survived an explicit source reset" run_contract
+restore
+
+# 114. The flash seed drops the wall-clock fraction before combining it with monotonic age.
+python3 - "$TMP/main/history.cpp" <<'PY4'
+import sys
+p = sys.argv[1]
+s = open(p).read()
+import re
+seed, n = re.subn(r"logic::history_anchor_bucket\(unix_s, now_us, commit_us,\s*logic::HISTORY_DT_S, ms\)",
+                  "logic::history_anchor_bucket(unix_s, now_us, commit_us, logic::HISTORY_DT_S, 0)",
+                  s, count=1)
+assert n == 1, "seed 114 did not apply - the subsecond seed binding moved"
+open(p, "w").write(seed)
+PY4
+expect_red "flash seed discarded the wall-clock milliseconds" run_contract
+restore
+
 if [ "$fail" -ne 0 ]; then
   echo
   echo "The source-absence matrix no longer catches a defect it was built for."

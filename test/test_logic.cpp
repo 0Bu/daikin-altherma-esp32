@@ -18039,8 +18039,9 @@ static void test_history_persist() {
     // The anchor of a live source is the wall bucket of its commit instant, `now - commit` ago; no
     // commit has no anchor, and a clock reading before the commit is age zero, never a negative
     // age.
-    const auto anchor = [](int64_t unix_s, int64_t now_us, int64_t commit_us) {
-        return history_anchor_bucket(rt(unix_s), rt(now_us), rt(commit_us));
+    const auto anchor = [](int64_t unix_s, int64_t now_us, int64_t commit_us, int32_t wall_ms = 0,
+                           uint32_t dt = HISTORY_DT_S) {
+        return history_anchor_bucket(rt(unix_s), rt(now_us), rt(commit_us), rt(dt), rt(wall_ms));
     };
     const auto boundary = [](int64_t now_us, uint32_t dt = HISTORY_DT_S) {
         return history_raster_boundary_us(rt(now_us), rt(dt));
@@ -18050,8 +18051,33 @@ static void test_history_persist() {
     CHECK(anchor(1'000, 100'000'000, 500'000'000) ==
           history_bucket_from_unix(1'000)); // 400 s "in the future" would be bucket 4
     CHECK(anchor(1'000, 500'000'000, INT64_MIN) == INT64_MIN);
-    // Whole seconds, floored: a commit 100.9 s ago is 100 s ago.
-    CHECK(anchor(1'000, 500'900'000, 400'000'000) == history_bucket_from_unix(900));
+    // Combine the clock fraction and elapsed fraction before flooring the commit instant.
+    CHECK(anchor(1'000, 500'900'000, 400'000'000) == history_bucket_from_unix(899));
+    CHECK(anchor(900, 500'900'000, 500'000'000, 899) == 2);
+    CHECK(anchor(900, 500'900'000, 500'000'000, 900) == 3);
+    CHECK(anchor(900, 500'900'001, 500'000'000, 900) == 2);
+    CHECK(anchor(900, 500'900'000, 500'000'000, 999) == 3);
+    CHECK(anchor(900, 0, 1, 999) == 3); // backwards monotonic reading: zero age
+    CHECK(anchor(900, 0, 0, -1) == INT64_MIN);
+    CHECK(anchor(900, 0, 0, 1000) == INT64_MIN);
+    CHECK(anchor(-300, 1, 0) == -2);
+    CHECK(anchor(-300, 1, 0, 1) == -1);
+    CHECK(anchor(0, 1'000'000, -1'000'000) == -1); // valid adopted instant before boot
+    CHECK(anchor(INT64_MIN, 1, 0) == INT64_MIN);   // subtraction cannot underflow
+    CHECK(anchor(INT64_MIN, 0, 0, 0, 1) == INT64_MIN);
+    CHECK(anchor(INT64_MIN + 1, 1'000'000, 0, 0, 1) == INT64_MIN);
+    CHECK(anchor(INT64_MAX, INT64_MAX, INT64_MIN + 1, 999, 1) < INT64_MAX);
+    CHECK(anchor(900, 0, 0, 0, 0) == 0);
+    CHECK(anchor(900, 0, 0, 0, UINT32_MAX) == 0);
+    CHECK(history_bucket_from_unix(rt(INT64_MIN), rt(uint32_t{300})) == INT64_MIN / 300 - 1);
+    CHECK(history_bucket_from_unix(rt(INT64_MIN), rt(uint32_t{1})) == INT64_MIN);
+
+    // Boot at wall 3299.600, restore at uptime 26.800: the seed belongs to bucket 10,
+    // and the first live completion at uptime 300 to bucket 11. Flooring elapsed seconds
+    // first attributed both to bucket 11, duplicating the grid and shifting the old curve.
+    CHECK(anchor(3326, 26'800'000, 0, 400) == 10);
+    CHECK(anchor(3599, 300'000'000, 300'000'000, 600) == 11);
+    CHECK(history_bucket_from_unix(3326 - 26) == 11); // retired arithmetic: negative control
 
     // The raster boundary a flash seed claims (HIST-03/c): the start of the open monotonic bucket.
     CHECK(boundary(0) == 0);
@@ -18075,7 +18101,7 @@ static void test_history_persist() {
     // A cursor beyond its clock means one of two things: an earlier boot synchronised to a wrong
     // far-future time, or THIS boot synchronised to a wrong past time. Equal is never future, an
     // unknown cursor or anchor proves nothing, and the slack absorbs the one-bucket jitter of an
-    // anchor derived from two whole-second readings.
+    // anchor derived from separately sampled clocks or a small wall-clock step.
     CHECK(!history_cursor_in_future(100, 100));
     CHECK(history_cursor_in_future(101, 100));
     CHECK(!history_cursor_in_future(99, 100));
@@ -18097,7 +18123,8 @@ static void test_history_persist() {
     // REPORTS the situation and neither re-indexes nor rewinds (history.cpp, "A bucket from the
     // future").
     //
-    // The anchor jitters by one bucket from tick to tick, so for a cursor two buckets above the
+    // If separately sampled clocks straddle a boundary, an anchor can differ by one bucket. For
+    // a cursor two buckets above the
     // lower reading the DECISION itself flips between adjacent anchors. That is why the writer's
     // "ahead of the clock" line is latched per episode and released only by that source's next
     // successful data append — never by a "not ahead" observation, which would make it flap.
@@ -20851,40 +20878,56 @@ static void test_history_restore_guards() {
     // past the first monotonic boundary.
     {
         int           trials = 0, old_collisions = 0, new_collisions = 0, new_not_next = 0;
+        int           truncated_age_collisions = 0;
         int           usual_trials = 0, usual_old_collisions = 0;
         const int64_t kBoot0 = 1'786'459'090; // the live-device boot instant the fix was found on
         for (int phase = 0; phase < static_cast<int>(HISTORY_DT_S); ++phase) {
             for (int sync_s = 5; sync_s <= 600; sync_s += 5) {
                 for (int lag_s = 0; lag_s <= 2; ++lag_s) {
-                    const int64_t unix_boot = kBoot0 + phase;
-                    const int64_t now_us    = static_cast<int64_t>(sync_s) * 1000000;
-                    const int64_t unix_s    = unix_boot + sync_s;
-                    // The first live commit: the next monotonic boundary, plus the fold's lag.
-                    const int64_t commit_t_s =
-                        (static_cast<int64_t>(history_bucket(now_us)) + 1) * HISTORY_DT_S + lag_s;
-                    const int64_t commit_bucket = history_anchor_bucket(
-                        unix_boot + commit_t_s, commit_t_s * 1000000, commit_t_s * 1000000);
-                    trials++;
-                    // OLD rule (retired): the start of the open WALL bucket.
-                    const int64_t wall_bucket = history_bucket_from_unix(unix_s);
-                    if (commit_bucket == wall_bucket) old_collisions++;
-                    if (sync_s <= 60) {
-                        usual_trials++;
-                        if (commit_bucket == wall_bucket) usual_old_collisions++;
+                    for (int boot_ms : {0, 600, 999}) {
+                        for (int sync_ms : {0, 100, 800}) {
+                            const int64_t boot_ms_total = (kBoot0 + phase) * 1000 + boot_ms;
+                            const int64_t now_us =
+                                static_cast<int64_t>(sync_s) * 1000000 + sync_ms * 1000;
+                            const int64_t wall_ms_total = boot_ms_total + now_us / 1000;
+                            const int64_t unix_s        = wall_ms_total / 1000;
+                            const int32_t wall_ms = static_cast<int32_t>(wall_ms_total % 1000);
+                            // The first live commit: the next monotonic boundary, plus the fold's
+                            // lag.
+                            const int64_t commit_t_s =
+                                (static_cast<int64_t>(history_bucket(now_us)) + 1) * HISTORY_DT_S +
+                                lag_s;
+                            const int64_t commit_bucket = history_anchor_bucket(
+                                boot_ms_total / 1000 + commit_t_s, commit_t_s * 1000000,
+                                commit_t_s * 1000000, HISTORY_DT_S, boot_ms);
+                            trials++;
+                            // OLD rule (retired): the start of the open WALL bucket.
+                            const int64_t wall_bucket = history_bucket_from_unix(unix_s);
+                            if (commit_bucket == wall_bucket) old_collisions++;
+                            if (sync_s <= 60) {
+                                usual_trials++;
+                                if (commit_bucket == wall_bucket) usual_old_collisions++;
+                            }
+                            // NEW rule: the last monotonic boundary.
+                            const int64_t seed_commit = history_raster_boundary_us(now_us);
+                            const int64_t seed_bucket = history_anchor_bucket(
+                                unix_s, now_us, seed_commit, HISTORY_DT_S, wall_ms);
+                            if (history_bucket_from_unix(unix_s - (now_us - seed_commit) /
+                                                                      1000000) == commit_bucket)
+                                truncated_age_collisions++;
+                            if (commit_bucket == seed_bucket) new_collisions++;
+                            // With no fold lag the commit follows the seed by exactly one bucket;
+                            // with a lag it can only land later, never on or before the seed.
+                            if (lag_s == 0 ? commit_bucket != seed_bucket + 1
+                                           : commit_bucket < seed_bucket + 1)
+                                new_not_next++;
+                        }
                     }
-                    // NEW rule: the last monotonic boundary.
-                    const int64_t seed_commit = history_raster_boundary_us(now_us);
-                    const int64_t seed_bucket = history_anchor_bucket(unix_s, now_us, seed_commit);
-                    if (commit_bucket == seed_bucket) new_collisions++;
-                    // With no fold lag the commit follows the seed by exactly one bucket; with a
-                    // lag it can only land later, never on or before the seed.
-                    if (lag_s == 0 ? commit_bucket != seed_bucket + 1
-                                   : commit_bucket < seed_bucket + 1)
-                        new_not_next++;
                 }
             }
         }
         CHECK(trials > 0 && new_collisions == 0 && new_not_next == 0);
+        CHECK(truncated_age_collisions > 0); // the subsecond regression is inside this sweep
         // The retired rule collided in a real share of restores even with the usual sync delay (the
         // later the sync, the closer the commit and the likelier the collision).
         CHECK(usual_old_collisions * 100 / usual_trials >= 8);
@@ -21840,6 +21883,33 @@ static void test_checkup_scoped_flash_age() {
     // no clock, a pending explicit reset and a consumed reset with withdrawn confirmation all
     // produce no marker. Only currently confirmed, matching model/link/consent restores it.
     const int64_t bucket = checkup_journal_bucket(stored.end_unix_s);
+    // A compatible saved marker may return after initial detection, but cannot return after an
+    // explicit reset, even when manual selection reconfirms exactly the same model/link and the
+    // empty poll consumes the reset. Recreate a fresh ring at each lifecycle phase.
+    struct LifecyclePhase {
+        CheckupRestore verdict;
+        bool           confirmed, reset;
+        uint32_t       expected_marker;
+    };
+    for (const LifecyclePhase& phase :
+         {LifecyclePhase{CheckupRestore::FlashPending, false, false, 0},
+          LifecyclePhase{CheckupRestore::FlashPending, true, false, 1},
+          LifecyclePhase{CheckupRestore::ModelChanged, false, true, 0},
+          LifecyclePhase{CheckupRestore::ModelChanged, true, true, 0},
+          LifecyclePhase{CheckupRestore::ModelChanged, true, false, 0}}) {
+        volatile CheckupRestore    verdict   = phase.verdict;
+        volatile bool              confirmed = phase.confirmed, reset = phase.reset;
+        CheckupRing                ring;
+        bool                       from_flash = false;
+        const CheckupJournalRecord record{bucket, stored};
+        if (!checkup_flash_restore_retired(verdict)) {
+            const auto* selected =
+                checkup_journal_select_slot(bucket, nullptr, 0, &record, 1, 7200, confirmed, model,
+                                            link_a, 7, reset, from_flash);
+            if (selected && from_flash) ring.push(selected->payload.checkup);
+        }
+        CHECK(checkup_aggregate(ring).starts == phase.expected_marker);
+    }
     // A fresh boot may finish its first hour behind an old flash cursor, or after a power-off
     // gap. Only current-boot completed hours may be offered; exercise the production helper with
     // runtime inputs so constexpr folding cannot hide either side of its cursor/anchor guards.

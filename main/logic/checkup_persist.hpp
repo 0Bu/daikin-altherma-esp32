@@ -351,6 +351,13 @@ inline constexpr CheckupRestore checkup_restore_route(CheckupRestore integrity) 
                : integrity;
 }
 
+// An explicit source reset starts a new lifecycle in this boot, even if a manual selection
+// subsequently names the same profile/link. Consuming the reset must not reload its old hours.
+// Initial boot integrity and first automatic detection still permit compatible dated records.
+inline constexpr bool checkup_flash_restore_retired(CheckupRestore state) {
+    return state == CheckupRestore::ModelChanged;
+}
+
 inline bool checkup_journal_identity_matches(const CheckupJournalPayload& p, uint32_t model_fp,
                                              uint32_t source_fp, uint32_t generation) {
     return source_fp != 0 && p.source_fp == source_fp && p.model_fp == model_fp &&

@@ -1261,7 +1261,8 @@ inline bool history_legacy_disinfection_layout_matches(const HistoryJournalHeade
 inline constexpr int64_t history_bucket_from_unix(int64_t unix_s, uint32_t dt = HISTORY_DT_S) {
     if (dt == 0) return 0;
     const int64_t d = static_cast<int64_t>(dt);
-    return unix_s >= 0 ? unix_s / d : -(((-unix_s) + d - 1) / d);
+    const int64_t quotient = unix_s / d;
+    return quotient - (unix_s % d < 0 ? 1 : 0);
 }
 
 // The wall-clock bucket a source's newest commit is attributed to: the wall time of the commit
@@ -1269,15 +1270,18 @@ inline constexpr int64_t history_bucket_from_unix(int64_t unix_s, uint32_t dt = 
 // writer, the restore and the seed below all go through it — so a commit and the seed that precedes
 // it are compared on the same arithmetic. INT64_MIN (no commit) has no anchor.
 inline constexpr int64_t history_anchor_bucket(int64_t unix_s, int64_t now_us, int64_t commit_us,
-                                               uint32_t dt = HISTORY_DT_S) {
-    if (commit_us == INT64_MIN) return INT64_MIN;
+                                               uint32_t dt = HISTORY_DT_S, int32_t wall_ms = 0) {
+    if (commit_us == INT64_MIN || wall_ms < 0 || wall_ms >= 1000) return INT64_MIN;
     // Unsigned, once `now >= commit` is established: a commit instant restored from damaged DRAM
     // must not turn the subtraction into signed overflow.
-    const int64_t age_s =
-        now_us < commit_us
-            ? 0
-            : static_cast<int64_t>(
-                  (static_cast<uint64_t>(now_us) - static_cast<uint64_t>(commit_us)) / 1000000u);
+    const uint64_t age_us =
+        now_us < commit_us ? 0 : static_cast<uint64_t>(now_us) - static_cast<uint64_t>(commit_us);
+    // Keep the subsecond remainder until wall time and age have been combined. Flooring age
+    // first can put a restored seed and the first live completion in the same wall bucket.
+    // Millisecond wall-clock precision and separately sampled clocks remain timing limits.
+    const int64_t age_s = static_cast<int64_t>(age_us / 1000000u) +
+                          (static_cast<uint64_t>(wall_ms) * 1000u < age_us % 1000000u ? 1 : 0);
+    if (unix_s < INT64_MIN + age_s) return INT64_MIN;
     return history_bucket_from_unix(unix_s - age_s, dt);
 }
 
@@ -1436,8 +1440,8 @@ inline constexpr int64_t history_adopt_floor_cursor(int64_t cursor, int64_t floo
 // did.
 //
 // This is the detection decision only. `slack` is tolerance for the anchor itself, which is
-// derived from two whole-second readings and can sit one bucket either side of where a record was
-// stamped (and for a small clock step). A cursor inside the slack just waits, as it always did;
+// derived from separately sampled wall and monotonic clocks, and can straddle a bucket boundary
+// (or differ after a small clock step). A cursor inside the slack just waits, as it always did;
 // only a cursor beyond it is reported as ahead of the clock. Equal is never future, and an unknown
 // cursor or anchor (INT64_MIN) is not evidence of anything.
 inline constexpr uint32_t HISTORY_CURSOR_FUTURE_SLACK_BUCKETS = 1;

@@ -1,6 +1,6 @@
 # Evidence and limits of the plant diagnostics
 
-<!-- diagnostic-evidence-contract: 4f182ab86438960f78f80bee3194c0ad15ec8f31a370a27db563e5d881abdda3 -->
+<!-- diagnostic-evidence-contract: 6b69fcdc4ad21ac60d3df4028fc0246372b21a2c55e86e93aa647711e32820f4 -->
 
 For every row in the **Plant diagnostics · 24 h** card, this page answers four questions:
 
@@ -21,6 +21,9 @@ X10A observations are also scoped to the configured target generation. A link, w
 unit change invalidates an in-flight cycle before it can enter this evidence window; the old target's
 last sample is discarded rather than becoming the first sample attributed to the new target. This is
 an identity and freshness boundary, not evidence that an unreadable replacement unit is healthy.
+An explicit source reset also retires pending flash restoration for the remainder of that boot.
+Manual selection may define the source for future decoding without a physical bus reply; it does
+not authorize pre-reset diagnosis hours to return, even with the same model and link fingerprint.
 
 Transport liveness is separate from each rule's measurement evidence. X10A live use requires a reply
 less than 15 s old. HomeHub cache use requires matching target/session identity, a full-cache age at

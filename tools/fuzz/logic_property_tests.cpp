@@ -563,15 +563,28 @@ void test_history_liveness_properties() {
         }
         for (const std::int64_t commit_us : extremes) {
             for (const std::int64_t unix_s :
-                 {INT64_C(0), INT64_C(1'786'459'116), INT64_C(-5), INT64_C(4'000'000'000)}) {
-                const std::int64_t anchor = history_anchor_bucket(unix_s, now_us, commit_us);
-                if (commit_us == INT64_MIN)
-                    REQUIRE(anchor == INT64_MIN);
-                else
-                    REQUIRE(anchor <= history_bucket_from_unix(unix_s) + 0);
-            }
+                 {INT64_MIN, INT64_MIN + 1, INT64_C(0), INT64_C(1'786'459'116), INT64_C(-5),
+                  INT64_C(4'000'000'000), INT64_MAX})
+                for (const std::int32_t ms : {-1, 0, 1, 400, 999, 1000})
+                    for (const std::uint32_t dt : {0u, 1u, 300u, 0xffffffffu}) {
+                        const std::int64_t anchor =
+                            history_anchor_bucket(unix_s, now_us, commit_us, dt, ms);
+                        if (commit_us == INT64_MIN || ms < 0 || ms >= 1000)
+                            REQUIRE(anchor == INT64_MIN);
+                        else {
+                            REQUIRE(anchor <= history_bucket_from_unix(unix_s, dt));
+                            if (now_us < commit_us)
+                                REQUIRE(anchor == history_bucket_from_unix(unix_s, dt));
+                        }
+                    }
         }
     }
+    // An independently constructed wall-clock witness must keep a seeded curve and the first
+    // live completion in successive cells even when the boot happens in the last second.
+    REQUIRE(history_anchor_bucket(3326, 26'800'000, 0, HISTORY_DT_S, 400) == 10);
+    REQUIRE(history_anchor_bucket(3599, 300'000'000, 300'000'000, HISTORY_DT_S, 600) == 11);
+    REQUIRE(history_bucket_from_unix(INT64_MIN, 1) == INT64_MIN);
+    REQUIRE(history_bucket_from_unix(INT64_MIN, 300) == INT64_MIN / 300 - 1);
 
     // The booked stretch: whatever the instants and the carried remainder, never above the cap,
     // never a wrapped value, zero when nothing was measured, never fewer for a longer stretch, and

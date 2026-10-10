@@ -585,7 +585,8 @@ int64_t wall_bucket_of_instant_locked(int64_t instant_us) {
     int64_t unix_s = -1; int32_t ms = 0;
     time_now(unix_s, ms);
     if (unix_s < 0) return INT64_MIN;
-    return logic::history_anchor_bucket(unix_s, esp_timer_get_time(), instant_us);
+    return logic::history_anchor_bucket(unix_s, esp_timer_get_time(), instant_us,
+                                        logic::HISTORY_DT_S, ms);
 }
 
 int64_t source_anchor_bucket_locked(HistorySource src) {
@@ -1472,7 +1473,7 @@ bool seed_source_timeline_locked(HistorySource src, int64_t stored_anchor, int64
     const int64_t  now_us    = esp_timer_get_time();
     const uint32_t bucket    = logic::history_bucket(now_us);
     const int64_t  commit_us = logic::history_raster_boundary_us(now_us);
-    live_anchor              = logic::history_anchor_bucket(unix_s, now_us, commit_us);
+    live_anchor = logic::history_anchor_bucket(unix_s, now_us, commit_us, logic::HISTORY_DT_S, ms);
     if (stored_anchor > live_anchor) return false;       // stored clock was ahead — never slide it back
 
     const int64_t mono_commit_bucket = bucket ? static_cast<int64_t>(bucket) - 1 : -1;

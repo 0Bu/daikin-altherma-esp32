@@ -204,11 +204,13 @@ assert.doesNotMatch(adoptFn, /now_us/, "persist_adopt knows only the claim");
 const seed = body(history, "bool seed_source_timeline_locked(");
 assert.match(seed, /logic::history_raster_boundary_us\(now_us\)/,
   "the flash seed claims the last monotonic boundary");
-assert.match(seed, /logic::history_anchor_bucket\(unix_s, now_us, commit_us\)/);
+assert.match(seed, /logic::history_anchor_bucket\(unix_s, now_us, commit_us, logic::HISTORY_DT_S, ms\)/,
+  "the seed combines the actual wall-clock milliseconds with the monotonic age");
 assert.equal(count(seed, /history_liveness_commit\(s_liveness/g), 3);
 assert.doesNotMatch(history + code("main/logic/history_persist.hpp"), /history_anchor_commit_us/,
   "the wall-bucket seed anchor is retired");
-assert.match(body(history, "int64_t wall_bucket_of_instant_locked("), /logic::history_anchor_bucket\(/,
+assert.match(body(history, "int64_t wall_bucket_of_instant_locked("),
+  /logic::history_anchor_bucket\(unix_s, esp_timer_get_time\(\), instant_us, logic::HISTORY_DT_S, ms\)/,
   "the live anchor, the floor and the seed share one derivation");
 assert.match(body(history, "int64_t source_anchor_bucket_locked("), /wall_bucket_of_instant_locked\(source_last_commit_us\(src\)\)/);
 
@@ -288,6 +290,10 @@ assert.match(detect, /!s_reset_requested\.load\(\) && !s_dhw_reset_requested\.lo
 assert.match(detect, /s_boot_handoff_valid = false;/);
 assert.match(body(checkup, "void checkup_reboot_save()"), /h\.payload\.pending = logic::DhwLossBucket\{\};/);
 const cFlash = body(checkup, "CheckupFlashRestoreResult checkup_flash_restore(");
+assert.match(explicitReset, /s_persist_verdict = logic::CheckupRestore::ModelChanged;/);
+assert.match(cFlash, /if \(logic::checkup_flash_restore_retired\(s_persist_verdict\)\) return CheckupFlashRestoreResult::Ignored;/);
+assert.ok(cFlash.indexOf("checkup_flash_restore_retired") < cFlash.indexOf("checkup_flash_source_ready"),
+  "explicit resets retire old journal adoption even after same-source manual confirmation");
 assert.match(cFlash, /checkup_flash_source_ready/);
 assert.match(cFlash, /checkup_journal_restore_admits/);
 assert.match(cFlash, /checkup_journal_select_slot/);

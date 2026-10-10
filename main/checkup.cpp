@@ -413,9 +413,10 @@ void checkup_reset() {
     s_reset_requested.store(true);
 }
 
-// The first successful detector call establishes this boot's full source scope. Startup cached
-// identity is only an expectation for a separately sealed handoff; it cannot admit old evidence.
-// Later detection/reconfiguration calls retire the old window through the normal reset barrier.
+// First automatic detection establishes this boot's full source scope. An explicit manual
+// selection establishes the decoding contract for future samples, without proving a bus reply.
+// Startup cached identity is only an expectation for a separately sealed handoff. Explicit resets
+// retire pending journal adoption for this boot, even if selection names the same profile/link.
 void checkup_reset_on_detect(const char* profile_id, uint32_t source_fp) {
     const uint32_t fp = logic::checkup_model_fingerprint(profile_id);
     if (!s_mtx) return;
@@ -675,6 +676,11 @@ CheckupFlashRestoreResult checkup_flash_restore(const CheckupFlashRecord* record
         return CheckupFlashRestoreResult::Ignored;
     Lock lk(s_mtx, 0);
     if (!lk.acquired()) return CheckupFlashRestoreResult::Deferred;
+    // This is irreversible for the current boot: manual same-source confirmation and consumption
+    // of the queued reset cannot make pre-reset hours belong to the new observation lifecycle.
+    // Ignored also completes the history service's one-shot restore without rewriting flash.
+    if (logic::checkup_flash_restore_retired(s_persist_verdict))
+        return CheckupFlashRestoreResult::Ignored;
     // Detection owns the identity and queues its reset from another point in the same poll cycle.
     // Never restore in between those two acts, or under a startup/withdrawn source expectation.
     if (!logic::checkup_flash_source_ready(s_source_confirmed, s_model_fp, s_source_fp,
