@@ -1,4 +1,4 @@
-// translation-source: bcd4ff0bb5bf1f2e454eb0f7e5c00ea352bcbb9f1f0c080ef5225bc85210fa0b
+// translation-source: 6bca03f96e2befcb0ffc38143e9bdb22db58839623b9195a314a93bb6dffffb3
 I18N.es = localeValues([
   /* sys.nodata */ "Sin datos",
   /* sys.unreachable */ "No accesible",
@@ -1168,7 +1168,7 @@ MODEL_DESCRIPTION_I18N.es = modelDescriptionValues([
   ["Caudal tras 60 s de bomba: tramo medido, no de diseño; comparar mismo modelo, modo y condiciones, sin límite universal."], // health_flow
   ["Tiempo observado de BUH/BSH: frío, emergencia, desescarche, ACS o excedentes pueden explicarlo; no hay límite universal."], // health_heater
   ["5 contadores experimentales poco documentados: solo un aumento comparable da NOTA, no diagnóstico; sin aumentos tampoco se excluye limitación."], // health_retries
-  ["RAM libre actual y tendencia 24 h: una caída continua puede indicar asignaciones no liberadas. Tras un reinicio o corte, los intervalos cerrados de 5 min se restauran desde la memoria flash."], // free_heap
+  ["RAM 24 h: estable o bajadas recuperadas; caída continua, posible fuga. Reinicio compatible alimentado: curva RAM posible; si no, solo 5 min fechados compatibles del registro flash tras ajustar hora; pasos de 5 min pueden ocultar pausas breves; abierto/últimos sin guardar pueden faltar."], // free_heap
   ["Mayor bloque contiguo necesario para TLS/OTA; si cae con RAM total estable, indica fragmentación."], // max_alloc
   ["Capacidad nominal de la unidad exterior, no su producción actual."], // capacity
   ["Capacidad nominal de la UNIDAD INTERIOR; no corresponde a la exterior ni al sistema completo."], // capacity_iu

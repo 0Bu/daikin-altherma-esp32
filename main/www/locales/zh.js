@@ -1,4 +1,4 @@
-// translation-source: bcd4ff0bb5bf1f2e454eb0f7e5c00ea352bcbb9f1f0c080ef5225bc85210fa0b
+// translation-source: 6bca03f96e2befcb0ffc38143e9bdb22db58839623b9195a314a93bb6dffffb3
 I18N.zh = localeValues([
   /* sys.nodata */ "无数据",
   /* sys.unreachable */ "无法访问",
@@ -1152,7 +1152,7 @@ MODEL_DESCRIPTION_I18N.zh = modelDescriptionValues([
   ["水泵运行 60 秒后的流量只代表测量支路，不是设计流量；孤立值意义有限，应在相同型号、模式和条件下比较，没有通用限值。"], // health_flow
   ["只观察 BUH/BSH 运行时间；低温、应急、除霜、生活热水或富余电力都可能解释运行，没有通用限值。"], // health_heater
   ["5 个公开资料不足的实验计数器：只有可比读数增加才给出“说明”，并非诊断；不增加也不能排除机组曾限功率。"], // health_retries
-  ["当前可用RAM及24小时趋势：持续下降可能表示内存未释放。重启或断电后，已完成的5分钟区间会从闪存恢复。"], // free_heap
+  ["RAM 24小时曲线稳定或回升正常；持续下降可能泄漏。兼容通电重启可保留RAM曲线。5分钟粒度可能隐藏短暂停机。否则，须时间同步，闪存仅恢复日志内带时间的兼容区间。未完/最近未存区间可能丢失。"], // free_heap
   ["TLS/OTA 需要足够大的连续内存块；总 RAM 稳定而最大连续块下降，可能表示内存碎片。"], // max_alloc
   ["识别页给出的室外机额定容量，不是当前热输出。"], // capacity
   ["室内机额定容量；不能当作室外机或整套系统容量。"], // capacity_iu

@@ -174,6 +174,32 @@ release its successor's busy lease. Settings regressions also preserve absent so
 round-trip literal `$`, backslashes and mapping whitespace in the 641-character escaped MQTT fields,
 while preserving hidden eligibility gates on an unchanged save.
 
+`node test/test_history_restore_guard_contract.mjs` pins the wiring of the `.noinit` age guards
+that the host suite cannot link. The boot verdict receives safe mode, the sealed counter and the
+judgement of the previous boot's liveness record before this boot overwrites it. The counter is
+covered by the seal, incremented and resealed before a trend adoption and zeroed by every raster's
+commit. Completed checkup RAM hours are retired on every boot. Only rasters this boot would adopt
+are weighed; an
+unmeasurable HomeHub or ENV III raster retires its own rings and never reaches the verdict, and
+adoption measures the unobserved stretch from the previous boot's record (a stalled raster
+included), books it as gaps before the seal, carries the rounding remainder in the sealed region,
+and claims the raster boundary rather than the boot instant. The boot line counts only what was
+booked into rings that hold samples, and the journal writer decides once whether to lift its cursor
+over the newest adopted real sample. The poll task signs the liveness
+record before any branch that can skip work, without allocating or waiting; the shutdown handler
+signs it with a bounded wait; and an ENV III ring its sensor did not feed is retired at startup and
+refused by the journal writer. The checkup rebuilt from the journal reports `flash`, not `accept`,
+and a valid one-shot DHW filter handoff waits for current-boot confirmation of its full source
+scope. Undated completed counters are discarded; compatible journal hours retain absolute ages
+and expire independently of the next hourly commit. Stored detection settings cannot authorize
+restoration.
+No staleness slack is left to derive: nothing refuses a raster for how long it stood still.
+`test_logic.cpp` runs the same boots under the old and the new rule, so the unguarded rule is shown
+misdating them: a stalled raster against the whole-region refusal it used to get, many restarts at
+a fixed uptime (every cadence from 305 to 900 s) against the one-direction drift of plain rounding
+and of the boot-instant claim, the seam against the reading the journal writer used to file twice,
+and a refused checkup against the dropped settle timer.
+
 `node test/test_json_ingress_contract.mjs` pins every config JSON body's actual byte count, the
 bounded cJSON adapter and Weather's preflight/suffix checks. It also checks the bounded heap-based
 room-source body and shared boot identity. `test_factory_reset_contract.mjs` pins early crash-guard
@@ -657,3 +683,10 @@ One entry per `test_*()` in [`test_logic.cpp`](test_logic.cpp), in the order `ma
    The Stop lifecycle hook repeats it through the same runner-neutral core.
 
 See the `$add-logic-test` skill (`.agents/skills/add-logic-test/`).
+
+Checkup restart contract (HIST-03): completed hours are reconstructed exclusively from the
+absolute-age flash journal after SNTP and current-source confirmation; `flash_pending`, `fresh`
+and `flash` distinguish waiting, fresh collection and actual reconstruction. Legacy unscoped
+hours are rejected. Exact restored-slot expiry prevents an hourly-raster phase from extending
+evidence beyond 24 hours. RAM-only completed hours and undated open-hour statistics may be lost;
+only the separately sealed, scoped ongoing DHW filter can cross an intentional restart.

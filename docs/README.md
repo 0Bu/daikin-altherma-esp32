@@ -361,7 +361,17 @@ GET  /status[?redact=1]            # ?redact=1 = the bug-report form: 28 protect
                                    #        (adopted from .noinit DRAM across a reset that kept
                                    #        power) or why they started empty — "power_cycle",
                                    #        "wrong_catalog" after an update, "bad_crc", "no_record",
-                                   #        "wrong_version". Compatible flash buckets may be
+                                   #        "wrong_version", or an age guard: "safe_mode" (this
+                                   #        boot is in safe mode: no producer runs),
+                                   #        "not_committed" (the previous boot adopted them and
+                                   #        committed nothing) or "stale_commit" (the name
+                                   #        predates the booking rule and now means unmeasurable:
+                                   #        the liveness record did not verify, or the X10A raster
+                                   #        held samples and recorded no commit; a raster that
+                                   #        merely stalled is booked as gaps, not refused).
+                                   #        "accept" may coexist with a HomeHub or ENV III ring
+                                   #        retired alone, which only the boot log names.
+                                   #        Compatible flash buckets may be
                                    #        spliced in later after clock sync even when persist is
                                    #        not "accept". dwell_persist is the equivalent RAM-only
                                    #        verdict for per-row state ages; it has no flash restore.
@@ -370,11 +380,19 @@ GET  /status[?redact=1]            # ?redact=1 = the bug-report form: 28 protect
                                    #        # rolling X10A operating OBSERVATION, not a whole-plant
                                    #        health certificate. Storage is 23 completed 1 h buckets
                                    #        plus the pending hour, so represented span is <=24 h.
-                                   #        .noinit carries resets that keep power; completed hourly
-                                   #        buckets also use the device's append-only history journal,
-                                   #        so power loss/OTA restores them ("accept"). Otherwise
-                                   #        `persist` names why the window started empty ("power_cycle", "wrong_layout",
-                                   #        "model_changed", "safe_mode", "bad_crc"). An explicit /detect, profile
+                                   #        Completed hours always restore from absolute-age flash after
+                                   #        clock sync and current-boot profile/link confirmation;
+                                   #        .noinit completed hours and undated open counters retire.
+                                   #        `persist` reports "flash_pending" while recovery awaits that
+                                   #        confirmation, without proving saved hours exist;
+                                   #        "fresh" means no stored intervals were selected, including
+                                   #        compatible records excluded by live precedence or capacity;
+                                   #        "flash" after actual reconstruction, or a startup refusal
+                                   #        ("power_cycle", "wrong_layout", "model_changed",
+                                   #        "safe_mode", "bad_crc", consent refusals). Only a sealed,
+                                   #        scoped ongoing DHW filter can cross an intentional restart.
+                                   #        Restored slots expire at their exact 24-hour deadline.
+                                   #        An explicit /detect, profile
                                    #        selection or RX/TX-pin change starts a new X10A lifecycle;
                                    #        a HomeHub-only edit does not. A reset discards an in-flight old-link sample.
                                    #        covered_s is coarse card context only. Each check's
@@ -497,7 +515,10 @@ GET  /history?row=<trend id>       # one trended row's 24 h series, oldest sampl
                                    #   Modbus has 13 rings (11 paired concepts, Smart Grid and the
                                    #   Modbus-only disinfection state); ENV III has 3. Ask
                                    #   /status.history for the exact rows enabled on this device.
-                                   #   Compatible warm resets may adopt sealed `.noinit` rings;
+                                   #   Compatible warm resets may adopt sealed `.noinit` rings
+                                   #   while they are still current (not after safe mode or a boot
+                                   #   that adopted them and committed nothing). A measured X10A
+                                   #   raster stall is booked as gaps; unmeasurable liveness refuses RAM;
                                    #   after a successful journal scan and clock sync, completed
                                    #   buckets also ride the upper-flash journal across ordinary
                                    #   reboot, OTA section movement and later power loss. Before the

@@ -1,6 +1,7 @@
 // Deterministic, bounded property tests for hostile-input pure logic. This is intentionally not a
 // second copy of test/test_logic.cpp: it explores prefixes and single-byte mutations under
 // ASan+UBSan, while the ordinary host suite owns exact behavioral examples and line coverage.
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <cstdio>
@@ -10,6 +11,7 @@
 #include <string_view>
 #include <vector>
 
+#include "logic/history_persist.hpp"
 #include "logic/http_body.hpp"
 #include "logic/http_request.hpp"
 #include "logic/modbus.hpp"
@@ -447,6 +449,236 @@ void test_http_properties() {
                            }) == -1);
 }
 
+// The liveness record and the age guards read bytes that survived a reset in DRAM, so an image of
+// arbitrary content is the hostile input: it must never be mistaken for a record, and a record that
+// does verify must never turn extreme instants into signed overflow.
+void test_history_liveness_properties() {
+    using namespace daik::logic;
+    std::uint64_t state = 0x9e3779b97f4a7c15ull;
+    const auto    next  = [&state]() {
+        state ^= state << 13;
+        state ^= state >> 7;
+        state ^= state << 17;
+        return state;
+    };
+    const std::int64_t extremes[]                          = {INT64_MIN,
+                                                              INT64_MIN + 1,
+                                                              -1'000'000'000'000'000'000LL,
+                                                              -1,
+                                                              0,
+                                                              1,
+                                                              1'000'000,
+                                                              299'999'999,
+                                                              300'000'000,
+                                                              330'000'000,
+                                                              4'611'686'018'427'387'904LL,
+                                                              INT64_MAX - 1,
+                                                              INT64_MAX};
+    const bool         combos[8][HISTORY_LIVENESS_RASTERS] = {
+        {false, false, false}, {true, false, false}, {false, true, false}, {true, true, false},
+        {false, false, true},  {true, false, true},  {false, true, true},  {true, true, true}};
+
+    // Arbitrary bytes do not verify; a flipped bit in a sealed record's covered fields does not
+    // either, and the code never reports a record it could not have written as current.
+    for (int i = 0; i < 4000; ++i) {
+        HistoryLiveness image;
+        auto*           bytes = reinterpret_cast<std::uint8_t*>(&image);
+        for (std::size_t b = 0; b < sizeof(image); ++b)
+            bytes[b] = static_cast<std::uint8_t>(next());
+        REQUIRE(!history_liveness_valid(image));
+        for (const auto& weighed : combos) {
+            const HistoryRasterPlan plan = history_raster_plan(image, weighed);
+            for (std::size_t i = 0; i < HISTORY_LIVENESS_RASTERS; ++i)
+                REQUIRE(plan.state[i] == (weighed[i] ? HistoryRasterState::NoRecord
+                                                     : HistoryRasterState::NotWeighed));
+            // A record that is not one measures no raster that is asked about, and for none
+            // that is not asked about it never makes the answer worse.
+            REQUIRE(plan.region_bookable == !weighed[0]);
+            REQUIRE(plan.retire_modbus == weighed[1] && plan.retire_env3 == weighed[2]);
+        }
+    }
+    for (int i = 0; i < 400; ++i) {
+        HistoryLiveness sealed;
+        std::memset(&sealed, 0, sizeof(sealed));
+        sealed.sign_us = extremes[next() % (sizeof(extremes) / sizeof(extremes[0]))];
+        for (auto& c : sealed.commit_us)
+            c = (next() & 1) ? extremes[next() % (sizeof(extremes) / sizeof(extremes[0]))]
+                             : static_cast<std::int64_t>(next() >> 20);
+        history_liveness_seal(sealed);
+        REQUIRE(history_liveness_valid(sealed));
+        // Every state is reachable and none of them overflows, whatever the instants.
+        for (const auto& weighed : combos) {
+            const HistoryRasterPlan plan = history_raster_plan(sealed, weighed);
+            for (std::size_t i = 0; i < HISTORY_LIVENESS_RASTERS; ++i) {
+                const HistoryRasterState state = plan.state[i];
+                if (!weighed[i]) {
+                    REQUIRE(state == HistoryRasterState::NotWeighed);
+                } else {
+                    REQUIRE(state == HistoryRasterState::Measurable ||
+                            state == HistoryRasterState::NoCommit ||
+                            state == HistoryRasterState::NoRecord);
+                    if (sealed.sign_us == INT64_MIN) REQUIRE(state == HistoryRasterState::NoRecord);
+                    // No commit recorded, one before the clock started, or one after the last
+                    // sign of life measures nothing; every other record is measurable, however
+                    // long ago the raster committed (there is no staleness bound).
+                    const bool usable = sealed.sign_us != INT64_MIN && sealed.commit_us[i] >= 0 &&
+                                        sealed.sign_us >= sealed.commit_us[i];
+                    REQUIRE((state == HistoryRasterState::Measurable) == usable);
+                }
+            }
+            // The X10A raster alone decides the region; the others retire their own rings only.
+            REQUIRE(plan.region_bookable == history_raster_bookable(plan.state[0]));
+            REQUIRE(plan.retire_modbus == !history_raster_bookable(plan.state[1]));
+            REQUIRE(plan.retire_env3 == !history_raster_bookable(plan.state[2]));
+        }
+        // A raster nobody asks about never makes the answer worse.
+        {
+            const HistoryRasterPlan none = history_raster_plan(sealed, combos[0]);
+            REQUIRE(none.region_bookable && !none.retire_modbus && !none.retire_env3);
+        }
+        for (std::size_t b = 0; b < sizeof(sealed); ++b) {
+            // A flipped bit anywhere the CRC covers (magic, version, the instants, the CRC itself)
+            // invalidates the record. The reserved word and the tail padding are not evidence.
+            HistoryLiveness damaged = sealed;
+            reinterpret_cast<std::uint8_t*>(&damaged)[b] ^= 0x10;
+            const bool evidence = b < offsetof(HistoryLiveness, reserved) ||
+                                  (b >= offsetof(HistoryLiveness, sign_us) &&
+                                   b < offsetof(HistoryLiveness, crc) + sizeof(sealed.crc));
+            REQUIRE(history_liveness_valid(damaged) == !evidence);
+        }
+    }
+
+    // The instants helpers take any clock reading, including ones no monotonic clock produces.
+    for (const std::int64_t now_us : extremes) {
+        for (const std::uint32_t dt : {0u, 1u, 300u, 0xffffffffu}) {
+            const std::int64_t boundary = history_raster_boundary_us(now_us, dt);
+            REQUIRE(boundary >= 0);
+            REQUIRE(boundary <= (now_us < 0 ? 0 : now_us));
+            if (dt != 0 && now_us >= 0) {
+                // On the grid, and the last grid point at or before now.
+                const std::int64_t step = static_cast<std::int64_t>(dt) * 1000000;
+                REQUIRE(boundary % step == 0);
+                REQUIRE(now_us - boundary < step);
+            }
+        }
+        for (const std::int64_t commit_us : extremes) {
+            for (const std::int64_t unix_s :
+                 {INT64_MIN, INT64_MIN + 1, INT64_C(0), INT64_C(1'786'459'116), INT64_C(-5),
+                  INT64_C(4'000'000'000), INT64_MAX})
+                for (const std::int32_t ms : {-1, 0, 1, 400, 999, 1000})
+                    for (const std::uint32_t dt : {0u, 1u, 300u, 0xffffffffu}) {
+                        const std::int64_t anchor =
+                            history_anchor_bucket(unix_s, now_us, commit_us, dt, ms);
+                        if (commit_us == INT64_MIN || ms < 0 || ms >= 1000)
+                            REQUIRE(anchor == INT64_MIN);
+                        else {
+                            REQUIRE(anchor <= history_bucket_from_unix(unix_s, dt));
+                            if (now_us < commit_us)
+                                REQUIRE(anchor == history_bucket_from_unix(unix_s, dt));
+                        }
+                    }
+        }
+    }
+    // An independently constructed wall-clock witness must keep a seeded curve and the first
+    // live completion in successive cells even when the boot happens in the last second.
+    REQUIRE(history_anchor_bucket(3326, 26'800'000, 0, HISTORY_DT_S, 400) == 10);
+    REQUIRE(history_anchor_bucket(3599, 300'000'000, 300'000'000, HISTORY_DT_S, 600) == 11);
+    REQUIRE(history_bucket_from_unix(INT64_MIN, 1) == INT64_MIN);
+    REQUIRE(history_bucket_from_unix(INT64_MIN, 300) == INT64_MIN / 300 - 1);
+
+    // The booked stretch: whatever the instants and the carried remainder, never above the cap,
+    // never a wrapped value, zero when nothing was measured, never fewer for a longer stretch, and
+    // a remainder that stays inside half a bucket whenever old content is left to keep in place.
+    const std::int32_t carries[] = {INT32_MIN, -150'000'000, -1, 0, 1, 149'999'999, INT32_MAX};
+    for (const std::int64_t sign_us : extremes)
+        for (const std::int64_t commit_us : extremes)
+            for (const std::int64_t claim_us : extremes)
+                for (const std::uint32_t downtime : {0u, 5u, 0xffffffffu})
+                    for (const std::int32_t carry : carries) {
+                        const HistoryAdoptBooking b =
+                            history_adopt_booking(sign_us, commit_us, downtime, claim_us, carry);
+                        REQUIRE(b.gaps <= HISTORY_SAMPLES);
+                        const bool measured =
+                            commit_us >= 0 && claim_us >= 0 && sign_us >= commit_us;
+                        if (!measured) REQUIRE(b.gaps == 0 && b.residual_us == 0);
+                        // A filled ring leaves nothing to carry the remainder for.
+                        if (b.gaps == HISTORY_SAMPLES) REQUIRE(b.residual_us == 0);
+                        if (measured && b.gaps < HISTORY_SAMPLES && carry >= -150'000'000 &&
+                            carry <= 149'999'999)
+                            REQUIRE(b.residual_us >= -150'000'000 && b.residual_us < 150'000'000);
+                        // A later sign of life never books fewer buckets (with the same carry).
+                        for (const std::int64_t later : extremes)
+                            if (later >= sign_us)
+                                REQUIRE(history_adopt_booking(later, commit_us, downtime, claim_us,
+                                                              carry)
+                                            .gaps >= b.gaps);
+                        // A smaller ring caps the count and a degenerate width or an empty ring
+                        // books nothing, and never divides.
+                        REQUIRE(history_adopt_booking(sign_us, commit_us, downtime, claim_us, carry,
+                                                      300, 7)
+                                    .gaps <= 7);
+                        REQUIRE(
+                            history_adopt_booking(sign_us, commit_us, downtime, claim_us, carry, 0)
+                                .gaps == 0);
+                        REQUIRE(history_adopt_booking(sign_us, commit_us, downtime, claim_us, carry,
+                                                      300, 0)
+                                    .gaps == 0);
+                    }
+    // The journal floor: never lowers the cursor, never invents one, and no extreme overflows.
+    for (const std::int64_t cursor : extremes)
+        for (const std::int64_t real_bucket : extremes) {
+            const std::int64_t floor_bucket = history_adopt_floor_bucket(cursor, real_bucket);
+            REQUIRE(floor_bucket == INT64_MIN ||
+                    (cursor != INT64_MIN && floor_bucket == real_bucket && real_bucket > cursor));
+            const std::int64_t lifted = history_adopt_floor_cursor(cursor, floor_bucket);
+            REQUIRE(lifted >= cursor);
+            if (cursor == INT64_MIN) REQUIRE(lifted == INT64_MIN);
+            if (floor_bucket == INT64_MIN) REQUIRE(lifted == cursor);
+        }
+    for (const std::int64_t claim_us : extremes)
+        for (const std::uint32_t gaps : {0u, 1u, 287u, 288u, 0xffffffffu}) {
+            const std::int64_t end = history_adopt_real_end_us(claim_us, gaps);
+            if (claim_us < 0 || gaps >= HISTORY_SAMPLES)
+                REQUIRE(end == INT64_MIN);
+            else
+                REQUIRE(end <= claim_us &&
+                        claim_us - end == static_cast<std::int64_t>(gaps) * 300'000'000);
+        }
+
+    // The verdict over its whole small product: an intact, current, uncommitted-free record is the
+    // only one accepted, and the order in which the refusals are reported never changes.
+    const std::uint32_t reasons[] = {static_cast<std::uint32_t>(CrashReason::SW),
+                                     static_cast<std::uint32_t>(CrashReason::PANIC),
+                                     static_cast<std::uint32_t>(CrashReason::POWERON),
+                                     static_cast<std::uint32_t>(CrashReason::BROWNOUT), 9999u};
+    for (const std::uint32_t reason : reasons)
+        for (int bad = 0; bad < 16; ++bad)
+            for (const std::uint32_t boots : {0u, 1u, 255u, 0xffffffffu})
+                for (int flags = 0; flags < 4; ++flags) {
+                    const bool           safe    = flags & 1;
+                    const bool           current = !(flags & 2);
+                    const HistoryRestore v       = history_restore_verdict(
+                        reason, (bad & 1) ? 0u : HISTORY_PERSIST_MAGIC,
+                        (bad & 2) ? static_cast<std::uint16_t>(HISTORY_PERSIST_VERSION + 1)
+                                        : HISTORY_PERSIST_VERSION,
+                        (bad & 4) ? 1u : 2u, 2u, 7u, (bad & 8) ? 8u : 7u, safe, boots, current);
+                    const bool intact = history_reset_preserves_ram(reason) && !bad;
+                    REQUIRE((v == HistoryRestore::Accept) ==
+                            (!safe && intact && boots == 0 && current));
+                    if (safe)
+                        REQUIRE(v == HistoryRestore::SafeMode);
+                    else if (!history_reset_preserves_ram(reason))
+                        REQUIRE(v == HistoryRestore::PowerCycle);
+                    else if (bad)
+                        REQUIRE(v != HistoryRestore::NotCommitted &&
+                                v != HistoryRestore::StaleCommit);
+                    else if (boots)
+                        REQUIRE(v == HistoryRestore::NotCommitted);
+                    else if (!current)
+                        REQUIRE(v == HistoryRestore::StaleCommit);
+                }
+}
+
 bool requested(int argc, char** argv, std::string_view target) {
     if (argc == 1) return true;
     for (int i = 1; i < argc; ++i)
@@ -456,7 +688,7 @@ bool requested(int argc, char** argv, std::string_view target) {
 
 bool known_target(std::string_view target) {
     return target == "manifest" || target == "changelog" || target == "modbus" ||
-           target == "mqtt" || target == "http";
+           target == "mqtt" || target == "http" || target == "liveness";
 }
 
 void require_target_checks(const char* target, std::size_t before, std::size_t minimum) {
@@ -509,9 +741,15 @@ int main(int argc, char** argv) {
         require_target_checks("http", before, 1500);
         ran = true;
     }
+    if (requested(argc, argv, "liveness")) {
+        const std::size_t before = g_checks;
+        test_history_liveness_properties();
+        require_target_checks("liveness", before, 25000);
+        ran = true;
+    }
     if (!ran) {
-        std::fprintf(stderr,
-                     "usage: logic_property_tests [manifest] [changelog] [modbus] [mqtt] [http]\n");
+        std::fprintf(stderr, "usage: logic_property_tests [manifest] [changelog] [modbus] [mqtt] "
+                             "[http] [liveness]\n");
         return 2;
     }
     std::printf("sanitizer/property tests passed: %zu invariant checks\n", g_checks);

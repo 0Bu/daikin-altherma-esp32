@@ -16,6 +16,7 @@ import fs from "node:fs";
 const read = (p) => fs.readFileSync(new URL(`../${p}`, import.meta.url), "utf8");
 const history = read("main/history.cpp");
 const checkup = read("main/checkup.cpp");
+const checkupPersist = read("main/logic/checkup_persist.hpp");
 const poll = read("main/hp_poll.cpp");
 const pollHeader = read("main/hp_poll.hpp");
 const modbus = read("main/hp_modbus.cpp");
@@ -211,36 +212,38 @@ assert.ok(detectSnapshotAt >= 0 && detectModeGuardAt > detectSnapshotAt &&
   "poll_detect must fail closed on its OWN concrete snapshot before the sweep and commit; this " +
   "closes auto->concrete between poll_task's branch and the worker snapshot");
 
-// The DHW loss filter needs one whole clean hour.  Its candidate and any completed-but-still-open
-// window are checkpointed exactly at intentional esp_restart(), rather than being reset by every
-// dev-channel OTA shorter than an hour.  The handler is bounded so a busy observer can cost one
-// candidate but can never strand an already-installed OTA image.
+assert.match(checkupPersist,
+  /checkup_restore_keeps_dhw_handoff\(CheckupRestore r\) \{\s*return r == CheckupRestore::Accept \|\| r == CheckupRestore::NotCommitted;/,
+  "an integrity-valid one-shot DHW candidate survives a not-committed completed-hour refusal");
+
+// Only the ongoing DHW candidate may cross an intentional reboot. Completed pending counters
+// have no absolute age and must be cleared both when sealing and when staging a valid handoff.
+// The shutdown lock remains bounded: a busy observer can cost a candidate, never strand OTA.
 assert.match(checkup,
-  /void checkup_reboot_save\(\)[\s\S]*?(?:Lock\s+lk\(s_mtx,\s*pdMS_TO_TICKS\(200\)\)|xSemaphoreTake\(s_mtx,\s*pdMS_TO_TICKS\(200\)\))[\s\S]*?dhw_loss_checkpoint\(s_dhw_state,[\s\S]*?h\.payload\.pending\s*=\s*P\(\)\.dhw\.pending/,
-  "intentional reboot must checkpoint both the in-flight DHW candidate and completed pending windows under a bounded lock");
+  /void checkup_reboot_save\(\)[\s\S]*?(?:Lock\s+lk\(s_mtx,\s*pdMS_TO_TICKS\(200\)\)|xSemaphoreTake\(s_mtx,\s*pdMS_TO_TICKS\(200\)\))[\s\S]*?dhw_loss_checkpoint\(s_dhw_state,[\s\S]*?h\.payload\.pending\s*=\s*logic::DhwLossBucket\{\}/,
+  "intentional reboot must checkpoint only the ongoing DHW candidate and clear undated pending counters under a bounded lock");
+assert.doesNotMatch(checkup, /h\.payload\.pending\s*=\s*P\(\)\.dhw\.pending/,
+  "undated completed pending counters must not enter the reboot checkpoint");
 assert.match(checkup,
-  /checkup_dhw_handoff_valid\([\s\S]*?P\(\)\.dhw\.pending\s*=\s*P\(\)\.dhw_handoff\.payload\.pending;[\s\S]*?dhw_loss_adopt\(/,
-  "boot must restore the separately sealed DHW handoff before producers start");
+  /checkup_restore_keeps_dhw_handoff\(integrity\)[\s\S]*?checkup_dhw_handoff_valid\([\s\S]*?s_boot_handoff\s*=\s*P\(\)\.dhw_handoff\.payload;\s*s_boot_handoff\.pending\s*=\s*logic::DhwLossBucket\{\}/,
+  "startup must stage only an integrity-valid candidate and explicitly discard its undated pending counters");
+assert.doesNotMatch(checkup, /P\(\)\.dhw\.pending\s*=\s*(?:P\(\)\.dhw_handoff\.payload|s_boot_handoff)\.pending/,
+  "startup must not restore undated completed pending counters");
+assert.match(checkup,
+  /if \(s_boot_handoff_valid[\s\S]*?s_diagnostics_enabled\.load\(std::memory_order_acquire\)[\s\S]*?s_boot_handoff_model == fp[\s\S]*?s_boot_handoff\.source_fp == source_fp\) \{\s*logic::dhw_loss_adopt\(s_dhw_state,\s*s_boot_handoff\.candidate,\s*esp_timer_get_time\(\)\)/,
+  "DHW adoption requires current consent and matching detected model/link scope and the real boot clock");
+assert.match(checkup,
+  /P\(\)\.dhw_handoff\.magic = 0;[\s\S]*?s_source_confirmed\s*=\s*false;[\s\S]*?persist_wipe\(\);/,
+  "startup must consume the one-shot handoff before producers and retire undated completed RAM hours");
+// Adoption may retain only a charge/settle deadline, or reject a carried segment after the blind
+// allowance. A neutral applied-checkpoint log must not claim that every candidate resumed.
+assert.match(checkup,
+  /scoped DHW filter checkpoint applied; undated completed counters(?:\s|"\s*")*discarded/,
+  "the applied-checkpoint log must stay neutral when adoption discards or only carries settle state");
+assert.doesNotMatch(checkup, /scoped DHW candidate resumed/,
+  "a rejected or settle-only handoff must never be logged as a resumed candidate");
 assert.match(checkup, /esp_register_shutdown_handler\(checkup_reboot_save\)/,
   "checkup_start must register the intentional-reboot DHW handoff");
-// The adoption derives the unobserved boot uptime from its `now_us` (dhw_loss_adopt_blind_s:
-// esp_timer's zero is the boot, and checkup_start() runs behind app_main's network wait). The glue
-// therefore has to pass the real clock; a literal would put the defect back with every CHECK green.
-// The clock is read ONCE into a local declared directly above the call, and the same local is what
-// the restart report is judged against (below), so the line cannot describe a different instant
-// than the one the adoption booked. The call is deliberately three-argument: it takes no bucket,
-// because a candidate it discards is not entered in the discarded-window count (the count stays a
-// count of the discards dhw_loss_step observed; the booked time is board-side, and an unread
-// stretch still open at the restart can add to it).
-assert.match(checkup,
-  /const\s+int64_t\s+(\w+)\s*=\s*esp_timer_get_time\(\)\s*;\s*logic::dhw_loss_adopt\(\s*s_dhw_state,\s*P\(\)\.dhw_handoff\.payload\.candidate,\s*\1\s*\)/,
-  "the DHW adoption must be handed one esp_timer_get_time() reading so the boot uptime is booked as blind");
-// A carried candidate segment that the adoption ended (segment_start_us back at -1) must be reported
-// as discarded, with the unobserved seconds booked at the SAME instant; only the other outcomes may
-// read "kept". Logging the discard as "kept (0 min ...)" told a syslog reader the opposite.
-assert.match(checkup,
-  /logic::dhw_loss_adopt\([^;]*?(\w+)\s*\);[\s\S]*?DHW_LOSS_CARRY_SEGMENT[\s\S]*?s_dhw_state\.segment_start_us\s*<\s*0[\s\S]*?carried DHW candidate discarded[\s\S]*?dhw_loss_adopt_blind_s\(\s*\1\s*\)[\s\S]*?DHW candidate kept/,
-  "a carried DHW candidate that the adoption discarded must be logged as discarded with the booked blind seconds, not as kept");
 
 // ── 1c. Every .noinit region must be UNINITIALISED storage ─────────────────────────────────────
 // `__NOINIT_ATTR` places an object in a NOLOAD section; it does NOT stop C++ from initialising it.

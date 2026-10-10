@@ -1,4 +1,4 @@
-// translation-source: bcd4ff0bb5bf1f2e454eb0f7e5c00ea352bcbb9f1f0c080ef5225bc85210fa0b
+// translation-source: 6bca03f96e2befcb0ffc38143e9bdb22db58839623b9195a314a93bb6dffffb3
 I18N.fi = localeValues([
   /* sys.nodata */ "Ei tietoja",
   /* sys.unreachable */ "Ei tavoiteta",
@@ -1009,7 +1009,7 @@ MODEL_DESCRIPTION_I18N.fi = modelDescriptionValues([
   ["Pienin virtaus, kun sisäinen pumppu on käynyt 60 s. Mittaa osakuorman käyttöä, ei suunnitteluvirtausta; yleistä rajaa ei ole eikä yksi pieni arvo todista vikaa."], // health_flow
   ["BUH:n ja BSH:n havaittu käyttöaika. Käyttö voi olla normaalia pakkasella, hätätilassa, sulatuksessa, DHW:ssa tai ylijäämäohjauksessa; yhteistä OK-/varoitusrajaa ei ole."], // health_heater
   ["Seuraa viittä suojalaskuria kokeellisesti. Vain selvä kasvu katkeamattomissa vertailukelpoisissa näytteissä osoittaa toiminnan, ei syytä; absoluuttinen arvo ei ole todiste, ja kynnys, nollaus sekä 7→0 ovat tuntemattomat. Kasvun puute ei todista ettei rajoitusta ollut."], // health_retries
-  ["Vapaa RAM ja 24 h kehitys: jatkuva lasku voi viitata vapauttamattomiin varauksiin. Uudelleenkäynnistyksen tai sähkökatkon jälkeen suljetut 5 min jaksot palautetaan flash-muistista."], // free_heap
+  ["RAM 24 h vakaa, laskut palautuvat; jatkuva lasku: ehkä vuoto; sopiva käynnistys virta päällä voi säilyttää RAM-käyrän. Muuten vain flash-lokin sopivat päivätyt 5 min aikasynkin jälkeen; 5 min välein lyhyt katko ei aina näy; avoin/uusimmat tallentamatta voivat puuttua."], // free_heap
   ["Suurin yhtenäinen vapaa RAM-lohko. TLS/OTA tarvitsee suuren yksittäisen lohkon; lasku vakaan kokonaismuistin rinnalla voi tarkoittaa pirstoutumista ja varausvirheitä."], // max_alloc
   ["Ulkoyksikön ID-sivulta luettu nimellisteholuokka, ei nykyinen lämpöteho."], // capacity
   ["Sisäyksikön nimellisteho; sitä ei voi tulkita ulkoyksikön tai koko laitteiston tehoksi."], // capacity_iu

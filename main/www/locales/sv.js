@@ -1,4 +1,4 @@
-// translation-source: bcd4ff0bb5bf1f2e454eb0f7e5c00ea352bcbb9f1f0c080ef5225bc85210fa0b
+// translation-source: 6bca03f96e2befcb0ffc38143e9bdb22db58839623b9195a314a93bb6dffffb3
 I18N.sv = localeValues([
   /* sys.nodata */ "Inga data",
   /* sys.unreachable */ "Inte tillgänglig",
@@ -1169,7 +1169,7 @@ MODEL_DESCRIPTION_I18N.sv = modelDescriptionValues([
   ["Vattenflöde efter 60 s pumpdrift: endast uppmätt avsnitt; jämför samma modell/läge/villkor, ingen universell gräns."], // health_flow
   ["Observerad BUH-/BSH-tid: kyla, nödläge, avfrostning, varmvatten eller överskott kan förklara; ingen universell gräns."], // health_heater
   ["Experimentell bevakning av fem interna skyddsräknare. Endast en tydlig ökning mellan jämförbara avläsningar räknas, även om den först syns vid stopp eller övergång i kompressorstatus; baslinje, stabila/fallande värden, luckor och återställningar räknas inte. En ökning är information, inte diagnos, och ingen ökning bevisar inte att ingen begränsning skett."], // health_retries
-  ["Ledigt RAM och trend över 24 h: ihållande nedgång kan tyda på allokeringar som inte frigörs. Efter omstart eller strömavbrott återställs avslutade 5-minutersintervall från flashminnet."], // free_heap
+  ["RAM 24 h: stabilt eller återhämtade fall; varaktigt fall, möjlig läcka; kompatibel omstart med ström kan behålla RAM-kurvan. Annars bara daterade kompatibla 5 min från flashjournal efter tidssynk; steg på 5 min kan dölja korta stopp; öppna/senaste osparade kan saknas."], // free_heap
   ["Största sammanhängande block som TLS/OTA behöver; fall med stabilt total-RAM tyder på fragmentering."], // max_alloc
   ["Utomhusenhetens nominella effekt, inte aktuell produktion."], // capacity
   ["Inomhusenhetens nominella effekt; inte utomhusenheten eller hela anläggningen."], // capacity_iu

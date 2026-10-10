@@ -1,6 +1,6 @@
 # Plant diagnostics in plain language
 
-<!-- user-docs-contract: 59c8e9d43c79e9be04e4bfcb71f5f810adc9d335a2ef25900fa9344641f9ce35 -->
+<!-- user-docs-contract: a82282eb86cf82dde2f08478375478ed3944b93e895163e38cbc3d22893ddee7 -->
 
 This guide is for owners who want to understand their heat pump without being heating specialists.
 Plant diagnostics are **off by default**. They run only after **Plant diagnostics** is explicitly
@@ -40,13 +40,18 @@ update can be normal. Changing the X10A wiring or detected profile also starts a
 read that was already in flight for the previous link is discarded rather than counted under the
 replacement plant identity.
 
-An ordinary reset while power remains available normally retains the diagnosis window directly from
-RAM. Completed diagnosis hours are also stored in the device's append-only history journal, so a
-power interruption or firmware update restores them once the clock and detected model match. Only
-the hour that was still open can be missing. An update still discards older records when the meaning
-or layout of their counters changed. An intentional restart, such as a firmware update, also hands
-over the domestic-hot-water check's unfinished quiet hour when the new start can read it (an update
-that changes how it is kept cannot); a power interruption or crash does not.
+After any restart, completed diagnosis hours can return from the device's history journal
+once its clock and detected heat-pump source match. The hour that was still open and completed
+hours not yet saved to flash can be missing. Without a clock or compatible journal, observation
+starts fresh. Only compatible saved hours that fit the current window return; current readings
+take precedence. Older formats or another source are rejected. Restored evidence expires exactly
+24 hours after its stored endpoint, including while waiting for the next hourly update.
+An explicit profile or link reset retires any pending diagnosis restore for that boot, even if
+the same profile is selected again. New observations then build a fresh window.
+An intentional restart can retain the domestic-hot-water check's ongoing quiet-hour candidate and
+the settling period after a tank charge, through a separately checked one-shot handoff. Completed
+statistics still in the open hour are discarded because they have no durable age. A changed source,
+power interruption, crash or incompatible stored format does not carry this filter forward.
 The restart and the start-up before the board can watch the tank again count as unwatched time, up
 to the point where the check resumes. When the restart and that start-up leave the tank unwatched
 for more than two minutes in total (less when the restart interrupted a stretch of unread readings,

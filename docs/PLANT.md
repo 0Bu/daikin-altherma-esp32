@@ -73,32 +73,32 @@ sample order. The explicit static cost is 64 B × 24 = **1,536 B**, 432 B more t
 layout (384 B payload plus 48 B alignment); the layout fingerprint retires the older `.noinit`
 window on update.
 
-**A reboot or power interruption no longer discards the completed hours.** This is the measurement that tolerates one worst: the window is 24 h and
-the requirements are hours, so losing it loses the *verdict*, not a few samples — and a device on the
-`dev` channel that keeps up to date may never reach 24 h at all. The rings therefore live in
-`.noinit` DRAM, so any compatible reset that kept power carries them across without a write. Once the
-journal scan succeeds and wall time is synchronized, each completed hour is additionally appended
-to the existing upper-flash `history` journal with its exact interval end, model identity, layout
-fingerprint and CRC. After the first eligible commit that path restores rolling evidence after OTA
-section movement and later power loss; before it flash has no RAM-only hour to restore.
-`/status.health.persist` states
-whether earlier observations were accepted instead of letting a shortened card look unexplained.
+**Completed diagnostic hours restore only from compatible, dated journal records.** The window
+is 24 h and the requirements are hours, so losing it loses the *verdict*, not a few samples.
+Completed `.noinit` hours are retired on every boot because their relative ages cannot establish
+their measurement times. Once the journal scan succeeds, wall time is synchronized and this boot
+confirms the X10A source, compatible records can rebuild the window. Each record binds its exact
+interval end, model and full X10A profile/link scope, diagnostics consent generation, layout
+fingerprint and CRC. Expiry continues against monotonic time even before another hour completes.
+The open hour and completed hours not yet saved to flash can be missing. Without a compatible
+journal or clock the window starts fresh. `/status.health.persist` exposes that distinction.
 
-The same checks guard both media. A **layout
-fingerprint** over the geometry, every row locator and every counting threshold invalidates the
-record whenever a firmware update changes what a stored counter means — a bucket is a pile of
-anonymous counters, so a valid checksum over silently re-meaning bytes is exactly what a checksum
-cannot catch. And the **model** is checked at detection rather than at boot, because that is when
-the answer exists: the window is kept only if the resolved profile is the one it was recorded under.
+A **layout fingerprint** over the geometry, every row locator and every counting threshold
+invalidates a record whenever an update changes what its counters mean. A checksum alone cannot
+detect that semantic change. Stored detection settings are only an expectation; current-boot
+detection must confirm the same full source scope before any old diagnostic evidence is admitted.
+The source-binding upgrade refuses earlier unscoped records and starts a new diagnosis window.
 The in-flight **edge** state is deliberately not restored — a reboot is a discontinuity, and
-restoring it would book a compressor start that may never have happened. The DHW-loss candidate is
-not an edge: an intentional `esp_restart()` checkpoints its relative ages and any completed clean
-window still waiting in the open bucket. The next boot adds five seconds of explicit blind time
-for the restart plus the time it has already run up to the point where the check resumes (the wait
-for the network comes first), never observed evidence, then continues the candidate. Only that
-stretch is booked at the hand-over: start-up, model detection and empty samples after the check has
-resumed are booked like any other unread time, and a candidate they end is counted among the
-discarded hours with the reason `blind`. If the unwatched time booked at the hand-over, the five
+restoring it would book a compressor start that may never have happened. An intentional
+`esp_restart()` can checkpoint the ongoing DHW-loss filter state. The next boot consumes this
+handoff once and drops any undated completed counters. Only current-boot confirmation of the same
+full source scope, with diagnostics still enabled and no reset requested, permits adoption of
+the filter. An incompatible or absent handoff starts a fresh filter without the old candidate or
+settle timer. When a candidate is carried, adoption adds five seconds of explicit blind time for
+the restart plus the entire new boot uptime through
+confirmation, never observed evidence, before a compatible candidate can continue. Later unread
+samples count as ordinary blind time; a candidate they end is counted among the discarded hours
+with the reason `blind`. If the unwatched time booked at the hand-over, the five
 seconds included, passes the two-minute blind-run bound together with an unread stretch still open
 at the restart, or a tenth of the hour together with all unread time the candidate already
 carried, the carried candidate is discarded instead, and that restart discard is not counted among
@@ -187,12 +187,12 @@ charge finishing soon after that timeout would arm no settle at all and have its
 as standing loss. At the reference installation's timeout rate that is not a corner case. Staying
 armed across a blind stretch only ever spends more settling time, never less.
 
-Two refusals exist because persistence can make evidence **outlive its source**, which is the one
-thing the window must never do. Safe mode never adopts: it does not run the poll loop, so nothing
-would age the window and a frozen pre-reboot day would read as a live assessment for as long as the
-latch holds. And while the bus is still unidentified the poll loop feeds an empty sample every
-second — booking no observed time, only advancing the clock — so a board whose X10A stops answering
-across a reboot ages the adopted evidence out within the day rather than freezing it.
+Restoration cannot substitute for current-source confirmation. Safe mode and disabled diagnostics
+admit no old hours. Completed RAM hours are retired on every boot; while the bus remains
+unidentified, journal admission is blocked. The poll loop feeds empty samples every second,
+advancing time without adding observed evidence. Once this boot confirms the source, compatible
+dated hours may return, and their monotonic deadlines prevent a later outage from extending them
+beyond 24 hours.
 
 **Claim strength is explicit per check**, because these are not equally strong statements: the
 current unit fault is direct `device` state; cycling and the defrost ratio are `heuristic` and raise

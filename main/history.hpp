@@ -19,18 +19,29 @@
 //
 //   .noinit DRAM   — the live arrays are simply no longer zeroed at startup, so a compatible
 //                    power-preserving reset that is not the factory wipe can keep the readings.
-//                    Costs no flash write and no extra RAM. The one seam
-//                    is the bucket that was open when the device went down: it is dropped, so the
-//                    restored series can be up to one HISTORY_DT_S adrift on the axis.
+//                    Costs no flash write; uses small fixed bookkeeping, including a 48-byte
+//                    liveness record, 48-byte journal-floor sidecars and sealed counters. The one
+//                    seam is the stretch between the newest commit and the new boot's first bucket,
+//                    which the liveness record MEASURES (a stall of the raster included): adoption
+//                    books it as explicit no-reading samples, rounded to the nearest whole bucket,
+//                    and carries the rounding remainder into the next adoption, so restarts at a
+//                    fixed uptime do not drift one way. What stays are a few seconds per restart
+//                    (the fixed downtime allowance against the real downtime, the time between the
+//                    last sign of life and a panic), and those are bounded PER restart because the
+//                    rings carry no per-sample time. The rings are refused after a safe-mode boot,
+//                    after a boot that adopted them and committed nothing, and when the liveness
+//                    record cannot measure the X10A raster (logic/history_persist.hpp); a HomeHub
+//                    or ENV III raster it cannot measure retires its own rings alone. The flash
+//                    journal then restores by wall clock, and keeps absolute positions.
 //   history        — one compact append-only record per source and completed five-minute bucket.
 //                    After the boot scan succeeds and wall time is synced, the 4 MiB ring journal
 //                    carries committed history across OTA, reboot and later power loss on the
 //                    official 8 MB table.
 //
-// Once that journal has an eligible commit, a sudden power loss can discard only the bucket still
-// being folded and, in the narrowest race, the just-closed record not yet serviced by the poll
-// task. Before it, flash has nothing to restore. /status.history.persist independently reports only
-// what happened to the RAM copy.
+// Recovery can carry only intervals actually committed to the journal. A sudden power loss can
+// discard the open bucket and completed intervals not yet drained; an adopted-tail floor or append
+// backlog can leave more than one completed interval unsaved. Before an eligible commit, flash has
+// nothing to restore. /status.history.persist independently reports what happened to the RAM copy.
 //
 // The flash path is SPLICED IN BEHIND the live samples by absolute wall-clock bucket, never
 // appended, and is skipped while the clock is unsynced — an unanchored curve has no honest position
@@ -48,6 +59,9 @@ namespace daik {
 // Create the one mutex before any producer task starts. History has three writers (X10A, HomeHub
 // and ENV III), so lazy creation inside one of them would be a race on first boot.
 void history_start();
+// Startup-only query, before producers: journal recovery is pending after a successful scan.
+// This does not establish that compatible diagnostic records exist.
+bool history_checkup_flash_pending();
 
 // Allocation-free browser lifetime token. Any source/consent reset advances it, including A -> B
 // -> A between status polls; ordinary samples/flushes do not. It is independent of producer
@@ -59,6 +73,15 @@ uint32_t history_epoch() noexcept;
 // reason). Cheap: it resolves the trended rows, folds one sample into the pending bucket per trend,
 // and only touches the ring when a bucket boundary is crossed (once per HISTORY_DT_S).
 void history_record(const CachedValue* v, size_t n, uint32_t source_generation);
+
+// The poll task's sign of life, once per cycle and from the shutdown handler: the last instant the
+// device is known to have been running, which the next boot measures each raster's last commit
+// against to book the time the raster stood still (logic::history_adopt_booking). It is called on
+// EVERY cycle, including the ones that skip all work and the ones spent detecting, because a
+// raster that stopped committing while the task lived is exactly what it exists to reveal.
+// Allocation-free and cheap (a try-lock and a CRC over a few dozen bytes, never the ~30 KB seal); a
+// contended lock skips the write.
+void history_liveness_touch() noexcept;
 
 // Feed the BOARD's own trends (free heap, largest contiguous block). Called from the poll task at
 // the top of EVERY cycle, before it decides whether to detect or to sweep, because these describe the
@@ -165,15 +188,18 @@ size_t history_label(size_t t, char* out, size_t max);
 // ── Persistence seams ───────────────────────────────────────────────────────────────────────────
 
 // The .noinit-RAM adoption verdict: "accept" across a compatible reset that kept power, or why RAM
-// started empty ("power_cycle", "wrong_catalog", "bad_crc", …). Independent compatible flash
+// started empty ("power_cycle", "wrong_catalog", "bad_crc", and the three age guards "safe_mode",
+// "not_committed" and "stale_commit", which now means the liveness record could not measure the
+// X10A raster). "accept" may coexist with a HomeHub or ENV III ring retired alone for the same
+// reason or an identity change, which only the boot log names. Independent compatible flash
 // records may splice in later after scan + clock sync without changing it. Reported on
 // /status.history so an emptied chart has a stated RAM cause — logic/history_persist.hpp's
 // HistoryRestore vocabulary.
 const char* history_persist_state();
 
-// Bounded final drain of completed journal buckets. Registered as an esp_restart shutdown handler
-// by history_start(); normal persistence happens after every bucket and an old-table board has no
-// compatible fallback.
+// Bounded final drain of completed journal buckets, preceded by the liveness record's last sign of
+// life (which needs no journal). Registered as an esp_restart shutdown handler by history_start();
+// normal persistence happens after every bucket and an old-table board has no compatible fallback.
 void history_flash_save();
 
 // Drop the stored journal AND suppress the shutdown-handler write that the same reboot would

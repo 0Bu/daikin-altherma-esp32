@@ -923,10 +923,13 @@ Body, ordered:
    raise `info`.
    **The window and each signal's evidence are stated in the expander, not crowded into every row.** Storage is 23 completed
    one-hour buckets plus the pending hour, so it never represents more than 24 hours; the trade-off
-   is that it may contain slightly less than a day at a bucket boundary. `full_span` uses the actual
-   first/latest monotonic samples rather than the number of crossed hour boundaries. The ring is
-   RAM-only, so a reboot starts a new observation lifecycle; explicit X10A re-detection, profile
-   selection or RX/TX-pin change also starts a new identity, while a HomeHub-only edit deliberately
+   is that it may contain slightly less than a day at a bucket boundary. `full_span` uses the
+   observed lifecycle and the span established by admitted dated journal intervals rather than
+   the number of crossed hour boundaries. The ring is
+   rebuilt after a reboot only from compatible, dated diagnostic journal records once the clock
+   and current-boot X10A source are confirmed. Completed RAM hours are retired; the open or
+   unsaved hours may be missing. Explicit X10A re-detection, profile selection or RX/TX-pin change
+   starts a new identity, while a HomeHub-only edit deliberately
    does not. A reset arriving during a sweep discards that sample, so the old link cannot seed the new
    window. Any check that concludes an *absence* of a pattern
    requires both `full_span` and at least 90% valid evidence for its own input; the direct current
@@ -1403,8 +1406,10 @@ vocabulary exactly:
    The crash banner (§5.5) identifies a current fault, including brownout or a power glitch, or
    stored crash evidence. A config save, OTA install or clean power-on is a normal reset, but a
    retained dump can still show the earlier-report banner. It is also what makes
-   the two rows under it legible: both curves live in RAM and start over at a reboot, so a heap line
-   that begins mid-chart is explained by the row above it instead of reading as lost data. Rendered
+   the two rows under it legible: both curves can survive a compatible warm restart in RAM or
+   restore compatible, dated five-minute journal records after clock sync. Unobserved time is
+   booked at five-minute resolution, so short interruptions may leave no visible gap; open or
+   unsaved buckets can be missing. Uptime identifies the restart separately. Rendered
    at **two units at most, coarsest first** (`3 d 2 h`, `5 h 12 min`, `47 min`, `38 s`) — at three
    days nobody is reading the minutes, and a figure that reshuffles every second is a clock, not a
    diagnostic. The unit symbols are SI and identical in every language, so the row needs no

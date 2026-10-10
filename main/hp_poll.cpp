@@ -645,7 +645,7 @@ static bool poll_detect() {                         // false only when an attemp
                 // All observation resets are inside the same generation barrier as the detected
                 // config commit. An HTTP reconfigure therefore happens wholly before or after this
                 // block, never between the new identity and its reset boundary.
-                checkup_reset_on_detect(detected_profile.c_str());
+                checkup_reset_on_detect(detected_profile.c_str(), identity_fp);
                 dwell_reset_on_detect(detected_profile.c_str());
                 history_reset_on_detect(identity_fp);
                 committed = config_commit_detected_model(
@@ -775,6 +775,13 @@ static void poll_task(void*) {
         // and no branch below can skip it. Outside the try: it allocates nothing and must still be
         // recorded for the cycle that threw, which is the one that went deepest.
         stack_watch_sample(StackWatch::Poll);
+        // The trend history's sign of life (logic/history_persist.hpp, liveness record). Before
+        // every branch below, so the cycles that do no work — the network hold-off, the silent-bus
+        // detect backoff — are counted: a raster that stopped committing while this task lived is
+        // exactly what the next boot weighs this against. Allocation-free, a try-lock and a few
+        // dozen bytes of CRC: nothing for this task's heap, and a short call chain beside — not
+        // on — the deepest one, so its stack peak does not move.
+        history_liveness_touch();
 
         // OTA/weather TLS and the Secure-Boot-v2 RSA verifier need the same scarce contiguous
         // internal heap that poll_once() uses for its vector and owned strings. Stand aside before
@@ -826,15 +833,13 @@ static void poll_task(void*) {
             // task to watch the largest contiguous block would spend the very resource it measures.
             heap_guard_sample();
             if (config_profile() == "auto") {
-                // Keep the CHECKUP's clock running while the bus is unidentified. The window is now
-                // adopted from .noinit at boot (logic/checkup_persist.hpp), and a board whose X10A
-                // stops answering across a reboot — a pulled cable, a /set_hp onto wrong pins —
-                // never resolves a profile, never reaches poll_once(), and would therefore present
-                // the FROZEN pre-reboot day as a live 24-hour assessment: evidence that outlives the
-                // source it came from, which is the one thing the checkup's own honesty rules exist
-                // to prevent. An empty sample books no observed seconds and ages the ring, so the
-                // stale hours are pushed out within the day and every check falls back to what it
-                // can still evidence. Coverage is empty because it is TRUE: no profile is resolved.
+                // Keep the CHECKUP's clock running while the bus is unidentified. Startup retires
+                // completed .noinit hours, and journal restoration requires this boot's confirmed
+                // source. An unidentified bus therefore cannot revive the previous window. Empty
+                // samples advance elapsed time without booking observed seconds; they also age any
+                // current-boot evidence if identification is withdrawn. Coverage is empty while no
+                // profile is resolved.
+                //
                 // Deliberately here rather than beside history_record_board() above — a resolved
                 // profile must be fed by poll_once() alone, or two samples would share one instant.
                 const uint32_t generation = hp_poll_generation();
