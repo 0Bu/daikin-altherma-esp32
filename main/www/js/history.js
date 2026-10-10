@@ -2209,9 +2209,9 @@ function modbusOnlyGroupHtml(all) {
   // explainer is a naked value, and these were 25 of them: a valve destination without context tells
   // a reader nothing about what it controls or what is normal. The description audit guards the
   // X10A catalog against exactly this and never saw these labels, so it stayed green while the card shipped.
-  // Copy comes from the one DESCRIPTIONS table (descFor), where 11 of the 27 gateway labels are
-  // already answered by the entries written for their X10A twins — the same words for the same
-  // quantity, which is the point of one table.
+  // The production descFor(label, row) first selects native profile/offset explanations, then
+  // uses the shared DESCRIPTIONS label table. Source-specific meaning survives even where
+  // two register catalogs use the same label for different states or measurements.
   //
   // A paired schematic measurement keeps its OWN Modbus ring even when this profile has no X10A row
   // to host it. Unpaired rows still have no chart. Where copy is missing the row degrades to the same
