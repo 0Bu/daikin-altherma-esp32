@@ -236,6 +236,7 @@ add_custom_command(
     COMMAND ${PYTHON} "${UI_MINIFIER}"
             --input "${CMAKE_CURRENT_BINARY_DIR}/index_inlined.html"
             --output "${CMAKE_CURRENT_BINARY_DIR}/index.html.gz"
+            --gzip-memory-level 7
             --max-gzip-bytes ${UI_GZIP_MAX_BYTES}
     DEPENDS "${CMAKE_CURRENT_BINARY_DIR}/index_inlined.html"
             "${UI_MINIFIER}"

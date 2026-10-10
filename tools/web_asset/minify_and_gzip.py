@@ -19,6 +19,7 @@ import argparse
 import gzip
 import re
 import sys
+import zlib
 from pathlib import Path
 
 VENDOR = Path(__file__).resolve().parent / "vendor"
@@ -324,11 +325,19 @@ def main() -> int:
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--html-output", type=Path)
     parser.add_argument("--max-gzip-bytes", required=True, type=positive_int)
+    parser.add_argument("--gzip-memory-level", type=int, choices=range(1, 10))
     args = parser.parse_args()
 
     source = args.input.read_text(encoding="utf-8")
     minified = minify_page(source)
-    compressed = gzip.compress(minified.encode("utf-8"), compresslevel=9, mtime=0)
+    payload = minified.encode("utf-8")
+    if args.gzip_memory_level is None:
+        compressed = gzip.compress(payload, compresslevel=9, mtime=0)
+    else:
+        compressor = zlib.compressobj(9, zlib.DEFLATED, 31, args.gzip_memory_level)
+        compressed = compressor.compress(payload) + compressor.flush()
+        # No timestamp/name; normalize the gzip OS byte across hosts without changing its payload.
+        compressed = compressed[:9] + b"\xff" + compressed[10:]
 
     if len(compressed) > args.max_gzip_bytes:
         print(

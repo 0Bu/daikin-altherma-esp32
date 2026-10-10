@@ -12,7 +12,7 @@
 #include <cstdint>
 #include <string>
 #include <string_view>
-#include <stdexcept>
+#include <new>
 #include <vector>
 #include "convert.hpp"   // PublishedKind — the row's JSON type, taken from its DEFINITION
 #include "fault_state.hpp" // derived numeric companions beside textual fault classes
@@ -371,7 +371,9 @@ inline void append_flat_json(JsonOut& j, const std::vector<GroupedValue>& vals) 
     j += '{';
     for (size_t i = 0; i < vals.size(); i++) {
         if (i) j += ',';
-        j += '"'; j += vals[i].key; j += "\":";
+        j += '"';
+        j += vals[i].key;
+        j += "\":";
         append_published_value(j, vals[i]);
     }
     j += '}';
@@ -385,8 +387,8 @@ inline size_t flat_json_size(const std::vector<GroupedValue>& vals) {
 
 inline std::string build_flat_json(const std::vector<GroupedValue>& vals) {
     const size_t bytes = flat_json_size(vals);
-    if (bytes > MODBUS_FLAT_JSON_MAX_BYTES)
-        throw std::length_error("Modbus MQTT payload exceeds safety ceiling");
+    // Refuse through the existing allocation-failure boundary without allocating an error string.
+    if (bytes > MODBUS_FLAT_JSON_MAX_BYTES) throw std::bad_alloc();
     std::string j;
     j.reserve(bytes);
     append_flat_json(j, vals);

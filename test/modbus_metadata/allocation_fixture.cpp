@@ -33,7 +33,7 @@ int main() {
     try {
         build_flat_json({{"modbus", "code", std::string(MODBUS_FLAT_JSON_MAX_BYTES, 'x'),
                           PublishedKind::Text}});
-    } catch (const std::length_error&) {
+    } catch (const std::bad_alloc&) {
         oversize_refused = true;
     }
     std::cout << "{\"case\":\"flat-oversize-refused\",\"value\":"

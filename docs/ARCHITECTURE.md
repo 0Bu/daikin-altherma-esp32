@@ -3426,6 +3426,8 @@ build-breaking, so the cost arrives as an unrelated feature's CI failure months 
 comments are stripped from markup; HTML indentation stays (whitespace between inline elements is
 significant, and ~1.1 KB is not worth a layout defect that renders correctly on the machine that
 made it). Locale assets use the same JavaScript minifier and a separate 32768-byte gzip cap.
+The dashboard uses gzip level 9 with memory level 7, preserving every decoded page byte and
+normalizing gzip metadata across hosts while recovering signed-image capacity.
 The setup portal and MCP information page use the same offline HTML/CSS/JS minifier, with 4096-byte
 and 8192-byte gzip caps respectively. The favicon is losslessly gzipped; HTTP decoding restores
 its original ICO bytes and all three resolutions. These reductions preserve the signed image's

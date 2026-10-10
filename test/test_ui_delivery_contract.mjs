@@ -48,6 +48,18 @@ try {
   const minified = fs.readFileSync(minifiedPath, "utf8");
   assert.equal(zlib.gunzipSync(compressed).toString("utf8"), minified,
     "checked minified HTML must be the exact compressed payload");
+  const tuned = run(gzipB, ["--gzip-memory-level", "7"]);
+  assert.equal(tuned.status, 0, tuned.stderr || tuned.stdout);
+  const tunedBytes = fs.readFileSync(gzipB);
+  assert.deepEqual(zlib.gunzipSync(tunedBytes), zlib.gunzipSync(compressed),
+    "firmware compression tuning must preserve every decoded page byte");
+  assert.equal(tunedBytes[9], 255, "tuned gzip must use deterministic host-independent metadata");
+  const tunedRepeat = run(gzipB, ["--gzip-memory-level", "7"]);
+  assert.equal(tunedRepeat.status, 0, tunedRepeat.stderr || tunedRepeat.stdout);
+  assert.deepEqual(fs.readFileSync(gzipB), tunedBytes, "tuned gzip must remain deterministic");
+  assert.match(fs.readFileSync(path.join(root, "main/CMakeLists.txt"), "utf8"),
+    /--output "\$\{CMAKE_CURRENT_BINARY_DIR\}\/index\.html\.gz"\s+--gzip-memory-level 7/,
+    "the tested compression parameter must be the firmware build parameter");
   assert.ok(minified.length < assembled.length * 0.7,
     "CSS/JS syntax minification must remove meaningful source-only weight");
 
