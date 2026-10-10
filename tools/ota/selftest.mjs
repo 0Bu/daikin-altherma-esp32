@@ -28,6 +28,9 @@ const files = [
   "main/weather_forecast.cpp",
   "main/mcp_server.cpp",
   "main/http_common.cpp",
+  "main/http_server.cpp",
+  "main/json_guard.hpp",
+  "main/logic/mcp.hpp",
   "main/http_status.cpp",
   "main/logic/http_values_wait.hpp",
   "main/logic/http_deadline.hpp",
@@ -78,6 +81,41 @@ try {
   }
 
   const cases = [
+    ["HTTP stack cannot hold the existing reviewed path ceilings plus reserve", () =>
+      replaceOnce("main/http_server.cpp", "cfg.stack_size       = 10240;", "cfg.stack_size       = 8192;")],
+    ["an HTTP path consumes the fixed 2 KiB reserve", () =>
+      replaceOnce("tools/stack/budgets.json", /("httpd_mcp_status": \{[\s\S]*?"max_bytes": )8192/, (_match, prefix) => `${prefix}8193`)],
+    ["cJSON accepts unreviewed nesting depth", () =>
+      replaceOnce("main/logic/payload_complete.hpp", "JSON_MAX_DEPTH      = 16;", "JSON_MAX_DEPTH      = 17;")],
+    ["the shared adapter overrides the reviewed JSON depth", () =>
+      replaceOnce("main/json_guard.hpp", "}, JSON_MAX_DEPTH);", "}, 32);")],
+    ["the cJSON parse root frame is omitted", () =>
+      replaceOnce("tools/stack/budgets.json", '"cjson_parse_value": 17', '"cjson_parse_value": 16')],
+    ["recursive cJSON cleanup is counted after releasing the parser frames", () =>
+      replaceOnce("tools/stack/budgets.json", '"cjson_delete": 17', '"cjson_delete": 16')],
+    ["the parser budget follows an unused cJSON wrapper", () =>
+      replaceOnce("tools/stack/budgets.json", "^cJSON_ParseWithLengthOpts$", "^cJSON_ParseWithOpts$")],
+    ["MCP accepts unreviewed recursive depth", () =>
+      replaceOnce("main/logic/mcp.hpp", "if (depth > 16) return false;", "if (depth > 17) return false;")],
+    ["MCP omits its early rejection frame", () =>
+      replaceOnce("tools/stack/budgets.json", '"mcp_json_value": 18', '"mcp_json_value": 17')],
+    ["the persistence transaction frame ceiling hides growth", () =>
+      replaceOnce("tools/stack/budgets.json", /("config_transaction": \{[\s\S]*?"max_bytes": )1600/, (_match, prefix) => `${prefix}4096`)],
+    ["the mandatory persistence transaction is dropped", () =>
+      replaceOnce("tools/stack/budgets.json", '"config_transaction": {', '"renamed_transaction": {')],
+    ["the WiFi scan frame ceiling hides growth", () =>
+      replaceOnce("tools/stack/budgets.json", /("wifi_scan": \{[\s\S]*?"max_bytes": )1920/, (_match, prefix) => `${prefix}4096`)],
+    ["the save wrapper bypasses the measured transaction", () =>
+      replaceOnce("main/config.cpp", "out = config_save_transaction(g_cfg, requested, owns_link, store);",
+        "out = config_save_transaction_bypassed(g_cfg, requested, owns_link, store);")],
+    ["the save path folds SDK-NVS into its HTTP allowance", () =>
+      replaceOnce("tools/stack/budgets.json", /("httpd_config_save": \{[\s\S]*?"base_bytes": )3072/, (_match, prefix) => `${prefix}1536`)],
+    ["the link-save path omits its native transaction", () =>
+      replaceOnce("tools/stack/budgets.json", /("httpd_config_save_link": \{[\s\S]*?)"config_transaction", /, (_match, prefix) => prefix)],
+    ["WiFi scan folds SDK-radio into its HTTP allowance", () =>
+      replaceOnce("tools/stack/budgets.json", /("httpd_wifi_scan": \{[\s\S]*?"base_bytes": )2560/, (_match, prefix) => `${prefix}1536`)],
+    ["MQTT teardown loses its reviewed TLS/renegotiation allowance", () =>
+      replaceOnce("tools/stack/budgets.json", /("httpd_mqtt_tls": \{[\s\S]*?"base_bytes": )5632/, (_match, prefix) => `${prefix}4608`)],
     ["signed-on-update is disabled", () =>
       replaceOnce("sdkconfig.defaults", "CONFIG_SECURE_SIGNED_ON_UPDATE_NO_SECURE_BOOT=y",
         "CONFIG_SECURE_SIGNED_ON_UPDATE_NO_SECURE_BOOT=n")],

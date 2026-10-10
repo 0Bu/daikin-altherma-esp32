@@ -109,7 +109,7 @@ Ids are stable keys and are never reused — a gap means a feature was retired, 
 | 66 | **Complete UI interaction merge gate** — the assembled production UI is *executed* in a deterministic DOM harness, covering every modal in the production registry | ✅ 🧪 | [`test_ui_use_cases.mjs`](../test/test_ui_use_cases.mjs), [`run-ui-use-case-tests.sh`](../scripts/run-ui-use-case-tests.sh) |
 | 68 | **Source-boundary contract gate** — source-text assertions about `main/*.cpp` the host suite structurally cannot make (task, order, and which file is entitled) | ✅ | [`run-contract-tests.sh`](../scripts/run-contract-tests.sh), [`test_heating_curve_diagnosis_contract.mjs`](../test/test_heating_curve_diagnosis_contract.mjs) |
 | 69 | **Source-absence matrix gate** — every optional source (broker, room source, circulation witness, HomeHub, ENV III, weather, X10A, safe mode) can be absent independently, so the firmware invariants and the browser copy are checked over that cross product, not one feature at a time | ✅ | [`test_source_absence_contract.mjs`](../test/test_source_absence_contract.mjs), [`test_ui_absence_matrix.mjs`](../test/test_ui_absence_matrix.mjs), [`selftest.sh`](../tools/absence/selftest.sh) |
-| 71 | **Pinned stack compiler contracts on `/status` and MQTT publishing** — `http_status.cpp` stays at `-Os` and scopes subsystem locals (+2836 B free stack) in `http_append_status_json()` with chunked streaming, while `mqtt_ha.cpp` keeps called-once helper boundaries and a fatal 2 KiB per-function frame ceiling so size optimisation cannot silently fold transient publish state back into the fixed MQTT task frame | ✅ | [`main/CMakeLists.txt`](../main/CMakeLists.txt), [`http_status.cpp`](../main/http_status.cpp), [`mqtt_ha.cpp`](../main/mqtt_ha.cpp) |
+| 71 | **Stack compiler and ELF contracts** — a 10 KiB HTTP task with 2 KiB above every named path ceiling, bounded JSON recursion, and MQTT helper boundaries with a fatal 2 KiB per-function frame ceiling | ✅ | [`http_server.cpp`](../main/http_server.cpp), [`check-stack-budget.py`](../scripts/check-stack-budget.py), [`main/CMakeLists.txt`](../main/CMakeLists.txt), [`mqtt_ha.cpp`](../main/mqtt_ha.cpp) |
 | 81 | **Stack-headroom telemetry** — the second memory budget, made reportable: five deep tasks record their own FreeRTOS high-water mark and the heartbeat carries all five, so a growing call frame is a falling line rather than a core dump nobody has yet | ✅ | [`stack_watch.hpp`](../main/stack_watch.hpp), [`stack_watch.cpp`](../main/stack_watch.cpp) |
 | 72 | **Power-loss-surviving 24-hour trends and opt-in plant checkup** — `.noinit` DRAM covers power-preserving resets; the upper-4-MiB append journal stores dense five-minute X10A/HomeHub/ENV III records, daily semantic-id manifests that preserve unchanged series across catalog edits, and enabled hourly diagnosis records. CRC, last-written commit and rotating sectors fail closed on torn writes; the build guards 72-hour capacity. The official 8 MB table is required; browser storage is not a measurement source | ✅ 🧪 | [`logic/history_persist.hpp`](../main/logic/history_persist.hpp), [`history.cpp`](../main/history.cpp), [`partitions.csv`](../partitions.csv) |
 | 82 | **Reproducible ESP-IDF build inputs** — exact transitive component lock, explicit ESP-IDF/CMake/C++ floors and wall-clock-free app metadata | ✅ | [`dependencies.lock`](../dependencies.lock), [`CMakeLists.txt`](../CMakeLists.txt), [`sdkconfig.defaults`](../sdkconfig.defaults) |
@@ -417,8 +417,8 @@ other.
 
 ## 4. Web server & the live transport
 
-- **`esp_http_server` on `:80`**, with `CONFIG_HTTPD_WS_SUPPORT=n` — stated explicitly because this
-  firmware deliberately has **no** push transport. The full HTTP surface is in
+- **`esp_http_server` on `:80`**, with a 10 KiB task stack, 2 KiB above every named ELF path
+  ceiling, and `CONFIG_HTTPD_WS_SUPPORT=n`. The full HTTP surface is in
   [`ARCHITECTURE.md`](ARCHITECTURE.md) and [`docs/README.md`](README.md).
 - **✅ The live UI is a POLL, and the absence of a push is the feature.** The browser fetches
   `/values` and `/status` on one recursive-`setTimeout` chain (never `setInterval`: a slow answer
@@ -893,20 +893,20 @@ Four properties of that core are worth naming because they are not obvious from 
   **11776 bytes** against ~2.2 KB of actual locals — the rest one stack slot per string temporary in
   a 760-line function. The original `-Os` change took it to **3744** and the deepest httpd path from
   14512 to 6480 bytes. The release image now also uses size optimisation globally to fit its
-  embedded catalogs. After
-  the refrigerant-service object and bounded MCP status sender, the 2026-08-28 ESP-IDF 6.1 ELF measures
-  the sole bounded serializer at **4896**. The historical manual call-path walk measured **7552**
-  bytes, while the automated conservative MCP gate sums **7664** of 16384 and leaves **8720 bytes**;
-  the stack itself remains unchanged. The trade — less exact backtraces in
-  the one file whose core dumps mattered — and the
-  reproduce command are stated where the pin lives and in
+  embedded catalogs. The HTTP task now allocates **10240 bytes**, with every named ELF path
+  ceiling retaining at least **2048 bytes**; required Config/probe/MCP parser frames include their
+  depth-bounded JSON paths, with the shared adapter explicitly bound to `JSON_MAX_DEPTH`. Save,
+  scan and MQTT setup/stop/destroy have separate SDK-NVS, radio and TLS allowances (including
+  renegotiation), above the surrounding HTTP allowance. The historical measurements, compiler
+  trade-off and reproduce command
+  are stated where the pin lives and in
   [`ARCHITECTURE.md`](ARCHITECTURE.md#memory-constraints).
   [`check-stack-budget.py`](../scripts/check-stack-budget.py) now performs that conservative call-path
   calculation on every CI-pinned ELF and fails when a required symbol disappears or a frame/path
   exceeds its committed budget. The ratchets include nested OTA manifest fetch, compact OTA status,
   the HIL-aware `/ota/check` acceptance path, the rollback-critical `ota_health` task, and both
   Weather task branches (download and JSON parse). All three task families' path ceilings leave at
-  least 1 KiB of their configured stacks; the health path carries a
+  least 1 KiB of their configured stacks, with HTTP retaining 2 KiB; the health path carries a
   separate reviewed 2048-byte IDF/logging/exception allowance. Live FreeRTOS high-water marks remain
   separate hardware evidence; the standalone lab-HIL harness can capture the resident delivery
   worker before reboot and rejects missing or sub-1-KiB Weather evidence after the deterministic
