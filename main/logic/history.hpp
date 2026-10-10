@@ -414,8 +414,8 @@ struct HistoryMeta {
 };
 
 // "Nothing has been committed on this source" on the monotonic microsecond axis. It is INT64_MIN
-// rather than zero or -1 because a commit restored from flash legitimately predates this boot's
-// zero and so reads NEGATIVE: no ordinary value below zero can mean "none".
+// rather than zero or -1 because zero is a real instant (the raster boundary a flash seed claims
+// in a boot's first bucket, history_raster_boundary_us) and no ordinary value may mean "none".
 constexpr int64_t HISTORY_NO_COMMIT_US = INT64_MIN;
 
 // `last_commit_us` is the newest commit on the monotonic clock (HISTORY_NO_COMMIT_US = none) and
@@ -589,6 +589,16 @@ struct TrendRing {
         push(pending);
         for (uint32_t k = 0; k < skipped && k < HISTORY_SAMPLES; k++) push(HISTORY_NO_READING);
         pending = HISTORY_NO_READING;
+    }
+
+    // Append `n` explicit no-reading samples after the newest one: time that went by with nothing
+    // measuring it (an adoption books the stretch between the previous boot's last commit and the
+    // new boot's first bucket this way). Capped at the ring size, like commit()'s skipped buckets,
+    // and an EMPTY ring stays empty — it has no seam to keep, and a ring of nothing but gaps would
+    // read as a recorded absence where nothing was ever recorded.
+    void append_gaps(uint32_t n) {
+        if (!count) return;
+        for (uint32_t k = 0; k < n && k < HISTORY_SAMPLES; k++) push(HISTORY_NO_READING);
     }
 
     // Copy out oldest-first. Until the ring wraps the oldest sample is slot 0; after that it is

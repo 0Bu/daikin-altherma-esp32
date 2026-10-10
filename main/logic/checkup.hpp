@@ -257,7 +257,8 @@ constexpr uint8_t CHECKUP_F_LOW_BAR = 1u << 3;   // <=1.0 bar persisted for the 
 // outdoor contexts. The old legacy-441 estimate assumed one shared context; pairing Cycling only
 // with completed space-heating runs and Defrost only with its known-state compressor denominator
 // makes that unsafe. Exact, order-independent sums cost 16 B per bucket plus 2 B alignment: 18 x 24
-// = 432 B of .noinit DRAM. No heap or flash is used.
+// = 432 B of static DRAM. The live rings use no heap; completed hours may also be journalled to
+// flash.
 constexpr size_t CHECKUP_BYTES = sizeof(CheckupBucket) * CHECKUP_BUCKETS;
 static_assert(CHECKUP_BYTES <= 1536, "the static checkup ring is too large for this heap-tight board");
 
@@ -342,7 +343,7 @@ struct CheckupRing {
     uint8_t      age_buckets = 0;           // elapsed bucket boundaries, saturates at 24
     int64_t      first_sample_us = -1;       // real lifecycle anchor; bucket boundaries are phase-shifted
     int64_t      latest_sample_us = -1;
-    // Lifecycle already observed in an EARLIER boot, carried across by the .noinit restore
+    // Lifecycle established by dated compatible flash intervals after clock/source confirmation
     // (logic/checkup_persist.hpp). It has to be a DURATION rather than a restored anchor pair:
     // first/latest_sample_us are MONOTONIC and restart at zero every boot, so a restored pair would
     // be measured against a clock that no longer exists — `latest - first` would go negative and
@@ -730,7 +731,8 @@ constexpr int      DHW_LOSS_HIGH_TENTHS_K_H = 8;         // project heuristic, n
 // witness, and it counts down from the last sample that saw the charge, also through unread
 // samples: dhw_loss_step's settle branch runs after the gap branch (a gap past CHECKUP_MAX_GAP_S
 // holds it) but before the unread-row blind branch. dhw_loss_adopt carries it unchanged across an
-// intentional restart whose handoff checkup_start accepts; anything that starts the check from a
+// intentional restart whose handoff passes startup integrity and current-source confirmation;
+// anything that starts the check from a
 // fresh DhwLossState drops it — a panic, a power loss, a handoff rejected or no longer found (e.g.
 // an OTA that changes the layout or moves .noinit), or a reset of the check. So a charge seen for
 // less than that in total — e.g. one lying entirely inside a stretch PAST the bound — arms no
@@ -819,8 +821,8 @@ inline bool dhw_loss_blind_ok(DhwLossState& st, uint32_t blind) {
 //
 // DHW_LOSS_REBOOT_BLIND_S covers the downtime, the stretch between the checkpoint and esp_timer's
 // zero. It does not cover the stretch after zero: esp_timer's zero is the start of this boot, and
-// the adoption happens in checkup_start(), behind app_main's network wait and ahead of every task
-// that could observe the tank. `now_us` at adoption therefore IS the uptime nobody watched, whole
+// adoption happens in checkup_reset_on_detect(), after current-source confirmation. `now_us` at
+// adoption therefore IS all unwatched boot time, including network startup and detection, whole
 // seconds, floored like every other absolute-instant quantisation here. Booked as the constant
 // alone, a boot that spent longer than DHW_LOSS_BLIND_RUN_MAX_S waiting for the network carried the
 // candidate straight through an unobserved interval that the run bound exists to refuse.
@@ -834,7 +836,8 @@ inline uint32_t dhw_loss_adopt_blind_s(int64_t now_us) {
 // A carried candidate that the booked unobserved time pushes past the blind bounds ends here with
 // reset_segment(), not dhw_loss_abort(), and the adoption takes no bucket: that discard is left out
 // of the discarded-window count on purpose. The count stays a count of the discards dhw_loss_step
-// observed. The time this adoption books is the restart allowance plus the network start-up, a
+// observed. The time this adoption books is the restart allowance plus all boot time up to source
+// confirmation, a
 // board-side cause the blind reason cannot separate from a silent link (an unread stretch still
 // open at the restart can add to it); counting the discard would add a board-side entry whenever
 // a slow restart carries a candidate. The count therefore under-reports restarts and never

@@ -11,7 +11,9 @@
 #include "logic/history_persist.hpp"
 #include "logic/homehub_map.hpp"
 #include "logic/history.hpp"
+#include "logic/state_dwell.hpp" // DWELL_REBOOT_BLIND_S — the project's one restart allowance
 #include "mqtt_ha.hpp"
+#include "safe_mode.hpp" // safe_mode_active — no producer runs there, so nothing adopts
 #include "sntp_time.hpp"
 
 #include "esp_attr.h"           // __NOINIT_ATTR — the whole of step 1 rests on this one attribute
@@ -30,6 +32,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <string>
+#include <type_traits>
 
 namespace daik {
 
@@ -75,7 +78,15 @@ struct PersistedHistory {
     // them rules out. `crc` covers the SEALED fields only (persist_crc below).
     uint32_t magic;
     uint16_t version;
-    uint16_t pad;
+    // Boots that adopted this region and have not committed a bucket since: incremented and
+    // resealed at adoption, zeroed by every commit of any raster. Refused at one or more
+    // (HistoryRestore::NotCommitted). Saturating; sealed, so a flipped bit is a bad_crc and not a
+    // forgiven crash loop.
+    uint8_t boots_since_commit;
+    // Whether the ENV III producer existed in the boot that sealed this region (configured,
+    // supported by the board, not in safe mode). A frozen ring is believed only when this and the
+    // current boot both say so (logic::history_env3_ring_adoptable).
+    uint8_t  env3_live;
     uint32_t catalog_fp;
     uint32_t crc;
     uint32_t x10a_target_fp;  // detected profile/link/fingerprint for the .noinit plant rings
@@ -85,6 +96,15 @@ struct PersistedHistory {
     // surviving ring whose witness is no longer the configured one is retired at startup, and the
     // flash writer stamps this onto the records that carry the ring's column.
     uint32_t circulation_fp;
+    // What the rounding of each raster's last adoption left unbooked (+) or over-booked (-), in
+    // microseconds (logic::history_adopt_booking), carried into the next adoption of that raster
+    // so the rounding errors of repeated restarts cancel instead of adding up. Index =
+    // logic::HistoryJournalSource of the raster (X10A, HomeHub, ENV III). It lives HERE rather than
+    // in the liveness record because it describes the rings of this region, is written once per
+    // adoption under the one reseal the adoption does anyway, and is cleared with them by every
+    // wipe and retirement; the liveness record is rewritten and re-hashed on every poll cycle and
+    // must stay at the few instants it measures.
+    int32_t residual_us[logic::HISTORY_LIVENESS_RASTERS];
 
     Trend ring[TREND_COUNT];
     // Eight paired HomeHub measurements plus BSH, 3-way-valve, Quiet, Smart-Grid and the standalone
@@ -119,6 +139,15 @@ __NOINIT_ATTR PersistStore s_store;
 // One name for the region, so no call site has to know about the union.
 inline PersistedHistory& P() { return s_store.v; }
 
+// The liveness record (logic/history_persist.hpp): when the device last gave a sign of life and
+// when each raster last committed, on this boot's clock. Its own seal and its own variable, so the
+// poll task can refresh it every cycle without touching the ~30 KB seal above. Plain data, so the
+// definition emits no initialiser image into a NOLOAD section; startup writes it explicitly, after
+// judging the previous boot's. Every writer holds s_mtx except startup, which is single-threaded.
+static_assert(std::is_trivially_default_constructible<logic::HistoryLiveness>::value,
+              "an initialiser on the liveness record would be dropped from .noinit silently");
+__NOINIT_ATTR logic::HistoryLiveness s_liveness;
+
 // Why the raster metadata below is NOT in the persisted region: every one of these is a MONOTONIC
 // bucket index, and the monotonic clock restarts at zero on the next boot. Carrying them across
 // would place the restored samples in a time frame that no longer exists — the restore path
@@ -133,10 +162,9 @@ bool              s_env3_have_bucket = false;
 // series' t0 (logic/history_t0): without it t0 was derived from `now` and drifted by up to a full
 // bucket between commits, which mislabelled every timestamp and let a PINNED readout round onto
 // the neighbouring sample. Monotonic because the commit may predate the first SNTP sync — its
-// wall-clock instant is then unknowable, but its age never is. INT64_MIN is the sentinel because a
-// flash-restored wall bucket may legitimately predate this
-// boot's monotonic zero. A negative commit timestamp is how the snapshot's newest-age meta
-// preserves that pre-boot age instead of sliding the curve to the reboot instant.
+// wall-clock instant is then unknowable, but its age never is. A flash seed claims the monotonic
+// raster boundary of the open bucket (logic::history_raster_boundary_us), so the restored samples
+// sit on the same grid as every later commit. INT64_MIN means "none".
 constexpr int64_t kNoCommitUs = INT64_MIN;
 static_assert(kNoCommitUs == logic::HISTORY_NO_COMMIT_US,
               "the commit sentinel is one definition shared with logic::history_snapshot_meta");
@@ -146,6 +174,28 @@ int64_t           s_env3_last_commit_us = kNoCommitUs;
 int64_t           s_last_commit_bucket = -1;
 int64_t           s_mb_last_commit_bucket = -1;
 int64_t           s_env3_last_commit_bucket = -1;
+// ENV III has no identity and no producer while it is disabled, so its ring needs two facts of its
+// own (HIST-03/e). `s_env3_enabled`: the sensor's task exists this boot — fixed at startup, from
+// the configuration and the board, never in safe mode. `s_env3_fed`: that task has recorded into
+// the ring at least once this boot. The journal writes ENV III records only for a ring that is
+// both, so a frozen ring is never filed under the buckets it happens to be adopted into.
+bool s_env3_enabled = false;
+bool s_env3_fed     = false;
+// The journal must not file an adopted sample twice (logic::history_adopt_floor_bucket), per
+// source (index = logic::HistoryJournalSource of the trend sources). `s_adopt_real_end_us` is the
+// monotonic instant at which the newest REAL sample adopted at startup ended, set once by
+// history_start() and spent by the journal writer's first look after it; `s_adopt_floor_bucket`
+// is the wall bucket that look decided the writer may not append at or before. INT64_MIN: none.
+// Owned by s_mtx, like the rings they describe, and cleared wherever a source's journal cursor is
+// reset (forget_adopt_floor).
+int64_t s_adopt_real_end_us[logic::HISTORY_LIVENESS_RASTERS]  = {INT64_MIN, INT64_MIN, INT64_MIN};
+int64_t s_adopt_floor_bucket[logic::HISTORY_LIVENESS_RASTERS] = {INT64_MIN, INT64_MIN, INT64_MIN};
+
+inline void forget_adopt_floor(size_t src) {
+    if (src >= logic::HISTORY_LIVENESS_RASTERS) return;
+    s_adopt_real_end_us[src]  = INT64_MIN;
+    s_adopt_floor_bucket[src] = INT64_MIN;
+}
 std::atomic<bool> s_reset_requested{false};
 std::atomic<uint32_t> s_x10a_target_fp{0};
 std::atomic<bool> s_mb_reset_requested{false};
@@ -213,9 +263,10 @@ bool s_detect_seen = false;
 // would defeat the whole feature: pending changes on every fold, i.e. once a second, so the CRC
 // would be stale for all but a few microseconds out of every five minutes — and a crash, the case
 // this exists for most, would land in the stale window essentially always, discarding a day of
-// perfectly intact readings. Excluded, the sealed bytes change ONLY at a commit, so the seal written
-// after the last commit stays valid right up to the next one. The open bucket is dropped on restore,
-// which is the honest answer anyway: a partial five minutes was never a sample.
+// perfectly intact readings. Excluding pending keeps ordinary folds from changing sealed bytes.
+// Commits, adoption, resets and source bookkeeping also reseal the region; a valid seal establishes
+// integrity, not sample age. The previous boot's open bucket is dropped on restore: a partial
+// five minutes was never a completed sample.
 inline uint32_t persist_crc_ring(uint32_t crc, const logic::TrendRing& r) {
     crc = config_crc32_update(crc, reinterpret_cast<const uint8_t*>(r.buf), sizeof(r.buf));
     crc = config_crc32_update(crc, reinterpret_cast<const uint8_t*>(&r.count), sizeof(r.count));
@@ -232,6 +283,14 @@ inline uint32_t persist_crc() {
     // Which circulation witness the sealed ring belongs to (HIST-01/b).
     crc = config_crc32_update(crc, reinterpret_cast<const uint8_t*>(&P().circulation_fp),
                               sizeof(P().circulation_fp));
+    // The two guards about AGE (HIST-03): a counter that a flipped bit must not be able to clear,
+    // and whether the ENV III ring was ever fed. Both change at a commit or at startup, never per
+    // fold, so covering them costs no extra seal.
+    crc = config_crc32_update(crc, &P().boots_since_commit, sizeof(P().boots_since_commit));
+    crc = config_crc32_update(crc, &P().env3_live, sizeof(P().env3_live));
+    // The booking residuals, which describe the rings below and change only at an adoption.
+    crc = config_crc32_update(crc, reinterpret_cast<const uint8_t*>(P().residual_us),
+                              sizeof(P().residual_us));
     for (const auto& t : P().ring) {
         crc = persist_crc_ring(crc, t.ring);
         crc = config_crc32_update(crc, reinterpret_cast<const uint8_t*>(t.label), sizeof(t.label));
@@ -256,10 +315,16 @@ inline bool rings_have_samples(const logic::TrendRing* r, size_t n) {
     return false;
 }
 
+inline bool x10a_rings_have_samples() {
+    for (const auto& t : P().ring)
+        if (t.ring.count) return true;
+    return false;
+}
+
 // Start this boot with nothing. REQUIRED rather than defensive: the region is uninitialised storage,
 // so without this every count, head and label would be whatever the last firmware left in DRAM.
 inline void persist_wipe(uint32_t catalog_fp, uint32_t x10a_target_fp, uint32_t mb_target_fp,
-                         uint32_t circulation_fp) {
+                         uint32_t circulation_fp, bool env3_live) {
     std::memset(&P(), 0, sizeof(PersistedHistory));
     // memset alone is NOT enough and the difference is a wrong reading rather than a crash: zero is
     // a perfectly valid sample, while `pending` must start at the NO_READING sentinel or every ring
@@ -269,7 +334,11 @@ inline void persist_wipe(uint32_t catalog_fp, uint32_t x10a_target_fp, uint32_t 
     for (auto& r : P().env3_ring)   r.reset();
     P().magic      = logic::HISTORY_PERSIST_MAGIC;
     P().version    = logic::HISTORY_PERSIST_VERSION;
-    P().pad        = 0;
+    P().boots_since_commit = 0; // nothing adopted: nothing is pending commit
+    // Nothing is left for a booking remainder to describe (the memset above zeroed it; stated so
+    // that a refusal, which reaches this wipe, visibly starts the diffusion over).
+    for (auto& r : P().residual_us) r = 0;
+    P().env3_live      = env3_live ? 1 : 0;
     P().catalog_fp = catalog_fp;
     P().x10a_target_fp = x10a_target_fp;
     P().mb_target_fp = mb_target_fp;
@@ -285,16 +354,39 @@ uint32_t current_mb_target_fp() {
         static_cast<uint32_t>(c.mb_unit_id));
 }
 
+// Book the stretch of time between the previous boot's last commit and this boot's first bucket as
+// explicit no-reading samples (logic::history_adopt_booking says how many), on every ring of the
+// raster that holds samples. Without it the adopted newest sample is simply claimed to have ended
+// at boot and that stretch collapses to nothing: every restart slides the older part of the curve
+// later by the time it did not measure, and the slides of repeated restarts add up in one
+// direction. A ring without samples has no seam and stays empty. Boot time only, single-threaded,
+// and before the region is sealed.
+inline void persist_book_unobserved(const uint32_t (&gaps)[logic::HISTORY_LIVENESS_RASTERS]) {
+    for (auto& t : P().ring) t.ring.append_gaps(gaps[0]);
+    for (auto& r : P().mb_ring) r.append_gaps(gaps[1]);
+    for (auto& r : P().env3_ring) r.append_gaps(gaps[2]);
+}
+
 // Re-anchor the surviving rings onto THIS boot's monotonic clock. No wall clock is consulted and
-// none is needed: the bytes only survive a reset that kept power, and such a reset completes in
-// about a second, so the newest sample is treated as having been committed at boot. The resulting
-// error is bounded by one HISTORY_DT_S — the bucket that was open when the device went down.
+// none is needed: the bytes only survive a reset that kept power, so the downtime is a reset of
+// about a second (booked as the allowance, with the rest of the stretch, by the caller). The newest
+// sample, after the gaps persist_book_unobserved appended, is claimed to have been committed at
+// the monotonic raster boundary of this boot (`claim_us`, logic::history_raster_boundary_us), the
+// grid every later commit lands on, so the first live commit comes one raster step later and its
+// wall bucket follows the claim's. The claim is only as good as what the caller could measure,
+// which is why it adopts nothing the guards of logic::history_restore_verdict refused (safe mode,
+// a boot that adopted and never committed, an X10A raster the liveness record cannot measure).
+// Behind them each seam's rounding error is carried to the next one (the sealed residual) and the
+// rest is the downtime and sign-of-life uncertainty (logic/history_persist.hpp, "Booking the
+// stretch an adoption cannot see"); the flash journal keeps absolute wall positions and does not
+// accumulate it.
 //
 // Per SOURCE, because they are independent: a board whose HomeHub was switched off since the last
 // boot must fall back to the normal first-bucket seeding for that source rather than claim a commit
-// that never happened.
-inline void persist_adopt(int64_t now_us) {
-    const uint32_t bucket = logic::history_bucket(now_us);
+// that never happened. The liveness record gets the same instant, so the next boot judges this
+// one's claim against what this boot actually committed.
+inline void persist_adopt(int64_t claim_us) {
+    const uint32_t bucket = logic::history_bucket(claim_us);
     const int64_t  prev   = static_cast<int64_t>(bucket) - 1;
 
     bool x10a = false;
@@ -304,15 +396,21 @@ inline void persist_adopt(int64_t now_us) {
 
     if (x10a) {
         s_have_bucket = true; s_bucket = bucket;
-        s_last_commit_us = now_us; s_last_commit_bucket = prev;
+        s_last_commit_us               = claim_us;
+        s_last_commit_bucket           = prev;
+        logic::history_liveness_commit(s_liveness, logic::HistoryJournalSource::X10a, claim_us);
     }
     if (rings_have_samples(P().mb_ring, HOMEHUB_HISTORY_COUNT)) {
         s_mb_have_bucket = true; s_mb_bucket = bucket;
-        s_mb_last_commit_us = now_us; s_mb_last_commit_bucket = prev;
+        s_mb_last_commit_us                  = claim_us;
+        s_mb_last_commit_bucket              = prev;
+        logic::history_liveness_commit(s_liveness, logic::HistoryJournalSource::Modbus, claim_us);
     }
     if (rings_have_samples(P().env3_ring, ENV3_HISTORY_COUNT)) {
         s_env3_have_bucket = true; s_env3_bucket = bucket;
-        s_env3_last_commit_us = now_us; s_env3_last_commit_bucket = prev;
+        s_env3_last_commit_us                    = claim_us;
+        s_env3_last_commit_bucket                = prev;
+        logic::history_liveness_commit(s_liveness, logic::HistoryJournalSource::Env3, claim_us);
     }
 }
 
@@ -340,6 +438,8 @@ inline void advance_raster_locked(int64_t now_us, uint32_t bucket) {
         if (completed) {
             s_last_commit_us = static_cast<int64_t>(bucket) * logic::HISTORY_DT_S * 1000000;
             s_last_commit_bucket = static_cast<int64_t>(bucket) - 1;
+            logic::history_liveness_commit(s_liveness, logic::HistoryJournalSource::X10a,
+                                           s_last_commit_us);
         }
     } else if (bucket > s_bucket) {
         // `>`, not `!=`. Both callers read the clock and compute the bucket BEFORE taking s_mtx, so
@@ -354,6 +454,10 @@ inline void advance_raster_locked(int64_t now_us, uint32_t bucket) {
         s_persist_dirty = true;
         s_last_commit_us = now_us;
         s_last_commit_bucket = static_cast<int64_t>(bucket) - 1;
+        // A real commit: this boot has now advanced the data it adopted, so the next boot may
+        // adopt it again (HIST-03/a), and the liveness record has a fresh commit to measure from.
+        P().boots_since_commit = 0;
+        logic::history_liveness_commit(s_liveness, logic::HistoryJournalSource::X10a, now_us);
     }
     // MONOTONIC for the same reason the branch above is: the loser of the read-clock-then-lock race
     // must not drag the raster back a slot, which would make the NEXT advance commit a skip that
@@ -476,16 +580,17 @@ bool homehub_event_ring(size_t idx) {
 // the ring's own bucket index is monotonic-since-boot and means nothing to the next boot, so a
 // snapshot without this is a curve with no position on the axis — and there is no honest default,
 // which is why the whole path is skipped rather than guessed at.
-int64_t source_anchor_bucket_locked(HistorySource src) {
-    if (!time_synced()) return INT64_MIN;
-    const int64_t commit_us = source_last_commit_us(src);
-    if (commit_us == kNoCommitUs) return INT64_MIN;
+int64_t wall_bucket_of_instant_locked(int64_t instant_us) {
+    if (!time_synced() || instant_us == kNoCommitUs) return INT64_MIN;
     int64_t unix_s = -1; int32_t ms = 0;
     time_now(unix_s, ms);
     if (unix_s < 0) return INT64_MIN;
-    const int64_t age_us = esp_timer_get_time() - commit_us;
-    const int64_t age_s  = age_us < 0 ? 0 : age_us / 1000000;
-    return logic::history_bucket_from_unix(unix_s - age_s);
+    return logic::history_anchor_bucket(unix_s, esp_timer_get_time(), instant_us,
+                                        logic::HISTORY_DT_S, ms);
+}
+
+int64_t source_anchor_bucket_locked(HistorySource src) {
+    return wall_bucket_of_instant_locked(source_last_commit_us(src));
 }
 
 // ── The history flash journal ───────────────────────────────────────────────────────────────────
@@ -588,7 +693,7 @@ HistorySource source_of_slot(size_t slot, size_t& idx) {
 
 } // namespace
 
-// Declared here rather than in the header: only history_start() calls it, and only once.
+// Declared here rather than in the header: only history_start() calls them, and only once.
 static void history_flash_start();
 static size_t history_flash_service_journal(size_t max_records, TickType_t wait_ticks);
 
@@ -608,8 +713,46 @@ void history_start() {
     const uint32_t want_circulation_fp = logic::history_circulation_identity(boot_config);
     s_circulation_fp.store(want_circulation_fp);
     const uint32_t reason  = static_cast<uint32_t>(esp_reset_reason());
-    s_persist_verdict = logic::history_restore_verdict(reason, P().magic, P().version,
-                                                       P().catalog_fp, want_fp, P().crc, persist_crc());
+    const bool     safe    = safe_mode_active();
+    // ENV III has a producer only when env3_start() will create its task: configured, supported by
+    // the board and not in safe mode (which starts no optional source at all).
+    s_env3_enabled       = !safe && boot_config.env3_enabled && env3_board_supported(boot_config);
+    const bool env3_keep = logic::history_env3_ring_adoptable(P().env3_live != 0, s_env3_enabled);
+    // The HomeHub rings are adopted only for the target they were recorded under; any other target
+    // retires them below (and a HomeHub disabled at runtime keeps its ring but stops its raster, so
+    // the target the ring was sealed under is no longer the configured one).
+    const bool mb_keep = P().mb_target_fp == want_mb_target_fp;
+    // What the previous boot's liveness record has to MEASURE: the rasters whose samples THIS boot
+    // would adopt, which is the same decision the retire steps below make (env3_keep, mb_keep). A
+    // ring those steps drop anyway has nothing to book, and weighing it would let a source that is
+    // gone refuse the trends that are not. The X10A raster alone decides the region; an
+    // unmeasurable HomeHub or ENV III raster retires only its own rings
+    // (logic::history_raster_plan). A raster that merely stalled is measurable and is booked.
+    const bool weighed[logic::HISTORY_LIVENESS_RASTERS] = {
+        x10a_rings_have_samples(),
+        mb_keep && rings_have_samples(P().mb_ring, HOMEHUB_HISTORY_COUNT),
+        env3_keep && rings_have_samples(P().env3_ring, ENV3_HISTORY_COUNT)};
+    const logic::HistoryRasterPlan plan = logic::history_raster_plan(s_liveness, weighed);
+    s_persist_verdict                   = logic::history_restore_verdict(
+        reason, P().magic, P().version, P().catalog_fp, want_fp, P().crc, persist_crc(), safe,
+        P().boots_since_commit, plan.region_bookable);
+    // The numbers behind a refusal or a retirement, while the previous boot's record is still
+    // unread: that the record itself did not verify, or that it holds no usable commit for the
+    // raster, is the whole diagnosis (a raster that merely stalled is booked, not refused).
+    const auto log_unmeasured = [](const char* what, logic::HistoryRasterState state) {
+        diag_printf("history: %s liveness %s (sign-of-life %lld us; last commit x10a %lld, modbus "
+                    "%lld, env3 %lld us)\n",
+                    what,
+                    state == logic::HistoryRasterState::NoRecord ? "record unreadable"
+                                                                 : "records no usable commit",
+                    static_cast<long long>(s_liveness.sign_us),
+                    static_cast<long long>(s_liveness.commit_us[0]),
+                    static_cast<long long>(s_liveness.commit_us[1]),
+                    static_cast<long long>(s_liveness.commit_us[2]));
+    };
+    if (s_persist_verdict == logic::HistoryRestore::StaleCommit)
+        log_unmeasured("X10A", plan.state[static_cast<size_t>(logic::HistoryJournalSource::X10a)]);
+    const int64_t start_us = esp_timer_get_time();
     if (s_persist_verdict == logic::HistoryRestore::Accept) {
         if (P().x10a_target_fp != boot_config.x10a_identity_fp) {
             for (size_t t = 0; t < TREND_COUNT; ++t) {
@@ -619,6 +762,9 @@ void history_start() {
                 P().ring[t].unit[0] = '\0';
             }
             P().x10a_target_fp = boot_config.x10a_identity_fp;
+            // The rings the remainder described are gone; the board and circulation rings that
+            // stay start their diffusion over.
+            P().residual_us[static_cast<size_t>(logic::HistoryJournalSource::X10a)] = 0;
             s_persist_dirty = true;
             persist_seal_locked();
             diag_printf("history: X10A RAM rings rejected (detected identity changed)\n");
@@ -648,23 +794,108 @@ void history_start() {
             persist_seal_locked();
             diag_printf("history: circulation RAM ring rejected (witness identity changed)\n");
         }
-        persist_adopt(esp_timer_get_time());
+        if (!env3_keep && rings_have_samples(P().env3_ring, ENV3_HISTORY_COUNT)) {
+            // A ring nothing has fed since it was sealed, or that nothing will feed now: adopting
+            // it would treat it as fed until the reset and let the journal file the frozen
+            // readings under today's buckets (HIST-03/e).
+            for (auto& r : P().env3_ring) r.reset();
+            s_persist_dirty = true;
+            diag_printf("history: ENV III RAM ring rejected (sensor %s)\n",
+                        s_env3_enabled ? "was not running when it was sealed"
+                                       : "is not running this boot");
+        }
+        // A raster the record cannot measure retires its own rings alone. The verdict above
+        // already accepted the region on the X10A raster's word, so a HomeHub whose record entry
+        // is unusable costs the trends nothing but its own.
+        if (plan.retire_modbus) {
+            for (auto& r : P().mb_ring) r.reset();
+            s_persist_dirty = true;
+            log_unmeasured("HomeHub RAM rings retired:",
+                           plan.state[static_cast<size_t>(logic::HistoryJournalSource::Modbus)]);
+        }
+        if (plan.retire_env3) {
+            for (auto& r : P().env3_ring) r.reset();
+            s_persist_dirty = true;
+            log_unmeasured("ENV III RAM ring retired:",
+                           plan.state[static_cast<size_t>(logic::HistoryJournalSource::Env3)]);
+        }
+        // The stretch between each adopted raster's last commit and this boot's first bucket,
+        // measured from the PREVIOUS boot's record (the fresh one below overwrites it), is booked
+        // as explicit no-reading samples, a stall of the raster included; the newest of them is
+        // claimed for the raster boundary that opened this boot's first bucket. The rounding
+        // remainder of the previous adoption is carried in and the new one carried out, so the
+        // rounding errors of repeated restarts cancel. Only a raster whose rings hold samples AFTER
+        // the retire steps above has a seam: for every other one the count and the remainder are
+        // zero, which is also what the boot line reports (a retired ring was booked nothing).
+        const int64_t claim_us = logic::history_raster_boundary_us(start_us);
+        const bool    has[logic::HISTORY_LIVENESS_RASTERS] = {
+            x10a_rings_have_samples(), rings_have_samples(P().mb_ring, HOMEHUB_HISTORY_COUNT),
+            rings_have_samples(P().env3_ring, ENV3_HISTORY_COUNT)};
+        uint32_t gaps[logic::HISTORY_LIVENESS_RASTERS];
+        for (size_t i = 0; i < logic::HISTORY_LIVENESS_RASTERS; ++i) {
+            logic::HistoryAdoptBooking booking{0, 0};
+            if (has[i])
+                booking = logic::history_adopt_booking(s_liveness.sign_us, s_liveness.commit_us[i],
+                                                       logic::DWELL_REBOOT_BLIND_S, claim_us,
+                                                       P().residual_us[i]);
+            gaps[i]            = booking.gaps;
+            P().residual_us[i] = booking.residual_us;
+            s_adopt_real_end_us[i] =
+                has[i] ? logic::history_adopt_real_end_us(claim_us, booking.gaps) : INT64_MIN;
+        }
+        persist_book_unobserved(gaps);
+        // Adopted: from here until a bucket commits, the next boot must not adopt it blindly.
+        P().env3_live          = s_env3_enabled ? 1 : 0;
+        P().boots_since_commit = logic::history_counter_next(P().boots_since_commit);
+        s_persist_dirty        = true;
+        persist_seal_locked();
+        logic::history_liveness_begin(s_liveness, start_us);
+        persist_adopt(claim_us);
         // The rings carry the previous identity in their labels, so this boot's first detection can
         // defer to the per-row check rather than wiping on sight — history_reset_on_detect().
         s_adopt_detect_grace = true;
-        diag_printf("history: rings kept across a %s reset (RAM survived)\n",
-                    crash_reason_slug(reason));
+        diag_printf(
+            "history: rings kept across a %s reset (RAM survived; unobserved buckets booked "
+            "x10a %u, modbus %u, env3 %u)\n",
+            crash_reason_slug(reason), static_cast<unsigned>(gaps[0]),
+            static_cast<unsigned>(gaps[1]), static_cast<unsigned>(gaps[2]));
     } else {
-        persist_wipe(want_fp, boot_config.x10a_identity_fp, want_mb_target_fp, want_circulation_fp);
+        persist_wipe(want_fp, boot_config.x10a_identity_fp, want_mb_target_fp, want_circulation_fp,
+                     s_env3_enabled);
+        logic::history_liveness_begin(s_liveness, start_us);
         // Not noise: "wrong_catalog" after an update explains a chart that emptied itself for a
         // reason nobody would otherwise be able to reconstruct, and "bad_crc" on a board that was
         // never power-cycled is a memory fault worth seeing.
         diag_printf("history: rings start empty (%s)\n", logic::history_restore_slug(s_persist_verdict));
     }
     history_flash_start();
+    // Registered whether or not a journal exists: the sign of life it records is independent of it
+    // (history_flash_save drains only a journal that was found and scanned).
+    const esp_err_t shutdown_err = esp_register_shutdown_handler(history_flash_save);
+    if (shutdown_err != ESP_OK)
+        diag_printf("history: shutdown handler not registered (%s)\n",
+                    esp_err_to_name(shutdown_err));
+}
+
+bool history_checkup_flash_pending() {
+    return s_flash_part && s_flash_scan_ok && !s_flash_checkup_restore_done;
 }
 
 const char* history_persist_state() { return logic::history_restore_slug(s_persist_verdict); }
+
+// The poll task's sign of life, every cycle — including the cycles that skip all work (a network
+// hold-off) and the ones spent detecting. Cheap by construction: a try-lock, a store and a CRC over
+// the 32 bytes of instants in the liveness record, never the ~30 KB seal, and nothing allocates. A
+// contended lock skips the write; a later successful touch refreshes it. Until then the record can
+// lag behind actual uptime. The next boot books only the measured record stretch plus its fixed
+// allowance; an unmeasured tail until reset can be under-booked. noexcept because this sits on the
+// poll task's per-cycle path and an unwind through a C task frame terminates the process.
+void history_liveness_touch() noexcept {
+    if (!s_mtx) return;
+    Lock lk(s_mtx, 0);
+    if (!lk.acquired()) return;
+    logic::history_liveness_touch(s_liveness, esp_timer_get_time());
+}
 
 uint32_t history_epoch() noexcept { return s_history_epoch.load(std::memory_order_acquire); }
 
@@ -689,6 +920,7 @@ void history_reset() {
         s_flash_newest_bucket[src] = INT64_MIN;
         s_flash_oldest_bucket[src] = INT64_MIN;
         s_flash_restore_slot_count[src] = 0;
+        forget_adopt_floor(src);
     }
     bump_history_epoch();
 }
@@ -739,6 +971,7 @@ void history_reset_on_detect(uint32_t identity_fp) {
         s_flash_newest_bucket[src] = INT64_MIN;
         s_flash_oldest_bucket[src] = INT64_MIN;
         s_flash_restore_slot_count[src] = 0;
+        forget_adopt_floor(src);
     }
     bump_history_epoch();
 }
@@ -767,6 +1000,7 @@ void history_modbus_reset(uint32_t target_fp) noexcept {
         s_flash_newest_bucket[src] = INT64_MIN;
         s_flash_oldest_bucket[src] = INT64_MIN;
         s_flash_restore_slot_count[src] = 0;
+        forget_adopt_floor(src);
     }
     bump_history_epoch();
 }
@@ -974,6 +1208,8 @@ void history_record(const CachedValue* v, size_t n, uint32_t source_generation) 
             P().ring[t].unit[0] = '\0';
         }
         P().x10a_target_fp = s_x10a_target_fp.load();
+        // Retired rings take their booking remainder with them.
+        P().residual_us[static_cast<size_t>(logic::HistoryJournalSource::X10a)] = 0;
         s_persist_dirty = true;
         // Public reset requests published their epoch before the deferred clear. Only a newly
         // discovered row-identity mismatch needs another retirement event here.
@@ -1058,6 +1294,8 @@ void history_record_modbus(const CachedValue* v, size_t n, uint32_t identity_gen
         if (completed) {
             s_mb_last_commit_us = static_cast<int64_t>(bucket) * logic::HISTORY_DT_S * 1000000;
             s_mb_last_commit_bucket = static_cast<int64_t>(bucket) - 1;
+            logic::history_liveness_commit(s_liveness, logic::HistoryJournalSource::Modbus,
+                                           s_mb_last_commit_us);
         }
     } else if (bucket != s_mb_bucket) {
         const uint32_t skipped = logic::history_skipped(s_mb_bucket, bucket);
@@ -1065,6 +1303,8 @@ void history_record_modbus(const CachedValue* v, size_t n, uint32_t identity_gen
         s_persist_dirty = true;
         s_mb_last_commit_us = now_us;
         s_mb_last_commit_bucket = static_cast<int64_t>(bucket) - 1;
+        P().boots_since_commit  = 0;
+        logic::history_liveness_commit(s_liveness, logic::HistoryJournalSource::Modbus, now_us);
     }
     s_mb_bucket = bucket;
     s_mb_have_bucket = true;
@@ -1072,6 +1312,7 @@ void history_record_modbus(const CachedValue* v, size_t n, uint32_t identity_gen
         const size_t completed = logic::history_completed_samples(bucket);
         for (auto& ring : P().mb_ring) ring.reset_with_gaps(completed);
         P().mb_target_fp = s_mb_target_fp.load();
+        P().residual_us[static_cast<size_t>(logic::HistoryJournalSource::Modbus)] = 0;
         s_persist_dirty = true;
     }
     for (size_t t = 0; t < HOMEHUB_HISTORY_COUNT; t++) {
@@ -1098,6 +1339,8 @@ void history_record_env3(bool valid, float temperature_c, float humidity_pct, fl
     Lock lk(s_mtx);
     if (!lk.acquired()) return;
     if (s_flash_forgotten.load()) return;
+    // The producer is alive and feeding: from here the journal may file this ring's buckets.
+    s_env3_fed = true;
     if (!s_env3_have_bucket) {
         const size_t completed = logic::history_completed_samples(bucket);
         for (auto& ring : P().env3_ring) ring.reset_with_gaps(completed);
@@ -1105,6 +1348,8 @@ void history_record_env3(bool valid, float temperature_c, float humidity_pct, fl
         if (completed) {
             s_env3_last_commit_us = static_cast<int64_t>(bucket) * logic::HISTORY_DT_S * 1000000;
             s_env3_last_commit_bucket = static_cast<int64_t>(bucket) - 1;
+            logic::history_liveness_commit(s_liveness, logic::HistoryJournalSource::Env3,
+                                           s_env3_last_commit_us);
         }
     } else if (bucket != s_env3_bucket) {
         const uint32_t skipped = logic::history_skipped(s_env3_bucket, bucket);
@@ -1112,6 +1357,8 @@ void history_record_env3(bool valid, float temperature_c, float humidity_pct, fl
         s_persist_dirty = true;
         s_env3_last_commit_us = now_us;
         s_env3_last_commit_bucket = static_cast<int64_t>(bucket) - 1;
+        P().boots_since_commit    = 0;
+        logic::history_liveness_commit(s_liveness, logic::HistoryJournalSource::Env3, now_us);
     }
     s_env3_bucket = bucket;
     s_env3_have_bucket = true;
@@ -1212,25 +1459,31 @@ void ring_replace_locked(logic::TrendRing& r, const HistorySample* v, size_t n) 
 // splice below fills every elapsed bucket after the stored anchor with explicit gaps, so a longer
 // restart never slides old readings forward. The boot's monotonic raster then continues from its
 // current open bucket exactly like a normal first observation.
+//
+// The newest restored sample claims to have been committed at the LAST MONOTONIC BOUNDARY, not at
+// the start of the open wall bucket (HIST-03/c). Every later commit of this boot lands on that
+// monotonic grid, so the first one comes exactly one raster step after the seed and its wall
+// bucket follows the seed's by one. Claiming the wall bucket's start put the seed on a different
+// grid, and the first commit then fell into the very wall bucket the seed had claimed in a fixed
+// share of restores, duplicating a bucket and shifting every restored sample one bucket early.
 bool seed_source_timeline_locked(HistorySource src, int64_t stored_anchor, int64_t& live_anchor) {
     int64_t unix_s = -1; int32_t ms = 0;
     time_now(unix_s, ms);
     if (unix_s < 0) return false;
-    live_anchor = logic::history_bucket_from_unix(unix_s);
+    const int64_t  now_us    = esp_timer_get_time();
+    const uint32_t bucket    = logic::history_bucket(now_us);
+    const int64_t  commit_us = logic::history_raster_boundary_us(now_us);
+    live_anchor = logic::history_anchor_bucket(unix_s, now_us, commit_us, logic::HISTORY_DT_S, ms);
     if (stored_anchor > live_anchor) return false;       // stored clock was ahead — never slide it back
 
-    const int64_t now_us = esp_timer_get_time();
-    const uint32_t bucket = logic::history_bucket(now_us);
-    // This can be negative when the absolute bucket began before this boot. That is intentional:
-    // zero-clamping made /history report the reboot instant as t0 and moved the retained curve
-    // forward on every OTA/power-cycle restore.
-    const int64_t commit_us = logic::history_anchor_commit_us(now_us, unix_s, live_anchor);
     const int64_t mono_commit_bucket = bucket ? static_cast<int64_t>(bucket) - 1 : -1;
 
     switch (src) {
         case HistorySource::X10a:
             if (!s_have_bucket) { s_have_bucket = true; s_bucket = bucket; }
             s_last_commit_us = commit_us; s_last_commit_bucket = mono_commit_bucket;
+            logic::history_liveness_commit(s_liveness, logic::HistoryJournalSource::X10a,
+                                           commit_us);
             // If SNTP won the race against first detection, let the latter validate/fill labels
             // instead of immediately wiping the just-restored samples.
             if (!s_detect_seen) s_adopt_detect_grace = true;
@@ -1238,10 +1491,14 @@ bool seed_source_timeline_locked(HistorySource src, int64_t stored_anchor, int64
         case HistorySource::Modbus:
             if (!s_mb_have_bucket) { s_mb_have_bucket = true; s_mb_bucket = bucket; }
             s_mb_last_commit_us = commit_us; s_mb_last_commit_bucket = mono_commit_bucket;
+            logic::history_liveness_commit(s_liveness, logic::HistoryJournalSource::Modbus,
+                                           commit_us);
             break;
         case HistorySource::Env3:
             if (!s_env3_have_bucket) { s_env3_have_bucket = true; s_env3_bucket = bucket; }
             s_env3_last_commit_us = commit_us; s_env3_last_commit_bucket = mono_commit_bucket;
+            logic::history_liveness_commit(s_liveness, logic::HistoryJournalSource::Env3,
+                                           commit_us);
             break;
     }
     return true;
@@ -1427,13 +1684,11 @@ bool flash_record_physically_valid(const FlashJournalRecord& r) {
     const auto& h = r.header;
     const bool checkup = h.source ==
         static_cast<uint8_t>(logic::HistoryJournalSource::Checkup);
-    const bool header_ok = checkup
-        ? logic::history_journal_header_matches(
-              h, logic::checkup_journal_fingerprint(),
-              static_cast<uint16_t>(logic::CHECKUP_JOURNAL_WORDS), logic::CHECKUP_DT_S)
-        : (flash_is_manifest(h)
-            ? logic::history_journal_manifest_header_matches(h)
-            : logic::history_journal_trend_header_structural_matches(h));
+    const bool header_ok =
+        checkup
+            ? logic::history_journal_checkup_header_structural_matches(h, logic::CHECKUP_DT_S)
+            : (flash_is_manifest(h) ? logic::history_journal_manifest_header_matches(h)
+                                    : logic::history_journal_trend_header_structural_matches(h));
     const size_t payload_bytes = logic::history_journal_payload_bytes(h);
     if (!header_ok || payload_bytes > sizeof(r.payload)) return false;
     if (flash_is_manifest(h) && !logic::history_journal_manifest_payload_matches(
@@ -1446,7 +1701,10 @@ bool flash_record_valid(const FlashJournalRecord& r) {
     if (!flash_record_physically_valid(r)) return false;
     const auto& h = r.header;
     if (flash_is_manifest(h)) return false;
-    if (h.source == static_cast<uint8_t>(logic::HistoryJournalSource::Checkup)) return true;
+    if (h.source == static_cast<uint8_t>(logic::HistoryJournalSource::Checkup))
+        return logic::history_journal_header_matches(
+            h, logic::checkup_journal_fingerprint(),
+            static_cast<uint16_t>(logic::CHECKUP_JOURNAL_WORDS), logic::CHECKUP_DT_S);
     if (!flash_trend_scope_matches(h)) return false;
     return flash_current_layout_matches(h) ||
            logic::history_legacy_disinfection_layout_matches(h) ||
@@ -1657,6 +1915,13 @@ bool flash_build_next_record(HistorySource src, FlashJournalRecord& out, TickTyp
     if (src == HistorySource::X10a && (s_x10a_target_fp.load() == 0 || s_reset_requested.load()))
         return false;
     if (src == HistorySource::Modbus && s_mb_reset_requested.load()) return false;
+    // ENV III has no identity to scope its records by, so the only thing that says a ring is being
+    // measured is that its producer exists and has fed it this boot. A frozen ring (sensor
+    // disabled, or a restore that nothing has extended yet) would otherwise be filed, sample by
+    // sample, under the recent buckets it was adopted or seeded into (HIST-03/e).
+    if (src == HistorySource::Env3 &&
+        !logic::history_env3_append_allowed(s_env3_enabled, s_env3_fed))
+        return false;
 
     const size_t src_i = static_cast<size_t>(src);
     const size_t value_count = logic::history_journal_source_rings(journal_source(src));
@@ -1682,9 +1947,23 @@ bool flash_build_next_record(HistorySource src, FlashJournalRecord& out, TickTyp
     }
     if (!max_count) return false;
 
+    // An adopted ring is the previous boot's, shifted by the seam: its newest REAL sample can sit
+    // a bucket later than the bucket the journal already holds it under, and the walk below would
+    // file the same reading again where nothing was measured. The first look after the adoption
+    // decides, once, whether the journal already holds that sample (the cursor is within reach of
+    // it) and lifts the cursor over it; later looks only apply the decision. A cursor that is
+    // missing or far behind says those samples were never filed, and they still are.
+    if (src_i < logic::HISTORY_LIVENESS_RASTERS && s_adopt_real_end_us[src_i] != INT64_MIN) {
+        s_adopt_floor_bucket[src_i] = logic::history_adopt_floor_bucket(
+            s_flash_last_bucket[src_i], wall_bucket_of_instant_locked(s_adopt_real_end_us[src_i]));
+        s_adopt_real_end_us[src_i] = INT64_MIN;
+    }
+    const int64_t cursor = src_i < logic::HISTORY_LIVENESS_RASTERS
+                               ? logic::history_adopt_floor_cursor(s_flash_last_bucket[src_i],
+                                                                   s_adopt_floor_bucket[src_i])
+                               : s_flash_last_bucket[src_i];
     const int64_t oldest = anchor - static_cast<int64_t>(max_count - 1);
-    int64_t target = s_flash_last_bucket[src_i] == INT64_MIN
-        ? oldest : s_flash_last_bucket[src_i] + 1;
+    int64_t       target = cursor == INT64_MIN ? oldest : cursor + 1;
     if (target < oldest) target = oldest;       // backlog older than the live 24-hour ring is gone
     if (target > anchor) return false;
     const size_t age = static_cast<size_t>(anchor - target);
@@ -2216,10 +2495,18 @@ static size_t history_flash_service_journal(size_t max_records, TickType_t wait_
     return written;
 }
 
-// A normal five-minute close is already durable within the next poll tick. The shutdown handler is
-// only a bounded final drain for the race where OTA/reconfiguration requests esp_restart between
-// the close and that tick; it never rewrites a ~30 KiB snapshot.
+// Eligible completed buckets are queued for journal draining. The shutdown handler provides a
+// bounded additional drain before an intentional restart; it never rewrites a ~30 KiB snapshot.
+//
+// It also gives the liveness record its last sign of life, first and whether or not a journal
+// exists. The wait is short: a restart that has already switched the boot partition must never be
+// stranded behind a contended history lock. A missed touch leaves an unmeasured interval between
+// the last successful update and reset; the fixed allowance need not cover that entire interval.
 void history_flash_save() {
+    if (s_mtx) {
+        Lock lk(s_mtx, pdMS_TO_TICKS(50));
+        if (lk.acquired()) logic::history_liveness_touch(s_liveness, esp_timer_get_time());
+    }
     if (!s_flash_part || s_flash_shutdown_started || s_flash_forgotten.load()) return;
     s_flash_shutdown_started = true;
     const size_t written = history_flash_service_journal(/*max_records=*/12, pdMS_TO_TICKS(200));
@@ -2240,11 +2527,13 @@ bool history_flash_forget() {
         Lock history_lk(s_mtx);
         if (!history_lk.acquired()) return false;
         persist_wipe(logic::history_catalog_fingerprint(), s_x10a_target_fp.load(),
-                     s_mb_target_fp.load(), s_circulation_fp.load());
+                     s_mb_target_fp.load(), s_circulation_fp.load(), s_env3_enabled);
         s_bucket = s_mb_bucket = s_env3_bucket = 0;
         s_have_bucket = s_mb_have_bucket = s_env3_have_bucket = false;
         s_last_commit_us = s_mb_last_commit_us = s_env3_last_commit_us = kNoCommitUs;
         s_last_commit_bucket = s_mb_last_commit_bucket = s_env3_last_commit_bucket = -1;
+        // Nothing is left to measure: every raster starts over, like a boot with no samples.
+        logic::history_liveness_begin(s_liveness, esp_timer_get_time());
         s_reset_requested.store(false);
         s_mb_reset_requested.store(false);
         s_circulation_reset_requested.store(false);
@@ -2258,6 +2547,7 @@ bool history_flash_forget() {
             s_flash_newest_bucket[src] = INT64_MIN;
             s_flash_oldest_bucket[src] = INT64_MIN;
             s_flash_restore_slot_count[src] = 0;
+            forget_adopt_floor(src);
         }
         flash_manifest_cache_reset();
         s_flash_restore_done = true;
@@ -2309,8 +2599,6 @@ static void history_flash_start() {
         diag_printf("history: journal disabled this boot (scan incomplete)\n");
         return;
     }
-    const esp_err_t e = esp_register_shutdown_handler(history_flash_save);
-    if (e != ESP_OK) diag_printf("history: shutdown handler not registered (%s)\n", esp_err_to_name(e));
 }
 
 } // namespace daik

@@ -1209,11 +1209,16 @@ static void append_status_json(JsonOut& j, bool redact) {
     // The .noinit-RAM adoption verdict for this boot. "accept" means a compatible reset kept the
     // sealed bytes; every other value names why RAM started empty. This is deliberately independent
     // of flash: after a successful journal scan and clock sync, compatible records may still splice
-    // buckets into those rings without changing this field.
+    // buckets into those rings without changing this field, and "accept" may coexist with a
+    // HomeHub or ENV III ring retired alone, which only the boot log names. "stale_commit" now
+    // means the liveness record could not measure the X10A raster. (The checkup's health.persist
+    // below does report "flash" when its window was rebuilt from the journal.)
     j += ",\"persist\":";
     j += jstr(history_persist_state());
     // The same question for the per-row STATE AGES (logic/state_dwell.hpp), which ride the same
-    // .noinit medium under the same rules and therefore reset for the same reasons. It sits here
+    // .noinit medium under the same integrity rules (safe mode, reset reason, magic, version,
+    // catalog, CRC). The trend rings' age guards (not_committed, stale_commit) do not apply: the
+    // dwell table books every restart as blind time itself. It sits here
     // rather than in a block of its own for the reason this whole builder is written the way it is:
     // every byte added to /status is paid for on the httpd task's stack (AGENTS.md → Memory,
     // concurrency, and HTTP safety), and one more key in an existing object is the cheapest honest
@@ -1290,9 +1295,10 @@ static void append_status_json(JsonOut& j, bool redact) {
         j += "\"health\":{\"covered_s\":";
         j += std::to_string(hr.covered_s);
         // How this boot's WINDOW came to be, for the reason the trends report it one block up:
-        // "accept" = adopted across a reset that kept power, anything else NAMES why the card
-        // started collecting again. A checkup that emptied itself otherwise reads as a defect, and
-        // only the device can tell a power cut from a firmware update that moved the layout.
+        // "flash_pending" awaits clock/source confirmation without proving stored hours exist;
+        // "fresh" means no stored intervals were selected, including live/capacity precedence,
+        // and "flash" means actual absolute-age journal reconstruction. Completed RAM hours never
+        // cross a restart; other slugs retain the startup integrity/consent refusal for diagnosis.
         j += ",\"persist\":";
         j += jstr(checkup_persist_state());
         j += ",\"full_span\":";

@@ -933,7 +933,7 @@ static esp_err_t set_hp(httpd_req_t* req) {
             dwell_reset();
             history_reset();
             if (c.x10a_identity_fp != 0) {
-                checkup_reset_on_detect(c.profile.c_str());
+                checkup_reset_on_detect(c.profile.c_str(), c.x10a_identity_fp);
                 dwell_reset_on_detect(c.profile.c_str());
                 history_reset_on_detect(c.x10a_identity_fp);
             }

@@ -1,68 +1,21 @@
 #pragma once
-// Making the 24-hour plant checkup survive a reboot — WHEN a persisted window may be believed.
+// Checkup integrity, scoped handoff and absolute-age journal compatibility.
 //
-// logic/checkup.hpp decides what is COUNTED; this decides what may be RE-ADOPTED. The sibling of
-// logic/history_persist.hpp, and deliberately the same machinery: a seal, a layout fingerprint, a
-// reset-reason allowlist, and a named verdict for every way the answer can be no.
+// Completed diagnosis hours are reconstructed from the history flash journal after clock sync
+// and current-boot X10A source confirmation. Warm .noinit rings have no absolute ages and are
+// always retired: repeated boots near an hourly seam must not rejuvenate an older assessment.
+// RAM-only completed hours and undated open-hour counters can therefore be lost on a restart.
 //
-// ── Why this exists at all ──────────────────────────────────────────────────────────────────────
-// The checkup was RAM-only "for history.hpp's reason" — hourly buckets in NVS would be write
-// traffic in the partition holding the WiFi credentials, for a convenience. That argument was never
-// about RAM; it was about FLASH, and legacy-391 answered it for the trends by moving them into
-// .noinit, where a reset that keeps power costs nothing to survive. The checkup simply never got
-// the same treatment, and its own header went on justifying the gap with "it is not persisted, so a
-// reboot starts it over regardless" — circular the moment somebody can change it.
+// Each journal payload carries the detected profile, the existing X10A profile/pins/protocol
+// target fingerprint, consent generation and exact interval end. The layout fingerprint binds
+// the bucket geometry, row locators and counting thresholds. Old unscoped records fail closed.
+// A unit swap that leaves the detected profile and link unchanged remains indistinguishable.
 //
-// The gap matters MORE here than it does for the trends. A trend that loses an hour has a shorter
-// chart; a checkup that loses its window loses the VERDICT, because the window is 24 h and the
-// requirements are hours long. Measured on the reference installation: the DHW check had one
-// completed hour after 9.9 h of uptime, and a single OTA took it back to zero — on a device
-// following the `dev` channel, where a firmware-relevant merge publishes a build and an owner who
-// keeps up to date may never reach 24 h at all.
-//
-// ── Two media, one meaning ──────────────────────────────────────────────────────────────────────
-// .noinit DRAM remains the zero-write fast path for a reset that keeps power.  The same completed
-// hourly buckets are also appended to the existing `history` flash journal once wall time is known.
-// That second path covers power loss and section movement across OTA; only the open hour can be
-// lost.
-//
-// A diagnostic bucket is not reconstructed from the five-minute trends: those rings deliberately
-// discard the short events this check counts.  Instead the exact CheckupBucket + DhwLossBucket pair
-// rides as the fourth journal source.  Its header carries checkup_journal_fingerprint(), and every
-// payload carries the detected model fingerprint and exact interval end.  A firmware meaning
-// change, a different unit, an invalid clock anchor or a torn flash write therefore fails closed
-// rather than turning old anonymous counters into a current verdict.
-//
-// One measurement is worth keeping from before the diagnostic journal existed, because it is what
-// the RAM seal is for: this same board DID keep its rings across a real OTA through .noinit alone.
-// The new image's sections can move, and then the bytes are not where the new build looks — but
-// they need not, and on an ordinary incremental build they did not. So .noinit is not a
-// power-cycle-only path; it is the path that fails closed when the layout moves, which is what the
-// seal below makes safe.
-//
-// ── Why the restore needs no clock ──────────────────────────────────────────────────────────────
-// history_persist.hpp's argument, and it transfers exactly: if the bytes are still there, power was
-// never lost, so the gap is a reset — about a second, or the reboot at the end of an OTA install.
-// The buckets are adopted in place with no re-anchoring. What CANNOT be adopted in place is the
-// lifecycle anchor: first/latest_sample_us are monotonic and restart at zero, so the previous
-// boot's observed span is carried as a DURATION (CheckupRing::carried_span_us) instead.
-//
-// The in-flight CheckupState is deliberately NOT restored. It holds edge witnesses either side of
-// the reboot, and carrying those would book a compressor start that may never have happened.  The
-// DHW filter is different: it is a measured one-hour LEVEL interval, not an edge.  Intentional
-// esp_restart() therefore checkpoints it as relative ages, books the reboot as explicit blind time,
-// and carries any fully measured DHW window that is still waiting in the open hourly bucket.
-//
-// ── Why a layout fingerprint, not just a CRC ────────────────────────────────────────────────────
-// A bucket is a pile of anonymous counters. Nothing in `buh_s` says which row it was read from, so
-// a firmware update that moved a locator, changed the bucket struct or moved a threshold would hand
-// the previous build's numbers to a check that now means something else by them — a valid CRC over
-// bytes that have quietly changed meaning. The fingerprint covers the geometry, every row locator
-// and the constants that decide what a counter COUNTS, so any such edit invalidates the record
-// automatically and nobody has to remember to bump a version.
-//
-// The MODEL is a second identity and is checked separately, at detect rather than at boot — see
-// checkup_model_fingerprint.
+// The RAM integrity predicate remains useful for a separately sealed, one-shot ongoing DHW
+// level filter written at an intentional esp_restart. Startup consumes the checkpoint once,
+// holds it only until current source confirmation. A carried candidate books the entire startup
+// gap plus the restart allowance as blind time; a settle/charge-only handoff adds no candidate
+// evidence. Undated completed pending counters are discarded. Edge state is never carried.
 #include "logic/checkup.hpp"
 #include "logic/config_store.hpp"     // config_crc32_* — the firmware's ONE CRC implementation
 #include "logic/history_persist.hpp"  // history_reset_preserves_ram — ONE answer to "did DRAM survive?"
@@ -74,24 +27,33 @@ namespace daik::logic {
 
 inline constexpr uint32_t CHECKUP_PERSIST_MAGIC   = 0x504b4843u;   // "CHKP" little-endian
 // v2 adds the diagnostics consent generation to the warm-restart image.  A v1
-// image must not be interpreted with the shifted v2 layout.
-inline constexpr uint16_t CHECKUP_PERSIST_VERSION = 2;
+// image must not be interpreted with the shifted v2 layout.  v3 seals the count of boots that
+// adopted the window and have not completed an hour since (HIST-03/b): a v2 image cannot say
+// whether its newest hour was ever aged, so it is refused as a whole.
+// v4 binds the full X10A source; integrity permits only the separate scoped handoff.
+// Completed hours are reconstructed exclusively from absolute-age flash records.
+inline constexpr uint16_t CHECKUP_PERSIST_VERSION = 4;
 
 // ── The verdict ─────────────────────────────────────────────────────────────────────────────────
-// Named outcomes for history_persist.hpp's reason: each is a different thing to say on /diag and a
-// different thing to do about it. "wrong_layout" after an update is expected and uninteresting;
-// "bad_crc" on a board that was never power-cycled is a memory fault worth seeing.
+// Internal integrity/refusal and public restoration vocabulary. Startup routes internal Accept
+// to FlashPending; later journal selection can report Fresh or Flash. "wrong_layout" after an
+// update is expected; "bad_crc" on a board that was never power-cycled is a memory fault worth
+// seeing.
 enum class CheckupRestore : uint8_t {
-    Accept,
-    NoRecord,       // magic absent — a fresh board, or DRAM that was never written
-    PowerCycle,     // the reset reason does not preserve RAM
-    WrongVersion,   // this build's record layout differs
-    WrongLayout,    // geometry, a row locator or a counting threshold moved
-    BadCrc,         // present and current, but not intact
-    ModelChanged,   // adopted at boot, then detection resolved a DIFFERENT unit
-    SafeMode,       // latched boot-loop recovery: nothing will age the window, so nothing adopts it
+    Accept,       // integrity only; startup routes this to FlashPending
+    NoRecord,     // magic absent — a fresh board, or DRAM that was never written
+    PowerCycle,   // the reset reason does not preserve RAM
+    WrongVersion, // this build's record layout differs
+    WrongLayout,  // geometry, a row locator or a counting threshold moved
+    BadCrc,       // present and current, but not intact
+    ModelChanged, // an explicit reset or later detector changed the source contract
+    SafeMode,     // latched boot-loop recovery: nothing will age the window, so nothing adopts it
     DiagnosticsDisabled, // explicit master switch is off: no observation or restore is allowed
     DiagnosticsChanged,  // evidence belongs to an earlier enable/disable generation
+    NotCommitted,        // retained legacy integrity-counter refusal; no completed-hour age claim
+    FlashPending,        // RAM hours retired; journal recovery pending, not proof of stored hours
+    Fresh,               // no stored intervals selected, including live/capacity precedence
+    Flash,               // selected stored intervals establish absolute-age journal reconstruction
 };
 
 inline constexpr const char* checkup_restore_slug(CheckupRestore r) {
@@ -106,6 +68,14 @@ inline constexpr const char* checkup_restore_slug(CheckupRestore r) {
         case CheckupRestore::SafeMode:     return "safe_mode";
         case CheckupRestore::DiagnosticsDisabled: return "diagnostics_disabled";
         case CheckupRestore::DiagnosticsChanged:  return "diagnostics_changed";
+        case CheckupRestore::NotCommitted:
+            return "not_committed";
+        case CheckupRestore::FlashPending:
+            return "flash_pending";
+        case CheckupRestore::Fresh:
+            return "fresh";
+        case CheckupRestore::Flash:
+            return "flash";
     }
     return "unknown";
 }
@@ -115,20 +85,21 @@ inline constexpr const char* checkup_restore_slug(CheckupRestore r) {
 // usually fail the magic check too, and reporting "bad_crc" for it sends a reader looking for a
 // memory fault that is not there.
 //
-// SAFE MODE is checked FIRST and refuses outright, which is the one rule here that is not about
-// whether the bytes are intact. Safe mode does not start the poll task, so nothing ages the ring:
-// an adopted window would sit frozen at its pre-reboot content — presented as a live 24-hour
-// assessment — for as long as the latch holds, which can be days. That is evidence outliving the
-// source it came from. It is also the state in which a plant verdict is worth least: the board is
-// recovering from a boot loop, and every optional consumer is already down.
-inline constexpr CheckupRestore checkup_restore_verdict(uint32_t reset_reason, uint32_t magic,
-                                                        uint16_t version, uint32_t layout_fp,
-                                                        uint32_t want_layout_fp,
-                                                        uint32_t stored_crc, uint32_t actual_crc,
-                                                        bool safe_mode = false,
-                                                        bool diagnostics_enabled = true,
-                                                        uint32_t stored_generation = 0,
-                                                        uint32_t wanted_generation = 0) {
+// Diagnostics-disabled and safe-mode refusals precede byte-integrity checks. Neither permits
+// observation or restoration; startup retires completed RAM hours in every case. Safe mode also
+// stops optional producers while the board recovers from a boot loop.
+//
+// NOT COMMITTED retains the sealed counter's legacy integrity refusal and is last because that
+// counter means nothing until the record passes its other checks. It does not establish age or
+// admit completed RAM hours: startup retires those hours regardless of this verdict. Integrity
+// instead gates the separate one-shot DHW handoff. `Flash` is not a verdict of this function:
+// later compatible absolute-age journal reconstruction reports it only after selecting evidence.
+inline constexpr CheckupRestore
+checkup_restore_verdict(uint32_t reset_reason, uint32_t magic, uint16_t version, uint32_t layout_fp,
+                        uint32_t want_layout_fp, uint32_t stored_crc, uint32_t actual_crc,
+                        bool safe_mode = false, bool diagnostics_enabled = true,
+                        uint32_t stored_generation = 0, uint32_t wanted_generation = 0,
+                        uint32_t boots_since_commit = 0) {
     if (!diagnostics_enabled)                         return CheckupRestore::DiagnosticsDisabled;
     if (safe_mode)                                  return CheckupRestore::SafeMode;
     if (!history_reset_preserves_ram(reset_reason)) return CheckupRestore::PowerCycle;
@@ -137,7 +108,19 @@ inline constexpr CheckupRestore checkup_restore_verdict(uint32_t reset_reason, u
     if (layout_fp != want_layout_fp)                return CheckupRestore::WrongLayout;
     if (stored_crc != actual_crc)                   return CheckupRestore::BadCrc;
     if (stored_generation != wanted_generation)     return CheckupRestore::DiagnosticsChanged;
+    if (boots_since_commit != 0) return CheckupRestore::NotCommitted;
     return CheckupRestore::Accept;
+}
+
+// Whether the one-shot DHW handoff of the previous boot's esp_restart is still believed. It rides
+// the record but has its own seal, model and layout. Startup consumes it once and retires all
+// completed RAM hours independently. The retained legacy NotCommitted counter follows the other
+// integrity and consent checks and does not itself measure age, so it need not reject this separate
+// handoff. Its own scope and seal still must pass, and applying it waits for current-source
+// confirmation. Preserving a compatible settle timer prevents a candidate inside the charge guard;
+// every other refusal clears the handoff as well.
+inline constexpr bool checkup_restore_keeps_dhw_handoff(CheckupRestore r) {
+    return r == CheckupRestore::Accept || r == CheckupRestore::NotCommitted;
 }
 
 // ── The fingerprints ────────────────────────────────────────────────────────────────────────────
@@ -205,12 +188,11 @@ inline uint32_t checkup_layout_fingerprint() {
 // when the answer exists: the model is RAM-only by design and every boot re-runs the sweep, so at
 // checkup_start() nothing yet knows what is on the bus.
 //
-// This is the trap history.cpp documents and paid for: treating "detection resolved" as "the
-// identity changed" was harmless while the window died at every reboot anyway, and becomes a
-// feature that delivers nothing the moment it does not — the restore is adopted at boot and thrown
-// away four seconds later, on exactly the boards that have a heat pump attached. The profile id is
-// the whole identity here, unlike the trends' per-row labels: every checkup locator is a fixed
-// constant, so what varies between units is only which profile supplies them.
+// First detection confirms this boot's source for later journal admission and the scoped DHW
+// filter handoff. Later source changes retire the old window.
+// This fingerprint binds the model portion: every checkup locator is fixed, and the profile selects
+// its decoding. The separate source_fp additionally binds the existing X10A profile/pins/protocol
+// target scope.
 inline uint32_t checkup_model_fingerprint(const char* profile_id) {
     uint32_t crc = CONFIG_CRC32_INIT;
     const uint8_t nul = 0;
@@ -230,10 +212,16 @@ inline uint32_t checkup_model_fingerprint(const char* profile_id) {
 // record older than the rolling day be rejected even when the board was powered off for weeks.
 struct CheckupJournalPayload {
     uint32_t model_fp = 0;
+    uint32_t source_fp = 0; // full detected X10A profile/link identity; zero is unsupported legacy
     uint32_t diagnostics_generation = 0;
     int64_t end_unix_s = -1;
     CheckupBucket checkup;
     DhwLossBucket dhw;
+};
+
+struct CheckupJournalRecord {
+    int64_t               bucket = INT64_MIN;
+    CheckupJournalPayload payload;
 };
 
 inline constexpr size_t CHECKUP_JOURNAL_WORD_BYTES = sizeof(uint16_t);
@@ -251,6 +239,7 @@ inline uint32_t checkup_journal_fingerprint() {
     crc = checkup_fp_u32(crc, checkup_layout_fingerprint());
     crc = checkup_fp_u32(crc, static_cast<uint32_t>(sizeof(CheckupJournalPayload)));
     crc = checkup_fp_u32(crc, static_cast<uint32_t>(offsetof(CheckupJournalPayload, model_fp)));
+    crc = checkup_fp_u32(crc, static_cast<uint32_t>(offsetof(CheckupJournalPayload, source_fp)));
     crc = checkup_fp_u32(
         crc, static_cast<uint32_t>(offsetof(CheckupJournalPayload, diagnostics_generation)));
     crc = checkup_fp_u32(crc, static_cast<uint32_t>(offsetof(CheckupJournalPayload, end_unix_s)));
@@ -287,14 +276,16 @@ inline constexpr int64_t checkup_journal_next_live_bucket(int64_t after_bucket,
 
 // ── Intentional-reboot DHW handoff ──────────────────────────────────────────────────────────────
 // Separate from the completed-ring seal on purpose.  The normal seal must remain valid through an
-// unexpected panic while the open buckets change.  This handoff is written once by the shutdown
-// handler immediately before esp_restart(), then consumed once by the next boot.
+// unexpected panic while the open buckets change. The best-effort intentional-restart checkpoint
+// is consumed once at startup; applying its compatible filter waits for current-source
+// confirmation.
 inline constexpr uint32_t CHECKUP_DHW_HANDOFF_MAGIC   = 0x57484443u; // "CDHW" little-endian
-inline constexpr uint16_t CHECKUP_DHW_HANDOFF_VERSION = 1;
+inline constexpr uint16_t CHECKUP_DHW_HANDOFF_VERSION = 2;
 
 struct DhwLossHandoffPayload {
+    uint32_t      source_fp = 0; // bound independently from profile and consent
     DhwLossCarry  candidate;
-    DhwLossBucket pending;   // completed clean windows not yet at the generic hour's commit seam
+    DhwLossBucket pending; // reserved layout field; undated completed counters retire on restart
 };
 
 inline uint32_t checkup_dhw_handoff_layout_fingerprint() {
@@ -314,6 +305,7 @@ inline uint32_t checkup_dhw_handoff_crc(uint32_t model_fp,
                                         const DhwLossHandoffPayload& p) {
     uint32_t crc = CONFIG_CRC32_INIT;
     crc = checkup_fp_u32(crc, model_fp);
+    crc                   = checkup_fp_u32(crc, p.source_fp);
     const DhwLossCarry& c = p.candidate;
     crc = checkup_fp_u32(crc, c.segment_elapsed_s);
     crc = checkup_fp_u32(crc, c.draw_anchor_age_s);
@@ -352,4 +344,79 @@ inline bool checkup_dhw_handoff_valid(uint32_t magic, uint16_t version,
            stored_crc == checkup_dhw_handoff_crc(model_fp, payload);
 }
 
+// Integrity and restoration are separate: a warm image never establishes completed-hour ages.
+inline constexpr CheckupRestore checkup_restore_route(CheckupRestore integrity) {
+    return integrity == CheckupRestore::Accept || integrity == CheckupRestore::NotCommitted
+               ? CheckupRestore::FlashPending
+               : integrity;
+}
+
+// An explicit source reset starts a new lifecycle in this boot, even if a manual selection
+// subsequently names the same profile/link. Consuming the reset must not reload its old hours.
+// Initial boot integrity and first automatic detection still permit compatible dated records.
+inline constexpr bool checkup_flash_restore_retired(CheckupRestore state) {
+    return state == CheckupRestore::ModelChanged;
+}
+
+inline bool checkup_journal_identity_matches(const CheckupJournalPayload& p, uint32_t model_fp,
+                                             uint32_t source_fp, uint32_t generation) {
+    return source_fp != 0 && p.source_fp == source_fp && p.model_fp == model_fp &&
+           p.diagnostics_generation == generation;
+}
+
+// Actual production admission for both stored and current-boot records. A cached startup scope
+// and a withdrawn source are expectations, never confirmation; absent clock uses the -1 sentinel.
+inline constexpr bool checkup_flash_source_ready(bool confirmed, uint32_t model_fp,
+                                                 uint32_t source_fp, bool reset_requested) {
+    return confirmed && model_fp != 0 && source_fp != 0 && !reset_requested;
+}
+inline bool checkup_journal_restore_admits(const CheckupJournalPayload& p, int64_t bucket,
+                                           int64_t now_unix_s, bool confirmed, uint32_t model_fp,
+                                           uint32_t source_fp, uint32_t generation,
+                                           bool reset_requested) {
+    return checkup_flash_source_ready(confirmed, model_fp, source_fp, reset_requested) &&
+           checkup_journal_identity_matches(p, model_fp, source_fp, generation) &&
+           bucket == checkup_journal_bucket(p.end_unix_s) &&
+           checkup_journal_in_window(p.end_unix_s, now_unix_s);
+}
+
+// Select exactly one admissible record for a retained slot. Current-boot evidence wins only
+// while it is itself valid; otherwise the newest valid stored duplicate wins. The caller uses
+// this same selection for provenance counting and reconstruction after capacity clipping.
+inline const CheckupJournalRecord*
+checkup_journal_select_slot(int64_t wanted, const CheckupJournalRecord* live, size_t live_count,
+                            const CheckupJournalRecord* stored, size_t stored_count,
+                            int64_t now_unix_s, bool confirmed, uint32_t model_fp,
+                            uint32_t source_fp, uint32_t generation, bool reset_requested,
+                            bool& from_flash) {
+    from_flash = false;
+    if ((!live && live_count) || (!stored && stored_count)) return nullptr;
+    auto admits = [&](const CheckupJournalRecord& rec) {
+        return rec.bucket == wanted &&
+               checkup_journal_restore_admits(rec.payload, rec.bucket, now_unix_s, confirmed,
+                                              model_fp, source_fp, generation, reset_requested);
+    };
+    for (size_t i = 0; i < live_count; ++i)
+        if (admits(live[i])) return &live[i];
+    for (size_t i = stored_count; i > 0; --i) {
+        if (!admits(stored[i - 1])) continue;
+        from_flash = true;
+        return &stored[i - 1];
+    }
+    return nullptr;
+}
+
+// Reconstructed slots, including selected live intervals, have monotonic deadlines independent of
+// the next boot-raster boundary and later SNTP corrections. Zero marks gaps or ordinary live slots
+// that still age through the hourly ring. Equality expires: end <= now - 24 h.
+inline constexpr bool checkup_restored_expired(int64_t expiry_us, int64_t now_us) {
+    return expiry_us > 0 && now_us >= expiry_us;
+}
+inline constexpr int64_t checkup_restore_expiry_us(int64_t end_unix_s, int64_t now_unix_s,
+                                                   int64_t now_us) {
+    if (now_us < 0 || !checkup_journal_in_window(end_unix_s, now_unix_s)) return 0;
+    const int64_t remaining_us =
+        (static_cast<int64_t>(CHECKUP_WINDOW_S) - (now_unix_s - end_unix_s)) * 1000000LL;
+    return now_us > INT64_MAX - remaining_us ? INT64_MAX : now_us + remaining_us;
+}
 } // namespace daik::logic

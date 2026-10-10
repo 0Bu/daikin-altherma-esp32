@@ -1,4 +1,4 @@
-// translation-source: bcd4ff0bb5bf1f2e454eb0f7e5c00ea352bcbb9f1f0c080ef5225bc85210fa0b
+// translation-source: 6bca03f96e2befcb0ffc38143e9bdb22db58839623b9195a314a93bb6dffffb3
 I18N.nb = localeValues([
   /* sys.nodata */ "Ingen data",
   /* sys.unreachable */ "Ikke tilgjengelig",
@@ -1169,7 +1169,7 @@ MODEL_DESCRIPTION_I18N.nb = modelDescriptionValues([
   ["Vannmengde etter 60 s pumpedrift: bare målt utsnitt; sammenlign samme modell/modus/vilkår, ingen universell grense."], // health_flow
   ["Observert BUH-/BSH-tid: kulde, nød, avriming, tappevann eller overskudd kan forklare; ingen universell grense."], // health_heater
   ["Eksperimentell overvåking av fem interne vernetellere: bare klar økning mellom sammenlignbare avlesninger teller, også når den først blir synlig ved stans eller en overgang i kompressorstatus. Basisverdi, stabile eller fallende verdier, hull og nullstillinger teller ikke. Økning gir INFO, ikke diagnose; ingen økning beviser ikke fravær av begrensning."], // health_retries
-  ["Ledig RAM og trend over 24 t: vedvarende fall kan tyde på ufrigjorte allokeringer. Etter omstart eller strømbrudd gjenopprettes lukkede 5-minutters intervaller fra flash-minnet."], // free_heap
+  ["RAM 24 h: stabil, fall snur; varig fall: mulig lekkasje; kompatibel omstart med strøm: RAM-kurve mulig; ellers kun daterte kompatible 5 min fra flashjournal etter tidssynk. 5 min oppløsning kan skjule korte stopp; åpne/siste ulagrede kan mangle."], // free_heap
   ["Største sammenhengende blokk som TLS/OTA trenger; fall med stabil total-RAM tyder på fragmentering."], // max_alloc
   ["Utedelens nominelle effekt, ikke aktuell produksjon."], // capacity
   ["INNEDELENS nominelle effekt; ikke utedel eller komplett anlegg."], // capacity_iu
