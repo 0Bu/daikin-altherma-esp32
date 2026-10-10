@@ -1402,7 +1402,10 @@ def secret_violation(payload: dict[str, Any]) -> str | None:
         github_action = classify_github_action(command)
         if github_action is not None and github_action.get("error"):
             return github_action["error"]
-        if SHELL_EXTGLOB.search(command) and not literal_rg_inspection(command):
+        # Decode ANSI-C quotes and join shell quote fragments conservatively before checking
+        # executable syntax. Reader proof must still come from the unmodified source.
+        extglob_source = re.sub(r"['\"]", "", normalize_ansi_c_quotes(command))
+        if SHELL_EXTGLOB.search(extglob_source) and not literal_rg_inspection(command):
             return "shell extglob expansion is not statically bounded by the credential/partition guard"
         if shell_dumps_environment(command):
             return "the command would dump process environment values, which may include credentials"
