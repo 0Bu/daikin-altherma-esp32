@@ -920,7 +920,8 @@ const mbStandInFor = (v) =>
 // to readings.
 const mbTwin = (row) => (row && !x10aDown() ? mbByConcept(row.concept) : null);
 
-// The eight quantities BOTH sources measure, in ONE table. Each row names the same thing three ways:
+// The structurally paired quantities, in ONE table. Water pressure is native Altherma4-only on the
+// Modbus side; the base EKRHH catalog has no pressure reading. Each row names the same thing three ways:
 // the field liveData fills, the schematic pill that draws it, the INSPECT target that pill opens —
 // against the CONCEPT the firmware paired them on (logic/homehub_map.hpp, resolved structurally by
 // register/offset/unit, never by label).
@@ -939,6 +940,7 @@ const MB_PAIRS = [
   { fld: "out",  pill: "svOut",  insp: "out",  cid: "outdoor_air"   },
   { fld: "r3t",  pill: "svR3t",  insp: "r3t",  cid: "refrigerant_liquid" },
   { fld: "flow", pill: "svFlow", insp: "flow", cid: "flow"          },
+  { fld: "wp",   pill: "svWp",   insp: "wp",   cid: "water_pressure" },
   { fld: "room", pill: "svRoom", insp: "room", cid: "room_temp"     },
 ];
 // The Modbus reading an INSPECT target stands for, while the drawing is running on the second
@@ -1110,7 +1112,7 @@ function descFor(label, row = null) {
       54: "a4.heating_offset_help",
       58: "a4.limit_help", 65: "a4.demand_help", 68: "a4.pump_help",
       74: "a4.pre_phe_outdoor_help", 79: "a4.pressure_help", 83: "a4.operation_help"})[row.off];
-    if (key) return { what: t(key) };
+    if (key) return { what: t(key), sourceQualified: true };
   }
   const l = label || "";
   const source = row && row.off != null ? "modbus" : row ? "x10a" : "";

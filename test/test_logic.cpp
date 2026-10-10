@@ -3365,6 +3365,23 @@ static void test_mqtt_group() {
           "{\"return_water_temperature\":35.5,"
           "\"smart_grid_operation_mode\":2,\"broken_numeric\":null}");
     CHECK(build_flat_json({}) == "{}");
+    const std::vector<GroupedValue> sparse_native = {
+        {"modbus", object_id(def::altherma4_find(54)->label), "0", PublishedKind::Number},
+        {"modbus", object_id(def::altherma4_find(74)->label), "1.0", PublishedKind::Number},
+        {"modbus", object_id(def::altherma4_find(80)->label), "1.0", PublishedKind::Number}};
+    CHECK(flat_json_size(sparse_native) == build_flat_json(sparse_native).size());
+    CHECK(flat_json_size(sparse_native) > sparse_native.size() * 32 + 16);
+    CHECK(flat_json_size({{"modbus", "code", "A\"\\\n", PublishedKind::Text}}) ==
+          build_flat_json({{"modbus", "code", "A\"\\\n", PublishedKind::Text}}).size());
+    CHECK(flat_json_size({}) == 2);
+    bool flat_oversize_refused = false;
+    try {
+        build_flat_json({{"modbus", "code", std::string(MODBUS_FLAT_JSON_MAX_BYTES, 'x'),
+                          PublishedKind::Text}});
+    } catch (const std::length_error&) {
+        flat_oversize_refused = true;
+    }
+    CHECK(flat_oversize_refused);
 
     // The group key doubles as an HA entity-name fragment for the DERIVED companions, which have no
     // catalog label of their own (logic/fault_state.hpp).

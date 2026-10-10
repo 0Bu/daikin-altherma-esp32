@@ -12,6 +12,7 @@
 #include <cstdint>
 #include <string>
 #include <string_view>
+#include <stdexcept>
 #include <vector>
 #include "convert.hpp"   // PublishedKind — the row's JSON type, taken from its DEFINITION
 #include "fault_state.hpp" // derived numeric companions beside textual fault classes
@@ -358,18 +359,37 @@ inline X10aCacheJsonProbe probe_x10a_cache_json(const Values& vals) {
     return {out.n, out.digest};
 }
 
-// Build the HomeHub payload for <base>/modbus. The topic already identifies the source, so repeating
-// a synthetic `modbus` object inside it would add nesting without information. Keys retain their
-// definition-owned Number/Text type exactly like the grouped X10A encoder above.
-inline std::string build_flat_json(const std::vector<GroupedValue>& vals) {
-    std::string j = "{";
-    j.reserve(vals.size() * 32 + 16);
+// Build the HomeHub payload for <base>/modbus. The topic already identifies the source, so
+// repeating a synthetic `modbus` object inside it would add nesting without information. Keys
+// retain their definition-owned Number/Text type exactly like the grouped X10A encoder above. Count
+// with the actual encoder before a single reservation; long corrected native keys must not trigger
+// a growth ladder. The ceiling is a refusal bound, never a permanent allocation.
+inline constexpr size_t MODBUS_FLAT_JSON_MAX_BYTES = 4 * 1024;
+
+template <typename JsonOut>
+inline void append_flat_json(JsonOut& j, const std::vector<GroupedValue>& vals) {
+    j += '{';
     for (size_t i = 0; i < vals.size(); i++) {
         if (i) j += ',';
         j += '"'; j += vals[i].key; j += "\":";
         append_published_value(j, vals[i]);
     }
     j += '}';
+}
+
+inline size_t flat_json_size(const std::vector<GroupedValue>& vals) {
+    CountingOut out;
+    append_flat_json(out, vals);
+    return out.n;
+}
+
+inline std::string build_flat_json(const std::vector<GroupedValue>& vals) {
+    const size_t bytes = flat_json_size(vals);
+    if (bytes > MODBUS_FLAT_JSON_MAX_BYTES)
+        throw std::length_error("Modbus MQTT payload exceeds safety ceiling");
+    std::string j;
+    j.reserve(bytes);
+    append_flat_json(j, vals);
     return j;
 }
 

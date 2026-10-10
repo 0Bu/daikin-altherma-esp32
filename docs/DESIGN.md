@@ -668,7 +668,8 @@ Body, ordered:
    three distinct vertical sections: description first, graphical history second, values last.
    For a leaf value target, that list omits the target's own X10A reading because it is already the
    headline, but keeps an available Modbus twin as its first divided value row, with the agreement or
-   difference directly underneath that row while both readings are current. A grouped target keeps
+   difference directly underneath that row while both readings are current and their conversion is
+   established. Native Altherma 4 flow/pressure show the conversion limit instead. A grouped target keeps
    its complete value list even when one member is also the headline: the DHW tank therefore lists
    X10A tank temperature, its Modbus
    twin, setpoint and both valve readings together below the chart. An inspector's explainer contains
@@ -679,6 +680,8 @@ Body, ordered:
    newer lazy locale modules carry a shorter inspector-specific explanation for every target so
    translated copy stays understandable inside this compact surface; their complete value/model
    accordion prose is stored separately in compact positional tables in the same locale asset.
+   A source-qualified native replacement explanation takes precedence over that generic inspector
+   copy in every locale, so an unverified conversion cannot lose its limitation in the compact view.
    Component copy (outdoor unit, PHE, ΔT, heat output, heating circuit) likewise lives in the
    inspector table. Both forms are keyed by the stable `data-insp` target; source selection and plant
    logic remain only in `INSPECT`.

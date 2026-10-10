@@ -889,7 +889,7 @@ const SG_INSP = (c, d) => c.INSPECT.sgrequest;
 // pinned here rather than left to be re-derived.
 {
   const c = ctx({ x10a: true, mbEnabled: true, mbConnected: true });
-  assert.equal(c.MB_PAIRS.length, 8, "eight measurement pairings");
+  assert.equal(c.MB_PAIRS.length, 9, "eight base pairings plus native-only water pressure");
   for (const p of c.MB_PAIRS) {
     for (const k of ["fld", "pill", "insp", "cid"]) {
       assert.equal(typeof p[k], "string", `MB_PAIRS entry needs ${k}`);

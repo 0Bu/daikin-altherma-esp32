@@ -88,9 +88,10 @@ See [its evidence limits](modbus_runtime/README.md): SDK timing models, schedule
 simulated config/history do not establish real hardware, NVS or physical HomeHub behavior.
 
 [`test_modbus_metadata_contract.mjs`](test_modbus_metadata_contract.mjs) separately compiles the
-current HTTP/MCP serializer and MQTT snapshot consumer from their production source. Fourteen
-cases and eight specific mutations check snapshot-owned definitions, raw numeric enums, text types,
-native labels/keys and quiet-selection exclusion from actual-state metadata. The future physical
+current HTTP/MCP serializer and MQTT snapshot consumer from their production source. Sixteen
+cases and ten specific mutations check snapshot-owned definitions, raw numeric enums, text types,
+native labels/keys and quiet-selection exclusion from actual-state metadata, plus exact bounded
+flat-JSON reservation and sparse native-key allocation. The future physical
 [Altherma 4 comparison](../docs/MODBUS_PROTOCOL.md#deferred-physical-acceptance) remains pending.
 
 `scripts/run-format-check.sh` always supplies the dependency-free baseline format gate: UTF-8, LF
@@ -287,7 +288,10 @@ assets together stay within a 283 KiB aggregate-growth guard. The reviewed growt
 complete localized factory-reset warning, cause-neutral diagnostic/report copy and native Altherma 4
 labels, state names and source-qualified explanations in every shipped language.
 Native flow/pressure limits are exercised in standalone, paired and replacement readings, including
-inspector invalidation when only definition metadata changes. Unverified conversions do not emit
+inspector invalidation when only definition metadata changes. The real-browser matrix performs
+390 value-disclosure and 104 schematic-inspector pointer clicks across all thirteen languages and
+both viewports, retaining each native limit in both paired and replacement inspector bodies.
+Unverified conversions do not emit
 numeric agreement/difference claims.
 The separate firmware-size gate binds
 the actual signed application image and its slot headroom. A fingerprint over the canonical

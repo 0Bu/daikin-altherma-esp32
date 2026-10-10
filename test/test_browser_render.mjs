@@ -333,13 +333,13 @@ async function clickDisclosure(page, selector) {
   })()`);
 }
 
-async function captureNativeEvidence(page, context) {
+async function captureNativeEvidence(page, context, target = "valueGroups") {
   const directory = process.env.DAIKIN_BROWSER_EVIDENCE_DIR;
   if (!directory || !/^(desktop\/en|phone\/de)(\/|$)/.test(context)) return;
   assert.ok(path.isAbsolute(directory), "browser evidence directory must be absolute");
   fs.mkdirSync(directory, { recursive: true });
   const clip = await page.evaluate(`(() => {
-    const rect = document.getElementById("valueGroups").getBoundingClientRect();
+    const rect = document.getElementById(${JSON.stringify(target)}).getBoundingClientRect();
     return { x: rect.left + scrollX, y: rect.top + scrollY,
       width: rect.width, height: rect.height, scale: 1 };
   })()`);
@@ -484,6 +484,55 @@ async function assertNativeAltherma4(page, context) {
       await assertAccessibility(page, `${context}/paired-limit/${connected}`, { nativeTree: true });
       assert.deepEqual(page.diagnostics, [], `${context}: paired limits must emit no browser errors`);
       await captureNativeEvidence(page, `${context}/${connected ? "paired" : "replacement"}`);
+      for (const [target, key, nativeValue] of [
+        ["flow", "a4.flow_help", "2.6"], ["wp", "a4.pressure_help", "2"],
+      ]) {
+        await page.waitFor("!S.clickHold");
+        await page.evaluate("S.insp = null; renderInspect(); true");
+        const selector = `#schem [data-insp=${JSON.stringify(target)}]`;
+        await page.evaluate(`document.querySelector(${JSON.stringify(selector)})
+          .scrollIntoView({block: "center", behavior: "instant"}); true`);
+        await page.frame();
+        const point = await page.evaluate(`(() => {
+          const hit = document.querySelector(${JSON.stringify(selector)});
+          const rect = hit.getBoundingClientRect();
+          const point = {x: rect.left + rect.width / 2, y: rect.top + rect.height / 2};
+          return {...point, target: document.elementFromPoint(point.x, point.y)
+            ?.closest("[data-insp]")?.dataset.insp};
+        })()`);
+        assert.equal(point.target, target, `${context}/${target}: settled pointer must reach the actual hit target`);
+        const {x, y} = point;
+        await page.send("Input.dispatchMouseEvent", {type: "mouseMoved", x, y});
+        await page.send("Input.dispatchMouseEvent",
+          {type: "mousePressed", button: "left", clickCount: 1, x, y});
+        await page.send("Input.dispatchMouseEvent",
+          {type: "mouseReleased", button: "left", clickCount: 1, x, y});
+        try {
+          await page.waitFor(`S.insp === ${JSON.stringify(target)} &&
+            document.getElementById("inspect").classList.contains("open") &&
+            document.getElementById("inspect").getAnimations({subtree: true})
+              .every(a => a.playState !== "running")`);
+        } catch (error) {
+          console.error(context, target, connected, await page.evaluate(`({
+            target: S.insp, open: document.getElementById("inspect").className,
+            animations: document.getElementById("inspect").getAnimations({subtree: true})
+              .map(a => ({state: a.playState, name: a.animationName,
+                target: a.effect.target.id || a.effect.target.className,
+                iterations: a.effect.getTiming().iterations})),
+          })`));
+          throw error;
+        }
+        assert.deepEqual(await page.evaluate(`(() => ({
+          help: document.getElementById(${JSON.stringify(connected ? "inspRows" : "inspBody")})
+            .innerText.includes(t(${JSON.stringify(key)})),
+          headline: document.getElementById("inspNow").innerText.split(" ")[0],
+          deltas: document.getElementById("inspRows").querySelectorAll(".mb-delta").length,
+        }))()`), {help: true, headline: connected ? "2.5" : nativeValue, deltas: 0},
+        `${context}/${target}/${connected}: real inspector click retains the native limit`);
+        assertLayout(await page.evaluate(layoutAudit), `${context}/${target}/native-inspector`);
+        await captureNativeEvidence(page,
+          `${context}/inspector-${target}-${connected ? "paired" : "replacement"}`, "inspect");
+      }
     }
   } finally {
     // The last real click holds per-poll rebuilds briefly. Restore only after that production lease

@@ -741,6 +741,8 @@ Deep dives: [`X10A_PROTOCOL.md`](X10A_PROTOCOL.md), [`REGISTERS.md`](REGISTERS.m
   [`logic/modbus_catalog.hpp`](../main/logic/modbus_catalog.hpp)): 42 rows retain their own labels,
   types and enums through copied snapshots. Manufacturer-derived meanings are host-tested;
   physical acceptance and flow/pump/pressure assumptions remain [pending](MODBUS_PROTOCOL.md#deferred-physical-acceptance).
+  Flat Modbus MQTT JSON uses one exact-sized transient reservation after escaped-byte counting;
+  a 4 KiB refusal ceiling is handled by the MQTT task's existing exception boundary.
 - **✅ 🧪 Batched reads on two cadences** ([`logic/modbus_plan.hpp`](../main/logic/modbus_plan.hpp),
   [`logic/modbus_snapshot.hpp`](../main/logic/modbus_snapshot.hpp)): the full map is read every fifth
   tick; intervening ticks read diagnosis gates and outdoor context. Exception batches fall back to

@@ -8,25 +8,37 @@ import { readAppFragments, readUiLocale } from "../tools/ui/read_app_source.mjs"
 const appStateSource = readAppFragments(["app_state.js"]);
 const schematicSource = readAppFragments(["schematic.js"]);
 
-function renderer(lang) {
-  const source = readAppFragments(["i18n.js"]) +
+function renderer(lang, removeNativePrecedence = false) {
+  let source = readAppFragments(["i18n.js"]) +
     (lang === "en" ? "" : readUiLocale(lang)) +
     readAppFragments(["history.js", "descriptions.js", "schematic.js"]);
+  if (removeNativePrecedence) {
+    const anchor = "const preferSourceDesc = fb && desc?.sourceQualified;";
+    assert.equal(source.split(anchor).length, 2, "unique production mutation anchor");
+    source = source.replace(anchor, "const preferSourceDesc = false;");
+  }
+  const nodes = new Map();
+  const element = (id) => {
+    if (!nodes.has(id)) nodes.set(id, { innerHTML: "", textContent: "", hidden: false,
+      classList: { toggle() {} }, removeAttribute() {}, setAttribute() {} });
+    return nodes.get(id);
+  };
   const context = {
-    document: { getElementById: () => null },
+    document: { getElementById: element, querySelectorAll: () => [] },
+    $: element,
     fetch: () => { throw new Error("unexpected fetch in enum test"); },
     localStorage: { getItem: () => lang, setItem: () => {} },
     navigator: { language: lang },
     S: { status: { hp: { connected: true }, modbus: { enabled: true, connected: true },
       history: { rows: [], modbus_rows: [], env3_rows: [] } },
-      _values: [], _modbus: [], descOpen: new Set(), hist: new Map() },
+      _values: [], _modbus: [], descOpen: new Set(), hist: new Map(), histPin: new Map() },
   };
   vm.createContext(context);
-  vm.runInContext(source + "\nthis.__ui = { displayValue, displayUnit, displayReadingLabel, displayHomeHubLabel, descFor, mbNoteHtml, vDescRow, inspectSig, INSPECT, state: S, operationModeText, operationModeFromFlags, labels: I18N[LANG]," +
+  vm.runInContext(source + "\nthis.__ui = { displayValue, displayUnit, displayReadingLabel, displayHomeHubLabel, descFor, mbNoteHtml, vDescRow, inspectSig, renderInspect, INSPECT, state: S, operationModeText, operationModeFromFlags, labels: I18N[LANG]," +
     " sgModeText: (mode) => t(`sg.mode${mode}`)," +
     " sgBoostText: () => t(\"schem.sg_boost\") };", context,
     { filename: "main/www/app.sources" });
-  return context.__ui;
+  return { ...context.__ui, element };
 }
 
 const en = renderer("en");
@@ -118,8 +130,28 @@ for (const lang of ["en", "de", "es", "fr", "it", "pl", "cs", "uk", "zh", "ja", 
     ui.state._modbus[0].profile = "altherma4";
     assert.notEqual(ui.inspectSig(ui.INSPECT[ui.state.insp]), baseSignature,
       `${lang}/${off}: source metadata alone must refresh an open inspector's meaning`);
+    ui.state.status.hp.connected = false;
+    ui.state.inspSig = "";
+    ui.renderInspect();
+    assert.ok(ui.element("inspBody").innerHTML.includes(escaped),
+      `${lang}/${off}: actual replacement inspector retains its native interpretation limit`);
+    ui.state._modbus[0].profile = "homehub";
+    ui.renderInspect();
+    assert.ok(!ui.element("inspBody").innerHTML.includes(escaped),
+      `${lang}/${off}: the base inspector must not inherit native limits`);
   }
 }
+const precedenceMutation = renderer("es", true);
+precedenceMutation.state._values = [{label: "Flow sensor", value: "2.5", concept: "flow"}];
+precedenceMutation.state._modbus = [{label: "Flow rate", value: 2, unit: "L/min", off: 49,
+  concept: "flow", profile: "altherma4"}];
+precedenceMutation.state.status.hp.connected = false;
+precedenceMutation.state.live = {flow: 2, wp: null, ouHeldOver: false};
+precedenceMutation.state.insp = "flow";
+precedenceMutation.renderInspect();
+assert.ok(!precedenceMutation.element("inspBody").innerHTML.includes(
+  precedenceMutation.labels["a4.flow_help"]),
+"the production mutation reproduces the missing native warning in the localized inspector");
 assert.equal(en.displayHomeHubLabel({off: 58, label: "Power consumption"}), "Power consumption",
   "the independent base profile keeps its actual power-consumption label");
 for (const [off, label, key] of [[49, "Flow rate", "flow_help"],

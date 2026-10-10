@@ -1058,7 +1058,9 @@ host-testable core is unusually large and valuable, because the risky parts are 
   change between states — the legacy-209 fan-step failure, where one key alternated between a number and a
   string and the metrics consumer silently kept the stale number. A `Number` whose formatted value is
   not a number publishes `null`, never a quoted string. Text values are escaped through
-  `logic/json.hpp`.
+  `logic/json.hpp`. The flat Modbus encoder measures the exact escaped payload before one
+  reservation and refuses payloads larger than 4 KiB through the MQTT task's exception boundary;
+  a sparse native subset therefore cannot trigger a second payload allocation from long keys.
 - `logic/mqtt_uri.hpp` — broker URI → host/port/TLS split behind `mqtt_ha`'s scheme policy: scheme
   defaults (`mqtt://` 1883, `mqtts://` 8883, `ws://` 80, `wss://` 443 — the WebSocket transports take
   the HTTP(S) ports **esp-mqtt itself** defaults to, so the save-time pre-flight probes the port the
@@ -4031,8 +4033,8 @@ GET  /values      decoded readings [{label,value,unit,reg}], plus sparse structu
                   prevent. The HomeHub's own readings ride a SECOND array, `modbus`
                   [{label,value,unit,off[,binary][,enum][,profile][,concept][,history]}] — two arrays, never merged, mirroring
                   the two stacks: the sources have separate liveness, and merging would make "is this
-                  reading current?" a per-row question no consumer could answer. `off` is the EKRHH
-                  data-model offset of the snapshot's defining catalog. Native rows carry `profile: "altherma4"`;
+                  reading current?" a per-row question no consumer could answer. `off` is the offset
+                  in the snapshot's defining EKRHH or native Altherma 4 catalog. Native rows carry `profile: "altherma4"`;
                   their enums and localized labels do not borrow EKRHH semantics. Native quiet selection
                   is neither a quiet-active pairing nor a quiet-active history. History recording requires
                   matching space, offset, codec, scale and unit; missing provenance produces a gap. `history`

@@ -14,6 +14,7 @@ const httpPath = path.join(root, "main/http_status.cpp");
 const mqttPath = path.join(root, "main/mqtt_ha.cpp");
 const httpSource = fs.readFileSync(httpPath, "utf8");
 const mqttSource = fs.readFileSync(mqttPath, "utf8");
+const flatSource = fs.readFileSync(path.join(root, "main/logic/mqtt_group.hpp"), "utf8");
 const productionInputs = new Map([
   httpPath, mqttPath,
   ...["hp_poll.hpp", "def/homehub.hpp", "def/altherma4.hpp", "logic/modbus_catalog.hpp",
@@ -82,6 +83,17 @@ function compile(name, http = httpBody, mqtt = mqttBody) {
     `-DHUB_HTTP_CONSUMERS=${JSON.stringify(httpHeader)}`,
     `-DHUB_MQTT_CONSUMER=${JSON.stringify(mqttHeader)}`, fixture, "-o", binary,
   ]);
+  return binary;
+}
+
+function compileAllocation(name, flat = flatSource) {
+  const header = path.join(temp, `${name}-mqtt-group.hpp`);
+  fs.writeFileSync(header, flat);
+  const binary = path.join(temp, name);
+  execute(process.env.CXX || "c++", ["-std=c++17", "-Wall", "-Wextra", "-Werror",
+    `-I${path.join(root, "main")}`, `-I${path.join(root, "main/logic")}`,
+    `-DHUB_FLAT_ENCODER=${JSON.stringify(header)}`,
+    path.join(root, "test/modbus_metadata/allocation_fixture.cpp"), "-o", binary]);
   return binary;
 }
 
@@ -177,6 +189,8 @@ const oracles = {
   "mqtt-not-live": (value) => assert.deepEqual(value, {}),
   "mqtt-owned-snapshot": (value) => assert.deepEqual(value, nativeMqtt),
   "mqtt-profile-calls": (count) => assert.equal(count, 0),
+  "flat-sparse-allocation-count": (count) => assert.equal(count, 1),
+  "flat-oversize-refused": (refused) => assert.equal(refused, true),
 };
 
 function check(cases, name) {
@@ -198,6 +212,10 @@ try {
     const expected = Object.keys(oracles).filter((name) => name.startsWith(`${consumer}-`));
     assert.deepEqual([...cases.keys()].sort(), expected.sort());
     for (const name of expected) { check(cases, name); passed++; }
+  }
+  const allocationCases = observe(compileAllocation("allocation-production"), "flat");
+  for (const name of ["flat-sparse-allocation-count", "flat-oversize-refused"]) {
+    check(allocationCases, name); passed++;
   }
 
   const controls = [
@@ -233,11 +251,22 @@ try {
     assert.throws(() => check(cases, control.oracle), { code: "ERR_ASSERTION" },
       `${control.name} must fail its specific semantic oracle ${control.oracle}`);
   }
+  for (const [name, before, after, oracle] of [
+    ["mqtt-heuristic-reserve", "j.reserve(bytes);", "j.reserve(vals.size() * 32 + 16);",
+      "flat-sparse-allocation-count"],
+    ["mqtt-missing-ceiling", "bytes > MODBUS_FLAT_JSON_MAX_BYTES", "false",
+      "flat-oversize-refused"],
+  ]) {
+    const binary = compileAllocation(name, mutate(flatSource, before, after, name));
+    const cases = observe(binary, "flat");
+    assert.throws(() => check(cases, oracle), {code: "ERR_ASSERTION"},
+      `${name} must fail its specific allocation/refusal oracle`);
+  }
   for (const [file, content] of productionInputs)
     assert.equal(fs.readFileSync(file, "utf8"), content,
       `${path.relative(root, file)} changed during the production consumer test`);
   const hash = (source) => createHash("sha256").update(source).digest("hex");
-  console.log(`Modbus metadata production consumers: ${passed} cases, ${controls.length} detected mutation controls`);
+  console.log(`Modbus metadata production consumers: ${passed} cases, ${controls.length + 2} detected mutation controls`);
   console.log(`Extracted append_json_uint + append_modbus_values_array: ${hash(`${uintBody}\n\n${httpBody}\n`)}`);
   console.log(`Extracted current_modbus_values: ${hash(mqttBody)}`);
 } finally {
