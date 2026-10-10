@@ -141,7 +141,7 @@ try {
   assert.deepEqual(zlib.gunzipSync(iconGzip.stdout), iconSource, "HTTP-decoded icon retains every original byte");
   assert.ok(iconGzip.stdout.length < iconSource.length, "compressing the icon must actually reduce its flash footprint");
   assert.match(cmake, /"\$\{CMAKE_CURRENT_BINARY_DIR\}\/favicon\.ico\.gz"/);
-  assert.match(status, /http_send_gzip\(req, "image\/vnd\.microsoft\.icon", favicon_ico_gz_start, favicon_ico_gz_end\)/);
+  assert.match(status, /http_send_gzip\(req,\s*"image\/vnd\.microsoft\.icon",\s*favicon_ico_gz_start,\s*favicon_ico_gz_end\)/);
 
   // rJSmin supports only unnested template literals.  The wrapper must preserve their raw text,
   // including the leading spaces in nested translated clauses; syntax-only validation missed this
