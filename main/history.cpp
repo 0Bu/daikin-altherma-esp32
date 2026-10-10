@@ -885,10 +885,10 @@ const char* history_persist_state() { return logic::history_restore_slug(s_persi
 // The poll task's sign of life, every cycle — including the cycles that skip all work (a network
 // hold-off) and the ones spent detecting. Cheap by construction: a try-lock, a store and a CRC over
 // the 32 bytes of instants in the liveness record, never the ~30 KB seal, and nothing allocates. A
-// contended lock skips the write; the next cycle makes it, and the record then lags by a cycle,
-// which the next boot books as unmeasured time (it is part of the stretch between the last sign of
-// life and the reset). noexcept because this sits on the poll task's per-cycle path and an unwind
-// through a C task frame terminates the process.
+// contended lock skips the write; a later successful touch refreshes it. Until then the record can
+// lag behind actual uptime. The next boot books only the measured record stretch plus its fixed
+// allowance; an unmeasured tail until reset can be under-booked. noexcept because this sits on the
+// poll task's per-cycle path and an unwind through a C task frame terminates the process.
 void history_liveness_touch() noexcept {
     if (!s_mtx) return;
     Lock lk(s_mtx, 0);
@@ -2494,14 +2494,13 @@ static size_t history_flash_service_journal(size_t max_records, TickType_t wait_
     return written;
 }
 
-// A normal five-minute close is already durable within the next poll tick. The shutdown handler is
-// only a bounded final drain for the race where OTA/reconfiguration requests esp_restart between
-// the close and that tick; it never rewrites a ~30 KiB snapshot.
+// Eligible completed buckets are queued for journal draining. The shutdown handler provides a
+// bounded additional drain before an intentional restart; it never rewrites a ~30 KiB snapshot.
 //
 // It also gives the liveness record its last sign of life, first and whether or not a journal
 // exists. The wait is short: a restart that has already switched the boot partition must never be
-// stranded behind a contended history lock, and a missed touch only leaves the record lagging by
-// the last poll cycle, which the next boot books as unmeasured time.
+// stranded behind a contended history lock. A missed touch leaves an unmeasured interval between
+// the last successful update and reset; the fixed allowance need not cover that entire interval.
 void history_flash_save() {
     if (s_mtx) {
         Lock lk(s_mtx, pdMS_TO_TICKS(50));

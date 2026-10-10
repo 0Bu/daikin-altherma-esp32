@@ -21706,7 +21706,8 @@ static void test_history_adoption_booking() {
         // The previous boot died with its last bucket still waiting for the next poll tick: that
         // reading was never filed. The old rule files it (at its seam-shifted bucket); the floor
         // cannot tell it from a reading filed under another bucket and skips it - the documented
-        // cost, one reading of the tail, still in RAM. Neither rule files anything twice there.
+        // cost in this fixture, one tail reading still in RAM. The old rule can duplicate earlier
+        // readings at these seams; the floor prevents those duplicates.
         const auto old_undrained = run(false, false, 0);
         const auto new_undrained = run(false, true, 0);
         CHECK(old_undrained.dups > 0 && new_undrained.dups == 0);

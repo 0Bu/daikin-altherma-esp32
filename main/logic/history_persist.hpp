@@ -702,8 +702,9 @@ inline uint32_t history_fp_u32(uint32_t crc, uint32_t v) {
 
 // ── The liveness record: how long ago did the newest commit happen, as the device last saw it? ──
 // The main seal answers "are these bytes intact"; it cannot answer "how old is the newest sample
-// they hold", because it changes only at a commit and a boot that stopped committing leaves it
-// valid and stale. This small record is the other half. It is written by the boot that owns the
+// they hold". Ordinary pending folds leave it intact; commits, adoption, resets and source
+// bookkeeping reseal it. Intact samples can still be old. This small record is the other half.
+// It is written by the boot that owns the
 // rings, outside the ~30 KB seal and under a CRC of its own, so updating it costs a few dozen bytes
 // of CRC rather than the whole region's, which is what lets the poll task refresh it every cycle.
 //
