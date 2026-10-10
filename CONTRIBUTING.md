@@ -186,12 +186,15 @@ protection flag and a retry counter as a °C reading. Its later reference-table 
 subject to the same gate. Since the profiles are machine-generated, the gap re-opens whenever the
 generator emits a label the copy has never seen, without anyone touching this repo's JS.
 
-It evaluates the real table in a JS engine rather than re-implementing its regexes elsewhere (a
-looser second copy of a rule is not a test of that rule), so it needs **node ≥ 18**, the same runtime
-as the user-docs, schematic and UI gates. Findings: `D001` a visible reading with no copy, `D002` an entry matching nothing,
-`D003/D004` a malformed entry or missing German, `D005` a stale ledger line. If a finding is correct
+It evaluates the real table, profile-qualified `descFor` and English `I18N`/`t()` in a JS engine
+rather than re-implementing their rules elsewhere, so it needs **node ≥ 18**, the same runtime
+as the user-docs, schematic and UI gates. Every base/native Modbus row is checked independently;
+a shared label cannot hide a missing native explanation. Findings: `D001` a visible reading with no
+copy, `D002` an entry matching nothing, `D003/D004` malformed or missing localized copy, `D005` a
+stale ledger line, `D008` shadowed semantic copy or a native profile leak, and `D009` unreachable
+native help. If a finding is correct
 as it stands, record it in [`tools/descriptions/audit_exceptions.txt`](tools/descriptions/audit_exceptions.txt)
-with a reason — except `D001`, which the ledger refuses outright: a published reading the user
+with a reason — except `D001` and `D009`, which the ledger refuses outright: a published reading the user
 cannot look up is the defect the gate exists for, and the fix is copy, not a suppression. Touching
 the audit means also running `tools/descriptions/selftest.sh`, same argument as the domain one.
 
