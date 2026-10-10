@@ -2591,12 +2591,14 @@ The Home Assistant bridge:
     funnels through one `mqtt_publish()` wrapper in `mqtt_ha.cpp` so these cover
     discovery+state+heartbeat+heating-curve evidence+LWT, not just one topic), `mqtt_reconnects` (cumulative, excludes the
     first-ever connect).
-    Beside them, the two counters for cycles that produced **nothing** (legacy-380). `mqtt_fails` counts a
-    failed publish *call*; neither of these ever reached one, so before they existed the loss was
+    Beside them, two counters for interrupted or deliberately skipped cycles (legacy-380).
+    `mqtt_fails` counts a failed publish *call*; these counters cover failures or hold-offs outside
+    that call, so before they existed the loss was
     invisible outside a `/diag` ring the next chatty boot overwrites — 337 dropped publishes in 30
     days on the wired board, 125 of them in the last 24 hours, every one immediately before an OTA
-    reboot. **`mqtt_skipped`** is a cycle that threw (`std::bad_alloc`, caught by the task guard) and
-    lost the reading; **`mqtt_quiesced`** is a cycle the publisher stood aside for **on purpose**
+    reboot. **`mqtt_skipped`** is a cycle that threw (`std::bad_alloc`, caught by the task guard)
+    after an allocation failure or the flat Modbus payload's 4 KiB refusal; earlier topics may
+    already have been published. **`mqtt_quiesced`** is a cycle the publisher stood aside for **on purpose**
     because an OTA or weather TLS operation owned the heap (`logic/ota_quiesce.hpp`, see OTA below). Two counters
     rather than one "cycles lost", so the fix is legible in the store: the intended shape is
     `quiesced` stepping once per install while `skipped` stops rising at all, which a combined

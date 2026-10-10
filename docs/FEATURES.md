@@ -647,8 +647,9 @@ Everything needed to explain a crash *after the fact*, from the field, without a
   independently of profile detection, so board health is visible while the model is still `auto`.
   The reset reason rides as a slug **and** as numbers, because a metrics pipeline keeps numeric
   fields and drops strings. `bus_ou_held_over` reports **source** freshness rather than link health.
-  `mqtt_skipped` / `mqtt_quiesced` / `poll_skipped` count the 1 s cycles that produced **nothing** —
-  an OOM guard catch, a deliberate OTA/weather TLS hold-off, and a sweep that never reached the bus (legacy-380). They
+  `mqtt_skipped` counts interrupted 1 s publish cycles, possibly after earlier topics were sent;
+  `mqtt_quiesced` counts deliberate OTA/weather TLS hold-offs and `poll_skipped` counts sweeps that
+  never reached the bus (legacy-380). They
   are the counters that made a silent loss visible: 337 dropped publishes in 30 days had existed only
   as lines in a `/diag` ring the next chatty boot overwrites. `heap_restarts` — the 22nd entity —
   attributes the one reboot nothing else can: the heap watchdog restarts with `esp_restart()`, so
