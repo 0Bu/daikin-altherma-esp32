@@ -589,8 +589,8 @@ static bool poll_detect() {                         // false only when an attemp
     // (detect_commit_no_match, logic/detect.hpp). Keeping "auto" means the next cycle simply
     // re-detects; the model is RAM-only either way, so nothing is persisted by waiting.
     const std::string detected_profile = d.best.empty() ? "generic" : d.best;
-    const uint32_t identity_fp = logic::history_x10a_target_fingerprint(
-        detected_profile.c_str(), d.rx, d.tx, static_cast<char>(d.proto));
+    const uint32_t    identity_fp =
+        history_x10a_identity(detected_profile.c_str(), d.rx, d.tx, static_cast<char>(d.proto));
     bool first_no_match = false;
     bool     first_incomplete  = false;
     bool generic_committed = false;

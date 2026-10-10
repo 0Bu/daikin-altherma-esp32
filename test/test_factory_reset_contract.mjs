@@ -83,7 +83,7 @@ assert.match(code("main/logic/config_transaction.hpp"),
   /config_commit_detected_link_transaction\([\s\S]*?live\.runtime_revision != expected_revision[\s\S]*?store\.write_blob\(CONFIG_KEY_LINK/,
   "the detection link write must be a revision-checked config transaction");
 const httpConfig = code("main/http_config.cpp");
-assert.match(httpConfig, /reset_checkup && c\.profile != "auto"[\s\S]*?history_x10a_target_fingerprint\([\s\S]*?if \(c\.x10a_identity_fp != 0\)[\s\S]*?history_reset_on_detect\(c\.x10a_identity_fp\)/,
+assert.match(httpConfig, /reset_checkup && c\.profile != "auto"[\s\S]*?history_x10a_identity\([\s\S]*?if \(c\.x10a_identity_fp != 0\)[\s\S]*?history_reset_on_detect\(c\.x10a_identity_fp\)/,
   "manual concrete-profile or wiring-only updates must install a nonzero history scope");
 
 const modbus = code("main/hp_modbus.cpp");

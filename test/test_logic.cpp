@@ -17452,9 +17452,11 @@ static void test_history_persist() {
 
     // --- the verdict, and the ORDER it decides in -----------------------------------------------
     const uint32_t fp = history_catalog_fingerprint();
-    // PR legacy-8's exact catalog: existing dev.6/dev.7 flash records must stay on the
-    // direct fast path while manifests make future catalog edits migratable.
-    CHECK(fp == 0xda95bbc0u);
+    // HIST-01/c: the fingerprint is now a fold of every ring's series id, so it moved from the
+    // previous generation (0xda95bbc0, legacy-8's catalog). Records of that generation are no
+    // longer on the direct fast path; they are read through their manifests
+    // (test_history_identity pins both the mapping and how the old constant was built).
+    CHECK(fp == 0xa1783c86u);
     const uint32_t sw = static_cast<uint32_t>(CrashReason::SW);
     CHECK(history_restore_verdict(sw, HISTORY_PERSIST_MAGIC, HISTORY_PERSIST_VERSION, fp, fp, 7,
                                   7) == HistoryRestore::Accept);
@@ -17723,6 +17725,8 @@ static void test_history_persist() {
     CHECK(history_current_series_list_fingerprint(HistoryJournalSource::X10a) ==
           history_series_list_fingerprint(HistoryJournalSource::X10a, x_ids, TREND_COUNT));
     CHECK(history_series_id(HistoryJournalSource::X10a, TREND_COUNT) == 0);
+    CHECK(history_series_id(HistoryJournalSource::Modbus, HOMEHUB_HISTORY_COUNT) == 0);
+    CHECK(history_series_id(HistoryJournalSource::Env3, ENV3_HISTORY_COUNT) == 0);
     CHECK(history_series_id(HistoryJournalSource::Checkup, 0) == 0);
 
     uint32_t reordered[HISTORY_MANIFEST_MAX_IDS] = {};
@@ -17775,7 +17779,10 @@ static void test_history_persist() {
     CHECK(history_series_index(legacy_mb, 12, mb_ids[HOMEHUB_HISTORY_COUNT - 1]) == -1);
     CHECK(history_series_index(legacy_x, 31, x_ids[0]) == 0);
     CHECK(history_series_index(legacy_x, 31, x_ids[0] ^ 1u) == -1); // changed semantics
-    CHECK(history_series_index(legacy_mb, 12, mb_ids[0]) == 0);
+    // The HomeHub ids now carry the register's decode columns (HIST-01/d), so the frozen
+    // pre-manifest HomeHub ids — built without them — map nothing: those records were written under
+    // a meaning this build can no longer vouch for, and the adapter correctly refuses them.
+    CHECK(history_series_index(legacy_mb, 12, mb_ids[0]) == -1);
     CHECK(history_legacy_disinfection_stored_index(HistoryJournalSource::X10a,
                                                    static_cast<size_t>(tank_preheat_index)) == -1);
     CHECK(history_legacy_disinfection_stored_index(HistoryJournalSource::X10a, 0) == 0);
@@ -18100,6 +18107,837 @@ static void test_history_persist() {
     CHECK(n == HISTORY_SAMPLES);
     CHECK(out[0] == 300); // its newest sample sits at the window edge
     CHECK(out[HISTORY_SAMPLES - 1] == 22);
+}
+
+// ── HIST-01: the durable identity of what a stored sample MEANS ─────────────────────────────────
+// b) the circulation witness, c) the catalog fingerprint, d) HomeHub decoding and the X10A scope's
+// independence from the trend catalog, e) the metadata the /history route derives its time axis
+// from. Each block is written so that the defect it closes reproduces if the production rule is
+// taken out (the negative controls run exactly that).
+static void test_history_identity() {
+    using namespace logic;
+
+    // ── b) HIST-01/b: the circulation witness's identity ─────────────────────────────────────────
+    // The sealed .noinit region gained the identity: a v2 seal must be refused as a whole.
+    CHECK(HISTORY_PERSIST_VERSION == 3);
+    CHECK(history_restore_verdict(static_cast<uint32_t>(CrashReason::SW), HISTORY_PERSIST_MAGIC, 2,
+                                  history_catalog_fingerprint(), history_catalog_fingerprint(), 7,
+                                  7) == HistoryRestore::WrongVersion);
+    Config witness;
+    witness.diagnostics_enabled      = true;
+    witness.diagnostics_generation   = 3;
+    witness.circulation_name         = "DHW circulation pump";
+    witness.circulation_topic        = "example/circulation/status";
+    witness.circulation_power_path   = "apower";
+    witness.circulation_time_path    = "aenergy.minute_ts";
+    witness.circulation_max_age_s    = 120;
+    witness.circulation_on_tenths_w  = 30;
+    witness.circulation_off_tenths_w = 10;
+    witness.circulation_confirm_s    = 60;
+    const uint32_t id                = history_circulation_identity(witness);
+    CHECK(id != HISTORY_CIRCULATION_NONE && id != HISTORY_CIRCULATION_LEGACY);
+    CHECK(history_circulation_identity(witness) == id);
+
+    // Every persisted field that defines the evidence source moves it ...
+    {
+        const auto moves = [&](auto edit) {
+            Config c = witness;
+            edit(c);
+            return history_circulation_identity(c) != id;
+        };
+        CHECK(moves([](Config& c) { c.circulation_topic = "example/other/status"; }));
+        CHECK(moves([](Config& c) { c.circulation_power_path = "output"; }));
+        CHECK(moves([](Config& c) { c.circulation_time_path = "aenergy.by_minute"; }));
+        CHECK(moves([](Config& c) { c.circulation_max_age_s = 121; }));
+        CHECK(moves([](Config& c) { c.circulation_on_tenths_w = 31; }));
+        CHECK(moves([](Config& c) { c.circulation_off_tenths_w = 11; }));
+        CHECK(moves([](Config& c) { c.circulation_confirm_s = 61; }));
+        // ... including the consent interval: a re-enable is a new generation, so what an earlier
+        // interval recorded can never be restored into it even under an identical mapping.
+        CHECK(moves([](Config& c) {
+            c.diagnostics_generation = diagnostics_next_generation(c.diagnostics_generation);
+        }));
+        // (The generation never wraps back to the default-off value, so a consent interval is never
+        // confused with the pre-opt-in one.)
+        volatile uint32_t last_generation = UINT32_MAX; // runtime values: the wrap is a real branch
+        CHECK(diagnostics_next_generation(last_generation) == 1u);
+        CHECK(diagnostics_next_generation(0) == 1u);
+        // Field boundaries are real: moving a character between the topic and the path differs.
+        CHECK(moves([](Config& c) {
+            c.circulation_topic      = "example/circulation/statusa";
+            c.circulation_power_path = "power";
+        }));
+    }
+    // ... and nothing else does. The display name is not evidence; neither is the broker the same
+    // topic is read from (a broker change reconnects the live ring without retiring it), nor any
+    // unrelated setting, nor a different MQTT source (the room reference).
+    {
+        const auto same = [&](auto edit) {
+            Config c = witness;
+            edit(c);
+            return history_circulation_identity(c) == id;
+        };
+        CHECK(same([](Config& c) { c.circulation_name = "DHW circulation"; }));
+        CHECK(same([](Config& c) { c.mqtt_uri = "mqtts://other-broker.local:8883"; }));
+        CHECK(same([](Config& c) { c.mqtt_base = "daikin-altherma-esp32-bench"; }));
+        CHECK(same([](Config& c) { c.ref_temp_topic = "zigbee2mqtt/room"; }));
+        CHECK(same([](Config& c) { c.profile = "generic"; }));
+        CHECK(same([](Config& c) { c.mb_host = "homehub.local"; }));
+        CHECK(same([](Config& c) { c.weather_enabled = true; }));
+    }
+    // Zero means "no witness": not consented, or not configured. Nothing is restorable under it.
+    {
+        Config off              = witness;
+        off.diagnostics_enabled = false;
+        CHECK(history_circulation_identity(off) == HISTORY_CIRCULATION_NONE);
+        Config unconfigured = witness;
+        unconfigured.circulation_topic.clear();
+        CHECK(history_circulation_identity(unconfigured) == HISTORY_CIRCULATION_NONE);
+    }
+    // Neither sentinel is ever produced as an identity.
+    // (Runtime values throughout this block: a constant argument lets the compiler fold the call
+    // and the branch never runs, which the coverage ratchet would count as untested.)
+    volatile uint32_t rt_none   = HISTORY_CIRCULATION_NONE;
+    volatile uint32_t rt_legacy = HISTORY_CIRCULATION_LEGACY;
+    volatile uint32_t rt_other  = 0x12345678u;
+    CHECK(history_circulation_identity_clamp(rt_none) == 1u);
+    CHECK(history_circulation_identity_clamp(rt_legacy) == 1u);
+    CHECK(history_circulation_identity_clamp(rt_other) == 0x12345678u);
+
+    // The column is the circulation witness's, and only that one is.
+    {
+        size_t circulation_columns = 0;
+        for (size_t i = 0; i < TREND_COUNT; i++) {
+            if (!history_trend_is_circulation(i)) continue;
+            circulation_columns++;
+            CHECK(std::strcmp(TRENDS[i].id, "circulation_state") == 0);
+        }
+        CHECK(circulation_columns == 1);
+        volatile size_t past_the_end = TREND_COUNT;
+        CHECK(!history_trend_is_circulation(past_the_end)); // out of range is not a column
+    }
+
+    // Restore needs an exact match with the current NON-ZERO identity, and no pending reset.
+    CHECK(history_circulation_restore_allowed(id, id, false));
+    CHECK(!history_circulation_restore_allowed(id, id, true));       // reset pending
+    CHECK(!history_circulation_restore_allowed(id ^ 1u, id, false)); // another witness
+    CHECK(!history_circulation_restore_allowed(HISTORY_CIRCULATION_LEGACY, id, false)); // pre-field
+    CHECK(
+        !history_circulation_restore_allowed(HISTORY_CIRCULATION_NONE, id, false)); // unconfigured
+    CHECK(!history_circulation_restore_allowed(id, HISTORY_CIRCULATION_NONE, false)); // opted out
+    CHECK(!history_circulation_restore_allowed(HISTORY_CIRCULATION_NONE, HISTORY_CIRCULATION_NONE,
+                                               false));                       // 0 == 0
+    CHECK(!history_circulation_restore_allowed(rt_legacy, rt_legacy, false)); // ff == ff
+
+    // The identity refuses one COLUMN, never the record: a legacy record restores the other 31.
+    {
+        size_t restorable_legacy = 0, restorable_other = 0, restorable_same = 0;
+        for (size_t i = 0; i < TREND_COUNT; i++) {
+            const bool circulation = history_trend_is_circulation(i);
+            const bool legacy =
+                history_x10a_column_restorable(i, HISTORY_CIRCULATION_LEGACY, id, false);
+            const bool other = history_x10a_column_restorable(i, id ^ 1u, id, false);
+            const bool same  = history_x10a_column_restorable(i, id, id, false);
+            CHECK(legacy == !circulation);
+            CHECK(other == !circulation);
+            CHECK(same);
+            restorable_legacy += legacy;
+            restorable_other += other;
+            restorable_same += same;
+        }
+        CHECK(restorable_legacy == TREND_COUNT - 1);
+        CHECK(restorable_other == TREND_COUNT - 1);
+        CHECK(restorable_same == TREND_COUNT);
+    }
+
+    // A restore replayed over records of two witnesses: remap from A to B, then reboot. Only B's
+    // buckets reach the circulation column; every other column keeps all of them.
+    {
+        const uint32_t witness_a   = id;
+        Config         remapped    = witness;
+        remapped.circulation_topic = "example/other/status";
+        const uint32_t witness_b   = history_circulation_identity(remapped);
+        CHECK(witness_a != witness_b);
+        struct Rec {
+            int      bucket;
+            uint32_t circulation_identity;
+        };
+        const Rec records[] = {{0, witness_a}, {1, witness_a}, {2, witness_a},
+                               {3, witness_b}, {4, witness_b}, {5, HISTORY_CIRCULATION_LEGACY}};
+        for (const uint32_t current : {witness_b, HISTORY_CIRCULATION_NONE}) {
+            size_t circulation_buckets = 0, other_buckets[TREND_COUNT] = {};
+            for (const Rec& r : records)
+                for (size_t col = 0; col < TREND_COUNT; col++) {
+                    if (!history_x10a_column_restorable(col, r.circulation_identity, current,
+                                                        false))
+                        continue;
+                    if (history_trend_is_circulation(col))
+                        circulation_buckets++;
+                    else
+                        other_buckets[col]++;
+                }
+            CHECK(circulation_buckets == (current == witness_b ? 2u : 0u));
+            for (size_t col = 0; col < TREND_COUNT; col++)
+                if (!history_trend_is_circulation(col)) CHECK(other_buckets[col] == 6);
+        }
+    }
+
+    // ROLLBACK READABILITY. The identity sits in pad[8..11] (header offsets 60..63; the scope is
+    // pad[0..3], offsets 52..55). The writer fills the whole slot with 0xff first, so every record
+    // ever written reads back 0xffffffff there; the previous firmware's acceptance reads none of
+    // those bytes, and its CRC hashes the header as stored.
+    {
+        const uint32_t catalog = history_catalog_fingerprint();
+        const uint32_t scope   = history_x10a_target_fingerprint("profile-a", 44, 43, 'I');
+        HistorySample  values[TREND_COUNT];
+        for (size_t i = 0; i < TREND_COUNT; i++) values[i] = static_cast<HistorySample>(i * 10);
+        const auto record = [&](bool with_identity, uint32_t identity) {
+            HistoryJournalHeader h;
+            std::memset(&h, 0xff, sizeof(h)); // flash_build_next_record's own slot fill
+            h.magic       = HISTORY_JOURNAL_MAGIC;
+            h.version     = HISTORY_JOURNAL_VERSION;
+            h.source      = static_cast<uint8_t>(HistoryJournalSource::X10a);
+            h.flags       = HISTORY_JOURNAL_FLAG_TARGET_SCOPED;
+            h.catalog_fp  = catalog;
+            h.crc         = 0;
+            h.commit      = HISTORY_JOURNAL_ERASED;
+            h.value_count = static_cast<uint16_t>(TREND_COUNT);
+            h.slot_bytes  = static_cast<uint16_t>(HISTORY_JOURNAL_SLOT_BYTES);
+            h.sequence    = 7;
+            h.bucket      = 5000;
+            h.dt_s        = HISTORY_DT_S;
+            h.rings[0]    = static_cast<uint16_t>(TREND_COUNT);
+            h.rings[1]    = static_cast<uint16_t>(HOMEHUB_HISTORY_COUNT);
+            h.rings[2]    = static_cast<uint16_t>(ENV3_HISTORY_COUNT);
+            h.reserved    = 0xffff;
+            history_journal_set_scope(h, scope);
+            if (with_identity) history_journal_set_circulation_identity(h, identity);
+            h.crc    = history_journal_crc(h, values, TREND_COUNT);
+            h.commit = HISTORY_JOURNAL_COMMITTED;
+            return h;
+        };
+        const HistoryJournalHeader legacy_record = record(false, 0);
+        const HistoryJournalHeader new_record    = record(true, id);
+
+        // What a record from before the field looks like, and what the field does not touch.
+        CHECK(history_journal_circulation_identity(legacy_record) == HISTORY_CIRCULATION_LEGACY);
+        CHECK(history_journal_circulation_identity(new_record) == id);
+        CHECK(history_journal_scope(new_record) == scope);
+        CHECK(history_journal_scope(legacy_record) == scope);
+        CHECK(history_journal_schema_fingerprint(new_record) == 0xffffffffu); // manifests only
+        for (size_t i = 0; i < 8; i++) CHECK(new_record.pad[i] == legacy_record.pad[i]);
+        {
+            // Everything outside pad[8..11] and the CRC it feeds is byte-identical.
+            HistoryJournalHeader a = legacy_record, b = new_record;
+            a.crc = b.crc = 0;
+            history_journal_set_circulation_identity(a, 0);
+            history_journal_set_circulation_identity(b, 0);
+            CHECK(std::memcmp(&a, &b, sizeof(a)) == 0);
+        }
+
+        // The PREVIOUS firmware's acceptance — the production predicates, unchanged by this work —
+        // reaches the same verdict on a record that carries the field as on one that does not, and
+        // the CRC it recomputes over the header as stored verifies.
+        for (const HistoryJournalHeader& h : {legacy_record, new_record}) {
+            CHECK(history_journal_trend_header_structural_matches(h));
+            CHECK(history_journal_header_matches_x10a_scoped(h, catalog, scope));
+            CHECK(history_journal_header_matches_scoped_layout(h, catalog,
+                                                               HistoryJournalSource::X10a));
+            CHECK(!history_journal_header_matches_x10a_scoped(h, catalog, scope ^ 1u));
+            CHECK(h.crc == history_journal_crc(h, values, TREND_COUNT));
+        }
+        // The CRC does cover the field: a flipped identity bit cannot pass for another witness.
+        {
+            HistoryJournalHeader tampered = new_record;
+            tampered.pad[9] ^= 0x01;
+            CHECK(tampered.crc != history_journal_crc(tampered, values, TREND_COUNT));
+            CHECK(new_record.crc != legacy_record.crc);
+        }
+        // A catalog manifest has no identity: bytes 8..11 stay erased next to its schema
+        // fingerprint.
+        {
+            HistoryJournalHeader manifest = legacy_record;
+            manifest.flags                = HISTORY_JOURNAL_FLAG_CATALOG_MANIFEST;
+            history_journal_set_schema_fingerprint(manifest, 0x0badf00du);
+            CHECK(history_journal_circulation_identity(manifest) == HISTORY_CIRCULATION_LEGACY);
+            CHECK(history_journal_schema_fingerprint(manifest) == 0x0badf00du);
+            CHECK(history_journal_scope(manifest) == scope);
+        }
+    }
+
+    // ── c) HIST-01/c: the catalog fingerprint follows the series ids ─────────────────────────────
+    {
+        // The rule, restated independently: an order-sensitive fold of the geometry and of every
+        // ring's series id, X10A then HomeHub then ENV III.
+        uint32_t crc = CONFIG_CRC32_INIT;
+        crc          = history_fp_u32(crc, HISTORY_DT_S);
+        crc          = history_fp_u32(crc, HISTORY_SAMPLES);
+        crc          = history_fp_u32(crc, static_cast<uint32_t>(TREND_COUNT));
+        crc          = history_fp_u32(crc, static_cast<uint32_t>(HOMEHUB_HISTORY_COUNT));
+        crc          = history_fp_u32(crc, static_cast<uint32_t>(ENV3_HISTORY_COUNT));
+        for (size_t i = 0; i < TREND_COUNT; i++)
+            crc = history_fp_u32(crc, history_series_id(HistoryJournalSource::X10a, i));
+        for (size_t i = 0; i < HOMEHUB_HISTORY_COUNT; i++)
+            crc = history_fp_u32(crc, history_series_id(HistoryJournalSource::Modbus, i));
+        for (size_t i = 0; i < ENV3_HISTORY_COUNT; i++)
+            crc = history_fp_u32(crc, history_series_id(HistoryJournalSource::Env3, i));
+        CHECK(history_catalog_fingerprint() == config_crc32_final(crc));
+        // Pinned: this is the generation the flash records of this build carry.
+        CHECK(history_catalog_fingerprint() == 0xa1783c86u);
+    }
+    {
+        // The defect, reproduced. The hand-written fingerprint hashed the HomeHub offset and trend
+        // id and the ENV III id only, so two catalogs that differed in the HomeHub event policy or
+        // the ENV III unit had the SAME fingerprint — while their series ids (which carry both)
+        // differed. The new fingerprint folds the ids and therefore cannot miss either.
+        const auto old_homehub_view = [](const HomeHubHistory& h) {
+            uint32_t crc = history_fp_u32(CONFIG_CRC32_INIT, h.offset);
+            return history_fp_str(crc, h.trend_id);
+        };
+        const auto old_env3_view = [](const Env3HistoryDef& e) {
+            return history_fp_str(CONFIG_CRC32_INIT, e.id);
+        };
+        HomeHubHistory event_a = HOMEHUB_HISTORIES[8]; // bsh_state, an event timeline
+        HomeHubHistory event_b = event_a;
+        event_b.event          = !event_a.event;
+        CHECK(old_homehub_view(event_a) == old_homehub_view(event_b));
+        CHECK(history_modbus_series_id(event_a) != history_modbus_series_id(event_b));
+        Env3HistoryDef unit_a = ENV3_HISTORIES[2];
+        Env3HistoryDef unit_b = unit_a;
+        unit_b.unit           = "kPa";
+        CHECK(old_env3_view(unit_a) == old_env3_view(unit_b));
+        CHECK(history_env3_series_id(unit_a) != history_env3_series_id(unit_b));
+    }
+    {
+        // The generation before this one stays readable through its manifests. Its fingerprint is
+        // reproduced from the hand-written formula that built it (so the constant is not just
+        // asserted), it no longer matches directly, and its manifest ids map: X10A and ENV III by
+        // unchanged semantic ids, HomeHub not at all (its ids now carry the decode columns, so the
+        // HomeHub history starts empty once).
+        const auto previous_catalog_fp = [] {
+            uint32_t crc = CONFIG_CRC32_INIT;
+            crc          = history_fp_u32(crc, HISTORY_DT_S);
+            crc          = history_fp_u32(crc, HISTORY_SAMPLES);
+            crc          = history_fp_u32(crc, static_cast<uint32_t>(TREND_COUNT));
+            crc          = history_fp_u32(crc, static_cast<uint32_t>(HOMEHUB_HISTORY_COUNT));
+            crc          = history_fp_u32(crc, static_cast<uint32_t>(ENV3_HISTORY_COUNT));
+            for (const auto& d : TRENDS) {
+                crc = history_fp_str(crc, d.id);
+                crc = history_fp_u32(crc, static_cast<uint32_t>(d.kind));
+                crc = history_fp_u32(crc, d.reg);
+                crc = history_fp_u32(crc, d.off);
+                crc = history_fp_str(crc, d.unit);
+                crc = history_fp_u32(crc, static_cast<uint32_t>(d.conv));
+            }
+            for (size_t i = 0; i < HOMEHUB_HISTORY_COUNT; i++) {
+                crc = history_fp_u32(crc, HOMEHUB_HISTORIES[i].offset);
+                crc = history_fp_str(crc, HOMEHUB_HISTORIES[i].trend_id);
+            }
+            for (size_t i = 0; i < ENV3_HISTORY_COUNT; i++)
+                crc = history_fp_str(crc, ENV3_HISTORIES[i].id);
+            return config_crc32_final(crc);
+        };
+        const uint32_t previous_fp = previous_catalog_fp();
+        CHECK(previous_fp == 0xda95bbc0u);
+        CHECK(previous_fp != history_catalog_fingerprint());
+
+        // A record of that generation: structurally valid, not the current layout, not the frozen
+        // pre-manifest one — so only its manifest can interpret it.
+        HistoryJournalHeader old_record{};
+        old_record.magic       = HISTORY_JOURNAL_MAGIC;
+        old_record.version     = HISTORY_JOURNAL_VERSION;
+        old_record.source      = static_cast<uint8_t>(HistoryJournalSource::Env3);
+        old_record.flags       = 0;
+        old_record.catalog_fp  = previous_fp;
+        old_record.commit      = HISTORY_JOURNAL_COMMITTED;
+        old_record.value_count = static_cast<uint16_t>(ENV3_HISTORY_COUNT);
+        old_record.slot_bytes  = static_cast<uint16_t>(HISTORY_JOURNAL_SLOT_BYTES);
+        old_record.sequence    = 9;
+        old_record.bucket      = 4000;
+        old_record.dt_s        = HISTORY_DT_S;
+        old_record.rings[0]    = static_cast<uint16_t>(TREND_COUNT);
+        old_record.rings[1]    = static_cast<uint16_t>(HOMEHUB_HISTORY_COUNT);
+        old_record.rings[2]    = static_cast<uint16_t>(ENV3_HISTORY_COUNT);
+        CHECK(history_journal_trend_header_structural_matches(old_record));
+        CHECK(!history_journal_trend_layout_matches(old_record, history_catalog_fingerprint(),
+                                                    static_cast<uint16_t>(TREND_COUNT),
+                                                    static_cast<uint16_t>(HOMEHUB_HISTORY_COUNT),
+                                                    static_cast<uint16_t>(ENV3_HISTORY_COUNT)));
+        CHECK(history_journal_trend_layout_matches(old_record, previous_fp,
+                                                   static_cast<uint16_t>(TREND_COUNT),
+                                                   static_cast<uint16_t>(HOMEHUB_HISTORY_COUNT),
+                                                   static_cast<uint16_t>(ENV3_HISTORY_COUNT)));
+        CHECK(!history_legacy_disinfection_layout_matches(old_record));
+
+        // Its manifest, exactly as the previous build appended it. The ENV III ids are the ones the
+        // frozen pre-manifest list pinned two generations ago; they still are today's, which is
+        // what lets this record map.
+        uint32_t prev_env3[HISTORY_MANIFEST_MAX_IDS] = {};
+        for (size_t i = 0; i < ENV3_HISTORY_COUNT; i++)
+            prev_env3[i] = HISTORY_LEGACY_DISINFECTION_ENV3_IDS[i];
+        HistoryJournalHeader manifest = old_record;
+        manifest.flags                = HISTORY_JOURNAL_FLAG_CATALOG_MANIFEST;
+        history_journal_set_schema_fingerprint(
+            manifest, history_series_list_fingerprint(HistoryJournalSource::Env3, prev_env3,
+                                                      ENV3_HISTORY_COUNT));
+        CHECK(history_journal_manifest_header_matches(manifest));
+        CHECK(history_journal_manifest_payload_matches(manifest, prev_env3));
+        for (size_t i = 0; i < ENV3_HISTORY_COUNT; i++)
+            CHECK(history_series_index(prev_env3, ENV3_HISTORY_COUNT,
+                                       history_series_id(HistoryJournalSource::Env3, i)) ==
+                  static_cast<int>(i));
+
+        // X10A: the series-id formula did not move — 31 of today's 32 ids are still the ones the
+        // frozen list holds — so the previous manifest maps them. The X10A scope did not move
+        // either (block d below), so those records stay restorable.
+        size_t mapped_x10a = 0;
+        for (size_t i = 0; i < TREND_COUNT; i++)
+            if (history_series_index(HISTORY_LEGACY_DISINFECTION_X10A_IDS, 31,
+                                     history_series_id(HistoryJournalSource::X10a, i)) >= 0)
+                mapped_x10a++;
+        CHECK(mapped_x10a == 31);
+
+        // HomeHub: the previous build's ids — reproduced with its formula, which is also the one
+        // that built the frozen pre-manifest list — match none of today's. Accepted, one-time.
+        const auto previous_modbus_id = [](const HomeHubHistory& d) {
+            uint32_t crc = history_series_id_begin(HistoryJournalSource::Modbus);
+            crc          = history_fp_str(crc, d.trend_id);
+            crc          = history_fp_u32(crc, d.offset);
+            crc          = history_fp_u32(crc, d.event ? 1u : 0u);
+            return history_series_id_end(crc);
+        };
+        uint32_t prev_mb[HISTORY_MANIFEST_MAX_IDS] = {};
+        for (size_t i = 0; i < HOMEHUB_HISTORY_COUNT; i++) {
+            prev_mb[i] = previous_modbus_id(HOMEHUB_HISTORIES[i]);
+            if (i < 12) CHECK(prev_mb[i] == HISTORY_LEGACY_DISINFECTION_MODBUS_IDS[i]);
+        }
+        CHECK(history_series_ids_valid(prev_mb, HOMEHUB_HISTORY_COUNT));
+        for (size_t i = 0; i < HOMEHUB_HISTORY_COUNT; i++)
+            CHECK(history_series_index(prev_mb, HOMEHUB_HISTORY_COUNT,
+                                       history_series_id(HistoryJournalSource::Modbus, i)) == -1);
+    }
+
+    // ── d) HIST-01/d: HomeHub decoding, and an X10A scope that ignores the trend catalog ─────────
+    // HomeHub: the register's decode columns are part of the series id. One field at a time, on a
+    // copy of the history entry.
+    {
+        const HomeHubHistory flow = HOMEHUB_HISTORIES[6]; // offset 49: Int16 / 100, L/min
+        CHECK(std::strcmp(flow.trend_id, "flow") == 0 && flow.decode.scale == 100);
+        const uint32_t base = history_modbus_series_id(flow);
+        CHECK(base == history_series_id(HistoryJournalSource::Modbus, 6));
+        const auto moves = [&](auto edit) {
+            HomeHubHistory h = flow;
+            edit(h);
+            return history_modbus_series_id(h) != base;
+        };
+        CHECK(moves([](HomeHubHistory& h) { h.decode.scale = 10; }));
+        CHECK(moves([](HomeHubHistory& h) { h.decode.type = MbType::Temp16; }));
+        CHECK(moves([](HomeHubHistory& h) { h.decode.unit = "m3/h"; }));
+        CHECK(moves([](HomeHubHistory& h) { h.decode.space = MbFunc::ReadHolding; }));
+        CHECK(moves([](HomeHubHistory& h) { h.event = true; }));
+        CHECK(moves([](HomeHubHistory& h) { h.offset = 48; }));
+        CHECK(!moves([](HomeHubHistory&) {}));
+    }
+    // The columns are the register definition's: both def/ tables decode every history register as
+    // the logic table says, and any one-column edit of a copy breaks that.
+    {
+        CHECK(homehub_history_decode_matches(def::HOMEHUB_REGS, def::HOMEHUB_REG_COUNT));
+        CHECK(homehub_history_decode_matches(def::ALTHERMA4_REGS, def::ALTHERMA4_REG_COUNT));
+        const auto breaks = [](auto edit) {
+            std::vector<def::HomeHubReg> regs(def::HOMEHUB_REGS,
+                                              def::HOMEHUB_REGS + def::HOMEHUB_REG_COUNT);
+            edit(regs);
+            return !homehub_history_decode_matches(regs.data(), static_cast<int>(regs.size()));
+        };
+        const auto at = [](std::vector<def::HomeHubReg>& regs,
+                           unsigned                      offset) -> def::HomeHubReg& {
+            for (auto& r : regs)
+                if (r.offset == offset) return r;
+            return regs.front();
+        };
+        CHECK(breaks([&](auto& regs) { at(regs, 49).scale = 10; }));
+        CHECK(breaks([&](auto& regs) { at(regs, 40).type = MbType::Pow16; }));
+        CHECK(breaks([&](auto& regs) { at(regs, 40).unit = "K"; }));
+        CHECK(breaks([&](auto& regs) { at(regs, 9).space = MbFunc::ReadInput; }));
+        CHECK(
+            breaks([&](auto& regs) { regs.erase(regs.begin() + (&at(regs, 33) - regs.data())); }));
+        // A label or the presentation kind is not a decode column.
+        CHECK(!breaks([&](auto& regs) {
+            at(regs, 40).label = "renamed";
+            at(regs, 37).kind  = def::HomeHubValueKind::Number;
+        }));
+    }
+
+    // X10A: the scope takes NO input from the trend catalog (HIST-01/d). It stamps a record as a
+    // whole and is checked before the semantic-id manifest is consulted, so a scope that moved with
+    // a TRENDS insertion, reorder or single-row decode fix would discard every X10A series instead
+    // of only the one the manifest says changed. The formula is restated independently here ...
+    {
+        const auto scope_of = [](const char* profile, int32_t rx, int32_t tx, char proto) {
+            uint32_t crc       = CONFIG_CRC32_INIT;
+            crc                = history_fp_str(crc, profile);
+            crc                = history_fp_u32(crc, static_cast<uint32_t>(rx));
+            crc                = history_fp_u32(crc, static_cast<uint32_t>(tx));
+            crc                = history_fp_u32(crc, static_cast<uint8_t>(proto));
+            const uint32_t out = config_crc32_final(crc);
+            return out ? out : 1u;
+        };
+        // ... and the production value equals it for every shipped profile on both documented
+        // wirings (Seeed XIAO RX=44/TX=43, M5Stack AtomS3 Lite RX=1/TX=2) and both protocols.
+        for (const auto& p : def::profiles) {
+            CHECK(history_x10a_target_fingerprint(p.id, 44, 43, 'I') ==
+                  scope_of(p.id, 44, 43, 'I'));
+            CHECK(history_x10a_target_fingerprint(p.id, 1, 2, 'I') == scope_of(p.id, 1, 2, 'I'));
+            CHECK(history_x10a_target_fingerprint(p.id, 44, 43, 'S') ==
+                  scope_of(p.id, 44, 43, 'S'));
+        }
+        // Pinned literals, computed by the formula of main/logic/history_persist.hpp at 0a18f371
+        // (the build before HIST-01), so "the scope did not move" is not only a self-comparison.
+        struct Pin {
+            const char* profile;
+            int32_t     rx;
+            int32_t     tx;
+            char        proto;
+            uint32_t    scope;
+        };
+        const Pin pins[] = {
+            {"altherma_erga_e_ehv_ehb_ehvz_e_ej_series_04_08kw", 44, 43, 'I', 0xcb594efdu},
+            {"generic", 44, 43, 'I', 0x2e332a14u},
+            {"generic", 1, 2, 'I', 0x4e94897fu},
+            {"generic", 44, 43, 'S', 0x11979defu},
+            {"profile-a", 44, 43, 'I', 0xaac2427eu},
+        };
+        for (const Pin& pin : pins) {
+            CHECK(history_x10a_target_fingerprint(pin.profile, pin.rx, pin.tx, pin.proto) ==
+                  pin.scope);
+            CHECK(scope_of(pin.profile, pin.rx, pin.tx, pin.proto) == pin.scope);
+        }
+
+        // The property itself. A record of a catalog with one X10A trend more or fewer, or two in
+        // another order, was stamped by a build whose scope has no TRENDS input (the formula
+        // above). It passes THIS build's scope check, is not this build's layout, and maps its
+        // unchanged series through its manifest: an inserted trend starts only itself empty.
+        const char* const kProfile = "altherma_erga_e_ehv_ehb_ehvz_e_ej_series_04_08kw";
+        const uint32_t    scope    = history_x10a_target_fingerprint(kProfile, 44, 43, 'I');
+        uint32_t          now[HISTORY_MANIFEST_MAX_IDS] = {};
+        CHECK(history_current_series_ids(HistoryJournalSource::X10a, now,
+                                         HISTORY_MANIFEST_MAX_IDS) == TREND_COUNT);
+        const size_t k = TREND_COUNT / 2; // a trend in the middle of the catalog
+
+        // What an older build left in flash: its ids in ITS order and a data record stamped with
+        // the scope its formula gave.
+        const auto stored_record = [&](const uint32_t* ids, size_t n) {
+            HistoryJournalHeader h;
+            std::memset(&h, 0xff, sizeof(h)); // flash_build_next_record's own slot fill
+            h.magic       = HISTORY_JOURNAL_MAGIC;
+            h.version     = HISTORY_JOURNAL_VERSION;
+            h.source      = static_cast<uint8_t>(HistoryJournalSource::X10a);
+            h.flags       = HISTORY_JOURNAL_FLAG_TARGET_SCOPED;
+            h.catalog_fp  = history_series_list_fingerprint(HistoryJournalSource::X10a, ids, n);
+            h.crc         = 0;
+            h.commit      = HISTORY_JOURNAL_COMMITTED;
+            h.value_count = static_cast<uint16_t>(n);
+            h.slot_bytes  = static_cast<uint16_t>(HISTORY_JOURNAL_SLOT_BYTES);
+            h.sequence    = 11;
+            h.bucket      = 6000;
+            h.dt_s        = HISTORY_DT_S;
+            h.rings[0]    = static_cast<uint16_t>(n);
+            h.rings[1]    = static_cast<uint16_t>(HOMEHUB_HISTORY_COUNT);
+            h.rings[2]    = static_cast<uint16_t>(ENV3_HISTORY_COUNT);
+            h.reserved    = 0xffff;
+            history_journal_set_scope(h, scope_of(kProfile, 44, 43, 'I'));
+            return h;
+        };
+        // Does this build accept the record's scope and read it through a manifest only? Returns
+        // the number of this build's series the manifest cannot map.
+        const auto unmapped_through_manifest = [&](const uint32_t* ids, size_t n, int* stored_at) {
+            const HistoryJournalHeader rec = stored_record(ids, n);
+            CHECK(history_journal_trend_header_structural_matches(rec));
+            CHECK(history_journal_scope(rec) == scope); // flash_trend_scope_matches' X10A rule
+            CHECK(!history_journal_trend_layout_matches(
+                rec, history_catalog_fingerprint(), static_cast<uint16_t>(TREND_COUNT),
+                static_cast<uint16_t>(HOMEHUB_HISTORY_COUNT),
+                static_cast<uint16_t>(ENV3_HISTORY_COUNT)));
+            HistoryJournalHeader manifest = rec;
+            manifest.flags                = HISTORY_JOURNAL_FLAG_CATALOG_MANIFEST;
+            history_journal_set_schema_fingerprint(
+                manifest, history_series_list_fingerprint(HistoryJournalSource::X10a, ids, n));
+            CHECK(history_series_ids_valid(ids, n));
+            CHECK(history_journal_manifest_header_matches(manifest));
+            CHECK(history_journal_manifest_payload_matches(manifest, ids));
+            size_t unmapped = 0;
+            for (size_t i = 0; i < TREND_COUNT; i++) {
+                stored_at[i] = history_series_index(ids, n, now[i]);
+                if (stored_at[i] < 0) unmapped++;
+            }
+            return unmapped;
+        };
+
+        // (1) This build has one X10A trend more than the older one: only that series is new.
+        {
+            uint32_t older[HISTORY_MANIFEST_MAX_IDS] = {};
+            size_t   n                               = 0;
+            for (size_t i = 0; i < TREND_COUNT; i++)
+                if (i != k) older[n++] = now[i];
+            int stored_at[HISTORY_MANIFEST_MAX_IDS] = {};
+            CHECK(unmapped_through_manifest(older, n, stored_at) == 1);
+            for (size_t i = 0; i < TREND_COUNT; i++)
+                CHECK(stored_at[i] == (i < k    ? static_cast<int>(i)
+                                       : i == k ? -1
+                                                : static_cast<int>(i) - 1));
+        }
+        // (2) The older catalog listed two trends in the other order: every series survives, each
+        // read from where the older build stored it.
+        {
+            uint32_t older[HISTORY_MANIFEST_MAX_IDS] = {};
+            std::memcpy(older, now, TREND_COUNT * sizeof(uint32_t));
+            older[k]                                = now[k + 1];
+            older[k + 1]                            = now[k];
+            int stored_at[HISTORY_MANIFEST_MAX_IDS] = {};
+            CHECK(unmapped_through_manifest(older, TREND_COUNT, stored_at) == 0);
+            for (size_t i = 0; i < TREND_COUNT; i++)
+                CHECK(stored_at[i] == static_cast<int>(i == k ? k + 1 : i == k + 1 ? k : i));
+        }
+    }
+
+    // ── e) HIST-01/e: the time-axis metadata comes from one commit ───────────────────────────────
+    {
+        constexpr int64_t kSec = 1000000;
+        // Whole seconds since the newest commit; sample zero is n-1 buckets before the newest.
+        HistoryMeta m = history_snapshot_meta(500 * kSec, 200 * kSec, 41, 288);
+        CHECK(m.newest_age_s == 300);
+        CHECK(m.oldest_bucket == 41 - 287);
+        m = history_snapshot_meta(500 * kSec + 999999, 200 * kSec, 1000, 288);
+        CHECK(m.newest_age_s == 300); // floors, never rounds up into the next bucket
+        CHECK(m.oldest_bucket == 1000 - 287);
+        m = history_snapshot_meta(500 * kSec, 200 * kSec, 1000, 1);
+        CHECK(m.oldest_bucket == 1000); // a single sample is its own sample zero
+        // Nothing committed: no age, and no sample zero.
+        m = history_snapshot_meta(500 * kSec, HISTORY_NO_COMMIT_US, -1, 0);
+        CHECK(m.newest_age_s == -1 && m.oldest_bucket == -1);
+        // An empty copy has no sample zero even if a commit exists.
+        m = history_snapshot_meta(500 * kSec, 200 * kSec, 1000, 0);
+        CHECK(m.newest_age_s == 300 && m.oldest_bucket == -1);
+        // A commit restored from flash predates this boot's zero: a NEGATIVE timestamp is a real
+        // age.
+        m = history_snapshot_meta(10 * kSec, -290 * kSec, 1000, 288);
+        CHECK(m.newest_age_s == 300);
+        // A clock reading before the commit yields age 0, never a negative age.
+        m = history_snapshot_meta(100 * kSec, 200 * kSec, 1000, 288);
+        CHECK(m.newest_age_s == 0);
+        // The bucket sentinel is negative; a real bucket of zero is valid.
+        CHECK(history_snapshot_meta(1, 0, 0, 1).oldest_bucket == 0);
+        CHECK(history_snapshot_meta(1, 0, -1, 1).oldest_bucket == -1);
+        // The two halves are the pieces history.cpp fills the struct from.
+        CHECK(history_meta_newest_age_s(500 * kSec, 200 * kSec) == 300);
+        CHECK(history_meta_newest_age_s(500 * kSec, HISTORY_NO_COMMIT_US) == -1);
+        CHECK(history_meta_oldest_bucket(1000, 288) == 1000 - 287);
+        CHECK(history_meta_oldest_bucket(-1, 288) == -1);
+        CHECK(history_meta_oldest_bucket(1000, 0) == -1);
+        // The default is "none", which is what every early return leaves behind.
+        const HistoryMeta none;
+        CHECK(none.newest_age_s == -1 && none.oldest_bucket == -1);
+        // Both facts belong to ONE commit: they are a function of the same (commit, count) pair, so
+        // a snapshot taken after the next commit moves them together and never apart.
+        const HistoryMeta before = history_snapshot_meta(1000 * kSec, 700 * kSec, 100, 288);
+        const HistoryMeta after  = history_snapshot_meta(1000 * kSec, 990 * kSec, 101, 288);
+        CHECK(after.oldest_bucket == before.oldest_bucket + 1);
+        CHECK(before.newest_age_s == 300 && after.newest_age_s == 10);
+    }
+
+    // ── f) The acceptance predicates reject each damaged field ───────────────────────────────────
+    // A record is accepted for what it says, field by field: damaging any one input of its
+    // acceptance rejects it. The spare bytes are inputs only where a rule says so — the scope
+    // (pad[0..3]) of a data record, the schema fingerprint (pad[4..7]) of a manifest — and the
+    // circulation identity (pad[8..11]) is none, which is what keeps a record that carries it
+    // acceptable to the previous firmware.
+    {
+        using H                        = HistoryJournalHeader;
+        constexpr uint32_t kFp         = 0x00c0ffeeu;
+        const auto         base_header = [] {
+            H h;
+            std::memset(&h, 0xff, sizeof(h)); // flash_build_next_record's own slot fill
+            h.magic      = HISTORY_JOURNAL_MAGIC;
+            h.version    = HISTORY_JOURNAL_VERSION;
+            h.commit     = HISTORY_JOURNAL_COMMITTED;
+            h.catalog_fp = kFp;
+            h.crc        = 0;
+            h.slot_bytes = static_cast<uint16_t>(HISTORY_JOURNAL_SLOT_BYTES);
+            h.sequence   = 5;
+            h.bucket     = 100;
+            h.dt_s       = HISTORY_DT_S;
+            h.rings[0]   = static_cast<uint16_t>(TREND_COUNT);
+            h.rings[1]   = static_cast<uint16_t>(HOMEHUB_HISTORY_COUNT);
+            h.rings[2]   = static_cast<uint16_t>(ENV3_HISTORY_COUNT);
+            h.reserved   = 0xffff;
+            return h;
+        };
+        // One edit per input every predicate reads.
+        const auto damage = [](auto each) {
+            each([](H& h) { h.magic ^= 1u; });
+            each([](H& h) { h.version = static_cast<uint16_t>(h.version + 1); });
+            each([](H& h) { h.commit = HISTORY_JOURNAL_ERASED; });
+            each([](H& h) { h.flags |= 0x80u; });
+            each([](H& h) { h.catalog_fp = 0; });
+            each([](H& h) { h.slot_bytes = static_cast<uint16_t>(h.slot_bytes + 1); });
+            each([](H& h) { h.dt_s += 1; });
+            each([](H& h) { h.sequence = 0; });
+            each([](H& h) { h.bucket = INT64_MIN; });
+            each([](H& h) { h.source = static_cast<uint8_t>(HISTORY_JOURNAL_SOURCE_COUNT); });
+            each([](H& h) { h.value_count = 0; });
+            each([](H& h) { h.value_count = static_cast<uint16_t>(h.value_count + 1); });
+            each([](H& h) {
+                h.value_count = static_cast<uint16_t>(
+                    HISTORY_JOURNAL_PAYLOAD_BYTES / sizeof(HistorySample) + 1);
+            });
+            each([](H& h) { h.rings[0] = 0; });
+            each([](H& h) { h.rings[1] = 0; });
+            each([](H& h) { h.rings[2] = 0; });
+            each([](H& h) { h.rings[0] = HISTORY_MANIFEST_MAX_IDS + 1; });
+            each([](H& h) { h.rings[1] = HISTORY_MANIFEST_MAX_IDS + 1; });
+            each([](H& h) { h.rings[2] = HISTORY_MANIFEST_MAX_IDS + 1; });
+        };
+        constexpr size_t kDamage = 19;
+        // The identity bytes are not an input of any of them.
+        const auto identity_is_inert = [](const H& valid, auto accepts) {
+            for (const uint32_t identity : {0u, 1u, 0x12345678u, 0xfffffffeu}) {
+                H h = valid;
+                history_journal_set_circulation_identity(h, identity);
+                CHECK(accepts(h));
+            }
+        };
+
+        // Dense record of a source without scope (ENV III), the generic acceptance.
+        {
+            H dense            = base_header();
+            dense.source       = static_cast<uint8_t>(HistoryJournalSource::Env3);
+            dense.flags        = 0;
+            dense.value_count  = static_cast<uint16_t>(ENV3_HISTORY_COUNT);
+            const auto accepts = [&](const H& h) {
+                return history_journal_header_matches(
+                    h, kFp, static_cast<uint16_t>(ENV3_HISTORY_COUNT), HISTORY_DT_S);
+            };
+            CHECK(accepts(dense));
+            size_t damaged = 0;
+            damage([&](auto edit) {
+                H h = dense;
+                edit(h);
+                CHECK(!accepts(h));
+                damaged++;
+            });
+            CHECK(damaged == kDamage);
+            H wrong_flags     = dense;
+            wrong_flags.flags = HISTORY_JOURNAL_FLAG_TARGET_SCOPED; // this predicate takes flags 0
+            CHECK(!accepts(wrong_flags));
+            CHECK(!history_journal_header_matches(dense, kFp ^ 1u,
+                                                  static_cast<uint16_t>(ENV3_HISTORY_COUNT),
+                                                  HISTORY_DT_S)); // another catalog generation
+            CHECK(!history_journal_header_matches(dense, kFp, 0, HISTORY_DT_S));
+            CHECK(!history_journal_header_matches(
+                dense, kFp, static_cast<uint16_t>(ENV3_HISTORY_COUNT), HISTORY_DT_S + 1));
+            H too_wide = dense; // a width the slot cannot hold
+            too_wide.value_count =
+                static_cast<uint16_t>(HISTORY_JOURNAL_PAYLOAD_BYTES / sizeof(HistorySample) + 1);
+            CHECK(
+                !history_journal_header_matches(too_wide, kFp, too_wide.value_count, HISTORY_DT_S));
+            H empty           = dense; // a record and a catalog that agree on holding nothing
+            empty.value_count = 0;
+            CHECK(!history_journal_header_matches(empty, kFp, 0, HISTORY_DT_S));
+            identity_is_inert(dense, accepts);
+        }
+
+        // Scoped data record (X10A): the structural acceptance, independent of any catalog.
+        {
+            H data           = base_header();
+            data.source      = static_cast<uint8_t>(HistoryJournalSource::X10a);
+            data.flags       = HISTORY_JOURNAL_FLAG_TARGET_SCOPED;
+            data.value_count = static_cast<uint16_t>(TREND_COUNT);
+            history_journal_set_scope(data, 0x0badcafeu);
+            const auto accepts = [](const H& h) {
+                return history_journal_trend_header_structural_matches(h);
+            };
+            CHECK(accepts(data));
+            size_t damaged = 0;
+            damage([&](auto edit) {
+                H h = data;
+                edit(h);
+                CHECK(!accepts(h));
+                damaged++;
+            });
+            CHECK(damaged == kDamage);
+            H unscoped     = data;
+            unscoped.flags = 0; // a source with a target scope must say it is scoped
+            CHECK(!accepts(unscoped));
+            H no_scope = data;
+            history_journal_set_scope(no_scope, 0); // ... and carry one
+            CHECK(!accepts(no_scope));
+            H scoped_env3           = data; // the unscoped source must not claim a scope
+            scoped_env3.source      = static_cast<uint8_t>(HistoryJournalSource::Env3);
+            scoped_env3.value_count = static_cast<uint16_t>(ENV3_HISTORY_COUNT);
+            CHECK(!accepts(scoped_env3));
+            // The fourth source is not a trend record. Every other rule would let this one through
+            // (no scope owed, and the ring count it is compared with is the header's own `reserved`
+            // word), so only the source rule itself refuses it.
+            H checkup        = data;
+            checkup.source   = static_cast<uint8_t>(HistoryJournalSource::Checkup);
+            checkup.flags    = 0;
+            checkup.reserved = checkup.value_count;
+            CHECK(!accepts(checkup));
+            identity_is_inert(data, accepts);
+            // The same record, read as a given catalog's layout, is stricter in exactly the
+            // catalog and ring counts it names.
+            const auto layout = [&](const H& h, uint16_t x, uint16_t m, uint16_t e) {
+                return history_journal_trend_layout_matches(h, kFp, x, m, e);
+            };
+            const uint16_t x = static_cast<uint16_t>(TREND_COUNT);
+            const uint16_t m = static_cast<uint16_t>(HOMEHUB_HISTORY_COUNT);
+            const uint16_t e = static_cast<uint16_t>(ENV3_HISTORY_COUNT);
+            CHECK(layout(data, x, m, e));
+            CHECK(!layout(data, x + 1, m, e));
+            CHECK(!layout(data, x, m + 1, e));
+            CHECK(!layout(data, x, m, e + 1));
+            H other_catalog          = data;
+            other_catalog.catalog_fp = kFp ^ 1u;
+            CHECK(!layout(other_catalog, x, m, e));
+            CHECK(!history_journal_header_matches_x10a_scoped(data, kFp, 0)); // no scope asked for
+        }
+
+        // Catalog manifest: the schema fingerprint in pad[4..7] is an input, the scope is not.
+        {
+            H manifest           = base_header();
+            manifest.source      = static_cast<uint8_t>(HistoryJournalSource::X10a);
+            manifest.flags       = HISTORY_JOURNAL_FLAG_CATALOG_MANIFEST;
+            manifest.value_count = static_cast<uint16_t>(TREND_COUNT);
+            history_journal_set_schema_fingerprint(manifest, 0x5eed1234u);
+            const auto accepts = [](const H& h) {
+                return history_journal_manifest_header_matches(h);
+            };
+            CHECK(accepts(manifest));
+            size_t damaged = 0;
+            damage([&](auto edit) {
+                H h = manifest;
+                edit(h);
+                CHECK(!accepts(h));
+                damaged++;
+            });
+            CHECK(damaged == kDamage);
+            H no_schema = manifest;
+            history_journal_set_schema_fingerprint(no_schema, 0);
+            CHECK(!accepts(no_schema));
+            H data_flags = manifest;
+            data_flags.flags =
+                HISTORY_JOURNAL_FLAG_TARGET_SCOPED; // a manifest is not a data record
+            CHECK(!accepts(data_flags));
+            H too_many           = manifest;
+            too_many.value_count = HISTORY_MANIFEST_MAX_IDS + 1;
+            CHECK(!accepts(too_many));
+            H checkup        = manifest; // as for data records, only the source rule refuses it
+            checkup.source   = static_cast<uint8_t>(HistoryJournalSource::Checkup);
+            checkup.reserved = checkup.value_count;
+            CHECK(!accepts(checkup));
+            identity_is_inert(manifest, accepts);
+        }
+    }
 }
 
 // ── The converter adjudication (logic/conv_override.hpp) — legacy-194
@@ -19549,6 +20387,7 @@ int main() {
     test_state_dwell();
     test_checkup_persist();
     test_history_persist();
+    test_history_identity();
     if (g_failures == 0) {
         std::printf("all logic tests passed\n");
         return 0;
