@@ -501,9 +501,12 @@ GET  /history?row=<trend id>       # one trended row's 24 h series, oldest sampl
                                    #   after a successful journal scan and clock sync, completed
                                    #   buckets also ride the upper-flash journal across ordinary
                                    #   reboot, OTA section movement and later power loss. Before the
-                                   #   first eligible commit, flash cannot restore RAM-only samples. The
-                                   #   factory reset erases both media. During OTA this route returns the
-                                   #   same early 503 as /values; retry the complete request later.
+                                   #   first eligible commit, flash cannot restore RAM-only samples. An
+                                   #   update that changes a series' stored identity starts that
+                                   #   series empty once (an X10A decode fix under an unchanged id
+                                   #   does not; see docs/ARCHITECTURE.md). The factory reset erases both
+                                   #   media. During OTA this route returns the same early 503 as
+                                   #   /values; retry the complete request later.
                                    #   A history reset between sampling and sending answers 503
                                    #   {"ok":false,"error":"history changed; retry"} before any
                                    #   series byte; retry after the next /status. When no snapshot

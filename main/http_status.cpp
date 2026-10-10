@@ -2233,13 +2233,21 @@ static esp_err_t h_history(httpd_req_t* req) {
     static logic::HistorySample samples[logic::HISTORY_SAMPLES];
     static uint16_t             runs[logic::HISTORY_MAX_RUNS][2];
     uint32_t                    history_snapshot_epoch = 0;
-    const size_t                n =
-        modbus ? history_modbus_snapshot(static_cast<size_t>(mb_t), samples, logic::HISTORY_SAMPLES,
-                                                        &history_snapshot_epoch)
-                       : env3_source
-                           ? history_env3_snapshot(static_cast<size_t>(env_t), samples, logic::HISTORY_SAMPLES,
-                                                   &history_snapshot_epoch)
-                           : history_snapshot(t, samples, logic::HISTORY_SAMPLES, &history_snapshot_epoch);
+    // The newest-sample age and sample zero's bucket come back from the SAME critical section as
+    // the samples (HIST-01/e). Asked for afterwards, each took the lock again, and a bucket commit
+    // between the copy and the question shifted sample zero by one bucket under the old t0/b0.
+    // Static for the reason above; every snapshot call resets it before it can fill it.
+    static logic::HistoryMeta history_meta;
+    size_t                    n = 0;
+    if (modbus)
+        n = history_modbus_snapshot(static_cast<size_t>(mb_t), samples, logic::HISTORY_SAMPLES,
+                                    &history_snapshot_epoch, &history_meta);
+    else if (env3_source)
+        n = history_env3_snapshot(static_cast<size_t>(env_t), samples, logic::HISTORY_SAMPLES,
+                                  &history_snapshot_epoch, &history_meta);
+    else
+        n = history_snapshot(t, samples, logic::HISTORY_SAMPLES, &history_snapshot_epoch,
+                             &history_meta);
     const size_t nruns = (modbus || env3_source) ? 0
         : logic::history_held_runs(samples, n, runs, logic::HISTORY_MAX_RUNS);
 
@@ -2282,8 +2290,7 @@ static esp_err_t h_history(httpd_req_t* req) {
     j += ",\"unit\":";
     j += jstr(unit);
     const TimeStatus ts = time_status();
-    const int32_t newest_age = modbus ? history_modbus_newest_age_s()
-        : env3_source ? history_env3_newest_age_s() : history_newest_age_s();
+    const int32_t    newest_age = history_meta.newest_age_s;
     if (ts.synced && n && newest_age >= 0) {
         // Derived from the AGE of the newest sample, not from `now`: the ring commits a bucket every
         // HISTORY_DT_S, so between commits the newest sample ages while `now` moves on. Measured on a
@@ -2295,8 +2302,7 @@ static esp_err_t h_history(httpd_req_t* req) {
         j += std::to_string(logic::history_t0(ts.unix_time, static_cast<uint32_t>(newest_age),
                                               n, logic::HISTORY_DT_S));
     }
-    const int64_t b0 = modbus ? history_modbus_oldest_bucket(n)
-        : env3_source ? history_env3_oldest_bucket(n) : history_oldest_bucket(n);
+    const int64_t b0 = history_meta.oldest_bucket;
     if (b0 >= 0) {
         // Exact source alignment even before SNTP: all recorders derive this monotonic bucket from
         // the same esp_timer clock, so a Modbus line cannot slide onto the neighbouring X10A sample.
