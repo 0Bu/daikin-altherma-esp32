@@ -24,6 +24,18 @@ MAX_TARGETS = 16
 MAX_CONTENT_BYTES = 1024 * 1024
 
 
+def bounded_utf8_size(content: str) -> int | None:
+    """Measure before constructing output; even a rejected input uses small chunks."""
+    if len(content) > MAX_CONTENT_BYTES:
+        return None
+    size = 0
+    for offset in range(0, len(content), 4096):
+        size += len(content[offset:offset + 4096].encode("utf-8"))
+        if size > MAX_CONTENT_BYTES:
+            return None
+    return size
+
+
 def digest(content: bytes) -> str:
     return hashlib.sha256(content).hexdigest()
 
@@ -114,6 +126,8 @@ def write_record(path: Path, record: dict[str, Any]) -> None:
 
 def patch_result(patch: str, target: str, previous: bytes | None) -> bytes | None:
     """Accept only exact, uniquely anchored custom patch hunks; skip other forms."""
+    if bounded_utf8_size(patch) is None or (previous is not None and len(previous) > MAX_CONTENT_BYTES):
+        return None
     lines = patch.splitlines()
     markers = [index for index, line in enumerate(lines)
                if line in {f"*** Add File: {target}", f"*** Update File: {target}"}]
@@ -125,10 +139,14 @@ def patch_result(patch: str, target: str, previous: bytes | None) -> bytes | Non
     if lines[start].startswith("*** Add File:"):
         if previous is not None or not section or not all(line.startswith("+") for line in section):
             return None
+        size = sum(len(line[1:].encode("utf-8")) + 1 for line in section)
+        if size > MAX_CONTENT_BYTES:
+            return None
         return ("\n".join(line[1:] for line in section) + "\n").encode()
     if previous is None or not previous.endswith(b"\n") or b"\r" in previous:
         return None
     source = previous.decode("utf-8").splitlines()
+    size = len(previous)
     hunks: list[list[str]] = []
     for line in section:
         if line.startswith("@@"):
@@ -151,6 +169,10 @@ def patch_result(patch: str, target: str, previous: bytes | None) -> bytes | Non
         if len(matches) != 1:
             return None
         index = matches[0]
+        size += sum(len(line.encode("utf-8")) + 1 for line in after) \
+            - sum(len(line.encode("utf-8")) + 1 for line in before)
+        if size > MAX_CONTENT_BYTES:
+            return None
         source[index:index + len(before)] = after
     return ("\n".join(source) + "\n").encode()
 
@@ -160,15 +182,25 @@ def expected_content(tool: str, inputs: dict[str, Any], patch: str, target: str,
     if tool == "apply_patch":
         return patch_result(patch, target, previous)
     if tool == "write" and isinstance(inputs.get("content"), str):
-        return inputs["content"].encode()
+        content = inputs["content"]
+        return content.encode() if bounded_utf8_size(content) is not None else None
     if tool == "edit" and previous is not None:
+        if len(previous) > MAX_CONTENT_BYTES:
+            return None
         before, after = inputs.get("old_string"), inputs.get("new_string")
         if not isinstance(before, str) or not before or not isinstance(after, str):
             return None
         content = previous.decode("utf-8")
-        if content.count(before) != 1 and inputs.get("replace_all") is not True:
+        count = content.count(before)
+        if count != 1 and inputs.get("replace_all") is not True:
             return None
-        if before not in content:
+        if count == 0:
+            return None
+        before_size, after_size = bounded_utf8_size(before), bounded_utf8_size(after)
+        if before_size is None or after_size is None:
+            return None
+        replacements = count if inputs.get("replace_all") is True else 1
+        if len(previous) + replacements * (after_size - before_size) > MAX_CONTENT_BYTES:
             return None
         return content.replace(before, after, -1 if inputs.get("replace_all") is True else 1).encode()
     return None
@@ -215,7 +247,7 @@ def record(payload: dict[str, Any], root: Path, tool: str, inputs: dict[str, Any
             return
         current = {"inputs": input_digest(payload), "paths": tracked, "blocked": collision}
         write_record(path, current)
-    except (OSError, ValueError, UnicodeError, subprocess.SubprocessError):
+    except (OSError, ValueError, UnicodeError, MemoryError, subprocess.SubprocessError):
         pass
     finally:
         if lock is not None:
@@ -242,7 +274,7 @@ def consume(payload: dict[str, Any], root: Path, targets: set[str]) -> dict[str,
         return {target: evidence for target, evidence in entry.get("paths", {}).items()
                 if target in targets and evidence.get("head") == head
                 and digest(read_source(Path(target))) == evidence.get("expected")}
-    except (OSError, ValueError, UnicodeError, subprocess.SubprocessError):
+    except (OSError, ValueError, UnicodeError, MemoryError, subprocess.SubprocessError):
         return {}
     finally:
         if lock is not None:
