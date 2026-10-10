@@ -119,8 +119,9 @@ skill/reviewer asserts:
   `nvs@0x9000`, MAC identity via `esptool chip-id`, `scripts/verify-device-health.sh`, and the automated
   diagnostic loop via `$device-triage`. Its boundary must match `AGENTS.md`'s USB cases. Standalone
   test fixes require separate commit authorization before a repeat at a new clean head; the
-  `$deploy-prod` chain can supply that authorization. Compare the full 64-hex API ELF SHA;
-  distinguish the serial boot prefix and the health script's explicit comparison prefix.
+  `$deploy-prod` chain can supply that authorization. Verify the API and serial ELF identity length
+  against the pinned ESP-IDF configuration (`CONFIG_APP_RETRIEVE_LEN_ELF_SHA=9`); compare that
+  prefix with the full artifact hash and distinguish build identity from installed-image readback.
 - **`$device-triage`** — live device network triage. Verify endpoints `/status`, `/values`, `/diag`,
   `/coredump`, `/crash/dismiss`. Verify that `last_crash.fault` is read before diagnosing a crash, that
   orphan dumps from earlier boots are distinguished, and that `scripts/decode-coredump.sh` is used with the

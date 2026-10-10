@@ -110,10 +110,12 @@ OTA gate (`--confirm-bench bench --install-bench`), never through this skill.
    a different port without identifying it again.
 
 7. **Verify by identity, not by name.** The board must be running *this* image: compare
-   the full 64-hex `/status.app_elf_sha256` from the inventory host with the ELF hash from step 3.
-   If HTTP is unavailable, compare the serial boot line `ELF file SHA256` as its shorter printed
-   prefix and report that limit. The health script accepts an explicitly selected comparison
-   prefix; it does not imply that the API field is shortened. Never verify through
+   `/status.app_elf_sha256` from the inventory host with the first nine hex characters of the
+   full ELF hash from step 3. The pinned ESP-IDF configuration uses
+   `CONFIG_APP_RETRIEVE_LEN_ELF_SHA=9`, so the API and serial boot line expose a shortened build
+   identity. Retain the full artifact hash and signature evidence separately; this prefix comparison
+   is not a cryptographic readback of the installed image. If HTTP is unavailable, compare the
+   serial boot line `ELF file SHA256` and report that verification limit. Never verify through
    `daikin-altherma-esp32.local`, which can resolve to another board. Then:
    ```bash
    scripts/verify-device-health.sh --ip <bench-host> --expected-version <version> --expected-elf-sha <elf-sha-prefix> --timeout 90
