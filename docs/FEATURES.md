@@ -665,8 +665,8 @@ Everything needed to explain a crash *after the fact*, from the field, without a
   `last_crash` it is present on **every** boot, and unlike the heartbeat it needs **no broker** —
   which is why the stack figures are here too: every MQTT publish is X10A-gated, so a board with a
   silent bus, or one in safe mode, would otherwise report them nowhere.
-- **✅ Build identity** — `/status.app_elf_sha256` ties a running device to the firmware that
-  produced any dump, and the syslog boot line puts the same hash in the **log stream**.
+- **✅ Build identity** — `/status.app_elf_sha256` and the syslog boot line expose the configured
+  nine-character ELF hash prefix; full artifact hashes and signatures remain separate evidence.
 - **✅ 🧪 Getting the evidence off the board — and what must not come with it.** *Settings → Report a
   bug* collects redacted status, update-feed URLs and logs plus values into one pasteable report
   and opens the prefilled issue form. The crash banner also uses redacted logs. Failed reads are

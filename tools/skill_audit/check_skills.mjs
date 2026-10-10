@@ -217,7 +217,18 @@ const languageList = localeSource.match(/const UI_LANGS\s*=\s*Object\.freeze\(\[
 if (!languageList) die(2, "cannot establish shipped UI_LANGS for skill claims");
 const shippedLanguageCount = [...languageList[1].matchAll(/"[a-z]+"/g)].length;
 const elfSource = fs.readFileSync(path.join(repoRoot, "main/http_status.cpp"), "utf8");
-const fullApiElfSha = /char\s+elf_sha\[65\][\s\S]{0,100}esp_app_get_elf_sha256\(elf_sha,\s*sizeof\(elf_sha\)\)/.test(elfSource);
+const elfBuffer = elfSource.match(/char\s+elf_sha\[([1-9][0-9]*)\][\s\S]{0,100}esp_app_get_elf_sha256\(elf_sha,\s*sizeof\(elf_sha\)\)/);
+const configSource = fs.readFileSync(path.join(repoRoot, "sdkconfig.defaults"), "utf8");
+const elfSettings = configSource.split(/\r?\n/).filter(line => /^\s*CONFIG_APP_RETRIEVE_LEN_ELF_SHA\s*=/.test(line));
+if (elfSettings.length !== 1 || !/^CONFIG_APP_RETRIEVE_LEN_ELF_SHA=([0-9]+)$/.test(elfSettings[0])) {
+  die(2, "cannot establish exactly one explicit CONFIG_APP_RETRIEVE_LEN_ELF_SHA assignment");
+}
+const apiElfShaLength = Number(elfSettings[0].split("=")[1]);
+// The pinned SDK's Kconfig range is 8..64; esp_app_get_elf_sha256 copies this configured prefix,
+// even when the caller supplies a larger buffer. Require room for its terminating NUL.
+if (apiElfShaLength < 8 || apiElfShaLength > 64 || !elfBuffer || Number(elfBuffer[1]) <= apiElfShaLength) {
+  die(2, "configured API ELF SHA length is outside the SDK range or status buffer capacity");
+}
 const browserCi = fs.readFileSync(path.join(repoRoot, ".github/workflows/build.yml"), "utf8")
   .includes("scripts/run-browser-render-tests.sh");
 
@@ -332,8 +343,12 @@ for (const skillName of discoveredSkills) {
   if (shippedLanguageCount > 2 && /(?:copy, in both languages|copy & fit check[^\n]*both English and German|key EXISTS in both dicts)/i.test(content)) {
     finding(skillName, `two-language review claim contradicts ${shippedLanguageCount} shipped UI_LANGS`);
   }
-  if (fullApiElfSha && /\/status\.app_elf_sha256[\s\S]{0,100}\b9-hex\b/.test(content)) {
-    finding(skillName, "API ELF SHA claim contradicts the full 64-hex status field");
+  const elfClaims = [
+    ...content.matchAll(/\/status\.app_elf_sha256[\s\S]{0,100}?\b([0-9]+)-hex\b/g),
+    ...content.matchAll(/\bCONFIG_APP_RETRIEVE_LEN_ELF_SHA=([0-9]+)\b/g),
+  ];
+  if (elfClaims.some(claim => Number(claim[1]) !== apiElfShaLength)) {
+    finding(skillName, `API ELF SHA claim contradicts the configured ${apiElfShaLength}-hex status prefix`);
   }
   if (browserCi && /CI has no browser/i.test(content)) {
     finding(skillName, "no-browser CI claim contradicts the rendered browser workflow gate");

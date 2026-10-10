@@ -31,7 +31,7 @@ new_fixture() {
     ln -s "$ROOT/CONTRIBUTING.md" "$TMP/t/CONTRIBUTING.md"
     ln -s "$ROOT/.githooks" "$TMP/t/.githooks"
     ln -s "$ROOT/.github" "$TMP/t/.github"
-    ln -s "$ROOT/sdkconfig.defaults" "$TMP/t/sdkconfig.defaults"
+    cp "$ROOT/sdkconfig.defaults" "$TMP/t/sdkconfig.defaults"
     cp "$ROOT/partitions.csv" "$TMP/t/partitions.csv"
     mkdir -p "$TMP/t/.agents"
     [ -f "$ROOT/.agents/hooks.json" ] && cp "$ROOT/.agents/hooks.json" "$TMP/t/.agents/"
@@ -277,9 +277,29 @@ run_case "two-language schematic review contradicts production locales" \
     "echo 'Copy, in both languages.' >> .agents/skills/schematic-review/SKILL.md" \
     "two-language review claim contradicts"
 
-run_case "short API ELF identity claim contradicts the status builder" \
+run_case "configured API ELF prefix remains valid with a larger status buffer" \
     "echo '/status.app_elf_sha256 is a 9-hex prefix.' >> .agents/skills/flash-esp32/SKILL.md" \
+    "18 skills and 3 reviewer agents clean" 0
+
+run_case "full API ELF identity claim contradicts the configured SDK prefix" \
+    "echo '/status.app_elf_sha256 is a full 64-hex hash.' >> .agents/skills/flash-esp32/SKILL.md" \
     "API ELF SHA claim contradicts"
+
+run_case "changed SDK prefix rejects stale skill instructions" \
+    "sed -i.bak 's/^CONFIG_APP_RETRIEVE_LEN_ELF_SHA=9$/CONFIG_APP_RETRIEVE_LEN_ELF_SHA=64/' sdkconfig.defaults" \
+    "API ELF SHA claim contradicts the configured 64-hex"
+
+run_case "missing explicit SDK prefix fails closed" \
+    "sed -i.bak '/^CONFIG_APP_RETRIEVE_LEN_ELF_SHA=/d' sdkconfig.defaults" \
+    "cannot establish exactly one explicit CONFIG_APP_RETRIEVE_LEN_ELF_SHA" 2
+
+run_case "duplicate SDK prefix fails closed" \
+    "echo 'CONFIG_APP_RETRIEVE_LEN_ELF_SHA=9' >> sdkconfig.defaults" \
+    "cannot establish exactly one explicit CONFIG_APP_RETRIEVE_LEN_ELF_SHA" 2
+
+run_case "SDK prefix outside its Kconfig range fails closed" \
+    "sed -i.bak 's/^CONFIG_APP_RETRIEVE_LEN_ELF_SHA=9$/CONFIG_APP_RETRIEVE_LEN_ELF_SHA=65/' sdkconfig.defaults" \
+    "configured API ELF SHA length is outside the SDK range" 2
 
 run_case "browserless CI claim contradicts the workflow" \
     "echo 'CI has no browser.' >> .agents/skills/ui-gif/SKILL.md" \
