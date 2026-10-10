@@ -220,5 +220,42 @@ s = open(p).read().replace('DiagLogIdentifier(s_server).c_str()', 's_server.c_st
 open(p, "w").write(s)
 PY
 expect_red "an unescaped free-text server bypassing diagnostic record framing"
+cp -R "$ROOT/main/sntp_time.cpp" "$TMP/main/sntp_time.cpp"
+
+python3 - "$TMP/main/logic/redact.hpp" <<'PY'
+import sys
+p = sys.argv[1]
+s = open(p).read().replace('{"ota: downloading ", " ("},', '', 1)
+open(p, "w").write(s)
+PY
+expect_red "a deleted OTA download-URL redaction rule"
+cp -R "$ROOT/main/logic/redact.hpp" "$TMP/main/logic/redact.hpp"
+
+python3 - "$TMP/main/ota_update.cpp" <<'PY'
+import sys
+p = sys.argv[1]
+s = open(p).read().replace('DiagLogIdentifier(url).c_str()', 'url.c_str()', 1)
+open(p, "w").write(s)
+PY
+expect_red "an unescaped private OTA download URL"
+cp -R "$ROOT/main/ota_update.cpp" "$TMP/main/ota_update.cpp"
+
+python3 - "$TMP/main/ota_update.cpp" <<'PY'
+import sys
+p = sys.argv[1]
+s = open(p).read() + '\nstatic void seeded() { diag_printf("ota: seeded feed %s\\n", effective_feed.manifest.data()); }\n'
+open(p, "w").write(s)
+PY
+expect_red "a new effective-feed alias bypassing log redaction"
+cp -R "$ROOT/main/ota_update.cpp" "$TMP/main/ota_update.cpp"
+
+python3 - "$TMP/main/http_status.cpp" <<'PY'
+import sys
+p = sys.argv[1]
+s = open(p).read().replace('jstr_r(rt.hvac_mode, redact && !report_hvac_mode_public(rt.hvac_mode))',
+                          'jstr(rt.hvac_mode)', 1)
+open(p, "w").write(s)
+PY
+expect_red "unknown MQTT HVAC text bypassing conditional source redaction"
 
 exit "$fail"

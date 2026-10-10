@@ -8,7 +8,7 @@ const source = fs.readFileSync("main/www/js/app_state.js", "utf8");
 const PRIVATE = "PRIVATE-IDENTITY-'\\n\"ü";
 const PRIVATE_URL = "https://private.invalid/house/person/token/manifest.json";
 
-function harness({ configured = true, failure = "", secure = true, log = "raw 0xA1 32B 01 02\n" } = {}) {
+function harness({ configured = true, failure = "", secure = true, log = "raw 0xA1 32B 01 02\nota: downloading <redacted> (1.2.3 -> 1.2.4, dev channel)\n" } = {}) {
   const state = { calls: [], copies: [], downloads: [], opens: [], selected: null };
   const elements = new Map();
   function element(tag) {
@@ -35,7 +35,7 @@ function harness({ configured = true, failure = "", secure = true, log = "raw 0x
   const rawStatus = {
     wifi: { ssid: configured ? PRIVATE : "", ip: configured ? PRIVATE : "", mac: PRIVATE },
     mqtt: { broker: configured ? PRIVATE : "" },
-    reference_temperature: { name: configured ? PRIVATE : "" },
+    reference_temperature: { name: configured ? PRIVATE : "", hvac_mode: configured ? "PRIVATE-HVAC" : "" },
     ntp: { server: configured ? PRIVATE : "" }, syslog: { host: configured ? PRIVATE : "" },
   };
   const redact = node => typeof node === "string" ? (node ? "<redacted>" : "")
@@ -69,6 +69,7 @@ function harness({ configured = true, failure = "", secure = true, log = "raw 0x
 
 function assertPrivateAbsent(text) {
   assert.ok(!text.includes(PRIVATE), "private operational identity escaped into a public report");
+  assert.ok(!text.includes("PRIVATE-HVAC"), "unknown MQTT HVAC text escaped into a public report");
   assert.ok(!text.includes(PRIVATE_URL), "effective private OTA override escaped into a public report");
 }
 
@@ -82,6 +83,7 @@ for (const configured of [true, false]) for (const secure of [true, false]) {
   assert.deepEqual(h.state.calls, ["/diag?redact=1"]);
   assertPrivateAbsent(h.state.copies.at(-1));
   assert.match(h.state.copies.at(-1), /raw 0xA1 32B 01 02/);
+  assert.match(h.state.copies.at(-1), /1\.2\.3 -> 1\.2\.4, dev channel/);
   assert.match(h.state.copies.at(-1), /reset: panic/);
   h.state.calls.length = 0;
   const report = await h.api.collectBugReport(); // real producer, never a test stub

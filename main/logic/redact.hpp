@@ -41,7 +41,7 @@ namespace daik {
 // nothing, e.g. bssid while offline) and from an absent key (an older build).
 inline constexpr const char* REDACTED = "<redacted>";
 
-// The twenty-seven /status values http_status.cpp passes through redact_identifier (via its jstr_r
+// The twenty-eight /status values http_status.cpp passes through redact_identifier (via its jstr_r
 // wrapper). This array is the machine-readable source for tools/redact/check_diag_coverage.py
 // (`--list` prints it); the audit also compares docs/REPORTING.md's public table with it:
 //   wifi.ssid  wifi.ip  wifi.bssid  wifi.mac  mqtt.broker  mqtt.base
@@ -50,6 +50,7 @@ inline constexpr const char* REDACTED = "<redacted>";
 //   reference_temperature.setpoint_topic  reference_temperature.setpoint_path
 //   reference_temperature.timestamp_topic  reference_temperature.timestamp_path
 //   reference_temperature.enabled_path  reference_temperature.hvac_mode_path
+//   reference_temperature.hvac_mode (conditional: unknown source text only)
 //   circulation_source.name  circulation_source.topic  circulation_source.power_path
 //   circulation_source.timestamp_path
 //   weather_forecast.latitude  weather_forecast.longitude
@@ -75,19 +76,36 @@ inline constexpr const char* REDACTED = "<redacted>";
 // The audit separately flags a Config string emitted through plain jstr(): that is the direction a
 // call-site count alone cannot see — a new identifying field that was never wrapped at all.
 inline constexpr std::string_view REDACTED_STATUS_FIELD_NAMES[] = {
-    "wifi.ssid", "wifi.ip", "wifi.bssid", "wifi.mac", "mqtt.broker", "mqtt.base",
-    "net.ip", "net.eth.ip", "net.eth.mac",
-    "reference_temperature.name", "reference_temperature.topic",
-    "reference_temperature.temperature_path", "reference_temperature.setpoint_topic",
-    "reference_temperature.setpoint_path", "reference_temperature.timestamp_topic",
-    "reference_temperature.timestamp_path", "reference_temperature.enabled_path",
+    "wifi.ssid",
+    "wifi.ip",
+    "wifi.bssid",
+    "wifi.mac",
+    "mqtt.broker",
+    "mqtt.base",
+    "net.ip",
+    "net.eth.ip",
+    "net.eth.mac",
+    "reference_temperature.name",
+    "reference_temperature.topic",
+    "reference_temperature.temperature_path",
+    "reference_temperature.setpoint_topic",
+    "reference_temperature.setpoint_path",
+    "reference_temperature.timestamp_topic",
+    "reference_temperature.timestamp_path",
+    "reference_temperature.enabled_path",
     "reference_temperature.hvac_mode_path",
-    "circulation_source.name", "circulation_source.topic", "circulation_source.power_path",
+    "reference_temperature.hvac_mode",
+    "circulation_source.name",
+    "circulation_source.topic",
+    "circulation_source.power_path",
     "circulation_source.timestamp_path",
-    "weather_forecast.latitude", "weather_forecast.longitude",
-    "syslog.host", "ntp.server", "modbus.host",
+    "weather_forecast.latitude",
+    "weather_forecast.longitude",
+    "syslog.host",
+    "ntp.server",
+    "modbus.host",
 };
-inline constexpr std::size_t REDACTED_STATUS_FIELDS = 27;
+inline constexpr std::size_t REDACTED_STATUS_FIELDS = 28;
 static_assert(REDACTED_STATUS_FIELDS ==
               sizeof(REDACTED_STATUS_FIELD_NAMES) / sizeof(REDACTED_STATUS_FIELD_NAMES[0]));
 
@@ -119,6 +137,13 @@ inline std::string redact_or(const std::string& value, bool on) {
 // that decision quietly reversed by an empty-string edge case.
 inline std::string redact_identifier(const std::string& value, bool on) {
     return on && !value.empty() ? std::string(REDACTED) : value;
+}
+
+// The MQTT source accepts arbitrary short text. Only this fixed public vocabulary is safe to
+// retain in a public report; recognizing it here does not change source acceptance or evaluation.
+inline constexpr bool report_hvac_mode_public(std::string_view value) {
+    return value == "off" || value == "heat" || value == "cool" || value == "heat_cool" ||
+           value == "auto" || value == "dry" || value == "fan_only";
 }
 
 // Allocation-free form for fixed-buffer serializers such as /ota/status.
@@ -160,7 +185,8 @@ struct DiagLogIdentifier {
     const char* c_str() const { return text; }
 };
 
-// One diag-line rule: everything between the end of `marker` and the next `end` is replaced.
+// One diag-line rule: everything between the end of `marker` and the final trusted `end` is
+// replaced.
 struct DiagRedaction {
     const char* marker;   // matched anywhere in the line; the value starts right after it
     const char* end;      // the value ends here (exclusive). Empty = run to the end of the line.
@@ -188,6 +214,9 @@ inline constexpr DiagRedaction DIAG_REDACTIONS[] = {
     // esp_err_to_name() of the failure case survives, only the server name goes.
     {"sntp: time synced (", ")"},
     {"sntp: init failed (", "): "},
+    // ota_update.cpp's effective firmware URL can carry a private HIL origin/path. The escaped
+    // identifier cannot contain this terminator; versions and channel remain diagnostic evidence.
+    {"ota: downloading ", " ("},
     // hp_modbus.cpp "modbus: %s mDNS search found gateway %s" — the DISCOVERED HomeHub IPv4.
     // /status?redact=1 already withholds it as
     // modbus.host, and without this rule the same string was printed in /diag a few sections below

@@ -83,7 +83,8 @@ below and edit them out by hand before you post.
 
 ## What is removed, and what deliberately is not
 
-The device replaces these 27 values with `<redacted>` and **keeps the field itself**.
+The device protects these 28 values and **keeps the field itself**. Set identifiers become
+`<redacted>`; the MQTT HVAC mode retains only the fixed public vocabulary listed below.
 A value you have **not set** is the exception: it stays empty rather than becoming
 `<redacted>`, because an unset field has nothing to hide and substituting one would claim you
 have a broker, a room source or a HomeHub that you do not — which is the first thing anyone
@@ -111,6 +112,7 @@ reading your report needs to know.
 | `reference_temperature.timestamp_path` | user-typed JSON path; may contain room, person or device names |
 | `reference_temperature.enabled_path` | user-typed JSON path; may contain room, person or device names |
 | `reference_temperature.hvac_mode_path` | user-typed JSON path; may contain room, person or device names |
+| `reference_temperature.hvac_mode` | unknown MQTT source text; the fixed public modes off, heat, cool, heat_cool, auto, dry and fan_only remain visible |
 | `circulation_source.name` | a name you typed for the circulation-pump meter |
 | `circulation_source.topic` | a path through your own broker — normally embeds the smart plug's device id |
 | `circulation_source.power_path` | user-typed JSON path; may contain room, person or device names |
@@ -125,7 +127,7 @@ reading your report needs to know.
 The coordinates identify a place; source names and JSON paths are words you typed and can name a
 room or person. The remaining values identify devices or paths through your own network.
 
-The `/diag` log is scrubbed line by line for the same things. WiFi, clock-server and log-server
+The `/diag` log is scrubbed line by line for the same things. WiFi, clock-server, log-server and OTA download
 identifiers are escaped when logged, so quotes, line breaks and non-ASCII bytes cannot split a
 private identifier out of its redaction span. The log drops incomplete oldest records after a ring
 wrap or a shortened read; `[... truncated ...]` announces missing records. A clipped record also
@@ -146,7 +148,8 @@ report has to answer.
 `/values` are your heat pump's readings at one moment. `/ota/status?redact=1` hides
 `effective_manifest_url` and `effective_firmware_base_url` when present; an empty URL stays empty.
 The operational `/ota/status` route retains those URLs and can reveal a private feed origin or path
-during a temporary test override. Always use its redacted form for a public report. Oversized
+during a temporary test override. The redacted log also hides the effective download URL while
+retaining its running/offered versions and channel. Always use the redacted form for a public report. Oversized
 redaction queries or flags are refused rather than returning an operational response.
 
 ### The one exception: crash dumps

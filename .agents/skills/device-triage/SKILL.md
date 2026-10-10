@@ -25,7 +25,7 @@ the IP and use it verbatim. Put the host in `H` for the commands below: `H=daiki
 1. **Snapshot health.** Pull the three read endpoints and keep the JSON:
    ```bash
    curl -sS --max-time 5 "http://$H/status" | tee /tmp/dt_status.json | jq .
-   curl -sS --max-time 5 "http://$H/values" | jq '.[] | {label,value,unit}'
+   curl -sS --max-time 5 "http://$H/values" | jq .
    curl -sS --max-time 5 "http://$H/diag?verbose=1"
    ```
    If `/status` times out, record that the live HTTP snapshot and coredump checks are unavailable,

@@ -8853,6 +8853,14 @@ static void test_redact() {
     CHECK(nested.find("evil.host") == std::string::npos);
     CHECK(nested == "sntp: time synced (<redacted>)");
 
+    for (const auto mode : {"off", "heat", "cool", "heat_cool", "auto", "dry", "fan_only"}) {
+        CHECK(report_hvac_mode_public(mode));
+        CHECK(redact_identifier(mode, !report_hvac_mode_public(mode)) == mode);
+    }
+    for (const auto mode : {"", "PRIVATE-HVAC", "Heat", "heat\nPRIVATE", "hëat", "fan"}) {
+        CHECK(!report_hvac_mode_public(mode));
+        CHECK(redact_identifier(mode, !report_hvac_mode_public(mode)) == (mode[0] ? REDACTED : ""));
+    }
     CHECK(redact_identifier_view("", true).empty());
     CHECK(redact_identifier_view("https://private.example/secret", true) == REDACTED);
     CHECK(redact_identifier_view("https://private.example/secret", false) ==
@@ -8889,6 +8897,19 @@ static void test_redact() {
     CHECK(bounded.size() < 96 && bounded.substr(bounded.size() - 3) == "...");
     CHECK(bounded.find("\n") == std::string::npos);
     CHECK(std::string(DiagLogIdentifier(std::string(200, 'x')).c_str()).size() < 96);
+    const std::string private_feed = "https://private.invalid/person?tag=(PRIVATE)\nPRIVATE-TAIL";
+    const std::string ota_line     = "ota: downloading " +
+                                 std::string(DiagLogIdentifier(private_feed).c_str()) +
+                                 " (1.2.3 -> 1.2.4, dev channel)\n";
+    CHECK(ota_line.find("private.invalid") != std::string::npos); // raw operational log control
+    CHECK(redact_diag_line(ota_line) ==
+          "ota: downloading <redacted> (1.2.3 -> 1.2.4, dev channel)\n");
+    CHECK(
+        redact_diag_line(
+            "ota: downloading https://private.invalid/person (PRIVATE) (1 -> 2, dev channel)\n") ==
+        "ota: downloading <redacted> (1 -> 2, dev channel)\n");
+    CHECK(redact_diag_line("ota: downloading https://private.invalid/truncated\n") ==
+          "ota: downloading <redacted>\n");
 }
 
 static void test_config_store() {

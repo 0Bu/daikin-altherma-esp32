@@ -10,6 +10,7 @@ for (const [file, expressions] of Object.entries({
   "main/wifi.cpp": ["DiagLogIdentifier(rollback_cfg.wifi_ssid).c_str()", "DiagLogIdentifier(stale_backup).c_str()"],
   "main/sntp_time.cpp": ["DiagLogIdentifier(s_server).c_str()", "ESP_NETIF_SNTP_DEFAULT_CONFIG(s_server.c_str())"],
   "main/syslog.cpp": ["DiagLogIdentifier(last_host).c_str()", "DiagLogIdentifier(syslog_host).c_str()", "getaddrinfo(syslog_host.c_str()"],
+  "main/ota_update.cpp": ["DiagLogIdentifier(url).c_str()"],
   "main/diag_log.cpp": ["diag_finish_record(line, pre + n, sizeof(line) - 1, truncated)", "diag_dump_tail(s_buf, RING, s_len, s_wrapped, out, max)"],
 })) {
   const text = fs.readFileSync(file, "utf8");
@@ -20,6 +21,10 @@ const start = ota.indexOf("static esp_err_t ota_stat(");
 const end = ota.indexOf("// Stream the optional build notes", start);
 assert.ok(start >= 0 && end > start);
 const body = ota.slice(start, end);
+const statusSource = fs.readFileSync("main/http_status.cpp", "utf8");
+const statusWrapper = statusSource.match(/static std::string jstr_r\([^)]*\) \{[\s\S]*?\n\}/)?.[0];
+const hvacExpression = statusSource.match(/j \+= rt\.has_hvac_mode\s*\?[\s\S]*?: "null";/)?.[0];
+assert.ok(statusWrapper && hvacExpression, "production conditional HVAC serializer is missing");
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), "daikin-report-privacy-"));
 try {
   const fixture = String.raw`
@@ -68,6 +73,13 @@ OtaStatus ota_status(OtaFeedUrls* feed) {
  OtaStatus s; s.state="idle"; s.current="1.2.3"; return s;
 }
 int http_send_json(httpd_req_t* r,const char* text) {r->response=text;return ESP_OK;}
+` + statusWrapper + String.raw`
+std::string emitted_hvac(bool redact, bool has, const std::string& mode) {
+ struct { bool has_hvac_mode; std::string hvac_mode; } rt{has, mode};
+ std::string j;
+` + hvacExpression + String.raw`
+ return j;
+}
 ` + body + String.raw`
 }
 int main() {
@@ -82,12 +94,18 @@ int main() {
  std::cout<<unavailable.status<<'\t'<<daik::snapshots<<'\t'<<unavailable.response<<'\n';
  daik::empty=true; httpd_req_t unconfigured; unconfigured.query="redact=1"; daik::ota_stat(&unconfigured);
  std::cout<<unconfigured.status<<'\t'<<daik::snapshots<<'\t'<<unconfigured.response<<'\n';
+ const char* modes[]={"off","heat","cool","heat_cool","auto","dry","fan_only","PRIVATE-HVAC","Heat","heat\nPRIVATE","hëat",""};
+ for(size_t i=0; i<sizeof(modes)/sizeof(modes[0]); ++i)
+  for(bool redact: {false,true})
+   std::cout<<"hvac\t"<<i<<'\t'<<redact<<'\t'<<daik::emitted_hvac(redact,true,modes[i])<<'\n';
+ std::cout<<"missing\t"<<daik::emitted_hvac(true,false,"PRIVATE-HVAC")<<'\n';
 }
 `;
   const cpp = path.join(dir, "handler.cpp"), bin = path.join(dir, "handler");
   fs.writeFileSync(cpp, fixture);
   execFileSync(process.env.CXX || "c++", ["-std=c++17", "-Wall", "-Wextra", "-Werror", "-I", "main", cpp, "-o", bin], { stdio: "pipe" });
-  const rows = execFileSync(bin, [], { encoding: "utf8" }).trim().split("\n").map(line => {
+  const output = execFileSync(bin, [], { encoding: "utf8" }).trim().split("\n");
+  const rows = output.slice(0, 9).map(line => {
     const [status, snapshots, ...text] = line.split("\t"); return { status: Number(status), snapshots: Number(snapshots), text: text.join("\t") };
   });
   assert.equal(rows.length, 9);
@@ -101,5 +119,13 @@ int main() {
   }
   assert.equal(JSON.parse(rows[8].text).effective_manifest_url, "");
   assert.equal(JSON.parse(rows[8].text).effective_firmware_base_url, "");
+  const modes = ["off", "heat", "cool", "heat_cool", "auto", "dry", "fan_only", "PRIVATE-HVAC", "Heat", "heat\nPRIVATE", "hëat", ""];
+  const hvacRows = output.filter(line => line.startsWith("hvac\t"));
+  assert.equal(hvacRows.length, modes.length * 2);
+  for (const line of hvacRows) {
+    const [, i, redact, text] = line.split("\t");
+    assert.equal(JSON.parse(text), redact === "1" && Number(i) >= 7 && modes[i] ? "<redacted>" : modes[i]);
+  }
+  assert.ok(output.includes("missing\tnull"), "an absent source mode must remain null");
 } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 console.log("report privacy source bindings and production OTA serializer/query behavior passed");
