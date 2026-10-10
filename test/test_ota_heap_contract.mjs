@@ -34,6 +34,9 @@ const syslog = code("main/syslog.cpp");
 const weather = code("main/weather_forecast.cpp");
 const mcp = code("main/mcp_server.cpp");
 const httpCommon = code("main/http_common.cpp");
+const httpServer = code("main/http_server.cpp");
+const jsonGuard = code("main/json_guard.hpp");
+const mcpLogic = code("main/logic/mcp.hpp");
 const config = code("main/config.cpp");
 const httpClientDiag = code("main/http_client_diag.cpp");
 const httpDeadline = code("main/http_deadline.cpp");
@@ -241,6 +244,92 @@ assert.match(manifestProvenance,
   "the publisher must reject identity escapes that the supported restore parser cannot consume");
 assert.ok(weatherTaskStackMatch,
   "the Weather TLS task stack size must remain machine-readable");
+
+const httpStack = Number(httpServer.match(/cfg\.stack_size\s*=\s*(\d+)\s*;/)?.[1]);
+assert.equal(httpStack, 10240, "HTTP must retain its reviewed 10 KiB task allocation");
+for (const [name, budget] of Object.entries(stackBudgets.paths)) {
+  if (name.startsWith("httpd_")) assert.ok(budget.max_bytes <= httpStack - 2048,
+    `${name} must retain 2 KiB above its complete named path ceiling`);
+}
+const boundedJson = code("main/logic/payload_complete.hpp");
+const jsonDepth = Number(boundedJson.match(/JSON_MAX_DEPTH\s*=\s*(\d+)/)?.[1]);
+const mcpDepth = Number(mcpLogic.match(/if \(depth > (\d+)\) return false;/)?.[1]);
+assert.equal(jsonDepth, 16, "HTTP cJSON depth must remain tied to its reviewed recursion budget");
+assert.equal(mcpDepth, 16, "MCP depth must remain tied to its early-reject recursion frame");
+assert.match(jsonGuard,
+  /inline\s+cJSON\*\s+json_parse_document\(std::string_view\s+payload\)\s*\{\s*return\s+json_parse_bounded\(\s*payload,\s*\[\]\(const char\* bytes,\s*size_t length,\s*const char\*\* end\)\s*noexcept\s*\{\s*return cJSON_ParseWithLengthOpts\(bytes,\s*length,\s*end,\s*false\);\s*\},\s*\[\]\(cJSON\* root\)\s*noexcept\s*\{\s*cJSON_Delete\(root\);\s*\},\s*JSON_MAX_DEPTH\s*\);\s*\}/,
+  "the bounded adapter must bind its fourth argument to the same source depth as the frame multipliers");
+for (const owner of ["hp", "mqtt", "board", "env3", "weather", "diagnostics", "circulation"]) {
+  const name = `httpd_config_${owner}`;
+  const expectedOwners = owner === "circulation" ? ["config_circulation", "circulation_parser"] : [`config_${owner}`];
+  assert.deepEqual(stackBudgets.paths[name].symbols,
+    [...expectedOwners, "cjson_parse_length_opts", "cjson_parse_value", "cjson_delete", "cjson_parse_string"]);
+  assert.deepEqual(stackBudgets.paths[name].multipliers,
+    { cjson_parse_value: jsonDepth + 1, cjson_delete: jsonDepth + 1 },
+    "parser frames remain live during rejection cleanup; both recursive chains need root + depth");
+  assert.equal(stackBudgets.paths[name].base_bytes, 1536);
+}
+assert.deepEqual(stackBudgets.paths.httpd_mcp_parse.symbols,
+  ["mcp_post", "mcp_parser", "mcp_json_value", "mcp_json_string"]);
+assert.deepEqual(stackBudgets.paths.httpd_mcp_parse.multipliers, { mcp_json_value: mcpDepth + 2 },
+  "MCP must include depth zero and the depth-limit rejection frame");
+assert.equal(stackBudgets.paths.httpd_mcp_parse.base_bytes, 1536);
+assert.deepEqual(stackBudgets.paths.httpd_hp_query_probe.symbols, ["hp_query_probe"]);
+assert.equal(stackBudgets.paths.httpd_hp_query_probe.base_bytes, 1536);
+for (const wrapper of ["config_save", "config_save_link"]) {
+  const name = wrapper === "config_save" ? "httpd_config_save" : "httpd_config_save_link";
+  assert.deepEqual(stackBudgets.paths[name].symbols,
+    ["config_hp", wrapper, "config_save_whole", "config_transaction", "config_nvs_blob"]);
+  assert.deepEqual(stackBudgets.paths[name].multipliers, {});
+  assert.equal(stackBudgets.paths[name].base_bytes, 1536 + 1536,
+    "configuration persistence needs separate surrounding HTTP and deeper SDK-NVS allowances");
+  assert.equal(stackBudgets.paths[name].max_bytes, 8192);
+}
+assert.deepEqual(stackBudgets.paths.httpd_wifi_scan.symbols, ["http_scan", "wifi_scan"]);
+assert.deepEqual(stackBudgets.paths.httpd_wifi_scan.multipliers, {});
+assert.equal(stackBudgets.paths.httpd_wifi_scan.base_bytes, 1536 + 1024,
+  "WiFi scan needs separate surrounding HTTP and opaque SDK-radio allowances");
+assert.equal(stackBudgets.paths.httpd_wifi_scan.max_bytes, 6144);
+assert.deepEqual(stackBudgets.paths.httpd_mqtt_tls.symbols, ["config_mqtt"]);
+assert.deepEqual(stackBudgets.paths.httpd_mqtt_tls.multipliers, {});
+assert.equal(stackBudgets.paths.httpd_mqtt_tls.base_bytes, 1536 + 4096,
+  "MQTT setup/stop/destroy needs its own TLS/RSA/renegotiation allowance outside HTTP");
+assert.equal(stackBudgets.paths.httpd_mqtt_tls.max_bytes, 8192);
+assert.equal(stackBudgets.symbols.cjson_parse_value.max_bytes, 64);
+assert.equal(stackBudgets.symbols.cjson_delete.max_bytes, 32);
+assert.equal(stackBudgets.symbols.cjson_parse_length_opts.max_bytes, 64);
+assert.equal(stackBudgets.symbols.cjson_parse_string.max_bytes, 48);
+
+assert.equal(stackBudgets.symbols.cjson_parse_length_opts.pattern, "^cJSON_ParseWithLengthOpts$");
+assert.equal(stackBudgets.symbols.cjson_parse_value.pattern, "^parse_value$");
+assert.equal(stackBudgets.symbols.cjson_delete.pattern, "^cJSON_Delete$");
+assert.equal(stackBudgets.symbols.cjson_parse_string.pattern, "^parse_string$");
+const namedHttpSymbols = {
+  config_hp: ["set_hp", 3200], config_mqtt: ["set_mqtt", 2336],
+  config_board: ["set_board", 2176], config_env3: ["set_env3", 1792],
+  config_weather: ["set_weather", 1776], config_diagnostics: ["set_diagnostics", 1536],
+  config_circulation: ["set_circulation", 976], circulation_parser: ["parse_circulation_request", 1408],
+  hp_query_probe: ["hp_query_probe", 2720], mcp_parser: ["mcp_parse", 256],
+  config_save: ["config_save", 32], config_save_link: ["config_save_link", 32],
+  config_save_whole: ["save_whole", 48], config_nvs_blob: ["nvs_set_blob", 48],
+  http_scan: ["h_scan", 768], wifi_scan: ["wifi_scan", 1920],
+};
+for (const [key, [name, maximum]] of Object.entries(namedHttpSymbols)) {
+  assert.equal(stackBudgets.symbols[key].pattern, `^daik::${name}\\(`);
+  assert.equal(stackBudgets.symbols[key].max_bytes, maximum);
+}
+assert.equal(stackBudgets.symbols.config_transaction.pattern,
+  "^_ZN4daik23config_save_transactionINS_12_GLOBAL__N_112NvsBlobStoreEEENS_17ConfigSaveOutcomeERNS_6ConfigERKS4_bRT_\\$constprop\\$[0-9]+$");
+assert.equal(stackBudgets.symbols.config_transaction.max_bytes, 1600,
+  "the real NvsBlobStore transaction must have a measured frame independent of the HTTP allowance");
+assert.match(config, /save_whole\([\s\S]*?config_save_transaction\([\s\S]*?config_save\([\s\S]*?save_whole\([\s\S]*?config_save_link\([\s\S]*?save_whole\(/,
+  "both HTTP config wrappers must retain the measured shared persistence transaction path");
+assert.match(httpStatus, /h_scan\([\s\S]*?wifi_scan\(e, 20\)/,
+  "the WiFi scan path budget must bind the actual route caller and fixed record count");
+assert.equal(stackBudgets.symbols.mcp_json_value.pattern, "^daik::mcp_detail::JsonReader::value\\(int\\)$");
+assert.equal(stackBudgets.symbols.mcp_json_value.max_bytes, 32);
+assert.equal(stackBudgets.symbols.mcp_json_string.max_bytes, 64);
+
 const minimumStackReserve = 1024;
 assert.ok(stackBudgets.paths.ota_task_manifest_fetch.max_bytes <=
   Number(otaTaskStackMatch[1]) - minimumStackReserve,
