@@ -899,8 +899,8 @@ static esp_err_t set_hp(httpd_req_t* req) {
         // cycle runs. A wiring-only raw patch while a concrete profile is already active follows
         // the same rule.
         if (reset_checkup && c.profile != "auto")
-            c.x10a_identity_fp = logic::history_x10a_target_fingerprint(
-                c.profile.c_str(), c.rx_pin, c.tx_pin, static_cast<char>(c.proto));
+            c.x10a_identity_fp = history_x10a_identity(c.profile.c_str(), c.rx_pin, c.tx_pin,
+                                                       static_cast<char>(c.proto));
         // Stage every HomeHub value needed after persistence while the handler may still report an
         // OOM honestly. The post-save path below accepts only POD and is noexcept: a successful
         // durable write can therefore never become a false 503 or lose predecessor cleanup to a

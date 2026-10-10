@@ -568,14 +568,15 @@ Everything needed to explain a crash *after the fact*, from the field, without a
   on torn writes. After a successful scan, SNTP sync and first eligible commit, a power cut loses at
   most the open or just-closed bucket; before that commit flash has no RAM-only samples to restore.
   Restore waits for SNTP, batches four rings per poll tick and derives spans from journal buckets.
-  Browser history epochs discard cached trends and pins on source resets or reboot, even for A → B
-  → A between polls; replies carry their sample epoch and boot identity for admission.
-  Browser `sessionStorage` is not a history medium.
-  `.noinit` is sealed by the order-sensitive catalog fingerprint. Flash precedes each generation
-  with daily-refreshed semantic-id manifests, so unchanged series survive insertion/reordering while
-  new or reinterpreted series alone start empty; unknown/ambiguous layouts fail closed and the exact
-  pre-disinfection 31/12/3 catalog has an adapter. `/status.history.persist` reports RAM adoption;
-  compatible flash can still refill it after SNTP.
+  Browser history epochs discard cached trends and pins on source resets or reboot, even for A → B →
+  A between polls; replies carry their sample epoch and boot identity for admission. `.noinit` is
+  sealed by the order-sensitive catalog fingerprint. Flash precedes each generation with
+  daily-refreshed semantic-id manifests, so unchanged series survive insertion/reordering while
+  series whose stored semantic identity changes start empty; unknown/ambiguous layouts fail closed and the exact
+  pre-disinfection 31/12/3 catalog has an adapter. A series whose identity changes (the circulation
+  witness, HomeHub decoding) starts empty once. An X10A decode change under an unchanged series ID
+  retains the previous scale for at most the 24-hour window ([ARCHITECTURE.md](ARCHITECTURE.md)).
+  `/status.history.persist` reports RAM adoption; compatible flash can still refill it after SNTP.
 - **✅ 🧪 The heap watchdog** ([`logic/heap_watchdog.hpp`](../main/logic/heap_watchdog.hpp),
   [`heap_guard.cpp`](../main/heap_guard.cpp)). Every other OOM guard in this firmware turns "out of
   memory" into "recover and continue" — `handle_all` answers 503, an allocating task loop catches

@@ -68,7 +68,10 @@ namespace daik::logic {
 // covers the RECORD LAYOUT alone; anything about the trend catalog is the fingerprint's job, which
 // is why this number has not had to move for a trend addition and should not be bumped for one.
 inline constexpr uint32_t HISTORY_PERSIST_MAGIC   = 0x54534948u;   // "HIST" little-endian
-inline constexpr uint16_t HISTORY_PERSIST_VERSION = 2;  // v2 binds .noinit HomeHub rings to target
+// v2 bound the .noinit HomeHub rings to their target. v3 adds the circulation witness's evidence
+// identity to the sealed region (HIST-01/b): a v2 seal cannot name the identity of the circulation
+// ring it covers, so it is refused as a whole rather than adopted on trust.
+inline constexpr uint16_t HISTORY_PERSIST_VERSION = 3;
 
 // ── Flash-journal geometry ──────────────────────────────────────────────────────────────────────
 // The official 8 MB table gives the entire upper 4 MiB to history. Flash can clear bits with a
@@ -227,6 +230,71 @@ inline uint32_t history_journal_schema_fingerprint(const HistoryJournalHeader& h
     return static_cast<uint32_t>(h.pad[4]) | (static_cast<uint32_t>(h.pad[5]) << 8) |
            (static_cast<uint32_t>(h.pad[6]) << 16) |
            (static_cast<uint32_t>(h.pad[7]) << 24);
+}
+
+// ── The circulation witness's evidence identity (HIST-01/b) ─────────────────────────────────────
+// X10A source index 31 (`circulation_state`) is not an X10A reading: it is the external MQTT power
+// witness of the DHW circulation pump, and WHICH witness that was is a configuration fact the X10A
+// target fingerprint knows nothing about. Remapping the topic or the thresholds, or switching the
+// diagnostics consent, retires the RAM samples at once (history_circulation_reset) — but an X10A
+// record is scoped by the X10A target alone, so the retired topic's samples sat in the journal
+// under a scope that still matched and were spliced back after the next boot. The identity below
+// closes that: a record names the witness its circulation COLUMN was recorded under, and the column
+// is restored only for an exact match with the current, non-zero identity. Every other X10A column
+// of the same record is unaffected.
+//
+// Where it lives, and why that is rollback-safe. The header has 12 spare bytes, `pad` (header
+// offsets 52..63): pad[0..3] (offsets 52..55) carry the target scope of an X10A or HomeHub data
+// record, pad[4..7] (56..59) the schema fingerprint of a catalog MANIFEST, and nothing in any build
+// reads or writes pad[8..11] (60..63; not the `catalog_fp` at offset 8). The writer fills the
+// whole slot with 0xff before assigning fields, so every record ever written holds 0xffffffff
+// there. The previous firmware's acceptance reads only magic, version, commit, catalog, slot size,
+// raster, sequence, bucket, source, flags, rings and the scope in pad[0..3];
+// history_journal_crc_bytes() hashes the whole header as stored (it normalises only `crc` and
+// `commit`), so a record that carries the field verifies in the old reader exactly as it did in the
+// writer. A record from before the field reads back as 0xffffffff, which is never a valid identity.
+inline constexpr uint32_t HISTORY_CIRCULATION_NONE   = 0;           // not configured / consented
+inline constexpr uint32_t HISTORY_CIRCULATION_LEGACY = 0xffffffffu; // erased pad: pre-field record
+
+inline void history_journal_set_circulation_identity(HistoryJournalHeader& h, uint32_t identity) {
+    h.pad[8]  = static_cast<uint8_t>(identity);
+    h.pad[9]  = static_cast<uint8_t>(identity >> 8);
+    h.pad[10] = static_cast<uint8_t>(identity >> 16);
+    h.pad[11] = static_cast<uint8_t>(identity >> 24);
+}
+
+inline uint32_t history_journal_circulation_identity(const HistoryJournalHeader& h) {
+    return static_cast<uint32_t>(h.pad[8]) | (static_cast<uint32_t>(h.pad[9]) << 8) |
+           (static_cast<uint32_t>(h.pad[10]) << 16) | (static_cast<uint32_t>(h.pad[11]) << 24);
+}
+
+// May the circulation column of a record stamped `record_identity` be restored? Only for an exact
+// match with the current non-zero identity, and never while a circulation reset is pending (the
+// ring still holds the retired witness's samples until the reset is consumed). A record without the
+// field (0xffffffff), one written while no witness was configured (0) and one of another witness
+// all fail closed.
+inline constexpr bool history_circulation_restore_allowed(uint32_t record_identity,
+                                                          uint32_t current_identity,
+                                                          bool     reset_pending) {
+    return !reset_pending && current_identity != HISTORY_CIRCULATION_NONE &&
+           current_identity != HISTORY_CIRCULATION_LEGACY && record_identity == current_identity;
+}
+
+// Is X10A ring `index` the circulation witness's? The only X10A column whose samples come from
+// somewhere other than the heat pump's own bus or the board.
+inline constexpr bool history_trend_is_circulation(size_t index) {
+    return index < TREND_COUNT && TRENDS[index].kind == TrendKind::CirculationState;
+}
+
+// May X10A column `index` of a record stamped `record_identity` be restored? Every column but the
+// circulation one, which also needs the record's witness to be the current one. A record from
+// before the field existed therefore still restores all 31 other columns — the identity refuses
+// one column, not the record.
+inline constexpr bool history_x10a_column_restorable(size_t index, uint32_t record_identity,
+                                                     uint32_t current_identity,
+                                                     bool     reset_pending) {
+    return !history_trend_is_circulation(index) ||
+           history_circulation_restore_allowed(record_identity, current_identity, reset_pending);
 }
 
 // Structural validity which is deliberately independent of THIS build's catalog. It lets the scan
@@ -533,46 +601,113 @@ inline uint32_t history_fp_u32(uint32_t crc, uint32_t v) {
     return config_crc32_update(crc, b, 4);
 }
 
+// Neither sentinel (0 = no witness, 0xffffffff = a record from before the field) is ever produced
+// as the identity of a real witness: a hash that lands on one is moved off it.
+inline constexpr uint32_t history_circulation_identity_clamp(uint32_t hash) {
+    return hash == HISTORY_CIRCULATION_NONE || hash == HISTORY_CIRCULATION_LEGACY ? 1u : hash;
+}
+
+// The identity of the witness a configuration defines: every field that decides WHICH power stream
+// the circulation samples were derived from and HOW (topic, the JSON paths into it, the freshness
+// bound, the ON/OFF thresholds and their confirmation time), plus the diagnostics consent, which
+// is the opt-in boundary for collecting it at all (each transition advances the generation, so the
+// evidence of one consent interval can never be restored into another). Exactly the set
+// http_config.cpp's set_circulation treats as an evidence-mapping change, and nothing else: the
+// display name and every unrelated setting leave it alone, and so does the MQTT broker connection
+// (a broker change reconnects the same topic without retiring the live ring, so the stored one
+// follows the same rule). Zero when the source is not configured or not consented — no witness
+// exists, so nothing may be restored.
+//
+// Templated on the configuration type only so this header need not name Config; `c` is a
+// daik::Config.
+template <typename Cfg> inline uint32_t history_circulation_identity(const Cfg& c) {
+    if (!c.diagnostics_enabled || c.circulation_topic.empty()) return HISTORY_CIRCULATION_NONE;
+    uint32_t crc = CONFIG_CRC32_INIT;
+    crc          = history_fp_u32(crc, 0x43495231u); // "CIR1" circulation-identity contract
+    crc          = history_fp_u32(crc, c.diagnostics_generation);
+    crc          = history_fp_str(crc, c.circulation_topic.c_str());
+    crc          = history_fp_str(crc, c.circulation_power_path.c_str());
+    crc          = history_fp_str(crc, c.circulation_time_path.c_str());
+    crc          = history_fp_u32(crc, static_cast<uint32_t>(c.circulation_max_age_s));
+    crc          = history_fp_u32(crc, static_cast<uint32_t>(c.circulation_on_tenths_w));
+    crc          = history_fp_u32(crc, static_cast<uint32_t>(c.circulation_off_tenths_w));
+    crc          = history_fp_u32(crc, static_cast<uint32_t>(c.circulation_confirm_s));
+    return history_circulation_identity_clamp(config_crc32_final(crc));
+}
+
 // Stable identity of ONE stored series. The public trend id is the semantic anchor; the source and
 // every field which can change the meaning of its int16 sample are also included. Consequently a
 // label-only edit survives, while a locator/converter/unit/folding change starts only that series
 // empty. The catalog-wide fingerprint below remains order-sensitive; these ids deliberately do not.
-inline uint32_t history_series_id(HistoryJournalSource src, size_t index) {
+//
+// THE RULE THAT KEEPS THIS AND THE CATALOG FINGERPRINT FROM DRIFTING (HIST-01/c): the fingerprint
+// below is a fold of exactly the ids this function returns, ring by ring. A field belongs to a
+// series' meaning in ONE place — here — and the fingerprint inherits it. The two used to be written
+// out separately, and the fingerprint had fallen behind: it left out the HomeHub event-folding
+// policy and the ENV III unit, so a catalog that changed only those still matched, was mapped by
+// index and had its RAM seal accepted, while the manifest ids (which did carry them) had moved.
+//
+// Each source's id is a function of its own table ENTRY (history_x10a_series_id and its siblings),
+// so a test can vary one field of a copy and watch the id move; history_series_id() only picks the
+// entry.
+inline uint32_t history_series_id_begin(HistoryJournalSource src) {
     uint32_t crc = CONFIG_CRC32_INIT;
     crc = history_fp_u32(crc, 0x53455231u);  // "SER1" semantic-id contract
-    crc = history_fp_u32(crc, static_cast<uint32_t>(src));
-    switch (src) {
-        case HistoryJournalSource::X10a: {
-            if (index >= TREND_COUNT) return 0;
-            const auto& d = TRENDS[index];
-            crc = history_fp_str(crc, d.id);
-            crc = history_fp_u32(crc, static_cast<uint32_t>(d.kind));
-            crc = history_fp_u32(crc, d.reg);
-            crc = history_fp_u32(crc, d.off);
-            crc = history_fp_str(crc, d.unit);
-            crc = history_fp_u32(crc, static_cast<uint32_t>(d.conv));
-            break;
-        }
-        case HistoryJournalSource::Modbus: {
-            if (index >= HOMEHUB_HISTORY_COUNT) return 0;
-            const auto& d = HOMEHUB_HISTORIES[index];
-            crc = history_fp_str(crc, d.trend_id);
-            crc = history_fp_u32(crc, d.offset);
-            crc = history_fp_u32(crc, d.event ? 1u : 0u);
-            break;
-        }
-        case HistoryJournalSource::Env3: {
-            if (index >= ENV3_HISTORY_COUNT) return 0;
-            const auto& d = ENV3_HISTORIES[index];
-            crc = history_fp_str(crc, d.id);
-            crc = history_fp_str(crc, d.unit);
-            break;
-        }
-        case HistoryJournalSource::Checkup:
-            return 0;
-    }
+    return history_fp_u32(crc, static_cast<uint32_t>(src));
+}
+
+inline uint32_t history_series_id_end(uint32_t crc) {
     const uint32_t out = config_crc32_final(crc);
-    return out ? out : 1u;  // zero is the invalid/out-of-range sentinel
+    return out ? out : 1u; // zero is the invalid/out-of-range sentinel
+}
+
+inline uint32_t history_x10a_series_id(const TrendDef& d) {
+    uint32_t crc = history_series_id_begin(HistoryJournalSource::X10a);
+    crc          = history_fp_str(crc, d.id);
+    crc          = history_fp_u32(crc, static_cast<uint32_t>(d.kind));
+    crc          = history_fp_u32(crc, d.reg);
+    crc          = history_fp_u32(crc, d.off);
+    crc          = history_fp_str(crc, d.unit);
+    crc          = history_fp_u32(crc, static_cast<uint32_t>(d.conv));
+    return history_series_id_end(crc);
+}
+
+inline uint32_t history_modbus_series_id(const HomeHubHistory& d) {
+    uint32_t crc = history_series_id_begin(HistoryJournalSource::Modbus);
+    crc          = history_fp_str(crc, d.trend_id);
+    crc          = history_fp_u32(crc, d.offset);
+    crc          = history_fp_u32(crc, d.event ? 1u : 0u);
+    // What the register's raw word means (HIST-01/d): the Modbus space, the codec, the extra
+    // divisor and the unit. A decode fix in def/homehub.hpp moves these and so moves the id, which
+    // starts only that series empty instead of mapping tenths recorded under the old scale onto the
+    // new one. The label and the presentation kind are not here.
+    crc = history_fp_u32(crc, static_cast<uint32_t>(d.decode.space));
+    crc = history_fp_u32(crc, static_cast<uint32_t>(d.decode.type));
+    crc = history_fp_u32(crc, static_cast<uint32_t>(d.decode.scale));
+    crc = history_fp_str(crc, d.decode.unit);
+    return history_series_id_end(crc);
+}
+
+inline uint32_t history_env3_series_id(const Env3HistoryDef& d) {
+    uint32_t crc = history_series_id_begin(HistoryJournalSource::Env3);
+    crc          = history_fp_str(crc, d.id);
+    crc          = history_fp_str(crc, d.unit);
+    return history_series_id_end(crc);
+}
+
+inline uint32_t history_series_id(HistoryJournalSource src, size_t index) {
+    switch (src) {
+    case HistoryJournalSource::X10a:
+        return index < TREND_COUNT ? history_x10a_series_id(TRENDS[index]) : 0;
+    case HistoryJournalSource::Modbus:
+        return index < HOMEHUB_HISTORY_COUNT ? history_modbus_series_id(HOMEHUB_HISTORIES[index])
+                                             : 0;
+    case HistoryJournalSource::Env3:
+        return index < ENV3_HISTORY_COUNT ? history_env3_series_id(ENV3_HISTORIES[index]) : 0;
+    case HistoryJournalSource::Checkup:
+        return 0;
+    }
+    return 0;
 }
 
 inline uint32_t history_series_list_fingerprint(HistoryJournalSource src, const uint32_t* ids,
@@ -697,6 +832,18 @@ inline uint32_t history_homehub_target_fingerprint(const char* host, uint32_t po
 // Page/capacity/EEPROM reads may legitimately be absent for one boot-time sweep; including them
 // would discard a day of valid history on a transient reply loss even though the selected row
 // catalog and wiring are unchanged. A profile or physical link change still gets a distinct scope.
+//
+// THE SCOPE TAKES NO INPUT FROM THE TREND CATALOG, and must not (HIST-01/d). It stamps every X10A
+// record as a whole and is checked before the semantic-id manifest is consulted, so anything in it
+// that depends on TRENDS (an id, a locator, their order or count, the row a profile resolves one
+// to) would turn every X10A trend insertion, reorder or single-row decode fix into the loss of the
+// whole X10A history instead of the one series the manifest says changed. The value is therefore
+// the same for the same (profile, pins, protocol) in every build, which also keeps an update or a
+// rollback able to restore the other build's X10A records. Pinned in test_logic.cpp.
+//
+// Known limit: an X10A decode fix shipped under an unchanged series id keeps the old-scale samples
+// of that series until they leave the 24-hour window. Kept deliberately by owner decision; a
+// per-series decode identity would close it (docs/ARCHITECTURE.md, history).
 inline uint32_t history_x10a_target_fingerprint(const char* profile, int32_t rx_pin, int32_t tx_pin,
                                                 char proto) {
     uint32_t crc = CONFIG_CRC32_INIT;
@@ -708,15 +855,21 @@ inline uint32_t history_x10a_target_fingerprint(const char* profile, int32_t rx_
     return out ? out : 1u;  // zero remains the explicit "identity not detected" sentinel
 }
 
-// Every fact that decides WHICH physical quantity ring index i holds, plus the geometry that decides
-// how its bytes are laid out. The order-sensitive value seals .noinit RAM and identifies one dense
-// flash generation. Flash restore may still map that generation through its semantic-id manifest;
-// deriving the value rather than hand-maintaining a version byte means nobody can forget to
-// distinguish the layouts.
+// Every fact that decides WHICH physical quantity ring index i holds, plus the geometry that
+// decides how its bytes are laid out. The order-sensitive value seals .noinit RAM and identifies
+// one dense flash generation. Flash restore may still map that generation through its semantic-id
+// manifest; deriving the value rather than hand-maintaining a version byte means nobody can forget
+// to distinguish the layouts.
 //
 // The three sources are all here because they share the record: adding a HomeHub history shifts no
 // X10A index, but it does change the payload length, and a length change with a matching CRC is
 // exactly the kind of coincidence this is meant to exclude.
+//
+// THE SERIES IDS ARE FOLDED, NOT RESTATED (HIST-01/c): history_series_id() is the one place that
+// says which fields give a ring its meaning, and this is an order-sensitive fold of exactly those
+// ids. A field can therefore not be part of a series' meaning and absent from the catalog
+// fingerprint, which is how the HomeHub event policy and the ENV III unit had slipped out of it
+// while the manifest ids carried them. Add a field to history_series_id() and this follows.
 inline uint32_t history_catalog_fingerprint() {
     uint32_t crc = CONFIG_CRC32_INIT;
     crc = history_fp_u32(crc, HISTORY_DT_S);
@@ -724,19 +877,10 @@ inline uint32_t history_catalog_fingerprint() {
     crc = history_fp_u32(crc, static_cast<uint32_t>(TREND_COUNT));
     crc = history_fp_u32(crc, static_cast<uint32_t>(HOMEHUB_HISTORY_COUNT));
     crc = history_fp_u32(crc, static_cast<uint32_t>(ENV3_HISTORY_COUNT));
-    for (const auto& d : TRENDS) {
-        crc = history_fp_str(crc, d.id);
-        crc = history_fp_u32(crc, static_cast<uint32_t>(d.kind));
-        crc = history_fp_u32(crc, d.reg);
-        crc = history_fp_u32(crc, d.off);
-        crc = history_fp_str(crc, d.unit);
-        crc = history_fp_u32(crc, static_cast<uint32_t>(d.conv));
-    }
-    for (size_t i = 0; i < HOMEHUB_HISTORY_COUNT; i++) {
-        crc = history_fp_u32(crc, HOMEHUB_HISTORIES[i].offset);
-        crc = history_fp_str(crc, HOMEHUB_HISTORIES[i].trend_id);
-    }
-    for (size_t i = 0; i < ENV3_HISTORY_COUNT; i++) crc = history_fp_str(crc, ENV3_HISTORIES[i].id);
+    for (const HistoryJournalSource src :
+         {HistoryJournalSource::X10a, HistoryJournalSource::Modbus, HistoryJournalSource::Env3})
+        for (size_t i = 0, n = history_journal_source_rings(src); i < n; i++)
+            crc = history_fp_u32(crc, history_series_id(src, i));
     return config_crc32_final(crc);
 }
 

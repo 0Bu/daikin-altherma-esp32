@@ -104,14 +104,27 @@ void history_reset();
 // does. See the definition for what this cost on a live board.
 void history_reset_on_detect(uint32_t identity_fp);
 
+// The X10A observation identity (the history scope, persisted as the link's identity fingerprint)
+// for a profile id, its pins and protocol: logic::history_x10a_target_fingerprint over exactly
+// those. Detection and a manual /set_hp profile derive it here and nowhere else, so the two paths
+// cannot scope the same unit differently. It takes no input from the trend catalog or from the
+// profile's rows, on purpose (logic::history_x10a_target_fingerprint says why). Pure computation:
+// no lock, no allocation.
+uint32_t history_x10a_identity(const char* profile, int32_t rx_pin, int32_t tx_pin, char proto);
+
 // Start a new HomeHub observation identity after host, port or unit-id changes. Like the X10A
 // reset, elapsed positions remain explicit gaps on the common boot-aligned 24-hour raster. The
 // caller supplies the already-staged target fingerprint so this remains allocation-free after a
 // durable /set_hp save.
 void history_modbus_reset(uint32_t target_fp) noexcept;
 
-// Start a new identity for the two optional external circulation witnesses without discarding the
-// independent X10A/HomeHub histories.
+// Start a new identity for the external circulation witness without discarding the independent
+// X10A/HomeHub histories. The new identity (logic::history_circulation_identity: the mapping,
+// thresholds and diagnostics consent of the LIVE configuration, zero when none) is derived here, so
+// call it after the configuration change has been saved. It retires the RAM ring at once, and it is
+// also what keeps the retired witness's samples out of a LATER restore: flash records name the
+// identity their circulation column was recorded under and the restore accepts only the current
+// one (HIST-01/b).
 void history_circulation_reset();
 
 // A diagnostics consent transition starts a new durable checkup generation. Forget the previous
@@ -124,26 +137,24 @@ void history_checkup_reset();
 // HTTP safety. Optional `epoch` is captured under that same lock, even for an empty/pending-reset
 // series; zero means no snapshot lock was acquired. Callers must not tag a copied series with a
 // later lifetime.
-size_t history_snapshot(size_t t, logic::HistorySample* out, size_t max, uint32_t* epoch = nullptr);
+//
+// Optional `meta` carries the facts that place the copy on the time axis — the age of its newest
+// sample and the monotonic bucket of sample zero — captured in that same critical section, so a
+// bucket commit cannot land between the samples and the t0/b0 the route derives from them
+// (HIST-01/e; logic/history_t0 for what t0 needs). The bucket is on the monotonic raster every
+// source shares, so it aligns the sources exactly even before SNTP has set wall time. The bucket is
+// -1 whenever the count is zero; the age is -1 only when nothing has been committed or the snapshot
+// was refused. There is deliberately no standalone getter for either: a second lock round-trip is
+// exactly the race this closes.
+size_t history_snapshot(size_t t, logic::HistorySample* out, size_t max, uint32_t* epoch = nullptr,
+                        logic::HistoryMeta* meta = nullptr);
 
-// Copy the HomeHub series for history slot `t` (logic::HOMEHUB_HISTORIES), oldest first.
+// Copy the HomeHub series for history slot `t` (logic::HOMEHUB_HISTORIES), oldest first. `epoch`
+// and `meta` as for history_snapshot.
 size_t history_modbus_snapshot(size_t t, logic::HistorySample* out, size_t max,
-                               uint32_t* epoch = nullptr);
+                               uint32_t* epoch = nullptr, logic::HistoryMeta* meta = nullptr);
 size_t history_env3_snapshot(size_t t, logic::HistorySample* out, size_t max,
-                             uint32_t* epoch = nullptr);
-
-// Seconds since the newest sample was committed, or -1 when nothing has been committed yet. The
-// route needs it to state the series' t0 independently of when the request arrived — see
-// logic/history_t0 for what went wrong without it.
-int32_t history_newest_age_s();
-int32_t history_modbus_newest_age_s();
-int32_t history_env3_newest_age_s();
-
-// Monotonic 5-minute bucket of sample zero, shared across both sources and therefore an exact
-// alignment key even before SNTP has established wall time. Returns -1 for an empty series.
-int64_t history_oldest_bucket(size_t sample_count);
-int64_t history_modbus_oldest_bucket(size_t sample_count);
-int64_t history_env3_oldest_bucket(size_t sample_count);
+                             uint32_t* epoch = nullptr, logic::HistoryMeta* meta = nullptr);
 
 // Copy the label this profile spells trend `t` with into `out` (empty when it carries no such row);
 // returns the length written. A COPY rather than a pointer: the poll task rewrites the stored label

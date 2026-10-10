@@ -34,6 +34,7 @@
 #include <cstddef>
 #include <cstdio>
 #include "history.hpp"   // TRENDS / TrendDef / trend_row_matches — the shared concept vocabulary
+#include "modbus.hpp" // MbFunc / MbType — the codec vocabulary the history decode columns reuse
 
 namespace daik::logic {
 
@@ -70,6 +71,25 @@ inline constexpr HomeHubConcept HOMEHUB_CONCEPTS[] = {
 inline constexpr size_t HOMEHUB_CONCEPT_COUNT =
     sizeof(HOMEHUB_CONCEPTS) / sizeof(HOMEHUB_CONCEPTS[0]);
 
+// What a stored HomeHub sample MEANS, as far as the register definition decides it: the Modbus
+// space it is read from, the codec that turns the raw word into a number, the extra divisor and the
+// unit. These are exactly the `def::HomeHubReg` columns (def/homehub.hpp) that move the value
+// history_record_modbus() parses back into tenths; the label and the presentation `kind` are not
+// among them. logic/ takes no def/ dependency (def/homehub.hpp already includes logic/modbus.hpp),
+// so the columns are repeated here and closed MECHANICALLY by homehub_history_decode_matches()
+// below, which test_logic.cpp runs against both def/ tables: a decode fix in def/ that does not
+// reach this table fails the host gate, and reaching it changes history_series_id(), so the
+// samples recorded under the old meaning are never mapped onto the new one (HIST-01/d).
+struct HomeHubDecode {
+    MbFunc      space; // ReadInput (FC04) or ReadHolding (FC03)
+    MbType      type;  // logic/modbus.hpp codec
+    int         scale; // divisor applied after the codec (Int16 flow is L/min x100 -> 100)
+    const char* unit;  // display unit ("" = none)
+};
+inline constexpr HomeHubDecode HOMEHUB_DECODE_TEMP{MbFunc::ReadInput, MbType::Temp16, 1, "°C"};
+inline constexpr HomeHubDecode HOMEHUB_DECODE_FLAG{MbFunc::ReadInput, MbType::Int16, 1, ""};
+inline constexpr HomeHubDecode HOMEHUB_DECODE_HOLDING{MbFunc::ReadHolding, MbType::Int16, 1, ""};
+
 // Histories are a slightly wider contract than source PAIRING. The eight measurements and three exact
 // state flags/selectors above are still paired one-for-one, while Smart-Grid mode is
 // assembled from TWO X10A contacts and
@@ -89,24 +109,44 @@ struct HomeHubHistory {
     const char* trend_id;
     bool        event = false;      // retain any observed ON within the open five-minute bucket
     bool        has_x10a = true;    // id must exist in TRENDS and may be overlaid as a second source
+    HomeHubDecode decode; // see HomeHubDecode — part of the series identity, no default
 };
 inline constexpr HomeHubHistory HOMEHUB_HISTORIES[] = {
-    { 40, "leaving_water"   },
-    { 41, "leaving_water_post_buh" },
-    { 42, "return_water"    },
-    { 43, "dhw_tank"        },
-    { 44, "outdoor_air"     },
-    { 45, "refrigerant_liquid" },
-    { 49, "flow"            },
-    { 50, "room_temp"       },
-    { 32, "bsh_state", true },
-    { 37, "valve_dhw"       },
-    {  9, "quiet_state"     },
-    { 56, "smart_grid_mode" },
-    { 33, "disinfection_state", true, false },
+    {40, "leaving_water", false, true, HOMEHUB_DECODE_TEMP},
+    {41, "leaving_water_post_buh", false, true, HOMEHUB_DECODE_TEMP},
+    {42, "return_water", false, true, HOMEHUB_DECODE_TEMP},
+    {43, "dhw_tank", false, true, HOMEHUB_DECODE_TEMP},
+    {44, "outdoor_air", false, true, HOMEHUB_DECODE_TEMP},
+    {45, "refrigerant_liquid", false, true, HOMEHUB_DECODE_TEMP},
+    {49, "flow", false, true, {MbFunc::ReadInput, MbType::Int16, 100, "L/min"}},
+    {50, "room_temp", false, true, HOMEHUB_DECODE_TEMP},
+    {32, "bsh_state", true, true, HOMEHUB_DECODE_FLAG},
+    {37, "valve_dhw", false, true, HOMEHUB_DECODE_FLAG},
+    {9, "quiet_state", false, true, HOMEHUB_DECODE_HOLDING},
+    {56, "smart_grid_mode", false, true, HOMEHUB_DECODE_HOLDING},
+    {33, "disinfection_state", true, false, HOMEHUB_DECODE_FLAG},
 };
 inline constexpr size_t HOMEHUB_HISTORY_COUNT =
     sizeof(HOMEHUB_HISTORIES) / sizeof(HOMEHUB_HISTORIES[0]);
+
+// Does a register table (def::HOMEHUB_REGS or def::ALTHERMA4_REGS — either feeds these histories,
+// depending on the detected gateway) decode every history register exactly as the columns above
+// say? Templated on the register type so logic/ names no def/ type; a row needs `.offset`,
+// `.space`, `.type`, `.scale` and `.unit`. A history register absent from the table fails too.
+template <typename Reg> constexpr bool homehub_history_decode_matches(const Reg* regs, int count) {
+    for (const auto& h : HOMEHUB_HISTORIES) {
+        const Reg* r = nullptr;
+        for (int i = 0; i < count; i++)
+            if (regs[i].offset == h.offset) {
+                r = &regs[i];
+                break;
+            }
+        if (!r || r->space != h.decode.space || r->type != h.decode.type ||
+            r->scale != h.decode.scale || !trend_cstr_eq(r->unit, h.decode.unit))
+            return false;
+    }
+    return true;
+}
 
 // Stable ring index for one paired reading/state concept. The Modbus history recorder and
 // GET /history?source=modbus both use this, so a concept can never be written into one slot and read

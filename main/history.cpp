@@ -80,6 +80,11 @@ struct PersistedHistory {
     uint32_t crc;
     uint32_t x10a_target_fp;  // detected profile/link/fingerprint for the .noinit plant rings
     uint32_t mb_target_fp;  // host/port/unit identity for the .noinit HomeHub rings
+    // Which circulation witness the circulation ring's samples were recorded under (HIST-01/b;
+    // logic::history_circulation_identity, zero = none). Sealed with the rings it describes: a
+    // surviving ring whose witness is no longer the configured one is retired at startup, and the
+    // flash writer stamps this onto the records that carry the ring's column.
+    uint32_t circulation_fp;
 
     Trend ring[TREND_COUNT];
     // Eight paired HomeHub measurements plus BSH, 3-way-valve, Quiet, Smart-Grid and the standalone
@@ -130,9 +135,11 @@ bool              s_env3_have_bucket = false;
 // the neighbouring sample. Monotonic because the commit may predate the first SNTP sync — its
 // wall-clock instant is then unknowable, but its age never is. INT64_MIN is the sentinel because a
 // flash-restored wall bucket may legitimately predate this
-// boot's monotonic zero. A negative commit timestamp is how history_newest_age_s preserves that
-// pre-boot age instead of sliding the curve to the reboot instant.
+// boot's monotonic zero. A negative commit timestamp is how the snapshot's newest-age meta
+// preserves that pre-boot age instead of sliding the curve to the reboot instant.
 constexpr int64_t kNoCommitUs = INT64_MIN;
+static_assert(kNoCommitUs == logic::HISTORY_NO_COMMIT_US,
+              "the commit sentinel is one definition shared with logic::history_snapshot_meta");
 int64_t           s_last_commit_us = kNoCommitUs;
 int64_t           s_mb_last_commit_us = kNoCommitUs;
 int64_t           s_env3_last_commit_us = kNoCommitUs;
@@ -145,6 +152,11 @@ std::atomic<bool> s_mb_reset_requested{false};
 std::atomic<uint32_t> s_mb_identity_generation{1};
 std::atomic<uint32_t> s_mb_target_fp{0};
 std::atomic<bool> s_circulation_reset_requested{false};
+// The CURRENT circulation witness identity (logic::history_circulation_identity; zero = no witness
+// configured or consented). history_circulation_reset() publishes the new one together with its
+// deferred reset, under s_mtx; P().circulation_fp is the identity of what the ring HOLDS and only
+// catches up when that reset is consumed. The flash restore compares records against this one.
+std::atomic<uint32_t> s_circulation_fp{0};
 // Browser cache lifetime, separate from every producer's source-generation admission token. It
 // changes only when a history lifetime is retired, so A -> B -> A between status polls is visible
 // even though the final configuration has the same bytes as before.
@@ -217,6 +229,9 @@ inline uint32_t persist_crc() {
                               sizeof(P().x10a_target_fp));
     crc = config_crc32_update(crc, reinterpret_cast<const uint8_t*>(&P().mb_target_fp),
                               sizeof(P().mb_target_fp));
+    // Which circulation witness the sealed ring belongs to (HIST-01/b).
+    crc = config_crc32_update(crc, reinterpret_cast<const uint8_t*>(&P().circulation_fp),
+                              sizeof(P().circulation_fp));
     for (const auto& t : P().ring) {
         crc = persist_crc_ring(crc, t.ring);
         crc = config_crc32_update(crc, reinterpret_cast<const uint8_t*>(t.label), sizeof(t.label));
@@ -243,7 +258,8 @@ inline bool rings_have_samples(const logic::TrendRing* r, size_t n) {
 
 // Start this boot with nothing. REQUIRED rather than defensive: the region is uninitialised storage,
 // so without this every count, head and label would be whatever the last firmware left in DRAM.
-inline void persist_wipe(uint32_t catalog_fp, uint32_t x10a_target_fp, uint32_t mb_target_fp) {
+inline void persist_wipe(uint32_t catalog_fp, uint32_t x10a_target_fp, uint32_t mb_target_fp,
+                         uint32_t circulation_fp) {
     std::memset(&P(), 0, sizeof(PersistedHistory));
     // memset alone is NOT enough and the difference is a wrong reading rather than a crash: zero is
     // a perfectly valid sample, while `pending` must start at the NO_READING sentinel or every ring
@@ -257,6 +273,7 @@ inline void persist_wipe(uint32_t catalog_fp, uint32_t x10a_target_fp, uint32_t 
     P().catalog_fp = catalog_fp;
     P().x10a_target_fp = x10a_target_fp;
     P().mb_target_fp = mb_target_fp;
+    P().circulation_fp = circulation_fp;
     s_persist_dirty = true;
     persist_seal_locked();
 }
@@ -329,7 +346,7 @@ inline void advance_raster_locked(int64_t now_us, uint32_t bucket) {
         // if the other task crosses a five-minute boundary inside that window the loser arrives
         // with a bucket BEHIND the raster. history_skipped() correctly answers 0 there, but
         // commit(0) still ran: every ring took a spurious NO_READING sample and s_bucket moved
-        // BACKWARDS, skewing the whole time axis by one slot and making history_newest_age_s() read
+        // BACKWARDS, skewing the whole time axis by one slot and making the newest-age meta read
         // from an older instant. Only reachable since legacy-367 gave the raster a second,
         // independent advancer.
         const uint32_t skipped = logic::history_skipped(s_bucket, bucket);
@@ -387,6 +404,10 @@ inline void reset_circulation_locked(uint32_t bucket) {
         P().ring[t].unit[0] = '\0';
         s_persist_dirty = true;
     }
+    // The ring now holds gaps under the witness the reset was requested for, and from here on the
+    // flash records that carry its column say so (HIST-01/b).
+    P().circulation_fp = s_circulation_fp.load();
+    s_persist_dirty    = true;
 }
 
 inline void fold_circulation_locked(const CirculationPumpSample& circulation) {
@@ -584,6 +605,8 @@ void history_start() {
     s_x10a_target_fp.store(boot_config.x10a_identity_fp);
     const uint32_t want_mb_target_fp = current_mb_target_fp();
     s_mb_target_fp.store(want_mb_target_fp);
+    const uint32_t want_circulation_fp = logic::history_circulation_identity(boot_config);
+    s_circulation_fp.store(want_circulation_fp);
     const uint32_t reason  = static_cast<uint32_t>(esp_reset_reason());
     s_persist_verdict = logic::history_restore_verdict(reason, P().magic, P().version,
                                                        P().catalog_fp, want_fp, P().crc, persist_crc());
@@ -610,6 +633,21 @@ void history_start() {
             persist_seal_locked();
             diag_printf("history: HomeHub RAM rings rejected (configured target changed)\n");
         }
+        if (P().circulation_fp != want_circulation_fp) {
+            // The witness was remapped, or diagnostics were switched, between the previous boot's
+            // last seal and this one. The surviving samples belong to the retired source, so only
+            // the circulation ring is dropped; the X10A and board rings beside it are unaffected.
+            for (size_t t = 0; t < TREND_COUNT; ++t) {
+                if (!circulation_trend(logic::TRENDS[t])) continue;
+                P().ring[t].ring.reset();
+                P().ring[t].label[0] = '\0';
+                P().ring[t].unit[0]  = '\0';
+            }
+            P().circulation_fp = want_circulation_fp;
+            s_persist_dirty    = true;
+            persist_seal_locked();
+            diag_printf("history: circulation RAM ring rejected (witness identity changed)\n");
+        }
         persist_adopt(esp_timer_get_time());
         // The rings carry the previous identity in their labels, so this boot's first detection can
         // defer to the per-row check rather than wiping on sight — history_reset_on_detect().
@@ -617,7 +655,7 @@ void history_start() {
         diag_printf("history: rings kept across a %s reset (RAM survived)\n",
                     crash_reason_slug(reason));
     } else {
-        persist_wipe(want_fp, boot_config.x10a_identity_fp, want_mb_target_fp);
+        persist_wipe(want_fp, boot_config.x10a_identity_fp, want_mb_target_fp, want_circulation_fp);
         // Not noise: "wrong_catalog" after an update explains a chart that emptied itself for a
         // reason nobody would otherwise be able to reconstruct, and "bad_crc" on a board that was
         // never power-cycled is a memory fault worth seeing.
@@ -629,6 +667,10 @@ void history_start() {
 const char* history_persist_state() { return logic::history_restore_slug(s_persist_verdict); }
 
 uint32_t history_epoch() noexcept { return s_history_epoch.load(std::memory_order_acquire); }
+
+uint32_t history_x10a_identity(const char* profile, int32_t rx_pin, int32_t tx_pin, char proto) {
+    return logic::history_x10a_target_fingerprint(profile, rx_pin, tx_pin, proto);
+}
 
 void history_reset() {
     if (!s_mtx) return;
@@ -733,8 +775,14 @@ uint32_t history_modbus_generation() { return s_mb_identity_generation.load(); }
 
 void history_circulation_reset() {
     if (!s_mtx) return;
+    // The identity of the witness the live configuration defines, read BEFORE the history lock: it
+    // takes the config mutex, and the callers (a /set_* handler after its save, app_main's consent
+    // opt-out) hold neither lock. The hash is allocation-free, which is what with_config demands.
+    const uint32_t identity =
+        with_config([](const Config& c) { return logic::history_circulation_identity(c); });
     Lock lk(s_mtx);
     if (!lk.acquired()) return;
+    s_circulation_fp.store(identity);
     s_circulation_reset_requested.store(true);
     bump_history_epoch();
 }
@@ -1075,8 +1123,28 @@ void history_record_env3(bool valid, float temperature_c, float humidity_pct, fl
     persist_seal_locked();
 }
 
-size_t history_snapshot(size_t t, HistorySample* out, size_t max, uint32_t* epoch) {
+// The series' time-axis facts, taken from the SAME critical section as its samples (HIST-01/e). The
+// route used to ask for them afterwards, through three further getters that each took the lock
+// again; a bucket commit between the copy and the getter shifted sample zero by one bucket under a
+// t0/b0 that still described the old ring. Every caller below holds s_mtx, copies the samples and
+// fills `meta` before releasing it, and nothing in here allocates.
+static void clear_snapshot_meta(logic::HistoryMeta* meta) {
+    if (!meta) return;
+    meta->newest_age_s  = -1;
+    meta->oldest_bucket = -1;
+}
+
+static void fill_snapshot_meta_locked(logic::HistoryMeta* meta, int64_t last_commit_us,
+                                      int64_t last_commit_bucket, size_t n) {
+    if (!meta) return;
+    meta->newest_age_s  = logic::history_meta_newest_age_s(esp_timer_get_time(), last_commit_us);
+    meta->oldest_bucket = logic::history_meta_oldest_bucket(last_commit_bucket, n);
+}
+
+size_t history_snapshot(size_t t, HistorySample* out, size_t max, uint32_t* epoch,
+                        logic::HistoryMeta* meta) {
     if (epoch) *epoch = 0;
+    clear_snapshot_meta(meta);
     if (t >= TREND_COUNT || !out || !max || !s_mtx) return 0;
     Lock lk(s_mtx);
     if (lk.acquired() && epoch) *epoch = history_epoch();
@@ -1084,25 +1152,35 @@ size_t history_snapshot(size_t t, HistorySample* out, size_t max, uint32_t* epoc
     if (!lk.acquired() || s_flash_forgotten.load() ||
         (s_reset_requested.load() && !independent_trend(logic::TRENDS[t])) ||
         (s_circulation_reset_requested.load() && circulation_trend(logic::TRENDS[t]))) return 0;
-    return P().ring[t].ring.snapshot(out, max);
+    const size_t n = P().ring[t].ring.snapshot(out, max);
+    fill_snapshot_meta_locked(meta, s_last_commit_us, s_last_commit_bucket, n);
+    return n;
 }
 
-size_t history_modbus_snapshot(size_t t, HistorySample* out, size_t max, uint32_t* epoch) {
+size_t history_modbus_snapshot(size_t t, HistorySample* out, size_t max, uint32_t* epoch,
+                               logic::HistoryMeta* meta) {
     if (epoch) *epoch = 0;
+    clear_snapshot_meta(meta);
     if (t >= HOMEHUB_HISTORY_COUNT || !out || !max || !s_mtx) return 0;
     Lock lk(s_mtx);
     if (lk.acquired() && epoch) *epoch = history_epoch();
     if (!lk.acquired() || s_flash_forgotten.load() || s_mb_reset_requested.load()) return 0;
-    return P().mb_ring[t].snapshot(out, max);
+    const size_t n = P().mb_ring[t].snapshot(out, max);
+    fill_snapshot_meta_locked(meta, s_mb_last_commit_us, s_mb_last_commit_bucket, n);
+    return n;
 }
 
-size_t history_env3_snapshot(size_t t, HistorySample* out, size_t max, uint32_t* epoch) {
+size_t history_env3_snapshot(size_t t, HistorySample* out, size_t max, uint32_t* epoch,
+                             logic::HistoryMeta* meta) {
     if (epoch) *epoch = 0;
+    clear_snapshot_meta(meta);
     if (t >= ENV3_HISTORY_COUNT || !out || !max || !s_mtx) return 0;
     Lock lk(s_mtx);
     if (lk.acquired() && epoch) *epoch = history_epoch();
     if (!lk.acquired() || s_flash_forgotten.load()) return 0;
-    return P().env3_ring[t].snapshot(out, max);
+    const size_t n = P().env3_ring[t].snapshot(out, max);
+    fill_snapshot_meta_locked(meta, s_env3_last_commit_us, s_env3_last_commit_bucket, n);
+    return n;
 }
 
 // Copied out under the lock rather than returning the pointer: the poll task rewrites these buffers
@@ -1111,53 +1189,6 @@ static size_t copy_under_lock(const char* src, char* out, size_t max) {
     std::strncpy(out, src, max - 1);
     out[max - 1] = '\0';
     return std::strlen(out);
-}
-
-int32_t history_newest_age_s() {
-    if (!s_mtx) return -1;
-    Lock lk(s_mtx);
-    if (!lk.acquired() || s_last_commit_us == kNoCommitUs) return -1;
-    const int64_t age_us = esp_timer_get_time() - s_last_commit_us;
-    return age_us < 0 ? 0 : static_cast<int32_t>(age_us / 1000000);
-}
-
-int32_t history_modbus_newest_age_s() {
-    if (!s_mtx) return -1;
-    Lock lk(s_mtx);
-    if (!lk.acquired() || s_mb_reset_requested.load() || s_mb_last_commit_us == kNoCommitUs) return -1;
-    const int64_t age_us = esp_timer_get_time() - s_mb_last_commit_us;
-    return age_us < 0 ? 0 : static_cast<int32_t>(age_us / 1000000);
-}
-
-int32_t history_env3_newest_age_s() {
-    if (!s_mtx) return -1;
-    Lock lk(s_mtx);
-    if (!lk.acquired() || s_env3_last_commit_us == kNoCommitUs) return -1;
-    const int64_t age_us = esp_timer_get_time() - s_env3_last_commit_us;
-    return age_us < 0 ? 0 : static_cast<int32_t>(age_us / 1000000);
-}
-
-static int64_t oldest_bucket_under_lock(int64_t newest, size_t sample_count) {
-    return newest < 0 || !sample_count ? -1 : newest - static_cast<int64_t>(sample_count - 1);
-}
-
-int64_t history_oldest_bucket(size_t sample_count) {
-    if (!s_mtx) return -1;
-    Lock lk(s_mtx);
-    return lk.acquired() ? oldest_bucket_under_lock(s_last_commit_bucket, sample_count) : -1;
-}
-
-int64_t history_modbus_oldest_bucket(size_t sample_count) {
-    if (!s_mtx) return -1;
-    Lock lk(s_mtx);
-    return lk.acquired() && !s_mb_reset_requested.load()
-        ? oldest_bucket_under_lock(s_mb_last_commit_bucket, sample_count) : -1;
-}
-
-int64_t history_env3_oldest_bucket(size_t sample_count) {
-    if (!s_mtx) return -1;
-    Lock lk(s_mtx);
-    return lk.acquired() ? oldest_bucket_under_lock(s_env3_last_commit_bucket, sample_count) : -1;
 }
 
 // ── Splicing an older snapshot in behind the live samples ───────────────────────────────────────
@@ -1241,7 +1272,8 @@ bool splice_locked(HistorySource src, size_t idx, const HistorySample* v, size_t
 // The locking wrapper the flash restore uses. File-local since the MQTT snapshot path was dropped:
 // nothing outside this file splices a stored series in any more.
 static bool history_splice_snapshot(HistorySource src, size_t idx, const logic::HistorySample* v,
-                                    size_t n, uint32_t stride, int64_t newest_bucket) {
+                                    size_t n, uint32_t stride, int64_t newest_bucket,
+                                    uint32_t circulation_identity) {
     if (!s_mtx) return false;
     Lock lk(s_mtx);
     if (!lk.acquired()) return false;
@@ -1249,6 +1281,15 @@ static bool history_splice_snapshot(HistorySource src, size_t idx, const logic::
     // be discarded anyway.
     if (src == HistorySource::X10a && s_reset_requested.load()) return false;
     if (src == HistorySource::Modbus && s_mb_reset_requested.load()) return false;
+    // HIST-01/b: the circulation column is the external witness's, not the heat pump's, and its
+    // identity moves on its own. While a circulation reset is pending the ring still holds the
+    // retired witness's samples. And a block assembled from records of one witness must not be
+    // spliced into a ring that has moved to another between that assembly and this lock — the
+    // reset may have been consumed meanwhile, so the pending flag alone would not catch it.
+    if (src == HistorySource::X10a && logic::history_trend_is_circulation(idx) &&
+        !logic::history_circulation_restore_allowed(circulation_identity, P().circulation_fp,
+                                                    s_circulation_reset_requested.load()))
+        return false;
     const bool ok = splice_locked(src, idx, v, n, stride, newest_bucket);
     persist_seal_locked();
     return ok;
@@ -1666,10 +1707,17 @@ bool flash_build_next_record(HistorySource src, FlashJournalRecord& out, TickTyp
     h.rings[1] = static_cast<uint16_t>(HOMEHUB_HISTORY_COUNT);
     h.rings[2] = static_cast<uint16_t>(ENV3_HISTORY_COUNT);
     h.reserved = 0xffff;
-    if (src == HistorySource::X10a)
+    if (src == HistorySource::X10a) {
         logic::history_journal_set_scope(h, s_x10a_target_fp.load());
-    else if (src == HistorySource::Modbus)
+        // HIST-01/b: name the witness the circulation COLUMN of this record was recorded under —
+        // the identity of what the ring holds (P(), sealed with it), not the configured one: while
+        // a reset is pending the ring still holds the retired witness's samples and the record
+        // must say so. Header bytes pad[8..11]; logic::history_journal_set_circulation_identity
+        // says why the previous firmware reads such a record unchanged.
+        logic::history_journal_set_circulation_identity(h, P().circulation_fp);
+    } else if (src == HistorySource::Modbus) {
         logic::history_journal_set_scope(h, s_mb_target_fp.load());
+    }
     for (size_t i = 0; i < value_count; i++) {
         HistorySample sample = HISTORY_NO_READING;
         const logic::TrendRing* r = ring_at(src, i);
@@ -2036,6 +2084,13 @@ void history_service_flash_restore() {
     const size_t  src_i       = static_cast<size_t>(src);
     const int64_t newest      = s_flash_newest_bucket[src_i];
     bool          read_failed = false;
+    // HIST-01/b: the identity the circulation column may be restored under, read once for the whole
+    // batch, and whether any record of it has fed this batch's block yet. A record is X10A-scoped,
+    // but its circulation column belongs to the external witness it names; the other columns of the
+    // same record are restored regardless.
+    const uint32_t circ_now                       = s_circulation_fp.load();
+    const bool     circ_pending                   = s_circulation_reset_requested.load();
+    bool           circ_fed[kRestoreRingsPerTick] = {};
     if (newest != INT64_MIN) {
         Lock flash_lk(s_flash_mtx, 0);
         if (!flash_lk.acquired()) return;
@@ -2058,7 +2113,13 @@ void history_service_flash_restore() {
             if (!flash_record_valid(r) || r.header.bucket < oldest || r.header.bucket > newest)
                 continue;
             const size_t pos = static_cast<size_t>(r.header.bucket - oldest);
+            const uint32_t record_circulation =
+                logic::history_journal_circulation_identity(r.header);
             for (size_t b = 0; b < batch; b++) {
+                const bool x10a = src == HistorySource::X10a;
+                if (x10a && !logic::history_x10a_column_restorable(
+                                first_idx + b, record_circulation, circ_now, circ_pending))
+                    continue;
                 const int stored = flash_record_stored_index(r.header, first_idx + b);
                 if (stored < 0 || static_cast<size_t>(stored) >= r.header.value_count) continue;
                 HistorySample sample = HISTORY_NO_READING;
@@ -2066,6 +2127,7 @@ void history_service_flash_restore() {
                             r.payload + static_cast<size_t>(stored) * sizeof(HistorySample),
                             sizeof(sample));
                 s_flash_restore_blocks[b][pos] = sample;
+                if (x10a && logic::history_trend_is_circulation(first_idx + b)) circ_fed[b] = true;
             }
         }
     }
@@ -2079,10 +2141,14 @@ void history_service_flash_restore() {
         const size_t start = logic::history_flash_restore_start(
             s_flash_oldest_bucket[src_i], newest, HISTORY_SAMPLES);
         for (size_t b = 0; b < batch; b++) {
+            // A circulation column with no record of the current witness has nothing to restore;
+            // splicing its all-gap block would only dress the ring up as a restored one.
+            if (src == HistorySource::X10a && logic::history_trend_is_circulation(first_idx + b) &&
+                !circ_fed[b])
+                continue;
             if (start < HISTORY_SAMPLES &&
-                history_splice_snapshot(src, first_idx + b,
-                                        s_flash_restore_blocks[b] + start,
-                                        HISTORY_SAMPLES - start, 1, newest))
+                history_splice_snapshot(src, first_idx + b, s_flash_restore_blocks[b] + start,
+                                        HISTORY_SAMPLES - start, 1, newest, circ_now))
                 s_flash_restored_rings++;
         }
     }
@@ -2174,7 +2240,7 @@ bool history_flash_forget() {
         Lock history_lk(s_mtx);
         if (!history_lk.acquired()) return false;
         persist_wipe(logic::history_catalog_fingerprint(), s_x10a_target_fp.load(),
-                     s_mb_target_fp.load());
+                     s_mb_target_fp.load(), s_circulation_fp.load());
         s_bucket = s_mb_bucket = s_env3_bucket = 0;
         s_have_bucket = s_mb_have_bucket = s_env3_have_bucket = false;
         s_last_commit_us = s_mb_last_commit_us = s_env3_last_commit_us = kNoCommitUs;
