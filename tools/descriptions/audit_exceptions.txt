@@ -13,9 +13,9 @@
 #                   emit yet. Deleting the copy instead would mean re-writing it when the rows land.
 #                   Delete the line when they do — D005 will remind you.
 #
-# NEVER adjudicate a D001 away. A published reading with no explainer is the exact defect this gate
-# was built for (def/overlay.hpp shipped 11 such rows); the fix is copy in DESCRIPTIONS, not a line
-# here. D003/D004 are malformed entries and have no legitimate adjudication either.
+# NEVER adjudicate a D001 or D009 away. A published reading with no reachable explainer is the
+# exact defect this gate was built for (def/overlay.hpp shipped 11 such rows); repair the actual
+# DESCRIPTIONS/descFor/I18N path, not this ledger. D003/D004 likewise have no legitimate adjudication.
 
 # FORWARD-ARMED — docs/REGISTERS.md §5 register 0x64 offsets 14/15 document "Target delta T
 # heating" / "… cooling" (conv 152, °C), but no generated profile carries either row: `grep -in

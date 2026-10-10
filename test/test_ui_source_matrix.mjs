@@ -434,6 +434,19 @@ const X_2WV = (on) => ({ label: "2way valve(On:Heat_Off:Cool)", value: on ? "1" 
   assert.equal(down.INSPECT.quiet.trend, "quiet_state");
   assert.equal(down.INSPECT.defrost.trend, "defrost_state");
 
+  // Native holding9 selects a quiet policy; even1/2 cannot establish current quiet activity.
+  for (const value of [0, 1, 2, 7]) {
+    const nativeSelection = {off: 9, label: "Quiet mode selection", value, unit: "",
+      profile: "altherma4", enum: "altherma4_quiet_selection"};
+    const native = ctx({x10a: false, mbEnabled: true, mbConnected: true,
+      values: [X_QUIET(true)], modbus: [nativeSelection]});
+    assert.equal(native.liveData().quiet, null, `native quiet selection${value} is not activity`);
+    assert.equal(native.mbForInspect("quiet"), null, "selection is not the quiet-active second source");
+    const x10aLeads = ctx({x10a: true, mbEnabled: true, mbConnected: true,
+      values: [X_QUIET(false)], modbus: [nativeSelection]});
+    assert.equal(x10aLeads.liveData().quiet, false, "live X10A quiet activity remains independent");
+  }
+
   const p2Only = ctx({ x10a: true, mbEnabled: false, mbConnected: false,
                        values: [{ ...X_QUIET(false), value: null }, X_LOW_NOISE(true)] });
   assert.equal(p2Only.liveData().quiet, null,
@@ -876,7 +889,7 @@ const SG_INSP = (c, d) => c.INSPECT.sgrequest;
 // pinned here rather than left to be re-derived.
 {
   const c = ctx({ x10a: true, mbEnabled: true, mbConnected: true });
-  assert.equal(c.MB_PAIRS.length, 8, "eight measurement pairings");
+  assert.equal(c.MB_PAIRS.length, 9, "eight base pairings plus native-only water pressure");
   for (const p of c.MB_PAIRS) {
     for (const k of ["fld", "pill", "insp", "cid"]) {
       assert.equal(typeof p[k], "string", `MB_PAIRS entry needs ${k}`);

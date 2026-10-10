@@ -599,7 +599,7 @@ function renderLive() {
   // the known pill set rather than per setTxt, so a pill that stops being Modbus-sourced cannot keep
   // the colour from a previous cycle.
   const mbf = (d && d.mbFields) || new Set();
-  // The eight paired pills come from MB_PAIRS; the four DERIVED ones have no register and so no
+  // The paired pills come from MB_PAIRS; the four DERIVED ones have no register and so no
   // concept — they are marked because their inputs were (liveData adds them to mbFields).
   const MB_PILL = { ...Object.fromEntries(MB_PAIRS.map((p) => [p.fld, p.pill])),
                     pel: "svPel", dt: "svDt", pth: "svPth", cop: "svCop" };
@@ -1576,6 +1576,8 @@ const inspTitleText = (e, d) => inspFieldText(e, "t", d);
 // Everything the panel would draw, as one string — the change key for the render guard above. It
 // covers the selection, the headline, the live sentence and every member reading, so a value moving
 // still repaints while an idle second does not.
+const inspectModbusSignature = (row) => row
+  ? JSON.stringify([row.value, row.label, row.unit, row.off, row.profile, row.enum, row.binary]) : "";
 function inspectSig(e) {
   if (!e) return "";
   if (e.env3) {
@@ -1594,12 +1596,12 @@ function inspectSig(e) {
   // a side effect IN here, and the quieter of the two failures: the panel keeps showing the gateway's
   // reading from whenever something else last changed, looking perfectly current.
   const rows = (d ? inspValues(e, row, fb).map((m) => {
-    return inspVal(m.x10a, d) + (m.mb ? "/" + m.mb.value : "")
+    return inspVal(m.x10a, d) + (m.mb ? "/" + inspectModbusSignature(m.mb) : "")
       + (m.compare ? "/" + m.compare.value : "");
   }) : []).join(",");
   // LANG guarantees the full body is redrawn even when this particular entry's title/live sentence
   // happens to be spelled identically in both dictionaries.
-  return [LANG, S.insp, inspTitleText(e, d), inspVal(row, d), fb ? fb.value : "",
+  return [LANG, S.insp, inspTitleText(e, d), inspVal(row, d), inspectModbusSignature(fb),
           d && e.head ? e.head(d) : "",
           inspNowText(e, d) || "", inspHeld(e, d) ? "held" : "", rows].join("|");
 }
@@ -1805,7 +1807,10 @@ function renderInspect() {
   const desc = e.sample ? descFor(e.sample, row || fb) : null;
   const localizedWhat = inspLocaleField(e, "what", d);
   const ownWhat = localizedWhat ?? inspSourceField(e, "what", d);
-  const what = ownWhat ? descParaHtml(esc(localizedWhat ?? tx(ownWhat)))
+  // A native replacement must retain its source-specific interpretation limits in every locale.
+  // Generic inspector copy describes the X10A quantity and cannot override the defining register.
+  const preferSourceDesc = fb && desc?.sourceQualified;
+  const what = ownWhat && !preferSourceDesc ? descParaHtml(esc(localizedWhat ?? tx(ownWhat)))
                        : (desc ? descBodyHtml(desc, (row || fb)?.value, descriptionCopy(desc)) : "");
   // Prose stays prose. Every live reading, including a leaf headline's second source, is rendered
   // together after the chart in the divided value list below.

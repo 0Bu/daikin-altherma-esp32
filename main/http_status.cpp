@@ -77,8 +77,8 @@ extern const unsigned char index_html_gz_start[] asm("_binary_index_html_gz_star
 extern const unsigned char index_html_gz_end[]   asm("_binary_index_html_gz_end");
 extern const unsigned char setup_html_gz_start[] asm("_binary_setup_html_gz_start");
 extern const unsigned char setup_html_gz_end[]   asm("_binary_setup_html_gz_end");
-extern const unsigned char favicon_ico_start[]   asm("_binary_favicon_ico_start");
-extern const unsigned char favicon_ico_end[]     asm("_binary_favicon_ico_end");
+extern const unsigned char favicon_ico_gz_start[] asm("_binary_favicon_ico_gz_start");
+extern const unsigned char favicon_ico_gz_end[] asm("_binary_favicon_ico_gz_end");
 extern const unsigned char heat_pump_icon_png_start[] asm("_binary_heat_pump_icon_png_start");
 extern const unsigned char heat_pump_icon_png_end[]   asm("_binary_heat_pump_icon_png_end");
 extern const unsigned char locale_de_js_gz_start[] asm("_binary_locale_de_js_gz_start");
@@ -214,9 +214,8 @@ static esp_err_t h_favicon(httpd_req_t* req) {
     bool not_modified = false;
     const esp_err_t cache_err = static_asset_cache(req, "favicon", etag, sizeof(etag), not_modified);
     if (cache_err != ESP_OK || not_modified) return cache_err;
-    httpd_resp_set_type(req, "image/vnd.microsoft.icon");
-    return httpd_resp_send(req, reinterpret_cast<const char*>(favicon_ico_start),
-                           favicon_ico_end - favicon_ico_start);
+    return http_send_gzip(req, "image/vnd.microsoft.icon", favicon_ico_gz_start,
+                          favicon_ico_gz_end);
 }
 
 static esp_err_t h_heat_pump_icon(httpd_req_t* req) {
@@ -1248,7 +1247,10 @@ static void append_status_json(JsonOut& j, bool redact) {
     if (mb.enabled) {
         for (size_t mt = 0; mt < logic::HOMEHUB_HISTORY_COUNT; mt++) {
             const auto& hh = logic::HOMEHUB_HISTORIES[mt];
-            const def::HomeHubReg* r = def::homehub_find(hh.offset);
+            const def::HomeHubReg* r  = mb.profile == ModbusProfile::Altherma4
+                                            ? def::altherma4_find(hh.offset)
+                                            : def::homehub_find(hh.offset);
+            if (r && !def::homehub_has_quiet_activity(*r)) continue;
             if (!r) continue;                         // compile-time table tests make this defensive
             if (!first_mb_trend) j += ",";
             first_mb_trend = false;
@@ -2036,7 +2038,8 @@ template <typename JsonOut>
 static void append_modbus_values_array(JsonOut& j, const std::vector<CachedValue>& v) {
     j += "[";
     for (size_t i = 0; i < v.size(); i++) {
-        const def::HomeHubReg* reg = def::homehub_find(v[i].off);
+        const def::HomeHubReg* reg = def::homehub_definition(v[i].modbus_definition);
+        if (reg && reg->offset != v[i].off) reg = nullptr;
         if (i) j += ",";
         j += "{\"label\":";
         json_append_quoted(j, v[i].label);
@@ -2049,18 +2052,28 @@ static void append_modbus_values_array(JsonOut& j, const std::vector<CachedValue
         json_append_quoted(j, v[i].unit);
         j += ",\"off\":";
         append_json_uint(j, v[i].off);
-        if (conv_is_binary(v[i].conv)) j += ",\"binary\":true";
+        if (reg && def::homehub_is_binary(*reg)) j += ",\"binary\":true";
+        if (reg && def::homehub_definition_is_altherma4(v[i].modbus_definition))
+            j += ",\"profile\":\"altherma4\"";
         // Keep the value raw and transport-friendly. The semantic id is metadata for the browser's
-        // last-mile rendering, so mode 2 can display as "Recommended on" without being sent as text.
+        // last-mile rendering, so profile-specific state names never become transport values.
         if (reg)
             if (const char* eid = def::homehub_enum_id(reg->kind))
                 { j += ",\"enum\":"; json_append_quoted(j, eid); }
-        if (const char* cid = logic::homehub_concept_for(v[i].off))
-            { j += ",\"concept\":"; json_append_quoted(j, cid); }
+        if (const char* cid =
+                reg ? logic::homehub_concept_for(reg->offset, def::homehub_has_quiet_activity(*reg))
+                    : nullptr) {
+            j += ",\"concept\":";
+            json_append_quoted(j, cid);
+        }
         // History metadata is wider than source pairing: a Modbus-only timeline must be attachable
         // to this row without pretending that it has an X10A `concept` twin.
-        if (const char* hid = logic::homehub_history_for(v[i].off))
-            { j += ",\"history\":"; json_append_quoted(j, hid); }
+        if (const char* hid =
+                reg ? logic::homehub_history_for(reg->offset, def::homehub_has_quiet_activity(*reg))
+                    : nullptr) {
+            j += ",\"history\":";
+            json_append_quoted(j, hid);
+        }
         j += "}";
     }
     j += "]";
@@ -2224,11 +2237,15 @@ static esp_err_t h_history(httpd_req_t* req) {
     size_t t = 0;
     if (def_) { while (t < logic::TREND_COUNT && &logic::TRENDS[t] != def_) t++; }
     const int mb_t = modbus ? logic::homehub_history_index(id) : -1;
+    const bool    native_modbus    = modbus && mb_active_profile() == ModbusProfile::Altherma4;
     const int env_t = env3_source ? env3_history_index(id) : -1;
     const Config& active_config = config();
     const bool env3_configured  = active_config.env3_enabled && env3_board_supported(active_config);
     const bool x10a_unknown = !modbus && !env3_source && (!def_ || t >= logic::TREND_COUNT);
-    if (x10a_unknown || (modbus && mb_t < 0) || (env3_source && (!env3_configured || env_t < 0))) {
+    const bool    missing_quiet =
+        native_modbus && mb_t >= 0 && logic::HOMEHUB_HISTORIES[mb_t].offset == 9;
+    if (x10a_unknown || (modbus && (mb_t < 0 || missing_quiet)) ||
+        (env3_source && (!env3_configured || env_t < 0))) {
         httpd_resp_set_status(req, "404 Not Found");
         return http_send_json(req, "{\"ok\":false,\"error\":\"unknown trend\"}");
     }
@@ -2259,7 +2276,9 @@ static esp_err_t h_history(httpd_req_t* req) {
 
     char lbl[80], unit[8];
     if (modbus) {
-        const def::HomeHubReg* r = def::homehub_find(logic::HOMEHUB_HISTORIES[mb_t].offset);
+        const uint16_t         offset = logic::HOMEHUB_HISTORIES[mb_t].offset;
+        const def::HomeHubReg* r =
+            native_modbus ? def::altherma4_find(offset) : def::homehub_find(offset);
         std::snprintf(lbl, sizeof(lbl), "%s", r ? r->label : "");
         std::snprintf(unit, sizeof(unit), "%s", r ? r->unit : "");
     } else if (env3_source) {

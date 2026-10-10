@@ -5,23 +5,40 @@ import assert from "node:assert/strict";
 import vm from "node:vm";
 import { readAppFragments, readUiLocale } from "../tools/ui/read_app_source.mjs";
 
-const SOURCE = readAppFragments(["i18n.js"]) + readUiLocale("de") + readAppFragments(["history.js"]);
 const appStateSource = readAppFragments(["app_state.js"]);
 const schematicSource = readAppFragments(["schematic.js"]);
 
-function renderer(lang) {
+function renderer(lang, removeNativePrecedence = false) {
+  let source = readAppFragments(["i18n.js"]) +
+    (lang === "en" ? "" : readUiLocale(lang)) +
+    readAppFragments(["history.js", "descriptions.js", "schematic.js"]);
+  if (removeNativePrecedence) {
+    const anchor = "const preferSourceDesc = fb && desc?.sourceQualified;";
+    assert.equal(source.split(anchor).length, 2, "unique production mutation anchor");
+    source = source.replace(anchor, "const preferSourceDesc = false;");
+  }
+  const nodes = new Map();
+  const element = (id) => {
+    if (!nodes.has(id)) nodes.set(id, { innerHTML: "", textContent: "", hidden: false,
+      classList: { toggle() {} }, removeAttribute() {}, setAttribute() {} });
+    return nodes.get(id);
+  };
   const context = {
-    document: { getElementById: () => null },
+    document: { getElementById: element, querySelectorAll: () => [] },
+    $: element,
     fetch: () => { throw new Error("unexpected fetch in enum test"); },
     localStorage: { getItem: () => lang, setItem: () => {} },
     navigator: { language: lang },
+    S: { status: { hp: { connected: true }, modbus: { enabled: true, connected: true },
+      history: { rows: [], modbus_rows: [], env3_rows: [] } },
+      _values: [], _modbus: [], descOpen: new Set(), hist: new Map(), histPin: new Map() },
   };
   vm.createContext(context);
-  vm.runInContext(SOURCE + "\nthis.__ui = { displayValue, displayUnit, displayReadingLabel, operationModeText, operationModeFromFlags, labels: I18N[LANG]," +
+  vm.runInContext(source + "\nthis.__ui = { displayValue, displayUnit, displayReadingLabel, displayHomeHubLabel, descFor, mbNoteHtml, vDescRow, inspectSig, renderInspect, INSPECT, state: S, operationModeText, operationModeFromFlags, labels: I18N[LANG]," +
     " sgModeText: (mode) => t(`sg.mode${mode}`)," +
     " sgBoostText: () => t(\"schem.sg_boost\") };", context,
     { filename: "main/www/app.sources" });
-  return context.__ui;
+  return { ...context.__ui, element };
 }
 
 const en = renderer("en");
@@ -48,6 +65,100 @@ for (const [semantic, value, english, german] of modes) {
   const row = { value, enum: semantic };
   assert.equal(en.displayValue(row), english, `${semantic}=${value} English named state`);
   assert.equal(de.displayValue(row), german, `${semantic}=${value} German named state`);
+}
+const nativeModes = [
+  ["altherma4_current_operation_mode", 0, "None", "Keine"],
+  ["altherma4_current_operation_mode", 1, "Heating", "Heizen"],
+  ["altherma4_current_operation_mode", 2, "Cooling", "Kühlen"],
+  ["altherma4_demand_response", 0, "Free running", "Freier Betrieb"],
+  ["altherma4_demand_response", 1, "Forced off", "Zwangsabschaltung"],
+  ["altherma4_demand_response", 2, "Forced on", "Erzwungen ein"],
+  ["altherma4_demand_response", 3, "Recommended on", "Empfehlung ein"],
+  ["altherma4_demand_response", 4, "Reduced", "Reduziert"],
+  ["altherma4_unit_operation_mode", 0, "Stop", "Stopp"],
+  ["altherma4_unit_operation_mode", 1, "Tank heat-up", "Speicheraufheizung"],
+  ["altherma4_unit_operation_mode", 2, "Space heating", "Raumheizung"],
+  ["altherma4_unit_operation_mode", 3, "Space cooling", "Raumkühlung"],
+  ["altherma4_unit_operation_mode", 4, "Actuator", "Stellantrieb"],
+  ["altherma4_quiet_selection", 0, "OFF", "OFF"],
+  ["altherma4_quiet_selection", 1, "Automatic", "Automatisch"],
+  ["altherma4_quiet_selection", 2, "Manual", "Manuell"],
+];
+for (const [semantic, value, english, german] of nativeModes) {
+  assert.equal(en.displayValue({value, enum: semantic}), english, `${semantic}=${value}`);
+  assert.equal(de.displayValue({value, enum: semantic}), german, `${semantic}=${value} German`);
+  assert.equal(en.displayValue({value: 7, enum: semantic}), "Unknown (7)");
+}
+for (const lang of ["en", "de", "es", "fr", "it", "pl", "cs", "uk", "zh", "ja", "nb", "sv", "fi"]) {
+  const ui = renderer(lang);
+  for (const [off, key] of [[9, "quiet_selection"], [54, "heating_offset"], [58, "imposed_power_limit"],
+    [65, "demand_response"], [74, "pre_phe_outdoor"], [80, "main_target"], [83, "unit_operation"]]) {
+    assert.equal(ui.displayHomeHubLabel({off, label: "obsolete label", profile: "altherma4"}),
+      ui.labels[`a4.${key}`], `${lang}/${off}: native label uses its reviewed translation`);
+  }
+  for (const [off, key] of [[9, "quiet_help"], [38, "current_help"], [49, "flow_help"],
+    [54, "heating_offset_help"], [58, "limit_help"], [65, "demand_help"], [68, "pump_help"],
+    [74, "pre_phe_outdoor_help"], [79, "pressure_help"], [83, "operation_help"]]) {
+    assert.equal(ui.descFor("obsolete base label", {off, profile: "altherma4"}).what,
+      ui.labels[`a4.${key}`], `${lang}/${off}: native explanation cannot inherit base semantics`);
+  }
+  for (const [semantic, value] of nativeModes)
+    assert.doesNotMatch(ui.displayValue({value, enum: semantic}), /^(?:enum\.|a4\.)/);
+  for (const [off, label, unit, concept, key] of [
+    [49, "Flow rate", "L/min", "flow", "flow_help"],
+    [79, "Water pressure", "bar", "water_pressure", "pressure_help"],
+  ]) {
+    const x = { label: off === 49 ? "Flow sensor" : "Water Pressure", value: "2.5", unit, concept };
+    const native = { off, label, value: 2, unit, concept, profile: "altherma4" };
+    const escaped = ui.labels[`a4.${key}`].replace(/[&<>"]/g,
+      (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+    const comparison = ui.mbNoteHtml(x, native);
+    assert.ok(comparison.includes(escaped), `${lang}/${off}: paired reading exposes its native limit`);
+    assert.ok(!comparison.includes('class="mb-delta"'),
+      `${lang}/${off}: unverified scaling cannot assert a physical difference or agreement`);
+    assert.ok(!ui.mbNoteHtml(x, {...native, profile: "homehub"}).includes(escaped),
+      `${lang}/${off}: the independent base comparison keeps its established meaning`);
+    ui.state._values = [x]; ui.state._modbus = [native]; ui.state.status.hp.connected = false;
+    const fallback = ui.vDescRow(x);
+    assert.ok(fallback.includes(escaped), `${lang}/${off}: native replacement exposes its own limit`);
+    assert.ok(!fallback.includes('class="mb-delta"'), `${lang}/${off}: no stale-source difference`);
+    ui.state.status.hp.connected = true;
+    ui.state.live = { flow: 2.5, wp: 2.5, ouHeldOver: false };
+    ui.state.insp = off === 49 ? "flow" : "wp";
+    ui.state._modbus = [{...native, profile: "homehub"}];
+    const baseSignature = ui.inspectSig(ui.INSPECT[ui.state.insp]);
+    ui.state._modbus[0].profile = "altherma4";
+    assert.notEqual(ui.inspectSig(ui.INSPECT[ui.state.insp]), baseSignature,
+      `${lang}/${off}: source metadata alone must refresh an open inspector's meaning`);
+    ui.state.status.hp.connected = false;
+    ui.state.inspSig = "";
+    ui.renderInspect();
+    assert.ok(ui.element("inspBody").innerHTML.includes(escaped),
+      `${lang}/${off}: actual replacement inspector retains its native interpretation limit`);
+    ui.state._modbus[0].profile = "homehub";
+    ui.renderInspect();
+    assert.ok(!ui.element("inspBody").innerHTML.includes(escaped),
+      `${lang}/${off}: the base inspector must not inherit native limits`);
+  }
+}
+const precedenceMutation = renderer("es", true);
+precedenceMutation.state._values = [{label: "Flow sensor", value: "2.5", concept: "flow"}];
+precedenceMutation.state._modbus = [{label: "Flow rate", value: 2, unit: "L/min", off: 49,
+  concept: "flow", profile: "altherma4"}];
+precedenceMutation.state.status.hp.connected = false;
+precedenceMutation.state.live = {flow: 2, wp: null, ouHeldOver: false};
+precedenceMutation.state.insp = "flow";
+precedenceMutation.renderInspect();
+assert.ok(!precedenceMutation.element("inspBody").innerHTML.includes(
+  precedenceMutation.labels["a4.flow_help"]),
+"the production mutation reproduces the missing native warning in the localized inspector");
+assert.equal(en.displayHomeHubLabel({off: 58, label: "Power consumption"}), "Power consumption",
+  "the independent base profile keeps its actual power-consumption label");
+for (const [off, label, key] of [[49, "Flow rate", "flow_help"],
+  [68, "Circulation pump speed", "pump_help"], [79, "Water pressure", "pressure_help"]]) {
+  for (const profile of [undefined, "homehub"])
+    assert.notEqual(en.descFor(label, {off, profile}).what, en.labels[`a4.${key}`],
+      `${off}/${profile}: native interpretation limits cannot replace another source's explanation`);
 }
 assert.equal(en.displayValue({ value: "Recommended on" }), "Recommended on",
   "the derived X10A Smart-Grid row may still use its local canonical display text");

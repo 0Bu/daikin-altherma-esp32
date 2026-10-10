@@ -87,7 +87,7 @@ Ids are stable keys and are never reused — a gap means a feature was retired, 
 | 40 | **Cost-shaped CI** — fast mechanical gates as steps of one job, skipped compile steps when nothing relevant changed, carried ccache, no per-PR publish | ✅ | [`build.yml`](../.github/workflows/build.yml) |
 | 41 | **Audited X10A telemetry supplements** — 11 outdoor protection/retry entities for all profiles plus 27 control, safety and actuator fields for every profile row-identical to the reference table, without new page queries | ✅ 🧪 | [`def/overlay.hpp`](../main/def/overlay.hpp), [`logic/profile_view.hpp`](../main/logic/profile_view.hpp), [`X10A_COVERAGE.md`](X10A_COVERAGE.md) |
 | 42 | **24-hour trend rings** — fixed-cadence `int16` rings in static storage, addressed structurally by (page, offset, unit), distinguishing *no reading* from *held over*; derived heat output requires a compressor witness while water is moving | ✅ 🧪 | [`logic/history.hpp`](../main/logic/history.hpp), [`history.cpp`](../main/history.cpp), [`history.js`](../main/www/js/history.js) |
-| 43 | **Value-description coverage gate** — every catalog label the UI can show must have an explainer, asserted against the real table in a JS engine | ✅ | [`check_descriptions.mjs`](../tools/descriptions/check_descriptions.mjs), [`run-description-audit.sh`](../scripts/run-description-audit.sh) |
+| 43 | **Value-description coverage gate** — every visible catalog row has an explainer through the actual table or profile-qualified `descFor` path and English dictionary | ✅ | [`check_descriptions.mjs`](../tools/descriptions/check_descriptions.mjs), [`run-description-audit.sh`](../scripts/run-description-audit.sh) |
 | 44 | **Digest-pinned CI supply chain** — every third-party Action is SHA-pinned; only the Renovate runner pin may omit human records after protected-base policy proves its immutable one-line head patch | ✅ 🧪 | [`pr-policy.yml`](../.github/workflows/pr-policy.yml), [`renovate_action_pr.py`](../tools/agent-policy/renovate_action_pr.py) |
 | 45 | **Dashboard-schematic audit** — parses the real SVG and evaluates the real bindings to catch a correct value drawn on the wrong pipe | ✅ | [`check_schematic.mjs`](../tools/schematic/check_schematic.mjs), [`run-schematic-audit.sh`](../scripts/run-schematic-audit.sh) |
 | 46 | **On-device redaction of a diagnostic snapshot** — so a bug report can be a *public* issue; in the firmware, so the UI and a manual `curl` cannot become two privacy rules | ✅ 🧪 | [`logic/redact.hpp`](../main/logic/redact.hpp), [`REPORTING.md`](REPORTING.md) |
@@ -144,7 +144,7 @@ Ids are stable keys and are never reused — a gap means a feature was retired, 
 | 103 | **Signed release artifact construction** — a trusted-main job isolates the signing key, pins signing-key continuity and manifest provenance, then hands the exact artifact to a separate write-capable publisher that binds and verifies the release tag against the requested source SHA | ✅ 🧪 | [`ci-build-all.sh`](../scripts/ci-build-all.sh), [`check-signing-key-continuity.py`](../scripts/check-signing-key-continuity.py), [`check-manifest-provenance.py`](../scripts/check-manifest-provenance.py), [`build.yml`](../.github/workflows/build.yml) |
 | 104 | **Hardware acceptance separated from publication** — the canonical private-inventory bench and production OTA transactions remain explicit maintainer operations; a manual release skips the PR test suite, never contacts a board and depends on no lab runner, private inventory or hardware policy | ✅ 🧪 | [`production-ota-gate.py`](../scripts/production-ota-gate.py), [`build.yml`](../.github/workflows/build.yml) |
 | 105 | **Protocol S legacy transport & hardware TX-echo suppression** — Protocol S support for legacy Daikin units (unverified catalog), `HpFrameReceiver` hardware TX-echo suppression for both protocols, and preamble resynchronization for Protocol I | ✅ 🧪 | [`logic/crc.hpp`](../main/logic/crc.hpp), [`hp_comm.cpp`](../main/hp_comm.cpp), [`hp_detect.cpp`](../main/hp_detect.cpp), [`def/protocol_s.hpp`](../main/def/protocol_s.hpp), [`X10A_PROTOCOL.md`](X10A_PROTOCOL.md) |
-| 106 | **Altherma 4 Modbus TCP extended telemetry & auto-detection** — Modbus TCP extension for Daikin Altherma 4 with 11 additional registers (unverified catalog; 43 total across 14 batches), safe base-map startup polling, active register probing (FC04 offset 79) with affirmative HomeHub fallback and bounded retries, and dedicated status tracking | ✅ 🧪 | [`logic/modbus_profile.hpp`](../main/logic/modbus_profile.hpp), [`def/altherma4.hpp`](../main/def/altherma4.hpp), [`hp_modbus.cpp`](../main/hp_modbus.cpp), [`MODBUS_PROTOCOL.md`](MODBUS_PROTOCOL.md) |
+| 106 | **Altherma 4 Modbus TCP telemetry** — manufacturer-derived 42-row read-only subset, snapshot-owned profile semantics and pressure-probe heuristic; physical acceptance and three conversion assumptions remain pending | 🟡 🧪 | [`logic/modbus_catalog.hpp`](../main/logic/modbus_catalog.hpp), [`logic/modbus_profile.hpp`](../main/logic/modbus_profile.hpp), [`def/altherma4.hpp`](../main/def/altherma4.hpp), [`MODBUS_PROTOCOL.md`](MODBUS_PROTOCOL.md) |
 
 ---
 
@@ -437,6 +437,10 @@ other.
 - **✅ gzip UI embedded in the app image**: the build inlines the page and its fragments,
   minifies, and pre-compresses them deterministically (`EMBED_FILES`). gzip is deliberate because
   the trusted-LAN origin is HTTP and browsers do not consistently negotiate Brotli there.
+  The dashboard uses gzip level 9 with memory level 7 for signed-image capacity; decoded page
+  bytes are unchanged and compression metadata is deterministic across hosts.
+  The setup portal and MCP information page use the same offline minifier; their gzip caps are
+  4 KiB and 8 KiB. The favicon is losslessly compressed and retains its original decoded bytes.
 - **✅ 🧪 OOM discipline & early rejection** ([`http_common.cpp`](../main/http_common.cpp),
   [`logic/http_request.hpp`](../main/logic/http_request.hpp)): every route runs under one
   trampoline whose `try/catch` returns **503 instead of crashing** while it still owns the response
@@ -643,8 +647,9 @@ Everything needed to explain a crash *after the fact*, from the field, without a
   independently of profile detection, so board health is visible while the model is still `auto`.
   The reset reason rides as a slug **and** as numbers, because a metrics pipeline keeps numeric
   fields and drops strings. `bus_ou_held_over` reports **source** freshness rather than link health.
-  `mqtt_skipped` / `mqtt_quiesced` / `poll_skipped` count the 1 s cycles that produced **nothing** —
-  an OOM guard catch, a deliberate OTA/weather TLS hold-off, and a sweep that never reached the bus (legacy-380). They
+  `mqtt_skipped` counts interrupted 1 s publish cycles, possibly after earlier topics were sent;
+  `mqtt_quiesced` counts deliberate OTA/weather TLS hold-offs and `poll_skipped` counts sweeps that
+  never reached the bus (legacy-380). They
   are the counters that made a silent loss visible: 337 dropped publishes in 30 days had existed only
   as lines in a `/diag` ring the next chatty boot overwrites. `heap_restarts` — the 22nd entity —
   attributes the one reboot nothing else can: the heap watchdog restarts with `esp_restart()`, so
@@ -735,18 +740,25 @@ Deep dives: [`X10A_PROTOCOL.md`](X10A_PROTOCOL.md), [`REGISTERS.md`](REGISTERS.m
   persists a result. Explicitly saving empty permanently disables Modbus and dependent diagnosis. The
   link is **READ-ONLY as a property of the code**: no write entry point, function-code builder or
   value encoder exists anywhere under `main/`.
+- **🟡 🧪 Native Altherma 4 subset** ([`def/altherma4.hpp`](../main/def/altherma4.hpp),
+  [`logic/modbus_catalog.hpp`](../main/logic/modbus_catalog.hpp)): 42 rows retain their own labels,
+  types and enums through copied snapshots. Manufacturer-derived meanings are host-tested;
+  physical acceptance and flow/pump/pressure assumptions remain [pending](MODBUS_PROTOCOL.md#deferred-physical-acceptance).
+  Flat Modbus MQTT JSON uses one exact-sized transient reservation after escaped-byte counting;
+  a 4 KiB refusal ceiling is handled by the MQTT task's existing exception boundary.
 - **✅ 🧪 Batched reads on two cadences** ([`logic/modbus_plan.hpp`](../main/logic/modbus_plan.hpp),
   [`logic/modbus_snapshot.hpp`](../main/logic/modbus_snapshot.hpp)): the full map is read every fifth
   tick; intervening ticks read diagnosis gates and outdoor context. Exception batches fall back to
   individual reads. Live cache use requires matching target/session identity, full-cache age at most
-  546 s and independently recent replies at most 7 s; these are transport bounds, not same-sweep proof.
+  537 s and independently recent replies at most 7 s; these are transport bounds, not same-sweep proof.
   Individual gate/context replies expire independently; each fallback request feeds the watchdog.
   Target changes reset public classification; discovery shares one five-second budget per attempt.
 - **The two sources meet in exactly one place** ([`logic/homehub_map.hpp`](../main/logic/homehub_map.hpp)):
   a register is paired to an X10A row **structurally**, reusing the trend ids and never the label —
   the catalog spells one quantity many ways and reuses tags across different quantities, so a label
-  match would be both incomplete and wrong. The UI shows both values with their difference, and lets
-  Modbus stand in, marked in its own colour, when X10A is silent.
+  match would be both incomplete and wrong. The UI shows both values with their difference when the
+  conversion is established. Native Altherma 4 flow and pressure instead show the unverified
+  conversion limit. Modbus can stand in, marked in its own colour, when X10A is silent.
 - **✅ 🧪 Silent-bus detect backoff** ([`logic/detect_backoff.hpp`](../main/logic/detect_backoff.hpp)):
   while nothing answers, the sweep stretches toward a ceiling by **skipping ticks**, so the 1 s
   watchdog reset still fires and the ceiling stays a detection-latency choice rather than a WDT

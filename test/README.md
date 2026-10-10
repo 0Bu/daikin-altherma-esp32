@@ -81,10 +81,18 @@ separately authorized hardware acceptance remain distinct proof layers.
 
 The contract suite also compiles the complete current `hp_modbus.cpp` through
 [`modbus_runtime/fixture.cpp`](modbus_runtime/fixture.cpp). Real POSIX transport and explicit SDK
-clock/task adapters exercise parsing, polling, cache expiry, target cutover and task retirement;
-specific temporary mutations prove the runtime oracles can reject the corresponding regressions.
+clock/task adapters exercise parsing, polling, cache expiry, target cutover and task retirement.
+Its 31 cases include native enum constants, 32/42-row profile ownership and automatic native
+promotion; 30 specific temporary mutations prove the corresponding runtime oracles reject regressions.
 See [its evidence limits](modbus_runtime/README.md): SDK timing models, scheduler callbacks and
 simulated config/history do not establish real hardware, NVS or physical HomeHub behavior.
+
+[`test_modbus_metadata_contract.mjs`](test_modbus_metadata_contract.mjs) separately compiles the
+current HTTP/MCP serializer and MQTT snapshot consumer from their production source. Sixteen
+cases and ten specific mutations check snapshot-owned definitions, raw numeric enums, text types,
+native labels/keys and quiet-selection exclusion from actual-state metadata, plus exact bounded
+flat-JSON reservation and sparse native-key allocation. The future physical
+[Altherma 4 comparison](../docs/MODBUS_PROTOCOL.md#deferred-physical-acceptance) remains pending.
 
 `scripts/run-format-check.sh` always supplies the dependency-free baseline format gate: UTF-8, LF
 endings, one final newline, no tabs or trailing whitespace on maintained `main/`, `test/` and
@@ -271,15 +279,21 @@ right-hand value column. The global reduced-motion contract removes that non-ess
 
 `scripts/run-ui-localization-audit.sh` is the named CI gate for complete device-local copy. Its core,
 `node test/test_ui_locale_catalogs.mjs`, evaluates the separately shipped de/es/fr/it/pl/cs/uk/zh/ja/nb/sv/fi
-modules against the embedded English fallback. All 870 keys, value types and parameter-function
+modules against the embedded English fallback. All 894 keys, value types and parameter-function
 arities must match; browser detection and the Firmware selector must name the same thirteen languages;
 all 125 value and 15 model-description rows must have native copy with no English prose fallback
 (compact locales may fold the normal context into their first field); concurrent loads coalesce onto
 `/locale.js`; every deterministic gzip asset stays within its 32 KiB response budget; and all locale
-assets together stay within a 275 KiB aggregate-growth guard. Three one-KiB rebases accommodate the
-complete localized factory-reset warning and the cause-neutral wording of the DHW heat-loss
-unobserved-data discard, and the stored-report provenance/cause-neutral fault copy in twelve languages;
-the separate firmware-size gate binds
+assets together stay within a 283 KiB aggregate-growth guard. The reviewed growth includes the
+complete localized factory-reset warning, cause-neutral diagnostic/report copy and native Altherma 4
+labels, state names and source-qualified explanations in every shipped language.
+Native flow/pressure limits are exercised in standalone, paired and replacement readings, including
+inspector invalidation when only definition metadata changes. The real-browser matrix performs
+390 value-disclosure and 104 schematic-inspector pointer clicks across all thirteen languages and
+both viewports, retaining each native limit in both paired and replacement inspector bodies.
+Unverified conversions do not emit
+numeric agreement/difference claims.
+The separate firmware-size gate binds
 the actual signed application image and its slot headroom. A fingerprint over the canonical
 English/domain copy makes every locale stale when a source sentence changes without its translation;
 `node tools/ui_localization/selftest.mjs` proves that stale source copy, missing specialist/domain
@@ -495,7 +509,7 @@ One entry per `test_*()` in [`test_logic.cpp`](test_logic.cpp), in the order `ma
   of X10A loss before ordinary publication stays silent until recovery. Separately,
   `mqtt_pause_withdraws_online()` allows the OTA-pause `offline` only for a connected LWT-bearing
   publisher and refuses Weather, subscriber-only and disconnected cases.
-- `logic/modbus_snapshot.hpp` — matching target/session generations, the derived 546-second full
+- `logic/modbus_snapshot.hpp` — matching target/session generations, the derived 537-second full
   cache budget and an independent seven-second reply budget gate live use; boundary and stale cases
   remain separate from measurement plausibility.
 - `logic/profile_view.hpp` + `def/overlay.hpp` — the generated table plus the temporary page-`0x10`

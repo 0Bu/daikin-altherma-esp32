@@ -49,7 +49,7 @@ idf_component_register(
         "${CMAKE_CURRENT_BINARY_DIR}/setup.html.gz"
         "${CMAKE_CURRENT_BINARY_DIR}/mcp.html.gz"
         ${UI_LOCALE_GZIP_FILES}
-        "${CMAKE_CURRENT_SOURCE_DIR}/www/favicon.ico"
+        "${CMAKE_CURRENT_BINARY_DIR}/favicon.ico.gz"
         "${CMAKE_CURRENT_SOURCE_DIR}/www/heat_pump_icon.png"
     REQUIRES
         nvs_flash
@@ -236,6 +236,7 @@ add_custom_command(
     COMMAND ${PYTHON} "${UI_MINIFIER}"
             --input "${CMAKE_CURRENT_BINARY_DIR}/index_inlined.html"
             --output "${CMAKE_CURRENT_BINARY_DIR}/index.html.gz"
+            --gzip-memory-level 7
             --max-gzip-bytes ${UI_GZIP_MAX_BYTES}
     DEPENDS "${CMAKE_CURRENT_BINARY_DIR}/index_inlined.html"
             "${UI_MINIFIER}"
@@ -269,17 +270,31 @@ endforeach()
 add_custom_target(gen_locale_gz DEPENDS ${UI_LOCALE_OUTPUTS})
 add_dependencies(${COMPONENT_LIB} gen_locale_gz)
 
-# Pre-compress the captive-portal setup page the same way (static source, no asset splicing).
+# Minify the captive portal with the same offline, syntax-preserving dashboard tool.
 # Symbols: _binary_setup_html_gz_{start,end} (see form_get in provisioning.cpp).
 add_custom_command(
     OUTPUT  "${CMAKE_CURRENT_BINARY_DIR}/setup.html.gz"
-    COMMAND gzip -9 -n -c "${CMAKE_CURRENT_SOURCE_DIR}/www/setup.html"
-            > "${CMAKE_CURRENT_BINARY_DIR}/setup.html.gz"
-    DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/www/setup.html"
-    COMMENT "Gzipping setup portal (www/setup.html -> setup.html.gz)"
+    COMMAND ${PYTHON} "${UI_MINIFIER}"
+            --input "${CMAKE_CURRENT_SOURCE_DIR}/www/setup.html"
+            --output "${CMAKE_CURRENT_BINARY_DIR}/setup.html.gz"
+            --max-gzip-bytes 4096
+    DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/www/setup.html" "${UI_MINIFIER}" ${UI_MINIFIER_VENDOR}
+    COMMENT "Minifying and gzipping setup portal"
     VERBATIM)
 add_custom_target(gen_setup_gz DEPENDS "${CMAKE_CURRENT_BINARY_DIR}/setup.html.gz")
 add_dependencies(${COMPONENT_LIB} gen_setup_gz)
+
+# Lossless compression preserves every ICO byte, pixel and resolution after HTTP decoding.
+# The raw DIB-based icon otherwise consumes over 11 KiB of the signed application slot.
+add_custom_command(
+    OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/favicon.ico.gz"
+    COMMAND gzip -9 -n -c "${CMAKE_CURRENT_SOURCE_DIR}/www/favicon.ico"
+            > "${CMAKE_CURRENT_BINARY_DIR}/favicon.ico.gz"
+    DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/www/favicon.ico"
+    COMMENT "Gzipping the unchanged favicon"
+    VERBATIM)
+add_custom_target(gen_favicon_gz DEPENDS "${CMAKE_CURRENT_BINARY_DIR}/favicon.ico.gz")
+add_dependencies(${COMPONENT_LIB} gen_favicon_gz)
 
 # The MCP endpoint is both a protocol URL (POST) and a self-documenting setup page (GET). Keep its
 # source split for editability like the main UI, but ship one pre-gzipped, dependency-free page.
@@ -300,10 +315,12 @@ add_custom_command(
     VERBATIM)
 add_custom_command(
     OUTPUT  "${CMAKE_CURRENT_BINARY_DIR}/mcp.html.gz"
-    COMMAND gzip -9 -n -c "${CMAKE_CURRENT_BINARY_DIR}/mcp_dashboard_inlined.html"
-            > "${CMAKE_CURRENT_BINARY_DIR}/mcp.html.gz"
-    DEPENDS "${CMAKE_CURRENT_BINARY_DIR}/mcp_dashboard_inlined.html"
-    COMMENT "Gzipping MCP dashboard"
+    COMMAND ${PYTHON} "${UI_MINIFIER}"
+            --input "${CMAKE_CURRENT_BINARY_DIR}/mcp_dashboard_inlined.html"
+            --output "${CMAKE_CURRENT_BINARY_DIR}/mcp.html.gz"
+            --max-gzip-bytes 8192
+    DEPENDS "${CMAKE_CURRENT_BINARY_DIR}/mcp_dashboard_inlined.html" "${UI_MINIFIER}" ${UI_MINIFIER_VENDOR}
+    COMMENT "Minifying and gzipping MCP dashboard"
     VERBATIM)
 add_custom_target(gen_mcp_gz DEPENDS "${CMAKE_CURRENT_BINARY_DIR}/mcp.html.gz")
 add_dependencies(${COMPONENT_LIB} gen_mcp_gz)

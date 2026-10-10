@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import http from "node:http";
 import path from "node:path";
+import { gzipSync } from "node:zlib";
 
 const JSON_HEADERS = { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" };
 
@@ -61,14 +62,17 @@ export async function startFixtureServer({ pageFile, projectRoot }) {
   const html = fs.readFileSync(pageFile, "utf8");
   const localeDir = path.join(projectRoot, "main/www/locales");
   const icon = fs.readFileSync(path.join(projectRoot, "main/www/heat_pump_icon.png"));
-  const favicon = fs.readFileSync(path.join(projectRoot, "main/www/favicon.ico"));
+  const favicon = gzipSync(fs.readFileSync(path.join(projectRoot, "main/www/favicon.ico")), { level: 9 });
 
   const server = http.createServer((request, response) => {
     const url = new URL(request.url, "http://127.0.0.1");
     if (url.pathname === "/" || url.pathname === "/index.html")
       return send(response, 200, "text/html; charset=utf-8", html);
     if (url.pathname === "/heat-pump-icon.png") return send(response, 200, "image/png", icon);
-    if (url.pathname === "/favicon.ico") return send(response, 200, "image/x-icon", favicon);
+    if (url.pathname === "/favicon.ico") {
+      response.writeHead(200, { "Content-Type": "image/vnd.microsoft.icon", "Content-Encoding": "gzip", "Cache-Control": "no-store" });
+      return response.end(favicon);
+    }
     if (url.pathname === "/locale.js") {
       const lang = url.searchParams.get("lang") || "";
       if (!/^[a-z]{2}$/.test(lang)) return send(response, 400, "text/plain", "invalid locale");

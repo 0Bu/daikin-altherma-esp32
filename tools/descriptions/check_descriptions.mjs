@@ -3,8 +3,9 @@
 // ── What this gates, and why it is not covered by anything else ──────────────────────────────────
 // Every reading the firmware publishes reaches the value list as a row keyed by its catalog LABEL,
 // and tapping that row is supposed to slide down a plain-language explainer. Whether a row IS
-// tappable is decided at render time by a first-match-wins regex sweep over DESCRIPTIONS — so a
-// label nothing matches produces a silently plain row. Nothing fails, nothing logs, and the only
+// tappable is decided by descFor(label, row): native source-qualified copy can precede the
+// first-match-wins regex sweep over DESCRIPTIONS. A row neither path covers becomes silently plain.
+// Nothing fails, nothing logs, and the only
 // evidence is the ABSENCE of a chevron on one row among a hundred.
 //
 // That is how the page-0x10 protection block shipped: `def/overlay.hpp` added 11 rows and 9 of them
@@ -69,6 +70,10 @@ const MODEL_CLOSE = '\n};';
 const DISPLAY_UNIT_DECL = 'const LABEL_UNIT_SUFFIX = ';
 const DISPLAY_LABEL_OPEN = 'function displayReadingLabel(label, row = null) {';
 const DISPLAY_LABEL_CLOSE = '\n}';
+const I18N_OPEN = 'const I18N = {';
+const I18N_CLOSE = '\n};';
+const TRANSLATE_OPEN = 'function t(k, ...a) {';
+const DESCRIPTION_OPEN = 'function descFor(label, row = null) {';
 
 // Slice a table literal out by exact markers and evaluate it. `braces` is the literal's own
 // delimiter pair, so the same routine reads the array and the object table.
@@ -94,7 +99,7 @@ function loadTable(src, file, open, close, braces, what, required) {
 // Load the actual browser helper rather than duplicating its transformation in the audit. The
 // independent catalog checks below define what it must achieve; evaluating the shipped function
 // makes a change to that function immediately visible to this gate.
-function loadFunction(src, file, open, close, what, preamble = '') {
+function loadFunction(src, file, open, close, what, preamble = '', bindings = Object.create(null)) {
   const n = src.split(open).length - 1;
   if (n !== 1) die(2, `'${open}' must appear exactly once in ${file} (found ${n})`);
   const from = src.indexOf(open);
@@ -102,7 +107,7 @@ function loadFunction(src, file, open, close, what, preamble = '') {
   if (to === -1) die(2, `no closing brace for ${what} in ${file}`);
   const literal = src.slice(from, to + close.length);
   let fn;
-  try { fn = vm.runInNewContext(`${preamble}\n(${literal})`, Object.create(null), { timeout: 5000 }); }
+  try { fn = vm.runInNewContext(`${preamble}\n(${literal})`, bindings, { timeout: 5000 }); }
   catch (e) { die(2, `${what} does not evaluate: ${e.message}`); }
   if (typeof fn !== 'function') die(2, `${what} did not evaluate to a function`);
   return fn;
@@ -134,7 +139,34 @@ function loadDescriptions(file) {
   const unitPreamble = src.slice(unitDeclFrom, unitDeclTo + 1);
   const displayLabel = loadFunction(src, file, DISPLAY_LABEL_OPEN, DISPLAY_LABEL_CLOSE,
                                     'displayReadingLabel', unitPreamble);
-  return { table, model, displayLabel };
+
+  // Execute the production source-qualified path with its real English dictionary and t(). The
+  // wrapper records dictionary access; it never supplies invented translations or repairs a key.
+  const i18n = loadTable(src, file, I18N_OPEN, I18N_CLOSE, '{}', 'I18N', true);
+  if (!i18n || typeof i18n.en !== 'object' || !i18n.en || Array.isArray(i18n.en) ||
+      Object.keys(i18n.en).length === 0) die(2, 'I18N has no nonempty English catalog');
+  const translate = loadFunction(src, file, TRANSLATE_OPEN, DISPLAY_LABEL_CLOSE, 't',
+    'const LANG = "en"; const I18N = dictionary;', { dictionary: i18n });
+  let keys = [], missing = [];
+  const trackedTranslate = (key, ...args) => {
+    keys.push(key);
+    if (!Object.hasOwn(i18n.en, key) || typeof i18n.en[key] !== 'string' || !i18n.en[key].trim())
+      missing.push(key);
+    return translate(key, ...args);
+  };
+  const describe = loadFunction(src, file, DESCRIPTION_OPEN, DISPLAY_LABEL_CLOSE, 'descFor', '',
+    { DESCRIPTIONS: table, t: trackedTranslate });
+  const resolve = (label, row) => {
+    keys = []; missing = [];
+    let description;
+    try { description = describe(label, row); }
+    catch (e) { die(2, `descFor does not evaluate for ${row.profile || 'homehub'}:${row.off}: ${e.message}`); }
+    return { description, keys: [...keys], missing: [...new Set(missing)] };
+  };
+  // Derive required native help reachability from the shipped dictionary, not a second offset/key
+  // map. This catches a removed mapping even when the same label still has generic base copy.
+  const nativeHelpKeys = Object.keys(i18n.en).filter((key) => /^a4\..*_help$/.test(key));
+  return { table, model, displayLabel, resolve, nativeHelpKeys, english: i18n.en };
 }
 
 // ── 2. the catalog labels the UI will actually be asked to render ────────────────────────────────
@@ -159,8 +191,9 @@ const ROW_OPEN_RE = /^\s*\{\s*0x[0-9A-Fa-f]+\s*,/gm;
 // The label is the last STRING in the row; an optional trailing HomeHubValueKind classifies a
 // dimensionless Int16 as number, binary flag or enum and must not stop the match. The parsed-vs-opens
 // cross-check below refuses to run if this row shape drifts again.
-const HH_ROW_RE = /\{\s*\d+\s*,\s*MbFunc::[^}]*?"((?:[^"\\]|\\.)*)"\s*(?:,\s*HomeHubValueKind::\w+\s*)?\}/g;
+const HH_ROW_RE = /\{\s*(\d+)\s*,\s*MbFunc::(\w+)\s*,\s*MbType::(\w+)\s*,\s*(\d+)\s*,\s*"((?:[^"\\]|\\.)*)"\s*,\s*"((?:[^"\\]|\\.)*)"\s*(?:,\s*HomeHubValueKind::(\w+)\s*)?\}/g;
 const HH_OPEN_RE = /^\s*\{\s*\d+\s*,\s*MbFunc::/gm;
+const HH_CATALOG_RE = /\bHomeHubReg\s+(HOMEHUB_REGS|ALTHERMA4_REGS)\s*\[\s*\]\s*=\s*\{/g;
 
 function loadLabels(dir) {
   let files;
@@ -169,6 +202,8 @@ function loadLabels(dir) {
   if (files.length === 0) die(2, `no .hpp files in ${dir} — refusing to pass vacuously`);
 
   const labels = new Map();      // label -> Set(file)
+  const legacyLabels = new Set();
+  const modbusRows = [];
   let rows = 0, skipped = 0, profiles = 0;
   for (const f of files) {
     const txt = fs.readFileSync(path.join(dir, f), 'utf8');
@@ -186,23 +221,45 @@ function loadLabels(dir) {
       die(2, `${f}: HomeHub row extraction is unreliable (${hhHits.length} parsed vs ${hhOpens} ` +
              'row starts) — the map row format changed; fix HH_ROW_RE before trusting this audit');
     }
+    const catalogs = [...txt.matchAll(HH_CATALOG_RE)];
+    if (hhOpens && catalogs.length !== 1)
+      die(2, `${f}: HomeHub rows require exactly one recognized catalog declaration`);
+    if (catalogs.length > 1) die(2, `${f}: multiple HomeHub catalogs require explicit row provenance`);
+    let native = false;
+    if (catalogs.length) {
+      const start = catalogs[0].index + catalogs[0][0].length;
+      const end = txt.indexOf('\n};', start);
+      if (end < 0) die(2, `${f}: missing closing brace for ${catalogs[0][1]}`);
+      const bodyHits = [...txt.slice(start, end).matchAll(HH_ROW_RE)];
+      if (!bodyHits.length) die(2, `${f}: empty ${catalogs[0][1]} catalog — refusing to pass vacuously`);
+      if (bodyHits.length !== hhHits.length)
+        die(2, `${f}: HomeHub rows outside ${catalogs[0][1]} have ambiguous profile provenance`);
+      const offsets = bodyHits.map((m) => Number(m[1]));
+      if (offsets.some((off) => !Number.isSafeInteger(off) || off <= 0) ||
+          new Set(offsets).size !== offsets.length) die(2, `${f}: invalid or duplicate HomeHub offsets`);
+      native = catalogs[0][1] === 'ALTHERMA4_REGS';
+    }
     if (opens > 0 || hhOpens > 0) profiles++;
     for (const m of hits) {
       rows++;
       if (m[2]) { skipped++; continue; }                       // no_publish: never reaches /values
       const lab = m[1].replace(/\\(["\\])/g, '$1');
+      legacyLabels.add(lab);
       if (!labels.has(lab)) labels.set(lab, new Set());
       labels.get(lab).add(f);
     }
     for (const m of hhHits) {
       rows++;
-      const lab = m[1].replace(/\\(["\\])/g, '$1');
+      const lab = m[6].replace(/\\(["\\])/g, '$1');
+      if (!native) legacyLabels.add(lab);
+      modbusRows.push({ label: lab, off: Number(m[1]), unit: m[5].replace(/\\(["\\])/g, '$1'),
+        ...(native ? { profile: 'altherma4' } : {}), file: f });
       if (!labels.has(lab)) labels.set(lab, new Set());
       labels.get(lab).add(f);
     }
   }
   if (rows === 0) die(2, `no catalog rows found under ${dir} — refusing to pass vacuously`);
-  return { labels, rows, skipped, profiles, files: files.length };
+  return { labels, legacyLabels, modbusRows, rows, skipped, profiles, files: files.length };
 }
 
 // ── 3. the adjudication ledger ───────────────────────────────────────────────────────────────────
@@ -222,21 +279,24 @@ function loadExceptions(file) {
     // There is no version of that which is correct-as-it-stands, so it is refused as a ledger entry
     // rather than merely discouraged in the header — a prose rule is only as strong as the next
     // person's hurry, and silencing D001 would restore the exact blind spot def/overlay.hpp hit.
-    if (line.startsWith('D001 ')) {
-      die(2, `${file}:${n + 1}: D001 cannot be adjudicated — write the missing copy in ` +
-             'main/www/js/descriptions.js DESCRIPTIONS instead');
+    if (line.startsWith('D001 ') || line.startsWith('D009 ')) {
+      die(2, `${file}:${n + 1}: ${line.slice(0, 4)} cannot be adjudicated — repair the missing ` +
+             'production description path instead');
     }
     out.set(line, n + 1);
   }
   return out;
 }
 
-const { table, model, displayLabel } = loadDescriptions(APP);
+const { table, model, displayLabel, resolve, nativeHelpKeys, english } = loadDescriptions(APP);
 const cat = loadLabels(DEF);
 const exceptions = loadExceptions(EXC);
 const usedExceptions = new Set();
 const findings = [];
 const suppressed = [];
+const coveredLabels = new Set();
+const reachedNativeHelp = new Set();
+let nativeCovered = 0, baseCovered = 0;
 // A finding's KEY is what the ledger quotes, so it must be stable against edits elsewhere in the
 // table: keyed on the LABEL / the regex SOURCE, never on the entry index, which shifts every time
 // an unrelated entry is inserted above it.
@@ -257,11 +317,41 @@ const isRegExp = (v) => Object.prototype.toString.call(v) === '[object RegExp]';
 // D001 — a published label no entry matches: the row renders plain and un-tappable.
 const firstMatch = (label) => table.findIndex((d) => isRegExp(d.re) && d.re.test(label));
 for (const [label, files] of [...cat.labels].sort((a, b) => a[0].localeCompare(b[0]))) {
+  if (!cat.legacyLabels.has(label)) continue;
   if (firstMatch(label) === -1) {
     add('D001', label, `no description matches "${label}"`,
         `carried by ${files.size} profile(s): ${[...files].sort().slice(0, 3).join(', ')}` +
         (files.size > 3 ? ', …' : ''));
+  } else coveredLabels.add(label);
+}
+
+// Every actual Modbus row is checked with its own offset/profile, including labels shared between
+// catalogs. A label set would incorrectly let another instrument's explanation cover a native hole.
+for (const row of cat.modbusRows) {
+  const native = row.profile === 'altherma4';
+  const source = native ? 'altherma4' : 'homehub';
+  const key = `${source}:${row.off}:${row.label}`;
+  const { description, keys, missing } = resolve(row.label, row);
+  if (!description || typeof description.what !== 'string' || !description.what.trim()) {
+    add('D001', key, `no description for ${source} row ${row.off} "${row.label}"`, row.file);
+  } else if (!missing.length) {
+    coveredLabels.add(row.label);
+    if (native) nativeCovered++;
+    else baseCovered++;
   }
+  for (const absent of missing)
+    add('D003', `${key}:${absent}`, `missing English I18N text "${absent}" for ${source} row ${row.off}`, row.file);
+  for (const called of keys.filter((called) => nativeHelpKeys.includes(called))) {
+    if (!native)
+      add('D008', key, `base row ${row.off} "${row.label}" uses native helper "${called}"`,
+        'descFor must retain its native profile guard');
+    else if (description?.what === english[called] && !missing.length) reachedNativeHelp.add(called);
+  }
+}
+for (const key of nativeHelpKeys) {
+  if (!reachedNativeHelp.has(key))
+    add('D009', key, `native help "${key}" is unreachable through the actual native catalog`,
+      'restore its source-qualified descFor mapping; generic coverage of the same label is insufficient');
 }
 
 // D006/D007 — catalog type legends and legacy unit suffixes belong in the VALUE column, not in the
@@ -338,20 +428,23 @@ for (const [key, line] of exceptions) {
 }
 
 // ── 5. report ────────────────────────────────────────────────────────────────────────────────────
-const covered = [...cat.labels.keys()].filter((l) => firstMatch(l) !== -1).length;
+const covered = coveredLabels.size;
+const nativeCount = cat.modbusRows.filter((row) => row.profile === 'altherma4').length;
+const baseCount = cat.modbusRows.length - nativeCount;
 // The model-card count is named even though nothing is asserted about its size: a reader must be
 // able to tell "the second table was checked and is small" from "the second table was never found".
 const summary =
   `${cat.labels.size} published labels from ${cat.profiles} catalog file(s) ` +
   `(${cat.rows} rows, ${cat.skipped} no_publish skipped) vs ${table.length} description entries` +
   (model === null ? ' (no MODEL_DESCRIPTIONS table)'
-                  : ` + ${Object.keys(model).length} model-card entries`);
+                  : ` + ${Object.keys(model).length} model-card entries`) +
+  `; ${baseCovered}/${baseCount} base rows, ${nativeCovered}/${nativeCount} native rows through descFor`;
 
 if (verbose) {
   console.log(summary);
   for (const [label, files] of [...cat.labels].sort((a, b) => a[0].localeCompare(b[0]))) {
     const i = firstMatch(label);
-    console.log(`  ${i === -1 ? 'MISS' : String(i).padStart(4)}  ${label}   (${files.size} profile(s))`);
+    console.log(`  ${i === -1 ? (coveredLabels.has(label) ? 'NATIVE' : 'MISS') : String(i).padStart(4)}  ${label}   (${files.size} profile(s))`);
   }
 }
 
@@ -372,11 +465,12 @@ for (const f of findings) {
   console.error(`          key: ${f.code} ${f.key}`);
 }
 console.error(
-  '\n  D001 = a reading users can see has no explainer (add an entry to DESCRIPTIONS in main/www/js/descriptions.js).\n' +
+  '\n  D001 = a reading users can see has no explainer (repair the production descFor/table/I18N path).\n' +
   '  D002 = an entry matches nothing any more (a renamed label left its regex behind).\n' +
   '  D003 = malformed entry.  D004 = missing/partial German copy.  D005 = stale ledger line.\n' +
   '  D006 = visible label still contains its value legend.  D007 = an unrelated label was changed.\n' +
   '  D008 = an exact semantic description is shadowed by an earlier, broader regex.\n' +
+  '  D009 = native English help is unreachable through the actual native catalog.\n' +
   '  Order matters: a new entry must sit BEFORE any more general one it should out-rank (first match wins).\n' +
   `  A finding that is CORRECT as it stands goes in ${EXC} — copy its key: line, with a reason.`);
 process.exit(1);

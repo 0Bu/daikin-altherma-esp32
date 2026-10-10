@@ -133,17 +133,26 @@ inline constexpr size_t HOMEHUB_HISTORY_COUNT =
 // depending on the detected gateway) decode every history register exactly as the columns above
 // say? Templated on the register type so logic/ names no def/ type; a row needs `.offset`,
 // `.space`, `.type`, `.scale` and `.unit`. A history register absent from the table fails too.
-template <typename Reg> constexpr bool homehub_history_decode_matches(const Reg* regs, int count) {
+template <typename Reg>
+constexpr bool homehub_history_row_matches(const HomeHubHistory& h, const Reg& r,
+                                           bool quiet_activity = true) {
+    return !(h.offset == 9 && !quiet_activity) && r.offset == h.offset &&
+           r.space == h.decode.space && r.type == h.decode.type && r.scale == h.decode.scale &&
+           trend_cstr_eq(r.unit, h.decode.unit);
+}
+
+template <typename Reg>
+constexpr bool homehub_history_decode_matches(const Reg* regs, int count,
+                                              bool quiet_activity = true) {
     for (const auto& h : HOMEHUB_HISTORIES) {
+        if (h.offset == 9 && !quiet_activity) continue;
         const Reg* r = nullptr;
         for (int i = 0; i < count; i++)
             if (regs[i].offset == h.offset) {
                 r = &regs[i];
                 break;
             }
-        if (!r || r->space != h.decode.space || r->type != h.decode.type ||
-            r->scale != h.decode.scale || !trend_cstr_eq(r->unit, h.decode.unit))
-            return false;
+        if (!r || !homehub_history_row_matches(h, *r, quiet_activity)) return false;
     }
     return true;
 }
@@ -166,7 +175,8 @@ inline constexpr int homehub_history_index(const char* trend_id) {
 
 // History id carried by a HomeHub value row. Unlike `homehub_concept_for`, this includes honest
 // Modbus-only timelines and therefore must never be used to pair or substitute an X10A value.
-inline const char* homehub_history_for(uint16_t offset) {
+inline const char* homehub_history_for(uint16_t offset, bool quiet_activity = true) {
+    if (offset == 9 && !quiet_activity) return nullptr;
     for (const auto& h : HOMEHUB_HISTORIES)
         if (h.offset == offset) return h.trend_id;
     return nullptr;
@@ -216,7 +226,8 @@ inline constexpr size_t ALTHERMA4_CONCEPT_COUNT =
 
 
 // The concept a HomeHub register carries, or nullptr when it has no X10A counterpart.
-inline const char* homehub_concept_for(uint16_t offset) {
+inline const char* homehub_concept_for(uint16_t offset, bool quiet_activity = true) {
+    if (offset == 9 && !quiet_activity) return nullptr;
     for (const auto& c : HOMEHUB_CONCEPTS)
         if (c.offset == offset) return c.concept_id;
     for (const auto& a : ALTHERMA4_CONCEPTS)

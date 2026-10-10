@@ -21,6 +21,7 @@
 #include <cstdio>
 #include <cstring>
 #include "../logic/modbus.hpp"
+#include "../logic/modbus_catalog.hpp"
 
 namespace daik::def {
 
@@ -44,6 +45,10 @@ enum class HomeHubValueKind : uint8_t {
     CurrentOperationMode, // input 38: 1 Heating, 2 Cooling (there is no Auto value)
     ThreeWayValve,     // 0 Space heating, 1 DHW
     SmartGridMode,     // 0 Free running, 1 Forced off, 2 Recommended on, 3 Forced on
+    Altherma4CurrentOperationMode, // 0 None, 1 Heating, 2 Cooling
+    Altherma4DemandResponse,       // 0 Free, 1 Forced off, 2 Forced on, 3 Recommended on, 4 Reduced
+    Altherma4UnitOperationMode,    // 0 Stop, 1 Tank heat up, 2 Heating, 3 Cooling, 4 Actuator
+    Altherma4QuietSelection,       // 0 Off, 1 Automatic, 2 Manual; not current activity
 };
 
 // One HomeHub register: the 1-based data-model offset, the Modbus space (FC04 input / FC03 holding),
@@ -145,6 +150,7 @@ inline constexpr HomeHubReg HOMEHUB_REGS[] = {
     {58, MbFunc::ReadHolding, MbType::Pow16, 1, "kW", "General power limit"},
 };
 inline constexpr int HOMEHUB_REG_COUNT = sizeof(HOMEHUB_REGS) / sizeof(HOMEHUB_REGS[0]);
+static_assert(logic::modbus_offsets_unique(HOMEHUB_REGS), "HomeHub public offsets must be unique");
 
 inline constexpr bool homehub_is_binary(const HomeHubReg& r) {
     return r.kind == HomeHubValueKind::Binary;
@@ -153,7 +159,11 @@ inline constexpr bool homehub_is_binary(const HomeHubReg& r) {
 inline constexpr bool homehub_is_enum(HomeHubValueKind kind) {
     return kind == HomeHubValueKind::UnitAbnormality || kind == HomeHubValueKind::OperationMode ||
            kind == HomeHubValueKind::CurrentOperationMode ||
-           kind == HomeHubValueKind::ThreeWayValve || kind == HomeHubValueKind::SmartGridMode;
+           kind == HomeHubValueKind::ThreeWayValve || kind == HomeHubValueKind::SmartGridMode ||
+           kind == HomeHubValueKind::Altherma4CurrentOperationMode ||
+           kind == HomeHubValueKind::Altherma4DemandResponse ||
+           kind == HomeHubValueKind::Altherma4UnitOperationMode ||
+           kind == HomeHubValueKind::Altherma4QuietSelection;
 }
 
 // JSON/HA wire type is a property of the register definition, never of the formatted value. Only
@@ -179,6 +189,10 @@ inline constexpr const char* homehub_enum_id(HomeHubValueKind kind) {
         case HomeHubValueKind::CurrentOperationMode: return "current_operation_mode";
         case HomeHubValueKind::ThreeWayValve:   return "three_way_valve";
         case HomeHubValueKind::SmartGridMode:   return "smart_grid_mode";
+        case HomeHubValueKind::Altherma4CurrentOperationMode: return "altherma4_current_operation_mode";
+        case HomeHubValueKind::Altherma4DemandResponse: return "altherma4_demand_response";
+        case HomeHubValueKind::Altherma4UnitOperationMode: return "altherma4_unit_operation_mode";
+        case HomeHubValueKind::Altherma4QuietSelection: return "altherma4_quiet_selection";
         default: return nullptr;
     }
 }

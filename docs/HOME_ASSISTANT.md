@@ -97,7 +97,11 @@ Assistant itself maps to *unknown*, for sensors and binary sensors alike. A subs
 
 When the HomeHub stack is enabled, its available register values are published independently as a
 flat retained object on `<base>/modbus`; a disconnected HomeHub produces `{}` and disabling the
-source removes that data topic. The saved target intent, not a retiring poll task's lagging status,
+source removes that data topic. Native Altherma 4 keys follow its own defining row: holding 58 is
+`imposed_power_limit`, holding 54 is `weather_dependent_main_heating_offset`, and unlisted holding 57
+is absent. These replace the older inherited keys when the complete retained object is published;
+they do not add Home Assistant entities. Altherma 4 physical acceptance remains pending as described
+in [the protocol guide](MODBUS_PROTOCOL.md#deferred-physical-acceptance). The saved target intent, not a retiring poll task's lagging status,
 decides whether it may publish. A cleanup attempt suppresses the source for that entire MQTT cycle,
 so the tombstone cannot be followed immediately by stale `{}`; an enabled A-to-B cutover may publish
 the new source's empty pre-first-sample state on the following cycle. Weather and ENV III cleanup use
@@ -131,9 +135,11 @@ its block name as a prefix (`wifi_connected`, `wifi_rssi`, `wifi_mac`, `wifi_bss
 associated AP's BSSID ride the `wifi_` set, so a heartbeat can be pinned to a specific board and the AP
 it roamed onto.
 
-Three fields count the one-second publish/poll cycles that produced **nothing**, each its own
-`total_increasing` diagnostic entity: `mqtt_skipped` (the publish cycle threw `std::bad_alloc` under
-heap pressure and the reading was lost), `mqtt_quiesced` (the publisher stood aside deliberately
+Three fields count interrupted or deliberately skipped one-second publish/poll cycles, each its own
+`total_increasing` diagnostic entity: `mqtt_skipped` (the publish cycle threw `std::bad_alloc` because
+an allocation failed or the flat Modbus payload exceeded its 4 KiB bound; earlier topics may already
+have been published),
+`mqtt_quiesced` (the publisher stood aside deliberately
 while an OTA or weather TLS operation owned the heap) and `poll_skipped` (the X10A sweep never ran,
 so the value was
 never read at all). They are worth an automation: `mqtt_skipped` rising outside an update window

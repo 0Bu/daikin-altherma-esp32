@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
+import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { launchBrowser } from "../tools/browser/cdp_browser.mjs";
 import { startFixtureServer } from "../tools/browser/fixture_server.mjs";
@@ -41,7 +42,9 @@ const layoutAudit = `(() => {
   const clipped = [];
   const candidates = document.querySelectorAll(
     "button, [role=button], [role=dialog], .field-label, .field-help, .hint, .section-label, " +
-    ".hdr-title, .hdr-name, .conn-label, .conn-value, .vrow-label, .vrow-val, .ota-alert-message"
+    ".hdr-title, .hdr-name, .conn-label, .conn-value, .vrow-label, .vrow-val, .ota-alert-message, " +
+    "#valueGroups .vitem.open .vdesc-inner, #valueGroups .vitem.open .vdesc-body, " +
+    "#valueGroups .vitem.open .vdesc-p"
   );
   for (const el of candidates) {
     if (!shown(el)) continue;
@@ -285,6 +288,280 @@ async function activateLocale(page, locale) {
   await page.frame();
 }
 
+// Native A4 metadata belongs to each cached /values row. Use the actual Modbus card/accordions,
+// including the exact numeric enums, rather than a second renderer or an X10A fallback fixture.
+const nativeAltherma4Rows = Object.freeze([
+  { off: 9, label: "Quiet mode selection", value: 1, unit: "", enum: "altherma4_quiet_selection",
+    labelKey: "a4.quiet_selection", valueKey: "enum.automatic", helpKey: "a4.quiet_help" },
+  { off: 38, label: "Current operation mode", value: 0, unit: "", enum: "altherma4_current_operation_mode",
+    valueKey: "enum.none", helpKey: "a4.current_help" },
+  { off: 49, label: "Flow rate", value: 2.6, unit: "L/min", helpKey: "a4.flow_help" },
+  { off: 54, label: "Weather-dependent Main Heating offset", value: -3, unit: "K",
+    labelKey: "a4.heating_offset", helpKey: "a4.heating_offset_help" },
+  { off: 58, label: "Imposed power limit", value: 6, unit: "kW",
+    labelKey: "a4.imposed_power_limit", helpKey: "a4.limit_help" },
+  { off: 65, label: "Demand response mode", value: 2, unit: "", enum: "altherma4_demand_response",
+    labelKey: "a4.demand_response", valueKey: "enum.forced_on", helpKey: "a4.demand_help" },
+  { off: 68, label: "Circulation pump speed", value: 45, unit: "%", helpKey: "a4.pump_help" },
+  { off: 74, label: "Leaving water temperature pre-PHE outdoor", value: 7.3, unit: "°C",
+    labelKey: "a4.pre_phe_outdoor", helpKey: "a4.pre_phe_outdoor_help" },
+  { off: 79, label: "Water pressure", value: 2, unit: "bar", helpKey: "a4.pressure_help" },
+  { off: 80, label: "Space heating/cooling target Main zone", value: 28, unit: "°C",
+    labelKey: "a4.main_target" },
+  { off: 83, label: "Unit operation mode", value: 4, unit: "", enum: "altherma4_unit_operation_mode",
+    labelKey: "a4.unit_operation", valueKey: "enum.actuator", helpKey: "a4.operation_help" },
+]);
+
+// Exercise the delegated pointer lifecycle, including the disclosure animation.
+async function clickDisclosure(page, selector) {
+  const point = await page.evaluate(`(() => {
+    const button = document.querySelector(${JSON.stringify(selector)});
+    button.scrollIntoView({ block: "center" });
+    const rect = button.getBoundingClientRect();
+    return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+  })()`);
+  await page.send("Input.dispatchMouseEvent", { type: "mouseMoved", ...point });
+  await page.send("Input.dispatchMouseEvent",
+    { type: "mousePressed", button: "left", clickCount: 1, ...point });
+  await page.send("Input.dispatchMouseEvent",
+    { type: "mouseReleased", button: "left", clickCount: 1, ...point });
+  await page.waitFor(`(() => {
+    const button = document.querySelector(${JSON.stringify(selector)});
+    const item = button?.closest(".vitem");
+    return button?.getAttribute("aria-expanded") === "true" && item.classList.contains("open") &&
+      item.getAnimations({ subtree: true }).every((animation) => animation.playState !== "running");
+  })()`);
+}
+
+async function captureNativeEvidence(page, context, target = "valueGroups") {
+  const directory = process.env.DAIKIN_BROWSER_EVIDENCE_DIR;
+  if (!directory || !/^(desktop\/en|phone\/de)(\/|$)/.test(context)) return;
+  assert.ok(path.isAbsolute(directory), "browser evidence directory must be absolute");
+  fs.mkdirSync(directory, { recursive: true });
+  const clip = await page.evaluate(`(() => {
+    const rect = document.getElementById(${JSON.stringify(target)}).getBoundingClientRect();
+    return { x: rect.left + scrollX, y: rect.top + scrollY,
+      width: rect.width, height: rect.height, scale: 1 };
+  })()`);
+  const capture = await page.send("Page.captureScreenshot",
+    { format: "png", captureBeyondViewport: true, clip });
+  fs.writeFileSync(path.join(directory, `${context.replaceAll("/", "-")}.png`),
+    Buffer.from(capture.data, "base64"));
+}
+
+async function assertNativeAltherma4(page, context) {
+  try {
+    await page.evaluate(`(() => {
+      window.__browserNativeAltherma4Original = { ...S };
+      S.status = structuredClone(S.status);
+      S.status.hp.connected = false;
+      S.status.diagnostics.enabled = false;
+      S.status.modbus = { ...S.status.modbus, host: "native-altherma4.fixture.invalid",
+        enabled: true, connected: true, profile: "altherma4" };
+      // This fixture isolates native help and quiet-state truth with history disabled. Flow,
+      // temperatures and power can offer real trends; their API/history contract is tested separately.
+      S.status.history = { rows: [], modbus_rows: [], env3_rows: [] };
+      S._values = [];
+      S._modbus = ${JSON.stringify(nativeAltherma4Rows)}.map(
+        ({ labelKey, valueKey, helpKey, ...row }) => ({ ...row, profile: "altherma4" }));
+      S.descOpen = new Set();
+      S.hist = new Map();
+      S.histPin = new Map();
+      S.histBusy = new Set();
+      S.histRequests = new Map();
+      S.insp = null;
+      S.inspSig = null;
+      S.inspHistSig = null;
+      S.scrub = null;
+      S.clickHold = false;
+      renderApp();
+      return true;
+    })()`);
+    await page.frame();
+    assert.equal(await page.evaluate("document.querySelectorAll('#valueGroups .vrow').length"),
+      nativeAltherma4Rows.length, `${context}: every native Modbus row must be visible with X10A down`);
+    assert.deepEqual(await page.evaluate(`(() => ({
+      x10aDown: x10aDown(),
+      quiet: S.live?.quiet,
+      active: document.getElementById("schem").classList.contains("quiet-on"),
+      namedUnknown: document.getElementById("gQuietState").getAttribute("aria-label").endsWith(": —"),
+      quietHistory: hasModbusHist("quiet_state"),
+      selectionMetadata: S._modbus.find((row) => row.off === 9),
+    }))()`), {
+      x10aDown: true, quiet: null, active: false, namedUnknown: true, quietHistory: false,
+      selectionMetadata: { off: 9, label: "Quiet mode selection", value: 1, unit: "",
+        enum: "altherma4_quiet_selection", profile: "altherma4" },
+    }, `${context}: quiet selection must not invent binary activity, a lit pill or a history source`);
+
+    for (const row of nativeAltherma4Rows) {
+      const selector = `#valueGroups button[data-desc=${JSON.stringify(row.label)}]`;
+      const reading = await page.evaluate(`(() => {
+        const button = document.querySelector(${JSON.stringify(selector)});
+        const source = S._modbus.find((row) => row.off === ${row.off});
+        const spec = ${JSON.stringify(row)};
+        const copy = descFor(source.label, source);
+        const translated = copy && descriptionCopy(copy);
+        const expectedHelp = spec.helpKey ? t(spec.helpKey)
+          : translated ? translated[0] : LANG === "de" && copy?.de ? copy.de.what : copy?.what;
+        return {
+          found: !!button,
+          label: button?.querySelector(".vrow-label")?.textContent,
+          expectedLabel: spec.labelKey ? t(spec.labelKey) : displayHomeHubLabel(source),
+          value: button?.querySelector(".vrow-val")?.childNodes[0]?.textContent,
+          expectedValue: spec.valueKey ? t(spec.valueKey) : String(spec.value),
+          unit: button?.querySelector(".vrow-unit")?.textContent || "",
+          expectedHelp,
+          activeCopy: [spec.labelKey, spec.valueKey, spec.helpKey].filter(Boolean)
+            .every((key) => typeof I18N[LANG][key] === "string" && I18N[LANG][key].trim()),
+          closed: button?.getAttribute("aria-expanded") === "false",
+          trend: button?.getAttribute("data-trend") || "",
+        };
+      })()`);
+      assert.equal(reading.found, true, `${context}/${row.off}: production accordion must exist`);
+      assert.equal(reading.activeCopy, true, `${context}/${row.off}: active locale must supply every native key`);
+      for (const field of ["expectedLabel", "expectedValue", "expectedHelp"]) {
+        assert.ok(typeof reading[field] === "string" && reading[field].trim(),
+          `${context}/${row.off}: ${field} requires active-locale copy`);
+        assert.doesNotMatch(reading[field], /^(?:a4\.|enum\.)/,
+          `${context}/${row.off}: untranslated keys must never appear`);
+      }
+      assert.equal(reading.label, reading.expectedLabel, `${context}/${row.off}: localized native label`);
+      assert.equal(reading.value, reading.expectedValue, `${context}/${row.off}: exact numeric/enum display`);
+      assert.equal(reading.unit, row.unit || "", `${context}/${row.off}: native unit must survive rendering`);
+      assert.equal(reading.closed, true, `${context}/${row.off}: fixture must start collapsed`);
+      assert.equal(reading.trend, "", `${context}/${row.off}: no unadvertised trend may be attached`);
+
+      await clickDisclosure(page, selector);
+      assert.deepEqual(await page.evaluate(`(() => {
+        const button = document.querySelector(${JSON.stringify(selector)});
+        const item = button.closest(".vitem");
+        return { remembered: S.descOpen.has(${JSON.stringify(row.label)}),
+          help: item.querySelector(".vdesc-body .vdesc-p")?.innerText,
+          visibleHelp: item.querySelector(".vdesc-body").getBoundingClientRect().height > 0,
+          charts: item.querySelectorAll(".vhist, [data-hist]").length };
+      })()`), { remembered: true, help: reading.expectedHelp, visibleHelp: true, charts: 0 },
+      `${context}/${row.off}: pointer click must expose complete localized help without a fabricated trend`);
+      assertLayout(await page.evaluate(layoutAudit), `${context}/${row.off}/open`);
+    }
+    await assertAccessibility(page, `${context}/all-open`, { nativeTree: true });
+    assert.deepEqual(page.diagnostics, [], `${context}: native rendering and real clicks must emit no errors`);
+    // Optional local evidence from the real page after every native disclosure was pointer-opened.
+    // Capture just the values card, including its off-screen height, without creating CI artifacts.
+    await captureNativeEvidence(page, `${context}/standalone`);
+    // The same limits must survive both a live second opinion and a native stand-in under an
+    // existing X10A row. The standalone card alone cannot establish those production routes.
+    for (const connected of [true, false]) {
+      await page.waitFor("!S.clickHold");
+      await page.evaluate(`(() => {
+        S.status.hp.connected = ${connected};
+        S._values = [
+          { label: "Flow sensor", value: "2.5", unit: "L/min", reg: 0x61, concept: "flow" },
+          { label: "Water Pressure", value: "2.5", unit: "bar", reg: 0x61, concept: "water_pressure" },
+        ];
+        S._modbus = ${JSON.stringify(nativeAltherma4Rows.filter(r => [49, 79].includes(r.off)))}
+          .map(({ labelKey, valueKey, helpKey, ...row }) => ({ ...row, profile: "altherma4",
+            concept: row.off === 49 ? "flow" : "water_pressure" }));
+        S.descOpen = new Set();
+        renderApp();
+      })()`);
+      for (const [off, label, key, nativeValue] of [
+        [49, "Flow sensor", "a4.flow_help", "2.6"],
+        [79, "Water Pressure", "a4.pressure_help", "2"],
+      ]) {
+        const selector = `#valueGroups button[data-desc=${JSON.stringify(label)}]`;
+        await clickDisclosure(page, selector);
+        assert.deepEqual(await page.evaluate(`(() => {
+          const button = document.querySelector(${JSON.stringify(selector)});
+          const item = button.closest(".vitem");
+          const text = Array.from(item.querySelectorAll(".vdesc-p"), e => e.innerText);
+          return { help: text.includes(t(${JSON.stringify(key)})),
+            value: button.querySelector(".vrow-val").childNodes[0].textContent,
+            comparisons: item.querySelectorAll(".mb-line").length,
+            deltas: item.querySelectorAll(".mb-delta").length };
+        })()`), { help: true, value: connected ? "2.5" : nativeValue,
+          comparisons: connected ? 1 : 0, deltas: 0 },
+        `${context}/${off}/${connected ? "paired" : "stand-in"}: native limit stays visible without an unverified difference`);
+        assertLayout(await page.evaluate(layoutAudit), `${context}/${off}/paired-limit`);
+      }
+      await assertAccessibility(page, `${context}/paired-limit/${connected}`, { nativeTree: true });
+      assert.deepEqual(page.diagnostics, [], `${context}: paired limits must emit no browser errors`);
+      await captureNativeEvidence(page, `${context}/${connected ? "paired" : "replacement"}`);
+      for (const [target, key, nativeValue] of [
+        ["flow", "a4.flow_help", "2.6"], ["wp", "a4.pressure_help", "2"],
+      ]) {
+        await page.waitFor("!S.clickHold");
+        await page.evaluate("S.insp = null; renderInspect(); true");
+        // Closing the preceding panel can clamp the document's scroll position on desktop.
+        // Wait for its real collapse before measuring the next pointer target.
+        await page.waitFor(`!document.getElementById("inspect").classList.contains("open") &&
+          document.getElementById("inspect").getAnimations({subtree: true})
+            .every(a => a.playState !== "running")`);
+        const selector = `#schem [data-insp=${JSON.stringify(target)}]`;
+        await page.evaluate(`document.querySelector(${JSON.stringify(selector)})
+          .scrollIntoView({block: "center", behavior: "instant"}); true`);
+        await page.frame();
+        const point = await page.evaluate(`(() => {
+          const hit = document.querySelector(${JSON.stringify(selector)});
+          const rect = hit.getBoundingClientRect();
+          const point = {x: rect.left + rect.width / 2, y: rect.top + rect.height / 2};
+          return {...point, target: document.elementFromPoint(point.x, point.y)
+            ?.closest("[data-insp]")?.dataset.insp};
+        })()`);
+        assert.equal(point.target, target, `${context}/${target}: settled pointer must reach the actual hit target`);
+        const {x, y} = point;
+        await page.send("Input.dispatchMouseEvent", {type: "mouseMoved", x, y});
+        await page.send("Input.dispatchMouseEvent",
+          {type: "mousePressed", button: "left", clickCount: 1, x, y});
+        await page.send("Input.dispatchMouseEvent",
+          {type: "mouseReleased", button: "left", clickCount: 1, x, y});
+        try {
+          await page.waitFor(`S.insp === ${JSON.stringify(target)} &&
+            document.getElementById("inspect").classList.contains("open") &&
+            document.getElementById("inspect").getAnimations({subtree: true})
+              .every(a => a.playState !== "running")`);
+        } catch (error) {
+          console.error(context, target, connected, await page.evaluate(`({
+            target: S.insp, open: document.getElementById("inspect").className,
+            animations: document.getElementById("inspect").getAnimations({subtree: true})
+              .map(a => ({state: a.playState, name: a.animationName,
+                target: a.effect.target.id || a.effect.target.className,
+                iterations: a.effect.getTiming().iterations})),
+          })`));
+          throw error;
+        }
+        assert.deepEqual(await page.evaluate(`(() => ({
+          help: document.getElementById(${JSON.stringify(connected ? "inspRows" : "inspBody")})
+            .innerText.includes(t(${JSON.stringify(key)})),
+          headline: document.getElementById("inspNow").innerText.split(" ")[0],
+          deltas: document.getElementById("inspRows").querySelectorAll(".mb-delta").length,
+        }))()`), {help: true, headline: connected ? "2.5" : nativeValue, deltas: 0},
+        `${context}/${target}/${connected}: real inspector click retains the native limit`);
+        assertLayout(await page.evaluate(layoutAudit), `${context}/${target}/native-inspector`);
+        await captureNativeEvidence(page,
+          `${context}/inspector-${target}-${connected ? "paired" : "replacement"}`, "inspect");
+      }
+    }
+  } finally {
+    // The last real click holds per-poll rebuilds briefly. Restore only after that production lease
+    // releases, so the next fixture cannot be rendered against stale native-card markup.
+    await page.waitFor("!S.clickHold");
+    assert.equal(await page.evaluate(`(() => {
+      const original = window.__browserNativeAltherma4Original;
+      Object.assign(S, original);
+      // Rendering caches describe DOM left by the fixture, not the restored logical state.
+      S.inspSig = null;
+      S.inspHistSig = null;
+      renderApp();
+      window.scrollTo(0, 0);
+      delete window.__browserNativeAltherma4Original;
+      return S.status === original.status && S._values === original._values &&
+        S._modbus === original._modbus && S.descOpen === original.descOpen &&
+        document.getElementById("inspect").classList.contains("open") === !!INSPECT[S.insp];
+    })()`), true, `${context}: original status, values, disclosure and inspector DOM state must be restored`);
+    await page.frame();
+  }
+}
+
 const server = await startFixtureServer({ pageFile, projectRoot: ROOT });
 const browser = await launchBrowser();
 try {
@@ -299,6 +576,16 @@ try {
     throw new Error(`${error.message}; state=${JSON.stringify(state)}; diagnostics=${page.diagnostics.join(" | ")}`);
   }
   await page.evaluate("pollStop(); true");
+
+  assert.deepEqual(await page.evaluate(`(async () => {
+    const response = await fetch('/favicon.ico');
+    const decoded = await response.arrayBuffer();
+    const digest = await crypto.subtle.digest('SHA-256', decoded);
+    return { type: response.headers.get('Content-Type'), encoding: response.headers.get('Content-Encoding'),
+      sha256: Array.from(new Uint8Array(digest), b => b.toString(16).padStart(2, '0')).join('') };
+  })()`), { type: "image/vnd.microsoft.icon", encoding: "gzip",
+    sha256: createHash("sha256").update(fs.readFileSync(path.join(ROOT, "main/www/favicon.ico"))).digest("hex") },
+  "the real browser must decode the gzip favicon to every original ICO byte");
 
   const browserLocales = await page.evaluate("Array.from(UI_LANGS)");
   const fileLocales = fs.readdirSync(path.join(ROOT, "main/www/locales"))
@@ -425,6 +712,7 @@ try {
   const routedKeyboardBudget = viewports.length * routedModalIds.length;
   let routedKeyboardOpens = 0;
   let isolatedKeyboardOpens = 0;
+  let nativeAltherma4Checks = 0;
   for (const viewport of viewports) {
     // The mutation seeds one complete locale's route budget, then exercises this same assertion on
     // the first extra route. It proves the boundary without running a deliberately flooded modal
@@ -438,6 +726,8 @@ try {
       await page.frame();
       assertLayout(await page.evaluate(layoutAudit), `${viewport.name}/${locale}/dashboard`);
       await assertAccessibility(page, `${viewport.name}/${locale}/dashboard`, { nativeTree: true });
+      await assertNativeAltherma4(page, `${viewport.name}/${locale}/native-altherma4`);
+      nativeAltherma4Checks++;
 
       // Firmware errors are intentionally preserved verbatim because they carry the safe next step.
       // Unlike compact progress labels, they can be a sentence. Exercise the production failure
@@ -599,10 +889,13 @@ try {
   assert.equal(isolatedKeyboardOpens,
     viewports.length * (browserLocales.length - 1) * routedModalIds.length,
     "every remaining locale requires the route-isolated keyboard/modal lifecycle");
+  assert.equal(nativeAltherma4Checks, viewports.length * browserLocales.length,
+    "native Altherma 4 must render and open its rows in every shipped locale and viewport");
 
   assert.deepEqual(page.diagnostics, [], "real page must emit no console errors or uncaught exceptions");
   console.log(`browser render gate passed: ${browser.product}; ${browserLocales.length} locales; ` +
     `${viewports.length} viewports; native AX + keyboard on dashboard/settings/all routed modals; ` +
+    "native Altherma 4 numeric metadata + localized pointer-opened accordions; " +
     "bounded real History roundtrips; reduced motion on dashboard/settings/WiFi/progress/disclosures");
   }
 } finally {
