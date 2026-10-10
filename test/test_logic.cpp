@@ -130,6 +130,15 @@ static int g_failures = 0;
 
 static bool approx(double a, double b) { return std::fabs(a - b) < 1e-6; }
 
+// A value the compiler cannot see through. Clang folds a call to a constexpr function on literal
+// arguments inside a CHECK at compile time, so the coverage instrumentation never sees its
+// branches and a rule's edge cases would be asserted without the rule ever running; routing the
+// arguments through here makes the call a real one.
+template <typename T> static T rt(T v) {
+    volatile T x = v;
+    return x;
+}
+
 using namespace daik;
 
 static void test_http_cache() {
@@ -13830,9 +13839,9 @@ static void test_checkup() {
         CHECK(dhw_loss_progress(settle_adopted, 0).candidate_observed_s == 0);
 
         // THE UPTIME BEFORE THE ADOPTION IS UNOBSERVED TOO. The checkpoint was taken at the old
-        // boot's esp_restart() and the adoption runs in checkup_start(), behind app_main's network
-        // wait, so `now_us` at adoption is how long this boot has run with nobody watching the
-        // tank. The constant covers the downtime only; the uptime is booked on top, as elapsed AND
+        // boot's esp_restart(); current-source confirmation later applies the held compatible
+        // candidate. Thus `now_us` at adoption includes this boot's unobserved startup time.
+        // The constant covers the downtime only; the uptime is booked on top, as elapsed AND
         // blind, on the segment, the draw anchor and the blind budget alike.
         CHECK(carry.segment_blind_s == 0 && carry.blind_run_s == 0);
         CHECK((carry.flags & DHW_LOSS_CARRY_SEGMENT) && (carry.flags & DHW_LOSS_CARRY_DRAW));
@@ -17245,7 +17254,9 @@ static void test_state_dwell() {
 // ── logic/checkup_persist.hpp ───────────────────────────────────────────────────────────────────
 // The checkup's window is the part of this firmware that tolerates a reboot WORST: the window is
 // 24 h and the requirements are hours long, so losing it loses the verdict rather than a few
-// samples. These pin what may be re-adopted and, more importantly, what may not.
+// samples. These pin the retained RAM-integrity predicate and scoped journal admission.
+// Current startup retires completed RAM hours regardless of internal Accept; selected compatible
+// journal intervals alone establish restored completed-hour evidence and public Flash provenance.
 static void test_checkup_persist() {
     using namespace logic;
 
@@ -17274,9 +17285,9 @@ static void test_checkup_persist() {
                                   CHECKUP_PERSIST_VERSION, fp, fp, crc,
                                   crc ^ 1u) == CheckupRestore::BadCrc);
 
-    // A PANIC is the boot whose preceding hours matter most, so it must adopt; a BROWNOUT must not,
-    // because the supply dipped and the contents are not proven — refused rather than left to the
-    // CRC, exactly as the trends refuse it.
+    // A PANIC permits intact retained bytes to pass this integrity predicate; it does not adopt
+    // completed hours. A BROWNOUT refuses integrity because the supply dipped and RAM retention
+    // is unproven, rather than relying on CRC alone, as with trend integrity.
     CHECK(checkup_restore_verdict(static_cast<uint32_t>(CrashReason::PANIC), CHECKUP_PERSIST_MAGIC,
                                   CHECKUP_PERSIST_VERSION, fp, fp, crc,
                                   crc) == CheckupRestore::Accept);
@@ -17306,7 +17317,8 @@ static void test_checkup_persist() {
                                   /*safe_mode=*/false, /*diagnostics_enabled=*/true, 4,
                                   5) == CheckupRestore::DiagnosticsChanged);
 
-    // Every verdict says something distinct on /diag and /status.health.persist.
+    // Predicate slugs remain distinct. Internal Accept is routed to FlashPending at startup;
+    // Fresh or Flash later describes actual journal selection, independent of this predicate.
     CHECK(std::string(checkup_restore_slug(CheckupRestore::Accept)) == "accept");
     CHECK(std::string(checkup_restore_slug(CheckupRestore::WrongLayout)) == "wrong_layout");
     CHECK(std::string(checkup_restore_slug(CheckupRestore::ModelChanged)) == "model_changed");
@@ -17315,6 +17327,72 @@ static void test_checkup_persist() {
           "diagnostics_disabled");
     CHECK(std::string(checkup_restore_slug(CheckupRestore::DiagnosticsChanged)) ==
           "diagnostics_changed");
+
+    // ── HIST-03/b: a window that never ages ──────────────────────────────────────────────────────
+    // Legacy regression: the former RAM-adoption algorithm aged only after a full monotonic hour.
+    // Repeated shorter boots could keep the same sealed window indefinitely. Its sealed counter
+    // refused the adoption following a boot that completed no hour. Retain the integrity-predicate
+    // controls below; current startup retires every completed RAM hour and restores only dated
+    // flash.
+    CHECK(CHECKUP_PERSIST_VERSION == 4); // v2 images carry no counter and are refused as a whole
+    CHECK(checkup_restore_verdict(static_cast<uint32_t>(CrashReason::SW), CHECKUP_PERSIST_MAGIC, 2,
+                                  fp, fp, crc, crc) == CheckupRestore::WrongVersion);
+    auto cverdict = [&](uint32_t crc_actual, uint32_t stored_gen, uint32_t boots, bool safe = false,
+                        bool diag = true) {
+        return checkup_restore_verdict(static_cast<uint32_t>(CrashReason::SW),
+                                       CHECKUP_PERSIST_MAGIC, CHECKUP_PERSIST_VERSION, fp, fp, crc,
+                                       crc_actual, safe, diag, stored_gen, 4, boots);
+    };
+    CHECK(cverdict(crc, 4, 0) == CheckupRestore::Accept);
+    CHECK(cverdict(crc, 4, 1) == CheckupRestore::NotCommitted);
+    CHECK(cverdict(crc, 4, 65535) == CheckupRestore::NotCommitted);
+    // The counter is read from the seal, so a record that failed its checks is judged by those:
+    // bad_crc beats not_committed, and a consent change (the user's own act, the more explanatory
+    // reason) beats it too.
+    CHECK(cverdict(crc ^ 1u, 4, 1) == CheckupRestore::BadCrc);
+    CHECK(cverdict(crc, 5, 1) == CheckupRestore::DiagnosticsChanged);
+    CHECK(cverdict(crc, 4, 1, /*safe=*/true) == CheckupRestore::SafeMode);
+    CHECK(cverdict(crc, 4, 1, false, /*diag=*/false) == CheckupRestore::DiagnosticsDisabled);
+    CHECK(std::string(checkup_restore_slug(CheckupRestore::NotCommitted)) == "not_committed");
+    // HIST-03/d: "accept" is an internal RAM-integrity verdict, not completed-hour adoption.
+    // Actual selected journal intervals establish the separate "flash" provenance.
+    CHECK(std::string(checkup_restore_slug(CheckupRestore::Flash)) == "flash");
+    CHECK(std::string(checkup_restore_slug(CheckupRestore::Flash)) !=
+          checkup_restore_slug(CheckupRestore::Accept));
+    // Historical simulation: 48 resets each 50 minutes apart compare unguarded RAM re-adoption
+    // with the former counter guard. This isolates the retained integrity predicate; it does not
+    // simulate current startup or journal selection. Current startup retires completed RAM hours.
+    {
+        for (int guarded = 0; guarded <= 1; ++guarded) {
+            uint32_t      boots   = 0;
+            int           adopted = 0, refused = 0;
+            int64_t       wall = 0, aged_to = 0, worst_unaged_s = 0;
+            const int64_t kLifeS = 50 * 60;
+            for (int i = 0; i < 48; ++i) {
+                const CheckupRestore v =
+                    checkup_restore_verdict(static_cast<uint32_t>(CrashReason::SW),
+                                            CHECKUP_PERSIST_MAGIC, CHECKUP_PERSIST_VERSION, fp, fp,
+                                            crc, crc, false, true, 4, 4, guarded ? boots : 0);
+                if (v == CheckupRestore::Accept) {
+                    adopted++;
+                    boots = guarded ? history_counter_next(boots) : 0;
+                    if (wall - aged_to > worst_unaged_s) worst_unaged_s = wall - aged_to;
+                } else {
+                    refused++;
+                    boots   = 0;
+                    aged_to = wall; // historical simulation assumes absolute-age reconstruction
+                }
+                wall += kLifeS; // the boot lives 50 min and completes no hour
+            }
+            if (guarded == 0) {
+                CHECK(adopted == 48 && refused == 0);
+                CHECK(worst_unaged_s > 39 * 3600); // the window was frozen for the whole run
+            } else {
+                CHECK(adopted == 24 && refused == 24);
+                CHECK(worst_unaged_s <= 2 * kLifeS);
+            }
+        }
+    }
 
     // The layout fingerprint is the half a CRC cannot do. A bucket is a pile of anonymous counters:
     // nothing in `buh_s` says which row it came from, so an update that moved a locator or a
@@ -17334,9 +17412,9 @@ static void test_checkup_persist() {
     CHECK(checkup_model_fingerprint("altherma_gshp") !=
           checkup_model_fingerprint("altherma_gshp2"));
 
-    // The intentional-reboot handoff is separately sealed from the completed ring.  A finished DHW
-    // window can live in the generic hour's pending bucket, and must survive even though the main
-    // seal deliberately excludes every open bucket.
+    // The intentional-reboot handoff is separately sealed from the completed ring. Its reserved
+    // pending counters remain CRC-covered for layout integrity; startup discards them because
+    // they lack absolute ages. Only the compatible scoped ongoing filter can be handed over.
     DhwLossHandoffPayload dhw_handoff;
     dhw_handoff.candidate.flags                = DHW_LOSS_CARRY_SEGMENT | DHW_LOSS_CARRY_DRAW;
     dhw_handoff.candidate.segment_elapsed_s    = 3590;
@@ -17359,10 +17437,10 @@ static void test_checkup_persist() {
                                      handoff_fp, model_fp, model_fp, handoff_crc, dhw_handoff));
 
     // ── the carried lifecycle ────────────────────────────────────────────────────────────────────
-    // first/latest_sample_us are MONOTONIC and restart at zero, so a restore cannot adopt them: the
-    // previous boot's span rides as a duration instead. Without this the restored window would
-    // report full_span() == false for another 24 h and every `ok` verdict would stay suppressed on
-    // evidence the device actually has.
+    // first/latest_sample_us are MONOTONIC and restart at zero. The ring supports a carried
+    // duration; the controls below exercise that primitive, not RAM-hour adoption. Production
+    // rebuilds the carried span from selected journal intervals' absolute end times and preserves
+    // this boot's live lifecycle; startup never carries the old RAM span.
     CheckupRing r;
     r.observe(0);
     r.observe(20LL * 3600 * 1000000); // 20 h in this boot
@@ -17370,7 +17448,7 @@ static void test_checkup_persist() {
     CHECK(r.span_us() == 20LL * 3600 * 1000000);
 
     CheckupRing restored;
-    restored.carried_span_us = 20LL * 3600 * 1000000; // ...carried across a reboot
+    restored.carried_span_us = 20LL * 3600 * 1000000; // illustrative reconstructed duration
     CHECK(!restored.full_span());
     restored.observe(0);
     restored.observe(5LL * 3600 * 1000000); // plus 5 h in the new boot
@@ -17384,8 +17462,9 @@ static void test_checkup_persist() {
     CHECK(restored.span_us() == 0);
     CHECK(!restored.full_span());
 
-    // The seal excludes `pending`, so a restore drops the open hour. Its counters must not survive
-    // into the adopted window: a partial hour was never a completed bucket.
+    // The seal excludes `pending`; startup drops the previous boot's undated open hour.
+    // This primitive reset clears those counters. Later journal reconstruction preserves current-
+    // boot pending evidence, rather than importing old pending counters.
     CheckupRing open;
     open.pending.covered_s = 1234;
     open.pending.starts    = 7;
@@ -17957,16 +18036,40 @@ static void test_history_persist() {
     CHECK(history_bucket_from_unix(-301) == -2);
     CHECK(history_bucket_from_unix(5, 0) == 0); // degenerate dt: 0, never a divide by zero
 
-    // Live-device regression: 26 s after a reboot at unix 1786459116, the current five-minute wall
-    // bucket began 216 s ago — before esp_timer's zero. The monotonic commit MUST stay negative;
-    // clamping it to zero moved a flash-restored t0 from 1786458900 to the reboot instant
-    // 1786459090.
-    const int64_t wall_bucket = history_bucket_from_unix(1'786'459'116);
-    const int64_t commit_us   = history_anchor_commit_us(26'000'000, 1'786'459'116, wall_bucket);
-    CHECK(commit_us == -190'000'000);
-    const uint32_t restored_age_s = static_cast<uint32_t>((26'000'000 - commit_us) / 1'000'000);
-    CHECK(history_t0(1'786'459'116, restored_age_s, 1, HISTORY_DT_S) == 1'786'458'900);
-    CHECK(history_anchor_commit_us(123, 456, 789, 0) == 123);
+    // The anchor of a live source is the wall bucket of its commit instant, `now - commit` ago; no
+    // commit has no anchor, and a clock reading before the commit is age zero, never a negative
+    // age.
+    const auto anchor = [](int64_t unix_s, int64_t now_us, int64_t commit_us) {
+        return history_anchor_bucket(rt(unix_s), rt(now_us), rt(commit_us));
+    };
+    const auto boundary = [](int64_t now_us, uint32_t dt = HISTORY_DT_S) {
+        return history_raster_boundary_us(rt(now_us), rt(dt));
+    };
+    CHECK(anchor(1'000, 500'000'000, 100'000'000) == history_bucket_from_unix(1'000 - 400));
+    CHECK(anchor(1'000, 500'000'000, 500'000'000) == history_bucket_from_unix(1'000));
+    CHECK(anchor(1'000, 100'000'000, 500'000'000) ==
+          history_bucket_from_unix(1'000)); // 400 s "in the future" would be bucket 4
+    CHECK(anchor(1'000, 500'000'000, INT64_MIN) == INT64_MIN);
+    // Whole seconds, floored: a commit 100.9 s ago is 100 s ago.
+    CHECK(anchor(1'000, 500'900'000, 400'000'000) == history_bucket_from_unix(900));
+
+    // The raster boundary a flash seed claims (HIST-03/c): the start of the open monotonic bucket.
+    CHECK(boundary(0) == 0);
+    CHECK(boundary(26'000'000) == 0);
+    CHECK(boundary(299'999'999) == 0);
+    CHECK(boundary(300'000'000) == 300'000'000);
+    CHECK(boundary(1'234'567'890) == 1'200'000'000);
+    CHECK(boundary(-5) == 0);       // total on a clock that cannot go negative
+    CHECK(boundary(123, 0) == 123); // degenerate dt: no grid, no divide by zero
+    // Live-device scenario: 26 s after a reboot at unix 1786459090 the seed claims monotonic zero —
+    // the reboot instant — and the newest restored sample is attributed to the wall bucket of that
+    // instant; the first live commit, one raster step later, is attributed to the next bucket.
+    const int64_t seed_commit_us = boundary(26'000'000);
+    CHECK(seed_commit_us == 0);
+    CHECK(anchor(1'786'459'116, 26'000'000, seed_commit_us) ==
+          history_bucket_from_unix(1'786'459'090));
+    CHECK(anchor(1'786'459'090 + 300, 300'000'000, 300'000'000) ==
+          history_bucket_from_unix(1'786'459'090) + 1);
 
     // --- a cursor from the future (HIST-02/b) ----------------------------------------------------
     // A cursor beyond its clock means one of two things: an earlier boot synchronised to a wrong
@@ -18125,11 +18228,14 @@ static void test_history_identity() {
     using namespace logic;
 
     // ── b) HIST-01/b: the circulation witness's identity ─────────────────────────────────────────
-    // The sealed .noinit region gained the identity: a v2 seal must be refused as a whole.
-    CHECK(HISTORY_PERSIST_VERSION == 3);
-    CHECK(history_restore_verdict(static_cast<uint32_t>(CrashReason::SW), HISTORY_PERSIST_MAGIC, 2,
-                                  history_catalog_fingerprint(), history_catalog_fingerprint(), 7,
-                                  7) == HistoryRestore::WrongVersion);
+    // The sealed .noinit region gained the identity (v3) and then the age guards (v4, HIST-03): a
+    // v2 or v3 seal must be refused as a whole.
+    CHECK(HISTORY_PERSIST_VERSION == 4);
+    for (const uint16_t older : {static_cast<uint16_t>(2), static_cast<uint16_t>(3)})
+        CHECK(history_restore_verdict(static_cast<uint32_t>(CrashReason::SW), HISTORY_PERSIST_MAGIC,
+                                      older, history_catalog_fingerprint(),
+                                      history_catalog_fingerprint(), 7,
+                                      7) == HistoryRestore::WrongVersion);
     Config witness;
     witness.diagnostics_enabled      = true;
     witness.diagnostics_generation   = 3;
@@ -20287,6 +20393,1719 @@ static void test_detect_identity() {
     CHECK(!established_identity(rep->name, rep->family, rep->marketing, real, n).any());
 }
 
+// ── HIST-03: the age guards of the .noinit restore ──────────────────────────────────────────────
+// The seal says the bytes are intact; it cannot say how old the newest sample is. The RETIRED
+// restore re-anchored that sample at the boot instant. a) a boot that never committed (safe mode, a
+// crash loop under one bucket, a stalled raster) leaves a valid seal that is hours stale, so the
+// old adoption shifted the curve by all of that time; b) the old checkup window had the same shape;
+// c) a flash seed claims a commit instant on the wrong grid; e) a disabled ENV III sensor leaves a
+// frozen ring that the old rule re-anchored and then journaled under today's buckets.
+// Each block runs the OLD rule (the guards' inputs left at their neutral defaults, or the retired
+// formula) beside the new one on the same scenarios: the old rule must be shown wrong, or the test
+// pins nothing.
+static void test_history_restore_guards() {
+    using namespace logic;
+
+    const uint32_t fp    = history_catalog_fingerprint();
+    const uint32_t sw    = static_cast<uint32_t>(CrashReason::SW);
+    const uint32_t panic = static_cast<uint32_t>(CrashReason::PANIC);
+
+    // ── a) the verdict: every refusal, and the order they decide in ──────────────────────────────
+    auto verdict = [&](uint32_t reason, uint32_t magic, uint16_t version, uint32_t cat,
+                       uint32_t crc, bool safe, uint32_t boots, bool current) {
+        return history_restore_verdict(reason, magic, version, cat, fp, 7, crc, safe, boots,
+                                       current);
+    };
+    CHECK(verdict(sw, HISTORY_PERSIST_MAGIC, HISTORY_PERSIST_VERSION, fp, 7, false, 0, true) ==
+          HistoryRestore::Accept);
+    // Safe mode starts no producer; the rings would sit frozen while the latch holds.
+    CHECK(verdict(sw, HISTORY_PERSIST_MAGIC, HISTORY_PERSIST_VERSION, fp, 7, true, 0, true) ==
+          HistoryRestore::SafeMode);
+    // ...and it outranks everything else, so the reported reason is the one a reader can act on:
+    // a power-cycled, version-skewed, corrupt, uncommitted and stale record is still "safe_mode".
+    CHECK(verdict(static_cast<uint32_t>(CrashReason::POWERON), 0, 99, fp ^ 1u, 8, true, 5, false) ==
+          HistoryRestore::SafeMode);
+    // One boot that adopted the rings and committed nothing refuses the next adoption.
+    CHECK(verdict(sw, HISTORY_PERSIST_MAGIC, HISTORY_PERSIST_VERSION, fp, 7, false, 1, true) ==
+          HistoryRestore::NotCommitted);
+    CHECK(verdict(sw, HISTORY_PERSIST_MAGIC, HISTORY_PERSIST_VERSION, fp, 7, false, 255, true) ==
+          HistoryRestore::NotCommitted);
+    // A raster the liveness record cannot measure refuses on its own...
+    CHECK(verdict(sw, HISTORY_PERSIST_MAGIC, HISTORY_PERSIST_VERSION, fp, 7, false, 0, false) ==
+          HistoryRestore::StaleCommit);
+    // ...and the counter, the cheaper and more specific statement, wins when both hold.
+    CHECK(verdict(sw, HISTORY_PERSIST_MAGIC, HISTORY_PERSIST_VERSION, fp, 7, false, 1, false) ==
+          HistoryRestore::NotCommitted);
+    // Both guards read sealed state, which means nothing on a record that failed its own checks:
+    // every intactness refusal outranks them, so a damaged record is "bad_crc", not
+    // "not_committed".
+    CHECK(verdict(sw, HISTORY_PERSIST_MAGIC, HISTORY_PERSIST_VERSION, fp, 8, false, 1, false) ==
+          HistoryRestore::BadCrc);
+    CHECK(verdict(sw, HISTORY_PERSIST_MAGIC, HISTORY_PERSIST_VERSION, fp ^ 1u, 7, false, 1,
+                  false) == HistoryRestore::WrongCatalog);
+    CHECK(verdict(sw, HISTORY_PERSIST_MAGIC, 3, fp, 7, false, 1, false) ==
+          HistoryRestore::WrongVersion);
+    CHECK(verdict(sw, 0, HISTORY_PERSIST_VERSION, fp, 7, false, 1, false) ==
+          HistoryRestore::NoRecord);
+    CHECK(verdict(static_cast<uint32_t>(CrashReason::POWERON), HISTORY_PERSIST_MAGIC,
+                  HISTORY_PERSIST_VERSION, fp, 7, false, 1, false) == HistoryRestore::PowerCycle);
+    // The old rule is the verdict with the guards' inputs left at their defaults: it accepts the
+    // very record the guards refuse. That is what the scenarios below are measured against.
+    CHECK(history_restore_verdict(sw, HISTORY_PERSIST_MAGIC, HISTORY_PERSIST_VERSION, fp, fp, 7,
+                                  7) == HistoryRestore::Accept);
+    CHECK(std::strcmp(history_restore_slug(HistoryRestore::SafeMode), "safe_mode") == 0);
+    CHECK(std::strcmp(history_restore_slug(HistoryRestore::NotCommitted), "not_committed") == 0);
+    CHECK(std::strcmp(history_restore_slug(HistoryRestore::StaleCommit), "stale_commit") == 0);
+
+    // The counter saturates instead of wrapping to "nothing pending".
+    CHECK(history_counter_next<uint8_t>(rt<uint8_t>(0)) == 1);
+    CHECK(history_counter_next<uint8_t>(rt<uint8_t>(254)) == 255);
+    CHECK(history_counter_next<uint8_t>(rt<uint8_t>(255)) == 255);
+    CHECK(history_counter_next<uint16_t>(rt<uint16_t>(65534)) == 65535);
+    CHECK(history_counter_next<uint16_t>(rt<uint16_t>(65535)) == 65535);
+    CHECK(history_counter_next<uint32_t>(rt<uint32_t>(0xfffffffeu)) == 0xffffffffu);
+    CHECK(history_counter_next<uint32_t>(rt<uint32_t>(0xffffffffu)) == 0xffffffffu);
+
+    // ── a) the liveness record ───────────────────────────────────────────────────────────────────
+    using RS                                 = HistoryRasterState;
+    constexpr HistoryJournalSource kX        = HistoryJournalSource::X10a;
+    constexpr HistoryJournalSource kM        = HistoryJournalSource::Modbus;
+    constexpr HistoryJournalSource kE        = HistoryJournalSource::Env3;
+    const int64_t                  kBucketUs = static_cast<int64_t>(HISTORY_DT_S) * 1000000;
+    HistoryLiveness                live{};
+    CHECK(!history_liveness_valid(live)); // all-zero DRAM is not a record
+    history_liveness_begin(live, 5'000'000);
+    CHECK(history_liveness_valid(live));
+    CHECK(live.sign_us == 5'000'000);
+    for (size_t i = 0; i < HISTORY_LIVENESS_RASTERS; ++i) CHECK(live.commit_us[i] == INT64_MIN);
+    const bool all[HISTORY_LIVENESS_RASTERS] = {true, true, true};
+    // A fresh record has committed nothing: a raster that holds samples has no commit to measure
+    // from, one that is not weighed has nothing to book and is not asked.
+    CHECK(history_raster_state(live, kX, true) == RS::NoCommit);
+    CHECK(history_raster_state(live, kM, true) == RS::NoCommit);
+    CHECK(history_raster_state(live, kE, true) == RS::NoCommit);
+    CHECK(history_raster_state(live, kX, false) == RS::NotWeighed);
+    CHECK(history_raster_state(live, kM, false) == RS::NotWeighed);
+    CHECK(history_raster_bookable(rt(RS::NotWeighed)) &&
+          history_raster_bookable(rt(RS::Measurable)));
+    CHECK(!history_raster_bookable(rt(RS::NoRecord)) && !history_raster_bookable(rt(RS::NoCommit)));
+    // The checkup is a journal source, not a raster of the record: it has no commit to measure
+    // with.
+    CHECK(history_raster_state(live, HistoryJournalSource::Checkup, true) == RS::NoRecord);
+    CHECK(history_raster_state(live, HistoryJournalSource::Checkup, false) == RS::NotWeighed);
+
+    // Touch never moves backwards; a commit is itself a sign of life.
+    history_liveness_touch(live, 9'000'000);
+    history_liveness_touch(live, 7'000'000);
+    CHECK(live.sign_us == 9'000'000 && history_liveness_valid(live));
+    history_liveness_commit(live, HistoryJournalSource::X10a, 11'000'000);
+    CHECK(live.commit_us[0] == 11'000'000 && live.sign_us == 11'000'000);
+    history_liveness_commit(live, HistoryJournalSource::Modbus, 4'000'000); // an older instant
+    CHECK(live.commit_us[1] == 4'000'000 && live.sign_us == 11'000'000);
+    history_liveness_commit(live, HistoryJournalSource::Checkup, 1); // not a trend raster: ignored
+    CHECK(live.commit_us[0] == 11'000'000 && live.commit_us[1] == 4'000'000 &&
+          live.commit_us[2] == INT64_MIN);
+    CHECK(history_liveness_valid(live));
+    {
+        // A record that never signalled life takes its first sign from either call; clearing a
+        // raster's commit (INT64_MIN) is not a sign of life and leaves the sign alone.
+        HistoryLiveness fresh{};
+        fresh.sign_us = INT64_MIN;
+        history_liveness_touch(fresh, 5'000'000);
+        CHECK(fresh.sign_us == 5'000'000 && history_liveness_valid(fresh));
+        history_liveness_commit(fresh, HistoryJournalSource::Env3, rt<int64_t>(INT64_MIN));
+        CHECK(fresh.commit_us[2] == INT64_MIN && fresh.sign_us == 5'000'000);
+        HistoryLiveness mute{};
+        mute.sign_us = INT64_MIN;
+        history_liveness_commit(mute, HistoryJournalSource::Modbus, 7'000'000);
+        CHECK(mute.sign_us == 7'000'000 && mute.commit_us[1] == 7'000'000);
+        HistoryLiveness cleared{};
+        history_liveness_begin(cleared, 1);
+        history_liveness_commit(cleared, HistoryJournalSource::Modbus, rt<int64_t>(INT64_MIN));
+        CHECK(cleared.commit_us[1] == INT64_MIN && cleared.sign_us == 1);
+    }
+
+    // There is NO staleness bound: how long ago a raster committed is what the adoption books, so a
+    // raster that committed an hour, a day or a week before the last sign of life is measurable. A
+    // bound (a bucket plus 90 s, the retired rule) would call the first of these stale and refuse
+    // samples whose age the record knows exactly.
+    history_liveness_touch(live, 11'000'000 + kBucketUs + 90'000'000);
+    CHECK(history_raster_state(live, kX, true) == RS::Measurable);
+    history_liveness_touch(live, 11'000'000 + kBucketUs + 90'000'001);
+    CHECK(history_raster_state(live, kX, true) == RS::Measurable); // the retired bound's edge
+    history_liveness_touch(live, 11'000'000 + 7 * 86400 * 1'000'000LL);
+    CHECK(history_raster_state(live, kX, true) == RS::Measurable);
+    // A healthy neighbour does not hide anything and a long-stalled one is not refused: HomeHub
+    // committed at 4 s and is a week behind, and still measurable.
+    CHECK(history_raster_state(live, kM, true) == RS::Measurable);
+    // A raster with samples and no recorded commit has nothing to measure from.
+    CHECK(history_raster_state(live, kE, true) == RS::NoCommit);
+    {
+        // The plan: the X10A raster alone decides the region, the others retire their own rings,
+        // and only when they cannot be measured.
+        const HistoryRasterPlan p = history_raster_plan(live, all);
+        CHECK(p.state[0] == RS::Measurable && p.state[1] == RS::Measurable &&
+              p.state[2] == RS::NoCommit);
+        CHECK(p.region_bookable && !p.retire_modbus && p.retire_env3);
+        // A raster that is not weighed is neither refused nor retired, whatever the record says.
+        const bool              only_x10a[HISTORY_LIVENESS_RASTERS] = {true, false, false};
+        const HistoryRasterPlan q = history_raster_plan(live, only_x10a);
+        CHECK(q.region_bookable && !q.retire_modbus && !q.retire_env3);
+        CHECK(q.state[1] == RS::NotWeighed && q.state[2] == RS::NotWeighed);
+        // A long-stalled X10A raster is booked, not refused: the region stays bookable.
+        HistoryLiveness stalled = live;
+        history_liveness_commit(stalled, HistoryJournalSource::Modbus, stalled.sign_us);
+        history_liveness_commit(stalled, HistoryJournalSource::X10a, 1'000'000);
+        const HistoryRasterPlan r = history_raster_plan(stalled, all);
+        CHECK(r.state[0] == RS::Measurable && r.state[1] == RS::Measurable);
+        CHECK(r.region_bookable && !r.retire_modbus && r.retire_env3);
+        // An X10A raster with samples and no commit cannot be measured, and nothing rescues it.
+        HistoryLiveness nocommit = live;
+        history_liveness_commit(nocommit, HistoryJournalSource::X10a, rt<int64_t>(INT64_MIN));
+        const HistoryRasterPlan u = history_raster_plan(nocommit, all);
+        CHECK(u.state[0] == RS::NoCommit && !u.region_bookable && !u.retire_modbus);
+        // Nothing weighed anywhere: nothing to book, even for a record that does not verify.
+        const bool      none[HISTORY_LIVENESS_RASTERS] = {false, false, false};
+        HistoryLiveness garbled                        = live;
+        garbled.crc ^= 1;
+        const HistoryRasterPlan g = history_raster_plan(garbled, none);
+        CHECK(g.region_bookable && !g.retire_modbus && !g.retire_env3);
+        const HistoryRasterPlan h = history_raster_plan(garbled, only_x10a);
+        CHECK(!h.region_bookable && h.state[0] == RS::NoRecord);
+    }
+    // A sign of life earlier than the commit is not a record this code can have written.
+    HistoryLiveness skew = live;
+    skew.sign_us         = skew.commit_us[0] - 1;
+    history_liveness_seal(skew);
+    CHECK(history_liveness_valid(skew) && history_raster_state(skew, kX, true) == RS::NoCommit);
+    // ...and neither is a commit before the clock started (a monotonic clock begins at zero).
+    HistoryLiveness before = live;
+    before.commit_us[0]    = -1;
+    history_liveness_seal(before);
+    CHECK(history_liveness_valid(before) && history_raster_state(before, kX, true) == RS::NoCommit);
+    // A commit at zero is the first instant there is, and is measurable.
+    HistoryLiveness zero = live;
+    zero.commit_us[0]    = 0;
+    history_liveness_seal(zero);
+    CHECK(history_raster_state(zero, kX, true) == RS::Measurable);
+
+    // Every field is under the record's CRC; damage is "no record", not "measurable".
+    {
+        HistoryLiveness good = live;
+        good.commit_us[2]    = 3'000'000;
+        history_liveness_seal(good);
+        CHECK(history_liveness_valid(good));
+        HistoryLiveness bad = good;
+        bad.sign_us ^= 1;
+        CHECK(!history_liveness_valid(bad));
+        CHECK(history_raster_state(bad, kX, true) == RS::NoRecord);
+        CHECK(history_raster_state(bad, kX, false) == RS::NotWeighed);
+        for (size_t i = 0; i < HISTORY_LIVENESS_RASTERS; ++i) {
+            bad = good;
+            bad.commit_us[i] ^= 1;
+            CHECK(!history_liveness_valid(bad));
+        }
+        bad = good;
+        bad.magic ^= 1;
+        CHECK(!history_liveness_valid(bad));
+        bad = good;
+        bad.version++;
+        CHECK(!history_liveness_valid(bad));
+        bad = good;
+        bad.crc ^= 1;
+        CHECK(!history_liveness_valid(bad));
+        // The reserved bytes are not evidence: they do not change validity.
+        bad          = good;
+        bad.reserved = 0x1234;
+        CHECK(history_liveness_valid(bad));
+        // A record that verifies but never signalled life measures nothing.
+        HistoryLiveness mute = good;
+        mute.sign_us         = INT64_MIN;
+        history_liveness_seal(mute);
+        CHECK(history_liveness_valid(mute) && history_raster_state(mute, kX, true) == RS::NoRecord);
+    }
+
+    // ── a) composite: the same boots under the OLD rule and the NEW one ─────────────────────────
+    // A device is a sequence of boots. Each boot may be a safe-mode boot (no producer: nothing
+    // touches or commits), may have its raster stall for a while (a network hold-off: the poll task
+    // lives and signs, but nothing commits), and ends in a panic or in an esp_restart that runs the
+    // shutdown touch. The firmware's own pure rules decide every adoption; the model only supplies
+    // the world: when the newest sample REALLY ended, against which the boot's claim — "committed
+    // at boot" — is measured. The bound that must hold after an adoption is the documented seam,
+    // one bucket, plus what the liveness check tolerates (its slack, the commit lag and the touch
+    // cadence) and the downtime.
+    struct Boot {
+        int64_t uptime_s;
+        bool    safe;
+        int64_t stall_from_s; // -1: none
+        int64_t stall_to_s;
+        bool    shutdown_touch;
+        int64_t lag_s;  // how late after its boundary a healthy commit lands
+        int64_t down_s; // reset downtime
+    };
+    struct Sim {
+        bool            region             = false;
+        uint8_t         boots_since_commit = 0;
+        bool            has_samples        = false;
+        int64_t         newest_true_s      = 0; // when the newest committed sample REALLY ended
+        HistoryLiveness live{};
+        int64_t         worst_error_s        = 0;
+        int             adopted_with_samples = 0;
+        std::vector<HistoryRestore> verdicts;
+    };
+    const int64_t kStep    = 5; // the model's touch cadence (the firmware's is 1 s)
+    auto          run_boot = [&](Sim& s, const Boot& b, int64_t wall_start_s, bool guarded) {
+        const bool            has[HISTORY_LIVENESS_RASTERS] = {s.has_samples, false, false};
+        const HistoryLiveness prev =
+            s.live; // the previous boot's record, read before it is replaced
+        const HistoryRasterPlan plan = history_raster_plan(prev, has);
+        HistoryRestore          v    = HistoryRestore::NoRecord;
+        if (s.region) {
+            v = guarded ? history_restore_verdict(panic, HISTORY_PERSIST_MAGIC,
+                                                           HISTORY_PERSIST_VERSION, fp, fp, 7, 7, b.safe,
+                                                           s.boots_since_commit, plan.region_bookable)
+                                 : history_restore_verdict(panic, HISTORY_PERSIST_MAGIC,
+                                                           HISTORY_PERSIST_VERSION, fp, fp, 7, 7);
+        }
+        s.verdicts.push_back(v);
+        history_liveness_begin(s.live, 0);
+        if (v == HistoryRestore::Accept) {
+            if (s.has_samples) {
+                // The OLD rule claims the newest sample for the boot instant and books nothing. The
+                // NEW one books the stretch since its commit as whole buckets of gaps
+                // (persist_book_unobserved) and claims the newest of them for this boot's raster
+                // boundary, so the real newest sample ends that many buckets before the boot's
+                // first bucket.
+                const uint32_t gaps = guarded
+                                                   ? history_adopt_booking(prev.sign_us, prev.commit_us[0],
+                                                                           DWELL_REBOOT_BLIND_S, 0, 0)
+                                                .gaps
+                                                   : 0;
+                const int64_t  claimed_s = wall_start_s - static_cast<int64_t>(gaps) * HISTORY_DT_S;
+                const int64_t  err = claimed_s > s.newest_true_s ? claimed_s - s.newest_true_s
+                                                                          : s.newest_true_s - claimed_s;
+                if (err > s.worst_error_s) s.worst_error_s = err;
+                s.adopted_with_samples++;
+                history_liveness_commit(s.live, HistoryJournalSource::X10a, 0);
+            }
+            s.boots_since_commit = history_counter_next(s.boots_since_commit);
+        } else {
+            s.region             = true; // a freshly wiped, sealed, empty region
+            s.has_samples        = false;
+            s.boots_since_commit = 0;
+        }
+        int64_t next_boundary = HISTORY_DT_S;
+        for (int64_t t = kStep; t <= b.uptime_s; t += kStep) {
+            if (b.safe) continue; // no poll task, no producer
+            history_liveness_touch(s.live, t * 1000000);
+            const bool stalled = b.stall_from_s >= 0 && t >= b.stall_from_s && t < b.stall_to_s;
+            if (!stalled && t >= next_boundary + b.lag_s) {
+                const int64_t boundary = t / HISTORY_DT_S * HISTORY_DT_S;
+                s.boots_since_commit   = 0;
+                s.has_samples          = true;
+                s.newest_true_s        = wall_start_s + boundary;
+                history_liveness_commit(s.live, HistoryJournalSource::X10a, t * 1000000);
+                next_boundary = boundary + HISTORY_DT_S;
+            }
+        }
+        if (b.shutdown_touch && !b.safe) history_liveness_touch(s.live, b.uptime_s * 1000000);
+        return wall_start_s + b.uptime_s + b.down_s;
+    };
+    auto run = [&](const std::vector<Boot>& boots, bool guarded) {
+        Sim     s;
+        int64_t wall = 1'786'000'000;
+        for (const Boot& b : boots) wall = run_boot(s, b, wall, guarded);
+        return s;
+    };
+    // What the OLD rule (which claims the boot instant and books nothing) could be wrong by while
+    // it adopted at all: the seam (one bucket) plus the 90 s slack and the 10 s commit lag the
+    // retired staleness bound used to tolerate (the generator's longest lag is 10 s), the touch
+    // cadence twice over (a commit is noticed one step late and the last touch can precede the
+    // reset by one) and the downtime (at most 3 s).
+    const int64_t kBudgetS = HISTORY_DT_S + 90 + 10 + 2 * kStep + 3;
+    // What the NEW rule can be wrong by per seam: half a bucket of rounding, the touch cadence
+    // twice over, and the allowance against the real downtime (1 to 3 s against 5). The commit
+    // lag is gone: the stretch is measured from the boundary the commit closed, not from the fold.
+    const int64_t kBookedBudgetS = HISTORY_DT_S / 2 + 2 * kStep + 5;
+    auto          healthy        = [](int64_t up) { return Boot{up, false, -1, -1, false, 2, 2}; };
+
+    { // Healthy runs adopt, and the error stays inside the documented seam. The guards must not
+        // refuse a device that is simply working.
+        const std::vector<Boot> boots = {healthy(3600), healthy(7200), healthy(1500), healthy(900)};
+        const Sim               n     = run(boots, true);
+        CHECK(n.verdicts[0] == HistoryRestore::NoRecord);
+        for (size_t i = 1; i < boots.size(); ++i) CHECK(n.verdicts[i] == HistoryRestore::Accept);
+        CHECK(n.adopted_with_samples == 3 && n.worst_error_s <= kBookedBudgetS);
+        const Sim o = run(boots, false);
+        // Nothing to refuse here, so both adopt; the booking is what the new rule changes.
+        CHECK(o.adopted_with_samples == 3 && o.worst_error_s <= HISTORY_DT_S + 10);
+    }
+    { // A safe-mode boot holds the rings while no producer runs. Old: the day-old rings are
+        // adopted at the first safe boot and again after the latch clears, three hours later.
+        const std::vector<Boot> boots = {healthy(1000), Boot{10800, true, -1, -1, false, 0, 2},
+                                         healthy(600)};
+        const Sim               o     = run(boots, false);
+        CHECK(o.verdicts[1] == HistoryRestore::Accept && o.verdicts[2] == HistoryRestore::Accept);
+        CHECK(o.worst_error_s > 10000); // misdated by the whole safe-mode stretch
+        const Sim n = run(boots, true);
+        CHECK(n.verdicts[1] == HistoryRestore::SafeMode);
+        CHECK(n.verdicts[2] == HistoryRestore::Accept && n.has_samples);
+        CHECK(n.adopted_with_samples == 0 && n.worst_error_s == 0);
+    }
+    { // A crash loop whose every boot dies inside one bucket. Old: each adoption re-anchors the
+        // same samples at "now", so the error grows by a boot's lifetime per boot without limit.
+        std::vector<Boot> boots = {healthy(1000)};
+        for (int i = 0; i < 10; ++i) boots.push_back(healthy(200));
+        const Sim o = run(boots, false);
+        CHECK(o.adopted_with_samples == 10);
+        CHECK(o.worst_error_s > 5 * HISTORY_DT_S);
+        const Sim n = run(boots, true);
+        CHECK(n.verdicts[1] == HistoryRestore::Accept); // the first reset after a working boot
+        CHECK(n.verdicts[2] == HistoryRestore::NotCommitted);
+        CHECK(n.adopted_with_samples == 1 && n.worst_error_s <= kBookedBudgetS);
+        // The loop settles into refusing every second boot; an empty region adopts nothing.
+        for (size_t i = 2; i < boots.size(); ++i)
+            CHECK(n.verdicts[i] ==
+                  (i % 2 == 0 ? HistoryRestore::NotCommitted : HistoryRestore::Accept));
+    }
+    { // A network hold-off: the poll task lives and signs, the raster stands still, then the device
+        // dies. 650 s in, nothing commits any more; it resets at 2000 s. The record measures the
+        // stall exactly, so the new rule books it (four buckets of gaps) instead of refusing the
+        // rings; the old rule claims the boot instant and is wrong by the whole stall.
+        const std::vector<Boot> boots = {Boot{2000, false, 650, 99999, false, 2, 2}, healthy(600)};
+        const Sim               o     = run(boots, false);
+        CHECK(o.verdicts[1] == HistoryRestore::Accept && o.worst_error_s > 3 * HISTORY_DT_S);
+        const Sim n = run(boots, true);
+        CHECK(n.verdicts[1] == HistoryRestore::Accept);
+        CHECK(n.adopted_with_samples == 1 && n.worst_error_s <= kBookedBudgetS);
+        // The same hold-off ending in an esp_restart (the OTA case): this fixture assumes a
+        // successful shutdown touch exactly at reset. Real shutdown touching is best effort.
+        const std::vector<Boot> ota = {Boot{1500, false, 350, 99999, true, 2, 2}, healthy(600)};
+        const Sim               on  = run(ota, true);
+        CHECK(on.verdicts[1] == HistoryRestore::Accept && on.adopted_with_samples == 1);
+        CHECK(on.worst_error_s <= kBookedBudgetS);
+        CHECK(run(ota, false).worst_error_s > 3 * HISTORY_DT_S);
+        // A stall longer than the ring is booked as a ring of gaps (capped), still not refused.
+        const std::vector<Boot> week = {Boot{2 * 86400, false, 400, 99999, true, 2, 2},
+                                        healthy(600)};
+        const Sim               wk   = run(week, true);
+        CHECK(wk.verdicts[1] == HistoryRestore::Accept && wk.adopted_with_samples == 1);
+        // A hold-off that ends inside a bucket is no reason to refuse either: the error is still
+        // the seam.
+        const std::vector<Boot> brief = {Boot{520, false, 330, 500, false, 2, 2}, healthy(600)};
+        const Sim               bn    = run(brief, true);
+        CHECK(bn.verdicts[1] == HistoryRestore::Accept && bn.worst_error_s <= kBookedBudgetS);
+    }
+    { // A hold-off that crosses a boundary but ends, and lets the raster catch up, before the
+      // device dies.
+        const std::vector<Boot> boots = {Boot{1200, false, 350, 640, false, 2, 2}, healthy(600)};
+        const Sim               n     = run(boots, true);
+        CHECK(n.verdicts[1] == HistoryRestore::Accept && n.worst_error_s <= kBookedBudgetS);
+    }
+    { // The invariant over many generated histories: whatever the new rule adopts is inside the
+        // budget, and the same histories break the old rule often enough to prove the model bites.
+        uint32_t rng  = 0x4849535fu;
+        auto     next = [&rng](uint32_t n) {
+            rng = rng * 1664525u + 1013904223u;
+            return (rng >> 8) % n;
+        };
+        const int64_t ups[]          = {20, 90, 200, 290, 310, 620, 1250, 2400, 5400};
+        int           old_violations = 0, new_violations = 0, new_adopted = 0, refused = 0;
+        for (int sc = 0; sc < 150; ++sc) {
+            std::vector<Boot> boots;
+            const int         n = 4 + static_cast<int>(next(5));
+            for (int i = 0; i < n; ++i) {
+                Boot b{};
+                b.uptime_s       = ups[next(9)];
+                b.safe           = next(8) == 0;
+                b.stall_from_s   = next(4) == 0 ? static_cast<int64_t>(60 + next(1500)) : -1;
+                b.stall_to_s     = b.stall_from_s < 0 ? -1 : b.stall_from_s + 60 + next(2400);
+                b.shutdown_touch = next(2) == 0;
+                b.lag_s          = static_cast<int64_t>(next(11));
+                b.down_s         = 1 + static_cast<int64_t>(next(3));
+                boots.push_back(b);
+            }
+            const Sim o = run(boots, false);
+            const Sim g = run(boots, true);
+            if (o.worst_error_s > kBudgetS) old_violations++;
+            if (g.worst_error_s > kBookedBudgetS) new_violations++;
+            new_adopted += g.adopted_with_samples;
+            for (HistoryRestore v : g.verdicts)
+                if (v == HistoryRestore::SafeMode || v == HistoryRestore::NotCommitted ||
+                    v == HistoryRestore::StaleCommit)
+                    refused++;
+        }
+        CHECK(new_violations == 0);
+        CHECK(old_violations >= 30); // the unguarded rule misdates a large share of these
+        CHECK(new_adopted > 100 && refused > 100); // and the guards neither refuse nor adopt it all
+    }
+
+    // ── c) the flash seed's commit instant ───────────────────────────────────────────────────────
+    // A source that has not closed a bucket yet is seeded from flash: the newest restored sample
+    // claims a commit instant, the wall bucket it is attributed to is derived from it, and the
+    // FIRST live commit of the boot lands at the next monotonic boundary. If that commit falls in
+    // the wall bucket the seed already claimed, two samples share a bucket: the curve gains a
+    // duplicate and every restored sample reads one bucket early. Swept over every wall phase of
+    // the boot and a range of SNTP sync delays (the seed runs once the clock is synced): the usual
+    // few seconds to a minute, and out to ten minutes for a slow network, which also moves the seed
+    // past the first monotonic boundary.
+    {
+        int           trials = 0, old_collisions = 0, new_collisions = 0, new_not_next = 0;
+        int           usual_trials = 0, usual_old_collisions = 0;
+        const int64_t kBoot0 = 1'786'459'090; // the live-device boot instant the fix was found on
+        for (int phase = 0; phase < static_cast<int>(HISTORY_DT_S); ++phase) {
+            for (int sync_s = 5; sync_s <= 600; sync_s += 5) {
+                for (int lag_s = 0; lag_s <= 2; ++lag_s) {
+                    const int64_t unix_boot = kBoot0 + phase;
+                    const int64_t now_us    = static_cast<int64_t>(sync_s) * 1000000;
+                    const int64_t unix_s    = unix_boot + sync_s;
+                    // The first live commit: the next monotonic boundary, plus the fold's lag.
+                    const int64_t commit_t_s =
+                        (static_cast<int64_t>(history_bucket(now_us)) + 1) * HISTORY_DT_S + lag_s;
+                    const int64_t commit_bucket = history_anchor_bucket(
+                        unix_boot + commit_t_s, commit_t_s * 1000000, commit_t_s * 1000000);
+                    trials++;
+                    // OLD rule (retired): the start of the open WALL bucket.
+                    const int64_t wall_bucket = history_bucket_from_unix(unix_s);
+                    if (commit_bucket == wall_bucket) old_collisions++;
+                    if (sync_s <= 60) {
+                        usual_trials++;
+                        if (commit_bucket == wall_bucket) usual_old_collisions++;
+                    }
+                    // NEW rule: the last monotonic boundary.
+                    const int64_t seed_commit = history_raster_boundary_us(now_us);
+                    const int64_t seed_bucket = history_anchor_bucket(unix_s, now_us, seed_commit);
+                    if (commit_bucket == seed_bucket) new_collisions++;
+                    // With no fold lag the commit follows the seed by exactly one bucket; with a
+                    // lag it can only land later, never on or before the seed.
+                    if (lag_s == 0 ? commit_bucket != seed_bucket + 1
+                                   : commit_bucket < seed_bucket + 1)
+                        new_not_next++;
+                }
+            }
+        }
+        CHECK(trials > 0 && new_collisions == 0 && new_not_next == 0);
+        // The retired rule collided in a real share of restores even with the usual sync delay (the
+        // later the sync, the closer the commit and the likelier the collision).
+        CHECK(usual_old_collisions * 100 / usual_trials >= 8);
+        CHECK(old_collisions * 100 / trials >= 25);
+    }
+
+    // ── e) ENV III: a ring nothing feeds ─────────────────────────────────────────────────────────
+    CHECK(history_env3_ring_adoptable(rt(true), rt(true)));
+    CHECK(!history_env3_ring_adoptable(rt(true), rt(false))); // disabled now
+    CHECK(!history_env3_ring_adoptable(rt(false), rt(true))); // was not running when it was sealed
+    CHECK(!history_env3_ring_adoptable(rt(false), rt(false)));
+    CHECK(history_env3_append_allowed(rt(true), rt(true)));
+    CHECK(!history_env3_append_allowed(rt(true), rt(false))); // enabled, nothing has fed it yet
+    CHECK(
+        !history_env3_append_allowed(rt(false), rt(true))); // disabled: whatever it holds is frozen
+    CHECK(!history_env3_append_allowed(rt(false), rt(false)));
+    {
+        // Composite: an ENV III sensor runs, is disabled by a /set_env3 save (a reboot), the device
+        // is updated twice, and the sensor is re-enabled. What the journal files for the ring, and
+        // how far from the time the samples really ended, under the old rule and the new one.
+        struct Boot3 {
+            bool enabled_now;
+            int  uptime_s;
+        };
+        const std::vector<Boot3> boots = {{true, 4000},   // the sensor runs: ring fed
+                                          {false, 20000}, // disabled by a save + reboot
+                                          {false, 20000}, // an update
+                                          {false, 20000}, // another one
+                                          {true, 4000}};  // re-enabled
+        for (int guarded = 0; guarded <= 1; ++guarded) {
+            bool    sealed_live = false;
+            bool    has_ring    = false;
+            int64_t newest_true = 0, wall = 1'786'000'000, worst_filed_error = 0;
+            int     filed_frozen = 0;
+            for (const Boot3& b : boots) {
+                bool       fed = false;
+                const bool keep =
+                    guarded ? history_env3_ring_adoptable(sealed_live, b.enabled_now) : true;
+                if (has_ring && !keep) has_ring = false; // retired
+                sealed_live = b.enabled_now;
+                // The writer files the ring under the buckets of the boot's instant. A ring that
+                // survived adoption is attributed to "now", however long ago it was measured.
+                auto file = [&](int64_t at_s) {
+                    const bool allowed =
+                        guarded ? history_env3_append_allowed(b.enabled_now, fed) : true;
+                    if (!has_ring || !allowed) return;
+                    const int64_t err = at_s - newest_true;
+                    if (err > 2 * HISTORY_DT_S) filed_frozen++;
+                    if (err > worst_filed_error) worst_filed_error = err;
+                };
+                file(wall);          // the first journal service of the boot, before any feed
+                if (b.enabled_now) { // the sensor task feeds the ring from here on
+                    fed         = true;
+                    has_ring    = true;
+                    newest_true = wall + b.uptime_s;
+                    file(wall + b.uptime_s);
+                }
+                wall += b.uptime_s + 2;
+            }
+            if (guarded == 0) {
+                CHECK(filed_frozen >= 3 && worst_filed_error > 2 * HISTORY_DT_S);
+            } else {
+                CHECK(filed_frozen == 0 && worst_filed_error <= 2 * HISTORY_DT_S);
+            }
+        }
+    }
+}
+
+// ── HIST-03, fix round: what an adoption does with each raster and with the time it cannot see ─
+// Three rules, each run beside the rule it replaces on the same scenarios so the old rule is shown
+// wrong. a) A raster that stopped (a HomeHub disabled at runtime, a task that never started) used
+// to make the WHOLE region stale; now only the X10A raster decides the region and a stale HomeHub
+// or ENV III raster retires its own rings. b) Adoption used to claim the boot instant and book
+// nothing, so the stretch since the last commit collapsed and the collapses of repeated restarts
+// added up; now it books that stretch as whole buckets of gaps, rounded to the nearest. c) A
+// refusal that only says the checkup window has not aged used to drop the DHW handoff, and with it
+// the settle timer after a tank charge.
+static void test_history_adoption_booking() {
+    using namespace logic;
+    constexpr HistoryJournalSource kX    = HistoryJournalSource::X10a;
+    constexpr HistoryJournalSource kM    = HistoryJournalSource::Modbus;
+    constexpr HistoryJournalSource kE    = HistoryJournalSource::Env3;
+    const uint32_t                 fp    = history_catalog_fingerprint();
+    const uint32_t                 sw    = static_cast<uint32_t>(CrashReason::SW);
+    const int64_t                  kDtUs = static_cast<int64_t>(HISTORY_DT_S) * 1000000;
+    using RS                             = HistoryRasterState;
+
+    // ── the booking: the stretch since the boundary the last commit closed, rounded to nearest ───
+    {
+        auto count = [](int64_t sign_us, int64_t commit_us, uint32_t downtime_s, int64_t claim_us) {
+            return history_adopt_booking(sign_us, commit_us, downtime_s, claim_us, 0).gaps;
+        };
+        const int64_t kGrid = 999'900'000'000; // 3333 buckets: a commit instant on the raster grid
+        CHECK(count(0, 0, 0, 0) == 0);
+        // Nearest, ties up, at the edges of the first two buckets: half a bucket is 150 s.
+        CHECK(count(149'999'999, 0, 0, 0) == 0);
+        CHECK(count(150'000'000, 0, 0, 0) == 1);
+        CHECK(count(449'999'999, 0, 0, 0) == 1);
+        CHECK(count(450'000'000, 0, 0, 0) == 2);
+        // The downtime allowance and the claim count like elapsed time, and the three add.
+        CHECK(count(0, 0, 149, 0) == 0);
+        CHECK(count(0, 0, 150, 0) == 1);
+        CHECK(count(0, 0, 0, 149'999'999) == 0);
+        CHECK(count(0, 0, 0, 150'000'000) == 1);
+        CHECK(count(100'000'000, 0, 5, 45'000'000) == 1);
+        CHECK(count(100'000'000, 0, 5, 44'999'999) == 0);
+        // Only the difference of the two instants counts, not where they sit on the clock.
+        CHECK(count(kGrid + 200'000'000, kGrid, 0, 0) == 1);
+        // The stretch runs from the BOUNDARY the commit closed, not from the fold instant that
+        // recorded it: a commit that landed 40 s after its boundary still books those 40 s (the
+        // fold lag is a producer period, always the same sign, and measuring from the fold would
+        // under-book every seam by it).
+        CHECK(count(150'000'000, 40'000'000, 0, 0) == 1);
+        CHECK(count(149'999'999, 40'000'000, 0, 0) == 0);
+        CHECK(count(kGrid + 150'000'000, kGrid + 40'000'000, 0, 0) == 1);
+        CHECK(count(kGrid + 450'000'000, kGrid + 299'999'999, 0, 0) == 2); // late fold, same bucket
+        // The typical restart: it falls at a uniform phase of the bucket and the allowance is 5 s.
+        CHECK(count(20'000'000, 0, DWELL_REBOOT_BLIND_S, 0) == 0);  // early in the bucket
+        CHECK(count(200'000'000, 0, DWELL_REBOOT_BLIND_S, 0) == 1); // late: the open bucket is lost
+        // Nothing measured, nothing booked.
+        CHECK(count(0, 1, 0, 0) == 0);              // a sign of life before the commit
+        CHECK(count(0, INT64_MIN, 0, 0) == 0);      // no commit recorded
+        CHECK(count(1'000'000'000, -1, 0, 0) == 0); // a commit before the clock started
+        CHECK(count(1'000'000'000, 0, 0, -1) == 0); // a clock that has not started
+        CHECK(history_adopt_booking(1'000'000'000, 0, 0, 0, 0, 0).gaps == 0); // no bucket width
+        CHECK(history_adopt_booking(1'000'000'000, 0, 0, 0, 0, HISTORY_DT_S, 0).gaps ==
+              0); // no room
+        CHECK(history_adopt_booking(1'000'000'000, 0, 0, 0, 0, 0).residual_us == 0);
+        // Capped at the ring: a day-old stretch books a day of gaps, never more.
+        CHECK(count(1'000'000'000'000'000, 0, 0, 0) == HISTORY_SAMPLES);
+        CHECK(history_adopt_booking(1'000'000'000'000, 0, 0, 0, 0, HISTORY_DT_S, 5).gaps == 5);
+        // A stretch of exactly the ring fills it (no real sample is left), one short of it does
+        // not.
+        CHECK(count(static_cast<int64_t>(HISTORY_SAMPLES) * kDtUs, 0, 0, 0) == HISTORY_SAMPLES);
+        CHECK(count(static_cast<int64_t>(HISTORY_SAMPLES - 1) * kDtUs, 0, 0, 0) ==
+              HISTORY_SAMPLES - 1);
+        // Damaged DRAM that still verifies cannot overflow it.
+        CHECK(count(INT64_MAX, 0, UINT32_MAX, INT64_MAX) == HISTORY_SAMPLES);
+        CHECK(count(INT64_MAX, INT64_MAX, 0, 0) == 0);
+        // The sum of the stretch and the terms would wrap to a handful of microseconds: saturated,
+        // it is the largest stretch there is, and books the day.
+        CHECK(count(INT64_MAX, 0, 0, 3) == HISTORY_SAMPLES);
+        CHECK(history_adopt_booking(INT64_MAX, 0, 0, 0, 0, 1, UINT32_MAX).gaps == UINT32_MAX);
+        CHECK(history_adopt_booking(INT64_MAX, 0, UINT32_MAX, INT64_MAX, INT32_MIN, 0xffffffffu,
+                                    UINT32_MAX)
+                  .gaps ==
+              UINT32_MAX); // a width and a ring so large that the limit itself saturates
+        // A width and a ring so large that the limit itself saturates: a stretch of 9.2e18 us is
+        // still more than half the signed range and is taken as the largest there is.
+        CHECK(history_adopt_booking(INT64_MAX, 0, 0, 0, 0, 0xffffffffu, UINT32_MAX).gaps ==
+              UINT32_MAX);
+        const int64_t kWide = 4294967295ll * 1000000; // a 0xffffffff-second bucket, in us
+        CHECK(history_adopt_booking(INT64_MAX / 4, 0, 0, 0, 0, 0xffffffffu, UINT32_MAX).gaps ==
+              (INT64_MAX / 4 + kWide / 2) / kWide);
+        // The remainder is stored in 32 bits: a bucket wide enough to overflow that is clamped,
+        // never wrapped (10000 s buckets: a remainder reaches 5e9 us).
+        CHECK(history_adopt_booking(4'000'000'000, 0, 0, 0, 0, 10000).residual_us == INT32_MAX);
+        CHECK(history_adopt_booking(6'000'000'000, 0, 0, 0, 0, 10000).residual_us == INT32_MIN);
+        CHECK(history_adopt_booking(6'000'000'000, 0, 0, 0, 0, 10000).gaps == 1);
+        // Rounding up to the ring is the ring (no remainder), whatever the carry would have been.
+        CHECK(history_adopt_booking(static_cast<int64_t>(HISTORY_SAMPLES) * kDtUs + 100'000'000, 0,
+                                    0, 0, 0)
+                      .gaps == HISTORY_SAMPLES &&
+              history_adopt_booking(static_cast<int64_t>(HISTORY_SAMPLES) * kDtUs + 100'000'000, 0,
+                                    0, 0, 0)
+                      .residual_us == 0);
+        // A sign of life before the commit (in a later bucket, where the boundary differs) books
+        // nothing instead of a wrapped difference.
+        CHECK(count(100'000'000, 400'000'000, 0, 0) == 0);
+        // The retired rule books nothing at all: a mutant that returns 0 must not survive.
+        CHECK(count(200'000'000, 0, DWELL_REBOOT_BLIND_S, 0) != 0);
+
+        // ── the remainder: what the rounding left over, carried to the next adoption ────────────
+        auto book = [](int64_t sign_us, int32_t carry_us) {
+            return history_adopt_booking(sign_us, 0, 0, 0, carry_us);
+        };
+        CHECK(book(100'000'000, 0).gaps == 0 && book(100'000'000, 0).residual_us == 100'000'000);
+        CHECK(book(200'000'000, 0).gaps == 1 && book(200'000'000, 0).residual_us == -100'000'000);
+        CHECK(book(150'000'000, 0).gaps == 1 && book(150'000'000, 0).residual_us == -150'000'000);
+        CHECK(book(149'999'999, 0).gaps == 0 && book(149'999'999, 0).residual_us == 149'999'999);
+        // A remainder carried in adds to the stretch: 100 s that rounded down, 100 s again, and the
+        // second adoption books the bucket the first one owed.
+        CHECK(book(100'000'000, 100'000'000).gaps == 1);
+        CHECK(book(100'000'000, 100'000'000).residual_us == -100'000'000);
+        CHECK(book(100'000'000, -60'000'000).gaps == 0 &&
+              book(100'000'000, -60'000'000).residual_us == 40'000'000);
+        // An over-booking is repaid by booking less, and never goes below nothing: with no stretch
+        // to take it from, the debt waits.
+        CHECK(book(0, -100'000'000).gaps == 0 && book(0, -100'000'000).residual_us == -100'000'000);
+        CHECK(book(0, -150'000'000).gaps == 0);
+        // ...even for a remainder no adoption writes (damaged DRAM that still verifies): the debt
+        // waits, it is not read as an unsigned number.
+        CHECK(book(0, INT32_MIN).gaps == 0 && book(0, INT32_MIN).residual_us == INT32_MIN);
+        CHECK(book(1'000'000, INT32_MIN).gaps == 0);
+        // The remainder always lies in [-half a bucket, half a bucket) while the ring is not full.
+        for (int64_t sign = 0; sign < 3 * kDtUs; sign += 7'000'000)
+            for (int32_t carry : {-150'000'000, -75'000'000, 0, 75'000'000, 149'999'999}) {
+                const HistoryAdoptBooking b = book(sign, carry);
+                CHECK(b.residual_us >= -static_cast<int32_t>(kDtUs / 2) &&
+                      b.residual_us < static_cast<int32_t>(kDtUs / 2));
+                // And the books balance exactly: what was booked plus what is carried is what was
+                // owed.
+                CHECK(static_cast<int64_t>(b.gaps) * kDtUs + b.residual_us == sign + carry);
+            }
+        // A ring filled by the booking carries nothing: there is no old content to keep in place.
+        CHECK(history_adopt_booking(1'000'000'000'000, 0, 0, 0, 77'000'000).residual_us == 0);
+        CHECK(history_adopt_booking(INT64_MAX, 0, 0, 0, 77'000'000).residual_us == 0);
+        CHECK(history_adopt_booking(INT64_MAX, 0, 0, 0, 77'000'000).gaps == HISTORY_SAMPLES);
+        CHECK(history_adopt_booking(static_cast<int64_t>(HISTORY_SAMPLES) * kDtUs, 0, 0, 0, 0)
+                  .residual_us == 0);
+        CHECK(history_adopt_booking(0, 1, 0, 0, 5).residual_us == 0); // nothing measured
+        // Telescoping: over many adoptions the booked buckets plus the final remainder are exactly
+        // the stretches added up, so the rounding errors cancel instead of accumulating.
+        {
+            int64_t  owed_total = 0, booked_total = 0;
+            int32_t  carry = 0;
+            uint32_t rng   = 12345;
+            for (int i = 0; i < 500; ++i) {
+                rng                         = rng * 1664525u + 1013904223u;
+                const int64_t stretch       = static_cast<int64_t>((rng >> 8) % 1'000'000'000u);
+                const HistoryAdoptBooking b = history_adopt_booking(stretch, 0, 0, 0, carry);
+                booked_total += static_cast<int64_t>(b.gaps) * kDtUs;
+                owed_total += stretch;
+                carry = b.residual_us;
+                CHECK(owed_total - booked_total == carry);
+            }
+            CHECK(carry >= -static_cast<int32_t>(kDtUs / 2) &&
+                  carry < static_cast<int32_t>(kDtUs / 2));
+        }
+    }
+
+    // ── the pure parts of the journal floor ─────────────────────────────────────────────────────
+    {
+        // (constexpr helpers: every argument goes through rt() so the instrumented code runs)
+        using I = int64_t;
+        // Where the newest real adopted sample ended: the claim, less one bucket per gap.
+        CHECK(history_adopt_real_end_us(rt<I>(0), rt<uint32_t>(0)) == 0);
+        CHECK(history_adopt_real_end_us(rt<I>(0), rt<uint32_t>(2)) == -2 * kDtUs);
+        CHECK(history_adopt_real_end_us(rt<I>(kDtUs), rt<uint32_t>(1)) == 0);
+        CHECK(history_adopt_real_end_us(rt<I>(0), rt<uint32_t>(HISTORY_SAMPLES - 1)) ==
+              -static_cast<I>(HISTORY_SAMPLES - 1) * kDtUs);
+        CHECK(history_adopt_real_end_us(rt<I>(0), rt<uint32_t>(HISTORY_SAMPLES)) ==
+              INT64_MIN); // a ring of nothing but gaps holds no real sample
+        CHECK(history_adopt_real_end_us(rt<I>(0), rt<uint32_t>(UINT32_MAX)) == INT64_MIN);
+        CHECK(history_adopt_real_end_us(rt<I>(-1), rt<uint32_t>(0)) == INT64_MIN);
+        CHECK(history_adopt_real_end_us(rt<I>(0), rt<uint32_t>(1), rt<uint32_t>(0)) == INT64_MIN);
+        // The floor is decided from the journal's cursor and the real sample's wall bucket.
+        const I reach = HISTORY_ADOPT_FLOOR_REACH_BUCKETS;
+        CHECK(history_adopt_floor_bucket(rt<I>(100), rt<I>(101)) ==
+              101); // one later: the seam case
+        CHECK(history_adopt_floor_bucket(rt<I>(100), rt<I>(100 + reach)) == 100 + reach);
+        CHECK(history_adopt_floor_bucket(rt<I>(100), rt<I>(101 + reach)) ==
+              INT64_MIN); // beyond reach: those samples were never filed
+        CHECK(history_adopt_floor_bucket(rt<I>(100), rt<I>(100)) == INT64_MIN); // at the cursor
+        CHECK(history_adopt_floor_bucket(rt<I>(100), rt<I>(99)) ==
+              INT64_MIN); // behind the cursor: nothing twice
+        CHECK(history_adopt_floor_bucket(rt<I>(INT64_MIN), rt<I>(101)) ==
+              INT64_MIN); // the journal holds nothing for the source
+        CHECK(history_adopt_floor_bucket(rt<I>(INT64_MIN), rt<I>(INT64_MIN + 1)) ==
+              INT64_MIN); // ...also when the distance would look small
+        CHECK(history_adopt_floor_bucket(rt<I>(100), rt<I>(INT64_MIN)) ==
+              INT64_MIN); // no wall bucket yet
+        CHECK(history_adopt_floor_bucket(rt<I>(INT64_MIN + 1), rt<I>(INT64_MAX)) ==
+              INT64_MIN); // the distance does not overflow
+        // ...and the cursor the writer works from is lifted to it, never lowered.
+        CHECK(history_adopt_floor_cursor(rt<I>(100), rt<I>(101)) == 101);
+        CHECK(history_adopt_floor_cursor(rt<I>(101), rt<I>(101)) == 101);
+        CHECK(history_adopt_floor_cursor(rt<I>(102), rt<I>(101)) == 102);
+        CHECK(history_adopt_floor_cursor(rt<I>(100), rt<I>(INT64_MIN)) == 100);
+        CHECK(history_adopt_floor_cursor(rt<I>(INT64_MIN), rt<I>(101)) ==
+              INT64_MIN); // a source without a cursor stays without one
+    }
+
+    // ── the ring: appended gaps ─────────────────────────────────────────────────────────────────
+    {
+        TrendRing empty;
+        empty.append_gaps(7);
+        CHECK(empty.count == 0 && empty.head == 0); // no seam to keep, so no ring of absences
+        TrendRing r;
+        r.push(10);
+        r.push(20);
+        r.push(30);
+        r.pending = 77;
+        r.append_gaps(0);
+        CHECK(r.count == 3);
+        r.append_gaps(2);
+        CHECK(r.count == 5 && r.head == 5 && r.pending == 77); // the open bucket is not touched
+        HistorySample out[HISTORY_SAMPLES];
+        CHECK(r.snapshot(out, HISTORY_SAMPLES) == 5);
+        CHECK(out[0] == 10 && out[1] == 20 && out[2] == 30);
+        CHECK(out[3] == HISTORY_NO_READING && out[4] == HISTORY_NO_READING);
+        r.append_gaps(100000); // capped at the ring size: only absences are left
+        CHECK(r.count == HISTORY_SAMPLES);
+        CHECK(r.head == 5); // one full turn of the ring, not a hundred thousand pushes
+        CHECK(r.snapshot(out, HISTORY_SAMPLES) == HISTORY_SAMPLES);
+        bool only_gaps = true;
+        for (size_t i = 0; i < HISTORY_SAMPLES; ++i)
+            only_gaps = only_gaps && out[i] == HISTORY_NO_READING;
+        CHECK(only_gaps);
+        TrendRing full; // a full ring loses exactly the oldest samples that the gaps displace
+        for (size_t i = 0; i < HISTORY_SAMPLES; ++i) full.push(static_cast<HistorySample>(i + 1));
+        full.append_gaps(2);
+        CHECK(full.count == HISTORY_SAMPLES &&
+              full.snapshot(out, HISTORY_SAMPLES) == HISTORY_SAMPLES);
+        CHECK(out[0] == 3 &&
+              out[HISTORY_SAMPLES - 3] == static_cast<HistorySample>(HISTORY_SAMPLES));
+        CHECK(out[HISTORY_SAMPLES - 2] == HISTORY_NO_READING &&
+              out[HISTORY_SAMPLES - 1] == HISTORY_NO_READING);
+    }
+
+    // ── a) a stall the poll task signs through is booked, not refused ────────────────────────────
+    // The newest sample ends at a bucket boundary and is committed at the first fold after it (lag
+    // 0 to 10 s). The raster then stalls - an OTA or weather hold-off parks it - while the poll
+    // task keeps signing, and the fixture restarts after `stall` seconds with a successful
+    // shutdown touch exactly at reset. Real shutdown touching is best effort. The retired rule
+    // asked whether the commit was within a bucket plus 90 s of the last sign of life and refused
+    // everything beyond it, although the record measures that stretch exactly; the new rule books
+    // it. Every scenario below is judged by both, and the booked placement is measured against the
+    // truth (the reset's real downtime is 2 s, the allowance 5 s).
+    {
+        const int64_t kRetiredBoundUs = (static_cast<int64_t>(HISTORY_DT_S) + 90) * 1000000;
+        int           scenarios = 0, old_refused = 0, new_refused = 0, filled = 0;
+        int64_t       worst_s = 0, worst_old_accepted_s = 0;
+        for (int64_t lag = 0; lag <= 10; lag += 5)
+            for (int64_t last_boundary = 300; last_boundary <= 600; last_boundary += 300)
+                for (int64_t stall = 0; stall <= 7200; stall += 7) {
+                    HistoryLiveness lv{};
+                    history_liveness_begin(lv, 0);
+                    const int64_t commit_s = last_boundary + lag;
+                    history_liveness_commit(lv, kX, commit_s * 1000000);
+                    const int64_t reset_s = commit_s + stall;
+                    history_liveness_touch(lv, reset_s * 1000000);
+                    const bool              w[HISTORY_LIVENESS_RASTERS] = {true, false, false};
+                    const HistoryRasterPlan plan = history_raster_plan(lv, w);
+                    const bool old_stale         = lv.sign_us - lv.commit_us[0] > kRetiredBoundUs;
+                    const HistoryAdoptBooking bk = history_adopt_booking(
+                        lv.sign_us, lv.commit_us[0], DWELL_REBOOT_BLIND_S, 0, 0);
+                    // Truth: from the end of the newest sample to the claim, 2 s of real downtime.
+                    const int64_t truth_s = (reset_s - last_boundary) + 2;
+                    const int64_t err     = truth_s - static_cast<int64_t>(bk.gaps) *
+                                                      static_cast<int64_t>(HISTORY_DT_S);
+                    const int64_t abs_err = err < 0 ? -err : err;
+                    scenarios++;
+                    if (old_stale) old_refused++;
+                    if (!plan.region_bookable) new_refused++;
+                    if (bk.gaps >= HISTORY_SAMPLES) filled++;
+                    worst_s = std::max(worst_s, abs_err);
+                    if (!old_stale) worst_old_accepted_s = std::max(worst_old_accepted_s, abs_err);
+                }
+        // Half a bucket of rounding plus the allowance against the real downtime (3 s too much).
+        const int64_t kBookedBoundS = HISTORY_DT_S / 2 + (DWELL_REBOOT_BLIND_S - 2);
+        CHECK(scenarios == 6174);
+        CHECK(new_refused == 0 && filled == 0);
+        CHECK(old_refused * 100 / scenarios >= 90); // the retired rule refused nearly all of them
+        // Booked, the placement error is the one of a stall-free restart: it does not grow with
+        // the stall, and the scenarios the retired rule would have refused are as good as the
+        // ones it accepted.
+        CHECK(worst_s <= kBookedBoundS);
+        CHECK(worst_old_accepted_s <= kBookedBoundS);
+    }
+
+    // ── a) one raster stops, the others do not ──────────────────────────────────────────────────
+    // A fixture in which every raster commits at the first fold after each bucket boundary, the
+    // poll task signs every second, and each raster may stop at its own instant. The next boot
+    // reads the fixture's final record; successful shutdown touching is assumed, not a device
+    // guarantee. The RETIRED rule asked every raster that held samples to have committed within a
+    // bucket plus 90 s of the last sign of life and refused the whole region (HomeHub's raw ring
+    // included) when one had not. The NEW rule measures the stall: every raster that has a commit
+    // is adopted and its stall is booked as gaps, the X10A raster alone can refuse the region, and
+    // a HomeHub or ENV III raster is retired on its own, and only when the record cannot measure
+    // it.
+    {
+        struct Stops {
+            int64_t x10a, modbus, env3;
+        };
+        const int64_t kNever = 1'000'000;
+        auto          record = [&](int64_t reset_s, const Stops& stop) {
+            HistoryLiveness lv{};
+            history_liveness_begin(lv, 0);
+            for (int64_t t = 1; t <= reset_s; ++t) {
+                history_liveness_touch(lv, t * 1000000); // the poll task, every second
+                if (t >= 301 && t % HISTORY_DT_S == 1 && t <= stop.x10a)
+                    history_liveness_commit(lv, kX, t * 1000000);
+                if (t >= 302 && t % HISTORY_DT_S == 2 && t <= stop.modbus)
+                    history_liveness_commit(lv, kM, t * 1000000);
+                if (t >= 303 && t % HISTORY_DT_S == 3 && t <= stop.env3)
+                    history_liveness_commit(lv, kE, t * 1000000);
+            }
+            return lv;
+        };
+        auto verdict = [&](bool bookable) {
+            return history_restore_verdict(sw, HISTORY_PERSIST_MAGIC, HISTORY_PERSIST_VERSION, fp,
+                                           fp, 7, 7, false, 0, bookable);
+        };
+        // The retired rule, reproduced: every raster that holds samples must have committed within
+        // one bucket plus 90 s of the last sign of life, or the region goes.
+        auto old_region_current = [&](const HistoryLiveness& lv,
+                                      const bool(&holds)[HISTORY_LIVENESS_RASTERS]) {
+            const int64_t bound_us = (static_cast<int64_t>(HISTORY_DT_S) + 90) * 1000000;
+            for (size_t i = 0; i < HISTORY_LIVENESS_RASTERS; ++i)
+                if (holds[i] && (lv.commit_us[i] == INT64_MIN || lv.sign_us < lv.commit_us[i] ||
+                                 lv.sign_us - lv.commit_us[i] > bound_us))
+                    return false;
+            return true;
+        };
+        // What the stall costs when it is booked: the time from the boundary the last commit
+        // closed (900 s for all three) to the reset, plus the allowance, to the nearest bucket.
+        auto expected_gaps = [&](int64_t reset_s) {
+            return static_cast<uint32_t>(
+                ((reset_s - 900 + DWELL_REBOOT_BLIND_S) * 1000000 + kDtUs / 2) / kDtUs);
+        };
+        auto booked = [&](const HistoryLiveness& lv, HistoryJournalSource src) {
+            return history_adopt_booking(lv.sign_us, lv.commit_us[static_cast<size_t>(src)],
+                                         DWELL_REBOOT_BLIND_S, 0, 0)
+                .gaps;
+        };
+        const int64_t kStopAt    = 1000;
+        int           old_losses = 0, new_losses = 0, scenarios = 0;
+        for (int64_t after : {100, 300, 600, 3600, 7200}) {
+            const int64_t reset_s = kStopAt + after;
+            // (i) A HomeHub disabled at runtime: its ring is frozen and its sealed target is no
+            // longer the configured one (mb_keep false), so this boot retires it anyway and does
+            // not ask the record about it.
+            {
+                const HistoryLiveness   lv = record(reset_s, Stops{kNever, kStopAt, kNever});
+                const bool              holds[HISTORY_LIVENESS_RASTERS]   = {true, true, true};
+                const bool              weighed[HISTORY_LIVENESS_RASTERS] = {true, false, true};
+                const HistoryRasterPlan plan = history_raster_plan(lv, weighed);
+                const HistoryRestore    now  = verdict(plan.region_bookable);
+                const HistoryRestore    was  = verdict(old_region_current(lv, holds));
+                scenarios++;
+                if (was != HistoryRestore::Accept) old_losses++;
+                if (now != HistoryRestore::Accept) new_losses++;
+                CHECK(now == HistoryRestore::Accept && !plan.retire_modbus && !plan.retire_env3);
+                // The old rule's verdict is what a long enough stop makes of it.
+                if (after >= 300) CHECK(was == HistoryRestore::StaleCommit);
+                if (after == 100) CHECK(was == HistoryRestore::Accept);
+            }
+            // (ii) The HomeHub task never started (or stopped) with its target unchanged: its ring
+            // is adopted, the stall is BOOKED, and nothing is retired.
+            {
+                const HistoryLiveness   lv = record(reset_s, Stops{kNever, kStopAt, kNever});
+                const bool              holds[HISTORY_LIVENESS_RASTERS] = {true, true, true};
+                const HistoryRasterPlan plan = history_raster_plan(lv, holds);
+                const HistoryRestore    now  = verdict(plan.region_bookable);
+                const HistoryRestore    was  = verdict(old_region_current(lv, holds));
+                scenarios++;
+                if (was != HistoryRestore::Accept) old_losses++;
+                if (now != HistoryRestore::Accept) new_losses++;
+                CHECK(now == HistoryRestore::Accept && !plan.retire_modbus && !plan.retire_env3);
+                CHECK(booked(lv, kM) == expected_gaps(reset_s));
+                if (after >= 300) CHECK(was == HistoryRestore::StaleCommit);
+            }
+            // (iii) The mirror: the ENV III task stopped, the sensor is configured and the ring
+            // would be kept. X10A and HomeHub are adopted, ENV III is booked.
+            {
+                const HistoryLiveness   lv = record(reset_s, Stops{kNever, kNever, kStopAt});
+                const bool              holds[HISTORY_LIVENESS_RASTERS] = {true, true, true};
+                const HistoryRasterPlan plan = history_raster_plan(lv, holds);
+                const HistoryRestore    now  = verdict(plan.region_bookable);
+                const HistoryRestore    was  = verdict(old_region_current(lv, holds));
+                scenarios++;
+                if (was != HistoryRestore::Accept) old_losses++;
+                if (now != HistoryRestore::Accept) new_losses++;
+                CHECK(now == HistoryRestore::Accept && !plan.retire_modbus && !plan.retire_env3);
+                CHECK(booked(lv, kE) == expected_gaps(reset_s));
+                if (after >= 300) CHECK(was == HistoryRestore::StaleCommit);
+            }
+            // (iv) The X10A raster itself stops - an OTA hold-off parks it while the poll task
+            // keeps signing. The old rule refused the region; the new rule books the stall.
+            {
+                const HistoryLiveness   lv = record(reset_s, Stops{kStopAt, kNever, kNever});
+                const bool              holds[HISTORY_LIVENESS_RASTERS] = {true, true, true};
+                const HistoryRasterPlan plan = history_raster_plan(lv, holds);
+                const HistoryRestore    now  = verdict(plan.region_bookable);
+                const HistoryRestore    was  = verdict(old_region_current(lv, holds));
+                scenarios++;
+                if (was != HistoryRestore::Accept) old_losses++;
+                if (now != HistoryRestore::Accept) new_losses++;
+                CHECK(now == HistoryRestore::Accept);
+                CHECK(booked(lv, kX) == expected_gaps(reset_s));
+                CHECK(was == (after >= 300 ? HistoryRestore::StaleCommit : HistoryRestore::Accept));
+            }
+            // (v) What the record cannot measure is still retired, and only that: a HomeHub ring
+            // with samples and no recorded commit goes alone, an X10A raster in the same state
+            // refuses the region.
+            {
+                const HistoryLiveness   lv = record(reset_s, Stops{kNever, 0, kNever});
+                const bool              holds[HISTORY_LIVENESS_RASTERS] = {true, true, true};
+                const HistoryRasterPlan plan = history_raster_plan(lv, holds);
+                CHECK(verdict(plan.region_bookable) == HistoryRestore::Accept);
+                CHECK(plan.retire_modbus && !plan.retire_env3 && plan.state[1] == RS::NoCommit);
+                const HistoryLiveness   mute = record(reset_s, Stops{0, kNever, kNever});
+                const HistoryRasterPlan q    = history_raster_plan(mute, holds);
+                CHECK(verdict(q.region_bookable) == HistoryRestore::StaleCommit);
+                CHECK(!q.retire_modbus && !q.retire_env3 && q.state[0] == RS::NoCommit);
+            }
+        }
+        // The old rule threw the region away in every scenario that outlasted a bucket plus 90 s
+        // (four of the five stops, four scenarios); the new rule in none.
+        CHECK(scenarios == 20 && new_losses == 0 && old_losses == 16);
+    }
+
+    // ── b) the booking, over many restarts ──────────────────────────────────────────────────────
+    // The ring has no per-sample time: a sample's place on the axis is the newest commit's instant
+    // minus its age in buckets. A device restarts n times; every ring sample carries the number of
+    // restarts it has crossed and its true end. After every boot the position the ring claims for
+    // each real sample is measured against the truth. The real adoption rules decide each restart
+    // (verdict, plan, booking, boundary claim); only the world is modelled. Three rules, each on
+    // the same restarts. RETIRED: the newest sample claims the boot instant and nothing is booked.
+    // PLAIN: the previous round's booking - the stretch from the commit's fold instant, rounded to
+    // the nearest bucket, the remainder thrown away. NEW: from the boundary, with the remainder
+    // carried to the next adoption.
+    {
+        enum class Rule { Retired, Plain, New };
+        struct Cell {
+            int64_t true_end_s;
+            bool    real;
+            int     seams;
+        };
+        struct BootPlan {
+            int64_t up_s, lag_s, down_s, start_s;
+            bool    touch; // fixture assumes a successful touch exactly at reset; panic omits it
+        };
+        struct Result {
+            int64_t worst_s        = 0; // largest |claimed - true| of any real sample, any boot
+            int64_t worst_final_s  = 0; // the same, after the last boot only
+            int     over_budget    = 0; // samples beyond (seams crossed) x per-seam budget
+            int64_t seam_sum_s     = 0; // signed error of the real newest sample at each adoption
+            int64_t seam_abs_max_s = 0;
+            int     seams          = 0;
+            int     refused        = 0;
+        };
+        const int64_t kStep = 5;
+        // Per seam, besides the rounding: the allowance against the real downtime (1 to 3 s
+        // against 5, so at most 4 s too much), and after a panic the cycle between the last sign of
+        // life and the reset (at most one touch step too little). The commit lag is not here: the
+        // stretch is measured from the boundary the commit closed.
+        const int64_t kDriftPerSeamS = DWELL_REBOOT_BLIND_S - 1 + kStep;
+        // The old rules' budget, which counts half a bucket of rounding per seam, the commit lag
+        // (10 s) and the same small terms.
+        const int64_t kSeamBudgetS = HISTORY_DT_S / 2 + 10 + kDriftPerSeamS + 1;
+        auto          plain_gaps   = [](int64_t sign_us, int64_t commit_us, uint32_t downtime_s,
+                             int64_t claim_us) -> uint32_t {
+            // 5af72ef6: nearest bucket of (sign - commit fold instant + allowance + claim).
+            if (commit_us < 0 || claim_us < 0 || sign_us < commit_us) return 0;
+            const int64_t lost =
+                sign_us - commit_us + static_cast<int64_t>(downtime_s) * 1000000 + claim_us;
+            const int64_t n = (lost + static_cast<int64_t>(HISTORY_DT_S) * 500000) /
+                              (static_cast<int64_t>(HISTORY_DT_S) * 1000000);
+            return static_cast<uint32_t>(n > static_cast<int64_t>(HISTORY_SAMPLES) ? HISTORY_SAMPLES
+                                                                                              : n);
+        };
+        auto simulate = [&](Rule rule, const std::vector<BootPlan>& plans) {
+            Result            res;
+            std::vector<Cell> ring;
+            int64_t           claimed_newest = 0;
+            HistoryLiveness   live{};
+            uint8_t           counter = 0;
+            int32_t           carry   = 0;
+            bool              region  = false;
+            int64_t           wall    = 1'786'000'000;
+            for (const BootPlan& bp : plans) {
+                const bool            has[HISTORY_LIVENESS_RASTERS] = {!ring.empty(), false, false};
+                const HistoryLiveness prev                          = live;
+                const HistoryRasterPlan plan = history_raster_plan(prev, has);
+                HistoryRestore          v    = HistoryRestore::NoRecord;
+                if (region)
+                    v = history_restore_verdict(static_cast<uint32_t>(CrashReason::PANIC),
+                                                HISTORY_PERSIST_MAGIC, HISTORY_PERSIST_VERSION, fp,
+                                                fp, 7, 7, false, counter, plan.region_bookable);
+                const int64_t start_us = bp.start_s * 1000000;
+                history_liveness_begin(live, start_us);
+                if (v == HistoryRestore::Accept) {
+                    if (!ring.empty()) {
+                        const int64_t claim_us =
+                            rule == Rule::Retired ? start_us : history_raster_boundary_us(start_us);
+                        uint32_t gaps = 0;
+                        if (rule == Rule::Plain)
+                            gaps = plain_gaps(prev.sign_us, prev.commit_us[0], DWELL_REBOOT_BLIND_S,
+                                              claim_us);
+                        if (rule == Rule::New) {
+                            const HistoryAdoptBooking bk =
+                                history_adopt_booking(prev.sign_us, prev.commit_us[0],
+                                                      DWELL_REBOOT_BLIND_S, claim_us, carry);
+                            gaps  = bk.gaps;
+                            carry = bk.residual_us;
+                        }
+                        int64_t real_true = 0;
+                        for (const Cell& c : ring)
+                            if (c.real) real_true = c.true_end_s;
+                        for (uint32_t k = 0; k < gaps; ++k) ring.push_back(Cell{0, false, 0});
+                        while (ring.size() > HISTORY_SAMPLES) ring.erase(ring.begin());
+                        for (Cell& c : ring) c.seams++;
+                        claimed_newest = wall + claim_us / 1000000;
+                        history_liveness_commit(live, kX, claim_us);
+                        // The seam: where the ring now claims the newest REAL sample to have ended.
+                        const int64_t claimed_real =
+                            claimed_newest - static_cast<int64_t>(gaps) * HISTORY_DT_S;
+                        const int64_t e = claimed_real - real_true;
+                        res.seam_sum_s += e;
+                        res.seam_abs_max_s = std::max<int64_t>(res.seam_abs_max_s, e < 0 ? -e : e);
+                        res.seams++;
+                    }
+                    counter = history_counter_next(counter);
+                } else {
+                    if (region && !ring.empty()) res.refused++;
+                    region  = true;
+                    counter = 0;
+                    carry   = 0; // a refusal wipes the region, and with it the remainder
+                    ring.clear();
+                }
+                // Only the commits and the last sign of life matter to the record (a touch never
+                // moves it back), so the model does not tick every second.
+                for (int64_t boundary = HISTORY_DT_S; boundary + bp.lag_s <= bp.up_s;
+                     boundary += HISTORY_DT_S) {
+                    const int64_t t = boundary + bp.lag_s;
+                    ring.push_back(Cell{wall + boundary, true, 0});
+                    if (ring.size() > HISTORY_SAMPLES) ring.erase(ring.begin());
+                    claimed_newest = wall + t;
+                    counter        = 0;
+                    history_liveness_commit(live, kX, t * 1000000);
+                }
+                history_liveness_touch(
+                    live, (bp.touch ? bp.up_s : std::max<int64_t>(bp.start_s, bp.up_s - kStep)) *
+                              1000000);
+                // Every real sample, measured against where the ring claims it ended.
+                res.worst_final_s = 0;
+                for (size_t i = 0; i < ring.size(); ++i) {
+                    if (!ring[i].real) continue;
+                    const int64_t age     = static_cast<int64_t>(ring.size() - 1 - i);
+                    const int64_t claimed = claimed_newest - age * HISTORY_DT_S;
+                    const int64_t e       = claimed - ring[i].true_end_s;
+                    const int64_t abs_e   = e < 0 ? -e : e;
+                    if (abs_e > res.worst_s) res.worst_s = abs_e;
+                    if (abs_e > res.worst_final_s) res.worst_final_s = abs_e;
+                    // RETIRED and PLAIN are held to the per-seam budget (half a bucket per seam);
+                    // NEW to the cumulative one: the remainder is carried, so a sample is off by
+                    // under a bucket of rounding however many seams it crossed, plus the small
+                    // terms per seam.
+                    const int64_t budget = rule == Rule::New
+                                               ? HISTORY_DT_S + ring[i].seams * kDriftPerSeamS
+                                               : ring[i].seams * kSeamBudgetS;
+                    if (abs_e > budget + 2 * (10 + kStep)) res.over_budget++;
+                }
+                wall += bp.up_s + bp.down_s;
+            }
+            return res;
+        };
+
+        // ── random restarts: uptime, lag, downtime and start-up all vary ───────────────────────
+        auto random_plans = [](uint32_t seed, int boots) {
+            std::vector<BootPlan> plans;
+            uint32_t              rng  = seed;
+            auto                  next = [&rng](uint32_t n) {
+                rng = rng * 1664525u + 1013904223u;
+                return (rng >> 8) % n;
+            };
+            for (int b = 0; b < boots; ++b)
+                plans.push_back(BootPlan{330 + static_cast<int64_t>(next(900)),
+                                         static_cast<int64_t>(next(11)),
+                                         1 + static_cast<int64_t>(next(3)),
+                                         2 + static_cast<int64_t>(next(8)), next(2) == 0});
+            return plans;
+        };
+        {
+            int64_t new_worst = 0, old_worst = 0, new_abs_max = 0;
+            int     new_over = 0, old_over = 0, new_seams = 0, old_seams = 0;
+            int64_t new_sum = 0, old_sum = 0;
+            for (uint32_t seed = 1; seed <= 12; ++seed) {
+                const std::vector<BootPlan> plans = random_plans(seed * 2654435761u, 48);
+                const Result                n     = simulate(Rule::New, plans);
+                const Result                o     = simulate(Rule::Retired, plans);
+                new_worst                         = std::max(new_worst, n.worst_s);
+                old_worst                         = std::max(old_worst, o.worst_s);
+                new_over += n.over_budget;
+                old_over += o.over_budget;
+                new_sum += n.seam_sum_s;
+                old_sum += o.seam_sum_s;
+                new_seams += n.seams;
+                old_seams += o.seams;
+                new_abs_max = std::max(new_abs_max, n.seam_abs_max_s);
+                CHECK(n.seams > 20 && o.seams > 20); // the histories do adopt, many times
+            }
+            // NEW: every sample sits within (restarts it crossed) x the per-seam budget of the
+            // truth; with the remainder carried, one seam can be wrong by up to a whole bucket (it
+            // takes over the previous seam's remainder) while the sum over the seams a sample
+            // crossed stays within one bucket plus the small terms; and the seams do not lean one
+            // way: their mean is a few seconds, not a fraction of a bucket.
+            CHECK(new_over == 0);
+            CHECK(new_abs_max <= HISTORY_DT_S + 2 * kDriftPerSeamS + 1);
+            CHECK(new_worst <= HISTORY_DT_S + 48 * kDriftPerSeamS + 2 * (10 + kStep));
+            CHECK(new_seams > 0 && new_sum / new_seams < 30 && new_sum / new_seams > -30);
+            // RETIRED: the newest sample claims the boot instant, so every seam collapses the
+            // whole stretch and all of them lean the same way, by about half a bucket on average.
+            // The samples then leave the per-seam budget by many buckets over a day of restarts.
+            CHECK(old_over > 100);
+            CHECK(old_seams > 0 && old_sum / old_seams > 100);
+            CHECK(old_worst > 20 * static_cast<int64_t>(HISTORY_DT_S) && old_worst > 3 * new_worst);
+        }
+
+        // ── restarts at a FIXED uptime: the case rounding alone cannot survive ─────────────────
+        // A restart loop at one uptime (a deterministic fault at the same point after boot, a
+        // watchdog with a fixed period) leaves the same remainder with the same sign at every
+        // seam. Rounding without the carry (PLAIN) is then biased and the errors add up linearly,
+        // as the retired rule's did; swept over every cadence from 305 to 900 s in steps of 5 s
+        // (the shortest boot that commits once to the longest of interest).
+        {
+            const int kRestarts = 48;
+            int64_t   new_worst = 0, plain_worst = 0, old_worst = 0;
+            int       plain_over = 0, new_over = 0, old_over = 0, cadences = 0;
+            // After n restarts a sample's error is bounded by one bucket of rounding plus the
+            // non-rounding terms, n times: the allowance against the real downtime (1 s of real
+            // downtime against 5 s) and nothing else, because this fixture assumes a successful
+            // shutdown touch exactly at reset. Real shutdown touching is best effort.
+            const int64_t kBoundS = HISTORY_DT_S + kRestarts * (DWELL_REBOOT_BLIND_S - 1);
+            for (int64_t up = 305; up <= 900; up += 5) {
+                std::vector<BootPlan> plans(kRestarts, BootPlan{up, 0, 1, 2, true});
+                const Result          n = simulate(Rule::New, plans);
+                const Result          p = simulate(Rule::Plain, plans);
+                const Result          o = simulate(Rule::Retired, plans);
+                cadences++;
+                new_worst   = std::max(new_worst, n.worst_final_s);
+                plain_worst = std::max(plain_worst, p.worst_final_s);
+                old_worst   = std::max(old_worst, o.worst_final_s);
+                if (n.worst_final_s > kBoundS) new_over++;
+                if (p.worst_final_s > kBoundS) plain_over++;
+                if (o.worst_final_s > kBoundS) old_over++;
+                CHECK(n.seams == kRestarts - 1);
+            }
+            CHECK(cadences == 120);
+            // NEW: no cadence leaves a sample further off than the bound, however it rounds.
+            CHECK(new_over == 0 && new_worst <= kBoundS);
+            // PLAIN rounding drifts in one direction at most cadences (the previous round's
+            // booking); the retired rule at nearly all of them, by hours.
+            CHECK(plain_over >= 100);
+            CHECK(old_over >= 100);
+            CHECK(plain_worst > 10 * new_worst && old_worst > plain_worst);
+        }
+    }
+
+    // ── d) the journal does not file an adopted sample twice ────────────────────────────────────
+    // The journal writer files the ring's samples at the wall buckets after its cursor. After an
+    // adoption the ring is shifted by the seam, so the newest real sample can sit one bucket later
+    // than the bucket the previous boot already filed it under, and the writer files the same
+    // reading again where nothing was measured. Swept over every wall phase, the uptimes and lags
+    // of a restart, the real downtime, with the writer's own arithmetic: the previous boot filed
+    // everything up to its newest commit (`drained`) or its last bucket was still waiting for the
+    // next poll tick when it died (`panic`). A reading r of the last few has its previous bucket p;
+    // the ring now places it at p + delta, where delta is how far the seam moved the newest sample.
+    {
+        auto run = [&](bool drained, bool floor_on, int behind) {
+            struct Tally {
+                long trials = 0, dups = 0, lost = 0, floored = 0, bad_floor = 0;
+            } t;
+            const int64_t base = 1'786'000'000;
+            for (int phase = 0; phase < static_cast<int>(HISTORY_DT_S); ++phase)
+                for (int64_t up = 305; up <= 900; up += 5)
+                    for (int64_t lag : {0, 5, 10})
+                        for (int64_t down : {1, 2, 3}) {
+                            if (up - lag < HISTORY_DT_S) continue; // no commit this boot
+                            const int64_t boundary = (up - lag) / HISTORY_DT_S * HISTORY_DT_S;
+                            const int64_t fold     = boundary + lag;
+                            const int64_t wall0_a  = base + phase;
+                            // Where the previous boot filed its newest reading, and how far it got.
+                            const int64_t newest_prev = history_anchor_bucket(
+                                wall0_a + fold, fold * 1000000, fold * 1000000);
+                            // `behind`: how many further buckets the journal lags (a backlog).
+                            const int64_t cursor =
+                                (drained ? newest_prev : newest_prev - 1) - behind;
+                            // The next boot: its clock starts `up + down` later, SNTP follows.
+                            const int64_t             wall0_b = wall0_a + up + down;
+                            const int64_t             sync_s  = 20;
+                            const int64_t             now_us  = sync_s * 1000000;
+                            const HistoryAdoptBooking bk      = history_adopt_booking(
+                                up * 1000000, fold * 1000000, DWELL_REBOOT_BLIND_S, 0, 0);
+                            const int64_t real_end = history_adopt_real_end_us(0, bk.gaps);
+                            const int64_t real_bucket =
+                                history_anchor_bucket(wall0_b + sync_s, now_us, real_end);
+                            const int64_t anchor_b =
+                                history_anchor_bucket(wall0_b + sync_s, now_us, 0);
+                            // The writer's walk: from the cursor (lifted to the floor) to the
+                            // anchor of the newest ring sample.
+                            int64_t working = cursor;
+                            if (floor_on) {
+                                const int64_t floor =
+                                    history_adopt_floor_bucket(cursor, real_bucket);
+                                working = history_adopt_floor_cursor(cursor, floor);
+                                if (floor != INT64_MIN) {
+                                    t.floored++;
+                                    // The first bucket it files is the one after the real sample,
+                                    // which was ahead of the cursor.
+                                    if (working != real_bucket || real_bucket <= cursor)
+                                        t.bad_floor++;
+                                }
+                            }
+                            // The last four readings: their previous buckets p, their new ones.
+                            const int64_t delta = real_bucket - newest_prev;
+                            for (int64_t j = 0; j < 4; ++j) {
+                                const int64_t p            = newest_prev - j;
+                                const bool    filed_before = p <= cursor;
+                                const int64_t placed       = p + delta;
+                                const bool    filed_anew   = placed > working && placed <= anchor_b;
+                                if (filed_before && filed_anew) t.dups++;
+                                if (!filed_before && !filed_anew) t.lost++;
+                            }
+                            t.trials++;
+                        }
+            return t;
+        };
+        // The previous boot drained everything: the old rule files readings twice at a share of
+        // seams, the floor files none twice and loses nothing (every reading it skips is filed).
+        const auto old_drained = run(true, false, 0);
+        const auto new_drained = run(true, true, 0);
+        CHECK(old_drained.trials > 100000);
+        CHECK(old_drained.dups * 20 > old_drained.trials); // more than 1 seam in 20
+        CHECK(new_drained.dups == 0 && new_drained.lost == 0 && old_drained.lost == 0);
+        CHECK(new_drained.floored > 0 && new_drained.bad_floor == 0);
+        // The previous boot died with its last bucket still waiting for the next poll tick: that
+        // reading was never filed. The old rule files it (at its seam-shifted bucket); the floor
+        // cannot tell it from a reading filed under another bucket and skips it - the documented
+        // cost, one reading of the tail, still in RAM. Neither rule files anything twice there.
+        const auto old_undrained = run(false, false, 0);
+        const auto new_undrained = run(false, true, 0);
+        CHECK(old_undrained.dups > 0 && new_undrained.dups == 0);
+        CHECK(new_undrained.lost >= old_undrained.lost &&
+              new_undrained.lost <= new_undrained.trials);
+        // A cursor behind the sample by more than the floor's reach says its readings were never
+        // filed (a backlog: the clock had not synced, or the journal was down): no floor, and the
+        // writer files them all as it always did. Four buckets behind is the nearest backlog the
+        // model has (the seam moves the sample by one bucket, one more may be undrained), so a
+        // reach any wider than two loses readings here.
+        // A genuine near-cursor backlog cannot be distinguished from a shifted filed sample.
+        // Sweep both ambiguous lengths explicitly: the floor sacrifices a bounded undrained
+        // tail, never more than its reach per trial, and never increases duplicate filings.
+        for (int behind : {1, 2}) {
+            const auto short_old = run(true, false, behind);
+            const auto short_new = run(true, true, behind);
+            CHECK(short_new.floored > 0 && short_new.bad_floor == 0);
+            CHECK(short_new.lost >= short_old.lost);
+            CHECK(short_new.lost <= short_new.trials * HISTORY_ADOPT_FLOOR_REACH_BUCKETS);
+            CHECK(short_new.dups <= short_old.dups);
+        }
+        for (int behind : {4, 50}) {
+            const auto far_old = run(true, false, behind);
+            const auto far_new = run(true, true, behind);
+            CHECK(far_new.floored == 0 && far_new.lost == far_old.lost &&
+                  far_new.dups == far_old.dups);
+        }
+        // ...and the reach is wide enough for what it must absorb: a seam moves the newest sample
+        // by under a bucket and one more bucket may be undrained, so the floor applies at every
+        // such trial and a narrower reach would leave duplicates.
+        CHECK(HISTORY_ADOPT_FLOOR_REACH_BUCKETS >= 2);
+        CHECK(old_drained.dups > 0 && new_drained.floored == old_drained.dups);
+    }
+
+    // ── c) the DHW handoff survives a refusal that only says "not aged" ─────────────────────────
+    // Legacy regression: a 30-minute charge ends ten minutes before an intentional restart.
+    // The former counter guard returned not_committed after RAM adoption without a completed hour;
+    // discarding the ongoing settle filter then started a candidate too early. Keep these predicate
+    // and state-filter controls. Current startup retires completed RAM hours and retains only a
+    // scoped one-shot filter, applied after current-source confirmation without pending counters.
+    {
+        const CheckupRestore all[] = {CheckupRestore::Accept,
+                                      CheckupRestore::NoRecord,
+                                      CheckupRestore::PowerCycle,
+                                      CheckupRestore::WrongVersion,
+                                      CheckupRestore::WrongLayout,
+                                      CheckupRestore::BadCrc,
+                                      CheckupRestore::ModelChanged,
+                                      CheckupRestore::SafeMode,
+                                      CheckupRestore::DiagnosticsDisabled,
+                                      CheckupRestore::DiagnosticsChanged,
+                                      CheckupRestore::NotCommitted,
+                                      CheckupRestore::Flash};
+        for (CheckupRestore r : all)
+            CHECK(checkup_restore_keeps_dhw_handoff(rt(r)) ==
+                  (r == CheckupRestore::Accept || r == CheckupRestore::NotCommitted));
+
+        auto quiet = [](int r5t) {
+            CheckupSample s;
+            s.valve_known = s.bsh_known = s.pump_known = true;
+            s.valve_dhw = s.bsh_on = s.pump_on = false;
+            s.r5t_ok                           = true;
+            s.r5t_tenths                       = r5t;
+            return s;
+        };
+        auto charging = [&quiet]() {
+            CheckupSample s = quiet(500);
+            s.valve_dhw     = true;
+            return s;
+        };
+        DhwLossState  st;
+        DhwLossBucket b;
+        int64_t       t = 0;
+        for (int i = 0; i < 1800; ++i, t += 1000000) dhw_loss_step(st, b, charging(), t);
+        for (int i = 0; i < 600; ++i, t += 1000000) dhw_loss_step(st, b, quiet(520), t);
+        const DhwLossCarry carry = dhw_loss_checkpoint(st, t);
+        CHECK(carry.settle_remaining_s > 2000 && carry.settle_remaining_s <= DHW_LOSS_SETTLE_S);
+
+        // The first moment, after the restart, a candidate segment begins.
+        auto first_candidate_s = [&](bool keep) {
+            DhwLossState  n;
+            DhwLossBucket nb;
+            const int64_t adopt = 6 * 1000000LL; // this boot's uptime at the adoption
+            if (keep) dhw_loss_adopt(n, carry, adopt);
+            int64_t u = adopt;
+            for (int i = 0; i < 4800; ++i, u += 1000000) {
+                dhw_loss_step(n, nb, quiet(520 - i / 120), u);
+                if (n.segment_start_us >= 0) return u / 1000000;
+            }
+            return static_cast<int64_t>(-1);
+        };
+        const CheckupRestore refusal   = CheckupRestore::NotCommitted;
+        const int64_t        old_start = first_candidate_s(rt(refusal) == CheckupRestore::Accept);
+        const int64_t new_start = first_candidate_s(checkup_restore_keeps_dhw_handoff(rt(refusal)));
+        // OLD: a candidate hour starts within seconds, inside the 45 minutes the charge is owed.
+        CHECK(old_start >= 0 && old_start < static_cast<int64_t>(DHW_LOSS_SETTLE_S));
+        CHECK(old_start < static_cast<int64_t>(carry.settle_remaining_s));
+        // NEW: nothing starts before the carried settle is spent.
+        CHECK(new_start >= static_cast<int64_t>(carry.settle_remaining_s));
+        // A refusal that says the record cannot be believed keeps the old (discarding) behaviour.
+        CHECK(first_candidate_s(checkup_restore_keeps_dhw_handoff(rt(CheckupRestore::BadCrc))) ==
+              old_start);
+    }
+}
+
+// Fresh-instance reconstruction oracle: durable absolute endpoints, not boot counts, own age.
+static void test_checkup_scoped_flash_age() {
+    using namespace daik::logic;
+    const uint32_t        model  = checkup_model_fingerprint("profile-p");
+    const uint32_t        link_a = history_x10a_target_fingerprint("profile-p", 44, 43, 'I');
+    const uint32_t        link_b = history_x10a_target_fingerprint("profile-p", 1, 2, 'I');
+    CheckupJournalPayload stored{};
+    stored.model_fp               = model;
+    stored.source_fp              = link_a;
+    stored.diagnostics_generation = 7;
+    stored.end_unix_s             = 3600;
+    stored.checkup.starts         = 1;
+    CHECK(checkup_journal_identity_matches(stored, model, link_a, 7));
+    CHECK(!checkup_journal_identity_matches(stored, model, link_b, 7));
+    CHECK(!checkup_journal_identity_matches(stored, model, link_a, 8));
+    CHECK(!checkup_journal_identity_matches(stored, model, 0, 7));
+    auto legacy      = stored;
+    legacy.source_fp = 0;
+    CHECK(!checkup_journal_identity_matches(legacy, model, link_a, 7));
+    CHECK(checkup_restore_route(CheckupRestore::Accept) == CheckupRestore::FlashPending);
+    CHECK(checkup_restore_route(CheckupRestore::NotCommitted) == CheckupRestore::FlashPending);
+    CHECK(checkup_restore_route(CheckupRestore::BadCrc) == CheckupRestore::BadCrc);
+
+    // Use the production admission predicate, then aggregate a fresh ring: startup expectations,
+    // no clock, a pending explicit reset and a consumed reset with withdrawn confirmation all
+    // produce no marker. Only currently confirmed, matching model/link/consent restores it.
+    const int64_t bucket = checkup_journal_bucket(stored.end_unix_s);
+    // A fresh boot may finish its first hour behind an old flash cursor, or after a power-off
+    // gap. Only current-boot completed hours may be offered; exercise the production helper with
+    // runtime inputs so constexpr folding cannot hide either side of its cursor/anchor guards.
+    struct LiveCursorCase {
+        int64_t after, newest;
+        size_t  count;
+        int64_t expected;
+    };
+    const LiveCursorCase live_cases[] = {{INT64_MIN, 6, 1, 6},
+                                         {4, 6, 1, 6},
+                                         {4, 6, 2, 5},
+                                         {5, 6, 2, 6},
+                                         {2, 6, 2, 5},
+                                         {6, 6, 2, INT64_MIN},
+                                         {7, 6, 2, INT64_MIN},
+                                         {INT64_MIN, 6, 0, INT64_MIN},
+                                         {0, INT64_MIN, 1, INT64_MIN}};
+    for (const LiveCursorCase& c : live_cases) {
+        volatile int64_t after = c.after, newest = c.newest;
+        volatile size_t  count = c.count;
+        CHECK(checkup_journal_next_live_bucket(after, newest, count) == c.expected);
+    }
+    const uint32_t model_b = checkup_model_fingerprint("profile-q");
+    struct AdmissionCase {
+        int64_t  wall;
+        bool     confirmed;
+        uint32_t profile, source, consent;
+        bool     reset, expected;
+    };
+    const AdmissionCase cases[] = {
+        {7200, true, model, link_a, 7, false, true},
+        {-1, true, model, link_a, 7, false, false},
+        {7200, false, model, link_a, 7, false, false}, // cached startup scope
+        {7200, true, 0, link_a, 7, false, false},      // no detected profile
+        {7200, true, model, 0, 7, false, false},       // no confirmed link scope
+        {7200, true, model_b, link_a, 7, false, false},
+        {7200, true, model, link_b, 7, false, false},
+        {7200, true, model, link_a, 8, false, false},
+        {7200, true, model, link_a, 7, true, false}, // reset not yet consumed
+        {7200, false, 0, 0, 7, false, false},        // reset consumed; new detector still missing
+        {stored.end_unix_s + CHECKUP_WINDOW_S - 1, true, model, link_a, 7, false, true},
+        {stored.end_unix_s + CHECKUP_WINDOW_S, true, model, link_a, 7, false, false},
+        {stored.end_unix_s - 1, true, model, link_a, 7, false, false}, // future record
+    };
+    for (const auto& c : cases) {
+        CheckupRing ring;
+        if (checkup_journal_restore_admits(stored, bucket, c.wall, c.confirmed, c.profile, c.source,
+                                           c.consent, c.reset))
+            ring.push(stored.checkup);
+        CHECK((checkup_aggregate(ring).starts == 1) == c.expected);
+        const CheckupJournalRecord record{bucket, stored};
+        bool                       from_flash = true;
+        const auto*                selected =
+            checkup_journal_select_slot(bucket, nullptr, 0, &record, 1, c.wall, c.confirmed,
+                                        c.profile, c.source, c.consent, c.reset, from_flash);
+        CHECK((selected != nullptr) == c.expected);
+        CHECK(from_flash == c.expected);
+    }
+    CHECK(!checkup_journal_restore_admits(stored, bucket + 1, 7200, true, model, link_a, 7, false));
+    auto replacement                   = stored;
+    replacement.model_fp               = model_b;
+    replacement.source_fp              = link_b;
+    replacement.diagnostics_generation = 8;
+    CHECK(
+        checkup_journal_restore_admits(replacement, bucket, 7200, true, model_b, link_b, 8, false));
+
+    // Provenance belongs to the interval actually selected, not every valid journal candidate.
+    // A live interval wins; stale live projections must not hide a compatible stored interval.
+    CheckupJournalRecord journal[]    = {{bucket, stored}, {bucket, stored}, {bucket, stored}};
+    journal[1].payload.checkup.starts = 2;
+    journal[2].payload.source_fp      = link_b; // newest duplicate is incompatible
+    CheckupJournalRecord live{bucket, stored};
+    live.payload.checkup.starts = 9;
+    bool       from_flash       = true;
+    const auto select           = [&](int64_t wanted, const CheckupJournalRecord* current, size_t n,
+                            const CheckupJournalRecord* durable, size_t m) {
+        const CheckupJournalRecord* volatile current_records = current;
+        const CheckupJournalRecord* volatile durable_records = durable;
+        volatile size_t current_count = n, durable_count = m;
+        return checkup_journal_select_slot(wanted, current_records, current_count, durable_records,
+                                                     durable_count, 7200, true, model, link_a, 7, false,
+                                                     from_flash);
+    };
+    CHECK(select(bucket, &live, 1, journal, 3) == &live);
+    CHECK(!from_flash);
+    live.payload.end_unix_s = -1;
+    CHECK(select(bucket, &live, 1, journal, 3) == &journal[1]);
+    CHECK(from_flash);
+    CHECK(select(bucket + 1, &live, 1, journal, 3) == nullptr);
+    CHECK(!from_flash);
+    CHECK(select(bucket, nullptr, 1, journal, 3) == nullptr);
+    CHECK(!from_flash);
+    CHECK(select(bucket, nullptr, 0, nullptr, 1) == nullptr);
+    CHECK(!from_flash);
+    CHECK(select(bucket, &journal[0], 1, nullptr, 1) == nullptr);
+    CHECK(!from_flash);
+    CHECK(select(bucket, &journal[0], 0, nullptr, 1) == nullptr);
+    CHECK(!from_flash);
+    CHECK(select(bucket, &journal[0], 1, nullptr, 0) == &journal[0]);
+    CHECK(!from_flash);
+    CHECK(select(bucket, nullptr, 0, nullptr, 0) == nullptr);
+    CHECK(!from_flash);
+    CHECK(select(bucket, nullptr, 0, journal, 1) == &journal[0]);
+    CHECK(from_flash);
+    journal[2].payload = stored;
+    CHECK(select(bucket, nullptr, 0, journal, 3) == &journal[2]);
+    CHECK(from_flash);
+
+    // At the same two-second remaining age, the fixed 23 completed slots retain the marker only
+    // near the end of a wall-clock hour. An evicted valid candidate is not restored evidence.
+    for (int64_t phase_s : {100LL, 3599LL}) {
+        const int64_t now        = 1'728'000'000 + phase_s;
+        auto          near_limit = stored;
+        near_limit.end_unix_s    = now - CHECKUP_WINDOW_S + 2;
+        const CheckupJournalRecord candidate{checkup_journal_bucket(near_limit.end_unix_s),
+                                             near_limit};
+        CHECK(checkup_journal_restore_admits(candidate.payload, candidate.bucket, now, true, model,
+                                             link_a, 7, false));
+        const int64_t newest_completed = checkup_journal_bucket(now) - 1;
+        unsigned      materialized     = 0;
+        uint32_t      marker           = 0;
+        for (int64_t wanted = newest_completed - CHECKUP_COMPLETED_BUCKETS + 1;
+             wanted <= newest_completed; ++wanted) {
+            const auto* chosen = checkup_journal_select_slot(
+                wanted, nullptr, 0, &candidate, 1, now, true, model, link_a, 7, false, from_flash);
+            if (chosen && from_flash) {
+                ++materialized;
+                marker += chosen->payload.checkup.starts;
+            }
+        }
+        CHECK(materialized == (phase_s == 3599 ? 1u : 0u));
+        CHECK(marker == (phase_s == 3599 ? 1u : 0u));
+    }
+
+    // Every restart constructs a new ring. An independent timestamp comparison is the oracle.
+    // The retired warm path keeps a marker because every 7199-s boot completes one hour.
+    for (int64_t boot_s : {3599LL, 3601LL, 7199LL}) {
+        CheckupRing retired;
+        retired.push(stored.checkup);
+        unsigned old_false_accepts = 0;
+        for (int64_t elapsed = 0; elapsed <= 3 * CHECKUP_WINDOW_S; elapsed += boot_s) {
+            const int64_t wall = stored.end_unix_s + elapsed;
+            CheckupRing   fresh;
+            const bool    expected = elapsed < CHECKUP_WINDOW_S;
+            if (checkup_journal_restore_admits(stored, bucket, wall, true, model, link_a, 7, false))
+                fresh.push(stored.checkup);
+            CHECK((checkup_aggregate(fresh).starts != 0) == expected);
+            if (checkup_aggregate(retired).starts && !expected) ++old_false_accepts;
+            for (int64_t hour = 0; hour < boot_s / CHECKUP_DT_S; ++hour)
+                retired.commit(0); // old warm path ages only completed boot hours
+        }
+        if (boot_s != 3601)
+            CHECK(old_false_accepts > 0); // shorter/phase-losing boots expose old path
+    }
+    const int64_t wall   = stored.end_unix_s + CHECKUP_WINDOW_S - 60;
+    const int64_t mono   = 2'000'000;
+    const int64_t expiry = checkup_restore_expiry_us(stored.end_unix_s, wall, mono);
+    CHECK(expiry == mono + 60'000'000);
+    CHECK(!checkup_restored_expired(expiry, expiry - 1));
+    CHECK(checkup_restored_expired(expiry, expiry));
+    CHECK(checkup_restored_expired(expiry, expiry + 1));
+    // Later backward/forward SNTP corrections cannot change an already dated slot's measured
+    // remaining lifetime. Recomputing against the corrected wall clock is a negative control.
+    for (const int64_t jump_s : {-3600LL, 3600LL}) {
+        const int64_t corrected_wall = wall + jump_s;
+        const int64_t recomputed =
+            checkup_restore_expiry_us(stored.end_unix_s, corrected_wall, mono);
+        CHECK(recomputed != expiry);
+        CHECK(!checkup_restored_expired(expiry, mono + 59'000'000));
+        CHECK(checkup_restored_expired(expiry, mono + 60'000'000));
+    }
+    CHECK(!checkup_restored_expired(0, expiry + 1)); // live slot/gap
+    CHECK(checkup_restore_expiry_us(stored.end_unix_s, stored.end_unix_s - 1, mono) == 0);
+    CHECK(checkup_restore_expiry_us(stored.end_unix_s, stored.end_unix_s + CHECKUP_WINDOW_S,
+                                    mono) == 0);
+    // Invalid anchors fail closed; a positive lifetime near the timer's representable end
+    // saturates instead of wrapping into an already-expired or undated slot.
+    for (int64_t invalid_end : {-1LL, -3600LL}) {
+        CHECK(checkup_journal_bucket(invalid_end) == INT64_MIN);
+        CHECK(!checkup_journal_in_window(invalid_end, wall));
+        CHECK(!checkup_journal_restore_admits(stored, checkup_journal_bucket(invalid_end), wall,
+                                              true, model, link_a, 7, false));
+    }
+    for (int64_t invalid_mono : {-1LL, -1000000LL})
+        CHECK(checkup_restore_expiry_us(stored.end_unix_s, wall, invalid_mono) == 0);
+    int64_t near_timer_limit = INT64_MAX - 10'000'000;
+    CHECK(checkup_restore_expiry_us(stored.end_unix_s, wall, near_timer_limit) == INT64_MAX);
+    CHECK(!checkup_restored_expired(INT64_MAX, near_timer_limit));
+    CHECK(checkup_restored_expired(INT64_MAX, INT64_MAX));
+
+    // Visible provenance is an API contract, including expected fail-closed startup refusals.
+    const std::pair<CheckupRestore, const char*> provenance[] = {
+        {CheckupRestore::Accept, "accept"},
+        {CheckupRestore::NoRecord, "no_record"},
+        {CheckupRestore::PowerCycle, "power_cycle"},
+        {CheckupRestore::WrongVersion, "wrong_version"},
+        {CheckupRestore::WrongLayout, "wrong_layout"},
+        {CheckupRestore::BadCrc, "bad_crc"},
+        {CheckupRestore::ModelChanged, "model_changed"},
+        {CheckupRestore::SafeMode, "safe_mode"},
+        {CheckupRestore::DiagnosticsDisabled, "diagnostics_disabled"},
+        {CheckupRestore::DiagnosticsChanged, "diagnostics_changed"},
+        {CheckupRestore::NotCommitted, "not_committed"},
+        {CheckupRestore::FlashPending, "flash_pending"},
+        {CheckupRestore::Fresh, "fresh"},
+        {CheckupRestore::Flash, "flash"},
+        {static_cast<CheckupRestore>(255), "unknown"},
+    };
+    for (const auto& entry : provenance)
+        CHECK(std::strcmp(checkup_restore_slug(entry.first), entry.second) == 0);
+
+    HistoryJournalHeader old{};
+    old.magic       = HISTORY_JOURNAL_MAGIC;
+    old.version     = HISTORY_JOURNAL_VERSION;
+    old.source      = static_cast<uint8_t>(HistoryJournalSource::Checkup);
+    old.commit      = HISTORY_JOURNAL_COMMITTED;
+    old.catalog_fp  = 0x1234;
+    old.slot_bytes  = HISTORY_JOURNAL_SLOT_BYTES;
+    old.sequence    = 999;
+    old.bucket      = 1;
+    old.dt_s        = CHECKUP_DT_S;
+    old.value_count = 2;
+    old.rings[0]    = 31;
+    old.rings[1]    = 12;
+    old.rings[2]    = 3;
+    CHECK(history_journal_checkup_header_structural_matches(old, CHECKUP_DT_S));
+    CHECK(!history_journal_header_matches(old, checkup_journal_fingerprint(), CHECKUP_JOURNAL_WORDS,
+                                          CHECKUP_DT_S));
+    old.commit ^= 1u;
+    CHECK(!history_journal_checkup_header_structural_matches(old, CHECKUP_DT_S));
+    old.commit       = HISTORY_JOURNAL_COMMITTED;
+    auto unrelated   = old;
+    unrelated.source = static_cast<uint8_t>(HistoryJournalSource::X10a);
+    CHECK(!history_journal_checkup_header_structural_matches(unrelated, CHECKUP_DT_S));
+    unrelated            = old;
+    unrelated.catalog_fp = 0;
+    CHECK(!history_journal_checkup_header_structural_matches(unrelated, CHECKUP_DT_S));
+    unrelated             = old;
+    unrelated.value_count = HISTORY_JOURNAL_PAYLOAD_BYTES / sizeof(HistorySample) + 1;
+    CHECK(!history_journal_checkup_header_structural_matches(unrelated, CHECKUP_DT_S));
+
+    DhwLossHandoffPayload handoff{};
+    handoff.source_fp                    = link_a;
+    handoff.candidate.settle_remaining_s = DHW_LOSS_SETTLE_S;
+    handoff.pending.windows              = 3;
+    const uint32_t sealed                = checkup_dhw_handoff_crc(model, handoff);
+    CHECK(checkup_dhw_handoff_valid(CHECKUP_DHW_HANDOFF_MAGIC, CHECKUP_DHW_HANDOFF_VERSION,
+                                    checkup_dhw_handoff_layout_fingerprint(), model, model, sealed,
+                                    handoff));
+    CHECK(!checkup_dhw_handoff_valid(0, CHECKUP_DHW_HANDOFF_VERSION,
+                                     checkup_dhw_handoff_layout_fingerprint(), model, model, sealed,
+                                     handoff));
+    CHECK(!checkup_dhw_handoff_valid(CHECKUP_DHW_HANDOFF_MAGIC, CHECKUP_DHW_HANDOFF_VERSION - 1,
+                                     checkup_dhw_handoff_layout_fingerprint(), model, model, sealed,
+                                     handoff));
+    CHECK(!checkup_dhw_handoff_valid(CHECKUP_DHW_HANDOFF_MAGIC, CHECKUP_DHW_HANDOFF_VERSION,
+                                     checkup_dhw_handoff_layout_fingerprint() ^ 1u, model, model,
+                                     sealed, handoff));
+    CHECK(!checkup_dhw_handoff_valid(CHECKUP_DHW_HANDOFF_MAGIC, CHECKUP_DHW_HANDOFF_VERSION,
+                                     checkup_dhw_handoff_layout_fingerprint(), model, model_b,
+                                     sealed, handoff));
+    handoff.source_fp = link_b;
+    CHECK(!checkup_dhw_handoff_valid(CHECKUP_DHW_HANDOFF_MAGIC, CHECKUP_DHW_HANDOFF_VERSION,
+                                     checkup_dhw_handoff_layout_fingerprint(), model, model, sealed,
+                                     handoff));
+}
+
 int main() {
     test_diag_tail();
     test_http_cache();
@@ -20395,6 +22214,9 @@ int main() {
     test_checkup_persist();
     test_history_persist();
     test_history_identity();
+    test_checkup_scoped_flash_age();
+    test_history_restore_guards();
+    test_history_adoption_booking();
     if (g_failures == 0) {
         std::printf("all logic tests passed\n");
         return 0;

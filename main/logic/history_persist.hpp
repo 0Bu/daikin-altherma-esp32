@@ -15,28 +15,83 @@
 //
 //   .noinit DRAM   — may survive a compatible reset that KEEPS POWER (esp_restart from a /set_*
 //   save,
-//                    a panic or a task watchdog). Costs no flash write and no extra RAM: the live
-//                    arrays simply stop being initialised at startup. A power cycle cannot preserve
-//                    it; an OTA may move the section, so only a matching seal can adopt it and
-//                    flash remains the guaranteed OTA path. Factory reset explicitly wipes this RAM
-//                    too.
+//                    a panic or a task watchdog). Reuses the live arrays without flash writes;
+//                    bounded metadata and restore sidecars use additional RAM. A power cycle cannot
+//                    preserve it; an OTA may move the section, so only a matching seal can adopt it
+//                    and compatible committed flash records provide the durable OTA path. Factory
+//                    reset explicitly wipes this RAM too.
 //   history        — an append-only flash journal: one compact record per source and completed
 //                    five-minute bucket. After a successful scan and wall-clock sync enable
-//                    commits, it covers OTA, ordinary reboot and later power loss; only the
-//                    open/just-closed bucket can be lost. It exists only in the official 8 MB
+//                    commits, it covers OTA, ordinary reboot and later power loss for committed
+//                    intervals. Open and undrained buckets can be lost; backlog and adoption floors
+//                    prevent a universal one-bucket loss bound. It exists only in the official 8 MB
 //                    table; there is no coarse/old-table fallback.
 //
 // ── Why the RAM path needs no clock and the flash one does ─────────────────────────────────────
 // A restored sample is meaningless without knowing WHEN it was taken, and the ring runs on the
 // MONOTONIC clock (history.hpp), which restarts at zero every boot. So a restore has to re-anchor.
 //
-// For .noinit the answer is free, and it is a property of the medium rather than an assumption: if
-// the bytes are still there, power was never lost, and a reset that keeps power completes in about
-// a second. The downtime is therefore bounded by construction to well under one bucket, and the
-// rings are adopted in place with no re-anchoring at all. The residual error is that the bucket
-// which was open when the device died is lost — which is what a gap means, so nothing is claimed
-// that was not measured. The seam is at most one HISTORY_DT_S wide and is documented rather than
-// hidden.
+// For .noinit the DOWNTIME needs no clock, and that is a property of the medium rather than an
+// assumption: if the bytes are still there, power was never lost, and a reset that keeps power
+// completes in about a second (a USB or pin reset that holds the chip can take longer; the fixed
+// allowance below then under-books it). The rings are adopted in place. What they cannot say is
+// HOW LONG the newest sample has been waiting: the rest of the previous boot after its bucket
+// closed, the downtime and this boot's own uptime up to the raster boundary it claims all passed
+// with nothing measuring. Adoption therefore BOOKS that stretch as explicit no-reading samples
+// (history_adopt_booking) and claims the newest of them for the start of this boot's raster
+// (history_raster_boundary_us), so the first live commit lands on the bucket after it. Claiming the
+// boot instant with no gaps instead collapsed the stretch to nothing, and the collapses of
+// repeated restarts added up, always in one direction, until a day-old curve sat hours off.
+//
+// What is booked is what the liveness record below MEASURES: the previous boot's last sign of life
+// minus the raster boundary its newest commit closed, plus a fixed downtime allowance, plus the
+// uptime up to the claim. A raster that stalled while the device kept signing (an OTA or weather
+// hold-off parks the X10A raster, a HomeHub task that stopped) therefore has its stall booked
+// at five-minute resolution, and keeps the samples it had; stalling alone does not refuse it.
+// Short interruptions can leave no visible gap. The count is capped at the
+// ring: a stretch of a ring or more leaves a ring of nothing but gaps, which is a ring that has
+// effectively lost its samples to the passing of time, not to a guard.
+//
+// The stretch is rounded to the NEAREST bucket and the rounding RESIDUAL is carried to the next
+// adoption of the same raster (error diffusion, a sealed field of the region). Rounding alone is
+// unbiased only if the restarts fall at random phases of the bucket; a restart loop at a fixed
+// uptime leaves the same residual with the same sign at every seam, and the residuals add up
+// linearly. Carried forward, the rounding errors of all the seams a sample crossed telescope into
+// the difference of two residuals, so the rounding term of any sample stays within one bucket
+// (HISTORY_DT_S) however many restarts it crossed. What the carry cannot remove are the terms that
+// are not rounding, and those do add up, a few seconds per restart: the allowance against the real
+// downtime (5 s against a typical 1 s; a longer held reset can instead be under-booked) and, after
+// a panic or a watchdog, the time between the last sign of life and the reset (an under-booking).
+// An esp_restart shutdown touch is best effort: its bounded lock can fail, and journal draining
+// follows the touch. The rings carry no per-sample time, so these are bounded per restart and not
+// once. The flash journal does not have this property: every record carries its absolute wall-clock
+// bucket.
+//
+// The booking covers the stretch the record measures, and that part rests on the seal and on the
+// record. Ordinary pending folds leave the seal intact; adoption, resets and source bookkeeping
+// also reseal it. A valid seal does not establish sample age. A boot that never committed can leave
+// intact samples from a moment long gone: a safe-mode latch (no producer signs the record), a
+// crash loop whose every boot dies inside one bucket (each adoption would book the same samples
+// again). Two refusals keep adoption to what the booking can account for, and a third one to what
+// can be measured at all, each a named verdict (HistoryRestore):
+//
+//   safe_mode      — no producer runs, nothing would age or commit the rings.
+//   not_committed  — a sealed counter of boots that adopted the rings and committed nothing since;
+//                    one such boot is already an unobserved stretch of unknown length, so ≥ 1
+//                    refuses.
+//   stale_commit   — the name predates the booking rule and now means UNMEASURABLE: the separately
+//                    sealed LIVENESS record (below) cannot say how old the X10A raster's newest
+//                    sample is, because it does not verify or because the raster holds samples but
+//                    recorded no commit. A measurable stall is booked, never refused. HomeHub and
+//                    ENV III are independent rasters: an unmeasurable one retires its own rings
+//                    alone.
+//
+// A refusal costs nothing the flash journal holds: it restores by wall clock as it always did. It
+// is a loss where the journal holds nothing — a board without the upper-flash `history` partition,
+// the board and circulation trends while no X10A identity has been detected and saved (the journal
+// scopes the X10A source by it), and a board that never syncs SNTP — and for the open or still
+// undrained bucket. That is the fail-closed trade: a refused copy is empty, a misdated one is
+// wrong.
 //
 // For the flash path the downtime is UNBOUNDED (a board can sit powered off for a week), so every
 // record carries its absolute wall-clock bucket and the last 24 hours are SPLICED behind whatever
@@ -70,8 +125,11 @@ namespace daik::logic {
 inline constexpr uint32_t HISTORY_PERSIST_MAGIC   = 0x54534948u;   // "HIST" little-endian
 // v2 bound the .noinit HomeHub rings to their target. v3 adds the circulation witness's evidence
 // identity to the sealed region (HIST-01/b): a v2 seal cannot name the identity of the circulation
-// ring it covers, so it is refused as a whole rather than adopted on trust.
-inline constexpr uint16_t HISTORY_PERSIST_VERSION = 3;
+// ring it covers, so it is refused as a whole rather than adopted on trust. v4 seals the count of
+// boots that adopted the rings without committing (HIST-03/a), whether the ENV III sensor was
+// live (HIST-03/e) and the rounding residual each raster's last booking left (HIST-03/f): a v3 seal
+// can say none of them, so it is refused as a whole as well.
+inline constexpr uint16_t HISTORY_PERSIST_VERSION = 4;
 
 // ── Flash-journal geometry ──────────────────────────────────────────────────────────────────────
 // The official 8 MB table gives the entire upper 4 MiB to history. Flash can clear bits with a
@@ -186,6 +244,14 @@ inline bool history_journal_header_matches(const HistoryJournalHeader& h, uint32
     return h.value_count == value_count && value_count > 0 &&
            static_cast<size_t>(value_count) * sizeof(HistorySample) <=
                HISTORY_JOURNAL_SLOT_BYTES - HISTORY_JOURNAL_HEADER_BYTES;
+}
+
+// Physical head discovery must retain sequence numbers of intact diagnostic records from a
+// previous payload generation. Interpretation separately requires the current fingerprint/width.
+inline bool history_journal_checkup_header_structural_matches(const HistoryJournalHeader& h,
+                                                              uint32_t                    dt_s) {
+    return h.source == static_cast<uint8_t>(HistoryJournalSource::Checkup) && h.catalog_fp != 0 &&
+           history_journal_header_matches(h, h.catalog_fp, h.value_count, dt_s);
 }
 
 inline bool history_journal_rings_match_current(const HistoryJournalHeader& h) {
@@ -547,11 +613,15 @@ inline constexpr bool history_reset_preserves_ram(uint32_t reason) {
 // knowing about.
 enum class HistoryRestore : uint8_t {
     Accept,
-    NoRecord,       // magic absent — a fresh board, or DRAM that was never written
-    PowerCycle,     // the reset reason does not preserve RAM
-    WrongVersion,   // this build's record layout differs
-    WrongCatalog,   // TRENDS changed — indices no longer mean the same rows
-    BadCrc,         // present and current, but not intact
+    NoRecord,     // magic absent — a fresh board, or DRAM that was never written
+    PowerCycle,   // the reset reason does not preserve RAM
+    WrongVersion, // this build's record layout differs
+    WrongCatalog, // TRENDS changed — indices no longer mean the same rows
+    BadCrc,       // present and current, but not intact
+    SafeMode,     // latched boot-loop recovery: no producer runs, so nothing ages or commits
+    NotCommitted, // intact, but its boot adopted it and committed nothing of its own since
+    StaleCommit,  // intact, but the liveness record cannot measure the X10A raster's unobserved
+                  // stretch (a name that predates booking: it now means "unmeasurable")
 };
 
 inline constexpr const char* history_restore_slug(HistoryRestore r) {
@@ -562,6 +632,12 @@ inline constexpr const char* history_restore_slug(HistoryRestore r) {
         case HistoryRestore::WrongVersion: return "wrong_version";
         case HistoryRestore::WrongCatalog: return "wrong_catalog";
         case HistoryRestore::BadCrc:       return "bad_crc";
+        case HistoryRestore::SafeMode:
+            return "safe_mode";
+        case HistoryRestore::NotCommitted:
+            return "not_committed";
+        case HistoryRestore::StaleCommit:
+            return "stale_commit";
     }
     return "unknown";
 }
@@ -570,16 +646,39 @@ inline constexpr const char* history_restore_slug(HistoryRestore r) {
 // site: the CHEAPEST and most explanatory refusal must win. A power-cycled board holds garbage that
 // will usually fail the magic check too, and reporting "bad_crc" for it would send a reader looking
 // for a memory fault that is not there.
-inline constexpr HistoryRestore history_restore_verdict(uint32_t reset_reason, uint32_t magic,
-                                                        uint16_t version, uint32_t catalog_fp,
-                                                        uint32_t want_catalog_fp,
-                                                        uint32_t stored_crc, uint32_t actual_crc) {
+//
+// SAFE MODE comes first and is not about the bytes at all, for the reason checkup_persist.hpp and
+// state_dwell.hpp give: it starts no producer, so an adopted ring would sit frozen while the latch
+// holds. The two guards about AGE come LAST, after the CRC, because they read sealed state — a
+// counter inside the seal, a liveness record with its own seal — that means nothing on a record
+// that failed its checks. Between them the counter is the cheaper and more specific statement
+// (this boot adopted and never committed), so it wins over an unmeasurable raster. The two guards'
+// inputs default to the old unguarded behaviour so a caller that predates them compiles; the
+// firmware passes both explicitly, and the tests pin each refusal. `bookable` is the liveness
+// record's answer for the X10A raster: it can measure the stretch the adoption has to book (a
+// stalled raster is measurable and is booked; only an unreadable record, or a raster with samples
+// and no recorded commit, is not).
+inline constexpr HistoryRestore
+history_restore_verdict(uint32_t reset_reason, uint32_t magic, uint16_t version,
+                        uint32_t catalog_fp, uint32_t want_catalog_fp, uint32_t stored_crc,
+                        uint32_t actual_crc, bool safe_mode = false,
+                        uint32_t boots_since_commit = 0, bool bookable = true) {
+    if (safe_mode) return HistoryRestore::SafeMode;
     if (!history_reset_preserves_ram(reset_reason)) return HistoryRestore::PowerCycle;
     if (magic != HISTORY_PERSIST_MAGIC)             return HistoryRestore::NoRecord;
     if (version != HISTORY_PERSIST_VERSION)         return HistoryRestore::WrongVersion;
     if (catalog_fp != want_catalog_fp)              return HistoryRestore::WrongCatalog;
     if (stored_crc != actual_crc)                   return HistoryRestore::BadCrc;
+    if (boots_since_commit != 0) return HistoryRestore::NotCommitted;
+    if (!bookable) return HistoryRestore::StaleCommit;
     return HistoryRestore::Accept;
+}
+
+// The sealed count of boots that adopted a region and have not committed since. Saturating, so a
+// counter at its maximum can never wrap to the "nothing pending" value. Shared with the checkup's
+// record, which uses a wider field.
+template <typename T> inline constexpr T history_counter_next(T n) {
+    return n == static_cast<T>(~static_cast<T>(0)) ? n : static_cast<T>(n + 1);
 }
 
 // ── The catalog fingerprint ─────────────────────────────────────────────────────────────────────
@@ -599,6 +698,184 @@ inline uint32_t history_fp_u32(uint32_t crc, uint32_t v) {
     const uint8_t b[4] = { static_cast<uint8_t>(v), static_cast<uint8_t>(v >> 8),
                            static_cast<uint8_t>(v >> 16), static_cast<uint8_t>(v >> 24) };
     return config_crc32_update(crc, b, 4);
+}
+
+// ── The liveness record: how long ago did the newest commit happen, as the device last saw it? ──
+// The main seal answers "are these bytes intact"; it cannot answer "how old is the newest sample
+// they hold", because it changes only at a commit and a boot that stopped committing leaves it
+// valid and stale. This small record is the other half. It is written by the boot that owns the
+// rings, outside the ~30 KB seal and under a CRC of its own, so updating it costs a few dozen bytes
+// of CRC rather than the whole region's, which is what lets the poll task refresh it every cycle.
+//
+// It holds the monotonic instant of the last SIGN OF LIFE (the poll task's cycle, including the
+// cycles that skip all work, and the shutdown handler) and, per raster, the monotonic instant of
+// the last COMMIT. The three rasters are independent — X10A (which carries the board and the
+// circulation witness), HomeHub and ENV III close their buckets in different tasks — so one
+// stalled raster is not hidden by a healthy neighbour. Both instants are on the same boot's clock,
+// so their difference needs no wall clock and survives the reset.
+//
+// The difference IS the stall: the poll task signs on every cycle whatever the raster does, and
+// the shutdown handler signs at esp_restart, so (last sign of life) − (the boundary the newest
+// commit closed) is the time the raster stood still, measured. The adoption books exactly that
+// (history_adopt_booking), so a stalled raster is booked rather than refused. The record can
+// answer "unmeasurable" only in two ways: it does not verify (damaged or never written DRAM), or a
+// raster that holds samples has no recorded commit (or a commit after the last sign of life, which
+// no code path writes). Those are the only reasons a raster is refused or retired.
+//
+// The verdict is PER RASTER, and only the X10A raster refuses the region. It carries the board and
+// circulation trends and is fed at the top of every poll cycle, whatever the bus does, so it is the
+// one raster that is always meant to be running. HomeHub and ENV III are optional sources that can
+// go away without a reboot (a HomeHub disabled by /set_hp leaves its rings frozen, its task gone
+// and its pending reset never consumed; a task that failed to start never folds at all). An
+// unmeasurable one retires its OWN rings and the verdict stays on the X10A raster, so a source that
+// stopped never costs the trends that did not. Only rasters this boot would adopt are weighed at
+// all (history_raster_state, `weighed`): a ring that an identity change retires anyway has nothing
+// for the record to measure.
+inline constexpr uint32_t HISTORY_LIVENESS_MAGIC   = 0x564c4948u; // "HILV" little-endian
+inline constexpr uint16_t HISTORY_LIVENESS_VERSION = 1;
+inline constexpr size_t   HISTORY_LIVENESS_RASTERS = 3; // X10a, Modbus, Env3 (HistoryJournalSource)
+
+// Plain data on purpose: no member initialisers, so a definition in .noinit emits no initialiser
+// image (the reason history.cpp's PersistStore is a union) and the type stays trivially
+// constructible. Padding is not part of the CRC.
+struct HistoryLiveness {
+    uint32_t magic;
+    uint16_t version;
+    uint16_t reserved;
+    int64_t  sign_us;                             // last sign of life; INT64_MIN: none
+    int64_t  commit_us[HISTORY_LIVENESS_RASTERS]; // last commit per raster; INT64_MIN: none
+    uint32_t crc;
+};
+
+// The CRC covers the instants — the fields that change — serialised little-endian into one small
+// buffer and hashed in one call: this runs on the poll task every cycle and from the commit paths
+// of three other tasks, so it keeps its call chain flat. Magic and version are compared directly
+// by history_liveness_valid() and padding is not evidence, so none of them needs to be hashed.
+inline uint32_t history_liveness_crc(const HistoryLiveness& r) {
+    uint8_t        b[8 + 8 * HISTORY_LIVENESS_RASTERS];
+    size_t         n    = 0;
+    const uint64_t sign = static_cast<uint64_t>(r.sign_us);
+    for (size_t i = 0; i < 8; ++i) b[n++] = static_cast<uint8_t>(sign >> (8 * i));
+    for (size_t k = 0; k < HISTORY_LIVENESS_RASTERS; ++k) {
+        const uint64_t commit = static_cast<uint64_t>(r.commit_us[k]);
+        for (size_t i = 0; i < 8; ++i) b[n++] = static_cast<uint8_t>(commit >> (8 * i));
+    }
+    return config_crc32_final(config_crc32_update(CONFIG_CRC32_INIT, b, n));
+}
+
+inline void history_liveness_seal(HistoryLiveness& r) {
+    r.magic    = HISTORY_LIVENESS_MAGIC;
+    r.version  = HISTORY_LIVENESS_VERSION;
+    r.reserved = 0;
+    r.crc      = history_liveness_crc(r);
+}
+
+inline bool history_liveness_valid(const HistoryLiveness& r) {
+    return r.magic == HISTORY_LIVENESS_MAGIC && r.version == HISTORY_LIVENESS_VERSION &&
+           r.crc == history_liveness_crc(r);
+}
+
+// A new boot's record: alive now, nothing committed yet. The previous boot's record has already
+// been judged by the time this overwrites it.
+inline void history_liveness_begin(HistoryLiveness& r, int64_t now_us) {
+    r.sign_us = now_us;
+    for (size_t i = 0; i < HISTORY_LIVENESS_RASTERS; ++i) r.commit_us[i] = INT64_MIN;
+    history_liveness_seal(r);
+}
+
+// The device is alive at `now_us`. Never moves backwards: two tasks can touch the record, and the
+// later reading is the one that matters.
+inline void history_liveness_touch(HistoryLiveness& r, int64_t now_us) {
+    if (r.sign_us == INT64_MIN || now_us > r.sign_us) r.sign_us = now_us;
+    history_liveness_seal(r);
+}
+
+// A raster committed (or was seeded, or adopted) at `commit_us`; INT64_MIN clears it. A commit is
+// itself a sign of life.
+inline void history_liveness_commit(HistoryLiveness& r, HistoryJournalSource src,
+                                    int64_t commit_us) {
+    const size_t i = static_cast<size_t>(src);
+    if (i >= HISTORY_LIVENESS_RASTERS) return;
+    r.commit_us[i] = commit_us;
+    if (commit_us != INT64_MIN && (r.sign_us == INT64_MIN || commit_us > r.sign_us))
+        r.sign_us = commit_us;
+    history_liveness_seal(r);
+}
+
+// What the record says about ONE raster.
+enum class HistoryRasterState : uint8_t {
+    NotWeighed, // holds no sample this boot would adopt: nothing to book, so it is not asked
+    Measurable, // the record verifies and the raster recorded a commit: the stretch can be booked
+    NoRecord,   // the record does not verify (or never signalled life): nothing can be said
+    NoCommit,   // the raster holds samples but recorded no commit, or one after the last sign of
+                // life: the record is not one this code wrote, so it measures nothing
+};
+
+// Not weighed counts as bookable: a raster without samples has nothing to book or to misdate.
+inline constexpr bool history_raster_bookable(HistoryRasterState s) {
+    return s == HistoryRasterState::NotWeighed || s == HistoryRasterState::Measurable;
+}
+
+// `weighed` says the raster holds samples this boot would ADOPT; the caller decides that, because
+// only it knows which rings an identity change retires anyway. A source that is not a raster of
+// the record (the checkup's journal source) has no commit instant to measure with. There is no
+// staleness bound: how long the raster stood still is what the adoption books.
+inline HistoryRasterState history_raster_state(const HistoryLiveness& r, HistoryJournalSource src,
+                                               bool weighed) {
+    if (!weighed) return HistoryRasterState::NotWeighed;
+    const size_t i = static_cast<size_t>(src);
+    if (i >= HISTORY_LIVENESS_RASTERS || !history_liveness_valid(r) || r.sign_us == INT64_MIN)
+        return HistoryRasterState::NoRecord;
+    // `sign >= commit` is established here so the unsigned difference the booking takes later can
+    // never be a wrapped one, even for a record from damaged DRAM that still verifies. A negative
+    // commit (which includes the "none" sentinel) is not an instant of a monotonic clock either.
+    const int64_t commit = r.commit_us[i];
+    if (commit < 0 || r.sign_us < commit) return HistoryRasterState::NoCommit;
+    return HistoryRasterState::Measurable;
+}
+
+// What an adoption does with each raster, decided from the previous boot's record BEFORE the fresh
+// one overwrites it. The X10A raster alone decides the region (`region_bookable` is the verdict's
+// `bookable`): an unmeasurable one refuses everything as stale_commit. An unmeasurable HomeHub or
+// ENV III raster retires only its own rings and leaves the verdict where the X10A raster put it,
+// so an optional source that stopped (disabled without a reboot, a task that never started) cannot
+// cost the trends that did not. `weighed[i]` is raster i's rings holding samples this boot would
+// adopt.
+struct HistoryRasterPlan {
+    HistoryRasterState state[HISTORY_LIVENESS_RASTERS];
+    bool               region_bookable;
+    bool               retire_modbus;
+    bool               retire_env3;
+};
+
+inline HistoryRasterPlan history_raster_plan(const HistoryLiveness& r,
+                                             const bool (&weighed)[HISTORY_LIVENESS_RASTERS]) {
+    constexpr size_t  kX10a   = static_cast<size_t>(HistoryJournalSource::X10a);
+    constexpr size_t  kModbus = static_cast<size_t>(HistoryJournalSource::Modbus);
+    constexpr size_t  kEnv3   = static_cast<size_t>(HistoryJournalSource::Env3);
+    HistoryRasterPlan p{};
+    for (size_t i = 0; i < HISTORY_LIVENESS_RASTERS; ++i)
+        p.state[i] = history_raster_state(r, static_cast<HistoryJournalSource>(i), weighed[i]);
+    p.region_bookable = history_raster_bookable(p.state[kX10a]);
+    p.retire_modbus   = !history_raster_bookable(p.state[kModbus]);
+    p.retire_env3     = !history_raster_bookable(p.state[kEnv3]);
+    return p;
+}
+
+// ── ENV III has no producer of its own while it is disabled ─────────────────────────────────────
+// A disabled sensor starts no task and nothing advances its raster, so its ring is frozen. Adopting
+// a frozen ring would treat it as if it had been fed until the reset, and the journal writer would
+// then append the same samples under the recent buckets — which a later power cycle restores from
+// flash as if they had been measured there. The ring is therefore believed only if the sensor was
+// live in the boot that sealed it AND is live now, and the journal is written only for a ring this
+// boot actually fed. "Live" is the producer's existence: configured, supported by the board and not
+// in safe mode.
+inline constexpr bool history_env3_ring_adoptable(bool sealed_live, bool live_now) {
+    return sealed_live && live_now;
+}
+
+inline constexpr bool history_env3_append_allowed(bool live_now, bool fed_this_boot) {
+    return live_now && fed_this_boot;
 }
 
 // Neither sentinel (0 = no witness, 0xffffffff = a record from before the field) is ever produced
@@ -986,17 +1263,149 @@ inline constexpr int64_t history_bucket_from_unix(int64_t unix_s, uint32_t dt = 
     return unix_s >= 0 ? unix_s / d : -(((-unix_s) + d - 1) / d);
 }
 
-// Represent an absolute wall-clock bucket on this boot's monotonic axis. The result is allowed to
-// be NEGATIVE: immediately after a reboot, the wall bucket may have started before esp_timer's new
-// zero. Clamping it to zero slides every restored curve forward to the boot instant — exactly the
-// lie the absolute flash anchor exists to prevent. Callers therefore use a distinct INT64_MIN
-// sentinel for "no commit" and accept ordinary negative timestamps as pre-boot commits.
-inline constexpr int64_t history_anchor_commit_us(int64_t now_us, int64_t unix_s,
-                                                  int64_t newest_bucket,
-                                                  uint32_t dt = HISTORY_DT_S) {
+// The wall-clock bucket a source's newest commit is attributed to: the wall time of the commit
+// instant, `now - commit` ago. This is the ONE derivation of a live source's anchor — the journal
+// writer, the restore and the seed below all go through it — so a commit and the seed that precedes
+// it are compared on the same arithmetic. INT64_MIN (no commit) has no anchor.
+inline constexpr int64_t history_anchor_bucket(int64_t unix_s, int64_t now_us, int64_t commit_us,
+                                               uint32_t dt = HISTORY_DT_S) {
+    if (commit_us == INT64_MIN) return INT64_MIN;
+    // Unsigned, once `now >= commit` is established: a commit instant restored from damaged DRAM
+    // must not turn the subtraction into signed overflow.
+    const int64_t age_s =
+        now_us < commit_us
+            ? 0
+            : static_cast<int64_t>(
+                  (static_cast<uint64_t>(now_us) - static_cast<uint64_t>(commit_us)) / 1000000u);
+    return history_bucket_from_unix(unix_s - age_s, dt);
+}
+
+// The last boundary of THIS boot's monotonic raster at or before `now_us`: the instant the open
+// bucket began, which is also the instant the bucket before it was committed.
+//
+// A source that has not closed a bucket yet is SEEDED from flash, and the seed has to claim a
+// commit instant for the newest restored sample. It used to claim the start of the current WALL
+// bucket (which can precede the boot, hence the negative values this axis once had to allow). That
+// instant lies on a different grid from the one every later commit lands on: the first live commit
+// comes at the next monotonic boundary, up to a bucket after the seed, and it falls into the very
+// wall bucket the seed had already claimed whenever the two grids' phases leave room for it (a
+// fixed share of restores, set by the phases alone). The curve then gains a duplicate bucket and
+// every restored sample reads one bucket early, with a phantom gap at the join. Claiming the
+// monotonic boundary puts the seed exactly one raster step before the first commit, so the commit's
+// wall bucket follows the seed's by one. The restored samples sit on the raster the rest of the
+// ring already uses.
+inline constexpr int64_t history_raster_boundary_us(int64_t now_us, uint32_t dt = HISTORY_DT_S) {
+    if (now_us < 0) return 0; // the monotonic clock starts at zero; keep the helper total
     if (dt == 0) return now_us;
-    const int64_t bucket_s = newest_bucket * static_cast<int64_t>(dt);
-    return now_us - (unix_s - bucket_s) * 1000000LL;
+    const int64_t step_us = static_cast<int64_t>(dt) * 1000000;
+    return now_us / step_us * step_us;
+}
+
+// ── Booking the stretch an adoption cannot see ──────────────────────────────────────────────────
+// The newest adopted sample closed at the raster boundary just before `commit_us` on the previous
+// boot's clock (a live commit stores the instant of its FOLD, which lags the boundary by up to one
+// producer period; measuring from the fold would under-book every seam by that lag, always in the
+// same direction, so the stretch is measured from the boundary). That boot gave its last sign of
+// life at `sign_us`. Until this boot's raster begins (`claim_us`, the monotonic boundary adoption
+// claims for it) the time that passed is: the rest of the previous boot after the boundary (sign −
+// boundary, which includes any stall of the raster: the record measures it), the downtime (a fixed
+// allowance — the device cannot time it, and the project already uses one for the state ages and
+// the DHW handoff: DWELL_REBOOT_BLIND_S), and this boot's own uptime up to the claim. The count of
+// whole buckets nearest to that stretch is how many explicit no-reading samples follow the newest
+// sample, so the claimed commit instant and the samples before it agree. The stretch is measured to
+// the CLAIM and not to the boot instant: the claim is where the newest booked sample is placed, and
+// a stretch measured further would put every restart's samples a few seconds early, a
+// one-directional drift of its own.
+//
+// ERROR DIFFUSION. Round to nearest, ties up, but do not throw the remainder away: `carry_us` is
+// the remainder the previous adoption of the same raster left (positive: it booked too little,
+// negative: too much), it is added to this stretch before rounding, and the new remainder is
+// returned to be carried again. Plain rounding is unbiased only for restarts at random phases of
+// the bucket; a restart loop at a fixed uptime leaves the same remainder with the same sign at
+// every seam, and the remainders add up linearly (a day of such restarts put the oldest sample
+// hours off). With the carry the booked total tracks the true total to within half a bucket
+// whatever the number of seams, and a sample that crossed n seams is off by the difference of two
+// remainders (under one bucket) plus the non-rounding terms, which add up a few seconds per seam
+// (the allowance against the real downtime, the time between the last sign of life and a panic).
+//
+// Capped at `cap` (the ring size). A stretch of a ring or more leaves nothing of the old content,
+// so there is nothing to carry a remainder for and it is returned as zero. A raster with no
+// recorded commit, or a sign of life before it, has nothing measured and books nothing (such a
+// raster is not adopted at all, see history_raster_state). Integer arithmetic on unsigned 64-bit
+// instants with saturation, so a record from damaged DRAM that still verifies cannot overflow it.
+struct HistoryAdoptBooking {
+    uint32_t gaps;       // whole no-reading buckets to append after the newest adopted sample
+    int32_t residual_us; // the unbooked (+) or over-booked (−) remainder, carried to the next one
+};
+
+inline HistoryAdoptBooking history_adopt_booking(int64_t sign_us, int64_t commit_us,
+                                                 uint32_t downtime_s, int64_t claim_us,
+                                                 int32_t carry_us, uint32_t dt_s = HISTORY_DT_S,
+                                                 uint32_t cap = HISTORY_SAMPLES) {
+    if (dt_s == 0 || commit_us < 0 || claim_us < 0 || sign_us < commit_us) return {0, 0};
+    const uint64_t step     = static_cast<uint64_t>(dt_s) * 1000000u;
+    const uint64_t boundary = static_cast<uint64_t>(history_raster_boundary_us(commit_us, dt_s));
+    const uint64_t since = static_cast<uint64_t>(sign_us) - boundary; // boundary <= commit <= sign
+    const uint64_t extra =
+        static_cast<uint64_t>(downtime_s) * 1000000u + static_cast<uint64_t>(claim_us);
+    const uint64_t lost = since > UINT64_MAX - extra ? UINT64_MAX : since + extra;
+    // A stretch beyond half the signed range is taken as the largest there is: the ring is all
+    // gaps, and `owed` below cannot overflow. (A smaller stretch that is still a ring or more
+    // reaches the same answer through the cap.)
+    if (lost > static_cast<uint64_t>(INT64_MAX / 2)) return {cap, 0};
+    const int64_t  owed  = static_cast<int64_t>(lost) + carry_us;
+    const int64_t  half  = static_cast<int64_t>(step / 2);
+    const uint64_t whole = owed + half <= 0 ? 0 : static_cast<uint64_t>(owed + half) / step;
+    if (whole >= cap) return {cap, 0};
+    const int64_t residual = owed - static_cast<int64_t>(whole * step);
+    return {static_cast<uint32_t>(whole), static_cast<int32_t>(residual > INT32_MAX   ? INT32_MAX
+                                                               : residual < INT32_MIN ? INT32_MIN
+                                                                                      : residual)};
+}
+
+// The monotonic instant (this boot's clock) at which the newest REAL adopted sample ended: the
+// claimed instant of the newest booked gap, less one bucket per gap. INT64_MIN when the ring holds
+// no real sample, i.e. when the booking filled it.
+inline constexpr int64_t history_adopt_real_end_us(int64_t claim_us, uint32_t gaps,
+                                                   uint32_t dt_s = HISTORY_DT_S) {
+    if (dt_s == 0 || claim_us < 0 || gaps >= HISTORY_SAMPLES) return INT64_MIN;
+    return claim_us - static_cast<int64_t>(gaps) * static_cast<int64_t>(dt_s) * 1000000;
+}
+
+// ── The journal must not file an adopted sample twice ───────────────────────────────────────────
+// The journal writer files the ring's samples at the wall buckets after its cursor (the newest
+// bucket the journal holds for the source). After an adoption the ring is the previous boot's,
+// shifted by the seam, so the newest REAL sample can sit one bucket later than the bucket the
+// previous boot already journaled it under, and the writer would file the same reading again under
+// the next bucket - a bucket in which nothing was measured. The cure is a floor: the writer never
+// appends a bucket at or before the wall bucket of the newest real adopted sample; the bucket after
+// it is a gap or the next live sample.
+//
+// The floor is meant for a sample the journal ALREADY holds, and the cursor is the only witness: a
+// cursor within HISTORY_ADOPT_FLOOR_REACH_BUCKETS is treated as prior filing evidence, within the
+// bounded seam/backlog reach below. It cannot distinguish prior filing from a short backlog.
+// A cursor with no value (the journal holds nothing for the source) or far behind it says the
+// samples in between were never filed - the clock never synced, or the journal was down - and the
+// writer files them as it always did. The decision is made once, at the writer's first look after
+// the adoption. A genuine short backlog is indistinguishable and can lose up to the reach's
+// recent undrained readings from flash; this deliberately prefers a gap to duplicated fresh data.
+inline constexpr uint32_t HISTORY_ADOPT_FLOOR_REACH_BUCKETS = 2;
+
+// The wall bucket the writer may not append at or before, or INT64_MIN for none. `cursor` is the
+// journal's newest bucket for the source, `real_bucket` the wall bucket of the newest real adopted
+// sample (history_anchor_bucket of history_adopt_real_end_us).
+inline constexpr int64_t history_adopt_floor_bucket(int64_t cursor, int64_t real_bucket) {
+    if (cursor == INT64_MIN || cursor >= real_bucket) return INT64_MIN; // (INT64_MIN real: below)
+    return static_cast<uint64_t>(real_bucket) - static_cast<uint64_t>(cursor) <=
+                   HISTORY_ADOPT_FLOOR_REACH_BUCKETS
+               ? real_bucket
+               : INT64_MIN;
+}
+
+// The cursor the writer works from: the journal's own, lifted to the floor. A source with no cursor
+// stays without one (nothing is filed for it, so nothing can be filed twice).
+inline constexpr int64_t history_adopt_floor_cursor(int64_t cursor, int64_t floor_bucket) {
+    return cursor == INT64_MIN || cursor >= floor_bucket ? cursor : floor_bucket;
 }
 
 // ── A bucket from the future ────────────────────────────────────────────────────────────────────

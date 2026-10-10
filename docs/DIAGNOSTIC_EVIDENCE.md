@@ -1,6 +1,6 @@
 # Evidence and limits of the plant diagnostics
 
-<!-- diagnostic-evidence-contract: 422ac07a3d80449629d6e180ae0876da73906236ebc5db0d38238a26124f176d -->
+<!-- diagnostic-evidence-contract: 4f182ab86438960f78f80bee3194c0ad15ec8f31a370a27db563e5d881abdda3 -->
 
 For every row in the **Plant diagnostics · 24 h** card, this page answers four questions:
 
@@ -145,9 +145,12 @@ paths, age limit, on/off thresholds or confirmation time) clears this check's wi
 completed windows, observed clean hours and the window in progress. The tank sample in flight at
 that moment is discarded rather than counted under the new mapping. The overall checkup's 24-hour
 span is not reset, so once it is complete a reassuring result needs six new clean hours, not a new
-24-hour lifecycle. An intentional restart, such as a firmware update, hands the window in progress
-to the next boot through RAM when that boot accepts it (an update that changes the stored layout or
-moves it in RAM hands over none); a power interruption or crash hands over none. The next boot books a
+24-hour lifecycle. An intentional restart can carry the ongoing candidate and charge-settle
+filter through a separately sealed handoff after the current source has been confirmed. Completed
+undated counters in its open hour are discarded; completed hourly evidence is reconstructed from
+compatible absolute-age journal records instead of RAM. Legacy records without the full X10A
+scope are rejected. A power interruption, crash, changed source or failed integrity/consent check
+carries no candidate. The next boot books a
 fixed 5-second downtime allowance plus its own uptime when the check resumes, which includes the
 network start-up, as unobserved time: it advances the window's age and never counts as observed.
 When that pushes the window past the bound every unread stretch is held to (`120 s` in one run,

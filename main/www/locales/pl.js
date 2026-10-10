@@ -1,4 +1,4 @@
-// translation-source: bcd4ff0bb5bf1f2e454eb0f7e5c00ea352bcbb9f1f0c080ef5225bc85210fa0b
+// translation-source: 6bca03f96e2befcb0ffc38143e9bdb22db58839623b9195a314a93bb6dffffb3
 const plNoun = (n, one, few, many) => {
   const value = Math.abs(Number(n)), mod10 = value % 10, mod100 = value % 100;
   return value === 1 ? one
@@ -1162,7 +1162,7 @@ MODEL_DESCRIPTION_I18N.pl = modelDescriptionValues([
   ["Najniższy przepływ po 60 s ciągłej pracy pompy wewnętrznej; pomija rozruch, postój i luki komunikacji. TYLKO POMIAR: minimum częściowego obciążenia po rozruchu, nie przepływ nominalny ani projektowy. Nie ma uniwersalnej granicy; minimum instrukcji dotyczy tego samego modelu, trybu i warunków. Jedna niska wartość bez błędu niewiele dowodzi."], // 5
   ["Osobno pokazuje czas pracy BUH dla obiegu domu i BSH w zasobniku CWU. TYLKO POMIAR. Mróz, awaria, wsparcie odszraniania, harmonogram CWU lub sterowanie nadwyżką mogą uzasadniać pracę. Nie ma uniwersalnego progu OK/OSTRZEŻENIE."], // 6
   ["Eksperymentalnie obserwuje pięć wewnętrznych liczników ochrony. Liczy tylko wyraźny wzrost między porównywalnymi odczytami, także pierwszy widoczny przy postoju lub zmianie sprężarki; baza, brak wzrostu, spadki, luki i reset nie liczą się. Brak zaobserwowanego wzrostu. Wzrost daje UWAGĘ, nie diagnozę usterki; brak wzrostu nie dowodzi braku ograniczeń, bo liczniki nie są w pełni opisane."], // 7
-  ["Wolna pamięć RAM i trend 24 h: stały spadek może wskazywać na niezwalniane alokacje. Po restarcie lub zaniku zasilania zamknięte 5-minutowe przedziały są przywracane z pamięci flash."], // 8
+  ["RAM 24 h: stabilna lub spadki z odbiciem; stały spadek, możliwy wyciek; zgodny restart z zasilaniem: możliwy wykres RAM. Inaczej tylko zgodne datowane 5 min dziennika flash po synchronizacji czasu. Co 5 min krótka przerwa może pozostać niewidoczna; otwarty/ostatnie niezapisane mogą zniknąć."], // 8
   ["Największy ciągły blok wolnej pamięci RAM. TLS i OTA potrzebują jednego dość dużego bloku, nawet gdy łącznie wolnej pamięci jest więcej. Zawsze nie większy niż cała wolna RAM. Jeśli wolna RAM jest stabilna, a ten blok maleje, rośnie fragmentacja sterty i duża alokacja może zawieść przed wyczerpaniem pamięci."], // 9
   ["Nominalna moc jednostki zewnętrznej z jej strony identyfikacyjnej. To klasa sprzętu, nie aktualna produkcja."], // 10
   ["Nominalna moc JEDNOSTKI WEWNĘTRZNEJ. Jest pokazana, gdy strona identyfikacji zewnętrznej nie ma własnej mocy; etykieta wskazuje źródło. Jednostki mogą mieć różne klasy. Nie odczytuj tego jako mocy zewnętrznej ani całego systemu."], // 11

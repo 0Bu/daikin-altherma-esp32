@@ -1,5 +1,5 @@
 {
-  "method": "Exact taken/outcome counts measured at this revision with Apple Clang 17.0.0 and GCC 13.3.0. Local profiles bind compiler family/major and platform slug (e.g. clang-17-darwin, gcc-13-darwin, gcc-13-linux-ubuntu24); authoritative GitHub profiles additionally bind runner OS/image because packaging can alter instrumentation. The gate compares repository history and rejects decreases; improvements require an immediate versioned update. The X10A value-template helper in discovery.hpp moved inline string appends into one function and was measured with Apple Clang 17, ESP-IDF-container GCC 13 and Ubuntu 26.04 GCC 15; both GNU inventories match and every ratio rises. The updated hosted GCC 15 expectations use that measured inventory and require confirmation by authoritative CI. The new config_transaction.hpp was measured with Apple Clang 17 and ESP-IDF-container GCC 13; its two GCC 15 expectations copy the GCC 13 inventory and require the same confirmation. The history-journal helpers added to history_persist.hpp (manifest currency, future-cursor detection, slot-failure skip with its abandon budget and paused-retry throttle, restore source skip) were measured with Apple Clang 17 (245/348), ESP-IDF-container GCC 13.3 (294/408) and Ubuntu 26.04 GCC 15.2 (292/406); both hosted GCC 15 expectations copy the measured Ubuntu GCC 15 inventory and require confirmation by authoritative CI. No ratio is reduced relative to the protected base (main: 219/320, 261/374, 259/372). The boot-gap rules (dwell_resume_origin_us in state_dwell.hpp, dhw_loss_adopt_blind_s in checkup.hpp) were measured with Apple Clang 17.0.0, ESP-IDF-container GCC 13.3.0 and Ubuntu 26.04 GCC 15.2.0; the hosted GCC 15 expectations copy the local GCC 15 inventory and require confirmation by authoritative CI. Relative to main before this change (neither file changed between a32c700f and 7af49885), checkup.hpp outcomes rise from 703 to 707 (Apple Clang 17), from 813 to 817 (GCC 13) and from 815 to 819 (GCC 15), and its taken counts rise by 7 (Apple Clang 17) and by 8 (GCC 13 and GCC 15); state_dwell.hpp outcomes stay at 116 (Apple Clang 17) and rise from 126 to 128 (GCC 13 and GCC 15), and its taken counts rise by 1 (Apple Clang 17) and by 2 (GCC 13 and GCC 15). The restart-adoption test steps a kept adoption through a 100 s unread gap, so the blind discard that dhw_loss_step records for a carried candidate is exercised. The HIST-01 identity helpers (the circulation witness identity and its restore rules, the catalog fingerprint as a fold of every ring's series id, the HomeHub decode columns with their closure check against both def/ register tables, the X10A scope pin against the pre-HIST-01 formula, the rejection table of the three journal-header acceptance predicates, and the snapshot time-axis metadata) in history.hpp, history_persist.hpp and homehub_map.hpp were measured with Apple Clang 17 (history.hpp 113/120, history_persist.hpp 319/372, homehub_map.hpp 52/52, and config_model.hpp 203/256 because the test now evaluates diagnostics_next_generation at run time, covering its wrap), ESP-IDF-container GCC 13.3 (148/154, 382/442, 54/54) and Ubuntu 26.04 GCC 15.2 (146/152, 380/440, 54/54); the hosted GCC 15 expectation copies the Ubuntu 26.04 inventory and requires confirmation by authoritative CI. Relative to the protected base no ratio is reduced (history.hpp 105/112, 140/146, 138/144; history_persist.hpp 245/348, 294/408, 292/406; homehub_map.hpp 36/36; config_model.hpp 201/254).SEC-01 report-privacy helpers were measured with canonical scripts/run-mock-tests.sh --coverage: native Apple Clang 17.0.0 (diag_tail.hpp 72/72, redact.hpp 64/72), pinned ESP-IDF-container GCC 13.3.0 (82/82, 80/96), and an isolated Ubuntu 26.04.1 aarch64 container with GCC/gcov 15.2.0-16ubuntu1 (82/82, 80/96). The GCC 15 full local canonical gate passed after updating only these expectations; its hosted profile repeats the measured local inventory and still requires authoritative CI confirmation. diag_tail.hpp stays at 100 percent and every redact.hpp ratio rises; no other header expectations or checker thresholds change. SEC-02 stored-report identity, bounded log values and provenance records were measured with canonical scripts/run-mock-tests.sh --coverage: Apple Clang 17.0.0 (bootlog.hpp 63/88, crashinfo.hpp 167/259), pinned ESP-IDF v6.1 container GCC 13.3.0 (68/94, 189/288), and isolated Ubuntu 26.04.1 aarch64 GCC/gcov 15.2.0-16ubuntu1 (68/94, 189/288). Every changed ratio rises; the hosted GCC 15 profile uses the measured local inventory pending authoritative CI confirmation. Other header expectations and the 95-percent line floor are unchanged. HUB observation-age admission was measured with the canonical host coverage runner: Apple Clang 17 remains 12/12, pinned ESP-IDF v6.1 GCC 13.3 becomes 24/24, and isolated Ubuntu 26.04 GCC 15.2 becomes 22/22, matching the authoritative CI observation. The three GNU inventories each add six covered outcomes; every ratio stays at 100 percent and all other header expectations are unchanged.",
+  "method": "Exact taken/outcome counts measured at this revision with Apple Clang 17.0.0 and GCC 13.3.0. Local profiles bind compiler family/major and platform slug (e.g. clang-17-darwin, gcc-13-darwin, gcc-13-linux-ubuntu24); authoritative GitHub profiles additionally bind runner OS/image because packaging can alter instrumentation. The gate compares repository history and rejects decreases; improvements require an immediate versioned update. The X10A value-template helper in discovery.hpp moved inline string appends into one function and was measured with Apple Clang 17, ESP-IDF-container GCC 13 and Ubuntu 26.04 GCC 15; both GNU inventories match and every ratio rises. The updated hosted GCC 15 expectations use that measured inventory and require confirmation by authoritative CI. The new config_transaction.hpp was measured with Apple Clang 17 and ESP-IDF-container GCC 13; its two GCC 15 expectations copy the GCC 13 inventory and require the same confirmation. The history-journal helpers added to history_persist.hpp (manifest currency, future-cursor detection, slot-failure skip with its abandon budget and paused-retry throttle, restore source skip) were measured with Apple Clang 17 (245/348), ESP-IDF-container GCC 13.3 (294/408) and Ubuntu 26.04 GCC 15.2 (292/406); both hosted GCC 15 expectations copy the measured Ubuntu GCC 15 inventory and require confirmation by authoritative CI. No ratio is reduced relative to the protected base (main: 219/320, 261/374, 259/372). The boot-gap rules (dwell_resume_origin_us in state_dwell.hpp, dhw_loss_adopt_blind_s in checkup.hpp) were measured with Apple Clang 17.0.0, ESP-IDF-container GCC 13.3.0 and Ubuntu 26.04 GCC 15.2.0; the hosted GCC 15 expectations copy the local GCC 15 inventory and require confirmation by authoritative CI. Relative to main before this change (neither file changed between a32c700f and 7af49885), checkup.hpp outcomes rise from 703 to 707 (Apple Clang 17), from 813 to 817 (GCC 13) and from 815 to 819 (GCC 15), and its taken counts rise by 7 (Apple Clang 17) and by 8 (GCC 13 and GCC 15); state_dwell.hpp outcomes stay at 116 (Apple Clang 17) and rise from 126 to 128 (GCC 13 and GCC 15), and its taken counts rise by 1 (Apple Clang 17) and by 2 (GCC 13 and GCC 15). The restart-adoption test steps a kept adoption through a 100 s unread gap, so the blind discard that dhw_loss_step records for a carried candidate is exercised. The HIST-01 identity helpers (the circulation witness identity and its restore rules, the catalog fingerprint as a fold of every ring's series id, the HomeHub decode columns with their closure check against both def/ register tables, the X10A scope pin against the pre-HIST-01 formula, the rejection table of the three journal-header acceptance predicates, and the snapshot time-axis metadata) in history.hpp, history_persist.hpp and homehub_map.hpp were measured with Apple Clang 17 (history.hpp 113/120, history_persist.hpp 319/372, homehub_map.hpp 52/52, and config_model.hpp 203/256 because the test now evaluates diagnostics_next_generation at run time, covering its wrap), ESP-IDF-container GCC 13.3 (148/154, 382/442, 54/54) and Ubuntu 26.04 GCC 15.2 (146/152, 380/440, 54/54); the hosted GCC 15 expectation copies the Ubuntu 26.04 inventory and requires confirmation by authoritative CI. Relative to the protected base no ratio is reduced (history.hpp 105/112, 140/146, 138/144; history_persist.hpp 245/348, 294/408, 292/406; homehub_map.hpp 36/36; config_model.hpp 201/254).SEC-01 report-privacy helpers were measured with canonical scripts/run-mock-tests.sh --coverage: native Apple Clang 17.0.0 (diag_tail.hpp 72/72, redact.hpp 64/72), pinned ESP-IDF-container GCC 13.3.0 (82/82, 80/96), and an isolated Ubuntu 26.04.1 aarch64 container with GCC/gcov 15.2.0-16ubuntu1 (82/82, 80/96). The GCC 15 full local canonical gate passed after updating only these expectations; its hosted profile repeats the measured local inventory and still requires authoritative CI confirmation. diag_tail.hpp stays at 100 percent and every redact.hpp ratio rises; no other header expectations or checker thresholds change. SEC-02 stored-report identity, bounded log values and provenance records were measured with canonical scripts/run-mock-tests.sh --coverage: Apple Clang 17.0.0 (bootlog.hpp 63/88, crashinfo.hpp 167/259), pinned ESP-IDF v6.1 container GCC 13.3.0 (68/94, 189/288), and isolated Ubuntu 26.04.1 aarch64 GCC/gcov 15.2.0-16ubuntu1 (68/94, 189/288). Every changed ratio rises; the hosted GCC 15 profile uses the measured local inventory pending authoritative CI confirmation. Other header expectations and the 95-percent line floor are unchanged. HUB observation-age admission was measured with the canonical host coverage runner: Apple Clang 17 remains 12/12, pinned ESP-IDF v6.1 GCC 13.3 becomes 24/24, and isolated Ubuntu 26.04 GCC 15.2 becomes 22/22, matching the authoritative CI observation. The three GNU inventories each add six covered outcomes; every ratio stays at 100 percent and all other header expectations are unchanged. HIST-03 scoped source admission, completed-hour flash-only restoration, strict restored-slot expiry, warm liveness/gap booking and conservative journal adoption floors were measured after pinned clang-format 18.1.8 changed-line formatting with canonical scripts/run-mock-tests.sh --coverage: Apple Clang 17.0.0 on Darwin (checkup_persist.hpp 97/97, history_persist.hpp 425/480), pinned ESP-IDF v6.1 container GCC/gcov 13.3.0 on Ubuntu 24.04.4 (117/117, 498/557), and isolated Ubuntu 26.04.1 aarch64 GCC/gcov 15.2.0-16ubuntu1 (117/117, 496/555). Runtime fresh-boot live-cursor gap and missing-anchor controls prevent constexpr folding from hiding the applicable guard paths. Every changed header ratio exceeds its protected-base ratio, including the stronger inherited candidate expectations; the checker, all other header inventories and the 95-percent line floor are unchanged. The hosted GCC 15 Ubuntu 26 expectations repeat the measured local inventory and remain provisional pending authoritative CI confirmation. The materialized-slot provenance selector was then measured with the same canonical runner: Apple Clang 17 has 113/113, GCC 13 and isolated Ubuntu 26 GCC 15 each have 137/137 for checkup_persist.hpp. Malformed pointer/count pairs, stale live projections, live precedence, valid duplicate selection and both capacity-boundary phases exercise the actual selector; runtime inputs prevent guard folding. All other inventories and floors are retained. The hosted GCC 15 expectation uses the measured local inventory pending authoritative CI confirmation.",
   "profiles": {
     "clang-17-darwin": {
       "main/logic/availability.hpp": {
@@ -39,8 +39,8 @@
         "taken": 633
       },
       "main/logic/checkup_persist.hpp": {
-        "outcomes": 45,
-        "taken": 38
+        "outcomes": 113,
+        "taken": 113
       },
       "main/logic/chunk_sink.hpp": {
         "outcomes": 272,
@@ -151,12 +151,12 @@
         "taken": 14
       },
       "main/logic/history.hpp": {
-        "outcomes": 120,
-        "taken": 113
+        "outcomes": 126,
+        "taken": 119
       },
       "main/logic/history_persist.hpp": {
-        "outcomes": 372,
-        "taken": 319
+        "outcomes": 480,
+        "taken": 425
       },
       "main/logic/homehub_map.hpp": {
         "outcomes": 52,
@@ -413,8 +413,8 @@
         "taken": 727
       },
       "main/logic/checkup_persist.hpp": {
-        "outcomes": 67,
-        "taken": 57
+        "outcomes": 137,
+        "taken": 137
       },
       "main/logic/chunk_sink.hpp": {
         "outcomes": 308,
@@ -525,12 +525,12 @@
         "taken": 16
       },
       "main/logic/history.hpp": {
-        "outcomes": 154,
-        "taken": 148
+        "outcomes": 160,
+        "taken": 154
       },
       "main/logic/history_persist.hpp": {
-        "outcomes": 442,
-        "taken": 382
+        "outcomes": 557,
+        "taken": 498
       },
       "main/logic/homehub_map.hpp": {
         "outcomes": 54,
@@ -787,8 +787,8 @@
         "taken": 729
       },
       "main/logic/checkup_persist.hpp": {
-        "outcomes": 67,
-        "taken": 57
+        "outcomes": 137,
+        "taken": 137
       },
       "main/logic/chunk_sink.hpp": {
         "outcomes": 308,
@@ -899,12 +899,12 @@
         "taken": 16
       },
       "main/logic/history.hpp": {
-        "outcomes": 152,
-        "taken": 146
+        "outcomes": 158,
+        "taken": 152
       },
       "main/logic/history_persist.hpp": {
-        "outcomes": 440,
-        "taken": 380
+        "outcomes": 555,
+        "taken": 496
       },
       "main/logic/homehub_map.hpp": {
         "outcomes": 54,
@@ -1161,8 +1161,8 @@
         "taken": 729
       },
       "main/logic/checkup_persist.hpp": {
-        "outcomes": 67,
-        "taken": 57
+        "outcomes": 137,
+        "taken": 137
       },
       "main/logic/chunk_sink.hpp": {
         "outcomes": 308,
@@ -1273,12 +1273,12 @@
         "taken": 16
       },
       "main/logic/history.hpp": {
-        "outcomes": 152,
-        "taken": 146
+        "outcomes": 158,
+        "taken": 152
       },
       "main/logic/history_persist.hpp": {
-        "outcomes": 440,
-        "taken": 380
+        "outcomes": 555,
+        "taken": 496
       },
       "main/logic/homehub_map.hpp": {
         "outcomes": 54,

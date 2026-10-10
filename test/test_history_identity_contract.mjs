@@ -252,7 +252,9 @@ const mqttHa = read("main/mqtt_ha.cpp");
 // identity of the ring it holds; flash records carry the identity of the circulation column; the
 // restore and the splice honour it. Without any one of these a later restore splices the retired
 // witness's samples back (the defect: RAM-only reset, journal untouched).
-assert.match(persistHeader, /HISTORY_PERSIST_VERSION\s*=\s*3\s*;/,
+// (Version 4 added the age guards; the exact current value is pinned by the host suite. This test
+// only needs the version to have moved past the layout that lacked the identity.)
+assert.match(persistHeader, /HISTORY_PERSIST_VERSION\s*=\s*(?:[3-9]|\d{2,})\s*;/,
   "the .noinit layout gained a sealed field: the persist version must move off 2");
 assert.match(history, /uint32_t circulation_fp;/, "the sealed region names the circulation identity");
 assert.match(functionBody("inline uint32_t persist_crc()", "// Called at the end of every record cycle"),
@@ -290,14 +292,14 @@ assert.match(functionBody("inline void persist_wipe(", "uint32_t current_mb_targ
   assert.match(body, /s_circulation_fp\.store\(want_circulation_fp\)/);
   const mismatch = body.search(/if \(P\(\)\.circulation_fp != want_circulation_fp\) \{/);
   assert.ok(mismatch >= 0, "an adopted image is compared with the configured witness identity");
-  const block = body.slice(mismatch, body.indexOf("persist_adopt(", mismatch));
+  const block = body.slice(mismatch, body.indexOf('"history: circulation RAM ring rejected', mismatch));
   assert.match(block, /if \(!circulation_trend\(logic::TRENDS\[t\]\)\) continue;/,
     "only the circulation ring is retired by an identity mismatch");
   assert.doesNotMatch(block, /mb_ring|env3_ring|x10a_target_fp/);
   assert.match(block, /P\(\)\.circulation_fp\s*=\s*want_circulation_fp/);
-  assert.match(body, /persist_wipe\(want_fp,[^;]*want_circulation_fp\)/);
+  assert.match(body, /persist_wipe\(want_fp,[^;]*want_circulation_fp,\s*s_env3_enabled\)/);
   assert.match(functionBody("bool history_flash_forget()", "static void history_flash_start()"),
-    /persist_wipe\([^;]*s_circulation_fp\.load\(\)\)/);
+    /persist_wipe\([^;]*s_circulation_fp\.load\(\),\s*s_env3_enabled\)/);
 }
 // Writer: an X10A record names the identity of the circulation ring it was assembled from — the
 // RING's identity (sealed, moves at the consumed reset), never the requested one — after the

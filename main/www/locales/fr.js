@@ -1,4 +1,4 @@
-// translation-source: bcd4ff0bb5bf1f2e454eb0f7e5c00ea352bcbb9f1f0c080ef5225bc85210fa0b
+// translation-source: 6bca03f96e2befcb0ffc38143e9bdb22db58839623b9195a314a93bb6dffffb3
 I18N.fr = localeValues([
   /* sys.nodata */ "Aucune donnée",
   /* sys.unreachable */ "Injoignable",
@@ -1152,7 +1152,7 @@ MODEL_DESCRIPTION_I18N.fr = modelDescriptionValues([
   ["Débit après 60 s de pompe : tronçon mesuré, pas débit de calcul ; comparer mêmes modèle/mode/conditions, sans seuil universel."], // health_flow
   ["Durée BUH/BSH observée : froid, secours, dégivrage, ECS ou surplus peuvent l’expliquer ; aucune limite universelle."], // health_heater
   ["5 compteurs expérimentaux peu documentés : seule une hausse comparable donne NOTE, pas diagnostic ; sans hausse, une limitation reste possible."], // health_retries
-  ["RAM libre actuelle et tendance 24 h : une baisse durable peut indiquer des allocations non libérées. Après redémarrage ou coupure, les intervalles clos de 5 min sont restaurés depuis le flash."], // free_heap
+  ["RAM 24 h stable, creux résorbés; baisse durable: fuite possible. Redémarrage compatible alimenté: courbe RAM possible. Sinon, journal flash requis: 5 min datées compatibles après synchro. Le pas de 5 min peut cacher un bref arrêt. Ouvert/récents non sauvés peuvent manquer."], // free_heap
   ["Plus grand bloc contigu requis par TLS/OTA ; sa baisse avec RAM totale stable indique une fragmentation."], // max_alloc
   ["Puissance nominale de l’unité extérieure, pas sa production actuelle."], // capacity
   ["Puissance nominale de l’UNITÉ INTÉRIEURE ; ne pas l’attribuer à l’extérieure ou au système complet."], // capacity_iu

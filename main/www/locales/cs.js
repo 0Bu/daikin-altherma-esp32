@@ -1,4 +1,4 @@
-// translation-source: bcd4ff0bb5bf1f2e454eb0f7e5c00ea352bcbb9f1f0c080ef5225bc85210fa0b
+// translation-source: 6bca03f96e2befcb0ffc38143e9bdb22db58839623b9195a314a93bb6dffffb3
 I18N.cs = localeValues([
   /* sys.nodata */ "Žádná data",
   /* sys.unreachable */ "Nedostupné",
@@ -1123,7 +1123,7 @@ MODEL_DESCRIPTION_I18N.cs = modelDescriptionValues([
   ["Nejnižší průtok po 60 s souvislého běhu vnitřního čerpadla; vyřazuje rozběh, klid a výpadky. JEN MĚŘENÍ: minimum při částečné zátěži, ne jmenovitý ani návrhový průtok. Obecná mez není; návod platí jen pro stejný model, režim a podmínky. Jeden nízký údaj bez poruchy málo dokazuje."], // 5
   ["Odděleně ukazuje dobu běhu BUH pro dům a BSH v zásobníku. JEN MĚŘENÍ. Mráz, nouze, odmrazování, plán TUV či přebytky mohou běh vysvětlit. Obecná mez OK/VAROVÁNÍ není."], // 6
   ["Experimentálně sleduje pět ochranných čítačů. Počítá jen jasný růst mezi srovnatelnými čteními; základ, stálost, pokles, mezera a reset ne. Bez pozorovaného růstu. Růst dává POZNÁMKU, ne diagnózu; bez růstu nelze kvůli neúplné dokumentaci vyloučit omezení."], // 7
-  ["Volná paměť RAM a trend 24 h: trvalý pokles může značit neuvolněnou paměť. Po restartu či výpadku se uzavřené 5minutové intervaly obnovují z paměti flash."], // 8
+  ["RAM 24 h stabilní, poklesy mizí; trvalý pokles: možný únik; napájený kompatibilní restart: průběh RAM možný. Jinak jen datované kompatibilní 5 min z flash žurnálu po seřízení hodin. Rastr 5 min může skrýt krátké pauzy; otevřené/nové neuložené mohou chybět."], // 8
   ["Největší souvislý blok volné RAM. TLS a OTA potřebují jeden velký blok i při vyšším celkovém volnu. Je nejvýše roven volné RAM. Klesá-li při stabilní volné RAM, roste fragmentace haldy a velká alokace může selhat před vyčerpáním paměti."], // 9
   ["Jmenovitý výkon venkovní jednotky z její identifikace; třída hardwaru, ne aktuální výroba."], // 10
   ["Jmenovitý výkon VNITŘNÍ jednotky, zobrazený protože identifikace venkovní vlastní výkon nemá. Vnitřní a venkovní jednotka mohou mít různé třídy; nejde o výkon venkovní ani celého systému."], // 11

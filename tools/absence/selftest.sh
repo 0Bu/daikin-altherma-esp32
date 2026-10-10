@@ -130,13 +130,31 @@
 #        esp_timer's zero to the first fold is neither elapsed nor blind
 #    96. a bare literal 0 written to the dwell clock outside the origin rule
 #    97. a wiped dwell table resuming from the adopted origin and booking time against nothing
-#    98. the DHW adoption reading a second clock instead of the one the restart report uses
+#    98. the DHW adoption forgetting the current-boot monotonic age
 #    99. the DHW adoption handed the restored pending bucket, so a restart discard is counted as
 #        a blind abort and read as an X10A fault
-#   100. the carried-candidate discard line keyed off nothing, so a discard reads as kept
-#   101. the discard line describing a different instant than the adoption booked
+#   100. the DHW handoff adopting without its confirmed current source scope
+#   101. restoring undated completed DHW counters from the handoff
 #   102. the dwell elapsed guard tightened from `>= 0` to `> 0`, so the adopted table's zero origin
 #        reads as "no previous observation" and the first fold books nothing again
+#   103. the HomeHub raster weighed from its raw ring instead of the ring this boot would adopt, so a
+#        HomeHub disabled at runtime (ring frozen, sealed target no longer the configured one) makes
+#        the whole RAM history stale and an unrelated source's absence costs every trend
+#   104. a stale HomeHub or ENV III raster folded into the region verdict again, so one optional
+#        source that stopped refuses the X10A and board trends that did not
+#   105. adoption claiming the boot instant again, so the first live commit can land in the bucket the
+#        claim sits in and the stretch since the last commit collapses
+#   106. adoption booking no gaps, so every restart slides the older part of the curve later and the
+#        slides of repeated restarts add up in one direction
+#   107. the checkup's not_committed refusal dropping the one-shot DHW handoff, and with it the settle
+#        timer a tank charge is owed, so a candidate hour can start inside it
+#   108. adoption throwing the rounding remainder away instead of carrying it in, so restarts at a
+#        fixed uptime lean the same way at every seam and the older samples drift by hours
+#   109. the journal writer walking from its own cursor again instead of the one lifted over the
+#        newest adopted real sample, so a seam files that reading a second time
+#   110. a count computed for a raster whose rings were just retired, so the boot line reports
+#        buckets booked into a ring that holds nothing
+#   111. a discarded or settle-only DHW checkpoint falsely logged as a resumed candidate
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -149,7 +167,8 @@ fail=0
 run_contract() {
   (cd "$TMP" &&
     node test/test_source_absence_contract.mjs &&
-    node test/test_mqtt_source_cleanup_contract.mjs)
+    node test/test_mqtt_source_cleanup_contract.mjs &&
+    node test/test_history_restore_guard_contract.mjs)
 }
 run_ui()       { (cd "$TMP" && node test/test_ui_absence_matrix.mjs) ; }
 
@@ -1707,60 +1726,55 @@ PY4
 expect_red "a wiped dwell table counting from esp_timer's zero" run_contract
 restore
 
-# 98. The DHW adoption taking its own clock reading while the restart report keeps the local. The
-#     report then names the seconds of a different instant than the one the adoption booked.
+# 98. A literal age origin instead of the real current-boot monotonic clock.
 python3 - "$TMP/main/checkup.cpp" <<'PY4'
-import sys, re
+import sys
 p = sys.argv[1]
 s = open(p).read()
-seed, n = re.subn(r"(logic::dhw_loss_adopt\(s_dhw_state,[^;]*?),\s*adopt_now_us\)",
-                  r"\1, esp_timer_get_time())", s, count=1)
-assert n == 1, "seed 98 did not apply — the DHW adoption call moved"
+old = "logic::dhw_loss_adopt(s_dhw_state, s_boot_handoff.candidate, esp_timer_get_time())"
+seed = s.replace(old, "logic::dhw_loss_adopt(s_dhw_state, s_boot_handoff.candidate, 0)", 1)
+assert seed != s, "seed 98 did not apply — scoped DHW adoption moved"
 open(p, "w").write(seed)
 PY4
-expect_red "the DHW adoption reading a second clock" run_contract
+expect_red "the DHW adoption forgetting the current boot uptime" run_contract
 restore
 
-# 99. The adoption handed the restored pending bucket. A restart discard would then be entered in
-#     the discarded-window count as a blind abort, and the UI words that reason as "X10A not
-#     answering" — a board-side cause (restart allowance, network start-up) read as a wiring fault.
+# 99. A pending bucket handed to adoption would turn board-side restart loss into a plant discard.
 python3 - "$TMP/main/checkup.cpp" <<'PY4'
-import sys, re
+import sys
 p = sys.argv[1]
 s = open(p).read()
-seed, n = re.subn(r"(logic::dhw_loss_adopt\(s_dhw_state,\s*)(P\(\)\.dhw_handoff\.payload\.candidate,)",
-                  r"\1P().dhw.pending, \2", s, count=1)
-assert n == 1, "seed 99 did not apply — the DHW adoption call moved"
+old = "logic::dhw_loss_adopt(s_dhw_state, s_boot_handoff.candidate,"
+seed = s.replace(old, "logic::dhw_loss_adopt(s_dhw_state, P().dhw.pending, s_boot_handoff.candidate,", 1)
+assert seed != s, "seed 99 did not apply — scoped DHW adoption moved"
 open(p, "w").write(seed)
 PY4
 expect_red "the DHW adoption handed the pending bucket" run_contract
 restore
 
-# 100. The discard line keyed off nothing: a carried candidate that the adoption ended is reported
-#      as "kept (0 min ...)", which told a syslog reader the opposite of what happened.
+# 100. Current source-scope admission withdrawn from the candidate handoff.
 python3 - "$TMP/main/checkup.cpp" <<'PY4'
 import sys
 p = sys.argv[1]
 s = open(p).read()
-seed = s.replace("if (carried_segment && s_dhw_state.segment_start_us < 0) {",
-                 "if (carried_segment && false) {", 1)
-assert seed != s, "seed 100 did not apply — the discard branch condition moved"
+seed = s.replace("s_boot_handoff.source_fp == source_fp", "true", 1)
+assert seed != s, "seed 100 did not apply — handoff source admission moved"
 open(p, "w").write(seed)
 PY4
-expect_red "a discarded DHW candidate logged as kept" run_contract
+expect_red "DHW handoff adoption without current source scope" run_contract
 restore
 
-# 101. The discard line recomputing its seconds from a fresh clock reading instead of the adoption's.
+# 101. Completed undated counters restored from the checkpoint instead of discarded.
 python3 - "$TMP/main/checkup.cpp" <<'PY4'
 import sys
 p = sys.argv[1]
 s = open(p).read()
-seed = s.replace("dhw_loss_adopt_blind_s(adopt_now_us)",
-                 "dhw_loss_adopt_blind_s(esp_timer_get_time())", 1)
-assert seed != s, "seed 101 did not apply — the discard line's seconds moved"
+old = "s_boot_handoff.pending = logic::DhwLossBucket{};"
+seed = s.replace(old, "P().dhw.pending = s_boot_handoff.pending;", 1)
+assert seed != s, "seed 101 did not apply — handoff pending clear moved"
 open(p, "w").write(seed)
 PY4
-expect_red "the DHW discard line naming a different instant" run_contract
+expect_red "restoring undated completed DHW pending counters" run_contract
 restore
 
 # 102. The elapsed guard tightened from `>= 0` to `> 0`, the "unset" reading of the clock. esp_timer's
@@ -1777,6 +1791,148 @@ assert seed != s, "seed 102 did not apply — the elapsed guard moved"
 open(p, "w").write(seed)
 PY4
 expect_red "an adopted dwell table's zero origin treated as no previous observation" run_contract
+restore
+
+# 103. The HomeHub raster weighed from its raw ring. A HomeHub disabled at runtime (/set_hp, no reboot)
+#      keeps its ring but stops its raster, and its sealed target is no longer the configured one, so
+#      this boot retires the ring anyway - weighing it first lets a source that is gone make the whole
+#      RAM history stale, X10A and board trends included.
+python3 - "$TMP/main/history.cpp" <<'PY4'
+import sys
+p = sys.argv[1]
+s = open(p).read()
+old = "mb_keep && rings_have_samples(P().mb_ring, HOMEHUB_HISTORY_COUNT),"
+seed = s.replace(old, "rings_have_samples(P().mb_ring, HOMEHUB_HISTORY_COUNT),", 1)
+assert seed != s, "seed 103 did not apply - the HomeHub weighing moved"
+open(p, "w").write(seed)
+PY4
+expect_red "the HomeHub raster weighed from its raw ring" run_contract
+restore
+
+# 104. The optional rasters folded back into the region verdict: one stalled HomeHub or ENV III task
+#      then refuses the X10A and board trends, which are the one raster that is always meant to run.
+python3 - "$TMP/main/history.cpp" <<'PY4'
+import sys
+p = sys.argv[1]
+s = open(p).read()
+old = "P().boots_since_commit, plan.region_bookable);"
+new = "P().boots_since_commit,\n        plan.region_bookable && !plan.retire_modbus && !plan.retire_env3);"
+seed = s.replace(old, new, 1)
+assert seed != s, "seed 104 did not apply - the verdict call moved"
+open(p, "w").write(seed)
+PY4
+expect_red "a stale optional raster refusing the whole region" run_contract
+restore
+
+# 105. Adoption claiming the boot instant. The newest booked sample then sits on a different grid from
+#      every later commit, and the first live commit can fall into the very wall bucket the claim
+#      names.
+python3 - "$TMP/main/history.cpp" <<'PY4'
+import sys
+p = sys.argv[1]
+s = open(p).read()
+seed = s.replace("persist_adopt(claim_us);", "persist_adopt(start_us);", 1)
+assert seed != s, "seed 105 did not apply - the adoption call moved"
+open(p, "w").write(seed)
+PY4
+expect_red "adoption claiming the boot instant" run_contract
+restore
+
+# 106. Adoption booking nothing: the stretch between the previous boot's last commit and this boot's
+#      first bucket collapses, every restart slides the older samples later, and repeated restarts
+#      add up without a bound.
+python3 - "$TMP/main/history.cpp" <<'PY4'
+import sys
+p = sys.argv[1]
+s = open(p).read()
+seed = s.replace("        persist_book_unobserved(gaps);\n", "", 1)
+assert seed != s, "seed 106 did not apply - the booking call moved"
+open(p, "w").write(seed)
+PY4
+expect_red "adoption booking no gaps for the unobserved stretch" run_contract
+restore
+
+# 107. The not-aged refusal dropping the DHW handoff. It carries the settle timer a tank charge is
+#      owed; without it a candidate hour can start within seconds of the restart, inside the 45
+#      minutes the charge should keep quiet.
+python3 - "$TMP/main/logic/checkup_persist.hpp" <<'PY4'
+import sys
+p = sys.argv[1]
+s = open(p).read()
+old = "return r == CheckupRestore::Accept || r == CheckupRestore::NotCommitted;"
+seed = s.replace(old, "return r == CheckupRestore::Accept;", 1)
+assert seed != s, "seed 107 did not apply - the handoff rule moved"
+open(p, "w").write(seed)
+PY4
+expect_red "the not_committed refusal dropping the DHW handoff" run_contract
+restore
+
+# 108. Adoption throwing the rounding remainder away. Rounding alone is unbiased only for restarts at
+#      random phases of the bucket; a loop at one uptime leaves the same remainder every time and
+#      the remainders add up linearly.
+python3 - "$TMP/main/history.cpp" <<'PY4'
+import re, sys
+p = sys.argv[1]
+s = open(p).read()
+seed, n = re.subn(r"claim_us,\s*P\(\)\.residual_us\[i\]\);", "claim_us, 0);", s, count=1)
+assert n == 1, "seed 108 did not apply - the booking call moved"
+open(p, "w").write(seed)
+PY4
+expect_red "adoption not carrying the rounding remainder" run_contract
+restore
+
+# 109. The journal writer ignoring the floor over the newest adopted real sample. The adopted ring is
+#      shifted by the seam, so that reading can sit one bucket later than the bucket the previous boot
+#      filed it under, and the writer files it again where nothing was measured.
+python3 - "$TMP/main/history.cpp" <<'PY4'
+import re, sys
+p = sys.argv[1]
+s = open(p).read()
+new = "int64_t target = s_flash_last_bucket[src_i] == INT64_MIN ? oldest : s_flash_last_bucket[src_i] + 1;"
+seed, n = re.subn(r"int64_t\s+target = cursor == INT64_MIN \? oldest : cursor \+ 1;", new, s, count=1)
+assert n == 1, "seed 109 did not apply - the writer's walk moved"
+open(p, "w").write(seed)
+PY4
+expect_red "the journal writer walking from its own cursor" run_contract
+restore
+
+# 110. A booking computed for a raster whose rings were retired a moment ago. The boot line would
+#      then report buckets booked into rings that hold nothing.
+python3 - "$TMP/main/history.cpp" <<'PY4'
+import re, sys
+p = sys.argv[1]
+s = open(p).read()
+seed, n = re.subn(r"if \(has\[i\]\)\s*booking = logic::history_adopt_booking\(",
+                  "booking = logic::history_adopt_booking(", s, count=1)
+assert n == 1, "seed 110 did not apply - the guard moved"
+open(p, "w").write(seed)
+PY4
+expect_red "a count computed for a raster with no rings" run_contract
+restore
+
+# 111. Neutral checkpoint application replaced by a false unconditional candidate-resume claim.
+python3 - "$TMP/main/checkup.cpp" <<'PY4'
+import sys
+p = sys.argv[1]
+s = open(p).read()
+seed = s.replace("scoped DHW filter checkpoint applied", "scoped DHW candidate resumed", 1)
+assert seed != s, "seed 111 did not apply — checkpoint log moved"
+open(p, "w").write(seed)
+PY4
+expect_red "a discarded or settle-only DHW checkpoint logged as a resumed candidate" run_contract
+restore
+
+# 112. An eligible journal candidate was evicted by the fixed ring or displaced by live data,
+#      yet restoration still rebuilt the ring and advertised flash provenance.
+python3 - "$TMP/main/checkup.cpp" <<'PY4'
+import sys
+p = sys.argv[1]
+s = open(p).read()
+seed = s.replace("if (!materialized)", "if (false)", 1)
+assert seed != s, "seed 112 did not apply - the selected-interval guard moved"
+open(p, "w").write(seed)
+PY4
+expect_red "zero selected flash intervals advertised as restored evidence" run_contract
 restore
 
 if [ "$fail" -ne 0 ]; then

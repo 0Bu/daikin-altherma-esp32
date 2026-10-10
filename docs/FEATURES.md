@@ -111,12 +111,12 @@ Ids are stable keys and are never reused — a gap means a feature was retired, 
 | 69 | **Source-absence matrix gate** — every optional source (broker, room source, circulation witness, HomeHub, ENV III, weather, X10A, safe mode) can be absent independently, so the firmware invariants and the browser copy are checked over that cross product, not one feature at a time | ✅ | [`test_source_absence_contract.mjs`](../test/test_source_absence_contract.mjs), [`test_ui_absence_matrix.mjs`](../test/test_ui_absence_matrix.mjs), [`selftest.sh`](../tools/absence/selftest.sh) |
 | 71 | **Stack compiler and ELF contracts** — a 10 KiB HTTP task with 2 KiB above every named path ceiling, bounded JSON recursion, and MQTT helper boundaries with a fatal 2 KiB per-function frame ceiling | ✅ | [`http_server.cpp`](../main/http_server.cpp), [`check-stack-budget.py`](../scripts/check-stack-budget.py), [`main/CMakeLists.txt`](../main/CMakeLists.txt), [`mqtt_ha.cpp`](../main/mqtt_ha.cpp) |
 | 81 | **Stack-headroom telemetry** — the second memory budget, made reportable: five deep tasks record their own FreeRTOS high-water mark and the heartbeat carries all five, so a growing call frame is a falling line rather than a core dump nobody has yet | ✅ | [`stack_watch.hpp`](../main/stack_watch.hpp), [`stack_watch.cpp`](../main/stack_watch.cpp) |
-| 72 | **Power-loss-surviving 24-hour trends and opt-in plant checkup** — `.noinit` DRAM covers power-preserving resets; the upper-4-MiB append journal stores dense five-minute X10A/HomeHub/ENV III records, daily semantic-id manifests that preserve unchanged series across catalog edits, and enabled hourly diagnosis records. CRC, last-written commit and rotating sectors fail closed on torn writes; the build guards 72-hour capacity. The official 8 MB table is required; browser storage is not a measurement source | ✅ 🧪 | [`logic/history_persist.hpp`](../main/logic/history_persist.hpp), [`history.cpp`](../main/history.cpp), [`partitions.csv`](../partitions.csv) |
+| 72 | **Power-loss-surviving 24-hour trends and opt-in plant checkup** — `.noinit` DRAM carries compatible trends across power-preserving resets; the upper-4-MiB append journal stores dense five-minute X10A/HomeHub/ENV III records, daily semantic-id manifests that preserve unchanged series across catalog edits, and enabled hourly diagnosis records. CRC, last-written commit and rotating sectors fail closed on torn writes; the build guards 72-hour capacity. The official 8 MB table is required; browser storage is not a measurement source | ✅ 🧪 | [`logic/history_persist.hpp`](../main/logic/history_persist.hpp), [`history.cpp`](../main/history.cpp), [`partitions.csv`](../partitions.csv) |
 | 82 | **Reproducible ESP-IDF build inputs** — exact transitive component lock, explicit ESP-IDF/CMake/C++ floors and wall-clock-free app metadata | ✅ | [`dependencies.lock`](../dependencies.lock), [`CMakeLists.txt`](../CMakeLists.txt), [`sdkconfig.defaults`](../sdkconfig.defaults) |
 | 83 | **Kconfig and target contract gate** — `esp32s3` is a project default and every declared default is compared with generated `sdkconfig` before compilation | ✅ 🧪 | [`check-sdkconfig-defaults.py`](../scripts/check-sdkconfig-defaults.py), [`ci-build-all.sh`](../scripts/ci-build-all.sh) |
 | 84 | **Firmware-size evidence** — the hard app ceiling is joined by retained ESP-IDF json2 data and an Actions summary for Flash, DIRAM, IRAM and `.bss` | ✅ 🧪 | [`report-firmware-size.py`](../scripts/report-firmware-size.py), [`build.yml`](../.github/workflows/build.yml) |
 | 93 | **Complete localization gate** — key/table parity plus a canonical-copy fingerprint forces all twelve device locale packs to follow every changed English or domain explainer before CI accepts the PR | ✅ 🧪 | [`run-ui-localization-audit.sh`](../scripts/run-ui-localization-audit.sh), [`test_ui_locale_catalogs.mjs`](../test/test_ui_locale_catalogs.mjs), [`selftest.mjs`](../tools/ui_localization/selftest.mjs) |
-| 79 | **Reboot-surviving, generation-bound plant checkup** — the default-off 24-hour window rides the same `.noinit` DRAM only after explicit Firmware opt-in, sealed with a consent generation and a layout fingerprint over every row locator and counting threshold; Cycling and Defrost carry separately paired X10A outdoor minimum/mean context without changing a verdict | ✅ 🧪 | [`logic/checkup_persist.hpp`](../main/logic/checkup_persist.hpp), [`logic/outdoor_evidence.hpp`](../main/logic/outdoor_evidence.hpp), [`checkup.cpp`](../main/checkup.cpp) |
+| 79 | **Reboot-surviving, generation-bound plant checkup** — the default-off 24-hour window restores completed hours from absolute-age flash only after current X10A-source confirmation and explicit Firmware opt-in, bound to the source, consent generation and layout fingerprint; Cycling and Defrost carry separately paired X10A outdoor minimum/mean context without changing a verdict | ✅ 🧪 | [`logic/checkup_persist.hpp`](../main/logic/checkup_persist.hpp), [`logic/outdoor_evidence.hpp`](../main/logic/outdoor_evidence.hpp), [`checkup.cpp`](../main/checkup.cpp) |
 | 73 | **Heap watchdog** — the escalation every other OOM guard here deliberately lacks: sustained exhaustion of the largest *internal* contiguous block becomes a deliberate restart with a persisted, capped breadcrumb, because a wedge that never recovers is worse than a crash | ✅ 🧪 | [`logic/heap_watchdog.hpp`](../main/logic/heap_watchdog.hpp), [`heap_guard.cpp`](../main/heap_guard.cpp) |
 | 74 | **Presenter-parity gate** — the browser's copies of the leaving-water / post-BUH / COP-scope / held-over-page rules are diffed against the C++ headers over the whole catalog, so "host-tested" stops meaning "the copy that does not ship is tested" | ✅ 🧪 | [`presenter_golden_dump.cpp`](../test/presenter_golden_dump.cpp), [`presenter_parity.mjs`](../tools/presenter/presenter_parity.mjs), [`selftest.sh`](../tools/presenter/selftest.sh) |
 | 75 | **One unwind-safe mutex guard** for the whole firmware, replacing nine per-file copies that had drifted into two shapes — plus a bounded/try-lock mode for the callback contexts that must not block | ✅ | [`rtos_guard.hpp`](../main/rtos_guard.hpp) |
@@ -548,16 +548,19 @@ Everything needed to explain a crash *after the fact*, from the field, without a
   Missing identity remains unresolved. The summary API uses IDF v6.1's flash-enable guard. Reset
   reason describes this boot; stored task/backtrace evidence can be older, even with matching ELF.
 - **✅ 🧪 The 24-hour plant checkup survives a reboot** ([`logic/checkup_persist.hpp`](../main/logic/checkup_persist.hpp)).
-  `.noinit` preserves the active window across power-preserving resets; the upper-flash append
-  journal additionally records completed enabled diagnosis hours and restores compatible coverage
-  after an ordinary reboot or power loss. The open hour can be missing after an interruption. The
-  lifecycle is carried as a duration (the monotonic anchors restart), and a **layout fingerprint**
-  over the geometry, every row locator and every counting threshold invalidates a record when an
-  update changes what a stored counter means.
-  Two refusals stop the window outliving its source: safe mode never adopts, since nothing there would
-  age it, and the poll loop keeps the clock running while the bus is unidentified. Cycling and
-  Defrost retain separate compact X10A outdoor minimum/mean statistics over their own eligible
-  populations; that context is visibly sourced and cannot alter a check's threshold or verdict.
+  After every restart, completed diagnosis hours come exclusively from the absolute-age flash
+  journal after clock sync and current-boot profile/link confirmation. Completed `.noinit` hours
+  and undated open-hour statistics are discarded. The scope binds profile, RX/TX pins and protocol;
+  consent generation and a **layout fingerprint** bind what each stored counter means. Legacy
+  unscoped records cannot restore. Exact restored-slot expiry prevents repeated or poorly phased
+  reboots from extending evidence beyond 24 hours. `flash_pending`, `fresh` and `flash` distinguish
+  waiting, fresh collection and actual reconstruction. Safe mode and disabled diagnostics cannot
+  restore. Only a separately sealed, matching ongoing DHW filter can cross an intentional restart.
+  A carried candidate books the restart allowance and all boot uptime through source confirmation
+  as blind time; a checkpoint with only settling/charge state preserves that state without adding
+  candidate evidence. The poll loop ages the window while unidentified. Cycling and Defrost retain
+  separate compact X10A outdoor minimum/mean statistics over their own eligible populations; that
+  context is visibly sourced and cannot alter a check's threshold or verdict.
 - **✅ 🧪 English-only maintained documentation** ([`english_docs.mjs`](../tools/user_docs/english_docs.mjs)).
   The user-docs gate scans project Markdown for high-confidence German prose while continuing to
   require bounded English/German diagnosis copy. The separate localization gate requires complete,
@@ -565,8 +568,9 @@ Everything needed to explain a crash *after the fact*, from the field, without a
 - **✅ 🧪 The 24-hour trends survive a reboot** ([`logic/history_persist.hpp`](../main/logic/history_persist.hpp)).
   Rings live in `.noinit` DRAM rather than NVS; the official 8 MB layout appends dense 256-byte
   records to the upper-4-MiB partition. CRC, a last-written commit and rotating sectors fail closed
-  on torn writes. After a successful scan, SNTP sync and first eligible commit, a power cut loses at
-  most the open or just-closed bucket; before that commit flash has no RAM-only samples to restore.
+  on torn writes. Flash restores only intervals actually committed to the journal. The open bucket
+  and recent unsaved tail can be missing, including readings omitted by the adopted-tail safety
+  floor. Before the first eligible commit, flash has no RAM-only samples to restore.
   Restore waits for SNTP, batches four rings per poll tick and derives spans from journal buckets.
   Browser history epochs discard cached trends and pins on source resets or reboot, even for A → B →
   A between polls; replies carry their sample epoch and boot identity for admission. `.noinit` is

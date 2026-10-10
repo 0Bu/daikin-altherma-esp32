@@ -3,6 +3,7 @@
 // one mutex, and the fold from a poll cycle into the open hour.
 #include "checkup.hpp"
 #include "diag_log.hpp"
+#include "history.hpp" // startup journal availability, after history_start
 #include "logic/checkup.hpp"
 #include "logic/checkup_persist.hpp"  // WHEN a persisted window may be believed
 #include "logic/crashinfo.hpp"        // crash_reason_slug — one reset vocabulary
@@ -10,13 +11,14 @@
 #include "safe_mode.hpp"         // safe_mode_active — nothing ages the window there
 #include "mqtt_ha.hpp"           // independent circulation-pump electrical witness
 
-#include "esp_attr.h"            // __NOINIT_ATTR — the whole of the restore rests on this attribute
+#include "esp_attr.h"            // __NOINIT_ATTR — warm handoff and startup integrity metadata
 #include "esp_system.h"          // esp_reset_reason
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "rtos_guard.hpp"   // SemGuard — the ONE unwind-safe mutex guard
 
+#include <array>
 #include <atomic>
 
 namespace daik {
@@ -41,17 +43,19 @@ struct PersistedDhwHandoff {
 struct PersistedCheckup {
     uint32_t magic;
     uint16_t version;
-    uint16_t reserved;
+    // Reserved legacy age-guard counter, sealed for integrity. Completed v4 RAM hours are retired.
+    uint16_t boots_since_commit;
     uint32_t layout_fp;
-    uint32_t model_fp;      // which unit the buckets describe (checked at detect, not here)
+    uint32_t model_fp;               // detected profile
+    uint32_t source_fp;              // full detected X10A profile/link identity
     uint32_t diagnostics_generation; // consent interval; old intervals never cross a new enable
     int64_t  span_us;       // lifecycle observed up to the last commit, carried as a duration
     uint32_t crc;
     logic::CheckupRing  ring;
     logic::DhwLossRing  dhw;
     // One-shot checkpoint written by esp_restart's shutdown handler.  It has its own seal because
-    // the completed ring must remain adoptable after an unexpected panic while this open state is
-    // changing.  checkup_start consumes it before any producer exists.
+    // ring integrity must remain usable to validate the handoff while this open state is changing.
+    // checkup_start consumes it before any producer exists and retires all completed RAM hours.
     PersistedDhwHandoff dhw_handoff;
 };
 
@@ -71,7 +75,8 @@ struct PersistedCheckup {
 //
 // A union with a user-provided empty constructor emits no initialisation at all, which is the
 // standard C++ way to say "these bytes are whatever they were". checkup_start() then initialises
-// them explicitly on every boot that does not adopt them, so nothing is read before it is written.
+// the completed-hour rings on every boot, after checking the separately sealed one-shot handoff,
+// so nothing is read before it is written.
 union PersistStore {
     PersistedCheckup v;
     PersistStore() {}      // deliberately leaves v untouched
@@ -85,9 +90,15 @@ logic::CheckupState s_state;
 logic::DhwLossState s_dhw_state;
 
 logic::CheckupRestore s_persist_verdict = logic::CheckupRestore::NoRecord;
-// The first detection after an ADOPTED boot defers to the model check instead of wiping on sight.
-bool s_adopt_detect_grace = false;
 uint32_t s_model_fp = 0;
+uint32_t                     s_source_fp        = 0;
+bool                         s_source_confirmed = false;
+logic::DhwLossHandoffPayload s_boot_handoff{};
+uint32_t                     s_boot_handoff_model = 0;
+bool                         s_boot_handoff_valid = false;
+// Exact expiry for reconstructed completed slots, including selected live intervals.
+// Zero marks gaps or ordinary current-boot slots that still age through the hourly ring.
+int64_t s_restored_expiry_us[logic::CHECKUP_COMPLETED_BUCKETS] = {};
 // Capability of the CURRENT converter-adjudicated profile. hp_poll derives it from the profile rows,
 // not from successful reads, so a timeout reduces evidence without pretending the feature vanished.
 // Replacing instead of OR-latching it is important when model detection changes at runtime.
@@ -100,17 +111,31 @@ std::atomic<uint32_t>  s_dhw_identity_generation{1};
 std::atomic<bool>     s_diagnostics_enabled{false};
 uint32_t              s_diagnostics_generation = 0; // guarded by s_mtx after startup
 bool                  s_reboot_saved_this_boot = false;
-// End of the newest COMPLETED bucket in this boot's monotonic clock.  Unlike P().span_us this is not
-// persisted: after a cold restore the journal's absolute end times are authoritative, and after a
-// warm restore the next live commit establishes a fresh wall-clock anchor before anything new is
-// appended.
+// End of the newest COMPLETED bucket in this boot's monotonic clock.  Unlike P().span_us this is
+// not persisted: restored journal intervals keep their absolute end times. Only a completed
+// interval observed in the current boot establishes an append anchor; completed RAM hours are never
+// adopted.
 constexpr int64_t      kNoCommitUs = INT64_MIN;
 int64_t                s_last_commit_us = kNoCommitUs;
 uint8_t                s_live_commit_count = 0; // completed in THIS monotonic clock, max 23
 
-// One-shot cold-restore scratch. Static for the poll task's measured 8 KiB stack: 23 diagnostic
-// records are roughly 2 KiB and must never become an automatic array on that task.
-CheckupFlashRecord     s_restore_live[logic::CHECKUP_COMPLETED_BUCKETS];
+// One-shot journal-reconstruction scratch. Static for the poll task's measured 8 KiB stack: 23
+// diagnostic records are roughly 2 KiB and must never become an automatic array on that task.
+// Unused scratch slots carry no evidence. Each admitted slot is fully assigned below before any
+// read; zero initial bytes keep this private buffer in .bss instead of duplicating it in flash.
+std::array<CheckupFlashRecord, logic::CHECKUP_COMPLETED_BUCKETS> s_restore_live = []() constexpr {
+    std::array<CheckupFlashRecord, logic::CHECKUP_COMPLETED_BUCKETS> records{};
+    for (auto& rec : records) {
+        rec.bucket                                     = 0;
+        rec.payload.end_unix_s                         = 0;
+        rec.payload.checkup.min_bar                    = 0;
+        rec.payload.checkup.min_flow                   = 0;
+        rec.payload.checkup.cycling_outdoor.min_tenths = 0;
+        rec.payload.checkup.defrost_outdoor.min_tenths = 0;
+        rec.payload.dhw.max_loss_tenths_k_h            = 0;
+    }
+    return records;
+}();
 
 // The ONE unwind-safe mutex guard, shared by every file in this firmware (main/rtos_guard.hpp).
 // This used to be a private copy here; nine of them had drifted into two different shapes.
@@ -168,15 +193,14 @@ bool reading(const CachedValue* v, size_t n, const logic::CheckupLocator& l, int
 
 // WHAT THE SEAL COVERS — and the fields it deliberately does not.
 //
-// `pending` is EXCLUDED, for history.cpp's reason: it changes on every fold, i.e. once a second, so
-// a seal covering it would be stale for all but microseconds of every hour — and a panic, the case
-// this exists for most, would land in the stale window essentially always and discard a whole
-// intact day. Excluded, sealed bytes change only at a COMMIT or when a completed run is booked back
-// into its retained START bucket; both paths re-seal immediately. The open hour is dropped on
-// restore, which is the honest answer anyway: a partial hour was never a completed bucket.
+// `pending` is EXCLUDED because it changes on every fold. Commits, completed-run updates,
+// resets, source changes and journal reconstruction reseal the covered state. The seal establishes
+// startup integrity for the scoped handoff. It does not establish
+// completed hour ages or authorize RAM adoption: completed RAM hours and undated pending counters
+// retire.
 //
 // first/latest_sample_us are excluded because they are MONOTONIC and meaningless in the next boot's
-// clock; the observed lifecycle rides as `span_us` instead.
+// clock; the recorded lifecycle rides as `span_us` instead, without establishing durable age.
 uint32_t persist_crc() {
     uint32_t crc = CONFIG_CRC32_INIT;
     const auto& r = P().ring;
@@ -192,47 +216,59 @@ uint32_t persist_crc() {
                               sizeof(P().span_us));
     crc = config_crc32_update(crc, reinterpret_cast<const uint8_t*>(&P().model_fp),
                               sizeof(P().model_fp));
+    crc             = config_crc32_update(crc, reinterpret_cast<const uint8_t*>(&P().source_fp),
+                                          sizeof(P().source_fp));
     crc = config_crc32_update(
         crc, reinterpret_cast<const uint8_t*>(&P().diagnostics_generation),
         sizeof(P().diagnostics_generation));
+    crc = config_crc32_update(crc, reinterpret_cast<const uint8_t*>(&P().boots_since_commit),
+                              sizeof(P().boots_since_commit));
     return config_crc32_final(crc);
 }
 
-// Re-seal after a commit or a completed-run write into an older retained bucket. The ONLY writer of
-// the record's header, so the seal and the bytes it covers cannot drift apart.
+// Re-seal covered state after commits, completed-run updates, resets, source changes or journal
+// reconstruction. This is the header writer, keeping its integrity fields together. It leaves
+// `boots_since_commit` alone for layout integrity. It is a reserved legacy age-guard field;
+// completed RAM hours are never adopted by this build.
 void persist_seal() {
     P().magic     = logic::CHECKUP_PERSIST_MAGIC;
     P().version   = logic::CHECKUP_PERSIST_VERSION;
-    P().reserved  = 0;
     P().layout_fp = logic::checkup_layout_fingerprint();
     P().model_fp  = s_model_fp;
+    P().source_fp              = s_source_fp;
     P().diagnostics_generation = s_diagnostics_generation;
     P().span_us   = P().ring.span_us();
     P().crc       = persist_crc();
 }
 
-void persist_wipe() {
+// `keep_handoff` spares the one-shot DHW checkpoint. Startup consumes it once and holds a
+// compatible filter until current-source confirmation; every other wipe clears its record.
+void persist_wipe(bool keep_handoff = false) {
     P().ring.reset();
     P().dhw.reset();
-    P().dhw_handoff.magic = 0;
+    for (auto& expiry : s_restored_expiry_us) expiry = 0;
+    if (!keep_handoff) P().dhw_handoff.magic = 0;
+    P().boots_since_commit = 0; // reserved integrity counter; no completed RAM hours are adopted
     s_last_commit_us = kNoCommitUs;
     s_live_commit_count = 0;
     persist_seal();     // keeps s_model_fp: the identity belongs to what is recorded NEXT, and the
-}                       // reset is consumed asynchronously, after checkup_reset_on_detect set it
+} // reset is consumed asynchronously, after checkup_reset_on_detect set it
 
 bool apply_reset_locked() {
     if (!s_reset_requested.exchange(false)) return false;
+    s_boot_handoff_valid = false;
     s_dhw_reset_requested.store(false);
     s_state = logic::CheckupState{};
     s_dhw_state = logic::DhwLossState{};
     s_cov = logic::CheckupCoverage{};
     s_fault_now = daik::FaultClass::Unknown;
-    persist_wipe();     // clears both rings AND the record, so the next boot cannot re-adopt them
+    persist_wipe(); // clears both rings and the checkpoint to withdraw the previous scope
     return true;
 }
 
 bool apply_dhw_reset_locked() {
     if (!s_dhw_reset_requested.exchange(false)) return false;
+    s_boot_handoff_valid = false;
     P().dhw.reset();
     s_dhw_state = logic::DhwLossState{};
     P().dhw_handoff.magic = 0;
@@ -240,10 +276,9 @@ bool apply_dhw_reset_locked() {
     return true;
 }
 
-// Intentional reboot handoff.  Unlike the completed-ring seal this runs exactly once, after the OTA
-// image is installed and immediately before esp_restart.  A bounded lock is load-bearing: failure
-// to checkpoint may lose one candidate, while waiting forever would strand a device that has
-// already switched its boot partition.
+// Best-effort intentional-reboot handoff, attempted once after OTA installation or during
+// shutdown. Further shutdown work can follow. Bounded-lock failure may lose one candidate;
+// waiting forever could strand a device that already switched its boot partition.
 void checkup_reboot_save() {
     if (!s_diagnostics_enabled.load(std::memory_order_acquire)) return;
     if (s_reboot_saved_this_boot) return;
@@ -268,7 +303,9 @@ void checkup_reboot_save() {
     h.layout_fp = logic::checkup_dhw_handoff_layout_fingerprint();
     h.model_fp  = s_model_fp;
     h.payload.candidate = logic::dhw_loss_checkpoint(s_dhw_state, esp_timer_get_time());
-    h.payload.pending   = P().dhw.pending;
+    h.payload.source_fp    = s_source_confirmed ? s_source_fp : 0;
+    // Completed counters in the open hour have no durable age; never carry them across a boot.
+    h.payload.pending = logic::DhwLossBucket{};
     h.crc = logic::checkup_dhw_handoff_crc(h.model_fp, h.payload);
 
     const logic::DhwLossProgress p = logic::dhw_loss_progress(s_dhw_state,
@@ -300,78 +337,35 @@ void checkup_start(bool diagnostics_enabled, uint32_t diagnostics_generation) {
     s_diagnostics_generation = diagnostics_generation;
     const uint32_t want_fp = logic::checkup_layout_fingerprint();
     const uint32_t reason  = static_cast<uint32_t>(esp_reset_reason());
-    s_persist_verdict = logic::checkup_restore_verdict(reason, P().magic, P().version,
-                                                       P().layout_fp, want_fp,
-                                                       P().crc, persist_crc(),
-                                                       safe_mode_active(), diagnostics_enabled,
-                                                       P().diagnostics_generation,
-                                                       diagnostics_generation);
-    if (s_persist_verdict == logic::CheckupRestore::Accept) {
-        // Adopt the completed buckets in place. The open hour is dropped (it is outside the seal),
-        // the monotonic anchors restart, and the lifecycle the previous boot observed is carried
-        // across as a duration — see CheckupRing::carried_span_us.
-        P().ring.pending      = logic::CheckupBucket{};
-        P().ring.first_sample_us  = -1;
-        P().ring.latest_sample_us = -1;
-        P().ring.carried_span_us  = P().span_us;
-        s_model_fp = P().model_fp;
-        s_adopt_detect_grace = true;
-        const bool dhw_kept = logic::checkup_dhw_handoff_valid(
+    s_persist_verdict        = logic::checkup_restore_verdict(
+        reason, P().magic, P().version, P().layout_fp, want_fp, P().crc, persist_crc(),
+        safe_mode_active(), diagnostics_enabled, P().diagnostics_generation, diagnostics_generation,
+        P().boots_since_commit);
+    const logic::CheckupRestore integrity = s_persist_verdict;
+    s_boot_handoff_valid =
+        logic::checkup_restore_keeps_dhw_handoff(integrity) && P().source_fp != 0 &&
+        P().dhw_handoff.payload.source_fp == P().source_fp &&
+        logic::checkup_dhw_handoff_valid(
             P().dhw_handoff.magic, P().dhw_handoff.version, P().dhw_handoff.layout_fp,
-            P().dhw_handoff.model_fp, s_model_fp, P().dhw_handoff.crc,
-            P().dhw_handoff.payload);
-        if (dhw_kept) {
-            P().dhw.pending = P().dhw_handoff.payload.pending;
-            // One clock reading serves the adoption AND the line that reports it: the unobserved
-            // seconds that line names are derived from this value, so a second reading would let
-            // the report drift from what the adoption actually booked.
-            const int64_t adopt_now_us = esp_timer_get_time();
-            logic::dhw_loss_adopt(s_dhw_state, P().dhw_handoff.payload.candidate, adopt_now_us);
-            // dhw_loss_adopt() ends a carried segment when this boot's unobserved time exhausts the
-            // blind bounds, and an ended segment leaves segment_start_us at -1. That outcome used
-            // to be logged as "kept (0 min ...)", which told a syslog reader the opposite of what
-            // happened, so a discard gets its own line. A carry that never held a segment has
-            // nothing to discard and keeps the ordinary line.
-            const bool carried_segment =
-                (P().dhw_handoff.payload.candidate.flags & logic::DHW_LOSS_CARRY_SEGMENT) != 0;
-            if (carried_segment && s_dhw_state.segment_start_us < 0) {
-                diag_printf("checkup: carried DHW candidate discarded (restart booked %u s "
-                            "unobserved, past the blind bounds; %u completed window(s) kept)\n",
-                            static_cast<unsigned>(logic::dhw_loss_adopt_blind_s(adopt_now_us)),
-                            static_cast<unsigned>(P().dhw.pending.windows));
-            } else {
-                const logic::DhwLossProgress progress =
-                    logic::dhw_loss_progress(s_dhw_state, adopt_now_us);
-                diag_printf("checkup: DHW candidate kept (%u min, %u completed window(s))\n",
-                            static_cast<unsigned>(progress.candidate_observed_s / 60),
-                            static_cast<unsigned>(P().dhw.pending.windows));
-            }
-        } else {
-            P().dhw.pending = logic::DhwLossBucket{};
-            s_dhw_state = logic::DhwLossState{};
-        }
-        // One shot: a later panic in THIS boot must not replay the same handoff a second time.
-        P().dhw_handoff.magic = 0;
-        // Reported in h AND min. Whole hours alone round the first successful restore of a board's
-        // life down to "0 h observed" — the seal lands at the hourly commit, so the carried span is
-        // 0.999 h — which reads as "kept nothing" at exactly the moment this first works, and sends
-        // a reader after a defect that is not there. This line is the ONLY human-readable evidence
-        // that the restore did anything; there is no UI for it.
-        //
-        // It is the window's LIFECYCLE SPAN, not its evidence: covered_s is the seconds actually
-        // observed and is reported separately on /status.health. The two are close on a board that
-        // was watching continuously and are not the same quantity.
-        const unsigned mins = static_cast<unsigned>(P().span_us / 60000000LL);
-        diag_printf("checkup: window kept across a %s reset (%u h %u min observed, RAM survived)\n",
-                    crash_reason_slug(reason), mins / 60, mins % 60);
-    } else {
-        persist_wipe();
-        // Not noise: "wrong_layout" after an update explains a card that emptied itself for a reason
-        // nobody could otherwise reconstruct, and "bad_crc" on a board that was never power-cycled
-        // is a memory fault worth seeing.
-        diag_printf("checkup: window starts empty (%s)\n",
-                    logic::checkup_restore_slug(s_persist_verdict));
+            P().dhw_handoff.model_fp, P().model_fp, P().dhw_handoff.crc, P().dhw_handoff.payload);
+    if (s_boot_handoff_valid) {
+        s_boot_handoff         = P().dhw_handoff.payload;
+        s_boot_handoff.pending = logic::DhwLossBucket{};
+        s_boot_handoff_model   = P().model_fp;
     }
+    // Consume before any producer or detection exists. A second panic cannot replay the handoff.
+    P().dhw_handoff.magic = 0;
+    s_source_confirmed    = false;
+    s_model_fp            = 0;
+    s_source_fp           = 0;
+    persist_wipe();
+    s_persist_verdict = logic::checkup_restore_route(integrity);
+    if (s_persist_verdict == logic::CheckupRestore::FlashPending &&
+        !history_checkup_flash_pending())
+        s_persist_verdict = logic::CheckupRestore::Fresh;
+    diag_printf("checkup: completed RAM hours retired (%s); dated flash restoration requires "
+                "clock and confirmed source\n",
+                logic::checkup_restore_slug(s_persist_verdict));
     const esp_err_t shutdown_err = esp_register_shutdown_handler(checkup_reboot_save);
     if (shutdown_err != ESP_OK)
         diag_printf("checkup: DHW shutdown handler not registered (%s)\n",
@@ -384,6 +378,7 @@ void checkup_set_diagnostics(bool enabled, uint32_t generation) {
     if (!lk.acquired()) return;
     s_diagnostics_enabled.store(enabled, std::memory_order_release);
     s_diagnostics_generation = generation;
+    s_boot_handoff_valid     = false;
     s_reset_requested.store(false);
     s_dhw_reset_requested.store(false);
     s_state = logic::CheckupState{};
@@ -408,40 +403,43 @@ void checkup_reset() {
     if (!s_mtx) return;
     Lock lk(s_mtx);
     if (!lk.acquired()) return;
+    s_boot_handoff_valid = false;
+    // An explicit /detect or automatic-profile rewiring withdraws the old confirmation immediately.
+    // Consuming the reset on an unidentified cycle must not let the journal re-admit the old link.
+    s_source_confirmed = false;
+    s_source_fp        = 0;
+    s_model_fp         = 0;
+    s_persist_verdict  = logic::CheckupRestore::ModelChanged;
     s_reset_requested.store(true);
 }
 
-// Detection resolves a profile on EVERY boot — the model is RAM-only by design — so "detection
-// resolved" is NOT evidence that the unit changed. Treating it as such was harmless while the window
-// died at every reboot anyway; the moment .noinit carries it across, it would adopt the window at
-// boot and throw it away four seconds later, on exactly the boards that have a heat pump attached.
-// That is the defect history.cpp shipped and documented, avoided here rather than rediscovered.
-//
-// So the FIRST detection after an adopted boot compares the resolved profile against the one the
-// record was written under and keeps the window only if it is the same unit. Every later call resets
-// exactly as before, so a genuine re-detect, a link rewire or a /set_hp model change is unaffected.
-void checkup_reset_on_detect(const char* profile_id) {
+// The first successful detector call establishes this boot's full source scope. Startup cached
+// identity is only an expectation for a separately sealed handoff; it cannot admit old evidence.
+// Later detection/reconfiguration calls retire the old window through the normal reset barrier.
+void checkup_reset_on_detect(const char* profile_id, uint32_t source_fp) {
     const uint32_t fp = logic::checkup_model_fingerprint(profile_id);
     if (!s_mtx) return;
     Lock lk(s_mtx);
     if (!lk.acquired()) return;
-    if (!s_diagnostics_enabled.load(std::memory_order_acquire)) {
-        s_model_fp = fp;
-        s_adopt_detect_grace = false;
+    const bool first   = !s_source_confirmed;
+    s_source_confirmed = source_fp != 0;
+    s_model_fp         = fp;
+    s_source_fp        = source_fp;
+    if (first) {
+        // The stored startup scope was only an expectation. This call confirms the current source.
+        if (s_boot_handoff_valid && !s_reset_requested.load() && !s_dhw_reset_requested.load() &&
+            s_diagnostics_enabled.load(std::memory_order_acquire) && s_boot_handoff_model == fp &&
+            s_boot_handoff.source_fp == source_fp) {
+            logic::dhw_loss_adopt(s_dhw_state, s_boot_handoff.candidate, esp_timer_get_time());
+            diag_printf("checkup: scoped DHW filter checkpoint applied; undated completed counters "
+                        "discarded\n");
+        }
+        s_boot_handoff_valid = false;
+        persist_seal();
         return;
     }
-    if (s_adopt_detect_grace) {
-        s_adopt_detect_grace = false;
-        if (fp == s_model_fp) {
-            diag_printf("checkup: restored window belongs to this unit (%s) — kept\n",
-                        profile_id ? profile_id : "?");
-            return;
-        }
-        s_persist_verdict = logic::CheckupRestore::ModelChanged;
-        diag_printf("checkup: restored window was another unit — discarded for %s\n",
-                    profile_id ? profile_id : "?");
-    }
-    s_model_fp = fp;
+    s_boot_handoff_valid = false;
+    s_persist_verdict    = logic::CheckupRestore::ModelChanged;
     s_reset_requested.store(true);
 }
 
@@ -560,6 +558,10 @@ void checkup_record(const CachedValue* v, size_t n, bool rps_known, bool rps_run
                 gap_us <= static_cast<int64_t>(logic::CHECKUP_MAX_GAP_S) * 1000000;
         }
         const uint32_t skipped = logic::checkup_skipped(s_state.bucket, bucket);
+        // Every overwritten slot loses its old flash expiry, including explicit skipped gaps.
+        const size_t overwritten = 1u + std::min<size_t>(skipped, logic::CHECKUP_COMPLETED_BUCKETS);
+        for (size_t i = 0; i < overwritten; ++i)
+            s_restored_expiry_us[(P().ring.head + i) % logic::CHECKUP_COMPLETED_BUCKETS] = 0;
         P().ring.commit(skipped);
         P().dhw.commit(skipped);
         s_last_commit_us = now;
@@ -570,7 +572,10 @@ void checkup_record(const CachedValue* v, size_t n, bool rps_known, bool rps_run
         s_live_commit_count = static_cast<uint8_t>(
             live_total < logic::CHECKUP_COMPLETED_BUCKETS
                 ? live_total : logic::CHECKUP_COMPLETED_BUCKETS);
-        persist_seal();          // the sealed bytes change ONLY here; see persist_crc()
+        // Retain the reserved sealed integrity counter's completed-hour bookkeeping. Startup
+        // still retires completed RAM hours; this does not authorize their adoption next boot.
+        P().boots_since_commit = 0;
+        persist_seal(); // seal this completed-bucket update; see persist_crc()
         if (continuous_boundary) s_state.last_us = now; // dt=0, edge witnesses intentionally kept
         const bool reseal = logic::checkup_step(s_state, P().ring.pending, s, now, &P().ring);
         if (reseal) persist_seal();
@@ -586,6 +591,19 @@ void checkup_record(const CachedValue* v, size_t n, bool rps_known, bool rps_run
     s_state.have_bucket = true;
 }
 
+void expire_restored_locked() {
+    const int64_t now_us  = esp_timer_get_time();
+    bool          changed = false;
+    for (size_t i = 0; i < logic::CHECKUP_COMPLETED_BUCKETS; ++i) {
+        if (!logic::checkup_restored_expired(s_restored_expiry_us[i], now_us)) continue;
+        P().ring.buf[i]         = logic::CheckupBucket{};
+        P().dhw.buf[i]          = logic::DhwLossBucket{};
+        s_restored_expiry_us[i] = 0;
+        changed                 = true;
+    }
+    if (changed) persist_seal();
+}
+
 logic::CheckupReport checkup_report() {
     if (!s_diagnostics_enabled.load(std::memory_order_acquire)) return logic::CheckupReport{};
     if (!s_mtx) return logic::CheckupReport{};
@@ -594,6 +612,7 @@ logic::CheckupReport checkup_report() {
     // Only the record path consumes a reset, because it can also discard the in-flight sample.
     // Until then expose an empty report, never stale identity A and never consume the guard early.
     if (s_reset_requested.load()) return logic::CheckupReport{};
+    expire_restored_locked();
     logic::CheckupReport report = logic::checkup_evaluate(
         logic::checkup_aggregate(P().ring), s_cov, s_fault_now,
         s_dhw_reset_requested.load() ? logic::DhwLossWindow{}
@@ -612,9 +631,9 @@ bool checkup_flash_next(int64_t now_unix_s, int64_t after_bucket,
     if (!s_diagnostics_enabled.load(std::memory_order_acquire)) return false;
     if (!s_mtx || now_unix_s < 0) return false;
     Lock lk(s_mtx, 0);
-    if (!lk.acquired() || s_reset_requested.load() || !s_model_fp ||
-        s_last_commit_us == kNoCommitUs || !s_live_commit_count || !P().ring.count ||
-        P().ring.count != P().dhw.count)
+    if (!lk.acquired() || s_reset_requested.load() || !s_model_fp || !s_source_confirmed ||
+        !s_source_fp || s_last_commit_us == kNoCommitUs || !s_live_commit_count ||
+        !P().ring.count || P().ring.count != P().dhw.count)
         return false;
 
     const int64_t now_us = esp_timer_get_time();
@@ -638,6 +657,7 @@ bool checkup_flash_next(int64_t now_unix_s, int64_t after_bucket,
                          logic::CHECKUP_COMPLETED_BUCKETS;
     payload = logic::CheckupJournalPayload{};
     payload.model_fp = s_model_fp;
+    payload.source_fp              = s_source_fp;
     payload.diagnostics_generation = s_diagnostics_generation;
     payload.end_unix_s = latest_end_unix_s -
         static_cast<int64_t>(age) * logic::CHECKUP_DT_S;
@@ -656,11 +676,14 @@ CheckupFlashRestoreResult checkup_flash_restore(const CheckupFlashRecord* record
     Lock lk(s_mtx, 0);
     if (!lk.acquired()) return CheckupFlashRestoreResult::Deferred;
     // Detection owns the identity and queues its reset from another point in the same poll cycle.
-    // Never restore in between those two acts. A valid RAM adoption is newer and loses no completed
-    // hour, so it wins without mixing the same evidence in twice.
-    if (!s_model_fp || s_reset_requested.load()) return CheckupFlashRestoreResult::Deferred;
-    if (s_persist_verdict == logic::CheckupRestore::Accept)
+    // Never restore in between those two acts, or under a startup/withdrawn source expectation.
+    if (!logic::checkup_flash_source_ready(s_source_confirmed, s_model_fp, s_source_fp,
+                                           s_reset_requested.load()))
+        return CheckupFlashRestoreResult::Deferred;
+    // An earlier call already rebuilt the window; never mix the same evidence in twice.
+    if (s_persist_verdict == logic::CheckupRestore::Flash)
         return CheckupFlashRestoreResult::Ignored;
+    const logic::CheckupRestore refused = s_persist_verdict;
 
     const int64_t now_us = esp_timer_get_time();
     size_t live_count = 0;
@@ -676,6 +699,7 @@ CheckupFlashRestoreResult checkup_flash_restore(const CheckupFlashRecord* record
             CheckupFlashRecord& rec = s_restore_live[live_count++];
             rec.payload = logic::CheckupJournalPayload{};
             rec.payload.model_fp = s_model_fp;
+            rec.payload.source_fp              = s_source_fp;
             rec.payload.diagnostics_generation = s_diagnostics_generation;
             rec.payload.end_unix_s = latest_end -
                 static_cast<int64_t>(available - 1 - i) * logic::CHECKUP_DT_S;
@@ -689,25 +713,23 @@ CheckupFlashRestoreResult checkup_flash_restore(const CheckupFlashRecord* record
 
     int64_t earliest_bucket = INT64_MAX;
     int64_t latest_bucket = INT64_MIN;
-    int64_t earliest_stored_end = INT64_MAX;
     size_t accepted = 0;
-    auto consider = [&](const CheckupFlashRecord& rec, bool stored) {
-        if (rec.payload.diagnostics_generation != s_diagnostics_generation ||
-            rec.payload.model_fp != s_model_fp ||
-            rec.bucket != logic::checkup_journal_bucket(rec.payload.end_unix_s) ||
-            !logic::checkup_journal_in_window(rec.payload.end_unix_s, now_unix_s))
+    auto    consider        = [&](const CheckupFlashRecord& rec, bool stored) {
+        if (!logic::checkup_journal_restore_admits(
+                rec.payload, rec.bucket, now_unix_s, s_source_confirmed, s_model_fp, s_source_fp,
+                s_diagnostics_generation, s_reset_requested.load()))
             return;
         if (rec.bucket < earliest_bucket) earliest_bucket = rec.bucket;
         if (rec.bucket > latest_bucket) latest_bucket = rec.bucket;
-        if (stored) {
-            accepted++;
-            if (rec.payload.end_unix_s < earliest_stored_end)
-                earliest_stored_end = rec.payload.end_unix_s;
-        }
+        if (stored) accepted++;
     };
     for (size_t i = 0; i < count; i++) consider(records[i], true);
     for (size_t i = 0; i < live_count; i++) consider(s_restore_live[i], false);
-    if (!accepted) return CheckupFlashRestoreResult::Ignored;
+    if (!accepted) {
+        if (s_persist_verdict == logic::CheckupRestore::FlashPending)
+            s_persist_verdict = logic::CheckupRestore::Fresh;
+        return CheckupFlashRestoreResult::Ignored;
+    }
 
     // If this boot has not completed an hour yet, explicit empty buckets represent wall time during
     // which the board was off. They age older evidence without inventing observed seconds.
@@ -719,6 +741,30 @@ CheckupFlashRestoreResult checkup_flash_restore(const CheckupFlashRecord* record
         static_cast<int64_t>(logic::CHECKUP_COMPLETED_BUCKETS - 1);
     if (earliest_bucket < capacity_start) earliest_bucket = capacity_start;
 
+    auto find = [&](int64_t wanted, bool& from_flash) {
+        return logic::checkup_journal_select_slot(wanted, s_restore_live.data(), live_count,
+                                                  records, count, now_unix_s, s_source_confirmed,
+                                                  s_model_fp, s_source_fp, s_diagnostics_generation,
+                                                  s_reset_requested.load(), from_flash);
+    };
+    size_t  materialized        = 0;
+    int64_t earliest_stored_end = INT64_MAX;
+    for (int64_t b = earliest_bucket; b <= latest_bucket; ++b) {
+        bool        from_flash = false;
+        const auto* rec        = find(b, from_flash);
+        if (!rec || !from_flash) continue;
+        ++materialized;
+        if (rec->payload.end_unix_s < earliest_stored_end)
+            earliest_stored_end = rec->payload.end_unix_s;
+    }
+    // Valid records can still fall outside capacity or lose to live evidence. Neither is a
+    // restoration: retain the current pending/live window and report no flash provenance.
+    if (!materialized) {
+        if (s_persist_verdict == logic::CheckupRestore::FlashPending)
+            s_persist_verdict = logic::CheckupRestore::Fresh;
+        return CheckupFlashRestoreResult::Ignored;
+    }
+
     const logic::CheckupBucket pending = P().ring.pending;
     const logic::DhwLossBucket dhw_pending = P().dhw.pending;
     const int64_t first_sample_us = P().ring.first_sample_us;
@@ -728,33 +774,20 @@ CheckupFlashRestoreResult checkup_flash_restore(const CheckupFlashRecord* record
             ? latest_sample_us - first_sample_us : 0;
     P().ring.reset();
     P().dhw.reset();
+    for (auto& expiry : s_restored_expiry_us) expiry = 0;
 
-    auto find = [&](int64_t wanted, logic::CheckupBucket& out,
-                    logic::DhwLossBucket& dhw_out) {
-        // This boot is strictly newer than flash on a collision, although normal one-hour cadence
-        // makes such a collision impossible across a power gap.
-        for (size_t i = 0; i < live_count; i++) {
-            const auto& rec = s_restore_live[i];
-            if (rec.bucket == wanted) {
-                out = rec.payload.checkup; dhw_out = rec.payload.dhw; return true;
-            }
-        }
-        for (size_t i = count; i > 0; i--) {
-            const auto& rec = records[i - 1];             // a newer duplicate wins
-            if (rec.bucket == wanted &&
-                rec.payload.diagnostics_generation == s_diagnostics_generation &&
-                rec.payload.model_fp == s_model_fp &&
-                logic::checkup_journal_in_window(rec.payload.end_unix_s, now_unix_s) &&
-                rec.bucket == logic::checkup_journal_bucket(rec.payload.end_unix_s)) {
-                out = rec.payload.checkup; dhw_out = rec.payload.dhw; return true;
-            }
-        }
-        return false;
-    };
     for (int64_t b = earliest_bucket; b <= latest_bucket; b++) {
         logic::CheckupBucket cb;
         logic::DhwLossBucket db;
-        (void)find(b, cb, db);       // absent interval stays an explicit all-zero gap
+        int64_t              expiry     = 0;
+        bool                 from_flash = false;
+        if (const auto* rec = find(b, from_flash)) {
+            cb     = rec->payload.checkup;
+            db     = rec->payload.dhw;
+            expiry = logic::checkup_restore_expiry_us(rec->payload.end_unix_s, now_unix_s, now_us);
+        }
+        s_restored_expiry_us[P().ring.head] =
+            expiry; // absent interval stays an explicit all-zero gap
         P().ring.push(cb);
         P().dhw.push(db);
     }
@@ -770,10 +803,14 @@ CheckupFlashRestoreResult checkup_flash_restore(const CheckupFlashRecord* record
         ? (now_unix_s - stored_start) * 1000000 : 0;
     if (wall_span_us > logic::CHECKUP_WINDOW_US) wall_span_us = logic::CHECKUP_WINDOW_US;
     P().ring.carried_span_us = wall_span_us > live_span_us ? wall_span_us - live_span_us : 0;
-    s_persist_verdict = logic::CheckupRestore::Accept;
+    // "flash" records actual selected journal provenance, independently of the startup
+    // RAM-integrity verdict. Completed RAM hours are never adopted. Reconstructed stored and
+    // selected live intervals keep absolute-age deadlines; only selected stored intervals establish
+    // this slug.
+    s_persist_verdict = logic::CheckupRestore::Flash;
     persist_seal();
-    diag_printf("checkup: restored %u hourly bucket(s) from flash after power loss\n",
-                static_cast<unsigned>(accepted));
+    diag_printf("checkup: restored %u hourly bucket(s) from flash (RAM copy refused: %s)\n",
+                static_cast<unsigned>(materialized), logic::checkup_restore_slug(refused));
     return CheckupFlashRestoreResult::Restored;
 }
 

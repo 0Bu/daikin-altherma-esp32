@@ -116,9 +116,12 @@ history.cpp/.hpp    → the 24-hour trend rings: one fixed-cadence buffer per lo
                       host-tested logic/history.hpp. In .noinit DRAM rather than heap, so a reset
                       that KEPT POWER keeps the readings, and the five-minute append journal in
                       upper-flash `history` covers OTA and power loss. `.noinit` is sealed by the
-                      whole catalog fingerprint (a fold of every ring's semantic id) and the
-                      circulation witness's identity; flash also stores bounded semantic-id
-                      manifests, so unchanged series survive catalog insertion and reordering
+                      whole catalog fingerprint (a fold of every ring's semantic id), the
+                      circulation witness's identity and, against a seal older than the reset, a boot counter
+                      plus a separate liveness record that measures the stretch the rings did not
+                      see and books it as gaps (the age guards); flash also stores bounded
+                      semantic-id manifests, so unchanged series survive catalog insertion and
+                      reordering
 checkup.cpp/.hpp    → the 24-hour PLANT CHECKUP behind /status.health: counted EVENTS and window
                       MINIMA (compressor starts + mean run length, defrost share, pressure and flow
                       minima, backup-heater minutes, fault class, retry counters). Storage + mutex
@@ -902,30 +905,25 @@ host-testable core is unusually large and valuable, because the risky parts are 
   inferred from DHW cooling, even after independent circulation-pump correlation,
   a universal minimum-flow threshold, a flat daily-start alarm, and any overall “healthy” verdict.
 
-  **Persistence** (`logic/checkup_persist.hpp`): the 24-hour window rides `.noinit` DRAM for a
-  zero-write reset that keeps power. Completed `CheckupBucket` + `DhwLossBucket` pairs are also the
-  fourth source in history's 256-byte append journal, with an exact interval end, model identity,
-  layout fingerprint and CRC. This restores counted evidence after OTA section movement and power
-  loss without trying to reconstruct short events from the lossy five-minute trends; only the open
-  hour can be lost. The RAM seal covers the completed buckets
-  and EXCLUDES `pending` (it changes once a second, so a seal over it would be stale whenever a
-  panic actually landed) and the monotonic `first/latest_sample_us` anchors, which are meaningless
-  in the next boot's clock — the observed lifecycle rides as `CheckupRing::carried_span_us`
-  instead; a flash restore derives it from the retained interval ends. The in-flight
-  `CheckupState`/`DhwLossState` are NOT restored: a reboot is exactly the
-  discontinuity both step functions handle, and restoring them would book a compressor start that
-  may never have happened. The MODEL identity is checked at DETECTION rather than at boot
-  (`checkup_reset_on_detect()` keeps the window only if the resolved profile matches the one it
-  was recorded under) — detection resolves every boot, so treating it as "the identity changed"
-  would adopt the window and throw it away four seconds later, on exactly the boards that have a
-  heat pump attached (the trap `history.cpp` shipped and documented). TWO refusals are about the
-  window OUTLIVING ITS SOURCE, both states persistence created: SAFE MODE never adopts, because it
-  does not start the poll task and nothing would age the ring — a frozen pre-reboot day would be
-  presented as a live 24-hour assessment for as long as the latch holds; and the poll task feeds
-  an EMPTY sample every cycle while the profile is still `"auto"`, so a board whose X10A stops
-  answering across a reboot ages the adopted evidence out within the day instead of freezing it
-  (the empty sample books no observed seconds — it only advances the clock).
-  `/status.health.persist` names the outcome.
+  **Persistence** (`logic/checkup_persist.hpp`): completed checkup hours always come from the
+  append-only flash journal after SNTP and confirmation of the current X10A profile/link identity.
+  The RAM integrity verdict does not establish completed-hour ages. Version 4 RAM and the new
+  diagnostic journal fingerprint bind the complete source; legacy unscoped checkpoints are refused.
+  `flash_pending` means journal recovery awaits clock/source confirmation, without proving saved
+  hours exist; `fresh` means no stored intervals were selected, including compatible records excluded
+  by live precedence or capacity; `flash` records actual reconstruction. Gaps contribute no observed
+  seconds. Restored slots retain a monotonic expiry computed from their exact absolute end time and
+  are cleared at aggregation once their end is 24 hours old, even before the next hourly boundary.
+  New live hours win overlapping buckets. Full-span describes elapsed lifecycle; per-signal
+  coverage independently controls reassuring results.
+
+  A separately sealed, one-shot intentional-restart handoff can retain the ongoing DHW candidate,
+  charge and settle filter only after integrity/consent checks and confirmation of the same source.
+  The startup cached identity is not confirmation. The saved handoff is consumed before tasks start;
+  undated completed counters from the open hour are discarded. A reset of the DHW source withdraws
+  any waiting handoff. Candidate adoption books boot uptime and the documented restart blind allowance.
+  Non-journaled RAM hours are lost on any restart; absent clock/journal starts fresh observation.
+
 - `logic/state_dwell.hpp` — **how long each switched row has read what it reads**, and how much of
   that the board actually watched. The value list answers *what is it now*; for a bit flag that is
   half the question, since `Powerful DHW Operation: OFF` describes a plant that finished a charge
@@ -1370,14 +1368,60 @@ A single task owns the X10A UART (there is exactly one link). Each cycle:
 
    * **`.noinit` DRAM.** The ring arrays are simply no longer zeroed at startup, so a compatible
      power-preserving reset (for example a `/set_*` save, panic or task watchdog) can keep the
-     readings. It costs no flash write and no extra RAM — it is the *same* memory the
-     route serves, not a shadow copy — and `.data` no longer carries a duplicate initialiser image
-     for rings that are about to be overwritten anyway. It needs no
-     clock, and that is a property of the medium rather than an assumption: if the bytes survived,
-     power was never lost, so the downtime is bounded to about a second. The one seam is the bucket
-     that was open when the device went down — it is dropped, so the restored series can be up to
-     one `HISTORY_DT_S` adrift on the axis. It is not an OTA guarantee: a new image may move the
-     sections, and the seal then rejects the bytes. The flash journal is the guaranteed OTA path.
+     readings. It costs no flash write; the rings are the *same* memory the
+     route serves, not a shadow copy. Fixed age and source bookkeeping adds RAM, while `.data`
+     no longer carries a duplicate initialiser image
+     for rings that are about to be overwritten anyway. The *downtime* needs no clock, and that is
+     a property of the medium rather than an assumption: if the bytes survived, power was never
+     lost, so the reset itself took about a second (a USB or pin reset can hold the chip for
+     longer, and the fixed allowance below then under-books it). The time *before* the reset is a
+     different matter. Ordinary pending folds leave the seal intact; adoption, resets and source
+     bookkeeping also reseal it. A valid seal establishes integrity, not sample age: a boot that
+     stopped committing can leave intact old samples, and treating them as committed at boot would
+     shift the curve by all of that time and
+     let the journal file it under today's buckets. Behind two refusals and a third that asks only
+     whether the stretch can be measured, each a named `/status.history.persist` value (the *age
+     guards*, below), adoption *books* the stretch it cannot see as explicit no-reading samples —
+     the count of whole buckets nearest to it — and claims the newest of them for the monotonic
+     raster boundary that opened this boot, so the first live commit falls into the next wall
+     bucket. The stretch is what the liveness record measures: from the raster boundary the newest
+     commit closed (not the instant the fold recorded it, which lags the boundary by a producer
+     period) to the last sign of life of the previous boot, plus the downtime (the project's one
+     fixed restart allowance, `DWELL_REBOOT_BLIND_S`, shared with the state ages and the DHW
+     hand-off), plus this boot's uptime up to the raster boundary the claim names (the boot's own
+     zero on an ordinary boot, so nothing: the start-up itself lies in the first live bucket and is
+     not booked). A stall of the raster before the reset (an OTA or weather hold-off, a stopped
+     HomeHub task) is inside that stretch and is booked as gaps, with the samples it had kept; a
+     stretch of a ring or more leaves a ring of nothing but gaps. Claiming the boot instant and
+     booking nothing collapsed that stretch at every restart, and the collapses of repeated
+     restarts added up in one direction.
+
+     Rounding the stretch to the nearest bucket is unbiased only for restarts at random phases of
+     the bucket: a restart loop at one uptime (a fault at the same point after boot) leaves the
+     same remainder with the same sign at every seam, and plain rounding drifts linearly with the
+     number of restarts. The remainder is therefore carried: each raster's is sealed with the rings
+     (`residual_us` in the region, inside its CRC, written under the one reseal an adoption does
+     anyway, so nothing is added to the poll path), added to the next adoption's stretch before it
+     is rounded, and zeroed by every refusal, wipe and retirement of the rings it describes. The
+     remainders then telescope: what rounding contributes to the position error of a sample is the
+     difference of two remainders, under one bucket, however many restarts it crossed. A single
+     seam can be wrong by up to a bucket (it takes over the previous seam's remainder) where plain
+     rounding was wrong by half a bucket, but the rounding error of any one sample, over all the
+     seams it crossed, stays under one bucket. What the carry cannot remove is not rounding, and it
+     does add up, a few seconds per restart: the
+     allowance against the real downtime (5 s against a typical 1 s; a longer held reset can
+     instead be under-booked) and, after a
+     panic or a watchdog, the time between the last sign of life and the reset (too little).
+     The shutdown touch before `esp_restart` reduces this uncertainty but is best effort: its
+     bounded lock can fail, and journal draining follows the touch. Those terms apply per
+     restart, not once, because the rings carry no per-sample time; the fixed-cadence composite in
+     `test/test_logic.cpp` (`test_history_adoption_booking`) restarts a model at every cadence
+     from 305 to 900 s and asserts the bound of one bucket plus the per-restart term, beside the
+     plain rounding of the previous round and the retired boot-instant claim, which it shows far
+     outside it. The flash journal does not accumulate any of this: every record carries its
+     absolute wall-clock bucket. None of this is an OTA guarantee: a new image may move the
+     sections, and the seal then rejects the bytes. Compatible committed journal records provide
+     the durable OTA recovery path.
    * **The upper-4-MiB `history` partition.** Each trend source appends one dense record when it
      closes a five-minute bucket: currently 32 default-source rings (29 X10A-derived, two board
      memory and the external MQTT circulation witness), 13 HomeHub or 3 ENV III `int16` values in
@@ -1395,18 +1439,94 @@ A single task owns the X10A UART (there is exactly one link). Each cycle:
      deliver the partition table, an old-layout board needs one USB/Web-Serial re-flash to install
      the official 8 MB table without moving NVS, coredump or either OTA slot.
 
-   **After the journal scan has succeeded, wall time is synchronized and at least one record has
-   committed, a sudden power loss loses at most the open bucket and a just-closed record still
-   waiting for the next poll tick.** Before that first eligible commit, flash has no record from
-   which to restore RAM-only samples. Normal persistence then runs continuously; the `esp_restart`
+   **Recovery carries only intervals actually committed to the journal after a successful scan and
+   synchronized wall time.** A sudden power loss can discard the open bucket and completed intervals
+   not yet drained. An adopted-tail floor or append backlog can leave more than one completed
+   interval unsaved; there is no universal one-bucket loss bound. Before the first eligible commit,
+   flash has no record from which to restore RAM-only samples. Normal persistence then runs
+   continuously; the `esp_restart`
    shutdown handler is only a bounded final drain for the OTA/reconfiguration race.
    `/status.history.persist` independently reports only what happened to `.noinit` RAM.
+
+   **The age guards** (`logic/history_persist.hpp`) decide whether a `.noinit` copy that is intact
+   can be believed. Each refusal is a named verdict and costs nothing the journal holds, which
+   restores by wall clock after SNTP as it always did. Beyond the bucket that was open or not yet
+   drained at the interruption it is a loss where the journal holds nothing: a board without the
+   upper-flash `history` partition (the old table), the board and circulation trends while no X10A
+   identity has been detected and saved (the journal scopes the X10A source by it, so those
+   columns are never filed), and a board that never syncs SNTP (the restore waits for wall time).
+   That is the fail-closed trade: an empty chart rather than a misdated one.
+
+   * `safe_mode` — safe mode starts no producer, so adopted rings would sit frozen while the latch
+     holds and be re-anchored at the next boot. It refuses outright and first, as the checkup and
+     the state ages already do.
+   * `not_committed` — a counter in the seal counts the boots that adopted the rings and have
+     committed nothing since (incremented and resealed at adoption, zeroed by every commit of any
+     raster, covered by the seal's CRC). One such boot is an unobserved stretch of unknown length —
+     a crash loop whose every boot dies inside one bucket would book the same samples again each
+     time — so a counter of one refuses.
+   * `stale_commit` — the name predates the booking rule and now means *unmeasurable*. A separate
+     liveness record (its own `.noinit` variable and CRC) holds the monotonic instant of the last
+     sign of life and of the last commit of each raster: X10A (which carries the board and
+     circulation trends), HomeHub and ENV III. The poll task signs it on every cycle, including the
+     cycles that skip all work (a network hold-off, the silent-bus detect backoff), and the
+     shutdown handler signs once more; each commit, adoption and flash seed notes its raster. The
+     difference between the last sign of life and the boundary a raster's newest commit closed is
+     the time the raster stood still, and the record measures it, so adoption books it (above)
+     rather than refusing the rings: there is no staleness bound, and so no slack to derive. The
+     record can fail to measure in two ways only, and only these refuse: it does not verify
+     (damaged, never written, or never signed), or a raster that holds samples has no recorded
+     commit (or one after the last sign of life, which no code path writes). The verdict is **per
+     raster**: only rasters this boot would adopt are weighed (a HomeHub ring only for the target it
+     was sealed under, an ENV III ring only when its sensor ran and runs), and only the X10A raster
+     refuses the region as `stale_commit`. An unmeasurable HomeHub or ENV III raster retires its
+     own rings alone and is logged once in the boot line, so a HomeHub disabled at runtime (its
+     task gone, its ring frozen) or a task that never started costs the trends that did not stop
+     nothing; one that merely stopped is measurable and is booked like any other stall. The
+     refresh is a try-lock, one store and a CRC over the record's 32 bytes of instants instead of
+     the ~30 KB seal's, and nothing allocates.
+
+   The order is the order of the verdict function: safe mode first, then the integrity refusals
+   (`power_cycle`, `no_record`, `wrong_version`, `wrong_catalog`, `bad_crc`), then
+   `not_committed` and `stale_commit` — they read sealed state, which means nothing on a damaged
+   record, and the counter is the more specific statement. A device that is simply working, or
+   whose raster stalled, adopts, with the seam booked as above. Because a refusal also resets the
+   counter, a boot loop settles into refusing every second boot, and an empty region adopts
+   nothing either way.
+
+   An OTA or a weather fetch parks the X10A raster for as long as its hold-off lasts (the poll
+   task keeps signing but skips the board fold, up to `OTA_QUIESCE_MAX_CYCLES` cycles). The restart
+   that ends it books that stretch like any other stall and keeps the samples from before it,
+   provided the new image left `.noinit` where it was (otherwise the magic or the version refuses
+   first and the journal refills the trends after SNTP).
+
+   The adopted ring is the previous boot's, shifted by the seam error, so its newest real sample
+   can sit a bucket later than the bucket the previous boot already filed it under, and the
+   journal writer would file the same reading again where nothing was measured. The writer
+   therefore never appends at or before the wall bucket of the newest real adopted sample (`anchor
+   of the claim − gaps booked`, kept per source as a monotonic instant): its first look after the
+   adoption decides, once, whether the journal already holds that sample (its cursor lies within
+   `HISTORY_ADOPT_FLOOR_REACH_BUCKETS` of it) and lifts its cursor over it, so the next bucket it
+   files is a gap or the next live sample. A source with no cursor, or one far behind the sample
+   (the clock never synced, or the journal was down), files its samples as before, and every
+   reset of a source's cursor forgets the floor. A genuine short undrained tail is indistinguishable
+   from a shifted filed sample: when the floor applies it can skip up to
+   `HISTORY_ADOPT_FLOOR_REACH_BUCKETS` recent five-minute readings, including an ordinary panic
+   before the next drain or a brief append backlog. They stay in RAM but are missing from the
+   journal. An `esp_restart` normally drains first. Longer backlogs keep the previous writer path;
+   the floor is a conservative guard for the near-cursor adoption seam, not a lossless journal.
 
    The flash path is **spliced in behind** the live samples at the absolute wall-clock bucket each
    sample was taken in, never appended — appending would slide a day-old curve onto today. It waits
    only for SNTP and can seed an empty live ring immediately; elapsed buckets after the stored anchor
-   become explicit gaps. The boot scan indexes only the final 24-hour source windows; restore reads
-   each indexed record once per four-ring batch, so no second ~30 KB matrix or one unbounded
+   become explicit gaps. The seed attributes the newest restored sample to the last monotonic
+   raster boundary, the grid every later commit lands on, so the first live commit falls into the
+   next wall bucket (within a second of a wall-bucket boundary the anchor's whole-second
+   arithmetic can still put the two in one); seeding the start of the open wall bucket put it on another grid, and in a
+   share of restores the first commit then fell into the very bucket the seed had claimed, which
+   duplicated that bucket and read every restored sample one bucket early. The boot scan indexes
+   only the final 24-hour source windows; restore reads each indexed record once per four-ring
+   batch, so no second ~30 KB matrix or one unbounded
    flash/UART stall is introduced. The oldest and newest indexed record buckets define the restored
    span; sample values do not. That distinction preserves an all-`NO_READING` register's raster
    instead of mistaking its recorded absences for unwritten leading scratch.
@@ -1534,22 +1654,61 @@ A single task owns the X10A UART (there is exactly one link). Each cycle:
    copy again (persist version 3 against 2) and moves the stores after it back, so the RAM-only
    stores restart a second time.
 
+   **Upgrade note — the age guards.** The build that introduced them moves both `.noinit` persist
+   versions again (the trend rings and the checkup window each gained a sealed field) and adds the
+   liveness record. On its first boot:
+
+   * *Both `.noinit` copies are refused once* (`no_record` when the update moved the record,
+     `wrong_version` when it did not). The trend rings come back from the flash journal after the
+     first SNTP sync if their existing source and catalog checks pass. Earlier checkup records
+     lack the new full source binding and are refused: this upgrade starts a new diagnosis
+     window. They remain in the journal but cannot restore observations. Only records written
+     under the new contract can return after clock sync and current-boot source confirmation
+     (`health.persist` then reads `flash`).
+   * *The RAM-only stores restart once more*: the new `.noinit` variable moves the stores after
+     it, so the open checkup hour, the DHW loss-candidate handoff and the per-row state ages start
+     over, as with any update that moves `.noinit`.
+   * *Nothing changes for a running ENV III sensor.* Records an earlier build filed from a frozen
+     ring (a sensor disabled across reboots) cannot be told apart in the journal and age out with
+     the 24-hour window.
+   * *Restarts that keep the RAM copy book unobserved time at five-minute resolution*: the
+     stretch between the last commit and the new boot's first bucket is rounded with a carried
+     remainder. Short interruptions can therefore leave no visible gap; longer stretches add
+     no-reading samples, including a measured hold-off or stalled source.
+   * *What a reader can now see*: a device restarted twice within one bucket refuses the second
+     RAM adoption (`not_committed`) and can restore compatible journal records after clock sync. After
+     every restart the checkup retires completed RAM hours. A compatible warm copy maps to
+     `flash_pending` while awaiting journal recovery, without proving stored hours exist, or `fresh`
+     when no stored intervals were selected, including live precedence or capacity clipping; other
+     integrity or refusal reasons can remain visible until actual flash restoration.
+     `safe_mode` follows a boot in safe mode; `stale_commit` is rare and means the
+     liveness record could not measure the X10A raster. A refusal costs nothing the journal holds;
+     where it holds nothing (see the age guards above) the refused copy is simply gone.
+
+   Going back to the previous build refuses both copies the same way and moves the stores again,
+   so the RAM-only stores restart a second time there.
+
    *ENV III has no target identity — a documented limit.* The sensor exposes no readable serial in
-   this firmware, and its history is neither scoped in flash nor in the `.noinit` seal. A swap or
-   relocation of the sensor is therefore not distinguishable and continues the series. Enabling,
-   disabling or moving the SDA/SCL pair is a configuration save that reboots (`/set_env3`) and never
-   reaches the history code: there is no reset. Flash is unscoped and wall-clock anchored, so when no
-   RAM copy of the ENV III ring survived the reboot (power loss, or an update that moved `.noinit`)
-   the stored records are spliced at their true buckets with explicit gaps where the sensor produced
-   nothing. Known limit: while the sensor is disabled nothing advances its raster, and every
-   power-preserving reboot (the `/set_env3` save itself, an update) re-adopts the frozen `.noinit`
-   ring and re-anchors its newest sample at the boot instant; the journal writer, which has no
-   enabled gate, then also records those samples under the recent buckets. After re-enabling a sensor
-   that was disabled across such reboots, samples from before the disable can therefore appear as the
-   hours just before the re-enable, and a later power cycle restores them from flash rather than
-   dropping them; they leave the chart only with the 24-hour window. A fix (an enabled flag in the
-   `.noinit` seal that retires the ring and stops its journal append) is an open follow-up. (Read
-   from the code path; not exercised on a board.)
+   this firmware, and its history is not scoped in flash or by a target fingerprint in the
+   `.noinit` seal. A swap or relocation of the sensor is therefore not distinguishable and
+   continues the series. Enabling, disabling or moving the SDA/SCL pair is a configuration save
+   that reboots (`/set_env3`) and never reaches the history code: there is no reset. Flash is
+   unscoped and wall-clock anchored, so when no RAM copy of the ENV III ring survived the reboot
+   (power loss, or an update that moved `.noinit`) the stored records are spliced at their true
+   buckets with explicit gaps where the sensor produced nothing.
+
+   *A ring nothing feeds is not believed.* While the sensor is disabled nothing advances its
+   raster, and adopting its frozen `.noinit` ring on every power-preserving reboot (the
+   `/set_env3` save itself, an update) would treat it as if it had been fed until the reset; the
+   journal writer would then file those samples under the recent buckets, and a later power cycle
+   would restore them from flash as if they had just been measured. The seal therefore records
+   whether the ENV III producer existed in the boot that sealed it (configured, supported by the
+   board, not in safe mode). At startup the ring is retired unless that flag and the current
+   boot's both say the sensor runs, and the journal writes ENV III records only for a ring whose
+   producer has recorded into it in this boot. A sensor re-enabled after any number of reboots
+   with it disabled therefore starts from an empty ring, and the flash restore supplies what the
+   journal truly holds. (Verified by host tests, a source contract and a composite simulation of
+   the misdating; not exercised on a board.)
 
    A journal cursor, or a restore window, ahead of the clock is **reported, never rewritten**.
    Records beyond the clock are never restored, and the writer of the affected source appends
@@ -1583,9 +1742,14 @@ A single task owns the X10A UART (there is exactly one link). Each cycle:
    number of the oldest sectors, not the retained history.
 
    `/status.history.persist` names how this boot's rings came to be, so a chart that emptied itself
-   has a stated cause instead of looking like a defect. It describes the `.noinit` adoption decision;
-   a refused RAM image can still be extended from a compatible flash generation after SNTP. Three
-   more `logic/history_persist.hpp`
+   has a stated cause instead of looking like a defect: `accept`, `power_cycle`, `no_record`,
+   `wrong_version`, `wrong_catalog`, `bad_crc` or one of the age guards `safe_mode`,
+   `not_committed`, `stale_commit`. It describes the `.noinit` adoption decision, and `accept`
+   may coexist with a HomeHub or ENV III ring that decision retired alone (an identity change, or a
+   raster the liveness record could not measure), which only the boot log names;
+   a refused RAM image can still be extended from a compatible flash generation after SNTP (the
+   checkup's `health.persist` differs here: it reports `flash` when its window was rebuilt that
+   way). Three more `logic/history_persist.hpp`
    rules, all pure so they are asserted rather than discovered on a board: **which reset reasons
    leave DRAM intact is an ALLOW list** with everything unrecognised refused — BROWNOUT and
    PWR_GLITCH are refused rather than left to the CRC, since a dipped supply proves nothing about
@@ -1639,11 +1803,12 @@ A single task owns the X10A UART (there is exactly one link). Each cycle:
    so page loss becomes missing evidence rather than either “unsupported” or zero. Every rule — row
    identity, edge handling, evidence clocks and verdict/evidence class — lives in the host-tested
    `logic/checkup.hpp`; storage is 23 completed one-hour buckets plus the pending hour in static
-   `.noinit` RAM, never 24 completed buckets plus an accidental 25th open hour. A reset that keeps
-   power adopts that RAM in place; the completed hour pairs also append to history's flash journal
-   for OTA and power-loss recovery. Intentional `esp_restart()` additionally
-   writes a separately sealed, one-shot DHW handoff under the same mutex: relative candidate ages,
-   the settling guard and completed DHW windows still in the open generic hour. The next boot books
+   `.noinit` RAM, never 24 completed buckets plus an accidental 25th open hour. Completed RAM hours
+   are retired on every restart and reconstructed only from absolute-age flash after clock sync and
+   current profile/link confirmation. RAM-only hours and undated open statistics may be lost.
+   Intentional `esp_restart()` writes a separately sealed, scoped one-shot DHW handoff under the
+   same mutex: only the ongoing candidate's relative ages and settling guard. Completed pending
+   DHW windows are discarded. After matching current-source confirmation, the next boot books
    `DHW_LOSS_REBOOT_BLIND_S` for the downtime plus its own uptime up to the adoption (`esp_timer`'s
    zero is the boot, and the adoption runs behind the network wait) as blind time on top of the
    blind run and blind total the candidate already carries. Past `DHW_LOSS_BLIND_RUN_MAX_S` in one
@@ -3721,11 +3886,21 @@ GET  /status      version, platform, uptime_s, boot_id (16 hex digits; non-secre
                   — `persist` is the `.noinit`-RAM adoption verdict for THIS boot: "accept" (adopted
                   across a compatible reset that kept power) or the named reason RAM started empty
                   ("power_cycle", "wrong_catalog" after an update moved the trend set, "bad_crc",
-                  "wrong_version", "no_record"). It does not report the independent flash result:
+                  "wrong_version", "no_record", or an age guard: "safe_mode", "not_committed" — the
+                  previous boot adopted them and committed nothing — and "stale_commit" — the name
+                  predates the booking rule and now means unmeasurable: the liveness record did not
+                  verify, or the X10A raster held samples and recorded no commit; a raster that
+                  merely stalled is measured and booked as gaps, not refused). "accept" may coexist
+                  with a HomeHub or ENV III ring retired alone (an identity change, or a raster the
+                  record could not measure), which only the boot log names. It does not report the
+                  independent flash result:
                   after a successful journal scan and clock sync, compatible flash records may still
                   splice buckets into those empty rings. `dwell_persist` answers the RAM-only question in the
                   same vocabulary for the per-row STATE AGES (state_dwell.cpp), which ride the same
-                  .noinit medium under the same rules and therefore reset for the same reasons; it
+                  .noinit medium under the same integrity rules (safe mode, reset reason, magic,
+                  version, catalog, CRC); the trend rings' age guards "not_committed" and
+                  "stale_commit" do not apply to it, because the dwell table books every restart as
+                  blind time itself, so it can read "accept" beside a trend verdict of either; it
                   rides this block rather than one of its own because every byte added to /status is
                   paid for on the httpd task's stack. Reported because a chart — or a set of
                   durations — that emptied itself
@@ -3746,7 +3921,14 @@ GET  /status      version, platform, uptime_s, boot_id (16 hex digits; non-secre
                   checks, and the dashboard card is hidden. `status` is the worst
                   verdict across the checks and `covered_s` how much of the day was actually
                   OBSERVED (seconds, not whole hours — the first hour after a reboot must read as the
-                  small number it is rather than rounding to "0 h"). covered_s is CARD-level context;
+                  small number it is rather than rounding to "0 h"). `health.persist` is the same
+                  question for the checkup: "flash_pending" means a compatible warm checkpoint was
+                  retired and journal recovery has not completed; it does not prove saved hours
+                  exist. "fresh" means no compatible hours were available or selected for that recovery, while
+                  "flash" means actual absolute-age hourly reconstruction. Only admissible stored
+                  intervals that survive the 23-slot capacity and current-boot live precedence
+                  establish flash provenance and the reconstructed span. Completed RAM hours
+                  are never adopted. Other values retain the named startup-integrity refusal. covered_s is CARD-level context;
                   each check carries its OWN evidence clock (observed_s/required_s), because a
                   mostly-readable pressure row cannot lend 24 hours to an RPS row seen for two
                   seconds. EIGHT checks in READING order,
