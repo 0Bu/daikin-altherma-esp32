@@ -6099,6 +6099,13 @@ static void test_modbus_plan() {
 
 static void test_modbus_snapshot() {
     using namespace daik::logic;
+    CHECK(modbus_observation_age_s(-1, 0) == UINT32_MAX);
+    CHECK(modbus_observation_age_s(1, 0) == UINT32_MAX);
+    CHECK(modbus_observation_age_s(0, 0) == 0);
+    CHECK(modbus_observation_age_s(0, 1) == 1);
+    CHECK(modbus_observation_age_s(100, 7100) == 7);
+    CHECK(modbus_observation_age_s(100, 7101) == 8);
+    CHECK(modbus_observation_age_s(0, INT64_MAX) == UINT32_MAX);
     SourceTimestampHighWater source_time;
     CHECK(!source_time.accept(-1));
     CHECK(source_time.allows(0));

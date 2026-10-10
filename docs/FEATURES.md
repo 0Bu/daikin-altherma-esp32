@@ -735,6 +735,8 @@ Deep dives: [`X10A_PROTOCOL.md`](X10A_PROTOCOL.md), [`REGISTERS.md`](REGISTERS.m
   tick; intervening ticks read diagnosis gates and outdoor context. Exception batches fall back to
   individual reads. Live cache use requires matching target/session identity, full-cache age at most
   546 s and independently recent replies at most 7 s; these are transport bounds, not same-sweep proof.
+  Individual gate/context replies expire independently; each fallback request feeds the watchdog.
+  Target changes reset public classification; discovery shares one five-second budget per attempt.
 - **The two sources meet in exactly one place** ([`logic/homehub_map.hpp`](../main/logic/homehub_map.hpp)):
   a register is paired to an X10A row **structurally**, reusing the trend ids and never the label —
   the catalog spells one quantity many ways and reuses tags across different quantities, so a label

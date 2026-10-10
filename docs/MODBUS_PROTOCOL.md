@@ -93,6 +93,12 @@ fills the ordinary editable address field and is not saved behind the dialog's C
 The larger cap matters on real home LANs: a 20-result cap can exclude the HomeHub solely because mDNS
 result order is unspecified.
 
+Each attempt shares a five-second monotonic budget between the three-second browse and all
+additional A-record lookups. Embedded IPv4 records are still inspected after that budget expires;
+missing addresses cannot each add another two seconds. Three attempts and the two one-second retry
+delays therefore have a 17-second SDK timeout budget, excluding scheduling and local processing.
+This is a project responsiveness bound, not a manufacturer discovery guarantee.
+
 The user may instead enter an IP, `.local` name or ordinary DNS name verbatim. Saving `mb_host` is an
 explicit decision: non-empty starts polling that address; empty disables HomeHub completely and
 persists the latch. Empty-after-searched therefore means no task, no socket, no HomeHub request, no
@@ -218,23 +224,34 @@ whatever the first cycle read.
   legacy-441 requires from the same current cycle. It is explicitly **not** a gate. The extra 40–45 batch
   is one deliberate bundled request; borrowing the five-second cache would not establish event-time
   freshness. Neighbouring registers ride these batches because leaving them out saves no request.
-* **Five seconds, not ten.** Chosen from the *dashboard*, not from how fast the values move: the
+* **Five poll ticks.** Chosen from the *dashboard*, not from how fast the values move: the
   browser polls `/values` every two seconds, and a HomeHub reading up to ten seconds old beside a
   one-second X10A reading of the same quantity invites exactly the "which of these is current?"
-  question the two-array `/values` shape exists to make answerable.
+  question the two-array `/values` shape exists to make answerable. This is nominal cadence with
+  short replies; bounded network waits add time and are included in the separate cache-age bound.
 * **A fast cycle commits no value cache.** Its thirteen gate/context-batch registers are not a cache and its
   position on the raster is not a sample, so `/values` and the trend rings stay with the last full
-  cycle (at most four poll intervals old) rather than publishing thirteen rows and 18 apparent read
-  failures. `connected` still reports *this* cycle, so a hub that goes away is visible within a
-  second.
+  cycle rather than publishing thirteen rows and 18 apparent read failures. Network waits add to
+  the intervening poll delays. `connected` reports this cycle's transport state; reply age detects
+  stalled progress independently of the larger full-cache allowance.
 * **An exception splits its batch.** A Modbus exception is a valid reply about **one** register, and
   a batched request cannot say which — so a batch that excepts is re-read register by register, and
   stays split for the session (the usual cause, a register this hub does not implement, does not go
   away). A reconnect forgets it: a different hub deserves the cheap plan again.
+  Every read request, including each fallback single read and profile probe, feeds the task watchdog
+  before transport begins; feeding once per batch does not bound a slow split batch.
 * **Only a full cycle proves recovery.** `/status.modbus` carries one current error for the whole
   map. A clean fast cycle did not re-read a failing full-cycle row, so it cannot clear that error;
   otherwise `/status`, `/diag` and Syslog would oscillate between failure and recovery every five
   seconds without evidence that the row recovered.
+
+Transport progress does not renew an earlier measurement. Gate53, heating-mode38 and outdoor44
+each retain the successful response's monotonic observation time and expire individually after the
+existing seven-second project bound. The full cache retains its separate 546-second bound, including
+bounded slow fallback requests; `/status.modbus.values` stops counting it when it expires, even if
+fast-cycle replies continue. These bounds are liveness filters, not proof of simultaneous measurements.
+A target change immediately resets the public profile to Auto/Probing, before name resolution;
+only work for that target generation can publish a new classification.
 
 **32 → 4.4 requests/poll-second, ~380 000 a day.** The plan is resolved at compile time and lives in flash;
 `hp_modbus.cpp` `static_assert`s that batching still collapses the map, so a future register added
