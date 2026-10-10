@@ -18987,6 +18987,7 @@ static void test_diag_tail() {
     CHECK(diag_dump_tail(ring, 0, 1, true, out, sizeof(out)) == 0);
     CHECK(diag_dump_tail(ring, 3, 4, false, out, sizeof(out)) == 0);
     CHECK(diag_dump_tail(ring, 3, 3, true, out, sizeof(out)) == 0);
+    CHECK(diag_dump_tail(ring, sizeof(ring), 0, false, out, sizeof(out)) == 0);
 
     // Production printf uses this allocation-free finisher: a truncated record is announced,
     // gets one terminator, and cannot fuse with the next record. Exact-fit/no-newline fails closed.
@@ -19008,6 +19009,9 @@ static void test_diag_tail() {
     CHECK(diag_finish_record(nullptr, 0, sizeof(record), true) == 0);
     CHECK(diag_finish_record(record, 0, 0, true) == 0);
     CHECK(diag_finish_record(record, 1, 1, true) == 1 && record[0] == '\n');
+    std::memcpy(record, "kept", 4);
+    n = diag_finish_record(record, 4, sizeof(record), true);
+    CHECK(std::string(record, n) == std::string("kept") + kDiagTruncatedMarker);
 }
 
 // The 27 observability rows were audited on the reference unit, which detection reads with the
