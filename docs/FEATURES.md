@@ -630,7 +630,7 @@ Everything needed to explain a crash *after the fact*, from the field, without a
   overflow overruns it) that those boards saw exactly the banner no action could clear. A proven
   foreign residue is also already suppressed: failed erasure of that residue cannot pin a separate
   current-fault banner. Other failures retain the report when current or unresolved evidence may
-  still be downloadable. Boot capture preserves foreign bytes; clear/dismiss/reset remain explicit
+  still be downloadable. Boot capture preserves foreign bytes; clear/dismiss/factory-reset remain explicit
   destructive actions.
 - **✅ 🧪 22-entity device heartbeat** ([`logic/heartbeat.hpp`](../main/logic/heartbeat.hpp)): a
   **flat** JSON of heap (free / min-free / largest-free-block, the true OOM limit), uptime, reset

@@ -27,6 +27,9 @@ from esp_coredump.corefile.xtensa import Esp32S3Methods, REG_NUM, REG_PC_IDX, RE
 
 import decode
 
+# Parse the actual GDB top-frame record; this is a frame number, not an issue reference.
+FRAME_ZERO = re.compile(r"(?m)^#[0]\s+fixture_leaf\b")
+
 
 def sdk_descriptors(directory: Path, compiler: str, identity: bytes, version: int):
     """Compile the actual pinned writer's type, rather than copying the parser's shorter view."""
@@ -339,7 +342,7 @@ def test_real_archive_wrapper(directory: Path) -> None:
                                 text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=45)
         if (result.returncode == 0) != expected:
             raise AssertionError(f"Real archive wrapper result: {core_name}: {result.stderr}")
-        if expected and "#0  fixture_leaf" not in result.stdout:
+        if expected and not FRAME_ZERO.search(result.stdout):
             raise AssertionError("Real archive wrapper failed to symbolize fixture_leaf")
         if plain.read_bytes() != stale:
             raise AssertionError("Wrapper overwrote an existing plain ELF")
@@ -362,9 +365,9 @@ def main() -> None:
             with redirect_stdout(output), redirect_stderr(StringIO()):
                 result = decode.decode("info_corefile", str(directory / f"{core_name}.raw"),
                                        str(directory / "matching.elf"))
-            if result != 0 or "#0  fixture_leaf" not in output.getvalue() or "fixture_task" not in output.getvalue():
+            if result != 0 or not FRAME_ZERO.search(output.getvalue()) or "fixture_task" not in output.getvalue():
                 raise AssertionError(f"Real pinned decoder symbolization failed: {core_name}")
-            print(f"Real GDB symbolization: {core_name}: #0 fixture_leaf, fixture_task", flush=True)
+            print(f"Real GDB symbolization: {core_name}: frame 0 fixture_leaf, fixture_task", flush=True)
             assert_temporary_cleanup(directory, core_name, "matching.elf", True)
         negative = ("missing-identity", "empty-identity", "short-identity", "nonhex-identity",
                     "duplicate-identity", "wrong-version", "wrong-identity", "short-descriptor",
