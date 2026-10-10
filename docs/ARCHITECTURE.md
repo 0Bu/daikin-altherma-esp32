@@ -4365,8 +4365,9 @@ below proves the original `-Os` change, not this newer payload, whose live high-
 device-validation boundary.
 
 **Current HTTP stack contract.** The HTTP task allocates **10240 bytes**. Every committed
-`httpd_*` path ceiling must fit below that allocation minus **2048 bytes**; reducing the task
-allocation or raising a path ceiling fails the gate. Required named frames cover the largest
+`httpd_*` path ceiling must be at most that allocation minus **2048 bytes**. The margin check
+fails when a reduced allocation or raised path ceiling leaves less headroom. Required named
+frames cover the largest
 configuration handlers, circulation's caller/parser pair, the register probe and MCP's parser,
 beside the existing status and OTA paths. Configuration parsing budgets both **17** live cJSON
 `parse_value` frames and **17** `cJSON_Delete` frames during rejection cleanup (root plus the
