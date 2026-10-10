@@ -28,7 +28,7 @@ from esp_coredump.corefile.xtensa import Esp32S3Methods, REG_NUM, REG_PC_IDX, RE
 import decode
 
 # Parse the actual GDB top-frame record; this is a frame number, not an issue reference.
-FRAME_ZERO = re.compile(r"(?m)^#[0]\s+fixture_leaf\b")
+FRAME_ZERO = re.compile(r"(?m)^#[0][ \t]+fixture_leaf\b")
 
 
 def sdk_descriptors(directory: Path, compiler: str, identity: bytes, version: int):
