@@ -413,7 +413,9 @@ green/yellow/red state colours as WiFi, MQTT, Syslog and NTP:
 
 * **Both up** — the row shows the X10A value, unmarked. Tapping it opens the explainer, and the
   gateway's reading appears at the **end** of the body, after the "Normal:" note: a full row carrying
-  the *Modbus register's own label*, the badge and the value, then the **difference** between the two.
+  the *Modbus register's own label*, the badge and the value, then the **difference** between the two
+  when the conversion is established. Native Altherma 4 flow and pressure show the unverified
+  conversion limit instead of a numeric comparison.
   It sits last, not first, because a reader opens an explainer to find out what the quantity *is* —
   the row's own value is already stated an inch above, in the header they just tapped. The label is
   the gateway's rather than the X10A row's on purpose: this line is what someone verifying a pairing

@@ -333,6 +333,22 @@ async function clickDisclosure(page, selector) {
   })()`);
 }
 
+async function captureNativeEvidence(page, context) {
+  const directory = process.env.DAIKIN_BROWSER_EVIDENCE_DIR;
+  if (!directory || !/^(desktop\/en|phone\/de)(\/|$)/.test(context)) return;
+  assert.ok(path.isAbsolute(directory), "browser evidence directory must be absolute");
+  fs.mkdirSync(directory, { recursive: true });
+  const clip = await page.evaluate(`(() => {
+    const rect = document.getElementById("valueGroups").getBoundingClientRect();
+    return { x: rect.left + scrollX, y: rect.top + scrollY,
+      width: rect.width, height: rect.height, scale: 1 };
+  })()`);
+  const capture = await page.send("Page.captureScreenshot",
+    { format: "png", captureBeyondViewport: true, clip });
+  fs.writeFileSync(path.join(directory, `${context.replaceAll("/", "-")}.png`),
+    Buffer.from(capture.data, "base64"));
+}
+
 async function assertNativeAltherma4(page, context) {
   try {
     await page.evaluate(`(() => {
@@ -429,20 +445,7 @@ async function assertNativeAltherma4(page, context) {
     assert.deepEqual(page.diagnostics, [], `${context}: native rendering and real clicks must emit no errors`);
     // Optional local evidence from the real page after every native disclosure was pointer-opened.
     // Capture just the values card, including its off-screen height, without creating CI artifacts.
-    const evidenceDirectory = process.env.DAIKIN_BROWSER_EVIDENCE_DIR;
-    if (evidenceDirectory) {
-      assert.ok(path.isAbsolute(evidenceDirectory), "browser evidence directory must be absolute");
-      fs.mkdirSync(evidenceDirectory, { recursive: true });
-      const clip = await page.evaluate(`(() => {
-        const rect = document.getElementById("valueGroups").getBoundingClientRect();
-        return { x: rect.left + scrollX, y: rect.top + scrollY,
-          width: rect.width, height: rect.height, scale: 1 };
-      })()`);
-      const capture = await page.send("Page.captureScreenshot",
-        { format: "png", captureBeyondViewport: true, clip });
-      fs.writeFileSync(path.join(evidenceDirectory, `${context.replaceAll("/", "-")}.png`),
-        Buffer.from(capture.data, "base64"));
-    }
+    await captureNativeEvidence(page, `${context}/standalone`);
     // The same limits must survive both a live second opinion and a native stand-in under an
     // existing X10A row. The standalone card alone cannot establish those production routes.
     for (const connected of [true, false]) {
@@ -480,6 +483,7 @@ async function assertNativeAltherma4(page, context) {
       }
       await assertAccessibility(page, `${context}/paired-limit/${connected}`, { nativeTree: true });
       assert.deepEqual(page.diagnostics, [], `${context}: paired limits must emit no browser errors`);
+      await captureNativeEvidence(page, `${context}/${connected ? "paired" : "replacement"}`);
     }
   } finally {
     // The last real click holds per-poll rebuilds briefly. Restore only after that production lease

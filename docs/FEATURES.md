@@ -751,8 +751,9 @@ Deep dives: [`X10A_PROTOCOL.md`](X10A_PROTOCOL.md), [`REGISTERS.md`](REGISTERS.m
 - **The two sources meet in exactly one place** ([`logic/homehub_map.hpp`](../main/logic/homehub_map.hpp)):
   a register is paired to an X10A row **structurally**, reusing the trend ids and never the label —
   the catalog spells one quantity many ways and reuses tags across different quantities, so a label
-  match would be both incomplete and wrong. The UI shows both values with their difference, and lets
-  Modbus stand in, marked in its own colour, when X10A is silent.
+  match would be both incomplete and wrong. The UI shows both values with their difference when the
+  conversion is established. Native Altherma 4 flow and pressure instead show the unverified
+  conversion limit. Modbus can stand in, marked in its own colour, when X10A is silent.
 - **✅ 🧪 Silent-bus detect backoff** ([`logic/detect_backoff.hpp`](../main/logic/detect_backoff.hpp)):
   while nothing answers, the sweep stretches toward a ceiling by **skipping ticks**, so the 1 s
   watchdog reset still fires and the ceiling stays a detection-latency choice rather than a WDT

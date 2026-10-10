@@ -1,4 +1,4 @@
-// translation-source: 6bca03f96e2befcb0ffc38143e9bdb22db58839623b9195a314a93bb6dffffb3
+// translation-source: 80308b6bdedee63f04a7aa561bdca0e02636f7e90fe91bf245200f24a0430a22
 I18N.fi = localeValues([
   /* sys.nodata */ "Ei tietoja",
   /* sys.unreachable */ "Ei tavoiteta",
