@@ -4300,7 +4300,8 @@ builder, and the two signed CI ELFs show exactly what that cost: the httpd handl
 grew from 0x2630 (9776) bytes in dev.295 to 0x2950 (10576) in dev.296, leaving 1712 bytes of a
 12288 stack for `config()`'s nested `Config`/`std::string` copy, httpd itself and interrupts. The
 dev.296 OTA double-faulted inside `config()` with the running task's TCB overwritten, and rolled
-back. It is now **16384**, chosen to leave 5808 bytes above the measured frame. Two lessons beyond
+back. That revision raised the stack to **16384**, leaving 5808 bytes above its measured frame.
+Two lessons beyond
 the number, both about method: a stack budget is read off the ELF's frame size and a decoded dump,
 never off an idle heap reading (an idle board looks fine at every one of these sizes), and the
 crash arrived through OTA — the one path where a too-small stack takes down a fleet rather than a
@@ -4362,6 +4363,32 @@ deliberately uses the more conservative direct sum `1536 + 1232 + 4896 = 7664` b
 **8720 bytes** before ISR and exception-unwind frames. This is build evidence; the hardware paragraph
 below proves the original `-Os` change, not this newer payload, whose live high-water mark remains a
 device-validation boundary.
+
+**Current HTTP stack contract.** The HTTP task allocates **10240 bytes**. Every committed
+`httpd_*` path ceiling must be at most that allocation minus **2048 bytes**. The margin check
+fails when a reduced allocation or raised path ceiling leaves less headroom. Required named
+frames cover the largest
+configuration handlers, circulation's caller/parser pair, the register probe and MCP's parser,
+beside the existing status and OTA paths. Configuration parsing budgets both **17** live cJSON
+`parse_value` frames and **17** `cJSON_Delete` frames during rejection cleanup (root plus the
+shared depth limit of 16), plus `cJSON_ParseWithLengthOpts`, `parse_string` and the existing
+1536-byte surrounding HTTP allowance. The shared adapter explicitly passes `JSON_MAX_DEPTH`
+as its fourth argument; the source contracts reject an override that would exceed these frame
+multipliers. MCP's depth-16 scanner includes **18** value frames, counting the early-rejection
+frame. The four named cJSON prologues may be decoded from a packed little-endian first word
+(with an empty mnemonic or an identical `.word`) only at the exact symbol address; later words
+and new out-of-line container parsers cannot supply an unreviewed bound.
+
+Separate persistence paths conservatively retain the largest configuration caller (3200 bytes),
+32-byte service/link wrapper, 48-byte `save_whole`, 1600-byte native `NvsBlobStore` transaction
+and 48-byte project NVS wrapper. Their **4928-byte** project sum plus **1536 bytes for HTTP**
+and **1536 bytes for SDK-NVS** totals **8000 / 8192 bytes**. The scan path uses its 768-byte
+caller and 1920-byte scan frame, plus 1536 HTTP and 1024 SDK-radio bytes: **5248 / 6144**.
+MQTT setup/stop/destroy separately budgets 2336 caller + 1536 HTTP + **4096 SDK-TLS** bytes:
+**7968 / 8192**, including renegotiation and RSA-PSS/ECDSA paths. These allowances are conservative
+reviews of the pinned SDK, not a complete symbolic C/ROM call graph. The final ELF and native
+save, scan and MQTT lifecycle high-water marks remain separate device acceptance; a real TLS
+renegotiation transaction is not established by the static allowance.
 
 **That ELF measurement is now an executable build gate.**
 [`scripts/check-stack-budget.py`](../scripts/check-stack-budget.py) parses the demangled ESP32-S3
@@ -4426,7 +4453,8 @@ costs 736, so the *peak* got 304 bytes WORSE; adding `history` gave 10816 + max(
 i.e. 64 bytes better than where it started. The frame is a SUM of block contributions while the peak
 is `builder + max(helper)`, so extraction only pays once ~10 blocks are out (~4 KB, extrapolated) —
 a large mechanical edit to the most stack-critical function in the firmware, for half of what one
-build line buys. **`cfg.stack_size` stays 16384 and was deliberately NOT raised**: 4 KB of permanent
+build line buys. **That experiment kept `cfg.stack_size` at 16384 rather than raising it**:
+4 KB of permanent
 RAM on a board whose binding limit is the largest CONTIGUOUS free block, spent on a compiler
 artefact, while `-Os` buys twice as much for one line. Should the `-Os` scoping ever be reverted,
 the stack must go to 20480 in the same commit — ~1872 bytes measured before ISR and unwind demands

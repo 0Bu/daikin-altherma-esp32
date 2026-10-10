@@ -21,7 +21,10 @@ from typing import Any
 
 REPO = Path(__file__).resolve().parents[1]
 DEFAULT_BUDGETS = REPO / "tools/stack/budgets.json"
-FUNCTION_RE = re.compile(r"^\s*[0-9a-fA-F]+\s+<(.+)>:\s*$")
+FUNCTION_RE = re.compile(r"^\s*([0-9a-fA-F]+)\s+<(.+)>:\s*$")
+INSTRUCTION_RE = re.compile(r"^\s*([0-9a-fA-F]+):\s+([0-9a-fA-F]+)(?:\s+(.*))?$")
+CJSON_PACKED_ENTRY_SYMBOLS = frozenset({"parse_value", "parse_string", "cJSON_Delete", "cJSON_ParseWithLengthOpts"})
+HTTP_STACK_RE = re.compile(r"\bcfg\.stack_size\s*=\s*([0-9]+)\s*;")
 ENTRY_RE = re.compile(r"\bentry\s+a1,\s*(0x[0-9a-fA-F]+|[0-9]+)\b")
 RULE_NAME_RE = re.compile(r"^[a-z][a-z0-9_]*$")
 
@@ -33,19 +36,101 @@ class BudgetError(ValueError):
 def parse_frames(disassembly: str) -> dict[str, int]:
     frames: dict[str, int] = {}
     current: str | None = None
+    symbol_address = 0
     for line in disassembly.splitlines():
         header = FUNCTION_RE.match(line)
         if header:
-            current = header.group(1)
+            if current in CJSON_PACKED_ENTRY_SYMBOLS:
+                raise BudgetError(f"symbol {current}: missing first prologue")
+            current = header.group(2)
+            symbol_address = int(header.group(1), 16)
+            if re.match(r"^parse_(?:array|object)(?:[.$]|$)", current):
+                raise BudgetError(f"symbol {current}: out-of-line cJSON container needs budget review")
+            if current in CJSON_PACKED_ENTRY_SYMBOLS and current in frames:
+                raise BudgetError(f"duplicate cJSON symbol {current}")
             continue
         if current is None:
+            continue
+        if current in CJSON_PACKED_ENTRY_SYMBOLS:
+            instruction = INSTRUCTION_RE.match(line)
+            if not instruction:
+                if re.match(r"^\s*[0-9a-fA-F]+:", line):
+                    raise BudgetError(f"symbol {current}: truncated first prologue")
+                continue
+            if int(instruction.group(1), 16) != symbol_address:
+                raise BudgetError(f"symbol {current}: first instruction is not at symbol address")
+            mnemonic = (instruction.group(3) or "").strip()
+            entry = ENTRY_RE.fullmatch(mnemonic)
+            if entry:
+                frame = int(entry.group(1), 0)
+            elif (len(instruction.group(2)) == 8 and
+                  (not mnemonic or re.fullmatch(r"\.word\s+0x[0-9a-fA-F]{8}", mnemonic))):
+                # Standard SDK objdump can print a packed word with no mnemonic; raw objdump
+                # can label it .word. Decode only these four first words at their exact symbol
+                # addresses. A later ENTRY or any other packed SDK symbol cannot supply a bound.
+                word = int(instruction.group(2), 16)
+                raw24 = word & 0xFFFFFF
+                if (mnemonic and word != int(mnemonic.split()[1], 16)) or raw24 & 0xFFF != 0x136:
+                    raise BudgetError(f"symbol {current}: wrong packed first prologue")
+                frame = (raw24 >> 12) * 8
+            else:
+                raise BudgetError(f"symbol {current}: undecodable first prologue")
+            if frame == 0:
+                raise BudgetError(f"symbol {current}: empty first stack frame")
+            frames[current] = frame
+            current = None
             continue
         entry = ENTRY_RE.search(line)
         if entry:
             frame = int(entry.group(1), 0)
             frames[current] = max(frame, frames.get(current, 0))
             current = None
+    if current in CJSON_PACKED_ENTRY_SYMBOLS:
+        raise BudgetError(f"symbol {current}: missing first prologue")
     return frames
+
+
+def validate_http_stack(budgets: dict[str, Any], source: str) -> None:
+    matches = HTTP_STACK_RE.findall(source)
+    if len(matches) != 1:
+        raise BudgetError("HTTP stack must have one machine-readable cfg.stack_size literal")
+    stack_size = int(matches[0])
+    for name, rule in budgets["paths"].items():
+        if name.startswith("httpd_") and rule["max_bytes"] > stack_size - 2048:
+            raise BudgetError(f"path {name}: ceiling must retain 2048 B on HTTP stack {stack_size}")
+
+
+def validate_json_recursion(budgets: dict[str, Any], json_source: str,
+                            mcp_source: str, adapter_source: str) -> None:
+    json_matches = re.findall(r"\bJSON_MAX_DEPTH\s*=\s*([0-9]+)\s*;", json_source)
+    mcp_matches = re.findall(r"if\s*\(depth\s*>\s*([0-9]+)\)\s*return false;", mcp_source)
+    if json_matches != ["16"] or mcp_matches != ["16"]:
+        raise BudgetError("JSON recursion source limits require review")
+    adapter = (
+        r"inline\s+cJSON\*\s+json_parse_document\(std::string_view\s+payload\)\s*\{\s*"
+        r"return\s+json_parse_bounded\(\s*payload,\s*"
+        r"\[\]\(const char\* bytes,\s*size_t length,\s*const char\*\* end\)\s*noexcept\s*\{\s*"
+        r"return cJSON_ParseWithLengthOpts\(bytes,\s*length,\s*end,\s*false\);\s*\},\s*"
+        r"\[\]\(cJSON\* root\)\s*noexcept\s*\{\s*cJSON_Delete\(root\);\s*\},\s*"
+        r"JSON_MAX_DEPTH\s*\);\s*\}")
+    if not re.search(adapter, adapter_source):
+        raise BudgetError("bounded cJSON adapter must bind JSON_MAX_DEPTH as its fourth argument")
+    for owner in ("hp", "mqtt", "board", "env3", "weather", "diagnostics", "circulation"):
+        name = f"httpd_config_{owner}"
+        rule = budgets["paths"].get(name)
+        if rule is None or rule["multipliers"] != {"cjson_parse_value": 17, "cjson_delete": 17}:
+            raise BudgetError(f"path {name}: cJSON parse and simultaneous cleanup need depth + root")
+    rule = budgets["paths"].get("httpd_mcp_parse")
+    if rule is None or rule["multipliers"] != {"mcp_json_value": 18}:
+        raise BudgetError("path httpd_mcp_parse: MCP needs depth + root + early-reject frame")
+
+
+def validate_source_contract(budgets: dict[str, Any]) -> None:
+    validate_http_stack(budgets, (REPO / "main/http_server.cpp").read_text(encoding="utf-8"))
+    validate_json_recursion(
+        budgets, (REPO / "main/logic/payload_complete.hpp").read_text(encoding="utf-8"),
+        (REPO / "main/logic/mcp.hpp").read_text(encoding="utf-8"),
+        (REPO / "main/json_guard.hpp").read_text(encoding="utf-8"))
 
 
 def reject_duplicate_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
@@ -257,8 +342,58 @@ def self_test() -> None:
 00000012 <daik::(anonymous namespace)::parse_forecast(std::string const&, long long, daik::WeatherForecastSample&, std::string&)>:
   12: 004136          entry a1, 512
 """
+    fixture += """
+00000013 <daik::set_hp(httpd_req*)>:
+  13: 004136          entry a1, 3200
+00000014 <daik::set_mqtt(httpd_req*)>:
+  14: 004136          entry a1, 2336
+00000015 <daik::set_board(httpd_req*)>:
+  15: 004136          entry a1, 2176
+00000016 <daik::set_env3(httpd_req*)>:
+  16: 004136          entry a1, 1792
+00000017 <daik::set_weather(httpd_req*)>:
+  17: 004136          entry a1, 1776
+00000018 <daik::set_diagnostics(httpd_req*)>:
+  18: 004136          entry a1, 1536
+00000019 <daik::set_circulation(httpd_req*)>:
+  19: 004136          entry a1, 976
+0000001a <daik::parse_circulation_request(httpd_req*, daik::CirculationRequest&)>:
+  1a: 004136          entry a1, 1408
+0000001b <daik::hp_query_probe(httpd_req*)>:
+  1b: 004136          entry a1, 2720
+0000001c <daik::mcp_parse(char const*, int)>:
+  1c: 004136          entry a1, 144
+0000001d <daik::mcp_detail::JsonReader::value(int)>:
+  1d: 004136          entry a1, 32
+0000001e <daik::mcp_detail::JsonReader::string(std::string*)>:
+  1e: 004136          entry a1, 48
+0000001f <parse_value>:
+  1f: 16008136 \t
+00000020 <parse_string>:
+  20: d8006136 \t
+00000021 <cJSON_Delete>:
+  21: 61004136 \t
+00000022 <cJSON_ParseWithLengthOpts>:
+  22: c2008136 \t
+00000023 <daik::config_save(daik::Config const&)>:
+  23: 004136          entry a1, 32
+00000024 <daik::save_whole(daik::Config const&, bool)>:
+  24: 004136          entry a1, 48
+00000025 <_ZN4daik23config_save_transactionINS_12_GLOBAL__N_112NvsBlobStoreEEENS_17ConfigSaveOutcomeERNS_6ConfigERKS4_bRT_$constprop$0>:
+  25: 004136          entry a1, 1600
+00000026 <daik::nvs_set_blob(char const*, void const*, unsigned int)>:
+  26: 004136          entry a1, 48
+00000027 <daik::h_scan(httpd_req*)>:
+  27: 004136          entry a1, 768
+00000028 <daik::wifi_scan(daik::WifiScanEntry*, int)>:
+  28: 004136          entry a1, 1920
+00000029 <daik::config_save_link(daik::Config const&)>:
+  29: 004136          entry a1, 32
+"""
     budgets = load_budgets(DEFAULT_BUDGETS)
+    validate_source_contract(budgets)
     frames = parse_frames(fixture)
+
     selected = evaluate(frames, budgets)
     assert selected["status_serializer"] == 4848
     assert selected["path:httpd_mcp_status"] == 7616
@@ -273,6 +408,108 @@ def self_test() -> None:
     assert selected["path:weather_task_parse"] == 3872
     assert selected["ota_health_task"] == 80
     assert selected["path:ota_health_gate"] == 2128
+    assert selected["path:httpd_config_hp"] == 6480
+    assert selected["path:httpd_config_circulation"] == 5664
+    assert selected["path:httpd_hp_query_probe"] == 4256
+    assert selected["path:httpd_mcp_parse"] == 3536
+    assert selected["path:httpd_config_save"] == 8000
+    assert selected["path:httpd_config_save_link"] == 8000
+    assert selected["path:httpd_wifi_scan"] == 5248
+    assert selected["path:httpd_mqtt_tls"] == 7968
+
+    for symbol, address, word, frame in (
+        ("parse_value", "1f", "16008136", 64),
+        ("parse_string", "20", "d8006136", 48),
+        ("cJSON_Delete", "21", "61004136", 32),
+        ("cJSON_ParseWithLengthOpts", "22", "c2008136", 64),
+    ):
+        first = f"{address}: {word} \t"
+        for rendered in (f"{address}: {word}        .word 0x{word}",
+                         f"{address}: {word}        entry a1, {frame}"):
+            decoded = fixture.replace(first, rendered)
+            assert parse_frames(decoded)[symbol] == frame
+            evaluate(parse_frames(decoded), budgets)
+
+    def reject_disassembly(name: str, text: str, expected: str) -> None:
+        try:
+            evaluate(parse_frames(text), budgets)
+        except BudgetError as exc:
+            assert expected in str(exc), f"{name}: unexpected failure {exc}"
+        else:
+            raise AssertionError(f"self-test accepted {name}")
+
+    reject_disassembly("wrong first blank opcode", fixture.replace(
+        "1f: 16008136 \t", "1f: 16008135 \t"), "first prologue")
+    reject_disassembly("later ENTRY rescue", fixture.replace(
+        "1f: 16008136 \t", "1f: 16008135 \t\n  2a: 008136 entry a1, 64"), "first prologue")
+    reject_disassembly("truncated blank word", fixture.replace(
+        "1f: 16008136 \t", "1f: 008136 \t"), "first prologue")
+    reject_disassembly("empty first word", fixture.replace(
+        "1f: 16008136 \t", "1f: \t"), "first prologue")
+    reject_disassembly("zero packed frame", fixture.replace(
+        "1f: 16008136 \t", "1f: 16000136 \t"), "empty first stack frame")
+    reject_disassembly("mismatched .word", fixture.replace(
+        "1f: 16008136 \t", "1f: 16008136 .word 0x16008135"), "first prologue")
+    reject_disassembly("wrong instruction address", fixture.replace(
+        "1f: 16008136", "2a: 16008136"), "symbol address")
+    reject_disassembly("missing cJSON symbol", fixture.replace("<parse_value>", "<renamed_value>"),
+        "cjson_parse_value")
+    reject_disassembly("recursive frame growth", fixture.replace(
+        "1f: 16008136 \t", "1f: 16009136 \t"), "cjson_parse_value")
+    reject_disassembly("Config frame growth", fixture.replace("entry a1, 3200", "entry a1, 3216"),
+        "config_hp")
+    reject_disassembly("MQTT save caller frame growth", fixture.replace(
+        "14: 004136          entry a1, 2336", "14: 004136          entry a1, 2352"), "config_mqtt")
+    reject_disassembly("MCP recursion frame growth", fixture.replace(
+        "1d: 004136          entry a1, 32", "1d: 004136          entry a1, 48"), "mcp_json_value")
+    reject_disassembly("Config transaction frame growth", fixture.replace(
+        "25: 004136          entry a1, 1600", "25: 004136          entry a1, 1616"),
+        "config_transaction")
+    reject_disassembly("missing Config transaction", fixture.replace(
+        "_ZN4daik23config_save_transaction", "_ZN4daik23renamed_transaction"), "config_transaction")
+    reject_disassembly("WiFi scan frame growth", fixture.replace(
+        "28: 004136          entry a1, 1920", "28: 004136          entry a1, 1936"), "wifi_scan")
+    reject_disassembly("missing WiFi scan", fixture.replace("<daik::wifi_scan(", "<daik::renamed_scan("),
+        "wifi_scan")
+    reject_disassembly("new out-of-line container", fixture +
+        "\n00000023 <parse_array>:\n  23: 004136 entry a1, 64\n", "budget review")
+    assert "unreviewed_packed" not in parse_frames(
+        "00000023 <unreviewed_packed>:\n  23: e2008136 .word 0xe2008136\n")
+    try:
+        validate_http_stack(budgets, "cfg.stack_size = 8192;")
+    except BudgetError as exc:
+        assert "retain 2048 B" in str(exc)
+    else:
+        raise AssertionError("self-test accepted insufficient HTTP stack reserve")
+    json_source = (REPO / "main/logic/payload_complete.hpp").read_text(encoding="utf-8")
+    mcp_source = (REPO / "main/logic/mcp.hpp").read_text(encoding="utf-8")
+    adapter_source = (REPO / "main/json_guard.hpp").read_text(encoding="utf-8")
+    for name, changed_json, changed_mcp, member, multiplier in (
+        ("cJSON source depth", json_source.replace("JSON_MAX_DEPTH      = 16;",
+                                                  "JSON_MAX_DEPTH      = 17;"), mcp_source, None, None),
+        ("MCP source depth", json_source, mcp_source.replace("depth > 16", "depth > 17"), None, None),
+        ("cJSON parse root", json_source, mcp_source, "cjson_parse_value", 16),
+        ("simultaneous cJSON cleanup", json_source, mcp_source, "cjson_delete", 16),
+        ("MCP early-reject frame", json_source, mcp_source, "mcp_json_value", 17),
+    ):
+        changed_budgets = json.loads(json.dumps(budgets))
+        if member is not None:
+            path = "httpd_mcp_parse" if member == "mcp_json_value" else "httpd_config_hp"
+            changed_budgets["paths"][path]["multipliers"][member] = multiplier
+        try:
+            validate_json_recursion(changed_budgets, changed_json, changed_mcp, adapter_source)
+        except BudgetError:
+            pass
+        else:
+            raise AssertionError(f"self-test accepted {name}")
+    overridden_adapter = adapter_source.replace("}, JSON_MAX_DEPTH);", "}, 32);")
+    assert overridden_adapter != adapter_source
+    try:
+        validate_json_recursion(budgets, json_source, mcp_source, overridden_adapter)
+    except BudgetError as exc:
+        assert "fourth argument" in str(exc)
+    else:
+        raise AssertionError("self-test accepted a larger cJSON adapter depth override")
     assert budgets["paths"]["ota_task_manifest_fetch"]["max_bytes"] == 6144
     assert budgets["paths"]["weather_task_download"]["max_bytes"] == 11264
     assert budgets["paths"]["weather_task_parse"]["max_bytes"] == 11264
@@ -529,6 +766,7 @@ def main(argv: list[str]) -> int:
     if args.elf is None and args.disassembly is None:
         parser.error("one of --elf or --disassembly is required")
     budgets = load_budgets(args.budgets)
+    validate_source_contract(budgets)
     if args.elf is not None:
         text = disassemble(args.elf, args.objdump)
     else:
