@@ -269,14 +269,21 @@ hp_modbus.cpp/.hpp  → THE HOMEHUB MODBUS STACK — a SECOND, INDEPENDENT sourc
                       first boot with a LAN lease and persists even a miss; an explicitly empty
                       address then means no task, socket, future automatic discovery or requests.
                       Manual Search remains available in the dialog. Both searches filter
-                      homehub-* from up to 64 _http._tcp responders per bounded attempt. The lwIP
-                      client wraps logic/modbus.hpp framing; the response borrows a caller-owned ADU
+                      homehub-* from up to 64 _http._tcp responders per bounded attempt. The
+                      browse and all missing A records share a five-second attempt budget; three
+                      attempts plus retry delays have a 17-second SDK timeout budget. Target changes
+                      reset public profile/basis before resolution; old generations cannot restore it.
+                      lwIP client wraps logic/modbus.hpp framing; the response borrows a caller-owned ADU
                       so its payload cannot outlive the received bytes. logic/modbus_plan.hpp turns
                       32 rows into ten contiguous batches: full map every fifth poll tick, the two
                       diagnosis gates and outdoor context on intervening ticks. Cache publication
                       requires matching session/target generations, a full-cache age at most 546 s
                       and an independently recent reply (at most 7 s). These project transport bounds
                       include exception fallback and do not make every row a same-sweep observation.
+                      Status counts use the identical full-cache commit time. Gate53, mode38 and
+                      outdoor44 expire independently from each successful reply's observation time
+                      at the existing seven-second bound; unrelated replies cannot refresh them.
+                      Every valid request feeds the watchdog, including single fallback reads/probes.
                       Gate-only success cannot clear a map-wide error;
                       only a clean full cycle proves recovery. READ-ONLY: no write function code is
                       issued anywhere, and no source file can build one (docs/MODBUS_PROTOCOL.md)
@@ -3671,8 +3678,9 @@ GET  /status      version, platform, uptime_s, boot_id (16 hex digits; non-secre
                   from ModbusStatus, so this surface and the MQTT heartbeat cannot answer the same
                   question with two numbers; it is NULL rather than 0 when the task has never run,
                   which on a board with no HomeHub is always. The PLANT GATE pair is input register 53,
-                  the one HomeHub fact the shadow controller consumes — `known` false means the
-                  register did not answer and must never read as an inactive plant. `host` is the configured persistent
+                  the one HomeHub fact the diagnosis consumes — `known` false means the input was
+                  absent, invalid or older than its own seven-second bound, even if another register
+                  answered recently; it must never read as an inactive plant. `host` is the configured persistent
                   target (redacted like the other reporter-identifying values); empty means disabled.
                   Explicit discovery is request-local and therefore not a status mode; `discovering`
                   remains false for wire compatibility. The plant-gate pair also reaches MQTT through

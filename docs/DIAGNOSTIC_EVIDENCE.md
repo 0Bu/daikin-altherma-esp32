@@ -1,6 +1,6 @@
 # Evidence and limits of the plant diagnostics
 
-<!-- diagnostic-evidence-contract: c0359113596dab56a0b09023141ccf5dc4c726ac259b11a6f523ad9618f0f641 -->
+<!-- diagnostic-evidence-contract: 422ac07a3d80449629d6e180ae0876da73906236ebc5db0d38238a26124f176d -->
 
 For every row in the **Plant diagnostics · 24 h** card, this page answers four questions:
 
@@ -25,8 +25,13 @@ an identity and freshness boundary, not evidence that an unreadable replacement 
 Transport liveness is separate from each rule's measurement evidence. X10A live use requires a reply
 less than 15 s old. HomeHub cache use requires matching target/session identity, a full-cache age at
 most 546 s and a separate reply age at most 7 s; these project bounds include slow fallback reads
-and do not establish that every row came from one sweep. State-age observation and blind time are
-also separate from the eight diagnosis counters; their version-4 format includes the resumed tail
+and do not establish that every row came from one sweep. Individual HomeHub diagnosis inputs
+gate53, mode38 and outdoor44 retain their
+own successful-response times and expire after the same seven-second project bound. A new reply
+for another register cannot renew them. A completed slow sweep can therefore already contain an
+expired early input; it is withheld rather than assigned the sweep's completion time. These changes
+alter evidence admission, not any diagnosis threshold or manufacturer claim. State-age observation
+and blind time are also separate from the eight diagnosis counters; their version-4 format includes the resumed tail
 in the cumulative blind-gap limit, books the start-up before the first fold after a RAM-preserving
 reset as unobserved, and changes no diagnosis threshold below.
 The [X10A gate](../main/logic/mqtt_publish_gate.hpp) and

@@ -51,17 +51,19 @@ struct ModbusStatus {
     int         last_error_detail   = -1;
     int         last_error_register = 0;
     // HomeHub input register 53 says SPACE HEATING OR COOLING is in normal operation. It cannot by
-    // itself license a heating-curve sample. Input register 38 supplies the current mode; both must be
-    // known and mode must be Heating before the diagnosis records a room-error sample.
-    // `known` is false whenever the register did not answer this cycle or answered a sentinel — an
-    // unknown gate must never read as "inactive", which would look like an ordinary quiet plant.
+    // itself license a heating-curve sample. Input register 38 supplies the current mode; both must
+    // be known and mode must be Heating before the diagnosis records a room-error sample. `known`
+    // is false whenever the register did not answer this cycle, answered a sentinel or its own
+    // successful reply is older than the seven-second project bound — an unknown gate must never
+    // read as "inactive", which would look like an ordinary quiet plant.
     bool        plant_gate_known  = false;
     bool        plant_gate_active = false;
     bool        heating_mode_known  = false;
     bool        heating_mode_active = false;
     // Plant-side outdoor context from input register 44. Unlike the full value cache, this row is
     // refreshed in an explicit one-second batch in the same cycle as input 38, and is published
-    // only when it answered in the current TCP session. It is optional evidence, never a gate.
+    // only while its own reply is recent in the current TCP session. It is optional evidence,
+    // never a gate; replies for other registers do not renew its observation time.
     logic::OutdoorEvidence plant_outdoor;
 };
 
