@@ -43,6 +43,54 @@ if (!process.env.PRODUCTION_OTA_CONTRACT_ROOT) {
     "-I", "-B", path.join(root, "scripts/production-ota-gate.py"), "--self-test",
   ], { encoding: "utf8" });
   assert.equal(selfTest.status, 0, `OTA/HIL self-test failed: ${selfTest.stderr}`);
+
+  // Python 3.9 has a socket.timeout class distinct from builtin TimeoutError. Exercise that
+  // exception through the actual slow-drip self-test on every interpreter, while the ordinary
+  // self-test above retains the real socket/deadline proof. An unrelated transport error must
+  // still escape rather than count as the expected deadline expiration.
+  const timeoutProbe = `
+import runpy, socket, sys
+gate = runpy.run_path(sys.argv[1], run_name="timeout_contract_probe")
+namespace = gate["self_test"].__globals__
+original_reader = namespace["read_compact_json_response"]
+original_timeout = socket.timeout
+class LegacySocketTimeout(OSError):
+    pass
+class UnexpectedTransportError(OSError):
+    pass
+assert not issubclass(LegacySocketTimeout, TimeoutError)
+calls = 0
+def first_read(*args, **kwargs):
+    global calls
+    calls += 1
+    namespace["read_compact_json_response"] = original_reader
+    if sys.argv[2] == "legacy":
+        raise LegacySocketTimeout("legacy socket deadline expired")
+    if sys.argv[2] == "builtin":
+        raise TimeoutError("whole-request deadline expired")
+    raise UnexpectedTransportError("unrelated transport failure")
+socket.timeout = LegacySocketTimeout
+namespace["read_compact_json_response"] = first_read
+try:
+    gate["self_test"]()
+    assert calls == 1
+finally:
+    socket.timeout = original_timeout
+    namespace["read_compact_json_response"] = original_reader
+`;
+  for (const kind of ["legacy", "builtin"]) {
+    const expectedTimeout = spawnSync("python3", [
+      "-I", "-B", "-c", timeoutProbe, path.join(root, "scripts/production-ota-gate.py"), kind,
+    ], { encoding: "utf8" });
+    assert.equal(expectedTimeout.status, 0,
+      `${kind} timeout must satisfy the deadline self-test: ${expectedTimeout.stderr}`);
+  }
+  const unrelatedTransport = spawnSync("python3", [
+    "-I", "-B", "-c", timeoutProbe, path.join(root, "scripts/production-ota-gate.py"), "unrelated",
+  ], { encoding: "utf8" });
+  assert.notEqual(unrelatedTransport.status, 0,
+    "the deadline self-test must not swallow unrelated transport errors");
+  assert.match(unrelatedTransport.stderr, /UnexpectedTransportError: unrelated transport failure/);
 }
 
 // Role, artifact and timing boundaries.
