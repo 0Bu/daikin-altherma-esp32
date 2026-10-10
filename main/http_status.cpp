@@ -1174,9 +1174,8 @@ static void append_status_json(JsonOut& j, bool redact) {
         else
             j += std::to_string(bytes);
     }
-    // The PLANT GATE (input register 53) is the one HomeHub fact the shadow controller consumes, so
-    // it is reported here beside the link it comes from. `known` false means the register did not
-    // answer or answered a sentinel — never read that as an inactive plant.
+    // The PLANT GATE (input register 53) is reported beside its source. `known` false includes an
+    // absent, invalid or individually expired reply — never read that as an inactive plant.
     j += ",\"plant_gate_known\":";  j += mb.plant_gate_known ? "true" : "false";
     j += ",\"plant_gate_active\":"; j += mb.plant_gate_active ? "true" : "false";
     j += ",\"heating_mode_known\":";  j += mb.heating_mode_known ? "true" : "false";

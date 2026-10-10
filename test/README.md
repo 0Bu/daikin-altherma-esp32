@@ -16,6 +16,7 @@ scripts/run-mock-tests.sh
 scripts/run-mock-tests.sh --coverage
 scripts/run-sanitizer-fuzz-tests.sh
 scripts/run-runtime-integration-tests.sh
+scripts/run-contract-tests.sh
 CLANG_FORMAT=clang-format-18 scripts/run-format-check.sh
 scripts/run-browser-render-tests.sh
 ```
@@ -77,6 +78,13 @@ replace the stored value, allocate after a config transaction's first write, and
 body-completion gate. The harness remains hardware-free and does not
 execute ESP-IDF target glue, real NVS or the production MCP/HTTP/MQTT stacks; target builds and
 separately authorized hardware acceptance remain distinct proof layers.
+
+The contract suite also compiles the complete current `hp_modbus.cpp` through
+[`modbus_runtime/fixture.cpp`](modbus_runtime/fixture.cpp). Real POSIX transport and explicit SDK
+clock/task adapters exercise parsing, polling, cache expiry, target cutover and task retirement;
+specific temporary mutations prove the runtime oracles can reject the corresponding regressions.
+See [its evidence limits](modbus_runtime/README.md): SDK timing models, scheduler callbacks and
+simulated config/history do not establish real hardware, NVS or physical HomeHub behavior.
 
 `scripts/run-format-check.sh` always supplies the dependency-free baseline format gate: UTF-8, LF
 endings, one final newline, no tabs or trailing whitespace on maintained `main/`, `test/` and

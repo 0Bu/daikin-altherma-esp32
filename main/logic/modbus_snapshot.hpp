@@ -7,6 +7,16 @@
 
 namespace daik::logic {
 
+// Rounded-up monotonic age shared by cache, status and individual reply evidence. An absent or
+// future observation fails closed; zero is a valid observation at boot. Avoid signed overflow at
+// the largest monotonic timestamp and saturate the public seconds representation.
+inline constexpr uint32_t modbus_observation_age_s(int64_t observed_ms, int64_t now_ms) {
+    if (observed_ms < 0 || now_ms < observed_ms) return UINT32_MAX;
+    const uint64_t delta   = static_cast<uint64_t>(now_ms) - static_cast<uint64_t>(observed_ms);
+    const uint64_t seconds = delta / 1000 + (delta % 1000 != 0);
+    return seconds >= UINT32_MAX ? UINT32_MAX : static_cast<uint32_t>(seconds);
+}
+
 // The full cache is refreshed every N ticks, while every tick also spends time reading the peer.
 // Its age budget must include those reads, including one batch exception followed by single reads.
 // A separate reply-age bound detects a stopped/OOM worker without waiting for this larger budget.
