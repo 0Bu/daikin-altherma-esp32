@@ -24,6 +24,8 @@ from typing import Any, Iterable
 from urllib.parse import unquote
 
 from merge_payload import find_merge as classify_github_action
+from merge_payload import literal_rg_inspection
+from merge_payload import shell_executes_stdin
 import format_snapshot
 
 
@@ -671,7 +673,6 @@ def shell_dumps_environment(command: str) -> bool:
 
 
 def shell_dumps_credentials(command: str) -> bool:
-    shell = r"(?:bash|dash|sh|zsh)"
     if any(
         re.search(pattern, command, flags=re.IGNORECASE)
         for pattern in (
@@ -682,11 +683,7 @@ def shell_dumps_credentials(command: str) -> bool:
         )
     ):
         return True
-    if (
-        re.search(rf"\|[^|;\n]*\b{shell}\b", command)
-        or re.search(rf"\b{shell}\b[^;&|\n]*(?:<<<|(?<!<)<(?!<))", command)
-        or re.search(rf"\b{shell}\b(?:\s+-[^;&|\n]*)*\s+-s(?:\s|$)", command)
-    ):
+    if shell_executes_stdin(command):
         return True
     for tokens, _ in shell_token_sets(command):
         if not tokens:
@@ -1249,27 +1246,34 @@ def direct_ota_update_write(command: str) -> bool:
 
 def read_only_gate_inspection(command: str) -> bool:
     """Allow source inspection to name the gate without allowing an execution wrapper."""
+    if re.search(r"[$`<>]", command):
+        return False
     token_sets = [tokens for tokens, _ in shell_token_sets(command) if tokens]
     if not token_sets:
         return False
     for tokens in token_sets:
         executable = Path(tokens[0]).name
         args = tokens[1:]
-        if executable not in {"cat", "diff", "grep", "head", "rg", "sed", "tail"}:
+        if executable not in {"cat", "diff", "grep", "head", "nl", "rg", "sed", "tail"}:
             return False
         if executable == "diff" and any(
             arg == "--output" or arg.startswith("--output=") for arg in args
         ):
             return False
         if executable == "rg" and any(
-            arg == "--pre" or arg.startswith("--pre=") for arg in args
-        ):
-            return False
-        if executable == "sed" and any(
-            arg == "-i" or arg.startswith("-i") or arg == "--in-place" or arg.startswith("--in-place=")
+            arg in {"--pre", "--hostname-bin"} or arg.startswith(("--pre=", "--hostname-bin="))
             for arg in args
         ):
             return False
+        if executable == "sed":
+            # sed also executes commands and writes files without -i. Source inspection needs
+            # only a literal print selector; unknown scripts must not inherit reader permission.
+            if args and args[0] in {"-n", "--quiet", "--silent"}:
+                args = args[1:]
+            if not args or re.fullmatch(r"(?:[0-9]+|\$)?(?:,(?:[0-9]+|\$))?p", args[0]) is None:
+                return False
+            if any(arg.startswith("-") for arg in args[1:]):
+                return False
     return True
 
 
@@ -1398,7 +1402,7 @@ def secret_violation(payload: dict[str, Any]) -> str | None:
         github_action = classify_github_action(command)
         if github_action is not None and github_action.get("error"):
             return github_action["error"]
-        if SHELL_EXTGLOB.search(command):
+        if SHELL_EXTGLOB.search(command) and not literal_rg_inspection(command):
             return "shell extglob expansion is not statically bounded by the credential/partition guard"
         if shell_dumps_environment(command):
             return "the command would dump process environment values, which may include credentials"
@@ -1498,7 +1502,14 @@ def partition_segment_is_read_only(tokens: list[str]) -> bool:
             return False
         return True
     if executable == "git" and args:
-        if args[0] not in {"diff", "grep", "log", "show", "status"}:
+        while args:
+            if args[:2] == ["-c", "core.fsmonitor=false"]:
+                args = args[2:]
+            elif args[0] == "--no-optional-locks":
+                args = args[1:]
+            else:
+                break
+        if not args or args[0] not in {"diff", "grep", "log", "ls-files", "show", "status"}:
             return False
         return not any(
             arg in {"--output", "--ext-diff", "--textconv"} or arg.startswith("--output=")

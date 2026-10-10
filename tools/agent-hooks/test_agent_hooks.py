@@ -14,6 +14,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "tools/agent-hooks"))
 
 import agent_hook
+import merge_payload
 
 
 class AgentHookFastTests(unittest.TestCase):
@@ -95,6 +96,72 @@ class AgentHookFastTests(unittest.TestCase):
                 self.assertEqual(rc, 0)
                 data = json.loads(fake_out.getvalue().strip())
                 self.assertEqual(data["decision"], "allow")
+
+    def test_native_review_source_reads_are_allowed_without_running_commands(self):
+        commands = [
+            "git -c core.fsmonitor=false --no-optional-locks ls-files -- AGENTS.md CONTRIBUTING.md README.md 'docs/*.md' '.agents/skills/*/SKILL.md' '.agents/agents/*.md'",
+            "nl -ba scripts/production-ota-gate.py | sed -n '1140,1186p'",
+            "rg -n 'expected.elf|expected_elf|app_elf_sha256|ELF|sha256|prefix|signature|verify_signature' scripts/verify-device-health.sh scripts/require-signed.sh",
+            "rg -n -C 3 --glob '*.md' 'app_elf_sha256|ELF.*(prefix|SHA|hash)|CONFIG_APP_RETRIEVE_LEN_ELF_SHA' docs/ARCHITECTURE.md docs/SECURITY.md docs/FEATURES.md docs/DESIGN.md docs/README.md .agents/skills/deploy-prod/SKILL.md .agents/skills/device-triage/SKILL.md .agents/skills/bug-triage/SKILL.md",
+        ]
+        with patch.object(agent_hook.subprocess, "run", side_effect=AssertionError("must not execute")):
+            for command in commands:
+                with self.subTest(command=command):
+                    rc, out = self.run_pre_tool({"tool_name": "Bash", "tool_input": {"command": command}})
+                    self.assertEqual((rc, out), (0, ""))
+
+    def test_reader_proof_does_not_admit_execution_or_writes(self):
+        commands = [
+            "cat AGENTS.md > partitions.csv",
+            "git -c alias.inspect='!sh' inspect partitions.csv",
+            "git -c core.pager=sh log partitions.csv",
+            "nl -ba scripts/production-ota-gate.py | sh",
+            "sed -n 'e scripts/production-ota-gate.py --execute' AGENTS.md",
+            "sed -n 'w /tmp/SYNTHETIC_GATE_COPY' scripts/production-ota-gate.py",
+            "sed -i '1,80p' scripts/production-ota-gate.py",
+            "cat scripts/production-ota-gate.py > /tmp/SYNTHETIC_GATE_COPY",
+            "rg -n '--pre=sh' scripts/production-ota-gate.py",
+            "rg -n 'prefix|sh' scripts/require-signed.sh | sh",
+            "rg -n 'ELF.*(prefix|SHA)' docs/ARCHITECTURE.md > /tmp/output",
+            "cat /tmp/@(ordinary|private).pem",
+            "bash -c 'cat /tmp/@(ordinary|private).pem'",
+            "printf harmless | env sh",
+            "bash -s",
+            "sh < /tmp/script",
+            "sh <<'EOF'",
+            "sh <<< 'harmless'",
+            "rg --hostname-bin=sh -n 'prefix|sh' scripts/production-ota-gate.py",
+        ]
+        with patch.object(agent_hook.subprocess, "run", side_effect=AssertionError("must not execute")):
+            for command in commands:
+                with self.subTest(command=command):
+                    rc, out = self.run_pre_tool({"tool_name": "Bash", "tool_input": {"command": command}})
+                    self.assertEqual(rc, 0)
+                    self.assertEqual(json.loads(out)["hookSpecificOutput"]["permissionDecision"], "deny")
+
+    def test_literal_query_proof_rejects_flags_wrappers_and_expansions(self):
+        commands = [
+            "rg -n '--pre=sh' docs/ARCHITECTURE.md",
+            "rg -n 'prefix|sh' --pre=sh",
+            "rg -n 'prefix|sh' ../outside.md",
+            "rg -n 'prefix|sh' /tmp/outside.md",
+            "rg --pre=sh 'prefix|sh' docs/ARCHITECTURE.md",
+            "rg -n 'prefix|sh' docs/ARCHITECTURE.md; sh",
+            "rg -n 'prefix|sh' docs/ARCHITECTURE.md\nsh",
+            "env rg -n 'prefix|sh' docs/ARCHITECTURE.md",
+            "bash -c \"rg -n 'prefix|sh' docs/ARCHITECTURE.md\"",
+            "rg -n 'prefix|sh' $(echo docs/ARCHITECTURE.md)",
+            "rg -n $'prefix|sh' docs/ARCHITECTURE.md",
+            "rg -n 'prefix|sh' docs/@(ARCHITECTURE|SECURITY).md",
+            "rg -n 'unterminated docs/ARCHITECTURE.md",
+        ]
+        for command in commands:
+            with self.subTest(command=command):
+                self.assertFalse(merge_payload.literal_rg_inspection(command))
+        # Decoding an ANSI-C quoted token must not create reader proof absent in the raw source.
+        command = "rg -n $'prefix|sh' scripts/require-signed.sh"
+        self.assertIsNotNone(merge_payload.find_merge(command))
+        self.assertTrue(merge_payload.shell_executes_stdin("printf harmless | sh"))
 
 
 if __name__ == "__main__":

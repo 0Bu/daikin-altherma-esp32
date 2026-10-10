@@ -120,6 +120,11 @@ fails closed on both missing and extra project skills.
   and cannot prove the intent of arbitrarily generated interpreter code or dynamically computed
   commands and paths. Treat an unrecognized or blocked form as a request to use a simpler,
   statically inspectable command; never treat hook silence as authorization.
+- Native review reads admit Git metadata with `-c core.fsmonitor=false` and
+  `--no-optional-locks`, and `nl` followed by a literal `sed` print selector. OTA source inspection
+  rejects redirections and `sed` execution or file-writing scripts. A narrow direct `rg` form
+  distinguishes a single-quoted query from stdin-shell or extglob syntax; unknown flags, wrappers,
+  expansions and command chains do not receive that exception. Secret and target guards still apply.
 - The hook blocks direct `/ota/update` writes, including interpreter, alternate HTTP-client and
   quote-split forms. It admits two direct, unchained canonical `scripts/production-ota-gate.py`
   shapes with the official dev manifest and exact artifact/source/current-version lease. Ordinary
