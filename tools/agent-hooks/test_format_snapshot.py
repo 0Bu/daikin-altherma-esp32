@@ -11,6 +11,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import tracemalloc
 import unittest
 from unittest.mock import patch
 
@@ -401,6 +402,48 @@ raise SystemExit(1)
         self.source.write_text(changed)
         self.assertEqual(self.post(payload), "")
         self.assertEqual(self.source.read_text(), changed)
+
+
+class FormatterAllocationTests(unittest.TestCase):
+    def test_replace_all_rejects_expansion_before_allocating_output(self):
+        previous = b"x" * 8192
+        inputs = {"old_string": "x", "new_string": "x" * 1024, "replace_all": True}
+        tracemalloc.start()
+        try:
+            result = format_snapshot.expected_content("edit", inputs, "", "probe.cpp", previous)
+            self.assertTrue(result is None, "oversized replacement was constructed")
+            self.assertLess(tracemalloc.get_traced_memory()[1], 2 * format_snapshot.MAX_CONTENT_BYTES)
+        finally:
+            tracemalloc.stop()
+
+    def test_write_limit_counts_utf8_bytes_before_encoding_whole_input(self):
+        class NoWholeEncoding(str):
+            def encode(self, *args, **kwargs):
+                raise AssertionError("oversized output must not be encoded")
+
+        content = NoWholeEncoding("é" * (format_snapshot.MAX_CONTENT_BYTES // 2 + 1))
+        self.assertIsNone(format_snapshot.expected_content("write", {"content": content}, "", "probe.cpp", None))
+
+    def test_exact_byte_limit_and_shrinking_edits_still_work(self):
+        limit = format_snapshot.MAX_CONTENT_BYTES
+        inputs = {"old_string": "x", "new_string": "é" * (limit // 2)}
+        expected = inputs["new_string"].encode()
+        self.assertEqual(format_snapshot.expected_content("edit", inputs, "", "probe.cpp", b"x"), expected)
+        self.assertEqual(format_snapshot.expected_content("write", {"content": inputs["new_string"]}, "", "probe.cpp", None), expected)
+        inputs = {"old_string": "é", "new_string": "x", "replace_all": True}
+        self.assertEqual(format_snapshot.expected_content("edit", inputs, "", "probe.cpp", expected), b"x" * (limit // 2))
+
+    def test_patch_growth_is_rejected_before_replacing_source_lines(self):
+        previous = b"keep\n" + b"x" * 600000 + b"\n"
+        patch_text = "*** Begin Patch\n*** Update File: probe.cpp\n@@\n-keep\n+" + "y" * 600000 + "\n*** End Patch\n"
+        self.assertIsNone(format_snapshot.patch_result(patch_text, "probe.cpp", previous))
+        self.assertEqual(format_snapshot.patch_result("*** Begin Patch\n*** Update File: probe.cpp\n@@\n-keep\n+é\n*** End Patch\n", "probe.cpp", previous),
+                         "é\n".encode() + previous[5:])
+
+    def test_oversized_patch_and_single_replacement_are_skipped(self):
+        oversized = "x" * (format_snapshot.MAX_CONTENT_BYTES + 1)
+        self.assertIsNone(format_snapshot.patch_result("*** Begin Patch\n*** Add File: probe.cpp\n+" + oversized + "\n*** End Patch\n", "probe.cpp", None))
+        self.assertIsNone(format_snapshot.expected_content("edit", {"old_string": "x", "new_string": oversized}, "", "probe.cpp", b"x"))
 
 
 if __name__ == "__main__":

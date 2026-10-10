@@ -235,8 +235,9 @@ local changes included, findings and completed review. Check that evidence indep
 recording a review; the launcher never checks PR boxes or creates an acceptance stamp.
 
 The formatter records a correlated pre-edit state only for eligible project source files and
-computes formatting in memory. It emits a bounded suggestion, never writes a source file. Existing
-user changes, missing correlation or concurrent changes cause it to skip the suggestion. Apply
+computes formatting in memory. It emits a bounded suggestion, never writes a source file.
+Edit, Write and patch projections are checked against a 1 MiB UTF-8 output budget before construction.
+Existing user changes, missing correlation or concurrent changes cause it to skip the suggestion. Apply
 formatting through the ordinary edit workflow under explicit file ownership, then run the normal
 format gate; a post-edit hook is not permission to reformat another author's changes.
 
