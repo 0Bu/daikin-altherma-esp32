@@ -489,6 +489,11 @@ async function assertNativeAltherma4(page, context) {
       ]) {
         await page.waitFor("!S.clickHold");
         await page.evaluate("S.insp = null; renderInspect(); true");
+        // Closing the preceding panel can clamp the document's scroll position on desktop.
+        // Wait for its real collapse before measuring the next pointer target.
+        await page.waitFor(`!document.getElementById("inspect").classList.contains("open") &&
+          document.getElementById("inspect").getAnimations({subtree: true})
+            .every(a => a.playState !== "running")`);
         const selector = `#schem [data-insp=${JSON.stringify(target)}]`;
         await page.evaluate(`document.querySelector(${JSON.stringify(selector)})
           .scrollIntoView({block: "center", behavior: "instant"}); true`);

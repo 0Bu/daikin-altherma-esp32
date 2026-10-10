@@ -136,8 +136,9 @@ associated AP's BSSID ride the `wifi_` set, so a heartbeat can be pinned to a sp
 it roamed onto.
 
 Three fields count the one-second publish/poll cycles that produced **nothing**, each its own
-`total_increasing` diagnostic entity: `mqtt_skipped` (the publish cycle threw `std::bad_alloc` under
-heap pressure and the reading was lost), `mqtt_quiesced` (the publisher stood aside deliberately
+`total_increasing` diagnostic entity: `mqtt_skipped` (the publish cycle threw `std::bad_alloc` because
+an allocation failed or the flat Modbus payload exceeded its 4 KiB bound, so the reading was lost),
+`mqtt_quiesced` (the publisher stood aside deliberately
 while an OTA or weather TLS operation owned the heap) and `poll_skipped` (the X10A sweep never ran,
 so the value was
 never read at all). They are worth an automation: `mqtt_skipped` rising outside an update window
