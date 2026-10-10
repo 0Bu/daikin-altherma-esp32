@@ -1,4 +1,4 @@
-// translation-source: 856c2ce7d1e297c3bcf8a20a2f1b4c8079ed68a2890bb1d0729997a0bd963c19
+// translation-source: bcd4ff0bb5bf1f2e454eb0f7e5c00ea352bcbb9f1f0c080ef5225bc85210fa0b
 I18N.zh = localeValues([
   /* sys.nodata */ "无数据",
   /* sys.unreachable */ "无法访问",
@@ -34,13 +34,16 @@ I18N.zh = localeValues([
   /* recovery.meta */ "多次重启后进入恢复模式并暂停热泵通信/MQTT。检查“设置 → 协议”的 RX/TX 后重启。",
   /* rollback.title */ "WiFi 更改失败 — 已恢复原配置",
   /* rollback.meta */ (back) => `设备无法使用新的 WiFi 设置联网，已恢复原网络${back}并重启。请在“设置 → 连接”中检查网络名称和密码后重试。`,
-  /* crash.title_fault */ "设备崩溃后已重启",
+  /* crash.title_fault */ "设备在故障后重启",
   /* crash.title_orphan */ "发现先前重启遗留的崩溃报告",
   /* crash.reset */ "复位",
   /* crash.task */ "任务",
   /* crash.fw */ "固件",
   /* crash.elf */ "ELF",
   /* crash.corrupted */ "已损坏",
+  /* crash.stored_dump */ "已保存的崩溃报告",
+  /* crash.stored_hint */ "此报告的生成时间及其与本次重启的关系未知。",
+  /* crash.backtrace */ "调用栈",
   /* crash.download */ "下载崩溃报告",
   /* crash.copy */ "复制诊断信息",
   /* crash.dismiss */ "删除报告",

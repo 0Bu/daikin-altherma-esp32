@@ -1,4 +1,4 @@
-// translation-source: 856c2ce7d1e297c3bcf8a20a2f1b4c8079ed68a2890bb1d0729997a0bd963c19
+// translation-source: bcd4ff0bb5bf1f2e454eb0f7e5c00ea352bcbb9f1f0c080ef5225bc85210fa0b
 I18N.de = localeValues([
   /* sys.nodata */ "Keine Daten",
   /* sys.unreachable */ "Nicht erreichbar",
@@ -34,13 +34,16 @@ I18N.de = localeValues([
   /* recovery.meta */ "Das Gerät wurde mehrfach neu gestartet und ist deshalb im Wiederherstellungsmodus. Die Verbindung zur Wärmepumpe und MQTT sind pausiert. Prüfe die Konfiguration — besonders die RX/TX-Pins auf der Protokoll-Karte in den Einstellungen — und starte das Gerät danach neu.",
   /* rollback.title */ "WLAN-Änderung fehlgeschlagen — zurückgesetzt",
   /* rollback.meta */ (back) => `Mit den neuen WLAN-Einstellungen konnte sich das Gerät nicht verbinden. Es hat das vorherige Netzwerk${back} wiederhergestellt und neu gestartet. Prüfe unter Einstellungen → Verbindungen den Netzwerknamen und das Passwort und versuche es erneut.`,
-  /* crash.title_fault */ "Gerät ist nach einem Absturz neu gestartet",
+  /* crash.title_fault */ "Gerät nach einem Fehler neu gestartet",
   /* crash.title_orphan */ "Absturzbericht von einem früheren Neustart",
   /* crash.reset */ "Reset",
   /* crash.task */ "Task",
   /* crash.fw */ "FW",
   /* crash.elf */ "elf",
   /* crash.corrupted */ "beschädigt",
+  /* crash.stored_dump */ "Gespeicherter Absturzbericht",
+  /* crash.stored_hint */ "Alter und Bezug des Berichts zu diesem Neustart sind unbekannt.",
+  /* crash.backtrace */ "Aufrufstack",
   /* crash.download */ "Absturzbericht herunterladen",
   /* crash.copy */ "Diagnose kopieren",
   /* crash.dismiss */ "Bericht löschen",

@@ -1,4 +1,4 @@
-// translation-source: 856c2ce7d1e297c3bcf8a20a2f1b4c8079ed68a2890bb1d0729997a0bd963c19
+// translation-source: bcd4ff0bb5bf1f2e454eb0f7e5c00ea352bcbb9f1f0c080ef5225bc85210fa0b
 I18N.fi = localeValues([
   /* sys.nodata */ "Ei tietoja",
   /* sys.unreachable */ "Ei tavoiteta",
@@ -34,13 +34,16 @@ I18N.fi = localeValues([
   /* recovery.meta */ "Laite käynnistyi toistuvasti uudelleen ja siirtyi palautustilaan. Lämpöpumppu- ja MQTT-yhteydet on keskeytetty. Tarkista asetukset, erityisesti Asetukset-näkymän Protokolla-kortin RX/TX-nastat, ja käynnistä laite uudelleen.",
   /* rollback.title */ "WiFi-muutos epäonnistui — palautettu",
   /* rollback.meta */ (back) => `Laite ei saanut yhteyttä uusilla WiFi-asetuksilla. Edellinen verkko${back} palautettiin ja laite käynnistyi uudelleen. Tarkista verkon nimi ja salasana kohdasta Asetukset → Yhteydet ja yritä uudelleen.`,
-  /* crash.title_fault */ "Laite käynnistyi uudelleen kaatumisen jälkeen",
+  /* crash.title_fault */ "Laite käynnistyi uudelleen virheen jälkeen",
   /* crash.title_orphan */ "Aiemman käynnistyksen kaatumisraportti odottaa",
   /* crash.reset */ "Nollaus",
   /* crash.task */ "tehtävä",
   /* crash.fw */ "fw",
   /* crash.elf */ "elf",
   /* crash.corrupted */ "vioittunut",
+  /* crash.stored_dump */ "Tallennettu kaatumisraportti",
+  /* crash.stored_hint */ "Raportin ikää ja yhteyttä tähän uudelleenkäynnistykseen ei tunneta.",
+  /* crash.backtrace */ "Kutsupino",
   /* crash.download */ "Lataa kaatumisraportti",
   /* crash.copy */ "Kopioi diagnostiikka",
   /* crash.dismiss */ "Poista raportti",

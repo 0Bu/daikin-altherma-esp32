@@ -5,10 +5,10 @@
 # The dump is USELESS without the matching unstripped ELF: the shipped .bin has no symbols. Use the
 # .elf from the SAME firmware version that produced the dump — CI archives it per version/PR as a
 # build artifact (dist/*.elf.xz, retained 3 days for a dev build; for a PR, until merge or 7 days)
-# and, for releases, as a Release ASSET, which has no expiry at all. esp-coredump matches the two by the
-# app_elf_sha256 the dump embeds and WARNS on a mismatch, so a wrong ELF is caught, not silently
-# mis-decoded. (The device also reports app_elf_sha256 on /status and in the crash banner, so you
-# know which build to fetch.)
+# and, for releases, as a Release ASSET, which has no expiry at all. The pinned loader checks
+# integrity; the repository helper additionally requires a meaningful app_elf_sha256 identity note
+# and fails closed on missing, malformed or mismatching provenance. The device reports its running
+# app_elf_sha256 too, but that does not date a stored dump or attribute it to the latest reset.
 #
 # CI stores that ELF xz-wrapped; this script unwraps it for you, so either name works. The container
 # is deliberately an OUTER wrapper — the ELF inside is byte-identical to the linker's output, which
@@ -105,4 +105,4 @@ with lzma.open(sys.argv[1], "rb") as f, open(sys.argv[2], "wb") as g:
 esac
 
 echo "decode-coredump: $mode  core=$core_rel  elf=$elf_rel" >&2
-"$repo_root/scripts/idf-docker.sh" esp-coredump "$mode" --core "$core_rel" --core-format raw "$elf_rel"
+"$repo_root/scripts/idf-docker.sh" python tools/coredump/decode.py "$mode" "$core_rel" "$elf_rel"

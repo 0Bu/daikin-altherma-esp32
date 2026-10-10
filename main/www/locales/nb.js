@@ -1,4 +1,4 @@
-// translation-source: 856c2ce7d1e297c3bcf8a20a2f1b4c8079ed68a2890bb1d0729997a0bd963c19
+// translation-source: bcd4ff0bb5bf1f2e454eb0f7e5c00ea352bcbb9f1f0c080ef5225bc85210fa0b
 I18N.nb = localeValues([
   /* sys.nodata */ "Ingen data",
   /* sys.unreachable */ "Ikke tilgjengelig",
@@ -34,13 +34,16 @@ I18N.nb = localeValues([
   /* recovery.meta */ "Enheten har startet på nytt flere ganger og er i gjenopprettingsmodus. Varmepumpeforbindelsen og MQTT er satt på pause. Kontroller konfigurasjonen, særlig RX/TX-pinnene på protokollkortet, og start enheten på nytt.",
   /* rollback.title */ "Wi-Fi-endringen mislyktes — tilbakestilt",
   /* rollback.meta */ (back) => `Enheten kunne ikke koble til med de nye Wi-Fi-innstillingene. Det forrige nettverket${back} ble gjenopprettet, og enheten startet på nytt. Kontroller nettverksnavn og passord under Innstillinger → Tilkoblinger og prøv igjen.`,
-  /* crash.title_fault */ "Enheten startet på nytt etter et krasj",
+  /* crash.title_fault */ "Enheten startet på nytt etter en feil",
   /* crash.title_orphan */ "Krasjrapport fra en tidligere omstart",
   /* crash.reset */ "Tilbakestilling",
   /* crash.task */ "Oppgave",
   /* crash.fw */ "FW",
   /* crash.elf */ "elf",
   /* crash.corrupted */ "skadet",
+  /* crash.stored_dump */ "Lagret krasjrapport",
+  /* crash.stored_hint */ "Rapportens alder og sammenheng med denne omstarten er ukjent.",
+  /* crash.backtrace */ "Kallstakk",
   /* crash.download */ "Last ned krasjrapport",
   /* crash.copy */ "Kopier diagnose",
   /* crash.dismiss */ "Slett rapport",

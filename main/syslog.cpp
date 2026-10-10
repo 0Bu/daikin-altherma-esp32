@@ -205,9 +205,9 @@ static SendResult syslog_sendto(int& sock, const struct sockaddr_in& dest, const
     char packet[320];
     // RFC 5424: <PRI=14 user.info>1 SP TIMESTAMP HOSTNAME APP PROCID MSGID SD SP MSG.
     // TIMESTAMP is the SNTP wall clock (main/sntp_time.cpp) once synced, else the RFC 5424 NILVALUE
-    // "-" — never a fabricated pre-epoch date. A collector conventionally substitutes its own receive
-    // time for "-", so a boot's first few lines (sent before the client's first sync lands) just carry
-    // a slightly-later effective timestamp rather than a wrong one.
+    // "-" — never a fabricated pre-epoch date. A collector conventionally substitutes its own
+    // receive time for "-". These timestamps date transmission/reception, including a stored-dump
+    // replay; they cannot establish when that dump was captured or which reset produced it.
     // rfc3339_utc() returns (a short-lived, heap-allocating) std::string. Caught HERE rather than
     // left to syslog_task's own top-level guard, which would be the wrong granularity: that guard
     // skips a whole cycle, and losing the datagram is a strictly worse answer than sending it with
@@ -268,12 +268,13 @@ static void handle_send_failure(int err, const char* what, bool& resolved, bool&
     }
 }
 
-// Replay the boot records ONCE, as soon as a collector is resolved. diag_crash_capture() runs at the
-// top of app_main — before networking, before this task exists — so its crash line could only ever reach
-// the in-RAM diag ring, which a chatty failure mode (an X10A timeout every ~0.3 s) overwrites within
-// a minute. Result: the single most useful line for forensics was readable nowhere. The boot line
-// goes out on every boot (build identity: without it a log stream cannot be tied to a binary); the
-// crash records only when there is a real crash to report (build_crash_log_lines returns 0 otherwise).
+// Replay the boot records ONCE, as soon as a collector is resolved. diag_crash_capture() runs at
+// the top of app_main — before networking, before this task exists — so its crash line could only
+// ever reach the in-RAM diag ring, which a chatty failure mode (an X10A timeout every ~0.3 s)
+// overwrites within a minute. Result: the single most useful line for forensics was readable
+// nowhere. The boot line goes out on every boot (build identity: without it a log stream cannot be
+// tied to a binary); the crash records only for a current fault or stored dump
+// (build_crash_log_lines returns 0 otherwise).
 //
 // Sent straight down syslog_sendto(), NOT via diag_printf(): by now the queue is typically full of
 // the boot backlog (nothing drains it until a network + DNS are up), and syslog_send()'s enqueue is
@@ -281,17 +282,16 @@ static void handle_send_failure(int err, const char* what, bool& resolved, bool&
 // send failed, leaving the one-shot unlatched so the next resolve retries.
 //
 // Consequence of bypassing diag_printf: these lines carry no "[uptime]" prefix, unlike every other
-// forwarded line. That is deliberate — they describe the PREVIOUS boot, so stamping them with this
-// boot's uptime (a few seconds) would date the crash wrong. syslog_sendto()'s RFC 5424 TIMESTAMP
-// field dates the REPLAY (this boot, once SNTP has synced) — not the crash, which happened sometime
-// in the previous, likely-unsynced boot; the collector's own receive timestamp is still the only
-// honest clock for *that*.
+// forwarded line. The head describes this boot's reset; summary/backtrace records describe a stored
+// dump with unknown age and unknown relation to that reset, even when its ELF matches. Neither
+// current uptime, syslog_sendto()'s RFC 5424 TIMESTAMP nor the collector's receive timestamp dates
+// that incident. Those timestamps date only this replay/transmission/reception.
 static bool syslog_replay_boot(int& sock, const struct sockaddr_in& dest) {
-    // Best-effort diagnostics must never take the device down. The record builders allocate (~800 B
-    // total, worst case), and an uncaught std::bad_alloc here would unwind through the FreeRTOS/C
+    // Best-effort diagnostics must never take the device down. The record builders allocate, and
+    // an uncaught std::bad_alloc here would unwind through the FreeRTOS/C
     // task frames → std::terminate → reboot; because the replay re-runs on EVERY boot that would be
     // a boot LOOP, not a one-off crash. Latch the one-shot on OOM rather than retrying forever: a
-    // device that can't spare 800 bytes has a worse problem than a missing log line.
+    // device unable to allocate the temporary records has a worse problem than a missing log line.
     try {
         char elf_sha[65] = {0};
         esp_app_get_elf_sha256(elf_sha, sizeof(elf_sha));
@@ -305,8 +305,8 @@ static bool syslog_replay_boot(int& sock, const struct sockaddr_in& dest) {
         const std::string boot = build_boot_line(id);
         if (syslog_sendto(sock, dest, boot.data(), boot.size()) != SendResult::Ok) return false;
 
-        // Short-lived and small (<= 3 lines, each capped at ~200 bytes by construction — see
-        // logic/bootlog.hpp): no risk to the contiguous-block budget this firmware runs against.
+        // Short-lived and small (<= 5 lines, each below 200 bytes by construction — see
+        // logic/bootlog.hpp). Allocation failure stays inside this replay's exception boundary.
         std::string lines[CRASH_LOG_LINE_MAX];
         const int n = build_crash_log_lines(diag_crash_info(), lines, CRASH_LOG_LINE_MAX);
         for (int i = 0; i < n; i++) {

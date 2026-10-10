@@ -21,7 +21,7 @@ needed for a present problem.
 | **A wrong or missing value on your unit** | The highest-value report. Include your model, `GET /values`, and `GET /diag` (a detect pass dumps the raw page bytes). See "Value correctness" below. The device collects all of it for you — [`docs/REPORTING.md`](docs/REPORTING.md). |
 | **A board that isn't already listed** | The RX/TX safe-pin table in [`docs/WIRING.md`](docs/WIRING.md) is filled in per board by hand — a verified new row is a real contribution. |
 | **Protocol findings** | Anything that sharpens [`docs/X10A_PROTOCOL.md`](docs/X10A_PROTOCOL.md) or [`docs/REGISTERS.md`](docs/REGISTERS.md). |
-| **Bugs with a reproduction** | Start from [`docs/REPORTING.md`](docs/REPORTING.md) — the web UI's **Report a bug** action assembles the whole evidence set. Crashes especially: `GET /coredump` + the version from `GET /status` lets it be symbolized (`scripts/decode-coredump.sh`). |
+| **Bugs with a reproduction** | Start from [`docs/REPORTING.md`](docs/REPORTING.md) — the web UI's **Report a bug** action assembles the whole evidence set. Crashes especially: A private raw dump needs its exact matching unstripped ELF; `scripts/decode-coredump.sh` verifies the dump/ELF identity before symbolizing it. |
 
 Please open an issue before a large change. Refactors that don't change behaviour are the one thing
 likely to be declined — the comment density and the "why" notes in this codebase are load-bearing.

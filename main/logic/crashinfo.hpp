@@ -12,6 +12,7 @@
 #include <string>
 #include "ha_device.hpp"   // device_json — one X10A HA device across values/diagnostics/crash
 #include "json.hpp"        // json_append_escaped
+#include "redact.hpp"      // DiagLogIdentifier — bounded diagnostic summary representation
 
 namespace daik {
 
@@ -67,9 +68,11 @@ inline bool crash_reason_is_fault(uint32_t reason) {
     }
 }
 
-// Everything the device captured about the last reset. bt[] holds raw program-counter addresses
+// The reset reason belongs to this boot; the summary describes the stored dump, whose age is
+// unknown even with matching ELF identity. bt[] holds raw program-counter addresses
 // (symbolized offline against the matching .elf); elf_sha is the crashed build's app ELF hash (hex,
-// possibly truncated by CONFIG_APP_RETRIEVE_LEN_ELF_SHA — still enough to spot a cross-version dump).
+// possibly truncated by CONFIG_APP_RETRIEVE_LEN_ELF_SHA — still enough to spot a cross-version
+// dump).
 struct CrashInfo {
     uint32_t reason       = 0;      // raw esp_reset_reason_t value
     bool     coredump     = false;  // a downloadable core-dump image exists in flash (GET /coredump)
@@ -83,36 +86,42 @@ struct CrashInfo {
     char     elf_sha[65]  = {0};    // crashed build's app_elf_sha256 (hex; "" if unknown)
 };
 
-// Minimum hex-char overlap two app-ELF SHA-256 strings must share before a DIFFERENCE between them is
-// trusted as "different build". Both sides come from esp_app_get_elf_sha256 / the core-dump summary's
-// app_elf_sha256, each truncated to CONFIG_APP_RETRIEVE_LEN_ELF_SHA256 hex chars (default 9); 8 chars
-// = 32 bits, below that default, so the normal equal-length case is compared in full while a
-// pathologically short config can never make two good shas look different by accident.
+// Minimum identity prefix required to establish a foreign build. IDF's default
+// CONFIG_APP_RETRIEVE_LEN_ELF_SHA is 9 hex chars; 8 chars retain at least 32 bits of identity.
 inline constexpr size_t ELF_SHA_MIN_COMPARE = 8;
 
-// Does a core dump carrying app-ELF sha `dump_sha` belong to a DIFFERENT firmware than the running
-// build `run_sha`? The coredump partition survives an OTA, and a panic that fails to write its own
-// dump (a stack overflow can overrun the writer) leaves the PREVIOUS build's dump in place — a
-// valid image that still passes esp_core_dump_image_check() but describes another binary, so a
-// download of it fails espcoredump with a SHA-256 mismatch (legacy-215). This answers true ONLY on
-// proof — both shas present, a meaningful common prefix, and a mismatch within it — because the
-// caller ERASES on true and erasing a dump that really IS ours (a false positive) destroys the one
-// artifact a panic left. A missing sha (a dump with no parsable summary, a build that could not
-// report its own) is NOT proof of foreign origin, so it returns false and the dump is left alone.
-// Truncation to different lengths is fine: two renderings of the same hash agree on their common
-// prefix.
-inline bool coredump_is_foreign(const char* dump_sha, const char* run_sha) {
-    if (!dump_sha || !run_sha || !*dump_sha || !*run_sha) return false;
-    size_t nd = std::strlen(dump_sha), nr = std::strlen(run_sha);
-    size_t n  = nd < nr ? nd : nr;
-    if (n < ELF_SHA_MIN_COMPARE) return false;
-    return std::strncmp(dump_sha, run_sha, n) != 0;
+inline bool elf_sha_is_valid_identity(const char* sha) {
+    if (!sha) return false;
+    size_t n = 0;
+    while (sha[n]) {
+        if (n == 64) return false;
+        const char c = sha[n];
+        if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')))
+            return false;
+        ++n;
+    }
+    return n >= ELF_SHA_MIN_COMPARE;
 }
 
-// A core-dump image is reportable/downloadable only when it belongs to this running firmware. The
-// flash erase attempted for a proven-foreign image can itself fail; that must not make a dump already
-// rejected on its ELF identity reappear through the later live presence check. `known_foreign` is a
-// boot-time proof, not a guess (coredump_is_foreign above).
+inline char elf_sha_lower(char c) {
+    return c >= 'A' && c <= 'F' ? static_cast<char>(c + ('a' - 'A')) : c;
+}
+
+// Foreign origin requires two valid identity strings and a mismatch within their shared prefix.
+// Missing, malformed or short identity is unresolved evidence, so preserve it. This predicate
+// suppresses attribution/download; it never authorizes erasure. A shared prefix also cannot prove
+// the age of a stored image or which reset wrote it.
+inline bool coredump_is_foreign(const char* dump_sha, const char* run_sha) {
+    if (!elf_sha_is_valid_identity(dump_sha) || !elf_sha_is_valid_identity(run_sha)) return false;
+    size_t nd = std::strlen(dump_sha), nr = std::strlen(run_sha);
+    size_t n  = nd < nr ? nd : nr;
+    for (size_t i = 0; i < n; ++i)
+        if (elf_sha_lower(dump_sha[i]) != elf_sha_lower(run_sha[i])) return true;
+    return false;
+}
+
+// Raw presence and reportability are separate facts. A proven foreign image stays in flash while
+// this shared predicate prevents /status from offering a download GET /coredump would reject.
 inline bool coredump_is_reportable(bool image_present, bool known_foreign) {
     return image_present && !known_foreign;
 }
@@ -172,6 +181,21 @@ inline void append_hex32(std::string& out, uint32_t v) {
     out += b;
 }
 
+// Fixed summary arrays reserve their final byte for a terminator (task: 15 bytes; ELF: 64 bytes).
+// Quote the bounded diagnostic representation so spaces cannot introduce logfmt keys. Delimiters
+// and control/non-ASCII bytes become literal \\xHH text; JSON escaping keeps those backslashes
+// inside the trusted quote. A full valid hex hash fits unchanged; malformed escape expansion can
+// carry DiagLogIdentifier's visible "..." truncation marker. Structured HTTP/MQTT fields remain
+// original.
+template <size_t N> inline void append_crash_log_value(std::string& out, const char (&value)[N]) {
+    size_t n = 0;
+    while (n < N - 1 && value[n]) ++n;
+    const DiagLogIdentifier identifier(std::string_view(value, n));
+    out += '"';
+    json_append_escaped(out, identifier.c_str());
+    out += '"';
+}
+
 // Compact JSON describing the reset. ALWAYS includes reason/reason_code/fault/coredump (so a clean
 // boot still reports e.g. reason="sw"); the summary fields (task/pc/backtrace/corrupted/elf_sha256)
 // are added only when a core-dump summary was parsed. Shared by /status.last_crash and the MQTT
@@ -209,20 +233,27 @@ inline std::string build_crash_mqtt_payload(const CrashInfo& c) {
     return crash_is_notable(c) ? build_crash_json(c) : std::string();
 }
 
-// Human/paste-friendly multi-line text of the same fields — logged to the diag ring at boot and
-// reused wherever a plain-text crash line is nicer than JSON.
+// Human/paste-friendly text separates this boot's reset from a stored dump whose age and relation
+// to that reset are unknown, even for the same ELF. Every physical summary line repeats provenance
+// because earlier lines can leave the ring independently. Capture can still clip the overall block;
+// complete structured summary/backtrace output remains available through the HTTP JSON path.
 inline std::string build_crash_text(const CrashInfo& c) {
     std::string t = "reset=";
     t += crash_reason_slug(c.reason);
+    t += "  source=current_boot";
     t += c.coredump ? "  coredump=yes" : "  coredump=no";
     if (c.have_summary) {
-        t += "\ntask="; t += c.task;
+        t += "\nsource=stored_dump age=unknown reset_relation=unknown task=";
+        append_crash_log_value(t, c.task);
         t += "  pc="; append_hex32(t, c.pc);
-        t += "\nbacktrace:";
+        t += "\nsource=stored_dump age=unknown reset_relation=unknown backtrace:";
         const int n = c.bt_depth < 0 ? 0 : (c.bt_depth < 16 ? c.bt_depth : 16);
         for (int i = 0; i < n; i++) { t += ' '; append_hex32(t, c.bt[i]); }
         if (c.bt_corrupted) t += "  (corrupted)";
-        if (c.elf_sha[0]) { t += "\nelf_sha256="; t += c.elf_sha; }
+        if (c.elf_sha[0]) {
+            t += "\nsource=stored_dump age=unknown reset_relation=unknown elf_sha256=";
+            append_crash_log_value(t, c.elf_sha);
+        }
     }
     return t;
 }

@@ -141,7 +141,7 @@ The promotion gate itself checks:
 - `hp.connected == true` (active X10A communication with the heat pump);
 - `/values` delivers a non-empty metric array;
 - the MQTT broker is connected;
-- `last_crash.fault == false` (no unhandled panic or watchdog);
+- `last_crash.fault == false` (no current fault reset);
 - the largest contiguous heap block is healthy.
 
 If the gate fails after its production write, or the canary reports a finding, go to **Step 8,
@@ -189,7 +189,8 @@ loop is part of the authorized chain.
    curl -sS "http://<bench-host>/status"
    curl -sS "http://<bench-host>/diag?verbose=1"
    ```
-   If `last_crash.fault` is true, symbolize the core dump via `$device-triage`.
+   If `last_crash.fault` is true, use `$device-triage` with any available private dump and its
+   verified matching ELF. Missing/undecodable dump evidence does not clear the current fault.
 2. **Fix in code** with a regression test, plus a negative control that fails without the fix, and
    commit:
    - Before the merge (Steps 0–2), commit the fix on the PR's own branch.
@@ -220,7 +221,8 @@ Step 5. The heat pump itself keeps running: this firmware only observes it, and 
 read-only.
 
 1. **Diagnose** read-only: snapshot production's `/status` and `/diag?verbose=1`. If
-   `last_crash.fault` is true, symbolize the core dump via `$device-triage`.
+   `last_crash.fault` is true, use `$device-triage` with any available private dump and its verified
+   matching ELF; record missing/undecodable evidence while retaining the current fault.
 2. **Choose the roll-forward:** a fix when the cause is understood and contained, otherwise a revert
    of the faulty squash commit (`git revert <merge-sha>` on a fresh `agent/` branch from
    `origin/main`).

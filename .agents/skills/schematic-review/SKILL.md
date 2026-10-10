@@ -24,11 +24,11 @@ the heating-only section (claiming a branch no sensor there reads), and "HEIZUNG
 the heating riser so it rendered as "HEIZUNC". Each is the legacy-35–legacy-39 failure shape drawn in SVG:
 well-formed, plausible, and attributing a real number to the wrong thing.
 
-**This review unlike `$domain-review` is conditional** — it is for changes that reach the drawing:
-`main/www/index.html`, `main/www/style.css`, the `INSPECT` / `I18N` / `liveData` / `paintSchematic`
-half of `main/www/js/schematic.js` plus `i18n.js`, or `docs/DESIGN.md` §5.3 / §7. A change that
-cannot reach the drawing does not need it. Report findings; apply fixes only when the user explicitly
-requests them.
+**This review unlike `$domain-review` is conditional.** Derive applicability from
+`tools/agent-hooks/require-pr-gates.sh`: any `main/www/` change, `docs/DESIGN.md`, schematic tooling
+or this skill requires the record. Inspect whether the change reaches the drawing or its contract;
+when it does not, document that conclusion against the actual diff. Report findings; apply fixes
+only when the user explicitly requests them.
 
 ## 0. Step 0 — pin the baseline
 

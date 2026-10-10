@@ -118,7 +118,7 @@ skill/reviewer asserts:
 - **`$device-triage`** — live device network triage. Verify endpoints `/status`, `/values`, `/diag`,
   `/coredump`, `/crash/dismiss`. Verify that `last_crash.fault` is read before diagnosing a crash, that
   orphan dumps from earlier boots are distinguished, and that `scripts/decode-coredump.sh` is used with the
-  exact-version matching ELF.
+  verified ELF matching the stored dump identity; the running version alone is insufficient.
 - **`$diagnostic-evidence-review`** — ties plant diagnoses to primary sources and firmware rules. Verify
   against `scripts/run-diagnostic-evidence-audit.sh`, `main/logic/checkup.hpp`, `docs/REGISTERS.md`, and
   `docs/DIAGNOSTIC_EVIDENCE.md`. Verify claim strength rules (manufacturer limit vs. project heuristic vs.

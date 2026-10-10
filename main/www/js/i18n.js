@@ -39,7 +39,7 @@ const FAULT_CODE_I18N = Object.create(null);
 const MB_DELTA_I18N = Object.create(null);
 // Locale assets store their compact UI translations positionally against the English key order.
 // The comments in those source files retain the readable key mapping, while the shipped scripts
-// omit 867 repeated property names per language. This keeps all twelve external catalogs within the
+// omit repeated property names per language. This keeps all twelve external catalogs within the
 // fixed application partition without weakening the English fallback contract.
 function localeValues(values) {
   const keys = Object.keys(I18N.en);
@@ -180,9 +180,12 @@ const I18N = {
     "recovery.meta": "The device restarted repeatedly and entered recovery mode. Communication with the heat pump and MQTT are paused. Check the configuration — especially the RX/TX pins on the Protocol card in Settings — then restart the device.",
     "rollback.title": "WiFi change failed — rolled back",
     "rollback.meta": (back) => `The device could not connect with the new WiFi settings. It restored the previous network${back} and restarted. Check the network name and password under Settings → Connections, then try again.`,
-    "crash.title_fault": "Device restarted after a crash",
+    "crash.title_fault": "Device restarted after a fault",
     "crash.title_orphan": "Crash report waiting from an earlier restart",
     "crash.reset": "Reset", "crash.task": "task", "crash.fw": "fw", "crash.elf": "elf", "crash.corrupted": "corrupted",
+    "crash.stored_dump": "Stored crash report",
+    "crash.stored_hint": "The report’s age and connection to this restart are unknown.",
+    "crash.backtrace": "Call stack",
     "crash.download": "Download crash report", "crash.copy": "Copy diagnostics", "crash.dismiss": "Delete report",
     "crash.copied": "Diagnostics copied — paste into a bug report",
     "crash.copy_fail": "Copy failed — open /coredump and /diag manually",

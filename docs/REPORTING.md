@@ -159,10 +159,16 @@ of the device's task memory, and a password of 15 characters or fewer is stored 
 object rather than elsewhere — so it can end up in a stack frame that the dump captures. No
 field-level redaction can reach into that.
 
-You are not asked for one up front: the device report already contains the crash reason, the task,
-the program counter and the backtrace, which is usually enough. If a dump turns out to be needed,
+You are not asked for one up front: the device report contains the current reset/fault and, when
+available, stored task, program counter and backtrace. The copied task is quoted on one line so
+damaged text cannot create another report record. If a dump turns out to be needed,
 you will be asked to send it through the [private advisory
 form](https://github.com/0Bu/daikin-altherma-esp32/security/advisories/new) instead.
+
+The reset reason describes why the device started this time. A stored dump can be older: its task
+and backtrace describe that stored evidence, even when it belongs to the same firmware build.
+Missing or undecodable evidence does not prove there was no fault. Keep a private original until
+its meaning is understood; do not delete it just because decoding failed.
 
 ---
 

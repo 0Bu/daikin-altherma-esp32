@@ -73,11 +73,18 @@ and the OTA-signing / key lifecycle.
   banner's **Delete report** (`POST /crash/dismiss`), which erases the same image *and* stops the
   device reporting the crash. All destructive actions are POSTs: they must not be triggerable by a
   link, prefetch or crawler.
+  A proven foreign-build dump is preserved at boot but its summary/download are suppressed for
+  that boot. Boot capture never erases evidence automatically; explicit clear/dismiss/factory-reset actions
+  still destroy it. The offline helper rejects missing, empty, short, malformed, duplicate or
+  mismatching ELF identity before GDB. Preserve private originals when decoding fails.
   - **The crash *summary* is deliberately not sensitive.** What the firmware surfaces automatically —
     `/status.last_crash`, the web-UI banner, and the retained `<base>/crash` MQTT topic — is
-    only the reset reason, the crashed task name, and raw program-counter/backtrace **addresses**.
+    the current reset/fault and optional stored task name, ELF identity and raw PC/backtrace
+    **addresses**. Stored incident age and relationship to this reset remain unknown.
     Those hold no credentials, so it is safe to publish them to Home Assistant / VictoriaLogs. The
     full memory image stays behind the manual `GET /coredump` pull; the automation never egresses it.
+    Reset reason describes the current boot; task and backtrace describe the stored dump. Even a
+    matching ELF cannot establish incident age or prove those frames caused the current reset.
   - **The archived `.elf` reveals symbols, not secrets.** CI keeps the unstripped ELF per build (to
     decode dumps, `scripts/decode-coredump.sh`). It exposes function names and layout — expected for
     an open-source firmware — but contains **no** runtime secrets (WiFi/MQTT credentials live only in
@@ -132,9 +139,12 @@ and the OTA-signing / key lifecycle.
   `syslog_host`). When enabled, every diag-log line (WiFi/MQTT/X10A state, timeouts, reset reasons)
   is sent as a plaintext RFC 5424 datagram to the configured host; there is no TLS option, unlike
   MQTT. Once per boot the syslog task additionally replays two record types that are **not** diag-log
-  lines (`logic/bootlog.hpp`): a build-identity line (firmware version + `elf_sha256`) and, after a
-  fault, the crash records (reset reason, crashed task name, exception PC, raw backtrace PCs). Like
-  the MQTT crash topic, these carry **reason/backtrace only — never the raw core dump** (that stays
+  lines (`logic/bootlog.hpp`): one build-identity line and up to five records for a current fault or
+  reportable stored dump. Current reset facts and stored task/PC/ELF/backtrace have separate source
+  labels; every stored record has unknown age/reset relationship. Task/ELF values are bounded and
+  quoted, records stay below 200 bytes, and replay timestamps do not date the stored incident. Like
+  the MQTT crash topic, these carry current reset/fault and optional stored task, PC, ELF identity
+  and backtrace addresses — **never the raw core dump** (that stays
   on flash behind `GET /coredump`) and never a secret. So the whole flow — diag lines and replay
   alike — carries **no credentials** (no WiFi/MQTT passwords or TLS material pass through it) and is
   operational metadata rather than secret disclosure; it does reveal your firmware version and
@@ -722,7 +732,7 @@ leaves the board (`GET /status?redact=1`, `GET /diag?redact=1` and `GET /ota/sta
 task-stack and TCB memory, and although `CONFIG_ESP_COREDUMP_CAPTURE_DRAM` is off, a password of 15
 characters or fewer lives *inside* its `std::string` object by small-string optimisation rather than
 on the heap — so a stack frame holding a config snapshot can carry one. Dumps are therefore never
-requested up front (`/status.last_crash` already gives reason, task, PC and backtrace) and, when one
+requested up front (`/status.last_crash` gives current reset/fault and any available stored summary) and, when one
 is genuinely needed, it is sent through this private form and never attached to an issue.
 
 Please include the firmware version (`GET /status` → `version`, or the version shown in the web UI)
