@@ -716,7 +716,8 @@ Found a security issue?
 
 **One non-security thing is also sent here: a core dump.** An ordinary bug report is filed as a
 public issue and carries its device data with it, because the device redacts that data before it
-leaves the board (`GET /status?redact=1` / `GET /diag?redact=1`, `main/logic/redact.hpp` — see
+leaves the board (`GET /status?redact=1`, `GET /diag?redact=1` and `GET /ota/status?redact=1`,
+`main/logic/redact.hpp` — see
 [REPORTING.md](REPORTING.md)). A **core dump is the exception the redaction cannot cover**: it is raw
 task-stack and TCB memory, and although `CONFIG_ESP_COREDUMP_CAPTURE_DRAM` is off, a password of 15
 characters or fewer lives *inside* its `std::string` object by small-string optimisation rather than

@@ -92,7 +92,7 @@ Ids are stable keys and are never reused — a gap means a feature was retired, 
 | 45 | **Dashboard-schematic audit** — parses the real SVG and evaluates the real bindings to catch a correct value drawn on the wrong pipe | ✅ | [`check_schematic.mjs`](../tools/schematic/check_schematic.mjs), [`run-schematic-audit.sh`](../scripts/run-schematic-audit.sh) |
 | 46 | **On-device redaction of a diagnostic snapshot** — so a bug report can be a *public* issue; in the firmware, so the UI and a manual `curl` cannot become two privacy rules | ✅ 🧪 | [`logic/redact.hpp`](../main/logic/redact.hpp), [`REPORTING.md`](REPORTING.md) |
 | 47 | **Redaction-coverage gate** — the only gate whose subject is the *user's data*: flags a diag line carrying a config or identity value with no matching rule | ✅ | [`check_diag_coverage.py`](../tools/redact/check_diag_coverage.py), [`run-redaction-audit.sh`](../scripts/run-redaction-audit.sh) |
-| 48 | **Device-assembled bug report** — the board collects its own redacted status, values and log into one pasteable report | ✅ | [`www/js/app_state.js`](../main/www/js/app_state.js), [`REPORTING.md`](REPORTING.md) |
+| 48 | **Device-assembled bug report** — collects redacted status, update-feed URLs and logs plus values; read failures remain explicit | ✅ | [`www/js/app_state.js`](../main/www/js/app_state.js), [`REPORTING.md`](REPORTING.md) |
 | 49 | **Typed telemetry contract** — a field's JSON type comes from its *converter*, so one MQTT key can never change type between states | ✅ 🧪 | [`logic/convert.hpp`](../main/logic/convert.hpp), [`logic/mqtt_group.hpp`](../main/logic/mqtt_group.hpp) |
 | 50 | **Availability ledger** — is a decoded number a *measurement*, or merely something the firmware could decode? Adjudicated per structural `(page, offset, converter)` key — plus the exact generated label where one coordinate carries multiple quantities, page-keyed absent-hardware verdicts, a conditional zero refuted by a same-cycle saturation witness, and a raw-page bit-overlay rule that withholds CT-L3 instead of turning `HP Forced FG` into a fictitious +64 A | ✅ 🧪 | [`logic/availability.hpp`](../main/logic/availability.hpp) |
 | 51 | **Converter adjudication** — which converter a generated row is actually *encoded* with, when the generator's id is demonstrably wrong | ✅ 🧪 | [`logic/conv_override.hpp`](../main/logic/conv_override.hpp) |
@@ -661,7 +661,10 @@ Everything needed to explain a crash *after the fact*, from the field, without a
 - **✅ Build identity** — `/status.app_elf_sha256` ties a running device to the firmware that
   produced any dump, and the syslog boot line puts the same hash in the **log stream**.
 - **✅ 🧪 Getting the evidence off the board — and what must not come with it.** *Settings → Report a
-  bug* collects status, values and log into one pasteable report and opens the prefilled issue form.
+  bug* collects redacted status, update-feed URLs and logs plus values into one pasteable report
+  and opens the prefilled issue form. The crash banner also uses redacted logs. Failed reads are
+  explicit, identifier log bytes are escaped without changing configuration, and partial ring
+  records are discarded with a truncation marker.
   It is filed as a *public* issue, which is defensible only because the board **redacts first**
   ([`logic/redact.hpp`](../main/logic/redact.hpp)) — in the *firmware*, so the UI collector and a
   manual `curl` cannot become two privacy rules. The value is replaced and the **key kept**, since a

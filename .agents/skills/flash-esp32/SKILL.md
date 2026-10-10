@@ -106,7 +106,8 @@ Before concluding the flash operation:
   on, so a board that got an unsigned image is recovered by re-flashing a **signed** one (step 3→5).
   The step-4 guard exists so this never happens in the first place. Boot-recovery model +
   auto-rollback details: [docs/SECURITY.md](../../../docs/SECURITY.md) → Boot recovery.
-- First flash of a fresh board erases NVS → set up WiFi via the `daikin-altherma-esp32-setup` portal.
+- A fresh board without saved WiFi configuration needs the `daikin-altherma-esp32-setup` portal.
+  The ordinary flash plan preserves NVS on both first and later flashes.
 - A full-erase recovery is destructive and outside an ordinary flash. Use `erase_flash` only after
   separate explicit authorization, a resolved exact target and an NVS backup where applicable.
 - This skill does NOT merge or release — it works on the local tree only. The supported merge path

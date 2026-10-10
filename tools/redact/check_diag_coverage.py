@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Does the bug report still scrub everything it claims to?
 
-TWO checks, one per half of the redaction surface, because the two halves fail differently.
+Field, line and public-collector checks cover the distinct ways a report can bypass redaction.
 
 (A) `/status` leaks by FIELD, and the header states how many it scrubs. That number is a CLAIM about
 another file, so it drifts the moment a field is added — silently, since nothing consumed it: it was
@@ -66,6 +66,7 @@ SENSITIVE = re.compile(
     r"wifi_ssid|wifi_pass|ssid|"
     r"syslog_host|mqtt_uri|mqtt_user|mqtt_pass|broker|"
     r"ntp_server|s_server|last_host|"
+    r"url|manifest_url|firmware_base_url|effective_feed|firmware_base|"
     r"ip_str|board_id|s_board|"
     r"mb_host|mb_dhost|s_host|"
     # A config value copied into a blandly-named local still leaks. `stale_backup` (wifi.cpp) is the
@@ -182,10 +183,55 @@ def adjudicated():
     return out
 
 
+def report_surface_findings():
+    """Public collectors must use source-side redaction, including the compact OTA surface."""
+    findings = []
+    ui = (ROOT / "main/www/js/app_state.js").read_text()
+    for name in ("copyDiagnostics", "collectBugReport"):
+        match = re.search(r"async function " + name + r"\([^)]*\) \{(.*?)\n\}", ui, re.S)
+        if not match:
+            findings.append(f"public report producer {name} is missing")
+            continue
+        body = match.group(1)
+        endpoints = re.findall(r'["\'](/(?:status|diag|ota/status)(?:\?[^"\'\n]*)?)["\']', body)
+        if not endpoints or any("redact=1" not in url.split("?", 1)[-1].split("&")
+                                for url in endpoints):
+            findings.append(f"{name} has a public-report read without redact=1")
+        if "if (!r.ok)" not in body:
+            findings.append(f"{name} does not refuse failed HTTP reads")
+        if name == "copyDiagnostics" and "Could not be read from the device:" not in body:
+            findings.append("copyDiagnostics silently loses a failed diagnostic read")
+    status = STATUS.read_text()
+    if not re.search(r"jstr_r\(rt\.hvac_mode,\s*redact\s*&&\s*!report_hvac_mode_public\(rt\.hvac_mode\)\)", status):
+        findings.append("reference-temperature HVAC text bypasses conditional source redaction")
+    ota = (ROOT / "main/http_ota.cpp").read_text()
+    for field in ("manifest", "firmware_base"):
+        if not re.search(r"json_append_quoted\(j,\s*redact_identifier_view\(effective_feed\." +
+                         field + r"\.data\(\),\s*redact\)\)", ota):
+            findings.append(f"OTA status bypasses canonical {field} URL redaction")
+    start = ota.find("static esp_err_t ota_stat(")
+    body = ota[start:ota.find("// Stream the optional", start)]
+    for required in ("httpd_req_get_url_query_len(req)", "HTTPD_414_URI_TOO_LONG",
+                     "flag_result == ESP_ERR_HTTPD_RESULT_TRUNC", "query_flag_on(flag)"):
+        if required not in body:
+            findings.append(f"OTA status lacks fail-closed query contract: {required}")
+    diag = (ROOT / "main/diag_log.cpp").read_text()
+    if "diag_finish_record(line, pre + n, sizeof(line) - 1, truncated)" not in diag:
+        findings.append("diagnostic producer no longer terminates/announces clipped records")
+    return findings
+
+
 def main():
     rules = markers()
     skip = adjudicated()
     findings, checked = [], 0
+
+    surface_findings = report_surface_findings()
+    if surface_findings:
+        print("\nPUBLIC REPORT BYPASS — source-side privacy contract changed:\n")
+        for finding in surface_findings:
+            print(f"  {finding}")
+        return 1
 
     # (A) /status — the declared field count against the call sites that produce it.
     declared, names, sites = (declared_status_fields(), declared_status_field_names(),
@@ -232,6 +278,16 @@ def main():
             fmt = fmt.replace('\\"', '"').replace("\\n", "\n").replace("\\\\", "\\")
             line_no = text.count("\n", 0, m.start()) + 1
             ident = f"{src.relative_to(ROOT)}:{fmt.splitlines()[0].strip()}"
+            # The free-text WiFi/NTP/syslog/OTA producers must escape identity bytes before they reach
+            # a physical log record. A rule alone cannot recognize an unmarked newline continuation.
+            if src.name in {"wifi.cpp", "sntp_time.cpp", "syslog.cpp", "ota_update.cpp"}:
+                raw_identifier = any(re.search(r"\b" + re.escape(hit.group()) +
+                                              r"\s*\.\s*(?:c_str|data)\s*\(", args)
+                                     for hit in SENSITIVE.finditer(args))
+                if raw_identifier:
+                    findings.append((f"{src.relative_to(ROOT)}:{line_no}", fmt.strip(),
+                                     "identifier needs DiagLogIdentifier escaping"))
+                    continue
             if any(r and r in fmt for r in rules):
                 continue
             if ident in skip:

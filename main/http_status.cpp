@@ -734,7 +734,9 @@ static void append_status_json(JsonOut& j, bool redact) {
         j += ",\"enabled\":";
         j += rt.has_enabled ? (rt.enabled ? "true" : "false") : "null";
         j += ",\"hvac_mode\":";
-        j += rt.has_hvac_mode ? jstr(rt.hvac_mode) : "null";
+        j += rt.has_hvac_mode
+                 ? jstr_r(rt.hvac_mode, redact && !report_hvac_mode_public(rt.hvac_mode))
+                 : "null";
         j += ",\"received_at\":";
         j += rt.has_value && rt.received_unix_s >= 0 ? jstr(rfc3339_utc(rt.received_unix_s))
                                                      : "null";

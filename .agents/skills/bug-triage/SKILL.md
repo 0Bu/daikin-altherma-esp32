@@ -30,10 +30,10 @@ when the backtrace in `last_crash` is genuinely not enough (step 5).
 
 ## Steps
 
-1. **Read the issue.**
+1. **Read the issue.** Use the literal issue number in both GitHub commands below; `123` is an example.
    ```bash
    scripts/gh-with-git-credentials.sh --repo github.com/0Bu/daikin-altherma-esp32 \
-     issue view "$N" --json number,title,body,labels,createdAt
+     issue view 123 --json number,title,body,labels,createdAt
    ```
    Pull the `Device report` section out of the body with the extraction below. If it is absent, or
    the user answered that the device was unreachable, **say so and stop before diagnosing**. A report
@@ -135,7 +135,7 @@ GitHub renders each issue-form answer under `### <label>`; the field `id` never 
 
 ```bash
 scripts/gh-with-git-credentials.sh --repo github.com/0Bu/daikin-altherma-esp32 \
-  issue view "$N" --json body
+  issue view 123 --json body
 # After checking that the returned issue body contains no private attachment or credential,
 # place only its JSON body string in /tmp/issue.md for the local parsing steps below.
 sec() { awk -v h="### $1" '$0==h{f=1;next} /^### /{f=0} f' /tmp/issue.md; }

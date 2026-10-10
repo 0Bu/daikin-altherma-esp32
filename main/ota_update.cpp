@@ -23,6 +23,7 @@
 #include "logic/ota_headroom.hpp"
 #include "logic/ota_manifest.hpp"
 #include "logic/payload_complete.hpp"
+#include "logic/redact.hpp"
 #include "logic/ota_transport.hpp"
 #include "logic/version_cmp.hpp"
 #include "config.hpp"
@@ -1065,8 +1066,8 @@ void run_update(const OtaTaskArgs& request) {
         set_state("error", "Update URL must use HTTPS");
         return;
     }
-    diag_printf("ota: downloading %s (%s -> %s, %s channel)\n", url.c_str(), running.c_str(), avail,
-                ota_channel_name(ch));
+    diag_printf("ota: downloading %s (%s -> %s, %s channel)\n", DiagLogIdentifier(url).c_str(),
+                running.c_str(), avail, ota_channel_name(ch));
 
     // The first gate runs while the manifest client's TLS state has already been released and
     // before the firmware transfer claims another client, buffer and OTA handle.  In particular it
