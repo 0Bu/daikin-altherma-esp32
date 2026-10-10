@@ -892,11 +892,50 @@ def parse_gh(tokens: list[str], index: int, inherited: dict[str, str]) -> dict[s
     return None
 
 
-def shell_executes_stdin(source: str) -> bool:
+def literal_rg_inspection(source: str) -> bool:
+    """Prove one narrow, direct search is data, without exempting other shell commands.
+
+    Non-POSIX tokens retain quotes, so a quoted regex pipe or extglob-shaped query cannot be
+    confused with an executable shell operator. Unknown flags, launchers and expansions fail closed.
+    Secret-path checks remain the caller's responsibility.
+    """
+    if len(source) > 16384 or re.search(r"[$`\x00-\x1f\x7f]", source):
+        return False
+    try:
+        lexer = shlex.shlex(source, posix=False, punctuation_chars=";&|()!<>")
+        lexer.whitespace_split = True
+        lexer.commenters = ""
+        tokens = list(lexer)
+    except ValueError:
+        return False
+    if not tokens or tokens[0] != "rg":
+        return False
+    args = tokens[1:]
+    while args and args[0].startswith("-"):
+        if args[0] == "-n":
+            args = args[1:]
+        elif len(args) >= 2 and args[0] == "-C" and re.fullmatch(r"[0-9]{1,4}", args[1]):
+            args = args[2:]
+        elif len(args) >= 2 and args[0] == "--glob" and re.fullmatch(r"'[^']+'", args[1]):
+            args = args[2:]
+        else:
+            return False
+    if len(args) < 2 or re.fullmatch(r"'[^']*'", args[0]) is None or args[0].startswith("'-"):
+        return False
+    return all(
+        not arg.startswith(("-", "/")) and ".." not in arg.split("/")
+        and re.fullmatch(r"[A-Za-z0-9_./-]+", arg) is not None
+        for arg in args[1:]
+    )
+
+
+def shell_executes_stdin(source: str, *, original_source: str | None = None) -> bool:
+    if literal_rg_inspection(source if original_source is None else original_source):
+        return False
     shell = r"(?:bash|dash|sh|zsh)"
     if re.search(rf"\|[^|;\n]*\b{shell}\b", source):
         return True
-    if re.search(rf"\b{shell}\b[^;&|\n]*(?:<<<|(?<!<)<(?!<))", source):
+    if re.search(rf"\b{shell}\b[^;&|\n]*<+", source):
         return True
     return re.search(rf"\b{shell}\b(?:\s+-[^;&|\n]*)*\s+-s(?:\s|$)", source) is not None
 
@@ -904,6 +943,7 @@ def shell_executes_stdin(source: str) -> bool:
 def find_merge(source: str, depth: int = 0) -> dict[str, str] | None:
     if depth > 5:
         return {"action": "shell merge", "selector": "", "repo": "", "host": "", "error": "shell nesting exceeds parser limit"}
+    original_source = source
     source = normalize_shell_source(source)
     graphql_action = next(
         (
@@ -1004,7 +1044,7 @@ def find_merge(source: str, depth: int = 0) -> dict[str, str] | None:
             "host": "",
             "error": "shell extglob prevents static merge executable/target binding",
         }
-    if shell_executes_stdin(source):
+    if shell_executes_stdin(source, original_source=original_source):
         return {"action": "shell stdin", "selector": "", "repo": "", "host": "", "error": "stdin-executed shell cannot be bound to one merge target"}
     substitutions = re.findall(r"(?<!\\)`([^`]*)`", source, flags=re.DOTALL)
     substitutions += re.findall(r"(?<!\\)\$\(([^()]*)\)", source, flags=re.DOTALL)

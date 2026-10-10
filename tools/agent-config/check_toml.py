@@ -94,4 +94,4 @@ for path in agent_files:
         fail(f"duplicate subagent name: {parsed['name']}")
     names.add(parsed["name"])
 
-print(f"agent-config: parsed canonical config and {len(agent_files)} read-only subagents")
+print(f"agent-config: parsed canonical config and {len(agent_files)} read-only reviewer declarations; runtime permissions need separate proof")

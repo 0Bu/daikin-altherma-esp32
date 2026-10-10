@@ -31,7 +31,7 @@ new_fixture() {
     ln -s "$ROOT/CONTRIBUTING.md" "$TMP/t/CONTRIBUTING.md"
     ln -s "$ROOT/.githooks" "$TMP/t/.githooks"
     ln -s "$ROOT/.github" "$TMP/t/.github"
-    ln -s "$ROOT/sdkconfig.defaults" "$TMP/t/sdkconfig.defaults"
+    cp "$ROOT/sdkconfig.defaults" "$TMP/t/sdkconfig.defaults"
     cp "$ROOT/partitions.csv" "$TMP/t/partitions.csv"
     mkdir -p "$TMP/t/.agents"
     [ -f "$ROOT/.agents/hooks.json" ] && cp "$ROOT/.agents/hooks.json" "$TMP/t/.agents/"
@@ -260,6 +260,62 @@ run_case "quoted YAML strings are accepted" \
 run_case "optimization verifies final content when repair is unavailable" \
     "sed -i.bak '/^- a \*\*wrong number\*\*/d' .agents/skills/skill-audit/SKILL.md" \
     "final read-only verification after optimization failed" 1 --optimize
+
+run_case "committed reviewer scope cannot disappear" \
+    "sed -i.bak 's|base_sha|removed_base|g' .agents/agents/doc-drift-checker.toml" \
+    "missing review-scope contract: base_sha"
+
+run_case "heap reviewer cannot omit mutex safety" \
+    "sed -i.bak 's|raw mutex|removed lock|g' .agents/agents/heap-safety-reviewer.toml" \
+    "missing heap safety coverage: raw mutex"
+
+run_case "reviewer cannot mistake a declaration for sandbox isolation" \
+    "sed -i.bak 's|effective read-only runtime permissions|declared permissions|g' .agents/agents/doc-drift-checker.toml" \
+    "missing review-scope contract: effective read-only runtime permissions"
+
+run_case "two-language schematic review contradicts production locales" \
+    "echo 'Copy, in both languages.' >> .agents/skills/schematic-review/SKILL.md" \
+    "two-language review claim contradicts"
+
+run_case "configured API ELF prefix remains valid with a larger status buffer" \
+    "echo '/status.app_elf_sha256 is a 9-hex prefix.' >> .agents/skills/flash-esp32/SKILL.md" \
+    "18 skills and 3 reviewer agents clean" 0
+
+run_case "full API ELF identity claim contradicts the configured SDK prefix" \
+    "echo '/status.app_elf_sha256 is a full 64-hex hash.' >> .agents/skills/flash-esp32/SKILL.md" \
+    "API ELF SHA claim contradicts"
+
+run_case "changed SDK prefix rejects stale skill instructions" \
+    "sed -i.bak 's/^CONFIG_APP_RETRIEVE_LEN_ELF_SHA=9$/CONFIG_APP_RETRIEVE_LEN_ELF_SHA=64/' sdkconfig.defaults" \
+    "API ELF SHA claim contradicts the configured 64-hex"
+
+run_case "missing explicit SDK prefix fails closed" \
+    "sed -i.bak '/^CONFIG_APP_RETRIEVE_LEN_ELF_SHA=/d' sdkconfig.defaults" \
+    "cannot establish exactly one explicit CONFIG_APP_RETRIEVE_LEN_ELF_SHA" 2
+
+run_case "duplicate SDK prefix fails closed" \
+    "echo 'CONFIG_APP_RETRIEVE_LEN_ELF_SHA=9' >> sdkconfig.defaults" \
+    "cannot establish exactly one explicit CONFIG_APP_RETRIEVE_LEN_ELF_SHA" 2
+
+run_case "SDK prefix outside its Kconfig range fails closed" \
+    "sed -i.bak 's/^CONFIG_APP_RETRIEVE_LEN_ELF_SHA=9$/CONFIG_APP_RETRIEVE_LEN_ELF_SHA=65/' sdkconfig.defaults" \
+    "configured API ELF SHA length is outside the SDK range" 2
+
+run_case "browserless CI claim contradicts the workflow" \
+    "echo 'CI has no browser.' >> .agents/skills/ui-gif/SKILL.md" \
+    "no-browser CI claim contradicts"
+
+run_case "moved reference links remain audited" \
+    "mkdir -p .agents/skills/absence-review/references; echo '[missing](not-present.md)' > .agents/skills/absence-review/references/broken.md" \
+    "broken relative link 'not-present.md'"
+
+run_case "angle-bracket external Markdown links stay external" \
+    "echo '[official](<https://example.invalid/source>)' >> .agents/skills/absence-review/SKILL.md" \
+    "18 skills and 3 reviewer agents clean" 0
+
+run_case "angle-bracket relative Markdown anchors stay resolvable" \
+    "echo '[background](<references/absence-failures.md#background>)' >> .agents/skills/absence-review/SKILL.md" \
+    "18 skills and 3 reviewer agents clean" 0
 
 if [ "$fail" -eq 0 ]; then
     echo "selftest ok: all $cases canaries and self-optimization cases verified."

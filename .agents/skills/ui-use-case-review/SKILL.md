@@ -64,13 +64,16 @@ the historical undefined ENV III close handler.
 ## 3. Inspect the changed visual states
 
 Render each affected state at a narrow phone viewport and a desktop viewport using the real inlined
-UI. Exercise controls by clicking them; do not infer behavior from markup. Check:
+UI. Derive all shipped locales from `UI_LANGS` in `main/www/js/i18n.js`, including the external
+catalogs in `main/www/locales/`. Exercise controls by clicking them; do not infer behavior from
+markup. Check:
 
 - no clipped text, overflowing actions or hidden focused controls;
 - hidden controls are also disabled and release resources such as GPIO choices;
 - focus starts on the dialog, labels and accessible names identify the action, and Escape closes;
 - loading, success, rejection, unreachable and empty states remain distinguishable;
-- German and English copy both fit and mean the same thing;
+- every shipped locale in `UI_LANGS` fits; every changed translation preserves the source meaning
+  and claim limits, including copy in `main/www/locales/`;
 - browser console errors remain empty throughout the path.
 
 Use deterministic fixtures for visual states. Do not write device configuration during a pre-merge
@@ -89,7 +92,7 @@ unrepresented new use case, live UI assertion failure, or visual/accessibility r
 
 Before ticking or stamping the gate:
 1. **Interactive lifecycle check:** Did this review verify the actual action outcome (state transition, endpoint call, error recovery on rejection), rather than only that the button exists and is clickable?
-2. **Viewport and accessibility check:** Verify that phone (320px) and desktop (1200px) layouts are clean, focus is trapped and released properly, and no console errors occurred.
+2. **Viewport and accessibility check:** Verify that phone (320px) and desktop (1200px) layouts are clean in every shipped `UI_LANGS` locale, focus is trapped and released properly, and no console errors occurred. A complete mechanical locale matrix does not establish semantic correctness of a changed translation; report any unreviewed copy explicitly.
 3. **Stamp integrity check:** Confirm the stamp uses the bare short SHA (`git rev-parse --short=12 HEAD`) without backticks.
 
 ## 5. Record the pass

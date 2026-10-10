@@ -49,6 +49,9 @@ Work in this order — it is a **single read-only pass**: pin baseline → enume
 1. **Enumerate — discover, do not hardcode.** Read every `.agents/skills/*/SKILL.md` and every
    reviewer in `.agents/agents/*.toml`. Inventory `AGENTS.md`, `.agents/hooks.json`,
    `tools/agent-hooks/`, `scripts/`, `main/`, `partitions.csv`, `main/idf_component.yml`, and `version.txt`.
+   Inventory supporting `references/` files and read those affected by the reviewed claims or diff.
+   Mandatory workflow, authorization and acceptance checks must remain in each `SKILL.md`;
+   conditional background references must not hide a required gate.
 2. **Extract concrete claims.** List numbers, paths, counts, flags, target pins, script names,
    authorization boundaries, and described hook behavior.
 3. **Verify claims against the tree.** Run the deterministic check:
@@ -114,7 +117,11 @@ skill/reviewer asserts:
 - **`$deploy-test`** — pre-merge USB bench test of an exact local head. Verify against `scripts/idf-docker.sh`,
   Secure Boot v2 signing with `$OTA_SIGNING_KEY_FILE`, `scripts/require-signed.sh`, flash args skipping
   `nvs@0x9000`, MAC identity via `esptool chip-id`, `scripts/verify-device-health.sh`, and the automated
-  diagnostic loop via `$device-triage`. Its boundary must match `AGENTS.md`'s USB cases.
+  diagnostic loop via `$device-triage`. Its boundary must match `AGENTS.md`'s USB cases. Standalone
+  test fixes require separate commit authorization before a repeat at a new clean head; the
+  `$deploy-prod` chain can supply that authorization. Verify the API and serial ELF identity length
+  against the pinned ESP-IDF configuration (`CONFIG_APP_RETRIEVE_LEN_ELF_SHA=9`); compare that
+  prefix with the full artifact hash and distinguish build identity from installed-image readback.
 - **`$device-triage`** — live device network triage. Verify endpoints `/status`, `/values`, `/diag`,
   `/coredump`, `/crash/dismiss`. Verify that `last_crash.fault` is read before diagnosing a crash, that
   orphan dumps from earlier boots are distinguished, and that `scripts/decode-coredump.sh` is used with the
@@ -151,11 +158,15 @@ skill/reviewer asserts:
 **Reviewers** (`.agents/agents/`):
 
 - **`doc_drift_checker`** (`.agents/agents/doc-drift-checker.toml`) — checks documentation consistency
-  between `AGENTS.md` and detailed markdown references under `docs/`.
+  between `AGENTS.md` and detailed markdown references under `docs/`. Verify the parent's
+  `base_sha`/`head_sha`, checkout HEAD, committed range and separate intended local changes.
 - **`heap_safety_reviewer`** (`.agents/agents/heap-safety-reviewer.toml`) — checks contiguous heap limits,
-  streaming responses, RAII locking, stack budgets, and 503 on OOM.
+  streaming responses, allocating task-loop OOM recovery, raw-mutex/RAII locking, every affected
+  builder caller's stack budget, and 503 on OOM. Verify its committed range and HEAD binding;
+  source review must not claim missing ELF/coredump or hardware measurements were completed.
 - **`x10a_decode_reviewer`** (`.agents/agents/x10a-decode-reviewer.toml`) — checks X10A protocol decode,
-  converter IDs, sign/scale, and byte layout against `docs/REGISTERS.md`.
+  converter IDs, sign/scale, and byte layout against `docs/REGISTERS.md`. Verify its committed range
+  and HEAD binding, then the separate intended local changes; an empty local diff cannot waive review.
 
 ## Self-analysis and audit self-optimization
 
