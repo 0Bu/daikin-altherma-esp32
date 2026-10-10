@@ -278,12 +278,12 @@ right-hand value column. The global reduced-motion contract removes that non-ess
 
 `scripts/run-ui-localization-audit.sh` is the named CI gate for complete device-local copy. Its core,
 `node test/test_ui_locale_catalogs.mjs`, evaluates the separately shipped de/es/fr/it/pl/cs/uk/zh/ja/nb/sv/fi
-modules against the embedded English fallback. All 891 keys, value types and parameter-function
+modules against the embedded English fallback. All 894 keys, value types and parameter-function
 arities must match; browser detection and the Firmware selector must name the same thirteen languages;
 all 125 value and 15 model-description rows must have native copy with no English prose fallback
 (compact locales may fold the normal context into their first field); concurrent loads coalesce onto
 `/locale.js`; every deterministic gzip asset stays within its 32 KiB response budget; and all locale
-assets together stay within a 281 KiB aggregate-growth guard. The reviewed growth includes the
+assets together stay within a 283 KiB aggregate-growth guard. The reviewed growth includes the
 complete localized factory-reset warning, cause-neutral diagnostic/report copy and native Altherma 4
 labels, state names and source-qualified explanations in every shipped language;
 the separate firmware-size gate binds

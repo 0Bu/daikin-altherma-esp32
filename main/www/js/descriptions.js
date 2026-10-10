@@ -1106,9 +1106,10 @@ const stateOf = (re, mbOffset) => {
 // happen to be identical in both protocols from inheriting the other protocol's meaning.
 function descFor(label, row = null) {
   if (row?.profile === "altherma4") {
-    const key = ({9: "a4.quiet_help", 38: "a4.current_help", 54: "a4.heating_offset_help",
-      58: "a4.limit_help", 65: "a4.demand_help", 74: "a4.pre_phe_outdoor_help",
-      83: "a4.operation_help"})[row.off];
+    const key = ({9: "a4.quiet_help", 38: "a4.current_help", 49: "a4.flow_help",
+      54: "a4.heating_offset_help",
+      58: "a4.limit_help", 65: "a4.demand_help", 68: "a4.pump_help",
+      74: "a4.pre_phe_outdoor_help", 79: "a4.pressure_help", 83: "a4.operation_help"})[row.off];
     if (key) return { what: t(key) };
   }
   const l = label || "";

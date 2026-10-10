@@ -80,8 +80,9 @@ for (const lang of ["en", "de", "es", "fr", "it", "pl", "cs", "uk", "zh", "ja", 
     assert.equal(ui.displayHomeHubLabel({off, label: "obsolete label", profile: "altherma4"}),
       ui.labels[`a4.${key}`], `${lang}/${off}: native label uses its reviewed translation`);
   }
-  for (const [off, key] of [[9, "quiet_help"], [38, "current_help"], [54, "heating_offset_help"],
-    [58, "limit_help"], [65, "demand_help"], [74, "pre_phe_outdoor_help"], [83, "operation_help"]]) {
+  for (const [off, key] of [[9, "quiet_help"], [38, "current_help"], [49, "flow_help"],
+    [54, "heating_offset_help"], [58, "limit_help"], [65, "demand_help"], [68, "pump_help"],
+    [74, "pre_phe_outdoor_help"], [79, "pressure_help"], [83, "operation_help"]]) {
     assert.equal(ui.descFor("obsolete base label", {off, profile: "altherma4"}).what,
       ui.labels[`a4.${key}`], `${lang}/${off}: native explanation cannot inherit base semantics`);
   }
@@ -90,6 +91,12 @@ for (const lang of ["en", "de", "es", "fr", "it", "pl", "cs", "uk", "zh", "ja", 
 }
 assert.equal(en.displayHomeHubLabel({off: 58, label: "Power consumption"}), "Power consumption",
   "the independent base profile keeps its actual power-consumption label");
+for (const [off, label, key] of [[49, "Flow rate", "flow_help"],
+  [68, "Circulation pump speed", "pump_help"], [79, "Water pressure", "pressure_help"]]) {
+  for (const profile of [undefined, "homehub"])
+    assert.notEqual(en.descFor(label, {off, profile}).what, en.labels[`a4.${key}`],
+      `${off}/${profile}: native interpretation limits cannot replace another source's explanation`);
+}
 assert.equal(en.displayValue({ value: "Recommended on" }), "Recommended on",
   "the derived X10A Smart-Grid row may still use its local canonical display text");
 

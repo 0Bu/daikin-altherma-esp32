@@ -1017,9 +1017,11 @@ Body, ordered:
    - **Tap a value → plain-language explainer.** Each value row whose label is recognised is a button
      (trailing chevron affordance, like the ESP32 card's Hardware row); tapping it slides open a short description
      beneath the row — what the reading means and, where useful, what is normal vs worth a look. The
-     text is keyed to the value **label** by a first-match-wins pattern table (`DESCRIPTIONS` in
+     text normally uses the value **label** through a first-match-wins pattern table (`DESCRIPTIONS` in
      `js/descriptions.js`), the same label-pattern technique the schematic/grouping already use, so one entry serves
-     every profile's spelling of a quantity; a label that matches nothing stays a plain row — unless
+     every profile's spelling of a quantity. Native Altherma 4 rows first select profile/offset-specific
+     `I18N` explanations through `descFor(label, row)`, including the unverified flow/pump/pressure
+     interpretation limits. A row neither path covers stays plain — unless
      the firmware keeps a **trend** for it, which opens the same panel on its own (below).
      **The schematic inspector (§5.3 item 3) reads this same table**, so a quantity is explained
      identically whether the user arrives from the picture or from the value list — add a concept

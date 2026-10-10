@@ -158,7 +158,7 @@ Modbus constants; the names below are applied only by the visual UI and come fro
 | holding `4` / `9` | Space heating/cooling / quiet mode | binary `0`/`1`, displayed `OFF`/`ON` |
 | holding `56` | Smart Grid operation mode | `0` / `1` / `2` / `3` → Free running / Forced off / Recommended on / Forced on |
 
-The four enums retain their raw integer in `homehub_format()`, `/values`, MCP and MQTT. `/values`
+The named enums retain their raw integer in `homehub_format()`, `/values`, MCP and MQTT. `/values`
 carries a separate structural `enum` id so the browser can localise a known
 state; an undocumented number remains visible as `Unknown (N)` instead of being silently coerced.
 The flat MQTT payload therefore contains, for example,
@@ -318,7 +318,8 @@ The existing input 49 `/100` flow conversion, input 68 percentage unit and input
 conversion are retained pending real-device evidence. The native guide does not document the extra
 flow scale, prints L/min for pump speed and gives an ambiguous 10–600 bar pressure range. These
 outputs, pressure pairing and pressure-based profile selection must not be treated as confirmed
-physical measurements or verified model identification. The sentinel filter remains a conservative
+physical measurements or verified model identification. The native value explainers also state the
+unverified flow/pump/pressure interpretations in every shipped language. The sentinel filter remains a conservative
 project rule; the guide explicitly documents unavailable 32766 for input 23 but does not establish
 the complete EKRHH sentinel vocabulary for every native row.
 

@@ -294,14 +294,17 @@ const nativeAltherma4Rows = Object.freeze([
     labelKey: "a4.quiet_selection", valueKey: "enum.automatic", helpKey: "a4.quiet_help" },
   { off: 38, label: "Current operation mode", value: 0, unit: "", enum: "altherma4_current_operation_mode",
     valueKey: "enum.none", helpKey: "a4.current_help" },
+  { off: 49, label: "Flow rate", value: 2.6, unit: "L/min", helpKey: "a4.flow_help" },
   { off: 54, label: "Weather-dependent Main Heating offset", value: -3, unit: "K",
     labelKey: "a4.heating_offset", helpKey: "a4.heating_offset_help" },
   { off: 58, label: "Imposed power limit", value: 6, unit: "kW",
     labelKey: "a4.imposed_power_limit", helpKey: "a4.limit_help" },
   { off: 65, label: "Demand response mode", value: 2, unit: "", enum: "altherma4_demand_response",
     labelKey: "a4.demand_response", valueKey: "enum.forced_on", helpKey: "a4.demand_help" },
+  { off: 68, label: "Circulation pump speed", value: 45, unit: "%", helpKey: "a4.pump_help" },
   { off: 74, label: "Leaving water temperature pre-PHE outdoor", value: 7.3, unit: "°C",
     labelKey: "a4.pre_phe_outdoor", helpKey: "a4.pre_phe_outdoor_help" },
+  { off: 79, label: "Water pressure", value: 2, unit: "bar", helpKey: "a4.pressure_help" },
   { off: 80, label: "Space heating/cooling target Main zone", value: 28, unit: "°C",
     labelKey: "a4.main_target" },
   { off: 83, label: "Unit operation mode", value: 4, unit: "", enum: "altherma4_unit_operation_mode",
@@ -317,6 +320,8 @@ async function assertNativeAltherma4(page, context) {
       S.status.diagnostics.enabled = false;
       S.status.modbus = { ...S.status.modbus, host: "native-altherma4.fixture.invalid",
         enabled: true, connected: true, profile: "altherma4" };
+      // This fixture isolates native help and quiet-state truth with history disabled. Flow,
+      // temperatures and power can offer real trends; their API/history contract is tested separately.
       S.status.history = { rows: [], modbus_rows: [], env3_rows: [] };
       S._values = [];
       S._modbus = ${JSON.stringify(nativeAltherma4Rows)}.map(
