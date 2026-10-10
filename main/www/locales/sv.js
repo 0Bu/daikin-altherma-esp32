@@ -1,4 +1,4 @@
-// translation-source: 856c2ce7d1e297c3bcf8a20a2f1b4c8079ed68a2890bb1d0729997a0bd963c19
+// translation-source: bcd4ff0bb5bf1f2e454eb0f7e5c00ea352bcbb9f1f0c080ef5225bc85210fa0b
 I18N.sv = localeValues([
   /* sys.nodata */ "Inga data",
   /* sys.unreachable */ "Inte tillgänglig",
@@ -34,13 +34,16 @@ I18N.sv = localeValues([
   /* recovery.meta */ "Flera omstarter utlöste återställningsläge med pausad värmepumpsanslutning och MQTT. Kontrollera konfigurationen, särskilt RX/TX-stiften, och starta om.",
   /* rollback.title */ "Wi-Fi-ändringen misslyckades — återställd",
   /* rollback.meta */ (back) => `Nya Wi-Fi-inställningar fungerade inte. Föregående nätverk${back} återställdes och enheten startades om. Kontrollera namn och lösenord under Inställningar → Anslutningar.`,
-  /* crash.title_fault */ "Enheten startades om efter en krasch",
+  /* crash.title_fault */ "Enheten startades om efter ett fel",
   /* crash.title_orphan */ "Kraschrapport från en tidigare omstart",
   /* crash.reset */ "Återställning",
   /* crash.task */ "Uppgift",
   /* crash.fw */ "FW",
   /* crash.elf */ "elf",
   /* crash.corrupted */ "skadad",
+  /* crash.stored_dump */ "Sparad kraschrapport",
+  /* crash.stored_hint */ "Rapportens ålder och koppling till denna omstart är okända.",
+  /* crash.backtrace */ "Anropsstack",
   /* crash.download */ "Ladda ned kraschrapport",
   /* crash.copy */ "Kopiera diagnos",
   /* crash.dismiss */ "Radera rapport",

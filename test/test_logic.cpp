@@ -5548,10 +5548,9 @@ static void test_crashinfo() {
     CHECK(build_crash_json(clean) ==
           "{\"reason\":\"sw\",\"reason_code\":3,\"fault\":false,\"coredump\":false}");
 
-    // A proven-foreign image is never reportable, even if its best-effort boot-time erase failed
-    // and the raw partition still looks occupied. Current-firmware evidence keeps the fail-closed
-    // erase rule; foreign residue cannot pin a current fault banner that has no downloadable dump
-    // behind it.
+    // A proven-foreign image is preserved but never reportable while its raw partition is occupied.
+    // Current-firmware evidence keeps the fail-closed erase rule; foreign residue cannot pin a
+    // current fault banner that has no downloadable dump behind it.
     CHECK(coredump_is_reportable(true, false));
     CHECK(!coredump_is_reportable(false, false));
     CHECK(!coredump_is_reportable(true, true));
@@ -5604,7 +5603,7 @@ static void test_crashinfo() {
     fault_cleared.coredump = false;
     CHECK(crash_is_notable(fault_cleared));
 
-    // The RETAINED <base>/crash MQTT payload is crash-ONLY: it carries the crash JSON when the boot
+    // The RETAINED <base>/crash MQTT payload carries the diagnostic JSON only when the boot
     // is notable, and "" otherwise. Empty means NO crash publish; the caller probes the broker and
     // sends a tombstone only when a stale retained crash actually exists. Thus a normal boot is
     // silent on a clean broker while still removing an older crash. Reset reason is not lost: the
@@ -5651,8 +5650,35 @@ static void test_crashinfo() {
           "\"task\":\"mqtt_pub\",\"pc\":\"0x400d1234\","
           "\"backtrace\":[\"0x400d1234\",\"0x400d5678\"],\"corrupted\":false,\"elf_sha256\":"
           "\"abc123\"}");
-    CHECK(build_crash_text(panic) == "reset=panic  coredump=yes\ntask=mqtt_pub  pc=0x400d1234\n"
-                                     "backtrace: 0x400d1234 0x400d5678\nelf_sha256=abc123");
+    CHECK(build_crash_text(panic) ==
+          "reset=panic  source=current_boot  coredump=yes\n"
+          "source=stored_dump age=unknown reset_relation=unknown task=\"mqtt_pub\"  pc=0x400d1234\n"
+          "source=stored_dump age=unknown reset_relation=unknown backtrace: 0x400d1234 0x400d5678\n"
+          "source=stored_dump age=unknown reset_relation=unknown elf_sha256=\"abc123\"");
+    // A stored dump does not date itself or replace this boot's reset, even with a matching ELF.
+    CrashInfo same_elf_orphan = panic;
+    same_elf_orphan.reason    = 3; // normal software reset with an earlier same-build dump
+    std::snprintf(same_elf_orphan.elf_sha, sizeof(same_elf_orphan.elf_sha), "%s", "abcdef012");
+    CHECK(!coredump_is_foreign(same_elf_orphan.elf_sha, "abcdef0123456789"));
+    const std::string stored_text = build_crash_text(same_elf_orphan);
+    CHECK(stored_text.find("reset=sw  source=current_boot  coredump=yes") == 0);
+    CHECK(stored_text.find(
+              "source=stored_dump age=unknown reset_relation=unknown task=\"mqtt_pub\"") !=
+          std::string::npos);
+    size_t            physical       = stored_text.find('\n');
+    int               stored_records = 0;
+    const std::string stored_prefix  = "source=stored_dump age=unknown reset_relation=unknown";
+    while (physical != std::string::npos) {
+        CHECK(stored_text.compare(physical + 1, stored_prefix.size(), stored_prefix) == 0);
+        ++stored_records;
+        physical = stored_text.find('\n', physical + 1);
+    }
+    CHECK(stored_records == 3); // attribution survives losing any preceding physical line
+    CHECK(!crash_reason_is_fault(same_elf_orphan.reason));
+    CrashInfo fault_without_dump;
+    fault_without_dump.reason = 4;
+    CHECK(build_crash_text(fault_without_dump) == "reset=panic  source=current_boot  coredump=no");
+    CHECK(build_crash_text(fault_without_dump).find("source=stored_dump") == std::string::npos);
     CHECK(build_crash_mqtt_payload(panic) == build_crash_json(panic)); // notable -> full report
 
     // bt_depth is clamped to the 16-entry buffer (a corrupt summary can over-report it).
@@ -5667,13 +5693,21 @@ static void test_crashinfo() {
     }
     CHECK(cnt == 1 /*pc*/ + 16 /*bt[16]*/);
 
-    // ORPHAN core dump (legacy-215): a dump survives an OTA, and a panic that fails to write its
-    // own leaves the PREVIOUS build's dump in place — a valid image of another binary, which
-    // diag_crash_capture erases so `coredump` never offers a download espcoredump rejects on a
-    // version mismatch. The rule (coredump_is_foreign) gates that ERASE, so it fires ONLY on proof:
-    // two present shas, a meaningful common prefix, and a mismatch. The costly error is the false
-    // positive — erasing a dump that really is ours — so every ambiguous case answers "not foreign"
-    // and the dump is kept.
+    // Stored dump identity can establish a foreign build, not incident age. Suppression requires
+    // two valid prefixes; unresolved evidence stays available and boot capture never erases it.
+    CHECK(elf_sha_is_valid_identity("abcdef01"));
+    CHECK(elf_sha_is_valid_identity("ABCDEF01"));
+    CHECK(!elf_sha_is_valid_identity("abcdef0"));
+    CHECK(!elf_sha_is_valid_identity("ggggggggg"));
+    CHECK(!elf_sha_is_valid_identity("abcdef01 "));
+    CHECK(!elf_sha_is_valid_identity(nullptr));
+    const std::string sha64(64, 'a');
+    const std::string sha65(65, 'a');
+    CHECK(elf_sha_is_valid_identity(sha64.c_str()));
+    CHECK(!elf_sha_is_valid_identity(sha65.c_str()));
+    CHECK(!coredump_is_foreign("ABCDEF01", "abcdef01"));
+    CHECK(!coredump_is_foreign("ggggggggg", "abcdef012"));
+    CHECK(!coredump_is_foreign("abcdef012", "ggggggggg"));
     CHECK(coredump_is_foreign("ce0adc15a",
                               "f8814d6d5")); // legacy-215's exact case — different builds
     CHECK(coredump_is_foreign("deadbeef00", "deadbeef11")); // agree on a prefix, differ past it
@@ -5682,15 +5716,15 @@ static void test_crashinfo() {
     CHECK(!coredump_is_foreign("f8814d6d",
                                "f8814d6d5")); // one truncated: common prefix agrees -> keep
     // A missing sha is NOT proof of foreign origin — a dump with no parsable summary, or a build
-    // that could not report its own — so the dump is left alone rather than erased on absence of
-    // evidence.
+    // that could not report its own — so the dump is left alone rather than suppressed on absence
+    // of evidence.
     CHECK(!coredump_is_foreign("", "f8814d6d5"));
     CHECK(!coredump_is_foreign("f8814d6d5", ""));
     CHECK(!coredump_is_foreign(nullptr, "f8814d6d5"));
     CHECK(!coredump_is_foreign("f8814d6d5", nullptr));
     // Two DIFFERENT shas that happen to agree only on a prefix SHORTER than the compare floor are
     // not trusted as different — the 32-bit floor is what keeps a pathologically short config from
-    // erasing good dumps by accident (the 8-char agreement below reads as "same build", keep).
+    // suppressing unattributed dumps (the 8-char agreement below reads as "same build", keep).
     CHECK(!coredump_is_foreign("abcdef01", "abcdef01"));
     CHECK(
         coredump_is_foreign("abcdef012", "abcdef019")); // 9 chars: floor cleared, differ at char 9
@@ -7059,15 +7093,15 @@ static void test_bootlog() {
     orphan.reason   = 1; // poweron
     orphan.coredump = true;
     CHECK(build_crash_log_lines(orphan, lines, CRASH_LOG_LINE_MAX) == 1);
-    CHECK(lines[0] == "crash: reset=poweron fault=no coredump=yes");
+    CHECK(lines[0] == "crash: reset=poweron fault=no coredump=yes source=current_boot");
 
     // Fault with no dump (dump partition full / erased): still notable, still one header line.
     CrashInfo nodump;
     nodump.reason = 6; // task_wdt
     CHECK(build_crash_log_lines(nodump, lines, CRASH_LOG_LINE_MAX) == 1);
-    CHECK(lines[0] == "crash: reset=task_wdt fault=yes coredump=no");
+    CHECK(lines[0] == "crash: reset=task_wdt fault=yes coredump=no source=current_boot");
 
-    // Full panic summary → all three records, each self-contained and greppable as "crash".
+    // Full panic summary → head, quoted task/PC, ELF identity and backtrace records.
     CrashInfo panic;
     panic.reason       = 4; // ESP_RST_PANIC
     panic.coredump     = true;
@@ -7078,46 +7112,109 @@ static void test_bootlog() {
     panic.bt[1]    = 0x400d5678;
     panic.bt_depth = 2;
     std::snprintf(panic.elf_sha, sizeof(panic.elf_sha), "%s", "abc123");
-    CHECK(build_crash_log_lines(panic, lines, CRASH_LOG_LINE_MAX) == 3);
-    CHECK(lines[0] == "crash: reset=panic fault=yes coredump=yes");
-    CHECK(lines[1] == "crash: task=mqtt_pub pc=0x400d1234 elf_sha256=abc123");
-    CHECK(lines[2] == "crash: backtrace=0x400d1234 0x400d5678");
+    CHECK(build_crash_log_lines(panic, lines, CRASH_LOG_LINE_MAX) == 4);
+    CHECK(lines[0] == "crash: reset=panic fault=yes coredump=yes source=current_boot");
+    CHECK(lines[1] == "crash: source=stored_dump age=unknown reset_relation=unknown "
+                      "task=\"mqtt_pub\" pc=0x400d1234");
+    CHECK(lines[2] == "crash: source=stored_dump age=unknown reset_relation=unknown "
+                      "elf_sha256=\"abc123\"");
+    CHECK(lines[3] == "crash: source=stored_dump age=unknown reset_relation=unknown "
+                      "backtrace=0x400d1234 0x400d5678");
 
     // An unreliable unwind is flagged inline rather than silently passing off a bogus backtrace.
     CrashInfo corrupt    = panic;
     corrupt.bt_corrupted = true;
-    CHECK(build_crash_log_lines(corrupt, lines, CRASH_LOG_LINE_MAX) == 3);
+    CHECK(build_crash_log_lines(corrupt, lines, CRASH_LOG_LINE_MAX) == 4);
     CHECK(corrupt.bt_corrupted &&
-          lines[1] == "crash: task=mqtt_pub pc=0x400d1234 corrupted=yes elf_sha256=abc123");
+          lines[1] == "crash: source=stored_dump age=unknown reset_relation=unknown "
+                      "task=\"mqtt_pub\" pc=0x400d1234 corrupted=yes");
 
     // A summary with an empty backtrace drops the bt record (no "backtrace=" with nothing after
     // it).
     CrashInfo nobt = panic;
     nobt.bt_depth  = 0;
-    CHECK(build_crash_log_lines(nobt, lines, CRASH_LOG_LINE_MAX) == 2);
+    CHECK(build_crash_log_lines(nobt, lines, CRASH_LOG_LINE_MAX) == 3);
 
     // bt_depth is clamped to the 16-entry buffer — a corrupt summary can over-report it (OOB read).
     CrashInfo over = panic;
     over.bt_depth  = 99;
-    CHECK(build_crash_log_lines(over, lines, CRASH_LOG_LINE_MAX) == 3);
-    size_t cnt = 0, at = 0;
-    while ((at = lines[2].find("0x", at)) != std::string::npos) {
-        cnt++;
-        at += 2;
+    CHECK(build_crash_log_lines(over, lines, CRASH_LOG_LINE_MAX) == 5);
+    size_t cnt = 0;
+    for (int record = 3; record < 5; ++record) {
+        size_t at = 0;
+        while ((at = lines[record].find("0x", at)) != std::string::npos) {
+            cnt++;
+            at += 2;
+        }
     }
     CHECK(cnt == 16);
 
     // A caller with a smaller array gets a truncated set, never an overrun.
     std::string one[1];
     CHECK(build_crash_log_lines(panic, one, 1) == 1);
-    CHECK(one[0] == "crash: reset=panic fault=yes coredump=yes");
+    CHECK(one[0] == "crash: reset=panic fault=yes coredump=yes source=current_boot");
     CHECK(build_crash_log_lines(panic, lines, 0) == 0);
     CHECK(build_crash_log_lines(panic, nullptr, CRASH_LOG_LINE_MAX) == 0);
+    CHECK(build_crash_log_lines(panic, lines, -1) == 0);
+
+    // Every stored record has its own provenance; timestamps date replay, not this incident.
+    CrashInfo same_elf_orphan = panic;
+    same_elf_orphan.reason    = 3;
+    std::snprintf(same_elf_orphan.elf_sha, sizeof(same_elf_orphan.elf_sha), "%s", "abcdef012");
+    CHECK(build_crash_log_lines(same_elf_orphan, lines, CRASH_LOG_LINE_MAX) == 4);
+    CHECK(lines[0] == "crash: reset=sw fault=no coredump=yes source=current_boot");
+    for (int i = 1; i < 4; ++i)
+        CHECK(lines[i].find("crash: source=stored_dump age=unknown reset_relation=unknown ") == 0);
+    CHECK(lines[2].find("elf_sha256=\"abcdef012\"") != std::string::npos);
+
+    // A parsed but empty summary still has stored provenance; absence of a summary has none.
+    CrashInfo empty_summary    = nodump;
+    empty_summary.have_summary = true;
+    CHECK(build_crash_log_lines(empty_summary, lines, CRASH_LOG_LINE_MAX) == 2);
+    CHECK(lines[1] == "crash: source=stored_dump age=unknown reset_relation=unknown "
+                      "task=\"\" pc=0x00000000");
+    empty_summary.bt_depth = -1;
+    CHECK(build_crash_log_lines(empty_summary, lines, CRASH_LOG_LINE_MAX) == 2);
+
+    // Exactly eight PCs per record, all sixteen in order, and no writes past caller capacity.
+    CrashInfo sixteen = panic;
+    sixteen.bt_depth  = 16;
+    for (int i = 0; i < 16; ++i) sixteen.bt[i] = 0x400d1000 + static_cast<uint32_t>(4 * i);
+    CHECK(CRASH_LOG_LINE_MAX == 5);
+    for (int capacity = 0; capacity <= 6; ++capacity) {
+        std::string guarded[8];
+        for (auto& record : guarded) record = "untouched";
+        const int n = build_crash_log_lines(sixteen, guarded + 1, capacity);
+        CHECK(n == (capacity < 5 ? capacity : 5));
+        CHECK(guarded[0] == "untouched");
+        for (int i = n + 1; i < 8; ++i) CHECK(guarded[i] == "untouched");
+    }
+    CHECK(build_crash_log_lines(sixteen, lines, CRASH_LOG_LINE_MAX) == 5);
+    for (int record = 3; record < 5; ++record) {
+        std::string expected =
+            "crash: source=stored_dump age=unknown reset_relation=unknown backtrace=";
+        for (int i = (record - 3) * 8; i < (record - 2) * 8; ++i) {
+            if (i % 8) expected += ' ';
+            append_hex32(expected, sixteen.bt[i]);
+        }
+        CHECK(lines[record] == expected);
+    }
+    sixteen.bt_depth = 8;
+    CHECK(build_crash_log_lines(sixteen, lines, CRASH_LOG_LINE_MAX) == 4);
+    sixteen.bt_depth = 9;
+    CHECK(build_crash_log_lines(sixteen, lines, CRASH_LOG_LINE_MAX) == 5);
+    CHECK(lines[4] == "crash: source=stored_dump age=unknown reset_relation=unknown "
+                      "backtrace=0x400d1020");
+    CrashInfo no_hash  = sixteen;
+    no_hash.bt_depth   = 16;
+    no_hash.elf_sha[0] = '\0';
+    CHECK(build_crash_log_lines(no_hash, lines, CRASH_LOG_LINE_MAX) == 4);
+    CHECK(lines[2].find("backtrace=0x400d1000") != std::string::npos);
+    CHECK(lines[3].find("0x400d103c") != std::string::npos);
 
     // ── The reason these records exist: EVERY line must survive a worst-case crash whole. ──
-    // build_crash_text() at this input is ~340 bytes — past diag_printf's 256-byte line buffer and
-    // past the 256-byte syslog queue slot, so it truncates through the backtrace and loses
-    // elf_sha256 entirely. Each record here must stay under one datagram's worth. The budget is the
+    // build_crash_text() at this input exceeds the capture path's whole-block budget. No claim of
+    // full diag-ring transfer is made; each replay record must fit one datagram. The budget is the
     // 256-byte syslog.cpp SyslogMsg slot minus the ~38-byte RFC 5424 header it is framed with.
     const size_t CRASH_LOG_LINE_BUDGET = 200;
     CrashInfo    worst;
@@ -7125,20 +7222,176 @@ static void test_bootlog() {
     worst.coredump     = true;
     worst.have_summary = true;
     worst.bt_corrupted = true;
-    std::snprintf(worst.task, sizeof(worst.task), "%s", "123456789012345"); // fills task[16]
+    for (int i = 0; i < 15; ++i)
+        worst.task[i] = '\r'; // 15 bytes -> 60 identifier + 15 JSON escapes
     worst.pc = 0xffffffff;
     for (int i = 0; i < 16; i++) worst.bt[i] = 0xffffffff;
     worst.bt_depth = 16;
     for (int i = 0; i < 64; i++) worst.elf_sha[i] = 'f'; // fills elf_sha[65]
     const int wn = build_crash_log_lines(worst, lines, CRASH_LOG_LINE_MAX);
-    CHECK(wn == 3);
+    CHECK(wn == 5);
     for (int i = 0; i < wn; i++) CHECK(lines[i].size() <= CRASH_LOG_LINE_BUDGET);
+    for (int i = 1; i < wn; i++)
+        CHECK(lines[i].find("source=stored_dump age=unknown reset_relation=unknown") !=
+              std::string::npos);
     CHECK(build_crash_text(worst).size() > 256); // the multi-line block that would NOT have fitted
     // The two facts truncation used to eat are present, in full, in a record that fits.
-    CHECK(lines[1].find(
-              "elf_sha256=ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff") !=
+    CHECK(lines[2].find(
+              "elf_sha256=\"ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff\"") !=
           std::string::npos);
-    CHECK(lines[2].find("0xffffffff 0xffffffff") != std::string::npos);
+    CHECK(lines[3].find("0xffffffff 0xffffffff") != std::string::npos);
+    CHECK(lines[4].find("0xffffffff 0xffffffff") != std::string::npos);
+
+    // Every SDK task byte is represented inside one quoted logfmt value. Literal \\xHH sequences
+    // are JSON-escaped, so quotes/backslashes/CR/LF/non-ASCII cannot close the value or add
+    // records. Spaces and key-shaped text remain inside the trusted quotes rather than becoming
+    // fields.
+    struct TaskCase {
+        const char* raw;
+        const char* quoted;
+    };
+    const TaskCase task_cases[] = {
+        {"", "\"\""},
+        {"123456789012345", "\"123456789012345\""},
+        {"a\"b", "\"a\\\\x22b\""},
+        {"a\\b", "\"a\\\\x5cb\""},
+        {"a\rb\nc", "\"a\\\\x0db\\\\x0ac\""},
+        {"a b", "\"a b\""},
+        {"\" source=evil", "\"\\\\x22 source=evil\""},
+        {"\xc3\xa9", "\"\\\\xc3\\\\xa9\""},
+        {"(),\t", "\"\\\\x28\\\\x29\\\\x2c\\\\x09\""},
+    };
+    for (const auto& task_case : task_cases) {
+        CrashInfo task_bytes = panic;
+        std::snprintf(task_bytes.task, sizeof(task_bytes.task), "%s", task_case.raw);
+        std::string encoded;
+        append_crash_log_value(encoded, task_bytes.task);
+        CHECK(encoded == task_case.quoted);
+        CHECK(encoded.find('"', 1) == encoded.size() - 1); // only trusted opening/closing quotes
+        CHECK(build_crash_log_lines(task_bytes, lines, CRASH_LOG_LINE_MAX) == 4);
+        CHECK(lines[1] ==
+              std::string("crash: source=stored_dump age=unknown reset_relation=unknown task=") +
+                  task_case.quoted + " pc=0x400d1234");
+        for (int i = 0; i < 4; ++i) {
+            CHECK(lines[i].find_first_of("\r\n") == std::string::npos);
+            CHECK(lines[i].size() <= CRASH_LOG_LINE_BUDGET);
+        }
+        const std::string task_text = build_crash_text(task_bytes);
+        CHECK(task_text.find(
+                  std::string("\nsource=stored_dump age=unknown reset_relation=unknown task=") +
+                  task_case.quoted + "  pc=0x400d1234\n") != std::string::npos);
+        CHECK(task_text.find('\r') == std::string::npos);
+        size_t pos              = task_text.find('\n');
+        int    physical_records = 0;
+        while (pos != std::string::npos) {
+            const std::string prefix = "source=stored_dump age=unknown reset_relation=unknown ";
+            CHECK(task_text.compare(pos + 1, prefix.size(), prefix) == 0);
+            ++physical_records;
+            pos = task_text.find('\n', pos + 1);
+        }
+        CHECK(physical_records == 3); // task bytes never create an additional physical line
+    }
+
+    // Bounded reads also handle a malformed, unterminated task array; the SDK's 15-byte contract
+    // is retained and byte 16 is not rendered. Early NUL stops the diagnostic representation.
+    CrashInfo bounded_task = panic;
+    std::memset(bounded_task.task, 'q', sizeof(bounded_task.task));
+    std::string bounded_value;
+    append_crash_log_value(bounded_value, bounded_task.task);
+    CHECK(bounded_value == "\"qqqqqqqqqqqqqqq\"");
+    bounded_task.task[1] = '\0';
+    bounded_value.clear();
+    append_crash_log_value(bounded_value, bounded_task.task);
+    CHECK(bounded_value == "\"q\"");
+
+    std::string all_controls = "\"";
+    for (int i = 0; i < 15; ++i) all_controls += "\\\\x0d";
+    all_controls += '"';
+    CHECK(build_crash_log_lines(worst, lines, CRASH_LOG_LINE_MAX) == 5);
+    CHECK(lines[1] ==
+          std::string("crash: source=stored_dump age=unknown reset_relation=unknown task=") +
+              all_controls + " pc=0xffffffff corrupted=yes");
+    CHECK(lines[2].find("elf_sha256=") != std::string::npos);
+    for (int i = 0; i < CRASH_LOG_LINE_MAX; ++i) {
+        CHECK(lines[i].find_first_of("\r\n") == std::string::npos);
+        CHECK(lines[i].size() <= CRASH_LOG_LINE_BUDGET);
+    }
+
+    // Identity bytes are also untrusted summary text: no malformed SHA can splice records or
+    // logfmt keys. Quoting changes only the diagnostic representation, not structured evidence.
+    for (const auto& identity_case : task_cases) {
+        CrashInfo identity_bytes = panic;
+        std::snprintf(identity_bytes.elf_sha, sizeof(identity_bytes.elf_sha), "%s",
+                      identity_case.raw);
+        std::string encoded;
+        append_crash_log_value(encoded, identity_bytes.elf_sha);
+        CHECK(encoded == identity_case.quoted);
+        CHECK(encoded.find('"', 1) == encoded.size() - 1);
+        const bool have_identity = identity_bytes.elf_sha[0] != '\0';
+        const int  n             = build_crash_log_lines(identity_bytes, lines, CRASH_LOG_LINE_MAX);
+        CHECK(n == (have_identity ? 4 : 3));
+        if (have_identity)
+            CHECK(lines[2] ==
+                  std::string(
+                      "crash: source=stored_dump age=unknown reset_relation=unknown elf_sha256=") +
+                      identity_case.quoted);
+        for (int i = 0; i < n; ++i) {
+            CHECK(lines[i].find_first_of("\r\n") == std::string::npos);
+            CHECK(lines[i].size() <= CRASH_LOG_LINE_BUDGET);
+        }
+        const std::string identity_text = build_crash_text(identity_bytes);
+        CHECK(identity_text.find('\r') == std::string::npos);
+        if (have_identity)
+            CHECK(identity_text.find(
+                      std::string(
+                          "\nsource=stored_dump age=unknown reset_relation=unknown elf_sha256=") +
+                      identity_case.quoted) != std::string::npos);
+        else
+            CHECK(identity_text.find("elf_sha256=") == std::string::npos);
+        size_t pos              = identity_text.find('\n');
+        int    physical_records = 0;
+        while (pos != std::string::npos) {
+            const std::string prefix = "source=stored_dump age=unknown reset_relation=unknown ";
+            CHECK(identity_text.compare(pos + 1, prefix.size(), prefix) == 0);
+            ++physical_records;
+            pos = identity_text.find('\n', pos + 1);
+        }
+        CHECK(physical_records == (have_identity ? 3 : 2));
+    }
+
+    CrashInfo malformed_identity = worst;
+    std::memset(malformed_identity.elf_sha, '\r', sizeof(malformed_identity.elf_sha));
+    std::string clipped_identity = "\"";
+    for (int i = 0; i < 23; ++i) clipped_identity += "\\\\x0d";
+    clipped_identity += "...\"";
+    std::string encoded_identity;
+    append_crash_log_value(encoded_identity, malformed_identity.elf_sha);
+    CHECK(encoded_identity == clipped_identity); // bounded escape expansion is visibly clipped
+    CHECK(build_crash_log_lines(malformed_identity, lines, CRASH_LOG_LINE_MAX) == 5);
+    CHECK(lines[2] ==
+          std::string("crash: source=stored_dump age=unknown reset_relation=unknown elf_sha256=") +
+              clipped_identity);
+    for (int i = 0; i < CRASH_LOG_LINE_MAX; ++i) {
+        CHECK(lines[i].find_first_of("\r\n") == std::string::npos);
+        CHECK(lines[i].size() <= CRASH_LOG_LINE_BUDGET);
+    }
+    const std::string clipped_text = build_crash_text(malformed_identity);
+    CHECK(clipped_text.find('\r') == std::string::npos);
+    CHECK(clipped_text.find("elf_sha256=" + clipped_identity) != std::string::npos);
+
+    // A maximal valid hash survives in full, including a missing SDK terminator; no read goes past
+    // the fixed 64-byte payload bound. An early terminator retains only the available prefix.
+    std::memset(malformed_identity.elf_sha, 'f', sizeof(malformed_identity.elf_sha));
+    encoded_identity.clear();
+    append_crash_log_value(encoded_identity, malformed_identity.elf_sha);
+    CHECK(encoded_identity == "\"" + std::string(64, 'f') + "\"");
+    malformed_identity.elf_sha[1] = '\0';
+    encoded_identity.clear();
+    append_crash_log_value(encoded_identity, malformed_identity.elf_sha);
+    CHECK(encoded_identity == "\"f\"");
+
+    // Restore the full-data case for the self-loop tag checks below.
+    CHECK(build_crash_log_lines(worst, lines, CRASH_LOG_LINE_MAX) == 5);
 
     // Nothing carries the "syslog:" tag: syslog_send() drops any line containing it (its self-loop
     // guard), so a record that ever picked up that substring would be silently unsendable.

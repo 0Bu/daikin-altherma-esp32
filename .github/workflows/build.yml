@@ -231,6 +231,8 @@ jobs:
             echo "  $1=$value"
           }
           echo "mutation self-test scope (all=$all):"
+          # Real pinned decoder fixtures read the crash capture/identity surface and these wrappers.
+          emit coredump '^(main/diag_crash[.](cpp|hpp)$|main/logic/crashinfo[.]hpp$|tools/coredump/|scripts/(decode-coredump|run-decode-coredump-tests|run-decode-coredump-integration-tests|idf-docker|idf-version)[.]sh$|sdkconfig[.]defaults$)'
           emit host_audits '^(tools/(presenter|docs)/|scripts/(check-presenter-parity|run-doc-entity-audit|run-host-audit-reuse-tests)[.]sh$|test/presenter_golden_dump[.]cpp$|main/logic/(lwt_select|discovery)[.]hpp$)'
           # agent-hooks drives the merge gate, which runs the UI, absence and UI-GIF suites; its
           # formatter cases copy the real .clang-format, and it pins the exact command shapes of
@@ -520,6 +522,10 @@ jobs:
         run: ./scripts/run-ci-release-contract-tests.sh
       - name: Test the coredump artifact decoder
         run: ./scripts/run-decode-coredump-tests.sh
+
+      - name: Exercise the pinned coredump decoder with synthetic evidence
+        if: steps.scope.outputs.coredump == 'yes'
+        run: ./scripts/run-decode-coredump-integration-tests.sh
 
       # Two cheap build-contract selftests. The first proves the post-Kconfig comparison catches a
       # missing, changed or malformed default before the firmware compile. The second pins the

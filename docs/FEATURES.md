@@ -55,7 +55,7 @@ Ids are stable keys and are never reused — a gap means a feature was retired, 
 | 8 | HTTP handlers under an **OOM `try/catch` → 503** discipline + active-OTA / low-heap early rejection; clean connection abort once a streamed response has begun | ✅ 🧪 | [`http_common.cpp`](../main/http_common.cpp), [`logic/chunk_sink.hpp`](../main/logic/chunk_sink.hpp), [`logic/http_request.hpp`](../main/logic/http_request.hpp) |
 | 9 | Home Assistant MQTT auto-discovery, separate X10A/HomeHub state topics, LWT | ✅ 🧪 | [`mqtt_ha.cpp`](../main/mqtt_ha.cpp), [`logic/discovery.hpp`](../main/logic/discovery.hpp) |
 | 10 | **MQTTS/WSS + verified common-root CA bundle**; credentials never sent in cleartext, no silent fallback | ✅ | [`mqtt_ha.cpp`](../main/mqtt_ha.cpp), [`sdkconfig.defaults`](../sdkconfig.defaults) |
-| 11 | Core dump to flash + offline symbolication, with a proven **orphan dump** erased so no undecodable download is ever offered | ✅ 🧪 | [`diag_crash.cpp`](../main/diag_crash.cpp), [`logic/crashinfo.hpp`](../main/logic/crashinfo.hpp), [`decode-coredump.sh`](../scripts/decode-coredump.sh) |
+| 11 | Core dump to flash + offline symbolication, with proven foreign evidence preserved and suppressed, and strict offline ELF identity checks | ✅ 🧪 | [`diag_crash.cpp`](../main/diag_crash.cpp), [`logic/crashinfo.hpp`](../main/logic/crashinfo.hpp), [`decode-coredump.sh`](../scripts/decode-coredump.sh) |
 | 12 | Reset-reason + crash classification, retained to MQTT and cleared when the boot is unremarkable | ✅ 🧪 | [`diag_crash.cpp`](../main/diag_crash.cpp), [`logic/crashinfo.hpp`](../main/logic/crashinfo.hpp) |
 | 13 | 22-entity device **heartbeat** diagnostics stream, published independently of profile detection | ✅ 🧪 | [`logic/heartbeat.hpp`](../main/logic/heartbeat.hpp) |
 | 14 | Strongest-AP scan + SAE tuning + **endless reconnect** (a router reboot never strands the bridge) | ✅ | [`wifi.cpp`](../main/wifi.cpp) |
@@ -544,8 +544,9 @@ Everything needed to explain a crash *after the fact*, from the field, without a
 - **✅ Core dump to flash.** The reset reason and `esp_core_dump_get_summary()` are read **once at
   boot** and cached, never re-parsed on a request path. The cheap presence flag is deliberately *not*
   cached, so a dump erased mid-session cannot strand a banner. A dump whose `app_elf_sha256` does not
-  match the **running** build — an orphan that survived an OTA — is erased on **proof**, so
-  `coredump` never advertises a download the decoder would reject.
+  match the **running** build is preserved but its summary/download are suppressed on proof.
+  Missing identity remains unresolved. The summary API uses IDF v6.1's flash-enable guard. Reset
+  reason describes this boot; stored task/backtrace evidence can be older, even with matching ELF.
 - **✅ 🧪 The 24-hour plant checkup survives a reboot** ([`logic/checkup_persist.hpp`](../main/logic/checkup_persist.hpp)).
   `.noinit` preserves the active window across power-preserving resets; the upper-flash append
   journal additionally records completed enabled diagnosis hours and restores compatible coverage
@@ -606,26 +607,31 @@ Everything needed to explain a crash *after the fact*, from the field, without a
   five largest allocators and is itself the reachable state a restart would be trying to produce.
 - **✅ Offline symbolication** ([`decode-coredump.sh`](../scripts/decode-coredump.sh)): the raw image
   is symbolized against the matching **unstripped `.elf`** CI archives per build. The dump embeds
-  `app_elf_sha256` and the device reports the same, so a wrong ELF is *caught*, not silently
-  mis-decoded.
+  `app_elf_sha256`; the helper requires exactly one valid identity note with at least eight hex
+  characters, rejects missing or mismatching provenance, and checks the actual ELF bytes.
+  Synthetic fixtures exercise real pinned GDB symbolization plus failure/cleanup paths. Matching
+  identity associates a build and cannot date the stored incident.
 - **✅ 🧪 Reset/crash classification** ([`logic/crashinfo.hpp`](../main/logic/crashinfo.hpp)): the
-  summary becomes `/status.last_crash` and a **retained** crash topic driving one diagnostic entity
-  (a "dump waiting" flag — reason and backtrace only, never the raw dump or any secret). The topic is
-  **crash-only**: a normal boot publishes nothing on a clean broker, while a stale record is deleted
-  once the device reboots cleanly. `static_assert`s pin the IDF reset enum so a renumbering fails the
+  current reset/fault plus optional stored task/PC/backtrace/ELF become `/status.last_crash` and a
+  retained topic driving the "dump waiting" entity; the raw memory image is excluded. Stored incident
+  age and relation to this reset remain unknown. A normal boot without a reportable stored image
+  publishes nothing on a clean broker and deletes an older retained record when it exists. `static_assert`s pin the IDF reset enum so a renumbering fails the
   build rather than mislabeling every crash.
 - **✅ 🧪 Deleting a crash report** (`POST /crash/dismiss`): a *device* action rather than a per-page
   hide — status, the retained topic and every browser agree at once. **Erase first, mark second**, so
   a failed erase answers `500` and marks nothing rather than reporting "no crash" with the dump still
   downloadable. RAM-only by design: a persisted dismissal could suppress a *new* crash. The one
-  erase result that does **not** block it is `ESP_ERR_NOT_FOUND`, which means the board has no
+  missing-partition result that does **not** block it is `ESP_ERR_NOT_FOUND`, which means the board has no
   `coredump` partition at all — the state of every device flashed before one existed and upgraded
   over the air since, because OTA writes the inactive app slot and never the partition table
   ([`partitions.csv`](../partitions.csv) states the same premise for `history`). There is nothing to
   destroy there, so the dismissal's other job — clearing the report — must still happen; treating it
   as a failure answered `500` forever, and a fault reset carries no dump often enough (a stack
-  overflow overruns it) that those boards saw exactly the banner no action could clear. Every other
-  error still blocks, because then a dump may genuinely still be downloadable.
+  overflow overruns it) that those boards saw exactly the banner no action could clear. A proven
+  foreign residue is also already suppressed: failed erasure of that residue cannot pin a separate
+  current-fault banner. Other failures retain the report when current or unresolved evidence may
+  still be downloadable. Boot capture preserves foreign bytes; clear/dismiss/reset remain explicit
+  destructive actions.
 - **✅ 🧪 22-entity device heartbeat** ([`logic/heartbeat.hpp`](../main/logic/heartbeat.hpp)): a
   **flat** JSON of heap (free / min-free / largest-free-block, the true OOM limit), uptime, reset
   reason, WiFi RSSI + reconnects + MAC/BSSID, MQTT counters and X10A bus stats — published

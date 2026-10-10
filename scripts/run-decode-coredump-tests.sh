@@ -14,7 +14,7 @@ trap 'rm -rf "$scratch"' EXIT HUP INT TERM
 fake="$scratch/repo"
 mkdir -p "$fake/scripts" "$fake/build"
 cp "$repo_root/scripts/decode-coredump.sh" "$fake/scripts/"
-printf '%s\n' '#!/bin/sh' 'for last do :; done' 'cmp "$EXPECTED_ELF" "$last"' > "$fake/scripts/idf-docker.sh"
+printf '%s\n' '#!/bin/sh' 'for last do :; done' 'cmp "$EXPECTED_ELF" "$last" || exit 1' 'if [ "${HANDOFF_SIGNAL:-}" = TERM ]; then kill -TERM "$PPID"; fi' 'exit "${HANDOFF_EXIT:-0}"' > "$fake/scripts/idf-docker.sh"
 chmod +x "$fake/scripts/idf-docker.sh"
 printf 'synthetic core\n' > "$fake/coredump.bin"
 
@@ -54,6 +54,21 @@ if ( cd "$fake" && EXPECTED_ELF="$payload" scripts/decode-coredump.sh coredump.b
   echo "decode-coredump accepted a corrupt archive" >&2
   exit 1
 fi
+cmp "$scratch/last-good.elf" "$plain"
+assert_no_parts
+
+# A failed decoder/Docker subprocess must preserve its exit code and clean an unwrapped ELF.
+xz -c "$payload" > "$archive"
+rc=0
+( cd "$fake" && EXPECTED_ELF="$payload" HANDOFF_EXIT=37 scripts/decode-coredump.sh coredump.bin >/dev/null 2>&1 ) || rc=$?
+[ "$rc" -eq 37 ] || { echo "decoder subprocess status was lost: $rc" >&2; exit 1; }
+cmp "$scratch/last-good.elf" "$plain"
+assert_no_parts
+
+# TERM during the handoff must run the wrapper's cleanup trap, preserving the original ELF.
+rc=0
+( cd "$fake" && EXPECTED_ELF="$payload" HANDOFF_SIGNAL=TERM scripts/decode-coredump.sh coredump.bin >/dev/null 2>&1 ) || rc=$?
+[ "$rc" -eq 143 ] || { echo "decoder interruption status was lost: $rc" >&2; exit 1; }
 cmp "$scratch/last-good.elf" "$plain"
 assert_no_parts
 

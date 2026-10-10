@@ -20,9 +20,9 @@ checks the values, and none of them can see that the picture in the README shows
 pipes, a pill that has since moved, or a component that no longer exists. A screenshot cannot fail
 a test. It can only be out of date, and it looks exactly as good either way.
 
-That is why the gate is a **stamp**, not a re-render: CI has no browser. And it is why the gate can
-only ever prove the recording is *current* — never that it is *right*. The second half is this
-skill's.
+The recording audit compares a **stamp** with the current UI and GIF; recording remains local.
+CI also runs browser rendering checks, but those do not re-record or judge this GIF. The stamp
+proves the recording is *current*; visual review of the recording is the second half of this skill.
 
 **This is a merge gate** (`tools/agent-hooks/require-pr-gates.sh`) and the audit is a CI `mechanical_gates`
 step. Neither was true before: the audit was kept out of CI because a gate whose remedy is

@@ -1,4 +1,4 @@
-// translation-source: 856c2ce7d1e297c3bcf8a20a2f1b4c8079ed68a2890bb1d0729997a0bd963c19
+// translation-source: bcd4ff0bb5bf1f2e454eb0f7e5c00ea352bcbb9f1f0c080ef5225bc85210fa0b
 I18N.es = localeValues([
   /* sys.nodata */ "Sin datos",
   /* sys.unreachable */ "No accesible",
@@ -41,6 +41,9 @@ I18N.es = localeValues([
   /* crash.fw */ "fw",
   /* crash.elf */ "elf",
   /* crash.corrupted */ "dañado",
+  /* crash.stored_dump */ "Informe de fallo guardado",
+  /* crash.stored_hint */ "Se desconocen la antigüedad del informe y su relación con este reinicio.",
+  /* crash.backtrace */ "Pila de llamadas",
   /* crash.download */ "Descargar informe de fallo",
   /* crash.copy */ "Copiar diagnóstico",
   /* crash.dismiss */ "Eliminar informe",

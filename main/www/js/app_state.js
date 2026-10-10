@@ -740,14 +740,34 @@ function renderRollbackBanner() {
 // second tap INSIDE the banner, not another modal: this decision is local to the evidence banner
 // and needs no separate context or fields.
 //
-// Those two cases need DIFFERENT wording: last_crash is notable when `fault` OR `coredump` is set,
-// so an orphan dump left in flash from an earlier crash raises the banner on every later boot — even
+// Those two cases need DIFFERENT wording: stored-dump metadata can outlive its original reset
+// and remain available on later boots — even
 // a clean power-on or a USB re-plug (reset=usb, fault=false). Titling that "Device restarted after a
-// crash" reports a crash that did not happen on this boot. Key the title on `fault`, which is the
-// only field that says THIS boot was a crash.
+// fault" reports a fault that did not happen on this boot. Key the title on `fault`, which covers
+// application crashes, watchdogs and power faults such as brownout/pwr_glitch on THIS boot.
+// A stored dump identifies a build, not a boot. Even a matching ELF cannot establish
+// its age or whether its task/PC/backtrace belong to the reset reported on this boot.
+function crashStoredMetadata(c) {
+  const text = (value) => typeof value === "string" ? value : "";
+  const address = (value) => /^0x[0-9a-f]+$/i.test(text(value)) ? value : "";
+  const task = text(c.task).trim(), pc = address(c.pc);
+  const bt = Array.isArray(c.backtrace) ? c.backtrace.filter((value) => address(value)) : [];
+  const elf = /^[0-9a-f]{8,64}$/i.test(text(c.elf_sha256)) ? c.elf_sha256 : "";
+  return { task, pc, bt, elf,
+    present: c.coredump === true || !!task || !!pc || bt.length > 0 || !!elf };
+}
+
+// Keep the stored task on one copied record, including Unicode line separators.
+function crashReportTask(task) {
+  return JSON.stringify(task).replace(/[\u0085\u2028\u2029]/g,
+    (char) => "\\u" + char.charCodeAt(0).toString(16).padStart(4, "0"));
+}
+
 function renderCrashBanner() {
   const el = $("crashBanner"), c = S.status?.last_crash;
   if (!c) { el.hidden = true; return; }
+  const stored = crashStoredMetadata(c), fault = c.fault === true, downloadable = c.coredump === true;
+  if (!fault && !stored.present) { el.hidden = true; return; }
   // Two different identities. `sig` is WHICH crash this is — the key the delete flow works on, so an
   // answer that arrives about a DIFFERENT crash can't be acted on. `rsig` is what the banner
   // currently DRAWS, which also depends on c.coredump (it gates the download button, and /status
@@ -761,29 +781,35 @@ function renderCrashBanner() {
   const ask  = S.crashAsk === sig;
   // The crash identity stays language-neutral (`sig`, used by the delete flow), while the DRAW
   // signature includes LANG because every visible label/action in the banner is localised.
-  const rsig = `${LANG}:${sig}:${!!c.coredump}:${ask}`;
+  const rsig = `${LANG}:${sig}:${downloadable}:${stored.present}:${ask}`;
   if (S.crashDismissed === sig) { el.hidden = true; return; }
   if (el.dataset.rsig === rsig && !el.hidden) return;   // already rendered this — don't thrash the DOM
   el.dataset.sig  = sig;    // crash key (read by the delete handler)
   el.dataset.rsig = rsig;   // render key
 
-  const s = S.status || {}, bt = Array.isArray(c.backtrace) ? c.backtrace : [];
+  const s = S.status || {};
   const bits = [`${esc(t("crash.reset"))}: <b>${esc(c.reason)}</b>`];
-  if (c.task) bits.push(`${esc(t("crash.task"))} <span class="mono">${esc(c.task)}</span>`);
   if (s.version) bits.push(`${esc(t("crash.fw"))} v${esc(s.version)}`);
   if (s.app_elf_sha256) bits.push(`${esc(t("crash.elf"))} <span class="mono">${esc(s.app_elf_sha256.slice(0, 12))}…</span>`);
-  const btHtml = bt.length
-    ? `<div class="crash-bt mono">${esc(bt.join(" "))}${c.corrupted ? " (" + esc(t("crash.corrupted")) + ")" : ""}</div>` : "";
-  const dl = c.coredump
+  const dumpBits = [esc(t("crash.stored_dump"))];
+  if (stored.task) dumpBits.push(`${esc(t("crash.task"))} <span class="mono">${esc(stored.task)}</span>`);
+  if (stored.pc) dumpBits.push(`PC <span class="mono">${esc(stored.pc)}</span>`);
+  const btHtml = stored.bt.length
+    ? `<div class="crash-meta">${esc(t("crash.stored_dump"))} · ${esc(t("crash.backtrace"))}</div>` +
+      `<div class="crash-bt mono">${esc(stored.bt.join(" "))}${c.corrupted ? " (" + esc(t("crash.corrupted")) + ")" : ""}</div>` : "";
+  const storedHtml = stored.present
+    ? `<div class="crash-meta">${dumpBits.join(" · ")}</div>` +
+      `<div class="crash-meta">${esc(t("crash.stored_hint"))}</div>` + btHtml : "";
+  const dl = downloadable
     ? `<a class="btn secondary sm" href="/coredump" download="coredump.bin">${esc(t("crash.download"))}</a>` : "";
-  const title = c.fault ? t("crash.title_fault") : t("crash.title_orphan");
+  const title = fault ? t("crash.title_fault") : t("crash.title_orphan");
   // The confirm step REPLACES the actions row rather than appearing under it: what it asks about is
   // the two buttons beside it (the dump download most of all), and leaving them live next to their
   // own deletion prompt invites the tap that makes the question moot. The question names the dump
   // only when one exists — on a fault reset that overran its own dump there is nothing to lose but
   // the record, and saying otherwise would talk someone out of a harmless delete.
   const actions = ask
-    ? `<div class="crash-ask">${esc(t(c.coredump ? "crash.ask_dump" : "crash.ask"))}</div>` +
+    ? `<div class="crash-ask">${esc(t(downloadable ? "crash.ask_dump" : "crash.ask"))}</div>` +
       `<div class="crash-actions">` +
       `<button class="btn danger sm" type="button" data-cact="del">${esc(t("crash.ask_yes"))}</button>` +
       `<button class="btn ghost sm" type="button" data-cact="keep">${esc(t("crash.ask_no"))}</button></div>`
@@ -793,7 +819,7 @@ function renderCrashBanner() {
   el.innerHTML =
     `<div class="crash-head"><span class="crash-ico">!</span>` +
     `<div class="crash-txt"><div class="crash-title">${esc(title)}</div>` +
-    `<div class="crash-meta">${bits.join(" · ")}</div>${btHtml}</div></div>` + actions;
+    `<div class="crash-meta">${bits.join(" · ")}</div>${storedHtml}</div></div>` + actions;
   el.hidden = false;
 }
 
@@ -826,16 +852,20 @@ async function copyDiagnostics() {
   } catch (e) {
     diag = `Could not be read from the device: ${e && e.message ? e.message : e}`;
   }
-  const s = S.status || {}, c = s.last_crash || {}, bt = Array.isArray(c.backtrace) ? c.backtrace : [];
+  const s = S.status || {}, c = s.last_crash || {}, stored = crashStoredMetadata(c);
   const lines = [
     "daikin-altherma-esp32 crash report",
     `firmware: v${s.version || "?"} (${s.platform || "?"})`,
     `app_elf_sha256: ${s.app_elf_sha256 || "?"}`,
-    `reset: ${c.reason || "?"}  fault=${!!c.fault}  coredump=${!!c.coredump}`,
+    `current boot reset: ${c.reason || "?"}  fault=${c.fault === true}  coredump=${c.coredump === true}`,
   ];
-  if (c.task) lines.push(`task: ${c.task}  pc: ${c.pc || "?"}`);
-  if (bt.length) lines.push(`backtrace: ${bt.join(" ")}${c.corrupted ? "  (corrupted)" : ""}`);
-  if (c.elf_sha256 && c.elf_sha256 !== s.app_elf_sha256) lines.push(`crashed build elf_sha256: ${c.elf_sha256}`);
+  if (stored.present) {
+    lines.push("stored dump metadata: age unknown; relationship to this reset unknown");
+    if (stored.task) lines.push(`stored dump task: ${crashReportTask(stored.task)}`);
+    if (stored.pc) lines.push(`stored dump pc: ${stored.pc}`);
+    if (stored.bt.length) lines.push(`stored dump backtrace: ${stored.bt.join(" ")}${c.corrupted ? "  (corrupted)" : ""}`);
+    if (stored.elf) lines.push(`stored dump elf_sha256: ${stored.elf}`);
+  }
   lines.push("", "--- /diag ---", diag.trim());
   if (await copyText(lines.join("\n"))) toast(t("crash.copied"), "ok");
   else toast(t("crash.copy_fail"), "err");

@@ -1652,8 +1652,8 @@ static void append_status_json(JsonOut& j, bool redact) {
     j += jstr(ui_lang_name(c.ui_lang));
     j += "},";
 
-    // Last reset: null on a clean boot, else the crash summary (reset reason + core-dump backtrace).
-    // The reason/backtrace come from the boot-time CACHE (diag_crash.cpp) — never re-parsed from
+    // Current reset/fault plus optional stored-dump summary of unknown age; null on a clean boot.
+    // These distinct facts come from the boot-time CACHE (diag_crash.cpp) — never re-parsed from
     // flash here: this builder answers a REQUEST, now up to once every 8 s per open dashboard, so
     // keep the path cheap (no flash PARSE).
     // `coredump` is the exception: it must reflect flash NOW, not at boot, or a dump erased via
@@ -2406,8 +2406,8 @@ static esp_err_t h_diag_clear(httpd_req_t* req) {
 
 static esp_err_t h_coredump(httpd_req_t* req) {
     // Match /status.last_crash exactly: a raw image proven to belong to another firmware is not a
-    // downloadable report, even when its best-effort boot-time erase failed and bytes remain in the
-    // partition. Without this gate the banner says "no dump" while the endpoint serves one that
+    // downloadable report. Boot capture preserves its private bytes in the partition and latches
+    // suppression. Without this gate the banner says "no dump" while the endpoint serves one that
     // esp-coredump rejects on the ELF SHA mismatch.
     if (!diag_crash_coredump_present()) {
         httpd_resp_set_status(req, "404 Not Found");
