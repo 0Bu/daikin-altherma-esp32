@@ -1021,7 +1021,11 @@ Body, ordered:
      `js/descriptions.js`), the same label-pattern technique the schematic/grouping already use, so one entry serves
      every profile's spelling of a quantity. Native Altherma 4 rows first select profile/offset-specific
      `I18N` explanations through `descFor(label, row)`, including the unverified flow/pump/pressure
-     interpretation limits. A row neither path covers stays plain — unless
+     interpretation limits. Native stand-ins retain their own explanations under an X10A row;
+     native flow/pressure comparisons state the conversion limit instead of numeric agreement or
+     difference. The shared inspector comparison uses the same rule, and its repaint signature
+     includes the Modbus definition metadata even when a numeric value stays unchanged.
+     A row neither path covers stays plain — unless
      the firmware keeps a **trend** for it, which opens the same panel on its own (below).
      **The schematic inspector (§5.3 item 3) reads this same table**, so a quantity is explained
      identically whether the user arrives from the picture or from the value list — add a concept

@@ -285,8 +285,11 @@ all 125 value and 15 model-description rows must have native copy with no Englis
 `/locale.js`; every deterministic gzip asset stays within its 32 KiB response budget; and all locale
 assets together stay within a 283 KiB aggregate-growth guard. The reviewed growth includes the
 complete localized factory-reset warning, cause-neutral diagnostic/report copy and native Altherma 4
-labels, state names and source-qualified explanations in every shipped language;
-the separate firmware-size gate binds
+labels, state names and source-qualified explanations in every shipped language.
+Native flow/pressure limits are exercised in standalone, paired and replacement readings, including
+inspector invalidation when only definition metadata changes. Unverified conversions do not emit
+numeric agreement/difference claims.
+The separate firmware-size gate binds
 the actual signed application image and its slot headroom. A fingerprint over the canonical
 English/domain copy makes every locale stale when a source sentence changes without its translation;
 `node tools/ui_localization/selftest.mjs` proves that stale source copy, missing specialist/domain

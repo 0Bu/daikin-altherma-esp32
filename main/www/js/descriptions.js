@@ -1209,6 +1209,12 @@ const MB_DELTA_WHY = {
 // comparing two numbers wants to know whether they agree, and "1.7 K apart, and here is why" is a
 // different statement from two numbers left side by side to be squinted at.
 function mbDeltaHtml(row, mb) {
+  // A numeric difference would assume verified common units. Keep the native conversion limit
+  // visible beside the second source instead, even when X10A supplies the primary reading.
+  if (mb?.profile === "altherma4" && [49, 68, 79].includes(mb.off)) {
+    const limit = descFor(mb.label, mb)?.what;
+    if (limit) return descParaHtml(esc(limit));
+  }
   const why = MB_DELTA_I18N[LANG]?.[row.concept] ||
     (MB_DELTA_WHY[row.concept] ? tx(MB_DELTA_WHY[row.concept]) : "");
   // A bit flag has no difference to state. Agreement on a flag is unremarkable and says nothing;

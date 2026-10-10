@@ -312,6 +312,27 @@ const nativeAltherma4Rows = Object.freeze([
     labelKey: "a4.unit_operation", valueKey: "enum.actuator", helpKey: "a4.operation_help" },
 ]);
 
+// Exercise the delegated pointer lifecycle, including the disclosure animation.
+async function clickDisclosure(page, selector) {
+  const point = await page.evaluate(`(() => {
+    const button = document.querySelector(${JSON.stringify(selector)});
+    button.scrollIntoView({ block: "center" });
+    const rect = button.getBoundingClientRect();
+    return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+  })()`);
+  await page.send("Input.dispatchMouseEvent", { type: "mouseMoved", ...point });
+  await page.send("Input.dispatchMouseEvent",
+    { type: "mousePressed", button: "left", clickCount: 1, ...point });
+  await page.send("Input.dispatchMouseEvent",
+    { type: "mouseReleased", button: "left", clickCount: 1, ...point });
+  await page.waitFor(`(() => {
+    const button = document.querySelector(${JSON.stringify(selector)});
+    const item = button?.closest(".vitem");
+    return button?.getAttribute("aria-expanded") === "true" && item.classList.contains("open") &&
+      item.getAnimations({ subtree: true }).every((animation) => animation.playState !== "running");
+  })()`);
+}
+
 async function assertNativeAltherma4(page, context) {
   try {
     await page.evaluate(`(() => {
@@ -392,25 +413,7 @@ async function assertNativeAltherma4(page, context) {
       assert.equal(reading.closed, true, `${context}/${row.off}: fixture must start collapsed`);
       assert.equal(reading.trend, "", `${context}/${row.off}: no unadvertised trend may be attached`);
 
-      // Scroll to the actual production button and dispatch a real pointer click. Calling
-      // toggleDesc() or Element.click() directly would miss delegated pointer/click lifecycle bugs.
-      const point = await page.evaluate(`(() => {
-        const button = document.querySelector(${JSON.stringify(selector)});
-        button.scrollIntoView({ block: "center" });
-        const rect = button.getBoundingClientRect();
-        return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
-      })()`);
-      await page.send("Input.dispatchMouseEvent", { type: "mouseMoved", ...point });
-      await page.send("Input.dispatchMouseEvent",
-        { type: "mousePressed", button: "left", clickCount: 1, ...point });
-      await page.send("Input.dispatchMouseEvent",
-        { type: "mouseReleased", button: "left", clickCount: 1, ...point });
-      await page.waitFor(`(() => {
-        const button = document.querySelector(${JSON.stringify(selector)});
-        const item = button?.closest(".vitem");
-        return button?.getAttribute("aria-expanded") === "true" && item.classList.contains("open") &&
-          item.getAnimations({ subtree: true }).every((animation) => animation.playState !== "running");
-      })()`);
+      await clickDisclosure(page, selector);
       assert.deepEqual(await page.evaluate(`(() => {
         const button = document.querySelector(${JSON.stringify(selector)});
         const item = button.closest(".vitem");
@@ -439,6 +442,44 @@ async function assertNativeAltherma4(page, context) {
         { format: "png", captureBeyondViewport: true, clip });
       fs.writeFileSync(path.join(evidenceDirectory, `${context.replaceAll("/", "-")}.png`),
         Buffer.from(capture.data, "base64"));
+    }
+    // The same limits must survive both a live second opinion and a native stand-in under an
+    // existing X10A row. The standalone card alone cannot establish those production routes.
+    for (const connected of [true, false]) {
+      await page.waitFor("!S.clickHold");
+      await page.evaluate(`(() => {
+        S.status.hp.connected = ${connected};
+        S._values = [
+          { label: "Flow sensor", value: "2.5", unit: "L/min", reg: 0x61, concept: "flow" },
+          { label: "Water Pressure", value: "2.5", unit: "bar", reg: 0x61, concept: "water_pressure" },
+        ];
+        S._modbus = ${JSON.stringify(nativeAltherma4Rows.filter(r => [49, 79].includes(r.off)))}
+          .map(({ labelKey, valueKey, helpKey, ...row }) => ({ ...row, profile: "altherma4",
+            concept: row.off === 49 ? "flow" : "water_pressure" }));
+        S.descOpen = new Set();
+        renderApp();
+      })()`);
+      for (const [off, label, key, nativeValue] of [
+        [49, "Flow sensor", "a4.flow_help", "2.6"],
+        [79, "Water Pressure", "a4.pressure_help", "2"],
+      ]) {
+        const selector = `#valueGroups button[data-desc=${JSON.stringify(label)}]`;
+        await clickDisclosure(page, selector);
+        assert.deepEqual(await page.evaluate(`(() => {
+          const button = document.querySelector(${JSON.stringify(selector)});
+          const item = button.closest(".vitem");
+          const text = Array.from(item.querySelectorAll(".vdesc-p"), e => e.innerText);
+          return { help: text.includes(t(${JSON.stringify(key)})),
+            value: button.querySelector(".vrow-val").childNodes[0].textContent,
+            comparisons: item.querySelectorAll(".mb-line").length,
+            deltas: item.querySelectorAll(".mb-delta").length };
+        })()`), { help: true, value: connected ? "2.5" : nativeValue,
+          comparisons: connected ? 1 : 0, deltas: 0 },
+        `${context}/${off}/${connected ? "paired" : "stand-in"}: native limit stays visible without an unverified difference`);
+        assertLayout(await page.evaluate(layoutAudit), `${context}/${off}/paired-limit`);
+      }
+      await assertAccessibility(page, `${context}/paired-limit/${connected}`, { nativeTree: true });
+      assert.deepEqual(page.diagnostics, [], `${context}: paired limits must emit no browser errors`);
     }
   } finally {
     // The last real click holds per-poll rebuilds briefly. Restore only after that production lease

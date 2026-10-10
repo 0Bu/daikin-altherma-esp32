@@ -1933,7 +1933,6 @@ function vDescRow(v) {
   // prefixing those keys preserves every existing key while making the colliding rows independent.
   const key = v.key || (v.x10a_group ? `${v.x10a_group}:${label}` : label);
   let cls = v.state || v.class || "";
-  const d = descFor(label, v);
   const hid = histIdFor(label);          // this profile's spelling -> the concept the device buffers
   // The SECOND source for this row, if the HomeHub carries the same quantity (paired on the concept
   // the firmware resolved — see mbByConcept). Two distinct uses, and they must not be confused:
@@ -1949,6 +1948,10 @@ function vDescRow(v) {
   // current row while the pill above it, the inspector, the chart and MQTT all refuse it.
   const notCurrent = x10aDown() || rowNotMeasuring(v);
   const src = fb || v;
+  // A native stand-in needs its own interpretation limits, rather than the unavailable X10A
+  // instrument's explanation. Baseline HomeHub and ordinary X10A copy retain their established path.
+  const nativeFallback = fb?.profile === "altherma4";
+  const d = descFor(nativeFallback ? fb.label : label, nativeFallback ? fb : v);
   if (fb) cls = (cls ? cls + " " : "") + "src-val-mb";
   const unit = displayUnit(src);
   const val = (notCurrent && !fb)

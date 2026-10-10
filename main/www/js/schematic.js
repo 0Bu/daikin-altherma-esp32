@@ -1576,6 +1576,8 @@ const inspTitleText = (e, d) => inspFieldText(e, "t", d);
 // Everything the panel would draw, as one string — the change key for the render guard above. It
 // covers the selection, the headline, the live sentence and every member reading, so a value moving
 // still repaints while an idle second does not.
+const inspectModbusSignature = (row) => row
+  ? JSON.stringify([row.value, row.label, row.unit, row.off, row.profile, row.enum, row.binary]) : "";
 function inspectSig(e) {
   if (!e) return "";
   if (e.env3) {
@@ -1594,12 +1596,12 @@ function inspectSig(e) {
   // a side effect IN here, and the quieter of the two failures: the panel keeps showing the gateway's
   // reading from whenever something else last changed, looking perfectly current.
   const rows = (d ? inspValues(e, row, fb).map((m) => {
-    return inspVal(m.x10a, d) + (m.mb ? "/" + m.mb.value : "")
+    return inspVal(m.x10a, d) + (m.mb ? "/" + inspectModbusSignature(m.mb) : "")
       + (m.compare ? "/" + m.compare.value : "");
   }) : []).join(",");
   // LANG guarantees the full body is redrawn even when this particular entry's title/live sentence
   // happens to be spelled identically in both dictionaries.
-  return [LANG, S.insp, inspTitleText(e, d), inspVal(row, d), fb ? fb.value : "",
+  return [LANG, S.insp, inspTitleText(e, d), inspVal(row, d), inspectModbusSignature(fb),
           d && e.head ? e.head(d) : "",
           inspNowText(e, d) || "", inspHeld(e, d) ? "held" : "", rows].join("|");
 }

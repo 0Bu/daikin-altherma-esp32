@@ -10,15 +10,19 @@ const schematicSource = readAppFragments(["schematic.js"]);
 
 function renderer(lang) {
   const source = readAppFragments(["i18n.js"]) +
-    (lang === "en" ? "" : readUiLocale(lang)) + readAppFragments(["history.js", "descriptions.js"]);
+    (lang === "en" ? "" : readUiLocale(lang)) +
+    readAppFragments(["history.js", "descriptions.js", "schematic.js"]);
   const context = {
     document: { getElementById: () => null },
     fetch: () => { throw new Error("unexpected fetch in enum test"); },
     localStorage: { getItem: () => lang, setItem: () => {} },
     navigator: { language: lang },
+    S: { status: { hp: { connected: true }, modbus: { enabled: true, connected: true },
+      history: { rows: [], modbus_rows: [], env3_rows: [] } },
+      _values: [], _modbus: [], descOpen: new Set(), hist: new Map() },
   };
   vm.createContext(context);
-  vm.runInContext(source + "\nthis.__ui = { displayValue, displayUnit, displayReadingLabel, displayHomeHubLabel, descFor, operationModeText, operationModeFromFlags, labels: I18N[LANG]," +
+  vm.runInContext(source + "\nthis.__ui = { displayValue, displayUnit, displayReadingLabel, displayHomeHubLabel, descFor, mbNoteHtml, vDescRow, inspectSig, INSPECT, state: S, operationModeText, operationModeFromFlags, labels: I18N[LANG]," +
     " sgModeText: (mode) => t(`sg.mode${mode}`)," +
     " sgBoostText: () => t(\"schem.sg_boost\") };", context,
     { filename: "main/www/app.sources" });
@@ -88,6 +92,33 @@ for (const lang of ["en", "de", "es", "fr", "it", "pl", "cs", "uk", "zh", "ja", 
   }
   for (const [semantic, value] of nativeModes)
     assert.doesNotMatch(ui.displayValue({value, enum: semantic}), /^(?:enum\.|a4\.)/);
+  for (const [off, label, unit, concept, key] of [
+    [49, "Flow rate", "L/min", "flow", "flow_help"],
+    [79, "Water pressure", "bar", "water_pressure", "pressure_help"],
+  ]) {
+    const x = { label: off === 49 ? "Flow sensor" : "Water Pressure", value: "2.5", unit, concept };
+    const native = { off, label, value: 2, unit, concept, profile: "altherma4" };
+    const escaped = ui.labels[`a4.${key}`].replace(/[&<>"]/g,
+      (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+    const comparison = ui.mbNoteHtml(x, native);
+    assert.ok(comparison.includes(escaped), `${lang}/${off}: paired reading exposes its native limit`);
+    assert.ok(!comparison.includes('class="mb-delta"'),
+      `${lang}/${off}: unverified scaling cannot assert a physical difference or agreement`);
+    assert.ok(!ui.mbNoteHtml(x, {...native, profile: "homehub"}).includes(escaped),
+      `${lang}/${off}: the independent base comparison keeps its established meaning`);
+    ui.state._values = [x]; ui.state._modbus = [native]; ui.state.status.hp.connected = false;
+    const fallback = ui.vDescRow(x);
+    assert.ok(fallback.includes(escaped), `${lang}/${off}: native replacement exposes its own limit`);
+    assert.ok(!fallback.includes('class="mb-delta"'), `${lang}/${off}: no stale-source difference`);
+    ui.state.status.hp.connected = true;
+    ui.state.live = { flow: 2.5, wp: 2.5, ouHeldOver: false };
+    ui.state.insp = off === 49 ? "flow" : "wp";
+    ui.state._modbus = [{...native, profile: "homehub"}];
+    const baseSignature = ui.inspectSig(ui.INSPECT[ui.state.insp]);
+    ui.state._modbus[0].profile = "altherma4";
+    assert.notEqual(ui.inspectSig(ui.INSPECT[ui.state.insp]), baseSignature,
+      `${lang}/${off}: source metadata alone must refresh an open inspector's meaning`);
+  }
 }
 assert.equal(en.displayHomeHubLabel({off: 58, label: "Power consumption"}), "Power consumption",
   "the independent base profile keeps its actual power-consumption label");

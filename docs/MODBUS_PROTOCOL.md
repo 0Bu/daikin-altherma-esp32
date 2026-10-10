@@ -319,9 +319,11 @@ conversion are retained pending real-device evidence. The native guide does not 
 flow scale, prints L/min for pump speed and gives an ambiguous 10–600 bar pressure range. These
 outputs, pressure pairing and pressure-based profile selection must not be treated as confirmed
 physical measurements or verified model identification. The native value explainers also state the
-unverified flow/pump/pressure interpretations in every shipped language. The sentinel filter remains a conservative
-project rule; the guide explicitly documents unavailable 32766 for input 23 but does not establish
-the complete EKRHH sentinel vocabulary for every native row.
+unverified flow/pump/pressure interpretations in every shipped language.
+The limits also appear beside paired X10A comparisons and under native replacement readings. No
+numeric agreement or difference is asserted for native flow/pressure while their scaling is unverified.
+The sentinel filter remains a conservative project rule; the guide explicitly documents unavailable
+32766 for input 23 but does not establish the complete EKRHH sentinel vocabulary for every native row.
 
 To complete HUB-02, record the matching model/MMI version and compare raw registers 49/68/79 with
 simultaneous controller readings or independent references across more than one operating point.
