@@ -15,7 +15,8 @@ template <typename Reg, size_t N> constexpr bool modbus_offsets_unique(const Reg
 }
 
 template <typename Reg, size_t N, size_t M>
-constexpr uint8_t modbus_definition_id(const Reg (&base)[N], const Reg (&native)[M], const Reg& row) {
+constexpr uint8_t modbus_definition_id(const Reg (&base)[N], const Reg (&native)[M],
+                                       const Reg& row) {
     static_assert(N + M <= 255, "Modbus definition tokens exceed their cache byte");
     for (size_t i = 0; i < N; ++i)
         if (&row == &base[i]) return static_cast<uint8_t>(i + 1);
@@ -25,7 +26,8 @@ constexpr uint8_t modbus_definition_id(const Reg (&base)[N], const Reg (&native)
 }
 
 template <typename Reg, size_t N, size_t M>
-constexpr const Reg* modbus_definition(const Reg (&base)[N], const Reg (&native)[M], uint8_t token) {
+constexpr const Reg* modbus_definition(const Reg (&base)[N], const Reg (&native)[M],
+                                       uint8_t token) {
     if (token == 0) return nullptr;
     const size_t index = token - 1;
     if (index < N) return &base[index];

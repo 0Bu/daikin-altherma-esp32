@@ -1278,7 +1278,8 @@ void history_record_modbus(const CachedValue* v, size_t n, uint32_t identity_gen
             if (v[i].off != wanted) continue;
             const auto* row = def::homehub_definition(v[i].modbus_definition);
             if (!row || !logic::homehub_history_row_matches(logic::HOMEHUB_HISTORIES[t], *row,
-                    def::homehub_has_quiet_activity(*row))) continue;
+                                                            def::homehub_has_quiet_activity(*row)))
+                continue;
             int tenths = 0;
             if (value_tenths(v[i].value, tenths)) sample[t] = static_cast<HistorySample>(tenths);
             break;

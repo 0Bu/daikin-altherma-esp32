@@ -997,16 +997,16 @@ static void mb_poll_once() {
         cv.reg  = def::HOMEHUB_GROUP_REG;
         cv.off  = static_cast<uint8_t>(r.offset);
         cv.modbus_definition = def::homehub_definition_id(r);
-        // conv only TYPES the value downstream (conv_is_binary for /values, published_kind for MQTT).
-        // No X10A decode runs here — homehub_format already produced the string — so these are
-        // BORROWED kinds, not claims that a HomeHub register is an X10A one: 204 for the Text16
+        // conv only TYPES the value downstream (conv_is_binary for /values, published_kind for
+        // MQTT). No X10A decode runs here — homehub_format already produced the string — so these
+        // are BORROWED kinds, not claims that a HomeHub register is an X10A one: 204 for the Text16
         // error code, and a bit-flag id for a register the catalog marks Binary, which is
-        // what makes /values emit `"binary":true` so the browser renders ON/OFF instead of a bare 1.
-        // Named enums keep their raw numeric Modbus constants and deliberately carry no binary
-        // marker. /values adds their semantic enum id separately, so the visual UI can name them
-        // without turning MQTT's mode 2 into the text "Recommended on".
-        // API/MQTT resolve the snapshot's definition token, including mixed base/probe sweeps.
-        // They never borrow a different profile's row at the same offset.
+        // what makes /values emit `"binary":true` so the browser renders ON/OFF instead of a
+        // bare 1. Named enums keep their raw numeric Modbus constants and deliberately carry no
+        // binary marker. /values adds their semantic enum id separately, so the visual UI can name
+        // them without turning MQTT's mode 2 into the text "Recommended on". API/MQTT resolve the
+        // snapshot's definition token, including mixed base/probe sweeps. They never borrow a
+        // different profile's row at the same offset.
         cv.conv = (r.type == MbType::Text16) ? 204 : def::homehub_is_binary(r) ? 300 : 0;
         cv.held = false;                           // no held-over concept on this link
         char buf[24];
@@ -1125,7 +1125,7 @@ static void mb_poll_once() {
     // each full cycle.
     const uint32_t now_s = static_cast<uint32_t>(esp_timer_get_time() / 1000000ULL);
     const bool can_probe = (cur_prof == ModbusProfile::Auto) || s_probe_tracker.should_probe(now_s);
-    bool profile_promoted = false;
+    bool           profile_promoted = false;
     if (full && can_probe && !link_broken && s_sock >= 0) {
         uint16_t probe_pdu = 0;
         if (mb_pdu_address(logic::MODBUS_PROBE_REGISTER, probe_pdu)) {
@@ -1140,8 +1140,9 @@ static void mb_poll_once() {
                         if (decision.next_profile == ModbusProfile::Altherma4) {
                             profile_promoted = cur_prof != ModbusProfile::Altherma4;
                             if (profile_promoted) {
-                                // The baseline was decoded as EKRHH. Do not publish its profile-sensitive
-                                // enums/labels or quiet activity after learning this target is native.
+                                // The baseline was decoded as EKRHH. Do not publish its
+                                // profile-sensitive enums/labels or quiet activity after learning
+                                // this target is native.
                                 fresh.clear();
                                 for (bool& split : s_batch_split) split = false;
                             }

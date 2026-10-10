@@ -135,14 +135,15 @@ inline constexpr size_t HOMEHUB_HISTORY_COUNT =
 // `.space`, `.type`, `.scale` and `.unit`. A history register absent from the table fails too.
 template <typename Reg>
 constexpr bool homehub_history_row_matches(const HomeHubHistory& h, const Reg& r,
-                                          bool quiet_activity = true) {
+                                           bool quiet_activity = true) {
     return !(h.offset == 9 && !quiet_activity) && r.offset == h.offset &&
            r.space == h.decode.space && r.type == h.decode.type && r.scale == h.decode.scale &&
            trend_cstr_eq(r.unit, h.decode.unit);
 }
 
-template <typename Reg> constexpr bool homehub_history_decode_matches(const Reg* regs, int count,
-                                                                      bool quiet_activity = true) {
+template <typename Reg>
+constexpr bool homehub_history_decode_matches(const Reg* regs, int count,
+                                              bool quiet_activity = true) {
     for (const auto& h : HOMEHUB_HISTORIES) {
         if (h.offset == 9 && !quiet_activity) continue;
         const Reg* r = nullptr;
@@ -151,8 +152,7 @@ template <typename Reg> constexpr bool homehub_history_decode_matches(const Reg*
                 r = &regs[i];
                 break;
             }
-        if (!r || !homehub_history_row_matches(h, *r, quiet_activity))
-            return false;
+        if (!r || !homehub_history_row_matches(h, *r, quiet_activity)) return false;
     }
     return true;
 }

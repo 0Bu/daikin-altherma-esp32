@@ -22,11 +22,11 @@ struct CachedValue {
     std::string value;   // formatted; empty = not available this cycle
     const char* unit = "";
     uint8_t     reg = 0; // X10A register page it came from (MQTT groups values by page)
-    uint8_t     off = 0; // X10A byte offset, or 1-based Modbus data-model offset.
-                         // With `reg` and `unit` it is the
-                         // row's IDENTITY — how logic/history.hpp addresses a trended row, since
-                         // the catalog's labels neither name one quantity consistently nor name
-                         // different quantities differently (see that header). Never displayed.
+    uint8_t     off  = 0; // X10A byte offset, or 1-based Modbus data-model offset.
+                          // With `reg` and `unit` it is the
+                          // row's IDENTITY — how logic/history.hpp addresses a trended row, since
+                          // the catalog's labels neither name one quantity consistently nor name
+                          // different quantities differently (see that header). Never displayed.
     bool held = false; // the source PAGE was not refreshed this cycle: the outdoor unit is
                        // resting and is answering with its last run's numbers
                        // (logic/ou_stale.hpp). The value is kept — the trend ring needs to
@@ -41,18 +41,19 @@ struct CachedValue {
                        // publish task), and the binding limit on this board is the largest
                        // contiguous block — so a field-ordering slip is a real ~460 B of
                        // extra peak, not a style point.
-    uint8_t modbus_definition = 0; // immutable catalog row that decoded this Modbus value; 0 = none.
-                                  // Uses the padding byte: provenance does not enlarge X10A snapshots.
-    int conv = 0;      // the X10A row's converter id — the metadata its consumers
-                       // need, and the reason none of the DERIVED facts are cached beside
-                       // it: `conv_is_binary(conv)` says whether /values should mark the
-                       // row as a 1/0 flag for the browser, `published_kind(conv)` says
-                       // what JSON type the MQTT bridge must give it, and conv 203 is what
-                       // earns a derived numeric fault companion (logic/fault_state.hpp).
-                       // Re-deriving any of those from the formatted TEXT instead is how a
-                       // field ends up changing type between states (legacy-209 defect 3), and
-                       // caching each as its own flag would grow the struct once per
-                       // question asked.
+    uint8_t modbus_definition =
+        0;        // immutable catalog row that decoded this Modbus value; 0 = none.
+                  // Uses the padding byte: provenance does not enlarge X10A snapshots.
+    int conv = 0; // the X10A row's converter id — the metadata its consumers
+                  // need, and the reason none of the DERIVED facts are cached beside
+                  // it: `conv_is_binary(conv)` says whether /values should mark the
+                  // row as a 1/0 flag for the browser, `published_kind(conv)` says
+                  // what JSON type the MQTT bridge must give it, and conv 203 is what
+                  // earns a derived numeric fault companion (logic/fault_state.hpp).
+                  // Re-deriving any of those from the formatted TEXT instead is how a
+                  // field ends up changing type between states (legacy-209 defect 3), and
+                  // caching each as its own flag would grow the struct once per
+                  // question asked.
 };
 #ifdef ESP_PLATFORM
 static_assert(sizeof(CachedValue) == 40, "CachedValue grew beyond the contiguous snapshot budget");

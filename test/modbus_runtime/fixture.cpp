@@ -559,12 +559,12 @@ void reconfigure_generations() {
     REQUIRE(s_target_generation == 1);
 }
 struct RegisterWord {
-    MbFunc space;
+    MbFunc   space;
     uint16_t offset;
     uint16_t raw;
 };
 struct WireRequest {
-    MbFunc space;
+    MbFunc   space;
     uint16_t offset;
     uint16_t count;
 };
@@ -576,10 +576,10 @@ struct Peer {
     std::atomic<uint16_t> outdoor{1200};
     std::atomic<bool>     break_link{false};
     std::atomic<bool>     batch_exception{false};
-    std::atomic<bool>     probe_exception{false};
-    std::mutex           response_mutex;
+    std::atomic<bool>         probe_exception{false};
+    std::mutex                response_mutex;
     std::vector<RegisterWord> words;
-    std::vector<WireRequest> wire_requests;
+    std::vector<WireRequest>  wire_requests;
     explicit Peer(bool fallback = false, ModbusProfile profile = ModbusProfile::HomeHub,
                   const std::vector<RegisterWord>& initial_words = {})
         : batch_exception(fallback), words(initial_words) {
@@ -635,7 +635,7 @@ struct Peer {
                     std::vector<uint16_t> response_words;
                     for (uint16_t i = 0; i < qty; ++i) {
                         const uint16_t off = addr + i + 1;
-                        uint16_t w = off == 44 ? outdoor.load() : 1;
+                        uint16_t       w   = off == 44 ? outdoor.load() : 1;
                         {
                             std::lock_guard<std::mutex> lock(response_mutex);
                             for (const auto& word : words)
@@ -670,9 +670,9 @@ struct Peer {
 };
 
 struct CatalogFixture {
-    MbFunc space;
-    uint16_t offset;
-    uint16_t raw;
+    MbFunc      space;
+    uint16_t    offset;
+    uint16_t    raw;
     const char* formatted;
 };
 // Independent wire/format expectations: distinct words make a swapped response index visible.
@@ -712,27 +712,24 @@ const CatalogFixture HOMEHUB_WORDS[] = {
     {MbFunc::ReadHolding, 58, 600, "6.0"},
 };
 const CatalogFixture NATIVE_EXTRA_WORDS[] = {
-    {MbFunc::ReadInput, 65, 4, "4"},
-    {MbFunc::ReadInput, 66, 45, "45"},
-    {MbFunc::ReadInput, 67, 100, "100"},
-    {MbFunc::ReadInput, 68, 75, "75"},
-    {MbFunc::ReadInput, 74, 3550, "35.5"},
-    {MbFunc::ReadInput, 75, 4900, "49.0"},
-    {MbFunc::ReadInput, 76, 5200, "52.0"},
-    {MbFunc::ReadInput, 77, 4800, "48.0"},
-    {MbFunc::ReadInput, 79, 185, "1.85"},
-    {MbFunc::ReadInput, 80, 3300, "33.0"},
+    {MbFunc::ReadInput, 65, 4, "4"},       {MbFunc::ReadInput, 66, 45, "45"},
+    {MbFunc::ReadInput, 67, 100, "100"},   {MbFunc::ReadInput, 68, 75, "75"},
+    {MbFunc::ReadInput, 74, 3550, "35.5"}, {MbFunc::ReadInput, 75, 4900, "49.0"},
+    {MbFunc::ReadInput, 76, 5200, "52.0"}, {MbFunc::ReadInput, 77, 4800, "48.0"},
+    {MbFunc::ReadInput, 79, 185, "1.85"},  {MbFunc::ReadInput, 80, 3300, "33.0"},
     {MbFunc::ReadInput, 83, 3, "3"},
 };
 std::vector<CatalogFixture> catalog_fixture(bool native) {
     std::vector<CatalogFixture> rows(std::begin(HOMEHUB_WORDS), std::end(HOMEHUB_WORDS));
     if (native) {
-        rows.erase(std::remove_if(rows.begin(), rows.end(), [](const auto& row) {
-                       return row.space == MbFunc::ReadHolding && row.offset == 57;
-                   }), rows.end());
+        rows.erase(std::remove_if(rows.begin(), rows.end(),
+                                  [](const auto& row) {
+                                      return row.space == MbFunc::ReadHolding && row.offset == 57;
+                                  }),
+                   rows.end());
         for (auto& row : rows)
             if (row.space == MbFunc::ReadHolding && row.offset == 9) {
-                row.raw = 2;
+                row.raw       = 2;
                 row.formatted = "2";
             }
         rows.insert(rows.end(), std::begin(NATIVE_EXTRA_WORDS), std::end(NATIVE_EXTRA_WORDS));
@@ -741,25 +738,24 @@ std::vector<CatalogFixture> catalog_fixture(bool native) {
 }
 std::vector<RegisterWord> wire_words(bool native) {
     std::vector<RegisterWord> words;
-    for (const auto& row : catalog_fixture(native)) words.push_back({row.space, row.offset, row.raw});
+    for (const auto& row : catalog_fixture(native))
+        words.push_back({row.space, row.offset, row.raw});
     return words;
 }
 std::vector<CachedValue> snapshot_rows(bool expected_live = true) {
     std::vector<CachedValue> rows(mb_values_capacity());
-    bool live = false;
-    const auto count = mb_values_snapshot(rows.data(), rows.size(), live);
+    bool                     live  = false;
+    const auto               count = mb_values_snapshot(rows.data(), rows.size(), live);
     REQUIRE(live == expected_live);
     rows.resize(count);
     return rows;
 }
 const CachedValue& cached_row(const std::vector<CachedValue>& rows, uint16_t offset) {
-    const auto row = std::find_if(rows.begin(), rows.end(), [=](const auto& value) {
-        return value.off == offset;
-    });
+    const auto row = std::find_if(rows.begin(), rows.end(),
+                                  [=](const auto& value) { return value.off == offset; });
     REQUIRE(row != rows.end());
-    REQUIRE(std::count_if(rows.begin(), rows.end(), [=](const auto& value) {
-        return value.off == offset;
-    }) == 1);
+    REQUIRE(std::count_if(rows.begin(), rows.end(),
+                          [=](const auto& value) { return value.off == offset; }) == 1);
     return *row;
 }
 void require_catalog_rows(const std::vector<CachedValue>& rows, bool native) {
@@ -767,17 +763,18 @@ void require_catalog_rows(const std::vector<CachedValue>& rows, bool native) {
     REQUIRE(rows.size() == (native ? 42u : 32u));
     REQUIRE(rows.size() == fixture.size());
     const auto* definitions = native ? def::ALTHERMA4_REGS : def::HOMEHUB_REGS;
-    const int count = native ? def::ALTHERMA4_REG_COUNT : def::HOMEHUB_REG_COUNT;
+    const int   count       = native ? def::ALTHERMA4_REG_COUNT : def::HOMEHUB_REG_COUNT;
     for (int i = 0; i < count; ++i) {
         const auto& definition = definitions[i];
-        const auto& row = cached_row(rows, definition.offset);
-        const auto* resolved = def::homehub_definition(row.modbus_definition);
+        const auto& row        = cached_row(rows, definition.offset);
+        const auto* resolved   = def::homehub_definition(row.modbus_definition);
         REQUIRE(resolved == &definition);
         REQUIRE(def::homehub_definition_is_altherma4(row.modbus_definition) == native);
         REQUIRE(row.reg == def::HOMEHUB_GROUP_REG && !row.held);
         REQUIRE(row.label == definition.label && row.unit == definition.unit);
-        REQUIRE(row.conv == (definition.type == MbType::Text16 ? 204 :
-                             definition.kind == def::HomeHubValueKind::Binary ? 300 : 0));
+        REQUIRE(row.conv == (definition.type == MbType::Text16                  ? 204
+                             : definition.kind == def::HomeHubValueKind::Binary ? 300
+                                                                                : 0));
         const auto expected = std::find_if(fixture.begin(), fixture.end(), [&](const auto& value) {
             return value.space == definition.space && value.offset == definition.offset;
         });
@@ -787,11 +784,15 @@ void require_catalog_rows(const std::vector<CachedValue>& rows, bool native) {
 }
 void require_request_spans(const std::vector<WireRequest>& requests, bool native) {
     std::vector<WireRequest> expected = {
-        {MbFunc::ReadHolding, 1, 4}, {MbFunc::ReadHolding, 6, 2},
-        {MbFunc::ReadHolding, 9, 2}, {MbFunc::ReadHolding, 54, 1},
+        {MbFunc::ReadHolding, 1, 4},
+        {MbFunc::ReadHolding, 6, 2},
+        {MbFunc::ReadHolding, 9, 2},
+        {MbFunc::ReadHolding, 54, 1},
         {MbFunc::ReadHolding, 56, native ? uint16_t{1} : uint16_t{3}},
-        {MbFunc::ReadInput, 21, 3}, {MbFunc::ReadInput, 30, 4},
-        {MbFunc::ReadInput, 37, 2}, {MbFunc::ReadInput, 40, 6},
+        {MbFunc::ReadInput, 21, 3},
+        {MbFunc::ReadInput, 30, 4},
+        {MbFunc::ReadInput, 37, 2},
+        {MbFunc::ReadInput, 40, 6},
         {MbFunc::ReadInput, 49, 5},
     };
     if (native) {
@@ -802,7 +803,8 @@ void require_request_spans(const std::vector<WireRequest>& requests, bool native
         expected.push_back({MbFunc::ReadInput, 83, 1});
     }
     const auto less = [](const auto& a, const auto& b) {
-        if (a.space != b.space) return static_cast<uint8_t>(a.space) < static_cast<uint8_t>(b.space);
+        if (a.space != b.space)
+            return static_cast<uint8_t>(a.space) < static_cast<uint8_t>(b.space);
         return a.offset < b.offset;
     };
     auto actual = requests;
@@ -829,14 +831,15 @@ void homehub_definition_rows() {
     const auto rows = snapshot_rows();
     REQUIRE(def::homehub_definition(cached_row(rows, 9).modbus_definition)->kind ==
             def::HomeHubValueKind::Binary);
-    REQUIRE(std::string(cached_row(rows, 57).label) == "Power limit during Recommended on / buffering");
+    REQUIRE(std::string(cached_row(rows, 57).label) ==
+            "Power limit during Recommended on / buffering");
     REQUIRE(std::string(cached_row(rows, 58).label) == "General power limit");
     // EKRHH input38 has no zero/None state; native's recognized inactive zero must not leak here.
     peer.set_word(MbFunc::ReadInput, 38, 0);
     s_cycle_tick = 0;
     mb_poll_once();
-    const auto zero_rows = snapshot_rows();
-    const auto& zero = cached_row(zero_rows, 38);
+    const auto  zero_rows = snapshot_rows();
+    const auto& zero      = cached_row(zero_rows, 38);
     REQUIRE(zero.value == "0");
     REQUIRE(def::homehub_definition(zero.modbus_definition)->kind ==
             def::HomeHubValueKind::CurrentOperationMode);
@@ -856,7 +859,7 @@ void native_definition_rows() {
 void native_enum_case(uint16_t offset, MbFunc space, def::HomeHubValueKind expected_kind,
                       const char* expected_enum, uint16_t max_value) {
     reset();
-    Peer peer(false, ModbusProfile::Altherma4, wire_words(true));
+    Peer                  peer(false, ModbusProfile::Altherma4, wire_words(true));
     std::vector<uint16_t> raw_values;
     for (uint16_t raw = 0; raw <= max_value + 1; ++raw) raw_values.push_back(raw);
     raw_values.insert(raw_values.end(), {17, MB_WAIT, MB_UNAVAILABLE, MB_UNSUPPORTED});
@@ -864,8 +867,8 @@ void native_enum_case(uint16_t offset, MbFunc space, def::HomeHubValueKind expec
         peer.set_word(space, offset, raw);
         s_cycle_tick = 0;
         mb_poll_once();
-        const auto rows = snapshot_rows();
-        const auto& row = cached_row(rows, offset);
+        const auto  rows       = snapshot_rows();
+        const auto& row        = cached_row(rows, offset);
         const auto* definition = def::homehub_definition(row.modbus_definition);
         REQUIRE(definition != nullptr);
         REQUIRE(definition->kind == expected_kind);
@@ -907,8 +910,8 @@ void native_power_label() {
     reset();
     Peer peer(false, ModbusProfile::Altherma4, wire_words(true));
     mb_poll_once();
-    const auto rows = snapshot_rows();
-    const auto& row = cached_row(rows, 58);
+    const auto  rows       = snapshot_rows();
+    const auto& row        = cached_row(rows, 58);
     const auto* definition = def::homehub_definition(row.modbus_definition);
     REQUIRE(definition != nullptr && std::string(definition->label) == "Imposed power limit");
     REQUIRE(std::string(row.label) == "Imposed power limit" && row.value == "6.0" &&
@@ -932,14 +935,14 @@ void probe_native_promotion() {
     REQUIRE(peer.requests > MB_PLAN.count + 1);
     for (bool split : s_batch_split) REQUIRE(!split);
     REQUIRE(s_cycle_tick == 0);
-    peer.batch_exception = false;
+    peer.batch_exception      = false;
     const auto first_requests = peer.requests_snapshot().size();
     mb_poll_once();
     rows = snapshot_rows();
     require_catalog_rows(rows, true);
     const auto requests = peer.requests_snapshot();
-    require_request_spans(std::vector<WireRequest>(requests.begin() + first_requests, requests.end()),
-                          true);
+    require_request_spans(
+        std::vector<WireRequest>(requests.begin() + first_requests, requests.end()), true);
 }
 void probe_homehub_rows() {
     // An affirmative unsupported-register exception leaves all32 baseline definitions intact.
@@ -972,18 +975,18 @@ void definition_snapshot_cutover() {
     for (const auto profile : {ModbusProfile::HomeHub, ModbusProfile::Altherma4}) {
         reset();
         const bool native = profile == ModbusProfile::Altherma4;
-        Peer peer(false, profile, wire_words(native));
+        Peer       peer(false, profile, wire_words(native));
         mb_poll_once();
         auto retained_copy = snapshot_rows();
-        bool called = false;
+        bool called        = false;
         sdk::on_mutex_give = [&] {
             if (called) return;
-            called = true;
+            called               = true;
             adapter::cfg.mb_host = "replacement-unresolved";
             mb_reconfigure(true);
         };
         auto overlapping_copy = snapshot_rows(false);
-        sdk::on_mutex_give = {};
+        sdk::on_mutex_give    = {};
         REQUIRE(called && !mb_values_live() && s_cache.empty());
         REQUIRE(mb_active_profile() == ModbusProfile::Auto);
         // Both copied buffers keep their own row identity even though they are no longer live.

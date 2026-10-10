@@ -1248,8 +1248,9 @@ static void append_status_json(JsonOut& j, bool redact) {
     if (mb.enabled) {
         for (size_t mt = 0; mt < logic::HOMEHUB_HISTORY_COUNT; mt++) {
             const auto& hh = logic::HOMEHUB_HISTORIES[mt];
-            const def::HomeHubReg* r = mb.profile == ModbusProfile::Altherma4
-                ? def::altherma4_find(hh.offset) : def::homehub_find(hh.offset);
+            const def::HomeHubReg* r  = mb.profile == ModbusProfile::Altherma4
+                                            ? def::altherma4_find(hh.offset)
+                                            : def::homehub_find(hh.offset);
             if (r && !def::homehub_has_quiet_activity(*r)) continue;
             if (!r) continue;                         // compile-time table tests make this defensive
             if (!first_mb_trend) j += ",";
@@ -2060,14 +2061,20 @@ static void append_modbus_values_array(JsonOut& j, const std::vector<CachedValue
         if (reg)
             if (const char* eid = def::homehub_enum_id(reg->kind))
                 { j += ",\"enum\":"; json_append_quoted(j, eid); }
-        if (const char* cid = reg ? logic::homehub_concept_for(
-                reg->offset, def::homehub_has_quiet_activity(*reg)) : nullptr)
-            { j += ",\"concept\":"; json_append_quoted(j, cid); }
+        if (const char* cid =
+                reg ? logic::homehub_concept_for(reg->offset, def::homehub_has_quiet_activity(*reg))
+                    : nullptr) {
+            j += ",\"concept\":";
+            json_append_quoted(j, cid);
+        }
         // History metadata is wider than source pairing: a Modbus-only timeline must be attachable
         // to this row without pretending that it has an X10A `concept` twin.
-        if (const char* hid = reg ? logic::homehub_history_for(
-                reg->offset, def::homehub_has_quiet_activity(*reg)) : nullptr)
-            { j += ",\"history\":"; json_append_quoted(j, hid); }
+        if (const char* hid =
+                reg ? logic::homehub_history_for(reg->offset, def::homehub_has_quiet_activity(*reg))
+                    : nullptr) {
+            j += ",\"history\":";
+            json_append_quoted(j, hid);
+        }
         j += "}";
     }
     j += "]";
@@ -2231,13 +2238,13 @@ static esp_err_t h_history(httpd_req_t* req) {
     size_t t = 0;
     if (def_) { while (t < logic::TREND_COUNT && &logic::TRENDS[t] != def_) t++; }
     const int mb_t = modbus ? logic::homehub_history_index(id) : -1;
-    const bool native_modbus = modbus && mb_active_profile() == ModbusProfile::Altherma4;
+    const bool    native_modbus    = modbus && mb_active_profile() == ModbusProfile::Altherma4;
     const int env_t = env3_source ? env3_history_index(id) : -1;
     const Config& active_config = config();
     const bool env3_configured  = active_config.env3_enabled && env3_board_supported(active_config);
     const bool x10a_unknown = !modbus && !env3_source && (!def_ || t >= logic::TREND_COUNT);
-    const bool missing_quiet = native_modbus && mb_t >= 0 &&
-        logic::HOMEHUB_HISTORIES[mb_t].offset == 9;
+    const bool    missing_quiet =
+        native_modbus && mb_t >= 0 && logic::HOMEHUB_HISTORIES[mb_t].offset == 9;
     if (x10a_unknown || (modbus && (mb_t < 0 || missing_quiet)) ||
         (env3_source && (!env3_configured || env_t < 0))) {
         httpd_resp_set_status(req, "404 Not Found");
@@ -2270,9 +2277,9 @@ static esp_err_t h_history(httpd_req_t* req) {
 
     char lbl[80], unit[8];
     if (modbus) {
-        const uint16_t offset = logic::HOMEHUB_HISTORIES[mb_t].offset;
-        const def::HomeHubReg* r = native_modbus ? def::altherma4_find(offset)
-                                               : def::homehub_find(offset);
+        const uint16_t         offset = logic::HOMEHUB_HISTORIES[mb_t].offset;
+        const def::HomeHubReg* r =
+            native_modbus ? def::altherma4_find(offset) : def::homehub_find(offset);
         std::snprintf(lbl, sizeof(lbl), "%s", r ? r->label : "");
         std::snprintf(unit, sizeof(unit), "%s", r ? r->unit : "");
     } else if (env3_source) {
