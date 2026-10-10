@@ -788,7 +788,9 @@ Body, ordered:
    air, liquid refrigerant, flow and room temperature are the eight measurement concepts both sources
    structurally pair; BSH, the 3-way valve and Quiet are exact state pairs, the twelfth ring is the
    explicit Smart-Grid-mode timeline, and the thirteenth is HomeHub input 33's Modbus-only
-   disinfection timeline. X10A Tank preheat keeps a separate X10A-only timeline because preparation
+   disinfection timeline. Native Altherma 4 offers twelve histories and no Quiet activity
+   timeline: its holding 9 is Off/Automatic/Manual selection, not a live activity flag. The quiet pill
+   remains unknown without an independent X10A activity reading. X10A Tank preheat keeps a separate X10A-only timeline because preparation
    and active disinfection are not the same fact. Every categorical timeline uses the same
    grammar: one outlined track per available source, a separate labelled colour for every valid
    state, and hatching only for missing samples. Hover, touch pinning and keyboard navigation show a

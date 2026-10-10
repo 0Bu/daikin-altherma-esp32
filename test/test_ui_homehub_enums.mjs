@@ -5,11 +5,12 @@ import assert from "node:assert/strict";
 import vm from "node:vm";
 import { readAppFragments, readUiLocale } from "../tools/ui/read_app_source.mjs";
 
-const SOURCE = readAppFragments(["i18n.js"]) + readUiLocale("de") + readAppFragments(["history.js"]);
 const appStateSource = readAppFragments(["app_state.js"]);
 const schematicSource = readAppFragments(["schematic.js"]);
 
 function renderer(lang) {
+  const source = readAppFragments(["i18n.js"]) +
+    (lang === "en" ? "" : readUiLocale(lang)) + readAppFragments(["history.js", "descriptions.js"]);
   const context = {
     document: { getElementById: () => null },
     fetch: () => { throw new Error("unexpected fetch in enum test"); },
@@ -17,7 +18,7 @@ function renderer(lang) {
     navigator: { language: lang },
   };
   vm.createContext(context);
-  vm.runInContext(SOURCE + "\nthis.__ui = { displayValue, displayUnit, displayReadingLabel, operationModeText, operationModeFromFlags, labels: I18N[LANG]," +
+  vm.runInContext(source + "\nthis.__ui = { displayValue, displayUnit, displayReadingLabel, displayHomeHubLabel, descFor, operationModeText, operationModeFromFlags, labels: I18N[LANG]," +
     " sgModeText: (mode) => t(`sg.mode${mode}`)," +
     " sgBoostText: () => t(\"schem.sg_boost\") };", context,
     { filename: "main/www/app.sources" });
@@ -49,6 +50,46 @@ for (const [semantic, value, english, german] of modes) {
   assert.equal(en.displayValue(row), english, `${semantic}=${value} English named state`);
   assert.equal(de.displayValue(row), german, `${semantic}=${value} German named state`);
 }
+const nativeModes = [
+  ["altherma4_current_operation_mode", 0, "None", "Keine"],
+  ["altherma4_current_operation_mode", 1, "Heating", "Heizen"],
+  ["altherma4_current_operation_mode", 2, "Cooling", "Kühlen"],
+  ["altherma4_demand_response", 0, "Free running", "Freier Betrieb"],
+  ["altherma4_demand_response", 1, "Forced off", "Zwangsabschaltung"],
+  ["altherma4_demand_response", 2, "Forced on", "Erzwungen ein"],
+  ["altherma4_demand_response", 3, "Recommended on", "Empfehlung ein"],
+  ["altherma4_demand_response", 4, "Reduced", "Reduziert"],
+  ["altherma4_unit_operation_mode", 0, "Stop", "Stopp"],
+  ["altherma4_unit_operation_mode", 1, "Tank heat-up", "Speicheraufheizung"],
+  ["altherma4_unit_operation_mode", 2, "Space heating", "Raumheizung"],
+  ["altherma4_unit_operation_mode", 3, "Space cooling", "Raumkühlung"],
+  ["altherma4_unit_operation_mode", 4, "Actuator", "Stellantrieb"],
+  ["altherma4_quiet_selection", 0, "OFF", "OFF"],
+  ["altherma4_quiet_selection", 1, "Automatic", "Automatisch"],
+  ["altherma4_quiet_selection", 2, "Manual", "Manuell"],
+];
+for (const [semantic, value, english, german] of nativeModes) {
+  assert.equal(en.displayValue({value, enum: semantic}), english, `${semantic}=${value}`);
+  assert.equal(de.displayValue({value, enum: semantic}), german, `${semantic}=${value} German`);
+  assert.equal(en.displayValue({value: 7, enum: semantic}), "Unknown (7)");
+}
+for (const lang of ["en", "de", "es", "fr", "it", "pl", "cs", "uk", "zh", "ja", "nb", "sv", "fi"]) {
+  const ui = renderer(lang);
+  for (const [off, key] of [[9, "quiet_selection"], [54, "heating_offset"], [58, "imposed_power_limit"],
+    [65, "demand_response"], [74, "pre_phe_outdoor"], [80, "main_target"], [83, "unit_operation"]]) {
+    assert.equal(ui.displayHomeHubLabel({off, label: "obsolete label", profile: "altherma4"}),
+      ui.labels[`a4.${key}`], `${lang}/${off}: native label uses its reviewed translation`);
+  }
+  for (const [off, key] of [[9, "quiet_help"], [38, "current_help"], [54, "heating_offset_help"],
+    [58, "limit_help"], [65, "demand_help"], [74, "pre_phe_outdoor_help"], [83, "operation_help"]]) {
+    assert.equal(ui.descFor("obsolete base label", {off, profile: "altherma4"}).what,
+      ui.labels[`a4.${key}`], `${lang}/${off}: native explanation cannot inherit base semantics`);
+  }
+  for (const [semantic, value] of nativeModes)
+    assert.doesNotMatch(ui.displayValue({value, enum: semantic}), /^(?:enum\.|a4\.)/);
+}
+assert.equal(en.displayHomeHubLabel({off: 58, label: "Power consumption"}), "Power consumption",
+  "the independent base profile keeps its actual power-consumption label");
 assert.equal(en.displayValue({ value: "Recommended on" }), "Recommended on",
   "the derived X10A Smart-Grid row may still use its local canonical display text");
 

@@ -280,7 +280,7 @@ hp_modbus.cpp/.hpp  → THE HOMEHUB MODBUS STACK — a SECOND, INDEPENDENT sourc
                       so its payload cannot outlive the received bytes. logic/modbus_plan.hpp turns
                       32 rows into ten contiguous batches: full map every fifth poll tick, the two
                       diagnosis gates and outdoor context on intervening ticks. Cache publication
-                      requires matching session/target generations, a full-cache age at most 546 s
+                      requires matching session/target generations, a full-cache age at most 537 s
                       and an independently recent reply (at most 7 s). These project transport bounds
                       include exception fallback and do not make every row a same-sweep observation.
                       Status counts use the identical full-cache commit time. Gate53, mode38 and
@@ -1764,7 +1764,9 @@ A single task owns the X10A UART (there is exactly one link). Each cycle:
    power-cycled is a memory fault worth knowing about.
    The independent HomeHub task feeds thirteen additional rings through `history_record_modbus()` — eight
    measurement concepts plus BSH, 3-way-valve, Quiet, Smart-Grid and the standalone disinfection
-   state explicitly named in `logic/homehub_map.hpp`. Both recorders use the same monotonic 5-minute bucket id, returned as `b0`
+   state explicitly named in `logic/homehub_map.hpp`. Native Altherma 4 offers twelve of these
+   histories: holding 9 is a quiet selection rather than activity, so its quiet ring remains a gap
+   and is not offered or served. Both recorders use the same monotonic 5-minute bucket id, returned as `b0`
    by `/history`, so the browser can overlay them exactly even before SNTP. An X10A absence stays a
    gap in the blue line while a HomeHub sample at that bucket remains a petrol point; the sources are
    never merged into one synthetic series.
@@ -2392,7 +2394,10 @@ The Home Assistant bridge:
   static 5-minute/24-hour rings; `/history?...&source=env3` serves them to the Board Hardware infobox,
   so X10A loss cannot stop the outdoor-climate history. `<base>/modbus` is a separate flat retained JSON object, published only
   for an enabled HomeHub stack and intentionally not referenced by HA discovery. Int16 enum values
-  retain the raw numeric Modbus constant; `/values` carries separate semantic metadata so the browser
+  retain the raw numeric Modbus constant. A one-byte immutable-definition token uses `CachedValue`'s
+  existing padding, preserving its 40-byte ESP32 size and binding API/MCP/MQTT metadata to the row
+  that decoded the snapshot, including a copied snapshot across profile changes. `/values` carries
+  separate semantic metadata so the browser
   can name them without putting prose on MQTT. A disconnected HomeHub publishes `{}` rather than
   preserving a previous TCP session's values; disabling or changing an enabled HomeHub queues one
   QoS-1 retained empty tombstone after persistence and synchronous generation/cache cutover. Every
@@ -4020,17 +4025,21 @@ GET  /values      decoded readings [{label,value,unit,reg}], plus sparse structu
                   HomeHub register — the browser matches on that string and does NO matching of its
                   own, since a label match here is the substitution lwt_select/ou_stale exist to
                   prevent. The HomeHub's own readings ride a SECOND array, `modbus`
-                  [{label,value,unit,off[,binary][,enum][,concept][,history]}] — two arrays, never merged, mirroring
+                  [{label,value,unit,off[,binary][,enum][,profile][,concept][,history]}] — two arrays, never merged, mirroring
                   the two stacks: the sources have separate liveness, and merging would make "is this
                   reading current?" a per-row question no consumer could answer. `off` is the EKRHH
-                  data-model offset (def/homehub.hpp), which is what the pairing keys on. `history`
+                  data-model offset of the snapshot's defining catalog. Native rows carry `profile: "altherma4"`;
+                  their enums and localized labels do not borrow EKRHH semantics. Native quiet selection
+                  is neither a quiet-active pairing nor a quiet-active history. History recording requires
+                  matching space, offset, codec, scale and unit; missing provenance produces a gap. `history`
                   attaches a Modbus-only timeline (logic/homehub_history_for) even when the row has no
                   X10A `concept` counterpart.
                   THE ARRAY IS EMITTED ONLY WHILE THE LINK IS LIVE AT THE MOMENT THE SNAPSHOT IS
-                  TAKEN and carries that session's latest FULL cycle — bounded to at most four poll
-                  intervals old while the 1 Hz fast cycles keep link/gate/context state current. A
-                  consumer cannot infer that bound from a row, so it is part of this API contract.
-                  Liveness and the cache
+                  TAKEN and carries that session's latest FULL cycle, subject to the 537-second
+                  full-cache and seven-second reply-age bounds. Network waits add to the four
+                  intervening fast polls. Native promotion initially exposes only the answered
+                  pressure probe until the following full native sweep. These bounds are transport
+                  limits, not proof of simultaneous observations. Liveness and the cache
                   sit behind two DIFFERENT mutexes, so mb_values_snapshot() reports the link state
                   AFTER copying the cache (the only place the two can be tied into one answer);
                   checking mb_status() and then copying left a window in which one response carried
@@ -4045,7 +4054,8 @@ GET  /history?row=<trend id>[&source=x10a|modbus|env3]   one source's 24-hour se
                   `source:"x10a"` except that witness, which truthfully returns `source:"mqtt"`;
                   `mqtt` is not a separate query value. Modbus accepts thirteen histories: the eleven paired
                   concepts (logic/homehub_map.hpp), Smart Grid, and its Modbus-only disinfection
-                  state. `env3` accepts only the three accessory rings. Payload:
+                  state. Native Altherma 4 accepts twelve, excluding `quiet_state`; its holding 9 selects a quiet
+                  policy rather than reporting current activity. `env3` accepts only the three accessory rings. Payload:
                   {id,source,label,epoch,boot_id,dt,unit[,t0][,b0],v[],held[[from,count],…]}.
                   `epoch` is captured with the sample snapshot; `boot_id` matches `/status`.
                   `unit` is the ROW's own unit, read

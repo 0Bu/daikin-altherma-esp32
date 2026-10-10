@@ -706,7 +706,8 @@ static std::vector<GroupedValue> current_modbus_values(bool& live) {
     out.reserve(n);
     for (size_t i = 0; i < n; i++) {
         if (cache[i].value.empty()) continue;
-        const def::HomeHubReg* reg = def::homehub_find(cache[i].off);
+        const def::HomeHubReg* reg = def::homehub_definition(cache[i].modbus_definition);
+        if (reg && reg->offset != cache[i].off) reg = nullptr;
         if (!reg) continue;   // fail closed: an untyped field must not reach a typed MQTT contract
         out.push_back({"modbus", object_id(reg->label), cache[i].value,
                        def::homehub_is_text(*reg) ? PublishedKind::Text : PublishedKind::Number});

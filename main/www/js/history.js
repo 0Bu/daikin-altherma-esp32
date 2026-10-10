@@ -1755,6 +1755,14 @@ const HOMEHUB_ENUM_VALUE_I18N = Object.freeze({
   unit_abnormality: Object.freeze(["enum.no_error", "enum.fault", "enum.warning"]),
   operation_mode: Object.freeze(["enum.auto", "enum.heating", "enum.cooling"]),
   current_operation_mode: Object.freeze([null, "enum.heating", "enum.cooling"]),
+  altherma4_current_operation_mode: Object.freeze(["enum.none", "enum.heating", "enum.cooling"]),
+  altherma4_demand_response: Object.freeze([
+    "enum.free_running", "enum.forced_off", "enum.forced_on", "enum.recommended_on", "enum.reduced",
+  ]),
+  altherma4_unit_operation_mode: Object.freeze([
+    "mode.stop", "enum.tank_heat_up", "enum.space_heating", "enum.space_cooling", "enum.actuator",
+  ]),
+  altherma4_quiet_selection: Object.freeze(["state.off", "enum.automatic", "enum.manual"]),
   three_way_valve: Object.freeze(["enum.space_heating", "enum.dhw"]),
   smart_grid_mode: Object.freeze([
     "enum.free_running", "enum.forced_off", "enum.recommended_on", "enum.forced_on",
@@ -1884,6 +1892,12 @@ const HOMEHUB_LABEL_DE = Object.freeze({
 function displayHomeHubLabel(row) {
   const fallback = displayReadingLabel(row && row.label, row);
   if (!row || row.off == null) return fallback;
+  if (row.profile === "altherma4") {
+    const key = ({9: "a4.quiet_selection", 54: "a4.heating_offset", 58: "a4.imposed_power_limit",
+      65: "a4.demand_response", 74: "a4.pre_phe_outdoor", 80: "a4.main_target",
+      83: "a4.unit_operation"})[row.off];
+    if (key) return t(key);
+  }
   if (LANG === "de") return HOMEHUB_LABEL_DE[row.off] || fallback;
   return HOMEHUB_LABEL_I18N[LANG]?.[row.off] || fallback;
 }

@@ -27,11 +27,15 @@ not authorize pre-reset diagnosis hours to return, even with the same model and 
 
 Transport liveness is separate from each rule's measurement evidence. X10A live use requires a reply
 less than 15 s old. HomeHub cache use requires matching target/session identity, a full-cache age at
-most 546 s and a separate reply age at most 7 s; these project bounds include slow fallback reads
+most 537 s and a separate reply age at most 7 s; these project bounds include slow fallback reads
 and do not establish that every row came from one sweep. Individual HomeHub diagnosis inputs
 gate53, mode38 and outdoor44 retain their
 own successful-response times and expire after the same seven-second project bound. A new reply
-for another register cannot renew them. A completed slow sweep can therefore already contain an
+for another register cannot renew them. Native Altherma 4 mode38 accepts its documented `0` None
+as a known inactive direction; EKRHH mode38 `0` remains unknown. This does not establish compressor
+activity. The native source scope, pressure-based profile heuristic and deferred physical comparison
+are recorded in [the Modbus contract](MODBUS_PROTOCOL.md#deferred-physical-acceptance).
+A completed slow sweep can therefore already contain an
 expired early input; it is withheld rather than assigned the sweep's completion time. These changes
 alter evidence admission, not any diagnosis threshold or manufacturer claim. State-age observation
 and blind time are also separate from the eight diagnosis counters; their version-4 format includes the resumed tail

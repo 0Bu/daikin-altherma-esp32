@@ -824,8 +824,8 @@ static_assert(
 
 constexpr auto MB_PLAN_ALTHERMA4 = mb_plan_make_from<def::ALTHERMA4_REG_COUNT>(def::ALTHERMA4_REGS);
 static_assert(MB_PLAN_ALTHERMA4.ok, "Altherma 4 register table does not yield a usable read plan");
-static_assert(MB_PLAN_ALTHERMA4.count * 3 <= def::ALTHERMA4_REG_COUNT,
-              "batching no longer collapses the Altherma 4 map — re-check the register offsets");
+static_assert(MB_PLAN_ALTHERMA4.count == 15,
+              "Altherma 4 request budget changed — re-check the documented native map");
 static constexpr uint32_t MB_CACHE_MAX_AGE_S = logic::modbus_cache_max_age_s(
     logic::MB_FULL_CYCLE_TICKS, POLL_INTERVAL_S * 1000, MB_REQUEST_BUDGET_MS,
     logic::mb_plan_max_requests(MB_PLAN_ALTHERMA4.batch, MB_PLAN_ALTHERMA4.count, true),
@@ -970,7 +970,8 @@ static void mb_poll_once() {
             plant_gate_ms     = observed_ms;
         }
         if (r.space == MbFunc::ReadInput && r.offset == 38 && !mb_is_special(raw) &&
-            (raw == 1 || raw == 2)) {
+            (raw == 1 || raw == 2 ||
+             (raw == 0 && r.kind == def::HomeHubValueKind::Altherma4CurrentOperationMode))) {
             heating_mode_known = true;
             heating_mode_active = raw == 1;
             heating_mode_ms     = observed_ms;
@@ -995,6 +996,7 @@ static void mb_poll_once() {
         // logic/homehub_map.hpp pairs on and what /values emits as the concept.
         cv.reg  = def::HOMEHUB_GROUP_REG;
         cv.off  = static_cast<uint8_t>(r.offset);
+        cv.modbus_definition = def::homehub_definition_id(r);
         // conv only TYPES the value downstream (conv_is_binary for /values, published_kind for MQTT).
         // No X10A decode runs here — homehub_format already produced the string — so these are
         // BORROWED kinds, not claims that a HomeHub register is an X10A one: 204 for the Text16
@@ -1003,8 +1005,8 @@ static void mb_poll_once() {
         // Named enums keep their raw numeric Modbus constants and deliberately carry no binary
         // marker. /values adds their semantic enum id separately, so the visual UI can name them
         // without turning MQTT's mode 2 into the text "Recommended on".
-        // The MQTT bridge looks the register definition up by `off` and does not use this borrowed
-        // converter to type Modbus JSON; this marker therefore remains limited to generic row/UI use.
+        // API/MQTT resolve the snapshot's definition token, including mixed base/probe sweeps.
+        // They never borrow a different profile's row at the same offset.
         cv.conv = (r.type == MbType::Text16) ? 204 : def::homehub_is_binary(r) ? 300 : 0;
         cv.held = false;                           // no held-over concept on this link
         char buf[24];
@@ -1123,6 +1125,7 @@ static void mb_poll_once() {
     // each full cycle.
     const uint32_t now_s = static_cast<uint32_t>(esp_timer_get_time() / 1000000ULL);
     const bool can_probe = (cur_prof == ModbusProfile::Auto) || s_probe_tracker.should_probe(now_s);
+    bool profile_promoted = false;
     if (full && can_probe && !link_broken && s_sock >= 0) {
         uint16_t probe_pdu = 0;
         if (mb_pdu_address(logic::MODBUS_PROBE_REGISTER, probe_pdu)) {
@@ -1135,6 +1138,13 @@ static void mb_poll_once() {
                     if (decision.is_definitive) {
                         s_active_profile.store(decision.next_profile, std::memory_order_release);
                         if (decision.next_profile == ModbusProfile::Altherma4) {
+                            profile_promoted = cur_prof != ModbusProfile::Altherma4;
+                            if (profile_promoted) {
+                                // The baseline was decoded as EKRHH. Do not publish its profile-sensitive
+                                // enums/labels or quiet activity after learning this target is native.
+                                fresh.clear();
+                                for (bool& split : s_batch_split) split = false;
+                            }
                             diag_printf(
                                 "modbus: detected Altherma 4 profile via probe register %u\n",
                                 static_cast<unsigned>(logic::MODBUS_PROBE_REGISTER));
@@ -1312,7 +1322,7 @@ static void mb_poll_once() {
         s_plant_outdoor_ms           = final_current_session ? plant_outdoor_ms : -1;
     }
     report_cycle_result(final_current_session);
-    s_cycle_tick++;
+    s_cycle_tick = profile_promoted ? 0 : s_cycle_tick + 1;
 }
 
 static void mb_task_start_if_enabled() noexcept;

@@ -22,7 +22,8 @@ struct CachedValue {
     std::string value;   // formatted; empty = not available this cycle
     const char* unit = "";
     uint8_t     reg = 0; // X10A register page it came from (MQTT groups values by page)
-    uint8_t     off = 0; // byte offset within that page's reply. With `reg` and `unit` it is the
+    uint8_t     off = 0; // X10A byte offset, or 1-based Modbus data-model offset.
+                         // With `reg` and `unit` it is the
                          // row's IDENTITY — how logic/history.hpp addresses a trended row, since
                          // the catalog's labels neither name one quantity consistently nor name
                          // different quantities differently (see that header). Never displayed.
@@ -40,8 +41,10 @@ struct CachedValue {
                        // publish task), and the binding limit on this board is the largest
                        // contiguous block — so a field-ordering slip is a real ~460 B of
                        // extra peak, not a style point.
-    int conv = 0;      // the row's converter id — the one piece of metadata every consumer
-                       // needs, and the reason none of the DERIVED facts are cached beside
+    uint8_t modbus_definition = 0; // immutable catalog row that decoded this Modbus value; 0 = none.
+                                  // Uses the padding byte: provenance does not enlarge X10A snapshots.
+    int conv = 0;      // the X10A row's converter id — the metadata its consumers
+                       // need, and the reason none of the DERIVED facts are cached beside
                        // it: `conv_is_binary(conv)` says whether /values should mark the
                        // row as a 1/0 flag for the browser, `published_kind(conv)` says
                        // what JSON type the MQTT bridge must give it, and conv 203 is what
@@ -51,6 +54,9 @@ struct CachedValue {
                        // caching each as its own flag would grow the struct once per
                        // question asked.
 };
+#ifdef ESP_PLATFORM
+static_assert(sizeof(CachedValue) == 40, "CachedValue grew beyond the contiguous snapshot budget");
+#endif
 
 // Health/status counters for /status.hp.
 struct HpStats {
@@ -72,8 +78,8 @@ struct HpStats {
     std::string last_error;
 };
 
-// The max cache row count for the ACTIVE transport (X10A profile rows, or the HomeHub map on Modbus
-// TCP) — /values and the MQTT bridge size their snapshot buffers from this so no row is truncated.
+// The active X10A profile's maximum row count. Modbus uses its independent mb_values_capacity();
+// /values and the MQTT bridge size each source's snapshot separately so no row is truncated.
 size_t hp_values_capacity(uint32_t* revision_out = nullptr);
 
 // Thread-safe snapshot copy of the current value cache. Returns count written; zero once the last

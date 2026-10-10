@@ -144,7 +144,7 @@ Ids are stable keys and are never reused — a gap means a feature was retired, 
 | 103 | **Signed release artifact construction** — a trusted-main job isolates the signing key, pins signing-key continuity and manifest provenance, then hands the exact artifact to a separate write-capable publisher that binds and verifies the release tag against the requested source SHA | ✅ 🧪 | [`ci-build-all.sh`](../scripts/ci-build-all.sh), [`check-signing-key-continuity.py`](../scripts/check-signing-key-continuity.py), [`check-manifest-provenance.py`](../scripts/check-manifest-provenance.py), [`build.yml`](../.github/workflows/build.yml) |
 | 104 | **Hardware acceptance separated from publication** — the canonical private-inventory bench and production OTA transactions remain explicit maintainer operations; a manual release skips the PR test suite, never contacts a board and depends on no lab runner, private inventory or hardware policy | ✅ 🧪 | [`production-ota-gate.py`](../scripts/production-ota-gate.py), [`build.yml`](../.github/workflows/build.yml) |
 | 105 | **Protocol S legacy transport & hardware TX-echo suppression** — Protocol S support for legacy Daikin units (unverified catalog), `HpFrameReceiver` hardware TX-echo suppression for both protocols, and preamble resynchronization for Protocol I | ✅ 🧪 | [`logic/crc.hpp`](../main/logic/crc.hpp), [`hp_comm.cpp`](../main/hp_comm.cpp), [`hp_detect.cpp`](../main/hp_detect.cpp), [`def/protocol_s.hpp`](../main/def/protocol_s.hpp), [`X10A_PROTOCOL.md`](X10A_PROTOCOL.md) |
-| 106 | **Altherma 4 Modbus TCP extended telemetry & auto-detection** — Modbus TCP extension for Daikin Altherma 4 with 11 additional registers (unverified catalog; 43 total across 14 batches), safe base-map startup polling, active register probing (FC04 offset 79) with affirmative HomeHub fallback and bounded retries, and dedicated status tracking | ✅ 🧪 | [`logic/modbus_profile.hpp`](../main/logic/modbus_profile.hpp), [`def/altherma4.hpp`](../main/def/altherma4.hpp), [`hp_modbus.cpp`](../main/hp_modbus.cpp), [`MODBUS_PROTOCOL.md`](MODBUS_PROTOCOL.md) |
+| 106 | **Altherma 4 Modbus TCP telemetry** — manufacturer-derived 42-row read-only subset, snapshot-owned profile semantics and pressure-probe heuristic; physical acceptance and three conversion assumptions remain pending | 🟡 🧪 | [`logic/modbus_catalog.hpp`](../main/logic/modbus_catalog.hpp), [`logic/modbus_profile.hpp`](../main/logic/modbus_profile.hpp), [`def/altherma4.hpp`](../main/def/altherma4.hpp), [`MODBUS_PROTOCOL.md`](MODBUS_PROTOCOL.md) |
 
 ---
 
@@ -735,11 +735,15 @@ Deep dives: [`X10A_PROTOCOL.md`](X10A_PROTOCOL.md), [`REGISTERS.md`](REGISTERS.m
   persists a result. Explicitly saving empty permanently disables Modbus and dependent diagnosis. The
   link is **READ-ONLY as a property of the code**: no write entry point, function-code builder or
   value encoder exists anywhere under `main/`.
+- **🟡 🧪 Native Altherma 4 subset** ([`def/altherma4.hpp`](../main/def/altherma4.hpp),
+  [`logic/modbus_catalog.hpp`](../main/logic/modbus_catalog.hpp)): 42 rows retain their own labels,
+  types and enums through copied snapshots. Manufacturer-derived meanings are host-tested;
+  physical acceptance and flow/pump/pressure assumptions remain [pending](MODBUS_PROTOCOL.md#deferred-physical-acceptance).
 - **✅ 🧪 Batched reads on two cadences** ([`logic/modbus_plan.hpp`](../main/logic/modbus_plan.hpp),
   [`logic/modbus_snapshot.hpp`](../main/logic/modbus_snapshot.hpp)): the full map is read every fifth
   tick; intervening ticks read diagnosis gates and outdoor context. Exception batches fall back to
   individual reads. Live cache use requires matching target/session identity, full-cache age at most
-  546 s and independently recent replies at most 7 s; these are transport bounds, not same-sweep proof.
+  537 s and independently recent replies at most 7 s; these are transport bounds, not same-sweep proof.
   Individual gate/context replies expire independently; each fallback request feeds the watchdog.
   Target changes reset public classification; discovery shares one five-second budget per attempt.
 - **The two sources meet in exactly one place** ([`logic/homehub_map.hpp`](../main/logic/homehub_map.hpp)):

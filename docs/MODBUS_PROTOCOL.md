@@ -116,8 +116,8 @@ that is already closed.
 
 ## The register map
 
-`main/def/homehub.hpp` — the Modbus counterpart of the X10A `def/` profiles, and the only place a
-HomeHub register's meaning is written down in this repo. Each row is
+`main/def/homehub.hpp` defines the EKRHH map; `main/def/altherma4.hpp` defines the native
+Altherma 4 subset. Each row is
 `{offset, space (FC04/FC03), MbType, scale, unit, label, value kind}`. The value kind is essential:
 the guide encodes ordinary numbers, binary flags and multi-state selectors alike as `Int16`, so the
 wire type alone cannot tell a UI whether `1` means one, ON, Heating, Fault or DHW.
@@ -166,7 +166,7 @@ The flat MQTT payload therefore contains, for example,
 true flags retain the same numeric `0`/`1` contract plus the structural `binary:true` marker, and
 only the visual boundary prints `OFF`/`ON`.
 
-> **Physical correctness is confirmed on hardware.** The host tests (`test_homehub()` in
+> **Physical correctness requires a hardware comparison.** The host tests (`test_homehub()` in
 > `test/test_logic.cpp`) verify the *decode mechanics* — scaling, the special-value guard, `Text16`,
 > the offset→PDU mapping, and that a negative temperature keeps its sign. Whether a given offset means
 > what the guide says it means on *your* unit is a hardware check, the same rule the X10A domain audit
@@ -247,7 +247,7 @@ whatever the first cycle read.
 
 Transport progress does not renew an earlier measurement. Gate53, heating-mode38 and outdoor44
 each retain the successful response's monotonic observation time and expire individually after the
-existing seven-second project bound. The full cache retains its separate 546-second bound, including
+existing seven-second project bound. The full cache retains its separate 537-second bound, including
 bounded slow fallback requests; `/status.modbus.values` stops counting it when it expires, even if
 fast-cycle replies continue. These bounds are liveness filters, not proof of simultaneous measurements.
 A target change immediately resets the public profile to Auto/Probing, before name resolution;
@@ -259,32 +259,75 @@ into a gap re-prices the link visibly instead of quietly restoring the per-regis
 
 ## Daikin Altherma 4 Modbus TCP support
 
-In addition to the legacy EKRHH (Altherma 3) 32-register map, this firmware supports native **Daikin Altherma 4** Modbus TCP telemetry.
+In addition to the EKRHH 32-register map, the firmware implements a native **Daikin Altherma 4**
+read-only subset. Its physical acceptance is pending; it has not been compared with an Altherma 4.
 
 ### Extended register catalog
 
-> **UNVERIFIED CATALOG / REFERENCE DERIVED**
-> Altherma 4 Modbus registers (`65–68`, `74–77`, `79`, `80`, `83`) and profile `MB_PLAN_ALTHERMA4` are derived from reverse-engineered community tables without verified hardware traces or official manufacturer documentation. All mappings and conversions remain unverified on physical hardware.
-
-Altherma 4 introduces 11 additional registers beyond the base 32 registers (total 43 registers):
+The documentary source is [Daikin Configuration reference guide 4P773396-1C (2026.02)](https://www.daikin.gr/content/dam/document-library/configuration-reference-guide/heat/air-to-water-heat-pump-high-temperature/epbx10a9w/EPBX%28U%2907A.EPBX%28U%2910A4V.EPBX10A9W.EPBX14A4V.EPBX%28U%2914A9W.EPSX%28B%2907A.EPSX%28B%2910A.EPSX%28B%2914A.EPVX07%28U%29A.EPVX%2810.14%29%28U%29A4V.EPVX%2810.14%29A9W_Configuration%20reference%20guide_4PEN773396-1C_English.pdf),
+MMI software v3.x.x, §7.2. Host tests check the documented codecs and enum constants; they do not
+verify the values on a machine. The implemented subset has **42 registers**, including the 11
+extended input registers below. Native holding 57 is unlisted and is absent from the native
+read plan; Auto still polls the EKRHH baseline before a successful native probe.
 
 | Register (FC04 Input) | Type | Unit | Meaning | Description / Pairing |
 |---|---|---|---|---|
 | `65` | `Int16` | | Demand response mode | Smart grid / demand response operating mode |
 | `66` | `Int16` | `%` | Bypass valve position | Bypass 3-way/mixing valve position |
 | `67` | `Int16` | `%` | Tank valve position | DHW tank valve position |
-| `68` | `Int16` | `%` | Circulation pump speed | Variable-speed water pump modulation |
-| `74` | `Temp16` | `°C` | Leaving water temp outdoor | Outdoor unit leaving water temperature |
+| `68` | `Int16` | `%` (assumed) | Circulation pump speed | Existing interpretation retained; guide prints a conflicting L/min unit |
+| `74` | `Temp16` | `°C` | Water temperature pre-PHE outdoor | Before the outdoor plate heat exchanger |
 | `75` | `Temp16` | `°C` | Leaving water temp tank valve | Leaving water temperature at tank valve |
 | `76` | `Temp16` | `°C` | DHW temp upper | Dual-sensor DHW tank upper temperature |
 | `77` | `Temp16` | `°C` | DHW temp lower | Dual-sensor DHW tank lower temperature |
-| `79` | `Int16` (÷100) | `bar` | Water pressure | Circuit water pressure (formatted with 2 decimal places, e.g. `1.85 bar`), paired to X10A concept `water_pressure` (`0x62/11`) |
-| `80` | `Temp16` | `°C` | Heating/cooling target | Active flow temperature target |
+| `79` | `Int16` (÷100, assumed) | `bar` (assumed) | Water pressure | Existing centibar interpretation and X10A pairing retained, physically unverified |
+| `80` | `Temp16` | `°C` | Heating/cooling target, main zone | Main-zone water temperature target |
 | `83` | `Int16` | | Unit operation mode | Current operational state |
+
+### Profile-specific meaning
+
+| Space / offset | Native Altherma 4 constants or meaning |
+|---|---|
+| input `38` | `0` None, `1` Heating, `2` Cooling; separate from EKRHH's current-mode enum |
+| input `65` | `0` Free, `1` Forced off, `2` Forced on, `3` Recommended on, `4` Reduced |
+| input `83` | `0` Stop, `1` Tank heat-up, `2` Space heating, `3` Space cooling, `4` Actuator |
+| holding `9` | `0` Off, `1` Automatic, `2` Manual quiet selection; **not current quiet activity** |
+| holding `54` | Weather-dependent heating offset for the main zone |
+| holding `58` | Imposed electrical power limit; protective operation can exceed it |
+
+The native quiet selection is not paired with X10A's quiet-active bit or recorded as a quiet-active
+history. The guide defines current activity separately as discrete input 12; this client currently
+issues only FC03/FC04. Automatic schedules and manually selected levels can be Off. Native
+`quiet_state` is consequently absent from the offered Modbus histories and returns 404 if requested.
+
+Every cached row carries the immutable definition that decoded it. API/MCP enum, binary and text
+metadata, as well as MQTT keys, use that snapshot-owned definition, never a later global profile or
+a base-first offset lookup. Native `/values` rows carry `profile: "altherma4"` for localized meaning.
+Unknown enum constants remain numbers and display as unknown. Public offset-only selectors require
+unique offsets within each shipped catalog; compile-time checks reject FC-space collisions.
 
 ### Batch compression
 
-The 43 registers of the Altherma 4 map collapse into **14 contiguous batches** (5 holding, 9 input). Batch compression satisfies `count * 3 <= 43` ($14 \times 3 = 42 \le 43$).
+The native subset uses **15 contiguous batches** (6 holding, 9 input). Removing unlisted holding 57
+splits 56 and 58 into separate requests; the native request count is pinned at compile time and in
+the production-runtime contract. EKRHH batching is unchanged.
+
+### Deferred physical acceptance
+
+The existing input 49 `/100` flow conversion, input 68 percentage unit and input 79 `/100` pressure
+conversion are retained pending real-device evidence. The native guide does not document the extra
+flow scale, prints L/min for pump speed and gives an ambiguous 10–600 bar pressure range. These
+outputs, pressure pairing and pressure-based profile selection must not be treated as confirmed
+physical measurements or verified model identification. The sentinel filter remains a conservative
+project rule; the guide explicitly documents unavailable 32766 for input 23 but does not establish
+the complete EKRHH sentinel vocabulary for every native row.
+
+To complete HUB-02, record the matching model/MMI version and compare raw registers 49/68/79 with
+simultaneous controller readings or independent references across more than one operating point.
+Confirm profile selection and compare the corrected enum states, quiet selection versus discrete
+input 12, and available native holding registers. No simulator, host test or ordinary
+HomeHub bench run substitutes for that physical acceptance. HUB-02 remains open until this evidence
+resolves the assumptions and any necessary follow-up fixes pass their own checks.
 
 ### Automatic profile detection and fail-closed fallback
 
@@ -292,11 +335,12 @@ Detection is **100% automatic** at runtime without requiring any UI configuratio
 
 1. **Initial session state (`Auto`):** When connecting to a new target host, port, or unit ID (`status_socket_open`), the active profile begins in `Auto`.
 2. **Safe baseline polling & probing:** In `Auto`, the firmware reads the safe 32-register base HomeHub map (`MB_PLAN`) and performs a single probe request on register 79 (water pressure, `MODBUS_PROBE_REGISTER`) at the end of each full cycle.
-3. **Promotion to `Altherma4`:** If probe register 79 successfully returns valid data in the plausible hydronic range (0 < pressure <= 6.0 bar), `s_probe_tracker` transitions affirmatively to `ModbusProfile::Altherma4`, enabling the 43-register `MB_PLAN_ALTHERMA4` on subsequent cycles.
+3. **Promotion to `Altherma4`:** If probe register 79 successfully returns valid data in the plausible hydronic range (0 < pressure <= 6.0 bar), `s_probe_tracker` selects `ModbusProfile::Altherma4` using the existing heuristic. The baseline rows are discarded, only the probe row is published for that cycle, and the next poll performs a complete 42-register native sweep. This avoids publishing native quiet/mode values through baseline semantics. The protocol answer is not physical model verification.
 4. **Fallback behavior:**
-   - **Affirmative `HomeHub` answer:** When connected to an Altherma 3 / EKRHH unit, register 79 returns `32767` (`MB_UNSUPPORTED`, verified on hardware), `32766` (`MB_UNAVAILABLE`), or Modbus Exception 02 (*Illegal Data Address*). The firmware evaluates this affirmative response via `logic::evaluate_probe_result()`, definitively setting `ModbusProfile::HomeHub` without incrementing `rx_fail` or dropping the link. The UI and `/status` remain green and healthy, reporting the 32 valid base registers.
+   - **Affirmative `HomeHub` answer:** When connected to an Altherma 3 / EKRHH unit, register 79 returns `32767` (`MB_UNSUPPORTED`, verified on EKRHH hardware) or Modbus Exception 02 (*Illegal Data Address*). The firmware evaluates this affirmative response via `logic::evaluate_probe_result()`, definitively setting `ModbusProfile::HomeHub` without incrementing `rx_fail` or dropping the link. The UI and `/status` remain green and healthy, reporting the 32 valid base registers.
    - **Transport failure branch:** If a probe request encounters a transport error (timeout, connection closed), the connection is dropped (`link_ok = false`, socket closed) without incrementing `rx_fail`. The profile stays in `Auto` across reconnects until `MODBUS_PROBE_MAX_RETRIES` (3) consecutive probe failures are reached, after which it falls back to `ModbusProfile::HomeHub` (`profile_basis: fallback`). During probe-cycle transport drops, `/values` remains unrefreshed for that cycle (`connected = false`).
    - **Invalid value branch:** If probe register 79 returns an implausible value (`0` or `> 6.0 bar`), the connection remains open, but after 3 consecutive invalid readings it exhausts the probe retry budget and falls back to `ModbusProfile::HomeHub` (`profile_basis: fallback`).
+   - **Unavailable (`MB_UNAVAILABLE`):** Unavailable is not capability evidence; it follows the non-affirmative retry/fallback path.
    - **Hub syncing (`MB_WAIT`):** While register 79 returns `32765` (`MB_WAIT`, hub syncing/booting), the probe continues to run on every full cycle, but does not consume the retry budget and leaves the profile in `Auto` without counting as a failure.
 5. **Sticky profile across reconnects & periodic back-off:** While connected to the same target endpoint (`host:port:unit_id`), an affirmatively detected profile (`HomeHub` or `Altherma4`, `profile_basis: affirmative`) is remembered in RAM across TCP reconnects to avoid repetitive probe churn. Non-affirmative exhaustion fallback defaults to `HomeHub` for safety, then periodically re-probes with exponential backoff (starting at 10 minutes, doubling up to a 4-hour cap) to accommodate transient startup conditions such as circuit filling or temporary network drops. Changing the target host, port, or unit ID resets all tracker state immediately.
 
@@ -325,7 +369,8 @@ Eight measurements plus three state pairs, and — measured across the catalog �
 39 detectable profiles**: pre- and post-BUH leaving water, return water, DHW tank, outdoor air,
 liquid refrigerant, flow, room temperature,
 booster-heater run (HomeHub input `32` ↔ X10A BSH converter `305`) and 3-way-valve position (input
-`37` ↔ converter `306`), and Quiet mode (input `9` ↔ X10A `0x60/2`, converter `301`). The rest carry no pairing on
+`37` ↔ converter `306`), and EKRHH Quiet mode (holding `9` ↔ X10A `0x60/2`, converter `301`).
+Native Altherma 4 holding 9 reports selection and is excluded from this activity pairing. The rest carry no pairing on
 purpose, each for a stated reason: the real power measurement has
 no X10A equivalent at all (X10A estimates it from CT clamps at an assumed 230 V, so pairing a
 measurement with an estimate would hide which is which); other setpoints, modes and faults are not readings.
@@ -343,10 +388,12 @@ X10A pairing.
 
 The `modbus` array is emitted **only while the link is live at the moment the snapshot is taken** —
 not merely while the stack is configured, and not merely while it was connected when the request
-arrived. Its rows belong to that live session's latest **full** cycle and are therefore bounded to at
-most four poll intervals old; the fast cycles update link, diagnosis-gate state and the sealed input-44
-event context without turning their thirteen rows into a partial cache. A consumer cannot infer that bound from a row, so the
-guarantee lives in this payload contract. Liveness and the cache sit behind two
+arrived. Its rows belong to that live session's latest **full** cycle, subject to the 537-second
+full-cache and seven-second reply-age bounds described above; bounded network reads add to the
+four intervening fast polls. At native promotion, the answered pressure probe alone is exposed
+until the following full native sweep. Fast cycles update link, diagnosis-gate state and the sealed
+input-44 event context without turning their thirteen rows into a partial cache. These are transport
+limits, not proof that every row was observed simultaneously. Liveness and the cache sit behind two
 different mutexes, so every successful TCP connect gets a generation and every cache commit records
 the generation that produced it. `mb_values_snapshot()` reports live only when the post-copy link
 state is connected **and** its generation matches the copied cache. That closes both directions of

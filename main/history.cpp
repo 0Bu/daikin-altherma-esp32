@@ -5,6 +5,7 @@
 #include "checkup.hpp"                // fourth journal source: exact hourly diagnostic buckets
 #include "config.hpp"
 #include "diag_log.hpp"
+#include "def/homehub.hpp"
 #include "heap_guard.hpp"
 #include "logic/binary_semantics.hpp"
 #include "logic/env3.hpp"
@@ -1275,6 +1276,9 @@ void history_record_modbus(const CachedValue* v, size_t n, uint32_t identity_gen
         const uint16_t wanted = logic::HOMEHUB_HISTORIES[t].offset;
         for (size_t i = 0; i < n; i++) {
             if (v[i].off != wanted) continue;
+            const auto* row = def::homehub_definition(v[i].modbus_definition);
+            if (!row || !logic::homehub_history_row_matches(logic::HOMEHUB_HISTORIES[t], *row,
+                    def::homehub_has_quiet_activity(*row))) continue;
             int tenths = 0;
             if (value_tenths(v[i].value, tenths)) sample[t] = static_cast<HistorySample>(tenths);
             break;

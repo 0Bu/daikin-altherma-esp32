@@ -1105,6 +1105,12 @@ const stateOf = (re, mbOffset) => {
 // HomeHub rows carry an offset, X10A rows a register. Source-qualified entries prevent labels that
 // happen to be identical in both protocols from inheriting the other protocol's meaning.
 function descFor(label, row = null) {
+  if (row?.profile === "altherma4") {
+    const key = ({9: "a4.quiet_help", 38: "a4.current_help", 54: "a4.heating_offset_help",
+      58: "a4.limit_help", 65: "a4.demand_help", 74: "a4.pre_phe_outdoor_help",
+      83: "a4.operation_help"})[row.off];
+    if (key) return { what: t(key) };
+  }
   const l = label || "";
   const source = row && row.off != null ? "modbus" : row ? "x10a" : "";
   for (const d of DESCRIPTIONS) {

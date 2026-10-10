@@ -1,6 +1,7 @@
 // Compile the entire current production Modbus component and execute it over real POSIX sockets.
 // SDK-shaped adapters provide an explicit clock and task schedule; see modbus_runtime/README.md.
 import assert from "node:assert/strict";
+import { semanticMutations } from "./modbus_runtime/semantic_mutations.mjs";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -51,12 +52,13 @@ try {
   const binary = compile(sourcePath, "production");
   const baseline = execute(binary, [], 20000);
   assert.equal(baseline.status, 0, `production runtime cases\n${baseline.stdout}${baseline.stderr}`);
-  assert.match(baseline.stdout, /PASS total=21\b/);
+  assert.match(baseline.stdout, /PASS total=31\b/);
   console.log(baseline.stdout.trim());
 
   // A successfully compiled mutation must fail its particular behavioral oracle. A crash,
   // compilation failure or another test failure cannot count as evidence that the oracle works.
   const mutations = [
+    ...semanticMutations,
     {
       name: "receive-deadline", scenario: "deadline",
       before: "if (esp_timer_get_time() >= deadline_us) {",
@@ -133,7 +135,7 @@ try {
       `${mutation.name}: only its specific assertion failure counts`);
     console.log(`negative control ${mutation.name}: rejected by ${mutation.scenario}`);
   }
-  console.log(`production Modbus runtime: 21 cases, ${mutations.length} negative controls; source sha256=${sourceHash}`);
+  console.log(`production Modbus runtime: 31 cases, ${mutations.length} negative controls; source sha256=${sourceHash}`);
 } finally {
   fs.rmSync(dir, { recursive: true, force: true });
 }

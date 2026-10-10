@@ -81,10 +81,17 @@ separately authorized hardware acceptance remain distinct proof layers.
 
 The contract suite also compiles the complete current `hp_modbus.cpp` through
 [`modbus_runtime/fixture.cpp`](modbus_runtime/fixture.cpp). Real POSIX transport and explicit SDK
-clock/task adapters exercise parsing, polling, cache expiry, target cutover and task retirement;
-specific temporary mutations prove the runtime oracles can reject the corresponding regressions.
+clock/task adapters exercise parsing, polling, cache expiry, target cutover and task retirement.
+Its 31 cases include native enum constants, 32/42-row profile ownership and automatic native
+promotion; 30 specific temporary mutations prove the corresponding runtime oracles reject regressions.
 See [its evidence limits](modbus_runtime/README.md): SDK timing models, scheduler callbacks and
 simulated config/history do not establish real hardware, NVS or physical HomeHub behavior.
+
+[`test_modbus_metadata_contract.mjs`](test_modbus_metadata_contract.mjs) separately compiles the
+current HTTP/MCP serializer and MQTT snapshot consumer from their production source. Fourteen
+cases and eight specific mutations check snapshot-owned definitions, raw numeric enums, text types,
+native labels/keys and quiet-selection exclusion from actual-state metadata. The future physical
+[Altherma 4 comparison](../docs/MODBUS_PROTOCOL.md#deferred-physical-acceptance) remains pending.
 
 `scripts/run-format-check.sh` always supplies the dependency-free baseline format gate: UTF-8, LF
 endings, one final newline, no tabs or trailing whitespace on maintained `main/`, `test/` and
@@ -495,7 +502,7 @@ One entry per `test_*()` in [`test_logic.cpp`](test_logic.cpp), in the order `ma
   of X10A loss before ordinary publication stays silent until recovery. Separately,
   `mqtt_pause_withdraws_online()` allows the OTA-pause `offline` only for a connected LWT-bearing
   publisher and refuses Weather, subscriber-only and disconnected cases.
-- `logic/modbus_snapshot.hpp` — matching target/session generations, the derived 546-second full
+- `logic/modbus_snapshot.hpp` — matching target/session generations, the derived 537-second full
   cache budget and an independent seven-second reply budget gate live use; boundary and stale cases
   remain separate from measurement plausibility.
 - `logic/profile_view.hpp` + `def/overlay.hpp` — the generated table plus the temporary page-`0x10`

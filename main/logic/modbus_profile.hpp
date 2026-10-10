@@ -41,7 +41,8 @@ inline constexpr uint16_t MODBUS_PROBE_REGISTER = 79;
 inline bool is_valid_altherma4_probe_value(uint16_t reg, uint16_t raw) {
     if (mb_is_special(raw)) return false;
     if (reg == MODBUS_PROBE_REGISTER) {
-        // Hydronic water pressure in bar * 100. Plausible range: > 0 and <= 600 (0..6.0 bar).
+        // Existing centibar heuristic, not a manufacturer-verified scale or model identity.
+        // Physical Altherma 4 acceptance remains pending (docs/MODBUS_PROTOCOL.md).
         return raw > 0 && raw <= 600;
     }
     return true;
@@ -52,7 +53,7 @@ struct ModbusProfileDecision {
     bool          link_ok;        // whether the connection / session should be kept alive
     bool          count_failure;  // whether this outcome counts as an rx_fail error
     bool          is_definitive;  // whether this decision concludes the profile
-    bool          is_affirmative; // whether this decision is affirmative (hardware-verified)
+    bool          is_affirmative; // affirmative protocol answer; not physical/model verification
 };
 
 // Evaluate probe result. consecutive_failures counts repeated non-affirmative attempts.
