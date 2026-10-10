@@ -4,15 +4,17 @@
 //
 // Why this exists rather than reusing build_crash_text():
 //   * TIMING — diag_crash_capture() runs at the top of app_main, before WiFi and before the syslog
-//     task exists, so its "crash:" line only ever reaches the in-RAM diag ring. The ring is 6 KB and
-//     a chatty failure mode (an X10A timeout every ~0.3 s) overwrites it within a minute, so in
+//     task exists, so its "crash:" line only ever reaches the in-RAM diag ring. The ring is 6 KB
+//     and a chatty failure mode (an X10A timeout every ~0.3 s) overwrites it within a minute, so in
 //     practice the crash is readable NOWHERE. syslog.cpp replays these records after DNS resolves.
-//   * SIZE — build_crash_text() is one multi-line block; at worst case (16-deep backtrace + a 64-char
-//     ELF hash) it is ~340 bytes, past diag_printf's 256-byte line buffer AND past the 256-byte
+//   * SIZE — build_crash_text() is one multi-line block; at worst case (16-deep backtrace + a
+//   64-char
+//     ELF hash) it exceeds diag_printf's 256-byte line buffer AND the 256-byte
 //     syslog queue slot, so it truncates exactly where the backtrace and elf_sha256 live. These
-//     records are single-line and each fits one datagram whole (see the CRASH_LOG_LINE_BUDGET test).
-// build_crash_text() stays as-is: it is the paste-friendly block for /diag + the UI bundle, where
-// multi-line is a feature and nothing truncates it.
+//     records are single-line and each fits one datagram whole (see the CRASH_LOG_LINE_BUDGET
+//     test).
+// build_crash_text() is the paste-friendly block for the UI copy bundle. Capture logs to the diag
+// ring can still truncate that block; these separate bounded records preserve the full backtrace.
 //
 // Format is logfmt-ish (key=value, space separated) so a collector can extract fields without a
 // custom parser, and each line carries a leading "boot:"/"crash:" module tag matching the rest of
@@ -48,12 +50,14 @@ inline std::string build_boot_line(const BootIdent& b) {
     return s;
 }
 
-// Upper bound on the records build_crash_log_lines() can produce (header / summary / backtrace).
-inline constexpr int CRASH_LOG_LINE_MAX = 3;
+// Header + task/PC + ELF identity + two backtrace records. Separating ELF identity preserves the
+// 200-byte bound even for 15 escaped task bytes and a full 64-character hash. Eight PCs per record
+// retain all 16 PCs while every stored record repeats provenance (a collector may get only one).
+inline constexpr int CRASH_LOG_LINE_MAX = 5;
 
-// Render a captured crash as up to CRASH_LOG_LINE_MAX single-line records into out[], returning how
-// many were written. Returns 0 for a boot that is not notable (a clean power-on / software reboot
-// with no orphan dump) — the "only replay a real crash" rule lives HERE, host-tested, rather than in
+// Render current reset facts and any stored summary as up to CRASH_LOG_LINE_MAX records into out[],
+// returning the count. Returns 0 for a boot that is not notable (a clean power-on / software reboot
+// with no orphan dump) — the notability rule lives HERE, host-tested, rather than in
 // the device caller. Writes at most `max` entries, so a caller with a smaller array cannot overrun.
 inline int build_crash_log_lines(const CrashInfo& c, std::string* out, int max) {
     if (!out || max <= 0 || !crash_is_notable(c)) return 0;
@@ -63,26 +67,36 @@ inline int build_crash_log_lines(const CrashInfo& c, std::string* out, int max) 
     head += crash_reason_slug(c.reason);
     head += crash_reason_is_fault(c.reason) ? " fault=yes" : " fault=no";
     head += c.coredump ? " coredump=yes" : " coredump=no";
+    head += " source=current_boot";
     out[n++] = head;
 
     if (!c.have_summary) return n;   // orphan dump / no parsable summary: the header is all there is
 
     if (n < max) {
-        std::string s = "crash: task=";
-        s += c.task;
+        std::string s = "crash: source=stored_dump age=unknown reset_relation=unknown task=";
+        append_crash_log_value(s, c.task);
         s += " pc=";
         append_hex32(s, c.pc);
         if (c.bt_corrupted) s += " corrupted=yes";
-        if (c.elf_sha[0]) { s += " elf_sha256="; s += c.elf_sha; }
+        out[n++] = s;
+    }
+
+    if (c.elf_sha[0] && n < max) {
+        std::string s = "crash: source=stored_dump age=unknown reset_relation=unknown elf_sha256=";
+        append_crash_log_value(s, c.elf_sha);
         out[n++] = s;
     }
 
     // Raw PCs, symbolized offline against the matching .elf (scripts/decode-coredump.sh). Depth is
     // clamped to the 16-entry buffer — a corrupt summary can over-report it (mirrors build_crash_json).
     const int depth = c.bt_depth < 0 ? 0 : (c.bt_depth < 16 ? c.bt_depth : 16);
-    if (depth > 0 && n < max) {
-        std::string s = "crash: backtrace=";
-        for (int i = 0; i < depth; i++) { if (i) s += ' '; append_hex32(s, c.bt[i]); }
+    for (int start = 0; start < depth && n < max; start += 8) {
+        std::string s   = "crash: source=stored_dump age=unknown reset_relation=unknown backtrace=";
+        const int   end = start + 8 < depth ? start + 8 : depth;
+        for (int i = start; i < end; i++) {
+            if (i > start) s += ' ';
+            append_hex32(s, c.bt[i]);
+        }
         out[n++] = s;
     }
     return n;

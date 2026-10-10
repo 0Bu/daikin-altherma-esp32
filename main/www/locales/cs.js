@@ -1,4 +1,4 @@
-// translation-source: 856c2ce7d1e297c3bcf8a20a2f1b4c8079ed68a2890bb1d0729997a0bd963c19
+// translation-source: bcd4ff0bb5bf1f2e454eb0f7e5c00ea352bcbb9f1f0c080ef5225bc85210fa0b
 I18N.cs = localeValues([
   /* sys.nodata */ "Žádná data",
   /* sys.unreachable */ "Nedostupné",
@@ -34,13 +34,16 @@ I18N.cs = localeValues([
   /* recovery.meta */ "Zařízení se opakovaně restartovalo a přešlo do režimu obnovení. Komunikace s tepelným čerpadlem a MQTT je pozastavena. Zkontrolujte konfiguraci — zejména piny RX/TX na kartě Protokol v Nastavení — a poté zařízení restartujte.",
   /* rollback.title */ "Změna WiFi selhala — obnoveno původní nastavení",
   /* rollback.meta */ (back) => `Zařízení se s novým nastavením WiFi nemohlo připojit. Obnovilo předchozí síť${back} a restartovalo se. V Nastavení → Připojení zkontrolujte název sítě a heslo a zkuste to znovu.`,
-  /* crash.title_fault */ "Zařízení se restartovalo po pádu",
+  /* crash.title_fault */ "Zařízení se restartovalo po chybě",
   /* crash.title_orphan */ "Čeká zde hlášení o pádu z dřívějšího restartu",
   /* crash.reset */ "Reset",
   /* crash.task */ "úloha",
   /* crash.fw */ "fw",
   /* crash.elf */ "elf",
   /* crash.corrupted */ "poškozeno",
+  /* crash.stored_dump */ "Uložené hlášení o pádu",
+  /* crash.stored_hint */ "Stáří hlášení a jeho souvislost s tímto restartem nejsou známy.",
+  /* crash.backtrace */ "Zásobník volání",
   /* crash.download */ "Stáhnout hlášení o pádu",
   /* crash.copy */ "Kopírovat diagnostiku",
   /* crash.dismiss */ "Smazat hlášení",

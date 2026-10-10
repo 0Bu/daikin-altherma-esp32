@@ -12,6 +12,7 @@
 #include <cstdlib>
 #include <atomic>
 #include <cstring>
+#include <new>
 
 namespace daik {
 
@@ -29,9 +30,9 @@ static_assert(static_cast<uint32_t>(CrashReason::BROWNOUT)   == ESP_RST_BROWNOUT
 // field and therefore lives in its own atomic rather than racing a request against /status/MQTT.
 static CrashInfo s_ci;
 static std::atomic<bool> s_dismissed{false};
-// Set only on boot-time proof that the on-flash image belongs to another firmware. The erase is
-// best-effort; this latch keeps a failed erase from making the rejected image reportable again when
-// diag_crash_info_live() performs its later raw flash presence check.
+// Set only on boot-time proof that the on-flash image belongs to another firmware. Preserve its
+// private bytes; this latch suppresses attribution/download for this boot even though the raw flash
+// presence check still finds an image. Only an explicit clear/dismiss/factory-reset may erase it.
 static bool s_foreign_coredump = false;
 
 // A dump is "downloadable" on EXACTLY the terms GET /coredump uses: the raw image must exist AND must
@@ -58,14 +59,15 @@ void diag_crash_capture() {
     s_ci.reason   = static_cast<uint32_t>(esp_reset_reason());
     s_ci.coredump = diag_crash_coredump_present();
 
-#if defined(CONFIG_ESP_COREDUMP_DATA_FORMAT_ELF)
-    // Parse the summary only from a VALID image (checksum ok). Allocate on the heap — the summary
-    // struct is ~2 KB and this runs at boot when heap is plentiful (before WiFi/MQTT come up).
+#if CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH
+    // Parse the summary only from a VALID image (checksum ok). This boot-only allocation is
+    // fallible: a missing summary leaves the reset reason and private flash evidence intact.
     if (s_ci.coredump && esp_core_dump_image_check() == ESP_OK) {
         auto* sum = static_cast<esp_core_dump_summary_t*>(calloc(1, sizeof(esp_core_dump_summary_t)));
         if (sum && esp_core_dump_get_summary(sum) == ESP_OK) {
             s_ci.have_summary = true;
-            std::snprintf(s_ci.task, sizeof(s_ci.task), "%s", sum->exc_task);
+            std::snprintf(s_ci.task, sizeof(s_ci.task), "%.*s",
+                          static_cast<int>(sizeof(sum->exc_task)), sum->exc_task);
             s_ci.pc           = sum->exc_pc;
             int depth = static_cast<int>(sum->exc_bt_info.depth);
             if (depth < 0) depth = 0;
@@ -74,32 +76,25 @@ void diag_crash_capture() {
             s_ci.bt_depth = depth;
             for (int i = 0; i < depth; i++) s_ci.bt[i] = sum->exc_bt_info.bt[i];
             s_ci.bt_corrupted = sum->exc_bt_info.corrupted;
-            std::snprintf(s_ci.elf_sha, sizeof(s_ci.elf_sha), "%s", sum->app_elf_sha256);
+            std::snprintf(s_ci.elf_sha, sizeof(s_ci.elf_sha), "%.*s",
+                          static_cast<int>(sizeof(sum->app_elf_sha256)),
+                          reinterpret_cast<const char*>(sum->app_elf_sha256));
         }
         free(sum);
     }
 
-    // A dump can OUTLIVE the firmware that wrote it: the coredump partition survives an OTA, and a
-    // panic that fails to write its own dump (a stack overflow can overrun the writer) leaves the
-    // PREVIOUS build's dump in place. Such an orphan still passes esp_core_dump_image_check() — it
-    // is a valid image, just of another binary — so `coredump` reads true, /status offers a
-    // download, and only espcoredump three steps later rejects it on a SHA-256 mismatch
-    // (legacy-215). Detect it by comparing the dump's own app-ELF sha (from the summary) against
-    // the RUNNING build's, and erase the orphan when they disagree: then `coredump` means "a dump
-    // for THIS firmware is downloadable" and the next real panic writes to a clean partition. The
-    // summary fields go with it — they describe the foreign binary and would symbolize to garbage
-    // against the running .elf. The erase failing is logged but not fatal; coredump/summary are
-    // cleared regardless, since reporting a dump we KNOW is foreign is worse than reporting none.
+    // The reset reason describes this boot; these summary fields describe the stored image. A
+    // matching ELF cannot prove that the image was written by the latest fault: a failed same-ELF
+    // write can leave an earlier incident behind. Reject proven foreign attribution without
+    // destroying its private evidence. The same latch drives /status and GET /coredump.
     if (s_ci.have_summary) {
         char run_sha[65] = {0};
         esp_app_get_elf_sha256(run_sha, sizeof(run_sha));
         if (coredump_is_foreign(s_ci.elf_sha, run_sha)) {
             s_foreign_coredump = true;
-            diag_printf("crash: stale core dump from build %s (running %s) — erasing\n",
-                        s_ci.elf_sha, run_sha);
-            esp_err_t err = esp_core_dump_image_erase();
-            if (err != ESP_OK)
-                diag_printf("crash: stale core dump erase failed: %s\n", esp_err_to_name(err));
+            diag_printf(
+                "crash: foreign core dump from build %s (running %s) — preserved, suppressed\n",
+                s_ci.elf_sha, run_sha);
             s_ci.coredump     = false;
             s_ci.have_summary = false;
             s_ci.elf_sha[0]   = '\0';
@@ -108,8 +103,13 @@ void diag_crash_capture() {
 #endif
 
     if (crash_is_notable(s_ci)) {
-        // Log the crash to the diag ring so GET /diag shows it too (build_crash_text is host-tested).
-        diag_printf("crash: %s\n", build_crash_text(s_ci).c_str());
+        // Formatting is best-effort. OOM must not abort boot or discard the captured facts.
+        try {
+            diag_printf("crash: %s\n", build_crash_text(s_ci).c_str());
+        } catch (const std::bad_alloc&) {
+            diag_printf("crash: diagnostic text unavailable (OOM); cached reset and stored "
+                        "evidence retained\n");
+        }
     }
 }
 

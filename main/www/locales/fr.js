@@ -1,4 +1,4 @@
-// translation-source: 856c2ce7d1e297c3bcf8a20a2f1b4c8079ed68a2890bb1d0729997a0bd963c19
+// translation-source: bcd4ff0bb5bf1f2e454eb0f7e5c00ea352bcbb9f1f0c080ef5225bc85210fa0b
 I18N.fr = localeValues([
   /* sys.nodata */ "Aucune donnée",
   /* sys.unreachable */ "Injoignable",
@@ -34,13 +34,16 @@ I18N.fr = localeValues([
   /* recovery.meta */ "L’appareil a redémarré à plusieurs reprises et est passé en mode de récupération. La communication avec la pompe à chaleur et MQTT est suspendue. Vérifiez la configuration — en particulier les broches RX/TX de la carte Protocole dans Paramètres — puis redémarrez l’appareil.",
   /* rollback.title */ "Échec de la modification WiFi — ancienne configuration restaurée",
   /* rollback.meta */ (back) => `L’appareil n’a pas pu se connecter avec les nouveaux paramètres WiFi. Il a restauré le réseau précédent${back} et redémarré. Vérifiez le nom du réseau et le mot de passe dans Paramètres → Connexions, puis réessayez.`,
-  /* crash.title_fault */ "L’appareil a redémarré après un plantage",
+  /* crash.title_fault */ "L’appareil a redémarré après une erreur",
   /* crash.title_orphan */ "Un rapport de plantage d’un redémarrage antérieur est en attente",
   /* crash.reset */ "Réinitialisation",
   /* crash.task */ "tâche",
   /* crash.fw */ "fw",
   /* crash.elf */ "elf",
   /* crash.corrupted */ "corrompu",
+  /* crash.stored_dump */ "Rapport de plantage conservé",
+  /* crash.stored_hint */ "L’âge du rapport et son lien avec ce redémarrage sont inconnus.",
+  /* crash.backtrace */ "Pile d’appels",
   /* crash.download */ "Télécharger le rapport de plantage",
   /* crash.copy */ "Copier le diagnostic",
   /* crash.dismiss */ "Supprimer le rapport",

@@ -1,4 +1,4 @@
-// translation-source: 856c2ce7d1e297c3bcf8a20a2f1b4c8079ed68a2890bb1d0729997a0bd963c19
+// translation-source: bcd4ff0bb5bf1f2e454eb0f7e5c00ea352bcbb9f1f0c080ef5225bc85210fa0b
 I18N.it = localeValues([
   /* sys.nodata */ "Nessun dato",
   /* sys.unreachable */ "Non raggiungibile",
@@ -34,13 +34,16 @@ I18N.it = localeValues([
   /* recovery.meta */ "Il dispositivo si è riavviato ripetutamente ed è entrato in modalità di ripristino. La comunicazione con la pompa di calore e MQTT è in pausa. Controllare la configurazione — in particolare i pin RX/TX nella scheda Protocollo delle Impostazioni — quindi riavviare il dispositivo.",
   /* rollback.title */ "Modifica WiFi non riuscita — configurazione precedente ripristinata",
   /* rollback.meta */ (back) => `Il dispositivo non è riuscito a connettersi con le nuove impostazioni WiFi. Ha ripristinato la rete precedente${back} e si è riavviato. Controllare il nome della rete e la password in Impostazioni → Connessioni, quindi riprovare.`,
-  /* crash.title_fault */ "Dispositivo riavviato dopo un arresto anomalo",
+  /* crash.title_fault */ "Dispositivo riavviato dopo un errore",
   /* crash.title_orphan */ "Rapporto di arresto anomalo in attesa da un riavvio precedente",
   /* crash.reset */ "Reset",
   /* crash.task */ "attività",
   /* crash.fw */ "fw",
   /* crash.elf */ "elf",
   /* crash.corrupted */ "danneggiato",
+  /* crash.stored_dump */ "Rapporto di arresto anomalo salvato",
+  /* crash.stored_hint */ "L’età del rapporto e il suo legame con questo riavvio sono sconosciuti.",
+  /* crash.backtrace */ "Stack di chiamate",
   /* crash.download */ "Scarica rapporto di arresto anomalo",
   /* crash.copy */ "Copia diagnostica",
   /* crash.dismiss */ "Elimina rapporto",
