@@ -465,7 +465,7 @@ Everything is runtime — no reflash, and no reboot.
 
 | Field | Meaning |
 |---|---|
-| `mb_host` | HomeHub IP or `.local`/DNS hostname; an explicitly saved empty value disables automatic discovery, task, requests and dependent diagnosis. Validated at most 512 chars — the atomic config blob rejects any longer string on read, which would discard the WHOLE saved configuration on the next boot, so an over-long address is a 400 |
+| `mb_host` | HomeHub IP or `.local`/DNS hostname, at most 512 bytes; longer input returns 400 before persistence. An explicitly saved empty value disables automatic discovery, task, requests and dependent diagnosis. |
 | `mb_discovery_done` | Internal v18 latch. Fresh=false triggers the one initial networked search; every result and every explicit `mb_host` save sets true. Exposed read-only as `/status.modbus.searched` |
 | `mb_port` | Modbus TCP port, default `502` (validated 1–65535) |
 | `mb_unit_id` | Modbus unit id, default `1` (validated 1–247) |

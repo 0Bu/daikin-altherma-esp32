@@ -48,7 +48,12 @@ try {
     .split("\0")
     .filter(Boolean)
     .filter((file) => fs.existsSync(path.join(root, file)));
-  for (const file of tracked) {
+  // Include new public Markdown pages before staging: relocated contracts must reach the fixture
+  // while this selftest is validating an in-progress documentation change.
+  const publicDocs = execFileSync(git,
+    ["ls-files", "-z", "--others", "--exclude-standard", "--", "docs/*.md"], { cwd: root })
+    .toString("utf8").split("\0").filter(Boolean);
+  for (const file of new Set([...tracked, ...publicDocs])) {
     const destination = path.join(seededRoot, file);
     fs.mkdirSync(path.dirname(destination), { recursive: true });
     fs.copyFileSync(path.join(root, file), destination);
@@ -203,11 +208,11 @@ try {
   }
   fs.writeFileSync(mcpFile, originalMcp);
 
-  const architectureFile = path.join(seededRoot, "docs/ARCHITECTURE.md");
-  const originalArchitecture = fs.readFileSync(architectureFile, "utf8");
+  const apiFile = path.join(seededRoot, "docs/API.md");
+  const originalApi = fs.readFileSync(apiFile, "utf8");
   fs.writeFileSync(
-    architectureFile,
-    originalArchitecture.replace("trusted-LAN route count of 39", "trusted-LAN route count of 38"),
+    apiFile,
+    originalApi.replace("trusted-LAN route count of 39", "trusted-LAN route count of 38"),
   );
   let seeded = spawnSync("/bin/bash", ["scripts/run-public-readiness-audit.sh"], {
     cwd: seededRoot,
@@ -216,7 +221,7 @@ try {
   });
   assert.notEqual(seeded.status, 0, "public-readiness audit accepted route-count documentation drift");
   assert.match(`${seeded.stdout}\n${seeded.stderr}`, /exact trusted-LAN route budget/);
-  fs.writeFileSync(architectureFile, originalArchitecture);
+  fs.writeFileSync(apiFile, originalApi);
 
   const wrapperFile = path.join(seededRoot, "scripts/gh-with-git-credentials.sh");
   const originalWrapper = fs.readFileSync(wrapperFile, "utf8");

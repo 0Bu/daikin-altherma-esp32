@@ -1,287 +1,143 @@
 # Boards
 
-Which ESP32-S3 boards this firmware runs on, what hardware each one brings, and **which of those
-parts the firmware actually uses**. Wiring the X10A service port itself is
-[WIRING.md](WIRING.md); this page is about the board.
+The supported presets are **M5Stack AtomS3 Lite** and **Seeed XIAO ESP32-S3**. One `esp32s3` image
+serves both; board identity, indicator, recovery button and optional ENV III wiring are runtime
+settings under **Settings → ESP32 → Hardware**. X10A RX/TX selection is under **Settings → Protocol**.
 
-The supported boards are the **M5Stack AtomS3 Lite** and **Seeed XIAO ESP32-S3**. Boards with an
-integrated display, including the M5Stack AtomS3 and M5StickS3, are intentionally unsupported: the
-firmware contains no display driver, display role, or remote-display MQTT path.
-
-> **One image, several boards.** CI publishes a single `esp32s3` artifact
-> ([`ci-build-all.sh`](../scripts/ci-build-all.sh)), so nothing board-specific may be a compile-time
-> choice — it would fork the binary, its OTA manifest and the web installer per board. Everything
-> below that differs between boards is therefore a **runtime setting** in NVS: the X10A RX/TX pins
-> (auto-detected, `POST /set_hp`) plus board identity, optional ENV III SDA/SCL, status indicator and
-> recovery button (one atomic `POST /set_board`, **⚙ Settings → ESP32 → Hardware**). The legacy
-> `POST /set_env3` route remains API-compatible. Kconfig only seeds a device that has never been configured.
+The board selection is your hardware statement, not automatic detection. It narrows the pin
+selectors using [`board_presets.hpp`](../main/logic/board_presets.hpp). Editing an indicator or button
+keeps that selected identity; choosing **Custom** removes the preset's accessory capability.
+Board/peripheral/sensor settings are validated and persisted together. Changed peripheral settings
+reboot; an identity-only change can save without rebooting.
 
 ## What the firmware requires
 
-| Requirement | Why |
+| Requirement | Purpose |
 |---|---|
-| **ESP32-S3** target | The only target built. Not a hard chip limit — the code is target-agnostic — but nothing else is compiled or tested. |
-| **≥ 8 MB flash** | [`partitions.csv`](../partitions.csv) keeps two ~2.03 MB OTA slots below 4 MB and reserves the whole upper 4 MiB for a wear-levelled history journal. Today's dense trend and hourly diagnostic records use 256-byte slots; slot width grows with the catalog and compilation requires at least 72 hours with all four sources active. Physical 4 MB boards are unsupported. |
-| **Two free GPIOs** | The X10A link (RX + TX). See [WIRING.md](WIRING.md) for the chip-safe set. |
-| **Two additional free GPIOs** *(optional)* | One I²C SDA/SCL pair when an ENV III outdoor sensor is enabled. |
-| **USB-Serial/JTAG** *(strongly preferred)* | `CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG` — the serial console and the browser (Web Serial) installer. A board with only an external USB-UART bridge needs the console reconfigured. |
+| ESP32-S3 | The only compiled and tested chip target. |
+| At least **8 MB flash** | Dual OTA slots plus a 4 MiB upper-flash history journal; 4 MB boards are unsupported. |
+| Two usable GPIOs | X10A receive/transmit. |
+| Native USB-Serial/JTAG, preferred | The shipped serial console and Web Serial installer. External USB-UART boards need console adaptation. |
 
-**Not required:** PSRAM (`CONFIG_SPIRAM` is off — the heap discipline in
-[ARCHITECTURE.md](ARCHITECTURE.md) assumes internal RAM only), Bluetooth, or an SD slot. None of
-them are used. A display is outside the supported hardware scope rather than an unused optional
-peripheral. **Ethernet is OPTIONAL and detected** — see *Wired networking* below; a board without a
-controller behaves exactly as it did before the transport existed.
+PSRAM, Bluetooth and SD storage are unused. Display-equipped boards, including AtomS3 and
+M5StickS3, are unsupported; the firmware contains no display driver or remote-display role.
+W5500 Ethernet is optional. [WIRING.md](WIRING.md) owns X10A voltages and connector wiring.
 
----
+<a id="m5stack-atoms3-lite--the-board-the-wiring-guide-is-written-for"></a>
+## M5Stack AtomS3 Lite
 
-## M5Stack AtomS3 Lite — the board the wiring guide is written for
-
-A 24 × 24 mm cased board. Its two onboard parts are exactly the two the firmware can drive, and its
-Grove port reaches X10A with no soldering — which is why [WIRING.md](WIRING.md) is written for it
-(the README stays generic across ESP32-S3 boards).
-
-| | |
+| Hardware | Firmware use |
 |---|---|
-| Chip / flash / PSRAM | ESP32-S3FN8 · 8 MB flash · no PSRAM |
-| USB | USB-C, native USB-Serial/JTAG |
-| X10A-safe pins broken out | **1, 2** (Grove), **5, 6, 7, 8, 38** (female header on the case) |
-| X10A pins to set | **RX = 1 (G1)**, **TX = 2 (G2)** for the Grove port — *not* a default; pick them once |
-| Status LED | **GPIO35**, WS2812C-2020 — an **addressable RGB** pixel |
-| Button | **GPIO41**, front button, **active low** |
-| Also on board | IR transmitter LED (GPIO4), reset button, Grove HY2.0-4P port |
+| ESP32-S3FN8, 8 MB flash, no PSRAM | Supported target; USB-C native USB console. |
+| Grove GPIO1/2 | X10A **RX 1 / TX 2**; select these once, as they are not the shipped defaults. |
+| Side header GPIO5/6/7/8/38 | Alternative X10A pair or optional sensor wiring. |
+| GPIO35 WS2812C-2020 | Addressable RGB status indicator. |
+| GPIO41 front button, active low | Optional 5-second privacy reset. |
+| GPIO4 IR LED | Unused. |
 
-**The pins are not automatic on this board.** The shipped `CONFIG_DAIKIN_RX_PIN`/`_TX_PIN` defaults
-are the XIAO's 44/43, and detection only ever probes the cached pair, the default pair and each of
-them swapped — none of which the AtomS3 Lite breaks out. So the bus stays silent until the pins are
-picked once under **⚙ Settings → Protocol** (RX/TX dropdown, `POST /set_hp`); after that they are
-cached in NVS and re-used every boot. Their order does not matter: the swap is probed too.
+The preset key is `m5stack_atoms3_lite`. Its indicator reports setup (blue), connecting (yellow),
+healthy (green), X10A down (red double-flash) or MQTT down (orange). Reset arming strobes red;
+erasure is solid white.
 
-**Firmware mapping.** Set under **⚙ Settings → ESP32 → Hardware** (a save reboots). Pick
-**M5Stack AtomS3 Lite** from the *Board* dropdown at the top of that dialog and all five fields below
-fill in — the dropdown is this table, served by the firmware (`logic/board_presets.hpp`), so it
-cannot drift from what follows. Save persists the stable id `m5stack_atoms3_lite` atomically with
-those fields; `/status.board.preset_id` and `.preset_name` therefore state the selection directly
-instead of inferring AtomS3 Lite from GPIO35/41. Nothing is written until you press Save, and editing
-LED or reset-button settings afterwards keeps the physical AtomS3 Lite identity selected. Only an
-explicit choice of *Custom* removes that identity and its M5Stack accessory capability.
+GPIO39 is physically exposed as “CLK_OUT3” but is dedicated JTAG and unavailable for X10A or ENV III.
+GPIO41 is also a JTAG pad, allowed for the board's own button; using it conflicts with an external
+JTAG probe. GPIO35 is allowed in the shipped DIO/no-PSRAM build, but Octal flash/PSRAM builds reserve
+GPIO33–37 and refuse them.
 
-- Status LED → `led_gpio 35`, type **WS2812**. The six operating states then come out as colours —
-  blue = setup portal, yellow = connecting, green = healthy, red double-flash = X10A down, orange =
-  MQTT down — plus the recovery button's red strobe (armed) and solid white (erasing). *Active low*
-  does not apply to a WS2812: it encodes "off" as the zero colour, so there is no drive level to
-  invert.
-- Recovery button → `btn_gpio 41`, **active low**. Held 5 s it performs a fail-closed privacy wipe:
-  serialized configuration, legacy WiFi credentials, history/trend/dwell state and the raw coredump
-  are erased. It reboots into the setup portal only after every erase succeeds; an incomplete wipe
-  stays on the current boot and must be retried.
+<a id="seeed-xiao-esp32-s3--the-board-the-pin-defaults-are-written-for"></a>
+## Seeed XIAO ESP32-S3
 
-**The Grove port is the tidy way in.** HY2.0-4P carries **GND, 5 V, G2, G1** — the same four wires
-X10A needs — so one Grove breakout cable reaches the service port. Without one, the female header on
-the case carries `5V`, `GND` and G5–G8/G38/G39 for plain jumper wires. The 5 V level-shifter advice and
-"power the board from USB, not off X10A's 50 mA" still apply exactly as in [WIRING.md](WIRING.md).
-
-**Watch out:**
-
-- **GPIO41 is a dedicated-JTAG pad (MTDI).** The firmware withholds GPIO39–42 from the *X10A* pin
-  picker to keep an external debug probe usable — a preference, not a hardware conflict — but the
-  LED/button picker offers them, because that is where this board's button physically is. Configuring
-  the button costs you nothing unless you actually attach a JTAG probe.
-- **GPIO39 is silkscreened "CLK_OUT3"** but is chip-level JTAG (MTCK) regardless of the label. It is
-  not offered in the generic X10A picker and is also withheld from ENV III: repeated hardware tests
-  did not establish reliable ENV III communication on that pad.
-- **GPIO35 is only safe because this build uses Quad (DIO) flash and no PSRAM.** On a build with
-  Octal flash/PSRAM, GPIO33–37 carry SPIIO4-7/DQS and the firmware refuses them — for the indicator
-  as well as for X10A.
-- **The IR LED (GPIO4) has no use here.** The firmware observes the Altherma over X10A and the
-  optional, independent read-only HomeHub Modbus connection; it does not control the heat pump.
-- **No display** — the LCD is on the non-Lite AtomS3. Nothing in the firmware renders to one.
-
----
-
-## Seeed XIAO ESP32-S3 — the board the pin defaults are written for
-
-The only board that needs no pin configuration at all: `CONFIG_DAIKIN_RX_PIN`/`_TX_PIN` are its pads,
-so a freshly flashed XIAO finds the bus on its own.
-
-| | |
+| Hardware | Firmware use |
 |---|---|
-| Chip / flash / PSRAM | ESP32-S3R8 · 8 MB flash · 8 MB PSRAM (**unused** — this build runs no SPIRAM) |
-| USB | USB-C, native USB-Serial/JTAG — flashes without a BOOT-button dance |
-| X10A default pins | **RX = 44 (D7)**, **TX = 43 (D6)** — the `CONFIG_DAIKIN_RX_PIN`/`_TX_PIN` defaults |
-| Other X10A-safe pins broken out | 1, 2, 4, 5, 6, 7, 8, 9 |
-| Status LED | **GPIO21**, plain single-colour, **active low** |
-| Button | none broken out |
+| ESP32-S3R8, 8 MB flash, 8 MB PSRAM | Supported target; PSRAM unused. |
+| USB-C, native USB-Serial/JTAG | Console and Web Serial installation. |
+| GPIO44 / D7 and GPIO43 / D6 | X10A **RX 44 / TX 43**, the shipped defaults. |
+| GPIO1/2/4/5/6/7/8/9 | Other exposed X10A-safe pads. |
+| GPIO21, plain LED, active low | The shipped indicator default. |
+| Recovery button | None configured; attach a real external button only if needed. |
 
-**Firmware mapping.** Status indicator: `led_gpio 21`, `led_type` *plain LED*, **active low**
-(the shipped first-boot default, so a XIAO needs no configuration). Recovery button: none — a XIAO
-has no free momentary switch, so a factory reset stays a web-UI or USB job unless you wire your own
-button to one of the free pins. Available as **Seeed XIAO ESP32-S3** in the *Board* dropdown under
-**⚙ Settings → ESP32 → Hardware**, should the settings ever need restoring.
+The preset key is `seeed_xiao_esp32s3`. GPIO3 / D2 is a strapping pin and unavailable for X10A.
+GPIO16/17 are absent from its header. **ENV III is unsupported on this preset**, including with a
+hand-wired Ethernet module: the runtime accessory gate requires a supported M5Stack preset.
 
-**Watch out:** GPIO3 (D2) is broken out as an ordinary pad but is the chip's JTAG-source-select
-**strapping** pin, so the firmware never offers it for X10A. GPIO16/17 do not exist on the XIAO's
-header at all.
-
----
-
+<a id="m5stack-env-iii-outdoor-temperature-humidity-and-pressure"></a>
 ## M5Stack ENV III — outdoor temperature, humidity and pressure
 
-ENV III is an optional, independent observation sensor. It combines an SHT30 at I²C address
-`0x44` with a QMP6988 at `0x70`; both share the same SDA/SCL pair. Select **M5Stack AtomS3 Lite**
-under **⚙ Settings → ESP32 → Hardware**, then configure **Outdoor sensor → ENV III** in that same
-dialog. Selecting **No sensor** disables the input. The dashboard then shows a
-separate **Outdoor climate** card. These readings do **not** replace or relabel Daikin's own R1T
-air-inlet value and are not yet consumed by a control algorithm. Every new fresh sample is also
-published as retained numeric JSON on `<base>/env3`, for example
-`{"temperature_c":20.25,"humidity_pct":45.50,"pressure_hpa":1008.75,"samples":4211,"errors":7}`.
-A stale or unavailable sensor **omits the three readings** and publishes the two counters alone
-(`{"samples":4211,"errors":8}`): `samples`/`errors` describe the I2C link rather than the air, so
-they are facts about the sensor whether or not it produced a reading — and they matter most when it
-did not, which is why they ride both shapes. Home Assistant discovery creates separate measurement
-entities for ENV III temperature, humidity and air pressure. They require both an online device and
-the corresponding READING key, so a counters-only document makes them unavailable without hiding
-unrelated heat-pump entities. Selecting
-**No sensor** retracts the state topic and all three retained discovery configurations.
+ENV III combines SHT30 temperature/humidity (`0x44`) and QMP6988 pressure (`0x70`) on one I²C pair.
+ENV, ENV II and ENV IV are different products and are not claimed compatible. Select **M5Stack
+AtomS3 Lite → Outdoor sensor → ENV III** in the Hardware dialog.
 
-| Board / wiring | ENV III SDA | ENV III SCL | X10A consequence |
-|---|---:|---:|---|
-| AtomS3 Lite, ENV III in Grove | **GPIO2 (G2)** | **GPIO1 (G1)** | Grove is then unavailable to X10A; move X10A to two free header pins, for example RX 5 / TX 6. |
-| AtomS3 Lite, X10A stays in Grove | choose two free header GPIOs, e.g. **5** | e.g. **6** | ENV III needs a Grove breakout/adapter to those header pins. |
-| AtomS3 Lite, side-header adapter | choose two offered pins, e.g. **GPIO7** | e.g. **GPIO8** | GPIO39 is intentionally unavailable for ENV III; power remains **5V (red)** / **GND (black)**. |
+| Arrangement | ENV III SDA / SCL | X10A consequence |
+|---|---|---|
+| ENV III on Grove | GPIO2 / GPIO1 | Move X10A to two free header pins, e.g. RX5 / TX6. |
+| X10A on Grove | Two free header pins, e.g. GPIO5 / GPIO6 | Use a Grove breakout for ENV III. |
+| Header adapter | Two offered pins, e.g. GPIO7 / GPIO8 | Keep both clear of other configured functions. |
 
-ENV III is exposed only when the pending board selection has firmware metadata identifying the
-vendor as **M5Stack** and declaring at least two physical I²C pins. Its section is hidden and disabled
-for Seeed and Custom, the driver cannot start there, and an enabled raw `POST /set_env3` is rejected.
-A future supported M5Stack preset must add its own connector-pin inventory to the same table; it
-cannot silently inherit the AtomS3 Lite layout. Custom cannot assert either fact, so it deliberately
-fails closed.
+The physical I²C inventory is **1, 2, 5, 6, 7, 8, 38**, minus occupied pins. GPIO39 is excluded
+because reliable sensor communication there was not established. The section is hidden for Seeed
+and Custom, and the API/driver also reject enabling it there. An M5Stack vendor identity alone is
+insufficient without explicit connector-pin metadata.
 
-The GPIO selectors preselect the AtomS3 Lite Grove mapping only when its pins are actually free and
-otherwise list only the tested board pins `1, 2, 5, 6, 7, 8, 38`. A save is rejected if
-ENV III uses any other chip pad or overlaps X10A, the status LED or the recovery button; the same
-check runs again at boot and disables an invalid persisted mapping. Board identity,
-LED/button and sensor are validated as one proposed snapshot. Enabling is **test-before-persist**:
-on the selected pair, the SHT30 must return one CRC-valid measurement and the QMP6988 must return its
-`0x5c` chip id before the firmware writes that snapshot once. If that sensor-level probe fails, the
-firmware tries exactly the same two selected GPIOs once more with SDA/SCL exchanged. A successful
-opposite order is written back as the corrected mapping; when neither order works, the original
-component-specific error remains visible. If either device is not reachable, the
-Board Hardware dialog stays open with the matching error and none of its changes are saved. Selecting
-**No sensor** remains directly saveable because disabling is the recovery path and requires no
-attached hardware. A running ENV III is accepted only while its latest sample is fresh. To move an
-already active sensor to other pins, first select **No sensor**, let the board restart, rewire it,
-then enable it on the new pair; this avoids creating a second I²C controller while the old one still
-owns its bus.
+Save proves both components before persisting: a CRC-valid SHT30 sample and QMP6988 chip id `0x5c`.
+It tries only the selected pair, then that pair with SDA/SCL exchanged; a successful exchange is
+saved. Failed probing leaves every proposed hardware change unsaved. An unchanged active pair
+requires a fresh runtime sample. **To move an active sensor: disable → restart → rewire → enable**.
+Selecting **No sensor** needs no successful probe and remains the recovery path.
 
-This matters on the AtomS3 Lite because its one Grove connector cannot carry X10A and ENV III at the
-same time even though both use the same four-colour cable.
-
-I²C cannot discover the physical GPIO pair without configuring candidate pins as a bus. Therefore
-the dialog keeps explicit pin selection: with Grove free it starts with GPIO2/1; with X10A on Grove
-it removes GPIO2/1 and selects two free header pins as the editable starting point. Save safely
-handles the common wire-order mistake by probing only that selected pair in both directions. It does
-not scan other free GPIO combinations or reconfigure unknown external pins at boot.
-
-Grove wire colours are **red 5 V, black GND, yellow SDA, white SCL**. M5Stack specifies a maximum
-temperature-measurement range of **−40–120 °C**. Its highest stated accuracy, **±0.2 °C**, applies
-from **0–60 °C**; the separately listed operating-temperature range is also **0–60 °C**. M5Stack
-does not state an IP weather-protection rating. For outdoor use, mount the unit in a ventilated,
-sheltered enclosure rather than exposing it directly to rain, condensation or full sun.
-
----
+Grove colours are red **5 V**, black **GND**, yellow **SDA**, white **SCL**. M5Stack lists a
+−40–120 °C measurement range; ±0.2 °C accuracy and the operating range apply to **0–60 °C**.
+No IP weather rating is stated. Use a ventilated sheltered enclosure for outdoor placement, away
+from rain, condensation and direct sun. Placement determines whether these are outdoor or indoor
+readings; they never replace Daikin's sensor. See [PLANT.md](PLANT.md#optional-env-iii-climate-input)
+for their lifecycle and [MQTT.md](MQTT.md#env-iii) for publication.
 
 ## Wired networking (M5Stack ATOMIC PoE Base, W5500)
 
-Optional. One cable then carries **both power and the LAN**, which is the point in a cellar or
-utility room where no access point reaches — the device still reads X10A over its own service lead
-and the HomeHub over the network.
-
-| | |
+| Hardware | Mapping |
 |---|---|
-| Controller | WIZnet **W5500** over SPI, polled (the base routes no interrupt line) |
-| Pins | **SCLK 5 · CS 6 · MISO 7 · MOSI 8** (`CONFIG_DAIKIN_ETH_SPI_*`) |
-| Detected | at boot, by reading the W5500's `VERSIONR` register — nothing to configure |
-| Power | PoE, or the base's own input; the ESP32 is powered through the base |
+| WIZnet W5500, polled SPI | **SCLK5 / CS6 / MISO7 / MOSI8**; no interrupt line. |
+| Detection | One boot-time `VERSIONR` probe; no network setting required. |
+| Power | PoE or the base's own supply powers the board. |
 
-**Nothing is configured.** The firmware probes those four pads once at boot. Found → the wire is
-brought up, and if it gets a lease the WiFi radio is never started and no setup portal is opened.
-Not found → the SPI bus is freed and the board is exactly what it was. The same single `esp32s3`
-image serves both, like every other board difference here.
+If detected and DHCP succeeds, Ethernet takes priority and the WiFi radio/setup portal stay off.
+If absent, the probe releases SPI and normal WiFi setup proceeds. The Connections tile shows
+Ethernet speed, no cable, or cable connected without an address; `/status.net` exposes the same
+facts. WiFi correctly reports offline on a wired boot.
 
-**On the AtomS3 Lite this costs you ENV III, and there is no way around it.** The base seats on the
-side header and covers **every pin it carries** (`5, 6, 7, 8, 38`) — four of them are the SPI bus
-itself. That leaves the Grove port (`GPIO1/2`), which X10A needs. So:
+On AtomS3 Lite the base covers the entire side header. X10A must use Grove **RX1/TX2**, leaving
+**no usable pair for ENV III**. A passive Grove hub cannot share the UART pair with an I²C sensor.
+Detected SPI pins are removed from all selectors and rejected by configuration saves. A hand-wired
+W5500 can also use the XIAO's exposed GPIO5–8, with X10A on 44/43; ENV III remains unsupported there.
 
-| | AtomS3 Lite, PoE base | AtomS3 Lite, no base |
-|---|---|---|
-| X10A | Grove — **RX 1 / TX 2** | Grove `1/2`, or header pins |
-| ENV III | **not attachable** | Grove, or two header pins |
-| Ethernet | GPIO 5/6/7/8 (the base) | — |
-
-A Grove hub does **not** rescue the sensor, and it is worth knowing why before buying one: a hub is
-a passive fan-out of the same four wires. That works for I²C, where a bus is shared and every device
-is addressed — but X10A is a **UART**, so a second device on the same pair is a collision, not a
-bus. The firmware states the conflict rather than letting you find it: once a controller is
-detected, those four pads disappear from every pin picker and a `POST /set_env3` or `/set_board`
-naming one is refused.
-
-The **XIAO ESP32-S3** breaks out the same four pads, so a hand-wired W5500 module works there and
-leaves pins for X10A — at the cost of the soldering and the case that the PoE base exists to avoid.
-ENV III is supported only with an M5Stack preset; the XIAO preset does not offer it, even if spare
-GPIOs are physically present.
-
-**What it looks like when it is running.** The Connections tile grows an *Ethernet* row (no pencil —
-there is nothing to configure) showing the negotiated speed, or one of two distinct problems: *no
-cable*, or *cable connected, no address* (a DHCP or VLAN issue). `/status.net` carries the same facts
-for a script. The WiFi row stays visible and says *offline*, truthfully — the radio really is off.
-
-**Pull the cable and the board reboots**, once, after ~30 s, and comes back up on WiFi if
-credentials are stored. That is deliberate: a board that came up wired has no radio running, and the
-reboot re-runs the same boot decision instead of duplicating it. The 24-hour trends survive it. With
-no WiFi configured it does not reboot at all — it simply waits for the wire, and takes it back when
-it returns.
-
----
+After cable loss for about 30 seconds, a wired boot with saved WiFi credentials reboots once and
+tries WiFi. Without credentials it waits for Ethernet instead. Compatible saved trends survive the
+reset; they do not prove that measurements were collected during the gap.
 
 ## Other ESP32-S3 boards
 
-Any board meeting *What the firmware requires* works; you supply the pin knowledge the firmware
-cannot discover. There is no board-ID EEPROM on an ESP32-S3. An explicitly selected AtomS3 Lite or
-XIAO preset is therefore the user's board statement and narrows `/status.pins_avail` to that board's
-documented headers. With *Custom* selected, the firmware only knows which pins the *chip* reserves
-([`logic/board_pins.hpp`](../main/logic/board_pins.hpp)); cross-reference the generic list against the
-unknown board's pinout. [WIRING.md](WIRING.md) includes the Waveshare ESP32-S3-DevKitC-1 example.
+Use **Custom** only after checking the board's schematic against the offered chip-safe pins.
+Meeting the chip/flash requirements does not establish physical board compatibility. See
+[WIRING.md](WIRING.md#picking-pins-on-a-different-board) for a DevKit example.
 
-For the indicator and the button, read your board's schematic for the onboard LED pin, its polarity
-(or whether it is a WS2812), and any free momentary switch, then enter them under
-**⚙ Settings → ESP32 → Hardware** — leaving the *Board* dropdown on *Custom*, since the presets cover only the two boards
-above. If your board has no LED the firmware can drive, leave the indicator on *None* — every state
-it shows is also on `/status` and in the dashboard.
+The shipped indicator default drives GPIO21 even before a custom board is described. Set the actual
+LED pin/type/polarity or **None**. Leave the recovery button on **None** unless a real button is
+wired; a floating input can trigger an unintended reset.
 
-A board with no preset is worth knowing about for one reason: until you set the indicator, it runs
-on the shipped default (a plain LED on GPIO21) and will silently drive that pin whether or not
-anything is on it. `/diag` says which pin and driver it resolved to at boot (`led: LED indicator on
-GPIO21 (active low)`), so a dark board is one line away from an explanation.
+## Recovery button
 
-**Leave the recovery button on *None* unless one is really wired.** An unconfigured input pin
-floats, and a floating pin that happens to read "pressed" for five seconds would erase the config of
-a board nobody touched.
-
----
+Holding a configured button for five seconds erases serialized settings, legacy WiFi credentials,
+history/trend/state-age data and the raw coredump. It reboots into setup only after every erase
+succeeds; an incomplete wipe remains on the current boot and is reported. Release while arming to
+abort. Preserve needed configuration and crash evidence before using it.
 
 ## Feature availability by board
 
-`✅` used · `➖` present but not used by this firmware · `—` not on the board
-
-| Firmware feature | AtomS3 Lite | XIAO ESP32-S3 |
-|---|:---:|:---:|
-| X10A link (2 GPIOs) | ✅ pick from 1, 2, 5–8, 38 | ✅ 44/43, the defaults |
-| ENV III outdoor climate sensor (optional) | ✅ 2/1 Grove **or** two free header pins | — (M5Stack boards only) |
-| Browser (Web Serial) install + serial console | ✅ | ✅ |
-| OTA self-update (dual slot, signed) | ✅ | ✅ |
-| Status indicator | ✅ WS2812, GPIO35 | ✅ plain LED, GPIO21 |
-| Recovery button (5 s factory reset) | ✅ GPIO41 | — |
-| Grove connector for X10A | ✅ 5 V/GND/G1/G2 | — |
-| PSRAM | — | ➖ 8 MB, unused |
-| IR transmitter | ➖ no use case | — |
-| Display | — (non-Lite AtomS3 only) | — |
+| Feature | AtomS3 Lite | XIAO ESP32-S3 |
+|---|---|---|
+| X10A | Choose Grove 1/2 or free header pair | Default 44/43 or free offered pair |
+| ENV III | Optional, without PoE base | Unsupported |
+| Web Serial, signed dual-slot OTA | Yes | Yes |
+| Indicator | WS2812 GPIO35 | Plain LED GPIO21, active low |
+| Recovery button | GPIO41, active low | External only |
+| W5500 Ethernet | ATOMIC PoE Base | Hand-wired module |
+| Display / IR / PSRAM use | None | None |

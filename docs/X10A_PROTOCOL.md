@@ -22,7 +22,7 @@ two independent implementations — the numbers are validated, not assumed (see
 | Timing | Unit replies within a few ms; a full poll of one register is request + reply |
 
 The link is a single point-to-point serial connection. There is exactly one master (the ESP) and
-one bus; only one transaction is in flight at a time. See [`docs/README.md`](README.md#hardware) for
+one bus; only one transaction is in flight at a time. See [WIRING.md](WIRING.md) for
 the electrical/wiring details and the 3.3 V ↔ 5 V level-shifter note.
 
 > **Poll only — the unit never pushes.** The host is always the master and the unit answers *only*

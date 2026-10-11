@@ -75,7 +75,7 @@ if (!Array.isArray(guards.Stop) || guards.Stop.length !== 1 ||
   throw new Error("unapproved canonical Stop hook definition");
 }
 
-const routeDocs = ["docs/ARCHITECTURE.md", ".agents/skills/device-triage/SKILL.md"];
+const routeDocs = ["docs/API.md", ".agents/skills/device-triage/SKILL.md"];
 for (const file of routeDocs) {
   const text = fs.readFileSync(file, "utf8");
   if (/\/(?:diag|coredump)\?clear(?:=1)?/.test(text)) {
@@ -85,8 +85,8 @@ for (const file of routeDocs) {
     if (!text.includes(route)) throw new Error(`${file} does not document ${route}`);
   }
 }
-if (!fs.readFileSync("docs/ARCHITECTURE.md", "utf8").includes("trusted-LAN route count of 39")) {
-  throw new Error("docs/ARCHITECTURE.md no longer documents the exact trusted-LAN route budget");
+if (!fs.readFileSync("docs/API.md", "utf8").includes("trusted-LAN route count of 39")) {
+  throw new Error("docs/API.md no longer documents the exact trusted-LAN route budget");
 }
 const credentialWrapperPath = "scripts/gh-with-git-credentials.sh";
 const credentialWrapperStat = fs.lstatSync(credentialWrapperPath);
@@ -298,14 +298,14 @@ function requireText(file, needle, message) {
   if (!read(file).includes(needle)) throw new Error(message);
 }
 
-for (const file of ["docs/README.md", "docs/ARCHITECTURE.md", "docs/DESIGN.md"]) {
+for (const file of ["docs/API.md", "docs/ARCHITECTURE.md", "docs/DESIGN.md"]) {
   requireText(
     file,
     "update X10A and HomeHub in separate requests",
     `${file} does not document the mixed /set_hp durability-domain rejection`,
   );
 }
-for (const file of ["docs/README.md", "docs/ARCHITECTURE.md"]) {
+for (const file of ["docs/API.md", "docs/ARCHITECTURE.md"]) {
   if (!/(?:atomic.*`link`|`link`.*atomic)/i.test(read(file))) {
     throw new Error(`${file} does not describe the atomic X10A link blob`);
   }

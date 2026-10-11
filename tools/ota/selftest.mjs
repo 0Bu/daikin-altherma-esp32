@@ -168,7 +168,7 @@ try {
         "            stack_watch_sample(StackWatch::Weather);\n            // A location/consent save",
         "            // Weather stack sample bypassed\n            // A location/consent save")],
     ["blank USB otadata is documented as a known unarmed state", () =>
-      replaceOnce("docs/SECURITY.md", 'is latched as `unknown`', 'boots `UNDEFINED`')],
+      replaceOnce("docs/SECURITY.md", 'Status preserves', 'USB boots `UNDEFINED`; status preserves')],
     ["dynamic TLS buffers are disabled", () =>
       replaceOnce("sdkconfig.defaults", "CONFIG_MBEDTLS_DYNAMIC_BUFFER=y",
         "CONFIG_MBEDTLS_DYNAMIC_BUFFER=n")],

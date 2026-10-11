@@ -2,327 +2,258 @@
 
 <!-- user-docs-contract: a82282eb86cf82dde2f08478375478ed3944b93e895163e38cbc3d22893ddee7 -->
 
-This guide is for owners who want to understand their heat pump without being heating specialists.
-Plant diagnostics are **off by default**. They run only after **Plant diagnostics** is explicitly
-enabled in Settings under the Firmware card. Enabling starts a new evidence generation; disabling
-stops the checkup and its additional room-temperature, weather-forecast, and circulation-power
-collection and clears the accumulated diagnosis. The ordinary X10A/HomeHub bridge and technical
-device telemetry remain independent. When enabled, the diagnosis **reads** measurements and counts
-events; it does not change settings or control the heat pump.
+Plant diagnostics **reads measurements and counts events; it does not control the heat pump**.
+It is off by default. Enable **Plant diagnostics** under **Settings → Firmware** to start a new
+evidence window. Disabling clears the diagnosis and stops its additional room, forecast and
+circulation collection; ordinary X10A/HomeHub and device telemetry stay independent.
 
-Every check also has an [evidence and limits entry](DIAGNOSTIC_EVIDENCE.md). That ledger identifies
-which claims come from Daikin documentation or primary research, which thresholds are project
-heuristics, and what the measurement cannot establish.
-
-While enabled, the web UI shows the **Plant diagnostics · 24 h** card immediately below the plant
-schematic. Open a row to see the reading, assessment, and normal context. The card deliberately does
-not recommend a plant action because its bounded evidence may not establish the cause. The steps it
-does name are to note, compare or check the board's connection: note when a cleared unit message
-keeps coming back, check the X10A link when the fault row cannot be read, compare the pressure with
-the exact unit manual, and check the X10A wiring when the hot-water check keeps losing its readings
-day after day.
+The **Plant diagnostics · 24 h** card appears below the schematic. Open a row for its reading,
+assessment and limitations. Its evidence does not necessarily identify a cause, so the card
+prescribes no plant action. Its bounded steps are to note recurring cleared unit messages, check
+X10A when fault rows are unreadable, compare pressure with the exact manual, and check wiring if
+the hot-water check loses needed readings day after day. Every check links to
+[DIAGNOSTIC_EVIDENCE.md](DIAGNOSTIC_EVIDENCE.md), which
+separates manufacturer/research evidence from project heuristics and exact firmware rules.
 
 ## What the statuses mean
 
-| Status | What it means for you |
-|--------|-----------------------|
-| **OK** | This one check had enough usable evidence and found nothing notable in it. It is not a health certificate for the whole installation. |
-| **NOTE** | Something is notable or worth knowing. Observe it and read the explanation; it is not proof of a defect. |
-| **WARNING** | The heat pump reports a fault, or a documented boundary remained violated. Check it promptly. |
-| **CHECKING** | The check still needs more hours or more usable measurements. Waiting is the correct response. |
-| **MEASURED ONLY** | The value is useful, but there is no responsible universal good/bad limit without the exact model and operating state. |
-| **EXPERIMENTAL** | Manufacturer documentation does not fully establish the signal semantics. Treat it as a lead, not a verdict. |
-| **NOT AVAILABLE** | The detected plant profile does not provide the required data, or this operating sequence cannot supply enough reliable evidence. |
+| Status | Meaning for this check |
+|---|---|
+| **OK** | Enough usable evidence, with nothing notable found. It does not certify the whole installation. |
+| **NOTE** | A notable observation; it is not proof of a defect. |
+| **WARNING** | A unit-reported fault or a sustained documented boundary violation. |
+| **CHECKING** | More hours or usable measurements are needed; missing evidence is not reassurance. |
+| **MEASURED ONLY** | A useful observation without a responsible universal good/bad limit. |
+| **EXPERIMENTAL** | Signal semantics are not fully documented; treat the result as a lead. |
+| **NOT AVAILABLE** | Required signals are unsupported or this operating sequence cannot supply reliable evidence. |
 
-Most reassuring results require a complete 24-hour window and at least 90% readable coverage for the
-signals used by the check. A diagnosis-format change starts a new window, so **CHECKING** after an
-update can be normal. Changing the X10A wiring or detected profile also starts a new window; a bus
-read that was already in flight for the previous link is discarded rather than counted under the
-replacement plant identity.
+Most reassuring results require a full 24-hour lifecycle and at least 90% readable coverage of that
+check's signals. Re-detection, changed X10A identity/pins or changed diagnosis-counter meaning starts
+a new window. Every boot retires completed RAM diagnosis hours. Only compatible, dated journal
+hours restore after clock synchronization and current-boot source confirmation; current readings
+take precedence. Open hours and unsaved completed hours are missing. Without eligible records,
+observation starts fresh. Restored evidence expires exactly 24 hours after its stored endpoint,
+including between hourly updates. An explicit profile/link reset cancels pending restore for that
+boot, even if the same profile is selected again.
 
-After any restart, completed diagnosis hours can return from the device's history journal
-once its clock and detected heat-pump source match. The hour that was still open and completed
-hours not yet saved to flash can be missing. Without a clock or compatible journal, observation
-starts fresh. Only compatible saved hours that fit the current window return; current readings
-take precedence. Older formats or another source are rejected. Restored evidence expires exactly
-24 hours after its stored endpoint, including while waiting for the next hourly update.
-An explicit profile or link reset retires any pending diagnosis restore for that boot, even if
-the same profile is selected again. New observations then build a fresh window.
-An intentional restart can retain the domestic-hot-water check's ongoing quiet-hour candidate and
-the settling period after a tank charge, through a separately checked one-shot handoff. Completed
-statistics still in the open hour are discarded because they have no durable age. A changed source,
-power interruption, crash or incompatible stored format does not carry this filter forward.
-The restart and the start-up before the board can watch the tank again count as unwatched time, up
-to the point where the check resumes. When the restart and that start-up leave the tank unwatched
-for more than two minutes in total (less when the restart interrupted a stretch of unread readings,
-or when that hour already had more than four minutes of them), for example during a long wait for
-the network, the unfinished hour starts over. That restart is not counted as a discarded hour, so
-the count of discarded hours can fall short after restarts. It says nothing about the tank. Unread
-readings after the check resumes count like any other unread time, and a discard they cause is
-counted.
+An intentional restart can preserve the DHW quiet-hour candidate and settling timer through a
+checked one-shot handoff. Power loss, crash, changed source or incompatible format cannot. Restart
+plus startup through source confirmation counts as blind time: exceeding either two minutes of
+continuous blindness or 10% of the hour including earlier gaps starts the candidate over. That restart
+discard does not increment the discarded-hour count; later unread-data discards do. See
+[PLANT.md](PLANT.md#reboot-and-persistence) for the exact handoff and restoration limits.
 
-The saved five-minute trends remain separate. Each interval retains only its final measurement or an
-aggregated event state. Those trends cannot reliably reconstruct second-by-second compressor starts,
-the operating mode of a complete run, or an uninterrupted domestic-hot-water hour, so the firmware
-does not reuse them as diagnosis evidence.
+Five-minute trends are separate: they cannot reconstruct complete compressor runs or quiet tank
+hours. This is passive ordinary-operation evidence, not a commissioning test or controlled
+full-load refrigerant examination.
 
-Changing or removing a source clears the browser's cached trends and pinned points; old replies
-cannot restore them. A reboot also starts a new browser lifetime, even when the device restores
-compatible saved trends. The state ages beside individual values are separate from the 24-hour
-card: normal polling cadence counts as observed, while known update, forecast or memory-pressure
-pauses and a continuing run's resumed tail count as blind time. When a reset keeps those ages, the
-reset and the start-up before the first poll count as blind time too. A blind gap longer than two
-minutes, including the interval until the first returning sample, starts a new age. The version-4
-format rejects older records, so those ages can restart after an update without proving that the
-plant changed state.
-
-The weather companion describes the two-hour window selected at the last successful fetch. That
-window stays fixed until another successful fetch; it is not continuously shifted forward.
-
-The 24-hour card is a passive watch of ordinary operation. It does not command a service mode,
-create a settled full-load operating point, or perform a controlled refrigerant test. A quiet card
-therefore means only that its eight bounded rules found nothing notable in the data they could
-assess; it is not a passed commissioning or refrigerant-circuit test.
+Browser trends/pinned points clear on source changes or deletion; older replies cannot restore
+them. A reboot starts a new browser lifetime even if the device restores saved trends. Per-row
+state ages are separate: normal poll cadence is observed, known update/forecast/memory pauses,
+the resumed tail and adopted restart/startup time are blind. More than two minutes of blindness
+through the returning sample starts a new age. The v4 format rejects older records, so an update
+can restart ages without proving a plant-state change. The weather companion's two-hour window
+is fixed at the last successful fetch until the next success.
 
 ## What is checked?
 
 <!-- user-docs: health_fault -->
 ### Unit-reported faults
 
-**In plain language:** The diagnosis remembers whether the heat pump itself reported a fault,
-warning, or caution. A report that has since cleared can remain visible for up to 24 hours.
+**In plain language:** The board remembers faults, warnings and cautions reported by the heat pump.
+A cleared report can remain visible for up to 24 hours.
+
+**Meaning:** This is the unit's own report, rather than a project inference from a temperature.
+
+**Important limit:** A clear report does not establish that every component is fault-free.
 
 **Evidence and limits:** [Unit-reported faults](DIAGNOSTIC_EVIDENCE.md#diagnosis-fault)
 
 <!-- user-docs: health_dhw_loss -->
 ### Domestic-hot-water tank heat loss
 
-**In plain language:** The diagnosis looks for quiet hours in which the tank was neither charged nor
-obviously affected by a hot-water draw. It then measures how quickly the tank temperature falls. An
-optional circulation-pump power measurement can show whether that pump was electrically operating
-during a notable window. The displayed K/h figure is the greatest R5T sensor-temperature drop in any
-completed quiet hour, not the average of all displayed windows. A pump label shows correlation during a
-notable window; it does not prove that the pump caused the full drop.
+**In plain language:** The board measures tank-sensor R5T cooling over complete quiet hours, excluding
+charging and evident hot-water draws. The displayed K/h is the **greatest completed-hour drop**, not
+an average. An optional circulation-power witness labels whether that pump was electrically operating
+during a notable window; correlation does not prove that it caused the whole drop.
 
-**What does that mean in kWh?** The expanded row gives an explicitly labelled size example for an
-assumed **200-litre** tank. If all 200 litres cooled uniformly by the displayed rate for one hour,
-the water's heat-content change would be
-`200 kg × 1.16 Wh/(kg·K) × displayed K = Wh`. For example, **1.6 K in one hour is about 0.37 kWh of
-thermal energy**. R5T measures only one point in a stratified tank, so this is not a measured
-whole-tank loss. The firmware also retains only the greatest completed-hour rate and the number of
-windows, not each window's individual drop. It therefore cannot calculate the actual daily loss.
+**Meaning:** A **NOTE** starts at **0.8 K/h**, a project heuristic from one installation, not a Daikin
+limit. Tank volume and tank-to-room temperature difference affect the rate. A reassuring result needs
+six clean hours in a full 24-hour lifecycle. The method can recognize notable clean-hour losses only
+up to about **1.85 K/h**; faster continuous cooling can resemble a draw and discard the hour.
 
-Once the report has actually crossed 24 hours, the second UI line deliberately shows a high
-**maximum-rate example**. It is not shown for an early partial report. With 18 clean windows, it
-assumes every one equalled the displayed maximum:
-`18 h × 1.6 K/h × 200 kg × 1.16 Wh/(kg·K) = 6.68 kWh` of thermal energy. With an illustrative domestic-hot-water COP of
-`2.5–3.0`, replacing that heat would use about **2.23–2.67 kWh of electricity**; a direct electric
-heater at COP 1 would use about 6.68 kWh. This is not measured daily consumption: the real window
-rates are unavailable, R5T is not whole-tank calorimetry, and the six hours outside those 18 clean
-windows are not represented.
+**Important limit:** **OK** excludes no faster loss outside that detection band. **NOT AVAILABLE**
+after repeated discarded candidates cannot identify their dominant cause: charging, pump activity,
+draws, unreadable data and continuous loss resembling a draw cannot be separated from the retained
+totals. R5T measures one point in a stratified tank; rapid cooling proves neither a leaking three-way
+valve nor poor insulation.
 
-**What range can it assess?** A **NOTE** starts at **0.8 K/h**. This is a project heuristic from one
-reference installation, not a Daikin limit. Tank volume and the temperature difference between the
-tank and its room both affect the cooling rate. The method can recognise notable clean hours only up
-to about **1.85 K/h**. A faster continuous loss can look like a draw and cause the hour to be
-discarded. If the tank was heated, wholly or partly, while the board could not read the unit (for
-example during a firmware update), or shortly before the board restarted unexpectedly, the board
-can lose track of that heating, and the next hour can show the tank settling after it as a fast
-loss. A NOTE from the first hour after such a
-period is therefore weaker evidence than a NOTE that repeats.
+An unobserved charge, update or unexpected restart can lose the settling filter, making the next
+hour look like fast loss; its first **NOTE is weaker evidence than a repeating NOTE**. Missing tank,
+valve, heater or pump readings can come from bus timeouts or firmware pauses for OTA, weather,
+network work, detection or restart. They do not by themselves prove faulty wiring.
+Changing circulation topic, paths, maximum age, thresholds or confirmation time resets this check;
+renaming it does not. **CHECKING** afterwards says nothing about the tank.
 
-**What do OK and NOT AVAILABLE mean here?** **OK** only says that the usable quiet hours contained no
-loss in the detectable range from 0.8 K/h upward. It does not exclude faster continuous loss. **NOT
-AVAILABLE** after many discarded windows also does not identify the reason: charging, pump activity,
-a draw, unreadable data, and continuous loss that resembles a draw cannot be separated from the
-stored totals alone. A discard for unread data the check needs (the tank temperature, or the
-valve, heater and pump states) can come from the X10A link not answering or from the board pausing
-its own polling (a firmware update, a weather download or other network transfer, a restart, model
-detection), so it does not by itself indicate a wiring fault. Changing the circulation-pump
-measurement's topic, value paths, age limit, on/off thresholds or confirmation time starts this
-check over; renaming it does not. **CHECKING** afterwards is expected and says nothing about the
-tank.
+**The kWh illustration:** The expanded row assumes **200 litres of water cooling uniformly**:
+`200 kg × 1.16 Wh/(kg·K) × displayed K = Wh`. At 1.6 K in one hour this is about **0.37 kWh of
+thermal energy**. It is a size example, not a measured whole-tank loss; tank volume is not configured.
 
-**What this result does not establish:** A rapid temperature drop alone proves neither a leaking
-three-way valve nor poor insulation. The sensor measures one location in a stratified tank; hot-water
-draws and natural circulation can look similar. The window count does not turn the highest rate into
-an energy total.
+After the report actually spans 24 hours, the second line deliberately assigns the maximum rate to
+**every clean window**. With 18 windows at an assumed 1.6 K/h maximum:
+`18 h × 1.6 K/h × 200 kg × 1.16 Wh/(kg·K) = 6.68 kWh` thermal. Assuming DHW COP **2.5–3.0** gives
+about **2.23–2.67 kWh** replacement electricity, or 6.68 kWh with direct electric heating at COP 1.
+The actual per-window rates are not retained, R5T is not whole-tank calorimetry, and the other six
+hours are outside the example. It establishes **neither actual daily loss nor daily consumption**.
+The full-day illustration is withheld for an early partial report.
 
-**Evidence and limits:** [Domestic-hot-water tank heat loss](DIAGNOSTIC_EVIDENCE.md#diagnosis-dhw-loss)
+**Evidence and limits:** [Tank heat loss](DIAGNOSTIC_EVIDENCE.md#diagnosis-dhw-loss)
 
 <!-- user-docs: health_cycling -->
 ### Compressor cycling
 
-The **compressor** moves heat to a useful temperature level. A run starts when it switches on and
-ends when it switches off.
+**In plain language:** The compressor moves heat to a useful temperature level. The board counts
+starts and complete runs, separating space heating, DHW and cooling where continuous valve/mode
+signals permit it. Only confirmed space-heating runs decide the classified short-run assessment.
 
-**In plain language:** Many very short space-heating runs can mean that the heat pump cannot deliver
-heat to the building for long enough. Where the signals permit it, the diagnosis separates complete
-runs into **space heating**, **domestic hot water**, and **cooling**. With sufficient classification
-evidence, only confirmed space-heating runs decide the short-run note. This requires readable
-classification inputs for at least 90% of the day, at least twelve classified runs, and a class for
-at least 90% of completed runs. Otherwise the diagnosis assesses all compressor runs together;
-long hot-water or cooling runs can then hide short heating runs. The detail text states which
-assessment was possible, and separately displayed class counts remain observations.
+**Meaning:** `17 starts · space 16 × 5 min · hot water 1 × 2 h` means sixteen complete heating runs
+averaging five minutes plus one two-hour DHW run. “Cooling … excluded” is identified cooling outside
+the heating assessment; “unclassified” means a mode change or gap prevented safe assignment.
+A **NOTE** requires at least twelve assessed runs averaging under ten minutes and sufficient
+complete-day evidence. A classified assessment needs at least **90% readable classification time**,
+**12 classified complete runs** and **90% of complete runs classified**. Only heating runs then
+decide the result. Otherwise all runs are pooled. These are project heuristics, not Daikin limits.
 
-Example:
-
-```text
-17 starts · space 16 × 5 min · hot water 1 × 2 h
-```
-
-With sufficient classification evidence, this means 17 total compressor starts, with 16 complete
-space-heating runs averaging five minutes
-and one two-hour hot-water run. “Cooling … excluded” means that cooling runs were identified but did
-not enter the heating assessment. “... unclassified” means a mode change or measurement gap made a
-safe assignment impossible.
-
-If `X10A min … °C · mean … °C` follows the run figures, it is the heat pump's fresh outdoor-air
-context from those completed space-heating runs. It helps compare a cold-day pattern with a mild-day
-one, but it does not change the ten-minute rule or the result. No X10A suffix means no suitably
-paired current sample was established; it never means 0 °C.
-
-**When does a note appear?** The project heuristic requires at least twelve assessed runs averaging
-under ten minutes: confirmed space-heating runs when classification is sufficient, otherwise all
-compressor runs together. This is not a Daikin limit and does not by itself prove a defect.
+**Important limit:** Very short runs alone do not identify oversizing, hydraulic imbalance or another
+cause. Where classified evidence is insufficient the documented pooled fallback can mask short heating
+runs with DHW/cooling; the status states which population carried the verdict. Optional fresh
+`X10A min … °C · mean … °C` describes accepted heating-run outdoor context only. It changes neither
+the ten-minute rule nor the result, and an absent suffix never means 0 °C.
 
 **Evidence and limits:** [Compressor cycling](DIAGNOSTIC_EVIDENCE.md#diagnosis-cycling)
 
 <!-- user-docs: health_defrost -->
 ### Defrost events
 
-In cold, humid weather the outdoor heat exchanger can ice up. The heat pump then defrosts it briefly;
-this is normal in suitable conditions.
+**In plain language:** In suitable cold, humid conditions the outdoor heat exchanger ices up and the
+heat pump briefly defrosts it. The board counts events and their share of compressor runtime during
+which both signals were readable.
 
-**In plain language:** The diagnosis counts defrost events and calculates their share of compressor
-runtime for which both signals were readable. A higher share is only a note because X10A provides
-neither outdoor humidity nor the heat exchanger's surface temperature.
+**Meaning:** At least three assessable events and more than **15%** paired defrost runtime produces a
+**NOTE**. Both numbers are project heuristics, not Daikin limits.
 
-The optional `X10A min … °C · mean … °C` suffix describes fresh outdoor readings from the same
-readable, running-compressor population. It is context only; it neither supplies humidity nor changes
-the defrost share or result.
-
-The separately listed **R4T de-icer** temperature is also live context only. Its installation point
-and the controller's defrost start/end logic are model-specific. The firmware does not pair R4T into
-the 24-hour result, and one local sensor cannot establish the ice state of the whole outdoor coil.
-
-**When does a note appear?** The project heuristic requires at least three assessable defrost events
-and more than 15% defrost time within the paired compressor runtime. This is not a Daikin limit.
+**Important limit:** X10A does not supply outdoor humidity or the whole coil's surface/ice state.
+Frequent defrost can be normal; this row establishes neither low refrigerant nor blocked airflow.
+Optional fresh X10A outdoor min/mean is context only. Live **R4T de-icer** temperature is also context,
+with model-specific placement; it does not enter this 24-hour population or verdict.
 
 **Evidence and limits:** [Defrost events](DIAGNOSTIC_EVIDENCE.md#diagnosis-defrost)
 
 <!-- user-docs: health_pressure -->
 ### Lowest water pressure
 
-**In plain language:** This is the lowest valid water pressure in the observed window. A **NOTE**
-appears at or below 1.0 bar; it becomes a **WARNING** after pressure remains that low for 60 seconds.
+**In plain language:** The row reports the lowest valid water pressure in the observed window.
+
+**Meaning:** At or below **1.0 bar** gives a **NOTE**; sixty uninterrupted seconds at that level gives a
+**WARNING**. The transient confirmation is a project filter.
+
+**Important limit:** The exact permitted pressure range is model-specific. A low reading does not
+identify water loss, air or an expansion-vessel problem; this one common boundary is not a complete
+filling specification.
 
 **Evidence and limits:** [Lowest water pressure](DIAGNOSTIC_EVIDENCE.md#diagnosis-pressure)
 
 <!-- user-docs: health_flow -->
 ### Lowest water flow
 
-**In plain language:** The diagnosis reports the lowest water flow after the internal pump had run
-continuously for at least 60 seconds. It deliberately excludes pump start-up and readings while the
-pump is stopped.
+**In plain language:** The board reports the lowest valid flow after the internal pump has run
+continuously for at least sixty seconds, excluding start-up and pump-off readings.
 
-**Why is it measured only?** Required flow depends on the exact unit and operating mode. Heating,
-cooling, domestic hot water, and defrost do not necessarily require the same value. This is an
-observed **part-load minimum** from a modulating pump, not the nominal or design flow stated for a
-different operating point in a manual. A manual minimum is comparable only for the same model,
-operating mode, and conditions; one low reading without a unit fault proves little.
+**Meaning:** **MEASURED ONLY** is deliberate. Required flow varies by exact model and heating, cooling,
+DHW or defrost operating state.
+
+**Important limit:** This is an observed **part-load minimum**, not a manual's nominal/design flow.
+Compare a manual minimum only for the same model, operating mode and conditions. One low reading
+without a unit fault proves little.
 
 **Evidence and limits:** [Lowest water flow](DIAGNOSTIC_EVIDENCE.md#diagnosis-flow)
 
 <!-- user-docs: health_heater -->
 ### Electric backup and booster heaters
 
-**In plain language:** The diagnosis separately counts how long the electric backup heater for the
-water circuit (**BUH**) and the electric booster heater in the hot-water tank (**BSH**) were active.
-Weather, hot-water schedules, defrosting, emergency mode, and PV-surplus control can all make this
-runtime intentional; runtime alone does not prove a defect.
+**In plain language:** The board separately counts active time for the water-circuit electric backup
+heater (**BUH**) and tank electric booster heater (**BSH**).
+
+**Meaning:** These are runtime observations. Weather, DHW schedules, defrost, emergency mode and
+PV-surplus control can make that activity intentional.
+
+**Important limit:** Runtime alone establishes neither energy consumed nor a defect; it does not
+identify why the controller used a heater.
 
 **Evidence and limits:** [Electric heaters](DIAGNOSTIC_EVIDENCE.md#diagnosis-heater)
 
 <!-- user-docs: health_retries -->
 ### Protection-limit counter changes
 
-**In plain language:** The diagnosis observes five internal counters that may indicate protective
-limiting. Only a clearly observed increase counts. The full manufacturer semantics are not publicly
-documented, so this row is **EXPERIMENTAL**. An increase is not a fault diagnosis, and no increase
-cannot prove that the unit never limited itself.
+**In plain language:** The board observes five internal counters that may indicate protective limiting.
+Only a clearly observed comparable increase counts.
 
-**Evidence and limits:** [Protection-limit counter changes](DIAGNOSTIC_EVIDENCE.md#diagnosis-retries)
+**Meaning:** The row is **EXPERIMENTAL** because full manufacturer semantics are not public.
+
+**Important limit:** An increase is not a fault diagnosis. No increase does not prove that the unit
+never limited itself; a decrease has no established wrap/reset interpretation.
+
+**Evidence and limits:** [Protection-limit changes](DIAGNOSTIC_EVIDENCE.md#diagnosis-retries)
 
 <a id="refrigerant-service-observation"></a>
 ## Refrigerant circuit during heating
 
-The expandable **Refrigerant circuit during heating** row inside the **Plant diagnostics** card is
-technical context, not a ninth plant diagnosis. It starts automatically during an ordinary space-
-heating compressor run. The owner does not need to enable a service mode, change a setpoint or start
-a test, and the firmware does not alter any heat-pump setting. Its collapsed value says whether it is
-waiting, recording, recording with missing comparison data, or paused. Opening the same information
-panel used by the other rows explains the current status, elapsed observation and claim limits. It
-remains outside `/status.health`, never changes the eight-row summary or card badge, and requires no
-Plant diagnostics opt-in. It watches only the ordinary read-only X10A traffic already used for live
-values.
+This expandable row is technical context, **not a ninth health diagnosis**. It watches existing
+read-only X10A traffic automatically without Plant diagnostics opt-in or a service mode. Until this
+boot detects a profile and evaluates its signal coverage—including safe mode—the row/status object
+is absent. It does not affect `/status.health` or the eight-row summary.
 
-Until this boot has detected an X10A profile and evaluated that profile's signal coverage, including
-while safe mode prevents the poll task from starting, the status object and row are absent. This
-avoids presenting missing source evidence as a claim that the installed profile lacks signals.
-
-The window starts only from fresh values captured in the same poll sweep while all of these facts are
-confirmed: the compressor is running in **space heating**, the three-way valve is not on domestic hot
-water, defrost is off, all available unit-fault rows are readable and normal, no available startup,
-restart, oil-return, or pressure-equalising phase is active, and the required discharge-temperature,
-EEV-command, and refrigerant-pressure readings are present. Cooling is not admitted because the
-pressure-side role used here is established only for the heating context.
+A window admits only fresh same-sweep values with a running space-heating compressor, non-DHW valve,
+no defrost, readable normal fault rows, no active profile-provided startup/restart/oil-return/pressure-
+equalising phase, and required discharge-temperature, EEV-command and structurally identified
+refrigerant-pressure readings. Cooling is excluded because the pressure-side roles here are
+established for heating. Optional missing comparison data remains an explicit limitation.
 
 | Row status | Meaning |
-|------------|---------|
-| **NOT AVAILABLE** | The detected profile lacks at least one required signal. |
-| **WAITING FOR HEATING RUN** | No suitable ordinary heating run is available now. The reason line names why; recording starts automatically when the conditions next fit. |
-| **RECORDING** | A continuous fresh observation is active with the complete optional comparison context. |
-| **RECORDING · SOME DATA MISSING** | Recording is active, but optional temperature, both pressure sides, outdoor context, or the complete model-specific controller-phase set was unavailable at least once. |
-| **PAUSED** | A required reading or operating condition, a profile-declared phase witness becoming unreadable, or an expected poll sequence ended the previous observation. The next suitable heating run starts a new observation at zero. A source-generation change also resets continuity. |
+|---|---|
+| **NOT AVAILABLE** | The detected profile lacks a required signal. |
+| **WAITING FOR HEATING RUN** | No suitable ordinary run now; recording starts automatically when conditions fit. |
+| **RECORDING** | Continuous fresh observation with the complete optional context. |
+| **RECORDING · SOME DATA MISSING** | Recording, with optional temperature/pressure-side/outdoor/controller-phase context missing at least once. |
+| **PAUSED** | A required reading/condition, expected sequence or profile-declared phase witness ended continuity. The next suitable run begins at zero. |
 
-The reported duration and min/mean/max figures describe that one uninterrupted window. The allowed
-poll gap scales with the active profile's page count and the X10A transport timeout; the firmware
-does not insert a universal three-second or twenty-minute service rule.
+Duration and min/mean/max describe **one uninterrupted window**. The permitted poll gap depends on
+profile pages and transport timeout; there is no universal three-second/twenty-minute service rule.
+Source-generation changes also reset continuity.
 
-**What it does not establish:** The observation does not decide whether refrigerant charge or any
-individual reading is normal. It does not prove full load or that the refrigeration cycle has
-settled. The displayed valve value is the controller's command; X10A supplies no independent
-mechanical feedback that the valve moved or reached that position. A qualified technician must
-still use the exact model's service procedure and suitable instruments when a controlled test is
-actually needed.
+**Important limit:** It assigns no normal range, refrigerant-charge verdict, full-load state or
+settling claim. EEV pulses are a controller command, not proof of mechanical valve movement.
+A controlled refrigerant test still requires the exact model's service procedure and suitable
+instruments.
 
 **Evidence and limits:** [Refrigerant circuit observation](DIAGNOSTIC_EVIDENCE.md#refrigerant-service-observation)
 
 ## What the diagnosis cannot do
 
-The card cannot reliably determine:
-
-- a refrigerant shortage, dirty filters, or mechanical wear;
-- correct hydraulic balancing;
-- the cause of every high-energy-use period;
-- seasonal efficiency;
-- the condition of every sensor or valve.
-
-It also cannot turn passive 24-hour history into a controlled stationary full-load service test.
-
-**OK therefore always means:** This one check found nothing notable in the evidence it could assess.
-It never means that the complete heat-pump installation is guaranteed to be fault-free.
+The card cannot establish refrigerant charge, hydraulic balancing, mechanical wear, the cause of
+every consumption period, seasonal efficiency or every sensor/valve's condition. A passive day of
+history cannot become a stationary full-load service test. **OK always refers to one bounded check,
+never to a guaranteed fault-free installation.**
 
 ## Plain-language glossary
 
 | Term | Meaning |
-|------|---------|
-| Compressor | The main heat-pump component that raises refrigerant pressure and moves heat to a useful temperature level. |
+|---|---|
+| Compressor | Raises refrigerant pressure and moves heat to a useful temperature level. |
 | Space heating | Heat delivered to radiators or underfloor heating. |
-| Domestic hot water (DHW) | Tap and shower water stored in the hot-water tank. |
-| Defrost | A short operating reversal that removes ice from the outdoor unit. |
-| Three-way valve | Directs heating water either to the building or to the hot-water tank. |
+| Domestic hot water (DHW) | Tap/shower water stored in the tank. |
+| Defrost | A short operating reversal removing outdoor-unit ice. |
+| Three-way valve | Directs heating water to the building or DHW tank. |
 | BUH | Electric backup heater for the water circuit. |
-| BSH | Electric booster heater in the domestic-hot-water tank. |
-| X10A | Service interface from which the ESP32 reads the heat pump without controlling it. |
+| BSH | Electric booster heater in the DHW tank. |
+| X10A | The service interface read by the ESP32 without controlling the heat pump. |

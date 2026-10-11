@@ -1,92 +1,44 @@
 # daikin-altherma-esp32
 
-ESP-IDF firmware: reads a **Daikin Altherma** over the **X10A** port (UART 9600 8E1, protocol I/S)
-and publishes all values to MQTT. Runtime config + OTA via an
-embedded web UI.
+ESP-IDF firmware for ESP32-S3 boards that reads a **Daikin Altherma** heat pump through its
+**X10A** service port. View live readings in the local web UI and publish them to Home Assistant
+through MQTT. An optional HomeHub connection provides a separate read-only Modbus source.
 
 ## Requirements
 
-- A Daikin Altherma with an **X10A** header.
-- An ESP32-S3 board with ≥8 MB flash.
-- A JST-EH 2.5 mm 5-pin connector to reach the X10A header.
-- A browser with Web Serial to flash.
+- A Daikin Altherma with an X10A header.
+- A supported ESP32-S3 board with at least **8 MB flash**.
+- An X10A cable: **JST-EH 2.5 mm, 5-pin** connector, two signal wires and common ground.
+- USB power and a browser supporting Web Serial for installation.
 
 ## Setup
 
-1. Flash: [web installer](https://0bu.github.io/daikin-altherma-esp32/)
-2. Join AP `daikin-altherma-esp32-setup`
-3. Configure at `http://daikin-altherma-esp32.local`
+1. Choose your [board](docs/BOARDS.md) and follow the [safe wiring guide](docs/WIRING.md).
+2. Install with the [web installer](https://0bu.github.io/daikin-altherma-esp32/).
+3. Join `daikin-altherma-esp32-setup`, then enter your home WiFi at `http://192.168.4.1`.
+4. Rejoin your home network and open `http://daikin-altherma-esp32.local`.
+5. Set your board under **Settings → ESP32 → Hardware** and the wired RX/TX pins under
+   **Settings → Protocol**. Set the broker under **Settings → Connections → MQTT** if needed.
 
-## Wiring X10A
-
-Breaker OFF. Three wires reach the heat pump: the two signals and ground.
-
-![The X10A header on the indoor unit's PCB: pin 1 (+5 V) at the right, pin 5 (GND) at the left. The TX/RX labels name the ESP32's side of each signal.](docs/media/x10a-header.jpg)
-
-| X10A | Signal | X10A wire | ESP32-S3 | Note |
-| :---: | :--- | :--- | :--- | :--- |
-| 1 | +5 V | Red | — | Optional — out of spec, prefer USB power |
-| 2 | HP-TX | Brown | RX GPIO | Heat pump sends → ESP32 receives |
-| 3 | HP-RX | Green | TX GPIO | ESP32 sends → heat pump receives |
-| 4 | NC | — | — | Not connected |
-| 5 | GND | Black | `GND` | Mandatory |
-
-**Tell the firmware which two pins you used.** The signals can go to any two free GPIOs, so the
-firmware cannot know them:
-
-1. Wire HP-TX and HP-RX to two free GPIOs on your board.
-2. Select those two in the RX/TX dropdown under **⚙ Settings → Protocol**. It lists the selected
-   board's available GPIOs, excluding pins reserved by other configured hardware. The choice is
-   saved and reused on every boot.
-
-Until that setting matches your wiring, no values arrive: the firmware tries the saved pins and its
-built-in defaults (`RX 44` / `TX 43`) — it does not scan every pin. Mixing up RX and TX is harmless,
-both orders are tried automatically; mixing up 5 V and GND is not.
-
-Visual diagram, the full cable chain, and the wiring worked through on specific boards:
-[docs/WIRING.md](docs/WIRING.md).
+The [setup guide](docs/SETUP.md) covers each step and how to check that it worked.
 
 ## UI
 
-One screen, live from the bus: what the unit is doing right now, with any reading the firmware
-cannot currently stand behind shown as `—` rather than as a number. When a release or development
-OTA build is available, the device-local confirmation shows its published changelog before install,
-or an explicit no-details fallback when that optional feed document is unavailable.
+View live values, operating states, local history and optional [plant diagnostics](docs/DIAGNOSTICS.md);
+unestablished readings appear as `—`.
 
-![The dashboard through its normal operating states, with smooth transitions between standby, heating, defrost, circulation, hot water and cooling](docs/media/dashboard.gif)
+![The dashboard through standby, heating, defrost, circulation, hot water and cooling](docs/media/dashboard.gif)
 
-## Reference
+## Documentation
 
-| Doc | Description |
-| :--- | :--- |
-| [docs/README.md](docs/README.md) | Technical reference: protocol, HTTP API, values, build & flash |
-| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Deep internal reference: poll engine, MQTT bridge, WiFi/OTA |
-| [docs/DESIGN.md](docs/DESIGN.md) | Web UI design contract (tokens, layout, states) |
-| [docs/X10A_PROTOCOL.md](docs/X10A_PROTOCOL.md) | X10A wire protocol: framing, checksum, register pages, detection |
-| [docs/MODBUS_PROTOCOL.md](docs/MODBUS_PROTOCOL.md) | The optional Modbus TCP source to a Daikin HomeHub (mDNS discovery, register map) |
-| [docs/REGISTERS.md](docs/REGISTERS.md) | Register map + converter/enum tables behind the value catalog |
-| [docs/HOME_ASSISTANT.md](docs/HOME_ASSISTANT.md) | MQTT topics, entities and derived (COP) sensors |
-| [docs/WIRING.md](docs/WIRING.md) | Visual wiring diagram + picking RX/TX pins on other boards |
-| [docs/BOARDS.md](docs/BOARDS.md) | Supported boards: what hardware each has and which parts the firmware uses |
-| [docs/FEATURES.md](docs/FEATURES.md) | Catalog of platform features (Secure Boot, OTA, diagnostics, …) |
-| [docs/ESP_IDF_MATRIX.md](docs/ESP_IDF_MATRIX.md) | Source-linked ESP-IDF usage, evaluated alternatives and completeness gate |
-| [docs/PLANT.md](docs/PLANT.md) | Plant-level features: the 24 h checkup, weather forecast, ENV III input, heating-curve diagnosis |
-| [docs/DIAGNOSTICS.md](docs/DIAGNOSTICS.md) | Plain-language guide to every 24 h plant-diagnostics result and the boundary of what it proves |
-| [docs/DIAGNOSTIC_EVIDENCE.md](docs/DIAGNOSTIC_EVIDENCE.md) | Sources, firmware rule, project heuristic and claim boundary for every plant diagnosis |
-| [docs/SECURITY.md](docs/SECURITY.md) | Threat model + OTA signing/key lifecycle |
-| [docs/MCP.md](docs/MCP.md) | Read-only MCP server plus a local self-documenting setup page |
-| [docs/REPORTING.md](docs/REPORTING.md) | Reporting a bug: the public issue, the private device report, what gets redacted |
-| [CONTRIBUTING.md](CONTRIBUTING.md) | What's useful to report, the local verification loop, how PRs land |
+[Documentation index](docs/README.md) · [Home Assistant](docs/HOME_ASSISTANT.md) ·
+[Report a bug](docs/REPORTING.md) · [Contributing](CONTRIBUTING.md)
 
 ## Scope & credits
 
-This firmware only ever reads the heat pump. X10A has no write command in the protocol, and the
-optional HomeHub link has none in the code: no source file can even frame a Modbus write, and a CI
-contract test keeps it that way ([docs/MODBUS_PROTOCOL.md](docs/MODBUS_PROTOCOL.md)). Other clients
-on your LAN — the Onecta app, the unit's own controller, evcc — do write the hub; this firmware just
-reports what they left behind.
-Trusted LAN only; no user authentication or API TLS (browser Host/Origin guards still apply). MIT
-([LICENSE](LICENSE)); protocol / value definitions derived from
-[ESPAltherma](https://github.com/raomin/ESPAltherma) (MIT). See
-[third-party notices](THIRD_PARTY_NOTICES.md) for complete attributions. No warranty; not affiliated
-with Daikin.
+The firmware reads the heat pump; it does not control it. Keep the unauthenticated HTTP API on a
+trusted LAN ([security model](docs/SECURITY.md)).
+
+[MIT](LICENSE). Protocol and value definitions derived from
+[ESPAltherma](https://github.com/raomin/ESPAltherma) (MIT); see [third-party notices](THIRD_PARTY_NOTICES.md).
+No warranty; not affiliated with Daikin.

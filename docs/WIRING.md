@@ -1,170 +1,119 @@
-# X10A Wiring
+# X10A wiring
 
-Pin table and quick-start wiring: [README.md § Wiring — X10A](../README.md#wiring-x10a).
-This page covers the visual diagram and picking pins on a board other than the M5Stack AtomS3 Lite
-the wiring guide is written for.
+Switch the heat pump **off at the breaker** before connecting or changing the cable. Identify the
+header and its pin numbering from the unit's service documentation. Cable colours alone do not
+establish pin identity.
 
-## Visual Wiring Diagram — M5Stack AtomS3 Lite (Grove)
+## Voltage and wiring
 
-The Grove HY2.0-4P port carries **GND, 5 V, G2, G1** — the same four wires X10A needs — so a
-Grove breakout cable reaches the service port with nothing to solder:
+X10A uses **5 V TTL**; ESP32 GPIOs are 3.3 V and are not officially 5 V tolerant. Protect the
+**HP-TX → ESP32-RX** input with a suitable divider, for example 10 kΩ from HP-TX to ESP32-RX and
+20 kΩ from ESP32-RX to common ground. An auto-direction shifter such as TXS0108E can prevent UART
+communication; do not use it as a substitute for a suitable UART input-level circuit.
+
+The ESP32's 3.3 V TX signal is accepted by the documented X10A TTL RX path. **Common ground is
+mandatory**, including when USB powers the board.
+
+Prefer **USB power** and leave X10A pin 1 insulated and disconnected. Daikin rates X10A at
+**5 V / 50 mA** in the [EKPCCAB installation manual](https://www.daikin.co.uk/content/dam/document-library/installation-manuals/ctrl/EKPCCAB4_4PW74106-1E_2018_06_Installation%20manual.pdf).
+An ESP32 exceeds this rating; powering it from X10A is outside that specification.
+
+![X10A header: pin 1 (+5 V) at the right and pin 5 (GND) at the left; signal labels refer to the ESP32 side](media/x10a-header.jpg)
+
+| X10A pin | Signal | Daikin harness colour | ESP32 connection |
+|---:|---|---|---|
+| 1 | +5 V | Red | Leave disconnected with USB power. |
+| 2 | HP-TX | Brown | **RX** GPIO, through input-level protection. |
+| 3 | HP-RX | Green | **TX** GPIO. |
+| 4 | NC | — | Leave disconnected and insulated. |
+| 5 | GND | Black | **GND**, always. |
+
+## Visual wiring diagram — M5Stack AtomS3 Lite (Grove)
+
+Select **RX1 / TX2** under **Settings → Protocol**. The shipped defaults are 44/43, which this
+board does not expose. A Grove cable needs three connected wires when USB powers the board:
 
 ```text
-   Daikin X10A (5-pin)                Grove breakout             M5Stack AtomS3 Lite
-   +---------------------+
-   | 1  +5 V    (Red)    | ----------- Red    -------------->  5V    (optional, see below)
-   | 2  HP-TX   (Brown)  | ----------- Yellow -------------->  G1 = GPIO1  (RX)
-   | 3  HP-RX   (Green)  | ----------- White  -------------->  G2 = GPIO2  (TX)
-   | 4  NC               |             —
-   | 5  GND     (Black)  | ----------- Black  -------------->  GND   (mandatory)
-   +---------------------+
+Daikin X10A                     Grove breakout           AtomS3 Lite
+2  HP-TX ── input divider ────── yellow ───────────────── G1 / GPIO1 (RX)
+3  HP-RX ─────────────────────── white ────────────────── G2 / GPIO2 (TX)
+5  GND ───────────────────────── black ────────────────── GND
+1  +5 V                         red: disconnected
+4  NC                           disconnected
 ```
 
-Grove colours are the standard cable's; if your adapter differs, go by the port, not the colour.
-**Without a Grove cable**, the female header on the case carries `5V`, `GND` and `G5`–`G8`/`G38` —
-use any two of those for the signals (e.g. RX `G5`, TX `G6`).
-
-Either way the two pins must be **picked once** under **⚙ Settings → Protocol** (RX/TX dropdown):
-the shipped defaults are the XIAO's `44`/`43`, which this board does not break out, so nothing
-answers until you set them. Their order does not matter — detection probes the pair both ways round.
-
-5 V TTL; level shifter on HP-TX→ESP-RX recommended. Daikin rates X10A at 5 V / **50 mA**, less than
-an ESP32 draws — prefer USB power ([details](README.md#voltage-and-wiring)). `GPIO16/17` — the
-classic-ESP32 default — are absent on both boards, which is why the pins are configurable.
-`Timeout`/`Wrong CRC` = cable/GND; `0x15 0xEA` = use protocol `S`.
+Grove colours follow the standard cable; verify a non-standard adapter by connector position.
+Without Grove, use two offered side-header GPIOs, for example RX5 / TX6. The available pads and
+accessory conflicts are listed once in [BOARDS.md](BOARDS.md).
 
 ### The cable chain, connector by connector
 
-Two ready-made cables meet in the middle, so nothing is soldered and nothing is cut: a **JST-EH
-2.5 mm 5-pin pigtail** plugs into the unit's X10A header and ends in **female 2.54 mm jumper**
-sockets; a **Grove breakout** cable plugs into the AtomS3 Lite and ends in **male 2.54 mm** pins.
-The male pins push straight into the female sockets.
+Use a **JST-EH 2.5 mm 5-pin pigtail** at X10A and a **Grove HY2.0-4P breakout** at the AtomS3 Lite.
+Female 2.54 mm jumper sockets on the pigtail can meet male 2.54 mm breakout pins without cutting
+either cable:
 
 ```text
-   Daikin X10A      JST-EH 2.5 mm 5-pin       jumper joint      Grove breakout       M5Stack AtomS3 Lite
-   (unit header)    pigtail                   [F] <- [M]        breakout cable       Grove HY2.0-4P
-   +------------+
-   | 1  +5 V    |--- pigtail wire --------->  [F] <- [M]  ----- Red ------------->  5V   (optional)
-   | 2  HP-TX   |--- pigtail wire --------->  [F] <- [M]  ----- Yellow ---------->  G1 = GPIO1  (RX)
-   | 3  HP-RX   |--- pigtail wire --------->  [F] <- [M]  ----- White ----------->  G2 = GPIO2  (TX)
-   | 4  NC      |--- pigtail wire --------->  [F]   (unused — insulate, don't cut)
-   | 5  GND     |--- pigtail wire --------->  [F] <- [M]  ----- Black ----------->  GND  (mandatory)
-   +------------+
-
-   [F] = female 2.54 mm jumper socket, on the JST-EH pigtail
-   [M] = male 2.54 mm pin, on the Grove breakout (4 pins for 5 sockets — pin 4 stays free)
+X10A → JST-EH pigtail → individual female/male jumper joints → Grove breakout → board
 ```
 
-**The two connectors are not in the same order**, so the joint has to be made wire by wire — you
-cannot push two 4-way blocks together. X10A runs `+5 V, HP-TX, HP-RX, NC, GND`; Grove runs
-`GND, 5 V, G2, G1`. If either cable ends in a moulded multi-way housing instead of loose singles,
-either free the pins from it (small retaining tab) or bridge the joint position by position with
-single male-to-female jumpers.
-
-**Go by pin number, not by the pigtail's colours.** The Red/Brown/Green/Black in the diagram at the
-top of this page are the *Daikin* harness colours; a separately bought JST-EH pigtail comes in
-whatever the seller used (rainbow
-ribbon is common), and its colours carry no meaning here. Identify pin 1 on the unit's header from
-the Daikin service diagram, then ring the pigtail out with a multimeter before anything is plugged
-in — a +5 V wire landing on a signal pin is the one mistake this chain makes easy.
-
-**Only three of the four Grove wires are needed** if the board is USB-powered, which is the
-recommendation ([50 mA](README.md#voltage-and-wiring)): leave the red 5 V pin out of the joint and
-insulate it, exactly like the NC socket. GND is never optional — it must be common even on USB
-power.
+Make the joints **wire by wire**. X10A order is `5V, HP-TX, HP-RX, NC, GND`; Grove order is
+`GND, 5V, G2, G1`. Joining multi-way housings straight across gives the wrong mapping. Purchased
+pigtail colours are arbitrary: identify pin 1, verify continuity with a multimeter while unpowered,
+then insulate the unused 5 V and NC ends. Include the input divider in the HP-TX/RX path.
 
 ### Same wiring on a Seeed XIAO ESP32-S3
 
-The board the compile-time pin defaults are written for, so it needs no pin configuration at all:
+| X10A | XIAO |
+|---|---|
+| Pin 2 HP-TX, through input protection | **D7 / GPIO44 (RX)** |
+| Pin 3 HP-RX | **D6 / GPIO43 (TX)** |
+| Pin 5 GND | **GND** |
 
-```text
-          Daikin X10A Connector                     Seeed Studio XIAO ESP32-S3
-          +------------------------+                      +-------------+
-          |  1    2   3    4    5  |                      |   [USB-C]   |
-          | [R] [Br] [G] [NC] [Bk] |                      |             |
-          +--|----|---|---------|--+                      |             |
-             |    |   |         |             D0 (GPIO1)  | [ ]     [X] |  5V  <--- [R] (Red, Pin 1) --+
-             |    |   |         +-- GND (Black, Pin 5) -->| [ ]     [X] |  GND                         |
-             |    |   |                       D2 (GPIO3)  | [ ]     [ ] |  3V3                         |
-             |    |   |                       D3 (GPIO4)  | [ ]     [ ] |  D10                         |
-             |    |   |                       D4 (GPIO5)  | [ ]     [ ] |  D9                          |
-             |    |   |                       D5 (GPIO6)  | [ ]     [ ] |  D8                          |
-             |    |   +------- HP-RX (Green, Pin 3) ----->| [X]     [X] |  D7 (RX) <-- [Br] (Pin 2) -+ |
-             |    |                                       (D6/TX)   (D7/RX)                          | |
-             |    +----------------------------------------------------------------------------------+ |
-             +-----------------------------------------------------------------------------------------+
-```
+These are the firmware defaults, so a fresh XIAO wired this way needs no RX/TX change. Leave pin 1
+disconnected with USB power.
 
 ## Bi-Zone modules and the X12A port
 
-On installations equipped with a Daikin Bi-Zone kit (such as EKMIK / EKMIKC) or secondary mixing PCB,
-the unit's `X10A` port on the main controller board may be occupied by the internal wiring harness
-connecting the bi-zone expansion module.
+With an EKMIK/EKMIKC Bi-Zone or secondary mixing PCB, an internal harness may already occupy the
+main PCB's X10A port. Community installations have instead used **X12A on the Bi-Zone PCB**, with
+a JST-EH 2.5 mm 5-pin connector and the same serial framing/polling.
 
-In this scenario, community field reports describe connecting via the secondary port labeled **`X12A`** on the bi-zone module PCB:
-- `X12A` uses a matching **JST-EH 2.5 mm 5-pin** connector.
-- Community observations report the pinout mirrors `X10A` (`Pin 1: +5 V`, `Pin 2: HP-TX`, `Pin 3: HP-RX`, `Pin 4: NC`, `Pin 5: GND`). However, this pinout remains **unconfirmed by official Daikin service schematics** across all PCB revisions.
-- Communication framing, register polling, and telemetry operate over the same serial bus.
-
-> [!WARNING]
-> Because the `X12A` pinout is an unconfirmed field observation, **always verify pin voltages and polarity with a digital multimeter** before connecting the ESP32. Confirm that Pin 1 is +5 V and Pin 5 is GND. Connecting +5 V to a 3.3 V signal line or reversing power will permanently damage the microcontroller.
+The reported pinout mirrors X10A: **1 +5 V, 2 HP-TX, 3 HP-RX, 4 NC, 5 GND**. This is community
+evidence, **not an official pinout confirmed across PCB revisions**. Before connecting an ESP32,
+verify connector orientation, voltages and polarity with a digital multimeter, especially pin 1
+(+5 V) and pin 5 (GND). Apply the same input protection and USB-power wiring above. Do not proceed
+from connector shape or cable colours alone; a power/signal mix-up can damage the board.
 
 ## Picking pins on a different board
 
-The dropdown (`/status.pins_avail`) always starts with the **chip-level** safe list from
-`logic/board_pins.hpp`: GPIOs not reserved for boot flash, PSRAM, strapping, USB-JTAG or JTAG. When
-**M5Stack AtomS3 Lite** or **Seeed XIAO ESP32-S3** has been explicitly selected under *Hardware*,
-the board preset then narrows that list to pads the PCB actually exposes. An enabled ENV III sensor,
-the status LED, recovery button and detected Ethernet base remove their occupied GPIOs as well.
+Choose two distinct, physically exposed GPIOs from the **Settings → Protocol** dropdown. The
+chip-safe filter excludes flash/PSRAM, strapping, USB console and dedicated-JTAG pads. A selected
+preset further restricts it to the board's actual headers; configured peripherals, ENV III and
+detected Ethernet remove occupied pins.
 
-With **Custom** selected, the firmware cannot know which chip pads an unknown PCB routes to a header,
-so the dropdown remains the generic chip-safe list. Cross-reference it against that board's pinout.
-Here is the physical cross-reference executed automatically for the two presets and useful manually
-for other boards:
+With **Custom**, the firmware knows chip reservations but cannot know your PCB routing. Compare
+the list with that board's schematic. On a Waveshare ESP32-S3-DevKitC-1, the typical eligible set is
+GPIO1/2/4–18/35–38/43/44/47/48, subject to the actual flash/PSRAM build and occupied pins.
+GPIO0/3/45/46 are straps, 19/20 are the USB console, 39–42 are dedicated JTAG, and the default
+indicator uses GPIO21.
 
-| Board | Chip | Safe pins this board breaks out | Exceptions (broken out but NOT in the dropdown) |
-| :--- | :--- | :--- | :--- |
-| M5Stack AtomS3 Lite | ESP32-S3FN8 | 1, 2 (Grove), 5, 6, 7, 8, 38 (case header) | GPIO39 ("CLK_OUT3" on this board's silkscreen) — chip-level dedicated JTAG (MTCK) regardless of what a board relabels it |
-| Seeed XIAO ESP32-S3 | ESP32-S3 | 1, 2, 4, 5, 6, 7, 8, 9, 43, 44 | GPIO3 (D2) — chip-level JTAG-select strap, even though the XIAO breaks it out as a plain pad |
-| Waveshare ESP32-S3-DevKitC-1 | ESP32-S3 | 1, 2, 4–18, 35, 36, 37, 38, 43, 44, 47, 48 | GPIO0/3/45/46 (strapping), 19/20 (USB-JTAG, already the console), 39–42 (dedicated JTAG), 21 (status LED) |
+Detection tries the saved pair, the default pair and both exchanged orders. **It never scans all
+GPIOs.** Swapping the two signal wires is recoverable through detection; mixing a signal with 5 V
+or ground is unsafe. GPIO16/17 from classic ESP32 examples are not broken out on the two presets.
 
-Pick any two distinct pins from a board's "safe pins" column for RX/TX, wire them to X10A, then set
-them in the RX/TX dropdown under **⚙ Settings → Protocol** (`POST /set_hp`) — see the pin table in
-[README.md § Wiring — X10A](../README.md#wiring-x10a) for why the firmware won't find
-them on its own until you do.
+## Check the link
 
-The first two rows are also the board-specific **X10A UART** inventories in the preset table. ENV III
-has its own physical and hardware-tested inventory: with **M5Stack AtomS3 Lite** selected, its I²C dropdown contains only
-`1, 2, 5, 6, 7, 8, 38`. GPIO39 remains excluded even though it is physically exposed, because ENV III
-communication on that pad was not reliable in hardware tests. Use Grove GPIO2/1 or two offered
-header pins such as GPIO7/8.
+Restore power after checking the wiring. An online link and readable values establish communication;
+they do not independently prove that every decoded measurement is physically correct.
 
-When ENV III is enabled, Save probes the selected pair first as shown and then once with SDA/SCL
-exchanged. If only the exchanged order answers with a CRC-valid SHT30 sample and QMP6988 chip id,
-the firmware stores that corrected order automatically. It never scans unrelated GPIO pairs.
+If it remains offline, verify the selected GPIOs, pin numbering, common ground and continuity with
+power removed. `Timeout` and `Wrong CRC` suggest a link-quality problem without identifying its
+cause. A reply `0x15 0xEA` rejects that request; the firmware also tries the older `S` protocol.
+For persistent problems, collect the [device report](REPORTING.md) and include the actual wiring.
 
 ## Status LED and recovery button
 
-These are the board's own onboard parts, and they are **runtime settings**, not build options: CI
-publishes one `esp32s3` image, and the boards it runs on disagree about what they have. Set them in
-**⚙ Settings → ESP32 → Hardware** (`POST /set_board`); a save reboots.
-
-| Board | Status LED | Recovery button |
-| :--- | :--- | :--- |
-| M5Stack AtomS3 Lite | GPIO35, **WS2812** (addressable RGB) | GPIO41, **active low** |
-| Seeed XIAO ESP32-S3 | GPIO21, plain LED, **active low** | none broken out |
-
-The picker for these two offers a slightly **wider** pin set than the RX/TX one: it also includes
-the dedicated-JTAG pads GPIO39–42. Those are withheld from the X10A dropdown only to keep an
-external debug probe usable — a preference, not a hardware conflict — and it is exactly where the
-AtomS3 Lite's button sits (GPIO41 = MTDI). Flash, strapping and the USB-Serial/JTAG console pins
-stay excluded from both.
-
-Leave the button on **None** unless one is really wired. An unconnected input pin floats, and a
-floating pin that happens to read "pressed" for five seconds would factory-reset a board nobody
-touched. When one *is* configured, holding it performs a fail-closed privacy wipe: serialized
-settings (WiFi, MQTT, Syslog/NTP and the X10A pin cache), legacy WiFi credentials,
-history/trend/dwell state and the raw coredump are erased. The board reboots into the setup portal
-only after every erase succeeds; an incomplete wipe remains on the current boot and must be
-retried. The LED flashes red once the reset is armed (release to abort), then goes solid white while
-erasing.
+Configure these under **Settings → ESP32 → Hardware**, following the single
+[board inventory](BOARDS.md). The local-peripheral picker also allows dedicated-JTAG pins because
+AtomS3 Lite's button uses GPIO41. Leave absent hardware on **None**. A configured recovery button
+can erase settings and evidence; read [the reset contract](BOARDS.md#recovery-button) before using it.
