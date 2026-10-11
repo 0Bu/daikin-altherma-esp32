@@ -754,7 +754,7 @@ template:
 wrong in the direction that flatters you: during a **defrost** the unit deliberately pulls heat back
 *out* of the heating water — several kW, for minutes — and clamping records that as `0.0 kW` of
 production instead of as the withdrawal it is. In a live gauge that is a misleading instant; in the
-**integral** below it is a systematic error that never cancels, so produced heat and with it the JAZ
+**integral** below it is a systematic error that never cancels, so produced heat and its period ratio
 come out too high — worst in winter, when defrosts are frequent and the number matters most. The
 firmware refuses the same clamp in its own dashboard for the same reason (`main/www/js/schematic.js`,
 `d.pth`). The Riemann integrator handles negative stretches correctly; let the sign through.
@@ -798,9 +798,9 @@ and every kilowatt the heater draws lands in the divisor while its heat never re
 — the COP collapses whenever the heater fires, and reads as a failing heat pump while nothing is
 wrong. R2T is downstream of the heater, so both sides count it and the pairing holds.
 
-**If your profile has no R2T row**, the recipe is valid only while the backup heater is off. All 44
-shipped profile tables carry one, under four different spellings — check
-`http://daikin-altherma-esp32.local/values` for yours. The device's own dashboard applies exactly
+**If your profile has no R2T row**, the recipe is valid only while the backup heater is off and the
+other required water measurements are available. Check
+`http://daikin-altherma-esp32.local/values` for your profile's rows. The device's own dashboard applies exactly
 this rule and blanks its COP pill rather than showing the collapsed quotient
 (`main/logic/cop_scope.hpp`); it also names which COP it is showing, since the two are different
 numbers and look identical on screen.
@@ -882,7 +882,7 @@ integrate($P[$__range]) / 3600
 # consumed electricity [kWh] over $__range, from the meter's kWh counter
 increase(heatpump_energy_kwh[$__range])
 
-# JAZ over the range
+# water-circuit energy ratio over the range
 integrate($P[$__range]) / 3600 / increase(heatpump_energy_kwh[$__range])
 ```
 
@@ -900,17 +900,18 @@ integrate($P[$__range]) / 3600 / increase(heatpump_energy_kwh[$__range])
   is a different input, so use the fluid supplier's property table rather than relabelling it. A
   wrong constant is a systematic error; (b) small-ΔT amplification — ±0.1 K on a 3 K heating
   ΔT is already ~3 %, and the leaving/return sensors are uncalibrated factory parts (~±0.5–1 K);
-  (c) whether a genuine volumetric flow signal exists. Every model profile shipped here defines the
-  flow sensor (`0x62/9`) plus both leaving (`0x61/2|4`) and return (`0x61/8`) water temps, so the
-  heat meter is available across the whole catalog — but if a specific unit variant physically lacks
-  the flow sensor its reading is no-data and `P_thermal` can't be formed.
+  (c) whether genuine water measurements exist. The Protocol-I water-circuit recipe needs a flow
+  sensor (`0x62/9`) plus leaving (`0x61/2|4`) and return (`0x61/8`) water temperatures. Verify those
+  rows and their readable values for the actual profile and unit. The Protocol-S profile does not
+  supply these measurements; if a unit lacks the flow sensor or required temperatures,
+  `P_thermal` cannot be formed.
 - **A metered electrical side does not make the live COP accurate.** A 1 %-class meter (Shelly Pro
   3EM and the like) removes the divisor as a source of error, but the divided quantity still comes
   from two uncalibrated factory temperature sensors: ±0.5–1 K each across a heating ΔT of ~5 K puts
   the instantaneous figure within roughly ±15–25 %, and no meter improves that. What the meter *does*
   fix is the **seasonal** number, because its kWh counter is exact and the ΔT scatter largely averages
   out over months — the systematic part (a wrong `Cf` for a glycol loop) does not, so set that. Read
-  the live gauge as a working indication and the JAZ as the result.
+  the live gauge as a working indication and the period ratio within its stated measurement boundary.
 - A live COP that is wildly off usually means the **wrong model profile** (mismatched flow/temperature
   registers) — compare the dashboard **Model** card (family, outdoor unit ID) with your nameplate and
   check the profile actually read in `/status` → `profile.id`, or `POST /detect` to re-run

@@ -691,8 +691,8 @@ host-testable core is unusually large and valuable, because the risky parts are 
   safe failure into an L1+L2 partial sum and inflated COP. Rules are keyed on `(page, offset, converter)` — the row's
   structural identity — plus, where that coordinate is demonstrably **not** one quantity, the exact
   generated label as a fourth component (the three `0x21` zero rows above, and nothing else). Never
-  a profile id: the catalog test proves each rule selects the adjudicated quantity across all 45
-  profiles. Adding a rule is an adjudication
+  a profile id: the catalog test checks the registered profiles and proves each rule selects the
+  adjudicated quantity wherever its rows occur. Adding a rule is an adjudication
   with the same evidentiary bar as `tools/domain/audit_exceptions.txt`, not a way to make an
   inconvenient number disappear. Five non-default row policies exist; four have live entries,
   while `Unproven` deliberately has none after the converter adjudication above.
