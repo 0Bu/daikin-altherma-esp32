@@ -358,7 +358,7 @@ The X10A writer revalidates a parsed patch against the current revision. Three f
 return 409 without saving; revalidation can return 400. A service save reconciles newer detection-owned
 fields so it cannot roll them back.
 
-HomeHub port is 1–65535, unit 1–247, host at most 512 characters. Empty host durably disables
+HomeHub port is 1–65535, unit 1–247, host at most 512 bytes. Empty host durably disables
 polling, automatic discovery, sockets and dependent diagnosis. Replacement state is staged before
 commit; live socket ownership remains with its task. X10A remains independent.
 

@@ -193,8 +193,9 @@ Future journal cursors are reported and never rewound; affected work waits for a
 Writes permit one slot retry and two abandoned sectors per failure episode, then retry at 60 seconds.
 
 X10A, HomeHub and ENV III keep three separate source rasters; board memory and the circulation
-witness share the X10A raster. Journal append and restoration depend on resolved X10A identity;
-resetting that source also resets its dependent series. `b0`
+witness share the X10A raster but keep RAM trends independent of heat-pump identity.
+X10A journal append requires a resolved identity and no pending source reset; a pending reset also
+skips that source's restoration. `b0`
 aligns monotonic buckets even before SNTP; `t0` is omitted until wall time is known. Missing samples
 stay gaps. Browser storage holds only a transient render frame during OTA, not measurement history.
 

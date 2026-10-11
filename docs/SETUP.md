@@ -33,8 +33,8 @@ Published application images are signed. A source build requires signing and
 `scripts/require-signed.sh` before flashing; an unsigned application cannot boot. The complete
 source-build and manual-flash procedure is in [MAINTENANCE.md](MAINTENANCE.md).
 
-If the browser still holds the port after the installer closes, select **Release serial port** on
-the installer page. It releases this site's permission when no flash is active.
+After closing the serial connection, select **Remove browser permission** on the installer page
+to forget this site's paired port permission. The control is unavailable during a flash.
 
 ## 3. Join the network
 

@@ -50,9 +50,9 @@ try {
     .filter((file) => fs.existsSync(path.join(root, file)));
   // Include new public Markdown pages before staging: relocated contracts must reach the fixture
   // while this selftest is validating an in-progress documentation change.
-  const publicDocs = fs.readdirSync(path.join(root, "docs"))
-    .filter((file) => file.endsWith(".md"))
-    .map((file) => `docs/${file}`);
+  const publicDocs = execFileSync(git,
+    ["ls-files", "-z", "--others", "--exclude-standard", "--", "docs/*.md"], { cwd: root })
+    .toString("utf8").split("\0").filter(Boolean);
   for (const file of new Set([...tracked, ...publicDocs])) {
     const destination = path.join(seededRoot, file);
     fs.mkdirSync(path.dirname(destination), { recursive: true });
