@@ -294,7 +294,7 @@ bool wifi_start_sta() {
         // The connect handshake (this function's wait + the event handler's SetBits) is entirely
         // driven through this event group; a null handle would fault the moment either touched it.
         // Fail safe: report false so main.cpp brings up the setup portal instead.
-        ESP_LOGE(TAG, "event group alloc failed — cannot start STA; falling back to setup portal");
+        ESP_LOGE(TAG, "event group alloc failed; STA unavailable, starting setup portal");
         return false;
     }
     s_sta_netif = esp_netif_create_default_wifi_sta();
@@ -391,14 +391,13 @@ bool wifi_start_sta() {
         checkpoint_started = checkpoint_now;
         if (!rollback_pending) break;   // no change pending → the flat window owns the decision
         if (rollback_step(rw, disco_class(s_last_disco_reason), elapsed) == RollbackAction::RollBack) break;
-        ESP_LOGW(TAG, "new credentials: no IP after %d s (last reason %d) — the AP may still be "
-                      "coming back; retrying up to %d s before rolling back",
-                 elapsed, s_last_disco_reason.load(), WIFI_ROLLBACK_GRACE_S);
+        ESP_LOGW(TAG, "new credentials: no IP after %d s, reason %d; retrying until %d s", elapsed,
+                 s_last_disco_reason.load(), WIFI_ROLLBACK_GRACE_S);
     }
     if (!(bits & CONNECTED_BIT)) {
         if (rollback_pending) {
             Config rollback_cfg = config();
-            ESP_LOGW(TAG, "STA connect failed with new credentials (last reason %d) — rolling back to %s",
+            ESP_LOGW(TAG, "new credentials failed (reason %d); restoring %s",
                      s_last_disco_reason.load(), rollback_cfg.wifi_ssid_backup.c_str());
             rollback_cfg.wifi_ssid = rollback_cfg.wifi_ssid_backup;
             rollback_cfg.wifi_pass = rollback_cfg.wifi_pass_backup;
@@ -484,16 +483,19 @@ esp_err_t wifi_forget_persisted_config() {
 }
 
 int wifi_scan(WifiScanEntry* out, int max) {
-    wifi_scan_config_t sc = {};
-    if (esp_wifi_scan_start(&sc, true) != ESP_OK) return 0;
-    uint16_t n = 0;
-    esp_wifi_scan_get_ap_num(&n);
-    if (n > 20) n = 20;
+    esp_err_t        e = esp_wifi_scan_start(nullptr, true); // SDK defaults
+    uint16_t         n = 20; // SDK input capacity; successful retrieval returns the actual count
     wifi_ap_record_t recs[20];
-    esp_wifi_scan_get_ap_records(&n, recs);
+    if (e == ESP_OK) e = esp_wifi_scan_get_ap_records(&n, recs);
+    if (e != ESP_OK) {
+        // The SDK requires clearing its allocated AP list when retrieval fails.
+        (void)esp_wifi_clear_ap_list();
+        return 0;
+    }
     int count = 0;
     for (int i = 0; i < n && count < max; i++) {
-        strncpy(out[count].ssid, reinterpret_cast<char*>(recs[i].ssid), sizeof(out[count].ssid) - 1);
+        strncpy(out[count].ssid, reinterpret_cast<char*>(recs[i].ssid),
+                sizeof(out[count].ssid) - 1);
         out[count].ssid[sizeof(out[count].ssid) - 1] = '\0';
         out[count].rssi = recs[i].rssi;
         count++;

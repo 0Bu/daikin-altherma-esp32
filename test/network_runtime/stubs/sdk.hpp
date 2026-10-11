@@ -14,7 +14,7 @@
 #include <unistd.h>
 
 using esp_err_t            = int;
-constexpr esp_err_t ESP_OK = 0, ESP_ERR_WIFI_NOT_INIT = -10;
+constexpr esp_err_t ESP_OK = 0, ESP_FAIL = -1, ESP_ERR_WIFI_NOT_INIT = -10;
 inline const char*  esp_err_to_name(esp_err_t) { return "fake error"; }
 #define ESP_ERROR_CHECK(x)                                                                         \
     do {                                                                                           \
@@ -166,6 +166,11 @@ inline TickType_t ticks    = 0;
 inline int        connects = 0, restarts = 0, mdns_starts = 0, netif_reads = 0, ap_reads = 0,
            queue_sends = 0, lock_depth = 0;
 inline bool                        forbid_alloc = false, queue_reject = false;
+inline uint16_t                    scan_count        = 0;
+inline esp_err_t                   scan_start_result = ESP_OK, scan_records_result = ESP_OK;
+inline unsigned                    scan_record_reads = 0;
+inline unsigned                    scan_clears       = 0;
+inline bool                        scan_pending      = false;
 inline std::vector<FakeHandler*>   handlers;
 inline std::vector<FakeEvents*>    events;
 inline std::vector<FakeSemaphore*> semaphores;
@@ -330,12 +335,28 @@ inline esp_err_t esp_wifi_start() {
 inline esp_err_t esp_wifi_stop() { return ESP_OK; }
 inline esp_err_t esp_wifi_deinit() { return ESP_OK; }
 inline esp_err_t esp_wifi_restore() { return ESP_OK; }
-inline esp_err_t esp_wifi_scan_start(const wifi_scan_config_t*, bool) { return ESP_OK; }
-inline esp_err_t esp_wifi_scan_get_ap_num(uint16_t* n) {
-    *n = 0;
+inline esp_err_t esp_wifi_scan_start(const wifi_scan_config_t*, bool) {
+    sdk::scan_pending = true; // even a timeout can leave a partial driver-owned scan list
+    return sdk::scan_start_result;
+}
+inline esp_err_t esp_wifi_scan_get_ap_records(uint16_t* n, wifi_ap_record_t* records) {
+    ++sdk::scan_record_reads;
+    *n = *n > sdk::scan_count ? sdk::scan_count : *n;
+    for (uint16_t i = 0; i < *n; ++i) {
+        records[i] = wifi_ap_record_t{};
+        std::snprintf(reinterpret_cast<char*>(records[i].ssid), sizeof(records[i].ssid), "%s",
+                      i ? "fallback" : "test-wifi");
+        records[i].rssi = -40 - i;
+    }
+    // Error responses deliberately leave plausible output: only ESP_OK attests its validity.
+    if (sdk::scan_records_result == ESP_OK) sdk::scan_pending = false;
+    return sdk::scan_records_result;
+}
+inline esp_err_t esp_wifi_clear_ap_list() {
+    ++sdk::scan_clears;
+    sdk::scan_pending = false;
     return ESP_OK;
 }
-inline esp_err_t esp_wifi_scan_get_ap_records(uint16_t*, wifi_ap_record_t*) { return ESP_OK; }
 inline esp_err_t esp_wifi_sta_get_ap_info(wifi_ap_record_t* p) {
     ++sdk::ap_reads;
     *p = wifi_ap_record_t{};

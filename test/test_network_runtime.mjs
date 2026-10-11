@@ -56,6 +56,19 @@ function mutate(mutation) {
 }
 const mutations = [
   {
+    name: "scan-record-capacity", file: "wifi", scenario: "scan_failure",
+    before: /uint16_t\s+n = 20;/, after: "uint16_t n = 0;",
+  },
+  {
+    name: "scan-record-result", file: "wifi", scenario: "scan_failure",
+    before: "if (e == ESP_OK) e = esp_wifi_scan_get_ap_records(&n, recs);",
+    after: "if (e == ESP_OK) esp_wifi_scan_get_ap_records(&n, recs);",
+  },
+  {
+    name: "scan-list-cleanup", file: "wifi", scenario: "scan_failure",
+    before: "(void)esp_wifi_clear_ap_list();", after: "/* mutation: leave the driver scan list pending */",
+  },
+  {
     name: "lost-ip-subscription", file: "wifi", scenario: "lost_lease",
     before: "esp_event_handler_instance_register(IP_EVENT, ESP_EVENT_ANY_ID, on_wifi, nullptr, &s_h_ip);",
     after: "esp_event_handler_instance_register(IP_EVENT, IP_EVENT_STA_GOT_IP, on_wifi, nullptr, &s_h_ip);",
@@ -134,7 +147,7 @@ try {
   const binary = compile("production");
   const baseline = execute(binary, []);
   assert.equal(baseline.status, 0, `${baseline.stdout}${baseline.stderr}`);
-  assert.match(baseline.stdout, /PASS total=14\b/);
+  assert.match(baseline.stdout, /PASS total=15\b/);
   console.log(baseline.stdout.trim());
   for (const mutation of mutations) {
     const result = execute(compile(mutation.name, mutate(mutation)), [mutation.scenario]);
@@ -145,7 +158,7 @@ try {
   for (const [key, source] of Object.entries(sources)) {
     console.log(`network runtime ${key} sha256=${createHash("sha256").update(source).digest("hex")}`);
   }
-  console.log(`production network runtime: 14 cases, ${mutations.length} negative controls`);
+  console.log(`production network runtime: 15 cases, ${mutations.length} negative controls`);
 } finally {
   fs.rmSync(dir, { recursive: true, force: true });
 }

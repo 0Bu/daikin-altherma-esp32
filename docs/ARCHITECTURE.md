@@ -3385,7 +3385,8 @@ allocating task loop catches `std::bad_alloc` and skips the cycle keeping its la
 publish is dropped: all correct for a TRANSIENT shortage, and none of them asks what happens when
 it never recovers. Composed, they describe a device that is powered, associated, answering 503 to
 everything and republishing nothing, indefinitely, reporting no fault — a HANG, which is worse than
-a crash (a crash reboots in seconds and leaves a reset reason, a core dump and a syslog record; a
+a crash (a crash normally restarts within seconds and reports a reset reason; a core dump and
+external syslog record depend on capture, forwarding and collector availability; a
 wedge looks like a powered-off device and heals never). So a largest CONTIGUOUS INTERNAL block
 under `HEAP_CRITICAL_BYTES` for `HEAP_CRITICAL_HOLD_MS` unbroken becomes a deliberate
 `esp_restart`, capped at `HEAP_MAX_CONSECUTIVE_RESTARTS` by the NVS `heap_rst` breadcrumb (an i32,

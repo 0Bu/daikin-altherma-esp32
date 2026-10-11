@@ -119,16 +119,20 @@ void reset() {
     sdk::queues.clear();
     sdk::netifs.clear();
     sdk::wait_budgets.clear();
-    sdk::ticks        = 0;
-    sdk::connects     = 0;
-    sdk::restarts     = 0;
-    sdk::mdns_starts  = 0;
-    sdk::netif_reads  = 0;
-    sdk::ap_reads     = 0;
-    sdk::queue_sends  = 0;
-    sdk::lock_depth   = 0;
-    sdk::queue_reject = false;
-    sdk::fail_send    = false;
+    sdk::ticks             = 0;
+    sdk::connects          = 0;
+    sdk::restarts          = 0;
+    sdk::mdns_starts       = 0;
+    sdk::netif_reads       = 0;
+    sdk::ap_reads          = 0;
+    sdk::queue_sends       = 0;
+    sdk::lock_depth        = 0;
+    sdk::queue_reject      = false;
+    sdk::fail_send         = false;
+    sdk::scan_count        = 0;
+    sdk::scan_start_result = sdk::scan_records_result = ESP_OK;
+    sdk::scan_record_reads = sdk::scan_clears = 0;
+    sdk::scan_pending                         = false;
     sdk::packets.clear();
     s_events    = nullptr;
     s_sta_netif = nullptr;
@@ -252,6 +256,26 @@ void snapshot_reacquisition() {
     const auto old_ap = wifi_info();
     REQUIRE(wifi_link_up());
     REQUIRE(!old_ap.connected && old_ap.ip[0] == 0 && old_ap.mac[0] == 2);
+}
+void scan_failure() {
+    reset();
+    sdk::scan_count = 2;
+    WifiScanEntry out[2]{};
+    REQUIRE(wifi_scan(out, 1) == 1 && std::string(out[0].ssid) == "test-wifi");
+    REQUIRE(out[0].rssi == -40);
+    REQUIRE(wifi_scan(out, 2) == 2 && std::string(out[1].ssid) == "fallback");
+    std::strcpy(out[0].ssid, "fallback");
+    out[0].rssi              = -90;
+    sdk::scan_record_reads   = 0;
+    sdk::scan_clears         = 0;
+    sdk::scan_pending        = false;
+    sdk::scan_records_result = ESP_FAIL;
+    REQUIRE(wifi_scan(out, 2) == 0 && sdk::scan_record_reads == 1);
+    REQUIRE(!sdk::scan_pending && sdk::scan_clears == 1);
+    REQUIRE(std::string(out[0].ssid) == "fallback" && out[0].rssi == -90);
+    sdk::scan_start_result = ESP_FAIL;
+    REQUIRE(wifi_scan(out, 2) == 0 && sdk::scan_record_reads == 1);
+    REQUIRE(!sdk::scan_pending && sdk::scan_clears == 2);
 }
 void stale_boot_wake() {
     reset();
@@ -424,6 +448,7 @@ int main(int argc, char** argv) {
         {"foreign_ip", test::foreign_ip},
         {"snapshot_loss", test::snapshot_loss},
         {"snapshot_reacquisition", test::snapshot_reacquisition},
+        {"scan_failure", test::scan_failure},
         {"stale_boot_wake", test::stale_boot_wake},
         {"stale_boot_timeout", test::stale_boot_timeout},
         {"boot_retry_budget", test::boot_retry_budget},

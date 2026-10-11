@@ -607,8 +607,9 @@ Everything needed to explain a crash *after the fact*, from the field, without a
   is right to, for a **transient** shortage. Nothing asked what happens when it never recovers.
   Composed, those guards describe a device that is powered, associated, answering 503 to everything
   and republishing nothing, indefinitely, while reporting no fault at all: a hang, which is the worst
-  failure shape available, because a crash reboots in seconds and leaves a reset reason, a core dump
-  and a syslog record, whereas a wedge looks exactly like a powered-off device and heals never. So
+  failure shape available, because a crash normally restarts within seconds and reports a reset
+  reason. A core dump and external syslog record depend on capture, forwarding and collector
+  availability, whereas a wedge looks exactly like a powered-off device and heals never. So
   when the largest **contiguous internal** block has stayed under 4 KB for five unbroken minutes —
   long enough that no burst can reach it, and an in-flight OTA *clears* the run rather than pausing
   it, so a restart can never land mid-install — the device restarts deliberately, leaving a
