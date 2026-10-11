@@ -223,8 +223,9 @@ http_status.cpp     → GET / (web UI), /index.html, /favicon.ico, /heat-pump-ic
                       /history, /scan, /models, /diag, /coredump, /* (captive/catch-all),
                       POST /diag/clear, /coredump/clear, /crash/dismiss — all sixteen. The live /status and /values
                       bodies use one bounded 1 KiB chunk sink instead of a body-sized contiguous allocation;
-                      unredacted GET /diag streams directly from static storage in 1 KiB chunks (clamped to 512 B during
-                      active OTA) with zero heap allocation. append_status_json() scopes subsystem local structs, saving +2836 B
+                      unredacted GET /diag streams directly from static storage in 1 KiB chunks with zero heap allocation.
+                      Its internal 512 B OTA clamp is unreachable through HTTP during active download because the common
+                      guard rejects every non-OTA route first. append_status_json() scopes subsystem local structs, saving +2836 B
                       httpd stack, and runs on the httpd task ALONE — see "Push vs. poll" below for why that
                       sentence is load-bearing
 http_config.cpp     → POST /set_wifi, /set_mqtt, /set_diagnostics, /set_ref_temp, /set_weather,
@@ -1203,13 +1204,14 @@ host-testable core is unusually large and valuable, because the risky parts are 
   timeout and no overall limit, and that purge runs after the handler returned — outside the 30 s
   budget. Rejections before any read (403, 415, 503), failed or oversized reads and routes that
   expect no body all reached it, so one peer announcing a large Content-Length and trickling it held
-  the httpd task indefinitely. `http_body_discard()` now settles at most 8 KiB within 2 s (plus one
-  in-progress socket timeout) from `handle_then_settle_body`, the function IDF actually calls; any
+  the httpd task indefinitely. `http_body_discard()` now settles at most 8 KiB with a 2 s budget
+  checked before each receive (plus one in-progress socket timeout) from `handle_then_settle_body`,
+  the function IDF actually calls; any
   remainder it cannot settle returns `ESP_FAIL`, so IDF closes the session instead of purging.
 - `logic/http_surface.hpp` — the HTTP trust-surface boundary (F01). `http_surface_serves(surface,
   path, is_post)` says which routes each surface exposes: on the trusted configured LAN (WiFi or
   Ethernet), everything; on the
-  OPEN setup AP, ONLY `GET /`, `/index.html` and `POST /set_wifi` — `/scan` included in what is
+  OPEN setup AP, ONLY `GET /`, `/index.html`, `/favicon.ico` and `POST /set_wifi` — `/scan` included in what is
   withheld, since the portal takes a typed SSID and an open radio has no reason to be handed a
   survey of every AP in range. `http_start()` picks the surface from the observed provisioning-AP
   state and every concern registers through `http_register_on()`, so `/coredump`, `/diag` and the
@@ -4588,8 +4590,10 @@ try-lock acquire a callback context needs.
 
 Heap is tight (WiFi + MQTT + TLS dominate; the binding limit is the
 largest *contiguous* free block): keep every HTTP handler under the `handle_all` try/catch (503 on
-OOM before response emission). `/status`, `/values` and MCP use the bounded stream helper to close
-an incomplete response after emission; `/diag` and `/history` still rely on the outer guard, which
+OOM before response emission). `/status` and MCP `get_status` use the exception-aware bounded
+stream helper to close an incomplete response after emission. `/values` and MCP `get_hp_values`
+stage their snapshot before the first byte and serialize it through the bounded chunk sink without
+allocating; they do not use that exception helper. `/diag` and `/history` still rely on the outer guard, which
 cannot safely replace an already-started response with a new error (tracked as HTTP-03). Stream `/diag`,
 `/status`, `/values`, both MCP results and MQTT discovery instead of building one big
 `std::string`, and treat any new large contiguous allocation (big JSON, OTA TLS) as a crash risk to

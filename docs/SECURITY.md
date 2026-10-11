@@ -31,7 +31,7 @@ and the OTA-signing / key lifecycle.
   reachable at boot, the device falls back to an unauthenticated `WIFI_AUTH_OPEN` SoftAP
   (`daikin-altherma-esp32-setup`) so WiFi can be entered from a phone — any radio client in range can
   associate with no credential. On that surface the HTTP server registers **only** `GET /`,
-  `GET /index.html` and `POST /set_wifi` (plus the captive catch-all, which serves the setup page).
+  `GET /index.html`, `GET /favicon.ico` and `POST /set_wifi` (plus the captive catch-all, which serves the setup page).
   `GET /scan` is withheld too: the portal takes the SSID as free text and never scans, so nothing is
   lost by not handing an unauthenticated radio client a survey of every AP in range (SSIDs + RSSI —
   a location fingerprint). The full read/config/OTA/MCP API — including `/coredump` and `/diag`, which can carry
@@ -132,7 +132,8 @@ and the OTA-signing / key lifecycle.
   container levels and one complete document; trailing non-whitespace, extra documents and raw NUL bytes
   are rejected. HTTP request bodies also have a 30 s absolute acceptance budget checked before and
   after every receive, including the last one; an active receive returns under its socket timeout.
-  A body the client still owes after the response is discarded only up to 8 KiB within 2 s; anything
+  A body the client still owes after the response is discarded only up to 8 KiB, with a 2 s budget
+  checked before each receive; one in-progress receive can add its socket timeout. Anything
   larger or slower closes the connection instead of reaching ESP-IDF's unbounded purge, so one
   trickling LAN client cannot hold the single HTTP worker after a rejected or unread request.
 - **Syslog forwarding is cleartext, unauthenticated UDP** — opt-in and off by default (empty
@@ -602,10 +603,10 @@ The initial running board identity is version plus the shortened ELF build id ex
 the host has separately verified the authorized signed application SHA, but this is not a complete
 cryptographic flash readback of the already-running bytes. Optional Open-Meteo
 evidence is not a bench prerequisite.
-During OTA, `/status`, the shared `/values` sender, `/history`, `/scan`, `/models?active=1`, redacted
-`/diag` and the whole MCP POST fail fast with a small busy-503 before allocation-rich work;
-`/ota/status`, static assets, the static `/models` catalog and the unredacted static `/diag` ring
-remain reachable.
+During active OTA download, the common HTTP guard rejects every non-OTA route with a small
+busy-503, including `/status`, `/values`, `/history`, `/scan`, both forms of `/models` and `/diag`,
+MCP and static assets. Only OTA routes remain reachable; the already-loaded browser uses the
+compact `/ota/status` response while the update runs.
 For the shorter Weather TLS owner, `/values` still waits in 250-ms steps for at most four seconds.
 The cap remains below the gate's five-second request timeout; expiry is a busy-503, not an accepted
 retry.
