@@ -1206,7 +1206,10 @@ jobs:
           SOURCE_SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
-          if git ls-remote --exit-code --tags origin "refs/tags/v$VERSION" >/dev/null 2>&1; then
+          tag_lookup_status=0
+          git ls-remote --exit-code --tags origin "refs/tags/v$VERSION" >/dev/null 2>&1 \
+            || tag_lookup_status=$?
+          if [ "$tag_lookup_status" -eq 0 ]; then
             git fetch --quiet --no-tags --force origin \
               "refs/tags/v$VERSION:refs/tags/v$VERSION"
             tag_sha="$(git rev-parse "v$VERSION^{commit}")"
@@ -1214,6 +1217,9 @@ jobs:
               echo "v$VERSION moved to $tag_sha; expected $SOURCE_SHA" >&2
               exit 1
             }
+          elif [ "$tag_lookup_status" -ne 2 ]; then
+            echo "cannot determine v$VERSION tag identity (git ls-remote exit $tag_lookup_status)" >&2
+            exit 1
           fi
 
       - name: Create or resume release
