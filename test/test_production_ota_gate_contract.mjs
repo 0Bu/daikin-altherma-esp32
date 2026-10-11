@@ -98,7 +98,7 @@ finally:
 // with fixtures; the real transfer observer and fail-closed verifier remain in the path.
 // Keep this probe enabled for isolated mutant trees too.
 const productionProbe = `
-import contextlib, io, json, runpy, sys
+import contextlib, io, json, runpy, shutil, sys
 from types import SimpleNamespace
 from unittest.mock import patch
 gate = runpy.run_path(sys.argv[1], run_name="production_evidence_probe")
@@ -158,6 +158,9 @@ for label, transfer_sample in cases:
     def status(endpoint, **kwargs):
         assert endpoint == "production.invalid"
         return target_status if "reboot" in events else old_status
+    def bench_cycle(**kwargs):
+        events.append("stress bench.invalid")
+        return {"cold_stress": {"uptime": [1, 181], "counters_after": {}}}
     replacements = {
         "parse_args": lambda: args, "request_limited_bytes": lambda *a, **k: b"{}",
         "validate_manifest": lambda *a: "https://feed.invalid/app.bin",
@@ -171,7 +174,7 @@ for label, transfer_sample in cases:
         "verify_release_source_binding": lambda *a: None,
         "request_json": lambda *a: target_status, "validate_identity": lambda *a, **k: None,
         "wait_for_bench_health_window": lambda *a, **k: target_status,
-        "exercise_bench_full_download": lambda **k: {}, "stress_board": stress,
+        "exercise_bench_full_download": bench_cycle, "stress_board": stress,
         "resolve_http_endpoint": lambda host: host, "request_status_deadline": status,
         "wait_for_production_promotion_readiness": lambda endpoint, before, **k: before,
         "wait_for_ota_offer": lambda *a: 7, "post_update_once": post_once,
@@ -194,12 +197,353 @@ for label, transfer_sample in cases:
             assert evidence["saw_done"] is True
             for key in ("heap_min_free_bytes", "heap_min_largest_block_bytes", "ota_stack_min_free_bytes"):
                 assert evidence[key] == transfer_sample[key], (key, evidence)
+        finally:
+            if namespace["ACTIVE_JOURNAL"] is not None:
+                shutil.rmtree(namespace["ACTIVE_JOURNAL"].directory)
 `;
 const productionEvidence = spawnSync("python3", [
   "-I", "-B", "-c", productionProbe, path.join(root, "scripts/production-ota-gate.py"),
 ], { encoding: "utf8" });
 assert.equal(productionEvidence.status, 0,
   `production must collect, validate and retain writer evidence: ${productionEvidence.stderr}`);
+
+// Executed controller fixtures: no inventory, board, feed or signing key is contacted. Keep this
+// standalone probe available to the mutation runner so syntax errors and unrelated failures cannot
+// count as a killed regression in cold ordering, privacy or partial receipt behavior.
+const coldReceiptProbe = String.raw`
+import contextlib, io, json, os, runpy, shutil, stat, sys
+from types import SimpleNamespace
+from unittest.mock import patch
+from urllib.error import HTTPError
+gate = runpy.run_path(sys.argv[1], run_name="cold_receipt_probe")
+ns = gate["main"].__globals__
+def check(condition, label):
+    assert condition, "COLD_RECEIPT: " + label
+target, writer, elf, old_elf, sha = "2.0.0-dev.2", "2.0.0-dev.1", "abcdef123", "123abcdef", "a" * 64
+counters = {"heap_restarts": 0, "mqtt_skipped": 0, "poll_skipped": 0, "crc_err": 0, "timeout_err": 0}
+def board(version=target, image=elf, uptime=13):
+    return {"version": version, "app_elf_sha256": image, "uptime_s": uptime,
+            "sys": {"free_heap": 65536, "max_alloc": 32768, "reset_reason": "sw",
+                    **{key: counters[key] for key in ("heap_restarts", "mqtt_skipped", "poll_skipped")}},
+            "hp": {"crc_err": 0, "timeout_err": 0}, "ota": {"channel": "dev"},
+            "mqtt": {"connected": True}}
+stress_receipt = {"uptime": [13, 193], "counters_before": counters, "counters_after": counters,
+                  "samples": {"status": 400, "values": 180, "diag": 20},
+                  "probation_before": {"image_state": "pending_verify", "rollback_pending": True,
+                                       "uptime_s": 13}, "free_heap": 65536, "largest_block": 32768}
+transfer = {"saw_done": True, "heap_min_free_bytes": 32768, "heap_min_largest_block_bytes": 16384,
+            "ota_stack_min_free_bytes": 1536, "ota_stack_present_at_done": True}
+
+# The real bench installer must enter pressure directly after identity/transfer verification.
+events = []
+def install_post(*args, **kwargs):
+    events.append("post")
+    return 8
+def install_wait(*args):
+    args[-1].update(transfer)
+    events.append("returned")
+    return board()
+def cold_stress(**kwargs):
+    check(kwargs.get("require_pending_image") is True, "bench pressure omitted pending witness")
+    check(events == ["post", "returned"], "bench pressure warmed up before stress")
+    events.append("cold stress")
+    return stress_receipt
+def warm_health(*args, **kwargs):
+    events.append("warm health")
+    return board(uptime=105)
+def install_confirm(**kwargs):
+    check(events == ["post", "returned", "cold stress"], "confirmation preceded cold stress")
+    events.append("valid")
+    return {"image_state": "valid", "rollback_pending": False, "uptime_s": 194}
+common = {"resolve_http_endpoint": lambda host: host, "validate_identity": lambda *a, **k: None,
+          "request_status_deadline": lambda *a, **k: board(writer, old_elf),
+          "wait_for_ota_offer": lambda *a, **k: 7, "post_update_once": install_post,
+          "wait_for_new_firmware": install_wait, "stress_board": cold_stress,
+          "wait_for_bench_health_window": warm_health, "confirm_bench_probation": install_confirm}
+with patch.dict(ns, common):
+    installed = gate["install_bench_target"](host="bench.invalid", mac="bench", current_version=writer,
+        target_version=target, target_sha256=sha, target_elf=elf)
+check(events == ["post", "returned", "cold stress", "valid"], "bench acceptance order")
+check(installed.get("probation_confirmed") is True, "bench accepted without valid probation")
+
+# Exercise the full release/restore function with one deterministic probe iteration per worker.
+events = []
+in_worker = [False]
+class OneIteration:
+    def __init__(self): self.stopped = False
+    def is_set(self): return self.stopped
+    def wait(self, seconds): self.stopped = True
+    def set(self): self.stopped = True
+stop = OneIteration()
+class Worker:
+    name = "fixture-worker"
+    def __init__(self, *, target, args, daemon): self.target, self.args = target, args
+    def start(self):
+        stop.stopped, in_worker[0] = False, True
+        try: self.target(*self.args)
+        finally: in_worker[0] = False
+    def join(self, timeout): pass
+    def is_alive(self): return False
+def cycle_status(*args, **kwargs):
+    if in_worker[0]: raise HTTPError("http://fixture.invalid", 503, "busy", {}, None)
+    return board("1.0.2", old_elf) if "release returned" in events else board()
+def cycle_values(*args, **kwargs):
+    raise HTTPError("http://fixture.invalid", 503, "busy", {}, None)
+def cycle_json(*args, **kwargs): return {"ok": True, "generation": 7}
+def cycle_wait(host, version, image, endpoint, evidence):
+    evidence.update(transfer)
+    events.append("release returned" if version == "1.0.2" else "target returned")
+    return board(version, image)
+def cycle_health(*args, **kwargs):
+    check(kwargs.get("phase") == "release", "current restore warmed before cold pressure")
+    events.append("release health")
+    return board("1.0.2", old_elf, 105)
+def cycle_stress(**kwargs):
+    check(kwargs.get("require_pending_image") is True, "restore pressure omitted pending witness")
+    check(events == ["release returned", "release health", "target returned"], "restore cold order")
+    events.append("cold stress")
+    return stress_receipt
+def cycle_confirm(**kwargs):
+    check(events[-1] == "cold stress", "restore confirmed before stress")
+    events.append("valid")
+    return {"image_state": "valid", "rollback_pending": False, "uptime_s": 194}
+with patch.dict(ns, {"resolve_http_endpoint": lambda host: host,
+    "validate_identity": lambda *a, **k: None, "require_official_dev_manifest_snapshot": lambda *a: None,
+    "wait_for_ota_offer": lambda *a, **k: 7, "post_update_once": lambda *a, **k: 8,
+    "request_status_deadline": cycle_status, "request_values_deadline": cycle_values,
+    "request_diag_deadline": lambda *a, **k: b"diagnostics", "request_json_deadline": cycle_json,
+    "wait_for_new_firmware": cycle_wait, "wait_for_bench_health_window": cycle_health,
+    "ota_offer_ready": lambda *a, **k: True, "stress_board": cycle_stress,
+    "confirm_bench_probation": cycle_confirm}), patch.object(ns["threading"], "Event", lambda: stop), \
+    patch.object(ns["threading"], "Thread", Worker), patch.object(ns["time"], "sleep", lambda seconds: None):
+    cycle = gate["exercise_bench_full_download"](host="bench.invalid", mac="bench",
+        target_source_sha="b" * 40, target_version=target, target_sha256=sha,
+        target_manifest_sha256="c" * 64, target_elf=elf, release_version="1.0.2",
+        release_sha256="d" * 64, release_elf=old_elf)
+check(events[-2:] == ["cold stress", "valid"], "restore omitted cold pressure or confirmation")
+check(cycle.get("cold_stress") == stress_receipt, "restore dropped completed cold pressure")
+
+# Reach the actual pressure precondition, stopping before any live worker can start.
+class PressureStart(RuntimeError): pass
+for image_state, rollback_pending, uptime, accepted in (
+    ("pending_verify", True, 13, True), ("valid", False, 105, False),
+    ("pending_verify", True, 121, False), ("pending_verify", False, 13, False),
+):
+    virtual_time = [0.0]
+    def advance(seconds): virtual_time[0] += max(seconds, 0.001)
+    def pressure_checkpoint(phase, **updates):
+        witness = updates["test_board"]["stress"].get("probation_before")
+        check(witness is not None and witness.get("image_state") == "pending_verify", "pending witness absent")
+        raise PressureStart()
+    with patch.dict(ns, {"resolve_http_endpoint": lambda host: host,
+        "validate_identity": lambda *a, **k: None, "request_status_deadline": lambda *a, **k: board(uptime=uptime),
+        "request_json_deadline": lambda *a, **k: {"image_state": image_state, "rollback_pending": rollback_pending},
+        "journal_checkpoint": pressure_checkpoint}), \
+        patch.object(ns["time"], "monotonic", lambda: virtual_time[0]), \
+        patch.object(ns["time"], "sleep", advance):
+        try:
+            gate["stress_board"](host="bench.invalid", mac="bench", version=target, elf=elf,
+                require_x10a=False, require_weather=False, expected_app_sha256=sha, expected_channel="dev",
+                require_pending_image=True)
+        except PressureStart:
+            check(accepted, "warm or unarmed pressure was accepted")
+        except gate["GateError"]:
+            check(not accepted, "cold armed pressure was rejected")
+        else:
+            check(False, "pressure precondition did not run")
+
+# Confirmation belongs to the same boot, counters and identity that completed pressure.
+for uptime, skip, state, pending, timeout_before, timeout_after, accepted in (
+    (194, 0, "valid", False, 0, 0, True), (3, 0, "valid", False, 0, 0, False),
+    (194, 1, "valid", False, 0, 0, False), (194, 0, "unarmed", False, 0, 0, False),
+    (194, 0, "valid", False, 5, 6, True), (194, 0, "valid", False, 5, 9, False),
+    (194, 0, "valid", False, 5, 4, False),
+):
+    status = board(uptime=uptime)
+    status["sys"]["mqtt_skipped"] = skip
+    status["hp"]["timeout_err"] = timeout_after
+    confirmation_stress = {**stress_receipt, "counters_after": {**counters, "timeout_err": timeout_before}}
+    with patch.dict(ns, {"resolve_http_endpoint": lambda host: host,
+        "validate_identity": lambda *a, **k: check(k["version"] == target and k["elf"] == elf, "confirmation identity"),
+        "request_status_deadline": lambda *a, **k: status,
+        "request_json_deadline": lambda *a, **k: {"image_state": state, "rollback_pending": pending}}):
+        try:
+            confirmed = gate["confirm_bench_probation"](host="bench.invalid", mac="bench", version=target,
+                                                       elf=elf, stress=confirmation_stress)
+        except gate["GateError"]:
+            check(not accepted, "healthy confirmation rejected")
+        else:
+            check(accepted and confirmed["image_state"] == "valid", "unhealthy confirmation accepted")
+
+# A valid compact image response cannot confirm the full status sampled before it. Bind one fresh
+# status after that response and reject a new boot, changed identity/counters or lost safe heap.
+for defect in (None, "reboot", "heap_restarts", "mqtt_skipped", "poll_skipped", "crc_err",
+               "mac", "version", "elf", "free_heap", "largest_block", "timeout regression",
+               "timeout excess", "short final budget", "expired before final", "expired final"):
+    before, after = board(uptime=194), board(uptime=206)
+    before["wifi"] = {"mac": "bench", "connected": True, "rolled_back": False}
+    after["wifi"] = dict(before["wifi"])
+    before["hp"]["timeout_err"], after["hp"]["timeout_err"] = 6, 7
+    confirmation_stress = {**stress_receipt, "counters_after": {**counters, "timeout_err": 5}}
+    if defect == "reboot": after["uptime_s"] = 3
+    if defect in ("heap_restarts", "mqtt_skipped", "poll_skipped"): after["sys"][defect] = 1
+    if defect == "crc_err": after["hp"]["crc_err"] = 1
+    if defect == "mac": after["wifi"]["mac"] = "other"
+    if defect == "version": after["version"] = writer
+    if defect == "elf": after["app_elf_sha256"] = old_elf
+    if defect == "free_heap": after["sys"]["free_heap"] = ns["MIN_FINAL_FREE_HEAP"] - 1
+    if defect == "largest_block": after["sys"]["max_alloc"] = ns["MIN_FINAL_LARGEST_BLOCK"] - 1
+    if defect == "timeout regression": after["hp"]["timeout_err"] = 5
+    if defect == "timeout excess": after["hp"]["timeout_err"] = 9
+    sequence, virtual = [], [0.0]
+    def full_status(endpoint, *, timeout):
+        check(endpoint == "bench.invalid", "confirmation changed its pinned endpoint")
+        check(0 < timeout <= ns["HTTP_TIMEOUT_S"], "confirmation status exceeded its request bound")
+        final = "image" in sequence
+        sequence.append("status")
+        if final and defect in ("short final budget", "expired final"):
+            check(timeout <= 1, "fresh confirmation ignored its remaining absolute deadline")
+            virtual[0] = 149.5 if defect == "short final budget" else 150.0
+        return after if final else before
+    def image_status(endpoint, route, *, timeout):
+        check(endpoint == "bench.invalid" and route == "/ota/status", "confirmation compact route")
+        sequence.append("image")
+        if defect in ("short final budget", "expired final"): virtual[0] = 149.0
+        if defect == "expired before final": virtual[0] = 150.0
+        return {"image_state": "valid", "rollback_pending": False}
+    accepted = defect in (None, "short final budget")
+    with patch.dict(ns, {"resolve_http_endpoint": lambda host: host,
+        "request_status_deadline": full_status, "request_json_deadline": image_status}), \
+        patch.object(ns["time"], "monotonic", lambda: virtual[0]):
+        try:
+            confirmed = gate["confirm_bench_probation"](host="bench.invalid", mac="BENCH", version=target,
+                                                       elf=elf, stress=confirmation_stress)
+        except gate["GateError"]:
+            check(not accepted, "healthy final confirmation rejected")
+        else:
+            check(accepted, "unsafe status after valid image observation accepted: " + str(defect))
+            check(sequence == ["status", "image", "status"], "fresh status missing after valid image")
+            check(confirmed["uptime_s"] == 206, "confirmation returned stale pre-image uptime")
+
+args = SimpleNamespace(self_test=False, release_hil=False, execute=True, confirm_release_hil=None,
+    artifact_manifest=None, artifact_app=None, install_bench=False, confirm_bench=None,
+    confirm_production="production", expected_current_version=writer,
+    manifest_url=ns["OFFICIAL_MANIFEST_URL"], expected_source_sha="b" * 40,
+    expected_version=target, expected_app_sha256=sha)
+for failing_phase in (None, "ack lost", "compact ack lost", "return", "stress", "retained", "journal before write", "journal on failure"):
+    events, syncs = [], []
+    failed = [False]
+    def stop(error):
+        failed[0] = True
+        raise error
+    def read_status(*args, **kwargs):
+        check(not failed[0], "error handler performed a network query")
+        return board() if "returned" in events else board(writer, old_elf)
+    def read_json(*args, **kwargs):
+        check(not failed[0], "error handler performed a network query")
+        return board()
+    def post(*args, **kwargs):
+        check(len([e for e in events if e == "post"]) == 0, "production POST retried")
+        saved = json.loads(ns["ACTIVE_JOURNAL"].path.read_text())
+        check(saved["phase"] == "production_write_attempted", "attempt was not durable before POST")
+        check(saved["receipt"]["production"].get("executed") is None, "uncertain POST claimed false or complete")
+        check(len(syncs) == 2 * len(saved["phases"]), "attempt lacked durable file/directory fsync")
+        events.append("post")
+        if failing_phase == "ack lost": stop(OSError("private-host private-topic private-coordinate"))
+        if failing_phase == "compact ack lost": stop(gate["CompactTransportError"]("private-host disconnected before acknowledgment"))
+        return 8
+    def wait(*args):
+        args[-1].update(transfer)
+        events.append("returned")
+        if failing_phase == "return": stop(gate["GateError"]("private-host private-topic"))
+        return board()
+    def stress(**kwargs):
+        check(kwargs["host"] == "production.invalid", "main repeated warm bench pressure")
+        events.append("stress")
+        if failing_phase in ("stress", "journal on failure"): stop(gate["GateError"]("private-coordinate"))
+        return stress_receipt
+    def retained(*args):
+        events.append("retained")
+        if failing_phase == "retained": stop(gate["GateError"]("private-topic"))
+        return {"topic": "private-topic", "retained": True, "bytes": 12, "rows": 1, "groups": 1}
+    def checkpoint(journal, phase, **kwargs):
+        if (failing_phase == "journal before write" and phase == "production_write_attempted") or \
+           (failing_phase == "journal on failure" and phase == "blocked"):
+            stop(OSError("fixture journal write failure"))
+        return original_checkpoint(journal, phase, **kwargs)
+    original_checkpoint, original_fsync = gate["GateJournal"].checkpoint, os.fsync
+    def sync(fd):
+        syncs.append(fd)
+        original_fsync(fd)
+    patches = {"parse_args": lambda: args, "request_limited_bytes": lambda *a, **k: b"{}",
+        "validate_manifest": lambda *a: "https://feed.invalid/app.bin", "require_legacy_bench_restore_manifest": lambda *a: None,
+        "verify_local_source": lambda *a: None, "request_bytes": lambda *a, **k: b"image",
+        "verify_image": lambda *a: elf, "verify_http_range_support": lambda *a: None, "run_local_gates": lambda: None,
+        "load_inventory": lambda: {role: {"host": role + ".invalid", "mac": "private-mac"} for role in ("bench", "production")},
+        "validate_release_manifest": lambda *a: ("1.0.2", "c" * 64, "https://feed.invalid/release.bin", "d" * 40),
+        "verify_release_source_binding": lambda *a: None, "request_json": read_json,
+        "validate_identity": lambda *a, **k: None, "wait_for_bench_health_window": lambda *a, **k: board(uptime=105),
+        "exercise_bench_full_download": lambda **k: {"cold_stress": stress_receipt, "target_download_heap": transfer},
+        "stress_board": stress, "resolve_http_endpoint": lambda host: host,
+        "request_status_deadline": read_status,
+        "wait_for_production_promotion_readiness": lambda endpoint, before, **k: before,
+        "wait_for_ota_offer": lambda *a: 7, "post_update_once": post, "wait_for_new_firmware": wait,
+        "verify_retained_x10a": retained}
+    output, errors = io.StringIO(), io.StringIO()
+    journal = None
+    try:
+        with patch.dict(ns, patches), patch.object(gate["GateJournal"], "checkpoint", checkpoint), \
+             patch.object(os, "fsync", sync), contextlib.redirect_stdout(output), contextlib.redirect_stderr(errors):
+            try:
+                result = gate["cli_main"]()
+            except gate["CompactTransportError"]:
+                check(False, "compact transport disconnect escaped the blocked receipt")
+            journal = ns["ACTIVE_JOURNAL"]
+        check(journal is not None, "journal absent: " + errors.getvalue())
+        check(stat.S_IMODE(journal.directory.stat().st_mode) == 0o700, "private journal directory mode")
+        check(stat.S_IMODE(journal.path.stat().st_mode) == 0o600, "private journal file mode")
+        saved = json.loads(journal.path.read_text())
+        report = json.loads(output.getvalue())
+        if failing_phase is None:
+            check(result == 0 and saved["outcome"] == "passed", "successful delivery report")
+            check(report["production"].get("retained_passed") is True, "success omitted completed retained proof")
+        else:
+            check(result == 2 and report.get("outcome") == "blocked", "failed delivery emitted success or wrong code")
+            check(all(word not in output.getvalue() for word in (".invalid", "private-", "topic", "coordinate", "host", "mac")), "public partial receipt leaked private data")
+            proof = report["receipt"]
+            check(proof["test_board"]["full_binary_download"]["target_download_heap"]["saw_done"] is True,
+                  "blocked receipt lost completed bench proof")
+            production = proof["production"]
+            if failing_phase == "journal before write":
+                check(events == [], "write proceeded without durable attempt")
+            else:
+                check(events.count("post") == 1, "failed phase retried POST")
+                check(production.get("write_attempted") is True, "blocked report omitted attempt")
+                check(production.get("executed") is (None if failing_phase in ("ack lost", "compact ack lost") else True), "false executed after possible write")
+                if failing_phase not in ("ack lost", "compact ack lost"):
+                    check(production.get("write_acknowledged") is True, "blocked report lost acknowledged write")
+                    check(production.get("ota_download_heap", {}).get("saw_done") is True, "blocked report lost completed transfer")
+                if failing_phase in ("stress", "retained", "journal on failure"):
+                    check(production.get("target_returned") is True, "blocked report lost returned target")
+                    check(production.get("transfer_verified") is True, "blocked report lost verified transfer")
+                if failing_phase == "retained":
+                    check(production.get("stress_passed") is True, "blocked report lost passed stress")
+                check(production.get("retained_passed") is not True, "failed delivery claimed retained completion")
+        # Even allowed-shaped fields cannot smuggle arbitrary private strings through the projection.
+        journal.receipt["test_board"].update({"version": "private-host", "samples": {"status": "private-topic"}})
+        journal.phases.append("private-coordinate")
+        check("private-" not in json.dumps(gate["public_receipt"](journal)), "projection trusted allowed keys without typed values")
+    finally:
+        if journal is not None:
+            shutil.rmtree(journal.directory)
+        ns["ACTIVE_JOURNAL"] = None
+print("cold-receipt behavioral fixtures passed")
+`;
+const coldReceipt = spawnSync("python3", [
+  "-I", "-B", "-c", coldReceiptProbe, path.join(root, "scripts/production-ota-gate.py"),
+], { encoding: "utf8" });
+assert.equal(coldReceipt.status, 0,
+  `cold pressure and durable blocked receipts must preserve evidence: ${coldReceipt.stderr}`);
 
 // Role, artifact and timing boundaries.
 assert.match(gate, /BENCH_ROLE\s*=\s*"bench"[\s\S]{0,100}?PRODUCTION_ROLE\s*=\s*"production"/);

@@ -2962,6 +2962,10 @@ Structure:
   that lease before re-reading the manifest and image, so a later request or config change cannot
   mix feeds. The same compact status exposes a boot-latched `image_state` and
   `rollback_pending` without reading otadata flash on the HTTP task.
+  The health task owns an aligned static 4096-byte stack and static task storage. Both remain
+  reserved after the task exits; a boot-latched arm prevents concurrent or later reuse in the same
+  boot. This avoids placing a transient stack allocation between runtime heap blocks during cold
+  probation, without changing the 90/600-second decision or any admission floor.
   Standalone lab-HIL first uses the pinned bootstrap writer to prove candidate rollback and then candidate
   commit/cold restore. It subsequently exercises the valid candidate's own writer by installing the
   separately root-pinned signed bootstrap through a distinct transient feed, capturing the
@@ -2987,16 +2991,25 @@ Structure:
   write, then a fixed-size reader applies one monotonic one-second deadline across connect, request,
   headers and body. The dwell therefore outlives a prior request, the 0.5-second sleep, the next
   request and another 0.5 seconds of scheduling margin. The exact target then
-  survives the 105-second rollback-health window and three minutes of status/values/diag plus real
-  manifest-TLS pressure with MQTT recovery. It returns before release staging or production target
+  must still report `pending_verify` with rollback armed immediately before three minutes of
+  status/values/diag plus real manifest-TLS pressure with MQTT recovery. Pressure starts within
+  120 seconds of boot; afterward a bounded 150-second confirmation requires the same boot and
+  exact image to report `valid` with rollback disarmed. It returns before release staging or production target
   construction. Only read-only observer GETs interrupted by reboot are sampled again; a complete
   malformed response fails hard, and the update POST has no retry or compensating write. The unwired bench does not require
   X10A or optional weather. Ordinary updates use OTA; signed NVS-preserving USB remains limited to
   bootstrap, recovery and an explicitly requested pre-merge test of an exact local head, which is
   never a delivery. Current firmware exposes its boot-latched pending/valid state through
-  compact `/ota/status`; the ordinary bench dwell still proves the documented service conditions and
-  remains compatible with the older stable image used during its rollback exercise.
+  compact `/ota/status`; the separate 105-second release dwell remains compatible with the older
+  stable image used during the rollback exercise.
 - **Production promotion is a staged, one-write transaction.**
+  Every important completed stage is atomically recorded in a private local receipt journal.
+  A write attempt is recorded before its single POST; an ambiguous response leaves execution
+  unknown rather than claiming no write. Failure retains verified artifact, transfer and pressure
+  evidence with an explicit blocked outcome and incomplete later stages. The public projection
+  allows delivery identities and measurements, without complete status objects, host/MAC,
+  coordinates or raw error strings. Receipt failure before a write blocks that write; failure
+  handling neither contacts a board nor retries a transaction.
   [`scripts/production-ota-gate.py`](../scripts/production-ota-gate.py) binds the official dev
   manifest to the expected source SHA, version, application SHA-256, ESP32-S3 metadata and signature;
   requires a clean exact local source; requires the raw dev manifest to fit the 1024-byte restore
@@ -3028,7 +3041,9 @@ Structure:
   the following real OTA start remains the authoritative state check, while a USB-installed target
   simply receives the same conservative dwell.
   A fixed three-minute concurrent
-  status/values/diag + OTA-manifest-TLS pressure window follows on the freshly restored target. The
+  status/values/diag + OTA-manifest-TLS pressure window follows immediately on the freshly restored
+  target, with pending rollback witnessed before pressure and valid state confirmed afterward.
+  The
   firmware intentionally stops MQTT while either the manifest check or a background weather fetch
   owns the constrained network heap. Because the first identity response after a restore can arrive
   before MQTT reconnects, every pressure path first waits up to the bounded OTA-check deadline for a

@@ -345,6 +345,8 @@ the asynchronous enqueue API, deleted-message reporting, incremental packet IDs 
 `node test/test_ota_runtime.mjs` compiles the complete production `ota_update.cpp` against SDK/service
 adapters. It executes resource cleanup, Range resumption, worker leases, version/manifest rejection
 and the actual 90/600-second health-task transitions, then independently removes each safeguard.
+The health adapter also checks an aligned static 4096-byte stack, creation when dynamic task
+allocation is unavailable, and rejection of a second arm before or after self-deletion.
 The adapters prove application control flow; they do not execute TLS, flash or IDF cryptography.
 
 `node test/test_ota_heap_contract.mjs` additionally pins SDK-facing source contracts:
@@ -383,7 +385,8 @@ and a third interruption aborts. IDF's umbrella image-validation error stays gen
 claiming a bad signature. Initial feed URLs and every redirect stay on forced HTTPS, and an oversized
 response remains a size-policy refusal rather than masquerading as an interrupted connection.
 `tools/ota/selftest.mjs` removes each IDF-facing orchestration safeguard independently (including
-the fixed task lease, the boot-resident static delivery stack and wake-up, the
+the fixed task lease, the boot-resident static delivery stack and wake-up, the aligned static
+health stack, its exact byte budget and boot-latched arm, the
 publisher-to-firmware manifest-size contract,
 whole-stream SHA comparison, fail-closed IDF image-state
 mapping, both OTA task-path stack budgets, the MQTT task's size-build call-boundary and
@@ -395,8 +398,9 @@ every seeded regression is required. The allocation-free
 `FixedText`/`FixedBuffer` bounds and overflow refusal are exercised by `test/test_logic.cpp`.
 
 `node test/test_production_ota_gate_contract.mjs` pins ordinary role-bound bench delivery plus the
-exact-artifact bench-to-production workflow: one bench install write and early return, initial target
-health window, full signed release-binary pressure, the short completed-verifier state,
+exact-artifact bench-to-production workflow: one bench install write and early return, pressure
+while the installed target is still pending verification, full signed release-binary pressure,
+the short completed-verifier state,
 105-second release health window, a stable exact legacy offer before the bench-only dev restore, and
 the compact transfer observer's 2 Hz connection-churn ceiling and monotonic one-second whole-request
 deadline after pre-write endpoint resolution, the
@@ -418,6 +422,12 @@ firmware logic test separately pins the measured 48 KiB aggregate / 20 KiB conti
 Its paired
 `tools/production_ota/selftest.mjs` requires every bench-delivery, release-HIL and
 production-promotion stage-removal mutation to turn that same contract red.
+The installed and restored bench target must begin the unchanged 180-second pressure window within
+120 seconds of boot with `pending_verify` and rollback armed. A separate bounded confirmation then
+requires `valid`, rollback disarmed, the same version/ELF/MAC and monotonic uptime without changed
+allocation counters. A private atomic receipt journal preserves completed stages on failure; its
+public projection excludes device identity and complete status objects. A write attempt is recorded
+before its sole POST, and an ambiguous response cannot be reported as no write.
 The executed production branch remains enabled in mutant trees: removing writer-receipt collection,
 verification or reporting cannot pass solely because the candidate subsequently boots successfully.
 

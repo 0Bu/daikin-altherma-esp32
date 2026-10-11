@@ -336,7 +336,8 @@ void reset(sdk::Fault fault) {
     daik::s_busy       = false;
     daik::s_ota_task   = nullptr;
     daik::s_generation = 0;
-    daik::s_task_args  = daik::OtaTaskArgs{};
+    daik::s_health_gate_armed.store(false);
+    daik::s_task_args = daik::OtaTaskArgs{};
 }
 
 void worker(sdk::Fault fault, int stalled_service = 0, bool malformed_manifest = false,
@@ -513,6 +514,22 @@ void health(const char* name) {
         REQUIRE(status.image_state == "unknown" && !status.rollback_pending_known);
         return;
     }
+    if (std::strcmp(name, "health_static_storage") == 0) {
+        s.fail_dynamic_create = true;
+        daik::ota_health_gate_arm();
+        REQUIRE(s.static_creations == 1 && s.dynamic_creations == 0);
+        REQUIRE(s.health_stack != nullptr && s.health_storage != nullptr);
+        REQUIRE(s.health_stack_bytes == 4096);
+        REQUIRE(reinterpret_cast<uintptr_t>(s.health_stack) % portBYTE_ALIGNMENT == 0);
+        REQUIRE(s.health_entry == daik::health_gate_task);
+        daik::ota_health_gate_arm();
+        REQUIRE(s.created == 1); // no second task may share the active stack.
+        s.health_entry(nullptr);
+        REQUIRE(s.marked == 1 && daik::ota_status().image_state == "valid");
+        daik::ota_health_gate_arm();
+        REQUIRE(s.created == 1); // self-deletion does not permit same-boot reuse.
+        return;
+    }
     if (std::strcmp(name, "health_task_error") == 0) {
         s.fail_task_create = true;
         daik::ota_health_gate_arm();
@@ -629,7 +646,8 @@ int main(int argc, char** argv) {
         "health_task_error",    "health_heap_boundary", "health_low_free",
         "health_low_block",     "health_heap_restart",  "health_mqtt_skip",
         "health_poll_skip",     "health_x10a_missing",  "health_x10a_proven",
-        "health_x10a_optional", "health_ap_recovery",   "health_task_error_unknown"};
+        "health_x10a_optional", "health_ap_recovery",   "health_task_error_unknown",
+        "health_static_storage"};
     for (const auto* name : health_cases) {
         if (argc > 1 && std::strcmp(argv[1], name) != 0) continue;
         try {

@@ -10,6 +10,11 @@ import { fileURLToPath } from "node:url";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const centralContract = path.join(root, "test/test_production_ota_gate_contract.mjs");
+const centralSource = fs.readFileSync(centralContract, "utf8");
+const coldProbeStart = centralSource.indexOf("const coldReceiptProbe = String.raw`");
+const coldProbeEnd = centralSource.indexOf("\n`;", coldProbeStart);
+assert.ok(coldProbeStart >= 0 && coldProbeEnd > coldProbeStart, "missing executed cold-receipt probe");
+const coldProbe = centralSource.slice(coldProbeStart + "const coldReceiptProbe = String.raw`".length, coldProbeEnd);
 const files = [
   "scripts/production-ota-gate.py",
   "tools/agent-hooks/agent_hook.py",
@@ -298,6 +303,10 @@ const runContracts = () => {
   }
 };
 
+const runColdReceipt = () => spawnSync("python3", [
+  "-I", "-B", "-c", coldProbe, path.join(tmp, "scripts/production-ota-gate.py"),
+], { encoding: "utf8", timeout: 10000 });
+
 try {
   restore();
   const baseline = runContracts();
@@ -305,8 +314,94 @@ try {
     process.stderr.write(baseline.stdout + baseline.stderr);
     throw new Error("production OTA contracts are already red on the unmodified tree");
   }
+  const coldBaseline = runColdReceipt();
+  assert.equal(coldBaseline.status, 0, `cold receipt baseline failed: ${coldBaseline.stderr}`);
 
   const cases = [
+    ["bench install delays pressure until its image is warm", () =>
+      replaceOnce("scripts/production-ota-gate.py",
+        '    journal_checkpoint("bench_transfer_verified", test_board=evidence)\n    stress = stress_board(',
+        '    journal_checkpoint("bench_transfer_verified", test_board=evidence)\n    wait_for_bench_health_window(host, mac, target_version, target_elf, phase="target")\n    stress = stress_board('), "cold-receipt"],
+    ["bench restore delays pressure until its image is warm", () =>
+      replaceOnce("scripts/production-ota-gate.py", '    cold_stress = stress_board(',
+        '    wait_for_bench_health_window(host, mac, target_version, target_elf, phase="target")\n    cold_stress = stress_board('), "cold-receipt"],
+    ["bench restore omits its pending-image witness", () =>
+      replaceOnce("scripts/production-ota-gate.py", 'expected_channel="dev", require_pending_image=True,',
+        'expected_channel="dev", require_pending_image=False,'), "cold-receipt"],
+    ["bench pressure accepts an already confirmed image", () =>
+      replaceOnce("scripts/production-ota-gate.py",
+        'if probation_before.get("image_state") != "pending_verify" or \\\n           probation_before.get("rollback_pending") is not True:',
+        'if False:'), "cold-receipt"],
+    ["bench pressure permits a late boot", () =>
+      replaceOnce("scripts/production-ota-gate.py", "MAX_TEST_START_UPTIME_S = 120", "MAX_TEST_START_UPTIME_S = 180"), "cold-receipt"],
+    ["main repeats warm bench pressure after restore", () =>
+      replaceOnce("scripts/production-ota-gate.py", '    test_evidence = full_download_evidence["cold_stress"]',
+        '    test_evidence = stress_board(host=bench["host"])'), "cold-receipt"],
+    ["an uncertain production POST is reported as unexecuted", () =>
+      replaceOnce("scripts/production-ota-gate.py",
+        'journal_checkpoint("production_write_attempted", production={\n        "executed": None,',
+        'journal_checkpoint("production_write_attempted", production={\n        "executed": False,'), "cold-receipt"],
+    ["the production attempt is not durably identified before POST", () =>
+      replaceOnce("scripts/production-ota-gate.py", 'journal_checkpoint("production_write_attempted", production={',
+        'journal_checkpoint("ignored_attempt", production={'), "cold-receipt"],
+    ["an acknowledged production write is reported as unexecuted", () =>
+      replaceOnce("scripts/production-ota-gate.py",
+        'journal_checkpoint("production_write_acknowledged", production={\n        "executed": True,',
+        'journal_checkpoint("production_write_acknowledged", production={\n        "executed": False,'), "cold-receipt"],
+    ["blocked output drops the returned target milestone", () =>
+      replaceOnce("scripts/production-ota-gate.py", 'production={"target_returned": True}',
+        'production={"target_returned": False}'), "cold-receipt"],
+    ["blocked output drops verified transfer completion", () =>
+      replaceOnce("scripts/production-ota-gate.py", 'production={"transfer_verified": True}',
+        'production={"transfer_verified": False}'), "cold-receipt"],
+    ["blocked output drops completed stress", () =>
+      replaceOnce("scripts/production-ota-gate.py", '"stress_passed": True, "stress": production_evidence',
+        '"stress_passed": False, "stress": production_evidence'), "cold-receipt"],
+    ["blocked output leaks the private receipt", () =>
+      replaceOnce("scripts/production-ota-gate.py", '"receipt": public_receipt(ACTIVE_JOURNAL)',
+        '"receipt": ACTIVE_JOURNAL.receipt'), "cold-receipt"],
+    ["error handler queries a possibly updated board", () =>
+      replaceOnce("scripts/production-ota-gate.py", '    except (GateError, OSError, CompactTransportError) as error:\n',
+        '    except (GateError, OSError, CompactTransportError) as error:\n        request_json("production.invalid", "/status")\n'), "cold-receipt"],
+    ["error handler retries a possible production write", () =>
+      replaceOnce("scripts/production-ota-gate.py", '    except (GateError, OSError, CompactTransportError) as error:\n',
+        '    except (GateError, OSError, CompactTransportError) as error:\n        post_update_once("production.invalid", 7, "2.0.0-dev.2", "a" * 64)\n'), "cold-receipt"],
+    ["compact POST disconnect escapes its blocked receipt", () =>
+      replaceOnce("scripts/production-ota-gate.py", 'except (GateError, OSError, CompactTransportError) as error:',
+        'except (GateError, OSError) as error:'), "cold-receipt"],
+    ["bench confirmation reuses status from before the valid image observation", () =>
+      replaceOnce("scripts/production-ota-gate.py", 'confirmed = request_status_deadline(endpoint, timeout=min(remaining, HTTP_TIMEOUT_S))',
+        'confirmed = status'), "cold-receipt"],
+    ["public receipt trusts untyped allowed fields", () =>
+      replaceOnce("scripts/production-ota-gate.py",
+        'elif key in number_fields and isinstance(value, int) and not isinstance(value, bool):',
+        'elif key in number_fields:'), "cold-receipt"],
+    ["private journal file is world-readable", () =>
+      replaceOnce("scripts/production-ota-gate.py", 'os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600',
+        'os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o644'), "cold-receipt"],
+    ["private journal directory is accessible to others", () =>
+      replaceOnce("scripts/production-ota-gate.py", 'self.directory.chmod(0o700)',
+        'self.directory.chmod(0o755)'), "cold-receipt"],
+    ["journal omits durable file fsync", () =>
+      replaceOnce("scripts/production-ota-gate.py", 'os.fsync(stream.fileno())', 'pass  # seeded missing file sync'), "cold-receipt"],
+    ["journal omits durable directory fsync", () =>
+      replaceOnce("scripts/production-ota-gate.py", 'os.fsync(directory_descriptor)', 'pass  # seeded missing directory sync'), "cold-receipt"],
+    ["bench confirmation accepts a hidden reboot", () =>
+      replaceOnce("scripts/production-ota-gate.py", 'if uptime < last_uptime:\n            fail("bench rebooted after its cold pressure window")',
+        'if False:\n            fail("bench rebooted after its cold pressure window")'), "cold-receipt"],
+    ["bench confirmation ignores changed failure counters", () =>
+      replaceOnce("scripts/production-ota-gate.py", 'if any(current[key] != baseline[key]\n               for key in ("heap_restarts", "mqtt_skipped", "poll_skipped", "crc_err")):',
+        'if False:'), "cold-receipt"],
+    ["bench confirmation accepts excessive X10A timeouts", () =>
+      replaceOnce("scripts/production-ota-gate.py", 'current["timeout_err"] - baseline["timeout_err"] > MAX_X10A_TIMEOUT_DELTA',
+        'False'), "cold-receipt"],
+    ["bench confirmation accepts a regressed X10A counter", () =>
+      replaceOnce("scripts/production-ota-gate.py", 'current["timeout_err"] < last_timeout',
+        'False'), "cold-receipt"],
+    ["bench confirmation accepts an unarmed image", () =>
+      replaceOnce("scripts/production-ota-gate.py",
+        'if image.get("image_state") == "valid" and image.get("rollback_pending") is False:',
+        'if True:'), "cold-receipt"],
     ["the bench role is redirected to production", () =>
       replaceOnce("scripts/production-ota-gate.py", 'BENCH_ROLE = "bench"', 'BENCH_ROLE = "production"')],
     ["the pressure window is shortened", () =>
@@ -789,8 +884,8 @@ try {
         "hil_manifest_url=None,")],
     ["the ordinary release write expects a persisted release channel", () =>
       replaceOnce("scripts/production-ota-gate.py",
-        "expected_channel=\"dev\", allow_downgrade=True,\n        )\n        release_status = wait_for_new_firmware(",
-        "expected_channel=\"release\", allow_downgrade=True,\n        )\n        release_status = wait_for_new_firmware(")],
+        "expected_channel=\"dev\", allow_downgrade=True,\n        )\n        evidence[\"release_write_acknowledged\"] = True\n        journal_checkpoint(\"bench_release_write_acknowledged\")\n        release_status = wait_for_new_firmware(",
+        "expected_channel=\"release\", allow_downgrade=True,\n        )\n        evidence[\"release_write_acknowledged\"] = True\n        journal_checkpoint(\"bench_release_write_acknowledged\")\n        release_status = wait_for_new_firmware(")],
     ["the official release manifest fetch is no longer host-memory bounded", () =>
       replaceOnce("scripts/production-ota-gate.py",
         "release_manifest_bytes = request_limited_bytes(",
@@ -836,11 +931,16 @@ try {
   ];
 
   let caught = 0;
-  for (const [name, mutate] of cases) {
+  for (const [name, mutate, executedProbe] of cases) {
     restore();
     mutate();
-    const result = runContracts();
+    const result = executedProbe === "cold-receipt" ? runColdReceipt() : runContracts();
     if (result.status === 0) throw new Error(`production OTA contracts missed mutation: ${name}`);
+    if (executedProbe === "cold-receipt") {
+      assert.equal(result.status, 1, `mutation failed without its behavioral assertion: ${name}\n${result.stderr}`);
+      assert.match(result.stderr, /AssertionError: COLD_RECEIPT:/,
+        `syntax, timeout, signal or unrelated error cannot kill ${name}`);
+    }
     caught++;
     console.log(`production OTA selftest: detected — ${name}`);
   }
