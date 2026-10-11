@@ -354,7 +354,8 @@ The device is a **stationary, mains-powered bridge** that must never need a huma
 - **Endless reconnect with a first-boot budget.** A boot-time failure spends a bounded budget and
   then opens the setup portal; once ever online, a drop reconnects **forever**, unconditionally on
   the disconnect reason — the reason codes that look like bad credentials are also the transient
-  SAE failures above, so acting on them stranded healthy boards in the open portal.
+  SAE failures above. Lost-IP/disconnect events revoke the lease and boot wake; cached addresses
+  do not establish a live connection.
 - **✅ One ESP-NETIF initialization for both network paths** — it is a process-wide singleton, and
   the STA and portal branches run in sequence on exactly the first-boot fallback path.
 - **✅ 🧪 In-app WiFi re-config with one-shot credential rollback.** `/set_wifi` stashes the previous
@@ -606,8 +607,9 @@ Everything needed to explain a crash *after the fact*, from the field, without a
   is right to, for a **transient** shortage. Nothing asked what happens when it never recovers.
   Composed, those guards describe a device that is powered, associated, answering 503 to everything
   and republishing nothing, indefinitely, while reporting no fault at all: a hang, which is the worst
-  failure shape available, because a crash reboots in seconds and leaves a reset reason, a core dump
-  and a syslog record, whereas a wedge looks exactly like a powered-off device and heals never. So
+  failure shape available, because a crash normally restarts within seconds and reports a reset
+  reason. A core dump and external syslog record depend on capture, forwarding and collector
+  availability, whereas a wedge looks exactly like a powered-off device and heals never. So
   when the largest **contiguous internal** block has stayed under 4 KB for five unbroken minutes —
   long enough that no burst can reach it, and an in-flight OTA *clears* the run rather than pausing
   it, so a restart can never land mid-install — the device restarts deliberately, leaving a
@@ -718,10 +720,14 @@ Everything needed to explain a crash *after the fact*, from the field, without a
   it, the device had no timestamp anywhere except uptime. Non-blocking, so it idles harmlessly even
   in AP-only setup mode; before the first sync both `/status.ntp` and the syslog TIMESTAMP fall back
   to `null`/`-` rather than a fabricated epoch date.
-- **✅ Off-device log forwarding** ([`syslog.cpp`](../main/syslog.cpp)): every diag line is also one
-  RFC 5424 UDP datagram to an optional collector. Delivery is gated on **DNS only** — the
+- **✅ Off-device log forwarding** ([`syslog.cpp`](../main/syslog.cpp)): best-effort RFC 5424 UDP
+  forwarding to an optional collector. Internal syslog diagnostics are filtered to prevent loops;
+  queue saturation rejects lines, and disabled or unresolved forwarding can discard admitted lines.
+  Network, OTA and weather pauses retain the queue until the task resumes. Sending is
+  gated on **DNS only** — the
   reachability probe is advisory, since a healthy collector may firewall ICMP — and a send failure is
-  classified hard vs. transient so a chatty stream cannot drive a resolve storm.
+  classified hard vs. transient. `/status.syslog.queue_dropped` counts boot-local queue rejection,
+  without claiming UDP delivery or collector retention.
 - **✅ 🧪 One-shot boot replay to syslog** ([`logic/bootlog.hpp`](../main/logic/bootlog.hpp)): the
   crash summary is captured before WiFi and the syslog task exist, so it could only ever reach the
   in-RAM ring, where a chatty failure overwrites it within a minute. On the first DNS resolve of a

@@ -185,16 +185,17 @@ its meaning is understood; do not delete it just because decoding failed.
 
 ### About syslog
 
-The device keeps only a small log in RAM. A fault that repeats every fraction of a second overwrites
-it within a minute, and a restart empties it. So **without syslog, there is no history** — "when did
-this start", "how often does it restart" and "was it ever healthy" cannot be answered at all, no
-matter how good the rest of the report is.
+The device keeps only a small log in RAM. A fault that repeats every fraction of a second can
+overwrite it within a minute, and a restart empties it. Current status and boot records can explain
+the latest restart; an external collector's retained syslog records help reconstruct a longer
+timeline. UDP delivery and the collector's retention determine how complete that timeline is.
 
 If your problem is a restart, a dropout, or something intermittent, it is worth switching syslog on
 (**Settings → Connections → Syslog**), waiting for the problem to happen again, and reporting then.
-Paste the lines from about five minutes either side under **Anything else**. Each line starts with
-the device's own uptime, `[  1234.567]` — **an uptime that jumps backwards is a restart**, which is
-the only way a restart is visible at all.
+Paste the lines from about five minutes either side under **Anything else**. Ordinary diagnostic
+lines start with the device's own uptime, `[  1234.567]`; a backwards jump supports a restart.
+Separate boot replay records carry build and reset facts without that uptime prefix. Missing
+records do not prove that no restart occurred.
 
 Those lines come from **your** server, not from the device's redacted output, so nothing has been
 removed from them for you — check them for your network name and your server addresses first.

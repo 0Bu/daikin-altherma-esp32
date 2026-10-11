@@ -281,12 +281,18 @@ inline ReferenceFreshness reference_freshness(bool has_value, bool retained,
     if (!has_value) return f;
     if (has_source_time) {
         if (now_unix_s < 0) { f.reason = "clock_unsynced"; return f; }
-        if (source_unix_s > now_unix_s + REF_TEMP_FUTURE_TOLERANCE_S) {
+        if (source_unix_s < 0) {
+            f.reason = "missing_source_time";
+            return f;
+        }
+        // Both instants are nonnegative int64_t, so their signed difference cannot overflow.
+        const int64_t age = now_unix_s - source_unix_s;
+        if (age < -REF_TEMP_FUTURE_TOLERANCE_S) {
             f.reason = "future_timestamp";
             return f;
         }
         f.age_known = true;
-        f.age_s = source_unix_s > now_unix_s ? 0 : static_cast<uint64_t>(now_unix_s - source_unix_s);
+        f.age_s     = age < 0 ? 0 : static_cast<uint64_t>(age);
     } else {
         if (retained) { f.reason = "retained_without_timestamp"; return f; }
         if (now_ms < received_ms) { f.reason = "arrival_clock_invalid"; return f; }

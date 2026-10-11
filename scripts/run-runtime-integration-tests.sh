@@ -84,3 +84,6 @@ assert_mutation_detected \
 # The complete production OTA translation unit runs with SDK/service adapters. Its independent
 # cleanup, acceptance and worker/health-state mutations must fail the corresponding runtime oracle.
 node test/test_ota_runtime.mjs
+
+# Complete WiFi/syslog production units exercise current leases, boot wakes and bounded logging.
+node test/test_network_runtime.mjs

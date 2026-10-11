@@ -339,8 +339,10 @@ GET  /status[?redact=1]            # ?redact=1 = the bug-report form: 28 protect
                                    #   wifi:{ssid,rssi,ip,connected,bssid,mac,std,rolled_back},
                                    #   mqtt:{configured,connected,tls,has_creds,broker,error?},
                                    #     (has_creds = whether creds are stored, never their value)
-                                   #   syslog:{configured,resolved,reachable,host,port,error?},
-                                   #   ntp:{server,synced,time},   # time = RFC 3339 UTC once SNTP syncs
+                                   #   syslog:{configured,resolved,reachable,queue_dropped,host,port,error?},
+                                   #     (queue_dropped = boot-local queue rejection, not UDP delivery)
+                                   #   ntp:{server,synced,time},   # null before sync; RFC 3339 UTC
+                                   #     afterward, or an empty string if the calendar time is invalid
                                    #   hp:{proto,rx,tx,connected,last_ok_s,
                                    #        registers,values,crc_err,timeout_err},
                                    #   profile:{id},
