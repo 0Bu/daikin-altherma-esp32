@@ -555,8 +555,9 @@ check task starts, so only this private bench-return leg requires the exact offe
 idle for three seconds before its one restore POST; a silently ignored write fails the bench stage and
 cannot reach production. Waiting before both replacements is mandatory because ESP-IDF refuses
 another OTA write while the running target or release is still `PENDING_VERIFY`. The freshly restored target then runs
-the fixed three-minute pressure window while still pending verification, with another real
-OTA-manifest TLS fetch, followed by the same bounded valid-state confirmation. Firmware deliberately
+the fixed three-minute pressure window starting while still pending verification, with another real
+OTA-manifest TLS fetch, followed by the same bounded valid-state confirmation on the stressed boot.
+The health task may confirm the image during that window once its prerequisites hold. Firmware deliberately
 stops MQTT while either OTA or Open-Meteo TLS holds the constrained network heap. The first identity
 response after the restore may precede MQTT reconnect, so every pressure path waits up to the bounded
 OTA-check deadline for a connected baseline before applying the 120-second fresh-boot cap. The first
