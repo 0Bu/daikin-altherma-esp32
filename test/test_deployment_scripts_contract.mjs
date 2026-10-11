@@ -40,462 +40,147 @@ function createMockServer(handler) {
   });
 }
 
-// ---------------------------------------------------------------------------
-// R2: A downgrade is permitted without the explicit option
-// ---------------------------------------------------------------------------
+// The legacy helper is only an observer. Arguments that could select or start an update must
+// fail before even a read, including malformed numeric input used in shell arithmetic.
 {
-  let postCount = 0;
+  const requests = [];
   const mock = await createMockServer((req, res) => {
-    if (req.url === "/status") {
-      res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ version: "1.0.1", uptime_s: 100, app_elf_sha256: "aabbcc" }));
-    } else if (req.url === "/ota/status") {
-      res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({
-        channel: "dev",
-        busy: false,
-        available: "1.0.0",
-        update_available: false,
-        downgrade: true,
-        generation: 42,
-        available_channel: "dev",
-        available_sha256: "11223344",
-      }));
-    } else if (req.url.startsWith("/ota/check")) {
-      res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ ok: true }));
-    } else if (req.url.startsWith("/ota/update")) {
-      postCount++;
-      res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ ok: true, generation: 42 }));
-    } else {
-      res.writeHead(404);
-      res.end();
-    }
+    requests.push([req.method, req.url]);
+    res.writeHead(500);
+    res.end();
   });
-
+  const base = ["--ip", `127.0.0.1:${mock.port}`, "--expected-version", "1.0.2",
+    "--generation", "77", "--quiet"];
   try {
-    // Without --allow-downgrade: must fail with exit 1 and ZERO update requests sent
-    const res = await runScript("trigger-ota-wait.sh", ["--ip", `127.0.0.1:${mock.port}`, "--timeout", "2"]);
-    assert.equal(res.status, 1, "downgrade without --allow-downgrade must exit 1");
-    assert.match(res.stderr, /Manifest offers a downgrade/);
-    assert.equal(postCount, 0, "must send zero update requests when downgrade is offered without permission");
-  } finally {
-    await mock.close();
-  }
+    for (const args of [
+      ["--channel", "dev"], ["--channel", "release"], ["--allow-downgrade"],
+      ["--write"], ["--generation", "0"], ["--generation", "01"],
+      ["--generation", "4294967296"], ["--generation", "1.5"],
+      ["--generation", "x[1]"], ["--expected-version", ""],
+      ["--ip", "127.0.0.1/status"], ["--ip", "user@127.0.0.1"],
+      ["--ip", "127.0.0.1:0"], ["--ip", "127.0.0.1:99999"],
+      ...["", "abc", "0", "-1", "1.5", "60s", "09", "99999", "x[1]"].map(
+        timeout => ["--timeout", timeout]),
+    ]) {
+      requests.length = 0;
+      const result = await runScript("trigger-ota-wait.sh", [...base, ...args]);
+      assert.equal(result.status, 2, `invalid observer args ${JSON.stringify(args)}: ${result.stderr}`);
+      assert.equal(requests.length, 0, "rejected arguments must never contact a device");
+      if (["--channel", "--allow-downgrade"].includes(args[0])) {
+        assert.match(result.stderr, /removed write option; use scripts\/production-ota-gate.py/);
+      }
+    }
+    for (const args of [[], ["--ip", `127.0.0.1:${mock.port}`],
+      ["--ip", `127.0.0.1:${mock.port}`, "--expected-version", "1.0.2"]]) {
+      requests.length = 0;
+      assert.equal((await runScript("trigger-ota-wait.sh", args)).status, 2);
+      assert.equal(requests.length, 0, "missing operation binding must fail before contact");
+    }
+  } finally { await mock.close(); }
 }
 
-// ---------------------------------------------------------------------------
-// R3: Expected-version validation happens after the write
-// ---------------------------------------------------------------------------
-{
-  let postCount = 0;
+const oldImage = { version: "1.0.1", uptime_s: 100, app_elf_sha256: "oldelf123" };
+const newImage = { version: "1.0.2", uptime_s: 2, app_elf_sha256: "newelf456" };
+const active = { state: "updating", busy: true, generation: 77, current: "1.0.1",
+  available: "1.0.2", progress: 20 };
+const done = { ...active, state: "done", busy: false, progress: 100 };
+const valid = { state: "", generation: 0, current: "1.0.2", image_state: "valid", rollback_pending: false };
+const pending = { ...valid, image_state: "pending_verify", rollback_pending: true };
+
+// Run the actual Bash helper and actual curl against loopback HTTP fixtures. Every scenario
+// asserts the entire method/path history, so a hidden manifest check or configuration write fails.
+async function observeCase(label, { statuses = [newImage], ota = [active, done, valid],
+  statusCode = 200, otaCode = 200, expectedStatus = 1, expectedError = null } = {}) {
+  const requests = [];
+  let statusIndex = 0, otaIndex = 0, currentOta = ota[0];
   const mock = await createMockServer((req, res) => {
-    if (req.url === "/status") {
-      res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ version: "1.0.1", uptime_s: 100, app_elf_sha256: "aabbcc" }));
-    } else if (req.url === "/ota/status") {
-      res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({
-        channel: "dev",
-        busy: false,
-        available: "1.0.2",
-        update_available: true,
-        downgrade: false,
-        generation: 55,
-        available_channel: "dev",
-        available_sha256: "55667788",
-      }));
-    } else if (req.url.startsWith("/ota/check")) {
-      res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ ok: true }));
-    } else if (req.url.startsWith("/ota/update")) {
-      postCount++;
-      res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ ok: true, generation: 55 }));
-    } else {
-      res.writeHead(404);
-      res.end();
-    }
+    requests.push([req.method, req.url]);
+    const isStatus = req.url === "/status";
+    const sequence = isStatus ? statuses : ota;
+    const index = isStatus ? statusIndex++ : otaIndex++;
+    const value = sequence[Math.min(index, sequence.length - 1)];
+    if (!isStatus) currentOta = value;
+    if (value === "disconnect") { req.socket.destroy(); return; }
+    // Match production's full-status guard throughout the active network lease. Even a
+    // healthy device returns 503 here until compact status records the validated new boot.
+    const guardedStatus = currentOta.generation !== 0 || currentOta.image_state !== "valid";
+    res.writeHead(isStatus ? (guardedStatus ? 503 : statusCode) : otaCode,
+      { "Content-Type": "application/json" });
+    res.end(JSON.stringify(value));
   });
-
   try {
-    // Expected version 1.0.3 when 1.0.2 is offered: must abort BEFORE sending POST
-    const res = await runScript("trigger-ota-wait.sh", [
-      "--ip", `127.0.0.1:${mock.port}`,
-      "--expected-version", "1.0.3",
-      "--timeout", "2",
-    ]);
-    assert.equal(res.status, 1, "expected version mismatch must exit 1");
-    assert.match(res.stderr, /does not match requested expected version '1.0.3'/);
-    assert.equal(postCount, 0, "must send zero update requests when offered version mismatches expected version");
-  } finally {
-    await mock.close();
-  }
+    const result = await runScript("trigger-ota-wait.sh", ["--ip", `127.0.0.1:${mock.port}`,
+      "--expected-version", "1.0.2", "--generation", "77", "--timeout",
+      expectedError?.source.includes("Timed out") ? "2" : "5", "--quiet"]);
+    assert.equal(result.status, expectedStatus, `${label}: ${result.stdout}${result.stderr}`);
+    assert.ok(requests.length > 0, `${label}: fixture must be reached`);
+    assert.deepEqual(requests[0], ["GET", "/ota/status"],
+      "observation must start on compact status while full status is guarded");
+    for (const [method, url] of requests) {
+      assert.equal(method, "GET", `${label}: observer cannot write`);
+      assert.ok(["/status", "/ota/status"].includes(url), `${label}: unexpected route ${url}`);
+    }
+    if (expectedError) assert.match(result.stderr, expectedError, label);
+    if (expectedStatus === 0) {
+      assert.match(result.stdout, /Observed generation 77 complete, a boot generation reset into 1.0.2, and valid image status/);
+      assert.match(result.stdout, /Read-only observation/);
+    }
+  } finally { await mock.close(); }
 }
 
-// ---------------------------------------------------------------------------
-// R4: OTA reports success without the new image, no reboot, or pending rollback
-// ---------------------------------------------------------------------------
-{
-  // 4a. No reboot (uptime unchanged, connection never dropped, returns old version)
-  const mockNoReboot = await createMockServer((req, res) => {
-    if (req.url === "/status") {
-      res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ version: "1.0.1", uptime_s: 150, app_elf_sha256: "oldsha" }));
-    } else if (req.url === "/ota/status") {
-      res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({
-        channel: "dev",
-        busy: false,
-        available: "1.0.2",
-        update_available: true,
-        downgrade: false,
-        generation: 60,
-        available_channel: "dev",
-        available_sha256: "newsha",
-        state: "done",
-      }));
-    } else if (req.url.startsWith("/ota/check")) {
-      res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ ok: true }));
-    } else if (req.url.startsWith("/ota/update")) {
-      res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ ok: true, generation: 60 }));
-    } else {
-      res.writeHead(404);
-      res.end();
-    }
-  });
-
-  try {
-    const res = await runScript("trigger-ota-wait.sh", [
-      "--ip", `127.0.0.1:${mockNoReboot.port}`,
-      "--timeout", "2",
-    ]);
-    assert.equal(res.status, 1, "no-reboot must fail");
-    assert.match(res.stderr, /Device did not reboot after OTA update/);
-  } finally {
-    await mockNoReboot.close();
-  }
-
-  // 4b. Foreign generation in progress
-  const mockForeignGen = await createMockServer((req, res) => {
-    if (req.url === "/status") {
-      res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ version: "1.0.1", uptime_s: 50, app_elf_sha256: "oldsha" }));
-    } else if (req.url === "/ota/status") {
-      res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({
-        channel: "dev",
-        busy: false,
-        available: "1.0.2",
-        update_available: true,
-        downgrade: false,
-        generation: 999, // foreign generation
-        available_channel: "dev",
-        available_sha256: "newsha",
-        state: "downloading",
-        progress: 10,
-      }));
-    } else if (req.url.startsWith("/ota/check")) {
-      res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ ok: true }));
-    } else if (req.url.startsWith("/ota/update")) {
-      res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ ok: true, generation: 70 }));
-    } else {
-      res.writeHead(404);
-      res.end();
-    }
-  });
-
-  try {
-    const res = await runScript("trigger-ota-wait.sh", [
-      "--ip", `127.0.0.1:${mockForeignGen.port}`,
-      "--timeout", "2",
-    ]);
-    assert.equal(res.status, 1, "foreign generation must fail");
-    assert.match(res.stderr, /Observed foreign generation/);
-  } finally {
-    await mockForeignGen.close();
-  }
-
-  // 4c. Rollback pending after reboot
-  let phase4c = "initial";
-  const mockRollbackPending = await createMockServer((req, res) => {
-    if (req.url === "/status") {
-      res.writeHead(200, { "Content-Type": "application/json" });
-      if (phase4c === "rebooted") {
-        res.end(JSON.stringify({ version: "1.0.2", uptime_s: 2, app_elf_sha256: "newsha" }));
-      } else {
-        res.end(JSON.stringify({ version: "1.0.1", uptime_s: 100, app_elf_sha256: "oldsha" }));
-      }
-    } else if (req.url === "/ota/status") {
-      res.writeHead(200, { "Content-Type": "application/json" });
-      if (phase4c === "initial") {
-        res.end(JSON.stringify({
-          channel: "dev",
-          busy: false,
-          available: "1.0.2",
-          update_available: true,
-          downgrade: false,
-          generation: 80,
-          available_channel: "dev",
-          available_sha256: "newsha",
-        }));
-      } else if (phase4c === "updating") {
-        phase4c = "rebooted";
-        res.end(JSON.stringify({ state: "done", generation: 80 }));
-      } else {
-        // Post-reboot: rollback_pending is true!
-        res.end(JSON.stringify({
-          image_state: "pending_verify",
-          rollback_pending: true,
-        }));
-      }
-    } else if (req.url.startsWith("/ota/check")) {
-      res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ ok: true }));
-    } else if (req.url.startsWith("/ota/update")) {
-      phase4c = "updating";
-      res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ ok: true, generation: 80 }));
-    } else {
-      res.writeHead(404);
-      res.end();
-    }
-  });
-
-  try {
-    const res = await runScript("trigger-ota-wait.sh", [
-      "--ip", `127.0.0.1:${mockRollbackPending.port}`,
-      "--timeout", "5",
-    ]);
-    assert.equal(res.status, 1, "rollback_pending=true must fail");
-    assert.match(res.stderr, /rollback_pending=true/);
-  } finally {
-    await mockRollbackPending.close();
-  }
-
-  // 4d. Empty final status object ({}) after reboot
-  let phase4d = "initial";
-  const mockEmptyFinal = await createMockServer((req, res) => {
-    if (req.url === "/status") {
-      res.writeHead(200, { "Content-Type": "application/json" });
-      if (phase4d === "rebooted") {
-        res.end(JSON.stringify({ version: "1.0.2", uptime_s: 2, app_elf_sha256: "newsha" }));
-      } else {
-        res.end(JSON.stringify({ version: "1.0.1", uptime_s: 100, app_elf_sha256: "oldsha" }));
-      }
-    } else if (req.url === "/ota/status") {
-      res.writeHead(200, { "Content-Type": "application/json" });
-      if (phase4d === "initial") {
-        res.end(JSON.stringify({
-          channel: "dev",
-          busy: false,
-          available: "1.0.2",
-          update_available: true,
-          downgrade: false,
-          generation: 85,
-          available_channel: "dev",
-          available_sha256: "newsha",
-        }));
-      } else if (phase4d === "updating") {
-        phase4d = "rebooted";
-        res.end(JSON.stringify({ state: "done", generation: 85 }));
-      } else {
-        res.end(JSON.stringify({})); // Empty final status
-      }
-    } else if (req.url.startsWith("/ota/check")) {
-      res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ ok: true }));
-    } else if (req.url.startsWith("/ota/update")) {
-      phase4d = "updating";
-      res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ ok: true, generation: 85 }));
-    } else {
-      res.writeHead(404);
-      res.end();
-    }
-  });
-
-  try {
-    const res = await runScript("trigger-ota-wait.sh", [
-      "--ip", `127.0.0.1:${mockEmptyFinal.port}`,
-      "--timeout", "5",
-    ]);
-    assert.equal(res.status, 1, "empty final status must fail");
-    assert.match(res.stderr, /Timed out waiting for OTA image to reach valid state/);
-  } finally {
-    await mockEmptyFinal.close();
-  }
-
-  // 4e. Reboot into old version (device reboots, uptime decreases, but runs old version)
-  let phase4e = "initial";
-  const mockOldVersionReboot = await createMockServer((req, res) => {
-    if (req.url === "/status") {
-      res.writeHead(200, { "Content-Type": "application/json" });
-      if (phase4e === "rebooted") {
-        res.end(JSON.stringify({ version: "1.0.1", uptime_s: 2, app_elf_sha256: "oldsha" }));
-      } else {
-        res.end(JSON.stringify({ version: "1.0.1", uptime_s: 100, app_elf_sha256: "oldsha" }));
-      }
-    } else if (req.url === "/ota/status") {
-      res.writeHead(200, { "Content-Type": "application/json" });
-      if (phase4e === "initial") {
-        res.end(JSON.stringify({
-          channel: "dev",
-          busy: false,
-          available: "1.0.2",
-          update_available: true,
-          downgrade: false,
-          generation: 90,
-          available_channel: "dev",
-          available_sha256: "newsha",
-        }));
-      } else if (phase4e === "updating") {
-        phase4e = "rebooted";
-        res.end(JSON.stringify({ state: "done", generation: 90 }));
-      } else {
-        res.end(JSON.stringify({ image_state: "valid", rollback_pending: false }));
-      }
-    } else if (req.url.startsWith("/ota/check")) {
-      res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ ok: true }));
-    } else if (req.url.startsWith("/ota/update")) {
-      phase4e = "updating";
-      res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ ok: true, generation: 90 }));
-    } else {
-      res.writeHead(404);
-      res.end();
-    }
-  });
-
-  try {
-    const res = await runScript("trigger-ota-wait.sh", [
-      "--ip", `127.0.0.1:${mockOldVersionReboot.port}`,
-      "--timeout", "5",
-    ]);
-    assert.equal(res.status, 1, "reboot into old version must fail");
-    assert.match(res.stderr, /Version mismatch after OTA: expected selected offer '1.0.2', but device runs '1.0.1'/);
-  } finally {
-    await mockOldVersionReboot.close();
-  }
-
-  // 4f. Happy path OTA upgrade: progresses, reboots, settles with valid image
-  let phase4f = "initial";
-  const mockHappyPath = await createMockServer((req, res) => {
-    if (req.url === "/status") {
-      res.writeHead(200, { "Content-Type": "application/json" });
-      if (phase4f === "rebooted") {
-        res.end(JSON.stringify({ version: "1.0.2", uptime_s: 3, app_elf_sha256: "newsha" }));
-      } else {
-        res.end(JSON.stringify({ version: "1.0.1", uptime_s: 120, app_elf_sha256: "oldsha" }));
-      }
-    } else if (req.url === "/ota/status") {
-      res.writeHead(200, { "Content-Type": "application/json" });
-      if (phase4f === "initial") {
-        res.end(JSON.stringify({
-          channel: "dev",
-          busy: false,
-          available: "1.0.2",
-          update_available: true,
-          downgrade: false,
-          generation: 95,
-          available_channel: "dev",
-          available_sha256: "newsha",
-        }));
-      } else if (phase4f === "updating") {
-        phase4f = "rebooted";
-        res.end(JSON.stringify({ state: "done", generation: 95 }));
-      } else {
-        res.end(JSON.stringify({ image_state: "valid", rollback_pending: false }));
-      }
-    } else if (req.url.startsWith("/ota/check")) {
-      res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ ok: true }));
-    } else if (req.url.startsWith("/ota/update")) {
-      phase4f = "updating";
-      res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ ok: true, generation: 95 }));
-    } else {
-      res.writeHead(404);
-      res.end();
-    }
-  });
-
-  try {
-    const res = await runScript("trigger-ota-wait.sh", [
-      "--ip", `127.0.0.1:${mockHappyPath.port}`,
-      "--expected-version", "1.0.2",
-      "--timeout", "5",
-    ]);
-    assert.equal(res.status, 0, "happy path update must exit 0");
-    assert.match(res.stdout, /OTA update accepted \(generation 95\)/);
-  } finally {
-    await mockHappyPath.close();
-  }
-
-  // 4g. Authorized downgrade with --allow-downgrade succeeds
-  let phase4g = "initial";
-  let receivedDowngradeParam = false;
-  const mockAuthorizedDowngrade = await createMockServer((req, res) => {
-    if (req.url === "/status") {
-      res.writeHead(200, { "Content-Type": "application/json" });
-      if (phase4g === "rebooted") {
-        res.end(JSON.stringify({ version: "1.0.0", uptime_s: 2, app_elf_sha256: "downgradesha" }));
-      } else {
-        res.end(JSON.stringify({ version: "1.0.1", uptime_s: 200, app_elf_sha256: "currentsha" }));
-      }
-    } else if (req.url === "/ota/status") {
-      res.writeHead(200, { "Content-Type": "application/json" });
-      if (phase4g === "initial") {
-        res.end(JSON.stringify({
-          channel: "dev",
-          busy: false,
-          available: "1.0.0",
-          update_available: false,
-          downgrade: true,
-          generation: 98,
-          available_channel: "dev",
-          available_sha256: "downgradesha",
-        }));
-      } else if (phase4g === "updating") {
-        phase4g = "rebooted";
-        res.end(JSON.stringify({ state: "done", generation: 98 }));
-      } else {
-        res.end(JSON.stringify({ image_state: "valid", rollback_pending: false }));
-      }
-    } else if (req.url.startsWith("/ota/check")) {
-      res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ ok: true }));
-    } else if (req.url.startsWith("/ota/update")) {
-      phase4g = "updating";
-      if (req.url.includes("downgrade=1")) {
-        receivedDowngradeParam = true;
-      }
-      res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ ok: true, generation: 98 }));
-    } else {
-      res.writeHead(404);
-      res.end();
-    }
-  });
-
-  try {
-    const res = await runScript("trigger-ota-wait.sh", [
-      "--ip", `127.0.0.1:${mockAuthorizedDowngrade.port}`,
-      "--allow-downgrade",
-      "--timeout", "5",
-    ]);
-    assert.equal(res.status, 0, "authorized downgrade must exit 0");
-    assert.ok(receivedDowngradeParam, "must include downgrade=1 parameter when --allow-downgrade is supplied");
-  } finally {
-    await mockAuthorizedDowngrade.close();
-  }
-}
+await observeCase("completed existing canonical update while full status is guarded", { expectedStatus: 0 });
+await observeCase("already completed transfer still requires a boot reset",
+  { ota: [done, valid], expectedStatus: 0 });
+await observeCase("pending rollback probation may settle normally",
+  { ota: [active, done, pending, valid], expectedStatus: 0 });
+await observeCase("same version is not fresh update evidence",
+  { ota: [{ ...active, current: "1.0.2" }], expectedError: /already runs the expected version/ });
+await observeCase("an available offer is not an accepted update",
+  { ota: [{ ...active, state: "checked", busy: false }], expectedError: /No existing update matches/ });
+await observeCase("wrong expected version",
+  { ota: [{ ...active, available: "1.0.3" }], expectedError: /No existing update matches/ });
+await observeCase("foreign generation",
+  { ota: [active, { ...done, generation: 78 }], expectedError: /foreign or missing generation/ });
+await observeCase("foreign generation after done",
+  { ota: [active, done, { ...valid, generation: 78 }], expectedError: /foreign or missing generation/ });
+await observeCase("new boot without completed writer receipt",
+  { ota: [active, valid], expectedError: /new boot without the selected writer's completed verification/ });
+await observeCase("failed update",
+  { ota: [active, { ...active, state: "error", message: "verification failed" }],
+    expectedError: /OTA failed on device: verification failed/ });
+await observeCase("operation never completes",
+  { ota: [active], expectedError: /Timed out observing/ });
+await observeCase("version and ELF change alone are not reboot proof",
+  { ota: [active, done], statuses: [newImage], expectedError: /Timed out observing/ });
+await observeCase("disconnect alone is not reboot proof",
+  { ota: [active, done, "disconnect", done], expectedError: /Timed out observing/ });
+await observeCase("connection drop followed by a proved new boot",
+  { ota: [active, done, "disconnect", valid], expectedStatus: 0 });
+await observeCase("rollback into old firmware",
+  { ota: [active, done, { ...valid, current: "1.0.1" }],
+    expectedError: /Rebooted device does not report the expected version/ });
+await observeCase("full status version disagrees with compact status",
+  { statuses: [oldImage], expectedError: /Full device status disagrees/ });
+await observeCase("probation never settles",
+  { ota: [active, done, pending], expectedError: /Timed out observing/ });
+await observeCase("missing generation",
+  { ota: [active, done, {}], expectedError: /foreign or missing generation/ });
+await observeCase("missing image state",
+  { ota: [active, done, { generation: 0, current: "1.0.2" }], expectedError: /Timed out observing/ });
+await observeCase("invalid image",
+  { ota: [active, done, { ...valid, image_state: "invalid" }], expectedError: /marked 'invalid'/ });
+await observeCase("valid status with rollback pending",
+  { ota: [active, done, { ...valid, rollback_pending: true }], expectedError: /Timed out observing/ });
+await observeCase("HTTP503 is not a successful post-reboot identity",
+  { statusCode: 503, expectedError: /Timed out observing/ });
+await observeCase("HTTP503 is not an accepted update receipt",
+  { otaCode: 503, expectedError: /No existing update matches/ });
+await observeCase("malformed identity",
+  { statuses: [{ ...newImage, uptime_s: "2" }], expectedError: /Timed out observing/ });
+await observeCase("missing ELF identity",
+  { statuses: [{ ...newImage, app_elf_sha256: "" }], expectedError: /Timed out observing/ });
+await observeCase("missing current version cannot establish a baseline",
+  { ota: [{ ...active, current: null }], expectedError: /No existing update matches/ });
 
 // ---------------------------------------------------------------------------
 // R5: The health helper turns missing evidence into a green result
@@ -896,4 +581,4 @@ process.exit(+process.env.TEST_CURL_EXIT);
   } finally { fs.rmSync(clockDir, { recursive: true, force: true }); }
 }
 
-console.log("deployment scripts contract: R2, R3, R4, R5 offline scenarios clean");
+console.log("deployment scripts contract: read-only OTA observer and R5 health scenarios clean");

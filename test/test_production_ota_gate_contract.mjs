@@ -91,11 +91,13 @@ finally:
   assert.notEqual(unrelatedTransport.status, 0,
     "the deadline self-test must not swallow unrelated transport errors");
   assert.match(unrelatedTransport.stderr, /UnexpectedTransportError: unrelated transport failure/);
+}
 
-  // Execute the production branch itself. A healthy new boot must not substitute for the old
-  // writer's completed verification, heap minima and OTA-task stack evidence. All I/O is replaced
-  // with fixtures; the real transfer observer and fail-closed verifier remain in the path.
-  const productionProbe = `
+// Execute the production branch itself. A healthy new boot must not substitute for the old
+// writer's completed verification, heap minima and OTA-task stack evidence. All I/O is replaced
+// with fixtures; the real transfer observer and fail-closed verifier remain in the path.
+// Keep this probe enabled for isolated mutant trees too.
+const productionProbe = `
 import contextlib, io, json, runpy, sys
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -193,12 +195,11 @@ for label, transfer_sample in cases:
             for key in ("heap_min_free_bytes", "heap_min_largest_block_bytes", "ota_stack_min_free_bytes"):
                 assert evidence[key] == transfer_sample[key], (key, evidence)
 `;
-  const productionEvidence = spawnSync("python3", [
-    "-I", "-B", "-c", productionProbe, path.join(root, "scripts/production-ota-gate.py"),
-  ], { encoding: "utf8" });
-  assert.equal(productionEvidence.status, 0,
-    `production must collect, validate and retain writer evidence: ${productionEvidence.stderr}`);
-}
+const productionEvidence = spawnSync("python3", [
+  "-I", "-B", "-c", productionProbe, path.join(root, "scripts/production-ota-gate.py"),
+], { encoding: "utf8" });
+assert.equal(productionEvidence.status, 0,
+  `production must collect, validate and retain writer evidence: ${productionEvidence.stderr}`);
 
 // Role, artifact and timing boundaries.
 assert.match(gate, /BENCH_ROLE\s*=\s*"bench"[\s\S]{0,100}?PRODUCTION_ROLE\s*=\s*"production"/);

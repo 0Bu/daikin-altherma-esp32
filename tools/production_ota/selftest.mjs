@@ -697,6 +697,16 @@ try {
       )],
     ["the OTA task stack sample is dropped before reboot", () =>
       replaceOnce("scripts/production-ota-gate.py", '("ota_stack_min_free_bytes", "ota_stack_min_free_bytes"),', '("ignored_ota_stack", "ignored_ota_stack"),')],
+    ["production stops collecting its completed writer receipt", () =>
+      replaceOnce("scripts/production-ota-gate.py",
+        '        production_transfer,\n    )', '    )')],
+    ["production skips completed writer receipt verification", () =>
+      replaceOnce("scripts/production-ota-gate.py",
+        '    require_ota_transfer_evidence(\n        production["host"], production_transfer, phase="production target",\n        writer_version=args.expected_current_version,\n        writer_elf=str(production_before.get("app_elf_sha256", "")),\n    )',
+        '    # seeded production receipt verification removal')],
+    ["production drops the completed writer receipt from its report", () =>
+      replaceOnce("scripts/production-ota-gate.py",
+        '        "ota_download_heap": production_transfer,\n', '')],
     ["invalid numeric OTA evidence is mistaken for an absent legacy field", () =>
       replaceOnce("scripts/production-ota-gate.py",
         "if isinstance(value, int) and not isinstance(value, bool):",

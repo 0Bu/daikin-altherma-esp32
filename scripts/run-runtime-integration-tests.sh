@@ -80,3 +80,7 @@ assert_mutation_detected \
     --mutate-weather-body-completion \
     "Weather rejects incomplete HTTP body" \
     "Weather incomplete-body rejection"
+
+# The complete production OTA translation unit runs with SDK/service adapters. Its independent
+# cleanup, acceptance and worker/health-state mutations must fail the corresponding runtime oracle.
+node test/test_ota_runtime.mjs

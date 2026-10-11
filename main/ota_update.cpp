@@ -397,6 +397,35 @@ void close_http_client(esp_http_client_handle_t& client, HttpSocketDeadline& dea
     client = nullptr;
 }
 
+// Construct before the first transport acquisition. Normal paths may release individual resources
+// early (especially TLS before RSA validation), while every return and C++ exception has the same
+// final owner. The deadline lives until close_http_client has joined its socket callback.
+struct OtaUpdateResources {
+    HttpSocketDeadline       socket_deadline;
+    esp_http_client_handle_t client         = nullptr;
+    uint8_t*                 buffer         = nullptr;
+    esp_ota_handle_t         ota_handle     = 0;
+    bool                     ota_open       = false;
+    psa_hash_operation_t     hash_operation = PSA_HASH_OPERATION_INIT;
+    bool                     hash_active    = false;
+
+    OtaUpdateResources()                                     = default;
+    OtaUpdateResources(const OtaUpdateResources&)            = delete;
+    OtaUpdateResources& operator=(const OtaUpdateResources&) = delete;
+
+    void release_buffer() noexcept {
+        if (buffer) heap_caps_free(buffer);
+        buffer = nullptr;
+    }
+
+    ~OtaUpdateResources() {
+        release_buffer();
+        close_http_client(client, socket_deadline);
+        if (hash_active) psa_hash_abort(&hash_operation);
+        if (ota_open) esp_ota_abort(ota_handle);
+    }
+};
+
 struct OtaFirmwareResponseState {
     OtaRedirectLocationState redirect;
     OtaContentRangeState     content_range;
@@ -993,7 +1022,7 @@ void run_check(const OtaTaskArgs& request) {
 
 void run_update(const OtaTaskArgs& request) {
     const bool        allow_downgrade = request.mode == OtaTaskMode::Downgrade;
-    const std::string running         = esp_app_get_description()->version;
+    const char*       running         = esp_app_get_description()->version;
     const OtaChannel  ch              = request.channel;
     set_state("checking", "Verifying the update");
 
@@ -1029,7 +1058,7 @@ void run_update(const OtaTaskArgs& request) {
     // relaxes the ordering — an equal version and an unparseable one are still refused. It is what
     // makes the release channel reachable from a board that has been following dev.
     if (!ota_install_allowed(running, avail, allow_downgrade)) {
-        diag_printf("ota: refusing %s while running %s (%s)\n", avail, running.c_str(),
+        diag_printf("ota: refusing %s while running %s (%s)\n", avail, running,
                     allow_downgrade ? "not a different version" : "not strictly newer");
         Lock lk(s_mtx);
         s_status.state = "error";
@@ -1067,7 +1096,7 @@ void run_update(const OtaTaskArgs& request) {
         return;
     }
     diag_printf("ota: downloading %s (%s -> %s, %s channel)\n", DiagLogIdentifier(url).c_str(),
-                running.c_str(), avail, ota_channel_name(ch));
+                running, avail, ota_channel_name(ch));
 
     // The first gate runs while the manifest client's TLS state has already been released and
     // before the firmware transfer claims another client, buffer and OTA handle.  In particular it
@@ -1100,15 +1129,17 @@ void run_update(const OtaTaskArgs& request) {
     http.buffer_size    = kOtaBufSize;
     http.buffer_size_tx = 512;
 
-    const HttpClientProbe    before = http_client_probe();
-    esp_http_client_handle_t client = esp_http_client_init(&http);
+    OtaUpdateResources        resources;
+    const HttpClientProbe     before = http_client_probe();
+    esp_http_client_handle_t& client = resources.client;
+    client                           = esp_http_client_init(&http);
     if (!client) {
         http_client_log_init_failure("ota", before);
         set_state("error", "Not enough memory for update TLS — retry after reboot");
         return;
     }
 
-    HttpSocketDeadline  socket_deadline;
+    HttpSocketDeadline& socket_deadline  = resources.socket_deadline;
     const TickType_t    transfer_started = xTaskGetTickCount();
     int                 status           = 0;
     esp_err_t           e = open_firmware_stream(client, response_state, socket_deadline, 200,
@@ -1136,7 +1167,8 @@ void run_update(const OtaTaskArgs& request) {
                 static_cast<unsigned>(transfer_open_heap.largest_internal_block));
 
     const int64_t total = esp_http_client_get_content_length(client);
-    uint8_t*      buffer =
+    uint8_t*&     buffer = resources.buffer;
+    buffer =
         static_cast<uint8_t*>(heap_caps_malloc(kOtaBufSize, MALLOC_CAP_8BIT | MALLOC_CAP_INTERNAL));
     if (!buffer) {
         close_http_client(client, socket_deadline);
@@ -1150,7 +1182,7 @@ void run_update(const OtaTaskArgs& request) {
 
     const esp_partition_t* update_partition = esp_ota_get_next_update_partition(nullptr);
     if (!update_partition || (total > 0 && static_cast<uint64_t>(total) > update_partition->size)) {
-        heap_caps_free(buffer);
+        resources.release_buffer();
         close_http_client(client, socket_deadline);
         diag_printf("ota: no suitable update partition (image=%lld B)\n",
                     static_cast<long long>(total));
@@ -1162,12 +1194,12 @@ void run_update(const OtaTaskArgs& request) {
     // esp_ota_write(), so the header/version gates below still reject a mismatched artifact before
     // altering that slot.  esp_ota_begin() may separately invalidate rollback metadata in otadata;
     // it is therefore intentionally not described as making no flash write at all.
-    esp_ota_handle_t ota_handle = 0;
-    bool             ota_open   = false;
+    esp_ota_handle_t& ota_handle = resources.ota_handle;
+    bool&             ota_open   = resources.ota_open;
     e = esp_ota_begin(update_partition, OTA_WITH_SEQUENTIAL_WRITES, &ota_handle);
     if (e == ESP_OK) ota_open = true;
     if (e != ESP_OK) {
-        heap_caps_free(buffer);
+        resources.release_buffer();
         close_http_client(client, socket_deadline);
         diag_printf("ota: esp_ota_begin failed (%s)\n", esp_err_to_name(e));
         set_state("error", e == ESP_ERR_NO_MEM
@@ -1209,7 +1241,7 @@ void run_update(const OtaTaskArgs& request) {
             esp_ota_abort(ota_handle);
             ota_open = false;
         }
-        heap_caps_free(buffer);
+        resources.release_buffer();
         close_http_client(client, socket_deadline);
         diag_printf("ota: incomplete image header (%u/%u B)\n", static_cast<unsigned>(probe_len),
                     static_cast<unsigned>(kImageProbeSize));
@@ -1230,7 +1262,7 @@ void run_update(const OtaTaskArgs& request) {
             esp_ota_abort(ota_handle);
             ota_open = false;
         }
-        heap_caps_free(buffer);
+        resources.release_buffer();
         close_http_client(client, socket_deadline);
         diag_printf("ota: image header rejected (magic=0x%02x chip=%u desc=0x%08lx)\n",
                     image_header.magic, static_cast<unsigned>(image_header.chip_id),
@@ -1260,7 +1292,7 @@ void run_update(const OtaTaskArgs& request) {
             esp_ota_abort(ota_handle);
             ota_open = false;
         }
-        heap_caps_free(buffer);
+        resources.release_buffer();
         close_http_client(client, socket_deadline);
         diag_printf("ota: REFUSING image v%s: manifest claimed %s (artifact mismatch)\n", imgver,
                     avail);
@@ -1275,10 +1307,10 @@ void run_update(const OtaTaskArgs& request) {
             esp_ota_abort(ota_handle);
             ota_open = false;
         }
-        heap_caps_free(buffer);
+        resources.release_buffer();
         close_http_client(client, socket_deadline);
         diag_printf("ota: REFUSING image v%s while running v%s (manifest claimed %s)\n", imgver,
-                    running.c_str(), avail);
+                    running, avail);
         Lock lk(s_mtx);
         s_status.state            = "error";
         s_status.message          = "Update rejected: not newer than the running firmware";
@@ -1290,15 +1322,16 @@ void run_update(const OtaTaskArgs& request) {
     // proves that the image is authentic; this independent digest proves it is the one bench-tested
     // application whose SHA the accepted check/request pinned.  PSA is initialized by ESP-IDF at
     // system start and the operation object is fixed-size task stack state.
-    psa_hash_operation_t hash_operation = PSA_HASH_OPERATION_INIT;
-    psa_status_t         hash_status    = psa_hash_setup(&hash_operation, PSA_ALG_SHA_256);
-    bool                 hash_active    = hash_status == PSA_SUCCESS;
+    psa_hash_operation_t& hash_operation = resources.hash_operation;
+    psa_status_t          hash_status    = psa_hash_setup(&hash_operation, PSA_ALG_SHA_256);
+    bool&                 hash_active    = resources.hash_active;
+    hash_active                          = hash_status == PSA_SUCCESS;
     if (!hash_active) {
         if (ota_open) {
             esp_ota_abort(ota_handle);
             ota_open = false;
         }
-        heap_caps_free(buffer);
+        resources.release_buffer();
         close_http_client(client, socket_deadline);
         diag_printf("ota: exact-artifact hash setup failed (%ld)\n",
                     static_cast<long>(hash_status));
@@ -1400,8 +1433,7 @@ void run_update(const OtaTaskArgs& request) {
         // Free all transport-owned dynamic state before applying the same measured admission gate
         // as the initial image TLS handshake.  The OTA handle and PSA hash deliberately survive:
         // they already own the exact sequential flash/hash position represented by `written`.
-        heap_caps_free(buffer);
-        buffer = nullptr;
+        resources.release_buffer();
         close_http_client(client, socket_deadline);
         ota_heap_sample();
 
@@ -1519,8 +1551,7 @@ void run_update(const OtaTaskArgs& request) {
     // cleanup second — so RSA/PSA verification had to allocate beside TLS and failed on the live
     // board with a 632-byte low-water mark.  The raw esp_ota API preserves the exact same signed
     // image verifier while letting the transport release its heap first.
-    if (buffer) heap_caps_free(buffer);
-    buffer = nullptr;
+    resources.release_buffer();
     close_http_client(client, socket_deadline);
     ota_heap_sample();
 

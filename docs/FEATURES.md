@@ -279,13 +279,14 @@ Deep dive: [`ARCHITECTURE.md`](ARCHITECTURE.md), [`SECURITY.md`](SECURITY.md).
   retried exactly once after cleanup; DNS, TCP, certificate and HTTP failures are not relabelled or
   retried. The manifest parser
   ([`logic/ota_manifest.hpp`](../main/logic/ota_manifest.hpp)) is the one place an attacker-influenced
-  byte stream is parsed here: bounded, allocation-free, depth-aware, and it **refuses rather than
-  truncates** an oversized value.
+  byte stream is parsed here: bounded, allocation-free, depth-aware, and it requires the complete
+  root object and **refuses rather than truncates** an oversized value.
 - **✅ 🧪 Heap-safe signed-image validation** ([`logic/ota_headroom.hpp`](../main/logic/ota_headroom.hpp)):
   the firmware streams HTTPS through a fixed 1 KiB INTERNAL buffer into the inactive partition,
   then destroys that buffer and the complete HTTP/TLS client **before** `esp_ota_end()` invokes the
   unchanged RSA-3072/PSA verifier. ESP-IDF's dynamic TLS-record buffers allocate and right-size RX/TX
-  records only while needed; TLS config/key/CA lifetime is deliberately unchanged. Every manifest
+  records only while needed; scope ownership also cleans up on exceptions, without changing TLS
+  config/key/CA lifetime. Every manifest
   and firmware handshake first requires four stable samples at 56 KiB total free INTERNAL 8-bit
   heap **and** a 24 KiB largest contiguous INTERNAL block. After TLS cleanup, validation has its
   separate two-sample 24/12 KiB gate before `esp_ota_end()` and again before
@@ -304,7 +305,7 @@ Deep dive: [`ARCHITECTURE.md`](ARCHITECTURE.md), [`SECURITY.md`](SECURITY.md).
   signature proves a build *authentic*, not *newer*. The gate refuses anything not strictly newer,
   checked against the manifest **and** against the image's own embedded `esp_app_desc_t` version,
   requiring the two to match exactly — so a host advertising `9.9.9` while serving a signed `1.0.0`
-  is caught. Ordering is numeric and pre-release-aware, and **fails closed** on an unparseable
+  is caught. Fixed-buffer checks allocate nothing; ordering is numeric and pre-release-aware, and **fails closed** on an unparseable
   version. The one relaxation is the channel switch (`?downgrade=1`), which relaxes *ordering* only:
   never the signature, never an equal version, never persisted.
 - **✅ Publish-version gate** ([`check-publish-version.sh`](../scripts/check-publish-version.sh)):
