@@ -328,7 +328,12 @@ probation, heap, stack and changed-behavior checks remain in the delivery skills
 A manual `workflow_dispatch` with `release: true` authorizes publication, skips the mechanical PR
 suite, performs one signed firmware build, publishes the release feed and creates the exact-source
 tag and GitHub Release. It contacts no board and requires no self-hosted runner, private inventory,
-environment approval or hardware evidence. Test-board and production-board acceptance are separate
-authorized chains. A standalone `$deploy-test` fix does not grant commit or publication permission;
+environment approval or hardware evidence. During the canonical agent delivery flow, a verified
+cumulative development changelog capacity overflow automatically authorizes this release for the already validated main
+head, without a further approval. The `$deploy-prod` release-baseline handoff verifies the source,
+release publication and next-core dev artifact; unrelated failures retain their stop conditions.
+This is an agent-run handoff through the existing workflow, not a GitHub push-triggered release.
+Test-board and production-board acceptance remain separate authorized chains.
+A standalone `$deploy-test` fix does not grant commit or publication permission;
 prepare the scoped correction and host evidence, then repeat the clean-head bench test only after
 its commit is authorized. The inherited `$deploy-prod` chain already includes its fix commits.

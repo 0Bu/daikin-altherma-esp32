@@ -177,6 +177,9 @@ documentation.
   recovery. `$flash-esp32` may write a local head to a board outside the inventory that the user
   names. None of these is a delivery of the artifact.
 - Direct `/ota/update` writes, including `downgrade=1`, and release creation are outside both modes.
+  Exception: a confirmed cumulative dev-changelog capacity overflow automatically authorizes the
+  existing release workflow for the already validated main head, without another approval. Follow
+  `$deploy-prod`'s release-baseline handoff; other failures do not qualify.
   A faulty production image that passed probation requires a reviewed fix or revert and the same
   bench-first roll-forward chain; failed probation is handled by bootloader rollback.
 - Completed validation, positive heap minima, `ota_stack_min_free_bytes`, target probation and

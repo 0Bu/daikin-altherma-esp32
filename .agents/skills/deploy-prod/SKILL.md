@@ -14,6 +14,8 @@ from start" or equivalent) explicitly authorizes the whole chain below:
 - running the deterministic gates and the review skills, and stamping their PR records;
 - merging the PR to `main` through the repository CAS merge path, after its required checks passed;
 - watching the CI run on `main` until the dev feed is published;
+- the automatic release-baseline handoff in Step 3a when that accepted main head's cumulative dev
+  changelog exceeds its existing capacity; this publication needs no additional approval;
 - the canonical bench delivery gate on the `bench` role, then the canonical promotion gate on the
   `production` role;
 - the failure loop in Step 8: fixes on the PR branch, fix or revert branches, commits, pushes, PR
@@ -23,8 +25,7 @@ from start" or equivalent) explicitly authorizes the whole chain below:
 
 It does **not** authorize:
 - touching unrelated devices, or changing heat pump parameters or live device configuration;
-- direct `/ota/update` writes, a release (`workflow_dispatch` with `release: true`), force pushes, or
-  bypassing branch protection;
+- direct `/ota/update` writes, releases outside Step 3a, force pushes, or bypassing branch protection;
 - `erase_flash`, NVS erasure, or a partition table change on any board;
 - skipping a required gate, review record or failing check.
 
@@ -101,7 +102,40 @@ retry for a bounded time. Continue only if the manifest's `source_sha` equals th
 note its version and application SHA-256. A PR without firmware-relevant files publishes no dev
 artifact, so the manifest keeps the previous source: report the merge and stop. If a
 firmware-relevant PR's manifest keeps the previous source after a green run and the bounded wait,
-treat it as **Case A**.
+treat it as **Case A**. A confirmed cumulative-changelog capacity failure uses Step 3a first.
+
+### 3a. Automatic release baseline when the cumulative changelog is full
+
+This handoff is already authorized; do not ask for another release approval. Serialize it with
+other sessions' bench, merge and dev-feed gates before changing either published feed.
+
+1. Verify the exact current main head and its successful complete `mechanical_gates` result. The
+   only qualifying failure is `Generate public OTA changelog` reporting cumulative development
+   history above the legacy text/document budget. Reproduce it with the production generator and
+   the current published feed. Invalid history, provenance, ancestry, versions, transport, signing,
+   tests or hardware failures remain Case A/B; never treat an arbitrary failed build as capacity.
+2. Bind the release version to that development history's numeric core. Confirm the release
+   candidate advances its feed and any existing tag is either absent or bound to this exact source.
+   Leave the byte limits, history and version floor intact.
+3. Invoke the existing main-only release workflow directly, with literal values:
+
+   ```bash
+   scripts/gh-with-git-credentials.sh --repo github.com/0Bu/daikin-altherma-esp32 workflow run build.yml --ref main -f release=true -f release_version=<X.Y.Z>
+   ```
+
+   Read the resulting run's head SHA and require the validated source before accepting its result.
+   Watch it to completion. Verify the signed public release manifest/app, exact-source tag and
+   GitHub Release. A partial release stops the handoff; do not claim a new baseline or silently
+   dispatch a second release. Use the documented exact-version resume only after diagnosing the
+   retained publication evidence.
+4. Refresh tags and the release feed, then rerun the original exact-source main build's failed
+   jobs. Its normal version/changelog path now starts the next development core from the published
+   release baseline. Require a green run and a dev manifest bound to that same source before Step 4.
+   If main changed, revalidate the new head and its acceptance; do not certify it from the old run.
+
+This automates the maintainer delivery handoff through the existing workflow, not an unattended
+release trigger on every GitHub push. A release publishes artifacts only; it neither changes a
+device's configured channel nor replaces the separate canonical bench/production acceptance.
 
 ### 4. Bench delivery gate
 

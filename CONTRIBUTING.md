@@ -728,6 +728,13 @@ It performs one signed firmware build, publishes the root feed, and creates the 
 GitHub Release. Test-board and production-board acceptance are separate maintainer operations around
 the PR/merge process; the release workflow neither repeats them nor claims hardware evidence.
 
+In the canonical agent delivery flow, a confirmed cumulative dev-changelog capacity overflow
+automatically cuts a release of the already validated main head through this existing workflow,
+without another approval. The agent verifies publication and resumes the exact-source dev build
+on the next development core before bench and production acceptance. Other failures do not trigger
+a release; the legacy byte limits and published history remain intact. See the
+[release-baseline handoff](.agents/skills/deploy-prod/SKILL.md#3a-automatic-release-baseline-when-the-cumulative-changelog-is-full).
+
 ## License
 
 Contributions are under the [MIT License](LICENSE). The X10A protocol and value definitions derive
