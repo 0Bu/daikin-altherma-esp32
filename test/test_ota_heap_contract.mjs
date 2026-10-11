@@ -117,6 +117,16 @@ assert.match(ota,
   "the static OTA worker must remain resident and sleep between operation notifications");
 assert.doesNotMatch(ota, /xTaskCreate\(ota_task/,
   "an OTA operation must not allocate its own task stack from runtime heap");
+assert.match(ota,
+  /alignas\(portBYTE_ALIGNMENT\)\s*static StackType_t\s+s_ota_health_task_stack\[kHealthTaskStack\s*\/\s*sizeof\(StackType_t\)\]/,
+  "probation must reserve an aligned exact-byte stack outside the fragmented runtime heap");
+assert.match(ota, /static_assert\(sizeof\(s_ota_health_task_stack\)\s*==\s*kHealthTaskStack\)/,
+  "the pinned SDK stack element width must not change the health stack byte budget");
+assert.match(ota,
+  /void\s+ota_health_gate_arm\(\)\s*\{\s*if \(s_health_gate_armed.exchange\(true, std::memory_order_acq_rel\)\) return;[\s\S]{0,650}?!xTaskCreateStatic\(health_gate_task,[\s\S]{0,180}?s_ota_health_task_stack,[\s\S]{0,80}?s_ota_health_task_storage/,
+  "one boot-latched health task must own its static stack and TCB even on creation failure");
+assert.doesNotMatch(ota, /xTaskCreate\(health_gate_task/,
+  "cold probation must not allocate its health task stack from runtime heap");
 const deadlineInitAt = appMain.indexOf("http_deadline_init()");
 const otaWorkerInitAt = appMain.indexOf("ota_update_init()", deadlineInitAt);
 const httpStartAt = appMain.indexOf("http_start()", otaWorkerInitAt);

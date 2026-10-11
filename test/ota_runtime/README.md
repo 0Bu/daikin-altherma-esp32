@@ -22,6 +22,10 @@ actual task and check unknown/valid/unarmed states, the 90-second minimum, the 6
 failed marking and failed task creation. Additional cases drive the real heap, allocation-failure,
 X10A publication and recovery-portal input wiring. Probation can refuse `esp_ota_begin` before a
 handle is acquired. Each optional owner acknowledgement is stalled separately.
+The health task's static creation is exercised with dynamic task allocation disabled. Its stack
+must be aligned and exactly 4096 bytes, and a second arm cannot reuse its storage before or after
+self-deletion. These are adapter assertions; separate measurements of the pinned target ELF must
+confirm storage size and alignment. The host fixture does not establish the target memory layout.
 The restart adapter records the request and returns so the fixture can inspect state; the success
 case's later worker cleanup is a synthetic continuation, not evidence that hardware resumes before
 reboot. Failed task creation checks preservation of a pre-seeded pending latch, not bootloader rollback.

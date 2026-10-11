@@ -217,6 +217,16 @@ try {
       replaceOnce("main/ota_update.cpp", "if (!http_deadline_ready()) return 0;", "if (false) return 0;")],
     ["OTA worker stack returns to the fragmented runtime heap", () =>
       replaceOnce("main/ota_update.cpp", "xTaskCreateStatic(ota_task", "xTaskCreate(ota_task")],
+    ["OTA probation stack returns to the fragmented runtime heap", () =>
+      replaceOnce("main/ota_update.cpp", "xTaskCreateStatic(health_gate_task", "xTaskCreate(health_gate_task")],
+    ["OTA probation storage can be armed twice", () =>
+      replaceOnce("main/ota_update.cpp",
+        "if (s_health_gate_armed.exchange(true, std::memory_order_acq_rel)) return;",
+        "/* mutation: health task storage can be reused */")],
+    ["OTA probation stack byte width is not constrained", () =>
+      replaceOnce("main/ota_update.cpp",
+        "static_assert(sizeof(s_ota_health_task_stack) == kHealthTaskStack);",
+        "/* mutation: SDK stack element width is unchecked */")],
     ["Weather payload allocation ignores an unavailable deadline watchdog", () =>
       replaceOnce("main/weather_forecast.cpp",
         /(bool download_json\([\s\S]{0,220}?)if \(!http_deadline_ready\(\)\)/,

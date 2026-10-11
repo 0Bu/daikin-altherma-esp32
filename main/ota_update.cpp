@@ -1021,9 +1021,9 @@ void run_check(const OtaTaskArgs& request) {
 }
 
 void run_update(const OtaTaskArgs& request) {
-    const bool        allow_downgrade = request.mode == OtaTaskMode::Downgrade;
-    const char*       running         = esp_app_get_description()->version;
-    const OtaChannel  ch              = request.channel;
+    const bool       allow_downgrade = request.mode == OtaTaskMode::Downgrade;
+    const char*      running         = esp_app_get_description()->version;
+    const OtaChannel ch              = request.channel;
     set_state("checking", "Verifying the update");
 
     // Re-fetch the exact channel captured by the accepted /ota/check.  The acceptance boundary has
@@ -1166,7 +1166,7 @@ void run_update(const OtaTaskArgs& request) {
                 static_cast<unsigned>(transfer_open_heap.free_bytes),
                 static_cast<unsigned>(transfer_open_heap.largest_internal_block));
 
-    const int64_t total = esp_http_client_get_content_length(client);
+    const int64_t total  = esp_http_client_get_content_length(client);
     uint8_t*&     buffer = resources.buffer;
     buffer =
         static_cast<uint8_t*>(heap_caps_malloc(kOtaBufSize, MALLOC_CAP_8BIT | MALLOC_CAP_INTERNAL));
@@ -1944,6 +1944,13 @@ static constexpr int kHealthHardCapS    = 600; // keep trying to commit this lon
 static constexpr int kHealthPollS     = 5;     // re-evaluate cadence
 static constexpr int kHealthTaskStack = 4096;  // ELF gate leaves at least 1 KiB after its reviewed
                                                // task/callee/exception-path allowance.
+// Probation overlaps the first OTA/TLS check. A runtime stack allocation can split the internal
+// heap even after every network owner has quiesced; keep this stack and its TCB outside that heap.
+alignas(portBYTE_ALIGNMENT) static StackType_t
+    s_ota_health_task_stack[kHealthTaskStack / sizeof(StackType_t)]{};
+static StaticTask_t      s_ota_health_task_storage{};
+static std::atomic<bool> s_health_gate_armed{false};
+static_assert(sizeof(s_ota_health_task_stack) == kHealthTaskStack);
 
 static OtaServiceHealth ota_service_health() {
     const MqttSkipStats mqtt_skips = mqtt_skip_stats();
@@ -2050,16 +2057,18 @@ static void health_gate_task(void*) {
 // is currently inlined into this frame. Keep 4096 anyway because the catch path must unwind below
 // the throwing frame. The executable ELF gate budgets the task plus 2048 B for IDF/logging,
 // exception-unwind and other named-outside-the-component callees, caps that path at 3072 B, and
-// thus preserves at least 1 KiB. This transient task deletes itself when the rollback window
-// closes.
+// thus preserves at least 1 KiB. The task deletes itself when the rollback window closes, while
+// its fixed storage remains reserved. Arming is boot-latched so a second call cannot reuse a
+// running or deleted task's storage.
 void ota_health_gate_arm() {
+    if (s_health_gate_armed.exchange(true, std::memory_order_acq_rel)) return;
     // If the gate task can't be created, a PENDING_VERIFY OTA image is never marked valid and the
     // bootloader will roll it back on the next reboot — safe, but say so (a silent failure looks
     // like a healthy commit that never happened).
-    if (xTaskCreate(health_gate_task, "ota_health", kHealthTaskStack, nullptr, TASK_PRIO_OTA_GATE,
-                    nullptr) != pdPASS)
+    if (!xTaskCreateStatic(health_gate_task, "ota_health", kHealthTaskStack, nullptr,
+                           TASK_PRIO_OTA_GATE, s_ota_health_task_stack, &s_ota_health_task_storage))
         ESP_LOGE("ota",
-                 "health-gate task alloc failed — a pending OTA image will roll back on reboot");
+                 "health-gate task creation failed — a pending OTA image will roll back on reboot");
 }
 
 } // namespace daik

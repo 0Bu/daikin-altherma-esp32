@@ -3,7 +3,7 @@
 
 The bench mode is the only agent-approved path to install an ordinary update on the private-inventory
 test board. It verifies one exact signed dev artifact, performs at most one POST on the bench role,
-waits through rollback probation and then runs the sustained pressure gate. It cannot contact the
+runs sustained pressure during rollback probation and requires confirmation. It cannot contact the
 production role.
 
 The production mode additionally proves that exact image on the bench role by making it perform a
@@ -122,6 +122,129 @@ class GateError(RuntimeError):
 
 class CompactTransportError(RuntimeError):
     """A retryable compact-observer disconnect while the board may be rebooting."""
+
+
+class GateJournal:
+    """Durable private milestones; the sole write cannot precede its attempted-write witness."""
+
+    def __init__(self) -> None:
+        self.directory = Path(tempfile.mkdtemp(prefix="daikin-ota-gate-"))
+        self.directory.chmod(0o700)
+        self.path = self.directory / "receipt.json"
+        self.receipt: dict[str, Any] = {
+            "artifact": {}, "test_board": {"role": BENCH_ROLE},
+            "production": {"role": PRODUCTION_ROLE, "executed": False},
+        }
+        self.phases: list[str] = []
+        self.checkpoint("started")
+        print(f"Private journal: {self.path}", file=sys.stderr)
+
+    def checkpoint(self, phase: str, *, outcome: str = "in_progress", error: str | None = None,
+                   **updates: Any) -> None:
+        for key, value in updates.items():
+            if isinstance(value, dict) and isinstance(self.receipt.get(key), dict):
+                self.receipt[key].update(value)
+            else:
+                self.receipt[key] = value
+        self.phases.append(phase)
+        document = {"outcome": outcome, "phase": phase, "phases": self.phases,
+                    "receipt": self.receipt}
+        if error is not None:
+            document["private_error"] = error
+        temporary = self.directory / "receipt.next"
+        descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        try:
+            with os.fdopen(descriptor, "w") as stream:
+                json.dump(document, stream, indent=2, sort_keys=True, allow_nan=False)
+                stream.write("\n")
+                stream.flush()
+                os.fsync(stream.fileno())
+            os.replace(temporary, self.path)
+            directory_descriptor = os.open(self.directory, os.O_RDONLY)
+            try:
+                os.fsync(directory_descriptor)
+            finally:
+                os.close(directory_descriptor)
+        finally:
+            if temporary.exists():
+                temporary.unlink()
+
+
+ACTIVE_JOURNAL: GateJournal | None = None
+
+
+def journal_checkpoint(phase: str, **updates: Any) -> None:
+    if ACTIVE_JOURNAL is not None:
+        ACTIVE_JOURNAL.checkpoint(phase, **updates)
+
+
+def public_receipt(journal: GateJournal) -> dict[str, Any]:
+    """Project only typed acceptance evidence; private identities and free-form strings stay local."""
+    version_fields = {"version", "previous_version", "release_version", "returned_version"}
+    hash_fields = {"source_sha": 40, "app_sha256": 64, "elf": 9, "release_elf": 9,
+                   "returned_elf": 9}
+    number_fields = {
+        "check_generation", "update_generation", "target_health_window_uptime_s", "uptime_s",
+        "release_health_window_uptime_s", "heap_min_free_bytes", "heap_min_largest_block_bytes",
+        "ota_stack_min_free_bytes", "ota_stack_done_samples", "free_heap", "largest_block",
+        "heap_restarts", "mqtt_skipped", "poll_skipped", "crc_err", "timeout_err", "status", "values",
+        "diag", "status_ok", "values_ok", "diag_ok", "ota_status_ok", "status_busy_503",
+        "values_busy_503", "diag_busy_503", "status_reboot_gap", "values_reboot_gap",
+        "diag_reboot_gap", "ota_status_reboot_gap", "bytes", "groups", "rows",
+    }
+    boolean_fields = {
+        "write_attempted", "write_acknowledged", "target_returned", "transfer_verified",
+        "release_write_attempted", "release_write_acknowledged",
+        "stress_passed", "retained_passed", "probation_confirmed", "saw_done",
+        "rollback_pending",
+        "ota_stack_present_at_done", "ota_stack_absent_at_done", "heap_min_free_bytes_invalid",
+        "heap_min_largest_block_bytes_invalid", "ota_stack_min_free_bytes_invalid", "retained",
+    }
+    object_fields = {
+        "artifact", "test_board", "production", "full_binary_download", "ota_download_heap",
+        "target_download_heap", "restore_download_heap", "stress", "cold_stress", "samples",
+        "tls_busy_503", "pressure", "counters_before", "counters_after", "retained_x10a",
+        "probation_before", "probation_after",
+    }
+
+    def project(document: dict[str, Any]) -> dict[str, Any]:
+        output: dict[str, Any] = {}
+        for key, value in document.items():
+            if key in object_fields and isinstance(value, dict):
+                output[key] = project(value)
+            elif key == "role" and value in (BENCH_ROLE, PRODUCTION_ROLE):
+                output[key] = value
+            elif key == "executed" and (value is None or isinstance(value, bool)):
+                output[key] = value
+            elif key == "image_state" and value in ("pending_verify", "valid"):
+                output[key] = value
+            elif key in boolean_fields and isinstance(value, bool):
+                output[key] = value
+            elif key in number_fields and isinstance(value, int) and not isinstance(value, bool):
+                output[key] = value
+            elif key in version_fields and isinstance(value, str) and \
+                 re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+(?:-dev\.[0-9]+)?", value):
+                output[key] = value
+            elif key in hash_fields and isinstance(value, str) and \
+                 re.fullmatch(r"[0-9a-f]{" + str(hash_fields[key]) + "}", value):
+                output[key] = value
+            elif key == "uptime" and isinstance(value, list) and len(value) >= 2 and \
+                 all(isinstance(item, int) and not isinstance(item, bool) for item in value):
+                output[key] = [value[0], value[-1]]
+        return output
+
+    phases = {
+        "started", "artifact_verified", "bench_write_attempted", "bench_write_acknowledged",
+        "bench_target_returned", "bench_transfer_verified", "bench_stress_passed",
+        "bench_probation_confirmed", "bench_cold_pressure_started", "bench_full_download_started",
+        "bench_release_write_attempted", "bench_release_write_acknowledged", "bench_release_returned",
+        "bench_release_health_passed", "bench_restore_attempted", "bench_restore_acknowledged",
+        "bench_restored", "bench_restore_stress_passed", "bench_restore_probation_confirmed",
+        "bench_completed", "production_write_attempted", "production_write_acknowledged",
+        "production_target_returned", "production_transfer_verified", "production_pressure_started", "production_stress_passed",
+        "production_retained_passed", "completed", "blocked",
+    }
+    return {**project(journal.receipt), "phases": [phase for phase in journal.phases if phase in phases]}
 
 
 @dataclass(frozen=True)
@@ -1390,6 +1513,7 @@ def stress_board(
     *, host: str, mac: str, version: str, elf: str, require_x10a: bool,
     require_weather: bool, expected_app_sha256: str, expected_channel: str,
     hil_manifest_url: str | None = None, hil_firmware_base_url: str | None = None,
+    require_pending_image: bool = False,
 ) -> dict[str, Any]:
     if (hil_manifest_url is None) != (hil_firmware_base_url is None):
         fail("stress HIL feed expectation must be a complete pair")
@@ -1456,6 +1580,18 @@ def stress_board(
     if int(ready_system.get("free_heap", 0)) < MIN_FINAL_FREE_HEAP or \
        int(ready_system.get("max_alloc", 0)) < MIN_FINAL_LARGEST_BLOCK:
         fail(f"{host} readiness window ended without safe heap")
+    probation_before = None
+    if require_pending_image:
+        probation_before = request_json_deadline(
+            pinned_endpoint, "/ota/status", timeout=OTA_STATUS_REQUEST_TIMEOUT_S,
+        )
+        if probation_before.get("image_state") != "pending_verify" or \
+           probation_before.get("rollback_pending") is not True:
+            fail("bench pressure must start while the exact OTA image is rollback-pending")
+        probation_before = {
+            "image_state": "pending_verify", "rollback_pending": True,
+            "uptime_s": started_uptime,
+        }
     baseline = initial_counters
     weather_before = started.get("weather_forecast", {})
     if require_weather and not isinstance(weather_before, dict):
@@ -1466,6 +1602,15 @@ def stress_board(
     busy_503: dict[str, int] = {"status": 0, "values": 0}
     errors: list[str] = []
     uptimes: list[int] = [initial_uptime, started_uptime]
+    if require_pending_image or require_x10a:
+        journal_checkpoint(
+            "bench_cold_pressure_started" if require_pending_image else "production_pressure_started",
+            **{("test_board" if require_pending_image else "production"): {
+                "stress": {"probation_before": probation_before, "samples": samples,
+                           "tls_busy_503": busy_503, "uptime": uptimes,
+                           "counters_before": baseline},
+            }},
+        )
     disconnected = 0
     scheduled_tls_active = threading.Event()
     mqtt_recovery_expected = threading.Event()
@@ -1919,6 +2064,7 @@ def stress_board(
            weather.get("refresh_success_token") != weather_refresh_token:
             fail(f"{host} final status lost the exact Weather refresh witness")
     return {
+        "probation_before": probation_before,
         "samples": samples,
         "tls_busy_503": busy_503,
         "uptime": [uptimes[0], uptimes[-1]],
@@ -2252,6 +2398,62 @@ def wait_for_legacy_offer(endpoint: ResolvedHttpEndpoint, expected_version: str)
     fail("legacy bench OTA check did not settle on the exact dev version")
 
 
+def confirm_bench_probation(
+    *, host: str, mac: str, version: str, elf: str, stress: dict[str, Any],
+) -> dict[str, Any]:
+    """Confirm the same stressed boot without losing its counters or accepting a hidden reboot."""
+    endpoint = resolve_http_endpoint(host)
+    deadline = time.monotonic() + BENCH_HEALTH_WINDOW_TIMEOUT_S
+    last_uptime = stress["uptime"][-1]
+    baseline = stress["counters_after"]
+    last_timeout = baseline["timeout_err"]
+
+    def validate_confirmation_status(status: dict[str, Any]) -> int:
+        nonlocal last_uptime, last_timeout
+        validate_identity(status, host=host, mac=mac, version=version, elf=elf)
+        uptime = required_uptime(status, "bench probation confirmation")
+        if uptime < last_uptime:
+            fail("bench rebooted after its cold pressure window")
+        last_uptime = uptime
+        current = board_counters(status)
+        if any(current[key] != baseline[key]
+               for key in ("heap_restarts", "mqtt_skipped", "poll_skipped", "crc_err")):
+            fail("bench counters changed after its cold pressure window")
+        if current["timeout_err"] < last_timeout or \
+           current["timeout_err"] - baseline["timeout_err"] > MAX_X10A_TIMEOUT_DELTA:
+            fail("bench timeout counter regressed or exceeded its confirmation allowance")
+        last_timeout = current["timeout_err"]
+        system = status.get("sys", {})
+        if int(system.get("free_heap", 0)) < MIN_FINAL_FREE_HEAP or \
+           int(system.get("max_alloc", 0)) < MIN_FINAL_LARGEST_BLOCK:
+            fail("bench probation confirmation lost safe heap")
+        return uptime
+
+    while time.monotonic() < deadline:
+        remaining = deadline - time.monotonic()
+        status = request_status_deadline(endpoint, timeout=min(remaining, HTTP_TIMEOUT_S))
+        validate_confirmation_status(status)
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            break
+        image = request_json_deadline(
+            endpoint, "/ota/status", timeout=min(remaining, OTA_STATUS_REQUEST_TIMEOUT_S),
+        )
+        if image.get("image_state") == "valid" and image.get("rollback_pending") is False:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                fail("bench confirmation deadline expired before its final status")
+            confirmed = request_status_deadline(endpoint, timeout=min(remaining, HTTP_TIMEOUT_S))
+            if time.monotonic() >= deadline:
+                fail("bench confirmation final status exceeded its absolute deadline")
+            confirmed_uptime = validate_confirmation_status(confirmed)
+            return {"image_state": "valid", "rollback_pending": False, "uptime_s": confirmed_uptime}
+        if image.get("image_state") != "pending_verify" or image.get("rollback_pending") is not True:
+            fail("bench probation confirmation lost the armed image identity")
+        time.sleep(min(1, max(0.0, deadline - time.monotonic())))
+    fail("bench stressed boot did not become valid within its confirmation deadline")
+
+
 def record_bench_pressure_failure(
     kind: str, error: BaseException, counts: dict[str, int], unexpected: list[str],
     lock: threading.Lock,
@@ -2300,8 +2502,20 @@ def exercise_bench_full_download(
 
     stop = threading.Event()
     lock = threading.Lock()
-    counts: dict[str, int] = {}
+    # Keep a fixed key set while the joining thread durably snapshots the in-flight receipt.
+    # Values can advance, but a pressure worker must never resize a mapping being serialized.
+    counts: dict[str, int] = {
+        f"{kind}_{outcome}": 0 for kind in ("status", "values", "diag", "ota_status")
+        for outcome in ("ok", "busy_503", "reboot_gap")
+    }
     unexpected: list[str] = []
+    target_transfer: dict[str, Any] = {}
+    restore_transfer: dict[str, Any] = {}
+    evidence: dict[str, Any] = {
+        "release_version": release_version, "release_elf": release_elf, "pressure": counts,
+        "target_download_heap": target_transfer, "restore_download_heap": restore_transfer,
+    }
+    journal_checkpoint("bench_full_download_started", test_board={"full_binary_download": evidence})
 
     def bump(key: str) -> None:
         with lock:
@@ -2339,15 +2553,18 @@ def exercise_bench_full_download(
         worker.start()
     time.sleep(0.5)
 
-    target_transfer: dict[str, Any] = {}
     try:
         require_official_dev_manifest_snapshot(
             target_manifest_sha256, target_source_sha, target_version, target_sha256,
         )
+        evidence["release_write_attempted"] = True
+        journal_checkpoint("bench_release_write_attempted")
         post_update_once(
             status_endpoint, generation, release_version, release_sha256,
             expected_channel="dev", allow_downgrade=True,
         )
+        evidence["release_write_acknowledged"] = True
+        journal_checkpoint("bench_release_write_acknowledged")
         release_status = wait_for_new_firmware(
             host, release_version, release_elf, status_endpoint, target_transfer,
         )
@@ -2361,6 +2578,7 @@ def exercise_bench_full_download(
     validate_identity(
         release_status, host=host, mac=mac, version=release_version, elf=release_elf,
     )
+    journal_checkpoint("bench_release_returned")
     if unexpected:
         fail(f"{host} bench binary pressure had unexpected HTTP failures: {'; '.join(unexpected)}")
     for key in ("status_busy_503", "values_busy_503", "diag_ok", "ota_status_ok"):
@@ -2375,6 +2593,8 @@ def exercise_bench_full_download(
     release_health_window = wait_for_bench_health_window(
         host, mac, release_version, release_elf, phase="release",
     )
+    evidence["release_health_window_uptime_s"] = release_health_window.get("uptime_s")
+    journal_checkpoint("bench_release_health_passed")
 
     # Restore the exact target from the official dev feed. Current releases use the atomic
     # generation handshake; an older still-supported release may predate it, so only this BENCH
@@ -2402,35 +2622,44 @@ def exercise_bench_full_download(
             time.sleep(OTA_OFFER_POLL_SECONDS)
         else:
             fail("bench return check did not settle on the exact dev artifact")
+        journal_checkpoint("bench_restore_attempted")
         post_update_once(status_endpoint, restore_generation, target_version, target_sha256)
     else:
         if accepted.get("ok") is not True:
             fail("legacy bench firmware refused the dev return check")
         wait_for_legacy_offer(status_endpoint, target_version)
         # Exactly one un-retried BENCH restore write; production never uses this legacy endpoint.
+        journal_checkpoint("bench_restore_attempted")
         restored = request_json_deadline(
             status_endpoint, "/ota/update", method="POST", timeout=HTTP_TIMEOUT_S,
         )
         if restored.get("ok") is not True:
             fail("legacy bench firmware refused the dev return update")
 
-    restore_transfer: dict[str, Any] = {}
+    journal_checkpoint("bench_restore_acknowledged")
     target_status = wait_for_new_firmware(
         host, target_version, target_elf, status_endpoint, restore_transfer,
     )
     validate_identity(
         target_status, host=host, mac=mac, version=target_version, elf=target_elf,
     )
-    return {
-        "release_version": release_version,
-        "release_elf": release_elf,
-        "release_health_window_uptime_s": release_health_window.get("uptime_s"),
-        "pressure": counts,
-        "target_download_heap": target_transfer,
-        "restore_download_heap": restore_transfer,
-        "returned_version": target_status.get("version"),
-        "returned_elf": target_status.get("app_elf_sha256"),
-    }
+    evidence.update({"returned_version": target_status.get("version"),
+                     "returned_elf": target_status.get("app_elf_sha256")})
+    journal_checkpoint("bench_restored")
+    # The historical release lacks the current compact writer telemetry, so its compatible
+    # health dwell remains above. The restored current target must prove its cold pending boot.
+    cold_stress = stress_board(
+        host=host, mac=mac, version=target_version, elf=target_elf,
+        require_x10a=False, require_weather=False,
+        expected_app_sha256=target_sha256, expected_channel="dev", require_pending_image=True,
+    )
+    evidence["cold_stress"] = cold_stress
+    journal_checkpoint("bench_restore_stress_passed")
+    evidence["probation_after"] = confirm_bench_probation(
+        host=host, mac=mac, version=target_version, elf=target_elf, stress=cold_stress,
+    )
+    journal_checkpoint("bench_restore_probation_confirmed")
+    return evidence
 
 
 def require_ota_transfer_evidence(
@@ -2495,40 +2724,49 @@ def install_bench_target(
         fail("bench does not have safe heap before OTA")
 
     check_generation = wait_for_ota_offer(status_endpoint, target_version, target_sha256)
+    transfer: dict[str, Any] = {}
+    evidence: dict[str, Any] = {
+        "role": BENCH_ROLE, "executed": None, "write_attempted": True,
+        "previous_version": current_version, "check_generation": check_generation,
+        "ota_download_heap": transfer,
+    }
+    journal_checkpoint("bench_write_attempted", test_board=evidence)
     update_generation = post_update_once(
         status_endpoint, check_generation, target_version, target_sha256,
     )
-    transfer: dict[str, Any] = {}
+    evidence.update({"executed": True, "write_acknowledged": True,
+                     "update_generation": update_generation})
+    journal_checkpoint("bench_write_acknowledged", test_board=evidence)
     returned = wait_for_new_firmware(
         host, target_version, target_elf, status_endpoint, transfer,
     )
     validate_identity(
         returned, host=host, mac=mac, version=target_version, elf=target_elf,
     )
+    evidence["target_returned"] = True
+    journal_checkpoint("bench_target_returned", test_board=evidence)
     if returned.get("sys", {}).get("reset_reason") != "sw":
         fail("bench target did not return from the expected software OTA reboot")
     require_ota_transfer_evidence(
         host, transfer, phase="bench target",
         writer_version=current_version, writer_elf=current_elf,
     )
-    health_window = wait_for_bench_health_window(
-        host, mac, target_version, target_elf, phase="target",
-    )
+    evidence["transfer_verified"] = True
+    journal_checkpoint("bench_transfer_verified", test_board=evidence)
     stress = stress_board(
         host=host, mac=mac, version=target_version, elf=target_elf,
         require_x10a=False, require_weather=False,
-        expected_app_sha256=target_sha256, expected_channel="dev",
+        expected_app_sha256=target_sha256, expected_channel="dev", require_pending_image=True,
     )
-    return {
-        "role": BENCH_ROLE,
-        "executed": True,
-        "previous_version": current_version,
-        "check_generation": check_generation,
-        "update_generation": update_generation,
-        "ota_download_heap": transfer,
-        "target_health_window_uptime_s": health_window.get("uptime_s"),
-        "stress": stress,
-    }
+    evidence.update({"stress": stress, "stress_passed": True})
+    journal_checkpoint("bench_stress_passed", test_board=evidence)
+    probation = confirm_bench_probation(
+        host=host, mac=mac, version=target_version, elf=target_elf, stress=stress,
+    )
+    evidence.update({"probation_after": probation, "probation_confirmed": True,
+                     "target_health_window_uptime_s": probation["uptime_s"]})
+    journal_checkpoint("bench_probation_confirmed", test_board=evidence)
+    return evidence
 
 
 def verify_release_hil_source(expected_source_sha: str) -> None:
@@ -4930,6 +5168,8 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> int:
+    global ACTIVE_JOURNAL
+    ACTIVE_JOURNAL = None
     args = parse_args()
     if args.self_test:
         self_test()
@@ -4976,6 +5216,7 @@ def main() -> int:
     missing = [name for name, value in required.items() if not value]
     if missing:
         fail(f"missing required arguments: {', '.join(missing)}")
+    ACTIVE_JOURNAL = GateJournal()
     manifest_bytes = request_limited_bytes(
         cache_busted(args.manifest_url), "official dev manifest",
         LEGACY_BENCH_RESTORE_MANIFEST_MAX_BYTES,
@@ -4994,6 +5235,12 @@ def main() -> int:
     elf = verify_image(binary, args.expected_version, args.expected_app_sha256)
     verify_http_range_support(app_url, binary)
     run_local_gates()
+    journal_checkpoint("artifact_verified", artifact={
+        "version": args.expected_version, "source_sha": args.expected_source_sha,
+        "app_sha256": args.expected_app_sha256, "elf": elf, "channel": "dev",
+        "release_created": False,
+    })
+    result = ACTIVE_JOURNAL.receipt
 
     inventory = load_inventory()
     bench = inventory[BENCH_ROLE]
@@ -5011,18 +5258,10 @@ def main() -> int:
             target_sha256=args.expected_app_sha256,
             target_elf=elf,
         )
-        result = {
-            "artifact": {
-                "version": args.expected_version,
-                "source_sha": args.expected_source_sha,
-                "app_sha256": args.expected_app_sha256,
-                "elf": elf,
-                "channel": "dev",
-                "release_created": False,
-            },
-            "test_board": {"host": bench["host"], "mac": bench["mac"], **bench_evidence},
-            "production": {"executed": False},
-        }
+        journal_checkpoint("bench_completed", test_board={
+            "host": bench["host"], "mac": bench["mac"], **bench_evidence,
+        })
+        ACTIVE_JOURNAL.checkpoint("completed", outcome="passed")
         print(json.dumps(result, indent=2, sort_keys=True))
         return 0
 
@@ -5055,26 +5294,16 @@ def main() -> int:
         target_elf=elf, release_version=release_version, release_sha256=release_sha256,
         release_elf=release_elf,
     )
-    test_before = request_json(bench["host"], "/status")
-    validate_identity(test_before, host=bench["host"], mac=bench["mac"], version=args.expected_version, elf=elf)
-    if required_uptime(test_before, "bench pre-stress status") > MAX_TEST_START_UPTIME_S:
-        fail("bench must be freshly booted into the exact artifact so the stress overlaps first TLS activity")
-    test_evidence = stress_board(
-        host=bench["host"], mac=bench["mac"], version=args.expected_version, elf=elf,
-        require_x10a=False, require_weather=False,
-        expected_app_sha256=args.expected_app_sha256, expected_channel="dev",
-    )
-
-    result: dict[str, Any] = {
-        "artifact": {"version": args.expected_version, "source_sha": args.expected_source_sha,
-                     "app_sha256": args.expected_app_sha256, "elf": elf, "channel": "dev",
-                     "release_created": False},
-        "test_board": {"role": BENCH_ROLE, "host": bench["host"], "mac": bench["mac"],
-                       "target_health_window_uptime_s": target_health_window.get("uptime_s"),
-                       "full_binary_download": full_download_evidence, **test_evidence},
-        "production": {"executed": False},
-    }
+    # The restore owns the cold pending-image pressure and confirmation. Repeating stress here
+    # would measure a warmed, already confirmed boot and can no longer cover probation.
+    test_evidence = full_download_evidence["cold_stress"]
+    journal_checkpoint("bench_completed", test_board={
+        "role": BENCH_ROLE, "host": bench["host"], "mac": bench["mac"],
+        "target_health_window_uptime_s": target_health_window.get("uptime_s"),
+        "full_binary_download": full_download_evidence, **test_evidence,
+    })
     if not args.execute:
+        ACTIVE_JOURNAL.checkpoint("completed", outcome="passed")
         print(json.dumps(result, indent=2, sort_keys=True))
         return 0
     if args.confirm_production != PRODUCTION_ROLE or not args.expected_current_version:
@@ -5099,26 +5328,40 @@ def main() -> int:
     check_generation = wait_for_ota_offer(
         production_status_endpoint, args.expected_version, args.expected_app_sha256,
     )
-    post_update_once(
+    production_transfer: dict[str, Any] = {}
+    journal_checkpoint("production_write_attempted", production={
+        "executed": None, "write_attempted": True, "role": PRODUCTION_ROLE,
+        "host": production["host"], "mac": production["mac"],
+        "previous_version": args.expected_current_version, "check_generation": check_generation,
+        "ota_download_heap": production_transfer,
+    })
+    update_generation = post_update_once(
         production_status_endpoint, check_generation,
         args.expected_version, args.expected_app_sha256,
     )
-    production_transfer: dict[str, Any] = {}
+    journal_checkpoint("production_write_acknowledged", production={
+        "executed": True, "write_acknowledged": True, "update_generation": update_generation,
+    })
     returned = wait_for_new_firmware(
         production["host"], args.expected_version, elf, production_status_endpoint,
         production_transfer,
     )
     validate_identity(returned, host=production["host"], mac=production["mac"], version=args.expected_version, elf=elf)
+    journal_checkpoint("production_target_returned", production={"target_returned": True})
     require_ota_transfer_evidence(
         production["host"], production_transfer, phase="production target",
         writer_version=args.expected_current_version,
         writer_elf=str(production_before.get("app_elf_sha256", "")),
     )
+    journal_checkpoint("production_transfer_verified", production={"transfer_verified": True})
     production_evidence = stress_board(
         host=production["host"], mac=production["mac"], version=args.expected_version, elf=elf,
         require_x10a=True, require_weather=True,
         expected_app_sha256=args.expected_app_sha256, expected_channel="dev",
     )
+    journal_checkpoint("production_stress_passed", production={
+        "stress_passed": True, "stress": production_evidence,
+    })
     final_status_endpoint = resolve_http_endpoint(production["host"])
     final_status = request_status_deadline(final_status_endpoint, timeout=HTTP_TIMEOUT_S)
     validate_identity(
@@ -5126,23 +5369,31 @@ def main() -> int:
         version=args.expected_version, elf=elf,
     )
     retained = verify_retained_x10a(final_status)
-    result["production"] = {
-        "executed": True,
-        "role": PRODUCTION_ROLE,
-        "host": production["host"],
-        "mac": production["mac"],
-        "previous_version": args.expected_current_version,
-        "ota_download_heap": production_transfer,
-        "stress": production_evidence,
-        "retained_x10a": retained,
-    }
+    journal_checkpoint("production_retained_passed", production={
+        "retained_passed": True, "retained_x10a": retained,
+    })
+    ACTIVE_JOURNAL.checkpoint("completed", outcome="passed")
     print(json.dumps(result, indent=2, sort_keys=True))
     return 0
 
 
-if __name__ == "__main__":
+def cli_main() -> int:
     try:
-        raise SystemExit(main())
-    except GateError as error:
+        return main()
+    except (GateError, OSError, CompactTransportError) as error:
+        # No follow-up request is safe here: a failed acknowledgment can still have written the
+        # board. Preserve the last durable milestone and existing private evidence, without retry.
+        if ACTIVE_JOURNAL is not None:
+            try:
+                ACTIVE_JOURNAL.checkpoint("blocked", outcome="blocked", error=str(error))
+            except (OSError, ValueError, TypeError):
+                print("Private journal checkpoint failed; retaining earlier milestones", file=sys.stderr)
+            print(json.dumps({"outcome": "blocked", "receipt": public_receipt(ACTIVE_JOURNAL)},
+                             indent=2, sort_keys=True))
+            print(f"Private journal: {ACTIVE_JOURNAL.path}", file=sys.stderr)
         print(f"BLOCKED: {error}", file=sys.stderr)
-        raise SystemExit(2)
+        return 2
+
+
+if __name__ == "__main__":
+    raise SystemExit(cli_main())
