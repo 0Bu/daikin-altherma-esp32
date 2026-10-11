@@ -29,12 +29,16 @@ class PublicationTests(unittest.TestCase):
         self.root = Path(self.temporary.name)
         for name in ('scripts/idf-version.sh', 'scripts/check-web-installer-plan.py',
                      'scripts/check-dev-manifest-source.sh', '.github/workflows/build.yml',
-                     'partitions.csv', 'dependencies.lock'):
+                     'scripts/check-publish-version.sh', 'scripts/check-manifest-provenance.py',
+                     'scripts/generate-ota-changelog.py', 'tools/version/publish_gate.cpp',
+                     'tools/release/ota_signing_key_digest.txt', 'main/logic/version_cmp.hpp',
+                     'main/ota_update.cpp', 'partitions.csv', 'dependencies.lock'):
             target = self.root / name
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(PROJECT / name, target)
+            shutil.copymode(PROJECT / name, target)
         (self.root / 'README.md').write_text('fixture\n')
-        (self.root / 'main').mkdir()
+        (self.root / 'main').mkdir(exist_ok=True)
         (self.root / 'main/hp_poll.cpp').write_text('fixture\n')
         self.git('init', '-q')
         self.git('config', 'user.name', 'Fixture')
@@ -307,6 +311,231 @@ class PublicationTests(unittest.TestCase):
             result = subprocess.run(['bash', 'scripts/check-dev-manifest-source.sh', remote],
                                     cwd=self.root, capture_output=True, timeout=10)
             self.assertEqual(result.returncode, 2)
+
+    def publication_handoff_fixture(self):
+        """Execute the production publisher shell; replace download and signature services only."""
+        self.git('init', '-q', '--bare', str(self.root / 'origin.git'))
+        self.git('remote', 'add', 'origin', str(self.root / 'origin.git'))
+        services = self.root / 'fixture-services'
+        services.mkdir()
+        downloader = services / 'gh'
+        downloader.write_text(textwrap.dedent('''\
+            #!/usr/bin/env python3
+            import shutil
+            import sys
+            from pathlib import Path
+            assert sys.argv[1:3] == ['run', 'download']
+            assert sys.argv[3] == '77' and sys.argv[-2:] == ['--dir', 'dist']
+            for path in Path('fixture-handoff').iterdir():
+                shutil.copyfile(path, Path('dist') / path.name)
+            '''))
+        downloader.chmod(0o755)
+        verifier = services / 'signature-verifier'
+        verifier.write_text(textwrap.dedent('''\
+            #!/usr/bin/env python3
+            import sys
+            from pathlib import Path
+            assert sys.argv[1:] == ['dist/daikin-altherma-esp32.bin']
+            assert Path(sys.argv[1]).read_bytes()
+            Path('fixture-signature-verified').write_text(sys.argv[1])
+            '''))
+        verifier.chmod(0o755)
+        text = (PROJECT / '.github/workflows/build.yml').read_text()
+        step = text.split('      - name: Download signed build handoff\n', 1)[1]
+        match = re.search(r'        run: \|\n((?:          .*\n|\n)+)', step)
+        self.assertIsNotNone(match)
+        shell = textwrap.dedent(match.group(1))
+        self.assertIn('./scripts/check-signing-key-continuity.py', shell)
+        return shell.replace('./scripts/check-signing-key-continuity.py',
+                             './fixture-services/signature-verifier')
+
+    def resume_payloads(self, mode):
+        self.document['version'] = '1.2.3' if mode == 'release' else '1.2.3-dev.1'
+        version = self.document['version']
+        notes = 'Original publication' if mode == 'release' else f'v{version} — Original publication'
+        self.payloads['changelog.json'] = json.dumps({'version': version, 'changelog': notes},
+                                                    ensure_ascii=False).encode()
+        self.update_manifest()
+        return copy.deepcopy(self.payloads)
+
+    def publish_fixture_handoff(self, mode, payloads, *, nonregular=None):
+        entries = []
+        for name, data in sorted(payloads.items()):
+            oid = self.git('hash-object', '-w', '--stdin', data=data).decode().strip()
+            file_mode = '120000' if name == nonregular else '100644'
+            entries.append(f'{file_mode} blob {oid}\t{name}\n')
+        tree = self.git('mktree', data=''.join(entries).encode()).decode().strip()
+        if mode == 'dev':
+            tree = self.git('mktree', data=f'040000 tree {tree}\tdev\n'.encode()).decode().strip()
+        pages = self.git('commit-tree', tree, data=b'fixture: immutable offered handoff\n').decode().strip()
+        self.git('push', '-q', '--force', 'origin', f'{pages}:refs/heads/gh-pages')
+        return pages
+
+    def execute_publisher_handoff(self, shell, mode, payloads, *, offered_version=None):
+        for name in ('fixture-handoff', 'dist'):
+            shutil.rmtree(self.root / name, ignore_errors=True)
+        handoff = self.root / 'fixture-handoff'
+        handoff.mkdir()
+        for name, data in payloads.items():
+            (handoff / name).write_bytes(data)
+        marker = self.root / 'fixture-outward-mutation'
+        marker.unlink(missing_ok=True)
+        (self.root / 'fixture-signature-verified').unlink(missing_ok=True)
+        version = offered_version or json.loads(payloads['manifest.json'])['version']
+        env = {**os.environ, 'PATH': f'{self.root / "fixture-services"}{os.pathsep}{os.environ["PATH"]}',
+               'SOURCE_SHA': self.source, 'MODE': mode, 'VERSION': version, 'RUN_ATTEMPT': '2',
+               'GH_REPO': 'fixture/repository', 'GITHUB_RUN_ID': '77', 'ARTIFACT_NAME': 'fixture'}
+        result = subprocess.run(['bash', '-e', '-c', shell + '\nprintf publication > fixture-outward-mutation\n'],
+                                cwd=self.root, env=env, capture_output=True, timeout=30)
+        return result, marker.exists()
+
+    def assert_equal_publication_is_immutable(self, shell):
+        original_document, original_payloads = copy.deepcopy(self.document), copy.deepcopy(self.payloads)
+        try:
+            for mode in ('release', 'dev'):
+                self.document, self.payloads = copy.deepcopy(original_document), copy.deepcopy(original_payloads)
+                original = self.resume_payloads(mode)
+                pages = self.publish_fixture_handoff(mode, original)
+                result, mutated = self.execute_publisher_handoff(shell, mode, original)
+                self.assertEqual(result.returncode, 0, result.stderr.decode())
+                self.assertTrue(mutated, 'identical original handoff could not reach publication')
+                self.assertTrue((self.root / 'fixture-signature-verified').exists())
+                # A fresh probabilistic signature can change the app bytes while source/version remain
+                # unchanged. Rebind all candidate metadata so the new handoff is internally valid.
+                self.payloads['daikin-altherma-esp32.bin'] = b'same-source-new-signed-application-fixture'
+                self.document['provenance']['app_sha256'] = hashlib.sha256(
+                    self.payloads['daikin-altherma-esp32.bin']).hexdigest()
+                self.update_manifest()
+                result, mutated = self.execute_publisher_handoff(shell, mode, self.payloads)
+                self.assertNotEqual(result.returncode, 0, 'same-version different application reached publication')
+                self.assertFalse(mutated, 'outward mutation happened before equality rejection')
+                self.assertEqual(self.git('ls-remote', '--heads', 'origin', 'gh-pages').decode().split()[0], pages)
+        finally:
+            self.document, self.payloads = original_document, original_payloads
+
+    def test_actual_publisher_equal_version_requires_identical_offered_bytes(self):
+        self.assert_equal_publication_is_immutable(self.publication_handoff_fixture())
+
+    def test_publisher_identity_guard_and_candidate_argument_mutations_are_detected(self):
+        shell = self.publication_handoff_fixture()
+        guard = './scripts/check-publish-version.sh --candidate-dir dist --source-sha "$SOURCE_SHA" "$check_mode" "$VERSION"'
+        self.assertIn(guard, shell)
+        for name, mutated in (
+            ('removed identity gate', shell.replace(guard, ':')),
+            ('removed candidate identity argument', shell.replace('--candidate-dir dist ', '')),
+            ('publication uses provisional preflight', shell.replace('--candidate-dir dist ', '--preflight ')),
+        ):
+            with self.subTest(mutation=name), self.assertRaises(AssertionError):
+                self.assert_equal_publication_is_immutable(mutated)
+
+        checker = self.root / 'scripts/check-publish-version.sh'
+        original = checker.read_text()
+        comparison = 'if (old / name).read_bytes() != (Path(candidate_dir) / name).read_bytes():'
+        self.assertIn(comparison, original)
+        checker.write_text(original.replace(comparison, 'if False:'))
+        try:
+            with self.assertRaises(AssertionError):
+                self.assert_equal_publication_is_immutable(shell)
+        finally:
+            checker.write_text(original)
+
+    def test_publisher_rejects_incomplete_or_unbound_old_handoff(self):
+        shell = self.publication_handoff_fixture()
+        for mode in ('release', 'dev'):
+            original = self.resume_payloads(mode)
+            cases = {}
+            for name in ('manifest.json', 'artifacts.json', 'changelog.json', 'daikin-altherma-esp32.bin'):
+                missing = copy.deepcopy(original)
+                del missing[name]
+                cases[f'missing {name}'] = missing
+                corrupt = copy.deepcopy(original)
+                corrupt[name] = b'{corrupt'
+                cases[f'corrupt {name}'] = corrupt
+            manifest = json.loads(original['manifest.json'])
+            for name, source in (('missing provenance', None), ('wrong source', 'b' * 40),
+                                 ('malformed source', 'short')):
+                old = copy.deepcopy(original)
+                document = copy.deepcopy(manifest)
+                if source is None:
+                    del document['provenance']
+                else:
+                    document['provenance']['source_sha'] = source
+                old['manifest.json'] = json.dumps(document).encode()
+                cases[name] = old
+            for name, old in cases.items():
+                with self.subTest(mode=mode, old=name):
+                    self.publish_fixture_handoff(mode, old)
+                    result, mutated = self.execute_publisher_handoff(shell, mode, original)
+                    self.assertNotEqual(result.returncode, 0, result.stdout.decode())
+                    self.assertFalse(mutated)
+            self.publish_fixture_handoff(mode, original, nonregular='changelog.json')
+            result, mutated = self.execute_publisher_handoff(shell, mode, original)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertFalse(mutated)
+
+    def test_publisher_rejects_malformed_candidate_source_version_and_channel(self):
+        shell = self.publication_handoff_fixture()
+        for mode in ('release', 'dev'):
+            original = self.resume_payloads(mode)
+            version = self.document['version']
+            self.publish_fixture_handoff(mode, original)
+            cases = {}
+            for name in ('artifacts.json', 'changelog.json', 'daikin-altherma-esp32.bin'):
+                missing = copy.deepcopy(original)
+                del missing[name]
+                cases[f'missing {name}'] = missing
+                corrupt = copy.deepcopy(original)
+                corrupt[name] = b'{corrupt'
+                cases[f'corrupt {name}'] = corrupt
+            malformed = copy.deepcopy(original)
+            malformed['manifest.json'] = b'{malformed'
+            cases['corrupt manifest'] = malformed
+            for name, field, value in (('wrong source', 'source_sha', 'b' * 40),
+                                       ('malformed source', 'source_sha', 'short'),
+                                       ('unbound app', 'app_sha256', '0' * 64)):
+                payloads = copy.deepcopy(original)
+                document = json.loads(payloads['manifest.json'])
+                document['provenance'][field] = value
+                payloads['manifest.json'] = json.dumps(document).encode()
+                cases[name] = payloads
+            duplicate = copy.deepcopy(original)
+            duplicate['changelog.json'] = ('{"version":"' + version +
+                                           '","changelog":"First","changelog":"Second"}').encode()
+            cases['duplicate changelog key'] = duplicate
+            for name, candidate in cases.items():
+                with self.subTest(mode=mode, candidate=name):
+                    result, mutated = self.execute_publisher_handoff(shell, mode, candidate,
+                                                                      offered_version=version)
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertFalse(mutated)
+            other_mode = 'dev' if mode == 'release' else 'release'
+            result, mutated = self.execute_publisher_handoff(shell, other_mode, original)
+            self.assertNotEqual(result.returncode, 0, 'candidate channel mismatch was accepted')
+            self.assertFalse(mutated)
+            result, mutated = self.execute_publisher_handoff(shell, mode, original, offered_version='9.9.9')
+            self.assertNotEqual(result.returncode, 0, 'manifest/version mismatch was accepted')
+            self.assertFalse(mutated)
+
+    def test_forward_legacy_and_absent_feed_accept_complete_candidate(self):
+        shell = self.publication_handoff_fixture()
+        for mode in ('release', 'dev'):
+            original = self.resume_payloads(mode)
+            old_version = '1.2.2' if mode == 'release' else '1.2.3-dev.0'
+            self.publish_fixture_handoff(mode, {'manifest.json': json.dumps({'version': old_version}).encode()})
+            result, mutated = self.execute_publisher_handoff(shell, mode, original)
+            self.assertEqual(result.returncode, 0, result.stderr.decode())
+            self.assertTrue(mutated)
+        # An existing root channel is distinct from an absent dev channel, and an absent branch is
+        # distinct from a transport failure (covered by the shell entrypoint's unreachable remote).
+        original = self.resume_payloads('dev')
+        self.publish_fixture_handoff('release', {'manifest.json': b'{"version":"1.2.2"}'})
+        result, mutated = self.execute_publisher_handoff(shell, 'dev', original)
+        self.assertEqual(result.returncode, 0, result.stderr.decode())
+        self.assertTrue(mutated)
+        self.git('push', '-q', 'origin', ':refs/heads/gh-pages')
+        result, mutated = self.execute_publisher_handoff(shell, 'dev', original)
+        self.assertEqual(result.returncode, 0, result.stderr.decode())
+        self.assertTrue(mutated)
 
     def test_actual_workflow_classification(self):
         workflow = (PROJECT / '.github/workflows/build.yml').read_text()

@@ -7,6 +7,7 @@ REPO="$PWD"
 T="$(mktemp -d)"
 trap 'rm -rf -- "$T"' EXIT
 python3 tools/release/test_dev_publication.py
+python3 tools/release/test_ci_event_matrix.py
 
 mkdir -p "$T/work/scripts" "$T/work/main/www" "$T/bin"
 cp scripts/run-browser-render-tests.sh "$T/work/scripts/"

@@ -259,6 +259,13 @@ malformed and divergent published provenance, refuses budget overflow without tr
 the intervening stable release for a dev-core change, and proves that the next core starts with only
 changes after that release baseline.
 
+The publication-version fixtures use a local bare Git feed to distinguish the early source/version
+preflight from equal-version publication. They reject a different signed-image identity, changed
+offered metadata and malformed prior evidence before the actual publisher block can mutate Pages.
+CI event fixtures execute the production path classifier and mutation-scope blocks; merged-PR
+cleanup fixtures execute the privileged workflow's shell against offline API responses, including
+an upload that finishes after close, fork association and failed metadata/pagination.
+
 The same `test_ui_*.mjs` sweep includes `node test/test_ui_live_i18n.mjs`. That browser-free regression
 test executes the production banner/inspector render functions from the assembled UI source and verifies
 that their DOM-write signatures invalidate when the persisted UI language changes while device state

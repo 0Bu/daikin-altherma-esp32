@@ -318,6 +318,18 @@ try {
   assert.equal(coldBaseline.status, 0, `cold receipt baseline failed: ${coldBaseline.stderr}`);
 
   const cases = [
+    ["blocked journal loses the HTTP route and callsite", () =>
+      replaceOnce("scripts/production-ota-gate.py",
+        'error_context=private_failure_context(error, ACTIVE_JOURNAL)',
+        'error_context=None'), "cold-receipt"],
+    ["private failure context stores the full query", () =>
+      replaceOnce("scripts/production-ota-gate.py",
+        'context["route"] = route if route in (',
+        'context["route"] = url if route in ('), "cold-receipt"],
+    ["private failure context loses its script callsites", () =>
+      replaceOnce("scripts/production-ota-gate.py",
+        'context["frames"] = context["frames"][-6:]',
+        'context["frames"] = []'), "cold-receipt"],
     ["bench install delays pressure until its image is warm", () =>
       replaceOnce("scripts/production-ota-gate.py",
         '    journal_checkpoint("bench_transfer_verified", test_board=evidence)\n    stress = stress_board(',

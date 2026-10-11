@@ -81,6 +81,14 @@ git -C "$T/version" tag v1.2.9
 git -C "$T/version" tag v1.10.0
 check_out "highest reachable valid tag bumps numerically" 1.10.1 "$T/version/scripts/next-version.sh"
 check_out "minor bump is strict" 1.11.0 "$T/version/scripts/next-version.sh" minor
+check_out "major bump resets minor and patch" 2.0.0 "$T/version/scripts/next-version.sh" major
+printf '2.1.0\n' > "$T/version/version.txt"
+check_out "version floor overrides the patch bump" 2.1.0 "$T/version/scripts/next-version.sh"
+check_out "version floor overrides the minor bump" 2.1.0 "$T/version/scripts/next-version.sh" minor
+check_out "version floor overrides the major bump" 2.1.0 "$T/version/scripts/next-version.sh" major
+check_out "development core honors the version floor" 2.1.0-dev.0 \
+    "$T/version/scripts/next-version.sh" --dev
+printf '1.0.0\n' > "$T/version/version.txt"
 check_out "exact release version is echoed" 2.3.4 "$T/version/scripts/next-version.sh" --exact 2.3.4
 check_rc "pre-release exact version is refused" 1 "$T/version/scripts/next-version.sh" --exact 2.3.4-rc.1
 check_rc "leading-zero exact version is refused" 1 "$T/version/scripts/next-version.sh" --exact 02.3.4
@@ -200,8 +208,15 @@ require(0 <= version_gate < changelog < firmware_build,
         "release identity/changelog gates do not precede firmware build")
 early_gate = trusted[version_gate:firmware_build]
 require("SOURCE_SHA: ${{ github.sha }}" in early_gate and
-        'check-publish-version.sh --source-sha "$SOURCE_SHA"' in early_gate,
-        "release resume is not checked against github.sha before the build")
+        'check-publish-version.sh --preflight --source-sha "$SOURCE_SHA"' in early_gate,
+        "release source/version admission before the build is not explicitly provisional")
+publisher = jobs["publish"]
+handoff_start = publisher.find("Download signed build handoff")
+handoff_end = publisher.find("Assemble dev-channel site")
+require(0 <= handoff_start < handoff_end and
+        'check-publish-version.sh --candidate-dir dist --source-sha "$SOURCE_SHA"' in
+        publisher[handoff_start:handoff_end],
+        "publication does not bind resume equality to the actual candidate artifact before mutation")
 require('"v${disp}^{commit}"' in trusted and '"$tag_sha" = "$GITHUB_SHA"' in trusted,
         "release resume does not bind an existing tag to this source commit")
 require("generate-ota-changelog.py" in trusted and "--published-ref FETCH_HEAD" in trusted and
@@ -442,8 +457,11 @@ require("check-manifest-provenance.py" in publish,
         "publisher does not verify signed artifact provenance")
 require("check-signing-key-continuity.py" in publish,
         "publisher does not reverify signing-key continuity")
-require('check-publish-version.sh --source-sha "$SOURCE_SHA"' in publish,
-        "publisher does not recheck the feed against artifact source")
+publication_guard = ('check-publish-version.sh --candidate-dir dist --source-sha '
+                     '"$SOURCE_SHA" "$check_mode" "$VERSION"')
+require(publication_guard in publish and 'SOURCE_SHA: ${{ github.sha }}' in publish and
+        '--preflight' not in publish[handoff_start:handoff_end],
+        "publisher does not recheck the actual candidate against its exact artifact source/version")
 dev_resume_guard = re.compile(
     r'elif \[ "\$MODE" = dev \] && \[ "\$RUN_ATTEMPT" -gt 1 \]; then\s+'
     r'check_mode=dev-resume'
@@ -461,7 +479,7 @@ require("target_commitish: ${{ github.sha }}" in publish,
 for notice in ("_site/LICENSE.txt", "_site/THIRD_PARTY_NOTICES.md", "_site/Apache-2.0.txt"):
     require(notice in publish, f"GitHub Release omits {notice}")
 provenance_check = publish.find("check-manifest-provenance.py")
-source_recheck = publish.find("check-publish-version.sh --source-sha")
+source_recheck = publish.find(publication_guard)
 root_publish = publish.find("Publish site to gh-pages (root)")
 release_create = publish.find("Create or resume release")
 require(0 <= provenance_check < source_recheck < root_publish < release_create,
