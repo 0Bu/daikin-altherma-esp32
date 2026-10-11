@@ -98,14 +98,14 @@ Use `agent/` for project branches: the repository PR wrapper requires this prefi
 
 Read only the references relevant to the task:
 
-- System architecture, component responsibilities, memory measurements, and full HTTP fields:
-  `docs/ARCHITECTURE.md`
+- System architecture, component responsibilities, persistence and memory: `docs/ARCHITECTURE.md`
+- Full HTTP fields, configuration validation and persistence effects: `docs/API.md`
 - X10A protocol: `docs/X10A_PROTOCOL.md`
 - Converter IDs, value evidence, and register map: `docs/REGISTERS.md`
 - HomeHub Modbus contract: `docs/MODBUS_PROTOCOL.md`
 - Platform features, ESP-IDF usage and plant features: `docs/FEATURES.md`,
   `docs/ESP_IDF_MATRIX.md` and `docs/PLANT.md`
-- Home Assistant and MQTT identity: `docs/HOME_ASSISTANT.md`
+- Home Assistant setup: `docs/HOME_ASSISTANT.md`; MQTT identity and wire contracts: `docs/MQTT.md`
 - Read-only firmware MCP surface: `docs/MCP.md`
 - Diagnosis meaning and evidence: `docs/DIAGNOSTICS.md` and `docs/DIAGNOSTIC_EVIDENCE.md`
 - UI/schematic design contract: `docs/DESIGN.md`
@@ -113,10 +113,14 @@ Read only the references relevant to the task:
 - Boards and wiring: `docs/BOARDS.md` and `docs/WIRING.md`
 - Contributor loop, review gates, and merge discipline: `CONTRIBUTING.md`
 - Agent setup, delivery details and runtime acceptance: `docs/AGENT_MIGRATION.md`
+- Build, publication and authorized hardware delivery procedures: `docs/MAINTENANCE.md`
 - Host-test organization: `test/README.md`
 
 If code and prose disagree, trace the production path and report the mismatch. Do not silently make
 one source agree with another without establishing which behavior is intended.
+Documentation review must also reject avoidable duplication and unreadable growth. Use the
+consistency and concision checklist in `$project-review`; keep one authoritative description per
+topic and preserve the facts needed to reproduce or interpret it.
 
 Use the full project name `daikin-altherma-esp32` in hostnames, SoftAP names, MQTT base topics,
 code, and documentation; do not shorten it to `daikin-altherma`. Other project names belong only in

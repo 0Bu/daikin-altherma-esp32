@@ -756,7 +756,7 @@ Protocol S operation mode and diagnostic fault codes.
 **Before step 1: ask the unit.** `POST /hp/query` reads one caller-chosen register on the live bus
 and answers with the raw frame plus every converter the requested slice admits — merged where they
 agree, so the reply names a *choice* rather than repeating a number
-([`logic/hp_probe.hpp`](../main/logic/hp_probe.hpp), fields in [`README.md`](README.md#http-api)).
+([`logic/hp_probe.hpp`](../main/logic/hp_probe.hpp), fields in [API.md](API.md#catalog-probes-and-evidence)).
 It is the only path here whose subject is a register this catalog does **not** already claim, which
 makes it the tool for the two questions a port starts with — what does this model put on page `0x__`,
 and which converter is the row actually encoded with:

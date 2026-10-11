@@ -1,79 +1,16 @@
 # MCP integration
 
-The device exposes a small **Model Context Protocol** server at `POST /mcp` so AI agents and other
-MCP clients can read heat-pump state directly. It is **strictly read-only**: the two tools reuse the
-same cached snapshots as `GET /status` and `GET /values`; no tool writes configuration, commands the
-heat pump, or reaches a separate data source.
+The device offers two read-only Model Context Protocol tools at **`POST /mcp`**. They reuse cached
+HTTP status/value snapshots; they do not command the heat pump, alter configuration or reach another
+source. Keep this unauthenticated, plaintext HTTP endpoint on a trusted LAN.
 
-> Transport: **Streamable HTTP**, stateless JSON-RPC 2.0. `POST /mcp` is the protocol;
-> `GET /mcp` is a self-contained setup and information page (not SSE). Both share the same
-> trusted-LAN-only caveat as the rest of the API — no auth/TLS, keep them on your LAN.
+## Set up a client
 
-The implemented subset follows the date-versioned MCP specification:
+Open `http://daikin-altherma-esp32.local/mcp` in a browser. **`GET /mcp`** is a device-local setup
+page, not an event stream. It shows the actual serving URL, copyable configuration, a curl example
+and the two tools. The page makes no requests and has no external assets (`connect-src 'none'`).
 
-- `initialize` negotiates `2025-03-26`, `2025-06-18`, or `2025-11-25`; an unsupported/missing
-  revision receives the server's latest supported revision (`2025-11-25`).
-- `tools/list` returns exactly the two no-argument tools below, including read-only annotations.
-- `tools/call` accepts only those tool names and an omitted or empty `arguments` object.
-- A valid notification (for example `notifications/initialized`) is accepted with HTTP `202` and no
-  body. There is no session id and no state is retained between requests.
-- Native clients may omit `Origin` (and an HTTP/1.0 probe may omit `Host` too); a `Host` they do
-  send, and a present browser `Origin`, must name the device's mDNS hostname or current WiFi/Ethernet
-  IP (with optional `:80`), and cross-site Fetch Metadata is rejected with HTTP `403`. The POST body
-  must declare `application/json`.
-  A present `MCP-Protocol-Version` header must name one of the three supported revisions; when it is
-  absent the Streamable-HTTP compatibility default applies.
-- Parse/Request/Method/Params errors use JSON-RPC `-32700`, `-32600`, `-32601`, and `-32602`;
-  a valid string, number, or null request id is echoed exactly. Unknown tool names use `-32601`.
-
-The request body is bounded to 1 KiB and parsed by the IDF-free, host-tested
-[`logic/mcp.hpp`](../main/logic/mcp.hpp) core. Every route invocation still runs under the shared
-HTTP OOM guard. Both tools emit their JSON-RPC envelope and the shared `/status` or `/values`
-representation through a host-tested 1 KiB chunk sink; neither complete result is one contiguous
-allocation. `get_hp_values` additionally stages its X10A/HomeHub snapshots before the first byte.
-
-While firmware OTA owns TLS, the shared HTTP boundary rejects every MCP POST before request parsing
-or entering the allocation-bearing streamed `get_status` serializer.
-Outside OTA, the shared values sender waits behind the shorter Weather TLS operation in 250 ms
-steps for at most four seconds. Either case fails before the snapshot and before the first response
-byte with HTTP `503` and `Content-Type: text/plain`: the global OTA boundary says
-`Network TLS operation in progress; retry shortly`, while an exhausted Weather wait says
-`network operation in progress`. These transport-level busy responses are deliberately not
-JSON-RPC error objects; clients may retry the complete read-only call later.
-
-## Browser setup page
-
-Open [`http://daikin-altherma-esp32.local/mcp`](http://daikin-altherma-esp32.local/mcp) in a browser.
-The page is embedded in the firmware, pre-compressed, and has no CDN, font, script, image, or other
-external dependency.
-
-It explains MCP in the context of the device and shows the exact URL that served the page, a
-copyable `mcpServers` configuration, a curl initialization example, the two-tool summary, and the
-transport/security contract. The page is deliberately static: it makes no MCP or other network
-requests. Its restrictive CSP includes `connect-src 'none'`.
-
-## Tools
-
-| Tool | Args | Returns |
-|------|------|---------|
-| `get_status` | none | `structuredContent` with the complete device/WiFi/MQTT/heat-pump status (same shape as `GET /status`) |
-| `get_hp_values` | none | `structuredContent` with the complete current X10A and, when live, HomeHub snapshot (same shape as `GET /values`) |
-
-`get_status.detect.model` reports only the identity the detection candidate set establishes: fields
-it does not establish are `null`, and the whole object is `null` when an ambiguous set establishes
-nothing. `profile.id` names the table actually being read — when several candidates remain,
-detect_best's pick among candidates the bus cannot tell apart — and is not a statement about the
-unit — see
-[`ARCHITECTURE.md`](ARCHITECTURE.md) → HTTP API, `/status.detect`.
-
-Each call result also contains a short `TextContent` summary. The full snapshot is emitted once as
-`structuredContent`: serialising and JSON-escaping the same multi-kilobyte value array a second time
-would create avoidable contiguous-heap pressure on the ESP32-S3. Transport chunks do not change the
-JSON shape; concatenating them produces the documented result object.
-
-## Client config
-
-Clients using the common `mcpServers` shape, including Claude Desktop / Code:
+For a client accepting the common `mcpServers` HTTP shape:
 
 ```json
 {
@@ -86,6 +23,50 @@ Clients using the common `mcpServers` shape, including Claude Desktop / Code:
 }
 ```
 
+Use the current device IP if mDNS does not resolve. Configure the URL format required by your client.
+
+## Tools
+
+| Tool | Arguments | Result |
+|---|---|---|
+| `get_status` | Omitted or empty object | Complete `GET /status` snapshot as `structuredContent`. |
+| `get_hp_values` | Omitted or empty object | Complete `GET /values` X10A/HomeHub snapshot as `structuredContent`. |
+
+Each result also has a short text summary. The full JSON is emitted once, in 1 KiB chunks, instead of
+being duplicated as escaped text. X10A/HomeHub values are staged before the first byte. Source
+absence/held readings and HTTP fields follow [API.md](API.md); read-only access does not strengthen
+the physical truth of a reading. In `get_status`, `detect.model` contains only identity fields
+established by the candidate set: unestablished fields are null, or the whole object is null if
+nothing is established. `profile.id` names the table actually read; its best pick among
+indistinguishable candidates does not establish the physical unit's identity.
+
+## Protocol contract
+
+Transport is **stateless Streamable HTTP**, JSON-RPC 2.0, with no session id, SSE or retained request
+state. Request bodies must declare `application/json` and are bounded to **1 KiB**.
+
+- `initialize` negotiates `2025-03-26`, `2025-06-18` or `2025-11-25`; missing/unsupported requested
+  revision receives the latest supported revision, `2025-11-25`.
+- `tools/list` returns exactly the two tools with read-only annotations.
+- `tools/call` accepts only those names and no non-empty arguments.
+- Valid notifications return HTTP **202** with no body.
+- Parse/request/method/parameter errors use `-32700` / `-32600` / `-32601` / `-32602`. Unknown tools use
+  `-32601`. Valid string, number or null request ids are echoed exactly.
+- A present `MCP-Protocol-Version` header must name one of the supported revisions. If absent, the
+  Streamable-HTTP compatibility default applies.
+
+Native clients may omit `Origin`; an HTTP/1.0 probe may also omit `Host`. When supplied, Host and
+browser Origin must name the device's mDNS hostname or current WiFi/Ethernet IP, optionally `:80`.
+Cross-site Fetch Metadata is rejected with HTTP **403**.
+[SECURITY.md](SECURITY.md) owns these LAN/browser boundaries.
+
+During OTA TLS the entire MCP POST returns **503 text/plain** before parsing or snapshot allocation:
+`Network TLS operation in progress; retry shortly`. Outside OTA, `get_hp_values` waits behind Weather
+TLS in 250 ms steps for at most four seconds; exhaustion returns **503 text/plain**,
+`network operation in progress`, before any result byte. These busy responses are transport errors,
+not JSON-RPC objects. Retry the complete read-only call later. All route invocations retain the
+shared allocation-failure boundary.
+
 ## Wire example
 
 ```bash
@@ -93,61 +74,21 @@ BASE=http://daikin-altherma-esp32.local
 
 curl -s "$BASE/mcp" \
   -H 'Content-Type: application/json' \
-  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"curl","version":"1"}}}' | jq
+  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"curl","version":"1"}}}'
 
 curl -s "$BASE/mcp" \
   -H 'Content-Type: application/json' \
   -H 'MCP-Protocol-Version: 2025-11-25' \
-  -d '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' | jq '.result.tools[].name'
+  -d '{"jsonrpc":"2.0","id":2,"method":"tools/list"}'
 
 curl -s "$BASE/mcp" \
   -H 'Content-Type: application/json' \
   -H 'MCP-Protocol-Version: 2025-11-25' \
-  -d '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"get_status","arguments":{}}}' \
-  | jq '.result.structuredContent'
-
-curl -s "$BASE/mcp" \
-  -H 'Content-Type: application/json' \
-  -H 'MCP-Protocol-Version: 2025-11-25' \
-  -d '{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"get_hp_values"}}' \
-  | jq '.result.structuredContent'
+  -d '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"get_hp_values","arguments":{}}}'
 ```
 
----
-
-## Developer tooling: ESP-IDF Tools MCP server — evaluated, not adopted
-
-Not to be confused with the device's `/mcp` above. Espressif's
-[ESP-IDF Tools MCP server](https://developer.espressif.com/blog/2026/04/esp-idf-tools-mcp-server/)
-(ESP-IDF v6.0+, `idf.py mcp-server`, stdio) exposes build tooling to an AI client —
-`set_target` / `build_project` / `flash_project` / `clean_project` plus read resources
-`project://config|status|devices`. **Evaluated 2026-07; decision: do not adopt.**
-
-- **build / set_target / clean are redundant** — `scripts/idf-docker.sh idf.py …` already does this,
-  allowlisted (no prompt) and pinned to the exact CI ESP-IDF version.
-- **`flash_project` is impossible *and* unsafe here** — Docker Desktop on macOS has no USB
-  passthrough (the project flashes from the host with `esptool` for this reason), and it would flash
-  the **unsigned** image, which crash-loops on this Secure Boot v2 board — bypassing the mandatory
-  sign step, `scripts/require-signed.sh`, and `$flash-esp32`.
-- **The native install path the blog recommends needs a local ESP-IDF** (EIM), which this project
-  rejects by design — `scripts/idf-docker.sh` is the single build path, so nothing drifts from CI.
-- **Nothing for the fast loop** — `scripts/run-mock-tests.sh` (host logic tests) is untouched.
-
-`idf.py mcp-server` *does* exist in the selected `espressif/idf:v6.1` image (verified), so this is a
-"no benefit," not a "can't." Re-evaluate only if builds move to a native host ESP-IDF, macOS gains
-Docker USB passthrough, or the board drops Secure Boot v2. A read-only ESP-IDF **Documentation** MCP
-server would be harmless if ever wanted; library docs are already covered by `context7`.
-
-## Repository agent tooling
-
-This developer-only integration is separate from the device's `/mcp` endpoint. The canonical
-configuration in [`.mcp.json`](../.mcp.json) declares `@upstash/context7-mcp@4.0.2`. Version `4.0.2` is
-the reviewed public-main pin; pinning it instead of `@latest` makes a checkout use the same server
-across runners and prevents an unreviewed registry release from changing the agent's documentation
-surface. Update it deliberately after reviewing the new package version, then regenerate the native
-Codex registration described in [AGENT_MIGRATION.md](AGENT_MIGRATION.md).
-
-Context7 is for library-documentation lookup only. It neither exposes the heat pump nor changes the
-read-only device MCP contract above. `.mcp.json` is the shared client descriptor; Codex uses its
-generated `[mcp_servers.context7]` registration in `.codex/config.toml`. Confirm effective discovery
-with the setup check rather than assuming that a valid JSON descriptor starts the server.
+Parser/dispatcher: [`logic/mcp.hpp`](../main/logic/mcp.hpp); HTTP implementation:
+[`mcp_server.cpp`](../main/mcp_server.cpp). Repository library-documentation tooling is separate from
+this device endpoint. Its pinned `.mcp.json` configuration and generated native Codex registration
+in `.codex/config.toml`, including effective-discovery checks, are described in
+[AGENT_MIGRATION.md](AGENT_MIGRATION.md).

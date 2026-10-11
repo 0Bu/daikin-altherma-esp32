@@ -1,749 +1,191 @@
 # Contributing
 
-Thanks for looking at this. It is a hobby project for a specific piece of hardware, so the most
-valuable contributions are usually **evidence from a real heat pump** — a model whose values decode
-wrongly, a register the catalog is missing, a board whose pins aren't in the safe list.
+Useful contributions start with a reproducible problem: a wrong value, an unsupported board, a
+protocol finding or a bug with device evidence. Read the [Code of Conduct](CODE_OF_CONDUCT.md) and
+open an issue before a large change. For device reports, follow [REPORTING.md](docs/REPORTING.md);
+it explains the redacted report and the separate handling of private crash dumps.
 
-By participating you agree to the [Code of Conduct](CODE_OF_CONDUCT.md).
+Historical identifiers such as `legacy-209` refer to the private predecessor tracker. Likewise,
+`(#N)` in signed commits before public launch names predecessor pull requests; subsequent PR
+numbers belong to this repository. Those discussions can contain installation data. Current source
+and documentation are authoritative; open a new public issue when a present problem needs more context.
 
-The project was developed in a private predecessor repository before its public launch. References
-such as `legacy-209` identify work items from that private tracker; the discussions themselves were
-not copied because they can contain installation data. Likewise, `(#N)` suffixes in the immutable,
-signed commit history prior to the public repository launch refer to predecessor pull requests,
-whereas subsequent PR numbers correspond to pull requests in this repository.
-The current source and documentation are authoritative; open a new public issue when old context is
-needed for a present problem.
+## Local workflow
 
-## What is most useful
+1. Create an `agent/` branch from current `main`. Keep existing local changes; never overwrite another
+   contributor's work. Rebase when `main` advances rather than merging it into the branch.
+2. Make the smallest complete change. Add a focused test for new target-independent logic and
+   update the document that owns the changed contract.
+3. Run the affected checks while developing, then the complete
+   [pre-PR gate set](test/README.md#run) before opening a pull request. Run the corresponding
+   mutation selftests whenever a checker or its inputs change.
+4. Review the diff for unintended edits, personal data and non-English prose. Maintained
+   documentation and PR text are English; device UI copy remains complete in every shipped locale.
+5. Fill in the [PR template](.github/pull_request_template.md). Describe the problem, resulting
+   behavior and validation, including anything that needs target or hardware evidence.
 
-| | |
-| :--- | :--- |
-| **A wrong or missing value on your unit** | The highest-value report. Include your model, `GET /values`, and `GET /diag` (a detect pass dumps the raw page bytes). See "Value correctness" below. The device collects all of it for you — [`docs/REPORTING.md`](docs/REPORTING.md). |
-| **A board that isn't already listed** | The RX/TX safe-pin table in [`docs/WIRING.md`](docs/WIRING.md) is filled in per board by hand — a verified new row is a real contribution. |
-| **Protocol findings** | Anything that sharpens [`docs/X10A_PROTOCOL.md`](docs/X10A_PROTOCOL.md) or [`docs/REGISTERS.md`](docs/REGISTERS.md). |
-| **Bugs with a reproduction** | Start from [`docs/REPORTING.md`](docs/REPORTING.md) — the web UI's **Report a bug** action assembles the whole evidence set. Crashes especially: A private raw dump needs its exact matching unstripped ELF; `scripts/decode-coredump.sh` verifies the dump/ELF identity before symbolizing it. |
+The host loop needs a C++17 compiler and CMake when available, Node ≥18 and Python ≥3.11.
+Coverage also needs the compiler's gcov-compatible tool. Browser rendering needs Chrome/Chromium;
+full source formatting needs exact clang-format 18.1.8. Individual runner requirements, commands,
+selftests and evidence limits are documented once in [test/README.md](test/README.md).
 
-Please open an issue before a large change. Refactors that don't change behaviour are the one thing
-likely to be declined — the comment density and the "why" notes in this codebase are load-bearing.
+Agent tools use `scripts/agent-python.sh` to select installed Python ≥3.11 with `tomllib`.
+`scripts/agent-python.sh --version` verifies the choice; `AGENT_PYTHON` selects a checked override.
+The helper installs nothing and changes no shell configuration.
 
-## The local loop — no board or ESP-IDF required
-
-These run on a plain system toolchain (cmake + g++/clang++ for the first, node for the rest) in
-seconds. **Run them all before opening a PR.** They are also the first steps of CI's
-`mechanical_gates` job, whose result the required `build` check consumes, so a failure here fails
-the PR anyway. One asymmetry: CI runs the `*/selftest.sh` mutation canaries only when the diff
-reaches something they read (the scope step in
-[`build.yml`](.github/workflows/build.yml) maps changed files to them; a push to `main` always runs
-every one). Locally, run them as this section says — the list here is what a contributor owes,
-not what CI happened to skip.
-
-The interpreter floors are **node ≥ 18** and **python ≥ 3.11** — the latter because
-[`tools/agent-config/check_toml.py`](tools/agent-config/check_toml.py) imports `tomllib`, which
-entered the standard library in 3.11. CI runs `ubuntu-26.04` (python 3.14), so a gate that needs a
-newer interpreter than these floors passes there and fails only on a contributor's machine; keep new
-tooling inside them rather than letting one file quietly raise the floor for the whole tree.
-
-Agent setup tooling resolves a compatible interpreter through `scripts/agent-python.sh`. A checked
-`AGENT_PYTHON` override can select an installed Python executable; unsupported versions fail with an
-actionable error. `scripts/agent-python.sh --version` shows the selected runtime. This does not
-install Python or change personal shell configuration.
-
-```bash
-scripts/run-mock-tests.sh --coverage # host logic tests + 95% floor + presenter parity
-scripts/run-sanitizer-fuzz-tests.sh # deterministic hostile-input properties under sanitizers
-scripts/run-runtime-integration-tests.sh # pure parsers/serializers through simulated adapters
-CLANG_FORMAT=clang-format-18 scripts/run-format-check.sh # portable + pinned changed-hunk checks
-scripts/run-contract-tests.sh      # do the firmware's SOURCE boundaries still hold?
-scripts/run-esp-idf-matrix-audit.sh # does the ESP-IDF feature matrix match the linked surface?
-tools/esp_idf_matrix/selftest.sh   # can the ESP-IDF matrix audit still go red?
-scripts/run-domain-audit.sh        # is the value catalog physically RIGHT?
-scripts/run-description-audit.sh   # can a user find out what each value IS?
-scripts/run-user-docs-audit.sh     # are English docs clear, current, and actionable?
-scripts/run-diagnostic-evidence-audit.sh # is each diagnosis still tied to its cited source?
-scripts/run-schematic-audit.sh     # does the DRAWING still say what it means?
-scripts/run-ui-localization-audit.sh # did every shipped locale follow changed canonical UI copy?
-scripts/run-ui-use-case-tests.sh   # do all visible UI actions actually work?
-scripts/run-browser-render-tests.sh # does real Chrome render and expose the UI accessibly?
-scripts/run-redaction-audit.sh     # can a bug report still leak the USER's data?
-scripts/run-pr-hygiene-audit.sh    # personal info or high-confidence German in commits/PR text?
-tools/absence/selftest.sh          # can the source-absence matrix still go red?
-scripts/run-ui-gif-audit.sh        # is the README's RECORDING still of this UI?
-scripts/run-doc-entity-audit.sh    # do the docs' copy-paste ENTITY IDS exist?
-scripts/run-agent-instructions-budget.sh # are canonical agent budgets and safety contracts intact?
-```
-
-`run-mock-tests.sh --coverage` compiles the IDF-free headers in [`main/logic/`](main/logic/) against
-[`test/test_logic.cpp`](test/test_logic.cpp) — the CRC and framing, the value converters, register
-extraction, the config model and the Home Assistant discovery payloads — and requires at least 95%
-aggregate executable-line coverage in those production headers. The test driver and generated
-profiles do not count toward the percentage. Details in [`test/README.md`](test/README.md). If you
-touch the coverage tooling itself, run `tools/coverage/selftest.sh` — the same argument as every
-other selftest here: a floor that has stopped failing turns a percentage into decoration.
-
-Coverage is two-dimensional: the aggregate executable-line floor remains 95%, while
-`tools/coverage/branch_baseline.json` ratchets each branch-bearing production logic header's
-aggregated gcov `taken/total` branch-edge counts for the selected compiler execution profile. Local
-profiles use compiler family and major; authoritative GitHub coverage also binds the hosted runner
-OS and image so compiler packaging drift cannot borrow a superficially compatible baseline. A later
-change may improve a header's ratio but may not silently reduce it. Equal counts do not prove that
-the same branch edges ran; this is a count ratchet, not branch-identity evidence. The
-sanitizer/property runner drives deterministic malformed frames, JSON, URLs and boundary values
-through the same pure logic. It first probes ASan+UBSan as a runtime capability; CI requires both,
-while a local host falls back to UBSan only when its ASan compile/runtime probe fails.
-
-`run-runtime-integration-tests.sh` calls selected production parsers, serializers and config save
-transactions through host-only fake clock, storage, serial, TCP, broker and HTTP adapters. Its thirteen deterministic
-scenarios comprise ten adapter/body cases for failed saves, config save boundaries and their
-allocation witness, reconstruction, allocation failure,
-scheduling, fragmented X10A and Modbus, MQTT lifecycle and bounded body/chunk handling, plus three
-slow-peer cases. Those slow-header, slow-body and leftover-body scenarios use
-real POSIX `socketpair`/`recv` traffic and prove the absolute watchdog's `shutdown(SHUT_RDWR)` abort
-and join boundary, and the bounded discard of a body still owed after the response, without
-hardware. It does not execute ESP-IDF target glue, real NVS or the
-production MCP/HTTP/MQTT stacks, and it does not replace a real board; the firmware build and release
-HIL remain distinct evidence layers. `run-browser-render-tests.sh` likewise
-complements the DOM harness by driving the assembled production UI in real Chrome at mobile and
-desktop widths, across every locale, with
-keyboard, accessibility-tree, reduced-motion, overflow and console-error checks.
-
-`run-format-check.sh` always enforces portable whole-tree invariants. CI additionally installs exact
-clang-format 18.1.8 and checks every new file and changed C/C++ hunk; it does not reformat legacy
-lines outside the diff. A local run may skip that layer when the pinned executable is unavailable,
-but `CI=true` requires the pinned executable and fails closed on another version. The canonical full
-gate, including maintained C/C++ under `tools/`, is
-`CLANG_FORMAT=clang-format-18 scripts/run-format-check.sh`.
-
-Before changed-line discovery, the gate binds the exact reviewed `.clang-format` bytes. An
-intentional style change must be reviewed as policy and update `EXPECTED_SHA256` in
-`tools/format/check_style_config.py` in the same commit; a `.clang-format`-only change therefore
-cannot silently turn formatting off.
-
-It **ends with the presenter-parity gate**
-([`scripts/check-presenter-parity.sh`](scripts/check-presenter-parity.sh), runnable on its own).
-Three headers here — `lwt_select`, `cop_scope` and `ou_stale` — say in their own comments that they
-have no firmware caller: they exist so CI can gate a rule the **browser** applies, and those three
-are exactly what the gate covers. (`feature_gate` is caller-less too, but for the other reason — it
-is a policy the browser cites rather than re-implements, so there is no second copy to diff.)
-That gates the C++ copy and says nothing about the JavaScript one, which is the copy your users get,
-and this project has already paid for the difference: a looser leaving-water pattern in
-`main/www/js/schematic.js` matched the bizone kit's *mixed-zone* row, putting a correct number on the
-wrong sensor in ΔT, heat output and COP at once. The gate compiles a host dumper against the real
-headers and the real `def/` catalog, then has the **production** `schematic.js` re-decide the same
-inputs in the DOM-free VM harness the UI suite already uses, and diffs. If you change either copy,
-change both in the same commit; if you *restructure* the browser side, keep the rules addressable as
-named bindings — a rule folded back into its caller makes the gate exit 2 as unreachable rather than
-pass by comparing nothing. Run `tools/presenter/selftest.sh` if you touch the gate itself.
-
-`run-contract-tests.sh` covers what the host suite structurally cannot. `test_logic.cpp` links the
-IDF-free headers, so it proves what a rule *decides* — never that the firmware still calls it from
-the right task, in the right order, or not at all. "No source file can issue a Modbus write" is a
-claim about a whole component, and the only way to check it is to read the source text, which is
-what each `test/test_*_contract.mjs` does. The glob is deliberate:
-a new sibling joins the gate with no workflow edit, the same property `test_ui_*.mjs` already had.
-
-`run-esp-idf-matrix-audit.sh` binds [`docs/ESP_IDF_MATRIX.md`](docs/ESP_IDF_MATRIX.md) to the
-application's explicit CMake components, direct managed dependencies, active `sdkconfig.defaults`,
-ESP-IDF-shaped includes and the few reviewed manual/native boundaries. It deliberately does not
-scrape the upstream documentation in CI: the negative feature list is curated, while the actual
-linked surface fails closed. Run `tools/esp_idf_matrix/selftest.sh` after changing the matrix,
-checker or input classification; its throwaway mutations prove missing components, defaults,
-headers, evidence and native-boundary changes are still rejected.
-
-Both globs also carry the **source-absence matrix** — `test_source_absence_contract.mjs` and
-`test_ui_absence_matrix.mjs` — which is why it has no runner of its own. It asks what the other
-gates do not: every source this firmware reads except the board is optional (the MQTT broker, the
-MQTT room source, the circulation witness, the HomeHub, ENV III, the weather location, the X10A bus
-itself), safe mode removes all of them at once, and each can be absent independently. That cross
-product is where defects have shipped with every other gate green — the board's own heap trends
-stopped recording because the *X10A bus* did not answer, and a card told a reader to set up a room
-source they had already configured. Run `tools/absence/selftest.sh` if you touch either test file:
-both halves assert over text, so a check that has stopped matching the code it describes reports
-success, and the selftest is what re-seeds the defects to prove otherwise.
-
-`run-domain-audit.sh` is separate on purpose, and the distinction matters:
-
-> **Passing the tests is not the same as being right.** The tests verify the logic they are handed;
-> they cannot see a value that is well-formed, compiles, drifts no doc — and is physically false. A
-> wrong converter id once published `-971.5 °C` as a water temperature across eight profiles, and a
-> valve *position* reached Home Assistant as a 12800 °C temperature sensor. The audit runs the real
-> converters over the real catalog and cross-checks [`docs/REGISTERS.md`](docs/REGISTERS.md).
-
-If you touch the audit itself, also run `tools/domain/selftest.sh` — it re-introduces every defect
-the audit was built for into a throwaway copy and asserts each is still caught (the four shipped
-decode bugs, plus a fan **step** mislabelled as a **rate**: the label becomes the Home Assistant
-entity id and the VictoriaMetrics series name, so a wrong unit word publishes a wrong quantity while
-the decode itself is correct). A checker that has stopped checking turns "clean" from evidence into
-a lie.
-
-`run-description-audit.sh` asks the same kind of question one layer up. Every reading reaches the
-web UI's value list as a row keyed by its catalog **label**, and tapping that row is meant to open a
-plain-language explainer — decided at render time by a first-match-wins regex sweep over the
-`DESCRIPTIONS` table in [`main/www/js/descriptions.js`](main/www/js/descriptions.js). A label nothing matches renders as a
-plain, un-tappable row: no error, no log, just a missing chevron among a hundred rows.
-The first 11 rows in [`main/def/overlay.hpp`](main/def/overlay.hpp) shipped exactly so — nine with no
-explainer, and two that matched the *fin temp* heatsink-**temperature** entry, describing a
-protection flag and a retry counter as a °C reading. Its later reference-table diagnostic block is
-subject to the same gate. Since the profiles are machine-generated, the gap re-opens whenever the
-generator emits a label the copy has never seen, without anyone touching this repo's JS.
-
-It evaluates the real table, profile-qualified `descFor` and English `I18N`/`t()` in a JS engine
-rather than re-implementing their rules elsewhere, so it needs **node ≥ 18**, the same runtime
-as the user-docs, schematic and UI gates. Every base/native Modbus row is checked independently;
-a shared label cannot hide a missing native explanation. Findings: `D001` a visible reading with no
-copy, `D002` an entry matching nothing, `D003/D004` malformed or missing localized copy, `D005` a
-stale ledger line, `D008` shadowed semantic copy or a native profile leak, and `D009` unreachable
-native help. If a finding is correct
-as it stands, record it in [`tools/descriptions/audit_exceptions.txt`](tools/descriptions/audit_exceptions.txt)
-with a reason — except `D001` and `D009`, which the ledger refuses outright: a published reading the user
-cannot look up is the defect the gate exists for, and the fix is copy, not a suppression. Touching
-the audit means also running `tools/descriptions/selftest.sh`, same argument as the domain one.
-
-`run-user-docs-audit.sh` closes the next gap: a row can have a description and still leave a normal
-owner unable to interpret it. Every visible plant-diagnostics row therefore needs localized English
-and German UI copy that says what was observed and the limit of the claim, without recommending an
-action the available evidence cannot support; [`docs/DIAGNOSTICS.md`](docs/DIAGNOSTICS.md) needs the matching English
-plain-language section. All maintained repository Markdown is English-only; localized prose belongs
-in the UI translation tables, not in `docs/` or review skills. The guide's
-source stamp covers the evaluator and visible diagnosis contract, so a changed threshold, result or
-wording makes the gate fail even when no row was added. Run the
-[`$user-docs-review` skill](.agents/skills/user-docs-review/SKILL.md), update the prose first, and only
-then use `scripts/run-user-docs-audit.sh --update` to record that review. The stamp is not an
-alternative to reviewing the diff. `tools/user_docs/selftest.sh` proves the gate still rejects a
-missing localization/claim-boundary/section, non-English documentation, false whole-plant reassurance, and
-an unstamped source change.
-
-`run-schematic-audit.sh` asks it one layer up again, of the **dashboard schematic** — the inline SVG
-in [`main/www/index.html`](main/www/index.html) with its CSS and its `INSPECT` / `I18N` bindings. All
-three gates above can be green while the picture is false, and that is not hypothetical: this drawing
-has shipped a fan spinning around a point beside its own axle, the leaving-water pill floating 40 px
-off the run it names, the return temperature drawn on the heating-only section (claiming a branch
-R4T does not read), and "HEIZUNG" struck through by the heating riser so it rendered "HEIZUNC". Each
-one is a physically correct value attached to the wrong thing — the `legacy-35`–`legacy-39` shape, drawn.
-
-It parses the real SVG (coordinates, transforms, path geometry, text metrics) and evaluates the real
-binding tables, so no second copy of either can drift, and reports in three layers: **structure**
-(`S…` — hit target ↔ inspector entry ↔ element id ↔ translation), **geometry** (`G…` — viewBox,
-overlaps, labels struck through, axis-aligned runs, text fit across all thirteen locales (inside fixed
-pills and between neighbouring captions), a pill's distance to its own pipe, rotor symmetry and
-pump rotation direction, and a run's *invisible* tap area not reaching into the fitting it meets:
-the hit lines are
-`stroke-linecap: round`, so each one also covers half a stroke past its declared endpoint, and every
-trim in the drawing had been computed as if the cap were flat — the 3-way valve outlined itself on
-hover and then opened the DHW branch) and **domain** (`E…` — a repeated unit needs a name; a
-return-run reading stays left of the junction). Findings that are correct as they stand go in
-[`tools/schematic/audit_exceptions.txt`](tools/schematic/audit_exceptions.txt) as an `ADJUDICATION`
-(citing the decision — `docs/DESIGN.md` §5.3, a measurement) or a `KNOWN-DEFECT` (naming what is
-wrong, and deleted by its fix); `S001` (a tap target that opens nothing) and `E002` (a pill on a
-branch its sensor does not read) are refused outright. Touching the audit means running
-`tools/schematic/selftest.sh`, which re-seeds every one of those historical defects (one `run_case`
-each, so `grep -c run_case` is the count) and asserts each is still caught. What it *cannot* decide
-— is the drawing still true of the plant, is a new part in the right place, is the German copy right
-— it stays quiet about; that half is the maintainer's `$schematic-review`, which is a **merge gate**
-on any PR that reaches the drawing, its contract or the tools that judge it. The runner-neutral gate
-under `tools/agent-hooks/` is the single definition.
-As an outside contributor you never run it; assume any change under `main/www/` needs it.
-
-`run-ui-use-case-tests.sh` exercises the production UI wiring rather than merely parsing it. Its
-matrix must name every production modal and drives Settings/Back, open, Cancel, backdrop, Escape,
-accepted and rejected Save paths, representative invalid input, board-dependent ENV III states and
-the two-step bug-report dialog. It also runs every existing `test_ui_*.mjs` contract and a selftest
-that re-introduces the historical ENV III failure where visible Cancel and Save buttons called an
-undefined close function. CI runs the same command in `mechanical_gates`. For UI-relevant
-changes, the maintainer's `$ui-use-case-review` adds real narrow/desktop click-through and records a
-SHA-stamped result. The runner-neutral aggregate PR gate requires that current record and reruns the
-deterministic suite immediately before a command-line merge.
-
-`$absence-review` is the same shape for the states above: **conditional**, required when a PR
-touches an optional source's lifecycle or a surface that reports one, with the neutral hook core as
-the single definition of that set. Like the schematic
-gate it exists because the mechanical half cannot judge whether a *new* source is in the matrix,
-whether removing one source quietly removed another, or whether the copy names a blocker the reader
-can actually act on.
-
-`run-redaction-audit.sh` is the only gate here whose subject is the **user's data** rather than the
-firmware's correctness, and it is the one an outside contributor is most likely to need without
-expecting to. A bug report is filed as a *public* GitHub issue carrying the device's own `/status`,
-`/values` and `/diag` ([`docs/REPORTING.md`](docs/REPORTING.md)) — defensible only because the device
-scrubs it first ([`main/logic/redact.hpp`](main/logic/redact.hpp)). There is no private channel behind
-it and nobody reviews a report before it is posted. Two halves, failing differently: `/status` leaks
-by **field**, so the audit derives how many fields the builder actually wraps and compares that
-against the header's declaration (they had drifted two apart, in silence, because nothing consumed
-the number); `/diag` leaks by **line**, guarded by an allowlist of named log statements, and an
-allowlist falls behind quietly — a new `diag_printf` interpolating a hostname or an SSID is simply
-not covered, and the symptom is a correct-looking log line with a real value in it. On its first run
-it found `mqtt: retired legacy HA device %s` printing the unique half of the MAC that `/status` was
-redacting three sections above. Adjudications go in
-[`tools/redact/audit_exceptions.txt`](tools/redact/audit_exceptions.txt); `tools/redact/selftest.sh`
-re-seeds every defect it was built for. Neither half can see the direction that needs a human: a new
-identifying field nobody wrapped at all never reaches the redactor, so it never reaches the count.
-
-`run-pr-hygiene-audit.sh` is the other gate whose subject is not the firmware but the
-**contributor's own text** — the commit range this PR carries, and its title/description. Nothing
-else here looks there: `run-redaction-audit.sh` above protects a *device's* bug report, never a
-human's own commit message or PR description. It runs two checks: an email/phone/GPS-coordinate/
-credential shape scan, deliberately never run over diff content (this project's MACs, register bytes
-and bench IPs would drown a value-shaped heuristic exactly the way the redaction gate solves it by
-identifier NAME instead — prose has no identifier names to key on), and the same German-detection
-heuristic `run-user-docs-audit.sh` applies to maintained documentation, reused rather than duplicated
-(`tools/user_docs/english_docs.mjs`'s `isLikelyGerman`). A `Co-authored-by:`/`Signed-off-by:` trailer
-is excluded on purpose — that is expected attribution, not a leak. Locally, before a PR exists, it
-checks only the commit range; in CI it also reads the live PR title/description from the
-`pull_request` event payload. A finding names a SHA-256 fingerprint of the exact flagged line, never
-the flagged text itself; adjudicate a false positive in
-[`tools/pr_hygiene/audit_exceptions.txt`](tools/pr_hygiene/audit_exceptions.txt) by that fingerprint,
-with a reason — the ledger must never come to hold the personal data the gate exists to keep out.
-`tools/pr_hygiene/selftest.sh` re-seeds one case per shape it exists to catch, and a few it exists NOT
-to flag (a Renovate version bump, a bench IP, a MAC address, that same trailer). What it cannot see is
-the [`$pr-hygiene-review`](.agents/skills/pr-hygiene-review/SKILL.md) skill's job and mandatory
-head-stamped merge record: other non-English languages, a real name or address spelled out in prose,
-or a secret pasted into the diff itself rather than a commit message.
-
-`run-ui-gif-audit.sh` guards the README's **recording** of that drawing,
-[`docs/media/dashboard.gif`](docs/media/dashboard.gif) — the animated dashboard a new reader sees
-before anything else. **It is a CI step and a merge condition**, like everything else on this page —
-but it was not always, and the argument that kept it out is worth knowing before you touch it. Its
-remedy is a local re-record (Chrome + ffmpeg, ~10 min) that no runner performs, and a gate whose fix
-is unavailable where it fires gets the *stamp* rewritten rather than the recording re-made — a GIF
-then carrying a stamp that asserts it is current, which is strictly worse than no gate at all. What
-changed is not the remedy but the escape: the stamp writer now **refuses** a stamp whose fingerprint
-moved while the GIF bytes did not, which is exactly what re-stamping an old recording looks like
-from the outside (`--allow-identical-gif` overrides it for the one case that is real — you did
-re-record and the encoder reproduced the file byte-for-byte). Red can therefore only be cleared by a
-recording. The cost of the old arrangement was not hypothetical: with the recording's currency
-nobody's merge condition, legacy-462 swapped the
-schematic's circuits and the README went stale the same day, against a stamp written hours earlier.
-If you are an outside contributor and cannot re-record, say so in the PR and leave it to the
-maintainer's `$ui-gif` skill rather than touching the stamp.
-
-**A UI change is not automatically a recording change**, and this gate is careful about the
-difference. The CI step is a fingerprint comparison that takes a second and passes unless the
-recording is genuinely stale, so an unrelated PR never pays for it. Editing the settings modal, the
-charts or the value list touches the same three files as the schematic and still costs you nothing
-here — what the gate reads is the `#schem` figure, the `.sc-*` rules and the six painting
-functions, not the files containing them.
-
-The maintainer's `$ui-gif` review is required when this PR **re-made** the recording, because a new
-recording is the one thing no check can judge. A **stale** one is not a review question at all: the
-merge hook refuses outright, and no ticked checkbox overrides it. A review record is evidence that
-somebody looked at a recording, and that can never outrank the mechanical fact that the recording on
-disk is not of these sources — the only way out is `scripts/record-dashboard-gif.sh`.
-
-It is the one artefact here that rots *invisibly*: a recording renders
-perfectly forever, whatever the UI has since become, so every gate above stays green while the
-README shows a drawing that no longer exists. A screenshot cannot fail a test; it can only be out of
-date, and it looks exactly as good either way. CI has no browser, so the check is a **stamp**, not a
-re-render: it fingerprints the sources the recording was made from — the schematic markup, the CSS
-that draws and animates it, the assembled UI functions that paint it, the
-strings it prints, the scenes in [`tools/uigif/scenes.js`](tools/uigif/scenes.js) and the
-recorder's own framing — and fails when they no longer match
-[`tools/uigif/gif_stamp.txt`](tools/uigif/gif_stamp.txt). The frame is the schematic card **alone** —
-the dashboard header above it is deliberately cropped out, because it prints the running version and
-no recording can keep that current — so a header change needs no re-record, and does not fingerprint.
-That crop is a hard-coded rectangle, which makes it the one framing number a UI change can invalidate
-in silence: when the card's height moves, **re-measure `#schem` in the demo page** and follow it. A
-crop left behind clips the drawing or catches a sliver of the next card, and no check can see it.
-It also reads the GIF itself: a single
-frame, or frames held over 200 ms, fails the thing a recording is *for*, which is showing the flow
-moving. The fix is always to re-record — never to edit the stamp:
-
-```bash
-scripts/record-dashboard-gif.sh    # ~10 min; needs Chrome + ffmpeg, so LOCAL only
-```
-
-It films the real UI (`index.html` + `style.css` + the ordered
-[`app.sources`](main/www/app.sources) fragments, spliced the way the firmware build splices them)
-with only the *device* stubbed, so what the GIF shows is what `renderLive()` drew.
-Look at the result before committing: the gate proves the recording is current, never that it is a
-good picture — that half is the maintainer's `$ui-gif` skill, itself a merge gate.
-`tools/uigif/selftest.sh` proves the gate still catches each way the recording can go stale, and
-that the stamp still cannot be earned without one.
-
-`run-doc-entity-audit.sh` asks whether the **copy-pasteable recipes in the docs still name entities
-that exist**. [`docs/HOME_ASSISTANT.md`](docs/HOME_ASSISTANT.md) hands a reader YAML naming ids like
-`sensor.daikin_altherma_inlet_water_temp_r4t`; each is derived from a catalog **label**, so it is
-only as stable as that label — and the catalog spells one quantity several ways across models. A
-wrong id errors *nowhere*: Home Assistant builds the template sensor, its `availability` guard never
-becomes true, the entity sits at `unavailable`, and the reader concludes their heat pump lacks the
-feature. It resolves each id through the real `ha_slug` over the real catalog, and only against
-**detectable** profiles — the heat-meter recipe had been naming a row that exists only in the
-hand-written host-test fixture `altherma3_r_erga`, which detection can never assign, so a check that
-looked at every table would have called it clean. It does **not** require an id to be right on every
-profile: the catalog genuinely disagrees across models, and the docs should state a majority id and
-name the alternatives beside it. `tools/docs/selftest.sh` re-seeds the defects it was built for.
-
-Ordinary presenter and entity-ID audits always compile the current C++ inputs. Their explicit
-`--golden` and `--binary` options are only for mutations inside a fresh selftest fixture whose
-pristine inputs have passed. Run `scripts/run-host-audit-reuse-tests.sh` after changing this reuse
-contract; it checks changed and removed inputs, preserved timestamps and compiler changes.
-
-`run-agent-instructions-budget.sh` is the canonical runner-neutral agent-integrity contract. It
-keeps the always-loaded [`AGENTS.md`](AGENTS.md) below 24 KiB, validates canonical skill identity and
-OpenAI metadata, focused-reviewer safety, hook definitions, generated Codex registration, effective
-repository instruction budgets and the explicit project safety invariants.
-Narrative belongs in `docs/`; do not trim a rule or raise the budget to clear a red gate. The
-mutation canaries are:
-
-| Canary | Expected evidence |
-|---|---|
-| Missing canonical instruction or configuration input | Non-zero failure; never a vacuous pass |
-| `AGENTS.md` over 24 KiB | Exit 1 with the measured byte count |
-| Missing, duplicate or wrongly named canonical skill | Non-zero identity failure |
-| OpenAI metadata or focused-reviewer safety drift | Non-zero configuration failure |
-| Hook dispatch drift | Non-zero hook failure |
-| Generated Codex registration drift | Non-zero adapter mismatch; regenerate from canonical sources |
-| Repository instruction chain over its limit | Non-zero failure with the affected directory and byte count |
-| `AGENTS.override.md`, including ignored files | Non-zero rejection of hidden instruction replacement |
-| Required safety invariant absent | Non-zero failure naming the invariant |
-
-Run `tools/agent-config/selftest.sh` after changing agent instructions, skills, subagent definitions,
-hook mappings, or the checker itself.
-
-`scripts/run-skill-audit.sh` checks canonical skills and reviewers against repository paths,
-partitions, routes and board wiring. Run `tools/skill_audit/selftest.sh` when its implementation or
-audited contracts change. The audit is read-only; `--optimize` changes skill files and requires an
-explicit request to apply fixes. Inspect its diff and rerun the read-only audit after an update.
-
-Enable the versioned native Git push hook once per clone with
-`git config --local core.hooksPath .githooks`. It verifies each destination branch and the commit
-Git is sending. Updates to an open PR need `$skill-audit` and `$pr-hygiene-review` records stamped
-with that commit in the PR body before the push. A successfully queried branch with no open PR may
-be pushed after the local audit; a failed PR query blocks the push. Merge reviews remain separate.
-Push from a clean checkout of the commit being sent so the local audit verifies that exact tree.
-Git hooks are local checks; remote CI and branch protection enforce merge readiness.
-
-Project branches use `agent/`, including when working from Codex. The PR wrapper requires that
-prefix. Native Codex setup and its separate trust/dispatch acceptance are documented in
-[`docs/AGENT_MIGRATION.md`](docs/AGENT_MIGRATION.md); a passing source gate is not runtime proof.
-
-The mechanical job runs `tools/agent-policy/selftest.sh` whenever a diff reaches it; the separate `pr-policy.yml` workflow
-provides the required `gates` check and invokes protected-base `scripts/run-agent-policy.sh` with the
-current PR body, head SHA and complete changed-file list from GitHub. Missing/partial inputs, an event SHA that is no longer
-the PR head, an unchecked or missing required review, and a stamp for an older commit all exit 2. A
-current `$name` record passes; other spellings are rejected. Editing the PR body starts a fresh
-`pull_request_target` run, so a corrected stamp is evaluated automatically. Any later commit
-invalidates every prior stamp.
-
-This CI parser proves exact record syntax, applicability, completeness and head freshness; it cannot
-prove who last edited a PR body. An outside contributor must still leave the section alone, and a
-maintainer must inspect/record the reviews before using their GitHub merge permission. Repository
-merge authorization and the branch ruleset are the actor trust boundary, not a checked Markdown box.
-
-There is one fail-closed CI-only exception: GitHub-native automerge may omit human review records for
-a same-repository, one-commit Renovate PR only when the current REST metadata and complete immutable
-file patches for that exact head prove that the sole edit is a like-for-like replacement of the fully
-pinned Renovate runner digest in `.github/workflows/renovate.yaml`; only the validated trailing
-version comment may move with that digest. The decision uses the data-only protected-base
-`pr-policy.yml` workflow, which never checks out PR-controlled code; mechanical execution remains
-under the ordinary `pull_request` event in `build.yml`.
-Missing or unreadable context files, or providing only part of the three-file authoritative context,
-hard-fails. Malformed or ineligible complete context rejects the exception and follows the ordinary
-human gates. Ineligible context includes a fork, another actor/branch shape, a tag pin, an
-action-coordinate change or any mixed edit. The exception never applies to a local/manual merge,
-ESP-IDF, esptool-js, or another dependency class.
-
-Four more fast gates guard the **published artifacts** rather than the firmware, so most PRs never
-need them locally — run them if you touch
-[`scripts/publish-pages-branch.sh`](scripts/publish-pages-branch.sh),
-[`scripts/build-pages.sh`](scripts/build-pages.sh),
-[`scripts/check-web-installer-plan.py`](scripts/check-web-installer-plan.py),
-[`scripts/check-publish-version.sh`](scripts/check-publish-version.sh),
-[`scripts/next-version.sh`](scripts/next-version.sh),
-[`scripts/generate-ota-changelog.py`](scripts/generate-ota-changelog.py), or when changing the CI
-trust/release split:
-
-```bash
-scripts/run-pages-publish-tests.sh         # needs only git, no toolchain
-scripts/run-web-installer-plan-tests.sh    # needs only python3
-scripts/run-publish-version-tests.sh       # git + python3 + a C++17 compiler
-scripts/run-ci-release-contract-tests.sh   # shell + python3, no credentials
-```
-
-The first races two publishers against a throwaway bare repo, because `gh-pages` has two concurrent
-writers (a release dispatch's root publish and every merge's dev-channel publish) and the loser used
-to fail its entire build — a bug that read as a flake, since re-running always cleared it. It also
-pins that a call which is not one of the two modes fails *before* the branch is touched: the
-argument selects which slice gets overwritten, so a retired `--pr 12` treated as a root publish
-would replace the release feed.
-
-The second is the negative half of the **NVS-preservation** gate. `check-web-installer-plan.py`
-already ran in CI on the real manifest, but only ever proved that today's good plan passes — these
-tests prove it still *rejects* a part that erases `nvs`, a path outside the manifest directory, a
-directory in place of an image and malformed JSON. A checker that only sees valid input is not
-evidence.
-
-The third covers [`check-publish-version.sh`](scripts/check-publish-version.sh), which the build job
-runs right after it stamps the version: **would a device on the currently-published build accept the
-one this run would publish?** The published version is read out of the `gh-pages` branch (per feed —
-root for a release, `dev/` for a merge) and the comparison is the device's own `ota_is_upgrade()`
-([`logic/version_cmp.hpp`](main/logic/version_cmp.hpp), via
-[`tools/version/publish_gate.cpp`](tools/version/publish_gate.cpp)), so CI cannot publish something
-no board would install. It exists because the version is *derived*: `next-version.sh` reads the `v*`
-tag list and falls back to the `version.txt` floor when it is empty, so a deleted tag silently
-resets the numbering — on 2026-07-24 that republished the dev feed as `1.0.0-dev.168` over the
-`1.0.14-dev.2` it had served minutes earlier, with a green build. If this gate fires, fix the floor
-(a tag, or `version.txt`) — not the gate.
-
-The fourth pins the workflow's trust and delivery contract: untrusted PRs expose no signing key or
-flashable artifact, and release/dev resumes must preserve the exact source and offered bytes.
-The early source/version check is a preflight; publication also compares the candidate manifest,
-binary inventory, changelog and indexed images with the existing feed on an equal-version resume.
-A newly signed rebuild cannot replace an already offered version. Resume with the original handoff,
-or advance through the normal version path. The license/notices, Pages feed and GitHub Release
-stay in their fail-closed order. Development
-publication keeps a bounded public Pages readback with 30 attempts; an explicit release has no
-post-build readback or test gate.
-
-Every one of their test suites is a **step of one `mechanical_gates` job**, not a job each (the
-required `gates` policy uses its own clean PR runner, and the production version gate runs in
-`trusted_build`, where the stamped version exists). Actions bills every
-job rounded up to the next whole minute, so a fleet of ~15-second jobs costs a billed minute each
-for under a minute of work; a step boundary names the failure just as precisely. For the current
-list, read the `mechanical_gates` job in `.github/workflows/build.yml` rather than a count written here.
+Host tests work without ESP-IDF, Docker or a board. They do not prove that the target tasks call a
+rule correctly, that a physical value is true, or that a device survives an update. Source contracts,
+domain audits, target compilation, rendered review and hardware acceptance cover different parts
+of that evidence. Report each completed layer separately.
 
 ## Building the firmware
 
-There is no local ESP-IDF install. Builds go through the Docker image pinned to the version CI uses
-(read at runtime from `.github/workflows/build.yml`):
+Build the ESP32-S3 image through the repository wrapper:
 
 ```bash
 scripts/idf-docker.sh idf.py build
 ```
 
-The `esp32s3` target is part of `sdkconfig.defaults`, so a first build needs no preceding
-`set-target`. Managed-component ranges live in `main/idf_component.yml`, while their complete
-resolved graph is committed in `dependencies.lock`. To update it intentionally, edit the manifest,
-run `scripts/idf-docker.sh idf.py update-dependencies`, and review both files. Do not hand-edit the
-lock. **You do not need to build to open a PR** — CI builds every PR and attaches its non-flashable
-diagnostic artifacts. Say in the PR what you did and didn't verify.
+The wrapper resolves the ESP-IDF version pinned in
+[build.yml](.github/workflows/build.yml); use it rather than a different local SDK.
+`sdkconfig.defaults` selects `esp32s3`, so a clean build needs no separate `set-target`.
+Docker is required. An environment without Docker can run host checks but cannot claim a firmware
+build.
 
-> **Flashing needs a signed image.** This config uses the Secure Boot v2 *signature scheme* without
-> hardware Secure Boot, so an **unsigned** app crash-loops before `app_main` (no eFuses are burned,
-> so this is a crash-loop, not a brick — reflash to recover). `scripts/require-signed.sh` refuses an
-> unsigned, corrupt or wrong-key image by verifying its signature and pinned public-key digest.
-> Signing needs an offline key that is not in this repo; see
-> [`docs/SECURITY.md`](docs/SECURITY.md). For a contributor the practical path is: build to check it
-> compiles, and let the maintainer test on hardware — or generate your own key for your own board.
-> `scripts/require-signed.sh` and the maintainer flash workflows accept only this project's pinned
-> key, so an own-key image is flashed outside them, and that board then trusts only your key: it
-> refuses the project's signed OTA images until it is USB-reflashed with one.
+Managed-component ranges are in [main/idf_component.yml](main/idf_component.yml); the exact
+resolved graph is committed in [dependencies.lock](dependencies.lock). For an intentional
+update, edit the manifest, run `scripts/idf-docker.sh idf.py update-dependencies`, then review both
+files. Do not hand-edit the lock.
 
-Maintainer OTA writes use the direct, unchained `scripts/production-ota-gate.py`; never call
-`/ota/update` directly. For an ordinary private-inventory `bench` update, use the exact signed
-official dev artifact with `--confirm-bench bench --install-bench`. This mode requires a clean
-matching source tree, host contracts, a generation-bound one-shot write, verifier/heap evidence,
-rollback probation and fixed live pressure. It cannot contact `production`; ordinary bench delivery
-is OTA-only, with signed NVS-preserving USB reserved for bootstrap or recovery. The one other USB
-case is an explicitly requested pre-merge test of an exact local head on the bench (`$deploy-test`,
-or `$flash-esp32` naming the bench under the same rules). It tests unmerged code and never counts as
-delivery.
+A local build is useful but is not required to open a PR: CI compiles build-relevant changes and
+retains diagnostic artifacts. State whether you built locally. PR artifacts contain compressed
+ELF/checksum and size reports, with no flashable binary or browser-installer manifest.
 
-Production promotion is the separate `--confirm-production production --execute` transaction. It
-first exercises a complete signed release download under pressure on the MAC-bound bench, restores
-the exact dev artifact, then permits one un-retried update of the distinct production role and a
-read-only heap/X10A/MQTT canary. The bench need not have physical X10A; production must prove the
-real retained X10A payload. The current target keeps its configured dev channel and binds only the
-release check generation to the stable feed. The historical release cannot consume that transient
-binding, so its return still reads the mutable official dev path: do not publish dev while a
-production-promotion transaction is in progress. Any changed or incompatible return manifest stops
-the transaction before production is contacted. Neither mode cuts a release. See
-[`docs/SECURITY.md`](docs/SECURITY.md) for the complete commands and evidence boundaries.
+**Flashing requires a signed application.** The firmware uses the Secure Boot v2 signature
+scheme without hardware Secure Boot. An unsigned application can crash-loop before `app_main`.
+Run `scripts/require-signed.sh` before every flash. The offline signing key is not in the repository;
+never inspect, copy or expose it. Ask the maintainer for official hardware validation. A board you
+build with your own key requires a separate trust setup: the pinned-key verifier and maintainer
+delivery workflows reject that image, and your board rejects official OTA until USB-reflashed with
+official firmware. See [SECURITY.md](docs/SECURITY.md) for the trust model and
+[MAINTENANCE.md](docs/MAINTENANCE.md) for separately authorized delivery.
 
 ## Where code goes
 
-- **Any decode, config, discovery or policy logic belongs in [`main/logic/`](main/logic/)** as an
-  IDF-free header, with a `CHECK` in `test/test_logic.cpp`. Never bury it in a `.cpp` only the device
-  can run — that is logic no one can verify without hardware.
-- **Never hand-edit generated per-model `main/def/*` profile tables.** They are machine-generated;
-  `main/def/overlay.hpp` is the hand-written overlay and `main/def/homehub.hpp` is the curated
-  HomeHub definition source. A generated profile's detection signature is the set of register pages
-  referenced by its rows (`def/signatures.hpp` → maximal page overlap). Deleting a row changes that
-  signature only when it is the last row referencing its page; only then is that page bit removed,
-  which can make the correct model lose a page to a feature-richer wrong one. An absent-feature row
-  gets the `ValueDef::no_publish` detect-only flag instead of deletion. Verify rows against
-  [`docs/REGISTERS.md`](docs/REGISTERS.md) §5.
-- **Heap is the binding constraint** (the largest *contiguous* free block, not total free). HTTP
-  handlers must stay under the shared OOM try/catch; every allocating task loop must self-guard; never
-  allocate while holding a mutex. The rules and the reasoning are in
-  [`AGENTS.md`](AGENTS.md) → "Memory, concurrency, and HTTP safety".
-- A PR touching HTTP, MQTT, OTA, TLS, JSON, X10A publishing, firmware polling or heap allocation also needs a
-  current-head `$heap-safety-review` record from the independent read-only `heap_safety_reviewer`;
-  the aggregate PR gate enforces applicability and freshness.
-- C/C++ formatting is [`.clang-format`](.clang-format). Match the surrounding comment density —
-  explaining *why*, not *what*, is the house style.
-- **Warnings are part of the contract in `main/`.** [`main/CMakeLists.txt`](main/CMakeLists.txt) pins
-  `-Werror=return-type`, `-Werror=format` and `-Werror=unused-result` on that component alone, so the
-  `[[nodiscard]]` on the NVS setters and the `format(printf, …)` on `diag_printf` are build *errors*,
-  not review catches — a dropped NVS write is silent, and one of them once left safe mode unable to
-  latch its crash counter. They are pinned rather than inherited because ESP-IDF's own `-Werror`
-  handling is version- and Kconfig-dependent, so it could change under a bump with nothing here to
-  notice. The firmware build is the only compile of `main/*.cpp`, so these fire in CI, not in
-  `run-mock-tests.sh`. Don't relax a flag to get green: each hit is the defect class it was pinned
-  for.
-- **So is the optimisation contract of the status serializer.** The release build now selects
-  size optimisation globally, and `main/CMakeLists.txt` also pins `http_status.cpp` to `-Os` so this
-  stack-critical translation unit remains protected if the global setting changes later. The older
-  whole-body `http_append_status_json()` overflowed a task stack twice; historically its `-Og` frame
-  was 11776 bytes and the deepest MCP path was 14512/16384, while the first per-file `-Os` change
-  reduced them to 3744 and 6480. The current bounded, streamed serializer is larger in features but
-  has no owning whole-status instantiation: the release ELF measures its frame at 4896 bytes. The
-  historical manual call-path walk measured MCP at 7552 bytes; the automated conservative gate sums
-  7664/16384 bytes, leaving 8720 bytes before ISR and exception-unwind frames. Do not remove the
-  explicit pin without an equivalent invariant. If you touch this path,
-  re-measure it from the ELF's `entry a1,N`, never from an idle heap reading; the command is in
-  [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md#memory-constraints).
-- **MQTT publishing has its own source-local frame contract.** ESP-IDF 6.0.2 with the required
-  release-wide `-Os` once folded called-once reference/circulation helpers into `mqtt_task`, growing
-  its fixed frame from 1040 to 2304 bytes. `main/CMakeLists.txt` now compiles `mqtt_ha.cpp` with
-  `-fno-inline-functions-called-once` and `-Werror=frame-larger-than=2048`; the measured task frame is
-  1120 bytes, the object's current largest frame is 1584 bytes, and the task allocation stays 6144
-  bytes. Do not weaken either option or merely raise the task stack to make a build pass. If this
-  translation unit or its helper boundaries change, remeasure the task and complete call path from
-  the CI-pinned ELF and verify the live MQTT high-water mark under OTA/weather TLS pressure. A fixed
-  frame below 2 KiB does not by itself prove the full task path or the contiguous internal-heap
-  budget, and the dev.13+ direct cache/digest and MQTTS/OTA headroom protections must remain intact.
-- **There is deliberately no clang-tidy or cppcheck gate**, and that was measured rather than
-  assumed. Over `main/logic/` + `main/def/`, a blanket config reports ~7000 findings — over half of
-  them this project's own `CHECK` macro — and a curated bug-finding set reports ~50 with **zero** real
-  defects; the three plausible ones flag deliberate, documented code (an explicit int16 clamp, a
-  well-defined `&&` sequence, a bounds-guarded reference return). The bug classes a linter looks for
-  are typed out here rather than linted out, and the defects this project ships fixes for are domain
-  and resource-budget defects, which the audits above already cover. A gate whose findings are noise
-  is one people learn to suppress without reading.
+| Change | Placement and constraint |
+|---|---|
+| Decode, formatting, validation, configuration, planning or discovery logic | IDF-free header in `main/logic/` and a focused `CHECK` in `test/test_logic.cpp`; device wrappers call that same rule |
+| Model profiles | Generated `main/def/` tables are machine output; deliberate corrections use the supported adjudication/override layer |
+| Hand-written definitions | `main/def/overlay.hpp`; curated Modbus sources `homehub.hpp`/`altherma4.hpp` and Protocol S `protocol_s.hpp` |
+| UI behavior and assets | `main/www/`, following its `AGENTS.md`, [DESIGN.md](docs/DESIGN.md) and [JavaScript ownership map](main/www/js/README.md) |
+| HTTP contract | [API.md](docs/API.md); component responsibilities and resource constraints belong in [ARCHITECTURE.md](docs/ARCHITECTURE.md) |
+| Owner instructions and diagnoses | The corresponding user guide; rules and source evidence belong in [DIAGNOSTIC_EVIDENCE.md](docs/DIAGNOSTIC_EVIDENCE.md) |
+
+A profile's page set is also its detection signature. Preserve absent-feature rows as detect-only
+`ValueDef::no_publish` where required; removing the last row for a page can change model detection.
+Verify converter, layout, label and publication identity against [REGISTERS.md](docs/REGISTERS.md).
+
+Resource-sensitive changes must preserve the rules in [AGENTS.md](AGENTS.md): the largest
+contiguous internal heap block is the binding allocation limit; allocating HTTP handlers and task
+loops need their exception boundary; allocations cannot strand a raw mutex. Configuration writers
+commit only owned fields and check every persistence result. NVS offset/size changes require an
+explicit migration decision.
+
+Match [.clang-format](.clang-format) and surrounding code. Keep comments that explain a constraint
+or decision. `main/CMakeLists.txt` makes return-type, format and unused-result warnings fatal;
+do not weaken these flags to clear a failure. Compiler/helper contracts and named ELF paths protect
+the 10 KiB HTTP stack with a 2 KiB reserve and the MQTT 2 KiB per-function frame ceiling. Remeasure
+affected paths from the CI-pinned ELF and, when authorized, from task high-water evidence.
+Idle heap figures do not measure stack safety.
 
 ## Value correctness
 
-If your change can alter what a published number **means**, that is the highest-risk change in this
-codebase and needs more than a green build. State in the PR:
+If a change alters a reading's meaning, include:
 
-- which values changed, and what the new number should physically be;
-- the decode witness — the wire bytes, what they should read, what they now read (`GET /diag` after a
-  detect pass dumps the raw page bytes for exactly this);
-- whether a real unit confirmed it, or why that wasn't possible.
+- The affected values, physical quantity, unit and intended result.
+- A decode witness: exact wire bytes, expected output and actual output.
+- Whether a real unit confirmed the interpretation, with explicit limits if it did not.
 
-Genuine per-model deviations get an on-record `ADJUDICATED` entry in
-`tools/domain/audit_exceptions.txt` (with evidence — a live capture or a documented model fact); a
-temporary defect gets a `KNOWN-DEFECT` entry that is **deleted by its fix**. Never add an entry to
-silence a *new* finding on code your PR touches — that is the gate working.
+Use independent source evidence, not only expected values copied from the implementation. A passing
+converter test cannot establish that the selected register or converter is physically correct.
+
+Document genuine model-specific exceptions as evidence-backed `ADJUDICATED` entries in
+`tools/domain/audit_exceptions.txt`. A temporary `KNOWN-DEFECT` entry names the unresolved problem
+and is deleted by its fix. Never suppress a new finding introduced by the change merely to get a
+passing gate.
 
 ## Pull requests
 
-Fill in [the template](.github/pull_request_template.md). Its `$project-review`,
-`$pr-hygiene-review`, `$feature-docs`, `$domain-review`, `$schematic-review`,
-`$ui-use-case-review`, `$absence-review`, `$diagnostic-evidence-review`, `$user-docs-review` and
-`$ui-gif` records are **maintainer-only** repository skills under `.agents/skills/`; the separate
-`$heap-safety-review` record comes from the independent focused reviewer when allocation-sensitive
-paths apply. They are not something an outside contributor can run. Leave them unchecked; the
-maintainer runs them before merge. Your equivalents are the scripts above plus an honest note about
-hardware. Renovate's mechanically attested
-Action-pin-line-only PR class is generated without the template and is the sole exception; any
-ineligible Renovate PR returns to this ordinary review path.
+Install the local hooks once per clone:
 
-`main` is kept **strictly linear**, so PRs land as **squash merges** — enforced by a branch ruleset
-on `main` (require a pull request, require linear history, and the `gates` / `build` checks green),
-not left to convention. Nobody is exempt: the ruleset carries no bypass actors, so this
-holds for the maintainer too — `main` takes no direct pushes at all. Practical consequences:
+```bash
+git config --local core.hooksPath .githooks
+```
 
-- Everything lands through a PR, including a one-line docs fix. There is no push-to-`main` path.
-- GitHub-native automerge is enabled only for `renovatebot/github-action`. Protected-base CI waives
-  human records only for its live, one-commit, same-repository pin in `renovate.yaml`; every other
-  Action update and both firmware dependency PRs remain manual.
-- Rebase onto `main` rather than merging `main` into your branch. Merge commits can't be accepted.
-- Sign your commits (`git commit -S`, or let GitHub sign a web merge). Signing is **asked for, not
-  enforced**: the ruleset used to carry *require signed commits*, and it was dropped because the
-  self-hosted Renovate bot cannot satisfy it. Renovate authenticates with a **PAT**, and GitHub
-  signs a bot's commits only when the bot is a **GitHub App** — neither of Renovate's two commit
-  paths helps, since the `git` one is unsigned by construction and the API one is signed by GitHub
-  for an App only. That was measured rather than inferred: a dispatch with the API path on
-  (run `30169946598`) produced `verified: false, reason: unsigned`. So every dependency PR carried
-  unsigned commits and the rule blocked them all — green checks, zero required approvals,
-  `mergeable_state: blocked`. A squash merge performed by GitHub is still signed by its web-flow key
-  either way; what is gone is the guarantee that each *incoming* commit was. Restoring the rule
-  means first moving Renovate onto a GitHub App (or giving it a `gitPrivateKey`) — see
-  [`.github/workflows/renovate.yaml`](.github/workflows/renovate.yaml).
-- `main` moves under open PRs — expect to rebase before merge.
-- A red CI job blocks the merge, including on a docs-only PR — the fast gates are cheap and
-  hardware-free precisely so this is never a burden.
-- A docs-only PR runs both required checks and **skips the firmware compile steps**: prose cannot
-  change the image, while the `build` job still carries the mechanical result and reports success
-  for the ruleset. What counts as
-  build-relevant is the path list in the *Detect build-relevant changes* step of
-  [`build.yml`](.github/workflows/build.yml) — add to it if you introduce a file the image or the
-  published site is made of.
+Before PR creation or push, run `$skill-audit` and inspect its result; `--optimize` changes canonical
+skills only with explicit edit authorization. The pre-push hook checks every destination and sent
+commit. Updating an open PR requires current-commit `$skill-audit` and `$pr-hygiene-review` stamps
+from a clean exact-commit checkout. A successful lookup finding no open PR allows push after the
+local audit; a failed lookup blocks it. This local hook does not change remote branch protection.
+Agent setup, generated registration, trust review and runtime acceptance belong in
+[AGENT_MIGRATION.md](docs/AGENT_MIGRATION.md).
 
-On `main`, change detection compares against the source of a valid dev feed with a completed
-publication proof. The proof binds the entire feed to the exact successful publisher and public
-readback; a manifest SHA alone is insufficient. Missing, expired (90-day retention), incompatible
-or unavailable evidence triggers a build. A full workflow rerun also builds to recover publication.
-Run `scripts/run-build-change-detection-tests.sh` after changing the comparison or browser filter.
+All changes reach `main` through a PR, including documentation fixes. `main` requires linear history,
+squash merges and passing `gates` and `build` checks, with no bypass actors. Sign your commits when
+possible; incoming commit signing is requested rather than enforced. Do not force-push or rewrite
+shared history without explicit authorization.
 
-Main pushes and release dispatches share one workflow-level queue across version selection, signing
-and publication. Up to 100 pending runs are retained instead of replacing a waiting release.
-Each PR run finishes its mechanical and compile stages; newer PR events do not cancel individual
-jobs in an older run. Rapid PR edits can therefore use more runner time. PR validation and the
-protected-base review policy run only for open PR events; edits after closing or merging skip
-those jobs.
+The template's review records are maintainer evidence. Outside contributors leave them unchecked
+and provide script results and hardware limitations. Every required record must name the actual PR
+head; any later commit invalidates it.
 
-For fork PRs, `build.yml` executes the exact PR merge tree only under the ordinary `pull_request`
-event; GitHub withholds repository secrets and downgrades the token, and checkout does not persist
-credentials. A same-repository branch author is instead a trusted CI actor: its PR-editable workflow
-can request repository secrets before merge policy runs, so `gates` prevents an unauthorized merge
-but is not a pre-execution secret sandbox. Independently, `pr-policy.yml` supplies the required
-`gates` check under `pull_request_target`, loads its verifier exclusively from the protected base
-tree, and never checks out PR code. Branch protection requires both `gates` and `build`; the latter fails when
-`mechanical_gates` fails and runs compile steps only for build-relevant changes. PRs compile- and
-size-check only and receive no signing key from the checked-in workflow. Their seven-day Actions artifact contains the compressed ELF,
-its checksum and size reports for diagnostics, but no flashable `.bin`, merged image, Web Serial
-parts or installer manifest. That is deliberate, not a failure.
+| Review | When required |
+|---|---|
+| `$project-review`, `$domain-review`, `$pr-hygiene-review` | Every ordinary merge, including all local/manual merges; hygiene also runs before PR opening |
+| `$heap-safety-review` | HTTP, MQTT, OTA, TLS, JSON, X10A publishing, firmware polling or allocation paths; independent read-only `heap_safety_reviewer` supplies evidence |
+| `$skill-audit` | Before PR creation or push; verifies canonical skills/reviewers against repository facts |
+| `$feature-docs` | Technical feature surface changes |
+| `$schematic-review` | Dashboard drawing, contract or audit changes |
+| `$ui-use-case-review` | Visible UI behavior or its test/audit surface changes |
+| `$absence-review` | Optional-source lifecycle or presentation changes |
+| `$diagnostic-evidence-review` | Diagnosis observations, sampling, thresholds, rules or source claims change |
+| `$user-docs-review` | User-facing meaning, instructions, documentation or diagnosis copy changes |
+| `$ui-gif` | GIF or stamp changes; a stale/unverifiable recording is independently a hard merge block |
 
-**A PR publishes no installer.** Per-PR previews at `…/PR/<N>/` are retired: each one was a
-`gh-pages` push, and every `gh-pages` push starts a full GitHub Pages deployment on top of the
-build. To flash a build in a browser, use the **dev channel** (`…/dev/`), republished by every
-firmware-relevant merge. The PR run retains only the non-flashable diagnostic artifact described
-above for seven days. Actions minutes are a metered monthly resource on this account — the same
-reason the fast mechanical gates share one job and firmware compile steps are skipped when they
-cannot matter.
+Use independent reviewers for high-risk changes; implementation authors cannot self-certify them.
+Unresolved findings, required CI, requested hardware evidence and user decisions block merge.
+The exact expected-head REST merge command and review-record syntax are in
+[MAINTENANCE.md](docs/MAINTENANCE.md) and [AGENT_MIGRATION.md](docs/AGENT_MIGRATION.md).
+A checked box supplies evidence; it does not authorize a merge.
 
-## Releases (a merge does not cut one)
+The sole review exception is GitHub-native automerge of an authoritative-CI-attested,
+same-repository, one-commit Renovate PR that changes only the fully pinned runner line in
+`.github/workflows/renovate.yaml`. Protected-base policy verifies the immutable head and complete
+patches. It never applies to local/manual merges, ESP-IDF, esptool-js or mixed changes.
 
-Merging a PR publishes a **development build**, not a release. There are two feeds, and they move
-at different rates:
+CI runs PR-controlled code under ordinary `pull_request` in `build.yml`. Forks receive no
+repository secrets and a reduced token; same-repository workflow authors are trusted CI actors.
+The separate `pr-policy.yml` supplies `gates` from the protected base without loading PR code.
+The required `build` propagates the shared mechanical result and conditionally compiles relevant
+changes. Documentation-only PRs still run both required checks. Do not replace step conditions
+with workflow path filters that leave required checks pending.
 
-| Feed | URL | Cut by |
-|------|-----|--------|
-| **Release** | [`…/manifest.json`](https://0bu.github.io/daikin-altherma-esp32/manifest.json) | a workflow dispatch with `release: true` (+ `bump`); normally Actions → **build** → *Run workflow* |
-| **Development** | `…/dev/manifest.json` | every firmware-relevant push to `main` |
+## Releases
 
-Every slice published by the current workflow also contains `artifacts.json`. `manifest.json` stays
-below the 1024-byte reader limit of the oldest supported signed restore release and contains only
-installer/OTA data; the sibling index binds the exact manifest hash plus every published `.bin` hash
-and size for integrity checks. The production promotion gate checks that restore grammar before it
-contacts the bench. A historical root slice keeps its old shape until the next release dispatch; a dev
-publish does not rewrite it.
+A firmware-relevant merge publishes the development feed at `/dev/`; it creates no release tag or
+GitHub Release. A `release: true` workflow dispatch performs one signed build, publishes the release
+feed and creates the exact-source tag and GitHub Release. It skips the mechanical PR suite and
+contacts no board. In the authorized delivery chain, confirmed cumulative dev-changelog capacity
+exhaustion dispatches that workflow for the already validated main head; other failures do not.
+Hardware acceptance, exact-source publication, equal-version byte identity and production promotion
+are maintained in [MAINTENANCE.md](docs/MAINTENANCE.md).
 
-A release run is the only thing that creates a `v*` tag and a GitHub Release; a merge creates
-neither. Dev builds are versioned `<next release>-dev.<commits since the tag>` — a semver
-pre-release, so they sort *above* the release they followed and *below* the release they lead to.
-A device picks its feed in the web UI (gear → **ESP32** → *Update channel*); nothing about a PR
-changes that, so a contributor never has to think about which feed their change lands in. It lands
-in dev. Releases normally follow a maintainer's decision; the bounded automatic capacity handoff
-below is the exception.
-
-An explicit release dispatch does not rerun the mechanical PR suite and has no hardware dependency.
-It performs one signed firmware build, publishes the root feed, and creates the exact-source tag and
-GitHub Release. Test-board and production-board acceptance are separate maintainer operations around
-the PR/merge process; the release workflow neither repeats them nor claims hardware evidence.
-
-In the canonical agent delivery flow, a confirmed cumulative dev-changelog capacity overflow
-automatically cuts a release of the already validated main head through this existing workflow,
-without another approval. Its `expected_source_sha` input rejects a moved or malformed source before
-versioning and signing. The agent verifies publication and resumes the exact-source dev build
-on the next development core before bench and production acceptance. Other failures do not trigger
-a release; the legacy byte limits and published history remain intact. See the
-[release-baseline handoff](.agents/skills/deploy-prod/SKILL.md#3a-automatic-release-baseline-when-the-cumulative-changelog-is-full).
+Crash decoding requires the private raw dump and its exact matching unstripped ELF. The decoder
+verifies the ELF bytes and embedded identity; matching a firmware version alone is insufficient,
+and matching ELF identity cannot date a stored incident.
 
 ## License
 
-Contributions are under the [MIT License](LICENSE). The X10A protocol and value definitions derive
-from [ESPAltherma](https://github.com/raomin/ESPAltherma) (MIT), credited in the README. Please keep
-new code free of copied material from other projects unless its license permits it and you say so in
-the PR.
+Contributions use the [MIT License](LICENSE). Preserve attribution and license notices when adding
+permitted third-party material, and describe its provenance in the PR. Existing project credits are
+in the main README.
