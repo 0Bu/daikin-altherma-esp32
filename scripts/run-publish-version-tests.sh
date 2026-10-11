@@ -72,10 +72,12 @@ run() { ( cd "$T/work" && ./scripts/check-publish-version.sh "$@" ) >"$T/out.log
 echo "== 1. no gh-pages at all: the first publish ever is not blocked =="
 run release 1.0.0; check "release passes" "$?" "0"
 run dev 1.0.0-dev.1; check "dev passes"   "$?" "0"
-run --source-sha "$SOURCE_A" release-resume 1.0.0
+run --preflight --source-sha "$SOURCE_A" release-resume 1.0.0
 check "first release-resume passes with an explicit source" "$?" "0"
-run --source-sha "$SOURCE_A" dev-resume 1.0.0-dev.1
+run --preflight --source-sha "$SOURCE_A" dev-resume 1.0.0-dev.1
 check "first dev-resume passes with an explicit source" "$?" "0"
+run --source-sha "$SOURCE_A" release-resume 1.0.0
+check "publication without a candidate is refused even for an absent feed" "$?" "2"
 
 echo "== 2. each mode reads its OWN feed's manifest =="
 publish 1.0.13 1.0.14-dev.2
@@ -102,44 +104,52 @@ run dev 1.0.14-dev.2;  check "equal dev version refused"     "$?" "1"
 echo "== 5. a RELEASE resume may repeat exactly one stable version =="
 run release-resume 1.0.13
 check "resume without source identity is refused" "$?" "2"
+run --preflight --source-sha "$SOURCE_A" release-resume 1.0.13
+check "equal release source passes provisional preflight" "$?" "0"
+check "source-only pass explicitly stays provisional" \
+      "$(grep -c 'artifact identity still required before publication' "$T/out.log")" "1"
 run --source-sha "$SOURCE_A" release-resume 1.0.13
-check "equal release and identical source pass" "$?" "0"
-run --source-sha "$SOURCE_B" release-resume 1.0.13
+check "equal release source alone cannot authorize publication" "$?" "2"
+run --preflight --source-sha "$SOURCE_B" release-resume 1.0.13
 check "equal release from different source is refused" "$?" "1"
 check "source mismatch names both identities" \
       "$(grep -c "$SOURCE_A.*$SOURCE_B" "$T/out.log")" "1"
-run --source-sha "$SOURCE_A" release-resume 1.0.14
+run --preflight --source-sha "$SOURCE_A" release-resume 1.0.14
 check "new stable release still passes" "$?" "0"
-run --source-sha "$SOURCE_A" release-resume 1.0.13-rc.1
+run --preflight --source-sha "$SOURCE_A" release-resume 1.0.13-rc.1
 check "pre-release resume is refused" "$?" "1"
-run --source-sha "$SOURCE_A" release-resume 1.0.12
+run --preflight --source-sha "$SOURCE_A" release-resume 1.0.12
 check "older release resume is refused" "$?" "1"
 
 publish 1.0.13 1.0.14-dev.2 no-provenance
-run --source-sha "$SOURCE_A" release-resume 1.0.13
+run --preflight --source-sha "$SOURCE_A" release-resume 1.0.13
 check "equal legacy manifest without provenance fails closed" "$?" "2"
 publish 1.0.13 1.0.14-dev.2 short-source
-run --source-sha "$SOURCE_A" release-resume 1.0.13
+run --preflight --source-sha "$SOURCE_A" release-resume 1.0.13
 check "equal manifest with malformed source fails closed" "$?" "2"
 publish 1.0.13 1.0.14-dev.2
 
 echo "== 5b. a DEV resume may repeat only the exact source-bound dev version =="
 run dev-resume 1.0.14-dev.2
 check "dev resume without source identity is refused" "$?" "2"
+run --preflight --source-sha "$SOURCE_A" dev-resume 1.0.14-dev.2
+check "equal dev source passes provisional preflight" "$?" "0"
 run --source-sha "$SOURCE_A" dev-resume 1.0.14-dev.2
-check "equal dev version and identical source pass" "$?" "0"
-run --source-sha "$SOURCE_B" dev-resume 1.0.14-dev.2
+check "equal dev source alone cannot authorize publication" "$?" "2"
+run --preflight --candidate-dir absent --source-sha "$SOURCE_A" dev-resume 1.0.14-dev.2
+check "preflight cannot be combined with publication admission" "$?" "2"
+run --preflight --source-sha "$SOURCE_B" dev-resume 1.0.14-dev.2
 check "equal dev version from different source is refused" "$?" "1"
-run --source-sha "$SOURCE_A" dev-resume 1.0.14-dev.3
+run --preflight --source-sha "$SOURCE_A" dev-resume 1.0.14-dev.3
 check "newer dev version still passes through resume mode" "$?" "0"
 publish 1.0.13 1.0.14-dev.2 "$SOURCE_A" no-provenance
-run --source-sha "$SOURCE_A" dev-resume 1.0.14-dev.2
+run --preflight --source-sha "$SOURCE_A" dev-resume 1.0.14-dev.2
 check "equal legacy dev manifest without provenance fails closed" "$?" "2"
 publish 1.0.13 1.0.14-dev.2 "$SOURCE_A" short-source
-run --source-sha "$SOURCE_A" dev-resume 1.0.14-dev.2
+run --preflight --source-sha "$SOURCE_A" dev-resume 1.0.14-dev.2
 check "equal dev manifest with malformed source fails closed" "$?" "2"
 publish 1.0.13 1.0.14
-run --source-sha "$SOURCE_A" dev-resume 1.0.14
+run --preflight --source-sha "$SOURCE_A" dev-resume 1.0.14
 check "equal stable version is not accepted as a dev resume" "$?" "2"
 publish 1.0.13 1.0.14-dev.2
 

@@ -5,23 +5,31 @@ name: cleanup merged PR artifacts
 # superseded metered Actions storage.
 #
 # pull_request_target is intentional. A merged PR may originate from a fork, whose pull_request
-# token is read-only. This event runs the workflow from the default branch with the requested
-# actions:write permission. It never checks out or executes PR code; the only event value used in
-# the command is GitHub's numeric PR number.
+# token is read-only. Both events run the default-branch workflow with actions:write. A build can
+# finish uploading after the close event's snapshot, so its completion must repeat the cleanup.
+# Neither event checks out code or downloads artifacts. GitHub API metadata, rather than a branch
+# name or an artifact name alone, must bind a completed build to exactly one merged PR.
 on:
   pull_request_target:
     types: [closed]
+  workflow_run:
+    workflows: [build]
+    types: [completed]
 
 permissions:
   actions: write
+  pull-requests: read
 
 concurrency:
-  group: cleanup-pr-artifacts-${{ github.event.pull_request.number }}
+  group: cleanup-pr-artifacts-${{ github.repository }}
+  queue: max
   cancel-in-progress: false
 
 jobs:
   delete:
-    if: github.event.pull_request.merged == true
+    if: >-
+      (github.event_name == 'pull_request_target' && github.event.pull_request.merged == true) ||
+      (github.event_name == 'workflow_run' && github.event.workflow_run.event == 'pull_request')
     runs-on: ubuntu-26.04
     timeout-minutes: 10
     steps:
@@ -29,32 +37,155 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
+          EVENT_NAME: ${{ github.event_name }}
         shell: bash
         run: |
           set -euo pipefail
 
-          [[ "$PR_NUMBER" =~ ^[0-9]+$ ]] || {
-            echo "Refusing non-numeric PR number: $PR_NUMBER" >&2
+          [[ "$GH_REPO" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]] || {
+            echo 'Refusing invalid repository identity' >&2
             exit 2
           }
+          scratch="$(mktemp -d)"
+          trap 'rm -rf -- "$scratch"' EXIT
+          repository_id="$(jq -er --arg repo "$GH_REPO" '
+            .repository | select(.full_name == $repo)
+            | .id | select(type == "number") | tostring
+            | select(test("^[1-9][0-9]*$"))
+          ' "$GITHUB_EVENT_PATH")"
+
+          case "$EVENT_NAME" in
+            pull_request_target)
+              PR_NUMBER="$(jq -er --arg repo "$GH_REPO" --argjson rid "$repository_id" '
+                .pull_request
+                | select(.merged == true and .state == "closed"
+                  and .base.repo.id == $rid and .base.repo.full_name == $repo)
+                | .number | select(type == "number") | tostring
+                | select(test("^[1-9][0-9]*$"))
+              ' "$GITHUB_EVENT_PATH")" ;;
+            workflow_run)
+              run_id="$(jq -er '
+                .workflow_run.id | select(type == "number") | tostring
+                | select(test("^[1-9][0-9]*$"))
+              ' "$GITHUB_EVENT_PATH")"
+              gh api "repos/$GH_REPO/actions/runs/$run_id" > "$scratch/run.json"
+              # Re-read the run through the trusted repository API. Its event identity, source and
+              # repository must agree with GitHub's completion payload; no PR-controlled text runs.
+              jq -e --arg repo "$GH_REPO" --argjson rid "$repository_id" \
+                --argjson run_id "$run_id" --slurpfile event "$GITHUB_EVENT_PATH" '
+                . as $run | $event[0].workflow_run as $event
+                | .id == $run_id and .repository.id == $rid and .repository.full_name == $repo
+                  and .path == ".github/workflows/build.yml" and .name == "build"
+                  and .event == "pull_request" and .status == "completed"
+                  and (.workflow_id | type == "number" and (tostring | test("^[1-9][0-9]*$")))
+                  and (.head_sha | type == "string" and test("^[0-9a-f]{40}$"))
+                  and (.head_repository.id | type == "number" and (tostring | test("^[1-9][0-9]*$")))
+                  and (.head_repository.full_name | type == "string"
+                    and test("^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"))
+                  and (.pull_requests | type == "array" and length <= 1)
+                  and ($event.pull_requests | type == "array" and length <= 1)
+                  and ([$event.id, $event.workflow_id, $event.event, $event.status,
+                    $event.repository.id, $event.repository.full_name,
+                    $event.head_sha, $event.head_repository.id, $event.head_repository.full_name]
+                    == [$run.id, $run.workflow_id, $run.event, $run.status,
+                      $run.repository.id, $run.repository.full_name,
+                      $run.head_sha, $run.head_repository.id, $run.head_repository.full_name])
+              ' "$scratch/run.json" > /dev/null
+              head_sha="$(jq -r '.head_sha' "$scratch/run.json")"
+              head_repository_id="$(jq -r '.head_repository.id' "$scratch/run.json")"
+              needs_membership=no
+              if [ "$(jq '.pull_requests | length' "$scratch/run.json")" -eq 1 ]; then
+                jq -e --argjson rid "$repository_id" --argjson hid "$head_repository_id" '
+                  .pull_requests[0] | select(.base.repo.id == $rid
+                    and .head.repo.id == $hid
+                    and (.head.sha | type == "string" and test("^[0-9a-f]{40}$")))
+                ' "$scratch/run.json" > "$scratch/association.json"
+              else
+                # Fork runs can omit their PR list. The commit-associated PR API is the only
+                # fallback: require one exact base-repository and fork identity match. Its current
+                # head may have advanced; verify the old run's SHA in the PR commit list below.
+                needs_membership=yes
+                gh api --paginate --slurp \
+                  "repos/$GH_REPO/commits/$head_sha/pulls?per_page=100" > "$scratch/associated-pages.json"
+                jq -e --arg repo "$GH_REPO" --argjson rid "$repository_id" \
+                  --argjson hid "$head_repository_id" '
+                  if type != "array" or any(.[]; type != "array")
+                  then error("invalid associated PR pages") else . end
+                  | [ .[][] | select(.base.repo.id == $rid and .base.repo.full_name == $repo
+                    and .head.repo.id == $hid) ]
+                  | if length == 1 then .[0] else error("no unique run-associated PR") end
+                ' "$scratch/associated-pages.json" > "$scratch/association.json"
+              fi
+              PR_NUMBER="$(jq -er '
+                .number | select(type == "number") | tostring
+                | select(test("^[1-9][0-9]*$"))
+              ' "$scratch/association.json")"
+              # Embedded association heads follow the current PR head, including on an older run.
+              # The event and API must still agree on the exact PR and both repository identities.
+              jq -e --argjson pr "$PR_NUMBER" --argjson rid "$repository_id" \
+                --argjson hid "$head_repository_id" '
+                .workflow_run.pull_requests
+                | length == 0 or (.[0].number == $pr and .[0].base.repo.id == $rid
+                  and .[0].head.repo.id == $hid
+                  and (.[0].head.sha | type == "string" and test("^[0-9a-f]{40}$")))
+              ' "$GITHUB_EVENT_PATH" > /dev/null
+              membership_required="$(jq -er --arg sha "$head_sha" --slurpfile association "$scratch/association.json" '
+                [$association[0].head.sha, .workflow_run.pull_requests[].head.sha]
+                | any(. != $sha) | tostring
+              ' "$GITHUB_EVENT_PATH")"
+              if [ "$membership_required" = true ]; then
+                needs_membership=yes
+              fi ;;
+            *) echo 'Refusing unsupported cleanup event' >&2; exit 2 ;;
+          esac
+
+          # A close event or a completed run is not enough: query the current PR verdict. Old runs
+          # of a now-merged PR are eligible even if its final head SHA differs from the old run.
+          gh api "repos/$GH_REPO/pulls/$PR_NUMBER" > "$scratch/pr.json"
+          jq -e --arg pr "$PR_NUMBER" --arg repo "$GH_REPO" --argjson rid "$repository_id" '
+            (.number | type == "number" and tostring == $pr)
+            and .base.repo.id == $rid and .base.repo.full_name == $repo
+            and (.merged | type == "boolean") and (.state == "open" or .state == "closed")
+          ' "$scratch/pr.json" > /dev/null
+          if [ "$EVENT_NAME" = workflow_run ]; then
+            jq -e --argjson hid "$head_repository_id" --argjson rid "$repository_id" '
+              .head.repo.id == $hid and .base.repo.id == $rid
+            ' "$scratch/pr.json" > /dev/null
+          fi
+          if ! jq -e '.state == "closed" and .merged == true' "$scratch/pr.json" > /dev/null; then
+            echo "PR #$PR_NUMBER is not merged; preserving artifacts"
+            exit 0
+          fi
+          if [ "$EVENT_NAME" = workflow_run ] && [ "$needs_membership" = yes ]; then
+            gh api --paginate --slurp \
+              "repos/$GH_REPO/pulls/$PR_NUMBER/commits?per_page=100" > "$scratch/commit-pages.json"
+            jq -e --arg sha "$head_sha" '
+              if type != "array" or any(.[]; type != "array")
+              then error("invalid PR commit pages") else . end
+              | [ .[][] | select(.sha == $sha) ] | length == 1
+            ' "$scratch/commit-pages.json" > /dev/null
+          fi
 
           # Fetch every page before deleting anything. Deleting while paginating shifts later pages
           # forward and can otherwise skip artifacts. The pattern accepts both historical `-pr72-`
           # and current `-PR-72` names, with numeric boundaries so PR 72 never matches PR 720.
-          artifact_list="$(mktemp)"
-          trap 'rm -f "$artifact_list"' EXIT
-          gh api --paginate --slurp "repos/$GH_REPO/actions/artifacts?per_page=100" |
-            jq -r --arg pr_number "$PR_NUMBER" '
+          artifact_list="$scratch/artifacts.tsv"
+          gh api --paginate --slurp "repos/$GH_REPO/actions/artifacts?per_page=100" > "$scratch/artifact-pages.json"
+          jq -r --arg pr_number "$PR_NUMBER" '
+              if type != "array" or any(.[]; (.artifacts | type) != "array")
+              then error("invalid artifact pages") else . end
+              | [
               .[].artifacts[]
               | select(.name | test("(?i)(?:^|-)pr-?" + $pr_number + "(?:-|$)"))
+              | if (.id | type != "number" or (tostring | test("^[1-9][0-9]*$") | not))
+                then error("invalid artifact id") else . end
               | [.id, .name]
               | @tsv
-            ' > "$artifact_list"
-          mapfile -t artifacts < "$artifact_list"
+              ] | .[]
+            ' "$scratch/artifact-pages.json" > "$artifact_list"
 
           deleted=0
-          for artifact in "${artifacts[@]}"; do
+          while IFS= read -r artifact; do
             artifact_id="${artifact%%$'\t'*}"
             artifact_name="${artifact#*$'\t'}"
             [[ "$artifact_id" =~ ^[0-9]+$ ]] || {
@@ -65,7 +196,7 @@ jobs:
             gh api --method DELETE "repos/$GH_REPO/actions/artifacts/$artifact_id"
             printf 'Deleted artifact %s (%s)\n' "$artifact_name" "$artifact_id"
             ((deleted += 1))
-          done
+          done < "$artifact_list"
 
           {
             echo "### Merged PR artifact cleanup"

@@ -140,6 +140,7 @@ class GateJournal:
         print(f"Private journal: {self.path}", file=sys.stderr)
 
     def checkpoint(self, phase: str, *, outcome: str = "in_progress", error: str | None = None,
+                   error_context: dict[str, Any] | None = None,
                    **updates: Any) -> None:
         for key, value in updates.items():
             if isinstance(value, dict) and isinstance(self.receipt.get(key), dict):
@@ -151,6 +152,8 @@ class GateJournal:
                     "receipt": self.receipt}
         if error is not None:
             document["private_error"] = error
+        if error_context is not None:
+            document["private_error_context"] = error_context
         temporary = self.directory / "receipt.next"
         descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
         try:
@@ -171,6 +174,41 @@ class GateJournal:
 
 
 ACTIVE_JOURNAL: GateJournal | None = None
+
+
+def private_failure_context(error: BaseException, journal: GateJournal) -> dict[str, Any]:
+    """Retain local callsites without copying URLs, query values, paths or frame locals."""
+    gate_path = Path(__file__).resolve()
+    context: dict[str, Any] = {
+        "previous_phase": journal.phases[-1],
+        "exception_type": type(error).__name__,
+        "frames": [],
+    }
+    try:
+        context["gate_sha256"] = hashlib.sha256(gate_path.read_bytes()).hexdigest()
+    except OSError:
+        context["gate_sha256"] = None
+    if isinstance(error, HTTPError):
+        context["http_status"] = error.code
+        try:
+            # OSError.filename retains the URL even when HTTPError has no response file (3.9).
+            url = error.filename
+            route = urlparse(url).path if isinstance(url, str) else ""
+        except ValueError:
+            route = ""
+        context["route"] = route if route in (
+            "/status", "/values", "/diag", "/ota/status", "/ota/check", "/ota/update",
+            "/weather/refresh",
+        ) else "unclassified"
+    trace = error.__traceback__
+    while trace is not None:
+        if Path(trace.tb_frame.f_code.co_filename).resolve() == gate_path:
+            context["frames"].append({
+                "function": trace.tb_frame.f_code.co_name, "line": trace.tb_lineno,
+            })
+        trace = trace.tb_next
+    context["frames"] = context["frames"][-6:]
+    return context
 
 
 def journal_checkpoint(phase: str, **updates: Any) -> None:
@@ -5385,7 +5423,10 @@ def cli_main() -> int:
         # board. Preserve the last durable milestone and existing private evidence, without retry.
         if ACTIVE_JOURNAL is not None:
             try:
-                ACTIVE_JOURNAL.checkpoint("blocked", outcome="blocked", error=str(error))
+                ACTIVE_JOURNAL.checkpoint(
+                    "blocked", outcome="blocked", error=str(error),
+                    error_context=private_failure_context(error, ACTIVE_JOURNAL),
+                )
             except (OSError, ValueError, TypeError):
                 print("Private journal checkpoint failed; retaining earlier milestones", file=sys.stderr)
             print(json.dumps({"outcome": "blocked", "receipt": public_receipt(ACTIVE_JOURNAL)},

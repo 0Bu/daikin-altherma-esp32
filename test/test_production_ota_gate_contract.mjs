@@ -211,7 +211,8 @@ assert.equal(productionEvidence.status, 0,
 // standalone probe available to the mutation runner so syntax errors and unrelated failures cannot
 // count as a killed regression in cold ordering, privacy or partial receipt behavior.
 const coldReceiptProbe = String.raw`
-import contextlib, io, json, os, runpy, shutil, stat, sys
+import contextlib, hashlib, io, json, os, runpy, shutil, stat, sys
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 from urllib.error import HTTPError
@@ -536,6 +537,54 @@ for failing_phase in (None, "ack lost", "compact ack lost", "return", "stress", 
     finally:
         if journal is not None:
             shutil.rmtree(journal.directory)
+        ns["ACTIVE_JOURNAL"] = None
+for route, expected_route in (("/status?fixture=hidden", "/status"),
+                              ("/private-fixture?fixture=hidden", "unclassified")):
+    journal = ns["GateJournal"]()
+    ns["ACTIVE_JOURNAL"] = journal
+    journal.checkpoint("bench_cold_pressure_started")
+    class ErrorConnection:
+        reads = 0
+        def settimeout(self, remaining):
+            check(remaining > 0, "failure fixture lost request deadline")
+        def recv(self, size):
+            self.reads += 1
+            check(self.reads == 1, "error path performed a follow-up read")
+            return b"HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\n\r\n"
+    connection = ErrorConnection()
+    def fixture_main():
+        gate["read_bounded_http_response"](connection, "bench.invalid", route,
+            ns["time"].monotonic() + 5, max_body_bytes=1024, allow_chunked=False)
+    output, errors = io.StringIO(), io.StringIO()
+    try:
+        with patch.dict(ns, {"main": fixture_main}), contextlib.redirect_stdout(output), \
+                contextlib.redirect_stderr(errors):
+            result = gate["cli_main"]()
+        check(result == 2, "HTTP 503 did not remain fail-closed")
+        saved = json.loads(journal.path.read_text())
+        context = saved.get("private_error_context", {})
+        check(context.get("previous_phase") == "bench_cold_pressure_started", "lost prior failure phase")
+        check(context.get("exception_type") == "HTTPError" and context.get("http_status") == 503,
+              "lost typed HTTP failure")
+        check(context.get("route") == expected_route, "lost or exposed unclassified route")
+        check(context.get("gate_sha256") == hashlib.sha256(Path(sys.argv[1]).read_bytes()).hexdigest(),
+              "failure evidence lost executing gate identity")
+        frames = context.get("frames", [])
+        check(0 < len(frames) <= 6 and any(frame.get("function") == "read_bounded_http_response"
+                                        for frame in frames), "lost bounded gate callsite")
+        check(all(set(frame) == {"function", "line"} and isinstance(frame["line"], int)
+                  for frame in frames), "failure context copied frame paths or locals")
+        check(all(value not in json.dumps(context) for value in (".invalid", "hidden", "private-fixture")),
+              "private failure context copied URL host/query or arbitrary route")
+        report = json.loads(output.getvalue())
+        check(report["outcome"] == "blocked" and report["receipt"]["production"]["executed"] is False,
+              "failure fixture invented a production write")
+        check(all(value not in output.getvalue() for value in
+                  ("private_error", "frames", "http_status", "gate_sha256", "hidden", ".invalid")),
+              "public blocked receipt exposed private failure context")
+        check(connection.reads == 1, "HTTP failure retried its request")
+    finally:
+        shutil.rmtree(journal.directory)
         ns["ACTIVE_JOURNAL"] = None
 print("cold-receipt behavioral fixtures passed")
 `;

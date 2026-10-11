@@ -525,6 +525,20 @@ def self_test() -> None:
             expect_build_error("dev", "1.0.3-dev.21", source21, budget_ref)
 
             fixture_git("switch", "main")
+            # Several main commits can land between feed publications. Both changed sources must
+            # appear in the real first-parent range; using only the target's parent silently drops
+            # the skipped build's owner-facing note. Unclassified maintenance stays private.
+            commit_file("fix: retain the first skipped firmware change", "dev22\n")
+            commit_file("chore: internal skipped-build bookkeeping", "dev22-maintenance\n")
+            skipped_source = commit_file("feat: retain the second skipped firmware change", "dev23\n")
+            skipped = build("dev", "1.0.3-dev.23", skipped_source, pages21)
+            assert skipped == {
+                "version": "1.0.3-dev.23",
+                "changelog": continued["changelog"] +
+                             "\nv1.0.3-dev.23 — Retain the second skipped firmware change" +
+                             "\nv1.0.3-dev.23 — Retain the first skipped firmware change",
+            }
+            assert "bookkeeping" not in skipped["changelog"]
             release_source = commit_file("chore(release): publish 1.0.3", "release-1.0.3\n")
             next_source = commit_file("feat: begin next development core", "dev-1.0.4\n")
             source20_tree = fixture_git("rev-parse", f"{source20}^{{tree}}")
