@@ -70,13 +70,16 @@ and leave pin 1 unconnected.
 ## Flash prebuilt artifacts
 
 Browser flasher + captive-portal setup: [../README.md](../README.md). The flasher is served on
-GitHub Pages (ESP Web Tools / Web Serial). **Two feeds are published, and only one of them is cut
-by hand:**
+GitHub Pages (ESP Web Tools / Web Serial). **Two feeds are published:**
 
 | Feed | Installer | OTA manifest | Changelog | Published by |
 |------|-----------|--------------|-----------|--------------|
-| Release | `…/` | `…/manifest.json` | `…/changelog.json` | a **manual** workflow run (Actions → *build* → *Run workflow* → `release: true`) — the only thing that creates a `v*` tag + a [GitHub release](https://github.com/0Bu/daikin-altherma-esp32/releases/latest) |
+| Release | `…/` | `…/manifest.json` | `…/changelog.json` | a workflow dispatch with `release: true` — creates a `v*` tag + a [GitHub release](https://github.com/0Bu/daikin-altherma-esp32/releases/latest) |
 | Development | `…/dev/` | `…/dev/manifest.json` | `…/dev/changelog.json` | every firmware-relevant push to `main`; no tag, no release |
+
+Releases normally use Actions → *build* → *Run workflow*. In the canonical agent delivery flow,
+confirmed changelog capacity exhaustion triggers the same release workflow without another approval;
+see the [release-baseline handoff](../.agents/skills/deploy-prod/SKILL.md#3a-automatic-release-baseline-when-the-cumulative-changelog-is-full).
 
 A device follows one feed at a time — gear → **Firmware** → *Update channel* (`POST /set_ota`). Dev
 builds are versioned `<next release>-dev.<n>`, so SemVer ranks that future stable release above its

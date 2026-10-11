@@ -1042,11 +1042,11 @@ Four properties of that core are worth naming because they are not obvious from 
   post-refresh high-water mark is a mandatory stack task in the private inventory. Root policy, inventory, both artifact
   identities/feeds and the feed/power controllers are distinct and deny production; the job receives
   no signing key.
-- **✅ Releases are manual; merges publish a dev channel.** A push to `main` stamps a dev version and
-  republishes `dev/`; a release is an explicit workflow run that tags and republishes the root. The
-  current workflow emits the same shape for either slice (`index.html`, compact `manifest.json`,
-  `artifacts.json`, `changelog.json`, binaries), so the installer and OTA client need no special case.
-  A historical root slice remains unchanged until the next manual release. New manifests stay within
+- **✅ Releases use dispatch; merges publish a dev channel.** A push to `main` republishes `dev/`;
+  a release dispatch tags and republishes the root. The canonical agent delivery flow dispatches
+  automatically on confirmed changelog capacity exhaustion. Both slices share `index.html`, `manifest.json`,
+  `artifacts.json`, `changelog.json` and binaries, so the installer and OTA client need no special case.
+  A historical root slice stays intact until the next release dispatch. New manifests stay within
   the oldest supported signed release's 1024-byte restore reader; the sibling index binds the exact
   manifest SHA-256 plus every published binary for integrity checks.
 - **✅ Concurrent publishers survive losing the race.** That one branch has two writers and they

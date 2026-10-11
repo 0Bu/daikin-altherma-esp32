@@ -706,14 +706,14 @@ at different rates:
 
 | Feed | URL | Cut by |
 |------|-----|--------|
-| **Release** | [`…/manifest.json`](https://0bu.github.io/daikin-altherma-esp32/manifest.json) | a **manual** run: Actions → **build** → *Run workflow* → `release: true` (+ `bump`) |
+| **Release** | [`…/manifest.json`](https://0bu.github.io/daikin-altherma-esp32/manifest.json) | a workflow dispatch with `release: true` (+ `bump`); normally Actions → **build** → *Run workflow* |
 | **Development** | `…/dev/manifest.json` | every firmware-relevant push to `main` |
 
 Every slice published by the current workflow also contains `artifacts.json`. `manifest.json` stays
 below the 1024-byte reader limit of the oldest supported signed restore release and contains only
 installer/OTA data; the sibling index binds the exact manifest hash plus every published `.bin` hash
 and size for integrity checks. The production promotion gate checks that restore grammar before it
-contacts the bench. A historical root slice keeps its old shape until the next manual release; a dev
+contacts the bench. A historical root slice keeps its old shape until the next release dispatch; a dev
 publish does not rewrite it.
 
 A release run is the only thing that creates a `v*` tag and a GitHub Release; a merge creates
@@ -721,7 +721,8 @@ neither. Dev builds are versioned `<next release>-dev.<commits since the tag>` �
 pre-release, so they sort *above* the release they followed and *below* the release they lead to.
 A device picks its feed in the web UI (gear → **ESP32** → *Update channel*); nothing about a PR
 changes that, so a contributor never has to think about which feed their change lands in. It lands
-in dev, and a maintainer decides when a release is cut from it.
+in dev. Releases normally follow a maintainer's decision; the bounded automatic capacity handoff
+below is the exception.
 
 An explicit release dispatch does not rerun the mechanical PR suite and has no hardware dependency.
 It performs one signed firmware build, publishes the root feed, and creates the exact-source tag and
