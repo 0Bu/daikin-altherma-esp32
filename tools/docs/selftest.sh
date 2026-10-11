@@ -27,7 +27,7 @@ mkdir -p "$TMP/t"
 # Copy only what the audit reads + compiles against.
 cp -R "$ROOT/main" "$ROOT/tools" "$ROOT/scripts" "$ROOT/docs" "$TMP/t/"
 cp "$ROOT/README.md" "$TMP/t/"
-cp "$ROOT/docs/HOME_ASSISTANT.md" "$TMP/HOME_ASSISTANT.md.pristine"
+cp "$ROOT/docs/RECIPES.md" "$TMP/RECIPES.md.pristine"
 
 # A mutation can prove detection only after the pristine tree passes. Build its binary once, then
 # explicitly reuse it for document-only changes in this same throwaway tree.
@@ -42,9 +42,9 @@ fail=0
 run_case() {   # run_case <name> <expected-id> <sed-expression>; `grep -c '^run_case '` = the case count (anchored:
                # the bare word matches this definition line and the comments about it too)
     local name="$1" expected_id="$2" expr="$3"
-    cp "$TMP/HOME_ASSISTANT.md.pristine" "$TMP/t/docs/HOME_ASSISTANT.md"
-    sed -i.bak "$expr" "$TMP/t/docs/HOME_ASSISTANT.md" && rm -f "$TMP/t/docs/HOME_ASSISTANT.md.bak"
-    if cmp -s "$TMP/HOME_ASSISTANT.md.pristine" "$TMP/t/docs/HOME_ASSISTANT.md"; then
+    cp "$TMP/RECIPES.md.pristine" "$TMP/t/docs/RECIPES.md"
+    sed -i.bak "$expr" "$TMP/t/docs/RECIPES.md" && rm -f "$TMP/t/docs/RECIPES.md.bak"
+    if cmp -s "$TMP/RECIPES.md.pristine" "$TMP/t/docs/RECIPES.md"; then
         printf '  FAIL  %s  (mutation changed nothing)\n' "$name"
         fail=1
         return
@@ -54,7 +54,7 @@ run_case() {   # run_case <name> <expected-id> <sed-expression>; `grep -c '^run_
     out="$(cd "$TMP/t" && scripts/run-doc-entity-audit.sh --binary "$AUDIT_BINARY" 2>&1)"
     rc=$?
     set -e
-    reported_ids="$(sed -n 's/^  \[E-ID\] docs\/HOME_ASSISTANT\.md:[0-9][0-9]*  //p' <<<"$out")"
+    reported_ids="$(sed -n 's/^  \[E-ID\] docs\/RECIPES\.md:[0-9][0-9]*  //p' <<<"$out")"
     if [ "$rc" -eq 1 ] && grep -Fxq "$expected_id" <<<"$reported_ids"; then
         printf '  PASS  %s\n' "$name"
     else
@@ -62,7 +62,7 @@ run_case() {   # run_case <name> <expected-id> <sed-expression>; `grep -c '^run_
             "$name" "$rc" "$expected_id" "$out"
         fail=1
     fi
-    cp "$TMP/HOME_ASSISTANT.md.pristine" "$TMP/t/docs/HOME_ASSISTANT.md"
+    cp "$TMP/RECIPES.md.pristine" "$TMP/t/docs/RECIPES.md"
 }
 
 echo "doc entity-id audit selftest — re-seeding each historical defect"
