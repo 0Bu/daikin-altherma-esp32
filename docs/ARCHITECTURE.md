@@ -2843,10 +2843,13 @@ Structure:
     topic + Telegraf) is.
 - **Two update channels** (`logic/ota_channel.hpp`, `POST /set_ota`, `/status.ota.channel`). A merge
   to `main` no longer cuts a release, so there are two published feeds and a device follows one:
-  `release` (the gh-pages root, republished only by a **manual** workflow run that tags `v*`) and
+  `release` (the gh-pages root, republished by a release workflow dispatch that tags `v*`) and
   `dev` (`…/dev/`, republished by every firmware-relevant merge). The URLs are *derived*, not
   configured twice — the dev feed is by construction the `dev/` subdirectory of the configured
-  firmware base URL, so the two cannot be pointed at different hosts. The channel is persisted in
+  firmware base URL, so the two cannot be pointed at different hosts. The canonical agent delivery
+  flow automatically dispatches a release after confirmed cumulative changelog capacity exhaustion;
+  [the handoff](../.agents/skills/deploy-prod/SKILL.md#3a-automatic-release-baseline-when-the-cumulative-changelog-is-full)
+  requires the accepted source and preserves separate hardware acceptance. The channel is persisted in
   the config blob (v3) and applied **live**: a check reads the current channel when it fetches, so a
   check right after the switch already reads the new feed. Once an update is accepted, it pins that
   checked channel together with the offered version and app SHA-256 for the complete task. Dev builds are

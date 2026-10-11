@@ -5,10 +5,11 @@
 #   scripts/next-version.sh --dev                 the next DEV build version
 #   scripts/next-version.sh --exact X.Y.Z         validate/echo a release version (resume path)
 #
-# RELEASES ARE MANUAL. A merge to main no longer cuts one: the release path is a
+# RELEASES USE DISPATCH. A merge to main no longer cuts one: the release path is a
 # `workflow_dispatch` run of .github/workflows/build.yml with `release: true` (and the bump level
 # below), which is the only thing that creates a v* tag. Every other push to main publishes a DEV
-# build instead, so `main` moves without the version number moving with it.
+# build instead. The canonical deploy-prod flow dispatches automatically on confirmed cumulative
+# changelog capacity exhaustion; other merges move main without cutting a release.
 #
 # version.txt is the FLOOR: bump it to force a specific next version. Otherwise the level argument
 # decides which segment moves above the highest strict-SemVer v* tag reachable from HEAD.
