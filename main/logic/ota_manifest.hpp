@@ -408,12 +408,14 @@ manifest_identity(const char* json, size_t len, OtaManifestIdentity& out) {
         }
         if (i < len && json[i] == '}') {
             ++i;
-            break;
+            detail::skip_ws(json, len, i);
+            return i == len && have_version && have_provenance && have_sha;
         }
         return false;
     }
-    detail::skip_ws(json, len, i);
-    return i == len && have_version && have_provenance && have_sha;
+    // Exhaustion after a comma is still an incomplete root object, even if every identity field
+    // was already read. Only the closing-brace path above may publish an accepted identity.
+    return false;
 }
 
 // Parse the optional sibling changelog.json document:
