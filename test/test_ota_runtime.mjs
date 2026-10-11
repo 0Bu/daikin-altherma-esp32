@@ -52,7 +52,7 @@ try {
     {
       name: "health-runtime-stack", scenario: "health_static_storage",
       before: /!xTaskCreateStatic\(health_gate_task,\s*"ota_health",\s*kHealthTaskStack,\s*nullptr,\s*TASK_PRIO_OTA_GATE,\s*s_ota_health_task_stack,\s*&s_ota_health_task_storage\)/,
-      after: 'xTaskCreate(health_gate_task, "ota_health", kHealthTaskStack, nullptr, TASK_PRIO_OTA_GATE, nullptr) != pdPASS',
+      after: '(static_cast<void>(s_ota_health_task_stack), static_cast<void>(s_ota_health_task_storage), xTaskCreate(health_gate_task, "ota_health", kHealthTaskStack, nullptr, TASK_PRIO_OTA_GATE, nullptr) != pdPASS)',
     },
     {
       name: "health-storage-rearm", scenario: "health_static_storage",

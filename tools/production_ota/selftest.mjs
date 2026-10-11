@@ -361,11 +361,17 @@ try {
       replaceOnce("scripts/production-ota-gate.py", '"receipt": public_receipt(ACTIVE_JOURNAL)',
         '"receipt": ACTIVE_JOURNAL.receipt'), "cold-receipt"],
     ["error handler queries a possibly updated board", () =>
-      replaceOnce("scripts/production-ota-gate.py", '    except (GateError, OSError) as error:\n',
-        '    except (GateError, OSError) as error:\n        request_json("production.invalid", "/status")\n'), "cold-receipt"],
+      replaceOnce("scripts/production-ota-gate.py", '    except (GateError, OSError, CompactTransportError) as error:\n',
+        '    except (GateError, OSError, CompactTransportError) as error:\n        request_json("production.invalid", "/status")\n'), "cold-receipt"],
     ["error handler retries a possible production write", () =>
-      replaceOnce("scripts/production-ota-gate.py", '    except (GateError, OSError) as error:\n',
-        '    except (GateError, OSError) as error:\n        post_update_once("production.invalid", 7, "2.0.0-dev.2", "a" * 64)\n'), "cold-receipt"],
+      replaceOnce("scripts/production-ota-gate.py", '    except (GateError, OSError, CompactTransportError) as error:\n',
+        '    except (GateError, OSError, CompactTransportError) as error:\n        post_update_once("production.invalid", 7, "2.0.0-dev.2", "a" * 64)\n'), "cold-receipt"],
+    ["compact POST disconnect escapes its blocked receipt", () =>
+      replaceOnce("scripts/production-ota-gate.py", 'except (GateError, OSError, CompactTransportError) as error:',
+        'except (GateError, OSError) as error:'), "cold-receipt"],
+    ["bench confirmation reuses status from before the valid image observation", () =>
+      replaceOnce("scripts/production-ota-gate.py", 'confirmed = request_status_deadline(endpoint, timeout=min(remaining, HTTP_TIMEOUT_S))',
+        'confirmed = status'), "cold-receipt"],
     ["public receipt trusts untyped allowed fields", () =>
       replaceOnce("scripts/production-ota-gate.py",
         'elif key in number_fields and isinstance(value, int) and not isinstance(value, bool):',
@@ -390,7 +396,7 @@ try {
       replaceOnce("scripts/production-ota-gate.py", 'current["timeout_err"] - baseline["timeout_err"] > MAX_X10A_TIMEOUT_DELTA',
         'False'), "cold-receipt"],
     ["bench confirmation accepts a regressed X10A counter", () =>
-      replaceOnce("scripts/production-ota-gate.py", 'current["timeout_err"] < baseline["timeout_err"]',
+      replaceOnce("scripts/production-ota-gate.py", 'current["timeout_err"] < last_timeout',
         'False'), "cold-receipt"],
     ["bench confirmation accepts an unarmed image", () =>
       replaceOnce("scripts/production-ota-gate.py",

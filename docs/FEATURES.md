@@ -215,8 +215,10 @@ Deep dive: [`ARCHITECTURE.md`](ARCHITECTURE.md), [`SECURITY.md`](SECURITY.md).
 - **Rollback armed until proven healthy** (`CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y`): a fresh OTA
   image starts `PENDING_VERIFY` and the bootloader reverts if it reboots before being marked valid.
 - **✅ 🧪 Health gate, not a timer** ([`logic/health_gate.hpp`](../main/logic/health_gate.hpp)): an
-  image is sealed in only after a base window **and** proven connectivity (STA online, or the setup
-  portal when it has no credentials). A boots-but-broken update — a WiFi regression that can never
+  image is sealed in only after a base window **and** an observed active recovery portal or normal
+  service: WiFi/Ethernet connectivity, sufficient free and contiguous internal heap, no allocation
+  failure counters, and one accepted retained X10A publish when live X10A and configured MQTT make
+  that proof applicable. A boots-but-broken update — a WiFi regression that can never
   get back online to be re-flashed — rolls back instead of sealing the break in. Blank/no-record
   USB images make IDF's state read fail and are reported `unknown`/`rollback_pending:null`, never
   `PENDING_VERIFY`, so the gate can never strand a fresh board or invent a safe rollback state.

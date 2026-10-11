@@ -375,12 +375,62 @@ for uptime, skip, state, pending, timeout_before, timeout_after, accepted in (
         else:
             check(accepted and confirmed["image_state"] == "valid", "unhealthy confirmation accepted")
 
+# A valid compact image response cannot confirm the full status sampled before it. Bind one fresh
+# status after that response and reject a new boot, changed identity/counters or lost safe heap.
+for defect in (None, "reboot", "heap_restarts", "mqtt_skipped", "poll_skipped", "crc_err",
+               "mac", "version", "elf", "free_heap", "largest_block", "timeout regression",
+               "timeout excess", "short final budget", "expired before final", "expired final"):
+    before, after = board(uptime=194), board(uptime=206)
+    before["wifi"] = {"mac": "bench", "connected": True, "rolled_back": False}
+    after["wifi"] = dict(before["wifi"])
+    before["hp"]["timeout_err"], after["hp"]["timeout_err"] = 6, 7
+    confirmation_stress = {**stress_receipt, "counters_after": {**counters, "timeout_err": 5}}
+    if defect == "reboot": after["uptime_s"] = 3
+    if defect in ("heap_restarts", "mqtt_skipped", "poll_skipped"): after["sys"][defect] = 1
+    if defect == "crc_err": after["hp"]["crc_err"] = 1
+    if defect == "mac": after["wifi"]["mac"] = "other"
+    if defect == "version": after["version"] = writer
+    if defect == "elf": after["app_elf_sha256"] = old_elf
+    if defect == "free_heap": after["sys"]["free_heap"] = ns["MIN_FINAL_FREE_HEAP"] - 1
+    if defect == "largest_block": after["sys"]["max_alloc"] = ns["MIN_FINAL_LARGEST_BLOCK"] - 1
+    if defect == "timeout regression": after["hp"]["timeout_err"] = 5
+    if defect == "timeout excess": after["hp"]["timeout_err"] = 9
+    sequence, virtual = [], [0.0]
+    def full_status(endpoint, *, timeout):
+        check(endpoint == "bench.invalid", "confirmation changed its pinned endpoint")
+        check(0 < timeout <= ns["HTTP_TIMEOUT_S"], "confirmation status exceeded its request bound")
+        final = "image" in sequence
+        sequence.append("status")
+        if final and defect in ("short final budget", "expired final"):
+            check(timeout <= 1, "fresh confirmation ignored its remaining absolute deadline")
+            virtual[0] = 149.5 if defect == "short final budget" else 150.0
+        return after if final else before
+    def image_status(endpoint, route, *, timeout):
+        check(endpoint == "bench.invalid" and route == "/ota/status", "confirmation compact route")
+        sequence.append("image")
+        if defect in ("short final budget", "expired final"): virtual[0] = 149.0
+        if defect == "expired before final": virtual[0] = 150.0
+        return {"image_state": "valid", "rollback_pending": False}
+    accepted = defect in (None, "short final budget")
+    with patch.dict(ns, {"resolve_http_endpoint": lambda host: host,
+        "request_status_deadline": full_status, "request_json_deadline": image_status}), \
+        patch.object(ns["time"], "monotonic", lambda: virtual[0]):
+        try:
+            confirmed = gate["confirm_bench_probation"](host="bench.invalid", mac="BENCH", version=target,
+                                                       elf=elf, stress=confirmation_stress)
+        except gate["GateError"]:
+            check(not accepted, "healthy final confirmation rejected")
+        else:
+            check(accepted, "unsafe status after valid image observation accepted: " + str(defect))
+            check(sequence == ["status", "image", "status"], "fresh status missing after valid image")
+            check(confirmed["uptime_s"] == 206, "confirmation returned stale pre-image uptime")
+
 args = SimpleNamespace(self_test=False, release_hil=False, execute=True, confirm_release_hil=None,
     artifact_manifest=None, artifact_app=None, install_bench=False, confirm_bench=None,
     confirm_production="production", expected_current_version=writer,
     manifest_url=ns["OFFICIAL_MANIFEST_URL"], expected_source_sha="b" * 40,
     expected_version=target, expected_app_sha256=sha)
-for failing_phase in (None, "ack lost", "return", "stress", "retained", "journal before write", "journal on failure"):
+for failing_phase in (None, "ack lost", "compact ack lost", "return", "stress", "retained", "journal before write", "journal on failure"):
     events, syncs = [], []
     failed = [False]
     def stop(error):
@@ -400,6 +450,7 @@ for failing_phase in (None, "ack lost", "return", "stress", "retained", "journal
         check(len(syncs) == 2 * len(saved["phases"]), "attempt lacked durable file/directory fsync")
         events.append("post")
         if failing_phase == "ack lost": stop(OSError("private-host private-topic private-coordinate"))
+        if failing_phase == "compact ack lost": stop(gate["CompactTransportError"]("private-host disconnected before acknowledgment"))
         return 8
     def wait(*args):
         args[-1].update(transfer)
@@ -443,7 +494,10 @@ for failing_phase in (None, "ack lost", "return", "stress", "retained", "journal
     try:
         with patch.dict(ns, patches), patch.object(gate["GateJournal"], "checkpoint", checkpoint), \
              patch.object(os, "fsync", sync), contextlib.redirect_stdout(output), contextlib.redirect_stderr(errors):
-            result = gate["cli_main"]()
+            try:
+                result = gate["cli_main"]()
+            except gate["CompactTransportError"]:
+                check(False, "compact transport disconnect escaped the blocked receipt")
             journal = ns["ACTIVE_JOURNAL"]
         check(journal is not None, "journal absent: " + errors.getvalue())
         check(stat.S_IMODE(journal.directory.stat().st_mode) == 0o700, "private journal directory mode")
@@ -465,8 +519,8 @@ for failing_phase in (None, "ack lost", "return", "stress", "retained", "journal
             else:
                 check(events.count("post") == 1, "failed phase retried POST")
                 check(production.get("write_attempted") is True, "blocked report omitted attempt")
-                check(production.get("executed") is (None if failing_phase == "ack lost" else True), "false executed after possible write")
-                if failing_phase != "ack lost":
+                check(production.get("executed") is (None if failing_phase in ("ack lost", "compact ack lost") else True), "false executed after possible write")
+                if failing_phase not in ("ack lost", "compact ack lost"):
                     check(production.get("write_acknowledged") is True, "blocked report lost acknowledged write")
                     check(production.get("ota_download_heap", {}).get("saw_done") is True, "blocked report lost completed transfer")
                 if failing_phase in ("stress", "retained", "journal on failure"):

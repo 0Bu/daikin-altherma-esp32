@@ -2406,9 +2406,10 @@ def confirm_bench_probation(
     deadline = time.monotonic() + BENCH_HEALTH_WINDOW_TIMEOUT_S
     last_uptime = stress["uptime"][-1]
     baseline = stress["counters_after"]
-    while time.monotonic() < deadline:
-        remaining = deadline - time.monotonic()
-        status = request_status_deadline(endpoint, timeout=min(remaining, HTTP_TIMEOUT_S))
+    last_timeout = baseline["timeout_err"]
+
+    def validate_confirmation_status(status: dict[str, Any]) -> int:
+        nonlocal last_uptime, last_timeout
         validate_identity(status, host=host, mac=mac, version=version, elf=elf)
         uptime = required_uptime(status, "bench probation confirmation")
         if uptime < last_uptime:
@@ -2418,13 +2419,20 @@ def confirm_bench_probation(
         if any(current[key] != baseline[key]
                for key in ("heap_restarts", "mqtt_skipped", "poll_skipped", "crc_err")):
             fail("bench counters changed after its cold pressure window")
-        if current["timeout_err"] < baseline["timeout_err"] or \
+        if current["timeout_err"] < last_timeout or \
            current["timeout_err"] - baseline["timeout_err"] > MAX_X10A_TIMEOUT_DELTA:
             fail("bench timeout counter regressed or exceeded its confirmation allowance")
+        last_timeout = current["timeout_err"]
         system = status.get("sys", {})
         if int(system.get("free_heap", 0)) < MIN_FINAL_FREE_HEAP or \
            int(system.get("max_alloc", 0)) < MIN_FINAL_LARGEST_BLOCK:
             fail("bench probation confirmation lost safe heap")
+        return uptime
+
+    while time.monotonic() < deadline:
+        remaining = deadline - time.monotonic()
+        status = request_status_deadline(endpoint, timeout=min(remaining, HTTP_TIMEOUT_S))
+        validate_confirmation_status(status)
         remaining = deadline - time.monotonic()
         if remaining <= 0:
             break
@@ -2432,7 +2440,14 @@ def confirm_bench_probation(
             endpoint, "/ota/status", timeout=min(remaining, OTA_STATUS_REQUEST_TIMEOUT_S),
         )
         if image.get("image_state") == "valid" and image.get("rollback_pending") is False:
-            return {"image_state": "valid", "rollback_pending": False, "uptime_s": uptime}
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                fail("bench confirmation deadline expired before its final status")
+            confirmed = request_status_deadline(endpoint, timeout=min(remaining, HTTP_TIMEOUT_S))
+            if time.monotonic() >= deadline:
+                fail("bench confirmation final status exceeded its absolute deadline")
+            confirmed_uptime = validate_confirmation_status(confirmed)
+            return {"image_state": "valid", "rollback_pending": False, "uptime_s": confirmed_uptime}
         if image.get("image_state") != "pending_verify" or image.get("rollback_pending") is not True:
             fail("bench probation confirmation lost the armed image identity")
         time.sleep(min(1, max(0.0, deadline - time.monotonic())))
@@ -5365,7 +5380,7 @@ def main() -> int:
 def cli_main() -> int:
     try:
         return main()
-    except (GateError, OSError) as error:
+    except (GateError, OSError, CompactTransportError) as error:
         # No follow-up request is safe here: a failed acknowledgment can still have written the
         # board. Preserve the last durable milestone and existing private evidence, without retry.
         if ACTIVE_JOURNAL is not None:
