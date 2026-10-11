@@ -142,7 +142,7 @@ Ids are stable keys and are never reused — a gap means a feature was retired, 
 | 101 | **Host runtime-scenario harness** — ten scenarios run selected production parsers, serializers and config save transactions through simulated clock/storage/transport/broker adapters; three real POSIX socket scenarios prove joined absolute deadline aborts for trickling headers and bodies and the bounded leftover-body discard after a response. It remains hardware-free and does not execute target glue, NVS or MCP | ✅ 🧪 | [`runtime_integration_tests.cpp`](../test/runtime/runtime_integration_tests.cpp), [`run-runtime-integration-tests.sh`](../scripts/run-runtime-integration-tests.sh) |
 | 102 | **Real-browser rendering and accessibility gate** — the assembled production UI runs in Chrome across all locales and mobile/desktop widths, including native accessibility, keyboard, overflow, reduced-motion and console contracts | ✅ 🧪 | [`test_browser_render.mjs`](../test/test_browser_render.mjs), [`run-browser-render-tests.sh`](../scripts/run-browser-render-tests.sh) |
 | 103 | **Signed release artifact construction** — a trusted-main job isolates the signing key, pins signing-key continuity and manifest provenance, then hands the exact artifact to a separate write-capable publisher that binds and verifies the release tag against the requested source SHA | ✅ 🧪 | [`ci-build-all.sh`](../scripts/ci-build-all.sh), [`check-signing-key-continuity.py`](../scripts/check-signing-key-continuity.py), [`check-manifest-provenance.py`](../scripts/check-manifest-provenance.py), [`build.yml`](../.github/workflows/build.yml) |
-| 104 | **Hardware acceptance separated from publication** — the canonical private-inventory bench and production OTA transactions remain explicit maintainer operations; a manual release skips the PR test suite, never contacts a board and depends on no lab runner, private inventory or hardware policy | ✅ 🧪 | [`production-ota-gate.py`](../scripts/production-ota-gate.py), [`build.yml`](../.github/workflows/build.yml) |
+| 104 | **Hardware acceptance separated from publication** — the canonical private-inventory bench and production OTA transactions remain explicit maintainer operations; a release dispatch skips the PR test suite, never contacts a board and depends on no lab runner, private inventory or hardware policy | ✅ 🧪 | [`production-ota-gate.py`](../scripts/production-ota-gate.py), [`build.yml`](../.github/workflows/build.yml) |
 | 105 | **Protocol S legacy transport & hardware TX-echo suppression** — Protocol S support for legacy Daikin units (unverified catalog), `HpFrameReceiver` hardware TX-echo suppression for both protocols, and preamble resynchronization for Protocol I | ✅ 🧪 | [`logic/crc.hpp`](../main/logic/crc.hpp), [`hp_comm.cpp`](../main/hp_comm.cpp), [`hp_detect.cpp`](../main/hp_detect.cpp), [`def/protocol_s.hpp`](../main/def/protocol_s.hpp), [`X10A_PROTOCOL.md`](X10A_PROTOCOL.md) |
 | 106 | **Altherma 4 Modbus TCP telemetry** — manufacturer-derived 42-row read-only subset, snapshot-owned profile semantics and pressure-probe heuristic; physical acceptance and three conversion assumptions remain pending | 🟡 🧪 | [`logic/modbus_catalog.hpp`](../main/logic/modbus_catalog.hpp), [`logic/modbus_profile.hpp`](../main/logic/modbus_profile.hpp), [`def/altherma4.hpp`](../main/def/altherma4.hpp), [`MODBUS_PROTOCOL.md`](MODBUS_PROTOCOL.md) |
 
@@ -226,7 +226,7 @@ Deep dive: [`ARCHITECTURE.md`](ARCHITECTURE.md), [`SECURITY.md`](SECURITY.md).
   single arm prevents reuse after self-deletion. Cold OTA pressure therefore does not overlap a
   dynamically allocated health-task stack. The existing 90/600-second rules remain unchanged.
 - **✅ 🧪 Two update channels** ([`logic/ota_channel.hpp`](../main/logic/ota_channel.hpp)):
-  `release` (the gh-pages root, cut by a manual workflow run) and `dev` (every firmware-relevant
+  `release` (the gh-pages root, cut by a release dispatch) and `dev` (every firmware-relevant
   merge). Dev builds are stamped `<next release>-dev.<n>` — a semver **pre-release**, so ordering
   alone gets both directions right. The dev URL is *derived* from the release base, never configured
   separately, so the feeds cannot drift onto different hosts.
@@ -904,7 +904,7 @@ Four properties of that core are worth naming because they are not obvious from 
   records its real floors too: ESP-IDF 6.0 (W5500 2.x needs that `esp_eth` API), CMake 3.22 and
   GNU++17 for `main`, matching the host logic suite instead of inheriting ESP-IDF's changing app
   dialect. `CONFIG_APP_REPRODUCIBLE_BUILD=y` removes wall-clock metadata from the application image;
-  the manual release path performs one signed build and does not turn a second clean rebuild into a
+  the release dispatch path performs one signed build and does not turn a second clean rebuild into a
   publication prerequisite.
 - **✅ Locked managed-component graph.** [`dependencies.lock`](../dependencies.lock) commits the
   exact direct and transitive versions plus registry content hashes resolved by ESP-IDF 6.1.0.
@@ -1021,7 +1021,7 @@ Four properties of that core are worth naming because they are not obvious from 
   digest also enters manifest provenance. The write-capable publisher receives no private key,
   and repeats the signature/provenance checks after artifact handoff. Development publication keeps
   its cache-busted Pages readback; an explicit release performs no post-build test gate.
-- **✅ Hardware-independent manual releases.** A manual `release: true` dispatch skips the
+- **✅ Hardware-independent release dispatch.** A `release: true` dispatch skips the
   mechanical PR suite, performs one signed build, publishes the root feed, and creates the
   exact-source tag and GitHub Release. It never schedules a self-hosted job or contacts a board.
   Test-board and production-board acceptance remain separately authorized maintainer operations.
@@ -1042,11 +1042,11 @@ Four properties of that core are worth naming because they are not obvious from 
   post-refresh high-water mark is a mandatory stack task in the private inventory. Root policy, inventory, both artifact
   identities/feeds and the feed/power controllers are distinct and deny production; the job receives
   no signing key.
-- **✅ Releases are manual; merges publish a dev channel.** A push to `main` stamps a dev version and
-  republishes `dev/`; a release is an explicit workflow run that tags and republishes the root. The
-  current workflow emits the same shape for either slice (`index.html`, compact `manifest.json`,
-  `artifacts.json`, `changelog.json`, binaries), so the installer and OTA client need no special case.
-  A historical root slice remains unchanged until the next manual release. New manifests stay within
+- **✅ Releases use dispatch; merges publish a dev channel.** A push to `main` republishes `dev/`;
+  a release dispatch tags and republishes the root. The canonical agent delivery flow dispatches
+  automatically on confirmed changelog capacity exhaustion. Both slices share `index.html`, `manifest.json`,
+  `artifacts.json`, `changelog.json` and binaries, so the installer and OTA client need no special case.
+  A historical root slice stays intact until the next release dispatch. New manifests stay within
   the oldest supported signed release's 1024-byte restore reader; the sibling index binds the exact
   manifest SHA-256 plus every published binary for integrity checks.
 - **✅ Concurrent publishers survive losing the race.** That one branch has two writers and they

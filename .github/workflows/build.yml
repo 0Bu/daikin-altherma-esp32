@@ -4,7 +4,7 @@ name: build
 #
 # There are two published feeds, cut by two different events:
 #
-#   RELEASE  (gh-pages root, /manifest.json)      only a MANUAL run of this workflow with
+#   RELEASE  (gh-pages root, /manifest.json)      only a DISPATCH of this workflow with
 #                                                 `release: true` tags v* and republishes it
 #   DEV      (gh-pages dev/,  /dev/manifest.json) every firmware-relevant push to main
 #
@@ -15,7 +15,8 @@ name: build
 # picking the bump level. The device chooses which feed it follows (Settings -> ESP32 -> Update
 # channel, POST /set_ota); each slice published by this workflow has the same shape, so nothing
 # downstream is special-cased. A root slice from an older release stays in its historical shape
-# until the next manual release; a dev push never rewrites it.
+# until the next release dispatch; a dev push never rewrites it. The canonical deploy-prod handoff
+# dispatches an already authorized release when cumulative development history exhausts its budget.
 #
 # PUBLISHING POLICY — publishes from a PRIVATE repo too, and the Pages site is PUBLIC
 #
@@ -99,8 +100,13 @@ on:
         type: string
         required: false
         default: ""
+      expected_source_sha:
+        description: "Optional exact source SHA; required by the automatic changelog-capacity release handoff"
+        type: string
+        required: false
+        default: ""
 
-# Serialize the complete main version/build/publish chain, including waiting manual releases.
+# Serialize the complete main version/build/publish chain, including waiting release dispatches.
 # A release dispatch and a push to main share this group deliberately: they both derive a version
 # from the tag list, and a release must never be computed against a tag another run is creating.
 # GitHub's default single pending slot can replace a release; max retains up to 100 waiting runs.
@@ -836,7 +842,20 @@ jobs:
         with:
           fetch-depth: 0   # full history + tags for versioning / change detection
 
-      # This job is structurally restricted to trusted main. A manual release is the only release
+      # Bind dispatch admission before versioning, signing-key provisioning or publication.
+      # main can move between acceptance and workflow_dispatch resolving its ref.
+      - name: Bind requested publication source
+        env:
+          EXPECTED_SOURCE_SHA: ${{ inputs.expected_source_sha }}
+        run: |
+          set -euo pipefail
+          if [ -n "$EXPECTED_SOURCE_SHA" ]; then
+            [[ "$EXPECTED_SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]] \
+              && [ "$EXPECTED_SOURCE_SHA" = "$GITHUB_SHA" ] \
+              || { echo "publication source does not match the accepted full SHA" >&2; exit 2; }
+          fi
+
+      # This job is structurally restricted to trusted main. An explicit dispatch is the only release
       # mode; every other admitted event publishes the dev channel.
       - name: Decide the run mode
         id: mode
@@ -1073,7 +1092,7 @@ jobs:
   # key to a write-capable job.
   publish:
     needs: [trusted_build]
-    # `trusted_build` deliberately admits a manual release through a skipped mechanical_gates job.
+    # `trusted_build` deliberately admits a release dispatch through a skipped mechanical_gates job.
     # `always()` prevents GitHub's implicit success() from propagating that transitive skip while
     # the explicit result check still fails closed when the signed build itself did not succeed.
     if: always() && needs.trusted_build.result == 'success'
