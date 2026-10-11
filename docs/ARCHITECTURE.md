@@ -197,7 +197,7 @@ nvs_storage.cpp     → thin NVS helpers (namespaces, blobs, migration); setters
                        nvs_storage_available() records initialization success, not write health
 http_server.cpp     → esp_http_server :80, wildcard dispatch; concerns register their own routes.
                       Picks the trust surface from the observed provisioning-AP state: the OPEN
-                      setup AP registers ONLY the provisioning routes (GET / , /index.html, POST
+                      setup AP registers ONLY the provisioning routes (GET / , /index.html, /favicon.ico, POST
                       /set_wifi + captive), withholding /scan, /coredump, /diag, config/OTA/MCP from
                       an unauthenticated radio client; with no setup AP, the configured WiFi or
                       Ethernet LAN registers the full API.
@@ -212,8 +212,9 @@ http_common.cpp     → shared HTTP helpers + the single OOM guard: http_registe
                       handle_all trampoline, which calls the handler inside try/catch —
                       std::bad_alloc → 503, any other throw → 500, instead of unwinding through
                       esp_http_server's C frames to std::terminate → reboot — and then settles a
-                      leftover request body (≤ 8 KiB within 2 s, otherwise ESP_FAIL closes the
-                      session instead of IDF's unbounded purge).
+                      leftover request body (≤ 8 KiB, with a 2 s admission deadline checked before
+                      each receive; one in-progress receive can add the socket timeout). Exceeding
+                      a limit returns ESP_FAIL and closes the session instead of IDF's unbounded purge.
                       Non-OTA routes are early-rejected with 503 during active OTA download or when
                       heap_largest_internal_block() < 6144 B (via logic/http_request.hpp http_is_ota_route()).
                       No route is exempt any more: the one that was (/events, raw-registered
@@ -3209,10 +3210,9 @@ Structure:
   observed roughly two-second TLS/parse owner unwind instead of racing that block. A stalled owner
   still produces an explicit bounded busy-503 after four seconds; it cannot park the HTTP server
   indefinitely. `/status` also fails fast before taking its many small snapshots while OTA is
-  active. The same early refusal covers `/history`, `/scan`, `/models?active=1` and only the
-  allocation-rich redacted `/diag` variant. The browser already switches to compact `/ota/status`;
-  static assets, `/models` and the unredacted static `/diag` ring remain readable, so update progress
-  and diagnostics stay observable without recreating the allocator race. No model-sized buffer is retained across requests —
+  active. The common early refusal covers every non-OTA route, including `/history`, `/scan`,
+  both `/models` variants, both `/diag` variants and static assets. An already-loaded browser
+  switches to compact `/ota/status`, which remains readable for update progress. No model-sized buffer is retained across requests —
   reintroducing one would recreate the dev.13 fragmentation failure this coordination replaces.
 - **The weather fetch gates on headroom immediately before opening TLS** (`logic/weather_forecast.hpp` →
   `weather_fetch_headroom_ok`, live-10). An Open-Meteo fetch transiently claims ~16 KiB mbedTLS
@@ -4156,12 +4156,12 @@ GET  /models?active=1   lazy X10A-diagnosis feed: streams exact queryable ValueD
                   and unknown/stale ids use definition:"generic",fallback:true, so example rows stay
                   available without claiming that generic was detected. The RX/TX dropdown still takes its GPIOs from
                   /status.pins_avail, NOT from the legacy pin_hint. During OTA this dynamic variant
-                  returns the common early busy-503; static GET /models remains reachable
+                  returns the common early busy-503, as does static GET /models
 GET  /diag[?verbose=0|1][?redact=1]   in-memory diag log. Streams in 1 KiB chunks. ?redact=1 scrubs the handful of
                   lines that interpolate a host/IP/SSID (logic/redact.hpp): a replacement is longer than most values
                   it replaces, so the redacted text can GROW past the static dump buffer, and the alternatives are a second
-                  ~8 KB .bss buffer or a ~6 KB contiguous heap allocation. Plain /diag keeps serving its
-                  static ring during OTA (dump volume clamped to 512 B to avoid multi-pbuf lwIP heap fragmentation); redact=1 returns the early busy-503 before its string chunk
+                  ~8 KB .bss buffer or a ~6 KB contiguous heap allocation. During active OTA download,
+                  both plain and redacted /diag return the common early busy-503 before entering the handler.
                   A query too long for the handler's buffer answers 414 rather than being read as absent, so
                   a padded ?redact=1 can never fall back to the unscrubbed log (same rule on /status).
                   Identifier producers use allocation-free 96-byte escaped representations; the real
@@ -4588,7 +4588,9 @@ try-lock acquire a callback context needs.
 
 Heap is tight (WiFi + MQTT + TLS dominate; the binding limit is the
 largest *contiguous* free block): keep every HTTP handler under the `handle_all` try/catch (503 on
-OOM before response emission; failed connection after a streamed response starts), stream `/diag`,
+OOM before response emission). `/status`, `/values` and MCP use the bounded stream helper to close
+an incomplete response after emission; `/diag` and `/history` still rely on the outer guard, which
+cannot safely replace an already-started response with a new error (tracked as HTTP-03). Stream `/diag`,
 `/status`, `/values`, both MCP results and MQTT discovery instead of building one big
 `std::string`, and treat any new large contiguous allocation (big JSON, OTA TLS) as a crash risk to
 size-check. A reboot loop is bad here too — it stops the poll cycle and drops MQTT availability.

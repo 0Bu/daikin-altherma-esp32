@@ -233,10 +233,10 @@ them. This project keeps that data but makes it **runtime-selectable**:
   fingerprint) and selects the matching profile — there is no manual model picker; the web UI shows
   the detected model read-only. The **RX/TX pins are auto-detected** too (the firmware sweeps the
   cached pair, its swap and the board default); they show read-only while the bus answers and fall
-  back to a dropdown of the chip's safe GPIOs when it doesn't (`logic/board_pins.hpp` — the ESP32-S3
-  pins not reserved for flash/PSRAM, strapping, USB-JTAG or JTAG, minus the status LED's own pin;
-  which of them a given board breaks out to a header is the user's to know, see the board table in
-  the top-level README). The heat-pump value labels stay English-only (a separate concept from the
+  back to a dropdown under **Settings → Protocol** when it doesn't. The selected board preset
+  narrows the chip-safe set to its exposed pins and reserves LED/button, ENV III and detected Ethernet
+  pins (`logic/board_pins.hpp`; see [BOARDS.md](BOARDS.md) and [WIRING.md](WIRING.md)).
+  The heat-pump value labels stay English-only (a separate concept from the
   UI's own language — see Configuration model below); the poll interval is fixed at 1 s.
 - The **model** (active profile + fingerprint) is **re-detected on every boot** (never written to
   NVS); the **link** (RX/TX pins + protocol + observation-identity fingerprint) is a persisted cache,
@@ -543,10 +543,9 @@ GET  /diag[?verbose=0|1][?redact=1]
                                    #   a replacement is longer than most values it replaces, so the
                                    #   redacted text can grow past the static dump buffer, and the
                                    #   alternatives were a second ~8 KB .bss buffer or a ~6 KB
-                                   #   contiguous heap allocation. During OTA, plain /diag remains
-                                   #   available from static storage (clamped to 512 B to prevent burst
-                                   #   pbuf heap fragmentation); redact=1 returns the early busy-503
-                                   #   before creating its string chunk.
+                                   #   contiguous heap allocation. During active OTA download both
+                                   #   plain and redacted /diag return the common early busy-503;
+                                   #   use /ota/status for progress.
 GET  /scan                         # WiFi scan → {"networks":[{ssid,rssi}]} (name + signal only, no
                                    #   auth field). Trusted-LAN only, and read by no shipped client:
                                    #   the setup portal takes a TYPED SSID and never scans. A
@@ -707,8 +706,8 @@ GET  /models?active=1              # X10A profile rows for the Settings register
                                    #   Rows stream from the exact resolved main/def view. Auto or a
                                    #   stale id uses definition:"generic",fallback:true, preserving
                                    #   useful examples without claiming that generic was detected.
-                                   #   During OTA this dynamic variant returns the early busy-503;
-                                   #   the static GET /models catalog remains available.
+                                   #   During active OTA download both this dynamic variant and
+                                   #   the static GET /models catalog return the common early busy-503.
 POST /hp/query                     # FREE REGISTER PROBE — read ONE caller-chosen page and report the
                                    #   raw frame plus every decode the requested slice admits. The only
                                    #   route whose subject is a register the value catalog does not

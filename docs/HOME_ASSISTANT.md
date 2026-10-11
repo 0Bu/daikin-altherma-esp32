@@ -681,8 +681,8 @@ Assistant **or** Grafana — and take their ratio:
 Then **COP = P_thermal / P_electrical** (instantaneous) and **SCOP / JAZ = ΣkWh_thermal ⁄ ΣkWh_electrical**
 over a period (month, heating season, year).
 
-> Entity ids below follow the sample `altherma3_r_erga` profile (English labels — the firmware is
-> English-only). For a different model, open `http://daikin-altherma-esp32.local/values` for the
+> Entity ids below are illustrative English catalog labels; the web UI has thirteen languages.
+> Open `http://daikin-altherma-esp32.local/values` for your detected profile's
 > exact labels, then map
 > them to your HA entity ids (HA slugs the discovery `name`). `sensor.heatpump_power` /
 > `sensor.heatpump_energy` are **your external meter** (e.g. a Shelly EM/3EM or DIN-rail kWh meter),
@@ -767,17 +767,19 @@ better empty than a plausible-looking wrong value.
 
 ### 2. Instantaneous COP (live gauge)
 
-Prefer the **measured** electrical power from your meter (a Shelly EM reports live W):
+Prefer the **measured** electrical power from your meter. This example requires
+`sensor.heatpump_power` in **W** (as reported by a Shelly EM) and converts it to kW:
 
 ```yaml
       - name: "Altherma COP (live)"
         unique_id: altherma_cop_live
         availability: >
           {{ states('sensor.altherma_thermal_power') | is_number
-             and states('sensor.heatpump_power') | is_number }}
+             and states('sensor.heatpump_power') | is_number
+             and state_attr('sensor.heatpump_power', 'unit_of_measurement') == 'W' }}
         state: >
           {% set p_th = states('sensor.altherma_thermal_power') | float %}
-          {% set p_el = states('sensor.heatpump_power') | float %}   {# external meter, kW #}
+          {% set p_el = (states('sensor.heatpump_power') | float) / 1000 %}
           {{ (p_th / p_el) | round(2) if p_el > 0.05 else 'unknown' }}
 ```
 
@@ -801,6 +803,14 @@ this rule and blanks its COP pill rather than showing the collapsed quotient
 (`main/logic/cop_scope.hpp`); it also names which COP it is showing, since the two are different
 numbers and look identical on screen.
 
+**The tank booster heater (BSH) is outside both water-temperature measurement points.** Its
+electricity may be included in your meter, but its heat is absent from this virtual heat meter.
+Use the whole-installation COP recipe only while BSH is known to be off; if its state is unknown,
+the measurement boundary is unproven. The firmware suppresses its corresponding COP in both cases.
+The seasonal ratio below also misses BSH heat and other unmeasured tank contributions: describe it
+as the measured water-circuit energy ratio, or use a heat meter covering the complete system before
+calling it whole-installation SCOP/JAZ.
+
 **With a Shelly Pro 3EM specifically:** use the device's *total* active power (the sum across all
 three channels) as `sensor.heatpump_power` — correct whether the unit is three-phase or single-phase,
 since unused channels simply read 0 — and its accumulated energy counter as `sensor.heatpump_energy`
@@ -821,7 +831,6 @@ sensor:
     source: sensor.altherma_thermal_power     # kW  -> kWh
     name: Altherma Thermal Energy
     unique_id: altherma_thermal_energy
-    unit_prefix: k
     unit_time: h
     method: trapezoidal
 
@@ -829,6 +838,8 @@ utility_meter:
   altherma_thermal_energy_yearly:
     source: sensor.altherma_thermal_energy
     cycle: yearly
+    net_consumption: true                   # retain negative defrost energy
+    periodically_resetting: false           # persistent, signed integral
   heatpump_electrical_energy_yearly:
     source: sensor.heatpump_energy            # your external kWh meter counter
     cycle: yearly
@@ -837,11 +848,19 @@ template:
   - sensor:
       - name: "Altherma JAZ (yearly SCOP)"
         unique_id: altherma_jaz
+        availability: >
+          {{ states('sensor.altherma_thermal_energy_yearly') | is_number
+             and states('sensor.heatpump_electrical_energy_yearly') | is_number
+             and (states('sensor.heatpump_electrical_energy_yearly') | float) > 0 }}
         state: >
-          {% set q = states('sensor.altherma_thermal_energy_yearly') | float(0) %}
-          {% set e = states('sensor.heatpump_electrical_energy_yearly') | float(0) %}
+          {% set q = states('sensor.altherma_thermal_energy_yearly') | float %}
+          {% set e = states('sensor.heatpump_electrical_energy_yearly') | float %}
           {{ (q / e) | round(2) if e > 0 else 'unknown' }}
 ```
+
+The thermal input is already in kW, so no additional `unit_prefix` is needed for kWh. The thermal
+period counter must accept negative adjustments; otherwise defrost withdrawals disappear again.
+Both yearly inputs must cover the same period and be available; a missing heat total is not zero.
 
 **Grafana** (if you route the MQTT values into a Prometheus-compatible TSDB, e.g. Telegraf's MQTT
 consumer → VictoriaMetrics) — compute the heat meter in the query and integrate over the dashboard

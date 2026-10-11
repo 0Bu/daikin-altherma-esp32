@@ -176,8 +176,8 @@ its meaning is understood; do not delete it just because decoding failed.
 
 | If you picked… | Also include |
 |---|---|
-| A wrong or impossible reading | What the number **should** be and how you know. Then press **Re-detect** (Settings → ESP32), wait ten seconds, and collect the report — `/diag` then contains the raw bytes the number is decoded from, which is the only way to tell a wrong formula from a wrong position in the message. |
-| The wrong model was detected | The model names from the sticker on **both** units, and a report collected after a re-detect. |
+| A wrong or impossible reading | What the number **should** be and how you know. Collect a report while the reading is visible. The report includes available diagnostic frames; a maintainer may request a fresh detection trace if those bytes do not cover the affected register. There is no Re-detect button in the current UI. |
+| The wrong model was detected | The model names from the sticker on **both** units and a report showing the current detection result. Preserve that report before restarting or changing the connection. |
 | No readings at all | How the two wires are connected to X10A. |
 | Home Assistant / MQTT | The affected entity ids and what Home Assistant shows for them (`unavailable`, `unknown`, a duplicate device). |
 | Crashes or restarts | Whether the web page showed a crash banner — but not the dump itself (see above). Collect the report **before** you press *Delete report* on that banner: deleting it erases the dump and the crash record on the device, and nothing can bring either back. |
