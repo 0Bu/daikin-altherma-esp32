@@ -92,6 +92,23 @@ for (const code of codes) {
       `${code} translates too little of the catalog (${translatedStrings}/${stringCount})`);
   }
 }
+// Progress arguments come from checkupDuration(), not numeric window counts. Execute the
+// actual locale functions with multi-hour and minute durations, including a settling value
+// whose unit is already formatted, so the historical count/unit mistakes cannot recur.
+for (const code of ["ja", "fi", "zh"]) {
+  const dict = catalog[code];
+  for (const key of ["check.detail.dhw_candidate", "check.detail.dhw_settling", "check.detail.dhw_waiting"]) {
+    const args = key.endsWith("candidate") ? ["2 h", "6 h", "20 min", "1 h"]
+      : key.endsWith("settling") ? ["2 h", "6 h", "45 min"] : ["2 h", "6 h"];
+    const text = dict[key](...args);
+    for (const arg of args) assert.ok(text.includes(arg), `${code}/${key} lost duration ${arg}`);
+    assert.doesNotMatch(text, /(?:h|min)\s*(?:件|个|分鐘|分钟)|puhdasta tunnin ikkunaa valmiina|puhdas tunnin ikkuna valmis/,
+      `${code}/${key} treats a formatted duration as a count or adds a second unit`);
+  }
+}
+assert.doesNotMatch(catalog.ja["check.detail.collecting"]("2 h", "24 h"), /(?:h|min)件/,
+  "Japanese collecting progress must describe elapsed time, not item counts");
+
 for (const code of lazyDomainCodes) {
   const faults = catalogContext.__faultCodeCopy[code];
   assert.equal(faults?.values?.length, 63, `${code} must register all fault-code meanings`);

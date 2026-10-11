@@ -35,8 +35,9 @@ Breaker OFF. Three wires reach the heat pump: the two signals and ground.
 firmware cannot know them:
 
 1. Wire HP-TX and HP-RX to two free GPIOs on your board.
-2. Select those two in the RX/TX dropdown under **⚙ Settings → ESP32**. It lists only the GPIOs
-   this chip allows. The choice is saved and reused on every boot.
+2. Select those two in the RX/TX dropdown under **⚙ Settings → Protocol**. It lists the selected
+   board's available GPIOs, excluding pins reserved by other configured hardware. The choice is
+   saved and reused on every boot.
 
 Until that setting matches your wiring, no values arrive: the firmware tries the saved pins and its
 built-in defaults (`RX 44` / `TX 43`) — it does not scan every pin. Mixing up RX and TX is harmless,
