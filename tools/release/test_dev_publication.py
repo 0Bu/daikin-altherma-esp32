@@ -368,6 +368,45 @@ class PublicationTests(unittest.TestCase):
 
 
 class SchedulingTests(unittest.TestCase):
+    def assert_publication_source_binding(self, workflow):
+        trusted = workflow.split('  trusted_build:\n', 1)[1].split('  publish:\n', 1)[0]
+        name = '      - name: Bind requested publication source\n'
+        guard = trusted.split(name, 1)[1].split('      - name:', 1)[0]
+        self.assertIn('EXPECTED_SOURCE_SHA: ${{ inputs.expected_source_sha }}', guard)
+        self.assertLess(trusted.index(name), trusted.index('- name: Decide the run mode'))
+        shell = re.search(r'        run: \|\n((?:          .*\n|\n)+)', guard).group(1)
+        source = 'a' * 40
+        for requested, actual, expected in (
+                (source, source, 0), ('', source, 0), (source, 'b' * 40, 2),
+                ('a' * 39, 'a' * 39, 2), ('A' * 40, 'A' * 40, 2),
+                ('g' * 40, 'g' * 40, 2), ('$(exit 0)', '$(exit 0)', 2)):
+            result = subprocess.run(['bash', '-c', textwrap.dedent(shell)], capture_output=True,
+                                    env={**os.environ, 'EXPECTED_SOURCE_SHA': requested,
+                                         'GITHUB_SHA': actual}, timeout=5)
+            self.assertEqual(result.returncode, expected, result.stderr.decode())
+
+    def test_dispatch_source_binding_runs_before_publication(self):
+        self.assert_publication_source_binding((PROJECT / '.github/workflows/build.yml').read_text())
+
+    def test_dispatch_source_binding_controls_reject_regressions(self):
+        workflow = (PROJECT / '.github/workflows/build.yml').read_text()
+        name = '      - name: Bind requested publication source\n'
+        start = workflow.index(name)
+        end = workflow.index('      # This job is structurally restricted', start)
+        guard = workflow[start:end]
+        moved = workflow[:start] + workflow[end:]
+        insertion = moved.index('      - name: Stamp firmware version\n')
+        cases = {
+            'accepts a moved main': workflow.replace('[ "$EXPECTED_SOURCE_SHA" = "$GITHUB_SHA" ]', 'true', 1),
+            'accepts malformed source': workflow.replace('[[ "$EXPECTED_SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]', 'true', 1),
+            'checks after versioning admission': moved[:insertion] + guard + moved[insertion:],
+        }
+        for name, mutated in cases.items():
+            with self.subTest(name=name):
+                self.assertNotEqual(mutated, workflow)
+                with self.assertRaises(AssertionError):
+                    self.assert_publication_source_binding(mutated)
+
     @staticmethod
     def job_header(workflow, name):
         return workflow.split(f'  {name}:\n', 1)[1].split('    steps:', 1)[0]

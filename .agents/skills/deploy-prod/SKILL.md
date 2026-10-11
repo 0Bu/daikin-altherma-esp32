@@ -120,10 +120,11 @@ other sessions' bench, merge and dev-feed gates before changing either published
 3. Invoke the existing main-only release workflow directly, with literal values:
 
    ```bash
-   scripts/gh-with-git-credentials.sh --repo github.com/0Bu/daikin-altherma-esp32 workflow run build.yml --ref main -f release=true -f release_version=<X.Y.Z>
+   scripts/gh-with-git-credentials.sh --repo github.com/0Bu/daikin-altherma-esp32 workflow run build.yml --ref main -f release=true -f release_version=<X.Y.Z> -f expected_source_sha=<full-40-hex-validated-main-sha>
    ```
 
-   Read the resulting run's head SHA and require the validated source before accepting its result.
+   The workflow must reject a mismatched source before versioning or signing. Read the resulting
+   run's head SHA and require the validated source before accepting its result.
    Watch it to completion. Verify the signed public release manifest/app, exact-source tag and
    GitHub Release. A partial release stops the handoff; do not claim a new baseline or silently
    dispatch a second release. Use the documented exact-version resume only after diagnosing the
