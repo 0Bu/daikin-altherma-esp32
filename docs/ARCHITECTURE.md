@@ -345,7 +345,9 @@ syslog.cpp          → optional syslog UDP client (RFC 5424, off when syslog_ho
                       "syslog:" lines); syslog_status() feeds /status. Its boot-local saturating
                       queue_dropped counter records rejected nonblocking queue admissions, not UDP
                       delivery, collector retention, disabled-source draining or truncated lines.
-                      Queue saturation rejects lines; disabled or unresolved forwarding drains them.
+                      Queue saturation rejects lines; admitted lines can also be discarded while
+                      forwarding is disabled or unresolved. Network, OTA and weather pauses retain
+                      the queue until the task resumes.
                       On the FIRST resolve of a boot
                       it replays the boot records once (logic/bootlog.hpp): a build-identity line
                       (version/elf_sha256/reset/safe_mode) plus current fault or stored-dump records.

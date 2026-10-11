@@ -372,7 +372,6 @@ bool wifi_start_sta() {
     // refused them, and otherwise keeps hunting for an SSID that may just be a router still coming
     // back up (logic/wifi_rollback.hpp).
     EventBits_t bits = 0;
-    bool             boot_connected     = false;
     const TickType_t window_ticks       = pdMS_TO_TICKS(WIFI_BOOT_WINDOW_S * 1000);
     TickType_t       checkpoint_started = xTaskGetTickCount();
     RollbackWatch rw;
@@ -380,10 +379,8 @@ bool wifi_start_sta() {
         const TickType_t waited = xTaskGetTickCount() - checkpoint_started;
         bits = xEventGroupWaitBits(s_events, CONNECTED_BIT | FAIL_BIT, pdFALSE, pdFALSE,
                                    waited < window_ticks ? window_ticks - waited : 0);
-        if (wifi_boot_wake_connected(bits & CONNECTED_BIT, s_wifi_connected)) {
-            boot_connected = true;
-            break;
-        }
+        if (wifi_boot_wake_connected(bits & CONNECTED_BIT, s_wifi_connected)) break;
+        bits &= ~CONNECTED_BIT;
         // A lease can disappear after waking the waiter but before it runs. Such a stale wake is
         // neither boot success nor a rollback checkpoint. Wait only the remainder of this window,
         // so repeated lease churn cannot extend the credential grace deadline.
@@ -398,7 +395,7 @@ bool wifi_start_sta() {
                       "coming back; retrying up to %d s before rolling back",
                  elapsed, s_last_disco_reason.load(), WIFI_ROLLBACK_GRACE_S);
     }
-    if (!boot_connected) {
+    if (!(bits & CONNECTED_BIT)) {
         if (rollback_pending) {
             Config rollback_cfg = config();
             ESP_LOGW(TAG, "STA connect failed with new credentials (last reason %d) — rolling back to %s",
@@ -514,7 +511,7 @@ WifiInfo wifi_info() {
         info.connected = true;
         // Only read the AP record while the link is up: mid-association its fields are transiently
         // null and a concurrent read faults (LoadProhibited). See s_wifi_connected.
-        wifi_ap_record_t ap{};
+        wifi_ap_record_t ap;
         if (s_wifi_connected && esp_wifi_sta_get_ap_info(&ap) == ESP_OK) {
             info.rssi = ap.rssi;
             memcpy(info.bssid, ap.bssid, 6);
@@ -523,8 +520,8 @@ WifiInfo wifi_info() {
                              : ap.phy_11n  ? "Wi-Fi 4"
                              : ap.phy_11g  ? "802.11g"
                              : ap.phy_11b  ? "802.11b" : "Wi-Fi";
-            strncpy(info.std, std_, sizeof(info.std) - 1);
-            info.std[sizeof(info.std) - 1] = '\0';
+            // Every choice above is a fixed literal of at most eight bytes including its NUL.
+            std::strcpy(info.std, std_);
         }
     }
     // The event loop can withdraw the lease while either SDK snapshot above is in progress.

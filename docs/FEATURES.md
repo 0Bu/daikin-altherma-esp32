@@ -721,7 +721,8 @@ Everything needed to explain a crash *after the fact*, from the field, without a
   to `null`/`-` rather than a fabricated epoch date.
 - **✅ Off-device log forwarding** ([`syslog.cpp`](../main/syslog.cpp)): best-effort RFC 5424 UDP
   forwarding to an optional collector. Internal syslog diagnostics are filtered to prevent loops;
-  queue saturation rejects lines, and disabled or unresolved forwarding drains them. Sending is
+  queue saturation rejects lines, and disabled or unresolved forwarding can discard admitted lines.
+  Network, OTA and weather pauses retain the queue until the task resumes. Sending is
   gated on **DNS only** — the
   reachability probe is advisory, since a healthy collector may firewall ICMP — and a send failure is
   classified hard vs. transient. `/status.syslog.queue_dropped` counts boot-local queue rejection,
