@@ -360,6 +360,12 @@ try {
     ["blocked output leaks the private receipt", () =>
       replaceOnce("scripts/production-ota-gate.py", '"receipt": public_receipt(ACTIVE_JOURNAL)',
         '"receipt": ACTIVE_JOURNAL.receipt'), "cold-receipt"],
+    ["error handler queries a possibly updated board", () =>
+      replaceOnce("scripts/production-ota-gate.py", '    except (GateError, OSError) as error:\n',
+        '    except (GateError, OSError) as error:\n        request_json("production.invalid", "/status")\n'), "cold-receipt"],
+    ["error handler retries a possible production write", () =>
+      replaceOnce("scripts/production-ota-gate.py", '    except (GateError, OSError) as error:\n',
+        '    except (GateError, OSError) as error:\n        post_update_once("production.invalid", 7, "2.0.0-dev.2", "a" * 64)\n'), "cold-receipt"],
     ["public receipt trusts untyped allowed fields", () =>
       replaceOnce("scripts/production-ota-gate.py",
         'elif key in number_fields and isinstance(value, int) and not isinstance(value, bool):',

@@ -378,6 +378,16 @@ args = SimpleNamespace(self_test=False, release_hil=False, execute=True, confirm
     expected_version=target, expected_app_sha256=sha)
 for failing_phase in (None, "ack lost", "return", "stress", "retained", "journal before write", "journal on failure"):
     events, syncs = [], []
+    failed = [False]
+    def stop(error):
+        failed[0] = True
+        raise error
+    def read_status(*args, **kwargs):
+        check(not failed[0], "error handler performed a network query")
+        return board() if "returned" in events else board(writer, old_elf)
+    def read_json(*args, **kwargs):
+        check(not failed[0], "error handler performed a network query")
+        return board()
     def post(*args, **kwargs):
         check(len([e for e in events if e == "post"]) == 0, "production POST retried")
         saved = json.loads(ns["ACTIVE_JOURNAL"].path.read_text())
@@ -385,26 +395,26 @@ for failing_phase in (None, "ack lost", "return", "stress", "retained", "journal
         check(saved["receipt"]["production"].get("executed") is None, "uncertain POST claimed false or complete")
         check(len(syncs) == 2 * len(saved["phases"]), "attempt lacked durable file/directory fsync")
         events.append("post")
-        if failing_phase == "ack lost": raise OSError("private-host private-topic private-coordinate")
+        if failing_phase == "ack lost": stop(OSError("private-host private-topic private-coordinate"))
         return 8
     def wait(*args):
         args[-1].update(transfer)
         events.append("returned")
-        if failing_phase == "return": raise gate["GateError"]("private-host private-topic")
+        if failing_phase == "return": stop(gate["GateError"]("private-host private-topic"))
         return board()
     def stress(**kwargs):
         check(kwargs["host"] == "production.invalid", "main repeated warm bench pressure")
         events.append("stress")
-        if failing_phase in ("stress", "journal on failure"): raise gate["GateError"]("private-coordinate")
+        if failing_phase in ("stress", "journal on failure"): stop(gate["GateError"]("private-coordinate"))
         return stress_receipt
     def retained(*args):
         events.append("retained")
-        if failing_phase == "retained": raise gate["GateError"]("private-topic")
+        if failing_phase == "retained": stop(gate["GateError"]("private-topic"))
         return {"topic": "private-topic", "retained": True, "bytes": 12, "rows": 1, "groups": 1}
     def checkpoint(journal, phase, **kwargs):
         if (failing_phase == "journal before write" and phase == "production_write_attempted") or \
            (failing_phase == "journal on failure" and phase == "blocked"):
-            raise OSError("fixture journal write failure")
+            stop(OSError("fixture journal write failure"))
         return original_checkpoint(journal, phase, **kwargs)
     original_checkpoint, original_fsync = gate["GateJournal"].checkpoint, os.fsync
     def sync(fd):
@@ -416,11 +426,11 @@ for failing_phase in (None, "ack lost", "return", "stress", "retained", "journal
         "verify_image": lambda *a: elf, "verify_http_range_support": lambda *a: None, "run_local_gates": lambda: None,
         "load_inventory": lambda: {role: {"host": role + ".invalid", "mac": "private-mac"} for role in ("bench", "production")},
         "validate_release_manifest": lambda *a: ("1.0.2", "c" * 64, "https://feed.invalid/release.bin", "d" * 40),
-        "verify_release_source_binding": lambda *a: None, "request_json": lambda *a: board(),
+        "verify_release_source_binding": lambda *a: None, "request_json": read_json,
         "validate_identity": lambda *a, **k: None, "wait_for_bench_health_window": lambda *a, **k: board(uptime=105),
         "exercise_bench_full_download": lambda **k: {"cold_stress": stress_receipt, "target_download_heap": transfer},
         "stress_board": stress, "resolve_http_endpoint": lambda host: host,
-        "request_status_deadline": lambda *a, **k: board() if "returned" in events else board(writer, old_elf),
+        "request_status_deadline": read_status,
         "wait_for_production_promotion_readiness": lambda endpoint, before, **k: before,
         "wait_for_ota_offer": lambda *a: 7, "post_update_once": post, "wait_for_new_firmware": wait,
         "verify_retained_x10a": retained}
