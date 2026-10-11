@@ -21,6 +21,7 @@ using StackType_t           = uint8_t;
 constexpr BaseType_t pdTRUE = 1, pdPASS = 1, pdFALSE = 0;
 constexpr TickType_t portMAX_DELAY      = UINT32_MAX;
 constexpr unsigned   portTICK_PERIOD_MS = 1;
+constexpr unsigned   portBYTE_ALIGNMENT = 16;
 #define pdMS_TO_TICKS(x) static_cast<TickType_t>(x)
 #define CONFIG_IDF_FIRMWARE_CHIP_ID 9
 #define CONFIG_DAIKIN_OTA_MANIFEST_URL "https://fixture.invalid/manifest.json"
@@ -152,9 +153,15 @@ struct State {
     int buffer_acquired = 0, buffer_freed = 0, ota_begun = 0, ota_aborted = 0, ota_ended = 0,
         selected   = 0;
     int hash_setup = 0, hash_aborted = 0, hash_finished = 0, active_clients = 0, active_buffers = 0;
-    bool           ota_live = false, hash_live = false;
-    size_t         written       = 0;
-    int            deadline_arms = 0, deadline_disarms = 0;
+    bool          ota_live = false, hash_live = false;
+    size_t        written       = 0;
+    int           deadline_arms = 0, deadline_disarms = 0;
+    int           static_creations = 0, dynamic_creations = 0;
+    bool          fail_dynamic_create = false;
+    StackType_t*  health_stack        = nullptr;
+    StaticTask_t* health_storage      = nullptr;
+    unsigned      health_stack_bytes  = 0;
+    void (*health_entry)(void*)       = nullptr;
     void*          buffers[8]{};
     FakeHttpClient clients[8]{};
     char           manifest[256]{};
@@ -182,16 +189,28 @@ inline BaseType_t xSemaphoreGive(SemaphoreHandle_t m) {
 inline TickType_t   xTaskGetTickCount() { return sdk::state.ticks; }
 inline void         vTaskDelay(TickType_t n) { sdk::state.ticks += n; }
 inline void         vTaskDelete(TaskHandle_t) {}
-inline TaskHandle_t xTaskCreateStatic(void (*fn)(void*), const char*, unsigned, void* arg, unsigned,
-                                      StackType_t*, StaticTask_t*) {
-    static FakeTask task;
+inline TaskHandle_t xTaskCreateStatic(void (*fn)(void*), const char* name, unsigned bytes,
+                                      void* arg, unsigned, StackType_t* stack,
+                                      StaticTask_t* storage) {
+    ++sdk::state.created;
+    ++sdk::state.static_creations;
+    if (sdk::state.fail_task_create) return nullptr;
+    static FakeTask worker, health;
+    FakeTask&       task = std::strcmp(name, "ota_health") == 0 ? health : worker;
+    if (std::strcmp(name, "ota_health") == 0) {
+        sdk::state.health_stack       = stack;
+        sdk::state.health_storage     = storage;
+        sdk::state.health_stack_bytes = bytes;
+        sdk::state.health_entry       = fn;
+    }
     task = {fn, arg};
     return &task;
 }
 inline BaseType_t xTaskCreate(void (*fn)(void*), const char*, unsigned, void* arg, unsigned,
                               TaskHandle_t* out) {
     ++sdk::state.created;
-    if (sdk::state.fail_task_create) return pdFALSE;
+    ++sdk::state.dynamic_creations;
+    if (sdk::state.fail_task_create || sdk::state.fail_dynamic_create) return pdFALSE;
     static FakeTask task;
     task = {fn, arg};
     if (out) *out = &task;

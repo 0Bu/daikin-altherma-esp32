@@ -45,10 +45,25 @@ function replaceOnce(text, before, after, name) {
 try {
   const baseline = execute(compile(sourcePath, "production"), []);
   assert.equal(baseline.status, 0, `production OTA cases\n${baseline.stdout}${baseline.stderr}`);
-  assert.match(baseline.stdout, /PASS total=46\b/);
+  assert.match(baseline.stdout, /PASS total=47\b/);
   console.log(baseline.stdout.trim());
 
   const mutations = [
+    {
+      name: "health-runtime-stack", scenario: "health_static_storage",
+      before: /!xTaskCreateStatic\(health_gate_task,\s*"ota_health",\s*kHealthTaskStack,\s*nullptr,\s*TASK_PRIO_OTA_GATE,\s*s_ota_health_task_stack,\s*&s_ota_health_task_storage\)/,
+      after: 'xTaskCreate(health_gate_task, "ota_health", kHealthTaskStack, nullptr, TASK_PRIO_OTA_GATE, nullptr) != pdPASS',
+    },
+    {
+      name: "health-storage-rearm", scenario: "health_static_storage",
+      before: "if (s_health_gate_armed.exchange(true, std::memory_order_acq_rel)) return;",
+      after: "/* mutation: allow a second task to reuse health storage */",
+    },
+    {
+      name: "health-stack-budget", scenario: "health_static_storage",
+      before: "static constexpr int kHealthTaskStack = 4096;",
+      after: "static constexpr int kHealthTaskStack = 3072;",
+    },
     {
       name: "unwind-buffer", scenario: "header_exception",
       before: /(~OtaUpdateResources\(\)\s*\{\s*)release_buffer\(\);/,
@@ -193,7 +208,7 @@ try {
       `${mutation.name}: only the specific assertion failure counts`);
     console.log(`negative control ${mutation.name}: rejected by ${mutation.scenario}`);
   }
-  console.log(`production OTA runtime: 46 cases, ${mutations.length} negative controls; source sha256=`
+  console.log(`production OTA runtime: 47 cases, ${mutations.length} negative controls; source sha256=`
     + createHash("sha256").update(source).digest("hex"));
 } finally {
   fs.rmSync(dir, { recursive: true, force: true });
