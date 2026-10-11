@@ -144,7 +144,12 @@ function discoverTargetArch(repoRootPath) {
 const targetArch = discoverTargetArch(repoRoot);
 
 // 4. Discover all canonical skills
-const discoveredSkills = fs.readdirSync(skillsDir, { withFileTypes: true })
+const skillEntries = fs.readdirSync(skillsDir, { withFileTypes: true });
+const skillSymlinks = skillEntries.filter((entry) => entry.isSymbolicLink());
+if (skillSymlinks.length) {
+  die(1, `skill inventory forbids symlink entries: ${skillSymlinks.map((entry) => entry.name).sort().join(", ")}`);
+}
+const discoveredSkills = skillEntries
   .filter((e) => e.isDirectory())
   .map((e) => e.name)
   .sort();

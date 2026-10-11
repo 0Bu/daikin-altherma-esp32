@@ -562,8 +562,15 @@ async function assertNativeAltherma4(page, context) {
   }
 }
 
-const server = await startFixtureServer({ pageFile, projectRoot: ROOT });
-const browser = await launchBrowser();
+let browser, server;
+try {
+  server = await startFixtureServer({ pageFile, projectRoot: ROOT });
+  browser = await launchBrowser();
+} catch (error) {
+  await server?.close();
+  console.error(`browser render setup: ${error.message}`);
+  process.exit(2);
+}
 try {
   const { page } = browser;
   await page.navigate(server.url);
@@ -899,6 +906,6 @@ try {
     "bounded real History roundtrips; reduced motion on dashboard/settings/WiFi/progress/disclosures");
   }
 } finally {
-  await browser.close();
-  await server.close();
+  try { await browser.close(); }
+  finally { await server.close(); }
 }

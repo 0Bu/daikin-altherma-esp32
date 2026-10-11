@@ -552,6 +552,20 @@ make_fixture "$fixture"
 mkdir -p "$fixture/.agents/skills/unreviewed-canary"
 expect_failure "extra canonical skill" "$fixture" "canonical skill set must contain exactly"
 
+for kind in extra canonical dangling; do
+  fixture="$WORK/skill-symlink-$kind"
+  make_fixture "$fixture"
+  case "$kind" in
+    extra) ln -s absence-review "$fixture/.agents/skills/unreviewed-canary" ;;
+    canonical)
+      mv "$fixture/.agents/skills/absence-review" "$fixture/linked-skill"
+      ln -s ../../linked-skill "$fixture/.agents/skills/absence-review"
+      ;;
+    dangling) ln -s not-present "$fixture/.agents/skills/unreviewed-canary" ;;
+  esac
+  expect_failure "$kind skill symlink" "$fixture" "agent inventory forbids symlink entries"
+done
+
 fixture="$WORK/skill-name"
 make_fixture "$fixture"
 skill="$(find "$fixture/.agents/skills" -mindepth 2 -maxdepth 2 -name SKILL.md | sort | head -n1)"

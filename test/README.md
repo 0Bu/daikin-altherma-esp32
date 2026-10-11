@@ -47,37 +47,43 @@ instrument different outcome counts from a container with the same upstream comp
 unknown runner image has no fallback profile and therefore fails closed pending review.
 
 CI runs the coverage form as the first step of `mechanical_gates`; the required `build` job consumes
-that result before conditionally compiling the esp32s3 firmware — a
-logic regression or an untested production path fails in seconds instead of after a full ESP-IDF
-build. `tools/coverage/selftest.sh` separately proves that an empty report, coverage below the
+that result before conditionally compiling the esp32s3 firmware. The coverage gate checks the
+production-header report inventory, the aggregate line floor and per-header branch-count ratchets;
+it does not require every production path to run. `tools/coverage/selftest.sh` separately proves
+that an empty report, coverage below the
 floor, a missing baseline and regressed branch-edge counts fail closed.
 
 `scripts/run-sanitizer-fuzz-tests.sh` compiles deterministic property tests over malformed and
 boundary-heavy logic inputs and probes the ASan+UBSan compile/runtime capability rather than the OS
-name. CI fails unless both sanitizers work; a local host falls back to UBSan only when the ASan probe
-fails. This is a bounded, reproducible hostile-input corpus, not an unbounded random fuzzer.
+name. CI requires both compile/start probes and the instrumented corpus to pass; a local host
+falls back to UBSan only when the ASan probe fails. The sanitizer capability smoke check only
+compiles and starts an instrumented binary; it
+does not independently prove detection of an injected memory fault. This is a bounded,
+reproducible hostile-input corpus, not an unbounded random fuzzer.
 
-`scripts/run-runtime-integration-tests.sh` runs the IDF-free runtime harness in `test/runtime/`. Thirteen
-scenarios call selected production config transactions and serializers, X10A/Modbus parsers, MQTT publish
-gating and bounded body/chunk logic through simulated clock, storage, serial, TCP, broker and HTTP adapters.
-Ten model failed saves and reconstruction, the config save failure boundaries (RAM, durable entries and
-result asserted together, including that an X10A save never writes `cfg`), an allocation witness that
-counts the calling thread's `operator new` allocations (the array and nothrow forms forward to the
-scalar one) while a transaction's store is alive
-(the fake's own bookkeeping paused) and requires none after the transaction's first durable write
-on the witnessed paths, allocation failure, task interleavings, fragmentation,
-reconnect/retain/LWT behavior and incomplete HTTP framing. The fake NVS follows IDF v6.1: `nvs_set_blob`
-is write-through and a failed set keeps the previous value, while `nvs_commit` is a no-op, so no
-staged-commit failure exists to model. Two deadline scenarios use real POSIX `socketpair`/`recv`
-traffic: a writer trickles an incomplete header or body beyond the absolute deadline, while the
-watchdog applies `shutdown(SHUT_RDWR)` and is joined before the descriptors are closed. A third
-socket scenario trickles a body still owed after the response: `http_body_discard()` must stop at its
-budget, settle a small buffered remainder and refuse more than its byte cap. Mutations
-independently disable the header and body watchdog and the discard deadline, let a failed NVS set
-replace the stored value, allocate after a config transaction's first write, and disable the Weather
-body-completion gate. The harness remains hardware-free and does not
-execute ESP-IDF target glue, real NVS or the production MCP/HTTP/MQTT stacks; target builds and
-separately authorized hardware acceptance remain distinct proof layers.
+`scripts/run-runtime-integration-tests.sh` runs thirteen scenarios in the IDF-free `test/runtime/`
+harness. Selected production headers run through simulated storage, clocks, transports and broker
+adapters; exception catches, periodic tasks, X10A transport, MQTT retain/LWT and the POSIX socket
+watchdog are modeled orchestration. Its six mutation flags change fake behavior or harness call
+sites: NVS atomicity, late config allocation, header/body watchdogs, discard deadline and Weather
+body completion. For Weather the harness bypasses `http_body_complete()` at its call site; it does
+not mutate the production Weather unit. Named failing assertions prove those modeled controls are
+observed, not that corresponding firmware `.cpp` regressions would be caught.
+This generic harness does not compile the production HTTP/MCP, X10A, MQTT or Weather glue;
+the complete production-unit fixtures below separately cover the named OTA, network and Modbus units.
+
+| Evidence layer | Executed source | Mutation witness and limits |
+|---|---|---|
+| Production headers | `main/logic/` config transactions, parsers, publish/body/chunk gates and serializers | Header logic runs on host; aggregate coverage and branch-count ratchets are bounded guarantees. |
+| Runtime models | `test/runtime/fake_runtime.hpp` and harness call sites | Six flags must fail named assertions; OOM, scheduling, transports and NVS/broker behavior remain models. |
+| Complete production units | OTA: `ota_update.cpp`; network: `wifi.cpp`, `syslog.cpp`; Modbus: `hp_modbus.cpp` | 47 OTA, 15 network and 31 Modbus cases, with temporary source mutations bound to named assertion oracles; SDK boundaries use host adapters. |
+
+The fake NVS models IDF v6.1 write-through `nvs_set_blob` and no-op `nvs_commit`; it does not exercise
+real storage. The allocation witness counts the calling thread's `operator new` after the first
+durable write, excluding fake bookkeeping. Real POSIX socket traffic exercises modeled header/body
+watchdogs and the production body-discard helper. None of these layers proves target scheduling,
+real TLS, NVS durability, radio behavior or physical X10A/HomeHub behavior; target builds and
+separately authorized hardware acceptance remain distinct evidence.
 
 The same runner compiles complete `wifi.cpp` and `syslog.cpp` production units through
 [`network_runtime/fixture.cpp`](network_runtime/fixture.cpp). Fifteen scenarios cover lease loss,
@@ -122,6 +128,9 @@ for overflow and console failures, inspects the native accessibility tree, exerc
 Escape behavior, waits for both `popstate` and `hashchange` before opening the following transient
 dialog, and repeats animation-sensitive checks under reduced motion. It is still a local fixture
 server, not device HTTP or physical sensor evidence.
+`DAIKIN_BROWSER_TIMEOUT_MS` bounds the entire runner (default 600000 ms, maximum 3600000 ms).
+Browser launch uses one absolute deadline across endpoint headers/body, socket and initialization;
+worker/browser process groups are joined before the temporary page is removed.
 
 `node test/test_production_ota_gate_contract.mjs` pins both canonical maintainer OTA modes without
 contacting hardware. The ordinary `bench` action must consume one exact dev offer/write, observe

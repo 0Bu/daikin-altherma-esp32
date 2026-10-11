@@ -275,6 +275,10 @@ def shell_mentions_sensitive_env(command: str) -> bool:
 
 
 def shell_injects_credential_wrapper(command: str) -> bool:
+    # A separately proven literal source search does not invoke the wrapper. Keep the later
+    # credential-path and environment checks active rather than exempting the whole command.
+    if literal_rg_inspection(command):
+        return False
     normalized = normalize_ansi_c_quotes(command).replace("\n", " ; ")
     try:
         lexer = shlex.shlex(normalized, posix=True, punctuation_chars=";&|()!<>")
@@ -1246,6 +1250,10 @@ def direct_ota_update_write(command: str) -> bool:
 
 def read_only_gate_inspection(command: str) -> bool:
     """Allow source inspection to name the gate without allowing an execution wrapper."""
+    # Session coordination only needs PIDs. Do not admit pgrep flags that expose argv/env,
+    # executable wrappers, substitutions, redirections, or additional shell commands.
+    if re.fullmatch(r"pgrep -f (?:production-ota-gate\.py|'production-ota-gate\.py')", command):
+        return True
     if re.search(r"[$`<>]", command):
         return False
     token_sets = [tokens for tokens, _ in shell_token_sets(command) if tokens]

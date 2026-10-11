@@ -9,12 +9,18 @@ trap 'rm -rf -- "$T"' EXIT
 python3 tools/release/test_dev_publication.py
 python3 tools/release/test_ci_event_matrix.py
 
-mkdir -p "$T/work/scripts" "$T/work/main/www" "$T/bin"
+real_node="$(command -v node)" || { echo "browser routing fixture requires Node" >&2; exit 2; }
+[ -x "$real_node" ] || { echo "browser routing fixture Node is not executable" >&2; exit 2; }
+"$real_node" --version >/dev/null
+export BROWSER_FIXTURE_NODE="$real_node"
+mkdir -p "$T/work/scripts" "$T/work/tools/browser" "$T/work/main/www" "$T/bin"
 cp scripts/run-browser-render-tests.sh "$T/work/scripts/"
+cp tools/browser/run_render.mjs "$T/work/tools/browser/"
 cat > "$T/bin/node" <<'NODE'
 #!/usr/bin/env bash
 set -euo pipefail
 printf '%s\n' "$*" >> "$BROWSER_FIXTURE_LOG"
+if [ "$1" = tools/browser/run_render.mjs ]; then exec "$BROWSER_FIXTURE_NODE" "$@"; fi
 if [ "$1" = tools/browser/find_browser.mjs ]; then printf '%s\n' /fixture/browser; fi
 NODE
 chmod +x "$T/bin/node"
@@ -50,6 +56,7 @@ check_scope() {
     [[ "$output" != *'no UI/browser-relevant changes in diff'* ]]
     [[ "$output" = *'complete browser rendering and accessibility gate passed'* ]]
     [ "$(grep -c '^tools/browser/find_browser.mjs$' "$BROWSER_FIXTURE_LOG")" -eq 1 ]
+    [ "$(grep -c '^tools/browser/run_render.mjs$' "$BROWSER_FIXTURE_LOG")" -eq 1 ]
     [ "$(grep -c '^tools/browser/assemble_page.mjs ' "$BROWSER_FIXTURE_LOG")" -eq 1 ]
     [ "$(grep -c '^test/test_browser_render.mjs --viewport ' "$BROWSER_FIXTURE_LOG")" -eq 2 ]
     [ "$(grep -c '^tools/browser/selftest.mjs$' "$BROWSER_FIXTURE_LOG")" -eq 1 ]
@@ -145,8 +152,9 @@ GITHUB_EVENT_NAME=push BEFORE="$push_before" check_scope 'push ending in a merge
 GITHUB_EVENT_NAME=push check_scope 'push without its event comparison runs full suite' run 'unresolvable comparison range'
 GITHUB_EVENT_NAME=push BEFORE=1111111111111111111111111111111111111111 \
   check_scope 'unknown push comparison cannot use merge parents' run 'unresolvable comparison range'
-mkdir -p "$T/empty/scripts"
+mkdir -p "$T/empty/scripts" "$T/empty/tools/browser"
 cp "$REPO/scripts/run-browser-render-tests.sh" "$T/empty/scripts/"
+cp "$REPO/tools/browser/run_render.mjs" "$T/empty/tools/browser/"
 cd "$T/empty"
 git init -q
 check_scope 'missing HEAD cannot silently skip browser tests' run 'unresolvable comparison range'
