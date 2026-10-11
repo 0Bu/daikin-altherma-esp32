@@ -662,7 +662,7 @@ same rows arrive by the normal route and the entities are unchanged.
 > construction ([MODBUS_PROTOCOL.md](MODBUS_PROTOCOL.md)). Using the HomeHub as a source does not
 > make HA a control path. Readings remain on `<base>/modbus` without per-value HA discovery.
 
-## Derived power, energy & COP / SCOP / JAZ
+## Derived power, energy, COP and period energy ratios
 
 The X10A bus (and this firmware) streams **instantaneous sensor values only** — there is no
 accumulated-energy (kWh), electrical-power (W) or run-hour register anywhere in the protocol. The
@@ -678,8 +678,10 @@ Assistant **or** Grafana — and take their ratio:
 2. **Electrical energy consumed** = from a **real electricity meter** on the heat-pump circuit — not
    from compressor current, not from Onecta's estimate.
 
-Then **COP = P_thermal / P_electrical** (instantaneous) and **SCOP / JAZ = ΣkWh_thermal ⁄ ΣkWh_electrical**
-over a period (month, heating season, year).
+Then **COP = P_thermal / P_electrical** (instantaneous) within the matched measurement boundary,
+and **period energy ratio = ΣkWh_thermal ⁄ ΣkWh_electrical** over a matching month, heating season
+or year. Call the latter whole-installation SCOP/JAZ only when the numerator and denominator
+cover that complete system; the water-circuit recipe below does not establish this.
 
 > Entity ids below are illustrative English catalog labels; the web UI has thirteen languages.
 > Open `http://daikin-altherma-esp32.local/values` for your detected profile's
@@ -814,11 +816,11 @@ calling it whole-installation SCOP/JAZ.
 **With a Shelly Pro 3EM specifically:** use the device's *total* active power (the sum across all
 three channels) as `sensor.heatpump_power` — correct whether the unit is three-phase or single-phase,
 since unused channels simply read 0 — and its accumulated energy counter as `sensor.heatpump_energy`
-for the JAZ denominator in step 3. The meter's ~1 % accuracy removes the electrical side as a source
+for the yearly ratio denominator in step 3. The meter's ~1 % accuracy removes the electrical side as a source
 of error; the **heat** side then dominates, so see the accuracy notes below before reading much into
 any single instant.
 
-### 3. Integrate to energy → SCOP / JAZ
+### 3. Integrate to energy → period energy ratio
 
 **Home Assistant** — turn the thermal-power sensor into a thermal-**energy** counter with the
 [`integration`](https://www.home-assistant.io/integrations/integration/) (Riemann-sum) platform,
@@ -846,7 +848,7 @@ utility_meter:
 
 template:
   - sensor:
-      - name: "Altherma JAZ (yearly SCOP)"
+      - name: "Altherma water-circuit energy ratio (yearly)"
         unique_id: altherma_jaz
         availability: >
           {{ states('sensor.altherma_thermal_energy_yearly') | is_number

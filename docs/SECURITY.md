@@ -132,8 +132,9 @@ and the OTA-signing / key lifecycle.
   container levels and one complete document; trailing non-whitespace, extra documents and raw NUL bytes
   are rejected. HTTP request bodies also have a 30 s absolute acceptance budget checked before and
   after every receive, including the last one; an active receive returns under its socket timeout.
-  A body the client still owes after the response is discarded only up to 8 KiB, with a 2 s budget
-  checked before each receive; one in-progress receive can add its socket timeout. Anything
+  Unread-body cleanup checks an 8 KiB accounting cap after each 128 B receive, so an overrun can
+  consume up to 8 KiB + 128 B before closure. A 2 s budget is checked before each receive;
+  one in-progress receive can add its socket timeout. Anything
   larger or slower closes the connection instead of reaching ESP-IDF's unbounded purge, so one
   trickling LAN client cannot hold the single HTTP worker after a rejected or unread request.
 - **Syslog forwarding is cleartext, unauthenticated UDP** — opt-in and off by default (empty

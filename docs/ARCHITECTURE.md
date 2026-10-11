@@ -212,8 +212,9 @@ http_common.cpp     → shared HTTP helpers + the single OOM guard: http_registe
                       handle_all trampoline, which calls the handler inside try/catch —
                       std::bad_alloc → 503, any other throw → 500, instead of unwinding through
                       esp_http_server's C frames to std::terminate → reboot — and then settles a
-                      leftover request body (≤ 8 KiB, with a 2 s admission deadline checked before
-                      each receive; one in-progress receive can add the socket timeout). Exceeding
+                      leftover request body (8 KiB accounting cap checked after each 128 B receive,
+                      so an overrun can consume up to 8 KiB + 128 B; a 2 s admission deadline is checked before
+                      each receive, and one in-progress receive can add the socket timeout). Exceeding
                       a limit returns ESP_FAIL and closes the session instead of IDF's unbounded purge.
                       Non-OTA routes are early-rejected with 503 during active OTA download or when
                       heap_largest_internal_block() < 6144 B (via logic/http_request.hpp http_is_ota_route()).
@@ -224,8 +225,8 @@ http_status.cpp     → GET / (web UI), /index.html, /favicon.ico, /heat-pump-ic
                       POST /diag/clear, /coredump/clear, /crash/dismiss — all sixteen. The live /status and /values
                       bodies use one bounded 1 KiB chunk sink instead of a body-sized contiguous allocation;
                       unredacted GET /diag streams directly from static storage in 1 KiB chunks with zero heap allocation.
-                      Its internal 512 B OTA clamp is unreachable through HTTP during active download because the common
-                      guard rejects every non-OTA route first. append_status_json() scopes subsystem local structs, saving +2836 B
+                      The common guard rejects non-OTA requests when it observes active download; an already-admitted
+                      request can still use the internal 512 B clamp if OTA starts afterward. append_status_json() scopes subsystem local structs, saving +2836 B
                       httpd stack, and runs on the httpd task ALONE — see "Push vs. poll" below for why that
                       sentence is load-bearing
 http_config.cpp     → POST /set_wifi, /set_mqtt, /set_diagnostics, /set_ref_temp, /set_weather,
@@ -1204,8 +1205,9 @@ host-testable core is unusually large and valuable, because the risky parts are 
   timeout and no overall limit, and that purge runs after the handler returned — outside the 30 s
   budget. Rejections before any read (403, 415, 503), failed or oversized reads and routes that
   expect no body all reached it, so one peer announcing a large Content-Length and trickling it held
-  the httpd task indefinitely. `http_body_discard()` now settles at most 8 KiB with a 2 s budget
-  checked before each receive (plus one in-progress socket timeout) from `handle_then_settle_body`,
+  the httpd task indefinitely. `http_body_discard()` uses an 8 KiB accounting cap checked after each
+  128 B receive (up to 8 KiB + 128 B can be consumed before closing), with a 2 s budget checked
+  before each receive (plus one in-progress socket timeout) from `handle_then_settle_body`,
   the function IDF actually calls; any
   remainder it cannot settle returns `ESP_FAIL`, so IDF closes the session instead of purging.
 - `logic/http_surface.hpp` — the HTTP trust-surface boundary (F01). `http_surface_serves(surface,

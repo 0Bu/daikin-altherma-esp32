@@ -438,8 +438,9 @@ other.
   do not require equally-growing contiguous allocations.
 - **🧪 Bounded request and JSON ingress** ([`logic/http_body.hpp`](../main/logic/http_body.hpp),
   [`logic/payload_complete.hpp`](../main/logic/payload_complete.hpp)): body acceptance has idle and
-  absolute 30 s limits; unread-rest cleanup admits at most 8 KiB and checks a 2 s deadline before
-  each receive. One in-progress receive can add the configured socket timeout before session closure.
+  absolute 30 s limits; unread-rest cleanup checks an 8 KiB accounting cap after each 128 B receive,
+  so an overrun can consume up to 8 KiB + 128 B before closure. A 2 s deadline is checked before
+  each receive; one in-progress receive can add the configured socket timeout.
   Config, MQTT and Weather JSON allow 16 container levels and one whitespace-terminated document.
 - **✅ gzip UI embedded in the app image**: the build inlines the page and its fragments,
   minifies, and pre-compresses them deterministically (`EMBED_FILES`). gzip is deliberate because
@@ -468,7 +469,7 @@ other.
   taken through an RAII lock.
 - **✅ Chunked streaming for large responses** — `/status` streams in bounded 1 KiB chunks (`HttpJsonChunks`)
   with zero whole-body heap reallocations; unredacted `/diag` streams in 1 KiB chunks (the handler's
-  512 B OTA branch is unreachable while the common guard rejects non-OTA routes)
+  512 B OTA branch can still serve a request admitted before the common guard observed active OTA)
   directly from static ring storage with zero dynamic heap allocations; the core-dump image, and
   one trended row's 24-hour ring flushed every 64 samples, so the peak string stays a few hundred bytes.
   The series carries the **row's own** unit rather than a hardcoded one, samples as exact integer tenths, and
