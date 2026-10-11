@@ -253,7 +253,7 @@ classification or inputs change; ordinary passing fixtures alone are insufficien
 | ESP-IDF matrix and catalog domain | `tools/esp_idf_matrix/selftest.sh`, `tools/domain/selftest.sh` |
 | Descriptions, user docs and diagnosis evidence | `tools/descriptions/selftest.sh`, `tools/user_docs/selftest.sh`, `tools/diagnostic_evidence/selftest.sh` |
 | Schematic, absence and localization | `tools/schematic/selftest.sh`, `tools/absence/selftest.sh`, `node tools/ui_localization/selftest.mjs` |
-| UI interactions and real-browser gate | `tools/ui/selftest.sh`, `node tools/browser/selftest.mjs` (also included by their runners) |
+| UI interactions and real-browser gate | `tools/ui/selftest.sh`; `tools/browser/selftest.mjs` runs inside `scripts/run-browser-render-tests.sh` with its assembled page and detected browser |
 | Redaction, doc entity IDs and PR hygiene | `tools/redact/selftest.sh`, `tools/docs/selftest.sh`, `tools/pr_hygiene/selftest.sh` |
 | GIF recording | `tools/uigif/selftest.sh` |
 | OTA source and delivery orchestration | `node tools/ota/selftest.mjs`, `node tools/production_ota/selftest.mjs` (separate scoped CI step) |

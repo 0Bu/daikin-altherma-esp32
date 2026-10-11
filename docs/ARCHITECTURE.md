@@ -47,7 +47,7 @@ tasks and transport.
 | HTTP and MCP | `http_common.cpp`, `http_status.cpp`, `http_config.cpp`, `http_ota.cpp`, `mcp_server.cpp` | `http_surface.hpp`, `http_request.hpp`, `mcp.hpp`, `redact.hpp` |
 | OTA and absolute download deadlines | `ota_update.cpp`, `http_deadline.cpp`, `http_client_diag.cpp` | `ota_manifest.hpp`, `ota_headroom.hpp`, `ota_quiesce.hpp`, `ota_transport.hpp`, `health_gate.hpp` |
 | Crash, heap, stack and recovery | `diag_crash.cpp`, `heap_guard.cpp`, `safe_mode.cpp`, `stack_watch.hpp`, `recovery_button.cpp` | `crashinfo.hpp`, `heap_watchdog.hpp`, `reset_reason.hpp` |
-| Logs, time and indicator | `diag.cpp`, `syslog.cpp`, `sntp_time.cpp`, `status_led.cpp` | `timestamp.hpp`, `bootlog.hpp` |
+| Logs, time and indicator | [diag_log.cpp](../main/diag_log.cpp), `syslog.cpp`, `sntp_time.cpp`, `status_led.cpp` | `timestamp.hpp`, `bootlog.hpp` |
 
 The source-linked ESP-IDF component and configuration inventory is [ESP_IDF_MATRIX.md](ESP_IDF_MATRIX.md).
 For host test organization and new logic coverage use [test/README.md](../test/README.md).
