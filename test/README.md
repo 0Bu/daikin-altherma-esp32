@@ -80,11 +80,12 @@ execute ESP-IDF target glue, real NVS or the production MCP/HTTP/MQTT stacks; ta
 separately authorized hardware acceptance remain distinct proof layers.
 
 The same runner compiles complete `wifi.cpp` and `syslog.cpp` production units through
-[`network_runtime/fixture.cpp`](network_runtime/fixture.cpp). Thirteen scenarios cover lease loss,
-foreign IP events, disconnect retries, netif snapshot races, stale boot wakes, bounded boot waits,
+[`network_runtime/fixture.cpp`](network_runtime/fixture.cpp). Fourteen scenarios cover lease loss,
+foreign IP events, disconnect retries, lease withdrawal and reacquisition during netif snapshots,
+stale boot wakes, bounded boot waits,
 successful and failed credential rollback, queue rejection and saturation, reentrant logging, and
 RFC 5424 framing with unavailable times.
-Fourteen targeted mutations must fail their named oracle. SDK-shaped event, clock, queue and
+Fifteen targeted mutations must fail their named oracle. SDK-shaped event, clock, queue and
 socket adapters make this deterministic without contacting a device; they do not prove real DHCP,
 radio timing, UDP delivery or collector retention.
 

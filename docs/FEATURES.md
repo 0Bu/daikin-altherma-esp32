@@ -719,8 +719,10 @@ Everything needed to explain a crash *after the fact*, from the field, without a
   it, the device had no timestamp anywhere except uptime. Non-blocking, so it idles harmlessly even
   in AP-only setup mode; before the first sync both `/status.ntp` and the syslog TIMESTAMP fall back
   to `null`/`-` rather than a fabricated epoch date.
-- **✅ Off-device log forwarding** ([`syslog.cpp`](../main/syslog.cpp)): every diag line is also one
-  RFC 5424 UDP datagram to an optional collector. Delivery is gated on **DNS only** — the
+- **✅ Off-device log forwarding** ([`syslog.cpp`](../main/syslog.cpp)): best-effort RFC 5424 UDP
+  forwarding to an optional collector. Internal syslog diagnostics are filtered to prevent loops;
+  queue saturation rejects lines, and disabled or unresolved forwarding drains them. Sending is
+  gated on **DNS only** — the
   reachability probe is advisory, since a healthy collector may firewall ICMP — and a send failure is
   classified hard vs. transient. `/status.syslog.queue_dropped` counts boot-local queue rejection,
   without claiming UDP delivery or collector retention.

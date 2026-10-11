@@ -506,6 +506,7 @@ int wifi_scan(WifiScanEntry* out, int max) {
 
 WifiInfo wifi_info() {
     WifiInfo info{};
+    const uint32_t      lease = s_reconnects;
     esp_netif_ip_info_t ip;
     if (s_wifi_connected && s_sta_netif && esp_netif_get_ip_info(s_sta_netif, &ip) == ESP_OK &&
         ip.ip.addr != 0) {
@@ -527,8 +528,9 @@ WifiInfo wifi_info() {
         }
     }
     // The event loop can withdraw the lease while either SDK snapshot above is in progress.
-    // Publish only a snapshot that still has a lease at this final observation point.
-    if (!s_wifi_connected) info = WifiInfo{};
+    // Reacquisition also invalidates the old snapshot even when connected is already true again.
+    // Each later GOT_IP advances the existing reconnect counter before publishing its lease.
+    if (!s_wifi_connected || s_reconnects != lease) info = WifiInfo{};
     // This identity exists even when an Ethernet-first boot never starts the WiFi driver.
     // Reporting it directly from eFuse keeps /status transport-neutral too.
     (void)esp_read_mac(info.mac, ESP_MAC_WIFI_STA);

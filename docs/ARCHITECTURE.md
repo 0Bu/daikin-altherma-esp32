@@ -337,7 +337,7 @@ diag_log.cpp        → in-RAM console ring served by GET /diag (static .bss buf
 syslog.cpp          → optional syslog UDP client (RFC 5424, off when syslog_host is empty). The
                       TIMESTAMP field is the SNTP wall clock (sntp_time.cpp) once synced, else the
                       "-" NILVALUE a collector conventionally substitutes its own receive time for.
-                      A task DNS-resolves the host and forwards each diag line as one UDP datagram, gated on
+                      A task DNS-resolves the host and attempts one UDP datagram per admitted diag line, gated on
                       DNS only; an ARP(local)/ICMP reachability probe is ADVISORY (feeds
                       /status.syslog.reachable, never gates delivery — syslog is best-effort UDP and a
                       collector may firewall ICMP). File-scope ping-control (like wifi.cpp s_wd) keeps
@@ -345,6 +345,7 @@ syslog.cpp          → optional syslog UDP client (RFC 5424, off when syslog_ho
                       "syslog:" lines); syslog_status() feeds /status. Its boot-local saturating
                       queue_dropped counter records rejected nonblocking queue admissions, not UDP
                       delivery, collector retention, disabled-source draining or truncated lines.
+                      Queue saturation rejects lines; disabled or unresolved forwarding drains them.
                       On the FIRST resolve of a boot
                       it replays the boot records once (logic/bootlog.hpp): a build-identity line
                       (version/elf_sha256/reset/safe_mode) plus current fault or stored-dump records.
@@ -1161,7 +1162,7 @@ host-testable core is unusually large and valuable, because the risky parts are 
   design — the asymmetry is asserted host-side.
 - `logic/timestamp.hpp` — `rfc3339_utc(unix_s, ms)`, the one UTC formatter the SNTP wall clock
   (`sntp_time.cpp`) renders through for `syslog.cpp`'s RFC 5424 TIMESTAMP field, the top-level
-  `/status.ntp` block, and `mqtt_ha.cpp`'s heartbeat `"time"` field. A negative `unix_s` —
+  `/status.ntp` block. A negative `unix_s` —
   `sntp_time.cpp`'s "never synced" sentinel — returns `""` without fabricating an epoch date.
   Unrepresentable times, calendar conversion failure, years outside RFC 3339's four-digit range
   and truncated formatting also return `""`. Syslog uses the RFC 5424 `-` NILVALUE for that result;
@@ -3861,7 +3862,8 @@ GET  /status      version, platform, uptime_s, boot_id (16 hex digits; non-secre
                   NVS "ntp_server" override of CONFIG_DAIKIN_NTP_SERVER, runtime-editable via
                   POST /set_ntp exactly like syslog_host/POST /set_syslog), not necessarily who
                   answered; synced/time are false/null until the first SNTP reply of this boot lands,
-                  else RFC 3339 UTC (logic/timestamp.hpp) — mirrors syslog{} rather than sys{} below,
+                  else RFC 3339 UTC, or an empty string for an invalid calendar time
+                  (logic/timestamp.hpp) — mirrors syslog{} rather than sys{} below,
                   since it is a runtime-configurable network service too, not a static board fact,
                   hp{proto,rx,tx,connected,
                   last_ok_s,registers,values,crc_err,timeout_err}, profile{id},

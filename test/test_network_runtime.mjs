@@ -76,7 +76,13 @@ const mutations = [
   },
   {
     name: "snapshot-withdrawal", file: "wifi", scenario: "snapshot_loss",
-    before: "if (!s_wifi_connected) info = WifiInfo{};", after: "/* mutation: publish a withdrawn lease */",
+    before: "if (!s_wifi_connected || s_reconnects != lease) info = WifiInfo{};",
+    after: "(void)lease; /* mutation: publish a withdrawn lease */",
+  },
+  {
+    name: "snapshot-generation", file: "wifi", scenario: "snapshot_reacquisition",
+    before: "if (!s_wifi_connected || s_reconnects != lease) info = WifiInfo{};",
+    after: "(void)lease; if (!s_wifi_connected) info = WifiInfo{};",
   },
   {
     name: "current-boot-lease", file: "wifi", scenario: "stale_boot_wake",
@@ -128,7 +134,7 @@ try {
   const binary = compile("production");
   const baseline = execute(binary, []);
   assert.equal(baseline.status, 0, `${baseline.stdout}${baseline.stderr}`);
-  assert.match(baseline.stdout, /PASS total=13\b/);
+  assert.match(baseline.stdout, /PASS total=14\b/);
   console.log(baseline.stdout.trim());
   for (const mutation of mutations) {
     const result = execute(compile(mutation.name, mutate(mutation)), [mutation.scenario]);
@@ -139,7 +145,7 @@ try {
   for (const [key, source] of Object.entries(sources)) {
     console.log(`network runtime ${key} sha256=${createHash("sha256").update(source).digest("hex")}`);
   }
-  console.log(`production network runtime: 13 cases, ${mutations.length} negative controls`);
+  console.log(`production network runtime: 14 cases, ${mutations.length} negative controls`);
 } finally {
   fs.rmSync(dir, { recursive: true, force: true });
 }

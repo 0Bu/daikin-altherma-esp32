@@ -1,8 +1,8 @@
 #pragma once
 // Pure UTC timestamp formatting for the wall clock the SNTP client (main/sntp_time.cpp) establishes
 // once synced. IDF-free (just <ctime>), so the framing is host-tested rather than only exercised
-// once a real NTP reply lands on a board. Three consumers: syslog.cpp's RFC 5424 TIMESTAMP field
-// (else the "-" NILVALUE), /status.ntp.time, and mqtt_ha.cpp's heartbeat "time" field.
+// once a real NTP reply lands on a board. Consumers: syslog.cpp's RFC 5424 TIMESTAMP field
+// (else the "-" NILVALUE) and /status.ntp.time.
 #include <cstdint>
 #include <cstdio>
 #include <ctime>

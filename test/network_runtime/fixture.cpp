@@ -150,7 +150,7 @@ void reset() {
     s_network_quiesced       = true;
     s_ping                   = {nullptr, 0};
     adapter::cfg             = Config{};
-    adapter::cfg.wifi_ssid   = "current";
+    adapter::cfg.wifi_ssid   = "test-wifi";
     adapter::cfg.wifi_pass   = "password";
     adapter::saves           = 0;
     adapter::save_ok         = true;
@@ -233,10 +233,30 @@ void snapshot_loss() {
     REQUIRE(!ap_info.connected && ap_info.ip[0] == 0 && ap_info.rssi == 0);
     REQUIRE(ap_info.mac[0] == 2);
 }
+void snapshot_reacquisition() {
+    reset();
+    start_connected();
+    auto reacquire = [] {
+        sdk::emit(IP_EVENT, IP_EVENT_STA_LOST_IP);
+        got_ip();
+        s_sta_netif->ip.ip.addr = inet_addr("192.0.2.9");
+    };
+    sdk::on_netif_read = reacquire;
+    const auto old_ip  = wifi_info();
+    REQUIRE(wifi_link_up());
+    REQUIRE(!old_ip.connected && old_ip.ip[0] == 0 && old_ip.mac[0] == 2);
+    sdk::on_netif_read = {};
+    const auto current = wifi_info();
+    REQUIRE(current.connected && std::string(current.ip) == "192.0.2.9");
+    sdk::on_ap_read   = reacquire;
+    const auto old_ap = wifi_info();
+    REQUIRE(wifi_link_up());
+    REQUIRE(!old_ap.connected && old_ap.ip[0] == 0 && old_ap.mac[0] == 2);
+}
 void stale_boot_wake() {
     reset();
     adapter::cfg.wifi_rollback_active = true;
-    adapter::cfg.wifi_ssid_backup     = "previous";
+    adapter::cfg.wifi_ssid_backup     = "fallback";
     int waits                         = 0;
     sdk::on_wait                      = [&waits](FakeEvents* group, TickType_t timeout) {
         ++waits;
@@ -255,7 +275,7 @@ void stale_boot_wake() {
     REQUIRE(wifi_start_sta());
     REQUIRE(waits == 2);
     REQUIRE(adapter::saves == 1 && !adapter::cfg.wifi_rollback_active);
-    REQUIRE(adapter::cfg.wifi_ssid == "current");
+    REQUIRE(adapter::cfg.wifi_ssid == "test-wifi");
 }
 void stale_boot_timeout() {
     reset();
@@ -292,7 +312,7 @@ void boot_retry_budget() {
 void pending_rollback() {
     reset();
     adapter::cfg.wifi_rollback_active = true;
-    adapter::cfg.wifi_ssid_backup     = "previous";
+    adapter::cfg.wifi_ssid_backup     = "fallback";
     adapter::cfg.wifi_pass_backup     = "old-password";
     adapter::save_ok                  = false; // failed persistence must not reboot
     sdk::on_start                     = [] {
@@ -303,12 +323,12 @@ void pending_rollback() {
     REQUIRE(!wifi_start_sta());
     REQUIRE(sdk::ticks == 180000);
     REQUIRE(adapter::saves == 1 && sdk::restarts == 0);
-    REQUIRE(adapter::cfg.wifi_ssid == "current" && adapter::cfg.wifi_rollback_active);
+    REQUIRE(adapter::cfg.wifi_ssid == "test-wifi" && adapter::cfg.wifi_rollback_active);
 }
 void successful_auth_rollback() {
     reset();
     adapter::cfg.wifi_rollback_active = true;
-    adapter::cfg.wifi_ssid_backup     = "previous";
+    adapter::cfg.wifi_ssid_backup     = "fallback";
     adapter::cfg.wifi_pass_backup     = "old-password";
     sdk::on_start                     = [] {
         wifi_event_sta_disconnected_t event{202, -45};
@@ -323,7 +343,7 @@ void successful_auth_rollback() {
     }
     REQUIRE(restarted && sdk::restarts == 1 && adapter::saves == 1);
     REQUIRE(sdk::ticks == 60500 && sdk::wait_budgets.size() == 2);
-    REQUIRE(adapter::cfg.wifi_ssid == "previous" && adapter::cfg.wifi_pass == "old-password");
+    REQUIRE(adapter::cfg.wifi_ssid == "fallback" && adapter::cfg.wifi_pass == "old-password");
     REQUIRE(!adapter::cfg.wifi_rollback_active && adapter::cfg.wifi_rolled_back);
     REQUIRE(adapter::cfg.wifi_ssid_backup.empty() && adapter::cfg.wifi_pass_backup.empty());
 }
@@ -403,6 +423,7 @@ int main(int argc, char** argv) {
         {"disconnect_retry", test::disconnect_retry},
         {"foreign_ip", test::foreign_ip},
         {"snapshot_loss", test::snapshot_loss},
+        {"snapshot_reacquisition", test::snapshot_reacquisition},
         {"stale_boot_wake", test::stale_boot_wake},
         {"stale_boot_timeout", test::stale_boot_timeout},
         {"boot_retry_budget", test::boot_retry_budget},
