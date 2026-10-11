@@ -20,6 +20,8 @@ permissions:
 jobs:
   # Keep this job named `gates`: branch protection requires that check alongside `build`.
   gates:
+    # Review evidence gates merges of open PRs; delivery notes on a closed PR need no new gate.
+    if: github.event.pull_request.state == 'open'
     runs-on: ubuntu-26.04
     timeout-minutes: 5
     permissions:

@@ -104,7 +104,8 @@ on:
 # A release dispatch and a push to main share this group deliberately: they both derive a version
 # from the tag list, and a release must never be computed against a tag another run is creating.
 # GitHub's default single pending slot can replace a release; max retains up to 100 waiting runs.
-# PR workflows have unique groups; their expensive jobs cancel superseded work independently below.
+# PR workflows have unique groups and finish their mechanical/build chain together. Cancelling
+# individual jobs makes an otherwise superseded run report a failed required build check.
 concurrency:
   group: build-${{ github.event_name == 'pull_request' && format('pr-{0}-{1}', github.event.pull_request.number, github.run_id) || github.ref }}
   queue: max
@@ -126,10 +127,8 @@ jobs:
   mechanical_gates:
     # A release is an explicit maintainer publication action for an already accepted main commit.
     # PR/main CI owns testing; do not rerun or make those tests a prerequisite for tagging it.
-    if: github.event_name != 'workflow_dispatch' || inputs.release != true
-    concurrency:
-      group: build-mechanical-${{ github.event.pull_request.number || github.run_id }}
-      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+    # A later edit of a closed PR has no open-PR merge tree to bind or test.
+    if: (github.event_name != 'workflow_dispatch' || inputs.release != true) && (github.event_name != 'pull_request' || github.event.pull_request.state == 'open')
     permissions:
       contents: read
       pull-requests: read
@@ -669,10 +668,8 @@ jobs:
   # named `build` because branch protection requires it; docs-only PRs pass it without compiling.
   build:
     needs: [mechanical_gates]
-    concurrency:
-      group: build-compile-${{ github.event.pull_request.number }}
-      cancel-in-progress: true
-    if: always() && github.event_name == 'pull_request'
+    # Keep always(): every unsuccessful mechanical result must fail an open PR's required check.
+    if: always() && github.event_name == 'pull_request' && github.event.pull_request.state == 'open'
     runs-on: ubuntu-26.04
     timeout-minutes: 30
     permissions:
