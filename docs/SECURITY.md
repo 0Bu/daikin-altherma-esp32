@@ -420,6 +420,10 @@ A release dispatch has a stronger path than a PR build or ordinary dev publicati
   revalidates the artifact handoff, publishes the root feed, and creates the exact-source tag and
   GitHub Release. A release dispatch skips the mechanical PR suite and performs no public or
   hardware readback gate.
+- An equal-version release or dev resume requires the original source and exact offered manifest,
+  binary inventory, changelog and indexed images. The source/version preflight cannot authorize
+  replacing an offered image with a new signature. Changed bytes stop before publication; recovery
+  uses the original handoff or the normal forward-version path.
 - The release workflow has no self-hosted job, protected hardware environment, board inventory,
   controller token or hardware-policy dependency. Test-board and production-board acceptance are
   separate maintainer operations and are never repeated by release publication.
@@ -572,7 +576,9 @@ An atomic private receipt journal preserves completed artifact, bench and produc
 a later check fails. Every write attempt is checkpointed before its sole POST; an ambiguous response
 keeps execution unknown. The failed public receipt contains only typed delivery evidence and marks
 later stages incomplete. Host/MAC, complete status objects, topics, coordinates and raw errors stay
-private. A journal failure before a write blocks that write; error handling performs no device query
+private. Failure context also retains the previous phase, exception type, an allowlisted route
+without host/query, bounded script-only callsites and the executing gate's digest; it never enters
+the public projection. A journal failure before a write blocks that write; error handling performs no device query
 or retry and retains exit code 2.
 After the bench proof, the production canary does not trust one cross-subsystem MQTT/Weather
 snapshot. It waits no more than 15 seconds for two consecutive MQTT-connected, Weather-idle samples

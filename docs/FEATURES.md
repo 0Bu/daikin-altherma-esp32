@@ -1013,10 +1013,9 @@ Four properties of that core are worth naming because they are not obvious from 
   required `gates` check under `pull_request_target`, using only the protected-base verifier and
   never loading PR code. Branch protection requires both checks. Mechanical checks are **steps of
   one job, never a job each**; the additional policy job is an intentional isolation boundary.
-- **✅ Crash-decodable and size-auditable.** CI archives the unstripped `.elf` (xz-wrapped, + the
-  sha256 of the ELF inside) and the json2/Markdown size reports per version/PR. A release's copy is
-  a Release asset and does not expire; a dev build's artifact lives 3 days, while an open PR's lives
-  at most 7 days and is deleted immediately on merge because artifact storage is metered.
+- **✅ Crash-decodable and size-auditable.** CI archives the unstripped `.elf`, its hash and size
+  reports: releases do not expire, dev artifacts live 3 days, open PR artifacts at most 7.
+  Trusted merged-PR cleanup covers close and build completion; unknown association stops deletion.
 - **✅ One Pages publisher.** The installer is served from the **`gh-pages` branch**. The branch model
   is what lets the release root and the `dev/` channel be published independently — an atomic
   whole-site Actions deployment cannot — so the `deploy-pages` path is deliberately absent rather
@@ -1025,7 +1024,8 @@ Four properties of that core are worth naming because they are not obvious from 
   v2 signature sector itself, checks its CRC and image digest, verifies RSA-PSS with exponent 65537,
   and requires the public-key digest committed in `tools/release/ota_signing_key_digest.txt`. That
   digest also enters manifest provenance. The write-capable publisher receives no private key,
-  and repeats the signature/provenance checks after artifact handoff. Development publication keeps
+  and repeats signature/provenance checks after handoff. Equal-version resumes preserve every
+  offered metadata and image byte. Development publication keeps
   its cache-busted Pages readback; an explicit release performs no post-build test gate.
 - **✅ Hardware-independent release dispatch.** A `release: true` dispatch skips the
   mechanical PR suite, performs one signed build, publishes the root feed, and creates the

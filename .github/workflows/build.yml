@@ -935,7 +935,7 @@ jobs:
           elif [ "$MODE" = dev ] && [ "$RUN_ATTEMPT" -gt 1 ]; then
             check_mode=dev-resume
           fi
-          ./scripts/check-publish-version.sh --source-sha "$SOURCE_SHA" "$check_mode" "$VERSION"
+          ./scripts/check-publish-version.sh --preflight --source-sha "$SOURCE_SHA" "$check_mode" "$VERSION"
 
       # Build notes are public feed metadata, even while the source repository is private. Generate
       # them from explicitly classified user-facing first-parent commit subjects, plus the one
@@ -1134,7 +1134,7 @@ jobs:
           elif [ "$MODE" = dev ] && [ "$RUN_ATTEMPT" -gt 1 ]; then
             check_mode=dev-resume
           fi
-          ./scripts/check-publish-version.sh --source-sha "$SOURCE_SHA" "$check_mode" "$VERSION"
+          ./scripts/check-publish-version.sh --candidate-dir dist --source-sha "$SOURCE_SHA" "$check_mode" "$VERSION"
 
       - name: Assemble dev-channel site
         if: needs.trusted_build.outputs.mode == 'dev'
@@ -1148,8 +1148,9 @@ jobs:
 
       # Publish the release feed BEFORE creating its tag/Release. If this fails, no immutable release
       # exists. If a later API call fails, a workflow rerun may repeat an already-published
-      # dev or release version only when its manifest names this exact github.sha; release_version
-      # can explicitly resume a release even after a tag was partially created.
+      # dev or release version only with the original complete handoff: source equality alone cannot
+      # admit a freshly signed rebuild. release_version can resume after a partial tag only when the
+      # already offered manifest, changelog, inventory and binaries all retain their exact bytes.
       - name: Assemble Pages site (release channel)
         if: needs.trusted_build.outputs.mode == 'release'
         run: ./scripts/build-pages.sh

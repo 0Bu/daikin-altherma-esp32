@@ -484,8 +484,12 @@ resets the numbering — on 2026-07-24 that republished the dev feed as `1.0.0-d
 (a tag, or `version.txt`) — not the gate.
 
 The fourth pins the workflow's trust and delivery contract: untrusted PRs expose no signing key or
-flashable artifact, release and dev resumes must match the published manifest's exact source SHA,
-and the license/notices, Pages feed and GitHub Release stay in their fail-closed order. Development
+flashable artifact, and release/dev resumes must preserve the exact source and offered bytes.
+The early source/version check is a preflight; publication also compares the candidate manifest,
+binary inventory, changelog and indexed images with the existing feed on an equal-version resume.
+A newly signed rebuild cannot replace an already offered version. Resume with the original handoff,
+or advance through the normal version path. The license/notices, Pages feed and GitHub Release
+stay in their fail-closed order. Development
 publication keeps a bounded public Pages readback with 30 attempts; an explicit release has no
 post-build readback or test gate.
 

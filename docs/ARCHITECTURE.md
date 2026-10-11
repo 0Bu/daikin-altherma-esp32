@@ -2841,7 +2841,9 @@ Structure:
     `objcopy --compress-debug-sections` is not used despite being the simpler-looking option.
     **How long an archived ELF lives depends on the build.** A release keeps its copy indefinitely
     as a Release asset; a dev build's lives 3 days and an open PR build's at most 7. The PR copies
-    are deleted immediately on merge, when the successor is built from `main`, because artifact
+    are deleted by trusted merged-PR cleanup on close and build completion, so a late upload is
+    collected after its producing run ends. Unknown PR association stops deletion. The successor
+    is built from `main`; artifact
     storage is metered and the previous 90/7-day pair overran the allowance (the arithmetic is in
     `build.yml` at the upload step). So a dev-channel dump older than three days may no longer be
     decodable —
@@ -3026,6 +3028,9 @@ Structure:
   allows delivery identities and measurements, without complete status objects, host/MAC,
   coordinates or raw error strings. Receipt failure before a write blocks that write; failure
   handling neither contacts a board nor retries a transaction.
+  The private failure context retains the previous phase, exception type, allowlisted route
+  without host/query, bounded script-only callsites and executing-script digest. This identifies
+  a future failed request without exposing frame locals or adding a follow-up device request.
   [`scripts/production-ota-gate.py`](../scripts/production-ota-gate.py) binds the official dev
   manifest to the expected source SHA, version, application SHA-256, ESP32-S3 metadata and signature;
   requires a clean exact local source; requires the raw dev manifest to fit the 1024-byte restore
