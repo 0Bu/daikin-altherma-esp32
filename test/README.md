@@ -342,8 +342,13 @@ fixed-ring evidence loss first stops and clears the producer before retry. The s
 the asynchronous enqueue API, deleted-message reporting, incremental packet IDs and the explicit
 8 KiB esp-mqtt outbox limit.
 
-`node test/test_ota_heap_contract.mjs` pins the signed-OTA memory boundary that cannot be linked on
-the host: firmware bytes stream through the low-level HTTP/OTA APIs, HTTP/TLS is fully released
+`node test/test_ota_runtime.mjs` compiles the complete production `ota_update.cpp` against SDK/service
+adapters. It executes resource cleanup, Range resumption, worker leases, version/manifest rejection
+and the actual 90/600-second health-task transitions, then independently removes each safeguard.
+The adapters prove application control flow; they do not execute TLS, flash or IDF cryptography.
+
+`node test/test_ota_heap_contract.mjs` additionally pins SDK-facing source contracts:
+firmware bytes stream through the low-level HTTP/OTA APIs, HTTP/TLS is fully released
 before `esp_ota_end()` performs RSA validation, dynamic TLS records remain enabled, every manifest
 and image handshake receives a stable 56/24-KiB INTERNAL-heap gate, and both IDF verifier passes
 (`esp_ota_end()` and boot selection) receive their own 24/12-KiB gate. It also requires
@@ -413,6 +418,12 @@ firmware logic test separately pins the measured 48 KiB aggregate / 20 KiB conti
 Its paired
 `tools/production_ota/selftest.mjs` requires every bench-delivery, release-HIL and
 production-promotion stage-removal mutation to turn that same contract red.
+The executed production branch remains enabled in mutant trees: removing writer-receipt collection,
+verification or reporting cannot pass solely because the candidate subsequently boots successfully.
+
+`scripts/trigger-ota-wait.sh` only observes an update already accepted by the canonical controller.
+Its loopback fixtures require GET-only requests and reject obsolete write options before any request;
+observation cannot replace artifact, signature or pressure acceptance by the canonical gate.
 
 `node test/test_ui_homehub_enums.mjs` executes the production value renderer against every named
 HomeHub status in the EKRHH register map and the schematic renderer against every X10A operation
@@ -650,7 +661,7 @@ One entry per `test_*()` in [`test_logic.cpp`](test_logic.cpp), in the order `ma
   hostile input: a `"version"` nested in `builds[]` must not shadow the real one, a crafted value
   must not close its own string and inject a second key, an oversized value is **refused rather than
   truncated** (a truncated `1.10.0` → `1.1` is well-formed and ordered wrong), and the parser must
-  respect the caller's length on a response cut short mid-value.
+  respect the caller's length on a response cut short mid-value or after a trailing root comma.
 - `logic/http_body.hpp` — request-body reassembly: a body delivered one byte per `recv` arrives
   whole (the fragmented POST that used to 400 as "bad json"), a timeout is retried while progress
   resets the idle count, and an absolute acceptance deadline also rejects a final receive that

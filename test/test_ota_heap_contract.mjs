@@ -593,10 +593,15 @@ const rootComma = identityRoot.indexOf("json[i] == ','", rootOpen);
 const rootClose = identityRoot.indexOf("json[i] == '}'", rootComma);
 const rootReject = identityRoot.indexOf("return false", rootClose);
 const rootExact = identityRoot.indexOf(
-  "return i == len && have_version && have_provenance && have_sha", rootReject);
+  "return i == len && have_version && have_provenance && have_sha", rootClose);
 assert.ok(rootOpen >= 0 && rootComma > rootOpen && rootClose > rootComma &&
-  rootReject > rootClose && rootExact > rootReject,
+  rootExact > rootClose && rootReject > rootExact,
   "manifest identity must require root member commas, its matching closer and exactly one root");
+assert.match(identityRoot, /return false;\s*}\s*inline bool manifest_changelog/,
+  "exhaustion after a trailing root comma must fail closed without a matching brace");
+assert.match(identityRoot,
+  /return i == len && have_version && have_provenance && have_sha;\s*}\s*return false;/,
+  "a root member without its comma or closing brace must fail immediately");
 const probeLoop = update.slice(update.indexOf("while (probe_len < kImageProbeSize)"),
                                update.indexOf("if (probe_len != kImageProbeSize)"));
 assert.match(probeLoop,
@@ -648,7 +653,7 @@ const bulkRead = update.indexOf("esp_http_client_read(", probeWrite);
 const bulkWrite = update.indexOf("write_chunk(buffer,", bulkRead);
 const release = update.lastIndexOf("close_http_client(client, socket_deadline)");
 const completeDecision = update.indexOf("const bool complete =", bulkWrite);
-const finalBufferRelease = update.indexOf("heap_caps_free(buffer)", completeDecision);
+const finalBufferRelease = update.indexOf("resources.release_buffer()", completeDecision);
 const finalTransportRelease = update.indexOf(
   "close_http_client(client, socket_deadline)", finalBufferRelease);
 const hashSetup = update.indexOf("psa_hash_setup(");
@@ -894,7 +899,7 @@ assert.match(transport, /numeric_limits<uint64_t>::max\(\)\s*-\s*digit/,
 const resumeDecision = update.indexOf("const bool can_resume");
 const resumeIncrement = update.indexOf("++resumes", resumeDecision);
 const resumeDiag = update.indexOf("http_client_log_read_failure(", bulkRead);
-const resumeFree = update.indexOf("heap_caps_free(buffer)", resumeDecision);
+const resumeFree = update.indexOf("resources.release_buffer()", resumeDecision);
 const resumeClose = update.indexOf("close_http_client(client, socket_deadline)", resumeFree);
 const resumeHeadroom = update.indexOf('wait_for_ota_headroom_until("transfer resume"', resumeClose);
 const resumeGateDeadline = update.indexOf(

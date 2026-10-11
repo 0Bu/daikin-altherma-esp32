@@ -313,12 +313,12 @@ try {
         "failure.socket_errno = 0;")],
     ["range resume skips transport-buffer cleanup", () =>
       replaceOnce("main/ota_update.cpp",
-        "heap_caps_free(buffer);\n        buffer = nullptr;\n        close_http_client(client, socket_deadline);",
-        "buffer = nullptr;\n        close_http_client(client, socket_deadline);")],
+        "resources.release_buffer();\n        close_http_client(client, socket_deadline);\n        ota_heap_sample();",
+        "buffer = nullptr;\n        close_http_client(client, socket_deadline);\n        ota_heap_sample();")],
     ["range resume leaves the failed TLS client alive", () =>
       replaceOnce("main/ota_update.cpp",
-        "buffer = nullptr;\n        close_http_client(client, socket_deadline);\n        ota_heap_sample();",
-        "buffer = nullptr;\n        client = nullptr;\n        ota_heap_sample();")],
+        "resources.release_buffer();\n        close_http_client(client, socket_deadline);\n        ota_heap_sample();",
+        "resources.release_buffer();\n        client = nullptr;\n        ota_heap_sample();")],
     ["range resume skips the stable TLS headroom gate", () =>
       replaceOnce("main/ota_update.cpp",
         "wait_for_ota_headroom_until(\"transfer resume\", OTA_TRANSFER_HEADROOM,",
@@ -418,7 +418,7 @@ try {
         "return have_version && have_provenance && have_sha;")],
     ["manifest identity no longer requires strict root member separators", () =>
       replaceOnce("main/logic/ota_manifest.hpp",
-        /(if \(i < len && json\[i\] == '\}'\) \{\n\s*\+\+i;\n\s*break;\n\s*\}\n\s*)return false;/,
+        /(if \(i < len && json\[i\] == '\}'\) \{\n\s*\+\+i;\n\s*detail::skip_ws\(json, len, i\);\n\s*return i == len && have_version && have_provenance && have_sha;\n\s*\}\n\s*)return false;/,
         "$1continue;")],
     ["manifest provenance no longer requires its matching object closer", () =>
       replaceOnce("main/logic/ota_manifest.hpp",
@@ -448,7 +448,7 @@ try {
         "(void)deadline.disarm_bypassed();")],
     ["HTTP cleanup before validation disappears", () =>
       replaceOnce("main/ota_update.cpp",
-        /(\/\/ CRITICAL ORDERING:[\s\S]{0,900}?buffer = nullptr;\n    )close_http_client\(client, socket_deadline\);/,
+        /(\/\/ CRITICAL ORDERING:[\s\S]{0,900}?resources.release_buffer\(\);\n    )close_http_client\(client, socket_deadline\);/,
         "$1close_http_client_after_validation(client, socket_deadline);")],
     ["the signed-image verifier is bypassed", () =>
       replaceOnce("main/ota_update.cpp", "esp_ota_end(ota_handle)",

@@ -8446,6 +8446,16 @@ static void test_version_cmp() {
     CHECK(!version_valid("1.0.0-") && !version_valid("1.0.0-dev."));
     CHECK(!version_valid("1.0.0+") && !version_valid("1.0.0+build+again"));
     CHECK(!version_valid(static_cast<const char*>(nullptr)));
+    CHECK(!ota_install_allowed(nullptr, "1.2.3", false));
+    CHECK(!ota_artifact_versions_match("1.2.3", nullptr));
+    const char* long_version = "1.0.8-dev.12345678901234567890";
+    CHECK(ota_artifact_versions_match(long_version, long_version));
+    CHECK(ota_install_allowed("1.0.8-dev.9", long_version, false));
+    CHECK(!ota_install_allowed(long_version, long_version, true));
+    const std::string host_version(long_version);
+    CHECK(ota_artifact_versions_match(host_version, host_version));
+    CHECK(!ota_artifact_versions_match(std::string("1.2.3\0a", 7), std::string("1.2.3\0b", 7)));
+    CHECK(ota_install_allowed(std::string("1.0.8-dev.9"), host_version, false));
     CHECK(version_compare(static_cast<const char*>("1.0.3-dev.20"),
                           static_cast<const char*>("1.0.3-dev.19")) > 0);
 
@@ -8892,6 +8902,22 @@ static void test_ota_manifest() {
     CHECK(std::string(identity.app_sha256) == sha);
     const std::string identity_with_ws = identity_json + " \r\n\t";
     CHECK(manifest_identity(identity_with_ws.data(), identity_with_ws.size(), identity));
+    // All identity fields can be present in an incomplete document. HTTP completion is a separate
+    // framing fact and must not turn a missing JSON root brace into an accepted offer.
+    const std::string incomplete_root = identity_json.substr(0, identity_json.size() - 1);
+    CHECK(!manifest_identity(incomplete_root.data(), incomplete_root.size(), identity));
+    for (const char* suffix : {",", ", \r\n\t", ",}"}) {
+        const std::string malformed = incomplete_root + suffix;
+        CHECK(!manifest_identity(malformed.data(), malformed.size(), identity));
+    }
+    const std::string extra_field = incomplete_root + ",\"extra\":true}";
+    CHECK(manifest_identity(extra_field.data(), extra_field.size(), identity));
+    const std::string depth_eight =
+        incomplete_root + ",\"extra\":" + std::string(7, '[') + "0" + std::string(7, ']') + "}";
+    CHECK(manifest_identity(depth_eight.data(), depth_eight.size(), identity));
+    const std::string depth_nine =
+        incomplete_root + ",\"extra\":" + std::string(8, '[') + "0" + std::string(8, ']') + "}";
+    CHECK(!manifest_identity(depth_nine.data(), depth_nine.size(), identity));
     const std::string missing_root_comma =
         std::string("{\"version\":\"1.2.3\" \"provenance\":{\"app_sha256\":\"") + sha + "\"}}";
     CHECK(!manifest_identity(missing_root_comma.data(), missing_root_comma.size(), identity));

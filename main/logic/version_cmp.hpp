@@ -191,8 +191,7 @@ inline int version_compare(const std::string& a, const std::string& b) {
 // ordering. "We could not tell" and "it is newer" must never be the same answer here. An EQUAL
 // version is refused in both modes: re-installing what is already running is not a channel switch,
 // it is a reboot loop.
-inline bool ota_install_allowed(const std::string& running, const std::string& candidate,
-                                bool allow_downgrade) {
+inline bool ota_install_allowed(const char* running, const char* candidate, bool allow_downgrade) {
     if (!version_valid(running) || !version_valid(candidate)) return false;
     const int c = version_compare(candidate, running);
     return allow_downgrade ? c != 0 : c > 0;
@@ -203,14 +202,25 @@ inline bool ota_install_allowed(const std::string& running, const std::string& c
 // are each "newer", yet the manifest did not describe the image that is about to be installed.
 // CI publishes exact matching strings, so any field mismatch is a stale cache, a broken host or an
 // attack. Refuse all three rather than trying to normalize a leading `v` or equivalent spellings.
-inline bool ota_artifact_versions_match(const std::string& manifest,
-                                        const std::string& image) {
-    return version_valid(manifest) && version_valid(image) && manifest == image;
+inline bool ota_artifact_versions_match(const char* manifest, const char* image) {
+    return version_valid(manifest) && version_valid(image) && std::strcmp(manifest, image) == 0;
 }
 
 // The automatic gate: strictly newer only.
-inline bool ota_is_upgrade(const std::string& running, const std::string& candidate) {
+inline bool ota_is_upgrade(const char* running, const char* candidate) {
     return ota_install_allowed(running, candidate, /*allow_downgrade=*/false);
+}
+
+// Preserve the host/publish callers while fixed firmware buffers never create temporary strings.
+inline bool ota_install_allowed(const std::string& running, const std::string& candidate,
+                                bool allow_downgrade) {
+    return ota_install_allowed(running.c_str(), candidate.c_str(), allow_downgrade);
+}
+inline bool ota_artifact_versions_match(const std::string& manifest, const std::string& image) {
+    return version_valid(manifest) && version_valid(image) && manifest == image;
+}
+inline bool ota_is_upgrade(const std::string& running, const std::string& candidate) {
+    return ota_is_upgrade(running.c_str(), candidate.c_str());
 }
 
 }  // namespace daik

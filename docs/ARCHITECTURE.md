@@ -3105,7 +3105,10 @@ Structure:
   workflow creates no release and contains no 48-hour soak gate.
 - **Validation gets the transport's heap back first.** The firmware downloads through a fixed
   1 KiB INTERNAL buffer and closes/frees both that buffer and the complete HTTP/TLS client before
-  finishing the PSA SHA-256 stream and calling `esp_ota_end()`. The stream digest must match the
+  finishing the PSA SHA-256 stream and calling `esp_ota_end()`. One scope owner also releases the
+  client, buffer, unfinished hash and open OTA handle when a C++ exception reaches the worker's
+  catch boundary; Range resumes retain only the sequential OTA/hash position. Fixed-buffer version
+  checks allocate nothing. The stream digest must match the
   application SHA captured from the completed check; `esp_ota_end()` remains IDF's mandatory
   RSA-3072/PSA verifier. `esp_ota_set_boot_partition()` performs another IDF image/signature
   validation, so it gets the same verifier headroom again immediately before boot selection.
