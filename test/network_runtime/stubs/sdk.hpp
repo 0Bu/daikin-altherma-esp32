@@ -21,9 +21,9 @@ inline const char*  esp_err_to_name(esp_err_t) { return "fake error"; }
         if ((x) != ESP_OK) throw std::runtime_error("SDK failure");                                \
     } while (0)
 #define CONFIG_DAIKIN_HOSTNAME "daikin-altherma-esp32"
-#define ESP_LOGI(...) ((void)0)
-#define ESP_LOGW(...) ((void)0)
-#define ESP_LOGE(...) ((void)0)
+#define ESP_LOGI(tag, ...) ((void)(tag))
+#define ESP_LOGW(tag, ...) ((void)(tag))
+#define ESP_LOGE(tag, ...) ((void)(tag))
 using TickType_t            = uint32_t;
 using BaseType_t            = int;
 using UBaseType_t           = unsigned;

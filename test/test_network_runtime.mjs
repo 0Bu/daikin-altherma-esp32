@@ -123,7 +123,7 @@ const mutations = [
   {
     name: "reentrant-loop-guard", file: "syslog", scenario: "reentrant_suppression",
     before: 'if (sv.find("syslog:") != std::string_view::npos)',
-    after: 'if ((sv.find("syslog:"), false))',
+    after: 'if ((static_cast<void>(sv.find("syslog:")), false))',
   },
   {
     name: "counter-saturation", file: "syslog", scenario: "queue_saturation",
