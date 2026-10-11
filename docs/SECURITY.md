@@ -505,9 +505,13 @@ board endpoint is resolved before the sole write; a fixed-size reader then appli
 one-second deadline across connect, request, headers and body. Firmware retains the completed state
 for three seconds, outliving a prior request, the poll sleep, the next request and another 0.5 seconds
 of scheduling margin before reboot. ELF and MAC must then match with the expected software-reset reason.
-The target must then survive the 105-second rollback-health window and a fixed three-minute
-status/values/diag plus real-manifest-TLS pressure test with stable counters, recovered heap and
-MQTT. X10A and optional weather are intentionally not required on the unwired bench.
+The target must still report `pending_verify` with rollback armed immediately before a fixed
+three-minute status/values/diag plus real-manifest-TLS pressure test. Pressure begins within
+120 seconds of boot, with stable allocation/CRC counters, recovered heap and MQTT. Afterward,
+a bounded 150-second confirmation requires the same MAC/version/ELF and monotonic stressed uptime
+to report `valid` with rollback disarmed. Expected unwired-X10A timeouts remain monotonic and
+bounded to three during confirmation. X10A and optional weather are intentionally not required
+on the unwired bench.
 
 Only read-only observer GETs interrupted by reboot are sampled again; a complete malformed response
 fails hard. No compensating write or update-POST retry follows a failed acceptance check. Ordinary bench updates
@@ -517,9 +521,12 @@ explicitly requested pre-merge test of an exact local head, which is never a del
 compact HTTP API exposes the boot-latched ESP-IDF image state and `rollback_pending` flag directly;
 the latter is JSON `null` while the image state is unknown, rather than claiming that rollback is
 absent without an ESP-IDF observation.
-The ordinary bench path keeps its cross-version 105-second health dwell and next accepted OTA start
-as the authoritative compatibility proof for an older stable image that predates those fields;
-release HIL additionally requires explicit `pending_verify` and `valid` observations.
+The current installed and restored target requires explicit pending and valid observations.
+The older stable release used during production staging retains its separate cross-version
+105-second health dwell and next accepted OTA start as the compatibility proof.
+The current health task uses an aligned static 4096-byte stack and static task storage, reserved
+for the entire boot. A single arm prevents concurrent or later reuse after task self-deletion.
+The existing 90/600-second rules, heap admission floors and rollback decisions are unchanged.
 
 #### Production OTA promotion
 
@@ -548,12 +555,19 @@ check task starts, so only this private bench-return leg requires the exact offe
 idle for three seconds before its one restore POST; a silently ignored write fails the bench stage and
 cannot reach production. Waiting before both replacements is mandatory because ESP-IDF refuses
 another OTA write while the running target or release is still `PENDING_VERIFY`. The freshly restored target then runs
-the fixed three-minute pressure window with another real OTA-manifest TLS fetch. Firmware deliberately
+the fixed three-minute pressure window while still pending verification, with another real
+OTA-manifest TLS fetch, followed by the same bounded valid-state confirmation. Firmware deliberately
 stops MQTT while either OTA or Open-Meteo TLS holds the constrained network heap. The first identity
 response after the restore may precede MQTT reconnect, so every pressure path waits up to the bounded
 OTA-check deadline for a connected baseline before applying the 120-second fresh-boot cap. The first
 status snapshot binds the boot uptime and allocation counters; a reboot, any heap/MQTT/poll skip or
 unsafe free/contiguous heap at readiness completion fails before pressure or production contact.
+An atomic private receipt journal preserves completed artifact, bench and production stages when
+a later check fails. Every write attempt is checkpointed before its sole POST; an ambiguous response
+keeps execution unknown. The failed public receipt contains only typed delivery evidence and marks
+later stages incomplete. Host/MAC, complete status objects, topics, coordinates and raw errors stay
+private. A journal failure before a write blocks that write; error handling performs no device query
+or retry and retains exit code 2.
 After the bench proof, the production canary does not trust one cross-subsystem MQTT/Weather
 snapshot. It waits no more than 15 seconds for two consecutive MQTT-connected, Weather-idle samples
 while retaining the exact old production identity, monotonic uptime and live X10A. Heap-restart,

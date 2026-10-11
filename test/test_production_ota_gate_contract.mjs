@@ -329,6 +329,8 @@ for image_state, rollback_pending, uptime, accepted in (
     ("pending_verify", True, 13, True), ("valid", False, 105, False),
     ("pending_verify", True, 121, False), ("pending_verify", False, 13, False),
 ):
+    virtual_time = [0.0]
+    def advance(seconds): virtual_time[0] += max(seconds, 0.001)
     def pressure_checkpoint(phase, **updates):
         witness = updates["test_board"]["stress"].get("probation_before")
         check(witness is not None and witness.get("image_state") == "pending_verify", "pending witness absent")
@@ -336,7 +338,9 @@ for image_state, rollback_pending, uptime, accepted in (
     with patch.dict(ns, {"resolve_http_endpoint": lambda host: host,
         "validate_identity": lambda *a, **k: None, "request_status_deadline": lambda *a, **k: board(uptime=uptime),
         "request_json_deadline": lambda *a, **k: {"image_state": image_state, "rollback_pending": rollback_pending},
-        "journal_checkpoint": pressure_checkpoint}):
+        "journal_checkpoint": pressure_checkpoint}), \
+        patch.object(ns["time"], "monotonic", lambda: virtual_time[0]), \
+        patch.object(ns["time"], "sleep", advance):
         try:
             gate["stress_board"](host="bench.invalid", mac="bench", version=target, elf=elf,
                 require_x10a=False, require_weather=False, expected_app_sha256=sha, expected_channel="dev",

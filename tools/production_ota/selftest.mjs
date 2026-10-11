@@ -878,8 +878,8 @@ try {
         "hil_manifest_url=None,")],
     ["the ordinary release write expects a persisted release channel", () =>
       replaceOnce("scripts/production-ota-gate.py",
-        "expected_channel=\"dev\", allow_downgrade=True,\n        )\n        release_status = wait_for_new_firmware(",
-        "expected_channel=\"release\", allow_downgrade=True,\n        )\n        release_status = wait_for_new_firmware(")],
+        "expected_channel=\"dev\", allow_downgrade=True,\n        )\n        evidence[\"release_write_acknowledged\"] = True\n        journal_checkpoint(\"bench_release_write_acknowledged\")\n        release_status = wait_for_new_firmware(",
+        "expected_channel=\"release\", allow_downgrade=True,\n        )\n        evidence[\"release_write_acknowledged\"] = True\n        journal_checkpoint(\"bench_release_write_acknowledged\")\n        release_status = wait_for_new_firmware(")],
     ["the official release manifest fetch is no longer host-memory bounded", () =>
       replaceOnce("scripts/production-ota-gate.py",
         "release_manifest_bytes = request_limited_bytes(",
