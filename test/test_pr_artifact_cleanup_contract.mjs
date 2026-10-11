@@ -47,7 +47,7 @@ function fixture({ fork = false, eventName = "workflow_run", associations = true
 
 function advancedAssociation({ fork = false, apiAdvanced = true, eventAdvanced = true } = {}) {
   const model = fixture({ fork });
-  // Observed API shape: run 38155527858 kept its old source while PR #185's embedded head advanced.
+  // A retained run can keep its original source while its embedded PR head advances.
   const oldSource = "4f1e044431eab75aff9795b990ba73aa1ebf7312";
   const currentHead = "a544279366578ba13beb0161abb4a67f71be0e3f";
   model.run.head_sha = model.event.workflow_run.head_sha = oldSource;

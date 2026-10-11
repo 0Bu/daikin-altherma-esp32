@@ -109,7 +109,8 @@ fails closed on both missing and extra project skills.
   Missing/unreadable files or a partial three-file authoritative context hard-fail; malformed or
   ineligible complete input rejects the exception and follows the ordinary review records. Local
   CAS merges never receive this exception.
-- GitHub evaluates a `pull_request_target` workflow from the default branch. Introducing or renaming
+- GitHub evaluates a `pull_request_target` workflow from the default branch
+  ([current event model](https://github.blog/changelog/2025-11-07-actions-pull_request_target-and-environment-branch-protections-changes/)). Introducing or renaming
   this boundary therefore requires a two-stage reviewed migration: first land the data-only policy
   workflow under a temporary unique check name while the existing required check remains available,
   then require that check before switching the ordinary PR workflow/ruleset to the final `gates` +
