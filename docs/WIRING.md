@@ -1,6 +1,6 @@
 # X10A Wiring
 
-Pin table and quick-start wiring: [README.md § Wiring — X10A](../README.md#wiring--x10a-breaker-off).
+Pin table and quick-start wiring: [README.md § Wiring — X10A](../README.md#wiring-x10a).
 This page covers the visual diagram and picking pins on a board other than the M5Stack AtomS3 Lite
 the wiring guide is written for.
 
@@ -130,7 +130,7 @@ for other boards:
 
 Pick any two distinct pins from a board's "safe pins" column for RX/TX, wire them to X10A, then set
 them in the RX/TX dropdown under **⚙ Settings → Protocol** (`POST /set_hp`) — see the pin table in
-[README.md § Wiring — X10A](../README.md#wiring--x10a-breaker-off) for why the firmware won't find
+[README.md § Wiring — X10A](../README.md#wiring-x10a) for why the firmware won't find
 them on its own until you do.
 
 The first two rows are also the board-specific **X10A UART** inventories in the preset table. ENV III

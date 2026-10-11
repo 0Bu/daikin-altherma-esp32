@@ -1,6 +1,6 @@
 # Evidence and limits of the plant diagnostics
 
-<!-- diagnostic-evidence-contract: 5bf962e5e4ab36eebaf962d16d07c410d75cd6c256a56e38b49b4e4f73b47cd9 -->
+<!-- diagnostic-evidence-contract: 758c96038582e1acfd8873bcbb546995bb8d8bb6f8b3abd21cf00f98fe297a30 -->
 
 For every row in the **Plant diagnostics · 24 h** card, this page answers four questions:
 
@@ -46,7 +46,8 @@ The [X10A gate](../main/logic/mqtt_publish_gate.hpp) and
 
 A manufacturer statement is not automatically a limit for every Daikin model. The installation
 manual for the exact indoor and outdoor units remains authoritative. The primary sources linked here
-were last reviewed on **12 August 2026**.
+were last reviewed on **11 October 2026**. The research paper [R2] was checked through its
+publisher abstract; its full text was not accessible during that review.
 
 ## How strong is each kind of claim?
 
@@ -226,9 +227,13 @@ supports the relevance of very short runs but does not provide a universal Daiki
 
 **Firmware rule:** The firmware counts complete compressor runs. When the three-way valve and
 operating mode remain readable throughout, it separates space heating, domestic hot water, and
-cooling; only confirmed space-heating runs decide the result. A **NOTE** requires at least twelve
-assessable runs averaging under ten minutes plus sufficient complete 24-hour evidence. Mixed runs
-and runs interrupted by measurement gaps are censored. The constants are
+cooling. Heating-only assessment requires paired classification inputs for at least
+`CHECKUP_REQUIRED_S` (90% of the day), at least twelve classified runs across all three classes,
+and at least 90% of completed runs classified. Otherwise the result uses pooled compressor starts
+and run duration; hot-water or cooling runs can hide short heating runs, as the UI detail states.
+A **NOTE** requires at least twelve assessable runs averaging under ten minutes plus sufficient
+complete 24-hour compressor evidence. Mixed runs and runs interrupted by measurement gaps are
+censored from the classified assessment. The constants are
 `CHECKUP_CYCLING_MIN_STARTS`, `CHECKUP_CYCLING_SHORT_RUN_S`, and
 `CHECKUP_CYCLING_CLASSIFIED_PCT` in [`checkup.hpp`](../main/logic/checkup.hpp).
 Fresh X10A outdoor minimum/mean is attached only to completed, consistently classified
@@ -369,7 +374,8 @@ together.
 
 - **[D2]** Daikin, *Daikin Altherma 3 H HT F – Installer reference guide*, models
   EPRA14–18D + ETVH16SU18+23E, document **4P644738-1D**, revision 2023-10:
-  [official PDF][D2-pdf]. Section used: 8.1.3 water piping; minimum pressure 1 bar and
+  [official PDF][D2-pdf]. Sections used: 8.1.1 water-circuit requirements and 8.1.3 volume/flow;
+  minimum pressure 1 bar and
   model-dependent minimum flow of 25 or 22 l/min.
 
 ### Regulation and research
@@ -400,7 +406,7 @@ together.
   *Reference Correlations for Thermophysical Properties of Liquid Water at 0.1 MPa*, Journal of
   Physical and Chemical Reference Data 38(1), 2009, 21–29, DOI 10.1063/1.3043575:
   [NIST publication page][R3-web] and [paper][R3-pdf]. Section used: table 8, liquid-water density
-  and isobaric heat capacity at 298.15 K. Reviewed **27 August 2026**.
+  and isobaric heat capacity at 298.15 K. Reviewed **11 October 2026**.
 
 ## Maintenance rule
 

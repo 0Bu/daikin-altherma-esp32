@@ -92,8 +92,8 @@ the case carries `5V`, `GND` and G5–G8/G38/G39 for plain jumper wires. The 5 V
 - **GPIO35 is only safe because this build uses Quad (DIO) flash and no PSRAM.** On a build with
   Octal flash/PSRAM, GPIO33–37 carry SPIIO4-7/DQS and the firmware refuses them — for the indicator
   as well as for X10A.
-- **The IR LED (GPIO4) has no use here.** The Altherma is controlled over X10A (and, for the planned
-  HomeHub link, Modbus); there is no infrared path on the unit for the firmware to talk to.
+- **The IR LED (GPIO4) has no use here.** The firmware observes the Altherma over X10A and the
+  optional, independent read-only HomeHub Modbus connection; it does not control the heat pump.
 - **No display** — the LCD is on the non-Lite AtomS3. Nothing in the firmware renders to one.
 
 ---
@@ -226,8 +226,9 @@ detected, those four pads disappear from every pin picker and a `POST /set_env3`
 naming one is refused.
 
 The **XIAO ESP32-S3** breaks out the same four pads, so a hand-wired W5500 module works there and
-leaves enough pins for X10A *and* ENV III — at the cost of the soldering and the case that the PoE
-base exists to avoid.
+leaves pins for X10A — at the cost of the soldering and the case that the PoE base exists to avoid.
+ENV III is supported only with an M5Stack preset; the XIAO preset does not offer it, even if spare
+GPIOs are physically present.
 
 **What it looks like when it is running.** The Connections tile grows an *Ethernet* row (no pencil —
 there is nothing to configure) showing the negotiated speed, or one of two distinct problems: *no

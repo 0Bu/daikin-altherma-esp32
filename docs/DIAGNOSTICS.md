@@ -158,8 +158,12 @@ ends when it switches off.
 
 **In plain language:** Many very short space-heating runs can mean that the heat pump cannot deliver
 heat to the building for long enough. Where the signals permit it, the diagnosis separates complete
-runs into **space heating**, **domestic hot water**, and **cooling**. Only confirmed space-heating
-runs decide the short-run note, so a long hot-water run cannot hide short heating runs.
+runs into **space heating**, **domestic hot water**, and **cooling**. With sufficient classification
+evidence, only confirmed space-heating runs decide the short-run note. This requires readable
+classification inputs for at least 90% of the day, at least twelve classified runs, and a class for
+at least 90% of completed runs. Otherwise the diagnosis assesses all compressor runs together;
+long hot-water or cooling runs can then hide short heating runs. The detail text states which
+assessment was possible, and separately displayed class counts remain observations.
 
 Example:
 
@@ -167,7 +171,8 @@ Example:
 17 starts · space 16 × 5 min · hot water 1 × 2 h
 ```
 
-This means 17 total compressor starts, with 16 complete space-heating runs averaging five minutes
+With sufficient classification evidence, this means 17 total compressor starts, with 16 complete
+space-heating runs averaging five minutes
 and one two-hour hot-water run. “Cooling … excluded” means that cooling runs were identified but did
 not enter the heating assessment. “... unclassified” means a mode change or measurement gap made a
 safe assignment impossible.
@@ -177,8 +182,9 @@ context from those completed space-heating runs. It helps compare a cold-day pat
 one, but it does not change the ten-minute rule or the result. No X10A suffix means no suitably
 paired current sample was established; it never means 0 °C.
 
-**When does a note appear?** The project heuristic requires at least twelve confirmed space-heating
-runs averaging under ten minutes. This is not a Daikin limit and does not by itself prove a defect.
+**When does a note appear?** The project heuristic requires at least twelve assessed runs averaging
+under ten minutes: confirmed space-heating runs when classification is sufficient, otherwise all
+compressor runs together. This is not a Daikin limit and does not by itself prove a defect.
 
 **Evidence and limits:** [Compressor cycling](DIAGNOSTIC_EVIDENCE.md#diagnosis-cycling)
 

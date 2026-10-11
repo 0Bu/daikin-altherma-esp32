@@ -662,7 +662,7 @@ same rows arrive by the normal route and the entities are unchanged.
 > construction ([MODBUS_PROTOCOL.md](MODBUS_PROTOCOL.md)). Using the HomeHub as a source does not
 > make HA a control path. Readings remain on `<base>/modbus` without per-value HA discovery.
 
-## Derived power, energy & COP / SCOP / JAZ
+## Derived power, energy, COP and period energy ratios
 
 The X10A bus (and this firmware) streams **instantaneous sensor values only** — there is no
 accumulated-energy (kWh), electrical-power (W) or run-hour register anywhere in the protocol. The
@@ -678,11 +678,13 @@ Assistant **or** Grafana — and take their ratio:
 2. **Electrical energy consumed** = from a **real electricity meter** on the heat-pump circuit — not
    from compressor current, not from Onecta's estimate.
 
-Then **COP = P_thermal / P_electrical** (instantaneous) and **SCOP / JAZ = ΣkWh_thermal ⁄ ΣkWh_electrical**
-over a period (month, heating season, year).
+Then **COP = P_thermal / P_electrical** (instantaneous) within the matched measurement boundary,
+and **period energy ratio = ΣkWh_thermal ⁄ ΣkWh_electrical** over a matching month, heating season
+or year. Call the latter whole-installation SCOP/JAZ only when the numerator and denominator
+cover that complete system; the water-circuit recipe below does not establish this.
 
-> Entity ids below follow the sample `altherma3_r_erga` profile (English labels — the firmware is
-> English-only). For a different model, open `http://daikin-altherma-esp32.local/values` for the
+> Entity ids below are illustrative English catalog labels; the web UI has thirteen languages.
+> Open `http://daikin-altherma-esp32.local/values` for your detected profile's
 > exact labels, then map
 > them to your HA entity ids (HA slugs the discovery `name`). `sensor.heatpump_power` /
 > `sensor.heatpump_energy` are **your external meter** (e.g. a Shelly EM/3EM or DIN-rail kWh meter),
@@ -752,7 +754,7 @@ template:
 wrong in the direction that flatters you: during a **defrost** the unit deliberately pulls heat back
 *out* of the heating water — several kW, for minutes — and clamping records that as `0.0 kW` of
 production instead of as the withdrawal it is. In a live gauge that is a misleading instant; in the
-**integral** below it is a systematic error that never cancels, so produced heat and with it the JAZ
+**integral** below it is a systematic error that never cancels, so produced heat and its period ratio
 come out too high — worst in winter, when defrosts are frequent and the number matters most. The
 firmware refuses the same clamp in its own dashboard for the same reason (`main/www/js/schematic.js`,
 `d.pth`). The Riemann integrator handles negative stretches correctly; let the sign through.
@@ -767,17 +769,19 @@ better empty than a plausible-looking wrong value.
 
 ### 2. Instantaneous COP (live gauge)
 
-Prefer the **measured** electrical power from your meter (a Shelly EM reports live W):
+Prefer the **measured** electrical power from your meter. This example requires
+`sensor.heatpump_power` in **W** (as reported by a Shelly EM) and converts it to kW:
 
 ```yaml
       - name: "Altherma COP (live)"
         unique_id: altherma_cop_live
         availability: >
           {{ states('sensor.altherma_thermal_power') | is_number
-             and states('sensor.heatpump_power') | is_number }}
+             and states('sensor.heatpump_power') | is_number
+             and state_attr('sensor.heatpump_power', 'unit_of_measurement') == 'W' }}
         state: >
           {% set p_th = states('sensor.altherma_thermal_power') | float %}
-          {% set p_el = states('sensor.heatpump_power') | float %}   {# external meter, kW #}
+          {% set p_el = (states('sensor.heatpump_power') | float) / 1000 %}
           {{ (p_th / p_el) | round(2) if p_el > 0.05 else 'unknown' }}
 ```
 
@@ -794,21 +798,29 @@ and every kilowatt the heater draws lands in the divisor while its heat never re
 — the COP collapses whenever the heater fires, and reads as a failing heat pump while nothing is
 wrong. R2T is downstream of the heater, so both sides count it and the pairing holds.
 
-**If your profile has no R2T row**, the recipe is valid only while the backup heater is off. All 44
-shipped profile tables carry one, under four different spellings — check
-`http://daikin-altherma-esp32.local/values` for yours. The device's own dashboard applies exactly
+**If your profile has no R2T row**, the recipe is valid only while the backup heater is off and the
+other required water measurements are available. Check
+`http://daikin-altherma-esp32.local/values` for your profile's rows. The device's own dashboard applies exactly
 this rule and blanks its COP pill rather than showing the collapsed quotient
 (`main/logic/cop_scope.hpp`); it also names which COP it is showing, since the two are different
 numbers and look identical on screen.
 
+**The tank booster heater (BSH) is outside both water-temperature measurement points.** Its
+electricity may be included in your meter, but its heat is absent from this virtual heat meter.
+Use the whole-installation COP recipe only while BSH is known to be off; if its state is unknown,
+the measurement boundary is unproven. The firmware suppresses its corresponding COP in both cases.
+The seasonal ratio below also misses BSH heat and other unmeasured tank contributions: describe it
+as the measured water-circuit energy ratio, or use a heat meter covering the complete system before
+calling it whole-installation SCOP/JAZ.
+
 **With a Shelly Pro 3EM specifically:** use the device's *total* active power (the sum across all
 three channels) as `sensor.heatpump_power` — correct whether the unit is three-phase or single-phase,
 since unused channels simply read 0 — and its accumulated energy counter as `sensor.heatpump_energy`
-for the JAZ denominator in step 3. The meter's ~1 % accuracy removes the electrical side as a source
+for the yearly ratio denominator in step 3. The meter's ~1 % accuracy removes the electrical side as a source
 of error; the **heat** side then dominates, so see the accuracy notes below before reading much into
 any single instant.
 
-### 3. Integrate to energy → SCOP / JAZ
+### 3. Integrate to energy → period energy ratio
 
 **Home Assistant** — turn the thermal-power sensor into a thermal-**energy** counter with the
 [`integration`](https://www.home-assistant.io/integrations/integration/) (Riemann-sum) platform,
@@ -821,7 +833,6 @@ sensor:
     source: sensor.altherma_thermal_power     # kW  -> kWh
     name: Altherma Thermal Energy
     unique_id: altherma_thermal_energy
-    unit_prefix: k
     unit_time: h
     method: trapezoidal
 
@@ -829,19 +840,29 @@ utility_meter:
   altherma_thermal_energy_yearly:
     source: sensor.altherma_thermal_energy
     cycle: yearly
+    net_consumption: true                   # retain negative defrost energy
+    periodically_resetting: false           # persistent, signed integral
   heatpump_electrical_energy_yearly:
     source: sensor.heatpump_energy            # your external kWh meter counter
     cycle: yearly
 
 template:
   - sensor:
-      - name: "Altherma JAZ (yearly SCOP)"
+      - name: "Altherma water-circuit energy ratio (yearly)"
         unique_id: altherma_jaz
+        availability: >
+          {{ states('sensor.altherma_thermal_energy_yearly') | is_number
+             and states('sensor.heatpump_electrical_energy_yearly') | is_number
+             and (states('sensor.heatpump_electrical_energy_yearly') | float) > 0 }}
         state: >
-          {% set q = states('sensor.altherma_thermal_energy_yearly') | float(0) %}
-          {% set e = states('sensor.heatpump_electrical_energy_yearly') | float(0) %}
+          {% set q = states('sensor.altherma_thermal_energy_yearly') | float %}
+          {% set e = states('sensor.heatpump_electrical_energy_yearly') | float %}
           {{ (q / e) | round(2) if e > 0 else 'unknown' }}
 ```
+
+The thermal input is already in kW, so no additional `unit_prefix` is needed for kWh. The thermal
+period counter must accept negative adjustments; otherwise defrost withdrawals disappear again.
+Both yearly inputs must cover the same period and be available; a missing heat total is not zero.
 
 **Grafana** (if you route the MQTT values into a Prometheus-compatible TSDB, e.g. Telegraf's MQTT
 consumer → VictoriaMetrics) — compute the heat meter in the query and integrate over the dashboard
@@ -861,7 +882,7 @@ integrate($P[$__range]) / 3600
 # consumed electricity [kWh] over $__range, from the meter's kWh counter
 increase(heatpump_energy_kwh[$__range])
 
-# JAZ over the range
+# water-circuit energy ratio over the range
 integrate($P[$__range]) / 3600 / increase(heatpump_energy_kwh[$__range])
 ```
 
@@ -879,17 +900,18 @@ integrate($P[$__range]) / 3600 / increase(heatpump_energy_kwh[$__range])
   is a different input, so use the fluid supplier's property table rather than relabelling it. A
   wrong constant is a systematic error; (b) small-ΔT amplification — ±0.1 K on a 3 K heating
   ΔT is already ~3 %, and the leaving/return sensors are uncalibrated factory parts (~±0.5–1 K);
-  (c) whether a genuine volumetric flow signal exists. Every model profile shipped here defines the
-  flow sensor (`0x62/9`) plus both leaving (`0x61/2|4`) and return (`0x61/8`) water temps, so the
-  heat meter is available across the whole catalog — but if a specific unit variant physically lacks
-  the flow sensor its reading is no-data and `P_thermal` can't be formed.
+  (c) whether genuine water measurements exist. The Protocol-I water-circuit recipe needs a flow
+  sensor (`0x62/9`) plus leaving (`0x61/2|4`) and return (`0x61/8`) water temperatures. Verify those
+  rows and their readable values for the actual profile and unit. The Protocol-S profile does not
+  supply these measurements; if a unit lacks the flow sensor or required temperatures,
+  `P_thermal` cannot be formed.
 - **A metered electrical side does not make the live COP accurate.** A 1 %-class meter (Shelly Pro
   3EM and the like) removes the divisor as a source of error, but the divided quantity still comes
   from two uncalibrated factory temperature sensors: ±0.5–1 K each across a heating ΔT of ~5 K puts
   the instantaneous figure within roughly ±15–25 %, and no meter improves that. What the meter *does*
   fix is the **seasonal** number, because its kWh counter is exact and the ΔT scatter largely averages
   out over months — the systematic part (a wrong `Cf` for a glycol loop) does not, so set that. Read
-  the live gauge as a working indication and the JAZ as the result.
+  the live gauge as a working indication and the period ratio within its stated measurement boundary.
 - A live COP that is wildly off usually means the **wrong model profile** (mismatched flow/temperature
   registers) — compare the dashboard **Model** card (family, outdoor unit ID) with your nameplate and
   check the profile actually read in `/status` → `profile.id`, or `POST /detect` to re-run

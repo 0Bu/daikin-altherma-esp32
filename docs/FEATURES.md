@@ -52,7 +52,7 @@ Ids are stable keys and are never reused — a gap means a feature was retired, 
 | 5 | OTA manifest check + version-bound **release/dev changelog modal** with cumulative skipped-dev-build notes + signed manual HTTPS stream with **at most two exact fail-closed Range resumes** and two-point downgrade gate; a boot-resident static delivery worker, dynamic TLS records, a boot-created absolute header/body socket watchdog, clean MQTT pause, transport cleanup, phase-specific INTERNAL-heap admission, fixed status and bounded peer coordination | ✅ 🧪 | [`ota_update.cpp`](../main/ota_update.cpp), [`http_deadline.cpp`](../main/http_deadline.cpp), [`http_client_diag.cpp`](../main/http_client_diag.cpp), [`http_ota.cpp`](../main/http_ota.cpp), [`www/js/settings.js`](../main/www/js/settings.js), [`mqtt_ha.cpp`](../main/mqtt_ha.cpp), [`logic/http_deadline.hpp`](../main/logic/http_deadline.hpp), [`logic/ota_transport.hpp`](../main/logic/ota_transport.hpp), [`logic/fixed_text.hpp`](../main/logic/fixed_text.hpp), [`logic/ota_manifest.hpp`](../main/logic/ota_manifest.hpp), [`logic/ota_changelog_range.hpp`](../main/logic/ota_changelog_range.hpp), [`logic/ota_headroom.hpp`](../main/logic/ota_headroom.hpp), [`logic/ota_quiesce.hpp`](../main/logic/ota_quiesce.hpp) |
 | 6 | Live UI by **polling** bounded-chunk-streamed `/status` + `/values` — no push transport, on purpose; response size does not become one contiguous heap allocation, both snapshots fail fast during OTA, and the model-sized values snapshot waits boundedly behind shorter Weather TLS | ✅ 🧪 | [`www/app.sources`](../main/www/app.sources), [`http_status.cpp`](../main/http_status.cpp), [`logic/http_values_wait.hpp`](../main/logic/http_values_wait.hpp), [`test_status_heap_contract.mjs`](../test/test_status_heap_contract.mjs), [`test_source_absence_contract.mjs`](../test/test_source_absence_contract.mjs) |
 | 7 | Minified deterministic-gzip UI **embedded in the app image**: startup page under 160 KiB, each device-local locale under 32 KiB | ✅ 🧪 | [`main/CMakeLists.txt`](../main/CMakeLists.txt), [`test_ui_delivery_contract.mjs`](../test/test_ui_delivery_contract.mjs), [`test_ui_locale_catalogs.mjs`](../test/test_ui_locale_catalogs.mjs) |
-| 8 | HTTP handlers under an **OOM `try/catch` → 503** discipline + active-OTA / low-heap early rejection; clean connection abort once a streamed response has begun | ✅ 🧪 | [`http_common.cpp`](../main/http_common.cpp), [`logic/chunk_sink.hpp`](../main/logic/chunk_sink.hpp), [`logic/http_request.hpp`](../main/logic/http_request.hpp) |
+| 8 | HTTP handlers under an **OOM `try/catch` → 503 before emission** discipline + active-OTA / low-heap early rejection; exception-aware stream abort for status and MCP `get_status`, staged non-allocating values output (remaining stream coverage described below) | ✅ 🧪 | [`http_common.cpp`](../main/http_common.cpp), [`logic/chunk_sink.hpp`](../main/logic/chunk_sink.hpp), [`logic/http_request.hpp`](../main/logic/http_request.hpp) |
 | 9 | Home Assistant MQTT auto-discovery, separate X10A/HomeHub state topics, LWT | ✅ 🧪 | [`mqtt_ha.cpp`](../main/mqtt_ha.cpp), [`logic/discovery.hpp`](../main/logic/discovery.hpp) |
 | 10 | **MQTTS/WSS + verified common-root CA bundle**; credentials never sent in cleartext, no silent fallback | ✅ | [`mqtt_ha.cpp`](../main/mqtt_ha.cpp), [`sdkconfig.defaults`](../sdkconfig.defaults) |
 | 11 | Core dump to flash + offline symbolication, with proven foreign evidence preserved and suppressed, and strict offline ELF identity checks | ✅ 🧪 | [`diag_crash.cpp`](../main/diag_crash.cpp), [`logic/crashinfo.hpp`](../main/logic/crashinfo.hpp), [`decode-coredump.sh`](../scripts/decode-coredump.sh) |
@@ -301,7 +301,7 @@ Deep dive: [`ARCHITECTURE.md`](ARCHITECTURE.md), [`SECURITY.md`](SECURITY.md).
   owner proceeds, removing MQTTS keepalive/subscription record churn, and resumes the same client
   only after the owner flag clears. MQTTS restart itself requires four stable 56/24-KiB heap samples
   and direct start failures back off exponentially to 60 seconds. Allocation-rich HTTP snapshots return an early busy-503 while
-  OTA is active; compact OTA status and the static diagnostic ring remain observable. Only both
+  OTA is active; compact `/ota/status` remains observable, while `/diag` returns the common busy-503. Only both
   successful validation passes may select the new slot. IDF maps structure,
   digest/signature and verifier-allocation
   failures to the same validation result, so the UI reports “image validation failed” rather than
@@ -438,7 +438,9 @@ other.
   do not require equally-growing contiguous allocations.
 - **🧪 Bounded request and JSON ingress** ([`logic/http_body.hpp`](../main/logic/http_body.hpp),
   [`logic/payload_complete.hpp`](../main/logic/payload_complete.hpp)): body acceptance has idle and
-  absolute 30 s limits; an unread rest after the response closes the session past 8 KiB or 2 s.
+  absolute 30 s limits; unread-rest cleanup checks an 8 KiB accounting cap after each 128 B receive,
+  so an overrun can consume up to 8 KiB + 128 B before closure. A 2 s deadline is checked before
+  each receive; one in-progress receive can add the configured socket timeout.
   Config, MQTT and Weather JSON allow 16 container levels and one whitespace-terminated document.
 - **✅ gzip UI embedded in the app image**: the build inlines the page and its fragments,
   minifies, and pre-compresses them deterministically (`EMBED_FILES`). gzip is deliberate because
@@ -454,7 +456,11 @@ other.
   contiguous internal heap block drops below 6144 B (`heap_largest_internal_block() < 6144`),
   shielding critical TLS allocations. A chunked route may have sent status/headers even when its first
   chunk call reports a socket error; the bounded stream helper therefore closes the 503 window before
-  that call and then consumes later exceptions so httpd closes the incomplete response. Host tests inject
+  that call and then consumes later exceptions so httpd closes the incomplete response. `/status`
+  and MCP `get_status` use this helper. `/values` and MCP `get_hp_values` stage their snapshot before
+  the first byte and serialize it without allocating through the bounded chunk sink, without using
+  the exception helper. `/diag` and `/history` still rely on the outer guard and do not
+  establish this post-emission guarantee (HTTP-03). Host tests of the helper inject
   OOM before emission, after a successful first chunk, and after a failed first chunk. No path unwinds
   through esp_http_server's C frames.
 - **✅ The same discipline covers every allocating FreeRTOS task loop**, since a task entry is a C
@@ -462,7 +468,8 @@ other.
   `xSemaphoreTake` is not released by unwinding, so critical sections are either non-allocating or
   taken through an RAII lock.
 - **✅ Chunked streaming for large responses** — `/status` streams in bounded 1 KiB chunks (`HttpJsonChunks`)
-  with zero whole-body heap reallocations; unredacted `/diag` streams in 1 KiB chunks (512 B during active OTA)
+  with zero whole-body heap reallocations; unredacted `/diag` streams in 1 KiB chunks (the handler's
+  512 B OTA branch can still serve a request admitted before the common guard observed active OTA)
   directly from static ring storage with zero dynamic heap allocations; the core-dump image, and
   one trended row's 24-hour ring flushed every 64 samples, so the peak string stays a few hundred bytes.
   The series carries the **row's own** unit rather than a hardcoded one, samples as exact integer tenths, and
@@ -543,7 +550,8 @@ other.
   silent for 15 s marks an active installation offline (shorter dropouts do not); a connected
   publisher retains `offline` itself before an OTA pause's clean stop discards the last-will.
 - **Read-only by design.** No command subscriptions and no actuation. The optional inbound reference
-  subscription captures and qualifies an input for display only; it cannot reach either pump link.
+  subscription captures and qualifies an input for display and the read-only heating-curve diagnosis;
+  it cannot actuate either pump link.
 
 ---
 
