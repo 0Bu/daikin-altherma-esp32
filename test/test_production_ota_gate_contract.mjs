@@ -1180,7 +1180,7 @@ assert.match(ota, /HealthVerdict::GiveUp[\s\S]{0,700}?esp_restart\(\);/);
 
 // CI trust split and agent mutation guard remain explicit.
 assert.match(workflow,
-  /mechanical_gates:\s*\n[\s\S]{0,300}?if:\s*github\.event_name != 'workflow_dispatch' \|\| inputs\.release != true/);
+  /mechanical_gates:\s*\n[\s\S]*?if:\s*\(github\.event_name != 'workflow_dispatch' \|\| inputs\.release != true\) && \(github\.event_name != 'pull_request' \|\| github\.event\.pull_request\.state == 'open'\)/);
 assert.match(workflow,
   /trusted_build:[\s\S]{0,500}?always\(\)[\s\S]{0,300}?github\.event_name == 'workflow_dispatch' && inputs\.release == true/);
 assert.match(workflow, /publish:[\s\S]{0,120}?needs:\s*\[trusted_build\]/);
