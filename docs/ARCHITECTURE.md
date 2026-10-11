@@ -102,8 +102,9 @@ link reconfiguration resets that backoff. Pin defaults and board capabilities ar
 [BOARDS.md](BOARDS.md); wiring is in [WIRING.md](WIRING.md).
 
 The receiver removes transmitted echoes and resynchronizes Protocol I preambles. Protocol S probes
-page `0x50`, selects curated `protocol_s` and bypasses Protocol I signature/capacity ranking. Two
-agreeing incomplete sweeps establish frame corruption; ordinary timeout/NAK probes do not.
+page `0x50`, selects curated `protocol_s` and bypasses Protocol I signature/capacity ranking. When
+frame corruption makes a detection sweep incomplete, two consecutive agreeing sweeps are required
+before committing its profile. Ordinary timeout/NAK probes do not count as frame corruption.
 Protocol S and native Altherma 4 remain unverified without a matching physical capture in this repo.
 Overlay eligibility follows row-identical generated tables, not the selected profile name.
 
@@ -191,7 +192,9 @@ Disabled/frozen ENV III RAM is not adopted or journaled unless the producer ran 
 Future journal cursors are reported and never rewound; affected work waits for acceptable time.
 Writes permit one slot retry and two abandoned sectors per failure episode, then retry at 60 seconds.
 
-HomeHub, ENV III, board memory and the circulation witness keep separate source rasters. `b0`
+X10A, HomeHub and ENV III keep three separate source rasters; board memory and the circulation
+witness share the X10A raster. Journal append and restoration depend on resolved X10A identity;
+resetting that source also resets its dependent series. `b0`
 aligns monotonic buckets even before SNTP; `t0` is omitted until wall time is known. Missing samples
 stay gaps. Browser storage holds only a transient render frame during OTA, not measurement history.
 

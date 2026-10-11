@@ -191,6 +191,9 @@ plant diagnostics are enabled. An empty room/circulation topic deletes its obser
 The UI accepts a temperature **`topic$path`**, a fixed target in °C or target **`topic$path`**, and an
 optional timestamp source. Dot-separated object paths have no array/filter operators; omitting the
 path admits a plain numeric payload. Saved mapping is intent, not a successful live decode.
+Escape a literal dollar sign as `\$` and a backslash as `\\`. Decoded topics are limited to 192 bytes,
+paths to 128 bytes; the combined UI field allows 641 characters. A numeric target without `$` is a
+fixed temperature; use an explicit delimiter for a numeric topic, for example `20$`.
 The current heating-curve sampler requires
 a non-empty temperature path and a fixed target or non-empty target path; scalar decoding alone
 does not arm it (see [PLANT.md](PLANT.md#heating-curve-diagnosis)).

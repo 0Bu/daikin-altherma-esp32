@@ -173,7 +173,13 @@ open(p, "w").write(s2)
 PY
 expect_red "a missing public redaction-documentation row"
 
-cp -R "$ROOT/docs/REPORTING.md" "$TMP/docs/REPORTING.md"
+cp -R "$ROOT/docs/SECURITY.md" "$TMP/docs/SECURITY.md"
+if ! python3 "$CHECK" >/dev/null 2>&1; then
+  echo "FAIL: restored documentation baseline is not clean"
+  python3 "$CHECK" || true
+  exit 1
+fi
+echo "ok: restored documentation baseline is clean"
 
 # Public entry points cannot silently switch back to an operational route.
 python3 - "$TMP/main/www/js/app_state.js" <<'PY'

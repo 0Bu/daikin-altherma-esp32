@@ -35,32 +35,6 @@ HTTP routes, OTA/security/network/diagnostic mechanisms, MQTT/HA entities, pure 
 layout. Read the actual diff and production path. If none of these facts changed, leave the catalog
 alone and report that it already matches the source.
 
-## Maintain one concise catalog
-
-1. Find the existing stable feature ID in FEATURES.md. Update its single row rather than appending
-   a second explanation. Add an ID only for a distinct capability; never renumber or reuse IDs.
-2. State behavior in one short sentence and link its production evidence relative to `docs/`.
-   Use the existing status legend: `✅` shipping, `🧪` host-tested logic, `🟡` partial with its TODO,
-   `🔭` planned or stubbed. Promote a completed stub and remove obsolete planned wording.
-3. When the ESP-IDF surface changes, update the corresponding stable ESP_IDF_MATRIX.md row,
-   source evidence, official provider link and active-config appendix. The matrix owns detailed
-   component/provider facts; FEATURES summarizes product capabilities.
-4. Use the topic owners in [docs/README.md](../../../docs/README.md). Architecture owns data flow;
-   API owns HTTP fields; Security owns trust/signing; Maintenance owns delivery procedures; MQTT
-   owns wire identity and freshness. Update the affected owner and link it. Do not copy its full
-   contract into FEATURES or introduce a per-feature deep-dive section there.
-5. Apply [project-review's consistency and concision checklist](../project-review/SKILL.md#documentation-consistency-and-concision).
-   Compare related documents with current code. Contradictions, unsupported status claims and
-   avoidable duplication block a clean review. Keep current rules and necessary limits; remove
-   defect chronology and redundant rationale. Count new or moved prose when judging growth.
-6. Keep counts and measurements only when the reader needs them. Derive retained numbers from
-   source; omit volatile CHECK/entity counts rather than duplicating them in several pages.
-   Verify partition sizes, defaults and feature claims without guessing.
-7. Preserve the status legend and the closing link to this skill. Check changed links/anchors and
-   run `scripts/run-esp-idf-matrix-audit.sh`. If the matrix checker changed, also run
-   `tools/esp_idf_matrix/selftest.sh`. Select host tests for changed logic; a prose edit alone does
-   not require rerunning firmware tests.
-
 ## Steps
 
 0. **Step 0 — pin the baseline.**
@@ -75,7 +49,8 @@ alone and report that it already matches the source.
    implementation, also inspect `git diff HEAD -- main/ sdkconfig.defaults partitions.csv scripts/ .github/`
    and the intended untracked new files. Scan for the signals above and read the actual new code;
    do not infer a feature from a commit message.
-2. **Locate the record.** Find the matching stable feature-matrix row in FEATURES.md.
+2. **Locate the record.** Update the matching stable feature row in FEATURES.md.
+   Add an ID only for a distinct capability; never renumber or reuse IDs.
    If ESP-IDF surface changed, also update the
    stable row, evidence, official link and active-config appendix in ESP_IDF_MATRIX.md.
 3. **Write the entry code-verified — and SHORT.** State what the feature does in **one short row** in the
@@ -86,19 +61,22 @@ alone and report that it already matches the source.
    guess, and prefer omitting a volatile count to restating one that will drift.
 
    **What does NOT go in the entry** — this is the failure mode this file actually has, not a
-   hypothetical one: the catalog once reached 1510 lines, a third of it inside "the short version"
-   matrix, because each new feature appended its full rationale to a table cell. Keep out the bug
+   hypothetical one: appending a full rationale to each table cell makes the catalog unreadable. Keep out the bug
    that motivated the feature (→ the issue), the measurement that settled it (→ the issue or
    `ARCHITECTURE.md`), the field-by-field API listing (→ `docs/API.md`), and the
    per-header reasoning (→ the header's own comment). A reader comes here to learn *that* a mechanism
    exists and *where* it lives; every line past that belongs somewhere it can be found on purpose.
    If an entry needs more room, the deep-dive doc is the room.
 4. **Promote, don't just append, when a stub goes real.** If `ota_update.cpp`'s download or
-   `mcp_server.cpp` graduates from TODO, change the label in the FEATURES matrix and section, promote
+   `mcp_server.cpp` graduates from TODO, change the label in the FEATURES row, promote
    the corresponding ESP_IDF_MATRIX.md row where applicable, and delete the "planned" wording.
-5. **Keep the deep-dive docs authoritative.** FEATURES.md links to [`ARCHITECTURE.md`](../../../docs/ARCHITECTURE.md),
-   [`SECURITY.md`](../../../docs/SECURITY.md), etc.; it summarizes, it does not fork their detail. If the
-   feature also needs a deep-dive edit, do that there and link — don't duplicate the prose.
+5. **Keep topic owners authoritative.** Use [docs/README.md](../../../docs/README.md) to locate the
+   reference for architecture, API, security, maintenance or MQTT. Update the affected reference
+   and link it; do not copy its complete contract into FEATURES or add a per-feature section there.
+   Apply [project-review's consistency and concision checklist](../project-review/SKILL.md#documentation-consistency-and-concision)
+   across related documents and current code. Contradictions, unsupported claims and avoidable
+   duplication block a clean review. Retain necessary rules and limits; remove defect chronology
+   and redundant rationale. Include new and moved prose when judging growth.
 6. **Verify.**
    - Links resolve — every `](../…)` target exists (they're relative to `docs/`).
    - `scripts/run-esp-idf-matrix-audit.sh` passes; if its checker changed, also run
@@ -133,8 +111,7 @@ Before recording the pass:
   [`AGENTS.md`](../../../AGENTS.md) may link to `docs/FEATURES.md` and its anchors.
 - **The project convention holds:** always write the full name `daikin-altherma-esp32`, and don't name
   other projects in the catalog (the README credit is the sole exception).
-Use the full project name `daikin-altherma-esp32`. Other project attribution belongs only in the
-README credits. A shipping label proves implementation, not behavior on a particular heat pump.
+- A shipping label proves implementation, not behavior on a particular heat pump.
 
 ## Recording the pass (merge gate — no file marker)
 

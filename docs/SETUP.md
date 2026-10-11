@@ -48,7 +48,9 @@ On a WiFi boot with no usable credentials:
 5. Open **`http://daikin-altherma-esp32.local`**. If mDNS does not resolve, use the address shown in
    your router's DHCP client list.
 
-The SSID must be 1–32 bytes; a password is empty for an open network or 8–63 characters.
+The SSID must be 1–32 bytes; a password is empty for an open network or 8–63 bytes.
+Non-ASCII characters can use multiple bytes; the server may reject input that passes the form's
+length check.
 A rejected save stays on the portal and shows the error. When changing an already working WiFi
 configuration, the firmware retains the previous credentials for automatic rollback if connection
 to the new network fails.

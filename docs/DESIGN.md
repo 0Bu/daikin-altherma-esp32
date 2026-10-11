@@ -81,8 +81,10 @@ and losing only X10A are rendered separately.
 ### 5.0 Provision (captive portal, `setup.html`)
 
 A faint brand hero and one card contain typed SSID, password and Save & reboot. No scan, picker or
-background fetch is needed; hidden SSIDs work as ordinary text. SSID is 1–32 characters, password
-empty or 8–63, with client and server validation. Announce Saved/rebooting only after acceptance.
+background fetch is needed; hidden SSIDs work as ordinary text. The server accepts SSIDs of 1–32
+bytes and passwords that are empty or 8–63 bytes. The client's length check counts JavaScript code
+units, so multibyte input can pass it and still be rejected by the server.
+Announce Saved/rebooting only after acceptance.
 Rejection keeps the form and displays the server reason; busy 503 has neutral retry wording.
 Network-derived strings use DOM text/value properties and are never interpreted as markup.
 

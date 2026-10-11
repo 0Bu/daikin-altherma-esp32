@@ -330,7 +330,7 @@ and raw dump. Any erase failure reports an incomplete reset rather than pretendi
 
 | POST route | JSON | Effect |
 |---|---|---|
-| `/set_wifi` | `{ssid,pass}` | SSID 1–32; password empty for open or 8–63. Persist and reboot, including rollback backup for a changed configured network. Re-save deliberately re-arms the trial. |
+| `/set_wifi` | `{ssid,pass}` | SSID 1–32 bytes; password empty for open or 8–63 bytes. Persist and reboot, including rollback backup for a changed configured network. Re-save deliberately re-arms the trial. |
 | `/set_mqtt` | `{broker,user,pass,clear_creds[,base]}` | Validate base and TLS policy; DNS/TCP/MQTT CONNECT/auth preflight up to about 8 s, then save/reboot. Empty broker disables without probe; unchanged settings do not probe/reboot. |
 | `/set_syslog` | `{host,port}` | Validate port, save/reboot; empty host disables. No request-path DNS/ping. Unchanged returns `reboot:false`. |
 | `/set_ntp` | `{server}` | Save/reboot; empty resets to compile-time default, not disabled. No request-path DNS. Unchanged returns `reboot:false`. |
@@ -391,7 +391,7 @@ timestamp_topic, timestamp_path, enabled_path, hvac_mode_path, max_age_s
 ```
 
 Exact topics (no wildcards), bounded dotted JSON paths, integer max age 10–3600 s, and a target
-mapping or fixed target 0.1–35.0 °C at 0.1 °C precision are required for a non-empty source.
+mapping or fixed target 5.0–35.0 °C at 0.1 °C precision are required for a non-empty source.
 `fixed_setpoint_c:0` selects an MQTT target rather than a usable fixed temperature.
 Old clients' setpoint/timestamp
 paths fall back to their single topic. Save/rebind is live with no proof step. An unchanged mapping
