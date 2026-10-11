@@ -177,43 +177,64 @@ class CdpPage {
   }
 }
 
-async function connectSocket(url) {
+async function connectSocket(url, signal) {
   const socket = new WebSocket(url);
-  await new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error("timed out connecting to Chrome DevTools")), 20000);
-    socket.addEventListener("open", () => { clearTimeout(timer); resolve(); }, { once: true });
-    socket.addEventListener("error", () => { clearTimeout(timer); reject(new Error("Chrome DevTools WebSocket failed")); }, { once: true });
-  });
-  return socket;
+  try {
+    await new Promise((resolve, reject) => {
+      const finish = (error) => {
+        signal.removeEventListener("abort", onAbort);
+        socket.removeEventListener("open", onOpen);
+        socket.removeEventListener("error", onError);
+        if (error) reject(error); else resolve();
+      };
+      const onOpen = () => finish();
+      const onError = () => finish(new Error("Chrome DevTools WebSocket failed"));
+      const onAbort = () => finish(signal.reason);
+      socket.addEventListener("open", onOpen, { once: true });
+      socket.addEventListener("error", onError, { once: true });
+      signal.addEventListener("abort", onAbort, { once: true });
+      if (signal.aborted) onAbort();
+    });
+    return socket;
+  } catch (error) {
+    // Ownership has not passed to launchBrowser yet. Its failure cleanup joins the owned
+    // Chrome process, ending the peer even if the native socket is still CONNECTING.
+    socket.addEventListener("error", () => {}, { once: true });
+    try { socket.close(); } catch { /* already closed */ }
+    throw error;
+  }
 }
 
-async function devToolsEndpoint(child) {
+async function devToolsEndpoint(child, signal) {
   return new Promise((resolve, reject) => {
     let output = "";
-    const timer = setTimeout(() => reject(new Error(`Chrome did not expose DevTools\n${output}`)), 30000);
-    const inspect = (chunk) => {
-      output += chunk.toString();
-      const match = output.match(/DevTools listening on (ws:\/\/[^\s]+)/);
-      if (match) {
-        clearTimeout(timer);
-        resolve(match[1]);
-      }
+    const finish = (error, value) => {
+      child.stdout.off("data", inspect);
+      child.stderr.off("data", inspect);
+      child.off("exit", onExit);
+      child.off("error", onError);
+      signal.removeEventListener("abort", onAbort);
+      if (error) reject(error); else resolve(value);
     };
+    const inspect = (chunk) => {
+      output = (output + chunk.toString()).slice(-16384);
+      const match = output.match(/DevTools listening on (ws:\/\/[^\s]+)/);
+      if (match) finish(null, match[1]);
+    };
+    const onExit = (code, reason) => finish(new Error(`Chrome exited before DevTools was ready (${code ?? reason})\n${output}`));
+    const onError = (error) => finish(error);
+    const onAbort = () => finish(signal.reason);
     child.stdout.on("data", inspect);
     child.stderr.on("data", inspect);
-    child.once("exit", (code, signal) => {
-      clearTimeout(timer);
-      reject(new Error(`Chrome exited before DevTools was ready (${code ?? signal})\n${output}`));
-    });
-    child.once("error", (error) => {
-      clearTimeout(timer);
-      reject(error);
-    });
+    child.once("exit", onExit);
+    child.once("error", onError);
+    signal.addEventListener("abort", onAbort, { once: true });
+    if (signal.aborted) onAbort();
   });
 }
 
 function childExited(child) {
-  return child.exitCode != null || child.signalCode != null;
+  return child.pid === undefined || child.exitCode != null || child.signalCode != null;
 }
 
 async function waitForChildExit(child, timeoutMs) {
@@ -261,7 +282,17 @@ export async function removeBrowserProfile(profile, {
   }
 }
 
-export async function launchBrowser() {
+function abortable(promise, signal) {
+  return new Promise((resolve, reject) => {
+    const onAbort = () => reject(signal.reason);
+    signal.addEventListener("abort", onAbort, { once: true });
+    if (signal.aborted) onAbort();
+    promise.then(resolve, reject).finally(() => signal.removeEventListener("abort", onAbort));
+  });
+}
+
+export async function launchBrowser({ timeoutMs = 30000 } = {}) {
+  if (!Number.isInteger(timeoutMs) || timeoutMs <= 0) throw new Error("invalid Chrome launch deadline");
   const executable = findBrowser();
   if (!executable) throw new Error("no executable Chrome or Chromium browser found");
   const profile = fs.mkdtempSync(path.join(os.tmpdir(), "daikin-browser-gate-"));
@@ -286,40 +317,69 @@ export async function launchBrowser() {
   ], { stdio: ["ignore", "pipe", "pipe"] });
 
   let socket;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(new Error("Chrome launch deadline exceeded")), timeoutMs);
+  let closing;
+  const close = () => {
+    if (!closing) closing = (async () => {
+      try {
+        try { socket?.close(); } catch { /* already closed */ }
+        await stopBrowser(child);
+        await removeBrowserProfile(profile);
+      } finally {
+        process.off("SIGINT", onInt);
+        process.off("SIGTERM", onTerm);
+      }
+    })();
+    return closing;
+  };
+  const onSignal = (signal) => {
+    controller.abort(new Error(`Chrome interrupted by ${signal}`));
+    close().then(() => process.exit(signal === "SIGINT" ? 130 : 143), (error) => {
+      console.error(`Chrome signal cleanup failed: ${error.message}`);
+      process.exit(2);
+    });
+  };
+  const onInt = () => onSignal("SIGINT");
+  const onTerm = () => onSignal("SIGTERM");
+  process.on("SIGINT", onInt);
+  process.on("SIGTERM", onTerm);
+  const json = async (url) => {
+    // The same absolute launch deadline covers response headers AND the complete JSON body.
+    const response = await fetch(url, { signal: controller.signal });
+    return response.json();
+  };
   try {
-    const browserWs = await devToolsEndpoint(child);
+    const browserWs = await devToolsEndpoint(child, controller.signal);
     const endpoint = new URL(browserWs);
     const listUrl = `http://${endpoint.host}/json/list`;
     let target;
     for (let attempt = 0; attempt < 100 && !target; attempt++) {
       try {
-        const targets = await (await fetch(listUrl)).json();
+        const targets = await json(listUrl);
         target = targets.find((item) => item.type === "page");
-      } catch {
+      } catch (error) {
+        if (controller.signal.aborted) throw controller.signal.reason;
         // The browser endpoint can precede creation of the initial page by a few milliseconds.
       }
       if (!target) await delay(25);
     }
     if (!target?.webSocketDebuggerUrl) throw new Error("Chrome did not expose a page target");
-    socket = await connectSocket(target.webSocketDebuggerUrl);
+    socket = await connectSocket(target.webSocketDebuggerUrl, controller.signal);
     const page = new CdpPage(socket);
-    await page.enable();
-    const version = await (await fetch(`http://${endpoint.host}/json/version`)).json();
+    await abortable(page.enable(), controller.signal);
+    const version = await json(`http://${endpoint.host}/json/version`);
+    clearTimeout(timer);
     return {
       page,
       executable,
       product: version.Browser || "Chrome/Chromium",
-      async close() {
-        try { socket.close(); } catch { /* already closed */ }
-        await stopBrowser(child);
-        await removeBrowserProfile(profile);
-      },
+      close,
     };
   } catch (error) {
-    try { socket?.close(); } catch { /* best effort */ }
+    clearTimeout(timer);
     try {
-      await stopBrowser(child);
-      await removeBrowserProfile(profile);
+      await close();
     } catch (cleanupError) {
       throw new AggregateError([error, cleanupError],
         "Browser launch failed and its temporary profile could not be cleaned up");

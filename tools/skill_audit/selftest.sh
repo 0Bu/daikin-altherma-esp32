@@ -116,6 +116,16 @@ run_optimize_case() {
 
 echo "skill-audit selftest — re-seeding defects to prove gate has teeth"
 
+run_case "unknown regular skill directory remains a finding" \
+    "mkdir .agents/skills/unreviewed-canary" "missing SKILL.md"
+run_case "extra skill symlink cannot escape inventory" \
+    "ln -s absence-review .agents/skills/unreviewed-canary" "skill inventory forbids symlink entries"
+run_case "canonical skill symlink cannot substitute its source" \
+    "mv .agents/skills/absence-review linked-skill; ln -s ../../linked-skill .agents/skills/absence-review" \
+    "skill inventory forbids symlink entries"
+run_case "dangling skill symlink cannot escape inventory" \
+    "ln -s not-present .agents/skills/unreviewed-canary" "skill inventory forbids symlink entries"
+
 # 1. Wrong partition offset in a skill
 run_case "wrong nvs partition offset" \
     "sed -i.bak 's|nvs@0x9000|nvs@0x10000|g' .agents/skills/flash-esp32/SKILL.md" \

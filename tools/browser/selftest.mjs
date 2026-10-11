@@ -4,6 +4,8 @@ import { EventEmitter } from "node:events";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { removeBrowserProfile, stopBrowser } from "./cdp_browser.mjs";
+import "./cleanup_selftest.mjs";
+import "./runner_selftest.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 assert.ok(process.env.DAIKIN_BROWSER_PAGE, "browser selftest requires DAIKIN_BROWSER_PAGE from the runner");
@@ -28,6 +30,7 @@ assert.equal(removeAttempts, 3, "profile cleanup must retry a transient ENOTEMPT
 assert.deepEqual(retryPauses, [7, 7], "profile cleanup retries must stay bounded and delayed");
 
 class DelayedExitChild extends EventEmitter {
+  pid = 1;
   exitCode = null;
   signalCode = null;
   signals = [];
