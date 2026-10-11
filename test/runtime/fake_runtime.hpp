@@ -2,8 +2,8 @@
 
 // Deterministic host adapters for the ESP-IDF boundaries which cannot be linked into the ordinary
 // pure-logic test binary.  These fakes deliberately model transactions, stream fragmentation,
-// reconnects and task scheduling; they are not source-text assertions.  Production decisions stay
-// in the IDF-free headers included below and are called by the adapters.
+// reconnects and task scheduling. They call the selected production headers below; exception
+// handling, task/transport orchestration and broker behavior are host models, not production .cpp.
 
 #include "logic/chunk_sink.hpp"
 #include "logic/config_model.hpp"

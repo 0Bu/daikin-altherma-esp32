@@ -99,6 +99,9 @@ class AgentHookFastTests(unittest.TestCase):
 
     def test_native_review_source_reads_are_allowed_without_running_commands(self):
         commands = [
+            "rg -n 'credential|wrapper' scripts/gh-with-git-credentials.sh",
+            "pgrep -f production-ota-gate.py",
+            "pgrep -f 'production-ota-gate.py'",
             "git -c core.fsmonitor=false --no-optional-locks ls-files -- AGENTS.md CONTRIBUTING.md README.md 'docs/*.md' '.agents/skills/*/SKILL.md' '.agents/agents/*.md'",
             "nl -ba scripts/production-ota-gate.py | sed -n '1140,1186p'",
             "rg -n 'expected.elf|expected_elf|app_elf_sha256|ELF|sha256|prefix|signature|verify_signature' scripts/verify-device-health.sh scripts/require-signed.sh",
@@ -112,6 +115,20 @@ class AgentHookFastTests(unittest.TestCase):
 
     def test_reader_proof_does_not_admit_execution_or_writes(self):
         commands = [
+            "env rg -n 'wrapper' scripts/gh-with-git-credentials.sh",
+            "rg --pre=sh 'wrapper' scripts/gh-with-git-credentials.sh",
+            "rg -n 'wrapper' scripts/gh-with-git-credentials.sh; sh",
+            "rg -n 'wrapper' scripts/gh-with-git-credentials.sh > /tmp/output",
+            "rg -n 'wrapper' scripts/gh-with-git-credentials.sh ota_signing_key.pem",
+            "rg -n 'wrapper' scripts/gh-with-git-credentials.sh .git-credentials",
+            "rg -n 'wrapper' ../scripts/gh-with-git-credentials.sh",
+            "pgrep -af production-ota-gate.py",
+            "pgrep -lf production-ota-gate.py",
+            "pgrep -f production-ota-gate.py; sh",
+            "pgrep -f production-ota-gate.py | sh",
+            "pgrep -f production-ota-gate.py > /tmp/output",
+            "env pgrep -f production-ota-gate.py",
+            "pgrep -f $GATE_NAME-production-ota-gate.py",
             "cat AGENTS.md > partitions.csv",
             "git -c alias.inspect='!sh' inspect partitions.csv",
             "git -c core.pager=sh log partitions.csv",
@@ -165,6 +182,16 @@ class AgentHookFastTests(unittest.TestCase):
         command = "rg -n $'prefix|sh' scripts/require-signed.sh"
         self.assertIsNotNone(merge_payload.find_merge(command))
         self.assertTrue(merge_payload.shell_executes_stdin("printf harmless | sh"))
+
+    def test_source_reader_exception_keeps_wrapper_execution_cwd_bound(self):
+        payload = {
+            "cwd": "/tmp",
+            "tool_name": "exec_command",
+            "tool_input": {"cmd": "scripts/gh-with-git-credentials.sh repo view"},
+        }
+        rc, out = self.run_pre_tool(payload)
+        self.assertEqual(rc, 0)
+        self.assertEqual(json.loads(out)["hookSpecificOutput"]["permissionDecision"], "deny")
 
 
 if __name__ == "__main__":

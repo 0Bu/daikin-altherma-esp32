@@ -127,7 +127,10 @@ function frontmatter(relative, label) {
 
 function directoryNames(relativeRoot) {
   try {
-    return fs.readdirSync(repoPath(relativeRoot), { withFileTypes: true })
+    const entries = fs.readdirSync(repoPath(relativeRoot), { withFileTypes: true });
+    const symlinks = entries.filter((entry) => entry.isSymbolicLink());
+    if (symlinks.length) die(1, `agent inventory forbids symlink entries: ${relativeRoot}/${symlinks.map((entry) => entry.name).sort().join(", ")}`);
+    return entries
       .filter((entry) => entry.isDirectory())
       .map((entry) => entry.name)
       .sort();

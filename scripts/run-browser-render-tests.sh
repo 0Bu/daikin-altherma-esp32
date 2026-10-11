@@ -56,31 +56,16 @@ if ! browser_bin="$(node tools/browser/find_browser.mjs)"; then
     exit 0
   fi
   echo "browser render gate requires Chrome or Chromium (set DAIKIN_BROWSER_BIN to its executable)" >&2
-  exit 1
+  exit 2
 fi
 export DAIKIN_BROWSER_BIN="$browser_bin"
 
-work="$(mktemp -d "${TMPDIR:-/tmp}/daikin-browser-render.XXXXXX")"
-cleanup() {
-  rm -rf -- "$work"
-}
-trap cleanup EXIT
-
-node tools/browser/assemble_page.mjs "$work/index.html"
-
-export DAIKIN_BROWSER_PAGE="$work/index.html"
-
-if [[ "${DAIKIN_BROWSER_PARALLEL:-1}" == "1" ]]; then
-  node test/test_browser_render.mjs --viewport phone "$@" &
-  pid_phone=$!
-  node test/test_browser_render.mjs --viewport desktop "$@" &
-  pid_desktop=$!
-  wait "$pid_phone"
-  wait "$pid_desktop"
-else
-  node test/test_browser_render.mjs "$@"
+browser_timeout="${DAIKIN_BROWSER_TIMEOUT_MS:-600000}"
+if ! [[ "$browser_timeout" =~ ^[1-9][0-9]{0,6}$ ]] || (( browser_timeout > 3600000 )); then
+  echo "browser render gate: DAIKIN_BROWSER_TIMEOUT_MS must be 1..3600000" >&2
+  exit 2
 fi
 
-node tools/browser/selftest.mjs
-
-echo "complete browser rendering and accessibility gate passed"
+# The supervisor creates and owns its temporary page. It cancels and joins every owned process
+# group before removing it, including siblings and Chrome descendants after a failure.
+exec node tools/browser/run_render.mjs "$@"

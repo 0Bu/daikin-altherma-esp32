@@ -522,6 +522,22 @@ guard_case "read-only source search may mention the OTA route" \
     "$(payload exec_command command "rg -n '/ota/update' main/http_ota.cpp")" ""
 guard_case "read-only source inspection may name the production gate" \
     "$(payload exec_command command "sed -n '1,80p' scripts/production-ota-gate.py")" ""
+guard_case "literal source inspection may name the credential wrapper" \
+    "$(payload exec_command command "rg -n 'credential|wrapper' scripts/gh-with-git-credentials.sh")" ""
+guard_case "source reader still rejects private key paths" \
+    "$(payload exec_command command "rg -n 'wrapper' scripts/gh-with-git-credentials.sh private.key")" deny
+guard_case "source reader still rejects execution flags" \
+    "$(payload exec_command command "rg --pre=sh 'wrapper' scripts/gh-with-git-credentials.sh")" deny
+guard_case "PID-only gate coordination is allowed" \
+    "$(payload exec_command command "pgrep -f production-ota-gate.py")" ""
+guard_case "gate coordination cannot expose arguments" \
+    "$(payload exec_command command "pgrep -af production-ota-gate.py")" deny
+guard_case "gate coordination cannot expose command names" \
+    "$(payload exec_command command "pgrep -lf production-ota-gate.py")" deny
+guard_case "gate coordination cannot use a launcher" \
+    "$(payload exec_command command "env pgrep -f production-ota-gate.py")" deny
+guard_case "gate coordination cannot chain execution" \
+    "$(payload exec_command command "pgrep -f production-ota-gate.py; true")" deny
 guard_case "quote-split production OTA path is denied" \
     "$(payload exec_command command "python3 -c 'import requests; requests.post(\"http://production.invalid/ota/\" + \"update\")'")" deny
 guard_case "foreign production gate copy is denied" \
