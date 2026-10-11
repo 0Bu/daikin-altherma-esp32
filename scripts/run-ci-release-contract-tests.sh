@@ -155,8 +155,9 @@ for name in ("mechanical_gates", "build", "trusted_build", "publish"):
     require(name in jobs, f"missing {name!r} job")
 
 mechanical = jobs["mechanical_gates"]
-require("if: github.event_name != 'workflow_dispatch' || inputs.release != true" in mechanical,
-        "an explicit release dispatch still runs the mechanical test suite")
+require("if: (github.event_name != 'workflow_dispatch' || inputs.release != true) && "
+        "(github.event_name != 'pull_request' || github.event.pull_request.state == 'open')" in mechanical,
+        "mechanical tests must skip explicit releases and closed PRs")
 
 untrusted = jobs["build"]
 require("contents: read" in untrusted, "untrusted build is not contents:read")

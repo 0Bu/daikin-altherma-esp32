@@ -674,7 +674,10 @@ Run `scripts/run-build-change-detection-tests.sh` after changing the comparison 
 
 Main pushes and manual releases share one workflow-level queue across version selection, signing
 and publication. Up to 100 pending runs are retained instead of replacing a waiting release.
-Superseded PR work is cancelled separately in the mechanical and compile jobs.
+Each PR run finishes its mechanical and compile stages; newer PR events do not cancel individual
+jobs in an older run. Rapid PR edits can therefore use more runner time. PR validation and the
+protected-base review policy run only for open PR events; edits after closing or merging skip
+those jobs.
 
 For fork PRs, `build.yml` executes the exact PR merge tree only under the ordinary `pull_request`
 event; GitHub withholds repository secrets and downgrades the token, and checkout does not persist

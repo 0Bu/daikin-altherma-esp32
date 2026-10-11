@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Offline integrity, retry, production classification and pending-release regression tests."""
+"""Offline integrity, retry, classification and PR/release scheduling regression tests."""
+import ast
 import copy
 import hashlib
 import io
@@ -367,6 +368,95 @@ class PublicationTests(unittest.TestCase):
 
 
 class SchedulingTests(unittest.TestCase):
+    @staticmethod
+    def job_header(workflow, name):
+        return workflow.split(f'  {name}:\n', 1)[1].split('    steps:', 1)[0]
+
+    def job_runs(self, workflow, name, context, mechanical_result='success'):
+        """Evaluate the production job condition's boolean subset, including implicit success()."""
+        match = re.search(r'^    if: (.+)$', self.job_header(workflow, name), re.M)
+        condition = match.group(1) if match else 'true'
+        statuses = re.findall(r'\b(always|success|failure|cancelled)\(\)', condition)
+        if name == 'build' and not statuses and mechanical_result != 'success':
+            return False
+        expression = condition.replace('&&', ' and ').replace('||', ' or ')
+        expression = re.sub(r'!(?!=)', ' not ', expression)
+        expression = re.sub(r'\btrue\b', 'True', expression)
+        expression = re.sub(r'\bfalse\b', 'False', expression)
+        for status in statuses:
+            value = status == 'always' or mechanical_result == {
+                'success': 'success', 'failure': 'failure', 'cancelled': 'cancelled',
+            }.get(status)
+            expression = expression.replace(f'{status}()', repr(value))
+        for key, value in context.items():
+            expression = expression.replace(key, repr(value))
+        tree = ast.parse(expression.strip(), mode='eval')
+        allowed = (ast.Expression, ast.BoolOp, ast.And, ast.Or, ast.Compare, ast.Eq,
+                   ast.NotEq, ast.Constant, ast.UnaryOp, ast.Not)
+        if any(not isinstance(node, allowed) for node in ast.walk(tree)):
+            raise ValueError(f'unsupported workflow condition: {condition}')
+        return bool(eval(compile(tree, '<workflow condition>', 'eval'), {'__builtins__': {}}, {}))
+
+    def assert_pr_lifecycle(self, workflow, policy):
+        for job in ('mechanical_gates', 'build'):
+            self.assertNotIn('    concurrency:', self.job_header(workflow, job))
+        for state, merged, expected in (('open', False, True), ('closed', True, False),
+                                        ('closed', False, False), ('', False, False)):
+            context = {'github.event_name': 'pull_request', 'inputs.release': False,
+                       'github.event.pull_request.state': state,
+                       'github.event.pull_request.merged': merged}
+            self.assertEqual(self.job_runs(workflow, 'mechanical_gates', context), expected)
+            # Even a failed/cancelled/skipped prerequisite must produce a blocking open-PR build.
+            for result in ('success', 'failure', 'cancelled', 'skipped'):
+                self.assertEqual(self.job_runs(workflow, 'build', context, result), expected)
+            context['github.event_name'] = 'pull_request_target'
+            self.assertEqual(self.job_runs(policy, 'gates', context), expected)
+        for event, release, expected in (('push', False, True),
+                                          ('workflow_dispatch', False, True),
+                                          ('workflow_dispatch', True, False)):
+            context = {'github.event_name': event, 'inputs.release': release,
+                       'github.event.pull_request.state': ''}
+            self.assertEqual(self.job_runs(workflow, 'mechanical_gates', context), expected)
+            self.assertFalse(self.job_runs(workflow, 'build', context))
+
+        # Run the actual aggregate assertion, rather than recreating its exit behavior in Python.
+        guard = workflow.split('      - name: Require the mechanical gates\n', 1)[1]
+        shell = re.search(r'        run: \|\n((?:          .*\n|\n)+)', guard).group(1)
+        for result, expected in (('success', 0), ('failure', 2), ('cancelled', 2),
+                                 ('skipped', 2), ('', 2)):
+            run = subprocess.run(['bash', '-c', textwrap.dedent(shell)], capture_output=True,
+                                 env={**os.environ, 'MECHANICAL_RESULT': result}, timeout=5)
+            self.assertEqual(run.returncode, expected, run.stderr.decode())
+
+    def test_open_pr_conditions_and_failure_propagation(self):
+        self.assert_pr_lifecycle((PROJECT / '.github/workflows/build.yml').read_text(),
+                                 (PROJECT / '.github/workflows/pr-policy.yml').read_text())
+
+    def test_pr_lifecycle_controls_reject_regressions(self):
+        workflow = (PROJECT / '.github/workflows/build.yml').read_text()
+        policy = (PROJECT / '.github/workflows/pr-policy.yml').read_text()
+        mechanical_guard = " && (github.event_name != 'pull_request' || github.event.pull_request.state == 'open')"
+        build_guard = " && github.event.pull_request.state == 'open'"
+        concurrency = '    concurrency:\n      group: fixture-pr\n      cancel-in-progress: true\n'
+        cases = {
+            'closed mechanical jobs': (workflow.replace(mechanical_guard, '', 1), policy),
+            'closed build jobs': (workflow.replace(build_guard, '', 1), policy),
+            'closed policy jobs': (workflow, policy.replace("    if: github.event.pull_request.state == 'open'\n", '', 1)),
+            'mechanical supersession': (workflow.replace('  mechanical_gates:\n',
+                                                        '  mechanical_gates:\n' + concurrency, 1), policy),
+            'compile supersession': (workflow.replace('  build:\n', '  build:\n' + concurrency, 1), policy),
+            'failure skips required build': (workflow.replace('if: always() &&', 'if: success() &&', 1), policy),
+            'cancelled skips required build': (workflow.replace('if: always() &&', 'if: !cancelled() &&', 1), policy),
+            'aggregate accepts incomplete tests': (workflow.replace('"$MECHANICAL_RESULT" = success',
+                                                                   '"$MECHANICAL_RESULT" != failure', 1), policy),
+        }
+        for name, (mutated_workflow, mutated_policy) in cases.items():
+            with self.subTest(name=name):
+                self.assertNotEqual((mutated_workflow, mutated_policy), (workflow, policy),
+                                    'mutation changed no production input')
+                with self.assertRaises(AssertionError):
+                    self.assert_pr_lifecycle(mutated_workflow, mutated_policy)
+
     def test_full_rerun_can_replace_its_signed_handoff(self):
         text = (PROJECT / '.github/workflows/build.yml').read_text()
         trusted = text.split('  trusted_build:\n', 1)[1].split('  publish:\n', 1)[0]
@@ -387,14 +477,8 @@ class SchedulingTests(unittest.TestCase):
         self.assertIn('github.ref', top)
         self.assertIn('github.run_id', top)
         self.assertIn("github.event_name == 'pull_request'", top)
-        for job in ('mechanical_gates', 'build'):
-            block = text.split(f'  {job}:\n', 1)[1].split('    steps:', 1)[0]
-            self.assertIn('    concurrency:', block)
-            self.assertIn('github.event.pull_request.number', block)
-            self.assertIn('cancel-in-progress:', block)
-        for job in ('trusted_build', 'publish'):
-            block = text.split(f'  {job}:\n', 1)[1].split('    steps:', 1)[0]
-            self.assertNotIn('    concurrency:', block)
+        for job in ('mechanical_gates', 'build', 'trusted_build', 'publish'):
+            self.assertNotIn('    concurrency:', self.job_header(text, job))
         self.assertLess(text.index('- name: Verify public feed readback'), text.index('- name: Record dev publication proof'))
         self.assertLess(text.index('- name: Record dev publication proof'), text.index('- name: Upload dev publication proof'))
 
