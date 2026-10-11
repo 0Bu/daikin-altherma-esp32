@@ -138,9 +138,12 @@ and the OTA-signing / key lifecycle.
   larger or slower closes the connection instead of reaching ESP-IDF's unbounded purge, so one
   trickling LAN client cannot hold the single HTTP worker after a rejected or unread request.
 - **Syslog forwarding is cleartext, unauthenticated UDP** — opt-in and off by default (empty
-  `syslog_host`). When enabled, every diag-log line (WiFi/MQTT/X10A state, timeouts, reset reasons)
-  is sent as a plaintext RFC 5424 datagram to the configured host; there is no TLS option, unlike
-  MQTT. Once per boot the syslog task additionally replays two record types that are **not** diag-log
+  `syslog_host`). When enabled and resolved, admitted diag-log lines (WiFi/MQTT/X10A state,
+  timeouts, reset reasons) are attempted as plaintext RFC 5424 datagrams to the configured host.
+  Internal syslog diagnostics are filtered; queue saturation rejects lines, and disabled or
+  unresolved forwarding can discard admitted lines. Network, OTA and weather pauses retain the
+  queue until the task resumes. Delivery and collector retention are best-effort. There is no
+  TLS option, unlike MQTT. Once per boot the syslog task additionally replays two record types that are **not** diag-log
   lines (`logic/bootlog.hpp`): one build-identity line and up to five records for a current fault or
   reportable stored dump. Current reset facts and stored task/PC/ELF/backtrace have separate source
   labels; every stored record has unknown age/reset relationship. Task/ELF values are bounded and

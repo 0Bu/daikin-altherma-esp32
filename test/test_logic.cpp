@@ -7569,6 +7569,9 @@ static void test_timestamp() {
     // snprintf formatting.
     CHECK(rfc3339_utc(1709208296) == "2024-02-29T12:04:56.000Z"); // 2024 is a leap year
     CHECK(rfc3339_utc(1735689599) == "2024-12-31T23:59:59.000Z");
+    CHECK(rfc3339_utc(253402300799LL) == "9999-12-31T23:59:59.000Z");
+    CHECK(rfc3339_utc(253402300800LL).empty()); // year 10000 is outside RFC 3339
+    CHECK(rfc3339_utc(INT64_MAX).empty());      // libc conversion/representability failure
     // "Never synced" (sntp_time.cpp's time_now() sentinel) must render as empty, never as a
     // plausible-looking 1970-01-01 — a caller forwarding this straight into the RFC 5424 TIMESTAMP
     // field falls back to "-" (the NILVALUE) exactly because this is "" rather than the epoch.
@@ -8019,6 +8022,10 @@ static void test_link_watch() {
 
 // ── WiFi credential-rollback policy (logic/wifi_rollback.hpp) ────────────────────────────────
 static void test_wifi_rollback() {
+    CHECK(!wifi_boot_wake_connected(true, false)); // lease lost before the boot waiter resumes
+    CHECK(wifi_boot_wake_connected(true, true));
+    CHECK(!wifi_boot_wake_connected(false, true));
+    CHECK(!wifi_boot_wake_connected(false, false));
     // The whole point of the classifier: an AP that REFUSED us is evidence about the credentials;
     // an AP that was never on the air is evidence about the ROUTER and says nothing about
     // credentials.
@@ -10288,6 +10295,21 @@ static void test_reference_temperature_config() {
     CHECK(!unsynced.fresh && std::string(unsynced.reason) == "clock_unsynced");
     ReferenceFreshness future = reference_freshness(true, false, true, 1100, 0, 1000, 0, 600);
     CHECK(!future.fresh && std::string(future.reason) == "future_timestamp");
+    const auto extreme_clock =
+        reference_freshness(true, false, true, INT64_MAX, 0, INT64_MAX, 0, 600);
+    CHECK(extreme_clock.fresh && extreme_clock.age_known && extreme_clock.age_s == 0);
+    const auto extreme_future =
+        reference_freshness(true, false, true, INT64_MAX, 0, INT64_MAX - 61, 0, 600);
+    CHECK(!extreme_future.fresh && std::string(extreme_future.reason) == "future_timestamp");
+    const auto tolerated_future =
+        reference_freshness(true, false, true, INT64_MAX, 0, INT64_MAX - 60, 0, 600);
+    CHECK(tolerated_future.fresh && tolerated_future.age_s == 0);
+    const auto negative_source =
+        reference_freshness(true, false, true, INT64_MIN, 0, INT64_MAX, 0, 600);
+    CHECK(!negative_source.fresh && !negative_source.age_known &&
+          std::string(negative_source.reason) == "missing_source_time");
+    const auto epoch_source = reference_freshness(true, false, true, 0, 0, INT64_MAX, 0, 600);
+    CHECK(!epoch_source.fresh && epoch_source.age_s == static_cast<uint64_t>(INT64_MAX));
 
     ReferenceRoomRaw raw;
     raw.configured                     = true;
@@ -10783,6 +10805,17 @@ static void test_weather_forecast_contract() {
                                  5.4, 82.0};
     WeatherValidation     valid = weather_validate(sample, fetched + 20);
     CHECK(valid.valid && std::string(valid.reason) == "ok");
+    auto extreme           = sample;
+    extreme.fetched_unix_s = extreme.decision_unix_s = INT64_MAX;
+    CHECK(weather_validate(extreme, INT64_MAX).valid);
+    CHECK(std::string(weather_validate(extreme, INT64_MAX - 61).reason) == "future_fetch");
+    extreme.decision_unix_s = INT64_MAX - 61;
+    CHECK(std::string(weather_validate(extreme, INT64_MAX).reason) == "invalid_decision_time");
+    extreme.fetched_unix_s  = INT64_MAX - 3601;
+    extreme.decision_unix_s = INT64_MAX;
+    CHECK(std::string(weather_validate(extreme, INT64_MAX).reason) == "invalid_decision_time");
+    extreme.fetched_unix_s = INT64_MIN;
+    CHECK(std::string(weather_validate(extreme, INT64_MAX).reason) == "missing_timestamp");
 
     WeatherLocationParse location = weather_location_parse("12.345678", "23.456789");
     CHECK(location.valid && location.enabled && location.latitude_e6 == 12345678 &&
@@ -10961,6 +10994,18 @@ static void test_weather_forecast_contract() {
     WeatherFreshness unsynced = weather_freshness(true, 1000, -1);
     CHECK(!unsynced.fresh && std::string(unsynced.reason) == "clock_unsynced");
 
+    const auto extreme_clock = weather_freshness(true, INT64_MAX, INT64_MAX);
+    CHECK(extreme_clock.fresh && extreme_clock.age_known && extreme_clock.age_s == 0);
+    const auto extreme_future = weather_freshness(true, INT64_MAX, INT64_MAX - 61);
+    CHECK(!extreme_future.fresh && std::string(extreme_future.reason) == "future_fetch");
+    const auto extreme_tolerated_future = weather_freshness(true, INT64_MAX, INT64_MAX - 60);
+    CHECK(extreme_tolerated_future.fresh && extreme_tolerated_future.age_s == 0);
+    const auto negative_fetch = weather_freshness(true, INT64_MIN, INT64_MAX);
+    CHECK(!negative_fetch.fresh && !negative_fetch.age_known &&
+          std::string(negative_fetch.reason) == "missing_timestamp");
+    const auto epoch_fetch = weather_freshness(true, 0, INT64_MAX);
+    CHECK(!epoch_fetch.fresh && epoch_fetch.age_s == static_cast<uint64_t>(INT64_MAX));
+
     WeatherMqttSnapshot mqtt;
     mqtt.configured             = true;
     mqtt.available              = true;
@@ -11095,6 +11140,15 @@ static void test_weather_forecast_contract() {
     CHECK(std::string(weather_validate(invalid_hourly).reason) == "invalid_hourly_time");
     invalid_hourly = derived;
     invalid_hourly.hourly_unix_s[1] += 1;
+    CHECK(std::string(weather_validate(invalid_hourly).reason) == "invalid_hourly_time");
+    invalid_hourly                  = derived;
+    invalid_hourly.hourly_unix_s[0] = INT64_MIN;
+    CHECK(std::string(weather_validate(invalid_hourly).reason) == "invalid_hourly_time");
+    invalid_hourly                  = derived;
+    invalid_hourly.fetched_unix_s   = INT64_MAX;
+    invalid_hourly.decision_unix_s  = INT64_MAX;
+    invalid_hourly.hourly_unix_s[0] = INT64_MAX;
+    invalid_hourly.hourly_unix_s[1] = INT64_MIN;
     CHECK(std::string(weather_validate(invalid_hourly).reason) == "invalid_hourly_time");
     invalid_hourly                         = derived;
     invalid_hourly.hourly_temperature_c[0] = std::nan("");

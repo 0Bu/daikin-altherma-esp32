@@ -76,8 +76,13 @@ static void on_wifi(void*, esp_event_base_t base, int32_t id, void* data) {
         // checkpoint even though we are, right now, associated to the new AP and merely waiting on a
         // first DHCP lease — and the boot window would roll back credentials that had just worked.
         s_last_disco_reason = 0;
-    } else if (base == WIFI_EVENT && id == WIFI_EVENT_STA_DISCONNECTED) {
+    } else if ((base == WIFI_EVENT && id == WIFI_EVENT_STA_DISCONNECTED) ||
+               (base == IP_EVENT && id == IP_EVENT_STA_LOST_IP)) {
         s_wifi_connected = false;
+        xEventGroupClearBits(s_events, CONNECTED_BIT);
+        // DHCP lease loss can leave the station associated. Reacquisition owns that recovery;
+        // only a disconnect below needs connect() retries. Both events withdraw the boot wake.
+        if (base == IP_EVENT) return;
         auto* d = static_cast<wifi_event_sta_disconnected_t*>(data);
 
         // Remember WHY, for the boot-window rollback decision (logic/wifi_rollback.hpp). Recording
@@ -113,6 +118,7 @@ static void on_wifi(void*, esp_event_base_t base, int32_t id, void* data) {
         }
     } else if (base == IP_EVENT && id == IP_EVENT_STA_GOT_IP) {
         auto* e = static_cast<ip_event_got_ip_t*>(data);
+        if (!e || e->esp_netif != s_sta_netif) return;
         ESP_LOGI(TAG, "connected, ip=" IPSTR, IP2STR(&e->ip_info.ip));
         if (s_wifi_ever_connected) s_reconnects.fetch_add(1);   // a later GOT_IP is a RE-connect
         s_retry_num           = 0;
@@ -165,7 +171,7 @@ static void wd_on_ping_end(esp_ping_handle_t hdl, void* args) {
 // decides what to DO with each; this function only observes.
 static GwProbe gateway_probe() {
     if (!s_wd.done) return GwProbe::Unmeasurable;   // watchdog not fully initialised yet
-    esp_netif_ip_info_t ip{};
+    esp_netif_ip_info_t ip;
     if (!s_sta_netif || esp_netif_get_ip_info(s_sta_netif, &ip) != ESP_OK || ip.gw.addr == 0)
         return GwProbe::Unreachable;   // no gateway/lease while link=up IS a proven broken link
 
@@ -270,10 +276,14 @@ bool wifi_link_up() { return s_wifi_connected.load(); }
 // esp_wifi_stop() raises can't re-enter on_wifi() and fire another esp_wifi_connect().
 static void wifi_stop_sta() {
     if (s_h_wifi) { esp_event_handler_instance_unregister(WIFI_EVENT, ESP_EVENT_ANY_ID, s_h_wifi); s_h_wifi = nullptr; }
-    if (s_h_ip)   { esp_event_handler_instance_unregister(IP_EVENT, IP_EVENT_STA_GOT_IP, s_h_ip);  s_h_ip = nullptr; }
+    if (s_h_ip) {
+        esp_event_handler_instance_unregister(IP_EVENT, ESP_EVENT_ANY_ID, s_h_ip);
+        s_h_ip = nullptr;
+    }
     esp_wifi_stop();
     esp_wifi_deinit();
     s_sta_running = false;
+    s_wifi_connected = false;
     if (s_sta_netif) { esp_netif_destroy_default_wifi(s_sta_netif); s_sta_netif = nullptr; }
     if (s_events) { vEventGroupDelete(s_events); s_events = nullptr; }
 }
@@ -284,7 +294,7 @@ bool wifi_start_sta() {
         // The connect handshake (this function's wait + the event handler's SetBits) is entirely
         // driven through this event group; a null handle would fault the moment either touched it.
         // Fail safe: report false so main.cpp brings up the setup portal instead.
-        ESP_LOGE(TAG, "event group alloc failed — cannot start STA; falling back to setup portal");
+        ESP_LOGE(TAG, "event group alloc failed; STA unavailable, starting setup portal");
         return false;
     }
     s_sta_netif = esp_netif_create_default_wifi_sta();
@@ -305,7 +315,7 @@ bool wifi_start_sta() {
     // reset. Select RAM before the first set_config; config_load supplies them again every boot.
     ESP_ERROR_CHECK(esp_wifi_set_storage(WIFI_STORAGE_RAM));
     esp_event_handler_instance_register(WIFI_EVENT, ESP_EVENT_ANY_ID, on_wifi, nullptr, &s_h_wifi);
-    esp_event_handler_instance_register(IP_EVENT, IP_EVENT_STA_GOT_IP, on_wifi, nullptr, &s_h_ip);
+    esp_event_handler_instance_register(IP_EVENT, ESP_EVENT_ANY_ID, on_wifi, nullptr, &s_h_ip);
 
     wifi_config_t wc = {};
     const Config& c  = config();
@@ -362,22 +372,32 @@ bool wifi_start_sta() {
     // refused them, and otherwise keeps hunting for an SSID that may just be a router still coming
     // back up (logic/wifi_rollback.hpp).
     EventBits_t bits = 0;
+    const TickType_t window_ticks       = pdMS_TO_TICKS(WIFI_BOOT_WINDOW_S * 1000);
+    TickType_t       checkpoint_started = xTaskGetTickCount();
     RollbackWatch rw;
     for (int elapsed = 0;;) {
+        const TickType_t waited = xTaskGetTickCount() - checkpoint_started;
         bits = xEventGroupWaitBits(s_events, CONNECTED_BIT | FAIL_BIT, pdFALSE, pdFALSE,
-                                   pdMS_TO_TICKS(WIFI_BOOT_WINDOW_S * 1000));
+                                   waited < window_ticks ? window_ticks - waited : 0);
+        if (wifi_boot_wake_connected(bits & CONNECTED_BIT, s_wifi_connected)) break;
+        bits &= ~CONNECTED_BIT;
+        // A lease can disappear after waking the waiter but before it runs. Such a stale wake is
+        // neither boot success nor a rollback checkpoint. Wait only the remainder of this window,
+        // so repeated lease churn cannot extend the credential grace deadline.
+        if (bits & FAIL_BIT) break;
+        const TickType_t checkpoint_now = xTaskGetTickCount();
+        if (checkpoint_now - checkpoint_started < window_ticks) continue;
         elapsed += WIFI_BOOT_WINDOW_S;
-        if (bits & (CONNECTED_BIT | FAIL_BIT)) break;
+        checkpoint_started = checkpoint_now;
         if (!rollback_pending) break;   // no change pending → the flat window owns the decision
         if (rollback_step(rw, disco_class(s_last_disco_reason), elapsed) == RollbackAction::RollBack) break;
-        ESP_LOGW(TAG, "new credentials: no IP after %d s (last reason %d) — the AP may still be "
-                      "coming back; retrying up to %d s before rolling back",
-                 elapsed, s_last_disco_reason.load(), WIFI_ROLLBACK_GRACE_S);
+        ESP_LOGW(TAG, "new credentials: no IP after %d s, reason %d; retrying until %d s", elapsed,
+                 s_last_disco_reason.load(), WIFI_ROLLBACK_GRACE_S);
     }
     if (!(bits & CONNECTED_BIT)) {
         if (rollback_pending) {
             Config rollback_cfg = config();
-            ESP_LOGW(TAG, "STA connect failed with new credentials (last reason %d) — rolling back to %s",
+            ESP_LOGW(TAG, "new credentials failed (reason %d); restoring %s",
                      s_last_disco_reason.load(), rollback_cfg.wifi_ssid_backup.c_str());
             rollback_cfg.wifi_ssid = rollback_cfg.wifi_ssid_backup;
             rollback_cfg.wifi_pass = rollback_cfg.wifi_pass_backup;
@@ -463,16 +483,19 @@ esp_err_t wifi_forget_persisted_config() {
 }
 
 int wifi_scan(WifiScanEntry* out, int max) {
-    wifi_scan_config_t sc = {};
-    if (esp_wifi_scan_start(&sc, true) != ESP_OK) return 0;
-    uint16_t n = 0;
-    esp_wifi_scan_get_ap_num(&n);
-    if (n > 20) n = 20;
+    esp_err_t        e = esp_wifi_scan_start(nullptr, true); // SDK defaults
+    uint16_t         n = 20; // SDK input capacity; successful retrieval returns the actual count
     wifi_ap_record_t recs[20];
-    esp_wifi_scan_get_ap_records(&n, recs);
+    if (e == ESP_OK) e = esp_wifi_scan_get_ap_records(&n, recs);
+    if (e != ESP_OK) {
+        // The SDK requires clearing its allocated AP list when retrieval fails.
+        (void)esp_wifi_clear_ap_list();
+        return 0;
+    }
     int count = 0;
     for (int i = 0; i < n && count < max; i++) {
-        strncpy(out[count].ssid, reinterpret_cast<char*>(recs[i].ssid), sizeof(out[count].ssid) - 1);
+        strncpy(out[count].ssid, reinterpret_cast<char*>(recs[i].ssid),
+                sizeof(out[count].ssid) - 1);
         out[count].ssid[sizeof(out[count].ssid) - 1] = '\0';
         out[count].rssi = recs[i].rssi;
         count++;
@@ -482,13 +505,15 @@ int wifi_scan(WifiScanEntry* out, int max) {
 
 WifiInfo wifi_info() {
     WifiInfo info{};
-    esp_netif_ip_info_t ip{};
-    if (s_sta_netif && esp_netif_get_ip_info(s_sta_netif, &ip) == ESP_OK && ip.ip.addr != 0) {
+    const uint32_t      lease = s_reconnects;
+    esp_netif_ip_info_t ip;
+    if (s_wifi_connected && s_sta_netif && esp_netif_get_ip_info(s_sta_netif, &ip) == ESP_OK &&
+        ip.ip.addr != 0) {
         snprintf(info.ip, sizeof(info.ip), IPSTR, IP2STR(&ip.ip));
         info.connected = true;
         // Only read the AP record while the link is up: mid-association its fields are transiently
         // null and a concurrent read faults (LoadProhibited). See s_wifi_connected.
-        wifi_ap_record_t ap{};
+        wifi_ap_record_t ap;
         if (s_wifi_connected && esp_wifi_sta_get_ap_info(&ap) == ESP_OK) {
             info.rssi = ap.rssi;
             memcpy(info.bssid, ap.bssid, 6);
@@ -497,10 +522,14 @@ WifiInfo wifi_info() {
                              : ap.phy_11n  ? "Wi-Fi 4"
                              : ap.phy_11g  ? "802.11g"
                              : ap.phy_11b  ? "802.11b" : "Wi-Fi";
-            strncpy(info.std, std_, sizeof(info.std) - 1);
-            info.std[sizeof(info.std) - 1] = '\0';
+            // Every choice above is a fixed literal of at most eight bytes including its NUL.
+            std::strcpy(info.std, std_);
         }
     }
+    // The event loop can withdraw the lease while either SDK snapshot above is in progress.
+    // Reacquisition also invalidates the old snapshot even when connected is already true again.
+    // Each later GOT_IP advances the existing reconnect counter before publishing its lease.
+    if (!s_wifi_connected || s_reconnects != lease) info = WifiInfo{};
     // This identity exists even when an Ethernet-first boot never starts the WiFi driver.
     // Reporting it directly from eFuse keeps /status transport-neutral too.
     (void)esp_read_mac(info.mac, ESP_MAC_WIFI_STA);
