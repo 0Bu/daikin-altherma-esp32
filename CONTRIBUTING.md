@@ -459,7 +459,7 @@ scripts/run-ci-release-contract-tests.sh   # shell + python3, no credentials
 ```
 
 The first races two publishers against a throwaway bare repo, because `gh-pages` has two concurrent
-writers (a manual release's root publish and every merge's dev-channel publish) and the loser used
+writers (a release dispatch's root publish and every merge's dev-channel publish) and the loser used
 to fail its entire build — a bug that read as a flake, since re-running always cleared it. It also
 pins that a call which is not one of the two modes fails *before* the branch is touched: the
 argument selects which slice gets overwritten, so a retired `--pr 12` treated as a root publish
@@ -672,7 +672,7 @@ readback; a manifest SHA alone is insufficient. Missing, expired (90-day retenti
 or unavailable evidence triggers a build. A full workflow rerun also builds to recover publication.
 Run `scripts/run-build-change-detection-tests.sh` after changing the comparison or browser filter.
 
-Main pushes and manual releases share one workflow-level queue across version selection, signing
+Main pushes and release dispatches share one workflow-level queue across version selection, signing
 and publication. Up to 100 pending runs are retained instead of replacing a waiting release.
 Each PR run finishes its mechanical and compile stages; newer PR events do not cancel individual
 jobs in an older run. Rapid PR edits can therefore use more runner time. PR validation and the

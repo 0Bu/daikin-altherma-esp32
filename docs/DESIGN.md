@@ -1186,7 +1186,7 @@ is exactly what a user would want to see move.
   unreachable or as a timeout. A changed generation is shown as "check again". Errors show in
   `--err` and linger longer than a success before clearing.
 - **Which feed it checks is a setting, and it lives in Settings** — the **Update channel** row on
-  the Firmware card (§5.6), a two-option select: *Release* (cut by hand) or *Development* (every merge
+  the Firmware card (§5.6), a two-option select: *Release* (release dispatch) or *Development* (every merge
   to `main`). It sits directly under the **Version** row, because a channel picker with no
   version beside it asks the user to hold "what am I running" in their head while choosing what to
   run. Picking one is a live write (`POST /set_ota`, no reboot), and it then **starts the check

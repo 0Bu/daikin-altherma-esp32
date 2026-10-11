@@ -936,7 +936,7 @@ workflow, that sibling file binds its exact compact manifest and every public `.
 checks.
 Keeping the inventory separate leaves `manifest.json` within the 1024-byte limit of the oldest
 supported signed restore release. A historical release slice retains its old layout until another
-manual release is cut.
+release is dispatched.
 
 > **Which feed it checks:** the device follows one channel at a time — gear → **Firmware** → *Update
 > channel* (`POST /set_ota`, applied live). `release` reads the Pages root, `dev` reads `…/dev/`;

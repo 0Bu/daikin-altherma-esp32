@@ -106,7 +106,7 @@ on:
         required: false
         default: ""
 
-# Serialize the complete main version/build/publish chain, including waiting manual releases.
+# Serialize the complete main version/build/publish chain, including waiting release dispatches.
 # A release dispatch and a push to main share this group deliberately: they both derive a version
 # from the tag list, and a release must never be computed against a tag another run is creating.
 # GitHub's default single pending slot can replace a release; max retains up to 100 waiting runs.
@@ -855,7 +855,7 @@ jobs:
               || { echo "publication source does not match the accepted full SHA" >&2; exit 2; }
           fi
 
-      # This job is structurally restricted to trusted main. A manual release is the only release
+      # This job is structurally restricted to trusted main. An explicit dispatch is the only release
       # mode; every other admitted event publishes the dev channel.
       - name: Decide the run mode
         id: mode
@@ -1092,7 +1092,7 @@ jobs:
   # key to a write-capable job.
   publish:
     needs: [trusted_build]
-    # `trusted_build` deliberately admits a manual release through a skipped mechanical_gates job.
+    # `trusted_build` deliberately admits a release dispatch through a skipped mechanical_gates job.
     # `always()` prevents GitHub's implicit success() from propagating that transitive skip while
     # the explicit result check still fails closed when the signed build itself did not succeed.
     if: always() && needs.trusted_build.result == 'success'

@@ -407,7 +407,7 @@ rollback is absent.
 
 ### Trusted release construction and separate hardware acceptance
 
-A manual release has a stronger path than a PR build or ordinary dev publication:
+A release dispatch has a stronger path than a PR build or ordinary dev publication:
 
 - `ci-build-all.sh` performs one signed ESP32-S3 build. The result is verified independently:
   signature-block CRC, complete
@@ -415,7 +415,7 @@ A manual release has a stronger path than a PR build or ordinary dev publication
   match. That public identity is written into manifest provenance; the private PEM is not.
 - The signing job has no repository-write permission. The separate publisher has no signing secret,
   revalidates the artifact handoff, publishes the root feed, and creates the exact-source tag and
-  GitHub Release. A manual release dispatch skips the mechanical PR suite and performs no public or
+  GitHub Release. A release dispatch skips the mechanical PR suite and performs no public or
   hardware readback gate.
 - The release workflow has no self-hosted job, protected hardware environment, board inventory,
   controller token or hardware-policy dependency. Test-board and production-board acceptance are
