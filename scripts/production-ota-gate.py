@@ -5103,10 +5103,17 @@ def main() -> int:
         production_status_endpoint, check_generation,
         args.expected_version, args.expected_app_sha256,
     )
+    production_transfer: dict[str, Any] = {}
     returned = wait_for_new_firmware(
         production["host"], args.expected_version, elf, production_status_endpoint,
+        production_transfer,
     )
     validate_identity(returned, host=production["host"], mac=production["mac"], version=args.expected_version, elf=elf)
+    require_ota_transfer_evidence(
+        production["host"], production_transfer, phase="production target",
+        writer_version=args.expected_current_version,
+        writer_elf=str(production_before.get("app_elf_sha256", "")),
+    )
     production_evidence = stress_board(
         host=production["host"], mac=production["mac"], version=args.expected_version, elf=elf,
         require_x10a=True, require_weather=True,
@@ -5125,6 +5132,7 @@ def main() -> int:
         "host": production["host"],
         "mac": production["mac"],
         "previous_version": args.expected_current_version,
+        "ota_download_heap": production_transfer,
         "stress": production_evidence,
         "retained_x10a": retained,
     }

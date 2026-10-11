@@ -91,6 +91,113 @@ finally:
   assert.notEqual(unrelatedTransport.status, 0,
     "the deadline self-test must not swallow unrelated transport errors");
   assert.match(unrelatedTransport.stderr, /UnexpectedTransportError: unrelated transport failure/);
+
+  // Execute the production branch itself. A healthy new boot must not substitute for the old
+  // writer's completed verification, heap minima and OTA-task stack evidence. All I/O is replaced
+  // with fixtures; the real transfer observer and fail-closed verifier remain in the path.
+  const productionProbe = `
+import contextlib, io, json, runpy, sys
+from types import SimpleNamespace
+from unittest.mock import patch
+gate = runpy.run_path(sys.argv[1], run_name="production_evidence_probe")
+namespace = gate["main"].__globals__
+target_version = "2.0.0-dev.2"
+target_elf = "abcdef123"
+writer_version = "2.0.0-dev.1"
+writer_elf = "123abcdef"
+app_sha = "a" * 64
+args = SimpleNamespace(
+    self_test=False, release_hil=False, execute=True, confirm_release_hil=None,
+    artifact_manifest=None, artifact_app=None, install_bench=False, confirm_bench=None,
+    confirm_production="production", expected_current_version=writer_version,
+    manifest_url=namespace["OFFICIAL_MANIFEST_URL"], expected_source_sha="b" * 40,
+    expected_version=target_version, expected_app_sha256=app_sha,
+)
+valid = {
+    "state": "done", "heap_min_free_bytes": 32768,
+    "heap_min_largest_block_bytes": 16384, "ota_stack_min_free_bytes": 1536,
+}
+cases = [("valid", valid), ("stack boundary", {**valid, "ota_stack_min_free_bytes": 1024})]
+for key, value in (
+    ("state", "updating"), ("heap_min_free_bytes", 0),
+    ("heap_min_largest_block_bytes", 0), ("ota_stack_min_free_bytes", None),
+    ("ota_stack_min_free_bytes", 1023),
+):
+    cases.append((f"reject {key}={value}", {**valid, key: value}))
+cases.append(("reject absent stack", {key: value for key, value in valid.items()
+                                    if key != "ota_stack_min_free_bytes"}))
+for label, transfer_sample in cases:
+    events = []
+    old_status = {"version": writer_version, "app_elf_sha256": writer_elf, "uptime_s": 1}
+    target_status = {"version": target_version, "app_elf_sha256": target_elf, "uptime_s": 1}
+    def post_once(endpoint, generation, version, sha):
+        assert (endpoint, generation, version, sha) == ("production.invalid", 7, target_version, app_sha)
+        events.append("post")
+        return 8
+    def wait(host, version, elf, endpoint, evidence=None):
+        assert (host, version, elf, endpoint) == ("production.invalid", target_version, target_elf,
+                                                "production.invalid")
+        assert evidence is not None, "production failed to collect the old writer's evidence"
+        gate["record_ota_transfer_evidence"](transfer_sample, evidence)
+        # The rebooted firmware resets these counters; it must not replace completed evidence.
+        gate["record_ota_transfer_evidence"]({"state": "", "heap_min_free_bytes": 0,
+            "heap_min_largest_block_bytes": 0, "ota_stack_min_free_bytes": None}, evidence)
+        events.append("reboot")
+        return target_status
+    def verify(host, evidence, **kwargs):
+        assert host == "production.invalid"
+        assert kwargs == {"phase": "production target", "writer_version": writer_version,
+                          "writer_elf": writer_elf}
+        gate["require_ota_transfer_evidence"](host, evidence, **kwargs)
+        events.append("verified")
+    def stress(**kwargs):
+        events.append(f"stress {kwargs['host']}")
+        return {"uptime_s": 181}
+    def status(endpoint, **kwargs):
+        assert endpoint == "production.invalid"
+        return target_status if "reboot" in events else old_status
+    replacements = {
+        "parse_args": lambda: args, "request_limited_bytes": lambda *a, **k: b"{}",
+        "validate_manifest": lambda *a: "https://feed.invalid/app.bin",
+        "require_legacy_bench_restore_manifest": lambda *a: None,
+        "verify_local_source": lambda *a: None, "request_bytes": lambda *a, **k: b"image",
+        "verify_image": lambda *a: target_elf, "verify_http_range_support": lambda *a: None,
+        "run_local_gates": lambda: None,
+        "load_inventory": lambda: {role: {"host": f"{role}.invalid", "mac": role}
+                                    for role in ("bench", "production")},
+        "validate_release_manifest": lambda *a: ("1.0.0", "c" * 64, "https://feed.invalid/release.bin", "d" * 40),
+        "verify_release_source_binding": lambda *a: None,
+        "request_json": lambda *a: target_status, "validate_identity": lambda *a, **k: None,
+        "wait_for_bench_health_window": lambda *a, **k: target_status,
+        "exercise_bench_full_download": lambda **k: {}, "stress_board": stress,
+        "resolve_http_endpoint": lambda host: host, "request_status_deadline": status,
+        "wait_for_production_promotion_readiness": lambda endpoint, before, **k: before,
+        "wait_for_ota_offer": lambda *a: 7, "post_update_once": post_once,
+        "wait_for_new_firmware": wait, "require_ota_transfer_evidence": verify,
+        "verify_retained_x10a": lambda *a: {"rows": 1},
+    }
+    output = io.StringIO()
+    with patch.dict(namespace, replacements), contextlib.redirect_stdout(output):
+        try:
+            assert gate["main"]() == 0
+        except gate["GateError"]:
+            assert label.startswith("reject"), label
+            assert events == ["stress bench.invalid", "post", "reboot"], events
+            assert output.getvalue() == "", "failed production evidence published a success report"
+        else:
+            assert not label.startswith("reject"), label
+            assert events == ["stress bench.invalid", "post", "reboot", "verified",
+                              "stress production.invalid"], events
+            evidence = json.loads(output.getvalue())["production"]["ota_download_heap"]
+            assert evidence["saw_done"] is True
+            for key in ("heap_min_free_bytes", "heap_min_largest_block_bytes", "ota_stack_min_free_bytes"):
+                assert evidence[key] == transfer_sample[key], (key, evidence)
+`;
+  const productionEvidence = spawnSync("python3", [
+    "-I", "-B", "-c", productionProbe, path.join(root, "scripts/production-ota-gate.py"),
+  ], { encoding: "utf8" });
+  assert.equal(productionEvidence.status, 0,
+    `production must collect, validate and retain writer evidence: ${productionEvidence.stderr}`);
 }
 
 // Role, artifact and timing boundaries.
