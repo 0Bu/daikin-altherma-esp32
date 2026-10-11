@@ -39,6 +39,9 @@ struct SyslogMsg {
 };
 
 static QueueHandle_t s_queue = nullptr;
+static std::atomic<uint32_t> s_queue_dropped{0};
+static_assert(std::atomic<uint32_t>::is_always_lock_free,
+              "Syslog enqueue loss accounting must remain allocation- and lock-free");
 static SemaphoreHandle_t s_status_mtx = nullptr;
 // Status guarded by s_status_mtx. Stored as primitives + a string-LITERAL pointer, never a
 // std::string: set_status runs on this task and the reader must be able to snapshot it without any
@@ -108,6 +111,7 @@ SyslogStatus syslog_status() {
         err            = s_error;   // pointer copy under the lock — no allocation
     }
     copy.error = err;               // std::string built from the literal OUTSIDE the lock
+    copy.queue_dropped = s_queue_dropped.load(std::memory_order_relaxed);
     return copy;
 }
 
@@ -559,7 +563,13 @@ void syslog_send(const char* msg, size_t len) {
     std::memcpy(m.text, msg, len);
     m.text[len] = '\0';
     m.len = len;
-    xQueueSend(s_queue, &m, 0); // Non-blocking send
+    if (xQueueSend(s_queue, &m, 0) != pdTRUE) {
+        // Nonblocking and silent: logging here would recurse through diag_printf/syslog_send.
+        // Count queue rejection only, never claim whether any accepted UDP datagram was delivered.
+        uint32_t dropped = s_queue_dropped.load(std::memory_order_relaxed);
+        while (dropped != UINT32_MAX && !s_queue_dropped.compare_exchange_weak(
+                                            dropped, dropped + 1, std::memory_order_relaxed)) {}
+    }
 }
 
 } // namespace daik

@@ -354,7 +354,8 @@ The device is a **stationary, mains-powered bridge** that must never need a huma
 - **Endless reconnect with a first-boot budget.** A boot-time failure spends a bounded budget and
   then opens the setup portal; once ever online, a drop reconnects **forever**, unconditionally on
   the disconnect reason — the reason codes that look like bad credentials are also the transient
-  SAE failures above, so acting on them stranded healthy boards in the open portal.
+  SAE failures above. Lost-IP/disconnect events revoke the lease and boot wake; cached addresses
+  do not establish a live connection.
 - **✅ One ESP-NETIF initialization for both network paths** — it is a process-wide singleton, and
   the STA and portal branches run in sequence on exactly the first-boot fallback path.
 - **✅ 🧪 In-app WiFi re-config with one-shot credential rollback.** `/set_wifi` stashes the previous
@@ -721,7 +722,8 @@ Everything needed to explain a crash *after the fact*, from the field, without a
 - **✅ Off-device log forwarding** ([`syslog.cpp`](../main/syslog.cpp)): every diag line is also one
   RFC 5424 UDP datagram to an optional collector. Delivery is gated on **DNS only** — the
   reachability probe is advisory, since a healthy collector may firewall ICMP — and a send failure is
-  classified hard vs. transient so a chatty stream cannot drive a resolve storm.
+  classified hard vs. transient. `/status.syslog.queue_dropped` counts boot-local queue rejection,
+  without claiming UDP delivery or collector retention.
 - **✅ 🧪 One-shot boot replay to syslog** ([`logic/bootlog.hpp`](../main/logic/bootlog.hpp)): the
   crash summary is captured before WiFi and the syslog task exist, so it could only ever reach the
   in-RAM ring, where a chatty failure overwrites it within a minute. On the first DNS resolve of a

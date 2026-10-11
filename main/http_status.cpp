@@ -298,6 +298,8 @@ struct HttpChunkEmitter {
 };
 using HttpJsonChunks = BoundedChunkSink<HttpChunkEmitter, 1024>;
 
+template <typename JsonOut> static void append_json_uint(JsonOut& out, uint64_t value);
+
 // `redact` withholds the reporter-identifying values (logic/redact.hpp) so a snapshot can be
 // pasted into a bug report. Defaulted OFF: the dashboard polls this same route and legitimately
 // shows the SSID and the broker — only GET /status?redact=1 asks for the scrubbed form.
@@ -1098,6 +1100,8 @@ static void append_status_json(JsonOut& j, bool redact) {
         j += sy.resolved ? "true" : "false";
         j += ",\"reachable\":";
         j += sy.reachable ? "true" : "false";
+        j += ",\"queue_dropped\":";
+        append_json_uint(j, sy.queue_dropped);
         j += ",\"host\":";
         j += jstr_r(sy.host, redact);
         j += ",\"port\":";

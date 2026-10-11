@@ -79,6 +79,15 @@ body-completion gate. The harness remains hardware-free and does not
 execute ESP-IDF target glue, real NVS or the production MCP/HTTP/MQTT stacks; target builds and
 separately authorized hardware acceptance remain distinct proof layers.
 
+The same runner compiles complete `wifi.cpp` and `syslog.cpp` production units through
+[`network_runtime/fixture.cpp`](network_runtime/fixture.cpp). Thirteen scenarios cover lease loss,
+foreign IP events, disconnect retries, netif snapshot races, stale boot wakes, bounded boot waits,
+successful and failed credential rollback, queue rejection and saturation, reentrant logging, and
+RFC 5424 framing with unavailable times.
+Fourteen targeted mutations must fail their named oracle. SDK-shaped event, clock, queue and
+socket adapters make this deterministic without contacting a device; they do not prove real DHCP,
+radio timing, UDP delivery or collector retention.
+
 The contract suite also compiles the complete current `hp_modbus.cpp` through
 [`modbus_runtime/fixture.cpp`](modbus_runtime/fixture.cpp). Real POSIX transport and explicit SDK
 clock/task adapters exercise parsing, polling, cache expiry, target cutover and task retirement.
@@ -613,7 +622,8 @@ One entry per `test_*()` in [`test_logic.cpp`](test_logic.cpp), in the order `ma
   the storm this guards against — stay transient, as does an unknown errno.
 - `logic/timestamp.hpp` — RFC 3339 UTC formatting for the SNTP wall clock (`main/sntp_time.cpp`):
   the epoch, a leap-year/year-boundary date, millisecond zero-padding, and that a negative (never
-  synced) input renders as `""` rather than a plausible-looking `1970-01-01` — the sentinel
+  synced) input renders as `""` rather than a plausible-looking `1970-01-01`. Calendar conversion
+  failure and years beyond 9999 also return `""`, while the last second of year 9999 remains valid — the sentinel
   `syslog.cpp`'s RFC 5424 TIMESTAMP field checks to fall back to the `-` NILVALUE.
 - `logic/hexdump.hpp` — hex rendering for the raw X10A page payloads on `/diag`: lowercase,
   space-separated, leading zeros preserved (a page is read positionally, so `0f` must not print as

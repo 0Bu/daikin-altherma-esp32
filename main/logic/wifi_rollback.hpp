@@ -28,6 +28,12 @@
 
 namespace daik {
 
+// A GOT_IP wake is historical evidence by the time the boot task resumes. Accept the credentials
+// only if the event handler still reports a current lease; a LOST_IP/disconnect cancels that wake.
+inline constexpr bool wifi_boot_wake_connected(bool got_ip_wake, bool current_lease) {
+    return got_ip_wake && current_lease;
+}
+
 // What a WIFI_EVENT_STA_DISCONNECTED reason says about the CREDENTIALS — not about the link. Codes
 // are the IDF's wifi_err_reason_t (the 200-range is Espressif-specific); they stay plain ints here
 // so this header remains IDF-free and host-testable.

@@ -1,5 +1,6 @@
 #pragma once
 #include <cstddef>
+#include <cstdint>
 #include <string>
 
 namespace daik {
@@ -9,6 +10,7 @@ struct SyslogStatus {
     bool resolved;     // DNS resolved → a destination is known and lines are being forwarded
     bool reachable;    // ADVISORY: last ARP/ICMP probe answered. Never gates delivery (syslog is
                        // best-effort UDP; an ICMP-filtered host still receives) — a UI hint only.
+    uint32_t queue_dropped = 0; // boot total of failed nonblocking enqueues; not UDP delivery proof
     std::string host;
     int port;
     std::string error;

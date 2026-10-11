@@ -76,8 +76,13 @@ static void on_wifi(void*, esp_event_base_t base, int32_t id, void* data) {
         // checkpoint even though we are, right now, associated to the new AP and merely waiting on a
         // first DHCP lease — and the boot window would roll back credentials that had just worked.
         s_last_disco_reason = 0;
-    } else if (base == WIFI_EVENT && id == WIFI_EVENT_STA_DISCONNECTED) {
+    } else if ((base == WIFI_EVENT && id == WIFI_EVENT_STA_DISCONNECTED) ||
+               (base == IP_EVENT && id == IP_EVENT_STA_LOST_IP)) {
         s_wifi_connected = false;
+        xEventGroupClearBits(s_events, CONNECTED_BIT);
+        // DHCP lease loss can leave the station associated. Reacquisition owns that recovery;
+        // only a disconnect below needs connect() retries. Both events withdraw the boot wake.
+        if (base == IP_EVENT) return;
         auto* d = static_cast<wifi_event_sta_disconnected_t*>(data);
 
         // Remember WHY, for the boot-window rollback decision (logic/wifi_rollback.hpp). Recording
@@ -113,6 +118,7 @@ static void on_wifi(void*, esp_event_base_t base, int32_t id, void* data) {
         }
     } else if (base == IP_EVENT && id == IP_EVENT_STA_GOT_IP) {
         auto* e = static_cast<ip_event_got_ip_t*>(data);
+        if (!e || e->esp_netif != s_sta_netif) return;
         ESP_LOGI(TAG, "connected, ip=" IPSTR, IP2STR(&e->ip_info.ip));
         if (s_wifi_ever_connected) s_reconnects.fetch_add(1);   // a later GOT_IP is a RE-connect
         s_retry_num           = 0;
@@ -165,7 +171,7 @@ static void wd_on_ping_end(esp_ping_handle_t hdl, void* args) {
 // decides what to DO with each; this function only observes.
 static GwProbe gateway_probe() {
     if (!s_wd.done) return GwProbe::Unmeasurable;   // watchdog not fully initialised yet
-    esp_netif_ip_info_t ip{};
+    esp_netif_ip_info_t ip;
     if (!s_sta_netif || esp_netif_get_ip_info(s_sta_netif, &ip) != ESP_OK || ip.gw.addr == 0)
         return GwProbe::Unreachable;   // no gateway/lease while link=up IS a proven broken link
 
@@ -270,10 +276,14 @@ bool wifi_link_up() { return s_wifi_connected.load(); }
 // esp_wifi_stop() raises can't re-enter on_wifi() and fire another esp_wifi_connect().
 static void wifi_stop_sta() {
     if (s_h_wifi) { esp_event_handler_instance_unregister(WIFI_EVENT, ESP_EVENT_ANY_ID, s_h_wifi); s_h_wifi = nullptr; }
-    if (s_h_ip)   { esp_event_handler_instance_unregister(IP_EVENT, IP_EVENT_STA_GOT_IP, s_h_ip);  s_h_ip = nullptr; }
+    if (s_h_ip) {
+        esp_event_handler_instance_unregister(IP_EVENT, ESP_EVENT_ANY_ID, s_h_ip);
+        s_h_ip = nullptr;
+    }
     esp_wifi_stop();
     esp_wifi_deinit();
     s_sta_running = false;
+    s_wifi_connected = false;
     if (s_sta_netif) { esp_netif_destroy_default_wifi(s_sta_netif); s_sta_netif = nullptr; }
     if (s_events) { vEventGroupDelete(s_events); s_events = nullptr; }
 }
@@ -305,7 +315,7 @@ bool wifi_start_sta() {
     // reset. Select RAM before the first set_config; config_load supplies them again every boot.
     ESP_ERROR_CHECK(esp_wifi_set_storage(WIFI_STORAGE_RAM));
     esp_event_handler_instance_register(WIFI_EVENT, ESP_EVENT_ANY_ID, on_wifi, nullptr, &s_h_wifi);
-    esp_event_handler_instance_register(IP_EVENT, IP_EVENT_STA_GOT_IP, on_wifi, nullptr, &s_h_ip);
+    esp_event_handler_instance_register(IP_EVENT, ESP_EVENT_ANY_ID, on_wifi, nullptr, &s_h_ip);
 
     wifi_config_t wc = {};
     const Config& c  = config();
@@ -362,19 +372,33 @@ bool wifi_start_sta() {
     // refused them, and otherwise keeps hunting for an SSID that may just be a router still coming
     // back up (logic/wifi_rollback.hpp).
     EventBits_t bits = 0;
+    bool             boot_connected     = false;
+    const TickType_t window_ticks       = pdMS_TO_TICKS(WIFI_BOOT_WINDOW_S * 1000);
+    TickType_t       checkpoint_started = xTaskGetTickCount();
     RollbackWatch rw;
     for (int elapsed = 0;;) {
+        const TickType_t waited = xTaskGetTickCount() - checkpoint_started;
         bits = xEventGroupWaitBits(s_events, CONNECTED_BIT | FAIL_BIT, pdFALSE, pdFALSE,
-                                   pdMS_TO_TICKS(WIFI_BOOT_WINDOW_S * 1000));
+                                   waited < window_ticks ? window_ticks - waited : 0);
+        if (wifi_boot_wake_connected(bits & CONNECTED_BIT, s_wifi_connected)) {
+            boot_connected = true;
+            break;
+        }
+        // A lease can disappear after waking the waiter but before it runs. Such a stale wake is
+        // neither boot success nor a rollback checkpoint. Wait only the remainder of this window,
+        // so repeated lease churn cannot extend the credential grace deadline.
+        if (bits & FAIL_BIT) break;
+        const TickType_t checkpoint_now = xTaskGetTickCount();
+        if (checkpoint_now - checkpoint_started < window_ticks) continue;
         elapsed += WIFI_BOOT_WINDOW_S;
-        if (bits & (CONNECTED_BIT | FAIL_BIT)) break;
+        checkpoint_started = checkpoint_now;
         if (!rollback_pending) break;   // no change pending → the flat window owns the decision
         if (rollback_step(rw, disco_class(s_last_disco_reason), elapsed) == RollbackAction::RollBack) break;
         ESP_LOGW(TAG, "new credentials: no IP after %d s (last reason %d) — the AP may still be "
                       "coming back; retrying up to %d s before rolling back",
                  elapsed, s_last_disco_reason.load(), WIFI_ROLLBACK_GRACE_S);
     }
-    if (!(bits & CONNECTED_BIT)) {
+    if (!boot_connected) {
         if (rollback_pending) {
             Config rollback_cfg = config();
             ESP_LOGW(TAG, "STA connect failed with new credentials (last reason %d) — rolling back to %s",
@@ -482,8 +506,9 @@ int wifi_scan(WifiScanEntry* out, int max) {
 
 WifiInfo wifi_info() {
     WifiInfo info{};
-    esp_netif_ip_info_t ip{};
-    if (s_sta_netif && esp_netif_get_ip_info(s_sta_netif, &ip) == ESP_OK && ip.ip.addr != 0) {
+    esp_netif_ip_info_t ip;
+    if (s_wifi_connected && s_sta_netif && esp_netif_get_ip_info(s_sta_netif, &ip) == ESP_OK &&
+        ip.ip.addr != 0) {
         snprintf(info.ip, sizeof(info.ip), IPSTR, IP2STR(&ip.ip));
         info.connected = true;
         // Only read the AP record while the link is up: mid-association its fields are transiently
@@ -501,6 +526,9 @@ WifiInfo wifi_info() {
             info.std[sizeof(info.std) - 1] = '\0';
         }
     }
+    // The event loop can withdraw the lease while either SDK snapshot above is in progress.
+    // Publish only a snapshot that still has a lease at this final observation point.
+    if (!s_wifi_connected) info = WifiInfo{};
     // This identity exists even when an Ethernet-first boot never starts the WiFi driver.
     // Reporting it directly from eFuse keeps /status transport-neutral too.
     (void)esp_read_mac(info.mac, ESP_MAC_WIFI_STA);

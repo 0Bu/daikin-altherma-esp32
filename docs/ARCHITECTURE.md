@@ -42,7 +42,8 @@ wifi.cpp/.hpp       → STA bring-up (all-channel scan → strongest AP by RSSI)
                        ICMP gateway watchdog (three-valued probe + host-tested policy in
                        logic/link_watch.hpp: 2 proven-silent periods, or 10 blind ones, re-associate)
                        + DHCP hostname/vendor class + mDNS product metadata; wifi_info() also reports the AP's
-                       BSSID + PHY standard + this STA's MAC
+                       BSSID + PHY standard + this STA's MAC. Lost-IP and disconnect events withdraw
+                       the current lease and boot wake; cached netif addresses cannot report online
 net.cpp/.hpp        → the OPTIONAL WIRED TRANSPORT: a W5500 on SPI, in practice an AtomS3 Lite on a
                       PoE base. A second TRANSPORT, not a second source — MQTT/syslog/SNTP/OTA/HTTP
                       run over it unchanged, so nothing above branches on which one carries the
@@ -341,7 +342,10 @@ syslog.cpp          → optional syslog UDP client (RFC 5424, off when syslog_ho
                       /status.syslog.reachable, never gates delivery — syslog is best-effort UDP and a
                       collector may firewall ICMP). File-scope ping-control (like wifi.cpp s_wd) keeps
                       the async esp_ping callback from a use-after-free. Self-loop-guarded (drops
-                      "syslog:" lines); syslog_status() feeds /status. On the FIRST resolve of a boot
+                      "syslog:" lines); syslog_status() feeds /status. Its boot-local saturating
+                      queue_dropped counter records rejected nonblocking queue admissions, not UDP
+                      delivery, collector retention, disabled-source draining or truncated lines.
+                      On the FIRST resolve of a boot
                       it replays the boot records once (logic/bootlog.hpp): a build-identity line
                       (version/elf_sha256/reset/safe_mode) plus current fault or stored-dump records.
                       The reset belongs to this boot; stored task/PC/backtrace have unknown age and
@@ -1158,9 +1162,10 @@ host-testable core is unusually large and valuable, because the risky parts are 
 - `logic/timestamp.hpp` — `rfc3339_utc(unix_s, ms)`, the one UTC formatter the SNTP wall clock
   (`sntp_time.cpp`) renders through for `syslog.cpp`'s RFC 5424 TIMESTAMP field, the top-level
   `/status.ntp` block, and `mqtt_ha.cpp`'s heartbeat `"time"` field. A negative `unix_s` —
-  `sntp_time.cpp`'s "never synced" sentinel — returns `""`
-  rather than a plausible-looking `1970-01-01`, so a caller can tell "no wall clock yet" from a real
-  epoch-adjacent instant and fall back to the RFC 5424 NILVALUE / JSON `null` instead. Pure, so the
+  `sntp_time.cpp`'s "never synced" sentinel — returns `""` without fabricating an epoch date.
+  Unrepresentable times, calendar conversion failure, years outside RFC 3339's four-digit range
+  and truncated formatting also return `""`. Syslog uses the RFC 5424 `-` NILVALUE for that result;
+  JSON clock fields use `null` while unsynced and an empty string for an invalid synced time. Pure, so the
   leap-year/year-boundary calendar math and the millisecond zero-padding are asserted against known
   instants on the host rather than only once a real NTP reply lands on a board.
 - `logic/health_gate.hpp` — the OTA commit/wait/give-up verdict across the base window and the hard
@@ -3840,7 +3845,7 @@ GET  /status      version, platform, uptime_s, boot_id (16 hex digits; non-secre
                 mac are redacted like their wifi twins, while every BOOLEAN and the four pin numbers
                 stay in the clear — they identify nobody and are the first thing a triage reader
                 needs from a wired board's report,
-                syslog{configured,resolved,reachable,host,port,error},
+                syslog{configured,resolved,reachable,queue_dropped,host,port,error},
                   ota{channel} — "release"|"dev", the FEED the next OTA check reads (POST /set_ota).
                   On /status and not only /ota/status because the Settings Firmware card renders its
                   selector from /status like every other setting; a device can be SET to a channel it

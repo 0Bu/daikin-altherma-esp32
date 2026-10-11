@@ -230,24 +230,22 @@ struct WeatherValidation {
 // `received_unix_s` is the synchronized wall clock captured after the HTTPS response. It is
 // optional in host tests (-1), but when available prevents an impossible future fetch time.
 inline WeatherValidation weather_validate(const WeatherForecastSample& s,
-                                           int64_t received_unix_s = -1) {
+                                          int64_t                      received_unix_s = -1) {
     auto fail = [](const char* why) { return WeatherValidation{false, why}; };
     if (s.version != 1) return fail("unsupported_version");
     if (s.provider != "open-meteo") return fail("invalid_provider");
     if (s.model != "icon_seamless") return fail("invalid_model");
-    if (s.fetched_unix_s < 0 || s.decision_unix_s < 0)
-        return fail("missing_timestamp");
+    if (s.fetched_unix_s < 0 || s.decision_unix_s < 0) return fail("missing_timestamp");
     // The features describe the two hours following a decision instant. An adapter may align that
     // instant to the next hour (the legacy-288 example does), but may not relabel arbitrary later
     // weather.
-    if (s.decision_unix_s < s.fetched_unix_s - WEATHER_FUTURE_TOLERANCE_S ||
-        s.decision_unix_s > s.fetched_unix_s + 60 * 60)
+    // Nonnegative instants make both differences below representable without deadline addition.
+    const int64_t decision_delta = s.decision_unix_s - s.fetched_unix_s;
+    if (decision_delta < -WEATHER_FUTURE_TOLERANCE_S || decision_delta > 60 * 60)
         return fail("invalid_decision_time");
-    if (received_unix_s >= 0 &&
-        s.fetched_unix_s > received_unix_s + WEATHER_FUTURE_TOLERANCE_S)
+    if (received_unix_s >= 0 && s.fetched_unix_s - received_unix_s > WEATHER_FUTURE_TOLERANCE_S)
         return fail("future_fetch");
-    if (!std::isfinite(s.outdoor_mean_2h_c) ||
-        s.outdoor_mean_2h_c < WEATHER_OUTDOOR_MIN_C ||
+    if (!std::isfinite(s.outdoor_mean_2h_c) || s.outdoor_mean_2h_c < WEATHER_OUTDOOR_MIN_C ||
         s.outdoor_mean_2h_c > WEATHER_OUTDOOR_MAX_C)
         return fail("invalid_outdoor_mean");
     if (!std::isfinite(s.solar_energy_2h_wh_m2) || s.solar_energy_2h_wh_m2 < 0.0 ||
@@ -256,7 +254,7 @@ inline WeatherValidation weather_validate(const WeatherForecastSample& s,
     if (s.hourly_count > WEATHER_HOURLY_CAP || s.hourly_count == 1)
         return fail("invalid_hourly_count");
     for (size_t i = 0; i < s.hourly_count; ++i) {
-        if ((!i && s.hourly_unix_s[i] != s.decision_unix_s) ||
+        if (s.hourly_unix_s[i] < 0 || (!i && s.hourly_unix_s[i] != s.decision_unix_s) ||
             (i && s.hourly_unix_s[i] - s.hourly_unix_s[i - 1] != 3600))
             return fail("invalid_hourly_time");
         if (!std::isfinite(s.hourly_temperature_c[i]) ||
@@ -285,20 +283,31 @@ struct WeatherFreshness {
 // Fetch age measures direct Open-Meteo availability. Provider issue time is deliberately unavailable
 // because this endpoint does not expose it; never synthesize it from the fetch time.
 inline WeatherFreshness weather_freshness(bool has_value, int64_t fetched_unix_s,
-                                          int64_t now_unix_s,
+                                          int64_t  now_unix_s,
                                           uint32_t max_age_s = WEATHER_MAX_AGE_S) {
     WeatherFreshness f;
     if (!has_value) return f;
-    if (now_unix_s < 0) { f.reason = "clock_unsynced"; return f; }
-    if (fetched_unix_s > now_unix_s + WEATHER_FUTURE_TOLERANCE_S) {
+    if (now_unix_s < 0) {
+        f.reason = "clock_unsynced";
+        return f;
+    }
+    if (fetched_unix_s < 0) {
+        f.reason = "missing_timestamp";
+        return f;
+    }
+    // Both instants are nonnegative int64_t, so their signed difference cannot overflow.
+    const int64_t age = now_unix_s - fetched_unix_s;
+    if (age < -WEATHER_FUTURE_TOLERANCE_S) {
         f.reason = "future_fetch";
         return f;
     }
     f.age_known = true;
-    f.age_s = fetched_unix_s > now_unix_s
-            ? 0 : static_cast<uint64_t>(now_unix_s - fetched_unix_s);
-    if (f.age_s > max_age_s) { f.reason = "stale"; return f; }
-    f.fresh = true;
+    f.age_s     = age < 0 ? 0 : static_cast<uint64_t>(age);
+    if (f.age_s > max_age_s) {
+        f.reason = "stale";
+        return f;
+    }
+    f.fresh  = true;
     f.reason = "fresh";
     return f;
 }
