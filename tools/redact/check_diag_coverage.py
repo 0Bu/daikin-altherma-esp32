@@ -43,7 +43,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 HEADER = ROOT / "main" / "logic" / "redact.hpp"
 STATUS = ROOT / "main" / "http_status.cpp"
-REPORTING = ROOT / "docs" / "REPORTING.md"
+SECURITY = ROOT / "docs" / "SECURITY.md"
 LEDGER = Path(__file__).with_name("audit_exceptions.txt")
 
 # Identifiers whose VALUE originates with the user or identifies this specific installation. This
@@ -121,11 +121,11 @@ def declared_status_field_names():
 
 def documented_status_field_names():
     """The public table is maintained prose, but its field column must match the code exactly."""
-    text = REPORTING.read_text()
+    text = SECURITY.read_text()
     start = "<!-- redacted-status-fields:start -->"
     end = "<!-- redacted-status-fields:end -->"
     if start not in text or end not in text:
-        print("redaction: REPORTING.md field-list markers are missing — refusing to check")
+        print("redaction: SECURITY.md field-list markers are missing — refusing to check")
         sys.exit(2)
     block = text.split(start, 1)[1].split(end, 1)[0]
     return re.findall(r"^\|\s*`([a-z0-9_.]+)`\s*\|", block, re.M)
@@ -250,7 +250,7 @@ def main():
         return 1
 
     if documented != names:
-        print("\nDOC DRIFT — docs/REPORTING.md does not list exactly the redacted /status fields:\n")
+        print("\nDOC DRIFT — docs/SECURITY.md does not list exactly the redacted /status fields:\n")
         print(f"  code only: {', '.join(n for n in names if n not in documented) or '(none)'}")
         print(f"  docs only: {', '.join(n for n in documented if n not in names) or '(none)'}")
         print("    fix: regenerate the ordered field column with run-redaction-audit.sh --list and")

@@ -1,6 +1,6 @@
 ---
 name: project-review
-description: Pre-merge project review — check the diff for doc drift (AGENTS.md ↔ docs ↔ code), memory safety on HTTP handlers, target/build implications, and host tests for new pure logic. Use before opening or merging a PR. Review is read-only unless the user explicitly requests fixes or publication.
+description: Review project changes for contradictory or bloated documentation, HTTP memory safety, target/build implications and host coverage. Use for documentation changes and before opening or merging a PR. Read-only unless fixes or publication are requested.
 ---
 
 # project-review
@@ -23,9 +23,8 @@ A holistic pass before a PR merges. Not a linter — it checks the things that r
    include the intended tracked diff and untracked new files in the review and identify them in
    the report; no commit, PR or equality with `origin/main` is required. Preserve unrelated user
    changes. Stamp a merge pass only after the reviewed content matches the exact committed PR head.
-1. **Doc drift.** If the diff changed the component map, NVS keys, the HTTP API, the config
-   model, or the poll/OTA/MQTT behaviour, are `AGENTS.md`, `docs/README.md` and
-   `docs/ARCHITECTURE.md` updated to match? They must not disagree with the code.
+1. **Documentation.** Apply the consistency and concision review below to changed documentation
+   and to the documented facts affected by a code change.
 2. **Memory safety.** New HTTP handlers run under the OOM discipline (try/catch → 503, no big
    contiguous `std::string`, stream large output). New large allocations (JSON, TLS) size-checked.
 3. **Host tests.** New pure logic is in `main/logic/` with a `CHECK` in `test/test_logic.cpp`,
@@ -36,13 +35,41 @@ A holistic pass before a PR merges. Not a linter — it checks the things that r
    verify changed rows against [`docs/REGISTERS.md`](../../../docs/REGISTERS.md), the in-repo source
    of truth. Value/CRC/converter changes are verified against known-good reference outputs.
 
-Report findings grouped by the above; block on doc drift and untested logic.
+Report findings grouped by the above; contradictions, unjustified duplication, unreadable guidance
+and untested logic block a clean review.
+
+## Documentation consistency and concision
+
+- Trace changed claims to current code or the cited evidence. Compare other pages, agent instructions
+  and skills that state the same fact. Resolve contradictions; a passing mechanical audit alone
+  does not establish consistency.
+- Use the topic owners in [`docs/README.md`](../../../docs/README.md). Keep complete technical
+  contracts in their reference and task steps in their guide. Other pages link to that owner; a
+  short warning or summary may repeat only what its reader needs locally.
+- Remove obsolete behavior, repeated explanations and defect chronology. Retain a decision's
+  current rule, necessary rationale and verifiable source. Keep still-needed migration steps.
+- Check the reader's task from entry to success or explicit failure. Use plain terms, short
+  paragraphs and headings that make prerequisites, actions and results findable.
+- Compare before/after prose across all affected files, including new or moved files. Explain any
+  necessary growth; moving verbose text or appending another account is not a reduction. Trim
+  existing repetition when updating a topic. Do not shorten away inputs, units, failure behavior,
+  safety conditions, provenance or claim limits.
+- Check relative links and anchors after moves, and run the affected documentation audits. Update
+  their coverage to the authoritative location without removing the checked contract. Route
+  owner-facing diagnosis copy through `$user-docs-review` and evidence changes through
+  `$diagnostic-evidence-review`.
+
+Report remaining contradictions or avoidable bulk with locations and a concrete remedy. Record a
+clean review only after they are resolved; word count alone cannot establish readability.
 
 ## Self-analysis and review audit
 
 Before ticking or stamping the gate:
 1. **Memory safety & exception boundary check:** Verify that every non-trivial HTTP handler wrapped large allocations in try/catch returning 503 on OOM, streams responses, and never allocates while holding a raw mutex.
-2. **Architecture and doc synchronization:** Verify that any changes to component boundaries, REST endpoints, NVS keys, or FreeRTOS task models are matched in `docs/ARCHITECTURE.md` and `AGENTS.md`.
+2. **Documentation synchronization and concision:** Verify component and task ownership in
+   `docs/ARCHITECTURE.md`, HTTP fields and NVS effects in `docs/API.md`, and safety rules in
+   `AGENTS.md`. Other pages link to the topic owner. Reject remaining contradictions, avoidable
+   duplication and unexplained growth across all affected pages.
 3. **Stamp integrity check:** Confirm the stamp uses the bare short SHA (`git rev-parse --short=12 HEAD`) without backticks.
 
 ## Recording the pass (merge gate — no file marker)

@@ -12,23 +12,26 @@ files, update GitHub state, merge, flash, deploy, clear evidence, or mutate a li
 because this skill activated. When a mutation is explicitly requested, keep it within that scope and
 report analysis, changes, and verification separately.
 
-Treat user documentation as part of the feature. A technically correct result is incomplete when a
-non-specialist cannot tell what it means, what it does not prove, or what to do next.
+Treat user documentation as part of the feature. A non-specialist must understand the observation,
+its meaning and limits. Apply the consistency and concision checklist in
+[`project-review`](../project-review/SKILL.md) to changed guides: contradictory, duplicated or
+needlessly long explanations block a clean review.
 
 ## Review the change
 
 1. Read the diff and the production evaluator. Identify every changed visible result, threshold,
    status, evidence requirement, limitation and supported user action. Do not infer behavior from a
    ticket or commit message.
-2. Trace the result through `/status.health`, `CHECKUP_ROW`, its translated value/detail strings and
+2. For a changed diagnosis, trace the result through `/status.health`, `CHECKUP_ROW`, its translated value/detail strings and
    `MODEL_DESCRIPTIONS.health_*`. Keep repository documentation in English. Verify localized UI copy
    carries the same claim strength in every shipped `UI_LANGS` locale, including
    `main/www/locales/`, without copying localized prose into the documentation. Check all changed
    translations semantically; a mechanical localization pass does not prove their meaning.
-3. Update the inline explainer, [`docs/DIAGNOSTICS.md`](../../../docs/DIAGNOSTICS.md) and
+3. If diagnosis meaning or behavior changed, update the inline explainer, [`docs/DIAGNOSTICS.md`](../../../docs/DIAGNOSTICS.md) and
    [`docs/DIAGNOSTIC_EVIDENCE.md`](../../../docs/DIAGNOSTIC_EVIDENCE.md) together. Preserve the
    `<!-- user-docs: health_* -->` marker and the evidence heading's stable wire id belonging to each
-   visible row.
+   visible row. Pure editorial changes do not require unrelated UI or evidence edits. Do not add
+   per-diagnosis action recommendations: the active audit rejects them.
 4. Invoke `$diagnostic-evidence-review` when an external claim, evaluator, threshold, source signal
    or evidence boundary changed. Keep this review focused on whether the resulting explanation is
    understandable and actionable for the owner.
@@ -40,16 +43,16 @@ For every result, answer these four questions in this order:
 1. What did the board observe or count?
 2. What does this status mean for this one check?
 3. What can the result not establish?
-4. What can the owner safely check, observe or record next, and when is an installer appropriate?
+4. Where can the owner find the complete evidence or reporting instructions when needed?
 
 Introduce a plain word before an abbreviation: “electric backup heater (BUH)”, not “BUH”. Keep
 manufacturer terms only where the user must match a manual, error code or display. State project
 heuristics as heuristics and model-specific limits as model-specific. Never turn one `OK` result into
 “the plant is healthy”, and never turn `CHECKING` or missing evidence into reassurance.
 
-Make the next step specific. “Contact service” alone is not useful; say what to note first, such as
-the code, time, operating mode, weather, repeated pattern or exact manual limit. Do not recommend
-changing safety-critical or installer settings from one day of data.
+Keep diagnosis explanations focused on observation, meaning and the important limit. Put generic
+evidence collection in [`docs/REPORTING.md`](../../../docs/REPORTING.md). Do not infer an owner
+action, root cause or installer-setting change from a bounded diagnosis.
 
 ## Add or change a diagnosis
 
@@ -57,12 +60,12 @@ Keep these surfaces aligned:
 
 - `main/logic/checkup.hpp` and `main/checkup.cpp`: evaluator and published evidence;
 - `main/www/js/dashboard.js`: visible row and bounded status/detail;
-- `main/www/js/history.js`: source `what`, `normal`/`meaning` and `action`;
+- `main/www/js/history.js`: source observation, meaning and claim boundaries;
 - `main/www/locales/`: corresponding copy in every external locale listed by `UI_LANGS`, including
   the compact `MODEL_DESCRIPTION_I18N` tables for diagnosis explainers;
 - `main/www/js/i18n.js`: labels and status wording;
-- `docs/DIAGNOSTICS.md`: one marked English section with **In plain language** and
-  **What you can do**, plus glossary/status updates when needed;
+- `docs/DIAGNOSTICS.md`: one marked English section with **In plain language**, the important
+  limitation and its evidence link, plus glossary/status updates when needed; no **What you can do**;
 - `docs/DIAGNOSTIC_EVIDENCE.md`: one English section keyed by the stable diagnosis id with
   **External evidence**, **Firmware rule**, **Not established**, and for a
   filtered/heuristic/experimental check an explicit **Project boundary** or
@@ -72,7 +75,8 @@ Keep these surfaces aligned:
 ## Self-analysis and prose self-optimization
 
 Before updating the audit fingerprint:
-1. **Four-question structure check:** Confirm that each visible diagnosis section answers the four questions in sequence: (1) what was counted/observed, (2) what it means, (3) what cannot be established, and (4) safe owner next steps.
+1. **Four-question structure check:** Confirm observation, meaning, claim limits and the evidence
+   or reporting pointer. Do not add unsupported per-diagnosis recommendations.
 2. **Owner perspective & jargon audit:** Verify that acronyms are introduced before abbreviations, language is accessible to a homeowner (not just an HVAC technician), and no single check implies whole-plant wellness.
 3. **English-only documentation check:** Confirm that all text in `docs/` and review files is strictly English, leaving localized UI strings exclusively in `main/www/`. Verify completeness against `UI_LANGS` and state any limits of the changed translations' semantic review.
 4. **Actionable wording review:** Report vague advice such as "call service" without supporting

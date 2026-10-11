@@ -30,21 +30,36 @@ it; anything not fully wired is `🟡`/`🔭` with the TODO named. When in doubt
 
 ## When to run
 
-After a change whose diff shows any of these — each is a signal a catalog entry must be added,
-promoted, or corrected:
+Review the catalog after changes to components or managed dependencies, active `CONFIG_*` defaults,
+HTTP routes, OTA/security/network/diagnostic mechanisms, MQTT/HA entities, pure logic or partition
+layout. Read the actual diff and production path. If none of these facts changed, leave the catalog
+alone and report that it already matches the source.
 
-| Signal (grep the diff) | Catalog impact |
-|------------------------|----------------|
-| new entry in `main/CMakeLists.txt` `REQUIRES` / `PRIV_REQUIRES` or `main/idf_component.yml` | add/promote a row in `ESP_IDF_MATRIX.md` + a FEATURES feature section when it changes product behavior |
-| a `CONFIG_*` added/flipped in `sdkconfig.defaults` | update the matrix config contract + the relevant FEATURES capability or footprint-trim row (§10) |
-| new `main/logic/*.hpp` header or new `CHECK`s in `test/test_logic.cpp` | update the logic-core list + the CHECK count (§8) — derive it with `grep -o 'CHECK(' test/test_logic.cpp \| wc -l` minus 1 for the `#define CHECK` line (`-o` not `-c`: `-c` counts lines and would undercount two `CHECK`s on one line) |
-| new `http_register(...)` route | HTTP feature (§4) + the matrix |
-| a `TODO`/stub in `ota_update.cpp` / `mcp_server.cpp` becoming real | promote the status label `🔭`/`🟡` → `✅` in §2 and the FEATURES matrix; promote the corresponding ESP_IDF_MATRIX.md row when native surface changes |
-| new `partitions.csv` layout, signing/OTA/rollback change | §1/§2 + cross-check [`SECURITY.md`](../../../docs/SECURITY.md) |
-| new MQTT topic / HA entity, heartbeat/crash field | §5/§6 + the entity counts — read them off `HEARTBEAT_SENSOR_COUNT` (`main/logic/heartbeat.hpp`) and `CRASH_SENSOR_COUNT` (`main/logic/crashinfo.hpp`), each a `sizeof` over its sensor table |
-| new WiFi/mDNS/DHCP/watchdog behaviour | §3 |
+## Maintain one concise catalog
 
-If the diff touches none of these, FEATURES.md probably needs nothing — say so and stop.
+1. Find the existing stable feature ID in FEATURES.md. Update its single row rather than appending
+   a second explanation. Add an ID only for a distinct capability; never renumber or reuse IDs.
+2. State behavior in one short sentence and link its production evidence relative to `docs/`.
+   Use the existing status legend: `✅` shipping, `🧪` host-tested logic, `🟡` partial with its TODO,
+   `🔭` planned or stubbed. Promote a completed stub and remove obsolete planned wording.
+3. When the ESP-IDF surface changes, update the corresponding stable ESP_IDF_MATRIX.md row,
+   source evidence, official provider link and active-config appendix. The matrix owns detailed
+   component/provider facts; FEATURES summarizes product capabilities.
+4. Use the topic owners in [docs/README.md](../../../docs/README.md). Architecture owns data flow;
+   API owns HTTP fields; Security owns trust/signing; Maintenance owns delivery procedures; MQTT
+   owns wire identity and freshness. Update the affected owner and link it. Do not copy its full
+   contract into FEATURES or introduce a per-feature deep-dive section there.
+5. Apply [project-review's consistency and concision checklist](../project-review/SKILL.md#documentation-consistency-and-concision).
+   Compare related documents with current code. Contradictions, unsupported status claims and
+   avoidable duplication block a clean review. Keep current rules and necessary limits; remove
+   defect chronology and redundant rationale. Count new or moved prose when judging growth.
+6. Keep counts and measurements only when the reader needs them. Derive retained numbers from
+   source; omit volatile CHECK/entity counts rather than duplicating them in several pages.
+   Verify partition sizes, defaults and feature claims without guessing.
+7. Preserve the status legend and the closing link to this skill. Check changed links/anchors and
+   run `scripts/run-esp-idf-matrix-audit.sh`. If the matrix checker changed, also run
+   `tools/esp_idf_matrix/selftest.sh`. Select host tests for changed logic; a prose edit alone does
+   not require rerunning firmware tests.
 
 ## Steps
 
@@ -60,11 +75,11 @@ If the diff touches none of these, FEATURES.md probably needs nothing — say so
    implementation, also inspect `git diff HEAD -- main/ sdkconfig.defaults partitions.csv scripts/ .github/`
    and the intended untracked new files. Scan for the signals above and read the actual new code;
    do not infer a feature from a commit message.
-2. **Locate both records.** Find the matching section **and** the feature-matrix row at the top of
-   FEATURES.md. Most product features appear in both. If ESP-IDF surface changed, also update the
+2. **Locate the record.** Find the matching stable feature-matrix row in FEATURES.md.
+   If ESP-IDF surface changed, also update the
    stable row, evidence, official link and active-config appendix in ESP_IDF_MATRIX.md.
-3. **Write the entry code-verified — and SHORT.** State what the feature does in **one line** in the
-   matrix and **at most two or three** in its section, point at the file with a repo-relative
+3. **Write the entry code-verified — and SHORT.** State what the feature does in **one short row** in the
+   matrix, point at the file with a repo-relative
    markdown link (targets are relative to `docs/`, e.g. `../main/wifi.cpp`), and label the status
    honestly (`✅` shipping / `🧪` host-tested logic / `🟡` partial / `🔭` planned). Copy exact numbers
    from the source — sensor counts, `CHECK` count, partition sizes, `CONFIG_*` names — never round or
@@ -74,7 +89,7 @@ If the diff touches none of these, FEATURES.md probably needs nothing — say so
    hypothetical one: the catalog once reached 1510 lines, a third of it inside "the short version"
    matrix, because each new feature appended its full rationale to a table cell. Keep out the bug
    that motivated the feature (→ the issue), the measurement that settled it (→ the issue or
-   `ARCHITECTURE.md`), the field-by-field API listing (→ `docs/ARCHITECTURE.md`), and the
+   `ARCHITECTURE.md`), the field-by-field API listing (→ `docs/API.md`), and the
    per-header reasoning (→ the header's own comment). A reader comes here to learn *that* a mechanism
    exists and *where* it lives; every line past that belongs somewhere it can be found on purpose.
    If an entry needs more room, the deep-dive doc is the room.
@@ -96,7 +111,8 @@ If the diff touches none of these, FEATURES.md probably needs nothing — say so
 ## Self-analysis and prose self-optimization
 
 Before recording the pass:
-   - **Conciseness budget audit:** Audit added lines against the catalog rule: strictly one line in the summary matrix table, at most 2-3 lines in the feature section. Reject any tutorial, issue backstory, or narrative text.
+   - **Conciseness budget audit:** Audit all changed prose, including moved or new files: one concise
+     feature row, with detailed contracts linked from their owner. Reject tutorials and issue backstory.
    - **Prose review:** Identify obsolete remarks or redundant explanations near the changed entry.
      Revise them only within an explicitly authorized documentation change.
    - **Link and count validation:** Re-check that repository links resolve relative to `docs/`,
@@ -117,6 +133,8 @@ Before recording the pass:
   [`AGENTS.md`](../../../AGENTS.md) may link to `docs/FEATURES.md` and its anchors.
 - **The project convention holds:** always write the full name `daikin-altherma-esp32`, and don't name
   other projects in the catalog (the README credit is the sole exception).
+Use the full project name `daikin-altherma-esp32`. Other project attribution belongs only in the
+README credits. A shipping label proves implementation, not behavior on a particular heat pump.
 
 ## Recording the pass (merge gate — no file marker)
 
@@ -143,6 +161,6 @@ The gate allows the merge only while that box is checked AND its stamp still mat
 any later commit re-stales it and forces a fresh run. Edit the PR body with
 `scripts/gh-with-git-credentials.sh --repo github.com/0Bu/daikin-altherma-esp32 pr edit <pr> --body-file <absolute-physical-temp-path>/review-body.md`.
 If the skill
-concludes no catalog change was needed (§*When to run* → "nothing"), the docs are already in sync —
+concludes no catalog change was needed (see *When to run*), the docs are already in sync —
 still tick + stamp the box to record that you checked. Don't tick it if FEATURES.md is out of date —
 fix it first. The gate fails **closed**: if GitHub can't be read, the merge is blocked with guidance.

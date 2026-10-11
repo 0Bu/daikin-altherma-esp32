@@ -161,14 +161,14 @@ cp -R "$ROOT/main/http_status.cpp" "$TMP/main/http_status.cpp"
 # 8. Drop one row from the public documentation. The field list is maintained prose, but its names
 #    are compared with redact.hpp's machine-readable array so users of old firmware never receive an
 #    incomplete manual scrub checklist again.
-python3 - "$TMP/docs/REPORTING.md" <<'PY'
+python3 - "$TMP/docs/SECURITY.md" <<'PY'
 import sys
 p = sys.argv[1]
 s = open(p).read()
 needle = '| `reference_temperature.temperature_path` |'
 lines = s.splitlines(True)
 s2 = ''.join(line for line in lines if needle not in line)
-assert s2 != s, "seed 8 did not apply — REPORTING field row moved"
+assert s2 != s, "seed 8 did not apply — SECURITY field row moved"
 open(p, "w").write(s2)
 PY
 expect_red "a missing public redaction-documentation row"

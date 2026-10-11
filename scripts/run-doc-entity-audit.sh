@@ -55,6 +55,9 @@ PREFIX="${DOC_ENTITY_PREFIX:-daikin_altherma}"
 # deliberately, and a doc that quotes no ids costs nothing to scan.
 "$audit_binary" "$PREFIX" \
     docs/HOME_ASSISTANT.md \
+    docs/MQTT.md \
+    docs/RECIPES.md \
+    docs/API.md \
     docs/README.md \
     docs/ARCHITECTURE.md \
     docs/FEATURES.md \

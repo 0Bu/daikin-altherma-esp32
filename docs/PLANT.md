@@ -1,514 +1,241 @@
-# Plant-level features
+# Plant features
 
-What the firmware **measures, records and infers about the heat-pump installation** — as opposed to
-[`FEATURES.md`](FEATURES.md), which catalogs what it does as an ESP32 *platform* (signing, OTA, the
-web server, diagnostics, the build). A feature belongs here when its subject is the plant, the
-building or the weather around them; there when its subject is the board.
+These features observe the heat-pump installation, building or surroundings. The firmware has no
+heat-pump actuator, Modbus write implementation or MQTT command route. [FEATURES.md](FEATURES.md)
+catalogs board/platform capabilities; [DIAGNOSTICS.md](DIAGNOSTICS.md) explains visible results.
 
-Five of the six below are **analysis**, not control, and one is an optional accessory. None of them
-writes to the heat pump: this firmware has no actuator, no Modbus write path and no MQTT command
-subscription, and that is a property of the code rather than a guard around a dormant capability
-(see [`FEATURES.md`](FEATURES.md) legacy-61 and legacy-68, and [`MODBUS_PROTOCOL.md`](MODBUS_PROTOCOL.md)).
+## Collection and prerequisites
 
-| Feature | Status | Anchored in |
-|---------|:------:|-------------|
-| [Rolling plant checkup (up to 24 h)](#rolling-plant-checkup-up-to-24-h) | ✅ 🧪 | [`logic/checkup.hpp`](../main/logic/checkup.hpp), [`checkup.cpp`](../main/checkup.cpp) |
-| [Refrigerant circuit during heating](#refrigerant-service-observation) | ✅ 🧪 | [`logic/refrigerant_service.hpp`](../main/logic/refrigerant_service.hpp), [`hp_poll.cpp`](../main/hp_poll.cpp) |
-| [Open-Meteo forecast on the device](#open-meteo-forecast-on-the-device) | ✅ 🧪 | [`weather_forecast.cpp`](../main/weather_forecast.cpp), [`logic/open_meteo.hpp`](../main/logic/open_meteo.hpp) |
-| [Optional ENV III climate input](#optional-env-iii-climate-input) | ✅ 🧪 | [`env3.cpp`](../main/env3.cpp), [`logic/env3.hpp`](../main/logic/env3.hpp) |
-| [Heating-curve diagnosis](#heating-curve-diagnosis) | ✅ 🧪 | [`logic/heating_curve_diagnosis.hpp`](../main/logic/heating_curve_diagnosis.hpp) |
-| [How long a switched row has read that](#how-long-a-switched-row-has-read-that) | ✅ 🧪 | [`logic/state_dwell.hpp`](../main/logic/state_dwell.hpp), [`state_dwell.cpp`](../main/state_dwell.cpp) |
+**Plant diagnostics is off by default**, including migrated configurations. Enable it under
+**Settings → Firmware**. Enabling starts a new evidence generation; disabling clears the accumulated
+checkup/curve sample state and stops additional room, forecast and circulation collection. Saved
+source mappings remain dormant, ready for a later opt-in. Evidence never crosses an opt-out boundary.
 
----
+| Feature | Requires diagnostics opt-in | Inputs / boundary |
+|---|---|---|
+| Rolling checkup | Yes | Supported fresh X10A rows; optional external circulation-power witness. |
+| Heating-curve diagnosis | Yes | X10A, active HomeHub, eligible MQTT room source and synchronized clock; forecast optional. |
+| Open-Meteo forecast | Yes | Explicit saved location, network and synchronized clock. |
+| Refrigerant heating observation | No | Existing X10A sweep; suitable ordinary heating run. |
+| ENV III | No | Supported M5Stack board, enabled/proven I²C mapping. |
+| Per-row state age and trends | No | Readable supported source rows; compatible retained history. |
+
+X10A, HomeHub Modbus, ENV III, room MQTT, circulation MQTT and forecast keep their own lifecycle,
+identity and freshness. One available source does not make another available, and absent context is
+null rather than a fabricated zero. Outbound MQTT has its own X10A gate: local source activity does
+not imply that an auxiliary topic is currently being published.
 
 ## Rolling plant checkup (up to 24 h)
 
-> **Looking for the user guide?** [DIAGNOSTICS.md](DIAGNOSTICS.md) explains every visible result in
-> everyday language, including what `OK`, `NOTE`, `WARNING`, `CHECKING`, and `MEASURED ONLY` mean and
-> the limits of each observation. [DIAGNOSTIC_EVIDENCE.md](DIAGNOSTIC_EVIDENCE.md)
-> maps every check to manufacturer documentation or primary research, the exact firmware rule and
-> the claim that the evidence cannot support. This section is the technical design record.
+The checkup counts faults, tank quiet-hour cooling, compressor runs, defrost events, water-pressure
+minima, water flow after pump run-up, electric-heater activity and protection-counter changes.
+[DIAGNOSTICS.md](DIAGNOSTICS.md) is the owner guide; [DIAGNOSTIC_EVIDENCE.md](DIAGNOSTIC_EVIDENCE.md)
+is authoritative for sources, exact thresholds and claim limits.
 
-The third question the dashboard asks, after *what is it doing now* (the schematic) and *what did
-this reading do today* ([the trend rings](FEATURES.md)): **is anything worth reporting**. Counted
-events and window minima — compressor starts and mean run length, defrost count and share of
-runtime, the lowest water pressure and flow, backup-heater minutes (the BUH and the DHW booster kept
-apart), the unit's own fault class, and the protection-retry counters. Cycling and defrost also
-carry source-named outdoor minimum/mean **context**; those figures never change a verdict.
+Events are evaluated once per completed X10A sweep. A pulse entirely between sweeps can be missed.
+Five-minute trends retain a final value/aggregated state and cannot reconstruct complete compressor
+runs or clean tank hours, so they are not reused as diagnosis evidence.
 
-**Collection is explicit opt-in.** A fresh device and every configuration migrated from before blob
-v19 keep plant diagnostics off. The Firmware card's selector starts a new evidence generation live;
-turning it off stops and clears the checkup and its dependent room, forecast, and circulation inputs.
-No accumulated window crosses a disable/enable boundary. Ordinary X10A/HomeHub telemetry, trend
-rings, ENV III, and board diagnostics are independent of this switch.
+Supported inputs with insufficient evidence remain `collecting`; unsupported checks are
+`unavailable`. Most absence-of-pattern conclusions require a complete lifecycle and at least 90%
+valid evidence for that check's signals. The card's overall `ok` means only that the bounded
+assessable checks found nothing notable. It is not an overall plant-health certificate. Direct
+fault state, observation-only flow/heater runtime and experimental retry changes have different
+claim strengths and must be read separately.
 
-**Why it is not a view over the trend rings.** A ring folds each 5-minute bucket to its *last*
-reading, so a compressor cycle shorter than five minutes leaves no trace in it — and short cycling is
-precisely what the checkup exists to find. Events are therefore counted where they happen, once per
-completed poll sweep. A pulse falling entirely between two sweeps can still be missed, and the doc
-says so rather than implying continuous coverage.
+### Evidence population
 
-**It reports what the inputs established, never a certificate of health.** Five verdicts, and the two
-that are not judgements carry the honesty:
+Compressor cycling separates **complete runs** into heating, DHW and cooling when valve/mode
+signals stay readable and unchanged throughout. Mixed/gapped runs are censored; a run already
+active at boot or still active now is not complete. Only heating enters the classified short-run
+judgement. Classification requires at least **90% readable classification time**, **12 classified
+complete runs** and **90% of completed runs classified**. Otherwise the assessment pools all runs,
+which can mask short heating runs with DHW/cooling. `/status` identifies the assessed population;
+class counts remain observations. Complete-run facts age with their start, not stop edge.
 
-- `unavailable` — this profile cannot supply the inputs. It really bites: only some of the shipped
-  profiles carry the compressor witness at all.
-- `collecting` — the inputs exist, the window does not hold enough of them yet. It outranks `ok` in
-  the aggregation while `unavailable` does not, so a board that has been up ten minutes cannot show
-  a green verdict it has no evidence for.
+Cycling/defrost outdoor minimum and mean use fresh X10A outdoor samples paired with their own
+accepted running-compressor population. Unknown compressor speed is not permission to call a
+page-0x20 response fresh. These temperatures are context and never change a verdict.
 
-Storage is 23 completed one-hour buckets plus the pending hour, so the represented span is never an
-almost-25-hour "24 h"; `full_span` is computed from real monotonic timestamps while running and
-absolute interval ends after a cold restore. An
-explicit re-detection, or a profile or RX/TX identity change, resets the window rather than mixing an
-in-flight old-link sample into it; HomeHub-only edits do not.
+Tank-loss evidence requires complete quiet hours after the documented settling period. Observed
+charging, pump movement, draws and implausible readings interrupt a candidate; bounded unreadable
+time is tracked as blind time and excluded from observed seconds. Excessive gaps discard it.
+The result retains the greatest completed-hour R5T cooling rate, window count and bounded circulation
+correlation, not each hour's rate or a measured energy integral.
 
-The two weather contexts are deliberately separate eight-byte aggregates per bucket. Cycling accepts
-only fresh X10A 0x20 samples from a run that later completes as consistently classified space
-heating; defrost accepts only samples paired with readable defrost and compressor state while the
-compressor runs. Page 0x20 answering is not enough: its value is held while the outdoor unit rests,
-so freshness additionally requires a positively running RPS witness in that same poll. Unknown RPS
-is null, not permission. Each aggregate keeps an exact tenths sum so its mean is independent of
-sample order. The explicit static cost is 64 B × 24 = **1,536 B**, 432 B more than the former bucket
-layout (384 B payload plus 48 B alignment); the layout fingerprint retires the older `.noinit`
-window on update.
+Charging witnessed for at least two minutes arms a 45-minute settling period. Charging partly or
+wholly hidden by unreadable data may not arm it; restarting without a compatible handoff loses it.
+The first quiet-hour **NOTE after an update, unobserved charge or unexpected restart is therefore
+weaker evidence than a repeating NOTE**: tank settling can resemble rapid loss. Unreadable tank,
+valve, heater or pump inputs can result from the bus or from firmware pauses for OTA, weather,
+network work, detection, memory pressure or restart. Blind time does not establish a wiring defect.
 
-**Completed diagnostic hours restore only from compatible, dated journal records.** The window
-is 24 h and the requirements are hours, so losing it loses the *verdict*, not a few samples.
-Completed `.noinit` hours are retired on every boot because their relative ages cannot establish
-their measurement times. Once the journal scan succeeds, wall time is synchronized and this boot
-confirms the X10A source, compatible records can rebuild the window. Each record binds its exact
-interval end, model and full X10A profile/link scope, diagnostics consent generation, layout
-fingerprint and CRC. Expiry continues against monotonic time even before another hour completes.
-The open hour and completed hours not yet saved to flash can be missing. Without a compatible
-journal or clock the window starts fresh. `/status.health.persist` exposes that distinction.
+A full lifecycle with no clean hour and at least six discarded candidates becomes `blocked`
+(visible as **NOT AVAILABLE**). `aborts`, the set of `abort_reasons` and `best_aborted_s` explain
+that limit but cannot establish which cause dominated or reconstruct individual rejected hours.
+Even `blind` as the sole recorded reason proves only that no plant-side cause was recorded for a
+live candidate; a longer gap can hide charging or draws after that candidate ends. Settling normally
+counts down through unread samples, but a sample gap past `CHECKUP_MAX_GAP_S` holds it. Charge
+witnesses seen across such a gap are treated as proven; a short or unseen charge remains a limit.
+Changing circulation topic, value paths, maximum age, on/off thresholds or confirmation time starts
+this DHW check over; changing its display name alone does not. **CHECKING** after that edit says
+nothing about the tank. The [tank-loss guide](DIAGNOSTICS.md#domestic-hot-water-tank-heat-loss) explains the method's limited
+cooling-rate band and why its kWh example is not actual tank/day consumption.
 
-A **layout fingerprint** over the geometry, every row locator and every counting threshold
-invalidates a record whenever an update changes what its counters mean. A checksum alone cannot
-detect that semantic change. Stored detection settings are only an expectation; current-boot
-detection must confirm the same full source scope before any old diagnostic evidence is admitted.
-The source-binding upgrade refuses earlier unscoped records and starts a new diagnosis window.
-The in-flight **edge** state is deliberately not restored — a reboot is a discontinuity, and
-restoring it would book a compressor start that may never have happened. An intentional
-`esp_restart()` can checkpoint the ongoing DHW-loss filter state. The next boot consumes this
-handoff once and drops any undated completed counters. Only current-boot confirmation of the same
-full source scope, with diagnostics still enabled and no reset requested, permits adoption of
-the filter. An incompatible or absent handoff starts a fresh filter without the old candidate or
-settle timer. When a candidate is carried, adoption adds five seconds of explicit blind time for
-the restart plus the entire new boot uptime through
-confirmation, never observed evidence, before a compatible candidate can continue. Later unread
-samples count as ordinary blind time; a candidate they end is counted among the discarded hours
-with the reason `blind`. If the unwatched time booked at the hand-over, the five
-seconds included, passes the two-minute blind-run bound together with an unread stretch still open
-at the restart, or a tenth of the hour together with all unread time the candidate already
-carried, the carried candidate is discarded instead, and that restart discard is not counted among
-the discarded hours, so the count can under-report restarts. `/status.health.checks[dhw_loss]`
-exposes `candidate_s` or `settle_remaining_s`, so a carried 59-minute candidate no longer looks
-like zero progress merely because only complete one-hour windows count toward the six-hour verdict
-gate.
+### Reboot and persistence
 
-**A check that cannot complete here says so, instead of collecting forever.** Only completed clean
-hours count, and each tank charge costs 105 undisturbed minutes (45 settling plus a 60-minute
-window), so a plant whose own duty cycle is shorter than that produces `0 min of 6 h` for the life
-of the installation — the same reading a board that booted a minute ago gives. Two changes separate
-them. The window now records what it **discarded**: how many candidate hours (`aborts`), why
-(`abort_reasons[]` — the OR-ed set of reason kinds seen: charge, pump, draw, reading, blind) and how
-far the best one got (`best_aborted_s`), all decaying with the same 24-hour ring. It does **not**
-retain a count per reason, the reason of each individual candidate, or circulation evidence for an
-aborted candidate, and it leaves out the one candidate that the next boot drops on adoption (above).
-A full lifecycle with no completed window and at least six discarded ones becomes
-`blocked`: reported as `Unavailable`, the verdict that already means "this check cannot adjudicate
-here" — it says nothing either way, does not outrank `Ok`, and stops one permanently unreachable
-check from holding the whole card at `collecting`. What separates it from a dead bus is `aborts`: a
-bus that measured nothing discarded nothing — a candidate cannot even open without readable rows —
-so `collecting` stays the honest answer there. A finding always outranks it: a high window is
-evidence, and evidence is never withheld because the plant is also busy.
+The window holds 23 completed one-hour buckets plus the pending hour, at most 24 hours.
+**Every boot retires completed `.noinit` diagnosis hours and undated open counters.** Completed hours
+can restore only from compatible, dated history-journal records after clock synchronization and
+**current-boot confirmation of the full X10A source**. Records bind endpoint, full profile/link scope,
+diagnostics-consent generation, layout/threshold fingerprint and CRC. Old unscoped formats are
+rejected; a cached model guess cannot admit records. The open hour and completed hours not yet saved
+are missing.
 
-The blocked verdict therefore has **one narrower sentence and one deliberately non-causal one**.
-When `blind` is the only reason kind recorded, no plant-side reason was recorded for a live
-candidate in the retained window. That is not proof that none occurred. Within the blind budget the
-candidate stays live, so a draw or charge hidden in a short unobserved stretch is still recorded
-when readings return. A stretch that exceeds the budget ends the candidate as a `blind` discard. A
-charge or pump run inside that stretch that is still under way when readings return meets no live
-candidate and is never recorded, because the next candidate opens only on the first clean reading
-(after any settle that charge arms). The part of a draw's drop that fell inside the stretch is lost
-because the draw anchor restarts at the first clean reading; a draw-sized drop that continues past
-it, or an event that starts after the new candidate has opened, is recorded against that candidate.
-The settle arms only after two minutes of charge witness the board has seen, and counts down from
-the last sample that saw the charge, also through unread samples. A gap past `CHECKUP_MAX_GAP_S`
-holds it, and so does an intentional restart whose handoff the next boot adopts; anything that
-starts the check afresh drops it (a panic, a power loss, a handoff the next boot rejects or no
-longer finds, for example after a firmware update that changes the stored layout or moves it in
-RAM, or a reset of the check). A charge seen for less than two minutes in total, such as one lying
-entirely inside the stretch, therefore arms no settle, a charge whose end fell inside an unread
-stretch has its settle shortened by the unread samples, and a settle still running when the check
-starts afresh is lost; each way the next candidate can open on the charge's settling tail. And `blind` itself only means unobserved time: the readings the check
-needs (the tank temperature, or the valve, heater and pump states, which sit on a different X10A
-page) went unread. That time comes from X10A timeouts and also from the board pausing its own
-polling (the OTA or weather network hold, model detection, a poll cycle skipped after a caught
-exception, a restart), and the ring cannot tell them apart. The card therefore says "readings the
-check needs" rather than naming the tank temperature, names both sources, says nothing about the
-tank, and points at the X10A wiring and RX/TX pins only conditionally: if it keeps happening day
-after day. Every other mix says only what the stored totals establish. Charging, pump activity,
-draws, an implausible reading and a continuous loss fast enough to trip the draw filter can all
-prevent a clean hour; the
-ring cannot say which dominated. In particular it cannot claim "draw-dominant" or correlate
-circulation-off time with discarded candidates.
+Current observations take precedence. Compatible hours must fit the window and expire **exactly
+24 hours after their stored endpoint**, even between hourly updates. `/status.health.persist` names
+`flash_pending` while confirmation is awaited (not proof that saved hours exist), `flash` after
+reconstruction, or `fresh` when no stored intervals were selected, including precedence/capacity
+exclusions. Startup refusal reasons remain explicit. An explicit profile/link reset retires pending
+restore for this boot, even if the same profile is selected again. HomeHub-only edits do not reset
+the X10A lifecycle. Safe mode and disabled diagnostics admit no old hours; unidentified-source
+empty samples advance time without booking observations.
 
-The standing-loss judgement has a **bounded detection band**. `0.8 K/h` is the notable threshold —
-a project heuristic from the reference installation, not a Daikin limit and not transferable across
-tank volume or the temperature difference between tank and room. At about `1.85 K/h`, the permitted
-per-sample drop reaches the draw filter's floor: a still faster continuous loss can make every
-candidate look draw-affected and leave no completed hour. `Ok` therefore means no clean-hour loss at
-or above `0.8 K/h` was observed inside that detectable band. It does not prove the absence of a
-faster loss, and `blocked` cannot exclude one either.
+An intentional restart can carry only the ongoing tank-loss filter through a separately sealed
+**one-shot handoff**, adopted after the same full source is confirmed with diagnostics enabled and
+no reset requested. It preserves the quiet-hour candidate/settling timer, never undated completed
+counters or transient compressor edges. Power loss, crash, changed source or incompatible/absent
+format starts a fresh filter.
 
-The row publishes the **greatest** completed-hour R5T drop plus the number of clean windows, not a
-mean or a sum. Its kWh explanation is deliberately only a 200-litre water-equivalent example: if
-the whole assumed volume cooled uniformly by the displayed rate, the water heat-content change is
-`200 kg × 1.16 Wh/(kg·K) × K`. R5T is one point in a stratified tank, tank volume is not configured,
-and individual window rates are not retained. The optional 24-hour orientation deliberately assigns
-that maximum to every clean window and converts the resulting thermal example with an assumed
-domestic-hot-water COP of `2.5–3.0`. This gives an order of magnitude for replacement electricity,
-not a measured whole-tank or daily loss; rejected and missing hours remain outside it. The 24-hour
-line is withheld until the rolling report has actually crossed its full-span boundary.
+Adoption books **five seconds plus all new-boot uptime through source confirmation as blind time**.
+Together with earlier gaps, exceeding either two minutes of continuous blindness or 10% of the
+candidate hour discards the carried candidate. This restart discard is not counted in `aborts`, so their
+count can under-report restarts; later unread samples use ordinary blind/discard accounting.
+`candidate_s` and `settle_remaining_s` expose carried progress. Neither blind nor settling time is
+observed evidence. Same-boot journal creation does not prove restoration after power loss.
 
-The **settling** guard is charged only for a charge witness that stood at least two minutes. It is
-owed to heat entering the tank, and a one-cycle valve blip put none in; before this bound a blip
-cost the identical 105 minutes as a 40-minute charge, and one blip every 90 minutes took a
-measured, otherwise perfect 24 h from 23 completed windows to zero. A short witness still discards
-the candidate hour — the hydronics moved, so the tank was not standing — it just no longer asserts
-that heat went in. For a charge whose witness the board saw for two minutes and whose end it saw,
-two rules keep the bound from failing in the direction that reports a leak where there is none; a
-charge it saw only in part is the limit disclosed in the blocked-verdict paragraph above. A witness seen across a gap between samples longer than `CHECKUP_MAX_GAP_S` counts
-as **proven** rather than short (an empty sample from a polling pause does not open such a gap). And an **unreadable** row is not proof the charge ended: both witnesses ride page 0x60, so
-one silent page inside a real 40-minute charge would otherwise restart the two-minute clock, and a
-charge finishing soon after that timeout would arm no settle at all and have its own tail measured
-as standing loss. At the reference installation's timeout rate that is not a corner case. Staying
-armed across a blind stretch only ever spends more settling time, never less.
-
-Restoration cannot substitute for current-source confirmation. Safe mode and disabled diagnostics
-admit no old hours. Completed RAM hours are retired on every boot; while the bus remains
-unidentified, journal admission is blocked. The poll loop feeds empty samples every second,
-advancing time without adding observed evidence. Once this boot confirms the source, compatible
-dated hours may return, and their monotonic deadlines prevent a later outage from extending them
-beyond 24 hours.
-
-**Claim strength is explicit per check**, because these are not equally strong statements: the
-current unit fault is direct `device` state; cycling and the defrost ratio are `heuristic` and raise
-`info` only, lacking load, humidity and coil-temperature context; flow after pump run-up and the
-separately counted BUH/BSH seconds are `observation` only; protection retries are `experimental`,
-raised only by a strict increase of one exact counter between comparable samples and never by an
-absolute non-zero value. Any check concluding the *absence* of a pattern needs a complete lifecycle
-and at least 90 % valid evidence for its own signal — a stable counter does not prove absence.
-
-**DHW standing loss needed a second source before it could be a check at all** (legacy-361). The cooling
-rate alone does not separate the two causes — a healthy tank loses ~0.3 K/h without DHW circulation
-and ~1.2 K/h with it — so an external power meter on the circulation pump (`POST /set_circulation`)
-says which a given hour was. The witness is optional, and a window whose pump state is unknown buys
-no observed seconds rather than an attributed loss.
-
-**Missing evidence is not a plant state.** All its inputs ride the X10A sweep, where one page that
-does not answer removes all of that page's rows from the cycle. Treating that unread second as
-*ineligible* discarded the whole accumulated hour, which on the reference installation happened
-about once an hour against a window needing sixty clean minutes. Replayed over that installation's
-real 24 h, the old rule kept about half the achievable windows — so it roughly doubled the time to a
-verdict, and in the first hours of a boot, when only one or two windows are possible at all, it read
-"0 min of 6 h" with every row it needed present and correct. A sample the firmware could not read is
-therefore **blind time**, bounded so no unobserved stretch within the run bound can hide a tank
-charge (a longer one ends the candidate, see the blind verdict above) and subtracted
-from the seconds the window claims to have observed. A state the sweep *can* see still ends the
-window, and a draw hidden inside a blind stretch is still caught against the temperature anchor
-standing when vision was lost.
-
-**Cycling is judged per operating class**, because pooling the loads hid the finding the check exists
-for. A tank charge is a long run — on the reference installation every DHW cycle terminates on the
-~100 °C discharge limit, so one charge is several legitimate starts — and a combined mean therefore
-lifts a genuinely short-cycling space circuit over the ten-minute heuristic. It fails the other way
-too: a tank charging in short bursts reads as a finding when it is the plant doing its job. The
-3-way valve separates tank from room circuit; the I/U operating mode then separates heating from
-cooling on the room circuit. Only confirmed space heating is judged. DHW and positively identified
-cooling are reported but excluded.
-
-**The unit is a COMPLETE RUN, not a second**, and that distinction is the whole correctness of it.
-Splitting seconds by the valve while the start stays where the run began leaves a ratio whose
-numerator and denominator describe different populations — and DHW priority makes that routine
-rather than rare: twelve continuous 25-minute runs that each hand over to the tank after five
-minutes then read as a five-minute mean over twelve starts, a short-cycling verdict on a plant that
-never short-cycled. A run is therefore assigned to a class only if the valve and, on the room
-circuit, I/U mode stayed readable and unchanged for every witnessed second. A completed run that
-switched class, lost a class/compressor input or crossed an observation gap is **censored** and
-counted as such, so "no eligible run" can never be read as "nothing ran". A run already active at
-boot or still active when the status is read has no complete edge pair and enters no completed-run
-mean. `CheckupState` remains transient and is deliberately not restored across a reboot.
-
-Complete-run facts age with the **start edge**, not the stop. A long run that starts in a retained
-hour is booked back into that bucket when it completes, and the persisted ring is re-sealed. If its
-start has already left the rolling day, its duration cannot re-enter through a later stop bucket;
-only a censored completion remains visible in the current hour.
-
-**Catalog capability is not evidence**, and the two questions it answers are separate. Coverage is
-built from the resolved profile, so a plant whose valve/mode page never answers still reports the row.
-The class figures are therefore printed only once something was *witnessed* — otherwise null, never
-a zero that would read as "no space heating ran today" beside real starts. And the split may only
-*decide* once the paired clock cleared the same 90 % bar the check has always used; below that the
-pooled figure decides, with its documented masking, exactly as on a profile that never had the row.
-A check that worked from the compressor witness alone must not start stalling forever because a
-second row it can see in the catalog is silent on the wire. `/status` states which of the two
-carried the verdict, because a reader cannot infer it from the numbers.
-
-**And the clock is not the population** — the same error one step further in, caught on hardware
-after the two above were fixed. The paired class clock counts seconds in which the required rows were
-*readable*; the verdict is built from completed, classified *runs*. Inputs can answer all day while
-changing or disappearing inside each run, giving a full clock and no eligible population. The split
-then judged an empty set and ended on a green **Ok resting on nothing**. It now requires both twelve
-classified runs and at least 90 % of all completed runs classified. Every positively known class
-counts toward that coverage, but only heating runs enter the judged mean. A fully observed quiet
-heating circuit beside DHW or cooling is a real picture; a large censored population forces the
-pooled fallback and its explicit masking warning.
-
-**Deliberately not built**, each because the bus cannot support the claim: an absolute minimum-flow
-threshold (model-specific over a 3–18 kW catalog, and the unit raises its own error anyway — so the
-observed part-load minimum after pump run-up is *reported* with no verdict attached; it is not the
-manual's nominal or design flow), a flat daily start count (24 starts is one an hour in January and
-a control problem in April, so the mean run length is what knows the load), and any overall
-"healthy" verdict.
-
----
+Browser trends and pinned points have a separate source/boot identity. Changing or deleting a
+source clears them, and older replies cannot restore them. A reboot starts a new browser lifetime
+even when the device later restores compatible saved trends.
 
 <a id="refrigerant-service-observation"></a>
 ## Refrigerant circuit during heating
 
-This is a separate, passive observation during an ordinary heating run, not a ninth plant-health
-diagnosis. It starts automatically; no service mode, changed setting or owner action is required. It
-folds fresh values from one ordinary X10A poll sweep only while the compressor is confirmed running
-in space heating, the DHW path and defrost are off, fault and any profile-provided special-phase
-witnesses are current and inactive, and discharge temperature, EEV command and at least one
-structurally identified refrigerant-pressure side are readable. A transport gap or a required signal
-becoming unavailable ends the observation; a profile that lacks optional context reports that
-recording is active with some comparison data missing.
+A separate passive row records one continuous ordinary space-heating run. It is not a ninth health
+check and starts without a service mode or plant-diagnostics opt-in. Until this boot detects a
+profile and evaluates its coverage—including safe mode—the row/status object is absent.
 
-After this boot has detected an X10A profile and the poll task has evaluated that profile's signal
-coverage, the object under `/status.refrigerant_service` reports duration, samples, limitations and
-window min/mean/max values. Until then—including safe mode, where the poll task is not started—the
-object and row are absent rather than assigning a profile reason.
-It deliberately has no health verdict, full-load or settling claim, numeric
-normal range, completion threshold or refrigerant-charge conclusion. The EEV pulse value is the
-controller command, not independent proof that the mechanical valve moved. See
-[`DIAGNOSTICS.md`](DIAGNOSTICS.md#refrigerant-service-observation) for the user-facing limits and
-[`DIAGNOSTIC_EVIDENCE.md`](DIAGNOSTIC_EVIDENCE.md#refrigerant-service-observation) for the exact
-rule boundary.
+A window needs fresh values in the same sweep: running compressor, space-heating mode, non-DHW
+valve, no defrost, readable normal fault rows, no active profile-provided special phase, discharge
+temperature, EEV command and at least one structurally identified refrigerant-pressure side.
+Optional missing comparison signals are reported separately. A required reading/phase witness or
+sequence gap ends the window; the next suitable run begins at zero.
+
+`/status.refrigerant_service` reports duration, sample count, limits and min/mean/max values.
+It assigns no health verdict, normal range, settling/full-load condition, completion threshold or
+refrigerant-charge conclusion. The EEV reading is a controller command, not mechanical feedback.
+See [the row guide](DIAGNOSTICS.md#refrigerant-service-observation) and
+[its evidence boundary](DIAGNOSTIC_EVIDENCE.md#refrigerant-service-observation).
 
 ## Open-Meteo forecast on the device
 
-An optional weather forecast fetched **directly by the ESP32** — no MQTT, no evcc, no cluster in the
-path. It exists as comparison evidence for heating-curve diagnosis, and is optional there.
+Configure **Open-Meteo weather forecast** in the Settings heating-curve section after enabling
+plant diagnostics. Saving latitude/longitude explicitly consents to sending that location and the
+installation's public source IP to Open-Meteo. Clearing both fields stops traffic and removes retained
+forecast evidence. A saved location stays dormant while diagnostics is off.
 
-Its own task waits for WiFi and a synchronized clock, then fetches a bounded six-hour JSON response
-over CA-verified HTTPS every 45 minutes, retrying after 5 on failure. The request path does none of
-that work: an ordinary `POST /set_weather` persists a changed location and wakes the task, so no
-DNS, TLS or JSON ever runs on the httpd worker. The release-HIL-only `refresh:true` form is accepted
-only for the unchanged, enabled saved location with diagnostics enabled; it writes no NVS, requests
-one causal refresh and returns its token. The response is bounded *before* it is read (a
-`Content-Length` cap, then fixed chunks against a running total) and never stored — nothing about a
-forecast survives a reboot.
+The ESP32 fetches directly over verified HTTPS, without MQTT as a prerequisite. Its task waits for
+network/clock readiness, fetches a bounded six-hour response every **45 minutes**, and retries after
+**5 minutes** on failure. Ordinary saving wakes the task; it does no TLS work in the HTTP handler.
+Values are runtime-only and do not survive reboot. The service is intended for non-commercial use
+and has no uptime guarantee; the dialog attributes Open-Meteo/DWD ICON.
 
-**Saving a location is the location-specific consent.** Handing these coordinates and this
-installation's public source IP to a third party is the act being consented to. Fetching additionally
-requires the default-off plant-diagnostics master; a saved location is dormant while it is off.
-Clearing the location wakes the task into its dormant state, drops the runtime values and retracts
-the retained MQTT evidence document — a retained forecast nobody deletes goes on reading like a
-live input long after collection was withdrawn. The worker itself remains alive on an ordinary
-non-safe boot so a later opt-in can apply without rebooting.
+Units, time order and input ranges are checked. Changing location invalidates old values. A failed
+refresh can keep the last numbers as historical evidence but fails current availability/freshness;
+fetch age expires after 90 minutes. Provider issue time remains unknown rather than being filled
+with fetch time. Diagnostic reports redact coordinates and the MQTT evidence topic omits them.
+The schema is in [MQTT.md](MQTT.md#weather); no weather HA entities are created.
 
-**Almost everything else here is a refusal**, and that is the design:
+Forecast is **optional comparison evidence** for heating-curve sampling. Losing it degrades that
+comparison but does not stop otherwise eligible local samples. The separate HIL refresh-token API
+belongs in [API.md](API.md), not the owner setup flow.
 
-- `issued_at` stays `null` rather than being backfilled from the fetch time. The endpoint does not
-  expose the model-run instant, and a synthesized one would be fabricated provenance.
-- The units are re-verified against the units the query asked for, so a provider changing them fails
-  closed instead of publishing a °F number as °C.
-- A provider timestamp that moves **backward** is rejected.
-- A location edit invalidates the stored value outright — an old city's forecast must never be
-  reported under a new one.
-- A failed refresh keeps the last numbers visible **for diagnosis only**, while `available` and
-  `fresh` fail closed together with the configured and task-availability flags.
-
-**Privacy is structural, not a review point.** The coordinates are redacted in diagnostic snapshots
-([`REPORTING.md`](REPORTING.md)), and the MQTT evidence document carries **no coordinates at all** — a
-host test pins their absence, because a broker archive is a place an installation's location would
-otherwise sit forever. There are no HA discovery entities: this is a metrics stream, and a forecast is
-not a state of this device.
-
-The public endpoint is intended for non-commercial use and carries no uptime guarantee; the modal
-discloses the location/IP transfer and attributes Open-Meteo/DWD ICON.
-
----
+The diagnostic weather companion uses the **two-hour window selected at the last successful fetch**.
+That window stays fixed until another successful fetch; it does not slide forward between requests.
 
 ## Optional ENV III climate input
 
-A **third reading source** beside X10A and the HomeHub, sharing nothing with either: its own task,
-its own 10 s sample cadence and its own freshness window. One runtime-configured I²C bus reads SHT30
-temperature and humidity (CRC-checked) and QMP6988 pressure as one atomic sample.
+ENV III is an independent accessory with a 10-second cadence and a 30-second fresh-sample bound.
+Temperature/humidity (CRC-checked SHT30) and pressure (QMP6988) form one atomic sample. Disabled or
+unsupported board selections start no sensor bus/task. Its supported hardware, installation limits
+and test-before-persist save sequence are in [BOARDS.md](BOARDS.md#m5stack-env-iii-outdoor-temperature-humidity-and-pressure).
 
-This is specifically an **ENV III** driver — ENV, ENV II and ENV IV use different sensor ICs and are
-not claimed as compatible. Support is decided by the board's **vendor**, not its model: what makes the
-sensor plausible is the Grove port carrying the pins the preset names.
+The UI shows an independent outdoor-climate reading/pill, with separate 24-hour history.
+It does not replace Daikin's outside-air sensor, enter `/values`, or become a checkup input.
+The temperature can accompany a heating-curve event as optional context. The board cannot discover
+sensor placement: a reading near the indoor unit is indoor air, irrespective of its label.
 
-The runtime gate is literal. Disabled, or a board whose preset is not an M5Stack one, and there is no
-task, no bus and no pullups — and the start path re-checks that itself rather than trusting its
-caller, so a hand-edited config cannot start an accessory this board has no connector for. Pin
-reservation runs in **all** directions against the X10A link, the status LED and the recovery button,
-each rejecting the others' pins with a named reason.
-
-**A save is hardware-proven, not merely validated**, and graded by what is changing:
-
-| Change | What it must prove |
-|--------|--------------------|
-| Enabling on new pins | a real bus probe — the QMP6988 chip id **and** a full CRC-valid SHT30 measurement, since the SHT30 has no chip-id register and a decoded measurement is the only identity an ACK cannot give |
-| Enabling on the pins already running | a fresh runtime sample |
-| Moving pins while running | refused — disable first, because two masters briefly driving one shared wire is a bus fault, not a config change |
-| Disabling | **nothing at all** — it is the recovery path and must never depend on hardware that may be the problem |
-
-Each refusal carries a machine code beside the English text, so the localized UI translates without
-the API losing its one wording. Board identity, LED/button and the sensor are submitted as **one**
-atomic proposed snapshot, so choosing a board and attaching its sensor cannot half-save.
-
-Published as a retained flat JSON document plus three HA sensors whose discovery config carries a
-two-entry availability list — the device LWT and a template on the state topic itself — so a stale or
-failed sensor marks only those three entities unavailable while the rest of the device stays online,
-and an error omits the three readings rather than carrying the last plausible value forward. The
-`samples`/`errors` I2C counters ride both shapes: they describe the link rather than the air, so a
-sensor going dark keeps reporting why instead of falling silent about it.
-
-**Where it deliberately does not appear:** `/values` and the plant checkup. Those describe the heat
-pump, and an accessory measuring the board's surroundings is not a plant reading. Its one firmware
-consumer is the [heating-curve diagnosis](#heating-curve-diagnosis) below, which records the
-temperature as optional context with each event — never as a condition for one.
-
-**The firmware cannot know where the sensor hangs.** Beside the indoor unit this is room air; over a
-long I²C run to a sheltered outdoor position it is genuine outdoor air, and only the latter makes the
-diagnosis axis mean anything. The device states the reading, not its meaning — placement is the
-owner's fact, and anything downstream that depends on it has to record it. It does carry its
-own 24-hour rings (served as a separate `/history` source, not mixed into the X10A set) and one
-schematic pill, and it does not pretend to replace the Daikin outdoor sensor.
-
----
+A stale/failed sample carries no plausible old MQTT reading; link counters remain. Disabling retracts
+its state and three HA configs. Source-specific publication/availability is in [MQTT.md](MQTT.md#env-iii).
 
 ## Heating-curve diagnosis
 
-A **raw, heating-only, write-free** sampler that records how far the living room deviates from its
-target during genuine space-heating windows — the evidence a heating curve is set too high or too low.
-It is a diagnosis instrument and terminates there: dynamic leaving-water actuation is retired, and the
-read-only Modbus core contains neither write function codes nor value encoders.
+This read-only sampler records **target room temperature − actual room temperature**, unchanged,
+at most once per 30 minutes during genuine heating windows. Positive means too cold, negative too
+warm. Room kelvin is not a calibrated leaving-water correction; the firmware does not calculate or
+apply a heat-pump command.
 
-It records the canonical room deviation **unchanged**, at most once per 30 minutes, and only after the
-gates below agree. There is no P gain, deadband, rounding, clamp, slew limit, requested LWT offset,
-mode switch or active controller anywhere in it — and none can be added quietly, because
-[`FEATURES.md`](FEATURES.md) legacy-68's contract test walks every C++ source under `main/` and fails on the
-vocabulary.
+Enable plant diagnostics, configure the broker/room source and keep the HomeHub source active.
+Under **Room-temperature source**, enter the exact temperature `topic$path`, a fixed target or
+target `topic$path`, and an optional timestamp `topic$path`. For example, use a structured payload's
+`room/status$temperature_c` plus a fixed target `20`. Configure maximum age to match the publisher.
+Saved mappings are not proof that their next payload is readable.
 
-**The gate order is load-bearing**, not incidental: HomeHub connectivity, then the plant gate
-(register 53, normal space operation), then heating mode (register 38, Heating rather than Cooling),
-and only then room, X10A and clock evidence. Establishing the plant *before* the room is what stops an
-idle summer plant with its thermostat off from reading as a fault — a healthy installation produced
-thousands of failsafes when the order was the other way round.
+The current sampler requires a **non-empty temperature JSON path** and, for an MQTT target, a
+non-empty target path. Although the room decoder can read a plain numeric topic with no path, that
+mapping does not arm this diagnosis. A fixed target avoids needing a target MQTT path. This is an
+implementation boundary, not evidence that a scalar sensor is defective.
 
-- **HOLD** (neutral): an idle plant, or Cooling — a separate non-heating hold that never enters the
-  data set.
-- **BLOCK**: missing or stale room data, an invalid clock, a disconnected X10A or HomeHub, or an
-  unknown mode or gate. Unknown evidence blocks; it is never assumed benign.
-- A transient hold or block **preserves** the cadence and the last durable event, so recovery cannot
-  fabricate a new sample.
+With no timestamp mapping, only live non-retained arrival time is accepted; a retained reading needs
+trusted source time. Actual/target range is 5–35 °C and optional enabled/HVAC mappings must pass.
+[MQTT.md](MQTT.md#room-input-and-heating-curve-evidence) defines freshness, reason codes and payloads.
 
-**Two optional outdoor axes ride with each event.** The plant axis is HomeHub input 44, decoded from
-an explicitly fast Modbus batch in the same poll cycle as the two heating gates. The second axis is
-the [ENV III](#optional-env-iii-climate-input) accessory when configured, fresh and plausible. They
-stay separate and each event stores its source: input 44 is the plant's outside-air concept, whereas
-the firmware cannot know whether ENV III is actually mounted outdoors. Both values are captured *at
-the moment of the event* beside the room deviation — without an outdoor axis the record is
-underdetermined, since a room error alone cannot
-separate a curve that is too **steep** from one shifted too **high** (+0.5 K at −5 °C and at +12 °C call
-for opposite corrections and record identically). Both are **context, never gates**: nothing
-branches on either, an absent source moves no state, reason or counter, and a source-boundary test
-refuses a hold or block on them. Absence is null, not 0 °C; a sample taken without one source clears
-that source's previous event value rather than inheriting it. The sampling *method* is unchanged, so
-archived events stay comparable; only the MQTT payload shape moves to schema 3.
+Gate order establishes HomeHub connectivity, normal space operation (register 53), then Heating
+rather than Cooling (register 38), before room/X10A/clock evidence. An inactive plant or confirmed
+Cooling yields neutral **HOLD**; unknown/stale prerequisites yield **BLOCK**. A transient hold/block
+preserves the sample cadence and last event. Deleting the room source/HomeHub or disabling
+plant diagnostics disarms and clears sample memory.
 
-**The reference room can hide the error it is meant to reveal.** A room thermostat and its zone
-valves form a closed inner control loop: once they reduce demand or close at the setpoint, they clip
-both excess heat and the room deviation. A near-zero recorded error therefore cannot by itself prove
-that the heating curve is correct; a curve that is too high can be masked by the room controller.
-Read the event series with the D2 clipping share (how often leaving-water temperature sits at its
-minimum) and the zone-demand duty cycle (how often that zone actually requests heat). Without those
-corroborating signals, this sampler systematically under-reports that high-curve case.
+Each event can store two distinct optional outdoor axes: HomeHub input 44 from the current
+cycle/session, and fresh/plausible ENV III from its actual placement. Missing context is null and
+never gates an event. Without outdoor context, room error cannot distinguish a steep curve from an
+overall high/low shift. A room thermostat/zone valve can clip the error at its target, so near-zero
+samples do not prove the curve is correct. Interpret them with actual leaving-water clipping and
+zone-demand duty where independent evidence exists.
 
-**Arming is derived from the explicit master and its prerequisites.** It requires plant diagnostics,
-the timestamped MQTT room mapping and an active HomeHub
-([`FEATURES.md`](FEATURES.md) legacy-62 — a typo is accepted as configuration but fails closed and is
-reported when the next MQTT frame reaches the decoder). The forecast above is *optional* comparison
-evidence, distinguishing a Recording state from a Degraded one, so clearing a location stops forecast
-traffic without stopping local samples. Disabling diagnostics, or deleting either the room source or
-HomeHub, disarms and clears sample memory: a reading taken under an earlier consent must not outlive it.
-
-The outside contract is `/status.heating_curve` plus the schema-versioned `<base>/heating_curve`
-payload, which expose raw current and last deviation, the heating gates, the source time, an absolute
-event timestamp with a sequence, and counters. Consumers detect an event by a **sequence increase**
-and treat a sequence or uptime reset as a reboot. Those domain fields are deliberately absent from
-`<base>/heartbeat`, which stays technical board and link health. There are no HA entities: this is
-analysis evidence, not a plant command.
-
-The card in the UI renders only while plant diagnostics are enabled, stating recording, optional-forecast degradation, a summer wait,
-excluded cooling or the exact missing input — and it says out loud that room kelvin is not calibrated
-water kelvin. It also carries the plant and accessory outdoor axes as separate rows, whose numbers
-come from the diagnosis rather than from either source read a second time, so a live source cannot
-show green there while the state row reports that nothing is being recorded. The rows name
-`HomeHub` and `ENV III`, respectively, and are **passive**, like every other reported row on the
-card: the readings live inside their explanations. ENV III's one editor stays the Board Hardware
-modal on the ESP32 card, which saves it in a
-single atomic `POST /set_board` beside the board identity that decides whether the Grove port exists
-at all. A second door into that modal from a card that reports EVIDENCE offered hardware
-configuration on a row whose own copy says the value changes nothing about what gets recorded.
-
----
-
-*Platform-level features are in [`FEATURES.md`](FEATURES.md); keep both current with the
-[`feature-docs`](../.agents/skills/feature-docs/SKILL.md) skill.*
-
----
+The Settings card names the recording/degraded/hold/block state and missing input. The emitted
+`heating_curve` evidence preserves current room values separately from the last recorded event.
+Use **sequence increases and absolute event time** to count samples, not repeated publications.
+ENV III configuration stays in Board Hardware; its passive context row is not a second sensor editor.
 
 ## How long a switched row has read that
 
-The value list states what a flag **is**; for a flag that is half the question. `Powerful DHW
-Operation: OFF` describes a plant that finished a charge four seconds ago and one that has not
-charged since Tuesday equally well, and until now nothing on the device could tell them apart —
-nine switched rows have a [24-hour timeline](FEATURES.md) whose tooltip names phase and duration,
-and other eligible flags had no answer anywhere.
+Eligible flags and fault classes show the age of their current state in the row explainer. A state
+already present when first observed has a floored lower bound, such as **OFF ≥ 3 h**; only a
+transition witnessed across consecutive readable cycles gets an exact-start duration.
 
-Every eligible bit flag and the fault class now carry the age of their current state, shown as the
-first line of the row's explainer. That includes the eight P2 overlay flags: their ages describe only
-how long the raw neutral ON/OFF bit has stood and do **not** establish its polarity, trigger or
-proprietary meaning. The age is an **observation**, not a statistic: nothing is inferred from it, no
-verdict is raised on it and no threshold is attached to it. What the plant does with a long-standing
-flag is the reader's judgement — the device only says how long it has stood, and how much of that it
-actually saw.
+Normal polling cadence counts as observed; known OTA, weather or memory-pressure pauses and a
+continuing run's resumed tail count as **blind time**. An unreadable current row shows no age.
+Compatible warm resets can carry state ages, with restart and new-boot time through the first poll
+also blind. More than two minutes of blindness, including time until the returning sample, starts
+a new age. The **v4 format rejects older records**, so an update can restart ages without a plant
+state change. State ages have no flash restore after power loss.
+P2 overlay ages describe neutral raw ON/OFF bits, not undocumented polarity or trigger meaning.
+No threshold or plant-health verdict is inferred from an age.
 
-**What it refuses to claim** is the whole design, because a duration is a statement about a stretch
-of time and every way of overstating one looks identical on screen:
-
-- A run the board only found **already standing** is a lower bound — *"OFF ≥ 3 h"*, floored, because
-  rounding a bound up asserts time nobody watched. Only a
-  transition it witnessed licenses the plain form, and *witnessed* means seen in the immediately
-  preceding cycle: a change discovered after even a short gap happened somewhere inside that gap.
-- A run the bus did not answer for throughout says so beside itself. A flag can pulse and return
-  inside a gap, and the X10A sweep really does miss pages (47 timeouts in 8.2 h on the reference
-  installation).
-- Past two minutes unread a row reports **nothing at all**, so a silent bus lets its ages expire
-  rather than freezing them and presenting them as current.
-- A reboot is not a change: the ages ride `.noinit` across a reset that kept power, with the
-  unwatched reboot window, and the start-up before the first poll of the new boot, booked as
-  unobserved rather than as a duration nobody measured.
-- A row the bus could not read this cycle shows **no age at all**, because it is showing no reading
-  either — an age under a "—" describes nothing.
-
-The mechanism, the storage and the persistence rules are the platform half and live in
-[`FEATURES.md`](FEATURES.md) legacy-80.
+Implementation entry points: [`checkup.cpp`](../main/checkup.cpp),
+[`refrigerant_service.hpp`](../main/logic/refrigerant_service.hpp),
+[`weather_forecast.cpp`](../main/weather_forecast.cpp), [`env3.cpp`](../main/env3.cpp),
+[`heating_curve_diagnosis.hpp`](../main/logic/heating_curve_diagnosis.hpp),
+[`state_dwell.hpp`](../main/logic/state_dwell.hpp). Keep feature docs synchronized with the
+[feature-docs skill](../.agents/skills/feature-docs/SKILL.md).
