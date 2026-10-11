@@ -116,6 +116,8 @@ printf '1. 2.3\n' > "$T/version/version.txt"
 check_rc "whitespace is not normalized into SemVer" 1 "$T/version/scripts/next-version.sh"
 
 echo "== 4. workflow trust and release ordering =="
+check_rc "release tag lookup refuses unknown remote identity" 0 \
+    node test/test_release_tag_guard_contract.mjs
 check_rc "manifest provenance validator self-test passes" 0 \
     python3 scripts/check-manifest-provenance.py --self-test
 check_rc "signing-key continuity self-test passes" 0 \
