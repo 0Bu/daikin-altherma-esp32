@@ -337,6 +337,44 @@ def is_canonical_credential_wrapper(token: str) -> bool:
     )
 
 
+def literal_pr_create_form(source: str) -> list[str] | None:
+    """Prove the reviewed direct PR-create argv before inspecting prose as shell syntax."""
+    source = re.sub(r"\\\r?\n", "", source)
+    if re.search(r"[\x00-\x1f\x7f$`]", source):
+        return None
+    quote = ""
+    escaped = False
+    for character in source:
+        if escaped:
+            escaped = False
+        elif character == "\\" and quote != "'":
+            escaped = True
+        elif quote:
+            if character == quote:
+                quote = ""
+        elif character in "'\"":
+            quote = character
+        elif character in ";&|(){}!<>*?[~#":
+            return None  # Operators/expansions must be quoted or escaped title data.
+    try:
+        tokens = tokenize(source)
+    except ValueError:
+        return None
+    if len(tokens) != 13 or not is_canonical_credential_wrapper(tokens[0]):
+        return None
+    if tokens[1::2] != ["--repo", "pr", "--head", "--base", "--title", "--body-file"]:
+        return None
+    if tokens[4] != "create" or tokens[8] != "main" or not tokens[10].strip():
+        return None
+    if not re.fullmatch(r"github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", tokens[2]):
+        return None
+    if not re.fullmatch(r"agent/[A-Za-z0-9_./-]+", tokens[6]):
+        return None
+    if not re.fullmatch(r"/[A-Za-z0-9_./-]+", tokens[12]) or ".." in Path(tokens[12]).parts:
+        return None
+    return tokens
+
+
 def token_may_be_gh(token: str) -> bool:
     base = executable(token)
     canonical_wrapper = is_canonical_credential_wrapper(token)
@@ -1020,6 +1058,9 @@ def shell_executes_stdin(source: str, *, original_source: str | None = None) -> 
 def find_merge(source: str, depth: int = 0) -> dict[str, str] | None:
     if depth > 5:
         return {"action": "shell merge", "selector": "", "repo": "", "host": "", "error": "shell nesting exceeds parser limit"}
+    create_tokens = literal_pr_create_form(source)
+    if create_tokens is not None:
+        return parse_gh(create_tokens, 0, {})
     if literal_rg_inspection(source):
         return None  # Literal query text is not a GitHub action; callers still check secret paths.
     original_source = source
@@ -1317,7 +1358,11 @@ def main() -> int:
             else find_merge(command)
         )
         if parsed is not None:
-            if merge_action_count(command) > 1:
+            if parsed["action"] == "gh pr create":
+                if literal_pr_create_form(command) is None:
+                    parsed["error"] = parsed["error"] or "PR creation needs one literal direct reviewed argv form"
+                # Literal title is data; wrapper argv, file, head and cwd checks remain active.
+            elif merge_action_count(command) > 1:
                 parsed["error"] = parsed["error"] or "multiple merge actions cannot be bound atomically"
             elif execution_context_is_ambiguous(command):
                 parsed["error"] = parsed["error"] or "merge command changes argv or working directory after target binding"

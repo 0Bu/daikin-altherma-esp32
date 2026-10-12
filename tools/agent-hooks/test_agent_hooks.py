@@ -22,6 +22,41 @@ import merge_payload
 
 
 class AgentHookFastTests(unittest.TestCase):
+    def test_literal_pr_create_title_is_data_and_transport_checks_remain(self):
+        for title in ("Modernize agent workflows and pre-push audits", "Document git push and cd checks",
+                      "Explain gh pr merge and mergePullRequest", "User's git push guidance"):
+            command = ("scripts/gh-with-git-credentials.sh --repo github.com/0Bu/daikin-altherma-esp32 "
+                       "pr create --head agent/example --base main --title " + shlex.quote(title) +
+                       " --body-file /private/tmp/body.md")
+            payload = {"cwd": str(ROOT), "tool_name": "exec_command", "tool_input": {"cmd": command}}
+            with self.subTest(title=title), patch("sys.stdin", io.StringIO(json.dumps(payload))), \
+                    patch("sys.stdout", new_callable=io.StringIO) as output:
+                self.assertEqual(merge_payload.main(), 0)
+                fields = output.getvalue().split("\0")
+                self.assertEqual(fields[0], "gh pr create")
+                self.assertEqual(fields[5], "")
+            self.assertEqual(self.run_pre_tool(payload), (0, ""))
+            for prefix, suffix in (("env ", ""), ("cd /tmp; ", ""), ("", "; gh api user"),
+                                   ("", " > /tmp/result")):
+                candidate = prefix + command + suffix
+                self.assertIsNone(merge_payload.literal_pr_create_form(candidate))
+                rc, out = self.run_pre_tool({"cwd": str(ROOT), "tool_name": "exec_command",
+                                             "tool_input": {"cmd": candidate}})
+                self.assertEqual(rc, 0)
+                self.assertEqual(json.loads(out)["hookSpecificOutput"]["permissionDecision"], "deny")
+            self.assertIsNone(merge_payload.literal_pr_create_form(command + " --fill"))
+            for title in ("X;echo", "X|sh", "X&echo", "X{a,b}", "X*", "X?", "X[ab]", ";", "~", "#"):
+                candidate = command.replace(shlex.quote(shlex.split(command)[10]), title)
+                self.assertIsNone(merge_payload.literal_pr_create_form(candidate))
+                with patch("sys.stdin", io.StringIO(json.dumps({**payload, "tool_input": {"cmd": candidate}}))), \
+                        patch("sys.stdout", new_callable=io.StringIO) as output:
+                    self.assertEqual(merge_payload.main(), 0)
+                    self.assertTrue(output.getvalue().split("\0")[5])
+            with patch("sys.stdin", io.StringIO(json.dumps({**payload, "cwd": "/tmp"}))), \
+                    patch("sys.stdout", new_callable=io.StringIO) as output:
+                self.assertEqual(merge_payload.main(), 0)
+                self.assertIn("not the canonical repository script", output.getvalue())
+
     def test_runner_aliases_keep_identical_pr_action_and_lease(self):
         command = ("scripts/gh-with-git-credentials.sh api --hostname github.com --method PUT "
                    "repos/0Bu/daikin-altherma-esp32/pulls/123/merge "

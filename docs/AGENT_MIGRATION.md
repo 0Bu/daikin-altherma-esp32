@@ -256,6 +256,8 @@ configuration; only a native run with actual permission and approval-policy evid
 effective restrictions for that run.
 Report `approval_policy` separately from `approvals_reviewer`: `auto_review` names the reviewer,
 not the policy. An unexposed actual approval policy remains unobserved.
+Use the harness-injected runtime permissions; do not query process environments or attempt writes
+to probe access. The coordinator verifies role selection from the actual native spawn call and result.
 The process exit status alone does not prove that the selected reviewer completed its work. A usable
 review record must identify the actual named role, verified read-only mode, exact base/head and scope,
 local changes included, findings and completed review. Check that evidence independently before
