@@ -12,6 +12,14 @@
 
 namespace daik {
 
+inline bool open_meteo_epoch_seconds(double value, int64_t& out) {
+    // INT64_MAX rounds up to 2^63 as a double. Use the exact exclusive bound before casting.
+    if (!std::isfinite(value) || value < 0 || value >= 0x1p63 || std::floor(value) != value)
+        return false;
+    out = static_cast<int64_t>(value);
+    return true;
+}
+
 inline WeatherValidation open_meteo_derive_forecast(const std::vector<int64_t>& times,
                                                      const std::vector<double>& temperature_c,
                                                      const std::vector<double>& humidity_pct,

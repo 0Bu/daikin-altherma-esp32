@@ -9995,6 +9995,22 @@ static void test_config_blob_strings_fit() {
     CHECK(validate(cfg, why));
 }
 
+static void test_open_meteo_epoch_seconds() {
+    int64_t seconds = -7;
+    CHECK(open_meteo_epoch_seconds(0.0, seconds) && seconds == 0);
+    CHECK(open_meteo_epoch_seconds(1791784800.0, seconds) && seconds == 1791784800);
+    CHECK(open_meteo_epoch_seconds(std::nextafter(0x1p63, 0.0), seconds));
+    CHECK(seconds == INT64_MAX - 1023);
+    for (const double invalid :
+         {0x1p63, static_cast<double>(INT64_MAX), -1.0, 0.5,
+          std::numeric_limits<double>::infinity(), -std::numeric_limits<double>::infinity(),
+          std::numeric_limits<double>::quiet_NaN()}) {
+        seconds = -7;
+        CHECK(!open_meteo_epoch_seconds(invalid, seconds));
+        CHECK(seconds == -7);
+    }
+}
+
 static void test_env3() {
     const uint8_t crc_bytes[2] = {0xbe, 0xef};
     CHECK(env3_sht_crc(crc_bytes, 2) == 0x92);
@@ -22387,6 +22403,7 @@ int main() {
     test_reference_temperature_config();
     test_circulation_source();
     test_heating_curve_diagnosis();
+    test_open_meteo_epoch_seconds();
     test_weather_forecast_contract();
     test_mcp();
     test_net_link();

@@ -231,11 +231,16 @@ bool read_sample(SensorBus& sensor, float& temperature_c, float& humidity_pct,
     return true;
 }
 
-void task(void*) {
-    const Config cfg = config();
+struct TaskPins {
+    int sda;
+    int scl;
+};
+
+void task(void* argument) {
+    const TaskPins pins = *static_cast<const TaskPins*>(argument);
     SensorBus sensor;
     for (;;) {
-        if (!sensor.initialized && !initialize(sensor, cfg.env3_sda, cfg.env3_scl)) {
+        if (!sensor.initialized && !initialize(sensor, pins.sda, pins.scl)) {
             publish_error("sensor_not_found");
         } else {
             float temperature = 0.0f, humidity = 0.0f, pressure = 0.0f;
@@ -299,11 +304,15 @@ void env3_start() {
     // config_load and POST /set_env3 enforce this too. Keep the task boundary fail-closed so a
     // future caller cannot start an M5Stack-only accessory from a stale or handcrafted Config.
     if (!cfg.env3_enabled || !env3_board_supported(cfg)) return;
+    // This boot-only task owns I2C0 until reboot. Keep its pins in immutable static storage rather
+    // than copying the allocating Config after entering the FreeRTOS C task boundary.
+    static const TaskPins pins{cfg.env3_sda, cfg.env3_scl};
     portENTER_CRITICAL(&g_mux);
     g_runtime.status.started = true;
     g_runtime.status.error = "collecting";
     portEXIT_CRITICAL(&g_mux);
-    if (xTaskCreate(task, "env3", 4096, nullptr, TASK_PRIO_ENV3, nullptr) != pdPASS) {
+    if (xTaskCreate(task, "env3", 4096, const_cast<TaskPins*>(&pins), TASK_PRIO_ENV3, nullptr) !=
+        pdPASS) {
         publish_error("task_start_failed");
         ESP_LOGE("env3", "task start failed");
         return;
