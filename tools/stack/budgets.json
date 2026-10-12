@@ -235,7 +235,7 @@
     },
     "mqtt_heartbeat_payload": {
       "pattern": "^daik::build_heartbeat_json\\[abi:cxx11\\]\\(",
-      "max_bytes": 176
+      "max_bytes": 368
     },
     "mqtt_crash": {
       "pattern": "^(?:daik::(?:\\(anonymous namespace\\)::)?publish_crash\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?13publish_crash[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
@@ -695,7 +695,19 @@
     },
     "mqtt_curve_payload": {
       "pattern": "^(?:daik::build_heating_curve_mqtt_json(?:\\[abi:cxx11\\])?\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?29build_heating_curve_mqtt_json[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
-      "max_bytes": 64
+      "max_bytes": 240
+    },
+    "json_integer_append": {
+      "pattern": "^daik::json_append_integer_field_impl\\(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >&, std::basic_string_view<char, std::char_traits<char> >, unsigned long long, bool, bool\\)$",
+      "max_bytes": 80
+    },
+    "json_integer_length": {
+      "pattern": "^unsigned int std::__detail::__to_chars_len<unsigned long long>\\(unsigned long long, int\\)$",
+      "max_bytes": 48
+    },
+    "json_integer_digits": {
+      "pattern": "^void std::__detail::__to_chars_10_impl<unsigned long long>\\(char\\*, unsigned int, unsigned long long\\)$",
+      "max_bytes": 240
     },
     "history_fold_circulation": {
       "pattern": "^(?:daik::(?:\\(anonymous namespace\\)::)?fold_circulation_locked\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?23fold_circulation_locked[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
@@ -2541,7 +2553,10 @@
       "symbols": [
         "mqtt_task",
         "mqtt_heartbeat_builder",
-        "mqtt_heartbeat_payload"
+        "mqtt_heartbeat_payload",
+        "json_integer_append",
+        "json_integer_length",
+        "json_integer_digits"
       ],
       "multipliers": {},
       "base_bytes": 1536,
@@ -2551,7 +2566,10 @@
       "symbols": [
         "mqtt_task",
         "mqtt_curve_builder",
-        "mqtt_curve_payload"
+        "mqtt_curve_payload",
+        "json_integer_append",
+        "json_integer_length",
+        "json_integer_digits"
       ],
       "multipliers": {},
       "base_bytes": 1536,

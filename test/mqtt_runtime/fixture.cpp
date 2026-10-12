@@ -6,6 +6,10 @@
 #include <cstdlib>
 #include <new>
 #include <string>
+namespace cpp_witness {
+// Arm only around a production preparation call. Long topics force each owned string to allocate.
+int fail_after = -1, attempted = 0;
+} // namespace cpp_witness
 namespace json_witness {
 int   parses = 0, deletes = 0, allocations = 0, frees = 0, live = 0;
 bool  fail_next  = false;
@@ -51,7 +55,11 @@ static void destroy(cJSON* root) {
 #include MQTT_PRODUCTION_SOURCE
 
 void* operator new(size_t size) {
-    if (sdk::fail_next_new || (sdk::fail_locked_new && sdk::locks > 0)) {
+    const bool staged_failure = cpp_witness::fail_after == 0;
+    if (cpp_witness::fail_after >= 0) ++cpp_witness::attempted;
+    if (cpp_witness::fail_after > 0) --cpp_witness::fail_after;
+    if (staged_failure || sdk::fail_next_new || (sdk::fail_locked_new && sdk::locks > 0)) {
+        cpp_witness::fail_after = -1;
         sdk::fail_locked_new = false;
         sdk::fail_next_new   = false;
         ++sdk::failed_news;
@@ -528,6 +536,57 @@ void subscription_locks_released() {
                 adapter::config_locks == 0,
             "SAVED_SUBSCRIPTION_LOCK_OWNERSHIP_BALANCED");
 }
+void clean_broker_reconnect() {
+    daik::on_mqtt(nullptr, "mqtt", MQTT_EVENT_DISCONNECTED, nullptr);
+    // Model a clean session: the broker has lost its subscriptions, while production cleanup
+    // owners still identify the previously accepted topics on this same client handle.
+    for (auto& topic : sdk::live_topics) topic.fill('\0');
+    daik::on_mqtt(nullptr, "mqtt", MQTT_EVENT_CONNECTED, nullptr);
+}
+void circulation_saved_reconnect_oom() {
+    initial_config();
+    daik::on_mqtt(nullptr, "mqtt", MQTT_EVENT_CONNECTED, nullptr);
+    const std::string topic        = "mem01-public-reconnect-circulation/" + std::string(80, 'c');
+    adapter::cfg.circulation_topic = topic;
+    const uint32_t epoch           = daik::s_circulation_requested_epoch.load();
+    daik::service_circulation_subscription(adapter::cfg, epoch);
+    require(daik::s_circulation_subscribed_topic == topic && sdk::topic_live(topic.c_str()) &&
+                daik::s_circulation_status.subscribed && !daik::s_circulation_subscription_retry,
+            "CIRCULATION_RECONNECT_OOM_ACCEPTED_UNCHANGED_OWNER_BASELINE");
+    clean_broker_reconnect();
+    const int before        = sdk::subscribe_calls;
+    cpp_witness::attempted  = 0;
+    cpp_witness::fail_after = 0; // prepared_owner, after the reconnect force is consumed
+    bool threw              = false;
+    try {
+        daik::service_circulation_subscription(adapter::cfg, epoch);
+    } catch (const std::bad_alloc&) {
+        threw = true;
+    }
+    cpp_witness::fail_after = -1;
+    require(threw && cpp_witness::attempted == 1 && sdk::failed_news == 1 &&
+                sdk::allocation_fail_lock_depth == 0,
+            "CIRCULATION_RECONNECT_OWNER_PREPARATION_REAL_BAD_ALLOC");
+    require(sdk::subscribe_calls == before && !sdk::topic_live(topic.c_str()) &&
+                daik::s_circulation_subscribed_topic == topic &&
+                !daik::s_circulation_status.subscribed && !daik::s_circulation_reconfigure,
+            "CIRCULATION_RECONNECT_OOM_RETAINS_OWNER_WITHOUT_BROKER_EFFECT");
+    const bool retry_pending = daik::s_circulation_subscription_retry;
+    subscription_locks_released();
+    daik::service_circulation_subscription(adapter::cfg, epoch);
+    require(sdk::subscribe_calls == before + 1 && sdk::topic_live(topic.c_str()) &&
+                daik::s_circulation_subscribed_topic == topic &&
+                daik::s_circulation_status.subscribed,
+            "CIRCULATION_RECONNECT_OOM_NEXT_CYCLE_RESUBSCRIBES_TOPIC");
+    require(retry_pending && !daik::s_circulation_subscription_retry,
+            "CIRCULATION_RECONNECT_RETRY_SURVIVES_OOM_AND_CLEARS_AFTER_ACCEPTANCE");
+    feed(topic.c_str(), R"({"power":58,"time":1700000100})");
+    daik::service_reference_frames(adapter::cfg);
+    require(daik::s_circulation_status.has_value && daik::s_circulation_status.power_w == 58 &&
+                daik::s_circulation_status.source_unix_s == 1700000100,
+            "CIRCULATION_RECONNECT_ACCEPTED_SUBSCRIPTION_RECEIVES_CURRENT_WIRE_VALUE");
+    subscription_locks_released();
+}
 void circulation_saved_epoch_change() {
     initial_config();
     daik::on_mqtt(nullptr, "mqtt", MQTT_EVENT_CONNECTED, nullptr);
@@ -649,6 +708,62 @@ daik::ReferenceTopicSet saved_reference_topics() {
     adapter::cfg.ref_temp_fixed_setpoint_tenths = 0;
     adapter::cfg.ref_temp_setpoint_path         = "setpoint";
     return daik::reference_topics(adapter::cfg);
+}
+void reference_saved_reconnect_oom() {
+    initial_config();
+    daik::on_mqtt(nullptr, "mqtt", MQTT_EVENT_CONNECTED, nullptr);
+    const auto     topics = saved_reference_topics();
+    const uint32_t epoch  = daik::s_ref_requested_epoch.load();
+    daik::service_reference_subscription(adapter::cfg, epoch);
+    require(daik::s_ref_subscribed_topics == topics && daik::s_ref_status.subscribed &&
+                !daik::s_ref_subscription_retry,
+            "REFERENCE_RECONNECT_OOM_ACCEPTED_UNCHANGED_OWNER_BASELINE");
+    // Fail the setpoint and time copies, then each of the three desired-topic slot copies. The
+    // mapping and accepted owners stay unchanged, so only post-force preparation is under test.
+    for (int allocation = 0; allocation < 5; ++allocation) {
+        clean_broker_reconnect();
+        for (const auto& topic : topics)
+            require(!sdk::topic_live(topic.c_str()),
+                    "REFERENCE_CLEAN_SESSION_HAS_NO_SUBSCRIPTIONS");
+        const int before        = sdk::subscribe_calls;
+        const int failed_before = sdk::failed_news;
+        cpp_witness::attempted  = 0;
+        cpp_witness::fail_after = allocation;
+        bool threw              = false;
+        try {
+            daik::service_reference_subscription(adapter::cfg, epoch);
+        } catch (const std::bad_alloc&) {
+            threw = true;
+        }
+        cpp_witness::fail_after = -1;
+        require(threw && cpp_witness::attempted == allocation + 1 &&
+                    sdk::failed_news == failed_before + 1 && sdk::allocation_fail_lock_depth == 0,
+                "REFERENCE_RECONNECT_PREPARATION_REAL_BAD_ALLOC");
+        require(sdk::subscribe_calls == before && daik::s_ref_subscribed_topics == topics &&
+                    !daik::s_ref_status.subscribed && !daik::s_ref_reconfigure,
+                "REFERENCE_RECONNECT_OOM_RETAINS_PRIOR_OWNERS_WITHOUT_BROKER_EFFECT");
+        const bool retry_pending = daik::s_ref_subscription_retry;
+        subscription_locks_released();
+        daik::service_reference_subscription(adapter::cfg, epoch);
+        bool all_live = true;
+        for (const auto& topic : topics) all_live = all_live && sdk::topic_live(topic.c_str());
+        require(sdk::subscribe_calls == before + 3 && all_live &&
+                    daik::s_ref_subscribed_topics == topics && daik::s_ref_status.subscribed &&
+                    daik::s_ref_status.error.empty(),
+                "REFERENCE_RECONNECT_OOM_NEXT_CYCLE_RESUBSCRIBES_ALL_TOPICS");
+        require(retry_pending && !daik::s_ref_subscription_retry,
+                "REFERENCE_RECONNECT_RETRY_SURVIVES_OOM_AND_CLEARS_AFTER_ACCEPTANCE");
+        feed(topics[0].c_str(), R"({"temperature":21,"enabled":true})");
+        feed(topics[1].c_str(), R"({"setpoint":22})");
+        feed(topics[2].c_str(), R"({"time":1700000100})");
+        daik::service_reference_frames(adapter::cfg);
+        require(daik::s_ref_status.has_value && daik::s_ref_status.temperature_c == 21 &&
+                    daik::s_ref_status.has_setpoint && daik::s_ref_status.setpoint_c == 22 &&
+                    daik::s_ref_status.has_source_time &&
+                    daik::s_ref_status.source_unix_s == 1700000100,
+                "REFERENCE_RECONNECT_ACCEPTED_SUBSCRIPTIONS_RECEIVE_CURRENT_WIRE_VALUES");
+        subscription_locks_released();
+    }
 }
 void reference_cleanup_once(const daik::ReferenceTopicSet& topics) {
     adapter::cfg.ref_temp_topic.clear();
@@ -1432,6 +1547,8 @@ int main(int argc, char** argv) {
             circulation_saved_epoch_change();
         else if (std::strcmp(scenario, "circulation_saved_retry") == 0)
             circulation_saved_retry();
+        else if (std::strcmp(scenario, "circulation_saved_reconnect_oom") == 0)
+            circulation_saved_reconnect_oom();
         else if (std::strcmp(scenario, "circulation_saved_replacement_failure") == 0)
             circulation_saved_replacement_failure();
         else if (std::strcmp(scenario, "reference_saved_postsubscribe_oom") == 0)
@@ -1444,6 +1561,8 @@ int main(int argc, char** argv) {
             reference_saved_prior_owner_failure(false);
         else if (std::strcmp(scenario, "reference_saved_prior_owner_retry") == 0)
             reference_saved_prior_owner_failure(true);
+        else if (std::strcmp(scenario, "reference_saved_reconnect_oom") == 0)
+            reference_saved_reconnect_oom();
         else if (std::strcmp(scenario, "reference_saved_replacement_partial_failure") == 0)
             reference_saved_replacement_partial_failure();
         else if (std::strcmp(scenario, "circulation_unsubscribe_rejection") == 0)

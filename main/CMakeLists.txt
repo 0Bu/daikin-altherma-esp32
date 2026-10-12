@@ -172,17 +172,10 @@ target_compile_options(${COMPONENT_LIB} PRIVATE
 # number.
 set_source_files_properties(http_status.cpp PROPERTIES COMPILE_OPTIONS "-Os")
 
-# mqtt_task owns the publish loop's persistent state and runs on a fixed 6144-byte stack. The
-# project-wide -Os required by the embedded locale catalogs enables GCC's called-once inliner; on
-# ESP-IDF 6.0.2 that folded large reference/circulation helpers into mqtt_task and grew its fixed
-# frame from the historical -Og 1040 bytes to 2304 bytes. With this local exception the measured
-# -Os frame is 0x460 = 1120 bytes. Keep size optimisation for this object, but retain those natural
-# helper call boundaries so transient publish locals do not all become one task-frame lifetime.
-# This is deliberately narrower than raising the task stack: another permanently allocated stack
-# would reduce the same contiguous internal heap protected by the MQTTS/OTA 56/24-KiB gates. Make
-# compiler drift fail the build too: 2048 bytes is above this object's current largest fixed frame
-# (mqtt_ha_start, 1584) but below the regressed mqtt_task frame (2304). It is a per-function frame
-# ceiling, not a substitute for measuring the complete task call path and live high-water mark.
+# Keep MQTT helper boundaries under -Os: called-once inlining previously folded large transient
+# locals into the persistent publisher frame. Publisher and SDK transport allocations are bound
+# separately in tools/stack/budgets.json. The 2048-byte per-function ceiling catches compiler drift;
+# complete call-path budgets and owner-task runtime minima remain independently necessary.
 set_source_files_properties(mqtt_ha.cpp PROPERTIES COMPILE_OPTIONS
     "-fno-inline-functions-called-once;-Werror=frame-larger-than=2048")
 

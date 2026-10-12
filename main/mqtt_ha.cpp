@@ -1862,6 +1862,9 @@ static void service_circulation_subscription(const Config& c, uint32_t epoch) {
 
     const bool force = s_circulation_reconfigure.exchange(false);
     if (force) {
+        // Keep the reconnect request through any later allocation failure. The prior cleanup
+        // owner can still match even though a clean broker session needs a new SUBSCRIBE.
+        s_circulation_subscription_retry = true;
         // Reconnects and persisted threshold/age changes both require a fresh, confirmed state.
         // A previously confirmed ON/OFF must not cross either boundary as current evidence.
         Lock lk(s_mtx);
@@ -2125,6 +2128,7 @@ static __attribute__((noinline)) bool apply_reference_binding(const Config& c, u
         }
         s_ref_applied_epoch = epoch;
         force               = s_ref_reconfigure.exchange(false);
+        if (force) s_ref_subscription_retry = true;
     }
     return true;
 }

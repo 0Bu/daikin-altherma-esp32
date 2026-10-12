@@ -24,7 +24,7 @@ IDs are stable and never reused; gaps identify retired entries. Each feature is 
 | 10 | Verified MQTTS/WSS with common-root CA bundle; credentials require encrypted transport | ✅ | [`mqtt_ha.cpp`](../main/mqtt_ha.cpp), [`sdkconfig.defaults`](../sdkconfig.defaults) |
 | 11 | Flash core dumps, strict matching-ELF symbolication; proven foreign bytes preserved but suppressed | ✅ 🧪 | [`diag_crash.cpp`](../main/diag_crash.cpp), [`logic/crashinfo.hpp`](../main/logic/crashinfo.hpp), [`decode-coredump.sh`](../scripts/decode-coredump.sh) |
 | 12 | Current-reset classification separate from optional stored crash evidence; retained report cleanup | ✅ 🧪 | [`diag_crash.cpp`](../main/diag_crash.cpp), [`logic/crashinfo.hpp`](../main/logic/crashinfo.hpp) |
-| 13 | Device heartbeat diagnostics independent of model detection; publication requires X10A activation | ✅ 🧪 | [`logic/heartbeat.hpp`](../main/logic/heartbeat.hpp) |
+| 13 | Device heartbeat diagnostics independent of model detection; publication requires X10A activation | ✅ 🧪 | [`logic/heartbeat.hpp`](../main/logic/heartbeat.hpp), [`logic/json_integer.hpp`](../main/logic/json_integer.hpp) |
 | 14 | Strongest-AP selection, SAE tuning and continuous reconnect after a working connection | ✅ | [`wifi.cpp`](../main/wifi.cpp) |
 | 15 | ICMP gateway watchdog for ghost associations, with explicit unmeasurable-probe handling | ✅ 🧪 | [`wifi.cpp`](../main/wifi.cpp), [`logic/link_watch.hpp`](../main/logic/link_watch.hpp) |
 | 16 | AP-only captive provisioning: typed SSID, catch-all DNS, redirects and RFC 8910 advertisement | ✅ 🧪 | [`provisioning.cpp`](../main/provisioning.cpp), [`captive_dns.cpp`](../main/captive_dns.cpp), [`logic/captive.hpp`](../main/logic/captive.hpp) |

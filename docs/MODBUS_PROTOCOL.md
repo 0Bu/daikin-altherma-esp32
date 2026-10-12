@@ -501,7 +501,7 @@ connection-state vocabulary. Config and diagnostics only; there are no pump cont
 
 **API:** `/status.modbus` carries the link/config fields (including `searched` and detected `profile`:
 `auto` \| `homehub` \| `altherma4`), `task_stack_min_free_bytes` (this task's
-worst stack headroom in bytes, from the one sampler all five watched stacks report through
+worst stack headroom in bytes, from the shared owner-task sampler
 — `main/stack_watch.hpp` — so this surface and the MQTT heartbeat's `modbus_stack_min_free_bytes`
 cannot answer the same question with two numbers; `null`, not `0`, when the task has never run,
 which on a board with no HomeHub is always) and the

@@ -275,6 +275,18 @@ ENTRY_RE = re.compile(r"\bentry\s+a1,\s*(0x[0-9a-fA-F]+|[0-9]+)\b")
 RULE_NAME_RE = re.compile(r"^[a-z][a-z0-9_]*$")
 TO_XSTRING_RE = re.compile(r"^[^\n]+ __gnu_cxx::__to_xstring<[^\n]+>\(")
 DOUBLE_STRING_SYMBOL = "std::__cxx11::to_string(double)"
+INTEGER_APPEND_SYMBOL = (
+    "daik::json_append_integer_field_impl(std::__cxx11::basic_string<char, std::char_traits<char>, "
+    "std::allocator<char> >&, std::basic_string_view<char, std::char_traits<char> >, "
+    "unsigned long long, bool, bool)")
+INTEGER_LENGTH_SYMBOL = (
+    "unsigned int std::__detail::__to_chars_len<unsigned long long>(unsigned long long, int)")
+INTEGER_DIGITS_SYMBOL = (
+    "void std::__detail::__to_chars_10_impl<unsigned long long>(char*, unsigned int, unsigned long long)")
+INTEGER_BUILDERS = {
+    "daik::build_heartbeat_json[abi:cxx11](daik::HeartbeatFields const&)": 25,
+    "daik::build_heating_curve_mqtt_json[abi:cxx11](daik::HeatingCurveMqttFields const&)": 21,
+}
 TASK_ALLOCATIONS = {
     "httpd": ("main/http_server.cpp", r"\bcfg\.stack_size\s*=\s*([0-9]+)\s*;"),
     "main": ("sdkconfig.defaults", r"(?m)^CONFIG_ESP_MAIN_TASK_STACK_SIZE=([0-9]+)$"),
@@ -508,6 +520,66 @@ def validate_dynamic_stack(disassembly: str, frames: dict[str, int],
     frames[name] += 336  # round 328 up to the exact 16-byte alignment above
 
 
+def validate_integer_formatter(disassembly: str) -> None:
+    """Keep the uint64 decimal conversion and its two callers in the reviewed fixed paths."""
+    blocks = function_instructions(disassembly)
+    for name in blocks:
+        if ("daik::json_append_integer_field" in name
+                and name != INTEGER_APPEND_SYMBOL):
+            raise BudgetError(f"integer formatter: newly outlined or cloned continuation {name}")
+    if INTEGER_APPEND_SYMBOL not in blocks:
+        return  # The required symbol inventory reports a missing helper.
+    callers: dict[str, int] = {}
+    for caller, instructions in blocks.items():
+        for instruction in instructions:
+            if f"<{INTEGER_APPEND_SYMBOL}>" not in instruction:
+                continue
+            if not re.match(r"call8\s", instruction):
+                raise BudgetError("integer formatter: indirect helper reference requires review")
+            callers[caller] = callers.get(caller, 0) + 1
+    if callers != INTEGER_BUILDERS:
+        raise BudgetError("integer formatter: the two reviewed builder caller counts changed")
+
+    def calls(name: str) -> list[str]:
+        result = []
+        for index, instruction in enumerate(blocks.get(name, [])):
+            if not re.match(r"call", instruction):
+                continue
+            direct = re.fullmatch(r"call8\s+[0-9a-f]+\s+<(.+)>", instruction)
+            if direct:
+                result.append(direct.group(1))
+                continue
+            indirect = re.fullmatch(r"callx8\s+(a[0-9]+)", instruction)
+            previous = blocks[name][index - 1] if index else ""
+            literal = re.fullmatch(
+                r"l32r\s+" + (indirect.group(1) if indirect else "INVALID")
+                + r",\s+[^\n]+\([0-9a-f]+\s+<(.+)>\)", previous)
+            if indirect is None or literal is None:
+                raise BudgetError(f"integer formatter: unreviewed call dispatch in {name}")
+            result.append(literal.group(1))
+        return result
+
+    string = "std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >"
+    expected = {
+        INTEGER_APPEND_SYMBOL: [
+            string + "::append(char const*, unsigned int)",
+            "_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEpLEPKc$isra$0",
+            string + "::push_back(char)", string + "::append(char const*, unsigned int)",
+            INTEGER_LENGTH_SYMBOL, INTEGER_DIGITS_SYMBOL,
+        ],
+        INTEGER_LENGTH_SYMBOL: ["__udivdi3"],
+        INTEGER_DIGITS_SYMBOL: ["memcpy", "__umoddi3", "__udivdi3"],
+    }
+    for name, targets in expected.items():
+        if name in blocks and calls(name) != targets:
+            raise BudgetError(f"integer formatter: decimal/append/ROM continuation changed in {name}")
+    helper = "\n".join(blocks[INTEGER_APPEND_SYMBOL])
+    if (not re.search(r"movi\s+a12,\s*10\n[^\n]+\n[^\n]+\ncall8\s+[0-9a-f]+\s+<"
+                      + re.escape(INTEGER_LENGTH_SYMBOL) + r">", helper)
+            or not re.search(r"movi\.n\s+a8,\s*20\n[^\n]+\naddi\s+a5,\s*a1,\s*20\n", helper)):
+        raise BudgetError("integer formatter: decimal base / fixed 20-byte destination changed")
+
+
 def parse_frames(disassembly: str, budgets: dict[str, Any] | None = None) -> dict[str, int]:
     if budgets is None:
         budgets = load_budgets(DEFAULT_BUDGETS)
@@ -583,6 +655,7 @@ def parse_frames(disassembly: str, budgets: dict[str, Any] | None = None) -> dic
     if current is not None and strict:
         raise BudgetError(f"symbol {current}: missing first prologue")
     validate_dynamic_stack(disassembly, frames, required)
+    validate_integer_formatter(disassembly)
     return frames
 
 
@@ -761,6 +834,43 @@ def validate_json_recursion(budgets: dict[str, Any], json_source: str,
         raise BudgetError("path httpd_mcp_parse: MCP needs depth + root + early-reject frame")
 
 
+def validate_integer_source(source: str, callers: dict[str, str]) -> None:
+    # Match only the two small source functions, independently of surrounding JSON helpers.
+    reviewed = """
+__attribute__((noinline)) inline void
+json_append_integer_field_impl(std::string& out, std::string_view prefix, uint64_t magnitude,
+                               bool negative, bool valid) {
+    out.append(prefix.data(), prefix.size());
+    if (!valid) { out += "null"; return; }
+    char digits[20];
+    const auto result = std::to_chars(digits, digits + sizeof(digits), magnitude);
+    if (negative) out += '-';
+    out.append(digits, static_cast<size_t>(result.ptr - digits));
+}
+template <typename Integer>
+__attribute__((always_inline)) inline void
+json_append_integer_field(std::string& out, std::string_view prefix, Integer value,
+                          bool valid = true) {
+    static_assert(std::is_integral_v<Integer> && !std::is_same_v<Integer, bool>);
+    using Unsigned = std::make_unsigned_t<Integer>;
+    const bool negative = std::is_signed_v<Integer> && value < 0;
+    const Unsigned bits = static_cast<Unsigned>(value);
+    const Unsigned magnitude = negative ? Unsigned(0) - bits : bits;
+    json_append_integer_field_impl(out, prefix, static_cast<uint64_t>(magnitude), negative, valid);
+}
+"""
+    compact = lambda text: re.sub(r"\s+", "", text)
+    if (compact(reviewed) not in compact(source)
+            or len(re.findall(r"\bjson_append_integer_field_impl\s*\(", source)) != 2
+            or len(re.findall(r"\bjson_append_integer_field\s*\(", source)) != 1):
+        raise BudgetError("integer formatter source: fixed uint64/20-byte/inline magnitude contract changed")
+    expected = {"main/logic/heartbeat.hpp": 25, "main/logic/heating_curve_mqtt.hpp": 21}
+    if (set(callers) != set(expected)
+            or any(len(re.findall(r"\bjson_append_integer_field\s*\(", callers[path])) != count
+                   for path, count in expected.items())):
+        raise BudgetError("integer formatter source: reviewed builder caller inventory changed")
+
+
 def validate_source_contract(budgets: dict[str, Any]) -> None:
     sources = {path: (REPO / path).read_text(encoding="utf-8")
                for path, _ in TASK_ALLOCATIONS.values()}
@@ -777,6 +887,17 @@ def validate_source_contract(budgets: dict[str, Any]) -> None:
         budgets, (REPO / "main/logic/payload_complete.hpp").read_text(encoding="utf-8"),
         (REPO / "main/logic/mcp.hpp").read_text(encoding="utf-8"),
         (REPO / "main/json_guard.hpp").read_text(encoding="utf-8"))
+    validate_integer_source(
+        (REPO / "main/logic/json_integer.hpp").read_text(encoding="utf-8"),
+        {path: (REPO / path).read_text(encoding="utf-8")
+         for path in ("main/logic/heartbeat.hpp", "main/logic/heating_curve_mqtt.hpp")})
+    for owner in ("heartbeat", "curve"):
+        path = budgets["paths"].get(f"mqtt_{owner}_build", {})
+        if (path.get("symbols") != ["mqtt_task", f"mqtt_{owner}_builder", f"mqtt_{owner}_payload",
+                                    "json_integer_append", "json_integer_length", "json_integer_digits"]
+                or path.get("multipliers") != {} or path.get("base_bytes") != 1536
+                or path.get("max_bytes") != 5120):
+            raise BudgetError(f"integer formatter path {owner}: reviewed builder/decimal/library bound changed")
     mqtt_depth = r"json_payload_depth_ok\(std::string_view\(frame\.payload,\s*frame\.payload_len\)\)"
     if (len(re.findall(mqtt_depth, sources["main/mqtt_ha.cpp"])) != 2
             or len(re.findall(r"\bjson_payload_depth_ok\s*\(", sources["main/mqtt_ha.cpp"])) != 2
@@ -1447,9 +1568,40 @@ def self_test() -> None:
      'netconn_write_partly': 48,
      'netconn_write_vectors_partly': 80,
      'tcpip_send_msg_wait_sem': 128,
-     'sys_mbox_post': 48}
+     'sys_mbox_post': 48,
+     INTEGER_APPEND_SYMBOL: 80,
+     INTEGER_LENGTH_SYMBOL: 48,
+     INTEGER_DIGITS_SYMBOL: 240}
     for index, (name, frame) in enumerate(extra_frames.items(), 0x100):
         fixture += f"\n{index:08x} <{name}>:\n{index:x}: 004136 entry a1, {frame}\n"
+        if name in INTEGER_BUILDERS:
+            for offset in range(INTEGER_BUILDERS[name]):
+                fixture += f"{index + 3 + offset:x}: fff7a5 call8 800 <{INTEGER_APPEND_SYMBOL}>\n"
+        if name == INTEGER_APPEND_SYMBOL:
+            string = "std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >"
+            fixture += f"""
+801: 000081 l32r a8, 1 <literal> (1 <{string}::append(char const*, unsigned int)>)
+804: 0008e0 callx8 a8
+807: fff7a5 call8 1 <_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEpLEPKc$isra$0>
+80a: 000081 l32r a8, 1 <literal> (1 <{string}::push_back(char)>)
+80d: 0008e0 callx8 a8
+810: 000081 l32r a8, 1 <literal> (1 <{string}::append(char const*, unsigned int)>)
+813: 0008e0 callx8 a8
+816: 00000c movi a12, 10
+819: 00000c or a10, a6, a6
+81c: 00000c mov.n a11, a7
+81f: fff7a5 call8 900 <{INTEGER_LENGTH_SYMBOL}>
+822: 00000c movi.n a8, 20
+825: 00000c mov.n a4, a10
+828: 00000c addi a5, a1, 20
+82b: fff7a5 call8 a00 <{INTEGER_DIGITS_SYMBOL}>
+"""
+        if name == INTEGER_LENGTH_SYMBOL:
+            fixture += "901: 000081 l32r a8, 1 <literal> (40002544 <__udivdi3>)\n904: 0008e0 callx8 a8\n"
+        if name == INTEGER_DIGITS_SYMBOL:
+            for offset, target in enumerate(("memcpy", "__umoddi3", "__udivdi3")):
+                fixture += (f"{0xa01 + offset * 6:x}: 000081 l32r a8, 1 <literal> (1 <{target}>)\n"
+                            f"{0xa04 + offset * 6:x}: 0008e0 callx8 a8\n")
     fixture += """
 00000700 <s_i2c_start_end_command>:
 700: 008136 entry a1, 64
@@ -1589,6 +1741,75 @@ def self_test() -> None:
         else:
             raise AssertionError("self-test accepted a changed small-task diagnostic continuation")
         diagnostic_controls += 1
+    integer_disassembly_controls = 0
+    for name, altered, expected in (
+        ("decimal base", fixture.replace("816: 00000c movi a12, 10", "816: 00000c movi a12, 16"),
+         "decimal base"),
+        ("destination bound", fixture.replace("828: 00000c addi a5, a1, 20", "828: 00000c addi a5, a1, 32"),
+         "20-byte destination"),
+        ("ROM division dispatch", fixture.replace("40002544 <__udivdi3>", "40002544 <unreviewed_division>"),
+         "ROM continuation"),
+        ("new conversion continuation", fixture.replace("<memcpy>)", "<unreviewed_copy>)"),
+         "ROM continuation"),
+        ("new helper caller", fixture + f"\n00000880 <unreviewed_payload()>:\n"
+         f"880: 004136 entry a1, 32\n883: fff7a5 call8 800 <{INTEGER_APPEND_SYMBOL}>\n",
+         "caller counts"),
+        ("missing helper caller", fixture.replace(f"call8 800 <{INTEGER_APPEND_SYMBOL}>", "nop", 1),
+         "caller counts"),
+        ("indirect helper caller", fixture.replace(f"call8 800 <{INTEGER_APPEND_SYMBOL}>",
+                                                  f"l32r a8, 800 <{INTEGER_APPEND_SYMBOL}>", 1),
+         "indirect helper"),
+        ("outlined frontend", fixture + "\n00000880 <void daik::json_append_integer_field<int>(int)>:\n"
+         "880: 004136 entry a1, 32\n", "newly outlined"),
+        ("dynamic integer helper", fixture.replace("801: 000081 l32r a8,", "800: 001810 movsp a1, a8\n801: 000081 l32r a8,"),
+         "unreviewed dynamic stack"),
+    ):
+        assert altered != fixture
+        reject_disassembly(f"integer formatter {name}", altered, expected)
+        integer_disassembly_controls += 1
+    integer_source = (REPO / "main/logic/json_integer.hpp").read_text(encoding="utf-8")
+    integer_callers = {path: (REPO / path).read_text(encoding="utf-8")
+                       for path in ("main/logic/heartbeat.hpp", "main/logic/heating_curve_mqtt.hpp")}
+    validate_integer_source(integer_source, integer_callers)
+    validate_integer_source(re.sub(r"\s+", " \n ", integer_source), integer_callers)
+    integer_source_controls = 0
+    for original, changed in (
+        ("char digits[20]", "char digits[external_size]"),
+        ("char digits[20]", "char digits[19]"),
+        ("uint64_t magnitude", "uint32_t magnitude"),
+        ("sizeof(digits), magnitude", "sizeof(digits), magnitude, 16"),
+        ("__attribute__((always_inline))", "__attribute__((noinline))"),
+        ("char digits[20];", "char digits[20]; alloca(external_size);"),
+    ):
+        altered = re.sub(re.escape(original).replace(r"\ ", r"\s+"), lambda _: changed, integer_source)
+        assert altered != integer_source
+        try:
+            validate_integer_source(altered, integer_callers)
+        except BudgetError as exc:
+            assert "integer formatter source" in str(exc)
+        else:
+            raise AssertionError("self-test accepted changed integer formatter source")
+        integer_source_controls += 1
+    altered_callers = dict(integer_callers)
+    altered_callers["main/logic/heartbeat.hpp"] += "\njson_append_integer_field(other, value);\n"
+    try:
+        validate_integer_source(integer_source, altered_callers)
+    except BudgetError as exc:
+        assert "caller inventory" in str(exc)
+    else:
+        raise AssertionError("self-test accepted an additional integer builder source caller")
+    integer_source_controls += 1
+    for owner in ("heartbeat", "curve"):
+        for member in ("json_integer_append", "json_integer_length", "json_integer_digits"):
+            altered_budget = json.loads(json.dumps(budgets))
+            altered_budget["paths"][f"mqtt_{owner}_build"]["symbols"].remove(member)
+            try:
+                validate_source_contract(altered_budget)
+            except BudgetError as exc:
+                assert "integer formatter path" in str(exc)
+            else:
+                raise AssertionError(f"self-test accepted omitted {member} from {owner}")
+            integer_source_controls += 1
     reject_disassembly("double buffer argument growth", fixture.replace("movi a12, 0x148",
                        "movi a12, 0x158"), "328-byte argument")
     reject_disassembly("double dynamic alignment growth", fixture.replace("addi.n a8, a4, 15",
@@ -2178,6 +2399,7 @@ def self_test() -> None:
           f"9 dynamic/first-prologue, {packed_controls} packed SDK, "
           f"{queue_controls} queue-source, {diagnostic_controls} diagnostic-source, "
           f"{tls_source_controls} TLS-client-source, {sdk_recursion_controls} SDK-recursion, "
+          f"{integer_disassembly_controls} integer-disassembly, {integer_source_controls} integer-source/path, "
           f"{i2c_dynamic_controls} I2C-dynamic, {i2c_source_controls} I2C-source, "
           f"{sdk_controls} SDK-source/config controls)")
 

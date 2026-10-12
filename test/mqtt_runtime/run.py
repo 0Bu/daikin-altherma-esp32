@@ -73,9 +73,11 @@ scenarios = ['ref_oom_recovery', 'circulation_oom_recovery', 'reconfigure_config
              'failure_episodes', 'real_json_consumers', 'circulation_probe_postsubscribe_oom',
              'circulation_saved_postsubscribe_oom', 'circulation_saved_epoch_change',
              'circulation_saved_retry', 'circulation_saved_replacement_failure',
+             'circulation_saved_reconnect_oom',
              'reference_saved_postsubscribe_oom',
              'reference_saved_final_owner_oom', 'reference_saved_partial_retry',
              'reference_saved_prior_owner_cleanup', 'reference_saved_prior_owner_retry',
+             'reference_saved_reconnect_oom',
              'reference_saved_replacement_partial_failure', 'circulation_unsubscribe_rejection',
              'circulation_replace_unsubscribe_rejection', 'reference_unsubscribe_rejection',
              'reference_replace_unsubscribe_rejection', 'probe_unsubscribe_rejection',
@@ -237,6 +239,18 @@ mutations = [
      'if (!force && !s_ref_subscription_retry && s_ref_subscribed_topics == desired)',
      'if (!force && s_ref_subscribed_topics == desired)',
      'REFERENCE_PRIOR_OWNER_ARRAY_EQUALITY_DOES_NOT_BYPASS_RETRY', 1),
+    ('reference-reconnect-oom-consumes-force', 'reference_saved_reconnect_oom',
+     'if (force) s_ref_subscription_retry = true;',
+     '/* mutation: lose the reconnect request before allocating preparation */',
+     'REFERENCE_RECONNECT_OOM_NEXT_CYCLE_RESUBSCRIBES_ALL_TOPICS', 1),
+    ('circulation-reconnect-oom-consumes-force', 'circulation_saved_reconnect_oom',
+     '''    if (force) {
+        // Keep the reconnect request through any later allocation failure. The prior cleanup
+        // owner can still match even though a clean broker session needs a new SUBSCRIBE.
+        s_circulation_subscription_retry = true;''',
+     '''    if (force) {
+        /* mutation: lose the reconnect request before allocating preparation */''',
+     'CIRCULATION_RECONNECT_OOM_NEXT_CYCLE_RESUBSCRIBES_TOPIC', 1),
     ('circulation-owner-equality-bypasses-retry', 'circulation_saved_retry',
      '''    if (!force && !s_circulation_subscription_retry &&
         s_circulation_subscribed_topic == c.circulation_topic) return;''',
