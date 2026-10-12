@@ -20,6 +20,47 @@ inline bool json_suffix_is_whitespace(std::string_view suffix) {
     return true;
 }
 
+// Configuration requests describe fields in one object. Check the root before a parser or
+// missing-field defaults can turn a valid scalar/array into a configuration change.
+// This is only a shape preflight; the bounded parser still validates the complete grammar.
+inline bool json_payload_is_object(std::string_view payload) {
+    for (const char byte : payload) {
+        if (byte == ' ' || byte == '\t' || byte == '\r' || byte == '\n') continue;
+        return byte == '{';
+    }
+    return false;
+}
+
+// cJSON strings use zero-terminated storage, so a decoded zero loses the remainder of a key or
+// value. Reject it and raw JSON string controls before the lexer; escaped controls remain valid.
+inline bool json_payload_strings_ok(std::string_view payload) noexcept {
+    if (payload.find('\0') != std::string_view::npos) return false;
+    bool in_string = false;
+    for (size_t i = 0; i < payload.size(); ++i) {
+        const char byte = payload[i];
+        if (byte == '"') {
+            in_string = !in_string;
+        } else if (in_string) {
+            if (static_cast<unsigned char>(byte) < 0x20) return false;
+            if (byte == '\\' && i + 1 < payload.size()) {
+                ++i;
+                if (payload[i] != 'u') continue;
+                if (payload.size() - i < 5) return false;
+                bool all_zero = true;
+                for (size_t n = 0; n < 4; ++n) {
+                    const char hex = payload[++i];
+                    if (!((hex >= '0' && hex <= '9') || (hex >= 'a' && hex <= 'f') ||
+                          (hex >= 'A' && hex <= 'F')))
+                        return false;
+                    all_zero &= hex == '0';
+                }
+                if (all_zero) return false;
+            }
+        }
+    }
+    return true;
+}
+
 // Bound recursive cJSON parse/delete before any external document reaches them. Sixteen levels
 // leave room for the callers even on the 6 KiB MQTT stack; HTTP and Weather use the same limit.
 inline constexpr size_t JSON_MAX_DEPTH      = 16;
@@ -62,7 +103,9 @@ template <typename Parse, typename Destroy>
 auto json_parse_bounded(std::string_view payload, Parse parse, Destroy destroy,
                         size_t max_depth = JSON_MAX_DEPTH)
     -> decltype(parse(payload.data(), payload.size(), static_cast<const char**>(nullptr))) {
-    if (payload.empty() || !json_payload_depth_ok(payload, max_depth)) return nullptr;
+    if (payload.empty() || !json_payload_strings_ok(payload) ||
+        !json_payload_depth_ok(payload, max_depth))
+        return nullptr;
     const char* end  = nullptr;
     auto        root = parse(payload.data(), payload.size(), &end);
     if (!root) return nullptr;

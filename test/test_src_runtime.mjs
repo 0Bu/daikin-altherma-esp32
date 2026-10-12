@@ -173,6 +173,14 @@ try {
     assert.match(result.stderr, new RegExp(`^FAIL ${mutation.scenario}:`, "m"));
     console.log(`negative control ${mutation.name}: rejected by ${mutation.scenario}`);
   }
+  if (cjsonDir) {
+    const mutation = { name: "weather-unrepresentable-strings", file: "weather",
+      before: "!json_payload_strings_ok(payload) || ", after: "" };
+    const result = execute(compile(mutation.name, "weather", mutate(mutation)), ["real_lexer"]);
+    assert.equal(result.status, 1, `${mutation.name}: real lexer must reject mutation\n${result.stdout}${result.stderr}`);
+    assert.match(result.stderr, /^FAIL real_lexer:/m);
+    console.log(`negative control ${mutation.name}: rejected by real_lexer`);
+  }
   for (const [key, source] of Object.entries(sources))
     console.log(`source runtime ${key} sha256=${createHash("sha256").update(source).digest("hex")}`);
   if (cjsonDir) console.log(`source runtime cJSON.c sha256=${createHash("sha256").update(fs.readFileSync(path.join(cjsonDir, "cJSON.c"))).digest("hex")}`);

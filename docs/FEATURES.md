@@ -80,7 +80,7 @@ IDs are stable and never reused; gaps identify retired entries. Each feature is 
 | 72 | Compatible RAM trends and dated flash-journal restoration; official 8 MB layout, torn-write rejection and semantic identities | ✅ 🧪 | [`logic/history_persist.hpp`](../main/logic/history_persist.hpp), [`history.cpp`](../main/history.cpp), [`partitions.csv`](../partitions.csv) |
 | 73 | Sustained internal contiguous-heap exhaustion triggers bounded restart escalation into recovery mode | ✅ 🧪 | [`logic/heap_watchdog.hpp`](../main/logic/heap_watchdog.hpp), [`heap_guard.cpp`](../main/heap_guard.cpp) |
 | 74 | Catalog-wide parity between browser and C++ selection/freshness/COP-boundary rules | ✅ 🧪 | [`presenter_golden_dump.cpp`](../test/presenter_golden_dump.cpp), [`presenter_parity.mjs`](../tools/presenter/presenter_parity.mjs), [`selftest.sh`](../tools/presenter/selftest.sh) |
-| 75 | Shared unwind-safe mutex guard with bounded and try-lock modes | ✅ | [`rtos_guard.hpp`](../main/rtos_guard.hpp) |
+| 75 | Unwind-safe guards, static OTA/syslog mutexes and one diagnostic per task-failure episode | ✅ 🧪 | [`rtos_guard.hpp`](../main/rtos_guard.hpp), [`logic/task_failure.hpp`](../main/logic/task_failure.hpp) |
 | 76 | One declared task-priority table | ✅ | [`task_config.hpp`](../main/task_config.hpp) |
 | 77 | Boot-detected W5500 Ethernet, wired-first startup, route priority and safe pin probe | ✅ 🧪 | [`logic/net_link.hpp`](../main/logic/net_link.hpp), [`net.cpp`](../main/net.cpp), [`test_transport_contract.mjs`](../test/test_transport_contract.mjs) |
 | 78 | HTTP provisioning restriction follows open-AP presence independently of network transport | ✅ 🧪 | [`logic/http_surface.hpp`](../main/logic/http_surface.hpp), [`http_server.cpp`](../main/http_server.cpp) |

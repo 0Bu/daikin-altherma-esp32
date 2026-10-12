@@ -4,6 +4,7 @@
 #include "checkup.hpp"
 #include "state_dwell.hpp"
 #include "config.hpp"
+#include "logic/task_failure.hpp"
 #include "def/overlay.hpp"
 #include "def/registry.hpp"
 #include "diag_log.hpp"
@@ -767,6 +768,7 @@ static void poll_task(void*) {
     OtaQuiesceState network_quiesce;
     bool network_quiesce_logged = false;
     bool network_quiesce_cap_logged = false;
+    TaskFailureEpisode failures;
     for (;;) {
         esp_task_wdt_reset();                                  // top of cycle; poll_once also resets per register
         // This task's own stack headroom — the budget that killed it in legacy-241 and that nothing
@@ -880,25 +882,23 @@ static void poll_task(void*) {
                 }
             }
             if (config_profile() != "auto") poll_once(); // then poll it (same cycle if resolved)
+            failures.succeeded();
         } catch (const std::exception& e) {
-            // COUNT FIRST, then log. diag_printf allocates, so on the heap that caused this it can
-            // throw again — and a second throw inside the handler is std::terminate, i.e. the
-            // reboot this guard exists to avoid. An atomic increment cannot fail, so the counter
-            // records the cycle even when the log line describing it never makes it into the ring
-            // (legacy-380: the ring was the ONLY evidence, and a chatty boot overwrites it).
+            // Count every skipped cycle and retire its coverage, even when this failure episode
+            // has already been logged. The bounded diagnostic ring does not allocate.
             s_cycles_skipped.fetch_add(1, std::memory_order_relaxed);
             const uint32_t generation = hp_poll_generation();
             checkup_record(nullptr, 0, false, false, logic::CheckupCoverage{}, generation);
             dwell_record(nullptr, 0, generation);
             refrigerant_service_record_poll_gap(generation);
-            diag_printf("poll: cycle skipped (%s)\n", e.what());
+            if (failures.first_failure()) diag_printf("poll: cycle skipped (%s)\n", e.what());
         } catch (...) {
             s_cycles_skipped.fetch_add(1, std::memory_order_relaxed);
             const uint32_t generation = hp_poll_generation();
             checkup_record(nullptr, 0, false, false, logic::CheckupCoverage{}, generation);
             dwell_record(nullptr, 0, generation);
             refrigerant_service_record_poll_gap(generation);
-            diag_printf("poll: cycle skipped (oom?)\n");
+            if (failures.first_failure()) diag_printf("poll: cycle skipped (oom?)\n");
         }
         // Serve at most one free probe after the sweep. Its Config access is POD-only and normally
         // allocation-free, but keep a separate task-level boundary anyway: a future edit must turn

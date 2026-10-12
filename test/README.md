@@ -39,7 +39,8 @@ scripts/run-agent-instructions-budget.sh
 scripts/run-skill-audit.sh
 ```
 
-Requirements: a C++17 compiler (`g++`/`clang++`), Node ≥18 and Python ≥3.11. The mock runner uses
+Requirements: a C++17 compiler (`g++`/`clang++`), Node ≥18 and Python ≥3.11; polling and accessory
+production-unit fixtures additionally use C++20. The mock runner uses
 CMake/CTest when available and otherwise directly compiles the test translation unit. Coverage needs
 `gcov` for GCC or `llvm-cov gcov` for Clang, using `xcrun` on macOS. The browser runner additionally
 needs a Node runtime accepting `--experimental-websocket` with the native WebSocket API, plus
@@ -123,9 +124,11 @@ The same runner also executes complete production units through SDK/service adap
 
 | Harness | Runtime evidence and limits |
 |---|---|
-| `node test/test_ota_runtime.mjs` | Complete `ota_update.cpp`: 47 cases with source mutations bound to named assertions for cleanup, Range resume, worker leases, manifest/version rejection and 90/600-second health transitions. Static aligned 4096 B health stack and boot-latched single arm work without dynamic task allocation; no TLS, flash or IDF cryptography executes. |
-| `node test/test_network_runtime.mjs` | Complete WiFi/syslog units: 15 scenarios and 18 targeted mutations cover leases, foreign IP events, boot wakes, credential rollback, scan errors, queue rejection/saturation, reentrant logging and RFC 5424 time framing; no real DHCP/radio/UDP delivery or collector retention. |
+| `node test/test_ota_runtime.mjs` | Complete `ota_update.cpp`: 48 cases with source mutations bound to cleanup, Range resume, worker leases, manifest/version rejection, static mutex ownership under dynamic-allocation failure and 90/600-second health transitions. Static aligned 4096 B health stack and boot-latched single arm avoid dynamic task allocation; no TLS, flash or IDF cryptography executes. |
+| `node test/test_network_runtime.mjs` | Complete WiFi/syslog units: 19 scenarios and 22 mutations cover leases, boot wakes, rollback, scan errors, queue loss, reentrant logging, static status-mutex ownership, independent OOM episodes and RFC 5424 framing; no real DHCP/radio/UDP delivery or collector retention. |
 | `node test/test_src_runtime.mjs` | Complete ENV III/Weather units: 26 cases and 18 source mutations cover probe identity/CRC, partial I2C allocation/cleanup, OOM, sensor freshness/recovery, forecast conversion/units, HTTP bounds/cleanup, rejected-response retention, A→B→A and zero Config-copy/request-buffer retention at network release and task waits. Default cJSON is an AST adapter; no real sensor, TLS, scheduler or JSON lexer runs. |
+| `python3 test/poll_runtime/run.py` | Complete polling/converter units: repeated allocation failures, preserved cache/source time, age expiry, quiescence, recovery, snapshot-lock unwind and six named source mutations; UART, clocks and RTOS are adapters. |
+| `python3 test/startup_runtime/run.py` | Complete LED/button units: nine startup/loop cases and two mutations verify scalar configuration snapshots, OOM containment and zero destructive calls; GPIO/RMT and scheduling are adapters. |
 
 After the pinned IDF build resolves `espressif/cjson` from `dependencies.lock`, run
 `node test/test_src_runtime.mjs --real-cjson managed_components/espressif__cjson/cJSON` for the same
@@ -133,6 +136,15 @@ Weather unit/cases/mutations with the real lexer plus malformed, embedded-NUL an
 This optional layer downloads nothing and prints the bound source hashes; HTTP/TLS remain adapted.
 Weather lifetime checks use synthetic public topic/name fields and a fixed allocation table, excluding
 SDK bookkeeping. Tagged host C++ counts prove scoped release, not ESP heap fragmentation or C/TLS allocations.
+
+After resolving the pinned cJSON component, run `python3 test/json_ingress_runtime/run.py
+--real-cjson managed_components/espressif__cjson/cJSON` and `python3 test/mqtt_runtime/run.py
+--real-cjson managed_components/espressif__cjson/cJSON`. `ci-build-all.sh` runs both after the target
+build. The first executes the real HTTP parser adapter's object/depth/size/trailing/OOM corpus and
+its root-type mutation. The second executes complete MQTT source consumers and task recovery,
+including post-subscribe cleanup ownership, with eight source mutations. HTTP routes, broker/TLS,
+RTOS and physical inputs remain outside these host adapters. Each runner binds compile inputs and
+uses its own temporary directory; polling/startup support `--sanitizer undefined`, MQTT `--ubsan`.
 
 The contract runner executes additional compiled production consumers:
 

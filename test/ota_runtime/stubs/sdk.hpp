@@ -38,6 +38,7 @@ struct FakeMutex {
     std::mutex mutex;
 };
 using SemaphoreHandle_t = FakeMutex*;
+using StaticSemaphore_t = FakeMutex;
 struct esp_app_desc_t {
     uint32_t magic_word = 0, secure_version = 0, reserv1[2]{};
     char     version[32]{}, project_name[32]{}, time[16]{}, date[16]{}, idf_ver[32]{};
@@ -173,10 +174,10 @@ extern State state;
 void         inject(Fault);
 } // namespace sdk
 inline SemaphoreHandle_t xSemaphoreCreateMutex() {
-    static FakeMutex mutex;
-    return &mutex;
+    return nullptr; // deterministic dynamic-mutex allocation failure, including static init
 }
-inline BaseType_t xSemaphoreTake(SemaphoreHandle_t m, TickType_t ticks) {
+inline SemaphoreHandle_t xSemaphoreCreateMutexStatic(StaticSemaphore_t* storage) { return storage; }
+inline BaseType_t        xSemaphoreTake(SemaphoreHandle_t m, TickType_t ticks) {
     if (!m) return 0;
     if (ticks == 0) return m->mutex.try_lock() ? pdTRUE : pdFALSE;
     m->mutex.lock();

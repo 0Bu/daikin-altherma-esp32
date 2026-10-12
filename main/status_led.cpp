@@ -112,7 +112,19 @@ void status_led_tick() {
     }
 }
 
-bool indicator_init(const Config& c) {
+struct IndicatorConfig {
+    int  led_gpio;
+    int  led_type;
+    bool led_inverted;
+};
+
+IndicatorConfig indicator_config() {
+    IndicatorConfig copy{};
+    with_config([&copy](const Config& c) { copy = {c.led_gpio, c.led_type, c.led_inverted}; });
+    return copy;
+}
+
+bool indicator_init(const IndicatorConfig& c) {
     s_gpio     = static_cast<gpio_num_t>(c.led_gpio);
     s_type     = static_cast<LedType>(c.led_type);
     s_inverted = c.led_inverted;
@@ -165,7 +177,7 @@ bool indicator_init(const Config& c) {
 // the firmware drives a pin with nothing on it. The board looks dead while being perfectly healthy,
 // and the sole evidence on /diag was the ABSENCE of an error — which reads identically to a working
 // indicator. One line turns "the LED doesn't light" into a five-second diagnosis.
-void log_indicator(const Config& c) {
+void log_indicator(const IndicatorConfig& c) {
     if (static_cast<LedType>(c.led_type) == LedType::Ws2812)
         diag_printf("led: WS2812 indicator on GPIO%d\n", c.led_gpio);
     else
@@ -174,7 +186,7 @@ void log_indicator(const Config& c) {
 }
 
 void status_led_task(void*) {
-    const Config c = config();
+    const IndicatorConfig c = indicator_config();
     if (!indicator_init(c)) {
         vTaskDelete(nullptr);
         return;
@@ -201,7 +213,7 @@ void status_led_task(void*) {
 }  // namespace
 
 void status_led_start() {
-    const Config c = config();
+    const IndicatorConfig c = indicator_config();
     if (c.led_gpio < 0) return;   // no indicator on this board — nothing to drive
     // Purely cosmetic, so a failed task is harmless — but don't swallow the allocation failure
     // silently. 3 KB (up from 2 KB): the WS2812 path calls into led_strip/RMT from this stack.

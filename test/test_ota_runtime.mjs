@@ -45,10 +45,15 @@ function replaceOnce(text, before, after, name) {
 try {
   const baseline = execute(compile(sourcePath, "production"), []);
   assert.equal(baseline.status, 0, `production OTA cases\n${baseline.stdout}${baseline.stderr}`);
-  assert.match(baseline.stdout, /PASS total=47\b/);
+  assert.match(baseline.stdout, /PASS total=48\b/);
   console.log(baseline.stdout.trim());
 
   const mutations = [
+    {
+      name: "mutex-heap-allocation", scenario: "mutex_storage",
+      before: "SemaphoreHandle_t s_mtx = xSemaphoreCreateMutexStatic(&s_mtx_storage);",
+      after: "[[maybe_unused]] int fixture_storage_use = (static_cast<void>(s_mtx_storage), 0);\nSemaphoreHandle_t s_mtx = xSemaphoreCreateMutex();",
+    },
     {
       name: "health-runtime-stack", scenario: "health_static_storage",
       before: /!xTaskCreateStatic\(health_gate_task,\s*"ota_health",\s*kHealthTaskStack,\s*nullptr,\s*TASK_PRIO_OTA_GATE,\s*s_ota_health_task_stack,\s*&s_ota_health_task_storage\)/,
@@ -208,7 +213,7 @@ try {
       `${mutation.name}: only the specific assertion failure counts`);
     console.log(`negative control ${mutation.name}: rejected by ${mutation.scenario}`);
   }
-  console.log(`production OTA runtime: 47 cases, ${mutations.length} negative controls; source sha256=`
+  console.log(`production OTA runtime: 48 cases, ${mutations.length} negative controls; source sha256=`
     + createHash("sha256").update(source).digest("hex"));
 } finally {
   fs.rmSync(dir, { recursive: true, force: true });

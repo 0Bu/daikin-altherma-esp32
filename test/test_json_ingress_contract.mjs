@@ -8,6 +8,8 @@ const parsers = [...config.matchAll(/json_parse_document\(std::string_view\(body
 assert.equal(readers.length, 14, "all 14 current JSON config bodies must retain their actual byte count");
 assert.equal(parsers.length, readers.length, "each parser must include embedded NULs in its bounded input");
 const guard = read("main/json_guard.hpp");
+assert.match(guard, /json_parse_document\(std::string_view payload\)\s*\{\s*if \(!json_payload_is_object\(payload\)\) return nullptr;/,
+  "configuration ingress must reject non-object roots before parsing or applying defaults");
 assert.match(guard, /json_parse_bounded\([\s\S]*?cJSON_ParseWithLengthOpts/,
   "the cJSON adapter must invoke the tested preflight/suffix rule");
 const weather = read("main/weather_forecast.cpp");
@@ -19,6 +21,12 @@ assert.ok(parser.indexOf("json_payload_depth_ok(payload, JSON_MAX_DEPTH)") >= 0 
   "Weather must reject excessive depth before recursive parsing");
 assert.match(parser, /json_suffix_is_whitespace/,
   "Weather must retain strict trailing-data rejection");
+assert.ok(parser.indexOf("json_payload_strings_ok(payload)") >= 0 &&
+  parser.indexOf("json_payload_strings_ok(payload)") < parser.indexOf("cJSON_ParseWithLengthOpts"),
+  "Weather must reject unrepresentable strings before recursive parsing");
+const mqtt = read("main/mqtt_ha.cpp");
+assert.equal([...mqtt.matchAll(/!json_payload_strings_ok\(std::string_view\(frame.payload, frame.payload_len\)\)/g)].length, 2,
+  "both MQTT frame consumers must reject unrepresentable strings before parsing");
 console.log("JSON ingress: every cJSON config body bounded; Weather preflight before parser");
 
 assert.match(config, /parse_ref_temp_request[\s\S]*?std::vector<char> body\(8192\)/,
