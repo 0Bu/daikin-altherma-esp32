@@ -4,6 +4,7 @@
 // an ICMP-to-gateway watchdog that catches missed-deauth "ghost" associations no event reports.
 // Also starts mDNS (<hostname>.local). See wifi.hpp and docs/ARCHITECTURE.md → WiFi/LAN.
 #include "wifi.hpp"
+#include "stack_watch.hpp"
 #include "config.hpp"
 #include "diag_log.hpp"
 #include "logic/redact.hpp"
@@ -218,12 +219,14 @@ static void wifi_watchdog_task(void*) {
         // guards on it), which the policy eventually reads as a wedge and would re-associate a
         // healthy link on a timer. Don't run blind — retire the task and log it.
         diag_printf("wifi: watchdog semaphore alloc failed — ghost-association recovery disabled\n");
+        stack_watch_sample(StackWatch::WifiWatchdog);
         vTaskDelete(nullptr);
         return;
     }
     LinkWatch lw;              // consecutive-observation counters; the policy owns the thresholds
     bool blind_logged = false; // latch: one line per blind SPELL, not one per 30 s period
     for (;;) {
+        stack_watch_sample(StackWatch::WifiWatchdog);
         vTaskDelay(pdMS_TO_TICKS(kWdPeriodS * 1000));
 
         // When the link already knows it is down, the endless-retry handler owns recovery — there is
@@ -288,7 +291,7 @@ static void wifi_stop_sta() {
     if (s_events) { vEventGroupDelete(s_events); s_events = nullptr; }
 }
 
-bool wifi_start_sta() {
+static __attribute__((noinline)) bool wifi_init_sta_driver(bool& rollback_pending) {
     s_events = xEventGroupCreate();
     if (!s_events) {
         // The connect handshake (this function's wait + the event handler's SetBits) is entirely
@@ -325,7 +328,7 @@ bool wifi_start_sta() {
     // Is this boot the trial run for freshly-changed credentials? Latched BEFORE esp_wifi_start()
     // below, because the very first STA_DISCONNECTED can arrive before this function reaches its
     // wait — and the handler reads it to decide whether the boot retry budget still applies.
-    const bool rollback_pending = c.wifi_rollback_active && !c.wifi_ssid_backup.empty();
+    rollback_pending            = c.wifi_rollback_active && !c.wifi_ssid_backup.empty();
     s_rollback_pending          = rollback_pending;
 
     // Pick the STRONGEST AP for the SSID, not the first one heard. The IDF default WIFI_FAST_SCAN
@@ -364,7 +367,10 @@ bool wifi_start_sta() {
     // latency to every inbound request — the HTTP UI then "sometimes takes very long to answer".
     // This is a mains-powered bridge, so we trade the small idle-power saving for a responsive UI.
     ESP_ERROR_CHECK(esp_wifi_set_ps(WIFI_PS_NONE));
+    return true;
+}
 
+static __attribute__((noinline)) bool wifi_wait_sta_connected(bool rollback_pending) {
     // Block until the first IP, or until the boot window decides we are not getting one. An ordinary
     // boot gets the flat WIFI_BOOT_WINDOW_S: the setup portal is its fallback and a user is waiting
     // on it. A boot carrying a PENDING credential change is re-evaluated at each checkpoint instead
@@ -394,42 +400,41 @@ bool wifi_start_sta() {
         ESP_LOGW(TAG, "new credentials: no IP after %d s, reason %d; retrying until %d s", elapsed,
                  s_last_disco_reason.load(), WIFI_ROLLBACK_GRACE_S);
     }
-    if (!(bits & CONNECTED_BIT)) {
-        if (rollback_pending) {
-            Config rollback_cfg = config();
-            ESP_LOGW(TAG, "new credentials failed (reason %d); restoring %s",
-                     s_last_disco_reason.load(), rollback_cfg.wifi_ssid_backup.c_str());
-            rollback_cfg.wifi_ssid = rollback_cfg.wifi_ssid_backup;
-            rollback_cfg.wifi_pass = rollback_cfg.wifi_pass_backup;
-            rollback_cfg.wifi_rollback_active = false;
-            rollback_cfg.wifi_ssid_backup = "";
-            rollback_cfg.wifi_pass_backup = "";
-            // One-shot outcome marker, persisted so it survives the reboot this rollback is about to
-            // take. Without it the dashboard simply shows the old SSID again and the rollback is
-            // indistinguishable from a save that never happened — the user re-enters the same
-            // credentials and waits out the same three minutes. Cleared by the next POST /set_wifi.
-            rollback_cfg.wifi_rolled_back = true;
-            // Only reboot into a rollback that actually persisted. The restore lives in NVS alone, so
-            // if the write failed the next boot re-reads the SAME new credentials, spends the whole
-            // window again and rolls back again — a reboot loop for as long as NVS misbehaves, with
-            // no way in. On failure fall through to the setup portal below: reachable beats looping.
-            if (config_save(rollback_cfg)) {
-                vTaskDelay(pdMS_TO_TICKS(500));
-                esp_restart();
-            }
-            // A false result here now means the one atomic blob did not land — not an unrelated
-            // self-healing link-cache maintenance failure — so the restored credentials themselves
-            // are definitely not durable. Erring toward the portal costs a re-entry; rebooting would
-            // re-read the rejected credentials and risk the loop this branch exists to avoid.
-            diag_printf("wifi: rollback restore to '%s' was not persisted — opening the setup "
-                        "portal rather than risk a reboot loop\n",
-                        DiagLogIdentifier(rollback_cfg.wifi_ssid).c_str());
-        }
-        ESP_LOGW(TAG, "STA connect failed on first boot — falling back to setup portal");
-        wifi_stop_sta();
-        return false;
-    }
+    return (bits & CONNECTED_BIT) != 0;
+}
 
+static __attribute__((noinline)) void wifi_finish_sta_rollback() {
+    Config rollback_cfg = config();
+    ESP_LOGW(TAG, "new credentials failed (reason %d); restoring %s", s_last_disco_reason.load(),
+             rollback_cfg.wifi_ssid_backup.c_str());
+    rollback_cfg.wifi_ssid            = rollback_cfg.wifi_ssid_backup;
+    rollback_cfg.wifi_pass            = rollback_cfg.wifi_pass_backup;
+    rollback_cfg.wifi_rollback_active = false;
+    rollback_cfg.wifi_ssid_backup     = "";
+    rollback_cfg.wifi_pass_backup     = "";
+    // One-shot outcome marker, persisted so it survives the reboot this rollback is about to
+    // take. Without it the dashboard simply shows the old SSID again and the rollback is
+    // indistinguishable from a save that never happened — the user re-enters the same
+    // credentials and waits out the same three minutes. Cleared by the next POST /set_wifi.
+    rollback_cfg.wifi_rolled_back = true;
+    // Only reboot into a rollback that actually persisted. The restore lives in NVS alone, so
+    // if the write failed the next boot re-reads the SAME new credentials, spends the whole
+    // window again and rolls back again — a reboot loop for as long as NVS misbehaves, with
+    // no way in. On failure fall through to the setup portal below: reachable beats looping.
+    if (config_save(rollback_cfg)) {
+        vTaskDelay(pdMS_TO_TICKS(500));
+        esp_restart();
+    }
+    // A false result here now means the one atomic blob did not land — not an unrelated
+    // self-healing link-cache maintenance failure — so the restored credentials themselves
+    // are definitely not durable. Erring toward the portal costs a re-entry; rebooting would
+    // re-read the rejected credentials and risk the loop this branch exists to avoid.
+    diag_printf("wifi: rollback restore to '%s' was not persisted — opening the setup "
+                "portal rather than risk a reboot loop\n",
+                DiagLogIdentifier(rollback_cfg.wifi_ssid).c_str());
+}
+
+static __attribute__((noinline)) void wifi_finish_sta_success() {
     // The new credentials work — commit to them and drop the backup. Note what is NOT cleared here:
     // wifi_rolled_back. The boot right after a rollback is a SUCCESSFUL one (onto the restored
     // network), so clearing the marker on success would erase it before anyone could read it. Only
@@ -449,7 +454,19 @@ bool wifi_start_sta() {
                         "a later connect failure may restore it\n",
                         DiagLogIdentifier(stale_backup).c_str());
     }
+}
 
+bool wifi_start_sta() {
+    // Driver configuration and persistence are separate stack peaks on the 6 KiB startup task.
+    bool rollback_pending = false;
+    if (!wifi_init_sta_driver(rollback_pending)) return false;
+    if (!wifi_wait_sta_connected(rollback_pending)) {
+        if (rollback_pending) wifi_finish_sta_rollback();
+        ESP_LOGW(TAG, "STA connect failed on first boot — falling back to setup portal");
+        wifi_stop_sta();
+        return false;
+    }
+    wifi_finish_sta_success();
     net_mdns_start();
     // Ghost-association watchdog. Started only once online; it self-guards on s_wifi_connected.
     // 4096, not 3072: this task now reports through diag_printf (so its decisions reach /diag +

@@ -4,6 +4,7 @@
 #include "diag_log.hpp"
 #include "history.hpp"
 #include "logic/env3.hpp"
+#include "stack_watch.hpp"
 
 #include "driver/i2c_master.h"
 #include "esp_err.h"
@@ -240,6 +241,7 @@ void task(void* argument) {
     const TaskPins pins = *static_cast<const TaskPins*>(argument);
     SensorBus sensor;
     for (;;) {
+        stack_watch_sample(StackWatch::Env3);
         if (!sensor.initialized && !initialize(sensor, pins.sda, pins.scl)) {
             publish_error("sensor_not_found");
         } else {

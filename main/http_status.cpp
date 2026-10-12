@@ -1594,20 +1594,8 @@ static void append_status_json(JsonOut& j, bool redact) {
         // is already correct. null whenever safe_mode is false.
         j += ",\"safe_mode_cause\":";
         j += safe_mode_cause() ? jstr(safe_mode_cause()) : "null";
-        // THE OTHER MEMORY BUDGET, on the surface that needs no broker. The MQTT heartbeat carries
-        // the same five figures, but every ordinary publish — the heartbeat included — sits behind
-        // the X10A publish gate (logic/mqtt_publish_gate.hpp): a board whose bus never answers
-        // publishes nothing at all, and safe mode never starts the publish task in the first place.
-        // Those are exactly the boards whose stack headroom someone wants, so a metric reachable
-        // only over MQTT would be absent precisely where it is the evidence — the shape that once
-        // folded the board's own heap trends inside the heat pump's poll cycle. Grouped under one
-        // key so the unit is stated once; null per task until that task has been sampled
-        // (main/stack_watch.hpp).
-        //
-        // Appended with successive += rather than extended onto the chain above: this builder is
-        // the one whose frame overflowed the httpd stack twice, and a chain materialises every
-        // intermediate std::string in one frame (AGENTS.md → Memory, concurrency, and HTTP safety).
-        // Five integers, one at a time.
+        // Owner-sampled boot minima remain available without MQTT/X10A or in safe mode.
+        // Append one field at a time; unsampled optional/retired tasks remain null.
         j += ",\"stack_min_free_bytes\":{\"httpd\":";
         append_stack_bytes(j, stack_watch_min_free_bytes(StackWatch::Httpd));
         j += ",\"poll\":";
@@ -1618,6 +1606,12 @@ static void append_status_json(JsonOut& j, bool redact) {
         append_stack_bytes(j, stack_watch_min_free_bytes(StackWatch::Modbus));
         j += ",\"weather\":";
         append_stack_bytes(j, stack_watch_min_free_bytes(StackWatch::Weather));
+        for (const StackWatchField& field : STACK_WATCH_EXTRA_FIELDS) {
+            j += ",\"";
+            j += field.name;
+            j += "\":";
+            append_stack_bytes(j, stack_watch_min_free_bytes(field.slot));
+        }
         j += "}},";
     }
 

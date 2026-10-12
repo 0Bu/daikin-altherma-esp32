@@ -1,6 +1,7 @@
 #include "syslog.hpp"
 #include "config.hpp"
 #include "logic/task_failure.hpp"
+#include "stack_watch.hpp"
 #include "net.hpp"
 #include "ota_update.hpp"
 #include "diag_crash.hpp"
@@ -361,6 +362,7 @@ void syslog_init() {
                 int sock = -1;
                 TaskFailureEpisode failures;
                 while (true) {
+                    stack_watch_sample(StackWatch::Syslog);
                     // OTA diagnostics themselves wake this queue. Do not answer those lines with a
                     // Config copy, DNS/ping work or a fresh UDP socket beside the TLS handshake.
                     // The fixed queue is intentionally allowed to buffer/drop best-effort syslog

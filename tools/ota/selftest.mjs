@@ -71,6 +71,29 @@ const replaceOnce = (rel, before, after) => {
   assert.notEqual(changed, old, `selftest mutation no longer reaches ${rel}: ${String(before)}`);
   fs.writeFileSync(target, changed);
 };
+// Budget mutations address schema members rather than their JSON layout. Reviewed paths retain
+// the same negative controls when new measured symbols expand an array onto multiple lines.
+const mutateBudgets = (mutate) => {
+  const target = path.join(tmp, "tools/stack/budgets.json");
+  const budgets = JSON.parse(fs.readFileSync(target, "utf8"));
+  const before = JSON.stringify(budgets);
+  mutate(budgets);
+  assert.notEqual(JSON.stringify(budgets), before, "selftest budget mutation must change its target");
+  fs.writeFileSync(target, JSON.stringify(budgets, null, 2) + "\n");
+};
+const replaceBudgetMember = (section, name, member, before, after) => mutateBudgets((budgets) => {
+  assert.ok(Object.hasOwn(budgets[section], name), `selftest budget target missing: ${section}.${name}`);
+  assert.deepEqual(budgets[section][name][member], before,
+    `selftest budget anchor changed: ${section}.${name}.${member}`);
+  budgets[section][name][member] = after;
+});
+const omitPathSymbol = (name, symbol) => mutateBudgets((budgets) => {
+  assert.ok(Object.hasOwn(budgets.paths, name), `selftest path target missing: ${name}`);
+  const symbols = budgets.paths[name].symbols;
+  assert.equal(symbols.filter((value) => value === symbol).length, 1,
+    `selftest path must contain exactly one ${symbol}: ${name}`);
+  budgets.paths[name].symbols = symbols.filter((value) => value !== symbol);
+});
 
 try {
   restore();
@@ -84,38 +107,47 @@ try {
     ["HTTP stack cannot hold the existing reviewed path ceilings plus reserve", () =>
       replaceOnce("main/http_server.cpp", /cfg\.stack_size\s*=\s*10240;/, "cfg.stack_size = 8192;")],
     ["an HTTP path consumes the fixed 2 KiB reserve", () =>
-      replaceOnce("tools/stack/budgets.json", /("httpd_mcp_status": \{[\s\S]*?"max_bytes": )8192/, (_match, prefix) => `${prefix}8193`)],
+      replaceBudgetMember("paths", "httpd_mcp_status", "max_bytes", 8192, 8193)],
     ["cJSON accepts unreviewed nesting depth", () =>
       replaceOnce("main/logic/payload_complete.hpp", "JSON_MAX_DEPTH      = 16;", "JSON_MAX_DEPTH      = 17;")],
     ["the shared adapter overrides the reviewed JSON depth", () =>
       replaceOnce("main/json_guard.hpp", "}, JSON_MAX_DEPTH);", "}, 32);")],
     ["the cJSON parse root frame is omitted", () =>
-      replaceOnce("tools/stack/budgets.json", '"cjson_parse_value": 17', '"cjson_parse_value": 16')],
+      replaceBudgetMember("paths", "httpd_config_hp", "multipliers",
+        { cjson_parse_value: 17, cjson_delete: 17 }, { cjson_parse_value: 16, cjson_delete: 17 })],
     ["recursive cJSON cleanup is counted after releasing the parser frames", () =>
-      replaceOnce("tools/stack/budgets.json", '"cjson_delete": 17', '"cjson_delete": 16')],
+      replaceBudgetMember("paths", "httpd_config_hp", "multipliers",
+        { cjson_parse_value: 17, cjson_delete: 17 }, { cjson_parse_value: 17, cjson_delete: 16 })],
     ["the parser budget follows an unused cJSON wrapper", () =>
-      replaceOnce("tools/stack/budgets.json", "^cJSON_ParseWithLengthOpts$", "^cJSON_ParseWithOpts$")],
+      replaceBudgetMember("symbols", "cjson_parse_length_opts", "pattern",
+        "^cJSON_ParseWithLengthOpts$", "^cJSON_ParseWithOpts$")],
     ["MCP accepts unreviewed recursive depth", () =>
       replaceOnce("main/logic/mcp.hpp", "if (depth > 16) return false;", "if (depth > 17) return false;")],
     ["MCP omits its early rejection frame", () =>
-      replaceOnce("tools/stack/budgets.json", '"mcp_json_value": 18', '"mcp_json_value": 17')],
+      replaceBudgetMember("paths", "httpd_mcp_parse", "multipliers",
+        { mcp_json_value: 18 }, { mcp_json_value: 17 })],
     ["the persistence transaction frame ceiling hides growth", () =>
-      replaceOnce("tools/stack/budgets.json", /("config_transaction": \{[\s\S]*?"max_bytes": )1600/, (_match, prefix) => `${prefix}4096`)],
+      replaceBudgetMember("symbols", "config_transaction", "max_bytes", 1600, 4096)],
     ["the mandatory persistence transaction is dropped", () =>
-      replaceOnce("tools/stack/budgets.json", '"config_transaction": {', '"renamed_transaction": {')],
+      mutateBudgets((budgets) => {
+        assert.ok(Object.hasOwn(budgets.symbols, "config_transaction"));
+        assert.ok(!Object.hasOwn(budgets.symbols, "renamed_transaction"));
+        budgets.symbols.renamed_transaction = budgets.symbols.config_transaction;
+        delete budgets.symbols.config_transaction;
+      })],
     ["the WiFi scan frame ceiling hides growth", () =>
-      replaceOnce("tools/stack/budgets.json", /("wifi_scan": \{[\s\S]*?"max_bytes": )1920/, (_match, prefix) => `${prefix}4096`)],
+      replaceBudgetMember("symbols", "wifi_scan", "max_bytes", 1920, 4096)],
     ["the save wrapper bypasses the measured transaction", () =>
       replaceOnce("main/config.cpp", "out = config_save_transaction(g_cfg, requested, owns_link, store);",
         "out = config_save_transaction_bypassed(g_cfg, requested, owns_link, store);")],
     ["the save path folds SDK-NVS into its HTTP allowance", () =>
-      replaceOnce("tools/stack/budgets.json", /("httpd_config_save": \{[\s\S]*?"base_bytes": )3072/, (_match, prefix) => `${prefix}1536`)],
+      replaceBudgetMember("paths", "httpd_config_save", "base_bytes", 3072, 1536)],
     ["the link-save path omits its native transaction", () =>
-      replaceOnce("tools/stack/budgets.json", /("httpd_config_save_link": \{[\s\S]*?)"config_transaction", /, (_match, prefix) => prefix)],
+      omitPathSymbol("httpd_config_save_link", "config_transaction")],
     ["WiFi scan folds SDK-radio into its HTTP allowance", () =>
-      replaceOnce("tools/stack/budgets.json", /("httpd_wifi_scan": \{[\s\S]*?"base_bytes": )2560/, (_match, prefix) => `${prefix}1536`)],
+      replaceBudgetMember("paths", "httpd_wifi_scan", "base_bytes", 2560, 1536)],
     ["MQTT teardown loses its reviewed TLS/renegotiation allowance", () =>
-      replaceOnce("tools/stack/budgets.json", /("httpd_mqtt_tls": \{[\s\S]*?"base_bytes": )5632/, (_match, prefix) => `${prefix}4608`)],
+      replaceBudgetMember("paths", "httpd_mqtt_tls", "base_bytes", 5632, 4608)],
     ["signed-on-update is disabled", () =>
       replaceOnce("sdkconfig.defaults", "CONFIG_SECURE_SIGNED_ON_UPDATE_NO_SECURE_BOOT=y",
         "CONFIG_SECURE_SIGNED_ON_UPDATE_NO_SECURE_BOOT=n")],
@@ -133,9 +165,7 @@ try {
     ["a failed rollback commit is reported as valid", () =>
       replaceOnce("main/ota_update.cpp", "if (e == ESP_OK) {", "if (true) {")],
     ["the OTA manifest path may consume the final 1 KiB reserve", () =>
-      replaceOnce("tools/stack/budgets.json",
-        '"ota_task_manifest_fetch": {\n      "symbols": ["ota_task", "ota_manifest_fetch_wrapper", "ota_manifest_fetch", "ota_manifest_identity", "ota_manifest_skip_value"],\n      "multipliers": {"ota_manifest_skip_value": 9},\n      "base_bytes": 0,\n      "max_bytes": 6144',
-        '"ota_task_manifest_fetch": {\n      "symbols": ["ota_task", "ota_manifest_fetch_wrapper", "ota_manifest_fetch", "ota_manifest_identity", "ota_manifest_skip_value"],\n      "multipliers": {"ota_manifest_skip_value": 9},\n      "base_bytes": 0,\n      "max_bytes": 11776')],
+      replaceBudgetMember("paths", "ota_task_manifest_fetch", "max_bytes", 6144, 11776)],
     ["the firmware manifest frame shrinks below the publisher contract", () =>
       replaceOnce("main/ota_update.cpp", "constexpr size_t   kManifestMax        = 2048;",
         "constexpr size_t   kManifestMax        = 1024;")],
@@ -152,25 +182,15 @@ try {
         'if b"\\\\" in manifest_bytes:',
         'if False and b"\\\\" in manifest_bytes:')],
     ["the rollback health gate may consume the final 1 KiB reserve", () =>
-      replaceOnce("tools/stack/budgets.json",
-        '"ota_health_gate": {\n      "symbols": ["ota_health_task"],\n      "multipliers": {},\n      "base_bytes": 2048,\n      "max_bytes": 3072',
-        '"ota_health_gate": {\n      "symbols": ["ota_health_task"],\n      "multipliers": {},\n      "base_bytes": 2048,\n      "max_bytes": 4096')],
+      replaceBudgetMember("paths", "ota_health_gate", "max_bytes", 3072, 4096)],
     ["the Weather download path may consume the final 1 KiB reserve", () =>
-      replaceOnce("tools/stack/budgets.json",
-        '"weather_task_download": {\n      "symbols": ["weather_task", "weather_cycle", "weather_fetch", "weather_download"],\n      "multipliers": {},\n      "base_bytes": 2048,\n      "max_bytes": 11264',
-        '"weather_task_download": {\n      "symbols": ["weather_task", "weather_cycle", "weather_fetch", "weather_download"],\n      "multipliers": {},\n      "base_bytes": 2048,\n      "max_bytes": 11265')],
+      replaceBudgetMember("paths", "weather_task_download", "max_bytes", 11264, 11265)],
     ["the Weather parse path may consume the final 1 KiB reserve", () =>
-      replaceOnce("tools/stack/budgets.json",
-        '"weather_task_parse": {\n      "symbols": ["weather_task", "weather_cycle", "weather_fetch", "weather_parse"],\n      "multipliers": {},\n      "base_bytes": 2048,\n      "max_bytes": 11264',
-        '"weather_task_parse": {\n      "symbols": ["weather_task", "weather_cycle", "weather_fetch", "weather_parse"],\n      "multipliers": {},\n      "base_bytes": 2048,\n      "max_bytes": 11265')],
+      replaceBudgetMember("paths", "weather_task_parse", "max_bytes", 11264, 11265)],
     ["the Weather download path omits its live cycle frame", () =>
-      replaceOnce("tools/stack/budgets.json",
-        '"symbols": ["weather_task", "weather_cycle", "weather_fetch", "weather_download"]',
-        '"symbols": ["weather_task", "weather_fetch", "weather_download"]')],
+      omitPathSymbol("weather_task_download", "weather_cycle")],
     ["the Weather parse path omits its live cycle frame", () =>
-      replaceOnce("tools/stack/budgets.json",
-        '"symbols": ["weather_task", "weather_cycle", "weather_fetch", "weather_parse"]',
-        '"symbols": ["weather_task", "weather_fetch", "weather_parse"]')],
+      omitPathSymbol("weather_task_parse", "weather_cycle")],
     ["the Weather TLS path is no longer sampled before HIL completion", () =>
       replaceOnce("main/weather_forecast.cpp",
         "    stack_watch_sample(StackWatch::Weather);\n    // A location/consent save",

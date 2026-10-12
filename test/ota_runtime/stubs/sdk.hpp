@@ -162,6 +162,8 @@ struct State {
     StackType_t*  health_stack        = nullptr;
     StaticTask_t* health_storage      = nullptr;
     unsigned      health_stack_bytes  = 0;
+    unsigned      health_stack_samples = 0;
+    bool          health_task_running  = false;
     void (*health_entry)(void*)       = nullptr;
     void*          buffers[8]{};
     FakeHttpClient clients[8]{};

@@ -55,6 +55,9 @@ struct FakeMqtt {
 using esp_mqtt_client_handle_t = FakeMqtt*;
 struct esp_mqtt_client_config_t {
     struct {
+        int stack_size = 0;
+    } task;
+    struct {
         struct {
             const char* uri = nullptr;
         } address;
@@ -87,6 +90,7 @@ struct esp_app_desc_t {
 namespace sdk {
 inline TickType_t ticks = 100000;
 inline int        locks = 0, takes = 0, gives = 0, delays = 0, resets = 0, samples = 0;
+inline int                             sdk_task_samples = 0;
 inline bool       fail_locked_new = false;
 inline bool       fail_next_new   = false;
 inline int        failed_news = 0, allocation_fail_lock_depth = 0;
@@ -99,6 +103,77 @@ inline int           message_id = 0, publish_calls = 0, subscribe_calls = 0;
 inline bool          reject_new_after_subscribe = false;
 inline int           unsubscribe_calls          = 0;
 inline char          last_subscribed_topic[256]{}, last_unsubscribed_topic[256]{};
+inline std::array<bool, 64> subscribe_failures{};
+inline std::array<bool, 64> unsubscribe_failures{}, unsubscribe_accepted{};
+inline std::array<std::array<char, 256>, 64> subscribed_topics{}, unsubscribed_topics{};
+inline std::array<std::array<char, 256>, 16> live_topics{};
+inline std::function<void(const char*, int)> on_subscribe;
+struct PublishTrace {
+    std::array<char, 256>  topic{};
+    std::array<char, 4096> payload{};
+    int                    length = 0, qos = 0, retain = 0;
+    bool                   accepted = false, enqueued = false;
+};
+inline std::array<PublishTrace, 64> published{};
+inline bool                         reject_next_publish = false, reject_new_after_publish = false;
+
+inline int record_publish(const char* topic, const char* payload, int len, int qos, int retain,
+                          bool enqueued) {
+    const size_t bytes = len == 0 && payload ? std::strlen(payload) : static_cast<size_t>(len);
+    if (publish_calls >= static_cast<int>(published.size()) ||
+        std::strlen(topic) >= published[0].topic.size() || bytes >= published[0].payload.size())
+        throw std::runtime_error("adapter publish trace bound exceeded");
+    PublishTrace& row = published[publish_calls++];
+    std::strcpy(row.topic.data(), topic);
+    if (bytes) std::memcpy(row.payload.data(), payload, bytes);
+    row.payload[bytes]  = '\0';
+    row.length          = static_cast<int>(bytes);
+    row.qos             = qos;
+    row.retain          = retain;
+    row.enqueued        = enqueued;
+    row.accepted        = !reject_next_publish;
+    reject_next_publish = false;
+    const int id        = row.accepted ? ++message_id : -1;
+    if (row.accepted && reject_new_after_publish) {
+        reject_new_after_publish = false;
+        fail_next_new = true; // final adapter action; only production work after SDK accept sees it
+    }
+    return id;
+}
+
+inline void record_topic(std::array<char, 256>& destination, const char* topic) {
+    if (std::strlen(topic) >= destination.size())
+        throw std::runtime_error("adapter topic bound exceeded");
+    std::strcpy(destination.data(), topic);
+}
+inline bool topic_live(const char* topic) {
+    for (const auto& live : live_topics)
+        if (std::strcmp(live.data(), topic) == 0) return true;
+    return false;
+}
+inline void retain_topic(const char* topic) {
+    if (topic_live(topic)) return; // the broker has one exact-topic subscription per client
+    for (auto& live : live_topics) {
+        if (live[0] == '\0') {
+            record_topic(live, topic);
+            return;
+        }
+    }
+    throw std::runtime_error("adapter live subscription bound exceeded");
+}
+inline int unsubscribe_count(const char* topic) {
+    int count = 0;
+    for (int i = 0; i < unsubscribe_calls; ++i)
+        if (std::strcmp(unsubscribed_topics[i].data(), topic) == 0) ++count;
+    return count;
+}
+inline int accepted_unsubscribe_count(const char* topic) {
+    int count = 0;
+    for (int i = 0; i < unsubscribe_calls; ++i)
+        if (unsubscribe_accepted[i] && std::strcmp(unsubscribed_topics[i].data(), topic) == 0)
+            ++count;
+    return count;
+}
 } // namespace sdk
 inline TickType_t xTaskGetTickCount() { return sdk::ticks; }
 inline void       vTaskDelay(TickType_t ticks) {
@@ -191,9 +266,14 @@ inline esp_err_t esp_mqtt_client_start(FakeMqtt* c) {
 }
 inline esp_err_t esp_mqtt_client_stop(FakeMqtt*) { return ESP_OK; }
 inline int       esp_mqtt_client_subscribe(FakeMqtt*, const char* topic, int) {
-    ++sdk::subscribe_calls;
+    const int row = sdk::subscribe_calls++;
+    if (static_cast<size_t>(row) >= sdk::subscribed_topics.size())
+        throw std::runtime_error("adapter subscribe trace bound exceeded");
+    sdk::record_topic(sdk::subscribed_topics[row], topic);
     std::strncpy(sdk::last_subscribed_topic, topic, sizeof(sdk::last_subscribed_topic) - 1);
-    const int id = ++sdk::message_id;
+    const int id = sdk::subscribe_failures[row] ? -1 : ++sdk::message_id;
+    if (id >= 0) sdk::retain_topic(topic);
+    if (sdk::on_subscribe) sdk::on_subscribe(topic, id);
     if (sdk::reject_new_after_subscribe) {
         sdk::reject_new_after_subscribe = false;
         sdk::fail_next_new =
@@ -202,15 +282,22 @@ inline int       esp_mqtt_client_subscribe(FakeMqtt*, const char* topic, int) {
     return id;
 }
 inline int esp_mqtt_client_unsubscribe(FakeMqtt*, const char* topic) {
-    ++sdk::unsubscribe_calls;
+    const int row = sdk::unsubscribe_calls++;
+    if (static_cast<size_t>(row) >= sdk::unsubscribed_topics.size())
+        throw std::runtime_error("adapter unsubscribe trace bound exceeded");
+    sdk::record_topic(sdk::unsubscribed_topics[row], topic);
     std::strncpy(sdk::last_unsubscribed_topic, topic, sizeof(sdk::last_unsubscribed_topic) - 1);
+    if (sdk::unsubscribe_failures[row]) return -1;
+    sdk::unsubscribe_accepted[row] = true;
+    for (auto& live : sdk::live_topics)
+        if (std::strcmp(live.data(), topic) == 0) live.fill('\0');
     return ++sdk::message_id;
 }
-inline int esp_mqtt_client_publish(FakeMqtt*, const char*, const char*, int, int, int) {
-    ++sdk::publish_calls;
-    return ++sdk::message_id;
+inline int esp_mqtt_client_publish(FakeMqtt*, const char* topic, const char* payload, int len,
+                                   int qos, int retain) {
+    return sdk::record_publish(topic, payload, len, qos, retain, false);
 }
-inline int esp_mqtt_client_enqueue(FakeMqtt*, const char*, const char*, int, int, int, bool) {
-    ++sdk::publish_calls;
-    return ++sdk::message_id;
+inline int esp_mqtt_client_enqueue(FakeMqtt*, const char* topic, const char* payload, int len,
+                                   int qos, int retain, bool) {
+    return sdk::record_publish(topic, payload, len, qos, retain, true);
 }

@@ -22,8 +22,8 @@ struct OtaHeapHeadroom {
 //   - firmware TLS failed twice at about 46-47 KiB free, while successful transfers began at
 //     58-63 KiB free with an approximately 30-32 KiB largest block;
 //   - RSA-3072 validation succeeds after TLS cleanup at the older measured 24/12 KiB floor.
-// The transfer floor matches the independently measured weather-TLS admission budget and requires
-// four consecutive samples, preventing a single allocator recovery edge from authorizing a
+// The transfer floor is higher than Weather's separate 48/20 KiB admission and requires four
+// consecutive samples, preventing a single allocator recovery edge from authorizing a
 // multi-megabyte download. These are gates, not reservations; TLS and the verifier remain
 // authoritative and every malformed, unsigned or wrongly-signed image is still rejected.
 inline constexpr OtaHeapHeadroom OTA_TRANSFER_HEADROOM = {56 * 1024, 24 * 1024, 4};

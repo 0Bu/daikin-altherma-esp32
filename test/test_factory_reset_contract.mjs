@@ -11,11 +11,20 @@ const code = (rel) => read(rel).split("\n")
   .filter((line) => !line.trim().startsWith("//")).join("\n");
 
 const wifi = code("main/wifi.cpp");
+const initAt = wifi.indexOf("bool wifi_init_sta_driver(bool& rollback_pending)");
+const waitAt = wifi.indexOf("bool wifi_wait_sta_connected(bool rollback_pending)");
+assert.ok(initAt >= 0 && waitAt > initAt, "the bounded STA driver helper must exist");
+const staInit = wifi.slice(initAt, waitAt);
+assert.ok(staInit.indexOf("esp_wifi_init(&ic)") >= 0 &&
+          staInit.indexOf("esp_wifi_init(&ic)") < staInit.indexOf("WIFI_STORAGE_RAM") &&
+          staInit.indexOf("WIFI_STORAGE_RAM") < staInit.indexOf("esp_wifi_set_config("),
+  "STA credentials must be configured only after selecting RAM-only WiFi storage");
+assert.doesNotMatch(staInit, /config_save\s*\(/,
+  "driver initialization must return before credential persistence consumes the startup stack");
 const staStart = wifi.slice(wifi.indexOf("bool wifi_start_sta()"),
                             wifi.indexOf("esp_err_t wifi_forget_persisted_config()"));
-assert.ok(staStart.indexOf("esp_wifi_init(&ic)") < staStart.indexOf("WIFI_STORAGE_RAM") &&
-          staStart.indexOf("WIFI_STORAGE_RAM") < staStart.indexOf("esp_wifi_set_config("),
-  "STA credentials must be configured only after selecting RAM-only WiFi storage");
+assert.match(staStart, /wifi_init_sta_driver\(rollback_pending\)[\s\S]*?wifi_wait_sta_connected\(rollback_pending\)[\s\S]*?wifi_finish_sta_rollback\(\)/,
+  "the scalar startup coordinator must finish initialization before wait and rollback persistence");
 
 const provisioning = code("main/provisioning.cpp");
 assert.ok(provisioning.indexOf("esp_wifi_init(&ic)") < provisioning.indexOf("WIFI_STORAGE_RAM") &&

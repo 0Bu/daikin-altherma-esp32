@@ -9,6 +9,7 @@
 #include <string>
 #include "ha_device.hpp"   // device_json — one X10A HA device across values/diagnostics/crash
 #include "json.hpp"        // json_append_escaped
+#include "json_integer.hpp"
 
 namespace daik {
 
@@ -154,10 +155,8 @@ struct HeartbeatFields {
     bool        modbus_connected = false;
     uint32_t    modbus_rx        = 0;   // successful HomeHub register reads since boot
     uint32_t    modbus_fails     = 0;   // failed reads since boot
-    // The HomeHub watched stack — same source and same 0-means-never-sampled rule as the other four
-    // slots (stack_watch.hpp). It USED to be published as a bare 0 on every board without a
-    // HomeHub, i.e. as "0 bytes of stack free" on the majority of the fleet: a plausible-looking
-    // number for a task that does not exist. It is null now, like its four siblings.
+    // The shared owner-task sampler keeps this minimum across HomeHub task recreation.
+    // A task that has never run publishes null rather than zero bytes of claimed headroom.
     uint32_t    modbus_stack_min_free_bytes = 0;
 };
 
@@ -211,14 +210,19 @@ inline std::string build_heartbeat_json(const HeartbeatFields& f) {
     std::string j = "{";
     j += "\"version\":\""; json_append_escaped(j, f.version); j += "\",";
     j += "\"platform\":\""; json_append_escaped(j, f.platform); j += "\",";
-    j += "\"uptime_s\":"; j += std::to_string(uptime_s); j += ",";
+    json_append_integer_field(j, "\"uptime_s\":", uptime_s);
+    j += ",";
     j += "\"uptime\":\""; j += format_uptime(f.uptime_ms); j += "\",";
-    j += "\"free_heap\":"; j += std::to_string(f.free_heap); j += ",";
-    j += "\"min_free_heap\":"; j += std::to_string(f.min_free_heap); j += ",";
-    j += "\"max_alloc\":"; j += std::to_string(f.max_alloc); j += ",";
+    json_append_integer_field(j, "\"free_heap\":", f.free_heap);
+    j += ",";
+    json_append_integer_field(j, "\"min_free_heap\":", f.min_free_heap);
+    j += ",";
+    json_append_integer_field(j, "\"max_alloc\":", f.max_alloc);
+    j += ",";
     // Beside the heap it reports on: the count of consecutive heap-watchdog restarts this boot
     // inherited, which is the only field here that can attribute a "sw" reset to the watchdog.
-    j += "\"heap_restarts\":"; j += std::to_string(static_cast<unsigned>(f.heap_restarts)); j += ",";
+    json_append_integer_field(j, "\"heap_restarts\":", static_cast<unsigned>(f.heap_restarts));
+    j += ",";
     // The stack budget, per watched task — null where the task has never run (see the fields).
     j += "\"httpd_stack_min_free_bytes\":"; append_stack_bytes(j, f.httpd_stack_min_free_bytes); j += ",";
     j += "\"poll_stack_min_free_bytes\":";  append_stack_bytes(j, f.poll_stack_min_free_bytes);  j += ",";
@@ -228,7 +232,8 @@ inline std::string build_heartbeat_json(const HeartbeatFields& f) {
     j += ",";
     j += "\"reset_reason\":\""; json_append_escaped(j, f.reset_reason); j += "\",";
     // Numeric twin of the slug above — see HeartbeatFields. A string never reaches a metrics store.
-    j += "\"reset_reason_code\":"; j += std::to_string(f.reset_reason_code); j += ",";
+    json_append_integer_field(j, "\"reset_reason_code\":", f.reset_reason_code);
+    j += ",";
     j += "\"reset_fault\":"; j += f.reset_fault ? "1" : "0"; j += ",";
     // The three connectivity flags ride as the NUMBERS 1/0, not JSON bools. Measured on this
     // install's Telegraf → VictoriaMetrics pipeline: wifi_connected/mqtt_connected/bus_connected were
@@ -242,8 +247,8 @@ inline std::string build_heartbeat_json(const HeartbeatFields& f) {
     // wifi_* — rssi null while offline (a stale reading must not leak); mac always present;
     // bssid null while offline (no AP).
     j += "\"wifi_connected\":"; j += f.wifi_connected ? "1" : "0";
-    j += ",\"wifi_rssi\":"; j += f.wifi_connected ? std::to_string(f.wifi_rssi) : "null";
-    j += ",\"wifi_reconnects\":"; j += std::to_string(f.wifi_reconnects);
+    json_append_integer_field(j, ",\"wifi_rssi\":", f.wifi_rssi, f.wifi_connected);
+    json_append_integer_field(j, ",\"wifi_reconnects\":", f.wifi_reconnects);
     j += ",\"wifi_mac\":";
     if (f.wifi_mac.empty()) j += "null";
     else { j += "\""; j += f.wifi_mac; j += "\""; }
@@ -251,30 +256,30 @@ inline std::string build_heartbeat_json(const HeartbeatFields& f) {
     if (f.wifi_bssid.empty()) j += "null";
     else { j += "\""; j += f.wifi_bssid; j += "\""; }
     // net_* — the transport, as numbers (see the field comments).
-    j += ",\"net_link\":";    j += std::to_string(static_cast<int>(f.net_link));
+    json_append_integer_field(j, ",\"net_link\":", static_cast<int>(f.net_link));
     j += ",\"eth_present\":"; j += f.eth_present ? "1" : "0";
     j += ",\"eth_link\":";    j += f.eth_link ? "1" : "0";
     // mqtt_*
     j += ",\"mqtt_connected\":"; j += f.mqtt_connected ? "1" : "0";
-    j += ",\"mqtt_count\":"; j += std::to_string(f.mqtt_count);
-    j += ",\"mqtt_fails\":"; j += std::to_string(f.mqtt_fails);
-    j += ",\"mqtt_reconnects\":"; j += std::to_string(f.mqtt_reconnects);
+    json_append_integer_field(j, ",\"mqtt_count\":", f.mqtt_count);
+    json_append_integer_field(j, ",\"mqtt_fails\":", f.mqtt_fails);
+    json_append_integer_field(j, ",\"mqtt_reconnects\":", f.mqtt_reconnects);
     // Cycles that produced nothing — an OOM skip and a deliberate OTA/weather TLS hold-off
     // (legacy-380).
-    j += ",\"mqtt_skipped\":"; j += std::to_string(f.mqtt_skipped);
-    j += ",\"mqtt_quiesced\":"; j += std::to_string(f.mqtt_quiesced);
+    json_append_integer_field(j, ",\"mqtt_skipped\":", f.mqtt_skipped);
+    json_append_integer_field(j, ",\"mqtt_quiesced\":", f.mqtt_quiesced);
     // poll_* — the X10A sweep that never ran, so nothing below was even attempted.
-    j += ",\"poll_skipped\":"; j += std::to_string(f.poll_skipped);
+    json_append_integer_field(j, ",\"poll_skipped\":", f.poll_skipped);
     // bus_*
     j += ",\"bus_connected\":"; j += f.bus_connected ? "1" : "0";
     j += ",\"bus_proto\":\""; j += f.bus_proto; j += "\"";
-    j += ",\"bus_registers\":"; j += std::to_string(f.registers);
-    j += ",\"bus_values\":"; j += std::to_string(f.values);
-    j += ",\"bus_last_ok_s\":"; j += std::to_string(f.last_ok_s);
-    j += ",\"bus_rx_received\":"; j += std::to_string(f.rx_received);
-    j += ",\"bus_rx_fails\":"; j += std::to_string(f.rx_fails);
-    j += ",\"bus_crc_err\":"; j += std::to_string(f.crc_err);
-    j += ",\"bus_timeout_err\":"; j += std::to_string(f.timeout_err);
+    json_append_integer_field(j, ",\"bus_registers\":", f.registers);
+    json_append_integer_field(j, ",\"bus_values\":", f.values);
+    json_append_integer_field(j, ",\"bus_last_ok_s\":", f.last_ok_s);
+    json_append_integer_field(j, ",\"bus_rx_received\":", f.rx_received);
+    json_append_integer_field(j, ",\"bus_rx_fails\":", f.rx_fails);
+    json_append_integer_field(j, ",\"bus_crc_err\":", f.crc_err);
+    json_append_integer_field(j, ",\"bus_timeout_err\":", f.timeout_err);
     // 1/0 NUMBER like the three connectivity flags above, and for the same measured reason.
     j += ",\"bus_ou_held_over\":"; j += f.ou_held_over ? "1" : "0";
     // Read commands actually sent. There is no bus_tx_writes/bus_tx_fails companion: the X10A
@@ -284,13 +289,13 @@ inline std::string build_heartbeat_json(const HeartbeatFields& f) {
     // metric that cannot vary is a line on a dashboard that always reads zero and an entity a
     // reader has to rule out. Dropped in legacy-215; neither was ever an HA entity, so nothing is
     // orphaned.
-    j += ",\"bus_tx_reads\":"; j += std::to_string(f.rx_received + f.rx_fails);
+    json_append_integer_field(j, ",\"bus_tx_reads\":", f.rx_received + f.rx_fails);
     // Modbus TCP (HomeHub) link — payload-only (no HA entity; see HeartbeatFields). The connectivity
     // flag rides as a 1/0 NUMBER like the others, for the same metrics-consumer reason.
     j += ",\"modbus_enabled\":"; j += f.modbus_enabled ? "1" : "0";
     j += ",\"modbus_connected\":"; j += f.modbus_connected ? "1" : "0";
-    j += ",\"modbus_rx\":"; j += std::to_string(f.modbus_rx);
-    j += ",\"modbus_fails\":"; j += std::to_string(f.modbus_fails);
+    json_append_integer_field(j, ",\"modbus_rx\":", f.modbus_rx);
+    json_append_integer_field(j, ",\"modbus_fails\":", f.modbus_fails);
     j += ",\"modbus_stack_min_free_bytes\":"; append_stack_bytes(j, f.modbus_stack_min_free_bytes);
     j += "}";
     return j;

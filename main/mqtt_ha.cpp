@@ -220,6 +220,7 @@ static logic::HeatingCurveDiagnosis s_heating_curve_diagnosis;  // guarded by s_
 inline constexpr size_t REF_VALUE_TOPIC_COUNT = 3;
 using ReferenceTopicSet = std::array<std::string, REF_VALUE_TOPIC_COUNT>;
 static ReferenceTopicSet s_ref_subscribed_topics;  // mqtt_task only
+static bool s_ref_subscription_retry = false;      // ownership is distinct from current acceptance
 static bool                s_ref_subscription_announced = false; // one success line per binding
 static std::array<std::string, 9> s_ref_binding_fields;                 // guarded by s_mtx
 static uint16_t            s_ref_binding_fixed_setpoint_tenths = 0;
@@ -246,6 +247,7 @@ struct CirculationProbeState {
 static CirculationProbeState s_circulation_probe;
 static SemaphoreHandle_t s_circulation_probe_sem = nullptr;
 static std::string s_circulation_subscribed_topic;
+static bool                  s_circulation_subscription_retry = false; // mqtt_task only
 static std::string s_circulation_probe_subscribed_topic;
 static uint32_t s_circulation_probe_task_generation = 0;
 static std::string s_circulation_binding_topic;
@@ -1117,7 +1119,7 @@ static RetainedCleanupCycle service_requested_topic_cleanup(const Config& c) {
     return suppressed;
 }
 
-static void publish_weather_state(bool config_enabled) {
+static __attribute__((noinline)) std::string build_weather_payload(bool config_enabled) {
     const WeatherForecastStatus status = weather_forecast_status();
     const WeatherMqttAction action = weather_mqtt_action(config_enabled, status.configured);
     if (action != WeatherMqttAction::Publish) {
@@ -1126,7 +1128,7 @@ static void publish_weather_state(bool config_enabled) {
         // the acknowledgement cache intact until the complete Weather run is broker-confirmed.
         if (action == WeatherMqttAction::CleanupRetained && !s_disabled_weather_cleaned)
             s_weather_cleanup_requested.store(true, std::memory_order_release);
-        return;
+        return {};
     }
     // Re-enabling makes the next disable a new cleanup transition.
     s_disabled_weather_cleaned = false;
@@ -1139,10 +1141,15 @@ static void publish_weather_state(bool config_enabled) {
         status.issued_unix_s, status.fetched_unix_s, status.decision_unix_s,
         status.last_attempt_unix_s, status.successes, status.errors,
         status.model, status.state, status.reason, status.error};
-    const std::string js = build_weather_mqtt_json(snapshot, now_unix_s);
+    return build_weather_mqtt_json(snapshot, now_unix_s);
+}
+
+static __attribute__((noinline)) void publish_weather_state(bool config_enabled) {
+    std::string js = build_weather_payload(config_enabled);
+    if (js.empty()) return;
     if (js != s_last_weather_json &&
         mqtt_publish(s_weather, js.c_str(), static_cast<int>(js.size()), 0, 1)) {
-        s_last_weather_json = js;
+        s_last_weather_json.swap(js);
     }
 }
 
@@ -1250,7 +1257,7 @@ static void publish_crash() {
 // from a controller mode: heating_curve_diagnosis_armed() answers it from the explicit diagnostics
 // consent plus the room-source and HomeHub configuration the editors show, so withdrawing any
 // required prerequisite disarms on the next cycle.
-static logic::HeatingCurveSnapshot evaluate_heating_curve(const Config& cfg, const HpStats& hp) {
+static logic::HeatingCurveSnapshot evaluate_heating_curve(const Config& cfg, bool x10a_connected) {
     if (!cfg.diagnostics_enabled) {
         logic::HeatingCurveInputs in;
         in.armed = false;
@@ -1296,7 +1303,7 @@ static logic::HeatingCurveSnapshot evaluate_heating_curve(const Config& cfg, con
     in.armed = heating_curve_diagnosis_armed(cfg);
     in.room_control_eligible = room.control_eligible;
     in.room_error_k = room.room_error_k;
-    in.x10a_connected = hp.connected;
+    in.x10a_connected        = x10a_connected;
     in.homehub_connected = mbs.connected;
     in.plant_gate_known = mbs.plant_gate_known;
     in.plant_gate_active = mbs.plant_gate_active;
@@ -1333,7 +1340,7 @@ static logic::HeatingCurveSnapshot evaluate_heating_curve(const Config& cfg, con
 // publish it to the heartbeat topic (not retained). Called on a fixed HEARTBEAT_INTERVAL_S cadence
 // (mqtt_task) — diagnostics, not real-time telemetry, so unlike the source topics it always publishes
 // rather than only on change.
-static void publish_heartbeat() {
+static __attribute__((noinline)) std::string build_heartbeat_payload() {
     HpStats  hp = hp_stats();
     WifiInfo wi = wifi_info();
     HeartbeatFields f;
@@ -1408,7 +1415,11 @@ static void publish_heartbeat() {
     f.modbus_rx        = mbs.rx_ok;
     f.modbus_fails     = mbs.rx_fail;
     f.modbus_stack_min_free_bytes = stack_watch_min_free_bytes(StackWatch::Modbus);
-    const std::string js = build_heartbeat_json(f);
+    return build_heartbeat_json(f);
+}
+
+static __attribute__((noinline)) void publish_heartbeat() {
+    const std::string js = build_heartbeat_payload();
     mqtt_publish(s_heartbeat, js.c_str(), static_cast<int>(js.size()), 0, 0);   // not retained
 }
 
@@ -1416,8 +1427,7 @@ static void publish_heartbeat() {
 // topic. Keeping these out of HeartbeatFields makes the board/link payload independent of any room
 // mapping or heating policy; the nested objects keep related evidence together for generic MQTT
 // browsers while retaining numeric leaves for Telegraf/VictoriaMetrics.
-static void publish_heating_curve_telemetry(const Config& cfg) {
-    if (!cfg.diagnostics_enabled) return;
+static __attribute__((noinline)) std::string build_heating_curve_payload(const Config& cfg) {
     HeatingCurveMqttFields f;
     const ReferenceTemperatureStatus rt          = reference_temperature_status(cfg);
     const uint64_t room_now_ms = static_cast<uint64_t>(esp_timer_get_time() / 1000);
@@ -1502,7 +1512,12 @@ static void publish_heating_curve_telemetry(const Config& cfg) {
     f.holds = diagnosis.holds;
     f.blocks = diagnosis.blocks;
 
-    const std::string js = build_heating_curve_mqtt_json(f);
+    return build_heating_curve_mqtt_json(f);
+}
+
+static __attribute__((noinline)) void publish_heating_curve_telemetry(const Config& cfg) {
+    if (!cfg.diagnostics_enabled) return;
+    const std::string js = build_heating_curve_payload(cfg);
     mqtt_publish(s_heating_curve_topic, js.c_str(), static_cast<int>(js.size()), 0, 0);
 }
 
@@ -1595,15 +1610,12 @@ struct DecodedReferenceFrame {
 
 // The saved mapping is interpreted only when an actual MQTT frame arrives. Configuration accepts
 // an unverified path intentionally; this decoder supplies the runtime error and fail-closed state.
-static DecodedReferenceFrame decode_reference_frame(const ReferenceMqttFrame& frame,
-                                                     const std::string& temperature_topic,
-                                                     const std::string& temperature_path,
-                                                     const std::string& setpoint_topic,
-                                                     const std::string& setpoint_path,
-                                                     const std::string& timestamp_topic,
-                                                     const std::string& timestamp_path,
-                                                     const std::string& enabled_path,
-                                                     const std::string& hvac_mode_path) {
+static __attribute__((noinline)) DecodedReferenceFrame
+decode_reference_frame(const ReferenceMqttFrame& frame, std::string_view temperature_topic,
+                       const std::string& temperature_path, std::string_view setpoint_topic,
+                       const std::string& setpoint_path, std::string_view timestamp_topic,
+                       const std::string& timestamp_path, const std::string& enabled_path,
+                       const std::string& hvac_mode_path) {
     DecodedReferenceFrame out;
     const bool temperature_frame = frame.topic == temperature_topic;
     const bool setpoint_frame = !setpoint_topic.empty() && frame.topic == setpoint_topic;
@@ -1705,9 +1717,9 @@ struct DecodedCirculationFrame {
     const char* error=nullptr;
 };
 
-static DecodedCirculationFrame decode_circulation_frame(const ReferenceMqttFrame& frame,
-                                                        const std::string& power_path,
-                                                        const std::string& timestamp_path) {
+static __attribute__((noinline)) DecodedCirculationFrame
+decode_circulation_frame(const ReferenceMqttFrame& frame, const std::string& power_path,
+                         const std::string& timestamp_path) {
     DecodedCirculationFrame out;
     if (frame.payload_len == 0 ||
         !json_payload_strings_ok(std::string_view(frame.payload, frame.payload_len))) {
@@ -1820,13 +1832,17 @@ static void service_circulation_subscription(const Config& c, uint32_t epoch) {
 
     if (!capture_enabled) {
         s_circulation_reconfigure.exchange(false);
-        if (!s_circulation_subscribed_topic.empty() && s_connected &&
-            !reference_topic_owned(s_circulation_subscribed_topic))
-            esp_mqtt_client_unsubscribe(s_client, s_circulation_subscribed_topic.c_str());
-        s_circulation_subscribed_topic.clear();
+        const bool retired =
+            s_circulation_subscribed_topic.empty() || !s_connected ||
+            reference_topic_owned(s_circulation_subscribed_topic) ||
+            s_circulation_subscribed_topic == s_circulation_probe_subscribed_topic ||
+            esp_mqtt_client_unsubscribe(s_client, s_circulation_subscribed_topic.c_str()) >= 0;
+        if (retired) s_circulation_subscribed_topic.clear();
+        s_circulation_subscription_retry = !retired;
         Lock lk(s_mtx);
         if (!circulation_epoch_current_locked(epoch)) return;
         s_circulation_status.subscribed = false;
+        if (!retired) s_circulation_status.error = "MQTT unsubscribe failed";
         return;
     }
 
@@ -1846,6 +1862,9 @@ static void service_circulation_subscription(const Config& c, uint32_t epoch) {
 
     const bool force = s_circulation_reconfigure.exchange(false);
     if (force) {
+        // Keep the reconnect request through any later allocation failure. The prior cleanup
+        // owner can still match even though a clean broker session needs a new SUBSCRIBE.
+        s_circulation_subscription_retry = true;
         // Reconnects and persisted threshold/age changes both require a fresh, confirmed state.
         // A previously confirmed ON/OFF must not cross either boundary as current evidence.
         Lock lk(s_mtx);
@@ -1858,13 +1877,29 @@ static void service_circulation_subscription(const Config& c, uint32_t epoch) {
         s_circulation_status.subscribed = false;
         return;
     }
-    if (!force && s_circulation_subscribed_topic == c.circulation_topic) return;
+    if (!force && !s_circulation_subscription_retry &&
+        s_circulation_subscribed_topic == c.circulation_topic)
+        return;
+    std::string prepared_owner = c.circulation_topic;
     if (!s_circulation_subscribed_topic.empty() &&
-        s_circulation_subscribed_topic != c.circulation_topic &&
-        !reference_topic_owned(s_circulation_subscribed_topic))
-        esp_mqtt_client_unsubscribe(s_client, s_circulation_subscribed_topic.c_str());
+        s_circulation_subscribed_topic != c.circulation_topic) {
+        if (!reference_topic_owned(s_circulation_subscribed_topic) &&
+            s_circulation_subscribed_topic != s_circulation_probe_subscribed_topic &&
+            esp_mqtt_client_unsubscribe(s_client, s_circulation_subscribed_topic.c_str()) < 0) {
+            s_circulation_subscription_retry = true;
+            Lock lk(s_mtx);
+            if (!circulation_epoch_current_locked(epoch)) return;
+            s_circulation_status.subscribed = false;
+            s_circulation_status.error      = "MQTT unsubscribe failed";
+            s_circulation_status.errors++;
+            return;
+        }
+        s_circulation_subscribed_topic.clear();
+    }
 
     const int id = esp_mqtt_client_subscribe(s_client, c.circulation_topic.c_str(), 0);
+    if (id >= 0) s_circulation_subscribed_topic.swap(prepared_owner);
+    s_circulation_subscription_retry = id < 0;
     {
         Lock lk(s_mtx);
         if (!circulation_epoch_current_locked(epoch)) return;
@@ -1873,7 +1908,6 @@ static void service_circulation_subscription(const Config& c, uint32_t epoch) {
         if (id < 0) s_circulation_status.errors++;
     }
     if (id >= 0) {
-        s_circulation_subscribed_topic = c.circulation_topic;
         diag_printf("mqtt: circulation power subscription active\n");
     }
 }
@@ -1888,11 +1922,13 @@ static void service_circulation_probe_subscription(const Config& saved) {
             s_circulation_probe.passed = false;
             s_circulation_probe.error = "Plant diagnostics are disabled";
         }
-        if (!s_circulation_probe_subscribed_topic.empty() && s_connected &&
-            !reference_topic_owned(s_circulation_probe_subscribed_topic) &&
-            s_circulation_probe_subscribed_topic != s_circulation_subscribed_topic)
-            esp_mqtt_client_unsubscribe(s_client, s_circulation_probe_subscribed_topic.c_str());
-        s_circulation_probe_subscribed_topic.clear();
+        const bool retired =
+            s_circulation_probe_subscribed_topic.empty() || !s_connected ||
+            reference_topic_owned(s_circulation_probe_subscribed_topic) ||
+            s_circulation_probe_subscribed_topic == s_circulation_subscribed_topic ||
+            esp_mqtt_client_unsubscribe(s_client, s_circulation_probe_subscribed_topic.c_str()) >=
+                0;
+        if (retired) s_circulation_probe_subscribed_topic.clear();
         s_circulation_probe_task_generation = 0;
         if (signal && s_circulation_probe_sem) xSemaphoreGive(s_circulation_probe_sem);
         return;
@@ -1910,15 +1946,34 @@ static void service_circulation_probe_subscription(const Config& saved) {
         if (active) candidate = s_circulation_probe.config;
     }
     if (!active) {
-        if (!s_circulation_probe_subscribed_topic.empty() &&
-            s_circulation_probe_subscribed_topic != saved.circulation_topic &&
-            !reference_topic_owned(s_circulation_probe_subscribed_topic))
-            esp_mqtt_client_unsubscribe(s_client, s_circulation_probe_subscribed_topic.c_str());
-        s_circulation_probe_subscribed_topic.clear();
+        const bool retired =
+            s_circulation_probe_subscribed_topic.empty() ||
+            s_circulation_probe_subscribed_topic == s_circulation_subscribed_topic ||
+            reference_topic_owned(s_circulation_probe_subscribed_topic) ||
+            esp_mqtt_client_unsubscribe(s_client, s_circulation_probe_subscribed_topic.c_str()) >=
+                0;
+        if (retired) s_circulation_probe_subscribed_topic.clear();
         s_circulation_probe_task_generation = 0;
         return;
     }
     if (s_circulation_probe_task_generation == generation) return;
+    // A second Test can arrive before the previous inactive probe's cleanup cycle. Retire that
+    // owner before replacing it; a rejected SDK unsubscribe keeps the identity for the next tick.
+    if (!s_circulation_probe_subscribed_topic.empty() &&
+        s_circulation_probe_subscribed_topic != candidate.topic) {
+        if (!reference_topic_owned(s_circulation_probe_subscribed_topic) &&
+            s_circulation_probe_subscribed_topic != s_circulation_subscribed_topic &&
+            esp_mqtt_client_unsubscribe(s_client, s_circulation_probe_subscribed_topic.c_str()) <
+                0) {
+            Lock lk(s_mtx);
+            if (s_circulation_probe.active && s_circulation_probe.generation == generation) {
+                s_circulation_probe.subscribed = false;
+                s_circulation_probe.error      = "MQTT unsubscribe failed";
+            }
+            return;
+        }
+        s_circulation_probe_subscribed_topic.clear();
+    }
     // Re-subscribe UNCONDITIONALLY, including when this exact topic is already the saved source's.
     // This asks the broker to deliver the retained value again, so pressing Test has a bounded
     // answer instead of depending on when the source happens to publish next. Skipping it here made
@@ -1926,6 +1981,11 @@ static void service_circulation_probe_subscription(const Config& saved) {
     // on-change-only meter answered 422 and /set_circulation then refused the save with the proof
     // gate — the mapping blamed for the probe.
     const int id = esp_mqtt_client_subscribe(s_client, candidate.topic.c_str(), 0);
+    // Configuration alone does not prove another owner exists: its SDK subscribe may have failed.
+    // Commit the accepted cleanup identity before the status-generation check, without allocation.
+    if (id >= 0 && candidate.topic != s_circulation_subscribed_topic &&
+        !reference_topic_owned(candidate.topic))
+        s_circulation_probe_subscribed_topic.swap(candidate.topic);
     bool signal = false;
     {
         Lock lk(s_mtx);
@@ -1938,10 +1998,6 @@ static void service_circulation_probe_subscription(const Config& saved) {
             }
         }
     }
-    // Recorded only when this topic is not already owned by another subscription, so the cleanup
-    // above cannot unsubscribe a topic the saved source still needs.
-    if (id >= 0 && candidate.topic != saved.circulation_topic)
-        s_circulation_probe_subscribed_topic.swap(candidate.topic);
     s_circulation_probe_task_generation = generation;
     if (signal && s_circulation_probe_sem) xSemaphoreGive(s_circulation_probe_sem);
 }
@@ -2004,18 +2060,31 @@ static bool reference_topic_owned(const std::string& topic) {
     return reference_topic_set_contains(s_ref_subscribed_topics, topic);
 }
 
-static void unsubscribe_reference_topic_if_unused(const std::string& topic,
+static bool unsubscribe_reference_topic_if_unused(const std::string&       topic,
                                                   const ReferenceTopicSet& keep) {
     if (topic.empty() || !s_connected || reference_topic_set_contains(keep, topic) ||
         topic == s_circulation_subscribed_topic || topic == s_circulation_probe_subscribed_topic)
-        return;
-    esp_mqtt_client_unsubscribe(s_client, topic.c_str());
+        return true;
+    return esp_mqtt_client_unsubscribe(s_client, topic.c_str()) >= 0;
+}
+
+static bool retire_reference_topics(const ReferenceTopicSet& keep) {
+    bool retired = true;
+    for (std::string& topic : s_ref_subscribed_topics) {
+        if (reference_topic_set_contains(keep, topic)) continue;
+        if (unsubscribe_reference_topic_if_unused(topic, keep))
+            topic.clear();
+        else
+            retired = false;
+    }
+    return retired;
 }
 
 // Apply topic edits on the existing MQTT client. A binding change retires the old raw value: a
 // reading extracted by the previous path must never appear under the new sensor identity.
 // Keep the checked source lifecycle compact without changing mqtt_task's pinned frame contract.
-static void service_reference_subscription(const Config& c, uint32_t epoch) {
+static __attribute__((noinline)) bool apply_reference_binding(const Config& c, uint32_t epoch,
+                                                              bool& force) {
     // The mapping may remain saved while diagnostics are off. Only the Firmware-card master consent
     // opens the subscription; switching it off clears the runtime sample and unsubscribes live.
     const bool configured = !c.ref_temp_topic.empty();
@@ -2023,7 +2092,7 @@ static void service_reference_subscription(const Config& c, uint32_t epoch) {
     bool       binding_changed = false;
     {
         Lock lk(s_mtx);
-        if (epoch != s_ref_requested_epoch.load(std::memory_order_acquire)) return;
+        if (epoch != s_ref_requested_epoch.load(std::memory_order_acquire)) return false;
         binding_changed = !reference_binding_matches(reference_config_binding(c),
                                                      reference_applied_binding_locked());
     }
@@ -2035,10 +2104,9 @@ static void service_reference_subscription(const Config& c, uint32_t epoch) {
         const auto fields = reference_binding_fields(reference_config_binding(c));
         for (size_t i = 0; i < fields.size(); ++i) prepared[i].assign(fields[i]);
     }
-    bool force = false;
     {
         Lock lk(s_mtx);
-        if (epoch != s_ref_requested_epoch.load(std::memory_order_acquire)) return;
+        if (epoch != s_ref_requested_epoch.load(std::memory_order_acquire)) return false;
         const ReferenceSourceBinding desired_binding = reference_config_binding(c);
         const ReferenceSourceBinding applied_binding = reference_applied_binding_locked();
         const bool                   mapping_changed =
@@ -2060,18 +2128,27 @@ static void service_reference_subscription(const Config& c, uint32_t epoch) {
         }
         s_ref_applied_epoch = epoch;
         force               = s_ref_reconfigure.exchange(false);
+        if (force) s_ref_subscription_retry = true;
     }
+    return true;
+}
+
+static __attribute__((noinline)) void service_reference_subscription(const Config& c,
+                                                                     uint32_t      epoch) {
+    bool force = false;
+    if (!apply_reference_binding(c, epoch, force)) return;
+    const bool configured      = !c.ref_temp_topic.empty();
+    const bool capture_enabled = c.diagnostics_enabled && configured;
 
     // Deleting the topic is the collection boundary. Drop the live subscription and the captured
     // runtime values with it.
     if (!capture_enabled) {
-        for (const std::string& topic : s_ref_subscribed_topics)
-            unsubscribe_reference_topic_if_unused(topic, {});
-        s_ref_subscribed_topics = {};
+        const bool retired       = retire_reference_topics({});
+        s_ref_subscription_retry = !retired;
         Lock lk(s_mtx);
         if (!reference_request_current_locked(epoch, c)) return;
         s_ref_status.subscribed = false;
-        s_ref_status.error.clear();
+        s_ref_status.error      = retired ? "" : "MQTT unsubscribe failed";
         return;
     }
 
@@ -2090,9 +2167,7 @@ static void service_reference_subscription(const Config& c, uint32_t epoch) {
                                             c.ref_temp_enabled_path,
                                             c.ref_temp_hvac_mode_path,
                                             c.ref_temp_max_age_s, &invalid)) {
-        for (const std::string& topic : s_ref_subscribed_topics)
-            unsubscribe_reference_topic_if_unused(topic, {});
-        s_ref_subscribed_topics = {};
+        s_ref_subscription_retry = !retire_reference_topics({});
         Lock lk(s_mtx);
         if (!reference_request_current_locked(epoch, c)) return;
         s_ref_status.subscribed = false;
@@ -2108,24 +2183,33 @@ static void service_reference_subscription(const Config& c, uint32_t epoch) {
         if (!configured) s_ref_subscribed_topics = {};
         return;
     }
-    const ReferenceTopicSet desired = reference_topics(c);
-    if (!force && s_ref_subscribed_topics == desired) {
+    ReferenceTopicSet desired = reference_topics(c);
+    if (!force && !s_ref_subscription_retry && s_ref_subscribed_topics == desired) {
         Lock lk(s_mtx);
         if (reference_request_current_locked(epoch, c)) s_ref_status.subscribed = true;
         return;
     }
 
-    for (const std::string& old_topic : s_ref_subscribed_topics)
-        unsubscribe_reference_topic_if_unused(old_topic, desired);
-    ReferenceTopicSet subscribed;
+    if (!retire_reference_topics(desired)) {
+        s_ref_subscription_retry = true;
+        Lock lk(s_mtx);
+        if (!reference_request_current_locked(epoch, c)) return;
+        s_ref_status.subscribed = false;
+        s_ref_status.error      = "MQTT unsubscribe failed";
+        s_ref_status.errors++;
+        return;
+    }
     bool all_subscribed = true;
-    for (const std::string& topic : desired) {
+    for (std::string& topic : desired) {
         if (topic.empty()) continue;
         const int id = esp_mqtt_client_subscribe(s_client, topic.c_str(), 0);
-        if (id >= 0) reference_topic_set_add(subscribed, topic);
-        else all_subscribed = false;
+        if (id < 0) {
+            all_subscribed = false;
+            if (!reference_topic_set_contains(s_ref_subscribed_topics, topic)) topic.clear();
+        }
     }
-    s_ref_subscribed_topics = subscribed;
+    s_ref_subscribed_topics.swap(desired);
+    s_ref_subscription_retry = !all_subscribed;
     {
         Lock lk(s_mtx);
         if (!reference_request_current_locked(epoch, c)) return;
@@ -2141,7 +2225,8 @@ static void service_reference_subscription(const Config& c, uint32_t epoch) {
     }
 }
 
-static void service_circulation_probe_frame(const ReferenceMqttFrame& frame) {
+static __attribute__((noinline)) void
+service_circulation_probe_frame(const ReferenceMqttFrame& frame) {
     CirculationSourceTestConfig candidate;
     uint32_t generation = 0;
     {
@@ -2179,8 +2264,8 @@ static void service_circulation_probe_frame(const ReferenceMqttFrame& frame) {
     if (signal && s_circulation_probe_sem) xSemaphoreGive(s_circulation_probe_sem);
 }
 
-static void service_circulation_frame(const ReferenceMqttFrame& frame, const Config& c) {
-    service_circulation_probe_frame(frame);
+static __attribute__((noinline)) void service_circulation_frame(const ReferenceMqttFrame& frame,
+                                                                const Config&             c) {
     if (!c.diagnostics_enabled || c.circulation_topic.empty() ||
         frame.topic != c.circulation_topic) return;
     CirculationSourceStatus  candidate;
@@ -2239,7 +2324,160 @@ static void service_circulation_frame(const ReferenceMqttFrame& frame, const Con
     s_circulation_source_time = source_time;
 }
 
-static void service_reference_frames(const Config& c) {
+// Candidate/status work runs after decoding, so its fixed frame never overlaps cJSON recursion.
+static __attribute__((noinline)) void
+apply_reference_frame(const ReferenceMqttFrame& frame, const Config& c,
+                      const DecodedReferenceFrame& decoded, std::string_view setpoint_topic,
+                      std::string_view timestamp_topic, bool timestamp_mapped) {
+    // Snapshot without mutating the committed aggregate. Copying strings may throw, but the
+    // RAII lock releases and every prior raw field and clock watermark remains intact.
+    ReferenceTemperatureStatus candidate;
+    SourceTimestampHighWater   candidate_watermark;
+    {
+        Lock lk(s_mtx);
+        if (!reference_request_current_locked(frame.reference_epoch, c)) return;
+        candidate           = s_ref_status;
+        candidate_watermark = s_ref_source_time;
+    }
+    candidate.messages++;
+    const char* rejection           = nullptr;
+    bool        first_valid_payload = false;
+    bool        recovered_mapping   = false;
+    if (!decoded.valid) {
+        if (frame.topic == c.ref_temp_topic) candidate.has_value = false;
+        if (!setpoint_topic.empty() && frame.topic == setpoint_topic)
+            candidate.has_setpoint = false;
+        if (frame.topic == timestamp_topic) candidate.has_source_time = false;
+        rejection                  = decoded.error ? decoded.error : "Source value is invalid";
+        candidate.rejection_reason = decoded.error_reason;
+    } else if (decoded.has_source_time && !candidate_watermark.accept(decoded.source_unix_s)) {
+        rejection                  = "Source timestamp moved backward";
+        candidate.rejection_reason = ReferenceRoomReason::BackwardTimestamp;
+    } else {
+        if (decoded.temperature_updated) {
+            first_valid_payload       = !candidate.has_value;
+            candidate.temperature_c   = decoded.temperature_c;
+            candidate.has_enabled     = decoded.has_enabled;
+            candidate.enabled         = decoded.enabled;
+            candidate.has_hvac_mode   = decoded.has_hvac_mode;
+            candidate.hvac_mode       = decoded.hvac_mode;
+            candidate.received_ms     = frame.received_ms;
+            candidate.received_unix_s = frame.received_unix_s;
+            candidate.retained        = frame.retained;
+            if (timestamp_topic.empty()) candidate.timestamp_source = "mqtt_arrival";
+            candidate.has_value = true;
+        }
+        if (decoded.setpoint_updated) {
+            candidate.has_setpoint = true;
+            candidate.setpoint_c   = decoded.setpoint_c;
+        }
+        if (decoded.timestamp_updated) {
+            candidate.has_source_time  = true;
+            candidate.source_unix_s    = decoded.source_unix_s;
+            candidate.timestamp_source = decoded.timestamp_source;
+        }
+        candidate.eligibility_error = decoded.control_error ? decoded.control_error : "";
+        const bool complete         = candidate.has_value &&
+                              (c.ref_temp_fixed_setpoint_tenths != 0 || candidate.has_setpoint) &&
+                              (!timestamp_mapped || candidate.has_source_time);
+        recovered_mapping = complete && !candidate.error.empty();
+        if (complete) candidate.error.clear();
+        // A retained decoder error still blocks this incomplete aggregate, so it keeps the
+        // reason that set it: reporting Eligible (code 0) beside a blocking error would break
+        // the rule that code 0 is the only eligible state (MQTT-05/b).
+        if (candidate.error.empty()) candidate.rejection_reason = ReferenceRoomReason::Eligible;
+        if (decoded.control_parse_error) candidate.errors++;
+
+        const uint64_t now_ms     = static_cast<uint64_t>(esp_timer_get_time() / 1000);
+        int64_t        now_unix_s = -1;
+        int32_t        now_sub_ms = 0;
+        time_now(now_unix_s, now_sub_ms);
+        const ReferenceFreshness freshness = reference_room_freshness(
+            timestamp_mapped, candidate.has_value, candidate.retained, candidate.has_source_time,
+            candidate.source_unix_s, candidate.received_ms, now_unix_s, now_ms,
+            c.ref_temp_max_age_s);
+        ReferenceRoomRaw room_raw;
+        room_raw.configured      = true;
+        room_raw.has_temperature = candidate.has_value;
+        room_raw.temperature_c   = candidate.temperature_c;
+        room_raw.has_source_time = candidate.has_source_time;
+        room_raw.setpoint_mapped = c.ref_temp_fixed_setpoint_tenths != 0 ||
+                                   !c.ref_temp_setpoint_topic.empty() ||
+                                   !c.ref_temp_setpoint_path.empty();
+        room_raw.has_setpoint     = candidate.has_setpoint;
+        room_raw.setpoint_c       = candidate.setpoint_c;
+        room_raw.enabled_mapped   = !c.ref_temp_enabled_path.empty();
+        room_raw.has_enabled      = candidate.has_enabled;
+        room_raw.enabled          = candidate.enabled;
+        room_raw.hvac_mode_mapped = !c.ref_temp_hvac_mode_path.empty();
+        room_raw.has_hvac_mode    = candidate.has_hvac_mode;
+        room_raw.hvac_mode        = candidate.hvac_mode;
+        if (!reference_room_sample(room_raw, freshness).control_eligible) candidate.rejections++;
+    }
+    std::string    prepared_error_log;
+    const uint64_t error_now_ms  = static_cast<uint64_t>(esp_timer_get_time() / 1000);
+    const bool     log_rejection = rejection && (s_ref_last_logged_error != rejection ||
+                                             error_now_ms - s_ref_last_error_log_ms >= 60000);
+    if (rejection) {
+        candidate.error = rejection;
+        candidate.errors++;
+        candidate.rejections++;
+        if (log_rejection) prepared_error_log = rejection;
+    }
+    {
+        Lock lk(s_mtx);
+        if (!reference_request_current_locked(frame.reference_epoch, c)) return;
+        // All allocating work, including raw/eligibility/error strings and error-log staging,
+        // completed. Commit the complete status and watermark together without allocation.
+        s_ref_status      = std::move(candidate);
+        s_ref_source_time = candidate_watermark;
+    }
+    if (log_rejection) {
+        diag_printf("mqtt: reference temperature payload rejected: %s\n", rejection);
+        s_ref_last_logged_error.swap(prepared_error_log);
+        s_ref_last_error_log_ms = error_now_ms;
+    }
+    if (recovered_mapping) {
+        diag_printf("mqtt: reference temperature mapping recovered\n");
+        s_ref_last_logged_error.clear();
+        s_ref_last_error_log_ms = 0;
+    }
+    if (first_valid_payload)
+        diag_printf("mqtt: reference temperature source received first valid payload%s\n",
+                    frame.retained ? " (retained)" : "");
+}
+
+static __attribute__((noinline)) void service_reference_frame(const ReferenceMqttFrame& frame,
+                                                              const Config&             c) {
+    if (c.ref_temp_topic.empty()) return;
+    const std::string_view setpoint_topic =
+        c.ref_temp_fixed_setpoint_tenths != 0
+            ? std::string_view{}
+            : (c.ref_temp_setpoint_topic.empty() ? std::string_view(c.ref_temp_topic)
+                                                 : std::string_view(c.ref_temp_setpoint_topic));
+    const bool timestamp_mapped =
+        reference_source_time_mapped(c.ref_temp_time_topic, c.ref_temp_time_path);
+    const std::string_view timestamp_topic =
+        !timestamp_mapped
+            ? std::string_view{}
+            : (c.ref_temp_time_topic.empty() ? std::string_view(c.ref_temp_topic)
+                                             : std::string_view(c.ref_temp_time_topic));
+    if (frame.topic != c.ref_temp_topic &&
+        (setpoint_topic.empty() || frame.topic != setpoint_topic) &&
+        (timestamp_topic.empty() || frame.topic != timestamp_topic))
+        return;
+    {
+        Lock lk(s_mtx);
+        if (!reference_request_current_locked(frame.reference_epoch, c)) return;
+    }
+    const DecodedReferenceFrame decoded = decode_reference_frame(
+        frame, c.ref_temp_topic, c.ref_temp_path, setpoint_topic, c.ref_temp_setpoint_path,
+        timestamp_topic, c.ref_temp_time_path, c.ref_temp_enabled_path, c.ref_temp_hvac_mode_path);
+    apply_reference_frame(frame, c, decoded, setpoint_topic, timestamp_topic, timestamp_mapped);
+}
+
+// Each source handler is a sibling. The queue dispatcher owns no mapping or status snapshot.
+static __attribute__((noinline)) void service_reference_frames(const Config& c) {
     if (!s_ref_queue) return;
     const uint32_t dropped = s_ref_dropped.load(std::memory_order_relaxed);
     if (dropped != s_ref_dropped_reported) {
@@ -2247,143 +2485,11 @@ static void service_reference_frames(const Config& c) {
                     static_cast<unsigned long>(dropped - s_ref_dropped_reported));
         s_ref_dropped_reported = dropped;
     }
-    const std::string setpoint_topic = c.ref_temp_fixed_setpoint_tenths != 0 ? "" :
-        (c.ref_temp_setpoint_topic.empty() ? c.ref_temp_topic : c.ref_temp_setpoint_topic);
-    const bool        timestamp_mapped =
-        reference_source_time_mapped(c.ref_temp_time_topic, c.ref_temp_time_path);
-    const std::string timestamp_topic = !timestamp_mapped ? "" :
-        (c.ref_temp_time_topic.empty() ? c.ref_temp_topic : c.ref_temp_time_topic);
-    const ReferenceTopicSet saved_topics = reference_topics(c);
     while (xQueueReceive(s_ref_queue, &s_ref_task_frame, 0) == pdTRUE) {
-        const ReferenceMqttFrame& frame = s_ref_task_frame;
         if (!c.diagnostics_enabled) continue;
-        service_circulation_frame(frame, c);
-        if (c.ref_temp_topic.empty() || !reference_topic_set_contains(saved_topics, frame.topic))
-            continue;
-
-        // Snapshot without mutating the committed aggregate. Copying strings may throw, but the
-        // RAII lock releases and every prior raw field and clock watermark remains intact.
-        ReferenceTemperatureStatus candidate;
-        SourceTimestampHighWater   candidate_watermark;
-        {
-            Lock lk(s_mtx);
-            if (!reference_request_current_locked(frame.reference_epoch, c)) continue;
-            candidate           = s_ref_status;
-            candidate_watermark = s_ref_source_time;
-        }
-        candidate.messages++;
-        const DecodedReferenceFrame decoded = decode_reference_frame(
-            frame, c.ref_temp_topic, c.ref_temp_path,
-            setpoint_topic, c.ref_temp_setpoint_path,
-            timestamp_topic, c.ref_temp_time_path,
-            c.ref_temp_enabled_path, c.ref_temp_hvac_mode_path);
-        const char* rejection           = nullptr;
-        bool first_valid_payload = false;
-        bool recovered_mapping = false;
-        if (!decoded.valid) {
-            if (frame.topic == c.ref_temp_topic) candidate.has_value = false;
-            if (!setpoint_topic.empty() && frame.topic == setpoint_topic)
-                candidate.has_setpoint = false;
-            if (frame.topic == timestamp_topic) candidate.has_source_time = false;
-            rejection                  = decoded.error ? decoded.error : "Source value is invalid";
-            candidate.rejection_reason = decoded.error_reason;
-        } else if (decoded.has_source_time && !candidate_watermark.accept(decoded.source_unix_s)) {
-            rejection                  = "Source timestamp moved backward";
-            candidate.rejection_reason = ReferenceRoomReason::BackwardTimestamp;
-        } else {
-            if (decoded.temperature_updated) {
-                first_valid_payload       = !candidate.has_value;
-                candidate.temperature_c   = decoded.temperature_c;
-                candidate.has_enabled     = decoded.has_enabled;
-                candidate.enabled         = decoded.enabled;
-                candidate.has_hvac_mode   = decoded.has_hvac_mode;
-                candidate.hvac_mode       = decoded.hvac_mode;
-                candidate.received_ms     = frame.received_ms;
-                candidate.received_unix_s = frame.received_unix_s;
-                candidate.retained        = frame.retained;
-                if (timestamp_topic.empty()) candidate.timestamp_source = "mqtt_arrival";
-                candidate.has_value = true;
-            }
-            if (decoded.setpoint_updated) {
-                candidate.has_setpoint = true;
-                candidate.setpoint_c   = decoded.setpoint_c;
-            }
-            if (decoded.timestamp_updated) {
-                candidate.has_source_time  = true;
-                candidate.source_unix_s    = decoded.source_unix_s;
-                candidate.timestamp_source = decoded.timestamp_source;
-            }
-            candidate.eligibility_error = decoded.control_error ? decoded.control_error : "";
-            const bool complete =
-                candidate.has_value &&
-                (c.ref_temp_fixed_setpoint_tenths != 0 || candidate.has_setpoint) &&
-                (!timestamp_mapped || candidate.has_source_time);
-            recovered_mapping = complete && !candidate.error.empty();
-            if (complete) candidate.error.clear();
-            // A retained decoder error still blocks this incomplete aggregate, so it keeps the
-            // reason that set it: reporting Eligible (code 0) beside a blocking error would break
-            // the rule that code 0 is the only eligible state (MQTT-05/b).
-            if (candidate.error.empty()) candidate.rejection_reason = ReferenceRoomReason::Eligible;
-            if (decoded.control_parse_error) candidate.errors++;
-
-            const uint64_t now_ms     = static_cast<uint64_t>(esp_timer_get_time() / 1000);
-            int64_t        now_unix_s = -1;
-            int32_t        now_sub_ms = 0;
-            time_now(now_unix_s, now_sub_ms);
-            const ReferenceFreshness freshness = reference_room_freshness(
-                timestamp_mapped, candidate.has_value, candidate.retained,
-                candidate.has_source_time, candidate.source_unix_s, candidate.received_ms,
-                now_unix_s, now_ms, c.ref_temp_max_age_s);
-            ReferenceRoomRaw room_raw;
-            room_raw.configured      = true;
-            room_raw.has_temperature = candidate.has_value;
-            room_raw.temperature_c   = candidate.temperature_c;
-            room_raw.has_source_time = candidate.has_source_time;
-            room_raw.setpoint_mapped = c.ref_temp_fixed_setpoint_tenths != 0 ||
-                                       !c.ref_temp_setpoint_topic.empty() ||
-                                       !c.ref_temp_setpoint_path.empty();
-            room_raw.has_setpoint     = candidate.has_setpoint;
-            room_raw.setpoint_c       = candidate.setpoint_c;
-            room_raw.enabled_mapped   = !c.ref_temp_enabled_path.empty();
-            room_raw.has_enabled      = candidate.has_enabled;
-            room_raw.enabled          = candidate.enabled;
-            room_raw.hvac_mode_mapped = !c.ref_temp_hvac_mode_path.empty();
-            room_raw.has_hvac_mode    = candidate.has_hvac_mode;
-            room_raw.hvac_mode        = candidate.hvac_mode;
-            if (!reference_room_sample(room_raw, freshness).control_eligible)
-                candidate.rejections++;
-        }
-        std::string    prepared_error_log;
-        const uint64_t error_now_ms  = static_cast<uint64_t>(esp_timer_get_time() / 1000);
-        const bool     log_rejection = rejection && (s_ref_last_logged_error != rejection ||
-                                                 error_now_ms - s_ref_last_error_log_ms >= 60000);
-        if (rejection) {
-            candidate.error = rejection;
-            candidate.errors++;
-            candidate.rejections++;
-            if (log_rejection) prepared_error_log = rejection;
-        }
-        {
-            Lock lk(s_mtx);
-            if (!reference_request_current_locked(frame.reference_epoch, c)) continue;
-            // All allocating work, including raw/eligibility/error strings and error-log staging,
-            // completed. Commit the complete status and watermark together without allocation.
-            s_ref_status      = std::move(candidate);
-            s_ref_source_time = candidate_watermark;
-        }
-        if (log_rejection) {
-            diag_printf("mqtt: reference temperature payload rejected: %s\n", rejection);
-            s_ref_last_logged_error.swap(prepared_error_log);
-            s_ref_last_error_log_ms = error_now_ms;
-        }
-        if (recovered_mapping) {
-            diag_printf("mqtt: reference temperature mapping recovered\n");
-            s_ref_last_logged_error.clear();
-            s_ref_last_error_log_ms = 0;
-        }
-        if (first_valid_payload)
-            diag_printf("mqtt: reference temperature source received first valid payload%s\n",
-                        frame.retained ? " (retained)" : "");
+        service_circulation_probe_frame(s_ref_task_frame);
+        service_circulation_frame(s_ref_task_frame, c);
+        service_reference_frame(s_ref_task_frame, c);
     }
 }
 
@@ -2399,6 +2505,10 @@ static void mqtt_transport_before_connect() {
 }
 
 static void on_mqtt(void*, esp_event_base_t, int32_t id, void* data) {
+    // mqtt 1.1.0 dispatches these three events on its transport task. ERROR/DISCONNECTED can
+    // instead run inside a synchronous publish/subscribe caller, so they must not sample this slot.
+    if (id == MQTT_EVENT_BEFORE_CONNECT || id == MQTT_EVENT_CONNECTED || id == MQTT_EVENT_DATA)
+        stack_watch_sample(StackWatch::SdkMqtt);
     switch (static_cast<esp_mqtt_event_id_t>(id)) {
     case MQTT_EVENT_BEFORE_CONNECT:
         mqtt_transport_before_connect();
@@ -2422,6 +2532,7 @@ static void on_mqtt(void*, esp_event_base_t, int32_t id, void* data) {
         diag_printf("mqtt: %s client connected\n",
                     s_client_is_publisher ? "publisher" : "observation");
         s_transport_connecting.store(false, std::memory_order_release);
+        stack_watch_sample(StackWatch::SdkMqtt);
         break;
     case MQTT_EVENT_DISCONNECTED:
         s_connected           = false;
@@ -2492,16 +2603,26 @@ static void on_mqtt(void*, esp_event_base_t, int32_t id, void* data) {
     }
 }
 
+// Only scalar gate observations survive into the cycle; the full source snapshot returns before
+// a socket write can re-enter TLS certificate verification.
+static __attribute__((noinline)) MqttPublishGateDecision mqtt_cycle_gate(MqttPublishGateState state,
+                                                                         bool& x10a_connected) {
+    const HpStats hp = hp_stats();
+    x10a_connected   = hp.connected;
+    return mqtt_publish_gate_step(state, hp.connected, hp.last_ok_s, s_connected.load());
+}
+
+static __attribute__((noinline)) bool crash_publication_changed() {
+    const CrashInfo current = diag_crash_info_live();
+    return current.coredump != s_crash_dump_pub || crash_is_notable(current) != s_crash_notable_pub;
+}
+
 // Publish task: announce on (re)connect / profile change, then publish both source JSON documents
-// when they change. The per-cycle body is guarded — an OOM std::string build must skip the cycle, not
-// throw through the FreeRTOS task and reboot the device.
-// CONFIG_COMPILER_OPTIMIZATION_SIZE is required to fit the localized UI into the OTA slot, but its
-// called-once inliner folded reference/circulation publishers into this task and grew the fixed
-// frame from the historical -Og 1040 bytes to 2304 bytes on ESP-IDF 6.0.2. The mqtt_ha.cpp-only
-// compiler contract retains natural called-once helper boundaries while keeping -Os; together with
-// the explicit transport helpers above, the measured frame is 1120 bytes. The ELF frame and live
-// high-water mark are both acceptance evidence; removing either boundary without remeasuring them
-// is unsafe.
+// when they change. The per-cycle body is guarded — an OOM std::string build must skip the cycle,
+// not throw through the FreeRTOS task and reboot the device. Keep the -Os helper boundaries bound
+// to the ELF gate. Synchronous SDK writes can re-enter TLS certificate verification; builders and
+// binding staging return before those writes. Static paths retain at least 1 KiB on the 7 KiB
+// publisher stack; hardware minima are separate evidence.
 static void mqtt_task(void*) {
     esp_task_wdt_add(NULL);                            // watch the publish task for a wedged broker write
     int heartbeat_elapsed_s = HEARTBEAT_INTERVAL_S;    // publish immediately on the first connected cycle
@@ -2590,9 +2711,8 @@ static void mqtt_task(void*) {
         // allocating another string on the heap that just refused one.
         const char* publish_stage = "gate";
         try {
-            const HpStats hp = hp_stats();
-            const MqttPublishGateDecision gate = mqtt_publish_gate_step(
-                publish_gate, hp.connected, hp.last_ok_s, s_connected.load());
+            bool                          x10a_connected = false;
+            const MqttPublishGateDecision gate = mqtt_cycle_gate(publish_gate, x10a_connected);
 
             // The first valid bus response upgrades the existing subscriber-only session to a fresh
             // client whose CONNECT packet carries the installation LWT. A clean stop means the old
@@ -2647,7 +2767,7 @@ static void mqtt_task(void*) {
                 }
             }
             publish_stage = "heating_curve";
-            evaluate_heating_curve(ref_config, hp);
+            evaluate_heating_curve(ref_config, x10a_connected);
 
             if (gate.publish_offline) {
                 mqtt_publish(s_avail, "offline", 0, 1, 1);
@@ -2732,11 +2852,11 @@ static void mqtt_task(void*) {
                     // correctly replaced its cache with an empty snapshot. Do not turn that honest
                     // local absence into a retained `{}` for every downstream consumer. The next
                     // answering sweep seeds state because the digest guard is still invalid here.
-                    if (hp.connected) {
+                    if (x10a_connected) {
                         publish_x10a_state(ref_config, true);
                         s_last_x10a_cache_gen = hp_cache_generation();
                     }
-                } else if (hp.connected && !s_announced_profile.empty() &&
+                } else if (x10a_connected && !s_announced_profile.empty() &&
                            prof == s_announced_profile) {
                     const uint32_t x10a_gen = hp_cache_generation();
                     if (x10a_gen != s_last_x10a_cache_gen || !s_last_x10a_digest_valid) {
@@ -2826,9 +2946,7 @@ static void mqtt_task(void*) {
                     // overflow overruns the dump too, which is how the crashes here actually look —
                     // changes no flash byte, so a dump-only test would leave the retained crash
                     // record standing in HA after the user deleted it on the device.
-                    const CrashInfo cnow = diag_crash_info_live();
-                    if (cnow.coredump != s_crash_dump_pub ||
-                        crash_is_notable(cnow) != s_crash_notable_pub) publish_crash();
+                    if (crash_publication_changed()) publish_crash();
                     heartbeat_elapsed_s = 0;
                 }
             }
@@ -2881,6 +2999,7 @@ static bool build_client(bool publisher_lwt) {
     }
 
     esp_mqtt_client_config_t cfg = {};
+    cfg.task.stack_size          = 6144; // pinned SDK default, explicitly bound to the ELF budget
     cfg.broker.address.uri = s_uri.c_str();
     if (is_tls) cfg.broker.verification.crt_bundle_attach = esp_crt_bundle_attach;
     cfg.credentials.client_id = s_board.c_str();   // per-BOARD: a client id must be unique per connection
@@ -2971,7 +3090,9 @@ static bool promote_client_to_publisher() {
         s_circulation_status.subscribed = false;
     }
     s_ref_subscribed_topics = {};
+    s_ref_subscription_retry = false;
     s_circulation_subscribed_topic.clear();
+    s_circulation_subscription_retry = false;
     s_circulation_probe_subscribed_topic.clear();
     s_circulation_probe_task_generation = 0;
     if (s_client) {
@@ -3057,8 +3178,9 @@ void mqtt_ha_start() {
     set_status(false, "");
     // Hardware coredump: the 4 KiB task hit the ESP32-S3 stack-end watchpoint while building the
     // heartbeat after Config gained the reference-source strings. heartbeat.hpp no longer creates
-    // chained temporary strings, and 6 KiB restores explicit headroom for future bounded mappings.
-    if (xTaskCreate(mqtt_task, "mqtt_pub", 6144, nullptr, TASK_PRIO_MQTT, nullptr) != pdPASS) {
+    // chained temporary strings. Seven KiB covers the reviewed synchronous TLS publish path;
+    // payload builders return before entering the SDK transport.
+    if (xTaskCreate(mqtt_task, "mqtt_pub", 7168, nullptr, TASK_PRIO_MQTT, nullptr) != pdPASS) {
         // No task -> the client was built but never started, so neither subscriptions nor publishes
         // are possible. Keep the startup claim through cleanup; its destructor releases the claim
         // only after the client and diagnostic work finish.

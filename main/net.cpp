@@ -14,6 +14,7 @@
 #include "logic/config_model.hpp"
 #include "ota_update.hpp"
 #include "task_config.hpp"
+#include "stack_watch.hpp"
 #include "sdkconfig.h"
 #include "wifi.hpp"
 
@@ -568,6 +569,7 @@ EthInfo net_eth_info() {
 static void eth_fallback_task(void*) {
     EthFallbackWatch watch{};
     for (;;) {
+        stack_watch_sample(StackWatch::EthFallback);
         vTaskDelay(pdMS_TO_TICKS(ETH_FALLBACK_PERIOD_S * 1000));
         try {
             const bool configured = wifi_configured();
@@ -589,6 +591,7 @@ static void eth_fallback_task(void*) {
             diag_printf("net: Ethernet has been down for %d s and WiFi is configured — rebooting "
                         "to come up on the radio\n", ETH_FALLBACK_PERIOD_S * ETH_FALLBACK_PERIODS);
             vTaskDelay(pdMS_TO_TICKS(500));   // let the diag line reach syslog first
+            stack_watch_sample(StackWatch::EthFallback);
             esp_restart();
         } catch (const std::exception& e) {
             diag_printf("net: fallback watch cycle failed (%s) — retrying\n", e.what());

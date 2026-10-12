@@ -2,6 +2,7 @@
 // (logic/led_pattern.hpp): a level-driven GPIO LED and an RMT-driven WS2812 pixel, selected at boot
 // from the runtime config so ONE published image serves both reference boards.
 #include "status_led.hpp"
+#include "stack_watch.hpp"
 #include "config.hpp"
 #include "net.hpp"
 #include "wifi.hpp"
@@ -188,6 +189,7 @@ void log_indicator(const IndicatorConfig& c) {
 void status_led_task(void*) {
     const IndicatorConfig c = indicator_config();
     if (!indicator_init(c)) {
+        stack_watch_sample(StackWatch::Led);
         vTaskDelete(nullptr);
         return;
     }
@@ -195,6 +197,7 @@ void status_led_task(void*) {
     emit(false, LedPattern{});   // start dark, whatever the pin's reset state was
 
     for (;;) {
+        stack_watch_sample(StackWatch::Led);
         // Guarded like mqtt_task/poll_task (AGENTS.md → Memory, concurrency, and HTTP safety):
         // mqtt_status() and hp_stats() copy std::strings out of a locked snapshot, so either can
         // throw std::bad_alloc under memory pressure (wifi_info() is POD and cannot — the tick is

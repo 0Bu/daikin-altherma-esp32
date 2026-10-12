@@ -4,6 +4,7 @@
 #include "logic/http_deadline.hpp"
 #include "rtos_guard.hpp"
 #include "task_config.hpp"
+#include "stack_watch.hpp"
 #include "arch/sys_arch.h"
 #include "esp_timer.h"
 #include "freertos/semphr.h"
@@ -62,15 +63,18 @@ __attribute__((noinline)) void socket_deadline_watchdog_task(void*) noexcept {
     s_deadline.lwip_primed.store(primed, std::memory_order_release);
     if (s_deadline.init_completion) (void)xSemaphoreGive(s_deadline.init_completion);
     if (!primed) {
+        stack_watch_sample(StackWatch::HttpDeadline);
         vTaskSuspend(nullptr);
         deadline_fail_closed();
     }
 
     for (;;) {
+        stack_watch_sample(StackWatch::HttpDeadline);
         (void)ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
         const int socket = s_deadline.socket.load(std::memory_order_acquire);
         if (socket < 0) {
             s_deadline.shutdown_failed.store(true, std::memory_order_release);
+            stack_watch_sample(StackWatch::HttpDeadline);
             deadline_fail_closed();
         }
 
@@ -82,10 +86,12 @@ __attribute__((noinline)) void socket_deadline_watchdog_task(void*) noexcept {
         // EBADF and every other result make exclusion unprovable and must never release the owner.
         if (shutdown_result != 0 && shutdown_errno != ENOTCONN) {
             s_deadline.shutdown_failed.store(true, std::memory_order_release);
+            stack_watch_sample(StackWatch::HttpDeadline);
             deadline_fail_closed();
         }
         if (!s_deadline.completion || xSemaphoreGive(s_deadline.completion) != pdTRUE) {
             s_deadline.shutdown_failed.store(true, std::memory_order_release);
+            stack_watch_sample(StackWatch::HttpDeadline);
             deadline_fail_closed();
         }
     }

@@ -375,7 +375,8 @@ source must never require it to work.
 ## Concurrency: tasks and priorities
 
 Application priorities come from `main/task_config.hpp`; stack sizes stay at each creation site.
-ESP-IDF's HTTP and MQTT event tasks have their own SDK configuration.
+HTTP and MQTT transport priorities remain SDK-controlled; their stack allocations are explicit
+at service creation sites.
 
 | Priority | Tasks | Ownership/lifecycle |
 |---|---|---|
@@ -404,15 +405,21 @@ pointers; materialize strings outside their status lock. A task catch cannot res
 ### Stack verification
 
 Stack is a separate budget. `scripts/check-stack-budget.py` reads the exact ESP32-S3 ELF's fixed
-frames and conservative call paths, failing when required symbols disappear or ratcheted ceilings
-are exceeded. `tools/stack/budgets.json` owns limits and reviewed HTTP/TLS/exception allowances;
-raising a budget is a review decision. The recursive manifest parser counts all accepted nesting
-frames. Delivery, rollback-health, Weather and socket-deadline paths have separate budgets.
+frames and conservative call paths, failing when required symbols disappear, dynamic stack
+adjustments change or source-bound task reserves are exceeded. `tools/stack/budgets.json` owns
+limits and reviewed HTTP/TLS/exception allowances; raising a budget is a review decision.
+Parser budgets count all accepted recursion frames. Startup persistence, payload construction,
+network writes and smaller application tasks have separate paths. WiFi initialization returns
+before credential persistence; heartbeat, Weather and heating-curve builders return before
+synchronous network writes.
 
 The HTTP task has 10,240 bytes with a reviewed 2,048-byte margin; its status serializer uses the
 reviewed `-Os` compilation scope.
 Reverting that scope requires addressing the measured stack demand, not assuming a helper split
-reduces peak use. OTA delivery and Weather additionally require at least 1 KiB runtime reserve in
-requested hardware acceptance. These are checkpoint high-water samples, not continuous traces.
+reduces peak use. Every exercised task additionally requires at least 1 KiB runtime reserve in
+requested hardware acceptance. Owner-only samples preserve boot minima across task recreation;
+unstarted tasks stay null. MQTT transport sampling uses SDK-owned callbacks because synchronous
+error callbacks may run on the application caller. These are checkpoint high-water samples,
+not continuous traces.
 ELF gates do not prove ISR nesting, external call paths beyond the allowances or real scheduling.
 A matching-build decoded coredump remains the primary evidence after a fault.

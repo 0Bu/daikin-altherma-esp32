@@ -72,8 +72,17 @@ bool                     save_ok = true;
 std::vector<std::string> logs;
 int64_t                  unix_s = -1;
 int32_t                  ms     = 0;
+daik::StackWatch         stack_owner = daik::StackWatch::COUNT;
+std::array<unsigned, static_cast<unsigned>(daik::StackWatch::COUNT)> stack_samples{};
 } // namespace adapter
 namespace daik {
+void stack_watch_sample(StackWatch slot) noexcept {
+    if (slot != adapter::stack_owner || slot == StackWatch::COUNT) {
+        std::fprintf(stderr, "FAIL stack_sampler_exact_network_owner\n");
+        std::exit(1);
+    }
+    ++adapter::stack_samples[static_cast<unsigned>(slot)];
+}
 Config config() { return adapter::cfg; }
 bool   config_save(const Config& c) {
     ++adapter::saves;
@@ -134,6 +143,8 @@ using namespace daik;
     } while (0)
 
 void reset() {
+    adapter::stack_owner = StackWatch::COUNT;
+    adapter::stack_samples.fill(0);
     syslog_episode::active = false;
     syslog_episode::cycles = syslog_episode::allocation_failures = syslog_episode::lock_depth = 0;
     syslog_episode::failure_delays = syslog_episode::idle_delays = syslog_episode::idle_receives =
@@ -532,16 +543,19 @@ void syslog_episode_recovery(syslog_episode::Recovery recovery) {
     };
     bool stopped = false;
     try {
+        adapter::stack_owner = StackWatch::Syslog;
         sdk::tasks.front()->fn(sdk::tasks.front()->arg);
     } catch (const syslog_episode::StopTask&) {
         stopped = true;
     }
+    adapter::stack_owner   = StackWatch::COUNT;
     syslog_episode::active = false;
     sdk::forbid_alloc      = false;
     sdk::on_delay          = {};
     sdk::on_queue_receive  = {};
     REQUIRE(stopped);
     REQUIRE(syslog_episode::cycles == 5 && syslog_episode::allocation_failures == 4);
+    REQUIRE(adapter::stack_samples[static_cast<unsigned>(StackWatch::Syslog)] == 5);
     REQUIRE(syslog_episode::failure_delays == 4);
     REQUIRE(syslog_episode::lock_depth == 0 && sdk::lock_depth == 0);
     REQUIRE(syslog_network_quiesced());

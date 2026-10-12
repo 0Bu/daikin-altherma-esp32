@@ -253,7 +253,18 @@ bool          weather_fetch_active() { return sdk::state.stalled_service == 6; }
 void          mqtt_transport_withdraw_online_on_pause() { ++sdk::state.withdraw; }
 void          mqtt_transport_pause_for_network_heap() { ++sdk::state.pause; }
 void          mqtt_transport_resume_after_network_heap() { ++sdk::state.resume; }
-void          stack_watch_sample(StackWatch) noexcept {}
+void          stack_watch_sample(StackWatch slot) noexcept {
+    if (slot == StackWatch::OtaHealth) {
+        if (!sdk::state.health_task_running) {
+            std::fprintf(stderr, "FAIL stack_sampler_exact_health_owner\n");
+            std::exit(1);
+        }
+        ++sdk::state.health_stack_samples;
+    } else if (slot != StackWatch::Ota || sdk::state.health_task_running) {
+        std::fprintf(stderr, "FAIL stack_sampler_does_not_file_foreign_ota_slot\n");
+        std::exit(1);
+    }
+}
 uint32_t      stack_watch_min_free_bytes(StackWatch) noexcept { return 4096; }
 size_t        heap_largest_internal_block() { return sdk::state.largest_block; }
 uint8_t       heap_guard_restarts() { return sdk::state.heap_restarts; }
@@ -538,7 +549,10 @@ void health(const char* name) {
         REQUIRE(s.health_entry == daik::health_gate_task);
         daik::ota_health_gate_arm();
         REQUIRE(s.created == 1); // no second task may share the active stack.
+        s.health_task_running = true;
         s.health_entry(nullptr);
+        s.health_task_running = false;
+        REQUIRE(s.health_stack_samples >= 2);
         REQUIRE(s.marked == 1 && daik::ota_status().image_state == "valid");
         daik::ota_health_gate_arm();
         REQUIRE(s.created == 1); // self-deletion does not permit same-boot reuse.
@@ -551,12 +565,17 @@ void health(const char* name) {
         REQUIRE(daik::ota_status().image_state == "pending_verify");
         return;
     }
+    s.health_task_running = true;
     daik::health_gate_task(nullptr);
+    s.health_task_running = false;
+    REQUIRE(s.health_stack_samples > 0);
     const auto status = daik::ota_status();
     if (s.state_result != ESP_OK) {
+        REQUIRE(s.health_stack_samples == 1);
         REQUIRE(status.image_state == "unknown" && !status.rollback_pending_known);
         REQUIRE(s.marked == 0 && s.restart == 0 && s.ticks == 1000);
     } else if (s.image_state != ESP_OTA_IMG_PENDING_VERIFY) {
+        REQUIRE(s.health_stack_samples == 1);
         REQUIRE(status.image_state == (s.image_state == ESP_OTA_IMG_VALID ? "valid" : "unarmed"));
         REQUIRE(s.marked == 0 && s.restart == 0 && s.ticks == 1000);
     } else if (reject) {
