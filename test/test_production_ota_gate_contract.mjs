@@ -1169,12 +1169,13 @@ assert.match(refreshDefer,
 assert.match(weatherLogic,
   /weather_refresh_defer\([\s\S]*?token != 0[\s\S]*?requested_token == token[\s\S]*?started_token == token[\s\S]*?completed_token != token/,
   "OTA deferral must accept only the still-outstanding exact refresh token");
-const weatherTask = section(weatherSource, "void weather_task(void*)", "\n}\n\n}  // namespace");
-const fetchAdmission = section(weatherTask, "time_now(now, ms);", "WeatherForecastSample sample;");
+const weatherTask = section(weatherSource, "void weather_task(void*)", "\n}\n\n} // namespace");
+const weatherCycle = section(weatherSource, "WeatherCycleWait weather_cycle(", "\n}\n\nvoid weather_task");
+const fetchAdmission = section(weatherCycle, "time_now(now, ms);", "NetworkActivity");
 const admissionLock = fetchAdmission.indexOf("Lock lk(s_mtx)");
 const admissionClaim = fetchAdmission.indexOf("claim_refresh_request_locked()", admissionLock);
 const admissionDrain = fetchAdmission.indexOf("ulTaskNotifyTake(pdTRUE, 0)", admissionClaim);
-const admissionFetching = fetchAdmission.indexOf("s_status.fetching = true", admissionDrain);
+const admissionFetching = fetchAdmission.search(/s_status\.fetching\s*=\s*true/);
 assert.ok(admissionLock >= 0 && admissionClaim > admissionLock && admissionDrain > admissionClaim &&
           admissionFetching > admissionDrain,
   "the task must claim a request in the same lock that starts its exact fetch attempt");
@@ -1182,15 +1183,18 @@ assert.match(fetchAdmission,
   /if \(refresh_attempt\.token != 0\) ulTaskNotifyTake\(pdTRUE, 0\);/,
   "a natural cycle that claims the request must consume its now-redundant queued wake");
 assert.match(weatherTask,
-  /RefreshRequestAttempt refresh_attempt[\s\S]*?refresh_attempt\.finish\(updated\)/,
+  /RefreshRequestAttempt refresh_attempt[\s\S]*?weather_cycle\(source_generation, refresh_attempt\)/,
+  "each cycle must retain its task-owned explicit request guard");
+assert.match(weatherCycle,
+  /s_status\.successes\+\+[\s\S]*?updated\s*=\s*true;[\s\S]*?refresh_attempt\.finish\(updated\)/,
   "only the real forecast update commit may complete an explicit refresh successfully");
 assert.match(weatherSource,
   /~RefreshRequestAttempt\(\) noexcept \{ finish\(false\); \}/,
   "the attempt guard must fail-complete every path that was not explicitly deferred");
-const otaPreempted = section(weatherTask, "if (ota_preempted) {",
-  "\n            if (poll_quiesce_failed");
+const otaPreempted = section(weatherCycle, "if (ota_preempted) {",
+  "\n    if (poll_quiesce_failed");
 assert.match(otaPreempted,
-  /refresh_attempt\.defer\(\)[\s\S]*?ulTaskNotifyTake\(pdTRUE, pdMS_TO_TICKS\(1000\)\)[\s\S]*?continue;/,
+  /refresh_attempt\.defer\(\)[\s\S]*?return \{pdMS_TO_TICKS\(1000\), false\};/,
   "OTA serialization must leave the exact refresh token pending for reclaim");
 assert.doesNotMatch(otaPreempted, /refresh_attempt\.finish\(false\)/,
   "OTA serialization must not fail-complete the causal refresh token");

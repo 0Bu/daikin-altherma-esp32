@@ -2,11 +2,14 @@
 
 `node test/test_src_runtime.mjs` compiles the complete current `main/weather_forecast.cpp`, including
 the production Open-Meteo conversion, forecast derivation and source/refresh state machines.
-Seventeen cases and ten temporary source mutations cover epoch bounds, payload shape/units,
+Eighteen cases and twelve temporary source mutations cover epoch bounds, payload shape/units,
 JSON cleanup during allocation failure, HTTP cleanup/completion/caps/deadlines, admission,
 source/consent invalidation, task failure and an exact refresh-success witness. A valid production
 task result survives truncated, malformed and overflowing replacements with an explicit failure;
 two committed source changes prove that A→B→A cannot revive the first A generation or its token.
+Six lifecycle states additionally require zero full Config copies and zero tagged request buffers
+at task waits and network release. A fixed host allocation table excludes SDK bookkeeping; its
+counts prove lifetimes, not ESP32 allocator overhead, fragmentation or C/TLS allocations.
 
 The default cJSON seam receives constructed trees and has no lexer. The optional command
 `node test/test_src_runtime.mjs --real-cjson managed_components/espressif__cjson/cJSON` compiles the

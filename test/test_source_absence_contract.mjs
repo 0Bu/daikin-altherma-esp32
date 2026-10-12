@@ -369,6 +369,13 @@ const weatherStart = weather.slice(weather.indexOf("void weather_forecast_start(
   weather.indexOf("void weather_forecast_reconfigure()"));
 const weatherTask = weather.slice(weather.indexOf("void weather_task(void*)"),
   weather.indexOf("for (;;) {", weather.indexOf("void weather_task(void*)")));
+const weatherTaskBody = weather.slice(weather.indexOf("void weather_task(void*)"),
+  weather.indexOf("\n} // namespace", weather.indexOf("void weather_task(void*)")));
+const weatherCycleStart = weather.indexOf("WeatherCycleWait weather_cycle(");
+const weatherCycleEnd = weather.indexOf("\nvoid weather_task(void*)", weatherCycleStart);
+assert.ok(weatherCycleStart >= 0 && weatherCycleEnd > weatherCycleStart,
+  "Weather must preserve the complete production cycle before the waiting task");
+const weatherCycle = weather.slice(weatherCycleStart, weatherCycleEnd);
 assert.match(weatherTask,
   /s_task_start_state\.load\(std::memory_order_acquire\)[\s\S]*?WeatherTaskStartState::Available[\s\S]*?vTaskDelay\(1\)/,
   "a newly scheduled Weather worker must not snapshot Config before its handle/availability edge");
@@ -399,13 +406,13 @@ assert.match(weather,
   /void weather_forecast_reconfigure\(\)[\s\S]*?s_task\.load\(std::memory_order_acquire\)[\s\S]*?xTaskNotifyGive\(task\)/,
   "Weather reconfigure must notify only an acquire-loaded task handle");
 assert.match(weather,
-  /bool weather_forecast_request_refresh\([\s\S]*?s_task\.load\(std::memory_order_acquire\)[\s\S]*?Lock lk\(s_mtx\)[\s\S]*?s_task\.load\(std::memory_order_acquire\)[\s\S]*?xTaskNotifyGive\(task\)/,
+  /bool weather_forecast_request_refresh\([\s\S]*?s_task\.load\(std::memory_order_acquire\)[\s\S]*?Lock\s+lk\(s_mtx\)[\s\S]*?s_task\.load\(std::memory_order_acquire\)[\s\S]*?xTaskNotifyGive\(task\)/,
   "Weather refresh admission and wake must use the published task handle under the token mutex");
 const weatherSnapshotStart = weather.indexOf("WeatherForecastStatus weather_forecast_status()");
 const weatherSnapshotEnd = weather.indexOf("bool weather_fetch_active()", weatherSnapshotStart);
 const weatherSnapshot = weather.slice(weatherSnapshotStart, weatherSnapshotEnd);
 assert.match(weatherSnapshot,
-  /WeatherForecastStatus status[\s\S]*?\{[\s\S]*?Lock lk\(s_mtx\)[\s\S]*?status\s*=\s*s_status[\s\S]*?\}[\s\S]*?weather_task_failure\(\s*true,\s*true,\s*s_task_start_state\.load\([^)]*\)\s*\)[\s\S]*?status\.configured\s*=\s*true[\s\S]*?status\.fetching\s*=\s*false[\s\S]*?status\.available\s*=\s*false[\s\S]*?status\.state\s*=\s*"error"[\s\S]*?task_failure\.reason[\s\S]*?task_failure\.error/,
+  /WeatherForecastStatus status[\s\S]*?\{[\s\S]*?Lock\s+lk\(s_mtx\)[\s\S]*?status\s*=\s*s_status[\s\S]*?\}[\s\S]*?weather_task_failure\(\s*true,\s*true,\s*s_task_start_state\.load\([^)]*\)\s*\)[\s\S]*?status\.configured\s*=\s*true[\s\S]*?status\.fetching\s*=\s*false[\s\S]*?status\.available\s*=\s*false[\s\S]*?status\.state\s*=\s*"error"[\s\S]*?task_failure\.reason[\s\S]*?task_failure\.error/,
   "Weather snapshots must materialise the atomic start failure only after releasing the optional mutex");
 assert.match(mqtt,
   /publish_weather_state\(bool config_enabled\)[\s\S]*?weather_forecast_status\(\)[\s\S]*?weather_mqtt_action\(config_enabled, status\.configured\)[\s\S]*?WeatherMqttAction::Publish[\s\S]*?build_weather_mqtt_json/,
@@ -414,35 +421,47 @@ const internalInvalidateStart = weather.indexOf("bool invalidate_if_generation("
 const internalInvalidateEnd = weather.indexOf("\n}\n\n// A saved location", internalInvalidateStart);
 const internalInvalidate = weather.slice(internalInvalidateStart, internalInvalidateEnd);
 assert.match(internalInvalidate,
-  /WeatherForecastStatus replacement = invalidated_status\([\s\S]*?Lock lk\(s_mtx\)[\s\S]*?s_source_generation\.load\([^)]*\) != expected_generation[\s\S]*?return false[\s\S]*?swap\(s_status, replacement\)/,
+  /WeatherForecastStatus replacement = invalidated_status\([\s\S]*?Lock\s+lk\(s_mtx\)[\s\S]*?s_source_generation\.load\([^)]*\) != expected_generation[\s\S]*?return false[\s\S]*?swap\(s_status, replacement\)/,
   "a task-side stale source snapshot must not overwrite the authoritative HTTP commit");
-const tokenBind = weather.indexOf("const uint32_t source_generation");
-const configSnapshot = weather.indexOf("const Config cfg = config();", tokenBind);
-assert.ok(tokenBind >= 0 && configSnapshot > tokenBind,
-  "Weather must bind the ABA token before taking the Config snapshot");
+const tokenBind = weatherTaskBody.search(
+  /const uint32_t\s+source_generation\s*=\s*s_source_generation\.load\(std::memory_order_acquire\);/);
+const cycleCall = weatherTaskBody.indexOf("weather_cycle(source_generation, refresh_attempt)", tokenBind);
+const configSnapshot = weatherCycle.search(/const WeatherConfigSnapshot\s+cfg\s*=\s*weather_config\(\)/);
+assert.ok(tokenBind >= 0 && cycleCall > tokenBind && configSnapshot >= 0,
+  "Weather must bind the ABA token before calling the cycle which takes its source snapshot");
+assert.match(weatherCycle,
+  /weather_cycle\(uint32_t\s+source_generation,\s*RefreshRequestAttempt&\s+refresh_attempt\)/,
+  "the real Weather cycle must consume the task's original generation and refresh attempt");
+assert.doesNotMatch(weatherCycle, /source_generation\s*=\s*s_source_generation\.load/,
+  "the cycle must not rebind its generation after a complete A -> B -> A source transition");
 assert.match(weather,
+  /WeatherConfigSnapshot weather_config\(\)\s*\{\s*return with_config\(\[\]\(const Config& cfg\)\s*\{\s*return weather_config_snapshot\(cfg\);\s*\}\);/,
+  "Weather must project its source snapshot under the Config reference lock without copying strings");
+assert.match(weatherCycle,
   /current\.diagnostics_generation\s*!=\s*cfg\.diagnostics_generation/,
   "an in-flight Weather result must not cross a diagnostics consent generation");
-assert.match(weather,
-  /const Config before_fetch = config\(\)[\s\S]{0,500}?s_source_generation\.load\([^)]*\) != source_generation[\s\S]{0,500}?before_fetch\.diagnostics_generation != cfg\.diagnostics_generation[\s\S]{0,500}?!source_preempted\)[\s\S]{0,100}?ok = fetch_forecast/,
+assert.match(weatherCycle,
+  /const WeatherConfigSnapshot before_fetch = weather_config\(\)[\s\S]{0,500}?s_source_generation\.load\([^)]*\) != source_generation[\s\S]{0,500}?before_fetch\.diagnostics_generation != cfg\.diagnostics_generation[\s\S]{0,500}?!source_preempted\)[\s\S]{0,100}?ok = fetch_forecast/,
   "Weather must revalidate token, consent and location after quiesce and before starting HTTPS");
-const successStart = weather.indexOf("if (ok) {");
-const successEnd = weather.indexOf("if (updated)", successStart);
-const successCommit = weather.slice(successStart, successEnd);
-const successLock = successCommit.indexOf("Lock lk(s_mtx)");
+const successStart = weatherCycle.indexOf("if (ok) {");
+const successEnd = weatherCycle.indexOf("if (updated)", successStart);
+const successCommit = weatherCycle.slice(successStart, successEnd);
+const successLock = successCommit.search(/Lock\s+lk\(s_mtx\)/);
 const successToken = successCommit.indexOf(
   "s_source_generation.load(std::memory_order_acquire) != source_generation", successLock);
-const successValue = successCommit.indexOf("s_status.has_value = true", successToken);
+const successValueMatch = successCommit.slice(successToken).search(/s_status\.has_value\s*=\s*true/);
+const successValue = successValueMatch < 0 ? -1 : successToken + successValueMatch;
 assert.ok(successStart >= 0 && successEnd > successStart && successLock >= 0 &&
   successToken > successLock && successValue > successToken,
   "Weather success must re-check the source token under the same mutex as its value commit");
-const failureStart = weather.indexOf("const std::string failure", successEnd);
-const failureEnd = weather.indexOf("diag_printf(\"weather: Open-Meteo fetch failed", failureStart);
-const failureCommit = weather.slice(failureStart, failureEnd);
-const failureLock = failureCommit.indexOf("Lock lk(s_mtx)");
+const failureStart = weatherCycle.indexOf("const std::string failure", successEnd);
+const failureEnd = weatherCycle.indexOf("diag_printf(\"weather: Open-Meteo fetch failed", failureStart);
+const failureCommit = weatherCycle.slice(failureStart, failureEnd);
+const failureLock = failureCommit.search(/Lock\s+lk\(s_mtx\)/);
 const failureToken = failureCommit.indexOf(
   "s_source_generation.load(std::memory_order_acquire) != source_generation", failureLock);
-const failureValue = failureCommit.indexOf("s_status.error = failure", failureToken);
+const failureValueMatch = failureCommit.slice(failureToken).search(/s_status\.error\s*=\s*failure/);
+const failureValue = failureValueMatch < 0 ? -1 : failureToken + failureValueMatch;
 assert.ok(failureStart >= 0 && failureEnd > failureStart && failureLock >= 0 &&
   failureToken > failureLock && failureValue > failureToken,
   "Weather failure must not overwrite a newer synchronous invalidation");
@@ -535,20 +554,20 @@ assert.ok(stagedReplacement >= 0 && stagedAvailable > stagedReplacement &&
 assert.match(destructor, /if \(!held_\) return;[\s\S]*?release_source_change\(\)/,
   "an exception or failed Config save must release Weather admission by RAII");
 assert.match(commitChange,
-  /Lock lk\(s_mtx\)[\s\S]*?if \(\s*configured_ && diagnostics_enabled_\s*\)[\s\S]*?s_task_start_state\.load\([^)]*\)[\s\S]*?case WeatherTaskStartState::Available[\s\S]*?case WeatherTaskStartState::DeadlineUnavailable[\s\S]*?deadline_reason_[\s\S]*?deadline_error_[\s\S]*?case WeatherTaskStartState::TaskStartFailed[\s\S]*?task_start_reason_[\s\S]*?task_start_error_[\s\S]*?case WeatherTaskStartState::NotStarted[\s\S]*?not_started_reason_[\s\S]*?not_started_error_[\s\S]*?swap\(replacement_\.state, failure_state_\)[\s\S]*?swap\(replacement_\.reason, \*failure_reason\)[\s\S]*?swap\(replacement_\.error, \*failure_error\)/,
+  /Lock\s+lk\(s_mtx\)[\s\S]*?if \(\s*configured_ && diagnostics_enabled_\s*\)[\s\S]*?s_task_start_state\.load\([^)]*\)[\s\S]*?case WeatherTaskStartState::Available[\s\S]*?case WeatherTaskStartState::DeadlineUnavailable[\s\S]*?deadline_reason_[\s\S]*?deadline_error_[\s\S]*?case WeatherTaskStartState::TaskStartFailed[\s\S]*?task_start_reason_[\s\S]*?task_start_error_[\s\S]*?case WeatherTaskStartState::NotStarted[\s\S]*?not_started_reason_[\s\S]*?not_started_error_[\s\S]*?swap\(replacement_\.state, failure_state_\)[\s\S]*?swap\(replacement_\.reason, \*failure_reason\)[\s\S]*?swap\(replacement_\.error, \*failure_error\)/,
   "Weather source commit must select the final exact task-start failure allocation-free under its mutex");
 assert.match(commitChange,
-  /Lock lk\(s_mtx\)[\s\S]*?s_source_generation\.fetch_add\(1[\s\S]*?weather_refresh_cancel_outstanding[\s\S]*?swap\(s_status, replacement_\)[\s\S]*?release_source_change\(\)[\s\S]*?held_ = false/,
+  /Lock\s+lk\(s_mtx\)[\s\S]*?s_source_generation\.fetch_add\(1[\s\S]*?weather_refresh_cancel_outstanding[\s\S]*?swap\(s_status, replacement_\)[\s\S]*?release_source_change\(\)[\s\S]*?held_ = false/,
   "only a successful Config save may advance generation, cancel refresh and install staged status");
-const preemptedStart = weather.indexOf("if (source_preempted) {");
-const preemptedEnd = weather.indexOf(
-  "if (s_source_generation.load(std::memory_order_acquire) != source_generation) continue;",
+const preemptedStart = weatherCycle.indexOf("if (source_preempted) {");
+const preemptedEnd = weatherCycle.indexOf(
+  "\n    if (s_source_generation.load(std::memory_order_acquire) != source_generation) return {};",
   preemptedStart);
-const preempted = weather.slice(preemptedStart, preemptedEnd);
+const preempted = weatherCycle.slice(preemptedStart, preemptedEnd);
 assert.ok(preemptedStart >= 0 && preemptedEnd > preemptedStart,
   "the source-preempted Weather finalization must remain identifiable");
 assert.match(preempted,
-  /Lock lk\(s_mtx\)[\s\S]*?s_source_generation\.load[\s\S]*?s_status\.fetching\s*=\s*false[\s\S]*?s_status\.state\s*=\s*"waiting"[\s\S]*?refresh_attempt\.finish\(false\)/,
+  /Lock\s+lk\(s_mtx\)[\s\S]*?s_source_generation\.load[\s\S]*?s_status\.fetching\s*=\s*false[\s\S]*?s_status\.state\s*=\s*"waiting"[\s\S]*?refresh_attempt\.finish\(false\)/,
   "a failed source save must not leave its admission-lost fetch reported as active");
 assert.match(weather,
   /bool weather_fetch_active\(\)[\s\S]*?state == SourceAdmission::Network \|\|[\s\S]*?state == SourceAdmission::SourceChangePending/,
@@ -929,16 +948,16 @@ assert.doesNotMatch(pollHeader, /std::string\s+(?:label|unit)\s*;/,
 // start race: weather raises its own flag first, waits the grace interval, re-reads OTA's flag and
 // starts HTTPS only if OTA did not win. Assert the ordered block rather than an arbitrary character
 // distance — the race explanation between those statements is deliberately allowed to be explicit.
-const weatherActivity = weather.indexOf("NetworkActivity activity(source_generation);");
-const weatherLead = weather.indexOf("vTaskDelay(pdMS_TO_TICKS(kNetworkQuiesceLeadMs));",
+const weatherActivity = weatherCycle.search(/NetworkActivity\s+activity\(source_generation\);/);
+const weatherLead = weatherCycle.indexOf("vTaskDelay(pdMS_TO_TICKS(kNetworkQuiesceLeadMs));",
                                   weatherActivity);
-const weatherPollBarrier = weather.indexOf("hp_poll_network_quiesced()", weatherLead);
-const weatherMqttBarrier = weather.indexOf("mqtt_publish_network_quiesced()", weatherPollBarrier);
-const weatherOtaRecheckMatch = weather.slice(weatherMqttBarrier).search(
+const weatherPollBarrier = weatherCycle.indexOf("hp_poll_network_quiesced()", weatherLead);
+const weatherMqttBarrier = weatherCycle.indexOf("mqtt_publish_network_quiesced()", weatherPollBarrier);
+const weatherOtaRecheckMatch = weatherCycle.slice(weatherMqttBarrier).search(
   /ota_preempted\s*=\s*ota_download_active\(\);/);
 const weatherOtaRecheck = weatherOtaRecheckMatch < 0 ? -1
   : weatherMqttBarrier + weatherOtaRecheckMatch;
-const weatherFetchMatch = weather.slice(weatherOtaRecheck).search(/ok\s*=\s*fetch_forecast\(/);
+const weatherFetchMatch = weatherCycle.slice(weatherOtaRecheck).search(/ok\s*=\s*fetch_forecast\(/);
 const weatherFetch = weatherFetchMatch < 0 ? -1 : weatherOtaRecheck + weatherFetchMatch;
 assert.ok(weatherActivity >= 0 && weatherLead > weatherActivity &&
           weatherPollBarrier > weatherLead && weatherMqttBarrier > weatherPollBarrier &&

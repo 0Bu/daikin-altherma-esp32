@@ -13,6 +13,7 @@ const files = {
   env3: path.join(root, "main/env3.cpp"),
   weather: path.join(root, "main/weather_forecast.cpp"),
   epoch: path.join(root, "main/logic/open_meteo.hpp"),
+  config: path.join(root, "main/logic/weather_config.hpp"),
 };
 const sources = Object.fromEntries(Object.entries(files).map(([key, file]) => [key, fs.readFileSync(file, "utf8")]));
 const args = process.argv.slice(2);
@@ -109,7 +110,7 @@ const mutations = [
   },
   {
     name: "weather-body-cap", file: "weather", scenario: "transport_body_cap",
-    before: "constexpr size_t kPayloadMax = 8 * 1024;", after: "constexpr size_t kPayloadMax = 16 * 1024;",
+    before: "constexpr size_t     kPayloadMax       = 8 * 1024;", after: "constexpr size_t     kPayloadMax       = 16 * 1024;",
   },
   {
     name: "weather-absolute-deadline", file: "weather", scenario: "transport_deadline",
@@ -132,8 +133,18 @@ const mutations = [
   },
   {
     name: "weather-rejected-overwrites-sample", file: "weather", scenario: "task_rejected_retains_sample",
-    before: "s_status.error = failure;",
-    after: "s_status.error = failure; s_status.fetched_unix_s = -1;",
+    before: "s_status.error     = failure;",
+    after: "s_status.error     = failure; s_status.fetched_unix_s = -1;",
+  },
+  {
+    name: "weather-allocating-config-projection", file: "weather", scenario: "task_allocation_lifetimes",
+    before: "return with_config([](const Config& cfg) { return weather_config_snapshot(cfg); });",
+    after: "return weather_config_snapshot(config());",
+  },
+  {
+    name: "weather-retained-request-buffer", file: "weather", scenario: "task_allocation_lifetimes",
+    before: "NetworkActivity       activity(source_generation);",
+    after: "NetworkActivity       activity(source_generation); static std::string retained_request_buffer; retained_request_buffer.reserve(64);",
   },
 ];
 try {
@@ -143,7 +154,7 @@ try {
       path.join(cjsonDir, "cJSON.c"), "-o", cjsonObject]);
     assert.equal(result.status, 0, `lock-resolved cJSON must compile\n${result.stdout}${result.stderr}`);
   }
-  for (const [file, count] of [["env3", 8], ["weather", 17]]) {
+  for (const [file, count] of [["env3", 8], ["weather", 18]]) {
     const binary = compile(`production-${file}`, file);
     const result = execute(binary, []);
     assert.equal(result.status, 0, `${result.stdout}${result.stderr}`);
@@ -165,7 +176,7 @@ try {
   for (const [key, source] of Object.entries(sources))
     console.log(`source runtime ${key} sha256=${createHash("sha256").update(source).digest("hex")}`);
   if (cjsonDir) console.log(`source runtime cJSON.c sha256=${createHash("sha256").update(fs.readFileSync(path.join(cjsonDir, "cJSON.c"))).digest("hex")}`);
-  console.log(`production source runtime: 25 cases, ${mutations.length} negative controls, ${cjsonDir ? "real lock-resolved cJSON plus lexer corpus" : "AST adapter; no JSON lexer"}`);
+  console.log(`production source runtime: 26 cases, ${mutations.length} negative controls, ${cjsonDir ? "real lock-resolved cJSON plus lexer corpus" : "AST adapter; no JSON lexer"}`);
 } finally {
   fs.rmSync(temp, { recursive: true, force: true });
 }

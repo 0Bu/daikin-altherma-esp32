@@ -341,6 +341,8 @@ def self_test() -> None:
   11: 004136          entry a1, 432
 00000012 <daik::(anonymous namespace)::parse_forecast(std::string const&, long long, daik::WeatherForecastSample&, std::string&)>:
   12: 004136          entry a1, 512
+00000040 <_ZN4daik12_GLOBAL__N_1L13weather_cycleEmRNS0_21RefreshRequestAttemptE$constprop$0>:
+  40: 004136          entry a1, 736
 """
     fixture += """
 00000013 <daik::set_hp(httpd_req*)>:
@@ -404,8 +406,9 @@ def self_test() -> None:
     assert selected["path:httpd_ota_check"] == 3376
     assert selected["path:http_deadline_watchdog"] == 1536
     assert selected["weather_task"] == 1152
-    assert selected["path:weather_task_download"] == 3792
-    assert selected["path:weather_task_parse"] == 3872
+    assert selected["weather_cycle"] == 736
+    assert selected["path:weather_task_download"] == 4528
+    assert selected["path:weather_task_parse"] == 4608
     assert selected["ota_health_task"] == 80
     assert selected["path:ota_health_gate"] == 2128
     assert selected["path:httpd_config_hp"] == 6480
@@ -437,6 +440,25 @@ def self_test() -> None:
             assert expected in str(exc), f"{name}: unexpected failure {exc}"
         else:
             raise AssertionError(f"self-test accepted {name}")
+
+    evaluate(parse_frames(fixture.replace(
+        "_ZN4daik12_GLOBAL__N_1L13weather_cycleEmRNS0_21RefreshRequestAttemptE$constprop$0",
+        "daik::(anonymous namespace)::weather_cycle(unsigned long, daik::RefreshRequestAttempt&)")),
+        budgets)
+    reject_disassembly("missing Weather cycle", fixture.replace(
+        "_ZN4daik12_GLOBAL__N_1L13weather_cycle", "_ZN4daik12_GLOBAL__N_1L13renamed_cycle"),
+        "weather_cycle")
+    reject_disassembly("Weather cycle frame growth", fixture.replace(
+        "40: 004136          entry a1, 736", "40: 004136          entry a1, 4112"),
+        "weather_cycle")
+    cloned_download = fixture.replace(
+        "daik::(anonymous namespace)::download_json(daik::Config const&, std::string&, std::string&, bool&, daik::HttpClientProbe&)",
+        "_ZN4daik12_GLOBAL__N_1L13download_jsonERKNS_21WeatherConfigSnapshotERNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEESA_RbRNS_15HttpClientProbeE$constprop$0")
+    evaluate(parse_frames(cloned_download), budgets)
+    reject_disassembly("missing Weather download with lambda present", cloned_download.replace(
+        "_ZN4daik12_GLOBAL__N_1L13download_json", "_ZN4daik12_GLOBAL__N_1L13renamed_fetch") +
+        "\n00000041 <daik::(anonymous namespace)::download_json(daik::Config const&, std::string&)::{lambda()}::operator()() const>:\n  41: 004136 entry a1, 32\n",
+        "weather_download")
 
     reject_disassembly("wrong first blank opcode", fixture.replace(
         "1f: 16008136 \t", "1f: 16008135 \t"), "first prologue")
