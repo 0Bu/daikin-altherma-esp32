@@ -353,9 +353,11 @@ for (const pathName of ["weather_task_download", "weather_task_parse"]) {
   `${pathName} must leave at least 1 KiB on the Weather task stack`);
 }
 assert.deepEqual(stackBudgets.paths.weather_task_download.symbols,
-  ["weather_task", "weather_fetch", "weather_download"]);
+  ["weather_task", "weather_cycle", "weather_fetch", "weather_download"]);
 assert.deepEqual(stackBudgets.paths.weather_task_parse.symbols,
-  ["weather_task", "weather_fetch", "weather_parse"]);
+  ["weather_task", "weather_cycle", "weather_fetch", "weather_parse"]);
+assert.match(weather, /__attribute__\(\(noinline\)\) WeatherCycleWait weather_cycle\(/,
+  "the separately budgeted cycle must retain its real ELF frame");
 assert.equal(stackBudgets.paths.weather_task_download.base_bytes, 2048,
   "Weather download must retain its reviewed TLS/IDF/exception allowance");
 assert.equal(stackBudgets.paths.weather_task_parse.base_bytes, 2048,
@@ -530,7 +532,7 @@ assert.match(weather,
   /void weather_forecast_start\(\)[\s\S]{0,500}?!http_deadline_ready\(\)[\s\S]{0,500}?xTaskCreate\(weather_task/,
   "Weather must refuse task creation when its boot-owned deadline watchdog is unavailable");
 assert.match(weather,
-  /bool download_json\([\s\S]{0,220}?!http_deadline_ready\(\)[\s\S]{0,220}?out\.reserve\(kPayloadMax\)[\s\S]{0,600}?esp_http_client_init/,
+  /bool download_json\(const WeatherConfigSnapshot& weather,[^{]+\{\s*if\s*\(!http_deadline_ready\(\)\)\s*\{\s*error\s*=\s*"deadline_unavailable";\s*return false;\s*\}\s*out\.clear\(\);\s*out\.reserve\(kPayloadMax\);/,
   "Weather must recheck readiness before payload and HTTP/TLS allocation");
 const deadlineArmStart = httpDeadline.indexOf("esp_err_t HttpSocketDeadline::arm(");
 const deadlineDisarmStart = httpDeadline.indexOf("bool HttpSocketDeadline::disarm(");
@@ -1372,15 +1374,15 @@ assert.match(syslog,
 assert.match(syslog,
   /bool\s+syslog_network_quiesced\(\)[\s\S]{0,120}?s_network_quiesced\.load\(std::memory_order_acquire\)/,
   "Syslog must expose an allocation-free cycle acknowledgement");
-const weatherNetworkStart = weather.indexOf("NetworkActivity activity(source_generation)");
+const weatherNetworkStart = weather.search(/NetworkActivity\s+activity\(source_generation\)/);
 const weatherNetworkEnd = weather.indexOf("ok = fetch_forecast(", weatherNetworkStart);
 const weatherNetwork = weather.slice(weatherNetworkStart, weatherNetworkEnd);
 const weatherModbusWait = weatherNetwork.indexOf("!mb_network_quiesced()");
 const weatherSyslogWait = weatherNetwork.indexOf("!syslog_network_quiesced()", weatherModbusWait);
-const weatherModbusVerdict = weatherNetwork.indexOf(
-  "modbus_quiesce_failed = !mb_network_quiesced()", weatherSyslogWait);
-const weatherSyslogVerdict = weatherNetwork.indexOf(
-  "syslog_quiesce_failed = !syslog_network_quiesced()", weatherModbusVerdict);
+const weatherModbusVerdict = weatherNetwork.search(
+  /modbus_quiesce_failed\s*=\s*!mb_network_quiesced\(\)/);
+const weatherSyslogVerdict = weatherNetwork.search(
+  /syslog_quiesce_failed\s*=\s*!syslog_network_quiesced\(\)/);
 assert.ok(weatherNetworkStart >= 0 && weatherNetworkEnd > weatherNetworkStart &&
   weatherModbusWait >= 0 && weatherSyslogWait > weatherModbusWait &&
   weatherModbusVerdict > weatherSyslogWait && weatherSyslogVerdict > weatherModbusVerdict,

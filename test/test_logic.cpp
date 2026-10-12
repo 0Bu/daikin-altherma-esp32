@@ -89,6 +89,7 @@
 #include "logic/reference_temperature.hpp"
 #include "logic/refrigerant_service.hpp"
 #include "logic/weather_forecast.hpp"
+#include "logic/weather_config.hpp"
 #include "logic/x10a_snapshot.hpp"
 #include "logic/weather_mqtt.hpp"
 #include "logic/open_meteo.hpp"
@@ -9993,6 +9994,25 @@ static void test_config_blob_strings_fit() {
     CHECK(!validate(cfg, why) && why == "mb_host is too long");
     cfg.mb_host = at_max;
     CHECK(validate(cfg, why));
+}
+
+static void test_weather_config_snapshot() {
+    Config cfg;
+    auto   snapshot = weather_config_snapshot(cfg);
+    CHECK(!snapshot.weather_enabled && !snapshot.diagnostics_enabled);
+    cfg.diagnostics_enabled    = true;
+    cfg.weather_enabled        = true;
+    cfg.diagnostics_generation = UINT32_MAX;
+    cfg.weather_latitude_e6    = -9012345;
+    cfg.weather_longitude_e6   = 179999999;
+    snapshot                   = weather_config_snapshot(cfg);
+    cfg.weather_enabled        = false;
+    cfg.diagnostics_generation = 0;
+    cfg.weather_latitude_e6    = 0;
+    CHECK(snapshot.diagnostics_enabled && snapshot.weather_enabled);
+    CHECK(snapshot.diagnostics_generation == UINT32_MAX);
+    CHECK(snapshot.weather_latitude_e6 == -9012345);
+    CHECK(snapshot.weather_longitude_e6 == 179999999);
 }
 
 static void test_open_meteo_epoch_seconds() {
@@ -22403,6 +22423,7 @@ int main() {
     test_reference_temperature_config();
     test_circulation_source();
     test_heating_curve_diagnosis();
+    test_weather_config_snapshot();
     test_open_meteo_epoch_seconds();
     test_weather_forecast_contract();
     test_mcp();

@@ -30,7 +30,14 @@ struct esp_http_client_config_t {
 };
 namespace sdk {
 struct Stop {};
-inline TickType_t               ticks = 0;
+// Exclude the adapter's own strings/vectors from production request-allocation observations.
+inline unsigned adapter_allocation_depth = 0;
+struct AdapterAllocationScope {
+    AdapterAllocationScope() { ++adapter_allocation_depth; }
+    ~AdapterAllocationScope() { --adapter_allocation_depth; }
+};
+inline bool                     fail_request_alloc = false;
+inline TickType_t               ticks              = 0;
 inline int                      mutex = 0, lock_depth = 0;
 inline bool                     deadline_ready = true, task_fails = false, init_fails = false;
 inline bool                     message_complete = true, read_fails = false;
@@ -84,6 +91,7 @@ inline esp_err_t                esp_crt_bundle_attach(void*) { return ESP_OK; }
 inline esp_http_client_handle_t esp_http_client_init(const esp_http_client_config_t* cfg) {
     ++sdk::inits;
     if (sdk::init_fails) return nullptr;
+    sdk::AdapterAllocationScope adapter_allocations;
     sdk::url    = cfg->url;
     sdk::client = {0, true, false};
     sdk::events.push_back("init");
@@ -93,11 +101,13 @@ inline esp_err_t esp_http_client_open(FakeHttp* client, int) {
     sdk::ticks += sdk::open_ticks;
     if (sdk::on_open) sdk::on_open();
     client->opened = sdk::open_result == ESP_OK;
+    sdk::AdapterAllocationScope adapter_allocations;
     sdk::events.push_back("open");
     return sdk::open_result;
 }
 inline esp_err_t esp_http_client_set_header(FakeHttp*, const char*, const char*) { return ESP_OK; }
 inline esp_err_t esp_http_client_set_timeout_ms(FakeHttp*, int value) {
+    sdk::AdapterAllocationScope adapter_allocations;
     sdk::timeouts.push_back(value);
     return ESP_OK;
 }
@@ -123,13 +133,17 @@ inline bool esp_http_client_is_complete_data_received(FakeHttp*) { return sdk::m
 inline esp_err_t esp_http_client_close(FakeHttp* client) {
     ++sdk::closes;
     client->opened = false;
+    sdk::AdapterAllocationScope adapter_allocations;
     sdk::events.push_back("close");
     return ESP_OK;
 }
 inline esp_err_t esp_http_client_cleanup(FakeHttp* client) {
     ++sdk::cleanups;
     client->live = false;
-    sdk::events.push_back("cleanup");
+    {
+        sdk::AdapterAllocationScope adapter_allocations;
+        sdk::events.push_back("cleanup");
+    }
     if (sdk::on_cleanup) sdk::on_cleanup();
     return ESP_OK;
 }
