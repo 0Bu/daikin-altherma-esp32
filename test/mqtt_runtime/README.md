@@ -11,7 +11,7 @@ python3 test/mqtt_runtime/run.py --real-cjson managed_components/espressif__cjso
 
 `--root` can select a checkout explicitly. `CC` and `CXX` select the host compilers. Each run creates its own directory through Python `tempfile`, respecting `TMPDIR`. It retains complete source snapshots, binaries, dependency files, exact commands and a manifest with source/cJSON/header/fixture hashes. It never writes repository files, downloads dependencies or deletes shared files.
 
-Six scenarios contain 256 named assertions:
+Six scenarios contain named assertions:
 
 - Real C++ allocation failure in reference/circulation status snapshots: normal delay, released activity/mutex ownership, preserved values/source-time watermarks and successful later iteration.
 - Immediate source withdrawal after reconfiguration despite the next actual Config-copy allocation failure, followed by recovery.

@@ -4022,7 +4022,11 @@ static void test_weather_fetch_headroom() {
     CHECK(json_payload_strings_ok("{} \\")); // grammar remains the parser's responsibility
     CHECK(json_payload_strings_ok(R"({"text":"a\\u0000b\u1000\u0100\u0010\u0001\n\r\t\b\f\"\\"})"));
     CHECK(json_payload_strings_ok("\"\\")); // truncated escape remains a parser error
-    CHECK(json_payload_strings_ok("\"\\u000"));
+    CHECK(!json_payload_strings_ok("\"\\u000"));
+    CHECK(json_payload_strings_ok(R"({"text":"\uA9Ff\uaf00"})"));
+    for (const std::string_view escape : {"uZZZZ", "uZ000", "u0Z00", "u00Z0", "u000Z", "u000/",
+                                          "u000:", "u000@", "u000G", "u000`", "u000g"})
+        CHECK(!json_payload_strings_ok(std::string("\"\\") + std::string(escape) + "\""));
     CHECK(!json_payload_strings_ok(std::string_view("\0", 1)));
     CHECK(!json_payload_strings_ok(std::string("{\"host\":\"a") + '\0' + "b\"}"));
     CHECK(!json_payload_strings_ok(R"({"host":"a\u0000b"})"));

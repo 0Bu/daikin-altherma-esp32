@@ -504,7 +504,16 @@ void real_json_consumers() {
     json_both(with_extra + "a\nb\"}", false, "not valid");
     require(json_witness::parses == before_strings,
             "UNREPRESENTABLE_STRINGS_REJECTED_BEFORE_REAL_CJSON_PARSE");
+    for (const std::string_view escape : {"uZZZZ", "uZ000", "u0Z00", "u00Z0", "u000Z"}) {
+        json_both(with_extra + "a\\" + std::string(escape) + "b\"}", false, "not valid");
+        json_both(valid.substr(0, valid.size() - 1) + ",\"a\\" + std::string(escape) + "b\":1}",
+                  false, "not valid");
+    }
+    require(json_witness::parses == before_strings,
+            "MALFORMED_UNICODE_REJECTED_BEFORE_REAL_CJSON_PARSE");
+    json_both(with_extra + R"(a\u000"})", false, "not valid");
     json_both(with_extra + R"(a\\u0000b\n\t"})", true);
+    json_both(with_extra + R"(a\u0041\u00Af"})", true);
     json_both(
         R"({"temperature":20,"power":50,"time":1700000100,"enabled":true,"literal":"{[\\\" ]}"})",
         true);
@@ -556,7 +565,7 @@ void real_json_consumers() {
     require(!json_witness::fail_next && json_witness::live == 0,
             "REAL_CJSON_CIRCULATION_ALLOC_FAILURE_RELEASED");
     json_both(valid, true);
-    require(json_witness::parses == 38, "BOTH_PRODUCTION_CONSUMERS_USED_REAL_CJSON");
+    require(json_witness::parses == 40, "BOTH_PRODUCTION_CONSUMERS_USED_REAL_CJSON");
     require(json_witness::live == 0 && json_witness::allocations == json_witness::frees,
             "REAL_CJSON_ALL_ALLOCATIONS_RELEASED");
 }

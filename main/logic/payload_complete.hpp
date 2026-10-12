@@ -44,9 +44,17 @@ inline bool json_payload_strings_ok(std::string_view payload) noexcept {
             if (static_cast<unsigned char>(byte) < 0x20) return false;
             if (byte == '\\' && i + 1 < payload.size()) {
                 ++i;
-                if (payload.size() - i >= 5 && payload[i] == 'u' && payload[i + 1] == '0' &&
-                    payload[i + 2] == '0' && payload[i + 3] == '0' && payload[i + 4] == '0')
-                    return false;
+                if (payload[i] != 'u') continue;
+                if (payload.size() - i < 5) return false;
+                bool all_zero = true;
+                for (size_t n = 0; n < 4; ++n) {
+                    const char hex = payload[++i];
+                    if (!((hex >= '0' && hex <= '9') || (hex >= 'a' && hex <= 'f') ||
+                          (hex >= 'A' && hex <= 'F')))
+                        return false;
+                    all_zero &= hex == '0';
+                }
+                if (all_zero) return false;
             }
         }
     }

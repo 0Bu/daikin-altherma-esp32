@@ -60,5 +60,15 @@ with tempfile.TemporaryDirectory(prefix="daikin-json-runtime-") as output:
         "FAIL unrepresentable_strings_rejected_before_parser" in result.stderr, \
         "string preflight mutation must fail its named oracle: " + result.stdout + result.stderr
     print("REJECTED missing string preflight: unrepresentable_strings_rejected_before_parser")
+    hex_guard = """                    if (!((hex >= '0' && hex <= '9') || (hex >= 'a' && hex <= 'f') ||
+                          (hex >= 'A' && hex <= 'F')))
+                        return false;"""
+    assert helper.read_text().count(hex_guard) == 1
+    unsafe_helper.write_text(helper.read_text().replace(hex_guard, ""))
+    result = execute([compile(unsafe_header, "unicode-mutation")])
+    assert result.returncode == 33 and \
+        "FAIL malformed_unicode_rejected_before_parser" in result.stderr, \
+        "Unicode mutation must fail its named oracle: " + result.stdout + result.stderr
+    print("REJECTED invalid Unicode digits: malformed_unicode_rejected_before_parser")
 assert all(hashlib.sha256(p.read_bytes()).hexdigest() == value for p, value in before.items())
 print("cJSON.c sha256=" + before[cjson / "cJSON.c"])

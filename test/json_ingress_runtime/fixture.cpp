@@ -66,7 +66,18 @@ int main() {
             return 31;
         }
     }
-    if (!parse(R"({"text":"a\\u0000b\u0001\n\r\t\b\f\"\\"})", true)) return 32;
+    for (const std::string_view escape : {"uZZZZ", "uZ000", "u0Z00", "u00Z0", "u000Z"}) {
+        const auto before_unicode = allocations;
+        if (!parse(std::string("{\"host\":\"a\\") + std::string(escape) + "b\"}", false) ||
+            !parse(std::string("{\"a\\") + std::string(escape) + "b\":1}", false) ||
+            allocations != before_unicode) {
+            std::fputs("FAIL malformed_unicode_rejected_before_parser\n", stderr);
+            return 33;
+        }
+    }
+    const auto before_truncated = allocations;
+    if (!parse(R"({"host":"a\u000"})", false) || allocations != before_truncated) return 34;
+    if (!parse(R"({"text":"a\\u0000b\u0001\u0041\u00Af\n\r\t\b\f\"\\"})", true)) return 32;
     const std::string large = "{\"text\":\"" + std::string(8180, 'x') + "\"}";
     if (large.size() != 8191 || !parse(large, true)) return 7;
     for (int n = 0; n < 4; ++n) {

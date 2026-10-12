@@ -784,6 +784,17 @@ void real_lexer() {
          {std::string("a") + '\0' + "b\"}", std::string(R"(a\u0000b"})"), std::string("a\nb\"}")})
         REQUIRE(!parse_forecast(prefix + suffix, NOW, sample, error) && error == "json_invalid");
     REQUIRE(parse_forecast(prefix + R"(a\\u0000b\n\t"})", NOW, sample, error));
+    REQUIRE(parse_forecast(prefix + R"(a\u0041\u00Af"})", NOW, sample, error));
+    REQUIRE(!parse_forecast(prefix + R"(a\u000"})", NOW, sample, error) && error == "json_invalid");
+    for (const std::string_view escape : {"uZZZZ", "uZ000", "u0Z00", "u00Z0", "u000Z"}) {
+        REQUIRE(
+            !parse_forecast(prefix + "a\\" + std::string(escape) + "b\"}", NOW, sample, error) &&
+            error == "json_invalid");
+        REQUIRE(!parse_forecast(prepare().substr(0, prepare().size() - 1) + ",\"a\\" +
+                                    std::string(escape) + "b\":1}",
+                                NOW, sample, error) &&
+                error == "json_invalid");
+    }
     Payload overflow;
     overflow.times[1] = std::ldexp(1.0, 63);
     REQUIRE(!parse_forecast(prepare(overflow), NOW, sample, error) &&
