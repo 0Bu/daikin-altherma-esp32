@@ -56,6 +56,17 @@ int main() {
     const auto before = allocations;
     if (!parse("{\"a\":" + sixteen + "}", false) || allocations != before) return 5;
     if (!parse(std::string("{}") + '\0' + "{}", false)) return 6;
+    for (const std::string& payload :
+         {std::string("{\"host\":\"a") + '\0' + "b\"}", std::string("{\"a") + '\0' + "b\":1}",
+          std::string(R"({"host":"a\u0000b"})"), std::string(R"({"a\u0000b":1})"),
+          std::string("{\"host\":\"a\nb\"}")}) {
+        const auto before_strings = allocations;
+        if (!parse(payload, false) || allocations != before_strings) {
+            std::fputs("FAIL unrepresentable_strings_rejected_before_parser\n", stderr);
+            return 31;
+        }
+    }
+    if (!parse(R"({"text":"a\\u0000b\u0001\n\r\t\b\f\"\\"})", true)) return 32;
     const std::string large = "{\"text\":\"" + std::string(8180, 'x') + "\"}";
     if (large.size() != 8191 || !parse(large, true)) return 7;
     for (int n = 0; n < 4; ++n) {

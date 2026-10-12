@@ -56,6 +56,21 @@ function mutate(mutation) {
 }
 const mutations = [
   {
+    name: "unconfigured-episode-reset", file: "syslog", scenario: "syslog_unconfigured_episode",
+    before: "xQueueReceive(s_queue, &msg, portMAX_DELAY);\n                            failures.succeeded();\n                            continue;",
+    after: "xQueueReceive(s_queue, &msg, portMAX_DELAY);\n                            continue;",
+  },
+  {
+    name: "network-down-episode-reset", file: "syslog", scenario: "syslog_network_down_episode",
+    before: "vTaskDelay(pdMS_TO_TICKS(2000));\n                            failures.succeeded();\n                            continue;",
+    after: "vTaskDelay(pdMS_TO_TICKS(2000));\n                            continue;",
+  },
+  {
+    name: "complete-cycle-episode-reset", file: "syslog", scenario: "syslog_complete_cycle_episode",
+    before: "                        failures.succeeded();\n                    } catch (const std::exception& e) {",
+    after: "                        /* mutation: retain the previous failure episode */\n                    } catch (const std::exception& e) {",
+  },
+  {
     name: "status-mutex-heap-allocation", file: "syslog", scenario: "status_mutex_failure",
     before: "static SemaphoreHandle_t s_status_mtx = xSemaphoreCreateMutexStatic(&s_status_mtx_storage);",
     after: "static SemaphoreHandle_t s_status_mtx = xSemaphoreCreateMutexStatic(&s_status_mtx_storage);",
@@ -154,7 +169,7 @@ try {
   const binary = compile("production");
   const baseline = execute(binary, []);
   assert.equal(baseline.status, 0, `${baseline.stdout}${baseline.stderr}`);
-  assert.match(baseline.stdout, /PASS total=16\b/);
+  assert.match(baseline.stdout, /PASS total=19\b/);
   console.log(baseline.stdout.trim());
   for (const mutation of mutations) {
     const result = execute(compile(mutation.name, mutate(mutation)), [mutation.scenario]);
@@ -165,7 +180,7 @@ try {
   for (const [key, source] of Object.entries(sources)) {
     console.log(`network runtime ${key} sha256=${createHash("sha256").update(source).digest("hex")}`);
   }
-  console.log(`production network runtime: 16 cases, ${mutations.length} negative controls`);
+  console.log(`production network runtime: 19 cases, ${mutations.length} negative controls`);
 } finally {
   fs.rmSync(dir, { recursive: true, force: true });
 }

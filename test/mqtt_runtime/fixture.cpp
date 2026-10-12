@@ -164,7 +164,7 @@ void initial_config() {
     adapter::cfg.ref_temp_enabled_path          = "enabled";
     adapter::cfg.ref_temp_fixed_setpoint_tenths = 220;
     adapter::cfg.ref_temp_max_age_s             = 600;
-    adapter::cfg.circulation_name               = "Circulation";
+    adapter::cfg.circulation_name               = "DHW circulation";
     adapter::cfg.circulation_topic              = "circulation";
     adapter::cfg.circulation_power_path         = "power";
     adapter::cfg.circulation_time_path          = "time";
@@ -496,7 +496,15 @@ void real_json_consumers() {
     json_both(valid + " \t\r\n", true);
     json_both(valid + "junk", false, "trailing");
     json_both(valid + "{}", false, "trailing");
-    json_both(valid + std::string("\0", 1) + "junk", false, "trailing");
+    json_both(valid + std::string("\0", 1) + "junk", false, "not valid");
+    const std::string with_extra     = valid.substr(0, valid.size() - 1) + ",\"extra\":\"";
+    const int         before_strings = json_witness::parses;
+    json_both(with_extra + "a" + std::string(1, '\0') + "b\"}", false, "not valid");
+    json_both(with_extra + R"(a\u0000b"})", false, "not valid");
+    json_both(with_extra + "a\nb\"}", false, "not valid");
+    require(json_witness::parses == before_strings,
+            "UNREPRESENTABLE_STRINGS_REJECTED_BEFORE_REAL_CJSON_PARSE");
+    json_both(with_extra + R"(a\\u0000b\n\t"})", true);
     json_both(
         R"({"temperature":20,"power":50,"time":1700000100,"enabled":true,"literal":"{[\\\" ]}"})",
         true);

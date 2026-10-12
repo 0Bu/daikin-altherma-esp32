@@ -47,5 +47,18 @@ with tempfile.TemporaryDirectory(prefix="daikin-json-runtime-") as output:
     assert result.returncode == 1 and "FAIL configuration_object_root_required" in result.stderr, \
         "object-root mutation must fail its named oracle: " + result.stdout + result.stderr
     print("REJECTED untyped configuration root: configuration_object_root_required")
+    helper = root / "main/logic/payload_complete.hpp"
+    string_guard = "!json_payload_strings_ok(payload) ||"
+    assert helper.read_text().count(string_guard) == 1
+    unsafe_helper = output / "unsafe-payload.hpp"
+    unsafe_helper.write_text(helper.read_text().replace(string_guard, ""))
+    unsafe_header = output / "unsafe-json.hpp"
+    unsafe_header.write_text(original.replace('"logic/payload_complete.hpp"',
+                                              '"' + str(unsafe_helper) + '"'))
+    result = execute([compile(unsafe_header, "string-mutation")])
+    assert result.returncode == 31 and \
+        "FAIL unrepresentable_strings_rejected_before_parser" in result.stderr, \
+        "string preflight mutation must fail its named oracle: " + result.stdout + result.stderr
+    print("REJECTED missing string preflight: unrepresentable_strings_rejected_before_parser")
 assert all(hashlib.sha256(p.read_bytes()).hexdigest() == value for p, value in before.items())
 print("cJSON.c sha256=" + before[cjson / "cJSON.c"])

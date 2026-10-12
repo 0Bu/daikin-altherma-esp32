@@ -26,7 +26,7 @@ an external Origin or cross-site Fetch Metadata. A plain port forward supplies n
 The device guards browser-origin attacks; they are not LAN-client authentication.
 
 Config, MQTT and Weather JSON ingress permits one complete document, at most 16 container levels,
-no raw NUL or trailing non-whitespace. HTTP body acceptance has a 30-second absolute budget;
+no raw or decoded NUL or trailing non-whitespace. HTTP body acceptance has a 30-second absolute budget;
 unread-body cleanup admits receives for two seconds and checks its 8 KiB cap after each 128-byte
 read. One in-progress read can add a socket timeout and the cap can reach 8 KiB + 128 bytes.
 Beyond those bounds the connection closes. During active OTA or below a 6,144-byte internal block,

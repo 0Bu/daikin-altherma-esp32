@@ -778,7 +778,12 @@ void real_lexer() {
     std::string embedded = prepare();
     embedded.push_back('\0');
     embedded += "{}";
-    REQUIRE(!parse_forecast(embedded, NOW, sample, error) && error == "json_trailing_data");
+    REQUIRE(!parse_forecast(embedded, NOW, sample, error) && error == "json_invalid");
+    const std::string prefix = prepare().substr(0, prepare().size() - 1) + ",\"extra\":\"";
+    for (const std::string& suffix :
+         {std::string("a") + '\0' + "b\"}", std::string(R"(a\u0000b"})"), std::string("a\nb\"}")})
+        REQUIRE(!parse_forecast(prefix + suffix, NOW, sample, error) && error == "json_invalid");
+    REQUIRE(parse_forecast(prefix + R"(a\\u0000b\n\t"})", NOW, sample, error));
     Payload overflow;
     overflow.times[1] = std::ldexp(1.0, 63);
     REQUIRE(!parse_forecast(prepare(overflow), NOW, sample, error) &&

@@ -1609,7 +1609,8 @@ static DecodedReferenceFrame decode_reference_frame(const ReferenceMqttFrame& fr
     const bool setpoint_frame = !setpoint_topic.empty() && frame.topic == setpoint_topic;
     const bool timestamp_frame = !timestamp_topic.empty() && frame.topic == timestamp_topic;
     if (!temperature_frame && !setpoint_frame && !timestamp_frame) return out;
-    if (frame.payload_len == 0) {
+    if (frame.payload_len == 0 ||
+        !json_payload_strings_ok(std::string_view(frame.payload, frame.payload_len))) {
         out.error = "payload is not valid JSON";
         return out;
     }
@@ -1708,7 +1709,8 @@ static DecodedCirculationFrame decode_circulation_frame(const ReferenceMqttFrame
                                                         const std::string& power_path,
                                                         const std::string& timestamp_path) {
     DecodedCirculationFrame out;
-    if (frame.payload_len == 0) {
+    if (frame.payload_len == 0 ||
+        !json_payload_strings_ok(std::string_view(frame.payload, frame.payload_len))) {
         out.error = "payload is not valid JSON";
         return out;
     }

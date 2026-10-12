@@ -4018,6 +4018,17 @@ static void test_weather_fetch_headroom() {
          {"", " \t\r\n", "null", "[]", "true", "false", "0", "-1", "\"{}\"", "\f{}"})
         CHECK(!json_payload_is_object(payload));
     CHECK(!json_payload_is_object(std::string_view("\0{}", 3)));
+    CHECK(json_payload_strings_ok(""));
+    CHECK(json_payload_strings_ok("{} \\")); // grammar remains the parser's responsibility
+    CHECK(json_payload_strings_ok(R"({"text":"a\\u0000b\u1000\u0100\u0010\u0001\n\r\t\b\f\"\\"})"));
+    CHECK(json_payload_strings_ok("\"\\")); // truncated escape remains a parser error
+    CHECK(json_payload_strings_ok("\"\\u000"));
+    CHECK(!json_payload_strings_ok(std::string_view("\0", 1)));
+    CHECK(!json_payload_strings_ok(std::string("{\"host\":\"a") + '\0' + "b\"}"));
+    CHECK(!json_payload_strings_ok(R"({"host":"a\u0000b"})"));
+    CHECK(!json_payload_strings_ok(R"({"a\u0000b":1})"));
+    for (char control : {'\n', '\r', '\t', '\b', '\f', char(1), char(31)})
+        CHECK(!json_payload_strings_ok(std::string("\"a") + control + "b\""));
     TaskFailureEpisode failures;
     CHECK(failures.first_failure());
     CHECK(!failures.first_failure());
@@ -4071,20 +4082,20 @@ static void test_weather_fetch_headroom() {
          {std::string("{}"), std::string("garbage"), std::string(1, '\0')}) {
         CHECK(json_parse_bounded(std::string("{}") + suffix, parse, destroy) == nullptr);
     }
-    CHECK(parses == 4 && deletes == 3);
+    CHECK(parses == 3 && deletes == 2);
     CHECK(json_parse_bounded(arrays(17), parse, destroy) == nullptr);
     CHECK(json_parse_bounded(arrays(400), parse, destroy) == nullptr);
     CHECK(json_parse_bounded("", parse, destroy) == nullptr);
-    CHECK(parses == 4); // excessive nesting never reaches the parser or its recursive deleter
+    CHECK(parses == 3); // excessive nesting and NUL never reach the parser or its recursive deleter
     consumed = arrays(16).size();
     CHECK(json_parse_bounded(arrays(16), parse, destroy) == &object);
     missing_end = true;
     CHECK(json_parse_bounded(arrays(16), parse, destroy) == nullptr);
-    CHECK(deletes == 4);
+    CHECK(deletes == 3);
     missing_end = false;
     parse_fails = true;
     CHECK(json_parse_bounded(arrays(16), parse, destroy) == nullptr);
-    CHECK(deletes == 4); // failed parsers do not transfer ownership
+    CHECK(deletes == 3); // failed parsers do not transfer ownership
     parse_fails                    = false;
     const std::string      storage = "x{}y";
     const std::string_view view(storage.data() + 1, 2);
@@ -4094,7 +4105,7 @@ static void test_weather_fetch_headroom() {
     consumed   = view.size();
     end_offset = 1;
     CHECK(json_parse_bounded(view, parse, destroy) == nullptr);
-    CHECK(deletes == 6);
+    CHECK(deletes == 5);
 }
 
 // /values waits boundedly behind the short Weather TLS allocator, but a newly active OTA owner must

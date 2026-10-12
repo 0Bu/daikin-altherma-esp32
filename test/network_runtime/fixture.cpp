@@ -26,6 +26,20 @@ static std::tm* fixture_gmtime_r(const std::time_t* time, std::tm* output) {
     output->tm_mday = 1;
     return nullptr;
 }
+namespace syslog_episode {
+enum class Recovery { Unconfigured, NetworkDown, CompleteCycle };
+struct StopTask {};
+inline Recovery recovery = Recovery::CompleteCycle;
+inline bool     active   = false;
+inline unsigned cycles = 0, allocation_failures = 0, lock_depth = 0;
+inline unsigned failure_delays = 0, idle_delays = 0, idle_receives = 0;
+} // namespace syslog_episode
+static int fixture_getaddrinfo(const char* host, const char* service, const addrinfo* hints,
+                               addrinfo** result) {
+    if (syslog_episode::active) return EAI_NONAME;
+    return ::getaddrinfo(host, service, hints, result);
+}
+#define getaddrinfo fixture_getaddrinfo
 #define TAG SYSLOG_TAG
 #define gmtime_r fixture_gmtime_r
 #define socket sdk::udp_socket
@@ -37,8 +51,10 @@ static std::tm* fixture_gmtime_r(const std::time_t* time, std::tm* output) {
 #undef close
 #undef TAG
 #undef gmtime_r
+#undef getaddrinfo
 
 void* operator new(size_t size) {
+    if (syslog_episode::active && sdk::forbid_alloc) ++syslog_episode::allocation_failures;
     if (sdk::forbid_alloc) throw std::bad_alloc();
     if (void* p = std::malloc(size ? size : 1)) return p;
     throw std::bad_alloc();
@@ -66,8 +82,24 @@ bool   config_save(const Config& c) {
 }
 bool config_wifi_configured() { return !adapter::cfg.wifi_ssid.empty(); }
 namespace detail {
-void          config_lock() {}
-void          config_unlock() {}
+void config_lock() {
+    if (!syslog_episode::active) return;
+    ++syslog_episode::cycles;
+    ++syslog_episode::lock_depth;
+    const bool recovered = syslog_episode::cycles == 3;
+    if (recovered && syslog_episode::recovery == syslog_episode::Recovery::Unconfigured)
+        adapter::cfg.syslog_host.clear();
+    else
+        adapter::cfg.syslog_host.assign(80, 'a');
+    s_wifi_connected =
+        !(recovered && syslog_episode::recovery == syslog_episode::Recovery::NetworkDown);
+    sdk::forbid_alloc = !recovered;
+}
+void config_unlock() {
+    if (!syslog_episode::active) return;
+    sdk::forbid_alloc = false;
+    --syslog_episode::lock_depth;
+}
 const Config& config_ref_locked() { return adapter::cfg; }
 } // namespace detail
 bool      nvs_storage_available() { return true; }
@@ -102,6 +134,11 @@ using namespace daik;
     } while (0)
 
 void reset() {
+    syslog_episode::active = false;
+    syslog_episode::cycles = syslog_episode::allocation_failures = syslog_episode::lock_depth = 0;
+    syslog_episode::failure_delays = syslog_episode::idle_delays = syslog_episode::idle_receives =
+        0;
+    sdk::on_queue_receive = {};
     sdk::forbid_alloc = false;
     sdk::on_start = sdk::on_netif_read = sdk::on_ap_read = {};
     sdk::on_wait                                         = {};
@@ -464,6 +501,69 @@ void status_mutex_failure() {
     }
     REQUIRE(sdk::lock_depth == 0);
 }
+
+// Two failed snapshots, one successful idle/full cycle, then two independent failures.
+// Real operator-new rejection proves once-per-episode logging without changing task cadence.
+void syslog_episode_recovery(syslog_episode::Recovery recovery) {
+    reset();
+    syslog_init();
+    REQUIRE(sdk::tasks.size() == 1);
+    syslog_episode::recovery = recovery;
+    adapter::cfg.syslog_host.assign(80, 'a');
+    syslog_episode::active = true;
+    sdk::on_delay          = [](TickType_t ticks) {
+        REQUIRE(syslog_episode::lock_depth == 0 && sdk::lock_depth == 0);
+        if (ticks == 2000) {
+            REQUIRE(syslog_episode::cycles == 3);
+            ++syslog_episode::idle_delays;
+        } else if (ticks == 1000) {
+            ++syslog_episode::failure_delays;
+            // This delay is outside the caught try body, so the sentinel stops the task.
+            if (syslog_episode::failure_delays == 4) throw syslog_episode::StopTask{};
+        } else
+            REQUIRE(false);
+    };
+    sdk::on_queue_receive = [](TickType_t ticks) {
+        REQUIRE(syslog_episode::cycles == 3);
+        if (ticks == portMAX_DELAY || ticks == 500)
+            ++syslog_episode::idle_receives;
+        else
+            REQUIRE(false);
+    };
+    bool stopped = false;
+    try {
+        sdk::tasks.front()->fn(sdk::tasks.front()->arg);
+    } catch (const syslog_episode::StopTask&) {
+        stopped = true;
+    }
+    syslog_episode::active = false;
+    sdk::forbid_alloc      = false;
+    sdk::on_delay          = {};
+    sdk::on_queue_receive  = {};
+    REQUIRE(stopped);
+    REQUIRE(syslog_episode::cycles == 5 && syslog_episode::allocation_failures == 4);
+    REQUIRE(syslog_episode::failure_delays == 4);
+    REQUIRE(syslog_episode::lock_depth == 0 && sdk::lock_depth == 0);
+    REQUIRE(syslog_network_quiesced());
+    if (recovery == syslog_episode::Recovery::NetworkDown)
+        REQUIRE(syslog_episode::idle_delays == 1 && syslog_episode::idle_receives == 0);
+    else
+        REQUIRE(syslog_episode::idle_delays == 0 && syslog_episode::idle_receives == 1);
+    unsigned reports = 0;
+    for (const auto& log : adapter::logs)
+        if (log.find("syslog: task cycle skipped") != std::string::npos) ++reports;
+    REQUIRE(reports == 2); // consecutive failures produce one report, recovery starts a new episode
+}
+void syslog_unconfigured_episode() {
+    syslog_episode_recovery(syslog_episode::Recovery::Unconfigured);
+}
+void syslog_network_down_episode() {
+    syslog_episode_recovery(syslog_episode::Recovery::NetworkDown);
+}
+void syslog_complete_cycle_episode() {
+    syslog_episode_recovery(syslog_episode::Recovery::CompleteCycle);
+}
+
 } // namespace test
 int main(int argc, char** argv) {
     const std::pair<const char*, void (*)()> cases[] = {
@@ -483,6 +583,9 @@ int main(int argc, char** argv) {
         {"queue_saturation", test::queue_saturation},
         {"timestamp_framing", test::timestamp_framing},
         {"status_mutex_failure", test::status_mutex_failure},
+        {"syslog_unconfigured_episode", test::syslog_unconfigured_episode},
+        {"syslog_network_down_episode", test::syslog_network_down_episode},
+        {"syslog_complete_cycle_episode", test::syslog_complete_cycle_episode},
     };
     unsigned count = 0;
     for (const auto& item : cases) {

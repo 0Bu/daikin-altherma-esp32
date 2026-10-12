@@ -183,6 +183,7 @@ inline std::vector<esp_netif_t*>   netifs;
 inline std::function<void()>       on_start, on_netif_read, on_ap_read;
 inline std::function<EventBits_t(FakeEvents*, TickType_t)> on_wait;
 inline std::function<void(TickType_t)>                     on_delay;
+inline std::function<void(TickType_t)>                     on_queue_receive;
 inline std::vector<TickType_t>                             wait_budgets;
 inline std::vector<std::string>                            packets;
 inline bool                                                fail_send = false;
@@ -276,6 +277,7 @@ inline BaseType_t xQueueSend(QueueHandle_t q, const void* row, TickType_t timeou
     return pdTRUE;
 }
 inline BaseType_t xQueueReceive(QueueHandle_t q, void* row, TickType_t timeout) {
+    if (sdk::on_queue_receive) sdk::on_queue_receive(timeout);
     if (!q->count) {
         sdk::ticks += timeout;
         return pdFALSE;

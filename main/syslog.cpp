@@ -404,6 +404,7 @@ void syslog_init() {
                             // busy-spin.
                             SyslogMsg msg;
                             xQueueReceive(s_queue, &msg, portMAX_DELAY);
+                            failures.succeeded();
                             continue;
                         }
 
@@ -418,6 +419,7 @@ void syslog_init() {
                                 set_status(false, false, "Network disconnected");
                             }
                             vTaskDelay(pdMS_TO_TICKS(2000));
+                            failures.succeeded();
                             continue;
                         }
 
