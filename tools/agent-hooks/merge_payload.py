@@ -10,6 +10,7 @@ from pathlib import Path
 import posixpath
 import re
 import shlex
+import stat
 import sys
 from typing import Any
 from urllib.parse import unquote, urlsplit
@@ -57,6 +58,21 @@ GH_BUILTIN_COMMANDS = {
     "variable",
     "workflow",
 }
+
+
+def normalized_tool(value: object) -> str:
+    """Share runner aliases without truncating dotted MCP server identities."""
+    tool = str(value or "").strip().lower()
+    for prefix in ("functions.", "functions::"):
+        if tool.startswith(prefix):
+            tool = tool[len(prefix):]
+            break
+    if tool.startswith("mcp__"):
+        return tool
+    for separator in (".", "::"):
+        if separator in tool:
+            tool = tool.rsplit(separator, 1)[-1]
+    return tool
 
 
 def executable(token: str) -> str:
@@ -321,6 +337,44 @@ def is_canonical_credential_wrapper(token: str) -> bool:
     )
 
 
+def literal_pr_create_form(source: str) -> list[str] | None:
+    """Prove the reviewed direct PR-create argv before inspecting prose as shell syntax."""
+    source = re.sub(r"\\\r?\n", "", source)
+    if re.search(r"[\x00-\x1f\x7f$`]", source):
+        return None
+    quote = ""
+    escaped = False
+    for character in source:
+        if escaped:
+            escaped = False
+        elif character == "\\" and quote != "'":
+            escaped = True
+        elif quote:
+            if character == quote:
+                quote = ""
+        elif character in "'\"":
+            quote = character
+        elif character in ";&|(){}!<>*?[~#":
+            return None  # Operators/expansions must be quoted or escaped title data.
+    try:
+        tokens = tokenize(source)
+    except ValueError:
+        return None
+    if len(tokens) != 13 or not is_canonical_credential_wrapper(tokens[0]):
+        return None
+    if tokens[1::2] != ["--repo", "pr", "--head", "--base", "--title", "--body-file"]:
+        return None
+    if tokens[4] != "create" or tokens[8] != "main" or not tokens[10].strip():
+        return None
+    if not re.fullmatch(r"github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", tokens[2]):
+        return None
+    if not re.fullmatch(r"agent/[A-Za-z0-9_./-]+", tokens[6]):
+        return None
+    if not re.fullmatch(r"/[A-Za-z0-9_./-]+", tokens[12]) or ".." in Path(tokens[12]).parts:
+        return None
+    return tokens
+
+
 def token_may_be_gh(token: str) -> bool:
     base = executable(token)
     canonical_wrapper = is_canonical_credential_wrapper(token)
@@ -441,6 +495,64 @@ def gh_api_write_error(args: list[str], *, graphql: bool) -> str:
     if method not in {"GET", "HEAD"}:
         return f"gh api method {method} is not read-only and is not the canonical merge action"
     return ""
+
+
+def native_ruleset_update(tokens: list[str], index: int, endpoint: str,
+                          args: list[str]) -> dict[str, str] | None:
+    """Separate a native gh ruleset update from merge operations and credential forwarding.
+
+    The aggregate gate still binds the execution directory and explicit repository to origin.
+    Authorization comes from the user's request, never from the presence of this command.
+    """
+    match = re.fullmatch(r"repos/([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+)/rulesets/([0-9]+)", endpoint)
+    if not match or is_canonical_credential_wrapper(tokens[index]):
+        return None
+    error = ""
+    methods: list[str] = []
+    inputs: list[str] = []
+    option_index = 0
+    while option_index < len(args):
+        option = args[option_index]
+        if option == endpoint:
+            option_index += 1
+        elif option in {"--method", "--input"} and option_index + 1 < len(args):
+            (methods if option == "--method" else inputs).append(args[option_index + 1])
+            option_index += 2
+        else:
+            error = f"unsupported native ruleset update argument: {option}"
+            break
+    if not error and (index != 0 or tokens[0] != "gh"):
+        error = "ruleset updates need one direct native gh invocation"
+    if not error:
+        error = canonical_api_host_option(tokens[index + 1:])
+    if not error and (methods != ["PUT"] or len(inputs) != 1):
+        error = "ruleset updates need exactly --method PUT and one --input JSON file"
+    if not error:
+        path = Path(inputs[0])
+        if not path.is_absolute() or path.suffix != ".json" or ".." in path.parts:
+            error = "ruleset input must be an absolute physical .json file"
+        else:
+            try:
+                # Inspect metadata only. Never read candidate credential or private-key contents.
+                if any(parent.is_symlink() for parent in [path, *path.parents]):
+                    error = "ruleset input must not contain symlinked path components"
+                else:
+                    metadata = path.lstat()
+                    if not stat.S_ISREG(metadata.st_mode) or metadata.st_nlink != 1:
+                        error = "ruleset input must be a single-link regular JSON file"
+                    elif metadata.st_uid != os.getuid() or metadata.st_mode & 0o022:
+                        error = "ruleset input must be owned by the current user and not writable by others"
+                    elif not 0 < metadata.st_size <= 1024 * 1024:
+                        error = "ruleset input must contain at most 1 MiB of JSON"
+            except OSError:
+                error = "ruleset input file is missing or cannot be inspected"
+    return {
+        "action": "gh api ruleset update",
+        "selector": "",
+        "repo": f"{match.group(1)}/{match.group(2)}",
+        "host": "github.com",
+        "error": error,
+    }
 
 
 def token_may_be_curl(token: str) -> bool:
@@ -874,6 +986,9 @@ def parse_gh(tokens: list[str], index: int, inherited: dict[str, str]) -> dict[s
                 }
         write_error = gh_api_write_error(normalized[1:], graphql=has_graphql_target)
         if write_error:
+            administration = native_ruleset_update(tokens, index, endpoint_token, normalized[1:])
+            if administration is not None:
+                return administration
             return {
                 "action": "gh api write",
                 "selector": "",
@@ -899,7 +1014,7 @@ def literal_rg_inspection(source: str) -> bool:
     confused with an executable shell operator. Unknown flags, launchers and expansions fail closed.
     Secret-path checks remain the caller's responsibility.
     """
-    if len(source) > 16384 or re.search(r"[$`\x00-\x1f\x7f]", source):
+    if len(source) > 16384 or re.search(r"[\x00-\x1f\x7f]", source):
         return False
     try:
         lexer = shlex.shlex(source, posix=False, punctuation_chars=";&|()!<>")
@@ -943,6 +1058,11 @@ def shell_executes_stdin(source: str, *, original_source: str | None = None) -> 
 def find_merge(source: str, depth: int = 0) -> dict[str, str] | None:
     if depth > 5:
         return {"action": "shell merge", "selector": "", "repo": "", "host": "", "error": "shell nesting exceeds parser limit"}
+    create_tokens = literal_pr_create_form(source)
+    if create_tokens is not None:
+        return parse_gh(create_tokens, 0, {})
+    if literal_rg_inspection(source):
+        return None  # Literal query text is not a GitHub action; callers still check secret paths.
     original_source = source
     source = normalize_shell_source(source)
     graphql_action = next(
@@ -1105,6 +1225,16 @@ def find_merge(source: str, depth: int = 0) -> dict[str, str] | None:
                     }
                 parsed = parse_gh(resolved_segment, index, {})
                 if parsed is not None:
+                    if parsed["action"] == "gh api ruleset update" and not parsed["error"]:
+                        literal_source = re.sub(r"\\\r?\n", "", original_source)
+                        try:
+                            literal_tokens = shlex.split(literal_source)
+                        except ValueError:
+                            literal_tokens = []
+                        if depth or literal_tokens != resolved_segment or re.search(
+                            r"[\n\r$`]", literal_source
+                        ):
+                            parsed["error"] = "ruleset updates need one literal, unchained native gh invocation"
                     return parsed
         command_index = next(
             (index for index, token in enumerate(segment) if not ASSIGNMENT.fullmatch(token)),
@@ -1187,11 +1317,11 @@ def main() -> int:
         return 2
     if not isinstance(data, dict):
         return 2
-    tool = str(data.get("tool_name") or "")
+    tool = normalized_tool(data.get("tool_name"))
     tool_input = data.get("tool_input") or {}
     if "toolCall" in data and isinstance(data["toolCall"], dict):
         tc = data["toolCall"]
-        tc_name = str(tc.get("name") or "").strip().lower()
+        tc_name = normalized_tool(tc.get("name"))
         tc_args = tc.get("args") or {}
         if isinstance(tc_args, dict) and tc_name == "run_command":
             tool = "bash"
@@ -1228,7 +1358,11 @@ def main() -> int:
             else find_merge(command)
         )
         if parsed is not None:
-            if merge_action_count(command) > 1:
+            if parsed["action"] == "gh pr create":
+                if literal_pr_create_form(command) is None:
+                    parsed["error"] = parsed["error"] or "PR creation needs one literal direct reviewed argv form"
+                # Literal title is data; wrapper argv, file, head and cwd checks remain active.
+            elif merge_action_count(command) > 1:
                 parsed["error"] = parsed["error"] or "multiple merge actions cannot be bound atomically"
             elif execution_context_is_ambiguous(command):
                 parsed["error"] = parsed["error"] or "merge command changes argv or working directory after target binding"

@@ -28,6 +28,9 @@ Look for:
    growing /status builder. Trace the deepest path and separate source bounds from measurements
    in the matching ELF or coredump and device stack minima. Less than roughly 1 KiB free needs
    action; missing measurements remain unverified, not a stack-safety pass.
+8. For affected config/history transactions, trace field-owned writes, allocations after the first
+   durable mutation, failure rollback and concurrent task/mutex lifecycle. Retain the last valid
+   state on failure; source/host evidence cannot prove power-loss restoration.
 
 For each finding report file:line, allocation and trigger, concrete failure path, and a bounded fix,
 ranked by likelihood of a device reboot or wedged task. Return the verified base_sha, head_sha,

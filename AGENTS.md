@@ -75,6 +75,7 @@ conditional workflows and are not necessarily PR checkbox gates.
 |---|---|
 | `$project-review`, `$domain-review` | Every local/manual merge and ordinary PR merge; the sole CI-attested Renovate exception is defined in [the runbook](docs/AGENT_MIGRATION.md#operating-rules). |
 | `$skill-audit` | Before PR creation or push; verify skills/reviewers against repository facts. |
+| `$agentic-setup` | Review/modernize agent support; its quick source audit runs before push and PR creation without a new stamp or model process. |
 | `$heap-safety-review` | Before merge of HTTP, MQTT, OTA, TLS, JSON, X10A publishing, polling or allocation changes. |
 | `$feature-docs` | Technical feature surface changes. |
 | `$schematic-review` | Schematic, contract or schematic-audit changes. |
@@ -150,10 +151,11 @@ documentation.
 - Never read, print, copy, stage, upload, or place in model context any `*.pem`, `*.key`, private
   pairing material, credential dump, or the offline OTA signing key. `.gitignore` is not a security
   boundary.
-- For local GitHub CLI access, use `scripts/gh-with-git-credentials.sh`. It resolves the configured
-  `github.com` Git credential inside the child process and passes it to `gh` only through a transient
-  environment variable. Never read the credential store, run `git credential fill`, or print an
-  authentication token directly. CI may provide its own transient `GH_TOKEN` to the same wrapper.
+- Native `gh` may use its existing authentication for reads and explicitly authorized repository
+  ruleset updates in the form documented in `docs/AGENT_MIGRATION.md`. The canonical PR-create and
+  merge paths still use `scripts/gh-with-git-credentials.sh`, which resolves the `github.com` Git
+  credential inside its child process. Never read the credential store, run `git credential fill`,
+  or print an authentication token. CI may provide a transient `GH_TOKEN` to the wrapper.
 - The only permitted use of the OTA key is an explicitly authorized, unchained `espsecure.py
   sign_data`/`sign-data` invocation that passes the key by path. Do not pipe, redirect, concatenate,
   inspect, or wrap that invocation with unrelated commands.
@@ -298,10 +300,10 @@ scripts/idf-docker.sh idf.py build
   Action-pin-line-only class defined in [the runbook](docs/AGENT_MIGRATION.md#operating-rules);
   it never applies to firmware dependencies or mixed diffs.
 - A PR checkbox is evidence, not authorization. Use only the repository-bound, expected-head REST
-  merge path documented in `docs/AGENT_MIGRATION.md`. `gh pr merge`, every other REST merge or
-  mutation shape, GraphQL mutations, and all MCP merge, auto-merge, or queue-activation forms are
-  intentionally blocked. Static read-only REST GET/HEAD requests and read-only GraphQL queries
-  remain allowed.
+  merge path documented in `docs/AGENT_MIGRATION.md`. `gh pr merge`, other REST mutation shapes
+  except the documented native ruleset update, GraphQL mutations, and all MCP merge, auto-merge,
+  or queue-activation forms are blocked. Static REST GET/HEAD requests and read-only GraphQL
+  queries remain allowed. A permitted administrative command still needs explicit user authorization.
 - Do not let a subagent self-certify its own implementation. Use an independent read-only reviewer
   for high-risk decode, heap, documentation, security, persistence, or UI changes.
 - Do not merge while required CI, review findings, requested hardware evidence, or user decisions are

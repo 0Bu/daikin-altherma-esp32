@@ -240,6 +240,7 @@ const browserCi = fs.readFileSync(path.join(repoRoot, ".github/workflows/build.y
 // Review skills that require baseline pinning and stamp format checks
 const reviewSkills = new Set([
   "absence-review",
+  "agentic-setup",
   "diagnostic-evidence-review",
   "domain-review",
   "feature-docs",

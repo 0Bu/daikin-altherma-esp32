@@ -18,6 +18,8 @@ affected by all reviewed changes:
 - HTTP routes in http_*.cpp or mcp_server.cpp;
 - configuration fields across main/logic/config_model.hpp, main/Kconfig.projbuild, the web UI, and docs;
 - polling, MQTT, and OTA behavior in hp_poll, mqtt_ha, and ota_update.
+- signing, installer, credential and CI trust claims against their executing paths; identify any
+  substantive security review still needed instead of declaring safety from documentation alone.
 
 For every affected fact, compare every document that states it with the implementation. Apply the
 consistency and concision checklist in .agents/skills/project-review/SKILL.md. Use docs/README.md
