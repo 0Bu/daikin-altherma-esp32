@@ -7669,6 +7669,26 @@ static const ProbeDecode* probe_find_or_alias(const ProbeDecode* d, int n, int c
 }
 
 static void test_hp_probe() {
+    // Numeric JSON extraction preserves exact integers and never writes the output on refusal.
+    int parsed = 77;
+    CHECK(probe_integer_value(0.0, parsed) && parsed == 0);
+    CHECK(probe_integer_value(-0.0, parsed) && parsed == 0);
+    CHECK(probe_integer_value(-1.0, parsed) && parsed == PROBE_SWEEP);
+    CHECK(probe_integer_value(1e2, parsed) && parsed == 100);
+    CHECK(probe_integer_value(std::numeric_limits<int>::min(), parsed) &&
+          parsed == std::numeric_limits<int>::min());
+    CHECK(probe_integer_value(std::numeric_limits<int>::max(), parsed) &&
+          parsed == std::numeric_limits<int>::max());
+    parsed = 77;
+    CHECK(!probe_integer_value(1.9, parsed) && parsed == 77);
+    CHECK(!probe_integer_value(-0.5, parsed) && parsed == 77);
+    CHECK(!probe_integer_value(static_cast<double>(std::numeric_limits<int>::min()) - 1, parsed));
+    CHECK(!probe_integer_value(static_cast<double>(std::numeric_limits<int>::max()) + 1, parsed));
+    CHECK(!probe_integer_value(std::numeric_limits<double>::infinity(), parsed));
+    CHECK(!probe_integer_value(-std::numeric_limits<double>::infinity(), parsed));
+    CHECK(!probe_integer_value(std::numeric_limits<double>::quiet_NaN(), parsed));
+    CHECK(parsed == 77);
+
     // ── The request slot. The gate mutex serialises CALLERS but not a caller against the poll
     // task, so the interleaving below is reachable on a real device and is where the bug was: a
     // caller whose timeout expired walks away mid-round-trip, the next one arms its own register,
@@ -7681,6 +7701,14 @@ static void test_hp_probe() {
     // 0 is "no request", so a masked-zero ticket must never be handed out — otherwise probing
     // register 0x00, the first page anyone walking the map asks for, would pack to exactly "none".
     CHECK(probe_ticket_normalize(0) == 1u);
+    CHECK(!probe_ticket_usable(0));
+    CHECK(!probe_ticket_usable(1u << 24));
+    CHECK(!probe_ticket_usable(0xFF000000u));
+    CHECK(probe_ticket_usable(PROBE_TICKET_MASK));
+    CHECK(probe_ticket_usable((1u << 24) + 1u));
+    CHECK(probe_ticket_usable(UINT32_MAX));
+    volatile uint32_t masked_zero = 1u << 24;
+    CHECK(!probe_ticket_usable(masked_zero));
     CHECK(probe_pack(0, 0x00) != 0u);
     CHECK(probe_pack(1u << 24, 0x00) != 0u);
     // The field is 24 bits and the counter is 32, so the match test must compare the MASKED ticket:
@@ -20125,6 +20153,19 @@ static void test_raw_capture() {
     CHECK(!logic::raw_capture_due(s, false, 100 * sec));
     CHECK(s.emitted == 0);
 
+    // Missing pages cannot spend the edge or periodic budget; the first recovered bytes can.
+    logic::RawCaptureState missing;
+    CHECK(!logic::raw_capture_due(missing, true, 0, false));
+    CHECK(!missing.was_running && missing.emitted == 0 && missing.next_us == 0);
+    CHECK(logic::raw_capture_due(missing, true, sec, true));
+    const int64_t pending_period = missing.next_us;
+    CHECK(!logic::raw_capture_due(missing, true, pending_period, false));
+    CHECK(missing.emitted == 1 && missing.next_us == pending_period);
+    CHECK(logic::raw_capture_due(missing, true, pending_period + sec, true));
+    CHECK(!logic::raw_capture_due(missing, false, pending_period + 2 * sec, false));
+    CHECK(!missing.was_running && missing.emitted == 2);
+    CHECK(logic::raw_capture_due(missing, true, pending_period + 3 * sec, true));
+
     // The stopped -> running EDGE fires immediately; the next cycle does not.
     CHECK(logic::raw_capture_due(s, true, 200 * sec));
     CHECK(!logic::raw_capture_due(s, true, 201 * sec));
@@ -20358,6 +20399,22 @@ static void test_mqtt_publish_gate() {
     CHECK(!mqtt_x10a_available(false, MQTT_X10A_OFFLINE_GRACE_S));
     CHECK(!mqtt_x10a_available(true, MQTT_X10A_OFFLINE_GRACE_S));
     CHECK(!mqtt_x10a_available(true, MQTT_X10A_OFFLINE_GRACE_S + 5));
+    const struct {
+        int64_t now, observed;
+        bool    recent;
+    } source_ages[] = {
+        {0, -1, false},
+        {10, 11, false},
+        {0, 0, true},
+        {14999999, 0, true},
+        {15000000, 0, false},
+        {INT64_MAX, 0, false},
+        {INT64_MAX, INT64_MAX - 14999999, true},
+    };
+    for (const auto& age : source_ages) {
+        volatile int64_t now = age.now, observed = age.observed;
+        CHECK(x10a_source_time_is_recent(now, observed) == age.recent);
+    }
     // A state outside the defined transition set grants no publication or promotion.
     d = mqtt_publish_gate_step(static_cast<MqttPublishGateState>(99), true, 0, true);
     CHECK(!d.publish_cycle && !d.publish_offline && !d.promote_publisher);

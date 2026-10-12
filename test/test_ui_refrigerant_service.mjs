@@ -35,7 +35,7 @@ assert.match(pollSource, /v && !v->held && logic::history_parse_tenths/,
 assert.match(pollSource, /service_register_count\) \* HP_QUERY_TIMEOUT_US/,
              "the gap allowance must scale with the active profile sweep");
 assert.match(pollSource,
-             /config_commit_detected_model\([\s\S]{0,500}?if \(committed\) \{[\s\S]{0,500}?s_refrigerant_service = logic::RefrigerantServiceTracker\{\};[\s\S]{0,200}?generation = cycle_generation;/,
+             /config_commit_detected_model\([\s\S]{0,500}?if \(committed\) \{[\s\S]{0,500}?s_refrigerant_service\s*=\s*logic::RefrigerantServiceTracker\{\};[\s\S]{0,200}?generation\s*=\s*cycle_generation;/,
              "detection must retire unidentified coverage before publishing the new fingerprint");
 assert.match(pollSource,
              /s_refrigerant_service_coverage = service_coverage;[\s\S]{0,250}?refrigerant_service_record\(/,

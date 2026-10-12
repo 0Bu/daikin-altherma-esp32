@@ -12,6 +12,7 @@ namespace daik {
 
 struct DetectResult {
     bool        bus_ok    = false;       // the identity page answered on some protocol/pin pair
+    bool        local_failure = false;       // pin policy, UART bring-up or driver operation failed
     Protocol    proto     = Protocol::I; // winning framing
     int         rx        = -1;          // winning RX/TX pins (auto-corrects a swapped wiring)
     int         tx        = -1;
@@ -25,8 +26,7 @@ struct DetectResult {
     int         iu_kw_tenths = -1;
     std::string eeprom;                  // rendered O/U EEPROM digits ("" if page 0x11 absent)
     // Model ids consistent with the unit — DISPLAY ONLY; nothing reads this to choose a table.
-    // Register-equivalent when the capacity is known; when it is absent they need not be, which is
-    // why legacy-225 narrows the set by the I/U fallback instead of leaving it spanning kW classes.
+    // Matching page/capacity signatures do not guarantee identical register decoding.
     std::vector<std::string> candidates; // (empty = none → generic)
     std::string best;                    // single best-fit id to READ with ("" = none → generic)
     bool transport_incomplete = false; // sweep had dropped pages due to transport errors

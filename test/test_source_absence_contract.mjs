@@ -203,8 +203,9 @@ assert.ok(pollOnceStart >= 0 && pollDetectStart > pollOnceStart && pollDetectEnd
   "hp_poll.cpp must retain independently inspectable poll_once() and poll_detect() workers");
 
 const pollOnceBody = poll.slice(pollOnceStart, pollDetectStart);
-const onceSnapshotAt = pollOnceBody.indexOf("const Config& c    = config();");
-const onceModeGuardAt = pollOnceBody.indexOf('if (c.profile == "auto") return;');
+const onceSnapshotAt = pollOnceBody.search(/const\s+Config\s*&\s*c\s*=\s*config\(\)\s*;/);
+const onceModeGuardAt = pollOnceBody.search(
+  /if\s*\(c\.profile\s*==\s*"auto"\)\s*(?:\{\s*retire_saturation_witness\(\);\s*)?return;/);
 const onceDecodeAt = pollOnceBody.indexOf("def::lookup(c.profile.c_str())");
 const onceBusAt = pollOnceBody.indexOf("hp_uart_init(c.rx_pin, c.tx_pin)");
 assert.ok(onceSnapshotAt >= 0 && onceModeGuardAt > onceSnapshotAt &&
@@ -213,9 +214,9 @@ assert.ok(onceSnapshotAt >= 0 && onceModeGuardAt > onceSnapshotAt &&
   "closes concrete->auto between poll_task's branch and the worker snapshot");
 
 const pollDetectBody = poll.slice(pollDetectStart, pollDetectEnd);
-const detectSnapshotAt = pollDetectBody.indexOf("const Config expected = config();");
+const detectSnapshotAt = pollDetectBody.search(/const\s+Config\s+expected\s*=\s*config\(\)\s*;/);
 const detectModeGuardAt = pollDetectBody.indexOf('if (expected.profile != "auto") return true;');
-const detectSweepAt = pollDetectBody.indexOf("DetectResult d = hp_detect_run();");
+const detectSweepAt = pollDetectBody.search(/(?:DetectResult\s+)?d\s*=\s*hp_detect_run\(\)\s*;/);
 const detectCommitAt = pollDetectBody.indexOf("config_commit_detected_link(");
 assert.ok(detectSnapshotAt >= 0 && detectModeGuardAt > detectSnapshotAt &&
           detectSweepAt > detectModeGuardAt && detectCommitAt > detectSweepAt,
