@@ -12,6 +12,14 @@ static const uart_port_t PORT     = UART_NUM_1;
 static bool              s_inited = false;
 static int               s_rx = -1, s_tx = -1;
 
+static HpQueryResult uart_error(uint8_t reg, const char* phase, int result, int received,
+                                HpQueryLogPolicy log_policy) {
+    if (hp_query_should_log(log_policy, HpQueryFailure::DriverError))
+        diag_printf("HP UART %s failed for reg 0x%02x (result=%d; rx=%d tx=%d)\n", phase, reg,
+                    result, s_rx, s_tx);
+    return {HpReplyKind::DriverError, received};
+}
+
 bool hp_uart_init(int rx, int tx) {
     // The detect sweep re-inits per candidate and alternates the pins {44,43}<->{43,44} every poll
     // second on a silent bus. Reinstalling the driver each time (uart_driver_delete + install)
@@ -94,9 +102,12 @@ HpQueryResult hp_query_detailed(uint8_t reg, Protocol proto, uint8_t* buf, size_
 
     uint8_t req[4];
     int     qlen = build_request(reg, proto, req);
-    uart_flush_input(PORT);
-    uart_write_bytes(PORT, reinterpret_cast<const char*>(req), qlen);
-    uart_wait_tx_done(PORT, pdMS_TO_TICKS(20));
+    const esp_err_t flushed = uart_flush_input(PORT);
+    if (flushed != ESP_OK) return uart_error(reg, "flush", flushed, 0, log_policy);
+    const int written = uart_write_bytes(PORT, reinterpret_cast<const char*>(req), qlen);
+    if (written != qlen) return uart_error(reg, "write", written, 0, log_policy);
+    const esp_err_t sent = uart_wait_tx_done(PORT, pdMS_TO_TICKS(20));
+    if (sent != ESP_OK) return uart_error(reg, "wait", sent, 0, log_policy);
 
     HpFrameReceiver rx(proto, req, qlen, buflen, replyLen);
     int             len   = 0;
@@ -110,7 +121,7 @@ HpQueryResult hp_query_detailed(uint8_t reg, Protocol proto, uint8_t* buf, size_
             if (read > 0) {
                 len += read;
             } else if (read < 0) {
-                break;
+                return uart_error(reg, "read", read, len, log_policy);
             }
             continue;
         }
@@ -133,7 +144,7 @@ HpQueryResult hp_query_detailed(uint8_t reg, Protocol proto, uint8_t* buf, size_
                 return {HpReplyKind::Rejected, len};
             }
         } else if (read_res < 0) {
-            break;
+            return uart_error(reg, "read", read_res, len, log_policy);
         }
     }
     replyLen = rx.reply_len();
@@ -166,6 +177,7 @@ HpQueryResult hp_query_detailed(uint8_t reg, Protocol proto, uint8_t* buf, size_
     case HpReplyKind::Ok:
     case HpReplyKind::Rejected:      // NAK returns immediately above
     case HpReplyKind::InvalidLength: // rejected before/while reading above
+    case HpReplyKind::DriverError:   // returned at the failed SDK operation, before classification
         break;
     }
     return {kind, len};

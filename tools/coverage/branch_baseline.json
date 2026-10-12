@@ -11,6 +11,20 @@
       "scope": "Object-root and lossless-string preflights; all other inventories and floors retained",
       "source": "main/logic/payload_complete.hpp",
       "source_sha256": "1597926362e5e375d167a796e7ffa7ed5346b076a3baa5436990728743680744"
+    },
+    {
+      "compilers": {
+        "clang-17-darwin": "Apple Clang 17.0.0",
+        "gcc-13-linux-ubuntu24": "ESP-IDF v6.1 container GCC 13.3.0",
+        "gcc-15-linux-ubuntu26": "Ubuntu 26.04 aarch64 GCC 15.2.0-16ubuntu1"
+      },
+      "hosted_confirmation": "gcc-15-github-linux-ubuntu26 repeats the local GCC 15 inventory; authoritative CI pending",
+      "runner": "scripts/run-mock-tests.sh --coverage",
+      "scope": "Local UART DriverError classification and manual NoLink mapping; each affected ratio rises, all other inventories and floors retained",
+      "sources": {
+        "main/logic/detect.hpp": "dc8206191368adc0df1e58d89054ef5d300ff6938695c715e1211aa037ac6d0d",
+        "main/logic/hp_probe.hpp": "a75d4a5f15c4fb24351d21461b0ade3547985082129919665e3957521f1bfddd"
+      }
     }
   ],
   "method": "Exact taken/outcome inventories are measured by scripts/run-mock-tests.sh --coverage and bound to compiler family, major version and platform; hosted profiles additionally bind the runner image. The gate rejects inventory mismatches and any historical ratio decrease. Updated hosted inventories require authoritative CI confirmation. Historical measurement notes remain in Git; profiles contain the enforced counts. Measurements below identify changed sources and local compiler provenance without changing checker rules or the 95-percent executable-line floor.",
@@ -177,8 +191,8 @@
         "taken": 68
       },
       "main/logic/hp_probe.hpp": {
-        "outcomes": 134,
-        "taken": 121
+        "outcomes": 135,
+        "taken": 122
       },
       "main/logic/hp_query_log.hpp": {
         "outcomes": 4,
@@ -475,8 +489,8 @@
         "taken": 108
       },
       "main/logic/detect.hpp": {
-        "outcomes": 175,
-        "taken": 158
+        "outcomes": 177,
+        "taken": 160
       },
       "main/logic/detect_backoff.hpp": {
         "outcomes": 10,
@@ -555,8 +569,8 @@
         "taken": 74
       },
       "main/logic/hp_probe.hpp": {
-        "outcomes": 140,
-        "taken": 127
+        "outcomes": 141,
+        "taken": 128
       },
       "main/logic/hp_query_log.hpp": {
         "outcomes": 6,
@@ -853,8 +867,8 @@
         "taken": 106
       },
       "main/logic/detect.hpp": {
-        "outcomes": 175,
-        "taken": 158
+        "outcomes": 177,
+        "taken": 160
       },
       "main/logic/detect_backoff.hpp": {
         "outcomes": 10,
@@ -933,8 +947,8 @@
         "taken": 74
       },
       "main/logic/hp_probe.hpp": {
-        "outcomes": 140,
-        "taken": 127
+        "outcomes": 141,
+        "taken": 128
       },
       "main/logic/hp_query_log.hpp": {
         "outcomes": 6,
@@ -1231,8 +1245,8 @@
         "taken": 106
       },
       "main/logic/detect.hpp": {
-        "outcomes": 175,
-        "taken": 158
+        "outcomes": 177,
+        "taken": 160
       },
       "main/logic/detect_backoff.hpp": {
         "outcomes": 10,
@@ -1311,8 +1325,8 @@
         "taken": 74
       },
       "main/logic/hp_probe.hpp": {
-        "outcomes": 140,
-        "taken": 127
+        "outcomes": 141,
+        "taken": 128
       },
       "main/logic/hp_query_log.hpp": {
         "outcomes": 6,

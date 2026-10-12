@@ -129,6 +129,7 @@ The same runner also executes complete production units through SDK/service adap
 | `node test/test_src_runtime.mjs` | Complete ENV III/Weather units: 26 cases and 18 source mutations cover probe identity/CRC, partial I2C allocation/cleanup, OOM, sensor freshness/recovery, forecast conversion/units, HTTP bounds/cleanup, rejected-response retention, A→B→A and zero Config-copy/request-buffer retention at network release and task waits. Default cJSON is an AST adapter; no real sensor, TLS, scheduler or JSON lexer runs. |
 | `python3 test/poll_runtime/run.py` | Complete polling/converter units: repeated allocation failures, preserved cache/source time, age expiry, quiescence, recovery, snapshot-lock unwind and six named source mutations; UART, clocks and RTOS are adapters. |
 | `python3 test/startup_runtime/run.py` | Complete LED/button units: nine startup/loop cases and two mutations verify scalar configuration snapshots, OOM containment and zero destructive calls; GPIO/RMT and scheduling are adapters. |
+| `node test/test_uart_runtime.mjs` | Complete `hp_comm.cpp`: 22 cases and 14 named mutations distinguish local SDK errors from device silence, retain partial bytes, detection/probe mappings and legacy results, and preserve I/S framing, deadlines and single-request behavior. SDK/clock adapters do not prove electrical behavior or explain historical NoReply events. |
 
 After the pinned IDF build resolves `espressif/cjson` from `dependencies.lock`, run
 `node test/test_src_runtime.mjs --real-cjson managed_components/espressif__cjson/cJSON` for the same

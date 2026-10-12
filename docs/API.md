@@ -285,8 +285,9 @@ Catalog ids and source eligibility are in `main/logic/history.hpp` and `homehub_
 
 For `/hp/query`, `reg` is required in 0–255; `offset` is 0–31 (default 0), `size` is 1 or 2
 (default 1), and `conv` is 0–999 or -1 for a sweep (also the default when absent). Invalid request
-bounds/shape return 400, another probe in flight 409, no link/unserved request 503. A rejected,
-missing or short register reply returns HTTP 200 with `ok:false` and its stable `status`.
+bounds/shape return 400, another probe in flight 409, and no link, local UART failure or an unserved
+request 503. A rejected, missing or short register reply returns HTTP 200 with `ok:false` and its
+stable `status`.
 
 An HTTP 200 probe result contains `reg` as a hex string, `proto`, `rx_pin`, `tx_pin`, `offset`,
 `size`, `status`, `ok`. `frame` preserves any received bytes, including bad/partial frames.

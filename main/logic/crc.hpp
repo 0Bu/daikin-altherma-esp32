@@ -100,6 +100,7 @@ enum class HpReplyKind : uint8_t {
     BadCrc,
     UnexpectedReply,
     InvalidLength,
+    DriverError, // local UART API failure, distinct from a missing or malformed device reply
 };
 
 inline HpReplyKind hp_reply_classify(uint8_t reg, Protocol proto, const uint8_t* buf, int received,
