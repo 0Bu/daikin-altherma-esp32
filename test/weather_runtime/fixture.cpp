@@ -145,8 +145,8 @@ void reset() {
     sdk::json_parses = sdk::json_deletes = 0;
     adapter::cfg                         = Config{};
     adapter::cfg.weather_enabled = adapter::cfg.diagnostics_enabled = true;
-    adapter::cfg.weather_latitude_e6                                = 52000000;
-    adapter::cfg.weather_longitude_e6                               = 13000000;
+    adapter::cfg.weather_latitude_e6                                = 12345678;
+    adapter::cfg.weather_longitude_e6                               = 23456789;
     adapter::network_up = adapter::synced = adapter::poll_quiesced = true;
     adapter::mqtt_quiesced = adapter::modbus_quiesced = adapter::syslog_quiesced = true;
     adapter::ota_active = adapter::config_oom = false;
@@ -307,7 +307,7 @@ void transport_success() {
     Download d;
     sdk::claimed = static_cast<int64_t>(sdk::body.size());
     REQUIRE(d.run() && d.body == sdk::body && d.error.empty() && !d.heap_refused);
-    REQUIRE(sdk::url.find("latitude=52.000000&longitude=13.000000") != std::string::npos);
+    REQUIRE(sdk::url.find("latitude=12.345678&longitude=23.456789") != std::string::npos);
     REQUIRE(sdk::events ==
             std::vector<std::string>({"init", "open", "disarm", "close", "cleanup"}));
     cleanup_assertions();
