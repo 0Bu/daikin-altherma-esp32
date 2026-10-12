@@ -113,8 +113,8 @@ if [ "$push_mode" -eq 1 ]; then
         || { echo "BLOCKED: cannot verify the audited checkout state." >&2; exit 2; }
     [ -z "$checkout_status" ] \
         || { echo "BLOCKED: push audit requires a clean checkout of the transferred commit." >&2; exit 2; }
-    "$canonical_root/scripts/run-skill-audit.sh" \
-        || { echo "BLOCKED: skill audit failed before push." >&2; exit 2; }
+    "$canonical_root/scripts/run-agentic-setup-audit.sh" \
+        || { echo "BLOCKED: agentic setup/skill audit failed before push." >&2; exit 2; }
     tmp="$(mktemp -d)" || exit 2
     push_body="$tmp/body.md"; push_files="$tmp/files.txt"; pr_rc=0
     agent_gate_discover_pr "" "$canonical_root" "$push_body" "$push_files" "${push_ref#refs/heads/}" || pr_rc=$?
@@ -155,11 +155,23 @@ if [ -n "$payload" ]; then
     parse_error="${fields[5]:-}"
     expected_head="${fields[6]:-}"
     [ -n "$action" ] || exit 0
+    if [ "$action" = "gh api ruleset update" ]; then
+        [ -z "$parse_error" ] \
+            || { echo "BLOCKED: ruleset update could not be bound safely: $parse_error" >&2; exit 2; }
+        root="$(agent_gate_project_root "$canonical_root")"
+        agent_gate_workdir_matches "$root" "$payload_cwd" \
+            || { echo "BLOCKED: ruleset execution directory is outside this project repository." >&2; exit 2; }
+        agent_gate_target_matches "$root" "$target_repo" "$target_host" \
+            || { echo "BLOCKED: ruleset target is not this project's origin repository." >&2; exit 2; }
+        # An authorized administrative action has no PR head or review checkbox. Native gh owns
+        # its authentication; do not forward Git credentials or run the merge suites here.
+        exit 0
+    fi
     if [ "$action" = "gh pr create" ]; then
         [ -z "$parse_error" ] \
             || { echo "BLOCKED: PR creation transport could not be bound safely: $parse_error" >&2; exit 2; }
-        "$canonical_root/scripts/run-skill-audit.sh" \
-            || { echo "BLOCKED: skill audit failed before PR creation." >&2; exit 2; }
+        "$canonical_root/scripts/run-agentic-setup-audit.sh" \
+            || { echo "BLOCKED: agentic setup/skill audit failed before PR creation." >&2; exit 2; }
         exit 0
     fi
     if [ -n "$selector" ] && [ "$selector" != "$parsed_selector" ]; then
@@ -269,7 +281,7 @@ if [ -z "$action" ] && [ "${renovate_context_count:-0}" -eq 3 ]; then
     renovate_classifier="$root/tools/agent-policy/renovate_action_pr.py"
     repo_slug="$(agent_gate_repo_slug "$root")"
     if [ -n "$repo_slug" ] && [ -f "$renovate_classifier" ] && [ -r "$renovate_classifier" ] \
-        && python3 "$renovate_classifier" "$pr_metadata_file" "$head_commit_file" \
+        && "$canonical_root/scripts/agent-python.sh" "$renovate_classifier" "$pr_metadata_file" "$head_commit_file" \
             "$head_commit_pages_file" "$repo_slug" "$head_sha" >/dev/null 2>&1; then
         verified_renovate_actions=1
     fi

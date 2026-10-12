@@ -67,7 +67,7 @@ expect_renovate_pass() {
 }
 
 echo "== Renovate action classifier =="
-output="$(python3 "$RENOVATE_TEST" 2>&1)" \
+output="$("$ROOT/scripts/agent-python.sh" "$RENOVATE_TEST" 2>&1)" \
   || fail "Renovate classifier unit tests failed: $output"
 echo "  PASS  adversarial classifier cases"
 pass=$((pass + 1))

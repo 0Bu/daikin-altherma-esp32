@@ -1606,8 +1606,8 @@ fi
 printf '%s\n' '// untracked lifecycle canary' >"$lifecycle_root/main/logic/untracked.hpp"
 stop_out="$(printf '%s' "$lifecycle_payload" | env PATH="$tmp/lifecycle-bin:$PATH" \
     AGENT_STOP_LOG="$stop_log" python3 "$lifecycle_root/tools/agent-hooks/agent_hook.py" stop-logic-tests 2>&1)"
-if [ -z "$stop_out" ] && [ "$(cat "$stop_log" 2>/dev/null)" = run ]; then
-    echo "PASS  Stop hook tests an untracked main/logic file"; pass=$((pass + 1))
+if [ ! -e "$stop_log" ] && printf '%s' "$stop_out" | python3 -c 'import json,sys; value=json.load(sys.stdin); raise SystemExit(0 if "does not run builds" in value.get("systemMessage", "") and "decision" not in value else 1)'; then
+    echo "PASS  Stop advises on untracked source without building"; pass=$((pass + 1))
 else
     echo "FAIL  Stop hook missed untracked main/logic change" >&2; fail=$((fail + 1))
 fi
@@ -1627,8 +1627,8 @@ fi
 stop_out="$(printf '%s' "$lifecycle_payload" | env PATH="$tmp/lifecycle-bin:$PATH" \
     AGENT_STOP_LOG="$stop_log" AGENT_STOP_TEST_RC=1 \
     python3 "$lifecycle_root/tools/agent-hooks/agent_hook.py" stop-logic-tests 2>&1)"
-if printf '%s' "$stop_out" | python3 -c 'import json,sys; value=json.load(sys.stdin); raise SystemExit(0 if value.get("decision") == "block" and "selftest host failure" in value.get("reason", "") else 1)'; then
-    echo "PASS  failing Stop logic tests request continuation"; pass=$((pass + 1))
+if [ ! -s "$stop_log" ] && printf '%s' "$stop_out" | python3 -c 'import json,sys; value=json.load(sys.stdin); raise SystemExit(0 if "systemMessage" in value and "decision" not in value else 1)'; then
+    echo "PASS  Stop never executes a failing build or blocks review"; pass=$((pass + 1))
 else
     echo "FAIL  failing Stop logic tests did not emit block JSON: $stop_out" >&2; fail=$((fail + 1))
 fi

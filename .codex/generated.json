@@ -1,17 +1,17 @@
 {
   "generated_by": "tools/agent-config/export-subagents.py",
   "outputs": {
-    ".codex/agents/doc-drift-checker.toml": "407723f73e376a83c390f9546622b7f930a2bce1b4f6f69e1433f9b91f847267",
-    ".codex/agents/heap-safety-reviewer.toml": "5a9ea356fe0c6ca6facb513e9fd9ac895af62851e0ae01a1d2d465d79817217e",
-    ".codex/agents/x10a-decode-reviewer.toml": "c3b60241521496eb6af1ec6d48b688ad791304dd0fd048eb503a7ae37f90c591",
+    ".codex/agents/doc-drift-checker.toml": "696280c40157c65fc65c528215cbedd8259d0006e22decfe20692d7700c5e6cc",
+    ".codex/agents/heap-safety-reviewer.toml": "0daddb9e0b0a96e03ece8b3b155e57c8c2cceb1b26044c0e1e848675398a4c6b",
+    ".codex/agents/x10a-decode-reviewer.toml": "3bf0fd889dd0fcb3d1d2cb8a17007aec290a1eddd0d6bcba85765b9d8f3589e4",
     ".codex/config.toml": "88882829a4d6d6cf24fc8e8fea4ba051f69cdecbcd863fe073079a219cee95b9",
     ".codex/hooks.json": "66ef1684b6e4cbabb6fdd8459480df694352db476d215d5b65a5015e60a45d0e"
   },
   "schema_version": 1,
   "sources": {
-    ".agents/agents/doc-drift-checker.toml": "8eb2cd3ae8ee33de1ba96bd4c306e73ddba105c9682afa5b52f7ff1c702da8dd",
-    ".agents/agents/heap-safety-reviewer.toml": "e3511f94330ef44978d96f4eece6c135f19660810b75df0d49c63559791a2cc1",
-    ".agents/agents/x10a-decode-reviewer.toml": "05b94a5fa46c67e2667f3b563e9435a7bdda289508802d92fc34e36c0ceaee55",
+    ".agents/agents/doc-drift-checker.toml": "08d72e6ef5a8a39c3418df860dfb3b8273f592cc89222cf799b33edf9514656e",
+    ".agents/agents/heap-safety-reviewer.toml": "35c9f1e06e5590e08caf8a75c1050e400daa58886e73ecf72133317962356daf",
+    ".agents/agents/x10a-decode-reviewer.toml": "af42ab5b3b051f16e04466412d8e12dc319ea97a31145a2ad0d42f3b87e21d92",
     ".agents/hooks.json": "5881a11651733837edf07a1f3dbd4a986cc64461a4b7f92f65e39eb31b11c5f4",
     ".mcp.json": "029e9eac30104471181cdeb729428da5ae68827e9cde2b9845d0b693f97bb53c"
   }

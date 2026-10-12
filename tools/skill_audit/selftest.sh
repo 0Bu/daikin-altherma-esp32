@@ -237,7 +237,7 @@ run_case "a correct board claim does not hide a conflicting claim" \
 
 run_case "wrapped and reversed board pin pairs remain valid" \
     "printf '\nXIAO ESP32-S3:\nTX=43/RX=44.\nAtomS3 Lite: TX=2/RX=1.\n' >> .agents/skills/absence-review/SKILL.md" \
-    "18 skills and 3 reviewer agents clean" 0
+    "19 skills and 3 reviewer agents clean" 0
 
 run_case "nested reviewer file references are checked" \
     "sed -i.bak 's|main/logic/convert.hpp|main/logic/nonexistent.hpp|' .agents/agents/x10a-decode-reviewer.toml" \
@@ -265,7 +265,7 @@ run_case "duplicate YAML key is rejected" \
 
 run_case "quoted YAML strings are accepted" \
     "sed -i.bak 's|^name: absence-review|name: \"absence-review\"|' .agents/skills/absence-review/SKILL.md" \
-    "18 skills and 3 reviewer agents clean" 0
+    "19 skills and 3 reviewer agents clean" 0
 
 run_case "optimization verifies final content when repair is unavailable" \
     "sed -i.bak '/^- a \*\*wrong number\*\*/d' .agents/skills/skill-audit/SKILL.md" \
@@ -289,7 +289,7 @@ run_case "two-language schematic review contradicts production locales" \
 
 run_case "configured API ELF prefix remains valid with a larger status buffer" \
     "echo '/status.app_elf_sha256 is a 9-hex prefix.' >> .agents/skills/flash-esp32/SKILL.md" \
-    "18 skills and 3 reviewer agents clean" 0
+    "19 skills and 3 reviewer agents clean" 0
 
 run_case "full API ELF identity claim contradicts the configured SDK prefix" \
     "echo '/status.app_elf_sha256 is a full 64-hex hash.' >> .agents/skills/flash-esp32/SKILL.md" \
@@ -321,11 +321,11 @@ run_case "moved reference links remain audited" \
 
 run_case "angle-bracket external Markdown links stay external" \
     "echo '[official](<https://example.invalid/source>)' >> .agents/skills/absence-review/SKILL.md" \
-    "18 skills and 3 reviewer agents clean" 0
+    "19 skills and 3 reviewer agents clean" 0
 
 run_case "angle-bracket relative Markdown anchors stay resolvable" \
     "echo '[background](<references/absence-failures.md#background>)' >> .agents/skills/absence-review/SKILL.md" \
-    "18 skills and 3 reviewer agents clean" 0
+    "19 skills and 3 reviewer agents clean" 0
 
 if [ "$fail" -eq 0 ]; then
     echo "selftest ok: all $cases canaries and self-optimization cases verified."

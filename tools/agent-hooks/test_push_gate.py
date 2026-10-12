@@ -38,7 +38,7 @@ class PushGateTests(unittest.TestCase):
             shutil.copy2(ROOT / relative, destination)
         scripts = self.root / "scripts"
         scripts.mkdir()
-        audit = scripts / "run-skill-audit.sh"
+        audit = scripts / "run-agentic-setup-audit.sh"
         audit.write_text('#!/usr/bin/env bash\nexit "${FIXTURE_AUDIT_RC:-0}"\n')
         audit.chmod(0o755)
         runner = scripts / "gh-with-git-credentials.sh"
@@ -134,7 +134,7 @@ print(pathlib.Path(os.environ["FIXTURE_RESPONSE_FILE"]).read_text())
         self.assertFalse(self.query_log.exists())
 
     def test_dirty_audit_inputs_are_rejected(self):
-        with (self.root / "scripts/run-skill-audit.sh").open("a") as stream:
+        with (self.root / "scripts/run-agentic-setup-audit.sh").open("a") as stream:
             stream.write("# dirty\n")
         self.assertEqual(self.gate().returncode, 2)
         self.assertFalse(self.query_log.exists())

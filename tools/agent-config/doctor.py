@@ -247,10 +247,11 @@ def observe_runtime() -> bool:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--runtime", action="store_true", help="read effective config and hooks/list metadata without starting a task")
-    parser.add_argument("--require-runtime", action="store_true", help="fail unless activation, dispatch and sandbox evidence are complete")
+    parser.add_argument("--require-registration", action="store_true", help="require observed native registration/trust and the active Git hook; not execution proof")
+    parser.add_argument("--require-runtime", action="store_true", help="legacy full-acceptance request; remains pending without fresh-task dispatch and sandbox evidence")
     args = parser.parse_args()
-    if args.require_runtime and not args.runtime:
-        parser.error("--require-runtime requires --runtime")
+    if (args.require_runtime or args.require_registration) and not args.runtime:
+        parser.error("--require-runtime and --require-registration require --runtime")
     result = subprocess.run([str(ROOT / "scripts/run-agent-instructions-budget.sh")], check=False)
     if result.returncode:
         return result.returncode
@@ -262,6 +263,7 @@ def main() -> int:
     native_hook = ROOT / ".githooks/pre-push"
     active = bool(hook_path and hook_path.resolve() == native_hook.resolve() and os.access(hook_path, os.X_OK))
     print(f"codex-doctor: effective Git pre-push {'uses executable project hook' if active else 'not activated; configure core.hooksPath manually'}")
+    ready = False
     if args.runtime:
         ready = observe_runtime()
         print(f"codex-doctor: runtime registration/trust {'verified' if ready else 'incomplete'}")
@@ -271,6 +273,9 @@ def main() -> int:
     print("codex-doctor: inspect /hooks in the Codex CLI and review current hashes manually; this tool never grants trust")
     if args.require_runtime:
         print("codex-doctor: full runtime acceptance pending fresh-task evidence", file=sys.stderr)
+        return 1
+    if args.require_registration and not (ready and active):
+        print("codex-doctor: required native registration or Git hook is incomplete", file=sys.stderr)
         return 1
     return 0
 
