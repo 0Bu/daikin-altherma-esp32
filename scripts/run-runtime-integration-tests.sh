@@ -87,3 +87,6 @@ node test/test_ota_runtime.mjs
 
 # Complete WiFi/syslog production units exercise current leases, boot wakes and bounded logging.
 node test/test_network_runtime.mjs
+
+# Complete ENV III / Weather units exercise sensor/resource and forecast/source lifecycle.
+node test/test_src_runtime.mjs

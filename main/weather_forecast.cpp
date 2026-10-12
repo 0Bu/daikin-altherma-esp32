@@ -347,10 +347,9 @@ bool json_time_array(cJSON* object, std::vector<int64_t>& out) {
     out.clear();
     out.reserve(raw.size());
     for (const double value : raw) {
-        if (value < 0 || value > static_cast<double>(std::numeric_limits<int64_t>::max()) ||
-            std::floor(value) != value)
-            return false;
-        out.push_back(static_cast<int64_t>(value));
+        int64_t seconds = 0;
+        if (!open_meteo_epoch_seconds(value, seconds)) return false;
+        out.push_back(seconds);
     }
     return true;
 }

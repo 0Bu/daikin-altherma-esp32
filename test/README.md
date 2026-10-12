@@ -116,7 +116,8 @@ Six mutation flags change fake behavior or harness call sites: NVS atomicity, la
 header/body watchdogs, discard deadline and Weather body completion. The Weather flag bypasses
 `http_body_complete()` at its call site. Named failing assertions verify these modeled controls;
 they do not prove that corresponding firmware `.cpp` regressions would be caught. This generic
-harness does not compile production HTTP/MCP, X10A, MQTT or Weather glue.
+harness does not compile production HTTP/MCP, X10A, MQTT or Weather glue; the separate complete-unit
+fixtures below add production orchestration coverage within their stated adapter boundaries.
 
 The same runner also executes complete production units through SDK/service adapters:
 
@@ -124,6 +125,12 @@ The same runner also executes complete production units through SDK/service adap
 |---|---|
 | `node test/test_ota_runtime.mjs` | Complete `ota_update.cpp`: 47 cases with source mutations bound to named assertions for cleanup, Range resume, worker leases, manifest/version rejection and 90/600-second health transitions. Static aligned 4096 B health stack and boot-latched single arm work without dynamic task allocation; no TLS, flash or IDF cryptography executes. |
 | `node test/test_network_runtime.mjs` | Complete WiFi/syslog units: 15 scenarios and 18 targeted mutations cover leases, foreign IP events, boot wakes, credential rollback, scan errors, queue rejection/saturation, reentrant logging and RFC 5424 time framing; no real DHCP/radio/UDP delivery or collector retention. |
+| `node test/test_src_runtime.mjs` | Complete ENV III/Weather units: 25 cases and 16 source mutations cover probe identity/CRC, partial I2C allocation/cleanup, task-copy OOM, sensor freshness/recovery, forecast conversion/units, HTTP completion/cap/deadline/cleanup, rejected-response retention and source/consent generations including A→B→A. Default cJSON is an AST adapter; no real sensor, TLS, scheduler or JSON lexer runs. |
+
+After the pinned IDF build resolves `espressif/cjson` from `dependencies.lock`, run
+`node test/test_src_runtime.mjs --real-cjson managed_components/espressif__cjson/cJSON` for the same
+Weather unit/cases/mutations with the real lexer plus malformed, embedded-NUL and overflow documents.
+This optional layer downloads nothing and prints the bound source hashes; HTTP/TLS remain adapted.
 
 The contract runner executes additional compiled production consumers:
 
