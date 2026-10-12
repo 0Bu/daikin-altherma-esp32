@@ -112,17 +112,17 @@ inline ProbeReject probe_validate(const ProbeRequest& q) {
 // is our own scheduler never getting to it. Collapsing them would send everyone to the same wrong
 // fix first.
 enum class ProbeStatus : uint8_t {
-    Ok,          // a CRC-verified reply with a usable payload
-    Busy,        // another probe is already in flight — one bus, one question at a time
-    NoLink,      // no poll task / UART could not be brought up on the configured pins
-    Timeout,     // the poll task did not serve the request in time (OTA hold-off, a long sweep)
-    NoReply,     // nothing came back within the serial timeout
-    Rejected,    // the unit answered 0x15 0xEA — request understood, page refused
-    BadCrc,      // bytes arrived, checksum failed
+    Ok,              // a CRC-verified reply with a usable payload
+    Busy,            // another probe is already in flight — one bus, one question at a time
+    NoLink,          // no poll task / UART initialization or driver operation failed
+    Timeout,         // the poll task did not serve the request in time (OTA hold-off, a long sweep)
+    NoReply,         // nothing came back within the serial timeout
+    Rejected,        // the unit answered 0x15 0xEA — request understood, page refused
+    BadCrc,          // bytes arrived, checksum failed
     UnexpectedReply, // CRC-valid Protocol-I frame echoed a different page/opcode
-    InvalidLength, // the advertised Protocol-I frame length is impossible or exceeds the buffer
-    ShortReply,  // a partial frame arrived, or a valid frame carries no payload
-    OutOfBounds, // the reply is real and the requested (offset,size) lies past its payload
+    InvalidLength,   // the advertised Protocol-I frame length is impossible or exceeds the buffer
+    ShortReply,      // a partial frame arrived, or a valid frame carries no payload
+    OutOfBounds,     // the reply is real and the requested (offset,size) lies past its payload
 };
 
 inline const char* probe_status_name(ProbeStatus s) {
@@ -160,6 +160,8 @@ inline ProbeStatus probe_status_from_reply(HpReplyKind kind) {
         case HpReplyKind::ShortReply:      return ProbeStatus::ShortReply;
         case HpReplyKind::UnexpectedReply: return ProbeStatus::UnexpectedReply;
         case HpReplyKind::InvalidLength:   return ProbeStatus::InvalidLength;
+        case HpReplyKind::DriverError:
+            return ProbeStatus::NoLink;
         case HpReplyKind::NoReply:
             return ProbeStatus::NoReply;
     }

@@ -154,6 +154,13 @@ does not populate. (Certain models or absent expansion boards simply do not answ
 at all, resulting in a bus timeout rather than a NAK; detection treats both as absent pages rather
 than transport errors.) One bad register must never stall the poll cycle.
 
+Local UART failures are separate from device silence or malformed frames. The transport checks
+RX flushing, request transmission, TX completion and both read paths; an SDK error returns
+`DriverError` with its stage and numeric result in `/diag`, without resending the request.
+Detection treats it as incomplete transport, and a manual query reports `no_link` (HTTP 503).
+The poller's legacy `timeout_err` counter still includes these negative transport results;
+use the per-register diagnostic line to identify the failure kind.
+
 ---
 
 ## 5. Register pages

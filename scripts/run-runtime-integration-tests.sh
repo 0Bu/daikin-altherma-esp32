@@ -94,3 +94,5 @@ node test/test_src_runtime.mjs
 # Real polling and accessory task entries execute with bounded SDK/service adapters.
 python3 test/poll_runtime/run.py
 python3 test/startup_runtime/run.py
+# The production UART transport retains SDK errors separately from device frame failures.
+node test/test_uart_runtime.mjs
