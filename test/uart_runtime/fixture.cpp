@@ -143,6 +143,12 @@ void protocol_i() {
     require(sdk::read_sizes == std::vector<int>({1, 1, 1, 9}),
             "complete Protocol-I header enables one bounded bulk read");
     require(sdk::logs.empty(), "valid frame must not emit a failure diagnostic");
+    sdk::clear_transaction();
+    sdk::pending_reply = {0x50, 0x01, 0x02, 0x03, 0x04, 0xa5};
+    const auto foreign = query();
+    require(foreign.kind == HpReplyKind::NoReply && foreign.received == 0,
+            "a Protocol-S frame cannot satisfy a Protocol-I query");
+    one_request();
 }
 void protocol_s() {
     setup();
@@ -155,6 +161,40 @@ void protocol_s() {
     one_request(Protocol::S, 0x50);
     require(sdk::read_sizes == std::vector<int>({1, 1, 4}),
             "Protocol-S header enables one bounded bulk read");
+    sdk::clear_transaction();
+    sdk::pending_reply = golden_i();
+    const auto foreign = query(Protocol::S, HpQueryLogPolicy::All, 0x50);
+    require(foreign.kind == HpReplyKind::BadCrc && foreign.received == 6,
+            "the Protocol-I golden frame fails the six-byte Protocol-S checksum");
+    one_request(Protocol::S, 0x50);
+    sdk::clear_transaction();
+    sdk::pending_reply   = {0x40, 0x60, 0x0a, 0x01, 0x02, 0x52};
+    const auto ambiguous = query(Protocol::S, HpQueryLogPolicy::All, 0x50);
+    require(ambiguous.kind == HpReplyKind::Ok && ambiguous.received == 6,
+            "Protocol-S currently establishes checksum and length, without a documented echo");
+    one_request(Protocol::S, 0x50);
+    sdk::clear_transaction();
+    sdk::pending_reply = {0x50, 0x01, 0x02, 0x03, 0x04, 0xa4};
+    const auto corrupt = query(Protocol::S, HpQueryLogPolicy::All, 0x50);
+    require(corrupt.kind == HpReplyKind::BadCrc && corrupt.received == 6,
+            "a complete Protocol-S frame with a wrong checksum is rejected");
+    one_request(Protocol::S, 0x50);
+    sdk::clear_transaction();
+    sdk::pending_reply = {0x50, 0x01, 0x02};
+    const auto partial = query(Protocol::S, HpQueryLogPolicy::All, 0x50);
+    require(partial.kind == HpReplyKind::ShortReply && partial.received == 3,
+            "a truncated Protocol-S frame retains copied bytes and the deadline");
+    require(sdk::now_us == HP_QUERY_TIMEOUT_US, "Protocol-S truncation cannot extend the deadline");
+    one_request(Protocol::S, 0x50);
+    sdk::clear_transaction();
+    sdk::pending_reply    = {0x50, 0x01, 0x02, 0x03, 0x04, 0xa5};
+    sdk::partial_bulk_cap = 1;
+    const auto fragmented = query(Protocol::S, HpQueryLogPolicy::All, 0x50);
+    require(fragmented.kind == HpReplyKind::Ok && fragmented.received == 6,
+            "fragmented Protocol-S bulk reads accumulate a complete frame");
+    require(sdk::read_sizes == std::vector<int>({1, 1, 4, 3, 2, 1}),
+            "Protocol-S bulk reads request only the remaining bytes");
+    one_request(Protocol::S, 0x50);
 }
 void echoed_frames() {
     setup();
@@ -234,6 +274,11 @@ void invalid_lengths() {
             "insufficient caller buffer must be rejected before request");
     require(sdk::flushes == 0 && sdk::writes == 0 && sdk::waits == 0 && sdk::reads == 0,
             "invalid request capacity must never touch the transport");
+    const auto small_s = query(Protocol::S, HpQueryLogPolicy::All, 0x50, 5);
+    require(small_s.kind == HpReplyKind::InvalidLength && small_s.received == 0,
+            "an undersized Protocol-S buffer is rejected before transmission");
+    require(sdk::flushes == 0 && sdk::writes == 0 && sdk::waits == 0 && sdk::reads == 0,
+            "Protocol-S capacity rejection cannot touch the SDK");
 }
 void partial_bulk_reads() {
     setup();

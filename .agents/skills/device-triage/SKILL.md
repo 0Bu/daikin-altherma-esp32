@@ -36,7 +36,9 @@ the IP and use it verbatim. Put the host in `H` for the commands below: `H=daiki
    - **WiFi** — connected? RSSI, `wifi_reconnects` (heartbeat; climbing = flaky link / ghost-assoc).
    - **MQTT** — connected? `mqtt_count` / `mqtt_fails` / reconnects (heartbeat; fails climbing = broker/TLS/creds).
    - **X10A** — `hp.connected`, `hp.last_ok_s`, `hp.registers`/`hp.values`, `hp.crc_err`,
-     `hp.timeout_err` (timeouts = wrong RX/TX pins or a silent bus; crc_err = noise/wrong proto).
+     `hp.timeout_err` is an aggregate transport-failure counter, including local UART errors.
+     Use per-register `/diag` lines to distinguish SDK failures, missing/partial replies and CRC
+     errors; the counters alone do not establish wrong pins, electrical noise or a silent bus.
    - **Model** — `detect.model` + `profile.id`; note if `detect.ambiguous`.
    - **Heap/uptime** — low heap or an uptime that keeps resetting hints at a reboot loop.
    - **Running build** — `version` + `app_elf_sha256`; these identify the current firmware.
