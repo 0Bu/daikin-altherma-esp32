@@ -217,6 +217,10 @@ expect_failure "symlinked native registration" "$fixture" "generated path must n
   || fail "doctor metadata fixture checks failed"
 echo "  PASS  doctor metadata remains separate from dispatch and trust authorization"
 pass=$((pass + 1))
+"$ROOT/scripts/agent-python.sh" "$ROOT/tools/agent-config/test_setup_audit.py" \
+  || fail "pre-push setup audit seam checks failed"
+echo "  PASS  fast setup audit binds its checkout and propagates both audit failures"
+pass=$((pass + 1))
 "$ROOT/scripts/agent-python.sh" "$ROOT/tools/agent-config/test_review.py" \
   || fail "read-only reviewer launcher checks failed"
 echo "  PASS  reviewer launcher requests isolated read-only permissions without trust or live tools"

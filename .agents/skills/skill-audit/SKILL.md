@@ -103,6 +103,9 @@ skill/reviewer asserts:
   `test/test_logic.cpp`. Verify that referenced headers (`crc.hpp`, `convert.hpp`, `registers.hpp`,
   `config_model.hpp`, `discovery.hpp`) exist and remain strictly IDF-free, and that `scripts/run-mock-tests.sh`
   and `scripts/run-sanitizer-fuzz-tests.sh` are current.
+- **`$agentic-setup`** — reviews and modernizes development support. Its pre-push source check
+  `scripts/run-agentic-setup-audit.sh` reuses configuration/parity and skill audits; it adds no model
+  process or review stamp. Native dispatch and reviewer isolation remain separately observed.
 - **`$bug-triage`** — frozen external issue triage. Verify against `scripts/gh-with-git-credentials.sh`,
   `main/logic/hexdump.hpp`, `main/logic/redact.hpp`, `docs/REPORTING.md`, and `docs/SECURITY.md`. Verify that
   it never asks for core dumps in public issues, checks `last_crash.fault` before declaring a crash, and

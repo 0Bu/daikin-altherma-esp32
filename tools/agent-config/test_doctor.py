@@ -20,6 +20,48 @@ spec.loader.exec_module(doctor)
 
 
 class DoctorChecks(unittest.TestCase):
+    def registration_command(self, arguments, *, ready=True, active=True):
+        output = io.StringIO()
+        hook = doctor.ROOT / ".githooks/pre-push"
+        results = [subprocess.CompletedProcess([], 0),
+                   subprocess.CompletedProcess([], 0, stdout=str(hook if active else doctor.ROOT / ".git/hooks/pre-push"))]
+        with patch.object(doctor.sys, "argv", ["doctor.py", *arguments]), \
+                patch.object(doctor.subprocess, "run", side_effect=results), \
+                patch.object(doctor.os, "access", return_value=active), \
+                patch.object(doctor, "observe_runtime", return_value=ready) as observe, \
+                contextlib.redirect_stdout(output), contextlib.redirect_stderr(output):
+            try:
+                rc = doctor.main()
+            except SystemExit as error:
+                rc = error.code
+        return rc, output.getvalue(), observe.call_count
+
+    def test_registration_requirement_is_usable_without_claiming_execution(self):
+        rc, output, calls = self.registration_command(["--runtime", "--require-registration"])
+        self.assertEqual((rc, calls), (0, 1))
+        self.assertIn("require a fresh-task smoke check", output)
+        self.assertNotIn("dispatch verified", output)
+
+    def test_registration_requirement_rejects_missing_observation_or_git_hook(self):
+        for ready, active in [(False, True), (True, False), (False, False)]:
+            with self.subTest(ready=ready, active=active):
+                rc, output, _ = self.registration_command(["--runtime", "--require-registration"], ready=ready, active=active)
+                self.assertEqual(rc, 1)
+                self.assertIn("incomplete", output)
+
+    def test_registration_requirement_needs_runtime_mode(self):
+        rc, _, calls = self.registration_command(["--require-registration"])
+        self.assertEqual((rc, calls), (2, 0))
+
+    def test_full_acceptance_is_not_implied_by_trusted_registration(self):
+        rc, output, _ = self.registration_command(["--runtime", "--require-runtime"])
+        self.assertEqual(rc, 1)
+        self.assertIn("full runtime acceptance pending", output)
+
+    def test_default_source_check_does_not_require_native_registration(self):
+        rc, _, calls = self.registration_command([], ready=False, active=False)
+        self.assertEqual((rc, calls), (0, 0))
+
     def observe(self, trusted: bool, pinned: bool = True, *, user_only: bool = False,
                 trust_status: str | None = None, linked: bool = False,
                 primary_adapter: str = "current", foreign_source: bool = False,

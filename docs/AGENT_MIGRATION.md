@@ -59,8 +59,9 @@ fails closed on both missing and extra project skills.
   reviewed PR head before allowing the command. `gh pr merge` is blocked because it can activate
   auto-merge or a merge queue instead of completing synchronously. Every other REST merge or
   mutation route or shape, GraphQL mutations, and all MCP merge, auto-merge, or queue-activation
-  tools are also blocked; static read-only REST GET/HEAD requests and read-only GraphQL queries
-  remain allowed, and no MCP tool is allowlisted as an equivalent merge path. The wrapper resolves
+  tools are also blocked, except for the native ruleset update below; static read-only REST GET/HEAD
+  requests and read-only GraphQL queries remain allowed. No MCP tool is an equivalent merge path.
+  The wrapper resolves
   the configured `github.com` Git credential in-process and exports it only to `gh`; an unlinked
   private FIFO bridges the clean child environment, and an isolated Git shim strips the token from
   any Git descendant. The token is never printed, persisted, written to a regular file, or placed in
@@ -76,6 +77,22 @@ fails closed on both missing and extra project skills.
   credential lookup: only GET/HEAD, static read-only GraphQL queries, and the exact CAS merge above
   may proceed. The merge reruns the aggregate evidence gate even when an opaque helper invoked the
   wrapper. A literal `gh` executable is never accepted as the local merge transport.
+- An explicitly authorized repository ruleset update uses native `gh` authentication:
+
+  ```bash
+  gh api --hostname github.com --method PUT \
+    repos/0Bu/daikin-altherma-esp32/rulesets/<numeric-id> \
+    --input <absolute-physical-temp-path>/ruleset.json
+  ```
+
+  Read the current ruleset with `gh api --method GET`, prepare only the authorized change, then
+  read it again to verify the result and retained rules. The hook binds the literal endpoint and
+  execution directory to this repository's origin. Input must be a nonempty regular `.json` file,
+  at most 1 MiB, owned by the user, without symlinked path components, hardlinks or write permission
+  for others. Metadata is checked before dispatch; native `gh` subsequently opens the file itself.
+  No PR checkbox, model run or credential forwarding is needed. Chaining, shell wrappers,
+  stdin/typed-file input, alternate hosts and other REST writes remain blocked. This technical
+  allowance is not permission to change GitHub state during a read-only task.
 - An explicitly authorized PR is published only after its branch is pushed, with the wrapper's
   exact noninteractive shape:
 
@@ -164,6 +181,7 @@ scripts/setup-codex.sh
 scripts/run-agent-instructions-budget.sh
 scripts/check-codex-setup.sh
 scripts/check-codex-setup.sh --runtime
+scripts/check-codex-setup.sh --runtime --require-registration
 ```
 
 Run setup again after changing a canonical MCP, hook or reviewer input. Generation refuses to
@@ -180,8 +198,11 @@ mode makes bounded read-only `config/read` and `hooks/list` app-server requests.
 effective Context7 pin and enabled status, subagent limit and enabled status, current-worktree config
 origin, and native hook discovery and trust without starting a model turn, connecting to device MCPs or
 printing credentials. These inventory requests prove discovery, not actual hook execution.
-`--runtime --require-runtime` exits non-zero while fresh-task acceptance evidence remains pending;
-the default check reports this limit without claiming full runtime acceptance.
+`--runtime --require-registration` requires these observed registrations and an active executable
+project Git pre-push hook. It gives automation a usable registration result, without a model turn or
+an acceptance file. The legacy `--runtime --require-runtime` requests full execution acceptance and
+still exits non-zero without directly observed fresh-task evidence; use the registration check and
+the separate controls below. Neither a model-written attestation nor requested CLI flags prove execution.
 
 Start Codex CLI in the project and use `/hooks` to inspect the exact generated definitions.
 First require discovery of all four project handlers: an active project config layer with only
@@ -246,6 +267,24 @@ Edit, Write and patch projections are checked against a 1 MiB UTF-8 output budge
 Existing user changes, missing correlation or concurrent changes cause it to skip the suggestion. Apply
 formatting through the ordinary edit workflow under explicit file ownership, then run the normal
 format gate; a post-edit hook is not permission to reformat another author's changes.
+
+Stop only reads changed firmware/test paths and provides a bounded, nonblocking verification reminder.
+It does not establish ownership of existing changes, run tests, write a shared build or assert a pass.
+Run relevant tests explicitly during authorized implementation and report their results.
+
+### Development support and modernization
+
+Use `$agentic-setup` for setup changes or modernization. The native pre-push and PR-create paths call
+`scripts/run-agentic-setup-audit.sh`, which reuses configuration/generated-parity and skill checks.
+There is no new review stamp, model run, online lookup or runtime smoke on ordinary pushes. A substantive
+setup/client change additionally uses the existing independent reviews and optional
+[synthetic behavior scenarios](../.agents/skills/agentic-setup/references/evaluation.md).
+
+The existing project review owns conditional security/persistence coverage. Scope the decode reviewer
+to affected X10A/Modbus interpretation and reply identity; the heap reviewer also traces affected
+transaction failure/concurrency paths. A signing, installer or CI change needs an independent security
+pass within project review; documentation comparison alone cannot supply it. Reuse the existing task
+for complex-change handoff and results. Simplify repeated guidance before adding another universal rule.
 
 ### Canonical checks
 

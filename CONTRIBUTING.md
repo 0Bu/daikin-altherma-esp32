@@ -38,6 +38,19 @@ rule correctly, that a physical value is true, or that a device survives an upda
 domain audits, target compilation, rendered review and hardware acceptance cover different parts
 of that evidence. Report each completed layer separately.
 
+### Larger changes and handoffs
+
+For work spanning sessions or components, keep a short note in the existing issue or task. It is
+optional for small changes; update it when the scope or evidence changes rather than creating a
+second tracker. A useful handoff contains:
+
+- Goal and acceptance criteria.
+- Comparison base, current head and owned paths; identify existing unrelated changes.
+- Authorized actions and any shared resource reservation.
+- Affected contracts, independent reviewers and relevant checks.
+- Completed evidence, open findings and unverified layers.
+- Next action and any decision needed from the user.
+
 ## Building the firmware
 
 Build the ESP32-S3 image through the repository wrapper:
@@ -122,11 +135,14 @@ Install the local hooks once per clone:
 git config --local core.hooksPath .githooks
 ```
 
-Before PR creation or push, run `$skill-audit` and inspect its result; `--optimize` changes canonical
-skills only with explicit edit authorization. The pre-push hook checks every destination and sent
-commit. Updating an open PR requires current-commit `$skill-audit` and `$pr-hygiene-review` stamps
-from a clean exact-commit checkout. A successful lookup finding no open PR allows push after the
-local audit; a failed lookup blocks it. This local hook does not change remote branch protection.
+Before PR creation or push, run `scripts/run-agentic-setup-audit.sh` and inspect its result. This
+quick deterministic check reuses the skill and configuration audits; ordinary pushes start no model
+process. Use `$agentic-setup` for a broader setup review or authorized modernization and `$skill-audit`
+for repository fact drift; `--optimize` requires explicit edit authorization. The pre-push hook checks
+every destination and sent commit. Updating an open PR retains current-commit `$skill-audit` and
+`$pr-hygiene-review` stamps from a clean exact-commit checkout, without adding another gate record.
+A successful lookup finding no open PR allows push after the local audit; a failed lookup blocks it.
+This local hook does not change remote branch protection.
 Agent setup, generated registration, trust review and runtime acceptance belong in
 [AGENT_MIGRATION.md](docs/AGENT_MIGRATION.md).
 

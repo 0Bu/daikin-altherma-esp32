@@ -34,6 +34,13 @@ A holistic pass before a PR merges. Not a linter — it checks the things that r
    decode tooling (maintained outside this repo), so they must be regenerated, not hand-edited —
    verify changed rows against [`docs/REGISTERS.md`](../../../docs/REGISTERS.md), the in-repo source
    of truth. Value/CRC/converter changes are verified against known-good reference outputs.
+6. **Persistence and source lifecycle, when affected.** Trace field-owned commits, failure rollback,
+   concurrent writers, journal compatibility and target/reply identity. Require a concrete failure
+   witness and independent review; host creation of a journal is not reboot/power-loss restoration.
+7. **Security and delivery, when affected.** Review parsing and route/provisioning boundaries,
+   redaction, dependency/tool execution, signing/installer provenance and trusted-base CI/credential
+   handling. Assign an independent security pass within this review; a doc comparison alone is
+   insufficient. Keep evidence at the reviewed head and retain the existing gate records.
 
 Report findings grouped by the above; contradictions, unjustified duplication, unreadable guidance
 and untested logic block a clean review.

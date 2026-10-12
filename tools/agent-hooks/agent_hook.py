@@ -25,6 +25,7 @@ from urllib.parse import unquote
 
 from merge_payload import find_merge as classify_github_action
 from merge_payload import literal_rg_inspection
+from merge_payload import normalized_tool
 from merge_payload import shell_executes_stdin
 import format_snapshot
 
@@ -33,14 +34,6 @@ FILE_TOOLS = {"read", "edit", "write"}
 PATCH_TOOLS = {"apply_patch"}
 SHELL_TOOLS = {"bash", "exec_command", "shell", "shell_command"}
 HOOK_ROOT = Path(__file__).resolve().parents[2]
-
-
-def normalized_tool(value: object) -> str:
-    tool = str(value or "").strip()
-    for separator in (".", "::"):
-        if separator in tool:
-            tool = tool.rsplit(separator, 1)[-1]
-    return tool.lower()
 
 
 _CURRENT_IS_ANTIGRAVITY = False
@@ -1858,54 +1851,31 @@ def run_prompt_context(_: argparse.Namespace) -> int:
 
 
 def run_stop_logic_tests(_: argparse.Namespace) -> int:
+    """Advise on verification; a Stop event does not establish edit ownership."""
     payload, _ = read_payload(fail_closed=False)
     payload = payload or {}
     if payload.get("stop_hook_active") is True:
         return 0
     root = HOOK_ROOT
-    if shutil.which("git"):
-        unstaged = subprocess.run(
-            ["git", "-C", str(root), "diff", "--quiet", "--", "main/", "test/"],
-            check=False,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        ).returncode
-        staged = subprocess.run(
-            ["git", "-C", str(root), "diff", "--cached", "--quiet", "--", "main/", "test/"],
-            check=False,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        ).returncode
-        untracked = subprocess.run(
-            ["git", "-C", str(root), "ls-files", "--others", "--exclude-standard", "--", "main/", "test/"],
-            check=False,
-            capture_output=True,
-            text=True,
-        )
-        if unstaged == 0 and staged == 0 and untracked.returncode == 0 and not untracked.stdout.strip():
-            return 0
-    if not any(shutil.which(tool) for tool in ("cmake", "g++", "clang++")):
-        return 0
-    script = root / "scripts/run-mock-tests.sh"
-    if not script.is_file():
-        return 0
     try:
         result = subprocess.run(
-            [str(script)],
-            cwd=root,
+            ["git", "-c", "core.fsmonitor=false", "--no-optional-locks", "-C", str(root),
+             "status", "--porcelain=v1", "--untracked-files=normal", "--", "main/", "test/"],
             check=False,
             capture_output=True,
             text=True,
-            timeout=540,
+            timeout=5,
         )
-        if result.returncode == 0:
+        if result.returncode == 0 and not result.stdout.strip():
             return 0
-        output = (result.stdout + result.stderr).strip()
-    except subprocess.TimeoutExpired as exc:
-        output = f"host logic tests exceeded 540 seconds: {exc}"
-    reason = ("Host logic tests failed — fix before stopping:\n" + output)[:4000]
-    decision = "continue" if _CURRENT_IS_ANTIGRAVITY else "block"
-    print(json.dumps({"decision": decision, "reason": reason}, separators=(",", ":")))
+    except (OSError, subprocess.SubprocessError):
+        pass
+    message = ("Firmware/test changes may need verification. Report checks for your own changes and "
+               "any unverified limits; preserve unrelated work. Stop does not run builds or claim tests passed.")
+    if _CURRENT_IS_ANTIGRAVITY:
+        print(message, file=sys.stderr)
+    else:
+        print(json.dumps({"systemMessage": message}, separators=(",", ":")))
     return 0
 
 
