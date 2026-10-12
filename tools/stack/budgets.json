@@ -168,140 +168,4483 @@
     "wifi_scan": {
       "pattern": "^daik::wifi_scan\\(",
       "max_bytes": 1920
+    },
+    "reference_dispatch": {
+      "pattern": "^(?:daik::(?:\\(anonymous namespace\\)::)?service_reference_frames\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?24service_reference_frames[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
+      "max_bytes": 32
+    },
+    "reference_decode": {
+      "pattern": "^(?:daik::(?:\\(anonymous namespace\\)::)?decode_reference_frame\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?22decode_reference_frame[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
+      "max_bytes": 96
+    },
+    "circulation_frame": {
+      "pattern": "^(?:daik::(?:\\(anonymous namespace\\)::)?service_circulation_frame\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?25service_circulation_frame[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
+      "max_bytes": 352
+    },
+    "circulation_probe": {
+      "pattern": "^(?:daik::(?:\\(anonymous namespace\\)::)?service_circulation_probe_frame\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?31service_circulation_probe_frame[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
+      "max_bytes": 192
+    },
+    "circulation_decode": {
+      "pattern": "^(?:daik::(?:\\(anonymous namespace\\)::)?decode_circulation_frame\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?24decode_circulation_frame[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
+      "max_bytes": 64
+    },
+    "reference_subscription": {
+      "pattern": "^(?:daik::(?:\\(anonymous namespace\\)::)?service_reference_subscription\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?30service_reference_subscription[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
+      "max_bytes": 240
+    },
+    "circulation_subscription": {
+      "pattern": "^(?:daik::(?:\\(anonymous namespace\\)::)?service_circulation_subscription\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?32service_circulation_subscription[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
+      "max_bytes": 224
+    },
+    "mqtt_promotion": {
+      "pattern": "^(?:daik::(?:\\(anonymous namespace\\)::)?promote_client_to_publisher\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?27promote_client_to_publisher[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
+      "max_bytes": 112
+    },
+    "mqtt_client_start": {
+      "pattern": "^(?:daik::(?:\\(anonymous namespace\\)::)?build_client\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?12build_client[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
+      "max_bytes": 1024
+    },
+    "mqtt_cleanup": {
+      "pattern": "^(?:daik::(?:\\(anonymous namespace\\)::)?service_requested_topic_cleanup\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?31service_requested_topic_cleanup[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
+      "max_bytes": 80
+    },
+    "mqtt_cleanup_probe": {
+      "pattern": "^(?:daik::(?:\\(anonymous namespace\\)::)?service_retained_cleanup_probe\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?30service_retained_cleanup_probe[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
+      "max_bytes": 32
+    },
+    "mqtt_discovery": {
+      "pattern": "^(?:daik::(?:\\(anonymous namespace\\)::)?publish_x10a_discovery\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?22publish_x10a_discovery[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
+      "max_bytes": 272
+    },
+    "mqtt_discovery_payload": {
+      "pattern": "^(?:daik::(?:\\(anonymous namespace\\)::)?discovery_config\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?16discovery_config[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
+      "max_bytes": 176
+    },
+    "mqtt_weather_publish": {
+      "pattern": "^(?:daik::(?:\\(anonymous namespace\\)::)?publish_weather_state\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?21publish_weather_state[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
+      "max_bytes": 64
+    },
+    "mqtt_weather_payload": {
+      "pattern": "^daik::build_weather_mqtt_json\\[abi:cxx11\\]\\(",
+      "max_bytes": 112
+    },
+    "mqtt_heartbeat": {
+      "pattern": "^(?:daik::(?:\\(anonymous namespace\\)::)?publish_heartbeat\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?17publish_heartbeat[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
+      "max_bytes": 64
+    },
+    "mqtt_heartbeat_payload": {
+      "pattern": "^daik::build_heartbeat_json\\[abi:cxx11\\]\\(",
+      "max_bytes": 176
+    },
+    "mqtt_crash": {
+      "pattern": "^(?:daik::(?:\\(anonymous namespace\\)::)?publish_crash\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?13publish_crash[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
+      "max_bytes": 256
+    },
+    "mqtt_curve": {
+      "pattern": "^(?:daik::(?:\\(anonymous namespace\\)::)?publish_heating_curve_telemetry\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?31publish_heating_curve_telemetry[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
+      "max_bytes": 64
+    },
+    "mqtt_curve_evaluate": {
+      "pattern": "^(?:daik::(?:\\(anonymous namespace\\)::)?evaluate_heating_curve\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?22evaluate_heating_curve[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
+      "max_bytes": 1200
+    },
+    "poll_task": {
+      "pattern": "^(?:daik::(?:\\(anonymous namespace\\)::)?poll_task\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?9poll_task[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
+      "max_bytes": 1584
+    },
+    "poll_detect": {
+      "pattern": "^(?:daik::(?:\\(anonymous namespace\\)::)?hp_detect_run\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?13hp_detect_run[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
+      "max_bytes": 1472
+    },
+    "poll_query": {
+      "pattern": "^(?:daik::(?:\\(anonymous namespace\\)::)?hp_query_detailed\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?17hp_query_detailed[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
+      "max_bytes": 256
+    },
+    "poll_format": {
+      "pattern": "^(?:daik::(?:\\(anonymous namespace\\)::)?hp_format\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?9hp_format[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
+      "max_bytes": 176
+    },
+    "history_record": {
+      "pattern": "^(?:daik::(?:\\(anonymous namespace\\)::)?history_record\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?14history_record[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
+      "max_bytes": 3312
+    },
+    "checkup_report": {
+      "pattern": "^(?:daik::(?:\\(anonymous namespace\\)::)?checkup_report\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?14checkup_report[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
+      "max_bytes": 720
+    },
+    "history_journal": {
+      "pattern": "^(?:daik::(?:\\(anonymous namespace\\)::)?history_flash_service_journal\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?29history_flash_service_journal[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
+      "max_bytes": 560
+    },
+    "history_append": {
+      "pattern": "^(?:daik::(?:\\(anonymous namespace\\)::)?flash_append_record\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?19flash_append_record[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
+      "max_bytes": 80
+    },
+    "history_append_at": {
+      "pattern": "^(?:daik::(?:\\(anonymous namespace\\)::)?flash_append_record_at\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?22flash_append_record_at[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
+      "max_bytes": 304
+    },
+    "modbus_task": {
+      "pattern": "^(?:daik::(?:\\(anonymous namespace\\)::)?mb_task\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?7mb_task[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
+      "max_bytes": 64
+    },
+    "modbus_poll": {
+      "pattern": "^(?:daik::(?:\\(anonymous namespace\\)::)?mb_poll_once\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?12mb_poll_once[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
+      "max_bytes": 704
+    },
+    "modbus_history": {
+      "pattern": "^(?:daik::(?:\\(anonymous namespace\\)::)?history_record_modbus\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?21history_record_modbus[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
+      "max_bytes": 112
+    },
+    "modbus_read": {
+      "pattern": "^(?:daik::(?:\\(anonymous namespace\\)::)?mb_read\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?7mb_read[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
+      "max_bytes": 96
+    },
+    "env3_task": {
+      "pattern": "^(?:daik::(?:\\(anonymous namespace\\)::)?task\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?4task[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
+      "max_bytes": 384
+    },
+    "env3_read": {
+      "pattern": "^(?:daik::(?:\\(anonymous namespace\\)::)?read_reg\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?8read_reg[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
+      "max_bytes": 48
+    },
+    "env3_history": {
+      "pattern": "^(?:daik::(?:\\(anonymous namespace\\)::)?history_record_env3\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?19history_record_env3[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
+      "max_bytes": 64
+    },
+    "syslog_send": {
+      "pattern": "^(?:daik::(?:\\(anonymous namespace\\)::)?syslog_sendto\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?13syslog_sendto[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
+      "max_bytes": 416
+    },
+    "diag_log": {
+      "pattern": "^(?:daik::(?:\\(anonymous namespace\\)::)?diag_printf\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?11diag_printf[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
+      "max_bytes": 384
+    },
+    "diag_syslog": {
+      "pattern": "^(?:daik::(?:\\(anonymous namespace\\)::)?syslog_send\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?11syslog_send[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
+      "max_bytes": 304
+    },
+    "led_task": {
+      "pattern": "^(?:daik::(?:\\(anonymous namespace\\)::)?status_led_task\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?15status_led_task[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
+      "max_bytes": 176
+    },
+    "button_task": {
+      "pattern": "^(?:daik::(?:\\(anonymous namespace\\)::)?button_task\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?11button_task[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
+      "max_bytes": 96
+    },
+    "wifi_task": {
+      "pattern": "^(?:daik::(?:\\(anonymous namespace\\)::)?wifi_watchdog_task\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?18wifi_watchdog_task[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
+      "max_bytes": 192
+    },
+    "wifi_start": {
+      "pattern": "^(?:daik::(?:\\(anonymous namespace\\)::)?wifi_start_sta\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?14wifi_start_sta[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
+      "max_bytes": 64
+    },
+    "eth_task": {
+      "pattern": "^(?:daik::(?:\\(anonymous namespace\\)::)?eth_fallback_task\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?17eth_fallback_task[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
+      "max_bytes": 400
+    },
+    "dns_task": {
+      "pattern": "^(?:daik::(?:\\(anonymous namespace\\)::)?dns_task\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?8dns_task[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
+      "max_bytes": 608
+    },
+    "config_load": {
+      "pattern": "^(?:daik::(?:\\(anonymous namespace\\)::)?config_load\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?11config_load[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
+      "max_bytes": 2368
+    },
+    "history_start": {
+      "pattern": "^(?:daik::(?:\\(anonymous namespace\\)::)?history_start\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?13history_start[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
+      "max_bytes": 1632
+    },
+    "modbus_discover": {
+      "pattern": "^(?:daik::(?:\\(anonymous namespace\\)::)?mb_autodiscover_initial\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?23mb_autodiscover_initial[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
+      "max_bytes": 1552
+    },
+    "http_values": {
+      "pattern": "^(?:daik::(?:\\(anonymous namespace\\)::)?http_send_values_json\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?21http_send_values_json[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
+      "max_bytes": 336
+    },
+    "http_history": {
+      "pattern": "^(?:daik::(?:\\(anonymous namespace\\)::)?h_history\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?9h_history[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
+      "max_bytes": 1184
+    },
+    "http_diag": {
+      "pattern": "^(?:daik::(?:\\(anonymous namespace\\)::)?h_diag\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?6h_diag[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
+      "max_bytes": 160
+    },
+    "http_diag_redact": {
+      "pattern": "^daik::redact_diag_line\\[abi:cxx11\\]\\(",
+      "max_bytes": 48
+    },
+    "http_coredump": {
+      "pattern": "^daik::h_coredump\\(httpd_req\\*\\)$",
+      "max_bytes": 32
+    },
+    "http_values_model": {
+      "pattern": "^(?:daik::(?:\\(anonymous namespace\\)::)?h_active_model_values\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?21h_active_model_values[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
+      "max_bytes": 864
+    },
+    "http_board_pins": {
+      "pattern": "^(?:daik::(?:\\(anonymous namespace\\)::)?board_pins\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?10board_pins[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
+      "max_bytes": 48
+    },
+    "syslog_task": {
+      "pattern": "^_ZZN4daik11syslog_initEvENKUlPvE_clES0_\\$constprop\\$[0-9]+$",
+      "max_bytes": 704
+    },
+    "syslog_task_entry": {
+      "pattern": "^daik::syslog_init\\(\\)::\\{lambda\\(void\\*\\)\\x231\\}::_FUN\\(void\\*\\)$",
+      "max_bytes": 32
+    },
+    "main_task": {
+      "pattern": "^app_main$",
+      "max_bytes": 32
+    },
+    "boot_sequence": {
+      "pattern": "^boot_sequence\\(\\)$",
+      "max_bytes": 800
+    },
+    "http_coredump_body": {
+      "pattern": "^_ZN4daikL10h_coredumpEP9httpd_req\\$part\\$[0-9]+$",
+      "max_bytes": 560
+    },
+    "double_string": {
+      "pattern": "^std::__cxx11::to_string\\(double\\)$",
+      "max_bytes": 32
+    },
+    "dynamic_double_string": {
+      "pattern": "^[^\\n]+ __gnu_cxx::__to_xstring<[^\\n]+>\\(",
+      "max_bytes": 416
+    },
+    "sdk_mqtt_publish": {
+      "pattern": "^esp_mqtt_client_publish$",
+      "max_bytes": 48
+    },
+    "sdk_mqtt_enqueue": {
+      "pattern": "^mqtt_client_enqueue_publish$",
+      "max_bytes": 64
+    },
+    "sdk_mqtt_message": {
+      "pattern": "^mqtt_msg_publish$",
+      "max_bytes": 32
+    },
+    "sdk_transport_write": {
+      "pattern": "^esp_transport_write$",
+      "max_bytes": 32
+    },
+    "sdk_tls_write": {
+      "pattern": "^esp_tls_conn_write$",
+      "max_bytes": 32
+    },
+    "sdk_ssl_write": {
+      "pattern": "^mbedtls_ssl_write$",
+      "max_bytes": 32
+    },
+    "sdk_queue_send": {
+      "pattern": "^xQueueGenericSend$",
+      "max_bytes": 64
+    },
+    "sdk_queue_remove_event": {
+      "pattern": "^xTaskRemoveFromEventList$",
+      "max_bytes": 32
+    },
+    "sdk_queue_yield_required": {
+      "pattern": "^prvIsYieldRequiredSMP$",
+      "max_bytes": 32
+    },
+    "sdk_queue_yield_other": {
+      "pattern": "^vPortYieldOtherCore$",
+      "max_bytes": 32
+    },
+    "sdk_queue_crosscore_yield": {
+      "pattern": "^esp_crosscore_int_send_yield$",
+      "max_bytes": 32
+    },
+    "sdk_queue_crosscore_send": {
+      "pattern": "^esp_crosscore_int_send$",
+      "max_bytes": 32
+    },
+    "sdk_queue_critical": {
+      "pattern": "^xPortEnterCriticalTimeout$",
+      "max_bytes": 32
+    },
+    "sdk_queue_compare_swap": {
+      "pattern": "^esp_cpu_compare_and_set$",
+      "max_bytes": 32
+    },
+    "runtime_task_entry": {
+      "pattern": "^vPortTaskWrapper$",
+      "max_bytes": 32
+    },
+    "reference_frame": {
+      "pattern": "^(?:daik::service_reference_frame\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daikL23service_reference_frame[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
+      "max_bytes": 192
+    },
+    "reference_apply": {
+      "pattern": "^(?:daik::apply_reference_frame\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daikL21apply_reference_frame[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
+      "max_bytes": 448
+    },
+    "json_guard_reset": {
+      "pattern": "^daik::JsonGuard::reset\\(cJSON\\*\\)$",
+      "max_bytes": 32
+    },
+    "json_guard_destroy": {
+      "pattern": "^daik::JsonGuard::~JsonGuard\\(\\)$",
+      "max_bytes": 32
+    },
+    "wifi_init": {
+      "pattern": "^(?:daik::wifi_init_sta_driver\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daikL20wifi_init_sta_driver[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
+      "max_bytes": 1136
+    },
+    "wifi_wait": {
+      "pattern": "^(?:daik::wifi_wait_sta_connected\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daikL23wifi_wait_sta_connected[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
+      "max_bytes": 64
+    },
+    "wifi_rollback": {
+      "pattern": "^(?:daik::wifi_finish_sta_rollback\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daikL24wifi_finish_sta_rollback[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
+      "max_bytes": 912
+    },
+    "wifi_success": {
+      "pattern": "^(?:daik::wifi_finish_sta_success\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daikL23wifi_finish_sta_success[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
+      "max_bytes": 912
+    },
+    "sdk_malloc": {
+      "pattern": "^malloc$",
+      "max_bytes": 32
+    },
+    "sdk_malloc_default": {
+      "pattern": "^heap_caps_malloc_default$",
+      "max_bytes": 32
+    },
+    "sdk_malloc_caps": {
+      "pattern": "^heap_caps_malloc$",
+      "max_bytes": 48
+    },
+    "sdk_malloc_base": {
+      "pattern": "^heap_caps_malloc_base$",
+      "max_bytes": 32
+    },
+    "sdk_malloc_aligned": {
+      "pattern": "^heap_caps_aligned_alloc_base$",
+      "max_bytes": 48
+    },
+    "sdk_multi_aligned_offset": {
+      "pattern": "^multi_heap_aligned_alloc_offs$",
+      "max_bytes": 32
+    },
+    "sdk_multi_aligned_impl": {
+      "pattern": "^multi_heap_aligned_alloc_impl_offs$",
+      "max_bytes": 32
+    },
+    "sdk_multi_lock": {
+      "pattern": "^multi_heap_internal_lock$",
+      "max_bytes": 32
+    },
+    "sdk_snprintf": {
+      "pattern": "^snprintf$",
+      "max_bytes": 112
+    },
+    "sdk_vsnprintf": {
+      "pattern": "^vsnprintf$",
+      "max_bytes": 96
+    },
+    "sdk_vfprintf": {
+      "pattern": "^__d_vfprintf$",
+      "max_bytes": 128
+    },
+    "sdk_int_format": {
+      "pattern": "^__ultoa_invert$",
+      "max_bytes": 48
+    },
+    "sdk_string_write": {
+      "pattern": "^__file_str_put$",
+      "max_bytes": 32
+    },
+    "sdk_log": {
+      "pattern": "^esp_log$",
+      "max_bytes": 96
+    },
+    "sdk_vprintf": {
+      "pattern": "^vprintf$",
+      "max_bytes": 48
+    },
+    "sdk_bufio_put": {
+      "pattern": "^__bufio_put$",
+      "max_bytes": 32
+    },
+    "sdk_bufio_allocate": {
+      "pattern": "^__bufio_buffer_allocate_locked$",
+      "max_bytes": 128
+    },
+    "sdk_bufio_flush": {
+      "pattern": "^__bufio_flush_locked$",
+      "max_bytes": 48
+    },
+    "sdk_write": {
+      "pattern": "^write$",
+      "max_bytes": 32
+    },
+    "sdk_write_r": {
+      "pattern": "^_write_r$",
+      "max_bytes": 32
+    },
+    "sdk_console_write": {
+      "pattern": "^console_write$",
+      "max_bytes": 32
+    },
+    "sdk_usb_write": {
+      "pattern": "^usb_serial_jtag_write$",
+      "max_bytes": 32
+    },
+    "sdk_usb_character": {
+      "pattern": "^usb_serial_jtag_tx_char_no_driver$",
+      "max_bytes": 32
+    },
+    "sdk_recursive_lock": {
+      "pattern": "^_lock_acquire_recursive$",
+      "max_bytes": 32
+    },
+    "sdk_lock_acquire": {
+      "pattern": "^lock_acquire_generic$",
+      "max_bytes": 48
+    },
+    "sdk_queue_sem_take": {
+      "pattern": "^xQueueSemaphoreTake$",
+      "max_bytes": 64
+    },
+    "mqtt_heartbeat_builder": {
+      "pattern": "^(?:daik::build_heartbeat_payload(?:\\[abi:cxx11\\])?\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daikL23build_heartbeat_payload[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
+      "max_bytes": 768
+    },
+    "mqtt_curve_builder": {
+      "pattern": "^(?:daik::build_heating_curve_payload(?:\\[abi:cxx11\\])?\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daikL27build_heating_curve_payload[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
+      "max_bytes": 736
+    },
+    "mqtt_cycle_gate": {
+      "pattern": "^(?:daik::mqtt_cycle_gate(?:\\[abi:cxx11\\])?\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daikL15mqtt_cycle_gate[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
+      "max_bytes": 112
+    },
+    "mqtt_crash_changed": {
+      "pattern": "^(?:daik::crash_publication_changed(?:\\[abi:cxx11\\])?\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daikL25crash_publication_changed[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
+      "max_bytes": 208
+    },
+    "mqtt_weather_builder": {
+      "pattern": "^(?:daik::build_weather_payload(?:\\[abi:cxx11\\])?\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daikL21build_weather_payload[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
+      "max_bytes": 656
+    },
+    "sdk_mqtt_task": {
+      "pattern": "^esp_mqtt_task$",
+      "max_bytes": 96
+    },
+    "mqtt_reference_binding": {
+      "pattern": "^(?:daik::apply_reference_binding\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?23apply_reference_binding[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
+      "max_bytes": 592
+    },
+    "mqtt_retire_reference": {
+      "pattern": "^(?:daik::retire_reference_topics\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?23retire_reference_topics[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
+      "max_bytes": 32
+    },
+    "mqtt_circulation_probe_subscription": {
+      "pattern": "^(?:daik::service_circulation_probe_subscription\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?38service_circulation_probe_subscription[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
+      "max_bytes": 128
+    },
+    "mqtt_cleanup_probe_start": {
+      "pattern": "^(?:daik::start_retained_cleanup_probe\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?28start_retained_cleanup_probe[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
+      "max_bytes": 32
+    },
+    "mqtt_emit": {
+      "pattern": "^(?:daik::mqtt_publish\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?12mqtt_publish[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
+      "max_bytes": 32
+    },
+    "mqtt_x10a_state": {
+      "pattern": "^(?:daik::publish_x10a_state\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?18publish_x10a_state[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
+      "max_bytes": 112
+    },
+    "mqtt_x10a_probe": {
+      "pattern": "^(?:daik::hp_values_x10a_json_probe\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?25hp_values_x10a_json_probe[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
+      "max_bytes": 80
+    },
+    "mqtt_x10a_copy": {
+      "pattern": "^(?:daik::hp_values_x10a_json_copy\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?24hp_values_x10a_json_copy[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
+      "max_bytes": 80
+    },
+    "mqtt_modbus_values": {
+      "pattern": "^(?:daik::current_modbus_values\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?21current_modbus_values[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
+      "max_bytes": 128
+    },
+    "mqtt_board_discovery": {
+      "pattern": "^(?:daik::publish_heartbeat_discovery\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?27publish_heartbeat_discovery[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
+      "max_bytes": 112
+    },
+    "mqtt_legacy_retract": {
+      "pattern": "^(?:daik::retract_legacy_fixed\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?20retract_legacy_fixed[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
+      "max_bytes": 112
+    },
+    "mqtt_retract_ungrouped": {
+      "pattern": "^(?:daik::retract_ungrouped_values\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?24retract_ungrouped_values[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
+      "max_bytes": 80
+    },
+    "history_circulation": {
+      "pattern": "^(?:daik::history_record_circulation\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?26history_record_circulation[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
+      "max_bytes": 48
+    },
+    "history_board": {
+      "pattern": "^(?:daik::history_record_board\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?20history_record_board[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
+      "max_bytes": 48
+    },
+    "mqtt_curve_payload": {
+      "pattern": "^(?:daik::build_heating_curve_mqtt_json(?:\\[abi:cxx11\\])?\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?29build_heating_curve_mqtt_json[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
+      "max_bytes": 64
+    },
+    "history_fold_circulation": {
+      "pattern": "^(?:daik::(?:\\(anonymous namespace\\)::)?fold_circulation_locked\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?23fold_circulation_locked[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
+      "max_bytes": 32
+    },
+    "history_advance_raster": {
+      "pattern": "^(?:daik::(?:\\(anonymous namespace\\)::)?advance_raster_locked\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?21advance_raster_locked[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
+      "max_bytes": 48
+    },
+    "mqtt_modbus_payload": {
+      "pattern": "^(?:daik::build_flat_json(?:\\[abi:cxx11\\])?\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?15build_flat_json[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
+      "max_bytes": 64
+    },
+    "mqtt_env3_payload": {
+      "pattern": "^(?:daik::build_env3_mqtt_json(?:\\[abi:cxx11\\])?\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?20build_env3_mqtt_json[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
+      "max_bytes": 128
+    },
+    "sdk_subscribe_single": {
+      "pattern": "^esp_mqtt_client_subscribe_single$",
+      "max_bytes": 48
+    },
+    "sdk_subscribe_multiple": {
+      "pattern": "^esp_mqtt_client_subscribe_multiple$",
+      "max_bytes": 48
+    },
+    "sdk_unsubscribe": {
+      "pattern": "^esp_mqtt_client_unsubscribe$",
+      "max_bytes": 32
+    },
+    "tls_esp_mqtt_write": {
+      "pattern": "^esp_mqtt_write$",
+      "max_bytes": 48
+    },
+    "tls_ssl_write": {
+      "pattern": "^ssl_write$",
+      "max_bytes": 80
+    },
+    "tls_esp_mbedtls_write": {
+      "pattern": "^esp_mbedtls_write$",
+      "max_bytes": 32
+    },
+    "tls_wrap_mbedtls_ssl_write": {
+      "pattern": "^__wrap_mbedtls_ssl_write$",
+      "max_bytes": 32
+    },
+    "tls_ssl_check_ctr_renegotiate": {
+      "pattern": "^ssl_check_ctr_renegotiate$",
+      "max_bytes": 48
+    },
+    "tls_mbedtls_ssl_renegotiate": {
+      "pattern": "^mbedtls_ssl_renegotiate$",
+      "max_bytes": 32
+    },
+    "tls_mbedtls_ssl_start_renegotiation": {
+      "pattern": "^mbedtls_ssl_start_renegotiation$",
+      "max_bytes": 32
+    },
+    "tls_mbedtls_ssl_handshake": {
+      "pattern": "^mbedtls_ssl_handshake$",
+      "max_bytes": 32
+    },
+    "tls_mbedtls_ssl_handshake_step": {
+      "pattern": "^mbedtls_ssl_handshake_step$",
+      "max_bytes": 32
+    },
+    "tls_wrap_mbedtls_ssl_handshake_client_step": {
+      "pattern": "^__wrap_mbedtls_ssl_handshake_client_step$",
+      "max_bytes": 32
+    },
+    "tls_mbedtls_ssl_handshake_client_step": {
+      "pattern": "^mbedtls_ssl_handshake_client_step$",
+      "max_bytes": 144
+    },
+    "tls_mbedtls_ssl_parse_certificate": {
+      "pattern": "^mbedtls_ssl_parse_certificate$",
+      "max_bytes": 96
+    },
+    "tls_mbedtls_ssl_verify_certificate": {
+      "pattern": "^mbedtls_ssl_verify_certificate$",
+      "max_bytes": 96
+    },
+    "tls_mbedtls_x509_crt_verify_restartable": {
+      "pattern": "^mbedtls_x509_crt_verify_restartable$",
+      "max_bytes": 48
+    },
+    "tls_x509_crt_verify_restartable_ca_cb_constprop_0_isra_0": {
+      "pattern": "^x509_crt_verify_restartable_ca_cb\\$constprop\\$0\\$isra\\$0$",
+      "max_bytes": 272
+    },
+    "tls_esp_crt_verify_callback": {
+      "pattern": "^esp_crt_verify_callback$",
+      "max_bytes": 48
+    },
+    "tls_esp_crt_check_signature": {
+      "pattern": "^esp_crt_check_signature$",
+      "max_bytes": 864
+    },
+    "tls_psa_verify_hash": {
+      "pattern": "^psa_verify_hash$",
+      "max_bytes": 80
+    },
+    "tls_psa_verify_hash_builtin": {
+      "pattern": "^psa_verify_hash_builtin$",
+      "max_bytes": 48
+    },
+    "tls_mbedtls_psa_ecdsa_verify_hash": {
+      "pattern": "^mbedtls_psa_ecdsa_verify_hash$",
+      "max_bytes": 64
+    },
+    "tls_mbedtls_ecdsa_verify": {
+      "pattern": "^mbedtls_ecdsa_verify$",
+      "max_bytes": 48
+    },
+    "tls_mbedtls_ecdsa_verify_restartable": {
+      "pattern": "^mbedtls_ecdsa_verify_restartable$",
+      "max_bytes": 128
+    },
+    "tls_mbedtls_ecp_muladd_restartable": {
+      "pattern": "^mbedtls_ecp_muladd_restartable$",
+      "max_bytes": 112
+    },
+    "tls_mbedtls_ecp_mul_shortcuts_isra_0": {
+      "pattern": "^mbedtls_ecp_mul_shortcuts\\$isra\\$0$",
+      "max_bytes": 48
+    },
+    "tls_ecp_mul_restartable_internal_isra_0": {
+      "pattern": "^ecp_mul_restartable_internal\\$isra\\$0$",
+      "max_bytes": 176
+    },
+    "tls_ecp_mul_comb_after_precomp_isra_0": {
+      "pattern": "^ecp_mul_comb_after_precomp\\$isra\\$0$",
+      "max_bytes": 400
+    },
+    "tls_ecp_add_mixed": {
+      "pattern": "^ecp_add_mixed$",
+      "max_bytes": 48
+    },
+    "tls_ecp_double_jac": {
+      "pattern": "^ecp_double_jac$",
+      "max_bytes": 48
+    },
+    "tls_mbedtls_mpi_mul_mod": {
+      "pattern": "^mbedtls_mpi_mul_mod$",
+      "max_bytes": 32
+    },
+    "tls_mbedtls_mpi_mod_mpi": {
+      "pattern": "^mbedtls_mpi_mod_mpi$",
+      "max_bytes": 48
+    },
+    "tls_mbedtls_mpi_div_mpi": {
+      "pattern": "^mbedtls_mpi_div_mpi$",
+      "max_bytes": 144
+    },
+    "tls_mbedtls_mpi_mul_int": {
+      "pattern": "^mbedtls_mpi_mul_int$",
+      "max_bytes": 48
+    },
+    "tls_mbedtls_mpi_mul_mpi": {
+      "pattern": "^mbedtls_mpi_mul_mpi$",
+      "max_bytes": 48
+    },
+    "tls_mbedtls_mpi_grow": {
+      "pattern": "^mbedtls_mpi_grow$",
+      "max_bytes": 32
+    },
+    "tls_mbedtls_calloc": {
+      "pattern": "^mbedtls_calloc$",
+      "max_bytes": 32
+    },
+    "tls_esp_mbedtls_mem_calloc": {
+      "pattern": "^esp_mbedtls_mem_calloc$",
+      "max_bytes": 32
+    },
+    "tls_heap_caps_calloc": {
+      "pattern": "^heap_caps_calloc$",
+      "max_bytes": 32
+    },
+    "tls_heap_caps_calloc_base": {
+      "pattern": "^heap_caps_calloc_base$",
+      "max_bytes": 32
+    },
+    "tls_mbedtls_pk_verify_ext": {
+      "pattern": "^mbedtls_pk_verify_ext$",
+      "max_bytes": 80
+    },
+    "tls_mbedtls_rsa_rsassa_pss_verify_ext": {
+      "pattern": "^mbedtls_rsa_rsassa_pss_verify_ext$",
+      "max_bytes": 1136
+    },
+    "tls_mbedtls_psa_rsa_verify_hash": {
+      "pattern": "^mbedtls_psa_rsa_verify_hash$",
+      "max_bytes": 80
+    },
+    "tls_mbedtls_rsa_pkcs1_verify": {
+      "pattern": "^mbedtls_rsa_pkcs1_verify$",
+      "max_bytes": 48
+    },
+    "tls_mbedtls_rsa_public": {
+      "pattern": "^mbedtls_rsa_public$",
+      "max_bytes": 48
+    },
+    "tls_mbedtls_mpi_exp_mod_unsafe": {
+      "pattern": "^mbedtls_mpi_exp_mod_unsafe$",
+      "max_bytes": 32
+    },
+    "tls_mbedtls_mpi_exp_mod": {
+      "pattern": "^mbedtls_mpi_exp_mod$",
+      "max_bytes": 80
+    },
+    "tls_calculate_rinv": {
+      "pattern": "^calculate_rinv$",
+      "max_bytes": 48
+    },
+    "tls_mpi_mult_mpi_overlong_isra_0": {
+      "pattern": "^mpi_mult_mpi_overlong\\$isra\\$0$",
+      "max_bytes": 64
+    },
+    "tls_mbedtls_mpi_add_mpi": {
+      "pattern": "^mbedtls_mpi_add_mpi$",
+      "max_bytes": 32
+    },
+    "tls_add_sub_mpi": {
+      "pattern": "^add_sub_mpi$",
+      "max_bytes": 32
+    },
+    "tls_mbedtls_mpi_add_abs": {
+      "pattern": "^mbedtls_mpi_add_abs$",
+      "max_bytes": 32
+    },
+    "tls_mbedtls_mpi_copy": {
+      "pattern": "^mbedtls_mpi_copy$",
+      "max_bytes": 32
+    },
+    "tls_mbedtls_rsa_rsassa_pkcs1_v15_verify": {
+      "pattern": "^mbedtls_rsa_rsassa_pkcs1_v15_verify$",
+      "max_bytes": 48
+    },
+    "i2c_s_i2c_start_end_command": {
+      "pattern": "^s_i2c_start_end_command$",
+      "max_bytes": 96
+    },
+    "i2c_s_i2c_send_commands": {
+      "pattern": "^s_i2c_send_commands$",
+      "max_bytes": 48
+    },
+    "i2c_s_i2c_transaction_start": {
+      "pattern": "^s_i2c_transaction_start$",
+      "max_bytes": 64
+    },
+    "i2c_s_i2c_synchronous_transaction": {
+      "pattern": "^s_i2c_synchronous_transaction$",
+      "max_bytes": 32
+    },
+    "i2c_i2c_master_transmit": {
+      "pattern": "^i2c_master_transmit$",
+      "max_bytes": 64
+    },
+    "i2c_i2c_master_multi_buffer_transmit": {
+      "pattern": "^i2c_master_multi_buffer_transmit$",
+      "max_bytes": 176
+    },
+    "i2c_i2c_master_transmit_receive": {
+      "pattern": "^i2c_master_transmit_receive$",
+      "max_bytes": 144
+    },
+    "i2c_i2c_master_receive": {
+      "pattern": "^i2c_master_receive$",
+      "max_bytes": 112
+    },
+    "i2c_daik_env3_probe_int_int": {
+      "pattern": "^daik::env3_probe\\(int,\\ int\\)$",
+      "max_bytes": 192
+    },
+    "i2c_daik_anonymous_namespace_write_reg_verified_i2c_master_dev_t_unsigned_char_unsigned_char": {
+      "pattern": "^daik::\\(anonymous\\ namespace\\)::write_reg_verified\\(i2c_master_dev_t\\*,\\ unsigned\\ char,\\ unsigned\\ char\\)$",
+      "max_bytes": 48
+    },
+    "tls_psa_generate_key": {
+      "pattern": "^psa_generate_key$",
+      "max_bytes": 32
+    },
+    "tls_psa_generate_key_custom": {
+      "pattern": "^psa_generate_key_custom$",
+      "max_bytes": 80
+    },
+    "tls_psa_generate_key_internal": {
+      "pattern": "^psa_generate_key_internal$",
+      "max_bytes": 32
+    },
+    "tls_mbedtls_psa_ecp_generate_key": {
+      "pattern": "^mbedtls_psa_ecp_generate_key$",
+      "max_bytes": 176
+    },
+    "tls_mbedtls_ecp_group_load": {
+      "pattern": "^mbedtls_ecp_group_load$",
+      "max_bytes": 48
+    },
+    "tls_mbedtls_mpi_sub_int": {
+      "pattern": "^mbedtls_mpi_sub_int$",
+      "max_bytes": 48
+    },
+    "tls_mbedtls_mpi_sub_mpi": {
+      "pattern": "^mbedtls_mpi_sub_mpi$",
+      "max_bytes": 32
+    },
+    "tls_psa_export_public_key": {
+      "pattern": "^psa_export_public_key$",
+      "max_bytes": 48
+    },
+    "tls_psa_driver_wrapper_export_public_key": {
+      "pattern": "^psa_driver_wrapper_export_public_key$",
+      "max_bytes": 32
+    },
+    "tls_psa_export_public_key_internal": {
+      "pattern": "^psa_export_public_key_internal$",
+      "max_bytes": 48
+    },
+    "tls_mbedtls_psa_ecp_export_public_key": {
+      "pattern": "^mbedtls_psa_ecp_export_public_key$",
+      "max_bytes": 64
+    },
+    "tls_mbedtls_psa_ecp_export_key": {
+      "pattern": "^mbedtls_psa_ecp_export_key$",
+      "max_bytes": 32
+    },
+    "tls_mbedtls_ecp_mul": {
+      "pattern": "^mbedtls_ecp_mul$",
+      "max_bytes": 48
+    },
+    "tls_mbedtls_ecp_mul_restartable": {
+      "pattern": "^mbedtls_ecp_mul_restartable$",
+      "max_bytes": 32
+    },
+    "tls_psa_raw_key_agreement": {
+      "pattern": "^psa_raw_key_agreement$",
+      "max_bytes": 80
+    },
+    "tls_psa_key_agreement_raw_builtin": {
+      "pattern": "^psa_key_agreement_raw_builtin$",
+      "max_bytes": 48
+    },
+    "tls_mbedtls_psa_key_agreement_ecdh": {
+      "pattern": "^mbedtls_psa_key_agreement_ecdh$",
+      "max_bytes": 96
+    },
+    "tls_mbedtls_ssl_read_record": {
+      "pattern": "^mbedtls_ssl_read_record$",
+      "max_bytes": 64
+    },
+    "tls_mbedtls_ssl_decrypt_buf": {
+      "pattern": "^mbedtls_ssl_decrypt_buf$",
+      "max_bytes": 624
+    },
+    "tls_psa_aead_decrypt": {
+      "pattern": "^psa_aead_decrypt$",
+      "max_bytes": 96
+    },
+    "tls_mbedtls_psa_aead_decrypt": {
+      "pattern": "^mbedtls_psa_aead_decrypt$",
+      "max_bytes": 480
+    },
+    "tls_mbedtls_ccm_auth_decrypt": {
+      "pattern": "^mbedtls_ccm_auth_decrypt$",
+      "max_bytes": 80
+    },
+    "tls_ccm_auth_crypt": {
+      "pattern": "^ccm_auth_crypt$",
+      "max_bytes": 48
+    },
+    "tls_mbedtls_ccm_update": {
+      "pattern": "^mbedtls_ccm_update$",
+      "max_bytes": 80
+    },
+    "tls_mbedtls_cipher_update": {
+      "pattern": "^mbedtls_cipher_update$",
+      "max_bytes": 64
+    },
+    "tls_aes_crypt_ecb_wrap": {
+      "pattern": "^aes_crypt_ecb_wrap$",
+      "max_bytes": 32
+    },
+    "tls_mbedtls_aes_crypt_ecb": {
+      "pattern": "^mbedtls_aes_crypt_ecb$",
+      "max_bytes": 32
+    },
+    "tls_esp_aes_crypt_ecb": {
+      "pattern": "^esp_aes_crypt_ecb$",
+      "max_bytes": 32
+    },
+    "tls_esp_aes_acquire_hardware": {
+      "pattern": "^esp_aes_acquire_hardware$",
+      "max_bytes": 32
+    },
+    "tls_esp_crypto_sha_aes_lock_acquire": {
+      "pattern": "^esp_crypto_sha_aes_lock_acquire$",
+      "max_bytes": 32
+    },
+    "tls_lock_acquire": {
+      "pattern": "^_lock_acquire$",
+      "max_bytes": 32
+    },
+    "tls_lock_init_generic": {
+      "pattern": "^lock_init_generic$",
+      "max_bytes": 32
+    },
+    "tls_xqueuecreatemutex": {
+      "pattern": "^xQueueCreateMutex$",
+      "max_bytes": 32
+    },
+    "tls_xqueuegenericcreate": {
+      "pattern": "^xQueueGenericCreate$",
+      "max_bytes": 32
+    },
+    "tls_pvportmalloc": {
+      "pattern": "^pvPortMalloc$",
+      "max_bytes": 32
+    },
+    "tls_mbedtls_gcm_auth_decrypt": {
+      "pattern": "^mbedtls_gcm_auth_decrypt$",
+      "max_bytes": 80
+    },
+    "tls_mbedtls_gcm_crypt_and_tag": {
+      "pattern": "^mbedtls_gcm_crypt_and_tag$",
+      "max_bytes": 48
+    },
+    "tls_mbedtls_gcm_update": {
+      "pattern": "^mbedtls_gcm_update$",
+      "max_bytes": 64
+    },
+    "tls_gcm_mask": {
+      "pattern": "^gcm_mask$",
+      "max_bytes": 64
+    },
+    "tls_mbedtls_ssl_derive_keys": {
+      "pattern": "^mbedtls_ssl_derive_keys$",
+      "max_bytes": 400
+    },
+    "tls_tls_prf_sha256": {
+      "pattern": "^tls_prf_sha256$",
+      "max_bytes": 48
+    },
+    "tls_tls_prf_generic": {
+      "pattern": "^tls_prf_generic$",
+      "max_bytes": 336
+    },
+    "tls_psa_key_derivation_output_bytes": {
+      "pattern": "^psa_key_derivation_output_bytes$",
+      "max_bytes": 304
+    },
+    "tls_psa_driver_wrapper_mac_compute": {
+      "pattern": "^psa_driver_wrapper_mac_compute$",
+      "max_bytes": 64
+    },
+    "tls_esp_hmac_compute_transparent": {
+      "pattern": "^esp_hmac_compute_transparent$",
+      "max_bytes": 144
+    },
+    "tls_esp_hmac_setup_transparent": {
+      "pattern": "^esp_hmac_setup_transparent$",
+      "max_bytes": 176
+    },
+    "tls_esp_sha_hash_compute": {
+      "pattern": "^esp_sha_hash_compute$",
+      "max_bytes": 512
+    },
+    "tls_esp_sha256_driver_compute": {
+      "pattern": "^esp_sha256_driver_compute$",
+      "max_bytes": 48
+    },
+    "tls_esp_sha256_finish": {
+      "pattern": "^esp_sha256_finish$",
+      "max_bytes": 48
+    },
+    "tls_esp_sha256_update": {
+      "pattern": "^esp_sha256_update$",
+      "max_bytes": 48
+    },
+    "tls_esp_sha_acquire_hardware": {
+      "pattern": "^esp_sha_acquire_hardware$",
+      "max_bytes": 32
+    },
+    "tls_ws_connect": {
+      "pattern": "^ws_connect$",
+      "max_bytes": 288
+    },
+    "tls_mbedtls_mpi_random": {
+      "pattern": "^mbedtls_mpi_random$",
+      "max_bytes": 32
+    },
+    "tls_mbedtls_mpi_fill_random": {
+      "pattern": "^mbedtls_mpi_fill_random$",
+      "max_bytes": 32
+    },
+    "tls_mbedtls_psa_get_random": {
+      "pattern": "^mbedtls_psa_get_random$",
+      "max_bytes": 32
+    },
+    "tls_psa_generate_random": {
+      "pattern": "^psa_generate_random$",
+      "max_bytes": 32
+    },
+    "tls_psa_generate_random_internal": {
+      "pattern": "^psa_generate_random_internal$",
+      "max_bytes": 64
+    },
+    "tls_mbedtls_psa_external_get_random": {
+      "pattern": "^mbedtls_psa_external_get_random$",
+      "max_bytes": 32
+    },
+    "tls_esp_fill_random": {
+      "pattern": "^esp_fill_random$",
+      "max_bytes": 64
+    },
+    "tls_esp_random": {
+      "pattern": "^esp_random$",
+      "max_bytes": 32
+    },
+    "tls_esp_clk_cpu_freq": {
+      "pattern": "^esp_clk_cpu_freq$",
+      "max_bytes": 32
+    },
+    "tls_esp_clk_apb_freq": {
+      "pattern": "^esp_clk_apb_freq$",
+      "max_bytes": 32
+    },
+    "tls_mbedtls_x509_crt_parse_der_nocopy": {
+      "pattern": "^mbedtls_x509_crt_parse_der_nocopy$",
+      "max_bytes": 32
+    },
+    "tls_mbedtls_x509_crt_parse_der_internal": {
+      "pattern": "^mbedtls_x509_crt_parse_der_internal$",
+      "max_bytes": 160
+    },
+    "tls_mbedtls_pk_parse_subpubkey": {
+      "pattern": "^mbedtls_pk_parse_subpubkey$",
+      "max_bytes": 64
+    },
+    "tls_mbedtls_pk_ecc_set_pubkey": {
+      "pattern": "^mbedtls_pk_ecc_set_pubkey$",
+      "max_bytes": 176
+    },
+    "tls_psa_import_key": {
+      "pattern": "^psa_import_key$",
+      "max_bytes": 64
+    },
+    "tls_psa_driver_wrapper_import_key": {
+      "pattern": "^psa_driver_wrapper_import_key$",
+      "max_bytes": 48
+    },
+    "tls_psa_import_key_into_slot": {
+      "pattern": "^psa_import_key_into_slot$",
+      "max_bytes": 64
+    },
+    "tls_mbedtls_psa_ecp_import_key": {
+      "pattern": "^mbedtls_psa_ecp_import_key$",
+      "max_bytes": 48
+    },
+    "tls_esp_crypto_aes_gcm_decrypt": {
+      "pattern": "^esp_crypto_aes_gcm_decrypt$",
+      "max_bytes": 64
+    },
+    "tls_esp_aes_gcm_auth_decrypt": {
+      "pattern": "^esp_aes_gcm_auth_decrypt$",
+      "max_bytes": 80
+    },
+    "tls_esp_aes_gcm_crypt_and_tag": {
+      "pattern": "^esp_aes_gcm_crypt_and_tag$",
+      "max_bytes": 48
+    },
+    "tls_esp_aes_gcm_update": {
+      "pattern": "^esp_aes_gcm_update$",
+      "max_bytes": 112
+    },
+    "tls_esp_aes_crypt_ctr": {
+      "pattern": "^esp_aes_crypt_ctr$",
+      "max_bytes": 48
+    },
+    "tls_esp_aes_process_dma": {
+      "pattern": "^esp_aes_process_dma$",
+      "max_bytes": 64
+    },
+    "tls_esp_aes_dma_start": {
+      "pattern": "^esp_aes_dma_start$",
+      "max_bytes": 32
+    },
+    "tls_esp_crypto_shared_gdma_start_axi_ahb": {
+      "pattern": "^esp_crypto_shared_gdma_start_axi_ahb$",
+      "max_bytes": 96
+    },
+    "tls_gdma_new_ahb_channel": {
+      "pattern": "^gdma_new_ahb_channel$",
+      "max_bytes": 96
+    },
+    "tls_psa_cipher_update": {
+      "pattern": "^psa_cipher_update$",
+      "max_bytes": 32
+    },
+    "tls_esp_aes_cipher_update": {
+      "pattern": "^esp_aes_cipher_update$",
+      "max_bytes": 64
+    },
+    "tls_esp_aes_crypt_cbc": {
+      "pattern": "^esp_aes_crypt_cbc$",
+      "max_bytes": 64
+    },
+    "tls_heap_caps_aligned_calloc": {
+      "pattern": "^heap_caps_aligned_calloc$",
+      "max_bytes": 32
+    },
+    "tls_heap_caps_aligned_alloc": {
+      "pattern": "^heap_caps_aligned_alloc$",
+      "max_bytes": 32
+    },
+    "tls_esp_heap_adjust_alignment_to_hw": {
+      "pattern": "^esp_heap_adjust_alignment_to_hw$",
+      "max_bytes": 48
+    },
+    "tls_esp_cache_get_alignment": {
+      "pattern": "^esp_cache_get_alignment$",
+      "max_bytes": 48
+    },
+    "tls_esp_log_timestamp": {
+      "pattern": "^esp_log_timestamp$",
+      "max_bytes": 32
+    },
+    "tls_xtaskgettickcountfromisr": {
+      "pattern": "^xTaskGetTickCountFromISR$",
+      "max_bytes": 32
+    },
+    "tls_tls_prf_sha384": {
+      "pattern": "^tls_prf_sha384$",
+      "max_bytes": 48
+    },
+    "tls_esp_sha512_driver_compute": {
+      "pattern": "^esp_sha512_driver_compute$",
+      "max_bytes": 48
+    },
+    "tls_esp_sha512_finish": {
+      "pattern": "^esp_sha512_finish$",
+      "max_bytes": 48
+    },
+    "tls_esp_sha512_update": {
+      "pattern": "^esp_sha512_update$",
+      "max_bytes": 48
+    },
+    "tls_esp_transport_connect": {
+      "pattern": "^esp_transport_connect$",
+      "max_bytes": 32
+    },
+    "tls_ssl_connect": {
+      "pattern": "^ssl_connect$",
+      "max_bytes": 48
+    },
+    "tls_esp_tls_conn_new_sync": {
+      "pattern": "^esp_tls_conn_new_sync$",
+      "max_bytes": 48
+    },
+    "tls_esp_tls_low_level_conn": {
+      "pattern": "^esp_tls_low_level_conn$",
+      "max_bytes": 80
+    },
+    "tls_esp_mbedtls_handshake": {
+      "pattern": "^esp_mbedtls_handshake$",
+      "max_bytes": 32
+    },
+    "tls_mqtt_message_receive": {
+      "pattern": "^mqtt_message_receive$",
+      "max_bytes": 64
+    },
+    "tls_esp_transport_read": {
+      "pattern": "^esp_transport_read$",
+      "max_bytes": 32
+    },
+    "tls_ws_read": {
+      "pattern": "^ws_read$",
+      "max_bytes": 80
+    },
+    "tls_esp_transport_read_exact_size": {
+      "pattern": "^esp_transport_read_exact_size$",
+      "max_bytes": 64
+    },
+    "tls_esp_transport_read_internal": {
+      "pattern": "^esp_transport_read_internal$",
+      "max_bytes": 32
+    },
+    "tls_ssl_read": {
+      "pattern": "^ssl_read$",
+      "max_bytes": 64
+    },
+    "tls_esp_tls_conn_read": {
+      "pattern": "^esp_tls_conn_read$",
+      "max_bytes": 32
+    },
+    "tls_esp_mbedtls_read": {
+      "pattern": "^esp_mbedtls_read$",
+      "max_bytes": 32
+    },
+    "tls_wrap_mbedtls_ssl_read": {
+      "pattern": "^__wrap_mbedtls_ssl_read$",
+      "max_bytes": 32
+    },
+    "tls_mbedtls_ssl_read": {
+      "pattern": "^mbedtls_ssl_read$",
+      "max_bytes": 32
+    },
+    "tls_ws_write": {
+      "pattern": "^ws_write$",
+      "max_bytes": 32
+    },
+    "tls_ws_write_constprop_0": {
+      "pattern": "^_ws_write\\$constprop\\$0$",
+      "max_bytes": 48
+    },
+    "tls_mbedtls_ssl_fetch_input": {
+      "pattern": "^mbedtls_ssl_fetch_input$",
+      "max_bytes": 32
+    },
+    "tls_mbedtls_net_recv": {
+      "pattern": "^mbedtls_net_recv$",
+      "max_bytes": 32
+    },
+    "tls_read": {
+      "pattern": "^read$",
+      "max_bytes": 32
+    },
+    "tls_read_r": {
+      "pattern": "^_read_r$",
+      "max_bytes": 32
+    },
+    "tls_lwip_read": {
+      "pattern": "^lwip_read$",
+      "max_bytes": 32
+    },
+    "tls_lwip_recvfrom": {
+      "pattern": "^lwip_recvfrom$",
+      "max_bytes": 80
+    },
+    "tls_lwip_recv_tcp": {
+      "pattern": "^lwip_recv_tcp$",
+      "max_bytes": 64
+    },
+    "tls_netconn_recv_tcp_pbuf_flags": {
+      "pattern": "^netconn_recv_tcp_pbuf_flags$",
+      "max_bytes": 32
+    },
+    "tls_netconn_recv_data_tcp": {
+      "pattern": "^netconn_recv_data_tcp$",
+      "max_bytes": 80
+    },
+    "tls_netconn_apimsg": {
+      "pattern": "^netconn_apimsg$",
+      "max_bytes": 128
+    },
+    "tls_sys_thread_sem_get": {
+      "pattern": "^sys_thread_sem_get$",
+      "max_bytes": 32
+    },
+    "tls_sys_thread_sem_init": {
+      "pattern": "^sys_thread_sem_init$",
+      "max_bytes": 64
+    },
+    "tls_pthread_setspecific": {
+      "pattern": "^pthread_setspecific$",
+      "max_bytes": 32
+    },
+    "tls_find_key": {
+      "pattern": "^find_key$",
+      "max_bytes": 32
+    },
+    "tls_esp_sha_dma": {
+      "pattern": "^esp_sha_dma$",
+      "max_bytes": 64
+    },
+    "tls_esp_sha_dma_start": {
+      "pattern": "^esp_sha_dma_start$",
+      "max_bytes": 32
+    },
+    "tls_psa_mac_verify_setup": {
+      "pattern": "^psa_mac_verify_setup$",
+      "max_bytes": 32
+    },
+    "tls_psa_mac_setup": {
+      "pattern": "^psa_mac_setup$",
+      "max_bytes": 64
+    },
+    "tls_lwip_read_r_wrapper": {
+      "pattern": "^lwip_read_r_wrapper$",
+      "max_bytes": 32
+    },
+    "tls_calloc": {
+      "pattern": "^calloc$",
+      "max_bytes": 48
+    },
+    "tls_wrap_mbedtls_ssl_write_client_hello": {
+      "pattern": "^__wrap_mbedtls_ssl_write_client_hello$",
+      "max_bytes": 32
+    },
+    "tls_mbedtls_ssl_write_client_hello": {
+      "pattern": "^mbedtls_ssl_write_client_hello$",
+      "max_bytes": 80
+    },
+    "tls_mbedtls_ssl_finish_handshake_msg": {
+      "pattern": "^mbedtls_ssl_finish_handshake_msg$",
+      "max_bytes": 32
+    },
+    "tls_mbedtls_ssl_write_handshake_msg_ext": {
+      "pattern": "^mbedtls_ssl_write_handshake_msg_ext$",
+      "max_bytes": 32
+    },
+    "tls_mbedtls_ssl_write_record": {
+      "pattern": "^mbedtls_ssl_write_record$",
+      "max_bytes": 64
+    },
+    "tls_mbedtls_ssl_flush_output": {
+      "pattern": "^mbedtls_ssl_flush_output$",
+      "max_bytes": 32
+    },
+    "tls_mbedtls_net_send": {
+      "pattern": "^mbedtls_net_send$",
+      "max_bytes": 32
+    },
+    "tls_lwip_write_r_wrapper": {
+      "pattern": "^lwip_write_r_wrapper$",
+      "max_bytes": 32
+    },
+    "tls_lwip_write": {
+      "pattern": "^lwip_write$",
+      "max_bytes": 32
+    },
+    "tls_lwip_send": {
+      "pattern": "^lwip_send$",
+      "max_bytes": 48
+    },
+    "tls_netconn_write_partly": {
+      "pattern": "^netconn_write_partly$",
+      "max_bytes": 48
+    },
+    "tls_netconn_write_vectors_partly": {
+      "pattern": "^netconn_write_vectors_partly$",
+      "max_bytes": 80
+    },
+    "tls_tcpip_send_msg_wait_sem": {
+      "pattern": "^tcpip_send_msg_wait_sem$",
+      "max_bytes": 128
+    },
+    "tls_sys_mbox_post": {
+      "pattern": "^sys_mbox_post$",
+      "max_bytes": 48
     }
   },
   "paths": {
     "httpd_mcp_status": {
-      "symbols": ["mcp_post", "status_serializer"],
+      "symbols": [
+        "mcp_post",
+        "status_serializer",
+        "double_string",
+        "dynamic_double_string"
+      ],
       "multipliers": {},
       "base_bytes": 1536,
       "max_bytes": 8192
     },
     "httpd_direct_status": {
-      "symbols": ["http_send_status_json", "status_serializer"],
+      "symbols": [
+        "http_send_status_json",
+        "status_serializer",
+        "double_string",
+        "dynamic_double_string"
+      ],
       "multipliers": {},
       "base_bytes": 1536,
       "max_bytes": 8192
     },
     "httpd_ota_status": {
-      "symbols": ["ota_status_http"],
+      "symbols": [
+        "ota_status_http"
+      ],
       "multipliers": {},
       "base_bytes": 1536,
       "max_bytes": 7168
     },
     "ota_task_manifest_fetch": {
-      "symbols": ["ota_task", "ota_manifest_fetch_wrapper", "ota_manifest_fetch", "ota_manifest_identity", "ota_manifest_skip_value"],
-      "multipliers": {"ota_manifest_skip_value": 9},
+      "symbols": [
+        "ota_task",
+        "ota_manifest_fetch_wrapper",
+        "ota_manifest_fetch",
+        "ota_manifest_identity",
+        "ota_manifest_skip_value"
+      ],
+      "multipliers": {
+        "ota_manifest_skip_value": 9
+      },
       "base_bytes": 0,
       "max_bytes": 6144
     },
     "httpd_ota_check": {
-      "symbols": ["ota_check_http", "ota_start_check"],
+      "symbols": [
+        "ota_check_http",
+        "ota_start_check"
+      ],
       "multipliers": {},
       "base_bytes": 1536,
       "max_bytes": 3840
     },
     "http_deadline_watchdog": {
-      "symbols": ["http_deadline_watchdog"],
+      "symbols": [
+        "http_deadline_watchdog"
+      ],
       "multipliers": {},
       "base_bytes": 1024,
       "max_bytes": 2048
     },
     "weather_task_download": {
-      "symbols": ["weather_task", "weather_cycle", "weather_fetch", "weather_download"],
+      "symbols": [
+        "weather_task",
+        "weather_cycle",
+        "weather_fetch",
+        "weather_download"
+      ],
       "multipliers": {},
       "base_bytes": 2048,
       "max_bytes": 11264
     },
     "weather_task_parse": {
-      "symbols": ["weather_task", "weather_cycle", "weather_fetch", "weather_parse"],
-      "multipliers": {},
+      "symbols": [
+        "weather_task",
+        "weather_cycle",
+        "weather_fetch",
+        "weather_parse",
+        "cjson_parse_length_opts",
+        "cjson_parse_value",
+        "cjson_delete",
+        "cjson_parse_string"
+      ],
+      "multipliers": {
+        "cjson_parse_value": 17,
+        "cjson_delete": 17
+      },
       "base_bytes": 2048,
       "max_bytes": 11264
     },
     "ota_health_gate": {
-      "symbols": ["ota_health_task"],
+      "symbols": [
+        "ota_health_task"
+      ],
       "multipliers": {},
       "base_bytes": 2048,
       "max_bytes": 3072
     },
     "httpd_config_hp": {
-      "symbols": ["config_hp", "cjson_parse_length_opts", "cjson_parse_value", "cjson_delete", "cjson_parse_string"],
-      "multipliers": {"cjson_parse_value": 17, "cjson_delete": 17},
+      "symbols": [
+        "config_hp",
+        "cjson_parse_length_opts",
+        "cjson_parse_value",
+        "cjson_delete",
+        "cjson_parse_string"
+      ],
+      "multipliers": {
+        "cjson_parse_value": 17,
+        "cjson_delete": 17
+      },
       "base_bytes": 1536,
       "max_bytes": 8192
     },
     "httpd_config_mqtt": {
-      "symbols": ["config_mqtt", "cjson_parse_length_opts", "cjson_parse_value", "cjson_delete", "cjson_parse_string"],
-      "multipliers": {"cjson_parse_value": 17, "cjson_delete": 17},
+      "symbols": [
+        "config_mqtt",
+        "cjson_parse_length_opts",
+        "cjson_parse_value",
+        "cjson_delete",
+        "cjson_parse_string"
+      ],
+      "multipliers": {
+        "cjson_parse_value": 17,
+        "cjson_delete": 17
+      },
       "base_bytes": 1536,
       "max_bytes": 8192
     },
     "httpd_config_board": {
-      "symbols": ["config_board", "cjson_parse_length_opts", "cjson_parse_value", "cjson_delete", "cjson_parse_string"],
-      "multipliers": {"cjson_parse_value": 17, "cjson_delete": 17},
+      "symbols": [
+        "config_board",
+        "cjson_parse_length_opts",
+        "cjson_parse_value",
+        "cjson_delete",
+        "cjson_parse_string"
+      ],
+      "multipliers": {
+        "cjson_parse_value": 17,
+        "cjson_delete": 17
+      },
       "base_bytes": 1536,
       "max_bytes": 8192
     },
     "httpd_config_env3": {
-      "symbols": ["config_env3", "cjson_parse_length_opts", "cjson_parse_value", "cjson_delete", "cjson_parse_string"],
-      "multipliers": {"cjson_parse_value": 17, "cjson_delete": 17},
+      "symbols": [
+        "config_env3",
+        "cjson_parse_length_opts",
+        "cjson_parse_value",
+        "cjson_delete",
+        "cjson_parse_string"
+      ],
+      "multipliers": {
+        "cjson_parse_value": 17,
+        "cjson_delete": 17
+      },
       "base_bytes": 1536,
       "max_bytes": 8192
     },
     "httpd_config_weather": {
-      "symbols": ["config_weather", "cjson_parse_length_opts", "cjson_parse_value", "cjson_delete", "cjson_parse_string"],
-      "multipliers": {"cjson_parse_value": 17, "cjson_delete": 17},
+      "symbols": [
+        "config_weather",
+        "cjson_parse_length_opts",
+        "cjson_parse_value",
+        "cjson_delete",
+        "cjson_parse_string"
+      ],
+      "multipliers": {
+        "cjson_parse_value": 17,
+        "cjson_delete": 17
+      },
       "base_bytes": 1536,
       "max_bytes": 8192
     },
     "httpd_config_diagnostics": {
-      "symbols": ["config_diagnostics", "cjson_parse_length_opts", "cjson_parse_value", "cjson_delete", "cjson_parse_string"],
-      "multipliers": {"cjson_parse_value": 17, "cjson_delete": 17},
+      "symbols": [
+        "config_diagnostics",
+        "cjson_parse_length_opts",
+        "cjson_parse_value",
+        "cjson_delete",
+        "cjson_parse_string"
+      ],
+      "multipliers": {
+        "cjson_parse_value": 17,
+        "cjson_delete": 17
+      },
       "base_bytes": 1536,
       "max_bytes": 8192
     },
     "httpd_config_circulation": {
-      "symbols": ["config_circulation", "circulation_parser", "cjson_parse_length_opts", "cjson_parse_value", "cjson_delete", "cjson_parse_string"],
-      "multipliers": {"cjson_parse_value": 17, "cjson_delete": 17},
+      "symbols": [
+        "config_circulation",
+        "circulation_parser",
+        "cjson_parse_length_opts",
+        "cjson_parse_value",
+        "cjson_delete",
+        "cjson_parse_string"
+      ],
+      "multipliers": {
+        "cjson_parse_value": 17,
+        "cjson_delete": 17
+      },
       "base_bytes": 1536,
       "max_bytes": 8192
     },
     "httpd_hp_query_probe": {
-      "symbols": ["hp_query_probe"],
+      "symbols": [
+        "hp_query_probe"
+      ],
       "multipliers": {},
       "base_bytes": 1536,
       "max_bytes": 6144
     },
     "httpd_mcp_parse": {
-      "symbols": ["mcp_post", "mcp_parser", "mcp_json_value", "mcp_json_string"],
-      "multipliers": {"mcp_json_value": 18},
+      "symbols": [
+        "mcp_post",
+        "mcp_parser",
+        "mcp_json_value",
+        "mcp_json_string"
+      ],
+      "multipliers": {
+        "mcp_json_value": 18
+      },
       "base_bytes": 1536,
       "max_bytes": 4096
     },
     "httpd_config_save": {
-      "symbols": ["config_hp", "config_save", "config_save_whole", "config_transaction", "config_nvs_blob"],
+      "symbols": [
+        "config_hp",
+        "config_save",
+        "config_save_whole",
+        "config_transaction",
+        "config_nvs_blob"
+      ],
       "multipliers": {},
       "base_bytes": 3072,
       "max_bytes": 8192
     },
     "httpd_config_save_link": {
-      "symbols": ["config_hp", "config_save_link", "config_save_whole", "config_transaction", "config_nvs_blob"],
+      "symbols": [
+        "config_hp",
+        "config_save_link",
+        "config_save_whole",
+        "config_transaction",
+        "config_nvs_blob"
+      ],
       "multipliers": {},
       "base_bytes": 3072,
       "max_bytes": 8192
     },
     "httpd_wifi_scan": {
-      "symbols": ["http_scan", "wifi_scan"],
+      "symbols": [
+        "http_scan",
+        "wifi_scan"
+      ],
       "multipliers": {},
       "base_bytes": 2560,
       "max_bytes": 6144
     },
     "httpd_mqtt_tls": {
-      "symbols": ["config_mqtt"],
+      "symbols": [
+        "config_mqtt"
+      ],
       "multipliers": {},
       "base_bytes": 5632,
       "max_bytes": 8192
+    },
+    "mqtt_reference_parse": {
+      "symbols": [
+        "mqtt_task",
+        "reference_dispatch",
+        "reference_frame",
+        "reference_decode",
+        "cjson_parse_length_opts",
+        "cjson_parse_value",
+        "cjson_delete",
+        "cjson_parse_string",
+        "json_guard_reset",
+        "json_guard_destroy"
+      ],
+      "multipliers": {
+        "cjson_parse_value": 17,
+        "cjson_delete": 17
+      },
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "mqtt_circulation_parse": {
+      "symbols": [
+        "mqtt_task",
+        "reference_dispatch",
+        "circulation_frame",
+        "circulation_decode",
+        "cjson_parse_length_opts",
+        "cjson_parse_value",
+        "cjson_delete",
+        "cjson_parse_string",
+        "json_guard_reset",
+        "json_guard_destroy"
+      ],
+      "multipliers": {
+        "cjson_parse_value": 17,
+        "cjson_delete": 17
+      },
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "mqtt_circulation_probe_parse": {
+      "symbols": [
+        "mqtt_task",
+        "reference_dispatch",
+        "circulation_probe",
+        "circulation_decode",
+        "cjson_parse_length_opts",
+        "cjson_parse_value",
+        "cjson_delete",
+        "cjson_parse_string",
+        "json_guard_reset",
+        "json_guard_destroy"
+      ],
+      "multipliers": {
+        "cjson_parse_value": 17,
+        "cjson_delete": 17
+      },
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "mqtt_reference_subscribe": {
+      "symbols": [
+        "mqtt_task",
+        "reference_subscription"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "mqtt_circulation_subscribe": {
+      "symbols": [
+        "mqtt_task",
+        "circulation_subscription"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "mqtt_cleanup": {
+      "symbols": [
+        "mqtt_task",
+        "mqtt_cleanup",
+        "mqtt_cleanup_probe"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "mqtt_promotion": {
+      "symbols": [
+        "mqtt_task",
+        "mqtt_promotion",
+        "mqtt_client_start"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "mqtt_discovery": {
+      "symbols": [
+        "mqtt_task",
+        "mqtt_discovery",
+        "mqtt_discovery_payload"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "mqtt_weather": {
+      "symbols": [
+        "mqtt_task",
+        "mqtt_weather_publish"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "mqtt_heartbeat": {
+      "symbols": [
+        "mqtt_task",
+        "mqtt_heartbeat"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "mqtt_crash": {
+      "symbols": [
+        "mqtt_task",
+        "mqtt_crash"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "mqtt_curve": {
+      "symbols": [
+        "mqtt_task",
+        "mqtt_curve"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "mqtt_sync_tls_publish": {
+      "symbols": [
+        "mqtt_task",
+        "mqtt_heartbeat"
+      ],
+      "multipliers": {},
+      "base_bytes": 4608,
+      "max_bytes": 6144
+    },
+    "poll_history": {
+      "symbols": [
+        "poll_task",
+        "history_record",
+        "checkup_report"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 7168
+    },
+    "poll_detect_query": {
+      "symbols": [
+        "poll_task",
+        "poll_detect",
+        "poll_query"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 7168
+    },
+    "poll_format": {
+      "symbols": [
+        "poll_task",
+        "poll_format"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 7168
+    },
+    "poll_journal": {
+      "symbols": [
+        "poll_task",
+        "history_journal",
+        "history_append",
+        "history_append_at"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 7168
+    },
+    "modbus_poll": {
+      "symbols": [
+        "modbus_task",
+        "modbus_poll",
+        "modbus_read"
+      ],
+      "multipliers": {},
+      "base_bytes": 2048,
+      "max_bytes": 5120
+    },
+    "modbus_history": {
+      "symbols": [
+        "modbus_task",
+        "modbus_poll",
+        "modbus_history"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "syslog_socket": {
+      "symbols": [
+        "syslog_task_entry",
+        "syslog_task",
+        "syslog_send"
+      ],
+      "multipliers": {},
+      "base_bytes": 2048,
+      "max_bytes": 5120
+    },
+    "env3_read": {
+      "symbols": [
+        "env3_task",
+        "env3_read"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 3072
+    },
+    "env3_history": {
+      "symbols": [
+        "env3_task",
+        "env3_history"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 3072
+    },
+    "led_diagnostic": {
+      "symbols": [
+        "led_task",
+        "diag_log",
+        "diag_syslog",
+        "sdk_queue_send",
+        "sdk_queue_remove_event",
+        "sdk_queue_yield_required",
+        "sdk_queue_yield_other",
+        "sdk_queue_crosscore_yield",
+        "sdk_queue_crosscore_send",
+        "sdk_queue_critical",
+        "sdk_queue_compare_swap",
+        "runtime_task_entry"
+      ],
+      "multipliers": {},
+      "base_bytes": 192,
+      "max_bytes": 2048
+    },
+    "button_diagnostic": {
+      "symbols": [
+        "button_task",
+        "diag_log",
+        "diag_syslog",
+        "sdk_queue_send",
+        "sdk_queue_remove_event",
+        "sdk_queue_yield_required",
+        "sdk_queue_yield_other",
+        "sdk_queue_crosscore_yield",
+        "sdk_queue_crosscore_send",
+        "sdk_queue_critical",
+        "sdk_queue_compare_swap",
+        "runtime_task_entry"
+      ],
+      "multipliers": {},
+      "base_bytes": 192,
+      "max_bytes": 2048
+    },
+    "wifi_diagnostic": {
+      "symbols": [
+        "wifi_task",
+        "diag_log",
+        "diag_syslog",
+        "sdk_queue_send",
+        "sdk_queue_remove_event",
+        "sdk_queue_yield_required",
+        "sdk_queue_yield_other",
+        "sdk_queue_crosscore_yield",
+        "sdk_queue_crosscore_send",
+        "sdk_queue_critical",
+        "sdk_queue_compare_swap",
+        "runtime_task_entry"
+      ],
+      "multipliers": {},
+      "base_bytes": 192,
+      "max_bytes": 3072
+    },
+    "eth_diagnostic": {
+      "symbols": [
+        "eth_task",
+        "diag_log",
+        "diag_syslog",
+        "sdk_queue_send",
+        "sdk_queue_remove_event",
+        "sdk_queue_yield_required",
+        "sdk_queue_yield_other",
+        "sdk_queue_crosscore_yield",
+        "sdk_queue_crosscore_send",
+        "sdk_queue_critical",
+        "sdk_queue_compare_swap",
+        "runtime_task_entry"
+      ],
+      "multipliers": {},
+      "base_bytes": 192,
+      "max_bytes": 2048
+    },
+    "dns_socket": {
+      "symbols": [
+        "dns_task"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 3072
+    },
+    "main_config_load": {
+      "symbols": [
+        "main_task",
+        "boot_sequence",
+        "config_load"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "main_history_restore": {
+      "symbols": [
+        "main_task",
+        "boot_sequence",
+        "history_start"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "main_modbus_discover": {
+      "symbols": [
+        "main_task",
+        "boot_sequence",
+        "modbus_discover"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "main_wifi_config_save": {
+      "symbols": [
+        "main_task",
+        "boot_sequence",
+        "wifi_start",
+        "wifi_rollback",
+        "config_save",
+        "config_save_whole",
+        "config_transaction",
+        "config_nvs_blob"
+      ],
+      "multipliers": {},
+      "base_bytes": 656,
+      "max_bytes": 5120
+    },
+    "httpd_values": {
+      "symbols": [
+        "http_values"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_history": {
+      "symbols": [
+        "http_history"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_diag_plain": {
+      "symbols": [
+        "http_diag"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_diag_redacted": {
+      "symbols": [
+        "http_diag",
+        "http_diag_redact"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_coredump": {
+      "symbols": [
+        "http_coredump",
+        "http_coredump_body"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_model_values": {
+      "symbols": [
+        "http_values_model"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "mqtt_reference_apply": {
+      "symbols": [
+        "mqtt_task",
+        "reference_dispatch",
+        "reference_frame",
+        "reference_apply"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "main_wifi_config_success": {
+      "symbols": [
+        "main_task",
+        "boot_sequence",
+        "wifi_start",
+        "wifi_success",
+        "config_save",
+        "config_save_whole",
+        "config_transaction",
+        "config_nvs_blob"
+      ],
+      "multipliers": {},
+      "base_bytes": 656,
+      "max_bytes": 5120
+    },
+    "main_wifi_driver": {
+      "symbols": [
+        "main_task",
+        "boot_sequence",
+        "wifi_start",
+        "wifi_init"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "main_wifi_wait": {
+      "symbols": [
+        "main_task",
+        "boot_sequence",
+        "wifi_start",
+        "wifi_wait"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "led_diagnostic_format": {
+      "symbols": [
+        "led_task",
+        "diag_log",
+        "sdk_snprintf",
+        "sdk_vfprintf",
+        "sdk_int_format",
+        "sdk_string_write",
+        "runtime_task_entry"
+      ],
+      "multipliers": {},
+      "base_bytes": 192,
+      "max_bytes": 2048
+    },
+    "led_diagnostic_console_buffer": {
+      "symbols": [
+        "led_task",
+        "diag_log",
+        "sdk_log",
+        "sdk_vprintf",
+        "sdk_vfprintf",
+        "sdk_bufio_put",
+        "sdk_bufio_allocate",
+        "sdk_malloc",
+        "sdk_malloc_default",
+        "sdk_malloc_caps",
+        "sdk_malloc_base",
+        "sdk_malloc_aligned",
+        "sdk_multi_aligned_offset",
+        "sdk_multi_aligned_impl",
+        "sdk_multi_lock",
+        "sdk_queue_critical",
+        "sdk_queue_compare_swap",
+        "runtime_task_entry"
+      ],
+      "multipliers": {},
+      "base_bytes": 192,
+      "max_bytes": 2048
+    },
+    "led_diagnostic_console_write": {
+      "symbols": [
+        "led_task",
+        "diag_log",
+        "sdk_log",
+        "sdk_vprintf",
+        "sdk_vfprintf",
+        "sdk_bufio_put",
+        "sdk_bufio_flush",
+        "sdk_write",
+        "sdk_write_r",
+        "sdk_console_write",
+        "sdk_usb_write",
+        "sdk_usb_character",
+        "sdk_recursive_lock",
+        "sdk_lock_acquire",
+        "sdk_queue_sem_take",
+        "sdk_queue_critical",
+        "sdk_queue_compare_swap",
+        "runtime_task_entry"
+      ],
+      "multipliers": {},
+      "base_bytes": 192,
+      "max_bytes": 2048
+    },
+    "button_diagnostic_format": {
+      "symbols": [
+        "button_task",
+        "diag_log",
+        "sdk_snprintf",
+        "sdk_vfprintf",
+        "sdk_int_format",
+        "sdk_string_write",
+        "runtime_task_entry"
+      ],
+      "multipliers": {},
+      "base_bytes": 192,
+      "max_bytes": 2048
+    },
+    "button_diagnostic_console_buffer": {
+      "symbols": [
+        "button_task",
+        "diag_log",
+        "sdk_log",
+        "sdk_vprintf",
+        "sdk_vfprintf",
+        "sdk_bufio_put",
+        "sdk_bufio_allocate",
+        "sdk_malloc",
+        "sdk_malloc_default",
+        "sdk_malloc_caps",
+        "sdk_malloc_base",
+        "sdk_malloc_aligned",
+        "sdk_multi_aligned_offset",
+        "sdk_multi_aligned_impl",
+        "sdk_multi_lock",
+        "sdk_queue_critical",
+        "sdk_queue_compare_swap",
+        "runtime_task_entry"
+      ],
+      "multipliers": {},
+      "base_bytes": 192,
+      "max_bytes": 2048
+    },
+    "button_diagnostic_console_write": {
+      "symbols": [
+        "button_task",
+        "diag_log",
+        "sdk_log",
+        "sdk_vprintf",
+        "sdk_vfprintf",
+        "sdk_bufio_put",
+        "sdk_bufio_flush",
+        "sdk_write",
+        "sdk_write_r",
+        "sdk_console_write",
+        "sdk_usb_write",
+        "sdk_usb_character",
+        "sdk_recursive_lock",
+        "sdk_lock_acquire",
+        "sdk_queue_sem_take",
+        "sdk_queue_critical",
+        "sdk_queue_compare_swap",
+        "runtime_task_entry"
+      ],
+      "multipliers": {},
+      "base_bytes": 192,
+      "max_bytes": 2048
+    },
+    "wifi_diagnostic_format": {
+      "symbols": [
+        "wifi_task",
+        "diag_log",
+        "sdk_snprintf",
+        "sdk_vfprintf",
+        "sdk_int_format",
+        "sdk_string_write",
+        "runtime_task_entry"
+      ],
+      "multipliers": {},
+      "base_bytes": 192,
+      "max_bytes": 3072
+    },
+    "wifi_diagnostic_console_buffer": {
+      "symbols": [
+        "wifi_task",
+        "diag_log",
+        "sdk_log",
+        "sdk_vprintf",
+        "sdk_vfprintf",
+        "sdk_bufio_put",
+        "sdk_bufio_allocate",
+        "sdk_malloc",
+        "sdk_malloc_default",
+        "sdk_malloc_caps",
+        "sdk_malloc_base",
+        "sdk_malloc_aligned",
+        "sdk_multi_aligned_offset",
+        "sdk_multi_aligned_impl",
+        "sdk_multi_lock",
+        "sdk_queue_critical",
+        "sdk_queue_compare_swap",
+        "runtime_task_entry"
+      ],
+      "multipliers": {},
+      "base_bytes": 192,
+      "max_bytes": 3072
+    },
+    "wifi_diagnostic_console_write": {
+      "symbols": [
+        "wifi_task",
+        "diag_log",
+        "sdk_log",
+        "sdk_vprintf",
+        "sdk_vfprintf",
+        "sdk_bufio_put",
+        "sdk_bufio_flush",
+        "sdk_write",
+        "sdk_write_r",
+        "sdk_console_write",
+        "sdk_usb_write",
+        "sdk_usb_character",
+        "sdk_recursive_lock",
+        "sdk_lock_acquire",
+        "sdk_queue_sem_take",
+        "sdk_queue_critical",
+        "sdk_queue_compare_swap",
+        "runtime_task_entry"
+      ],
+      "multipliers": {},
+      "base_bytes": 192,
+      "max_bytes": 3072
+    },
+    "eth_diagnostic_format": {
+      "symbols": [
+        "eth_task",
+        "diag_log",
+        "sdk_snprintf",
+        "sdk_vfprintf",
+        "sdk_int_format",
+        "sdk_string_write",
+        "runtime_task_entry"
+      ],
+      "multipliers": {},
+      "base_bytes": 192,
+      "max_bytes": 2048
+    },
+    "eth_diagnostic_console_buffer": {
+      "symbols": [
+        "eth_task",
+        "diag_log",
+        "sdk_log",
+        "sdk_vprintf",
+        "sdk_vfprintf",
+        "sdk_bufio_put",
+        "sdk_bufio_allocate",
+        "sdk_malloc",
+        "sdk_malloc_default",
+        "sdk_malloc_caps",
+        "sdk_malloc_base",
+        "sdk_malloc_aligned",
+        "sdk_multi_aligned_offset",
+        "sdk_multi_aligned_impl",
+        "sdk_multi_lock",
+        "sdk_queue_critical",
+        "sdk_queue_compare_swap",
+        "runtime_task_entry"
+      ],
+      "multipliers": {},
+      "base_bytes": 192,
+      "max_bytes": 2048
+    },
+    "eth_diagnostic_console_write": {
+      "symbols": [
+        "eth_task",
+        "diag_log",
+        "sdk_log",
+        "sdk_vprintf",
+        "sdk_vfprintf",
+        "sdk_bufio_put",
+        "sdk_bufio_flush",
+        "sdk_write",
+        "sdk_write_r",
+        "sdk_console_write",
+        "sdk_usb_write",
+        "sdk_usb_character",
+        "sdk_recursive_lock",
+        "sdk_lock_acquire",
+        "sdk_queue_sem_take",
+        "sdk_queue_critical",
+        "sdk_queue_compare_swap",
+        "runtime_task_entry"
+      ],
+      "multipliers": {},
+      "base_bytes": 192,
+      "max_bytes": 2048
+    },
+    "mqtt_heartbeat_build": {
+      "symbols": [
+        "mqtt_task",
+        "mqtt_heartbeat_builder",
+        "mqtt_heartbeat_payload"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "mqtt_curve_build": {
+      "symbols": [
+        "mqtt_task",
+        "mqtt_curve_builder",
+        "mqtt_curve_payload"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "sdk_mqtt_tls": {
+      "symbols": [
+        "sdk_mqtt_task"
+      ],
+      "multipliers": {},
+      "base_bytes": 4608,
+      "max_bytes": 5120
+    },
+    "mqtt_cycle_gate": {
+      "symbols": [
+        "mqtt_task",
+        "mqtt_cycle_gate"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "mqtt_crash_changed": {
+      "symbols": [
+        "mqtt_task",
+        "mqtt_crash_changed"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "mqtt_weather_build": {
+      "symbols": [
+        "mqtt_task",
+        "mqtt_weather_builder",
+        "mqtt_weather_payload"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "mqtt_reference_binding": {
+      "symbols": [
+        "mqtt_task",
+        "reference_subscription",
+        "mqtt_reference_binding"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "mqtt_circulation_history": {
+      "symbols": [
+        "mqtt_task",
+        "history_circulation",
+        "history_fold_circulation",
+        "history_advance_raster"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "poll_board_history": {
+      "symbols": [
+        "poll_task",
+        "history_board",
+        "history_advance_raster"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 7168
+    },
+    "mqtt_curve_evaluate": {
+      "symbols": [
+        "mqtt_task",
+        "mqtt_curve_evaluate"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "mqtt_x10a_build": {
+      "symbols": [
+        "mqtt_task",
+        "mqtt_x10a_state",
+        "mqtt_x10a_probe",
+        "mqtt_x10a_copy"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "mqtt_modbus_build": {
+      "symbols": [
+        "mqtt_task",
+        "mqtt_modbus_values",
+        "mqtt_modbus_payload"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "mqtt_env3_build": {
+      "symbols": [
+        "mqtt_task",
+        "mqtt_env3_payload"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "mqtt_reference_subscribe_tls": {
+      "symbols": [
+        "mqtt_task",
+        "reference_subscription",
+        "mqtt_retire_reference"
+      ],
+      "multipliers": {},
+      "base_bytes": 4608,
+      "max_bytes": 6144
+    },
+    "mqtt_circulation_subscribe_tls": {
+      "symbols": [
+        "mqtt_task",
+        "circulation_subscription"
+      ],
+      "multipliers": {},
+      "base_bytes": 4608,
+      "max_bytes": 6144
+    },
+    "mqtt_circulation_probe_subscribe_tls": {
+      "symbols": [
+        "mqtt_task",
+        "mqtt_circulation_probe_subscription"
+      ],
+      "multipliers": {},
+      "base_bytes": 4608,
+      "max_bytes": 6144
+    },
+    "mqtt_cleanup_probe_tls": {
+      "symbols": [
+        "mqtt_task",
+        "mqtt_cleanup_probe_start"
+      ],
+      "multipliers": {},
+      "base_bytes": 4608,
+      "max_bytes": 6144
+    },
+    "mqtt_discovery_tls": {
+      "symbols": [
+        "mqtt_task",
+        "mqtt_discovery"
+      ],
+      "multipliers": {},
+      "base_bytes": 4608,
+      "max_bytes": 6144
+    },
+    "mqtt_x10a_state_tls": {
+      "symbols": [
+        "mqtt_task",
+        "mqtt_x10a_state"
+      ],
+      "multipliers": {},
+      "base_bytes": 4608,
+      "max_bytes": 6144
+    },
+    "mqtt_crash_tls": {
+      "symbols": [
+        "mqtt_task",
+        "mqtt_crash"
+      ],
+      "multipliers": {},
+      "base_bytes": 4608,
+      "max_bytes": 6144
+    },
+    "mqtt_heartbeat_discovery_tls": {
+      "symbols": [
+        "mqtt_task",
+        "mqtt_board_discovery"
+      ],
+      "multipliers": {},
+      "base_bytes": 4608,
+      "max_bytes": 6144
+    },
+    "mqtt_legacy_retract_tls": {
+      "symbols": [
+        "mqtt_task",
+        "mqtt_discovery",
+        "mqtt_legacy_retract"
+      ],
+      "multipliers": {},
+      "base_bytes": 4608,
+      "max_bytes": 6144
+    },
+    "mqtt_retract_ungrouped_tls": {
+      "symbols": [
+        "mqtt_task",
+        "mqtt_discovery",
+        "mqtt_retract_ungrouped"
+      ],
+      "multipliers": {},
+      "base_bytes": 4608,
+      "max_bytes": 6144
+    },
+    "mqtt_cleanup_tls": {
+      "symbols": [
+        "mqtt_task",
+        "mqtt_cleanup"
+      ],
+      "multipliers": {},
+      "base_bytes": 4608,
+      "max_bytes": 6144
+    },
+    "env3_i2c_read": {
+      "symbols": [
+        "env3_task",
+        "env3_read",
+        "i2c_i2c_master_transmit_receive",
+        "i2c_s_i2c_synchronous_transaction",
+        "i2c_s_i2c_transaction_start",
+        "i2c_s_i2c_send_commands",
+        "i2c_s_i2c_start_end_command"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 3072
+    },
+    "env3_i2c_write": {
+      "symbols": [
+        "env3_task",
+        "i2c_daik_anonymous_namespace_write_reg_verified_i2c_master_dev_t_unsigned_char_unsigned_char",
+        "i2c_i2c_master_transmit",
+        "i2c_i2c_master_multi_buffer_transmit",
+        "i2c_s_i2c_synchronous_transaction",
+        "i2c_s_i2c_transaction_start",
+        "i2c_s_i2c_send_commands",
+        "i2c_s_i2c_start_end_command"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 3072
+    },
+    "env3_i2c_receive": {
+      "symbols": [
+        "env3_task",
+        "i2c_i2c_master_receive",
+        "i2c_s_i2c_synchronous_transaction",
+        "i2c_s_i2c_transaction_start",
+        "i2c_s_i2c_send_commands",
+        "i2c_s_i2c_start_end_command"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 3072
+    },
+    "httpd_i2c_read": {
+      "symbols": [
+        "config_env3",
+        "i2c_daik_env3_probe_int_int",
+        "env3_read",
+        "i2c_i2c_master_transmit_receive",
+        "i2c_s_i2c_synchronous_transaction",
+        "i2c_s_i2c_transaction_start",
+        "i2c_s_i2c_send_commands",
+        "i2c_s_i2c_start_end_command"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_i2c_write": {
+      "symbols": [
+        "config_env3",
+        "i2c_daik_env3_probe_int_int",
+        "i2c_i2c_master_transmit",
+        "i2c_i2c_master_multi_buffer_transmit",
+        "i2c_s_i2c_synchronous_transaction",
+        "i2c_s_i2c_transaction_start",
+        "i2c_s_i2c_send_commands",
+        "i2c_s_i2c_start_end_command"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_i2c_receive": {
+      "symbols": [
+        "config_env3",
+        "i2c_daik_env3_probe_int_int",
+        "i2c_i2c_master_receive",
+        "i2c_s_i2c_synchronous_transaction",
+        "i2c_s_i2c_transaction_start",
+        "i2c_s_i2c_send_commands",
+        "i2c_s_i2c_start_end_command"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    }
+  },
+  "tasks": {
+    "httpd": {
+      "stack_bytes": 10240,
+      "reserve_bytes": 2048,
+      "paths": [
+        "httpd_mcp_status",
+        "httpd_direct_status",
+        "httpd_ota_status",
+        "httpd_ota_check",
+        "httpd_config_hp",
+        "httpd_config_mqtt",
+        "httpd_config_board",
+        "httpd_config_env3",
+        "httpd_config_weather",
+        "httpd_config_diagnostics",
+        "httpd_config_circulation",
+        "httpd_hp_query_probe",
+        "httpd_mcp_parse",
+        "httpd_config_save",
+        "httpd_config_save_link",
+        "httpd_wifi_scan",
+        "httpd_mqtt_tls",
+        "httpd_values",
+        "httpd_history",
+        "httpd_diag_plain",
+        "httpd_diag_redacted",
+        "httpd_coredump",
+        "httpd_model_values",
+        "httpd_i2c_read",
+        "httpd_i2c_write",
+        "httpd_i2c_receive"
+      ]
+    },
+    "main": {
+      "stack_bytes": 6144,
+      "reserve_bytes": 1024,
+      "paths": [
+        "main_config_load",
+        "main_history_restore",
+        "main_modbus_discover",
+        "main_wifi_config_save",
+        "main_wifi_config_success",
+        "main_wifi_driver",
+        "main_wifi_wait"
+      ]
+    },
+    "mqtt": {
+      "stack_bytes": 7168,
+      "reserve_bytes": 1024,
+      "paths": [
+        "mqtt_reference_parse",
+        "mqtt_circulation_parse",
+        "mqtt_circulation_probe_parse",
+        "mqtt_reference_subscribe",
+        "mqtt_circulation_subscribe",
+        "mqtt_cleanup",
+        "mqtt_promotion",
+        "mqtt_discovery",
+        "mqtt_weather",
+        "mqtt_heartbeat",
+        "mqtt_crash",
+        "mqtt_curve",
+        "mqtt_sync_tls_publish",
+        "mqtt_reference_apply",
+        "mqtt_heartbeat_build",
+        "mqtt_curve_build",
+        "mqtt_cycle_gate",
+        "mqtt_crash_changed",
+        "mqtt_weather_build",
+        "mqtt_reference_binding",
+        "mqtt_circulation_history",
+        "mqtt_curve_evaluate",
+        "mqtt_x10a_build",
+        "mqtt_modbus_build",
+        "mqtt_env3_build",
+        "mqtt_reference_subscribe_tls",
+        "mqtt_circulation_subscribe_tls",
+        "mqtt_circulation_probe_subscribe_tls",
+        "mqtt_cleanup_probe_tls",
+        "mqtt_discovery_tls",
+        "mqtt_x10a_state_tls",
+        "mqtt_crash_tls",
+        "mqtt_heartbeat_discovery_tls",
+        "mqtt_legacy_retract_tls",
+        "mqtt_retract_ungrouped_tls",
+        "mqtt_cleanup_tls"
+      ]
+    },
+    "poll": {
+      "stack_bytes": 8192,
+      "reserve_bytes": 1024,
+      "paths": [
+        "poll_history",
+        "poll_detect_query",
+        "poll_format",
+        "poll_journal",
+        "poll_board_history"
+      ]
+    },
+    "modbus": {
+      "stack_bytes": 6144,
+      "reserve_bytes": 1024,
+      "paths": [
+        "modbus_poll",
+        "modbus_history"
+      ]
+    },
+    "syslog": {
+      "stack_bytes": 6144,
+      "reserve_bytes": 1024,
+      "paths": [
+        "syslog_socket"
+      ]
+    },
+    "env3": {
+      "stack_bytes": 4096,
+      "reserve_bytes": 1024,
+      "paths": [
+        "env3_read",
+        "env3_history",
+        "env3_i2c_read",
+        "env3_i2c_write",
+        "env3_i2c_receive"
+      ]
+    },
+    "led": {
+      "stack_bytes": 3072,
+      "reserve_bytes": 1024,
+      "paths": [
+        "led_diagnostic",
+        "led_diagnostic_format",
+        "led_diagnostic_console_buffer",
+        "led_diagnostic_console_write"
+      ]
+    },
+    "button": {
+      "stack_bytes": 3072,
+      "reserve_bytes": 1024,
+      "paths": [
+        "button_diagnostic",
+        "button_diagnostic_format",
+        "button_diagnostic_console_buffer",
+        "button_diagnostic_console_write"
+      ]
+    },
+    "wifi": {
+      "stack_bytes": 4096,
+      "reserve_bytes": 1024,
+      "paths": [
+        "wifi_diagnostic",
+        "wifi_diagnostic_format",
+        "wifi_diagnostic_console_buffer",
+        "wifi_diagnostic_console_write"
+      ]
+    },
+    "eth": {
+      "stack_bytes": 3072,
+      "reserve_bytes": 1024,
+      "paths": [
+        "eth_diagnostic",
+        "eth_diagnostic_format",
+        "eth_diagnostic_console_buffer",
+        "eth_diagnostic_console_write"
+      ]
+    },
+    "dns": {
+      "stack_bytes": 4096,
+      "reserve_bytes": 1024,
+      "paths": [
+        "dns_socket"
+      ]
+    },
+    "weather": {
+      "stack_bytes": 12288,
+      "reserve_bytes": 1024,
+      "paths": [
+        "weather_task_download",
+        "weather_task_parse"
+      ]
+    },
+    "ota": {
+      "stack_bytes": 11776,
+      "reserve_bytes": 1024,
+      "paths": [
+        "ota_task_manifest_fetch"
+      ]
+    },
+    "ota_health": {
+      "stack_bytes": 4096,
+      "reserve_bytes": 1024,
+      "paths": [
+        "ota_health_gate"
+      ]
+    },
+    "deadline": {
+      "stack_bytes": 3072,
+      "reserve_bytes": 1024,
+      "paths": [
+        "http_deadline_watchdog"
+      ]
+    },
+    "sdk_mqtt": {
+      "stack_bytes": 6144,
+      "reserve_bytes": 1024,
+      "paths": [
+        "sdk_mqtt_tls"
+      ]
+    }
+  },
+  "sdk": {
+    "source_sha256": {
+      "mbedtls/mbedtls/tf-psa-crypto/include/psa/crypto_sizes.h": "87693b7058f391a472b34378893452789fdcf0542e6f7bb5612d59b7b4bc2267",
+      "mbedtls/mbedtls/tf-psa-crypto/drivers/builtin/src/psa_crypto_rsa.c": "06f3a581c743bced41153e780eebc79e8a90be48c8634d2c070091fdcc74758e",
+      "mbedtls/mbedtls/tf-psa-crypto/drivers/builtin/src/psa_crypto_ecp.c": "8d6e2245774ef2f672f3ee29657a9f8bb341fc0224f24d2380d460a2b739b8d5",
+      "mbedtls/mbedtls/tf-psa-crypto/drivers/builtin/src/rsa.c": "f1265d8ecb7f883ed777ba2275f2e3816a530ee2469d093d5868a5f62cef85eb",
+      "mbedtls/mbedtls/tf-psa-crypto/drivers/builtin/src/ecp.c": "ee437af81f17d968dadde0c8e27acd7196f0e23b1558703d6000d2da630eda92",
+      "mbedtls/mbedtls/tf-psa-crypto/drivers/builtin/src/bignum.c": "105c77822dfb98f97e7795d8b4fce0f34782efbd8a88c2cb9c52ba78fa0b2fd3",
+      "mbedtls/mbedtls/library/ssl_msg.c": "46716c891f1ce273909e636cd1dad1447276aed01541b377813733be7470d449",
+      "mbedtls/mbedtls/library/ssl_tls.c": "1beac5da2dd0f99f626c81651e9cecb921eb9725a9f17624851802b8c6259ddc",
+      "mbedtls/mbedtls/library/ssl_tls12_client.c": "e59d2ece5103e30c6d72c1f3c788f7021f03e18a5d0f4af5db5eba57cfef5802",
+      "mbedtls/mbedtls/library/x509_crt.c": "02ab06050ac7b202b0b825af514d4543ad762eee84bc1caa86c3a89d1da28b8a",
+      "mbedtls/port/bignum/esp_bignum.c": "b52e1a17d8d480c573f7b0ca15882244d14835b1163d078abaa48705c5e965c7",
+      "mbedtls/port/include/mbedtls/esp_config.h": "fe6bff0c3c428c57324721a44f10d9eb651cb126d36fa901d79e22d35641f0d4",
+      "mbedtls/port/esp_mem.c": "5b4d710ddb779b83c36aadb861bbfa1e59dac236e72f4b545fad2fb2f5154bb0",
+      "mbedtls/port/dynamic/esp_mbedtls_dynamic_impl.c": "1671a803b3ecf2c91d21c43a3a91f8b363946241872ecfdc5598e9d0dcfe8314",
+      "mbedtls/esp_crt_bundle/esp_crt_bundle.c": "a912969d617c93bf00efc73aaa464f5e276ed421ac78b5268e0630ec7f90cde9",
+      "esp-tls/esp_tls_mbedtls.c": "53897b7af44be30ea66ae762e8fdc0a41f4f407103ffc5a8710cb2bc2d12950d",
+      "tcp_transport/transport_ssl.c": "cad469c18675708b5b2bf3cc89edb54a2407fb0331b0c9ce6f8deb4014f2c299",
+      "tcp_transport/transport_ws.c": "133320d4e867ee5671804a8ecab706f125d3db57d8445c310129fcf909ef5075",
+      "tcp_transport/transport.c": "777b8f7d41ea0a1afc50e860a41520eb2deefc0ea1e88b901e2b8ab5d30088a9",
+      "esp-tls/esp_tls.c": "ee7ddb63bb9328bb9aa44f8889081c0e5316f593c2466cb6da441f30b8989c48",
+      "esp_driver_i2c/i2c_master.c": "3ebaeee176e2ff731d15c69a7629c32c0339817afcd31e93da167f4f6b9d9ca0",
+      "esp_driver_i2c/include/driver/i2c_types.h": "b097be521ad611af5642aa9278e34ed26f2a4233c1d420c4a273d51cce09588b",
+      "esp_driver_i2c/i2c_private.h": "344e15ae98df2d4bf0e1e3074966eb86a5698652cf4c6d5fa5130c1435db472f",
+      "mbedtls/mbedtls/library/ssl_ciphersuites.c": "b013b5f67cc4f3d1cbc1b937200243dc7de5590ebf3a0cfe353b0349e91a5f0d",
+      "mbedtls/mbedtls/library/ssl_misc.h": "110c563a7b9f02a792d86d707f3471f02c5ae0048189b4816ec58edb23d6e5cf",
+      "mbedtls/mbedtls/library/x509.c": "676b48c20aaa08c97ee871982eea739763810d7643e6299c3208d4bc0683653b",
+      "mbedtls/mbedtls/tf-psa-crypto/core/psa_crypto.c": "a6d6d6d394c201fafa337eeab5f3a5a5ed0516d28665eb7acbf089a940d3ebcf",
+      "mbedtls/mbedtls/tf-psa-crypto/core/psa_crypto_random.c": "631ee70a47e239e428fd18f9be6de0dc130d14283d2af7786d07bb268715a292",
+      "mbedtls/mbedtls/tf-psa-crypto/core/psa_crypto_driver_wrappers_no_static.c": "dfd025d8e10856ef8a730ab1af8745c691150b59801e8a449e63fef11ce94692",
+      "mbedtls/mbedtls/tf-psa-crypto/extras/pk_ecc.c": "dc99d5cd738ae0491582a8ddbe007c61f2e5415268ddd5fee22cba910eb25d13",
+      "mbedtls/mbedtls/tf-psa-crypto/extras/pkparse.c": "44ffe9f1a589f2bdc6118cbaf47760a521511858853d766b83c2ac38256f77ca",
+      "mbedtls/mbedtls/tf-psa-crypto/drivers/builtin/src/ecdsa.c": "80610978896812e69d2f53e40328e16fe86be02d125662d3b83d6766b912e391",
+      "mbedtls/mbedtls/tf-psa-crypto/drivers/builtin/src/psa_crypto_aead.c": "b3d317ea71de1c26096ebe5b819ec293bfdf36cd817a3da6520569d7b6586dc6",
+      "mbedtls/mbedtls/tf-psa-crypto/drivers/builtin/src/psa_crypto_mac.c": "e1f6ae88ab68ffe4f0bdf696ecd4130136de454a4f3751ba07528a69558268b3",
+      "mbedtls/mbedtls/tf-psa-crypto/drivers/builtin/src/psa_crypto_cipher.c": "ae6d9b57a0661f857feab9a6471e01a44afa67503fb8a6a97469ce235fb63714",
+      "mbedtls/mbedtls/tf-psa-crypto/drivers/builtin/src/cipher.c": "5c1d267026bb309ca2fb04daf7332d1e3fe2bf5f99aad28093f69eb02b7cba09",
+      "mbedtls/mbedtls/tf-psa-crypto/drivers/builtin/src/ccm.c": "41dcc38780e23e8a2a01620b4387d2d4639eba8ba83d1960ba4f787404f8b938",
+      "mbedtls/mbedtls/tf-psa-crypto/drivers/builtin/src/gcm.c": "b14b15e5c0baa197f89697810a2d2f97fd3c5c89ca7daf8c3214e903cae130b1",
+      "mbedtls/port/esp_hardware.c": "3fcb76a92ddce22aaaf15a7e9117f3ca8c2395a9a5152047bd94fb22167718eb",
+      "mbedtls/port/psa_driver/esp_mac/psa_crypto_driver_esp_hmac_transparent.c": "d24649088db487de89f1538aae6ab6d59df8dbd879209c543af1903b795a53c6",
+      "mbedtls/port/psa_driver/esp_aes/psa_crypto_driver_esp_aes.c": "7276a4a4595d42b70ca59965b543857fdc6a2e2625ec7f8aa92f3e2caafff7f5",
+      "mbedtls/port/aes/esp_aes.c": "4d9eb350e9f4983d23f0c7e751ded8f5d66ff72e8657f313de3f9cc0b6615dc4",
+      "mbedtls/port/aes/esp_aes_gcm.c": "58239fab1582b3d4aba7eb9fbc9c7d054f49255b4df67d4abde5dc0f73950d9f",
+      "mbedtls/port/aes/dma/esp_aes_dma_core.c": "e9d05275143c0d9e5d02193162f7401a9df0c6810d99a724f42e8beb01ddd52e",
+      "esp_hw_support/hw_random.c": "45b8381aef1a2e7bd9e42fc198c6b0a8644ae7eb28c1dc56bc1b561178e7b5bd",
+      "esp_hw_support/heap_align_hw.c": "ff236dba92a105848ef9409e7cb0cb2985c942d0bd5fb3aa627b7e968050438c",
+      "heap/heap_caps_base.c": "596f1006c850492d947c7770fe3f759c2b3ebffd90be2167be5a9245a393adbf",
+      "esp_security/src/esp_crypto_lock.c": "5ec2287139419de96af04c40afdff39829655d3b67893f2bdef8096070068c2b",
+      "mbedtls/mbedtls/tf-psa-crypto/drivers/builtin/src/cipher_wrap.c": "77a61ccd7dbfbe145bd2efcbe5cb2290f5d18fff7e25d88df256c45a218a771a",
+      "mbedtls/port/psa_driver/esp_sha/psa_crypto_driver_esp_sha.c": "65f88200c57466e9d5e4fbea53c06a17d93ae25f508ed4512a373f7533c8d6f0",
+      "mbedtls/port/psa_driver/esp_sha/core/psa_crypto_driver_esp_sha256.c": "c3ea6c439b4924208b2929cf58c790038f7ce600f736e644f4e605fc7f82a798",
+      "mbedtls/port/psa_driver/esp_sha/core/psa_crypto_driver_esp_sha512.c": "305c1c4ce5476186707f372c707dfe1bb944560d88787403ce1a4ab227984be7",
+      "mbedtls/port/sha/esp_sha.c": "44e5f7c95e42c9886acdcd7c43c468e00e956aa9aa84746f22f58e1df1fdfbd2",
+      "mbedtls/port/sha/core/esp_sha_gdma_impl.c": "a4a2766aebac84dae1f41e0c847e382151adf6ffb993a7c6ba028b9eb2ef31f2",
+      "mbedtls/port/aes/dma/esp_aes_gdma_impl.c": "eee95016249494cdae2dfe9208c5160ba246351505b66b7572e415d17f27b598",
+      "mbedtls/port/crypto_shared_gdma/esp_crypto_shared_gdma.c": "6e1551aab9e08136a1df63ab2766ac2e86406e9077030db539bb2c366e176b02",
+      "esp_libc/src/locks.c": "f387412296c33db8d06d8b666aa4b61c7bdf10be1ff43f6bbb1d71b4937e1edd",
+      "freertos/heap_idf.c": "6201b70a245f721c3021656d62fbbbf45c3e4d5d843365df007d0da9ac99db2e",
+      "freertos/FreeRTOS-Kernel/queue.c": "6794db86ab086372ea2789d043d83e0b1efd0534a0c0deb5d28cffb342feaa0e",
+      "freertos/FreeRTOS-Kernel/tasks.c": "193c3d8379acc847097632da8e6d4dd2ee0bf8e069d78979d68dd26b653d48df",
+      "esp_driver_dma/src/gdma.c": "60885758fc19ae899b69b39e64103235cd5ec983a675e5bd9a960fbb273729e0",
+      "mbedtls/port/net_sockets.c": "d015844989a31b72044da5f9469198b798b498b528472b6c4db211e8300a94c0",
+      "lwip/lwip/src/api/sockets.c": "861822d05ac60f68228279036a966c26acb1282b8f2f7bd0c4672129c7fd74a4",
+      "lwip/lwip/src/api/api_lib.c": "5b61f1f067cf7a689dc42228aa6a9fb4a0d65d97697f5b74c03bc68d6c3265dc",
+      "lwip/lwip/src/api/tcpip.c": "486a8ad6d219bd9c3ed5e030715d457589537678a059b74e4debe687657e03e9",
+      "lwip/port/freertos/sys_arch.c": "dd875fe08b8f6a9279e6b04f81b9a8cf046f17e0e94fc9661ed013e83a046cf9",
+      "mbedtls/port/sha/core/sha.c": "ea21ac935f2012729778d540db895f6bd3f2a7aa33d2ca52decf41a202ac006a",
+      "vfs/vfs.c": "7862793770dc24821419cd961c4e1a369736dc85b5e8fd1ee247286f347de974",
+      "vfs/vfs_calls.c": "737f6d0bd5882abc52d13ed3935466b9cf95d2fbc104d71eba1a7607422d5398",
+      "lwip/port/esp32xx/vfs_lwip.c": "0f0967786aac2df9f83d5ff2ea6b874554410737667b0bcb3f439ce1a04d5610",
+      "pthread/pthread.c": "3423df09f2a291e76abf2cb34a26b5fde21a22bd514563f1526d44cdafa8da15",
+      "pthread/pthread_local_storage.c": "838b9ea24df5493cc648248110bc5ce2e28c98bbad945ac7cfd70912977cc378"
+    },
+    "config_macros": {
+      "CONFIG_ESP_MAIN_TASK_STACK_SIZE": 6144,
+      "CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG": 1,
+      "CONFIG_LOG_VERSION": 1,
+      "CONFIG_LOG_DEFAULT_LEVEL": 3,
+      "CONFIG_MBEDTLS_INTERNAL_MEM_ALLOC": 1,
+      "CONFIG_MBEDTLS_CUSTOM_MEM_ALLOC": null,
+      "CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC": null,
+      "CONFIG_MBEDTLS_SSL_RENEGOTIATION": 1,
+      "CONFIG_MBEDTLS_HARDWARE_MPI": 1,
+      "CONFIG_MBEDTLS_LARGE_KEY_SOFTWARE_MPI": 1,
+      "CONFIG_MBEDTLS_MPI_USE_INTERRUPT": 1,
+      "CONFIG_MBEDTLS_MPI_INTERRUPT_LEVEL": 0,
+      "CONFIG_MBEDTLS_ECP_C": 1,
+      "CONFIG_MBEDTLS_ECP_DP_SECP521R1_ENABLED": 1,
+      "CONFIG_MBEDTLS_ECP_NIST_OPTIM": 1,
+      "CONFIG_MBEDTLS_ECDSA_C": 1,
+      "CONFIG_MBEDTLS_SSL_PROTO_TLS1_2": 1,
+      "CONFIG_MBEDTLS_SSL_PROTO_TLS1_3": null,
+      "CONFIG_MBEDTLS_DYNAMIC_BUFFER": 1,
+      "CONFIG_MBEDTLS_CERTIFICATE_BUNDLE": 1,
+      "CONFIG_MBEDTLS_SSL_IN_CONTENT_LEN": 16384,
+      "CONFIG_MBEDTLS_SSL_OUT_CONTENT_LEN": 4096,
+      "CONFIG_MBEDTLS_DHM_C": null,
+      "CONFIG_MBEDTLS_KEY_EXCHANGE_PSK": null,
+      "CONFIG_MBEDTLS_KEY_EXCHANGE_ECDHE_PSK": null,
+      "CONFIG_MBEDTLS_KEY_EXCHANGE_DHE_PSK": null,
+      "CONFIG_MBEDTLS_KEY_EXCHANGE_RSA_PSK": null,
+      "CONFIG_MBEDTLS_KEY_EXCHANGE_DHE_RSA": null,
+      "CONFIG_MBEDTLS_KEY_EXCHANGE_ECJPAKE": null,
+      "CONFIG_MBEDTLS_KEY_EXCHANGE_RSA": 1,
+      "CONFIG_MBEDTLS_KEY_EXCHANGE_ELLIPTIC_CURVE": 1,
+      "CONFIG_MBEDTLS_KEY_EXCHANGE_ECDHE_RSA": 1,
+      "CONFIG_MBEDTLS_KEY_EXCHANGE_ECDHE_ECDSA": 1,
+      "CONFIG_MBEDTLS_ECDH_C": 1,
+      "CONFIG_MBEDTLS_ECP_DP_SECP256R1_ENABLED": 1,
+      "CONFIG_MBEDTLS_ECP_DP_SECP384R1_ENABLED": 1,
+      "CONFIG_MBEDTLS_ECP_DP_SECP256K1_ENABLED": 1,
+      "CONFIG_MBEDTLS_ECP_DP_BP256R1_ENABLED": 1,
+      "CONFIG_MBEDTLS_ECP_DP_BP384R1_ENABLED": 1,
+      "CONFIG_MBEDTLS_ECP_DP_BP512R1_ENABLED": 1,
+      "CONFIG_MBEDTLS_ECP_DP_CURVE25519_ENABLED": 1,
+      "CONFIG_MBEDTLS_ECP_DP_CURVE448_ENABLED": null,
+      "CONFIG_MBEDTLS_AES_C": 1,
+      "CONFIG_MBEDTLS_HARDWARE_AES": 1,
+      "CONFIG_MBEDTLS_AES_USE_INTERRUPT": 1,
+      "CONFIG_MBEDTLS_AES_INTERRUPT_LEVEL": 0,
+      "CONFIG_MBEDTLS_CIPHER_MODE_CBC": 1,
+      "CONFIG_MBEDTLS_GCM_C": 1,
+      "CONFIG_MBEDTLS_CCM_C": 1,
+      "CONFIG_MBEDTLS_CHACHA20_C": null,
+      "CONFIG_MBEDTLS_CAMELLIA_C": null,
+      "CONFIG_MBEDTLS_ARIA_C": null,
+      "CONFIG_MBEDTLS_DES_C": null,
+      "CONFIG_MBEDTLS_SHA1_C": 1,
+      "CONFIG_MBEDTLS_SHA256_C": 1,
+      "CONFIG_MBEDTLS_SHA384_C": 1,
+      "CONFIG_MBEDTLS_SHA512_C": 1,
+      "CONFIG_MBEDTLS_HARDWARE_SHA": 1,
+      "CONFIG_MBEDTLS_CTR_DRBG_C": 1,
+      "CONFIG_MBEDTLS_HMAC_DRBG_C": 1,
+      "CONFIG_MBEDTLS_RSA_C": 1,
+      "CONFIG_MBEDTLS_PKCS1_V15": 1,
+      "CONFIG_MBEDTLS_PKCS1_V21": 1,
+      "CONFIG_MBEDTLS_AES_HW_SMALL_DATA_LEN_OPTIM": 1,
+      "CONFIG_MBEDTLS_ECP_DP_SECP192R1_ENABLED": null,
+      "CONFIG_MBEDTLS_ECP_DP_SECP224R1_ENABLED": null,
+      "CONFIG_MBEDTLS_ECP_DP_SECP192K1_ENABLED": null,
+      "CONFIG_MBEDTLS_ECP_DP_SECP224K1_ENABLED": null,
+      "CONFIG_MBEDTLS_ECP_RESTARTABLE": null,
+      "CONFIG_MBEDTLS_ECP_FIXED_POINT_OPTIM": null,
+      "CONFIG_I2C_ISR_IRAM_SAFE": null,
+      "CONFIG_LWIP_TCPIP_CORE_LOCKING": null,
+      "CONFIG_LWIP_NETCONN_SEM_PER_THREAD": null
+    },
+    "tls_paths": {
+      "certificate_ecdsa": {
+        "symbols": [
+          "tls_ws_connect",
+          "sdk_transport_write",
+          "tls_ssl_write",
+          "sdk_tls_write",
+          "tls_esp_mbedtls_write",
+          "tls_wrap_mbedtls_ssl_write",
+          "sdk_ssl_write",
+          "tls_ssl_check_ctr_renegotiate",
+          "tls_mbedtls_ssl_renegotiate",
+          "tls_mbedtls_ssl_start_renegotiation",
+          "tls_mbedtls_ssl_handshake",
+          "tls_mbedtls_ssl_handshake_step",
+          "tls_wrap_mbedtls_ssl_handshake_client_step",
+          "tls_mbedtls_ssl_handshake_client_step",
+          "tls_mbedtls_ssl_parse_certificate",
+          "tls_mbedtls_ssl_verify_certificate",
+          "tls_mbedtls_x509_crt_verify_restartable",
+          "tls_x509_crt_verify_restartable_ca_cb_constprop_0_isra_0",
+          "tls_esp_crt_verify_callback",
+          "tls_esp_crt_check_signature",
+          "tls_psa_verify_hash",
+          "tls_psa_verify_hash_builtin",
+          "tls_mbedtls_psa_ecdsa_verify_hash",
+          "tls_mbedtls_ecdsa_verify",
+          "tls_mbedtls_ecdsa_verify_restartable",
+          "tls_mbedtls_ecp_muladd_restartable",
+          "tls_mbedtls_ecp_mul_shortcuts_isra_0",
+          "tls_ecp_mul_restartable_internal_isra_0",
+          "tls_ecp_mul_comb_after_precomp_isra_0",
+          "tls_ecp_add_mixed",
+          "tls_ecp_double_jac",
+          "tls_mbedtls_mpi_mul_mod",
+          "tls_mbedtls_mpi_mod_mpi",
+          "tls_mbedtls_mpi_div_mpi",
+          "tls_mbedtls_mpi_mul_int",
+          "tls_mbedtls_mpi_mul_mpi",
+          "tls_mbedtls_mpi_grow",
+          "tls_mbedtls_calloc",
+          "tls_esp_mbedtls_mem_calloc",
+          "tls_heap_caps_calloc",
+          "tls_heap_caps_calloc_base",
+          "sdk_malloc_base",
+          "sdk_malloc_aligned",
+          "sdk_multi_aligned_offset",
+          "sdk_multi_aligned_impl",
+          "sdk_multi_lock",
+          "sdk_queue_critical",
+          "sdk_queue_compare_swap",
+          "runtime_task_entry"
+        ],
+        "multipliers": {},
+        "base_bytes": 192,
+        "max_bytes": 4608
+      },
+      "certificate_rsa_pss_adding": {
+        "symbols": [
+          "tls_ws_connect",
+          "sdk_transport_write",
+          "tls_ssl_write",
+          "sdk_tls_write",
+          "tls_esp_mbedtls_write",
+          "tls_wrap_mbedtls_ssl_write",
+          "sdk_ssl_write",
+          "tls_ssl_check_ctr_renegotiate",
+          "tls_mbedtls_ssl_renegotiate",
+          "tls_mbedtls_ssl_start_renegotiation",
+          "tls_mbedtls_ssl_handshake",
+          "tls_mbedtls_ssl_handshake_step",
+          "tls_wrap_mbedtls_ssl_handshake_client_step",
+          "tls_mbedtls_ssl_handshake_client_step",
+          "tls_mbedtls_ssl_parse_certificate",
+          "tls_mbedtls_ssl_verify_certificate",
+          "tls_mbedtls_x509_crt_verify_restartable",
+          "tls_x509_crt_verify_restartable_ca_cb_constprop_0_isra_0",
+          "tls_mbedtls_pk_verify_ext",
+          "tls_mbedtls_rsa_rsassa_pss_verify_ext",
+          "tls_psa_verify_hash",
+          "tls_psa_verify_hash_builtin",
+          "tls_mbedtls_psa_rsa_verify_hash",
+          "tls_mbedtls_rsa_pkcs1_verify",
+          "tls_mbedtls_rsa_public",
+          "tls_mbedtls_mpi_exp_mod_unsafe",
+          "tls_mbedtls_mpi_exp_mod",
+          "tls_calculate_rinv",
+          "tls_mbedtls_mpi_mod_mpi",
+          "tls_mbedtls_mpi_div_mpi",
+          "tls_mbedtls_mpi_mul_int",
+          "tls_mbedtls_mpi_mul_mpi",
+          "tls_mpi_mult_mpi_overlong_isra_0",
+          "tls_mbedtls_mpi_add_mpi",
+          "tls_add_sub_mpi",
+          "tls_mbedtls_mpi_add_abs",
+          "tls_mbedtls_mpi_copy",
+          "tls_mbedtls_mpi_grow",
+          "tls_mbedtls_calloc",
+          "tls_esp_mbedtls_mem_calloc",
+          "tls_heap_caps_calloc",
+          "tls_heap_caps_calloc_base",
+          "sdk_malloc_base",
+          "sdk_malloc_aligned",
+          "sdk_multi_aligned_offset",
+          "sdk_multi_aligned_impl",
+          "sdk_multi_lock",
+          "sdk_queue_critical",
+          "sdk_queue_compare_swap",
+          "runtime_task_entry"
+        ],
+        "multipliers": {},
+        "base_bytes": 192,
+        "max_bytes": 4608
+      },
+      "certificate_rsa_pss_recursive": {
+        "symbols": [
+          "tls_ws_connect",
+          "sdk_transport_write",
+          "tls_ssl_write",
+          "sdk_tls_write",
+          "tls_esp_mbedtls_write",
+          "tls_wrap_mbedtls_ssl_write",
+          "sdk_ssl_write",
+          "tls_ssl_check_ctr_renegotiate",
+          "tls_mbedtls_ssl_renegotiate",
+          "tls_mbedtls_ssl_start_renegotiation",
+          "tls_mbedtls_ssl_handshake",
+          "tls_mbedtls_ssl_handshake_step",
+          "tls_wrap_mbedtls_ssl_handshake_client_step",
+          "tls_mbedtls_ssl_handshake_client_step",
+          "tls_mbedtls_ssl_parse_certificate",
+          "tls_mbedtls_ssl_verify_certificate",
+          "tls_mbedtls_x509_crt_verify_restartable",
+          "tls_x509_crt_verify_restartable_ca_cb_constprop_0_isra_0",
+          "tls_mbedtls_pk_verify_ext",
+          "tls_mbedtls_rsa_rsassa_pss_verify_ext",
+          "tls_psa_verify_hash",
+          "tls_psa_verify_hash_builtin",
+          "tls_mbedtls_psa_rsa_verify_hash",
+          "tls_mbedtls_rsa_pkcs1_verify",
+          "tls_mbedtls_rsa_public",
+          "tls_mbedtls_mpi_exp_mod_unsafe",
+          "tls_mbedtls_mpi_exp_mod",
+          "tls_calculate_rinv",
+          "tls_mbedtls_mpi_mod_mpi",
+          "tls_mbedtls_mpi_div_mpi",
+          "tls_mbedtls_mpi_mul_int",
+          "tls_mbedtls_mpi_mul_mpi",
+          "tls_mpi_mult_mpi_overlong_isra_0",
+          "tls_mbedtls_mpi_grow",
+          "tls_mbedtls_calloc",
+          "tls_esp_mbedtls_mem_calloc",
+          "tls_heap_caps_calloc",
+          "tls_heap_caps_calloc_base",
+          "sdk_malloc_base",
+          "sdk_malloc_aligned",
+          "sdk_multi_aligned_offset",
+          "sdk_multi_aligned_impl",
+          "sdk_multi_lock",
+          "sdk_queue_critical",
+          "sdk_queue_compare_swap",
+          "runtime_task_entry"
+        ],
+        "multipliers": {
+          "tls_mbedtls_mpi_mul_mpi": 2
+        },
+        "base_bytes": 192,
+        "max_bytes": 4608
+      },
+      "certificate_rsa_v15_adding": {
+        "symbols": [
+          "tls_ws_connect",
+          "sdk_transport_write",
+          "tls_ssl_write",
+          "sdk_tls_write",
+          "tls_esp_mbedtls_write",
+          "tls_wrap_mbedtls_ssl_write",
+          "sdk_ssl_write",
+          "tls_ssl_check_ctr_renegotiate",
+          "tls_mbedtls_ssl_renegotiate",
+          "tls_mbedtls_ssl_start_renegotiation",
+          "tls_mbedtls_ssl_handshake",
+          "tls_mbedtls_ssl_handshake_step",
+          "tls_wrap_mbedtls_ssl_handshake_client_step",
+          "tls_mbedtls_ssl_handshake_client_step",
+          "tls_mbedtls_ssl_parse_certificate",
+          "tls_mbedtls_ssl_verify_certificate",
+          "tls_mbedtls_x509_crt_verify_restartable",
+          "tls_x509_crt_verify_restartable_ca_cb_constprop_0_isra_0",
+          "tls_esp_crt_verify_callback",
+          "tls_esp_crt_check_signature",
+          "tls_mbedtls_rsa_rsassa_pkcs1_v15_verify",
+          "tls_psa_verify_hash",
+          "tls_psa_verify_hash_builtin",
+          "tls_mbedtls_psa_rsa_verify_hash",
+          "tls_mbedtls_rsa_pkcs1_verify",
+          "tls_mbedtls_rsa_public",
+          "tls_mbedtls_mpi_exp_mod_unsafe",
+          "tls_mbedtls_mpi_exp_mod",
+          "tls_calculate_rinv",
+          "tls_mbedtls_mpi_mod_mpi",
+          "tls_mbedtls_mpi_div_mpi",
+          "tls_mbedtls_mpi_mul_int",
+          "tls_mbedtls_mpi_mul_mpi",
+          "tls_mpi_mult_mpi_overlong_isra_0",
+          "tls_mbedtls_mpi_add_mpi",
+          "tls_add_sub_mpi",
+          "tls_mbedtls_mpi_add_abs",
+          "tls_mbedtls_mpi_copy",
+          "tls_mbedtls_mpi_grow",
+          "tls_mbedtls_calloc",
+          "tls_esp_mbedtls_mem_calloc",
+          "tls_heap_caps_calloc",
+          "tls_heap_caps_calloc_base",
+          "sdk_malloc_base",
+          "sdk_malloc_aligned",
+          "sdk_multi_aligned_offset",
+          "sdk_multi_aligned_impl",
+          "sdk_multi_lock",
+          "sdk_queue_critical",
+          "sdk_queue_compare_swap",
+          "runtime_task_entry"
+        ],
+        "multipliers": {},
+        "base_bytes": 192,
+        "max_bytes": 4608
+      },
+      "certificate_rsa_v15_recursive": {
+        "symbols": [
+          "tls_ws_connect",
+          "sdk_transport_write",
+          "tls_ssl_write",
+          "sdk_tls_write",
+          "tls_esp_mbedtls_write",
+          "tls_wrap_mbedtls_ssl_write",
+          "sdk_ssl_write",
+          "tls_ssl_check_ctr_renegotiate",
+          "tls_mbedtls_ssl_renegotiate",
+          "tls_mbedtls_ssl_start_renegotiation",
+          "tls_mbedtls_ssl_handshake",
+          "tls_mbedtls_ssl_handshake_step",
+          "tls_wrap_mbedtls_ssl_handshake_client_step",
+          "tls_mbedtls_ssl_handshake_client_step",
+          "tls_mbedtls_ssl_parse_certificate",
+          "tls_mbedtls_ssl_verify_certificate",
+          "tls_mbedtls_x509_crt_verify_restartable",
+          "tls_x509_crt_verify_restartable_ca_cb_constprop_0_isra_0",
+          "tls_esp_crt_verify_callback",
+          "tls_esp_crt_check_signature",
+          "tls_mbedtls_rsa_rsassa_pkcs1_v15_verify",
+          "tls_psa_verify_hash",
+          "tls_psa_verify_hash_builtin",
+          "tls_mbedtls_psa_rsa_verify_hash",
+          "tls_mbedtls_rsa_pkcs1_verify",
+          "tls_mbedtls_rsa_public",
+          "tls_mbedtls_mpi_exp_mod_unsafe",
+          "tls_mbedtls_mpi_exp_mod",
+          "tls_calculate_rinv",
+          "tls_mbedtls_mpi_mod_mpi",
+          "tls_mbedtls_mpi_div_mpi",
+          "tls_mbedtls_mpi_mul_int",
+          "tls_mbedtls_mpi_mul_mpi",
+          "tls_mpi_mult_mpi_overlong_isra_0",
+          "tls_mbedtls_mpi_grow",
+          "tls_mbedtls_calloc",
+          "tls_esp_mbedtls_mem_calloc",
+          "tls_heap_caps_calloc",
+          "tls_heap_caps_calloc_base",
+          "sdk_malloc_base",
+          "sdk_malloc_aligned",
+          "sdk_multi_aligned_offset",
+          "sdk_multi_aligned_impl",
+          "sdk_multi_lock",
+          "sdk_queue_critical",
+          "sdk_queue_compare_swap",
+          "runtime_task_entry"
+        ],
+        "multipliers": {
+          "tls_mbedtls_mpi_mul_mpi": 2
+        },
+        "base_bytes": 192,
+        "max_bytes": 4608
+      },
+      "ecdhe_generate_key": {
+        "symbols": [
+          "tls_ws_connect",
+          "sdk_transport_write",
+          "tls_ssl_write",
+          "sdk_tls_write",
+          "tls_esp_mbedtls_write",
+          "tls_wrap_mbedtls_ssl_write",
+          "sdk_ssl_write",
+          "tls_ssl_check_ctr_renegotiate",
+          "tls_mbedtls_ssl_renegotiate",
+          "tls_mbedtls_ssl_start_renegotiation",
+          "tls_mbedtls_ssl_handshake",
+          "tls_mbedtls_ssl_handshake_step",
+          "tls_wrap_mbedtls_ssl_handshake_client_step",
+          "tls_mbedtls_ssl_handshake_client_step",
+          "tls_psa_generate_key",
+          "tls_psa_generate_key_custom",
+          "tls_psa_generate_key_internal",
+          "tls_mbedtls_psa_ecp_generate_key",
+          "tls_mbedtls_ecp_group_load",
+          "tls_mbedtls_mpi_sub_int",
+          "tls_mbedtls_mpi_sub_mpi",
+          "tls_add_sub_mpi",
+          "tls_mbedtls_mpi_add_abs",
+          "tls_mbedtls_mpi_copy",
+          "tls_mbedtls_mpi_grow",
+          "tls_mbedtls_calloc",
+          "tls_esp_mbedtls_mem_calloc",
+          "tls_heap_caps_calloc",
+          "tls_heap_caps_calloc_base",
+          "sdk_malloc_base",
+          "sdk_malloc_aligned",
+          "sdk_multi_aligned_offset",
+          "sdk_multi_aligned_impl",
+          "sdk_multi_lock",
+          "sdk_queue_critical",
+          "sdk_queue_compare_swap",
+          "runtime_task_entry"
+        ],
+        "multipliers": {},
+        "base_bytes": 192,
+        "max_bytes": 4608
+      },
+      "ecdhe_export_public": {
+        "symbols": [
+          "tls_ws_connect",
+          "sdk_transport_write",
+          "tls_ssl_write",
+          "sdk_tls_write",
+          "tls_esp_mbedtls_write",
+          "tls_wrap_mbedtls_ssl_write",
+          "sdk_ssl_write",
+          "tls_ssl_check_ctr_renegotiate",
+          "tls_mbedtls_ssl_renegotiate",
+          "tls_mbedtls_ssl_start_renegotiation",
+          "tls_mbedtls_ssl_handshake",
+          "tls_mbedtls_ssl_handshake_step",
+          "tls_wrap_mbedtls_ssl_handshake_client_step",
+          "tls_mbedtls_ssl_handshake_client_step",
+          "tls_psa_export_public_key",
+          "tls_psa_driver_wrapper_export_public_key",
+          "tls_psa_export_public_key_internal",
+          "tls_mbedtls_psa_ecp_export_public_key",
+          "tls_mbedtls_psa_ecp_export_key",
+          "tls_mbedtls_ecp_mul",
+          "tls_mbedtls_ecp_mul_restartable",
+          "tls_ecp_mul_restartable_internal_isra_0",
+          "tls_ecp_mul_comb_after_precomp_isra_0",
+          "tls_ecp_add_mixed",
+          "tls_ecp_double_jac",
+          "tls_mbedtls_mpi_mul_mod",
+          "tls_mbedtls_mpi_mod_mpi",
+          "tls_mbedtls_mpi_div_mpi",
+          "tls_mbedtls_mpi_sub_mpi",
+          "tls_add_sub_mpi",
+          "tls_mbedtls_mpi_add_abs",
+          "tls_mbedtls_mpi_copy",
+          "tls_mbedtls_mpi_grow",
+          "tls_mbedtls_calloc",
+          "tls_esp_mbedtls_mem_calloc",
+          "tls_heap_caps_calloc",
+          "tls_heap_caps_calloc_base",
+          "sdk_malloc_base",
+          "sdk_malloc_aligned",
+          "sdk_multi_aligned_offset",
+          "sdk_multi_aligned_impl",
+          "sdk_multi_lock",
+          "sdk_queue_critical",
+          "sdk_queue_compare_swap",
+          "runtime_task_entry"
+        ],
+        "multipliers": {},
+        "base_bytes": 192,
+        "max_bytes": 4608
+      },
+      "ecdhe_shared_secret": {
+        "symbols": [
+          "tls_ws_connect",
+          "sdk_transport_write",
+          "tls_ssl_write",
+          "sdk_tls_write",
+          "tls_esp_mbedtls_write",
+          "tls_wrap_mbedtls_ssl_write",
+          "sdk_ssl_write",
+          "tls_ssl_check_ctr_renegotiate",
+          "tls_mbedtls_ssl_renegotiate",
+          "tls_mbedtls_ssl_start_renegotiation",
+          "tls_mbedtls_ssl_handshake",
+          "tls_mbedtls_ssl_handshake_step",
+          "tls_wrap_mbedtls_ssl_handshake_client_step",
+          "tls_mbedtls_ssl_handshake_client_step",
+          "tls_psa_raw_key_agreement",
+          "tls_psa_key_agreement_raw_builtin",
+          "tls_mbedtls_psa_key_agreement_ecdh",
+          "tls_mbedtls_ecp_mul",
+          "tls_mbedtls_ecp_mul_restartable",
+          "tls_ecp_mul_restartable_internal_isra_0",
+          "tls_ecp_mul_comb_after_precomp_isra_0",
+          "tls_ecp_add_mixed",
+          "tls_ecp_double_jac",
+          "tls_mbedtls_mpi_mul_mod",
+          "tls_mbedtls_mpi_mod_mpi",
+          "tls_mbedtls_mpi_div_mpi",
+          "tls_mbedtls_mpi_sub_mpi",
+          "tls_add_sub_mpi",
+          "tls_mbedtls_mpi_add_abs",
+          "tls_mbedtls_mpi_copy",
+          "tls_mbedtls_mpi_grow",
+          "tls_mbedtls_calloc",
+          "tls_esp_mbedtls_mem_calloc",
+          "tls_heap_caps_calloc",
+          "tls_heap_caps_calloc_base",
+          "sdk_malloc_base",
+          "sdk_malloc_aligned",
+          "sdk_multi_aligned_offset",
+          "sdk_multi_aligned_impl",
+          "sdk_multi_lock",
+          "sdk_queue_critical",
+          "sdk_queue_compare_swap",
+          "runtime_task_entry"
+        ],
+        "multipliers": {},
+        "base_bytes": 192,
+        "max_bytes": 4608
+      },
+      "certificate_ecdsa_subtract": {
+        "symbols": [
+          "tls_ws_connect",
+          "sdk_transport_write",
+          "tls_ssl_write",
+          "sdk_tls_write",
+          "tls_esp_mbedtls_write",
+          "tls_wrap_mbedtls_ssl_write",
+          "sdk_ssl_write",
+          "tls_ssl_check_ctr_renegotiate",
+          "tls_mbedtls_ssl_renegotiate",
+          "tls_mbedtls_ssl_start_renegotiation",
+          "tls_mbedtls_ssl_handshake",
+          "tls_mbedtls_ssl_handshake_step",
+          "tls_wrap_mbedtls_ssl_handshake_client_step",
+          "tls_mbedtls_ssl_handshake_client_step",
+          "tls_mbedtls_ssl_parse_certificate",
+          "tls_mbedtls_ssl_verify_certificate",
+          "tls_mbedtls_x509_crt_verify_restartable",
+          "tls_x509_crt_verify_restartable_ca_cb_constprop_0_isra_0",
+          "tls_esp_crt_verify_callback",
+          "tls_esp_crt_check_signature",
+          "tls_psa_verify_hash",
+          "tls_psa_verify_hash_builtin",
+          "tls_mbedtls_psa_ecdsa_verify_hash",
+          "tls_mbedtls_ecdsa_verify",
+          "tls_mbedtls_ecdsa_verify_restartable",
+          "tls_mbedtls_ecp_muladd_restartable",
+          "tls_mbedtls_ecp_mul_shortcuts_isra_0",
+          "tls_ecp_mul_restartable_internal_isra_0",
+          "tls_ecp_mul_comb_after_precomp_isra_0",
+          "tls_ecp_add_mixed",
+          "tls_ecp_double_jac",
+          "tls_mbedtls_mpi_mul_mod",
+          "tls_mbedtls_mpi_mod_mpi",
+          "tls_mbedtls_mpi_div_mpi",
+          "tls_mbedtls_mpi_sub_mpi",
+          "tls_add_sub_mpi",
+          "tls_mbedtls_mpi_add_abs",
+          "tls_mbedtls_mpi_copy",
+          "tls_mbedtls_mpi_grow",
+          "tls_mbedtls_calloc",
+          "tls_esp_mbedtls_mem_calloc",
+          "tls_heap_caps_calloc",
+          "tls_heap_caps_calloc_base",
+          "sdk_malloc_base",
+          "sdk_malloc_aligned",
+          "sdk_multi_aligned_offset",
+          "sdk_multi_aligned_impl",
+          "sdk_multi_lock",
+          "sdk_queue_critical",
+          "sdk_queue_compare_swap",
+          "runtime_task_entry"
+        ],
+        "multipliers": {},
+        "base_bytes": 192,
+        "max_bytes": 4608
+      },
+      "record_ccm": {
+        "symbols": [
+          "tls_ws_connect",
+          "sdk_transport_write",
+          "tls_ssl_write",
+          "sdk_tls_write",
+          "tls_esp_mbedtls_write",
+          "tls_wrap_mbedtls_ssl_write",
+          "sdk_ssl_write",
+          "tls_ssl_check_ctr_renegotiate",
+          "tls_mbedtls_ssl_renegotiate",
+          "tls_mbedtls_ssl_start_renegotiation",
+          "tls_mbedtls_ssl_handshake",
+          "tls_mbedtls_ssl_handshake_step",
+          "tls_wrap_mbedtls_ssl_handshake_client_step",
+          "tls_mbedtls_ssl_handshake_client_step",
+          "tls_mbedtls_ssl_read_record",
+          "tls_mbedtls_ssl_decrypt_buf",
+          "tls_psa_aead_decrypt",
+          "tls_mbedtls_psa_aead_decrypt",
+          "tls_mbedtls_ccm_auth_decrypt",
+          "tls_ccm_auth_crypt",
+          "tls_mbedtls_ccm_update",
+          "tls_mbedtls_cipher_update",
+          "tls_aes_crypt_ecb_wrap",
+          "tls_mbedtls_aes_crypt_ecb",
+          "tls_esp_aes_crypt_ecb",
+          "tls_esp_aes_acquire_hardware",
+          "tls_esp_crypto_sha_aes_lock_acquire",
+          "tls_lock_acquire",
+          "sdk_lock_acquire",
+          "tls_lock_init_generic",
+          "tls_xqueuecreatemutex",
+          "tls_xqueuegenericcreate",
+          "tls_pvportmalloc",
+          "sdk_malloc_caps",
+          "sdk_malloc_base",
+          "sdk_malloc_aligned",
+          "sdk_multi_aligned_offset",
+          "sdk_multi_aligned_impl",
+          "sdk_multi_lock",
+          "sdk_queue_critical",
+          "sdk_queue_compare_swap",
+          "runtime_task_entry"
+        ],
+        "multipliers": {},
+        "base_bytes": 192,
+        "max_bytes": 4608
+      },
+      "record_gcm_software": {
+        "symbols": [
+          "tls_ws_connect",
+          "sdk_transport_write",
+          "tls_ssl_write",
+          "sdk_tls_write",
+          "tls_esp_mbedtls_write",
+          "tls_wrap_mbedtls_ssl_write",
+          "sdk_ssl_write",
+          "tls_ssl_check_ctr_renegotiate",
+          "tls_mbedtls_ssl_renegotiate",
+          "tls_mbedtls_ssl_start_renegotiation",
+          "tls_mbedtls_ssl_handshake",
+          "tls_mbedtls_ssl_handshake_step",
+          "tls_wrap_mbedtls_ssl_handshake_client_step",
+          "tls_mbedtls_ssl_handshake_client_step",
+          "tls_mbedtls_ssl_read_record",
+          "tls_mbedtls_ssl_decrypt_buf",
+          "tls_psa_aead_decrypt",
+          "tls_mbedtls_psa_aead_decrypt",
+          "tls_mbedtls_gcm_auth_decrypt",
+          "tls_mbedtls_gcm_crypt_and_tag",
+          "tls_mbedtls_gcm_update",
+          "tls_gcm_mask",
+          "tls_mbedtls_cipher_update",
+          "tls_aes_crypt_ecb_wrap",
+          "tls_mbedtls_aes_crypt_ecb",
+          "tls_esp_aes_crypt_ecb",
+          "tls_esp_aes_acquire_hardware",
+          "tls_esp_crypto_sha_aes_lock_acquire",
+          "tls_lock_acquire",
+          "sdk_lock_acquire",
+          "tls_lock_init_generic",
+          "tls_xqueuecreatemutex",
+          "tls_xqueuegenericcreate",
+          "tls_pvportmalloc",
+          "sdk_malloc_caps",
+          "sdk_malloc_base",
+          "sdk_malloc_aligned",
+          "sdk_multi_aligned_offset",
+          "sdk_multi_aligned_impl",
+          "sdk_multi_lock",
+          "sdk_queue_critical",
+          "sdk_queue_compare_swap",
+          "runtime_task_entry"
+        ],
+        "multipliers": {},
+        "base_bytes": 192,
+        "max_bytes": 4608
+      },
+      "prf_hmac_sha256": {
+        "symbols": [
+          "tls_ws_connect",
+          "sdk_transport_write",
+          "tls_ssl_write",
+          "sdk_tls_write",
+          "tls_esp_mbedtls_write",
+          "tls_wrap_mbedtls_ssl_write",
+          "sdk_ssl_write",
+          "tls_ssl_check_ctr_renegotiate",
+          "tls_mbedtls_ssl_renegotiate",
+          "tls_mbedtls_ssl_start_renegotiation",
+          "tls_mbedtls_ssl_handshake",
+          "tls_mbedtls_ssl_handshake_step",
+          "tls_wrap_mbedtls_ssl_handshake_client_step",
+          "tls_mbedtls_ssl_handshake_client_step",
+          "tls_mbedtls_ssl_derive_keys",
+          "tls_tls_prf_sha256",
+          "tls_tls_prf_generic",
+          "tls_psa_key_derivation_output_bytes",
+          "tls_psa_driver_wrapper_mac_compute",
+          "tls_esp_hmac_compute_transparent",
+          "tls_esp_hmac_setup_transparent",
+          "tls_esp_sha_hash_compute",
+          "tls_esp_sha256_driver_compute",
+          "tls_esp_sha256_finish",
+          "tls_esp_sha256_update",
+          "tls_esp_sha_acquire_hardware",
+          "tls_esp_crypto_sha_aes_lock_acquire",
+          "tls_lock_acquire",
+          "sdk_lock_acquire",
+          "tls_lock_init_generic",
+          "tls_xqueuecreatemutex",
+          "tls_xqueuegenericcreate",
+          "tls_pvportmalloc",
+          "sdk_malloc_caps",
+          "sdk_malloc_base",
+          "sdk_malloc_aligned",
+          "sdk_multi_aligned_offset",
+          "sdk_multi_aligned_impl",
+          "sdk_multi_lock",
+          "sdk_queue_critical",
+          "sdk_queue_compare_swap",
+          "runtime_task_entry"
+        ],
+        "multipliers": {},
+        "base_bytes": 192,
+        "max_bytes": 4608
+      },
+      "ecdhe_rng_cpu": {
+        "symbols": [
+          "tls_ws_connect",
+          "sdk_transport_write",
+          "tls_ssl_write",
+          "sdk_tls_write",
+          "tls_esp_mbedtls_write",
+          "tls_wrap_mbedtls_ssl_write",
+          "sdk_ssl_write",
+          "tls_ssl_check_ctr_renegotiate",
+          "tls_mbedtls_ssl_renegotiate",
+          "tls_mbedtls_ssl_start_renegotiation",
+          "tls_mbedtls_ssl_handshake",
+          "tls_mbedtls_ssl_handshake_step",
+          "tls_wrap_mbedtls_ssl_handshake_client_step",
+          "tls_mbedtls_ssl_handshake_client_step",
+          "tls_psa_export_public_key",
+          "tls_psa_driver_wrapper_export_public_key",
+          "tls_psa_export_public_key_internal",
+          "tls_mbedtls_psa_ecp_export_public_key",
+          "tls_mbedtls_psa_ecp_export_key",
+          "tls_mbedtls_ecp_mul",
+          "tls_mbedtls_ecp_mul_restartable",
+          "tls_ecp_mul_restartable_internal_isra_0",
+          "tls_ecp_mul_comb_after_precomp_isra_0",
+          "tls_mbedtls_mpi_random",
+          "tls_mbedtls_mpi_fill_random",
+          "tls_mbedtls_psa_get_random",
+          "tls_psa_generate_random",
+          "tls_psa_generate_random_internal",
+          "tls_mbedtls_psa_external_get_random",
+          "tls_esp_fill_random",
+          "tls_esp_random",
+          "runtime_task_entry",
+          "tls_esp_clk_cpu_freq"
+        ],
+        "multipliers": {},
+        "base_bytes": 192,
+        "max_bytes": 4608
+      },
+      "ecdhe_rng_apb": {
+        "symbols": [
+          "tls_ws_connect",
+          "sdk_transport_write",
+          "tls_ssl_write",
+          "sdk_tls_write",
+          "tls_esp_mbedtls_write",
+          "tls_wrap_mbedtls_ssl_write",
+          "sdk_ssl_write",
+          "tls_ssl_check_ctr_renegotiate",
+          "tls_mbedtls_ssl_renegotiate",
+          "tls_mbedtls_ssl_start_renegotiation",
+          "tls_mbedtls_ssl_handshake",
+          "tls_mbedtls_ssl_handshake_step",
+          "tls_wrap_mbedtls_ssl_handshake_client_step",
+          "tls_mbedtls_ssl_handshake_client_step",
+          "tls_psa_export_public_key",
+          "tls_psa_driver_wrapper_export_public_key",
+          "tls_psa_export_public_key_internal",
+          "tls_mbedtls_psa_ecp_export_public_key",
+          "tls_mbedtls_psa_ecp_export_key",
+          "tls_mbedtls_ecp_mul",
+          "tls_mbedtls_ecp_mul_restartable",
+          "tls_ecp_mul_restartable_internal_isra_0",
+          "tls_ecp_mul_comb_after_precomp_isra_0",
+          "tls_mbedtls_mpi_random",
+          "tls_mbedtls_mpi_fill_random",
+          "tls_mbedtls_psa_get_random",
+          "tls_psa_generate_random",
+          "tls_psa_generate_random_internal",
+          "tls_mbedtls_psa_external_get_random",
+          "tls_esp_fill_random",
+          "tls_esp_random",
+          "runtime_task_entry",
+          "tls_esp_clk_apb_freq"
+        ],
+        "multipliers": {},
+        "base_bytes": 192,
+        "max_bytes": 4608
+      },
+      "certificate_der_import": {
+        "symbols": [
+          "tls_ws_connect",
+          "sdk_transport_write",
+          "tls_ssl_write",
+          "sdk_tls_write",
+          "tls_esp_mbedtls_write",
+          "tls_wrap_mbedtls_ssl_write",
+          "sdk_ssl_write",
+          "tls_ssl_check_ctr_renegotiate",
+          "tls_mbedtls_ssl_renegotiate",
+          "tls_mbedtls_ssl_start_renegotiation",
+          "tls_mbedtls_ssl_handshake",
+          "tls_mbedtls_ssl_handshake_step",
+          "tls_wrap_mbedtls_ssl_handshake_client_step",
+          "tls_mbedtls_ssl_handshake_client_step",
+          "tls_mbedtls_ssl_parse_certificate",
+          "tls_mbedtls_x509_crt_parse_der_nocopy",
+          "tls_mbedtls_x509_crt_parse_der_internal",
+          "tls_mbedtls_pk_parse_subpubkey",
+          "tls_mbedtls_pk_ecc_set_pubkey",
+          "tls_psa_import_key",
+          "tls_psa_driver_wrapper_import_key",
+          "tls_psa_import_key_into_slot",
+          "tls_mbedtls_psa_ecp_import_key",
+          "tls_mbedtls_psa_ecp_export_key",
+          "tls_mbedtls_ecp_mul",
+          "tls_mbedtls_ecp_mul_restartable",
+          "tls_ecp_mul_restartable_internal_isra_0",
+          "tls_ecp_mul_comb_after_precomp_isra_0",
+          "tls_ecp_add_mixed",
+          "tls_ecp_double_jac",
+          "tls_mbedtls_mpi_mul_mod",
+          "tls_mbedtls_mpi_mod_mpi",
+          "tls_mbedtls_mpi_div_mpi",
+          "tls_mbedtls_mpi_sub_mpi",
+          "tls_add_sub_mpi",
+          "tls_mbedtls_mpi_add_abs",
+          "tls_mbedtls_mpi_copy",
+          "tls_mbedtls_mpi_grow",
+          "tls_mbedtls_calloc",
+          "tls_esp_mbedtls_mem_calloc",
+          "tls_heap_caps_calloc",
+          "tls_heap_caps_calloc_base",
+          "sdk_malloc_base",
+          "sdk_malloc_aligned",
+          "sdk_multi_aligned_offset",
+          "sdk_multi_aligned_impl",
+          "sdk_multi_lock",
+          "sdk_queue_critical",
+          "sdk_queue_compare_swap",
+          "runtime_task_entry"
+        ],
+        "multipliers": {},
+        "base_bytes": 192,
+        "max_bytes": 4608
+      },
+      "record_gcm_hardware": {
+        "symbols": [
+          "tls_ws_connect",
+          "sdk_transport_write",
+          "tls_ssl_write",
+          "sdk_tls_write",
+          "tls_esp_mbedtls_write",
+          "tls_wrap_mbedtls_ssl_write",
+          "sdk_ssl_write",
+          "tls_ssl_check_ctr_renegotiate",
+          "tls_mbedtls_ssl_renegotiate",
+          "tls_mbedtls_ssl_start_renegotiation",
+          "tls_mbedtls_ssl_handshake",
+          "tls_mbedtls_ssl_handshake_step",
+          "tls_wrap_mbedtls_ssl_handshake_client_step",
+          "tls_mbedtls_ssl_handshake_client_step",
+          "tls_mbedtls_ssl_read_record",
+          "tls_mbedtls_ssl_decrypt_buf",
+          "tls_psa_aead_decrypt",
+          "tls_esp_crypto_aes_gcm_decrypt",
+          "tls_esp_aes_gcm_auth_decrypt",
+          "tls_esp_aes_gcm_crypt_and_tag",
+          "tls_esp_aes_gcm_update",
+          "tls_esp_aes_crypt_ctr",
+          "tls_esp_aes_process_dma",
+          "tls_esp_aes_dma_start",
+          "tls_esp_crypto_shared_gdma_start_axi_ahb",
+          "tls_gdma_new_ahb_channel",
+          "tls_heap_caps_calloc",
+          "tls_heap_caps_calloc_base",
+          "sdk_malloc_base",
+          "sdk_malloc_aligned",
+          "sdk_multi_aligned_offset",
+          "sdk_multi_aligned_impl",
+          "sdk_multi_lock",
+          "sdk_queue_critical",
+          "sdk_queue_compare_swap",
+          "runtime_task_entry"
+        ],
+        "multipliers": {
+          "tls_esp_aes_process_dma": 2
+        },
+        "base_bytes": 192,
+        "max_bytes": 4608
+      },
+      "record_cbc_dma": {
+        "symbols": [
+          "tls_ws_connect",
+          "sdk_transport_write",
+          "tls_ssl_write",
+          "sdk_tls_write",
+          "tls_esp_mbedtls_write",
+          "tls_wrap_mbedtls_ssl_write",
+          "sdk_ssl_write",
+          "tls_ssl_check_ctr_renegotiate",
+          "tls_mbedtls_ssl_renegotiate",
+          "tls_mbedtls_ssl_start_renegotiation",
+          "tls_mbedtls_ssl_handshake",
+          "tls_mbedtls_ssl_handshake_step",
+          "tls_wrap_mbedtls_ssl_handshake_client_step",
+          "tls_mbedtls_ssl_handshake_client_step",
+          "tls_mbedtls_ssl_read_record",
+          "tls_mbedtls_ssl_decrypt_buf",
+          "tls_psa_cipher_update",
+          "tls_esp_aes_cipher_update",
+          "tls_esp_aes_crypt_cbc",
+          "tls_esp_aes_process_dma",
+          "tls_esp_aes_dma_start",
+          "tls_esp_crypto_shared_gdma_start_axi_ahb",
+          "tls_gdma_new_ahb_channel",
+          "tls_heap_caps_calloc",
+          "tls_heap_caps_calloc_base",
+          "sdk_malloc_base",
+          "sdk_malloc_aligned",
+          "sdk_multi_aligned_offset",
+          "sdk_multi_aligned_impl",
+          "sdk_multi_lock",
+          "sdk_queue_critical",
+          "sdk_queue_compare_swap",
+          "runtime_task_entry"
+        ],
+        "multipliers": {
+          "tls_esp_aes_process_dma": 2
+        },
+        "base_bytes": 192,
+        "max_bytes": 4608
+      },
+      "record_gcm_descriptor": {
+        "symbols": [
+          "tls_ws_connect",
+          "sdk_transport_write",
+          "tls_ssl_write",
+          "sdk_tls_write",
+          "tls_esp_mbedtls_write",
+          "tls_wrap_mbedtls_ssl_write",
+          "sdk_ssl_write",
+          "tls_ssl_check_ctr_renegotiate",
+          "tls_mbedtls_ssl_renegotiate",
+          "tls_mbedtls_ssl_start_renegotiation",
+          "tls_mbedtls_ssl_handshake",
+          "tls_mbedtls_ssl_handshake_step",
+          "tls_wrap_mbedtls_ssl_handshake_client_step",
+          "tls_mbedtls_ssl_handshake_client_step",
+          "tls_mbedtls_ssl_read_record",
+          "tls_mbedtls_ssl_decrypt_buf",
+          "tls_psa_aead_decrypt",
+          "tls_esp_crypto_aes_gcm_decrypt",
+          "tls_esp_aes_gcm_auth_decrypt",
+          "tls_esp_aes_gcm_crypt_and_tag",
+          "tls_esp_aes_gcm_update",
+          "tls_esp_aes_crypt_ctr",
+          "tls_esp_aes_process_dma",
+          "tls_heap_caps_aligned_calloc",
+          "tls_heap_caps_aligned_alloc",
+          "sdk_malloc_aligned",
+          "tls_esp_heap_adjust_alignment_to_hw",
+          "tls_esp_cache_get_alignment",
+          "tls_esp_log_timestamp",
+          "tls_xtaskgettickcountfromisr",
+          "sdk_queue_critical",
+          "sdk_queue_compare_swap",
+          "runtime_task_entry"
+        ],
+        "multipliers": {
+          "tls_esp_aes_process_dma": 2
+        },
+        "base_bytes": 192,
+        "max_bytes": 4608
+      },
+      "prf_hmac_sha384": {
+        "symbols": [
+          "tls_ws_connect",
+          "sdk_transport_write",
+          "tls_ssl_write",
+          "sdk_tls_write",
+          "tls_esp_mbedtls_write",
+          "tls_wrap_mbedtls_ssl_write",
+          "sdk_ssl_write",
+          "tls_ssl_check_ctr_renegotiate",
+          "tls_mbedtls_ssl_renegotiate",
+          "tls_mbedtls_ssl_start_renegotiation",
+          "tls_mbedtls_ssl_handshake",
+          "tls_mbedtls_ssl_handshake_step",
+          "tls_wrap_mbedtls_ssl_handshake_client_step",
+          "tls_mbedtls_ssl_handshake_client_step",
+          "tls_mbedtls_ssl_derive_keys",
+          "tls_tls_prf_sha384",
+          "tls_tls_prf_generic",
+          "tls_psa_key_derivation_output_bytes",
+          "tls_psa_driver_wrapper_mac_compute",
+          "tls_esp_hmac_compute_transparent",
+          "tls_esp_hmac_setup_transparent",
+          "tls_esp_sha_hash_compute",
+          "tls_esp_sha512_driver_compute",
+          "tls_esp_sha512_finish",
+          "tls_esp_sha512_update",
+          "tls_esp_sha_acquire_hardware",
+          "tls_esp_crypto_sha_aes_lock_acquire",
+          "tls_lock_acquire",
+          "sdk_lock_acquire",
+          "tls_lock_init_generic",
+          "tls_xqueuecreatemutex",
+          "tls_xqueuegenericcreate",
+          "tls_pvportmalloc",
+          "sdk_malloc_caps",
+          "sdk_malloc_base",
+          "sdk_malloc_aligned",
+          "sdk_multi_aligned_offset",
+          "sdk_multi_aligned_impl",
+          "sdk_multi_lock",
+          "sdk_queue_critical",
+          "sdk_queue_compare_swap",
+          "runtime_task_entry"
+        ],
+        "multipliers": {},
+        "base_bytes": 192,
+        "max_bytes": 4608
+      },
+      "prefix_initial_wss": {
+        "symbols": [
+          "tls_esp_transport_connect",
+          "tls_ws_connect",
+          "tls_ssl_connect",
+          "tls_esp_tls_conn_new_sync",
+          "tls_esp_tls_low_level_conn",
+          "tls_esp_mbedtls_handshake",
+          "tls_mbedtls_ssl_handshake",
+          "tls_mbedtls_ssl_handshake_step",
+          "tls_wrap_mbedtls_ssl_handshake_client_step",
+          "tls_mbedtls_ssl_handshake_client_step"
+        ],
+        "multipliers": {
+          "tls_esp_transport_connect": 2
+        },
+        "base_bytes": 0,
+        "max_bytes": 880
+      },
+      "prefix_wss_read": {
+        "symbols": [
+          "tls_mqtt_message_receive",
+          "tls_esp_transport_read",
+          "tls_ws_read",
+          "tls_esp_transport_read_exact_size",
+          "tls_esp_transport_read_internal",
+          "tls_ssl_read",
+          "tls_esp_tls_conn_read",
+          "tls_esp_mbedtls_read",
+          "tls_wrap_mbedtls_ssl_read",
+          "tls_mbedtls_ssl_read",
+          "tls_ssl_check_ctr_renegotiate",
+          "tls_mbedtls_ssl_renegotiate",
+          "tls_mbedtls_ssl_start_renegotiation",
+          "tls_mbedtls_ssl_handshake",
+          "tls_mbedtls_ssl_handshake_step",
+          "tls_wrap_mbedtls_ssl_handshake_client_step",
+          "tls_mbedtls_ssl_handshake_client_step"
+        ],
+        "multipliers": {},
+        "base_bytes": 0,
+        "max_bytes": 880
+      },
+      "prefix_wss_upgrade_read": {
+        "symbols": [
+          "tls_ws_connect",
+          "tls_esp_transport_read",
+          "tls_ssl_read",
+          "tls_esp_tls_conn_read",
+          "tls_esp_mbedtls_read",
+          "tls_wrap_mbedtls_ssl_read",
+          "tls_mbedtls_ssl_read",
+          "tls_ssl_check_ctr_renegotiate",
+          "tls_mbedtls_ssl_renegotiate",
+          "tls_mbedtls_ssl_start_renegotiation",
+          "tls_mbedtls_ssl_handshake",
+          "tls_mbedtls_ssl_handshake_step",
+          "tls_wrap_mbedtls_ssl_handshake_client_step",
+          "tls_mbedtls_ssl_handshake_client_step"
+        ],
+        "multipliers": {},
+        "base_bytes": 0,
+        "max_bytes": 880
+      },
+      "prefix_wss_write": {
+        "symbols": [
+          "sdk_subscribe_single",
+          "sdk_subscribe_multiple",
+          "tls_esp_mqtt_write",
+          "tls_ws_write",
+          "tls_ws_write_constprop_0",
+          "sdk_transport_write",
+          "tls_ssl_write",
+          "sdk_tls_write",
+          "tls_esp_mbedtls_write",
+          "tls_wrap_mbedtls_ssl_write",
+          "sdk_ssl_write",
+          "tls_ssl_check_ctr_renegotiate",
+          "tls_mbedtls_ssl_renegotiate",
+          "tls_mbedtls_ssl_start_renegotiation",
+          "tls_mbedtls_ssl_handshake",
+          "tls_mbedtls_ssl_handshake_step",
+          "tls_wrap_mbedtls_ssl_handshake_client_step",
+          "tls_mbedtls_ssl_handshake_client_step"
+        ],
+        "multipliers": {
+          "sdk_transport_write": 2
+        },
+        "base_bytes": 0,
+        "max_bytes": 880
+      },
+      "prefix_wss_upgrade_write": {
+        "symbols": [
+          "tls_ws_connect",
+          "sdk_transport_write",
+          "tls_ssl_write",
+          "sdk_tls_write",
+          "tls_esp_mbedtls_write",
+          "tls_wrap_mbedtls_ssl_write",
+          "sdk_ssl_write",
+          "tls_ssl_check_ctr_renegotiate",
+          "tls_mbedtls_ssl_renegotiate",
+          "tls_mbedtls_ssl_start_renegotiation",
+          "tls_mbedtls_ssl_handshake",
+          "tls_mbedtls_ssl_handshake_step",
+          "tls_wrap_mbedtls_ssl_handshake_client_step",
+          "tls_mbedtls_ssl_handshake_client_step"
+        ],
+        "multipliers": {},
+        "base_bytes": 0,
+        "max_bytes": 880
+      },
+      "bio_recv": {
+        "symbols": [
+          "tls_ws_connect",
+          "sdk_transport_write",
+          "tls_ssl_write",
+          "sdk_tls_write",
+          "tls_esp_mbedtls_write",
+          "tls_wrap_mbedtls_ssl_write",
+          "sdk_ssl_write",
+          "tls_ssl_check_ctr_renegotiate",
+          "tls_mbedtls_ssl_renegotiate",
+          "tls_mbedtls_ssl_start_renegotiation",
+          "tls_mbedtls_ssl_handshake",
+          "tls_mbedtls_ssl_handshake_step",
+          "tls_wrap_mbedtls_ssl_handshake_client_step",
+          "tls_mbedtls_ssl_handshake_client_step",
+          "tls_mbedtls_ssl_parse_certificate",
+          "tls_mbedtls_ssl_read_record",
+          "tls_mbedtls_ssl_fetch_input",
+          "tls_mbedtls_net_recv",
+          "tls_read",
+          "tls_read_r",
+          "tls_lwip_read_r_wrapper",
+          "tls_lwip_read",
+          "tls_lwip_recvfrom",
+          "tls_lwip_recv_tcp",
+          "tls_netconn_recv_tcp_pbuf_flags",
+          "tls_netconn_recv_data_tcp",
+          "tls_netconn_apimsg",
+          "tls_sys_thread_sem_get",
+          "tls_sys_thread_sem_init",
+          "tls_pthread_setspecific",
+          "tls_calloc",
+          "sdk_malloc_default",
+          "sdk_malloc_caps",
+          "sdk_malloc_base",
+          "sdk_malloc_aligned",
+          "sdk_multi_aligned_offset",
+          "sdk_multi_aligned_impl",
+          "sdk_multi_lock",
+          "sdk_queue_critical",
+          "sdk_queue_compare_swap",
+          "runtime_task_entry"
+        ],
+        "multipliers": {},
+        "base_bytes": 192,
+        "max_bytes": 4608
+      },
+      "prf_dma_sha256": {
+        "symbols": [
+          "tls_ws_connect",
+          "sdk_transport_write",
+          "tls_ssl_write",
+          "sdk_tls_write",
+          "tls_esp_mbedtls_write",
+          "tls_wrap_mbedtls_ssl_write",
+          "sdk_ssl_write",
+          "tls_ssl_check_ctr_renegotiate",
+          "tls_mbedtls_ssl_renegotiate",
+          "tls_mbedtls_ssl_start_renegotiation",
+          "tls_mbedtls_ssl_handshake",
+          "tls_mbedtls_ssl_handshake_step",
+          "tls_wrap_mbedtls_ssl_handshake_client_step",
+          "tls_mbedtls_ssl_handshake_client_step",
+          "tls_mbedtls_ssl_derive_keys",
+          "tls_tls_prf_sha256",
+          "tls_tls_prf_generic",
+          "tls_psa_key_derivation_output_bytes",
+          "tls_psa_driver_wrapper_mac_compute",
+          "tls_esp_hmac_compute_transparent",
+          "tls_esp_hmac_setup_transparent",
+          "tls_esp_sha_hash_compute",
+          "tls_esp_sha256_driver_compute",
+          "tls_esp_sha256_finish",
+          "tls_esp_sha256_update",
+          "runtime_task_entry",
+          "tls_esp_sha_dma",
+          "tls_esp_sha_dma_start",
+          "tls_esp_crypto_shared_gdma_start_axi_ahb",
+          "tls_gdma_new_ahb_channel",
+          "tls_heap_caps_calloc",
+          "tls_heap_caps_calloc_base",
+          "sdk_malloc_base",
+          "sdk_malloc_aligned",
+          "sdk_multi_aligned_offset",
+          "sdk_multi_aligned_impl",
+          "sdk_multi_lock",
+          "sdk_queue_critical",
+          "sdk_queue_compare_swap"
+        ],
+        "multipliers": {},
+        "base_bytes": 192,
+        "max_bytes": 4608
+      },
+      "record_cbc_hmac_sha256": {
+        "symbols": [
+          "tls_ws_connect",
+          "sdk_transport_write",
+          "tls_ssl_write",
+          "sdk_tls_write",
+          "tls_esp_mbedtls_write",
+          "tls_wrap_mbedtls_ssl_write",
+          "sdk_ssl_write",
+          "tls_ssl_check_ctr_renegotiate",
+          "tls_mbedtls_ssl_renegotiate",
+          "tls_mbedtls_ssl_start_renegotiation",
+          "tls_mbedtls_ssl_handshake",
+          "tls_mbedtls_ssl_handshake_step",
+          "tls_wrap_mbedtls_ssl_handshake_client_step",
+          "tls_mbedtls_ssl_handshake_client_step",
+          "tls_mbedtls_ssl_read_record",
+          "tls_mbedtls_ssl_decrypt_buf",
+          "tls_psa_mac_verify_setup",
+          "tls_psa_mac_setup",
+          "tls_esp_hmac_setup_transparent",
+          "tls_esp_sha_hash_compute",
+          "tls_esp_sha256_driver_compute",
+          "tls_esp_sha256_finish",
+          "tls_esp_sha256_update",
+          "tls_esp_sha_acquire_hardware",
+          "tls_esp_crypto_sha_aes_lock_acquire",
+          "tls_lock_acquire",
+          "sdk_lock_acquire",
+          "tls_lock_init_generic",
+          "tls_xqueuecreatemutex",
+          "tls_xqueuegenericcreate",
+          "tls_pvportmalloc",
+          "sdk_malloc_caps",
+          "sdk_malloc_base",
+          "sdk_malloc_aligned",
+          "sdk_multi_aligned_offset",
+          "sdk_multi_aligned_impl",
+          "sdk_multi_lock",
+          "sdk_queue_critical",
+          "sdk_queue_compare_swap",
+          "runtime_task_entry"
+        ],
+        "multipliers": {},
+        "base_bytes": 192,
+        "max_bytes": 4608
+      },
+      "prf_dma_sha384": {
+        "symbols": [
+          "tls_ws_connect",
+          "sdk_transport_write",
+          "tls_ssl_write",
+          "sdk_tls_write",
+          "tls_esp_mbedtls_write",
+          "tls_wrap_mbedtls_ssl_write",
+          "sdk_ssl_write",
+          "tls_ssl_check_ctr_renegotiate",
+          "tls_mbedtls_ssl_renegotiate",
+          "tls_mbedtls_ssl_start_renegotiation",
+          "tls_mbedtls_ssl_handshake",
+          "tls_mbedtls_ssl_handshake_step",
+          "tls_wrap_mbedtls_ssl_handshake_client_step",
+          "tls_mbedtls_ssl_handshake_client_step",
+          "tls_mbedtls_ssl_derive_keys",
+          "tls_tls_prf_sha384",
+          "tls_tls_prf_generic",
+          "tls_psa_key_derivation_output_bytes",
+          "tls_psa_driver_wrapper_mac_compute",
+          "tls_esp_hmac_compute_transparent",
+          "tls_esp_hmac_setup_transparent",
+          "tls_esp_sha_hash_compute",
+          "tls_esp_sha512_driver_compute",
+          "tls_esp_sha512_finish",
+          "tls_esp_sha512_update",
+          "runtime_task_entry",
+          "tls_esp_sha_dma",
+          "tls_esp_sha_dma_start",
+          "tls_esp_crypto_shared_gdma_start_axi_ahb",
+          "tls_gdma_new_ahb_channel",
+          "tls_heap_caps_calloc",
+          "tls_heap_caps_calloc_base",
+          "sdk_malloc_base",
+          "sdk_malloc_aligned",
+          "sdk_multi_aligned_offset",
+          "sdk_multi_aligned_impl",
+          "sdk_multi_lock",
+          "sdk_queue_critical",
+          "sdk_queue_compare_swap"
+        ],
+        "multipliers": {},
+        "base_bytes": 192,
+        "max_bytes": 4608
+      },
+      "record_cbc_hmac_sha384": {
+        "symbols": [
+          "tls_ws_connect",
+          "sdk_transport_write",
+          "tls_ssl_write",
+          "sdk_tls_write",
+          "tls_esp_mbedtls_write",
+          "tls_wrap_mbedtls_ssl_write",
+          "sdk_ssl_write",
+          "tls_ssl_check_ctr_renegotiate",
+          "tls_mbedtls_ssl_renegotiate",
+          "tls_mbedtls_ssl_start_renegotiation",
+          "tls_mbedtls_ssl_handshake",
+          "tls_mbedtls_ssl_handshake_step",
+          "tls_wrap_mbedtls_ssl_handshake_client_step",
+          "tls_mbedtls_ssl_handshake_client_step",
+          "tls_mbedtls_ssl_read_record",
+          "tls_mbedtls_ssl_decrypt_buf",
+          "tls_psa_mac_verify_setup",
+          "tls_psa_mac_setup",
+          "tls_esp_hmac_setup_transparent",
+          "tls_esp_sha_hash_compute",
+          "tls_esp_sha512_driver_compute",
+          "tls_esp_sha512_finish",
+          "tls_esp_sha512_update",
+          "tls_esp_sha_acquire_hardware",
+          "tls_esp_crypto_sha_aes_lock_acquire",
+          "tls_lock_acquire",
+          "sdk_lock_acquire",
+          "tls_lock_init_generic",
+          "tls_xqueuecreatemutex",
+          "tls_xqueuegenericcreate",
+          "tls_pvportmalloc",
+          "sdk_malloc_caps",
+          "sdk_malloc_base",
+          "sdk_malloc_aligned",
+          "sdk_multi_aligned_offset",
+          "sdk_multi_aligned_impl",
+          "sdk_multi_lock",
+          "sdk_queue_critical",
+          "sdk_queue_compare_swap",
+          "runtime_task_entry"
+        ],
+        "multipliers": {},
+        "base_bytes": 192,
+        "max_bytes": 4608
+      },
+      "bio_recv_specific": {
+        "symbols": [
+          "tls_ws_connect",
+          "sdk_transport_write",
+          "tls_ssl_write",
+          "sdk_tls_write",
+          "tls_esp_mbedtls_write",
+          "tls_wrap_mbedtls_ssl_write",
+          "sdk_ssl_write",
+          "tls_ssl_check_ctr_renegotiate",
+          "tls_mbedtls_ssl_renegotiate",
+          "tls_mbedtls_ssl_start_renegotiation",
+          "tls_mbedtls_ssl_handshake",
+          "tls_mbedtls_ssl_handshake_step",
+          "tls_wrap_mbedtls_ssl_handshake_client_step",
+          "tls_mbedtls_ssl_handshake_client_step",
+          "tls_mbedtls_ssl_parse_certificate",
+          "tls_mbedtls_ssl_read_record",
+          "tls_mbedtls_ssl_fetch_input",
+          "tls_mbedtls_net_recv",
+          "tls_read",
+          "tls_read_r",
+          "tls_lwip_read_r_wrapper",
+          "tls_lwip_read",
+          "tls_lwip_recvfrom",
+          "tls_lwip_recv_tcp",
+          "tls_netconn_recv_tcp_pbuf_flags",
+          "tls_netconn_recv_data_tcp",
+          "tls_netconn_apimsg",
+          "tls_sys_thread_sem_get",
+          "tls_sys_thread_sem_init",
+          "tls_pthread_setspecific",
+          "tls_find_key",
+          "sdk_queue_critical",
+          "sdk_queue_compare_swap",
+          "runtime_task_entry"
+        ],
+        "multipliers": {},
+        "base_bytes": 192,
+        "max_bytes": 4608
+      },
+      "bio_send": {
+        "symbols": [
+          "tls_ws_connect",
+          "sdk_transport_write",
+          "tls_ssl_write",
+          "sdk_tls_write",
+          "tls_esp_mbedtls_write",
+          "tls_wrap_mbedtls_ssl_write",
+          "sdk_ssl_write",
+          "tls_ssl_check_ctr_renegotiate",
+          "tls_mbedtls_ssl_renegotiate",
+          "tls_mbedtls_ssl_start_renegotiation",
+          "tls_mbedtls_ssl_handshake",
+          "tls_mbedtls_ssl_handshake_step",
+          "tls_wrap_mbedtls_ssl_handshake_client_step",
+          "tls_mbedtls_ssl_handshake_client_step",
+          "tls_wrap_mbedtls_ssl_write_client_hello",
+          "tls_mbedtls_ssl_write_client_hello",
+          "tls_mbedtls_ssl_finish_handshake_msg",
+          "tls_mbedtls_ssl_write_handshake_msg_ext",
+          "tls_mbedtls_ssl_write_record",
+          "tls_mbedtls_ssl_flush_output",
+          "tls_mbedtls_net_send",
+          "sdk_write",
+          "sdk_write_r",
+          "tls_lwip_write_r_wrapper",
+          "tls_lwip_write",
+          "tls_lwip_send",
+          "tls_netconn_write_partly",
+          "tls_netconn_write_vectors_partly",
+          "tls_netconn_apimsg",
+          "tls_sys_thread_sem_get",
+          "tls_sys_thread_sem_init",
+          "tls_pthread_setspecific",
+          "tls_calloc",
+          "sdk_malloc_default",
+          "sdk_malloc_caps",
+          "sdk_malloc_base",
+          "sdk_malloc_aligned",
+          "sdk_multi_aligned_offset",
+          "sdk_multi_aligned_impl",
+          "sdk_multi_lock",
+          "sdk_queue_critical",
+          "sdk_queue_compare_swap",
+          "runtime_task_entry"
+        ],
+        "multipliers": {},
+        "base_bytes": 192,
+        "max_bytes": 4608
+      },
+      "bio_send_ipc": {
+        "symbols": [
+          "tls_ws_connect",
+          "sdk_transport_write",
+          "tls_ssl_write",
+          "sdk_tls_write",
+          "tls_esp_mbedtls_write",
+          "tls_wrap_mbedtls_ssl_write",
+          "sdk_ssl_write",
+          "tls_ssl_check_ctr_renegotiate",
+          "tls_mbedtls_ssl_renegotiate",
+          "tls_mbedtls_ssl_start_renegotiation",
+          "tls_mbedtls_ssl_handshake",
+          "tls_mbedtls_ssl_handshake_step",
+          "tls_wrap_mbedtls_ssl_handshake_client_step",
+          "tls_mbedtls_ssl_handshake_client_step",
+          "tls_wrap_mbedtls_ssl_write_client_hello",
+          "tls_mbedtls_ssl_write_client_hello",
+          "tls_mbedtls_ssl_finish_handshake_msg",
+          "tls_mbedtls_ssl_write_handshake_msg_ext",
+          "tls_mbedtls_ssl_write_record",
+          "tls_mbedtls_ssl_flush_output",
+          "tls_mbedtls_net_send",
+          "sdk_write",
+          "sdk_write_r",
+          "tls_lwip_write_r_wrapper",
+          "tls_lwip_write",
+          "tls_lwip_send",
+          "tls_netconn_write_partly",
+          "tls_netconn_write_vectors_partly",
+          "tls_netconn_apimsg",
+          "tls_tcpip_send_msg_wait_sem",
+          "tls_sys_mbox_post",
+          "sdk_queue_send",
+          "sdk_queue_remove_event",
+          "sdk_queue_yield_required",
+          "sdk_queue_yield_other",
+          "sdk_queue_crosscore_yield",
+          "sdk_queue_crosscore_send",
+          "sdk_queue_critical",
+          "sdk_queue_compare_swap",
+          "runtime_task_entry"
+        ],
+        "multipliers": {},
+        "base_bytes": 192,
+        "max_bytes": 4608
+      }
     }
   }
 }

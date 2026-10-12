@@ -355,7 +355,10 @@ for (const pathName of ["weather_task_download", "weather_task_parse"]) {
 assert.deepEqual(stackBudgets.paths.weather_task_download.symbols,
   ["weather_task", "weather_cycle", "weather_fetch", "weather_download"]);
 assert.deepEqual(stackBudgets.paths.weather_task_parse.symbols,
-  ["weather_task", "weather_cycle", "weather_fetch", "weather_parse"]);
+  ["weather_task", "weather_cycle", "weather_fetch", "weather_parse",
+   "cjson_parse_length_opts", "cjson_parse_value", "cjson_delete", "cjson_parse_string"]);
+assert.equal(stackBudgets.paths.weather_task_parse.multipliers.cjson_parse_value, 17);
+assert.equal(stackBudgets.paths.weather_task_parse.multipliers.cjson_delete, 17);
 assert.match(weather, /__attribute__\(\(noinline\)\) WeatherCycleWait weather_cycle\(/,
   "the separately budgeted cycle must retain its real ELF frame");
 assert.equal(stackBudgets.paths.weather_task_download.base_bytes, 2048,
@@ -373,7 +376,7 @@ assert.match(httpOta,
 assert.match(httpOta,
   /,\\"heap_min_free_bytes\\":[\s\S]{0,160}?,\\"heap_min_largest_block_bytes\\":[\s\S]{0,240}?,\\"ota_stack_min_free_bytes\\":[\s\S]{0,180}?null/,
   "compact OTA status must expose heap dimensions and null-before-sample OTA stack evidence");
-assert.match(stackWatch, /Modbus[\s\S]{0,120}?Weather[\s\S]{0,120}?Ota[\s\S]{0,120}?COUNT/,
+assert.match(stackWatch, /enum class StackWatch[\s\S]*?\bModbus\b[\s\S]*?\bWeather\b[\s\S]*?\bOta\b[\s\S]*?\bCOUNT\b/,
   "the shared allocation-free stack watcher must retain Weather and resident-worker OTA minima");
 assert.ok(occurrences(weather, "stack_watch_sample(StackWatch::Weather)") >= 2,
   "Weather must sample after the real TLS/HTTP/JSON interval before HIL accepts it");

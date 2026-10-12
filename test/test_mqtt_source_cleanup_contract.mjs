@@ -79,7 +79,7 @@ assert.match(cleanupLogic,
 
 const cleanupStart = mqtt.indexOf(
   "static RetainedCleanupCycle service_requested_topic_cleanup(const Config& c)");
-const cleanupEnd = mqtt.indexOf("static void publish_weather_state", cleanupStart);
+const cleanupEnd = mqtt.indexOf("std::string build_weather_payload", cleanupStart);
 assert.ok(cleanupStart >= 0 && cleanupEnd > cleanupStart,
   "the source-cleanup runtime boundary must remain identifiable");
 const cleanup = mqtt.slice(cleanupStart, cleanupEnd);

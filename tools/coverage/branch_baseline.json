@@ -25,6 +25,18 @@
         "main/logic/detect.hpp": "dc8206191368adc0df1e58d89054ef5d300ff6938695c715e1211aa037ac6d0d",
         "main/logic/hp_probe.hpp": "a75d4a5f15c4fb24351d21461b0ade3547985082129919665e3957521f1bfddd"
       }
+    },
+    {
+      "compilers": {
+        "clang-17-darwin": "Apple Clang 17.0.0",
+        "gcc-13-linux-ubuntu24": "ESP-IDF v6.1 container GCC 13.3.0",
+        "gcc-15-linux-ubuntu26": "GCC 15, Ubuntu 26.04 Docker"
+      },
+      "hosted_confirmation": "gcc-15-github-linux-ubuntu26 repeats the local GCC 15 inventory; authoritative CI pending",
+      "runner": "scripts/run-mock-tests.sh --coverage",
+      "scope": "Maximum HTTP-body surrogate truncation and valid-pair controls; MCP taken outcomes increase, all other inventories and floors retained",
+      "source": "main/logic/mcp.hpp",
+      "source_sha256": "56c72f12cc12f15891bcb8108562d23ed510ee134103b3f14b3a6c4140a01a0d"
     }
   ],
   "method": "Exact taken/outcome inventories are measured by scripts/run-mock-tests.sh --coverage and bound to compiler family, major version and platform; hosted profiles additionally bind the runner image. The gate rejects inventory mismatches and any historical ratio decrease. Updated hosted inventories require authoritative CI confirmation. Historical measurement notes remain in Git; profiles contain the enforced counts. Measurements below identify changed sources and local compiler provenance without changing checker rules or the 95-percent executable-line floor.",
@@ -244,7 +256,7 @@
       },
       "main/logic/mcp.hpp": {
         "outcomes": 579,
-        "taken": 367
+        "taken": 375
       },
       "main/logic/modbus.hpp": {
         "outcomes": 108,
@@ -622,7 +634,7 @@
       },
       "main/logic/mcp.hpp": {
         "outcomes": 621,
-        "taken": 389
+        "taken": 397
       },
       "main/logic/modbus.hpp": {
         "outcomes": 120,
@@ -1000,7 +1012,7 @@
       },
       "main/logic/mcp.hpp": {
         "outcomes": 621,
-        "taken": 389
+        "taken": 397
       },
       "main/logic/modbus.hpp": {
         "outcomes": 120,
@@ -1378,7 +1390,7 @@
       },
       "main/logic/mcp.hpp": {
         "outcomes": 621,
-        "taken": 389
+        "taken": 397
       },
       "main/logic/modbus.hpp": {
         "outcomes": 120,

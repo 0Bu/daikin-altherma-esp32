@@ -21,6 +21,9 @@ const poll = read("main/hp_poll.cpp");
 const pollHeader = read("main/hp_poll.hpp");
 const modbus = read("main/hp_modbus.cpp");
 const mqtt = read("main/mqtt_ha.cpp");
+const applyReferenceHeaders = [...mqtt.matchAll(/void\s+apply_reference_frame\(/g)];
+assert.equal(applyReferenceHeaders.length, 1, "one staged reference handler must remain");
+const applyReferenceHeader = applyReferenceHeaders[0][0];
 const weather = read("main/weather_forecast.cpp");
 const httpConfig = read("main/http_config.cpp");
 const configSource = read("main/config.cpp");
@@ -40,11 +43,14 @@ const captureFrame = mqtt.slice(mqtt.indexOf("static void capture_reference_fram
 assert.match(captureFrame,
   /if \(e->current_data_offset == 0\) \{\s*s_ref_rx\.reference_epoch\s*=\s*s_ref_requested_epoch\.load/,
   "a fragmented MQTT frame must keep the request epoch of its first fragment");
-const referenceFrames = mqtt.slice(mqtt.indexOf("static void service_reference_frames("),
+const referenceDispatch = mqtt.slice(mqtt.indexOf("void service_reference_frames("),
   mqtt.indexOf("static void mqtt_transport_before_connect("));
-assert.ok(referenceFrames.indexOf("service_circulation_frame(frame, c)") <
-  referenceFrames.indexOf("reference_request_current_locked(frame.reference_epoch, c)"),
+assert.ok(referenceDispatch.indexOf("service_circulation_frame(s_ref_task_frame, c)") >= 0 &&
+  referenceDispatch.indexOf("service_circulation_frame(s_ref_task_frame, c)") <
+  referenceDispatch.indexOf("service_reference_frame(s_ref_task_frame, c)"),
   "independent circulation frames must be served before a stale room-source epoch is discarded");
+const referenceFrames = mqtt.slice(mqtt.indexOf(applyReferenceHeader),
+  mqtt.indexOf("void service_reference_frame("));
 const invalidReference = referenceFrames.slice(referenceFrames.indexOf("if (!decoded.valid)"),
   referenceFrames.indexOf("prepared_error_log;"));
 assert.match(invalidReference,
@@ -54,7 +60,7 @@ assert.match(referenceFrames,
   /candidate_watermark\.accept\(decoded\.source_unix_s\)/,
   "acceptance must stage the timestamp highwatermark independently of the committed one");
 assert.match(referenceFrames,
-  /Lock lk\(s_mtx\);\s*if \(!reference_request_current_locked\(frame\.reference_epoch, c\)\) continue;[\s\S]*?s_ref_status\s*=\s*std::move\(candidate\);\s*s_ref_source_time\s*=\s*candidate_watermark;/,
+  /Lock lk\(s_mtx\);\s*if \(!reference_request_current_locked\(frame\.reference_epoch, c\)\) return;[\s\S]*?s_ref_status\s*=\s*std::move\(candidate\);\s*s_ref_source_time\s*=\s*candidate_watermark;/,
   "valid and invalid status/clock candidates must commit together after the guarded epoch check");
 assert.doesNotMatch(referenceFrames, /s_ref_status\.[a-z_]+\s*=/,
   "no field of the committed raw aggregate may change before all throwing staging has finished");
@@ -86,18 +92,22 @@ const referenceConfigCopy = mqtt.indexOf("const Config ref_config = config()", c
 assert.ok(configEpochCapture >= 0 && referenceConfigCopy > configEpochCapture,
   "the owner must capture its request epoch before copying Config");
 for (const [begin, end] of [
-  ["static DecodedReferenceFrame decode_reference_frame(", "struct DecodedCirculationFrame"],
-  ["static DecodedCirculationFrame decode_circulation_frame(", "static ReferenceFreshness circulation_frame_freshness("],
+  [/DecodedReferenceFrame\s+decode_reference_frame\(/g, "struct DecodedCirculationFrame"],
+  [/DecodedCirculationFrame\s+decode_circulation_frame\(/g, "static ReferenceFreshness circulation_frame_freshness("],
 ]) {
-  const decoder = mqtt.slice(mqtt.indexOf(begin), mqtt.indexOf(end));
+  const starts = [...mqtt.matchAll(begin)];
+  assert.equal(starts.length, 1, "one source-bound MQTT decoder must remain");
+  const finish = mqtt.indexOf(end, starts[0].index);
+  assert.ok(finish > starts[0].index, "MQTT decoder boundary must remain explicit");
+  const decoder = mqtt.slice(starts[0].index, finish);
   assert.match(decoder, /JsonGuard root\(cJSON_ParseWithLengthOpts/,
     "MQTT parsed input trees must unwind through a scoped owner on string allocation failure");
   assert.doesNotMatch(decoder, /cJSON_Delete\(root\)/,
     "MQTT scoped input trees must not also be deleted manually");
 }
 
-const circulationFrames = mqtt.slice(mqtt.indexOf("static void service_circulation_frame("),
-  mqtt.indexOf("static void service_reference_frames("));
+const circulationFrames = mqtt.slice(mqtt.indexOf("void service_circulation_frame("),
+  mqtt.indexOf(applyReferenceHeader));
 assert.match(circulationFrames,
   /circulation_request_current_locked\(frame\.circulation_epoch, c\)[\s\S]*?candidate\s*=\s*s_circulation_status/,
   "circulation decoding must snapshot only the matching applied Config and frame request");
@@ -415,7 +425,7 @@ assert.match(weatherSnapshot,
   /WeatherForecastStatus status[\s\S]*?\{[\s\S]*?Lock\s+lk\(s_mtx\)[\s\S]*?status\s*=\s*s_status[\s\S]*?\}[\s\S]*?weather_task_failure\(\s*true,\s*true,\s*s_task_start_state\.load\([^)]*\)\s*\)[\s\S]*?status\.configured\s*=\s*true[\s\S]*?status\.fetching\s*=\s*false[\s\S]*?status\.available\s*=\s*false[\s\S]*?status\.state\s*=\s*"error"[\s\S]*?task_failure\.reason[\s\S]*?task_failure\.error/,
   "Weather snapshots must materialise the atomic start failure only after releasing the optional mutex");
 assert.match(mqtt,
-  /publish_weather_state\(bool config_enabled\)[\s\S]*?weather_forecast_status\(\)[\s\S]*?weather_mqtt_action\(config_enabled, status\.configured\)[\s\S]*?WeatherMqttAction::Publish[\s\S]*?build_weather_mqtt_json/,
+  /build_weather_payload\(bool config_enabled\)[\s\S]*?weather_forecast_status\(\)[\s\S]*?weather_mqtt_action\(config_enabled, status\.configured\)[\s\S]*?WeatherMqttAction::Publish[\s\S]*?build_weather_mqtt_json/,
   "an active Weather config must publish its materialised boot-start failure atomically over MQTT");
 const internalInvalidateStart = weather.indexOf("bool invalidate_if_generation(");
 const internalInvalidateEnd = weather.indexOf("\n}\n\n// A saved location", internalInvalidateStart);
@@ -602,7 +612,8 @@ assert.match(configSource, /config_save_transaction\(g_cfg, requested, owns_link
   "save_whole must run the transaction whose staging order is pinned above");
 
 const cleanupStart = mqtt.indexOf("static RetainedCleanupCycle service_requested_topic_cleanup(");
-const cleanupEnd = mqtt.indexOf("\n}\n\nstatic void publish_weather_state", cleanupStart);
+const cleanupEnd = mqtt.indexOf("std::string build_weather_payload", cleanupStart);
+assert.ok(cleanupStart >= 0 && cleanupEnd > cleanupStart);
 const cleanup = mqtt.slice(cleanupStart, cleanupEnd);
 assert.match(mqtt,
   /#include "logic\/mqtt_cleanup\.hpp"/,
@@ -704,11 +715,11 @@ const modbusPublish = mqtt.slice(modbusPublishStart, modbusPublishEnd);
 assert.match(modbusPublish,
   /if \(js != s_last_modbus_json\) \{\s*if \(!mqtt_publish\(s_modbus,[\s\S]*?\)\) return false;\s*s_last_modbus_json = js;\s*\}/,
   "HomeHub dedup may advance only after the broker accepts current state");
-const weatherPublishStart = mqtt.indexOf("static void publish_weather_state(");
+const weatherPublishStart = mqtt.indexOf("void publish_weather_state(");
 const weatherPublishEnd = mqtt.indexOf("\n}\n\n// ENV III", weatherPublishStart) + 2;
 const weatherPublish = mqtt.slice(weatherPublishStart, weatherPublishEnd);
 assert.match(weatherPublish,
-  /if \(js != s_last_weather_json &&\s*mqtt_publish\(s_weather,[\s\S]*?\)\) \{\s*s_last_weather_json = js;\s*\}/,
+  /if \(js != s_last_weather_json &&\s*mqtt_publish\(s_weather,[\s\S]*?\)\) \{\s*s_last_weather_json\.swap\(js\);\s*\}/,
   "Weather dedup may advance only after the broker accepts current state");
 const env3PublishStart = mqtt.indexOf("static void publish_env3_state()");
 const env3PublishEnd = mqtt.indexOf("\n}\n\n// Stream one retained", env3PublishStart) + 2;
@@ -1057,7 +1068,7 @@ assert.match(historySource, /compare_exchange_weak[\s\S]*?memory_order_release/)
     0, "the room timestamp mapping must be derived by reference_source_time_mapped() alone");
   // MQTT-05/b: a decoder error that still blocks an incomplete aggregate keeps its own reason;
   // the frame loop may report Eligible (code 0) only once no error remains.
-  const frames = bodyOf(mqtt, "static void service_reference_frames(const Config& c)");
+  const frames = bodyOf(mqtt, applyReferenceHeader);
   assert.doesNotMatch(frames, /^\s*candidate\.rejection_reason\s*=\s*ReferenceRoomReason::Eligible;/m,
     "the frame loop must not reset the rejection reason while a blocking error remains");
   assert.match(frames,

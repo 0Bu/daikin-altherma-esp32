@@ -1969,6 +1969,7 @@ static void health_gate_task(void*) {
     if (esp_ota_get_state_partition(running, &st) != ESP_OK) {
         s_runtime_image_state.store(static_cast<uint8_t>(OtaRuntimeImageState::Unknown),
                                     std::memory_order_release);
+        stack_watch_sample(StackWatch::OtaHealth);
         vTaskDelete(nullptr);
         return;
     }
@@ -1976,6 +1977,7 @@ static void health_gate_task(void*) {
         const OtaRuntimeImageState state =
             st == ESP_OTA_IMG_VALID ? OtaRuntimeImageState::Valid : OtaRuntimeImageState::Unarmed;
         s_runtime_image_state.store(static_cast<uint8_t>(state), std::memory_order_release);
+        stack_watch_sample(StackWatch::OtaHealth);
         vTaskDelete(nullptr); // successful IDF observation, but not a rollback-armed image
         return;
     }
@@ -1987,6 +1989,7 @@ static void health_gate_task(void*) {
     // reason.
     bool skip_reported = false;
     for (int elapsed = 0;; elapsed += kHealthPollS) {
+        stack_watch_sample(StackWatch::OtaHealth);
         // THE BODY SELF-GUARDS, like every other allocating task loop here (AGENTS.md → Memory,
         // concurrency, and HTTP safety), and
         // it is worth saying why it counts as one: net_kind() is atomic-only,
@@ -2029,6 +2032,7 @@ static void health_gate_task(void*) {
                          "PENDING_VERIFY -> rollback to the previous firmware",
                          elapsed);
                 vTaskDelay(pdMS_TO_TICKS(1000));
+                stack_watch_sample(StackWatch::OtaHealth);
                 esp_restart();
                 break; // esp_restart() does not return; keep the fail-closed intent explicit.
             }
@@ -2046,6 +2050,7 @@ static void health_gate_task(void*) {
         }
         vTaskDelay(pdMS_TO_TICKS(kHealthPollS * 1000));
     }
+    stack_watch_sample(StackWatch::OtaHealth);
     vTaskDelete(nullptr);
 }
 

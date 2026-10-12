@@ -11482,6 +11482,23 @@ static void test_mcp() {
     CHECK(parse("{\"jsonrpc\":\"2.0\",\"id\":\"\\uDC00\",\"method\":\"tools/list\"}").error ==
           -32700);
     CHECK(parse("{\"jsonrpc\":\"2.0\",\"id\":\"\\q\",\"method\":\"tools/list\"}").error == -32700);
+    // Use the production transport's actual array and maximum request length: looking ahead
+    // after a high surrogate must compare remaining bytes before forming another pointer.
+    for (const std::string& tail : {
+             std::string(R"({"jsonrpc":"2.0","method":"tools/list","id":"\uD800)"),
+             std::string(R"({"jsonrpc":"2.0","method":"tools/list","id":"\uD800\)"),
+         }) {
+        const std::string      payload = std::string(1023 - tail.size(), ' ') + tail;
+        std::array<char, 1024> body{};
+        std::copy(payload.begin(), payload.end(), body.begin());
+        CHECK(mcp_parse(body.data(), 1023).error == -32700);
+    }
+    const std::string paired     = R"({"jsonrpc":"2.0","method":"tools/list","id":"\uD83D\uDE00"})";
+    const std::string max_paired = std::string(1023 - paired.size(), ' ') + paired;
+    std::array<char, 1024> paired_body{};
+    std::copy(max_paired.begin(), max_paired.end(), paired_body.begin());
+    CHECK(mcp_parse(paired_body.data(), 1023).error == 0);
+    CHECK(mcp_parse(paired_body.data(), 1023).id_raw == R"("\uD83D\uDE00")");
     std::string deep = "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/list\",\"x\":";
     deep += std::string(18, '[');
     deep += "0";

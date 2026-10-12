@@ -2,6 +2,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 using esp_err_t            = int;
 constexpr esp_err_t ESP_OK = 0, ESP_FAIL = -1;
@@ -51,6 +52,8 @@ inline unsigned    gpio_configs = 0, gpio_reads = 0, gpio_writes = 0;
 inline unsigned    strip_creates = 0, strip_clears = 0, strip_pixels = 0, strip_refreshes = 0;
 inline unsigned    mqtt_reads = 0, hp_reads = 0, destructive_calls = 0, delays = 0;
 inline bool        fail_mqtt_snapshot = false, fail_hp_snapshot = false;
+inline bool                   fail_gpio_config = false, in_task = false;
+inline uint32_t               current_stack_bytes = 2048;
 inline wifi_mode_t wifi_mode = WIFI_MODE_NULL;
 inline int      read_level = 1, read_gpio = -1, first_gpio = -1, first_level = -1, last_level = -1;
 inline uint32_t strip_r = 99, strip_g = 99, strip_b = 99;
@@ -68,7 +71,7 @@ inline UBaseType_t task_priority = 0;
 inline esp_err_t gpio_config(const gpio_config_t* c) {
     ++sdk::gpio_configs;
     sdk::gpio_configured = *c;
-    return ESP_OK;
+    return sdk::fail_gpio_config ? ESP_FAIL : ESP_OK;
 }
 inline esp_err_t gpio_set_level(gpio_num_t pin, int level) {
     if (!sdk::gpio_writes) {
@@ -124,6 +127,13 @@ inline BaseType_t xTaskCreate(void (*fn)(void*), const char* name, uint32_t stac
     return pdPASS;
 }
 inline void vTaskDelete(TaskHandle_t) { ++sdk::task_deletes; }
+inline uint32_t uxTaskGetStackHighWaterMark(TaskHandle_t task) {
+    if (task || !sdk::in_task) {
+        std::fprintf(stderr, "FAIL oracle=stack_sampler_reads_only_current_owner_task\n");
+        std::exit(1);
+    }
+    return sdk::current_stack_bytes;
+}
 inline void vTaskDelay(TickType_t ticks) {
     ++sdk::delays;
     sdk::now_us += static_cast<int64_t>(ticks) * 1000;

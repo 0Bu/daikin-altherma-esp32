@@ -142,8 +142,12 @@ assert.ok(parseStart >= 0 && parseEnd > parseStart &&
           weather.slice(parseStart, parseEnd).includes("JsonCleanup cleanup(root)"),
   "the cJSON tree must be released when parse-time vector or error allocations throw");
 
-const refDecodeStart = mqtt.indexOf("static DecodedReferenceFrame decode_reference_frame(");
-const refDecodeEnd = mqtt.indexOf("static DecodedCirculationFrame decode_circulation_frame(", refDecodeStart);
+const refDecodeStarts = [...mqtt.matchAll(/static\s+__attribute__\(\(noinline\)\)\s+DecodedReferenceFrame\s+decode_reference_frame\(/g)];
+const circDecodeStarts = [...mqtt.matchAll(/static\s+__attribute__\(\(noinline\)\)\s+DecodedCirculationFrame\s+decode_circulation_frame\(/g)];
+assert.equal(refDecodeStarts.length, 1, "one noinline reference decoder must remain");
+assert.equal(circDecodeStarts.length, 1, "one noinline circulation decoder must remain");
+const refDecodeStart = refDecodeStarts[0].index;
+const refDecodeEnd = circDecodeStarts[0].index;
 assert.ok(refDecodeStart >= 0 && refDecodeEnd > refDecodeStart,
   "decode_reference_frame must exist in mqtt_ha.cpp");
 const refDecode = mqtt.slice(refDecodeStart, refDecodeEnd);

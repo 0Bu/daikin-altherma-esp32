@@ -1,6 +1,7 @@
 // Physical recovery button — see recovery_button.hpp. GPIO sampling + the NVS erase + the indicator
 // hand-off; the press classification itself is logic/button.hpp (pure, host-tested).
 #include "recovery_button.hpp"
+#include "stack_watch.hpp"
 #include "config.hpp"
 #include "diag_crash.hpp"
 #include "diag_log.hpp"
@@ -74,6 +75,7 @@ void factory_reset() {
         return;
     }
     diag_printf("button: factory reset complete — rebooting into the setup portal\n");
+    stack_watch_sample(StackWatch::Button);
     esp_restart();
 }
 
@@ -96,6 +98,7 @@ void button_task(void*) {
     io.pull_down_en = active_low ? GPIO_PULLDOWN_DISABLE : GPIO_PULLDOWN_ENABLE;
     if (gpio_config(&io) != ESP_OK) {
         diag_printf("button: GPIO%d config failed — recovery button disabled this boot\n", gpio);
+        stack_watch_sample(StackWatch::Button);
         vTaskDelete(nullptr);
         return;
     }
@@ -112,6 +115,7 @@ void button_task(void*) {
                 static_cast<unsigned long>(BUTTON_FIRE_MS / 1000));
 
     for (;;) {
+        stack_watch_sample(StackWatch::Button);
         // Same self-guard as the other task loops (AGENTS.md → Memory, concurrency, and HTTP
         // safety). A dropped sample costs nothing — the hold is re-evaluated next tick.
         try {

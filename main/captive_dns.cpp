@@ -4,6 +4,7 @@
 #include "captive_dns.hpp"
 #include "diag_log.hpp"
 #include "logic/captive.hpp"
+#include "stack_watch.hpp"
 
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
@@ -22,6 +23,7 @@ static void dns_task(void*) {
     if (sock < 0) {
         ESP_LOGE(TAG, "socket failed");
         diag_printf("cdns: socket failed — portal won't auto-open (browse to %s)\n", CAPTIVE_PORTAL_IP);
+        stack_watch_sample(StackWatch::CaptiveDns);
         vTaskDelete(nullptr);
         return;
     }
@@ -34,6 +36,7 @@ static void dns_task(void*) {
         ESP_LOGE(TAG, "bind :53 failed");
         diag_printf("cdns: bind :53 failed — portal won't auto-open (browse to %s)\n", CAPTIVE_PORTAL_IP);
         ::close(sock);
+        stack_watch_sample(StackWatch::CaptiveDns);
         vTaskDelete(nullptr);
         return;
     }
@@ -42,6 +45,7 @@ static void dns_task(void*) {
     unsigned answered = 0;
     uint8_t  buf[512];
     while (true) {
+        stack_watch_sample(StackWatch::CaptiveDns);
         sockaddr_in client;
         socklen_t   clen = sizeof(client);
         int len = ::recvfrom(sock, buf, sizeof(buf), 0, reinterpret_cast<sockaddr*>(&client), &clen);
