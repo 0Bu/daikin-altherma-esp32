@@ -503,8 +503,8 @@ connection-state vocabulary. Config and diagnostics only; there are no pump cont
 `auto` \| `homehub` \| `altherma4`), `task_stack_min_free_bytes` (this task's
 worst stack headroom in bytes, from the shared owner-task sampler
 — `main/stack_watch.hpp` — so this surface and the MQTT heartbeat's `modbus_stack_min_free_bytes`
-cannot answer the same question with two numbers; `null`, not `0`, when the task has never run,
-which on a board with no HomeHub is always) and the
+cannot answer the same question with two numbers; `null` until the Modbus task has been sampled
+during this boot, with recorded minima retained after disabling the source) and the
 plant-gate pair `plant_gate_known` / `plant_gate_active` (input register 53 — the one HomeHub fact the
 shadow controller consumes). There is no actuator object: it was removed with the write path. `host`
 is the configured value and is redacted in bug reports. See

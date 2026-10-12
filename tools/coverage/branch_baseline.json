@@ -44,7 +44,7 @@
         "gcc-13-linux-ubuntu24": "ESP-IDF v6.1 container GCC 13.3.0",
         "gcc-15-linux-ubuntu26": "Ubuntu 26.04 aarch64 GCC 15.2.0"
       },
-      "hosted_confirmation": "New formatter inventory requires authoritative GCC 15 CI confirmation",
+    "hosted_confirmation": "GitHub run 38314337467 at 1b2c6ee7ad6fa75550ee039836619977434fcc71 measured heartbeat 144/258 and curve 147/240; hosted inventory differs from local aarch64. Both ratios rise; all other inventories and floors retained. Updated profile awaits a successful full CI run.",
       "runner": "scripts/run-mock-tests.sh --coverage",
       "scope": "Shared integer serialization: existing builder ratios increase; string-encoder inventory and all historical floors retained. New integer header has all lines and ordinary branches covered; GCC also counts untaken C++ throw edges and per-call constant-sign branches.",
       "sources": {
@@ -954,16 +954,16 @@
         "taken": 24
       },
       "main/logic/heartbeat.hpp": {
-        "outcomes": 306,
-        "taken": 170
+        "outcomes": 258,
+        "taken": 144
       },
       "main/logic/heating_curve_diagnosis.hpp": {
         "outcomes": 78,
         "taken": 62
       },
       "main/logic/heating_curve_mqtt.hpp": {
-        "outcomes": 274,
-        "taken": 167
+        "outcomes": 240,
+        "taken": 147
       },
       "main/logic/hexdump.hpp": {
         "outcomes": 16,
