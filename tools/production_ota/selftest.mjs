@@ -622,7 +622,7 @@ try {
       replaceNth("main/weather_forecast.cpp", "stack_watch_sample(StackWatch::Weather);",
         "stack_watch_sample_bypassed(StackWatch::Weather);", 2)],
     ["Weather loses its dedicated stack-watch slot", () =>
-      replaceOnce("main/stack_watch.hpp", "    Weather, //", "    Climate, //")],
+      replaceOnce("main/stack_watch.hpp", /^([ \t]*)Weather([ \t]*,)/m, "$1Climate$2")],
     ["Weather stack evidence is omitted from always-on status", () =>
       replaceOnce("main/http_status.cpp", 'j += ",\\\"weather\\\":";', 'j += ",\\\"ignored_weather_stack\\\":";')],
     ["mandatory Weather stress no longer requires Weather stack evidence", () =>

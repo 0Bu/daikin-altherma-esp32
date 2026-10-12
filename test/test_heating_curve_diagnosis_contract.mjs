@@ -63,7 +63,7 @@ assert.doesNotMatch(arming, /weather_enabled|latitude|longitude/,
 
 const mqtt = read("main/mqtt_ha.cpp");
 const evaluateStart = mqtt.indexOf("static logic::HeatingCurveSnapshot evaluate_heating_curve(");
-const evaluateEnd = mqtt.indexOf("static void publish_heartbeat()", evaluateStart);
+const evaluateEnd = mqtt.indexOf("std::string build_heartbeat_payload()", evaluateStart);
 assert.ok(evaluateStart >= 0 && evaluateEnd > evaluateStart,
   "runtime diagnosis adapter boundary must remain identifiable");
 const evaluator = mqtt.slice(evaluateStart, evaluateEnd);
@@ -78,22 +78,27 @@ assert.match(evaluator, /now_unix_s = now_unix_s/,
 assert.doesNotMatch(evaluator, /mb_request|LwtOffsetIntent|\.offer\s*\(/,
   "runtime diagnosis may observe the plant but never offer an intent");
 
-const subscriptionStart = mqtt.indexOf("static void service_reference_subscription(");
-const subscriptionEnd = mqtt.indexOf("static void service_circulation_probe_frame(", subscriptionStart);
+const subscriptionStart = mqtt.indexOf("void service_reference_subscription(");
+const probeHeaders = [...mqtt.matchAll(/void\s+service_circulation_probe_frame\(/g)];
+assert.equal(probeHeaders.length, 1, "one circulation probe handler must remain");
+const subscriptionEnd = probeHeaders[0].index;
+assert.ok(subscriptionStart >= 0 && subscriptionEnd > subscriptionStart);
 const subscription = mqtt.slice(subscriptionStart, subscriptionEnd);
-assert.match(subscription, /capture_enabled = c\.diagnostics_enabled && configured;/,
+assert.match(subscription, /capture_enabled\s*=\s*c\.diagnostics_enabled && configured;/,
   "the saved room mapping must remain dormant until master diagnostics consent is on");
-assert.match(subscription, /if \(!capture_enabled\)[\s\S]*unsubscribe_reference_topic_if_unused/,
+assert.match(subscription, /if \(!capture_enabled\)[\s\S]*retire_reference_topics\(\{\}\)/,
   "deleting the room mapping must retire every saved value-topic subscription");
-const unsubscribeStart = mqtt.indexOf("static void unsubscribe_reference_topic_if_unused(");
-const unsubscribeEnd = mqtt.indexOf("static void service_reference_subscription(", unsubscribeStart);
+const unsubscribeStart = mqtt.indexOf("static bool unsubscribe_reference_topic_if_unused(");
+const unsubscribeEnd = mqtt.indexOf("bool apply_reference_binding(", unsubscribeStart);
+assert.ok(unsubscribeStart >= 0 && unsubscribeEnd > unsubscribeStart);
 assert.match(mqtt.slice(unsubscribeStart, unsubscribeEnd), /esp_mqtt_client_unsubscribe/,
   "the shared topic-retirement helper must actively unsubscribe once no source owns it");
-assert.match(subscription, /const ReferenceTopicSet desired = reference_topics\(c\)[\s\S]*for \(const std::string& topic : desired\)[\s\S]*esp_mqtt_client_subscribe/,
+assert.match(subscription, /ReferenceTopicSet desired = reference_topics\(c\)[\s\S]*for \(std::string& topic : desired\)[\s\S]*esp_mqtt_client_subscribe/,
   "the saved logical room source must subscribe all distinct temperature, target and timestamp topics");
 
 const circulationSubscriptionStart = mqtt.indexOf("static void service_circulation_subscription(");
-const circulationSubscriptionEnd = mqtt.indexOf("static void service_circulation_probe(", circulationSubscriptionStart);
+const circulationSubscriptionEnd = mqtt.indexOf("static void service_circulation_probe_subscription(", circulationSubscriptionStart);
+assert.ok(circulationSubscriptionStart >= 0 && circulationSubscriptionEnd > circulationSubscriptionStart);
 const circulationSubscription = mqtt.slice(circulationSubscriptionStart, circulationSubscriptionEnd);
 assert.match(circulationSubscription, /capture_enabled = c\.diagnostics_enabled && configured;/,
   "the saved circulation mapping must remain dormant until master diagnostics consent is on");
@@ -118,7 +123,9 @@ const taskStart = mqtt.indexOf("static void mqtt_task(void*)");
 const taskEnd = mqtt.indexOf("static bool build_client(", taskStart);
 const task = mqtt.slice(taskStart, taskEnd);
 const frames = task.indexOf("service_reference_frames(ref_config)");
-const evaluate = task.indexOf("evaluate_heating_curve(ref_config, hp)");
+const evaluate = task.indexOf("evaluate_heating_curve(ref_config, x10a_connected)");
+assert.match(mqtt, /mqtt_cycle_gate[\s\S]*?const HpStats\s+hp\s*=\s*hp_stats\(\);\s*x10a_connected\s*=\s*hp\.connected;/,
+  "the scalar diagnosis input must retain the same gate snapshot's connection observation");
 const publishGate = task.indexOf("if (gate.publish_cycle)");
 assert.ok(frames >= 0 && evaluate > frames && publishGate > evaluate,
   "diagnosis must consume inbound room data before evaluation and outside the publish gate");

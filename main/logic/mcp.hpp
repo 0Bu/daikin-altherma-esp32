@@ -126,7 +126,8 @@ public:
                     unsigned cp = 0;
                     if (!hex4(cp)) return false;
                     if (cp >= 0xD800 && cp <= 0xDBFF) {
-                        if (p_ + 2 > end_ || p_[0] != '\\' || p_[1] != 'u') return false;
+                        if (static_cast<size_t>(end_ - p_) < 2 || p_[0] != '\\' || p_[1] != 'u')
+                            return false;
                         p_ += 2;
                         unsigned low = 0;
                         if (!hex4(low) || low < 0xDC00 || low > 0xDFFF) return false;

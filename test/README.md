@@ -128,7 +128,7 @@ The same runner also executes complete production units through SDK/service adap
 | `node test/test_network_runtime.mjs` | Complete WiFi/syslog units: 19 scenarios and 22 mutations cover leases, boot wakes, rollback, scan errors, queue loss, reentrant logging, static status-mutex ownership, independent OOM episodes and RFC 5424 framing; no real DHCP/radio/UDP delivery or collector retention. |
 | `node test/test_src_runtime.mjs` | Complete ENV III/Weather units: 26 cases and 18 source mutations cover probe identity/CRC, partial I2C allocation/cleanup, OOM, sensor freshness/recovery, forecast conversion/units, HTTP bounds/cleanup, rejected-response retention, A→B→A and zero Config-copy/request-buffer retention at network release and task waits. Default cJSON is an AST adapter; no real sensor, TLS, scheduler or JSON lexer runs. |
 | `python3 test/poll_runtime/run.py` | Complete polling/converter units: repeated allocation failures, preserved cache/source time, age expiry, quiescence, recovery, snapshot-lock unwind and six named source mutations; UART, clocks and RTOS are adapters. |
-| `python3 test/startup_runtime/run.py` | Complete LED/button units: nine startup/loop cases and two mutations verify scalar configuration snapshots, OOM containment and zero destructive calls; GPIO/RMT and scheduling are adapters. |
+| `python3 test/startup_runtime/run.py` | Complete LED/button units and the production stack sampler: startup/loop failures, null and byte semantics, independent owner slots, boot minima across recreation and zero destructive calls; GPIO/RMT and scheduling are adapters. |
 | `node test/test_uart_runtime.mjs` | Complete `hp_comm.cpp`: 22 cases and 14 named mutations distinguish local SDK errors from device silence, retain partial bytes, detection/probe mappings and legacy results, and preserve I/S framing, deadlines and single-request behavior. SDK/clock adapters do not prove electrical behavior or explain historical NoReply events. |
 
 After the pinned IDF build resolves `espressif/cjson` from `dependencies.lock`, run
@@ -143,7 +143,8 @@ After resolving the pinned cJSON component, run `python3 test/json_ingress_runti
 --real-cjson managed_components/espressif__cjson/cJSON`. `ci-build-all.sh` runs both after the target
 build. The first executes the real HTTP parser adapter's object/depth/size/trailing/OOM corpus and
 its root-type mutation. The second executes complete MQTT source consumers and task recovery,
-including post-subscribe cleanup ownership, with eight source mutations. HTTP routes, broker/TLS,
+including accepted subscription cleanup ownership, rejected retirement, shared owners and SDK
+callback sampling with semantic removal controls. HTTP routes, broker/TLS,
 RTOS and physical inputs remain outside these host adapters. Each runner binds compile inputs and
 uses its own temporary directory; polling/startup support `--sanitizer undefined`, MQTT `--ubsan`.
 

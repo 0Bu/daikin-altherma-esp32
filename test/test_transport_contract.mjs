@@ -85,9 +85,16 @@ assert.match(defaults, /^CONFIG_LWIP_DHCP_OPTIONS_LEN=109$/m,
   "the DHCP option buffer must remain large enough for the hostname vendor class");
 
 const wifi = code("main/wifi.cpp");
-const wifiStartBegin = wifi.indexOf("bool wifi_start_sta()");
-const wifiStartEnd = wifi.indexOf("void wifi_stop_sta()", wifiStartBegin);
-const wifiStart = wifi.slice(wifiStartBegin, wifiStartEnd);
+const wifiDriverBegin = wifi.indexOf("bool wifi_init_sta_driver(bool& rollback_pending)");
+const wifiDriverEnd = wifi.indexOf("bool wifi_wait_sta_connected(bool rollback_pending)", wifiDriverBegin);
+assert.ok(wifiDriverBegin >= 0 && wifiDriverEnd > wifiDriverBegin,
+  "the noinline WiFi driver initialization boundary must remain present");
+const wifiStart = wifi.slice(wifiDriverBegin, wifiDriverEnd);
+const wifiCoordinator = wifi.slice(wifi.indexOf("bool wifi_start_sta()"));
+assert.ok(wifiCoordinator.indexOf("wifi_init_sta_driver(rollback_pending)") >= 0 &&
+          wifiCoordinator.indexOf("wifi_init_sta_driver(rollback_pending)") <
+          wifiCoordinator.indexOf("wifi_wait_sta_connected(rollback_pending)"),
+  "WiFi must initialize the driver before waiting for its lease");
 assert.ok(wifiStart.indexOf("esp_netif_set_hostname(") >= 0 &&
           wifiStart.indexOf("esp_netif_set_hostname(") < wifiStart.indexOf("esp_wifi_start("),
   "WiFi must install the option-12/60 hostname before its DHCP client can send");

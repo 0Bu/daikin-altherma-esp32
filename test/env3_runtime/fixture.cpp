@@ -9,8 +9,17 @@
 
 namespace adapter {
 daik::Config cfg;
+bool         task_running  = false;
+unsigned     stack_samples = 0;
 }
 namespace daik {
+void stack_watch_sample(StackWatch slot) noexcept {
+    if (!adapter::task_running || slot != StackWatch::Env3) {
+        std::fprintf(stderr, "FAIL stack_sampler_exact_env3_owner\n");
+        std::exit(1);
+    }
+    ++adapter::stack_samples;
+}
 Config config() {
     ++sdk::config_reads;
     if (sdk::fail_config_copy) throw std::bad_alloc();
@@ -28,6 +37,8 @@ using namespace daik;
                                      ": " #c);                                                     \
     } while (0)
 void reset() {
+    adapter::task_running  = false;
+    adapter::stack_samples = 0;
     g_runtime     = Runtime{};
     sdk::now_us   = 1000000;
     sdk::bus_adds = sdk::bus_deletes = sdk::device_adds = sdk::device_deletes = 0;
@@ -55,8 +66,11 @@ void reset() {
 void run_task() {
     REQUIRE(sdk::task_fn);
     try {
+        adapter::task_running = true;
         sdk::task_fn(sdk::task_arg);
     } catch (const sdk::Stop&) {
+        adapter::task_running = false;
+        REQUIRE(adapter::stack_samples == static_cast<unsigned>(sdk::polls));
         return;
     }
     throw std::runtime_error("task returned unexpectedly");

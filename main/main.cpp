@@ -43,6 +43,7 @@
 #include "state_dwell.hpp"
 #include "sntp_time.hpp"
 #include "status_led.hpp"
+#include "stack_watch.hpp"
 #include "wifi.hpp"
 #include "weather_forecast.hpp"
 
@@ -208,10 +209,12 @@ static void boot_sequence() {
     // not be initialised, and syslog certainly is not.
     ESP_LOGE(TAG, "boot sequence threw (%s) — aborting so this counts as a crash boot", what);
     daik::diag_printf("boot: FAILED — boot sequence threw (%s)\n", what);
+    daik::stack_watch_sample(daik::StackWatch::Main);
     abort();
 }
 
 extern "C" void app_main() {
+    daik::stack_watch_sample(daik::StackWatch::Main);
     try {
         boot_sequence();
     } catch (const std::exception& e) {
@@ -219,4 +222,5 @@ extern "C" void app_main() {
     } catch (...) {
         boot_failed("unknown exception");
     }
+    daik::stack_watch_sample(daik::StackWatch::Main);
 }

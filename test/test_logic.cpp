@@ -4224,6 +4224,41 @@ static void test_ota_transport() {
 }
 
 static void test_heartbeat() {
+    std::string integer_fields;
+    json_append_integer_field(integer_fields, "{\"zero\":", uint64_t{0});
+    json_append_integer_field(integer_fields, ",\"max\":", UINT64_MAX);
+    json_append_integer_field(integer_fields, ",\"min\":", INT64_MIN);
+    json_append_integer_field(integer_fields, ",\"positive\":", INT64_MAX);
+    json_append_integer_field(integer_fields, ",\"negative\":", int8_t{-128});
+    json_append_integer_field(integer_fields, ",\"missing\":", INT64_MIN, false);
+    integer_fields += '}';
+    CHECK(integer_fields == "{\"zero\":0,\"max\":18446744073709551615,\"min\":-9223372036854775808,"
+                            "\"positive\":9223372036854775807,\"negative\":-128,\"missing\":null}");
+    const auto check_integer = [](auto value) {
+        std::string output;
+        json_append_integer_field(output, "value=", value);
+        CHECK(output == "value=" + std::to_string(value));
+        output.clear();
+        json_append_integer_field(output, "missing=", value, false);
+        CHECK(output == "missing=null");
+    };
+    for (int value = -128; value <= 127; ++value) {
+        check_integer(static_cast<int8_t>(value));
+        check_integer(static_cast<int32_t>(value));
+        check_integer(static_cast<int64_t>(value));
+        check_integer(static_cast<uint8_t>(value + 128));
+        check_integer(static_cast<uint32_t>(value + 128));
+        check_integer(static_cast<uint64_t>(value + 128));
+    }
+    for (uint64_t power = 10; power <= UINT64_MAX / 10; power *= 10) {
+        check_integer(power - 1);
+        check_integer(power);
+        check_integer(power + 1);
+        check_integer(-static_cast<int64_t>(power));
+    }
+    check_integer(UINT64_MAX);
+    check_integer(INT64_MIN);
+    check_integer(INT64_MAX);
     const std::string base = "daikin-altherma-esp32", node = device_node_id(base),
                       board = "daikin_abc123"; // installation id + this board's own id
     CHECK(heartbeat_topic(base) ==
@@ -11482,6 +11517,23 @@ static void test_mcp() {
     CHECK(parse("{\"jsonrpc\":\"2.0\",\"id\":\"\\uDC00\",\"method\":\"tools/list\"}").error ==
           -32700);
     CHECK(parse("{\"jsonrpc\":\"2.0\",\"id\":\"\\q\",\"method\":\"tools/list\"}").error == -32700);
+    // Use the production transport's actual array and maximum request length: looking ahead
+    // after a high surrogate must compare remaining bytes before forming another pointer.
+    for (const std::string& tail : {
+             std::string(R"({"jsonrpc":"2.0","method":"tools/list","id":"\uD800)"),
+             std::string(R"({"jsonrpc":"2.0","method":"tools/list","id":"\uD800\)"),
+         }) {
+        const std::string      payload = std::string(1023 - tail.size(), ' ') + tail;
+        std::array<char, 1024> body{};
+        std::copy(payload.begin(), payload.end(), body.begin());
+        CHECK(mcp_parse(body.data(), 1023).error == -32700);
+    }
+    const std::string paired     = R"({"jsonrpc":"2.0","method":"tools/list","id":"\uD83D\uDE00"})";
+    const std::string max_paired = std::string(1023 - paired.size(), ' ') + paired;
+    std::array<char, 1024> paired_body{};
+    std::copy(max_paired.begin(), max_paired.end(), paired_body.begin());
+    CHECK(mcp_parse(paired_body.data(), 1023).error == 0);
+    CHECK(mcp_parse(paired_body.data(), 1023).id_raw == R"("\uD83D\uDE00")");
     std::string deep = "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/list\",\"x\":";
     deep += std::string(18, '[');
     deep += "0";

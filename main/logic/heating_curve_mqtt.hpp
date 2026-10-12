@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <string>
 
+#include "json_integer.hpp"
 #include "outdoor_evidence.hpp"
 
 namespace daik {
@@ -92,22 +93,21 @@ inline std::string build_heating_curve_mqtt_json(const HeatingCurveMqttFields& f
     j += f.room_setpoint_valid ? std::to_string(f.room_setpoint_c) : "null";
     j += ",\"error_k\":";
     j += f.room_control_eligible ? std::to_string(f.room_error_k) : "null";
-    j += ",\"source_unix_s\":";
-    j += f.room_has_source_time ? std::to_string(f.room_source_unix_s) : "null";
-    j += ",\"age_s\":";
-    j += f.room_age_known ? std::to_string(f.room_age_s) : "null";
-    j += ",\"reason_code\":"; j += std::to_string(f.room_reason_code);
+    json_append_integer_field(j, ",\"source_unix_s\":", f.room_source_unix_s,
+                              f.room_has_source_time);
+    json_append_integer_field(j, ",\"age_s\":", f.room_age_s, f.room_age_known);
+    json_append_integer_field(j, ",\"reason_code\":", f.room_reason_code);
     j += ",\"counters\":{";
-    j += "\"messages\":"; j += std::to_string(f.room_messages);
-    j += ",\"errors\":"; j += std::to_string(f.room_errors);
-    j += ",\"rejections\":"; j += std::to_string(f.room_rejections);
+    json_append_integer_field(j, "\"messages\":", f.room_messages);
+    json_append_integer_field(j, ",\"errors\":", f.room_errors);
+    json_append_integer_field(j, ",\"rejections\":", f.room_rejections);
     j += "}}";
 
     j += ",\"diagnosis\":{";
-    j += "\"method_version\":"; j += std::to_string(f.method_version);
+    json_append_integer_field(j, "\"method_version\":", f.method_version);
     j += ",\"armed\":"; j += f.armed ? "1" : "0";
-    j += ",\"state\":"; j += std::to_string(f.state);
-    j += ",\"reason\":"; j += std::to_string(f.reason);
+    json_append_integer_field(j, ",\"state\":", f.state);
+    json_append_integer_field(j, ",\"reason\":", f.reason);
     j += ",\"sample_eligible\":"; j += f.sample_eligible ? "1" : "0";
     j += ",\"forecast_available\":"; j += f.forecast_available ? "1" : "0";
     j += ",\"outdoor_available\":"; j += f.outdoor_available ? "1" : "0";
@@ -115,17 +115,18 @@ inline std::string build_heating_curve_mqtt_json(const HeatingCurveMqttFields& f
     j += logic::outdoor_source_name(f.outdoor_available ? f.outdoor_source
                                                         : logic::OutdoorSource::None);
     j += "\"";
-    j += ",\"outdoor_source_code\":";
-    j += std::to_string(static_cast<unsigned>(f.outdoor_available ? f.outdoor_source
-                                                                  : logic::OutdoorSource::None));
+    json_append_integer_field(
+        j, ",\"outdoor_source_code\":",
+        static_cast<unsigned>(f.outdoor_available ? f.outdoor_source : logic::OutdoorSource::None));
     j += ",\"plant_outdoor_available\":"; j += f.plant_outdoor_available ? "1" : "0";
     j += ",\"plant_outdoor_source\":\"";
     j += logic::outdoor_source_name(f.plant_outdoor_available ? f.plant_outdoor_source
                                                               : logic::OutdoorSource::None);
     j += "\"";
-    j += ",\"plant_outdoor_source_code\":";
-    j += std::to_string(static_cast<unsigned>(f.plant_outdoor_available
-                        ? f.plant_outdoor_source : logic::OutdoorSource::None));
+    json_append_integer_field(j, ",\"plant_outdoor_source_code\":",
+                              static_cast<unsigned>(f.plant_outdoor_available
+                                                        ? f.plant_outdoor_source
+                                                        : logic::OutdoorSource::None));
     j += ",\"gates\":{";
     j += "\"plant_known\":"; j += f.plant_gate_known ? "1" : "0";
     j += ",\"plant_active\":"; j += f.plant_gate_active ? "1" : "0";
@@ -135,11 +136,9 @@ inline std::string build_heating_curve_mqtt_json(const HeatingCurveMqttFields& f
     j += ",\"room_evidence\":{";
     j += "\"current_error_k\":";
     j += f.has_current_room_error ? std::to_string(f.current_room_error_k) : "null";
-    j += ",\"source_unix_s\":";
-    j += f.has_diagnosis_room_source_time
-       ? std::to_string(f.diagnosis_room_source_unix_s) : "null";
-    j += ",\"age_s\":";
-    j += f.diagnosis_room_age_known ? std::to_string(f.diagnosis_room_age_s) : "null";
+    json_append_integer_field(j, ",\"source_unix_s\":", f.diagnosis_room_source_unix_s,
+                              f.has_diagnosis_room_source_time);
+    json_append_integer_field(j, ",\"age_s\":", f.diagnosis_room_age_s, f.diagnosis_room_age_known);
     j += "}";
     j += ",\"last_sample\":{";
     j += "\"room_error_k\":";
@@ -155,9 +154,10 @@ inline std::string build_heating_curve_mqtt_json(const HeatingCurveMqttFields& f
                                     ? f.last_sample_outdoor_source
                                     : logic::OutdoorSource::None);
     j += "\"";
-    j += ",\"outdoor_source_code\":";
-    j += std::to_string(static_cast<unsigned>(f.has_last_sample_outdoor
-                        ? f.last_sample_outdoor_source : logic::OutdoorSource::None));
+    json_append_integer_field(j, ",\"outdoor_source_code\":",
+                              static_cast<unsigned>(f.has_last_sample_outdoor
+                                                        ? f.last_sample_outdoor_source
+                                                        : logic::OutdoorSource::None));
     j += ",\"plant_outdoor_temperature_c\":";
     j += f.has_last_sample_plant_outdoor
        ? std::to_string(f.last_sample_plant_outdoor_temperature_c) : "null";
@@ -166,18 +166,18 @@ inline std::string build_heating_curve_mqtt_json(const HeatingCurveMqttFields& f
                                     ? f.last_sample_plant_outdoor_source
                                     : logic::OutdoorSource::None);
     j += "\"";
-    j += ",\"plant_outdoor_source_code\":";
-    j += std::to_string(static_cast<unsigned>(f.has_last_sample_plant_outdoor
-                        ? f.last_sample_plant_outdoor_source : logic::OutdoorSource::None));
-    j += ",\"unix_s\":";
-    j += f.has_last_sample ? std::to_string(f.last_sample_unix_s) : "null";
-    j += ",\"sequence\":"; j += std::to_string(f.sequence);
+    json_append_integer_field(j, ",\"plant_outdoor_source_code\":",
+                              static_cast<unsigned>(f.has_last_sample_plant_outdoor
+                                                        ? f.last_sample_plant_outdoor_source
+                                                        : logic::OutdoorSource::None));
+    json_append_integer_field(j, ",\"unix_s\":", f.last_sample_unix_s, f.has_last_sample);
+    json_append_integer_field(j, ",\"sequence\":", f.sequence);
     j += "}";
     j += ",\"counters\":{";
-    j += "\"evaluations\":"; j += std::to_string(f.evaluations);
-    j += ",\"samples\":"; j += std::to_string(f.samples);
-    j += ",\"holds\":"; j += std::to_string(f.holds);
-    j += ",\"blocks\":"; j += std::to_string(f.blocks);
+    json_append_integer_field(j, "\"evaluations\":", f.evaluations);
+    json_append_integer_field(j, ",\"samples\":", f.samples);
+    json_append_integer_field(j, ",\"holds\":", f.holds);
+    json_append_integer_field(j, ",\"blocks\":", f.blocks);
     j += "}}}";
     return j;
 }

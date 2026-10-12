@@ -25,6 +25,33 @@
         "main/logic/detect.hpp": "dc8206191368adc0df1e58d89054ef5d300ff6938695c715e1211aa037ac6d0d",
         "main/logic/hp_probe.hpp": "a75d4a5f15c4fb24351d21461b0ade3547985082129919665e3957521f1bfddd"
       }
+    },
+    {
+      "compilers": {
+        "clang-17-darwin": "Apple Clang 17.0.0",
+        "gcc-13-linux-ubuntu24": "ESP-IDF v6.1 container GCC 13.3.0",
+        "gcc-15-linux-ubuntu26": "GCC 15, Ubuntu 26.04 Docker"
+      },
+      "hosted_confirmation": "gcc-15-github-linux-ubuntu26 repeats the local GCC 15 inventory; authoritative CI pending",
+      "runner": "scripts/run-mock-tests.sh --coverage",
+      "scope": "Maximum HTTP-body surrogate truncation and valid-pair controls; MCP taken outcomes increase, all other inventories and floors retained",
+      "source": "main/logic/mcp.hpp",
+      "source_sha256": "56c72f12cc12f15891bcb8108562d23ed510ee134103b3f14b3a6c4140a01a0d"
+    },
+    {
+      "compilers": {
+        "clang-17-darwin": "Apple Clang 17.0.0",
+        "gcc-13-linux-ubuntu24": "ESP-IDF v6.1 container GCC 13.3.0",
+        "gcc-15-linux-ubuntu26": "Ubuntu 26.04 aarch64 GCC 15.2.0"
+      },
+    "hosted_confirmation": "GitHub run 38314337467 at 1b2c6ee7ad6fa75550ee039836619977434fcc71 measured heartbeat 144/258 and curve 147/240; hosted inventory differs from local aarch64. Updated profile awaits a successful full CI run.",
+      "runner": "scripts/run-mock-tests.sh --coverage",
+      "scope": "Shared integer serialization: existing builder ratios increase; string-encoder inventory and all historical floors retained. New integer header has all lines and ordinary branches covered; GCC also counts untaken C++ throw edges and per-call constant-sign branches.",
+      "sources": {
+        "main/logic/heartbeat.hpp": "701d9cb7b571b44a7fb7831b3f2b6ac16b83d1c3205ab9b1f06bca52fbd5939e",
+        "main/logic/heating_curve_mqtt.hpp": "6607732d0901b016eae2cb87fc4c68b7375c521080f94cacdda857a7a17aee31",
+        "main/logic/json_integer.hpp": "f0c6970f1219ac1e17e2eb0b0b46d0cdd28189fad6fd70db4b0574ff4dfd85f2"
+      }
     }
   ],
   "method": "Exact taken/outcome inventories are measured by scripts/run-mock-tests.sh --coverage and bound to compiler family, major version and platform; hosted profiles additionally bind the runner image. The gate rejects inventory mismatches and any historical ratio decrease. Updated hosted inventories require authoritative CI confirmation. Historical measurement notes remain in Git; profiles contain the enforced counts. Measurements below identify changed sources and local compiler provenance without changing checker rules or the 95-percent executable-line floor.",
@@ -163,16 +190,16 @@
         "taken": 18
       },
       "main/logic/heartbeat.hpp": {
-        "outcomes": 406,
-        "taken": 219
+        "outcomes": 352,
+        "taken": 191
       },
       "main/logic/heating_curve_diagnosis.hpp": {
         "outcomes": 66,
         "taken": 51
       },
       "main/logic/heating_curve_mqtt.hpp": {
-        "outcomes": 368,
-        "taken": 216
+        "outcomes": 310,
+        "taken": 182
       },
       "main/logic/hexdump.hpp": {
         "outcomes": 14,
@@ -226,6 +253,10 @@
         "outcomes": 68,
         "taken": 49
       },
+      "main/logic/json_integer.hpp": {
+        "outcomes": 10,
+        "taken": 10
+      },
       "main/logic/label_override.hpp": {
         "outcomes": 14,
         "taken": 13
@@ -244,7 +275,7 @@
       },
       "main/logic/mcp.hpp": {
         "outcomes": 579,
-        "taken": 367
+        "taken": 375
       },
       "main/logic/modbus.hpp": {
         "outcomes": 108,
@@ -541,16 +572,16 @@
         "taken": 24
       },
       "main/logic/heartbeat.hpp": {
-        "outcomes": 366,
-        "taken": 199
+        "outcomes": 306,
+        "taken": 170
       },
       "main/logic/heating_curve_diagnosis.hpp": {
         "outcomes": 78,
         "taken": 62
       },
       "main/logic/heating_curve_mqtt.hpp": {
-        "outcomes": 374,
-        "taken": 219
+        "outcomes": 274,
+        "taken": 167
       },
       "main/logic/hexdump.hpp": {
         "outcomes": 16,
@@ -604,6 +635,10 @@
         "outcomes": 66,
         "taken": 48
       },
+      "main/logic/json_integer.hpp": {
+        "outcomes": 178,
+        "taken": 102
+      },
       "main/logic/label_override.hpp": {
         "outcomes": 16,
         "taken": 16
@@ -622,7 +657,7 @@
       },
       "main/logic/mcp.hpp": {
         "outcomes": 621,
-        "taken": 389
+        "taken": 397
       },
       "main/logic/modbus.hpp": {
         "outcomes": 120,
@@ -919,16 +954,16 @@
         "taken": 24
       },
       "main/logic/heartbeat.hpp": {
-        "outcomes": 366,
-        "taken": 199
+        "outcomes": 258,
+        "taken": 144
       },
       "main/logic/heating_curve_diagnosis.hpp": {
         "outcomes": 78,
         "taken": 62
       },
       "main/logic/heating_curve_mqtt.hpp": {
-        "outcomes": 374,
-        "taken": 219
+        "outcomes": 240,
+        "taken": 147
       },
       "main/logic/hexdump.hpp": {
         "outcomes": 16,
@@ -982,6 +1017,10 @@
         "outcomes": 66,
         "taken": 48
       },
+      "main/logic/json_integer.hpp": {
+        "outcomes": 178,
+        "taken": 102
+      },
       "main/logic/label_override.hpp": {
         "outcomes": 16,
         "taken": 16
@@ -1000,7 +1039,7 @@
       },
       "main/logic/mcp.hpp": {
         "outcomes": 621,
-        "taken": 389
+        "taken": 397
       },
       "main/logic/modbus.hpp": {
         "outcomes": 120,
@@ -1297,16 +1336,16 @@
         "taken": 24
       },
       "main/logic/heartbeat.hpp": {
-        "outcomes": 366,
-        "taken": 199
+        "outcomes": 306,
+        "taken": 170
       },
       "main/logic/heating_curve_diagnosis.hpp": {
         "outcomes": 78,
         "taken": 62
       },
       "main/logic/heating_curve_mqtt.hpp": {
-        "outcomes": 374,
-        "taken": 219
+        "outcomes": 274,
+        "taken": 167
       },
       "main/logic/hexdump.hpp": {
         "outcomes": 16,
@@ -1360,6 +1399,10 @@
         "outcomes": 66,
         "taken": 48
       },
+      "main/logic/json_integer.hpp": {
+        "outcomes": 178,
+        "taken": 102
+      },
       "main/logic/label_override.hpp": {
         "outcomes": 16,
         "taken": 16
@@ -1378,7 +1421,7 @@
       },
       "main/logic/mcp.hpp": {
         "outcomes": 621,
-        "taken": 389
+        "taken": 397
       },
       "main/logic/modbus.hpp": {
         "outcomes": 120,
