@@ -1,6 +1,7 @@
 #include "weather_forecast.hpp"
 
 #include "config.hpp"
+#include "logic/task_failure.hpp"
 #include "diag_log.hpp"
 #include "http_client_diag.hpp"
 #include "http_deadline.hpp"
@@ -363,7 +364,7 @@ bool json_unit(cJSON* units, const char* key, const char* expected) {
 
 __attribute__((noinline)) bool parse_forecast(const std::string& payload, int64_t fetched_unix_s,
                                               WeatherForecastSample& sample, std::string& error) {
-    if (!json_payload_depth_ok(payload, JSON_MAX_DEPTH)) {
+    if (!json_payload_strings_ok(payload) || !json_payload_depth_ok(payload, JSON_MAX_DEPTH)) {
         error = "json_invalid";
         return false;
     }
@@ -777,6 +778,7 @@ void weather_task(void*) {
     // this first real loop necessarily reads its final Config/generation.
     while (s_task_start_state.load(std::memory_order_acquire) != WeatherTaskStartState::Available)
         vTaskDelay(1);
+    TaskFailureEpisode failures;
     for (;;) {
         // Retrospective high-water mark for the largest firmware-owned task. Sample at the loop
         // boundary for every lifecycle state, then again immediately after the TLS/HTTP/JSON
@@ -787,12 +789,13 @@ void weather_task(void*) {
         RefreshRequestAttempt refresh_attempt;
         try {
             const WeatherCycleWait wait = weather_cycle(source_generation, refresh_attempt);
+            failures.succeeded();
             if (wait.delay)
                 vTaskDelay(wait.ticks);
             else if (wait.ticks != 0)
                 ulTaskNotifyTake(pdTRUE, wait.ticks);
         } catch (const std::exception& e) {
-            diag_printf("weather: task exception: %s\n", e.what());
+            if (failures.first_failure()) diag_printf("weather: task exception: %s\n", e.what());
             // These three assignments run while the original throw was most likely a bad_alloc, and
             // they are safe only because "error" (5), "fetch_failed" (12) and "out_of_memory" (13)
             // all fit libstdc++'s 15-char SSO buffer and therefore cannot allocate. That is
@@ -817,7 +820,7 @@ void weather_task(void*) {
             // and the JSON parser are C, and only std::string/std::vector throw) — this is the
             // GUARANTEE, which every other task loop here already has (mqtt_task, poll_task,
             // mb_task, syslog_task, status_led_task) and which this one was missing.
-            diag_printf("weather: task exception (non-std)\n");
+            if (failures.first_failure()) diag_printf("weather: task exception (non-std)\n");
             {
                 Lock lk(s_mtx);
                 if (s_source_generation.load(std::memory_order_acquire) != source_generation)

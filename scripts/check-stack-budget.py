@@ -108,6 +108,7 @@ def validate_json_recursion(budgets: dict[str, Any], json_source: str,
         raise BudgetError("JSON recursion source limits require review")
     adapter = (
         r"inline\s+cJSON\*\s+json_parse_document\(std::string_view\s+payload\)\s*\{\s*"
+        r"if\s*\(!json_payload_is_object\(payload\)\)\s*return nullptr;\s*"
         r"return\s+json_parse_bounded\(\s*payload,\s*"
         r"\[\]\(const char\* bytes,\s*size_t length,\s*const char\*\* end\)\s*noexcept\s*\{\s*"
         r"return cJSON_ParseWithLengthOpts\(bytes,\s*length,\s*end,\s*false\);\s*\},\s*"

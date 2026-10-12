@@ -6,6 +6,7 @@
 namespace daik {
 
 inline cJSON* json_parse_document(std::string_view payload) {
+    if (!json_payload_is_object(payload)) return nullptr;
     return json_parse_bounded(
         payload,
         [](const char* bytes, size_t length, const char** end) noexcept {

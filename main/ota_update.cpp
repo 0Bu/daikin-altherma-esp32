@@ -76,14 +76,10 @@ namespace {
 // during TLS must not allocate merely to take its snapshot. Keep the RAII lock anyway; future code
 // must not turn an exception into a permanently held mutex.
 OtaStatus s_status;
-// Created at STATIC INIT — before app_main, before any task exists to race for it. The obvious
-// alternative, a lazy `if (!s_mtx) s_mtx = xSemaphoreCreateMutex()` on first use, is a real bug
-// here and not a theoretical one: main.cpp starts the HTTP server (line 72) BEFORE it arms the OTA
-// health gate (line 79), so a GET /ota/status landing in that window runs on the httpd task while
-// the main task is still walking to the arm call. Two first-callers each create a mutex, one leaks,
-// and the two sides then guard s_status with DIFFERENT locks — no mutual exclusion at all, in the
-// one construct whose entire job is to provide it.
-SemaphoreHandle_t s_mtx = xSemaphoreCreateMutex();
+// Boot-lifetime storage removes heap-allocation failure and creates ownership before HTTP or
+// the worker can race on their first access.
+StaticSemaphore_t s_mtx_storage;
+SemaphoreHandle_t s_mtx = xSemaphoreCreateMutexStatic(&s_mtx_storage);
 // The ONE unwind-safe mutex guard, shared by every file in this firmware (main/rtos_guard.hpp).
 // This used to be a private copy here; nine of them had drifted into two different shapes.
 using Lock = SemGuard;

@@ -41,6 +41,7 @@ struct FakeSemaphore {
     bool held = false;
 };
 using SemaphoreHandle_t = FakeSemaphore*;
+using StaticSemaphore_t = FakeSemaphore;
 struct FakeTask {
     void (*fn)(void*);
     void* arg;
@@ -166,7 +167,9 @@ inline TickType_t ticks    = 0;
 inline int        connects = 0, restarts = 0, mdns_starts = 0, netif_reads = 0, ap_reads = 0,
            queue_sends = 0, lock_depth = 0;
 inline bool                        forbid_alloc = false, queue_reject = false;
-inline uint16_t                    scan_count        = 0;
+inline bool                        fail_dynamic_mutex      = false;
+inline unsigned                    dynamic_mutex_creations = 0;
+inline uint16_t                    scan_count              = 0;
 inline esp_err_t                   scan_start_result = ESP_OK, scan_records_result = ESP_OK;
 inline unsigned                    scan_record_reads = 0;
 inline unsigned                    scan_clears       = 0;
@@ -180,6 +183,7 @@ inline std::vector<esp_netif_t*>   netifs;
 inline std::function<void()>       on_start, on_netif_read, on_ap_read;
 inline std::function<EventBits_t(FakeEvents*, TickType_t)> on_wait;
 inline std::function<void(TickType_t)>                     on_delay;
+inline std::function<void(TickType_t)>                     on_queue_receive;
 inline std::vector<TickType_t>                             wait_budgets;
 inline std::vector<std::string>                            packets;
 inline bool                                                fail_send = false;
@@ -232,12 +236,22 @@ inline BaseType_t xTaskCreate(void (*fn)(void*), const char*, unsigned, void* ar
     return pdPASS;
 }
 inline SemaphoreHandle_t xSemaphoreCreateMutex() {
+    ++sdk::dynamic_mutex_creations;
+    if (sdk::fail_dynamic_mutex) return nullptr;
     auto* p = new FakeSemaphore;
     sdk::semaphores.push_back(p);
     return p;
 }
-inline SemaphoreHandle_t xSemaphoreCreateBinary() { return xSemaphoreCreateMutex(); }
-inline BaseType_t        xSemaphoreTake(SemaphoreHandle_t p, TickType_t) {
+inline SemaphoreHandle_t xSemaphoreCreateMutexStatic(StaticSemaphore_t* storage) {
+    *storage = {};
+    return storage;
+}
+inline SemaphoreHandle_t xSemaphoreCreateBinary() {
+    auto* p = new FakeSemaphore;
+    sdk::semaphores.push_back(p);
+    return p;
+}
+inline BaseType_t xSemaphoreTake(SemaphoreHandle_t p, TickType_t) {
     if (!p) return 0;
     p->held = true;
     ++sdk::lock_depth;
@@ -263,6 +277,7 @@ inline BaseType_t xQueueSend(QueueHandle_t q, const void* row, TickType_t timeou
     return pdTRUE;
 }
 inline BaseType_t xQueueReceive(QueueHandle_t q, void* row, TickType_t timeout) {
+    if (sdk::on_queue_receive) sdk::on_queue_receive(timeout);
     if (!q->count) {
         sdk::ticks += timeout;
         return pdFALSE;

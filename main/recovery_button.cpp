@@ -78,20 +78,24 @@ void factory_reset() {
 }
 
 void button_task(void*) {
-    const Config c = config();
-    const gpio_num_t pin = static_cast<gpio_num_t>(c.btn_gpio);
-    const bool active_low = c.btn_active_low;
+    int  gpio       = -1;
+    bool active_low = true;
+    with_config([&](const Config& c) {
+        gpio       = c.btn_gpio;
+        active_low = c.btn_active_low;
+    });
+    const gpio_num_t pin = static_cast<gpio_num_t>(gpio);
 
     gpio_config_t io{};
     io.intr_type    = GPIO_INTR_DISABLE;
     io.mode         = GPIO_MODE_INPUT;
-    io.pin_bit_mask = (1ULL << c.btn_gpio);
+    io.pin_bit_mask = (1ULL << gpio);
     // Pull the pin to its INACTIVE level. Without this an open switch leaves the input floating and
     // ambient noise reads as a press — on a pin whose press erases the device's whole config.
     io.pull_up_en   = active_low ? GPIO_PULLUP_ENABLE : GPIO_PULLUP_DISABLE;
     io.pull_down_en = active_low ? GPIO_PULLDOWN_DISABLE : GPIO_PULLDOWN_ENABLE;
     if (gpio_config(&io) != ESP_OK) {
-        diag_printf("button: GPIO%d config failed — recovery button disabled this boot\n", c.btn_gpio);
+        diag_printf("button: GPIO%d config failed — recovery button disabled this boot\n", gpio);
         vTaskDelete(nullptr);
         return;
     }
@@ -104,14 +108,12 @@ void button_task(void*) {
     ButtonState st;
 
     diag_printf("button: recovery button on GPIO%d (active %s) — hold %lus to factory reset\n",
-                c.btn_gpio, active_low ? "low" : "high",
+                gpio, active_low ? "low" : "high",
                 static_cast<unsigned long>(BUTTON_FIRE_MS / 1000));
 
     for (;;) {
         // Same self-guard as the other task loops (AGENTS.md → Memory, concurrency, and HTTP
-        // safety):
-        // diag_printf allocates, and an escaping bad_alloc from a task entry is std::terminate ->
-        // reboot. A dropped sample costs nothing — the hold is re-evaluated from scratch next tick.
+        // safety). A dropped sample costs nothing — the hold is re-evaluated next tick.
         try {
             const bool pressed = (gpio_get_level(pin) == 0) == active_low;
             if (!ready) {
@@ -149,8 +151,9 @@ void button_task(void*) {
 }  // namespace
 
 void recovery_button_start() {
-    const Config c = config();
-    if (c.btn_gpio < 0) return;   // no button configured — the default
+    int gpio = -1;
+    with_config([&gpio](const Config& c) { gpio = c.btn_gpio; });
+    if (gpio < 0) return; // no button configured — the default
     if (xTaskCreate(button_task, "recovery_btn", 3072, nullptr, TASK_PRIO_BUTTON, nullptr) != pdPASS)
         ESP_LOGW("button", "recovery-button task alloc failed — factory-reset button disabled this boot");
 }

@@ -1,0 +1,216 @@
+#pragma once
+#include <array>
+#include <cstddef>
+#include <cstdint>
+#include <cstring>
+#include <functional>
+#include <stdexcept>
+using esp_err_t            = int;
+constexpr esp_err_t ESP_OK = 0, ESP_FAIL = -1;
+inline const char*  esp_err_to_name(esp_err_t) { return "host-adapter"; }
+using TickType_t            = uint32_t;
+using BaseType_t            = int;
+using UBaseType_t           = unsigned;
+constexpr BaseType_t pdTRUE = 1, pdFALSE = 0, pdPASS = 1;
+constexpr TickType_t portMAX_DELAY = UINT32_MAX;
+#define pdMS_TO_TICKS(x) (static_cast<TickType_t>(x))
+#define CONFIG_DAIKIN_MQTT_BASE_TOPIC "daikin-altherma-esp32"
+#define CONFIG_DAIKIN_MQTT_DISCOVERY_PREFIX "homeassistant"
+#define CONFIG_IDF_TARGET "esp32s3"
+constexpr unsigned MALLOC_CAP_8BIT = 1, MALLOC_CAP_INTERNAL = 2;
+constexpr int      ESP_MAC_WIFI_STA = 0;
+struct FakeSemaphore {
+    bool held   = false;
+    bool binary = false;
+};
+using SemaphoreHandle_t = FakeSemaphore*;
+struct FakeQueue {
+    std::array<std::array<uint8_t, 1600>, 8> rows{};
+    size_t                                   item_size = 0, depth = 0, head = 0, count = 0;
+};
+using QueueHandle_t          = FakeQueue*;
+using TaskHandle_t           = void*;
+using esp_event_base_t       = const char*;
+using esp_mqtt_event_id_t    = int;
+constexpr int MQTT_EVENT_ANY = -1, MQTT_EVENT_BEFORE_CONNECT = 1, MQTT_EVENT_CONNECTED = 2,
+              MQTT_EVENT_DISCONNECTED = 3, MQTT_EVENT_ERROR = 4, MQTT_EVENT_PUBLISHED = 5,
+              MQTT_EVENT_DELETED = 6, MQTT_EVENT_DATA = 7, MQTT_ERROR_TYPE_TCP_TRANSPORT = 1,
+              MQTT_CONNECTION_ACCEPTED = 0;
+struct esp_mqtt_error_codes_t {
+    int error_type = 0, connect_return_code = 0;
+};
+struct esp_mqtt_event_t {
+    char*                   topic          = nullptr;
+    int                     topic_len      = 0;
+    char*                   data           = nullptr;
+    int                     data_len       = 0;
+    int                     total_data_len = 0, current_data_offset = 0, retain = 0, msg_id = 0;
+    esp_mqtt_error_codes_t* error_handle = nullptr;
+};
+using esp_mqtt_event_handle_t = esp_mqtt_event_t*;
+struct FakeMqtt {
+    void (*handler)(void*, esp_event_base_t, int32_t, void*) = nullptr;
+    void* handler_arg                                        = nullptr;
+};
+using esp_mqtt_client_handle_t = FakeMqtt*;
+struct esp_mqtt_client_config_t {
+    struct {
+        struct {
+            const char* uri = nullptr;
+        } address;
+        struct {
+            esp_err_t (*crt_bundle_attach)(void*) = nullptr;
+        } verification;
+    } broker;
+    struct {
+        const char* client_id = nullptr;
+        const char* username  = nullptr;
+        struct {
+            const char* password = nullptr;
+        } authentication;
+    } credentials;
+    struct {
+        int keepalive = 0;
+        struct {
+            const char* topic   = nullptr;
+            const char* msg     = nullptr;
+            int         msg_len = 0, qos = 0, retain = 0;
+        } last_will;
+    } session;
+    struct {
+        uint64_t limit = 0;
+    } outbox;
+};
+struct esp_app_desc_t {
+    const char* version = "host-witness";
+};
+namespace sdk {
+inline TickType_t ticks = 100000;
+inline int        locks = 0, takes = 0, gives = 0, delays = 0, resets = 0, samples = 0;
+inline bool       fail_locked_new = false;
+inline bool       fail_next_new   = false;
+inline int        failed_news = 0, allocation_fail_lock_depth = 0;
+inline std::function<void(TickType_t)> on_delay;
+inline void (*task_fn)(void*) = nullptr;
+inline FakeSemaphore mutex, binary;
+inline FakeQueue     queue;
+inline FakeMqtt      client;
+inline int           message_id = 0, publish_calls = 0, subscribe_calls = 0;
+inline bool          reject_new_after_subscribe = false;
+inline int           unsubscribe_calls          = 0;
+inline char          last_subscribed_topic[256]{}, last_unsubscribed_topic[256]{};
+} // namespace sdk
+inline TickType_t xTaskGetTickCount() { return sdk::ticks; }
+inline void       vTaskDelay(TickType_t ticks) {
+    ++sdk::delays;
+    sdk::ticks += ticks;
+    if (sdk::on_delay) sdk::on_delay(ticks);
+}
+inline BaseType_t xTaskCreate(void (*fn)(void*), const char*, uint32_t, void*, UBaseType_t,
+                              TaskHandle_t*) {
+    sdk::task_fn = fn;
+    return pdPASS;
+}
+inline void vTaskDelete(TaskHandle_t) { throw std::runtime_error("unexpected task deletion"); }
+inline SemaphoreHandle_t xSemaphoreCreateMutex() { return &sdk::mutex; }
+inline SemaphoreHandle_t xSemaphoreCreateBinary() {
+    sdk::binary.binary = true;
+    return &sdk::binary;
+}
+inline BaseType_t xSemaphoreTake(SemaphoreHandle_t sem, TickType_t) {
+    if (!sem || sem->held) throw std::runtime_error("semaphore already held or null");
+    sem->held = true;
+    ++sdk::locks;
+    ++sdk::takes;
+    return pdTRUE;
+}
+inline BaseType_t xSemaphoreGive(SemaphoreHandle_t sem) {
+    if (!sem) throw std::runtime_error("semaphore give null");
+    if (!sem->binary && !sem->held) throw std::runtime_error("semaphore not owned");
+    if (sem->held) {
+        sem->held = false;
+        --sdk::locks;
+        ++sdk::gives;
+    }
+    return pdTRUE;
+}
+inline QueueHandle_t xQueueCreate(size_t depth, size_t size) {
+    if (depth > 8 || size > 1600) throw std::runtime_error("queue bound");
+    sdk::queue           = {};
+    sdk::queue.depth     = depth;
+    sdk::queue.item_size = size;
+    return &sdk::queue;
+}
+inline BaseType_t xQueueSend(QueueHandle_t q, const void* row, TickType_t) {
+    if (q->count == q->depth) return pdFALSE;
+    std::memcpy(q->rows[(q->head + q->count) % q->depth].data(), row, q->item_size);
+    ++q->count;
+    return pdTRUE;
+}
+inline BaseType_t xQueueReceive(QueueHandle_t q, void* row, TickType_t) {
+    if (!q->count) return pdFALSE;
+    std::memcpy(row, q->rows[q->head].data(), q->item_size);
+    q->head = (q->head + 1) % q->depth;
+    --q->count;
+    return pdTRUE;
+}
+inline int64_t esp_timer_get_time() { return int64_t(sdk::ticks) * 1000; }
+inline int     esp_task_wdt_add(void*) { return 0; }
+inline int     esp_task_wdt_delete(void*) { return 0; }
+inline int     esp_task_wdt_reset() {
+    ++sdk::resets;
+    return 0;
+}
+inline size_t    heap_caps_get_free_size(unsigned) { return 100000; }
+inline size_t    esp_get_free_heap_size() { return 100000; }
+inline size_t    esp_get_minimum_free_heap_size() { return 90000; }
+inline void      esp_restart() { throw std::runtime_error("unexpected restart"); }
+inline esp_err_t esp_read_mac(uint8_t* mac, int) {
+    std::memset(mac, 1, 6);
+    return ESP_OK;
+}
+inline esp_err_t             esp_crt_bundle_attach(void*) { return ESP_OK; }
+inline const esp_app_desc_t* esp_app_get_description() {
+    static esp_app_desc_t desc;
+    return &desc;
+}
+inline esp_mqtt_client_handle_t esp_mqtt_client_init(const esp_mqtt_client_config_t*) {
+    return &sdk::client;
+}
+inline esp_err_t esp_mqtt_client_destroy(FakeMqtt*) { return ESP_OK; }
+inline esp_err_t esp_mqtt_client_register_event(FakeMqtt* c, int,
+                                                void (*fn)(void*, esp_event_base_t, int32_t, void*),
+                                                void* arg) {
+    c->handler     = fn;
+    c->handler_arg = arg;
+    return ESP_OK;
+}
+inline esp_err_t esp_mqtt_client_start(FakeMqtt* c) {
+    if (c->handler) c->handler(c->handler_arg, "mqtt", MQTT_EVENT_CONNECTED, nullptr);
+    return ESP_OK;
+}
+inline esp_err_t esp_mqtt_client_stop(FakeMqtt*) { return ESP_OK; }
+inline int       esp_mqtt_client_subscribe(FakeMqtt*, const char* topic, int) {
+    ++sdk::subscribe_calls;
+    std::strncpy(sdk::last_subscribed_topic, topic, sizeof(sdk::last_subscribed_topic) - 1);
+    const int id = ++sdk::message_id;
+    if (sdk::reject_new_after_subscribe) {
+        sdk::reject_new_after_subscribe = false;
+        sdk::fail_next_new =
+            true; // final adapter action; only subsequent production new may consume it
+    }
+    return id;
+}
+inline int esp_mqtt_client_unsubscribe(FakeMqtt*, const char* topic) {
+    ++sdk::unsubscribe_calls;
+    std::strncpy(sdk::last_unsubscribed_topic, topic, sizeof(sdk::last_unsubscribed_topic) - 1);
+    return ++sdk::message_id;
+}
+inline int esp_mqtt_client_publish(FakeMqtt*, const char*, const char*, int, int, int) {
+    ++sdk::publish_calls;
+    return ++sdk::message_id;
+}
+inline int esp_mqtt_client_enqueue(FakeMqtt*, const char*, const char*, int, int, int, bool) {
+    ++sdk::publish_calls;
+    return ++sdk::message_id;
+}
