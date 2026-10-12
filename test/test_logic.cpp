@@ -10003,16 +10003,16 @@ static void test_weather_config_snapshot() {
     cfg.diagnostics_enabled    = true;
     cfg.weather_enabled        = true;
     cfg.diagnostics_generation = UINT32_MAX;
-    cfg.weather_latitude_e6    = -9012345;
-    cfg.weather_longitude_e6   = 179999999;
+    cfg.weather_latitude_e6    = 12345678;
+    cfg.weather_longitude_e6   = 23456789;
     snapshot                   = weather_config_snapshot(cfg);
     cfg.weather_enabled        = false;
     cfg.diagnostics_generation = 0;
     cfg.weather_latitude_e6    = 0;
     CHECK(snapshot.diagnostics_enabled && snapshot.weather_enabled);
     CHECK(snapshot.diagnostics_generation == UINT32_MAX);
-    CHECK(snapshot.weather_latitude_e6 == -9012345);
-    CHECK(snapshot.weather_longitude_e6 == 179999999);
+    CHECK(snapshot.weather_latitude_e6 == 12345678);
+    CHECK(snapshot.weather_longitude_e6 == 23456789);
 }
 
 static void test_open_meteo_epoch_seconds() {

@@ -457,7 +457,7 @@ def self_test() -> None:
     evaluate(parse_frames(cloned_download), budgets)
     reject_disassembly("missing Weather download with lambda present", cloned_download.replace(
         "_ZN4daik12_GLOBAL__N_1L13download_json", "_ZN4daik12_GLOBAL__N_1L13renamed_fetch") +
-        "\n00000041 <daik::(anonymous namespace)::download_json(daik::Config const&, std::string&)::{lambda()#1}::operator()() const>:\n  41: 004136 entry a1, 32\n",
+        "\n00000041 <daik::(anonymous namespace)::download_json(daik::Config const&, std::string&)::{lambda()}::operator()() const>:\n  41: 004136 entry a1, 32\n",
         "weather_download")
 
     reject_disassembly("wrong first blank opcode", fixture.replace(
