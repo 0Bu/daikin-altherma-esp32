@@ -119,17 +119,19 @@ void reset() {
     sdk::queues.clear();
     sdk::netifs.clear();
     sdk::wait_budgets.clear();
-    sdk::ticks             = 0;
-    sdk::connects          = 0;
-    sdk::restarts          = 0;
-    sdk::mdns_starts       = 0;
-    sdk::netif_reads       = 0;
-    sdk::ap_reads          = 0;
-    sdk::queue_sends       = 0;
-    sdk::lock_depth        = 0;
-    sdk::queue_reject      = false;
-    sdk::fail_send         = false;
-    sdk::scan_count        = 0;
+    sdk::ticks                   = 0;
+    sdk::connects                = 0;
+    sdk::restarts                = 0;
+    sdk::mdns_starts             = 0;
+    sdk::netif_reads             = 0;
+    sdk::ap_reads                = 0;
+    sdk::queue_sends             = 0;
+    sdk::lock_depth              = 0;
+    sdk::fail_dynamic_mutex      = false;
+    sdk::dynamic_mutex_creations = 0;
+    sdk::queue_reject            = false;
+    sdk::fail_send               = false;
+    sdk::scan_count              = 0;
     sdk::scan_start_result = sdk::scan_records_result = ESP_OK;
     sdk::scan_record_reads = sdk::scan_clears = 0;
     sdk::scan_pending                         = false;
@@ -147,7 +149,7 @@ void reset() {
     s_wd                  = {nullptr, 0};
     s_gw_ever_reachable   = false;
     s_queue               = nullptr;
-    s_status_mtx          = nullptr;
+    s_status_mtx          = xSemaphoreCreateMutexStatic(&s_status_mtx_storage);
     s_queue_dropped       = 0;
     s_resolved = s_reachable = false;
     s_error                  = "";
@@ -440,6 +442,28 @@ void timestamp_framing() {
     REQUIRE(syslog_sendto(sender, destination, "sample", 6) == SendResult::SendFailed);
     REQUIRE(s_queue_dropped == 0); // failed UDP sending is not failed queue enqueue
 }
+void status_mutex_failure() {
+    reset();
+    sdk::fail_dynamic_mutex = true;
+    syslog_init();
+    REQUIRE(sdk::dynamic_mutex_creations == 0);
+    REQUIRE(s_status_mtx != nullptr && sdk::tasks.size() == 1);
+    set_status(true, true, "sample");
+    const auto status = syslog_status();
+    REQUIRE(status.resolved && status.reachable && status.error == "sample");
+    REQUIRE(sdk::lock_depth == 0 && !s_status_mtx->held);
+    try {
+        SemGuard guard(s_status_mtx);
+        REQUIRE(guard.acquired());
+        throw std::bad_alloc();
+    } catch (const std::bad_alloc&) {}
+    REQUIRE(sdk::lock_depth == 0 && !s_status_mtx->held);
+    {
+        SemGuard missing(nullptr, 0);
+        REQUIRE(!missing.acquired());
+    }
+    REQUIRE(sdk::lock_depth == 0);
+}
 } // namespace test
 int main(int argc, char** argv) {
     const std::pair<const char*, void (*)()> cases[] = {
@@ -458,6 +482,7 @@ int main(int argc, char** argv) {
         {"reentrant_suppression", test::reentrant_suppression},
         {"queue_saturation", test::queue_saturation},
         {"timestamp_framing", test::timestamp_framing},
+        {"status_mutex_failure", test::status_mutex_failure},
     };
     unsigned count = 0;
     for (const auto& item : cases) {

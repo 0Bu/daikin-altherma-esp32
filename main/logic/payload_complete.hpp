@@ -20,6 +20,17 @@ inline bool json_suffix_is_whitespace(std::string_view suffix) {
     return true;
 }
 
+// Configuration requests describe fields in one object. Check the root before a parser or
+// missing-field defaults can turn a valid scalar/array into a configuration change.
+// This is only a shape preflight; the bounded parser still validates the complete grammar.
+inline bool json_payload_is_object(std::string_view payload) {
+    for (const char byte : payload) {
+        if (byte == ' ' || byte == '\t' || byte == '\r' || byte == '\n') continue;
+        return byte == '{';
+    }
+    return false;
+}
+
 // Bound recursive cJSON parse/delete before any external document reaches them. Sixteen levels
 // leave room for the callers even on the 6 KiB MQTT stack; HTTP and Weather use the same limit.
 inline constexpr size_t JSON_MAX_DEPTH      = 16;

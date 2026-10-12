@@ -1,5 +1,6 @@
 #include "syslog.hpp"
 #include "config.hpp"
+#include "logic/task_failure.hpp"
 #include "net.hpp"
 #include "ota_update.hpp"
 #include "diag_crash.hpp"
@@ -42,7 +43,8 @@ static QueueHandle_t s_queue = nullptr;
 static std::atomic<uint32_t> s_queue_dropped{0};
 static_assert(std::atomic<uint32_t>::is_always_lock_free,
               "Syslog enqueue loss accounting must remain allocation- and lock-free");
-static SemaphoreHandle_t s_status_mtx = nullptr;
+static StaticSemaphore_t s_status_mtx_storage;
+static SemaphoreHandle_t s_status_mtx = xSemaphoreCreateMutexStatic(&s_status_mtx_storage);
 // Status guarded by s_status_mtx. Stored as primitives + a string-LITERAL pointer, never a
 // std::string: set_status runs on this task and the reader must be able to snapshot it without any
 // allocation happening while the mutex is held (see the RAII Lock note below). host/port/configured
@@ -326,14 +328,11 @@ static bool syslog_replay_boot(int& sock, const struct sockaddr_in& dest) {
 }
 
 void syslog_init() {
-    s_status_mtx = xSemaphoreCreateMutex();
     s_ping.done  = xSemaphoreCreateBinary();
     s_queue = xQueueCreate(32, sizeof(SyslogMsg));
     // The queue is load-bearing (syslog_send enqueues, the task drains); without it there is no
-    // syslog, so bail. The status mutex + ping semaphore are advisory — their readers null-guard
-    // (Lock, and the ping probe's `if (!s_ping.done)`) — so a failure there is logged, not fatal.
-    if (!s_status_mtx || !s_ping.done)
-        diag_printf("syslog: status mutex / ping semaphore alloc failed — status + reachability degraded\n");
+    // syslog, so bail. Status ownership uses static storage; only the ping semaphore is advisory.
+    if (!s_ping.done) diag_printf("syslog: ping semaphore alloc failed — reachability degraded\n");
     if (!s_queue) {
         diag_printf("syslog: message queue alloc failed — syslog forwarding disabled this boot\n");
         return;
@@ -360,6 +359,7 @@ void syslog_init() {
                     pdMS_TO_TICKS(10000); // re-resolve + re-probe cadence
 
                 int sock = -1;
+                TaskFailureEpisode failures;
                 while (true) {
                     // OTA diagnostics themselves wake this queue. Do not answer those lines with a
                     // Config copy, DNS/ping work or a fresh UDP socket beside the TLS handshake.
@@ -519,19 +519,22 @@ void syslog_init() {
                                 }
                             }
                         }
+                        failures.succeeded();
                     } catch (const std::exception& e) {
                         if (sock >= 0) {
                             close(sock);
                             sock = -1;
                         }
-                        diag_printf("syslog: task cycle skipped (%s)\n", e.what());
+                        if (failures.first_failure())
+                            diag_printf("syslog: task cycle skipped (%s)\n", e.what());
                         vTaskDelay(pdMS_TO_TICKS(1000));
                     } catch (...) {
                         if (sock >= 0) {
                             close(sock);
                             sock = -1;
                         }
-                        diag_printf("syslog: task cycle skipped (oom?)\n");
+                        if (failures.first_failure())
+                            diag_printf("syslog: task cycle skipped (oom?)\n");
                         vTaskDelay(pdMS_TO_TICKS(1000));
                     }
                 }

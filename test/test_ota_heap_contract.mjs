@@ -267,7 +267,7 @@ const mcpDepth = Number(mcpLogic.match(/if \(depth > (\d+)\) return false;/)?.[1
 assert.equal(jsonDepth, 16, "HTTP cJSON depth must remain tied to its reviewed recursion budget");
 assert.equal(mcpDepth, 16, "MCP depth must remain tied to its early-reject recursion frame");
 assert.match(jsonGuard,
-  /inline\s+cJSON\*\s+json_parse_document\(std::string_view\s+payload\)\s*\{\s*return\s+json_parse_bounded\(\s*payload,\s*\[\]\(const char\* bytes,\s*size_t length,\s*const char\*\* end\)\s*noexcept\s*\{\s*return cJSON_ParseWithLengthOpts\(bytes,\s*length,\s*end,\s*false\);\s*\},\s*\[\]\(cJSON\* root\)\s*noexcept\s*\{\s*cJSON_Delete\(root\);\s*\},\s*JSON_MAX_DEPTH\s*\);\s*\}/,
+  /inline\s+cJSON\*\s+json_parse_document\(std::string_view\s+payload\)\s*\{\s*if\s*\(!json_payload_is_object\(payload\)\)\s*return nullptr;\s*return\s+json_parse_bounded\(\s*payload,\s*\[\]\(const char\* bytes,\s*size_t length,\s*const char\*\* end\)\s*noexcept\s*\{\s*return cJSON_ParseWithLengthOpts\(bytes,\s*length,\s*end,\s*false\);\s*\},\s*\[\]\(cJSON\* root\)\s*noexcept\s*\{\s*cJSON_Delete\(root\);\s*\},\s*JSON_MAX_DEPTH\s*\);\s*\}/,
   "the bounded adapter must bind its fourth argument to the same source depth as the frame multipliers");
 for (const owner of ["hp", "mqtt", "board", "env3", "weather", "diagnostics", "circulation"]) {
   const name = `httpd_config_${owner}`;

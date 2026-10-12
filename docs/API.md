@@ -14,7 +14,8 @@ than WiFi, OTA and MCP are not available on that AP.
 
 Body-bearing POSTs require `Content-Type: application/json`. Bodies are reassembled to the route's
 fixed capacity with room for a terminator; empty, oversized, truncated or stalled bodies are rejected.
-JSON permits one document and at most 16 container levels; raw NUL and trailing non-whitespace fail.
+Configuration JSON requires one object and at most 16 container levels; scalars, arrays, raw NUL
+and trailing non-whitespace fail before any setting is applied.
 Body acceptance checks a 30-second absolute budget before and after each receive. Unread-body
 cleanup admits receives for two seconds and checks an 8 KiB cap after each 128-byte receive
 (up to 8 KiB + 128 bytes); an active receive can add its socket timeout. Larger/slower cleanup

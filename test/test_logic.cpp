@@ -60,6 +60,7 @@
 #include "logic/ota_manifest.hpp"
 #include "logic/ota_changelog_range.hpp"
 #include "logic/payload_complete.hpp"
+#include "logic/task_failure.hpp"
 #include "logic/ota_transport.hpp"
 #include "logic/heartbeat.hpp"
 #include "logic/hp_query_log.hpp"
@@ -4010,6 +4011,21 @@ static void test_weather_fetch_headroom() {
     CHECK(json_suffix_is_whitespace(" \t\r\n"));
     CHECK(!json_suffix_is_whitespace(" trailing"));
     CHECK(!json_suffix_is_whitespace(std::string_view("\0", 1)));
+    CHECK(json_payload_is_object("{}"));
+    CHECK(json_payload_is_object(" \t\r\n{\"host\":\"\"}"));
+    CHECK(json_payload_is_object("{")); // grammar remains the parser's responsibility
+    for (const std::string_view payload :
+         {"", " \t\r\n", "null", "[]", "true", "false", "0", "-1", "\"{}\"", "\f{}"})
+        CHECK(!json_payload_is_object(payload));
+    CHECK(!json_payload_is_object(std::string_view("\0{}", 3)));
+    TaskFailureEpisode failures;
+    CHECK(failures.first_failure());
+    CHECK(!failures.first_failure());
+    CHECK(!failures.first_failure());
+    failures.succeeded();
+    failures.succeeded();
+    CHECK(failures.first_failure());
+    CHECK(!failures.first_failure());
     CHECK(json_payload_depth_ok("{}"));
     CHECK(json_payload_depth_ok("}"));
     CHECK(json_payload_depth_ok("]"));

@@ -340,6 +340,20 @@ void reset(sdk::Fault fault) {
     daik::s_task_args = daik::OtaTaskArgs{};
 }
 
+void mutex_storage() {
+    reset(sdk::Fault::None);
+    REQUIRE(daik::s_mtx != nullptr);
+    daik::ota_update_init();
+    REQUIRE(daik::s_ota_task != nullptr);
+    try {
+        daik::SemGuard lock(daik::s_mtx);
+        REQUIRE(lock.acquired());
+        throw std::bad_alloc();
+    } catch (const std::bad_alloc&) {}
+    daik::SemGuard again(daik::s_mtx, 0);
+    REQUIRE(again.acquired());
+}
+
 void worker(sdk::Fault fault, int stalled_service = 0, bool malformed_manifest = false,
             bool mismatched_image = false) {
     reset(fault);
@@ -582,6 +596,16 @@ int main(int argc, char** argv) {
         {"begin_probation", sdk::Fault::BeginProbation},
     };
     int count = 0;
+    if (argc == 1 || std::strcmp(argv[1], "mutex_storage") == 0) {
+        try {
+            test::mutex_storage();
+        } catch (const std::exception& e) {
+            std::cerr << "ASSERT mutex_storage: " << e.what() << '\n';
+            return 1;
+        }
+        std::cout << "PASS mutex_storage\n";
+        ++count;
+    }
     for (const auto& c : cases) {
         if (argc > 1 && std::strcmp(argv[1], c.name) != 0) continue;
         try {

@@ -90,3 +90,7 @@ node test/test_network_runtime.mjs
 
 # Complete ENV III / Weather units exercise sensor/resource and forecast/source lifecycle.
 node test/test_src_runtime.mjs
+
+# Real polling and accessory task entries execute with bounded SDK/service adapters.
+python3 test/poll_runtime/run.py
+python3 test/startup_runtime/run.py

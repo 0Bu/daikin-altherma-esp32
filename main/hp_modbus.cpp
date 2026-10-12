@@ -16,6 +16,7 @@
 
 #include "hp_modbus.hpp"
 #include "config.hpp"
+#include "logic/task_failure.hpp"
 #include "def/homehub.hpp"
 #include "diag_log.hpp"
 #include "history.hpp"
@@ -1348,6 +1349,7 @@ static void mb_task(void*) {
     OtaQuiesceState ota_quiesce;
     bool            ota_quiesce_logged     = false;
     bool            ota_quiesce_cap_logged = false;
+    TaskFailureEpisode failures;
     for (;;) {
         esp_task_wdt_reset();
         // Moved here from the end of the loop when the original four watched stacks got one sampler
@@ -1400,16 +1402,18 @@ static void mb_task(void*) {
                         s_next_try_us.store(0, std::memory_order_release);
                     }
                     if (esp_timer_get_time() >= s_next_try_us) mb_poll_once();
+                    failures.succeeded();
                 } catch (const std::exception& e) {
                     // Keep the allocation guard allocation-free: constructing the UI error itself
                     // can throw when the exception was std::bad_alloc. Transport/protocol failures
                     // take the structured status_error() path before reaching this last-resort
                     // guard.
                     mb_record_poll_gap();
-                    diag_printf("modbus: cycle skipped (%s)\n", e.what());
+                    if (failures.first_failure())
+                        diag_printf("modbus: cycle skipped (%s)\n", e.what());
                 } catch (...) {
                     mb_record_poll_gap();
-                    diag_printf("modbus: cycle skipped (oom?)\n");
+                    if (failures.first_failure()) diag_printf("modbus: cycle skipped (oom?)\n");
                 }
             }
         }

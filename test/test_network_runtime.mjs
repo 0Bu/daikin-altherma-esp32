@@ -56,6 +56,13 @@ function mutate(mutation) {
 }
 const mutations = [
   {
+    name: "status-mutex-heap-allocation", file: "syslog", scenario: "status_mutex_failure",
+    before: "static SemaphoreHandle_t s_status_mtx = xSemaphoreCreateMutexStatic(&s_status_mtx_storage);",
+    after: "static SemaphoreHandle_t s_status_mtx = xSemaphoreCreateMutexStatic(&s_status_mtx_storage);",
+    secondaryBefore: "void syslog_init() {",
+    secondaryAfter: "void syslog_init() {\n    s_status_mtx = xSemaphoreCreateMutex();",
+  },
+  {
     name: "scan-record-capacity", file: "wifi", scenario: "scan_failure",
     before: /uint16_t\s+n = 20;/, after: "uint16_t n = 0;",
   },
@@ -147,7 +154,7 @@ try {
   const binary = compile("production");
   const baseline = execute(binary, []);
   assert.equal(baseline.status, 0, `${baseline.stdout}${baseline.stderr}`);
-  assert.match(baseline.stdout, /PASS total=15\b/);
+  assert.match(baseline.stdout, /PASS total=16\b/);
   console.log(baseline.stdout.trim());
   for (const mutation of mutations) {
     const result = execute(compile(mutation.name, mutate(mutation)), [mutation.scenario]);
@@ -158,7 +165,7 @@ try {
   for (const [key, source] of Object.entries(sources)) {
     console.log(`network runtime ${key} sha256=${createHash("sha256").update(source).digest("hex")}`);
   }
-  console.log(`production network runtime: 15 cases, ${mutations.length} negative controls`);
+  console.log(`production network runtime: 16 cases, ${mutations.length} negative controls`);
 } finally {
   fs.rmSync(dir, { recursive: true, force: true });
 }

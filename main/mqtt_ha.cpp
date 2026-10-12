@@ -54,6 +54,7 @@
 #include "mqtt_ha.hpp"
 #include "net.hpp"
 #include "config.hpp"
+#include "logic/task_failure.hpp"
 #include "checkup.hpp"
 #include "def/homehub.hpp"
 #include "def/overlay.hpp"
@@ -1938,7 +1939,7 @@ static void service_circulation_probe_subscription(const Config& saved) {
     // Recorded only when this topic is not already owned by another subscription, so the cleanup
     // above cannot unsubscribe a topic the saved source still needs.
     if (id >= 0 && candidate.topic != saved.circulation_topic)
-        s_circulation_probe_subscribed_topic = candidate.topic;
+        s_circulation_probe_subscribed_topic.swap(candidate.topic);
     s_circulation_probe_task_generation = generation;
     if (signal && s_circulation_probe_sem) xSemaphoreGive(s_circulation_probe_sem);
 }
@@ -2509,6 +2510,7 @@ static void mqtt_task(void*) {
     bool network_quiesce_logged     = false;           // one diag line per operation, not per cycle
     bool network_quiesce_cap_logged = false;           // and one if that budget ever runs out
     MqttTransportResumeState transport_resume;
+    TaskFailureEpisode       failures;
 
     // Broker reachability and inbound observation do not depend on X10A. This first client carries
     // no installation LWT, and the gate below still encloses every ordinary/current publish. The
@@ -2828,30 +2830,25 @@ static void mqtt_task(void*) {
                     heartbeat_elapsed_s = 0;
                 }
             }
+            failures.succeeded();
         } catch (const std::exception& e) {
-            // COUNT FIRST, then log — diag_printf allocates, so on the heap that caused this it can
-            // throw again, and a throw inside a catch handler is std::terminate (the reboot this
-            // guard exists to prevent). The atomic add cannot fail, so the cycle is recorded even
-            // when the line describing it never reaches the ring — which is the whole complaint in
-            // legacy-380: the ring was the only evidence, and a chatty boot overwrites it.
-            //
-            // The heap snapshot rides the SAME line (private issue 10 E): both sampler calls are
-            // allocation-free, and the throw second's free/largest-block pair is what identifies
-            // the collision partner (status build, TLS teardown tail, …) that split the block
-            // mid-cycle — the one datum every earlier `publish skipped` line lacked, which made the
-            // events provably heap-healthy at 10-s sampling and unprovable at the throw instant.
+            // Count every failed cycle. Log the first failure with allocation-free INTERNAL
+            // heap samples; a successful cycle rearms the next episode's diagnostic.
             s_mqtt_skipped.fetch_add(1, std::memory_order_relaxed);
-            diag_printf("mqtt: publish skipped at %s (%s; free=%u B largest=%u B)\n", publish_stage,
-                        e.what(),
-                        static_cast<unsigned>(heap_caps_get_free_size(MALLOC_CAP_8BIT |
-                                                                      MALLOC_CAP_INTERNAL)),
-                        static_cast<unsigned>(heap_largest_internal_block()));
+            if (failures.first_failure())
+                diag_printf("mqtt: publish skipped at %s (%s; free=%u B largest=%u B)\n",
+                            publish_stage, e.what(),
+                            static_cast<unsigned>(
+                                heap_caps_get_free_size(MALLOC_CAP_8BIT | MALLOC_CAP_INTERNAL)),
+                            static_cast<unsigned>(heap_largest_internal_block()));
         } catch (...) {
             s_mqtt_skipped.fetch_add(1, std::memory_order_relaxed);
-            diag_printf("mqtt: publish skipped at %s (oom?; free=%u B largest=%u B)\n", publish_stage,
-                        static_cast<unsigned>(heap_caps_get_free_size(MALLOC_CAP_8BIT |
-                                                                      MALLOC_CAP_INTERNAL)),
-                        static_cast<unsigned>(heap_largest_internal_block()));
+            if (failures.first_failure())
+                diag_printf("mqtt: publish skipped at %s (oom?; free=%u B largest=%u B)\n",
+                            publish_stage,
+                            static_cast<unsigned>(
+                                heap_caps_get_free_size(MALLOC_CAP_8BIT | MALLOC_CAP_INTERNAL)),
+                            static_cast<unsigned>(heap_largest_internal_block()));
         }
         }
         vTaskDelay(pdMS_TO_TICKS(delay_s * 1000));
