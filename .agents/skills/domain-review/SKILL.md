@@ -39,7 +39,8 @@ Run the audit anyway (§1 — it takes seconds), then look at the diff and confi
 published value. Ask specifically: does it touch `main/def/`, the converter/register/discovery/
 detect logic, the poll/decode glue, `docs/REGISTERS.md`, the profile generators, or a decode `CHECK`?
 Does it change a label, a unit, a `type` code, an offset, a converter id, or an enum table? Could it
-change *which* profile a unit gets? If the honest answer to all of that is no and the audit is
+change *which* profile a unit gets, a Modbus definition/mapping, or source/target/reply identity?
+If the honest answer to all of that is no and the audit is
 clean, record that — say what you checked, not just "N/A":
 
 ```
@@ -95,6 +96,11 @@ Check each of these five boundaries:
 5. **Detection.** Trace `main/logic/detect.hpp` and `main/def/signatures.hpp` candidate selection.
    A wrong profile can produce plausible readings from another model. Detection must rerun each
    boot and must not persist a model identity.
+
+For Modbus changes, also trace the curated HomeHub/native Altherma 4 definitions and snapshot
+identity against [the Modbus contract](../../../docs/MODBUS_PROTOCOL.md). Require wire examples,
+independent manufacturer/capture evidence and explicit native scaling limits. X10A and HomeHub
+remain independent instruments; a correct transport response does not prove physical meaning.
 
 ## 3. Sanity, physically
 

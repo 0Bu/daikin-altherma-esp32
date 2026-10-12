@@ -180,6 +180,7 @@ update and reject obsolete write options. None of these proves a device update, 
 | `run-pr-hygiene-audit.sh` | Exact commit range and available PR text are scanned for personal/credential shapes and high-confidence German; names, contextual addresses and other non-English prose need human review |
 | `run-agent-instructions-budget.sh` | Canonical/generated registration budgets, inventory, reviewer safety, hook/credential dispatch and invariants; missing inputs and ignored `AGENTS.override.md` fail |
 | `run-skill-audit.sh` | Canonical skills/reviewers against repository paths, partition/route/wiring facts; source correctness does not prove native runtime dispatch |
+| `run-agentic-setup-audit.sh` | Fast pre-push source/configuration and skill check; no model, network, build or extra review record. Runtime registration and execution remain separate |
 
 All names in the table are under `scripts/`. Audits fail on defects; the appropriate skill supplies
 judgment where a mechanical match cannot. Review records must refer to the current PR head.

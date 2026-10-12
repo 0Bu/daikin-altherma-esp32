@@ -77,7 +77,10 @@ class FormatterOwnershipTests(unittest.TestCase):
         payload = self.payload(changed)
         self.pre(payload)
         self.source.write_text(changed)
-        self.assertIn("current-tool edit needs reviewed formatting", self.post(payload))
+        notice = self.post(payload)
+        self.assertIn("optional formatting suggestion", notice)
+        self.assertIn("This advisory requests no edits or verification", notice)
+        self.assertIn("The user's task scope controls", notice)
         self.assertEqual(self.source.read_text(), changed)
         self.assertEqual(self.source.read_text().splitlines()[0], self.baseline.splitlines()[0])
 
@@ -118,7 +121,7 @@ class FormatterOwnershipTests(unittest.TestCase):
         payload = self.payload(changed, source=source)
         self.pre(payload)
         source.write_text(changed)
-        self.assertIn("current-tool edit needs reviewed formatting", self.post(payload))
+        self.assertIn("optional formatting suggestion", self.post(payload))
         self.assertEqual(source.read_text(), changed)
 
     def test_antigravity_notice_keeps_its_empty_object_protocol(self):
@@ -128,7 +131,7 @@ class FormatterOwnershipTests(unittest.TestCase):
         with patch("sys.stdout", new_callable=io.StringIO):
             self.pre(payload)
         self.source.write_text(changed)
-        self.assertIn("current-tool edit needs reviewed formatting", self.post(payload))
+        self.assertIn("optional formatting suggestion", self.post(payload))
         self.assertEqual(self.source.read_text(), changed)
 
     def test_absent_pre_event_or_identity_is_a_noop(self):
@@ -193,7 +196,7 @@ class FormatterOwnershipTests(unittest.TestCase):
         self.pre(payload)
         self.source.write_text(self.baseline.replace("int keep(int b) { return b; }", "int   added_line ( int c )  {return c ;}"))
         changed = self.source.read_text()
-        self.assertIn("current-tool edit needs reviewed formatting", self.post(payload))
+        self.assertIn("optional formatting suggestion", self.post(payload))
         self.assertEqual(self.source.read_text(), changed)
 
     def test_custom_patch_add_file_is_correlated(self):
@@ -204,7 +207,7 @@ class FormatterOwnershipTests(unittest.TestCase):
         self.pre(payload)
         source.write_text("int  fresh ( )  {return 0 ;}\n")
         changed = source.read_text()
-        self.assertIn("current-tool edit needs reviewed formatting", self.post(payload))
+        self.assertIn("optional formatting suggestion", self.post(payload))
         self.assertEqual(source.read_text(), changed)
 
     def test_exact_edit_replacement_is_correlated(self):
@@ -214,7 +217,7 @@ class FormatterOwnershipTests(unittest.TestCase):
         self.pre(payload)
         self.source.write_text(self.baseline.replace(payload["tool_input"]["old_string"], payload["tool_input"]["new_string"]))
         changed = self.source.read_text()
-        self.assertIn("current-tool edit needs reviewed formatting", self.post(payload))
+        self.assertIn("optional formatting suggestion", self.post(payload))
         self.assertEqual(self.source.read_text(), changed)
 
     def test_contended_cache_lock_is_not_removed(self):
@@ -249,7 +252,7 @@ os._exit(0)
         payload = self.payload(changed)
         self.pre(payload)
         self.source.write_text(changed)
-        self.assertIn("current-tool edit needs reviewed formatting", self.post(payload))
+        self.assertIn("optional formatting suggestion", self.post(payload))
         self.assertEqual(self.source.read_text(), changed)
 
     def test_full_cache_can_drain_without_exceeding_its_budget(self):
@@ -264,7 +267,7 @@ os._exit(0)
         self.pre(self.payload("int new_file() {return 0;}\n", key="new", source=new_source))
         self.assertEqual(len(list(directory.glob("*.json"))), format_snapshot.MAX_RECORDS)
         self.source.write_text(changed)
-        self.assertIn("current-tool edit needs reviewed formatting", self.post(payload))
+        self.assertIn("optional formatting suggestion", self.post(payload))
         self.assertEqual(len(list(directory.glob("*.json"))), format_snapshot.MAX_RECORDS - 1)
         self.assertEqual(self.source.read_text(), changed)
 
@@ -398,7 +401,7 @@ raise SystemExit(1)
         self.assertEqual(record.stat().st_mode & 0o777, 0o600)
         self.assertNotIn("legacy_untouched", record.read_text())
         self.source.write_text(changed)
-        self.assertIn("current-tool edit needs reviewed formatting", self.post(payload))
+        self.assertIn("optional formatting suggestion", self.post(payload))
         self.source.write_text(changed)
         self.assertEqual(self.post(payload), "")
         self.assertEqual(self.source.read_text(), changed)

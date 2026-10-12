@@ -140,6 +140,7 @@ function directoryNames(relativeRoot) {
 const expectedSkills = [
   "absence-review",
   "add-logic-test",
+  "agentic-setup",
   "bug-triage",
   "deploy-prod",
   "deploy-test",

@@ -103,6 +103,9 @@ skill/reviewer asserts:
   `test/test_logic.cpp`. Verify that referenced headers (`crc.hpp`, `convert.hpp`, `registers.hpp`,
   `config_model.hpp`, `discovery.hpp`) exist and remain strictly IDF-free, and that `scripts/run-mock-tests.sh`
   and `scripts/run-sanitizer-fuzz-tests.sh` are current.
+- **`$agentic-setup`** — reviews and modernizes development support. Its pre-push source check
+  `scripts/run-agentic-setup-audit.sh` reuses configuration/parity and skill audits; it adds no model
+  process or review stamp. Native dispatch and reviewer isolation remain separately observed.
 - **`$bug-triage`** — frozen external issue triage. Verify against `scripts/gh-with-git-credentials.sh`,
   `main/logic/hexdump.hpp`, `main/logic/redact.hpp`, `docs/REPORTING.md`, and `docs/SECURITY.md`. Verify that
   it never asks for core dumps in public issues, checks `last_crash.fault` before declaring a crash, and
@@ -164,9 +167,10 @@ skill/reviewer asserts:
   streaming responses, allocating task-loop OOM recovery, raw-mutex/RAII locking, every affected
   builder caller's stack budget, and 503 on OOM. Verify its committed range and HEAD binding;
   source review must not claim missing ELF/coredump or hardware measurements were completed.
-- **`x10a_decode_reviewer`** (`.agents/agents/x10a-decode-reviewer.toml`) — checks X10A protocol decode,
-  converter IDs, sign/scale, and byte layout against `docs/REGISTERS.md`. Verify its committed range
-  and HEAD binding, then the separate intended local changes; an empty local diff cannot waive review.
+- **`x10a_decode_reviewer`** ([profile](../../agents/x10a-decode-reviewer.toml)) — checks X10A/Modbus
+  interpretation, converter IDs, sign/scale, byte layout and source/reply identity against
+  `docs/REGISTERS.md` and `docs/MODBUS_PROTOCOL.md`. Verify its committed range and HEAD binding,
+  then the separate intended local changes; an empty local diff cannot waive review.
 
 ## Self-analysis and audit self-optimization
 
