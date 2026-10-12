@@ -24,6 +24,7 @@ enum class HpQueryFailure : uint8_t {
     InvalidLength,
     BadCrc,
     UnexpectedReply,
+    DriverError,
 };
 
 inline bool hp_query_should_log(HpQueryLogPolicy policy, HpQueryFailure failure) {

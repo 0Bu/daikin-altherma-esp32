@@ -3118,6 +3118,7 @@ static void test_detect() {
     CHECK(is_transport_error(HpReplyKind::ShortReply));
     CHECK(is_transport_error(HpReplyKind::UnexpectedReply));
     CHECK(is_transport_error(HpReplyKind::InvalidLength));
+    CHECK(is_transport_error(HpReplyKind::DriverError));
     CHECK(!is_transport_error(HpReplyKind::Ok));
     CHECK(!is_transport_error(HpReplyKind::NoReply));
     CHECK(!is_transport_error(HpReplyKind::Rejected));
@@ -7722,6 +7723,9 @@ static void test_hp_probe() {
     CHECK(std::string(probe_status_name(ProbeStatus::UnexpectedReply)) == "unexpected_reply");
     CHECK(std::string(probe_status_name(ProbeStatus::InvalidLength)) == "invalid_length");
     CHECK(probe_status_from_reply(HpReplyKind::InvalidLength) == ProbeStatus::InvalidLength);
+    CHECK(probe_status_from_reply(HpReplyKind::DriverError) == ProbeStatus::NoLink);
+    CHECK(hp_query_should_log(HpQueryLogPolicy::All, HpQueryFailure::DriverError));
+    CHECK(hp_query_should_log(HpQueryLogPolicy::IntegrityOnly, HpQueryFailure::DriverError));
     CHECK(std::string(probe_status_name(static_cast<ProbeStatus>(99))) == "error");
 
     // ── The slice bound applied AFTER the reply: a page shorter than the caller assumed is a

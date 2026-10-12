@@ -21,7 +21,8 @@ namespace daik {
 // an unpopulated/unsupported register (timeout/NoReply or affirmative NAK/Rejected).
 inline constexpr bool is_transport_error(HpReplyKind kind) {
     return kind == HpReplyKind::ShortReply || kind == HpReplyKind::BadCrc ||
-           kind == HpReplyKind::UnexpectedReply || kind == HpReplyKind::InvalidLength;
+           kind == HpReplyKind::UnexpectedReply || kind == HpReplyKind::InvalidLength ||
+           kind == HpReplyKind::DriverError;
 }
 
 // A register page maps to one bit of a 32-bit page mask. Only pages that a value profile can
