@@ -29,16 +29,115 @@ static void fixture_delete(cJSON* root) {
 #endif
 #include WEATHER_PRODUCTION_SOURCE
 
+namespace allocation_witness {
+enum class Kind { None, ConfigCopy, NetworkRequest };
+struct Entry {
+    void*  pointer = nullptr;
+    size_t bytes   = 0;
+    Kind   kind    = Kind::None;
+};
+struct Snapshot {
+    unsigned config_count = 0, request_count = 0;
+    size_t   config_bytes = 0, request_bytes = 0;
+};
+Entry      entries[512];
+bool       config_copy_active = false, config_ref_active = false, overflow = false;
+bool       have_resume = false, have_wait = false;
+unsigned   config_copy_calls  = 0;
+unsigned   config_allocations = 0;
+TickType_t wait_ticks         = 0;
+Snapshot   at_resume, at_wait;
+struct ConfigCopyScope {
+    ConfigCopyScope() {
+        ++config_copy_calls;
+        config_copy_active = true;
+    }
+    ~ConfigCopyScope() { config_copy_active = false; }
+};
+void allocated(void* pointer, size_t bytes) noexcept {
+    Kind kind = (config_copy_active || config_ref_active) ? Kind::ConfigCopy
+                : (sdk::adapter_allocation_depth == 0 && daik::weather_fetch_active())
+                    ? Kind::NetworkRequest
+                    : Kind::None;
+    if (kind == Kind::None) return;
+    if (kind == Kind::ConfigCopy) ++config_allocations;
+    for (auto& entry : entries)
+        if (!entry.pointer) {
+            entry = {pointer, bytes, kind};
+            return;
+        }
+    overflow = true;
+}
+void released(void* pointer) noexcept {
+    if (!pointer) return;
+    for (auto& entry : entries)
+        if (entry.pointer == pointer) {
+            entry = {};
+            return;
+        }
+}
+Snapshot snapshot() noexcept {
+    Snapshot out;
+    for (const auto& entry : entries) {
+        if (!entry.pointer) continue;
+        if (entry.kind == Kind::ConfigCopy) {
+            ++out.config_count;
+            out.config_bytes += entry.bytes;
+        } else {
+            ++out.request_count;
+            out.request_bytes += entry.bytes;
+        }
+    }
+    return out;
+}
+void resumed() noexcept {
+    if (have_resume) return;
+    at_resume   = snapshot();
+    have_resume = true;
+}
+void waiting(TickType_t ticks) noexcept {
+    if (have_wait) return;
+    at_wait    = snapshot();
+    wait_ticks = ticks;
+    have_wait  = true;
+}
+void reset() noexcept {
+    for (auto& entry : entries) entry = {};
+    config_copy_active = config_ref_active = overflow = have_resume = have_wait = false;
+    config_copy_calls                                                           = 0;
+    config_allocations                                                          = 0;
+    wait_ticks                                                                  = 0;
+    at_resume = at_wait = {};
+}
+} // namespace allocation_witness
 void* operator new(size_t size) {
     if (sdk::fail_cpp_alloc) throw std::bad_alloc();
-    if (void* p = std::malloc(size ? size : 1)) return p;
+    if (sdk::fail_request_alloc && sdk::adapter_allocation_depth == 0 &&
+        daik::weather_fetch_active())
+        throw std::bad_alloc();
+    if (void* p = std::malloc(size ? size : 1)) {
+        allocation_witness::allocated(p, size);
+        return p;
+    }
     throw std::bad_alloc();
 }
-void  operator delete(void* p) noexcept { std::free(p); }
-void  operator delete(void* p, size_t) noexcept { std::free(p); }
+void operator delete(void* p) noexcept {
+    allocation_witness::released(p);
+    std::free(p);
+}
+void operator delete(void* p, size_t) noexcept {
+    allocation_witness::released(p);
+    std::free(p);
+}
 void* operator new[](size_t n) { return ::operator new(n); }
-void  operator delete[](void* p) noexcept { std::free(p); }
-void  operator delete[](void* p, size_t) noexcept { std::free(p); }
+void  operator delete[](void* p) noexcept {
+    allocation_witness::released(p);
+    std::free(p);
+}
+void operator delete[](void* p, size_t) noexcept {
+    allocation_witness::released(p);
+    std::free(p);
+}
 
 namespace adapter {
 daik::Config          cfg;
@@ -53,8 +152,20 @@ namespace daik {
 Config config() {
     ++adapter::config_reads;
     if (adapter::config_oom) throw std::bad_alloc();
+    allocation_witness::ConfigCopyScope copied;
     return adapter::cfg;
 }
+namespace detail {
+void config_lock() {
+    ++sdk::lock_depth;
+    allocation_witness::config_ref_active = true;
+}
+void config_unlock() {
+    allocation_witness::config_ref_active = false;
+    --sdk::lock_depth;
+}
+const Config& config_ref_locked() { return adapter::cfg; }
+} // namespace detail
 void diag_printf(const char*, ...) {}
 bool net_is_up() { return adapter::network_up; }
 bool time_synced() { return adapter::synced; }
@@ -62,14 +173,17 @@ void time_now(int64_t& unix_s, int32_t& ms) {
     unix_s = adapter::unix_s;
     ms     = 0;
 }
-bool                  ota_download_active() { return adapter::ota_active; }
-bool                  hp_poll_network_quiesced() { return adapter::poll_quiesced; }
-bool                  mqtt_publish_network_quiesced() { return adapter::mqtt_quiesced; }
-bool                  mqtt_transport_network_quiesced() { return adapter::mqtt_quiesced; }
-bool                  mb_network_quiesced() { return adapter::modbus_quiesced; }
-bool                  syslog_network_quiesced() { return adapter::syslog_quiesced; }
-void                  mqtt_transport_pause_for_network_heap() { ++sdk::pauses; }
-void                  mqtt_transport_resume_after_network_heap() { ++sdk::resumes; }
+bool ota_download_active() { return adapter::ota_active; }
+bool hp_poll_network_quiesced() { return adapter::poll_quiesced; }
+bool mqtt_publish_network_quiesced() { return adapter::mqtt_quiesced; }
+bool mqtt_transport_network_quiesced() { return adapter::mqtt_quiesced; }
+bool mb_network_quiesced() { return adapter::modbus_quiesced; }
+bool syslog_network_quiesced() { return adapter::syslog_quiesced; }
+void mqtt_transport_pause_for_network_heap() { ++sdk::pauses; }
+void mqtt_transport_resume_after_network_heap() {
+    allocation_witness::resumed();
+    ++sdk::resumes;
+}
 void                  stack_watch_sample(StackWatch) noexcept {}
 HttpClientProbe       http_client_probe() noexcept { return adapter::probe; }
 void                  http_client_log_init_failure(const char*, const HttpClientProbe&) noexcept {}
@@ -91,7 +205,10 @@ bool HttpSocketDeadline::expired() const noexcept {
 }
 bool HttpSocketDeadline::disarm() noexcept {
     expired_latched_ = expired();
-    if (active_) sdk::events.push_back("disarm");
+    if (active_) {
+        sdk::AdapterAllocationScope adapter_allocations;
+        sdk::events.push_back("disarm");
+    }
     active_ = false;
     return expired_latched_;
 }
@@ -141,6 +258,7 @@ void reset() {
     sdk::on_open = sdk::on_read = sdk::on_cleanup = {};
     sdk::json_parse_fails                         = false;
     sdk::fail_cpp_alloc = sdk::fail_alloc_after_parse = false;
+    sdk::fail_request_alloc                           = false;
     sdk::json_prefix_length                           = 0;
     sdk::json_parses = sdk::json_deletes = 0;
     adapter::cfg                         = Config{};
@@ -161,6 +279,7 @@ void reset() {
     s_source_generation                       = 0;
     s_refresh_next_token = s_refresh_requested_token = s_refresh_started_token = 0;
     s_refresh_completed_token = s_refresh_success_token = 0;
+    allocation_witness::reset();
 }
 cJSON* array(const std::vector<double>& values) {
     cJSON* result = cJSON_CreateArray();
@@ -295,7 +414,10 @@ struct Download {
     std::string     body, error;
     bool            heap_refused = false;
     HttpClientProbe probe;
-    bool            run() { return download_json(adapter::cfg, body, error, heap_refused, probe); }
+    bool            run() {
+        return download_json(weather_config_snapshot(adapter::cfg), body, error, heap_refused,
+                                        probe);
+    }
 };
 void cleanup_assertions() {
     REQUIRE(sdk::closes == 1 && sdk::cleanups == 1 && !sdk::client.live);
@@ -440,7 +562,8 @@ void source_admission_generation() {
 // Assertions use only the first captured status, before synthetic shutdown touched it.
 WeatherForecastStatus task_iteration() {
     std::optional<WeatherForecastStatus> completed;
-    sdk::on_notify = [&](TickType_t) {
+    sdk::on_notify = [&](TickType_t ticks) {
+        allocation_witness::waiting(ticks);
         if (!completed) completed = weather_forecast_status();
         throw sdk::Stop{};
     };
@@ -484,10 +607,12 @@ void task_oom_start() {
     weather_forecast_start();
     REQUIRE(weather_forecast_status().reason == "deadline_unavailable" && !sdk::task_fn);
     reset();
-    adapter::config_oom = true;
-    const auto result   = task_iteration();
+    sdk::body               = prepare();
+    sdk::fail_request_alloc = true;
+    const auto result       = task_iteration();
     REQUIRE(!result.available && result.error == "out_of_memory" && result.errors == 1);
     REQUIRE(sdk::inits == 0);
+    REQUIRE(sdk::pauses == 1 && sdk::resumes == 1);
 }
 void task_success() {
     reset();
@@ -602,6 +727,46 @@ void source_aba() {
     REQUIRE(retained.refresh_success_token == current_token);
     REQUIRE(s_source_generation == old_generation + 2);
 }
+void task_allocation_lifetimes() {
+    for (int state = 0; state < 6; ++state) {
+        reset();
+        // These public topic/name values are synthetic and force real string-copy allocations.
+        // Credentials remain empty; the Config projection must not copy any unrelated string.
+        adapter::cfg.mqtt_base.assign(160, 'm');
+        adapter::cfg.ref_temp_name.assign(96, 'n');
+        adapter::cfg.ref_temp_topic.assign(192, 't');
+        adapter::cfg.ref_temp_setpoint_topic.assign(192, 's');
+        adapter::cfg.ref_temp_time_topic.assign(192, 'u');
+        adapter::cfg.circulation_name.assign(96, 'c');
+        adapter::cfg.circulation_topic.assign(192, 'p');
+        sdk::body = prepare();
+        if (state == 1) sdk::status = 503;
+        if (state == 2) adapter::probe.largest_internal = 1;
+        if (state == 3) adapter::cfg.diagnostics_enabled = false;
+        if (state == 4) adapter::network_up = false;
+        if (state == 5) adapter::ota_active = true;
+        const auto completed = task_iteration();
+        REQUIRE(!allocation_witness::overflow && allocation_witness::have_wait);
+        REQUIRE(allocation_witness::config_copy_calls == 0 && adapter::config_reads == 0);
+        REQUIRE(allocation_witness::config_allocations == 0);
+        const auto wait = allocation_witness::at_wait;
+        REQUIRE(wait.config_count == 0 && wait.config_bytes == 0);
+        REQUIRE(wait.request_count == 0 && wait.request_bytes == 0);
+        const TickType_t expected_wait = state == 0  ? 2700000
+                                         : state < 3 ? 300000
+                                         : state < 5 ? 60000
+                                                     : 1000;
+        REQUIRE(allocation_witness::wait_ticks == expected_wait);
+        REQUIRE(allocation_witness::have_resume == (state < 3));
+        if (allocation_witness::have_resume) {
+            const auto resume = allocation_witness::at_resume;
+            REQUIRE(resume.config_count == 0 && resume.config_bytes == 0);
+            REQUIRE(resume.request_count == 0 && resume.request_bytes == 0);
+        }
+        REQUIRE(sdk::pauses == sdk::resumes);
+        REQUIRE(completed.available == (state == 0));
+    }
+}
 void real_lexer() {
 #ifdef WEATHER_REAL_CJSON
     reset();
@@ -639,7 +804,8 @@ const Case cases[] = {{"epoch_bounds", epoch_bounds},
                       {"task_oom_start", task_oom_start},
                       {"task_success", task_success},
                       {"task_rejected_retains_sample", task_rejected_retains_sample},
-                      {"source_aba", source_aba}};
+                      {"source_aba", source_aba},
+                      {"task_allocation_lifetimes", task_allocation_lifetimes}};
 } // namespace test
 int main(int argc, char** argv) {
     if (argc == 2 && std::string(argv[1]) == "real_lexer") {
@@ -665,5 +831,7 @@ int main(int argc, char** argv) {
         }
     }
     if (!count) return 2;
+    std::cout << "allocation witness table_bytes=" << sizeof(allocation_witness::entries)
+              << " config_projection_bytes=" << sizeof(daik::WeatherConfigSnapshot) << '\n';
     std::cout << "PASS total=" << count << '\n';
 }

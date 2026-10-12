@@ -157,16 +157,24 @@ try {
         '"ota_health_gate": {\n      "symbols": ["ota_health_task"],\n      "multipliers": {},\n      "base_bytes": 2048,\n      "max_bytes": 4096')],
     ["the Weather download path may consume the final 1 KiB reserve", () =>
       replaceOnce("tools/stack/budgets.json",
-        '"weather_task_download": {\n      "symbols": ["weather_task", "weather_fetch", "weather_download"],\n      "multipliers": {},\n      "base_bytes": 2048,\n      "max_bytes": 11264',
-        '"weather_task_download": {\n      "symbols": ["weather_task", "weather_fetch", "weather_download"],\n      "multipliers": {},\n      "base_bytes": 2048,\n      "max_bytes": 11265')],
+        '"weather_task_download": {\n      "symbols": ["weather_task", "weather_cycle", "weather_fetch", "weather_download"],\n      "multipliers": {},\n      "base_bytes": 2048,\n      "max_bytes": 11264',
+        '"weather_task_download": {\n      "symbols": ["weather_task", "weather_cycle", "weather_fetch", "weather_download"],\n      "multipliers": {},\n      "base_bytes": 2048,\n      "max_bytes": 11265')],
     ["the Weather parse path may consume the final 1 KiB reserve", () =>
       replaceOnce("tools/stack/budgets.json",
-        '"weather_task_parse": {\n      "symbols": ["weather_task", "weather_fetch", "weather_parse"],\n      "multipliers": {},\n      "base_bytes": 2048,\n      "max_bytes": 11264',
-        '"weather_task_parse": {\n      "symbols": ["weather_task", "weather_fetch", "weather_parse"],\n      "multipliers": {},\n      "base_bytes": 2048,\n      "max_bytes": 11265')],
+        '"weather_task_parse": {\n      "symbols": ["weather_task", "weather_cycle", "weather_fetch", "weather_parse"],\n      "multipliers": {},\n      "base_bytes": 2048,\n      "max_bytes": 11264',
+        '"weather_task_parse": {\n      "symbols": ["weather_task", "weather_cycle", "weather_fetch", "weather_parse"],\n      "multipliers": {},\n      "base_bytes": 2048,\n      "max_bytes": 11265')],
+    ["the Weather download path omits its live cycle frame", () =>
+      replaceOnce("tools/stack/budgets.json",
+        '"symbols": ["weather_task", "weather_cycle", "weather_fetch", "weather_download"]',
+        '"symbols": ["weather_task", "weather_fetch", "weather_download"]')],
+    ["the Weather parse path omits its live cycle frame", () =>
+      replaceOnce("tools/stack/budgets.json",
+        '"symbols": ["weather_task", "weather_cycle", "weather_fetch", "weather_parse"]',
+        '"symbols": ["weather_task", "weather_fetch", "weather_parse"]')],
     ["the Weather TLS path is no longer sampled before HIL completion", () =>
       replaceOnce("main/weather_forecast.cpp",
-        "            stack_watch_sample(StackWatch::Weather);\n            // A location/consent save",
-        "            // Weather stack sample bypassed\n            // A location/consent save")],
+        "    stack_watch_sample(StackWatch::Weather);\n    // A location/consent save",
+        "    // Weather stack sample bypassed\n    // A location/consent save")],
     ["blank USB otadata is documented as a known unarmed state", () =>
       replaceOnce("docs/SECURITY.md", 'Status preserves', 'USB boots `UNDEFINED`; status preserves')],
     ["dynamic TLS buffers are disabled", () =>

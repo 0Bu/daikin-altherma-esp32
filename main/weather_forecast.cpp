@@ -10,6 +10,7 @@
 #include "logic/open_meteo.hpp"
 #include "logic/payload_complete.hpp"
 #include "logic/weather_forecast.hpp"
+#include "logic/weather_config.hpp"
 #include "mqtt_ha.hpp"
 #include "net.hpp"
 #include "ota_update.hpp"
@@ -20,9 +21,9 @@
 #include "esp_crt_bundle.h"
 #include "esp_http_client.h"
 #include "freertos/FreeRTOS.h"
-#include "task_config.hpp"   // TASK_PRIO_* — the firmware-wide priority table
+#include "task_config.hpp" // TASK_PRIO_* — the firmware-wide priority table
 #include "freertos/semphr.h"
-#include "rtos_guard.hpp"   // SemGuard — the ONE unwind-safe mutex guard
+#include "rtos_guard.hpp" // SemGuard — the ONE unwind-safe mutex guard
 #include "freertos/task.h"
 #include <algorithm>
 #include <atomic>
@@ -40,22 +41,22 @@
 namespace daik {
 namespace {
 
-constexpr size_t kPayloadMax = 8 * 1024;
-constexpr int kHttpTimeoutMs = 20000;
+constexpr size_t     kPayloadMax       = 8 * 1024;
+constexpr int        kHttpTimeoutMs    = 20000;
 constexpr TickType_t kDownloadDeadline = pdMS_TO_TICKS(60000);
 // Longer than the MQTT publisher's one-second cadence. Set the active flag first, give MQTT time to
 // release its snapshot, then wait explicitly for the allocation-rich X10A sweep to acknowledge.
-constexpr int kNetworkQuiesceLeadMs = 1100;
-constexpr int kPollQuiesceWaitMs = 15000;
-constexpr int kAllocatorRetryMs = 250;
+constexpr int         kNetworkQuiesceLeadMs = 1100;
+constexpr int         kPollQuiesceWaitMs    = 15000;
+constexpr int         kAllocatorRetryMs     = 250;
 constexpr TickType_t  kSourceCancelWait     = pdMS_TO_TICKS(4000);
-constexpr int kTaskStack = 12288;
-constexpr UBaseType_t kTaskPrio = TASK_PRIO_WEATHER;   // see main/task_config.hpp
-constexpr const char* kProvider = "open-meteo";
-constexpr const char* kModel = "icon_seamless";
+constexpr int         kTaskStack            = 12288;
+constexpr UBaseType_t kTaskPrio             = TASK_PRIO_WEATHER; // see main/task_config.hpp
+constexpr const char* kProvider             = "open-meteo";
+constexpr const char* kModel                = "icon_seamless";
 
-WeatherForecastStatus s_status;
-SemaphoreHandle_t s_mtx = xSemaphoreCreateMutex();
+WeatherForecastStatus              s_status;
+SemaphoreHandle_t                  s_mtx = xSemaphoreCreateMutex();
 std::atomic<TaskHandle_t>          s_task{nullptr};
 std::atomic<WeatherTaskStartState> s_task_start_state{WeatherTaskStartState::NotStarted};
 enum class SourceAdmission : uint8_t { Idle, Network, SourceChangePending, SourceChange };
@@ -169,7 +170,7 @@ private:
 struct HttpClientCleanup {
     HttpClientCleanup(esp_http_client_handle_t handle, HttpSocketDeadline& deadline)
         : handle(handle), deadline(deadline) {}
-    HttpClientCleanup(const HttpClientCleanup&) = delete;
+    HttpClientCleanup(const HttpClientCleanup&)            = delete;
     HttpClientCleanup& operator=(const HttpClientCleanup&) = delete;
     ~HttpClientCleanup() {
         if (!handle) return;
@@ -185,7 +186,7 @@ struct HttpClientCleanup {
 
 struct JsonCleanup {
     explicit JsonCleanup(cJSON* root) : root(root) {}
-    JsonCleanup(const JsonCleanup&) = delete;
+    JsonCleanup(const JsonCleanup&)            = delete;
     JsonCleanup& operator=(const JsonCleanup&) = delete;
     ~JsonCleanup() { cJSON_Delete(root); }
     cJSON* root;
@@ -195,13 +196,13 @@ struct JsonCleanup {
 // This used to be a private copy here; nine of them had drifted into two different shapes.
 using Lock = SemGuard;
 
-std::string open_meteo_url(const Config& cfg) {
+std::string open_meteo_url(const WeatherConfigSnapshot& cfg) {
     // Only formatter-produced signed decimals enter this URL. `forecast_hours=6` is deliberately
     // larger than the four values normally needed: a request that crosses an hour boundary while
     // TLS is in flight still has two complete future one-hour bins after the next decision instant.
     return "https://api.open-meteo.com/v1/forecast?latitude=" +
-           weather_coordinate_format_e6(cfg.weather_latitude_e6) + "&longitude=" +
-           weather_coordinate_format_e6(cfg.weather_longitude_e6) +
+           weather_coordinate_format_e6(cfg.weather_latitude_e6) +
+           "&longitude=" + weather_coordinate_format_e6(cfg.weather_longitude_e6) +
            "&hourly=temperature_2m,relative_humidity_2m,surface_pressure,shortwave_radiation"
            "&models=icon_seamless"
            "&forecast_hours=6&timeformat=unixtime&timezone=GMT&temperature_unit=celsius";
@@ -210,7 +211,7 @@ std::string open_meteo_url(const Config& cfg) {
 // Keep the reviewed Weather task stages as real ELF symbols. The static stack gate deliberately
 // sums the task frame with the mutually exclusive download and parse frames; inlining these helpers
 // would make that proof disappear rather than prove a smaller path.
-__attribute__((noinline)) bool download_json(const Config& weather, std::string& out,
+__attribute__((noinline)) bool download_json(const WeatherConfigSnapshot& weather, std::string& out,
                                              std::string& error, bool& heap_refused,
                                              HttpClientProbe& headroom) {
     if (!http_deadline_ready()) {
@@ -222,16 +223,16 @@ __attribute__((noinline)) bool download_json(const Config& weather, std::string&
     out.clear();
     out.reserve(kPayloadMax);
     error.reserve(32);
-    const std::string url = open_meteo_url(weather);
+    const std::string     url    = open_meteo_url(weather);
     const HttpClientProbe before = http_client_probe();
-    headroom = before;
+    headroom                     = before;
     heap_refused = !weather_fetch_headroom_ok(before.free_internal, before.largest_internal);
     if (heap_refused) return false;
-    esp_http_client_config_t cfg = {};
-    cfg.url = url.c_str();
-    cfg.timeout_ms = kHttpTimeoutMs;
-    cfg.crt_bundle_attach = esp_crt_bundle_attach;
-    cfg.keep_alive_enable = false;
+    esp_http_client_config_t cfg    = {};
+    cfg.url                         = url.c_str();
+    cfg.timeout_ms                  = kHttpTimeoutMs;
+    cfg.crt_bundle_attach           = esp_crt_bundle_attach;
+    cfg.keep_alive_enable           = false;
     esp_http_client_handle_t client = esp_http_client_init(&cfg);
     if (!client) {
         http_client_log_init_failure("weather", before);
@@ -356,7 +357,8 @@ bool json_time_array(cJSON* object, std::vector<int64_t>& out) {
 
 bool json_unit(cJSON* units, const char* key, const char* expected) {
     cJSON* item = cJSON_GetObjectItemCaseSensitive(units, key);
-    return cJSON_IsString(item) && item->valuestring && std::strcmp(item->valuestring, expected) == 0;
+    return cJSON_IsString(item) && item->valuestring &&
+           std::strcmp(item->valuestring, expected) == 0;
 }
 
 __attribute__((noinline)) bool parse_forecast(const std::string& payload, int64_t fetched_unix_s,
@@ -382,16 +384,15 @@ __attribute__((noinline)) bool parse_forecast(const std::string& payload, int64_
     bool ok = false;
     do {
         cJSON* utc_offset = cJSON_GetObjectItemCaseSensitive(root, "utc_offset_seconds");
-        cJSON* hourly = cJSON_GetObjectItemCaseSensitive(root, "hourly");
-        cJSON* units = cJSON_GetObjectItemCaseSensitive(root, "hourly_units");
+        cJSON* hourly     = cJSON_GetObjectItemCaseSensitive(root, "hourly");
+        cJSON* units      = cJSON_GetObjectItemCaseSensitive(root, "hourly_units");
         if (!cJSON_IsNumber(utc_offset) || utc_offset->valuedouble != 0 ||
             !cJSON_IsObject(hourly) || !cJSON_IsObject(units)) {
             error = "payload_shape_invalid";
             break;
         }
         // Fail closed if the provider ever changes units despite the explicit query parameters.
-        if (!json_unit(units, "time", "unixtime") ||
-            !json_unit(units, "temperature_2m", "°C") ||
+        if (!json_unit(units, "time", "unixtime") || !json_unit(units, "temperature_2m", "°C") ||
             !json_unit(units, "relative_humidity_2m", "%") ||
             !json_unit(units, "surface_pressure", "hPa") ||
             !json_unit(units, "shortwave_radiation", "W/m²")) {
@@ -399,10 +400,10 @@ __attribute__((noinline)) bool parse_forecast(const std::string& payload, int64_
             break;
         }
         std::vector<int64_t> times;
-        std::vector<double> temperature;
-        std::vector<double> humidity;
-        std::vector<double> pressure;
-        std::vector<double> shortwave;
+        std::vector<double>  temperature;
+        std::vector<double>  humidity;
+        std::vector<double>  pressure;
+        std::vector<double>  shortwave;
         if (!json_time_array(hourly, times) ||
             !json_number_array(hourly, "temperature_2m", temperature) ||
             !json_number_array(hourly, "relative_humidity_2m", humidity) ||
@@ -413,21 +414,27 @@ __attribute__((noinline)) bool parse_forecast(const std::string& payload, int64_
         }
         const WeatherValidation validation = open_meteo_derive_forecast(
             times, temperature, humidity, pressure, shortwave, fetched_unix_s, sample);
-        if (!validation.valid) { error = validation.reason; break; }
+        if (!validation.valid) {
+            error = validation.reason;
+            break;
+        }
         ok = true;
     } while (false);
     return ok;
 }
 
-__attribute__((noinline)) bool fetch_forecast(const Config& weather, WeatherForecastSample& sample,
-                                              std::string& error, bool& heap_refused,
-                                              HttpClientProbe& headroom) {
+__attribute__((noinline)) bool fetch_forecast(const WeatherConfigSnapshot& weather,
+                                              WeatherForecastSample& sample, std::string& error,
+                                              bool& heap_refused, HttpClientProbe& headroom) {
     std::string payload;
     if (!download_json(weather, payload, error, heap_refused, headroom)) return false;
     int64_t fetched_unix_s = -1;
-    int32_t ms = 0;
+    int32_t ms             = 0;
     time_now(fetched_unix_s, ms);
-    if (fetched_unix_s < 0) { error = "clock_unsynced"; return false; }
+    if (fetched_unix_s < 0) {
+        error = "clock_unsynced";
+        return false;
+    }
     return parse_forecast(payload, fetched_unix_s, sample, error);
 }
 
@@ -482,7 +489,7 @@ static_assert(std::is_nothrow_swappable_v<WeatherForecastStatus>,
 bool invalidate_if_generation(uint32_t expected_generation, bool configured,
                               bool diagnostics_enabled) {
     WeatherForecastStatus replacement = invalidated_status(configured, diagnostics_enabled);
-    Lock lk(s_mtx);
+    Lock                  lk(s_mtx);
     if (s_source_generation.load(std::memory_order_acquire) != expected_generation) return false;
     using std::swap;
     swap(s_status, replacement);
@@ -492,6 +499,276 @@ bool invalidate_if_generation(uint32_t expected_generation, bool configured,
 // A saved location is dormant while the device-wide diagnostics switch is off. Invalidation clears
 // every runtime value in either inactive state; the coordinates remain in Config and become active
 // again only after explicit consent is restored.
+
+WeatherConfigSnapshot weather_config() {
+    return with_config([](const Config& cfg) { return weather_config_snapshot(cfg); });
+}
+
+struct WeatherCycleWait {
+    TickType_t ticks = 0;
+    bool       delay = false;
+};
+
+// Keep transient request allocations off the sleeping task's frame and inside network ownership.
+// The separate frame is also included in both reviewed static stack paths.
+__attribute__((noinline)) WeatherCycleWait weather_cycle(uint32_t               source_generation,
+                                                         RefreshRequestAttempt& refresh_attempt) {
+    // OTA owns the same scarce internal heap for TLS and RSA validation.  Check before the
+    // allocation-free source snapshot so a scheduled forecast does not start allocating after OTA
+    // requested quiescence.  The second check inside NetworkActivity below closes the race
+    // where both tasks passed their first check at the same instant.
+    if (ota_download_active()) {
+        return {pdMS_TO_TICKS(1000), false};
+    }
+    // Bind before the Config snapshot. Every HTTP-side source/consent transition advances
+    // this token while holding s_mtx, so even A -> B -> A cannot become indistinguishable.
+    const WeatherConfigSnapshot cfg = weather_config();
+    if (!cfg.diagnostics_enabled || !cfg.weather_enabled) {
+        (void)invalidate_if_generation(source_generation, cfg.weather_enabled,
+                                       cfg.diagnostics_enabled);
+        return {pdMS_TO_TICKS(60000), false};
+    }
+    const std::string latitude         = weather_coordinate_format_e6(cfg.weather_latitude_e6);
+    const std::string longitude        = weather_coordinate_format_e6(cfg.weather_longitude_e6);
+    bool              location_changed = false;
+    {
+        Lock lk(s_mtx);
+        if (s_source_generation.load(std::memory_order_acquire) != source_generation) return {};
+        location_changed = s_status.latitude != latitude || s_status.longitude != longitude;
+        if (!location_changed) s_status.configured = true;
+    }
+    if (location_changed) {
+        WeatherForecastStatus replacement = invalidated_status(true, true);
+        replacement.latitude              = latitude;
+        replacement.longitude             = longitude;
+        replacement.model                 = kModel;
+        Lock lk(s_mtx);
+        if (s_source_generation.load(std::memory_order_acquire) != source_generation) return {};
+        using std::swap;
+        swap(s_status, replacement);
+    }
+    const bool network_up = net_is_up();
+    if (!network_up || !time_synced()) {
+        {
+            Lock lk(s_mtx);
+            if (s_source_generation.load(std::memory_order_acquire) != source_generation) return {};
+            s_status.fetching  = false;
+            s_status.available = false;
+            s_status.state     = "waiting";
+            s_status.reason    = !network_up ? "network_unavailable" : "clock_unsynced";
+        }
+        return {pdMS_TO_TICKS(60000), false};
+    }
+
+    int64_t now = -1;
+    int32_t ms  = 0;
+    time_now(now, ms);
+    {
+        Lock lk(s_mtx);
+        if (s_source_generation.load(std::memory_order_acquire) != source_generation) return {};
+        refresh_attempt.token = claim_refresh_request_locked();
+        // The POST publishes its token and Give while holding this same mutex. If this
+        // already-running natural cycle won the token, consume that now-redundant wake;
+        // otherwise its long final wait would return immediately and start a second TLS
+        // owner after HIL had already accepted this token's success. A sleeping task has
+        // consumed the Give in its blocking Take already, so this zero-time drain is
+        // benign.
+        if (refresh_attempt.token != 0) ulTaskNotifyTake(pdTRUE, 0);
+        s_status.fetching = true;
+        s_status.state    = "fetching";
+        s_status.reason.clear();
+        s_status.error.clear();
+        s_status.last_attempt_unix_s = now;
+    }
+    // Destroy request temporaries before releasing network ownership and before sleeping.
+    NetworkActivity       activity(source_generation);
+    WeatherForecastSample sample;
+    std::string           error;
+    bool                  ok                    = false;
+    bool                  ota_preempted         = false;
+    bool                  poll_quiesce_failed   = false;
+    bool                  mqtt_quiesce_failed   = false;
+    bool                  modbus_quiesce_failed = false;
+    bool                  syslog_quiesce_failed = false;
+    bool                  source_preempted      = false;
+    bool                  heap_refused          = false;
+    HttpClientProbe       headroom;
+    if (!activity) {
+        source_preempted = true;
+    } else {
+        vTaskDelay(pdMS_TO_TICKS(kNetworkQuiesceLeadMs));
+        // Set our flag first, then re-read OTA's. If OTA won the race it either
+        // observes this flag and waits, or observes it before we set it; in the latter
+        // case this re-check sees OTA and no TLS allocation starts. There is no
+        // interval in which both clients may legitimately proceed.
+        const TickType_t poll_wait_started = xTaskGetTickCount();
+        while ((!hp_poll_network_quiesced() || !mqtt_publish_network_quiesced() ||
+                !mqtt_transport_network_quiesced() || !mb_network_quiesced() ||
+                !syslog_network_quiesced()) &&
+               s_source_generation.load(std::memory_order_acquire) == source_generation &&
+               xTaskGetTickCount() - poll_wait_started < pdMS_TO_TICKS(kPollQuiesceWaitMs))
+            vTaskDelay(pdMS_TO_TICKS(kAllocatorRetryMs));
+        poll_quiesce_failed = !hp_poll_network_quiesced();
+        mqtt_quiesce_failed = !mqtt_publish_network_quiesced();
+        if (!mqtt_quiesce_failed) mqtt_quiesce_failed = !mqtt_transport_network_quiesced();
+        modbus_quiesce_failed = !mb_network_quiesced();
+        syslog_quiesce_failed = !syslog_network_quiesced();
+        ota_preempted         = ota_download_active();
+        // A config handler owns source-change admission before its fallible save, then
+        // advances the generation only at durable commit. Re-read the exact Config
+        // identity too, then admit TLS only if neither consent nor coordinates changed
+        // during the scheduling/quiesce window.
+        const WeatherConfigSnapshot before_fetch = weather_config();
+        source_preempted =
+            s_source_generation.load(std::memory_order_acquire) != source_generation ||
+            !before_fetch.diagnostics_enabled || !before_fetch.weather_enabled ||
+            before_fetch.diagnostics_generation != cfg.diagnostics_generation ||
+            before_fetch.weather_latitude_e6 != cfg.weather_latitude_e6 ||
+            before_fetch.weather_longitude_e6 != cfg.weather_longitude_e6;
+        if (!ota_preempted && !poll_quiesce_failed && !mqtt_quiesce_failed &&
+            !modbus_quiesce_failed && !syslog_quiesce_failed && !source_preempted)
+            ok = fetch_forecast(cfg, sample, error, heap_refused, headroom);
+    }
+    stack_watch_sample(StackWatch::Weather);
+    // A location/consent save may race the old request. Bind every result and failure to
+    // the exact source snapshot that initiated it before changing public status.
+    const WeatherConfigSnapshot current = weather_config();
+    const bool config_changed = !current.diagnostics_enabled || !current.weather_enabled ||
+                                current.diagnostics_generation != cfg.diagnostics_generation ||
+                                current.weather_latitude_e6 != cfg.weather_latitude_e6 ||
+                                current.weather_longitude_e6 != cfg.weather_longitude_e6;
+    if (config_changed) {
+        (void)invalidate_if_generation(source_generation, current.weather_enabled,
+                                       current.diagnostics_enabled);
+        return {};
+    }
+    if (source_preempted) {
+        // SourceChange owns network admission before the durable save. If the save later
+        // fails, the old source remains authoritative, so settle this preempted attempt now
+        // instead of leaving /status.fetching true until OTA permits another cycle. A
+        // successful commit increments the generation and swaps a fully invalidated status;
+        // in that ordering this old attempt must not touch it.
+        {
+            Lock lk(s_mtx);
+            if (s_source_generation.load(std::memory_order_acquire) != source_generation) return {};
+            s_status.fetching = false;
+            s_status.state    = "waiting";
+            s_status.reason   = "source_busy";
+            s_status.error.clear();
+        }
+        refresh_attempt.finish(false);
+        return {pdMS_TO_TICKS(25), true};
+    }
+    if (s_source_generation.load(std::memory_order_acquire) != source_generation) return {};
+    if (ota_preempted) {
+        {
+            Lock lk(s_mtx);
+            if (s_source_generation.load(std::memory_order_acquire) != source_generation) return {};
+            s_status.fetching = false;
+            s_status.state    = "waiting";
+            s_status.reason   = "ota_active";
+            s_status.error.clear();
+        }
+        // OTA is a peer serialization owner, not a Weather result. Keep the exact explicit
+        // token outstanding so this task reclaims it after OTA releases the shared heap.
+        refresh_attempt.defer();
+        return {pdMS_TO_TICKS(1000), false};
+    }
+    if (poll_quiesce_failed || mqtt_quiesce_failed || modbus_quiesce_failed ||
+        syslog_quiesce_failed) {
+        const HttpClientProbe blocked = http_client_probe();
+        diag_printf("weather: %s did not quiesce (free=%u B largest=%u B)\n",
+                    poll_quiesce_failed     ? "X10A poll"
+                    : mqtt_quiesce_failed   ? "MQTT publisher"
+                    : modbus_quiesce_failed ? "HomeHub poll"
+                                            : "Syslog",
+                    static_cast<unsigned>(blocked.free_internal),
+                    static_cast<unsigned>(blocked.largest_internal));
+        {
+            Lock lk(s_mtx);
+            if (s_source_generation.load(std::memory_order_acquire) != source_generation) return {};
+            s_status.fetching = false;
+            s_status.state    = "waiting";
+            s_status.reason   = poll_quiesce_failed     ? "x10a_busy"
+                                : mqtt_quiesce_failed   ? "mqtt_busy"
+                                : modbus_quiesce_failed ? "homehub_busy"
+                                                        : "syslog_busy";
+        }
+        refresh_attempt.finish(false);
+        return {pdMS_TO_TICKS(WEATHER_RETRY_INTERVAL_S * 1000u), false};
+    }
+    if (heap_refused) {
+        diag_printf("weather: fetch skipped by low heap (free=%u B largest=%u B; "
+                    "need %u/%u B)\n",
+                    static_cast<unsigned>(headroom.free_internal),
+                    static_cast<unsigned>(headroom.largest_internal),
+                    static_cast<unsigned>(WEATHER_FETCH_MIN_FREE_BYTES),
+                    static_cast<unsigned>(WEATHER_FETCH_MIN_LARGEST_BLOCK_BYTES));
+        {
+            Lock lk(s_mtx);
+            if (s_source_generation.load(std::memory_order_acquire) != source_generation) return {};
+            s_status.fetching = false;
+            s_status.state    = "waiting";
+            s_status.reason   = "heap_headroom";
+        }
+        refresh_attempt.finish(false);
+        return {pdMS_TO_TICKS(WEATHER_RETRY_INTERVAL_S * 1000u), false};
+    }
+    bool updated = false;
+    if (ok) {
+        Lock lk(s_mtx);
+        if (s_source_generation.load(std::memory_order_acquire) != source_generation) return {};
+        const WeatherForecastSample previous{1,
+                                             kProvider,
+                                             kModel,
+                                             s_status.issued_unix_s,
+                                             s_status.fetched_unix_s,
+                                             s_status.decision_unix_s,
+                                             s_status.outdoor_mean_2h_c,
+                                             s_status.solar_energy_2h_wh_m2};
+        if (s_status.has_value && weather_timestamp_moved_backward(sample, previous)) {
+            error = "provider_time_moved_backward";
+        } else {
+            s_status.fetching  = false;
+            s_status.available = true;
+            s_status.has_value = true;
+            s_status.state     = "ok";
+            s_status.reason    = "fresh";
+            s_status.error.clear();
+            s_status.issued_unix_s         = sample.issued_unix_s;
+            s_status.fetched_unix_s        = sample.fetched_unix_s;
+            s_status.decision_unix_s       = sample.decision_unix_s;
+            s_status.outdoor_mean_2h_c     = sample.outdoor_mean_2h_c;
+            s_status.solar_energy_2h_wh_m2 = sample.solar_energy_2h_wh_m2;
+            s_status.hourly_count          = sample.hourly_count;
+            s_status.hourly_unix_s         = sample.hourly_unix_s;
+            s_status.hourly_temperature_c  = sample.hourly_temperature_c;
+            s_status.hourly_humidity_pct   = sample.hourly_humidity_pct;
+            s_status.hourly_pressure_hpa   = sample.hourly_pressure_hpa;
+            s_status.successes++;
+            updated = true;
+        }
+    }
+    if (updated) diag_printf("weather: Open-Meteo ICON forecast updated\n");
+    if (!ok || !error.empty()) {
+        const std::string failure = error.empty() ? "fetch_failed" : error;
+        {
+            Lock lk(s_mtx);
+            if (s_source_generation.load(std::memory_order_acquire) != source_generation) return {};
+            s_status.fetching  = false;
+            s_status.available = false;
+            s_status.state     = "error";
+            s_status.reason    = "fetch_failed";
+            s_status.error     = failure;
+            s_status.errors++;
+        }
+        diag_printf("weather: Open-Meteo fetch failed (%s)\n", failure.c_str());
+    }
+    refresh_attempt.finish(updated);
+    return {pdMS_TO_TICKS((ok && error.empty()) ? WEATHER_FETCH_INTERVAL_S * 1000u
+                                                : WEATHER_RETRY_INTERVAL_S * 1000u),
+            false};
+}
 
 void weather_task(void*) {
     // xTaskCreate may schedule this worker before it returns the handle to app_main. Do not
@@ -509,283 +786,18 @@ void weather_task(void*) {
         const uint32_t source_generation = s_source_generation.load(std::memory_order_acquire);
         RefreshRequestAttempt refresh_attempt;
         try {
-            // OTA owns the same scarce internal heap for TLS and RSA validation.  Check before the
-            // Config/string snapshot so a scheduled forecast does not start allocating after OTA
-            // requested quiescence.  The second check inside NetworkActivity below closes the race
-            // where both tasks passed their first check at the same instant.
-            if (ota_download_active()) {
-                ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(1000));
-                continue;
-            }
-            // Bind before the Config snapshot. Every HTTP-side source/consent transition advances
-            // this token while holding s_mtx, so even A -> B -> A cannot become indistinguishable.
-            const Config cfg = config();
-            if (!cfg.diagnostics_enabled || !cfg.weather_enabled) {
-                (void)invalidate_if_generation(source_generation, cfg.weather_enabled,
-                                               cfg.diagnostics_enabled);
-                ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(60000));
-                continue;
-            }
-            const std::string latitude = weather_coordinate_format_e6(cfg.weather_latitude_e6);
-            const std::string longitude = weather_coordinate_format_e6(cfg.weather_longitude_e6);
-            bool              location_changed = false;
-            {
-                Lock lk(s_mtx);
-                if (s_source_generation.load(std::memory_order_acquire) != source_generation)
-                    continue;
-                location_changed = s_status.latitude != latitude || s_status.longitude != longitude;
-                if (!location_changed) s_status.configured = true;
-            }
-            if (location_changed) {
-                WeatherForecastStatus replacement = invalidated_status(true, true);
-                replacement.latitude              = latitude;
-                replacement.longitude             = longitude;
-                replacement.model                 = kModel;
-                Lock lk(s_mtx);
-                if (s_source_generation.load(std::memory_order_acquire) != source_generation)
-                    continue;
-                using std::swap;
-                swap(s_status, replacement);
-            }
-            const bool network_up = net_is_up();
-            if (!network_up || !time_synced()) {
-                {
-                    Lock lk(s_mtx);
-                    if (s_source_generation.load(std::memory_order_acquire) != source_generation)
-                        continue;
-                    s_status.fetching = false;
-                    s_status.available = false;
-                    s_status.state = "waiting";
-                    s_status.reason = !network_up ? "network_unavailable" : "clock_unsynced";
-                }
-                ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(60000));
-                continue;
-            }
-
-            int64_t now = -1;
-            int32_t ms = 0;
-            time_now(now, ms);
-            {
-                Lock lk(s_mtx);
-                if (s_source_generation.load(std::memory_order_acquire) != source_generation)
-                    continue;
-                refresh_attempt.token = claim_refresh_request_locked();
-                // The POST publishes its token and Give while holding this same mutex. If this
-                // already-running natural cycle won the token, consume that now-redundant wake;
-                // otherwise its long final wait would return immediately and start a second TLS
-                // owner after HIL had already accepted this token's success. A sleeping task has
-                // consumed the Give in its blocking Take already, so this zero-time drain is
-                // benign.
-                if (refresh_attempt.token != 0) ulTaskNotifyTake(pdTRUE, 0);
-                s_status.fetching = true;
-                s_status.state = "fetching";
-                s_status.reason.clear();
-                s_status.error.clear();
-                s_status.last_attempt_unix_s = now;
-            }
-            WeatherForecastSample sample;
-            std::string error;
-            bool ok = false;
-            bool ota_preempted = false;
-            bool poll_quiesce_failed = false;
-            bool mqtt_quiesce_failed = false;
-            bool modbus_quiesce_failed = false;
-            bool syslog_quiesce_failed = false;
-            bool                  source_preempted      = false;
-            bool heap_refused = false;
-            HttpClientProbe headroom;
-            {
-                NetworkActivity activity(source_generation);
-                if (!activity) {
-                    source_preempted = true;
-                } else {
-                    vTaskDelay(pdMS_TO_TICKS(kNetworkQuiesceLeadMs));
-                    // Set our flag first, then re-read OTA's. If OTA won the race it either
-                    // observes this flag and waits, or observes it before we set it; in the latter
-                    // case this re-check sees OTA and no TLS allocation starts. There is no
-                    // interval in which both clients may legitimately proceed.
-                    const TickType_t poll_wait_started = xTaskGetTickCount();
-                    while (
-                        (!hp_poll_network_quiesced() || !mqtt_publish_network_quiesced() ||
-                         !mqtt_transport_network_quiesced() || !mb_network_quiesced() ||
-                         !syslog_network_quiesced()) &&
-                        s_source_generation.load(std::memory_order_acquire) == source_generation &&
-                        xTaskGetTickCount() - poll_wait_started < pdMS_TO_TICKS(kPollQuiesceWaitMs))
-                        vTaskDelay(pdMS_TO_TICKS(kAllocatorRetryMs));
-                    poll_quiesce_failed = !hp_poll_network_quiesced();
-                    mqtt_quiesce_failed = !mqtt_publish_network_quiesced();
-                    if (!mqtt_quiesce_failed)
-                        mqtt_quiesce_failed = !mqtt_transport_network_quiesced();
-                    modbus_quiesce_failed = !mb_network_quiesced();
-                    syslog_quiesce_failed = !syslog_network_quiesced();
-                    ota_preempted         = ota_download_active();
-                    // A config handler owns source-change admission before its fallible save, then
-                    // advances the generation only at durable commit. Re-read the exact Config
-                    // identity too, then admit TLS only if neither consent nor coordinates changed
-                    // during the scheduling/quiesce window.
-                    const Config before_fetch = config();
-                    source_preempted =
-                        s_source_generation.load(std::memory_order_acquire) != source_generation ||
-                        !before_fetch.diagnostics_enabled || !before_fetch.weather_enabled ||
-                        before_fetch.diagnostics_generation != cfg.diagnostics_generation ||
-                        before_fetch.weather_latitude_e6 != cfg.weather_latitude_e6 ||
-                        before_fetch.weather_longitude_e6 != cfg.weather_longitude_e6;
-                    if (!ota_preempted && !poll_quiesce_failed && !mqtt_quiesce_failed &&
-                        !modbus_quiesce_failed && !syslog_quiesce_failed && !source_preempted)
-                        ok = fetch_forecast(cfg, sample, error, heap_refused, headroom);
-                }
-            }
-            stack_watch_sample(StackWatch::Weather);
-            // A location/consent save may race the old request. Bind every result and failure to
-            // the exact source snapshot that initiated it before changing public status.
-            const Config current = config();
-            const bool   config_changed =
-                !current.diagnostics_enabled || !current.weather_enabled ||
-                current.diagnostics_generation != cfg.diagnostics_generation ||
-                current.weather_latitude_e6 != cfg.weather_latitude_e6 ||
-                current.weather_longitude_e6 != cfg.weather_longitude_e6;
-            if (config_changed) {
-                (void)invalidate_if_generation(source_generation, current.weather_enabled,
-                                               current.diagnostics_enabled);
-                continue;
-            }
-            if (source_preempted) {
-                // SourceChange owns network admission before the durable save. If the save later
-                // fails, the old source remains authoritative, so settle this preempted attempt now
-                // instead of leaving /status.fetching true until OTA permits another cycle. A
-                // successful commit increments the generation and swaps a fully invalidated status;
-                // in that ordering this old attempt must not touch it.
-                {
-                    Lock lk(s_mtx);
-                    if (s_source_generation.load(std::memory_order_acquire) != source_generation)
-                        continue;
-                    s_status.fetching = false;
-                    s_status.state    = "waiting";
-                    s_status.reason   = "source_busy";
-                    s_status.error.clear();
-                }
-                refresh_attempt.finish(false);
-                vTaskDelay(pdMS_TO_TICKS(25));
-                continue;
-            }
-            if (s_source_generation.load(std::memory_order_acquire) != source_generation) continue;
-            if (ota_preempted) {
-                {
-                    Lock lk(s_mtx);
-                    if (s_source_generation.load(std::memory_order_acquire) != source_generation)
-                        continue;
-                    s_status.fetching = false;
-                    s_status.state = "waiting";
-                    s_status.reason = "ota_active";
-                    s_status.error.clear();
-                }
-                // OTA is a peer serialization owner, not a Weather result. Keep the exact explicit
-                // token outstanding so this task reclaims it after OTA releases the shared heap.
-                refresh_attempt.defer();
-                ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(1000));
-                continue;
-            }
-            if (poll_quiesce_failed || mqtt_quiesce_failed || modbus_quiesce_failed ||
-                syslog_quiesce_failed) {
-                const HttpClientProbe blocked = http_client_probe();
-                diag_printf("weather: %s did not quiesce (free=%u B largest=%u B)\n",
-                            poll_quiesce_failed ? "X10A poll" : mqtt_quiesce_failed ? "MQTT publisher" :
-                            modbus_quiesce_failed ? "HomeHub poll" : "Syslog",
-                            static_cast<unsigned>(blocked.free_internal),
-                            static_cast<unsigned>(blocked.largest_internal));
-                {
-                    Lock lk(s_mtx);
-                    if (s_source_generation.load(std::memory_order_acquire) != source_generation)
-                        continue;
-                    s_status.fetching = false;
-                    s_status.state    = "waiting";
-                    s_status.reason   = poll_quiesce_failed     ? "x10a_busy"
-                                        : mqtt_quiesce_failed   ? "mqtt_busy"
-                                        : modbus_quiesce_failed ? "homehub_busy"
-                                                                : "syslog_busy";
-                }
-                refresh_attempt.finish(false);
-                ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(WEATHER_RETRY_INTERVAL_S * 1000u));
-                continue;
-            }
-            if (heap_refused) {
-                diag_printf("weather: fetch skipped by low heap (free=%u B largest=%u B; "
-                            "need %u/%u B)\n",
-                            static_cast<unsigned>(headroom.free_internal),
-                            static_cast<unsigned>(headroom.largest_internal),
-                            static_cast<unsigned>(WEATHER_FETCH_MIN_FREE_BYTES),
-                            static_cast<unsigned>(WEATHER_FETCH_MIN_LARGEST_BLOCK_BYTES));
-                {
-                    Lock lk(s_mtx);
-                    if (s_source_generation.load(std::memory_order_acquire) != source_generation)
-                        continue;
-                    s_status.fetching = false;
-                    s_status.state    = "waiting";
-                    s_status.reason   = "heap_headroom";
-                }
-                refresh_attempt.finish(false);
-                ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(WEATHER_RETRY_INTERVAL_S * 1000u));
-                continue;
-            }
-            bool updated = false;
-            if (ok) {
-                Lock lk(s_mtx);
-                if (s_source_generation.load(std::memory_order_acquire) != source_generation)
-                    continue;
-                const WeatherForecastSample previous{
-                    1, kProvider, kModel, s_status.issued_unix_s, s_status.fetched_unix_s,
-                    s_status.decision_unix_s, s_status.outdoor_mean_2h_c,
-                    s_status.solar_energy_2h_wh_m2};
-                if (s_status.has_value && weather_timestamp_moved_backward(sample, previous)) {
-                    error = "provider_time_moved_backward";
-                } else {
-                    s_status.fetching = false;
-                    s_status.available = true;
-                    s_status.has_value = true;
-                    s_status.state = "ok";
-                    s_status.reason = "fresh";
-                    s_status.error.clear();
-                    s_status.issued_unix_s = sample.issued_unix_s;
-                    s_status.fetched_unix_s = sample.fetched_unix_s;
-                    s_status.decision_unix_s = sample.decision_unix_s;
-                    s_status.outdoor_mean_2h_c = sample.outdoor_mean_2h_c;
-                    s_status.solar_energy_2h_wh_m2 = sample.solar_energy_2h_wh_m2;
-                    s_status.hourly_count = sample.hourly_count;
-                    s_status.hourly_unix_s = sample.hourly_unix_s;
-                    s_status.hourly_temperature_c = sample.hourly_temperature_c;
-                    s_status.hourly_humidity_pct = sample.hourly_humidity_pct;
-                    s_status.hourly_pressure_hpa = sample.hourly_pressure_hpa;
-                    s_status.successes++;
-                    updated = true;
-                }
-            }
-            if (updated) diag_printf("weather: Open-Meteo ICON forecast updated\n");
-            if (!ok || !error.empty()) {
-                const std::string failure = error.empty() ? "fetch_failed" : error;
-                {
-                    Lock lk(s_mtx);
-                    if (s_source_generation.load(std::memory_order_acquire) != source_generation)
-                        continue;
-                    s_status.fetching = false;
-                    s_status.available = false;
-                    s_status.state = "error";
-                    s_status.reason = "fetch_failed";
-                    s_status.error = failure;
-                    s_status.errors++;
-                }
-                diag_printf("weather: Open-Meteo fetch failed (%s)\n", failure.c_str());
-            }
-            refresh_attempt.finish(updated);
-            ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS((ok && error.empty())
-                                                  ? WEATHER_FETCH_INTERVAL_S * 1000u
-                                                  : WEATHER_RETRY_INTERVAL_S * 1000u));
+            const WeatherCycleWait wait = weather_cycle(source_generation, refresh_attempt);
+            if (wait.delay)
+                vTaskDelay(wait.ticks);
+            else if (wait.ticks != 0)
+                ulTaskNotifyTake(pdTRUE, wait.ticks);
         } catch (const std::exception& e) {
             diag_printf("weather: task exception: %s\n", e.what());
             // These three assignments run while the original throw was most likely a bad_alloc, and
             // they are safe only because "error" (5), "fetch_failed" (12) and "out_of_memory" (13)
             // all fit libstdc++'s 15-char SSO buffer and therefore cannot allocate. That is
-            // load-bearing: a 16-character reason string here turns this handler into a re-throw out
-            // of the task, i.e. std::terminate and a reboot.
+            // load-bearing: a 16-character reason string here turns this handler into a re-throw
+            // out of the task, i.e. std::terminate and a reboot.
             {
                 Lock lk(s_mtx);
                 if (s_source_generation.load(std::memory_order_acquire) != source_generation)
@@ -823,7 +835,7 @@ void weather_task(void*) {
     }
 }
 
-}  // namespace
+} // namespace
 
 void weather_forecast_start() {
     if (s_task.load(std::memory_order_acquire)) return;
@@ -1021,4 +1033,4 @@ bool weather_fetch_active() {
     return state == SourceAdmission::Network || state == SourceAdmission::SourceChangePending;
 }
 
-}  // namespace daik
+} // namespace daik

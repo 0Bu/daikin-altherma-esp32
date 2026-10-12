@@ -21,12 +21,16 @@
       "pattern": "^daik::.*weather_task\\(",
       "max_bytes": 6144
     },
+    "weather_cycle": {
+      "pattern": "^(?:daik::.*weather_cycle\\(|_ZN4daik12_GLOBAL__N_1L13weather_cycleEmRNS0_21RefreshRequestAttemptE\\$constprop\\$[0-9]+$)",
+      "max_bytes": 4096
+    },
     "weather_fetch": {
       "pattern": "^daik::.*fetch_forecast\\(",
       "max_bytes": 2048
     },
     "weather_download": {
-      "pattern": "^daik::.*download_json\\(",
+      "pattern": "^(?:daik::\\(anonymous namespace\\)::download_json\\([^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik12_GLOBAL__N_1L13download_jsonERKNS_21WeatherConfigSnapshotERNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEESA_RbRNS_15HttpClientProbeE\\$constprop\\$[0-9]+$)",
       "max_bytes": 3072
     },
     "weather_parse": {
@@ -204,13 +208,13 @@
       "max_bytes": 2048
     },
     "weather_task_download": {
-      "symbols": ["weather_task", "weather_fetch", "weather_download"],
+      "symbols": ["weather_task", "weather_cycle", "weather_fetch", "weather_download"],
       "multipliers": {},
       "base_bytes": 2048,
       "max_bytes": 11264
     },
     "weather_task_parse": {
-      "symbols": ["weather_task", "weather_fetch", "weather_parse"],
+      "symbols": ["weather_task", "weather_cycle", "weather_fetch", "weather_parse"],
       "multipliers": {},
       "base_bytes": 2048,
       "max_bytes": 11264

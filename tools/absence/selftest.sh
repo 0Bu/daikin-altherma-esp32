@@ -493,21 +493,16 @@ restore
 # 18. Raise the weather activity signal after the grace instead of before it. MQTT can then begin a
 #     large snapshot during the delay and still own it when the handshake starts.
 python3 - "$TMP/main/weather_forecast.cpp" <<'PY2'
-import sys
+import re, sys
 p = sys.argv[1]
 s = open(p).read()
-old = ("                NetworkActivity activity(source_generation);\n"
-       "                if (!activity) {\n"
-       "                    source_preempted = true;\n"
-       "                } else {\n"
-       "                    vTaskDelay(pdMS_TO_TICKS(kNetworkQuiesceLeadMs));")
-new = ("                vTaskDelay(pdMS_TO_TICKS(kNetworkQuiesceLeadMs));\n"
-       "                NetworkActivity activity(source_generation);\n"
-       "                if (!activity) {\n"
-       "                    source_preempted = true;\n"
-       "                } else {")
-seed = s.replace(old, new, 1)
-assert seed != s, "seed 18 did not apply — the weather grace moved"
+s, count = re.subn(r'^[ \t]*vTaskDelay\(pdMS_TO_TICKS\(kNetworkQuiesceLeadMs\)\);\n',
+                   '', s, count=1, flags=re.MULTILINE)
+assert count == 1, "seed 18 did not apply — the weather grace moved"
+seed, count = re.subn(r'^([ \t]*)NetworkActivity\s+activity\(source_generation\);',
+                     r'\1vTaskDelay(pdMS_TO_TICKS(kNetworkQuiesceLeadMs));\n\g<0>',
+                     s, count=1, flags=re.MULTILINE)
+assert count == 1, "seed 18 did not apply — the weather cycle admission moved"
 open(p, "w").write(seed)
 PY2
 expect_red "weather advertising TLS activity after its grace" run_contract
@@ -760,18 +755,13 @@ restore
 # 36. Bind after the Config snapshot. A complete A -> B -> A transition in that interval then
 #     gives an old snapshot the new token and the post-fetch equality checks cannot distinguish it.
 python3 - "$TMP/main/weather_forecast.cpp" <<'PY4'
-import re, sys
+import sys
 p = sys.argv[1]
 s = open(p).read()
-pattern = (r"^\s*const uint32_t source_generation\s*=\s*"
-           r"s_source_generation\.load\(std::memory_order_acquire\);\n")
-s, count = re.subn(pattern, "", s, count=1, flags=re.MULTILINE)
-assert count == 1, "seed 36 did not apply — Weather token binding moved"
-s = s.replace("            const Config cfg = config();\n",
-              "            const Config cfg = config();\n"
-              "            const uint32_t source_generation =\n"
-              "                s_source_generation.load(std::memory_order_acquire);\n", 1)
-open(p, "w").write(s)
+old = "    const WeatherConfigSnapshot cfg = weather_config();\n"
+new = old + "    source_generation = s_source_generation.load(std::memory_order_acquire);\n"
+assert s.count(old) == 1, "seed 36 did not apply — Weather cycle source snapshot moved"
+open(p, "w").write(s.replace(old, new, 1))
 PY4
 expect_red "Weather binding its ABA token after the Config snapshot" run_contract
 restore
@@ -782,7 +772,7 @@ python3 - "$TMP/main/weather_forecast.cpp" <<'PY4'
 import sys
 p = sys.argv[1]
 s = open(p).read()
-seed = s.replace("                current.diagnostics_generation != cfg.diagnostics_generation ||\n", "", 1)
+seed = s.replace("current.diagnostics_generation != cfg.diagnostics_generation ||", "false ||", 1)
 assert seed != s, "seed 37 did not apply — diagnostics generation comparison moved"
 open(p, "w").write(seed)
 PY4
@@ -795,9 +785,9 @@ python3 - "$TMP/main/weather_forecast.cpp" <<'PY4'
 import re, sys
 p = sys.argv[1]
 s = open(p).read()
-pattern = (r'(if \(ok\) \{\n\s*Lock lk\(s_mtx\);)\n'
-           r'\s*if \(s_source_generation\.load\(std::memory_order_acquire\) != source_generation\)\n'
-           r'\s*continue;')
+pattern = (r'(if \(ok\) \{\n\s*Lock\s+lk\(s_mtx\);)\n'
+           r'\s*if \(s_source_generation\.load\(std::memory_order_acquire\) != source_generation\)'
+           r'\s*return \{\};')
 seed, count = re.subn(pattern, r'\1', s, count=1)
 assert count == 1, "seed 38 did not apply — success token check moved"
 open(p, "w").write(seed)
@@ -1472,16 +1462,17 @@ restore
 #     If config_save then fails, the old source remains valid and this abandoned attempt must be
 #     settled before an OTA hold-off can prolong a false fetching:true status.
 python3 - "$TMP/main/weather_forecast.cpp" <<'PY4'
-import sys
+import re, sys
 p = sys.argv[1]
 s = open(p).read()
-start = s.index("            if (source_preempted) {")
+start = s.index("    if (source_preempted) {")
 end = s.index(
-    "            if (s_source_generation.load(std::memory_order_acquire) != source_generation) continue;",
+    "\n    if (s_source_generation.load(std::memory_order_acquire) != source_generation) return {};",
     start)
 body = s[start:end]
-mutated = body.replace("                    s_status.fetching = false;\n", "", 1)
-assert mutated != body, "seed 82 did not apply — preempted Weather finalization moved"
+mutated, count = re.subn(r'^[ \t]*s_status\.fetching\s*=\s*false;\n', '', body,
+                        count=1, flags=re.MULTILINE)
+assert count == 1, "seed 82 did not apply — preempted Weather finalization moved"
 open(p, "w").write(s[:start] + mutated + s[end:])
 PY4
 expect_red "failed Weather source save retaining fetching true" run_contract

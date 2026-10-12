@@ -315,6 +315,8 @@ OTA TLS requires four stable internal-heap samples of 56 KiB free and a 24 KiB l
 Validation after transport/buffer cleanup requires two 24/12 KiB samples. Weather reserves its fixed
 8 KiB response, URL and error capacity before its final 48/20 KiB admission sample. A refused Weather
 fetch keeps the previous evidence unavailable for decisions and retries after five minutes.
+Weather reads only an allocation-free consent/location snapshot; request temporaries are destroyed
+before network ownership returns to MQTT and before the worker sleeps.
 
 `http_deadline.cpp` owns a boot-static absolute socket watchdog. After successful open, a timer
 covers headers and body within the original monotonic deadline; expiry wakes a preallocated worker
