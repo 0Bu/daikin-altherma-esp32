@@ -167,9 +167,10 @@ skill/reviewer asserts:
   streaming responses, allocating task-loop OOM recovery, raw-mutex/RAII locking, every affected
   builder caller's stack budget, and 503 on OOM. Verify its committed range and HEAD binding;
   source review must not claim missing ELF/coredump or hardware measurements were completed.
-- **`x10a_decode_reviewer`** (`.agents/agents/x10a-decode-reviewer.toml`) — checks X10A protocol decode,
-  converter IDs, sign/scale, and byte layout against `docs/REGISTERS.md`. Verify its committed range
-  and HEAD binding, then the separate intended local changes; an empty local diff cannot waive review.
+- **`x10a_decode_reviewer`** ([profile](../../agents/x10a-decode-reviewer.toml)) — checks X10A/Modbus
+  interpretation, converter IDs, sign/scale, byte layout and source/reply identity against
+  `docs/REGISTERS.md` and `docs/MODBUS_PROTOCOL.md`. Verify its committed range and HEAD binding,
+  then the separate intended local changes; an empty local diff cannot waive review.
 
 ## Self-analysis and audit self-optimization
 

@@ -266,7 +266,8 @@ computes formatting in memory. It emits a bounded suggestion, never writes a sou
 Edit, Write and patch projections are checked against a 1 MiB UTF-8 output budget before construction.
 Existing user changes, missing correlation or concurrent changes cause it to skip the suggestion. Apply
 formatting through the ordinary edit workflow under explicit file ownership, then run the normal
-format gate; a post-edit hook is not permission to reformat another author's changes.
+format gate when the user task calls for it. The advisory requests no extra edit or verification
+and is not permission to reformat another author's changes.
 
 Stop only reads changed firmware/test paths and provides a bounded, nonblocking verification reminder.
 It does not establish ownership of existing changes, run tests, write a shared build or assert a pass.
@@ -276,8 +277,8 @@ Run relevant tests explicitly during authorized implementation and report their 
 
 Use `$agentic-setup` for setup changes or modernization. The native pre-push and PR-create paths call
 `scripts/run-agentic-setup-audit.sh`, which reuses configuration/generated-parity and skill checks.
-There is no new review stamp, model run, online lookup or runtime smoke on ordinary pushes. A substantive
-setup/client change additionally uses the existing independent reviews and optional
+The source audit adds no review stamp, model run, network access or runtime smoke; the existing
+online PR lookup still applies. A substantive setup/client change uses the independent reviews and optional
 [synthetic behavior scenarios](../.agents/skills/agentic-setup/references/evaluation.md).
 
 The existing project review owns conditional security/persistence coverage. Scope the decode reviewer

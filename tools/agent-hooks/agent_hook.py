@@ -1758,17 +1758,18 @@ def run_format(_: argparse.Namespace) -> int:
             if result.returncode == 0 and result.stdout != original \
                     and format_snapshot.git(root, "rev-parse", "--verify", "HEAD") == snapshot["head"] \
                     and format_snapshot.read_source(path) == original:
-                notices.append(f"agent-format: current-tool edit needs reviewed formatting: {path.relative_to(root)}")
+                notices.append(f"agent-format: optional formatting suggestion: {path.relative_to(root)}")
         except (OSError, subprocess.SubprocessError):
             continue
+    context = ("\n".join(notices) + "\nThis advisory requests no edits or verification. "
+               "The user's task scope controls whether to apply a reviewed patch or run scripts/run-format-check.sh.")[:4000]
     if _CURRENT_IS_ANTIGRAVITY:
         if notices:
-            sys.stderr.write(("\n".join(notices))[:4000] + "\n")
+            sys.stderr.write(context + "\n")
         print("{}")
     elif notices:
         print(json.dumps({"hookSpecificOutput": {"hookEventName": "PostToolUse",
-                          "additionalContext": ("\n".join(notices)
-                                                + "\nApply only reviewed edits under explicit file ownership, then run scripts/run-format-check.sh.")[:4000]}},
+                          "additionalContext": context}},
                          separators=(",", ":")))
     return 0
 
