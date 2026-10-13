@@ -159,7 +159,8 @@ The temperature can accompany a heating-curve event as optional context. The boa
 sensor placement: a reading near the indoor unit is indoor air, irrespective of its label.
 
 A stale/failed sample carries no plausible old MQTT reading; link counters remain. Disabling retracts
-its state and three HA configs. Source-specific publication/availability is in [MQTT.md](MQTT.md#env-iii).
+its state; HA discovery cleanup follows the [ownership migration rule](MQTT.md#migrations).
+Source-specific publication/availability is in [MQTT.md](MQTT.md#env-iii).
 
 ## Heating-curve diagnosis
 
