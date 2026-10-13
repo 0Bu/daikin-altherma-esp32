@@ -160,6 +160,46 @@ detail = ui.detail({ ...collecting, observed_s: 77760, reason: "day_incomplete" 
 assert.match(detail, /full 24-hour window is still missing: 30 min remaining/);
 assert.doesNotMatch(detail, /insufficient coverage|Missing readable time/);
 
+// A first-hour flow observation needs eligible pump operation, not the rest of a calendar day.
+// Exercise actual localized details: daily assessments must keep their waiting explanation,
+// while instant/eligible-window observations must preserve scope without inheriting that delay.
+const partialReport = { span_s: 900, source_age_s: 1, source_fresh: true };
+const collectingFlow = {
+  id: "flow", verdict: "collecting", evidence: "observation", reason: "input_coverage",
+  observed_s: 0, required_s: 0, min_l_min: null,
+};
+for (const lang of locales) {
+  const horizon = ui.text(lang, "check.detail.horizon_wait", "23 h 45 min");
+  const completeHorizon = ui.text(lang, "check.detail.horizon_wait", "0 min");
+  const period = ui.text(lang, "check.detail.period", "15 min");
+  const ageLabel = ui.text(lang, "check.detail.age_label");
+  const flowDetail = ui.detail(collectingFlow, false, partialReport);
+  assert.ok(!flowDetail.includes(horizon), `${lang} flow must not require a full day`);
+  assert.ok(flowDetail.includes(period), `${lang} flow must retain its observed period`);
+  assert.ok(flowDetail.includes(ageLabel), `${lang} flow must retain source age`);
+  assert.ok(flowDetail.includes(ui.text(lang, "check.detail.collecting_unknown")),
+    `${lang} flow must retain its actual collection state`);
+  for (const id of ["pressure", "cycling", "defrost"]) {
+    for (const reason of ["day_incomplete", "input_coverage"]) {
+      const daily = { ...collecting, id, reason, observed_s: 900 };
+      assert.ok(ui.detail(daily, false, partialReport).includes(horizon),
+        `${lang}/${id}/${reason} must explain its missing day`);
+      assert.ok(!ui.detail(daily, true, { ...partialReport, span_s: 86400 }).includes(completeHorizon),
+        `${lang}/${id} must not add a day once the horizon is complete`);
+    }
+  }
+  for (const id of ["fault", "dhw_loss", "heater", "retries"]) {
+    assert.ok(!ui.detail({ ...collectingFlow, id, windows: 0 }, false, partialReport).includes(horizon),
+      `${lang}/${id} observations must not inherit a daily prerequisite`);
+  }
+  const staleDetail = ui.detail({ ...collectingFlow, reason: "source_stale" }, false,
+    { ...partialReport, source_fresh: false, source_age_s: 120 });
+  assert.ok(staleDetail.includes(ui.text(lang, "check.detail.source_stale")),
+    `${lang} flow must retain the stale-source explanation`);
+  assert.ok(!staleDetail.includes(horizon), `${lang} a stale source is not a missing day`);
+}
+ui.setLang("en");
+
 // Current acquisition must not negate already completed DHW hours. No invented tank/COP example.
 const dhw = {
   id: "dhw_loss", verdict: "info", evidence: "heuristic", reason: "observation_only",
