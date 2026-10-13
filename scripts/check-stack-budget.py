@@ -75,6 +75,7 @@ PACKED_ENTRY_SYMBOLS = frozenset({
     'esp_mbedtls_read',
     'esp_mbedtls_write',
     'esp_mqtt_client_publish',
+    'esp_mqtt_client_enqueue',
     'esp_mqtt_client_subscribe_multiple',
     'esp_mqtt_client_subscribe_single',
     'esp_mqtt_client_unsubscribe',
@@ -187,6 +188,7 @@ PACKED_ENTRY_SYMBOLS = frozenset({
     'mqtt_client_enqueue_publish',
     'mqtt_message_receive',
     'mqtt_msg_publish',
+    'outbox_enqueue',
     'netconn_apimsg',
     'netconn_recv_data_tcp',
     'netconn_recv_tcp_pbuf_flags',
@@ -382,7 +384,18 @@ SDK_PUBLIC_FILES = (
     "vfs/vfs.c", "vfs/vfs_calls.c", "lwip/port/esp32xx/vfs_lwip.c",
     "pthread/pthread.c", "pthread/pthread_local_storage.c",
     "esp_system/esp_system.c",
+    "nvs_flash/src/nvs_api.cpp", "nvs_flash/src/nvs_storage.cpp",
+    "nvs_flash/src/nvs_storage.hpp", "nvs_flash/src/nvs_page.cpp",
+    "nvs_flash/src/nvs_page.hpp", "nvs_flash/src/nvs_pagemanager.cpp",
+    "nvs_flash/src/nvs_pagemanager.hpp", "nvs_flash/src/nvs_partition.cpp",
+    "nvs_flash/src/nvs_partition.hpp", "nvs_flash/src/nvs_partition_manager.cpp",
+    "nvs_flash/src/nvs_handle_simple.cpp", "nvs_flash/src/nvs_handle_simple.hpp",
+    "nvs_flash/src/nvs_memory_management.hpp", "esp_partition/partition.c",
+    "spi_flash/esp_flash_api.c", "spi_flash/spi_flash_chip_generic.c",
+    "spi_flash/spi_flash_chip_winbond.c", "spi_flash/memspi_host_driver.c",
+    "spi_flash/spi_flash_os_func_app.c",
 )
+SDK_MQTT_FILES = ("mqtt_client.c", "lib/mqtt_outbox.c", "lib/mqtt_msg.c")
 SDK_PUBLIC_MACROS = (
     "CONFIG_ESP_MAIN_TASK_STACK_SIZE", "CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG",
     "CONFIG_LOG_VERSION", "CONFIG_LOG_DEFAULT_LEVEL",
@@ -418,10 +431,18 @@ SDK_PUBLIC_MACROS = (
     "CONFIG_MBEDTLS_ECP_RESTARTABLE", "CONFIG_MBEDTLS_ECP_FIXED_POINT_OPTIM",
     "CONFIG_I2C_ISR_IRAM_SAFE",
     "CONFIG_LWIP_TCPIP_CORE_LOCKING", "CONFIG_LWIP_NETCONN_SEM_PER_THREAD",
+    "CONFIG_NVS_ENCRYPTION", "CONFIG_NVS_ASSERT_ERROR_CHECK", "CONFIG_NVS_COMPATIBLE_PRE_V4_4",
+    "CONFIG_SPI_FLASH_ROM_DRIVER_PATCH", "CONFIG_SPI_FLASH_VERIFY_WRITE",
+    "CONFIG_SPI_FLASH_VERIFY_ERASE", "CONFIG_SPI_FLASH_WARN_SETTING_ZERO_TO_ONE",
+    "CONFIG_SPI_FLASH_AUTO_SUSPEND", "CONFIG_SPI_FLASH_SOFTWARE_RESUME",
+    "CONFIG_SPI_FLASH_WRITE_CHUNK_SIZE", "CONFIG_SPI_FLASH_YIELD_DURING_ERASE",
+    "CONFIG_ESPTOOLPY_FLASHMODE_DIO", "CONFIG_ESPTOOLPY_FLASHMODE_OPI",
+    "CONFIG_ESPTOOLPY_FLASHMODE_QIO",
 )
 INLINED_MQTT_HELPERS = (
     "publish_modbus_state", "publish_env3_state", "publish_env3_discovery",
-    "retract_modbus_discovery", "retract_weather_discovery",
+    "service_periodic_discovery_retirement",
+    "mqtt_retirement_record_make",
     "unsubscribe_reference_topic_if_unused",
 )
 
@@ -450,7 +471,8 @@ def public_sdkconfig(header: Path) -> dict[str, int | None]:
     return values
 
 
-def validate_sdk_contract(budgets: dict[str, Any], components: Path, header: Path) -> None:
+def validate_sdk_contract(budgets: dict[str, Any], components: Path, header: Path,
+                          mqtt_root: Path | None = None) -> None:
     """Re-review changed SDK code or active build flags before reusing the TLS/ROM envelope."""
     for name in SDK_PUBLIC_FILES:
         try:
@@ -459,6 +481,14 @@ def validate_sdk_contract(budgets: dict[str, Any], components: Path, header: Pat
             raise BudgetError(f"SDK source {name}: unavailable ({exc})") from exc
         if digest != budgets["sdk"]["source_sha256"][name]:
             raise BudgetError(f"SDK source {name}: reviewed fingerprint changed; source-bound budgets need review")
+    mqtt_root = mqtt_root or REPO / "managed_components/espressif__mqtt"
+    for name in SDK_MQTT_FILES:
+        try:
+            digest = hashlib.sha256((mqtt_root / name).read_bytes()).hexdigest()
+        except OSError as exc:
+            raise BudgetError(f"MQTT SDK source {name}: unavailable ({exc})") from exc
+        if digest != budgets["sdk"]["mqtt_source_sha256"][name]:
+            raise BudgetError(f"MQTT SDK source {name}: reviewed fingerprint changed; enqueue budgets need review")
     actual = public_sdkconfig(header)
     for name, expected in budgets["sdk"]["config_macros"].items():
         if actual[name] != expected:
@@ -672,8 +702,9 @@ def parse_frames(disassembly: str, budgets: dict[str, Any] | None = None) -> dic
             current = header.group(2)
             symbol_address = int(header.group(1), 16)
             for name in INLINED_MQTT_HELPERS:
-                if (re.match(r"^daik::" + name + r"\(", current)
-                        or re.match(r"^_Z[ZN]+4daikL" + str(len(name)) + name, current)):
+                if (re.match(r"^daik::(?:\(anonymous namespace\)::)?" + name + r"\(", current)
+                        or re.match(r"^_Z[ZN]+4daik(?:12_GLOBAL__N_1)?L?"
+                                    + str(len(name)) + name, current)):
                     raise BudgetError(f"symbol {current}: newly outlined MQTT continuation needs budget review")
             if re.match(r"^parse_(?:array|object)(?:[.$]|$)", current):
                 raise BudgetError(f"symbol {current}: out-of-line cJSON container needs budget review")
@@ -1136,6 +1167,132 @@ def validate_discovery_builder_paths(budgets: dict[str, Any]) -> None:
             raise BudgetError(f"discovery builder path {path}: required helper coverage missing")
 
 
+def reviewed_mqtt_retirement_paths() -> dict[str, list[str]]:
+    """Reviewed simultaneous callers, with conservative SDK callback sibling sums.
+
+    The 1536-byte ordinary library/ROM envelope stays unchanged. NVS codec buffers are
+    already in the measured store/codec frames. Encode, decode and flash operations run
+    successively and have separate paths. The task owns the persistent identity buffer.
+    Page/blob loops do not recurse; requestNewPage may copy live entries and erase a page.
+    Enqueue constructs and copies into the outbox without synchronously entering TLS.
+    """
+    allocation = ["tls_calloc", "sdk_malloc_caps", "sdk_malloc_base", "sdk_malloc_aligned",
+                  "sdk_multi_aligned_offset", "sdk_multi_aligned_impl", "sdk_multi_lock",
+                  "sdk_queue_critical", "sdk_queue_compare_swap", "runtime_task_entry"]
+    enqueue = ["mqtt_retire_exact", "mqtt_enqueue_id", "sdk_mqtt_enqueue_api",
+               "sdk_mqtt_enqueue", "sdk_mqtt_outbox_enqueue"] + allocation
+    prefixes = {
+        "legacy": ["mqtt_cleanup", "mqtt_pending_retirement", "mqtt_legacy_retract"],
+        "legacy_heartbeat": ["mqtt_board_discovery", "mqtt_legacy_retract"],
+        "legacy_crash": ["mqtt_crash", "mqtt_legacy_retract"],
+        "stale": ["mqtt_cleanup", "mqtt_pending_retirement", "mqtt_retract_stale"],
+        "stale_discovery": ["mqtt_discovery", "mqtt_retract_stale"],
+        "profile": ["mqtt_cleanup", "mqtt_pending_retirement", "mqtt_retire_profile"],
+        "profile_discovery": ["mqtt_discovery", "mqtt_retire_profile"],
+        "periodic": ["mqtt_cleanup", "mqtt_pending_retirement"],
+        "probe": ["mqtt_cleanup", "mqtt_pending_retirement", "mqtt_cleanup_probe"],
+    }
+    paths = {f"mqtt_retirement_{name}_enqueue": ["mqtt_task"] + callers + enqueue
+             for name, callers in prefixes.items()}
+    paths["mqtt_source_cleanup_enqueue"] = ["mqtt_task", "mqtt_cleanup"] + enqueue[1:]
+    for name, helpers in (
+        ("make", ["mqtt_retirement_identity_make", "mqtt_retirement_identity_capture"]),
+        ("scan", ["mqtt_retirement_scan", "mqtt_retirement_identity_matches",
+                  "mqtt_retirement_identity_compare"]),
+    ):
+        paths[f"mqtt_retirement_identity_{name}"] = [
+            "mqtt_task", "mqtt_discovery", "mqtt_retire_profile"] + helpers
+        paths[f"mqtt_retirement_pending_identity_{name}"] = [
+            "mqtt_task", "mqtt_cleanup", "mqtt_pending_retirement", "mqtt_retire_profile"] + helpers
+    paths["mqtt_periodic_retirement_request"] = ["mqtt_task", "mqtt_periodic_request"]
+    read = ["sdk_nvs_partition_read", "sdk_partition_read", "sdk_flash_read",
+            "sdk_flash_driver_read", "sdk_flash_hal_read", "sdk_flash_hal_poll"]
+    # Program and wait/status callbacks are siblings. Summing both bounds every supported
+    # DIO driver branch while rejecting source/config/frame drift before reusing this model.
+    write = ["sdk_nvs_partition_write", "sdk_partition_write", "sdk_flash_write",
+             "sdk_flash_driver_write", "sdk_flash_driver_page_program", "sdk_flash_wait_idle",
+             "sdk_flash_read_reg", "sdk_flash_host_status", "sdk_flash_host_program",
+             "sdk_flash_hal_program", "sdk_flash_hal_common", "sdk_flash_hal_poll",
+             "sdk_flash_os_start", "sdk_flash_os_end"]
+    erase = ["sdk_nvs_partition_erase", "sdk_partition_erase", "sdk_flash_erase",
+             "sdk_flash_driver_erase", "sdk_flash_wait_idle", "sdk_flash_read_reg",
+             "sdk_flash_host_status", "sdk_flash_host_erase", "sdk_flash_hal_common",
+             "sdk_flash_hal_poll", "sdk_flash_os_start", "sdk_flash_os_end"]
+    opened = ["sdk_nvs_open", "sdk_nvs_open_partition", "sdk_nvs_manager_open", "sdk_nvs_namespace"]
+    get = ["sdk_nvs_get_blob", "sdk_nvs_get_blob_impl"]
+    put = ["sdk_nvs_set_blob", "sdk_nvs_handle_set", "sdk_nvs_write"]
+    loaded = {
+        "decode": ["mqtt_retirement_decode"],
+        "open": opened + allocation,
+        "size": get + ["sdk_nvs_handle_size", "sdk_nvs_size", "sdk_nvs_find",
+                       "sdk_nvs_page_find", "sdk_nvs_page_read_entry"] + read,
+        "read": get + ["sdk_nvs_handle_get", "sdk_nvs_read", "sdk_nvs_read_multi",
+                       "sdk_nvs_page_read", "sdk_nvs_page_variable_read",
+                       "sdk_nvs_page_read_entry"] + read,
+        "close": ["sdk_nvs_close"] + allocation,
+    }
+    # Load runs from both the unconditional cleanup service and gated discovery.
+    for name, continuation in loaded.items():
+        for caller, prefix in (("load", ["mqtt_cleanup"]),
+                               ("discovery_load", ["mqtt_discovery"])):
+            paths[f"mqtt_retirement_{caller}_{name}"] = [
+                "mqtt_task"] + prefix + ["mqtt_provenance_load", "mqtt_retirement_store_load"] + continuation
+    saved = {
+        "encode": ["mqtt_retirement_encode"],
+        "open": opened + allocation,
+        "namespace_compaction": opened + ["sdk_nvs_write", "sdk_nvs_request_page",
+            "sdk_nvs_page_copy", "sdk_nvs_page_init", "sdk_nvs_page_write_entry"] + write,
+        "namespace_erase": opened + ["sdk_nvs_write", "sdk_nvs_request_page",
+            "sdk_nvs_activate_page", "sdk_nvs_page_erase"] + erase,
+        "write": put + ["sdk_nvs_write_multi", "sdk_nvs_page_write",
+                        "sdk_nvs_page_write_entry", "sdk_nvs_page_write_data"] + write,
+        "compaction": put + ["sdk_nvs_write_multi", "sdk_nvs_request_page", "sdk_nvs_page_copy",
+                             "sdk_nvs_page_init", "sdk_nvs_page_write_entry"] + write,
+        "compaction_erase": put + ["sdk_nvs_write_multi", "sdk_nvs_request_page",
+                                   "sdk_nvs_activate_page", "sdk_nvs_page_erase"] + erase,
+        "compare": put + ["sdk_nvs_cmp_multi", "sdk_nvs_page_cmp", "sdk_nvs_page_read_entry"] + read,
+        "find": put + ["sdk_nvs_find", "sdk_nvs_page_find", "sdk_nvs_page_read_entry"] + read,
+        "erase_old": put + ["sdk_nvs_erase_multi", "sdk_nvs_page_erase_item",
+                            "sdk_nvs_page_erase_entry", "sdk_nvs_page_alter_range"] + write,
+        "commit": ["sdk_nvs_commit", "sdk_nvs_handle_commit"],
+        "close": ["sdk_nvs_close"] + allocation,
+    }
+    for name, continuation in saved.items():
+        paths[f"mqtt_retirement_save_{name}"] = ["mqtt_task", "mqtt_discovery",
+            "mqtt_provenance_save", "mqtt_retirement_store_save"] + continuation
+    paths["mqtt_retirement_diagnostic"] = ["mqtt_task", "mqtt_discovery", "mqtt_provenance_save",
+        "mqtt_retirement_note", "diag_log", "diag_syslog", "sdk_queue_send", "sdk_queue_remove_event",
+        "sdk_queue_yield_required", "sdk_queue_yield_other", "sdk_queue_crosscore_yield",
+        "sdk_queue_crosscore_send", "sdk_queue_critical", "sdk_queue_compare_swap", "runtime_task_entry"]
+    return paths
+
+
+def validate_mqtt_retirement_paths(budgets: dict[str, Any]) -> None:
+    expected = reviewed_mqtt_retirement_paths()
+    owned = budgets["tasks"]["mqtt"]
+    if owned["stack_bytes"] != 7168 or owned["reserve_bytes"] != 1024:
+        raise BudgetError("MQTT retirement paths: reviewed 7168/1024 task allocation must remain fixed")
+    for name, members in expected.items():
+        rule = budgets["paths"].get(name)
+        if (rule is None or name not in owned["paths"] or rule["symbols"] != members
+                or rule["multipliers"] != {} or rule["base_bytes"] != 1536
+                or rule["max_bytes"] != 5120):
+            raise BudgetError(f"MQTT retirement path {name}: reviewed caller/SDK/codec continuation missing or changed")
+    tls = {
+        "mqtt_cleanup_tls": ["mqtt_task", "mqtt_cleanup", "mqtt_pending_retirement", "mqtt_cleanup_probe"],
+        "mqtt_cleanup_probe_tls": ["mqtt_task", "mqtt_crash", "mqtt_cleanup_probe_start"],
+    }
+    for name, members in tls.items():
+        rule = budgets["paths"].get(name)
+        if (rule is None or name not in owned["paths"] or rule["symbols"] != members
+                or rule["multipliers"] != {} or rule["base_bytes"] != 4608
+                or rule["max_bytes"] != 6144):
+            raise BudgetError(f"MQTT retirement path {name}: synchronous probe TLS continuation changed")
+    if "mqtt_retract_ungrouped" in budgets["symbols"] or any(
+            name in budgets["paths"] for name in ("mqtt_legacy_retract_tls", "mqtt_retract_ungrouped_tls")):
+        raise BudgetError("MQTT retirement paths: obsolete synchronous retirement accounting remains")
+
+
 def validate_source_contract(budgets: dict[str, Any]) -> None:
     sources = {path: (REPO / path).read_text(encoding="utf-8")
                for path, _ in TASK_ALLOCATIONS.values()}
@@ -1148,6 +1305,7 @@ def validate_source_contract(budgets: dict[str, Any]) -> None:
     validate_env_i2c(sources["main/env3.cpp"])
     validate_task_stacks(budgets, sources)
     validate_discovery_builder_paths(budgets)
+    validate_mqtt_retirement_paths(budgets)
     validate_http_stack(budgets, (REPO / "main/http_server.cpp").read_text(encoding="utf-8"))
     validate_status_diagnosis_paths(budgets, sources)
     validate_shutdown_paths(budgets, sources)
@@ -1245,7 +1403,7 @@ def load_budgets(path: Path) -> dict[str, Any]:
     sdk = document["sdk"]
     if not isinstance(sdk, dict):
         raise BudgetError("SDK contract must be an object")
-    require_exact_keys(sdk, {"source_sha256", "config_macros", "tls_paths"}, "SDK contract")
+    require_exact_keys(sdk, {"source_sha256", "mqtt_source_sha256", "config_macros", "tls_paths"}, "SDK contract")
     tls_paths = sdk["tls_paths"]
     if not isinstance(tls_paths, dict) or not tls_paths:
         raise BudgetError("SDK TLS paths must be a non-empty object")
@@ -1342,6 +1500,11 @@ def load_budgets(path: Path) -> dict[str, Any]:
     for name, digest in sdk["source_sha256"].items():
         if not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest):
             raise BudgetError(f"SDK source {name}: fingerprint must be a SHA-256 hex string")
+    if not isinstance(sdk["mqtt_source_sha256"], dict) or set(sdk["mqtt_source_sha256"]) != set(SDK_MQTT_FILES):
+        raise BudgetError("MQTT SDK fingerprints must name exactly the reviewed MQTT source files")
+    for name, digest in sdk["mqtt_source_sha256"].items():
+        if not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest):
+            raise BudgetError(f"MQTT SDK source {name}: fingerprint must be a SHA-256 hex string")
     if not isinstance(sdk["config_macros"], dict) or set(sdk["config_macros"]) != set(SDK_PUBLIC_MACROS):
         raise BudgetError("SDK configuration must name exactly the reviewed public macros")
     for name, value in sdk["config_macros"].items():
@@ -1506,8 +1669,8 @@ def self_test() -> None:
      '_ZN4daikL24decode_circulation_frameERKNS_18ReferenceMqttFrameERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEESA_$constprop$0': 64,
      'daik::service_reference_subscription(daik::Config const&, unsigned long)': 64,
      'daik::service_circulation_subscription(daik::Config const&, unsigned long)': 64,
-     'daik::promote_client_to_publisher()': 64,
-     'daik::build_client(bool)': 64,
+     'daik::build_client()': 64,
+     'daik::mqtt_ha_start()': 64,
      'daik::service_requested_topic_cleanup(daik::Config const&)': 64,
      'daik::service_retained_cleanup_probe(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&, std::atomic<bool>&, bool&, long long)': 32,
      'daik::publish_x10a_discovery()': 64,
@@ -1637,7 +1800,6 @@ def self_test() -> None:
      'daik::current_modbus_values(bool&)': 64,
      'daik::publish_heartbeat_discovery()': 64,
      'daik::retract_legacy_fixed()': 64,
-     'daik::retract_ungrouped_values()': 64,
      'daik::history_record_circulation()': 48,
      'daik::history_record_board()': 48,
      'daik::build_heating_curve_mqtt_json[abi:cxx11](daik::HeatingCurveMqttFields const&)': 64,
@@ -1857,6 +2019,90 @@ def self_test() -> None:
      INTEGER_DIGITS_SYMBOL: 240}
     # Keep generated anchors outside the hand-written decimal/I2C fixtures below. Otherwise
     # a packed-prologue mutation can also replace an unrelated first instruction at 0x220.
+    # Exact current MQTT/journal continuation fixture; omission and growth are rejected below.
+    extra_frames.update({
+        'daik::retract_stale_values(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&)': 144,
+        'daik::retract_profile_cutover(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&)': 176,
+        'daik::service_pending_retirement()': 64,
+        'daik::request_periodic_discovery_retirement()': 32,
+        'daik::retire_exact_topic(daik::MqttRetirementOwner, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&)': 32,
+        '_ZN4daikL15mqtt_enqueue_idERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEEPKciii$constprop$0$isra$0': 48,
+        'daik::load_retirement_provenance()': 64,
+        'daik::save_retirement_provenance(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&)': 272,
+        'daik::mqtt_retirement_store_load(daik::MqttRetirementRecord&)': 256,
+        'daik::mqtt_retirement_store_save(daik::MqttRetirementRecord const&)': 240,
+        'daik::mqtt_retirement_decode(unsigned char const*, unsigned int, daik::MqttRetirementRecord&)': 256,
+        'daik::mqtt_retirement_encode(daik::MqttRetirementRecord const&, unsigned char*, unsigned int)': 64,
+        'daik::mqtt_retirement_identity_make(daik::MqttRetirementIdentity&, daik::ValueDef const&, char const*)': 48,
+        'daik::mqtt_retirement_identity_matches(daik::MqttRetirementIdentity const&, daik::ValueDef const&, char const*, bool*)': 64,
+        'daik::mqtt_retirement_scan_step(daik::MqttRetirementIdentity const&, daik::logic::ProfileView const&, daik::MqttRetirementScan&, unsigned int&)': 64,
+        'daik::retirement_store_note(unsigned long, char const*)': 32,
+        '_ZN4daik26retirement_identity_detail7CapturepLEc$isra$0': 32,
+        '_ZN4daik26retirement_identity_detail7ComparepLEc$isra$0': 32,
+        'outbox_enqueue': 96,
+        'nvs_open': 32,
+        'nvs_open_from_partition': 48,
+        'nvs::NVSPartitionManager::open_handle(char const*, char const*, nvs_open_mode_t, nvs::NVSHandleSimple**)': 64,
+        'nvs::Storage::createOrOpenNamespace(char const*, bool, unsigned char&)': 64,
+        'nvs_get_blob': 32,
+        'nvs_get_str_or_blob(unsigned long, nvs::ItemType, char const*, void*, unsigned int*)': 48,
+        'nvs_set_blob': 48,
+        'nvs_commit': 48,
+        'nvs_close': 48,
+        'nvs::NVSHandleSimple::get_typed_item(nvs::ItemType, char const*, void*, unsigned int)': 32,
+        'nvs::NVSHandleSimple::set_blob(char const*, void const*, unsigned int)': 48,
+        'nvs::NVSHandleSimple::get_item_size(nvs::ItemType, char const*, unsigned int&)': 32,
+        'nvs::NVSHandleSimple::commit()': 32,
+        'nvs::Storage::readItem(unsigned char, nvs::ItemType, char const*, void*, unsigned int)': 112,
+        'nvs::Storage::readMultiPageBlob(unsigned char, char const*, void*, unsigned int)': 112,
+        'nvs::Storage::getItemDataSize(unsigned char, nvs::ItemType, char const*, unsigned int&)': 96,
+        'nvs::Storage::writeItem(unsigned char, nvs::ItemType, char const*, void const*, unsigned int, bool)': 112,
+        'nvs::Storage::writeMultiPageBlob(unsigned char, char const*, void const*, unsigned int, nvs::VerOffset, bool)': 144,
+        'nvs::Storage::cmpMultiPageBlob(unsigned char, char const*, void const*, unsigned int)': 128,
+        'nvs::Storage::eraseMultiPageBlob(unsigned char, char const*, bool, nvs::VerOffset)': 112,
+        'nvs::Storage::findItem(unsigned char, nvs::ItemType, char const*, nvs::Page*&, nvs::Item&, unsigned char, nvs::VerOffset, unsigned int*)': 80,
+        'nvs::PageManager::requestNewPage()': 32,
+        'nvs::PageManager::activatePage()': 32,
+        'nvs::Page::copyItems(nvs::Page&)': 80,
+        'nvs::Page::initialize()': 64,
+        'nvs::Page::findItem(unsigned char, nvs::ItemType, char const*, unsigned int&, nvs::Item&, unsigned char, nvs::VerOffset)': 96,
+        'nvs::Page::readItem(unsigned char, nvs::ItemType, char const*, void*, unsigned int, unsigned char, nvs::VerOffset)': 112,
+        'nvs::Page::readVariableLengthItemData(nvs::Item const&, unsigned int, void*)': 80,
+        'nvs::Page::cmpItem(unsigned char, nvs::ItemType, char const*, void const*, unsigned int, unsigned char, nvs::VerOffset)': 144,
+        'nvs::Page::writeItem(unsigned char, nvs::ItemType, char const*, void const*, unsigned int, unsigned char)': 112,
+        'nvs::Page::writeEntry(nvs::Item const&)': 32,
+        'nvs::Page::writeEntryData(unsigned char const*, unsigned int)': 32,
+        'nvs::Page::readEntry(unsigned int, nvs::Item&) const': 32,
+        'nvs::Page::eraseItem(unsigned char, nvs::ItemType, char const*, bool, unsigned char, nvs::VerOffset)': 112,
+        'nvs::Page::eraseEntryAndSpan(unsigned int, bool)': 96,
+        'nvs::Page::alterEntryRangeState(unsigned int, unsigned int, nvs::Page::EntryState)': 64,
+        'nvs::Page::erase()': 32,
+        'nvs::NVSPartition::read(unsigned int, void*, unsigned int)': 32,
+        'nvs::NVSPartition::write(unsigned int, void const*, unsigned int)': 32,
+        'nvs::NVSPartition::erase_range(unsigned int, unsigned int)': 32,
+        'esp_partition_read': 48,
+        'esp_partition_write': 32,
+        'esp_partition_erase_range': 32,
+        'esp_flash_read': 64,
+        'esp_flash_write': 96,
+        'esp_flash_erase_region': 80,
+        'spi_flash_chip_generic_read': 128,
+        'spi_flash_chip_generic_write': 128,
+        'spi_flash_chip_generic_page_program': 64,
+        'spi_flash_chip_generic_erase_block': 64,
+        'spi_flash_chip_generic_wait_idle': 64,
+        'spi_flash_chip_generic_read_reg': 32,
+        'memspi_host_read_status_hs': 64,
+        'memspi_host_program_page': 64,
+        'memspi_host_erase_sector': 64,
+        'spi_flash_hal_read': 64,
+        'spi_flash_hal_program_page': 64,
+        'spi_flash_hal_common_command': 64,
+        'spi_flash_hal_poll_cmd_done': 32,
+        'spi1_start': 32,
+        'spi1_end': 32,
+        'esp_mqtt_client_enqueue': 128,
+    })
     for index, (name, frame) in enumerate(extra_frames.items(), 0x1000):
         fixture += f"\n{index:08x} <{name}>:\n{index:x}: 004136 entry a1, {frame}\n"
         if name == 'daik::(anonymous namespace)::button_task(void*)':
@@ -1957,6 +2203,61 @@ def self_test() -> None:
     assert selected["path:httpd_config_save_link"] == 8000
     assert selected["path:httpd_wifi_scan"] == 5248
     assert selected["path:httpd_mqtt_tls"] == 7968
+
+    retirement_controls = 0
+    required_retirement = reviewed_mqtt_retirement_paths()
+    validate_mqtt_retirement_paths(budgets)
+    for name, members in required_retirement.items():
+        for member in members:
+            changed = json.loads(json.dumps(budgets))
+            changed["paths"][name]["symbols"].remove(member)
+            try:
+                validate_mqtt_retirement_paths(changed)
+            except BudgetError as exc:
+                assert "MQTT retirement path" in str(exc)
+            else:
+                raise AssertionError(f"retirement model accepted omitted {member} from {name}")
+            retirement_controls += 1
+        for removal in ("rule", "ownership"):
+            changed = json.loads(json.dumps(budgets))
+            if removal == "rule":
+                del changed["paths"][name]
+            else:
+                changed["tasks"]["mqtt"]["paths"].remove(name)
+            try:
+                validate_mqtt_retirement_paths(changed)
+            except BudgetError as exc:
+                assert "MQTT retirement path" in str(exc)
+            else:
+                raise AssertionError(f"retirement model accepted missing {name} {removal}")
+            retirement_controls += 1
+    retirement_symbols = set().union(*(set(members) for members in required_retirement.values()))
+    for key in sorted(retirement_symbols):
+        pattern = re.compile(budgets["symbols"][key]["pattern"])
+        missing_frames = {name: frame for name, frame in frames.items() if not pattern.search(name)}
+        try:
+            evaluate(missing_frames, budgets)
+        except BudgetError as exc:
+            assert f"symbol {key}: required pattern" in str(exc)
+        else:
+            raise AssertionError(f"retirement model accepted missing anchor {key}")
+        retirement_controls += 1
+    for key in ("mqtt_retirement_store_load", "mqtt_retirement_store_save", "mqtt_retirement_decode",
+                "mqtt_retirement_identity_make", "mqtt_retirement_scan",
+                "sdk_mqtt_enqueue_api", "sdk_mqtt_outbox_enqueue",
+                "sdk_nvs_write_multi", "sdk_nvs_page_copy", "sdk_flash_driver_write"):
+        changed_frames = frames.copy()
+        pattern = re.compile(budgets["symbols"][key]["pattern"])
+        for name in changed_frames:
+            if pattern.search(name):
+                changed_frames[name] = budgets["symbols"][key]["max_bytes"] + 16
+        try:
+            evaluate(changed_frames, budgets)
+        except BudgetError as exc:
+            assert f"symbol {key}:" in str(exc) and "exceeds" in str(exc)
+        else:
+            raise AssertionError(f"retirement model accepted grown anchor {key}")
+        retirement_controls += 1
 
     status_sources = {path: (REPO / path).read_text(encoding="utf-8")
                       for path in ("main/http_status.cpp", "main/mcp_server.cpp", "main/hp_poll.cpp")}
@@ -2501,6 +2802,13 @@ def self_test() -> None:
     reject_disassembly("new out-of-line publication continuation", fixture +
         "\n00000300 <daik::publish_modbus_state(bool&)>:\n300: 004136 entry a1, 64\n",
         "newly outlined MQTT continuation")
+    for name in ("service_periodic_discovery_retirement", "mqtt_retirement_record_make"):
+        for outlined in (f"daik::{name}()", f"daik::(anonymous namespace)::{name}()",
+                         f"_ZN4daikL{len(name)}{name}Ev$constprop$0"):
+            reject_disassembly("new out-of-line retirement continuation", fixture +
+                f"\n00003000 <{outlined}>:\n3000: 004136 entry a1, 32\n",
+                "newly outlined MQTT continuation")
+            retirement_controls += 1
     assert "unreviewed_packed" not in parse_frames(
         "00000023 <unreviewed_packed>:\n  23: e2008136 .word 0xe2008136\n")
     try:
@@ -2638,6 +2946,13 @@ def self_test() -> None:
             contents = f"/* reviewed public source fixture: {name} */\n".encode()
             path.write_bytes(contents)
             sdk_fixture["sdk"]["source_sha256"][name] = hashlib.sha256(contents).hexdigest()
+        mqtt_root = Path(raw) / "mqtt"
+        for name in SDK_MQTT_FILES:
+            path = mqtt_root / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            contents = f"/* reviewed MQTT source fixture: {name} */\n".encode()
+            path.write_bytes(contents)
+            sdk_fixture["sdk"]["mqtt_source_sha256"][name] = hashlib.sha256(contents).hexdigest()
         header = Path(raw) / "sdkconfig.h"
         header_text = "".join(f"#define {name} {value}\n"
                               for name, value in sdk_fixture["sdk"]["config_macros"].items()
@@ -2645,13 +2960,43 @@ def self_test() -> None:
         header_text += "#define CONFIG_UNRELATED_TUNING 123\n"
         header.write_text(header_text, encoding="utf-8")
         assert set(public_sdkconfig(header)) == set(SDK_PUBLIC_MACROS)
-        validate_sdk_contract(sdk_fixture, sdk_root, header)
+        validate_sdk_contract(sdk_fixture, sdk_root, header, mqtt_root)
         sdk_controls = 0
+        for name in SDK_PUBLIC_FILES:
+            if not name.startswith(("nvs_flash/", "spi_flash/", "esp_partition/")):
+                continue
+            path = sdk_root / name
+            original = path.read_bytes()
+            path.write_bytes(original + b"/* changed NVS/flash continuation */\n")
+            try:
+                validate_sdk_contract(sdk_fixture, sdk_root, header, mqtt_root)
+            except BudgetError as exc:
+                assert "fingerprint changed" in str(exc)
+            else:
+                raise AssertionError(f"self-test accepted NVS/flash source drift: {name}")
+            path.write_bytes(original)
+            sdk_controls += 1
+        for name in SDK_MQTT_FILES:
+            path = mqtt_root / name
+            original = path.read_bytes()
+            for missing in (False, True):
+                if missing:
+                    path.unlink()
+                else:
+                    path.write_bytes(original + b"/* changed enqueue continuation */\n")
+                try:
+                    validate_sdk_contract(sdk_fixture, sdk_root, header, mqtt_root)
+                except BudgetError as exc:
+                    assert "unavailable" in str(exc) if missing else "fingerprint changed" in str(exc)
+                else:
+                    raise AssertionError(f"self-test accepted MQTT source drift/absence: {name}")
+                path.write_bytes(original)
+                sdk_controls += 1
         changed_source = sdk_root / SDK_PUBLIC_FILES[0]
         original_source = changed_source.read_bytes()
         changed_source.write_bytes(original_source + b"#define PSA_VENDOR_RSA_MAX_KEY_BITS 8192u\n")
         try:
-            validate_sdk_contract(sdk_fixture, sdk_root, header)
+            validate_sdk_contract(sdk_fixture, sdk_root, header, mqtt_root)
         except BudgetError as exc:
             assert "fingerprint changed" in str(exc)
         else:
@@ -2663,7 +3008,7 @@ def self_test() -> None:
             changed = re.sub(r"(?m)^#define " + macro + r" .+\n", "", header_text)
             header.write_text(changed + f"#define {macro} {changed_value}\n", encoding="utf-8")
             try:
-                validate_sdk_contract(sdk_fixture, sdk_root, header)
+                validate_sdk_contract(sdk_fixture, sdk_root, header, mqtt_root)
             except BudgetError as exc:
                 assert "active build differs" in str(exc)
             else:
@@ -2680,7 +3025,7 @@ def self_test() -> None:
         header.write_text(header_text, encoding="utf-8")
         changed_source.unlink()
         try:
-            validate_sdk_contract(sdk_fixture, sdk_root, header)
+            validate_sdk_contract(sdk_fixture, sdk_root, header, mqtt_root)
         except BudgetError as exc:
             assert "unavailable" in str(exc)
         else:
@@ -2863,6 +3208,12 @@ def self_test() -> None:
         mutated["sdk"]["source_sha256"][SDK_PUBLIC_FILES[0]] = "0" * 63
         reject_document("truncated SDK fingerprint", mutated, "SHA-256 hex")
         mutated = clone()
+        mutated["sdk"]["mqtt_source_sha256"]["unreviewed-outbox.c"] = "0" * 64
+        reject_document("unreviewed MQTT source", mutated, "exactly the reviewed MQTT source files")
+        mutated = clone()
+        mutated["sdk"]["mqtt_source_sha256"][SDK_MQTT_FILES[0]] = "0" * 63
+        reject_document("truncated MQTT fingerprint", mutated, "SHA-256 hex")
+        mutated = clone()
         mutated["sdk"]["config_macros"]["CONFIG_UNRELATED_TUNING"] = 123
         reject_document("unreviewed public SDK macro", mutated, "exactly the reviewed public macros")
         mutated = clone()
@@ -2904,6 +3255,7 @@ def self_test() -> None:
           f"{queue_controls} queue-source, {diagnostic_controls} diagnostic-source, "
           f"{tls_source_controls} TLS-client-source, {sdk_recursion_controls} SDK-recursion, "
           f"{integer_disassembly_controls} integer-disassembly, {integer_source_controls} integer-source/path, "
+          f"{retirement_controls} MQTT-retirement/SDK/codec path, "
           f"{diagnosis_controls} diagnosis-source/path, "
           f"{numeric_disassembly_controls} diagnosis-numeric-calls, "
           f"{shutdown_controls} shutdown-source/path, "

@@ -72,6 +72,9 @@
 #include "logic/json.hpp"
 #include "logic/mqtt_group.hpp"
 #include "logic/mqtt_cleanup.hpp"
+#include "logic/mqtt_retirement.hpp"
+#include "logic/mqtt_retirement_identity.hpp"
+#include "logic/mqtt_retirement_store.hpp"
 #include "logic/mqtt_publish_gate.hpp"
 #include "logic/ota_quiesce.hpp"
 #include "logic/link_watch.hpp"
@@ -83,6 +86,7 @@
 #include "logic/lwt_select.hpp"
 #include "logic/rwt_select.hpp"
 #include "logic/profile_view.hpp"
+#include "logic/profile_table_equal.hpp"
 #include "logic/ou_stale.hpp"
 #include "logic/cop_scope.hpp"
 #include "logic/mqtt_base.hpp"
@@ -2439,8 +2443,9 @@ static void test_config_transaction() {
 // which the old MAC-derived node id could not do.
 static void test_ha_device() {
     CHECK(device_node_id("daikin-altherma-esp32") == "daikin_altherma_esp32");
-    CHECK(device_node_id("home/heating/daikin altherma") == "home_heating_daikin_altherma");
-    CHECK(device_node_id("Daikin_2") == "daikin_2");
+    CHECK(device_node_id("home/heating/daikin altherma") ==
+          "daikin_altherma_esp32__686f6d652f68656174696e672f6461696b696e20616c746865726d61");
+    CHECK(device_node_id("Daikin_2") == "daikin_altherma_esp32__4461696b696e5f32");
     // A base topic that slugifies to nothing must still yield a usable discovery-topic segment —
     // an empty node would produce "homeassistant/sensor//x/config", which HA silently ignores.
     CHECK(device_node_id("///") == "daikin");
@@ -2503,8 +2508,12 @@ static void test_discovery() {
         CHECK(encoded.find("site\\\"west\\\\room/status") != std::string::npos);
     }
     CHECK(escaped_configs[1].find("\"topic\":\"site\\\"west\\\\room/x10a\"") != std::string::npos);
-    CHECK(!conv_publishable(0));
-    CHECK(conv_publishable(105));
+    CHECK(!conv_publishable(rt(0)));
+    CHECK(conv_publishable(rt(105)));
+    CHECK(!conv_publishable(rt(995)));
+    CHECK(!conv_publishable(rt(999)));
+    CHECK(conv_publishable(rt(994)));
+    CHECK(conv_publishable(rt(1000)));
     CHECK(!conv_publishable(995));
     CHECK(!conv_publishable(997));
     CHECK(!conv_publishable(999));
@@ -2583,7 +2592,11 @@ static void test_discovery() {
     CHECK(cfg.find("\"stat_cla\":\"measurement\"") != std::string::npos);
     CHECK(cfg.find("\"unit_of_meas\":\"°C\"") != std::string::npos);
     CHECK(cfg.find("\"stat_t\":\"daikin-altherma-esp32/x10a\"") != std::string::npos);
-    CHECK(cfg.find("\"avty_t\":\"daikin-altherma-esp32/status\"") != std::string::npos);
+    CHECK(cfg.find("\"availability\":[{\"topic\":\"daikin-altherma-esp32/"
+                   "status\"},{\"topic\":\"daikin-altherma-esp32/x10a/status\"}]") !=
+          std::string::npos);
+    CHECK(cfg.find("\"availability_mode\":\"all\"") != std::string::npos);
+    CHECK(cfg.find("\"avty_t\"") == std::string::npos);
     // Shared JSON topic -> value_template reads group (page 0x61 -> hydronic_temps) + object. An
     // absent group or key defaults to HA's `None` (-> unknown): subscripting it would keep the
     // LAST value in HA, or raise a template error for a missing group (MQTT-02/b).
@@ -3701,6 +3714,9 @@ static void test_mqtt_group() {
         CountingOut slug_count;
         ha_slug_append(slug_count, "  Outdoor air temp. (R1T)  ");
         CHECK(slug_count.n == ha_slug("  Outdoor air temp. (R1T)  ").size());
+        slug_count.n = 0;
+        ha_slug_append(slug_count, "Flow{9}~A");
+        CHECK(slug_count.n == 8); // the same separator bytes on signed- and unsigned-char hosts
     }
     // A stopped/held page changes only the direct view of the existing cache. Reuse one already
     // reserved transient sink through thousands of full/held/full transitions: exact bytes and
@@ -17081,7 +17097,7 @@ static void test_entity_identity() {
             // The invariant that makes this a TOPIC assertion too: an entity's uniq_id is its node
             // plus the object segment of its own discovery topic, for every family. Two entities
             // therefore cannot collide on the retained config topic without colliding here.
-            CHECK(uid == node + "_" + topic_object_of(topic));
+            CHECK(uid == node + "__" + topic_object_of(topic));
             checked++;
             auto it = owner.find(uid);
             if (it != owner.end() && it->second != who) {
@@ -17123,7 +17139,7 @@ static void test_entity_identity() {
         // Time", "WiFi Quality") and uniq_id is ONE flat namespace across them, so both lists are
         // burned.
         auto burned = [&](const RetiredHaSensor& r) {
-            const std::string uid = node + "_" + r.object_id;
+            const std::string uid = node + "__" + r.object_id;
             auto              it  = owner.find(uid);
             if (it != owner.end() && colliding.insert(uid).second)
                 std::printf("  live entity re-uses the RETIRED id %s on %s (claimed by %s)\n",
@@ -17138,6 +17154,130 @@ static void test_entity_identity() {
 
     CHECK(checked > 4000); // every profile x every family, not a sampled subset
     CHECK(colliding.empty());
+}
+
+// Cross-installation identity is measured through every real discovery builder, including ENV III.
+// The frozen default/bench boundary is '_' exactly; all other nodes use an explicit '__' boundary.
+static std::set<std::string> all_profile_entity_ids(const def::Profile& profile,
+                                                    const std::string& base, bool frozen_legacy) {
+    const std::string node     = device_node_id(base),
+                      board    = "daikin_altherma_esp32__board_020102aabbcc";
+    const auto            view = def::resolved(profile);
+    std::set<std::string> ids;
+    auto                  claim = [&](const std::string& payload, const std::string& object) {
+        const std::string actual   = uniq_id_of(payload);
+        const std::string expected = node + (frozen_legacy ? "_" : "__") + object;
+        CHECK(!actual.empty());
+        CHECK(actual == expected);
+        CHECK(payload.find(device_json(node, board)) != std::string::npos);
+        ids.insert(actual);
+    };
+    for (size_t i = 0; i < view.count(); ++i) {
+        const ValueDef row = logic::adjudicated(view[i]);
+        if (!row_publishable(row) || !conv_publishable(row.conv) || object_id(row.label).empty())
+            continue;
+        claim(discovery_config(node, board, x10a_topic(base), availability_topic(base), row),
+              row_object_id(row));
+        if (row.conv == 203) {
+            const std::string group = group_for_page(row.reg);
+            for (const auto& companion : FAULT_COMPANIONS)
+                claim(companion_discovery_config(node, board, x10a_topic(base),
+                                                 availability_topic(base), group, companion),
+                      companion_object_id(group, companion.key));
+        }
+    }
+    for (const auto& sensor : HEARTBEAT_SENSORS)
+        claim(heartbeat_discovery_config(node, board, heartbeat_topic(base),
+                                         availability_topic(base), sensor),
+              sensor.object_id);
+    for (const auto& sensor : CRASH_SENSORS)
+        claim(crash_discovery_config(node, board, crash_topic(base), availability_topic(base),
+                                     sensor),
+              sensor.object_id);
+    for (const auto& sensor : ENV3_HA_SENSORS)
+        claim(
+            env3_discovery_config(node, board, env3_topic(base), availability_topic(base), sensor),
+            sensor.object_id);
+    return ids;
+}
+
+static void test_mqtt_installation_identity() {
+    CHECK(ha_canonical_installation_base("daikin-altherma-esp32"));
+    CHECK(ha_canonical_installation_base("daikin-altherma-esp32-bench"));
+    CHECK(ha_canonical_installation_base("a1-b2"));
+    for (const char* noncanonical :
+         {"", "-a", "a-", "a--b", "A", "a_b", "a/b", "a.b", "a\\b", "a\"b"})
+        CHECK(!ha_canonical_installation_base(noncanonical));
+    CHECK(device_node_id("daikin-altherma-esp32-bench") == "daikin_altherma_esp32_bench");
+    CHECK(std::string(ha_entity_separator("daikin_altherma_esp32")) == "_");
+    CHECK(std::string(ha_entity_separator("daikin_altherma_esp32_bench")) == "_");
+    CHECK(std::string(ha_entity_separator("daikin_altherma_esp32_custom")) == "__");
+    CHECK(device_node_id("Daikin_2") == "daikin_altherma_esp32__4461696b696e5f32");
+    CHECK(device_node_id("plant/温度") == "daikin_altherma_esp32__706c616e742fe6b8a9e5baa6");
+    const std::pair<const char*, const char*> pairs[] = {
+        {"daikin-altherma-esp32.one", "daikin-altherma-esp32-one"},
+        {"Daikin_2", "daikin-2"},
+        {"plant/room", "plant-room"},
+        {"plant\\room", "plant-room"},
+        {"plant\"room", "plant-room"},
+        {"plant..room", "plant_room"},
+        {"plant/温度", "plant温度"},
+    };
+    size_t profiles_checked = 0;
+    for (const auto& profile : def::profiles) {
+        const auto production = all_profile_entity_ids(profile, "daikin-altherma-esp32", true);
+        const auto bench = all_profile_entity_ids(profile, "daikin-altherma-esp32-bench", true);
+        CHECK(!production.empty() && production.size() == bench.size());
+        for (const auto& id : production) CHECK(bench.count(id) == 0);
+        for (const auto& pair : pairs) {
+            CHECK(mqtt_base_valid(pair.first) && mqtt_base_valid(pair.second));
+            CHECK(device_node_id(pair.first) != device_node_id(pair.second));
+            const auto first  = all_profile_entity_ids(profile, pair.first, false);
+            const auto second = all_profile_entity_ids(profile, pair.second, false);
+            CHECK(first.size() == production.size() && second.size() == production.size());
+            for (const auto& id : first) CHECK(second.count(id) == 0 && production.count(id) == 0);
+        }
+        ++profiles_checked;
+    }
+    CHECK(profiles_checked == sizeof(def::profiles) / sizeof(def::profiles[0]));
+    CHECK(profiles_checked > 40);
+    // The reported cross-family boundary collision: default Min Free Heap versus custom-base-min
+    // Free Heap. Inspect the actual builders, not a reimplementation of the new delimiter.
+    const HeartbeatSensor *minimum = nullptr, *free = nullptr;
+    for (const auto& sensor : HEARTBEAT_SENSORS) {
+        if (std::string(sensor.object_id) == "min_free_heap") minimum = &sensor;
+        if (std::string(sensor.object_id) == "free_heap") free = &sensor;
+    }
+    CHECK(minimum && free);
+    if (minimum && free) {
+        const auto minimum_id = uniq_id_of(
+            heartbeat_discovery_config("daikin_altherma_esp32", "board", "s", "a", *minimum));
+        const auto free_id = uniq_id_of(heartbeat_discovery_config(
+            device_node_id("daikin-altherma-esp32-min"), "board", "s", "a", *free));
+        CHECK(minimum_id == "daikin_altherma_esp32_min_free_heap");
+        CHECK(free_id == "daikin_altherma_esp32_min__free_heap");
+        CHECK(minimum_id != free_id);
+    }
+    const uint8_t mac_a[] = {0x02, 0x01, 0x02, 0xaa, 0xbb, 0xcc};
+    const uint8_t mac_b[] = {0x04, 0x01, 0x02, 0xaa, 0xbb, 0xcc};
+    const uint8_t zero[6]{};
+    const uint8_t multicast[] = {0x03, 0x01, 0x02, 0xaa, 0xbb, 0xcc};
+    const uint8_t broadcast[] = {0xff, 0xff, 0xff, 0xff, 0xff, 0xff};
+    const auto    hardware_a = ha_board_id(mac_a, 6), hardware_b = ha_board_id(mac_b, 6);
+    CHECK(hardware_a == "daikin_altherma_esp32__board_020102aabbcc");
+    CHECK(hardware_b == "daikin_altherma_esp32__board_040102aabbcc");
+    CHECK(hardware_a != hardware_b);
+    CHECK(hardware_a != device_node_id("daikin-altherma-esp32-board-020102aabbcc"));
+    CHECK(ha_board_id(nullptr, 6).empty());
+    CHECK(ha_board_id(mac_a, 0).empty());
+    CHECK(ha_board_id(mac_a, 5).empty());
+    CHECK(ha_board_id(mac_a, 7).empty());
+    CHECK(ha_board_id(zero, 6).empty());
+    CHECK(ha_board_id(multicast, 6).empty());
+    CHECK(ha_board_id(broadcast, 6).empty());
+    const auto active_node = device_node_id("daikin-altherma-esp32.one");
+    CHECK(active_node != hardware_a);
+    CHECK(device_json(active_node, hardware_a) != device_json(active_node, hardware_b));
 }
 
 // ── logic/feature_gate.hpp — what may honestly run on the detected profile (PR 110 Part C)
@@ -20389,7 +20529,8 @@ static void test_fault_state() {
         companion_discovery_config("daikin_test", "daikin_board", "daikin/x10a", "daikin/status",
                                    "outdoor_state", FAULT_COMPANIONS[0]);
     CHECK(ccfg.find("\"name\":\"Outdoor State Error Active\"") != std::string::npos);
-    CHECK(ccfg.find("\"uniq_id\":\"daikin_test_outdoor_state_error_active\"") != std::string::npos);
+    CHECK(ccfg.find("\"uniq_id\":\"daikin_test__outdoor_state_error_active\"") !=
+          std::string::npos);
     // A withheld fault row takes its companions with it; they must read `unknown`, not keep the
     // last 1/0 (MQTT-02/b).
     CHECK(ccfg.find("\"val_tpl\":\"{{ value_json.get('outdoor_state', {})"
@@ -20614,6 +20755,349 @@ static void test_mqtt_cleanup() {
     CHECK(MQTT_SOURCE_CLEANUP_MAX_STEPS == 37);
 }
 
+// Integrate include logic/profile_table_equal.hpp, this function, and its call in test_logic.cpp.
+static void test_profile_table_equal() {
+    using daik::logic::profile_table_labels_equal;
+    using daik::logic::profile_tables_equal;
+    ValueDef original[] = {
+        {0x10, 1, 105, 2, 1, "Alpha", false},
+        {0x61, 2, 310, 1, -1, "Beta", true},
+    };
+    ValueDef   candidate[] = {original[0], original[1]};
+    const auto equal       = [&](const ValueDef* a, size_t na, const ValueDef* b, size_t nb) {
+        return profile_tables_equal(rt(a), rt(na), rt(b), rt(nb));
+    };
+    CHECK(equal(original, 2, candidate, 2));
+    CHECK(equal(nullptr, 0, nullptr, 0));
+    CHECK(equal(original, 0, nullptr, 0));
+    CHECK(!equal(nullptr, 1, original, 1));
+    CHECK(!equal(original, 1, nullptr, 1));
+    CHECK(!equal(nullptr, 1, nullptr, 1));
+    CHECK(!equal(original, 2, candidate, 1));
+    CHECK(!equal(original, 1, candidate, 2));
+    candidate[1].reg++;
+    CHECK(!equal(original, 2, candidate, 2));
+    candidate[1] = original[1];
+    candidate[1].offset++;
+    CHECK(!equal(original, 2, candidate, 2));
+    candidate[1] = original[1];
+    candidate[1].conv++;
+    CHECK(!equal(original, 2, candidate, 2));
+    candidate[1] = original[1];
+    candidate[1].size++;
+    CHECK(!equal(original, 2, candidate, 2));
+    candidate[1] = original[1];
+    candidate[1].type++;
+    CHECK(!equal(original, 2, candidate, 2));
+    candidate[1]            = original[1];
+    candidate[1].no_publish = false;
+    CHECK(!equal(original, 2, candidate, 2));
+    candidate[1]       = original[1];
+    candidate[1].label = "Betb";
+    CHECK(!equal(original, 2, candidate, 2));
+    candidate[1].label = "BetaX";
+    CHECK(!equal(original, 2, candidate, 2));
+    candidate[1].label = "Bet";
+    CHECK(!equal(original, 2, candidate, 2));
+    candidate[1].label = nullptr;
+    CHECK(!equal(original, 2, candidate, 2));
+    candidate[1]                         = original[1];
+    char equal_text_at_another_address[] = "Beta";
+    candidate[1].label                   = equal_text_at_another_address;
+    CHECK(equal(original, 2, candidate, 2));
+    candidate[0] = original[1];
+    candidate[1] = original[0];
+    CHECK(!equal(original, 2, candidate, 2));
+    original[0].label = candidate[0].label = nullptr;
+    original[1]                            = candidate[1];
+    candidate[0]                           = original[0];
+    CHECK(equal(original, 2, candidate, 2));
+    candidate[0].label = "";
+    CHECK(!equal(original, 2, candidate, 2));
+    CHECK(profile_table_labels_equal(rt(static_cast<const char*>(nullptr)),
+                                     rt(static_cast<const char*>(nullptr))));
+    CHECK(!profile_table_labels_equal(rt(static_cast<const char*>(nullptr)),
+                                      rt(static_cast<const char*>(""))));
+    CHECK(!profile_table_labels_equal(rt(static_cast<const char*>("")),
+                                      rt(static_cast<const char*>(nullptr))));
+    CHECK(profile_table_labels_equal(rt(static_cast<const char*>("")),
+                                     rt(static_cast<const char*>(""))));
+    CHECK(!profile_table_labels_equal(rt(static_cast<const char*>("A")),
+                                      rt(static_cast<const char*>(""))));
+    CHECK(!profile_table_labels_equal(rt(static_cast<const char*>("")),
+                                      rt(static_cast<const char*>("A"))));
+    CHECK(profile_table_labels_equal(rt(static_cast<const char*>("Alpha")),
+                                     rt(static_cast<const char*>("Alpha"))));
+    CHECK(!equal(def::altherma_gshp, sizeof(def::altherma_gshp) / sizeof(def::altherma_gshp[0]),
+                 def::altherma_gshp2,
+                 sizeof(def::altherma_gshp2) / sizeof(def::altherma_gshp2[0])));
+}
+
+static void test_mqtt_retirement_identity() {
+    MqttRetirementIdentity identity;
+    const ValueDef         decorated(0x20, 0, 105, 1, -1, "Flow{9}~A");
+    CHECK(mqtt_retirement_identity_make(identity, decorated) ==
+          MqttRetirementIdentityResult::Ready);
+    CHECK(std::string(identity.object.data(), identity.size) == "outdoor_sensors_flow_9_a");
+    CHECK(mqtt_retirement_identity_matches(identity, decorated));
+    CHECK(mqtt_retirement_identity_matches(identity, ValueDef(0x20, 0, 105, 1, -1, "Flow 9 A")));
+    const ValueDef binary(0x10, 0, 303, 1, -1, "Error active");
+    const ValueDef fault(0x10, 4, 203, 1, -1, "Error Type");
+    CHECK(mqtt_retirement_identity_make(identity, fault, "error_active") ==
+          MqttRetirementIdentityResult::Ready);
+    CHECK(mqtt_retirement_identity_matches(identity, binary)); // row/companion share a real topic
+    CHECK(!mqtt_retirement_identity_matches(identity,
+                                            ValueDef(0x10, 0, 303, 1, -1, "Error active extra")));
+    CHECK(!mqtt_retirement_identity_matches(identity, ValueDef(0x10, 0, 303, 1, -1, "Error")));
+    CHECK(
+        !mqtt_retirement_identity_matches(identity, ValueDef(0x10, 0, 105, 1, -1, "Error active")));
+    CHECK(mqtt_retirement_identity_make(identity,
+                                        ValueDef(0x60, 0, 105, 1, -1, "State Error Code")) ==
+          MqttRetirementIdentityResult::Ready);
+    CHECK(mqtt_retirement_identity_matches(identity, ValueDef(0x62, 0, 105, 1, -1, "Error Code")));
+    CHECK(mqtt_retirement_identity_make(identity, ValueDef(0x20, 0, 105, 1, -1, "!!!")) ==
+          MqttRetirementIdentityResult::Empty);
+    CHECK(mqtt_retirement_identity_make(identity, ValueDef(0x20, 0, 105, 1, -1, nullptr)) ==
+          MqttRetirementIdentityResult::Empty);
+    std::string bounded_label(
+        MQTT_RETIREMENT_OBJECT_CAPACITY - std::strlen(group_for_page(0x20)) - 1, 'a');
+    CHECK(mqtt_retirement_identity_make(identity,
+                                        ValueDef(0x20, 0, 105, 1, -1, bounded_label.c_str())) ==
+          MqttRetirementIdentityResult::Ready);
+    CHECK(identity.size == MQTT_RETIREMENT_OBJECT_CAPACITY);
+    bounded_label += 'a';
+    CHECK(mqtt_retirement_identity_make(identity,
+                                        ValueDef(0x20, 0, 105, 1, -1, bounded_label.c_str())) ==
+          MqttRetirementIdentityResult::TooLong);
+    const std::string long_label(2 * MQTT_RETIREMENT_OBJECT_CAPACITY, 'a');
+    CHECK(mqtt_retirement_identity_make(identity,
+                                        ValueDef(0x20, 0, 105, 1, -1, long_label.c_str())) ==
+          MqttRetirementIdentityResult::TooLong);
+
+    CHECK(mqtt_retirement_identity_make(identity, binary) == MqttRetirementIdentityResult::Ready);
+    MqttRetirementScan       direct_scan;
+    const logic::ProfileView direct_view{&binary, 1};
+    size_t                   direct_work = 1;
+    CHECK(mqtt_retirement_scan_step(identity, direct_view, direct_scan, direct_work) ==
+          MqttRetirementPresence::Present);
+    const ValueDef           other(0x10, 8, 105, 1, -1, "Different");
+    const logic::ProfileView other_view{&other, 1};
+    direct_scan = {};
+    direct_work = 1;
+    CHECK(mqtt_retirement_scan_step(identity, other_view, direct_scan, direct_work) ==
+          MqttRetirementPresence::Absent);
+    direct_scan = {};
+    direct_work = 0;
+    CHECK(mqtt_retirement_scan_step(identity, logic::ProfileView{}, direct_scan, direct_work) ==
+          MqttRetirementPresence::Absent);
+    const ValueDef           rows[] = {ValueDef(0x10, 0, 303, 1, -1, "Error active", true),
+                                       ValueDef(0x10, 0, 0, 1, -1, "Error active"), fault};
+    const logic::ProfileView view{rows, 3};
+    MqttRetirementScan       scan;
+    size_t                   work = 0;
+    CHECK(mqtt_retirement_scan_step(identity, view, scan, work) == MqttRetirementPresence::Pending);
+    work = 1;
+    CHECK(mqtt_retirement_scan_step(identity, view, scan, work) == MqttRetirementPresence::Pending);
+    CHECK(scan.row == 1 && work == 0);
+    work = 1;
+    CHECK(mqtt_retirement_scan_step(identity, view, scan, work) == MqttRetirementPresence::Pending);
+    work = 1;
+    CHECK(mqtt_retirement_scan_step(identity, view, scan, work) == MqttRetirementPresence::Present);
+    const ValueDef           empty_fault(0x10, 4, 203, 1, -1, "!!!");
+    const logic::ProfileView empty_fault_view{&empty_fault, 1};
+    MqttRetirementScan       empty_scan;
+    work = 1;
+    CHECK(mqtt_retirement_scan_step(identity, empty_fault_view, empty_scan, work) ==
+          MqttRetirementPresence::Absent); // discovery skips the row and all of its companions
+    work = 1;
+    CHECK(mqtt_retirement_scan_step(identity, view, scan, work) == MqttRetirementPresence::Present);
+    CHECK(work == 1);
+    CHECK(mqtt_retirement_identity_make(identity, fault, FAULT_COMPANIONS[1].key) ==
+          MqttRetirementIdentityResult::Ready);
+    scan = {};
+    work = 3;
+    CHECK(mqtt_retirement_scan_step(identity, view, scan, work) == MqttRetirementPresence::Present);
+    CHECK(mqtt_retirement_identity_make(identity, ValueDef(0x62, 0, 105, 1, -1, "Absent")) ==
+          MqttRetirementIdentityResult::Ready);
+    scan = {};
+    work = 2;
+    CHECK(mqtt_retirement_scan_step(identity, view, scan, work) == MqttRetirementPresence::Pending);
+    work = 1;
+    CHECK(mqtt_retirement_scan_step(identity, view, scan, work) == MqttRetirementPresence::Absent);
+
+    // Every shipped current/historical row shape and companion fits the fixed identity and agrees
+    // with the real discovery builder; no prefix truncation may turn unsupported into Absent.
+    for (const auto& profile : def::profiles) {
+        const auto resolved = def::resolved(profile);
+        for (size_t i = 0; i < resolved.count(); ++i) {
+            const ValueDef row = logic::adjudicated(resolved[i]);
+            if (!conv_publishable(row.conv) || object_id(row.label).empty()) continue;
+            CHECK(mqtt_retirement_identity_make(identity, row) ==
+                  MqttRetirementIdentityResult::Ready);
+            CHECK(std::string(identity.object.data(), identity.size) == row_object_id(row));
+            CHECK(identity.binary == conv_is_binary(row.conv));
+            if (row.conv == 203)
+                for (size_t k = 0; k < FAULT_COMPANION_COUNT; ++k) {
+                    CHECK(mqtt_retirement_identity_make(identity, row, FAULT_COMPANIONS[k].key) ==
+                          MqttRetirementIdentityResult::Ready);
+                    CHECK(std::string(identity.object.data(), identity.size) ==
+                          companion_object_id(group_for_page(row.reg), FAULT_COMPANIONS[k].key));
+                }
+        }
+    }
+}
+
+static void test_mqtt_retirement() {
+    MqttRetirementDelivery retirement;
+    CHECK(!retirement.busy());
+    CHECK(!retirement.queued(MqttRetirementOwner::None, 1, 1));
+    CHECK(!retirement.queued(MqttRetirementOwner::Profile, 0, 1));
+    CHECK(!retirement.queued(MqttRetirementOwner::Profile, 1, -1));
+    CHECK(retirement.queued(MqttRetirementOwner::Profile, 1, 100));
+    CHECK(retirement.busy() && retirement.in_flight());
+    CHECK(!retirement.can_queue(MqttRetirementOwner::Profile, 1));
+    CHECK(!retirement.can_queue(MqttRetirementOwner::StaleValues, 1));
+    CHECK(!retirement.take_confirmed(MqttRetirementOwner::Profile));
+    CHECK(!retirement.evidence({2, 100}));
+    CHECK(!retirement.evidence({1, 101}));
+    CHECK(retirement.evidence({1, 100, MqttCleanupDeliveryOutcome::Deleted}));
+    CHECK(!retirement.take_confirmed(MqttRetirementOwner::Profile));
+    CHECK(!retirement.can_queue(MqttRetirementOwner::StaleValues, 1));
+    CHECK(retirement.queued(MqttRetirementOwner::Profile, 1, 102));
+    retirement.outbox_cleared_after_transport_stop();
+    CHECK(!retirement.in_flight() && retirement.busy());
+    CHECK(!retirement.evidence({1, 102}));
+    CHECK(retirement.queued(MqttRetirementOwner::Profile, 2, 103));
+    CHECK(!retirement.evidence({1, 103}));
+    CHECK(retirement.evidence({2, 103}));
+    CHECK(!retirement.in_flight() && retirement.busy());
+    CHECK(!retirement.take_confirmed(MqttRetirementOwner::StaleValues));
+    CHECK(!retirement.can_queue(MqttRetirementOwner::Profile, 2));
+    retirement.outbox_cleared_after_transport_stop();
+    CHECK(retirement.take_confirmed(MqttRetirementOwner::Profile));
+    CHECK(!retirement.busy() && retirement.msg_id() == -1);
+    CHECK(!retirement.take_confirmed(MqttRetirementOwner::Profile));
+    CHECK(retirement.queued(MqttRetirementOwner::LegacyProbe, 2, 104));
+    CHECK(retirement.owner() == MqttRetirementOwner::LegacyProbe);
+}
+
+static void test_mqtt_retirement_store() {
+    MqttRetirementRecord record{}, out{};
+    CHECK(mqtt_retirement_record_make(record, "daikin-altherma-esp32",
+                                      "daikin_altherma_esp32__board_020102aabbcc",
+                                      "altherma_gshp2"));
+    uint8_t bytes[MQTT_RETIREMENT_STORE_BYTES]{};
+    CHECK(mqtt_retirement_encode(record, bytes, sizeof(bytes)));
+    CHECK(std::memcmp(bytes, "MQRT", 4) == 0 && bytes[4] == 1);
+    CHECK(bytes[5] == std::strlen(record.base) && bytes[6] == std::strlen(record.board_id) &&
+          bytes[7] == std::strlen(record.profile_id));
+    CHECK(mqtt_retirement_decode(bytes, sizeof(bytes), out));
+    CHECK(std::memcmp(&record, &out, sizeof(record)) == 0);
+    const auto fix_crc = [&](uint8_t* mutated) {
+        const uint32_t checksum = config_crc32(mutated, sizeof(bytes) - 4);
+        for (size_t i = 0; i < 4; ++i)
+            mutated[sizeof(bytes) - 4 + i] = static_cast<uint8_t>(checksum >> (8 * i));
+    };
+    MqttRetirementRecord sentinel{};
+    CHECK(mqtt_retirement_record_make(sentinel, "sentinel-base", "sentinel-board",
+                                      "sentinel-profile"));
+    const auto rejects_decode = [&](const uint8_t* data, size_t size) {
+        MqttRetirementRecord previous = sentinel;
+        CHECK(!mqtt_retirement_decode(data, size, previous));
+        CHECK(std::memcmp(&previous, &sentinel, sizeof(previous)) == 0);
+    };
+    rejects_decode(nullptr, sizeof(bytes));
+    rejects_decode(bytes, 0);
+    rejects_decode(bytes, sizeof(bytes) - 1);
+    rejects_decode(bytes, sizeof(bytes) + 1);
+    for (const size_t index : {size_t{0}, size_t{3}, size_t{8}, sizeof(bytes) - 1}) {
+        uint8_t mutated[sizeof(bytes)];
+        std::memcpy(mutated, bytes, sizeof(bytes));
+        mutated[index] ^= 1; // includes CRC corruption and payload corruption without recomputation
+        rejects_decode(mutated, sizeof(mutated));
+    }
+    for (uint8_t version : {uint8_t{0}, uint8_t{2}, uint8_t{255}}) {
+        uint8_t mutated[sizeof(bytes)];
+        std::memcpy(mutated, bytes, sizeof(bytes));
+        mutated[4] = version;
+        fix_crc(mutated);
+        rejects_decode(mutated, sizeof(mutated));
+    }
+    for (size_t field = 0; field < 3; ++field) {
+        const size_t start = 8 + field * MQTT_RETIREMENT_FIELD_CAPACITY;
+        uint8_t      mutated[sizeof(bytes)];
+        std::memcpy(mutated, bytes, sizeof(bytes));
+        mutated[5 + field] = MQTT_RETIREMENT_FIELD_CAPACITY + 1;
+        fix_crc(mutated);
+        rejects_decode(mutated, sizeof(mutated));
+        std::memcpy(mutated, bytes, sizeof(bytes));
+        mutated[start] = 0; // NUL hidden inside an explicitly nonempty field
+        fix_crc(mutated);
+        rejects_decode(mutated, sizeof(mutated));
+        std::memcpy(mutated, bytes, sizeof(bytes));
+        mutated[start + bytes[5 + field]] = 'x'; // nonzero unused padding, even with valid CRC
+        fix_crc(mutated);
+        rejects_decode(mutated, sizeof(mutated));
+        if (field < 2) {
+            std::memcpy(mutated, bytes, sizeof(bytes));
+            mutated[5 + field] = 0;
+            std::memset(mutated + start, 0, MQTT_RETIREMENT_FIELD_CAPACITY);
+            fix_crc(mutated);
+            rejects_decode(mutated, sizeof(mutated));
+        }
+    }
+    // Profiles may be absent before first discovery; required base/hardware identities may not.
+    MqttRetirementRecord profile_absent{};
+    CHECK(mqtt_retirement_record_make(profile_absent, "base", "board", ""));
+    CHECK(mqtt_retirement_encode(profile_absent, bytes, sizeof(bytes)));
+    CHECK(bytes[7] == 0);
+    CHECK(mqtt_retirement_decode(bytes, sizeof(bytes), out));
+    CHECK(std::memcmp(&profile_absent, &out, sizeof(out)) == 0);
+    const std::string limit(MQTT_RETIREMENT_FIELD_CAPACITY, 'x');
+    CHECK(mqtt_retirement_record_make(record, limit, limit, limit));
+    CHECK(mqtt_retirement_encode(record, bytes, sizeof(bytes)));
+    CHECK(bytes[5] == 64 && bytes[6] == 64 && bytes[7] == 64);
+    CHECK(mqtt_retirement_decode(bytes, sizeof(bytes), out));
+    CHECK(std::memcmp(&record, &out, sizeof(record)) == 0);
+    for (size_t field = 0; field < 3; ++field) {
+        std::string fields[] = {"base", "board", "profile"};
+        fields[field].assign(MQTT_RETIREMENT_FIELD_CAPACITY + 1, 'y');
+        MqttRetirementRecord previous = sentinel;
+        CHECK(!mqtt_retirement_record_make(previous, fields[0], fields[1], fields[2]));
+        CHECK(std::memcmp(&previous, &sentinel, sizeof(previous)) == 0);
+        fields[field] = std::string("has\0nul", 7);
+        CHECK(!mqtt_retirement_record_make(previous, fields[0], fields[1], fields[2]));
+        CHECK(std::memcmp(&previous, &sentinel, sizeof(previous)) == 0);
+        MqttRetirementRecord invalid = record;
+        char*                value   = field == 0   ? invalid.base
+                                       : field == 1 ? invalid.board_id
+                                                    : invalid.profile_id;
+        std::memset(value, 'z', MQTT_RETIREMENT_FIELD_CAPACITY + 1);
+        uint8_t unchanged[sizeof(bytes)];
+        std::memset(unchanged, 0xa5, sizeof(unchanged));
+        CHECK(!mqtt_retirement_encode(invalid, unchanged, sizeof(unchanged)));
+        CHECK(std::all_of(std::begin(unchanged), std::end(unchanged),
+                          [](uint8_t byte) { return byte == 0xa5; }));
+        if (field < 2) {
+            invalid  = record;
+            value    = field == 0 ? invalid.base : invalid.board_id;
+            value[0] = 0;
+            CHECK(!mqtt_retirement_encode(invalid, unchanged, sizeof(unchanged)));
+            CHECK(std::all_of(std::begin(unchanged), std::end(unchanged),
+                              [](uint8_t byte) { return byte == 0xa5; }));
+        }
+    }
+    MqttRetirementRecord previous = sentinel;
+    CHECK(!mqtt_retirement_record_make(previous, "", "board", "profile"));
+    CHECK(std::memcmp(&previous, &sentinel, sizeof(previous)) == 0);
+    CHECK(!mqtt_retirement_record_make(previous, "base", "", "profile"));
+    CHECK(std::memcmp(&previous, &sentinel, sizeof(previous)) == 0);
+    CHECK(!mqtt_retirement_encode(record, nullptr, sizeof(bytes)));
+    CHECK(!mqtt_retirement_encode(record, bytes, 0));
+    CHECK(!mqtt_retirement_encode(record, bytes, sizeof(bytes) - 1));
+    CHECK(!mqtt_retirement_encode(record, bytes, sizeof(bytes) + 1));
+}
+
 static void test_mqtt_publish_gate() {
     // Cleanup runs before ordinary publication in one MQTT cycle. A disabled target that was just
     // tombstoned must stay idle even while its worker still reports enabled; an A-to-B replacement
@@ -20623,65 +21107,52 @@ static void test_mqtt_publish_gate() {
     CHECK(retained_source_action(true, true) == RetainedSourceAction::PublishCurrent);
     CHECK(retained_source_action(true, false) == RetainedSourceAction::PublishCurrent);
 
-    MqttPublishGateState state = MqttPublishGateState::SubscriberOnly;
-
-    // Broker configuration alone proves no installation ownership. The no-LWT client may be
-    // connected for subscriptions, but the gate authorizes no application publication.
-    auto d = mqtt_publish_gate_step(state, false, -1, false);
-    CHECK(d.next == MqttPublishGateState::SubscriberOnly);
-    CHECK(!d.promote_publisher && !d.publish_cycle && !d.publish_offline && !d.resumed);
-    d = mqtt_publish_gate_step(state, false, -1, true);
-    CHECK(d.next == MqttPublishGateState::SubscriberOnly);
-    CHECK(!d.promote_publisher && !d.publish_cycle && !d.publish_offline && !d.resumed);
-
-    // The first valid bus cycle authorizes exactly the replacement by an LWT-bearing client.
-    // Publication still waits for that new client's MQTT_EVENT_CONNECTED.
-    d = mqtt_publish_gate_step(state, true, 0, true);
-    CHECK(d.next == MqttPublishGateState::Active);
-    CHECK(d.promote_publisher && !d.publish_cycle && !d.publish_offline && !d.resumed);
-    state = d.next;
-    d     = mqtt_publish_gate_step(state, true, 0, true);
-    CHECK(d.publish_cycle && !d.promote_publisher && !d.publish_offline);
-
-    // One missed whole sweep is a known property of this serial source, not an installation outage.
-    // Keep publishing auxiliary/diagnostic data during the grace; the runtime separately refuses to
-    // publish the empty current-cycle X10A cache. The boundary is elapsed source age, not MQTT
-    // ticks.
-    d = mqtt_publish_gate_step(state, false, 1, true);
-    CHECK(d.next == MqttPublishGateState::Active);
-    CHECK(d.publish_cycle && !d.publish_offline && !d.resumed);
-    d = mqtt_publish_gate_step(state, false, MQTT_X10A_OFFLINE_GRACE_S - 1, true);
-    CHECK(d.next == MqttPublishGateState::Active);
-    CHECK(d.publish_cycle && !d.publish_offline && !d.resumed);
-
-    // A sustained loss gets one explicit offline marker at the exact grace boundary, then silence.
-    d = mqtt_publish_gate_step(state, false, MQTT_X10A_OFFLINE_GRACE_S, true);
-    CHECK(d.next == MqttPublishGateState::Paused);
-    CHECK(d.publish_offline && !d.publish_cycle && !d.promote_publisher);
-    state = d.next;
-    d     = mqtt_publish_gate_step(state, false, MQTT_X10A_OFFLINE_GRACE_S + 1, true);
-    CHECK(d.next == MqttPublishGateState::Paused);
-    CHECK(!d.publish_offline && !d.publish_cycle && !d.resumed);
-
-    // Recovery on the existing broker session asks the runtime for an online + fresh state seed;
-    // a recovery while the broker is down still changes state but cannot publish prematurely.
-    d = mqtt_publish_gate_step(state, true, 0, true);
+    MqttPublishGateState state = MqttPublishGateState::Unavailable;
+    auto                 d     = mqtt_publish_gate_step(state, false, false);
+    CHECK(d.next == MqttPublishGateState::Unavailable);
+    CHECK(!d.publish_cycle && !d.publish_offline && !d.resumed);
+    d = mqtt_publish_gate_step(state, false, true);
+    CHECK(d.next == MqttPublishGateState::Unavailable);
+    CHECK(!d.publish_cycle && !d.publish_offline && !d.resumed);
+    // The first real source evidence permits X10A publication on the existing transport.
+    d = mqtt_publish_gate_step(state, true, true);
     CHECK(d.next == MqttPublishGateState::Active);
     CHECK(d.resumed && d.publish_cycle && !d.publish_offline);
-    d = mqtt_publish_gate_step(state, true, 0, false);
+    state = d.next;
+    d     = mqtt_publish_gate_step(state, true, true);
+    CHECK(d.publish_cycle && !d.publish_offline && !d.resumed);
+    // The cache owner applies the exact 15-second grace independently of MQTT task ticks.
+    d = mqtt_publish_gate_step(state, false, true);
+    CHECK(d.next == MqttPublishGateState::Paused);
+    CHECK(d.publish_offline && !d.publish_cycle);
+    state = d.next;
+    d     = mqtt_publish_gate_step(state, false, true);
+    CHECK(d.next == MqttPublishGateState::Paused);
+    CHECK(!d.publish_offline && !d.publish_cycle && !d.resumed);
+    d = mqtt_publish_gate_step(state, true, true);
+    CHECK(d.next == MqttPublishGateState::Active);
+    CHECK(d.resumed && d.publish_cycle && !d.publish_offline);
+    d = mqtt_publish_gate_step(state, true, false);
     CHECK(d.resumed && !d.publish_cycle && !d.publish_offline);
-
-    // The MQTT task can start just after a good sweep and observe the following transient miss.
-    // last_ok_s still proves X10A ownership during this boot, while -1 never does.
-    state = MqttPublishGateState::SubscriberOnly;
-    d     = mqtt_publish_gate_step(state, false, 1, true);
-    CHECK(d.next == MqttPublishGateState::Active && d.promote_publisher);
+    d = mqtt_publish_gate_step(MqttPublishGateState::Active, false, false);
+    CHECK(d.next == MqttPublishGateState::Paused && !d.publish_offline);
     CHECK(!mqtt_x10a_available(false, -1));
     CHECK(!mqtt_x10a_available(true, -1));
     CHECK(mqtt_x10a_available(false, MQTT_X10A_OFFLINE_GRACE_S - 1));
     CHECK(!mqtt_x10a_available(false, MQTT_X10A_OFFLINE_GRACE_S));
     CHECK(!mqtt_x10a_available(true, MQTT_X10A_OFFLINE_GRACE_S));
     CHECK(!mqtt_x10a_available(true, MQTT_X10A_OFFLINE_GRACE_S + 5));
+    const struct {
+        int32_t age;
+        bool    recent;
+    } second_ages[] = {
+        {-1, false}, {0, true}, {14, true}, {15, false}, {INT32_MAX, false},
+    };
+    for (const auto& sample : second_ages) {
+        volatile int32_t age = sample.age;
+        CHECK(x10a_source_is_recent(age) == sample.recent);
+        CHECK(mqtt_x10a_available(false, age) == sample.recent);
+    }
     const struct {
         int64_t now, observed;
         bool    recent;
@@ -20698,9 +21169,9 @@ static void test_mqtt_publish_gate() {
         volatile int64_t now = age.now, observed = age.observed;
         CHECK(x10a_source_time_is_recent(now, observed) == age.recent);
     }
-    // A state outside the defined transition set grants no publication or promotion.
-    d = mqtt_publish_gate_step(static_cast<MqttPublishGateState>(99), true, 0, true);
-    CHECK(!d.publish_cycle && !d.publish_offline && !d.promote_publisher);
+    // A state outside the defined transition set grants no X10A publication.
+    d = mqtt_publish_gate_step(static_cast<MqttPublishGateState>(99), true, true);
+    CHECK(!d.publish_cycle && !d.publish_offline && !d.resumed);
 
     // MQTT-02/a: a clean stop discards the LWT, so an OTA pause withdraws `online` first. Volatile
     // inputs keep every combination a runtime branch for gcov instead of a folded constant.
@@ -20709,7 +21180,7 @@ static void test_mqtt_publish_gate() {
     CHECK(mqtt_pause_withdraws_online(yes, yes, yes));
     // A Weather pause never precedes a restart and keeps the no-churn gap.
     CHECK(!mqtt_pause_withdraws_online(no, yes, yes));
-    // The no-LWT subscriber-only client never speaks for the installation, connected or not.
+    // A missing LWT client or disconnected transport cannot order a withdrawal.
     CHECK(!mqtt_pause_withdraws_online(yes, no, yes));
     CHECK(!mqtt_pause_withdraws_online(yes, no, no));
     // A disconnected publisher cannot order the marker ahead of a DISCONNECT; esp-mqtt would only
@@ -22867,6 +23338,10 @@ int main() {
     test_fault_state();
     test_raw_capture();
     test_mqtt_cleanup();
+    test_mqtt_retirement();
+    test_profile_table_equal();
+    test_mqtt_retirement_identity();
+    test_mqtt_retirement_store();
     test_mqtt_publish_gate();
     test_published_kind();
     test_history();
@@ -22939,6 +23414,7 @@ int main() {
     test_tie_break_order_independence();
     test_tie_break_reach();
     test_entity_identity();
+    test_mqtt_installation_identity();
     test_feature_gate();
     test_refrigerant_service();
     test_state_dwell();

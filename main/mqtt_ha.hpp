@@ -22,6 +22,10 @@ void mqtt_ha_start();
 struct MqttStatus { bool configured=false, connected=false, tls=false; std::string broker, error; };
 MqttStatus mqtt_status();
 
+// Allocation-free boot/journal evidence; docs/API.md defines the bit mask. Loaded predecessor
+// evidence is set only by a successful NVS load in this boot, never by a same-boot save.
+uint32_t mqtt_retirement_evidence() noexcept;
+
 // Publish cycles that produced nothing, since boot — the heartbeat's mqtt_skipped/mqtt_quiesced
 // (legacy-380). `skipped` threw and lost the reading; `quiesced` stood aside on purpose while an
 // OTA download or weather fetch owned the heap (logic/ota_quiesce.hpp). Reported on /status too,
@@ -87,7 +91,7 @@ logic::HeatingCurveSnapshot heating_curve_status();
 void mqtt_reference_reconfigure();
 
 // Independent read-only power witness for the potable-water circulation pump.  It shares the
-// already-authenticated MQTT client but has its own exact topic, parser, freshness and test proof.
+// configured MQTT client but has its own exact topic, parser, freshness and test proof.
 struct CirculationSourceStatus {
     bool configured=false, subscribed=false, has_value=false, retained=false, has_source_time=false;
     bool fresh=false, age_known=false;
@@ -124,9 +128,8 @@ bool mqtt_circulation_test_proof_valid(uint32_t proof,
                                        const CirculationSourceTestConfig& candidate);
 void                        mqtt_circulation_reconfigure(bool configured);
 
-// Explicit source/consent changes own these retained-topic tombstones. They are the only outbound
-// MQTT operations allowed before X10A proves installation publication authority; ordinary state,
-// discovery and diagnostics remain gated. Requests stay pending across broker outages and are
+// Explicit source/consent changes own these retained-topic tombstones independently of X10A.
+// Requests stay pending across broker outages and are
 // reconstructed on reconnect; Weather and HomeHub cleanup also cover enabled identity changes.
 void mqtt_request_weather_cleanup();
 void mqtt_request_modbus_cleanup();

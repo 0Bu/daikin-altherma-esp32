@@ -7,7 +7,7 @@ command topics or writable heat-pump entities.
 
 ## Enabling
 
-1. Complete [SETUP.md](SETUP.md) and confirm that X10A has returned valid readings.
+1. Complete [SETUP.md](SETUP.md). For heat-pump entities, also confirm valid X10A readings.
 2. Enable Home Assistant's MQTT integration and connect it to your broker.
 3. Open the device's **Settings → Connections → MQTT**.
 4. Enter the broker and, if required, its username/password. With credentials, use an explicit
@@ -17,14 +17,12 @@ command topics or writable heat-pump entities.
 6. In Home Assistant, open the MQTT integration's device list and find **Daikin Altherma**. Check a
    readable water temperature and operating flag against the device dashboard.
 
-A newly booted board publishes ordinary state and discovery only after its first valid X10A reply.
-A connected broker alone is therefore insufficient. A later X10A outage of 15 seconds marks the
-installation offline and pauses ordinary publishing; recovery seeds current state again. You can
-still use the device's local HTTP page to diagnose an unwired or offline bus. A connected MQTT
-client marks availability offline before an OTA pause, but an already reconnecting client cannot
-withdraw an old retained online value. Weather pauses leave it unchanged; check actual source
-freshness when a retained state looks current. [MQTT.md](MQTT.md#outbound-availability) gives the
-complete pause/reboot contract.
+Board diagnostics and independent accessories can appear as soon as the broker connects. X10A
+readings require the first valid reply; a later 15-second X10A outage makes those entities
+unavailable while board diagnostics continue. Recovery seeds current readings again. An OTA pause
+attempts to withdraw broker availability; a failed delivery can leave the old marker until the next
+connection. Check actual source freshness when retained data looks current, and follow the
+[availability migration](MQTT.md#migrations) for older discovery configurations.
 
 Empty credential fields keep stored credentials. To switch to anonymous access, select **Remove
 stored credentials**. Clearing the broker disables MQTT. Disabling MQTT does not stop the X10A or
@@ -34,9 +32,8 @@ HomeHub readings visible locally.
 
 Choose the base topic **before commissioning**. It identifies the installation in both MQTT and
 Home Assistant. Keep it unchanged when replacing the ESP32 to retain the existing HA device,
-entities and statistics. Give a second installation or test board a different base and a different
-slugified node id: punctuation is collapsed to underscores, so `plant-one` and `plant_one` collide
-in HA despite using different MQTT topics.
+entities and statistics. Give each installation or test board a different base. Distinct accepted
+bases now produce distinct discovery identities, including punctuation differences.
 
 The default is `daikin-altherma-esp32`; a suitable second base is
 `daikin-altherma-esp32-bench`. Changing a running installation's base creates a new HA identity and
@@ -94,7 +91,7 @@ explanation before using a flag as an operating-mode witness.
 
 | What you see | Interpretation |
 |---|---|
-| Most entities unavailable | Check both the broker connection and X10A link. Installation availability is X10A-gated. |
+| X10A entities unavailable | Check the broker connection and X10A link; board diagnostics can remain available while X10A is offline. |
 | One value unknown | Its state key may be absent because the input is unreadable, unimplemented, implausible or not fitted. |
 | Outdoor readings absent while resting | The outdoor unit may answer with values held from its last run. The firmware withholds those MQTT readings; **Outdoor Data Held Over** explains that boundary. |
 | Only ENV III unavailable | Its corresponding fresh reading keys are missing; an accessory fault does not make other plant entities unavailable. |
@@ -123,7 +120,8 @@ silently corrupt a heat integral.
 
 | Symptom | Check |
 |---|---|
-| No HA device | MQTT integration/broker connection, first valid X10A reply, base/prefix agreement and broker permissions. |
+| No HA device | MQTT integration/broker connection, base/prefix agreement and broker permissions. |
+| No X10A entities | First valid X10A reply and detected profile; check the availability migration above if old configs remain. |
 | Broker save rejected | Exact URI/port, DNS/reachability, TLS certificate chain and credentials. The error is shown before saving. |
 | Duplicate device or `…_2` entities after upgrade | Read the migration note below; keep HA connected for discovery deletions. |
 | Values alternate or uptime repeatedly jumps | Ensure one active board per base/node identity before concluding the board is rebooting. |
@@ -147,12 +145,17 @@ not the redacted bug-report format; consider that before sharing a broker export
 Keep Home Assistant connected to the broker during discovery migrations so it sees retained-config
 deletions before replacements. Preserve the base topic when upgrading or replacing a board.
 
-- Older MAC-based or ungrouped discovery ids are deleted before current grouped configs are
-  announced. Device identity can merge with the old board id; per-entity customizations tied to old
-  `unique_id` values do not migrate automatically.
+- Before the first upgrade with split availability, confirm that X10A is answering so current
+  discovery can replace old single-marker configurations. If it is not, pause consumers that rely
+  on the old marker and migrate only the confirmed old configurations before trusting availability.
+- Default and bench entity IDs remain stable. Custom bases get unambiguous entity IDs, and old
+  short-MAC aliases are no longer advertised. Export relevant entity customizations and references before this
+  migration; existing merged HA devices, old aliases and custom unique IDs need owner reconciliation.
+- Current-namespace ungrouped and renamed discovery is deleted before replacements. Old broker,
+  old-base and ambiguous MAC-era configurations need the targeted cleanup in the migration guide.
 - A historical `sensor` → `binary_sensor` change requires automation/template references to use the
   new domain; its old recorder history does not carry to that domain automatically.
-- Retired HomeHub/weather discovery and the redundant **Device Time**, **WiFi Quality** and **Last
+- Current-namespace retired HomeHub/weather discovery and the redundant **Device Time**, **WiFi Quality** and **Last
   Reset Reason** diagnostics are removed. Update any consumers of their old fields/topics.
 
 If HA was offline during a deletion, old entries can remain and replacements can gain `…_2`.

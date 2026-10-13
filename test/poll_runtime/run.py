@@ -21,6 +21,7 @@ CASES = [
     'saturation_wire_gap', 'saturation_commit_gap',
     'probe_no_task', 'probe_busy', 'probe_drain', 'probe_deadline', 'probe_late', 'probe_wrap',
     'raw_recovery', 'raw_empty', 'raw_stopped_recovery', 'raw_one_page', 'raw_budget',
+    'mqtt_scalar_source',
 ]
 REGRESSION_ORACLES = {
     'detect_silent': 'detect_silence_breaks_confirmation',
@@ -118,6 +119,18 @@ for case in selected_cases:
     print(('EXPECTED REGRESSION ' + case + ': ' if expected else '') + output, end='')
 source_text = SOURCE.read_text()
 mutations = {
+    'allocate_mqtt_scalar_snapshot': (
+        'const bool recent = x10a_cache_recent_locked();\n    return {s_stats.connected && recent, recent};',
+        'const HpStats copied = hp_stats();\n    const bool recent = x10a_source_is_recent(copied.last_ok_s);\n    return {copied.connected, recent};',
+        'mqtt_scalar_sampler_allocation_free', 'mqtt_scalar_source'),
+    'tie_mqtt_grace_to_current_sweep': (
+        'const bool recent = x10a_cache_recent_locked();\n    return {s_stats.connected && recent, recent};',
+        'const bool recent = s_stats.connected && x10a_cache_recent_locked();\n    return {s_stats.connected && recent, recent};',
+        'mqtt_scalar_empty_sweep_keeps_grace', 'mqtt_scalar_source'),
+    'extend_mqtt_scalar_expiry': (
+        'const bool recent = x10a_cache_recent_locked();\n    return {s_stats.connected && recent, recent};',
+        'const bool recent = x10a_source_time_is_recent(esp_timer_get_time() - 1, s_last_ok_us);\n    return {s_stats.connected && recent, recent};',
+        'mqtt_scalar_source_exact_expiry', 'mqtt_scalar_source'),
     'clear_last_good_cache': (
         's_cycles_skipped.fetch_add(1, std::memory_order_relaxed);',
         's_cycles_skipped.fetch_add(1, std::memory_order_relaxed); s_cache.clear();',

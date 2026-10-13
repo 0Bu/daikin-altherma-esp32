@@ -760,6 +760,48 @@ static void run_raw(const char* name) {
         oracle(false, "known_raw_case");
 }
 
+static void run_mqtt_scalar_source() {
+    using namespace daik;
+    auto sample = [](bool connected, bool recent, const char* name) {
+        sdk::fail_next_new = true;
+        HpMqttSourceState state;
+        bool              threw = false;
+        try {
+            state = hp_mqtt_source_state();
+        } catch (const std::bad_alloc&) {
+            threw = true;
+        }
+        const bool unspent = sdk::fail_next_new;
+        sdk::fail_next_new = false;
+        oracle(!threw && unspent && sdk::failures == 0, "mqtt_scalar_sampler_allocation_free");
+        oracle(sdk::lock_depth == 0 && !sdk::mutex.owned && sdk::takes == sdk::gives,
+               "mqtt_scalar_sampler_unlocks");
+        oracle(state.connected == connected && state.recent == recent, name);
+    };
+    s_mtx = nullptr;
+    sample(false, false, "mqtt_scalar_missing_owner_unknown");
+    s_mtx = xSemaphoreCreateMutex();
+    s_stats.last_error.assign(96, 'e'); // copying HpStats must spend the armed allocation failure
+    s_last_ok_us = -1;
+    sample(false, false, "mqtt_scalar_never_observed_unknown");
+    s_last_ok_us      = 1000000;
+    sdk::now_us       = s_last_ok_us + 1;
+    s_stats.connected = true;
+    sample(true, true, "mqtt_scalar_answering_sweep_current");
+    s_stats.connected = false;
+    s_cache.clear();
+    sdk::now_us = s_last_ok_us + 1000000;
+    sample(false, true, "mqtt_scalar_empty_sweep_keeps_grace");
+    sdk::now_us = s_last_ok_us + 14999999;
+    sample(false, true, "mqtt_scalar_last_recent_microsecond");
+    sdk::now_us = s_last_ok_us + 15000000;
+    sample(false, false, "mqtt_scalar_source_exact_expiry");
+    s_stats.connected = true;
+    sample(false, false, "mqtt_scalar_connected_bit_cannot_renew_time");
+    sdk::now_us = s_last_ok_us - 1;
+    sample(false, false, "mqtt_scalar_future_observation_unknown");
+}
+
 int main(int argc, char** argv) {
     const char* name = argc > 1 ? argv[1] : "oom_raii";
     if (!std::strcmp(name, "oom_raii"))
@@ -770,6 +812,8 @@ int main(int argc, char** argv) {
         run_saturation(name);
     else if (!std::strncmp(name, "probe_", 6))
         run_probe(name);
+    else if (!std::strcmp(name, "mqtt_scalar_source"))
+        run_mqtt_scalar_source();
     else if (!std::strncmp(name, "raw_", 4))
         run_raw(name);
     else

@@ -101,6 +101,11 @@ inline FakeQueue     queue;
 inline FakeMqtt      client;
 inline int           message_id = 0, publish_calls = 0, subscribe_calls = 0;
 inline int                  start_calls = 0, start_failures = 0, destroy_calls = 0;
+inline int                    init_calls = 0, stop_calls = 0;
+inline esp_err_t              mac_result = ESP_OK;
+inline std::array<uint8_t, 6> mac{2, 1, 1, 1, 1, 1};
+inline char                   client_id[160]{}, will_topic[256]{}, will_payload[32]{};
+inline int                    will_qos = 0, will_retain = 0;
 inline esp_err_t            registration_result        = ESP_OK;
 inline bool          reject_new_after_subscribe = false;
 inline int           unsubscribe_calls          = 0;
@@ -111,13 +116,15 @@ inline std::array<std::array<char, 256>, 64> subscribed_topics{}, unsubscribed_t
 inline std::array<std::array<char, 256>, 16> live_topics{};
 inline std::function<void(const char*, int)> on_subscribe;
 struct PublishTrace {
-    std::array<char, 256>  topic{};
+    std::array<char, 1024> topic{};
     std::array<char, 4096> payload{};
     int                    length = 0, qos = 0, retain = 0;
     bool                   accepted = false, enqueued = false;
 };
-inline std::array<PublishTrace, 64> published{};
+inline std::array<PublishTrace, 512> published{};
+inline void (*on_publish)(const PublishTrace&)          = nullptr;
 inline bool                         reject_next_publish = false, reject_new_after_publish = false;
+inline char                         reject_publish_topic[256]{};
 
 inline int record_publish(const char* topic, const char* payload, int len, int qos, int retain,
                           bool enqueued) {
@@ -133,9 +140,11 @@ inline int record_publish(const char* topic, const char* payload, int len, int q
     row.qos             = qos;
     row.retain          = retain;
     row.enqueued        = enqueued;
-    row.accepted        = !reject_next_publish;
+    row.accepted        = !reject_next_publish && std::strcmp(topic, reject_publish_topic) != 0;
+    if (std::strcmp(topic, reject_publish_topic) == 0) reject_publish_topic[0] = '\0';
     reject_next_publish = false;
     const int id        = row.accepted ? ++message_id : -1;
+    if (on_publish) on_publish(row);
     if (row.accepted && reject_new_after_publish) {
         reject_new_after_publish = false;
         fail_next_new = true; // final adapter action; only production work after SDK accept sees it
@@ -243,15 +252,25 @@ inline size_t    esp_get_free_heap_size() { return 100000; }
 inline size_t    esp_get_minimum_free_heap_size() { return 90000; }
 inline void      esp_restart() { throw std::runtime_error("unexpected restart"); }
 inline esp_err_t esp_read_mac(uint8_t* mac, int) {
-    std::memset(mac, 1, 6);
-    return ESP_OK;
+    // Failure may leave nonzero bytes in the caller buffer: the production return-code check,
+    // rather than a fabricated/zeroed MAC fallback, must prevent client creation.
+    std::memcpy(mac, sdk::mac.data(), 6);
+    return sdk::mac_result;
 }
 inline esp_err_t             esp_crt_bundle_attach(void*) { return ESP_OK; }
 inline const esp_app_desc_t* esp_app_get_description() {
     static esp_app_desc_t desc;
     return &desc;
 }
-inline esp_mqtt_client_handle_t esp_mqtt_client_init(const esp_mqtt_client_config_t*) {
+inline esp_mqtt_client_handle_t esp_mqtt_client_init(const esp_mqtt_client_config_t* cfg) {
+    ++sdk::init_calls;
+    std::snprintf(sdk::client_id, sizeof(sdk::client_id), "%s", cfg->credentials.client_id);
+    std::snprintf(sdk::will_topic, sizeof(sdk::will_topic), "%s",
+                  cfg->session.last_will.topic ? cfg->session.last_will.topic : "");
+    std::snprintf(sdk::will_payload, sizeof(sdk::will_payload), "%s",
+                  cfg->session.last_will.msg ? cfg->session.last_will.msg : "");
+    sdk::will_qos    = cfg->session.last_will.qos;
+    sdk::will_retain = cfg->session.last_will.retain;
     return &sdk::client;
 }
 inline esp_err_t esp_mqtt_client_destroy(FakeMqtt* client) {
@@ -276,7 +295,10 @@ inline esp_err_t esp_mqtt_client_start(FakeMqtt* c) {
     if (c->handler) c->handler(c->handler_arg, "mqtt", MQTT_EVENT_CONNECTED, nullptr);
     return ESP_OK;
 }
-inline esp_err_t esp_mqtt_client_stop(FakeMqtt*) { return ESP_OK; }
+inline esp_err_t esp_mqtt_client_stop(FakeMqtt*) {
+    ++sdk::stop_calls;
+    return ESP_OK;
+}
 inline int       esp_mqtt_client_subscribe(FakeMqtt*, const char* topic, int) {
     const int row = sdk::subscribe_calls++;
     if (static_cast<size_t>(row) >= sdk::subscribed_topics.size())

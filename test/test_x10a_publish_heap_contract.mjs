@@ -58,7 +58,7 @@ assert.match(publish,
 const x10aStage = mqtt.indexOf('publish_stage = "x10a"');
 const x10aStageEnd = mqtt.indexOf('publish_stage = "modbus"', x10aStage);
 assert.ok(x10aStage >= 0 && x10aStageEnd > x10aStage &&
-          mqtt.slice(x10aStage, x10aStageEnd).includes("const std::string& prof = ref_config.profile"),
+          /const std::string&\s+prof\s*=\s*ref_config\.profile/.test(mqtt.slice(x10aStage, x10aStageEnd)),
   "the per-second x10a stage must borrow the already-copied profile string, not allocate another one");
 
 // ── The dedup guard is a digest, not a retained copy of the payload ────────────────────────────
@@ -226,17 +226,8 @@ assert.ok(startupGuard >= 0 && guardNotQuiesced > startupGuard &&
           mqttStart >= 0 && startupNotQuiesced > mqttStart && configAtStart > startupNotQuiesced &&
           startupRunning > configAtStart,
   "startup must claim/recheck/yield behind an existing TLS owner before allocation, then hand off");
-const promotionStart = mqtt.indexOf("static bool promote_client_to_publisher() {");
-const promotionEnd = mqtt.indexOf("\n}\n\nvoid mqtt_ha_start()", promotionStart);
-const promotion = mqtt.slice(promotionStart, promotionEnd);
-const promotionStop = promotion.indexOf("esp_mqtt_client_stop(s_client)");
-const promotionTransportClear = promotion.indexOf(
-  "s_transport_connecting.store(false, std::memory_order_release)", promotionStop);
-const promotionDestroy = promotion.indexOf(
-  "esp_mqtt_client_destroy(s_client)", promotionTransportClear);
-assert.ok(promotionStart >= 0 && promotionEnd > promotionStart && promotionStop >= 0 &&
-          promotionTransportClear > promotionStop && promotionDestroy > promotionTransportClear,
-  "promotion must clear the transport claim explicitly because client_stop emits no disconnect event");
+assert.doesNotMatch(mqtt, /promote_client_to_publisher/,
+  "source proof must not replace the single transport or introduce another TLS handshake");
 assert.match(weather, /s_status\.reason\s*=\s*"heap_headroom";/,
   "a refused fetch must state the heap-headroom reason");
 const skipBranch = weather.indexOf('"heap_headroom"');

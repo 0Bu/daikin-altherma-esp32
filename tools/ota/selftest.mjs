@@ -555,10 +555,10 @@ try {
       replaceOnce("main/mqtt_ha.cpp",
         "if (!competing_tls_active()) return;",
         "if (true) return;")],
-    ["MQTT promotion leaves a stale transport claim after client stop", () =>
+    ["MQTT leaves a stale transport claim after an acknowledged client stop", () =>
       replaceOnce("main/mqtt_ha.cpp",
-        "s_transport_connecting.store(false, std::memory_order_release);\n    s_client_running.store(false, std::memory_order_release);\n\n    s_connected = false;",
-        "s_transport_connecting.store(true, std::memory_order_release);\n    s_client_running.store(false, std::memory_order_release);\n\n    s_connected = false;")],
+        "s_client_running.store(false, std::memory_order_release);\n        s_transport_connecting.store(false, std::memory_order_release);",
+        "s_client_running.store(false, std::memory_order_release);\n        s_transport_connecting.store(true, std::memory_order_release);")],
     ["OTA starts without waiting for the X10A acknowledgement", () =>
       replaceOnce("main/ota_update.cpp", "if (!wait_for_poll_quiesce())",
         "if (false)")],
@@ -583,9 +583,9 @@ try {
       replaceOnce("main/mqtt_ha.cpp",
         "    mqtt_ota_withdraw_online();\n    const esp_err_t stop_rc = esp_mqtt_client_stop(s_client);",
         "    const esp_err_t stop_rc = esp_mqtt_client_stop(s_client);\n    mqtt_ota_withdraw_online();")],
-    ["the no-LWT subscriber client withdraws installation availability", () =>
+    ["a missing MQTT client withdraws installation availability", () =>
       replaceOnce("main/mqtt_ha.cpp",
-        "s_client_is_publisher.load(std::memory_order_acquire),\n", "true,\n")],
+        "s_client != nullptr,\n", "true,\n")],
     ["a disconnected publisher queues the marker into the outbox the stop deletes", () =>
       replaceOnce("main/mqtt_ha.cpp", "s_connected.load(std::memory_order_acquire)))", "true))")],
     ["the availability withdrawal is not retained", () =>
@@ -635,9 +635,9 @@ try {
     ["the MQTT status reason becomes an allocating string", () =>
       replaceOnce("main/mqtt_ha.cpp", "static const char*              s_error   = \"\";",
         "static std::string             s_error   = \"\";")],
-    ["publisher promotion overwrites MQTT_EVENT_CONNECTED after its start", () =>
-      replaceOnce("main/mqtt_ha.cpp", "diag_printf(\"mqtt: X10A proven",
-        "set_status(false, \"\");\n    diag_printf(\"mqtt: X10A proven")],
+    ["the initial transport loses its retained broker last will", () =>
+      replaceOnce("main/mqtt_ha.cpp", "cfg.session.last_will.retain  = 1;",
+        "cfg.session.last_will.retain  = 0;")],
     ["mqtt_task overwrites MQTT_EVENT_CONNECTED after the initial start", () =>
       replaceOnce("main/mqtt_ha.cpp",
         "transport_resume.wait_s = transport_resume.backoff_s;\n    }\n    for (;;) {",

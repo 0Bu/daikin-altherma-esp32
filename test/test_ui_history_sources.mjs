@@ -58,11 +58,10 @@ assert.match(firmwareHistory,
   "the MQTT witness must own a lightweight recorder that advances the common raster without X10A");
 const referenceFramesAt = mqtt.indexOf("service_reference_frames(ref_config);");
 const circulationHistoryAt = mqtt.indexOf("history_record_circulation();", referenceFramesAt);
-const offlinePublishAt = mqtt.indexOf("if (gate.publish_offline)", circulationHistoryAt);
 const ordinaryPublishAt = mqtt.indexOf("if (gate.publish_cycle)", circulationHistoryAt);
 assert.ok(referenceFramesAt >= 0 && circulationHistoryAt > referenceFramesAt &&
-  offlinePublishAt > circulationHistoryAt && ordinaryPublishAt > offlinePublishAt,
-"circulation history must tick on the subscriber path before every X10A publication gate");
+  ordinaryPublishAt > circulationHistoryAt,
+"circulation history must tick on the independent subscriber path before X10A state publication");
 
 const S = {
   status: { history: {
