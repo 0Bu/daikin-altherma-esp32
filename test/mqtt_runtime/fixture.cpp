@@ -2192,6 +2192,153 @@ void discovery_guard_case(const char* mode) {
     discovery_guard_require_blocked();
 }
 
+void discovery_guard_retry_abandon(bool stop) {
+    discovery_guard_fixture();
+    require(daik::start_current_client(), "DISCOVERY_RETRY_FIXTURE_STARTS_REAL_TRANSPORT_ADAPTER");
+    daik::service_discovery_owner_guard();
+    sdk::ticks += 5000;
+    daik::service_discovery_owner_guard();
+    const std::string topic =
+        daik::s_prefix + "/binary_sensor/" + daik::s_node + "/weather_forecast_available/config";
+    require(!daik::retire_exact_topic(MqttRetirementOwner::PeriodicDiscovery, topic) &&
+                daik::s_retirement_delivery.in_flight(),
+            "DISCOVERY_RETRY_FIXTURE_QUEUES_OWNED_EXACT_DISCOVERY");
+    const int id = sdk::message_id;
+    feed(topic.c_str(), discovery_guard_config(true).c_str(), true);
+    const int writes = sdk::publish_calls;
+    daik::service_requested_topic_cleanup(adapter::cfg);
+    require(sdk::publish_calls == writes && !daik::s_source_cleanup.in_flight() &&
+                daik::s_retirement_delivery.in_flight(),
+            "DISCOVERY_RETRY_LIVE_ITEM_STILL_PROTECTS_GLOBAL_CLEANUP_SLOT");
+    if (stop) {
+        daik::mqtt_transport_pause_for_network_heap();
+        daik::mqtt_transport_pause_if_requested();
+        require(sdk::stop_calls == 1 && !daik::s_client_running &&
+                    !daik::s_retirement_delivery.in_flight() && daik::s_retirement_delivery.busy(),
+                "DISCOVERY_RETRY_STOP_JOINS_TRANSPORT_BEFORE_RELEASING_MESSAGE_ID");
+    } else {
+        cleanup_event(id, MqttCleanupDeliveryOutcome::Deleted);
+        daik::service_source_cleanup_evidence();
+        require(!daik::s_retirement_delivery.in_flight() && daik::s_retirement_delivery.busy(),
+                "DISCOVERY_RETRY_DELETED_EVENT_RETAINS_UNCONFIRMED_OWNER");
+    }
+    require(
+        daik::retire_exact_topic(MqttRetirementOwner::PeriodicDiscovery, topic) &&
+            !daik::s_retirement_delivery.busy() && sdk::publish_calls == writes &&
+            !daik::s_retirement_delivery.take_confirmed(MqttRetirementOwner::PeriodicDiscovery) &&
+            daik::s_discovery_owner_skipped &&
+            (daik::mqtt_retirement_evidence() & daik::RETIRE_OPERATOR_MIGRATION),
+        "DISCOVERY_BLOCKED_RETRY_ABANDONS_EXACT_OWNER_WITHOUT_WRITE_OR_FAKE_PUBACK");
+    if (stop) {
+        const std::string foreign = discovery_guard_config(true);
+        sdk::on_subscribe         = [&topic, &foreign](const char* filter, int sub_id) {
+            if (sub_id < 0) return;
+            discovery_guard_suback(sub_id);
+            if (daik::s_discovery_owner_filters[0] == filter)
+                feed(topic.c_str(), foreign.c_str(), true);
+        };
+        daik::mqtt_transport_resume_after_network_heap();
+        require(daik::start_current_client(), "DISCOVERY_RETRY_STOP_RESTARTS_SAME_CLIENT");
+        daik::service_discovery_owner_guard();
+        require(daik::s_discovery_owner_state == daik::DiscoveryOwnerState::Blocked,
+                "DISCOVERY_RETRY_STOP_REPLAYS_FOREIGN_CONFIG_BEFORE_NEW_DISCOVERY");
+    }
+    reset_cleanup_trace();
+    cleanup_witness::early_ack = true;
+    for (int cycles = 0; cycles < 80; ++cycles) daik::service_requested_topic_cleanup(adapter::cfg);
+    require(accepted_count(daik::s_weather, "") == 1 && accepted_count(daik::s_modbus, "") == 1 &&
+                accepted_count(daik::s_env3, "") == 1 &&
+                !daik::s_source_cleanup.suppress(daik::MqttCleanupSource::Weather) &&
+                !daik::s_source_cleanup.suppress(daik::MqttCleanupSource::Modbus) &&
+                !daik::s_source_cleanup.suppress(daik::MqttCleanupSource::Env3),
+            "DISCOVERY_BLOCKED_RETRY_RELEASE_UNBLOCKS_ALL_RAW_SOURCE_WITHDRAWALS");
+    for (int i = 0; i < sdk::publish_calls; ++i)
+        require(!daik::mqtt_discovery_namespace_topic(sdk::published[i].topic.data(),
+                                                      daik::s_prefix, daik::s_node),
+                "DISCOVERY_BLOCKED_RETRY_NEVER_REQUEUES_FOREIGN_CONFIG_DELETION");
+    sdk::on_subscribe = [](const char*, int sub_id) {
+        if (sub_id >= 0) discovery_guard_suback(sub_id);
+    };
+    daik::on_mqtt(nullptr, "mqtt", MQTT_EVENT_DISCONNECTED, nullptr);
+    daik::on_mqtt(nullptr, "mqtt", MQTT_EVENT_CONNECTED, nullptr);
+    daik::service_discovery_owner_guard();
+    sdk::ticks += 5000;
+    daik::service_discovery_owner_guard();
+    daik::service_discovery_admission_reset();
+    require(daik::discovery_mutation_allowed() && !daik::s_discovery_owner_skipped &&
+                daik::s_periodic_discovery_pending && !daik::s_legacy_fixed_retracted,
+            "DISCOVERY_ABANDONED_CURSOR_REARMS_AFTER_ACTUAL_CLEAN_ADMISSION");
+}
+
+void discovery_guard_retry_protected() {
+    discovery_guard_fixture();
+    sdk::ticks += 5000;
+    daik::service_discovery_owner_guard();
+    const std::string topic = daik::s_prefix + "/sensor/" + daik::s_node + "/device_time/config";
+    require(!daik::retire_exact_topic(MqttRetirementOwner::LegacyFixed, topic),
+            "DISCOVERY_PROTECTED_FIXTURE_STARTS_HELD_DISCOVERY_CURSOR");
+    const int id = sdk::message_id;
+    feed(topic.c_str(), discovery_guard_config(true).c_str(), true);
+    require(!daik::retire_exact_topic(MqttRetirementOwner::PeriodicDiscovery, topic) &&
+                daik::s_retirement_delivery.owner() == MqttRetirementOwner::LegacyFixed &&
+                daik::s_retirement_delivery.in_flight() &&
+                daik::s_retirement_delivery.msg_id() == id,
+            "DISCOVERY_ABANDON_NEVER_RELEASES_DIFFERENT_LIVE_OWNER");
+    cleanup_event(id);
+    require(!daik::retire_exact_topic(MqttRetirementOwner::PeriodicDiscovery, topic) &&
+                daik::s_retirement_delivery.owner() == MqttRetirementOwner::LegacyFixed &&
+                daik::s_retirement_delivery.busy() && !daik::s_retirement_delivery.in_flight(),
+            "DISCOVERY_ABANDON_NEVER_CONSUMES_DIFFERENT_CONFIRMED_OWNER");
+    require(daik::retire_exact_topic(MqttRetirementOwner::LegacyFixed, topic) &&
+                !daik::s_retirement_delivery.busy() && !daik::s_discovery_owner_skipped,
+            "DISCOVERY_MATCHING_REAL_PUBACK_IS_DRAINED_BEFORE_MIGRATION_SKIP");
+    require(!daik::retire_exact_topic(MqttRetirementOwner::LegacyProbe, daik::s_legacy_state),
+            "DISCOVERY_BLOCKED_RAW_PROBE_REMAINS_AN_INDEPENDENT_RETIREMENT");
+    cleanup_event(sdk::message_id, MqttCleanupDeliveryOutcome::Deleted);
+    require(!daik::retire_exact_topic(MqttRetirementOwner::PeriodicDiscovery, topic) &&
+                daik::s_retirement_delivery.owner() == MqttRetirementOwner::LegacyProbe &&
+                !daik::s_retirement_delivery.in_flight() && daik::s_retirement_delivery.busy(),
+            "DISCOVERY_MIGRATION_NEVER_ABANDONS_RETRYABLE_RAW_TOPIC_PROBE");
+    const int writes = sdk::publish_calls;
+    require(!daik::retire_exact_topic(MqttRetirementOwner::LegacyProbe, daik::s_legacy_state) &&
+                sdk::publish_calls == writes + 1 && daik::s_retirement_delivery.in_flight(),
+            "DISCOVERY_BLOCKED_RAW_PROBE_RETRIES_ITS_OWN_EXACT_TOPIC");
+    cleanup_event(sdk::message_id);
+    require(daik::retire_exact_topic(MqttRetirementOwner::LegacyProbe, daik::s_legacy_state),
+            "DISCOVERY_BLOCKED_RAW_PROBE_STILL_REQUIRES_ITS_REAL_PUBACK");
+    daik::on_mqtt(nullptr, "mqtt", MQTT_EVENT_CONNECTED, nullptr);
+    daik::service_discovery_owner_guard();
+    sdk::ticks += 5000;
+    daik::service_discovery_owner_guard();
+    require(!daik::retire_exact_topic(MqttRetirementOwner::PeriodicDiscovery, topic),
+            "DISCOVERY_PENDING_FIXTURE_QUEUES_CURRENT_OWNED_CURSOR");
+    cleanup_event(sdk::message_id, MqttCleanupDeliveryOutcome::Deleted);
+    daik::on_mqtt(nullptr, "mqtt", MQTT_EVENT_CONNECTED, nullptr);
+    require(!daik::retire_exact_topic(MqttRetirementOwner::PeriodicDiscovery, topic) &&
+                daik::s_retirement_delivery.busy() && !daik::s_retirement_delivery.in_flight() &&
+                !daik::s_discovery_owner_skipped,
+            "DISCOVERY_PENDING_ADMISSION_NEVER_ABANDONS_RETRYABLE_CURSOR");
+}
+
+void discovery_guard_retry_legacy_fixed() {
+    discovery_guard_fixture();
+    sdk::ticks += 5000;
+    daik::service_discovery_owner_guard();
+    require(!daik::retract_legacy_fixed() && daik::s_legacy_fixed_step == 0 &&
+                daik::s_retirement_delivery.owner() == MqttRetirementOwner::LegacyFixed &&
+                daik::s_retirement_delivery.in_flight(),
+            "DISCOVERY_LEGACY_FIXED_HOLDS_ITS_UNCHANGED_EXACT_CURSOR");
+    const std::string held = sdk::published[0].topic.data();
+    require(daik::mqtt_discovery_namespace_topic(held, daik::s_prefix, daik::s_node),
+            "DISCOVERY_LEGACY_FIXED_ACTUAL_CURSOR_IS_DISCOVERY_NOT_RAW_STATE");
+    feed(held.c_str(), discovery_guard_config(true).c_str(), true);
+    cleanup_event(sdk::message_id, MqttCleanupDeliveryOutcome::Deleted);
+    require(daik::retract_legacy_fixed() && daik::s_legacy_fixed_retracted &&
+                !daik::s_retirement_delivery.busy() && daik::s_discovery_owner_skipped &&
+                sdk::publish_calls == 1,
+            "DISCOVERY_BLOCKED_EXPIRED_LEGACY_FIXED_CURSOR_IS_MIGRATION_SKIPPED");
+}
+
 std::string discovery_owned_input_payload(const std::string& fields) {
     std::string payload = discovery_guard_config();
     payload.pop_back();
@@ -3653,7 +3800,15 @@ int main(int argc, char** argv) {
     try {
         cJSON_Hooks hooks{json_witness::allocate, json_witness::release};
         cJSON_InitHooks(&hooks);
-        if (std::strcmp(scenario, "discovery_guard_ingress_burst") == 0)
+        if (std::strcmp(scenario, "discovery_guard_retry_deleted") == 0)
+            discovery_guard_retry_abandon(false);
+        else if (std::strcmp(scenario, "discovery_guard_retry_stop") == 0)
+            discovery_guard_retry_abandon(true);
+        else if (std::strcmp(scenario, "discovery_guard_retry_protected") == 0)
+            discovery_guard_retry_protected();
+        else if (std::strcmp(scenario, "discovery_guard_retry_legacy_fixed") == 0)
+            discovery_guard_retry_legacy_fixed();
+        else if (std::strcmp(scenario, "discovery_guard_ingress_burst") == 0)
             discovery_guard_ingress_burst();
         else if (std::strcmp(scenario, "discovery_guard_ingress_exact") == 0)
             discovery_guard_ingress_exact();

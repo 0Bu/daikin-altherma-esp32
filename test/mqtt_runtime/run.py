@@ -81,6 +81,9 @@ scenarios = ['discovery_guard_clean', 'discovery_guard_default', 'discovery_guar
              'discovery_guard_raw_crash_cleanup', 'discovery_guard_raw_crash_notable',
              'discovery_guard_ingress_burst', 'discovery_guard_ingress_exact',
              'discovery_guard_ingress_epoch',
+             'discovery_guard_retry_deleted', 'discovery_guard_retry_stop',
+             'discovery_guard_retry_protected',
+             'discovery_guard_retry_legacy_fixed',
              'discovery_guard_count', 'transport_source_lifecycle', 'independent_source_reconnect',
              'journal_reboot_mid_retirement', 'journal_reboot_after_save',
              'journal_commit_write_through_failure', 'journal_load_errors',
@@ -582,6 +585,28 @@ mutations.append(('discovery-blocked-raw-crash-start-omitted', 'discovery_guard_
                   'publish_crash(false);', '(void)0;',
                   'DISCOVERY_BLOCKED_NORMAL_BOOT_STILL_ACK_CLEANS_OLD_RAW_CRASH', 1))
 mutation_results = {}
+for scenario in ['discovery_guard_retry_deleted', 'discovery_guard_retry_stop']:
+    mutations.append(('discovery-retry-release-omitted-'+scenario, scenario,
+                      'if (blocked) s_retirement_delivery.abandon_discovery_for_operator_migration(owner);',
+                      '(void)blocked;',
+                      'DISCOVERY_BLOCKED_RETRY_ABANDONS_EXACT_OWNER_WITHOUT_WRITE_OR_FAKE_PUBACK', 1))
+mutations.extend([
+    ('discovery-retry-release-steals-slot', 'discovery_guard_retry_protected',
+     'if (blocked) s_retirement_delivery.abandon_discovery_for_operator_migration(owner);',
+     'if (blocked) s_retirement_delivery = {};',
+     'DISCOVERY_ABANDON_NEVER_RELEASES_DIFFERENT_LIVE_OWNER', 1),
+    ('discovery-retry-release-loses-confirmed', 'discovery_guard_retry_protected',
+     'if (blocked) s_retirement_delivery.abandon_discovery_for_operator_migration(owner);',
+     'if (blocked && !s_retirement_delivery.in_flight()) s_retirement_delivery = {};',
+     'DISCOVERY_ABANDON_NEVER_CONSUMES_DIFFERENT_CONFIRMED_OWNER', 1),
+    ('discovery-retry-release-before-blocked', 'discovery_guard_retry_protected',
+     'if (blocked) s_retirement_delivery.abandon_discovery_for_operator_migration(owner);',
+     's_retirement_delivery.abandon_discovery_for_operator_migration(owner);',
+     'DISCOVERY_PENDING_ADMISSION_NEVER_ABANDONS_RETRYABLE_CURSOR', 1),
+    ('discovery-retry-legacy-fixed-release-omitted', 'discovery_guard_retry_legacy_fixed',
+     'if (blocked) s_retirement_delivery.abandon_discovery_for_operator_migration(owner);',
+     '(void)blocked;', 'DISCOVERY_BLOCKED_EXPIRED_LEGACY_FIXED_CURSOR_IS_MIGRATION_SKIPPED', 1),
+])
 mutations.extend([
     ('discovery-ingress-unfiltered', 'discovery_guard_ingress_burst',
      '''!discovery_topic_is_current_input(

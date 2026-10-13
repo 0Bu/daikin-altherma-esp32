@@ -21355,6 +21355,50 @@ static void test_mqtt_retirement() {
     CHECK(!retirement.take_confirmed(MqttRetirementOwner::Profile));
     CHECK(retirement.queued(MqttRetirementOwner::LegacyProbe, 2, 104));
     CHECK(retirement.owner() == MqttRetirementOwner::LegacyProbe);
+    // Keep every raw retained probe retryable after expiry/stop even when discovery cannot be
+    // touched. Only a matching unconfirmed discovery cursor can become an operator migration.
+    for (MqttRetirementOwner owner :
+         {MqttRetirementOwner::None, MqttRetirementOwner::LegacyProbe,
+          MqttRetirementOwner::ModbusProbe, MqttRetirementOwner::WeatherProbe,
+          MqttRetirementOwner::CrashProbe}) {
+        MqttRetirementDelivery probe;
+        CHECK(!probe.abandon_discovery_for_operator_migration(owner));
+        if (owner == MqttRetirementOwner::None) continue;
+        CHECK(probe.queued(owner, 3, 200));
+        CHECK(probe.evidence({3, 200, MqttCleanupDeliveryOutcome::Deleted}));
+        CHECK(!probe.abandon_discovery_for_operator_migration(owner));
+        CHECK(probe.busy() && probe.owner() == owner && !probe.in_flight());
+    }
+    for (MqttRetirementOwner owner :
+         {MqttRetirementOwner::LegacyFixed, MqttRetirementOwner::StaleValues,
+          MqttRetirementOwner::Profile, MqttRetirementOwner::PeriodicDiscovery}) {
+        const MqttRetirementOwner other = owner == MqttRetirementOwner::Profile
+                                              ? MqttRetirementOwner::PeriodicDiscovery
+                                              : MqttRetirementOwner::Profile;
+        for (bool stop : {false, true}) {
+            MqttRetirementDelivery pending;
+            CHECK(!pending.abandon_discovery_for_operator_migration(owner));
+            CHECK(pending.queued(owner, 4, 201));
+            CHECK(!pending.abandon_discovery_for_operator_migration(owner));
+            CHECK(pending.busy() && pending.in_flight() && pending.msg_id() == 201);
+            if (stop)
+                pending.outbox_cleared_after_transport_stop();
+            else
+                CHECK(pending.evidence({4, 201, MqttCleanupDeliveryOutcome::Deleted}));
+            CHECK(!pending.abandon_discovery_for_operator_migration(other));
+            CHECK(pending.owner() == owner && pending.busy() && !pending.in_flight());
+            CHECK(pending.abandon_discovery_for_operator_migration(owner));
+            CHECK(!pending.busy() && pending.msg_id() == -1 && !pending.take_confirmed(owner));
+            CHECK(pending.queued(other, 5, 202));
+        }
+        MqttRetirementDelivery confirmed;
+        CHECK(confirmed.queued(owner, 6, 203));
+        CHECK(confirmed.evidence({6, 203, MqttCleanupDeliveryOutcome::Published}));
+        CHECK(!confirmed.abandon_discovery_for_operator_migration(other));
+        CHECK(!confirmed.abandon_discovery_for_operator_migration(owner));
+        CHECK(confirmed.busy() && confirmed.owner() == owner && !confirmed.in_flight());
+        CHECK(confirmed.take_confirmed(owner));
+    }
 }
 
 static void test_mqtt_retirement_store() {

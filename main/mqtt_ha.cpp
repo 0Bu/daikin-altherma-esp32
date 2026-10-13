@@ -874,9 +874,10 @@ static bool retire_exact_topic(MqttRetirementOwner owner, const std::string& top
     if (discovery_topic_guarded(topic) && !discovery_mutation_allowed()) {
         // A blocked namespace is a migration boundary, not an acknowledged tombstone. Retire
         // cursors may abandon its configs so independent raw-base telemetry keeps progressing.
-        const bool skip = s_discovery_owner_state.load(std::memory_order_acquire) ==
-                              DiscoveryOwnerState::Blocked &&
-                          !s_retirement_delivery.busy();
+        const bool blocked =
+            s_discovery_owner_state.load(std::memory_order_acquire) == DiscoveryOwnerState::Blocked;
+        if (blocked) s_retirement_delivery.abandon_discovery_for_operator_migration(owner);
+        const bool skip = blocked && !s_retirement_delivery.busy();
         s_discovery_owner_skipped |= skip;
         return skip;
     }

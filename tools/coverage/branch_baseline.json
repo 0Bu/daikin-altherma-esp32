@@ -231,6 +231,21 @@
         "test/test_logic.cpp": "fcf93de59a7fde6f38120604637668f527b61679476fc5add1bb9d63e1a699b6"
       },
       "hosted_confirmation": "GCC 15 x86_64 measured locally in Ubuntu 26.04; authoritative GitHub CI pending."
+    },
+    {
+      "runner": "scripts/run-mock-tests.sh --coverage",
+      "compilers": {
+        "clang-17-darwin": "Apple clang version 17.0.0 (clang-1700.6.4.2); arm64",
+        "gcc-13-linux-ubuntu24": "g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0; aarch64",
+        "gcc-15-linux-ubuntu26": "g++-15 (Ubuntu 15.2.0-16ubuntu1) 15.2.0; aarch64",
+        "gcc-15-github-linux-ubuntu26": "g++-15 (Ubuntu 15.2.0-16ubuntu1) 15.2.0; x86_64"
+      },
+      "hosted_confirmation": "The GCC 15 Ubuntu 26 x86_64 inventory was measured in a local Docker container using the hosted profile selector; authoritative GitHub CI confirmation remains required.",
+      "scope": "Matching expired discovery retirement owners can be released for blocked operator migration; in-flight, confirmed, different-owner and raw-probe entries stay protected. All new retirement outcomes are taken; every other compiler inventory, historical ratio and the 95-percent line floor remains unchanged.",
+      "sources": {
+        "main/logic/mqtt_retirement.hpp": "0dbe80bceb64328963029d5f7ad5f9b10adc85ccc1e5ee5020cfee4ff6cac187",
+        "test/test_logic.cpp": "06ea64cf0550e919f4be2af5345862ff6e0d57a92c940ea3d7eb28eac733dbcc"
+      }
     }
   ],
   "method": "Exact taken/outcome inventories are measured by scripts/run-mock-tests.sh --coverage and bound to compiler family, major version and platform; hosted profiles additionally bind the runner image. The gate rejects inventory mismatches and any historical ratio decrease. Updated hosted inventories require authoritative CI confirmation. Historical measurement notes remain in Git; profiles contain the enforced counts. Measurements below identify changed sources and local compiler provenance without changing checker rules or the 95-percent executable-line floor.",
@@ -493,8 +508,8 @@
         "outcomes": 20
       },
       "main/logic/mqtt_retirement.hpp": {
-        "taken": 26,
-        "outcomes": 26
+        "taken": 40,
+        "outcomes": 40
       },
       "main/logic/mqtt_retirement_store.hpp": {
         "taken": 64,
@@ -1019,8 +1034,8 @@
         "taken": 36
       },
       "main/logic/mqtt_retirement.hpp": {
-        "taken": 30,
-        "outcomes": 30
+        "taken": 46,
+        "outcomes": 46
       },
       "main/logic/mqtt_retirement_identity.hpp": {
         "taken": 68,
@@ -1421,8 +1436,8 @@
         "taken": 36
       },
       "main/logic/mqtt_retirement.hpp": {
-        "taken": 30,
-        "outcomes": 30
+        "taken": 46,
+        "outcomes": 46
       },
       "main/logic/mqtt_retirement_identity.hpp": {
         "taken": 68,
@@ -1823,8 +1838,8 @@
         "taken": 36
       },
       "main/logic/mqtt_retirement.hpp": {
-        "taken": 30,
-        "outcomes": 30
+        "taken": 46,
+        "outcomes": 46
       },
       "main/logic/mqtt_retirement_identity.hpp": {
         "taken": 68,

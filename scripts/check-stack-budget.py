@@ -2146,7 +2146,7 @@ def self_test() -> None:
         'bool std::operator==<char, std::char_traits<char> >(std::basic_string_view<char, std::char_traits<char> >, std::basic_string_view<char, std::char_traits<char> >)': 48,
         'daik::capture_reference_frame(esp_mqtt_event_t*)': 64,
         'daik::discovery_topic_is_current_input(std::basic_string_view<char, std::char_traits<char> >)': 64,
-        'daik::discovery_topic_is_current_input(std::basic_string_view<char, std::char_traits<char> >)::{lambda(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&)#1}::operator()(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&) const': 48,
+        'daik::discovery_topic_is_current_input(std::basic_string_view<char, std::char_traits<char> >)::{lambda(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&)\x231}::operator()(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&) const': 48,
         'daik::SemGuard::SemGuard(QueueDefinition*)': 32,
         'daik::SemGuard::~SemGuard()': 32,
         'daik::service_discovery_owner_guard()': 64,
