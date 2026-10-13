@@ -445,6 +445,10 @@ INLINED_MQTT_HELPERS = (
     "mqtt_retirement_record_make",
     "unsubscribe_reference_topic_if_unused",
 )
+INLINED_DISCOVERY_HELPERS = (
+    r"^daik::mqtt_discovery_payload_owned\(",
+    r"^daik::discovery_owner_detail::(?:topic_owned|Parser::availability)\(",
+)
 
 
 class BudgetError(ValueError):
@@ -706,6 +710,8 @@ def parse_frames(disassembly: str, budgets: dict[str, Any] | None = None) -> dic
                         or re.match(r"^_Z[ZN]+4daik(?:12_GLOBAL__N_1)?L?"
                                     + str(len(name)) + name, current)):
                     raise BudgetError(f"symbol {current}: newly outlined MQTT continuation needs budget review")
+            if any(re.match(pattern, current) for pattern in INLINED_DISCOVERY_HELPERS):
+                raise BudgetError(f"symbol {current}: newly outlined discovery continuation needs budget review")
             if re.match(r"^parse_(?:array|object)(?:[.$]|$)", current):
                 raise BudgetError(f"symbol {current}: out-of-line cJSON container needs budget review")
             if re.match(r"^(?:parse_value|parse_string|cJSON_Delete|cJSON_ParseWithLengthOpts)[.$]", current):
@@ -843,7 +849,7 @@ def stack_source_code(source: str) -> str:
 
 def stack_function_body(source: str, name: str) -> str:
     definitions = list(re.finditer(r"\b" + re.escape(name) +
-                                   r"\([^;{}]*\)\s*(?:noexcept\s*)?\{", source))
+                                   r"\([^;{}()]*\)\s*(?:noexcept\s*)?\{", source))
     if len(definitions) != 1:
         raise BudgetError(f"shutdown source: expected one definition of {name}")
     start = definitions[0].end()
@@ -1293,6 +1299,98 @@ def validate_mqtt_retirement_paths(budgets: dict[str, Any]) -> None:
         raise BudgetError("MQTT retirement paths: obsolete synchronous retirement accounting remains")
 
 
+def reviewed_mqtt_discovery_paths() -> dict[str, tuple[str, list[str], dict[str, int], int, int]]:
+    """Independent callback descents, including the JSON depth-nine rejection frame.
+
+    DATA is dispatched after the transport read returns. SUBSCRIBE may instead report
+    ERROR synchronously; its ordinary callback and TLS continuations are separate.
+    The existing 1536-byte library/ROM and 4608-byte TLS envelopes are unchanged.
+    scan_string/skip_ws and constructor/destructor sibling sums are conservative.
+    """
+    event = ["sdk_mqtt_task", "mqtt_event_loop", "mqtt_callback"]
+    captured = event + ["mqtt_owner_capture"]
+    parser = captured + ["mqtt_owner_parse"]
+    paths: dict[str, tuple[str, list[str], dict[str, int], int, int]] = {}
+
+    def callback(name: str, members: list[str], recursion: int = 0) -> None:
+        paths["sdk_mqtt_discovery_" + name] = (
+            "sdk_mqtt", members,
+            {"ota_manifest_skip_value": recursion} if recursion else {}, 1536, 5120)
+
+    callback("namespace", captured + ["mqtt_owner_namespace", "mqtt_owner_view_substr",
+                                       "mqtt_owner_view_equal"])
+    callback("blocked", captured + ["mqtt_owner_block"])
+    scan = ["ota_manifest_skip_value", "mqtt_owner_scan_string", "mqtt_owner_skip_ws"]
+    # Source-bound entry depths are one (root/device) and two (availability entry).
+    # Depths 1..8 plus the rejected depth 9 need nine simultaneous frames, not eight.
+    callback("root_json", parser + scan, 9)
+    callback("device_json", parser + ["mqtt_owner_device"] + scan, 9)
+    callback("availability_json", parser + ["mqtt_owner_availability_entry"] + scan, 8)
+    identifiers = parser + ["mqtt_owner_device", "mqtt_owner_identifiers"]
+    callback("identifier_string", identifiers + ["mqtt_owner_string", "mqtt_owner_scan_string",
+                                                   "mqtt_owner_skip_ws"])
+    callback("identifier_compare", identifiers + ["mqtt_owner_equals", "mqtt_owner_string_byte",
+                                                    "mqtt_owner_view_substr", "mqtt_owner_view_equal"])
+    callback("device_key", parser + ["mqtt_owner_device", "mqtt_owner_key", "mqtt_owner_string",
+                                       "mqtt_owner_scan_string", "mqtt_owner_skip_ws"])
+    callback("identifier_token", identifiers + ["mqtt_owner_token", "mqtt_owner_skip_ws"])
+    callback("identifier_end", identifiers + ["mqtt_owner_end", "mqtt_owner_skip_ws"])
+    callback("availability_topic", parser + ["mqtt_owner_availability_entry", "mqtt_owner_owned_topic",
+                                               "mqtt_owner_topic_equals", "mqtt_owner_string_byte"])
+    callback("input_filter", event + ["mqtt_input_capture", "mqtt_input_filter", "mqtt_input_match",
+                                        "mqtt_owner_view_equal", "mqtt_input_lock", "mqtt_input_unlock"])
+    paths["mqtt_discovery_owner_subscribe_tls"] = (
+        "mqtt", ["mqtt_task", "mqtt_owner_service"], {}, SDK_TLS_LIMIT, 6144)
+    paths["mqtt_discovery_owner_subscribe_callback"] = (
+        "mqtt", ["mqtt_task", "mqtt_owner_service", "sdk_subscribe_single", "sdk_subscribe_multiple",
+                 "tls_esp_mqtt_write", "mqtt_event_loop", "mqtt_callback", "diag_log", "diag_syslog",
+                 "sdk_queue_send", "sdk_queue_remove_event", "sdk_queue_critical", "runtime_task_entry"],
+        {}, 1536, 5120)
+    return paths
+
+
+def validate_mqtt_discovery_paths(budgets: dict[str, Any], mqtt_source: str,
+                                  owner_source: str, json_source: str) -> None:
+    for owner, allocation in (("mqtt", 7168), ("sdk_mqtt", 6144)):
+        task = budgets["tasks"][owner]
+        if task["stack_bytes"] != allocation or task["reserve_bytes"] != 1024:
+            raise BudgetError("MQTT discovery paths: task allocation/reserve changed")
+    for name, (owner, members, multipliers, base, maximum) in reviewed_mqtt_discovery_paths().items():
+        rule = budgets["paths"].get(name)
+        if (rule is None or name not in budgets["tasks"][owner]["paths"]
+                or rule["symbols"] != members or rule["multipliers"] != multipliers
+                or rule["base_bytes"] != base or rule["max_bytes"] != maximum):
+            raise BudgetError(f"MQTT discovery path {name}: caller/owner/recursion/envelope changed")
+    mqtt = stack_source_code(mqtt_source)
+    for parent, child in (("on_mqtt", "capture_discovery_owner_frame"),
+                          ("on_mqtt", "capture_reference_frame"),
+                          ("capture_discovery_owner_frame", "mqtt_discovery_payload_owned"),
+                          ("capture_reference_frame", "discovery_topic_is_current_input"),
+                          ("capture_reference_frame", "mqtt_discovery_namespace_topic"),
+                          ("mqtt_task", "service_discovery_owner_guard"),
+                          ("service_discovery_owner_guard", "esp_mqtt_client_subscribe")):
+        if len(re.findall(r"\b" + child + r"\s*\(", stack_function_body(mqtt, parent))) != 1:
+            raise BudgetError(f"MQTT discovery source: {parent}/{child} caller changed")
+    callback = stack_function_body(mqtt, "on_mqtt")
+    data = re.split(r"\bcase\s+MQTT_EVENT_DATA\s*:", callback)
+    if (len(data) != 2 or "capture_discovery_owner_frame" in data[0]
+            or not re.search(r"capture_discovery_owner_frame\(e\);\s*capture_reference_frame\(e\);", data[1])):
+        raise BudgetError("MQTT discovery source: parser/input callbacks must remain DATA-only siblings")
+    if len(re.findall(r"esp_mqtt_client_register_event\([^;]+\bon_mqtt\s*,\s*nullptr\)", mqtt)) != 1:
+        raise BudgetError("MQTT discovery source: SDK event registration changed")
+    source = stack_source_code(owner_source)
+    expected_depths = {"parse": ["1"], "device": ["1"], "availability_entry": ["2"]}
+    for method, depths in expected_depths.items():
+        body = stack_function_body(source, method)
+        if re.findall(r"detail::skip_json_value\(json,\s*len,\s*pos,\s*([0-9]+)\)", body) != depths:
+            raise BudgetError(f"MQTT discovery source: {method} JSON entry depth changed")
+    primitive = stack_function_body(stack_source_code(json_source), "skip_json_value")
+    if (re.findall(r"\bMAX_JSON_DEPTH\s*=\s*([0-9]+)\s*;", primitive) != ["8"]
+            or not re.search(r"if\s*\(pos\s*>=\s*len\s*\|\|\s*depth\s*>\s*MAX_JSON_DEPTH\)\s*return\s+false;", primitive)
+            or len(re.findall(r"skip_json_value\(json,\s*len,\s*pos,\s*depth\s*\+\s*1\)", primitive)) != 2):
+        raise BudgetError("MQTT discovery source: bounded JSON recursion/rejection frame changed")
+
+
 def validate_source_contract(budgets: dict[str, Any]) -> None:
     sources = {path: (REPO / path).read_text(encoding="utf-8")
                for path, _ in TASK_ALLOCATIONS.values()}
@@ -1306,6 +1404,10 @@ def validate_source_contract(budgets: dict[str, Any]) -> None:
     validate_task_stacks(budgets, sources)
     validate_discovery_builder_paths(budgets)
     validate_mqtt_retirement_paths(budgets)
+    validate_mqtt_discovery_paths(
+        budgets, sources["main/mqtt_ha.cpp"],
+        (REPO / "main/logic/mqtt_discovery_owner.hpp").read_text(encoding="utf-8"),
+        (REPO / "main/logic/ota_manifest.hpp").read_text(encoding="utf-8"))
     validate_http_stack(budgets, (REPO / "main/http_server.cpp").read_text(encoding="utf-8"))
     validate_status_diagnosis_paths(budgets, sources)
     validate_shutdown_paths(budgets, sources)
@@ -2021,6 +2123,33 @@ def self_test() -> None:
     # a packed-prologue mutation can also replace an unrelated first instruction at 0x220.
     # Exact current MQTT/journal continuation fixture; omission and growth are rejected below.
     extra_frames.update({
+        'esp_event_loop_run': 80,
+        'daik::on_mqtt(void*, char const*, long, void*)': 80,
+        'daik::capture_discovery_owner_frame(esp_mqtt_event_t*)': 96,
+        'daik::mqtt_discovery_namespace_topic(std::basic_string_view<char, std::char_traits<char> >, std::basic_string_view<char, std::char_traits<char> >, std::basic_string_view<char, std::char_traits<char> >)': 112,
+        'daik::discovery_owner_block()': 32,
+        'daik::discovery_owner_detail::Parser::parse()': 64,
+        'daik::discovery_owner_detail::Parser::device()': 64,
+        'daik::discovery_owner_detail::Parser::identifiers()': 64,
+        'daik::discovery_owner_detail::Parser::availability_entry()': 48,
+        'daik::discovery_owner_detail::Parser::owned_topic(bool)': 64,
+        'daik::discovery_owner_detail::Parser::key(std::basic_string_view<char, std::char_traits<char> >&)': 48,
+        'daik::discovery_owner_detail::Parser::string(std::basic_string_view<char, std::char_traits<char> >&)': 64,
+        'daik::discovery_owner_detail::Parser::token(char)': 48,
+        'daik::discovery_owner_detail::Parser::end(char)': 48,
+        'daik::discovery_owner_detail::equals(std::basic_string_view<char, std::char_traits<char> >, std::basic_string_view<char, std::char_traits<char> >)': 64,
+        'daik::discovery_owner_detail::topic_equals(std::basic_string_view<char, std::char_traits<char> >, std::basic_string_view<char, std::char_traits<char> >, std::basic_string_view<char, std::char_traits<char> >)': 80,
+        'daik::discovery_owner_detail::string_byte(std::basic_string_view<char, std::char_traits<char> >, unsigned int&, char&)': 48,
+        'daik::detail::scan_string(char const*, unsigned int, unsigned int, unsigned int&, unsigned int&, unsigned int&)': 48,
+        'daik::detail::skip_ws(char const*, unsigned int, unsigned int&)': 32,
+        'std::basic_string_view<char, std::char_traits<char> >::substr(unsigned int, unsigned int) const': 48,
+        'bool std::operator==<char, std::char_traits<char> >(std::basic_string_view<char, std::char_traits<char> >, std::basic_string_view<char, std::char_traits<char> >)': 48,
+        'daik::capture_reference_frame(esp_mqtt_event_t*)': 64,
+        'daik::discovery_topic_is_current_input(std::basic_string_view<char, std::char_traits<char> >)': 64,
+        'daik::discovery_topic_is_current_input(std::basic_string_view<char, std::char_traits<char> >)::{lambda(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&)\x231}::operator()(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&) const': 48,
+        'daik::SemGuard::SemGuard(QueueDefinition*)': 32,
+        'daik::SemGuard::~SemGuard()': 32,
+        'daik::service_discovery_owner_guard()': 64,
         'daik::retract_stale_values(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&)': 144,
         'daik::retract_profile_cutover(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&)': 176,
         'daik::service_pending_retirement()': 64,
@@ -2203,6 +2332,64 @@ def self_test() -> None:
     assert selected["path:httpd_config_save_link"] == 8000
     assert selected["path:httpd_wifi_scan"] == 5248
     assert selected["path:httpd_mqtt_tls"] == 7968
+
+    discovery_sources = [(REPO / name).read_text(encoding="utf-8") for name in (
+        "main/mqtt_ha.cpp", "main/logic/mqtt_discovery_owner.hpp", "main/logic/ota_manifest.hpp")]
+    validate_mqtt_discovery_paths(budgets, *discovery_sources)
+    validate_mqtt_discovery_paths(budgets, *(re.sub(r"\s+", " \n ", stack_source_code(text))
+                                            for text in discovery_sources))
+    assert selected["path:sdk_mqtt_discovery_device_json"] == 2672
+    discovery_controls = 0
+    for name, (owner, members, multipliers, _, _) in reviewed_mqtt_discovery_paths().items():
+        for mutation in ("path", "owner", "member", "recursion"):
+            if mutation == "recursion" and not multipliers:
+                continue
+            changed = json.loads(json.dumps(budgets))
+            if mutation == "path":
+                del changed["paths"][name]
+            elif mutation == "owner":
+                changed["tasks"][owner]["paths"].remove(name)
+            elif mutation == "member":
+                changed["paths"][name]["symbols"].remove(members[-1])
+            else:
+                changed["paths"][name]["multipliers"]["ota_manifest_skip_value"] -= 1
+            try:
+                validate_mqtt_discovery_paths(changed, *discovery_sources)
+            except BudgetError as exc:
+                assert "MQTT discovery path" in str(exc)
+            else:
+                raise AssertionError(f"discovery model accepted omitted {mutation} from {name}")
+            discovery_controls += 1
+    for index, original, replacement in (
+        (0, "capture_discovery_owner_frame(e);", "other_capture(e);"),
+        (0, "service_discovery_owner_guard();", "other_service();"),
+        (0, "!discovery_topic_is_current_input(", "!other_input_filter("),
+        (1, "skip_json_value(json, len, pos, 1)", "skip_json_value(json, len, pos, 0)"),
+        (1, "skip_json_value(json, len, pos, 2)", "skip_json_value(json, len, pos, 0)"),
+        (2, "MAX_JSON_DEPTH = 8", "MAX_JSON_DEPTH = 9"),
+        (2, "depth > MAX_JSON_DEPTH", "depth >= MAX_JSON_DEPTH"),
+        (2, "depth + 1", "depth"),
+    ):
+        changed_sources = list(discovery_sources)
+        changed_sources[index] = changed_sources[index].replace(original, replacement)
+        assert changed_sources[index] != discovery_sources[index]
+        try:
+            validate_mqtt_discovery_paths(budgets, *changed_sources)
+        except BudgetError as exc:
+            assert "MQTT discovery source" in str(exc)
+        else:
+            raise AssertionError(f"discovery model accepted changed caller/depth: {original}")
+        discovery_controls += 1
+    for helper in ("daik::mqtt_discovery_payload_owned()",
+                   "daik::discovery_owner_detail::Parser::availability()",
+                   "daik::discovery_owner_detail::topic_owned()"):
+        try:
+            parse_frames(fixture + f"\n00005000 <{helper}>:\n5000: 004136 entry a1, 32\n", budgets)
+        except BudgetError as exc:
+            assert "newly outlined discovery" in str(exc)
+        else:
+            raise AssertionError(f"discovery model accepted unbudgeted outlined helper {helper}")
+        discovery_controls += 1
 
     retirement_controls = 0
     required_retirement = reviewed_mqtt_retirement_paths()
@@ -3256,6 +3443,7 @@ def self_test() -> None:
           f"{tls_source_controls} TLS-client-source, {sdk_recursion_controls} SDK-recursion, "
           f"{integer_disassembly_controls} integer-disassembly, {integer_source_controls} integer-source/path, "
           f"{retirement_controls} MQTT-retirement/SDK/codec path, "
+          f"{discovery_controls} MQTT-discovery/source/depth path, "
           f"{diagnosis_controls} diagnosis-source/path, "
           f"{numeric_disassembly_controls} diagnosis-numeric-calls, "
           f"{shutdown_controls} shutdown-source/path, "

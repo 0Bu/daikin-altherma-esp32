@@ -1928,6 +1928,114 @@
     "sdk_mqtt_enqueue_api": {
       "pattern": "^esp_mqtt_client_enqueue$",
       "max_bytes": 128
+    },
+    "mqtt_event_loop": {
+      "pattern": "^esp_event_loop_run$",
+      "max_bytes": 80
+    },
+    "mqtt_callback": {
+      "pattern": "^daik::on_mqtt\\(",
+      "max_bytes": 80
+    },
+    "mqtt_owner_capture": {
+      "pattern": "^daik::capture_discovery_owner_frame\\(",
+      "max_bytes": 96
+    },
+    "mqtt_owner_namespace": {
+      "pattern": "^daik::mqtt_discovery_namespace_topic\\(",
+      "max_bytes": 112
+    },
+    "mqtt_owner_block": {
+      "pattern": "^daik::discovery_owner_block\\(",
+      "max_bytes": 32
+    },
+    "mqtt_owner_parse": {
+      "pattern": "^daik::discovery_owner_detail::Parser::parse\\(",
+      "max_bytes": 64
+    },
+    "mqtt_owner_device": {
+      "pattern": "^daik::discovery_owner_detail::Parser::device\\(",
+      "max_bytes": 64
+    },
+    "mqtt_owner_identifiers": {
+      "pattern": "^daik::discovery_owner_detail::Parser::identifiers\\(",
+      "max_bytes": 64
+    },
+    "mqtt_owner_availability_entry": {
+      "pattern": "^daik::discovery_owner_detail::Parser::availability_entry\\(",
+      "max_bytes": 48
+    },
+    "mqtt_owner_owned_topic": {
+      "pattern": "^daik::discovery_owner_detail::Parser::owned_topic\\(",
+      "max_bytes": 64
+    },
+    "mqtt_owner_key": {
+      "pattern": "^daik::discovery_owner_detail::Parser::key\\(",
+      "max_bytes": 48
+    },
+    "mqtt_owner_string": {
+      "pattern": "^daik::discovery_owner_detail::Parser::string\\(",
+      "max_bytes": 64
+    },
+    "mqtt_owner_token": {
+      "pattern": "^daik::discovery_owner_detail::Parser::token\\(",
+      "max_bytes": 48
+    },
+    "mqtt_owner_end": {
+      "pattern": "^daik::discovery_owner_detail::Parser::end\\(",
+      "max_bytes": 48
+    },
+    "mqtt_owner_equals": {
+      "pattern": "^daik::discovery_owner_detail::equals\\(",
+      "max_bytes": 64
+    },
+    "mqtt_owner_topic_equals": {
+      "pattern": "^daik::discovery_owner_detail::topic_equals\\(",
+      "max_bytes": 80
+    },
+    "mqtt_owner_string_byte": {
+      "pattern": "^daik::discovery_owner_detail::string_byte\\(",
+      "max_bytes": 48
+    },
+    "mqtt_owner_scan_string": {
+      "pattern": "^daik::detail::scan_string\\(",
+      "max_bytes": 48
+    },
+    "mqtt_owner_skip_ws": {
+      "pattern": "^daik::detail::skip_ws\\(",
+      "max_bytes": 32
+    },
+    "mqtt_owner_view_substr": {
+      "pattern": "^std::basic_string_view<char, std::char_traits<char> >::substr\\(",
+      "max_bytes": 48
+    },
+    "mqtt_owner_view_equal": {
+      "pattern": "^bool std::operator==<char, std::char_traits<char> >\\(",
+      "max_bytes": 48
+    },
+    "mqtt_input_capture": {
+      "pattern": "^daik::capture_reference_frame\\(",
+      "max_bytes": 64
+    },
+    "mqtt_input_filter": {
+      "pattern": "^daik::discovery_topic_is_current_input\\((?!.*\\{lambda)",
+      "max_bytes": 64
+    },
+    "mqtt_input_match": {
+      "pattern": "^daik::discovery_topic_is_current_input\\(.*\\{lambda.*::operator\\(\\)",
+      "max_bytes": 48
+    },
+    "mqtt_input_lock": {
+      "pattern": "^daik::SemGuard::SemGuard\\(QueueDefinition\\*\\)$",
+      "max_bytes": 32
+    },
+    "mqtt_input_unlock": {
+      "pattern": "^daik::SemGuard::~SemGuard\\(\\)$",
+      "max_bytes": 32
+    },
+    "mqtt_owner_service": {
+      "pattern": "^daik::service_discovery_owner_guard\\(",
+      "max_bytes": 64
     }
   },
   "paths": {
@@ -4440,6 +4548,230 @@
       "multipliers": {},
       "base_bytes": 1536,
       "max_bytes": 5120
+    },
+    "sdk_mqtt_discovery_namespace": {
+      "symbols": [
+        "sdk_mqtt_task",
+        "mqtt_event_loop",
+        "mqtt_callback",
+        "mqtt_owner_capture",
+        "mqtt_owner_namespace",
+        "mqtt_owner_view_substr",
+        "mqtt_owner_view_equal"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "sdk_mqtt_discovery_blocked": {
+      "symbols": [
+        "sdk_mqtt_task",
+        "mqtt_event_loop",
+        "mqtt_callback",
+        "mqtt_owner_capture",
+        "mqtt_owner_block"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "sdk_mqtt_discovery_root_json": {
+      "symbols": [
+        "sdk_mqtt_task",
+        "mqtt_event_loop",
+        "mqtt_callback",
+        "mqtt_owner_capture",
+        "mqtt_owner_parse",
+        "ota_manifest_skip_value",
+        "mqtt_owner_scan_string",
+        "mqtt_owner_skip_ws"
+      ],
+      "multipliers": {
+        "ota_manifest_skip_value": 9
+      },
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "sdk_mqtt_discovery_device_json": {
+      "symbols": [
+        "sdk_mqtt_task",
+        "mqtt_event_loop",
+        "mqtt_callback",
+        "mqtt_owner_capture",
+        "mqtt_owner_parse",
+        "mqtt_owner_device",
+        "ota_manifest_skip_value",
+        "mqtt_owner_scan_string",
+        "mqtt_owner_skip_ws"
+      ],
+      "multipliers": {
+        "ota_manifest_skip_value": 9
+      },
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "sdk_mqtt_discovery_availability_json": {
+      "symbols": [
+        "sdk_mqtt_task",
+        "mqtt_event_loop",
+        "mqtt_callback",
+        "mqtt_owner_capture",
+        "mqtt_owner_parse",
+        "mqtt_owner_availability_entry",
+        "ota_manifest_skip_value",
+        "mqtt_owner_scan_string",
+        "mqtt_owner_skip_ws"
+      ],
+      "multipliers": {
+        "ota_manifest_skip_value": 8
+      },
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "sdk_mqtt_discovery_identifier_string": {
+      "symbols": [
+        "sdk_mqtt_task",
+        "mqtt_event_loop",
+        "mqtt_callback",
+        "mqtt_owner_capture",
+        "mqtt_owner_parse",
+        "mqtt_owner_device",
+        "mqtt_owner_identifiers",
+        "mqtt_owner_string",
+        "mqtt_owner_scan_string",
+        "mqtt_owner_skip_ws"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "sdk_mqtt_discovery_identifier_compare": {
+      "symbols": [
+        "sdk_mqtt_task",
+        "mqtt_event_loop",
+        "mqtt_callback",
+        "mqtt_owner_capture",
+        "mqtt_owner_parse",
+        "mqtt_owner_device",
+        "mqtt_owner_identifiers",
+        "mqtt_owner_equals",
+        "mqtt_owner_string_byte",
+        "mqtt_owner_view_substr",
+        "mqtt_owner_view_equal"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "sdk_mqtt_discovery_device_key": {
+      "symbols": [
+        "sdk_mqtt_task",
+        "mqtt_event_loop",
+        "mqtt_callback",
+        "mqtt_owner_capture",
+        "mqtt_owner_parse",
+        "mqtt_owner_device",
+        "mqtt_owner_key",
+        "mqtt_owner_string",
+        "mqtt_owner_scan_string",
+        "mqtt_owner_skip_ws"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "sdk_mqtt_discovery_identifier_token": {
+      "symbols": [
+        "sdk_mqtt_task",
+        "mqtt_event_loop",
+        "mqtt_callback",
+        "mqtt_owner_capture",
+        "mqtt_owner_parse",
+        "mqtt_owner_device",
+        "mqtt_owner_identifiers",
+        "mqtt_owner_token",
+        "mqtt_owner_skip_ws"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "sdk_mqtt_discovery_identifier_end": {
+      "symbols": [
+        "sdk_mqtt_task",
+        "mqtt_event_loop",
+        "mqtt_callback",
+        "mqtt_owner_capture",
+        "mqtt_owner_parse",
+        "mqtt_owner_device",
+        "mqtt_owner_identifiers",
+        "mqtt_owner_end",
+        "mqtt_owner_skip_ws"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "sdk_mqtt_discovery_availability_topic": {
+      "symbols": [
+        "sdk_mqtt_task",
+        "mqtt_event_loop",
+        "mqtt_callback",
+        "mqtt_owner_capture",
+        "mqtt_owner_parse",
+        "mqtt_owner_availability_entry",
+        "mqtt_owner_owned_topic",
+        "mqtt_owner_topic_equals",
+        "mqtt_owner_string_byte"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "sdk_mqtt_discovery_input_filter": {
+      "symbols": [
+        "sdk_mqtt_task",
+        "mqtt_event_loop",
+        "mqtt_callback",
+        "mqtt_input_capture",
+        "mqtt_input_filter",
+        "mqtt_input_match",
+        "mqtt_owner_view_equal",
+        "mqtt_input_lock",
+        "mqtt_input_unlock"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "mqtt_discovery_owner_subscribe_tls": {
+      "symbols": [
+        "mqtt_task",
+        "mqtt_owner_service"
+      ],
+      "multipliers": {},
+      "base_bytes": 4608,
+      "max_bytes": 6144
+    },
+    "mqtt_discovery_owner_subscribe_callback": {
+      "symbols": [
+        "mqtt_task",
+        "mqtt_owner_service",
+        "sdk_subscribe_single",
+        "sdk_subscribe_multiple",
+        "tls_esp_mqtt_write",
+        "mqtt_event_loop",
+        "mqtt_callback",
+        "diag_log",
+        "diag_syslog",
+        "sdk_queue_send",
+        "sdk_queue_remove_event",
+        "sdk_queue_critical",
+        "runtime_task_entry"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
     }
   },
   "tasks": {
@@ -4581,7 +4913,9 @@
         "mqtt_retirement_discovery_load_open",
         "mqtt_retirement_discovery_load_size",
         "mqtt_retirement_discovery_load_read",
-        "mqtt_retirement_discovery_load_close"
+        "mqtt_retirement_discovery_load_close",
+        "mqtt_discovery_owner_subscribe_tls",
+        "mqtt_discovery_owner_subscribe_callback"
       ]
     },
     "poll": {
@@ -4712,7 +5046,19 @@
       "stack_bytes": 6144,
       "reserve_bytes": 1024,
       "paths": [
-        "sdk_mqtt_tls"
+        "sdk_mqtt_tls",
+        "sdk_mqtt_discovery_namespace",
+        "sdk_mqtt_discovery_blocked",
+        "sdk_mqtt_discovery_root_json",
+        "sdk_mqtt_discovery_device_json",
+        "sdk_mqtt_discovery_availability_json",
+        "sdk_mqtt_discovery_identifier_string",
+        "sdk_mqtt_discovery_identifier_compare",
+        "sdk_mqtt_discovery_device_key",
+        "sdk_mqtt_discovery_identifier_token",
+        "sdk_mqtt_discovery_identifier_end",
+        "sdk_mqtt_discovery_availability_topic",
+        "sdk_mqtt_discovery_input_filter"
       ]
     }
   },

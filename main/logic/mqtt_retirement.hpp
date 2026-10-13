@@ -48,6 +48,22 @@ public:
         return true;
     }
 
+    // A proven foreign discovery namespace forbids retrying this deletion. Only its matching,
+    // retryable discovery owner may abandon the cursor for an explicit operator migration. This
+    // is neither a broker acknowledgement nor deletion evidence; raw-topic probes remain owned.
+    // The caller retains the exact discovery cursor while this owner is held; expiry/stop cannot
+    // advance it. Each discovery owner has one such cursor and never owns a raw-topic probe.
+    bool abandon_discovery_for_operator_migration(MqttRetirementOwner owner) noexcept {
+        const bool discovery = owner == MqttRetirementOwner::LegacyFixed ||
+                               owner == MqttRetirementOwner::StaleValues ||
+                               owner == MqttRetirementOwner::Profile ||
+                               owner == MqttRetirementOwner::PeriodicDiscovery;
+        if (!discovery || owner_ != owner || msg_id_ >= 0 || confirmed_) return false;
+        owner_ = MqttRetirementOwner::None;
+        epoch_ = 0;
+        return true;
+    }
+
     // Only after the transport producer stopped and its outbox was actually cleared. Preserve
     // the owner/cursor; its same exact topic is requeued on resume or a replacement epoch.
     void outbox_cleared_after_transport_stop() noexcept {

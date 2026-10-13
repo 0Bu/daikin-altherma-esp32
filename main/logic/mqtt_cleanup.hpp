@@ -40,6 +40,7 @@ struct MqttCleanupAction {
 struct MqttCleanupCompletion {
     MqttCleanupSource source       = MqttCleanupSource::None;
     bool              env3_enabled = false;
+    bool              discovery_skipped = false;
 
     constexpr explicit operator bool() const { return source != MqttCleanupSource::None; }
 };
@@ -138,6 +139,7 @@ public:
             if (active_ == MqttCleanupSource::None) return {};
             next_step_           = 0;
             active_env3_enabled_ = env3_enabled;
+            active_discovery_skipped_ = false;
         }
 
         if (next_step_ == 0) return {active_, MqttCleanupTopic::State, 0};
@@ -165,13 +167,19 @@ public:
             evidence.client_epoch != client_epoch_ || evidence.msg_id != in_flight_id_)
             return false;
         in_flight_id_ = -1;
-        ++next_step_;
-        if (next_step_ < active_step_count()) return true;
+        advance_step();
+        return true;
+    }
 
-        completion_ = {active_, active_env3_enabled_};
-        completed_this_cycle_ |= mqtt_cleanup_bit(active_);
-        active_    = MqttCleanupSource::None;
-        next_step_ = 0;
+    // A foreign/unproven discovery namespace is an operator migration boundary, not a
+    // delivered tombstone. Release only the selected discovery step so independent telemetry
+    // can resume; never skip a raw-base state withdrawal or an item already owned by the outbox.
+    bool skip_discovery_for_operator_migration() noexcept {
+        if (active_ == MqttCleanupSource::None || in_flight_id_ >= 0 || next_step_ == 0 ||
+            next_step_ >= active_step_count())
+            return false;
+        active_discovery_skipped_ = true;
+        advance_step();
         return true;
     }
 
@@ -212,6 +220,14 @@ public:
     uint8_t           next_step() const noexcept { return next_step_; }
 
 private:
+    void advance_step() noexcept {
+        ++next_step_;
+        if (next_step_ < active_step_count()) return;
+        completion_ = {active_, active_env3_enabled_, active_discovery_skipped_};
+        completed_this_cycle_ |= mqtt_cleanup_bit(active_);
+        active_    = MqttCleanupSource::None;
+        next_step_ = 0;
+    }
     MqttCleanupSource take_next_pending() noexcept {
         for (MqttCleanupSource source :
              {MqttCleanupSource::Weather, MqttCleanupSource::Modbus, MqttCleanupSource::Env3}) {
@@ -243,6 +259,7 @@ private:
     MqttCleanupSource     active_               = MqttCleanupSource::None;
     uint8_t               next_step_            = 0;
     bool                  active_env3_enabled_  = false;
+    bool                  active_discovery_skipped_ = false;
     int                   in_flight_id_         = -1;
     uint32_t              client_epoch_         = 0;
     MqttCleanupCompletion completion_;

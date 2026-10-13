@@ -34,12 +34,15 @@ using esp_event_base_t       = const char*;
 using esp_mqtt_event_id_t    = int;
 constexpr int MQTT_EVENT_ANY = -1, MQTT_EVENT_BEFORE_CONNECT = 1, MQTT_EVENT_CONNECTED = 2,
               MQTT_EVENT_DISCONNECTED = 3, MQTT_EVENT_ERROR = 4, MQTT_EVENT_PUBLISHED = 5,
-              MQTT_EVENT_DELETED = 6, MQTT_EVENT_DATA = 7, MQTT_ERROR_TYPE_TCP_TRANSPORT = 1,
-              MQTT_CONNECTION_ACCEPTED = 0;
+              MQTT_EVENT_DELETED = 6, MQTT_EVENT_DATA = 7, MQTT_EVENT_SUBSCRIBED = 8,
+              MQTT_ERROR_TYPE_TCP_TRANSPORT = 1, MQTT_CONNECTION_ACCEPTED = 0,
+              MQTT_ERROR_TYPE_SUBSCRIBE_FAILED = 2;
 struct esp_mqtt_error_codes_t {
     int error_type = 0, connect_return_code = 0;
 };
+struct FakeMqtt;
 struct esp_mqtt_event_t {
+    FakeMqtt*               client         = nullptr;
     char*                   topic          = nullptr;
     int                     topic_len      = 0;
     char*                   data           = nullptr;
