@@ -85,7 +85,10 @@ scenarios = ['ref_oom_recovery', 'circulation_oom_recovery', 'reconfigure_config
              'probe_active_replacement', 'probe_active_replacement_retire_rejection',
              'probe_saved_config_without_owner', 'probe_active_shared_prior_owner',
              'sdk_event_stack_owner', 'outgoing_heartbeat', 'outgoing_weather',
-             'outgoing_curve', 'scalar_snapshot_helpers']
+             'outgoing_curve', 'scalar_snapshot_helpers', 'discovery_topic_roundtrip',
+             'callback_fragments', 'callback_payload_bounds', 'callback_epoch_cutover',
+             'callback_queue_full', 'callback_timestamp_order', 'probe_capture_generation',
+             'probe_proof_expiry']
 binary = compile('production-mqtt', frozen)
 deps.update([source_path, CJSON/'cJSON.c', CJSON/'cJSON.h', lock_path, HERE/'run.py'])
 inputs_before = {path: digest(path) for path in deps if path.is_file()}
@@ -96,6 +99,19 @@ for scenario in scenarios:
     print(result.stdout.strip())
 
 mutations = [
+    ('probe-predecessor-generation', 'probe_capture_generation',
+     'frame.probe_generation != s_circulation_probe.generation ||', '',
+     'PRETEST_QUEUED_FRAME_CANNOT_PROVE_SUCCESSOR_TEST', 1),
+    ('probe-original-observation-expiry', 'probe_proof_expiry',
+     's_circulation_probe.clock.current(now_unix_s, now_ms, candidate.max_age_s) &&',
+     '(static_cast<void>(now_unix_s), static_cast<void>(now_ms), true) &&',
+     'PROOF_EXPIRES_WITH_ORIGINAL_OBSERVATION', 1),
+    ('probe-arrival-as-now', 'probe_proof_expiry',
+     '''frame.received_ms, now_unix_s,
+                               static_cast<uint64_t>(esp_timer_get_time() / 1000),''',
+     '''frame.received_ms, (static_cast<void>(now_unix_s), frame.received_unix_s),
+                               frame.received_ms,''',
+     'QUEUE_DELAY_CANNOT_REFRESH_STALE_PROBE_EVIDENCE', 1),
     ('heartbeat-wrong-topic', 'outgoing_heartbeat',
      'mqtt_publish(s_heartbeat, js.c_str(), static_cast<int>(js.size()), 0, 0);',
      'mqtt_publish(s_crash, js.c_str(), static_cast<int>(js.size()), 0, 0);',

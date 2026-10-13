@@ -82,6 +82,21 @@ struct RetiredHaSensor {
     const char* object_id;
 };
 
+// Share the fixed discovery identity sequence without extra temporary strings. Names and object
+// IDs here are repository literals; the installation node has already passed the slug rules.
+inline __attribute__((noinline)) void ha_discovery_identity(std::string&       out,
+                                                            const std::string& node,
+                                                            const char*        name,
+                                                            const char*        object_id) {
+    out += "\"name\":\"";
+    out += name;
+    out += "\",\"uniq_id\":\"";
+    out += node;
+    out += '_';
+    out += object_id;
+    out += "\",";
+}
+
 // The `dev` object of a discovery config: the stable installation id first, this board's own id
 // second (omitted when empty, or when it IS the stable id — HA rejects a duplicated identifier).
 inline std::string device_json(const std::string& node, const std::string& board_id) {

@@ -4,6 +4,25 @@
       "compilers": {
         "clang-17-darwin": "Apple Clang 17.0.0",
         "gcc-13-linux-ubuntu24": "ESP-IDF v6.1 container GCC 13.3.0",
+        "gcc-15-linux-ubuntu26": "Ubuntu 26.04 aarch64 GCC 15.2.0"
+      },
+      "hosted_confirmation": "Hosted counts use the measured local instrumentation delta and preserve the existing hosted heartbeat offset; authoritative GCC 15 CI confirmation is pending",
+      "runner": "scripts/run-mock-tests.sh --coverage",
+      "scope": "Eight new circulation-proof outcomes and all bounded-fragment outcomes are taken. Shared discovery serialization removes repeated append instrumentation; every affected builder ratio rises, all other inventories and historical floors are retained",
+      "sources": {
+        "main/logic/circulation_source.hpp": "301112147856103f8755e4630b0ca78e3981c62917b70935ffabff6044a25ae4",
+        "main/logic/crashinfo.hpp": "ed9c6fc98648f5fa2cdc1b572a516cdc4b7833a8b9fde39be06d05be96ee66a0",
+        "main/logic/discovery.hpp": "402853161eeb1aafe41c7c491702f422bc3c226e6ef0924d911ad9c59200295f",
+        "main/logic/ha_device.hpp": "83da062d28c07a996a1b37f5557f33274297521badecc5cff81e9779a7003db7",
+        "main/logic/heartbeat.hpp": "919be7a1154d0d64bf0ac1a9baf9580903eb1682855be335f9f0fffacf86c7a1",
+        "main/logic/json.hpp": "177603078b8ef3db6798838cb396f96996b0c940a7259803f24ea8f6c13144df",
+        "main/logic/payload_complete.hpp": "63d56e67e261ae49ffe1e22f661d114a6b9b821d08b7fb3d7e21f524775cf2bc"
+      }
+    },
+    {
+      "compilers": {
+        "clang-17-darwin": "Apple Clang 17.0.0",
+        "gcc-13-linux-ubuntu24": "ESP-IDF v6.1 container GCC 13.3.0",
         "gcc-15-linux-ubuntu26": "Ubuntu 26.04 aarch64 GCC 15.2.0-16ubuntu1"
       },
       "hosted_confirmation": "gcc-15-github-linux-ubuntu26 repeats the local GCC 15 inventory; authoritative CI pending",
@@ -134,8 +153,8 @@
         "taken": 144
       },
       "main/logic/circulation_source.hpp": {
-        "outcomes": 56,
-        "taken": 45
+        "outcomes": 64,
+        "taken": 53
       },
       "main/logic/config_model.hpp": {
         "outcomes": 256,
@@ -162,8 +181,8 @@
         "taken": 22
       },
       "main/logic/crashinfo.hpp": {
-        "outcomes": 259,
-        "taken": 167
+        "outcomes": 237,
+        "taken": 156
       },
       "main/logic/crc.hpp": {
         "outcomes": 97,
@@ -186,8 +205,8 @@
         "taken": 72
       },
       "main/logic/discovery.hpp": {
-        "outcomes": 302,
-        "taken": 163
+        "outcomes": 266,
+        "taken": 145
       },
       "main/logic/env3.hpp": {
         "outcomes": 120,
@@ -222,8 +241,8 @@
         "taken": 18
       },
       "main/logic/heartbeat.hpp": {
-        "outcomes": 352,
-        "taken": 191
+        "outcomes": 330,
+        "taken": 180
       },
       "main/logic/heating_curve_diagnosis.hpp": {
         "outcomes": 66,
@@ -394,8 +413,8 @@
         "taken": 15
       },
       "main/logic/payload_complete.hpp": {
-        "outcomes": 94,
-        "taken": 94
+        "outcomes": 108,
+        "taken": 108
       },
       "main/logic/profile_view.hpp": {
         "outcomes": 50,
@@ -516,8 +535,8 @@
         "taken": 162
       },
       "main/logic/circulation_source.hpp": {
-        "outcomes": 56,
-        "taken": 45
+        "outcomes": 64,
+        "taken": 53
       },
       "main/logic/config_model.hpp": {
         "outcomes": 270,
@@ -544,8 +563,8 @@
         "taken": 33
       },
       "main/logic/crashinfo.hpp": {
-        "outcomes": 288,
-        "taken": 189
+        "outcomes": 266,
+        "taken": 178
       },
       "main/logic/crc.hpp": {
         "outcomes": 113,
@@ -568,8 +587,8 @@
         "taken": 82
       },
       "main/logic/discovery.hpp": {
-        "outcomes": 324,
-        "taken": 179
+        "outcomes": 288,
+        "taken": 161
       },
       "main/logic/env3.hpp": {
         "outcomes": 144,
@@ -604,8 +623,8 @@
         "taken": 24
       },
       "main/logic/heartbeat.hpp": {
-        "outcomes": 306,
-        "taken": 170
+        "outcomes": 284,
+        "taken": 159
       },
       "main/logic/heating_curve_diagnosis.hpp": {
         "outcomes": 78,
@@ -776,8 +795,8 @@
         "taken": 23
       },
       "main/logic/payload_complete.hpp": {
-        "outcomes": 106,
-        "taken": 106
+        "outcomes": 122,
+        "taken": 122
       },
       "main/logic/profile_view.hpp": {
         "outcomes": 52,
@@ -898,8 +917,8 @@
         "taken": 162
       },
       "main/logic/circulation_source.hpp": {
-        "outcomes": 56,
-        "taken": 45
+        "outcomes": 64,
+        "taken": 53
       },
       "main/logic/config_model.hpp": {
         "outcomes": 270,
@@ -926,8 +945,8 @@
         "taken": 33
       },
       "main/logic/crashinfo.hpp": {
-        "outcomes": 288,
-        "taken": 189
+        "outcomes": 266,
+        "taken": 178
       },
       "main/logic/crc.hpp": {
         "outcomes": 111,
@@ -950,8 +969,8 @@
         "taken": 82
       },
       "main/logic/discovery.hpp": {
-        "outcomes": 324,
-        "taken": 179
+        "outcomes": 288,
+        "taken": 161
       },
       "main/logic/env3.hpp": {
         "outcomes": 144,
@@ -986,8 +1005,8 @@
         "taken": 24
       },
       "main/logic/heartbeat.hpp": {
-        "outcomes": 258,
-        "taken": 144
+        "outcomes": 236,
+        "taken": 133
       },
       "main/logic/heating_curve_diagnosis.hpp": {
         "outcomes": 78,
@@ -1158,8 +1177,8 @@
         "taken": 23
       },
       "main/logic/payload_complete.hpp": {
-        "outcomes": 106,
-        "taken": 106
+        "outcomes": 122,
+        "taken": 122
       },
       "main/logic/profile_view.hpp": {
         "outcomes": 52,
@@ -1280,8 +1299,8 @@
         "taken": 162
       },
       "main/logic/circulation_source.hpp": {
-        "outcomes": 56,
-        "taken": 45
+        "outcomes": 64,
+        "taken": 53
       },
       "main/logic/config_model.hpp": {
         "outcomes": 270,
@@ -1308,8 +1327,8 @@
         "taken": 33
       },
       "main/logic/crashinfo.hpp": {
-        "outcomes": 288,
-        "taken": 189
+        "outcomes": 266,
+        "taken": 178
       },
       "main/logic/crc.hpp": {
         "outcomes": 111,
@@ -1332,8 +1351,8 @@
         "taken": 82
       },
       "main/logic/discovery.hpp": {
-        "outcomes": 324,
-        "taken": 179
+        "outcomes": 288,
+        "taken": 161
       },
       "main/logic/env3.hpp": {
         "outcomes": 144,
@@ -1368,8 +1387,8 @@
         "taken": 24
       },
       "main/logic/heartbeat.hpp": {
-        "outcomes": 306,
-        "taken": 170
+        "outcomes": 284,
+        "taken": 159
       },
       "main/logic/heating_curve_diagnosis.hpp": {
         "outcomes": 78,
@@ -1540,8 +1559,8 @@
         "taken": 23
       },
       "main/logic/payload_complete.hpp": {
-        "outcomes": 106,
-        "taken": 106
+        "outcomes": 122,
+        "taken": 122
       },
       "main/logic/profile_view.hpp": {
         "outcomes": 52,

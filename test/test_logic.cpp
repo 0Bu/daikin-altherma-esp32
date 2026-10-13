@@ -2480,6 +2480,29 @@ static void test_ha_device() {
 }
 
 static void test_discovery() {
+    // MQTT permits these topic bytes; JSON encoding must preserve them for HA subscribers.
+    const std::string escaped_base = "site\"west\\room";
+    CHECK(mqtt_base_valid(escaped_base));
+    const std::string escaped_state = x10a_topic(escaped_base);
+    const std::string escaped_avail = availability_topic(escaped_base);
+    const ValueDef    escaped_row{0x61, 10, 105, 2, 1, "DHW Tank Temp (R5T)"};
+    const std::string escaped_configs[] = {
+        discovery_config("site_west_room", "daikin_fixture", escaped_state, escaped_avail,
+                         escaped_row),
+        env3_discovery_config("site_west_room", "daikin_fixture", escaped_state, escaped_avail,
+                              ENV3_HA_SENSORS[0]),
+        companion_discovery_config("site_west_room", "daikin_fixture", escaped_state, escaped_avail,
+                                   "hydronic", FAULT_COMPANIONS[0]),
+        heartbeat_discovery_config("site_west_room", "daikin_fixture", escaped_state, escaped_avail,
+                                   HEARTBEAT_SENSORS[0]),
+        crash_discovery_config("site_west_room", "daikin_fixture", escaped_state, escaped_avail,
+                               CRASH_SENSORS[0]),
+    };
+    for (const auto& encoded : escaped_configs) {
+        CHECK(encoded.find("\"stat_t\":\"site\\\"west\\\\room/x10a\"") != std::string::npos);
+        CHECK(encoded.find("site\\\"west\\\\room/status") != std::string::npos);
+    }
+    CHECK(escaped_configs[1].find("\"topic\":\"site\\\"west\\\\room/x10a\"") != std::string::npos);
     CHECK(!conv_publishable(0));
     CHECK(conv_publishable(105));
     CHECK(!conv_publishable(995));
@@ -4198,6 +4221,20 @@ static void test_weather_fetch_headroom() {
     CHECK(!weather_fetch_headroom_ok(WEATHER_FETCH_MIN_FREE_BYTES - 1, 32u * 1024u));
     CHECK(!weather_fetch_headroom_ok(0, 0));
 
+    CHECK(mqtt_fragment_fits(0, 3, 5, 0, 5, 1024));
+    CHECK(mqtt_fragment_fits(3, 2, 5, 3, 5, 1024));
+    CHECK(mqtt_fragment_fits(5, 0, 5, 5, 5, 1024));
+    CHECK(!mqtt_fragment_fits(0, 0, 0, 0, 0, 1024));
+    CHECK(!mqtt_fragment_fits(0, 0, -1, 0, 5, 1024));
+    CHECK(!mqtt_fragment_fits(0, 0, 1025, 0, 1025, 1024));
+    CHECK(!mqtt_fragment_fits(-1, 1, 5, 0, 5, 1024));
+    CHECK(!mqtt_fragment_fits(0, -1, 5, 0, 5, 1024));
+    CHECK(!mqtt_fragment_fits(3, 2, 6, 3, 5, 1024));
+    CHECK(!mqtt_fragment_fits(2, 2, 5, 3, 5, 1024));
+    CHECK(!mqtt_fragment_fits(6, 0, 5, 6, 5, 1024));
+    CHECK(!mqtt_fragment_fits(3, 3, 5, 3, 5, 1024));
+    CHECK(!mqtt_fragment_fits(INT_MAX, INT_MAX, 5, INT_MAX, 5, 1024));
+    CHECK(!mqtt_fragment_fits(0, INT_MAX, 5, 0, 5, 1024));
     CHECK(http_body_complete(128, 128, true));
     CHECK(!http_body_complete(128, 127, true));
     CHECK(!http_body_complete(128, 129, true));
@@ -10732,6 +10769,21 @@ static void test_reference_temperature_config() {
 }
 
 static void test_circulation_source() {
+    CirculationTestProofClock proof{100000, 5, 1000, true};
+    CHECK(proof.current(1005, 100000, 10));
+    CHECK(proof.current(1010, 105000, 10));
+    CHECK(!proof.current(1011, 106000, 10));
+    CHECK(!proof.current(1005, 106000, 10)); // wall-clock rollback cannot renew expired evidence
+    CHECK(!proof.current(1011, 100001, 10)); // a forward clock jump still expires source evidence
+    CHECK(!proof.current(-1, 100001, 10));
+    CHECK(!proof.current(1005, 99999, 10));
+    CHECK(!proof.current(1005, 100000, 4));
+    proof.valid = false;
+    CHECK(!proof.current(1005, 100000, 10));
+    proof = {100000, UINT64_MAX, 1000, true};
+    CHECK(!proof.current(1005, 100000, 10));
+    proof = {100000, 0, -1, true};
+    CHECK(!proof.current(1005, 100000, 10));
     const char* why = nullptr;
     CHECK(circulation_source_config_valid("DHW circulation", "fixture/circulation/status", "apower",
                                           "aenergy.minute_ts", 120, 30, 10, 60, &why));
