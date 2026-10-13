@@ -339,9 +339,9 @@ int main(int argc, char** argv) {
         text(doc, "slice", "24");
     });
     run("serialization_escapes_text", [] {
-        httpd_req_t           req;
-        daik::ProbeJsonChunks out(daik::ProbeChunkEmitter{&req});
-        daik::ProbeDecode     decoded;
+        httpd_req_t          req;
+        daik::HttpJsonChunks out(daik::HttpChunkEmitter{&req});
+        daik::ProbeDecode    decoded;
         decoded.conv    = 217;
         decoded.is_text = true;
         std::strcpy(decoded.text, "He\"at\n\\");

@@ -544,9 +544,205 @@ static void test_registers() {
     CHECK(read_s16(one, 1, false) == 42); // high byte 0 -> stays positive
     CHECK(in_bounds(2, 2, 10));
     CHECK(!in_bounds(9, 2, 10));
+    // Never add untrusted signed coordinates: INT_MAX + 1 used to overflow this helper.
+    const int imax = rt(std::numeric_limits<int>::max());
+    const int imin = rt(std::numeric_limits<int>::min());
+    CHECK(in_bounds(0, 1, 1));
+    CHECK(in_bounds(imax - 1, 1, imax));
+    CHECK(in_bounds(0, imax, imax));
+    CHECK(!in_bounds(-1, 1, imax));
+    CHECK(!in_bounds(0, 0, imax));
+    CHECK(!in_bounds(0, -1, imax));
+    CHECK(!in_bounds(0, 1, -1));
+    CHECK(!in_bounds(imin, 1, imax));
+    CHECK(!in_bounds(0, imin, imax));
+    CHECK(!in_bounds(0, 1, imin));
+    CHECK(!in_bounds(imax, 1, imax));
+    CHECK(!in_bounds(imax, imax, imax));
+    CHECK(!in_bounds(1, imax, imax));
 }
 
 static void test_convert() {
+    // Independent literal arithmetic from REGISTERS.md sections 2/3.1: intrinsic decode
+    // extrema and sentinel neighbours are separate from publication plausibility.
+    {
+        struct SignedCase {
+            int    id;
+            bool   be;
+            double minimum, maximum, next, minus_one, plus_one, byte127, byte128, byte_max;
+            bool   min_ok;
+        };
+        const SignedCase cases[] = {
+            {101, false, -32768.0, 32767.0, -32767.0, -1.0, 1.0, 127.0, 128.0, 255.0, true},
+            {102, true, -32768.0, 32767.0, -32767.0, -1.0, 1.0, 127.0, 128.0, 255.0, true},
+            {103, false, -128.0, 127.99609375, -127.99609375, -0.00390625, 0.00390625, 0.49609375,
+             0.5, 0.99609375, true},
+            {104, true, -128.0, 127.99609375, -127.99609375, -0.00390625, 0.00390625, 0.49609375,
+             0.5, 0.99609375, true},
+            {105, false, -3276.8, 3276.7, -3276.7, -0.1, 0.1, 12.7, 12.8, 25.5, true},
+            {106, true, -3276.8, 3276.7, -3276.7, -0.1, 0.1, 12.7, 12.8, 25.5, true},
+            {107, false, -3276.8, 3276.7, -3276.7, -0.1, 0.1, 12.7, 12.8, 25.5, false},
+            {108, true, -3276.8, 3276.7, -3276.7, -0.1, 0.1, 12.7, 12.8, 25.5, false},
+            {109, false, -256.0, 255.9921875, -255.9921875, -0.0078125, 0.0078125, 0.9921875, 1.0,
+             1.9921875, true},
+            {110, true, -256.0, 255.9921875, -255.9921875, -0.0078125, 0.0078125, 0.9921875, 1.0,
+             1.9921875, true},
+            {111, false, -16384.0, 16383.5, -16383.5, -0.5, 0.5, 63.5, 64.0, 127.5, true},
+            {114, false, -3276.8, 3276.7, -3276.7, -0.1, 0.1, 12.7, 12.8, 25.5, false},
+            {118, true, -327.68, 327.67, -327.67, -0.01, 0.01, 1.27, 1.28, 2.55, true},
+            {119, false, -3276.8, 3276.7, -3276.7, -0.1, 0.1, 12.7, 12.8, 25.5, false},
+        };
+        for (const auto& c : cases) {
+            const ValueDef row{0, 0, c.id, 2, -1, "raw"};
+            const uint8_t  lo[]   = {static_cast<uint8_t>(c.be ? 0x80 : 0x00),
+                                     static_cast<uint8_t>(c.be ? 0x00 : 0x80)};
+            const uint8_t  hi[]   = {static_cast<uint8_t>(c.be ? 0x7f : 0xff),
+                                     static_cast<uint8_t>(c.be ? 0xff : 0x7f)};
+            const uint8_t  next[] = {static_cast<uint8_t>(c.be ? 0x80 : 0x01),
+                                     static_cast<uint8_t>(c.be ? 0x01 : 0x80)};
+            const uint8_t  neg[]  = {0xff, 0xff};
+            const uint8_t  pos[]  = {static_cast<uint8_t>(c.be ? 0x00 : 0x01),
+                                     static_cast<uint8_t>(c.be ? 0x01 : 0x00)};
+            const uint8_t  zero[] = {0x00, 0x00};
+            const auto     min    = convert(row, lo);
+            CHECK(min.ok == c.min_ok && !min.unimpl && approx(min.value, c.minimum));
+            for (const auto& sample :
+                 {std::pair{hi, c.maximum}, std::pair{next, c.next}, std::pair{neg, c.minus_one},
+                  std::pair{pos, c.plus_one}, std::pair{zero, 0.0}}) {
+                const auto r = convert(row, sample.first);
+                CHECK(r.ok && !r.unimpl && approx(r.value, sample.second) && r.text[0] == '\0');
+            }
+            for (const auto& sample : {std::pair<uint8_t, double>{0, 0.0},
+                                       {127, c.byte127},
+                                       {128, c.byte128},
+                                       {255, c.byte_max}}) {
+                const auto b = convert(ValueDef{0, 0, c.id, 1, -1, "byte"}, &sample.first);
+                CHECK(b.ok && !b.unimpl && approx(b.value, sample.second));
+            }
+        }
+        struct UnsignedCase {
+            int    id;
+            bool   be;
+            double maximum, top_bit, one, byte127, byte128, byte_max;
+        };
+        const UnsignedCase unsigned_cases[] = {
+            {151, false, 65535.0, 32768.0, 1.0, 127.0, 128.0, 255.0},
+            {152, true, 65535.0, 32768.0, 1.0, 127.0, 128.0, 255.0},
+            {161, false, 32767.5, 16384.0, 0.5, 63.5, 64.0, 127.5},
+            {164, true, 327675.0, 163840.0, 5.0, 635.0, 640.0, 1275.0},
+        };
+        for (const auto& c : unsigned_cases) {
+            const ValueDef row{0, 0, c.id, 2, -1, "raw"};
+            const uint8_t  maximum[] = {0xff, 0xff}, zero[] = {0x00, 0x00};
+            const uint8_t  top_bit[] = {static_cast<uint8_t>(c.be ? 0x80 : 0x00),
+                                        static_cast<uint8_t>(c.be ? 0x00 : 0x80)};
+            const uint8_t  one[]     = {static_cast<uint8_t>(c.be ? 0x00 : 0x01),
+                                        static_cast<uint8_t>(c.be ? 0x01 : 0x00)};
+            for (const auto& sample : {std::pair{maximum, c.maximum}, std::pair{top_bit, c.top_bit},
+                                       std::pair{one, c.one}, std::pair{zero, 0.0}}) {
+                const auto r = convert(row, sample.first);
+                CHECK(r.ok && !r.unimpl && approx(r.value, sample.second) && r.text[0] == '\0');
+            }
+            for (const auto& sample : {std::pair<uint8_t, double>{0, 0.0},
+                                       {127, c.byte127},
+                                       {128, c.byte128},
+                                       {255, c.byte_max}}) {
+                const auto b = convert(ValueDef{0, 0, c.id, 1, -1, "byte"}, &sample.first);
+                CHECK(b.ok && !b.unimpl && approx(b.value, sample.second));
+            }
+        }
+        for (int id : {200, 211, 214, 215, 219}) {
+            const uint8_t  zero[] = {0}, full[] = {0xff};
+            const ValueDef row{0, 0, id, 1, -1, "byte"};
+            CHECK(convert(row, zero).ok && approx(convert(row, zero).value, 0.0));
+            CHECK(convert(row, full).ok && approx(convert(row, full).value, 255.0));
+        }
+        for (int bit = 0; bit < 8; ++bit) {
+            const uint8_t  chosen[] = {static_cast<uint8_t>(1u << bit)};
+            const uint8_t  others[] = {static_cast<uint8_t>(~chosen[0])};
+            const ValueDef row{0, 0, 300 + bit, 1, -1, "bit"};
+            CHECK(approx(convert(row, chosen).value, 1.0));
+            CHECK(approx(convert(row, others).value, 0.0));
+        }
+        for (int id : {310, 311}) {
+            const uint8_t  full[] = {0xff}, flags[] = {0x88}, mixed[] = {0x95};
+            const ValueDef row{0, 0, id, 1, -1, "retry"};
+            CHECK(approx(convert(row, full).value, 7.0));
+            CHECK(approx(convert(row, flags).value, 0.0));
+            CHECK(approx(convert(row, mixed).value, id == 310 ? 1.0 : 5.0));
+        }
+        for (const auto& c : {std::pair<uint8_t, double>{0x00, 0.0},
+                              {0x7f, 7.9375},
+                              {0x80, 0.0},
+                              {0xff, -7.9375},
+                              {0x01, 0.0625},
+                              {0x81, -0.0625}}) {
+            const ValueDef row{0, 0, 312, 1, -1, "delta"};
+            const auto     r = convert(row, &c.first);
+            CHECK(r.ok && approx(r.value, c.second));
+            if (c.first == 0x80) CHECK(!std::signbit(r.value));
+        }
+        struct EnvelopeCase {
+            uint8_t lo, hi;
+            double  expected;
+            bool    plausible;
+        };
+        for (int id : {105, 106}) {
+            for (const auto& c : {EnvelopeCase{0xa8, 0xfd, -60.0, true},
+                                  {0xa7, 0xfd, -60.1, false},
+                                  {0xd0, 0x07, 200.0, true},
+                                  {0xd1, 0x07, 200.1, false}}) {
+                const uint8_t  bytes[] = {id == 105 ? c.lo : c.hi, id == 105 ? c.hi : c.lo};
+                const ValueDef row{0x61, 0, id, 2, 1, "temperature"};
+                const auto     r = convert(row, bytes);
+                CHECK(r.ok && approx(r.value, c.expected));
+                CHECK(reading_plausible(row, r) == c.plausible);
+            }
+        }
+        // Independent Decimal/Horner evaluation of the recovered correlation
+        // coefficients; these literal outputs establish arithmetic, not service-gauge
+        // calibration.
+        struct PressureCase {
+            int    rtype, ceiling_raw;
+            double low, ten, byte_max, ceiling;
+        };
+        const PressureCase pressure_cases[] = {
+            {801, 400, -51.70014287312306, 8.92012905544278, 43.42738975692821, 63.45080161735818},
+            {802, 470, -49.85287273742902, 9.33349418072315, 42.88920848559727, 68.93858814303590},
+            {803, 280, -40.45658681785769, 25.51110689750470, 63.51116880335663, 68.50601483165518},
+        };
+        for (const auto& c : pressure_cases) {
+            for (const auto& sample :
+                 {std::pair{1, c.low}, std::pair{100, c.ten}, std::pair{255, c.byte_max},
+                  std::pair{c.ceiling_raw, c.ceiling}}) {
+                const uint8_t bytes[] = {static_cast<uint8_t>(sample.first),
+                                         static_cast<uint8_t>(sample.first >> 8)};
+                for (int width : {1, 2}) {
+                    if (width == 1 && sample.first > 255) continue;
+                    const auto r =
+                        convert(ValueDef{0, 0, 405, width, 1, "saturation"}, bytes, c.rtype);
+                    CHECK(r.ok && !r.unimpl && approx(r.value, sample.second));
+                }
+            }
+            const ValueDef row{0, 0, 405, 2, 1, "saturation"};
+            const uint8_t  high[] = {static_cast<uint8_t>(c.ceiling_raw + 1),
+                                     static_cast<uint8_t>((c.ceiling_raw + 1) >> 8)};
+            const uint8_t  zero[] = {0, 0}, negative[] = {0xff, 0xff}, maximum[] = {0xff, 0x7f};
+            CHECK(!convert(row, high, c.rtype).ok);
+            CHECK(!convert(row, zero, c.rtype).ok);
+            CHECK(!convert(row, negative, c.rtype).ok);
+            CHECK(!convert(row, maximum, c.rtype).ok);
+        }
+        const uint8_t pressure_ten[] = {0x64, 0x00};
+        for (int rtype : {0, 804, 805, 899})
+            CHECK(!convert(ValueDef{0, 0, 405, 2, 1, "saturation"}, pressure_ten, rtype).ok);
+        for (int id : {112, 113, 115, 116, 117, 153, 154, 155, 156, 157, 158, 159, 160,
+                       162, 163, 165, 401, 402, 403, 404, 406, 451, 465, 881, 885, 998}) {
+            const auto r = convert(ValueDef{0, 0, id, 2, -1, "unimplemented"}, pressure_ten);
+            CHECK(!r.ok && r.unimpl && r.text[0] == '\0');
+        }
+    }
+
     // conv 105 = signed, little-endian, ×0.1 (temperature).
     ValueDef      temp{0x61, 0, 105, 2, 1, "T"};
     const uint8_t pos[] = {0x2C, 0x01}; // LE 300 -> 30.0 °C

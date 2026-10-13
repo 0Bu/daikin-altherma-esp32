@@ -234,7 +234,7 @@ inline int env3_history_index(const char* id) {
 // unavailable" from a surprise into a stated refusal, since the base occupies the whole header and
 // leaves only the Grove port, which X10A needs (docs/BOARDS.md).
 inline bool env3_config_valid(const Config& c, std::string& reason, int max_gpio = 48,
-                              bool octal_spi = true, ReservedPins extra = {}) {
+                              bool octal_spi = true, const ReservedPins& extra = {}) {
     if (!c.env3_enabled) return true;
     if (!env3_board_supported(c)) {
         reason = "ENV III requires a selected M5Stack board preset"; return false;

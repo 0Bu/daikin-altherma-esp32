@@ -143,7 +143,7 @@ inline int board_pins_offerable(int* out, int cap, bool octal_spi, ReservedPins 
 // accepted a curl POST that routed the X10A UART onto the SPI-flash pins (GPIO26-32): flash traffic
 // corrupts, the board crash-loops, and the toxic pair is already persisted so every boot re-tries
 // it.
-inline bool board_pin_offerable(int pin, bool octal_spi, ReservedPins rsv = {}) {
+inline bool board_pin_offerable(int pin, bool octal_spi, const ReservedPins& rsv = {}) {
     if (rsv.claims(pin)) return false;
     BoardPins bp = board_pins(nullptr, octal_spi);
     for (int i = 0; i < bp.count; i++)

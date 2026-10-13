@@ -28,6 +28,7 @@ const weather = read("main/weather_forecast.cpp");
 const httpConfig = read("main/http_config.cpp");
 const configSource = read("main/config.cpp");
 const status = read("main/http_status.cpp");
+const chunks = read("main/http_chunks.hpp");
 const mcp = read("main/mcp_server.cpp");
 const chunkSink = read("main/logic/chunk_sink.hpp");
 const redact = read("main/logic/redact.hpp");
@@ -802,7 +803,7 @@ assert.match(status,
 // The complete 129-row target body is larger than the contiguous block a healthy running board can
 // commonly provide. Both GET /values and MCP must therefore reuse the exact serializer through the
 // production bounded sink, never rebuild the whole JSON or a secondary whole HomeHub array.
-assert.match(status,
+assert.match(chunks,
   /using HttpJsonChunks = BoundedChunkSink<HttpChunkEmitter, 1024>;/,
   "values responses must bind the host-tested sink to a strict 1 KiB HTTP chunk bound");
 assert.match(chunkSink,

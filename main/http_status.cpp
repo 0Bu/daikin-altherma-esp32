@@ -1,5 +1,6 @@
 // GET routes: the web UI (embedded gzip), /status, /values, /models, /diag, /scan.
 #include "http_handlers.hpp"
+#include "http_chunks.hpp"
 #include "checkup.hpp"
 #include "config.hpp"
 #include "env3.hpp"
@@ -283,20 +284,6 @@ static esp_err_t h_captive(httpd_req_t* req) {
     httpd_resp_set_type(req, "text/plain");
     return httpd_resp_send(req, nullptr, 0);   // empty body — nothing to gzip, nothing to render
 }
-
-// A status/values response must never require one body-sized contiguous allocation. The emitter is
-// synchronous: esp_http_server consumes each view before returning, so the sink can immediately
-// reuse its one bounded buffer. Keep this definition above the status builder so GET /status and
-// GET /values instantiate the exact same transport contract.
-struct HttpChunkEmitter {
-    httpd_req_t* req = nullptr;
-
-    bool operator()(std::string_view bytes, bool final) const {
-        if (final) return httpd_resp_send_chunk(req, nullptr, 0) == ESP_OK;
-        return httpd_resp_send_chunk(req, bytes.data(), bytes.size()) == ESP_OK;
-    }
-};
-using HttpJsonChunks = BoundedChunkSink<HttpChunkEmitter, 1024>;
 
 template <typename JsonOut> static void append_json_uint(JsonOut& out, uint64_t value);
 
