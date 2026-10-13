@@ -407,7 +407,7 @@ Recording additionally requires fresh source-time evidence.
 
 `POST /test_circulation` fields: `name`, `topic`, `power_path`, `timestamp_path`, `max_age_s`,
 `on_threshold_w`, `off_threshold_w`, `confirm_s`. Diagnostics off is 409, empty topic 400. Probe the
-candidate mapping through the existing authenticated MQTT client for up to 12 seconds;
+candidate mapping through the already connected MQTT client for up to 12 seconds;
 `{ok,test_proof,power_w,state,retained}` or 422. No config is written.
 
 `POST /set_circulation` adds `test_proof` to that mapping. A non-empty topic needs a current proof
