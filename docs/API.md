@@ -183,15 +183,20 @@ restoration. `stale_commit` means unmeasurable age, not an ordinary stalled rast
 Individual Modbus/ENV III rings may be retired beside an X10A `accept`. Dwell v4 books restart
 blind time itself, so its verdict can be `accept` beside trend age refusals.
 
-`health` fields: `covered_s`, `persist`, `full_span`, `available`, `assessable`, `evaluated`, `status`,
-`checks`. Disabled diagnostics keeps the object but no accumulated checks. Card coverage is seconds;
-each check has its own `observed_s`/`required_s`. One check cannot lend evidence to another.
+`health` fields: `covered_s`, `span_s`, `source_fresh`, `source_age_s`, `persist`, `full_span`,
+`available`, `assessable`, `evaluated`, `status`, `checks`. Disabled diagnostics keeps the object but
+no accumulated checks. `span_s` is elapsed lifecycle time capped at 24 hours; `covered_s` is observed
+bus context. Each check has its own `observed_s`/`required_s`, so one signal cannot lend coverage to
+another. `source_age_s` is null before a nonempty X10A sample; empty pause/failure callbacks cannot
+renew it. `source_fresh` applies the 15-second observation-age bound at read time. A stale source
+withholds current fault-clear/current pressure and reassuring assessments; dated findings remain.
 `health.persist:"flash_pending"` means recovery has not completed and proves no stored hours;
 `fresh` means none were selected; `flash` means admissible dated hourly reconstruction with live
 precedence. Completed RAM hours are never adopted. Other values describe startup-integrity refusal.
 
-Each check has `id`, `verdict`, `evidence` and its applicable numbers. Verdicts are `unavailable`,
-`collecting`, `ok`, `info`, `warn`. The reading order and main evidence are:
+Each check has `id`, `verdict`, `evidence`, `reason`, `observed_s`, `required_s` and its applicable
+numbers. Verdicts are `unavailable`, `collecting`, `ok`, `info`, `warn`; an `ok` with observation
+evidence is a measurement, not a good/bad assessment. The reading order and main evidence are:
 
 | Id | Evidence fields |
 |---|---|
@@ -199,15 +204,25 @@ Each check has `id`, `verdict`, `evidence` and its applicable numbers. Verdicts 
 | `dhw_loss` | `max_k_h`, `windows`, `high_windows`, `high_with_pump`, `high_pump_off`, `circulation_on_s`, `circulation_known_s`, `candidate_s`, `settle_remaining_s`, `aborts`, `abort_reasons`, `best_aborted_s`, `blocked` |
 | `cycling` | `starts`, `mean_run_s`, `space_runs`, `space_mean_run_s`, `dhw_runs`, `dhw_mean_run_s`, `cooling_runs`, `censored_runs`, `split`, `outdoor_source`, `outdoor_min_c`, `outdoor_mean_c`, `outdoor_samples` |
 | `defrost` | `count`, `share_pct`, `paired_count`, `defrost_s`, `run_s`, `outdoor_source`, `outdoor_min_c`, `outdoor_mean_c`, `outdoor_samples` |
-| `pressure` | `min_bar` |
+| `pressure` | `min_bar`, `current_bar`, `min_unix_s`, `confirmed_low` |
 | `flow` | `min_l_min` |
-| `heater` | `buh_min`, `bsh_min`, `buh_s`, `bsh_s` |
+| `heater` | `buh_min`, `bsh_min`, `buh_s`, `bsh_s`, `buh_observed_s`, `bsh_observed_s` |
 | `retries` | `seen` |
 
-Unestablished numeric evidence is null. Cycling class counts describe completed runs; censored runs
-lack a fully witnessed boundary. `split` states whether class-specific evidence decided the verdict.
+Unestablished numeric evidence is null. `reason` is empty when no qualification applies; otherwise:
+`unsupported`, `day_incomplete`, `input_coverage`, `no_eligible_windows`, `class_unavailable`,
+`class_coverage`, `heating_runs_insufficient`, `class_population_incomplete`, `observation_only`,
+`no_paired_runtime`, `defrost_events_insufficient` or `source_stale`.
+
+Cycling class counts describe completed runs; mixed or gapped runs are censored. `split` identifies
+an eligible heating-only assessment. No pooled all-mode assessment exists; legacy `mean_run_s`
+remains present as null. `min_unix_s` is the pressure minimum's observed-at time, null without a
+synchronized clock; it retains no raw frame or validity context. `current_bar` is null when the
+latest sample lacks pressure or the source is stale. `confirmed_low` records whether at least
+60 continuously observed seconds at or below the project boundary were witnessed in the window.
 Positive defrost shares below 1% make the whole-percent `share_pct` null; positive heater runtimes
 below one minute make `buh_min`/`bsh_min` null. Use the seconds fields for these small values.
+Heater coverage is reported separately for each supported signal; an unread signal has null runtime.
 Complete rules, coverage and experimental boundaries are in
 [DIAGNOSTIC_EVIDENCE.md](DIAGNOSTIC_EVIDENCE.md); owner wording is in [DIAGNOSTICS.md](DIAGNOSTICS.md).
 

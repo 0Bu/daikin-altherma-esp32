@@ -287,6 +287,13 @@ INTEGER_BUILDERS = {
     "daik::build_heartbeat_json[abi:cxx11](daik::HeartbeatFields const&)": 25,
     "daik::build_heating_curve_mqtt_json[abi:cxx11](daik::HeatingCurveMqttFields const&)": 21,
 }
+STATUS_HEALTH_NUMBER_SYMBOL = (
+    "daik::append_status_json<daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u> >"
+    "(daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u>&, bool)"
+    "::{lambda(char const*, int)\x231}::operator()(char const*, int) const")
+STATUS_UNSIGNED_NUMBER_SYMBOL = (
+    "void daik::append_json_uint<daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u> >"
+    "(daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u>&, unsigned long long)")
 TASK_ALLOCATIONS = {
     "httpd": ("main/http_server.cpp", r"\bcfg\.stack_size\s*=\s*([0-9]+)\s*;"),
     "main": ("sdkconfig.defaults", r"(?m)^CONFIG_ESP_MAIN_TASK_STACK_SIZE=([0-9]+)$"),
@@ -305,6 +312,18 @@ TASK_ALLOCATIONS = {
     "ota": ("main/ota_update.cpp", r'xTaskCreateStatic\s*\(\s*ota_task,\s*"ota",\s*(kTaskStack)\s*,'),
     "ota_health": ("main/ota_update.cpp", r'xTaskCreateStatic\s*\(\s*health_gate_task,\s*"ota_health",\s*(kHealthTaskStack)\s*,'),
     "deadline": ("main/http_deadline.cpp", r'xTaskCreateStatic\s*\(\s*socket_deadline_watchdog_task,\s*"http_abs_dl",\s*(kWatchdogStackBytes)\s*,'),
+}
+SHUTDOWN_HTTP_CALLERS = {
+    "wifi": "config_wifi", "mqtt": "config_mqtt", "syslog": "config_syslog",
+    "ntp": "config_ntp", "board": "config_board", "env3": "config_env3",
+}
+SHUTDOWN_CALLERS = {
+    **{f"httpd_shutdown_{name}": [symbol, "http_reboot", "sdk_restart"]
+       for name, symbol in SHUTDOWN_HTTP_CALLERS.items()},
+    "poll_shutdown": ["poll_task", "heap_guard", "sdk_restart"],
+    "eth_shutdown": ["eth_task", "sdk_restart"],
+    "ota_shutdown": ["ota_task", "sdk_restart"],
+    "ota_health_shutdown": ["ota_health_task", "sdk_restart"],
 }
 SDK_PUBLIC_FILES = (
     "mbedtls/mbedtls/tf-psa-crypto/include/psa/crypto_sizes.h",
@@ -362,6 +381,7 @@ SDK_PUBLIC_FILES = (
     "lwip/port/freertos/sys_arch.c", "mbedtls/port/sha/core/sha.c",
     "vfs/vfs.c", "vfs/vfs_calls.c", "lwip/port/esp32xx/vfs_lwip.c",
     "pthread/pthread.c", "pthread/pthread_local_storage.c",
+    "esp_system/esp_system.c",
 )
 SDK_PUBLIC_MACROS = (
     "CONFIG_ESP_MAIN_TASK_STACK_SIZE", "CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG",
@@ -580,6 +600,56 @@ def validate_integer_formatter(disassembly: str) -> None:
         raise BudgetError("integer formatter: decimal base / fixed 20-byte destination changed")
 
 
+def validate_shutdown_inlining(disassembly: str, budgets: dict[str, Any]) -> None:
+    """Bind omitted nominal helper frames to the measured task-level restart instructions."""
+    blocks: dict[str, list[str]] = {}
+    current = None
+    for line in disassembly.splitlines():
+        if header := FUNCTION_RE.match(line):
+            current = header.group(2)
+            blocks[current] = []
+        elif current is not None:
+            blocks[current].append(line)
+    for name, lines in blocks.items():
+        # run_update's chunk lambda is emitted separately, but it returns before the task's
+        # restart. A nominal helper/cloned helper would need its own newly reviewed frame.
+        nominal = ("{lambda" not in name
+                   and re.search(r"\b(?:factory_reset|run_update)\(", name))
+        raw_clone = re.match(r"^_Z.*(?:13factory_reset|10run_update)E", name)
+        if nominal or raw_clone:
+            raise BudgetError(f"shutdown inlining: outlined helper {name} needs frame accounting")
+        if ("{lambda" in name and "run_update" in name
+                and any("<esp_restart" in line for line in lines)):
+            raise BudgetError("shutdown inlining: update lambda now contains a restart")
+    direct = re.compile(r"^\s*[0-9a-f]+:\s+[0-9a-f]+\s+call8\s+[0-9a-f]+\s+<esp_restart>\s*$")
+    for key in ("button_task", "ota_task"):
+        pattern = re.compile(budgets["symbols"][key]["pattern"])
+        matches = [lines for name, lines in blocks.items() if pattern.search(name)]
+        if (len(matches) != 1
+                or sum(bool(direct.match(line)) for line in matches[0]) != 1
+                or sum("<esp_restart" in line for line in matches[0]) != 1):
+            raise BudgetError(f"shutdown inlining: {key} must contain its sole direct restart")
+
+
+def validate_status_numeric_calls(disassembly: str, budgets: dict[str, Any]) -> None:
+    """Keep the outlined nullable-number helper on its sole serializer caller."""
+    references: list[tuple[str, str]] = []
+    current = None
+    for line in disassembly.splitlines():
+        if header := FUNCTION_RE.match(line):
+            current = header.group(2)
+        elif current is not None and "<" + STATUS_HEALTH_NUMBER_SYMBOL + ">" in line:
+            references.append((current, line))
+    serializer = re.compile(budgets["symbols"]["status_serializer"]["pattern"])
+    direct = re.compile(r"^\s*[0-9a-f]+:\s+[0-9a-f]+\s+call8\s+[0-9a-f]+\s+<"
+                        + re.escape(STATUS_HEALTH_NUMBER_SYMBOL) + r">\s*$")
+    # The compiler merges two branch tails from the 27 source invocations into 25 calls.
+    if (len(references) != 25
+            or any(not serializer.search(caller) or not direct.match(line)
+                   for caller, line in references)):
+        raise BudgetError("diagnosis numeric calls: 25 direct serializer calls require review")
+
+
 def parse_frames(disassembly: str, budgets: dict[str, Any] | None = None) -> dict[str, int]:
     if budgets is None:
         budgets = load_budgets(DEFAULT_BUDGETS)
@@ -669,6 +739,182 @@ def validate_http_stack(budgets: dict[str, Any], source: str) -> None:
             raise BudgetError(f"path {name}: ceiling must retain 2048 B on HTTP stack {stack_size}")
 
 
+def validate_status_diagnosis_paths(budgets: dict[str, Any], sources: dict[str, str]) -> None:
+    """Keep the report frame on its real HTTP callers, separate from decimal-format branches."""
+    expected = {
+        "httpd_mcp_status": ["mcp_post", "http_send_status_json", "status_serializer",
+                             "double_string", "dynamic_double_string"],
+        "httpd_direct_status": ["http_send_status_json", "status_serializer",
+                                "double_string", "dynamic_double_string"],
+        "httpd_mcp_checkup": ["mcp_post", "http_send_status_json", "status_serializer",
+                              "checkup_report"],
+        "httpd_direct_checkup": ["http_send_status_json", "status_serializer", "checkup_report"],
+        "httpd_mcp_health_number": ["mcp_post", "http_send_status_json", "status_serializer",
+                                    "status_health_number", "status_unsigned_number"],
+        "httpd_direct_health_number": ["http_send_status_json", "status_serializer",
+                                       "status_health_number", "status_unsigned_number"],
+    }
+    for name, members in expected.items():
+        rule = budgets["paths"].get(name, {})
+        if (rule.get("symbols") != members or rule.get("multipliers") != {}
+                or rule.get("base_bytes") != 1536 or rule.get("max_bytes") != 8192):
+            raise BudgetError(f"diagnosis status path {name}: HTTP caller/report accounting changed")
+    report_paths = {name for name, rule in budgets["paths"].items()
+                    if "checkup_report" in rule["symbols"]}
+    if report_paths != {"httpd_mcp_checkup", "httpd_direct_checkup"}:
+        raise BudgetError("diagnosis status paths: checkup_report belongs to HTTP, not polling")
+    code = {name: re.sub(r"/\*.*?\*/|//[^\n]*", "", sources[name], flags=re.S)
+            for name in ("main/http_status.cpp", "main/mcp_server.cpp", "main/hp_poll.cpp")}
+    status = code["main/http_status.cpp"]
+    if (len(re.findall(r"\bcheckup_report\s*\(", status)) != 1
+            or not re.search(r"const logic::CheckupReport hr\s*=\s*checkup_report\(\);", status)
+            or len(re.findall(r"\bappend_status_json\(out, redact\)", status)) != 1
+            or not re.search(r"return http_send_status_json\(req, \{\}, \{\}, redact\);", status)
+            or len(re.findall(r"\bhttp_send_status_json\s*\(", code["main/mcp_server.cpp"])) != 1
+            or not re.search(r"return http_send_status_json\(req, response, suffix, false\);",
+                             code["main/mcp_server.cpp"])
+            or re.search(r"\b(?:checkup_report|http_send_status_json)\s*\(", code["main/hp_poll.cpp"])):
+        raise BudgetError("diagnosis status source: direct/MCP-only serializer caller contract changed")
+    if (len(re.findall(r"\bnum\s*\(", status)) != 27
+            or not re.search(r"auto num = \[&j\]\(const char\* name, int v\) "
+                             r"__attribute__\(\(noinline\)\)\s*\{", status)
+            or not re.search(r"if \(v < 0\)\s*\{[^{}]*return;\s*\}\s*"
+                             r"append_json_uint\(j, static_cast<unsigned>\(v\)\);", status)
+            or not re.search(r"static void append_json_uint\(JsonOut& out, uint64_t value\)\s*\{\s*"
+                             r"char digits\[20\];", status)
+            or not re.search(r"value % 10\)\);\s*value /= 10;", status)):
+        raise BudgetError("diagnosis numeric source: nullable int/fixed uint64 decimal contract changed")
+
+
+def shutdown_path_members() -> dict[str, list[str]]:
+    # esp_restart invokes handlers sequentially. Keep their paths separate and retain the
+    # existing 1536 B SDK/ROM continuation, including smaller reset/seal descendants.
+    paths = {}
+    for name, prefix in SHUTDOWN_CALLERS.items():
+        paths[name + "_journal"] = prefix + ["history_shutdown", "history_journal",
+                                             "history_append", "history_append_at"]
+        paths[name + "_checkup"] = prefix + ["checkup_shutdown", "checkup_shutdown_reset"]
+    # A successful factory reset has already forgotten the journal; the liveness touch and
+    # independently registered checkup handler still run. Keep that exclusion source-bound.
+    paths["button_shutdown_history_touch"] = ["button_task", "sdk_restart", "history_shutdown"]
+    paths["button_shutdown_checkup"] = ["button_task", "sdk_restart", "checkup_shutdown",
+                                        "checkup_shutdown_reset"]
+    paths["poll_board_journal"] = ["poll_task", "history_board", "history_journal",
+                                   "history_append", "history_append_at"]
+    return paths
+
+
+def stack_source_code(source: str) -> str:
+    # Blanking strings as well as comments makes brace matching independent of diagnostic copy.
+    tokens = r'"(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\'|/\*.*?\*/|//[^\n]*'
+    return re.sub(tokens, lambda match: " " * len(match[0]), source, flags=re.S)
+
+
+def stack_function_body(source: str, name: str) -> str:
+    definitions = list(re.finditer(r"\b" + re.escape(name) +
+                                   r"\([^;{}]*\)\s*(?:noexcept\s*)?\{", source))
+    if len(definitions) != 1:
+        raise BudgetError(f"shutdown source: expected one definition of {name}")
+    start = definitions[0].end()
+    depth = 1
+    for end in range(start, len(source)):
+        depth += (source[end] == "{") - (source[end] == "}")
+        if depth == 0:
+            return source[start:end]
+    raise BudgetError(f"shutdown source: unclosed body of {name}")
+
+
+def validate_shutdown_paths(budgets: dict[str, Any], sources: dict[str, str]) -> None:
+    expected = shutdown_path_members()
+    modeled = {name for name in budgets["paths"]
+               if "_shutdown" in name or name == "poll_board_journal"}
+    if modeled != set(expected):
+        raise BudgetError("shutdown paths: complete caller inventory changed")
+    for name, members in expected.items():
+        rule = budgets["paths"][name]
+        owner = "ota_health" if name.startswith("ota_health_") else name.split("_")[0]
+        task = budgets["tasks"][owner]
+        if (rule["symbols"] != members or rule["multipliers"] != {}
+                or rule["base_bytes"] != 1536
+                or rule["max_bytes"] != task["stack_bytes"] - task["reserve_bytes"]):
+            raise BudgetError(f"shutdown path {name}: caller/handler/SDK continuation changed")
+    code = {name: stack_source_code(source) for name, source in sources.items()}
+    counts = {"main/http_config.cpp": 1, "main/heap_guard.cpp": 1,
+              "main/net.cpp": 1, "main/recovery_button.cpp": 1, "main/wifi.cpp": 1,
+              "main/ota_update.cpp": 2}
+    actual = {name: len(re.findall(r"\besp_restart\s*\(", source))
+              for name, source in code.items() if re.search(r"\besp_restart\s*\(", source)}
+    if actual != counts:
+        raise BudgetError("shutdown source: restart caller inventory changed")
+    registrations = {name: len(re.findall(r"\besp_register_shutdown_handler\s*\(", source))
+                     for name, source in code.items()
+                     if re.search(r"\besp_register_shutdown_handler\s*\(", source)}
+    if registrations != {"main/history.cpp": 1, "main/checkup.cpp": 1}:
+        raise BudgetError("shutdown source: handler registration inventory changed")
+    bodies = {}
+    for path, name in (("main/http_config.cpp", "reboot_soon"),
+                       ("main/heap_guard.cpp", "heap_guard_sample"),
+                       ("main/net.cpp", "eth_fallback_task"),
+                       ("main/recovery_button.cpp", "factory_reset"),
+                       ("main/wifi.cpp", "wifi_finish_sta_rollback"),
+                       ("main/ota_update.cpp", "run_update"),
+                       ("main/ota_update.cpp", "health_gate_task")):
+        bodies[name] = stack_function_body(code[path], name)
+        if len(re.findall(r"\besp_restart\s*\(\s*\)", bodies[name])) != 1:
+            raise BudgetError(f"shutdown source: restart moved outside {name}")
+    for name in SHUTDOWN_HTTP_CALLERS:
+        body = stack_function_body(code["main/http_config.cpp"], "set_" + name)
+        if len(re.findall(r"\breboot_soon\s*\(\s*\)", body)) != 1:
+            raise BudgetError(f"shutdown source: HTTP restart caller set_{name} changed")
+    if len(re.findall(r"\breboot_soon\s*\(\s*\)", code["main/http_config.cpp"])) != 7:
+        raise BudgetError("shutdown source: unreviewed HTTP restart caller")
+    for path, parent, child in (("main/hp_poll.cpp", "poll_task", "heap_guard_sample"),
+                                ("main/hp_poll.cpp", "poll_task", "history_record_board"),
+                                ("main/recovery_button.cpp", "button_task", "factory_reset"),
+                                ("main/ota_update.cpp", "ota_task", "run_update")):
+        if len(re.findall(r"\b" + child + r"\s*\(", stack_function_body(code[path], parent))) != 1:
+            raise BudgetError(f"shutdown source: {parent}/{child} caller changed")
+    for name, count in (("heap_guard_sample", 2), ("history_record_board", 2),
+                        ("factory_reset", 2), ("run_update", 2), ("wifi_start_sta", 2),
+                        ("wifi_finish_sta_rollback", 2), ("checkup_reboot_save", 1),
+                        ("history_flash_save", 1), ("history_flash_service_journal", 4)):
+        actual = sum(len(re.findall(r"\b" + name + r"\s*\(", source))
+                     for path, source in code.items() if path.endswith(".cpp"))
+        if actual != count:
+            raise BudgetError(f"shutdown source: unreviewed caller of {name}")
+    history = code["main/history.cpp"]
+    checkup = code["main/checkup.cpp"]
+    if (not re.search(r"esp_register_shutdown_handler\(history_flash_save\)",
+                      stack_function_body(history, "history_start"))
+            or not re.search(r"esp_register_shutdown_handler\(checkup_reboot_save\)",
+                             stack_function_body(checkup, "checkup_start"))
+            or not re.search(r"history_flash_service_journal\(\s*12,\s*pdMS_TO_TICKS\(200\)\)",
+                             stack_function_body(history, "history_flash_save"))
+            or not re.search(r"history_flash_service_journal\(\s*3,\s*0\)",
+                             stack_function_body(history, "history_record_board"))):
+        raise BudgetError("shutdown source: registered handler/journal caller changed")
+    boot = stack_function_body(code["main/main.cpp"], "boot_sequence")
+    positions = [boot.find(name + "(") for name in ("wifi_start_sta", "history_start", "checkup_start")]
+    if (any(position < 0 for position in positions) or positions != sorted(positions)
+            or len(re.findall(r"\bwifi_start_sta\s*\(", code["main/main.cpp"])) != 1
+            or len(re.findall(r"\bwifi_finish_sta_rollback\s*\(",
+                              stack_function_body(code["main/wifi.cpp"], "wifi_start_sta"))) != 1):
+        raise BudgetError("shutdown source: pre-handler WiFi rollback ordering changed")
+    reset = bodies["factory_reset"]
+    incomplete = re.search(r"if\s*\(wifi_e != ESP_OK \|\| !history_erased \|\| !crash_erased\)\s*\{",
+                           reset)
+    if (not re.search(r"history_erased\s*=\s*e == ESP_OK && wifi_e == ESP_OK\s*\?\s*"
+                      r"history_flash_forget\(\)\s*:\s*false", reset)
+            or incomplete is None or "return;" not in reset[incomplete.end():reset.find("}", incomplete.end())]
+            or incomplete.start() > reset.find("esp_restart(")
+            or not re.search(r"^\s*s_flash_forgotten\.store\(true\);",
+                             stack_function_body(history, "history_flash_forget"))
+            or not re.search(r"if\s*\(!s_flash_part \|\| s_flash_shutdown_started \|\| "
+                             r"s_flash_forgotten\.load\(\)\) return;",
+                             stack_function_body(history, "history_flash_save"))):
+        raise BudgetError("shutdown source: factory-reset journal exclusion changed")
+
+
 def validate_task_stacks(budgets: dict[str, Any], sources: dict[str, str]) -> None:
     """Check ceilings against the allocation actually passed to each application task."""
     tasks = budgets["tasks"]
@@ -694,7 +940,9 @@ def validate_task_stacks(budgets: dict[str, Any], sources: dict[str, str]) -> No
         for path in rule["paths"]:
             if path in owners:
                 raise BudgetError(f"path {path}: duplicate task owner")
-            expected = {"http_deadline_watchdog": "deadline", "ota_health_gate": "ota_health"}.get(path)
+            expected = {"http_deadline_watchdog": "deadline", "ota_health_gate": "ota_health",
+                        "ota_health_shutdown_journal": "ota_health",
+                        "ota_health_shutdown_checkup": "ota_health"}.get(path)
             if expected is None:
                 candidates = [owner for owner in tasks if path.startswith(owner + "_")]
                 if len(candidates) != 1:
@@ -901,6 +1149,8 @@ def validate_source_contract(budgets: dict[str, Any]) -> None:
     validate_task_stacks(budgets, sources)
     validate_discovery_builder_paths(budgets)
     validate_http_stack(budgets, (REPO / "main/http_server.cpp").read_text(encoding="utf-8"))
+    validate_status_diagnosis_paths(budgets, sources)
+    validate_shutdown_paths(budgets, sources)
     validate_json_recursion(
         budgets, (REPO / "main/logic/payload_complete.hpp").read_text(encoding="utf-8"),
         (REPO / "main/logic/mcp.hpp").read_text(encoding="utf-8"),
@@ -1169,6 +1419,7 @@ def self_test() -> None:
    4: 004136          entry a1, 1120
 00000005 <daik::(anonymous namespace)::ota_task(void*)>:
    5: 004136          entry a1, 2608
+   8: fff7a5          call8 1000 <esp_restart>
 00000006 <daik::ota_stat(httpd_req*)>:
    6: 004136          entry a1, 5088
 00000007 <daik::(anonymous namespace)::fetch_manifest_identity_once(std::string const&, daik::OtaManifestIdentity&, char const*&, bool&)>:
@@ -1274,6 +1525,18 @@ def self_test() -> None:
      'daik::hp_format(daik::ValueDef const&, unsigned char const*, int, int, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >&, daik::ValueDef const*, unsigned int, daik::SaturationWitness)': 64,
      'daik::history_record(daik::CachedValue const*, unsigned int, unsigned long)': 64,
      'daik::checkup_report()': 64,
+     STATUS_HEALTH_NUMBER_SYMBOL: 32,
+     STATUS_UNSIGNED_NUMBER_SYMBOL: 64,
+     'esp_restart': 32,
+     'daik::reboot_soon()': 32,
+     'daik::heap_guard_sample()': 64,
+     'daik::history_flash_save()': 48,
+     'daik::(anonymous namespace)::checkup_reboot_save()': 80,
+     'daik::(anonymous namespace)::apply_reset_locked()': 112,
+     'daik::(anonymous namespace)::apply_dhw_reset_locked()': 112,
+     'daik::set_wifi(httpd_req*)': 64,
+     'daik::set_syslog(httpd_req*)': 64,
+     'daik::set_ntp(httpd_req*)': 64,
      'daik::history_flash_service_journal(unsigned int, unsigned long)': 64,
      'daik::(anonymous namespace)::flash_append_record(daik::(anonymous namespace)::FlashJournalRecord&)': 64,
      '_ZN4daik12_GLOBAL__N_1L22flash_append_record_atERNS0_18FlashJournalRecordERj$constprop$0': 64,
@@ -1592,8 +1855,12 @@ def self_test() -> None:
      INTEGER_APPEND_SYMBOL: 80,
      INTEGER_LENGTH_SYMBOL: 48,
      INTEGER_DIGITS_SYMBOL: 240}
-    for index, (name, frame) in enumerate(extra_frames.items(), 0x100):
+    # Keep generated anchors outside the hand-written decimal/I2C fixtures below. Otherwise
+    # a packed-prologue mutation can also replace an unrelated first instruction at 0x220.
+    for index, (name, frame) in enumerate(extra_frames.items(), 0x1000):
         fixture += f"\n{index:08x} <{name}>:\n{index:x}: 004136 entry a1, {frame}\n"
+        if name == 'daik::(anonymous namespace)::button_task(void*)':
+            fixture += f"{index + 3:x}: fff7a5 call8 1000 <esp_restart>\n"
         if name in INTEGER_BUILDERS:
             for offset in range(INTEGER_BUILDERS[name]):
                 fixture += f"{index + 3 + offset:x}: fff7a5 call8 800 <{INTEGER_APPEND_SYMBOL}>\n"
@@ -1653,14 +1920,24 @@ def self_test() -> None:
 226: 20a220 or a10, a2, a2
 229: fff7a5 call8 200 <{double_body}>
 """
+    number_calls = "".join(f"{0x3003 + offset:x}: fff7a5 call8 3000 <{STATUS_HEALTH_NUMBER_SYMBOL}>\n"
+                           for offset in range(25))
+    fixture = fixture.replace("   3: 004136          entry a1, 4848\n",
+                              "   3: 004136          entry a1, 4848\n" + number_calls)
     budgets = load_budgets(DEFAULT_BUDGETS)
     validate_source_contract(budgets)
     frames = parse_frames(fixture)
 
     selected = evaluate(frames, budgets)
+    validate_shutdown_inlining(fixture, budgets)
+    validate_status_numeric_calls(fixture, budgets)
     assert selected["status_serializer"] == 4848
-    assert selected["path:httpd_mcp_status"] == 8064
+    assert selected["path:httpd_mcp_status"] == 8192
     assert selected["path:httpd_direct_status"] == 6960
+    assert selected["path:httpd_mcp_checkup"] == 7808
+    assert selected["path:httpd_direct_checkup"] == 6576
+    assert selected["path:httpd_mcp_health_number"] == 7840
+    assert selected["path:httpd_direct_health_number"] == 6608
     assert selected["ota_task"] == 2608
     assert selected["path:httpd_ota_status"] == 6624
     assert selected["path:ota_task_manifest_fetch"] == 4672
@@ -1681,6 +1958,136 @@ def self_test() -> None:
     assert selected["path:httpd_wifi_scan"] == 5248
     assert selected["path:httpd_mqtt_tls"] == 7968
 
+    status_sources = {path: (REPO / path).read_text(encoding="utf-8")
+                      for path in ("main/http_status.cpp", "main/mcp_server.cpp", "main/hp_poll.cpp")}
+    validate_status_diagnosis_paths(budgets, status_sources)
+    diagnosis_controls = 0
+    for name, member in (("httpd_direct_checkup", "checkup_report"),
+                         ("httpd_mcp_checkup", "checkup_report"),
+                         ("httpd_mcp_checkup", "http_send_status_json"),
+                         ("httpd_mcp_status", "http_send_status_json"),
+                         ("httpd_mcp_health_number", "status_health_number"),
+                         ("httpd_mcp_health_number", "status_unsigned_number"),
+                         ("httpd_direct_health_number", "status_health_number"),
+                         ("httpd_direct_health_number", "status_unsigned_number")):
+        changed = json.loads(json.dumps(budgets))
+        changed["paths"][name]["symbols"].remove(member)
+        try:
+            validate_status_diagnosis_paths(changed, status_sources)
+        except BudgetError as exc:
+            assert "diagnosis status path" in str(exc)
+        else:
+            raise AssertionError(f"self-test accepted omitted {member} from {name}")
+        diagnosis_controls += 1
+    changed = json.loads(json.dumps(budgets))
+    changed["paths"]["poll_history"]["symbols"].append("checkup_report")
+    try:
+        validate_status_diagnosis_paths(changed, status_sources)
+    except BudgetError as exc:
+        assert "belongs to HTTP, not polling" in str(exc)
+    else:
+        raise AssertionError("self-test accepted charging the report frame to polling")
+    diagnosis_controls += 1
+    for name, before, after in (
+        ("main/http_status.cpp", "return http_send_status_json(req, {}, {}, redact);", "return ESP_FAIL;"),
+        ("main/mcp_server.cpp", "return http_send_status_json(req, response, suffix, false);", "return ESP_FAIL;"),
+        ("main/hp_poll.cpp", "static void poll_task(void*) {",
+         "static void poll_task(void*) { checkup_report();"),
+    ):
+        changed = dict(status_sources)
+        changed[name] = changed[name].replace(before, after)
+        assert changed[name] != status_sources[name]
+        try:
+            validate_status_diagnosis_paths(budgets, changed)
+        except BudgetError as exc:
+            assert "diagnosis status source" in str(exc)
+        else:
+            raise AssertionError(f"self-test accepted a changed report caller in {name}")
+        diagnosis_controls += 1
+
+    for before, after in (
+        ('__attribute__((noinline))', '__attribute__((always_inline))'),
+        ('num("windows", ck.b);', 'other_number("windows", ck.b);'),
+        ('char digits[20];', 'char digits[19];'),
+        ('JsonOut& out, uint64_t value', 'JsonOut& out, uint32_t value'),
+        ('value /= 10;', 'value /= 16;'),
+    ):
+        changed = dict(status_sources)
+        changed["main/http_status.cpp"] = changed["main/http_status.cpp"].replace(before, after)
+        assert changed["main/http_status.cpp"] != status_sources["main/http_status.cpp"]
+        try:
+            validate_status_diagnosis_paths(budgets, changed)
+        except BudgetError as exc:
+            assert "diagnosis numeric source" in str(exc)
+        else:
+            raise AssertionError(f"self-test accepted changed numeric serializer source: {before}")
+        diagnosis_controls += 1
+
+    shutdown_sources = {str(path.relative_to(REPO)): path.read_text(encoding="utf-8")
+                        for path in (REPO / "main").glob("*.cpp")}
+    validate_shutdown_paths(budgets, shutdown_sources)
+    shutdown_controls = 0
+    for name, members in shutdown_path_members().items():
+        for member in members:
+            changed = json.loads(json.dumps(budgets))
+            changed["paths"][name]["symbols"].remove(member)
+            try:
+                validate_shutdown_paths(changed, shutdown_sources)
+            except BudgetError as exc:
+                assert "shutdown path" in str(exc)
+            else:
+                raise AssertionError(f"self-test accepted omitted {member} from {name}")
+            shutdown_controls += 1
+        changed = json.loads(json.dumps(budgets))
+        changed["paths"][name]["base_bytes"] = 0
+        try:
+            validate_shutdown_paths(changed, shutdown_sources)
+        except BudgetError as exc:
+            assert "shutdown path" in str(exc)
+        else:
+            raise AssertionError(f"self-test accepted omitted SDK continuation from {name}")
+        shutdown_controls += 1
+    for path, before, after in (
+        ("main/history.cpp", "esp_register_shutdown_handler(history_flash_save)",
+         "esp_register_shutdown_handler(other_handler)"),
+        ("main/checkup.cpp", "esp_register_shutdown_handler(checkup_reboot_save)",
+         "esp_register_shutdown_handler(other_handler)"),
+        ("main/history.cpp", "history_flash_service_journal(/*max_records=*/12, pdMS_TO_TICKS(200))",
+         "history_flash_service_journal(/*max_records=*/13, pdMS_TO_TICKS(200))"),
+        ("main/history.cpp", "history_flash_service_journal(/*max_records=*/3, /*wait_ticks=*/0)",
+         "history_flash_service_journal(/*max_records=*/4, /*wait_ticks=*/0)"),
+        ("main/history.cpp", "s_flash_forgotten.store(true);", "s_flash_forgotten.store(false);"),
+        ("main/history.cpp", "s_flash_shutdown_started || s_flash_forgotten.load()",
+         "s_flash_shutdown_started"),
+        ("main/recovery_button.cpp", "wifi_e != ESP_OK || !history_erased || !crash_erased",
+         "wifi_e != ESP_OK || !crash_erased"),
+        ("main/recovery_button.cpp", "? history_flash_forget() : false", "? true : false"),
+        ("main/recovery_button.cpp", "factory_reset();", "other_reset();"),
+        ("main/hp_poll.cpp", "heap_guard_sample();", "other_heap_guard();"),
+        ("main/hp_poll.cpp", "history_record_board();", "other_history();"),
+        ("main/http_config.cpp", "reboot_soon();", "other_reboot();"),
+        ("main/net.cpp", "esp_restart();", "other_restart();"),
+        ("main/wifi.cpp", "wifi_finish_sta_rollback();", "other_rollback();"),
+        ("main/main.cpp", "wifi_up = daik::wifi_start_sta();",
+         "wifi_up = (daik::history_start(), daik::wifi_start_sta());"),
+        ("main/net.cpp", "void net_eth_fallback_start() {",
+         "void net_eth_fallback_start() { esp_restart();"),
+        ("main/net.cpp", "void net_eth_fallback_start() {",
+         "void net_eth_fallback_start() { wifi_start_sta();"),
+        ("main/checkup.cpp", "void checkup_reboot_save() {",
+         "void checkup_reboot_save() { history_flash_save();"),
+    ):
+        changed = dict(shutdown_sources)
+        changed[path] = changed[path].replace(before, after, 1)
+        assert changed[path] != shutdown_sources[path], f"missing shutdown control {path}: {before}"
+        try:
+            validate_shutdown_paths(budgets, changed)
+        except BudgetError as exc:
+            assert "shutdown source" in str(exc)
+        else:
+            raise AssertionError(f"self-test accepted a changed shutdown caller in {path}: {before}")
+        shutdown_controls += 1
+
     for symbol, address, word, frame in (
         ("parse_value", "1f", "16008136", 64),
         ("parse_string", "20", "d8006136", 48),
@@ -1697,10 +2104,53 @@ def self_test() -> None:
     def reject_disassembly(name: str, text: str, expected: str) -> None:
         try:
             evaluate(parse_frames(text), budgets)
+            validate_shutdown_inlining(text, budgets)
+            validate_status_numeric_calls(text, budgets)
         except BudgetError as exc:
             assert expected in str(exc), f"{name}: unexpected failure {exc}"
         else:
             raise AssertionError(f"self-test accepted {name}")
+
+    numeric_call = f"3003: fff7a5 call8 3000 <{STATUS_HEALTH_NUMBER_SYMBOL}>\n"
+    numeric_disassembly_controls = 0
+    for altered in (
+        fixture.replace(numeric_call, ""),
+        fixture.replace(numeric_call, numeric_call.replace("call8", "l32r a8,")),
+        fixture.replace(numeric_call, "") + "\n00004000 <unreviewed_number_caller()>:\n"
+        "4000: 004136 entry a1, 32\n" + numeric_call,
+    ):
+        assert altered != fixture
+        reject_disassembly("changed nullable-number caller", altered, "diagnosis numeric calls")
+        numeric_disassembly_controls += 1
+
+    shutdown_optimizer_controls = 0
+    for name in (
+        'daik::(anonymous namespace)::factory_reset()',
+        'daik::(anonymous namespace)::run_update(daik::(anonymous namespace)::OtaTaskArgs const&)',
+        '_ZN4daik12_GLOBAL__N_1L13factory_resetEv$constprop$0',
+        '_ZN4daik12_GLOBAL__N_1L10run_updateERKNS0_11OtaTaskArgsE$isra$0',
+    ):
+        reject_disassembly("outlined shutdown helper " + name, fixture +
+                           f"\n00003000 <{name}>:\n3000: 004136 entry a1, 32\n",
+                           "shutdown inlining")
+        shutdown_optimizer_controls += 1
+    button_match = re.search(r"<daik::\(anonymous namespace\)::button_task\(void\*\)>:\n"
+                             r"[^\n]+\n([^\n]*call8[^\n]*<esp_restart>)", fixture)
+    assert button_match is not None
+    for call in (button_match.group(1), "   8: fff7a5          call8 1000 <esp_restart>"):
+        for replacement in ("", call.replace("call8", "l32r a8,"), call + "\n" + call):
+            reject_disassembly("changed task-level shutdown call", fixture.replace(call, replacement),
+                               "shutdown inlining")
+            shutdown_optimizer_controls += 1
+    update_lambda = ('daik::(anonymous namespace)::run_update(daik::(anonymous namespace)::'
+                     'OtaTaskArgs const&)::{lambda(unsigned char const*, unsigned int)\x231}::'
+                     'operator()(unsigned char const*, unsigned int) const')
+    lambda_fixture = fixture + f"\n00003000 <{update_lambda}>:\n3000: 004136 entry a1, 32\n"
+    evaluate(parse_frames(lambda_fixture), budgets)
+    validate_shutdown_inlining(lambda_fixture, budgets)
+    reject_disassembly("restart moved into update lambda", lambda_fixture +
+                       "3003: fff7a5 call8 1000 <esp_restart>\n", "shutdown inlining")
+    shutdown_optimizer_controls += 1
 
     # Exercise every required anchor, not only the original HTTP examples. Small fixture frames
     # establish acceptance/control behavior; the real ELF supplies the production measurements.
@@ -2454,6 +2904,10 @@ def self_test() -> None:
           f"{queue_controls} queue-source, {diagnostic_controls} diagnostic-source, "
           f"{tls_source_controls} TLS-client-source, {sdk_recursion_controls} SDK-recursion, "
           f"{integer_disassembly_controls} integer-disassembly, {integer_source_controls} integer-source/path, "
+          f"{diagnosis_controls} diagnosis-source/path, "
+          f"{numeric_disassembly_controls} diagnosis-numeric-calls, "
+          f"{shutdown_controls} shutdown-source/path, "
+          f"{shutdown_optimizer_controls} shutdown-inlining, "
           f"{i2c_dynamic_controls} I2C-dynamic, {i2c_source_controls} I2C-source, "
           f"{sdk_controls} SDK-source/config controls)")
 
@@ -2494,6 +2948,8 @@ def main(argv: list[str]) -> int:
             text = args.disassembly.read_text(encoding="utf-8")
         except (OSError, UnicodeError) as exc:
             raise BudgetError(f"cannot read {args.disassembly}: {exc}") from exc
+    validate_shutdown_inlining(text, budgets)
+    validate_status_numeric_calls(text, budgets)
     result = evaluate(parse_frames(text, budgets), budgets)
     reserves = {task: rule["stack_bytes"] - max(result[f"path:{path}"] for path in rule["paths"])
                 for task, rule in budgets["tasks"].items()}

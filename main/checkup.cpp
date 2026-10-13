@@ -10,6 +10,8 @@
 #include "logic/history.hpp"     // history_parse_tenths — the ONE parse of a cached value
 #include "safe_mode.hpp"         // safe_mode_active — nothing ages the window there
 #include "mqtt_ha.hpp"           // independent circulation-pump electrical witness
+#include "config.hpp"            // allocation-free circulation identity snapshot
+#include "sntp_time.hpp"         // pressure minimum carries a real source observation timestamp
 
 #include "esp_attr.h"            // __NOINIT_ATTR — warm handoff and startup integrity metadata
 #include "esp_system.h"          // esp_reset_reason
@@ -92,18 +94,22 @@ logic::DhwLossState s_dhw_state;
 logic::CheckupRestore s_persist_verdict = logic::CheckupRestore::NoRecord;
 uint32_t s_model_fp = 0;
 uint32_t                     s_source_fp        = 0;
+uint32_t                     s_dhw_source_fp    = 0;
+std::atomic<uint32_t>        s_requested_dhw_source_fp{0};
 bool                         s_source_confirmed = false;
 logic::DhwLossHandoffPayload s_boot_handoff{};
 uint32_t                     s_boot_handoff_model = 0;
 bool                         s_boot_handoff_valid = false;
 // Exact expiry for reconstructed completed slots, including selected live intervals.
-// Zero marks gaps or ordinary current-boot slots that still age through the hourly ring.
+// Current-boot completions carry the same deadline: a stopped producer must still lose old hours.
 int64_t s_restored_expiry_us[logic::CHECKUP_COMPLETED_BUCKETS] = {};
 // Capability of the CURRENT converter-adjudicated profile. hp_poll derives it from the profile rows,
 // not from successful reads, so a timeout reduces evidence without pretending the feature vanished.
 // Replacing instead of OR-latching it is important when model detection changes at runtime.
 logic::CheckupCoverage s_cov;
 daik::FaultClass      s_fault_now = daik::FaultClass::Unknown;
+int64_t                s_source_last_us = -1; // actual X10A rows, never an empty gap callback
+int                    s_pressure_now   = -1;
 SemaphoreHandle_t     s_mtx = nullptr;
 std::atomic<bool>     s_reset_requested{false};
 std::atomic<bool>     s_dhw_reset_requested{false};
@@ -142,6 +148,15 @@ std::array<CheckupFlashRecord, logic::CHECKUP_COMPLETED_BUCKETS> s_restore_live 
 // Everything inside a critical section in this file is a plain integer copy — nothing allocates —
 // so the unwind safety is belt-and-braces here rather than the reason the guard is used.
 using Lock = SemGuard;
+
+uint32_t circulation_identity() {
+    return with_config([](const Config& c) {
+        return logic::checkup_dhw_source_fingerprint(
+            c.mqtt_uri.c_str(), c.circulation_topic.c_str(), c.circulation_power_path.c_str(),
+            c.circulation_time_path.c_str(), c.circulation_max_age_s, c.circulation_on_tenths_w,
+            c.circulation_off_tenths_w, c.circulation_confirm_s);
+    });
+}
 
 // The row a locator addresses, or -1. Composes logic/checkup.hpp's pure predicate rather than taking
 // the parallel-array checkup_select(): building (reg, off, conv) views for a full resolved profile
@@ -251,6 +266,8 @@ void persist_wipe(bool keep_handoff = false) {
     P().boots_since_commit = 0; // reserved integrity counter; no completed RAM hours are adopted
     s_last_commit_us = kNoCommitUs;
     s_live_commit_count = 0;
+    s_source_last_us       = -1;
+    s_pressure_now         = -1;
     persist_seal();     // keeps s_model_fp: the identity belongs to what is recorded NEXT, and the
 } // reset is consumed asynchronously, after checkup_reset_on_detect set it
 
@@ -270,6 +287,11 @@ bool apply_dhw_reset_locked() {
     if (!s_dhw_reset_requested.exchange(false)) return false;
     s_boot_handoff_valid = false;
     P().dhw.reset();
+    // The independent reset retires values, not the shared hourly geometry. Losing head/count
+    // would suppress even unrelated X10A journal writes until both rings saturated again.
+    P().dhw.head          = P().ring.head;
+    P().dhw.count         = P().ring.count;
+    s_dhw_source_fp       = s_requested_dhw_source_fp.load();
     s_dhw_state = logic::DhwLossState{};
     P().dhw_handoff.magic = 0;
     persist_seal();
@@ -304,6 +326,7 @@ void checkup_reboot_save() {
     h.model_fp  = s_model_fp;
     h.payload.candidate = logic::dhw_loss_checkpoint(s_dhw_state, esp_timer_get_time());
     h.payload.source_fp    = s_source_confirmed ? s_source_fp : 0;
+    h.payload.dhw_source_fp = s_dhw_source_fp;
     // Completed counters in the open hour have no durable age; never carry them across a boot.
     h.payload.pending = logic::DhwLossBucket{};
     h.crc = logic::checkup_dhw_handoff_crc(h.model_fp, h.payload);
@@ -333,6 +356,8 @@ void checkup_start(bool diagnostics_enabled, uint32_t diagnostics_generation) {
     }
     s_last_commit_us = kNoCommitUs;
     s_live_commit_count = 0;
+    s_dhw_source_fp     = circulation_identity();
+    s_requested_dhw_source_fp.store(s_dhw_source_fp);
     s_diagnostics_enabled.store(diagnostics_enabled, std::memory_order_release);
     s_diagnostics_generation = diagnostics_generation;
     const uint32_t want_fp = logic::checkup_layout_fingerprint();
@@ -430,7 +455,8 @@ void checkup_reset_on_detect(const char* profile_id, uint32_t source_fp) {
         // The stored startup scope was only an expectation. This call confirms the current source.
         if (s_boot_handoff_valid && !s_reset_requested.load() && !s_dhw_reset_requested.load() &&
             s_diagnostics_enabled.load(std::memory_order_acquire) && s_boot_handoff_model == fp &&
-            s_boot_handoff.source_fp == source_fp) {
+            s_boot_handoff.source_fp == source_fp &&
+            s_boot_handoff.dhw_source_fp == s_dhw_source_fp) {
             logic::dhw_loss_adopt(s_dhw_state, s_boot_handoff.candidate, esp_timer_get_time());
             diag_printf("checkup: scoped DHW filter checkpoint applied; undated completed counters "
                         "discarded\n");
@@ -445,17 +471,25 @@ void checkup_reset_on_detect(const char* profile_id, uint32_t source_fp) {
 }
 
 void checkup_dhw_reset() {
+    // The saved configuration is already committed when its MQTT owner calls this. Read it before
+    // acquiring the checkup mutex; no Config/string copy or nested config/checkup lock is needed.
+    s_requested_dhw_source_fp.store(circulation_identity());
     s_dhw_identity_generation.fetch_add(1);
     s_dhw_reset_requested.store(true);
 }
 
 void checkup_record(const CachedValue* v, size_t n, bool rps_known, bool rps_running,
-                    const logic::CheckupCoverage& coverage, uint32_t source_generation) {
+                    const logic::CheckupCoverage& coverage, uint32_t source_generation,
+                    bool profile_confirmed) {
     if (!s_diagnostics_enabled.load(std::memory_order_acquire)) return;
     if (!s_mtx) return;   // checkup_start() creates it; absent means its alloc failed -> no observation
     if (!v && n) return;
 
     logic::CheckupSample s;
+    int64_t              unix_s  = -1;
+    int32_t              unix_ms = 0;
+    time_now(unix_s, unix_ms);
+    if (unix_s > 0 && unix_s <= UINT32_MAX) s.unix_s = static_cast<uint32_t>(unix_s);
     s.rps_known   = rps_known;
     s.rps_running = rps_running;
 
@@ -543,8 +577,12 @@ void checkup_record(const CachedValue* v, size_t n, bool rps_known, bool rps_run
     const bool discard_dhw_sample = apply_dhw_reset_locked() ||
                                     dhw_generation != s_dhw_identity_generation.load() ||
                                     circulation_generation != circulation_source_generation();
-    s_cov       = coverage;
+    // OOM/TLS callbacks report an observation gap, not a newly resolved empty profile. A genuine
+    // unidentified-profile cycle still supplies confirmed empty coverage and withdraws capability.
+    if (profile_confirmed) s_cov = coverage;
     s_fault_now = s.fault;
+    s_pressure_now = s.bar_ok && s.bar_tenths >= 0 ? s.bar_tenths : -1;
+    if (n) s_source_last_us = now;
     P().ring.observe(now);
 
     // Close the old hour before folding the current sample. For a continuous boundary, zero only
@@ -565,10 +603,21 @@ void checkup_record(const CachedValue* v, size_t n, bool rps_known, bool rps_run
             s_restored_expiry_us[(P().ring.head + i) % logic::CHECKUP_COMPLETED_BUCKETS] = 0;
         P().ring.commit(skipped);
         P().dhw.commit(skipped);
-        s_last_commit_us = now;
-        const uint32_t committed_now = 1u +
-            (skipped < logic::CHECKUP_COMPLETED_BUCKETS
-                ? skipped : logic::CHECKUP_COMPLETED_BUCKETS);
+        // Expire at the same start+24 h boundary that a progressing 23-slot ring would overwrite.
+        // The first pushed slot closes the previous open bucket; skipped slots contain no evidence.
+        const int64_t completed_end_us =
+            (static_cast<int64_t>(s_state.bucket) + 1) * logic::CHECKUP_DT_S * 1000000LL;
+        const int64_t completed_start_us =
+            completed_end_us - static_cast<int64_t>(logic::CHECKUP_DT_S) * 1000000LL;
+        const size_t committed_i =
+            (static_cast<size_t>(P().ring.head) + logic::CHECKUP_COMPLETED_BUCKETS - overwritten) %
+            logic::CHECKUP_COMPLETED_BUCKETS;
+        if (skipped < logic::CHECKUP_COMPLETED_BUCKETS)
+            s_restored_expiry_us[committed_i] = logic::checkup_live_expiry_us(completed_start_us);
+        s_last_commit_us = static_cast<int64_t>(bucket) * logic::CHECKUP_DT_S * 1000000LL;
+        const uint32_t committed_now =
+            1u + (skipped < logic::CHECKUP_COMPLETED_BUCKETS ? skipped
+                                                             : logic::CHECKUP_COMPLETED_BUCKETS);
         const uint32_t live_total = static_cast<uint32_t>(s_live_commit_count) + committed_now;
         s_live_commit_count = static_cast<uint8_t>(
             live_total < logic::CHECKUP_COMPLETED_BUCKETS
@@ -602,6 +651,19 @@ void expire_restored_locked() {
         s_restored_expiry_us[i] = 0;
         changed                 = true;
     }
+    // A stopped producer must not extend the pending hour's lifetime to last-sample+24 h.
+    const int64_t pending_start_us =
+        static_cast<int64_t>(s_state.bucket) * logic::CHECKUP_DT_S * 1000000LL;
+    if (s_state.have_bucket && s_state.last_us >= 0 &&
+        logic::checkup_restored_expired(logic::checkup_live_expiry_us(pending_start_us), now_us)) {
+        P().ring.pending = logic::CheckupBucket{};
+        P().dhw.pending  = logic::DhwLossBucket{};
+        s_state          = logic::CheckupState{};
+        s_dhw_state      = logic::DhwLossState{};
+        s_fault_now      = FaultClass::Unknown;
+        s_pressure_now   = -1;
+        changed          = true;
+    }
     if (changed) persist_seal();
 }
 
@@ -614,16 +676,36 @@ logic::CheckupReport checkup_report() {
     // Until then expose an empty report, never stale identity A and never consume the guard early.
     if (s_reset_requested.load()) return logic::CheckupReport{};
     expire_restored_locked();
+    const int64_t  now_us        = esp_timer_get_time();
+    const bool     have_source   = s_source_last_us >= 0 && now_us >= s_source_last_us;
+    const int64_t  source_gap_us = have_source ? now_us - s_source_last_us : 0;
+    const uint32_t source_age_s =
+        have_source
+            ? static_cast<uint32_t>(std::min<int64_t>(source_gap_us / 1000000, UINT32_MAX - 1))
+            : UINT32_MAX;
+    const bool source_fresh =
+        have_source && source_gap_us <= static_cast<int64_t>(logic::CHECKUP_MAX_GAP_S) * 1000000LL;
+    const int64_t live_span_us = P().ring.first_sample_us >= 0 && now_us >= P().ring.first_sample_us
+                                     ? now_us - P().ring.first_sample_us
+                                     : 0;
+    const uint32_t span_s      = static_cast<uint32_t>(std::min<int64_t>(
+        logic::CHECKUP_WINDOW_S, live_span_us / 1000000 + P().ring.carried_span_us / 1000000));
+    auto           window      = logic::checkup_aggregate(P().ring);
+    window.full_span           = span_s >= logic::CHECKUP_WINDOW_S;
     logic::CheckupReport report = logic::checkup_evaluate(
-        logic::checkup_aggregate(P().ring), s_cov, s_fault_now,
-        s_dhw_reset_requested.load() ? logic::DhwLossWindow{}
-                                     : logic::dhw_loss_aggregate(P().dhw));
-    if (!s_dhw_reset_requested.load()) {
-        const logic::DhwLossProgress p = logic::dhw_loss_progress(s_dhw_state,
-                                                                  esp_timer_get_time());
+        window, s_cov, source_fresh ? s_fault_now : FaultClass::Unknown,
+        s_dhw_reset_requested.load() ? logic::DhwLossWindow{} : logic::dhw_loss_aggregate(P().dhw));
+    report.pressure_current_tenths = source_fresh ? s_pressure_now : -1;
+    if (source_fresh && !s_dhw_reset_requested.load()) {
+        const int64_t progress_us =
+            s_dhw_state.last_us >= 0 ? std::min(now_us, s_dhw_state.last_us) : now_us;
+        const logic::DhwLossProgress p = logic::dhw_loss_progress(s_dhw_state, progress_us);
         report.dhw_candidate_s = p.candidate_observed_s;
         report.dhw_settle_remaining_s = p.settle_remaining_s;
     }
+    // Apply read-time freshness after all report fields are populated. A stopped source must not
+    // have its retired current state or progress reintroduced by a later builder step.
+    logic::checkup_apply_freshness(report, source_fresh, source_age_s, span_s);
     return report;
 }
 
@@ -659,6 +741,7 @@ bool checkup_flash_next(int64_t now_unix_s, int64_t after_bucket,
     payload = logic::CheckupJournalPayload{};
     payload.model_fp = s_model_fp;
     payload.source_fp              = s_source_fp;
+    payload.dhw_source_fp          = s_dhw_source_fp;
     payload.diagnostics_generation = s_diagnostics_generation;
     payload.end_unix_s = latest_end_unix_s -
         static_cast<int64_t>(age) * logic::CHECKUP_DT_S;
@@ -706,6 +789,7 @@ CheckupFlashRestoreResult checkup_flash_restore(const CheckupFlashRecord* record
             rec.payload = logic::CheckupJournalPayload{};
             rec.payload.model_fp = s_model_fp;
             rec.payload.source_fp              = s_source_fp;
+            rec.payload.dhw_source_fp          = s_dhw_source_fp;
             rec.payload.diagnostics_generation = s_diagnostics_generation;
             rec.payload.end_unix_s = latest_end -
                 static_cast<int64_t>(available - 1 - i) * logic::CHECKUP_DT_S;
@@ -789,7 +873,11 @@ CheckupFlashRestoreResult checkup_flash_restore(const CheckupFlashRecord* record
         bool                 from_flash = false;
         if (const auto* rec = find(b, from_flash)) {
             cb     = rec->payload.checkup;
-            db     = rec->payload.dhw;
+            // A circulation reconfiguration retires only its DHW evidence. Independent X10A
+            // findings keep their original dated observations and expiry.
+            if (!s_dhw_reset_requested.load() &&
+                logic::checkup_journal_dhw_identity_matches(rec->payload, s_dhw_source_fp))
+                db = rec->payload.dhw;
             expiry = logic::checkup_restore_expiry_us(rec->payload.end_unix_s, now_unix_s, now_us);
         }
         s_restored_expiry_us[P().ring.head] =

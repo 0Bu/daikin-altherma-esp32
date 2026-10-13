@@ -142,7 +142,7 @@ uint32_t history_x10a_identity(const char*, int32_t, int32_t, char) { return 0x1
 void     checkup_reset_on_detect(const char*, uint32_t) {}
 void     dwell_reset_on_detect(const char*) {}
 void     checkup_record(const CachedValue* values, size_t count, bool, bool,
-                        const logic::CheckupCoverage&, uint32_t) {
+                        const logic::CheckupCoverage&, uint32_t, bool) {
     if (!values && !count) ++sdk::checkup_unread;
 }
 void dwell_record(const CachedValue* values, size_t count, uint32_t, uint32_t) {

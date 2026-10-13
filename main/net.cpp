@@ -606,7 +606,9 @@ void net_eth_fallback_start() {
     // WiFi already has the radio's own endless reconnect, and one with no controller has no wire
     // to lose.
     if (!net_eth_fallback_watch_needed(s_present.load(), s_carried_boot.load())) return;
-    if (xTaskCreate(eth_fallback_task, "eth_fb", 3072, nullptr, TASK_PRIO_ETH_FALLBACK, nullptr) != pdPASS)
+    // esp_restart runs the bounded history/checkup shutdown handlers on this task's stack.
+    if (xTaskCreate(eth_fallback_task, "eth_fb", 4096, nullptr, TASK_PRIO_ETH_FALLBACK, nullptr) !=
+        pdPASS)
         diag_printf("net: fallback watch task alloc failed — a pulled cable will need a manual "
                     "power cycle\n");
 }

@@ -84,7 +84,7 @@ IDs are stable and never reused; gaps identify retired entries. Each feature is 
 | 76 | One declared task-priority table | ✅ | [`task_config.hpp`](../main/task_config.hpp) |
 | 77 | Boot-detected W5500 Ethernet, wired-first startup, route priority and safe pin probe | ✅ 🧪 | [`logic/net_link.hpp`](../main/logic/net_link.hpp), [`net.cpp`](../main/net.cpp), [`test_transport_contract.mjs`](../test/test_transport_contract.mjs) |
 | 78 | HTTP provisioning restriction follows open-AP presence independently of network transport | ✅ 🧪 | [`logic/http_surface.hpp`](../main/logic/http_surface.hpp), [`http_server.cpp`](../main/http_server.cpp) |
-| 79 | Consent/source/layout-bound checkup restores dated flash hours after current X10A confirmation; independent outdoor context | ✅ 🧪 | [`logic/checkup_persist.hpp`](../main/logic/checkup_persist.hpp), [`logic/outdoor_evidence.hpp`](../main/logic/outdoor_evidence.hpp), [`checkup.cpp`](../main/checkup.cpp) |
+| 79 | Scoped dated diagnosis hours with read-time expiry, heating-only run assessment and independent circulation identity | ✅ 🧪 | [`logic/checkup_persist.hpp`](../main/logic/checkup_persist.hpp), [`logic/checkup.hpp`](../main/logic/checkup.hpp), [`checkup.cpp`](../main/checkup.cpp) |
 | 80 | Binary-row elapsed time, witnessed transition and blind gaps including resumed tails; version 4 rejects older folds | ✅ 🧪 | [`logic/state_dwell.hpp`](../main/logic/state_dwell.hpp), [`state_dwell.cpp`](../main/state_dwell.cpp) |
 | 81 | Owner-sampled task stack minima, including startup and MQTT transport; unsampled tasks remain null | ✅ | [`stack_watch.hpp`](../main/stack_watch.hpp), [`stack_watch.cpp`](../main/stack_watch.cpp), [`mqtt_ha.cpp`](../main/mqtt_ha.cpp) |
 | 82 | Locked component graph, explicit toolchain/language floors and reproducible application metadata | ✅ | [`dependencies.lock`](../dependencies.lock), [`CMakeLists.txt`](../CMakeLists.txt), [`sdkconfig.defaults`](../sdkconfig.defaults) |
@@ -119,10 +119,9 @@ below a 6144 B internal contiguous block. `/status` and MCP `get_status` have ex
 post-emission aborts; values stage snapshots and serialize without allocation. `/diag` and `/history`
 retain the outer guard but do not establish that post-emission guarantee (HTTP-03).
 
-Restarted checkups reconstruct completed hours only from compatible dated flash records after clock
-sync and current-source confirmation. RAM completed hours are retired; open/unsaved intervals may be
-lost. `flash_pending`, `fresh` and `flash` distinguish waiting, new collection and reconstruction.
-The separately sealed ongoing DHW filter is the sole scoped intentional-restart handoff.
+Diagnosis lifecycle, dated restoration and scoped restart limits are in
+[PLANT.md](PLANT.md#reboot-and-persistence); readings and evidence boundaries are in
+[DIAGNOSTICS.md](DIAGNOSTICS.md).
 
 Ordinary bench delivery is OTA. Signed USB is limited to bootstrap/recovery and an explicitly
 requested exact-head pre-merge bench test; that test is separate from artifact delivery.

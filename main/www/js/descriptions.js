@@ -1282,13 +1282,13 @@ function descriptionCopy(d) {
 function modelDescriptionCopy(id) {
   return LANG === "en" || LANG === "de" ? null : MODEL_DESCRIPTION_I18N[LANG]?.[id] || null;
 }
-function descBodyHtml(d, currentValue, localized = null) {
+function descBodyHtml(d, currentValue, localized = null, normalLabelKey = "normal.label") {
   const b = (LANG === "de" && d.de) ? d.de : d;   // German copy when present, else the English row
   if (d.faultCode) return faultCodeDetailHtml(currentValue);
   const whatText = localized ? localized[0] : b.what;
   const normalText = localized ? localized[1] : b.normal;
   const intro = descParaHtml(esc(whatText));
   const meaning = b.meaning ? descNoteHtml(t("meaning.label"), b.meaning) : "";
-  const normal = normalText ? descNoteHtml(t("normal.label"), normalText) : "";
+  const normal = normalText ? descNoteHtml(t(normalLabelKey), normalText) : "";
   return intro + meaning + normal;
 }

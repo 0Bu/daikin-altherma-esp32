@@ -283,7 +283,7 @@
     },
     "history_journal": {
       "pattern": "^(?:daik::(?:\\(anonymous namespace\\)::)?history_flash_service_journal\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?29history_flash_service_journal[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
-      "max_bytes": 560
+      "max_bytes": 576
     },
     "history_append": {
       "pattern": "^(?:daik::(?:\\(anonymous namespace\\)::)?flash_append_record\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?19flash_append_record[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
@@ -1564,12 +1564,57 @@
     "tls_sys_mbox_post": {
       "pattern": "^sys_mbox_post$",
       "max_bytes": 48
+    },
+    "sdk_restart": {
+      "pattern": "^esp_restart$",
+      "max_bytes": 32
+    },
+    "http_reboot": {
+      "pattern": "^daik::reboot_soon\\(",
+      "max_bytes": 32
+    },
+    "heap_guard": {
+      "pattern": "^daik::heap_guard_sample\\(",
+      "max_bytes": 64
+    },
+    "history_shutdown": {
+      "pattern": "^daik::history_flash_save\\(",
+      "max_bytes": 48
+    },
+    "checkup_shutdown": {
+      "pattern": "^daik::.*checkup_reboot_save\\(",
+      "max_bytes": 80
+    },
+    "config_wifi": {
+      "pattern": "^daik::set_wifi\\(",
+      "max_bytes": 1376
+    },
+    "config_syslog": {
+      "pattern": "^daik::set_syslog\\(",
+      "max_bytes": 1328
+    },
+    "config_ntp": {
+      "pattern": "^daik::set_ntp\\(",
+      "max_bytes": 1072
+    },
+    "checkup_shutdown_reset": {
+      "pattern": "^daik::.*apply_(?:dhw_)?reset_locked\\(",
+      "max_bytes": 112
+    },
+    "status_health_number": {
+      "pattern": "^daik::append_status_json<daik::BoundedChunkSink<daik::HttpChunkEmitter,\\ 1024u>\\ >\\(daik::BoundedChunkSink<daik::HttpChunkEmitter,\\ 1024u>\\&,\\ bool\\)::\\{lambda\\(char\\ const\\*,\\ int\\)\\\u00231\\}::operator\\(\\)\\(char\\ const\\*,\\ int\\)\\ const$",
+      "max_bytes": 32
+    },
+    "status_unsigned_number": {
+      "pattern": "^void\\ daik::append_json_uint<daik::BoundedChunkSink<daik::HttpChunkEmitter,\\ 1024u>\\ >\\(daik::BoundedChunkSink<daik::HttpChunkEmitter,\\ 1024u>\\&,\\ unsigned\\ long\\ long\\)$",
+      "max_bytes": 64
     }
   },
   "paths": {
     "httpd_mcp_status": {
       "symbols": [
         "mcp_post",
+        "http_send_status_json",
         "status_serializer",
         "double_string",
         "dynamic_double_string"
@@ -1584,6 +1629,27 @@
         "status_serializer",
         "double_string",
         "dynamic_double_string"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_mcp_checkup": {
+      "symbols": [
+        "mcp_post",
+        "http_send_status_json",
+        "status_serializer",
+        "checkup_report"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_direct_checkup": {
+      "symbols": [
+        "http_send_status_json",
+        "status_serializer",
+        "checkup_report"
       ],
       "multipliers": {},
       "base_bytes": 1536,
@@ -1992,8 +2058,7 @@
     "poll_history": {
       "symbols": [
         "poll_task",
-        "history_record",
-        "checkup_report"
+        "history_record"
       ],
       "multipliers": {},
       "base_bytes": 1536,
@@ -2900,6 +2965,316 @@
       "multipliers": {},
       "base_bytes": 1536,
       "max_bytes": 8192
+    },
+    "httpd_shutdown_wifi_journal": {
+      "symbols": [
+        "config_wifi",
+        "http_reboot",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "history_append",
+        "history_append_at"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_shutdown_wifi_checkup": {
+      "symbols": [
+        "config_wifi",
+        "http_reboot",
+        "sdk_restart",
+        "checkup_shutdown",
+        "checkup_shutdown_reset"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_shutdown_mqtt_journal": {
+      "symbols": [
+        "config_mqtt",
+        "http_reboot",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "history_append",
+        "history_append_at"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_shutdown_mqtt_checkup": {
+      "symbols": [
+        "config_mqtt",
+        "http_reboot",
+        "sdk_restart",
+        "checkup_shutdown",
+        "checkup_shutdown_reset"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_shutdown_syslog_journal": {
+      "symbols": [
+        "config_syslog",
+        "http_reboot",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "history_append",
+        "history_append_at"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_shutdown_syslog_checkup": {
+      "symbols": [
+        "config_syslog",
+        "http_reboot",
+        "sdk_restart",
+        "checkup_shutdown",
+        "checkup_shutdown_reset"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_shutdown_ntp_journal": {
+      "symbols": [
+        "config_ntp",
+        "http_reboot",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "history_append",
+        "history_append_at"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_shutdown_ntp_checkup": {
+      "symbols": [
+        "config_ntp",
+        "http_reboot",
+        "sdk_restart",
+        "checkup_shutdown",
+        "checkup_shutdown_reset"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_shutdown_board_journal": {
+      "symbols": [
+        "config_board",
+        "http_reboot",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "history_append",
+        "history_append_at"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_shutdown_board_checkup": {
+      "symbols": [
+        "config_board",
+        "http_reboot",
+        "sdk_restart",
+        "checkup_shutdown",
+        "checkup_shutdown_reset"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_shutdown_env3_journal": {
+      "symbols": [
+        "config_env3",
+        "http_reboot",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "history_append",
+        "history_append_at"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_shutdown_env3_checkup": {
+      "symbols": [
+        "config_env3",
+        "http_reboot",
+        "sdk_restart",
+        "checkup_shutdown",
+        "checkup_shutdown_reset"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "poll_shutdown_journal": {
+      "symbols": [
+        "poll_task",
+        "heap_guard",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "history_append",
+        "history_append_at"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 7168
+    },
+    "poll_shutdown_checkup": {
+      "symbols": [
+        "poll_task",
+        "heap_guard",
+        "sdk_restart",
+        "checkup_shutdown",
+        "checkup_shutdown_reset"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 7168
+    },
+    "eth_shutdown_journal": {
+      "symbols": [
+        "eth_task",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "history_append",
+        "history_append_at"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 3072
+    },
+    "eth_shutdown_checkup": {
+      "symbols": [
+        "eth_task",
+        "sdk_restart",
+        "checkup_shutdown",
+        "checkup_shutdown_reset"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 3072
+    },
+    "ota_shutdown_journal": {
+      "symbols": [
+        "ota_task",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "history_append",
+        "history_append_at"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 10752
+    },
+    "ota_shutdown_checkup": {
+      "symbols": [
+        "ota_task",
+        "sdk_restart",
+        "checkup_shutdown",
+        "checkup_shutdown_reset"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 10752
+    },
+    "ota_health_shutdown_journal": {
+      "symbols": [
+        "ota_health_task",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "history_append",
+        "history_append_at"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 3072
+    },
+    "ota_health_shutdown_checkup": {
+      "symbols": [
+        "ota_health_task",
+        "sdk_restart",
+        "checkup_shutdown",
+        "checkup_shutdown_reset"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 3072
+    },
+    "button_shutdown_history_touch": {
+      "symbols": [
+        "button_task",
+        "sdk_restart",
+        "history_shutdown"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 2048
+    },
+    "button_shutdown_checkup": {
+      "symbols": [
+        "button_task",
+        "sdk_restart",
+        "checkup_shutdown",
+        "checkup_shutdown_reset"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 2048
+    },
+    "poll_board_journal": {
+      "symbols": [
+        "poll_task",
+        "history_board",
+        "history_journal",
+        "history_append",
+        "history_append_at"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 7168
+    },
+    "httpd_mcp_health_number": {
+      "symbols": [
+        "mcp_post",
+        "http_send_status_json",
+        "status_serializer",
+        "status_health_number",
+        "status_unsigned_number"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_direct_health_number": {
+      "symbols": [
+        "http_send_status_json",
+        "status_serializer",
+        "status_health_number",
+        "status_unsigned_number"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
     }
   },
   "tasks": {
@@ -2909,6 +3284,8 @@
       "paths": [
         "httpd_mcp_status",
         "httpd_direct_status",
+        "httpd_mcp_checkup",
+        "httpd_direct_checkup",
         "httpd_ota_status",
         "httpd_ota_check",
         "httpd_config_hp",
@@ -2932,7 +3309,21 @@
         "httpd_model_values",
         "httpd_i2c_read",
         "httpd_i2c_write",
-        "httpd_i2c_receive"
+        "httpd_i2c_receive",
+        "httpd_shutdown_wifi_journal",
+        "httpd_shutdown_wifi_checkup",
+        "httpd_shutdown_mqtt_journal",
+        "httpd_shutdown_mqtt_checkup",
+        "httpd_shutdown_syslog_journal",
+        "httpd_shutdown_syslog_checkup",
+        "httpd_shutdown_ntp_journal",
+        "httpd_shutdown_ntp_checkup",
+        "httpd_shutdown_board_journal",
+        "httpd_shutdown_board_checkup",
+        "httpd_shutdown_env3_journal",
+        "httpd_shutdown_env3_checkup",
+        "httpd_mcp_health_number",
+        "httpd_direct_health_number"
       ]
     },
     "main": {
@@ -3000,7 +3391,10 @@
         "poll_detect_query",
         "poll_format",
         "poll_journal",
-        "poll_board_history"
+        "poll_board_history",
+        "poll_shutdown_journal",
+        "poll_shutdown_checkup",
+        "poll_board_journal"
       ]
     },
     "modbus": {
@@ -3046,7 +3440,9 @@
         "button_diagnostic",
         "button_diagnostic_format",
         "button_diagnostic_console_buffer",
-        "button_diagnostic_console_write"
+        "button_diagnostic_console_write",
+        "button_shutdown_history_touch",
+        "button_shutdown_checkup"
       ]
     },
     "wifi": {
@@ -3060,13 +3456,15 @@
       ]
     },
     "eth": {
-      "stack_bytes": 3072,
+      "stack_bytes": 4096,
       "reserve_bytes": 1024,
       "paths": [
         "eth_diagnostic",
         "eth_diagnostic_format",
         "eth_diagnostic_console_buffer",
-        "eth_diagnostic_console_write"
+        "eth_diagnostic_console_write",
+        "eth_shutdown_journal",
+        "eth_shutdown_checkup"
       ]
     },
     "dns": {
@@ -3088,14 +3486,18 @@
       "stack_bytes": 11776,
       "reserve_bytes": 1024,
       "paths": [
-        "ota_task_manifest_fetch"
+        "ota_task_manifest_fetch",
+        "ota_shutdown_journal",
+        "ota_shutdown_checkup"
       ]
     },
     "ota_health": {
       "stack_bytes": 4096,
       "reserve_bytes": 1024,
       "paths": [
-        "ota_health_gate"
+        "ota_health_gate",
+        "ota_health_shutdown_journal",
+        "ota_health_shutdown_checkup"
       ]
     },
     "deadline": {
@@ -3186,7 +3588,8 @@
       "vfs/vfs_calls.c": "737f6d0bd5882abc52d13ed3935466b9cf95d2fbc104d71eba1a7607422d5398",
       "lwip/port/esp32xx/vfs_lwip.c": "0f0967786aac2df9f83d5ff2ea6b874554410737667b0bcb3f439ce1a04d5610",
       "pthread/pthread.c": "3423df09f2a291e76abf2cb34a26b5fde21a22bd514563f1526d44cdafa8da15",
-      "pthread/pthread_local_storage.c": "838b9ea24df5493cc648248110bc5ce2e28c98bbad945ac7cfd70912977cc378"
+      "pthread/pthread_local_storage.c": "838b9ea24df5493cc648248110bc5ce2e28c98bbad945ac7cfd70912977cc378",
+      "esp_system/esp_system.c": "3dff935f82b8754ec4574bff6744fa59b2c3171146d9600d05fd0a1e298a1210"
     },
     "config_macros": {
       "CONFIG_ESP_MAIN_TASK_STACK_SIZE": 6144,
