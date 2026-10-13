@@ -20,8 +20,8 @@ command topics or writable heat-pump entities.
 Board diagnostics and independent accessories can appear as soon as the broker connects. X10A
 readings require the first valid reply; a later 15-second X10A outage makes those entities
 unavailable while board diagnostics continue. Recovery seeds current readings again. An OTA pause
-withdraws broker availability when connected; a reconnecting client refreshes markers only on its
-next connection. Check actual source freshness when retained data looks current, and follow the
+attempts to withdraw broker availability; a failed delivery can leave the old marker until the next
+connection. Check actual source freshness when retained data looks current, and follow the
 [availability migration](MQTT.md#migrations) for older discovery configurations.
 
 Empty credential fields keep stored credentials. To switch to anonymous access, select **Remove

@@ -44,9 +44,9 @@ new discovery pause. A shorter empty sweep changes neither the retained payload 
 Recovery seeds current state before source online. This clock comes from the poller, independently
 of the allocating configuration snapshot. Offline and cleanup requests survive allocation failures.
 
-For an OTA check/install, a connected client retains transport `offline` before its clean stop.
-An already reconnecting client cannot withdraw an old marker during that stop; on its next
-connection it publishes current transport and source markers again. Weather-refresh pauses leave
+For an OTA check/install, a connected client attempts retained transport `offline` before its clean
+stop, without waiting for PUBACK. Refusal, delivery failure or an already reconnecting client can
+leave the previous marker until reconnection refreshes transport and source markers. Weather pauses leave
 transport availability unchanged. Retained markers alone are not current source proof, and older
 single-marker discovery needs the migration below before it can rely on this split.
 

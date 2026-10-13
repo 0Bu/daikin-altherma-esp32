@@ -3714,6 +3714,9 @@ static void test_mqtt_group() {
         CountingOut slug_count;
         ha_slug_append(slug_count, "  Outdoor air temp. (R1T)  ");
         CHECK(slug_count.n == ha_slug("  Outdoor air temp. (R1T)  ").size());
+        slug_count.n = 0;
+        ha_slug_append(slug_count, "Flow{9}~A");
+        CHECK(slug_count.n == 8); // the same separator bytes on signed- and unsigned-char hosts
     }
     // A stopped/held page changes only the direct view of the existing cache. Reuse one already
     // reserved transient sink through thousands of full/held/full transitions: exact bytes and
@@ -20832,6 +20835,12 @@ static void test_profile_table_equal() {
 
 static void test_mqtt_retirement_identity() {
     MqttRetirementIdentity identity;
+    const ValueDef         decorated(0x20, 0, 105, 1, -1, "Flow{9}~A");
+    CHECK(mqtt_retirement_identity_make(identity, decorated) ==
+          MqttRetirementIdentityResult::Ready);
+    CHECK(std::string(identity.object.data(), identity.size) == "outdoor_sensors_flow_9_a");
+    CHECK(mqtt_retirement_identity_matches(identity, decorated));
+    CHECK(mqtt_retirement_identity_matches(identity, ValueDef(0x20, 0, 105, 1, -1, "Flow 9 A")));
     const ValueDef         binary(0x10, 0, 303, 1, -1, "Error active");
     const ValueDef         fault(0x10, 4, 203, 1, -1, "Error Type");
     CHECK(mqtt_retirement_identity_make(identity, fault, "error_active") ==

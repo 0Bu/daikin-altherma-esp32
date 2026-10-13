@@ -167,6 +167,52 @@
           8852
         ]
       }
+    },
+    {
+      "runner": "scripts/run-mock-tests.sh --coverage",
+      "compilers": {
+        "clang-17-darwin": "Apple clang version 17.0.0 (clang-1700.6.4.2)",
+        "gcc-13-linux-ubuntu24": "g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+        "gcc-15-linux-ubuntu26": "g++ (Ubuntu 15.2.0-16ubuntu1) 15.2.0",
+        "gcc-15-github-linux-ubuntu26": "g++ (Ubuntu 15.2.0-16ubuntu1) 15.2.0"
+      },
+      "hosted_confirmation": "CI run 38428987194 measured ha_device 159/188 before the additional punctuation/digit cases. The exact x86_64 GCC 15 reproduction now takes 166/188; authoritative confirmation of the corrected head is pending. Unchanged hosted inventories remain intact.",
+      "scope": "Frozen literal punctuation/digit identifiers cover signed- and unsigned-char paths in counting and retirement sinks. The actual x86 CI inventory is measured independently from aarch64. Every existing per-file ratio is retained or raised; no checker or line floor changes.",
+      "sources": {
+        "main/logic/availability.hpp": "726c7cc7e1c439449939ae3da967524e2f41f10c7ee4c7fab12f6ec8d9abbe6a",
+        "main/logic/discovery.hpp": "7f9354d4c52f4e78190c11dd12d1b710d1ffece4ceadb98322acdb2ee6383133",
+        "main/logic/ha_device.hpp": "ddba158580e787bbc3db2128fe88550a2e00de7c5c222aed9cb9a1c2f5393ed5",
+        "main/logic/mqtt_publish_gate.hpp": "e79cf21f4b004b41c073c33bdcd11fbaec6efaf771bc3c1305c69a5b3f80e3fe",
+        "main/logic/mqtt_retirement.hpp": "08a760b222afa89f953a006114398447694eb62e80cfb128762aafbbf53dd1c7",
+        "main/logic/mqtt_retirement_identity.hpp": "71fcc71ed25a1f337e194bd4bd2ad5faeed78667ef4450aa5901fceb4abeb52e",
+        "main/logic/mqtt_retirement_store.hpp": "6d3cf00039f51a51d7fcf4449def9506417955ceade53d641cd729267b983814",
+        "main/logic/profile_table_equal.hpp": "5032e48cc321c051278af70f9b28efafc2638d820eb237386aaede7b85ed4b3f"
+      },
+      "test_source_sha256": "c099255c87eae914ba084847ee66206e605c8517704c0ec45f1dd7cdbafb5105",
+      "architectures": {
+        "clang-17-darwin": "arm64",
+        "gcc-13-linux-ubuntu24": "aarch64",
+        "gcc-15-linux-ubuntu26": "aarch64",
+        "gcc-15-github-linux-ubuntu26": "x86_64"
+      },
+      "local_executable_lines": {
+        "clang-17-darwin": [
+          8755,
+          8972
+        ],
+        "gcc-13-linux-ubuntu24": [
+          8528,
+          8850
+        ],
+        "gcc-15-linux-ubuntu26": [
+          8530,
+          8852
+        ],
+        "gcc-15-github-linux-ubuntu26": [
+          8528,
+          8852
+        ]
+      }
     }
   ],
   "method": "Exact taken/outcome inventories are measured by scripts/run-mock-tests.sh --coverage and bound to compiler family, major version and platform; hosted profiles additionally bind the runner image. The gate rejects inventory mismatches and any historical ratio decrease. Updated hosted inventories require authoritative CI confirmation. Historical measurement notes remain in Git; profiles contain the enforced counts. Measurements below identify changed sources and local compiler provenance without changing checker rules or the 95-percent executable-line floor.",
@@ -293,7 +339,7 @@
         "taken": 12
       },
       "main/logic/ha_device.hpp": {
-        "taken": 145,
+        "taken": 149,
         "outcomes": 172
       },
       "main/logic/health_gate.hpp": {
@@ -691,7 +737,7 @@
         "taken": 11
       },
       "main/logic/ha_device.hpp": {
-        "taken": 162,
+        "taken": 168,
         "outcomes": 188
       },
       "main/logic/health_gate.hpp": {
@@ -1089,7 +1135,7 @@
         "taken": 11
       },
       "main/logic/ha_device.hpp": {
-        "taken": 162,
+        "taken": 166,
         "outcomes": 188
       },
       "main/logic/health_gate.hpp": {
@@ -1487,7 +1533,7 @@
         "taken": 11
       },
       "main/logic/ha_device.hpp": {
-        "taken": 162,
+        "taken": 168,
         "outcomes": 188
       },
       "main/logic/health_gate.hpp": {
