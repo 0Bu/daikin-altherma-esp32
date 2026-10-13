@@ -80,7 +80,8 @@ physical measurement. `?redact=1` applies the [report redaction contract](SECURI
 | `sys.stack_min_free_bytes` | `httpd`, `poll`, `mqtt`, `modbus`, `weather`, `ota`, `syslog`, `env3`, `led`, `button`, `wifi_watchdog`, `eth_fallback`, `captive_dns`, `ota_health`, `http_deadline`, `main`, `sdk_mqtt` | Boot-local sampled minimum free stack bytes; null until that task was sampled. Samples survive task recreation. `sdk_mqtt` uses transport-task callbacks; synchronous caller error events do not sample it. |
 | `last_crash` | null or `{reason,reason_code,fault,coredump[,task,pc,backtrace,corrupted,elf_sha256]}` | Current boot reset/fault plus any stored dump summary. Stored incident age/reset relationship remain unknown even for matching ELF. Proven foreign dumps are preserved but suppressed. Dump presence is live; dismissal preserves `sys.reset_reason`. |
 
-`mqtt.retirement_evidence` is a maintainer bit mask, zero before journal service or without MQTT.
+`mqtt.retirement_evidence` is a maintainer bit mask. Journal bits remain zero before journal service;
+the discovery ownership check can set `0x100` earlier. Without MQTT the mask is zero.
 Bits `0x001` / `0x080` distinguish a nonempty matching predecessor actually **loaded this boot**
 from durable metadata for the current target; saving alone does not prove restoration.
 `0x002` is the missing/empty bootstrap boundary, `0x004` a foreign base/board, `0x100` an operator

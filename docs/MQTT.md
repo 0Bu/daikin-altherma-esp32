@@ -139,7 +139,8 @@ A stale/unavailable sample omits the three reading keys but retains `samples`/`e
 the I²C link. A fresh sample is published when its sample counter advances even if rounded values
 are unchanged. Three HA measurement entities require both installation-online state **and their
 reading key**, so only the accessory becomes unavailable on a sensor fault. Selecting **No sensor**
-retracts this topic and all three discovery configs. Hardware gate: [BOARDS.md](BOARDS.md).
+retracts this topic and retires its three discovery configs, subject to the
+[ownership migration boundary](#migrations). Hardware gate: [BOARDS.md](BOARDS.md).
 
 ### Weather
 
@@ -159,7 +160,9 @@ a disabled forecast. MQTT is unnecessary for the ESP32's own HTTPS fetch.
 ### Cleanup guarantees
 
 Retractions use empty retained QoS-1 messages. One cleanup message is outstanding; only its matching
-PUBACK advances that step. Pending sources stay suppressed, including the cycle that sends the
+PUBACK confirms that deletion. Unproven discovery ownership instead skips the discovery step and
+requires [operator migration](#migrations), without claiming a deletion or PUBACK. Raw state cleanup
+continues. Pending sources stay suppressed, including the cycle that sends the
 retraction, so stale state cannot immediately recreate it. Reconnect/replacement reconstructs or
 preserves pending cleanup. Outbox expiry and a joined TLS transport stop permit retry; missing
 PUBACK alone does not duplicate an item still owned by the outbox. The outbox is capped at 8 KiB.
@@ -316,8 +319,9 @@ Delete **only confirmed old topics**, for example:
 mosquitto_pub -h <broker> -r -n -t '<exact-old-topic>'
 ```
 
-The relevant old namespaces are `<old-base>/#`, `homeassistant/+/<old_node>/#`, or the retired board's
-`homeassistant/+/daikin_<mac3>/#`; add your broker's authentication/TLS options. Do not delete a tree
+The relevant old namespaces are `<old-base>/#`, `homeassistant/+/<old_node>/#`, the legacy
+`homeassistant/+/<old_node>_modbus/#`, or the retired board's `homeassistant/+/daikin_<mac3>/#`;
+add your broker's authentication/TLS options. Do not delete a tree
 still used by another board. For a group-id migration, old and new configs share the current node,
 so a broad sweep would delete current entities. If HA missed those deletions and now has duplicates,
 use its MQTT device **Delete** action and reboot the board to republish, then reconcile entity ids
