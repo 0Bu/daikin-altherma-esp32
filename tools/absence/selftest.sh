@@ -1402,10 +1402,10 @@ python3 - "$TMP/main/mqtt_ha.cpp" <<'PY4'
 import sys
 p = sys.argv[1]
 s = open(p).read()
-old = 'for (int i = 0; i < RETIRED_MODBUS_HA_SENSOR_COUNT; i++)'
-new = 'for (int i = 0; i < def::HOMEHUB_REG_COUNT; i++)'
+old = 'RETIRED_MODBUS_HA_SENSOR_COUNT + RETIRED_WEATHER_HA_SENSOR_COUNT;'
+new = 'def::HOMEHUB_REG_COUNT + RETIRED_WEATHER_HA_SENSOR_COUNT;'
 seed = s.replace(old, new, 1)
-assert seed != s, "seed 78 did not apply — retired HomeHub ledger loop moved"
+assert seed != s, "seed 78 did not apply — periodic retirement ledger count moved"
 open(p, "w").write(seed)
 PY4
 expect_red "retired HomeHub ledger recoupled to current catalog" run_contract

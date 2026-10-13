@@ -22,8 +22,8 @@ source mappings remain dormant, ready for a later opt-in. Evidence never crosses
 
 X10A, HomeHub Modbus, ENV III, room MQTT, circulation MQTT and forecast keep their own lifecycle,
 identity and freshness. One available source does not make another available, and absent context is
-null rather than a fabricated zero. Outbound MQTT has its own X10A gate: local source activity does
-not imply that an auxiliary topic is currently being published.
+null rather than a fabricated zero. Only X10A state/discovery requires recent X10A readings;
+independent MQTT sources continue without them. Publication still requires a broker connection.
 
 ## Rolling plant checkup (up to 24 h)
 

@@ -212,7 +212,7 @@ const periodicEnd = mqtt.indexOf("static bool publish_x10a_state", periodicStart
 assert.ok(periodicStart >= 0 && periodicEnd > periodicStart);
 const periodic = mqtt.slice(periodicStart, periodicEnd);
 assert.match(periodic,
-  /RETIRED_MODBUS_HA_SENSOR_COUNT \+ RETIRED_WEATHER_HA_SENSOR_COUNT/,
+  /constexpr size_t count\s*=\s*RETIRED_MODBUS_HA_SENSOR_COUNT \+ RETIRED_WEATHER_HA_SENSOR_COUNT;/,
   "periodic convergence must use only the two frozen retirement ledgers");
 assert.match(periodic,
   /retired_modbus_discovery_topic[\s\S]*?RETIRED_MODBUS_HA_SENSORS\[i\][\s\S]*?retired_weather_discovery_topic[\s\S]*?RETIRED_WEATHER_HA_SENSORS\[i - RETIRED_MODBUS_HA_SENSOR_COUNT\]/);

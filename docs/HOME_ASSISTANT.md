@@ -7,7 +7,7 @@ command topics or writable heat-pump entities.
 
 ## Enabling
 
-1. Complete [SETUP.md](SETUP.md) and confirm that X10A has returned valid readings.
+1. Complete [SETUP.md](SETUP.md). For heat-pump entities, also confirm valid X10A readings.
 2. Enable Home Assistant's MQTT integration and connect it to your broker.
 3. Open the device's **Settings → Connections → MQTT**.
 4. Enter the broker and, if required, its username/password. With credentials, use an explicit
@@ -120,7 +120,8 @@ silently corrupt a heat integral.
 
 | Symptom | Check |
 |---|---|
-| No HA device | MQTT integration/broker connection, first valid X10A reply, base/prefix agreement and broker permissions. |
+| No HA device | MQTT integration/broker connection, base/prefix agreement and broker permissions. |
+| No X10A entities | First valid X10A reply and detected profile; check the availability migration above if old configs remain. |
 | Broker save rejected | Exact URI/port, DNS/reachability, TLS certificate chain and credentials. The error is shown before saving. |
 | Duplicate device or `…_2` entities after upgrade | Read the migration note below; keep HA connected for discovery deletions. |
 | Values alternate or uptime repeatedly jumps | Ensure one active board per base/node identity before concluding the board is rebooting. |
