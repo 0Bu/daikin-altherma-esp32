@@ -1,12 +1,24 @@
 #pragma once
 
-// IDF-free completeness rules shared by HTTP consumers and strict JSON adapters.
+// IDF-free completeness rules shared by HTTP/MQTT consumers and strict JSON adapters.
 
 #include <cstddef>
 #include <cstdint>
 #include <string_view>
 
 namespace daik {
+
+// MQTT fragments must cover the announced bounded payload consecutively. Subtraction avoids
+// overflowing SDK integer lengths before rejecting a malformed callback.
+inline bool mqtt_fragment_fits(int offset, int length, int total, size_t received,
+                               size_t expected_total, size_t capacity) {
+    if (total <= 0 || static_cast<size_t>(total) > capacity || offset < 0 || length < 0)
+        return false;
+    const size_t position = static_cast<size_t>(offset);
+    const size_t bytes    = static_cast<size_t>(length);
+    return static_cast<size_t>(total) == expected_total && position == received &&
+           position <= expected_total && bytes <= expected_total - position;
+}
 
 inline bool http_body_complete(int64_t content_length, size_t received_bytes,
                                bool message_complete) {

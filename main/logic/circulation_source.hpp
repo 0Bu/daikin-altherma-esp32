@@ -21,6 +21,23 @@ inline constexpr uint16_t CIRC_SOURCE_CONFIRM_MIN_S = 1;
 inline constexpr uint16_t CIRC_SOURCE_CONFIRM_MAX_S = 600;
 inline constexpr double CIRC_SOURCE_POWER_MAX_W = 100000.0;
 
+// A successful mapping test proves one original observation. Wall-clock correction must not
+// extend that observation's remaining lifetime; retain its age and monotonic test-time anchor.
+struct CirculationTestProofClock {
+    uint64_t tested_ms = 0, age_s_at_test = 0;
+    int64_t  source_unix_s = -1;
+    bool     valid         = false;
+
+    bool current(int64_t now_unix_s, uint64_t now_ms, uint32_t max_age_s) const {
+        if (!valid || now_ms < tested_ms || age_s_at_test > max_age_s) return false;
+        const uint64_t remaining_ms = (uint64_t{max_age_s} - age_s_at_test + 1) * 1000;
+        if (now_ms - tested_ms >= remaining_ms) return false;
+        return reference_freshness(true, true, true, source_unix_s, tested_ms, now_unix_s, now_ms,
+                                   max_age_s)
+            .fresh;
+    }
+};
+
 inline bool circulation_source_config_valid(std::string_view name, std::string_view topic,
                                             std::string_view power_path,
                                             std::string_view timestamp_path,

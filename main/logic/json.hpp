@@ -65,6 +65,16 @@ inline void json_append_quoted(JsonOut& out, std::string_view s) {
     out += '"';
 }
 
+// Share the discovery member sequence across builders without another temporary string.
+// Prefix/suffix contain the fixed key, quotes and separators, never user input.
+inline __attribute__((noinline)) void
+json_append_literal_string_member(std::string& out, const char* prefix, const std::string& value,
+                                  const char* suffix = "\",") {
+    out += prefix;
+    json_append_escaped(out, value);
+    out += suffix;
+}
+
 // A byte counter exposing the same `operator+=` surface as std::string and BoundedChunkSink, so the
 // ESCAPING template above can run against it unchanged: `json_escaped_size` reuses the one encoder
 // instead of keeping a parallel escape table that could drift from it. The X10A publish path uses
