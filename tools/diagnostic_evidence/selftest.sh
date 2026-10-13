@@ -75,7 +75,7 @@ reset
 patch_file "$WORK/docs/DIAGNOSTIC_EVIDENCE.md" <<'PY'
 import sys
 p = sys.argv[1]; s = open(p).read()
-a = s.index('### 1. Unit-reported fault (`fault`)'); b = s.index('### 2. Domestic-hot-water tank heat loss', a)
+a = s.index('<a id="diagnosis-fault">'); b = s.index('<a id="diagnosis-dhw-loss">', a)
 block = s[a:b]
 if '**Firmware rule:**' not in block: sys.exit(1)
 open(p, 'w').write(s[:a] + block.replace('**Firmware rule:**', '**Unclear rule:**', 1) + s[b:])
@@ -87,7 +87,7 @@ reset
 patch_file "$WORK/docs/DIAGNOSTIC_EVIDENCE.md" <<'PY'
 import sys
 p = sys.argv[1]; s = open(p).read()
-a = s.index('### 1. Unit-reported fault (`fault`)'); b = s.index('### 2. Domestic-hot-water tank heat loss', a)
+a = s.index('<a id="diagnosis-fault">'); b = s.index('<a id="diagnosis-dhw-loss">', a)
 block = s[a:b]
 if '**Not established:**' not in block: sys.exit(1)
 open(p, 'w').write(s[:a] + block.replace('**Not established:**', '**Open question:**', 1) + s[b:])

@@ -6,7 +6,9 @@ import fs from "node:fs";
 import vm from "node:vm";
 import { readAppFragments, readUiLocale } from "../tools/ui/read_app_source.mjs";
 
-const i18nSource = readAppFragments(["i18n.js"]) + readUiLocale("de");
+const i18nBase = readAppFragments(["i18n.js"]);
+const shippedLocales = JSON.parse(i18nBase.match(/const UI_LANGS = Object.freeze\((\[[^\n]+\])\)/)[1]);
+const i18nSource = i18nBase + shippedLocales.filter(l => l !== "en").map(readUiLocale).join("\n");
 const dashboardSource = readAppFragments(["dashboard.js"]);
 const explanationSource = readAppFragments(["descriptions.js", "history.js", "schematic.js"]);
 const style = fs.readFileSync(new URL("../main/www/style.css", import.meta.url), "utf8");
@@ -39,13 +41,15 @@ assert.match(dashboardSource,
 const normalizedStatusSource = statusSource.replaceAll("\\\"", "\"");
 for (const key of [
   "health", "covered_s", "status", "checks",
+  "span_s", "source_age_s", "source_fresh", "reason",
   "persist",
   "full_span", "available", "assessable", "evaluated", "evidence", "observed_s", "required_s",
   "starts", "mean_run_s", "count", "paired_count", "share_pct", "defrost_s", "run_s",
   "space_runs", "space_mean_run_s", "dhw_runs", "dhw_mean_run_s", "cooling_runs",
   "censored_runs", "split",
   "outdoor_source", "outdoor_min_c", "outdoor_mean_c", "outdoor_samples",
-  "min_bar", "min_l_min", "buh_min", "bsh_min", "buh_s", "bsh_s", "active", "seen",
+  "min_bar", "current_bar", "min_unix_s", "confirmed_low", "min_l_min",
+  "buh_min", "bsh_min", "buh_s", "bsh_s", "buh_observed_s", "bsh_observed_s", "active", "seen",
   "max_k_h", "windows", "high_windows", "high_with_pump", "high_pump_off",
   "circulation_on_s", "circulation_known_s", "candidate_s", "settle_remaining_s",
   "aborts", "best_aborted_s", "blocked", "abort_reasons",
@@ -53,7 +57,7 @@ for (const key of [
   assert.match(normalizedStatusSource, new RegExp(`"${key}"`),
                `missing /status.health key ${key}`);
 }
-assert.match(statusSource, /if \(v < 0\) \{ j \+= "null"; return; \}/,
+assert.match(statusSource, /if\s*\(v\s*<\s*0\)\s*\{\s*j\s*\+=\s*"null";\s*return;\s*\}/,
              "unestablished check numbers must serialize as null");
 assert.match(style, /\.vrow-val\.checkup-val\s*\{[^}]*white-space:\s*normal;[^}]*overflow-wrap:\s*anywhere;[^}]*text-align:\s*right;/s,
              "checkup statuses must wrap inside narrow cards");
@@ -120,710 +124,256 @@ vm.runInContext(
   { filename: "main/www/app.sources" },
 );
 const ui = sandbox.__checkup;
-
-// The title keeps the bounded 24-hour scope without consuming most of a narrow card's first line.
+const locales = Object.keys(ui.copy);
+ui.setLang("en");
 assert.equal(ui.text("en", "card.checkup"), "Plant diagnostics · 24 h");
 assert.equal(ui.text("de", "card.checkup"), "Anlagendiagnose · 24 h");
-for (const copy of Object.values(ui.copy)) {
-  assert.ok(!("check.guide" in copy), "the removed guide row must have no translation");
-  assert.ok(!("check.guide.value" in copy), "the removed guide value must have no translation");
-  assert.ok(!("action.label" in copy), "diagnostic explainers must not advertise recommendations");
-}
-for (const [key, en, de] of [
-  ["ok", "OK", "OK"],
-  ["info", "NOTE", "HINWEIS"],
-  ["warn", "WARNING", "WARNUNG"],
-  ["collecting", "CHECKING", "PRÜFT"],
-  ["observation", "MEASURED ONLY", "NUR MESSWERT"],
-  ["experimental", "EXPERIMENTAL", "EXPERIMENTELL"],
-  ["unavailable", "NOT AVAILABLE", "NICHT VERFÜGBAR"],
-]) {
-  assert.equal(ui.text("en", `check.status.${key}`), en);
-  assert.equal(ui.text("de", `check.status.${key}`), de);
-}
-
-// BUH and BSH are independent channels. An unsupported/unreadable side is null, not a plausible zero,
-// while a real observed zero remains visible.
 ui.setLang("en");
-assert.equal(
-  ui.metric({ id: "heater", verdict: "ok", buh_min: 7, bsh_min: null }),
-  "7 min",
-  "a missing BSH channel must not be rendered as zero minutes",
-);
-assert.equal(
-  ui.metric({ id: "heater", verdict: "ok", buh_min: null, bsh_min: 9 }),
-  "tank 9 min",
-  "a missing BUH channel must not suppress an observed BSH value",
-);
-assert.equal(
-  ui.metric({ id: "heater", verdict: "ok", buh_min: 0, bsh_min: 0 }),
-  "0 min · tank 0 min",
-  "observed zeroes are facts and must not be mistaken for missing channels",
-);
-ui.setLang("de");
-assert.equal(ui.metric({ id: "heater", verdict: "ok", buh_min: null, bsh_min: 9 }), "Speicher 9 min");
-assert.equal(
-  ui.metric({ id: "heater", verdict: "ok", buh_s: 1, bsh_s: 59 }),
-  "<1 min · Speicher <1 min",
-  "positive sub-minute heater runtime must not collapse into a factual zero",
-);
-assert.equal(
-  ui.metric({ id: "heater", verdict: "ok", buh_s: 0, bsh_s: 60 }),
-  "0 min · Speicher 1 min",
-  "an exact observed zero remains distinct from a positive runtime",
-);
 
-// Capability without one readable interval serializes as null. The renderer must say it is still
-// collecting instead of turning those unknowns into plausible zero starts/cycles/minutes.
-ui.setLang("en");
-for (const payload of [
-  { id: "cycling", verdict: "collecting", starts: null },
-  { id: "defrost", verdict: "collecting", count: null, paired_count: null },
-  { id: "heater", verdict: "collecting", buh_s: null, bsh_s: null },
-]) {
-  const check = { observed_s: 0, required_s: 3600, ...payload };
-  assert.equal(ui.value(check), "CHECKING");
-  assert.doesNotMatch(ui.metric(check), /\b0 (?:starts|cycles)\b/,
-                      "unreadable supported data must not render as an observed zero");
-}
+// Missing channels stay absent; observed zero and a positive sub-minute runtime stay distinct.
+for (const [payload, expected] of [
+  [{ buh_min: 7, bsh_min: null }, "7 min"],
+  [{ buh_min: null, bsh_min: 9 }, "tank 9 min"],
+  [{ buh_s: 0, bsh_s: 0 }, "0 min · tank 0 min"],
+  [{ buh_s: 1, bsh_s: 59 }, "<1 min · tank <1 min"],
+]) assert.equal(ui.metric({ id: "heater", verdict: "ok", ...payload }), expected);
+for (const c of [
+  { id: "cycling", starts: null }, { id: "defrost", count: null },
+  { id: "heater", buh_s: null, bsh_s: null },
+]) assert.equal(ui.metric({ verdict: "collecting", ...c }), "");
+assert.equal(ui.metric({ id: "pressure", verdict: "unavailable", min_bar: 0 }), "");
+assert.equal(ui.metric({ id: "pressure", verdict: "collecting", min_bar: 0 }), "0 bar");
+assert.equal(ui.metric({ id: "pressure", verdict: "ok", min_bar: NaN }), "");
 
-// The collapsed row carries only its status. Its reading, assessment and own observed/required
-// clocks move to the explainer, proving that card-level coverage is not borrowed.
-ui.setLang("en");
-const cyclingCollecting = {
-  id: "cycling", verdict: "collecting", starts: 2, mean_run_s: null,
-  observed_s: 3600, required_s: 7200,
+// An almost-complete input clock and a partial calendar horizon have different explanations.
+const collecting = {
+  id: "cycling", verdict: "collecting", evidence: "heuristic", reason: "input_coverage",
+  starts: 2, observed_s: 77759, required_s: 77760,
 };
-const pressureCollecting = {
-  id: "pressure", verdict: "collecting", min_bar: 1.7,
-  observed_s: 120, required_s: 3600,
+let detail = ui.detail(collecting, true, { span_s: 86400, source_age_s: 5, source_fresh: true });
+assert.match(detail, /Readable signals: 21 h 35 min of 21 h 36 min required/);
+assert.match(detail, /Missing readable time: 1 s/);
+assert.match(detail, /Data window:.*24 h, at most 24 h/);
+assert.doesNotMatch(detail, /full 24-hour window is still missing/);
+detail = ui.detail({ ...collecting, observed_s: 77760, reason: "day_incomplete" }, false,
+                   { span_s: 84600, source_age_s: 5, source_fresh: true });
+assert.match(detail, /full 24-hour window is still missing: 30 min remaining/);
+assert.doesNotMatch(detail, /insufficient coverage|Missing readable time/);
+
+// Current acquisition must not negate already completed DHW hours. No invented tank/COP example.
+const dhw = {
+  id: "dhw_loss", verdict: "info", evidence: "heuristic", reason: "observation_only",
+  max_k_h: 1.2, windows: 6, high_windows: 2, high_with_pump: 2, high_pump_off: 0,
 };
-assert.equal(ui.value(cyclingCollecting), "CHECKING");
-assert.equal(ui.value(pressureCollecting), "CHECKING");
-assert.match(ui.detail(cyclingCollecting), /label="Value:">2 starts<\/detail>/);
-assert.match(ui.detail(cyclingCollecting), /label="Assessment:">CHECKING — 1 h of 2 h captured/);
-assert.match(ui.detail(pressureCollecting), /label="Value:">1\.7 bar<\/detail>/);
-assert.match(ui.detail(pressureCollecting), /label="Assessment:">CHECKING — 2 min of 1 h captured/);
-
-// DHW has an all-or-nothing one-hour eligibility window.  Expose the in-flight progress separately
-// so a successful OTA handoff cannot look identical to a reset merely because observed_s still
-// counts completed windows only.
-const dhwCandidate = {
-  id: "dhw_loss", verdict: "collecting", observed_s: 0, required_s: 21600,
-  candidate_s: 3300, settle_remaining_s: 0, windows: 0, max_k_h: null,
+assert.equal(ui.metric(dhw), "maximum 1.2 K/h · 2/6 windows: threshold reached · during circulation-pump operation");
+assert.equal(ui.metric({ ...dhw, max_k_h: 0.8, windows: 1, high_windows: 1,
+                        high_with_pump: 0, high_pump_off: 0 }),
+             "maximum 0.8 K/h · 1/1 windows: threshold reached · pump attribution incomplete");
+assert.match(ui.detail(dhw), /Project hint at ≥0.8 K\/h; cause unproven/);
+assert.doesNotMatch(ui.detail(dhw, true), /200 l|COP|kWh|24 h:/);
+assert.equal(ui.value({ ...dhw, verdict: "ok", evidence: "observation" }), "MEASURED ONLY");
+assert.match(ui.detail({ ...dhw, verdict: "ok", evidence: "observation" }), /omitted hours may cool faster/);
+const waiting = {
+  id: "dhw_loss", verdict: "collecting", reason: "no_eligible_windows",
+  observed_s: 7200, required_s: 21600, windows: 2,
+  candidate_s: 0, settle_remaining_s: 0, max_k_h: null,
 };
-assert.match(ui.detail(dhwCandidate),
-  /CHECKING — 0 min of 6 h completed in clean one-hour windows; current clean window: 55 min of 1 h/);
-ui.setLang("de");
-assert.match(ui.detail(dhwCandidate),
-  /PRÜFT — 0 min von 6 h als vollständige bereinigte Stundenfenster erfasst; laufendes bereinigtes Fenster: 55 min von 1 h/);
-const dhwSettling = { ...dhwCandidate, candidate_s: 0, settle_remaining_s: 1200 };
-assert.match(ui.detail(dhwSettling),
-  /PRÜFT — 0 min von 6 h als vollständige bereinigte Stundenfenster erfasst; Speicherladung oder BSH erkannt, noch 20 min Beruhigungszeit/);
-
-// WHAT THE WINDOW DISCARDED rides every collecting sentence. "0 min" alone reads exactly like a
-// board that booted a minute ago; "0 min, and nine candidates were thrown away by tank charging"
-// is the half that says where to look — and whether waiting will ever help.
-const dhwAborted = { ...dhwSettling, aborts: 9, best_aborted_s: 2400,
-                     abort_reasons: ["charge", "pump"] };
-assert.match(ui.detail(dhwAborted),
-  /noch 20 min Beruhigungszeit\. 9 Kandidaten wurden verworfen \(Speicherladung, interne Pumpe\); längster erreichte 40 min von 60 min\./);
-ui.setLang("en");
-assert.match(ui.detail(dhwAborted),
-  /9 candidate windows discarded \(tank charging, internal pump\); longest reached 40 min of 60 min\./);
-assert.match(ui.detail({ ...dhwAborted, aborts: 1, abort_reasons: ["pump"] }),
-             /1 candidate window discarded \(internal pump\)/);
-// Older firmware sends none of these keys: the sentence must simply not appear.
-assert.doesNotMatch(ui.detail(dhwSettling), /discarded/);
-// A slug this build does not know is dropped rather than rendered as a raw key that would read
-// like a cause. The firmware sends names, so the browser never decodes a bitmask.
-assert.match(ui.detail({ ...dhwAborted, abort_reasons: ["charge", "from_the_future"] }),
-             /discarded \(tank charging\)/);
-// A discard for unread data is cause-neutral: unobserved time comes from a silent X10A bus AND from
-// the board pausing its own polling, so the list item must not read as an X10A fault by itself. It
-// is also not a tank claim (the unread rows can be the page-0x60 valve/heater/pump states while R5T
-// was read), and it sits inside the sentence's one parenthesised list, so it carries no parentheses
-// of its own: the closing `\)` below is the list's, and a nested pair would leave `\)\)` here.
-assert.match(ui.detail({ ...dhwAborted, abort_reasons: ["blind"] }),
-             /9 candidate windows discarded \(readings missing: X10A silent or polling paused\); longest reached 40 min of 60 min\./);
-assert.doesNotMatch(ui.detail({ ...dhwAborted, abort_reasons: ["blind"] }), /X10A not answering/);
-assert.doesNotMatch(ui.detail({ ...dhwAborted, abort_reasons: ["blind"] }), /tank not read/);
-
-// THE VERDICT THAT SAYS WAITING WILL NOT HELP. Unavailable like a profile that cannot supply the
-// rows — it says nothing either way — but `blocked` gets its own sentence instead of the generic
-// "the active profile provides no assessable data". The plant-side sentence must remain NON-CAUSAL:
-// the payload has an abort total plus an OR-ed reason set, not per-reason counts or circulation
-// evidence for aborted candidates.
-const dhwBlocked = { id: "dhw_loss", verdict: "unavailable", observed_s: 0, required_s: 21600,
-                     windows: 0, max_k_h: null, blocked: true, aborts: 14, best_aborted_s: 3000,
-                     abort_reasons: ["charge"] };
-assert.match(ui.detail(dhwBlocked),
-  /NOT AVAILABLE — Not assessable with this method: over a full 24 hours not one clean one-hour window completed, and 14 candidate windows were discarded \(tank charging\); the longest reached 50 min of 60 min\./);
-assert.match(ui.detail(dhwBlocked), /continuous heat loss fast enough to look like a draw/);
-assert.match(ui.detail(dhwBlocked), /stored totals do not show which cause dominated/);
-assert.match(ui.detail(dhwBlocked), /fast continuous heat loss cannot be excluded/);
-assert.doesNotMatch(ui.detail(dhwBlocked), /plant's own duty cycle/);
-ui.setLang("de");
-assert.match(ui.detail(dhwBlocked),
-  /NICHT VERFÜGBAR — Mit diesem Verfahren nicht bewertbar: über volle 24 Stunden wurde kein einziges bereinigtes Stundenfenster fertig, 14 Kandidaten wurden verworfen \(Speicherladung\)/);
-assert.match(ui.detail(dhwBlocked), /schneller Dauerverlust, der wie eine Zapfung aussieht/);
-assert.match(ui.detail(dhwBlocked), /gespeicherten Summen zeigen nicht, welcher Grund überwog/);
-assert.match(ui.detail(dhwBlocked), /schneller kontinuierlicher Wärmeverlust ist daher nicht ausgeschlossen/);
-assert.doesNotMatch(ui.detail(dhwBlocked), /Takt dieser Anlage/);
-// The SAME verdict is reachable from a flapping X10A link — a candidate opens, the bus goes quiet
-// mid-window, repeatedly — and that needs the opposite action from a plant that never stands still.
-// Blaming the duty cycle there sends the reader to the heat pump for a wiring fault. But `blind`
-// only means the readings the check needs went UNREAD — R5T, or the page-0x60 valve, heater and
-// pump rows with R5T read fine — and the board's own pauses (a firmware update, a weather download
-// or other network transfer, a restart, model detection) book the same unobserved time as a silent
-// bus. So this sentence names both sources, says nothing about the tank, never claims the tank
-// temperature ALONE went unread, and keeps the wiring step CONDITIONAL instead of asserting the
-// link as the cause.
-const dhwBlockedByLink = { ...dhwBlocked, abort_reasons: ["blind"] };
-assert.match(ui.detail(dhwBlockedByLink),
-             /weil für die Prüfung nötige Messwerte zu lange nicht gelesen wurden — die X10A-Verbindung antwortete nicht, oder das Board pausierte seine Abfrage \(Firmware-Update, Wetter-Download oder andere Netzwerkübertragung, Neustart, Modellerkennung\)/);
-assert.match(ui.detail(dhwBlockedByLink), /Das sagt nichts über den Speicher aus\./);
-assert.match(ui.detail(dhwBlockedByLink),
-             /Wiederholt sich das Tag für Tag, prüfe die X10A-Verkabelung und die RX\/TX-Pins\./);
-assert.doesNotMatch(ui.detail(dhwBlockedByLink), /Takt dieser Anlage/);
-assert.doesNotMatch(ui.detail(dhwBlockedByLink), /Das liegt an der Verbindung, nicht an der Anlage/);
-assert.doesNotMatch(ui.detail(dhwBlockedByLink), /weil die Temperatur des Speichers zu lange nicht gelesen wurde/);
-ui.setLang("en");
-assert.match(ui.detail(dhwBlockedByLink),
-  /discarded because readings the check needs went unread for too long — the X10A link not answering, or the board pausing its polling \(a firmware update, a weather download or other network transfer, a restart, model detection\); the longest reached 50 min of 60 min\./);
-assert.match(ui.detail(dhwBlockedByLink),
-  /This says nothing about the tank\. If it keeps happening day after day, check the X10A wiring and the RX\/TX pins\./);
-// The old unconditional single-cause verdict must not return: neither the "this is the link" claim
-// nor the "stopped answering" cause, and the wiring step only ever appears behind its condition.
-assert.doesNotMatch(ui.detail(dhwBlockedByLink), /This is the link, not the plant/);
-assert.doesNotMatch(ui.detail(dhwBlockedByLink), /stopped answering/);
-assert.doesNotMatch(ui.detail(dhwBlockedByLink),
-  /(?<!If it keeps happening day after day, )check the X10A wiring/);
-// The reviewed defect: "because the tank temperature went unread" is false when R5T was read and
-// only the valve, heater or pump rows were missing (checkup.hpp books `blind` for both). The
-// verdict must not name the tank temperature as the only unread input, and it must not name the
-// link as the cause: the link is one of two listed sources, never the sentence's subject.
-assert.doesNotMatch(ui.detail(dhwBlockedByLink), /because the tank temperature went unread/);
-assert.doesNotMatch(ui.detail(dhwBlockedByLink), /tank temperature went unread/);
-assert.doesNotMatch(ui.detail(dhwBlockedByLink), /because the X10A link/);
-assert.match(ui.detail(dhwBlockedByLink), /because readings the check needs went unread/);
-// A mix names what was seen but cannot rank its causes.
-assert.match(ui.detail({ ...dhwBlocked, abort_reasons: ["charge", "blind"] }),
-             /discarded \(tank charging, readings missing: X10A silent or polling paused\); the longest/);
-assert.match(ui.detail({ ...dhwBlocked, abort_reasons: ["charge", "blind"] }),
-             /stored totals do not show which cause dominated/);
-assert.doesNotMatch(ui.detail({ ...dhwBlocked, abort_reasons: ["charge", "blind"] }),
-                    /plant's own duty cycle/);
-ui.setLang("de");
-
-// The OTHER unavailable — a profile without the rows — keeps the generic sentence.
-assert.match(ui.detail({ id: "dhw_loss", verdict: "unavailable", observed_s: 0, required_s: 21600 }),
-             /Das aktive Profil liefert für diese Prüfung keine auswertbaren Daten/);
-ui.setLang("de");
-
-ui.setLang("en");
-assert.equal(
-  ui.metric({ id: "cycling", verdict: "info", starts: 12, mean_run_s: 599 }),
-  "12 starts · 9 min/start",
-  "a mean below the ten-minute heuristic must not round up to the boundary",
-);
-assert.equal(
-  ui.metric({ id: "cycling", verdict: "info", starts: 12, mean_run_s: 1 }),
-  "12 starts · <1 min/start",
-  "positive runtime must not render as zero",
-);
-
-// ── the operating-class split ────────────────────────────────────────────────────────────────────
-// The class figures count COMPLETED RUNS. When the split DECIDED (`split:true`) the pooled mean is
-// the misleading half — a long tank charge inflates it — so the classes replace it on the line.
-const cyclingSplit = {
-  id: "cycling", verdict: "info", starts: 13, mean_run_s: 830, split: true,
-  space_runs: 12, space_mean_run_s: 300, dhw_runs: 1, dhw_mean_run_s: 7200,
-  cooling_runs: 0, censored_runs: 0,
+detail = ui.detail(waiting);
+assert.match(detail, /Accepted hourly windows: 2; waiting for the next eligible hour/);
+assert.doesNotMatch(detail, /no complete.*window yet/);
+assert.match(ui.detail({ ...waiting, observed_s: 0, candidate_s: 3300, required_s: 0 }), /current candidate: 55 min of 1 h/);
+assert.match(ui.detail({ ...waiting, candidate_s: 0, settle_remaining_s: 1200, required_s: 0 }), /Settling time remaining: 20 min/);
+const blocked = {
+  ...waiting, verdict: "collecting", blocked: true, aborts: 14,
+  best_aborted_s: 3000, abort_reasons: ["charge", "blind", "unknown_future_reason"],
 };
-assert.equal(ui.metric(cyclingSplit), "13 starts · space 12 × 5 min · hot water 1 × 2 h");
-assert.match(ui.detail(cyclingSplit), /Only confirmed space heating is assessed here/);
-assert.match(ui.detail(cyclingSplit), /I\/U operating mode must stay readable and unchanged/,
-             "the complete run-level class contract must be visible to the reader");
-ui.setLang("de");
-assert.equal(ui.metric(cyclingSplit), "13 Starts · Raum 12 × 5 min · Warmwasser 1 × 2 h");
-assert.match(ui.detail(cyclingSplit), /Bewertet wird nur bestätigte Raumheizung/);
-assert.match(ui.detail(cyclingSplit), /sicher erkannte Kühlung ist ausgeschlossen/);
-ui.setLang("en");
+detail = ui.detail(blocked);
+assert.match(detail, /Candidate windows discarded: 14 \(tank charging, readings missing: X10A silent or polling paused\)/);
+assert.match(detail, /Draw-like drops can also be rapid continuous cooling/);
+assert.doesNotMatch(detail, /unknown_future_reason|cause dominated|check the X10A wiring|duty cycle/);
+detail = ui.detail({ ...blocked, abort_reasons: ["blind"] });
+assert.match(detail, /required readings were unread too long/);
+assert.match(detail, /Missing replies or board-side polling pauses/);
+assert.match(detail, /establishes nothing about the tank/);
+assert.doesNotMatch(detail, /tank temperature went unread|because the X10A link|resolved|call service/);
+assert.equal(ui.value(blocked), "CHECKING");
+assert.equal(ui.value({ ...blocked, verdict: "unavailable", blocked: false }), "NOT AVAILABLE");
+assert.match(ui.detail({ ...blocked, verdict: "collecting" }), /No eligible one-hour window in 24 h/);
 
-const cyclingWeather = { ...cyclingSplit, outdoor_source: "x10a", outdoor_min_c: -5.0,
-                         outdoor_mean_c: -1.5, outdoor_samples: 120 };
-assert.equal(ui.metric(cyclingWeather),
-  "13 starts · space 12 × 5 min · hot water 1 × 2 h · X10A min -5.0 °C · mean -1.5 °C");
-assert.match(ui.detail(cyclingWeather), /only fresh samples from completed, consistently classified/);
-assert.match(ui.detail(cyclingWeather), /do not change the cycling threshold or verdict/);
-ui.setLang("de");
-assert.match(ui.metric(cyclingWeather), /X10A min\. -5,0 °C · Mittel -1,5 °C/);
-assert.match(ui.detail(cyclingWeather), /ändern weder Taktgrenze noch Bewertung/);
-ui.setLang("en");
-// Missing context is absent, never a plausible 0 °C. One real constant-temperature context remains
-// visible without inventing a range.
-assert.doesNotMatch(ui.metric(cyclingSplit), /X10A|0\.0 °C/);
-assert.match(ui.metric({ ...cyclingSplit, outdoor_source: "x10a", outdoor_min_c: 0,
-                         outdoor_mean_c: 0, outdoor_samples: 2 }), /X10A 0\.0 °C/);
+detail = ui.detail({ id: "heater", verdict: "ok", evidence: "observation", buh_s: 0,
+  bsh_s: 60, buh_observed_s: 7200, bsh_observed_s: 3600 });
+assert.match(detail, /BUH: 2 h readable · BSH: 1 h readable/);
 
-assert.equal(
-  ui.metric({ ...cyclingSplit, cooling_runs: 4 }),
-  "13 starts · space 12 × 5 min · hot water 1 × 2 h · cooling 4 excluded",
-  "positively identified cooling must be visible but never relabelled as heating",
-);
-ui.setLang("de");
-assert.equal(
-  ui.metric({ ...cyclingSplit, cooling_runs: 4 }),
-  "13 Starts · Raum 12 × 5 min · Warmwasser 1 × 2 h · Kühlen 4 ausgeschlossen",
-);
-ui.setLang("en");
-
-// Runs that happened but could not be classified are shown, so `space 0` can never be read as "no
-// space heating ran" when in truth nothing could be judged.
-assert.equal(
-  ui.metric({ ...cyclingSplit, space_runs: 0, space_mean_run_s: null,
-              dhw_runs: 0, dhw_mean_run_s: null, censored_runs: 9 }),
-  "13 starts · space 0 · hot water 0 · 9 unclassified",
-);
-
-// THE FALLBACK (legacy-443 live review): the valve row exists in the catalog but was too sparse to judge
-// with. The pooled mean is what decided, so it stays on the line, the class figures ride along as
-// observation, and the copy says which one carried the verdict.
-const cyclingPooled = {
-  id: "cycling", verdict: "ok", starts: 16, mean_run_s: 3600, split: false,
-  space_runs: 2, space_mean_run_s: 1800, dhw_runs: 1, dhw_mean_run_s: 900,
-  cooling_runs: 0, censored_runs: 3,
+// Only completed, fully classified heating-run means are presented. A pooled long DHW run can
+// neither inflate this mean nor restore an assessment after classification becomes insufficient.
+const cycling = {
+  id: "cycling", verdict: "info", evidence: "heuristic", starts: 13, mean_run_s: 830,
+  split: true, space_runs: 12, space_mean_run_s: 300,
+  dhw_runs: 1, dhw_mean_run_s: 7200, cooling_runs: 0, censored_runs: 0,
 };
-assert.equal(ui.metric(cyclingPooled),
-             "16 starts · 1 h/start · space 2 × 30 min · hot water 1 × 15 min · 3 unclassified");
-assert.match(ui.detail(cyclingPooled), /Assessed on all runs together/);
-assert.doesNotMatch(ui.detail(cyclingPooled), /Only confirmed space heating is assessed here/);
+assert.equal(ui.metric(cycling), "13 starts · heating 12 · mean 5 min · hot water 1 · mean 2 h");
+assert.match(ui.detail(cycling), /≥12 completed heating runs average <10 min/);
+assert.match(ui.detail(cycling), /Only completed, continuously classified space-heating runs/);
+assert.doesNotMatch(ui.metric(cycling), /830|13 min|\/start/);
+assert.equal(ui.metric({ ...cycling, space_mean_run_s: 599 }),
+             "13 starts · heating 12 · mean 9 min · hot water 1 · mean 2 h");
+assert.equal(ui.metric({ ...cycling, space_runs: 0, space_mean_run_s: null,
+                        dhw_runs: null, dhw_mean_run_s: null, censored_runs: 9 }),
+             "13 starts · heating 0 · 9 unclassified");
+assert.equal(ui.metric({ ...cycling, space_runs: null, mean_run_s: 9999 }), "13 starts");
+detail = ui.detail({ ...cycling, verdict: "ok", evidence: "observation", split: false,
+                     reason: "class_population_incomplete" });
+assert.match(detail, /Incomplete classification/);
+assert.doesNotMatch(detail, /Assessed on all runs together|all runs are assessed together/);
+assert.equal(ui.value({ ...cycling, verdict: "ok", evidence: "observation" }), "MEASURED ONLY");
+assert.match(ui.detail({ ...cycling, verdict: "ok", evidence: "observation",
+                        reason: "heating_runs_insufficient" }), /Fewer than 12 eligible completed heating runs/);
 
-// Nothing witnessed at all: the firmware sends null, and the line falls back to the pooled pair
-// unchanged. Rendering `space 0` here would claim a day of space heating nobody watched.
-assert.equal(
-  ui.metric({ id: "cycling", verdict: "ok", starts: 8, mean_run_s: 3600, split: false,
-              space_runs: null, space_mean_run_s: null,
-              dhw_runs: null, dhw_mean_run_s: null, cooling_runs: null, censored_runs: null }),
-  "8 starts · 1 h/start",
-);
-assert.doesNotMatch(
-  ui.detail({ id: "cycling", verdict: "ok", starts: 8, mean_run_s: 3600 }),
-  /Only confirmed space heating is assessed here|Assessed on all runs together/,
-  "neither sentence may appear where no class evidence was measured",
-);
+// Minimum, timestamp and current pressure are independent facts. A recovered historical low
+// pressure warning remains a historical warning when the present sample is stale.
+const pressure = {
+  id: "pressure", verdict: "info", evidence: "heuristic", min_bar: 0,
+  current_bar: 1.5, min_unix_s: 1791888000, confirmed_low: false,
+};
+detail = ui.detail(pressure);
+assert.match(detail, /Retained minimum ≤1.0 bar/);
+assert.match(detail, /continuous 60 s unconfirmed/);
+assert.match(detail, /label="Current water pressure:">1.5 bar/);
+assert.match(detail, /label="Minimum recorded at:">[^<]+/);
+detail = ui.detail({ ...pressure, verdict: "warn", current_bar: null, min_unix_s: null,
+                     confirmed_low: true }, true,
+                   { span_s: 86400, source_age_s: 900, source_fresh: false });
+assert.match(detail, /WARNING — Recorded continuous ≥60 s at ≤1.0 bar/);
+assert.match(detail, /not a current-pressure statement/);
+assert.match(detail, /No fresh X10A sample/);
+assert.match(detail, /label="Current water pressure:">No data/);
+assert.match(detail, /label="Minimum recorded at:">No data/);
 
-// Collecting, with class counts already real but no mean established yet.
-assert.equal(
-  ui.metric({ id: "cycling", verdict: "collecting", starts: 3, mean_run_s: null, split: false,
-              space_runs: 2, space_mean_run_s: null, dhw_runs: 1, dhw_mean_run_s: null,
-              censored_runs: 0, observed_s: 3600, required_s: 7200 }),
-  "3 starts · space 2 · hot water 1",
-);
+// Cleared and unreadable-current fault states must not promise automatic resolution or no action.
+detail = ui.detail({ id: "fault", verdict: "info", active: 0 });
+assert.match(detail, /No message is active now/);
+assert.match(detail, /neither cause nor resolution/);
+assert.doesNotMatch(detail, /cleared on its own|Nothing needs to be done|resolved itself/);
+detail = ui.detail({ id: "fault", verdict: "info", active: null, reason: "source_stale" });
+assert.match(detail, /current fault state is unreadable/);
+assert.match(detail, /No fresh X10A sample/);
+assert.doesNotMatch(detail, /right now.*error|No message is active now/);
 
-const lossWithPump = { id: "dhw_loss", verdict: "info", full_span: true,
-                       max_k_h: 1.2, windows: 6,
-                       high_windows: 2, high_with_pump: 2, high_pump_off: 0 };
-assert.equal(ui.value(lossWithPump), "NOTE");
-assert.equal(
-  ui.metric(lossWithPump),
-  "1.2 K/h · 6 windows · during circulation-pump operation",
-  "high tank loss must expose its independent pump attribution",
-);
-assert.match(ui.detail(lossWithPump),
-             /label="Value:">1\.2 K\/h · 6 windows · during circulation-pump operation<\/detail>/);
-assert.match(ui.detail(lossWithPump), /label="Assessment:">NOTE —/);
-assert.match(ui.detail(lossWithPump),
-  /label="How to read it:">200 l ≈ 200 kg · 1\.16 Wh\/\(kg·K\) · 1\.2 K ≈ 0\.28 kWhₜₕ/);
-assert.match(ui.detail(lossWithPump),
-  /label="24 h:">6 h × 1\.2 K\/h ≈ 1\.67 kWhₜₕ · COP 2\.5–3\.0 ⇒ 0\.56–0\.67 kWhₑₗ/);
-assert.doesNotMatch(
-  ui.detail({ id: "dhw_loss", verdict: "collecting", max_k_h: null, windows: 4 }),
-  /How to read it:|kWh/,
-  "count-only legacy evidence must not be coerced into a zero-energy example",
-);
-const earlyLoss = { id: "dhw_loss", verdict: "info", full_span: false,
-                    max_k_h: 1.2, windows: 1 };
-assert.match(ui.detail(earlyLoss), /0\.28 kWhₜₕ/,
-             "an early notable window must retain its honest one-hour size example");
-assert.doesNotMatch(ui.detail(earlyLoss), /label="24 h:"|kWhₑₗ/,
-                    "a partial report must not be labelled as a 24-hour electricity orientation");
+// Runtime denominator is truthful even close to thresholds; event-only evidence stays neutral.
+const defrost = { id: "defrost", verdict: "info", evidence: "heuristic", count: 3,
+  paired_count: 3, defrost_s: 200, run_s: 1000 };
+assert.equal(ui.metric(defrost), "3 cycles · 3 paired · 20 %");
+assert.equal(ui.metric({ ...defrost, defrost_s: 1 }), "3 cycles · 3 paired · <1 %");
+assert.match(ui.detail({ ...defrost, verdict: "ok", evidence: "observation",
+                        count: 2, paired_count: 2,
+                        reason: "defrost_events_insufficient" }), /Fewer than three paired defrosts/);
+assert.match(ui.detail({ id: "defrost", verdict: "ok", evidence: "observation",
+                         reason: "no_paired_runtime", count: 3 }), /event count only/);
+assert.equal(ui.value({ id: "retries", verdict: "ok", evidence: "experimental", seen: 0 }), "EXPERIMENTAL");
+assert.equal(ui.value({ id: "flow", verdict: "ok", evidence: "observation" }), "MEASURED ONLY");
+assert.equal(ui.value({ id: "heater", verdict: "ok", evidence: "observation" }), "MEASURED ONLY");
+
+// The badge counts the highest-severity serialized findings; unrelated metadata cannot turn it
+// into a health score. Pure observations never get a fake assessment denominator.
 context.S.status = { health: {
-  covered_s: 3600, full_span: false, status: "info",
-  available: 1, assessable: 1, evaluated: 1,
-  checks: [{ id: "dhw_loss", verdict: "info", max_k_h: 1.2, windows: 6,
-             high_windows: 1, high_with_pump: 0, high_pump_off: 0 }],
+  status: "info", assessable: 4, evaluated: 2, available: 8,
+  span_s: 3600, source_age_s: 5, source_fresh: true, full_span: false,
+  checks: [dhw, pressure, cycling],
 } };
-const partialLossCard = ui.card();
-assert.match(partialLossCard, /0\.28 kWhₜₕ/);
-assert.doesNotMatch(partialLossCard, /label="24 h:"|kWhₑₗ/,
-                    "the real card-level partial span must suppress the 24-hour line");
-context.S.status.health.full_span = true;
-const fullLossCard = ui.card();
-assert.match(fullLossCard,
-  /label="24 h:">6 h × 1\.2 K\/h ≈ 1\.67 kWhₜₕ · COP 2\.5–3\.0 ⇒ 0\.56–0\.67 kWhₑₗ/,
-  "the real card-level full span must enable the 24-hour orientation");
-ui.setLang("de");
-const lossWhileOff = { id: "dhw_loss", verdict: "info", full_span: true,
-                       max_k_h: 1.6, windows: 18,
-                       high_windows: 2, high_with_pump: 0, high_pump_off: 1 };
-assert.equal(ui.value(lossWhileOff), "HINWEIS");
-assert.equal(
-  ui.metric(lossWhileOff),
-  "1,6 K/h · 18 Fenster · auch bei ausgeschalteter Zirkulationspumpe",
-  "off-pump evidence must not be mislabeled as a circulation-pump cause",
-);
-assert.match(ui.detail(lossWhileOff),
-             /label="Messwert:">1,6 K\/h · 18 Fenster · auch bei ausgeschalteter Zirkulationspumpe<\/detail>/);
-assert.match(ui.detail(lossWhileOff), /label="Bewertung:">HINWEIS —/);
-assert.match(ui.detail(lossWhileOff),
-  /label="So liest du es:">200 l ≈ 200 kg · 1,16 Wh\/\(kg·K\) · 1,6 K ≈ 0,37 kWhₜₕ/);
-assert.match(ui.detail(lossWhileOff),
-  /label="24 h:">18 h × 1,6 K\/h ≈ 6,68 kWhₜₕ · COP 2,5–3,0 ⇒ 2,23–2,67 kWhₑₗ/);
-ui.setLang("en");
-
-// Unsupported means no observation, even if a legacy payload happens to carry a plausible zero.
-// Count-only defrost without RPS is a supported `ok` path and remains separately visible.
-assert.equal(ui.value({ id: "defrost", verdict: "unavailable", count: 0 }), "NOT AVAILABLE");
-assert.equal(ui.value({ id: "defrost", verdict: "ok", count: 0, share_pct: null,
-                        evidence: "observation" }), "MEASURED ONLY");
-assert.equal(
-  ui.metric({ id: "defrost", verdict: "ok", count: 3, paired_count: 2,
-              defrost_s: 200, run_s: 1000, evidence: "heuristic" }),
-  "3 cycles · 2 paired · 20 %",
-);
-const defrostWeather = { id: "defrost", verdict: "ok", count: 3, paired_count: 2,
-  defrost_s: 200, run_s: 1000, evidence: "heuristic", outdoor_source: "x10a",
-  outdoor_min_c: -7.0, outdoor_mean_c: -2.0, outdoor_samples: 300 };
-assert.equal(ui.metric(defrostWeather),
-  "3 cycles · 2 paired · 20 % · X10A min -7.0 °C · mean -2.0 °C");
-assert.match(ui.detail(defrostWeather), /both defrost and compressor state were readable/);
-assert.match(ui.detail(defrostWeather), /do not change the defrost threshold or verdict/);
-
-context.S.status = { health: {
-  covered_s: 86400, status: "unavailable", available: 1, assessable: 0, evaluated: 0,
-  checks: [{ id: "defrost", verdict: "ok", count: 3, paired_count: null,
-             share_pct: null, defrost_s: null, run_s: null, evidence: "observation" }],
-} };
-ui.setLang("en");
-let countOnlyCard = ui.card();
-assert.match(countOnlyCard, /<value>MEASURED ONLY<\/value>/);
-assert.match(countOnlyCard, /label="Value:">3 cycles<\/detail>/);
-assert.doesNotMatch(countOnlyCard, /paired/);
-assert.match(countOnlyCard, />NOT AVAILABLE<\/span>/);
-assert.doesNotMatch(countOnlyCard, /heuristic/);
-assert.equal(
-  ui.metric({ id: "defrost", verdict: "ok", count: 1, defrost_s: 1, run_s: 1000 }),
-  "1 cycle · <1 %",
-  "a positive sub-percent defrost share must not collapse into zero",
-);
-assert.equal(
-  ui.metric({ id: "defrost", verdict: "info", count: 3, defrost_s: 151, run_s: 1000 }),
-  "3 cycles · 15.1 %",
-  "the raw ratio must remain visibly above the 15% heuristic boundary",
-);
-assert.equal(
-  ui.metric({ id: "defrost", verdict: "info", count: 3, defrost_s: 12959, run_s: 86393 }),
-  "3 cycles · 15.00005 %",
-  "a small over-boundary ratio must remain visibly over its firmware-owned threshold",
-);
-
-// An unreadable current fault class is unknown, not a clear device state. Historical evidence also
-// keeps that uncertainty visible rather than silently falling back to "None active".
-assert.equal(
-  ui.metric({ id: "fault", verdict: "collecting", active: null }),
-  "Current state unknown",
-);
-assert.equal(
-  ui.metric({ id: "fault", verdict: "info", active: null }),
-  "Occurred in the last 24 h · current state unknown",
-);
-
-// NOTE on the fault row covers three different device states, and the assessment sentence is the
-// only place that distinction is stated. A generic per-verdict sentence there ("a notable value or
-// pattern") reads as a heuristic finding about a measurement, which this row never reports.
-const faultWarningNow = ui.detail({ id: "fault", verdict: "info", active: 1 });
-assert.match(faultWarningNow, /label="Value:">Warning active<\/detail>/);
-assert.match(faultWarningNow, /NOTE — The unit is reporting a warning or caution right now, not an error/);
-assert.match(faultWarningNow, /“Operation” card/, "an active class must point at the code");
-const faultCleared = ui.detail({ id: "fault", verdict: "info", active: 0 });
-assert.match(faultCleared, /NOTE — Nothing is being reported right now\./);
-assert.match(faultCleared, /cleared on its own, which is why this row is not OK/);
-assert.doesNotMatch(faultCleared, /“Operation” card/,
-                    "a cleared message has no current code to look up");
-assert.match(ui.detail({ id: "fault", verdict: "info", active: null }),
-             /NOTE — A message appeared during the last 24 hours\./);
-assert.match(ui.detail({ id: "fault", verdict: "warn", active: 1 }),
-             /WARNING — The unit is reporting an error right now\./);
-// Every other check keeps the shared per-verdict copy — this override is the fault row's alone.
-assert.match(ui.detail({ id: "pressure", verdict: "info", min_bar: 0.9 }),
-             /NOTE — Worth knowing about, but not proof of a defect\./);
-for (const lang of ["en", "de"]) {
-  ui.setLang(lang);
-  for (const c of [{ id: "fault", verdict: "warn", active: 1 },
-                   { id: "fault", verdict: "info", active: 1 },
-                   { id: "fault", verdict: "info", active: 0 },
-                   { id: "fault", verdict: "info", active: null }]) {
-    assert.doesNotMatch(ui.detail(c), /check\.detail\./,
-                        `fault copy must exist in ${lang}`);
-  }
-}
-ui.setLang("en");
-
-// Observed evidence is rounded down. A one-second shortfall must not overstate the collected time;
-// the longer target remains available in the payload without bloating the collapsed row.
-const almostRequired = {
-  id: "cycling", verdict: "collecting", starts: 2, mean_run_s: null,
-  observed_s: 77759, required_s: 77760,
-};
-assert.equal(ui.value(almostRequired), "CHECKING");
-const almostRequiredDetail = ui.detail(almostRequired);
-assert.match(almostRequiredDetail, /label="Value:">2 starts<\/detail>/);
-assert.match(almostRequiredDetail, /21 h 35 min of 21 h 36 min captured/);
-
-// Aggregate badges stay judgement-oriented: card status plus evaluated/assessable checks, without
-// presenting reportable-value count or collection duration as a health score.
-context.S.status = {
-  health: {
-    covered_s: 86400, status: "ok", available: 7, assessable: 4, evaluated: 4,
-    checks: [{ id: "fault", verdict: "ok", active: 0, observed_s: 0, required_s: 0 }],
-  },
-};
-ui.setLang("en");
 let card = ui.card();
-assert.match(card, /tone="checkup-val ok"/,
-             "OK rows must carry both the wrapping class and visible OK tone");
-assert.match(card, /Plant diagnostics · 24 h/);
-assert.match(card, />OK · 4\/4 assessed<\/span>/);
-assert.doesNotMatch(card, /7 values|24 h of/);
-assert.doesNotMatch(card, /\bAll clear\b|\bhealthy\b/i);
-ui.setLang("de");
+assert.match(card, />3 notes<\/span>/);
+assert.doesNotMatch(card, /2\/4 checks|checks assessed/);
+assert.match(card, /tone="checkup-val warn"/);
+assert.doesNotMatch(card, /All clear|healthy|8 values|health score/);
+context.S.status.health = { status: "unavailable", assessable: 0, evaluated: 0,
+  checks: [{ id: "flow", verdict: "ok", evidence: "observation", min_l_min: 8.4 }] };
 card = ui.card();
-assert.match(card, /Anlagendiagnose · 24 h/);
-assert.match(card, />OK · 4\/4 bewertet<\/span>/);
-assert.doesNotMatch(card, /7 Werte|von 24 h/);
-assert.doesNotMatch(card, /Alles in Ordnung|\bgesund/i);
+assert.match(card, />Observations<\/span>/);
+assert.doesNotMatch(card, /0\/0|NOT AVAILABLE<\/span>|>OK</);
+context.S.status.health = { status: "warn", checks: [dhw, { ...pressure, verdict: "warn" }] };
+assert.match(ui.card(), />1 warning<\/span>/);
+assert.doesNotMatch(ui.card(), />1 note<\/span>/);
+context.S.status.health = { status: "ok", checks: [{ id: "fault", verdict: "ok", active: 0 }] };
+assert.match(ui.card(), />No hint in assessed data<\/span>/);
+context.S.status.health = { status: "collecting", checks: [collecting] };
+assert.match(ui.card(), />Collecting data<\/span>/);
+context.S.status.health.checks = [{ id: "future_check", verdict: "warn", opaque: "<must-not-render>" }];
+assert.equal(ui.card(), "");
 
-context.S.status.health = {
-  covered_s: 7200, persist: "wrong_layout", status: "collecting", available: 5, assessable: 3, evaluated: 1,
-  checks: [{
-    id: "pressure", verdict: "collecting", min_bar: 1.7,
-    observed_s: 120, required_s: 3600,
-  }],
-};
-ui.setLang("en");
-card = ui.card();
-assert.match(card, />CHECKING · 1\/3 assessed<\/span>/);
-assert.match(card, /<value>CHECKING<\/value>/);
-assert.match(card, /label="Value:">1\.7 bar<\/detail>/);
-assert.match(card, /label="Assessment:">CHECKING — 2 min of 1 h captured/);
-ui.setLang("de");
-card = ui.card();
-assert.match(card, />PRÜFT · 1\/3 bewertet<\/span>/);
-assert.match(card, /<value>PRÜFT<\/value>/);
-assert.match(card, /label="Messwert:">1\.7 bar<\/detail>/);
-assert.match(card, /label="Bewertung:">PRÜFT — 2 min von 1 h erfasst/);
-assert.doesNotMatch(card, /So liest du diese Karte|Einfach erklärt|Datenfenster:/,
-                    "the diagnostic card must not render the removed guide row");
-
-// Regression payload matching the narrow German card that prompted the status-only design.
-// Readings, assessment copy and collection clocks are present in details but absent from every
-// collapsed value.
-context.S.status.health = {
-  covered_s: 1200, status: "info", available: 8, assessable: 5, evaluated: 2,
-  checks: [
-    { id: "fault", verdict: "ok", active: 0, evidence: "device" },
-    { id: "dhw_loss", verdict: "info", max_k_h: 1.2, windows: 3,
-      high_windows: 2, high_with_pump: 2, high_pump_off: 0, evidence: "heuristic" },
-    { id: "cycling", verdict: "collecting", starts: 0, observed_s: 1200, required_s: 77760, evidence: "heuristic" },
-    { id: "defrost", verdict: "collecting", count: 0, observed_s: 1200, required_s: 77760, evidence: "observation" },
-    { id: "pressure", verdict: "collecting", min_bar: 1.7, observed_s: 1200, required_s: 77760, evidence: "manufacturer" },
-    { id: "flow", verdict: "collecting", min_l_min: null, observed_s: 0, required_s: 60, evidence: "observation" },
-    { id: "heater", verdict: "collecting", buh_s: 0, bsh_s: 0, observed_s: 1200, required_s: 77760, evidence: "observation" },
-    { id: "retries", verdict: "collecting", seen: null, observed_s: 1200, required_s: 77760, evidence: "experimental" },
-  ],
-};
-ui.setLang("de");
-card = ui.card();
-const collapsedValues = [...card.matchAll(/<value>(.*?)<\/value>/g)].map((m) => m[1]);
-assert.deepEqual(collapsedValues,
-                 ["OK", "HINWEIS", "PRÜFT", "PRÜFT", "PRÜFT", "PRÜFT", "PRÜFT", "PRÜFT"]);
-for (const value of collapsedValues) {
-  assert.doesNotMatch(value, /Aktuell|Start|Vorgang|bar|min|Speicher|gesammelt|erfasst/);
-}
-for (const reading of ["Aktuell keine", "1,2 K/h · 3 Fenster · während Zirkulationspumpenbetrieb",
-                       "0 Starts", "0 Vorgänge", "1.7 bar", "0 min · Speicher 0 min"]) {
-  assert.match(card, new RegExp(`label="Messwert:">${reading.replace(".", "\\.")}<\\/detail>`),
-               `reading must move into the German hint box: ${reading}`);
-}
-assert.match(card, /HINWEIS · 2\/5 bewertet/);
-assert.match(card, /20 min von 21 h 36 min erfasst/,
-             "the removed collection clock must remain available in the explainer");
-
-context.S.status.health = {
-  covered_s: 23.5 * 3600, status: "collecting", available: 1, assessable: 1, evaluated: 0,
-  checks: [{
-    id: "pressure", verdict: "collecting", min_bar: 1.7,
-    observed_s: 120, required_s: 3600, evidence: "manufacturer",
-  }],
-};
-ui.setLang("en");
-card = ui.card();
-assert.match(card, />CHECKING · 0\/1 assessed<\/span>/);
-assert.doesNotMatch(card, /23 h 30 min|1 values/);
-assert.doesNotMatch(card, /manufacturer limit/);
-ui.setLang("de");
-card = ui.card();
-assert.match(card, />PRÜFT · 0\/1 bewertet<\/span>/);
-assert.doesNotMatch(card, /23 h 30 min|1 Werte/);
-assert.doesNotMatch(card, /Herstellergrenze/);
-
-// Evidence class refines OK: observation-only and experimental facts must not claim a completed
-// judgement. Missing additive fields remain backwards-compatible and use the firmware verdict.
-const evidenceChecks = [
-  { id: "fault", verdict: "ok", active: 0, evidence: "device" },
-  { id: "pressure", verdict: "ok", min_bar: 1.7, evidence: "manufacturer" },
-  { id: "cycling", verdict: "ok", starts: 1, mean_run_s: 3600, evidence: "heuristic" },
-  { id: "flow", verdict: "ok", min_l_min: 8.4, evidence: "observation" },
-  { id: "retries", verdict: "ok", seen: 0, evidence: "experimental" },
-];
-context.S.status.health = { covered_s: 86400, status: "ok", checks: evidenceChecks };
-ui.setLang("en");
-card = ui.card();
-for (const status of ["OK", "MEASURED ONLY", "EXPERIMENTAL"])
-  assert.match(card, new RegExp(status));
-assert.match(card, /<value>OK<\/value>.*label="Value:">1\.7 bar<\/detail>/,
-             "manufacturer-bounded pressure can report OK after its evidence gate");
-assert.match(card, /<value>MEASURED ONLY<\/value>.*label="Value:">8\.4 l\/min<\/detail>/,
-             "flow has no universal threshold and must not report OK");
-assert.match(card, /<value>EXPERIMENTAL<\/value>.*label="Value:">No increase seen<\/detail>/,
-             "stable retry counters must not report OK");
-
-context.S.status.health = {
-  covered_s: 3600, status: "collecting",
-  checks: [{ id: "cycling", verdict: "collecting", starts: 1, mean_run_s: null }],
-};
-card = ui.card();
-assert.match(card, /CHECKING · 0\/1 assessed/);
-assert.match(card, /<value>CHECKING<\/value>/);
-assert.match(card, /label="Value:">1 start<\/detail>/);
-assert.doesNotMatch(card, /undefined|check\.basis/);
-
-// A future firmware may append checks this UI does not know. They are skipped without guessing a
-// label/value, and a payload containing only unknown checks yields no empty card.
-context.S.status.health = {
-  covered_s: 60, status: "info", available: 2, evaluated: 1,
-  checks: [
-    { id: "future_check", verdict: "warn", opaque: "<must-not-render>" },
-    { id: "fault", verdict: "info", active: 0, observed_s: 0, required_s: 0 },
-  ],
-};
-ui.setLang("en");
-card = ui.card();
-assert.match(card, /<value>NOTE<\/value>/);
-assert.match(card, /label="Value:">Occurred in the last 24 h · not active now<\/detail>/);
-assert.doesNotMatch(card, /future_check|must-not-render/);
-context.S.status.health.checks = [{ id: "future_check", verdict: "warn" }];
-assert.equal(ui.card(), "", "unknown-only payload must not render an empty or guessed card");
-
-// Load the complete production explainer fragments and expose their data tables. These are real
-// module boundaries now; moving an unrelated comment can no longer change what this test executes.
-const descriptionContext = {};
-vm.runInNewContext(
-  `${explanationSource}
-   this.__copy = { descriptions: DESCRIPTIONS, model: MODEL_DESCRIPTIONS, inspect: INSPECT };`,
-  descriptionContext,
-  { filename: "main/www/app.sources" },
-);
-
-// Limit this wording check to Checkup keys and Checkup explainers. Other value explainers may
-// legitimately use words such as "healthy"; this surface must not turn a bounded observation into
-// a whole-plant claim.
-const checkupI18n = Object.values(ui.copy).flatMap((language) =>
-  Object.entries(language)
-    .filter(([key]) => key === "card.checkup" || key.startsWith("check."))
-    .map(([, value]) => String(value)));
-const checkupDescriptions = Object.entries(descriptionContext.__copy.model)
-  .filter(([key]) => key.startsWith("health_"))
-  .map(([, value]) => JSON.stringify(value));
-const checkupCopy = [...checkupI18n, ...checkupDescriptions].join("\n");
-for (const [name, pattern] of [
-  ["German all-clear claim", /Alles in Ordnung/i],
-  ["English all-clear claim", /\bAll clear\b/i],
-  ["German health claim", /\bgesund(?:e[rsnm]?|heit|heitszustand)?\b/i],
-  ["English health claim", /\bhealthy\b|\bhealth status\b/i],
-  ["English whole-plant claim", /\b(?:plant|unit|system) (?:is )?(?:fine|healthy)\b/i],
-  ["German whole-plant claim", /\bAnlage (?:ist )?(?:gesund|in Ordnung)\b/i],
-]) assert.doesNotMatch(checkupCopy, pattern, `checkup copy must not contain a ${name}`);
-
-assert.ok(!("health_guide" in descriptionContext.__copy.model),
-          "the removed guide row must have no explainer copy");
-assert.doesNotMatch(explanationSource, /action\.label|b\.action/,
-                    "the shared explainer must not render recommendation copy");
-
-// The concise explainer must retain the production retry comparator's important edge cases.
-const retryCopy = JSON.stringify(descriptionContext.__copy.model.health_retries);
-assert.match(retryCopy, /while stopped or at a compressor-state boundary/);
-assert.match(retryCopy, /im Stillstand oder an einer Verdichter-Zustandsgrenze/);
-assert.match(retryCopy, /stable or decreasing values, gaps and resets do not/);
-assert.match(retryCopy, /stabile oder abnehmende Werte, Lücken und Rücksetzungen zählen nicht/);
-assert.doesNotMatch(retryCopy, /with the compressor running|bei laufendem Verdichter/);
-
-const pressureCopy = JSON.stringify(descriptionContext.__copy.model.health_pressure);
-assert.match(pressureCopy, /NOTE immediately and a WARNING after 60 continuous seconds/);
-assert.match(pressureCopy, /sofort HINWEIS und nach 60 durchgehenden Sekunden WARNUNG/);
-
-const dhwCopy = JSON.stringify(descriptionContext.__copy.model.health_dhw_loss);
-assert.match(dhwCopy, /NOTE ≥0\.8 K\/h is a project heuristic/);
-assert.match(dhwCopy, /volume\/room-temperature gap affects rate/);
-assert.match(dhwCopy, /HINWEIS ≥0,8 K\/h ist Projektheuristik/);
-assert.match(dhwCopy, /Volumen\/Abstand zur Raumtemperatur ändern den Wert/);
-assert.match(dhwCopy, /R5T is one point in a stratified tank/);
-assert.match(dhwCopy, /R5T: ein Punkt im geschichteten Speicher/);
-assert.match(dhwCopy, /greatest hourly drop, not mean\/day total/);
-assert.match(dhwCopy, /K\/h: höchster Stundenabfall, kein Mittel-\/Tageswert/);
-assert.match(dhwCopy, /Detection ends near 1\.85 K\/h/);
-assert.match(dhwCopy, /Erkennung endet nahe 1,85 K\/h/);
-assert.match(dhwCopy, /correlation, not cause/);
-assert.match(dhwCopy, /Zusammenhang, keine Ursache/);
-assert.match(dhwCopy, /each window=maximum.*COP 2\.5–3\.0/);
-assert.match(dhwCopy, /jedes Fenster=Maximum.*COP 2,5–3,0/);
-assert.match(dhwCopy, /replacement-electricity direction, not measured daily use/);
-assert.match(dhwCopy, /elektrischer Nachheizbedarf, kein Messwert/);
-
-const flowCopy = JSON.stringify(descriptionContext.__copy.model.health_flow);
-assert.match(flowCopy, /observed part-load minimum.*not the nominal or design flow/);
-assert.match(flowCopy, /beobachtetes Teillast-Minimum.*nicht der Nenn- oder Auslegungsdurchfluss/);
-assert.match(flowCopy, /same model, mode and conditions/);
-assert.match(flowCopy, /dasselbe Modell, dieselbe Betriebsart und dieselben Bedingungen/);
-
-// The hint box should explain the observation without becoming a manual or recommending an action.
-// Keep both paragraphs concise while the source-level assertions preserve the load-bearing caveats.
-for (const id of ["fault", "dhw_loss", "cycling", "defrost", "pressure", "flow", "heater", "retries"]) {
-  const d = descriptionContext.__copy.model[`health_${id}`];
-  for (const [lang, copy] of [["en", d], ["de", d.de]]) {
-    const length = `${copy.what} ${copy.normal || ""}`.length;
-    assert.ok(length <= 520, `${id} ${lang} explainer is too long (${length} characters)`);
-    assert.ok(!("action" in copy), `${id} ${lang} must not recommend a next step`);
+// Every shipped language must have dynamic copies for the changed states, not English fallback keys.
+for (const lang of locales) {
+  ui.setLang(lang);
+  for (const c of [dhw, pressure, cycling, defrost, waiting,
+      { ...cycling, verdict: "ok", evidence: "observation", reason: "class_coverage" },
+      { id: "fault", verdict: "info", active: 0 },
+      { id: "fault", verdict: "info", active: null, reason: "source_stale" }]) {
+    assert.doesNotMatch(ui.detail(c, false, { span_s: 3600, source_age_s: 900, source_fresh: false }),
+                       /check\.detail\.|undefined|NaN|200 l|COP|kWh/, `missing or misleading ${lang} copy`);
   }
 }
+ui.setLang("de");
+assert.match(ui.detail(cycling), /im Mittel unter 10 min/);
+assert.doesNotMatch(ui.detail(cycling), /mindestens 12 Läufen unter 10 min/);
+assert.match(ui.detail(dhw), /interner Hinweis ab 0,8 K\/h; Ursache nicht belegt/);
+assert.match(ui.detail({ id: "fault", verdict: "info", active: 0 }), /weder Ursache noch Behebung/);
+assert.equal(ui.metric(pressure), "0 bar");
+assert.match(ui.detail(pressure), /Aktueller Wasserdruck:">1,5 bar/);
 
-// Technical binary states stay ON/OFF in German explainers instead of switching between translated
-// prose forms. The defrost copy may name the same rising edge as an "Abtaustart" without spelling
-// out the states. Named manufacturer enums such as Smart Grid "Empfehlung ein" remain outside this
-// binary-state contract.
-const cyclingCopy = JSON.stringify(descriptionContext.__copy.model.health_cycling);
-const defrostCopy = JSON.stringify(descriptionContext.__copy.model.health_defrost);
-assert.match(cyclingCopy, /von OFF zu ON/);
-assert.match(defrostCopy, /Abtaustarts/);
-const explanationCopy = JSON.stringify(descriptionContext.__copy);
-for (const [name, pattern] of [
-  ["Aus-zu-Ein transition", /von Aus zu Ein/i],
-  ["translated switched-off state", /\bausgeschaltet(?:e[rmns]?)?\b/i],
-  ["translated switched-on state", /\beingeschaltet(?:e[rmns]?)?\b/i],
-  ["translated compressor state", /\bVerdichter ist aus\b/i],
-  ["translated backup-heater state", /\bZusatzheizer (?:ist )?aus\b/i],
-]) assert.doesNotMatch(explanationCopy, pattern, `${name} must use ON/OFF`);
+const descriptionContext = {};
+vm.runInNewContext(`${explanationSource}; this.model = MODEL_DESCRIPTIONS;`, descriptionContext);
+const allCheckupCopy = [
+  ...Object.values(ui.copy).flatMap(c => Object.entries(c).filter(([k]) => k.startsWith("check.")).map(([,v]) => String(v))),
+  ...Object.entries(descriptionContext.model).filter(([k]) => k.startsWith("health_")).map(([,v]) => JSON.stringify(v)),
+].join("\n");
+for (const pattern of [/Alles in Ordnung/i, /\bAll clear\b/i, /\bhealthy\b|\bhealth status\b/i,
+  /\bAnlage (?:ist )?(?:gesund|in Ordnung)\b/i, /cleared on its own|von selbst.*verschwunden/i])
+  assert.doesNotMatch(allCheckupCopy, pattern, "diagnosis copy must remain bounded");
+assert.doesNotMatch(allCheckupCopy, /200 l|COP 2[.,]5|each window=maximum|jedes Fenster=Maximum/);
+assert.doesNotMatch(explanationSource, /action\.label|b\.action/);
+for (const id of ["fault", "dhw_loss", "cycling", "defrost", "pressure", "flow", "heater", "retries"]) {
+  const d = descriptionContext.model[`health_${id}`];
+  for (const [lang,c] of [["en",d],["de",d.de]]) {
+    assert.ok(`${c.what} ${c.normal || ""}`.length <= 520, `${id} ${lang} explainer length`);
+    assert.ok(!("action" in c), `${id} ${lang} must not invent an action`);
+  }
+}
+const model = descriptionContext.model;
+assert.match(JSON.stringify(model.health_dhw_loss), /one point in a stratified tank/);
+assert.match(JSON.stringify(model.health_dhw_loss), /cooling near 1\.85 K\/h or faster may be excluded as draw-like/);
+assert.match(JSON.stringify(model.health_dhw_loss), /correlation, not cause/);
+assert.match(JSON.stringify(model.health_cycling), /≥12 heating runs averaging <10 min/);
+assert.match(model.health_cycling.normal, /≥90% of all completed runs classified/);
+assert.match(model.health_cycling.de.normal, /≥90 % aller abgeschlossenen Läufe zugeordnet/);
+assert.doesNotMatch(JSON.stringify(model.health_cycling), /all runs are assessed together|alle gemeinsam bewertet/);
+assert.match(model.health_defrost.what, /compressor runtime with readable compressor and defrost states/);
+assert.match(model.health_defrost.de.what, /Verdichterlaufzeit bei lesbarem Verdichter- und Abtaustatus/);
+assert.match(JSON.stringify(model.health_pressure), /Project rule:.*60 continuously observed seconds/);
+assert.match(JSON.stringify(model.health_flow), /Not nominal flow or proof of part load/);
+assert.match(JSON.stringify(model.health_retries), /while stopped or at a compressor-state boundary/);
+assert.match(JSON.stringify(model.health_retries), /Gaps, resets and non-rises do not count/);
+assert.match(JSON.stringify(model.health_retries), /Stable counters cannot rule out limiting/);
+assert.doesNotMatch(JSON.stringify(model.health_retries), /with the compressor running|bei laufendem Verdichter/);
+assert.match(JSON.stringify(model.health_cycling), /von OFF zu ON/);
 
-console.log("plant-diagnostics UI contract: evidence-bounded rendering verified");
+// Execute the real accordion/body builders: diagnosis rules explain interpretation, while
+// ordinary readings and model rows retain their normal-context label.
+const renderedContext = vm.createContext({
+  S: { descOpen: new Set() }, document: { getElementById: () => null },
+  localStorage: { getItem: () => "en", setItem: () => {} }, navigator: { language: "en" },
+});
+vm.runInContext(`${i18nSource}${dashboardSource}${explanationSource}
+  this.rendered = {
+    model: modelDescRow,
+    value: () => descBodyHtml(DESCRIPTIONS.find(d => d.normal)),
+    lang: (value) => { LANG = value; },
+  };`, renderedContext);
+for (const [lang, interpretation] of [["en", "How to read it:"], ["de", "So liest du es:"]]) {
+  renderedContext.rendered.lang(lang);
+  const diagnosis = renderedContext.rendered.model("health_pressure", "Pressure", "NOTE");
+  assert.ok(diagnosis.includes(`<span class="vdesc-n">${interpretation}</span>`));
+  assert.doesNotMatch(diagnosis, /<span class="vdesc-n">Normal:<\/span>/);
+  assert.match(renderedContext.rendered.model("max_alloc", "Memory", "20 kB"),
+               /<span class="vdesc-n">Normal:<\/span>/);
+  assert.match(renderedContext.rendered.value(), /<span class="vdesc-n">Normal:<\/span>/);
+}
+console.log("plant-diagnostics UI contract: evidence, lifecycle, localized claims and counterexamples verified");

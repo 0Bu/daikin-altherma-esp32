@@ -158,6 +158,10 @@ Five-minute trend buckets and one-second diagnosis evidence answer different que
 buckets retain the last sample; they cannot reconstruct short cycling, transient faults or observed
 heater runtime. `checkup_record()` accumulates those events, signal-specific coverage and minima
 directly. [DIAGNOSTIC_EVIDENCE.md](DIAGNOSTIC_EVIDENCE.md) owns the actual rules and claim limits.
+State-time integration requires readable interval endpoints; resumed readings do not fill blind
+time. Read-time lifecycle span and source age remain separate from measured signal coverage.
+Temporary TLS/allocation gaps preserve profile capabilities and age the evidence without renewing
+source freshness. Historical readings expire even if polling stops.
 
 History has two independent persistence paths:
 
@@ -208,12 +212,17 @@ stay gaps. Browser storage holds only a transient render frame during OTA, not m
 
 Completed diagnosis hours restore only from the dated flash journal after SNTP and current source
 confirmation; retained `.noinit` hours are never adopted. Records require a compatible fingerprint,
-configuration, source identity and diagnostics generation. A narrowly scoped one-shot DHW handoff
-may preserve an unfinished candidate; it cannot lend coverage to completed checks. Disabling
-diagnostics clears runtime evidence; re-enabling starts a new generation. Same-boot journal creation
-is not proof of reboot restoration. `DIAGNOSTICS.md` explains results; `PLANT.md` owns lifecycle.
+configuration, source identity and diagnostics generation. Circulation broker/mapping/interpretation
+identity gates only DHW buckets; changed circulation must not retire independent X10A evidence.
+A narrowly scoped one-shot DHW handoff may preserve an unfinished candidate; it cannot lend coverage
+to completed checks. Disabling diagnostics clears runtime evidence; re-enabling starts a new
+generation. Same-boot journal creation is not proof of reboot restoration. `DIAGNOSTICS.md` explains
+results; `PLANT.md` owns lifecycle.
 Current source confirmation requires this boot's full profile/link evidence, not cached startup
-identity. Restored intervals expire at their exact 24-hour age. Legacy unscoped records are refused.
+identity. Whole live and restored hours expire when their beginning leaves the rolling day,
+independently of producer progress; abandoned open evidence expires too. The current 80-byte
+diagnosis bucket changes its journal fingerprint and starts fresh after a format update; ordinary
+trend records are unaffected.
 The intentional-restart DHW handoff is consumed once; downtime/startup remains blind and can
 invalidate it without incrementing ordinary abort counters.
 
@@ -407,6 +416,12 @@ size-check bounded JSON and TLS claims. Every allocating handler keeps the commo
 Never allocate while holding a raw semaphore. Stage outside the critical section and move/swap, or
 use `daik::SemGuard` for unwind-safe ownership. MQTT/Syslog event-side errors use stable literal
 pointers; materialize strings outside their status lock. A task catch cannot rescue a stranded mutex.
+
+Diagnosis bucket storage is 1,920 bytes for 23 completed hours and one pending hour. Completed-run
+totals and outdoor sample counts use 32 bits; pressure minima add an observed-at timestamp. The
+23-record static restoration scratch occupies 2,944 bytes, avoiding a poll-task stack array.
+The history owner reuses its existing 4 KiB sector scratch. These geometry figures do not replace
+the ESP32-S3 ELF's full static-memory and call-path budgets.
 
 <a id="the-stack-the-second-budget-and-how-it-was-measured"></a>
 ### Stack verification

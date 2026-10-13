@@ -31,15 +31,19 @@ using CheckupFlashRecord = logic::CheckupJournalRecord;
 enum class CheckupFlashRestoreResult : uint8_t { Deferred, Ignored, Restored };
 
 // Feed one poll cycle. Called from the poll task right after a sweep with that cycle's values — NOT
-// under the cache mutex (this takes its own, and holding two would invent a lock order this file has
-// no reason to have, exactly like history_record).
+// under the cache mutex (this takes its own, and holding two would invent a lock order this file
+// has no reason to have, exactly like history_record).
 //
 // `rps_known` / `rps_running` are the compressor state the poll task has ALREADY derived for the
 // held-over marking (logic/ou_stale.hpp). Passed in rather than re-derived: two answers to "is the
 // compressor running" is how the trend ring and the MQTT bridge would come to blank different rows,
 // and here it would be how a compressor start gets counted by one rule and not the other.
+// `profile_confirmed` refers to the supplied capability metadata. Temporary allocation/TLS gaps
+// pass false to retain the current profile, while an unresolved profile explicitly supplies empty
+// metadata. Neither an empty sample nor that flag establishes a successful bus observation.
 void checkup_record(const CachedValue* v, size_t n, bool rps_known, bool rps_running,
-                    const logic::CheckupCoverage& coverage, uint32_t source_generation);
+                    const logic::CheckupCoverage& coverage, uint32_t source_generation,
+                    bool profile_confirmed = true);
 
 // Judge the previous boot's handoff integrity and retire completed RAM hours. app_main calls ONCE,
 // before any producer task exists, which is what makes the decision single-threaded and lock-free.

@@ -242,8 +242,8 @@ assert.match(checkup,
 assert.doesNotMatch(checkup, /P\(\)\.dhw\.pending\s*=\s*(?:P\(\)\.dhw_handoff\.payload|s_boot_handoff)\.pending/,
   "startup must not restore undated completed pending counters");
 assert.match(checkup,
-  /if \(s_boot_handoff_valid[\s\S]*?s_diagnostics_enabled\.load\(std::memory_order_acquire\)[\s\S]*?s_boot_handoff_model == fp[\s\S]*?s_boot_handoff\.source_fp == source_fp\) \{\s*logic::dhw_loss_adopt\(s_dhw_state,\s*s_boot_handoff\.candidate,\s*esp_timer_get_time\(\)\)/,
-  "DHW adoption requires current consent and matching detected model/link scope and the real boot clock");
+  /if \(s_boot_handoff_valid[\s\S]*?s_diagnostics_enabled\.load\(std::memory_order_acquire\)[\s\S]*?s_boot_handoff_model == fp[\s\S]*?s_boot_handoff\.source_fp == source_fp[\s\S]*?s_boot_handoff\.dhw_source_fp == s_dhw_source_fp\) \{\s*logic::dhw_loss_adopt\(s_dhw_state,\s*s_boot_handoff\.candidate,\s*esp_timer_get_time\(\)\)/,
+  "DHW adoption requires current consent, matching model/link and circulation identities, and the real boot clock");
 assert.match(checkup,
   /P\(\)\.dhw_handoff\.magic = 0;[\s\S]*?s_source_confirmed\s*=\s*false;[\s\S]*?persist_wipe\(\);/,
   "startup must consume the one-shot handoff before producers and retire undated completed RAM hours");

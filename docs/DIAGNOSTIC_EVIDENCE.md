@@ -1,6 +1,6 @@
 # Evidence and limits of the plant diagnostics
 
-<!-- diagnostic-evidence-contract: 758c96038582e1acfd8873bcbb546995bb8d8bb6f8b3abd21cf00f98fe297a30 -->
+<!-- diagnostic-evidence-contract: 84ded6b157100ea5e1817f26db9a97fb545abf6557c4afb60d1e783d546acf45 -->
 
 For every row in the **Plant diagnostics · 24 h** card, this page answers four questions:
 
@@ -17,32 +17,18 @@ The card observes ordinary operation; it does not command service mode, full loa
 refrigerant test. No manufacturer settling duration can therefore be inferred from a complete
 24-hour window, and none of the eight results is a passed commissioning test.
 
-X10A observations are also scoped to the configured target generation. A link, wiring, or detected
-unit change invalidates an in-flight cycle before it can enter this evidence window; the old target's
-last sample is discarded rather than becoming the first sample attributed to the new target. This is
-an identity and freshness boundary, not evidence that an unreadable replacement unit is healthy.
-An explicit source reset also retires pending flash restoration for the remainder of that boot.
-Manual selection may define the source for future decoding without a physical bus reply; it does
-not authorize pre-reset diagnosis hours to return, even with the same model and link fingerprint.
+X10A evidence is scoped to the configured target generation. Changed wiring, profile or detected
+source discards an in-flight old-source sample and retires pending restoration for that boot.
+A manual profile selection establishes a decoding contract, not a physical reply.
 
-Transport liveness is separate from each rule's measurement evidence. X10A live use requires a reply
-less than 15 s old. HomeHub cache use requires matching target/session identity, a full-cache age at
-most 537 s and a separate reply age at most 7 s; these project bounds include slow fallback reads
-and do not establish that every row came from one sweep. Individual HomeHub diagnosis inputs
-gate53, mode38 and outdoor44 retain their
-own successful-response times and expire after the same seven-second project bound. A new reply
-for another register cannot renew them. Native Altherma 4 mode38 accepts its documented `0` None
-as a known inactive direction; EKRHH mode38 `0` remains unknown. This does not establish compressor
-activity. The native source scope, pressure-based profile heuristic and deferred physical comparison
-are recorded in [the Modbus contract](MODBUS_PROTOCOL.md#deferred-physical-acceptance).
-A completed slow sweep can therefore already contain an
-expired early input; it is withheld rather than assigned the sweep's completion time. These changes
-alter evidence admission, not any diagnosis threshold or manufacturer claim. State-age observation
-and blind time are also separate from the eight diagnosis counters; their version-4 format includes the resumed tail
-in the cumulative blind-gap limit, books the start-up before the first fold after a RAM-preserving
-reset as unobserved, and changes no diagnosis threshold below.
-The [X10A gate](../main/logic/mqtt_publish_gate.hpp) and
-[HomeHub implementation](../main/hp_modbus.cpp) define those transport bounds.
+At read time the diagnosis publishes elapsed span separately from usable signal coverage and the
+age of the last nonempty X10A sample. A source older than the 15-second project bound cannot support
+a current fault all-clear or reassuring assessment. Temporary TLS/allocation pauses contribute no
+measurement coverage and do not withdraw profile capabilities. Historical findings remain within
+their admissible age; live, restored and open evidence expires even if the producer stops.
+DHW circulation identity is independent and binds broker, topic, value/time paths and interpretation
+parameters. A mismatch retires only tank-cooling evidence. [PLANT.md](PLANT.md#reboot-and-persistence)
+owns restoration and restart limits; HomeHub/ENV III remain separate instruments.
 
 A manufacturer statement is not automatically a limit for every Daikin model. The installation
 manual for the exact indoor and outdoor units remains authoritative. The primary sources linked here
@@ -120,101 +106,58 @@ and suitable service instruments remain necessary.
 shows a short and long description when a malfunction occurs. Its error-code table includes
 refrigerant-circuit, electronics, and 7H water-flow faults ([D1], section 12.4, printed pages 89–90).
 
-**Firmware rule:** The diagnosis reads the fault class supplied by the unit. It reports a currently
-active fault immediately and retains a warning observed in the rolling window as a past event after
-it clears. This is implemented by the `Fault` branch of
-[`checkup_evaluate()`](../main/logic/checkup.hpp); [`fault_state.hpp`](../main/logic/fault_state.hpp)
-decodes the fault class.
+**Firmware rule:** A currently readable error class produces **WARNING** immediately; warnings and
+cautions produce **NOTE**. An earlier observed error/warning flag remains a **NOTE** in the rolling
+window. Normal requires every fault-class row supplied by the profile to be readable and normal.
+Missing current rows cannot establish that a retained fault has cleared. See the Fault branch of
+[checkup_evaluate()](../main/logic/checkup.hpp) and [fault_state.hpp](../main/logic/fault_state.hpp).
 
-**Not established:** This row does not determine a root cause and does not replace the code-specific
-Daikin service procedure. An unreadable signal is not equivalent to “no fault”.
+**Not established:** The supported classes are not a comprehensive plant-health test. No root
+cause, spontaneous recovery, absence of intervention or code-specific service conclusion is inferred.
 
 <a id="diagnosis-dhw-loss"></a>
-### 2. Domestic-hot-water tank heat loss (`dhw_loss`)
+### 2. Domestic-hot-water tank cooling (`dhw_loss`)
 
 **External evidence:** The EU defines a hot-water storage tank's standing loss as the heat power in
 watts emitted at specified water and ambient temperatures. Storage volume and standing loss are
 separate declared technical parameters ([E1], Article 2(17) and Annex III, section 7). This supports
 that tank heat loss is real and measurable, while also showing that test conditions and tank size
-matter. A NIST liquid-water reference correlation gives an isobaric heat capacity of
-`4181.446 J/(kg·K)` at 298.15 K and 0.1 MPa ([R3], table 8), equivalent to about
-`1.16 Wh/(kg·K)`. This supports the UI's rounded water heat-content example, not whole-tank
-calorimetry from one sensor.
+matter.
 
-**Firmware rule:** The firmware evaluates complete, quiet one-hour windows of tank sensor R5T. Tank
-charging, internal pump movement, a detected draw, implausible readings, and excessive gaps discard
-the window. A genuine charge starts a 45-minute settling period. A **NOTE** begins at `0.8 K/h`; a
-reassuring result requires six clean hours in a complete 24-hour lifecycle. The rules are the
-`DHW_LOSS_*` constants and the `DhwLoss` branch in
-[`checkup.hpp`](../main/logic/checkup.hpp). The retained aggregate publishes only the greatest
-completed-hour R5T rate plus window counts and circulation correlation; it does not retain a mean,
-sum, or every window's individual rate. Changing the circulation-pump evidence mapping (topic, value
-paths, age limit, on/off thresholds or confirmation time) clears this check's window evidence:
-completed windows, observed clean hours and the window in progress. The tank sample in flight at
-that moment is discarded rather than counted under the new mapping. The overall checkup's 24-hour
-span is not reset, so once it is complete a reassuring result needs six new clean hours, not a new
-24-hour lifecycle. An intentional restart can carry the ongoing candidate and charge-settle
-filter through a separately sealed handoff after the current source has been confirmed. Completed
-undated counters in its open hour are discarded; completed hourly evidence is reconstructed from
-compatible absolute-age journal records instead of RAM. Legacy records without the full X10A
-scope are rejected. A power interruption, crash, changed source or failed integrity/consent check
-carries no candidate. The next boot books a
-fixed 5-second downtime allowance plus its own uptime when the check resumes, which includes the
-network start-up, as unobserved time: it advances the window's age and never counts as observed.
-When that pushes the window past the bound every unread stretch is held to (`120 s` in one run,
-counting an unread stretch still open at the restart, or 10% of the hour in total, counting all
-unobserved time the carried window already holds), the carried window is discarded instead of
-continued; this discard is not entered in the discarded-window
-count, so the count can under-report restarts.
+**Firmware rule:** Complete eligible one-hour windows measure the drop at tank sensor R5T.
+Charging, internal-pump activity, an apparent draw, implausible temperature or excessive blindness
+discards a candidate. A charge witness sustained for two minutes, or seen after an unmeasured gap,
+arms a 45-minute settling filter. A completed window at
+or above 0.8 K/h produces **NOTE** immediately. Other completed windows remain observations; no
+eligible window remains **CHECKING**. There is no reassuring tank-loss verdict or six-hour acceptance
+test. The result retains the maximum rate, completed/notable window counts and circulation correlation,
+not individual rates, an average or an energy integral.
 
-**Project boundary:** `0.8 K/h`, the 45-minute settling period, six clean hours, and the detectable
-upper range of about `1.85 K/h` are **project heuristics**, not Daikin limits or an implementation of
-the EU test method. So are the `120 s` and 10% unobserved-time bounds and the 5-second restart
-allowance, which is an assumed restart length rather than a measurement. A temperature drop in K/h
-is not directly comparable to a product-sheet loss in watts. The UI's kWh figure assumes
-`200 l ≈ 200 kg` of water, uniform whole-volume cooling, and the rounded `1.16 Wh/(kg·K)` heat
-capacity. It is an explanatory size example based on the greatest
-single R5T drop, not an additional measurement or a configured tank volume. Its 24-hour orientation
-then assigns that maximum to every clean window and assumes a domestic-hot-water COP of `2.5–3.0`.
-Both are explicit project assumptions chosen to show scale, not a measured efficiency or a
-manufacturer performance range. Rejected and missing hours are outside that illustration.
-The 24-hour line is suppressed until the report's `full_span` boundary is true; an early notable
-window can show only its one-hour thermal size example.
+Changing the circulation broker, mapping or interpretation retires DHW records and the ongoing
+filter, without discarding independent X10A checks. Display-name edits do not change evidence identity.
+A dated journal interval or one-shot restart candidate must match both scopes. See DHW_LOSS_* and
+the DhwLoss branch in [checkup.hpp](../main/logic/checkup.hpp); [PLANT.md](PLANT.md#reboot-and-persistence)
+owns the compatible-restart blind-time allowance and admission rules.
 
-**Not established:** A notable drop proves neither a leaking three-way valve nor poor insulation.
-Draws, stratification, thermosiphoning, a check valve, and external circulation can produce similar
-traces. The 45-minute settling period arms only after the board has seen two minutes of charge
-witness (the three-way valve on DHW or the booster heater on; a witness seen in the sample that
-closes a gap between samples longer than `CHECKUP_MAX_GAP_S`, or in the first sample after the
-check starts afresh, counts as two minutes). It counts down from the last sample that saw the
-charge, also through samples in which the valve and heater rows went unread (the unit not
-answering, or the board pausing its polling while it keeps sampling). A gap between samples longer
-than `CHECKUP_MAX_GAP_S` holds it, and so does an intentional restart whose handoff the next boot
-adopts. Anything that starts the check afresh drops it: a panic, a power loss, an intentional
-restart whose handoff the next boot rejects or no longer finds (for example after a firmware update
-that changes the stored layout or moves it in RAM), or a reset of the check (for example after a
-changed circulation-pump mapping or a repeated model detection). A charge seen for less than two
-minutes in total, such as one lying entirely inside an unread stretch, therefore arms no settling
-period; a charge whose end falls inside an unread stretch has its settling period shortened by the
-unread samples the board kept taking, and loses it entirely once those reach 45 minutes; and a
-settling period still running when the check starts afresh is lost. In each case the next
-candidate can open on the charge's settling tail, and a window completed there can report a
-settling artefact as a fast loss. A circulation label shows temporal correlation, not exclusive cause. `OK` also does not
-exclude faster continuous loss outside the detectable band. Because one point in a stratified tank
-does not establish uniform cooling and the individual window rates are not retained, the result
-establishes neither whole-tank/daily thermal kWh nor electrical kWh. The UI's multiplication is
-therefore labelled as the counterfactual case where every clean window equals the maximum; reading
-it as the actual 24-hour total would fabricate a measurement. A candidate hour discarded as `blind`
-(too much of it unobserved: R5T, or the valve, heater and pump rows from the other X10A page, went
-unread) does not establish an X10A link or wiring fault. Unobserved time comes from X10A timeouts
-and also from the board's own pauses, among them the network hold during a firmware update, a
-manual update check or a weather transfer, model detection (which also runs while the bus is
-dead), a poll cycle skipped after a caught exception, a UART that could not be started, and the
-allowance booked across a restart. The
-retained 24-hour aggregate keeps neither the source of that time nor a per-hour reason, only an
-OR-ed set of reason kinds. A day whose only recorded reason is `blind` therefore shows no
-plant-side discard reason but cannot tell a faulty link from a healthy one that was merely not
-being read.
+**Project boundary:** The 0.8 K/h threshold, 45-minute settling period, apparent-draw filter and
+roughly 1.85 K/h upper detection band are project heuristics, not Daikin limits or the EU test method.
+Candidates tolerate at most 120 seconds of one blind stretch and 10% blind time in total; blind
+seconds are excluded from observation coverage. Pump overlap needs at least 90% known circulation
+state and five minutes on; a pump-off label additionally requires two hours of known-off settling.
+These bounds describe this filter, not an identified physical cause.
+
+**Not established:** A single point in a stratified tank cannot measure whole-tank thermal loss,
+daily consumption or replacement electricity. Fast continuous cooling can be excluded as an apparent
+draw, so quiet accepted windows cannot rule out loss elsewhere. Draws, stratification, circulation,
+thermosiphoning and valve behaviour can produce similar traces; pump overlap is correlation.
+
+A charge hidden by unreadable data or a restart that loses the settling filter can admit a settling
+tail as apparent cooling. The two-minute charge guard also treats a charge witness at the first sample
+or after a long sample gap as sufficient to arm settling; a wholly unseen charge cannot arm it.
+Settling counts down through unread samples within the normal poll gap, but longer gaps hold it.
+Power loss, panic, identity changes and incompatible handoffs lose the filter. Discard totals retain
+only an OR-ed reason set, not per-hour provenance or dominant cause. Blindness may reflect bus
+timeouts or firmware pauses and establishes no wiring defect.
 
 <a id="diagnosis-cycling"></a>
 ### 3. Compressor cycling (`cycling`)
@@ -225,29 +168,29 @@ than about six minutes reduced efficiency in the tested systems, while heat emis
 control, and outside temperature also affected the result ([R1], summary and sections 1–2). This
 supports the relevance of very short runs but does not provide a universal Daikin limit.
 
-**Firmware rule:** The firmware counts complete compressor runs. When the three-way valve and
-operating mode remain readable throughout, it separates space heating, domestic hot water, and
-cooling. Heating-only assessment requires paired classification inputs for at least
-`CHECKUP_REQUIRED_S` (90% of the day), at least twelve classified runs across all three classes,
-and at least 90% of completed runs classified. Otherwise the result uses pooled compressor starts
-and run duration; hot-water or cooling runs can hide short heating runs, as the UI detail states.
-A **NOTE** requires at least twelve assessable runs averaging under ten minutes plus sufficient
-complete 24-hour compressor evidence. Mixed runs and runs interrupted by measurement gaps are
-censored from the classified assessment. The constants are
-`CHECKUP_CYCLING_MIN_STARTS`, `CHECKUP_CYCLING_SHORT_RUN_S`, and
-`CHECKUP_CYCLING_CLASSIFIED_PCT` in [`checkup.hpp`](../main/logic/checkup.hpp).
-Fresh X10A outdoor minimum/mean is attached only to completed, consistently classified
-space-heating runs. It is explanatory context and changes no threshold or verdict.
+**Firmware rule:** Starts and continuously witnessed completed runs are retained separately.
+Readable unchanged valve/mode inputs classify completed runs as space heating, DHW or cooling;
+mixed or gapped runs are censored. Only at least 12 completed space-heating runs and at least 90%
+of all completed runs classified can support the heating assessment. A mean below ten minutes then
+produces **NOTE** immediately. An absence-of-short-run assessment additionally requires a full
+24-hour span and at least CHECKUP_REQUIRED_S of paired classification time.
 
-**Project boundary:** Twelve runs and ten minutes are deliberately cautious **project heuristics**.
-They are neither copied from [R1] nor specified by Daikin. [R1] studied different, non-modulating
-units and supports only the general claim that short runs and system hydraulics can affect
-efficiency. The X10A page-`0x20` mapping and the positive-RPS freshness pairing are project
-evidence, not a published Daikin protocol guarantee.
+Missing classification, fewer than 12 heating runs or an inadequate classified population remains
+an observation with an explicit reason; absent compressor evidence remains CHECKING.
+There is no pooled starts/runtime fallback, and unfinished
+runs never enter the completed mean. Completed-run evidence ages with its start edge. See
+CHECKUP_CYCLING_MIN_STARTS, CHECKUP_CYCLING_SHORT_RUN_S and CHECKUP_CYCLING_CLASSIFIED_PCT in
+[checkup.hpp](../main/logic/checkup.hpp). Fresh X10A outdoor minimum/mean accompanies only accepted
+completed heating runs and changes no threshold.
 
-**Not established:** The note proves neither oversizing nor incorrect hydraulic balancing. Building
-load, weather, setpoints, and delivered heat are required to investigate a cause. The optional
-minimum/mean describes only accepted samples inside eligible runs, not continuous weather coverage.
+**Project boundary:** Twelve heating runs, ten minutes and the 90% evidence requirements are
+project heuristics, not limits copied from R1 or specified by Daikin. R1 studied different,
+non-modulating units and supports only the general relevance of short runs and system hydraulics.
+The page-0x20 mapping and positive-compressor freshness pairing are project protocol evidence.
+
+**Not established:** The note identifies neither oversizing nor incorrect hydraulic balancing.
+The observed run population and its outdoor context do not establish building load, delivered heat
+or continuous weather coverage.
 
 <a id="diagnosis-defrost"></a>
 ### 4. Defrost events (`defrost`)
@@ -257,26 +200,25 @@ commissioning must maintain minimum water flow during defrost and backup-heater 
 sections 8.4.8, 8.4.9, and 9.3–9.4). Experimental research shows that icing and defrost behaviour
 depend strongly on outside-air temperature, relative humidity, and heat-exchanger state ([R2]).
 
-**Firmware rule:** The diagnosis counts rising edges of `Defrost Operation`. It calculates a share
-only for periods in which both the defrost signal and compressor state were readable. A **NOTE**
-appears after at least three paired defrost events and when defrost exceeds **15%** of paired
-compressor runtime. `CHECKUP_DEFROST_MIN_COUNT` and `CHECKUP_DEFROST_SHARE_PCT` implement the rule in
-[`checkup.hpp`](../main/logic/checkup.hpp).
-Fresh X10A outdoor minimum/mean is collected over that same readable, running-compressor population;
-it is explanatory context and changes neither the ratio nor its verdict.
-The separately published live R4T de-icer temperature is not paired into the checkup population or
-verdict. Its sensor position and the unit's defrost start/end logic are model-specific, and one local
-reading cannot establish the whole coil's surface or ice state.
+**Firmware rule:** Rising edges count defrost starts. Defrost share uses only intervals with
+readable compressor and defrost states at both endpoints. At least three paired events and more
+than 15% of paired compressor runtime produce **NOTE** immediately. A reassuring assessment
+additionally requires a complete 24-hour span and 90% paired coverage. Fewer events or no paired
+runtime remain observations with a reason; no readable defrost observation remains CHECKING.
+Missing readings remain missing, not zero. See
+CHECKUP_DEFROST_MIN_COUNT and CHECKUP_DEFROST_SHARE_PCT in [checkup.hpp](../main/logic/checkup.hpp).
 
-**Project boundary:** The 15% share and three-event requirement are broad **project heuristics**, not
-Daikin limits. The firmware knows neither outdoor humidity nor the outdoor heat exchanger's surface
-or fin temperature. The X10A page-`0x20` mapping and the positive-RPS freshness pairing are project
-evidence, not a published Daikin protocol guarantee.
+Fresh X10A outdoor minimum/mean belongs to the same accepted running-compressor population and
+does not alter the rule. Separate live R4T de-icer temperature does not enter the population;
+its placement and the controller's defrost logic are model-specific.
 
-**Not established:** Frequent defrosting is not automatically abnormal in wet, cold weather. The row
-proves neither blocked airflow, low refrigerant charge, nor a sensor defect. The optional
-minimum/mean describes only accepted samples inside the paired runtime, not continuous weather
-coverage.
+**Project boundary:** The three-event requirement and 15% share are project heuristics, not Daikin
+limits. The page-0x20 mapping and positive-compressor freshness pairing are project evidence, not a
+published Daikin protocol guarantee. X10A supplies neither humidity nor whole-coil surface/ice state.
+
+**Not established:** Frequent defrost can be normal in cold, wet weather. Neither the share nor
+the optional outdoor context establishes blocked airflow, refrigerant shortage, sensor failure or
+continuous weather coverage.
 
 <a id="diagnosis-pressure"></a>
 ### 5. Lowest water pressure (`pressure`)
@@ -287,17 +229,21 @@ vessel, valve, and pre-pressure as checks ([D1], section 12.3.4, printed page 87
 manuals also state at least or above 1 bar, but the permitted filling and operating range remains
 model-specific ([D2], section 8.1.3).
 
-**Firmware rule:** The row reports the lowest valid value in the rolling window. At `<= 1.0 bar` it
-shows a **NOTE** immediately; only 60 seconds of uninterrupted low pressure promotes it to a
-**WARNING**. Confirmation does not alter the raw reading. See `CHECKUP_BAR_WARN_TENTHS` and
-`CHECKUP_PRESSURE_CONFIRM_S` in [`checkup.hpp`](../main/logic/checkup.hpp).
+**Firmware rule:** The accepted rolling minimum is retained unchanged, including zero. At or
+below 1.0 bar produces **NOTE**; at least 60 continuously observed seconds at that level produces
+**WARNING**. Confirmation requires readable endpoints and does not rewrite the minimum. The API
+publishes the observed-at timestamp only with synchronized wall time, current pressure only when
+the last fresh sample supplied it, and a separate confirmed-low flag. A reassuring result requires
+a full day and 90% readable pressure time. See CHECKUP_BAR_WARN_TENTHS and
+CHECKUP_PRESSURE_CONFIRM_S in [checkup.hpp](../main/logic/checkup.hpp).
 
-**Project boundary:** The one-minute confirmation is this project's transient filter and is not in
-the Daikin manual. The firmware uses 1.0 bar as a conservative common diagnostic boundary, not as
-the complete permitted range for every model.
+**Project boundary:** The one-minute confirmation is a project filter. The firmware's common
+1.0-bar threshold is a project diagnostic boundary, not every model's filling specification.
 
-**Not established:** Low pressure does not identify its cause. Refilling without investigation can
-hide an expansion-vessel problem, air, or water loss.
+**Not established:** A stored low or zero value does not identify water loss, air or an expansion-
+vessel problem. Its timestamp retains neither the raw frame nor the then-current validity context,
+and decoding acceptance does not establish sensor accuracy. A current normal reading cannot erase
+an earlier low observation or explain its cause.
 
 <a id="diagnosis-flow"></a>
 ### 6. Lowest water flow (`flow`)
@@ -307,16 +253,16 @@ the listed Altherma 3 R W units (sections 6.4.3, 9.4.1, and 12.4). An Altherma 3
 `25 l/min` or `22 l/min`, depending on the variant ([D2], section 8.1.3). One firmware-wide good/bad
 limit would therefore be incorrect.
 
-**Firmware rule:** The diagnosis reports only the lowest valid flow after the internal pump ran
-continuously for at least 60 seconds. It does not assign a good/bad verdict. See
-`CHECKUP_FLOW_RUNUP_S` and the `Flow` branch in [`checkup.hpp`](../main/logic/checkup.hpp).
+**Firmware rule:** The row reports the lowest accepted flow after the internal pump ran
+continuously for at least 60 seconds. It assigns no good/bad assessment. See CHECKUP_FLOW_RUNUP_S
+and the Flow branch in [checkup.hpp](../main/logic/checkup.hpp).
 
-**Project boundary:** The 60-second period filters pump start-up, valve movement, and air purging; it
-is not a manufacturer limit.
+**Project boundary:** Sixty seconds is a pump run-up filter, not a manufacturer limit. The filter
+does not establish part load or exclude later valve movements.
 
-**Not established:** The observed part-load minimum is not automatically the design flow required
-during a commissioning test. A comparison is valid only against the manual for the exact model
-combination and the same operating condition.
+**Not established:** The minimum has no retained operating-mode context and is not a design-flow
+measurement. It cannot be compared generally with a model manual's commissioning minimum or
+identify a hydraulic restriction.
 
 <a id="diagnosis-heater"></a>
 ### 7. Electric backup and booster heaters (`heater`)
@@ -328,13 +274,16 @@ emergency operation after a heat-pump failure ([D1], sections 8.4.6 and 8.4.9, p
 71–72). The manual also requires sufficient water flow during backup-heater and defrost operation
 ([D1], section 9.3).
 
-**Firmware rule:** The diagnosis separately totals active seconds for BUH steps 1/2 in the water
-circuit and BSH in the domestic-hot-water tank. The result remains **MEASURED ONLY** because weather,
-configuration, setpoints, and the operating reason are needed before runtime can be judged. See the
-`Heater` branch in [`checkup.hpp`](../main/logic/checkup.hpp).
+**Firmware rule:** The diagnosis separately totals observed active seconds for electric backup
+heater (BUH) steps in the water circuit and the tank booster heater (BSH). Usable runtime evidence
+is published immediately as **MEASURED ONLY**, without waiting for 24 hours. A zero applies only to
+readable observed intervals; unsupported or unreadable inputs remain null. Proving BUH off requires
+every profile-provided step to be readable; either readable active step proves on. See the Heater
+branch in [checkup.hpp](../main/logic/checkup.hpp).
 
-**Not established:** Runtime alone proves neither a defect nor unnecessary electricity use. An
-energy conclusion additionally needs electrical power and the heat delivered by the heater.
+**Not established:** Runtime alone establishes neither energy consumed, unnecessary use nor a
+defect. Electrical power, delivered heat and the controller's operating reason are not supplied by
+this counter.
 
 <a id="diagnosis-retries"></a>
 ### 8. Protection-limit counter changes (`retries`)
@@ -345,19 +294,21 @@ temperature, compressor inverter current, high pressure, low pressure, and inver
 including high pressure, compressor overheating, and inverter overcurrent, in its error-code table
 ([D1], section 12.4).
 
-**Firmware rule:** An event is reported only when the same exact counter **increases** between two
-comparable observed values. A non-zero counter present at startup is insufficient. All five counters
-and a readable compressor state are required. See `checkup_retry_index()`, `CHECKUP_RETRY_COUNT`, and
-the `Retries` branch in [`checkup.hpp`](../main/logic/checkup.hpp).
+**Firmware rule:** The same exact counter must increase between comparable readable endpoints.
+All profile-declared counters and the compressor state must be readable at both endpoints. A
+non-zero startup value is a baseline; a decrease invalidates the comparison. A usable comparison
+without an increase displays **EXPERIMENTAL**; a comparable increase displays **NOTE**. Both retain
+experimental evidence and appear without a day-long wait. The retained event flag does not identify
+which counter increased or when. See checkup_retry_index(),
+CHECKUP_RETRY_COUNT and the Retries branch in [checkup.hpp](../main/logic/checkup.hpp).
 
 **Experimental boundary:** Public Daikin documentation does not establish complete semantics for
-these five internal X10A counters, including reset behaviour, guaranteed counting rules, or causal
-assignment. The documentation therefore provides no manufacturer threshold, and the UI marks the
-row **EXPERIMENTAL**.
+the five X10A counters: reset/wrap behaviour, guaranteed event counting and causal assignment are
+unknown. No manufacturer threshold or health verdict is derived from their values.
 
-**Not established:** An increase is not a specific fault, and a stable counter does not prove that
-no protection limiting occurred. A cause requires the time, operating state, and official fault code
-together.
+**Not established:** An increase is not a specific fault, and no observed increase does not prove
+that protection limiting never occurred. Individual events, operating causes and limiting intensity
+cannot be reconstructed from the retained flag.
 
 ## Sources
 
@@ -400,14 +351,6 @@ together.
   [publisher page and abstract][R2-doi]. The study supports dependence on outdoor conditions, not
   this project's 15% heuristic.
 
-<a id="source-r3"></a>
-
-- **[R3]** J. Pátek, J. Hrubý, J. Klomfar, M. Součková, and A. H. Harvey,
-  *Reference Correlations for Thermophysical Properties of Liquid Water at 0.1 MPa*, Journal of
-  Physical and Chemical Reference Data 38(1), 2009, 21–29, DOI 10.1063/1.3043575:
-  [NIST publication page][R3-web] and [paper][R3-pdf]. Section used: table 8, liquid-water density
-  and isobaric heat capacity at 298.15 K. Reviewed **11 October 2026**.
-
 ## Maintenance rule
 
 A diagnosis change is not documentation-complete until this page still names the observation,
@@ -437,12 +380,9 @@ prove that a source is technically applicable; that remains the human part of th
 [E1]: #source-e1
 [R1]: #source-r1
 [R2]: #source-r2
-[R3]: #source-r3
 [D1-pdf]: https://my.daikin.eu/content/dam/document-library/Installer-reference-guide/heat/EHBH-D6V%2C%20EHBH-D9W%2C%20EHBX-D6V%2C%20EHBX-D9W%2C%20ERGA04-08DV%2C%20ERGA04-08DVA_4PEN496758-1B_2019_10_Installer%20reference%20guide_English.pdf
 [D2-pdf]: https://www.daikin.eu/content/dam/document-library/Installer-reference-guide/heat/air-to-water-heat-pump-high-temperature/epra14-18dw7/EPRA014-018D%28V.W%29.EPRA14-18D%28V.W%297.ETVH16UE6V%287%29_Installer%20reference%20guide_4PEN644738-1D_English.pdf
 [E1-web]: https://eur-lex.europa.eu/eli/reg/2013/814/oj/eng
 [R1-web]: https://www.gov.uk/government/publications/heat-pump-performance-effects-of-cycling
 [R1-pdf]: https://assets.publishing.service.gov.uk/media/5a78e0d9e5274a2acd18a7c6/7389-effects-cycling-heat-pump-performance.pdf
 [R2-doi]: https://doi.org/10.1016/j.applthermaleng.2009.01.003
-[R3-web]: https://www.nist.gov/publications/reference-correlations-thermophysical-properties-liquid-water-01-mpa
-[R3-pdf]: https://srd.nist.gov/jpcrdreprint/1.3043575.pdf

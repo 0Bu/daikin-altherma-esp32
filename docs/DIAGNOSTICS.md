@@ -1,207 +1,178 @@
 # Plant diagnostics in plain language
 
-<!-- user-docs-contract: a82282eb86cf82dde2f08478375478ed3944b93e895163e38cbc3d22893ddee7 -->
+<!-- user-docs-contract: 51b6d9404d292e048cc74f7d995291848f25bdc008068eacabda28c1c93fb4fe -->
 
 Plant diagnostics **reads measurements and counts events; it does not control the heat pump**.
-It is off by default. Enable **Plant diagnostics** under **Settings → Firmware** to start a new
-evidence window. Disabling clears the diagnosis and stops its additional room, forecast and
-circulation collection; ordinary X10A/HomeHub and device telemetry stay independent.
+It is off by default. Enable **Plant diagnostics** under **Settings → Firmware** to start an evidence
+window. Disabling clears this evidence and stops additional room, forecast and circulation collection.
 
-The **Plant diagnostics · 24 h** card appears below the schematic. Open a row for its reading,
-assessment and limitations. Its evidence does not necessarily identify a cause, so the card
-prescribes no plant action. Its bounded steps are to note recurring cleared unit messages, check
-X10A when fault rows are unreadable, compare pressure with the exact manual, and check wiring if
-the hot-water check loses needed readings day after day. Every check links to
-[DIAGNOSTIC_EVIDENCE.md](DIAGNOSTIC_EVIDENCE.md), which
-separates manufacturer/research evidence from project heuristics and exact firmware rules.
+The **Plant diagnostics · 24 h** card appears below the schematic. Open a row for its observation,
+meaning and limits. A rolling day does not imply that every signal was readable throughout it.
+The summary shows the highest finding severity and the number of affected rows. Without a finding,
+it distinguishes ongoing collection, measurements and completed assessments. It is not a score for
+the installation's health.
 
 ## What the statuses mean
 
 | Status | Meaning for this check |
 |---|---|
-| **OK** | Enough usable evidence, with nothing notable found. It does not certify the whole installation. |
-| **NOTE** | A notable observation; it is not proof of a defect. |
-| **WARNING** | A unit-reported fault or a sustained documented boundary violation. |
-| **CHECKING** | More hours or usable measurements are needed; missing evidence is not reassurance. |
-| **MEASURED ONLY** | A useful observation without a responsible universal good/bad limit. |
-| **EXPERIMENTAL** | Signal semantics are not fully documented; treat the result as a lead. |
-| **NOT AVAILABLE** | Required signals are unsupported or this operating sequence cannot supply reliable evidence. |
+| **OK** | The supported assessment found no notable pattern with the required evidence. It does not certify the installation. |
+| **NOTE** | A notable accepted observation or unit-reported warning; it does not identify a defect or cause. |
+| **WARNING** | A current unit-reported fault, or pressure confirmed continuously at or below the project's boundary during the window. |
+| **CHECKING** | A required day, signal coverage or eligible observation is missing. The detail names what is missing. |
+| **MEASURED ONLY** | A measurement or event population without enough evidence for a good/bad assessment. |
+| **EXPERIMENTAL** | A counter comparison whose complete manufacturer semantics are unknown. |
+| **NOT AVAILABLE** | The active profile does not supply the required signals. |
 
-Most reassuring results require a full 24-hour lifecycle and at least 90% readable coverage of that
-check's signals. Re-detection, changed X10A identity/pins or changed diagnosis-counter meaning starts
-a new window. Every boot retires completed RAM diagnosis hours. Only compatible, dated journal
-hours restore after clock synchronization and current-boot source confirmation; current readings
-take precedence. Open hours and unsaved completed hours are missing. Without eligible records,
-observation starts fresh. Restored evidence expires exactly 24 hours after its stored endpoint,
-including between hourly updates. An explicit profile/link reset cancels pending restore for that
-boot, even if the same profile is selected again.
+A reassuring day-based result needs both the full 24-hour span and at least 90% usable coverage
+of its own signals. Current fault state is separate. Missing or stale X10A data cannot establish a
+current all-clear; retained observations can still explain an earlier finding. Firmware pauses and
+timeouts reduce evidence without pretending that the profile no longer has the sensor.
 
-An intentional restart can preserve the DHW quiet-hour candidate and settling timer through a
-checked one-shot handoff. Power loss, crash, changed source or incompatible format cannot. Restart
-plus startup through source confirmation counts as blind time: exceeding either two minutes of
-continuous blindness or 10% of the hour including earlier gaps starts the candidate over. That restart
-discard does not increment the discarded-hour count; later unread-data discards do. See
-[PLANT.md](PLANT.md#reboot-and-persistence) for the exact handoff and restoration limits.
+Completed hours can return after a restart only from compatible dated flash records and current
+source confirmation. Open and unsaved hours may be lost. Whole hourly records expire when their
+beginning leaves the rolling day, even if polling stops. Changed X10A identity or incompatible
+diagnosis format starts fresh collection; changing the independent circulation witness clears only
+tank-cooling evidence.
+The current format cannot reuse older diagnosis intervals or restart handoffs; trend history has
+a separate compatibility contract. See [PLANT.md](PLANT.md#reboot-and-persistence).
 
-Five-minute trends are separate: they cannot reconstruct complete compressor runs or quiet tank
-hours. This is passive ordinary-operation evidence, not a commissioning test or controlled
-full-load refrigerant examination.
-
-Browser trends/pinned points clear on source changes or deletion; older replies cannot restore
-them. A reboot starts a new browser lifetime even if the device restores saved trends. Per-row
-state ages are separate: normal poll cadence is observed, known update/forecast/memory pauses,
-the resumed tail and adopted restart/startup time are blind. More than two minutes of blindness
-through the returning sample starts a new age. The v4 format rejects older records, so an update
-can restart ages without proving a plant-state change. The weather companion's two-hour window
-is fixed at the last successful fetch until the next success.
+These are passive ordinary-operation observations. Five-minute trends cannot reconstruct complete
+compressor runs or quiet tank hours, and a day of observations is not a controlled commissioning test.
+[DIAGNOSTIC_EVIDENCE.md](DIAGNOSTIC_EVIDENCE.md) separates external facts from project rules;
+[REPORTING.md](REPORTING.md) describes available reports.
 
 ## What is checked?
 
 <!-- user-docs: health_fault -->
 ### Unit-reported faults
 
-**In plain language:** The board remembers faults, warnings and cautions reported by the heat pump.
-A cleared report can remain visible for up to 24 hours.
+**In plain language:** The board reads the heat pump's supported fault, warning and caution classes.
+An earlier reported event remains visible for up to 24 hours.
 
-**Meaning:** This is the unit's own report, rather than a project inference from a temperature.
+**Meaning:** A current fault produces **WARNING**. A past event remains a **NOTE**. If the current
+rows are unreadable, the board cannot establish that an earlier fault has cleared.
 
-**Important limit:** A clear report does not establish that every component is fault-free.
+**Important limit:** No supported fault class reported is not proof that every component is healthy.
+The observation establishes neither a cause nor why a message stopped appearing.
 
 **Evidence and limits:** [Unit-reported faults](DIAGNOSTIC_EVIDENCE.md#diagnosis-fault)
 
 <!-- user-docs: health_dhw_loss -->
-### Domestic-hot-water tank heat loss
+### Domestic-hot-water tank cooling
 
-**In plain language:** The board measures tank-sensor R5T cooling over complete quiet hours, excluding
-charging and evident hot-water draws. The displayed K/h is the **greatest completed-hour drop**, not
-an average. An optional circulation-power witness labels whether that pump was electrically operating
-during a notable window; correlation does not prove that it caused the whole drop.
+**In plain language:** The board measures the temperature drop at tank sensor R5T during eligible
+one-hour windows. It displays the largest completed-hour drop, the completed window count and
+how many reached the project's **0.8 K/h** note threshold.
 
-**Meaning:** A **NOTE** starts at **0.8 K/h**, a project heuristic from one installation, not a Daikin
-limit. Tank volume and tank-to-room temperature difference affect the rate. A reassuring result needs
-six clean hours in a full 24-hour lifecycle. The method can recognize notable clean-hour losses only
-up to about **1.85 K/h**; faster continuous cooling can resemble a draw and discard the hour.
+**Meaning:** At least one such window produces **NOTE**. Other completed windows are **MEASURED
+ONLY**; no eligible window means **CHECKING**. There is no green tank-loss result. An optional
+circulation-power witness shows how many notable windows overlapped electrical pump operation or
+had a sufficiently observed pump-off state.
 
-**Important limit:** **OK** excludes no faster loss outside that detection band. **NOT AVAILABLE**
-after repeated discarded candidates cannot identify their dominant cause: charging, pump activity,
-draws, unreadable data and continuous loss resembling a draw cannot be separated from the retained
-totals. R5T measures one point in a stratified tank; rapid cooling proves neither a leaking three-way
-valve nor poor insulation.
+**Important limit:** Charging, pump activity, apparent draws and missing readings exclude time. Fast
+continuous cooling above about **1.85 K/h** can resemble a draw and be excluded too. One sensor
+in a stratified tank does not measure whole-tank heat or electricity loss, and pump overlap does not
+prove a cause. An unobserved charge or lost settling filter can affect the first accepted window.
 
-An unobserved charge, update or unexpected restart can lose the settling filter, making the next
-hour look like fast loss; its first **NOTE is weaker evidence than a repeating NOTE**. Missing tank,
-valve, heater or pump readings can come from bus timeouts or firmware pauses for OTA, weather,
-network work, detection or restart. They do not by themselves prove faulty wiring.
-Changing circulation topic, paths, maximum age, thresholds or confirmation time resets this check;
-renaming it does not. **CHECKING** afterwards says nothing about the tank.
-
-**The kWh illustration:** The expanded row assumes **200 litres of water cooling uniformly**:
-`200 kg × 1.16 Wh/(kg·K) × displayed K = Wh`. At 1.6 K in one hour this is about **0.37 kWh of
-thermal energy**. It is a size example, not a measured whole-tank loss; tank volume is not configured.
-
-After the report actually spans 24 hours, the second line deliberately assigns the maximum rate to
-**every clean window**. With 18 windows at an assumed 1.6 K/h maximum:
-`18 h × 1.6 K/h × 200 kg × 1.16 Wh/(kg·K) = 6.68 kWh` thermal. Assuming DHW COP **2.5–3.0** gives
-about **2.23–2.67 kWh** replacement electricity, or 6.68 kWh with direct electric heating at COP 1.
-The actual per-window rates are not retained, R5T is not whole-tank calorimetry, and the other six
-hours are outside the example. It establishes **neither actual daily loss nor daily consumption**.
-The full-day illustration is withheld for an early partial report.
-
-**Evidence and limits:** [Tank heat loss](DIAGNOSTIC_EVIDENCE.md#diagnosis-dhw-loss)
+**Evidence and limits:** [Tank cooling](DIAGNOSTIC_EVIDENCE.md#diagnosis-dhw-loss)
 
 <!-- user-docs: health_cycling -->
 ### Compressor cycling
 
-**In plain language:** The compressor moves heat to a useful temperature level. The board counts
-starts and complete runs, separating space heating, DHW and cooling where continuous valve/mode
-signals permit it. Only confirmed space-heating runs decide the classified short-run assessment.
+**In plain language:** The board counts starts and completed compressor runs. Continuous valve and
+mode readings separate space heating, domestic hot water (DHW) and cooling; uncertain or mixed runs
+remain unclassified.
 
-**Meaning:** `17 starts · space 16 × 5 min · hot water 1 × 2 h` means sixteen complete heating runs
-averaging five minutes plus one two-hour DHW run. “Cooling … excluded” is identified cooling outside
-the heating assessment; “unclassified” means a mode change or gap prevented safe assignment.
-A **NOTE** requires at least twelve assessed runs averaging under ten minutes and sufficient
-complete-day evidence. A classified assessment needs at least **90% readable classification time**,
-**12 classified complete runs** and **90% of complete runs classified**. Only heating runs then
-decide the result. Otherwise all runs are pooled. These are project heuristics, not Daikin limits.
+**Meaning:** At least **12 completed space-heating runs**, with at least **90% of all completed runs
+classified**, can carry the assessment. An average below **10 minutes** produces **NOTE** as soon as
+this population exists. **OK** additionally needs a full day and 90% readable classification time.
+Smaller or insufficiently classified populations are **MEASURED ONLY**, with the reason shown;
+no usable compressor observation remains **CHECKING**.
 
-**Important limit:** Very short runs alone do not identify oversizing, hydraulic imbalance or another
-cause. Where classified evidence is insufficient the documented pooled fallback can mask short heating
-runs with DHW/cooling; the status states which population carried the verdict. Optional fresh
-`X10A min … °C · mean … °C` describes accepted heating-run outdoor context only. It changes neither
-the ten-minute rule nor the result, and an absent suffix never means 0 °C.
+**Important limit:** There is no pooled all-mode assessment, and an unfinished long run cannot dilute
+completed short runs. Twelve runs and ten minutes are project heuristics, not Daikin limits. These
+figures do not identify oversizing or hydraulic imbalance. Optional outdoor min/mean is context for
+accepted heating runs only.
 
 **Evidence and limits:** [Compressor cycling](DIAGNOSTIC_EVIDENCE.md#diagnosis-cycling)
 
 <!-- user-docs: health_defrost -->
 ### Defrost events
 
-**In plain language:** In suitable cold, humid conditions the outdoor heat exchanger ices up and the
-heat pump briefly defrosts it. The board counts events and their share of compressor runtime during
-which both signals were readable.
+**In plain language:** The board counts observed defrost starts and the seconds spent defrosting
+while the compressor and defrost signals were both readable.
 
-**Meaning:** At least three assessable events and more than **15%** paired defrost runtime produces a
-**NOTE**. Both numbers are project heuristics, not Daikin limits.
+**Meaning:** At least **three paired events** and more than **15%** defrost share produce **NOTE**.
+Both are project heuristics. Fewer events or no paired compressor runtime remain **MEASURED ONLY**;
+no readable defrost observation remains **CHECKING**.
+A reassuring assessment additionally needs a full day and 90% paired signal coverage.
 
-**Important limit:** X10A does not supply outdoor humidity or the whole coil's surface/ice state.
-Frequent defrost can be normal; this row establishes neither low refrigerant nor blocked airflow.
-Optional fresh X10A outdoor min/mean is context only. Live **R4T de-icer** temperature is also context,
-with model-specific placement; it does not enter this 24-hour population or verdict.
+**Important limit:** Temperature, humidity and coil icing affect normal defrost needs. These signals
+do not establish blocked airflow, refrigerant shortage or a sensor defect. Outdoor min/mean and the
+separate live de-icer temperature provide context, without changing the rule.
 
 **Evidence and limits:** [Defrost events](DIAGNOSTIC_EVIDENCE.md#diagnosis-defrost)
 
 <!-- user-docs: health_pressure -->
 ### Lowest water pressure
 
-**In plain language:** The row reports the lowest valid water pressure in the observed window.
+**In plain language:** The board reports the lowest accepted pressure, its time when the clock was
+synchronized, and the current pressure if the latest observation supplied it.
 
-**Meaning:** At or below **1.0 bar** gives a **NOTE**; sixty uninterrupted seconds at that level gives a
-**WARNING**. The transient confirmation is a project filter.
+**Meaning:** An accepted minimum at or below **1.0 bar** produces **NOTE**. At least **60 continuously
+observed seconds** at or below that boundary produce **WARNING**. This is a common project boundary and filter,
+not the complete permitted range for every Daikin model.
 
-**Important limit:** The exact permitted pressure range is model-specific. A low reading does not
-identify water loss, air or an expansion-vessel problem; this one common boundary is not a complete
-filling specification.
+**Important limit:** A stored zero remains an accepted reading requiring interpretation; it is not
+converted into missing data or proof of water loss. The stored timestamp does not retain the raw
+frame or establish sensor accuracy. Current pressure is absent when unreadable or stale; a current
+normal value does not erase an earlier low reading.
 
 **Evidence and limits:** [Lowest water pressure](DIAGNOSTIC_EVIDENCE.md#diagnosis-pressure)
 
 <!-- user-docs: health_flow -->
 ### Lowest water flow
 
-**In plain language:** The board reports the lowest valid flow after the internal pump has run
-continuously for at least sixty seconds, excluding start-up and pump-off readings.
+**In plain language:** The board reports the lowest accepted flow after the internal pump has run
+continuously for at least sixty seconds.
 
-**Meaning:** **MEASURED ONLY** is deliberate. Required flow varies by exact model and heating, cooling,
-DHW or defrost operating state.
+**Meaning:** The result is **MEASURED ONLY**. It filters pump-off and initial run-up values; it does
+not establish part load or retain the operating mode of the minimum.
 
-**Important limit:** This is an observed **part-load minimum**, not a manual's nominal/design flow.
-Compare a manual minimum only for the same model, operating mode and conditions. One low reading
-without a unit fault proves little.
+**Important limit:** Required flow differs by model, heating, cooling, DHW and defrost conditions.
+The minimum is not a design-flow measurement or a diagnosis of restricted flow.
 
 **Evidence and limits:** [Lowest water flow](DIAGNOSTIC_EVIDENCE.md#diagnosis-flow)
 
 <!-- user-docs: health_heater -->
 ### Electric backup and booster heaters
 
-**In plain language:** The board separately counts active time for the water-circuit electric backup
-heater (**BUH**) and tank electric booster heater (**BSH**).
+**In plain language:** The board separately counts observed active seconds for the water-circuit
+electric backup heater (**BUH**) and tank electric booster heater (**BSH**).
 
-**Meaning:** These are runtime observations. Weather, DHW schedules, defrost, emergency mode and
-PV-surplus control can make that activity intentional.
+**Meaning:** **MEASURED ONLY** appears as soon as there is readable runtime evidence; it does not
+wait for a full day. A reported zero applies only to the observed intervals. A missing heater signal
+remains absent, rather than being counted as off.
 
-**Important limit:** Runtime alone establishes neither energy consumed nor a defect; it does not
-identify why the controller used a heater.
+**Important limit:** Runtime does not establish electricity consumed, necessity or a defect.
+Controller settings, weather and operating schedules can make this activity intentional.
 
 **Evidence and limits:** [Electric heaters](DIAGNOSTIC_EVIDENCE.md#diagnosis-heater)
 
 <!-- user-docs: health_retries -->
 ### Protection-limit counter changes
 
-**In plain language:** The board observes five internal counters that may indicate protective limiting.
-Only a clearly observed comparable increase counts.
+**In plain language:** The board compares five internal counters at consecutive readable endpoints,
+with a known compressor state. Only a comparable increase counts as an observed event.
 
-**Meaning:** The row is **EXPERIMENTAL** because full manufacturer semantics are not public.
+**Meaning:** A usable comparison without an increase shows **EXPERIMENTAL**; a comparable increase
+shows **NOTE**. Both retain experimental evidence and appear without a full-day wait. A non-zero
+startup value is a baseline, and a decrease has no established reset or wrap interpretation.
 
-**Important limit:** An increase is not a fault diagnosis. No increase does not prove that the unit
-never limited itself; a decrease has no established wrap/reset interpretation.
+**Important limit:** An increase does not identify a fault; no observed increase does not prove that
+protection limiting never occurred. The retained event flag cannot reconstruct individual counter
+changes or their cause.
 
 **Evidence and limits:** [Protection-limit changes](DIAGNOSTIC_EVIDENCE.md#diagnosis-retries)
 

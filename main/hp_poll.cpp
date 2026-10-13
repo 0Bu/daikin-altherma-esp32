@@ -850,7 +850,7 @@ static void poll_task(void*) {
             retire_saturation_witness();
             s_network_quiesced.store(true, std::memory_order_release);
             const uint32_t generation = hp_poll_generation();
-            checkup_record(nullptr, 0, false, false, logic::CheckupCoverage{}, generation);
+            checkup_record(nullptr, 0, false, false, logic::CheckupCoverage{}, generation, false);
             dwell_record(nullptr, 0, generation);
             refrigerant_service_record_poll_gap(generation);
             esp_task_wdt_reset();  // explicit on the held path; keep this true if code moves above it
@@ -936,11 +936,11 @@ static void poll_task(void*) {
             failures.succeeded();
         } catch (const std::exception& e) {
             retire_saturation_witness();
-            // Count every skipped cycle and retire its coverage, even when this failure episode
+            // Count every skipped cycle as unread, even when this failure episode
             // has already been logged. The bounded diagnostic ring does not allocate.
             s_cycles_skipped.fetch_add(1, std::memory_order_relaxed);
             const uint32_t generation = hp_poll_generation();
-            checkup_record(nullptr, 0, false, false, logic::CheckupCoverage{}, generation);
+            checkup_record(nullptr, 0, false, false, logic::CheckupCoverage{}, generation, false);
             dwell_record(nullptr, 0, generation);
             refrigerant_service_record_poll_gap(generation);
             if (failures.first_failure()) diag_printf("poll: cycle skipped (%s)\n", e.what());
@@ -948,7 +948,7 @@ static void poll_task(void*) {
             retire_saturation_witness();
             s_cycles_skipped.fetch_add(1, std::memory_order_relaxed);
             const uint32_t generation = hp_poll_generation();
-            checkup_record(nullptr, 0, false, false, logic::CheckupCoverage{}, generation);
+            checkup_record(nullptr, 0, false, false, logic::CheckupCoverage{}, generation, false);
             dwell_record(nullptr, 0, generation);
             refrigerant_service_record_poll_gap(generation);
             if (failures.first_failure()) diag_printf("poll: cycle skipped (oom?)\n");

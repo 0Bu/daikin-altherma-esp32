@@ -286,9 +286,23 @@ assert.match(explicitReset, /s_model_fp = 0;/);
 const detect = body(checkup, "void checkup_reset_on_detect(");
 assert.match(detect, /s_source_confirmed = source_fp != 0;/);
 assert.match(detect, /s_boot_handoff\.source_fp == source_fp/);
+assert.match(detect, /s_boot_handoff\.dhw_source_fp == s_dhw_source_fp/,
+  "an intentional restart cannot revive a candidate from a replaced circulation witness");
 assert.match(detect, /!s_reset_requested\.load\(\) && !s_dhw_reset_requested\.load\(\)/);
 assert.match(detect, /s_boot_handoff_valid = false;/);
 assert.match(body(checkup, "void checkup_reboot_save()"), /h\.payload\.pending = logic::DhwLossBucket\{\};/);
+assert.match(body(checkup, "void checkup_reboot_save()"), /h\.payload\.dhw_source_fp = s_dhw_source_fp;/);
+const circulationIdentity = body(checkup, "uint32_t circulation_identity()");
+assert.match(circulationIdentity, /with_config\(/);
+for (const field of ["mqtt_uri", "circulation_topic", "circulation_power_path", "circulation_time_path",
+  "circulation_max_age_s", "circulation_on_tenths_w", "circulation_off_tenths_w", "circulation_confirm_s"])
+  assert.ok(circulationIdentity.includes("c." + field), "DHW witness identity must include " + field);
+assert.doesNotMatch(circulationIdentity, /config\(\)|circulation_name/,
+  "the identity must not copy Config or change when a display name changes");
+const dhwReset = body(checkup, "bool apply_dhw_reset_locked()");
+assert.match(dhwReset, /P\(\)\.dhw\.head = P\(\)\.ring\.head;/);
+assert.match(dhwReset, /P\(\)\.dhw\.count = P\(\)\.ring\.count;/,
+  "DHW-only reset keeps the shared hourly geometry and unrelated persistence writable");
 const cFlash = body(checkup, "CheckupFlashRestoreResult checkup_flash_restore(");
 assert.match(explicitReset, /s_persist_verdict = logic::CheckupRestore::ModelChanged;/);
 assert.match(cFlash, /if \(logic::checkup_flash_restore_retired\(s_persist_verdict\)\) return CheckupFlashRestoreResult::Ignored;/);
@@ -297,6 +311,9 @@ assert.ok(cFlash.indexOf("checkup_flash_restore_retired") < cFlash.indexOf("chec
 assert.match(cFlash, /checkup_flash_source_ready/);
 assert.match(cFlash, /checkup_journal_restore_admits/);
 assert.match(cFlash, /checkup_journal_select_slot/);
+assert.match(cFlash,
+  /cb = rec->payload\.checkup; if \(!s_dhw_reset_requested\.load\(\) && logic::checkup_journal_dhw_identity_matches\(rec->payload, s_dhw_source_fp\)\) db = rec->payload\.dhw;/,
+  "a mismatched circulation mapping must retire DHW alone, while admitting dated X10A checks");
 const noMaterialized = cFlash.indexOf("if (!materialized)");
 assert.ok(noMaterialized >= 0 && noMaterialized < cFlash.indexOf("P().ring.reset();"),
   "zero selected flash intervals must not rebuild the ring or report restoration");
@@ -308,4 +325,40 @@ assert.match(cFlash, /s_persist_verdict = logic::CheckupRestore::Flash;/);
 assert.doesNotMatch(cFlash, /s_persist_verdict = logic::CheckupRestore::Accept/);
 assert.match(body(checkup, "logic::CheckupReport checkup_report()"), /expire_restored_locked\(\);/);
 assert.match(body(checkup, "void expire_restored_locked()"), /checkup_restored_expired/);
+const cRecord = body(checkup, "void checkup_record(");
+assert.match(cRecord, /if \(profile_confirmed\) s_cov = coverage;/,
+  "temporary empty cycles must not overwrite the current profile's capabilities");
+assert.match(cRecord, /if \(n\) s_source_last_us = now;/,
+  "empty callbacks must not renew successful source observation age");
+assert.match(cRecord,
+  /const int64_t completed_start_us = completed_end_us - static_cast<int64_t>\(logic::CHECKUP_DT_S\) \* 1000000LL;/,
+  "completed-hour expiry must use the bucket start, matching ordinary ring replacement");
+assert.match(cRecord, /s_restored_expiry_us\[committed_i\] = logic::checkup_live_expiry_us\(completed_start_us\);/,
+  "a stalled producer cannot keep completed findings for an extra hour");
+const cReport = body(checkup, "logic::CheckupReport checkup_report()");
+assert.match(cReport, /source_fresh \? s_fault_now : FaultClass::Unknown/,
+  "the last cycle's fault class must not masquerade as a current observation after a stall");
+assert.match(cReport, /logic::checkup_apply_freshness\(report, source_fresh, source_age_s, span_s\);/,
+  "the pure freshness policy receives read-time source age and actual lifecycle span");
+assert.match(cReport,
+  /if \(source_fresh && !s_dhw_reset_requested\.load\(\)\) \{[^}]*report\.dhw_candidate_s = p\.candidate_observed_s;[^}]*report\.dhw_settle_remaining_s = p\.settle_remaining_s;/,
+  "candidate and settling progress require a fresh source, not just retained filter state");
+assert.match(cReport,
+  /logic::checkup_apply_freshness\(report, source_fresh, source_age_s, span_s\); return report; \}$/,
+  "no later report population may reintroduce current state after the freshness gate");
+assert.match(body(checkup, "void expire_restored_locked()"),
+  /const int64_t pending_start_us = static_cast<int64_t>\(s_state\.bucket\) \* logic::CHECKUP_DT_S \* 1000000LL;/,
+  "open-hour expiry must use the bucket start, not rejuvenating it at the last sample");
+assert.match(body(checkup, "void expire_restored_locked()"),
+  /if \(s_state\.have_bucket && s_state\.last_us >= 0 && logic::checkup_restored_expired\(logic::checkup_live_expiry_us\(pending_start_us\), now_us\)\)/,
+  "the open hour needs a valid bucket and the same start-based expiry during a producer stall");
+assert.match(body(checkup, "void expire_restored_locked()"),
+  /P\(\)\.ring\.pending = logic::CheckupBucket\{\};[\s\S]*changed = true; \} if \(changed\) persist_seal\(\);/,
+  "pending-only expiry must reseal even when no completed slot expired");
+const emptyCallback = /checkup_record\(nullptr, 0, false, false, logic::CheckupCoverage\{\}, generation, false\);/g;
+assert.equal(count(task, emptyCallback), 3,
+  "the TLS hold and both OOM handlers preserve resolved profile capabilities");
+assert.equal(count(task,
+  /checkup_record\(nullptr, 0, false, false, logic::CheckupCoverage\{\}, generation\);/g), 1,
+  "the unidentified-profile path still explicitly withdraws profile capability");
 console.log("history restore guard contract: ok");

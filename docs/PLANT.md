@@ -27,60 +27,36 @@ not imply that an auxiliary topic is currently being published.
 
 ## Rolling plant checkup (up to 24 h)
 
-The checkup counts faults, tank quiet-hour cooling, compressor runs, defrost events, water-pressure
-minima, water flow after pump run-up, electric-heater activity and protection-counter changes.
-[DIAGNOSTICS.md](DIAGNOSTICS.md) is the owner guide; [DIAGNOSTIC_EVIDENCE.md](DIAGNOSTIC_EVIDENCE.md)
-is authoritative for sources, exact thresholds and claim limits.
+The checkup observes unit fault classes, tank cooling, compressor runs, defrost, pressure, flow,
+heater activity and experimental counter changes. [DIAGNOSTICS.md](DIAGNOSTICS.md) explains the
+results; [DIAGNOSTIC_EVIDENCE.md](DIAGNOSTIC_EVIDENCE.md) owns thresholds and claim boundaries.
 
-Events are evaluated once per completed X10A sweep. A pulse entirely between sweeps can be missed.
-Five-minute trends retain a final value/aggregated state and cannot reconstruct complete compressor
-runs or clean tank hours, so they are not reused as diagnosis evidence.
+Each completed X10A sweep contributes only the rows it read. Integrated state time requires readable
+endpoints and bounded gaps; a pulse entirely between sweeps can still be missed. Five-minute trends
+cannot reconstruct completed runs or quiet tank hours and are not reused as diagnosis evidence.
+Temporary allocation/TLS pauses preserve profile capabilities while adding no observed time.
 
-Supported inputs with insufficient evidence remain `collecting`; unsupported checks are
-`unavailable`. Most absence-of-pattern conclusions require a complete lifecycle and at least 90%
-valid evidence for that check's signals. The card's overall `ok` means only that the bounded
-assessable checks found nothing notable. It is not an overall plant-health certificate. Direct
-fault state, observation-only flow/heater runtime and experimental retry changes have different
-claim strengths and must be read separately.
+Read-time source age, elapsed lifecycle span and per-signal coverage are separate facts. A stopped
+producer cannot retain a current all-clear. Historical findings remain age-bounded; observation-only rows
+do not become reassuring health results. The overall verdict uses eligible bounded assessments;
+tank-cooling notes and experimental events can independently raise its severity. The badge counts
+warning or note rows, as explained in [DIAGNOSTICS.md](DIAGNOSTICS.md).
 
 ### Evidence population
 
-Compressor cycling separates **complete runs** into heating, DHW and cooling when valve/mode
-signals stay readable and unchanged throughout. Mixed/gapped runs are censored; a run already
-active at boot or still active now is not complete. Only heating enters the classified short-run
-judgement. Classification requires at least **90% readable classification time**, **12 classified
-complete runs** and **90% of completed runs classified**. Otherwise the assessment pools all runs,
-which can mask short heating runs with DHW/cooling. `/status` identifies the assessed population;
-class counts remain observations. Complete-run facts age with their start, not stop edge.
+Cycling uses completed continuously classified heating runs; DHW, cooling, mixed and unfinished
+runs cannot dilute that mean. An insufficient heating/classification population remains a neutral
+observation with an explicit reason. Defrost uses its own paired compressor/defrost population.
+Optional outdoor min/mean belongs only to each accepted population and changes no verdict.
 
-Cycling/defrost outdoor minimum and mean use fresh X10A outdoor samples paired with their own
-accepted running-compressor population. Unknown compressor speed is not permission to call a
-page-0x20 response fresh. These temperatures are context and never change a verdict.
+Tank cooling retains completed/notable window counts, the greatest accepted one-hour R5T drop and
+optional circulation correlation. Rejected windows and their OR-ed reason set explain filter
+limitations, not a defect or dominant cause. There is no tank-energy calculation or green loss
+assessment. A hidden charge or lost settling filter can affect the next candidate.
 
-Tank-loss evidence requires complete quiet hours after the documented settling period. Observed
-charging, pump movement, draws and implausible readings interrupt a candidate; bounded unreadable
-time is tracked as blind time and excluded from observed seconds. Excessive gaps discard it.
-The result retains the greatest completed-hour R5T cooling rate, window count and bounded circulation
-correlation, not each hour's rate or a measured energy integral.
-
-Charging witnessed for at least two minutes arms a 45-minute settling period. Charging partly or
-wholly hidden by unreadable data may not arm it; restarting without a compatible handoff loses it.
-The first quiet-hour **NOTE after an update, unobserved charge or unexpected restart is therefore
-weaker evidence than a repeating NOTE**: tank settling can resemble rapid loss. Unreadable tank,
-valve, heater or pump inputs can result from the bus or from firmware pauses for OTA, weather,
-network work, detection, memory pressure or restart. Blind time does not establish a wiring defect.
-
-A full lifecycle with no clean hour and at least six discarded candidates becomes `blocked`
-(visible as **NOT AVAILABLE**). `aborts`, the set of `abort_reasons` and `best_aborted_s` explain
-that limit but cannot establish which cause dominated or reconstruct individual rejected hours.
-Even `blind` as the sole recorded reason proves only that no plant-side cause was recorded for a
-live candidate; a longer gap can hide charging or draws after that candidate ends. Settling normally
-counts down through unread samples, but a sample gap past `CHECKUP_MAX_GAP_S` holds it. Charge
-witnesses seen across such a gap are treated as proven; a short or unseen charge remains a limit.
-Changing circulation topic, value paths, maximum age, on/off thresholds or confirmation time starts
-this DHW check over; changing its display name alone does not. **CHECKING** after that edit says
-nothing about the tank. The [tank-loss guide](DIAGNOSTICS.md#domestic-hot-water-tank-heat-loss) explains the method's limited
-cooling-rate band and why its kWh example is not actual tank/day consumption.
+The independent circulation witness's broker, topic, value/time paths, maximum age, thresholds and
+confirmation time bind the DHW evidence identity. Editing them clears only that check and its
+ongoing filter; renaming it does not. Its empty post-edit window says nothing about the tank.
 
 ### Reboot and persistence
 
@@ -88,12 +64,17 @@ The window holds 23 completed one-hour buckets plus the pending hour, at most 24
 **Every boot retires completed `.noinit` diagnosis hours and undated open counters.** Completed hours
 can restore only from compatible, dated history-journal records after clock synchronization and
 **current-boot confirmation of the full X10A source**. Records bind endpoint, full profile/link scope,
-diagnostics-consent generation, layout/threshold fingerprint and CRC. Old unscoped formats are
-rejected; a cached model guess cannot admit records. The open hour and completed hours not yet saved
-are missing.
+diagnostics-consent generation, layout/threshold fingerprint and CRC. DHW additionally binds the
+circulation configuration; a mismatch empties only its bucket, preserving independent X10A evidence.
+Old unscoped formats are rejected; a cached model guess cannot admit records. The open hour and
+completed hours not yet saved are missing.
 
-Current observations take precedence. Compatible hours must fit the window and expire **exactly
-24 hours after their stored endpoint**, even between hourly updates. `/status.health.persist` names
+Current observations take precedence. A whole completed or open hour expires when its beginning
+leaves the rolling day, even if polling stops. A completed record therefore lasts at most 23 hours
+after its endpoint, matching ordinary ring replacement. This is hourly event bookkeeping, not exact
+event reconstruction: a completed tank-cooling window can use an initial temperature from the
+preceding bucket. Later clock corrections do not renew an already assigned monotonic deadline;
+read-time span cannot fabricate observation coverage. `/status.health.persist` names
 `flash_pending` while confirmation is awaited (not proof that saved hours exist), `flash` after
 reconstruction, or `fresh` when no stored intervals were selected, including precedence/capacity
 exclusions. Startup refusal reasons remain explicit. An explicit profile/link reset retires pending
@@ -102,10 +83,12 @@ the X10A lifecycle. Safe mode and disabled diagnostics admit no old hours; unide
 empty samples advance time without booking observations.
 
 An intentional restart can carry only the ongoing tank-loss filter through a separately sealed
-**one-shot handoff**, adopted after the same full source is confirmed with diagnostics enabled and
-no reset requested. It preserves the quiet-hour candidate/settling timer, never undated completed
-counters or transient compressor edges. Power loss, crash, changed source or incompatible/absent
-format starts a fresh filter.
+**one-shot handoff**, adopted after the same full X10A and circulation scopes are confirmed with
+diagnostics enabled and no reset requested. It preserves the quiet-hour candidate/settling timer,
+never undated completed counters or transient compressor edges. Power loss, crash, changed source
+or incompatible/absent format starts a fresh filter. The current bucket geometry changes the diagnosis journal fingerprint,
+so previous-format hourly records are rejected; handoff v3 also rejects v2. Trend-journal sources
+remain independently compatible.
 
 Adoption books **five seconds plus all new-boot uptime through source confirmation as blind time**.
 Together with earlier gaps, exceeding either two minutes of continuous blindness or 10% of the

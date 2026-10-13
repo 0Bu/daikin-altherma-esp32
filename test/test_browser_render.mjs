@@ -333,13 +333,15 @@ async function clickDisclosure(page, selector) {
   })()`);
 }
 
-async function captureNativeEvidence(page, context, target = "valueGroups") {
+async function captureNativeEvidence(page, context, target = "valueGroups", ancestor = null) {
   const directory = process.env.DAIKIN_BROWSER_EVIDENCE_DIR;
   if (!directory || !/^(desktop\/en|phone\/de)(\/|$)/.test(context)) return;
   assert.ok(path.isAbsolute(directory), "browser evidence directory must be absolute");
   fs.mkdirSync(directory, { recursive: true });
   const clip = await page.evaluate(`(() => {
-    const rect = document.getElementById(${JSON.stringify(target)}).getBoundingClientRect();
+    const element = ${ancestor ? `document.querySelector(${JSON.stringify(target)}).closest(${JSON.stringify(ancestor)})`
+                              : `document.getElementById(${JSON.stringify(target)})`};
+    const rect = element.getBoundingClientRect();
     return { x: rect.left + scrollX, y: rect.top + scrollY,
       width: rect.width, height: rect.height, scale: 1 };
   })()`);
@@ -347,6 +349,95 @@ async function captureNativeEvidence(page, context, target = "valueGroups") {
     { format: "png", captureBeyondViewport: true, clip });
   fs.writeFileSync(path.join(directory, `${context.replaceAll("/", "-")}.png`),
     Buffer.from(capture.data, "base64"));
+}
+
+async function assertPlantDiagnosis(page, context) {
+  // Exercise the shipped renderer with independently scoped observations, including a real zero,
+  // an absent heater channel and stale-source evidence. These fixtures do not certify a plant.
+  await page.evaluate(`(() => {
+    window.__browserDiagnosisOriginal = { status: S.status, open: new Set(S.descOpen) };
+    S.status = structuredClone(S.status);
+    S.status.health = {
+      status: "info", full_span: true, span_s: 86400, source_fresh: true, source_age_s: 1,
+      available: 8, assessable: 2, evaluated: 2,
+      checks: [
+        { id: "fault", verdict: "ok", evidence: "manufacturer", active: 0 },
+        { id: "dhw_loss", verdict: "info", evidence: "heuristic", max_k_h: 1,
+          windows: 4, high_windows: 1, high_with_pump: 1, high_pump_off: 0,
+          observed_s: 14285, required_s: 3600, circulation_known_s: 14285,
+          circulation_on_s: 3600, aborts: 3, abort_reasons: ["draw", "charge", "blind"],
+          best_aborted_s: 2400 },
+        { id: "cycling", verdict: "ok", evidence: "observation", reason: "class_unavailable",
+          starts: 17, mean_run_s: null, space_runs: null, censored_runs: 3,
+          observed_s: 77760, required_s: 77760 },
+        { id: "defrost", verdict: "ok", evidence: "observation",
+          reason: "defrost_events_insufficient", count: 0, paired_count: 0,
+          share_pct: null, defrost_s: 0, run_s: 7200 },
+        { id: "pressure", verdict: "info", evidence: "heuristic", min_bar: 0,
+          current_bar: 1.5, min_unix_s: 1791871200, confirmed_low: false,
+          observed_s: 77760, required_s: 77760 },
+        { id: "flow", verdict: "ok", evidence: "observation", min_l_min: 10.7,
+          observed_s: 60, required_s: 0 },
+        { id: "heater", verdict: "ok", evidence: "observation", buh_s: 59,
+          bsh_s: null, buh_observed_s: 7200, bsh_observed_s: 0,
+          observed_s: 7200, required_s: 0 },
+        { id: "retries", verdict: "ok", evidence: "experimental", seen: 0,
+          observed_s: 7200, required_s: 0 }
+      ]
+    };
+    S.descOpen.clear();
+    renderApp();
+    return true;
+  })()`);
+  try {
+    const selector = "[data-desc^='model:health_']";
+    assert.equal(await page.evaluate(`document.querySelectorAll(${JSON.stringify(selector)}).length`), 8,
+      `${context}: all eight diagnosis rows must render`);
+    await captureNativeEvidence(page, `${context}/overview`,
+      "[data-desc='model:health_pressure']", ".card");
+    const selectors = await page.evaluate(`Array.from(document.querySelectorAll(${JSON.stringify(selector)}),
+      el => '[data-desc="' + el.dataset.desc + '"]')`);
+    for (const row of selectors) await clickDisclosure(page, row);
+    // The real pointer lifecycle protects the accordion for 600ms after release. Polling is
+    // stopped in this fixture, so wait for that protection before explicitly repainting new data.
+    await page.waitFor("S.clickHold === false");
+    await page.frame();
+    assertLayout(await page.evaluate(layoutAudit), `${context}/expanded`);
+    await assertAccessibility(page, `${context}/expanded`, { nativeTree: true });
+    assert.equal(await page.evaluate(`document.querySelector("[data-desc='model:health_pressure']")
+      .closest('.card').querySelector('.section-badge')?.innerText || ''`),
+      await page.evaluate("t('check.summary.notes', 2)"),
+      `${context}: badge counts findings rather than assessed fractions`);
+    await captureNativeEvidence(page, `${context}/expanded`);
+    for (const id of ["pressure", "dhw_loss", "cycling", "defrost"])
+      await captureNativeEvidence(page, `${context}/${id}`,
+        `[data-desc='model:health_${id}']`, ".vitem");
+    await page.evaluate(`(() => {
+      const h = S.status.health;
+      h.source_fresh = false;
+      h.source_age_s = 120;
+      h.checks[0] = { id: 'fault', verdict: 'collecting', evidence: 'manufacturer',
+        reason: 'source_stale', active: null };
+      h.checks[4].current_bar = null;
+      renderApp();
+      return true;
+    })()`);
+    await page.frame();
+    assertLayout(await page.evaluate(layoutAudit), `${context}/stale`);
+    assert.equal(await page.evaluate(`document.querySelector("[data-desc='model:health_fault'] .vrow-val").innerText`),
+      await page.evaluate("t('check.status.collecting')"),
+      `${context}: stale current fault state cannot render an all-clear`);
+    await captureNativeEvidence(page, `${context}/stale`);
+  } finally {
+    await page.evaluate(`(() => {
+      S.status = window.__browserDiagnosisOriginal.status;
+      S.descOpen = window.__browserDiagnosisOriginal.open;
+      delete window.__browserDiagnosisOriginal;
+      renderApp();
+      return true;
+    })()`);
+    await page.frame();
+  }
 }
 
 async function assertNativeAltherma4(page, context) {
@@ -708,6 +799,21 @@ try {
     await openModalWithKeyboard(page, "refTempModal", modalTriggers.refTempModal,
       "selftest/desktop/de/refTempModal", { route: false });
     throw new Error("route-isolation-bypass mutation unexpectedly survived the route gate");
+  } else if (process.argv.includes("--diagnosis-only")) {
+    // A focused rendering pass for diagnosis-copy iterations. The default full matrix below and
+    // the supervisor's independent mutation controls remain unchanged.
+    for (const viewport of viewports) {
+      await page.viewport(viewport.width, viewport.height);
+      for (const locale of browserLocales) {
+        await activateLocale(page, locale);
+        await page.evaluate("showStage('dashboard'); window.scrollTo(0, 0); true");
+        await page.frame();
+        await assertPlantDiagnosis(page, `${viewport.name}/${locale}/diagnosis`);
+        console.log(`diagnosis render checked: ${viewport.name}/${locale}`);
+      }
+    }
+    assert.deepEqual(page.diagnostics, [], "diagnosis states must emit no browser errors");
+    console.log(`focused diagnosis rendering passed: ${browserLocales.length} locales; ${viewports.length} viewports`);
   } else {
 
   // Full semantic matrix: every shipped locale, both supported viewport classes, both views and
@@ -733,6 +839,7 @@ try {
       await page.frame();
       assertLayout(await page.evaluate(layoutAudit), `${viewport.name}/${locale}/dashboard`);
       await assertAccessibility(page, `${viewport.name}/${locale}/dashboard`, { nativeTree: true });
+      await assertPlantDiagnosis(page, `${viewport.name}/${locale}/diagnosis`);
       await assertNativeAltherma4(page, `${viewport.name}/${locale}/native-altherma4`);
       nativeAltherma4Checks++;
 

@@ -1286,32 +1286,45 @@ static void append_status_json(JsonOut& j, bool redact) {
     {
         const logic::CheckupReport hr = checkup_report();
         j += "\"health\":{\"covered_s\":";
-        j += std::to_string(hr.covered_s);
+        append_json_uint(j, hr.covered_s);
+        j += ",\"span_s\":";
+        append_json_uint(j, hr.span_s);
+        j += ",\"source_fresh\":";
+        j += hr.source_fresh ? "true" : "false";
+        j += ",\"source_age_s\":";
+        if (hr.source_age_s == UINT32_MAX)
+            j += "null";
+        else
+            append_json_uint(j, hr.source_age_s);
         // How this boot's WINDOW came to be, for the reason the trends report it one block up:
         // "flash_pending" awaits clock/source confirmation without proving stored hours exist;
         // "fresh" means no stored intervals were selected, including live/capacity precedence,
         // and "flash" means actual absolute-age journal reconstruction. Completed RAM hours never
         // cross a restart; other slugs retain the startup integrity/consent refusal for diagnosis.
         j += ",\"persist\":";
-        j += jstr(checkup_persist_state());
+        json_append_quoted(j, checkup_persist_state());
         j += ",\"full_span\":";
         j += hr.full_span ? "true" : "false";
         j += ",\"available\":";
-        j += std::to_string(hr.available);
+        append_json_uint(j, hr.available);
         j += ",\"assessable\":";
-        j += std::to_string(hr.assessable);
+        append_json_uint(j, hr.assessable);
         j += ",\"evaluated\":";
-        j += std::to_string(hr.evaluated);
+        append_json_uint(j, hr.evaluated);
         j += ",\"status\":";
-        j += jstr(logic::checkup_verdict_name(hr.overall));
+        json_append_quoted(j, logic::checkup_verdict_name(hr.overall));
         j += ",\"checks\":[";
         // An integer field, or null when the check did not establish it.
-        auto num = [&j](const char* name, int v) {
+        // Keep one implementation of the many nullable integer fields in the compact image.
+        auto num = [&j](const char* name, int v) __attribute__((noinline)) {
             j += ",\"";
             j += name;
             j += "\":";
-            if (v < 0) { j += "null"; return; }
-            j += std::to_string(v);
+            if (v < 0) {
+                j += "null";
+                return;
+            }
+            append_json_uint(j, static_cast<unsigned>(v));
         };
         // The same, for a value the converters produce in TENTHS of its unit (bar, l/min) — printed
         // with its one decimal so the browser never has to know the scale. Mirrors kw_field below.
@@ -1319,34 +1332,46 @@ static void append_status_json(JsonOut& j, bool redact) {
             j += ",\"";
             j += name;
             j += "\":";
-            if (v < 0) { j += "null"; return; }
-            j += std::to_string(v / 10);
+            if (v < 0) {
+                j += "null";
+                return;
+            }
+            append_json_uint(j, static_cast<unsigned>(v / 10));
             j += ".";
-            j += std::to_string(v % 10);
+            append_json_uint(j, static_cast<unsigned>(v % 10));
         };
         auto signed_tenths = [&j](const char* name, bool known, int v) {
             j += ",\"";
             j += name;
             j += "\":";
-            if (!known) { j += "null"; return; }
+            if (!known) {
+                j += "null";
+                return;
+            }
             if (v < 0) j += "-";
             const unsigned magnitude = static_cast<unsigned>(v < 0 ? -v : v);
-            j += std::to_string(magnitude / 10);
+            append_json_uint(j, magnitude / 10);
             j += ".";
-            j += std::to_string(magnitude % 10);
+            append_json_uint(j, magnitude % 10);
         };
         auto outdoor_context = [&j, &signed_tenths](const logic::CheckupOutdoorReport& context) {
             const bool known = context.samples > 0;
             j += ",\"outdoor_source\":";
-            j += known ? jstr(logic::outdoor_source_name(context.source)) : "null";
+            if (known)
+                json_append_quoted(j, logic::outdoor_source_name(context.source));
+            else
+                j += "null";
             signed_tenths("outdoor_min_c", known, context.min_tenths);
             signed_tenths("outdoor_mean_c", known, context.mean_tenths);
             j += ",\"outdoor_samples\":";
-            j += known ? std::to_string(context.samples) : "null";
+            if (known)
+                append_json_uint(j, context.samples);
+            else
+                j += "null";
         };
         // Compatibility minutes cannot represent a positive sub-minute runtime without lying as
-        // zero or rounding up. Emit null for that one interval; the additive *_s fields preserve the
-        // observed seconds accumulated between completed sweeps.
+        // zero or rounding up. Emit null for that one interval; the additive *_s fields preserve
+        // the observed seconds accumulated between completed sweeps.
         auto whole_minutes = [](int seconds) {
             if (seconds < 0 || (seconds > 0 && seconds < 60)) return -1;
             return seconds / 60;
@@ -1356,93 +1381,109 @@ static void append_status_json(JsonOut& j, bool redact) {
             const auto& ck = hr.checks[i];
             if (i) j += ",";
             j += "{\"id\":";
-            j += jstr(logic::checkup_check_id(id));
+            json_append_quoted(j, logic::checkup_check_id(id));
             j += ",\"evidence\":";
-            j += jstr(logic::checkup_result_evidence_name(id, ck));
+            json_append_quoted(j, logic::checkup_result_evidence_name(id, ck));
             j += ",\"verdict\":";
-            j += jstr(logic::checkup_verdict_name(ck.verdict));
+            json_append_quoted(j, logic::checkup_verdict_name(ck.verdict));
+            j += ",\"reason\":";
+            json_append_quoted(j, logic::checkup_reason_name(ck.reason));
             j += ",\"observed_s\":";
-            j += std::to_string(ck.observed_s);
+            append_json_uint(j, ck.observed_s);
             j += ",\"required_s\":";
-            j += std::to_string(ck.required_s);
-            // Named per check rather than a generic pair: the browser must not have to carry a table
-            // that says what `a` means for which id — that table would be a second definition of the
-            // check, free to drift from this one.
+            append_json_uint(j, ck.required_s);
+            // Named per check rather than a generic pair: the browser must not have to carry a
+            // table that says what `a` means for which id — that table would be a second definition
+            // of the check, free to drift from this one.
             switch (id) {
-                case logic::CheckupCheck::DhwLoss:
-                    tenths("max_k_h", ck.a);
-                    num("windows", ck.b);
-                    num("high_windows", ck.c);
-                    num("high_with_pump", ck.d);
-                    num("high_pump_off", ck.e);
-                    num("circulation_on_s", ck.f);
-                    num("circulation_known_s", ck.g);
-                    j += ",\"candidate_s\":";
-                    j += std::to_string(hr.dhw_candidate_s);
-                    j += ",\"settle_remaining_s\":";
-                    j += std::to_string(hr.dhw_settle_remaining_s);
-                    j += ",\"aborts\":";
-                    j += std::to_string(hr.dhw_aborts);
-                    j += ",\"best_aborted_s\":";
-                    j += std::to_string(hr.dhw_best_aborted_s);
-                    j += ",\"blocked\":";
-                    j += hr.dhw_blocked ? "true" : "false";
-                    // NAMES, not the raw mask: the browser would otherwise carry a copy of the bit
-                    // meanings, which is a second definition of the rule free to drift from
-                    // checkup.hpp's. Appended one literal at a time (the stack budget this builder
-                    // is measured against — AGENTS.md → Memory, concurrency, and HTTP safety).
-                    j += ",\"abort_reasons\":[";
-                    {
-                        bool first = true;
-                        for (uint8_t bit : {logic::DHW_ABORT_CHARGE, logic::DHW_ABORT_PUMP,
-                                            logic::DHW_ABORT_DRAW, logic::DHW_ABORT_READING,
-                                            logic::DHW_ABORT_BLIND}) {
-                            if (!(hr.dhw_abort_reasons & bit)) continue;
-                            if (!first) j += ",";
-                            first = false;
-                            j += jstr(logic::dhw_abort_reason_name(bit));
-                        }
+            case logic::CheckupCheck::DhwLoss:
+                tenths("max_k_h", ck.a);
+                num("windows", ck.b);
+                num("high_windows", ck.c);
+                num("high_with_pump", ck.d);
+                num("high_pump_off", ck.e);
+                num("circulation_on_s", ck.f);
+                num("circulation_known_s", ck.g);
+                j += ",\"candidate_s\":";
+                append_json_uint(j, hr.dhw_candidate_s);
+                j += ",\"settle_remaining_s\":";
+                append_json_uint(j, hr.dhw_settle_remaining_s);
+                j += ",\"aborts\":";
+                append_json_uint(j, hr.dhw_aborts);
+                j += ",\"best_aborted_s\":";
+                append_json_uint(j, hr.dhw_best_aborted_s);
+                j += ",\"blocked\":";
+                j += hr.dhw_blocked ? "true" : "false";
+                // NAMES, not the raw mask: the browser would otherwise carry a copy of the bit
+                // meanings, which is a second definition of the rule free to drift from
+                // checkup.hpp's. Appended one literal at a time (the stack budget this builder
+                // is measured against — AGENTS.md → Memory, concurrency, and HTTP safety).
+                j += ",\"abort_reasons\":[";
+                {
+                    bool first = true;
+                    for (uint8_t bit :
+                         {logic::DHW_ABORT_CHARGE, logic::DHW_ABORT_PUMP, logic::DHW_ABORT_DRAW,
+                          logic::DHW_ABORT_READING, logic::DHW_ABORT_BLIND}) {
+                        if (!(hr.dhw_abort_reasons & bit)) continue;
+                        if (!first) j += ",";
+                        first = false;
+                        json_append_quoted(j, logic::dhw_abort_reason_name(bit));
                     }
-                    j += "]";
-                    break;
-                case logic::CheckupCheck::Cycling:
-                    // The pooled pair stays first and keeps its names: it is still the day's total,
-                    // and a consumer written before the split reads exactly what it always did. The
-                    // class figures count COMPLETED RUNS — `null` until one was actually witnessed,
-                    // never 0, because a zero beside real starts reads as "no space heating ran".
-                    // `split` says which of the two decided the verdict; the reader cannot infer it.
-                    num("starts", ck.a);
-                    num("mean_run_s", ck.b);
-                    num("space_runs", ck.c);
-                    num("space_mean_run_s", ck.d);
-                    num("dhw_runs", ck.e);
-                    num("dhw_mean_run_s", ck.f);
-                    num("cooling_runs", hr.cycling_cooling_runs);
-                    num("censored_runs", ck.g);
-                    j += ",\"split\":";
-                    j += hr.cycling_split ? "true" : "false";
-                    outdoor_context(hr.cycling_outdoor);
-                    break;
-                case logic::CheckupCheck::Defrost: {
-                    num("count", ck.a);
-                    num("paired_count", ck.e);
-                    // The legacy whole-percent field cannot express a positive share below 1%.
-                    num("share_pct", ck.c > 0 && ck.b == 0 ? -1 : ck.b);
-                    num("defrost_s", ck.c);
-                    num("run_s", ck.d);
-                    outdoor_context(hr.defrost_outdoor);
-                    break;
                 }
-                case logic::CheckupCheck::Pressure: tenths("min_bar", ck.a);                        break;
-                case logic::CheckupCheck::Flow:     tenths("min_l_min", ck.a);                      break;
-                case logic::CheckupCheck::Heater:
-                    num("buh_min", whole_minutes(ck.a));
-                    num("bsh_min", whole_minutes(ck.b));
-                    num("buh_s", ck.a);
-                    num("bsh_s", ck.b);
-                    break;
-                case logic::CheckupCheck::Fault:    num("active", ck.a);                            break;
-                case logic::CheckupCheck::Retries:  num("seen", ck.a);                              break;
+                j += "]";
+                break;
+            case logic::CheckupCheck::Cycling:
+                // Keep legacy names; the pooled mean is null. Only complete heating runs judge.
+                num("starts", ck.a);
+                num("mean_run_s", ck.b);
+                num("space_runs", ck.c);
+                num("space_mean_run_s", ck.d);
+                num("dhw_runs", ck.e);
+                num("dhw_mean_run_s", ck.f);
+                num("cooling_runs", hr.cycling_cooling_runs);
+                num("censored_runs", ck.g);
+                j += ",\"split\":";
+                j += hr.cycling_split ? "true" : "false";
+                outdoor_context(hr.cycling_outdoor);
+                break;
+            case logic::CheckupCheck::Defrost: {
+                num("count", ck.a);
+                num("paired_count", ck.e);
+                // The legacy whole-percent field cannot express a positive share below 1%.
+                num("share_pct", ck.c > 0 && ck.b == 0 ? -1 : ck.b);
+                num("defrost_s", ck.c);
+                num("run_s", ck.d);
+                outdoor_context(hr.defrost_outdoor);
+                break;
+            }
+            case logic::CheckupCheck::Pressure:
+                tenths("min_bar", ck.a);
+                tenths("current_bar", hr.pressure_current_tenths);
+                j += ",\"min_unix_s\":";
+                if (hr.pressure_min_unix_s)
+                    append_json_uint(j, hr.pressure_min_unix_s);
+                else
+                    j += "null";
+                j += ",\"confirmed_low\":";
+                j += ck.b > 0 ? "true" : "false";
+                break;
+            case logic::CheckupCheck::Flow:
+                tenths("min_l_min", ck.a);
+                break;
+            case logic::CheckupCheck::Heater:
+                num("buh_min", whole_minutes(ck.a));
+                num("bsh_min", whole_minutes(ck.b));
+                num("buh_s", ck.a);
+                num("bsh_s", ck.b);
+                num("buh_observed_s", ck.c);
+                num("bsh_observed_s", ck.d);
+                break;
+            case logic::CheckupCheck::Fault:
+                num("active", ck.a);
+                break;
+            case logic::CheckupCheck::Retries:
+                num("seen", ck.a);
+                break;
             }
             j += "}";
         }

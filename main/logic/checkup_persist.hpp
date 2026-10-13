@@ -7,7 +7,8 @@
 // RAM-only completed hours and undated open-hour counters can therefore be lost on a restart.
 //
 // Each journal payload carries the detected profile, the existing X10A profile/pins/protocol
-// target fingerprint, consent generation and exact interval end. The layout fingerprint binds
+// target fingerprint, independent circulation configuration, consent generation and exact interval
+// end. A circulation change retires only the tank-cooling evidence. The layout fingerprint binds
 // the bucket geometry, row locators and counting thresholds. Old unscoped records fail closed.
 // A unit swap that leaves the detected profile and link unchanged remains indistinguishable.
 //
@@ -143,6 +144,8 @@ inline uint32_t checkup_fp_loc(uint32_t crc, const CheckupLocator& l) {
 // name, which is exactly the substitution a CRC cannot see.
 inline uint32_t checkup_layout_fingerprint() {
     uint32_t crc = CONFIG_CRC32_INIT;
+    // Endpoint-qualified duration accounting and completed-heating-only assessment.
+    crc = checkup_fp_u32(crc, 2u);
     crc = checkup_fp_u32(crc, static_cast<uint32_t>(sizeof(CheckupBucket)));
     crc = checkup_fp_u32(crc, static_cast<uint32_t>(sizeof(DhwLossBucket)));
     crc = checkup_fp_u32(crc, static_cast<uint32_t>(sizeof(CheckupRing)));
@@ -205,6 +208,32 @@ inline uint32_t checkup_model_fingerprint(const char* profile_id) {
     return config_crc32_final(crc);
 }
 
+// The electrical circulation witness is independently configured. Its broker, value/time mapping
+// and interpretation must survive a reboot unchanged before yesterday's correlation can return.
+// A display name is intentionally absent: it changes neither the instrument nor its measurements.
+// Null and empty strings represent the same unconfigured field. Delimit every string so adjacent
+// field contents cannot alias; no allocation or credential copy is needed at the firmware caller.
+inline uint32_t checkup_dhw_source_fingerprint(const char* broker, const char* topic,
+                                               const char* power_path, const char* time_path,
+                                               uint32_t max_age_s, uint16_t on_tenths_w,
+                                               uint16_t off_tenths_w, uint32_t confirm_s) {
+    uint32_t      crc = CONFIG_CRC32_INIT;
+    const uint8_t nul = 0;
+    for (const char* field : {broker, topic, power_path, time_path}) {
+        size_t n = 0;
+        if (field)
+            while (field[n]) ++n;
+        if (n) crc = config_crc32_update(crc, reinterpret_cast<const uint8_t*>(field), n);
+        crc = config_crc32_update(crc, &nul, 1);
+    }
+    crc               = checkup_fp_u32(crc, max_age_s);
+    crc               = checkup_fp_u32(crc, on_tenths_w);
+    crc               = checkup_fp_u32(crc, off_tenths_w);
+    crc               = checkup_fp_u32(crc, confirm_s);
+    const uint32_t fp = config_crc32_final(crc);
+    return fp ? fp : 1; // zero remains the unsupported legacy identity
+}
+
 // ── Durable hourly journal payload ───────────────────────────────────────────────────────────────
 // history_persist.hpp owns the common 256-byte slot/header protocol; this header owns what the
 // diagnostic bytes MEAN.  `end_unix_s` is the exact end of the measured one-hour interval, not only
@@ -213,6 +242,7 @@ inline uint32_t checkup_model_fingerprint(const char* profile_id) {
 struct CheckupJournalPayload {
     uint32_t model_fp = 0;
     uint32_t source_fp = 0; // full detected X10A profile/link identity; zero is unsupported legacy
+    uint32_t dhw_source_fp          = 0; // independent circulation source/mapping/interpretation
     uint32_t diagnostics_generation = 0;
     int64_t end_unix_s = -1;
     CheckupBucket checkup;
@@ -240,6 +270,8 @@ inline uint32_t checkup_journal_fingerprint() {
     crc = checkup_fp_u32(crc, static_cast<uint32_t>(sizeof(CheckupJournalPayload)));
     crc = checkup_fp_u32(crc, static_cast<uint32_t>(offsetof(CheckupJournalPayload, model_fp)));
     crc = checkup_fp_u32(crc, static_cast<uint32_t>(offsetof(CheckupJournalPayload, source_fp)));
+    crc =
+        checkup_fp_u32(crc, static_cast<uint32_t>(offsetof(CheckupJournalPayload, dhw_source_fp)));
     crc = checkup_fp_u32(
         crc, static_cast<uint32_t>(offsetof(CheckupJournalPayload, diagnostics_generation)));
     crc = checkup_fp_u32(crc, static_cast<uint32_t>(offsetof(CheckupJournalPayload, end_unix_s)));
@@ -252,12 +284,14 @@ inline constexpr int64_t checkup_journal_bucket(int64_t end_unix_s) {
     return end_unix_s >= 0 ? end_unix_s / static_cast<int64_t>(CHECKUP_DT_S) : INT64_MIN;
 }
 
-// A completed interval contributes while any part of its one-hour extent can still be inside the
-// rolling day. Future records are refused rather than slid to now; a stale record after a long power
-// outage is valid flash, but no longer current diagnostic evidence.
+// Keep a whole completed interval only while its beginning remains inside the rolling day.
+// This matches 23 completed slots plus one open slot, including when the producer stops.
+// Future records are refused rather than slid to now. Derived results belong to the bucket
+// where they are recorded; their contributing samples can precede that bucket (e.g. DHW cooling).
+constexpr uint32_t    CHECKUP_RECORD_MAX_AGE_S = CHECKUP_WINDOW_S - CHECKUP_DT_S;
 inline constexpr bool checkup_journal_in_window(int64_t end_unix_s, int64_t now_unix_s) {
     return end_unix_s >= 0 && now_unix_s >= 0 && end_unix_s <= now_unix_s &&
-           end_unix_s > now_unix_s - static_cast<int64_t>(CHECKUP_WINDOW_S);
+           end_unix_s > now_unix_s - static_cast<int64_t>(CHECKUP_RECORD_MAX_AGE_S);
 }
 
 // Only buckets completed in THIS boot have the current monotonic-to-wall-clock anchor. After a
@@ -280,10 +314,11 @@ inline constexpr int64_t checkup_journal_next_live_bucket(int64_t after_bucket,
 // is consumed once at startup; applying its compatible filter waits for current-source
 // confirmation.
 inline constexpr uint32_t CHECKUP_DHW_HANDOFF_MAGIC   = 0x57484443u; // "CDHW" little-endian
-inline constexpr uint16_t CHECKUP_DHW_HANDOFF_VERSION = 2;
+inline constexpr uint16_t CHECKUP_DHW_HANDOFF_VERSION = 3;
 
 struct DhwLossHandoffPayload {
     uint32_t      source_fp = 0; // bound independently from profile and consent
+    uint32_t      dhw_source_fp = 0; // bound to the circulation configuration across the restart
     DhwLossCarry  candidate;
     DhwLossBucket pending; // reserved layout field; undated completed counters retire on restart
 };
@@ -306,6 +341,7 @@ inline uint32_t checkup_dhw_handoff_crc(uint32_t model_fp,
     uint32_t crc = CONFIG_CRC32_INIT;
     crc = checkup_fp_u32(crc, model_fp);
     crc                   = checkup_fp_u32(crc, p.source_fp);
+    crc                   = checkup_fp_u32(crc, p.dhw_source_fp);
     const DhwLossCarry& c = p.candidate;
     crc = checkup_fp_u32(crc, c.segment_elapsed_s);
     crc = checkup_fp_u32(crc, c.draw_anchor_age_s);
@@ -364,6 +400,14 @@ inline bool checkup_journal_identity_matches(const CheckupJournalPayload& p, uin
            p.diagnostics_generation == generation;
 }
 
+// A changed circulation witness must not throw away unrelated X10A-backed checks. The caller can
+// admit the dated record above and substitute an empty DHW bucket when this independent scope
+// fails.
+inline bool checkup_journal_dhw_identity_matches(const CheckupJournalPayload& p,
+                                                 uint32_t                     dhw_source_fp) {
+    return dhw_source_fp != 0 && p.dhw_source_fp == dhw_source_fp;
+}
+
 // Actual production admission for both stored and current-boot records. A cached startup scope
 // and a withdrawn source are expectations, never confirmation; absent clock uses the -1 sentinel.
 inline constexpr bool checkup_flash_source_ready(bool confirmed, uint32_t model_fp,
@@ -406,17 +450,20 @@ checkup_journal_select_slot(int64_t wanted, const CheckupJournalRecord* live, si
     return nullptr;
 }
 
-// Reconstructed slots, including selected live intervals, have monotonic deadlines independent of
-// the next boot-raster boundary and later SNTP corrections. Zero marks gaps or ordinary live slots
-// that still age through the hourly ring. Equality expires: end <= now - 24 h.
+// Every completed slot has a monotonic deadline independent of producer liveness, the next
+// boot-raster boundary and later SNTP corrections. Zero marks gaps. Equality expires.
 inline constexpr bool checkup_restored_expired(int64_t expiry_us, int64_t now_us) {
     return expiry_us > 0 && now_us >= expiry_us;
+}
+inline constexpr int64_t checkup_live_expiry_us(int64_t start_us) {
+    if (start_us < 0) return 0;
+    return start_us > INT64_MAX - CHECKUP_WINDOW_US ? INT64_MAX : start_us + CHECKUP_WINDOW_US;
 }
 inline constexpr int64_t checkup_restore_expiry_us(int64_t end_unix_s, int64_t now_unix_s,
                                                    int64_t now_us) {
     if (now_us < 0 || !checkup_journal_in_window(end_unix_s, now_unix_s)) return 0;
     const int64_t remaining_us =
-        (static_cast<int64_t>(CHECKUP_WINDOW_S) - (now_unix_s - end_unix_s)) * 1000000LL;
+        (static_cast<int64_t>(CHECKUP_RECORD_MAX_AGE_S) - (now_unix_s - end_unix_s)) * 1000000LL;
     return now_us > INT64_MAX - remaining_us ? INT64_MAX : now_us + remaining_us;
 }
 } // namespace daik::logic
