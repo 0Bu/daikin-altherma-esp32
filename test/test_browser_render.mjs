@@ -428,6 +428,42 @@ async function assertPlantDiagnosis(page, context) {
       await page.evaluate("t('check.status.collecting')"),
       `${context}: stale current fault state cannot render an all-clear`);
     await captureNativeEvidence(page, `${context}/stale`);
+    // The production pump-off case is collecting flow in a partial day. Pressure still needs
+    // the day; a flow observation needs eligible pump runtime and must not inherit that wait.
+    await page.evaluate(`(() => {
+      S.status.health = {
+        status: 'collecting', full_span: false, span_s: 900,
+        source_fresh: true, source_age_s: 1, available: 2, assessable: 1, evaluated: 0,
+        checks: [
+          { id: 'pressure', verdict: 'collecting', evidence: 'heuristic', reason: 'input_coverage',
+            min_bar: 1.5, current_bar: 1.5, min_unix_s: 1791871200, confirmed_low: false,
+            observed_s: 900, required_s: 77760 },
+          { id: 'flow', verdict: 'collecting', evidence: 'observation', reason: 'input_coverage',
+            min_l_min: null, observed_s: 0, required_s: 0 }
+        ]
+      };
+      renderApp();
+      return true;
+    })()`);
+    await page.frame();
+    assertLayout(await page.evaluate(layoutAudit), `${context}/flow-waiting`);
+    await assertAccessibility(page, `${context}/flow-waiting`, { nativeTree: true });
+    const missingDay = await page.evaluate("t('check.detail.horizon_wait', '23 h 45 min')");
+    const pressureDetail = await page.evaluate(`document.querySelector("[data-desc='model:health_pressure']")
+      .closest('.vitem').innerText`);
+    const flowDetail = await page.evaluate(`document.querySelector("[data-desc='model:health_flow']")
+      .closest('.vitem').innerText`);
+    assert.ok(pressureDetail.includes(missingDay),
+      `${context}: collecting pressure must retain its missing-day explanation`);
+    assert.ok(!flowDetail.includes(missingDay),
+      `${context}: collecting flow must not require a full day`);
+    assert.ok(flowDetail.includes(await page.evaluate("t('check.detail.period', '15 min')")),
+      `${context}: collecting flow must retain its observed period`);
+    assert.equal(await page.evaluate(`document.querySelector("[data-desc='model:health_flow'] .vrow-val").innerText`),
+      await page.evaluate("t('check.status.collecting')"),
+      `${context}: missing eligible flow stays neutral collection`);
+    await captureNativeEvidence(page, `${context}/flow-waiting`,
+      "[data-desc='model:health_flow']", ".vitem");
   } finally {
     await page.evaluate(`(() => {
       S.status = window.__browserDiagnosisOriginal.status;
