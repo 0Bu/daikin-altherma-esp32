@@ -113,19 +113,22 @@ DetectResult hp_detect_run() {
         int rx, tx;
     };
     PinPair cand[4];
-    const ReservedPins reserved  = config_reserved_pins(c).plus(net_eth_reserved_pins());
-    const bool         octal_spi = hw_octal_spi();
     int     nc  = 0;
-    auto               add       = [&](int rx, int tx) {
-        if (!link_pins_safe(rx, tx, octal_spi, reserved)) return;
-        for (int i = 0; i < nc; i++)
-            if (cand[i].rx == rx && cand[i].tx == tx) return;
-        if (nc < 4) cand[nc++] = {rx, tx};
-    };
-    add(c.rx_pin, c.tx_pin);
-    add(c.tx_pin, c.rx_pin);
-    add(CONFIG_DAIKIN_RX_PIN, CONFIG_DAIKIN_TX_PIN);
-    add(CONFIG_DAIKIN_TX_PIN, CONFIG_DAIKIN_RX_PIN);
+    {
+        // Pin-policy scratch is dead before the page sweep and its decode/log buffers.
+        const ReservedPins reserved  = config_reserved_pins(c).plus(net_eth_reserved_pins());
+        const bool         octal_spi = hw_octal_spi();
+        auto               add       = [&](int rx, int tx) {
+            if (!link_pins_safe(rx, tx, octal_spi, reserved)) return;
+            for (int i = 0; i < nc; i++)
+                if (cand[i].rx == rx && cand[i].tx == tx) return;
+            if (nc < 4) cand[nc++] = {rx, tx};
+        };
+        add(c.rx_pin, c.tx_pin);
+        add(c.tx_pin, c.rx_pin);
+        add(CONFIG_DAIKIN_RX_PIN, CONFIG_DAIKIN_TX_PIN);
+        add(CONFIG_DAIKIN_TX_PIN, CONFIG_DAIKIN_RX_PIN);
+    }
 
     const Protocol p0 = c.proto; // cached framing — try it first
     const Protocol p1 = (p0 == Protocol::I) ? Protocol::S : Protocol::I;
