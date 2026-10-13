@@ -1250,13 +1250,10 @@ function checkupStatusText(c) {
   return t(`check.status.${checkupStatusKey(c)}`);
 }
 
-// The fault row is the ONE check whose verdict comes from the DEVICE rather than from a project
-// heuristic, so the generic per-verdict sentence ("a notable value or pattern") explains nothing a
-// reader can act on there: NOTE means one of THREE different device states — a warning class active
-// right now, a message that has since cleared, or an unreadable class with history behind it — and
-// they call for different follow-up (read the code under Operation / nothing / check the link).
-// Naming which one is the whole point of the sentence, so this check gets its own copy.
+// Fault copy follows the unit’s reported class. A remembered message does not establish
+// its cause, resolution or current severity when the source is unreadable.
 function checkupDetailKey(c, statusKey) {
+  if (c.id === "retries" && statusKey === "info") return "check.detail.experimental";
   if (c.id === "fault") {
     if (statusKey === "warn") return "check.detail.fault.error";
     if (statusKey === "info") {
@@ -1265,6 +1262,8 @@ function checkupDetailKey(c, statusKey) {
       return "check.detail.fault.past_unknown";
     }
   }
+  const specific = `check.detail.${c.id}.${statusKey}`;
+  if (t(specific) !== specific) return specific;
   return `check.detail.${statusKey}`;
 }
 
@@ -1278,77 +1277,28 @@ function checkupDhwReasons(c) {
              .join(", ");
 }
 
-// Convert the ONE figure the firmware actually retains into an owner-readable energy example.
-// `max_k_h` is the greatest completed clean-hour loss, not the mean of `windows`; presenting its
-// product with the window count as an actual daily total would manufacture a measurement. The
-// firmware also has no configured tank volume. Keep the 200 l basis explicit and call the result
-// thermal energy. The second line is
-// deliberately a MAXIMUM-RATE orientation: it assigns that one retained maximum to every clean
-// window, then shows the replacement electricity for an explicitly assumed DHW COP range. It is not
-// a measured 24-hour total, and hours rejected by the evaluator are not represented.
-function checkupDhwEnergyHtml(c, fullSpan) {
-  if (c.max_k_h == null) return "";
-  const rate = Number(c.max_k_h), windows = Math.floor(Number(c.windows));
-  if (!Number.isFinite(rate) || rate < 0 || !Number.isFinite(windows) || windows < 1) return "";
-  const fmt = (n, digits) => n.toLocaleString(LANG,
-    { minimumFractionDigits: digits, maximumFractionDigits: digits });
-  const rateText = fmt(rate, 1);
-  // 200 l water is approximated as 200 kg; 1.16 Wh/(kg*K) is the rounded liquid-water heat
-  // capacity used for this explanatory example. This is deliberately not a firmware verdict.
-  const thermalKwhRaw = rate * 200 * 1.16 / 1000;
-  const thermalKwh = fmt(thermalKwhRaw, 2);
-  const heatCapacity = fmt(1.16, 2);
-  const maxThermalKwh = thermalKwhRaw * windows;
-  const copLow = 2.5, copHigh = 3.0;
-  const electricLow = fmt(maxThermalKwh / copHigh, 2);
-  const electricHigh = fmt(maxThermalKwh / copLow, 2);
-  // The formula itself is language-neutral; the localized explainer immediately below owns every
-  // assumption and claim limit. Keeping prose out of this line avoids twelve copies of one long
-  // sentence in the signed locale assets while every language still renders the same calculation.
-  const perWindow = descNoteHtml(t("meaning.label"),
-    `200 l ≈ 200 kg · ${heatCapacity} Wh/(kg·K) · ${rateText} K ≈ ${thermalKwh} kWhₜₕ`);
-  // An early notable window is published before the rolling report has crossed 24 hours. Keep its
-  // honest one-hour size example, but do not put a "24 h" label on a partial report.
-  const dayOrientation = fullSpan === true ? descNoteHtml("24 h:",
-    `${windows} h × ${rateText} K/h ≈ ${fmt(maxThermalKwh, 2)} kWhₜₕ · ` +
-    `COP ${fmt(copLow, 1)}–${fmt(copHigh, 1)} ⇒ ${electricLow}–${electricHigh} kWhₑₗ`) : "";
-  return perWindow + dayOrientation;
-}
-
-function checkupDetailHtml(c, fullSpan = c.full_span === true) {
+function checkupDetailHtml(c, fullSpan = c.full_span === true, report = {}) {
   const statusKey = checkupStatusKey(c);
   const value = checkupMetricValue(c);
   let detail;
-  // "This check cannot be completed HERE" is an unavailable verdict like a profile that lacks the
-  // rows, and needs the opposite advice — so it gets its own sentence rather than the generic one.
-  if (statusKey === "unavailable" && c.id === "dhw_loss" && c.blocked) {
+  // Discard reasons are aggregates, without a per-candidate cause ranking. Missing readings
+  // include necessary valve/heater/pump inputs as well as tank temperature; missing X10A
+  // replies and deliberate board-side polling pauses can both create that gap.
+  if (statusKey === "collecting" && c.id === "dhw_loss" && c.blocked) {
     const reasons = Array.isArray(c.abort_reasons) ? c.abort_reasons : [];
-    // In the all-blind case no plant-side reason was recorded for a live candidate in the retained
-    // window. That does not rule plant-side events out: within the blind budget the candidate stays
-    // live and a hidden draw or charge is recorded on return. A stretch past the budget ends the
-    // candidate as blind; a charge or pump run still under way at the first reading after it is
-    // never recorded (the next candidate opens only on the first clean reading, after any settle
-    // that charge arms), and the part of a draw's drop inside the stretch is lost, while a draw-sized
-    // drop continuing past the first clean reading, or an event starting after the next candidate has
-    // opened, is recorded. Nor does it prove a link fault: "blind" is unobserved time
-    // (R5T, or the page-0x60 valve, heater and pump rows, went unread), which X10A timeouts and
-    // board-side pauses (OTA/weather network hold, model detection, a skipped poll cycle, a
-    // restart) both produce. Its sentence says "readings the check needs", names both and points
-    // at the wiring only conditionally. Every mixed/non-blind case stays non-causal. The report has
-    // an abort total and an OR-ed reason set, not per-reason counts or circulation evidence for
-    // aborted candidates, so it cannot honestly say which plant-side cause dominated.
     const blindOnly = reasons.length === 1 && reasons[0] === "blind";
     const sentence = blindOnly
       ? t("check.detail.dhw_blocked_link", Number(c.aborts) || 0,
           checkupDuration(c.best_aborted_s))
       : t("check.detail.dhw_blocked", Number(c.aborts) || 0, checkupDhwReasons(c),
           checkupDuration(c.best_aborted_s));
-    return descNoteHtml(t("check.detail.assessment_label"),
-                        `${checkupStatusText(c)} — ${sentence}`);
+    detail = sentence;
   }
-  if (statusKey === "collecting") {
-    if (c.id === "dhw_loss" && c.required_s > 0) {
-      const done = checkupDuration(c.observed_s), required = checkupDuration(c.required_s);
+  if (statusKey === "collecting" && !detail) {
+    if (c.id === "dhw_loss") {
+      const done = Number.isFinite(c.windows) ? c.windows.toLocaleString(LANG)
+                                            : checkupDuration(c.observed_s);
+      const required = checkupDuration(c.required_s);
       if (Number(c.settle_remaining_s) > 0) {
         detail = t("check.detail.dhw_settling", done, required,
                    checkupDuration(c.settle_remaining_s));
@@ -1368,22 +1318,63 @@ function checkupDetailHtml(c, fullSpan = c.full_span === true) {
         ? t("check.detail.collecting", checkupDuration(c.observed_s), checkupDuration(c.required_s))
         : t("check.detail.collecting_unknown");
     }
-  } else {
+  } else if (!detail) {
     detail = t(checkupDetailKey(c, statusKey));
   }
-  // Once valve + I/U mode provide enough run-level evidence, the verdict judges confirmed SPACE
-  // HEATING alone. The card says so in every state because DHW and cooling are observations, not
-  // judged classes; mixed, unread or boundary-crossing runs remain explicitly unclassified.
+  // The reason is selected by firmware, not inferred from missing numbers in the browser.
+  const reasonKey = {
+    class_unavailable: "class_missing", class_coverage: "class_missing",
+    class_population_incomplete: "class_missing",
+    heating_runs_insufficient: "heating_runs_insufficient",
+    defrost_events_insufficient: "defrost_events_insufficient",
+    source_stale: "source_stale", no_paired_runtime: "no_paired_runtime",
+  }[c.reason];
+  if (reasonKey) detail += ` ${t(`check.detail.${reasonKey}`)}`;
+  // Only fully observed, classified heating runs have a cycling verdict. Do not revive a
+  // combined runtime/start assessment when older payloads contain its mean.
   if (c.id === "cycling" && c.space_runs != null)
-    detail += t(c.split ? "check.detail.cycling_split" : "check.detail.cycling_pooled");
+    detail += t("check.detail.cycling_split");
+  if (c.id === "dhw_loss" && statusKey !== "collecting" && Number(c.aborts) > 0)
+    detail += t("check.detail.dhw_aborted", Number(c.aborts), checkupDhwReasons(c),
+                checkupDuration(c.best_aborted_s));
   if ((c.id === "cycling" || c.id === "defrost") && checkupOutdoorContext(c))
     detail += t(c.id === "cycling" ? "check.detail.outdoor_cycling"
                                    : "check.detail.outdoor_defrost");
   const reading = value ? descNoteHtml(t("check.detail.value_label"), value) : "";
   const assessment = descNoteHtml(t("check.detail.assessment_label"),
                                   `${checkupStatusText(c)} — ${detail}`);
-  const energy = c.id === "dhw_loss" ? checkupDhwEnergyHtml(c, fullSpan) : "";
-  return reading + assessment + energy;
+  let scope = "";
+  if (Number.isFinite(report.span_s))
+    scope += descNoteHtml(t("check.detail.period_label"),
+                          t("check.detail.period", checkupDuration(report.span_s)));
+  if (Number.isFinite(report.source_age_s))
+    scope += descNoteHtml(t("check.detail.age_label"), checkupDuration(report.source_age_s));
+  if (c.id === "heater") {
+    const channelCoverage = [["BUH", c.buh_observed_s], ["BSH", c.bsh_observed_s]]
+      .filter(([, duration]) => typeof duration === "number" && Number.isFinite(duration))
+      .map(([label, duration]) => t("check.detail.channel_coverage", label, checkupDuration(duration)));
+    if (channelCoverage.length) scope += descNoteHtml(t("check.detail.value_label"), channelCoverage.join(" · "));
+  }
+  if (report.source_fresh === false && c.reason !== "source_stale")
+    scope += `<div class="vdesc-p">${esc(t("check.detail.source_stale"))}</div>`;
+  if (statusKey === "collecting" && Number(c.required_s) > Number(c.observed_s))
+    scope += `<div class="vdesc-p">${esc(t("check.detail.coverage_missing",
+         Math.ceil(c.required_s - c.observed_s).toLocaleString(LANG)))}</div>`;
+  if (statusKey === "collecting" && fullSpan === false && Number.isFinite(report.span_s) &&
+      ["day_incomplete", "input_coverage"].includes(c.reason))
+    scope += `<div class="vdesc-p">${esc(t("check.detail.horizon_wait",
+                           checkupDuration(Math.max(0, 86400 - report.span_s))))}</div>`;
+  let pressure = "";
+  if (c.id === "pressure" && c.min_bar != null) {
+    const current = typeof c.current_bar === "number" && Number.isFinite(c.current_bar)
+      ? `${c.current_bar.toLocaleString(LANG, { maximumFractionDigits: 1 })} bar` : t("sys.nodata");
+    const when = typeof c.min_unix_s === "number" && c.min_unix_s > 0
+      ? new Date(c.min_unix_s * 1000).toLocaleString(LANG,
+          { dateStyle: "short", timeStyle: "short" }) : t("sys.nodata");
+    pressure = descNoteHtml(t("check.detail.current_label"), current) +
+               descNoteHtml(t("check.detail.minimum_time_label"), when);
+  }
+  return reading + assessment + pressure + scope;
 }
 
 function checkupDefrostShare(c) {
@@ -1450,24 +1441,16 @@ function checkupMetricValue(c) {
       const attribution = c.high_pump_off > 0 ? t("check.loss_pump_off")
         : c.high_with_pump > 0 ? t("check.loss_with_pump")
         : c.high_windows > 0 ? t("check.loss_unattributed") : "";
-      return [`${rate} K/h`, t("check.loss_windows", c.windows || 0), attribution].filter(Boolean).join(" · ");
+      const high = c.high_windows == null ? "" : t("check.loss_high", c.high_windows, c.windows || 0);
+      return [t("check.loss_max", rate), high || t("check.loss_windows", c.windows || 0), attribution].filter(Boolean).join(" · ");
     }
     case "cycling": {
       if (c.starts == null) return "";
       const starts = t("check.starts", c.starts);
-      // The class figures count COMPLETED runs and are published as soon as anything was witnessed —
-      // which is not the same as the split having DECIDED. When it has, the pooled mean is the
-      // misleading half (a long tank charge inflates it) and the classes replace it; when it has
-      // not, the pooled mean is what the verdict used and stays.
-      if (c.space_runs == null) {
-        if (collecting || c.mean_run_s == null) return checkupWithOutdoor(c, starts);
-        return checkupWithOutdoor(c,
-          `${starts} · ${t("check.mean", checkupDuration(c.mean_run_s))}`);
-      }
-      const cls = (key, n, mean) => t(key, n ?? 0, mean == null ? "" : checkupDuration(mean));
+      if (c.space_runs == null) return checkupWithOutdoor(c, starts);
+      const cls = (key, n, mean) => n == null ? "" : mean == null
+        ? t(key, n, "").split(" · ")[0] : t(key, n, checkupDuration(mean));
       const parts = [starts];
-      if (!c.split && !collecting && c.mean_run_s != null)
-        parts.push(t("check.mean", checkupDuration(c.mean_run_s)));
       parts.push(cls("check.cycling_space", c.space_runs, c.space_mean_run_s));
       parts.push(cls("check.cycling_dhw", c.dhw_runs, c.dhw_mean_run_s));
       if (c.cooling_runs > 0) parts.push(t("check.cycling_cooling", c.cooling_runs));
@@ -1485,7 +1468,8 @@ function checkupMetricValue(c) {
       return checkupWithOutdoor(c, [n, paired, share].filter(Boolean).join(" · "));
     }
     case "pressure": {
-      return c.min_bar == null ? "" : `${c.min_bar} bar`;
+      return typeof c.min_bar !== "number" || !Number.isFinite(c.min_bar) ? ""
+        : `${c.min_bar.toLocaleString(LANG, { maximumFractionDigits: 1 })} bar`;
     }
     case "flow": {
       return c.min_l_min == null ? "" : `${c.min_l_min} l/min`;
@@ -1517,7 +1501,7 @@ function checkupCardHtml(includeHealth = true) {
       const tone = CHECKUP_TONE[checkupStatusKey(c)] || "";
       healthRows += modelDescRow(`health_${c.id}`, t(key), checkupValue(c),
                                  { cls: `checkup-val${tone ? ` ${tone}` : ""}`,
-                                   bodyPrefix: checkupDetailHtml(c, h.full_span === true) });
+                                   bodyPrefix: checkupDetailHtml(c, h.full_span === true, h) });
     }
   }
   // This row shares the card visually but remains independent of /status.health: it is not counted
@@ -1525,16 +1509,14 @@ function checkupCardHtml(includeHealth = true) {
   const rows = healthRows + refrigerantServiceRowHtml();
   if (!rows) return "";                               // older firmware — no card rather than an empty one
   if (!healthRows) return vcard(t("card.checkup"), rows);
-  // The badge gives only the card-level verdict and judgement progress. Evidence clocks live in each
-  // row's explainer, where they qualify the result without competing with the first-glance status.
-  const status = checkupStatusText(h.status);
-  const available = Number.isFinite(h.available) ? h.available : h.checks.filter(c => c.verdict !== "unavailable").length;
-  const evaluated = Number.isFinite(h.evaluated) ? h.evaluated
-                  : h.checks.filter(c => c.verdict !== "unavailable" && c.verdict !== "collecting").length;
-  // New firmware distinguishes facts it can report from checks capable of a bounded judgement.
-  // Older payloads had only `available`; using it as the fallback keeps their established contract.
-  const assessable = Number.isFinite(h.assessable) ? h.assessable : available;
-  const badge = t("check.summary", status, evaluated, assessable);
+  // Findings are counts of serialized verdicts, not a health score or a second threshold rule.
+  const warnings = h.checks.filter(c => c.verdict === "warn").length;
+  const notes = h.checks.filter(c => c.verdict === "info").length;
+  const badge = warnings ? t("check.summary.warnings", warnings)
+              : notes ? t("check.summary.notes", notes)
+              : h.status === "ok" ? t("check.summary.ok")
+              : h.status === "collecting" ? t("check.summary.collecting")
+              : t("check.summary.observations");
   const badgeCls = { warn: "err", ok: "ok", collecting: "dim", unavailable: "dim" }[h.status] || "";
   return vcard(t("card.checkup"), rows, badge, badgeCls);
 }
@@ -1567,6 +1549,29 @@ function refrigerantServiceRowHtml() {
       ? `service.reason.${service.blocker}` : "sys.nodata";
     detail += descNoteHtml(t("service.row.reason"), t(reasonKey));
   }
+  const metricKeys = [
+    ["compressor_rps", "comp", "rps"], ["discharge_c", "disch", "°C"],
+    ["eev_command_pls", "eev", "pls"], ["high_pressure_bar", "hp", "bar"],
+    ["low_pressure_bar", "lp", "bar"],
+  ];
+  for (const [key, inspectorKey, unit] of metricKeys) {
+    const metric = service.metrics?.[key];
+    if (!metric || ![metric.min, metric.mean, metric.max].every(n => typeof n === "number" && Number.isFinite(n)))
+      continue;
+    const number = n => n.toLocaleString(LANG, { maximumFractionDigits: 1 });
+    const label = t(`service.metric.${inspectorKey}`);
+    detail += descNoteHtml(label, t("service.metric.range", number(metric.min),
+                                  number(metric.mean), number(metric.max), unit));
+  }
+  const limitations = Array.isArray(service.limitations) ? service.limitations : [];
+  const knownLimitations = ["special_phases_unavailable", "temperature_context_incomplete",
+                           "pressure_sides_incomplete", "outdoor_context_incomplete"];
+  const missing = limitations.filter(key => knownLimitations.includes(key))
+                            .map(key => t(`service.limit.${key}`));
+  // Older additive payloads still expose this one specific missing input.
+  if (service.special_phases_known === false && !limitations.includes("special_phases_unavailable"))
+    missing.unshift(t("service.limit.special_phases_unavailable"));
+  if (missing.length) detail += descNoteHtml(t("service.row.limits"), missing.join(" · "));
   // Unsupported and waiting already carry an exact blocker reason. Active-window states add only
   // the continuity consequence, in owner language rather than transport terminology.
   const helpKey = ["observing", "limited", "interrupted"].includes(state)

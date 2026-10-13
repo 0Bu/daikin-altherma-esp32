@@ -13190,6 +13190,221 @@ static void test_history() {
 //      wrong, and there is nothing to compare it against.
 //  (c) the VERDICT boundaries, and the one property that makes the card honest — a window that has
 //      not collected enough can never aggregate to a green overall.
+static void test_checkup_evidence_overhaul() {
+    using namespace logic;
+    const std::pair<CheckupReason, const char*> reasons[] = {
+        {CheckupReason::None, ""},
+        {CheckupReason::Unsupported, "unsupported"},
+        {CheckupReason::DayIncomplete, "day_incomplete"},
+        {CheckupReason::InputCoverage, "input_coverage"},
+        {CheckupReason::NoEligibleWindows, "no_eligible_windows"},
+        {CheckupReason::ClassUnavailable, "class_unavailable"},
+        {CheckupReason::ClassCoverage, "class_coverage"},
+        {CheckupReason::HeatingRunsInsufficient, "heating_runs_insufficient"},
+        {CheckupReason::ClassPopulationIncomplete, "class_population_incomplete"},
+        {CheckupReason::ObservationOnly, "observation_only"},
+        {CheckupReason::NoPairedRuntime, "no_paired_runtime"},
+        {CheckupReason::TooFewDefrostEvents, "defrost_events_insufficient"},
+        {CheckupReason::SourceStale, "source_stale"},
+    };
+    for (const auto& entry : reasons)
+        CHECK(std::string(checkup_reason_name(entry.first)) == entry.second);
+    CHECK(std::string(checkup_reason_name(static_cast<CheckupReason>(255))) == "unsupported");
+    CHECK(checkup_add_u8(1, UINT32_MAX) == 255);
+    CHECK(checkup_add_u16(1, UINT32_MAX) == UINT16_MAX);
+
+    // A recovered ON sample cannot credit a preceding blind interval to observed heater time.
+    CheckupState  state;
+    CheckupBucket bucket;
+    CheckupSample sample;
+    checkup_step(state, bucket, sample, 0);
+    sample.buh_known = sample.buh_on = true;
+    checkup_step(state, bucket, sample, 15'000'000);
+    CHECK(bucket.buh_s == 0 && bucket.buh_observed_s == 0);
+    checkup_step(state, bucket, sample, 16'000'000);
+    CHECK(bucket.buh_s == 1 && bucket.buh_observed_s == 1);
+    CheckupState  paired_state;
+    CheckupBucket paired;
+    CheckupSample recovered;
+    checkup_step(paired_state, paired, recovered, 0);
+    recovered.rps_known = recovered.rps_running = true;
+    recovered.defrost_known = recovered.defrost_on = true;
+    recovered.bsh_known = recovered.bsh_on = true;
+    recovered.bar_ok                       = true;
+    recovered.bar_tenths                   = 0;
+    checkup_step(paired_state, paired, recovered, 15'000'000);
+    CHECK(paired.bsh_s == 0 && paired.bsh_observed_s == 0);
+    CHECK(paired.dfr_run_s == 0 && paired.defrost_s == 0 && paired.dfr_pair_observed_s == 0);
+    CHECK(paired.bar_observed_s == 0 && paired_state.bar_low_run_s == 0);
+    checkup_step(paired_state, paired, recovered, 16'000'000);
+    CHECK(paired.bsh_s == 1 && paired.bsh_observed_s == 1);
+    CHECK(paired.dfr_run_s == 1 && paired.defrost_s == 1 && paired.dfr_pair_observed_s == 1);
+    recovered.bsh_on = recovered.defrost_on = recovered.rps_running = false;
+    checkup_step(paired_state, paired, recovered, 17'000'000);
+    CHECK(paired.bsh_s == 1 && paired.bsh_observed_s == 2);
+    CHECK(paired.dfr_run_s == 1 && paired.defrost_s == 1 && paired.dfr_pair_observed_s == 2);
+
+    // A missing flow sample cannot become elapsed flow evidence at recovery after pump run-up.
+    CheckupState  flowing;
+    CheckupBucket flows;
+    CheckupSample pump;
+    pump.pump_known = pump.pump_on = true;
+    for (int second = 0; second <= 60; ++second)
+        checkup_step(flowing, flows, pump, static_cast<int64_t>(second) * 1000000);
+    pump.flow_ok     = true;
+    pump.flow_tenths = 150;
+    checkup_step(flowing, flows, pump, 61'000'000);
+    CHECK(flows.min_flow == 150 && flows.flow_observed_s == 0);
+    checkup_step(flowing, flows, pump, 62'000'000);
+    CHECK(flows.flow_observed_s == 1);
+
+    // An accepted zero remains visible. Its exact time is supplied only by a synchronized clock.
+    sample.bar_ok     = true;
+    sample.bar_tenths = 0;
+    checkup_step(state, bucket, sample, 17'000'000);
+    CHECK(bucket.min_bar == 0 && bucket.min_bar_unix_s == 0);
+    sample.unix_s = 1'800'000'000u;
+    checkup_step(state, bucket, sample, 18'000'000);
+    CHECK(bucket.min_bar == 0 && bucket.min_bar_unix_s == sample.unix_s);
+    sample.bar_tenths = 15;
+    sample.unix_s++;
+    checkup_step(state, bucket, sample, 19'000'000);
+    CHECK(bucket.min_bar_unix_s == 1'800'000'000u);
+    CheckupRing ring;
+    ring.pending = bucket;
+    CHECK(checkup_aggregate(ring).min_bar_unix_s == 1'800'000'000u);
+    CheckupBucket same_minimum = bucket;
+    same_minimum.min_bar_unix_s++;
+    ring.push(same_minimum);
+    CHECK(checkup_aggregate(ring).min_bar_unix_s == 1'800'000'001u);
+    ring.pending.min_bar_unix_s = 0;
+    CHECK(checkup_aggregate(ring).min_bar_unix_s == 1'800'000'001u);
+    ring.buf[0].min_bar  = 15;
+    ring.pending.min_bar = 12; // a lower undated observation cannot inherit the old time
+    CHECK(checkup_aggregate(ring).min_bar == 12 && checkup_aggregate(ring).min_bar_unix_s == 0);
+
+    // Twenty-hour modulating runs and their actual outdoor sample count do not truncate at 16 bits.
+    CheckupState long_run;
+    long_run.run_open = long_run.run_class_pure = true;
+    long_run.run_class                          = CheckupRunClass::SpaceHeating;
+    long_run.run_s                              = 72000;
+    for (unsigned i = 0; i < 72000; ++i)
+        checkup_outdoor_add(long_run.run_outdoor, outdoor_x10a_evidence(true, true, true, 10.0));
+    CheckupBucket completed;
+    CHECK(!checkup_close_run(long_run, completed));
+    CHECK(completed.space_runs == 1 && completed.space_run_s == 72000);
+    CHECK(completed.cycling_outdoor.samples == 72000);
+    CHECK(checkup_outdoor_mean_tenths(completed.cycling_outdoor) == 100);
+    CheckupOutdoorStats bounded = completed.cycling_outdoor;
+    bounded.samples             = CHECKUP_WINDOW_S;
+    const auto original_sum     = bounded.sum_tenths;
+    checkup_outdoor_add(bounded, outdoor_x10a_evidence(true, true, true, -10.0));
+    CHECK(bounded.samples == CHECKUP_WINDOW_S && bounded.sum_tenths == original_sum);
+    checkup_outdoor_merge(bounded, completed.cycling_outdoor);
+    CHECK(bounded.samples == CHECKUP_WINDOW_S && bounded.sum_tenths == original_sum);
+
+    // Mixed slow/fast cooling: fast drops are discarded as draw-like, so the remaining slow hours
+    // cannot support a green tank verdict. This reproduces the former false-clear case.
+    DhwLossState  tank;
+    DhwLossRing   cooling;
+    CheckupSample quiet;
+    quiet.valve_known = quiet.pump_known = quiet.bsh_known = quiet.r5t_ok = true;
+    for (int sec = 0; sec <= 86400; ++sec) {
+        if (sec && sec % 3600 == 0) cooling.commit(0);
+        const double drop =
+            0.3 * std::min(sec, 28800) / 3600.0 + 2.0 * std::max(0, sec - 28800) / 3600.0;
+        quiet.r5t_tenths = 800 - static_cast<int>(std::floor(drop * 10.0));
+        dhw_loss_step(tank, cooling.pending, quiet, static_cast<int64_t>(sec) * 1000000);
+    }
+    CheckupCoverage cov;
+    cov.r5t = cov.valve = cov.pump = cov.bsh = true;
+    CheckupWindow window;
+    window.full_span = true;
+    const auto loss  = dhw_loss_aggregate(cooling);
+    CHECK(loss.windows >= 6 && loss.aborts > 0 && loss.high_windows == 0);
+    auto report = checkup_evaluate(window, cov, FaultClass::Unknown, loss);
+    CHECK(report[CheckupCheck::DhwLoss].observation_only);
+    CHECK(std::string(checkup_result_evidence_name(
+              CheckupCheck::DhwLoss, report[CheckupCheck::DhwLoss])) == "observation");
+    CHECK(report.assessable == 0 && report.evaluated == 0 &&
+          report.overall == CheckupVerdict::Unavailable);
+    DhwLossWindow notable       = loss;
+    notable.high_windows        = 1;
+    notable.max_loss_tenths_k_h = 10;
+    CHECK(checkup_evaluate(window, cov, FaultClass::Unknown, notable).overall ==
+          CheckupVerdict::Info);
+
+    cov       = CheckupCoverage{};
+    cov.fault = cov.pressure = true;
+    window.min_bar           = 15;
+    window.bar_observed_s    = CHECKUP_REQUIRED_S;
+    report                   = checkup_evaluate(window, cov, FaultClass::Normal);
+    checkup_apply_freshness(report, true, 1, CHECKUP_WINDOW_S + 10);
+    CHECK(report.source_fresh && report.source_age_s == 1 && report.span_s == CHECKUP_WINDOW_S);
+    CHECK(report.evaluated == 2 && report.overall == CheckupVerdict::Ok);
+    checkup_apply_freshness(report, false, UINT32_MAX, CHECKUP_WINDOW_S);
+    CHECK(!report.source_fresh && report[CheckupCheck::Fault].a == -1);
+    CHECK(report[CheckupCheck::Fault].reason == CheckupReason::SourceStale);
+    CHECK(report[CheckupCheck::Pressure].verdict == CheckupVerdict::Collecting);
+    CHECK(report.evaluated == 0 && report.overall == CheckupVerdict::Collecting);
+    window.min_bar = 0;
+    window.flags   = CHECKUP_F_LOW_BAR;
+    report         = checkup_evaluate(window, cov, FaultClass::Error);
+    checkup_apply_freshness(report, false, 20, CHECKUP_WINDOW_S);
+    CHECK(report[CheckupCheck::Pressure].verdict == CheckupVerdict::Warn);
+    CHECK(report[CheckupCheck::Pressure].b == 1);
+    CHECK(report[CheckupCheck::Fault].verdict == CheckupVerdict::Info);
+    CHECK(report[CheckupCheck::Fault].a == -1 && report.pressure_current_tenths == -1);
+
+    const auto fingerprint = [](const char* broker, const char* topic, const char* power,
+                                const char* clock, unsigned age, unsigned on, unsigned off,
+                                unsigned confirm) {
+        return checkup_dhw_source_fingerprint(broker, topic, power, clock, age, on, off, confirm);
+    };
+    const uint32_t fp = fingerprint("mqtt://broker", "pump", "power", "time", 60, 50, 20, 5);
+    CHECK(fp != 0 && fp == fingerprint("mqtt://broker", "pump", "power", "time", 60, 50, 20, 5));
+    CHECK(fp != fingerprint("mqtt://other", "pump", "power", "time", 60, 50, 20, 5));
+    CHECK(fp != fingerprint("mqtt://broker", "other", "power", "time", 60, 50, 20, 5));
+    CHECK(fp != fingerprint("mqtt://broker", "pump", "other", "time", 60, 50, 20, 5));
+    CHECK(fp != fingerprint("mqtt://broker", "pump", "power", "other", 60, 50, 20, 5));
+    CHECK(fp != fingerprint("mqtt://broker", "pump", "power", "time", 61, 50, 20, 5));
+    CHECK(fp != fingerprint("mqtt://broker", "pump", "power", "time", 60, 51, 20, 5));
+    CHECK(fp != fingerprint("mqtt://broker", "pump", "power", "time", 60, 50, 21, 5));
+    CHECK(fp != fingerprint("mqtt://broker", "pump", "power", "time", 60, 50, 20, 6));
+    // The CRC-zero preimage must never masquerade as an unsupported legacy witness identity.
+    CHECK(fingerprint("mqtt://broker", "pump", "power", "time", 60, 50, 20, 376147156) == 1);
+    CHECK(fingerprint(nullptr, nullptr, nullptr, nullptr, 0, 0, 0, 0) ==
+          fingerprint("", "", "", "", 0, 0, 0, 0));
+    CHECK(fingerprint("a", "bc", "", "", 0, 0, 0, 0) != fingerprint("ab", "c", "", "", 0, 0, 0, 0));
+    CheckupJournalPayload stored;
+    stored.model_fp               = 1;
+    stored.source_fp              = 2;
+    stored.diagnostics_generation = 3;
+    stored.dhw_source_fp          = fp;
+    stored.end_unix_s             = 1'800'000'000;
+    CHECK(checkup_journal_restore_admits(stored, checkup_journal_bucket(stored.end_unix_s),
+                                         stored.end_unix_s + 3600, true, 1, 2, 3, false));
+    CHECK(checkup_journal_dhw_identity_matches(stored, fp));
+    CHECK(!checkup_journal_dhw_identity_matches(stored, fp ^ 1u));
+    CHECK(!checkup_journal_dhw_identity_matches(stored, 0));
+    CHECK(checkup_live_expiry_us(-1) == 0);
+    CHECK(checkup_live_expiry_us(0) == CHECKUP_WINDOW_US);
+    CHECK(checkup_live_expiry_us(INT64_MAX) == INT64_MAX);
+    CHECK(checkup_restored_expired(checkup_live_expiry_us(1), CHECKUP_WINDOW_US + 1));
+    // A stopped producer must age the whole slot from its beginning, never its last sample.
+    // The former end-based rule retains a t=1s pressure sample past age 24h.
+    constexpr int64_t hour_us            = static_cast<int64_t>(CHECKUP_DT_S) * 1000000;
+    const int64_t     completed_deadline = checkup_live_expiry_us(0);
+    CHECK(!checkup_restored_expired(completed_deadline, CHECKUP_WINDOW_US - 1));
+    CHECK(checkup_restored_expired(completed_deadline, CHECKUP_WINDOW_US));
+    CHECK(checkup_restored_expired(completed_deadline, 86'402'000'000LL));
+    CHECK(!checkup_restored_expired(checkup_live_expiry_us(hour_us), 86'402'000'000LL));
+    const int64_t pending_deadline = checkup_live_expiry_us(hour_us);
+    CHECK(checkup_restored_expired(pending_deadline, 90'002'000'000LL));
+    CHECK(!checkup_restored_expired(checkup_live_expiry_us(7'199'000'000LL),
+                                    90'002'000'000LL)); // old last-sample rule
+}
+
 static void test_checkup() {
     using namespace logic;
 
@@ -13281,12 +13496,10 @@ static void test_checkup() {
     // .noinit is DRAM this board does not have spare, so the ring's size is a decision and not a
     // consequence. The static_assert stops a build that overruns the bound; this pins the FIGURE,
     // so a field added without the conversation shows up as a failing test rather than as headroom
-    // quietly spent. The two eight-byte contexts are deliberately separate: sharing one mean would
-    // describe Cycling with defrost-runtime weather and vice versa. The payload costs 384 bytes;
-    // 4-byte alignment adds another 48.
-    CHECK(sizeof(CheckupOutdoorStats) == 8);
-    CHECK(sizeof(CheckupBucket) == 64);
-    CHECK(CHECKUP_BYTES == 1536);
+    // quietly spent. Wider complete-run/context counts and a dated pressure minimum add 384 bytes.
+    CHECK(sizeof(CheckupOutdoorStats) == 12);
+    CHECK(sizeof(CheckupBucket) == 80);
+    CHECK(CHECKUP_BYTES == 1920);
 
     // --- saturation -----------------------------------------------------------------------------
     // A wrap would turn the worst imaginable cycling into a perfect score.
@@ -13295,6 +13508,8 @@ static void test_checkup() {
     CHECK(checkup_add_u8(255, 1) == 255);
     CHECK(checkup_add_u16(65530, 3) == 65533);
     CHECK(checkup_add_u16(65535, 10) == 65535);
+    CHECK(checkup_add_u32(65535, 72000) == 137535);
+    CHECK(checkup_add_u32(UINT32_MAX - 1, 2) == UINT32_MAX);
 
     // --- outdoor context: compact arithmetic + paired populations -----------------------------
     {
@@ -13455,6 +13670,8 @@ static void test_checkup() {
         s.rps_known   = true;
         s.rps_running = true;
         checkup_step(st, b, s, 4'000'000); // both
+        CHECK(b.class_observed_s == 0);    // the previous RPS endpoint was unreadable
+        checkup_step(st, b, s, 5'000'000);
         CHECK(b.class_observed_s == 1);
     }
     {
@@ -13480,10 +13697,10 @@ static void test_checkup() {
         tick(1, false, false);
         tick(600, true, false); // ten minutes on the space circuit
         tick(1, false, false);  // stop -> the run completes
-        CHECK(b.space_runs == 1 && b.space_run_s == 600);
+        CHECK(b.space_runs == 1 && b.space_run_s == 599);
         tick(1200, true, true); // twenty minutes charging the tank
         tick(1, false, true);
-        CHECK(b.dhw_runs == 1 && b.dhw_run_s == 1200);
+        CHECK(b.dhw_runs == 1 && b.dhw_run_s == 1199);
         CHECK(b.censored_runs == 0 && b.starts == 2);
 
         // The same valve position is also used for cooling, so the I/U mode is the load-bearing
@@ -13506,7 +13723,7 @@ static void test_checkup() {
         // put in a mean. This is the window-edge censoring, and it needs no code of its own.
         s.operating_mode = CheckupOperatingMode::Heating;
         tick(300, true, false);
-        CHECK(b.space_runs == 1 && b.space_run_s == 600);
+        CHECK(b.space_runs == 1 && b.space_run_s == 599);
     }
     {
         // ── THE REVIEWER'S REPRODUCER (legacy-443): a valve switch is not a compressor cycle
@@ -13728,9 +13945,8 @@ static void test_checkup() {
         s.rps_running = true;
         checkup_step(st, b, s, 4'000'000);
         CHECK(b.starts == 0); // no phantom start across the unknown cycle
-        // Three deltas were observed (the first sample of a boot has no predecessor and books
-        // nothing) and the UNKNOWN one is not among the running ones.
-        CHECK(b.run_s == 2);
+        // Neither an unreadable endpoint nor its recovery can establish the interval's run time.
+        CHECK(b.run_s == 1);
     }
     {
         // A POLL GAP breaks continuity in both directions: no seconds, and no transition. Without
@@ -13808,8 +14024,8 @@ static void test_checkup() {
         s.rps_running = true;
         checkup_step(st, b, s, 3'000'000);
         CHECK(b.defrosts == 1);
-        CHECK(b.dfr_observed_s == 2 && b.dfr_pair_observed_s == 1);
-        CHECK(b.dfr_run_s == 1 && b.defrost_s == 1);
+        CHECK(b.dfr_observed_s == 2 && b.dfr_pair_observed_s == 0);
+        CHECK(b.dfr_run_s == 0 && b.defrost_s == 0);
         s.defrost_on = false;
         checkup_step(st, b, s, 4'000'000);
         s.defrost_on = true;
@@ -13907,6 +14123,8 @@ static void test_checkup() {
         CHECK((b.flags & CHECKUP_F_LOW_BAR) == 0);
         checkup_step(st, b, s, 91'000'000);
         CHECK(b.min_bar == CHECKUP_BAR_WARN_TENTHS - 1);
+        CHECK((b.flags & CHECKUP_F_LOW_BAR) == 0);
+        checkup_step(st, b, s, 92'000'000);
         CHECK((b.flags & CHECKUP_F_LOW_BAR) != 0);
     }
     {
@@ -13929,6 +14147,8 @@ static void test_checkup() {
         CHECK((missing_b.flags & CHECKUP_F_LOW_BAR) == 0);
         checkup_step(missing_st, missing_b, s, 91'000'000);
         CHECK(missing_b.min_bar == CHECKUP_BAR_WARN_TENTHS);
+        CHECK((missing_b.flags & CHECKUP_F_LOW_BAR) == 0);
+        checkup_step(missing_st, missing_b, s, 92'000'000);
         CHECK((missing_b.flags & CHECKUP_F_LOW_BAR) != 0);
 
         CheckupState  gap_st;
@@ -14776,7 +14996,8 @@ static void test_checkup() {
         dhw.best_aborted_s = 2400;
         {
             const CheckupReport r = checkup_evaluate(w, cov, FaultClass::Normal, dhw);
-            CHECK(r[CheckupCheck::DhwLoss].verdict == CheckupVerdict::Unavailable);
+            CHECK(r[CheckupCheck::DhwLoss].verdict == CheckupVerdict::Collecting);
+            CHECK(r[CheckupCheck::DhwLoss].reason == CheckupReason::NoEligibleWindows);
             CHECK(r.dhw_blocked);
             CHECK(r.dhw_aborts == DHW_LOSS_BLOCKED_MIN_ABORTS);
             CHECK(r.dhw_best_aborted_s == 2400);
@@ -15025,284 +15246,96 @@ static void test_checkup() {
     }
 
     {
-        // Cycling has no per-cycle operating mode. Even a very short mean is therefore a heuristic
-        // Info, never a fault/limit warning.
+        // A pooled start/runtime ratio cannot establish complete heating-run duration.
         CheckupWindow w = day();
         w.starts        = 24;
-        w.run_s         = 24u * 1800;
-        CHECK(checkup_evaluate(w, full, FaultClass::Normal)[CheckupCheck::Cycling].verdict ==
-              CheckupVerdict::Ok);
-        w.run_s = 24u * CHECKUP_CYCLING_SHORT_RUN_S;
-        CHECK(checkup_evaluate(w, full, FaultClass::Normal)[CheckupCheck::Cycling].verdict ==
-              CheckupVerdict::Ok);
-        w.run_s = 24u * (CHECKUP_CYCLING_SHORT_RUN_S - 1);
-        {
-            const CheckupReport r = checkup_evaluate(w, full, FaultClass::Normal);
-            CHECK(r[CheckupCheck::Cycling].verdict == CheckupVerdict::Info);
-            CHECK(r[CheckupCheck::Cycling].a == 24);
-            CHECK(r[CheckupCheck::Cycling].b == static_cast<int>(CHECKUP_CYCLING_SHORT_RUN_S) - 1);
-            CHECK(r.overall == CheckupVerdict::Info);
-        }
-        w.starts = CHECKUP_CYCLING_MIN_STARTS - 1;
-        w.run_s  = w.starts * 60;
-        CHECK(checkup_evaluate(w, full, FaultClass::Normal)[CheckupCheck::Cycling].verdict ==
-              CheckupVerdict::Ok);
-        w.starts = CHECKUP_CYCLING_MIN_STARTS;
-        CHECK(checkup_evaluate(w, full, FaultClass::Normal)[CheckupCheck::Cycling].verdict ==
-              CheckupVerdict::Info);
+        w.run_s         = 24u * 60;
+        auto r          = checkup_evaluate(w, full, FaultClass::Normal);
+        CHECK(r[CheckupCheck::Cycling].verdict == CheckupVerdict::Ok);
+        CHECK(r[CheckupCheck::Cycling].observation_only);
+        CHECK(r[CheckupCheck::Cycling].reason == CheckupReason::ClassUnavailable);
+        CHECK(r[CheckupCheck::Cycling].a == 24 && r[CheckupCheck::Cycling].b == -1);
+        CHECK(!r.cycling_split && r.overall != CheckupVerdict::Info);
 
-        // Twelve short heating-like runs plus one long DHW-like run demonstrate why the combined
-        // mean cannot classify the short runs. It remains context, with no universal Warn either
-        // way.
-        w.starts                  = 13;
-        w.run_s                   = 12u * 300 + 2u * 3600;
-        const CheckupReport mixed = checkup_evaluate(w, full, FaultClass::Normal);
-        CHECK(mixed[CheckupCheck::Cycling].verdict == CheckupVerdict::Ok);
-        CHECK(mixed[CheckupCheck::Cycling].b == static_cast<int>(w.run_s / w.starts));
-
-        w.starts                 = 0;
-        w.run_s                  = 0;
-        const CheckupReport idle = checkup_evaluate(w, full, FaultClass::Normal);
-        CHECK(idle[CheckupCheck::Cycling].verdict == CheckupVerdict::Ok);
-        CHECK(idle[CheckupCheck::Cycling].a == 0);
-    }
-    {
-        // ── the operating-class split, once the 3-way valve is readable ─────────────────────────
-        // `full` deliberately carries no valve row, so every case above is the POOLED fallback and
-        // stays exactly as it was. These are the same windows judged with the valve in hand.
         CheckupCoverage split = full;
         split.valve = split.mode = true;
+        w.starts                 = 13;
+        w.space_runs             = 12;
+        w.space_run_s            = 12u * 300;
+        w.dhw_runs               = 1;
+        w.dhw_run_s              = 7200;
+        w.run_s                  = w.space_run_s + w.dhw_run_s;
+        r                        = checkup_evaluate(w, split, FaultClass::Normal);
+        CHECK(r.cycling_split && r[CheckupCheck::Cycling].verdict == CheckupVerdict::Info);
+        CHECK(r[CheckupCheck::Cycling].c == 12 && r[CheckupCheck::Cycling].d == 300);
+        CHECK(r[CheckupCheck::Cycling].e == 1 && r[CheckupCheck::Cycling].f == 7200);
+        CHECK(r[CheckupCheck::Cycling].b == -1);
+        // A long, unfinished thirteenth run cannot dilute twelve complete short heating runs.
+        w.run_s += 7200;
+        CHECK(checkup_evaluate(w, split, FaultClass::Normal)[CheckupCheck::Cycling].verdict ==
+              CheckupVerdict::Info);
 
-        // THE FINDING THE POOLED MEAN COULD NOT REACH, and it is the block above's own example:
-        // twelve five-minute space runs beside one two-hour tank charge. Pooled, the long charge
-        // lifts the mean to 13.8 minutes and the day reads Ok. Per completed run, the space circuit
-        // is cycling at five minutes with the tank's runtime out of both halves of the ratio.
-        CheckupWindow w = day();
-        w.starts        = 13;
-        w.run_s         = 12u * 300 + 2u * 3600;
-        w.space_runs    = 12;
-        w.space_run_s   = 12u * 300;
-        w.dhw_runs      = 1;
-        w.dhw_run_s     = 2u * 3600;
-        CHECK(checkup_evaluate(w, full, FaultClass::Normal)[CheckupCheck::Cycling].verdict ==
-              CheckupVerdict::Ok); // no valve row: pooled, and masked
-        {
-            const CheckupReport r = checkup_evaluate(w, split, FaultClass::Normal);
-            CHECK(r[CheckupCheck::Cycling].verdict == CheckupVerdict::Info);
-            CHECK(r.overall == CheckupVerdict::Info);
-            CHECK(r.cycling_split);
-            // The pooled pair stays on the wire as the day's total — still a fact, no longer a
-            // decision.
-            CHECK(r[CheckupCheck::Cycling].a == 13);
-            CHECK(r[CheckupCheck::Cycling].b == static_cast<int>(w.run_s / w.starts));
-            CHECK(r[CheckupCheck::Cycling].c == 12 && r[CheckupCheck::Cycling].d == 300);
-            CHECK(r[CheckupCheck::Cycling].e == 1 && r[CheckupCheck::Cycling].f == 2 * 3600);
-            CHECK(r[CheckupCheck::Cycling].g == 0); // nothing was censored in this day
-        }
-
-        // And the OTHER direction the same pooling produced: a tank charging in many short bursts
-        // is the plant doing its job, and pooled it reads as a finding. The DHW class is
-        // observation.
-        w.starts      = 32;
-        w.space_runs  = 2;
-        w.space_run_s = 2u * 3600;
-        w.dhw_runs    = 30;
-        w.dhw_run_s   = 30u * 120;
-        w.run_s       = w.space_run_s + w.dhw_run_s;
-        CHECK(checkup_evaluate(w, full, FaultClass::Normal)[CheckupCheck::Cycling].verdict ==
-              CheckupVerdict::Info); // pooled: the tank's own duty, called out
-        {
-            const CheckupReport r = checkup_evaluate(w, split, FaultClass::Normal);
-            CHECK(r[CheckupCheck::Cycling].verdict == CheckupVerdict::Ok);
-            CHECK(r[CheckupCheck::Cycling].e == 30 && r[CheckupCheck::Cycling].f == 120);
-        }
-
-        // ── THE STALL (legacy-443 live review): catalog capability is not evidence
-        // ──────────────────── A profile that CARRIES the valve row on a plant whose valve page
-        // never answers. Before this rule the paired clock stayed pinned at 0, could never reach
-        // 90% of 24 h, and a check that had always worked from the compressor witness alone read `0
-        // min of 21 h 36 min` forever — while the card printed `space 0` beside sixteen real
-        // starts.
-        CheckupWindow silent    = day();
-        silent.class_observed_s = 0;
-        silent.starts           = 16;
-        silent.run_s            = 16u * 3600;
-        {
-            const CheckupReport r = checkup_evaluate(silent, split, FaultClass::Normal);
-            CHECK(r[CheckupCheck::Cycling].verdict != CheckupVerdict::Collecting);
-            CHECK(!r.cycling_split); // the pooled figure decided, and says so
-            CHECK(r[CheckupCheck::Cycling].observed_s == silent.rps_observed_s);
-            CHECK(r[CheckupCheck::Cycling].a == 16);
-            // NOT zero: nothing about the class was ever witnessed, and a rendered 0 reads as "no
-            // space heating ran today" beside sixteen starts that did.
-            CHECK(r[CheckupCheck::Cycling].c == -1 && r[CheckupCheck::Cycling].d == -1);
-            CHECK(r[CheckupCheck::Cycling].e == -1 && r[CheckupCheck::Cycling].g == -1);
-        }
-        // One witnessed second is enough to make the counts real observations again, while the
-        // VERDICT still falls back until the pair clears the same bar the check has always used.
-        silent.class_observed_s = 1;
-        {
-            const CheckupReport r = checkup_evaluate(silent, split, FaultClass::Normal);
-            CHECK(!r.cycling_split);
-            CHECK(r[CheckupCheck::Cycling].c == 0 && r[CheckupCheck::Cycling].g == 0);
-        }
-
-        // The verdict rests on the paired clock only once that clock cleared the bar; the READINESS
-        // gate stays on the compressor witness, so the row can never be starved into collecting.
-        w.class_observed_s = CHECKUP_REQUIRED_S - 1;
-        {
-            const CheckupReport r = checkup_evaluate(w, split, FaultClass::Normal);
-            CHECK(!r.cycling_split);
-            CHECK(r[CheckupCheck::Cycling].verdict != CheckupVerdict::Collecting);
-            CHECK(r[CheckupCheck::Cycling].observed_s == w.rps_observed_s);
-            CHECK(r[CheckupCheck::Cycling].c == 2); // the class facts are still published
-        }
-        w.class_observed_s = CHECKUP_REQUIRED_S;
-        CHECK(checkup_evaluate(w, split, FaultClass::Normal).cycling_split);
-
-        // Without the valve row in the catalog at all, the class fields are UNESTABLISHED.
-        {
-            const CheckupReport r = checkup_evaluate(w, full, FaultClass::Normal);
-            CHECK(r[CheckupCheck::Cycling].c == -1 && r[CheckupCheck::Cycling].d == -1);
-            CHECK(r[CheckupCheck::Cycling].e == -1 && r[CheckupCheck::Cycling].f == -1);
-            CHECK(r[CheckupCheck::Cycling].g == -1);
-            CHECK(r[CheckupCheck::Cycling].observed_s == w.rps_observed_s);
-        }
-
-        // The twelve-run bound is a bound on the JUDGED population: eleven short space runs cannot
-        // borrow a busy tank's runs to clear it.
-        w.dhw_runs    = 20;
-        w.dhw_run_s   = 20u * 1200;
-        w.space_runs  = CHECKUP_CYCLING_MIN_STARTS - 1;
-        w.space_run_s = w.space_runs * 60;
-        w.starts      = w.space_runs + w.dhw_runs;
-        w.run_s       = w.space_run_s + w.dhw_run_s;
+        w.space_run_s = 12u * CHECKUP_CYCLING_SHORT_RUN_S;
         CHECK(checkup_evaluate(w, split, FaultClass::Normal)[CheckupCheck::Cycling].verdict ==
               CheckupVerdict::Ok);
-        w.space_runs  = CHECKUP_CYCLING_MIN_STARTS;
-        w.space_run_s = w.space_runs * 60;
-        w.starts      = w.space_runs + w.dhw_runs;
-        w.run_s       = w.space_run_s + w.dhw_run_s;
+        w.space_run_s--;
         CHECK(checkup_evaluate(w, split, FaultClass::Normal)[CheckupCheck::Cycling].verdict ==
               CheckupVerdict::Info);
 
-        // Runs that happened but could not be classified are PUBLISHED, so a day with no eligible
-        // space run cannot be read as a day with no space heating.
-        w.space_runs = w.dhw_runs = 0;
-        w.space_run_s = w.dhw_run_s = 0;
-        w.censored_runs             = 9;
-        w.starts                    = 9;
-        w.run_s                     = 9u * 1500;
-        {
-            const CheckupReport r = checkup_evaluate(w, split, FaultClass::Normal);
-            CHECK(r[CheckupCheck::Cycling].verdict == CheckupVerdict::Ok);
-            CHECK(r[CheckupCheck::Cycling].c == 0 && r[CheckupCheck::Cycling].d == -1);
-            CHECK(r[CheckupCheck::Cycling].g == 9);
-            // ...and that Ok comes from the POOLED figure, not from an empty judged set. The
-            // assertion above used to pass with `split` still true, which is the defect below.
-            CHECK(!r.cycling_split);
-        }
+        // Few heating runs cannot borrow DHW or cooling events to qualify an assessment.
+        w.space_runs  = CHECKUP_CYCLING_MIN_STARTS - 1;
+        w.space_run_s = w.space_runs * 60;
+        w.dhw_runs    = 30;
+        r             = checkup_evaluate(w, split, FaultClass::Normal);
+        CHECK(!r.cycling_split && r[CheckupCheck::Cycling].observation_only);
+        CHECK(r[CheckupCheck::Cycling].reason == CheckupReason::HeatingRunsInsufficient);
+        w.space_runs   = 0;
+        w.cooling_runs = 12;
+        r              = checkup_evaluate(w, split, FaultClass::Normal);
+        CHECK(r.cycling_cooling_runs == 12 && r[CheckupCheck::Cycling].c == 0);
+        CHECK(!r.cycling_split && r[CheckupCheck::Cycling].observation_only);
 
-        // ── AN EMPTY JUDGED POPULATION IS NOT A CLEAN BILL (legacy-443 second live round)
-        // ───────────── The clock and the judged population are DIFFERENT measurements, and gating
-        // the split on the clock alone was the same category error as gating it on catalog
-        // capability — the third place it hid. `class_observed_s` counts seconds in which both rows
-        // were READABLE; a valve that answers all day while moving mid-run yields a full clock and
-        // zero classified runs. The split then judged an empty set, `notable` needed >= MIN_STARTS
-        // to fire, and the day fell through to Ok: a green verdict resting on nothing, on exactly
-        // the DHW-priority pattern the censoring rule exists for.
-        //
-        // The bar is therefore on the population the verdict is built from: unless enough runs were
-        // classified AT ALL, the split has no picture of the day and the pooled figure decides —
-        // the same degradation as a too-sparse clock, one step earlier.
-        {
-            CheckupWindow d       = day(); // 12 x 1500 s, every run handed over
-            d.starts              = 12;
-            d.run_s               = 12u * 1500;
-            d.censored_runs       = 12;
-            const CheckupReport r = checkup_evaluate(d, split, FaultClass::Normal);
-            CHECK(!r.cycling_split); // no classified run -> pooled decides
-            CHECK(r[CheckupCheck::Cycling].verdict == CheckupVerdict::Ok);
-            CHECK(r[CheckupCheck::Cycling].b == 1500); // ...and Ok now has a number behind it
-            CHECK(r[CheckupCheck::Cycling].c == 0 && r[CheckupCheck::Cycling].g == 12);
-        }
-        // The case that makes it matter rather than merely tidy: a plant that BOTH short-cycles and
-        // hands over mid-run. Judging the empty space set returned Ok and lost the finding; the
-        // pooled fallback keeps it.
-        {
-            CheckupWindow d       = day();
-            d.starts              = 20;
-            d.run_s               = 20u * 240;
-            d.censored_runs       = 20;
-            const CheckupReport r = checkup_evaluate(d, split, FaultClass::Normal);
-            CHECK(!r.cycling_split);
-            CHECK(r[CheckupCheck::Cycling].verdict == CheckupVerdict::Info);
-        }
-        // Twelve pure tank runs do not make twenty unclassified handovers evidence about space
-        // heating. The old "twelve on either side" gate opened the split, judged space_runs=0 and
-        // lost the pooled short-cycling finding. Classification coverage now fails closed.
-        {
-            CheckupWindow d       = day();
-            d.dhw_runs            = 12;
-            d.dhw_run_s           = 12u * 240u;
-            d.censored_runs       = 20;
-            d.starts              = 32;
-            d.run_s               = 32u * 240u;
-            const CheckupReport r = checkup_evaluate(d, split, FaultClass::Normal);
-            CHECK(!r.cycling_split);
-            CHECK(r[CheckupCheck::Cycling].verdict == CheckupVerdict::Info);
-        }
-        // Cooling is a positively known third class: it proves those room-circuit runs were not
-        // heating and therefore neither pollutes the heating mean nor counts as censored evidence.
-        {
-            CheckupWindow d       = day();
-            d.cooling_runs        = 12;
-            d.starts              = 12;
-            d.run_s               = 12u * 240u;
-            const CheckupReport r = checkup_evaluate(d, split, FaultClass::Normal);
-            CHECK(r.cycling_split);
-            CHECK(r[CheckupCheck::Cycling].verdict == CheckupVerdict::Ok);
-            CHECK(r.cycling_cooling_runs == 12);
-            CHECK(r[CheckupCheck::Cycling].c == 0); // no HEATING run was claimed
-        }
-        // And the fallback must NOT reach back for a day the split described perfectly well. A tank
-        // charging in short bursts beside two long space runs classified every run it had: the
-        // space population is small because the plant barely heated, not because classification
-        // failed. Falling back there would restore the pooled false positive this PR removed.
-        {
-            CheckupWindow d       = day();
-            d.space_runs          = 2;
-            d.space_run_s         = 2u * 3600;
-            d.dhw_runs            = 30;
-            d.dhw_run_s           = 30u * 120;
-            d.starts              = 32;
-            d.run_s               = d.space_run_s + d.dhw_run_s;
-            const CheckupReport r = checkup_evaluate(d, split, FaultClass::Normal);
-            CHECK(r.cycling_split); // 32 runs classified: a real picture
-            CHECK(r[CheckupCheck::Cycling].verdict == CheckupVerdict::Ok);
-            CHECK(checkup_evaluate(d, full, FaultClass::Normal)[CheckupCheck::Cycling].verdict ==
-                  CheckupVerdict::Info); // what the pooled figure would have said
-        }
-    }
-    {
-        // A complete global bus window with sparse RPS evidence stays collecting. The row reports
-        // its own evidence clock, not covered_s.
-        CheckupWindow w       = day();
-        w.rps_observed_s      = CHECKUP_REQUIRED_S - 1;
-        w.starts              = 40;
-        w.run_s               = 40 * 60;
-        const CheckupReport r = checkup_evaluate(w, full, FaultClass::Normal);
-        CHECK(r[CheckupCheck::Cycling].verdict == CheckupVerdict::Collecting);
-        CHECK(r[CheckupCheck::Cycling].observed_s == CHECKUP_REQUIRED_S - 1);
-        CHECK(r[CheckupCheck::Cycling].required_s == CHECKUP_REQUIRED_S);
-        CHECK(r[CheckupCheck::Cycling].a == 40);
-        CHECK(r.overall != CheckupVerdict::Ok);
-        w.rps_observed_s = CHECKUP_REQUIRED_S;
-        CHECK(checkup_evaluate(w, full, FaultClass::Normal)[CheckupCheck::Cycling].verdict ==
+        // A readable clock alone cannot classify a population of mixed/unreadable runs.
+        w               = day();
+        w.space_runs    = 12;
+        w.space_run_s   = 12u * 60;
+        w.censored_runs = 2; // 12/14 <90%
+        r               = checkup_evaluate(w, split, FaultClass::Normal);
+        CHECK(r[CheckupCheck::Cycling].observation_only);
+        CHECK(r[CheckupCheck::Cycling].reason == CheckupReason::ClassPopulationIncomplete);
+        w.censored_runs = 1; // 12/13 >=90%
+        CHECK(checkup_evaluate(w, split, FaultClass::Normal)[CheckupCheck::Cycling].verdict ==
               CheckupVerdict::Info);
+        w.class_observed_s = 0;
+        r                  = checkup_evaluate(w, split, FaultClass::Normal);
+        CHECK(r[CheckupCheck::Cycling].reason == CheckupReason::ClassCoverage);
+        CHECK(r[CheckupCheck::Cycling].c == -1 && r[CheckupCheck::Cycling].g == -1);
+
+        // A positive completed-run observation can surface early. Absence requires a full day
+        // and sufficient readable classification time, separately from the global bus clock.
+        w                  = day();
+        w.space_runs       = 12;
+        w.space_run_s      = 12u * 1200;
+        w.class_observed_s = CHECKUP_REQUIRED_S - 1;
+        r                  = checkup_evaluate(w, split, FaultClass::Normal);
+        CHECK(r[CheckupCheck::Cycling].verdict == CheckupVerdict::Collecting);
+        CHECK(r[CheckupCheck::Cycling].reason == CheckupReason::InputCoverage);
+        CHECK(r[CheckupCheck::Cycling].observed_s == CHECKUP_REQUIRED_S - 1);
+        w.class_observed_s = CHECKUP_REQUIRED_S;
+        w.rps_observed_s   = CHECKUP_REQUIRED_S - 1;
+        r                  = checkup_evaluate(w, split, FaultClass::Normal);
+        CHECK(r[CheckupCheck::Cycling].verdict == CheckupVerdict::Collecting);
+        CHECK(r[CheckupCheck::Cycling].reason == CheckupReason::InputCoverage);
+        w.rps_observed_s = CHECKUP_REQUIRED_S;
         w.full_span = false;
-        CHECK(checkup_evaluate(w, full, FaultClass::Normal)[CheckupCheck::Cycling].verdict ==
-              CheckupVerdict::Collecting);
+        r                = checkup_evaluate(w, split, FaultClass::Normal);
+        CHECK(r[CheckupCheck::Cycling].verdict == CheckupVerdict::Collecting);
+        CHECK(r[CheckupCheck::Cycling].reason == CheckupReason::DayIncomplete);
+        w.space_run_s = 12u * 60;
+        r             = checkup_evaluate(w, split, FaultClass::Normal);
+        CHECK(r[CheckupCheck::Cycling].verdict == CheckupVerdict::Info);
+        checkup_apply_freshness(r, false, 20, CHECKUP_WINDOW_S);
+        CHECK(r[CheckupCheck::Cycling].verdict == CheckupVerdict::Info);
     }
     {
         // Defrost share uses paired RPS+defrost evidence and remains an Info heuristic at 20%.
@@ -15377,7 +15410,8 @@ static void test_checkup() {
         CHECK(unsupported[CheckupCheck::Defrost].a == -1);
         CHECK(unsupported[CheckupCheck::Defrost].b == -1);
 
-        w                = day();
+        w          = day();
+        w.defrosts = w.paired_defrosts = CHECKUP_DEFROST_MIN_COUNT;
         w.dfr_observed_s = CHECKUP_REQUIRED_S - 1;
         CHECK(checkup_evaluate(w, full, FaultClass::Normal)[CheckupCheck::Defrost].verdict ==
               CheckupVerdict::Collecting);
@@ -15390,7 +15424,7 @@ static void test_checkup() {
         w.defrost_s                        = 0;
         const CheckupReport no_denominator = checkup_evaluate(w, full, FaultClass::Normal);
         CHECK(no_denominator[CheckupCheck::Defrost].b == -1);
-        CHECK(no_denominator.assessable == 3 && no_denominator.evaluated == 3);
+        CHECK(no_denominator.assessable == 2 && no_denominator.evaluated == 2);
     }
     {
         // Pressure <=1.0 bar violates the documented ">1 bar" boundary. The raw minimum surfaces as
@@ -15456,9 +15490,9 @@ static void test_checkup() {
         w.flow_observed_s = CHECKUP_MIN_S_FLOW - 1;
         {
             const CheckupReport r = checkup_evaluate(w, full, FaultClass::Normal);
-            CHECK(r[CheckupCheck::Flow].verdict == CheckupVerdict::Collecting);
+            CHECK(r[CheckupCheck::Flow].verdict == CheckupVerdict::Ok);
             CHECK(r[CheckupCheck::Flow].observed_s == CHECKUP_MIN_S_FLOW - 1);
-            CHECK(r[CheckupCheck::Flow].required_s == CHECKUP_MIN_S_FLOW);
+            CHECK(r[CheckupCheck::Flow].required_s == 0);
             CHECK(r[CheckupCheck::Flow].a == 120); // partial fact remains visible
         }
         w.min_flow = CHECKUP_ABSENT;
@@ -15519,7 +15553,7 @@ static void test_checkup() {
         w                           = day();
         w.bsh_observed_s            = CHECKUP_REQUIRED_S - 1;
         const CheckupReport partial = checkup_evaluate(w, full, FaultClass::Normal);
-        CHECK(partial[CheckupCheck::Heater].verdict == CheckupVerdict::Collecting);
+        CHECK(partial[CheckupCheck::Heater].verdict == CheckupVerdict::Ok);
         CHECK(partial[CheckupCheck::Heater].observed_s == CHECKUP_REQUIRED_S - 1);
     }
     {
@@ -15562,10 +15596,10 @@ static void test_checkup() {
         w.retry_observed_s = CHECKUP_REQUIRED_S - 1;
         {
             const CheckupReport r = checkup_evaluate(w, full, FaultClass::Normal);
-            CHECK(r[CheckupCheck::Retries].verdict == CheckupVerdict::Collecting);
+            CHECK(r[CheckupCheck::Retries].verdict == CheckupVerdict::Ok);
             CHECK(r[CheckupCheck::Retries].observed_s == CHECKUP_REQUIRED_S - 1);
-            CHECK(r[CheckupCheck::Retries].required_s == CHECKUP_REQUIRED_S);
-            CHECK(r[CheckupCheck::Retries].a == -1);
+            CHECK(r[CheckupCheck::Retries].required_s == 0);
+            CHECK(r[CheckupCheck::Retries].a == 0);
         }
         w.flags = CHECKUP_F_RETRY;
         {
@@ -15585,7 +15619,7 @@ static void test_checkup() {
         w.retry_observed_s = CHECKUP_REQUIRED_S;
         w.full_span        = false;
         CHECK(checkup_evaluate(w, full, FaultClass::Normal)[CheckupCheck::Retries].verdict ==
-              CheckupVerdict::Collecting);
+              CheckupVerdict::Ok);
     }
     {
         // AGGREGATION. Supported observations remain visible and count as available, but only
@@ -15612,26 +15646,27 @@ static void test_checkup() {
         // `all` carries the valve row, so the cycling verdict is the per-class one and the window
         // has to be coherent with that: eight hour-long runs on the space circuit, none on the
         // tank.
-        good.space_runs     = 8;
-        good.space_run_s    = 8u * 3600;
+        good.space_runs  = 12;
+        good.space_run_s = 12u * 3600;
+        good.defrosts = good.paired_defrosts = CHECKUP_DEFROST_MIN_COUNT;
         CheckupCoverage all = full;
         all.valve = all.mode = all.r5t = true;
         DhwLossWindow clean_dhw;
-        clean_dhw.observed_s          = DHW_LOSS_REQUIRED_S;
-        clean_dhw.circulation_known_s = DHW_LOSS_REQUIRED_S;
-        clean_dhw.windows             = DHW_LOSS_REQUIRED_S / DHW_LOSS_WINDOW_S;
+        clean_dhw.observed_s          = 6 * DHW_LOSS_WINDOW_S;
+        clean_dhw.circulation_known_s = clean_dhw.observed_s;
+        clean_dhw.windows             = 6;
         clean_dhw.max_loss_tenths_k_h = 3;
         const CheckupReport ok        = checkup_evaluate(good, all, FaultClass::Normal, clean_dhw);
         CHECK(ok.overall == CheckupVerdict::Ok);
-        CHECK(ok.full_span && ok.available == CHECKUP_CHECK_COUNT && ok.assessable == 5 &&
-              ok.evaluated == 5); // fault, DHW loss, cycling, defrost ratio and pressure
+        CHECK(ok.full_span && ok.available == CHECKUP_CHECK_COUNT && ok.assessable == 4 &&
+              ok.evaluated == 4); // current fault, heating runs, defrost ratio and pressure
 
         CheckupWindow idle_no_ratio = good;
         idle_no_ratio.dfr_run_s     = 0;
         const CheckupReport idle_defrost =
             checkup_evaluate(idle_no_ratio, all, FaultClass::Normal, clean_dhw);
         CHECK(idle_defrost[CheckupCheck::Defrost].verdict == CheckupVerdict::Ok);
-        CHECK(idle_defrost.assessable == 4 && idle_defrost.evaluated == 4);
+        CHECK(idle_defrost.assessable == 3 && idle_defrost.evaluated == 3);
 
         // Flow and heaters are facts without universal judgement; count-only defrost is likewise
         // not an assessment. They can fill rows but can never manufacture "no finding".
@@ -15652,7 +15687,7 @@ static void test_checkup() {
             checkup_evaluate(retry_event, all, FaultClass::Normal, clean_dhw);
         CHECK(with_retry[CheckupCheck::Retries].verdict == CheckupVerdict::Info);
         CHECK(with_retry.overall == CheckupVerdict::Info);
-        CHECK(with_retry.assessable == 5 && with_retry.evaluated == 5);
+        CHECK(with_retry.assessable == 4 && with_retry.evaluated == 4);
         // These strings are the existing /status.health wire contract. Non-empty is insufficient:
         // a well-formed rename would make an older UI silently skip a row or misread a verdict.
         static const char* const kCheckIds[] = {
@@ -15669,7 +15704,7 @@ static void test_checkup() {
         CHECK(std::string(checkup_verdict_name(CheckupVerdict::Info)) == "info");
         CHECK(std::string(checkup_verdict_name(CheckupVerdict::Warn)) == "warn");
         CHECK(std::string(checkup_evidence_name(CheckupCheck::Fault)) == "device");
-        CHECK(std::string(checkup_evidence_name(CheckupCheck::Pressure)) == "manufacturer");
+        CHECK(std::string(checkup_evidence_name(CheckupCheck::Pressure)) == "heuristic");
         CHECK(std::string(checkup_evidence_name(CheckupCheck::DhwLoss)) == "heuristic");
         CHECK(std::string(checkup_evidence_name(CheckupCheck::Cycling)) == "heuristic");
         CHECK(std::string(checkup_evidence_name(CheckupCheck::Defrost)) == "heuristic");
@@ -18076,9 +18111,9 @@ static void test_checkup_persist() {
     CHECK(checkup_journal_bucket(7'200) == 2);
     CHECK(checkup_journal_bucket(-1) == INT64_MIN);
     CHECK(checkup_journal_in_window(100'000, 100'000));
-    CHECK(checkup_journal_in_window(100'000 - CHECKUP_WINDOW_S + 1, 100'000));
+    CHECK(checkup_journal_in_window(100'000 - CHECKUP_RECORD_MAX_AGE_S + 1, 100'000));
     CHECK(!checkup_journal_in_window(100'001, 100'000)); // future is never slid to now
-    CHECK(!checkup_journal_in_window(100'000 - CHECKUP_WINDOW_S, 100'000));
+    CHECK(!checkup_journal_in_window(100'000 - CHECKUP_RECORD_MAX_AGE_S, 100'000));
     CHECK(checkup_journal_next_live_bucket(INT64_MIN, 6, 1) == 6);
     CHECK(checkup_journal_next_live_bucket(4, 6, 1) == 6); // hour 5 was a power-off gap
     CHECK(checkup_journal_next_live_bucket(4, 6, 2) == 5);
@@ -22572,8 +22607,8 @@ static void test_checkup_scoped_flash_age() {
         {7200, true, model, link_a, 8, false, false},
         {7200, true, model, link_a, 7, true, false}, // reset not yet consumed
         {7200, false, 0, 0, 7, false, false},        // reset consumed; new detector still missing
-        {stored.end_unix_s + CHECKUP_WINDOW_S - 1, true, model, link_a, 7, false, true},
-        {stored.end_unix_s + CHECKUP_WINDOW_S, true, model, link_a, 7, false, false},
+        {stored.end_unix_s + CHECKUP_RECORD_MAX_AGE_S - 1, true, model, link_a, 7, false, true},
+        {stored.end_unix_s + CHECKUP_RECORD_MAX_AGE_S, true, model, link_a, 7, false, false},
         {stored.end_unix_s - 1, true, model, link_a, 7, false, false}, // future record
     };
     for (const auto& c : cases) {
@@ -22640,12 +22675,12 @@ static void test_checkup_scoped_flash_age() {
     CHECK(select(bucket, nullptr, 0, journal, 3) == &journal[2]);
     CHECK(from_flash);
 
-    // At the same two-second remaining age, the fixed 23 completed slots retain the marker only
-    // near the end of a wall-clock hour. An evicted valid candidate is not restored evidence.
+    // At two seconds before the conservative deadline, both raster phases retain the marker.
+    // Every selected completed interval is wholly inside the rolling day.
     for (int64_t phase_s : {100LL, 3599LL}) {
         const int64_t now        = 1'728'000'000 + phase_s;
         auto          near_limit = stored;
-        near_limit.end_unix_s    = now - CHECKUP_WINDOW_S + 2;
+        near_limit.end_unix_s    = now - CHECKUP_RECORD_MAX_AGE_S + 2;
         const CheckupJournalRecord candidate{checkup_journal_bucket(near_limit.end_unix_s),
                                              near_limit};
         CHECK(checkup_journal_restore_admits(candidate.payload, candidate.bucket, now, true, model,
@@ -22662,8 +22697,8 @@ static void test_checkup_scoped_flash_age() {
                 marker += chosen->payload.checkup.starts;
             }
         }
-        CHECK(materialized == (phase_s == 3599 ? 1u : 0u));
-        CHECK(marker == (phase_s == 3599 ? 1u : 0u));
+        CHECK(materialized == 1u);
+        CHECK(marker == 1u);
     }
 
     // Every restart constructs a new ring. An independent timestamp comparison is the oracle.
@@ -22672,10 +22707,10 @@ static void test_checkup_scoped_flash_age() {
         CheckupRing retired;
         retired.push(stored.checkup);
         unsigned old_false_accepts = 0;
-        for (int64_t elapsed = 0; elapsed <= 3 * CHECKUP_WINDOW_S; elapsed += boot_s) {
+        for (int64_t elapsed = 0; elapsed <= 3 * CHECKUP_RECORD_MAX_AGE_S; elapsed += boot_s) {
             const int64_t wall = stored.end_unix_s + elapsed;
             CheckupRing   fresh;
-            const bool    expected = elapsed < CHECKUP_WINDOW_S;
+            const bool    expected = elapsed < CHECKUP_RECORD_MAX_AGE_S;
             if (checkup_journal_restore_admits(stored, bucket, wall, true, model, link_a, 7, false))
                 fresh.push(stored.checkup);
             CHECK((checkup_aggregate(fresh).starts != 0) == expected);
@@ -22686,7 +22721,7 @@ static void test_checkup_scoped_flash_age() {
         if (boot_s != 3601)
             CHECK(old_false_accepts > 0); // shorter/phase-losing boots expose old path
     }
-    const int64_t wall   = stored.end_unix_s + CHECKUP_WINDOW_S - 60;
+    const int64_t wall   = stored.end_unix_s + CHECKUP_RECORD_MAX_AGE_S - 60;
     const int64_t mono   = 2'000'000;
     const int64_t expiry = checkup_restore_expiry_us(stored.end_unix_s, wall, mono);
     CHECK(expiry == mono + 60'000'000);
@@ -22705,7 +22740,7 @@ static void test_checkup_scoped_flash_age() {
     }
     CHECK(!checkup_restored_expired(0, expiry + 1)); // live slot/gap
     CHECK(checkup_restore_expiry_us(stored.end_unix_s, stored.end_unix_s - 1, mono) == 0);
-    CHECK(checkup_restore_expiry_us(stored.end_unix_s, stored.end_unix_s + CHECKUP_WINDOW_S,
+    CHECK(checkup_restore_expiry_us(stored.end_unix_s, stored.end_unix_s + CHECKUP_RECORD_MAX_AGE_S,
                                     mono) == 0);
     // Invalid anchors fail closed; a positive lifetime near the timer's representable end
     // saturates instead of wrapping into an already-expired or undated slot.
@@ -22836,6 +22871,7 @@ int main() {
     test_published_kind();
     test_history();
     test_checkup();
+    test_checkup_evidence_overhaul();
     test_no_publish();
     test_config_model();
     test_config_transaction();

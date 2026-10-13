@@ -103,6 +103,20 @@
         "main/logic/config_model.hpp": "d70fdcb451660719d1bb3b97a86e5857081e85ae2ee15978b671bdb7af40f0f2",
         "main/logic/env3.hpp": "41a3d7ad895bbd97ca97b5cde32bb3b0ccd22d392008f47eb396d52b987ce0ef"
       }
+    },
+    {
+      "compilers": {
+        "clang-17-darwin": "Apple Clang 17.0.0",
+        "gcc-13-linux-ubuntu24": "ESP-IDF v6.1 container GCC 13.3.0",
+        "gcc-15-linux-ubuntu26": "Ubuntu 26.04 aarch64 GCC 15.2.0-16ubuntu1"
+      },
+      "hosted_confirmation": "gcc-15-github-linux-ubuntu26 repeats the local GCC 15 diagnosis inventory; authoritative CI pending",
+      "runner": "scripts/run-mock-tests.sh --coverage",
+      "scope": "Evidence-bounded diagnosis, endpoint coverage, source freshness, long-run widths and circulation-bound persistence; both affected ratios increase or remain complete, all other inventories and floors retained",
+      "sources": {
+        "main/logic/checkup.hpp": "e1f049b1d9cd5a9eece1725da1980e08ec87adfe10e815047ec65a7da62570ad",
+        "main/logic/checkup_persist.hpp": "43e113183289aeff97915749da4e89e20ed363215f688a73dd0305264eb5bf04"
+      }
     }
   ],
   "method": "Exact taken/outcome inventories are measured by scripts/run-mock-tests.sh --coverage and bound to compiler family, major version and platform; hosted profiles additionally bind the runner image. The gate rejects inventory mismatches and any historical ratio decrease. Updated hosted inventories require authoritative CI confirmation. Historical measurement notes remain in Git; profiles contain the enforced counts. Measurements below identify changed sources and local compiler provenance without changing checker rules or the 95-percent executable-line floor.",
@@ -141,12 +155,12 @@
         "taken": 6
       },
       "main/logic/checkup.hpp": {
-        "outcomes": 707,
-        "taken": 633
+        "outcomes": 825,
+        "taken": 748
       },
       "main/logic/checkup_persist.hpp": {
-        "outcomes": 113,
-        "taken": 113
+        "outcomes": 125,
+        "taken": 125
       },
       "main/logic/chunk_sink.hpp": {
         "outcomes": 272,
@@ -523,12 +537,12 @@
         "taken": 8
       },
       "main/logic/checkup.hpp": {
-        "outcomes": 817,
-        "taken": 727
+        "outcomes": 951,
+        "taken": 861
       },
       "main/logic/checkup_persist.hpp": {
-        "outcomes": 137,
-        "taken": 137
+        "outcomes": 153,
+        "taken": 153
       },
       "main/logic/chunk_sink.hpp": {
         "outcomes": 308,
@@ -905,12 +919,12 @@
         "taken": 8
       },
       "main/logic/checkup.hpp": {
-        "outcomes": 819,
-        "taken": 729
+        "outcomes": 953,
+        "taken": 863
       },
       "main/logic/checkup_persist.hpp": {
-        "outcomes": 137,
-        "taken": 137
+        "outcomes": 153,
+        "taken": 153
       },
       "main/logic/chunk_sink.hpp": {
         "outcomes": 308,
@@ -1287,12 +1301,12 @@
         "taken": 8
       },
       "main/logic/checkup.hpp": {
-        "outcomes": 819,
-        "taken": 729
+        "outcomes": 953,
+        "taken": 863
       },
       "main/logic/checkup_persist.hpp": {
-        "outcomes": 137,
-        "taken": 137
+        "outcomes": 153,
+        "taken": 153
       },
       "main/logic/chunk_sink.hpp": {
         "outcomes": 308,

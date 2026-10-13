@@ -2016,45 +2016,45 @@ const MODEL_DESCRIPTIONS = {
   // are not on this bus — and a reader who assumes the firmware is asserting more than it is will draw
   // the wrong conclusion from a correct number.
   health_fault: {
-    what: "Reports the heat pump's own error or warning state. An active error gives WARNING; a warning/caution or a message that appeared and cleared within 24 hours gives NOTE. This is the unit speaking, not a project guess.",
-    normal: "No current or remembered message after every supported fault row was readable. A cleared message can remain visible for up to 24 hours; an active code is shown under Operation.",
-    de: { what: "Meldet den Fehler- oder Warnzustand der Wärmepumpe selbst. Ein aktiver Fehler ergibt WARNUNG; eine Warnung/Vorsicht oder eine in 24 Stunden erschienene und wieder verschwundene Meldung ergibt HINWEIS. Das ist keine Projekt-Vermutung.",
-          normal: "Keine aktuelle oder gemerkte Meldung, nachdem alle unterstützten Störungszeilen lesbar waren. Eine verschwundene Meldung kann bis zu 24 Stunden sichtbar bleiben; ein aktiver Code steht unter „Betrieb“." } },
+    what: "Current and remembered fault messages reported by the heat pump.",
+    normal: "A message does not identify its cause; disappearance does not prove resolution.",
+    de: { what: "Aktuelle und gespeicherte Störungsmeldungen der Wärmepumpe.",
+          normal: "Eine Meldung belegt keine Ursache; ihr Verschwinden belegt keine Behebung." } },
   health_dhw_loss: {
-    what: "Measures quiet-hour R5T without charge/draw/heat. R5T is one point in a stratified tank. K/h is the greatest hourly drop, not mean/day total; pump tag is correlation, not cause.",
-    normal: "NOTE ≥0.8 K/h is a project heuristic; volume/room-temperature gap affects rate. Detection ends near 1.85 K/h; faster loss may look like a draw. OK proves neither insulation nor valves. 200 l assumes uniform cooling. 24 h sets each window=maximum and assumes COP 2.5–3.0: replacement-electricity direction, not measured daily use.",
-    de: { what: "Misst ruhige R5T-Stunden ohne Laden/Zapfen/Heizen. R5T: ein Punkt im geschichteten Speicher. K/h: höchster Stundenabfall, kein Mittel-/Tageswert; Pumpenangabe: Zusammenhang, keine Ursache.",
-          normal: "HINWEIS ≥0,8 K/h ist Projektheuristik; Volumen/Abstand zur Raumtemperatur ändern den Wert. Erkennung endet nahe 1,85 K/h; mehr Verlust wirkt wie Zapfung. OK belegt weder Dämmung noch Ventile. 200 l nimmt gleichmäßige Abkühlung an. 24 h setzt jedes Fenster=Maximum und COP 2,5–3,0 an: elektrischer Nachheizbedarf, kein Messwert." } },
+    what: "Accepted hourly drops at tank sensor R5T, one point in a stratified tank, not an energy measurement.",
+    normal: "Project hint ≥0.8 K/h; cooling near 1.85 K/h or faster may be excluded as draw-like. Circulation overlap is correlation, not cause; no tank-wide conclusion.",
+    de: { what: "Gefilterte Stundenabfälle am Speichersensor R5T, einem Punkt im geschichteten Speicher, keine Energiemessung.",
+          normal: "Interne Hinweisschwelle ≥0,8 K/h; Abkühlung nahe 1,85 K/h oder schneller kann als zapfungsähnlich ausgeschlossen werden. Zirkulationsüberschneidung belegt keine Ursache und erlaubt kein Speicherurteil." } },
   health_cycling: {
-    what: "Counts each compressor change from OFF to ON and how long a complete run lasted. Where the signals permit, runs are separated into space heating, hot water and cooling. Mixed or unread runs are shown as unclassified.",
-    normal: "Confirmed heating runs average at least 10 min. With 12 or more averaging under 10 min, NOTE appears. Hot water and cooling are excluded. If too many runs are unclassified, all runs are assessed together. This is not a Daikin limit.",
-    de: { what: "Zählt jeden Verdichterwechsel von OFF zu ON und die Dauer eines vollständigen Laufs. Wenn die Signale reichen, werden Raumheizung, Warmwasser und Kühlen getrennt. Gemischte oder ungelesene Läufe erscheinen als „ohne Zuordnung“.",
-          normal: "Bestätigte Heizläufe dauern im Mittel mindestens 10 min. Bei mindestens 12 Läufen unter 10 min erscheint HINWEIS. Warmwasser und Kühlen zählen nicht mit. Sind zu viele Läufe ungeklärt, werden alle gemeinsam bewertet. Kein Daikin-Grenzwert." } },
+    what: "Compressor OFF-to-ON starts and durations of complete, consistently classified heating runs.",
+    normal: "Project hint: ≥12 heating runs averaging <10 min; ≥90% of all completed runs classified. Excludes hot water, cooling and unclassified runs; no Daikin limit.",
+    de: { what: "Verdichterstarts von OFF zu ON und vollständige, durchgehend zugeordnete Heizläufe.",
+          normal: "Interne Regel: ≥12 Heizläufe im Mittel <10 min; ≥90 % aller abgeschlossenen Läufe zugeordnet. Warmwasser, Kühlung und ungeklärte Läufe zählen nicht; kein Daikin-Grenzwert." } },
   health_defrost: {
-    what: "Counts defrost transitions and their share of readable compressor runtime. Defrost is normal in cold, damp weather. The separate R4T de-icer value is live context, not part of this 24-hour verdict.",
-    normal: "Up to 15%; above it with at least three defrosts gives NOTE only. Not a Daikin limit: humidity and whole-coil surface temperature are unavailable, and one R4T point cannot establish the entire coil's ice state.",
-    de: { what: "Zählt Abtaustarts und ihren Anteil an der lesbaren Verdichterlaufzeit. Abtauen ist bei kaltem, feuchtem Wetter normal. Der separate R4T-Enteiser-Wert ist Live-Kontext und kein Teil dieses 24-Stunden-Urteils.",
-          normal: "Bis 15 %; darüber erscheint bei mindestens drei Abtauungen nur HINWEIS. Kein Daikin-Grenzwert: Luftfeuchte und Temperatur der gesamten Wärmetauscherfläche fehlen; ein R4T-Punkt belegt nicht deren gesamten Vereisungszustand." } },
+    what: "Defrost starts and their share of compressor runtime with readable compressor and defrost states.",
+    normal: "Project hint: ≥3 paired events and >15%. Humidity and whole-coil temperature are unavailable; no Daikin fault limit.",
+    de: { what: "Abtaustarts und ihr Anteil an der Verdichterlaufzeit bei lesbarem Verdichter- und Abtaustatus.",
+          normal: "Interne Regel: ≥3 zugeordnete Vorgänge und >15 %. Luftfeuchte und Temperatur der gesamten Wärmetauscherfläche fehlen; kein Daikin-Störungsgrenzwert." } },
   health_pressure: {
-    what: "Shows the lowest valid water pressure measured in the heating circuit during the rolling window.",
-    normal: "Above 1.0 bar. At or below 1.0 bar gives a NOTE immediately and a WARNING after 60 continuous seconds. The permitted range can vary by model, so compare it with the exact unit manual.",
-    de: { what: "Zeigt den niedrigsten gültigen Wasserdruck, der im Heizkreis während des rollierenden Fensters gemessen wurde.",
-          normal: "Über 1,0 bar. Bei höchstens 1,0 bar erscheint sofort HINWEIS und nach 60 durchgehenden Sekunden WARNUNG. Der erlaubte Bereich kann je Modell abweichen; mit der genauen Geräteanleitung vergleichen." } },
+    what: "Water-pressure samples accepted by the decoder.",
+    normal: "Project rule: ≤1.0 bar gives NOTE; 60 continuously observed seconds gives WARNING. This common threshold is not verified for every model; its exact manual applies.",
+    de: { what: "Vom Decoder angenommene Wasserdruckwerte.",
+          normal: "Interne Regel: ≤1,0 bar ergibt HINWEIS, 60 durchgehend beobachtete Sekunden WARNUNG. Diese verbreitete Grenze ist nicht für jedes Modell bestätigt; maßgeblich ist dessen genaue Anleitung." } },
   health_flow: {
-    what: "Shows the lowest water flow after the internal pump had run continuously for 60 seconds. Pump startup, stopped-pump readings and communication gaps are excluded.",
-    normal: "MEASURED ONLY: this is an observed part-load minimum after pump run-up, not the nominal or design flow. There is no universal limit; a manual minimum applies only to the same model, mode and conditions. One low value without a unit fault proves little.",
-    de: { what: "Zeigt den niedrigsten Wasserdurchfluss, nachdem die interne Pumpe 60 Sekunden durchgehend lief. Pumpenanlauf, Werte bei stehender Pumpe und Kommunikationslücken werden ausgeschlossen.",
-          normal: "NUR MESSWERT: Das ist ein beobachtetes Teillast-Minimum nach Pumpenanlauf, nicht der Nenn- oder Auslegungsdurchfluss. Eine allgemeine Grenze gibt es nicht; ein Anleitungs-Minimum gilt nur für dasselbe Modell, dieselbe Betriebsart und dieselben Bedingungen. Ein Einzelwert ohne Anlagenstörung beweist wenig." } },
+    what: "Lowest flow after 60 continuously observed seconds of internal pump operation.",
+    normal: "Not nominal flow or proof of part load. Manual limits need the same model, mode and conditions; the value alone cannot establish insufficient flow.",
+    de: { what: "Niedrigster Durchfluss nach 60 durchgehend beobachteten Sekunden mit laufender interner Pumpe.",
+          normal: "Kein Nenndurchfluss oder Teillastnachweis. Anleitungsgrenzen benötigen dasselbe Modell, dieselbe Betriebsart und Bedingungen; der Wert allein belegt keine Unterversorgung." } },
   health_heater: {
-    what: "Shows separately how long the electric heater for space heating (BUH) and the heater in the hot-water tank (BSH) were observed running.",
-    normal: "MEASURED ONLY. Cold weather, emergency mode, defrost support, hot-water schedules or surplus-energy control can all make electric-heater runtime intentional. There is no universal OK/WARNING limit.",
-    de: { what: "Zeigt getrennt, wie lange der elektrische Zusatzheizer für den Heizkreis (BUH) und der Heizstab im Warmwasserspeicher (BSH) beobachtet wurden.",
-          normal: "NUR MESSWERT. Kälte, Notbetrieb, Abtauhilfe, Warmwasser-Zeitplan oder Überschusssteuerung können elektrische Laufzeit erklären. Es gibt keine allgemeine Grenze für OK/WARNUNG." } },
+    what: "Observed ON time of the circuit heater (BUH) and tank heater (BSH).",
+    normal: "Runtime is not energy consumption and cannot establish unnecessary heating.",
+    de: { what: "Beobachtete ON-Zeit des Zusatzheizers (BUH) und Speicherheizstabs (BSH).",
+          normal: "Laufzeit ist kein Energieverbrauch und belegt kein unnötiges Heizen." } },
   health_retries: {
-    what: "Experimental watch of five internal protection counters. Only a clear increase between comparable readings counts, including one first visible while stopped or at a compressor-state boundary. Baseline, stable or decreasing values, gaps and resets do not.",
-    normal: "No observed increase. An increase gives NOTE, not a fault diagnosis; no increase cannot prove that the unit never limited itself because the counters are not fully documented.",
-    de: { what: "Experimentelle Beobachtung von fünf internen Schutzzählern. Nur ein klarer Anstieg zwischen vergleichbaren Messungen zählt, auch wenn er erst im Stillstand oder an einer Verdichter-Zustandsgrenze sichtbar wird. Basiswert, stabile oder abnehmende Werte, Lücken und Rücksetzungen zählen nicht.",
-          normal: "Kein beobachteter Anstieg. Ein Anstieg ergibt HINWEIS, keine Störungsdiagnose; kein Anstieg beweist wegen unvollständig dokumentierter Zähler nicht, dass die Anlage nie begrenzt hat." } },
+    what: "Comparable rises in five experimental counters, including while stopped or at a compressor-state boundary.",
+    normal: "Gaps, resets and non-rises do not count. Stable counters cannot rule out limiting or identify a cause.",
+    de: { what: "Vergleichbare Anstiege in fünf experimentellen Zählern, auch im Stillstand oder an Verdichter-Zustandsgrenzen.",
+          normal: "Lücken, Rücksetzungen und fehlende Anstiege zählen nicht. Stabile Zähler schließen Begrenzung nicht aus und belegen keine Ursache." } },
   // The two board-memory rows on the ESP32 card. The copy has one job beyond naming the number: to
   // say what the SHAPE of the curve means, because that is the whole reason these rows exist rather
   // than living on /status alone.
@@ -2110,7 +2110,8 @@ function modelDescRow(id, label, value, opt = {}) {
   // No trend half here: the firmware keeps series for catalog readings, and these rows are model
   // identity — a nameplate fact, not something that moves.
   return descAccordion(`model:${id}`, label, val, opt.cls || "",
-                       (opt.bodyPrefix || "") + descBodyHtml(d, undefined, modelDescriptionCopy(id)));
+                       (opt.bodyPrefix || "") + descBodyHtml(d, undefined, modelDescriptionCopy(id),
+                         id.startsWith("health_") ? "meaning.label" : "normal.label"));
 }
 
 // Toggle a value row's description accordion. Only the LIVE element is flipped here (so the CSS
