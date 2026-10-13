@@ -148,7 +148,7 @@ deletions before replacements. Preserve the base topic when upgrading or replaci
   discovery can replace old single-marker configurations. If it is not, pause consumers that rely
   on the old marker and migrate only the confirmed old configurations before trusting availability.
 - Default and bench entity IDs remain stable. Custom bases get unambiguous entity IDs, and old
-  short-MAC aliases are removed. Export relevant entity customizations and references before this
+  short-MAC aliases are no longer advertised. Export relevant entity customizations and references before this
   migration; existing merged HA devices, old aliases and custom unique IDs need owner reconciliation.
 - Current-namespace ungrouped and renamed discovery is deleted before replacements. Old broker,
   old-base and ambiguous MAC-era configurations need the targeted cleanup in the migration guide.

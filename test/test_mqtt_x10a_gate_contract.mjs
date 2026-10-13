@@ -56,7 +56,7 @@ assert.match(builder,
   "the initial client must arm the retained broker-transport LWT");
 assert.match(mqtt, /if \(s_board\.empty\(\)\)[\s\S]*?set_status\(false, "board MAC read failed"\)[\s\S]*?return;/,
   "a failed MAC read must stop before creating an unidentified client");
-assert.match(discovery, /append_x10a_availability[\s\S]*?state_topic \+ "\/status"[\s\S]*?availability_mode/,
+assert.match(discovery, /append_x10a_availability[\s\S]*?state_topic,\s*"\/status[\s\S]*?availability_mode/,
   "X10A discovery must require both exact transport/source availability topics");
 assert.equal([...mqtt.matchAll(/esp_mqtt_client_start\s*\(/g)].length, 1,
   "initial start and resume retries must share the checked lifecycle wrapper");

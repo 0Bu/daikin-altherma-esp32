@@ -140,7 +140,7 @@ inline void append_x10a_availability(std::string& j, const std::string& transpor
                                      const std::string& state_topic) {
     j += "\"availability\":[{";
     json_append_literal_string_member(j, "\"topic\":\"", transport_topic, "\"},{");
-    json_append_literal_string_member(j, "\"topic\":\"", state_topic + "/status", "\"");
+    json_append_literal_string_member(j, "\"topic\":\"", state_topic, "/status\"");
     j += "}],\"availability_mode\":\"all\",";
 }
 

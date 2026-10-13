@@ -110,7 +110,7 @@ inline MqttPublishGateDecision mqtt_publish_gate_step(MqttPublishGateState state
 // Every OTA pause therefore withdraws it first, the check too: an install always consumes a
 // completed check, and when the install follows before an MQTTS client has passed its resume gate,
 // the install's own pause finds the client already stopped. Otherwise the resumed publisher's
-// ordinary reconnect announce restores `online` once X10A is live and the install withdraws it
+// ordinary reconnect announce restores transport `online` and the install withdraws it
 // again; a check or failed install resumes the same way. A pause that finds the client stopped or
 // reconnecting after an earlier stop cannot withdraw anything (docs/ARCHITECTURE.md).
 // A Weather pause is never followed by a restart and keeps its short gap without availability

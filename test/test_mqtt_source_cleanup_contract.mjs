@@ -207,12 +207,20 @@ assert.deepEqual(retiredWeatherEntries, [
   "binary_sensor/weather_forecast_available",
   "binary_sensor/weather_forecast_fresh",
 ], "retired Weather cleanup must keep the exact frozen four-topic ledger");
-const modbusRetractionStart = mqtt.indexOf("static bool retract_modbus_discovery(");
-const modbusRetractionEnd = mqtt.indexOf("static bool publish_env3_discovery", modbusRetractionStart);
-const modbusRetraction = mqtt.slice(modbusRetractionStart, modbusRetractionEnd);
-assert.match(modbusRetraction,
-  /for \(int i = 0; i < RETIRED_MODBUS_HA_SENSOR_COUNT; i\+\+\)/,
-  "periodic HomeHub convergence must use only the frozen retirement ledger");
+const periodicStart = mqtt.indexOf("static void service_periodic_discovery_retirement() {");
+const periodicEnd = mqtt.indexOf("static bool publish_x10a_state", periodicStart);
+assert.ok(periodicStart >= 0 && periodicEnd > periodicStart);
+const periodic = mqtt.slice(periodicStart, periodicEnd);
+assert.match(periodic,
+  /RETIRED_MODBUS_HA_SENSOR_COUNT \+ RETIRED_WEATHER_HA_SENSOR_COUNT/,
+  "periodic convergence must use only the two frozen retirement ledgers");
+assert.match(periodic,
+  /retired_modbus_discovery_topic[\s\S]*?RETIRED_MODBUS_HA_SENSORS\[i\][\s\S]*?retired_weather_discovery_topic[\s\S]*?RETIRED_WEATHER_HA_SENSORS\[i - RETIRED_MODBUS_HA_SENSOR_COUNT\]/);
+assert.match(periodic,
+  /if \(!retire_exact_topic\(MqttRetirementOwner::PeriodicDiscovery, topic\)\) return;\s*\+\+s_periodic_discovery_step/,
+  "periodic retirement must advance only after its exact-topic PUBACK");
+assert.match(periodic, /work < 8/,
+  "periodic retirement must leave a bounded slice for ordinary telemetry");
 
 const taskStart = mqtt.indexOf("static void mqtt_task(void*)");
 const taskEnd = mqtt.indexOf("static bool build_client(", taskStart);
@@ -226,8 +234,8 @@ assert.ok(refs >= 0 && requestedCleanup > refs && periodicRetirement > requested
 "source tombstones and periodic retirement must run with inbound MQTT, outside X10A authority");
 const retirementBody = task.slice(periodicRetirement, ordinaryGate);
 assert.match(retirementBody,
-  /if \(ha_retire_elapsed_s >= HA_RETIRE_INTERVAL_S\)[\s\S]*?retract_modbus_discovery\(\)[\s\S]*?retract_weather_discovery\(\)[\s\S]*?ha_retire_elapsed_s = 0/,
-  "periodic discovery convergence must reset its interval after one bounded pass");
+  /if \(ha_retire_elapsed_s >= HA_RETIRE_INTERVAL_S\)[\s\S]*?if \(!s_periodic_discovery_pending\) request_periodic_discovery_retirement\(\);\s*ha_retire_elapsed_s = 0/,
+  "periodic convergence must queue one retryable pass and reset its interval");
 const publishCycleBody = task.slice(ordinaryGate);
 assert.match(publishCycleBody, /if \(!cleanup_cycle\.weather\)[\s\S]*?publish_weather_state/,
   "requested Weather cleanup must suppress stale-snapshot publication");

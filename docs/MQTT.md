@@ -34,7 +34,8 @@ backoff. Failed event registration prevents transport start and reports an expli
 One client starts with the retained transport LWT immediately, without waiting for X10A. Bridge
 diagnostics, HomeHub, ENV III, forecast and inbound observers keep their independent lifecycles.
 X10A discovery uses `availability_mode: all`: both `<base>/status` and `<base>/x10a/status` must be
-online. Board and accessory discovery uses transport availability; missing accessory keys stay unknown.
+online. Board discovery uses transport availability; accessory discovery also requires its own
+numeric reading, so missing accessory keys make that entity unavailable.
 
 Each connection first withdraws old X10A availability. A current X10A payload accepted by esp-mqtt
 then permits source `online`; rejected sends are retried. Before the first valid reply, and at

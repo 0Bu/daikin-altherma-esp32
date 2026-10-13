@@ -1518,9 +1518,9 @@ python3 - "$TMP/main/mqtt_ha.cpp" <<'PY4'
 import sys
 p = sys.argv[1]
 s = open(p).read()
-old = ('                        retract_weather_discovery();\n'
+old = ('                        if (!s_periodic_discovery_pending) request_periodic_discovery_retirement();\n'
        '                        ha_retire_elapsed_s = 0;\n')
-new = '                        retract_weather_discovery();\n'
+new = '                        if (!s_periodic_discovery_pending) request_periodic_discovery_retirement();\n'
 seed = s.replace(old, new, 1)
 assert seed != s, "seed 85 did not apply — periodic retirement reset moved"
 open(p, "w").write(seed)

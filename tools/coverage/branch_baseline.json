@@ -132,14 +132,49 @@
         "main/logic/checkup.hpp": "e1f049b1d9cd5a9eece1725da1980e08ec87adfe10e815047ec65a7da62570ad",
         "main/logic/checkup_persist.hpp": "43e113183289aeff97915749da4e89e20ed363215f688a73dd0305264eb5bf04"
       }
+    },
+    {
+      "runner": "scripts/run-mock-tests.sh --coverage",
+      "compilers": {
+        "clang-17-darwin": "Apple clang version 17.0.0 (clang-1700.6.4.2)",
+        "gcc-13-linux-ubuntu24": "g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+        "gcc-15-linux-ubuntu26": "g++ (Ubuntu 15.2.0-16ubuntu1) 15.2.0"
+      },
+      "hosted_confirmation": "The hosted GCC 15 profile uses the measured local inventory for these scoped headers and awaits authoritative PR CI confirmation; unchanged hosted inventories remain intact.",
+      "scope": "Final split availability, injective identity, bounded ACK retirement and full-field profile storage guards. Current-source positive and negative cases cover actual catalog identities and every GCC retirement outcome. Every existing per-file ratio is retained or raised; no checker or line floor changes.",
+      "sources": {
+        "main/logic/availability.hpp": "726c7cc7e1c439449939ae3da967524e2f41f10c7ee4c7fab12f6ec8d9abbe6a",
+        "main/logic/discovery.hpp": "7f9354d4c52f4e78190c11dd12d1b710d1ffece4ceadb98322acdb2ee6383133",
+        "main/logic/ha_device.hpp": "ddba158580e787bbc3db2128fe88550a2e00de7c5c222aed9cb9a1c2f5393ed5",
+        "main/logic/mqtt_publish_gate.hpp": "e79cf21f4b004b41c073c33bdcd11fbaec6efaf771bc3c1305c69a5b3f80e3fe",
+        "main/logic/mqtt_retirement.hpp": "08a760b222afa89f953a006114398447694eb62e80cfb128762aafbbf53dd1c7",
+        "main/logic/mqtt_retirement_identity.hpp": "71fcc71ed25a1f337e194bd4bd2ad5faeed78667ef4450aa5901fceb4abeb52e",
+        "main/logic/mqtt_retirement_store.hpp": "6d3cf00039f51a51d7fcf4449def9506417955ceade53d641cd729267b983814",
+        "main/logic/profile_table_equal.hpp": "5032e48cc321c051278af70f9b28efafc2638d820eb237386aaede7b85ed4b3f"
+      },
+      "test_source_sha256": "03cb951fa336b7ef2aea4243d896a8f14d82bf54439c74a8da8000f14cc7ba5e",
+      "local_executable_lines": {
+        "clang-17-darwin": [
+          8755,
+          8972
+        ],
+        "gcc-13-linux-ubuntu24": [
+          8528,
+          8850
+        ],
+        "gcc-15-linux-ubuntu26": [
+          8530,
+          8852
+        ]
+      }
     }
   ],
   "method": "Exact taken/outcome inventories are measured by scripts/run-mock-tests.sh --coverage and bound to compiler family, major version and platform; hosted profiles additionally bind the runner image. The gate rejects inventory mismatches and any historical ratio decrease. Updated hosted inventories require authoritative CI confirmation. Historical measurement notes remain in Git; profiles contain the enforced counts. Measurements below identify changed sources and local compiler provenance without changing checker rules or the 95-percent executable-line floor.",
   "profiles": {
     "clang-17-darwin": {
       "main/logic/availability.hpp": {
-        "outcomes": 81,
-        "taken": 75
+        "taken": 76,
+        "outcomes": 81
       },
       "main/logic/binary_semantics.hpp": {
         "outcomes": 24,
@@ -234,8 +269,8 @@
         "taken": 72
       },
       "main/logic/discovery.hpp": {
-        "outcomes": 270,
-        "taken": 149
+        "taken": 147,
+        "outcomes": 266
       },
       "main/logic/env3.hpp": {
         "outcomes": 120,
@@ -258,8 +293,8 @@
         "taken": 12
       },
       "main/logic/ha_device.hpp": {
-        "outcomes": 132,
-        "taken": 109
+        "taken": 145,
+        "outcomes": 172
       },
       "main/logic/health_gate.hpp": {
         "outcomes": 18,
@@ -390,16 +425,16 @@
         "taken": 258
       },
       "main/logic/mqtt_publish_gate.hpp": {
-        "outcomes": 20,
-        "taken": 20
+        "taken": 20,
+        "outcomes": 20
       },
       "main/logic/mqtt_retirement.hpp": {
-        "outcomes": 26,
-        "taken": 26
+        "taken": 26,
+        "outcomes": 26
       },
       "main/logic/mqtt_retirement_store.hpp": {
-        "outcomes": 66,
-        "taken": 64
+        "taken": 64,
+        "outcomes": 66
       },
       "main/logic/mqtt_uri.hpp": {
         "outcomes": 54,
@@ -524,12 +559,20 @@
       "main/logic/x10a_snapshot.hpp": {
         "outcomes": 40,
         "taken": 33
+      },
+      "main/logic/mqtt_retirement_identity.hpp": {
+        "taken": 59,
+        "outcomes": 64
+      },
+      "main/logic/profile_table_equal.hpp": {
+        "taken": 36,
+        "outcomes": 36
       }
     },
     "gcc-13-linux-ubuntu24": {
       "main/logic/availability.hpp": {
-        "outcomes": 87,
-        "taken": 82
+        "taken": 83,
+        "outcomes": 87
       },
       "main/logic/binary_semantics.hpp": {
         "outcomes": 24,
@@ -624,8 +667,8 @@
         "taken": 82
       },
       "main/logic/discovery.hpp": {
-        "outcomes": 288,
-        "taken": 161
+        "taken": 161,
+        "outcomes": 288
       },
       "main/logic/env3.hpp": {
         "outcomes": 144,
@@ -648,8 +691,8 @@
         "taken": 11
       },
       "main/logic/ha_device.hpp": {
-        "outcomes": 100,
-        "taken": 82
+        "taken": 162,
+        "outcomes": 188
       },
       "main/logic/health_gate.hpp": {
         "outcomes": 26,
@@ -780,8 +823,8 @@
         "taken": 371
       },
       "main/logic/mqtt_publish_gate.hpp": {
-        "outcomes": 36,
-        "taken": 35
+        "taken": 35,
+        "outcomes": 36
       },
       "main/logic/mqtt_uri.hpp": {
         "outcomes": 66,
@@ -906,12 +949,28 @@
       "main/logic/x10a_snapshot.hpp": {
         "outcomes": 44,
         "taken": 36
+      },
+      "main/logic/mqtt_retirement.hpp": {
+        "taken": 30,
+        "outcomes": 30
+      },
+      "main/logic/mqtt_retirement_identity.hpp": {
+        "taken": 68,
+        "outcomes": 68
+      },
+      "main/logic/mqtt_retirement_store.hpp": {
+        "taken": 68,
+        "outcomes": 68
+      },
+      "main/logic/profile_table_equal.hpp": {
+        "taken": 40,
+        "outcomes": 40
       }
     },
     "gcc-15-github-linux-ubuntu26": {
       "main/logic/availability.hpp": {
-        "outcomes": 87,
-        "taken": 82
+        "taken": 83,
+        "outcomes": 87
       },
       "main/logic/binary_semantics.hpp": {
         "outcomes": 24,
@@ -1006,8 +1065,8 @@
         "taken": 82
       },
       "main/logic/discovery.hpp": {
-        "outcomes": 288,
-        "taken": 161
+        "taken": 161,
+        "outcomes": 288
       },
       "main/logic/env3.hpp": {
         "outcomes": 144,
@@ -1030,8 +1089,8 @@
         "taken": 11
       },
       "main/logic/ha_device.hpp": {
-        "outcomes": 100,
-        "taken": 80
+        "taken": 162,
+        "outcomes": 188
       },
       "main/logic/health_gate.hpp": {
         "outcomes": 26,
@@ -1162,8 +1221,8 @@
         "taken": 371
       },
       "main/logic/mqtt_publish_gate.hpp": {
-        "outcomes": 36,
-        "taken": 35
+        "taken": 35,
+        "outcomes": 36
       },
       "main/logic/mqtt_uri.hpp": {
         "outcomes": 66,
@@ -1288,12 +1347,28 @@
       "main/logic/x10a_snapshot.hpp": {
         "outcomes": 44,
         "taken": 36
+      },
+      "main/logic/mqtt_retirement.hpp": {
+        "taken": 30,
+        "outcomes": 30
+      },
+      "main/logic/mqtt_retirement_identity.hpp": {
+        "taken": 68,
+        "outcomes": 68
+      },
+      "main/logic/mqtt_retirement_store.hpp": {
+        "taken": 68,
+        "outcomes": 68
+      },
+      "main/logic/profile_table_equal.hpp": {
+        "taken": 40,
+        "outcomes": 40
       }
     },
     "gcc-15-linux-ubuntu26": {
       "main/logic/availability.hpp": {
-        "outcomes": 87,
-        "taken": 82
+        "taken": 83,
+        "outcomes": 87
       },
       "main/logic/binary_semantics.hpp": {
         "outcomes": 24,
@@ -1388,8 +1463,8 @@
         "taken": 82
       },
       "main/logic/discovery.hpp": {
-        "outcomes": 288,
-        "taken": 161
+        "taken": 161,
+        "outcomes": 288
       },
       "main/logic/env3.hpp": {
         "outcomes": 144,
@@ -1412,8 +1487,8 @@
         "taken": 11
       },
       "main/logic/ha_device.hpp": {
-        "outcomes": 100,
-        "taken": 82
+        "taken": 162,
+        "outcomes": 188
       },
       "main/logic/health_gate.hpp": {
         "outcomes": 26,
@@ -1544,8 +1619,8 @@
         "taken": 371
       },
       "main/logic/mqtt_publish_gate.hpp": {
-        "outcomes": 36,
-        "taken": 35
+        "taken": 35,
+        "outcomes": 36
       },
       "main/logic/mqtt_uri.hpp": {
         "outcomes": 66,
@@ -1670,6 +1745,22 @@
       "main/logic/x10a_snapshot.hpp": {
         "outcomes": 44,
         "taken": 36
+      },
+      "main/logic/mqtt_retirement.hpp": {
+        "taken": 30,
+        "outcomes": 30
+      },
+      "main/logic/mqtt_retirement_identity.hpp": {
+        "taken": 68,
+        "outcomes": 68
+      },
+      "main/logic/mqtt_retirement_store.hpp": {
+        "taken": 68,
+        "outcomes": 68
+      },
+      "main/logic/profile_table_equal.hpp": {
+        "taken": 40,
+        "outcomes": 40
       }
     }
   },

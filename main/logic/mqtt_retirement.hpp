@@ -12,7 +12,8 @@ enum class MqttRetirementOwner : uint8_t {
     LegacyProbe,
     ModbusProbe,
     WeatherProbe,
-    CrashProbe
+    CrashProbe,
+    PeriodicDiscovery
 };
 
 // One exact-topic retirement at a time. The owner keeps its cursor/topic until matching PUBACK;

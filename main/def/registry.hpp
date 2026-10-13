@@ -53,6 +53,8 @@
 #include "minichiller_inverter_04_08kw.hpp"
 #include "protocol_s.hpp"
 
+#include "profile_storage.hpp"
+
 namespace daik::def {
 
 // Generic Altherma fallback: the universal register core present (with identical layout) in >=95%
@@ -124,27 +126,30 @@ struct Profile {
     size_t          count;
 };
 
+// Named sharing pointers preserve the simple registry grammar; counts remain from each original
+// generated array. The storage layer guards equality before the linker discards duplicate copies.
 inline constexpr Profile profiles[] = {
     {"generic", generic, sizeof(generic) / sizeof(generic[0])},
     {"altherma3_r_erga", altherma3_r_erga, sizeof(altherma3_r_erga) / sizeof(altherma3_r_erga[0])},
     // --- generated ---
-    {"altherma_bizone_cb_04_08kw", altherma_bizone_cb_04_08kw,
+    {"altherma_bizone_cb_04_08kw", profile_storage_altherma_lt_ca_cb_04_08kw,
      sizeof(altherma_bizone_cb_04_08kw) / sizeof(altherma_bizone_cb_04_08kw[0])},
-    {"altherma_bizone_cb_11_16kw", altherma_bizone_cb_11_16kw,
+    {"altherma_bizone_cb_11_16kw", profile_storage_altherma_bizone_cb_11_16kw,
      sizeof(altherma_bizone_cb_11_16kw) / sizeof(altherma_bizone_cb_11_16kw[0])},
     {"altherma_ebla_edla_ewaa_ewya_d_series_9_16kw", altherma_ebla_edla_ewaa_ewya_d_series_9_16kw,
      sizeof(altherma_ebla_edla_ewaa_ewya_d_series_9_16kw) /
          sizeof(altherma_ebla_edla_ewaa_ewya_d_series_9_16kw[0])},
-    {"altherma_ebla_edla_d_series_4_8kw_monobloc", altherma_ebla_edla_d_series_4_8kw_monobloc,
+    {"altherma_ebla_edla_d_series_4_8kw_monobloc",
+     profile_storage_altherma_ebla_edla_d_series_4_8kw_monobloc,
      sizeof(altherma_ebla_edla_d_series_4_8kw_monobloc) /
          sizeof(altherma_ebla_edla_d_series_4_8kw_monobloc[0])},
     {"altherma_ebla_edla_d_series_9_16kw_monobloc", altherma_ebla_edla_d_series_9_16kw_monobloc,
      sizeof(altherma_ebla_edla_d_series_9_16kw_monobloc) /
          sizeof(altherma_ebla_edla_d_series_9_16kw_monobloc[0])},
-    {"altherma_egsah_x_ewsah_x_d_series_6_10kw_geo3", altherma_egsah_x_ewsah_x_d_series_6_10kw_geo3,
+    {"altherma_egsah_x_ewsah_x_d_series_6_10kw_geo3", profile_storage_altherma_gshp2,
      sizeof(altherma_egsah_x_ewsah_x_d_series_6_10kw_geo3) /
          sizeof(altherma_egsah_x_ewsah_x_d_series_6_10kw_geo3[0])},
-    {"altherma_egsqh_a_series_10kw_geo2", altherma_egsqh_a_series_10kw_geo2,
+    {"altherma_egsqh_a_series_10kw_geo2", profile_storage_altherma_gshp,
      sizeof(altherma_egsqh_a_series_10kw_geo2) / sizeof(altherma_egsqh_a_series_10kw_geo2[0])},
     {"altherma_epga_d_eab_eav_eavz_d_j_series_11_16kw",
      altherma_epga_d_eab_eav_eavz_d_j_series_11_16kw,
@@ -159,19 +164,19 @@ inline constexpr Profile profiles[] = {
      sizeof(altherma_epra_d_etv16_etb16_etvz16_d_series_14_16kw) /
          sizeof(altherma_epra_d_etv16_etb16_etvz16_d_series_14_16kw[0])},
     {"altherma_epra_d_d7_etsh_x_16p30_50_e_e7_series_14_18kw_ech2o",
-     altherma_epra_d_d7_etsh_x_16p30_50_e_e7_series_14_18kw_ech2o,
+     profile_storage_altherma_epra_d_d7_etv16_etb16_etvz16_e_e7_series_14_18kw,
      sizeof(altherma_epra_d_d7_etsh_x_16p30_50_e_e7_series_14_18kw_ech2o) /
          sizeof(altherma_epra_d_d7_etsh_x_16p30_50_e_e7_series_14_18kw_ech2o[0])},
     {"altherma_epra_d_d7_etv16_etb16_etvz16_e_e7_series_14_18kw",
-     altherma_epra_d_d7_etv16_etb16_etvz16_e_e7_series_14_18kw,
+     profile_storage_altherma_epra_d_d7_etv16_etb16_etvz16_e_e7_series_14_18kw,
      sizeof(altherma_epra_d_d7_etv16_etb16_etvz16_e_e7_series_14_18kw) /
          sizeof(altherma_epra_d_d7_etv16_etb16_etvz16_e_e7_series_14_18kw[0])},
     {"altherma_epra_e_etsh_x_16p30_50_e_series_8_12kw_ech2o",
-     altherma_epra_e_etsh_x_16p30_50_e_series_8_12kw_ech2o,
+     profile_storage_altherma_epra_e_etsh_x_16p30_50_e_series_8_12kw_ech2o,
      sizeof(altherma_epra_e_etsh_x_16p30_50_e_series_8_12kw_ech2o) /
          sizeof(altherma_epra_e_etsh_x_16p30_50_e_series_8_12kw_ech2o[0])},
     {"altherma_epra_e_etv16_etb16_etvz16_e_ej_series_8_12kw",
-     altherma_epra_e_etv16_etb16_etvz16_e_ej_series_8_12kw,
+     profile_storage_altherma_epra_e_etsh_x_16p30_50_e_series_8_12kw_ech2o,
      sizeof(altherma_epra_e_etv16_etb16_etvz16_e_ej_series_8_12kw) /
          sizeof(altherma_epra_e_etv16_etb16_etvz16_e_ej_series_8_12kw[0])},
     {"altherma_erga_d_ehsh_x_p30_50_d_series_04_08kw_ech2o",
@@ -191,7 +196,7 @@ inline constexpr Profile profiles[] = {
      sizeof(altherma_erga_e_ehsh_x_p30_50_e_ef_series_04_08kw_ech2o) /
          sizeof(altherma_erga_e_ehsh_x_p30_50_e_ef_series_04_08kw_ech2o[0])},
     {"altherma_erga_e_ehv_ehb_ehvz_e_ej_series_04_08kw",
-     altherma_erga_e_ehv_ehb_ehvz_e_ej_series_04_08kw,
+     profile_storage_altherma_ebla_edla_d_series_4_8kw_monobloc,
      sizeof(altherma_erga_e_ehv_ehb_ehvz_e_ej_series_04_08kw) /
          sizeof(altherma_erga_e_ehv_ehb_ehvz_e_ej_series_04_08kw[0])},
     {"altherma_erla_d_ebsh_x_16p30_50_d_series_11_16kw_ech2o",
@@ -205,15 +210,17 @@ inline constexpr Profile profiles[] = {
      sizeof(altherma_erla03_d_ehfh_ehfz_dj_series_3kw) /
          sizeof(altherma_erla03_d_ehfh_ehfz_dj_series_3kw[0])},
     {"altherma_erra_e_elsh_x_12p30_50_ef_series_8_12kw_ech2o",
-     altherma_erra_e_elsh_x_12p30_50_ef_series_8_12kw_ech2o,
+     profile_storage_altherma_erra_e_elsh_x_12p30_50_ef_series_8_12kw_ech2o,
      sizeof(altherma_erra_e_elsh_x_12p30_50_ef_series_8_12kw_ech2o) /
          sizeof(altherma_erra_e_elsh_x_12p30_50_ef_series_8_12kw_ech2o[0])},
     {"altherma_erra_e_elv12_elb12_elvz12_ef_ej_series_8_12kw",
-     altherma_erra_e_elv12_elb12_elvz12_ef_ej_series_8_12kw,
+     profile_storage_altherma_erra_e_elsh_x_12p30_50_ef_series_8_12kw_ech2o,
      sizeof(altherma_erra_e_elv12_elb12_elvz12_ef_ej_series_8_12kw) /
          sizeof(altherma_erra_e_elv12_elb12_elvz12_ef_ej_series_8_12kw[0])},
-    {"altherma_gshp", altherma_gshp, sizeof(altherma_gshp) / sizeof(altherma_gshp[0])},
-    {"altherma_gshp2", altherma_gshp2, sizeof(altherma_gshp2) / sizeof(altherma_gshp2[0])},
+    {"altherma_gshp", profile_storage_altherma_gshp,
+     sizeof(altherma_gshp) / sizeof(altherma_gshp[0])},
+    {"altherma_gshp2", profile_storage_altherma_gshp2,
+     sizeof(altherma_gshp2) / sizeof(altherma_gshp2[0])},
     {"altherma_hpsu6_ultra", altherma_hpsu6_ultra,
      sizeof(altherma_hpsu6_ultra) / sizeof(altherma_hpsu6_ultra[0])},
     {"altherma_hybrid", altherma_hybrid, sizeof(altherma_hybrid) / sizeof(altherma_hybrid[0])},
@@ -222,7 +229,7 @@ inline constexpr Profile profiles[] = {
     {"altherma_lt_11_16kw_hydrosplit_hydro_unit", altherma_lt_11_16kw_hydrosplit_hydro_unit,
      sizeof(altherma_lt_11_16kw_hydrosplit_hydro_unit) /
          sizeof(altherma_lt_11_16kw_hydrosplit_hydro_unit[0])},
-    {"altherma_lt_ca_cb_04_08kw", altherma_lt_ca_cb_04_08kw,
+    {"altherma_lt_ca_cb_04_08kw", profile_storage_altherma_lt_ca_cb_04_08kw,
      sizeof(altherma_lt_ca_cb_04_08kw) / sizeof(altherma_lt_ca_cb_04_08kw[0])},
     {"altherma_lt_ca_cb_11_16kw", altherma_lt_ca_cb_11_16kw,
      sizeof(altherma_lt_ca_cb_11_16kw) / sizeof(altherma_lt_ca_cb_11_16kw[0])},
@@ -232,9 +239,9 @@ inline constexpr Profile profiles[] = {
      sizeof(altherma_lt_da_pair_bml) / sizeof(altherma_lt_da_pair_bml[0])},
     {"altherma_lt_gas_inj", altherma_lt_gas_inj,
      sizeof(altherma_lt_gas_inj) / sizeof(altherma_lt_gas_inj[0])},
-    {"altherma_lt_multi_dhwhp", altherma_lt_multi_dhwhp,
+    {"altherma_lt_multi_dhwhp", profile_storage_altherma_lt_multi_dhwhp,
      sizeof(altherma_lt_multi_dhwhp) / sizeof(altherma_lt_multi_dhwhp[0])},
-    {"altherma_lt_multi_hybrid", altherma_lt_multi_hybrid,
+    {"altherma_lt_multi_hybrid", profile_storage_altherma_lt_multi_dhwhp,
      sizeof(altherma_lt_multi_hybrid) / sizeof(altherma_lt_multi_hybrid[0])},
     {"altherma_monobloc_ca_05_07kw", altherma_monobloc_ca_05_07kw,
      sizeof(altherma_monobloc_ca_05_07kw) / sizeof(altherma_monobloc_ca_05_07kw[0])},
@@ -243,13 +250,13 @@ inline constexpr Profile profiles[] = {
     {"minichiller_ewaa_ewya_d_series_4_8kw", minichiller_ewaa_ewya_d_series_4_8kw,
      sizeof(minichiller_ewaa_ewya_d_series_4_8kw) /
          sizeof(minichiller_ewaa_ewya_d_series_4_8kw[0])},
-    {"minichiller_ewaa_ewya_d_series_9_16kw", minichiller_ewaa_ewya_d_series_9_16kw,
+    {"minichiller_ewaa_ewya_d_series_9_16kw", profile_storage_altherma_bizone_cb_11_16kw,
      sizeof(minichiller_ewaa_ewya_d_series_9_16kw) /
          sizeof(minichiller_ewaa_ewya_d_series_9_16kw[0])},
-    {"minichiller_ewaq_ewyq_b_series_4_8kw", minichiller_ewaq_ewyq_b_series_4_8kw,
+    {"minichiller_ewaq_ewyq_b_series_4_8kw", profile_storage_minichiller_inverter_04_08kw,
      sizeof(minichiller_ewaq_ewyq_b_series_4_8kw) /
          sizeof(minichiller_ewaq_ewyq_b_series_4_8kw[0])},
-    {"minichiller_inverter_04_08kw", minichiller_inverter_04_08kw,
+    {"minichiller_inverter_04_08kw", profile_storage_minichiller_inverter_04_08kw,
      sizeof(minichiller_inverter_04_08kw) / sizeof(minichiller_inverter_04_08kw[0])},
     {"protocol_s", protocol_s, sizeof(protocol_s) / sizeof(protocol_s[0])},
 };

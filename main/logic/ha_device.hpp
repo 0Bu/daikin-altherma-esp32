@@ -106,7 +106,7 @@ inline std::string ha_board_id(const uint8_t* mac, size_t length) {
 
 // Preserve the two deployed legacy entity sets; their suffixes are checked against real catalogs.
 // Every custom installation has an unambiguous node/entity boundary, including canonical nodes.
-inline const char* ha_entity_separator(const std::string& node) {
+inline const char* ha_entity_separator(const std::string& node) noexcept {
     return node == "daikin_altherma_esp32" || node == "daikin_altherma_esp32_bench" ? "_" : "__";
 }
 

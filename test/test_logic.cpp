@@ -73,6 +73,7 @@
 #include "logic/mqtt_group.hpp"
 #include "logic/mqtt_cleanup.hpp"
 #include "logic/mqtt_retirement.hpp"
+#include "logic/mqtt_retirement_identity.hpp"
 #include "logic/mqtt_retirement_store.hpp"
 #include "logic/mqtt_publish_gate.hpp"
 #include "logic/ota_quiesce.hpp"
@@ -85,6 +86,7 @@
 #include "logic/lwt_select.hpp"
 #include "logic/rwt_select.hpp"
 #include "logic/profile_view.hpp"
+#include "logic/profile_table_equal.hpp"
 #include "logic/ou_stale.hpp"
 #include "logic/cop_scope.hpp"
 #include "logic/mqtt_base.hpp"
@@ -20750,6 +20752,192 @@ static void test_mqtt_cleanup() {
     CHECK(MQTT_SOURCE_CLEANUP_MAX_STEPS == 37);
 }
 
+// Integrate include logic/profile_table_equal.hpp, this function, and its call in test_logic.cpp.
+static void test_profile_table_equal() {
+    using daik::logic::profile_table_labels_equal;
+    using daik::logic::profile_tables_equal;
+    ValueDef original[] = {
+        {0x10, 1, 105, 2, 1, "Alpha", false},
+        {0x61, 2, 310, 1, -1, "Beta", true},
+    };
+    ValueDef   candidate[] = {original[0], original[1]};
+    const auto equal       = [&](const ValueDef* a, size_t na, const ValueDef* b, size_t nb) {
+        return profile_tables_equal(rt(a), rt(na), rt(b), rt(nb));
+    };
+    CHECK(equal(original, 2, candidate, 2));
+    CHECK(equal(nullptr, 0, nullptr, 0));
+    CHECK(equal(original, 0, nullptr, 0));
+    CHECK(!equal(nullptr, 1, original, 1));
+    CHECK(!equal(original, 1, nullptr, 1));
+    CHECK(!equal(nullptr, 1, nullptr, 1));
+    CHECK(!equal(original, 2, candidate, 1));
+    CHECK(!equal(original, 1, candidate, 2));
+    candidate[1].reg++;
+    CHECK(!equal(original, 2, candidate, 2));
+    candidate[1] = original[1];
+    candidate[1].offset++;
+    CHECK(!equal(original, 2, candidate, 2));
+    candidate[1] = original[1];
+    candidate[1].conv++;
+    CHECK(!equal(original, 2, candidate, 2));
+    candidate[1] = original[1];
+    candidate[1].size++;
+    CHECK(!equal(original, 2, candidate, 2));
+    candidate[1] = original[1];
+    candidate[1].type++;
+    CHECK(!equal(original, 2, candidate, 2));
+    candidate[1]            = original[1];
+    candidate[1].no_publish = false;
+    CHECK(!equal(original, 2, candidate, 2));
+    candidate[1]       = original[1];
+    candidate[1].label = "Betb";
+    CHECK(!equal(original, 2, candidate, 2));
+    candidate[1].label = "BetaX";
+    CHECK(!equal(original, 2, candidate, 2));
+    candidate[1].label = "Bet";
+    CHECK(!equal(original, 2, candidate, 2));
+    candidate[1].label = nullptr;
+    CHECK(!equal(original, 2, candidate, 2));
+    candidate[1]                         = original[1];
+    char equal_text_at_another_address[] = "Beta";
+    candidate[1].label                   = equal_text_at_another_address;
+    CHECK(equal(original, 2, candidate, 2));
+    candidate[0] = original[1];
+    candidate[1] = original[0];
+    CHECK(!equal(original, 2, candidate, 2));
+    original[0].label = candidate[0].label = nullptr;
+    original[1]                            = candidate[1];
+    candidate[0]                           = original[0];
+    CHECK(equal(original, 2, candidate, 2));
+    candidate[0].label = "";
+    CHECK(!equal(original, 2, candidate, 2));
+    CHECK(profile_table_labels_equal(rt(static_cast<const char*>(nullptr)),
+                                     rt(static_cast<const char*>(nullptr))));
+    CHECK(!profile_table_labels_equal(rt(static_cast<const char*>(nullptr)),
+                                      rt(static_cast<const char*>(""))));
+    CHECK(!profile_table_labels_equal(rt(static_cast<const char*>("")),
+                                      rt(static_cast<const char*>(nullptr))));
+    CHECK(profile_table_labels_equal(rt(static_cast<const char*>("")),
+                                     rt(static_cast<const char*>(""))));
+    CHECK(!profile_table_labels_equal(rt(static_cast<const char*>("A")),
+                                      rt(static_cast<const char*>(""))));
+    CHECK(!profile_table_labels_equal(rt(static_cast<const char*>("")),
+                                      rt(static_cast<const char*>("A"))));
+    CHECK(profile_table_labels_equal(rt(static_cast<const char*>("Alpha")),
+                                     rt(static_cast<const char*>("Alpha"))));
+    CHECK(!equal(def::altherma_gshp, sizeof(def::altherma_gshp) / sizeof(def::altherma_gshp[0]),
+                 def::altherma_gshp2,
+                 sizeof(def::altherma_gshp2) / sizeof(def::altherma_gshp2[0])));
+}
+
+static void test_mqtt_retirement_identity() {
+    MqttRetirementIdentity identity;
+    const ValueDef         binary(0x10, 0, 303, 1, -1, "Error active");
+    const ValueDef         fault(0x10, 4, 203, 1, -1, "Error Type");
+    CHECK(mqtt_retirement_identity_make(identity, fault, "error_active") ==
+          MqttRetirementIdentityResult::Ready);
+    CHECK(mqtt_retirement_identity_matches(identity, binary)); // row/companion share a real topic
+    CHECK(!mqtt_retirement_identity_matches(identity,
+                                            ValueDef(0x10, 0, 303, 1, -1, "Error active extra")));
+    CHECK(!mqtt_retirement_identity_matches(identity, ValueDef(0x10, 0, 303, 1, -1, "Error")));
+    CHECK(
+        !mqtt_retirement_identity_matches(identity, ValueDef(0x10, 0, 105, 1, -1, "Error active")));
+    CHECK(mqtt_retirement_identity_make(identity,
+                                        ValueDef(0x60, 0, 105, 1, -1, "State Error Code")) ==
+          MqttRetirementIdentityResult::Ready);
+    CHECK(mqtt_retirement_identity_matches(identity, ValueDef(0x62, 0, 105, 1, -1, "Error Code")));
+    CHECK(mqtt_retirement_identity_make(identity, ValueDef(0x20, 0, 105, 1, -1, "!!!")) ==
+          MqttRetirementIdentityResult::Empty);
+    CHECK(mqtt_retirement_identity_make(identity, ValueDef(0x20, 0, 105, 1, -1, nullptr)) ==
+          MqttRetirementIdentityResult::Empty);
+    std::string bounded_label(
+        MQTT_RETIREMENT_OBJECT_CAPACITY - std::strlen(group_for_page(0x20)) - 1, 'a');
+    CHECK(mqtt_retirement_identity_make(identity,
+                                        ValueDef(0x20, 0, 105, 1, -1, bounded_label.c_str())) ==
+          MqttRetirementIdentityResult::Ready);
+    CHECK(identity.size == MQTT_RETIREMENT_OBJECT_CAPACITY);
+    bounded_label += 'a';
+    CHECK(mqtt_retirement_identity_make(identity,
+                                        ValueDef(0x20, 0, 105, 1, -1, bounded_label.c_str())) ==
+          MqttRetirementIdentityResult::TooLong);
+    const std::string long_label(2 * MQTT_RETIREMENT_OBJECT_CAPACITY, 'a');
+    CHECK(mqtt_retirement_identity_make(identity,
+                                        ValueDef(0x20, 0, 105, 1, -1, long_label.c_str())) ==
+          MqttRetirementIdentityResult::TooLong);
+
+    CHECK(mqtt_retirement_identity_make(identity, binary) == MqttRetirementIdentityResult::Ready);
+    MqttRetirementScan       direct_scan;
+    const logic::ProfileView direct_view{&binary, 1};
+    size_t                   direct_work = 1;
+    CHECK(mqtt_retirement_scan_step(identity, direct_view, direct_scan, direct_work) ==
+          MqttRetirementPresence::Present);
+    const ValueDef           other(0x10, 8, 105, 1, -1, "Different");
+    const logic::ProfileView other_view{&other, 1};
+    direct_scan = {};
+    direct_work = 1;
+    CHECK(mqtt_retirement_scan_step(identity, other_view, direct_scan, direct_work) ==
+          MqttRetirementPresence::Absent);
+    direct_scan = {};
+    direct_work = 0;
+    CHECK(mqtt_retirement_scan_step(identity, logic::ProfileView{}, direct_scan, direct_work) ==
+          MqttRetirementPresence::Absent);
+    const ValueDef           rows[] = {ValueDef(0x10, 0, 303, 1, -1, "Error active", true),
+                                       ValueDef(0x10, 0, 0, 1, -1, "Error active"), fault};
+    const logic::ProfileView view{rows, 3};
+    MqttRetirementScan       scan;
+    size_t                   work = 0;
+    CHECK(mqtt_retirement_scan_step(identity, view, scan, work) == MqttRetirementPresence::Pending);
+    work = 1;
+    CHECK(mqtt_retirement_scan_step(identity, view, scan, work) == MqttRetirementPresence::Pending);
+    CHECK(scan.row == 1 && work == 0);
+    work = 1;
+    CHECK(mqtt_retirement_scan_step(identity, view, scan, work) == MqttRetirementPresence::Pending);
+    work = 1;
+    CHECK(mqtt_retirement_scan_step(identity, view, scan, work) == MqttRetirementPresence::Present);
+    const ValueDef           empty_fault(0x10, 4, 203, 1, -1, "!!!");
+    const logic::ProfileView empty_fault_view{&empty_fault, 1};
+    MqttRetirementScan       empty_scan;
+    work = 1;
+    CHECK(mqtt_retirement_scan_step(identity, empty_fault_view, empty_scan, work) ==
+          MqttRetirementPresence::Absent); // discovery skips the row and all of its companions
+    work = 1;
+    CHECK(mqtt_retirement_scan_step(identity, view, scan, work) == MqttRetirementPresence::Present);
+    CHECK(work == 1);
+    CHECK(mqtt_retirement_identity_make(identity, fault, FAULT_COMPANIONS[1].key) ==
+          MqttRetirementIdentityResult::Ready);
+    scan = {};
+    work = 3;
+    CHECK(mqtt_retirement_scan_step(identity, view, scan, work) == MqttRetirementPresence::Present);
+    CHECK(mqtt_retirement_identity_make(identity, ValueDef(0x62, 0, 105, 1, -1, "Absent")) ==
+          MqttRetirementIdentityResult::Ready);
+    scan = {};
+    work = 2;
+    CHECK(mqtt_retirement_scan_step(identity, view, scan, work) == MqttRetirementPresence::Pending);
+    work = 1;
+    CHECK(mqtt_retirement_scan_step(identity, view, scan, work) == MqttRetirementPresence::Absent);
+
+    // Every shipped current/historical row shape and companion fits the fixed identity and agrees
+    // with the real discovery builder; no prefix truncation may turn unsupported into Absent.
+    for (const auto& profile : def::profiles) {
+        const auto resolved = def::resolved(profile);
+        for (size_t i = 0; i < resolved.count(); ++i) {
+            const ValueDef row = logic::adjudicated(resolved[i]);
+            if (!conv_publishable(row.conv) || object_id(row.label).empty()) continue;
+            CHECK(mqtt_retirement_identity_make(identity, row) ==
+                  MqttRetirementIdentityResult::Ready);
+            CHECK(std::string(identity.object.data(), identity.size) == row_object_id(row));
+            CHECK(identity.binary == conv_is_binary(row.conv));
+            if (row.conv == 203)
+                for (size_t k = 0; k < FAULT_COMPANION_COUNT; ++k) {
+                    CHECK(mqtt_retirement_identity_make(identity, row, FAULT_COMPANIONS[k].key) ==
+                          MqttRetirementIdentityResult::Ready);
+                    CHECK(std::string(identity.object.data(), identity.size) ==
+                          companion_object_id(group_for_page(row.reg), FAULT_COMPANIONS[k].key));
+                }
+        }
+    }
+}
+
 static void test_mqtt_retirement() {
     MqttRetirementDelivery retirement;
     CHECK(!retirement.busy());
@@ -23142,6 +23330,8 @@ int main() {
     test_raw_capture();
     test_mqtt_cleanup();
     test_mqtt_retirement();
+    test_profile_table_equal();
+    test_mqtt_retirement_identity();
     test_mqtt_retirement_store();
     test_mqtt_publish_gate();
     test_published_kind();

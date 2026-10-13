@@ -77,6 +77,7 @@
 #include "logic/mqtt_base.hpp"   // mqtt_base_effective — the installation's base topic, host-tested
 #include "logic/mqtt_cleanup.hpp"
 #include "logic/mqtt_retirement.hpp"
+#include "logic/mqtt_retirement_identity.hpp"
 #include "logic/mqtt_group.hpp"
 #include "logic/mqtt_publish_gate.hpp"
 #include "logic/ota_quiesce.hpp" // stand aside while an OTA/weather TLS op owns the heap (legacy-380)
@@ -300,6 +301,13 @@ static size_t                s_retiring_profile_row           = 0;
 static size_t                s_retiring_profile_shape         = 0;
 static bool                  s_retiring_current_unpublishable = false;
 static std::string           s_current_profile_retired;
+static MqttRetirementIdentity s_retiring_identity;
+static MqttRetirementScan     s_retiring_scan;
+static bool                   s_retiring_identity_ready  = false;
+static constexpr size_t       PROFILE_RETIRE_WORK_BUDGET = 128;
+static bool        s_periodic_discovery_pending = false, s_periodic_discovery_again = false;
+static uint8_t     s_periodic_discovery_step = 0;
+static void        service_periodic_discovery_retirement();
 static uint64_t    s_last_x10a_digest = 0;            // per-topic dedup guards (mqtt_task only):
                                                       // fnv1a64 of the last X10A payload — the old
                                                       // full-string copy cost a permanent ~3 KB block
@@ -866,23 +874,6 @@ static bool retract_stale_values(const std::string& profile_id) {
     return s_stale_values_profile == profile_id;
 }
 
-static bool profile_has_discovery_topic(const logic::ProfileView& prof, const std::string& topic) {
-    for (size_t i = 0; i < prof.count(); ++i) {
-        const ValueDef d = logic::adjudicated(prof[i]);
-        if (!row_publishable(d) || !conv_publishable(d.conv) || object_id(d.label).empty())
-            continue;
-        if (discovery_topic(s_prefix, s_node, d) == topic) return true;
-        if (d.conv == 203) {
-            const std::string group = group_for_page(d.reg);
-            for (size_t k = 0; k < FAULT_COMPANION_COUNT; ++k)
-                if (companion_discovery_topic(s_prefix, s_node, group, FAULT_COMPANIONS[k].key) ==
-                    topic)
-                    return true;
-        }
-    }
-    return false;
-}
-
 static void retirement_evidence_update(uint32_t clear, uint32_t set) noexcept {
     const uint32_t before = s_retirement_evidence.load(std::memory_order_relaxed);
     s_retirement_evidence.store((before & ~clear) | set, std::memory_order_release);
@@ -977,18 +968,25 @@ static bool save_retirement_provenance(const std::string& profile_id) noexcept {
 // The remembered prior profile is independent of reconnect reannouncement. Enumerate only its
 // current grouped configs/companions missing from the replacement, then current quarantined rows;
 // never delete another base/node or a wildcard. No vector of profiles, rows or topics is built.
+static void invalidate_profile_announcement() noexcept { s_announced_profile.clear(); }
+
 static bool retract_profile_cutover(const std::string& profile_id) {
-    if (s_current_profile_retired == profile_id) return true;
+    if (s_retiring_profile_target.empty() && s_current_profile_retired == profile_id) return true;
+    // Invalidate before cursor progress, including its last ACK: P->Q->P must reannounce P
+    // after queued P deletes finish, even if P's earlier cleanup was already cached.
+    invalidate_profile_announcement();
     if (s_retiring_profile_target.empty()) {
         s_retiring_profile_target = profile_id;
         s_retiring_profile_row = s_retiring_profile_shape = 0;
         s_retiring_current_unpublishable =
             s_discovered_profile.empty() || s_discovered_profile == profile_id;
+        s_retiring_identity_ready = false;
+        s_retiring_scan           = {};
     }
     const auto target   = def::resolved(def::lookup(s_retiring_profile_target.c_str()));
     const auto previous = def::resolved(def::lookup(s_discovered_profile.c_str()));
-    size_t     budget   = 0;
-    while (budget < 8) {
+    size_t     work     = PROFILE_RETIRE_WORK_BUDGET;
+    while (work) {
         const auto& prof = s_retiring_current_unpublishable ? target : previous;
         if (s_retiring_profile_row >= prof.count()) {
             if (s_retiring_current_unpublishable) {
@@ -998,23 +996,48 @@ static bool retract_profile_cutover(const std::string& profile_id) {
             }
             s_retiring_current_unpublishable = true;
             s_retiring_profile_row = s_retiring_profile_shape = 0;
+            s_retiring_identity_ready                         = false;
+            s_retiring_scan                                   = {};
             continue;
         }
         const ValueDef d         = logic::adjudicated(prof[s_retiring_profile_row]);
         const size_t   shape     = s_retiring_profile_shape;
-        const bool     candidate = conv_publishable(d.conv) && !object_id(d.label).empty() &&
+        const bool     candidate = conv_publishable(d.conv) &&
                                (!s_retiring_current_unpublishable || !row_publishable(d)) &&
                                (shape == 0 || d.conv == 203);
         if (candidate) {
+            if (!s_retiring_identity_ready) {
+                --work;
+                const auto made = mqtt_retirement_identity_make(
+                    s_retiring_identity, d, shape == 0 ? nullptr : FAULT_COMPANIONS[shape - 1].key);
+                if (made == MqttRetirementIdentityResult::TooLong) {
+                    retirement_evidence_update(RETIRE_CURRENT_DURABLE,
+                                               RETIRE_INCOMPATIBLE | RETIRE_PENDING);
+                    retirement_store_note(RETIRE_INCOMPATIBLE,
+                                          "discovery identity exceeds bound; retirement deferred");
+                    return false;
+                }
+                if (made == MqttRetirementIdentityResult::Ready) s_retiring_identity_ready = true;
+            }
+            if (s_retiring_identity_ready && !s_retiring_current_unpublishable &&
+                mqtt_retirement_scan_step(s_retiring_identity, target, s_retiring_scan, work) ==
+                    MqttRetirementPresence::Pending)
+                return false;
+        } else
+            --work;
+        if (s_retiring_identity_ready &&
+            (s_retiring_current_unpublishable ||
+             s_retiring_scan.result == MqttRetirementPresence::Absent)) {
+            if (!work) return false;
+            --work;
             const std::string topic =
                 shape == 0 ? discovery_topic(s_prefix, s_node, d)
                            : companion_discovery_topic(s_prefix, s_node, group_for_page(d.reg),
                                                        FAULT_COMPANIONS[shape - 1].key);
-            if (s_retiring_current_unpublishable || !profile_has_discovery_topic(target, topic)) {
-                if (!retire_exact_topic(MqttRetirementOwner::Profile, topic)) return false;
-                ++budget;
-            }
+            if (!retire_exact_topic(MqttRetirementOwner::Profile, topic)) return false;
         }
+        s_retiring_identity_ready = false;
+        s_retiring_scan           = {};
         if (++s_retiring_profile_shape == 1 + FAULT_COMPANION_COUNT) {
             s_retiring_profile_shape = 0;
             ++s_retiring_profile_row;
@@ -1045,9 +1068,11 @@ static void service_pending_retirement() {
         retract_stale_values(pending);
     }
     if (!s_retiring_profile_target.empty()) {
+        invalidate_profile_announcement();
         const std::string target = s_retiring_profile_target;
         retract_profile_cutover(target);
     }
+    service_periodic_discovery_retirement();
 }
 
 // Stream one retained discovery config per value of the active profile. Every entity points at the
@@ -1109,21 +1134,6 @@ static bool publish_x10a_discovery() {
     return accepted;
 }
 
-// Builds up to v1.0.0-dev.257 exposed all HomeHub registers through HA discovery. They are retired:
-// delete those exact retained configs on every MQTT connection and periodically thereafter, and
-// never publish replacements. The repeat is intentional and idempotent — it also cleans a broker
-// restored from an old backup, while keeping the independent <base>/modbus state stream available
-// to Telegraf and other MQTT clients.
-static bool retract_modbus_discovery(int qos = 0) {
-    bool ok = true;
-    for (int i = 0; i < RETIRED_MODBUS_HA_SENSOR_COUNT; i++)
-        if (!mqtt_publish(
-                retired_modbus_discovery_topic(s_prefix, s_node, RETIRED_MODBUS_HA_SENSORS[i]), "",
-                0, qos, 1))
-            ok = false;
-    return ok;
-}
-
 static bool publish_env3_discovery() {
     bool ok = true;
     for (size_t i = 0; i < ENV3_HA_SENSOR_COUNT; ++i) {
@@ -1135,18 +1145,37 @@ static bool publish_env3_discovery() {
     return ok;
 }
 
-// Builds up to v1.0.0-dev.295 briefly exposed the forecast as four HA entities. Forecast history
-// now has one explicit consumer contract on MQTT instead; delete the frozen discovery topics and
-// never publish replacement configs. Repeating this with the Modbus retirement also cleans brokers
-// restored from a backup made while those entities existed.
-static bool retract_weather_discovery(int qos = 0) {
-    bool ok = true;
-    for (int i = 0; i < RETIRED_WEATHER_HA_SENSOR_COUNT; ++i) {
-        const RetiredHaSensor& sensor = RETIRED_WEATHER_HA_SENSORS[i];
-        if (!mqtt_publish(retired_weather_discovery_topic(s_prefix, s_node, sensor), "", 0, qos, 1))
-            ok = false;
+// Reconnects and the independent timer retire the frozen HomeHub/forecast discovery ledgers.
+// Repeat idempotently after a broker restore, using the shared ACK cursor while current source
+// telemetry stays live. A reconnect during a pass schedules one further complete pass.
+static void request_periodic_discovery_retirement() noexcept {
+    if (s_periodic_discovery_pending)
+        s_periodic_discovery_again = true;
+    else {
+        s_periodic_discovery_pending = true;
+        s_periodic_discovery_step    = 0;
     }
-    return ok;
+}
+
+static void service_periodic_discovery_retirement() {
+    if (!s_periodic_discovery_pending) return;
+    constexpr size_t count = RETIRED_MODBUS_HA_SENSOR_COUNT + RETIRED_WEATHER_HA_SENSOR_COUNT;
+    for (size_t work = 0; work < 8 && s_periodic_discovery_step < count; ++work) {
+        const size_t      i = s_periodic_discovery_step;
+        const std::string topic =
+            i < RETIRED_MODBUS_HA_SENSOR_COUNT
+                ? retired_modbus_discovery_topic(s_prefix, s_node, RETIRED_MODBUS_HA_SENSORS[i])
+                : retired_weather_discovery_topic(
+                      s_prefix, s_node,
+                      RETIRED_WEATHER_HA_SENSORS[i - RETIRED_MODBUS_HA_SENSOR_COUNT]);
+        if (!retire_exact_topic(MqttRetirementOwner::PeriodicDiscovery, topic)) return;
+        ++s_periodic_discovery_step;
+    }
+    if (s_periodic_discovery_step == count) {
+        s_periodic_discovery_pending = s_periodic_discovery_again;
+        s_periodic_discovery_again   = false;
+        s_periodic_discovery_step    = 0;
+    }
 }
 
 // Build + publish each source independently. The X10A payload is grouped by register page; the
@@ -2996,8 +3025,7 @@ static void mqtt_task(void*) {
                 } else {
                     ha_retire_elapsed_s += delay_s;
                     if (ha_retire_elapsed_s >= HA_RETIRE_INTERVAL_S) {
-                        retract_modbus_discovery();
-                        retract_weather_discovery();
+                        if (!s_periodic_discovery_pending) request_periodic_discovery_retirement();
                         ha_retire_elapsed_s = 0;
                     }
                 }
@@ -3008,6 +3036,7 @@ static void mqtt_task(void*) {
             if (s_connected) {
                 publish_stage = "announce";
                 if (s_announce.exchange(false)) {              // consume: just (re)connected
+                    request_periodic_discovery_retirement();
                     s_announced_profile.clear();               // force a fresh discovery below
                     s_last_x10a_digest = 0;                    // force full per-topic state re-seeds
                     s_last_x10a_digest_valid = false;
