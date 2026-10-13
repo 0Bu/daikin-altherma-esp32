@@ -25,6 +25,9 @@ The publisher's nominal cadence includes time spent polling and deliberate TLS p
 promise of one new physical measurement each second. Retained data can be replayed after its
 source stops, so receipt time alone never establishes measurement freshness.
 
+An initial transport-start rejection retains the initialized client and retries with bounded
+backoff. Failed event registration prevents transport start and reports an explicit error.
+
 ## Outbound availability
 
 X10A owns the outbound installation identity. Before the first valid X10A reply after boot, MQTT

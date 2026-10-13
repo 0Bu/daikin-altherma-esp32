@@ -450,17 +450,19 @@ static esp_err_t set_mqtt(httpd_req_t* req) {
             return http_send_json(req, "{\"ok\":false,\"error\":\"MQTT init failed\"}");
         }
 
-        esp_mqtt_client_register_event(client, static_cast<esp_mqtt_event_id_t>(MQTT_EVENT_ANY),
-                                       on_mqtt_validate, &ctx);
-
+        const esp_err_t registration_rc = esp_mqtt_client_register_event(
+            client, static_cast<esp_mqtt_event_id_t>(MQTT_EVENT_ANY), on_mqtt_validate, &ctx);
         // A failed start never produces an event, so waiting on the semaphore would burn the full
         // 5 s and then blame a "connection timeout" — report the real cause immediately instead.
-        // No stop() here: nothing was started.
-        if (esp_mqtt_client_start(client) != ESP_OK) {
+        // Registration rejection short-circuits start; neither case needs stop().
+        if (registration_rc != ESP_OK || esp_mqtt_client_start(client) != ESP_OK) {
             esp_mqtt_client_destroy(client);
             vSemaphoreDelete(ctx.sem);
             httpd_resp_set_status(req, "500 Internal Server Error");
-            return http_send_json(req, "{\"ok\":false,\"error\":\"MQTT client start failed\"}");
+            return http_send_json(
+                req, registration_rc != ESP_OK
+                         ? "{\"ok\":false,\"error\":\"MQTT event registration failed\"}"
+                         : "{\"ok\":false,\"error\":\"MQTT client start failed\"}");
         }
 
         bool finished = xSemaphoreTake(ctx.sem, pdMS_TO_TICKS(5000)) == pdTRUE;

@@ -11,6 +11,7 @@
 #include "fault_state.hpp"
 #include "ha_device.hpp"
 #include "mqtt_group.hpp"
+#include "json.hpp"
 
 namespace daik {
 
@@ -171,13 +172,13 @@ inline std::string env3_discovery_config(const std::string& node, const std::str
                                          const std::string& device_availability_topic,
                                          const Env3HaSensor& sensor) {
     std::string j = "{";
-    j += "\"name\":\"";         j += sensor.name; j += "\",";
-    j += "\"uniq_id\":\"";      j += node; j += '_'; j += sensor.object_id; j += "\",";
-    j += "\"stat_t\":\"";       j += state_topic; j += "\",";
+    ha_discovery_identity(j, node, sensor.name, sensor.object_id);
+    json_append_literal_string_member(j, "\"stat_t\":\"", state_topic);
     j += "\"val_tpl\":\"{{ value_json.get('"; j += sensor.json_key; j += "') }}\",";
-    j += "\"availability\":[{\"topic\":\""; j += device_availability_topic;
-    j += "\"},{\"topic\":\""; j += state_topic;
-    j += "\",\"value_template\":\"{{ 'online' if value_json.get('";
+    j += "\"availability\":[{";
+    json_append_literal_string_member(j, "\"topic\":\"", device_availability_topic, "\"},{");
+    json_append_literal_string_member(j, "\"topic\":\"", state_topic, "\"");
+    j += ",\"value_template\":\"{{ 'online' if value_json.get('";
     j += sensor.json_key;
     j += "') is number else 'offline' }}\"}],\"availability_mode\":\"all\",";
     j += "\"unit_of_meas\":\""; j += sensor.unit; j += "\",";
@@ -261,11 +262,11 @@ inline std::string discovery_config(const std::string& node, const std::string& 
     // (legacy-217).
     j += "\"name\":\"";       j += entity_name(def); j += "\",";
     j += "\"uniq_id\":\"";    j += node; j += "_"; j += row_object_id(def); j += "\",";
-    j += "\"stat_t\":\"";     j += state_topic; j += "\",";
+    json_append_literal_string_member(j, "\"stat_t\":\"", state_topic);
     j += "\"val_tpl\":\"";
     append_x10a_value_template(j, group, obj.c_str());
     j += "\",";
-    j += "\"avty_t\":\"";     j += avail_topic; j += "\",";
+    json_append_literal_string_member(j, "\"avty_t\":\"", avail_topic);
     // A binary row's state is the number 1/0 (logic/convert.hpp), which the template renders as
     // "1"/"0" — so pl_on/pl_off must be spelled out; HA's defaults are "ON"/"OFF"
     // and would leave every one of these entities stuck at `unknown`. No unit / device_class /
@@ -364,11 +365,11 @@ inline std::string companion_discovery_config(const std::string& node, const std
     std::string j = "{";
     j += "\"name\":\"";    j += group_display_name(group); j += ' '; j += c.name; j += "\",";
     j += "\"uniq_id\":\""; j += node; j += "_"; j += obj; j += "\",";
-    j += "\"stat_t\":\"";  j += state_topic; j += "\",";
+    json_append_literal_string_member(j, "\"stat_t\":\"", state_topic);
     j += "\"val_tpl\":\"";
     append_x10a_value_template(j, group, c.key);
     j += "\",";
-    j += "\"avty_t\":\"";  j += avail_topic; j += "\",";
+    json_append_literal_string_member(j, "\"avty_t\":\"", avail_topic);
     j += "\"pl_on\":\"1\",\"pl_off\":\"0\",";
     j += "\"dev_cla\":\"problem\",";
     j += device_json(node, board_id);

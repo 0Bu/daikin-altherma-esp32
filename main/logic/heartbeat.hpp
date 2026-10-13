@@ -413,11 +413,10 @@ inline std::string heartbeat_discovery_config(const std::string& node, const std
                                               const std::string& avail_topic,
                                               const HeartbeatSensor& s) {
     std::string j = "{";
-    j += "\"name\":\""; j += s.name; j += "\",";
-    j += "\"uniq_id\":\""; j += node; j += "_"; j += s.object_id; j += "\",";
-    j += "\"stat_t\":\""; j += hb_topic; j += "\",";
+    ha_discovery_identity(j, node, s.name, s.object_id);
+    json_append_literal_string_member(j, "\"stat_t\":\"", hb_topic);
     j += "\"val_tpl\":\"{{ value_json."; j += s.json_path; j += " }}\",";
-    j += "\"avty_t\":\""; j += avail_topic; j += "\",";
+    json_append_literal_string_member(j, "\"avty_t\":\"", avail_topic);
     // A binary_sensor here reads a 1/0 NUMBER (see build_heartbeat_json), so it must say so: HA's
     // pl_on/pl_off default to "ON"/"OFF" and match neither 1/0 nor the `True`/`False` a JSON bool used
     // to render as — which is why the "X10A Bus" entity never left `unknown` before this.

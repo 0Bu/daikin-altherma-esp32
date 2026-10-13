@@ -199,12 +199,14 @@ struct ReferenceMqttFrame {
     int64_t received_unix_s = -1;
     uint32_t reference_epoch                   = 0;
     uint32_t circulation_epoch                 = 0;
+    uint32_t probe_generation                  = 0;
     bool   retained = false;
 };
 static QueueHandle_t       s_ref_queue = nullptr;
 static ReferenceMqttFrame  s_ref_rx;
 static ReferenceMqttFrame  s_ref_task_frame;          // mqtt_task-owned; keeps ~1.2 KB off its stack
 static bool                s_ref_rx_active = false;
+static size_t              s_ref_rx_received = 0;
 // Written by the event task, read + reported by mqtt_task — the same split as the flags above, and
 // std::atomic for the reason stated there. Relaxed ordering: it is a counter, ordering nothing and
 // synchronising nothing, and taking a lock on the event task is what this hand-off exists to avoid.
@@ -242,9 +244,11 @@ struct CirculationProbeState {
     bool active=false, subscribed=false, passed=false, retained=false;
     double power_w=0.0;
     CirculationPowerState state=CirculationPowerState::Unknown;
+    CirculationTestProofClock   clock;
     std::string error;
 };
 static CirculationProbeState s_circulation_probe;
+static std::atomic<uint32_t> s_circulation_probe_capture_generation{0};
 static SemaphoreHandle_t s_circulation_probe_sem = nullptr;
 static std::string s_circulation_subscribed_topic;
 static bool                  s_circulation_subscription_retry = false; // mqtt_task only
@@ -1532,6 +1536,9 @@ static void capture_reference_frame(esp_mqtt_event_handle_t e) {
     if (e->current_data_offset == 0) {
         s_ref_rx.reference_epoch   = s_ref_requested_epoch.load(std::memory_order_acquire);
         s_ref_rx.circulation_epoch = s_circulation_requested_epoch.load(std::memory_order_acquire);
+        s_ref_rx.probe_generation =
+            s_circulation_probe_capture_generation.load(std::memory_order_acquire);
+        s_ref_rx_received = 0;
         s_ref_rx_active = e->topic && e->topic_len > 0 &&
                           e->topic_len <= static_cast<int>(REF_TEMP_TOPIC_MAX);
         if (!s_ref_rx_active) return;
@@ -1543,16 +1550,18 @@ static void capture_reference_frame(esp_mqtt_event_handle_t e) {
         int32_t received_sub_ms = 0;
         time_now(s_ref_rx.received_unix_s, received_sub_ms);
     }
-    if (!s_ref_rx_active || e->current_data_offset < 0 || e->data_len < 0 ||
-        e->current_data_offset + e->data_len > e->total_data_len ||
-        e->total_data_len != static_cast<int>(s_ref_rx.payload_len)) {
+    if (!s_ref_rx_active ||
+        !mqtt_fragment_fits(e->current_data_offset, e->data_len, e->total_data_len,
+                            s_ref_rx_received, s_ref_rx.payload_len, REF_TEMP_PAYLOAD_MAX) ||
+        (e->data_len > 0 && !e->data)) {
         s_ref_rx_active = false;
         return;
     }
     if (e->data_len > 0)
         std::memcpy(s_ref_rx.payload + e->current_data_offset, e->data,
                     static_cast<size_t>(e->data_len));
-    if (e->current_data_offset + e->data_len == e->total_data_len) {
+    s_ref_rx_received += static_cast<size_t>(e->data_len);
+    if (s_ref_rx_received == s_ref_rx.payload_len) {
         s_ref_rx.payload[s_ref_rx.payload_len] = '\0';
         if (xQueueSend(s_ref_queue, &s_ref_rx, 0) != pdTRUE)
             s_ref_dropped.fetch_add(1, std::memory_order_relaxed);
@@ -1764,8 +1773,11 @@ decode_circulation_frame(const ReferenceMqttFrame& frame, const std::string& pow
 static ReferenceFreshness circulation_frame_freshness(const ReferenceMqttFrame& frame,
                                                        const DecodedCirculationFrame& decoded,
                                                        uint32_t max_age_s) {
-    return reference_freshness(true, frame.retained, true, decoded.source_unix_s,
-                               frame.received_ms, frame.received_unix_s, frame.received_ms,
+    int64_t now_unix_s = -1;
+    int32_t now_sub_ms = 0;
+    time_now(now_unix_s, now_sub_ms);
+    return reference_freshness(true, frame.retained, true, decoded.source_unix_s, frame.received_ms,
+                               now_unix_s, static_cast<uint64_t>(esp_timer_get_time() / 1000),
                                max_age_s);
 }
 
@@ -2227,19 +2239,32 @@ static __attribute__((noinline)) void service_reference_subscription(const Confi
 
 static __attribute__((noinline)) void
 service_circulation_probe_frame(const ReferenceMqttFrame& frame) {
-    CirculationSourceTestConfig candidate;
+    // Topic ownership is checked under the lock; decoding only needs the two paths and limits.
+    struct {
+        std::string power_path, timestamp_path;
+        uint32_t    max_age_s   = 0;
+        uint16_t    on_tenths_w = 0, off_tenths_w = 0;
+    } candidate;
     uint32_t generation = 0;
     {
         Lock lk(s_mtx);
-        if (!s_circulation_probe.active || frame.topic != s_circulation_probe.config.topic) return;
-        candidate = s_circulation_probe.config;
-        generation = s_circulation_probe.generation;
+        if (!s_circulation_probe.active ||
+            frame.probe_generation != s_circulation_probe.generation ||
+            frame.topic != s_circulation_probe.config.topic)
+            return;
+        candidate.power_path     = s_circulation_probe.config.power_path;
+        candidate.timestamp_path = s_circulation_probe.config.timestamp_path;
+        candidate.max_age_s      = s_circulation_probe.config.max_age_s;
+        candidate.on_tenths_w    = s_circulation_probe.config.on_tenths_w;
+        candidate.off_tenths_w   = s_circulation_probe.config.off_tenths_w;
+        generation               = s_circulation_probe.generation;
     }
-    const DecodedCirculationFrame decoded = decode_circulation_frame(
-        frame, candidate.power_path, candidate.timestamp_path);
-    const ReferenceFreshness freshness = decoded.valid
-        ? circulation_frame_freshness(frame, decoded, candidate.max_age_s)
-        : ReferenceFreshness{};
+    const DecodedCirculationFrame decoded =
+        decode_circulation_frame(frame, candidate.power_path, candidate.timestamp_path);
+    const uint64_t           tested_ms = static_cast<uint64_t>(esp_timer_get_time() / 1000);
+    const ReferenceFreshness freshness =
+        decoded.valid ? circulation_frame_freshness(frame, decoded, candidate.max_age_s)
+                      : ReferenceFreshness{};
     bool signal = false;
     {
         Lock lk(s_mtx);
@@ -2249,15 +2274,17 @@ service_circulation_probe_frame(const ReferenceMqttFrame& frame) {
             return;
         }
         if (!freshness.fresh) {
-            s_circulation_probe.error = freshness.reason ? freshness.reason : "Source value is stale";
+            s_circulation_probe.error =
+                freshness.reason ? freshness.reason : "Source value is stale";
             return;
         }
-        s_circulation_probe.active = false;
+        s_circulation_probe.active   = false;
         s_circulation_probe.passed = true;
         s_circulation_probe.retained = frame.retained;
         s_circulation_probe.power_w = decoded.power_w;
         s_circulation_probe.state = circulation_power_class(
             decoded.power_w, candidate.on_tenths_w, candidate.off_tenths_w);
+        s_circulation_probe.clock = {tested_ms, freshness.age_s, decoded.source_unix_s, true};
         s_circulation_probe.error.clear();
         signal = true;
     }
@@ -2641,11 +2668,8 @@ static void mqtt_task(void*) {
     // intent or a permanently retired discovery ledger. It can therefore subscribe to the room
     // source without letting an unwired board speak for the installation.
     if (!start_current_client()) {
-        s_publish_network_quiesced.store(true, std::memory_order_release);
-        esp_task_wdt_delete(NULL);
-        vTaskDelete(NULL);
+        transport_resume.wait_s = transport_resume.backoff_s;
     }
-    diag_printf("mqtt: subscriber-only client started (publishing waits for X10A)\n");
     for (;;) {
         // Feed the watchdog unconditionally at the top of every cycle — the loop wakes each second
         // regardless of connection state, so this must NOT be gated on s_connected or an actual
@@ -3017,21 +3041,27 @@ static bool build_client(bool publisher_lwt) {
 
     s_client = esp_mqtt_client_init(&cfg);
     if (!s_client) { set_status(false, "mqtt init failed"); return false; }
+    if (esp_mqtt_client_register_event(s_client, static_cast<esp_mqtt_event_id_t>(MQTT_EVENT_ANY),
+                                       on_mqtt, nullptr) != ESP_OK) {
+        esp_mqtt_client_destroy(s_client);
+        s_client = nullptr;
+        set_status(false, "event registration failed");
+        return false;
+    }
     uint32_t client_epoch = s_mqtt_client_epoch.fetch_add(1, std::memory_order_acq_rel) + 1;
     if (client_epoch == 0) {
         client_epoch = 1;
         s_mqtt_client_epoch.store(client_epoch, std::memory_order_release);
     }
     s_client_is_publisher = publisher_lwt;
-    esp_mqtt_client_register_event(s_client, static_cast<esp_mqtt_event_id_t>(MQTT_EVENT_ANY),
-                                   on_mqtt, nullptr);
-    { Lock lk(s_mtx); s_status.tls = is_tls; }
+    {
+        Lock lk(s_mtx);
+        s_status.tls = is_tls;
+    }
     return true;
 }
 
-static esp_err_t start_client_transport() {
-    return esp_mqtt_client_start(s_client);
-}
+static esp_err_t start_client_transport() { return esp_mqtt_client_start(s_client); }
 
 static bool start_current_client() {
     if (!s_client) {
@@ -3051,8 +3081,9 @@ static bool start_current_client() {
     }
     set_status(false, "client start failed");
     diag_printf("mqtt: client start failed (%s)\n", esp_err_to_name(rc));
-    esp_mqtt_client_destroy(s_client);               // start failed: no task/session is running
-    s_client = nullptr;
+    // No task/session started. Keep this initialized client for the task's bounded resume retry;
+    // publisher-promotion failure still destroys its replacement in the caller.
+    s_transport_paused.store(true, std::memory_order_release);
     s_client_running.store(false, std::memory_order_release);
     return false;
 }
@@ -3353,6 +3384,7 @@ CirculationSourceTestResult mqtt_circulation_test(
         generation = s_circulation_probe.generation + 1;
         if (generation == 0 || generation > 0x7fffffffu) generation = 1;
         s_circulation_probe.passed = false;
+        s_circulation_probe.clock  = {};
         s_circulation_probe.config.topic.swap(prepared.topic);
         s_circulation_probe.config.power_path.swap(prepared.power_path);
         s_circulation_probe.config.timestamp_path.swap(prepared.timestamp_path);
@@ -3367,6 +3399,7 @@ CirculationSourceTestResult mqtt_circulation_test(
         s_circulation_probe.power_w = 0.0;
         s_circulation_probe.state = CirculationPowerState::Unknown;
         s_circulation_probe.error.clear();
+        s_circulation_probe_capture_generation.store(generation, std::memory_order_release);
     }
     s_circulation_probe_reconfigure = true;
     xSemaphoreTake(s_circulation_probe_sem, pdMS_TO_TICKS(timeout_ms));
@@ -3394,8 +3427,13 @@ CirculationSourceTestResult mqtt_circulation_test(
 bool mqtt_circulation_test_proof_valid(uint32_t proof,
                                        const CirculationSourceTestConfig& candidate) {
     if (!s_mtx || proof == 0) return false;
+    const uint64_t now_ms     = static_cast<uint64_t>(esp_timer_get_time() / 1000);
+    int64_t        now_unix_s = -1;
+    int32_t        now_sub_ms = 0;
+    time_now(now_unix_s, now_sub_ms);
     Lock lk(s_mtx);
     return s_circulation_probe.passed && s_circulation_probe.generation == proof &&
+           s_circulation_probe.clock.current(now_unix_s, now_ms, candidate.max_age_s) &&
            s_circulation_probe.config.topic == candidate.topic &&
            s_circulation_probe.config.power_path == candidate.power_path &&
            s_circulation_probe.config.timestamp_path == candidate.timestamp_path &&
@@ -3418,6 +3456,7 @@ void mqtt_circulation_reconfigure(bool configured) {
             reset_circulation_status_locked(configured);
             s_circulation_probe.active = false;
             s_circulation_probe.passed = false;
+            s_circulation_probe_capture_generation.store(0, std::memory_order_release);
         }
     }
     // Withdraw the old witness first, then change consumer identity without nesting their locks.

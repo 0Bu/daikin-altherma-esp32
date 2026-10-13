@@ -407,11 +407,12 @@ Recording additionally requires fresh source-time evidence.
 
 `POST /test_circulation` fields: `name`, `topic`, `power_path`, `timestamp_path`, `max_age_s`,
 `on_threshold_w`, `off_threshold_w`, `confirm_s`. Diagnostics off is 409, empty topic 400. Probe the
-candidate mapping through the existing authenticated MQTT client for up to 12 seconds;
+candidate mapping through the already connected MQTT client for up to 12 seconds;
 `{ok,test_proof,power_w,state,retained}` or 422. No config is written.
 
 `POST /set_circulation` adds `test_proof` to that mapping. A non-empty topic needs a current proof
-bound to the seven behavioral fields; absent/invalid proof is 409. Empty topic disables without
+bound to the seven behavioral fields and the original observation's `max_age_s` lifetime;
+clock rollback cannot extend it. Absent, expired or invalid proof is 409. Empty topic disables without
 proof. Save applies live; cosmetic renaming does not retire evidence. Unchanged mapping returns
 `saved:false,reboot:false`. Numeric bounds/decoder policy are in `logic/circulation_source.hpp`.
 

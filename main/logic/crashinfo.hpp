@@ -306,9 +306,8 @@ inline std::string crash_discovery_config(const std::string& node, const std::st
                                           const std::string& avail_topic, const CrashSensor& s) {
     const bool is_binary = (s.component[0] == 'b');   // "binary_sensor"
     std::string j = "{";
-    j += "\"name\":\""; j += s.name; j += "\",";
-    j += "\"uniq_id\":\""; j += node; j += "_"; j += s.object_id; j += "\",";
-    j += "\"stat_t\":\""; j += crash_top; j += "\",";
+    ha_discovery_identity(j, node, s.name, s.object_id);
+    json_append_literal_string_member(j, "\"stat_t\":\"", crash_top);
     if (is_binary) {
         // Jinja renders the JSON bool as True/False; | lower → "true"/"false" to match pl_on/pl_off.
         j += "\"val_tpl\":\"{{ value_json."; j += s.json_path; j += " | lower }}\",";
@@ -316,7 +315,7 @@ inline std::string crash_discovery_config(const std::string& node, const std::st
     } else {
         j += "\"val_tpl\":\"{{ value_json."; j += s.json_path; j += " }}\",";
     }
-    j += "\"avty_t\":\""; j += avail_topic; j += "\",";
+    json_append_literal_string_member(j, "\"avty_t\":\"", avail_topic);
     if (s.device_class[0]) { j += "\"dev_cla\":\""; j += s.device_class; j += "\","; }
     j += "\"ent_cat\":\"diagnostic\",";
     j += device_json(node, board_id);

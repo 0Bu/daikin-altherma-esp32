@@ -217,6 +217,14 @@
       "pattern": "^(?:daik::(?:\\(anonymous namespace\\)::)?publish_x10a_discovery\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?22publish_x10a_discovery[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
       "max_bytes": 272
     },
+    "json_literal_member": {
+      "pattern": "^(?:daik::json_append_literal_string_member\\([^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik33json_append_literal_string_member[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
+      "max_bytes": 48
+    },
+    "ha_discovery_identity": {
+      "pattern": "^(?:daik::ha_discovery_identity\\([^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik21ha_discovery_identity[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
+      "max_bytes": 32
+    },
     "mqtt_discovery_payload": {
       "pattern": "^(?:daik::(?:\\(anonymous namespace\\)::)?discovery_config\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?16discovery_config[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
       "max_bytes": 176
@@ -1927,7 +1935,8 @@
       "symbols": [
         "mqtt_task",
         "mqtt_discovery",
-        "mqtt_discovery_payload"
+        "mqtt_discovery_payload",
+        "json_literal_member"
       ],
       "multipliers": {},
       "base_bytes": 1536,
@@ -1954,7 +1963,9 @@
     "mqtt_crash": {
       "symbols": [
         "mqtt_task",
-        "mqtt_crash"
+        "mqtt_crash",
+        "json_literal_member",
+        "ha_discovery_identity"
       ],
       "multipliers": {},
       "base_bytes": 1536,
@@ -2549,6 +2560,27 @@
       "base_bytes": 192,
       "max_bytes": 2048
     },
+    "mqtt_heartbeat_discovery_build": {
+      "symbols": [
+        "mqtt_task",
+        "mqtt_board_discovery",
+        "json_literal_member",
+        "ha_discovery_identity"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "mqtt_env3_discovery_build": {
+      "symbols": [
+        "mqtt_task",
+        "json_literal_member",
+        "ha_discovery_identity"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
     "mqtt_heartbeat_build": {
       "symbols": [
         "mqtt_task",
@@ -2935,6 +2967,8 @@
         "mqtt_sync_tls_publish",
         "mqtt_reference_apply",
         "mqtt_heartbeat_build",
+        "mqtt_heartbeat_discovery_build",
+        "mqtt_env3_discovery_build",
         "mqtt_curve_build",
         "mqtt_cycle_gate",
         "mqtt_crash_changed",

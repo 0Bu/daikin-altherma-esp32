@@ -100,6 +100,8 @@ inline FakeSemaphore mutex, binary;
 inline FakeQueue     queue;
 inline FakeMqtt      client;
 inline int           message_id = 0, publish_calls = 0, subscribe_calls = 0;
+inline int                  start_calls = 0, start_failures = 0, destroy_calls = 0;
+inline esp_err_t            registration_result        = ESP_OK;
 inline bool          reject_new_after_subscribe = false;
 inline int           unsubscribe_calls          = 0;
 inline char          last_subscribed_topic[256]{}, last_unsubscribed_topic[256]{};
@@ -252,15 +254,25 @@ inline const esp_app_desc_t* esp_app_get_description() {
 inline esp_mqtt_client_handle_t esp_mqtt_client_init(const esp_mqtt_client_config_t*) {
     return &sdk::client;
 }
-inline esp_err_t esp_mqtt_client_destroy(FakeMqtt*) { return ESP_OK; }
+inline esp_err_t esp_mqtt_client_destroy(FakeMqtt* client) {
+    ++sdk::destroy_calls;
+    client->handler = nullptr;
+    return ESP_OK;
+}
 inline esp_err_t esp_mqtt_client_register_event(FakeMqtt* c, int,
                                                 void (*fn)(void*, esp_event_base_t, int32_t, void*),
                                                 void* arg) {
+    if (sdk::registration_result != ESP_OK) return sdk::registration_result;
     c->handler     = fn;
     c->handler_arg = arg;
     return ESP_OK;
 }
 inline esp_err_t esp_mqtt_client_start(FakeMqtt* c) {
+    ++sdk::start_calls;
+    if (sdk::start_failures > 0) {
+        --sdk::start_failures;
+        return ESP_FAIL;
+    }
     if (c->handler) c->handler(c->handler_arg, "mqtt", MQTT_EVENT_CONNECTED, nullptr);
     return ESP_OK;
 }
