@@ -893,33 +893,28 @@ public:
     MqttBridgeAdapter(FakeBroker& broker, std::string client_id, std::string base)
         : broker_(broker), client_id_(std::move(client_id)), base_(std::move(base)) {}
 
-    void connect_subscriber() {
-        broker_.connect(client_id_, std::nullopt);
+    void connect_transport() {
+        broker_.connect(client_id_, LastWill{base_ + "/status", "offline", true});
         mqtt_connected_ = true;
         ++connections_;
+        broker_.publish(client_id_, base_ + "/status", "online", true);
+        broker_.publish(client_id_, base_ + "/x10a/status", "offline", true);
     }
 
     daik::MqttPublishGateDecision observe_x10a(bool connected, int32_t last_ok_s) {
-        auto decision = daik::mqtt_publish_gate_step(state_, connected, last_ok_s, mqtt_connected_);
-        state_        = decision.next;
-        if (decision.promote_publisher) {
-            broker_.disconnect(client_id_, false);
-            broker_.connect(client_id_, LastWill{base_ + "/status", "offline", true});
-            ++connections_;
-            broker_.publish(client_id_, base_ + "/status", "online", true);
-            publisher_      = true;
-            mqtt_connected_ = true;
-        }
+        auto decision = daik::mqtt_publish_gate_step(
+            state_, daik::mqtt_x10a_available(connected, last_ok_s), mqtt_connected_);
+        state_ = decision.next;
         if (decision.publish_offline)
-            broker_.publish(client_id_, base_ + "/status", "offline", true);
-        if (decision.resumed) broker_.publish(client_id_, base_ + "/status", "online", true);
+            broker_.publish(client_id_, base_ + "/x10a/status", "offline", true);
         return decision;
     }
 
     void publish_state(std::string payload) {
-        if (!publisher_ || state_ != daik::MqttPublishGateState::Active)
-            throw std::logic_error("ordinary publish outside active X10A gate");
+        if (state_ != daik::MqttPublishGateState::Active || !mqtt_connected_)
+            throw std::logic_error("X10A publish outside active source gate");
         broker_.publish(client_id_, base_ + "/x10a", std::move(payload), true);
+        broker_.publish(client_id_, base_ + "/x10a/status", "online", true);
     }
 
     void delete_retained(std::string topic) {
@@ -931,25 +926,16 @@ public:
         mqtt_connected_ = false;
     }
 
-    void reconnect() {
-        broker_.connect(client_id_, publisher_ ? std::optional<LastWill>(
-                                                     LastWill{base_ + "/status", "offline", true})
-                                               : std::nullopt);
-        mqtt_connected_ = true;
-        ++connections_;
-        if (publisher_) broker_.publish(client_id_, base_ + "/status", "online", true);
-    }
+    void reconnect() { connect_transport(); }
 
     size_t connections() const { return connections_; }
-    bool   publisher() const { return publisher_; }
 
 private:
     FakeBroker&                broker_;
     std::string                client_id_;
     std::string                base_;
-    daik::MqttPublishGateState state_          = daik::MqttPublishGateState::SubscriberOnly;
+    daik::MqttPublishGateState state_          = daik::MqttPublishGateState::Unavailable;
     bool                       mqtt_connected_ = false;
-    bool                       publisher_      = false;
     size_t                     connections_    = 0;
 };
 

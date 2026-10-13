@@ -197,10 +197,6 @@
       "pattern": "^(?:daik::(?:\\(anonymous namespace\\)::)?service_circulation_subscription\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?32service_circulation_subscription[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
       "max_bytes": 224
     },
-    "mqtt_promotion": {
-      "pattern": "^(?:daik::(?:\\(anonymous namespace\\)::)?promote_client_to_publisher\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?27promote_client_to_publisher[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
-      "max_bytes": 112
-    },
     "mqtt_client_start": {
       "pattern": "^(?:daik::(?:\\(anonymous namespace\\)::)?build_client\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?12build_client[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
       "max_bytes": 1024
@@ -211,11 +207,11 @@
     },
     "mqtt_cleanup_probe": {
       "pattern": "^(?:daik::(?:\\(anonymous namespace\\)::)?service_retained_cleanup_probe\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?30service_retained_cleanup_probe[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
-      "max_bytes": 32
+      "max_bytes": 48
     },
     "mqtt_discovery": {
       "pattern": "^(?:daik::(?:\\(anonymous namespace\\)::)?publish_x10a_discovery\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?22publish_x10a_discovery[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
-      "max_bytes": 272
+      "max_bytes": 304
     },
     "json_literal_member": {
       "pattern": "^(?:daik::json_append_literal_string_member\\([^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik33json_append_literal_string_member[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
@@ -659,7 +655,7 @@
     },
     "mqtt_cleanup_probe_start": {
       "pattern": "^(?:daik::start_retained_cleanup_probe\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?28start_retained_cleanup_probe[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
-      "max_bytes": 32
+      "max_bytes": 48
     },
     "mqtt_emit": {
       "pattern": "^(?:daik::mqtt_publish\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?12mqtt_publish[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
@@ -687,11 +683,7 @@
     },
     "mqtt_legacy_retract": {
       "pattern": "^(?:daik::retract_legacy_fixed\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?20retract_legacy_fixed[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
-      "max_bytes": 112
-    },
-    "mqtt_retract_ungrouped": {
-      "pattern": "^(?:daik::retract_ungrouped_values\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?24retract_ungrouped_values[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
-      "max_bytes": 80
+      "max_bytes": 128
     },
     "history_circulation": {
       "pattern": "^(?:daik::history_record_circulation\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?26history_record_circulation[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
@@ -1602,12 +1594,340 @@
       "max_bytes": 112
     },
     "status_health_number": {
-      "pattern": "^daik::append_status_json<daik::BoundedChunkSink<daik::HttpChunkEmitter,\\ 1024u>\\ >\\(daik::BoundedChunkSink<daik::HttpChunkEmitter,\\ 1024u>\\&,\\ bool\\)::\\{lambda\\(char\\ const\\*,\\ int\\)\\\u00231\\}::operator\\(\\)\\(char\\ const\\*,\\ int\\)\\ const$",
+      "pattern": "^daik::append_status_json<daik::BoundedChunkSink<daik::HttpChunkEmitter,\\ 1024u>\\ >\\(daik::BoundedChunkSink<daik::HttpChunkEmitter,\\ 1024u>\\&,\\ bool\\)::\\{lambda\\(char\\ const\\*,\\ int\\)[#]1\\}::operator\\(\\)\\(char\\ const\\*,\\ int\\)\\ const$",
       "max_bytes": 32
     },
     "status_unsigned_number": {
       "pattern": "^void\\ daik::append_json_uint<daik::BoundedChunkSink<daik::HttpChunkEmitter,\\ 1024u>\\ >\\(daik::BoundedChunkSink<daik::HttpChunkEmitter,\\ 1024u>\\&,\\ unsigned\\ long\\ long\\)$",
       "max_bytes": 64
+    },
+    "mqtt_public_start": {
+      "pattern": "^daik::mqtt_ha_start\\(\\)$",
+      "max_bytes": 880
+    },
+    "mqtt_retract_stale": {
+      "pattern": "^(?:daik::(?:\\(anonymous namespace\\)::)?retract_stale_values\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?20retract_stale_values[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
+      "max_bytes": 144
+    },
+    "mqtt_retire_profile": {
+      "pattern": "^(?:daik::(?:\\(anonymous namespace\\)::)?retract_profile_cutover\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?23retract_profile_cutover[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
+      "max_bytes": 176
+    },
+    "mqtt_pending_retirement": {
+      "pattern": "^(?:daik::(?:\\(anonymous namespace\\)::)?service_pending_retirement\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?26service_pending_retirement[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
+      "max_bytes": 64
+    },
+    "mqtt_periodic_request": {
+      "pattern": "^(?:daik::(?:\\(anonymous namespace\\)::)?request_periodic_discovery_retirement\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?37request_periodic_discovery_retirement[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
+      "max_bytes": 32
+    },
+    "mqtt_retire_exact": {
+      "pattern": "^(?:daik::(?:\\(anonymous namespace\\)::)?retire_exact_topic\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?18retire_exact_topic[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
+      "max_bytes": 32
+    },
+    "mqtt_enqueue_id": {
+      "pattern": "^(?:daik::(?:\\(anonymous namespace\\)::)?mqtt_enqueue_id\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?15mqtt_enqueue_id[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
+      "max_bytes": 48
+    },
+    "mqtt_provenance_load": {
+      "pattern": "^(?:daik::(?:\\(anonymous namespace\\)::)?load_retirement_provenance\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?26load_retirement_provenance[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
+      "max_bytes": 64
+    },
+    "mqtt_provenance_save": {
+      "pattern": "^(?:daik::(?:\\(anonymous namespace\\)::)?save_retirement_provenance\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?26save_retirement_provenance[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
+      "max_bytes": 272
+    },
+    "mqtt_retirement_store_load": {
+      "pattern": "^(?:daik::(?:\\(anonymous namespace\\)::)?mqtt_retirement_store_load\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?26mqtt_retirement_store_load[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
+      "max_bytes": 256
+    },
+    "mqtt_retirement_store_save": {
+      "pattern": "^(?:daik::(?:\\(anonymous namespace\\)::)?mqtt_retirement_store_save\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?26mqtt_retirement_store_save[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
+      "max_bytes": 240
+    },
+    "mqtt_retirement_decode": {
+      "pattern": "^(?:daik::(?:\\(anonymous namespace\\)::)?mqtt_retirement_decode\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?22mqtt_retirement_decode[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
+      "max_bytes": 256
+    },
+    "mqtt_retirement_encode": {
+      "pattern": "^(?:daik::(?:\\(anonymous namespace\\)::)?mqtt_retirement_encode\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?22mqtt_retirement_encode[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
+      "max_bytes": 64
+    },
+    "mqtt_retirement_identity_make": {
+      "pattern": "^(?:daik::(?:\\(anonymous namespace\\)::)?mqtt_retirement_identity_make\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?29mqtt_retirement_identity_make[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
+      "max_bytes": 48
+    },
+    "mqtt_retirement_identity_matches": {
+      "pattern": "^(?:daik::(?:\\(anonymous namespace\\)::)?mqtt_retirement_identity_matches\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?32mqtt_retirement_identity_matches[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
+      "max_bytes": 64
+    },
+    "mqtt_retirement_scan": {
+      "pattern": "^(?:daik::(?:\\(anonymous namespace\\)::)?mqtt_retirement_scan_step\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?25mqtt_retirement_scan_step[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
+      "max_bytes": 64
+    },
+    "mqtt_retirement_note": {
+      "pattern": "^(?:daik::(?:\\(anonymous namespace\\)::)?retirement_store_note\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?21retirement_store_note[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
+      "max_bytes": 32
+    },
+    "mqtt_retirement_identity_capture": {
+      "pattern": "^_ZN4daik26retirement_identity_detail7CapturepLEc\\$isra\\$[0-9]+$",
+      "max_bytes": 32
+    },
+    "mqtt_retirement_identity_compare": {
+      "pattern": "^_ZN4daik26retirement_identity_detail7ComparepLEc\\$isra\\$[0-9]+$",
+      "max_bytes": 32
+    },
+    "sdk_mqtt_outbox_enqueue": {
+      "pattern": "^outbox_enqueue$",
+      "max_bytes": 96
+    },
+    "sdk_nvs_open": {
+      "pattern": "^nvs_open$",
+      "max_bytes": 32
+    },
+    "sdk_nvs_open_partition": {
+      "pattern": "^nvs_open_from_partition$",
+      "max_bytes": 48
+    },
+    "sdk_nvs_manager_open": {
+      "pattern": "^nvs::NVSPartitionManager::open_handle\\(",
+      "max_bytes": 64
+    },
+    "sdk_nvs_namespace": {
+      "pattern": "^nvs::Storage::createOrOpenNamespace\\(",
+      "max_bytes": 64
+    },
+    "sdk_nvs_get_blob": {
+      "pattern": "^nvs_get_blob$",
+      "max_bytes": 32
+    },
+    "sdk_nvs_get_blob_impl": {
+      "pattern": "^nvs_get_str_or_blob\\(",
+      "max_bytes": 48
+    },
+    "sdk_nvs_set_blob": {
+      "pattern": "^nvs_set_blob$",
+      "max_bytes": 48
+    },
+    "sdk_nvs_commit": {
+      "pattern": "^nvs_commit$",
+      "max_bytes": 48
+    },
+    "sdk_nvs_close": {
+      "pattern": "^nvs_close$",
+      "max_bytes": 48
+    },
+    "sdk_nvs_handle_get": {
+      "pattern": "^nvs::NVSHandleSimple::get_typed_item\\(",
+      "max_bytes": 32
+    },
+    "sdk_nvs_handle_set": {
+      "pattern": "^nvs::NVSHandleSimple::set_blob\\(",
+      "max_bytes": 48
+    },
+    "sdk_nvs_handle_size": {
+      "pattern": "^nvs::NVSHandleSimple::get_item_size\\(",
+      "max_bytes": 32
+    },
+    "sdk_nvs_handle_commit": {
+      "pattern": "^nvs::NVSHandleSimple::commit\\(",
+      "max_bytes": 32
+    },
+    "sdk_nvs_read": {
+      "pattern": "^nvs::Storage::readItem\\(",
+      "max_bytes": 112
+    },
+    "sdk_nvs_read_multi": {
+      "pattern": "^nvs::Storage::readMultiPageBlob\\(",
+      "max_bytes": 112
+    },
+    "sdk_nvs_size": {
+      "pattern": "^nvs::Storage::getItemDataSize\\(",
+      "max_bytes": 96
+    },
+    "sdk_nvs_write": {
+      "pattern": "^nvs::Storage::writeItem\\(",
+      "max_bytes": 112
+    },
+    "sdk_nvs_write_multi": {
+      "pattern": "^nvs::Storage::writeMultiPageBlob\\(",
+      "max_bytes": 144
+    },
+    "sdk_nvs_cmp_multi": {
+      "pattern": "^nvs::Storage::cmpMultiPageBlob\\(",
+      "max_bytes": 128
+    },
+    "sdk_nvs_erase_multi": {
+      "pattern": "^nvs::Storage::eraseMultiPageBlob\\(",
+      "max_bytes": 112
+    },
+    "sdk_nvs_find": {
+      "pattern": "^nvs::Storage::findItem\\(",
+      "max_bytes": 80
+    },
+    "sdk_nvs_request_page": {
+      "pattern": "^nvs::PageManager::requestNewPage\\(",
+      "max_bytes": 32
+    },
+    "sdk_nvs_activate_page": {
+      "pattern": "^nvs::PageManager::activatePage\\(",
+      "max_bytes": 32
+    },
+    "sdk_nvs_page_copy": {
+      "pattern": "^nvs::Page::copyItems\\(",
+      "max_bytes": 80
+    },
+    "sdk_nvs_page_init": {
+      "pattern": "^nvs::Page::initialize\\(",
+      "max_bytes": 64
+    },
+    "sdk_nvs_page_find": {
+      "pattern": "^nvs::Page::findItem\\(",
+      "max_bytes": 96
+    },
+    "sdk_nvs_page_read": {
+      "pattern": "^nvs::Page::readItem\\(",
+      "max_bytes": 112
+    },
+    "sdk_nvs_page_variable_read": {
+      "pattern": "^nvs::Page::readVariableLengthItemData\\(",
+      "max_bytes": 80
+    },
+    "sdk_nvs_page_cmp": {
+      "pattern": "^nvs::Page::cmpItem\\(",
+      "max_bytes": 144
+    },
+    "sdk_nvs_page_write": {
+      "pattern": "^nvs::Page::writeItem\\(",
+      "max_bytes": 112
+    },
+    "sdk_nvs_page_write_entry": {
+      "pattern": "^nvs::Page::writeEntry\\(",
+      "max_bytes": 32
+    },
+    "sdk_nvs_page_write_data": {
+      "pattern": "^nvs::Page::writeEntryData\\(",
+      "max_bytes": 32
+    },
+    "sdk_nvs_page_read_entry": {
+      "pattern": "^nvs::Page::readEntry\\(",
+      "max_bytes": 32
+    },
+    "sdk_nvs_page_erase_item": {
+      "pattern": "^nvs::Page::eraseItem\\(",
+      "max_bytes": 112
+    },
+    "sdk_nvs_page_erase_entry": {
+      "pattern": "^nvs::Page::eraseEntryAndSpan\\(",
+      "max_bytes": 96
+    },
+    "sdk_nvs_page_alter_range": {
+      "pattern": "^nvs::Page::alterEntryRangeState\\(",
+      "max_bytes": 64
+    },
+    "sdk_nvs_page_erase": {
+      "pattern": "^nvs::Page::erase\\(",
+      "max_bytes": 32
+    },
+    "sdk_nvs_partition_read": {
+      "pattern": "^nvs::NVSPartition::read\\(",
+      "max_bytes": 32
+    },
+    "sdk_nvs_partition_write": {
+      "pattern": "^nvs::NVSPartition::write\\(",
+      "max_bytes": 32
+    },
+    "sdk_nvs_partition_erase": {
+      "pattern": "^nvs::NVSPartition::erase_range\\(",
+      "max_bytes": 32
+    },
+    "sdk_partition_read": {
+      "pattern": "^esp_partition_read$",
+      "max_bytes": 48
+    },
+    "sdk_partition_write": {
+      "pattern": "^esp_partition_write$",
+      "max_bytes": 32
+    },
+    "sdk_partition_erase": {
+      "pattern": "^esp_partition_erase_range$",
+      "max_bytes": 32
+    },
+    "sdk_flash_read": {
+      "pattern": "^esp_flash_read$",
+      "max_bytes": 64
+    },
+    "sdk_flash_write": {
+      "pattern": "^esp_flash_write$",
+      "max_bytes": 96
+    },
+    "sdk_flash_erase": {
+      "pattern": "^esp_flash_erase_region$",
+      "max_bytes": 80
+    },
+    "sdk_flash_driver_read": {
+      "pattern": "^spi_flash_chip_(?:generic|winbond)_read$",
+      "max_bytes": 128
+    },
+    "sdk_flash_driver_write": {
+      "pattern": "^spi_flash_chip_generic_write$",
+      "max_bytes": 128
+    },
+    "sdk_flash_driver_page_program": {
+      "pattern": "^spi_flash_chip_(?:generic|winbond)_page_program$",
+      "max_bytes": 64
+    },
+    "sdk_flash_driver_erase": {
+      "pattern": "^spi_flash_chip_(?:generic|winbond)_erase_(?:sector|block)$",
+      "max_bytes": 64
+    },
+    "sdk_flash_wait_idle": {
+      "pattern": "^spi_flash_chip_generic_wait_idle$",
+      "max_bytes": 64
+    },
+    "sdk_flash_read_reg": {
+      "pattern": "^spi_flash_chip_generic_read_reg$",
+      "max_bytes": 32
+    },
+    "sdk_flash_host_status": {
+      "pattern": "^memspi_host_read_status_hs$",
+      "max_bytes": 64
+    },
+    "sdk_flash_host_program": {
+      "pattern": "^memspi_host_program_page$",
+      "max_bytes": 64
+    },
+    "sdk_flash_host_erase": {
+      "pattern": "^memspi_host_erase_sector$",
+      "max_bytes": 64
+    },
+    "sdk_flash_hal_read": {
+      "pattern": "^spi_flash_hal_read$",
+      "max_bytes": 64
+    },
+    "sdk_flash_hal_program": {
+      "pattern": "^spi_flash_hal_program_page$",
+      "max_bytes": 64
+    },
+    "sdk_flash_hal_common": {
+      "pattern": "^spi_flash_hal_common_command$",
+      "max_bytes": 64
+    },
+    "sdk_flash_hal_poll": {
+      "pattern": "^spi_flash_hal_poll_cmd_done$",
+      "max_bytes": 32
+    },
+    "sdk_flash_os_start": {
+      "pattern": "^spi1_start$",
+      "max_bytes": 32
+    },
+    "sdk_flash_os_end": {
+      "pattern": "^spi1_end$",
+      "max_bytes": 32
+    },
+    "sdk_mqtt_enqueue_api": {
+      "pattern": "^esp_mqtt_client_enqueue$",
+      "max_bytes": 128
     }
   },
   "paths": {
@@ -1982,16 +2302,6 @@
         "mqtt_task",
         "mqtt_cleanup",
         "mqtt_cleanup_probe"
-      ],
-      "multipliers": {},
-      "base_bytes": 1536,
-      "max_bytes": 5120
-    },
-    "mqtt_promotion": {
-      "symbols": [
-        "mqtt_task",
-        "mqtt_promotion",
-        "mqtt_client_start"
       ],
       "multipliers": {},
       "base_bytes": 1536,
@@ -2809,6 +3119,7 @@
     "mqtt_cleanup_probe_tls": {
       "symbols": [
         "mqtt_task",
+        "mqtt_crash",
         "mqtt_cleanup_probe_start"
       ],
       "multipliers": {},
@@ -2851,30 +3162,12 @@
       "base_bytes": 4608,
       "max_bytes": 6144
     },
-    "mqtt_legacy_retract_tls": {
-      "symbols": [
-        "mqtt_task",
-        "mqtt_discovery",
-        "mqtt_legacy_retract"
-      ],
-      "multipliers": {},
-      "base_bytes": 4608,
-      "max_bytes": 6144
-    },
-    "mqtt_retract_ungrouped_tls": {
-      "symbols": [
-        "mqtt_task",
-        "mqtt_discovery",
-        "mqtt_retract_ungrouped"
-      ],
-      "multipliers": {},
-      "base_bytes": 4608,
-      "max_bytes": 6144
-    },
     "mqtt_cleanup_tls": {
       "symbols": [
         "mqtt_task",
-        "mqtt_cleanup"
+        "mqtt_cleanup",
+        "mqtt_pending_retirement",
+        "mqtt_cleanup_probe"
       ],
       "multipliers": {},
       "base_bytes": 4608,
@@ -3275,6 +3568,878 @@
       "multipliers": {},
       "base_bytes": 1536,
       "max_bytes": 8192
+    },
+    "main_initial_mqtt_client": {
+      "symbols": [
+        "main_task",
+        "boot_sequence",
+        "mqtt_public_start",
+        "mqtt_client_start"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "mqtt_retirement_legacy_enqueue": {
+      "symbols": [
+        "mqtt_task",
+        "mqtt_cleanup",
+        "mqtt_pending_retirement",
+        "mqtt_legacy_retract",
+        "mqtt_retire_exact",
+        "mqtt_enqueue_id",
+        "sdk_mqtt_enqueue_api",
+        "sdk_mqtt_enqueue",
+        "sdk_mqtt_outbox_enqueue",
+        "tls_calloc",
+        "sdk_malloc_caps",
+        "sdk_malloc_base",
+        "sdk_malloc_aligned",
+        "sdk_multi_aligned_offset",
+        "sdk_multi_aligned_impl",
+        "sdk_multi_lock",
+        "sdk_queue_critical",
+        "sdk_queue_compare_swap",
+        "runtime_task_entry"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "mqtt_retirement_legacy_heartbeat_enqueue": {
+      "symbols": [
+        "mqtt_task",
+        "mqtt_board_discovery",
+        "mqtt_legacy_retract",
+        "mqtt_retire_exact",
+        "mqtt_enqueue_id",
+        "sdk_mqtt_enqueue_api",
+        "sdk_mqtt_enqueue",
+        "sdk_mqtt_outbox_enqueue",
+        "tls_calloc",
+        "sdk_malloc_caps",
+        "sdk_malloc_base",
+        "sdk_malloc_aligned",
+        "sdk_multi_aligned_offset",
+        "sdk_multi_aligned_impl",
+        "sdk_multi_lock",
+        "sdk_queue_critical",
+        "sdk_queue_compare_swap",
+        "runtime_task_entry"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "mqtt_retirement_legacy_crash_enqueue": {
+      "symbols": [
+        "mqtt_task",
+        "mqtt_crash",
+        "mqtt_legacy_retract",
+        "mqtt_retire_exact",
+        "mqtt_enqueue_id",
+        "sdk_mqtt_enqueue_api",
+        "sdk_mqtt_enqueue",
+        "sdk_mqtt_outbox_enqueue",
+        "tls_calloc",
+        "sdk_malloc_caps",
+        "sdk_malloc_base",
+        "sdk_malloc_aligned",
+        "sdk_multi_aligned_offset",
+        "sdk_multi_aligned_impl",
+        "sdk_multi_lock",
+        "sdk_queue_critical",
+        "sdk_queue_compare_swap",
+        "runtime_task_entry"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "mqtt_retirement_stale_enqueue": {
+      "symbols": [
+        "mqtt_task",
+        "mqtt_cleanup",
+        "mqtt_pending_retirement",
+        "mqtt_retract_stale",
+        "mqtt_retire_exact",
+        "mqtt_enqueue_id",
+        "sdk_mqtt_enqueue_api",
+        "sdk_mqtt_enqueue",
+        "sdk_mqtt_outbox_enqueue",
+        "tls_calloc",
+        "sdk_malloc_caps",
+        "sdk_malloc_base",
+        "sdk_malloc_aligned",
+        "sdk_multi_aligned_offset",
+        "sdk_multi_aligned_impl",
+        "sdk_multi_lock",
+        "sdk_queue_critical",
+        "sdk_queue_compare_swap",
+        "runtime_task_entry"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "mqtt_retirement_stale_discovery_enqueue": {
+      "symbols": [
+        "mqtt_task",
+        "mqtt_discovery",
+        "mqtt_retract_stale",
+        "mqtt_retire_exact",
+        "mqtt_enqueue_id",
+        "sdk_mqtt_enqueue_api",
+        "sdk_mqtt_enqueue",
+        "sdk_mqtt_outbox_enqueue",
+        "tls_calloc",
+        "sdk_malloc_caps",
+        "sdk_malloc_base",
+        "sdk_malloc_aligned",
+        "sdk_multi_aligned_offset",
+        "sdk_multi_aligned_impl",
+        "sdk_multi_lock",
+        "sdk_queue_critical",
+        "sdk_queue_compare_swap",
+        "runtime_task_entry"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "mqtt_retirement_profile_enqueue": {
+      "symbols": [
+        "mqtt_task",
+        "mqtt_cleanup",
+        "mqtt_pending_retirement",
+        "mqtt_retire_profile",
+        "mqtt_retire_exact",
+        "mqtt_enqueue_id",
+        "sdk_mqtt_enqueue_api",
+        "sdk_mqtt_enqueue",
+        "sdk_mqtt_outbox_enqueue",
+        "tls_calloc",
+        "sdk_malloc_caps",
+        "sdk_malloc_base",
+        "sdk_malloc_aligned",
+        "sdk_multi_aligned_offset",
+        "sdk_multi_aligned_impl",
+        "sdk_multi_lock",
+        "sdk_queue_critical",
+        "sdk_queue_compare_swap",
+        "runtime_task_entry"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "mqtt_retirement_profile_discovery_enqueue": {
+      "symbols": [
+        "mqtt_task",
+        "mqtt_discovery",
+        "mqtt_retire_profile",
+        "mqtt_retire_exact",
+        "mqtt_enqueue_id",
+        "sdk_mqtt_enqueue_api",
+        "sdk_mqtt_enqueue",
+        "sdk_mqtt_outbox_enqueue",
+        "tls_calloc",
+        "sdk_malloc_caps",
+        "sdk_malloc_base",
+        "sdk_malloc_aligned",
+        "sdk_multi_aligned_offset",
+        "sdk_multi_aligned_impl",
+        "sdk_multi_lock",
+        "sdk_queue_critical",
+        "sdk_queue_compare_swap",
+        "runtime_task_entry"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "mqtt_retirement_periodic_enqueue": {
+      "symbols": [
+        "mqtt_task",
+        "mqtt_cleanup",
+        "mqtt_pending_retirement",
+        "mqtt_retire_exact",
+        "mqtt_enqueue_id",
+        "sdk_mqtt_enqueue_api",
+        "sdk_mqtt_enqueue",
+        "sdk_mqtt_outbox_enqueue",
+        "tls_calloc",
+        "sdk_malloc_caps",
+        "sdk_malloc_base",
+        "sdk_malloc_aligned",
+        "sdk_multi_aligned_offset",
+        "sdk_multi_aligned_impl",
+        "sdk_multi_lock",
+        "sdk_queue_critical",
+        "sdk_queue_compare_swap",
+        "runtime_task_entry"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "mqtt_retirement_probe_enqueue": {
+      "symbols": [
+        "mqtt_task",
+        "mqtt_cleanup",
+        "mqtt_pending_retirement",
+        "mqtt_cleanup_probe",
+        "mqtt_retire_exact",
+        "mqtt_enqueue_id",
+        "sdk_mqtt_enqueue_api",
+        "sdk_mqtt_enqueue",
+        "sdk_mqtt_outbox_enqueue",
+        "tls_calloc",
+        "sdk_malloc_caps",
+        "sdk_malloc_base",
+        "sdk_malloc_aligned",
+        "sdk_multi_aligned_offset",
+        "sdk_multi_aligned_impl",
+        "sdk_multi_lock",
+        "sdk_queue_critical",
+        "sdk_queue_compare_swap",
+        "runtime_task_entry"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "mqtt_source_cleanup_enqueue": {
+      "symbols": [
+        "mqtt_task",
+        "mqtt_cleanup",
+        "mqtt_enqueue_id",
+        "sdk_mqtt_enqueue_api",
+        "sdk_mqtt_enqueue",
+        "sdk_mqtt_outbox_enqueue",
+        "tls_calloc",
+        "sdk_malloc_caps",
+        "sdk_malloc_base",
+        "sdk_malloc_aligned",
+        "sdk_multi_aligned_offset",
+        "sdk_multi_aligned_impl",
+        "sdk_multi_lock",
+        "sdk_queue_critical",
+        "sdk_queue_compare_swap",
+        "runtime_task_entry"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "mqtt_retirement_identity_make": {
+      "symbols": [
+        "mqtt_task",
+        "mqtt_discovery",
+        "mqtt_retire_profile",
+        "mqtt_retirement_identity_make",
+        "mqtt_retirement_identity_capture"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "mqtt_retirement_identity_scan": {
+      "symbols": [
+        "mqtt_task",
+        "mqtt_discovery",
+        "mqtt_retire_profile",
+        "mqtt_retirement_scan",
+        "mqtt_retirement_identity_matches",
+        "mqtt_retirement_identity_compare"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "mqtt_retirement_pending_identity_make": {
+      "symbols": [
+        "mqtt_task",
+        "mqtt_cleanup",
+        "mqtt_pending_retirement",
+        "mqtt_retire_profile",
+        "mqtt_retirement_identity_make",
+        "mqtt_retirement_identity_capture"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "mqtt_retirement_pending_identity_scan": {
+      "symbols": [
+        "mqtt_task",
+        "mqtt_cleanup",
+        "mqtt_pending_retirement",
+        "mqtt_retire_profile",
+        "mqtt_retirement_scan",
+        "mqtt_retirement_identity_matches",
+        "mqtt_retirement_identity_compare"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "mqtt_periodic_retirement_request": {
+      "symbols": [
+        "mqtt_task",
+        "mqtt_periodic_request"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "mqtt_retirement_load_decode": {
+      "symbols": [
+        "mqtt_task",
+        "mqtt_cleanup",
+        "mqtt_provenance_load",
+        "mqtt_retirement_store_load",
+        "mqtt_retirement_decode"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "mqtt_retirement_load_open": {
+      "symbols": [
+        "mqtt_task",
+        "mqtt_cleanup",
+        "mqtt_provenance_load",
+        "mqtt_retirement_store_load",
+        "sdk_nvs_open",
+        "sdk_nvs_open_partition",
+        "sdk_nvs_manager_open",
+        "sdk_nvs_namespace",
+        "tls_calloc",
+        "sdk_malloc_caps",
+        "sdk_malloc_base",
+        "sdk_malloc_aligned",
+        "sdk_multi_aligned_offset",
+        "sdk_multi_aligned_impl",
+        "sdk_multi_lock",
+        "sdk_queue_critical",
+        "sdk_queue_compare_swap",
+        "runtime_task_entry"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "mqtt_retirement_load_size": {
+      "symbols": [
+        "mqtt_task",
+        "mqtt_cleanup",
+        "mqtt_provenance_load",
+        "mqtt_retirement_store_load",
+        "sdk_nvs_get_blob",
+        "sdk_nvs_get_blob_impl",
+        "sdk_nvs_handle_size",
+        "sdk_nvs_size",
+        "sdk_nvs_find",
+        "sdk_nvs_page_find",
+        "sdk_nvs_page_read_entry",
+        "sdk_nvs_partition_read",
+        "sdk_partition_read",
+        "sdk_flash_read",
+        "sdk_flash_driver_read",
+        "sdk_flash_hal_read",
+        "sdk_flash_hal_poll"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "mqtt_retirement_load_read": {
+      "symbols": [
+        "mqtt_task",
+        "mqtt_cleanup",
+        "mqtt_provenance_load",
+        "mqtt_retirement_store_load",
+        "sdk_nvs_get_blob",
+        "sdk_nvs_get_blob_impl",
+        "sdk_nvs_handle_get",
+        "sdk_nvs_read",
+        "sdk_nvs_read_multi",
+        "sdk_nvs_page_read",
+        "sdk_nvs_page_variable_read",
+        "sdk_nvs_page_read_entry",
+        "sdk_nvs_partition_read",
+        "sdk_partition_read",
+        "sdk_flash_read",
+        "sdk_flash_driver_read",
+        "sdk_flash_hal_read",
+        "sdk_flash_hal_poll"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "mqtt_retirement_load_close": {
+      "symbols": [
+        "mqtt_task",
+        "mqtt_cleanup",
+        "mqtt_provenance_load",
+        "mqtt_retirement_store_load",
+        "sdk_nvs_close",
+        "tls_calloc",
+        "sdk_malloc_caps",
+        "sdk_malloc_base",
+        "sdk_malloc_aligned",
+        "sdk_multi_aligned_offset",
+        "sdk_multi_aligned_impl",
+        "sdk_multi_lock",
+        "sdk_queue_critical",
+        "sdk_queue_compare_swap",
+        "runtime_task_entry"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "mqtt_retirement_save_encode": {
+      "symbols": [
+        "mqtt_task",
+        "mqtt_discovery",
+        "mqtt_provenance_save",
+        "mqtt_retirement_store_save",
+        "mqtt_retirement_encode"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "mqtt_retirement_save_open": {
+      "symbols": [
+        "mqtt_task",
+        "mqtt_discovery",
+        "mqtt_provenance_save",
+        "mqtt_retirement_store_save",
+        "sdk_nvs_open",
+        "sdk_nvs_open_partition",
+        "sdk_nvs_manager_open",
+        "sdk_nvs_namespace",
+        "tls_calloc",
+        "sdk_malloc_caps",
+        "sdk_malloc_base",
+        "sdk_malloc_aligned",
+        "sdk_multi_aligned_offset",
+        "sdk_multi_aligned_impl",
+        "sdk_multi_lock",
+        "sdk_queue_critical",
+        "sdk_queue_compare_swap",
+        "runtime_task_entry"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "mqtt_retirement_save_namespace_compaction": {
+      "symbols": [
+        "mqtt_task",
+        "mqtt_discovery",
+        "mqtt_provenance_save",
+        "mqtt_retirement_store_save",
+        "sdk_nvs_open",
+        "sdk_nvs_open_partition",
+        "sdk_nvs_manager_open",
+        "sdk_nvs_namespace",
+        "sdk_nvs_write",
+        "sdk_nvs_request_page",
+        "sdk_nvs_page_copy",
+        "sdk_nvs_page_init",
+        "sdk_nvs_page_write_entry",
+        "sdk_nvs_partition_write",
+        "sdk_partition_write",
+        "sdk_flash_write",
+        "sdk_flash_driver_write",
+        "sdk_flash_driver_page_program",
+        "sdk_flash_wait_idle",
+        "sdk_flash_read_reg",
+        "sdk_flash_host_status",
+        "sdk_flash_host_program",
+        "sdk_flash_hal_program",
+        "sdk_flash_hal_common",
+        "sdk_flash_hal_poll",
+        "sdk_flash_os_start",
+        "sdk_flash_os_end"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "mqtt_retirement_save_namespace_erase": {
+      "symbols": [
+        "mqtt_task",
+        "mqtt_discovery",
+        "mqtt_provenance_save",
+        "mqtt_retirement_store_save",
+        "sdk_nvs_open",
+        "sdk_nvs_open_partition",
+        "sdk_nvs_manager_open",
+        "sdk_nvs_namespace",
+        "sdk_nvs_write",
+        "sdk_nvs_request_page",
+        "sdk_nvs_activate_page",
+        "sdk_nvs_page_erase",
+        "sdk_nvs_partition_erase",
+        "sdk_partition_erase",
+        "sdk_flash_erase",
+        "sdk_flash_driver_erase",
+        "sdk_flash_wait_idle",
+        "sdk_flash_read_reg",
+        "sdk_flash_host_status",
+        "sdk_flash_host_erase",
+        "sdk_flash_hal_common",
+        "sdk_flash_hal_poll",
+        "sdk_flash_os_start",
+        "sdk_flash_os_end"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "mqtt_retirement_save_write": {
+      "symbols": [
+        "mqtt_task",
+        "mqtt_discovery",
+        "mqtt_provenance_save",
+        "mqtt_retirement_store_save",
+        "sdk_nvs_set_blob",
+        "sdk_nvs_handle_set",
+        "sdk_nvs_write",
+        "sdk_nvs_write_multi",
+        "sdk_nvs_page_write",
+        "sdk_nvs_page_write_entry",
+        "sdk_nvs_page_write_data",
+        "sdk_nvs_partition_write",
+        "sdk_partition_write",
+        "sdk_flash_write",
+        "sdk_flash_driver_write",
+        "sdk_flash_driver_page_program",
+        "sdk_flash_wait_idle",
+        "sdk_flash_read_reg",
+        "sdk_flash_host_status",
+        "sdk_flash_host_program",
+        "sdk_flash_hal_program",
+        "sdk_flash_hal_common",
+        "sdk_flash_hal_poll",
+        "sdk_flash_os_start",
+        "sdk_flash_os_end"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "mqtt_retirement_save_compaction": {
+      "symbols": [
+        "mqtt_task",
+        "mqtt_discovery",
+        "mqtt_provenance_save",
+        "mqtt_retirement_store_save",
+        "sdk_nvs_set_blob",
+        "sdk_nvs_handle_set",
+        "sdk_nvs_write",
+        "sdk_nvs_write_multi",
+        "sdk_nvs_request_page",
+        "sdk_nvs_page_copy",
+        "sdk_nvs_page_init",
+        "sdk_nvs_page_write_entry",
+        "sdk_nvs_partition_write",
+        "sdk_partition_write",
+        "sdk_flash_write",
+        "sdk_flash_driver_write",
+        "sdk_flash_driver_page_program",
+        "sdk_flash_wait_idle",
+        "sdk_flash_read_reg",
+        "sdk_flash_host_status",
+        "sdk_flash_host_program",
+        "sdk_flash_hal_program",
+        "sdk_flash_hal_common",
+        "sdk_flash_hal_poll",
+        "sdk_flash_os_start",
+        "sdk_flash_os_end"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "mqtt_retirement_save_compaction_erase": {
+      "symbols": [
+        "mqtt_task",
+        "mqtt_discovery",
+        "mqtt_provenance_save",
+        "mqtt_retirement_store_save",
+        "sdk_nvs_set_blob",
+        "sdk_nvs_handle_set",
+        "sdk_nvs_write",
+        "sdk_nvs_write_multi",
+        "sdk_nvs_request_page",
+        "sdk_nvs_activate_page",
+        "sdk_nvs_page_erase",
+        "sdk_nvs_partition_erase",
+        "sdk_partition_erase",
+        "sdk_flash_erase",
+        "sdk_flash_driver_erase",
+        "sdk_flash_wait_idle",
+        "sdk_flash_read_reg",
+        "sdk_flash_host_status",
+        "sdk_flash_host_erase",
+        "sdk_flash_hal_common",
+        "sdk_flash_hal_poll",
+        "sdk_flash_os_start",
+        "sdk_flash_os_end"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "mqtt_retirement_save_compare": {
+      "symbols": [
+        "mqtt_task",
+        "mqtt_discovery",
+        "mqtt_provenance_save",
+        "mqtt_retirement_store_save",
+        "sdk_nvs_set_blob",
+        "sdk_nvs_handle_set",
+        "sdk_nvs_write",
+        "sdk_nvs_cmp_multi",
+        "sdk_nvs_page_cmp",
+        "sdk_nvs_page_read_entry",
+        "sdk_nvs_partition_read",
+        "sdk_partition_read",
+        "sdk_flash_read",
+        "sdk_flash_driver_read",
+        "sdk_flash_hal_read",
+        "sdk_flash_hal_poll"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "mqtt_retirement_save_find": {
+      "symbols": [
+        "mqtt_task",
+        "mqtt_discovery",
+        "mqtt_provenance_save",
+        "mqtt_retirement_store_save",
+        "sdk_nvs_set_blob",
+        "sdk_nvs_handle_set",
+        "sdk_nvs_write",
+        "sdk_nvs_find",
+        "sdk_nvs_page_find",
+        "sdk_nvs_page_read_entry",
+        "sdk_nvs_partition_read",
+        "sdk_partition_read",
+        "sdk_flash_read",
+        "sdk_flash_driver_read",
+        "sdk_flash_hal_read",
+        "sdk_flash_hal_poll"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "mqtt_retirement_save_erase_old": {
+      "symbols": [
+        "mqtt_task",
+        "mqtt_discovery",
+        "mqtt_provenance_save",
+        "mqtt_retirement_store_save",
+        "sdk_nvs_set_blob",
+        "sdk_nvs_handle_set",
+        "sdk_nvs_write",
+        "sdk_nvs_erase_multi",
+        "sdk_nvs_page_erase_item",
+        "sdk_nvs_page_erase_entry",
+        "sdk_nvs_page_alter_range",
+        "sdk_nvs_partition_write",
+        "sdk_partition_write",
+        "sdk_flash_write",
+        "sdk_flash_driver_write",
+        "sdk_flash_driver_page_program",
+        "sdk_flash_wait_idle",
+        "sdk_flash_read_reg",
+        "sdk_flash_host_status",
+        "sdk_flash_host_program",
+        "sdk_flash_hal_program",
+        "sdk_flash_hal_common",
+        "sdk_flash_hal_poll",
+        "sdk_flash_os_start",
+        "sdk_flash_os_end"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "mqtt_retirement_save_commit": {
+      "symbols": [
+        "mqtt_task",
+        "mqtt_discovery",
+        "mqtt_provenance_save",
+        "mqtt_retirement_store_save",
+        "sdk_nvs_commit",
+        "sdk_nvs_handle_commit"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "mqtt_retirement_save_close": {
+      "symbols": [
+        "mqtt_task",
+        "mqtt_discovery",
+        "mqtt_provenance_save",
+        "mqtt_retirement_store_save",
+        "sdk_nvs_close",
+        "tls_calloc",
+        "sdk_malloc_caps",
+        "sdk_malloc_base",
+        "sdk_malloc_aligned",
+        "sdk_multi_aligned_offset",
+        "sdk_multi_aligned_impl",
+        "sdk_multi_lock",
+        "sdk_queue_critical",
+        "sdk_queue_compare_swap",
+        "runtime_task_entry"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "mqtt_retirement_diagnostic": {
+      "symbols": [
+        "mqtt_task",
+        "mqtt_discovery",
+        "mqtt_provenance_save",
+        "mqtt_retirement_note",
+        "diag_log",
+        "diag_syslog",
+        "sdk_queue_send",
+        "sdk_queue_remove_event",
+        "sdk_queue_yield_required",
+        "sdk_queue_yield_other",
+        "sdk_queue_crosscore_yield",
+        "sdk_queue_crosscore_send",
+        "sdk_queue_critical",
+        "sdk_queue_compare_swap",
+        "runtime_task_entry"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "mqtt_retirement_discovery_load_decode": {
+      "symbols": [
+        "mqtt_task",
+        "mqtt_discovery",
+        "mqtt_provenance_load",
+        "mqtt_retirement_store_load",
+        "mqtt_retirement_decode"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "mqtt_retirement_discovery_load_open": {
+      "symbols": [
+        "mqtt_task",
+        "mqtt_discovery",
+        "mqtt_provenance_load",
+        "mqtt_retirement_store_load",
+        "sdk_nvs_open",
+        "sdk_nvs_open_partition",
+        "sdk_nvs_manager_open",
+        "sdk_nvs_namespace",
+        "tls_calloc",
+        "sdk_malloc_caps",
+        "sdk_malloc_base",
+        "sdk_malloc_aligned",
+        "sdk_multi_aligned_offset",
+        "sdk_multi_aligned_impl",
+        "sdk_multi_lock",
+        "sdk_queue_critical",
+        "sdk_queue_compare_swap",
+        "runtime_task_entry"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "mqtt_retirement_discovery_load_size": {
+      "symbols": [
+        "mqtt_task",
+        "mqtt_discovery",
+        "mqtt_provenance_load",
+        "mqtt_retirement_store_load",
+        "sdk_nvs_get_blob",
+        "sdk_nvs_get_blob_impl",
+        "sdk_nvs_handle_size",
+        "sdk_nvs_size",
+        "sdk_nvs_find",
+        "sdk_nvs_page_find",
+        "sdk_nvs_page_read_entry",
+        "sdk_nvs_partition_read",
+        "sdk_partition_read",
+        "sdk_flash_read",
+        "sdk_flash_driver_read",
+        "sdk_flash_hal_read",
+        "sdk_flash_hal_poll"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "mqtt_retirement_discovery_load_read": {
+      "symbols": [
+        "mqtt_task",
+        "mqtt_discovery",
+        "mqtt_provenance_load",
+        "mqtt_retirement_store_load",
+        "sdk_nvs_get_blob",
+        "sdk_nvs_get_blob_impl",
+        "sdk_nvs_handle_get",
+        "sdk_nvs_read",
+        "sdk_nvs_read_multi",
+        "sdk_nvs_page_read",
+        "sdk_nvs_page_variable_read",
+        "sdk_nvs_page_read_entry",
+        "sdk_nvs_partition_read",
+        "sdk_partition_read",
+        "sdk_flash_read",
+        "sdk_flash_driver_read",
+        "sdk_flash_hal_read",
+        "sdk_flash_hal_poll"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "mqtt_retirement_discovery_load_close": {
+      "symbols": [
+        "mqtt_task",
+        "mqtt_discovery",
+        "mqtt_provenance_load",
+        "mqtt_retirement_store_load",
+        "sdk_nvs_close",
+        "tls_calloc",
+        "sdk_malloc_caps",
+        "sdk_malloc_base",
+        "sdk_malloc_aligned",
+        "sdk_multi_aligned_offset",
+        "sdk_multi_aligned_impl",
+        "sdk_multi_lock",
+        "sdk_queue_critical",
+        "sdk_queue_compare_swap",
+        "runtime_task_entry"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
     }
   },
   "tasks": {
@@ -3336,7 +4501,8 @@
         "main_wifi_config_save",
         "main_wifi_config_success",
         "main_wifi_driver",
-        "main_wifi_wait"
+        "main_wifi_wait",
+        "main_initial_mqtt_client"
       ]
     },
     "mqtt": {
@@ -3349,7 +4515,6 @@
         "mqtt_reference_subscribe",
         "mqtt_circulation_subscribe",
         "mqtt_cleanup",
-        "mqtt_promotion",
         "mqtt_discovery",
         "mqtt_weather",
         "mqtt_heartbeat",
@@ -3378,9 +4543,45 @@
         "mqtt_x10a_state_tls",
         "mqtt_crash_tls",
         "mqtt_heartbeat_discovery_tls",
-        "mqtt_legacy_retract_tls",
-        "mqtt_retract_ungrouped_tls",
-        "mqtt_cleanup_tls"
+        "mqtt_cleanup_tls",
+        "mqtt_retirement_legacy_enqueue",
+        "mqtt_retirement_legacy_heartbeat_enqueue",
+        "mqtt_retirement_legacy_crash_enqueue",
+        "mqtt_retirement_stale_enqueue",
+        "mqtt_retirement_stale_discovery_enqueue",
+        "mqtt_retirement_profile_enqueue",
+        "mqtt_retirement_profile_discovery_enqueue",
+        "mqtt_retirement_periodic_enqueue",
+        "mqtt_retirement_probe_enqueue",
+        "mqtt_source_cleanup_enqueue",
+        "mqtt_retirement_identity_make",
+        "mqtt_retirement_identity_scan",
+        "mqtt_retirement_pending_identity_make",
+        "mqtt_retirement_pending_identity_scan",
+        "mqtt_periodic_retirement_request",
+        "mqtt_retirement_load_decode",
+        "mqtt_retirement_load_open",
+        "mqtt_retirement_load_size",
+        "mqtt_retirement_load_read",
+        "mqtt_retirement_load_close",
+        "mqtt_retirement_save_encode",
+        "mqtt_retirement_save_open",
+        "mqtt_retirement_save_namespace_compaction",
+        "mqtt_retirement_save_namespace_erase",
+        "mqtt_retirement_save_write",
+        "mqtt_retirement_save_compaction",
+        "mqtt_retirement_save_compaction_erase",
+        "mqtt_retirement_save_compare",
+        "mqtt_retirement_save_find",
+        "mqtt_retirement_save_erase_old",
+        "mqtt_retirement_save_commit",
+        "mqtt_retirement_save_close",
+        "mqtt_retirement_diagnostic",
+        "mqtt_retirement_discovery_load_decode",
+        "mqtt_retirement_discovery_load_open",
+        "mqtt_retirement_discovery_load_size",
+        "mqtt_retirement_discovery_load_read",
+        "mqtt_retirement_discovery_load_close"
       ]
     },
     "poll": {
@@ -3589,7 +4790,26 @@
       "lwip/port/esp32xx/vfs_lwip.c": "0f0967786aac2df9f83d5ff2ea6b874554410737667b0bcb3f439ce1a04d5610",
       "pthread/pthread.c": "3423df09f2a291e76abf2cb34a26b5fde21a22bd514563f1526d44cdafa8da15",
       "pthread/pthread_local_storage.c": "838b9ea24df5493cc648248110bc5ce2e28c98bbad945ac7cfd70912977cc378",
-      "esp_system/esp_system.c": "3dff935f82b8754ec4574bff6744fa59b2c3171146d9600d05fd0a1e298a1210"
+      "esp_system/esp_system.c": "3dff935f82b8754ec4574bff6744fa59b2c3171146d9600d05fd0a1e298a1210",
+      "nvs_flash/src/nvs_api.cpp": "31845c9586313e73c08afaeaa4868a5c22d9c463ab193f4c60be7593e49a3e7f",
+      "nvs_flash/src/nvs_storage.cpp": "fb2fccc3a204b6e6ab1aaea78790f7897ce917318b3baf96a715a89a249f97a9",
+      "nvs_flash/src/nvs_storage.hpp": "88e839630d864221f7ad13b1c7af7eea70b92ad040ca91940d94c00372d6aabe",
+      "nvs_flash/src/nvs_page.cpp": "e77a3cb5c9baa6011df2a0cb0053d7f84a003ac1d26d0a7845beadcfaefbfd49",
+      "nvs_flash/src/nvs_page.hpp": "5169df79ad3a76146cd92258abdcb09209080d259cc9325d0e55de4c01a568d3",
+      "nvs_flash/src/nvs_pagemanager.cpp": "9429ba340a539f7ec62427b12f9e6c630748566cc72f2a589a8e70d06e5c4118",
+      "nvs_flash/src/nvs_pagemanager.hpp": "cfdffe1c2d9e572633a8d456f8f08dd3b7436cdbd6f7d8d5edc9be5722dcc750",
+      "nvs_flash/src/nvs_partition.cpp": "8067c2ddc8259ff0ebfc2fe309732f75cae8bdad605725738508bc55ca8a0e93",
+      "nvs_flash/src/nvs_partition.hpp": "426f6e6a5b7dbefbc193a2069e3ae494d066330f693c368647966d57f4784451",
+      "nvs_flash/src/nvs_partition_manager.cpp": "886cbe213af0c88bac83168b252e960f510944eb4064967207c5ed3ef7c37dd7",
+      "nvs_flash/src/nvs_handle_simple.cpp": "15ed54fdb14bd9e8a0646cab54c41fe06140521b016830d6c13193675631facd",
+      "nvs_flash/src/nvs_handle_simple.hpp": "ff81baafd3f280c35fee1d546af533c41b0395c23ac739b937ffa31da8d75073",
+      "nvs_flash/src/nvs_memory_management.hpp": "24982f5525a212b57bb7a1e42ce27106a061b27b23c3049914a5b472e7a6993d",
+      "esp_partition/partition.c": "6dfe4a91aeacade3f02a98446e690ea77c91071afd3784351637a961b2cee050",
+      "spi_flash/esp_flash_api.c": "dff90a44ffa75013c3f610e8e31bc2bb9e186aca281808f66bf7060c3cead0f2",
+      "spi_flash/spi_flash_chip_generic.c": "11c39de130afef9a3459aa13918b420ca2b27a2d5a494d96544619095ecf6800",
+      "spi_flash/spi_flash_chip_winbond.c": "12a415aa6b50d7666c9f9e81504c37c2c09c340bb35700e9a1d013bf93374818",
+      "spi_flash/memspi_host_driver.c": "2586901bcc4692d526a284f7cfeb9fda7dc06c01ecd0726c4465b2ce4b846921",
+      "spi_flash/spi_flash_os_func_app.c": "88ba993676ebd0349c4d94302bc098199a6d1dcea76fcda92dc649f1c7c6f966"
     },
     "config_macros": {
       "CONFIG_ESP_MAIN_TASK_STACK_SIZE": 6144,
@@ -3664,7 +4884,21 @@
       "CONFIG_MBEDTLS_ECP_FIXED_POINT_OPTIM": null,
       "CONFIG_I2C_ISR_IRAM_SAFE": null,
       "CONFIG_LWIP_TCPIP_CORE_LOCKING": null,
-      "CONFIG_LWIP_NETCONN_SEM_PER_THREAD": null
+      "CONFIG_LWIP_NETCONN_SEM_PER_THREAD": null,
+      "CONFIG_NVS_ENCRYPTION": null,
+      "CONFIG_NVS_ASSERT_ERROR_CHECK": null,
+      "CONFIG_NVS_COMPATIBLE_PRE_V4_4": null,
+      "CONFIG_SPI_FLASH_ROM_DRIVER_PATCH": null,
+      "CONFIG_SPI_FLASH_VERIFY_WRITE": null,
+      "CONFIG_SPI_FLASH_VERIFY_ERASE": null,
+      "CONFIG_SPI_FLASH_WARN_SETTING_ZERO_TO_ONE": null,
+      "CONFIG_SPI_FLASH_AUTO_SUSPEND": null,
+      "CONFIG_SPI_FLASH_SOFTWARE_RESUME": null,
+      "CONFIG_SPI_FLASH_WRITE_CHUNK_SIZE": 8192,
+      "CONFIG_SPI_FLASH_YIELD_DURING_ERASE": 1,
+      "CONFIG_ESPTOOLPY_FLASHMODE_DIO": 1,
+      "CONFIG_ESPTOOLPY_FLASHMODE_OPI": null,
+      "CONFIG_ESPTOOLPY_FLASHMODE_QIO": null
     },
     "tls_paths": {
       "certificate_ecdsa": {
@@ -5100,6 +6334,11 @@
         "base_bytes": 192,
         "max_bytes": 4608
       }
+    },
+    "mqtt_source_sha256": {
+      "mqtt_client.c": "83e5a7065b8774dce83dd6b9be0163caed3a4fdbbd7de38b328e7e01911487dc",
+      "lib/mqtt_outbox.c": "5e17d0b15f699e241a89b28301d17507003813100e2f61cc4d0906362d51b5e3",
+      "lib/mqtt_msg.c": "4f030f744316677de0d852968b5c6e8d99dfa9f3e8601c6800385779c05096cc"
     }
   }
 }

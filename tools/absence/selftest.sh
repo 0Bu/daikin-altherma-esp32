@@ -1339,7 +1339,7 @@ match = re.search(
 assert match, "seed 74 did not apply — cleanup call moved"
 call = match.group(0)
 seed = s[:match.start()] + s[match.end():]
-gate = '            if (gate.publish_cycle) {\n'
+gate = '                if (gate.publish_cycle) {\n'
 assert gate in seed, "seed 74 did not apply — publication gate moved"
 seed = seed.replace(gate, gate + "    " + call, 1)
 open(p, "w").write(seed)
@@ -1402,10 +1402,10 @@ python3 - "$TMP/main/mqtt_ha.cpp" <<'PY4'
 import sys
 p = sys.argv[1]
 s = open(p).read()
-old = 'for (int i = 0; i < RETIRED_MODBUS_HA_SENSOR_COUNT; i++)'
-new = 'for (int i = 0; i < def::HOMEHUB_REG_COUNT; i++)'
+old = 'RETIRED_MODBUS_HA_SENSOR_COUNT + RETIRED_WEATHER_HA_SENSOR_COUNT;'
+new = 'def::HOMEHUB_REG_COUNT + RETIRED_WEATHER_HA_SENSOR_COUNT;'
 seed = s.replace(old, new, 1)
-assert seed != s, "seed 78 did not apply — retired HomeHub ledger loop moved"
+assert seed != s, "seed 78 did not apply — periodic retirement ledger count moved"
 open(p, "w").write(seed)
 PY4
 expect_red "retired HomeHub ledger recoupled to current catalog" run_contract
@@ -1489,7 +1489,7 @@ start = s.index('            // HA may have been offline for the connect-time to
 end = s.index('            publish_stage = "heating_curve";', start)
 block = s[start:end]
 seed = s[:start] + s[end:]
-gate = '            if (gate.publish_cycle) {\n'
+gate = '                if (gate.publish_cycle) {\n'
 assert gate in seed, "seed 83 did not apply — ordinary publish gate moved"
 seed = seed.replace(gate, gate + block, 1)
 open(p, "w").write(seed)
@@ -1518,9 +1518,9 @@ python3 - "$TMP/main/mqtt_ha.cpp" <<'PY4'
 import sys
 p = sys.argv[1]
 s = open(p).read()
-old = ('                        retract_weather_discovery();\n'
+old = ('                        if (!s_periodic_discovery_pending) request_periodic_discovery_retirement();\n'
        '                        ha_retire_elapsed_s = 0;\n')
-new = '                        retract_weather_discovery();\n'
+new = '                        if (!s_periodic_discovery_pending) request_periodic_discovery_retirement();\n'
 seed = s.replace(old, new, 1)
 assert seed != s, "seed 85 did not apply — periodic retirement reset moved"
 open(p, "w").write(seed)

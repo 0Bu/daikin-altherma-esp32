@@ -4,7 +4,7 @@
 //
 // The base topic is the INSTALLATION identity: every message topic sits directly under it
 // (`<base>/x10a`, `<base>/heartbeat`, `<base>/crash`, …) and `device_node_id(base)`
-// (logic/ha_device.hpp) slugifies it into the Home Assistant discovery node id. Kconfig's
+// (logic/ha_device.hpp) maps it injectively into the Home Assistant discovery node id. Kconfig's
 // DAIKIN_MQTT_BASE_TOPIC help has always stated the consequence — "Two boards on one broker
 // therefore need two base topics" — but the value was compile-time ONLY, while CI publishes exactly
 // ONE esp32s3 image. So the requirement was unsatisfiable for anyone running the published build:
@@ -31,14 +31,14 @@
 // on a broker, where a bad base topic does not fail loudly — it publishes to the wrong place.
 #include <string>
 
-#include "ha_device.hpp"   // ha_slug — the node id must survive this, or two boards collide again
+#include "ha_device.hpp" // rejects bases with no alphanumeric identity
 
 namespace daik {
 
 // A base topic longer than this is refused. MQTT itself allows 65535 bytes, but this string is a
-// PREFIX on every topic the firmware builds and is slugified into an HA node id that appears in every
-// discovery topic and unique_id. The bound keeps those derived strings small on a heap-tight target;
-// it is not a protocol limit and nothing here depends on the exact number.
+// PREFIX on every topic the firmware builds and is encoded into an HA node id that appears in every
+// discovery topic and unique_id. The bound keeps those derived strings small on a heap-tight
+// target; it is not a protocol limit and nothing here depends on the exact number.
 inline constexpr size_t MQTT_BASE_MAX_LEN = 64;
 
 // Why a base topic was refused: a stable machine `code` beside the English `message`. Both are string

@@ -35,6 +35,7 @@ idf_component_register(
         "heap_guard.cpp"
         "stack_watch.cpp"
         "mqtt_ha.cpp"
+        "mqtt_retirement_store.cpp"
         "ota_update.cpp"
         "diag_log.cpp"
         "syslog.cpp"

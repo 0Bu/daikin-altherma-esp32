@@ -26,31 +26,52 @@ fi
 
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
-cp -R main "$WORK/main"
+cp -R main "$WORK/original-main" || exit 2
+cp -R "$WORK/original-main" "$WORK/main" || exit 2
 
 pass=0 fail=0
 
-# run_case <name> <file> <expect-code> <expect-needle> <python-patch>
-# Patches one file in the copy, rebuilds the audit against it, and asserts the audit both fails
-# (exit 1) and names the expected finding.
+# Restore every affected file even when a patch or compilation fails. The immutable snapshot also
+# prevents a concurrent working-tree edit from becoming a later case's supposedly fixed baseline.
+restore_fixture_files() {
+    local file
+    for file in "$@"; do
+        cp "$WORK/original-main/$file" "$WORK/main/$file" || return 1
+    done
+}
+
+# run_case <name> <file> <expect-code> <expect-needle> <python-patch> [exact-storage-peer]
+# Rebuilds the real audit and requires exit 1 plus the historical finding. A shared table's defect
+# must be seeded in its proven-equal peer too: the production equality guard remains active, while
+# both model identities must independently report the domain finding.
 run_case() {
-    local name="$1" file="$2" code="$3" needle="$4" patch="$5"
-    cp "main/def/$file" "$WORK/main/def/$file"                     # reset to the fixed original
-    if ! FILE="$WORK/main/def/$file" python3 -c "$patch"; then
-        echo "  MISCONFIGURED: $name — patch did not apply (did the row change upstream?)"
-        fail=$((fail + 1)); return
-    fi
+    local name="$1" file="$2" code="$3" needle="$4" patch="$5" peer="${6:-}" target
+    local files=("def/$file")
+    if [ -n "$peer" ]; then files+=("def/$peer"); fi
+    restore_fixture_files "${files[@]}" || exit 2
+    for target in "${files[@]}"; do
+        if ! FILE="$WORK/main/$target" python3 -c "$patch"; then
+            restore_fixture_files "${files[@]}" || exit 2
+            echo "  MISCONFIGURED: $name — patch did not apply (did the row change upstream?)"
+            fail=$((fail + 1)); return
+        fi
+    done
     if ! "$CXX" -std=c++17 -I"$WORK/main" -o "$WORK/audit" tools/domain/catalog_audit.cpp 2>"$WORK/cc.log"; then
+        restore_fixture_files "${files[@]}" || exit 2
         echo "  MISCONFIGURED: $name — audit failed to compile against the patched catalog"
         sed -n '1,5p' "$WORK/cc.log"
         fail=$((fail + 1)); return
     fi
     local out rc
     out="$("$WORK/audit" docs/REGISTERS.md tools/domain/audit_exceptions.txt 2>&1)"; rc=$?
-    cp "main/def/$file" "$WORK/main/def/$file"                     # restore for the next case
+    restore_fixture_files "${files[@]}" || exit 2
 
     if [ "$rc" -eq 0 ]; then
         echo "  MISSED: $name — audit reported CLEAN on the re-introduced bug"
+        fail=$((fail + 1)); return
+    fi
+    if [ "$rc" -ne 1 ]; then
+        echo "  MISCONFIGURED: $name — audit returned $rc instead of a finding (exit 1)"
         fail=$((fail + 1)); return
     fi
     if ! printf '%s' "$out" | grep -q "$code"; then
@@ -61,7 +82,42 @@ run_case() {
         echo "  MISSED: $name — $code fired but not on \"$needle\""
         fail=$((fail + 1)); return
     fi
+    if [ -n "$peer" ]; then
+        for target in "$file" "$peer"; do
+            if [[ "$out" != *"] $code  ${target%.hpp}  "* ]]; then
+                echo "  MISSED: $name — no live $code finding for ${target%.hpp}"
+                fail=$((fail + 1)); return
+            fi
+        done
+    fi
     echo "  caught: $name  [$code]"
+    pass=$((pass + 1))
+}
+
+# The fixture synchronization must never weaken the production storage guard. A one-table mutation
+# is a separate negative compile control; ordinary domain cases still require successful builds.
+run_storage_guard_case() {
+    local name="$1" file="$2" patch="$3" rc
+    restore_fixture_files "def/$file" || exit 2
+    if ! FILE="$WORK/main/def/$file" python3 -c "$patch"; then
+        restore_fixture_files "def/$file" || exit 2
+        echo "  MISCONFIGURED: $name — patch did not apply"
+        fail=$((fail + 1)); return
+    fi
+    "$CXX" -std=c++17 -I"$WORK/main" -o "$WORK/audit" tools/domain/catalog_audit.cpp 2>"$WORK/cc.log"; rc=$?
+    restore_fixture_files "def/$file" || exit 2
+    if [ "$rc" -eq 0 ]; then
+        echo "  MISSED: $name — unequal shared tables compiled"
+        fail=$((fail + 1)); return
+    fi
+    if ! grep -qF "static assertion failed" "$WORK/cc.log" ||
+       ! grep -qF "profile_storage.hpp" "$WORK/cc.log" ||
+       ! grep -qF "shared storage requires the complete ordered generated tables to remain equal" "$WORK/cc.log"; then
+        echo "  MISCONFIGURED: $name — compilation failed without the expected storage guard"
+        sed -n '1,5p' "$WORK/cc.log"
+        fail=$((fail + 1)); return
+    fi
+    echo "  caught: $name  [STORAGE-EQUALITY]"
     pass=$((pass + 1))
 }
 
@@ -110,19 +166,21 @@ run_doc_case() {
 # Re-introduces a converter-table defect while leaving the documented contract authoritative.
 run_logic_case() {
     local name="$1" file="$2" code="$3" needle="$4" patch="$5"
-    cp "main/logic/$file" "$WORK/main/logic/$file"
+    restore_fixture_files "logic/$file" || exit 2
     if ! FILE="$WORK/main/logic/$file" python3 -c "$patch"; then
+        restore_fixture_files "logic/$file" || exit 2
         echo "  MISCONFIGURED: $name — logic patch did not apply (did the table change upstream?)"
         fail=$((fail + 1)); return
     fi
     if ! "$CXX" -std=c++17 -I"$WORK/main" -o "$WORK/audit" tools/domain/catalog_audit.cpp 2>"$WORK/cc.log"; then
+        restore_fixture_files "logic/$file" || exit 2
         echo "  MISCONFIGURED: $name — audit failed to compile against the patched converter"
         sed -n '1,5p' "$WORK/cc.log"
         fail=$((fail + 1)); return
     fi
     local out rc
     out="$("$WORK/audit" docs/REGISTERS.md tools/domain/audit_exceptions.txt 2>&1)"; rc=$?
-    cp "main/logic/$file" "$WORK/main/logic/$file"
+    restore_fixture_files "logic/$file" || exit 2
 
     if [ "$rc" -eq 0 ]; then
         echo "  MISSED: $name — audit reported CLEAN on the re-introduced bug"
@@ -155,14 +213,21 @@ open(p,"w").write(s.replace(old,"{0x64, 10, 105, 2, 1, \"Mixed water temp.\"}"))
 
 # legacy-36 — bizone mix-valve POSITION read as a 2-byte unsigned BE and typed °C, so Home Assistant
 #       got a phantom temperature sensor reading 12800 °C for a real 50 % valve position.
-run_case "legacy-36 M1S valve as °C temperature" "altherma_epra_e_etv16_etb16_etvz16_e_ej_series_8_12kw.hpp" \
-    "SEMANTICS" "valve position M1S" '
+m1s_patch='
 import os
 p=os.environ["FILE"]; s=open(p).read()
 old="{0x65, 0, 101, 1, -1, \"[EKMIK] Bizone kit mix valve position M1S\"}"
 assert old in s, "row not found"
 open(p,"w").write(s.replace(old,"{0x65, 0, 152, 2, 1, \"[EKMIK] Bizone kit mix valve position M1S\"}"))
 '
+run_storage_guard_case "one-table mutation preserves storage equality guard" \
+    "altherma_epra_e_etv16_etb16_etvz16_e_ej_series_8_12kw.hpp" "$m1s_patch"
+
+# This exact pair is guarded by the full-field assertion in main/def/profile_storage.hpp. Patch
+# only those two throwaway generated tables; their production sources and sharing guard stay fixed.
+run_case "legacy-36 M1S valve as °C temperature" "altherma_epra_e_etv16_etb16_etvz16_e_ej_series_8_12kw.hpp" \
+    "SEMANTICS" "valve position M1S" "$m1s_patch" \
+    "altherma_epra_e_etsh_x_16p30_50_e_series_8_12kw_ech2o.hpp"
 
 # legacy-37 — expansion-valve row widened to size 2 at offset 2, swallowing the Fan 2 byte: Fan 2 lost,
 #       valve count fabricated from two unrelated bytes (11267 pls for a real 300).

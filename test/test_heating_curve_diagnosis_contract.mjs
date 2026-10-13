@@ -124,7 +124,7 @@ const taskEnd = mqtt.indexOf("static bool build_client(", taskStart);
 const task = mqtt.slice(taskStart, taskEnd);
 const frames = task.indexOf("service_reference_frames(ref_config)");
 const evaluate = task.indexOf("evaluate_heating_curve(ref_config, x10a_connected)");
-assert.match(mqtt, /mqtt_cycle_gate[\s\S]*?const HpStats\s+hp\s*=\s*hp_stats\(\);\s*x10a_connected\s*=\s*hp\.connected;/,
+assert.match(mqtt, /mqtt_cycle_gate[\s\S]*?const HpMqttSourceState\s+hp\s*=\s*hp_mqtt_source_state\(\);\s*x10a_connected\s*=\s*hp\.connected;/,
   "the scalar diagnosis input must retain the same gate snapshot's connection observation");
 const publishGate = task.indexOf("if (gate.publish_cycle)");
 assert.ok(frames >= 0 && evaluate > frames && publishGate > evaluate,
@@ -132,7 +132,7 @@ assert.ok(frames >= 0 && evaluate > frames && publishGate > evaluate,
 const heartbeatPublish = task.indexOf("publish_heartbeat()", publishGate);
 const telemetryPublish = task.indexOf("publish_heating_curve_telemetry(ref_config)", publishGate);
 assert.ok(heartbeatPublish > publishGate && telemetryPublish > heartbeatPublish,
-  "technical heartbeat and grouped heating-curve telemetry must publish together inside the X10A gate");
+  "technical heartbeat and bounded heating-curve telemetry must share the independent transport cadence");
 
 const heartbeat = read("main/logic/heartbeat.hpp");
 assert.doesNotMatch(heartbeat, /room_(?:source|temperature|setpoint|control|error|age|messages|rejections)|heating_curve_/,

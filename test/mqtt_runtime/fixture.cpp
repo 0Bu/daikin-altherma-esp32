@@ -5,7 +5,12 @@
 #include <cstdio>
 #include <cstdlib>
 #include <new>
+#include <set>
 #include <string>
+namespace cleanup_witness {
+bool early_ack = false;
+int  enqueue(FakeMqtt*, const char*, const char*, int, int, int, bool);
+} // namespace cleanup_witness
 namespace cpp_witness {
 // Arm only around a production preparation call. Long topics force each owned string to allocate.
 int fail_after = -1, attempted = 0;
@@ -49,10 +54,25 @@ static void destroy(cJSON* root) {
 } // namespace json_witness
 #define cJSON_ParseWithLengthOpts json_witness::parse
 #define cJSON_Delete json_witness::destroy
+#define esp_mqtt_client_enqueue cleanup_witness::enqueue
 #ifndef MQTT_PRODUCTION_SOURCE
 #error MQTT_PRODUCTION_SOURCE must identify the complete current production TU
 #endif
 #include MQTT_PRODUCTION_SOURCE
+#undef esp_mqtt_client_enqueue
+
+namespace cleanup_witness {
+int enqueue(FakeMqtt* client, const char* topic, const char* bytes, int length, int qos,
+            int retained, bool store) {
+    const int id = esp_mqtt_client_enqueue(client, topic, bytes, length, qos, retained, store);
+    if (early_ack && id >= 0) {
+        esp_mqtt_event_t event{};
+        event.msg_id = id;
+        daik::on_mqtt(nullptr, "mqtt", MQTT_EVENT_PUBLISHED, &event);
+    }
+    return id;
+}
+} // namespace cleanup_witness
 
 void* operator new(size_t size) {
     const bool staged_failure = cpp_witness::fail_after == 0;
@@ -77,12 +97,17 @@ void  operator delete[](void* p, size_t) noexcept { std::free(p); }
 
 namespace adapter {
 daik::Config cfg;
-int          config_locks = 0, skipped_logs = 0;
+int          config_locks = 0, skipped_logs = 0, retirement_logs = 0;
 int64_t                                                            clock_shift_s = 0;
 char         last_skip[256]{};
 daik::HpStats               hp;
 daik::WifiInfo              wifi{};
 daik::ModbusStatus          modbus;
+bool                           modbus_enabled = false, modbus_live = false;
+uint32_t                       modbus_generation = 0, x10a_generation = 0;
+std::vector<daik::CachedValue> modbus_values;
+daik::Env3Status               env;
+std::string                    x10a_payload;
 daik::WeatherForecastStatus weather;
 daik::CrashInfo             boot, live_crash;
 daik::EthInfo               ethernet;
@@ -94,7 +119,37 @@ std::array<uint32_t, static_cast<size_t>(daik::StackWatch::COUNT)> stack_minima 
     return minima;
 }();
 } // namespace adapter
+namespace retirement_witness {
+daik::MqttRetirementRecord    durable;
+daik::MqttRetirementStoreLoad result     = daik::MqttRetirementStoreLoad::Missing;
+int                           load_calls = 0, save_calls = 0, save_failures = 0;
+int                           expected_ack_count = 0, observed_ack_count = 0;
+bool                          write_through_failure = false, reject_new_after_save = false;
+bool                          save_before_retirement = false;
+} // namespace retirement_witness
 namespace daik {
+MqttRetirementStoreLoad mqtt_retirement_store_load(MqttRetirementRecord& out) noexcept {
+    ++retirement_witness::load_calls;
+    if (retirement_witness::result == MqttRetirementStoreLoad::Ready)
+        out = retirement_witness::durable;
+    return retirement_witness::result;
+}
+bool mqtt_retirement_store_save(const MqttRetirementRecord& record) noexcept {
+    ++retirement_witness::save_calls;
+    retirement_witness::save_before_retirement |=
+        retirement_witness::observed_ack_count < retirement_witness::expected_ack_count;
+    const bool accepted = retirement_witness::save_failures == 0;
+    if (!accepted) --retirement_witness::save_failures;
+    if (accepted || retirement_witness::write_through_failure) {
+        retirement_witness::durable = record;
+        retirement_witness::result  = MqttRetirementStoreLoad::Ready;
+    }
+    if (accepted && retirement_witness::reject_new_after_save) {
+        retirement_witness::reject_new_after_save = false;
+        sdk::fail_next_new                        = true;
+    }
+    return accepted;
+}
 Config      config() { return adapter::cfg; }
 std::string config_profile() { return adapter::cfg.profile; }
 Protocol    config_x10a_protocol() { return adapter::cfg.proto; }
@@ -117,6 +172,7 @@ void diag_printf(const char* format, ...) {
         std::snprintf(adapter::last_skip, sizeof(adapter::last_skip), "%.*s",
                       static_cast<int>(sizeof(adapter::last_skip) - 1), line);
     }
+    if (std::strstr(line, "retirement metadata")) ++adapter::retirement_logs;
 }
 void stack_watch_sample(StackWatch slot) noexcept {
     if (slot == StackWatch::Mqtt) ++sdk::samples;
@@ -125,26 +181,39 @@ void stack_watch_sample(StackWatch slot) noexcept {
 uint32_t stack_watch_min_free_bytes(StackWatch slot) noexcept {
     return adapter::stack_minima[static_cast<size_t>(slot)];
 }
-size_t               heap_largest_internal_block() { return 40000; }
-uint8_t              heap_guard_restarts() { return 0; }
-HpStats              hp_stats() { return adapter::hp; }
-uint32_t             hp_cache_generation() { return 0; }
-uint32_t             hp_skipped_cycles() { return adapter::poll_skips; }
-HpX10aJsonProbe      hp_values_x10a_json_probe(const char*, uint64_t) { return {}; }
-HpX10aJsonCopyResult hp_values_x10a_json_copy(std::string&, size_t, uint64_t, uint32_t, const char*,
-                                              uint64_t) {
-    return HpX10aJsonCopyResult::SourceMismatch;
+size_t            heap_largest_internal_block() { return 40000; }
+uint8_t           heap_guard_restarts() { return 0; }
+HpStats           hp_stats() { return adapter::hp; }
+HpMqttSourceState hp_mqtt_source_state() {
+    const bool recent = mqtt_x10a_available(adapter::hp.connected, adapter::hp.last_ok_s);
+    return {adapter::hp.connected && recent, recent};
 }
-bool         mb_target_enabled() noexcept { return false; }
+uint32_t        hp_cache_generation() { return adapter::x10a_generation; }
+uint32_t        hp_skipped_cycles() { return adapter::poll_skips; }
+HpX10aJsonProbe hp_values_x10a_json_probe(const char*, uint64_t) {
+    if (!hp_mqtt_source_state().connected || adapter::x10a_payload.empty()) return {};
+    return {true, adapter::x10a_payload.size(), adapter::x10a_generation + 1,
+            adapter::x10a_generation};
+}
+HpX10aJsonCopyResult hp_values_x10a_json_copy(std::string& out, size_t, uint64_t, uint32_t,
+                                              const char*, uint64_t) {
+    if (!hp_mqtt_source_state().connected || adapter::x10a_payload.empty())
+        return HpX10aJsonCopyResult::SourceMismatch;
+    out = adapter::x10a_payload;
+    return HpX10aJsonCopyResult::Ok;
+}
+bool         mb_target_enabled() noexcept { return adapter::modbus_enabled; }
 ModbusStatus mb_status() { return adapter::modbus; }
-size_t       mb_values_capacity() { return 0; }
-size_t       mb_values_snapshot(CachedValue*, size_t, bool& live) {
-    live = false;
-    return 0;
+size_t       mb_values_capacity() { return adapter::modbus_values.size(); }
+size_t       mb_values_snapshot(CachedValue* out, size_t capacity, bool& live) {
+    live               = adapter::modbus_live;
+    const size_t count = std::min(capacity, adapter::modbus_values.size());
+    for (size_t i = 0; i < count; ++i) out[i] = adapter::modbus_values[i];
+    return count;
 }
-bool                  mb_values_live() { return false; }
-uint32_t              mb_cache_generation() { return 0; }
-Env3Status            env3_status() { return {}; }
+bool                  mb_values_live() { return adapter::modbus_live; }
+uint32_t              mb_cache_generation() { return adapter::modbus_generation; }
+Env3Status            env3_status() { return adapter::env; }
 WeatherForecastStatus weather_forecast_status() { return adapter::weather; }
 void                  history_record_circulation() {}
 void                  history_circulation_reset() {}
@@ -180,9 +249,12 @@ void feed(const char* topic, const char* payload, bool retained = false) {
     e.retain         = retained;
     daik::on_mqtt(nullptr, "mqtt", MQTT_EVENT_DATA, &e);
 }
-void initial_config() {
+void initial_config(const char* base = nullptr) {
     adapter::cfg.mqtt_uri = "mqtt://host-witness";
-    adapter::cfg.mqtt_base.assign(80, 'm'); // guarantees the ordinary Config copy allocates
+    if (base)
+        adapter::cfg.mqtt_base = base;
+    else
+        adapter::cfg.mqtt_base.assign(80, 'm'); // ordinary Config copy must allocate
     adapter::cfg.profile                        = "auto";
     adapter::cfg.diagnostics_enabled            = true;
     adapter::cfg.ref_temp_topic                 = "room";
@@ -1545,10 +1617,10 @@ void scalar_snapshot_helpers() {
     adapter::hp.connected = true;
     adapter::hp.last_ok_s = 1;
     bool connected        = false;
-    auto gate = daik::mqtt_cycle_gate(daik::MqttPublishGateState::SubscriberOnly, connected);
-    require(connected && gate.promote_publisher && !gate.publish_cycle &&
+    auto gate = daik::mqtt_cycle_gate(daik::MqttPublishGateState::Unavailable, connected);
+    require(connected && gate.resumed && gate.publish_cycle &&
                 gate.next == daik::MqttPublishGateState::Active,
-            "SCALAR_HP_GATE_PRESERVES_FIRST_SOURCE_PROMOTION");
+            "SCALAR_HP_GATE_PRESERVES_FIRST_SOURCE_PERMISSION");
     gate = daik::mqtt_cycle_gate(daik::MqttPublishGateState::Active, connected);
     require(connected && gate.publish_cycle && !gate.publish_offline,
             "SCALAR_HP_GATE_PRESERVES_CURRENT_PUBLISH_PERMISSION");
@@ -1570,9 +1642,9 @@ void scalar_snapshot_helpers() {
     adapter::live_crash.dismissed = true;
     require(daik::crash_publication_changed(), "SCALAR_CRASH_HELPER_DETECTS_DISMISSED_NOTABILITY");
 }
-std::array<std::string, 5> discovery_documents(const std::string& base) {
+std::array<std::string, 5> discovery_documents(const std::string& base,
+                                               const std::string& board = "daikin_fixture") {
     const auto           node  = daik::device_node_id(base);
-    const std::string    board = "daikin_fixture";
     const auto           state = daik::x10a_topic(base), avail = daik::availability_topic(base);
     const daik::ValueDef row{0x61, 10, 105, 2, 1, "DHW Tank Temp (R5T)"};
     return {
@@ -1590,9 +1662,9 @@ void discovery_topic_roundtrip() {
     const std::string device =
         R"json("dev":{"ids":["daikin_altherma_esp32","daikin_fixture"],"name":"Daikin Altherma","mf":"Daikin","mdl":"Altherma X10A"})json";
     const char* prefixes[] = {
-        R"json({"name":"DHW Tank Temp (R5T)","uniq_id":"daikin_altherma_esp32_hydronic_temps_dhw_tank_temp_r5t","stat_t":"daikin-altherma-esp32/x10a","val_tpl":"{{ value_json.get('hydronic_temps', {}).get('dhw_tank_temp_r5t', 'None') }}","avty_t":"daikin-altherma-esp32/status","unit_of_meas":"°C","dev_cla":"temperature","stat_cla":"measurement",)json",
+        R"json({"name":"DHW Tank Temp (R5T)","uniq_id":"daikin_altherma_esp32_hydronic_temps_dhw_tank_temp_r5t","stat_t":"daikin-altherma-esp32/x10a","val_tpl":"{{ value_json.get('hydronic_temps', {}).get('dhw_tank_temp_r5t', 'None') }}","availability":[{"topic":"daikin-altherma-esp32/status"},{"topic":"daikin-altherma-esp32/x10a/status"}],"availability_mode":"all","unit_of_meas":"°C","dev_cla":"temperature","stat_cla":"measurement",)json",
         R"json({"name":"ENV III Temperature","uniq_id":"daikin_altherma_esp32_env3_temperature","stat_t":"daikin-altherma-esp32/env3","val_tpl":"{{ value_json.get('temperature_c') }}","availability":[{"topic":"daikin-altherma-esp32/status"},{"topic":"daikin-altherma-esp32/env3","value_template":"{{ 'online' if value_json.get('temperature_c') is number else 'offline' }}"}],"availability_mode":"all","unit_of_meas":"°C","dev_cla":"temperature","stat_cla":"measurement",)json",
-        R"json({"name":"Hydronic Error Active","uniq_id":"daikin_altherma_esp32_hydronic_error_active","stat_t":"daikin-altherma-esp32/x10a","val_tpl":"{{ value_json.get('hydronic', {}).get('error_active', 'None') }}","avty_t":"daikin-altherma-esp32/status","pl_on":"1","pl_off":"0","dev_cla":"problem",)json",
+        R"json({"name":"Hydronic Error Active","uniq_id":"daikin_altherma_esp32_hydronic_error_active","stat_t":"daikin-altherma-esp32/x10a","val_tpl":"{{ value_json.get('hydronic', {}).get('error_active', 'None') }}","availability":[{"topic":"daikin-altherma-esp32/status"},{"topic":"daikin-altherma-esp32/x10a/status"}],"availability_mode":"all","pl_on":"1","pl_off":"0","dev_cla":"problem",)json",
         R"json({"name":"WiFi Signal","uniq_id":"daikin_altherma_esp32_wifi_signal","stat_t":"daikin-altherma-esp32/heartbeat","val_tpl":"{{ value_json.wifi_rssi }}","avty_t":"daikin-altherma-esp32/status","unit_of_meas":"dBm","dev_cla":"signal_strength","stat_cla":"measurement","ent_cat":"diagnostic",)json",
         R"json({"name":"Crash Dump Waiting","uniq_id":"daikin_altherma_esp32_coredump","stat_t":"daikin-altherma-esp32/crash","val_tpl":"{{ value_json.coredump | lower }}","pl_on":"true","pl_off":"false","avty_t":"daikin-altherma-esp32/status","dev_cla":"problem","ent_cat":"diagnostic",)json",
     };
@@ -1612,15 +1684,16 @@ void discovery_topic_roundtrip() {
                     "DISCOVERY_IS_COMPLETE_JSON_FOR_ACCEPTED_TOPIC_BYTES");
             wire_text(object.get(), "stat_t", (base + suffixes[i]).c_str(),
                       "DISCOVERY_STATE_TOPIC_ROUNDTRIPS_EXACT_BYTES");
-            if (i == 1) {
+            if (i <= 2) {
                 cJSON* availability =
                     cJSON_GetObjectItemCaseSensitive(object.get(), "availability");
                 require(cJSON_IsArray(availability) && cJSON_GetArraySize(availability) == 2,
                         "ENV_DISCOVERY_RETAINS_BOTH_AVAILABILITY_AUTHORITIES");
                 wire_text(cJSON_GetArrayItem(availability, 0), "topic", (base + "/status").c_str(),
                           "ENV_DISCOVERY_DEVICE_AVAILABILITY_TOPIC_ROUNDTRIPS");
-                wire_text(cJSON_GetArrayItem(availability, 1), "topic", (base + "/env3").c_str(),
-                          "ENV_DISCOVERY_SOURCE_AVAILABILITY_TOPIC_ROUNDTRIPS");
+                wire_text(cJSON_GetArrayItem(availability, 1), "topic",
+                          (base + (i == 1 ? "/env3" : "/x10a/status")).c_str(),
+                          "SOURCE_DISCOVERY_AVAILABILITY_TOPIC_ROUNDTRIPS");
             } else {
                 wire_text(object.get(), "avty_t", (base + "/status").c_str(),
                           "DISCOVERY_AVAILABILITY_TOPIC_ROUNDTRIPS_EXACT_BYTES");
@@ -1784,12 +1857,1383 @@ void probe_proof_expiry() {
     daik::service_reference_frames(adapter::cfg);
     require(!daik::s_circulation_probe.passed, "QUEUE_DELAY_CANNOT_REFRESH_STALE_PROBE_EVIDENCE");
 }
+using daik::MqttCleanupDeliveryOutcome;
+using daik::MqttRetirementOwner;
+
+void cleanup_fixture() {
+    daik::s_client                 = &sdk::client;
+    daik::s_mtx                    = &sdk::mutex;
+    daik::s_connected              = true;
+    daik::s_client_running         = true;
+    daik::s_mqtt_client_epoch      = 17;
+    daik::s_connected_client_epoch = 17;
+    daik::s_prefix                 = "homeassistant";
+    daik::s_node                   = "daikin_altherma_esp32_install";
+    daik::s_board                  = "daikin_abcdef";
+    daik::s_base                   = "daikin-altherma-esp32-install";
+    daik::s_avail                  = "daikin-altherma-esp32-install/availability";
+    daik::s_x10a                   = "daikin-altherma-esp32-install/x10a";
+    daik::s_weather                = "daikin-altherma-esp32-install/weather/openmeteo/forecast";
+    daik::s_modbus                 = "daikin-altherma-esp32-install/modbus";
+    daik::s_env3                   = "daikin-altherma-esp32-install/env3";
+    daik::s_legacy_state           = "daikin-altherma-esp32-install/state";
+    daik::s_retired_modbus_status  = "daikin-altherma-esp32-install/modbus/status";
+    daik::s_retired_weather        = "daikin-altherma-esp32-install/weather/forecast";
+    daik::s_crash                  = "daikin-altherma-esp32-install/crash";
+}
+
+void cleanup_event(int                        id,
+                   MqttCleanupDeliveryOutcome outcome = MqttCleanupDeliveryOutcome::Published,
+                   uint32_t                   epoch   = 17) {
+    if (epoch != 17) {
+        require(daik::s_source_cleanup_evidence.push({epoch, id, outcome}),
+                "CLEANUP_EVIDENCE_RING_HAS_ROOM");
+        return;
+    }
+    esp_mqtt_event_t event{};
+    event.msg_id = id;
+    daik::on_mqtt(nullptr, "mqtt",
+                  outcome == MqttCleanupDeliveryOutcome::Published ? MQTT_EVENT_PUBLISHED
+                                                                   : MQTT_EVENT_DELETED,
+                  &event);
+}
+
+void reset_cleanup_trace() {
+    sdk::publish_calls = 0;
+    sdk::published     = {};
+}
+
+const sdk::PublishTrace* last_accepted(const std::string& topic) {
+    for (int i = sdk::publish_calls - 1; i >= 0; --i)
+        if (sdk::published[i].accepted && topic == sdk::published[i].topic.data())
+            return &sdk::published[i];
+    return nullptr;
+}
+int accepted_count(const std::string& topic, const char* payload = nullptr) {
+    int count = 0;
+    for (int i = 0; i < sdk::publish_calls; ++i) {
+        const auto& row = sdk::published[i];
+        if (row.accepted && topic == row.topic.data() &&
+            (!payload || std::strcmp(payload, row.payload.data()) == 0))
+            ++count;
+    }
+    return count;
+}
+void independent_sources_fixture() {
+    adapter::cfg.env3_enabled    = true;
+    adapter::cfg.board_user_set  = true;
+    adapter::cfg.board_preset_id = daik::BoardPresetId::M5StackAtomS3Lite;
+    adapter::cfg.weather_enabled = true;
+    adapter::modbus_enabled = adapter::modbus_live = true;
+    adapter::modbus_generation                     = 8;
+    daik::CachedValue row;
+    row.modbus_definition = 1;
+    row.off               = daik::def::homehub_definition(row.modbus_definition)->offset;
+    row.value             = "1";
+    adapter::modbus_values.push_back(row);
+    adapter::env.fresh = adapter::env.connected = true;
+    adapter::env.temperature_c                  = 17.25f;
+    adapter::env.humidity_pct                   = 43;
+    adapter::env.pressure_hpa                   = 1000;
+    adapter::env.samples                        = 7;
+    adapter::weather.configured = adapter::weather.available = adapter::weather.has_value = true;
+    adapter::weather.outdoor_mean_2h_c                                                    = 7.25;
+    adapter::weather.solar_energy_2h_wh_m2                                                = 150.5;
+    adapter::weather.issued_unix_s  = 1700000060;
+    adapter::weather.fetched_unix_s = adapter::weather.decision_unix_s = 1700000100;
+    adapter::weather.state                                             = "ready";
+    adapter::live_crash.reason   = static_cast<uint32_t>(daik::CrashReason::PANIC);
+    adapter::live_crash.coredump = true;
+    cleanup_witness::early_ack   = true;
+    initial_config();
+    // Inbound observations are independent of the X10A owner too.
+    feed("room", R"({"temperature":20,"time":1700000100,"enabled":true})");
+}
+void require_independent_fresh() {
+    const auto* mb  = last_accepted(daik::s_modbus);
+    const auto* env = last_accepted(daik::s_env3);
+    require(mb && mb->length > 2 && mb->retain == 1,
+            "NEVER_SEEN_X10A_PUBLISHES_TYPED_HOMEHUB_STATE");
+    require(env && std::strstr(env->payload.data(), "\"temperature_c\":17.25") && env->retain == 1,
+            "NEVER_SEEN_X10A_PUBLISHES_FRESH_ENV_STATE");
+    require(last_accepted(daik::s_weather) && last_accepted(daik::s_heartbeat) &&
+                last_accepted(daik::s_crash),
+            "NEVER_SEEN_X10A_PUBLISHES_WEATHER_HEARTBEAT_CRASH");
+    require(daik::s_ref_status.has_value && daik::s_ref_status.subscribed,
+            "NEVER_SEEN_X10A_SERVICES_REFERENCE_SUBSCRIPTION");
+}
+void transport_source_lifecycle() {
+    independent_sources_fixture();
+    int x10a_seed_count = 0;
+    sdk::on_delay       = [&](TickType_t delay) {
+        check_cycle(delay);
+        if (sdk::delays == 45) {
+            require_independent_fresh();
+            require(accepted_count(daik::s_avail, "online") == 1 &&
+                              accepted_count(daik::s_x10a_avail, "offline") == 1 &&
+                              !last_accepted(daik::s_x10a),
+                          "NEVER_SEEN_SOURCE_OFFLINE_TRANSPORT_ONLINE");
+            require(std::strcmp(sdk::will_topic, daik::s_avail.c_str()) == 0 &&
+                              std::strcmp(sdk::will_payload, "offline") == 0 && sdk::will_qos == 1 &&
+                              sdk::will_retain == 1,
+                          "INITIAL_TRANSPORT_ARMS_RETAINED_OFFLINE_LWT");
+            adapter::cfg.profile = "altherma_gshp2";
+            daik::s_stale_values_profile =
+                adapter::cfg.profile; // earlier frozen cleanup is acknowledged
+            adapter::hp.connected    = true;
+            adapter::hp.last_ok_s    = 0;
+            adapter::x10a_payload    = R"({"hydronic":{"flow_rate":9.0}})";
+            adapter::x10a_generation = 11;
+        } else if (sdk::delays == 46) {
+            const auto* seed   = last_accepted(daik::s_x10a);
+            const auto* online = last_accepted(daik::s_x10a_avail);
+            require(seed && seed->length > 2 && online &&
+                              std::strcmp(online->payload.data(), "online") == 0 && seed < online,
+                          "SOURCE_ONLINE_FOLLOWS_ACCEPTED_FRESH_STATE_SEED");
+            require(sdk::start_calls == 1 && sdk::init_calls == 1 && sdk::stop_calls == 0 &&
+                              sdk::destroy_calls == 0,
+                          "FIRST_X10A_EVIDENCE_KEEPS_SAME_LWT_TRANSPORT");
+            x10a_seed_count       = accepted_count(daik::s_x10a);
+            adapter::hp.connected = false;
+            adapter::hp.last_ok_s = 14;
+            adapter::x10a_payload.clear(); // a real empty sweep retains no new JSON
+        } else if (sdk::delays == 47) {
+            require(accepted_count(daik::s_x10a) == x10a_seed_count &&
+                              std::strcmp(last_accepted(daik::s_x10a_avail)->payload.data(), "online") ==
+                                  0,
+                          "FOURTEEN_SECOND_EMPTY_SWEEP_NEITHER_FLAPS_NOR_RETAINS_EMPTY_X10A");
+            adapter::hp.last_ok_s = 15;
+            adapter::env.samples++;
+            adapter::modbus_values[0].value = "2";
+            adapter::modbus_generation++;
+        } else if (sdk::delays == 48) {
+            require(accepted_count(daik::s_x10a_avail, "offline") == 2 &&
+                              accepted_count(daik::s_avail, "online") == 1 &&
+                              accepted_count(daik::s_avail, "offline") == 0,
+                          "EXACT_FIFTEEN_SECOND_OUTAGE_WITHDRAWS_ONLY_SOURCE");
+            require(accepted_count(daik::s_modbus) >= 2 && accepted_count(daik::s_env3) >= 2,
+                          "X10A_OUTAGE_CONTINUES_INDEPENDENT_SOURCE_PUBLICATION");
+            adapter::hp.connected = true;
+            adapter::hp.last_ok_s = 0;
+            adapter::x10a_payload = R"({"hydronic":{"flow_rate":9.0}})";
+        } else if (sdk::delays == 49) {
+            require(accepted_count(daik::s_x10a) == x10a_seed_count + 1 &&
+                              accepted_count(daik::s_x10a_avail, "online") == 2,
+                          "RECOVERY_RESEEDS_UNCHANGED_REVISION_BEFORE_SOURCE_ONLINE");
+            adapter::modbus_live = false;
+            adapter::env.fresh   = false;
+        } else if (sdk::delays == 50) {
+            require(std::strcmp(last_accepted(daik::s_modbus)->payload.data(), "{}") == 0,
+                          "HOMEHUB_EXPIRY_WITHOUT_REVISION_WITHDRAWS_RETAINED_VALUES");
+            require(!std::strstr(last_accepted(daik::s_env3)->payload.data(), "temperature_c") &&
+                              std::strstr(last_accepted(daik::s_env3)->payload.data(), "samples"),
+                          "ENV_EXPIRY_WITHOUT_NEW_SAMPLE_WITHDRAWS_ONLY_READINGS");
+            throw StopTask{};
+        }
+    };
+    try {
+        sdk::task_fn(nullptr);
+    } catch (const StopTask&) {}
+}
+void independent_source_reconnect() {
+    independent_sources_fixture();
+    sdk::on_delay = [](TickType_t delay) {
+        check_cycle(delay);
+        if (sdk::delays == 45) {
+            require_independent_fresh();
+            adapter::modbus_live = false;
+            adapter::env.fresh   = false;
+            daik::on_mqtt(nullptr, "mqtt", MQTT_EVENT_DISCONNECTED, nullptr);
+            daik::on_mqtt(nullptr, "mqtt", MQTT_EVENT_CONNECTED, nullptr);
+        } else if (sdk::delays == 46) {
+            require(accepted_count(daik::s_avail, "online") == 2 &&
+                        accepted_count(daik::s_x10a_avail, "offline") == 2 &&
+                        accepted_count(daik::s_x10a_avail, "online") == 0,
+                    "RECONNECT_RESEEDS_TRANSPORT_WITHOUT_FABRICATING_X10A_FRESHNESS");
+            require(std::strcmp(last_accepted(daik::s_modbus)->payload.data(), "{}") == 0 &&
+                        !std::strstr(last_accepted(daik::s_env3)->payload.data(), "temperature_c"),
+                    "RECONNECT_CANNOT_RESEED_STALE_AUXILIARY_VALUES");
+            require(sdk::init_calls == 1 && sdk::destroy_calls == 0 && sdk::start_calls == 1,
+                    "BROKER_RECONNECT_PRESERVES_SINGLE_CLIENT_IDENTITY");
+            throw StopTask{};
+        }
+    };
+    try {
+        sdk::task_fn(nullptr);
+    } catch (const StopTask&) {}
+}
+void independent_source_cutover() {
+    independent_sources_fixture();
+    int  mb_before = 0, env_before = 0;
+    bool peer_started = false, peer_completed = false;
+    sdk::on_delay = [&](TickType_t delay) {
+        check_cycle(delay);
+        if (sdk::delays == 45) {
+            require_independent_fresh();
+            mb_before                 = accepted_count(daik::s_modbus);
+            env_before                = accepted_count(daik::s_env3);
+            adapter::modbus_enabled   = false;
+            adapter::cfg.env3_enabled = false;
+            daik::mqtt_request_modbus_cleanup();
+            cleanup_witness::early_ack = false;
+        } else if (sdk::delays > 45 && !peer_started) {
+            require(accepted_count(daik::s_modbus) - mb_before <= 1 &&
+                        accepted_count(daik::s_env3) - env_before <= 1,
+                    "DISABLED_SOURCES_CANNOT_RECREATE_RETAINED_EMPTY_OR_STALE_STATE");
+            if (daik::s_source_cleanup.in_flight())
+                cleanup_event(daik::s_source_cleanup.in_flight_id(),
+                              MqttCleanupDeliveryOutcome::Published,
+                              daik::s_mqtt_client_epoch.load());
+            if (daik::s_modbus_disabled_cleaned && daik::s_env3_disabled_cleaned) {
+                require(last_accepted(daik::s_modbus)->length == 0 &&
+                            last_accepted(daik::s_env3)->length == 0,
+                        "INDEPENDENT_DISABLE_FINISHES_ONLY_AFTER_SOURCE_CLEANUP_PUBACK");
+                peer_started            = true;
+                adapter::modbus_enabled = true;
+                adapter::modbus_live    = false;
+                daik::mqtt_request_modbus_cleanup();
+                cleanup_witness::early_ack = true;
+            }
+        } else if (peer_started && !peer_completed &&
+                   !daik::s_source_cleanup.suppress(daik::MqttCleanupSource::Modbus)) {
+            // Completed-this-cycle is still suppressed; the next cycle may expose B's absence.
+            if (last_accepted(daik::s_modbus)->length != 0) {
+                require(std::strcmp(last_accepted(daik::s_modbus)->payload.data(), "{}") == 0,
+                        "HOMEHUB_PEER_CHANGE_CANNOT_RESURRECT_PREDECESSOR_VALUES");
+                adapter::modbus_values[0].value = "3";
+                adapter::modbus_live            = true;
+                adapter::modbus_generation++;
+                peer_completed = true;
+            }
+        } else if (peer_completed) {
+            require(last_accepted(daik::s_modbus)->length > 2 &&
+                        accepted_count(daik::s_x10a_avail, "online") == 0,
+                    "NEW_HOMEHUB_PEER_PUBLISHES_WITHOUT_X10A_PROOF");
+            throw StopTask{};
+        }
+        require(sdk::delays < 150, "INDEPENDENT_SOURCE_CUTOVER_MAKES_BOUNDED_PROGRESS");
+    };
+    try {
+        sdk::task_fn(nullptr);
+    } catch (const StopTask&) {}
+}
+void availability_retry_oom() {
+    initial_config();
+    adapter::hp.last_error.assign(80,
+                                  'h'); // HpStats would allocate; POD withdrawal must not copy it
+    sdk::fail_next_new       = true;
+    sdk::reject_next_publish = true; // refuse the initial source-offline marker
+    sdk::on_delay            = [](TickType_t delay) {
+        check_cycle(delay);
+        if (sdk::delays == 1) {
+            require(daik::mqtt_skip_stats().skipped == 1 &&
+                                   accepted_count(daik::s_x10a_avail, "offline") == 0,
+                               "CONFIG_OOM_CANNOT_CONSUME_REJECTED_SOURCE_WITHDRAWAL");
+            sdk::fail_next_new = true;
+        } else if (sdk::delays == 2) {
+            require(daik::mqtt_skip_stats().skipped == 2 &&
+                                   accepted_count(daik::s_x10a_avail, "offline") == 1,
+                               "SOURCE_WITHDRAWAL_RETRIES_BEFORE_CONFIG_COPY_OOM");
+            daik::on_mqtt(nullptr, "mqtt", MQTT_EVENT_DISCONNECTED, nullptr);
+            daik::on_mqtt(nullptr, "mqtt", MQTT_EVENT_CONNECTED, nullptr);
+            std::strcpy(sdk::reject_publish_topic, daik::s_avail.c_str());
+        } else if (sdk::delays == 3) {
+            require(accepted_count(daik::s_avail, "online") == 1,
+                               "REJECTED_TRANSPORT_ONLINE_DOES_NOT_ADVANCE_ACCEPTED_MARKER");
+        } else if (sdk::delays == 4) {
+            require(accepted_count(daik::s_avail, "online") == 2 &&
+                                   accepted_count(daik::s_x10a_avail, "offline") == 2,
+                               "TRANSPORT_ONLINE_RETRIES_AFTER_SDK_REJECTION");
+            adapter::cfg.profile         = "altherma_gshp2";
+            daik::s_stale_values_profile = daik::s_announced_profile = adapter::cfg.profile;
+            adapter::hp.connected                                    = true;
+            adapter::hp.last_ok_s                                    = 0;
+            adapter::x10a_generation                                 = 2;
+            adapter::x10a_payload = R"({"hydronic":{"flow_rate":9}})";
+            std::strcpy(sdk::reject_publish_topic, daik::s_x10a.c_str());
+        } else if (sdk::delays == 5) {
+            require(accepted_count(daik::s_x10a_avail, "online") == 0 &&
+                                   !daik::s_x10a_publish_proven.load(),
+                               "REFUSED_X10A_SEED_CANNOT_CLAIM_SOURCE_ONLINE");
+            std::strcpy(sdk::reject_publish_topic, daik::s_x10a_avail.c_str());
+        } else if (sdk::delays == 6) {
+            require(accepted_count(daik::s_x10a) == 1 &&
+                                   accepted_count(daik::s_x10a_avail, "online") == 0,
+                               "REFUSED_X10A_SEED_RETRIES_WITHOUT_NEW_REVISION");
+        } else if (sdk::delays == 7) {
+            require(accepted_count(daik::s_x10a) == 1 &&
+                                   accepted_count(daik::s_x10a_avail, "online") == 1,
+                               "SOURCE_ONLINE_RETRIES_REFUSED_MARKER_WITHOUT_DUPLICATING_ACCEPTED_SEED");
+            adapter::x10a_generation = 3;
+            adapter::x10a_payload    = R"({"hydronic":{"flow_rate":10}})";
+            std::strcpy(sdk::reject_publish_topic, daik::s_x10a.c_str());
+        } else if (sdk::delays == 8) {
+            require(accepted_count(daik::s_x10a) == 1 && daik::s_last_x10a_cache_gen == 2,
+                               "REFUSED_CHANGED_X10A_STATE_PRESERVES_ACCEPTED_GENERATION");
+        } else if (sdk::delays == 9) {
+            require(accepted_count(daik::s_x10a) == 2 && daik::s_last_x10a_cache_gen == 3,
+                               "REFUSED_CHANGED_X10A_STATE_RETRIES_SAME_GENERATION");
+            adapter::hp.connected = false;
+            adapter::hp.last_ok_s = 15;
+            std::strcpy(sdk::reject_publish_topic, daik::s_x10a_avail.c_str());
+            sdk::fail_next_new = true;
+            // A real in-flight ACK is drained even when Config cannot be copied this cycle.
+            require(daik::s_source_cleanup.in_flight(), "CONFIG_OOM_ACK_WITNESS_HAS_INFLIGHT_ID");
+            cleanup_event(daik::s_source_cleanup.in_flight_id(),
+                                     MqttCleanupDeliveryOutcome::Published, daik::s_mqtt_client_epoch.load());
+        } else if (sdk::delays == 10) {
+            require(!daik::s_source_cleanup.in_flight() &&
+                                   daik::s_source_cleanup_evidence.dropped() == 0,
+                               "CONFIG_OOM_STILL_DRAINS_EXACT_CLEANUP_ACK_EVIDENCE");
+            require(accepted_count(daik::s_x10a_avail, "offline") == 2,
+                               "REFUSED_OUTAGE_WITHDRAWAL_KEEPS_RETRY_PENDING");
+        } else if (sdk::delays == 11) {
+            require(accepted_count(daik::s_x10a_avail, "offline") == 3,
+                               "OUTAGE_WITHDRAWAL_RETRIES_AFTER_SDK_REJECTION_AND_OOM");
+            throw StopTask{};
+        }
+    };
+    try {
+        sdk::task_fn(nullptr);
+    } catch (const StopTask&) {
+    } catch (const std::bad_alloc&) {
+        require(false, "WITHDRAWAL_DOES_NOT_ALLOCATE_HP_STATS");
+    }
+}
+void full_mac_identity() {
+    initial_config();
+    const std::string first           = sdk::client_id;
+    const auto        first_documents = discovery_documents(daik::s_base, daik::s_board);
+    const std::string first_device    = daik::device_json(daik::s_node, daik::s_board);
+    require(first.find("daikin_altherma_esp32__board_020101010101") == 0,
+            "CLIENT_ID_USES_COMPLETE_UNICAST_HARDWARE_MAC");
+    esp_mqtt_client_destroy(daik::s_client); // fixture tears down the first unstarted SDK handle
+    daik::s_client = nullptr;
+    sdk::task_fn   = nullptr;
+    sdk::mac[0]    = 4; // same final three bytes, distinct physical board
+    daik::mqtt_ha_start();
+    require(first != sdk::client_id &&
+                first_device != daik::device_json(daik::s_node, daik::s_board),
+            "MATCHING_MAC_SUFFIX_BOARDS_HAVE_DISTINCT_CLIENT_AND_DEVICE_IDS");
+    for (const auto& bytes : first_documents)
+        require(bytes.find(first) != std::string::npos,
+                "ALL_DISCOVERY_FAMILIES_KEEP_HARDWARE_SECONDARY_DEVICE_IDENTIFIER");
+    // Automatic cleanup may touch current-node frozen aliases, never either board namespace.
+    daik::s_connected              = true;
+    cleanup_witness::early_ack     = true;
+    daik::s_connected_client_epoch = daik::s_mqtt_client_epoch.load();
+    daik::retract_legacy_fixed();
+    for (int i = 0; i < sdk::publish_calls; ++i)
+        require(!std::strstr(sdk::published[i].topic.data(), "__board_") &&
+                    !std::strstr(sdk::published[i].topic.data(), "/daikin_010101/"),
+                "AUTOMATIC_RETIREMENT_NEVER_GUESSES_LEGACY_BOARD_NAMESPACE_OWNERSHIP");
+}
+void full_mac_read_failure() {
+    adapter::cfg.mqtt_uri = "mqtt://host-witness";
+    sdk::mac_result       = ESP_FAIL;
+    daik::mqtt_ha_start();
+    require(!sdk::task_fn && !daik::s_client && sdk::init_calls == 0 && sdk::start_calls == 0,
+            "MAC_READ_FAILURE_CANNOT_START_FABRICATED_CLIENT_IDENTITY");
+    require(daik::mqtt_status().error == "board MAC read failed",
+            "MAC_READ_FAILURE_REPORTS_EXPLICIT_STARTUP_ERROR");
+}
+
+void legacy_retirement_delivery() {
+    cleanup_fixture();
+    sdk::reject_next_publish = true;
+    require(!daik::retract_legacy_fixed() && !daik::s_legacy_fixed_retracted &&
+                daik::s_legacy_fixed_step == 0,
+            "LEGACY_REJECTED_ENQUEUE_RETAINS_CURSOR_AND_LATCH");
+    require(!daik::retract_legacy_fixed() && daik::s_legacy_fixed_step == 0 &&
+                !daik::s_legacy_fixed_retracted,
+            "LEGACY_QUEUE_ADMISSION_IS_NOT_BROKER_ACK");
+    const std::string first    = sdk::published[1].topic.data();
+    const int         first_id = sdk::message_id;
+    for (int i = 0; i < 4; ++i) daik::retract_legacy_fixed();
+    require(sdk::publish_calls == 2, "LEGACY_MISSING_ACK_NEVER_DUPLICATES_OUTBOX_ITEM");
+    cleanup_event(first_id + 100);
+    cleanup_event(first_id, MqttCleanupDeliveryOutcome::Published, 16);
+    daik::retract_legacy_fixed();
+    require(daik::s_legacy_fixed_step == 0 && sdk::publish_calls == 2,
+            "LEGACY_ONLY_EXACT_EPOCH_AND_ID_ADVANCE_CURSOR");
+    daik::service_requested_topic_cleanup(adapter::cfg);
+    require(sdk::publish_calls == 2 && !daik::s_source_cleanup.in_flight(),
+            "SOURCE_CLEANUP_CANNOT_QUEUE_BESIDE_DISCOVERY_RETIREMENT");
+    cleanup_event(first_id, MqttCleanupDeliveryOutcome::Deleted);
+    daik::retract_legacy_fixed();
+    require(sdk::publish_calls == 3 && sdk::published[2].topic.data() == first &&
+                daik::s_legacy_fixed_step == 0,
+            "LEGACY_DELETED_OUTBOX_RETRIES_SAME_CURSOR");
+    const int retry_id = sdk::message_id;
+    daik::on_mqtt(nullptr, "mqtt", MQTT_EVENT_DISCONNECTED, nullptr);
+    daik::on_mqtt(nullptr, "mqtt", MQTT_EVENT_CONNECTED, nullptr);
+    daik::retract_legacy_fixed();
+    require(sdk::publish_calls == 3, "LEGACY_SAME_CLIENT_RECONNECT_PRESERVES_OUTBOX_ITEM");
+    daik::source_cleanup_outbox_cleared_after_transport_stop();
+    daik::s_mqtt_client_epoch      = 18;
+    daik::s_connected_client_epoch = 18;
+    daik::retract_legacy_fixed();
+    require(sdk::publish_calls == 4 && sdk::published[3].topic.data() == first &&
+                daik::s_legacy_fixed_step == 0,
+            "LEGACY_TRANSPORT_STOP_RETRIES_EXACT_UNCONFIRMED_TOPIC");
+    cleanup_event(retry_id);
+    daik::retract_legacy_fixed();
+    require(daik::s_legacy_fixed_step == 0, "LEGACY_REPLACEMENT_IGNORES_OLD_CLIENT_ACK");
+    daik::s_source_cleanup_evidence.push(
+        {18, sdk::message_id, MqttCleanupDeliveryOutcome::Published});
+    daik::retract_legacy_fixed();
+    require(daik::s_legacy_fixed_step == 1 && !daik::s_legacy_fixed_retracted,
+            "LEGACY_ACK_ADVANCES_ONLY_ONE_STEP");
+    std::set<std::string> retired{first};
+    for (int iterations = 0; iterations < 128 && !daik::s_legacy_fixed_retracted; ++iterations) {
+        for (int i = 0; i < sdk::publish_calls; ++i) {
+            const auto& row = sdk::published[i];
+            require(row.length == 0 && row.qos == 1 && row.retain == 1 && row.enqueued,
+                    "LEGACY_RETIREMENT_USES_TRACKED_RETAINED_QOS1");
+            if (row.accepted && (std::strstr(row.topic.data(), "/device_time/config") ||
+                                 std::strstr(row.topic.data(), "/wifi_quality/config") ||
+                                 std::strstr(row.topic.data(), "/last_reset/config")))
+                retired.insert(row.topic.data());
+        }
+        if (daik::s_retirement_delivery.in_flight())
+            daik::s_source_cleanup_evidence.push(
+                {18, daik::s_retirement_delivery.msg_id(), MqttCleanupDeliveryOutcome::Published});
+        if (daik::s_source_cleanup.in_flight())
+            daik::s_source_cleanup_evidence.push(
+                {18, daik::s_source_cleanup.in_flight_id(), MqttCleanupDeliveryOutcome::Published});
+        reset_cleanup_trace();
+        daik::service_requested_topic_cleanup(adapter::cfg);
+        daik::retract_legacy_fixed();
+    }
+    require(daik::s_legacy_fixed_retracted && !daik::s_retirement_delivery.busy(),
+            "LEGACY_COMPLETE_SET_FINISHES_ONLY_AFTER_ALL_ACKS");
+    require(retired.size() ==
+                daik::RETIRED_HEARTBEAT_SENSOR_COUNT + daik::RETIRED_CRASH_SENSOR_COUNT,
+            "LEGACY_ALL_FROZEN_HEARTBEAT_AND_CRASH_TOPICS_RETIRED");
+    reset_cleanup_trace();
+    daik::service_requested_topic_cleanup(adapter::cfg);
+    daik::s_weather_cleanup_requested = true;
+    daik::service_requested_topic_cleanup(adapter::cfg);
+    require(sdk::publish_calls == 1 && daik::s_source_cleanup.in_flight(),
+            "SOURCE_CLEANUP_RESUMES_AFTER_RETIREMENT");
+    require(!daik::retire_exact_topic(MqttRetirementOwner::Profile, first) &&
+                sdk::publish_calls == 1,
+            "DISCOVERY_RETIREMENT_CANNOT_QUEUE_BESIDE_SOURCE_CLEANUP");
+}
+
+void retirement_oom_recovery() {
+    cleanup_fixture();
+    daik::s_prefix     = std::string(90, 'p');
+    sdk::fail_next_new = true;
+    bool threw         = false;
+    try {
+        daik::retract_legacy_fixed();
+    } catch (const std::bad_alloc&) {
+        threw = true;
+    }
+    require(threw && sdk::publish_calls == 0 && daik::s_legacy_fixed_step == 0 &&
+                !daik::s_legacy_fixed_retracted,
+            "RETIREMENT_PREPARATION_OOM_RETAINS_UNSENT_CURSOR");
+    sdk::reject_new_after_publish = true;
+    daik::retract_legacy_fixed();
+    require(sdk::publish_calls == 1 && sdk::fail_next_new &&
+                daik::s_retirement_delivery.in_flight(),
+            "RETIREMENT_ADMITTED_ID_COMMIT_DOES_NOT_ALLOCATE");
+    threw = false;
+    try {
+        daik::retract_legacy_fixed();
+    } catch (const std::bad_alloc&) {
+        threw = true;
+    }
+    require(threw && sdk::publish_calls == 1 && daik::s_legacy_fixed_step == 0 &&
+                daik::s_retirement_delivery.in_flight(),
+            "RETIREMENT_LATER_OOM_CANNOT_LOSE_INFLIGHT_OWNER");
+    cleanup_event(sdk::message_id);
+    daik::retract_legacy_fixed();
+    require(daik::s_legacy_fixed_step == 1 && sdk::publish_calls == 2,
+            "RETIREMENT_RECOVERS_CURSOR_AFTER_OOM_AND_EXACT_ACK");
+}
+
+void retained_probe_delivery() {
+    cleanup_fixture();
+    sdk::subscribe_failures[0] = true;
+    daik::start_retained_cleanup_probe(daik::s_legacy_state, daik::s_legacy_state_seen,
+                                       daik::s_legacy_probe_active,
+                                       daik::s_legacy_probe_deadline_us, "legacy state");
+    require(!daik::s_legacy_probe_active, "PROBE_REJECTED_SUBSCRIBE_IS_NOT_ACTIVE");
+    daik::service_retained_cleanup_probe(daik::s_legacy_state, daik::s_legacy_state_seen,
+                                         daik::s_legacy_probe_active,
+                                         daik::s_legacy_probe_deadline_us);
+    require(daik::s_legacy_probe_active && sdk::subscribe_calls == 2,
+            "PROBE_REJECTED_SUBSCRIBE_RETRIES_NEXT_SERVICE");
+    feed(daik::s_legacy_state.c_str(), "old retained state", true);
+    sdk::reject_next_publish = true;
+    sdk::ticks += 10000;
+    daik::service_retained_cleanup_probe(daik::s_legacy_state, daik::s_legacy_state_seen,
+                                         daik::s_legacy_probe_active,
+                                         daik::s_legacy_probe_deadline_us);
+    require(daik::s_legacy_state_seen && daik::s_legacy_probe_active && sdk::unsubscribe_calls == 0,
+            "PROBE_REJECTED_DELETE_PRESERVES_SEEN_AND_OWNER_PAST_DEADLINE");
+    daik::service_retained_cleanup_probe(daik::s_legacy_state, daik::s_legacy_state_seen,
+                                         daik::s_legacy_probe_active,
+                                         daik::s_legacy_probe_deadline_us);
+    const int id = sdk::message_id;
+    daik::service_retained_cleanup_probe(daik::s_legacy_state, daik::s_legacy_state_seen,
+                                         daik::s_legacy_probe_active,
+                                         daik::s_legacy_probe_deadline_us);
+    require(sdk::publish_calls == 2 && sdk::unsubscribe_calls == 0 && daik::s_legacy_state_seen,
+            "PROBE_QUEUE_ACCEPTANCE_WAITS_FOR_ACK_WITHOUT_DUPLICATE_DELETE");
+    daik::start_retained_cleanup_probe(daik::s_legacy_state, daik::s_legacy_state_seen,
+                                       daik::s_legacy_probe_active,
+                                       daik::s_legacy_probe_deadline_us, "legacy state");
+    require(daik::s_legacy_state_seen, "PROBE_RECONNECT_CANNOT_CONSUME_PENDING_RETAINED_EVIDENCE");
+    cleanup_event(id);
+    sdk::unsubscribe_failures[0] = true;
+    daik::service_retained_cleanup_probe(daik::s_legacy_state, daik::s_legacy_state_seen,
+                                         daik::s_legacy_probe_active,
+                                         daik::s_legacy_probe_deadline_us);
+    require(daik::s_legacy_probe_active && daik::s_legacy_state_seen && sdk::publish_calls == 2,
+            "PROBE_REJECTED_UNSUBSCRIBE_PRESERVES_CONFIRMED_DELETE_OWNER");
+    daik::service_retained_cleanup_probe(daik::s_legacy_state, daik::s_legacy_state_seen,
+                                         daik::s_legacy_probe_active,
+                                         daik::s_legacy_probe_deadline_us);
+    require(!daik::s_legacy_probe_active && !daik::s_legacy_state_seen && sdk::publish_calls == 2 &&
+                sdk::accepted_unsubscribe_count(daik::s_legacy_state.c_str()) == 1,
+            "PROBE_CONFIRMED_DELETE_RETIRES_OWNER_ON_ACCEPTED_UNSUBSCRIBE");
+    daik::start_retained_cleanup_probe(daik::s_legacy_state, daik::s_legacy_state_seen,
+                                       daik::s_legacy_probe_active,
+                                       daik::s_legacy_probe_deadline_us, "legacy state");
+    sdk::ticks += 10000;
+    daik::service_retained_cleanup_probe(daik::s_legacy_state, daik::s_legacy_state_seen,
+                                         daik::s_legacy_probe_active,
+                                         daik::s_legacy_probe_deadline_us);
+    require(sdk::publish_calls == 2 && !daik::s_legacy_probe_active,
+            "PROBE_CLEAN_BROKER_IS_READ_ONLY_AND_SILENT");
+}
+
+void stale_value_retirement() {
+    cleanup_fixture();
+    const std::string profile = "altherma_lt_11_16kw_hydrosplit_hydro_unit";
+    sdk::reject_next_publish  = true;
+    daik::retract_stale_values(profile);
+    require(daik::s_stale_values_step == 0 && daik::s_stale_values_profile.empty(),
+            "STALE_VALUES_REJECTED_DELETE_CANNOT_LATCH_PROFILE");
+    daik::retract_stale_values(profile);
+    require(daik::s_stale_values_step == 0 && daik::s_stale_values_profile.empty(),
+            "STALE_VALUES_QUEUE_ADMISSION_CANNOT_LATCH_PROFILE");
+    std::set<std::string> retired;
+    bool                  done = false;
+    for (int cycles = 0; cycles < 2048 && !done; ++cycles) {
+        for (int i = 0; i < sdk::publish_calls; ++i) {
+            const auto& row = sdk::published[i];
+            require(row.length == 0 && row.qos == 1 && row.retain == 1 && row.enqueued,
+                    "STALE_VALUES_EVERY_TOPIC_USES_TRACKED_TOMBSTONE");
+            if (row.accepted) retired.insert(row.topic.data());
+        }
+        reset_cleanup_trace();
+        if (daik::s_retirement_delivery.in_flight())
+            cleanup_event(daik::s_retirement_delivery.msg_id());
+        done = daik::retract_stale_values(profile);
+    }
+    require(done && daik::s_stale_values_profile == profile && !daik::s_retirement_delivery.busy(),
+            "STALE_VALUES_COMPLETE_ONLY_AFTER_ALL_EXACT_ACKS");
+    require(
+        retired.count(
+            "homeassistant/sensor/daikin_altherma_esp32_install/actuators_fan_1_10_rpm/config") &&
+            retired.count(
+                "homeassistant/sensor/daikin_altherma_esp32_install/fan_1_10_rpm/config") &&
+            !retired.count("homeassistant/sensor/daikin_abcdef/actuators_fan_1_10_rpm/config") &&
+            !retired.count(
+                "homeassistant/sensor/daikin_altherma_esp32_install/actuators_fan_1_step/config"),
+        "STALE_VALUES_FROZEN_LABEL_SHAPES_NEVER_DELETE_CURRENT_GROUPED_ID");
+    for (const auto& topic : retired)
+        require(topic.find("/daikin_altherma_esp32_install/") != std::string::npos,
+                "STALE_VALUES_ONLY_PROVEN_CURRENT_INSTALLATION_NAMESPACE");
+}
+
+std::set<std::string> fixture_profile_topics(const std::string& profile) {
+    std::set<std::string> topics;
+    const auto            rows = daik::def::resolved(daik::def::lookup(profile.c_str()));
+    for (size_t i = 0; i < rows.count(); ++i) {
+        const auto row = daik::logic::adjudicated(rows[i]);
+        if (!daik::row_publishable(row) || !daik::conv_publishable(row.conv) ||
+            daik::object_id(row.label).empty())
+            continue;
+        topics.insert(daik::discovery_topic(daik::s_prefix, daik::s_node, row));
+        if (row.conv == 203)
+            for (size_t k = 0; k < daik::FAULT_COMPANION_COUNT; ++k)
+                topics.insert(daik::companion_discovery_topic(daik::s_prefix, daik::s_node,
+                                                              daik::group_for_page(row.reg),
+                                                              daik::FAULT_COMPANIONS[k].key));
+    }
+    return topics;
+}
+
+void profile_cutover_delivery() {
+    cleanup_fixture();
+    require(daik::mqtt_retirement_record_make(retirement_witness::durable, daik::s_base,
+                                              daik::s_board, "altherma3_r_erga"),
+            "PROFILE_FIXTURE_HAS_SCOPED_DURABLE_PREDECESSOR");
+    retirement_witness::result = daik::MqttRetirementStoreLoad::Ready;
+    daik::s_discovered_profile = "altherma3_r_erga";
+    daik::s_announced_profile
+        .clear(); // actual reconnect used to lose the only prior-profile record
+    adapter::cfg.profile             = "protocol_s";
+    daik::s_stale_values_profile     = adapter::cfg.profile;
+    const auto            old_topics = fixture_profile_topics(daik::s_discovered_profile);
+    const auto            new_topics = fixture_profile_topics(adapter::cfg.profile);
+    std::set<std::string> expected;
+    for (const auto& topic : old_topics)
+        if (!new_topics.count(topic)) expected.insert(topic);
+    require(!expected.empty(), "PROFILE_FIXTURE_HAS_REAL_OBSOLETE_GROUPED_CONFIGS");
+    sdk::reject_next_publish = true;
+    require(!daik::publish_x10a_discovery() && daik::s_discovered_profile == "altherma3_r_erga",
+            "PROFILE_REJECTED_RETIREMENT_BLOCKS_REPLACEMENT_DISCOVERY");
+    const auto old_rows = daik::def::resolved(daik::def::lookup("altherma3_r_erga"));
+    require(daik::s_retiring_profile_row < old_rows.count() &&
+                daik::s_retiring_profile_shape == 0 &&
+                daik::discovery_topic(
+                    daik::s_prefix, daik::s_node,
+                    daik::logic::adjudicated(old_rows[daik::s_retiring_profile_row])) ==
+                    sdk::published[0].topic.data(),
+            "PROFILE_REJECTED_RETIREMENT_RETAINS_EXACT_CURSOR");
+    require(sdk::publish_calls == 1 && sdk::published[0].length == 0,
+            "PROFILE_REPLACEMENT_WAITING_EMITS_NO_CONFIG");
+    std::set<std::string> deleted, published;
+    bool                  complete = false;
+    for (int cycles = 0; cycles < 1024 && !complete; ++cycles) {
+        for (int i = 0; i < sdk::publish_calls; ++i) {
+            const auto& row = sdk::published[i];
+            if (row.length == 0) {
+                require(row.qos == 1 && row.retain == 1 && row.enqueued,
+                        "PROFILE_OBSOLETE_CONFIG_USES_TRACKED_QOS1_TOMBSTONE");
+                if (row.accepted) deleted.insert(row.topic.data());
+            } else {
+                require(daik::s_current_profile_retired == adapter::cfg.profile &&
+                            !daik::s_retirement_delivery.busy(),
+                        "PROFILE_EVERY_REPLACEMENT_FOLLOWS_CONFIRMED_RETIREMENT");
+                published.insert(row.topic.data());
+            }
+        }
+        reset_cleanup_trace();
+        if (daik::s_retirement_delivery.in_flight())
+            cleanup_event(daik::s_retirement_delivery.msg_id());
+        complete = daik::publish_x10a_discovery();
+    }
+    for (int i = 0; i < sdk::publish_calls; ++i)
+        if (sdk::published[i].length != 0) published.insert(sdk::published[i].topic.data());
+    require(complete && daik::s_discovered_profile == adapter::cfg.profile,
+            "PROFILE_REPLACEMENT_DISCOVERY_COMPLETES_AFTER_ACKS");
+    for (const auto& topic : expected)
+        require(deleted.count(topic), "PROFILE_ALL_OBSOLETE_GROUPED_AND_COMPANION_CONFIGS_RETIRED");
+    for (const auto& topic : new_topics)
+        require(!deleted.count(topic), "PROFILE_COMMON_OR_NEW_CURRENT_CONFIG_IS_NEVER_RETRACTED");
+    require(published == new_topics,
+            "PROFILE_REPLACEMENT_PUBLISHES_COMPLETE_CURRENT_DISCOVERY_SET");
+    require(deleted.count("homeassistant/binary_sensor/daikin_altherma_esp32_install/"
+                          "outdoor_state_error_active/config"),
+            "PROFILE_OBSOLETE_FAULT_COMPANION_IS_RETIRED");
+}
+
+void periodic_discovery_delivery() {
+    cleanup_fixture();
+    daik::s_source_cleanup.reconstruct_for_client(17);
+    for (int id = 1;; ++id) {
+        const auto action = daik::s_source_cleanup.next_action(true, false);
+        if (!action) break;
+        require(daik::s_source_cleanup.publish_queued(17, id) &&
+                    daik::s_source_cleanup.acknowledge({17, id}),
+                "PERIODIC_FIXTURE_STARTS_WITH_CONVERGED_SOURCE_SCHEDULER");
+        daik::s_source_cleanup.take_completion();
+    }
+    daik::s_source_cleanup.begin_cycle();
+    std::set<std::string> expected, deleted;
+    for (const auto& row : daik::RETIRED_MODBUS_HA_SENSORS)
+        expected.insert(daik::retired_modbus_discovery_topic(daik::s_prefix, daik::s_node, row));
+    for (const auto& row : daik::RETIRED_WEATHER_HA_SENSORS)
+        expected.insert(daik::retired_weather_discovery_topic(daik::s_prefix, daik::s_node, row));
+    daik::request_periodic_discovery_retirement();
+    sdk::reject_next_publish = true;
+    daik::service_periodic_discovery_retirement();
+    require(daik::s_periodic_discovery_step == 0 && daik::s_periodic_discovery_pending &&
+                !daik::s_retirement_delivery.busy(),
+            "PERIODIC_REJECTED_DELETE_CANNOT_ADVANCE_LEDGER");
+    daik::service_periodic_discovery_retirement();
+    const std::string first = sdk::published[1].topic.data();
+    const int         id    = sdk::message_id;
+    for (int i = 0; i < 4; ++i) daik::service_periodic_discovery_retirement();
+    require(daik::s_periodic_discovery_step == 0 && sdk::publish_calls == 2 &&
+                daik::s_retirement_delivery.in_flight(),
+            "PERIODIC_QUEUE_ACCEPTANCE_WAITS_FOR_EXACT_PUBACK");
+    cleanup_event(id + 100);
+    cleanup_event(id, MqttCleanupDeliveryOutcome::Published, 16);
+    daik::service_periodic_discovery_retirement();
+    require(daik::s_periodic_discovery_step == 0 && sdk::publish_calls == 2,
+            "PERIODIC_WRONG_ID_OR_EPOCH_NEVER_ADVANCES_LEDGER");
+    cleanup_event(id, MqttCleanupDeliveryOutcome::Deleted);
+    daik::service_periodic_discovery_retirement();
+    require(daik::s_periodic_discovery_step == 0 && sdk::publish_calls == 3 &&
+                sdk::published[2].topic.data() == first,
+            "PERIODIC_OUTBOX_EXPIRY_RETRIES_SAME_EXACT_TOPIC");
+    daik::on_mqtt(nullptr, "mqtt", MQTT_EVENT_DISCONNECTED, nullptr);
+    daik::on_mqtt(nullptr, "mqtt", MQTT_EVENT_CONNECTED, nullptr);
+    daik::service_periodic_discovery_retirement();
+    require(sdk::publish_calls == 3 && daik::s_periodic_discovery_step == 0,
+            "PERIODIC_SAME_CLIENT_RECONNECT_PRESERVES_INFLIGHT_CURSOR");
+    daik::request_periodic_discovery_retirement();
+    daik::s_env3_cleanup_requested = true;
+    cleanup_event(sdk::message_id);
+    daik::service_requested_topic_cleanup(adapter::cfg);
+    require(daik::s_source_cleanup.in_flight() && !daik::s_retirement_delivery.in_flight() &&
+                daik::s_periodic_discovery_pending && daik::s_periodic_discovery_step == 1,
+            "PERIODIC_ACK_YIELDS_NEXT_SLOT_TO_SOURCE_WITHDRAWAL");
+    reset_cleanup_trace();
+    int source_acks = 0;
+    for (int cycles = 0;
+         cycles < 256 && (daik::s_periodic_discovery_pending || daik::s_source_cleanup.in_flight());
+         ++cycles) {
+        if (daik::s_retirement_delivery.in_flight())
+            cleanup_event(daik::s_retirement_delivery.msg_id());
+        if (daik::s_source_cleanup.in_flight()) {
+            cleanup_event(daik::s_source_cleanup.in_flight_id());
+            ++source_acks;
+        }
+        daik::service_requested_topic_cleanup(adapter::cfg);
+        require(!daik::s_source_cleanup.in_flight() || !daik::s_retirement_delivery.in_flight(),
+                "PERIODIC_AND_SOURCE_HAVE_ONE_GLOBAL_CLEANUP_OUTBOX_ITEM");
+        for (int i = 0; i < sdk::publish_calls; ++i) {
+            const auto& row = sdk::published[i];
+            require(row.length == 0 && row.qos == 1 && row.retain == 1 && row.enqueued,
+                    "PERIODIC_EVERY_RETIREMENT_IS_TRACKED_QOS1");
+            const std::string topic = row.topic.data();
+            if (expected.count(topic) && row.accepted)
+                deleted.insert(topic);
+            else
+                require(topic == daik::s_env3 || topic.find("/env3_") != std::string::npos,
+                        "PERIODIC_LEDGER_NEVER_DELETES_CURRENT_OR_FOREIGN_TOPIC");
+        }
+        reset_cleanup_trace();
+    }
+    require(!daik::s_periodic_discovery_pending && deleted == expected && source_acks == 4,
+            "PERIODIC_FROZEN_HOMEHUB_WEATHER_LEDGER_AND_QUEUED_RECONNECT_COMPLETE");
+    daik::request_periodic_discovery_retirement();
+    daik::service_periodic_discovery_retirement();
+    require(daik::s_retirement_delivery.in_flight(), "PERIODIC_STOP_FIXTURE_HAS_PENDING_ITEM");
+    const std::string stopped = sdk::published[0].topic.data();
+    daik::source_cleanup_outbox_cleared_after_transport_stop();
+    daik::on_mqtt(nullptr, "mqtt", MQTT_EVENT_CONNECTED, nullptr);
+    daik::service_periodic_discovery_retirement();
+    require(sdk::publish_calls == 2 && sdk::published[1].topic.data() == stopped &&
+                daik::s_periodic_discovery_step == 0,
+            "PERIODIC_STOPPED_TRANSPORT_RETRIES_WITHOUT_FORGETTING_LEDGER");
+}
+
+void periodic_discovery_task_timer() {
+    independent_sources_fixture();
+    bool timer_seen = false;
+    int  pending_id = -1;
+    sdk::on_delay   = [&](TickType_t delay) {
+        check_cycle(delay);
+        if (sdk::delays == 290) cleanup_witness::early_ack = false;
+        if (sdk::delays >= 290 &&
+            daik::s_retirement_delivery.owner() == MqttRetirementOwner::PeriodicDiscovery) {
+            if (!timer_seen) {
+                timer_seen = true;
+                pending_id = daik::s_retirement_delivery.msg_id();
+                adapter::env.samples++;
+                adapter::env.temperature_c = 18.25f;
+            } else {
+                require(daik::s_retirement_delivery.msg_id() == pending_id &&
+                              daik::s_periodic_discovery_step == 0,
+                          "PERIODIC_TASK_TIMER_RETAINS_MISSING_ACK_ITEM");
+                require(last_accepted(daik::s_env3) != nullptr,
+                          "PERIODIC_TASK_WAITING_ACK_STILL_PUBLISHES_CURRENT_SOURCE");
+                throw StopTask{};
+            }
+        }
+        if (sdk::delays == 350) {
+            require(timer_seen, "PERIODIC_TASK_TIMER_REQUESTS_LEDGER_AFTER_INTERVAL");
+            throw StopTask{};
+        }
+        reset_cleanup_trace();
+    };
+    try {
+        sdk::task_fn(nullptr);
+    } catch (const StopTask&) {}
+    require(timer_seen, "PERIODIC_TASK_TIMER_REQUESTS_LEDGER_AFTER_INTERVAL");
+}
+
+void profile_return_during_retirement() {
+    initial_config("daikin-altherma-esp32-install");
+    const std::string prior       = "altherma_gshp2";
+    const std::string replacement = "generic";
+    require(daik::mqtt_retirement_record_make(retirement_witness::durable, daik::s_base,
+                                              daik::s_board, prior),
+            "PROFILE_RETURN_FIXTURE_HAS_DURABLE_REAL_GSHP_PREDECESSOR");
+    retirement_witness::result = daik::MqttRetirementStoreLoad::Ready;
+    daik::s_discovered_profile = daik::s_announced_profile = daik::s_current_profile_retired =
+        prior;
+    daik::s_stale_values_profile = prior;
+    adapter::cfg.profile         = prior;
+    adapter::hp.connected        = true;
+    adapter::hp.last_ok_s        = 0;
+    adapter::x10a_payload        = R"({"hydronic":{"flow_rate":9}})";
+    adapter::x10a_generation     = 7;
+    const std::string brine      = daik::s_prefix + "/sensor/" + daik::s_node +
+                              "/outdoor_sensors_entering_brine_temp_r5t/config";
+    const auto            expected    = fixture_profile_topics(prior);
+    bool                  requested_q = false, switched_back = false, brine_deleted = false;
+    bool                  brine_refused = false, source_check = false;
+    std::set<std::string> reannounced;
+    sdk::on_delay = [&](TickType_t delay) {
+        check_cycle(delay);
+        for (int i = 0; i < sdk::publish_calls; ++i) {
+            const auto& row = sdk::published[i];
+            if (row.accepted && row.length == 0 && brine == row.topic.data()) brine_deleted = true;
+            if (requested_q && expected.count(row.topic.data()) && row.length > 0) {
+                require(switched_back && daik::s_retiring_profile_target.empty(),
+                        "PROFILE_RETURN_NEVER_REANNOUNCES_BEFORE_FROZEN_RETIREMENT_FINISHES");
+                if (row.accepted)
+                    reannounced.insert(row.topic.data());
+                else if (brine == row.topic.data())
+                    brine_refused = true;
+            }
+        }
+        if (!requested_q && daik::s_announced_profile == prior) {
+            adapter::cfg.profile         = replacement;
+            daik::s_stale_values_profile = replacement;
+            requested_q                  = true;
+        }
+        if (daik::s_source_cleanup.in_flight())
+            cleanup_event(daik::s_source_cleanup.in_flight_id(),
+                          MqttCleanupDeliveryOutcome::Published, daik::s_mqtt_client_epoch.load());
+        if (daik::s_retirement_delivery.in_flight()) {
+            const int id = daik::s_retirement_delivery.msg_id();
+            if (!switched_back && brine_deleted) {
+                adapter::cfg.profile         = prior;
+                daik::s_stale_values_profile = prior;
+                switched_back                = true;
+                adapter::x10a_generation++;
+                adapter::x10a_payload = R"({"hydronic":{"flow_rate":10}})";
+                std::snprintf(sdk::reject_publish_topic, sizeof(sdk::reject_publish_topic), "%s",
+                              brine.c_str());
+                source_check = true;
+                reset_cleanup_trace();
+                return; // hold the queued brine delete's ACK across the return to P
+            }
+            if (switched_back && brine_deleted)
+                require(reannounced.empty() && daik::s_retiring_profile_target == replacement,
+                        "PROFILE_RETURN_CACHED_P_CANNOT_BYPASS_FROZEN_Q_JOB");
+            if (source_check) {
+                require(last_accepted(daik::s_x10a) != nullptr,
+                        "PROFILE_RETURN_WAITING_DELETE_ACK_STILL_PUBLISHES_CURRENT_X10A");
+                source_check = false;
+            }
+            cleanup_event(id, MqttCleanupDeliveryOutcome::Published,
+                          daik::s_mqtt_client_epoch.load());
+        }
+        if (switched_back && daik::s_announced_profile == prior && brine_deleted) {
+            require(reannounced == expected,
+                    "PROFILE_RETURN_REANNOUNCES_ALL_P_CONFIGS_AFTER_DELAYED_DELETE_ACKS");
+            require(brine_refused, "PROFILE_RETURN_REJECTED_BRINE_CONFIG_RETRIES_FULL_DISCOVERY");
+            require(std::strcmp(retirement_witness::durable.profile_id, prior.c_str()) == 0,
+                    "PROFILE_RETURN_JOURNAL_NEVER_FORGETS_LAST_POSSIBLY_ANNOUNCED_P");
+            throw StopTask{};
+        }
+        require(sdk::delays < 1024, "PROFILE_RETURN_COMPLETES_WITH_BOUNDED_CURSOR_RETRIES");
+        reset_cleanup_trace();
+    };
+    try {
+        sdk::task_fn(nullptr);
+    } catch (const StopTask&) {}
+    require(brine_deleted && switched_back && reannounced.count(brine),
+            "PROFILE_RETURN_REAL_ENTERING_BRINE_ENTITY_IS_RESTORED");
+}
+
+void profile_retirement_scan_bounds() {
+    cleanup_fixture();
+    const std::string previous = "altherma_erga_e_ehv_ehb_ehvz_e_ej_series_04_08kw";
+    const std::string target   = "altherma_ebla_edla_d_series_4_8kw_monobloc";
+    daik::s_discovered_profile = previous;
+    auto prepare               = [&] {
+        daik::s_retiring_profile_target        = target;
+        daik::s_retiring_current_unpublishable = false;
+        daik::s_retiring_profile_row           = 128;
+        daik::s_retiring_profile_shape         = 0;
+        daik::s_retiring_identity_ready        = false;
+        daik::s_retiring_scan                  = {};
+    };
+    prepare();
+    require(!daik::retract_profile_cutover(target) && daik::s_retiring_profile_row == 128 &&
+                daik::s_retiring_scan.row == 127 &&
+                daik::s_retiring_scan.result == daik::MqttRetirementPresence::Pending &&
+                sdk::publish_calls == 0,
+            "PROFILE_SCANNER_WORK_SLICE_CANNOT_DECLARE_PARTIAL_REPLACEMENT_ABSENT");
+    prepare();
+    sdk::fail_next_new = true;
+    bool failed        = false;
+    try {
+        daik::retract_profile_cutover(target);
+    } catch (const std::bad_alloc&) {
+        failed = true;
+    }
+    const bool still_armed = sdk::fail_next_new;
+    sdk::fail_next_new     = false;
+    require(!failed && still_armed && sdk::publish_calls == 0 && daik::s_retiring_scan.row == 127,
+            "PROFILE_SCANNER_PENDING_COMPARISONS_AND_PREPARATION_ALLOCATE_NOTHING");
+    daik::retract_profile_cutover(target);
+    require(daik::s_retiring_profile_row > 128 && sdk::publish_calls == 0,
+            "PROFILE_SCANNER_RESUMES_AND_PRESERVES_LATE_COMMON_GROUPED_CONFIG");
+}
+
+void retirement_early_ack() {
+    cleanup_fixture();
+    cleanup_witness::early_ack = true;
+    const std::string topic    = daik::s_legacy_state;
+    require(daik::retire_exact_topic(MqttRetirementOwner::LegacyProbe, topic) &&
+                !daik::s_retirement_delivery.busy() && sdk::publish_calls == 1,
+            "RETIREMENT_ACK_BEFORE_ENQUEUE_RETURN_IS_PRESERVED");
+    cleanup_witness::early_ack = false;
+    daik::retire_exact_topic(MqttRetirementOwner::LegacyProbe, topic);
+    for (int i = 0; i < 32; ++i) cleanup_event(sdk::message_id + 100 + i);
+    cleanup_event(sdk::message_id);
+    require(daik::s_source_cleanup_evidence_lost, "RETIREMENT_EVIDENCE_OVERFLOW_REPORTS_LOSS");
+    daik::service_source_cleanup_evidence();
+    require(daik::s_retirement_delivery.in_flight(),
+            "RETIREMENT_LOST_ACK_NEVER_ADVANCES_OR_DUPLICATES");
+    require(daik::mqtt_cleanup_evidence_recovery_step(1) &&
+                !daik::s_retirement_delivery.in_flight(),
+            "RETIREMENT_EVIDENCE_RECOVERY_STOPS_TRANSPORT_BEFORE_RETRY");
+}
+
+void retirement_after_gate_withdrawal() {
+    cleanup_fixture();
+    const std::string prior = "altherma3_r_erga";
+    daik::retract_stale_values(prior);
+    require(daik::s_retirement_delivery.in_flight(), "WITHDRAWAL_FIXTURE_HAS_STARTED_RETIREMENT");
+    adapter::cfg.profile = "auto"; // replacement discovery cannot run while detection is pending
+    bool interrupted     = false;
+    int  source_acks     = 0;
+    for (int cycles = 0; cycles < 512 && !daik::s_stale_values_pending_profile.empty(); ++cycles) {
+        reset_cleanup_trace();
+        if (daik::s_retirement_delivery.in_flight())
+            cleanup_event(daik::s_retirement_delivery.msg_id());
+        if (daik::s_source_cleanup.in_flight()) {
+            cleanup_event(daik::s_source_cleanup.in_flight_id());
+            ++source_acks;
+        }
+        daik::service_requested_topic_cleanup(
+            adapter::cfg); // actual pre-publish-gate production step
+        interrupted = interrupted || daik::s_source_cleanup.in_flight();
+        require(!daik::s_source_cleanup.in_flight() || !daik::s_retirement_delivery.in_flight(),
+                "WITHDRAWAL_CLEANUP_STILL_HAS_ONE_GLOBAL_OUTBOX_ITEM");
+        for (int i = 0; i < sdk::publish_calls; ++i)
+            require(sdk::published[i].length == 0,
+                    "WITHDRAWAL_COMPLETION_DOES_NOT_EMIT_REPLACEMENT_DISCOVERY");
+    }
+    require(daik::s_stale_values_pending_profile.empty() && daik::s_stale_values_profile == prior &&
+                !daik::s_retirement_delivery.busy() && interrupted &&
+                source_acks == daik::MQTT_SOURCE_CLEANUP_MAX_STEPS,
+            "WITHDRAWAL_FROZEN_RETIREMENT_FINISHES_AND_UNBLOCKS_SOURCE_CLEANUP");
+}
+
+void journal_seed(const char* profile, const char* base = nullptr, const char* board = nullptr) {
+    require(daik::mqtt_retirement_record_make(retirement_witness::durable,
+                                              base ? base : daik::s_base.c_str(),
+                                              board ? board : daik::s_board.c_str(), profile),
+            "JOURNAL_FIXTURE_RECORD_HAS_BOUNDED_VALID_FIELDS");
+    retirement_witness::result = daik::MqttRetirementStoreLoad::Ready;
+}
+
+void journal_discovery_trace(const sdk::PublishTrace& row) {
+    if (row.length == 0) return;
+    require((daik::mqtt_retirement_evidence() & 0x080) != 0 &&
+                retirement_witness::result == daik::MqttRetirementStoreLoad::Ready &&
+                std::strcmp(retirement_witness::durable.profile_id, adapter::cfg.profile.c_str()) ==
+                    0,
+            "JOURNAL_CURRENT_RECORD_DURABLE_BEFORE_FIRST_DISCOVERY_SDK_EFFECT");
+}
+
+void journal_reboot_volatile_state() {
+    // Emulate a fresh MQTT TU's volatile globals after producer stop; only the model's durable
+    // record and broker ACKed tombstones survive. This is not a physical reboot/power-loss claim.
+    daik::source_cleanup_outbox_cleared_after_transport_stop();
+    daik::s_retirement_delivery = {};
+    daik::s_source_cleanup      = {};
+    daik::s_discovered_profile.clear();
+    daik::s_announced_profile.clear();
+    daik::s_retiring_profile_target.clear();
+    daik::s_retiring_profile_row = daik::s_retiring_profile_shape = 0;
+    daik::s_retiring_current_unpublishable                        = false;
+    daik::s_retiring_identity_ready                               = false;
+    daik::s_retiring_scan                                         = {};
+    daik::s_periodic_discovery_pending = daik::s_periodic_discovery_again = false;
+    daik::s_periodic_discovery_step                                       = 0;
+    daik::s_current_profile_retired.clear();
+    daik::s_stale_values_pending_profile.clear();
+    daik::s_stale_values_profile.clear();
+    daik::s_stale_values_step       = 0;
+    daik::s_retirement_store_loaded = daik::s_retirement_store_scoped = false;
+    daik::s_retirement_record = daik::s_retirement_staged = {};
+    daik::s_retirement_load_retry_us = daik::s_retirement_save_retry_us = 0;
+    daik::s_retirement_evidence                                         = 0;
+    daik::s_retirement_log_state                                        = UINT32_MAX;
+    daik::s_mqtt_client_epoch++;
+    daik::s_connected_client_epoch = daik::s_mqtt_client_epoch.load();
+    reset_cleanup_trace();
+}
+
+std::set<std::string> journal_obsolete_topics(const char* previous, const char* current) {
+    const auto            old_topics = fixture_profile_topics(previous);
+    const auto            new_topics = fixture_profile_topics(current);
+    std::set<std::string> expected;
+    for (const auto& topic : old_topics)
+        if (!new_topics.count(topic)) expected.insert(topic);
+    retirement_witness::expected_ack_count = static_cast<int>(expected.size());
+    return expected;
+}
+
+void journal_ack_current(const std::set<std::string>& expected,
+                         std::set<std::string>&       acknowledged) {
+    if (!daik::s_retirement_delivery.in_flight()) return;
+    const sdk::PublishTrace* trace = nullptr;
+    for (int i = sdk::publish_calls - 1; i >= 0; --i)
+        if (sdk::published[i].accepted && sdk::published[i].enqueued) {
+            trace = &sdk::published[i];
+            break;
+        }
+    require(trace != nullptr, "JOURNAL_ACK_MATCHES_ACTUALLY_ADMITTED_TOMBSTONE");
+    const std::string topic = trace->topic.data();
+    cleanup_event(daik::s_retirement_delivery.msg_id(), MqttCleanupDeliveryOutcome::Published,
+                  daik::s_mqtt_client_epoch.load());
+    if (expected.count(topic)) acknowledged.insert(topic);
+    retirement_witness::observed_ack_count = static_cast<int>(acknowledged.size());
+}
+
+bool journal_drive(const std::set<std::string>& expected, std::set<std::string>& acknowledged) {
+    for (int cycle = 0; cycle < 2048; ++cycle) {
+        journal_ack_current(expected, acknowledged);
+        reset_cleanup_trace();
+        if (daik::publish_x10a_discovery()) return true;
+        if (daik::mqtt_retirement_evidence() & 0x020) return false;
+    }
+    return false;
+}
+
+void journal_reboot_mid_retirement() {
+    cleanup_fixture();
+    journal_seed("altherma3_r_erga");
+    adapter::cfg.profile           = "protocol_s";
+    daik::s_stale_values_profile   = adapter::cfg.profile;
+    const auto            expected = journal_obsolete_topics("altherma3_r_erga", "protocol_s");
+    std::set<std::string> acknowledged;
+    sdk::on_publish          = journal_discovery_trace;
+    sdk::reject_next_publish = true;
+    require(!daik::publish_x10a_discovery() && retirement_witness::save_calls == 0 &&
+                (daik::mqtt_retirement_evidence() & 0x001),
+            "JOURNAL_READY_PREDECESSOR_LOADED_BEFORE_REJECTED_RETIREMENT");
+    require(adapter::cfg.profile == "protocol_s" &&
+                daik::s_discovered_profile == "altherma3_r_erga",
+            "JOURNAL_LOADED_PREDECESSOR_NEVER_RESTORES_ACTIVE_DETECTION");
+    reset_cleanup_trace();
+    daik::publish_x10a_discovery();
+    journal_ack_current(expected, acknowledged);
+    reset_cleanup_trace();
+    daik::publish_x10a_discovery();
+    require(!acknowledged.empty() && acknowledged.size() < expected.size() &&
+                retirement_witness::save_calls == 0 &&
+                std::strcmp(retirement_witness::durable.profile_id, "altherma3_r_erga") == 0,
+            "JOURNAL_PARTIAL_ACK_CURSOR_CANNOT_REPLACE_DURABLE_PREDECESSOR");
+    journal_reboot_volatile_state();
+    daik::s_stale_values_profile = adapter::cfg.profile;
+    require(journal_drive(expected, acknowledged),
+            "JOURNAL_REBOOT_RELOAD_RESTARTS_IDEMPOTENT_PREDECESSOR_RETIREMENT");
+    require(retirement_witness::load_calls == 2 && acknowledged == expected &&
+                !retirement_witness::save_before_retirement && retirement_witness::save_calls == 1,
+            "JOURNAL_ALL_PREDECESSOR_ACKS_PRECEDE_TARGET_SAVE_ACROSS_REBOOT");
+    require((daik::mqtt_retirement_evidence() & 0x081) == 0x081 &&
+                std::strcmp(retirement_witness::durable.profile_id, "protocol_s") == 0,
+            "JOURNAL_REBOOT_LOAD_AND_CURRENT_DURABILITY_HAVE_SEPARATE_EVIDENCE");
+}
+
+void journal_reboot_after_save() {
+    cleanup_fixture();
+    adapter::cfg.profile         = "protocol_s";
+    daik::s_stale_values_profile = adapter::cfg.profile;
+    std::set<std::string> empty, acknowledged;
+    sdk::on_publish                           = journal_discovery_trace;
+    retirement_witness::reject_new_after_save = true;
+    bool threw                                = false;
+    try {
+        journal_drive(empty, acknowledged);
+    } catch (const std::bad_alloc&) {
+        threw = true;
+    }
+    require(threw && retirement_witness::save_calls == 1 &&
+                std::strcmp(retirement_witness::durable.profile_id, "protocol_s") == 0,
+            "JOURNAL_SAVE_SURVIVES_FAILURE_BEFORE_FIRST_DISCOVERY_BUILD");
+    require((daik::mqtt_retirement_evidence() & 0x001) == 0 &&
+                (daik::mqtt_retirement_evidence() & 0x080),
+            "JOURNAL_SAME_BOOT_SAVE_CANNOT_CLAIM_REBOOT_RESTORATION");
+    journal_reboot_volatile_state();
+    daik::s_stale_values_profile = adapter::cfg.profile;
+    require(journal_drive(empty, acknowledged) && retirement_witness::save_calls == 1 &&
+                (daik::mqtt_retirement_evidence() & 0x001),
+            "JOURNAL_REBOOT_AFTER_SAVE_LOADS_TARGET_WITHOUT_ERASING_OR_REWRITING_IT");
+    sdk::reject_next_publish = true;
+    reset_cleanup_trace();
+    require(!daik::publish_x10a_discovery(), "JOURNAL_REFUSED_DISCOVERY_REMAINS_UNANNOUNCED");
+    reset_cleanup_trace();
+    require(daik::publish_x10a_discovery() && retirement_witness::save_calls == 1,
+            "JOURNAL_DISCOVERY_SDK_RETRY_DOES_NOT_REWRITE_DURABLE_METADATA");
+}
+
+void journal_commit_write_through_failure() {
+    cleanup_fixture();
+    journal_seed("altherma3_r_erga");
+    adapter::cfg.profile           = "protocol_s";
+    daik::s_stale_values_profile   = adapter::cfg.profile;
+    const auto            expected = journal_obsolete_topics("altherma3_r_erga", "protocol_s");
+    std::set<std::string> acknowledged;
+    sdk::on_publish                           = journal_discovery_trace;
+    retirement_witness::save_failures         = 1;
+    retirement_witness::write_through_failure = true;
+    require(!journal_drive(expected, acknowledged) && acknowledged == expected &&
+                !retirement_witness::save_before_retirement,
+            "JOURNAL_FAILED_COMMIT_WRITE_THROUGH_CANNOT_FORGET_UNRETIRED_PREDECESSOR");
+    require((daik::mqtt_retirement_evidence() & 0x020) &&
+                !(daik::mqtt_retirement_evidence() & 0x080) &&
+                daik::s_discovered_profile == "altherma3_r_erga" &&
+                std::strcmp(retirement_witness::durable.profile_id, "protocol_s") == 0,
+            "JOURNAL_FAILED_COMMIT_BLOCKS_DISCOVERY_DESPITE_WRITE_THROUGH");
+    const int saves = retirement_witness::save_calls;
+    for (int i = 0; i < 20; ++i) {
+        daik::publish_x10a_discovery();
+        require(retirement_witness::save_calls == saves,
+                "JOURNAL_FAILED_SAVE_RETRY_IS_TIME_BOUNDED");
+    }
+    require(retirement_witness::save_calls == saves, "JOURNAL_FAILED_SAVE_RETRY_IS_TIME_BOUNDED");
+    journal_reboot_volatile_state();
+    daik::s_stale_values_profile = adapter::cfg.profile;
+    require(journal_drive(expected, acknowledged) && retirement_witness::save_calls == saves &&
+                acknowledged == expected,
+            "JOURNAL_REBOOT_AFTER_FAILED_COMMIT_NEEDS_NO_FORGOTTEN_PREDECESSOR_DELETES");
+    adapter::cfg.profile          = "altherma3_r_erga";
+    daik::s_stale_values_profile  = adapter::cfg.profile;
+    const auto            reverse = journal_obsolete_topics("protocol_s", "altherma3_r_erga");
+    std::set<std::string> reverse_acknowledged;
+    retirement_witness::observed_ack_count    = 0;
+    retirement_witness::save_failures         = 1;
+    retirement_witness::write_through_failure = false;
+    require(!journal_drive(reverse, reverse_acknowledged) &&
+                std::strcmp(retirement_witness::durable.profile_id, "protocol_s") == 0,
+            "JOURNAL_REJECTED_SAVE_PRESERVES_PRIOR_DURABLE_RECORD");
+    sdk::ticks += 5000;
+    require(journal_drive(reverse, reverse_acknowledged) &&
+                !(daik::mqtt_retirement_evidence() & 0x020) &&
+                std::strcmp(retirement_witness::durable.profile_id, "altherma3_r_erga") == 0,
+            "JOURNAL_FAILED_SAVE_RECOVERS_AFTER_BOUNDED_RETRY_WITHOUT_REBOOT");
+}
+
+void journal_load_errors() {
+    cleanup_fixture();
+    adapter::cfg.profile       = "protocol_s";
+    retirement_witness::result = daik::MqttRetirementStoreLoad::Error;
+    for (int i = 0; i < 20; ++i)
+        require(!daik::publish_x10a_discovery(), "JOURNAL_LOAD_ERROR_DEFERS_DISCOVERY");
+    require(retirement_witness::load_calls == 1 && retirement_witness::save_calls == 0 &&
+                sdk::publish_calls == 0 && adapter::retirement_logs == 1 &&
+                (daik::mqtt_retirement_evidence() & 0x008),
+            "JOURNAL_LOAD_ERROR_RETRIES_AND_LOGS_ONLY_AT_BOUNDED_TRANSITIONS");
+    sdk::ticks += 5000;
+    retirement_witness::result = daik::MqttRetirementStoreLoad::Incompatible;
+    require(!daik::publish_x10a_discovery() && retirement_witness::save_calls == 0 &&
+                (daik::mqtt_retirement_evidence() & 0x010),
+            "JOURNAL_CORRUPTION_NEVER_INITIALIZES_OR_OVERWRITES_METADATA");
+    sdk::ticks += 5000;
+    journal_seed("unknown_retired_profile");
+    require(!daik::publish_x10a_discovery() && retirement_witness::save_calls == 0 &&
+                sdk::publish_calls == 0,
+            "JOURNAL_UNKNOWN_PROFILE_NEVER_FALLS_BACK_TO_FABRICATED_GENERIC_RETIREMENT");
+    sdk::ticks += 5000;
+    journal_seed("altherma3_r_erga");
+    daik::s_stale_values_profile   = adapter::cfg.profile;
+    const auto            expected = journal_obsolete_topics("altherma3_r_erga", "protocol_s");
+    std::set<std::string> acknowledged;
+    require(journal_drive(expected, acknowledged) && !(daik::mqtt_retirement_evidence() & 0x018),
+            "JOURNAL_LOAD_FAILURE_RECOVERS_WITHOUT_ERASING_OWNER_RECORD");
+}
+
+void journal_foreign_scope(bool board_only = false) {
+    cleanup_fixture();
+    journal_seed("altherma3_r_erga",
+                 board_only ? daik::s_base.c_str() : "daikin-altherma-esp32-other",
+                 board_only ? "daikin_altherma_esp32__board_040404040404" : daik::s_board.c_str());
+    adapter::cfg.profile         = "protocol_s";
+    daik::s_stale_values_profile = adapter::cfg.profile;
+    std::set<std::string> empty, acknowledged;
+    sdk::on_publish = journal_discovery_trace;
+    require(journal_drive(empty, acknowledged),
+            "JOURNAL_FOREIGN_OWNER_CAN_MIGRATE_ONLY_CURRENT_NAMESPACE");
+    require((daik::mqtt_retirement_evidence() & 0x104) == 0x104 &&
+                !(daik::mqtt_retirement_evidence() & 0x001) &&
+                std::strcmp(retirement_witness::durable.base, daik::s_base.c_str()) == 0 &&
+                std::strcmp(retirement_witness::durable.board_id, daik::s_board.c_str()) == 0,
+            "JOURNAL_FOREIGN_BINDING_REMAINS_EXPLICIT_OPERATOR_MIGRATION_EVIDENCE");
+    for (int i = 0; i < sdk::publish_calls; ++i)
+        require(!std::strstr(sdk::published[i].topic.data(), "other") &&
+                    !std::strstr(sdk::published[i].topic.data(), "040404040404") &&
+                    !std::strchr(sdk::published[i].topic.data(), '#') &&
+                    !std::strchr(sdk::published[i].topic.data(), '+'),
+                "JOURNAL_FOREIGN_NAMESPACE_IS_NEVER_AUTOMATICALLY_RETRACTED");
+}
+
+void journal_bootstrap_auto() {
+    cleanup_fixture();
+    adapter::cfg.profile = "auto";
+    require(daik::load_retirement_provenance() &&
+                (daik::mqtt_retirement_evidence() & 0x102) == 0x102,
+            "JOURNAL_MISSING_RECORD_HAS_EXPLICIT_UNKNOWN_UPGRADE_BOUNDARY");
+    require(!daik::publish_x10a_discovery() && retirement_witness::save_calls == 0,
+            "JOURNAL_AUTO_TARGET_NEVER_OVERWRITES_LAST_POSSIBLY_ANNOUNCED_PROFILE");
+    journal_reboot_volatile_state();
+    journal_seed("altherma3_r_erga");
+    require(daik::load_retirement_provenance() && daik::s_discovered_profile == "altherma3_r_erga",
+            "JOURNAL_SCOPED_PREDECESSOR_LOADS_WHILE_DETECTION_IS_AUTO");
+    adapter::cfg.profile.clear();
+    require(!daik::publish_x10a_discovery() && retirement_witness::save_calls == 0 &&
+                std::strcmp(retirement_witness::durable.profile_id, "altherma3_r_erga") == 0,
+            "JOURNAL_EMPTY_TARGET_PRESERVES_RETIREMENT_PROVENANCE");
+}
+
+void journal_load_oom_recovery() {
+    cleanup_fixture();
+    journal_seed("altherma_lt_11_16kw_hydrosplit_hydro_unit");
+    sdk::fail_next_new = true;
+    bool threw         = false;
+    try {
+        daik::load_retirement_provenance();
+    } catch (const std::bad_alloc&) {
+        threw = true;
+    }
+    require(threw && !daik::s_retirement_store_loaded && daik::s_discovered_profile.empty() &&
+                !(daik::mqtt_retirement_evidence() & 0x001),
+            "JOURNAL_LOAD_STRING_OOM_CANNOT_CONSUME_OR_CLAIM_PREDECESSOR");
+    require(daik::load_retirement_provenance() && retirement_witness::load_calls == 2 &&
+                daik::s_discovered_profile == "altherma_lt_11_16kw_hydrosplit_hydro_unit" &&
+                (daik::mqtt_retirement_evidence() & 0x001),
+            "JOURNAL_LOAD_OOM_RETRIES_AND_COMMITS_REAL_RESTORATION_WITHOUT_SDK_EFFECTS");
+    require(sdk::publish_calls == 0 && retirement_witness::save_calls == 0,
+            "JOURNAL_LOAD_IS_READ_ONLY_AND_NOT_DETECTION_AUTHORITY");
+}
+
+void journal_failure_live_metrics() {
+    initial_config();
+    retirement_witness::result = daik::MqttRetirementStoreLoad::Incompatible;
+    adapter::cfg.profile       = "altherma_gshp2";
+    adapter::hp.connected      = true;
+    adapter::hp.last_ok_s      = 0;
+    adapter::x10a_generation   = 7;
+    adapter::x10a_payload      = R"({"hydronic":{"flow_rate":9}})";
+    sdk::on_delay              = [](TickType_t delay) {
+        check_cycle(delay);
+        if (sdk::delays == 1) {
+            require(accepted_count(daik::s_x10a) == 1 &&
+                                     accepted_count(daik::s_x10a_avail, "online") == 1 &&
+                                     retirement_witness::save_calls == 0 &&
+                                     (daik::mqtt_retirement_evidence() & 0x010),
+                                 "JOURNAL_FAILURE_CANNOT_BLOCK_CURRENT_X10A_METRICS_OR_TRUTHFUL_AVAILABILITY");
+            adapter::x10a_generation = 8;
+            adapter::x10a_payload    = R"({"hydronic":{"flow_rate":10}})";
+        } else if (sdk::delays == 2) {
+            require(accepted_count(daik::s_x10a) == 2 && daik::s_last_x10a_cache_gen == 8,
+                                 "JOURNAL_FAILURE_STILL_PUBLISHES_CHANGED_CURRENT_METRICS");
+            throw StopTask{};
+        }
+    };
+    try {
+        sdk::task_fn(nullptr);
+    } catch (const StopTask&) {}
+}
+
+void journal_prior_quarantined_row() {
+    cleanup_fixture();
+    journal_seed("altherma_ebla_edla_d_series_4_8kw_monobloc");
+    adapter::cfg.profile         = "protocol_s";
+    daik::s_stale_values_profile = adapter::cfg.profile;
+    auto expected =
+        journal_obsolete_topics("altherma_ebla_edla_d_series_4_8kw_monobloc", "protocol_s");
+    const std::string historical =
+        "homeassistant/sensor/daikin_altherma_esp32_install/hybrid_be_cop/config";
+    expected.insert(historical);
+    retirement_witness::expected_ack_count = static_cast<int>(expected.size());
+    std::set<std::string> acknowledged;
+    require(journal_drive(expected, acknowledged) && acknowledged.count(historical),
+            "JOURNAL_PREDECESSOR_QUARANTINE_CANNOT_HIDE_HISTORICAL_GROUPED_CONFIG");
+    require(!retirement_witness::save_before_retirement,
+            "JOURNAL_HISTORICAL_QUARANTINED_PREDECESSOR_IS_ACKED_BEFORE_TARGET_SAVE");
+}
+
 int main(int argc, char** argv) {
     const char* scenario = argc > 1 ? argv[1] : "ref_oom_recovery";
     try {
         cJSON_Hooks hooks{json_witness::allocate, json_witness::release};
         cJSON_InitHooks(&hooks);
-        if (std::strcmp(scenario, "discovery_topic_roundtrip") == 0)
+        if (std::strcmp(scenario, "transport_source_lifecycle") == 0)
+            transport_source_lifecycle();
+        else if (std::strcmp(scenario, "independent_source_reconnect") == 0)
+            independent_source_reconnect();
+        else if (std::strcmp(scenario, "independent_source_cutover") == 0)
+            independent_source_cutover();
+        else if (std::strcmp(scenario, "availability_retry_oom") == 0)
+            availability_retry_oom();
+        else if (std::strcmp(scenario, "full_mac_identity") == 0)
+            full_mac_identity();
+        else if (std::strcmp(scenario, "full_mac_read_failure") == 0)
+            full_mac_read_failure();
+        else if (std::strcmp(scenario, "legacy_retirement_delivery") == 0)
+            legacy_retirement_delivery();
+        else if (std::strcmp(scenario, "retirement_oom_recovery") == 0)
+            retirement_oom_recovery();
+        else if (std::strcmp(scenario, "retained_probe_delivery") == 0)
+            retained_probe_delivery();
+        else if (std::strcmp(scenario, "stale_value_retirement") == 0)
+            stale_value_retirement();
+        else if (std::strcmp(scenario, "profile_cutover_delivery") == 0)
+            profile_cutover_delivery();
+        else if (std::strcmp(scenario, "periodic_discovery_delivery") == 0)
+            periodic_discovery_delivery();
+        else if (std::strcmp(scenario, "periodic_discovery_task_timer") == 0)
+            periodic_discovery_task_timer();
+        else if (std::strcmp(scenario, "profile_return_during_retirement") == 0)
+            profile_return_during_retirement();
+        else if (std::strcmp(scenario, "profile_retirement_scan_bounds") == 0)
+            profile_retirement_scan_bounds();
+        else if (std::strcmp(scenario, "retirement_early_ack") == 0)
+            retirement_early_ack();
+        else if (std::strcmp(scenario, "retirement_after_gate_withdrawal") == 0)
+            retirement_after_gate_withdrawal();
+        else if (std::strcmp(scenario, "journal_reboot_mid_retirement") == 0)
+            journal_reboot_mid_retirement();
+        else if (std::strcmp(scenario, "journal_reboot_after_save") == 0)
+            journal_reboot_after_save();
+        else if (std::strcmp(scenario, "journal_commit_write_through_failure") == 0)
+            journal_commit_write_through_failure();
+        else if (std::strcmp(scenario, "journal_load_errors") == 0)
+            journal_load_errors();
+        else if (std::strcmp(scenario, "journal_foreign_scope") == 0)
+            journal_foreign_scope();
+        else if (std::strcmp(scenario, "journal_foreign_board_scope") == 0)
+            journal_foreign_scope(true);
+        else if (std::strcmp(scenario, "journal_bootstrap_auto") == 0)
+            journal_bootstrap_auto();
+        else if (std::strcmp(scenario, "journal_load_oom_recovery") == 0)
+            journal_load_oom_recovery();
+        else if (std::strcmp(scenario, "journal_failure_live_metrics") == 0)
+            journal_failure_live_metrics();
+        else if (std::strcmp(scenario, "journal_prior_quarantined_row") == 0)
+            journal_prior_quarantined_row();
+        else if (std::strcmp(scenario, "discovery_topic_roundtrip") == 0)
             discovery_topic_roundtrip();
         else if (std::strcmp(scenario, "callback_fragments") == 0)
             callback_fragments();

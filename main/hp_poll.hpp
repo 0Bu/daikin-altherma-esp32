@@ -131,6 +131,14 @@ logic::RefrigerantServiceSnapshot refrigerant_service_status();
 // primitive guarded field and therefore cannot copy a profile/error std::string while heap is low.
 bool hp_link_connected();
 
+// MQTT withdrawal must remain possible while an allocating Config/HpStats copy fails. Keep the
+// last answering-sweep grace separate from a current sweep that returned an empty cache.
+struct HpMqttSourceState {
+    bool connected = false;
+    bool recent    = false;
+};
+HpMqttSourceState hp_mqtt_source_state();
+
 // Poll cycles the task guard DROPPED — a sweep that threw (std::bad_alloc under OTA/TLS heap
 // pressure) and never reached the bus (legacy-380). Deliberately NOT a field of HpStats: every
 // counter in there describes a cycle that RAN, is committed by poll_once() under the stats mutex,

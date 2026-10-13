@@ -10,11 +10,11 @@
 // duplicates). One base topic already means one board (the message topics sit directly under it),
 // so the base topic is the honest identity: swap the board, keep the device.
 //
-// The board's MAC-derived id stays in play as a SECOND `dev.ids` entry: HA's device registry matches
-// a device by ANY of its identifiers and merges the rest in, so an install upgrading from a
-// MAC-identified build keeps its existing device (and with it its area, name and device-level
-// settings) instead of gaining a third one. It also keeps the identifier a downgrade would publish.
+// The secondary hardware identifier uses the complete MAC in a separate namespace. The historical
+// three-byte alias can identify more than one board, so it is retired through the explicit owner
+// migration in docs/MQTT.md rather than advertised as a compatibility alias.
 // Pure + IDF-free so the exact bytes HA receives are asserted on the host (test/test_logic.cpp).
+#include <cstdint>
 #include <string>
 
 namespace daik {
@@ -58,13 +58,56 @@ inline std::string ha_slug(const char* s) {
     return o;
 }
 
-// The HA device / discovery-topic node id for an installation, from its MQTT base topic:
-// "daikin-altherma-esp32" -> "daikin_altherma_esp32". Board-independent BY DESIGN (see above).
-// A base topic that slugifies to nothing still has to yield a usable topic segment, so it falls
-// back to a constant rather than producing "<prefix>/sensor//<obj>/config".
+// Lowercase alphanumeric segments separated by one '-' retain their existing node. Every other
+// accepted raw base is encoded exactly in a namespace that the single-separator slugger cannot
+// produce. MQTT validates the raw base's size and alphabet before it reaches this builder.
+inline bool ha_canonical_installation_base(const std::string& base) {
+    bool needs_alnum = true;
+    for (const unsigned char c : base) {
+        if ((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9')) {
+            needs_alnum = false;
+        } else if (c == '-' && !needs_alnum) {
+            needs_alnum = true;
+        } else {
+            return false;
+        }
+    }
+    return !needs_alnum;
+}
+
 inline std::string device_node_id(const std::string& base) {
     std::string id = ha_slug(base.c_str());
-    return id.empty() ? std::string("daikin") : id;
+    if (id.empty()) return "daikin"; // invalid/non-sluggable callers; accepted bases never use this
+    if (ha_canonical_installation_base(base)) return id;
+    id                   = "daikin_altherma_esp32__";
+    constexpr char hex[] = "0123456789abcdef";
+    for (const unsigned char c : base) {
+        id += hex[c >> 4];
+        id += hex[c & 15];
+    }
+    return id;
+}
+
+// Full hardware identities are disjoint from both canonical nodes and the raw-base hex namespace.
+// Missing, multicast and sentinel addresses cannot become a shared synthetic identity.
+inline std::string ha_board_id(const uint8_t* mac, size_t length) {
+    if (!mac || length != 6 || (mac[0] & 1)) return {};
+    bool all_zero = true;
+    for (size_t i = 0; i < length; ++i) all_zero = all_zero && mac[i] == 0;
+    if (all_zero) return {};
+    std::string    id    = "daikin_altherma_esp32__board_";
+    constexpr char hex[] = "0123456789abcdef";
+    for (size_t i = 0; i < length; ++i) {
+        id += hex[mac[i] >> 4];
+        id += hex[mac[i] & 15];
+    }
+    return id;
+}
+
+// Preserve the two deployed legacy entity sets; their suffixes are checked against real catalogs.
+// Every custom installation has an unambiguous node/entity boundary, including canonical nodes.
+inline const char* ha_entity_separator(const std::string& node) noexcept {
+    return node == "daikin_altherma_esp32" || node == "daikin_altherma_esp32_bench" ? "_" : "__";
 }
 
 // An HA entity this firmware ONCE published and no longer does. Its retained discovery config must
@@ -92,7 +135,7 @@ inline __attribute__((noinline)) void ha_discovery_identity(std::string&       o
     out += name;
     out += "\",\"uniq_id\":\"";
     out += node;
-    out += '_';
+    out += ha_entity_separator(node);
     out += object_id;
     out += "\",";
 }

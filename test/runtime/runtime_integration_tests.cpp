@@ -577,43 +577,34 @@ void test_modbus_fragment_exception_and_desync() {
 void test_mqtt_reconnect_retained_and_lwt_lifecycle() {
     FakeBroker        broker;
     MqttBridgeAdapter bridge(broker, "board-a", "daikin-altherma-esp32/plant");
-    bridge.connect_subscriber();
+    bridge.connect_transport();
     CHECK_EQ(bridge.connections(), size_t{1});
-    CHECK(!bridge.publisher());
-
     const auto waiting = bridge.observe_x10a(false, -1);
-    CHECK_EQ(waiting.next, daik::MqttPublishGateState::SubscriberOnly);
-    CHECK(!broker.retained("daikin-altherma-esp32/plant/status"));
-
-    const auto promoted = bridge.observe_x10a(true, 0);
-    CHECK(promoted.promote_publisher);
-    CHECK(bridge.publisher());
-    CHECK_EQ(bridge.connections(), size_t{2});
+    CHECK_EQ(waiting.next, daik::MqttPublishGateState::Unavailable);
     CHECK_EQ(*broker.retained("daikin-altherma-esp32/plant/status"), std::string("online"));
+    CHECK_EQ(*broker.retained("daikin-altherma-esp32/plant/x10a/status"), std::string("offline"));
+    const auto fresh = bridge.observe_x10a(true, 0);
+    CHECK(fresh.resumed && fresh.publish_cycle);
+    CHECK_EQ(bridge.connections(), size_t{1});
+    // Source online follows the accepted fresh state seed, never just a connection or observation.
+    CHECK_EQ(*broker.retained("daikin-altherma-esp32/plant/x10a/status"), std::string("offline"));
     bridge.publish_state("{\"hydronic\":{\"leaving_water\":31.2}}");
-    CHECK(broker.retained("daikin-altherma-esp32/plant/x10a"));
-
-    // One missed sweep stays active; reaching the production 15-second grace emits offline once.
-    const auto grace = bridge.observe_x10a(false, 14);
-    CHECK(grace.publish_cycle);
-    const auto offline = bridge.observe_x10a(false, 15);
-    CHECK(offline.publish_offline);
-    CHECK_EQ(*broker.retained("daikin-altherma-esp32/plant/status"), std::string("offline"));
-
-    const auto resumed = bridge.observe_x10a(true, 0);
-    CHECK(resumed.resumed);
+    CHECK_EQ(*broker.retained("daikin-altherma-esp32/plant/x10a/status"), std::string("online"));
+    CHECK(bridge.observe_x10a(false, 14).publish_cycle);
+    CHECK(bridge.observe_x10a(false, 15).publish_offline);
+    CHECK_EQ(*broker.retained("daikin-altherma-esp32/plant/x10a/status"), std::string("offline"));
     CHECK_EQ(*broker.retained("daikin-altherma-esp32/plant/status"), std::string("online"));
-
+    CHECK(bridge.observe_x10a(true, 0).resumed);
+    bridge.publish_state("{\"hydronic\":{\"leaving_water\":31.3}}");
     broker.publish("board-a", "homeassistant/sensor/retired/config", "{\"old\":true}", true);
-    CHECK(broker.retained("homeassistant/sensor/retired/config"));
     bridge.delete_retained("homeassistant/sensor/retired/config");
     CHECK(!broker.retained("homeassistant/sensor/retired/config"));
-
     bridge.lose_connection();
     CHECK_EQ(*broker.retained("daikin-altherma-esp32/plant/status"), std::string("offline"));
     bridge.reconnect();
-    CHECK_EQ(bridge.connections(), size_t{3});
+    CHECK_EQ(bridge.connections(), size_t{2});
     CHECK_EQ(*broker.retained("daikin-altherma-esp32/plant/status"), std::string("online"));
+    CHECK_EQ(*broker.retained("daikin-altherma-esp32/plant/x10a/status"), std::string("offline"));
 }
 
 void test_http_body_segmented_oversized_and_chunked() {

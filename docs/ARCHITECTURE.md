@@ -262,6 +262,9 @@ not become one simultaneous physical observation.
 
 The publisher owns HA discovery, retained state and its MQTT input subscriptions. The full topic,
 identity, availability and timestamp contracts are in [MQTT.md](MQTT.md).
+Its dedicated `mqtt_retire` NVS namespace stores only retirement provenance. This task-owned
+record never restores configuration or detected identity; confirmed predecessor retirement and
+fallible record save precede replacement discovery.
 
 For X10A state, an allocation-free pass over the committed cache calculates exact payload size and
 digest. Unchanged state stops there. Changed state reserves one exact local string outside the
