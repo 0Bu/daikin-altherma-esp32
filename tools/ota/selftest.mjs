@@ -639,8 +639,9 @@ try {
       replaceOnce("main/mqtt_ha.cpp", "diag_printf(\"mqtt: X10A proven",
         "set_status(false, \"\");\n    diag_printf(\"mqtt: X10A proven")],
     ["mqtt_task overwrites MQTT_EVENT_CONNECTED after the initial start", () =>
-      replaceOnce("main/mqtt_ha.cpp", "diag_printf(\"mqtt: subscriber-only client started",
-        "set_status(false, \"\");\n    diag_printf(\"mqtt: subscriber-only client started")],
+      replaceOnce("main/mqtt_ha.cpp",
+        "transport_resume.wait_s = transport_resume.backoff_s;\n    }\n    for (;;) {",
+        "transport_resume.wait_s = transport_resume.backoff_s;\n    }\n    set_status(false, \"\");\n    for (;;) {")],
     ["mqtt_task overwrites MQTT_EVENT_CONNECTED after a resume", () =>
       replaceOnce("main/mqtt_ha.cpp",
         "if (!mqtt_transport_resume_step(transport_resume, delay_s)) continue;",
