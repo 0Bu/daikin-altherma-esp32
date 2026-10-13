@@ -74,9 +74,13 @@ nothing else is:
 | 24-hour trend ring | its own reset (`history_*_reset`) or a reboot | every other source's ring |
 | `/status.history.*rows` entry | the source's `enabled`/`configured` gate | the board's own trends |
 | retained MQTT topic | an explicit empty retained publish | every other topic |
-| HA discovery config | an explicit retraction before any replacement | other entities |
+| HA discovery config with established ownership | an explicit retraction before any replacement | other entities |
 | a checkup verdict's evidence | `checkup_dhw_reset()` and friends | the other checks |
 | the heating-curve sample memory | disarming | the sequence contract |
+
+Unproven discovery ownership delegates that config's retirement to the
+[operator migration](../../../docs/MQTT.md#migrations). Check that raw state still withdraws and
+skipped discovery does not claim a deletion or PUBACK.
 
 Two directions fail here, and both have shipped: a derived artefact that **outlives** its source
 (a stale ring spliced onto a new one, a retained topic nobody deletes) and an **unrelated** artefact
