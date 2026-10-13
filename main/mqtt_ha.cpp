@@ -289,18 +289,18 @@ enum : uint32_t {
     RETIRE_CURRENT_DURABLE    = 0x080,
     RETIRE_OPERATOR_MIGRATION = 0x100
 };
-static std::atomic<uint32_t> s_retirement_evidence{0};
-static bool                  s_retirement_store_loaded = false;
-static bool                  s_retirement_store_scoped = false;
-static MqttRetirementRecord  s_retirement_record, s_retirement_staged;
-static int64_t               s_retirement_load_retry_us = 0, s_retirement_save_retry_us = 0;
-static uint32_t              s_retirement_log_state    = UINT32_MAX;
-static constexpr int64_t     RETIREMENT_STORE_RETRY_US = 5 * 1000 * 1000;
-static std::string           s_retiring_profile_target;
-static size_t                s_retiring_profile_row           = 0;
-static size_t                s_retiring_profile_shape         = 0;
-static bool                  s_retiring_current_unpublishable = false;
-static std::string           s_current_profile_retired;
+static std::atomic<uint32_t>  s_retirement_evidence{0};
+static bool                   s_retirement_store_loaded = false;
+static bool                   s_retirement_store_scoped = false;
+static MqttRetirementRecord   s_retirement_record, s_retirement_staged;
+static int64_t                s_retirement_load_retry_us = 0, s_retirement_save_retry_us = 0;
+static uint32_t               s_retirement_log_state    = UINT32_MAX;
+static constexpr int64_t      RETIREMENT_STORE_RETRY_US = 5 * 1000 * 1000;
+static std::string            s_retiring_profile_target;
+static size_t                 s_retiring_profile_row           = 0;
+static size_t                 s_retiring_profile_shape         = 0;
+static bool                   s_retiring_current_unpublishable = false;
+static std::string            s_current_profile_retired;
 static MqttRetirementIdentity s_retiring_identity;
 static MqttRetirementScan     s_retiring_scan;
 static bool                   s_retiring_identity_ready  = false;

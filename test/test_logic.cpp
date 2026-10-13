@@ -20841,8 +20841,8 @@ static void test_mqtt_retirement_identity() {
     CHECK(std::string(identity.object.data(), identity.size) == "outdoor_sensors_flow_9_a");
     CHECK(mqtt_retirement_identity_matches(identity, decorated));
     CHECK(mqtt_retirement_identity_matches(identity, ValueDef(0x20, 0, 105, 1, -1, "Flow 9 A")));
-    const ValueDef         binary(0x10, 0, 303, 1, -1, "Error active");
-    const ValueDef         fault(0x10, 4, 203, 1, -1, "Error Type");
+    const ValueDef binary(0x10, 0, 303, 1, -1, "Error active");
+    const ValueDef fault(0x10, 4, 203, 1, -1, "Error Type");
     CHECK(mqtt_retirement_identity_make(identity, fault, "error_active") ==
           MqttRetirementIdentityResult::Ready);
     CHECK(mqtt_retirement_identity_matches(identity, binary)); // row/companion share a real topic

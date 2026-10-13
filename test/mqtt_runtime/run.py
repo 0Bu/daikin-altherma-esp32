@@ -157,7 +157,8 @@ mutations = [
      'JOURNAL_READY_PREDECESSOR_LOADED_BEFORE_REJECTED_RETIREMENT', 1),
     ('journal-target-save-before-retirement', 'journal_reboot_mid_retirement',
      'if (!retract_profile_cutover(profile_id)) return false;',
-     'if (!save_retirement_provenance(profile_id)) return false; if (!retract_profile_cutover(profile_id)) return false;',
+     '''if (!save_retirement_provenance(profile_id)) return false;
+    if (!retract_profile_cutover(profile_id)) return false;''',
      'JOURNAL_READY_PREDECESSOR_LOADED_BEFORE_REJECTED_RETIREMENT', 1),
     ('journal-discovery-before-target-save', 'journal_reboot_after_save',
      'if (!save_retirement_provenance(profile_id)) return false;', '',
