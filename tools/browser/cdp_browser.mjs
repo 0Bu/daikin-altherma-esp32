@@ -262,8 +262,8 @@ export async function stopBrowser(child, { termTimeoutMs = 3000, killTimeoutMs =
       throw new Error("Chrome did not exit after SIGKILL");
     }
   }
-  // Main-process exit need not close pipes inherited by helpers such as Crashpad. Retain
-  // diagnostic collection until that exit is verified, then release only our read handles.
+  // Main-process exit need not close pipes inherited by helpers such as Crashpad. Keep our read
+  // handles open until main-process exit is verified, then release them.
   child.stdout?.destroy();
   child.stderr?.destroy();
 }
