@@ -202,6 +202,7 @@ for t in "${TARGETS[@]}"; do
     # Resolve cJSON through the pinned target build before the complete production consumers run.
     python3 test/json_ingress_runtime/run.py --real-cjson managed_components/espressif__cjson/cJSON
     python3 test/mqtt_runtime/run.py --real-cjson managed_components/espressif__cjson/cJSON
+    python3 test/query_http_runtime/run.py --real-cjson managed_components/espressif__cjson/cJSON
     sfx="$(suffix "$t")"
     app="$BUILD_DIR/daikin-altherma-esp32.bin"
     repro_app=""

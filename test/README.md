@@ -127,9 +127,10 @@ The same runner also executes complete production units through SDK/service adap
 | `node test/test_ota_runtime.mjs` | Complete `ota_update.cpp`: 48 cases with source mutations bound to cleanup, Range resume, worker leases, manifest/version rejection, static mutex ownership under dynamic-allocation failure and 90/600-second health transitions. Static aligned 4096 B health stack and boot-latched single arm avoid dynamic task allocation; no TLS, flash or IDF cryptography executes. |
 | `node test/test_network_runtime.mjs` | Complete WiFi/syslog units: 19 scenarios and 22 mutations cover leases, boot wakes, rollback, scan errors, queue loss, reentrant logging, static status-mutex ownership, independent OOM episodes and RFC 5424 framing; no real DHCP/radio/UDP delivery or collector retention. |
 | `node test/test_src_runtime.mjs` | Complete ENV III/Weather units: 26 cases and 18 source mutations cover probe identity/CRC, partial I2C allocation/cleanup, OOM, sensor freshness/recovery, forecast conversion/units, HTTP bounds/cleanup, rejected-response retention, A→B→A and zero Config-copy/request-buffer retention at network release and task waits. Default cJSON is an AST adapter; no real sensor, TLS, scheduler or JSON lexer runs. |
-| `python3 test/poll_runtime/run.py` | Complete polling/converter units: repeated allocation failures, preserved cache/source time, age expiry, quiescence, recovery, snapshot-lock unwind and six named source mutations; UART, clocks and RTOS are adapters. |
+| `python3 test/poll_runtime/run.py` | Complete polling/converter units: OOM/RAII, detection corroboration and generation, saturation freshness, late probe ownership including ticket wrap, and successful raw-capture budget. Named compiling source mutations bind each invariant; UART, clocks and RTOS are adapters. [Limits](poll_runtime/README.md). |
 | `python3 test/startup_runtime/run.py` | Complete LED/button units and the production stack sampler: startup/loop failures, null and byte semantics, independent owner slots, boot minima across recreation and zero destructive calls; GPIO/RMT and scheduling are adapters. |
 | `node test/test_uart_runtime.mjs` | Complete `hp_comm.cpp`: 22 cases and 14 named mutations distinguish local SDK errors from device silence, retain partial bytes, detection/probe mappings and legacy results, and preserve I/S framing, deadlines and single-request behavior. SDK/clock adapters do not prove electrical behavior or explain historical NoReply events. |
+| `node test/test_detect_runtime.mjs` | Complete detector with real profile registry and pin rules: reserved candidates, local failures, bounded retries, capacities and ambiguous membership. Synthetic frames do not establish physical Protocol S or electrical behavior. [Limits](detect_runtime/README.md). |
 
 After the pinned IDF build resolves `espressif/cjson` from `dependencies.lock`, run
 `node test/test_src_runtime.mjs --real-cjson managed_components/espressif__cjson/cJSON` for the same
@@ -147,6 +148,11 @@ including accepted subscription cleanup ownership, rejected retirement, shared o
 callback sampling with semantic removal controls. HTTP routes, broker/TLS,
 RTOS and physical inputs remain outside these host adapters. Each runner binds compile inputs and
 uses its own temporary directory; polling/startup support `--sanitizer undefined`, MQTT `--ubsan`.
+
+The same build also runs `python3 test/query_http_runtime/run.py` with resolved cJSON. It invokes
+the actual `/hp/query` handler for strict numeric fields, defaults, status/frame/decode output and
+bounded serialization, with named compiling mutations. HTTP transport and UART handoff are adapters;
+the shared HTTP exception trampoline and real devices remain outside its [scope](query_http_runtime/README.md).
 
 The contract runner executes additional compiled production consumers:
 

@@ -42,13 +42,16 @@ struct RawCaptureState {
 };
 
 // Should this cycle emit a raw page dump? Advances `s`; call exactly once per poll cycle.
-inline bool raw_capture_due(RawCaptureState& s, bool running, int64_t now_us) {
+inline bool raw_capture_due(RawCaptureState& s, bool running, int64_t now_us,
+                            bool payload_available = true) {
     if (!running) {
         // Re-arm the EDGE, not the budget. A unit that cycles hourly gets one dump per start until
         // the budget runs out, which is the sampling anyone diagnosing this would ask for.
         s.was_running = false;
         return false;
     }
+    // A missed page is not a capture. Keep the edge/period pending until bytes actually arrive.
+    if (!payload_available) return false;
     const bool due = !s.was_running || now_us >= s.next_us;
     s.was_running  = true;
     if (!due || s.emitted >= RAW_CAPTURE_MAX) return false;

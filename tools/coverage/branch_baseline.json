@@ -44,13 +44,45 @@
         "gcc-13-linux-ubuntu24": "ESP-IDF v6.1 container GCC 13.3.0",
         "gcc-15-linux-ubuntu26": "Ubuntu 26.04 aarch64 GCC 15.2.0"
       },
-    "hosted_confirmation": "GitHub run 38314337467 at 1b2c6ee7ad6fa75550ee039836619977434fcc71 measured heartbeat 144/258 and curve 147/240; hosted inventory differs from local aarch64. Updated profile awaits a successful full CI run.",
+      "hosted_confirmation": "GitHub run 38314337467 at 1b2c6ee7ad6fa75550ee039836619977434fcc71 measured heartbeat 144/258 and curve 147/240; hosted inventory differs from local aarch64. Updated profile awaits a successful full CI run.",
       "runner": "scripts/run-mock-tests.sh --coverage",
       "scope": "Shared integer serialization: existing builder ratios increase; string-encoder inventory and all historical floors retained. New integer header has all lines and ordinary branches covered; GCC also counts untaken C++ throw edges and per-call constant-sign branches.",
       "sources": {
         "main/logic/heartbeat.hpp": "701d9cb7b571b44a7fb7831b3f2b6ac16b83d1c3205ab9b1f06bca52fbd5939e",
         "main/logic/heating_curve_mqtt.hpp": "6607732d0901b016eae2cb87fc4c68b7375c521080f94cacdda857a7a17aee31",
         "main/logic/json_integer.hpp": "f0c6970f1219ac1e17e2eb0b0b46d0cdd28189fad6fd70db4b0574ff4dfd85f2"
+      }
+    },
+    {
+      "compilers": {
+        "clang-17-darwin": "Apple Clang 17.0.0",
+        "gcc-13-linux-ubuntu24": "ESP-IDF v6.1 container GCC 13.3.0",
+        "gcc-15-linux-ubuntu26": "Ubuntu 26.04 aarch64 GCC 15.2.0-16ubuntu1"
+      },
+      "hosted_confirmation": "gcc-15-github-linux-ubuntu26 repeats the local GCC 15 inventory; authoritative CI pending",
+      "runner": "scripts/run-mock-tests.sh --coverage",
+      "scope": "Exact integral probe fields, monotonic source timestamps and payload-only raw-capture budgeting; added outcomes fully taken, existing ratios and floors retained",
+      "sources": {
+        "main/logic/hp_probe.hpp": "9513c8aaf41065a8ac728816188318efdc06e650644712661734fec977a38b4e",
+        "main/logic/mqtt_publish_gate.hpp": "87f0126355eccd906ffba2c1a7b61cc2d018cc35cc79b2ea133c5190f87a9fb0",
+        "main/logic/raw_capture.hpp": "9040c602693a4398fe3679eb2f72c0c61c947c5973775426239868be15e45b77"
+      }
+    },
+    {
+      "compilers": {
+        "clang-17-darwin": "Apple Clang 17.0.0",
+        "gcc-13-linux-ubuntu24": "ESP-IDF v6.1 container GCC 13.3.0",
+        "gcc-15-linux-ubuntu26": "Ubuntu 26.04 aarch64 GCC 15.2.0"
+      },
+      "hosted_confirmation": "gcc-15-github-linux-ubuntu26 requires authoritative CI confirmation for the ordered bounds guard",
+      "runner": "scripts/run-mock-tests.sh --coverage",
+      "scope": "Ordered subtraction rejects signed-overflow coordinates; all guard outcomes taken. Read-only pin predicates retain their measured inventories; all other ratios and floors retained.",
+      "sources": {
+        "main/logic/registers.hpp": "dccdacfcd0471adc664072f4903b29c4c752e11282f775bc64cba5e2467358cd",
+        "main/logic/board_pins.hpp": "9d9cfc208b4a977c79f321a58f407929b674d03f0e54d59f1d4fc5ef516bd08a",
+        "main/logic/board_presets.hpp": "3ff3e82032d6996f3e27a40db3a71c8a66ca927ab05be99b2cea4177beb9d2ac",
+        "main/logic/config_model.hpp": "d70fdcb451660719d1bb3b97a86e5857081e85ae2ee15978b671bdb7af40f0f2",
+        "main/logic/env3.hpp": "41a3d7ad895bbd97ca97b5cde32bb3b0ccd22d392008f47eb396d52b987ce0ef"
       }
     }
   ],
@@ -218,8 +250,8 @@
         "taken": 68
       },
       "main/logic/hp_probe.hpp": {
-        "outcomes": 135,
-        "taken": 122
+        "outcomes": 143,
+        "taken": 130
       },
       "main/logic/hp_query_log.hpp": {
         "outcomes": 4,
@@ -310,8 +342,8 @@
         "taken": 258
       },
       "main/logic/mqtt_publish_gate.hpp": {
-        "outcomes": 16,
-        "taken": 16
+        "outcomes": 20,
+        "taken": 20
       },
       "main/logic/mqtt_uri.hpp": {
         "outcomes": 54,
@@ -374,8 +406,8 @@
         "taken": 4
       },
       "main/logic/raw_capture.hpp": {
-        "outcomes": 8,
-        "taken": 8
+        "outcomes": 10,
+        "taken": 10
       },
       "main/logic/redact.hpp": {
         "outcomes": 72,
@@ -390,8 +422,8 @@
         "taken": 186
       },
       "main/logic/registers.hpp": {
-        "outcomes": 8,
-        "taken": 6
+        "outcomes": 10,
+        "taken": 10
       },
       "main/logic/rwt_select.hpp": {
         "outcomes": 54,
@@ -600,8 +632,8 @@
         "taken": 74
       },
       "main/logic/hp_probe.hpp": {
-        "outcomes": 141,
-        "taken": 128
+        "outcomes": 151,
+        "taken": 138
       },
       "main/logic/hp_query_log.hpp": {
         "outcomes": 6,
@@ -692,8 +724,8 @@
         "taken": 371
       },
       "main/logic/mqtt_publish_gate.hpp": {
-        "outcomes": 30,
-        "taken": 29
+        "outcomes": 36,
+        "taken": 35
       },
       "main/logic/mqtt_uri.hpp": {
         "outcomes": 66,
@@ -756,8 +788,8 @@
         "taken": 6
       },
       "main/logic/raw_capture.hpp": {
-        "outcomes": 10,
-        "taken": 10
+        "outcomes": 12,
+        "taken": 12
       },
       "main/logic/redact.hpp": {
         "outcomes": 96,
@@ -772,8 +804,8 @@
         "taken": 222
       },
       "main/logic/registers.hpp": {
-        "outcomes": 10,
-        "taken": 8
+        "outcomes": 12,
+        "taken": 12
       },
       "main/logic/rwt_select.hpp": {
         "outcomes": 66,
@@ -982,8 +1014,8 @@
         "taken": 74
       },
       "main/logic/hp_probe.hpp": {
-        "outcomes": 141,
-        "taken": 128
+        "outcomes": 151,
+        "taken": 138
       },
       "main/logic/hp_query_log.hpp": {
         "outcomes": 6,
@@ -1074,8 +1106,8 @@
         "taken": 371
       },
       "main/logic/mqtt_publish_gate.hpp": {
-        "outcomes": 30,
-        "taken": 29
+        "outcomes": 36,
+        "taken": 35
       },
       "main/logic/mqtt_uri.hpp": {
         "outcomes": 66,
@@ -1138,8 +1170,8 @@
         "taken": 6
       },
       "main/logic/raw_capture.hpp": {
-        "outcomes": 10,
-        "taken": 10
+        "outcomes": 12,
+        "taken": 12
       },
       "main/logic/redact.hpp": {
         "outcomes": 96,
@@ -1154,8 +1186,8 @@
         "taken": 222
       },
       "main/logic/registers.hpp": {
-        "outcomes": 10,
-        "taken": 8
+        "outcomes": 12,
+        "taken": 12
       },
       "main/logic/rwt_select.hpp": {
         "outcomes": 66,
@@ -1364,8 +1396,8 @@
         "taken": 74
       },
       "main/logic/hp_probe.hpp": {
-        "outcomes": 141,
-        "taken": 128
+        "outcomes": 151,
+        "taken": 138
       },
       "main/logic/hp_query_log.hpp": {
         "outcomes": 6,
@@ -1456,8 +1488,8 @@
         "taken": 371
       },
       "main/logic/mqtt_publish_gate.hpp": {
-        "outcomes": 30,
-        "taken": 29
+        "outcomes": 36,
+        "taken": 35
       },
       "main/logic/mqtt_uri.hpp": {
         "outcomes": 66,
@@ -1520,8 +1552,8 @@
         "taken": 6
       },
       "main/logic/raw_capture.hpp": {
-        "outcomes": 10,
-        "taken": 10
+        "outcomes": 12,
+        "taken": 12
       },
       "main/logic/redact.hpp": {
         "outcomes": 96,
@@ -1536,8 +1568,8 @@
         "taken": 222
       },
       "main/logic/registers.hpp": {
-        "outcomes": 10,
-        "taken": 8
+        "outcomes": 12,
+        "taken": 12
       },
       "main/logic/rwt_select.hpp": {
         "outcomes": 66,

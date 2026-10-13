@@ -23,7 +23,7 @@ inline int16_t read_s16(const uint8_t* data, int size, bool big_endian) {
 
 // Bounds check: is (offset, size) within a reply payload of `payload_len` bytes?
 inline bool in_bounds(int offset, int size, int payload_len) {
-    return offset >= 0 && size > 0 && offset + size <= payload_len;
+    return offset >= 0 && size > 0 && offset <= payload_len && size <= payload_len - offset;
 }
 
 } // namespace daik

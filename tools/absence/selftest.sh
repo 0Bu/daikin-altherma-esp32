@@ -579,7 +579,7 @@ restore
 
 # 24. Widen only the production alias. The generic sink tests would stay green while the ESP32 path
 #     silently regained a larger contiguous requirement.
-python3 - "$TMP/main/http_status.cpp" <<'PY3'
+python3 - "$TMP/main/http_chunks.hpp" <<'PY3'
 import sys
 p = sys.argv[1]
 s = open(p).read()

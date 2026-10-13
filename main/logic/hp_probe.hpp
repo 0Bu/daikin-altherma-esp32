@@ -48,6 +48,8 @@
 // arbitrary bytes is therefore a host test here, not a discovery on someone's board.
 #include <cstddef>
 #include <cstdint>
+#include <cmath>
+#include <limits>
 #include <string_view>
 #include "convert.hpp"
 #include "crc.hpp"
@@ -80,6 +82,18 @@ struct ProbeRequest {
 inline constexpr int PROBE_SWEEP = -1;
 
 enum class ProbeReject : uint8_t { None, Register, Offset, Size, Converter };
+
+// Numeric JSON fields must be exact integers. Check range before converting: a fractional or
+// oversized number must not be truncated into a different request for the shared UART.
+inline bool probe_integer_value(double value, int& out) {
+    if (!std::isfinite(value) || value < std::numeric_limits<int>::min() ||
+        value > std::numeric_limits<int>::max())
+        return false;
+    const int parsed = static_cast<int>(value);
+    if (static_cast<double>(parsed) != value) return false;
+    out = parsed;
+    return true;
+}
 
 inline const char* probe_reject_name(ProbeReject r) {
     switch (r) {
@@ -190,6 +204,10 @@ inline bool probe_slice_fits(int offset, int size, int payload_len) {
 // The packing lives here, pure, because the interleaving is the part worth asserting on the host:
 // it is not reachable from a device test, and it is where the bug was.
 inline constexpr uint32_t PROBE_TICKET_MASK = 0x00FFFFFFu;   // 24 bits above the register byte
+
+// Allocation skips masked zero instead of mapping it to 1, which would issue ticket 1 twice at
+// the wrap boundary. Normalization below remains a packing helper, not a ticket allocator.
+inline constexpr bool probe_ticket_usable(uint32_t raw) { return (raw & PROBE_TICKET_MASK) != 0; }
 
 // Ticket 0 is never handed out. `pending == 0` means "no request", and a masked-zero ticket packed
 // with register 0x00 is exactly that value — so the one register whose probe would silently do

@@ -96,3 +96,5 @@ python3 test/poll_runtime/run.py
 python3 test/startup_runtime/run.py
 # The production UART transport retains SDK errors separately from device frame failures.
 node test/test_uart_runtime.mjs
+# The complete detector retains candidate pin policy, transport causes and real profile selection.
+node test/test_detect_runtime.mjs

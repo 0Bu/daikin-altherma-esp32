@@ -405,7 +405,8 @@ inline bool link_pins_valid(int rx, int tx, int max_gpio = 48) {
 // persisted cache can only hold a pair the UI would also have offered. `octal_spi` is supplied by the
 // caller from Kconfig (config.cpp hw_octal_spi()) and `reserved` from the live config
 // (config_reserved_pins), keeping this header CONFIG_-free.
-inline bool link_pins_safe(int rx, int tx, bool octal_spi, ReservedPins reserved, int max_gpio = 48) {
+inline bool link_pins_safe(int rx, int tx, bool octal_spi, const ReservedPins& reserved,
+                           int max_gpio = 48) {
     return link_pins_valid(rx, tx, max_gpio)
         && board_pin_offerable(rx, octal_spi, reserved)
         && board_pin_offerable(tx, octal_spi, reserved);
@@ -453,7 +454,7 @@ inline ReservedPins config_env3_reserved_pins(const Config& c) {
 // this header must stay answerable on the host, where no bus exists. Defaults to empty, so every
 // existing caller and test keeps its exact meaning.
 inline bool board_hw_valid(const Config& c, std::string& reason, int max_gpio = 48,
-                           bool octal_spi = true, ReservedPins extra = {}) {
+                           bool octal_spi = true, const ReservedPins& extra = {}) {
     if (!led_type_valid(c.led_type)) { reason = "led_type unknown"; return false; }
     if (c.led_gpio >= 0) {
         if (!gpio_in_range(c.led_gpio, max_gpio))          { reason = "led_gpio out of range";  return false; }
@@ -509,8 +510,8 @@ inline bool board_save_needed(const Config& want, const Config& cur) {
 // pass them. The device call site (http_config.cpp /set_hp) passes the real values so a reserved
 // GPIO — a flash/strapping/JTAG pad, or the pin the indicator/button holds — is rejected with the pin named
 // instead of range-accepted and persisted into a crash loop.
-inline bool validate(const Config& c, std::string& reason, int max_gpio = 48,
-                     bool octal_spi = true, ReservedPins reserved = {}) {
+inline bool validate(const Config& c, std::string& reason, int max_gpio = 48, bool octal_spi = true,
+                     const ReservedPins& reserved = {}) {
     if (!gpio_in_range(c.rx_pin, max_gpio)) { reason = "rx_pin out of range"; return false; }
     if (!gpio_in_range(c.tx_pin, max_gpio)) { reason = "tx_pin out of range"; return false; }
     if (!link_pins_valid(c.rx_pin, c.tx_pin, max_gpio)) { reason = "rx_pin and tx_pin must differ"; return false; }

@@ -319,7 +319,7 @@ const namedHttpSymbols = {
   config_board: ["set_board", 2176], config_env3: ["set_env3", 1792],
   config_weather: ["set_weather", 1776], config_diagnostics: ["set_diagnostics", 1536],
   config_circulation: ["set_circulation", 976], circulation_parser: ["parse_circulation_request", 1408],
-  hp_query_probe: ["hp_query_probe", 2720], mcp_parser: ["mcp_parse", 256],
+  hp_query_probe: ["hp_query_probe", 2736], mcp_parser: ["mcp_parse", 256],
   config_save: ["config_save", 32], config_save_link: ["config_save_link", 32],
   config_save_whole: ["save_whole", 48], config_nvs_blob: ["nvs_set_blob", 48],
   http_scan: ["h_scan", 768], wifi_scan: ["wifi_scan", 1920],

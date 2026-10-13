@@ -196,7 +196,7 @@ inline BoardVendor board_selected_vendor(const Config& c) {
 // board has no inventory and deliberately continues to use the generic chip-safe path at the call
 // site rather than pretending an empty preset means no usable pins.
 inline bool board_preset_x10a_pin_offerable(const BoardPreset* preset, int pin, bool octal_spi,
-                                            ReservedPins used = {}) {
+                                            const ReservedPins& used = {}) {
     if (!preset || !board_pin_offerable(pin, octal_spi, used)) return false;
     for (int i = 0; i < preset->x10a_pin_count; ++i)
         if (preset->x10a_pins[i] == pin) return true;
@@ -221,7 +221,7 @@ inline int board_preset_x10a_pins_offerable(const BoardPreset* preset, int* out,
 // absent from Atom's ENV III inventory after hardware tests; flash, strapping,
 // USB-console and build-dependent Octal-SPI conflicts. Runtime reservations remove occupied pads.
 inline bool board_preset_i2c_pin_offerable(const BoardPreset* preset, int pin, bool octal_spi,
-                                           ReservedPins used = {}) {
+                                           const ReservedPins& used = {}) {
     if (!preset || used.claims(pin) || !board_pin_local_io(pin, octal_spi)) return false;
     for (int i = 0; i < preset->i2c_pin_count; ++i)
         if (preset->i2c_pins[i] == pin) return true;

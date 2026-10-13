@@ -82,8 +82,10 @@ revision-checked setters, never a whole configuration snapshot that could revert
 The poll task performs detection while the profile is `auto`:
 
 1. Try the cached RX/TX pair and its reverse, then the build defaults and their reverse. Try cached
-   framing first, then the other supported I/S framing. Do not sweep arbitrary GPIOs. Install the
-   UART driver once and remap pins between candidates.
+   framing first, then the other supported I/S framing. Filter every pair through current chip,
+   board, sensor and detected Ethernet pin claims. Install the UART driver once and remap only
+   permitted candidates; local bring-up/driver failures retain their cause rather than implying
+   incorrect physical wiring.
 2. Probe identity and profile pages with bounded retries; record page coverage and unit facts.
    Missing/rejected identity pages are expected; corrupt/partial frames and a silent link remain
    diagnosable. A protocol or page mask alone is not an exact model identification.
@@ -105,6 +107,7 @@ The receiver removes transmitted echoes and resynchronizes Protocol I preambles.
 page `0x50`, selects curated `protocol_s` and bypasses Protocol I signature/capacity ranking. When
 frame corruption makes a detection sweep incomplete, two consecutive agreeing sweeps are required
 before committing its profile. Ordinary timeout/NAK probes do not count as frame corruption.
+A failed attempted sweep clears incomplete/no-match corroboration; skipped backoff ticks do not.
 Protocol S and native Altherma 4 remain unverified without a matching physical capture in this repo.
 Overlay eligibility follows row-identical generated tables, not the selected profile name.
 
@@ -122,6 +125,9 @@ commit and outside its mutex. Avoid nested history/cache locks. The poll task is
 I/O must not be mistaken for a stuck worker.
 X10A liveness additionally requires a real reply less than 15 seconds old; cached connection state
 alone is insufficient.
+The cross-page saturation witness uses the preceding completed sweep's pressure observation time.
+Unread cycles retire it, and it expires at the same 15-second source-age boundary. Without a fresh
+witness, the conditional liquid-line zero filter leaves the reading available.
 
 Outdoor pages can keep returning a previous run's values while the compressor rests.
 `logic/ou_stale.hpp` classifies them from the page and a live compressor witness. HTTP keeps the
@@ -135,7 +141,8 @@ restart blind intervals explicitly rather than extending a state through unobser
 A long blind interval removes duration
 instead of reporting zero or uninterrupted certainty. Changes in source identity retire prior
 state evidence. Bounded running-edge/periodic raw page capture supplements detection logs; it is
-limited per boot so the log ring remains useful.
+limited per boot so the log ring remains useful. Only nonempty captured page bytes spend its budget;
+missing pages leave the edge or periodic capture pending.
 
 HomeHub and native Altherma 4 Modbus use separate read-only profiles selected from current metadata.
 `profile_basis` states the selection evidence; an unknown profile stays bounded rather than borrowing

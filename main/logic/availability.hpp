@@ -33,7 +33,7 @@
 //                     a dataType -1 row at all. The only thing that identifies such a row is its
 //                     (page, offset, converter) coordinate, which is exactly this ledger's key.
 //   ZeroAbsentAboveSaturation
-//                     an exact zero is withheld only when a same-cycle cross-page saturation
+//                     an exact zero is withheld only when a fresh cross-page saturation
 //                     witness makes it physically impossible; without that witness it fails open.
 //   Bit7MeansAbsent   this one-byte numeric row shares bit 7 with a documented flag. When the
 //                     current page proves that bit is asserted, the unmasked number is not a
@@ -90,8 +90,8 @@ enum class AvailabilityPolicy : uint8_t {
     ZeroMeansAbsent, // an exact decoded zero is an unpopulated field on THIS row, not a reading
     Unproven,        // the decode itself is not trusted here — publish nothing, keep the evidence
     AboveRangeIsAbsent,        // a decoded value above this row's physical ceiling is not a reading
-    ZeroAbsentAboveSaturation, // an exact zero REFUTED by a saturation temperature read at most
-                               // one poll cycle earlier — conditional, and silent without it
+    ZeroAbsentAboveSaturation, // an exact zero REFUTED by a fresh previous-sweep saturation
+                               // temperature — conditional, and silent without it
     Bit7MeansAbsent, // current page shows a documented overlaid bit, so the number is not usable
 };
 
@@ -108,7 +108,8 @@ enum class AvailabilityPolicy : uint8_t {
 // installation where the zero is genuine answers differently and the row publishes untouched.
 // "Alongside" is one poll cycle, not the same instant: the witness page is read AFTER the page it
 // judges, so the caller supplies the PREVIOUS sweep's value (hp_poll.cpp, s_sat_witness, states why
-// that one-cycle lag is accepted and why it expires instead of persisting).
+// that lag is accepted). The poll owner retires it on unread cycles and at the existing 15 s
+// source-age boundary; this rule cannot establish freshness from a temperature alone.
 //
 // The witness is the refrigerant pressure sensor's saturation temperature on the HYDRONIC page,
 // (0x62, 15, conv 405). Two facts about it decide everything below, and BOTH were measured rather
