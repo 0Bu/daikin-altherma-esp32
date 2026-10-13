@@ -1,7 +1,8 @@
 #pragma once
-// Extract the OTA manifest version and the optional version-bound changelog. IDF-free + host-tested.
+// Extract the OTA manifest version and the optional version-bound changelog. IDF-free +
+// host-tested.
 //
-// This is the ONE place a remote, attacker-influencable byte stream is parsed on this device, so it
+// This allocation-free parser handles remote byte streams on this device, so it
 // is pure logic with its own CHECKs rather than a strstr() in the download path. The manifest is
 // fetched over TLS from the configured host, but the whole point of the downgrade gate
 // (logic/version_cmp.hpp) is that the HOST ITSELF is in the threat model — so this parser assumes
@@ -76,8 +77,7 @@ inline void skip_ws(const char* json, size_t len, size_t& pos) {
     while (pos < len && is_ws(json[pos])) ++pos;
 }
 
-static __attribute__((noinline)) bool skip_json_value(const char* json, size_t len, size_t& pos,
-                                                      unsigned depth);
+bool skip_json_value(const char* json, size_t len, size_t& pos, unsigned depth);
 
 inline bool skip_json_number(const char* json, size_t len, size_t& pos) {
     size_t i = pos;
@@ -115,7 +115,7 @@ inline bool skip_json_number(const char* json, size_t len, size_t& pos) {
 // 2 KiB, but an attacker can still spend those bytes on nesting; cap recursion before it can spend
 // the OTA task's stack. Eight levels are far beyond the publisher's two-level document and are
 // included explicitly in the target-ELF stack budget.
-static __attribute__((noinline)) bool skip_json_value(const char* json, size_t len, size_t& pos,
+inline __attribute__((noinline)) bool skip_json_value(const char* json, size_t len, size_t& pos,
                                                       unsigned depth) {
     constexpr unsigned MAX_JSON_DEPTH = 8;
     skip_ws(json, len, pos);

@@ -54,7 +54,7 @@ single-marker discovery needs the migration below before it can rely on this spl
 
 | Identifier | Construction |
 |---|---|
-| Node / primary `dev.ids` | Lowercase alphanumeric segments separated by single hyphens retain their underscore slug. All other accepted bases use `daikin_altherma_esp32__` followed by the complete raw-base bytes in hex. |
+| Node / primary `dev.ids` | Only the exact default and bench bases retain their underscore slug. Every custom base uses `daikin_altherma_esp32__` followed by the complete raw-base bytes in hex. |
 | MQTT client id / secondary `dev.ids` | `daikin_altherma_esp32__board_<mac12>`, from the complete WiFi MAC. Invalid/unreadable MAC prevents MQTT startup. |
 | X10A state key | `<group>.<object_id>`; object id is the same slug rule applied to the label. |
 | X10A `uniq_id` | `<node><separator><group>_<object_id>`. |
@@ -139,7 +139,8 @@ A stale/unavailable sample omits the three reading keys but retains `samples`/`e
 the I²C link. A fresh sample is published when its sample counter advances even if rounded values
 are unchanged. Three HA measurement entities require both installation-online state **and their
 reading key**, so only the accessory becomes unavailable on a sensor fault. Selecting **No sensor**
-retracts this topic and all three discovery configs. Hardware gate: [BOARDS.md](BOARDS.md).
+retracts this topic and retires its three discovery configs, subject to the
+[ownership migration boundary](#migrations). Hardware gate: [BOARDS.md](BOARDS.md).
 
 ### Weather
 
@@ -159,7 +160,9 @@ a disabled forecast. MQTT is unnecessary for the ESP32's own HTTPS fetch.
 ### Cleanup guarantees
 
 Retractions use empty retained QoS-1 messages. One cleanup message is outstanding; only its matching
-PUBACK advances that step. Pending sources stay suppressed, including the cycle that sends the
+PUBACK confirms that deletion. Unproven discovery ownership instead skips the discovery step and
+requires [operator migration](#migrations), without claiming a deletion or PUBACK. Raw state cleanup
+continues. Pending sources stay suppressed, including the cycle that sends the
 retraction, so stale state cannot immediately recreate it. Reconnect/replacement reconstructs or
 preserves pending cleanup. Outbox expiry and a joined TLS transport stop permit retry; missing
 PUBACK alone does not duplicate an item still owned by the outbox. The outbox is capped at 8 KiB.
@@ -274,7 +277,7 @@ latest reset remain unknown. Preserve private memory evidence before dismissal; 
 | 27 historical HomeHub discovery configs under `<node>_modbus` | Retired; data topic `<base>/modbus` remains. Delete-only passes run on connect and every five minutes outside the X10A gate. |
 | Flat `room_*` / `heating_curve_*` heartbeat fields | Move consumers to the grouped `heating_curve` paths above; heartbeat is non-retained, so no tombstone applies. |
 | Single-marker X10A availability | `<base>/status` now means transport availability. Current discovery requires transport **and** `<base>/x10a/status`. Confirm current configs have both before trusting X10A availability. If X10A is absent during the first upgrade, old configs cannot be automatically replaced: pause consumers and migrate confirmed old configs explicitly. Raw consumers must check both markers and actual source freshness. |
-| Custom-base unique IDs / lossy base slugs | New IDs separate node and entity with `__`; noncanonical bases are encoded exactly. Export customizations, identify the exact former configs, remove only abandoned IDs and reconcile HA references/history. Default and bench entity IDs remain unchanged. |
+| Custom-base unique IDs / lossy base slugs | Every custom base is encoded exactly; IDs separate node and entity with `__`. Export customizations, identify the exact former configs, remove only abandoned IDs and reconcile HA references/history. Default and bench entity IDs remain unchanged. |
 | Three-byte MAC aliases / MAC-era discovery | Complete-MAC hardware IDs replace ambiguous aliases without advertising the old alias. Owner reconciliation is required for old discovery or already merged registry devices; do not delete a short-MAC namespace that another board may own. |
 | Current-namespace ungrouped X10A discovery | Confirmed deletions precede replacements; keep HA connected. Unique-id customizations do not migrate automatically. |
 | Textual bit-flag sensors | Now `binary_sensor`; update domain references. Old-domain history does not migrate automatically. |
@@ -282,11 +285,24 @@ latest reset remain unknown. Preserve private memory evidence before dismissal; 
 | Non-hybrid `0x64` boiler/hybrid entities | Detect-only rows retracted; use **LW setpoint (main)** for the legitimate heating target. |
 | Old Target Evap. Temp. samples | Corrected converter keeps its id; pre-correction history remains wrong and must be excluded from comparisons. |
 
+The preserved default/bench discovery nodes can also contain a historical custom base that once
+slugged to the same identifier. Before discovery changes, firmware inspects both the node and its
+retired `_modbus` namespace. Foreign or unproven ownership leaves discovery intact and requires
+the targeted owner migration below; ordinary MQTT telemetry continues. Every custom base now uses
+a separate raw-byte namespace, including bases that previously consisted only of lowercase words
+and hyphens.
+
+The namespace check uses a bounded retained subscription window after both subscription ACKs;
+it cannot prove absolute absence or perform an atomic compare-and-delete. Commission exactly one
+publisher for each discovery namespace, and reconcile historical aliases before sharing a broker.
+Late conflicting evidence revokes discovery admission until a clean reconnect after migration.
+
 Retired state-topic probes delete only an actually returned old retained payload. Permanent
 HomeHub/weather discovery ledgers remain frozen independently of the current catalog. Cleanup
 advances only after the matching client-epoch PUBACK, retries refused sends, and keeps at most one
 cleanup message in flight across source and discovery jobs. Replacement discovery waits for those
-deletions; current telemetry remains live.
+deletions; current telemetry remains live. Discovery delegated to owner migration is explicitly
+reported as skipped, without claiming a tombstone or PUBACK.
 
 The dedicated NVS retirement record stores only the last possibly announced base, full board ID
 and profile, never credentials or active configuration. A known predecessor is retired before its
@@ -303,8 +319,9 @@ Delete **only confirmed old topics**, for example:
 mosquitto_pub -h <broker> -r -n -t '<exact-old-topic>'
 ```
 
-The relevant old namespaces are `<old-base>/#`, `homeassistant/+/<old_node>/#`, or the retired board's
-`homeassistant/+/daikin_<mac3>/#`; add your broker's authentication/TLS options. Do not delete a tree
+The relevant old namespaces are `<old-base>/#`, `homeassistant/+/<old_node>/#`, the legacy
+`homeassistant/+/<old_node>_modbus/#`, or the retired board's `homeassistant/+/daikin_<mac3>/#`;
+add your broker's authentication/TLS options. Do not delete a tree
 still used by another board. For a group-id migration, old and new configs share the current node,
 so a broad sweep would delete current entities. If HA missed those deletions and now has duplicates,
 use its MQTT device **Delete** action and reboot the board to republish, then reconcile entity ids

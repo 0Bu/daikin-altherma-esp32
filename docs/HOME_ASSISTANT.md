@@ -151,12 +151,13 @@ deletions before replacements. Preserve the base topic when upgrading or replaci
 - Default and bench entity IDs remain stable. Custom bases get unambiguous entity IDs, and old
   short-MAC aliases are no longer advertised. Export relevant entity customizations and references before this
   migration; existing merged HA devices, old aliases and custom unique IDs need owner reconciliation.
-- Current-namespace ungrouped and renamed discovery is deleted before replacements. Old broker,
-  old-base and ambiguous MAC-era configurations need the targeted cleanup in the migration guide.
+- Current-namespace ungrouped and renamed discovery with established ownership is deleted before
+  replacements. Unproven ownership, old broker/base and ambiguous MAC-era configurations require
+  the targeted cleanup in the migration guide; automatic discovery changes remain blocked.
 - A historical `sensor` → `binary_sensor` change requires automation/template references to use the
   new domain; its old recorder history does not carry to that domain automatically.
 - Current-namespace retired HomeHub/weather discovery and the redundant **Device Time**, **WiFi Quality** and **Last
-  Reset Reason** diagnostics are removed. Update any consumers of their old fields/topics.
+  Reset Reason** diagnostics follow the same ownership rule. Update consumers of their old fields/topics.
 
 If HA was offline during a deletion, old entries can remain and replacements can gain `…_2`.
 [MQTT.md → Migrations](MQTT.md#migrations) gives the exact namespaces and safe cleanup scopes.

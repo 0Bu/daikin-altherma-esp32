@@ -70,7 +70,21 @@ def compile(name, source_file):
     deps.update(Path(value) for value in shlex.split(dep_text.split(':', 1)[1]))
     return binary
 
-scenarios = ['transport_source_lifecycle', 'independent_source_reconnect',
+scenarios = ['discovery_guard_clean', 'discovery_guard_default', 'discovery_guard_owned_fragment',
+             'discovery_guard_weather', 'discovery_guard_heartbeat', 'discovery_guard_unknown',
+             'discovery_guard_modbus', 'discovery_guard_invalid', 'discovery_guard_oversize',
+             'discovery_guard_gap', 'discovery_guard_suback', 'discovery_guard_reconnect',
+             'discovery_guard_denied', 'discovery_guard_denied_qos', 'discovery_guard_denied_missing',
+             'discovery_guard_denied_shape', 'discovery_guard_inflight', 'discovery_guard_migration_rearm',
+             'discovery_guard_session_binding',
+             'discovery_guard_descendant', 'discovery_guard_availability_descendant',
+             'discovery_guard_raw_crash_cleanup', 'discovery_guard_raw_crash_notable',
+             'discovery_guard_ingress_burst', 'discovery_guard_ingress_exact',
+             'discovery_guard_ingress_epoch',
+             'discovery_guard_retry_deleted', 'discovery_guard_retry_stop',
+             'discovery_guard_retry_protected',
+             'discovery_guard_retry_legacy_fixed',
+             'discovery_guard_count', 'transport_source_lifecycle', 'independent_source_reconnect',
              'journal_reboot_mid_retirement', 'journal_reboot_after_save',
              'journal_commit_write_through_failure', 'journal_load_errors',
              'journal_foreign_scope', 'journal_foreign_board_scope', 'journal_bootstrap_auto',
@@ -563,7 +577,46 @@ mutations = [
      '''        if (s_circulation_probe_subscribed_topic != s_circulation_subscribed_topic &&''',
      'PROBE_ACTIVE_REPLACEMENT_PRESERVES_OTHER_ACTUAL_PRIOR_OWNER', 1),
 ]
+mutations.append(('discovery-ownership-bypass', 'discovery_guard_weather',
+                  'state == DiscoveryOwnerState::Encoded;',
+                  'state == DiscoveryOwnerState::Encoded || state == DiscoveryOwnerState::Blocked;',
+                  'DISCOVERY_FOREIGN_NAMESPACE_BLOCKS_ALL_REPLACEMENTS_AND_TOMBSTONES', 1))
+mutations.append(('discovery-blocked-raw-crash-start-omitted', 'discovery_guard_raw_crash_cleanup',
+                  'publish_crash(false);', '(void)0;',
+                  'DISCOVERY_BLOCKED_NORMAL_BOOT_STILL_ACK_CLEANS_OLD_RAW_CRASH', 1))
 mutation_results = {}
+for scenario in ['discovery_guard_retry_deleted', 'discovery_guard_retry_stop']:
+    mutations.append(('discovery-retry-release-omitted-'+scenario, scenario,
+                      'if (blocked) s_retirement_delivery.abandon_discovery_for_operator_migration(owner);',
+                      '(void)blocked;',
+                      'DISCOVERY_BLOCKED_RETRY_ABANDONS_EXACT_OWNER_WITHOUT_WRITE_OR_FAKE_PUBACK', 1))
+mutations.extend([
+    ('discovery-retry-release-steals-slot', 'discovery_guard_retry_protected',
+     'if (blocked) s_retirement_delivery.abandon_discovery_for_operator_migration(owner);',
+     'if (blocked) s_retirement_delivery = {};',
+     'DISCOVERY_ABANDON_NEVER_RELEASES_DIFFERENT_LIVE_OWNER', 1),
+    ('discovery-retry-release-loses-confirmed', 'discovery_guard_retry_protected',
+     'if (blocked) s_retirement_delivery.abandon_discovery_for_operator_migration(owner);',
+     'if (blocked && !s_retirement_delivery.in_flight()) s_retirement_delivery = {};',
+     'DISCOVERY_ABANDON_NEVER_CONSUMES_DIFFERENT_CONFIRMED_OWNER', 1),
+    ('discovery-retry-release-before-blocked', 'discovery_guard_retry_protected',
+     'if (blocked) s_retirement_delivery.abandon_discovery_for_operator_migration(owner);',
+     's_retirement_delivery.abandon_discovery_for_operator_migration(owner);',
+     'DISCOVERY_PENDING_ADMISSION_NEVER_ABANDONS_RETRYABLE_CURSOR', 1),
+    ('discovery-retry-legacy-fixed-release-omitted', 'discovery_guard_retry_legacy_fixed',
+     'if (blocked) s_retirement_delivery.abandon_discovery_for_operator_migration(owner);',
+     '(void)blocked;', 'DISCOVERY_BLOCKED_EXPIRED_LEGACY_FIXED_CURSOR_IS_MIGRATION_SKIPPED', 1),
+])
+mutations.extend([
+    ('discovery-ingress-unfiltered', 'discovery_guard_ingress_burst',
+     '''!discovery_topic_is_current_input(
+            std::string_view(e->topic, static_cast<size_t>(e->topic_len)))) {''',
+     'false) {', 'DISCOVERY_159_CONFIG_BURST_NEVER_DISPLACES_SIX_INTERLEAVED_INPUTS', 1),
+    ('discovery-ingress-explicit-owner-ignored', 'discovery_guard_ingress_exact',
+     'return !binding.empty() && topic == std::string_view(binding);',
+     '(void)topic; (void)binding; return false;',
+     'DISCOVERY_EXACT_SAVED_REFERENCE_RECEIVES_EARLY_RETAINED_DATA', 1),
+])
 for name, scenario, before, after, assertion, count in mutations:
     if scenario not in scenarios:
         continue

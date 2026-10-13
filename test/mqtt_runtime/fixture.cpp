@@ -1861,6 +1861,10 @@ using daik::MqttCleanupDeliveryOutcome;
 using daik::MqttRetirementOwner;
 
 void cleanup_fixture() {
+    // These delivery fixtures operate the encoded custom namespace after its identity boundary.
+    // Preserved-node retained admission is exercised separately through real event callbacks.
+    daik::s_discovery_owner_required = false;
+    daik::s_discovery_owner_state    = daik::DiscoveryOwnerState::Encoded;
     daik::s_client                 = &sdk::client;
     daik::s_mtx                    = &sdk::mutex;
     daik::s_connected              = true;
@@ -1908,6 +1912,623 @@ const sdk::PublishTrace* last_accepted(const std::string& topic) {
         if (sdk::published[i].accepted && topic == sdk::published[i].topic.data())
             return &sdk::published[i];
     return nullptr;
+}
+
+int accepted_count(const std::string& topic, const char* payload);
+
+void discovery_guard_suback(int id) {
+    esp_mqtt_event_t event{};
+    char             granted = 1;
+    event.data               = &granted;
+    event.data_len           = 1;
+    event.total_data_len     = 1;
+    event.msg_id             = id;
+    daik::on_mqtt(nullptr, "mqtt", MQTT_EVENT_SUBSCRIBED, &event);
+}
+
+void discovery_guard_fixture(bool bench = true) {
+    initial_config(bench ? "daikin-altherma-esp32-bench" : "daikin-altherma-esp32");
+    sdk::ticks = 100;
+    daik::on_mqtt(nullptr, "mqtt", MQTT_EVENT_CONNECTED, nullptr);
+    sdk::on_subscribe = [](const char*, int id) {
+        if (id >= 0) discovery_guard_suback(id);
+    };
+    daik::service_discovery_owner_guard();
+    require(!daik::discovery_mutation_allowed() && sdk::subscribe_calls == 2 &&
+                daik::s_discovery_owner_ack_mask == 3,
+            "DISCOVERY_PREFLIGHT_MATCHES_EARLY_SUBACKS_FOR_BOTH_NAMESPACES");
+    require(std::strstr(sdk::subscribed_topics[1].data(), "_modbus/+/config") != nullptr,
+            "DISCOVERY_PREFLIGHT_INCLUDES_RETIRED_MODBUS_NAMESPACE");
+}
+
+std::string discovery_guard_config(bool foreign = false, bool modbus = false) {
+    const std::string base = foreign ? "daikin.altherma.esp32-bench" : daik::s_base;
+    const std::string node = daik::s_node + (modbus ? "_modbus" : "");
+    return "{\"stat_t\":\"" + base + "/heartbeat\",\"avty_t\":\"" + base +
+           "/status\",\"dev\":{\"ids\":[\"" + node + "\",\"" + daik::s_board + "\"]}}";
+}
+
+void discovery_guard_require_blocked() {
+    require(daik::s_discovery_owner_state == daik::DiscoveryOwnerState::Blocked &&
+                (daik::mqtt_retirement_evidence() & daik::RETIRE_OPERATOR_MIGRATION),
+            "DISCOVERY_FOREIGN_OR_UNPROVEN_NAMESPACE_REQUIRES_OPERATOR_MIGRATION");
+    reset_cleanup_trace();
+    cleanup_witness::early_ack = true;
+    const std::string retired  = daik::retired_weather_discovery_topic(
+        daik::s_prefix, daik::s_node, daik::RETIRED_WEATHER_HA_SENSORS[0]);
+    require(daik::retire_exact_topic(MqttRetirementOwner::PeriodicDiscovery, retired),
+            "DISCOVERY_BLOCKED_CURSOR_USES_EXPLICIT_MIGRATION_BOUNDARY");
+    daik::publish_heartbeat_discovery();
+    daik::publish_env3_discovery();
+    daik::publish_x10a_discovery();
+    daik::publish_crash();
+    require(sdk::publish_calls == 0,
+            "DISCOVERY_FOREIGN_NAMESPACE_BLOCKS_ALL_REPLACEMENTS_AND_TOMBSTONES");
+    require(daik::mqtt_publish(daik::s_heartbeat, "{}", 0, 0, 1) && sdk::publish_calls == 1,
+            "DISCOVERY_BLOCKED_NAMESPACE_KEEPS_RAW_BASE_TELEMETRY_LIVE");
+    daik::s_source_cleanup = {};
+    daik::s_source_cleanup.reconstruct_for_client(daik::s_connected_client_epoch.load());
+    cleanup_witness::early_ack = true;
+    for (size_t i = 0; i < 80; ++i) daik::service_requested_topic_cleanup(adapter::cfg);
+    for (int i = 1; i < sdk::publish_calls; ++i)
+        require(!daik::mqtt_discovery_namespace_topic(sdk::published[i].topic.data(),
+                                                      daik::s_prefix, daik::s_node),
+                "DISCOVERY_SOURCE_CLEANUP_SKIPS_FOREIGN_CONFIGS_WITHOUT_SDK_WRITE");
+    require(!daik::s_source_cleanup.suppress(daik::MqttCleanupSource::Weather) &&
+                !daik::s_source_cleanup.suppress(daik::MqttCleanupSource::Modbus) &&
+                !daik::s_source_cleanup.suppress(daik::MqttCleanupSource::Env3),
+            "DISCOVERY_MIGRATION_BOUNDARY_DOES_NOT_WEDGE_SOURCE_WITHDRAWAL");
+}
+
+void discovery_guard_case(const char* mode) {
+    discovery_guard_fixture(std::strcmp(mode, "default") != 0);
+    const std::string topic =
+        daik::s_prefix + "/binary_sensor/" + daik::s_node + "/weather_forecast_available/config";
+    if (std::strncmp(mode, "denied", 6) == 0) {
+        daik::on_mqtt(nullptr, "mqtt", MQTT_EVENT_CONNECTED, nullptr);
+        sdk::on_subscribe = [mode](const char*, int id) {
+            char grant = std::strcmp(mode, "denied_qos") == 0 ? 2 : static_cast<char>(0x80);
+            esp_mqtt_event_t event{};
+            event.msg_id         = id;
+            event.data           = &grant;
+            event.data_len       = 1;
+            event.total_data_len = 1;
+            if (std::strcmp(mode, "denied_missing") == 0) event.data = nullptr;
+            if (std::strcmp(mode, "denied_shape") == 0) event.total_data_len = 2;
+            daik::on_mqtt(nullptr, "mqtt", MQTT_EVENT_SUBSCRIBED, &event);
+        };
+        daik::service_discovery_owner_guard();
+        require(daik::s_discovery_owner_ack_mask == 0,
+                "DISCOVERY_DENIED_OR_INVALID_SUBACK_NEVER_COUNTS_AS_ADMISSION");
+        discovery_guard_require_blocked();
+        return;
+    }
+    if (std::strcmp(mode, "inflight") == 0 || std::strcmp(mode, "migration_rearm") == 0 ||
+        std::strcmp(mode, "session_binding") == 0) {
+        sdk::ticks += 5000;
+        daik::service_discovery_owner_guard();
+        require(daik::discovery_mutation_allowed(),
+                "DISCOVERY_PRECEDING_SESSION_WAS_ACTUALLY_ADMITTED");
+        if (std::strcmp(mode, "session_binding") == 0) {
+            const uint32_t old_session = daik::s_connected_session_epoch.load();
+            daik::on_mqtt(nullptr, "mqtt", MQTT_EVENT_CONNECTED, nullptr);
+            // Model an old task's CAS racing the new CONNECTED reset. Its session is still stale.
+            daik::s_discovery_owner_admitted_session.store(old_session);
+            daik::s_discovery_owner_state.store(daik::DiscoveryOwnerState::Admitted);
+            require(!daik::discovery_mutation_allowed(),
+                    "DISCOVERY_OLD_ADMISSION_CANNOT_AUTHORIZE_NEW_SESSION");
+            daik::service_discovery_owner_guard();
+            require(daik::s_discovery_owner_state == daik::DiscoveryOwnerState::Pending,
+                    "DISCOVERY_STALE_ADMISSION_RACE_REARMS_FRESH_PREFLIGHT");
+            return;
+        }
+        if (std::strcmp(mode, "inflight") == 0) {
+            require(!daik::retire_exact_topic(MqttRetirementOwner::PeriodicDiscovery, topic) &&
+                        daik::s_retirement_delivery.busy(),
+                    "DISCOVERY_PRECEDING_OWNED_TOMBSTONE_RETAINS_EXACT_INFLIGHT_ITEM");
+            const int id = sdk::message_id;
+            feed(topic.c_str(), discovery_guard_config(true).c_str(), true);
+            const int writes = sdk::publish_calls;
+            require(!daik::retire_exact_topic(MqttRetirementOwner::PeriodicDiscovery, topic) &&
+                        daik::s_retirement_delivery.busy() && sdk::publish_calls == writes,
+                    "DISCOVERY_LATE_COLLISION_NEVER_SKIPS_UNCONFIRMED_INFLIGHT_SLOT");
+            cleanup_event(id);
+            require(daik::retire_exact_topic(MqttRetirementOwner::PeriodicDiscovery, topic) &&
+                        !daik::s_retirement_delivery.busy(),
+                    "DISCOVERY_BLOCKED_NAMESPACE_STILL_DRAINS_ITS_PREVIOUS_EXACT_PUBACK");
+            discovery_guard_require_blocked();
+            return;
+        }
+        feed(topic.c_str(), discovery_guard_config(true).c_str(), true);
+        discovery_guard_require_blocked();
+        daik::s_legacy_fixed_retracted = true;
+        daik::s_legacy_fixed_step      = 3;
+        daik::s_stale_values_profile   = "previous";
+        daik::on_mqtt(nullptr, "mqtt", MQTT_EVENT_CONNECTED, nullptr);
+        daik::service_discovery_owner_guard();
+        sdk::ticks += 5000;
+        daik::service_discovery_owner_guard();
+        daik::service_discovery_admission_reset();
+        require(daik::discovery_mutation_allowed() && !daik::s_discovery_owner_skipped &&
+                    !daik::s_legacy_fixed_retracted && daik::s_legacy_fixed_step == 0 &&
+                    daik::s_stale_values_profile.empty() && daik::s_periodic_discovery_pending,
+                "DISCOVERY_OPERATOR_MIGRATION_READMISSION_REPLAYS_SKIPPED_LEDGERS");
+        return;
+    }
+    if (std::strcmp(mode, "clean") == 0 || std::strcmp(mode, "default") == 0) {
+        sdk::ticks += 4999;
+        daik::service_discovery_owner_guard();
+        require(!daik::discovery_mutation_allowed(),
+                "DISCOVERY_CLEAN_REPLAY_WAITS_FULL_QUIET_BOUND");
+        sdk::ticks += 1;
+        daik::service_discovery_owner_guard();
+        require(daik::discovery_mutation_allowed(),
+                "DISCOVERY_EMPTY_BROKER_ADMITS_ONLY_AFTER_BOTH_SUBACKS_AND_QUIET");
+        reset_cleanup_trace();
+        daik::publish_env3_discovery();
+        require(sdk::publish_calls == daik::ENV3_HA_SENSOR_COUNT,
+                "DISCOVERY_ADMITTED_NAMESPACE_STILL_PUBLISHES_OWNED_CONFIGS");
+        cleanup_witness::early_ack = true;
+        require(daik::retire_exact_topic(MqttRetirementOwner::PeriodicDiscovery, topic) &&
+                    accepted_count(topic, "") == 1,
+                "DISCOVERY_ADMITTED_NAMESPACE_STILL_RETIRES_OWNED_CONFIG_WITH_PUBACK");
+        return;
+    }
+    if (std::strcmp(mode, "owned_fragment") == 0 || std::strcmp(mode, "gap") == 0 ||
+        std::strcmp(mode, "reconnect") == 0) {
+        const auto       payload = discovery_guard_config();
+        esp_mqtt_event_t event{};
+        event.topic          = const_cast<char*>(topic.data());
+        event.topic_len      = static_cast<int>(topic.size());
+        event.data           = const_cast<char*>(payload.data());
+        event.data_len       = 12;
+        event.total_data_len = static_cast<int>(payload.size());
+        event.retain         = 1;
+        daik::on_mqtt(nullptr, "mqtt", MQTT_EVENT_DATA, &event);
+        sdk::ticks += 6000;
+        daik::service_discovery_owner_guard();
+        require(!daik::discovery_mutation_allowed(),
+                "DISCOVERY_PARTIAL_REPLAY_CANNOT_ADMIT_AFTER_QUIET");
+        if (std::strcmp(mode, "reconnect") == 0) {
+            daik::on_mqtt(nullptr, "mqtt", MQTT_EVENT_DISCONNECTED, nullptr);
+            daik::on_mqtt(nullptr, "mqtt", MQTT_EVENT_CONNECTED, nullptr);
+            require(!daik::s_discovery_owner_fragment_pending &&
+                        !daik::discovery_mutation_allowed(),
+                    "DISCOVERY_RECONNECT_DISCARDS_PARTIAL_FRAME_AND_REARMS_AUTHORITY");
+            daik::service_discovery_owner_guard();
+            require(daik::s_discovery_owner_ack_mask == 3 && sdk::subscribe_calls == 4,
+                    "DISCOVERY_RECONNECT_REQUIRES_FRESH_MATCHING_SUBACKS");
+            sdk::ticks += 5000;
+            daik::service_discovery_owner_guard();
+            require(daik::discovery_mutation_allowed(),
+                    "DISCOVERY_RECONNECT_CLEAN_REPLAY_READMITS");
+            feed(topic.c_str(), discovery_guard_config(true).c_str(), false);
+            discovery_guard_require_blocked();
+            return;
+        }
+        event.topic               = nullptr;
+        event.topic_len           = 0;
+        event.current_data_offset = std::strcmp(mode, "gap") == 0 ? 13 : 12;
+        event.data                = const_cast<char*>(payload.data() + 12);
+        event.data_len            = static_cast<int>(payload.size() - 12);
+        daik::on_mqtt(nullptr, "mqtt", MQTT_EVENT_DATA, &event);
+        if (std::strcmp(mode, "gap") == 0) {
+            discovery_guard_require_blocked();
+            return;
+        }
+        sdk::ticks += 5000;
+        daik::service_discovery_owner_guard();
+        require(daik::discovery_mutation_allowed(),
+                "DISCOVERY_COMPLETE_OWNED_FRAGMENTED_REPLAY_ADMITS");
+        return;
+    }
+    if (std::strcmp(mode, "suback") == 0) {
+        daik::on_mqtt(nullptr, "mqtt", MQTT_EVENT_CONNECTED, nullptr);
+        sdk::on_subscribe                             = {};
+        sdk::subscribe_failures[sdk::subscribe_calls] = true;
+        daik::service_discovery_owner_guard();
+        require(daik::s_discovery_owner_sub_ids[0] < 0,
+                "DISCOVERY_REJECTED_SUBSCRIPTION_RETAINS_PENDING_OWNER");
+        sdk::ticks += 10000;
+        daik::service_discovery_owner_guard();
+        discovery_guard_suback(9999);
+        daik::service_discovery_owner_guard();
+        require(!daik::discovery_mutation_allowed() && daik::s_discovery_owner_ack_mask == 0,
+                "DISCOVERY_NO_ELAPSED_TIMEOUT_ADMITS_WITHOUT_MATCHING_SUBACKS");
+        discovery_guard_suback(daik::s_discovery_owner_sub_ids[0]);
+        discovery_guard_suback(daik::s_discovery_owner_sub_ids[1]);
+        daik::service_discovery_owner_guard();
+        require(!daik::discovery_mutation_allowed(),
+                "DISCOVERY_QUIET_CLOCK_STARTS_AFTER_MATCHED_ACKS");
+        sdk::ticks += 5000;
+        daik::service_discovery_owner_guard();
+        require(daik::discovery_mutation_allowed(),
+                "DISCOVERY_RETRY_AND_DELAYED_ACK_CAN_COMPLETE_WITHIN_TOTAL_BOUND");
+        daik::on_mqtt(nullptr, "mqtt", MQTT_EVENT_CONNECTED, nullptr);
+        daik::service_discovery_owner_guard();
+        sdk::ticks += 30000;
+        daik::service_discovery_owner_guard();
+        discovery_guard_require_blocked();
+        return;
+    }
+    if (std::strcmp(mode, "oversize") == 0) {
+        const std::string payload(daik::DISCOVERY_OWNER_PAYLOAD_MAX + 1, 'x');
+        feed(topic.c_str(), payload.c_str(), true);
+    } else if (std::strcmp(mode, "count") == 0) {
+        const auto payload = discovery_guard_config();
+        for (uint32_t i = 0; i <= daik::DISCOVERY_OWNER_CONFIG_MAX; ++i)
+            feed(topic.c_str(), payload.c_str(), true);
+    } else if (std::strcmp(mode, "invalid") == 0) {
+        feed(topic.c_str(), "{\"stat_t\":\"daikin-altherma-esp32-bench/heartbeat\",\"dev\":null}",
+             true);
+    } else if (std::strcmp(mode, "descendant") == 0 ||
+               std::strcmp(mode, "availability_descendant") == 0) {
+        const bool        state_foreign = std::strcmp(mode, "descendant") == 0;
+        const std::string payload =
+            "{\"stat_t\":\"" + daik::s_base + (state_foreign ? "/温度/heartbeat" : "/heartbeat") +
+            "\",\"avty_t\":\"" + daik::s_base + (state_foreign ? "/status" : "/温度/status") +
+            "\",\"dev\":{\"ids\":[\"" + daik::s_node + "\"]}}";
+        feed(topic.c_str(), payload.c_str(), true);
+    } else {
+        std::string actual_topic = topic;
+        if (std::strcmp(mode, "heartbeat") == 0)
+            actual_topic = daik::s_prefix + "/sensor/" + daik::s_node + "/device_time/config";
+        if (std::strcmp(mode, "unknown") == 0)
+            actual_topic =
+                daik::s_prefix + "/sensor/" + daik::s_node + "/unknown_historical_object/config";
+        const bool modbus = std::strcmp(mode, "modbus") == 0;
+        if (modbus)
+            actual_topic = daik::s_prefix + "/sensor/" + daik::s_node + "_modbus/flow/config";
+        const auto payload           = discovery_guard_config(true, modbus);
+        const int  parses_before     = json_witness::parses,
+                  allocations_before = json_witness::allocations;
+        sdk::fail_next_new           = true;
+        feed(actual_topic.c_str(), payload.c_str(), true);
+        require(sdk::fail_next_new && json_witness::parses == parses_before &&
+                    json_witness::allocations == allocations_before,
+                "DISCOVERY_EVENT_OWNERSHIP_PARSE_NEVER_ALLOCATES_CPP_OR_CJSON");
+        sdk::fail_next_new = false;
+    }
+    discovery_guard_require_blocked();
+}
+
+void discovery_guard_retry_abandon(bool stop) {
+    discovery_guard_fixture();
+    require(daik::start_current_client(), "DISCOVERY_RETRY_FIXTURE_STARTS_REAL_TRANSPORT_ADAPTER");
+    daik::service_discovery_owner_guard();
+    sdk::ticks += 5000;
+    daik::service_discovery_owner_guard();
+    const std::string topic =
+        daik::s_prefix + "/binary_sensor/" + daik::s_node + "/weather_forecast_available/config";
+    require(!daik::retire_exact_topic(MqttRetirementOwner::PeriodicDiscovery, topic) &&
+                daik::s_retirement_delivery.in_flight(),
+            "DISCOVERY_RETRY_FIXTURE_QUEUES_OWNED_EXACT_DISCOVERY");
+    const int id = sdk::message_id;
+    feed(topic.c_str(), discovery_guard_config(true).c_str(), true);
+    const int writes = sdk::publish_calls;
+    daik::service_requested_topic_cleanup(adapter::cfg);
+    require(sdk::publish_calls == writes && !daik::s_source_cleanup.in_flight() &&
+                daik::s_retirement_delivery.in_flight(),
+            "DISCOVERY_RETRY_LIVE_ITEM_STILL_PROTECTS_GLOBAL_CLEANUP_SLOT");
+    if (stop) {
+        daik::mqtt_transport_pause_for_network_heap();
+        daik::mqtt_transport_pause_if_requested();
+        require(sdk::stop_calls == 1 && !daik::s_client_running &&
+                    !daik::s_retirement_delivery.in_flight() && daik::s_retirement_delivery.busy(),
+                "DISCOVERY_RETRY_STOP_JOINS_TRANSPORT_BEFORE_RELEASING_MESSAGE_ID");
+    } else {
+        cleanup_event(id, MqttCleanupDeliveryOutcome::Deleted);
+        daik::service_source_cleanup_evidence();
+        require(!daik::s_retirement_delivery.in_flight() && daik::s_retirement_delivery.busy(),
+                "DISCOVERY_RETRY_DELETED_EVENT_RETAINS_UNCONFIRMED_OWNER");
+    }
+    require(
+        daik::retire_exact_topic(MqttRetirementOwner::PeriodicDiscovery, topic) &&
+            !daik::s_retirement_delivery.busy() && sdk::publish_calls == writes &&
+            !daik::s_retirement_delivery.take_confirmed(MqttRetirementOwner::PeriodicDiscovery) &&
+            daik::s_discovery_owner_skipped &&
+            (daik::mqtt_retirement_evidence() & daik::RETIRE_OPERATOR_MIGRATION),
+        "DISCOVERY_BLOCKED_RETRY_ABANDONS_EXACT_OWNER_WITHOUT_WRITE_OR_FAKE_PUBACK");
+    if (stop) {
+        const std::string foreign = discovery_guard_config(true);
+        sdk::on_subscribe         = [&topic, &foreign](const char* filter, int sub_id) {
+            if (sub_id < 0) return;
+            discovery_guard_suback(sub_id);
+            if (daik::s_discovery_owner_filters[0] == filter)
+                feed(topic.c_str(), foreign.c_str(), true);
+        };
+        daik::mqtt_transport_resume_after_network_heap();
+        require(daik::start_current_client(), "DISCOVERY_RETRY_STOP_RESTARTS_SAME_CLIENT");
+        daik::service_discovery_owner_guard();
+        require(daik::s_discovery_owner_state == daik::DiscoveryOwnerState::Blocked,
+                "DISCOVERY_RETRY_STOP_REPLAYS_FOREIGN_CONFIG_BEFORE_NEW_DISCOVERY");
+    }
+    reset_cleanup_trace();
+    cleanup_witness::early_ack = true;
+    for (int cycles = 0; cycles < 80; ++cycles) daik::service_requested_topic_cleanup(adapter::cfg);
+    require(accepted_count(daik::s_weather, "") == 1 && accepted_count(daik::s_modbus, "") == 1 &&
+                accepted_count(daik::s_env3, "") == 1 &&
+                !daik::s_source_cleanup.suppress(daik::MqttCleanupSource::Weather) &&
+                !daik::s_source_cleanup.suppress(daik::MqttCleanupSource::Modbus) &&
+                !daik::s_source_cleanup.suppress(daik::MqttCleanupSource::Env3),
+            "DISCOVERY_BLOCKED_RETRY_RELEASE_UNBLOCKS_ALL_RAW_SOURCE_WITHDRAWALS");
+    for (int i = 0; i < sdk::publish_calls; ++i)
+        require(!daik::mqtt_discovery_namespace_topic(sdk::published[i].topic.data(),
+                                                      daik::s_prefix, daik::s_node),
+                "DISCOVERY_BLOCKED_RETRY_NEVER_REQUEUES_FOREIGN_CONFIG_DELETION");
+    sdk::on_subscribe = [](const char*, int sub_id) {
+        if (sub_id >= 0) discovery_guard_suback(sub_id);
+    };
+    daik::on_mqtt(nullptr, "mqtt", MQTT_EVENT_DISCONNECTED, nullptr);
+    daik::on_mqtt(nullptr, "mqtt", MQTT_EVENT_CONNECTED, nullptr);
+    daik::service_discovery_owner_guard();
+    sdk::ticks += 5000;
+    daik::service_discovery_owner_guard();
+    daik::service_discovery_admission_reset();
+    require(daik::discovery_mutation_allowed() && !daik::s_discovery_owner_skipped &&
+                daik::s_periodic_discovery_pending && !daik::s_legacy_fixed_retracted,
+            "DISCOVERY_ABANDONED_CURSOR_REARMS_AFTER_ACTUAL_CLEAN_ADMISSION");
+}
+
+void discovery_guard_retry_protected() {
+    discovery_guard_fixture();
+    sdk::ticks += 5000;
+    daik::service_discovery_owner_guard();
+    const std::string topic = daik::s_prefix + "/sensor/" + daik::s_node + "/device_time/config";
+    require(!daik::retire_exact_topic(MqttRetirementOwner::LegacyFixed, topic),
+            "DISCOVERY_PROTECTED_FIXTURE_STARTS_HELD_DISCOVERY_CURSOR");
+    const int id = sdk::message_id;
+    feed(topic.c_str(), discovery_guard_config(true).c_str(), true);
+    require(!daik::retire_exact_topic(MqttRetirementOwner::PeriodicDiscovery, topic) &&
+                daik::s_retirement_delivery.owner() == MqttRetirementOwner::LegacyFixed &&
+                daik::s_retirement_delivery.in_flight() &&
+                daik::s_retirement_delivery.msg_id() == id,
+            "DISCOVERY_ABANDON_NEVER_RELEASES_DIFFERENT_LIVE_OWNER");
+    cleanup_event(id);
+    require(!daik::retire_exact_topic(MqttRetirementOwner::PeriodicDiscovery, topic) &&
+                daik::s_retirement_delivery.owner() == MqttRetirementOwner::LegacyFixed &&
+                daik::s_retirement_delivery.busy() && !daik::s_retirement_delivery.in_flight(),
+            "DISCOVERY_ABANDON_NEVER_CONSUMES_DIFFERENT_CONFIRMED_OWNER");
+    require(daik::retire_exact_topic(MqttRetirementOwner::LegacyFixed, topic) &&
+                !daik::s_retirement_delivery.busy() && !daik::s_discovery_owner_skipped,
+            "DISCOVERY_MATCHING_REAL_PUBACK_IS_DRAINED_BEFORE_MIGRATION_SKIP");
+    require(!daik::retire_exact_topic(MqttRetirementOwner::LegacyProbe, daik::s_legacy_state),
+            "DISCOVERY_BLOCKED_RAW_PROBE_REMAINS_AN_INDEPENDENT_RETIREMENT");
+    cleanup_event(sdk::message_id, MqttCleanupDeliveryOutcome::Deleted);
+    require(!daik::retire_exact_topic(MqttRetirementOwner::PeriodicDiscovery, topic) &&
+                daik::s_retirement_delivery.owner() == MqttRetirementOwner::LegacyProbe &&
+                !daik::s_retirement_delivery.in_flight() && daik::s_retirement_delivery.busy(),
+            "DISCOVERY_MIGRATION_NEVER_ABANDONS_RETRYABLE_RAW_TOPIC_PROBE");
+    const int writes = sdk::publish_calls;
+    require(!daik::retire_exact_topic(MqttRetirementOwner::LegacyProbe, daik::s_legacy_state) &&
+                sdk::publish_calls == writes + 1 && daik::s_retirement_delivery.in_flight(),
+            "DISCOVERY_BLOCKED_RAW_PROBE_RETRIES_ITS_OWN_EXACT_TOPIC");
+    cleanup_event(sdk::message_id);
+    require(daik::retire_exact_topic(MqttRetirementOwner::LegacyProbe, daik::s_legacy_state),
+            "DISCOVERY_BLOCKED_RAW_PROBE_STILL_REQUIRES_ITS_REAL_PUBACK");
+    daik::on_mqtt(nullptr, "mqtt", MQTT_EVENT_CONNECTED, nullptr);
+    daik::service_discovery_owner_guard();
+    sdk::ticks += 5000;
+    daik::service_discovery_owner_guard();
+    require(!daik::retire_exact_topic(MqttRetirementOwner::PeriodicDiscovery, topic),
+            "DISCOVERY_PENDING_FIXTURE_QUEUES_CURRENT_OWNED_CURSOR");
+    cleanup_event(sdk::message_id, MqttCleanupDeliveryOutcome::Deleted);
+    daik::on_mqtt(nullptr, "mqtt", MQTT_EVENT_CONNECTED, nullptr);
+    require(!daik::retire_exact_topic(MqttRetirementOwner::PeriodicDiscovery, topic) &&
+                daik::s_retirement_delivery.busy() && !daik::s_retirement_delivery.in_flight() &&
+                !daik::s_discovery_owner_skipped,
+            "DISCOVERY_PENDING_ADMISSION_NEVER_ABANDONS_RETRYABLE_CURSOR");
+}
+
+void discovery_guard_retry_legacy_fixed() {
+    discovery_guard_fixture();
+    sdk::ticks += 5000;
+    daik::service_discovery_owner_guard();
+    require(!daik::retract_legacy_fixed() && daik::s_legacy_fixed_step == 0 &&
+                daik::s_retirement_delivery.owner() == MqttRetirementOwner::LegacyFixed &&
+                daik::s_retirement_delivery.in_flight(),
+            "DISCOVERY_LEGACY_FIXED_HOLDS_ITS_UNCHANGED_EXACT_CURSOR");
+    const std::string held = sdk::published[0].topic.data();
+    require(daik::mqtt_discovery_namespace_topic(held, daik::s_prefix, daik::s_node),
+            "DISCOVERY_LEGACY_FIXED_ACTUAL_CURSOR_IS_DISCOVERY_NOT_RAW_STATE");
+    feed(held.c_str(), discovery_guard_config(true).c_str(), true);
+    cleanup_event(sdk::message_id, MqttCleanupDeliveryOutcome::Deleted);
+    require(daik::retract_legacy_fixed() && daik::s_legacy_fixed_retracted &&
+                !daik::s_retirement_delivery.busy() && daik::s_discovery_owner_skipped &&
+                sdk::publish_calls == 1,
+            "DISCOVERY_BLOCKED_EXPIRED_LEGACY_FIXED_CURSOR_IS_MIGRATION_SKIPPED");
+}
+
+std::string discovery_owned_input_payload(const std::string& fields) {
+    std::string payload = discovery_guard_config();
+    payload.pop_back();
+    payload += ',';
+    payload += fields;
+    payload += '}';
+    return payload;
+}
+
+void discovery_guard_ingress_burst() {
+    discovery_guard_fixture();
+    adapter::clock_shift_s = 100; // source fixture time, independent of the preflight's short clock
+    daik::service_reference_subscription(adapter::cfg, daik::s_ref_requested_epoch.load());
+    daik::service_circulation_subscription(adapter::cfg,
+                                           daik::s_circulation_requested_epoch.load());
+    const std::string owned = discovery_guard_config();
+    for (int phase = 0; phase < 2; ++phase) {
+        const uint32_t drops_before = daik::s_ref_dropped.load();
+        for (int i = 0, input = 0; i < 159; ++i) {
+            const std::string topic = daik::s_prefix + "/sensor/" + daik::s_node + "/fixture_" +
+                                      std::to_string(i) + "/config";
+            const int parses_before = json_witness::parses;
+            sdk::fail_next_new      = true;
+            feed(topic.c_str(), owned.c_str(), true);
+            require(sdk::fail_next_new && json_witness::parses == parses_before,
+                    "DISCOVERY_INGRESS_FILTER_AND_OWNERSHIP_CALLBACK_ALLOCATE_NOTHING");
+            sdk::fail_next_new = false;
+            if (i == 10 || i == 60 || i == 100) {
+                const std::string time = std::to_string(1700000100 + phase * 3 + input);
+                const std::string room = "{\"temperature\":" + std::to_string(20 + input) +
+                                         ",\"time\":" + time + ",\"enabled\":true}";
+                const std::string power =
+                    "{\"power\":" + std::to_string(40 + input * 10) + ",\"time\":" + time + '}';
+                feed("room", room.c_str());
+                feed("circulation", power.c_str());
+                ++input;
+            }
+        }
+        require(sdk::queue.count == 6 && daik::s_ref_dropped.load() == drops_before,
+                "DISCOVERY_159_CONFIG_BURST_NEVER_DISPLACES_SIX_INTERLEAVED_INPUTS");
+        daik::service_reference_frames(adapter::cfg);
+        require(daik::s_ref_status.messages == static_cast<uint32_t>((phase + 1) * 3) &&
+                    daik::s_ref_status.temperature_c == 22 && daik::s_ref_status.errors == 0 &&
+                    daik::s_ref_status.source_unix_s == 1700000102 + phase * 3,
+                "DISCOVERY_BURST_PRESERVES_ROOM_VALUE_AND_SOURCE_TIMESTAMP_ORDER");
+        require(daik::s_circulation_status.messages == static_cast<uint32_t>((phase + 1) * 3) &&
+                    daik::s_circulation_status.power_w == 60 &&
+                    daik::s_circulation_status.errors == 0 &&
+                    daik::s_circulation_status.source_unix_s == 1700000102 + phase * 3,
+                "DISCOVERY_BURST_PRESERVES_CIRCULATION_VALUE_AND_SOURCE_TIMESTAMP_ORDER");
+        if (phase == 0) {
+            sdk::ticks += 5000;
+            daik::service_discovery_owner_guard();
+            require(daik::discovery_mutation_allowed(),
+                    "DISCOVERY_INPUT_ISOLATION_APPLIES_DURING_PREFLIGHT_AND_OWN_REANNOUNCEMENT");
+        }
+    }
+}
+
+void discovery_guard_ingress_exact() {
+    discovery_guard_fixture();
+    adapter::clock_shift_s                  = 100;
+    const std::string                prefix = daik::s_prefix + "/sensor/" + daik::s_node + '/';
+    const std::array<std::string, 5> topics{prefix + "room/config", prefix + "target/config",
+                                            prefix + "clock/config", prefix + "circulation/config",
+                                            prefix + "probe/config"};
+    const std::array<std::string, 5> payloads{
+        discovery_owned_input_payload("\"temperature\":22.5,\"enabled\":true"),
+        discovery_owned_input_payload("\"target\":24"),
+        discovery_owned_input_payload("\"time\":1700000100"),
+        discovery_owned_input_payload("\"power\":55,\"time\":1700000100"),
+        discovery_owned_input_payload("\"power\":60,\"time\":1700000100")};
+    adapter::cfg.ref_temp_topic                 = topics[0];
+    adapter::cfg.ref_temp_fixed_setpoint_tenths = 0;
+    adapter::cfg.ref_temp_setpoint_topic        = topics[1];
+    adapter::cfg.ref_temp_setpoint_path         = "target";
+    adapter::cfg.ref_temp_time_topic            = topics[2];
+    adapter::cfg.circulation_topic              = topics[3];
+    sdk::on_subscribe                           = [&topics, &payloads](const char* topic, int id) {
+        if (id < 0) return;
+        for (size_t i = 0; i < topics.size(); ++i) {
+            if (topics[i] != topic) continue;
+            const int parses_before = json_witness::parses;
+            sdk::fail_next_new      = true;
+            feed(topic, payloads[i].c_str(), true);
+            require(sdk::fail_next_new && json_witness::parses == parses_before,
+                                              "DISCOVERY_EXACT_INPUT_CALLBACK_BORROWS_BINDINGS_WITHOUT_ALLOCATING");
+            sdk::fail_next_new = false;
+        }
+    };
+    daik::service_reference_subscription(adapter::cfg, daik::s_ref_requested_epoch.load());
+    require(sdk::queue.count == 3, "DISCOVERY_EXACT_SAVED_REFERENCE_RECEIVES_EARLY_RETAINED_DATA");
+    daik::service_circulation_subscription(adapter::cfg,
+                                           daik::s_circulation_requested_epoch.load());
+    require(sdk::queue.count == 4,
+            "DISCOVERY_EXACT_SAVED_CIRCULATION_RECEIVES_EARLY_RETAINED_DATA");
+    begin_probe(42);
+    daik::s_circulation_probe.config.topic = topics[4];
+    daik::service_circulation_probe_subscription(adapter::cfg);
+    require(sdk::queue.count == 5, "DISCOVERY_EXACT_ACTIVE_PROBE_RECEIVES_EARLY_RETAINED_DATA");
+    daik::service_reference_frames(adapter::cfg);
+    require(daik::s_ref_status.has_value && daik::s_ref_status.temperature_c == 22.5 &&
+                daik::s_ref_status.has_setpoint && daik::s_ref_status.setpoint_c == 24 &&
+                daik::s_ref_status.has_source_time &&
+                daik::s_ref_status.source_unix_s == 1700000100 && daik::s_ref_status.messages == 3,
+            "DISCOVERY_EXACT_ROOM_TARGET_AND_TIME_TOPICS_REACH_THE_REAL_AGGREGATOR");
+    require(daik::s_circulation_status.has_value && daik::s_circulation_status.power_w == 55 &&
+                daik::s_circulation_status.messages == 1 && daik::s_circulation_probe.passed,
+            "DISCOVERY_EXACT_SAVED_WITNESS_AND_PROBE_KEEP_DISTINCT_SOURCE_OWNERS");
+    require(daik::s_ref_dropped.load() == 0 && sdk::queue.count == 0 && sdk::locks == 0 &&
+                sdk::takes == sdk::gives,
+            "DISCOVERY_EXPLICIT_INPUT_LIFECYCLE_RELEASES_QUEUE_AND_RAII_LOCK");
+}
+
+void discovery_guard_ingress_epoch() {
+    discovery_guard_fixture();
+    adapter::clock_shift_s  = 100;
+    const std::string topic = daik::s_prefix + "/sensor/" + daik::s_node + "/room/config";
+    const std::string payload =
+        discovery_owned_input_payload("\"temperature\":20,\"time\":1700000100,\"enabled\":true");
+    adapter::cfg.ref_temp_topic = topic;
+    daik::service_reference_subscription(adapter::cfg, daik::s_ref_requested_epoch.load());
+    feed(topic.c_str(), payload.c_str());
+    require(sdk::queue.count == 1, "DISCOVERY_APPLIED_EXACT_INPUT_IS_CAPTURED");
+    daik::service_reference_frames(adapter::cfg);
+    daik::mqtt_reference_reconfigure();
+    feed(topic.c_str(), payload.c_str());
+    require(sdk::queue.count == 0 && !daik::s_ref_status.has_value,
+            "DISCOVERY_WITHDRAWN_INPUT_EPOCH_CANNOT_CONSUME_QUEUE_OR_RESTORE_OLD_VALUE");
+    daik::service_reference_subscription(adapter::cfg, daik::s_ref_requested_epoch.load());
+    feed(topic.c_str(), payload.c_str());
+    daik::service_reference_frames(adapter::cfg);
+    require(daik::s_ref_status.has_value, "DISCOVERY_CURRENT_SUCCESSOR_BINDING_RECEIVES_OWN_INPUT");
+    adapter::cfg.diagnostics_enabled = false;
+    daik::mqtt_reference_reconfigure();
+    daik::service_reference_subscription(adapter::cfg, daik::s_ref_requested_epoch.load());
+    feed(topic.c_str(), payload.c_str());
+    require(sdk::queue.count == 0 && !daik::s_ref_status.has_value,
+            "DISCOVERY_DISABLED_SAVED_MAPPING_IS_NOT_INGRESS_AUTHORITY");
+}
+
+void discovery_guard_crash_task(bool notable) {
+    initial_config("daikin-altherma-esp32-bench");
+    if (notable) {
+        adapter::live_crash.reason   = static_cast<uint32_t>(daik::CrashReason::PANIC);
+        adapter::live_crash.coredump = true;
+    }
+    cleanup_witness::early_ack = true;
+    sdk::on_subscribe          = [notable](const char* topic, int id) {
+        if (id < 0) return;
+        if (std::strstr(topic, "/+/config")) {
+            discovery_guard_suback(id);
+            if (!std::strstr(topic, "_modbus/")) {
+                const std::string foreign =
+                    daik::s_prefix + "/sensor/" + daik::s_node + "/device_time/config";
+                feed(foreign.c_str(), discovery_guard_config(true).c_str(), true);
+            }
+        } else if (!notable && daik::s_crash == topic) {
+            feed(topic, "{\"coredump\":true}", true);
+        }
+    };
+    sdk::on_delay = [notable](TickType_t delay) {
+        check_cycle(delay);
+        if (sdk::delays == 1)
+            feed("room", R"({"temperature":20,"time":1700000100,"enabled":true})");
+        if (sdk::delays < 46) return;
+        require(daik::s_discovery_owner_state == daik::DiscoveryOwnerState::Blocked &&
+                    !daik::discovery_mutation_allowed(),
+                "DISCOVERY_TASK_REAL_FOREIGN_REPLAY_BLOCKS_HA_PERMISSION");
+        const auto* crash = last_accepted(daik::s_crash);
+        if (notable)
+            require(crash && crash->length > 0 &&
+                        std::strstr(crash->payload.data(), "\"coredump\":true"),
+                    "DISCOVERY_BLOCKED_TASK_STILL_PUBLISHES_CURRENT_NOTABLE_RAW_CRASH");
+        else
+            require(crash && crash->length == 0 && crash->enqueued && crash->qos == 1 &&
+                        !daik::s_crash_probe_active && !daik::s_retirement_delivery.busy(),
+                    "DISCOVERY_BLOCKED_NORMAL_BOOT_STILL_ACK_CLEANS_OLD_RAW_CRASH");
+        require(last_accepted(daik::s_heartbeat) && last_accepted(daik::s_avail) &&
+                    daik::s_ref_status.has_value && daik::s_ref_status.subscribed,
+                "DISCOVERY_BLOCKED_TASK_KEEP_HEARTBEAT_AVAILABILITY_AND_INBOUND_LIVE");
+        for (int i = 0; i < sdk::publish_calls; ++i)
+            require(!daik::mqtt_discovery_namespace_topic(sdk::published[i].topic.data(),
+                                                          daik::s_prefix, daik::s_node),
+                    "DISCOVERY_BLOCKED_TASK_NEVER_MUTATES_FOREIGN_HA_NAMESPACE");
+        throw StopTask{};
+    };
+    try {
+        sdk::task_fn(nullptr);
+    } catch (const StopTask&) {}
 }
 int accepted_count(const std::string& topic, const char* payload = nullptr) {
     int count = 0;
@@ -3179,7 +3800,27 @@ int main(int argc, char** argv) {
     try {
         cJSON_Hooks hooks{json_witness::allocate, json_witness::release};
         cJSON_InitHooks(&hooks);
-        if (std::strcmp(scenario, "transport_source_lifecycle") == 0)
+        if (std::strcmp(scenario, "discovery_guard_retry_deleted") == 0)
+            discovery_guard_retry_abandon(false);
+        else if (std::strcmp(scenario, "discovery_guard_retry_stop") == 0)
+            discovery_guard_retry_abandon(true);
+        else if (std::strcmp(scenario, "discovery_guard_retry_protected") == 0)
+            discovery_guard_retry_protected();
+        else if (std::strcmp(scenario, "discovery_guard_retry_legacy_fixed") == 0)
+            discovery_guard_retry_legacy_fixed();
+        else if (std::strcmp(scenario, "discovery_guard_ingress_burst") == 0)
+            discovery_guard_ingress_burst();
+        else if (std::strcmp(scenario, "discovery_guard_ingress_exact") == 0)
+            discovery_guard_ingress_exact();
+        else if (std::strcmp(scenario, "discovery_guard_ingress_epoch") == 0)
+            discovery_guard_ingress_epoch();
+        else if (std::strcmp(scenario, "discovery_guard_raw_crash_cleanup") == 0)
+            discovery_guard_crash_task(false);
+        else if (std::strcmp(scenario, "discovery_guard_raw_crash_notable") == 0)
+            discovery_guard_crash_task(true);
+        else if (std::strncmp(scenario, "discovery_guard_", 16) == 0)
+            discovery_guard_case(scenario + 16);
+        else if (std::strcmp(scenario, "transport_source_lifecycle") == 0)
             transport_source_lifecycle();
         else if (std::strcmp(scenario, "independent_source_reconnect") == 0)
             independent_source_reconnect();

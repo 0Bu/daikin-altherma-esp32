@@ -49,12 +49,20 @@ assert.match(cleanupLogic,
 assert.match(cleanupLogic,
   /MqttCleanupAction next_action[\s\S]*?if \(!connected \|\| client_epoch_ == 0 \|\| in_flight_id_ >= 0\) return \{\}/,
   "a missing PUBACK must not enqueue another source tombstone on the next cycle");
-assert.match(cleanupLogic,
-  /bool acknowledge\(MqttCleanupDeliveryEvidence evidence\)[\s\S]*?evidence\.client_epoch != client_epoch_[\s\S]*?evidence\.msg_id != in_flight_id_[\s\S]*?\+\+next_step_/,
+const acknowledgeStart = cleanupLogic.indexOf("    bool acknowledge(");
+const acknowledgeEnd = cleanupLogic.indexOf("\n    }", acknowledgeStart);
+assert.ok(acknowledgeStart >= 0 && acknowledgeEnd > acknowledgeStart,
+  "the acknowledgement method must have a bounded source scope");
+const acknowledgeBody = cleanupLogic.slice(acknowledgeStart, acknowledgeEnd);
+assert.match(acknowledgeBody,
+  /evidence\.client_epoch != client_epoch_[\s\S]*?evidence\.msg_id != in_flight_id_[\s\S]*?return false;[\s\S]*?advance_step\(\)/,
   "only a matching PUBACK from the active client may advance cleanup");
-assert.match(cleanupLogic,
-  /bool acknowledge\(MqttCleanupDeliveryEvidence evidence\)[\s\S]*?evidence\.outcome != MqttCleanupDeliveryOutcome::Published[\s\S]*?return false/,
+assert.match(acknowledgeBody,
+  /evidence\.outcome != MqttCleanupDeliveryOutcome::Published[\s\S]*?return false/,
   "outbox deletion evidence must never advance a cleanup step");
+assert.match(cleanupLogic,
+  /void advance_step\(\) noexcept \{\s*\+\+next_step_/,
+  "the shared step transition must advance only its selected cleanup item");
 assert.match(cleanupLogic,
   /bool publish_queued\(uint32_t client_epoch, int msg_id\)[\s\S]*?client_epoch != client_epoch_\)\s*return false;\s*in_flight_id_ = msg_id/,
   "a rejected enqueue must leave the scheduler retryable rather than inventing an in-flight id");
