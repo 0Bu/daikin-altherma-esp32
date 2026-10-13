@@ -36,7 +36,7 @@ if 'version: 1.7.19~2' not in (ROOT / 'dependencies.lock').read_text():
     parser.error('update the explicit cJSON provenance check when the production lock changes')
 OUT = Path(tempfile.mkdtemp(prefix='daikin-query-http-runtime-'))
 CC, CXX = os.environ.get('CC', 'cc'), os.environ.get('CXX', 'c++')
-SAN = ['-fsanitize=undefined'] if args.sanitizer == 'undefined' else []
+SAN = ['-fsanitize=undefined', '-fno-sanitize-recover=all'] if args.sanitizer == 'undefined' else []
 FLAGS = ['-std=c++20', '-O0', '-g', '-ffunction-sections', '-fdata-sections',
          '-Wall', '-Wextra', '-Wno-unused-parameter', *SAN,
          '-I' + str(HERE / 'stubs'), '-I' + str(ROOT / 'main'), '-I' + str(CJSON)]
@@ -48,7 +48,7 @@ def command(argv, require_success=True):
     argv = list(map(str, argv))
     commands.append(shlex.join(argv))
     result = subprocess.run(argv, cwd=HERE, capture_output=True, text=True, timeout=60)
-    if require_success and result.returncode:
+    if require_success and (result.returncode or 'runtime error:' in result.stderr):
         raise RuntimeError(shlex.join(argv) + '\n' + result.stdout + result.stderr)
     return result
 
@@ -102,10 +102,12 @@ if args.baseline_expect_defect:
         raise RuntimeError('older baseline did not reproduce the expected defect\n' +
                            result.stdout + result.stderr)
     baseline = result.stdout + result.stderr
+    baseline_stderr = result.stderr
     print('CONFIRMED BASELINE DEFECT ' + result.stderr.strip())
 else:
     result = command([binary])
-    baseline = result.stdout
+    baseline = result.stdout + result.stderr
+    baseline_stderr = result.stderr
     print(result.stdout, end='')
     mutations = [
         ('truncate_integer_fields',
@@ -194,6 +196,28 @@ else:
                     'input_sha256': mutation_inputs})
     print('NEGATIVE CONTROL ' + tag + ': ' + output.strip())
 
+sanitizer_control = None
+if args.sanitizer == 'undefined':
+    # This handler still produces the right response if UBSan merely logs and recovers.
+    # The artificial overflow must terminate it before the ordinary oracle can pass.
+    tripwire = mutate('sanitizer_signed_overflow', '    ProbeRequest q;',
+                      '    volatile int limit = std::numeric_limits<int>::max();\n'
+                      '    volatile int overflow = limit + 1;\n'
+                      '    (void)overflow;\n'
+                      '    ProbeRequest q;')
+    binary = compile(tripwire, 'sanitizer_signed_overflow')
+    result = command([binary, 'absent_optional_defaults'], False)
+    output = result.stdout + result.stderr
+    if result.returncode == 0 or 'runtime error:' not in result.stderr or \
+       'signed integer overflow' not in result.stderr:
+        raise RuntimeError('UBSan did not stop the signed-overflow tripwire\n' + output)
+    sanitizer_control = {'exit_code': result.returncode, 'stdout': result.stdout,
+                         'stderr': result.stderr,
+                         'sha256': hashlib.sha256(tripwire.read_bytes()).hexdigest(),
+                         'input_sha256': inputs([OUT / 'sanitizer_signed_overflow.d',
+                                                 OUT / 'cjson.d'], tripwire)}
+    print('SANITIZER CONTROL signed overflow terminated the handler before its passing oracle')
+
 after = inputs([OUT / 'production.d', OUT / 'cjson.d'])
 if after != before:
     changed = [p for p in set(before) | set(after) if before.get(p) != after.get(p)]
@@ -201,7 +225,9 @@ if after != before:
 head = command(['git', '-c', 'core.fsmonitor=false', '-C', ROOT, 'rev-parse', 'HEAD'], False)
 record = {
     'compiler': compiler, 'sanitizers': args.sanitizer, 'commands': commands,
-    'baseline': baseline, 'baseline_defect_expected': args.baseline_expect_defect,
+    'baseline': baseline, 'baseline_stderr': baseline_stderr,
+    'baseline_defect_expected': args.baseline_expect_defect,
+    'sanitizer_control': sanitizer_control,
     'negative_controls': results, 'input_sha256': after,
     'production_head': head.stdout.strip() if head.returncode == 0 else None,
     'cjson_lock_version': '1.7.19~2',

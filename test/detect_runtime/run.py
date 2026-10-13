@@ -23,7 +23,7 @@ if not SOURCE.is_file():
     parser.error('--root must name a complete daikin-altherma-esp32 source tree')
 OUT = Path(tempfile.mkdtemp(prefix='daikin-detect-runtime-'))
 CXX = os.environ.get('CXX', 'c++')
-SAN = ['-fsanitize=undefined'] if args.sanitizer == 'undefined' else []
+SAN = ['-fsanitize=undefined', '-fno-sanitize-recover=all'] if args.sanitizer == 'undefined' else []
 FLAGS = ['-std=c++17', '-O0', '-g', '-Wall', '-Wextra', '-Werror', *SAN,
          '-fno-omit-frame-pointer', '-I', str(HERE / 'stubs'), '-I', str(ROOT / 'main')]
 commands = []
@@ -32,7 +32,7 @@ commands = []
 def run(command, require_success=True):
     commands.append(shlex.join(command))
     result = subprocess.run(command, cwd=HERE, capture_output=True, text=True, timeout=60)
-    if require_success and result.returncode:
+    if require_success and (result.returncode or 'runtime error:' in result.stderr):
         raise RuntimeError(shlex.join(command) + '\n' + result.stdout + result.stderr)
     return result
 
@@ -200,6 +200,27 @@ if not args.baseline and not args.no_mutations:
                                  'exit_code': result.returncode, 'output': output,
                                  'sha256': hashlib.sha256(mutant.read_bytes()).hexdigest()})
 
+sanitizer_control = None
+if args.sanitizer == 'undefined':
+    old = 'DetectResult hp_detect_run() {'
+    if text.count(old) != 1:
+        raise RuntimeError('sanitizer tripwire needs the exact detector entry')
+    tripwire = OUT / 'sanitizer_signed_overflow.cpp'
+    tripwire.write_text('#include <limits>\n' + text.replace(old, old +
+        '\n    volatile int limit = std::numeric_limits<int>::max();'
+        '\n    volatile int overflow = limit + 1;\n    (void)overflow;', 1))
+    binary = build(tripwire, 'sanitizer_signed_overflow')
+    result = run([str(binary), 'candidate_dedup'], require_success=False)
+    output = result.stdout + result.stderr
+    if result.returncode == 0 or 'runtime error:' not in result.stderr or \
+       'signed integer overflow' not in result.stderr:
+        raise RuntimeError('UBSan did not stop the signed-overflow tripwire\n' + output)
+    sanitizer_control = {'exit_code': result.returncode, 'stdout': result.stdout,
+                         'stderr': result.stderr,
+                         'sha256': hashlib.sha256(tripwire.read_bytes()).hexdigest(),
+                         'input_sha256': hashes(dependencies(OUT / 'sanitizer_signed_overflow.d'))}
+    print('SANITIZER CONTROL signed overflow terminated detection before its passing oracle')
+
 after = hashes(dependencies(OUT / 'production.d'))
 if before != after:
     changed = [p for p in before.keys() | after.keys() if before.get(p) != after.get(p)]
@@ -210,7 +231,8 @@ record = {
     'compiler': compiler, 'production_head': head.stdout.strip() if head.returncode == 0 else None,
     'mode': 'old-head control' if args.baseline else 'production',
     'sanitizer': args.sanitizer, 'commands': commands, 'cases': case_results,
-    'negative_controls': mutation_results, 'input_sha256': after,
+    'negative_controls': mutation_results, 'sanitizer_control': sanitizer_control,
+    'input_sha256': after,
     'claim_limits': [
         'Complete hp_detect.cpp, generated real profile registry/signatures and pure CRC, pin and selection rules execute.',
         'Config snapshots, build defaults, active Ethernet reservation, UART init/transport and diagnostic sink are host adapters.',
