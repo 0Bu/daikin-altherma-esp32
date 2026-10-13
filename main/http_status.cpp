@@ -623,6 +623,8 @@ static void append_status_json(JsonOut& j, bool redact) {
         j += jstr_r(mqtt_base_effective(c.mqtt_base, CONFIG_DAIKIN_MQTT_BASE_TOPIC), redact);
         j += ",\"base_custom\":";
         j += c.mqtt_base.empty() ? "false" : "true";
+        j += ",\"retirement_evidence\":";
+        j += std::to_string(mqtt_retirement_evidence());
         j += "},";
     }
     // One exact MQTT-backed living-room source. Freshness and canonical eligibility remain separate:

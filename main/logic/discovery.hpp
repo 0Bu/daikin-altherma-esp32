@@ -130,6 +130,20 @@ inline std::string x10a_topic(const std::string& base) {
     return base + "/x10a";
 }
 
+inline std::string x10a_availability_topic(const std::string& base) {
+    return x10a_topic(base) + "/status";
+}
+
+// The grouped state topic supplies the source-status topic without guessing or normalising any
+// user-owned bytes. HA must require both the broker transport and a fresh accepted X10A seed.
+inline void append_x10a_availability(std::string& j, const std::string& transport_topic,
+                                     const std::string& state_topic) {
+    j += "\"availability\":[{";
+    json_append_literal_string_member(j, "\"topic\":\"", transport_topic, "\"},{");
+    json_append_literal_string_member(j, "\"topic\":\"", state_topic + "/status", "\"");
+    j += "}],\"availability_mode\":\"all\",";
+}
+
 inline std::string modbus_topic(const std::string& base) {
     return base + "/modbus";
 }
@@ -261,12 +275,16 @@ inline std::string discovery_config(const std::string& node, const std::string& 
     // STATE key and must not — it is what mqtt_group.hpp nests and what VictoriaMetrics is keyed on
     // (legacy-217).
     j += "\"name\":\"";       j += entity_name(def); j += "\",";
-    j += "\"uniq_id\":\"";    j += node; j += "_"; j += row_object_id(def); j += "\",";
+    j += "\"uniq_id\":\"";
+    j += node;
+    j += ha_entity_separator(node);
+    j += row_object_id(def);
+    j += "\",";
     json_append_literal_string_member(j, "\"stat_t\":\"", state_topic);
     j += "\"val_tpl\":\"";
     append_x10a_value_template(j, group, obj.c_str());
     j += "\",";
-    json_append_literal_string_member(j, "\"avty_t\":\"", avail_topic);
+    append_x10a_availability(j, avail_topic, state_topic);
     // A binary row's state is the number 1/0 (logic/convert.hpp), which the template renders as
     // "1"/"0" — so pl_on/pl_off must be spelled out; HA's defaults are "ON"/"OFF"
     // and would leave every one of these entities stuck at `unknown`. No unit / device_class /
@@ -364,12 +382,16 @@ inline std::string companion_discovery_config(const std::string& node, const std
     const std::string obj = companion_object_id(group, c.key);
     std::string j = "{";
     j += "\"name\":\"";    j += group_display_name(group); j += ' '; j += c.name; j += "\",";
-    j += "\"uniq_id\":\""; j += node; j += "_"; j += obj; j += "\",";
+    j += "\"uniq_id\":\"";
+    j += node;
+    j += ha_entity_separator(node);
+    j += obj;
+    j += "\",";
     json_append_literal_string_member(j, "\"stat_t\":\"", state_topic);
     j += "\"val_tpl\":\"";
     append_x10a_value_template(j, group, c.key);
     j += "\",";
-    json_append_literal_string_member(j, "\"avty_t\":\"", avail_topic);
+    append_x10a_availability(j, avail_topic, state_topic);
     j += "\"pl_on\":\"1\",\"pl_off\":\"0\",";
     j += "\"dev_cla\":\"problem\",";
     j += device_json(node, board_id);

@@ -139,9 +139,8 @@ assert.ok(connected.indexOf("s_connected_client_epoch.store") <
 "the event task must publish the epoch before exposing the connected client");
 assert.doesNotMatch(connected, /s_(?:weather|modbus|env3)_cleanup_requested\.store/,
   "a normal reconnect of the same client must not duplicate a complete cleanup run");
-assert.match(mqtt,
-  /esp_mqtt_client_stop\(s_client\)[\s\S]*?s_source_cleanup\.invalidate_client\(\)[\s\S]*?esp_mqtt_client_destroy\(s_client\)/,
-  "publisher promotion must invalidate the old id after stop and before destroy");
+assert.doesNotMatch(mqtt, /promote_client_to_publisher/,
+  "X10A evidence must not replace the transport or invalidate a retained cleanup owner");
 assert.match(mqtt,
   /mqtt_transport_pause_if_requested[\s\S]*?esp_mqtt_client_stop\(s_client\)[\s\S]*?source_cleanup_outbox_cleared_after_transport_stop\(\)/,
   "OTA/Weather transport pause must release the cleanup id whose outbox item stop deleted");

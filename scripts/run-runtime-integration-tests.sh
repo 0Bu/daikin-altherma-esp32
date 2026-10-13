@@ -94,6 +94,8 @@ node test/test_src_runtime.mjs
 # Real polling and accessory task entries execute with bounded SDK/service adapters.
 python3 test/poll_runtime/run.py
 python3 test/startup_runtime/run.py
+# The bounded retirement journal executes its production NVS adapter and failure controls.
+python3 test/mqtt_retirement_store/run.py
 # The production UART transport retains SDK errors separately from device frame failures.
 node test/test_uart_runtime.mjs
 # The complete detector retains candidate pin policy, transport causes and real profile selection.

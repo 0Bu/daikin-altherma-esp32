@@ -66,7 +66,7 @@ physical measurement. `?redact=1` applies the [report redaction contract](SECURI
 | `wifi` | `ssid`, `ip`, `rssi`, `connected`, `bssid`, `mac`, `std`, `rolled_back` | BSSID/PHY standard are null offline. `rolled_back` is sticky until the next WiFi save. |
 | `net` | `kind`, `ip`, `eth` | Active transport (`none`, `wifi`, `eth`) and its address, independent of X10A/HomeHub. |
 | `net.eth` | `supported`, `present`, `link`, `lease`, `ip`, `mac`, `speed_mbps`, `full_duplex`, `pins{ sclk,cs,miso,mosi }` | Build support, detected controller, cable and DHCP are distinct. Speed/duplex are null without link. |
-| `mqtt` | `configured`, `connected`, `tls`, `has_creds`, `broker`, `base`, `base_custom`, `error` | Effective base vs explicit custom choice. `has_creds` reports stored presence, never credentials, even if the broker is disabled. |
+| `mqtt` | `configured`, `connected`, `tls`, `has_creds`, `broker`, `base`, `base_custom`, `error`, `retirement_evidence` | Effective base vs explicit custom choice. `has_creds` reports stored presence, never credentials, even if the broker is disabled. Retirement bit mask is defined below. |
 | `syslog` | `configured`, `resolved`, `reachable`, `queue_dropped`, `host`, `port`, `error` | Saved target and DNS/advisory reachability. Queue refusal cannot prove UDP delivery or collector retention. |
 | `ntp` | `server`, `synced`, `time` | Configured server; false/null until sync, then RFC 3339 UTC (empty if calendar conversion is invalid). |
 | `ota` | `channel` | Saved `release`/`dev` feed choice, independent of the currently running version. |
@@ -79,6 +79,15 @@ physical measurement. `?redact=1` applies the [report redaction contract](SECURI
 | `sys` | `free_heap`, `min_free_heap`, `max_alloc`, `heap_restarts`, `mqtt_skipped`, `mqtt_quiesced`, `poll_skipped`, `reset_reason`, `safe_mode`, `safe_mode_cause`, `stack_min_free_bytes` | Heap bytes, largest internal block, allocation/quiesce counters, reset and recovery state. |
 | `sys.stack_min_free_bytes` | `httpd`, `poll`, `mqtt`, `modbus`, `weather`, `ota`, `syslog`, `env3`, `led`, `button`, `wifi_watchdog`, `eth_fallback`, `captive_dns`, `ota_health`, `http_deadline`, `main`, `sdk_mqtt` | Boot-local sampled minimum free stack bytes; null until that task was sampled. Samples survive task recreation. `sdk_mqtt` uses transport-task callbacks; synchronous caller error events do not sample it. |
 | `last_crash` | null or `{reason,reason_code,fault,coredump[,task,pc,backtrace,corrupted,elf_sha256]}` | Current boot reset/fault plus any stored dump summary. Stored incident age/reset relationship remain unknown even for matching ELF. Proven foreign dumps are preserved but suppressed. Dump presence is live; dismissal preserves `sys.reset_reason`. |
+
+`mqtt.retirement_evidence` is a maintainer bit mask, zero before journal service or without MQTT.
+Bits `0x001` / `0x080` distinguish a nonempty matching predecessor actually **loaded this boot**
+from durable metadata for the current target; saving alone does not prove restoration.
+`0x002` is the missing/empty bootstrap boundary, `0x004` a foreign base/board, `0x100` an operator
+migration boundary, and `0x040` pending retirement. Error bits are `0x008` (load), `0x010`
+(incompatible record/unknown profile) and `0x020` (save). Errors clear after recovery; loaded and
+boundary evidence remains for the boot. This record never establishes physical model identity.
+See [MQTT migrations](MQTT.md#migrations) for scope and owner actions.
 
 ### Optional inputs
 

@@ -1,81 +1,63 @@
-// Source-boundary regression test for the IDF-facing MQTT lifecycle. The pure C++ gate test proves
-// state transitions; this pins the orchestration host tests cannot link: MQTT connects in a no-LWT
-// subscriber-only mode before X10A, inbound reference handling stays outside the publish gate, and
-// the first valid X10A response replaces that client with the installation-LWT publisher.
+// Source boundaries supplement the executable complete-TU MQTT runtime witness. Transport, source
+// availability and independent-source publication have different owners.
 import assert from "node:assert/strict";
 import fs from "node:fs";
-
-const mqtt = fs.readFileSync(new URL("../main/mqtt_ha.cpp", import.meta.url), "utf8");
-const main = fs.readFileSync(new URL("../main/main.cpp", import.meta.url), "utf8");
-
-const hpStart = main.indexOf("daik::hp_poll_start()");
-const mqttStart = main.indexOf("daik::mqtt_ha_start()");
-assert.ok(hpStart >= 0 && mqttStart > hpStart,
+const read = (path) => fs.readFileSync(new URL(`../${path}`, import.meta.url), "utf8");
+const mqtt = read("main/mqtt_ha.cpp");
+const main = read("main/main.cpp");
+const discovery = read("main/logic/discovery.hpp");
+assert.ok(main.indexOf("daik::mqtt_ha_start()") > main.indexOf("daik::hp_poll_start()"),
   "the X10A owner must start before the MQTT bridge");
-
 const taskStart = mqtt.indexOf("static void mqtt_task(void*)");
 const taskEnd = mqtt.indexOf("static bool build_client(", taskStart);
-assert.ok(taskStart >= 0 && taskEnd > taskStart, "the MQTT task boundary must remain identifiable");
+assert.ok(taskStart >= 0 && taskEnd > taskStart);
 const task = mqtt.slice(taskStart, taskEnd);
-
-const initialStart = task.indexOf("start_current_client()");
-const gateStep = task.indexOf("mqtt_cycle_gate(publish_gate, x10a_connected)");
-const promote = task.indexOf("if (gate.promote_publisher");
-const refSubscription = task.indexOf("service_reference_subscription(ref_config, reference_epoch)");
-const refFrames = task.indexOf("service_reference_frames(ref_config)");
-const offline = task.indexOf("if (gate.publish_offline)");
-const resume = task.indexOf("if (gate.resumed");
-const publishCycle = task.indexOf("if (gate.publish_cycle)");
-assert.ok(initialStart >= 0 && gateStep > initialStart && promote > gateStep,
-  "the no-LWT client must start before X10A decides publisher promotion");
-assert.ok(refSubscription > promote && refFrames > refSubscription,
-  "saved room-source subscription and runtime frame decoding must run outside the publish gate");
-assert.doesNotMatch(task, /service_reference_probe|mqtt_reference_test/,
-  "removing the room pre-save test must not leave a second inbound state machine");
-assert.ok(offline > refFrames && resume > offline && publishCycle > resume,
-  "offline/resume transitions and every ordinary publication must follow inbound servicing");
-assert.doesNotMatch(task.slice(promote, refSubscription), /SubscriberOnly[\s\S]*continue\s*;/,
-  "subscriber-only mode must not skip inbound reference servicing");
+const sample = task.indexOf("mqtt_cycle_gate(publish_gate, x10a_connected)");
+const withdrawal = task.indexOf('mqtt_publish(s_x10a_avail, "offline", 0, 1, 1)');
+const config = task.indexOf("const Config ref_config = config()");
+const frames = task.indexOf("service_reference_frames(ref_config)");
+const gateAt = task.indexOf("if (gate.publish_cycle) {");
+assert.ok(task.indexOf("start_current_client()") < sample && sample < withdrawal &&
+  withdrawal < config && config < frames && frames < gateAt,
+"transport starts independently and source withdrawal precedes allocating Config/inbound work");
+assert.ok(task.indexOf("service_source_cleanup_evidence();") < config,
+  "a low-heap Config failure must not discard broker cleanup ACK evidence");
 assert.match(mqtt,
-  /mqtt_cycle_gate\([\s\S]*?const HpStats hp = hp_stats\(\);[\s\S]*?return mqtt_publish_gate_step\(state, hp\.connected, hp\.last_ok_s, s_connected\.load\(\)\)/,
-  "availability gating must debounce current-cycle X10A loss with monotonic last-good age");
-assert.match(task,
-  /else if \(x10a_connected && !s_announced_profile\.empty\(\)/,
-  "an availability-grace cycle must not retain an empty X10A snapshot");
-
-const builderStart = taskEnd;
-const builderEnd = mqtt.indexOf("static bool start_current_client()", builderStart);
-assert.ok(builderStart >= 0 && builderEnd > builderStart,
-  "the two-mode MQTT client builder must remain identifiable");
-const builder = mqtt.slice(builderStart, builderEnd);
+  /mqtt_cycle_gate[\s\S]*?const HpMqttSourceState hp = hp_mqtt_source_state\(\);[\s\S]*?return mqtt_publish_gate_step\(state, hp\.recent, s_connected\.load\(\)\)/,
+  "source withdrawal must use the allocation-free poll-owned freshness sample");
+// Preserve source offsets while ignoring comments and quoted strings before following braces.
+const structural = task.replace(/\/\*[\s\S]*?\*\/|\/\/[^\n]*|"(?:\\.|[^"\\])*"/g,
+  (match) => " ".repeat(match.length));
+let depth = 0, gateEnd = -1;
+for (let i = structural.indexOf("{", gateAt); i < structural.length; ++i) {
+  if (structural[i] === "{") ++depth;
+  if (structural[i] === "}" && --depth === 0) { gateEnd = i; break; }
+}
+assert.ok(gateEnd > gateAt, "the X10A source gate must have a bounded identifiable body");
+const x10a = task.slice(gateAt, gateEnd);
+assert.match(x10a, /publish_x10a_discovery\(\)/);
+assert.match(x10a, /if \(x10a_connected && prof != "auto" && !seed_attempted\)/,
+  "a grace-period empty sweep must not overwrite retained X10A readings with an empty document");
+assert.match(x10a, /if \(x10a_connected && !s_last_x10a_digest_valid\)/,
+  "a discovery retry must not force an empty X10A seed during observation grace");
+assert.match(x10a,
+  /s_x10a_publish_proven\.load[\s\S]*?hp_mqtt_source_state\(\)\.recent[\s\S]*?mqtt_publish\(s_x10a_avail, "online"/,
+  "source online needs an accepted state seed and a still-recent source");
+for (const call of ["publish_modbus_state", "publish_weather_state", "publish_env3_state",
+  "publish_heartbeat()", "publish_heating_curve_telemetry(ref_config)"]) {
+  assert.ok(task.indexOf(call, gateEnd) > gateEnd, `${call} must remain outside X10A authority`);
+}
+assert.doesNotMatch(mqtt, /promote_client_to_publisher|publisher_lwt|s_client_is_publisher/,
+  "X10A must not change the broker lifecycle or LWT ownership");
+const builderEnd = mqtt.indexOf("static bool start_current_client()", taskEnd);
+const builder = mqtt.slice(taskEnd, builderEnd);
 assert.match(builder,
-  /if \(publisher_lwt\)\s*\{[\s\S]*last_will\.topic[\s\S]*last_will\.msg[\s\S]*last_will\.retain/,
-  "only the proven publisher client may carry the shared installation LWT");
-
-const promoteStart = mqtt.indexOf("static bool promote_client_to_publisher()", builderEnd);
-const promoteEnd = mqtt.indexOf("void mqtt_ha_start()", promoteStart);
-assert.ok(promoteStart >= 0 && promoteEnd > promoteStart,
-  "the subscriber-to-publisher replacement boundary must remain identifiable");
-const promoteBody = mqtt.slice(promoteStart, promoteEnd);
-const cleanStop = promoteBody.indexOf("esp_mqtt_client_stop(s_client)");
-const destroy = promoteBody.indexOf("esp_mqtt_client_destroy(s_client)");
-const armedBuild = promoteBody.indexOf("build_client(true)");
-const armedStart = promoteBody.indexOf("start_current_client()");
-assert.ok(cleanStop >= 0 && destroy > cleanStop && armedBuild > destroy && armedStart > armedBuild,
-  "publisher promotion must cleanly stop/destroy the no-LWT client before arming a replacement");
-
-const publicStart = mqtt.indexOf("void mqtt_ha_start()");
-const publicStartEnd = mqtt.indexOf("MqttStatus mqtt_status()", publicStart);
-assert.ok(publicStart >= 0 && publicStartEnd > publicStart,
-  "the public MQTT start boundary must remain identifiable");
-const publicBody = mqtt.slice(publicStart, publicStartEnd);
-assert.match(publicBody, /build_client\(false\)/,
-  "mqtt_ha_start must build the initial subscriber without an installation LWT");
-assert.doesNotMatch(publicBody, /waiting for X10A response/,
-  "missing X10A must no longer masquerade as an MQTT connection error");
-
-const startCalls = [...mqtt.matchAll(/esp_mqtt_client_start\s*\(/g)];
-assert.equal(startCalls.length, 1,
-  "all initial and replacement starts must share one checked lifecycle wrapper");
-
-console.log("MQTT lifecycle: no-LWT subscriptions before X10A; all ordinary publishes remain gated");
+  /last_will\.topic\s*=\s*s_avail\.c_str\(\)[\s\S]*last_will\.msg\s*=\s*"offline"[\s\S]*last_will\.retain\s*=\s*1/,
+  "the initial client must arm the retained broker-transport LWT");
+assert.match(mqtt, /if \(s_board\.empty\(\)\)[\s\S]*?set_status\(false, "board MAC read failed"\)[\s\S]*?return;/,
+  "a failed MAC read must stop before creating an unidentified client");
+assert.match(discovery, /append_x10a_availability[\s\S]*?state_topic \+ "\/status"[\s\S]*?availability_mode/,
+  "X10A discovery must require both exact transport/source availability topics");
+assert.equal([...mqtt.matchAll(/esp_mqtt_client_start\s*\(/g)].length, 1,
+  "initial start and resume retries must share the checked lifecycle wrapper");
+console.log("MQTT lifecycle: one initial transport LWT, pre-allocation X10A withdrawal, independent sources");

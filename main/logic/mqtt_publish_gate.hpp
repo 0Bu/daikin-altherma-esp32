@@ -1,22 +1,17 @@
 #pragma once
 #include <cstdint>
 
-// X10A owns the outbound MQTT identity, not the broker connection. A board that has never received
-// an X10A reply may still connect WITHOUT the installation LWT and subscribe to its configured
-// reference-temperature topic. It may emit only empty retained tombstones that reconstruct a
-// persisted source/consent cleanup or retract permanently retired discovery; it must not publish
-// current discovery, diagnostics or auxiliary-source data. The first X10A reply promotes that
-// read-only session to the ordinary LWT-bearing publisher. A later, CONFIRMED bus loss marks an
-// already-active installation offline once, then suppresses every ordinary publish until the bus
-// returns; inbound subscriptions and the same delete-only cleanup exception stay alive. X10A
-// occasionally loses a whole poll sweep, so the current-cycle bit alone is not outage evidence.
-// The monotonic age of the last answering sweep provides the debounce without hiding a sustained
-// cable/unit failure. The only other `offline` is the OTA-pause withdrawal at the end of this file.
+// MQTT transport and X10A are separate availability authorities. Every client carries the broker
+// LWT; auxiliary sources, diagnostics and subscriptions do not depend on this X10A-only gate.
+// X10A occasionally loses a whole poll sweep, so the current-cycle bit alone is not outage
+// evidence. The monotonic age of the last answering sweep provides the debounce without hiding a
+// sustained cable/unit failure. The only other `offline` is the OTA-pause withdrawal at the end of
+// this file.
 
 namespace daik {
 
 enum class MqttPublishGateState {
-    SubscriberOnly,
+    Unavailable,
     Active,
     Paused,
 };
@@ -71,29 +66,26 @@ inline constexpr bool mqtt_source_state_needs_publish(uint32_t revision,
 }
 
 struct MqttPublishGateDecision {
-    MqttPublishGateState next = MqttPublishGateState::SubscriberOnly;
-    bool promote_publisher = false; // first X10A proof: reconnect with the installation LWT armed
-    bool publish_cycle = false;    // ordinary discovery/state/heartbeat publication is allowed
-    bool publish_offline = false;  // one transition marker for a previously active installation
+    MqttPublishGateState next          = MqttPublishGateState::Unavailable;
+    bool                 publish_cycle = false; // X10A discovery/state publication is allowed
+    bool publish_offline = false; // source withdrawal; runtime retries until SDK acceptance
     bool resumed = false;          // bus recovered without requiring a broker reconnect
 };
 
-inline MqttPublishGateDecision mqtt_publish_gate_step(MqttPublishGateState state,
-                                                      bool x10a_connected,
-                                                      int32_t x10a_last_ok_s,
+inline MqttPublishGateDecision mqtt_publish_gate_step(MqttPublishGateState state, bool x10a_recent,
                                                       bool mqtt_connected) {
     MqttPublishGateDecision d;
     d.next = state;
-    const bool x10a_available = mqtt_x10a_available(x10a_connected, x10a_last_ok_s);
     switch (state) {
-    case MqttPublishGateState::SubscriberOnly:
-        if (x10a_available) {
+    case MqttPublishGateState::Unavailable:
+        if (x10a_recent) {
             d.next = MqttPublishGateState::Active;
-            d.promote_publisher = true;
+            d.publish_cycle = mqtt_connected;
+            d.resumed       = true;
         }
         break;
     case MqttPublishGateState::Active:
-        if (x10a_available) {
+        if (x10a_recent) {
             d.publish_cycle = mqtt_connected;
         } else {
             d.next = MqttPublishGateState::Paused;
@@ -101,7 +93,7 @@ inline MqttPublishGateDecision mqtt_publish_gate_step(MqttPublishGateState state
         }
         break;
     case MqttPublishGateState::Paused:
-        if (x10a_available) {
+        if (x10a_recent) {
             d.next = MqttPublishGateState::Active;
             d.publish_cycle = mqtt_connected;
             d.resumed = true;
@@ -112,9 +104,9 @@ inline MqttPublishGateDecision mqtt_publish_gate_step(MqttPublishGateState state
 }
 
 // The network-heap pause stops esp-mqtt cleanly. Its DISCONNECT makes the broker discard the
-// installation LWT while the retained availability still reads `online`. An OTA install ends in
-// esp_restart() with that transport still stopped, and the next boot connects without an LWT until
-// X10A answers, so the stale `online` would outlive the boot, indefinitely if X10A never returns.
+// broker LWT while the retained availability still reads `online`. An OTA install ends in
+// esp_restart() with that transport still stopped, so the retained transport status must be
+// withdrawn before a clean stop even when no X10A reply has arrived.
 // Every OTA pause therefore withdraws it first, the check too: an install always consumes a
 // completed check, and when the install follows before an MQTTS client has passed its resume gate,
 // the install's own pause finds the client already stopped. Otherwise the resumed publisher's
@@ -122,7 +114,7 @@ inline MqttPublishGateDecision mqtt_publish_gate_step(MqttPublishGateState state
 // again; a check or failed install resumes the same way. A pause that finds the client stopped or
 // reconnecting after an earlier stop cannot withdraw anything (docs/ARCHITECTURE.md).
 // A Weather pause is never followed by a restart and keeps its short gap without availability
-// churn. Only the LWT-bearing publisher speaks for the installation, and only a connected client
+// churn. Every client carries this transport LWT, and only a connected client
 // can still put the marker on the stream ahead of the DISCONNECT.
 inline constexpr bool mqtt_pause_withdraws_online(bool ota_pause, bool publisher_client,
                                                   bool mqtt_connected) {

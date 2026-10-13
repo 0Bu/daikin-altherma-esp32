@@ -197,10 +197,6 @@
       "pattern": "^(?:daik::(?:\\(anonymous namespace\\)::)?service_circulation_subscription\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?32service_circulation_subscription[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
       "max_bytes": 224
     },
-    "mqtt_promotion": {
-      "pattern": "^(?:daik::(?:\\(anonymous namespace\\)::)?promote_client_to_publisher\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?27promote_client_to_publisher[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
-      "max_bytes": 112
-    },
     "mqtt_client_start": {
       "pattern": "^(?:daik::(?:\\(anonymous namespace\\)::)?build_client\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?12build_client[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
       "max_bytes": 1024
@@ -1602,12 +1598,16 @@
       "max_bytes": 112
     },
     "status_health_number": {
-      "pattern": "^daik::append_status_json<daik::BoundedChunkSink<daik::HttpChunkEmitter,\\ 1024u>\\ >\\(daik::BoundedChunkSink<daik::HttpChunkEmitter,\\ 1024u>\\&,\\ bool\\)::\\{lambda\\(char\\ const\\*,\\ int\\)\\\u00231\\}::operator\\(\\)\\(char\\ const\\*,\\ int\\)\\ const$",
+      "pattern": "^daik::append_status_json<daik::BoundedChunkSink<daik::HttpChunkEmitter,\\ 1024u>\\ >\\(daik::BoundedChunkSink<daik::HttpChunkEmitter,\\ 1024u>\\&,\\ bool\\)::\\{lambda\\(char\\ const\\*,\\ int\\)\\#1\\}::operator\\(\\)\\(char\\ const\\*,\\ int\\)\\ const$",
       "max_bytes": 32
     },
     "status_unsigned_number": {
       "pattern": "^void\\ daik::append_json_uint<daik::BoundedChunkSink<daik::HttpChunkEmitter,\\ 1024u>\\ >\\(daik::BoundedChunkSink<daik::HttpChunkEmitter,\\ 1024u>\\&,\\ unsigned\\ long\\ long\\)$",
       "max_bytes": 64
+    },
+    "mqtt_public_start": {
+      "pattern": "^daik::mqtt_ha_start\\(\\)$",
+      "max_bytes": 640
     }
   },
   "paths": {
@@ -1982,16 +1982,6 @@
         "mqtt_task",
         "mqtt_cleanup",
         "mqtt_cleanup_probe"
-      ],
-      "multipliers": {},
-      "base_bytes": 1536,
-      "max_bytes": 5120
-    },
-    "mqtt_promotion": {
-      "symbols": [
-        "mqtt_task",
-        "mqtt_promotion",
-        "mqtt_client_start"
       ],
       "multipliers": {},
       "base_bytes": 1536,
@@ -3275,6 +3265,17 @@
       "multipliers": {},
       "base_bytes": 1536,
       "max_bytes": 8192
+    },
+    "main_initial_mqtt_client": {
+      "symbols": [
+        "main_task",
+        "boot_sequence",
+        "mqtt_public_start",
+        "mqtt_client_start"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
     }
   },
   "tasks": {
@@ -3336,7 +3337,8 @@
         "main_wifi_config_save",
         "main_wifi_config_success",
         "main_wifi_driver",
-        "main_wifi_wait"
+        "main_wifi_wait",
+        "main_initial_mqtt_client"
       ]
     },
     "mqtt": {
@@ -3349,7 +3351,6 @@
         "mqtt_reference_subscribe",
         "mqtt_circulation_subscribe",
         "mqtt_cleanup",
-        "mqtt_promotion",
         "mqtt_discovery",
         "mqtt_weather",
         "mqtt_heartbeat",

@@ -7,16 +7,17 @@ command subscriptions or writable entities**.
 ## Topics
 
 `<base>` defaults to `daikin-altherma-esp32`; `<prefix>` to `homeassistant`. Data topics sit directly
-under the base with no node segment. `<node>` is the slugified base used for discovery only.
+under the base with no node segment. `<node>` is the installation identity described below.
 
 | Topic | Retained | Payload / cadence |
 |---|---|---|
-| `<base>/status` | Yes | `online` / `offline`, installation availability and last will. |
+| `<base>/status` | Yes | `online` / `offline`, broker transport availability and last will. |
+| `<base>/x10a/status` | Yes | `online` / `offline`, X10A source availability. |
 | `<base>/x10a` | Yes | Grouped JSON from readable publishable X10A rows, updated by the publisher's nominal one-second loop. |
 | `<base>/modbus` | Yes | Flat HomeHub register JSON while enabled; disconnected source yields `{}`. No HA value discovery. |
 | `<base>/env3` | Yes | Flat optional accessory readings/counters; each fresh sample, normally every 10 s. |
 | `<base>/weather/openmeteo/forecast` | Yes | Atomic weather evidence while location and diagnostics consent are enabled. No HA discovery. |
-| `<base>/heartbeat` | No | Flat board/link diagnostics, every 10 s while outbound publication is allowed. |
+| `<base>/heartbeat` | No | Flat board/link diagnostics, every 10 s while connected. |
 | `<base>/heating_curve` | No | Schema-v3 room/diagnosis evidence on the same 10 s cadence. No HA discovery. |
 | `<base>/crash` | Yes | Pending fault/dump summary; only while a notable record exists. |
 | `<prefix>/<component>/<node>/<group>_<object_id>/config` | Yes | X10A discovery config; `binary_sensor` for converter 300–307 bit flags, `sensor` otherwise. |
@@ -30,38 +31,40 @@ backoff. Failed event registration prevents transport start and reports an expli
 
 ## Outbound availability
 
-X10A owns the outbound installation identity. Before the first valid X10A reply after boot, MQTT
-connects as a subscriber **without the installation LWT** and sends no ordinary state, discovery,
-heartbeat or auxiliary-source evidence. Delete-only retained cleanup remains allowed, including
-retired discovery and persisted source/consent cleanup. Configured inbound observers can still receive.
+One client starts with the retained transport LWT immediately, without waiting for X10A. Bridge
+diagnostics, HomeHub, ENV III, forecast and inbound observers keep their independent lifecycles.
+X10A discovery uses `availability_mode: all`: both `<base>/status` and `<base>/x10a/status` must be
+online. Board and accessory discovery uses transport availability; missing accessory keys stay unknown.
 
-After first proof, the client reconnects with the LWT and publishes online/current state. A later
-X10A outage of **15 seconds** publishes offline once and suppresses ordinary output until recovery.
-A shorter empty sweep changes neither availability nor the retained X10A payload. Recovery publishes
-online plus a fresh seed. HTTP diagnostics stay available regardless of the MQTT gate.
+Each connection first withdraws old X10A availability. A current X10A payload accepted by esp-mqtt
+then permits source `online`; rejected sends are retried. Before the first valid reply, and at
+**15 seconds** since the last successful reply, source availability is offline and X10A state and
+new discovery pause. A shorter empty sweep changes neither the retained payload nor availability.
+Recovery seeds current state before source online. This clock comes from the poller, independently
+of the allocating configuration snapshot. Offline and cleanup requests survive allocation failures.
 
-For an OTA check/install, a connected client publishes retained `offline` before pausing its TLS
-transport. After a check or pre-reboot failure, it reconnects online once X10A answers; a successful
-install waits for the new boot's first valid reply. A check followed by installation can therefore
-produce offline → online → offline. **If OTA starts while MQTT is reconnecting, it cannot withdraw
-an old retained `online`**; that value can survive a restart indefinitely if X10A never answers.
-Weather-refresh pauses leave availability unchanged. Retained availability alone is not current
-source proof.
+For an OTA check/install, a connected client retains transport `offline` before its clean stop.
+An already reconnecting client cannot withdraw an old marker during that stop; on its next
+connection it publishes current transport and source markers again. Weather-refresh pauses leave
+transport availability unchanged. Retained markers alone are not current source proof, and older
+single-marker discovery needs the migration below before it can rely on this split.
 
 ## Identity and discovery
 
 | Identifier | Construction |
 |---|---|
-| Node / primary `dev.ids` | Base slug: lowercase alphanumeric, other runs collapsed to `_`, no edge underscores. |
-| MQTT client id / secondary `dev.ids` | `daikin_<mac3>`, from the board's low three WiFi-MAC bytes. |
+| Node / primary `dev.ids` | Lowercase alphanumeric segments separated by single hyphens retain their underscore slug. All other accepted bases use `daikin_altherma_esp32__` followed by the complete raw-base bytes in hex. |
+| MQTT client id / secondary `dev.ids` | `daikin_altherma_esp32__board_<mac12>`, from the complete WiFi MAC. Invalid/unreadable MAC prevents MQTT startup. |
 | X10A state key | `<group>.<object_id>`; object id is the same slug rule applied to the label. |
-| X10A `uniq_id` | `<node>_<group>_<object_id>`. |
-| Diagnostic/accessory `uniq_id` | `<node>_<object_id>`, using its surface's fixed diagnostic id. |
+| X10A `uniq_id` | `<node><separator><group>_<object_id>`. |
+| Diagnostic/accessory `uniq_id` | `<node><separator><object_id>`, using its surface's fixed diagnostic id. |
 
 One base/node represents one installation; preserve it on board replacement. Distinct installations
-must use distinct raw bases **and distinct slugs**. `plant-one` and `plant_one` produce the same HA
-node. The board-derived secondary identifier preserves device-registry merging for MAC-era upgrades;
-it does not authorize two current publishers under one installation identity.
+must use distinct raw bases. `plant-one` and `plant_one` now have distinct HA nodes. The separator
+is `_` for the default and `daikin-altherma-esp32-bench`, preserving their deployed entity IDs;
+custom installations use `__` so a node suffix cannot masquerade as part of a sensor ID. The full
+hardware identifier occupies a separate namespace. Historical three-byte aliases are not advertised
+because two boards can share them; already merged HA registry entries require owner migration.
 
 Base selection is runtime `POST /set_mqtt` field `base`: omitted keeps it; empty uses the compiled
 default. A base is at most 64 bytes, cannot contain spaces, controls, `+`, `#`, empty path segments
@@ -269,14 +272,28 @@ latest reset remain unknown. Preserve private memory evidence before dismissal; 
 | `<base>/weather_forecast` and four weather discovery configs | Use `<base>/weather/openmeteo/forecast`; no weather HA entities. |
 | 27 historical HomeHub discovery configs under `<node>_modbus` | Retired; data topic `<base>/modbus` remains. Delete-only passes run on connect and every five minutes outside the X10A gate. |
 | Flat `room_*` / `heating_curve_*` heartbeat fields | Move consumers to the grouped `heating_curve` paths above; heartbeat is non-retained, so no tombstone applies. |
-| MAC-era / ungrouped X10A discovery | Old configs are deleted before replacements; keep HA connected during deletion. Entity-id history can continue when HA reclaims the same entity id; unique-id customizations do not. |
+| Single-marker X10A availability | `<base>/status` now means transport availability. Current discovery requires transport **and** `<base>/x10a/status`. Confirm current configs have both before trusting X10A availability. If X10A is absent during the first upgrade, old configs cannot be automatically replaced: pause consumers and migrate confirmed old configs explicitly. Raw consumers must check both markers and actual source freshness. |
+| Custom-base unique IDs / lossy base slugs | New IDs separate node and entity with `__`; noncanonical bases are encoded exactly. Export customizations, identify the exact former configs, remove only abandoned IDs and reconcile HA references/history. Default and bench entity IDs remain unchanged. |
+| Three-byte MAC aliases / MAC-era discovery | Complete-MAC hardware IDs replace ambiguous aliases without advertising the old alias. Owner reconciliation is required for old discovery or already merged registry devices; do not delete a short-MAC namespace that another board may own. |
+| Current-namespace ungrouped X10A discovery | Confirmed deletions precede replacements; keep HA connected. Unique-id customizations do not migrate automatically. |
 | Textual bit-flag sensors | Now `binary_sensor`; update domain references. Old-domain history does not migrate automatically. |
 | Device Time, WiFi Quality, Last Reset Reason | Retired discovery removed; use `/status.ntp`, WiFi Signal and Reset Reason respectively. `time` / `wifi_quality_pct` heartbeat fields are gone. |
 | Non-hybrid `0x64` boiler/hybrid entities | Detect-only rows retracted; use **LW setpoint (main)** for the legitimate heating target. |
 | Old Target Evap. Temp. samples | Corrected converter keeps its id; pre-correction history remains wrong and must be excluded from comparisons. |
 
 Retired state-topic probes delete only an actually returned old retained payload. Permanent
-HomeHub/weather discovery ledgers remain frozen independently of the current catalog.
+HomeHub/weather discovery ledgers remain frozen independently of the current catalog. Cleanup
+advances only after the matching client-epoch PUBACK, retries refused sends, and keeps at most one
+cleanup message in flight across source and discovery jobs. Replacement discovery waits for those
+deletions; current telemetry remains live.
+
+The dedicated NVS retirement record stores only the last possibly announced base, full board ID
+and profile, never credentials or active configuration. A known predecessor is retired before its
+replacement is saved, and the replacement is saved before discovery. Reload after a real reboot
+therefore resumes known-profile cleanup. A missing first-upgrade record cannot recover an unknown
+older profile; a corrupt/incompatible record blocks new X10A discovery rather than guessing.
+An abandoned broker/base or replacement board is an owner migration boundary: the new connection
+does not authenticate to the old broker or blindly delete another installation's topics.
 
 For a retired board or an intentionally abandoned base, first list and inspect the retained topics.
 Delete **only confirmed old topics**, for example:

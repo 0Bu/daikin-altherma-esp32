@@ -1139,6 +1139,13 @@ bool hp_link_connected() {
     return s_stats.connected && x10a_cache_recent_locked();
 }
 
+HpMqttSourceState hp_mqtt_source_state() {
+    if (!s_mtx) return {};
+    Lock       lk(s_mtx);
+    const bool recent = x10a_cache_recent_locked();
+    return {s_stats.connected && recent, recent};
+}
+
 uint32_t hp_skipped_cycles() { return s_cycles_skipped.load(std::memory_order_relaxed); }
 
 bool hp_probe_run(uint8_t reg, HpProbeReply& out, int timeout_ms) {

@@ -2,18 +2,14 @@
 // esp-mqtt client in its own publish task:
 //   • TLS policy: credentials present ⇒ mqtts:// + CA-verified (esp_crt_bundle); NEVER send
 //     credentials over plaintext (no silent fallback — refuse with an error in /status.mqtt).
-//   • X10A owns the outbound installation identity, not inbound observation: before the first valid
-//     X10A reply, connect without the shared installation LWT and service only the configured
-//     reference-temperature subscription/test. The first reply replaces that read-only session with
-//     the normal LWT-bearing publisher. After activation, a bus loss lasting 15 seconds marks
-//     availability offline once and then suppresses every ordinary publish until X10A returns;
-//     subscriptions stay alive. A shorter whole-sweep dropout neither flaps availability nor emits
-//     an empty X10A document. A clean transport stop for an OTA check or install retains `offline`
-//     first, since its DISCONNECT discards the LWT and an install restarts the board.
-//   • On (re)connect: mark availability "online", stream retained discovery configs for the active
-//     X10A profile, diagnostics and enabled ENV III, and retract every retired HomeHub/weather
-//     discovery config. HomeHub values stay on MQTT for non-HA consumers, but are deliberately not
-//     exposed as HA entities; weather has no HA entities either.
+//   • One client carries the retained <base>/status transport LWT from its initial connection.
+//     Independent HomeHub, ENV III, weather and board diagnostics remain publishable without X10A.
+//     X10A discovery requires both transport and <base>/x10a/status, whose 15-second observation
+//     grace never extends a retained state into fresh evidence. Recovery announces source online
+//     only after a fresh state seed is accepted. A short empty sweep does not retain empty X10A.
+//   • On (re)connect: mark transport online, seed each source from its own current liveness, and
+//     retract frozen retired discovery with broker-confirmed cleanup. An OTA pause withdraws
+//     transport availability before its clean stop, which otherwise discards the LWT.
 //   • Each cycle: publish X10A's grouped JSON to <base>/x10a, the generation-checked flat HomeHub
 //     JSON to <base>/modbus, and — only while Open-Meteo is configured AND diagnostics consent is
 //     active — an atomic forecast/provenance snapshot to <base>/weather/openmeteo/forecast when
@@ -26,13 +22,12 @@
 //     id identifies the DEVICE only in each discovery config's uniq_id/dev.ids + the
 //     <prefix>/<component>/<node>/<group>_<object_id> discovery topic. That node id is derived from
 //     the BASE TOPIC (logic/ha_device.hpp), not from the board's MAC, so replacing the ESP32 keeps
-//     ONE HA device and its entities; this board's MAC-derived id stays on as the MQTT client id
-//     and a second dev.ids entry (HA merges on it, so an install upgrading from a MAC-identified
-//     build keeps its device). The entity id carries the REGISTER GROUP because uniq_id and the
+//     ONE HA device and its entities; the full hardware MAC identifies the MQTT client and a
+//     secondary dev.ids entry. Legacy short-MAC identities require operator migration rather than
+//     guessed ownership. The entity id carries the REGISTER GROUP because uniq_id and the
 //     discovery topic are flat namespaces while a label is unique only within its page
-//     (legacy-221). The configs an older build published under a superseded identity — the MAC node
-//     id, and the un-grouped entity ids — are retracted in one pass before any replacement goes
-//     out.
+//     (legacy-221). Frozen ungrouped and relabelled entities under the current owned namespace are
+//     retracted before replacement discovery.
 //   • Every HEARTBEAT_INTERVAL_S (10 s): rebuild + publish board/link diagnostics
 //     (logic/heartbeat.hpp) to <base>/heartbeat and the separately grouped
 //     room-source/heating-curve evidence (logic/heating_curve_mqtt.hpp) to <base>/heating_curve.
@@ -52,6 +47,7 @@
 // is empty. Memory-safe: discovery is one small publish per value; the state JSON is a single
 // few-KB build, guarded against OOM.
 #include "mqtt_ha.hpp"
+#include "mqtt_retirement_store.hpp"
 #include "net.hpp"
 #include "config.hpp"
 #include "logic/task_failure.hpp"
@@ -80,6 +76,7 @@
 #include "logic/heartbeat.hpp"
 #include "logic/mqtt_base.hpp"   // mqtt_base_effective — the installation's base topic, host-tested
 #include "logic/mqtt_cleanup.hpp"
+#include "logic/mqtt_retirement.hpp"
 #include "logic/mqtt_group.hpp"
 #include "logic/mqtt_publish_gate.hpp"
 #include "logic/ota_quiesce.hpp" // stand aside while an OTA/weather TLS op owns the heap (legacy-380)
@@ -149,19 +146,20 @@ static std::atomic<bool>        s_env3_cleanup_requested{false};
 // above. A new client epoch restarts the idempotent sequence, while a reconnect of the same client
 // preserves esp-mqtt's queued packet and its expected message id.
 static MqttCleanupScheduler         s_source_cleanup;
+static MqttRetirementDelivery       s_retirement_delivery;
+static void                         service_source_cleanup_evidence();
 static MqttCleanupEvidenceQueue<32> s_source_cleanup_evidence;
 static std::atomic<bool>            s_source_cleanup_evidence_lost{false};
 static std::atomic<uint32_t>        s_mqtt_client_epoch{0};
 static std::atomic<uint32_t>        s_connected_client_epoch{0};
 static uint32_t                     s_source_cleanup_evidence_drops_reported = 0; // mqtt_task only
 
-// The task starts a subscriber-only client immediately, then replaces it with an LWT-bearing client
-// after the first X10A proof. Definitions live beside the client builder below; forward declarations
+// The task starts one LWT-bearing transport immediately. Definitions live beside its builder;
+// forward declarations
 // keep the publish loop above the configuration/lifecycle glue without duplicating either contract.
-static bool build_client(bool publisher_lwt);
+static bool      build_client();
 static esp_err_t start_client_transport();
 static bool start_current_client();
-static bool promote_client_to_publisher();
 // Counted publish wrapper, defined with mqtt_publish_id() below; the OTA pause step precedes both.
 static bool mqtt_publish(const std::string& topic, const char* payload, int len, int qos,
                          int retain);
@@ -272,10 +270,36 @@ using Lock = SemGuard;
 }  // namespace
 
 // Persisted so the pointers handed to esp-mqtt (and reused by the task) stay valid.
-static std::string s_uri, s_user, s_pass, s_node, s_board, s_base, s_prefix, s_avail, s_x10a,
-                   s_modbus, s_weather, s_env3, s_retired_weather, s_retired_modbus_status,
-                   s_legacy_state, s_heartbeat, s_heating_curve_topic, s_crash;
+static std::string s_uri, s_user, s_pass, s_node, s_board, s_base, s_prefix, s_avail, s_x10a_avail,
+    s_x10a, s_modbus, s_weather, s_env3, s_retired_weather, s_retired_modbus_status, s_legacy_state,
+    s_heartbeat, s_heating_curve_topic, s_crash;
 static std::string s_announced_profile;               // profile we last published discovery for (mqtt_task only)
+static std::string s_discovered_profile;              // survives reconnect's reannounce reset
+// Store provenance never restores Config or detection. Bit 0 records a real scoped predecessor
+// load in this boot; saving a same-boot record cannot claim reboot restoration.
+enum : uint32_t {
+    RETIRE_LOADED_PREDECESSOR = 0x001,
+    RETIRE_BOOTSTRAP_BOUNDARY = 0x002,
+    RETIRE_FOREIGN_BOUNDARY   = 0x004,
+    RETIRE_LOAD_ERROR         = 0x008,
+    RETIRE_INCOMPATIBLE       = 0x010,
+    RETIRE_SAVE_ERROR         = 0x020,
+    RETIRE_PENDING            = 0x040,
+    RETIRE_CURRENT_DURABLE    = 0x080,
+    RETIRE_OPERATOR_MIGRATION = 0x100
+};
+static std::atomic<uint32_t> s_retirement_evidence{0};
+static bool                  s_retirement_store_loaded = false;
+static bool                  s_retirement_store_scoped = false;
+static MqttRetirementRecord  s_retirement_record, s_retirement_staged;
+static int64_t               s_retirement_load_retry_us = 0, s_retirement_save_retry_us = 0;
+static uint32_t              s_retirement_log_state    = UINT32_MAX;
+static constexpr int64_t     RETIREMENT_STORE_RETRY_US = 5 * 1000 * 1000;
+static std::string           s_retiring_profile_target;
+static size_t                s_retiring_profile_row           = 0;
+static size_t                s_retiring_profile_shape         = 0;
+static bool                  s_retiring_current_unpublishable = false;
+static std::string           s_current_profile_retired;
 static uint64_t    s_last_x10a_digest = 0;            // per-topic dedup guards (mqtt_task only):
                                                       // fnv1a64 of the last X10A payload — the old
                                                       // full-string copy cost a permanent ~3 KB block
@@ -317,16 +341,20 @@ static int64_t           s_crash_probe_deadline_us = 0;               // mqtt_ta
 static bool              s_disabled_weather_cleaned = false;          // mqtt_task only
 // Stale-identity migration (mqtt_task only) — see retract_legacy_fixed / retract_stale_values below.
 static bool        s_legacy_fixed_retracted = false;   // heartbeat + crash entities: once per boot
+static size_t      s_legacy_fixed_step      = 0;
 static std::string s_stale_values_profile;             // value entities: the profile they were
                                                        // retracted for ("" = not yet). Keyed on the
                                                        // profile, not a bool, because the row set IS
                                                        // the profile: a re-detect (POST /detect, or
                                                        // an ambiguous first fingerprint settling)
                                                        // brings rows the earlier pass never saw.
+static std::string s_stale_values_pending_profile;
+static size_t      s_stale_values_step = 0;
 // Written false by the event task on DISCONNECT, written true + read by the publish task -> atomic.
 static std::atomic<bool> s_heartbeat_announced{false}; // diagnostic discovery streamed this connection?
 static bool         s_mqtt_ever_connected = false;     // event-task-only: first connect vs. a RE-connect
-static std::atomic<bool> s_client_is_publisher{false};  // set before this client's event task starts
+static std::atomic<uint32_t> s_connected_session_epoch{
+    0}; // every CONNECT, including same-client reconnect
 static bool         s_crash_dump_pub      = false;     // mqtt_task-only: `coredump` at last crash-topic sync
 static bool         s_crash_notable_pub   = false;     // mqtt_task-only: was that sync a crash publish or cleanup probe?
 
@@ -456,6 +484,7 @@ static void set_status(bool connected, const char* err) {
 // same client handle reconnects.
 static void source_cleanup_outbox_cleared_after_transport_stop() noexcept {
     s_source_cleanup.outbox_cleared_after_transport_stop();
+    s_retirement_delivery.outbox_cleared_after_transport_stop();
     s_source_cleanup_evidence.clear_after_producer_stop();
     s_source_cleanup_evidence_lost.store(false, std::memory_order_release);
     s_connected_client_epoch.store(0, std::memory_order_release);
@@ -471,8 +500,7 @@ static void source_cleanup_outbox_cleared_after_transport_stop() noexcept {
 static __attribute__((noinline)) void mqtt_ota_withdraw_online() {
     const bool ota_pause =
         s_transport_pause_withdraws_online.exchange(false, std::memory_order_acq_rel);
-    if (!mqtt_pause_withdraws_online(ota_pause,
-                                     s_client_is_publisher.load(std::memory_order_acquire),
+    if (!mqtt_pause_withdraws_online(ota_pause, s_client != nullptr,
                                      s_connected.load(std::memory_order_acquire)))
         return;
     // esp-mqtt also accepts a QoS-1 publish that a racing disconnect left queued; the stop then
@@ -615,22 +643,16 @@ static __attribute__((noinline)) bool mqtt_transport_resume_step(MqttTransportRe
     return true;
 }
 
-// This BOARD's own id, daikin_<mac3> (STA MAC low 3 bytes). It is the MQTT client id (which must be
-// unique per connection — two boards briefly online during a swap must not kick each other off the
-// broker) and a second `dev.ids` entry so HA merges an install that was set up under the old
-// MAC-based identity into the one device. It is NOT the HA device id any more: that is s_node,
-// derived from the base topic (logic/ha_device.hpp), so replacing the ESP32 keeps the device.
+// Full eFuse MAC identifies this hardware independently of the installation's base topic.
+// A failed read must not fabricate an all-zero client id and evict a different board.
 static std::string board_id() {
-    uint8_t m[6] = {0};
-    // Read the interface MAC from eFuse, not the WiFi driver. An Ethernet-first board intentionally
-    // never initialises that driver; esp_wifi_get_mac() then fails and used to collapse every such
-    // board onto daikin_000000, making them disconnect one another at the broker.
+    uint8_t         m[6];
     const esp_err_t e = esp_read_mac(m, ESP_MAC_WIFI_STA);
-    if (e != ESP_OK)
+    if (e != ESP_OK) {
         diag_printf("mqtt: failed to read board MAC (%s)\n", esp_err_to_name(e));
-    char b[20];
-    std::snprintf(b, sizeof(b), "daikin_%02x%02x%02x", m[3], m[4], m[5]);
-    return b;
+        return {};
+    }
+    return ha_board_id(m, sizeof(m));
 }
 
 // Every outbound publish funnels through here so the heartbeat's mqtt_count/mqtt_fails reflect
@@ -671,33 +693,91 @@ static int mqtt_enqueue_id(const std::string& topic, const char* payload, int le
     return rc;
 }
 
+// Source cleanup and discovery/probe retirement share one global QoS-1 admission bound. Keep the
+// returned id without allocating and drain again for a PUBACK that raced the enqueue return.
+static bool retire_exact_topic(MqttRetirementOwner owner, const std::string& topic) {
+    service_source_cleanup_evidence();
+    if (s_retirement_delivery.take_confirmed(owner)) return true;
+    const uint32_t epoch = s_connected_client_epoch.load(std::memory_order_acquire);
+    // A newly requested source withdrawal takes the next vacant slot rather than waiting behind
+    // hundreds of legacy aliases. An existing unconfirmed/expired retirement still owns its exact
+    // item until PUBACK; after confirmation the cursor can yield without losing any topic.
+    const bool source_pending = s_source_cleanup.suppress(MqttCleanupSource::Weather) ||
+                                s_source_cleanup.suppress(MqttCleanupSource::Modbus) ||
+                                s_source_cleanup.suppress(MqttCleanupSource::Env3);
+    if (!s_connected.load(std::memory_order_acquire) || s_source_cleanup.in_flight() ||
+        (source_pending && !s_retirement_delivery.busy()) ||
+        !s_retirement_delivery.can_queue(owner, epoch))
+        return false;
+    const int id = mqtt_enqueue_id(topic, "", 0, 1, 1);
+    if (id >= 0) {
+        s_retirement_delivery.queued(owner, epoch, id);
+        service_source_cleanup_evidence();
+    }
+    return s_retirement_delivery.take_confirmed(owner);
+}
+
+struct RetainedProbeProgress {
+    bool subscribe_retry  = false;
+    bool delete_confirmed = false;
+};
+static std::array<RetainedProbeProgress, 4> s_retained_probe_progress;
+
+static size_t retained_probe_index(std::atomic<bool>& seen) noexcept {
+    if (&seen == &s_legacy_state_seen) return 0;
+    if (&seen == &s_retired_modbus_status_seen) return 1;
+    if (&seen == &s_retired_weather_seen) return 2;
+    return 3;
+}
+
+static MqttRetirementOwner retained_probe_owner(size_t index) noexcept {
+    return static_cast<MqttRetirementOwner>(static_cast<uint8_t>(MqttRetirementOwner::LegacyProbe) +
+                                            index);
+}
+
 // Start and service one exact-topic retained cleanup probe. Both functions run only on mqtt_task;
 // the esp-mqtt event task communicates the matching retained DATA event through `seen`. Keeping the
 // broker write here preserves mqtt_publish()'s single-task watchdog/counter contract.
 static void start_retained_cleanup_probe(const std::string& topic, std::atomic<bool>& seen,
                                          bool& active, int64_t& deadline_us,
                                          const char* diagnostic_name) {
-    seen = false;
+    auto& progress = s_retained_probe_progress[retained_probe_index(seen)];
+    if (!active && !progress.subscribe_retry) {
+        seen                      = false;
+        progress.delete_confirmed = false;
+    }
     const int sub_id = esp_mqtt_client_subscribe(s_client, topic.c_str(), 0);
-    active = sub_id >= 0;
-    deadline_us = esp_timer_get_time() + RETIRED_TOPIC_PROBE_US;
+    progress.subscribe_retry = sub_id < 0;
+    if (sub_id >= 0) {
+        active      = true;
+        deadline_us = esp_timer_get_time() + RETIRED_TOPIC_PROBE_US;
+    }
     if (sub_id < 0)
         diag_printf("mqtt: %s cleanup probe could not be queued\n", diagnostic_name);
 }
 
 static void service_retained_cleanup_probe(const std::string& topic, std::atomic<bool>& seen,
-                                           bool& active, int64_t deadline_us) {
+                                           bool& active, int64_t& deadline_us) {
+    const size_t index    = retained_probe_index(seen);
+    auto&        progress = s_retained_probe_progress[index];
+    if (progress.subscribe_retry) {
+        if (esp_mqtt_client_subscribe(s_client, topic.c_str(), 0) < 0) return;
+        progress.subscribe_retry = false;
+        active                   = true;
+        deadline_us              = esp_timer_get_time() + RETIRED_TOPIC_PROBE_US;
+    }
     if (!active) return;
-    const bool retained_seen = seen.exchange(false);
+    const bool retained_seen = seen.load(std::memory_order_acquire);
     const bool probe_done = esp_timer_get_time() >= deadline_us;
-    if (retained_seen) {
-        // QoS 1 makes the one required delete durable at the broker. Later reconnect probes receive
-        // nothing and therefore publish nothing — no visible empty topic is recreated.
-        mqtt_publish(topic, "", 0, 1, 1);
+    if (retained_seen && !progress.delete_confirmed) {
+        if (!retire_exact_topic(retained_probe_owner(index), topic)) return;
+        progress.delete_confirmed = true;
     }
     if (retained_seen || probe_done) {
-        esp_mqtt_client_unsubscribe(s_client, topic.c_str());
+        if (esp_mqtt_client_unsubscribe(s_client, topic.c_str()) < 0) return;
         active = false;
+        seen                      = false;
+        progress.delete_confirmed = false;
     }
 }
 
@@ -722,151 +802,285 @@ static std::vector<GroupedValue> current_modbus_values(bool& live) {
     return out;
 }
 
-// ── Legacy (MAC-identified) discovery configs ────────────────────────────────────────────────────
-// Builds up to this one identified the HA DEVICE by this board's MAC (node id daikin_<mac3>), so
-// replacing the ESP32 produced a SECOND "Daikin Altherma" device in HA and every entity — with it,
-// every long-term statistic — started over. The device id now comes from the MQTT base topic
-// (logic/ha_device.hpp): the installation, not the hardware.
-//
-// The configs published under the old MAC id are RETAINED, so they would otherwise outlive the
-// change and keep their entities as permanently-unavailable duplicates. Each is deleted
-// (zero-length retained publish) exactly once per boot and — crucially — BEFORE the replacement
-// config for the same entity goes out: HA drops the old registry entry, freeing its entity_id, and
-// the new entity (same device, since the board id rides along in dev.ids and HA merges on it; same
-// name) takes that entity_id back. History and statistics are keyed by entity_id and carry over;
-// per-entity UI customisations are keyed by unique_id and do not.
-//
-// Only THIS board's own legacy topics can be retracted — a board that has already been swapped out
-// is gone and cannot clean up after itself. docs/HOME_ASSISTANT.md says how to remove its leftovers.
-static void retract_legacy_fixed() {   // heartbeat + crash entities (no profile needed)
-    if (s_board == s_node) {           // ids coincide -> there is no separate legacy identity
-        s_legacy_fixed_retracted = true;
-        return;
+// Frozen obsolete board-diagnostic entities under the CURRENT installation namespace only.
+// A short-MAC-era topic cannot prove which physical board owns it; operator migration handles
+// those ambiguous namespaces rather than automatically deleting another installation's entities.
+static bool retract_legacy_fixed() {
+    constexpr size_t count = RETIRED_HEARTBEAT_SENSOR_COUNT + RETIRED_CRASH_SENSOR_COUNT;
+    for (size_t budget = 0; budget < 8 && s_legacy_fixed_step < count; ++budget) {
+        const size_t i = s_legacy_fixed_step;
+        std::string  topic;
+        if (i < RETIRED_HEARTBEAT_SENSOR_COUNT) {
+            const auto& sensor = RETIRED_HEARTBEAT_SENSORS[i];
+            topic = heartbeat_discovery_topic(s_prefix, sensor.component, s_node, sensor.object_id);
+        } else {
+            const auto& sensor = RETIRED_CRASH_SENSORS[i - RETIRED_HEARTBEAT_SENSOR_COUNT];
+            topic = crash_discovery_topic(s_prefix, sensor.component, s_node, sensor.object_id);
+        }
+        if (!retire_exact_topic(MqttRetirementOwner::LegacyFixed, topic)) return false;
+        ++s_legacy_fixed_step;
     }
-    for (int i = 0; i < HEARTBEAT_SENSOR_COUNT; i++)
-        mqtt_publish(heartbeat_discovery_topic(s_prefix, s_board, HEARTBEAT_SENSORS[i]), "", 0, 0, 1);
-    for (int i = 0; i < RETIRED_HEARTBEAT_SENSOR_COUNT; i++)
-        mqtt_publish(heartbeat_discovery_topic(s_prefix, RETIRED_HEARTBEAT_SENSORS[i].component,
-                                               s_board, RETIRED_HEARTBEAT_SENSORS[i].object_id),
-                     "", 0, 0, 1);
-    for (int i = 0; i < CRASH_SENSOR_COUNT; i++)
-        mqtt_publish(crash_discovery_topic(s_prefix, s_board, CRASH_SENSORS[i]), "", 0, 0, 1);
-    for (int i = 0; i < RETIRED_CRASH_SENSOR_COUNT; i++)
-        mqtt_publish(crash_discovery_topic(s_prefix, RETIRED_CRASH_SENSORS[i].component, s_board,
-                                           RETIRED_CRASH_SENSORS[i].object_id), "", 0, 0, 1);
-    // Latched AFTER the publishes, the rule retract_stale_values states and this function did not
-    // follow: the topic builders allocate, so a bad_alloc part-way through unwinds to mqtt_task's
-    // catch — and a guard already set would mean the remaining legacy configs are never retried for
-    // the rest of the boot, leaving permanently-unavailable duplicate entities in HA with nothing
-    // logged. On the equal-ids path above there is nothing to publish, so latching there is right.
+    if (s_legacy_fixed_step != count) return false;
     s_legacy_fixed_retracted = true;
+    return true;
 }
 
-// ── Ungrouped (pre-legacy-221) value discovery configs
-// ───────────────────────────────────────────────── Builds up to this one put only the LABEL SLUG
-// in a value's entity id and discovery topic, leaving out the register group. Two rows sharing a
-// label on different pages therefore landed on ONE topic under ONE uniq_id, and HA created one
-// entity where the device publishes two — a unit reporting an outdoor fault and a hydronic one
-// showed a single "Error Code" (legacy-221). Both are now group-scoped.
-//
-// So every row has up to TWO stale retained configs per node id — the `sensor` form every build
-// ever wrote, plus the `binary_sensor` form post-split builds wrote for a bit-flag row — and they
-// are retained, so they outlive the upgrade as permanently-unavailable duplicates unless deleted.
-static void retract_ungrouped_values(const logic::ProfileView& prof, const std::string& node) {
-    for (size_t i = 0; i < prof.count(); i++) {
-        const ValueDef  d = logic::adjudicated(prof[i]);   // wire truth, not the generator label
-        // Every row an older build published — including a row that is detect-only (no_publish)
-        // TODAY: it was a plain sensor before the flag existed, and that config is still retained.
-        if (!conv_publishable(d.conv) || object_id(d.label).empty()) continue;
-        mqtt_publish(ungrouped_discovery_topic(s_prefix, node, "sensor", d), "", 0, 0, 1);
-        if (conv_is_binary(d.conv))
-            mqtt_publish(ungrouped_discovery_topic(s_prefix, node, "binary_sensor", d), "", 0, 0, 1);
+// Frozen ungrouped and pre-override label configs in this installation namespace. Each exact
+// tombstone advances its bounded cursor only after PUBACK; current grouped identities are kept.
+// Ambiguous board/slug predecessors require operator migration; recorder history is not guaranteed.
+static bool retract_stale_values(const std::string& profile_id) {
+    if (s_stale_values_pending_profile.empty()) {
+        s_stale_values_pending_profile = profile_id; // prepare before any SDK effect
+        s_stale_values_step            = 0;
     }
-}
-
-// ── Relabelled (pre-label-override) value discovery configs (legacy-230 A)
-// ─────────────────────────────── logic/label_override.hpp republishes a row under a spec-correct
-// label when the generator's was wrong — today the four "Fan 1 (10 rpm)" fan-step rows, now
-// announced as "Fan 1 (step)". The label is the entity id, so a build before the override published
-// each such row under a DIFFERENT grouped id (actuators_fan_1_10_rpm), whose retained config would
-// otherwise survive the upgrade as a permanently-unavailable duplicate. Delete it — built from the
-// RAW (pre-override) label, which is exactly the "frozen literal" the migration needs: it is NOT
-// what this build writes (that is now the adjudicated label), so discovery_topic(raw) targets the
-// superseded config and nothing live. General over any future label override; fires only on a row a
-// label override actually changed. (Unlike a rename, a VictoriaMetrics series cannot be carried
-// across by any firmware action — actuators_fan_1_10_rpm simply stops and actuators_fan_1_step
-// starts at zero for a unit on one of the four profiles; the reference install already published
-// the majority _step spelling.)
-static void retract_relabeled_values(const logic::ProfileView& prof, const std::string& node) {
-    for (size_t i = 0; i < prof.count(); i++) {
-        const ValueDef raw = prof[i];
-        if (logic::label_str_eq(raw.label, logic::adjudicated(raw).label)) continue;  // no override here
-        if (!conv_publishable(raw.conv) || object_id(raw.label).empty()) continue;
-        // Every superseded shape the OLD label was ever published under: the legacy-221 GROUPED id
-        // (actuators_fan_1_10_rpm — every build since legacy-232), and the pre-legacy-221 UNGROUPED
-        // bare slug (fan_1_10_rpm — for a device upgrading straight from before legacy-221,
-        // skipping the grouped era).
-        mqtt_publish(discovery_topic(s_prefix, node, raw), "", 0, 0, 1);
-        mqtt_publish(ungrouped_discovery_topic(s_prefix, node, "sensor", raw), "", 0, 0, 1);
-        if (conv_is_binary(raw.conv))
-            mqtt_publish(ungrouped_discovery_topic(s_prefix, node, "binary_sensor", raw), "", 0, 0, 1);
+    const auto       prof = def::resolved(def::lookup(s_stale_values_pending_profile.c_str()));
+    constexpr size_t shapes =
+        5; // current-label ungrouped sensor/binary + old-label grouped/sensor/binary
+    constexpr size_t nodes  = 1; // only the current installation namespace is owned
+    const size_t     count  = prof.count() * shapes * nodes;
+    size_t           budget = 0;
+    while (budget < 8 && s_stale_values_step < count) {
+        const size_t       shape = s_stale_values_step % shapes;
+        const size_t       entry = s_stale_values_step / shapes;
+        const ValueDef     raw   = prof[entry % prof.count()];
+        const ValueDef     d     = shape < 2 ? logic::adjudicated(raw) : raw;
+        const std::string& node  = s_node;
+        const bool relabeled     = !logic::label_str_eq(raw.label, logic::adjudicated(raw).label);
+        if (!conv_publishable(d.conv) || object_id(d.label).empty() || (shape >= 2 && !relabeled) ||
+            ((shape == 1 || shape == 4) && !conv_is_binary(d.conv))) {
+            ++s_stale_values_step;
+            continue;
+        }
+        const std::string topic =
+            shape == 2
+                ? discovery_topic(s_prefix, node, d)
+                : ungrouped_discovery_topic(
+                      s_prefix, node, shape == 1 || shape == 4 ? "binary_sensor" : "sensor", d);
+        if (!retire_exact_topic(MqttRetirementOwner::StaleValues, topic)) return false;
+        ++s_stale_values_step;
+        ++budget;
     }
+    if (s_stale_values_step != count) return false;
+    s_stale_values_profile.swap(s_stale_values_pending_profile);
+    s_stale_values_pending_profile.clear();
+    return s_stale_values_profile == profile_id;
 }
 
-// All migrations at once, as ONE pass that completes before any replacement config is published.
-// That ordering is the whole mechanism: HA frees a deleted entity's entity_id, and the replacement
-// reclaims it — carrying recorder history and long-term statistics, which are keyed on entity_id.
-// Doing the deletes in bulk rather than one-immediately-before-each-row also puts ~130 messages of
-// separation between a removal and the add that wants its id back, instead of one.
-//
-// The MAC-era half must use the FROZEN topic shape too, not discovery_topic(): that helper now emits
-// the grouped form, so building a legacy delete from it would delete a topic no build ever wrote and
-// leave the real ones behind.
-// The "done" guard is latched AFTER the passes, not before: an allocation failure part-way through
-// throws out to the mqtt_task try/catch, and a guard already set would mean the remaining stale
-// topics are never retried — every one of them a permanently-unavailable orphan entity, with no
-// error visible anywhere. Retrying is free and idempotent (a zero-length retained publish to a topic
-// already cleared is a no-op), so the failure mode should be "does it again", not "silently stops".
-static void retract_stale_values(const logic::ProfileView& prof, const std::string& profile_id) {
-    retract_ungrouped_values(prof, s_node); // legacy-221: the un-grouped ids
-    if (s_board != s_node) retract_ungrouped_values(prof, s_board);  // ...and the MAC-era device
-    retract_relabeled_values(prof, s_node); // legacy-230 A: superseded label ids
-    if (s_board != s_node) retract_relabeled_values(prof, s_board);
-    s_stale_values_profile = profile_id;
+static bool profile_has_discovery_topic(const logic::ProfileView& prof, const std::string& topic) {
+    for (size_t i = 0; i < prof.count(); ++i) {
+        const ValueDef d = logic::adjudicated(prof[i]);
+        if (!row_publishable(d) || !conv_publishable(d.conv) || object_id(d.label).empty())
+            continue;
+        if (discovery_topic(s_prefix, s_node, d) == topic) return true;
+        if (d.conv == 203) {
+            const std::string group = group_for_page(d.reg);
+            for (size_t k = 0; k < FAULT_COMPANION_COUNT; ++k)
+                if (companion_discovery_topic(s_prefix, s_node, group, FAULT_COMPANIONS[k].key) ==
+                    topic)
+                    return true;
+        }
+    }
+    return false;
+}
+
+static void retirement_evidence_update(uint32_t clear, uint32_t set) noexcept {
+    const uint32_t before = s_retirement_evidence.load(std::memory_order_relaxed);
+    s_retirement_evidence.store((before & ~clear) | set, std::memory_order_release);
+}
+
+static void retirement_store_note(uint32_t state, const char* message) noexcept {
+    if (state == s_retirement_log_state) return;
+    s_retirement_log_state = state;
+    diag_printf("mqtt: retirement metadata %s\n", message);
+}
+
+// Called only inside mqtt_task's allocation boundary. A failed or incompatible load is read-only
+// and retryable; a foreign namespace is an explicit operator migration, never deletion authority.
+static bool load_retirement_provenance() {
+    if (s_retirement_store_loaded) return true;
+    const int64_t now = esp_timer_get_time();
+    if (now < s_retirement_load_retry_us) return false;
+    const auto loaded = mqtt_retirement_store_load(s_retirement_staged);
+    if (loaded == MqttRetirementStoreLoad::Error ||
+        loaded == MqttRetirementStoreLoad::Incompatible) {
+        const uint32_t error =
+            loaded == MqttRetirementStoreLoad::Error ? RETIRE_LOAD_ERROR : RETIRE_INCOMPATIBLE;
+        retirement_evidence_update(RETIRE_LOAD_ERROR | RETIRE_INCOMPATIBLE | RETIRE_CURRENT_DURABLE,
+                                   error | RETIRE_PENDING);
+        retirement_store_note(error, loaded == MqttRetirementStoreLoad::Error
+                                         ? "read failed; discovery deferred"
+                                         : "incompatible; owner repair required");
+        s_retirement_load_retry_us = now + RETIREMENT_STORE_RETRY_US;
+        return false;
+    }
+    uint32_t    evidence = 0;
+    bool        scoped   = false;
+    std::string predecessor;
+    if (loaded == MqttRetirementStoreLoad::Ready) {
+        scoped = s_base == s_retirement_staged.base && s_board == s_retirement_staged.board_id;
+        if (!scoped)
+            evidence = RETIRE_FOREIGN_BOUNDARY | RETIRE_OPERATOR_MIGRATION;
+        else if (!s_retirement_staged.profile_id[0])
+            evidence = RETIRE_BOOTSTRAP_BOUNDARY | RETIRE_OPERATOR_MIGRATION;
+        else if (!def::has_profile(s_retirement_staged.profile_id)) {
+            retirement_evidence_update(RETIRE_LOAD_ERROR | RETIRE_CURRENT_DURABLE,
+                                       RETIRE_INCOMPATIBLE | RETIRE_PENDING);
+            retirement_store_note(RETIRE_INCOMPATIBLE,
+                                  "unknown predecessor profile; owner repair required");
+            s_retirement_load_retry_us = now + RETIREMENT_STORE_RETRY_US;
+            return false;
+        } else {
+            predecessor =
+                s_retirement_staged.profile_id; // stage before committing loaded ownership
+            evidence = RETIRE_LOADED_PREDECESSOR;
+        }
+    } else
+        evidence = RETIRE_BOOTSTRAP_BOUNDARY | RETIRE_OPERATOR_MIGRATION;
+    s_discovered_profile.swap(predecessor);
+    if (scoped) s_retirement_record = s_retirement_staged;
+    s_retirement_store_scoped = scoped;
+    s_retirement_store_loaded = true;
+    retirement_evidence_update(RETIRE_LOAD_ERROR | RETIRE_INCOMPATIBLE, evidence);
+    retirement_store_note(evidence,
+                          evidence & RETIRE_FOREIGN_BOUNDARY
+                              ? "foreign owner boundary; only the current namespace may migrate"
+                          : evidence & RETIRE_BOOTSTRAP_BOUNDARY
+                              ? "bootstrap boundary; unknown older profiles need operator migration"
+                              : "scoped predecessor loaded");
+    return true;
+}
+
+// All predecessor deletions must be ACK-complete before calling this: even a rejected NVS commit
+// can leave Q written through. A reboot may then read Q, so it must never need forgotten P deletes.
+static bool save_retirement_provenance(const std::string& profile_id) noexcept {
+    if (s_retirement_store_scoped && profile_id == s_retirement_record.profile_id) {
+        retirement_evidence_update(RETIRE_SAVE_ERROR | RETIRE_PENDING, RETIRE_CURRENT_DURABLE);
+        return true;
+    }
+    const int64_t now = esp_timer_get_time();
+    if (now < s_retirement_save_retry_us) return false;
+    if (!mqtt_retirement_record_make(s_retirement_staged, s_base, s_board, profile_id) ||
+        !mqtt_retirement_store_save(s_retirement_staged)) {
+        retirement_evidence_update(RETIRE_CURRENT_DURABLE, RETIRE_SAVE_ERROR | RETIRE_PENDING);
+        retirement_store_note(RETIRE_SAVE_ERROR, "save failed; discovery deferred");
+        s_retirement_save_retry_us = now + RETIREMENT_STORE_RETRY_US;
+        return false;
+    }
+    s_retirement_record        = s_retirement_staged;
+    s_retirement_store_scoped  = true;
+    s_retirement_save_retry_us = 0;
+    retirement_evidence_update(RETIRE_SAVE_ERROR | RETIRE_PENDING, RETIRE_CURRENT_DURABLE);
+    retirement_store_note(RETIRE_CURRENT_DURABLE, "current profile durable before discovery");
+    return true;
+}
+
+// The remembered prior profile is independent of reconnect reannouncement. Enumerate only its
+// current grouped configs/companions missing from the replacement, then current quarantined rows;
+// never delete another base/node or a wildcard. No vector of profiles, rows or topics is built.
+static bool retract_profile_cutover(const std::string& profile_id) {
+    if (s_current_profile_retired == profile_id) return true;
+    if (s_retiring_profile_target.empty()) {
+        s_retiring_profile_target = profile_id;
+        s_retiring_profile_row = s_retiring_profile_shape = 0;
+        s_retiring_current_unpublishable =
+            s_discovered_profile.empty() || s_discovered_profile == profile_id;
+    }
+    const auto target   = def::resolved(def::lookup(s_retiring_profile_target.c_str()));
+    const auto previous = def::resolved(def::lookup(s_discovered_profile.c_str()));
+    size_t     budget   = 0;
+    while (budget < 8) {
+        const auto& prof = s_retiring_current_unpublishable ? target : previous;
+        if (s_retiring_profile_row >= prof.count()) {
+            if (s_retiring_current_unpublishable) {
+                s_current_profile_retired.swap(s_retiring_profile_target);
+                s_retiring_profile_target.clear();
+                return s_current_profile_retired == profile_id;
+            }
+            s_retiring_current_unpublishable = true;
+            s_retiring_profile_row = s_retiring_profile_shape = 0;
+            continue;
+        }
+        const ValueDef d         = logic::adjudicated(prof[s_retiring_profile_row]);
+        const size_t   shape     = s_retiring_profile_shape;
+        const bool     candidate = conv_publishable(d.conv) && !object_id(d.label).empty() &&
+                               (!s_retiring_current_unpublishable || !row_publishable(d)) &&
+                               (shape == 0 || d.conv == 203);
+        if (candidate) {
+            const std::string topic =
+                shape == 0 ? discovery_topic(s_prefix, s_node, d)
+                           : companion_discovery_topic(s_prefix, s_node, group_for_page(d.reg),
+                                                       FAULT_COMPANIONS[shape - 1].key);
+            if (s_retiring_current_unpublishable || !profile_has_discovery_topic(target, topic)) {
+                if (!retire_exact_topic(MqttRetirementOwner::Profile, topic)) return false;
+                ++budget;
+            }
+        }
+        if (++s_retiring_profile_shape == 1 + FAULT_COMPANION_COUNT) {
+            s_retiring_profile_shape = 0;
+            ++s_retiring_profile_row;
+        }
+    }
+    return false;
+}
+
+// A started retirement must not depend on fresh X10A evidence or a still-selected profile. Finish
+// its frozen exact-topic job before admitting another cleanup owner; only discovery replacements
+// stay behind the ordinary publish gate. Small profile-name copies are staged before SDK effects.
+static void service_pending_retirement() {
+    service_retained_cleanup_probe(s_legacy_state, s_legacy_state_seen, s_legacy_probe_active,
+                                   s_legacy_probe_deadline_us);
+    service_retained_cleanup_probe(s_retired_modbus_status, s_retired_modbus_status_seen,
+                                   s_retired_modbus_status_probe_active,
+                                   s_retired_modbus_status_probe_deadline_us);
+    service_retained_cleanup_probe(s_retired_weather, s_retired_weather_seen,
+                                   s_retired_weather_probe_active,
+                                   s_retired_weather_probe_deadline_us);
+    service_retained_cleanup_probe(s_crash, s_crash_seen, s_crash_probe_active,
+                                   s_crash_probe_deadline_us);
+    if (s_retirement_delivery.owner() == MqttRetirementOwner::LegacyFixed ||
+        (s_legacy_fixed_step > 0 && !s_legacy_fixed_retracted))
+        retract_legacy_fixed();
+    if (!s_stale_values_pending_profile.empty()) {
+        const std::string pending = s_stale_values_pending_profile;
+        retract_stale_values(pending);
+    }
+    if (!s_retiring_profile_target.empty()) {
+        const std::string target = s_retiring_profile_target;
+        retract_profile_cutover(target);
+    }
 }
 
 // Stream one retained discovery config per value of the active profile. Every entity points at the
 // X10A topic (s_x10a) and pulls its value out via a value_template. A bit-flag row lands
 // under the binary_sensor component, everything else under sensor (logic/discovery.hpp ha_component).
-static void publish_x10a_discovery() {
+static bool publish_x10a_discovery() {
     const std::string profile_id = config_profile();
+    if (profile_id == "auto" || !def::has_profile(profile_id.c_str())) return false;
+    if (!load_retirement_provenance()) return false;
     // The VIEW, not the raw profile: every row hp_poll caches needs a discovery config, and the
     // applicable overlay blocks (def/overlay.hpp) are part of that row set. Announcing fewer rows than the
     // X10A topic carries would leave the extra values in MQTT with no HA entity to land in.
     const auto prof = def::resolved(def::lookup(profile_id.c_str()));
-    // Delete every config published under a superseded identity FIRST — the un-grouped ids
-    // (legacy-221) and, on a board that predates the base-topic device id, the MAC-era ones. The
-    // freed entity_id is what the replacements below reclaim. Runs once per profile, not once per
-    // (re)connect: a broker restart must not re-send ~200 deletes for entities that no longer exist
-    // under those ids.
-    if (s_stale_values_profile != profile_id) retract_stale_values(prof, profile_id);
+    // Delete every frozen superseded identity under the current namespace FIRST — ungrouped ids
+    // (legacy-221) and relabelled rows. Ambiguous MAC-era namespaces require operator migration.
+    // The freed entity_id is what the replacements below reclaim. Runs once per profile, not once
+    // per (re)connect: a broker restart must not re-send ~200 deletes for entities that no longer
+    // exist under those ids.
+    retirement_evidence_update(RETIRE_CURRENT_DURABLE, RETIRE_PENDING);
+    if (!retract_profile_cutover(profile_id)) return false;
+    if (s_stale_values_profile != profile_id && !retract_stale_values(profile_id)) return false;
+    // Allocate the remembered commit before the first replacement SDK effect. Partial discovery
+    // is remembered as belonging to this profile even if a later builder throws; a subsequent
+    // profile change therefore retires every possible config from that partially emitted set.
+    std::string discovered = profile_id;
+    if (!save_retirement_provenance(profile_id)) return false;
+    s_discovered_profile.swap(discovered);
+    bool accepted = true;
     for (size_t i = 0; i < prof.count(); i++) {
         const ValueDef  d = logic::adjudicated(prof[i]);   // wire truth, not the generator label
-        // A row the firmware does not publish — the generator's detect-only flag, or the
-        // availability ledger's Unproven verdict (logic/availability.hpp). RETRACT rather than
-        // merely skip: an install upgrading from a build that DID publish this row already has a
-        // RETAINED discovery config in the broker, which would survive forever as a
-        // permanently-unavailable HA entity — and for a QUARANTINED row it is worse than an orphan,
-        // since HA would keep the last false value it was ever sent (145-200 °C for Target Evap.
-        // Temp.) as that entity's state until something replaced it. A zero-length retained payload
-        // deletes it, and is harmless on a fresh install where the topic never existed. Only the
-        // CURRENT (grouped) topic is retracted here: this is a live rule about a row THIS build
-        // stopped publishing, not a migration, and the row's pre-legacy-221 shapes are the bulk
-        // pass's job above — which covers it, since that pass deliberately ignores row_publishable
-        // (an older build announced it as an ordinary sensor).
+        // The confirmed pre-pass already removed current quarantined/detect-only configs and
+        // their companions. No unavailable or unproven row may be reintroduced here.
         if (!row_publishable(d)) {
-            if (!object_id(d.label).empty())
-                mqtt_publish(discovery_topic(s_prefix, s_node, d), "", 0, 0, 1);
             continue;
         }
         if (!conv_publishable(d.conv)) continue;
@@ -874,7 +1088,7 @@ static void publish_x10a_discovery() {
         if (obj.empty()) continue;
         const std::string ct  = discovery_topic(s_prefix, s_node, d);
         const std::string cfg = discovery_config(s_node, s_board, s_x10a, s_avail, d);
-        mqtt_publish(ct, cfg.c_str(), 0, 0, 1);   // retained
+        accepted              = mqtt_publish(ct, cfg.c_str(), 0, 0, 1) && accepted; // retained
         // The DERIVED numeric fault flags that ride beside a textual error class (legacy-209 defect
         // 4). Announced here, from the same row loop that publishes the class itself, so the entity
         // set and the payload cannot drift apart — the direct cache encoder emits these keys for
@@ -883,13 +1097,16 @@ static void publish_x10a_discovery() {
             const std::string group = group_for_page(d.reg);
             for (size_t k = 0; k < FAULT_COMPANION_COUNT; k++) {
                 const FaultCompanion& c = FAULT_COMPANIONS[k];
-                mqtt_publish(companion_discovery_topic(s_prefix, s_node, group, c.key),
-                             companion_discovery_config(s_node, s_board, s_x10a, s_avail, group, c)
-                                 .c_str(),
-                             0, 0, 1);            // retained
+                accepted = mqtt_publish(companion_discovery_topic(s_prefix, s_node, group, c.key),
+                                        companion_discovery_config(s_node, s_board, s_x10a, s_avail,
+                                                                   group, c)
+                                            .c_str(),
+                                        0, 0, 1) &&
+                           accepted; // retained
             }
         }
     }
+    return accepted;
 }
 
 // Builds up to v1.0.0-dev.257 exposed all HomeHub registers through HA discovery. They are retired:
@@ -961,7 +1178,7 @@ static bool publish_x10a_state(const Config& config, bool force) {
         return false;
     }
     s_x10a_json_oversize_logged = false;
-    if (!force && s_last_x10a_digest_valid && probe.digest == s_last_x10a_digest) return false;
+    if (!force && s_last_x10a_digest_valid && probe.digest == s_last_x10a_digest) return true;
 
     std::string payload;
     payload.reserve(probe.bytes); // the only changed-state allocation; exact and outside s_cache lock
@@ -1065,6 +1282,7 @@ static void apply_source_cleanup_completion(const MqttCleanupCompletion& complet
 static void service_source_cleanup_evidence() {
     MqttCleanupDeliveryEvidence evidence;
     while (s_source_cleanup_evidence.pop(evidence)) {
+        if (s_retirement_delivery.evidence(evidence)) continue;
         if (evidence.outcome == MqttCleanupDeliveryOutcome::Published) {
             if (s_source_cleanup.acknowledge(evidence))
                 apply_source_cleanup_completion(s_source_cleanup.take_completion());
@@ -1100,9 +1318,13 @@ static RetainedCleanupCycle service_requested_topic_cleanup(const Config& c) {
     // numeric message id. Drain again after storing the id to cover a callback that ran before
     // esp_mqtt_client_enqueue() returned it to this task.
     service_source_cleanup_evidence();
+    load_retirement_provenance();
+    service_pending_retirement();
     const bool              env3_enabled = c.env3_enabled && env3_board_supported(c);
     const MqttCleanupAction action       = s_source_cleanup.next_action(
-        connected && connected_epoch == s_source_cleanup.client_epoch(), env3_enabled);
+        connected && connected_epoch == s_source_cleanup.client_epoch() &&
+            !s_retirement_delivery.busy(),
+        env3_enabled);
     if (action) {
         const std::string topic = source_cleanup_topic(action);
         if (!topic.empty()) {
@@ -1186,22 +1408,16 @@ static void publish_env3_state() {
 // the ESP32 board + X10A link itself, not a heat-pump value, so — unlike X10A discovery —
 // they don't wait on profile detection: WiFi signal and free heap are meaningful even while
 // profile == "auto".
-static void publish_heartbeat_discovery() {
-    if (!s_legacy_fixed_retracted) retract_legacy_fixed();   // delete the old ids FIRST
-    // Delete any entity we USED to publish here but no longer do — a zero-length retained message to
-    // its old discovery topic removes it from HA, so an install upgraded from an older build doesn't
-    // keep a stale, permanently-unavailable "Device Time" / "WiFi Quality". Same contract as the
-    // crash topic's RETIRED_CRASH_SENSORS; cheap + retained, so once per (re)connect is fine.
-    for (int i = 0; i < RETIRED_HEARTBEAT_SENSOR_COUNT; i++) {
-        const RetiredHaSensor& r = RETIRED_HEARTBEAT_SENSORS[i];
-        mqtt_publish(heartbeat_discovery_topic(s_prefix, r.component, s_node, r.object_id), "", 0, 0, 1);
-    }
+static bool publish_heartbeat_discovery() {
+    if (!s_legacy_fixed_retracted && !retract_legacy_fixed()) return false;
+    bool accepted = true;
     for (int i = 0; i < HEARTBEAT_SENSOR_COUNT; i++) {
         const HeartbeatSensor& s = HEARTBEAT_SENSORS[i];
         const std::string ct  = heartbeat_discovery_topic(s_prefix, s_node, s);
         const std::string cfg = heartbeat_discovery_config(s_node, s_board, s_heartbeat, s_avail, s);
-        mqtt_publish(ct, cfg.c_str(), 0, 0, 1);   // retained
+        accepted = mqtt_publish(ct, cfg.c_str(), 0, 0, 1) && accepted; // retained
     }
+    return accepted;
 }
 
 // Crash/reset diagnostics (logic/crashinfo.hpp): delete any retired entity, stream the discovery
@@ -1217,16 +1433,7 @@ static void publish_heartbeat_discovery() {
 // is retained so a late subscriber still sees it; it never carries secrets or the raw dump — just
 // the reason + a raw-hex backtrace; the binary stays behind GET /coredump.
 static void publish_crash() {
-    if (!s_legacy_fixed_retracted) retract_legacy_fixed();   // delete the old ids FIRST (see above)
-    // Delete any entity we USED to publish here but no longer do — a zero-length retained message to
-    // its old discovery topic removes it from HA, so an install upgraded from an older build doesn't
-    // keep a stale, permanently-unavailable entity (e.g. the old "Last Reset Reason" sensor, now the
-    // heartbeat's job). Cheap + retained, so once per (re)connect is fine.
-    for (int i = 0; i < RETIRED_CRASH_SENSOR_COUNT; i++) {
-        const RetiredHaSensor& r = RETIRED_CRASH_SENSORS[i];
-        const std::string ct = crash_discovery_topic(s_prefix, r.component, s_node, r.object_id);
-        mqtt_publish(ct, "", 0, 0, 1);   // retained, zero-length -> deletes the discovery config
-    }
+    if (!s_legacy_fixed_retracted && !retract_legacy_fixed()) return;
     for (int i = 0; i < CRASH_SENSOR_COUNT; i++) {
         const CrashSensor& s = CRASH_SENSORS[i];
         const std::string ct  = crash_discovery_topic(s_prefix, s_node, s);
@@ -1242,10 +1449,19 @@ static void publish_crash() {
         // Defensive: notability normally cannot change false -> true without a reboot, but never let
         // a cleanup probe race a newly-published crash if a future runtime source changes that rule.
         if (s_crash_probe_active) {
-            esp_mqtt_client_unsubscribe(s_client, s_crash.c_str());
+            // A previously admitted delete must finish before a replacement retained crash. Keep
+            // subscription ownership on a rejected teardown, then retry this publication later.
+            if (s_retirement_delivery.owner() == MqttRetirementOwner::CrashProbe &&
+                !s_retirement_delivery.take_confirmed(MqttRetirementOwner::CrashProbe))
+                return;
+            if (esp_mqtt_client_unsubscribe(s_client, s_crash.c_str()) < 0) return;
             s_crash_probe_active = false;
             s_crash_seen = false;
+            s_retained_probe_progress[3] = {};
         }
+        // A rejected initial subscription owns no live topic, but its deferred retry must also be
+        // cancelled before retaining a new notable crash that the old probe would otherwise delete.
+        s_retained_probe_progress[3].subscribe_retry = false;
         mqtt_publish(s_crash, js.c_str(), static_cast<int>(js.size()), 0, 1);   // retained
     } else {
         start_retained_cleanup_probe(s_crash, s_crash_seen, s_crash_probe_active,
@@ -2551,13 +2767,13 @@ static void on_mqtt(void*, esp_event_base_t, int32_t id, void* data) {
         // connected client with epoch zero and queue a tombstone whose returned id cannot be
         // tracked.
         s_connected.store(true, std::memory_order_release);
+        s_connected_session_epoch.fetch_add(1, std::memory_order_release);
         s_announce                      = true;
         s_ref_reconfigure               = true;
         s_circulation_reconfigure       = true;
         s_circulation_probe_reconfigure = true;
         set_status(true, nullptr);
-        diag_printf("mqtt: %s client connected\n",
-                    s_client_is_publisher ? "publisher" : "observation");
+        diag_printf("mqtt: transport client connected\n");
         s_transport_connecting.store(false, std::memory_order_release);
         stack_watch_sample(StackWatch::SdkMqtt);
         break;
@@ -2630,13 +2846,13 @@ static void on_mqtt(void*, esp_event_base_t, int32_t id, void* data) {
     }
 }
 
-// Only scalar gate observations survive into the cycle; the full source snapshot returns before
-// a socket write can re-enter TLS certificate verification.
+// The withdrawal path samples POD only; HpStats owns strings and cannot be copied safely
+// before a low-heap source withdrawal. The cache owner already applies the exact monotonic grace.
 static __attribute__((noinline)) MqttPublishGateDecision mqtt_cycle_gate(MqttPublishGateState state,
                                                                          bool& x10a_connected) {
-    const HpStats hp = hp_stats();
-    x10a_connected   = hp.connected;
-    return mqtt_publish_gate_step(state, hp.connected, hp.last_ok_s, s_connected.load());
+    const HpMqttSourceState hp = hp_mqtt_source_state();
+    x10a_connected             = hp.connected;
+    return mqtt_publish_gate_step(state, hp.recent, s_connected.load());
 }
 
 static __attribute__((noinline)) bool crash_publication_changed() {
@@ -2654,19 +2870,17 @@ static void mqtt_task(void*) {
     esp_task_wdt_add(NULL);                            // watch the publish task for a wedged broker write
     int heartbeat_elapsed_s = HEARTBEAT_INTERVAL_S;    // publish immediately on the first connected cycle
     int ha_retire_elapsed_s = HA_RETIRE_INTERVAL_S;
-    MqttPublishGateState publish_gate = MqttPublishGateState::SubscriberOnly;
-    int                  publisher_promotion_retry_countdown_s = 0;
+    MqttPublishGateState publish_gate                 = MqttPublishGateState::Unavailable;
+    uint32_t             availability_session_epoch   = 0;
+    bool                 transport_online_accepted    = false;
+    int                  source_availability_accepted = -1; // unknown / offline / online
     OtaQuiesceState network_quiesce;                   // current TLS operation's hold-off budget
     bool network_quiesce_logged     = false;           // one diag line per operation, not per cycle
     bool network_quiesce_cap_logged = false;           // and one if that budget ever runs out
     MqttTransportResumeState transport_resume;
     TaskFailureEpisode       failures;
 
-    // Broker reachability and inbound observation do not depend on X10A. This first client carries
-    // no installation LWT, and the gate below still encloses every ordinary/current publish. The
-    // sole pre-gate output is a zero-length retained tombstone reconstructed from persisted source
-    // intent or a permanently retired discovery ledger. It can therefore subscribe to the room
-    // source without letting an unwired board speak for the installation.
+    // Start one LWT-bearing transport immediately; X10A never owns its lifecycle.
     if (!start_current_client()) {
         transport_resume.wait_s = transport_resume.backoff_s;
     }
@@ -2683,11 +2897,6 @@ static void mqtt_task(void*) {
         // still reports the deepest frame the task has ever built.
         stack_watch_sample(StackWatch::Mqtt);
         const int delay_s = POLL_INTERVAL_S;
-        if (publisher_promotion_retry_countdown_s > 0) {
-            publisher_promotion_retry_countdown_s =
-                std::max(0, publisher_promotion_retry_countdown_s - delay_s);
-        }
-
         // STAND ASIDE while an OTA or weather HTTPS operation owns the heap (legacy-380). Placed
         // above the try, before the first allocation of the cycle: everything below this point
         // builds std::strings, and on the heap a TLS session leaves behind, the largest of them is
@@ -2731,32 +2940,35 @@ static void mqtt_task(void*) {
             network_quiesce_cap_logged = false;
         }
 
-        // Static literals only: the catch path must say WHICH allocation-rich phase failed without
-        // allocating another string on the heap that just refused one.
-        const char* publish_stage = "gate";
+        // Before any Config/HpStats allocation, consume ACK evidence and withdraw stale X10A.
+        // The accepted markers advance only on SDK acceptance and are reset for EVERY session.
+        service_source_cleanup_evidence();
+        bool                          x10a_connected = false;
+        const MqttPublishGateDecision gate = mqtt_cycle_gate(publish_gate, x10a_connected);
+        publish_gate                       = gate.next;
+        const uint32_t session_epoch = s_connected_session_epoch.load(std::memory_order_acquire);
+        if (s_connected && session_epoch != availability_session_epoch) {
+            availability_session_epoch   = session_epoch;
+            transport_online_accepted    = false;
+            source_availability_accepted = -1;
+            s_last_x10a_digest_valid     = false;
+            s_x10a_publish_proven.store(false, std::memory_order_release);
+            s_last_x10a_cache_gen = 0;
+        }
+        if (!gate.publish_cycle) {
+            s_last_x10a_digest_valid = false;
+            s_x10a_publish_proven.store(false, std::memory_order_release);
+            s_last_x10a_cache_gen = 0;
+        }
+        if (s_connected && !s_x10a_publish_proven.load(std::memory_order_acquire) &&
+            source_availability_accepted != 0 && mqtt_publish(s_x10a_avail, "offline", 0, 1, 1))
+            source_availability_accepted = 0;
+        if (s_connected && !transport_online_accepted && mqtt_publish(s_avail, "online", 0, 0, 1))
+            transport_online_accepted = true;
+
+        // Static literals only: a low-heap failure report must not allocate another string.
+        const char* publish_stage = "config";
         try {
-            bool                          x10a_connected = false;
-            const MqttPublishGateDecision gate = mqtt_cycle_gate(publish_gate, x10a_connected);
-
-            // The first valid bus response upgrades the existing subscriber-only session to a fresh
-            // client whose CONNECT packet carries the installation LWT. A clean stop means the old
-            // no-LWT session cannot emit `offline`; publication begins only after the replacement
-            // client reports MQTT_EVENT_CONNECTED on a later cycle.
-            if (gate.promote_publisher && publisher_promotion_retry_countdown_s == 0) {
-                if (promote_client_to_publisher()) {
-                    publish_gate = gate.next;
-                } else {
-                    publisher_promotion_retry_countdown_s = 5; // retry after 5 s backoff
-                }
-            } else if (!gate.promote_publisher) {
-                publish_gate = gate.next;
-            }
-
-            // SubscriberOnly/Paused services exact-topic inbound subscriptions and bounded frame
-            // decoding. The only outbound exception is a persisted source/consent-change tombstone:
-            // Weather, HomeHub and ENV III predecessor state, plus discovery that was retired or is
-            // now disabled. Ordinary publication remains below gate.publish_cycle, so no current
-            // discovery/state/heartbeat/value payload can escape.
             publish_stage = "config";
             const uint32_t reference_epoch = s_ref_requested_epoch.load(std::memory_order_acquire);
             const uint32_t circulation_epoch =
@@ -2776,7 +2988,7 @@ static void mqtt_task(void*) {
             // retired discovery deletes on this independent timer, outside X10A publication
             // authority, so a silent heat-pump bus cannot strand legacy entities after HA returns.
             // A pending/active source cleanup includes the same deletes and holds this timer;
-            // ordinary source state/discovery remains inside gate.publish_cycle below.
+            // only X10A state/discovery remains inside gate.publish_cycle below.
             publish_stage = "retire";
             if (s_connected) {
                 if (cleanup_cycle.modbus || cleanup_cycle.weather) {
@@ -2793,25 +3005,7 @@ static void mqtt_task(void*) {
             publish_stage = "heating_curve";
             evaluate_heating_curve(ref_config, x10a_connected);
 
-            if (gate.publish_offline) {
-                mqtt_publish(s_avail, "offline", 0, 1, 1);
-                diag_printf("mqtt: X10A unavailable — publishing paused\n");
-            }
-
-            // A bus recovery on the same broker session needs only a fresh availability/state seed;
-            // discovery is already retained. If the broker reconnected while the bus was down,
-            // s_announce remains set and the full ordinary reconnect path below owns the reseed.
-            if (gate.resumed && s_connected && !s_announce.load()) {
-                mqtt_publish(s_avail, "online", 0, 0, 1);
-                s_last_x10a_digest = 0;
-                s_last_x10a_digest_valid = false;
-                s_x10a_publish_proven.store(false, std::memory_order_release);
-                s_last_x10a_cache_gen = 0;
-                heartbeat_elapsed_s = HEARTBEAT_INTERVAL_S;
-                diag_printf("mqtt: X10A restored — publishing resumed\n");
-            }
-
-            if (gate.publish_cycle) {
+            if (s_connected) {
                 publish_stage = "announce";
                 if (s_announce.exchange(false)) {              // consume: just (re)connected
                     s_announced_profile.clear();               // force a fresh discovery below
@@ -2831,7 +3025,6 @@ static void mqtt_task(void*) {
                     // announce — set on EVERY connect — closes that race.
                     s_heartbeat_announced = false;
                     heartbeat_elapsed_s = HEARTBEAT_INTERVAL_S; // publish it right away, then every 10 s
-                    mqtt_publish(s_avail, "online", 0, 0, 1);
                     // Probe before deleting a retired data topic. Publishing tombstones
                     // unconditionally here recreates visible empty topics on every reconnect after
                     // the broker is already clean. DATA events raise the atomic flags only for
@@ -2863,32 +3056,41 @@ static void mqtt_task(void*) {
                                                s_crash_probe_active,
                                                s_crash_probe_deadline_us);
                 if (!s_heartbeat_announced) {                  // board/link diagnostics — independent
-                    publish_heartbeat_discovery();              // of heat-pump profile detection
-                    publish_crash();                            // crash report if notable, else stale-record probe
-                    s_heartbeat_announced = true;
+                    if (publish_heartbeat_discovery()) {
+                        publish_crash(); // crash report if notable, else stale-record probe
+                        s_heartbeat_announced = true;
+                    }
                 }
+                // Only this source depends on the X10A observation boundary. Its cache marker
+                // cannot advance on a refused write; recovery/reconnect force a fresh accepted
+                // seed.
                 publish_stage = "x10a";
-                const std::string& prof = ref_config.profile;
-                if (prof != "auto" && prof != s_announced_profile) {
-                    publish_x10a_discovery();                  // discovery for the (new) profile
-                    s_announced_profile = prof;
-                    // A short all-page timeout stays inside the availability grace, but poll_once()
-                    // correctly replaced its cache with an empty snapshot. Do not turn that honest
-                    // local absence into a retained `{}` for every downstream consumer. The next
-                    // answering sweep seeds state because the digest guard is still invalid here.
-                    if (x10a_connected) {
-                        publish_x10a_state(ref_config, true);
-                        s_last_x10a_cache_gen = hp_cache_generation();
+                if (gate.publish_cycle) {
+                    const std::string& prof           = ref_config.profile;
+                    bool               seed_attempted = false;
+                    if (prof != "auto" && prof != s_announced_profile) {
+                        if (publish_x10a_discovery()) s_announced_profile = prof;
+                        if (x10a_connected && !s_last_x10a_digest_valid) {
+                            seed_attempted = true;
+                            if (publish_x10a_state(ref_config, true))
+                                s_last_x10a_cache_gen = hp_cache_generation();
+                        }
                     }
-                } else if (x10a_connected && !s_announced_profile.empty() &&
-                           prof == s_announced_profile) {
-                    const uint32_t x10a_gen = hp_cache_generation();
-                    if (x10a_gen != s_last_x10a_cache_gen || !s_last_x10a_digest_valid) {
-                        publish_x10a_state(ref_config, false); // republish only when it changed
-                        s_last_x10a_cache_gen = x10a_gen;
+                    if (x10a_connected && prof != "auto" && !seed_attempted) {
+                        const uint32_t x10a_gen = hp_cache_generation();
+                        if ((x10a_gen != s_last_x10a_cache_gen || !s_last_x10a_digest_valid) &&
+                            publish_x10a_state(ref_config, false))
+                            s_last_x10a_cache_gen = x10a_gen;
                     }
+                    // A slow SDK write may outlive the grace. Re-sample the source before claiming
+                    // online, and retry a refused availability write without regenerating its
+                    // payload.
+                    if (s_x10a_publish_proven.load(std::memory_order_acquire) &&
+                        hp_mqtt_source_state().recent && source_availability_accepted != 1 &&
+                        mqtt_publish(s_x10a_avail, "online", 0, 1, 1))
+                        source_availability_accepted = 1;
                 }
-                // prof == "auto" (detection pending): wait — don't publish transient generic sensors.
+                // prof == auto is not an X10A seed; independent sources below still publish.
 
                 publish_stage = "modbus";
                 if (!cleanup_cycle.modbus) {
@@ -2999,12 +3201,8 @@ static void mqtt_task(void*) {
     }
 }
 
-// Validate the URI/credential combination and build one of two client modes. The initial
-// subscriber-only client deliberately has no shared installation LWT; after X10A proof the task
-// rebuilds it with publisher_lwt=true. Both modes use the same broker/TLS/credential identity.
-// Returns false (with an error set in /status.mqtt) if the config would leak credentials over
-// plaintext.
-static bool build_client(bool publisher_lwt) {
+// Validate URI/credentials and build the single broker-LWT transport.
+static bool build_client() {
     const Config& c = config();
     s_uri  = c.mqtt_uri;
     s_user = c.mqtt_user;
@@ -3031,7 +3229,7 @@ static bool build_client(bool publisher_lwt) {
     if (!s_pass.empty()) cfg.credentials.authentication.password = s_pass.c_str();
     cfg.session.keepalive         = 30;
     cfg.outbox.limit              = MQTT_OUTBOX_LIMIT_BYTES;
-    if (publisher_lwt) {
+    {
         cfg.session.last_will.topic   = s_avail.c_str();
         cfg.session.last_will.msg     = "offline";
         cfg.session.last_will.msg_len = 7;
@@ -3053,7 +3251,6 @@ static bool build_client(bool publisher_lwt) {
         client_epoch = 1;
         s_mqtt_client_epoch.store(client_epoch, std::memory_order_release);
     }
-    s_client_is_publisher = publisher_lwt;
     {
         Lock lk(s_mtx);
         s_status.tls = is_tls;
@@ -3081,66 +3278,10 @@ static bool start_current_client() {
     }
     set_status(false, "client start failed");
     diag_printf("mqtt: client start failed (%s)\n", esp_err_to_name(rc));
-    // No task/session started. Keep this initialized client for the task's bounded resume retry;
-    // publisher-promotion failure still destroys its replacement in the caller.
+    // No task/session started. Keep this initialized client for the task's bounded resume retry.
     s_transport_paused.store(true, std::memory_order_release);
     s_client_running.store(false, std::memory_order_release);
     return false;
-}
-
-// Replace the connected/read-only client rather than mutating its CONNECT contract in place. The
-// old session is stopped cleanly (so there is no LWT at all), then destroyed before the publisher
-// client is allocated, avoiding two simultaneous MQTT/TLS clients on this heap-constrained board.
-// This runs on mqtt_task, never inside esp-mqtt's event handler, which is the API's required stop
-// boundary. Task-owned subscription bookkeeping is cleared because the broker discarded the old
-// clean session; MQTT_EVENT_CONNECTED on the replacement forces both exact-topic subscriptions.
-static bool promote_client_to_publisher() {
-    if (s_client) {
-        const esp_err_t stop_rc = esp_mqtt_client_stop(s_client);
-        if (stop_rc != ESP_OK) {
-            set_status(false, "client stop failed");
-            diag_printf("mqtt: subscriber client stop failed (%s)\n", esp_err_to_name(stop_rc));
-            return false;
-        }
-    }
-    // esp_mqtt_client_stop() deliberately emits no DISCONNECTED event. Withdraw a possible
-    // BEFORE_CONNECT claim explicitly after the transport task has stopped; MqttPublishActivity
-    // still keeps the firmware acknowledgement false throughout this promotion.
-    s_transport_connecting.store(false, std::memory_order_release);
-    s_client_running.store(false, std::memory_order_release);
-
-    s_connected = false;
-    s_source_cleanup.invalidate_client();
-    s_source_cleanup_evidence.clear_after_producer_stop();
-    s_source_cleanup_evidence_lost.store(false, std::memory_order_release);
-    s_connected_client_epoch.store(0, std::memory_order_release);
-    set_status(false, "");
-    {
-        Lock lk(s_mtx);
-        s_ref_status.subscribed         = false;
-        s_circulation_status.subscribed = false;
-    }
-    s_ref_subscribed_topics = {};
-    s_ref_subscription_retry = false;
-    s_circulation_subscribed_topic.clear();
-    s_circulation_subscription_retry = false;
-    s_circulation_probe_subscribed_topic.clear();
-    s_circulation_probe_task_generation = 0;
-    if (s_client) {
-        esp_mqtt_client_destroy(s_client);
-        s_client = nullptr;
-    }
-
-    if (!build_client(true) || !start_current_client()) {
-        diag_printf("mqtt: publisher client promotion failed\n");
-        if (s_client) {
-            esp_mqtt_client_destroy(s_client);
-            s_client = nullptr;
-        }
-        return false;
-    }
-    diag_printf("mqtt: X10A proven — publisher client started with installation LWT\n");
-    return true;
 }
 
 void mqtt_ha_start() {
@@ -3189,9 +3330,14 @@ void mqtt_ha_start() {
         return mqtt_base_effective(c.mqtt_base, CONFIG_DAIKIN_MQTT_BASE_TOPIC);
     });
     s_node   = device_node_id(s_base);   // HA device id: the installation, NOT this board
-    s_board  = board_id();               // this board: MQTT client id + dev.ids merge key
+    s_board           = board_id(); // complete hardware MAC: MQTT client id + secondary dev.ids
+    if (s_board.empty()) {
+        set_status(false, "board MAC read failed");
+        return;
+    }
     s_prefix = CONFIG_DAIKIN_MQTT_DISCOVERY_PREFIX;
     s_avail     = availability_topic(s_base);
+    s_x10a_avail            = x10a_availability_topic(s_base);
     s_x10a      = x10a_topic(s_base);
     s_modbus    = modbus_topic(s_base);
     s_weather   = weather_forecast_topic(s_base);
@@ -3202,10 +3348,8 @@ void mqtt_ha_start() {
     s_heartbeat = heartbeat_topic(s_base);
     s_heating_curve_topic = heating_curve_topic(s_base);
     s_crash     = crash_topic(s_base);
-    if (!build_client(false)) return;                          // policy error already surfaced
-    // mqtt_task starts this no-LWT client immediately for inbound reference observations. Every
-    // explicit publish stays behind the X10A gate, and only the first valid bus response replaces
-    // this handle with a client whose CONNECT packet arms the shared installation LWT.
+    if (!build_client()) return; // policy error already surfaced
+    // The task starts the LWT transport without waiting for any observation source.
     set_status(false, "");
     // Hardware coredump: the 4 KiB task hit the ESP32-S3 stack-end watchpoint while building the
     // heartbeat after Config gained the reference-source strings. heartbeat.hpp no longer creates
@@ -3466,5 +3610,9 @@ void mqtt_circulation_reconfigure(bool configured) {
 
 void mqtt_request_weather_cleanup() { s_weather_cleanup_requested = true; }
 void mqtt_request_modbus_cleanup() { s_modbus_cleanup_requested = true; }
+
+uint32_t mqtt_retirement_evidence() noexcept {
+    return s_retirement_evidence.load(std::memory_order_acquire);
+}
 
 } // namespace daik

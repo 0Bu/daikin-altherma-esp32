@@ -1170,8 +1170,8 @@ const resumeStep = mqtt.slice(resumeStart, resumeEnd);
 assert.match(pauseStep,
   /s_transport_pause_requested\.load\(std::memory_order_acquire\)[\s\S]{0,220}?esp_mqtt_client_stop\(s_client\)[\s\S]{0,260}?s_client_running\.store\(false,\s*std::memory_order_release\)[\s\S]{0,260}?s_transport_paused\.store\(true,\s*std::memory_order_release\)/,
   "the MQTT owner must stop and acknowledge esp-mqtt before a competing TLS session starts");
-// The clean stop discards the installation LWT, and an OTA install restarts the board while the
-// client is stopped. The connected publisher must therefore retain `offline` itself, on the same
+// The clean stop discards the transport LWT, and an OTA install restarts the board while the
+// client is stopped. The connected transport must therefore retain `offline` itself, on the same
 // stream and ahead of the DISCONNECT, and only for the OTA lease (logic/mqtt_publish_gate.hpp).
 const withdrawStart = mqtt.indexOf(
   "static __attribute__((noinline)) void mqtt_ota_withdraw_online(");
@@ -1179,8 +1179,8 @@ assert.ok(withdrawStart >= 0 && withdrawStart < pauseStart,
   "the OTA availability withdrawal must remain a scalar helper ahead of the pause step");
 const withdrawStep = mqtt.slice(withdrawStart, pauseStart);
 assert.match(withdrawStep,
-  /s_transport_pause_withdraws_online\.exchange\(false,\s*std::memory_order_acq_rel\);\s*if\s*\(!mqtt_pause_withdraws_online\(ota_pause,\s*s_client_is_publisher\.load\(std::memory_order_acquire\),\s*s_connected\.load\(std::memory_order_acquire\)\)\)\s*return;\s*if\s*\(mqtt_publish\(s_avail,\s*"offline",\s*0,\s*1,\s*1\)\)/,
-  "an OTA pause must consume its intent and retain QoS-1 `offline` only from a connected publisher");
+  /s_transport_pause_withdraws_online\.exchange\(false,\s*std::memory_order_acq_rel\);\s*if\s*\(!mqtt_pause_withdraws_online\(ota_pause,\s*s_client != nullptr,\s*s_connected\.load\(std::memory_order_acquire\)\)\)\s*return;\s*if\s*\(mqtt_publish\(s_avail,\s*"offline",\s*0,\s*1,\s*1\)\)/,
+  "an OTA pause must consume its intent and retain QoS-1 `offline` only from a connected transport");
 assert.doesNotMatch(withdrawStep, /std::string|esp_mqtt_client_(?:stop|start|enqueue)|"online"/,
   "the withdrawal must stay allocation-free on the firmware side and must never claim `online`");
 const pauseQuiescedAt = pauseStep.indexOf("s_publish_network_quiesced.store(false");
@@ -1268,17 +1268,14 @@ assert.ok(startCurrentStart >= 0 && startCurrentOkAt > startCurrentStartAt &&
   "start_current_client must reset the MQTT status before starting the client");
 assert.equal(statusCalls(startCurrent.slice(startCurrentStartAt, startCurrentOkEnd)).length, 0,
   "a successful client start must leave the connection state to MQTT_EVENT_CONNECTED");
-// The callers: mqtt_task (initial start and the OTA/Weather resume) writes no status at all, and the
-// publisher promotion writes none after its replacement client started.
+// mqtt_task leaves the connection state to the checked start/resume paths and SDK events.
 assert.equal(statusCalls(mqttTask).length, 0,
   "mqtt_task must leave the connection state to the start paths and MQTT_EVENT_CONNECTED");
-const promoteStatusStart = mqtt.indexOf("static bool promote_client_to_publisher() {");
-const promoteStatusEnd = mqtt.indexOf("void mqtt_ha_start()", promoteStatusStart);
-const promoteStatus = mqtt.slice(promoteStatusStart, promoteStatusEnd);
-const promoteStartAt = promoteStatus.indexOf("start_current_client()");
-assert.ok(promoteStatusStart >= 0 && promoteStatusEnd > promoteStatusStart && promoteStartAt >= 0 &&
-          statusCalls(promoteStatus.slice(promoteStartAt)).length === 0,
-  "publisher promotion must not write the MQTT status after the replacement client started");
+assert.doesNotMatch(mqtt, /promote_client_to_publisher/,
+  "X10A source proof must not replace the LWT transport or introduce a second status writer");
+assert.match(mqtt,
+  /cfg\.session\.last_will\.topic\s*=\s*s_avail\.c_str\(\)[\s\S]{0,240}?cfg\.session\.last_will\.msg\s*=\s*"offline"[\s\S]{0,240}?cfg\.session\.last_will\.qos\s*=\s*1;[\s\S]{0,120}?cfg\.session\.last_will\.retain\s*=\s*1;/,
+  "the initial transport must own the retained QoS-1 broker last will without a promotion step");
 const publicStatusStart = mqtt.indexOf("void mqtt_ha_start()");
 const publicStatusEnd = mqtt.indexOf("MqttStatus mqtt_status()", publicStatusStart);
 const publicStatus = mqtt.slice(publicStatusStart, publicStatusEnd);
@@ -1309,16 +1306,13 @@ assert.match(mainCmake,
 assert.match(mqtt,
   /struct\s+MqttStartupActivity[\s\S]{0,800}?s_publish_network_quiesced\.store\(false,\s*std::memory_order_release\)[\s\S]{0,300}?if\s*\(!competing_tls_active\(\)\)\s*return;[\s\S]{0,200}?s_publish_network_quiesced\.store\(true,\s*std::memory_order_release\)/,
   "MQTT startup must claim/recheck and yield to an OTA that began before mqtt_ha_start");
-const promoteStart = mqtt.indexOf("static bool promote_client_to_publisher() {");
-const promoteEnd = mqtt.indexOf("\n}\n\nvoid mqtt_ha_start()", promoteStart);
-const promote = mqtt.slice(promoteStart, promoteEnd);
-const promoteStop = promote.indexOf("esp_mqtt_client_stop(s_client)");
-const promoteTransportClear = promote.indexOf(
-  "s_transport_connecting.store(false, std::memory_order_release)", promoteStop);
-const promoteDestroy = promote.indexOf("esp_mqtt_client_destroy(s_client)", promoteTransportClear);
-assert.ok(promoteStart >= 0 && promoteEnd > promoteStart && promoteStop >= 0 &&
-          promoteTransportClear > promoteStop && promoteDestroy > promoteTransportClear,
-  "MQTT promotion must clear BEFORE_CONNECT state because client_stop emits no disconnect event");
+const transportPauseStart = mqtt.indexOf("static __attribute__((noinline)) void mqtt_transport_pause_if_requested()");
+const transportPauseEnd = mqtt.indexOf("static __attribute__((noinline)) bool mqtt_cleanup_evidence_recovery_step", transportPauseStart);
+const transportPause = mqtt.slice(transportPauseStart, transportPauseEnd);
+const transportStop = transportPause.indexOf("esp_mqtt_client_stop(s_client)");
+assert.ok(transportPauseStart >= 0 && transportStop >= 0 &&
+  transportPause.indexOf("s_transport_connecting.store(false, std::memory_order_release)", transportStop) > transportStop,
+  "a successful transport stop must explicitly release BEFORE_CONNECT activity");
 
 // The live plant also runs HomeHub and Syslog. Both used to allocate after the OTA flag rose:
 // HomeHub copied the string-owning Config and periodically reserved a fresh values vector; every

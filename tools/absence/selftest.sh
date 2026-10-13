@@ -1339,7 +1339,7 @@ match = re.search(
 assert match, "seed 74 did not apply — cleanup call moved"
 call = match.group(0)
 seed = s[:match.start()] + s[match.end():]
-gate = '            if (gate.publish_cycle) {\n'
+gate = '                if (gate.publish_cycle) {\n'
 assert gate in seed, "seed 74 did not apply — publication gate moved"
 seed = seed.replace(gate, gate + "    " + call, 1)
 open(p, "w").write(seed)
@@ -1489,7 +1489,7 @@ start = s.index('            // HA may have been offline for the connect-time to
 end = s.index('            publish_stage = "heating_curve";', start)
 block = s[start:end]
 seed = s[:start] + s[end:]
-gate = '            if (gate.publish_cycle) {\n'
+gate = '                if (gate.publish_cycle) {\n'
 assert gate in seed, "seed 83 did not apply — ordinary publish gate moved"
 seed = seed.replace(gate, gate + block, 1)
 open(p, "w").write(seed)
