@@ -2668,11 +2668,8 @@ static void mqtt_task(void*) {
     // intent or a permanently retired discovery ledger. It can therefore subscribe to the room
     // source without letting an unwired board speak for the installation.
     if (!start_current_client()) {
-        s_publish_network_quiesced.store(true, std::memory_order_release);
-        esp_task_wdt_delete(NULL);
-        vTaskDelete(NULL);
+        transport_resume.wait_s = transport_resume.backoff_s;
     }
-    diag_printf("mqtt: subscriber-only client started (publishing waits for X10A)\n");
     for (;;) {
         // Feed the watchdog unconditionally at the top of every cycle — the loop wakes each second
         // regardless of connection state, so this must NOT be gated on s_connected or an actual
@@ -3044,21 +3041,27 @@ static bool build_client(bool publisher_lwt) {
 
     s_client = esp_mqtt_client_init(&cfg);
     if (!s_client) { set_status(false, "mqtt init failed"); return false; }
+    if (esp_mqtt_client_register_event(s_client, static_cast<esp_mqtt_event_id_t>(MQTT_EVENT_ANY),
+                                       on_mqtt, nullptr) != ESP_OK) {
+        esp_mqtt_client_destroy(s_client);
+        s_client = nullptr;
+        set_status(false, "event registration failed");
+        return false;
+    }
     uint32_t client_epoch = s_mqtt_client_epoch.fetch_add(1, std::memory_order_acq_rel) + 1;
     if (client_epoch == 0) {
         client_epoch = 1;
         s_mqtt_client_epoch.store(client_epoch, std::memory_order_release);
     }
     s_client_is_publisher = publisher_lwt;
-    esp_mqtt_client_register_event(s_client, static_cast<esp_mqtt_event_id_t>(MQTT_EVENT_ANY),
-                                   on_mqtt, nullptr);
-    { Lock lk(s_mtx); s_status.tls = is_tls; }
+    {
+        Lock lk(s_mtx);
+        s_status.tls = is_tls;
+    }
     return true;
 }
 
-static esp_err_t start_client_transport() {
-    return esp_mqtt_client_start(s_client);
-}
+static esp_err_t start_client_transport() { return esp_mqtt_client_start(s_client); }
 
 static bool start_current_client() {
     if (!s_client) {
@@ -3078,8 +3081,9 @@ static bool start_current_client() {
     }
     set_status(false, "client start failed");
     diag_printf("mqtt: client start failed (%s)\n", esp_err_to_name(rc));
-    esp_mqtt_client_destroy(s_client);               // start failed: no task/session is running
-    s_client = nullptr;
+    // No task/session started. Keep this initialized client for the task's bounded resume retry;
+    // publisher-promotion failure still destroys its replacement in the caller.
+    s_transport_paused.store(true, std::memory_order_release);
     s_client_running.store(false, std::memory_order_release);
     return false;
 }

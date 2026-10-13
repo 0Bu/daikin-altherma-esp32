@@ -69,7 +69,8 @@ def compile(name, source_file):
     deps.update(Path(value) for value in shlex.split(dep_text.split(':', 1)[1]))
     return binary
 
-scenarios = ['ref_oom_recovery', 'circulation_oom_recovery', 'reconfigure_config_oom',
+scenarios = ['startup_failure_recovery', 'event_registration_failure',
+             'ref_oom_recovery', 'circulation_oom_recovery', 'reconfigure_config_oom',
              'failure_episodes', 'real_json_consumers', 'circulation_probe_postsubscribe_oom',
              'circulation_saved_postsubscribe_oom', 'circulation_saved_epoch_change',
              'circulation_saved_retry', 'circulation_saved_replacement_failure',
@@ -99,6 +100,15 @@ for scenario in scenarios:
     print(result.stdout.strip())
 
 mutations = [
+    ('initial-start-task-deletion', 'startup_failure_recovery',
+     'transport_resume.wait_s = transport_resume.backoff_s;',
+     'vTaskDelete(nullptr);', 'START_FAILURE_KEEPS_PUBLISH_TASK_ALIVE', 1),
+    ('initial-start-no-backoff', 'startup_failure_recovery',
+     'transport_resume.wait_s = transport_resume.backoff_s;',
+     '', 'INITIAL_START_FAILURE_DELAYS_FIRST_RETRY', 1),
+    ('event-registration-rejection-ignored', 'event_registration_failure',
+     'on_mqtt, nullptr) != ESP_OK', 'on_mqtt, nullptr) == ESP_OK',
+     'REGISTRATION_FAILURE_CANNOT_START_UNOBSERVED_CLIENT', 1),
     ('probe-predecessor-generation', 'probe_capture_generation',
      'frame.probe_generation != s_circulation_probe.generation ||', '',
      'PRETEST_QUEUED_FRAME_CANNOT_PROVE_SUCCESSOR_TEST', 1),

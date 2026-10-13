@@ -871,6 +871,23 @@ json_append_integer_field(std::string& out, std::string_view prefix, Integer val
         raise BudgetError("integer formatter source: reviewed builder caller inventory changed")
 
 
+def validate_discovery_builder_paths(budgets: dict[str, Any]) -> None:
+    # These out-of-line builders return before synchronous SDK/TLS publication. Keep their
+    # ordinary construction frames required without inventing overlap with the TLS paths.
+    required = {
+        "mqtt_discovery": {"json_literal_member"},
+        "mqtt_crash": {"json_literal_member", "ha_discovery_identity"},
+        "mqtt_heartbeat_discovery_build": {
+            "mqtt_board_discovery", "json_literal_member", "ha_discovery_identity"},
+        "mqtt_env3_discovery_build": {"json_literal_member", "ha_discovery_identity"},
+    }
+    owned = budgets["tasks"]["mqtt"]["paths"]
+    for path, symbols in required.items():
+        rule = budgets["paths"].get(path)
+        if rule is None or path not in owned or not symbols.issubset(rule["symbols"]):
+            raise BudgetError(f"discovery builder path {path}: required helper coverage missing")
+
+
 def validate_source_contract(budgets: dict[str, Any]) -> None:
     sources = {path: (REPO / path).read_text(encoding="utf-8")
                for path, _ in TASK_ALLOCATIONS.values()}
@@ -882,6 +899,7 @@ def validate_source_contract(budgets: dict[str, Any]) -> None:
     validate_mqtt_tls_client(sources["main/mqtt_ha.cpp"])
     validate_env_i2c(sources["main/env3.cpp"])
     validate_task_stacks(budgets, sources)
+    validate_discovery_builder_paths(budgets)
     validate_http_stack(budgets, (REPO / "main/http_server.cpp").read_text(encoding="utf-8"))
     validate_json_recursion(
         budgets, (REPO / "main/logic/payload_complete.hpp").read_text(encoding="utf-8"),
@@ -1229,6 +1247,8 @@ def self_test() -> None:
   29: 004136          entry a1, 32
 """
     extra_frames = {'daik::service_reference_frames(daik::Config const&)': 32,
+     'daik::json_append_literal_string_member(std::string&, char const*, std::string const&, char const*)': 48,
+     'daik::ha_discovery_identity(std::string&, std::string const&, char const*, char const*)': 32,
      '_ZN4daikL22decode_reference_frameERKNS_18ReferenceMqttFrameERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEESA_SA_SA_SA_SA_SA_SA_$constprop$0': 64,
      '_ZN4daikL25service_circulation_frameERKNS_18ReferenceMqttFrameERKNS_6ConfigE$constprop$0': 64,
      '_ZN4daikL31service_circulation_probe_frameERKNS_18ReferenceMqttFrameE$constprop$0': 64,
@@ -1706,6 +1726,40 @@ def self_test() -> None:
         else:
             raise AssertionError(f"self-test accepted frame growth for {key}")
         inventory_controls += 2
+    validate_discovery_builder_paths(budgets)
+    for path, symbol in (
+        ("mqtt_discovery", "json_literal_member"),
+        ("mqtt_crash", "json_literal_member"),
+        ("mqtt_crash", "ha_discovery_identity"),
+        ("mqtt_heartbeat_discovery_build", "mqtt_board_discovery"),
+        ("mqtt_heartbeat_discovery_build", "json_literal_member"),
+        ("mqtt_heartbeat_discovery_build", "ha_discovery_identity"),
+        ("mqtt_env3_discovery_build", "json_literal_member"),
+        ("mqtt_env3_discovery_build", "ha_discovery_identity"),
+    ):
+        missing = json.loads(json.dumps(budgets))
+        missing["paths"][path]["symbols"].remove(symbol)
+        try:
+            validate_discovery_builder_paths(missing)
+        except BudgetError as exc:
+            assert f"discovery builder path {path}:" in str(exc)
+        else:
+            raise AssertionError(f"self-test accepted missing {symbol} from {path}")
+        inventory_controls += 1
+    for path in ("mqtt_heartbeat_discovery_build", "mqtt_env3_discovery_build"):
+        for remove_owner in (False, True):
+            missing = json.loads(json.dumps(budgets))
+            if remove_owner:
+                missing["tasks"]["mqtt"]["paths"].remove(path)
+            else:
+                del missing["paths"][path]
+            try:
+                validate_discovery_builder_paths(missing)
+            except BudgetError as exc:
+                assert f"discovery builder path {path}:" in str(exc)
+            else:
+                raise AssertionError(f"self-test accepted missing builder path/owner {path}")
+            inventory_controls += 1
     sources = {path: (REPO / path).read_text(encoding="utf-8")
                for path, _ in TASK_ALLOCATIONS.values()}
     moved = json.loads(json.dumps(budgets))

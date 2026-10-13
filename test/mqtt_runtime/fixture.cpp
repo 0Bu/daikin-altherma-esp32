@@ -207,6 +207,49 @@ void check_cycle(TickType_t delay) {
     require(sdk::takes == sdk::gives, "MQTT_LOCK_OWNERSHIP_BALANCED");
     require(adapter::config_locks == 0, "CONFIG_LOCK_OWNERSHIP_BALANCED");
 }
+void startup_failure_recovery() {
+    initial_config();
+    sdk::start_failures = 2;
+    sdk::on_delay       = [](TickType_t delay) {
+        require(delay == 1000 && sdk::locks == 0 && !sdk::mutex.held && sdk::takes == sdk::gives &&
+                          adapter::config_locks == 0,
+                      "START_FAILURE_WAIT_RELEASES_LOCKS_AND_DELAYS_NORMALLY");
+        require(sdk::destroy_calls == 0, "START_FAILURE_PRESERVES_REUSABLE_CLIENT");
+        require(sdk::start_calls <= sdk::delays + 1, "START_FAILURE_RETRY_IS_RATE_BOUNDED");
+        if (sdk::delays == 1)
+            require(sdk::start_calls == 1, "INITIAL_START_FAILURE_DELAYS_FIRST_RETRY");
+        if (sdk::delays == 3)
+            require(sdk::start_calls == 2, "START_FAILURE_BACKOFF_RETAINS_WAIT_CYCLE");
+        if (sdk::delays == 4) {
+            check_cycle(delay);
+            require(sdk::start_calls == 3 && daik::s_client_running.load() &&
+                              daik::mqtt_status().connected,
+                          "START_FAILURE_RECOVERS_WITHOUT_REBOOT");
+            require(daik::s_ref_status.subscribed && daik::s_circulation_status.subscribed,
+                          "START_FAILURE_RECOVERY_SERVICES_INBOUND_WITHOUT_X10A");
+            throw StopTask{};
+        }
+    };
+    try {
+        sdk::task_fn(nullptr);
+    } catch (const StopTask&) {
+    } catch (const std::runtime_error&) {
+        require(false, "START_FAILURE_KEEPS_PUBLISH_TASK_ALIVE");
+    }
+}
+
+void event_registration_failure() {
+    adapter::cfg.mqtt_uri    = "mqtt://host-witness";
+    sdk::registration_result = ESP_FAIL;
+    daik::mqtt_ha_start();
+    require(!sdk::task_fn && !daik::s_client && sdk::start_calls == 0,
+            "REGISTRATION_FAILURE_CANNOT_START_UNOBSERVED_CLIENT");
+    require(sdk::destroy_calls == 1 && sdk::locks == 0,
+            "REGISTRATION_FAILURE_RELEASES_INITIALIZED_CLIENT");
+    require(daik::mqtt_status().error == "event registration failed",
+            "REGISTRATION_FAILURE_REPORTS_ITS_ACTUAL_CAUSE");
+}
+
 void ref_oom_recovery() {
     initial_config();
     feed("room", R"({"temperature":20,"time":1700000100})");
@@ -1762,6 +1805,10 @@ int main(int argc, char** argv) {
             probe_capture_generation();
         else if (std::strcmp(scenario, "probe_proof_expiry") == 0)
             probe_proof_expiry();
+        else if (std::strcmp(scenario, "startup_failure_recovery") == 0)
+            startup_failure_recovery();
+        else if (std::strcmp(scenario, "event_registration_failure") == 0)
+            event_registration_failure();
         else if (std::strcmp(scenario, "ref_oom_recovery") == 0)
             ref_oom_recovery();
         else if (std::strcmp(scenario, "circulation_oom_recovery") == 0)

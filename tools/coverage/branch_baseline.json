@@ -6,7 +6,7 @@
         "gcc-13-linux-ubuntu24": "ESP-IDF v6.1 container GCC 13.3.0",
         "gcc-15-linux-ubuntu26": "Ubuntu 26.04 aarch64 GCC 15.2.0"
       },
-      "hosted_confirmation": "Hosted counts use the measured local instrumentation delta and preserve the existing hosted heartbeat offset; authoritative GCC 15 CI confirmation is pending",
+      "hosted_confirmation": "GitHub run 38370062541 at ffecf5482f1f8fd8b46dc03ee4cea15e2ab04b98 confirmed all updated hosted inventories, including heartbeat 133/236. These logic headers are unchanged in the startup/preflight follow-up.",
       "runner": "scripts/run-mock-tests.sh --coverage",
       "scope": "Eight new circulation-proof outcomes and all bounded-fragment outcomes are taken. Shared discovery serialization removes repeated append instrumentation; every affected builder ratio rises, all other inventories and historical floors are retained",
       "sources": {
