@@ -84,7 +84,7 @@ physical measurement. `?redact=1` applies the [report redaction contract](SECURI
 Bits `0x001` / `0x080` distinguish a nonempty matching predecessor actually **loaded this boot**
 from durable metadata for the current target; saving alone does not prove restoration.
 `0x002` is the missing/empty bootstrap boundary, `0x004` a foreign base/board, `0x100` an operator
-migration boundary, and `0x040` pending retirement. Error bits are `0x008` (load), `0x010`
+migration boundary (including unproven retained discovery ownership), and `0x040` pending retirement. Error bits are `0x008` (load), `0x010`
 (incompatible record/unknown profile) and `0x020` (save). Errors clear after recovery; loaded and
 boundary evidence remains for the boot. This record never establishes physical model identity.
 See [MQTT migrations](MQTT.md#migrations) for scope and owner actions.

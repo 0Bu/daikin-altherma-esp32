@@ -72,6 +72,7 @@
 #include "logic/json.hpp"
 #include "logic/mqtt_group.hpp"
 #include "logic/mqtt_cleanup.hpp"
+#include "logic/mqtt_discovery_owner.hpp"
 #include "logic/mqtt_retirement.hpp"
 #include "logic/mqtt_retirement_identity.hpp"
 #include "logic/mqtt_retirement_store.hpp"
@@ -2442,6 +2443,25 @@ static void test_config_transaction() {
 // must keep the X10A device in HA (and with it the entities, their history and their statistics),
 // which the old MAC-derived node id could not do.
 static void test_ha_device() {
+    // A missing label must emit no key bytes in either state pass or retirement comparison.
+    // The owning writer, size counter and digest must agree, including their existing prefix.
+    std::string missing_label = "kept";
+    ha_slug_append(missing_label, nullptr);
+    CHECK(missing_label == "kept");
+    CountingOut missing_count;
+    missing_count += "kept";
+    ha_slug_append(missing_count, nullptr);
+    CHECK(missing_count.n == missing_label.size());
+    X10aCacheProbeOut missing_digest;
+    missing_digest += "kept";
+    const auto unchanged_digest = missing_digest.digest;
+    ha_slug_append(missing_digest, nullptr);
+    CHECK(missing_digest.n == missing_label.size() && missing_digest.digest == unchanged_digest);
+    const MqttRetirementIdentity        no_identity{};
+    retirement_identity_detail::Compare missing_comparison{no_identity};
+    ha_slug_append(missing_comparison, nullptr);
+    CHECK(missing_comparison.at == 0 && missing_comparison.equal);
+
     CHECK(device_node_id("daikin-altherma-esp32") == "daikin_altherma_esp32");
     CHECK(device_node_id("home/heating/daikin altherma") ==
           "daikin_altherma_esp32__686f6d652f68656174696e672f6461696b696e20616c746865726d61");
@@ -17201,21 +17221,312 @@ static std::set<std::string> all_profile_entity_ids(const def::Profile& profile,
     return ids;
 }
 
+// Retained discovery must establish an exact raw installation owner before a preserved namespace
+// can be changed. Assert the production builders, not a parallel serialization of their fields.
+static void test_mqtt_discovery_owner() {
+    const std::string board  = "daikin_altherma_esp32__board_020102aabbcc";
+    const std::string prefix = "homeassistant", nested_prefix = "plant/homeassistant";
+    size_t            configs = 0, profiles = 0;
+    for (const std::string base : {"daikin-altherma-esp32", "daikin-altherma-esp32-bench"}) {
+        const std::string node = device_node_id(base);
+        CHECK(mqtt_preserved_discovery_base(base));
+        auto config = [&](const std::string& payload, const std::string& topic) {
+            CHECK(mqtt_discovery_namespace_topic(topic, prefix, node));
+            CHECK(mqtt_discovery_payload_owned(payload.data(), payload.size(), base, node, board));
+            CHECK(!mqtt_discovery_payload_owned(payload.data(), payload.size(), base + "-other",
+                                                node, board));
+            ++configs;
+        };
+        for (const auto& profile : def::profiles) {
+            const auto view = def::resolved(profile);
+            for (size_t i = 0; i < view.count(); ++i) {
+                const ValueDef row = logic::adjudicated(view[i]);
+                if (!row_publishable(row) || !conv_publishable(row.conv) ||
+                    object_id(row.label).empty())
+                    continue;
+                config(
+                    discovery_config(node, board, x10a_topic(base), availability_topic(base), row),
+                    discovery_topic(prefix, node, row));
+                if (row.conv == 203) {
+                    const std::string group = group_for_page(row.reg);
+                    for (const auto& companion : FAULT_COMPANIONS)
+                        config(companion_discovery_config(node, board, x10a_topic(base),
+                                                          availability_topic(base), group,
+                                                          companion),
+                               companion_discovery_topic(prefix, node, group, companion.key));
+                }
+            }
+            ++profiles;
+        }
+        for (const auto& sensor : HEARTBEAT_SENSORS)
+            config(heartbeat_discovery_config(node, board, heartbeat_topic(base),
+                                              availability_topic(base), sensor),
+                   heartbeat_discovery_topic(prefix, node, sensor));
+        for (const auto& sensor : CRASH_SENSORS)
+            config(crash_discovery_config(node, board, crash_topic(base), availability_topic(base),
+                                          sensor),
+                   crash_discovery_topic(prefix, node, sensor));
+        for (const auto& sensor : ENV3_HA_SENSORS)
+            config(env3_discovery_config(node, board, env3_topic(base), availability_topic(base),
+                                         sensor),
+                   env3_discovery_topic(prefix, node, sensor));
+        for (const auto& sensor : RETIRED_HEARTBEAT_SENSORS)
+            CHECK(mqtt_discovery_namespace_topic(
+                heartbeat_discovery_topic(prefix, sensor.component, node, sensor.object_id), prefix,
+                node));
+        for (const auto& sensor : RETIRED_CRASH_SENSORS)
+            CHECK(mqtt_discovery_namespace_topic(
+                crash_discovery_topic(prefix, sensor.component, node, sensor.object_id), prefix,
+                node));
+        for (const auto& sensor : RETIRED_WEATHER_HA_SENSORS)
+            CHECK(mqtt_discovery_namespace_topic(
+                retired_weather_discovery_topic(prefix, node, sensor), prefix, node));
+        for (const auto& sensor : RETIRED_MODBUS_HA_SENSORS)
+            CHECK(mqtt_discovery_namespace_topic(
+                retired_modbus_discovery_topic(prefix, node, sensor), prefix, node));
+        // The retired Modbus source used a distinct primary node. Its exact raw state topic still
+        // establishes installation ownership, including on a replacement board.
+        const std::string retired =
+            "{\"state_topic\":\"" + base + "/modbus\",\"availability_topic\":\"" + base +
+            "/status\",\"device\":{\"identifiers\":[\"" + modbus_entity_node_id(node) + "\"]}}";
+        CHECK(mqtt_discovery_payload_owned(retired.data(), retired.size(), base, node, board));
+        const std::string foreign_base = base == "daikin-altherma-esp32"
+                                             ? "daikin.altherma.esp32"
+                                             : "daikin.altherma.esp32.bench";
+        CHECK(ha_slug(foreign_base.c_str()) == node);
+        const std::string foreign =
+            heartbeat_discovery_config(node, board, heartbeat_topic(foreign_base),
+                                       availability_topic(foreign_base), HEARTBEAT_SENSORS[0]);
+        CHECK(!mqtt_discovery_payload_owned(foreign.data(), foreign.size(), base, node, board));
+    }
+    CHECK(profiles == 2 * sizeof(def::profiles) / sizeof(def::profiles[0]));
+    CHECK(configs > 8000);
+
+    // Raw slash, backslash, quote and UTF-8 bytes are escaped by the actual publisher and must
+    // decode consistently in the owner predicate. Custom nodes never inspect a historical slug.
+    for (const std::string base : {"plant/room", "plant\\room", "plant\"room", "plant/温度",
+                                   "plant-min", "DAIKIN-ALTHERMA-ESP32"}) {
+        const std::string node = device_node_id(base);
+        CHECK(!mqtt_preserved_discovery_base(base));
+        CHECK(mqtt_discovery_namespace_topic(
+            heartbeat_discovery_topic(nested_prefix, node, HEARTBEAT_SENSORS[0]), nested_prefix,
+            node));
+        CHECK(!mqtt_discovery_namespace_topic(
+            heartbeat_discovery_topic(nested_prefix, ha_slug(base.c_str()), HEARTBEAT_SENSORS[0]),
+            nested_prefix, node));
+        const auto hb = heartbeat_discovery_config(node, board, heartbeat_topic(base),
+                                                   availability_topic(base), HEARTBEAT_SENSORS[0]);
+        CHECK(mqtt_discovery_payload_owned(hb.data(), hb.size(), base, node, board));
+        const auto env = env3_discovery_config(node, board, env3_topic(base),
+                                               availability_topic(base), ENV3_HA_SENSORS[0]);
+        CHECK(mqtt_discovery_payload_owned(env.data(), env.size(), base, node, board));
+        CHECK(!mqtt_discovery_payload_owned(hb.data(), hb.size(), ha_slug(base.c_str()), node,
+                                            board));
+    }
+    for (const char* raw : {"", "Daikin-Altherma-Esp32", "daikin_altherma_esp32",
+                            "daikin-altherma-esp32-one", "daikin-altherma-esp32-bench-2"})
+        CHECK(!mqtt_preserved_discovery_base(raw));
+
+    const std::string base = "daikin-altherma-esp32", node = device_node_id(base);
+    CHECK(mqtt_discovery_namespace_topic(
+        prefix + "/unknown_component/" + node + "/unknown_object/config", prefix, node));
+    CHECK(!mqtt_discovery_namespace_topic("anything", "", node));
+    CHECK(!mqtt_discovery_namespace_topic("anything", prefix, ""));
+    for (const std::string& topic : {
+             prefix,
+             prefix + "/",
+             prefix + "/sensor",
+             prefix + "-other/sensor/" + node + "/x/config",
+             prefix + "//" + node + "/x/config",
+             prefix + "/sensor/" + node,
+             prefix + "/sensor/" + node + "/config",
+             prefix + "/sensor/" + node + "//config",
+             prefix + "/sensor/" + node + "/x/config/extra",
+             prefix + "/sensor/" + node + "/x/extra/config",
+             prefix + "/sensor/" + node + "_other/x/config",
+             prefix + "/sensor/" + node + "_modbus_other/x/config",
+         })
+        CHECK(!mqtt_discovery_namespace_topic(topic, prefix, node));
+
+    // Fixed historical discovery fixtures expose aliases and ambiguous identities independent of
+    // today's abbreviated builders. Unknown HA options may contain complete bounded JSON values.
+    auto owned = [&](const std::string& json) {
+        return mqtt_discovery_payload_owned(json.data(), json.size(), base, node, board);
+    };
+    const std::string state  = "\"stat_t\":\"" + base + "/x10a\"";
+    const std::string device = "\"dev\":{\"ids\":[\"" + node + "\",\"" + board + "\"]}";
+    const std::string valid  = "{" + state + "," + device + "}";
+    CHECK(owned(valid));
+    CHECK(owned(" \n\t" + valid + "\r\n"));
+    CHECK(owned("{\"state_topic\":\"" + base + "/x10a\",\"device\":{\"identifiers\":[\"" + node +
+                "\"]},\"availability_topic\":\"" + base + "/status\"}"));
+    CHECK(owned("{" + state + ",\"dev\":{\"ids\":[\"" + board + "\"]}}"));
+    CHECK(owned("{" + state + ",\"dev\":{\"ids\":[\"old_short_board_alias\",\"" + node +
+                "\"]},\"avty\":[{\"topic\":\"" + base +
+                "/status\",\"payload_available\":\"online\"}]}"));
+    CHECK(owned("{" + state + "," + device +
+                ",\"options\":{\"null\":null,\"truth\":true,\"falsehood\":false,\"count\":-1.25e+3,"
+                "\"array\":[0,\"quoted\\\"value\",{},[]]},\"other\":\"\\u0061\"}"));
+    CHECK(!mqtt_discovery_payload_owned(nullptr, 0, base, node, board));
+    CHECK(!mqtt_discovery_payload_owned(nullptr, valid.size(), base, node, board));
+    // Every partial delivery is unproven, and data outside the supplied byte count is not read.
+    for (size_t length = 0; length < valid.size(); ++length)
+        CHECK(!mqtt_discovery_payload_owned(valid.data(), length, base, node, board));
+    const std::string outside = valid + "unrelated bytes beyond the frame";
+    CHECK(mqtt_discovery_payload_owned(outside.data(), valid.size(), base, node, board));
+    CHECK(!owned(outside));
+    std::string with_nul = valid;
+    with_nul.insert(with_nul.find("x10a"), 1, '\0');
+    CHECK(!owned(with_nul));
+    CHECK(!owned(valid + std::string(1, '\0')));
+
+    const std::vector<std::string> invalid = {
+        "",
+        "{}",
+        "[]",
+        "null",
+        "true",
+        "0",
+        "{",
+        "{\"",
+        "{\"x\"}",
+        "{\"x\":}",
+        "{\"x\":tru}",
+        "{\"x\":01}",
+        "{\"x\":1.}",
+        "{\"x\":1e}",
+        "{\"x\":[]",
+        "{\"x\":{}}",
+        "{" + state + "}",
+        "{" + device + "}",
+        "{" + state + "," + device + ",}",
+        "{" + state + "," + device + ",\"x\":{\"a\":1,}}",
+        "{" + state + "," + device + ",\"x\":[1,]}",
+        "{" + state + "," + device + ",\"x\":\"\\q\"}",
+        "{" + state + "," + device + ",\"x\":\"\\u00\"}",
+        "{" + state + "," + state + "," + device + "}",
+        "{" + state + ",\"state_topic\":\"" + base + "/x10a\"," + device + "}",
+        "{" + state + ",\"state_topic\":\"foreign/x10a\"," + device + "}",
+        "{" + state + ",\"\\u0073tat_t\":\"foreign/x10a\"," + device + "}",
+        "{" + state + "," + device + "," + device + "}",
+        "{" + state + "," + device + ",\"device\":{\"identifiers\":[\"" + node + "\"]}}",
+        "{" + state + "," + device + ",\"\\u0064ev\":{\"ids\":[\"foreign\"]}}",
+        "{\"stat_t\":null," + device + "}",
+        "{\"stat_t\":123," + device + "}",
+        "{\"stat_t\":[]," + device + "}",
+        "{\"stat_t\":\"" + base + "\"," + device + "}",
+        "{\"stat_t\":\"" + base + "/\"," + device + "}",
+        "{\"stat_t\":\"" + base + "-other/x10a\"," + device + "}",
+        "{\"stat_t\":\"foreign/x10a\"," + device + "}",
+        "{\"stat_t\":\"~/x10a\"," + device + "}",
+        "{\"stat_t\":\"" + base + "/~x10a\"," + device + "}",
+        "{\"stat_t\":\"\\u0064aikin-altherma-esp32/x10a\"," + device + "}",
+        "{\"stat_t\":\"" + base + "/x10a\\n\"," + device + "}",
+        "{" + state + ",\"~\":\"" + base + "\"," + device + "}",
+        "{" + state + ",\"dev\":null}",
+        "{" + state + ",\"dev\":[]}",
+        "{" + state + ",\"dev\":{}}",
+        "{" + state + ",\"dev\":{\"name\":\"same name\"}}",
+        "{" + state + ",\"dev\":{\"ids\":[]}}",
+        "{" + state + ",\"dev\":{\"ids\":null}}",
+        "{" + state + ",\"dev\":{\"ids\":\"" + node + "\"}}",
+        "{" + state + ",\"dev\":{\"ids\":[123]}}",
+        "{" + state + ",\"dev\":{\"ids\":[\"foreign_device\"]}}",
+        "{" + state + ",\"dev\":{\"ids\":[\"" + node + "_other\"]}}",
+        "{" + state + ",\"dev\":{\"ids\":[\"" + node + "\"],\"ids\":[\"" + node + "\"]}}",
+        "{" + state + ",\"dev\":{\"ids\":[\"" + node + "\"],\"identifiers\":[\"foreign\"]}}",
+        "{" + state + ",\"dev\":{\"ids\":[\"" + node + "\"],\"\\u0069ds\":[\"foreign\"]}}",
+        "{" + state + "," + device + ",\"avty_t\":null}",
+        "{" + state + "," + device + ",\"availability_topic\":\"foreign/status\"}",
+        "{" + state + "," + device + ",\"\\u0061vty_t\":\"foreign/status\"}",
+        "{" + state + "," + device + ",\"avty_t\":\"" + base + "/status\",\"avty_t\":\"" + base +
+            "/status\"}",
+        "{" + state + "," + device + ",\"avty_t\":\"" + base +
+            "/status\",\"availability_topic\":\"" + base + "/status\"}",
+        "{" + state + "," + device + ",\"avty_t\":\"" + base + "/status\",\"availability\":[]}",
+        "{" + state + "," + device + ",\"availability\":null}",
+        "{" + state + "," + device + ",\"availability\":{}}",
+        "{" + state + "," + device + ",\"availability\":[]}",
+        "{" + state + "," + device + ",\"availability\":[{}]}",
+        "{" + state + "," + device + ",\"availability\":[null]}",
+        "{" + state + "," + device + ",\"availability\":[{\"payload_available\":\"online\"}]}",
+        "{" + state + "," + device + ",\"availability\":[{\"topic\":false}]}",
+        "{" + state + "," + device + ",\"availability\":[{\"topic\":\"foreign/status\"}]}",
+        "{" + state + "," + device + ",\"availability\":[{\"topic\":\"" + base +
+            "/status\"},{\"topic\":\"foreign/status\"}]}",
+        "{" + state + "," + device + ",\"availability\":[{\"topic\":\"" + base +
+            "/status\",\"topic\":\"" + base + "/status\"}]}",
+        "{" + state + "," + device + ",\"availability\":[{\"topic\":\"" + base +
+            "/status\",\"\\u0074opic\":\"foreign/status\"}]}",
+        "{" + state + "," + device + ",\"availability\":[{\"topic\":\"" + base +
+            "/status\"}],\"avty\":[{\"topic\":\"" + base + "/status\"}]}",
+    };
+    for (const auto& json : invalid) CHECK(!owned(json));
+    // Unknown metadata is supported without materializing it, but recursion is deliberately
+    // bounded so malformed retained data cannot spend the MQTT task's stack budget.
+    std::string deep = "null";
+    for (size_t i = 0; i < 12; ++i) deep = "[" + deep + "]";
+    CHECK(!owned("{" + state + "," + device + ",\"metadata\":" + deep + "}"));
+}
+
 static void test_mqtt_installation_identity() {
-    CHECK(ha_canonical_installation_base("daikin-altherma-esp32"));
-    CHECK(ha_canonical_installation_base("daikin-altherma-esp32-bench"));
-    CHECK(ha_canonical_installation_base("a1-b2"));
-    for (const char* noncanonical :
-         {"", "-a", "a-", "a--b", "A", "a_b", "a/b", "a.b", "a\\b", "a\"b"})
-        CHECK(!ha_canonical_installation_base(noncanonical));
+    CHECK(device_node_id("daikin-altherma-esp32") == "daikin_altherma_esp32");
     CHECK(device_node_id("daikin-altherma-esp32-bench") == "daikin_altherma_esp32_bench");
+    CHECK(device_node_id("a1-b2") == "daikin_altherma_esp32__61312d6232");
     CHECK(std::string(ha_entity_separator("daikin_altherma_esp32")) == "_");
     CHECK(std::string(ha_entity_separator("daikin_altherma_esp32_bench")) == "_");
     CHECK(std::string(ha_entity_separator("daikin_altherma_esp32_custom")) == "__");
     CHECK(device_node_id("Daikin_2") == "daikin_altherma_esp32__4461696b696e5f32");
     CHECK(device_node_id("plant/温度") == "daikin_altherma_esp32__706c616e742fe6b8a9e5baa6");
+    // These real historical aliases all advertised the same discovery node. Keeping only the
+    // lowercase hyphenated custom base on that node would let its retirement delete another
+    // installation's old retained configuration. Every custom spelling must leave the old node.
+    const char* historical_aliases[] = {
+        "daikin-altherma-esp32-one",
+        "daikin.altherma.esp32.one",
+        "DAIKIN-ALTHERMA-ESP32-ONE",
+        "daikin_altherma_esp32_one",
+    };
+    std::set<std::string> custom_nodes;
+    for (const char* base : historical_aliases) {
+        CHECK(mqtt_base_valid(base));
+        CHECK(ha_slug(base) == "daikin_altherma_esp32_one");
+        const std::string node = device_node_id(base);
+        CHECK(node != ha_slug(base));
+        CHECK(node.find("daikin_altherma_esp32__") == 0);
+        CHECK(custom_nodes.insert(node).second);
+        CHECK(
+            retired_weather_discovery_topic("homeassistant", node, RETIRED_WEATHER_HA_SENSORS[2]) !=
+            "homeassistant/binary_sensor/daikin_altherma_esp32_one/weather_forecast_available/"
+            "config");
+    }
+    // The preserved nodes are exceptions for their exact raw bases, never for old slug aliases.
+    // Slugging a new node also proves it cannot be the output of the idempotent old slugger: the
+    // historical algorithm collapses every punctuation run, including the reserved '__'.
+    for (const char* base : {
+             "daikin.altherma.esp32",
+             "DAIKIN-ALTHERMA-ESP32",
+             "daikin_altherma_esp32",
+             "daikin.altherma.esp32.bench",
+             "DAIKIN-ALTHERMA-ESP32-BENCH",
+             "daikin_altherma_esp32_bench",
+             "daikin-altherma-esp32__706c616e74",
+             "daikin",
+             "daikin-altherma-esp32-board-020102aabbcc",
+             "plant",
+             "plant-min",
+         }) {
+        CHECK(mqtt_base_valid(base));
+        const std::string node = device_node_id(base);
+        CHECK(node != ha_slug(node.c_str()));
+        CHECK(node != "daikin_altherma_esp32" && node != "daikin_altherma_esp32_bench");
+        CHECK(std::string(ha_entity_separator(node)) == "__");
+        CHECK(custom_nodes.insert(node).second);
+    }
     const std::pair<const char*, const char*> pairs[] = {
         {"daikin-altherma-esp32.one", "daikin-altherma-esp32-one"},
+        {"DAIKIN-ALTHERMA-ESP32-ONE", "daikin-altherma-esp32-one"},
+        {"daikin_altherma_esp32_one", "daikin-altherma-esp32-one"},
         {"Daikin_2", "daikin-2"},
         {"plant/room", "plant-room"},
         {"plant\\room", "plant-room"},
@@ -17255,8 +17566,20 @@ static void test_mqtt_installation_identity() {
         const auto free_id = uniq_id_of(heartbeat_discovery_config(
             device_node_id("daikin-altherma-esp32-min"), "board", "s", "a", *free));
         CHECK(minimum_id == "daikin_altherma_esp32_min_free_heap");
-        CHECK(free_id == "daikin_altherma_esp32_min__free_heap");
+        CHECK(
+            free_id ==
+            "daikin_altherma_esp32__6461696b696e2d616c746865726d612d65737033322d6d696e__free_heap");
         CHECK(minimum_id != free_id);
+        // A raw-base prefix followed by the first entity segment collided historically too.
+        const auto plant_minimum = uniq_id_of(
+            heartbeat_discovery_config(device_node_id("plant"), "board", "s", "a", *minimum));
+        const auto plant_min_free = uniq_id_of(
+            heartbeat_discovery_config(device_node_id("plant-min"), "board", "s", "a", *free));
+        CHECK(ha_slug("plant") + "_" + minimum->object_id ==
+              ha_slug("plant-min") + "_" + free->object_id);
+        CHECK(plant_minimum == "daikin_altherma_esp32__706c616e74__min_free_heap");
+        CHECK(plant_min_free == "daikin_altherma_esp32__706c616e742d6d696e__free_heap");
+        CHECK(plant_minimum != plant_min_free);
     }
     const uint8_t mac_a[] = {0x02, 0x01, 0x02, 0xaa, 0xbb, 0xcc};
     const uint8_t mac_b[] = {0x04, 0x01, 0x02, 0xaa, 0xbb, 0xcc};
@@ -17268,6 +17591,10 @@ static void test_mqtt_installation_identity() {
     CHECK(hardware_b == "daikin_altherma_esp32__board_040102aabbcc");
     CHECK(hardware_a != hardware_b);
     CHECK(hardware_a != device_node_id("daikin-altherma-esp32-board-020102aabbcc"));
+    for (const auto& node : custom_nodes) {
+        CHECK(node != hardware_a && node != hardware_b);
+        CHECK(node.find("daikin_altherma_esp32__board_") != 0);
+    }
     CHECK(ha_board_id(nullptr, 6).empty());
     CHECK(ha_board_id(mac_a, 0).empty());
     CHECK(ha_board_id(mac_a, 5).empty());
@@ -20752,6 +21079,55 @@ static void test_mqtt_cleanup() {
     CHECK(env3_enabled_done.source == MqttCleanupSource::Env3 && env3_enabled_done.env3_enabled);
     CHECK(env3_only.suppress(MqttCleanupSource::Env3)); // completion cycle stays suppressed
 
+    // A positively conflicting discovery namespace delegates only config removal to the owner.
+    // Raw source withdrawal still needs its real ACK, and a queued config cannot be skipped.
+    MqttCleanupScheduler foreign;
+    CHECK(!foreign.skip_discovery_for_operator_migration());
+    CHECK(foreign.reconstruct_for_client(11));
+    action = foreign.next_action(true, false);
+    CHECK(action.topic == MqttCleanupTopic::State);
+    CHECK(!foreign.skip_discovery_for_operator_migration());
+    CHECK(foreign.publish_queued(11, 600));
+    CHECK(!foreign.skip_discovery_for_operator_migration());
+    CHECK(foreign.acknowledge({11, 600}));
+    action = foreign.next_action(true, false);
+    CHECK(action.topic == MqttCleanupTopic::RetiredDiscovery);
+    CHECK(foreign.publish_queued(11, 601));
+    CHECK(!foreign.skip_discovery_for_operator_migration());
+    CHECK(foreign.acknowledge({11, 601}));
+    for (int i = 1; i < MQTT_WEATHER_CLEANUP_DISCOVERY_COUNT; ++i) {
+        action = foreign.next_action(true, false);
+        CHECK(action.topic == MqttCleanupTopic::RetiredDiscovery && action.index == i);
+        CHECK(foreign.skip_discovery_for_operator_migration());
+    }
+    const auto delegated_weather = foreign.take_completion();
+    CHECK(delegated_weather.source == MqttCleanupSource::Weather);
+    CHECK(delegated_weather.discovery_skipped && !delegated_weather.env3_enabled);
+    CHECK(!foreign.skip_discovery_for_operator_migration());
+    action = foreign.next_action(true, false);
+    CHECK(action.source == MqttCleanupSource::Modbus && action.topic == MqttCleanupTopic::State);
+    CHECK(!foreign.skip_discovery_for_operator_migration());
+    CHECK(foreign.publish_queued(11, 602));
+    CHECK(foreign.acknowledge({11, 602}));
+    for (int i = 0; i < MQTT_MODBUS_CLEANUP_DISCOVERY_COUNT; ++i) {
+        action = foreign.next_action(true, false);
+        CHECK(action.index == i && foreign.publish_queued(11, 603 + i));
+        CHECK(foreign.acknowledge({11, 603 + i}));
+    }
+    CHECK(!foreign.take_completion().discovery_skipped); // a later owned run has its own evidence
+    action = foreign.next_action(true, false);
+    CHECK(action.source == MqttCleanupSource::Env3 && action.topic == MqttCleanupTopic::State);
+    CHECK(foreign.publish_queued(11, 630));
+    CHECK(foreign.acknowledge({11, 630}));
+    for (int i = 0; i < MQTT_ENV3_CLEANUP_DISCOVERY_COUNT; ++i) {
+        action = foreign.next_action(true, false);
+        CHECK(action.topic == MqttCleanupTopic::Env3Discovery && action.index == i);
+        CHECK(foreign.skip_discovery_for_operator_migration());
+    }
+    CHECK(foreign.take_completion().discovery_skipped);
+    foreign.begin_cycle();
+    CHECK(!foreign.suppress(MqttCleanupSource::Env3) && !foreign.next_action(true, false));
+
     CHECK(MQTT_SOURCE_CLEANUP_MAX_STEPS == 37);
 }
 
@@ -23415,6 +23791,7 @@ int main() {
     test_tie_break_reach();
     test_entity_identity();
     test_mqtt_installation_identity();
+    test_mqtt_discovery_owner();
     test_feature_gate();
     test_refrigerant_service();
     test_state_dwell();

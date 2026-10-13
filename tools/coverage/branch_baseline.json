@@ -213,6 +213,24 @@
           8852
         ]
       }
+    },
+    {
+      "compilers": {
+        "clang-17-darwin": "Apple clang version 17.0.0 (clang-1700.6.4.2)",
+        "gcc-13-linux-ubuntu24": "g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+        "gcc-15-linux-ubuntu26": "g++-15 (Ubuntu 15.2.0-16ubuntu1) 15.2.0",
+        "gcc-15-github-linux-ubuntu26": "g++-15 (Ubuntu 15.2.0-16ubuntu1) 15.2.0"
+      },
+      "runner": "scripts/run-mock-tests.sh --coverage",
+      "scope": "Allocation-bounded installation IDs, missing-label sink agreement, skipped-discovery evidence and streaming retained ownership; all existing ratios preserved or raised and unrelated inventories retained. Ownership tests also exercise the existing bounded JSON grammar.",
+      "sources": {
+        "main/logic/ha_device.hpp": "f30d66ad58192623e33482bfbc5ebb4f7b7becba764c42325a20039fb7384e3c",
+        "main/logic/mqtt_cleanup.hpp": "242a57a938e8815757b4d4e31ee46323f1d9d793479c92464b0f4e8dbfd18684",
+        "main/logic/mqtt_discovery_owner.hpp": "e3fbdab191867cc94b810317eeac997c8b6cc5861c9478f86f1df7adefabd058",
+        "main/logic/ota_manifest.hpp": "d8555565fa78b0145a6a8fe0df626f5fbebe6449a4c207799293a0486358da72",
+        "test/test_logic.cpp": "fcf93de59a7fde6f38120604637668f527b61679476fc5add1bb9d63e1a699b6"
+      },
+      "hosted_confirmation": "GCC 15 x86_64 measured locally in Ubuntu 26.04; authoritative GitHub CI pending."
     }
   ],
   "method": "Exact taken/outcome inventories are measured by scripts/run-mock-tests.sh --coverage and bound to compiler family, major version and platform; hosted profiles additionally bind the runner image. The gate rejects inventory mismatches and any historical ratio decrease. Updated hosted inventories require authoritative CI confirmation. Historical measurement notes remain in Git; profiles contain the enforced counts. Measurements below identify changed sources and local compiler provenance without changing checker rules or the 95-percent executable-line floor.",
@@ -339,8 +357,8 @@
         "taken": 12
       },
       "main/logic/ha_device.hpp": {
-        "taken": 149,
-        "outcomes": 172
+        "taken": 141,
+        "outcomes": 156
       },
       "main/logic/health_gate.hpp": {
         "outcomes": 18,
@@ -463,8 +481,8 @@
         "taken": 32
       },
       "main/logic/mqtt_cleanup.hpp": {
-        "outcomes": 75,
-        "taken": 54
+        "taken": 66,
+        "outcomes": 83
       },
       "main/logic/mqtt_group.hpp": {
         "outcomes": 308,
@@ -511,8 +529,8 @@
         "taken": 130
       },
       "main/logic/ota_manifest.hpp": {
-        "outcomes": 468,
-        "taken": 287
+        "taken": 340,
+        "outcomes": 468
       },
       "main/logic/ota_quiesce.hpp": {
         "outcomes": 6,
@@ -613,6 +631,10 @@
       "main/logic/profile_table_equal.hpp": {
         "taken": 36,
         "outcomes": 36
+      },
+      "main/logic/mqtt_discovery_owner.hpp": {
+        "taken": 231,
+        "outcomes": 274
       }
     },
     "gcc-13-linux-ubuntu24": {
@@ -737,8 +759,8 @@
         "taken": 11
       },
       "main/logic/ha_device.hpp": {
-        "taken": 168,
-        "outcomes": 188
+        "taken": 163,
+        "outcomes": 180
       },
       "main/logic/health_gate.hpp": {
         "outcomes": 26,
@@ -861,8 +883,8 @@
         "taken": 40
       },
       "main/logic/mqtt_cleanup.hpp": {
-        "outcomes": 77,
-        "taken": 55
+        "taken": 71,
+        "outcomes": 87
       },
       "main/logic/mqtt_group.hpp": {
         "outcomes": 524,
@@ -901,8 +923,8 @@
         "taken": 156
       },
       "main/logic/ota_manifest.hpp": {
-        "outcomes": 530,
-        "taken": 327
+        "taken": 379,
+        "outcomes": 530
       },
       "main/logic/ota_quiesce.hpp": {
         "outcomes": 8,
@@ -1011,6 +1033,10 @@
       "main/logic/profile_table_equal.hpp": {
         "taken": 40,
         "outcomes": 40
+      },
+      "main/logic/mqtt_discovery_owner.hpp": {
+        "taken": 258,
+        "outcomes": 274
       }
     },
     "gcc-15-github-linux-ubuntu26": {
@@ -1135,8 +1161,8 @@
         "taken": 11
       },
       "main/logic/ha_device.hpp": {
-        "taken": 166,
-        "outcomes": 188
+        "taken": 161,
+        "outcomes": 180
       },
       "main/logic/health_gate.hpp": {
         "outcomes": 26,
@@ -1259,8 +1285,8 @@
         "taken": 40
       },
       "main/logic/mqtt_cleanup.hpp": {
-        "outcomes": 77,
-        "taken": 55
+        "taken": 71,
+        "outcomes": 87
       },
       "main/logic/mqtt_group.hpp": {
         "outcomes": 524,
@@ -1299,8 +1325,8 @@
         "taken": 156
       },
       "main/logic/ota_manifest.hpp": {
-        "outcomes": 530,
-        "taken": 327
+        "taken": 379,
+        "outcomes": 530
       },
       "main/logic/ota_quiesce.hpp": {
         "outcomes": 8,
@@ -1409,6 +1435,10 @@
       "main/logic/profile_table_equal.hpp": {
         "taken": 40,
         "outcomes": 40
+      },
+      "main/logic/mqtt_discovery_owner.hpp": {
+        "taken": 258,
+        "outcomes": 274
       }
     },
     "gcc-15-linux-ubuntu26": {
@@ -1533,8 +1563,8 @@
         "taken": 11
       },
       "main/logic/ha_device.hpp": {
-        "taken": 168,
-        "outcomes": 188
+        "taken": 163,
+        "outcomes": 180
       },
       "main/logic/health_gate.hpp": {
         "outcomes": 26,
@@ -1657,8 +1687,8 @@
         "taken": 40
       },
       "main/logic/mqtt_cleanup.hpp": {
-        "outcomes": 77,
-        "taken": 55
+        "taken": 71,
+        "outcomes": 87
       },
       "main/logic/mqtt_group.hpp": {
         "outcomes": 524,
@@ -1697,8 +1727,8 @@
         "taken": 156
       },
       "main/logic/ota_manifest.hpp": {
-        "outcomes": 530,
-        "taken": 327
+        "taken": 379,
+        "outcomes": 530
       },
       "main/logic/ota_quiesce.hpp": {
         "outcomes": 8,
@@ -1807,6 +1837,10 @@
       "main/logic/profile_table_equal.hpp": {
         "taken": 40,
         "outcomes": 40
+      },
+      "main/logic/mqtt_discovery_owner.hpp": {
+        "taken": 258,
+        "outcomes": 274
       }
     }
   },

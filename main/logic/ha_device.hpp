@@ -58,37 +58,32 @@ inline std::string ha_slug(const char* s) {
     return o;
 }
 
-// Lowercase alphanumeric segments separated by one '-' retain their existing node. Every other
-// accepted raw base is encoded exactly in a namespace that the single-separator slugger cannot
+// Preserve only the two exact deployed standard bases. Even a lowercase hyphenated custom base
+// can share an old slug with a dotted, underscored or differently cased installation. Encode every
+// other accepted raw base in a namespace that the historical single-separator slugger cannot
 // produce. MQTT validates the raw base's size and alphabet before it reaches this builder.
-inline bool ha_canonical_installation_base(const std::string& base) {
-    bool needs_alnum = true;
-    for (const unsigned char c : base) {
-        if ((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9')) {
-            needs_alnum = false;
-        } else if (c == '-' && !needs_alnum) {
-            needs_alnum = true;
-        } else {
-            return false;
-        }
-    }
-    return !needs_alnum;
-}
-
 inline std::string device_node_id(const std::string& base) {
-    std::string id = ha_slug(base.c_str());
-    if (id.empty()) return "daikin"; // invalid/non-sluggable callers; accepted bases never use this
-    if (ha_canonical_installation_base(base)) return id;
-    id                   = "daikin_altherma_esp32__";
+    if (base == "daikin-altherma-esp32") return "daikin_altherma_esp32";
+    if (base == "daikin-altherma-esp32-bench") return "daikin_altherma_esp32_bench";
+    // Check fallback eligibility without allocating a slug that custom installations discard.
+    if (base.find_first_of("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789") ==
+        std::string::npos)
+        return "daikin"; // invalid/non-sluggable callers; accepted bases never use this
+    constexpr char   prefix[]    = "daikin_altherma_esp32__";
+    constexpr size_t prefix_size = sizeof(prefix) - 1;
+    std::string      id(prefix_size + 2 * base.size(), '\0');
+    char* const      writable = id.data();
+    for (size_t i = 0; i < prefix_size; ++i) writable[i] = prefix[i];
     constexpr char hex[] = "0123456789abcdef";
-    for (const unsigned char c : base) {
-        id += hex[c >> 4];
-        id += hex[c & 15];
+    for (size_t i = 0; i < base.size(); ++i) {
+        const unsigned char c             = static_cast<unsigned char>(base[i]);
+        writable[prefix_size + 2 * i]     = hex[c >> 4];
+        writable[prefix_size + 2 * i + 1] = hex[c & 15];
     }
     return id;
 }
 
-// Full hardware identities are disjoint from both canonical nodes and the raw-base hex namespace.
+// Full hardware identities are disjoint from both preserved nodes and the raw-base hex namespace.
 // Missing, multicast and sentinel addresses cannot become a shared synthetic identity.
 inline std::string ha_board_id(const uint8_t* mac, size_t length) {
     if (!mac || length != 6 || (mac[0] & 1)) return {};
@@ -105,7 +100,7 @@ inline std::string ha_board_id(const uint8_t* mac, size_t length) {
 }
 
 // Preserve the two deployed legacy entity sets; their suffixes are checked against real catalogs.
-// Every custom installation has an unambiguous node/entity boundary, including canonical nodes.
+// Every custom installation has an unambiguous node/entity boundary.
 inline const char* ha_entity_separator(const std::string& node) noexcept {
     return node == "daikin_altherma_esp32" || node == "daikin_altherma_esp32_bench" ? "_" : "__";
 }
