@@ -166,7 +166,8 @@ Controller settings, weather and operating schedules can make this activity inte
 **In plain language:** The board compares five internal counters at consecutive readable endpoints,
 with a known compressor state. Only a comparable increase counts as an observed event.
 
-**Meaning:** **EXPERIMENTAL** appears after a usable comparison, without a full-day wait. A non-zero
+**Meaning:** A usable comparison without an increase shows **EXPERIMENTAL**; a comparable increase
+shows **NOTE**. Both retain experimental evidence and appear without a full-day wait. A non-zero
 startup value is a baseline, and a decrease has no established reset or wrap interpretation.
 
 **Important limit:** An increase does not identify a fault; no observed increase does not prove that

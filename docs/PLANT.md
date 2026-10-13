@@ -38,8 +38,9 @@ Temporary allocation/TLS pauses preserve profile capabilities while adding no ob
 
 Read-time source age, elapsed lifecycle span and per-signal coverage are separate facts. A stopped
 producer cannot retain a current all-clear. Historical findings remain age-bounded; observation-only rows
-do not become reassuring health results. The summary counts eligible bounded assessments, while
-tank-cooling notes and experimental events can independently raise its severity.
+do not become reassuring health results. The overall verdict uses eligible bounded assessments;
+tank-cooling notes and experimental events can independently raise its severity. The badge counts
+warning or note rows, as explained in [DIAGNOSTICS.md](DIAGNOSTICS.md).
 
 ### Evidence population
 

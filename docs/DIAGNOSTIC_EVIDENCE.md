@@ -1,6 +1,6 @@
 # Evidence and limits of the plant diagnostics
 
-<!-- diagnostic-evidence-contract: 62968ad7eb0a845bf63312f350746e2f52eb2e92c34ace7e9953a3a18773a707 -->
+<!-- diagnostic-evidence-contract: 84ded6b157100ea5e1817f26db9a97fb545abf6557c4afb60d1e783d546acf45 -->
 
 For every row in the **Plant diagnostics · 24 h** card, this page answers four questions:
 
@@ -296,9 +296,10 @@ including high pressure, compressor overheating, and inverter overcurrent, in it
 
 **Firmware rule:** The same exact counter must increase between comparable readable endpoints.
 All profile-declared counters and the compressor state must be readable at both endpoints. A
-non-zero startup value is a baseline; a decrease invalidates the comparison. Usable comparison
-evidence is available immediately as **EXPERIMENTAL**, without a day-long wait. The retained event
-flag does not identify which counter increased or when. See checkup_retry_index(),
+non-zero startup value is a baseline; a decrease invalidates the comparison. A usable comparison
+without an increase displays **EXPERIMENTAL**; a comparable increase displays **NOTE**. Both retain
+experimental evidence and appear without a day-long wait. The retained event flag does not identify
+which counter increased or when. See checkup_retry_index(),
 CHECKUP_RETRY_COUNT and the Retries branch in [checkup.hpp](../main/logic/checkup.hpp).
 
 **Experimental boundary:** Public Daikin documentation does not establish complete semantics for
