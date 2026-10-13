@@ -256,11 +256,16 @@ async function waitForChildExit(child, timeoutMs) {
 
 export async function stopBrowser(child, { termTimeoutMs = 3000, killTimeoutMs = 3000 } = {}) {
   if (!childExited(child)) child.kill("SIGTERM");
-  if (await waitForChildExit(child, termTimeoutMs)) return;
-  if (!childExited(child)) child.kill("SIGKILL");
-  if (!await waitForChildExit(child, killTimeoutMs)) {
-    throw new Error("Chrome did not exit after SIGKILL");
+  if (!await waitForChildExit(child, termTimeoutMs)) {
+    if (!childExited(child)) child.kill("SIGKILL");
+    if (!await waitForChildExit(child, killTimeoutMs)) {
+      throw new Error("Chrome did not exit after SIGKILL");
+    }
   }
+  // Main-process exit need not close pipes inherited by helpers such as Crashpad. Retain
+  // diagnostic collection until that exit is verified, then release only our read handles.
+  child.stdout?.destroy();
+  child.stderr?.destroy();
 }
 
 const RETRYABLE_PROFILE_ERRORS = new Set(["EBUSY", "EMFILE", "ENFILE", "ENOTEMPTY", "EPERM"]);
