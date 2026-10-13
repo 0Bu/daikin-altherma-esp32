@@ -227,7 +227,7 @@
         "main/logic/ha_device.hpp": "f30d66ad58192623e33482bfbc5ebb4f7b7becba764c42325a20039fb7384e3c",
         "main/logic/mqtt_cleanup.hpp": "242a57a938e8815757b4d4e31ee46323f1d9d793479c92464b0f4e8dbfd18684",
         "main/logic/mqtt_discovery_owner.hpp": "e3fbdab191867cc94b810317eeac997c8b6cc5861c9478f86f1df7adefabd058",
-        "main/logic/ota_manifest.hpp": "d8555565fa78b0145a6a8fe0df626f5fbebe6449a4c207799293a0486358da72",
+        "main/logic/ota_manifest.hpp": "dfe8eef6b34ac77667e156b8553f598ad91a5aa4ed3a53ddd0125b5521d411c5",
         "test/test_logic.cpp": "fcf93de59a7fde6f38120604637668f527b61679476fc5add1bb9d63e1a699b6"
       },
       "hosted_confirmation": "GCC 15 x86_64 measured locally in Ubuntu 26.04; authoritative GitHub CI pending."
