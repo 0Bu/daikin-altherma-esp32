@@ -1360,7 +1360,9 @@ function checkupDetailHtml(c, fullSpan = c.full_span === true, report = {}) {
   if (statusKey === "collecting" && Number(c.required_s) > Number(c.observed_s))
     scope += `<div class="vdesc-p">${esc(t("check.detail.coverage_missing",
          Math.ceil(c.required_s - c.observed_s).toLocaleString(LANG)))}</div>`;
-  if (statusKey === "collecting" && fullSpan === false && Number.isFinite(report.span_s) &&
+  // Only the bounded daily assessments need a complete day; flow waits for eligible pump time.
+  if (["pressure", "cycling", "defrost"].includes(c.id) && statusKey === "collecting" &&
+      fullSpan === false && Number.isFinite(report.span_s) &&
       ["day_incomplete", "input_coverage"].includes(c.reason))
     scope += `<div class="vdesc-p">${esc(t("check.detail.horizon_wait",
                            checkupDuration(Math.max(0, 86400 - report.span_s))))}</div>`;
