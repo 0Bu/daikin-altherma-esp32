@@ -78,7 +78,7 @@ assert.match(recovery, /if \(wifi_e != ESP_OK \|\| !history_erased \|\| !crash_e
   "an incomplete WiFi/history/coredump wipe must not reboot into a partial reset");
 
 const poll = code("main/hp_poll.cpp");
-assert.match(poll, /poll_detect\(\)[\s\S]*?cycle_generation = hp_poll_generation\(\)[\s\S]*?expected = config\(\)[\s\S]*?hp_detect_run\(\)/,
+assert.match(poll, /poll_detect\(\)[\s\S]*?cycle_generation\s*=\s*hp_poll_generation\(\)[\s\S]*?expected\s*=\s*config\(\)[\s\S]*?hp_detect_run\(\)/,
   "detection must capture both generation and config revision before the bus sweep");
 assert.match(poll, /Lock lk\(s_mtx\)[\s\S]*?s_target_generation\.load[\s\S]*?config_commit_detected_link\([\s\S]*?history_reset_on_detect\([\s\S]*?config_commit_detected_model\(/,
   "detected link, observer resets and model publication must share the reconfigure barrier");

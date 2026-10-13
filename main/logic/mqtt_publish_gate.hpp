@@ -49,6 +49,13 @@ inline constexpr bool x10a_source_is_recent(int32_t last_ok_s) {
     return last_ok_s >= 0 && last_ok_s < MQTT_X10A_OFFLINE_GRACE_S;
 }
 
+// Apply the same observation boundary to an actual monotonic source timestamp. Unknown and
+// future timestamps cannot establish freshness; subtract only after that ordering check.
+inline constexpr bool x10a_source_time_is_recent(int64_t now_us, int64_t observed_us) {
+    return observed_us >= 0 && now_us >= observed_us &&
+           now_us - observed_us < static_cast<int64_t>(MQTT_X10A_OFFLINE_GRACE_S) * 1000000;
+}
+
 inline constexpr bool mqtt_x10a_available(bool x10a_connected, int32_t last_ok_s) {
     (void)x10a_connected; // current-cycle loss is debounced solely by the last real observation
     return x10a_source_is_recent(last_ok_s);

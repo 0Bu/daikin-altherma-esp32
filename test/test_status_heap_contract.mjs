@@ -8,13 +8,14 @@ import fs from "node:fs";
 
 const read = p => fs.readFileSync(new URL(`../${p}`, import.meta.url), "utf8");
 const status = read("main/http_status.cpp");
+const chunks = read("main/http_chunks.hpp");
 const sink = read("main/logic/chunk_sink.hpp");
 const heartbeat = read("main/logic/heartbeat.hpp");
 
 assert.match(status,
   /template <typename JsonOut>\s*\nstatic void append_status_json\(JsonOut& j, bool redact\)/,
   "the status serializer must accept both owning and bounded output sinks");
-assert.match(status,
+assert.match(chunks,
   /using HttpJsonChunks = BoundedChunkSink<HttpChunkEmitter, 1024>;/,
   "HTTP JSON responses must keep a strict 1 KiB contiguous transport bound");
 assert.match(status,

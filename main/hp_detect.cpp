@@ -6,8 +6,10 @@
 #include "diag_log.hpp"
 #include "hp_comm.hpp"
 #include "logic/crc.hpp"
+#include "logic/config_model.hpp"
 #include "logic/detect.hpp"
 #include "logic/hexdump.hpp"
+#include "net.hpp"
 #include "sdkconfig.h"
 
 namespace daik {
@@ -37,9 +39,12 @@ static int read_page(uint8_t reg, Protocol proto, uint8_t* out, int outmax,
     return paylen;
 }
 
-static bool proto_answers(Protocol p) {
+static bool proto_answers(Protocol p, bool& local_failure) {
     uint8_t tmp[64];
-    return read_page(p == Protocol::S ? 0x50 : 0x00, p, tmp, sizeof(tmp)) >= 0;
+    HpReplyKind kind = HpReplyKind::NoReply;
+    const int   n    = read_page(p == Protocol::S ? 0x50 : 0x00, p, tmp, sizeof(tmp), &kind);
+    if (kind == HpReplyKind::DriverError) local_failure = true;
+    return n >= 0;
 }
 
 // Same read, but RETRIED — used only for the page probe (step 2), where the protocol and pins are
@@ -109,16 +114,21 @@ DetectResult hp_detect_run() {
     };
     PinPair cand[4];
     int     nc  = 0;
-    auto    add = [&](int rx, int tx) {
-        if (rx < 0 || tx < 0 || rx == tx) return;
-        for (int i = 0; i < nc; i++)
-            if (cand[i].rx == rx && cand[i].tx == tx) return;
-        if (nc < 4) cand[nc++] = {rx, tx};
-    };
-    add(c.rx_pin, c.tx_pin);
-    add(c.tx_pin, c.rx_pin);
-    add(CONFIG_DAIKIN_RX_PIN, CONFIG_DAIKIN_TX_PIN);
-    add(CONFIG_DAIKIN_TX_PIN, CONFIG_DAIKIN_RX_PIN);
+    {
+        // Pin-policy scratch is dead before the page sweep and its decode/log buffers.
+        const ReservedPins reserved  = config_reserved_pins(c).plus(net_eth_reserved_pins());
+        const bool         octal_spi = hw_octal_spi();
+        auto               add       = [&](int rx, int tx) {
+            if (!link_pins_safe(rx, tx, octal_spi, reserved)) return;
+            for (int i = 0; i < nc; i++)
+                if (cand[i].rx == rx && cand[i].tx == tx) return;
+            if (nc < 4) cand[nc++] = {rx, tx};
+        };
+        add(c.rx_pin, c.tx_pin);
+        add(c.tx_pin, c.rx_pin);
+        add(CONFIG_DAIKIN_RX_PIN, CONFIG_DAIKIN_TX_PIN);
+        add(CONFIG_DAIKIN_TX_PIN, CONFIG_DAIKIN_RX_PIN);
+    }
 
     const Protocol p0 = c.proto; // cached framing — try it first
     const Protocol p1 = (p0 == Protocol::I) ? Protocol::S : Protocol::I;
@@ -137,14 +147,15 @@ DetectResult hp_detect_run() {
         //     failure indistinguishable from a silent X10A link. Naming the real cause once is the
         //     whole point of the equivalent guard in poll_once.
         if (!hp_uart_init(cand[i].rx, cand[i].tx)) {
+            r.local_failure = true;
             diag_printf("detect: UART bring-up failed on rx=%d tx=%d — skipping this pair\n",
                         cand[i].rx, cand[i].tx);
             continue;
         }
-        if (proto_answers(p0)) {
+        if (proto_answers(p0, r.local_failure)) {
             r.proto  = p0;
             r.bus_ok = true;
-        } else if (proto_answers(p1)) {
+        } else if (proto_answers(p1, r.local_failure)) {
             r.proto  = p1;
             r.bus_ok = true;
         }
@@ -154,12 +165,15 @@ DetectResult hp_detect_run() {
         }
     }
     if (!r.bus_ok) {
-        if (nc > 0) {
+        if (nc == 0) {
+            r.local_failure = true;
+            diag_printf("detect: no permitted rx/tx pin candidates to probe — check config\n");
+        } else if (r.local_failure) {
+            diag_printf("detect: local UART/probe failure without a usable X10A response\n");
+        } else {
             diag_printf("detect: no X10A response on any pin/proto (last tried rx=%d tx=%d) — "
                         "check wiring/GND\n",
                         cand[nc - 1].rx, cand[nc - 1].tx);
-        } else {
-            diag_printf("detect: no valid rx/tx pin candidates to probe — check config\n");
         }
         return r;
     }
@@ -171,6 +185,7 @@ DetectResult hp_detect_run() {
         diag_printf("detect: UART re-init failed on the answering pair rx=%d tx=%d — retrying\n",
                     r.rx, r.tx);
         r.bus_ok = false;
+        r.local_failure = true;
         return r;
     }
 

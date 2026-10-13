@@ -12,6 +12,7 @@
 // RAM; /hp/query persists nothing at all — it is the free register probe, a one-shot read of a
 // caller-chosen page served on the poll task (logic/hp_probe.hpp).
 #include "http_handlers.hpp"
+#include "http_chunks.hpp"
 #include "checkup.hpp"
 #include "state_dwell.hpp"
 #include "config.hpp"
@@ -1295,15 +1296,6 @@ static esp_err_t do_detect(httpd_req_t* req) {
 // was asked and the finding is that this unit has nothing there. Those come back 200 with
 // `ok:false` and a stable `status`, because a client exploring a register map will hit them
 // constantly and an HTTP error would tell it the device is broken when it is working perfectly.
-struct ProbeChunkEmitter {
-    httpd_req_t* req = nullptr;
-    bool operator()(std::string_view bytes, bool final) const {
-        if (final) return httpd_resp_send_chunk(req, nullptr, 0) == ESP_OK;
-        return httpd_resp_send_chunk(req, bytes.data(), bytes.size()) == ESP_OK;
-    }
-};
-using ProbeJsonChunks = BoundedChunkSink<ProbeChunkEmitter, 1024>;
-
 template <typename JsonOut>
 static void probe_append_int(JsonOut& out, int value) {
     char b[16];
@@ -1349,12 +1341,24 @@ static esp_err_t hp_query_probe(httpd_req_t* req) {
     JsonGuard j(json_parse_document(std::string_view(body, static_cast<size_t>(body_len))));
     if (!j) return send_err(req, "400 Bad Request", "bad json");
     ProbeRequest q;
-    q.reg    = ji(j, "reg", -1);
-    q.offset = ji(j, "offset", 0);
-    q.size   = ji(j, "size", 1);
+    const auto   read_integer = [&](const char* key, int fallback, int& out) {
+        const cJSON* item = cJSON_GetObjectItem(j, key);
+        if (!item) {
+            out = fallback;
+            return true;
+        }
+        return cJSON_IsNumber(item) && probe_integer_value(item->valuedouble, out);
+    };
+    if (!read_integer("reg", -1, q.reg))
+        return send_err(req, "400 Bad Request", probe_reject_name(ProbeReject::Register));
+    if (!read_integer("offset", 0, q.offset))
+        return send_err(req, "400 Bad Request", probe_reject_name(ProbeReject::Offset));
+    if (!read_integer("size", 1, q.size))
+        return send_err(req, "400 Bad Request", probe_reject_name(ProbeReject::Size));
     // No converter named = sweep. That is the DEFAULT on purpose: requiring an id before any value
     // is visible would ask the user to answer the question they came here to ask.
-    q.conv   = cJSON_HasObjectItem(j, "conv") ? ji(j, "conv", PROBE_SWEEP) : PROBE_SWEEP;
+    if (!read_integer("conv", PROBE_SWEEP, q.conv))
+        return send_err(req, "400 Bad Request", probe_reject_name(ProbeReject::Converter));
     j.reset();
 
     const ProbeReject reject = probe_validate(q);
@@ -1404,7 +1408,7 @@ static esp_err_t hp_query_probe(httpd_req_t* req) {
 
     char reg_hex[8], hex[3 * 64];
     snprintf(reg_hex, sizeof(reg_hex), "0x%02X", static_cast<unsigned>(q.reg));
-    ProbeJsonChunks out(ProbeChunkEmitter{req});
+    HttpJsonChunks out(HttpChunkEmitter{req});
     httpd_resp_set_type(req, "application/json");
     out += "{\"reg\":\"";
     out += reg_hex;

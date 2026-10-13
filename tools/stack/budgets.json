@@ -111,7 +111,7 @@
     },
     "hp_query_probe": {
       "pattern": "^daik::hp_query_probe\\(",
-      "max_bytes": 2720
+      "max_bytes": 2736
     },
     "mcp_parser": {
       "pattern": "^daik::mcp_parse\\(",
