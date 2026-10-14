@@ -36,12 +36,16 @@ struct SampleHttpdStackOnExit {
 
 bool read_header(httpd_req_t* req, const char* name, char* out, size_t cap, bool& present) {
     const size_t len = httpd_req_get_hdr_value_len(req, name);
-    present = len != 0;
+    if (len >= cap) return false;
+    // IDF returns length zero for both absent and supplied-empty headers. Only its value getter
+    // distinguishes them; a supplied-empty Origin/Host must reach the policy as present.
+    const esp_err_t result = httpd_req_get_hdr_value_str(req, name, out, cap);
+    present                = result != ESP_ERR_NOT_FOUND;
     if (!present) {
         if (cap) out[0] = '\0';
-        return true;
+        return len == 0;
     }
-    return len < cap && httpd_req_get_hdr_value_str(req, name, out, cap) == ESP_OK;
+    return result == ESP_OK;
 }
 
 esp_err_t reject_request(httpd_req_t* req, const char* status, const char* message) {
@@ -94,7 +98,7 @@ __attribute__((noinline)) bool discard_unread_body(httpd_req_t* req) {
         },
         [deadline_us]() -> bool { return esp_timer_get_time() >= deadline_us; });
 }
-}  // namespace
+} // namespace
 
 // The single OOM/exception guard every HTTP handler runs under. http_register() stashes the real
 // handler in user_ctx and installs this trampoline (behind handle_then_settle_body) as the route
@@ -123,15 +127,17 @@ static esp_err_t handle_all(httpd_req_t* req) {
         if (!provisioning_ap_active() && !trusted_lan_headers_allowed(req))
             return reject_request(req, "403 Forbidden", "request origin not allowed");
 
-        if (ota_download_active() && !http_is_ota_route(req->uri))
+        const bool ota_route =
+            !provisioning_ap_active() && http_is_ota_route(req->uri, req->method == HTTP_POST);
+        if (ota_download_active() && !ota_route)
             return reject_request(req, "503 Service Unavailable", "update in progress");
-        if (heap_largest_internal_block() < 6144 && !http_is_ota_route(req->uri))
+        if (heap_largest_internal_block() < 6144 && !ota_route)
             return reject_request(req, "503 Service Unavailable", "heap low");
 
-        // All body-bearing POST handlers parse JSON. text/plain and HTML-form bodies are deliberately
-        // refused: both are CORS-safelisted request shapes a hostile page can emit without preflight.
-        // Bodyless actions (/detect, /ota/update, /crash/dismiss and the clear endpoints) remain
-        // available to native clients without inventing an empty JSON envelope.
+        // All body-bearing POST handlers parse JSON. text/plain and HTML-form bodies are
+        // deliberately refused: both are CORS-safelisted request shapes a hostile page can emit
+        // without preflight. Bodyless actions (/detect, /ota/update, /crash/dismiss and the clear
+        // endpoints) remain available to native clients without inventing an empty JSON envelope.
         if (!json_post_allowed(req))
             return reject_request(req, "415 Unsupported Media Type", "application/json required");
         return fn(req);

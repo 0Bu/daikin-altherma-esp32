@@ -503,6 +503,7 @@ assert.ok(watchdogTaskStart >= 0 && watchdogTaskEnd > watchdogTaskStart,
 const watchdogTask = httpDeadline.slice(watchdogTaskStart, watchdogTaskEnd);
 const watchdogPrime = watchdogTask.indexOf("sys_thread_sem_get()");
 const watchdogPrimeCheck = watchdogTask.indexOf("thread_sem != nullptr", watchdogPrime);
+const watchdogRetainedPrime = watchdogTask.indexOf("sys_thread_sem_get() == thread_sem", watchdogPrimeCheck);
 const watchdogInitAck = watchdogTask.indexOf("xSemaphoreGive(s_deadline.init_completion)",
   watchdogPrimeCheck);
 const watchdogShutdown = watchdogTask.indexOf("shutdown(socket, SHUT_RDWR)", watchdogInitAck);
@@ -510,7 +511,7 @@ const watchdogFailure = watchdogTask.indexOf("shutdown_result != 0", watchdogShu
 const watchdogAbort = watchdogTask.indexOf("deadline_fail_closed()", watchdogFailure);
 const watchdogAck = watchdogTask.indexOf("xSemaphoreGive(s_deadline.completion)", watchdogAbort);
 assert.ok(watchdogPrime >= 0 && watchdogPrimeCheck > watchdogPrime &&
-  watchdogInitAck > watchdogPrimeCheck && watchdogShutdown > watchdogInitAck &&
+  watchdogRetainedPrime > watchdogPrimeCheck && watchdogInitAck > watchdogRetainedPrime && watchdogShutdown > watchdogInitAck &&
   watchdogFailure > watchdogShutdown && watchdogAbort > watchdogFailure &&
   watchdogAck > watchdogAbort,
   "the static watchdog must require a successful lwIP prime at boot and fail closed on shutdown before ack");
@@ -1516,7 +1517,7 @@ const mcpPostStart = mcp.indexOf("static esp_err_t mcp_post(");
 const mcpStatusSend = mcp.indexOf(
   "return http_send_status_json(req, response, suffix, false);", mcpPostStart);
 const mcpOtaGate = mcp.indexOf("if (ota_download_active())", mcpPostStart);
-const mcpBody = mcp.indexOf("char body[1024]", mcpPostStart);
+const mcpBody = mcpPostStart + mcp.slice(mcpPostStart).search(/\bchar\s+body\[1024\]/);
 assert.ok(mcpPostStart >= 0 && mcpOtaGate > mcpPostStart && mcpBody > mcpOtaGate &&
           mcpStatusSend > mcpBody,
   "MCP must refuse OTA before parsing or entering its streamed get_status snapshot");

@@ -6,6 +6,20 @@
         "gcc-13-linux-ubuntu24": "ESP-IDF v6.1 container GCC 13.3.0",
         "gcc-15-linux-ubuntu26": "Ubuntu 26.04 aarch64 GCC 15.2.0"
       },
+      "runner": "scripts/run-mock-tests.sh --coverage",
+      "scope": "Exact OTA paths/methods/AP surfaces, quoted Accept separators and nonzero RFC 9110 weights, UTF-8 families, null parse-error IDs and notification shape controls raise both changed-header coverage ratios; all other inventories and historical floors retained",
+      "hosted_confirmation": "Local GCC 15 inventory measured; authoritative GitHub Ubuntu 26 confirmation pending",
+      "sources": {
+        "main/logic/http_request.hpp": "bf8822074d90b5bd064cf9166e61aef711dd8e11769b5410b0ad7a0f2d825e13",
+        "main/logic/mcp.hpp": "444e41f5b1420b907fc65fdf835d6f997e8232d840f13fb7e5cb4ba3b5bbb3cc"
+      }
+    },
+    {
+      "compilers": {
+        "clang-17-darwin": "Apple Clang 17.0.0",
+        "gcc-13-linux-ubuntu24": "ESP-IDF v6.1 container GCC 13.3.0",
+        "gcc-15-linux-ubuntu26": "Ubuntu 26.04 aarch64 GCC 15.2.0"
+      },
       "hosted_confirmation": "GitHub run 38370062541 at ffecf5482f1f8fd8b46dc03ee4cea15e2ab04b98 confirmed all updated hosted inventories, including heartbeat 133/236. These logic headers are unchanged in the startup/preflight follow-up.",
       "runner": "scripts/run-mock-tests.sh --coverage",
       "scope": "Eight new circulation-proof outcomes and all bounded-fragment outcomes are taken. Shared discovery serialization removes repeated append instrumentation; every affected builder ratio rises, all other inventories and historical floors are retained",
@@ -432,8 +446,8 @@
         "taken": 2
       },
       "main/logic/http_request.hpp": {
-        "outcomes": 98,
-        "taken": 88
+        "taken": 150,
+        "outcomes": 160
       },
       "main/logic/http_surface.hpp": {
         "outcomes": 8,
@@ -468,8 +482,8 @@
         "taken": 58
       },
       "main/logic/mcp.hpp": {
-        "outcomes": 579,
-        "taken": 375
+        "taken": 433,
+        "outcomes": 641
       },
       "main/logic/modbus.hpp": {
         "outcomes": 108,
@@ -834,8 +848,8 @@
         "taken": 2
       },
       "main/logic/http_request.hpp": {
-        "outcomes": 142,
-        "taken": 118
+        "taken": 197,
+        "outcomes": 226
       },
       "main/logic/http_surface.hpp": {
         "outcomes": 12,
@@ -870,8 +884,8 @@
         "taken": 69
       },
       "main/logic/mcp.hpp": {
-        "outcomes": 621,
-        "taken": 397
+        "taken": 457,
+        "outcomes": 685
       },
       "main/logic/modbus.hpp": {
         "outcomes": 120,
@@ -1236,8 +1250,8 @@
         "taken": 2
       },
       "main/logic/http_request.hpp": {
-        "outcomes": 142,
-        "taken": 118
+        "taken": 197,
+        "outcomes": 226
       },
       "main/logic/http_surface.hpp": {
         "outcomes": 12,
@@ -1272,8 +1286,8 @@
         "taken": 69
       },
       "main/logic/mcp.hpp": {
-        "outcomes": 621,
-        "taken": 397
+        "taken": 457,
+        "outcomes": 685
       },
       "main/logic/modbus.hpp": {
         "outcomes": 120,
@@ -1638,8 +1652,8 @@
         "taken": 2
       },
       "main/logic/http_request.hpp": {
-        "outcomes": 142,
-        "taken": 118
+        "taken": 197,
+        "outcomes": 226
       },
       "main/logic/http_surface.hpp": {
         "outcomes": 12,
@@ -1674,8 +1688,8 @@
         "taken": 69
       },
       "main/logic/mcp.hpp": {
-        "outcomes": 621,
-        "taken": 397
+        "taken": 457,
+        "outcomes": 685
       },
       "main/logic/modbus.hpp": {
         "outcomes": 120,

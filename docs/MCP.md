@@ -8,7 +8,8 @@ source. Keep this unauthenticated, plaintext HTTP endpoint on a trusted LAN.
 
 Open `http://daikin-altherma-esp32.local/mcp` in a browser. **`GET /mcp`** is a device-local setup
 page, not an event stream. It shows the actual serving URL, copyable configuration, a curl example
-and the two tools. The page makes no requests and has no external assets (`connect-src 'none'`).
+and the two tools. It makes no API or external requests (`connect-src 'none'`). An SSE-only GET
+receives **405** because this device does not offer an event stream.
 
 For a client accepting the common `mcpServers` HTTP shape:
 
@@ -45,15 +46,17 @@ indistinguishable candidates does not establish the physical unit's identity.
 Transport is **stateless Streamable HTTP**, JSON-RPC 2.0, with no session id, SSE or retained request
 state. Request bodies must declare `application/json` and are bounded to **1 KiB**.
 
-- `initialize` negotiates `2025-03-26`, `2025-06-18` or `2025-11-25`; missing/unsupported requested
+- `initialize` negotiates `2025-06-18` or `2025-11-25`; missing/unsupported requested
   revision receives the latest supported revision, `2025-11-25`.
 - `tools/list` returns exactly the two tools with read-only annotations.
 - `tools/call` accepts only those names and no non-empty arguments.
-- Valid notifications return HTTP **202** with no body.
+- Valid notifications return HTTP **202** with no body; supplied params must be an object.
 - Parse/request/method/parameter errors use `-32700` / `-32600` / `-32601` / `-32602`. Unknown tools use
-  `-32601`. Valid string, number or null request ids are echoed exactly.
-- A present `MCP-Protocol-Version` header must name one of the supported revisions. If absent, the
-  Streamable-HTTP compatibility default applies.
+  `-32601`. Valid string, number or null request ids are echoed exactly. Malformed JSON or UTF-8
+  receives a parse error with a null id.
+- `MCP-Protocol-Version` must name a supported revision on every post-initialize message.
+  Initialization may omit it. The headerless March 2025 default and explicit March headers receive
+  **400** on subsequent messages: that revision has no `structuredContent` for the actual readings.
 
 Native clients may omit `Origin`; an HTTP/1.0 probe may also omit `Host`. When supplied, Host and
 browser Origin must name the device's mDNS hostname or current WiFi/Ethernet IP, optionally `:80`.

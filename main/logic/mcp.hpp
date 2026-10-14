@@ -108,6 +108,37 @@ public:
             if (c == '"') return true;
             if (c < 0x20) return false;
             if (c != '\\') {
+                if (c >= 0x80) {
+                    const char* const start    = p_ - 1;
+                    unsigned          cp       = 0;
+                    unsigned          minimum  = 0;
+                    size_t            trailing = 0;
+                    if (c >= 0xC2 && c <= 0xDF) {
+                        cp       = c & 0x1F;
+                        minimum  = 0x80;
+                        trailing = 1;
+                    } else if (c >= 0xE0 && c <= 0xEF) {
+                        cp       = c & 0x0F;
+                        minimum  = 0x800;
+                        trailing = 2;
+                    } else if (c >= 0xF0 && c <= 0xF4) {
+                        cp       = c & 0x07;
+                        minimum  = 0x10000;
+                        trailing = 3;
+                    } else {
+                        return false;
+                    }
+                    if (static_cast<size_t>(end_ - p_) < trailing) return false;
+                    for (size_t i = 0; i < trailing; ++i) {
+                        const unsigned char next = static_cast<unsigned char>(*p_++);
+                        if ((next & 0xC0) != 0x80) return false;
+                        cp = (cp << 6) | (next & 0x3F);
+                    }
+                    if (cp < minimum || cp > 0x10FFFF || (cp >= 0xD800 && cp <= 0xDFFF))
+                        return false;
+                    if (out) out->append(start, trailing + 1);
+                    continue;
+                }
                 if (out) *out += static_cast<char>(c);
                 continue;
             }
@@ -264,10 +295,9 @@ inline bool tool_params(const char* begin, const char* end, std::string& tool) {
 } // namespace mcp_detail
 
 inline bool mcp_protocol_supported(const std::string& requested) {
-    // All three revisions use Streamable HTTP and the tool/result subset implemented here.
-    return requested == "2025-03-26" ||
-           requested == "2025-06-18" ||
-           requested == "2025-11-25";
+    // The snapshots live in structuredContent, introduced in June 2025. Do not negotiate the
+    // earlier revision, whose text-only tool result would contain only our short summary.
+    return requested == "2025-06-18" || requested == "2025-11-25";
 }
 
 inline McpRequest mcp_parse(const char* body, int len) {
@@ -275,12 +305,20 @@ inline McpRequest mcp_parse(const char* body, int len) {
     if (!body || len <= 0) { out.error = -32700; return out; }
 
     using mcp_detail::JsonReader;
+    // A parse failure has no trustworthy request identity, even after a valid id token.
+    auto parse_error = [] {
+        McpRequest error;
+        error.error = -32700;
+        return error;
+    };
     JsonReader r(body, body + len);
     if (r.peek() != '{') {
         out.error = r.value() && r.done() ? -32600 : -32700;
         return out;
     }
-    if (!r.take('{')) { out.error = -32700; return out; }
+    if (!r.take('{')) {
+        return parse_error();
+    }
 
     bool seen_jsonrpc = false;
     bool jsonrpc_ok = false;
@@ -296,25 +334,31 @@ inline McpRequest mcp_parse(const char* body, int len) {
     if (!r.take('}')) {
         for (;;) {
             std::string key;
-            if (!r.string(&key) || !r.take(':')) { out.error = -32700; return out; }
+            if (!r.string(&key) || !r.take(':')) {
+                return parse_error();
+            }
             if (key == "jsonrpc") {
                 if (seen_jsonrpc) structural_invalid = true;
                 seen_jsonrpc = true;
                 std::string version;
                 if (r.peek() == '"') {
-                    if (!r.string(&version)) { out.error = -32700; return out; }
+                    if (!r.string(&version)) {
+                        return parse_error();
+                    }
                     jsonrpc_ok = version == "2.0";
                 } else if (!r.value()) {
-                    out.error = -32700; return out;
+                    return parse_error();
                 }
             } else if (key == "method") {
                 if (seen_method) structural_invalid = true;
                 seen_method = true;
                 if (r.peek() == '"') {
-                    if (!r.string(&method)) { out.error = -32700; return out; }
+                    if (!r.string(&method)) {
+                        return parse_error();
+                    }
                     method_is_string = true;
                 } else if (!r.value()) {
-                    out.error = -32700; return out;
+                    return parse_error();
                 }
             } else if (key == "id") {
                 if (seen_id) structural_invalid = true;
@@ -322,34 +366,48 @@ inline McpRequest mcp_parse(const char* body, int len) {
                 const char* start = r.mark();
                 const char c = r.peek();
                 if (c == '"') {
-                    if (!r.string()) { out.error = -32700; return out; }
+                    if (!r.string()) {
+                        return parse_error();
+                    }
                     out.id_kind = McpIdKind::String;
                     out.id_raw.assign(start, r.position() - start);
                 } else if (c == '-' || (c >= '0' && c <= '9')) {
-                    if (!r.number()) { out.error = -32700; return out; }
+                    if (!r.number()) {
+                        return parse_error();
+                    }
                     out.id_kind = McpIdKind::Number;
                     out.id_raw.assign(start, r.position() - start);
                 } else if (c == 'n') {
-                    if (!r.literal("null")) { out.error = -32700; return out; }
+                    if (!r.literal("null")) {
+                        return parse_error();
+                    }
                     out.id_kind = McpIdKind::Null;
                 } else {
-                    if (!r.value()) { out.error = -32700; return out; }
+                    if (!r.value()) {
+                        return parse_error();
+                    }
                     out.id_kind = McpIdKind::Invalid;
                 }
             } else if (key == "params") {
                 if (seen_params) structural_invalid = true;
                 seen_params = true;
                 params_begin = r.mark();
-                if (!r.value()) { out.error = -32700; return out; }
+                if (!r.value()) {
+                    return parse_error();
+                }
                 params_end = r.position();
             } else if (!r.value()) {
-                out.error = -32700; return out;
+                return parse_error();
             }
             if (r.take('}')) break;
-            if (!r.take(',')) { out.error = -32700; return out; }
+            if (!r.take(',')) {
+                return parse_error();
+            }
         }
     }
-    if (!r.done()) { out.error = -32700; return out; }
+    if (!r.done()) {
+        return parse_error();
+    }
 
     if (structural_invalid || !seen_jsonrpc || !jsonrpc_ok || !seen_method ||
         !method_is_string || out.id_kind == McpIdKind::Invalid) {
@@ -358,6 +416,10 @@ inline McpRequest mcp_parse(const char* body, int len) {
         return out;
     }
     if (!seen_id) {
+        if (seen_params && !mcp_detail::object_value(params_begin, params_end)) {
+            out.error = -32600;
+            return out;
+        }
         out.id_kind = McpIdKind::None;
         out.notification = true;
         return out;

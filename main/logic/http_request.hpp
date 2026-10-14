@@ -103,14 +103,81 @@ inline bool http_json_content_type(std::string_view value) {
     return !params.empty();
 }
 
-// Returns true if the requested URI belongs to the OTA subsystem (/ota/status, /ota/check,
-// /ota/update). When memory is low or an OTA update is actively downloading, all non-OTA routes
+// Only registered OTA paths may bypass the busy/low-heap guard. Unknown /ota/... GETs reach the
+// SPA catch-all, so a prefix match would admit a dashboard asset beside the writer's TLS heap.
+// When memory is low or an OTA update is actively downloading, all non-OTA routes
 // are early-rejected with 503 so background browser polling doesn't fragment the TLS receive heap.
-inline bool http_is_ota_route(std::string_view uri) {
-    if (uri == "/ota") return true;
-    if (uri.size() > 4 && uri.substr(0, 4) == "/ota" && (uri[4] == '/' || uri[4] == '?'))
-        return true;
+inline bool http_is_ota_route(std::string_view uri, bool is_post = false) {
+    uri = uri.substr(0, uri.find('?'));
+    if (is_post) return uri == "/ota/update";
+    return uri == "/ota/status" || uri == "/ota/check" || uri == "/ota/changelog";
+}
+
+inline std::string_view http_accept_trim_ows(std::string_view value) {
+    while (!value.empty() && (value.front() == ' ' || value.front() == '\t'))
+        value.remove_prefix(1);
+    while (!value.empty() && (value.back() == ' ' || value.back() == '\t')) value.remove_suffix(1);
+    return value;
+}
+
+// Commas and semicolons inside quoted parameter values are not field separators.
+inline std::string_view http_header_token(std::string_view& input, char delimiter) {
+    bool        quoted = false, escaped = false;
+    std::size_t end = 0;
+    for (; end < input.size(); ++end) {
+        const char c = input[end];
+        if (escaped) {
+            escaped = false;
+            continue;
+        }
+        if (quoted && c == '\\') {
+            escaped = true;
+            continue;
+        }
+        if (c == '"') {
+            quoted = !quoted;
+            continue;
+        }
+        if (!quoted && c == delimiter) break;
+    }
+    const std::string_view token = input.substr(0, end);
+    input.remove_prefix(end < input.size() ? end + 1 : end);
+    return http_accept_trim_ows(token);
+}
+
+// RFC 9110 qvalue: zero excludes a representation; values have at most three decimal places.
+inline bool http_quality_nonzero(std::string_view value) {
+    if (value.empty() || (value[0] != '0' && value[0] != '1')) return false;
+    bool nonzero = value[0] == '1';
+    if (value.size() == 1) return nonzero;
+    if (value.size() > 5 || value[1] != '.') return false;
+    for (std::size_t i = 2; i < value.size(); ++i) {
+        if (value[i] < '0' || value[i] > '9' || (value[0] == '1' && value[i] != '0')) return false;
+        nonzero = nonzero || value[i] != '0';
+    }
+    return nonzero;
+}
+
+// Only explicitly accepted, nonzero-weight media types select the MCP GET transport.
+inline bool http_accepts_media_type(std::string_view accept, std::string_view wanted) {
+    while (!accept.empty()) {
+        std::string_view item = http_header_token(accept, ',');
+        if (!http_ascii_iequal(http_header_token(item, ';'), wanted)) continue;
+        bool accepted = true, seen_quality = false;
+        while (!item.empty()) {
+            const std::string_view parameter = http_header_token(item, ';');
+            const std::size_t      equal     = parameter.find('=');
+            if (!http_ascii_iequal(http_accept_trim_ows(parameter.substr(0, equal)), "q")) continue;
+            if (seen_quality || equal == std::string_view::npos) {
+                accepted = false;
+                break;
+            }
+            seen_quality = true;
+            accepted     = http_quality_nonzero(http_accept_trim_ows(parameter.substr(equal + 1)));
+        }
+        if (accepted) return true;
+    }
     return false;
 }
 
-}  // namespace daik
+} // namespace daik
