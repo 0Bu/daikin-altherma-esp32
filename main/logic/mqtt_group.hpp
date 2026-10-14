@@ -379,13 +379,15 @@ inline void append_flat_json(JsonOut& j, const std::vector<GroupedValue>& vals) 
     j += '}';
 }
 
-inline size_t flat_json_size(const std::vector<GroupedValue>& vals) {
+// Count and emission are separate measured stack phases in the MQTT path budget.
+inline __attribute__((noinline)) size_t flat_json_size(const std::vector<GroupedValue>& vals) {
     CountingOut out;
     append_flat_json(out, vals);
     return out.n;
 }
 
-inline std::string build_flat_json(const std::vector<GroupedValue>& vals) {
+inline __attribute__((noinline)) std::string
+                                 build_flat_json(const std::vector<GroupedValue>& vals) {
     const size_t bytes = flat_json_size(vals);
     // Refuse through the existing allocation-failure boundary without allocating an error string.
     if (bytes > MODBUS_FLAT_JSON_MAX_BYTES) throw std::bad_alloc();

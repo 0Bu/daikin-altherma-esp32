@@ -1,4 +1,4 @@
-// translation-source: 22a1c00755c5e710f675904d8503fe9efb3cfb475acba640fc78c686e833d886
+// translation-source: 094b6d8e9805ef6f1340361c7b7628c5db490a2ea1fe8f32355cfd8c17e686a0
 I18N.zh = localeValues([
   /* sys.nodata */ "无数据",
   /* sys.unreachable */ "无法访问",
@@ -506,8 +506,8 @@ I18N.zh = localeValues([
   /* wifi.title */ "WiFi 配置",
   /* wifi.ssid */ "WiFi 网络（SSID）",
   /* wifi.pass */ "WiFi 密码",
-  /* wifi.err_ssid */ "SSID 最多 32 个字符",
-  /* wifi.err_pass */ "密码必须为空（开放网络）或为 8 到 63 个字符",
+  /* wifi.err_ssid */ "SSID 必须为 1 到 32 个 UTF-8 字节",
+  /* wifi.err_pass */ "密码必须为空（开放网络）或为 8 到 63 个 UTF-8 字节",
   /* wifi.hint */ "请输入 WiFi 网络名称。若设备无法连接，会自动恢复先前的 WiFi 设置。",
   /* mqtt.title */ "MQTT 代理",
   /* mqtt.hostport */ "主机 : 端口",

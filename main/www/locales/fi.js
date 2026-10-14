@@ -1,4 +1,4 @@
-// translation-source: 22a1c00755c5e710f675904d8503fe9efb3cfb475acba640fc78c686e833d886
+// translation-source: 094b6d8e9805ef6f1340361c7b7628c5db490a2ea1fe8f32355cfd8c17e686a0
 I18N.fi = localeValues([
   /* sys.nodata */ "Ei tietoja",
   /* sys.unreachable */ "Ei tavoiteta",
@@ -506,8 +506,8 @@ I18N.fi = localeValues([
   /* wifi.title */ "WiFi-asetukset",
   /* wifi.ssid */ "WiFi-verkko (SSID)",
   /* wifi.pass */ "WiFi-salasana",
-  /* wifi.err_ssid */ "SSID saa olla enintään 32 merkkiä",
-  /* wifi.err_pass */ "Salasanan on oltava tyhjä (avoin verkko) tai 8–63 merkkiä",
+  /* wifi.err_ssid */ "SSID:n on oltava 1–32 UTF-8-tavua",
+  /* wifi.err_pass */ "Salasanan on oltava tyhjä (avoin verkko) tai 8–63 UTF-8-tavua",
   /* wifi.hint */ "Anna WiFi-verkon nimi. Jos yhteys ei onnistu, laite palauttaa aiemmat WiFi-asetukset automaattisesti.",
   /* mqtt.title */ "MQTT-välittäjä",
   /* mqtt.hostport */ "Palvelin : portti",

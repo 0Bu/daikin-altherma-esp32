@@ -1,4 +1,4 @@
-// translation-source: 22a1c00755c5e710f675904d8503fe9efb3cfb475acba640fc78c686e833d886
+// translation-source: 094b6d8e9805ef6f1340361c7b7628c5db490a2ea1fe8f32355cfd8c17e686a0
 I18N.sv = localeValues([
   /* sys.nodata */ "Inga data",
   /* sys.unreachable */ "Inte tillgänglig",
@@ -506,8 +506,8 @@ I18N.sv = localeValues([
   /* wifi.title */ "Wi-Fi-konfiguration",
   /* wifi.ssid */ "Wi-Fi-nätverk · SSID",
   /* wifi.pass */ "Wi-Fi-lösenord",
-  /* wifi.err_ssid */ "SSID kan ha högst 32 tecken",
-  /* wifi.err_pass */ "Lösenordet måste vara tomt för öppna nätverk, annars 8–63 tecken",
+  /* wifi.err_ssid */ "SSID måste vara 1–32 UTF-8-byte",
+  /* wifi.err_pass */ "Lösenordet måste vara tomt för öppna nätverk, annars 8–63 UTF-8-byte",
   /* wifi.hint */ "Ange Wi-Fi-namnet. Om anslutningen misslyckas återställer enheten automatiskt de föregående inställningarna.",
   /* mqtt.title */ "MQTT-broker",
   /* mqtt.hostport */ "Värd : port",

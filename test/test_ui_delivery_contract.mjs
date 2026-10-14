@@ -127,6 +127,9 @@ try {
     ["  test network  ", "test-password", { status: 400, ok: false, text: async () => '{"error":"Rejected by server"}' }, "Rejected by server", 1],
     ["test network", "test-password", { status: 503 }, "Device busy", 1],
     ["  test network  ", "", { status: 200, ok: true }, "Saved — rebooting", 1],
+    ["ä".repeat(16), "ä".repeat(4), { status: 200, ok: true }, "Saved — rebooting", 1],
+    ["ä".repeat(17), "test-password", null, "Enter a network name", 0],
+    ["test network", "ä".repeat(32), null, "Password must be empty", 0],
   ]) {
     let submit;
     const requests = [];
@@ -134,7 +137,7 @@ try {
       value: id === "ssid" ? ssid : id === "pass" ? pass : "", textContent: "", disabled: false,
       addEventListener(type, handler) { assert.equal(type, "submit"); submit = handler; },
     }]));
-    const context = vm.createContext({ document: { getElementById: id => nodes[id] },
+    const context = vm.createContext({ document: { getElementById: id => nodes[id] }, TextEncoder,
       fetch: async (url, options) => { requests.push({ url, options }); return reply; } });
     vm.runInContext(shipped.setup.match(/<script>([\s\S]*?)<\/script>/)[1], context);
     await submit({ preventDefault() {} });

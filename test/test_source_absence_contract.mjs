@@ -301,7 +301,7 @@ assert.match(status, /if \(mb\.enabled\) \{[\s\S]*?HOMEHUB_HISTORIES/,
 assert.match(status, /if \(env_enabled\) \{[\s\S]*?ENV3_HISTORIES/,
   "ENV III trends must be offered only while that sensor is enabled");
 assert.match(status,
-  /const bool env3_configured\s*=\s*active_config\.env3_enabled && env3_board_supported\(active_config\);[\s\S]*?env3_source && \(!env3_configured \|\| env_t < 0\)/,
+  /bool\s+env3_configured\s*=\s*false;\s*\{\s*const Config active_config = config\(\);\s*env3_configured = active_config\.env3_enabled && env3_board_supported\(active_config\);\s*\}[\s\S]*?env3_source && \(!env3_configured \|\| env_t < 0\)/,
   "an explicitly requested ENV III history must fail closed while the source is disabled");
 
 // ── 3. A never-started task must not make a CONFIGURED source read as absent ────────────────────
@@ -810,8 +810,11 @@ assert.match(chunkSink,
   /while \(!value\.empty\(\)\)[\s\S]*?const size_t take = std::min\(available, value\.size\(\)\)[\s\S]*?value\.remove_prefix\(take\)/,
   "one oversized append must be split before it can grow the production buffer past its bound");
 assert.match(status,
-  /esp_err_t http_send_values_json\([\s\S]*?ValuesSnapshot snapshot = take_values_snapshot\(\);[\s\S]*?HttpJsonChunks j\(HttpChunkEmitter\{req\}\);[\s\S]*?j \+= prefix;[\s\S]*?append_values_json\(j, snapshot\);[\s\S]*?j \+= suffix;[\s\S]*?j\.finish\(\)/,
-  "the shared sender must snapshot before streaming prefix + values + suffix through one sink");
+  /esp_err_t http_send_values_json\([\s\S]*?ValuesSnapshot snapshot = take_values_snapshot\(\);[\s\S]*?HttpJsonChunks j\(HttpChunkEmitter\{req\}\);[\s\S]*?return finish_bounded_stream\(j,\s*\[prefix, suffix, &snapshot\]\(auto& out\)\s*\{\s*out \+= prefix;\s*append_values_json\(out, snapshot\);\s*out \+= suffix;\s*\}\)\s*\? ESP_OK\s*: ESP_FAIL;/,
+  "the shared sender must snapshot before guarded prefix + values + suffix emission and propagate failure");
+assert.match(chunkSink,
+  /inline bool finish_bounded_stream\(Sink& sink, Append&& append\)\s*\{\s*try\s*\{\s*std::forward<Append>\(append\)\(sink\);\s*return sink\.finish\(\);\s*\}\s*catch\s*\(\.\.\.\)\s*\{\s*if\s*\(!sink\.emission_started\(\)\)\s*throw;\s*return false;/,
+  "stream failures must rethrow before emission for 503/500 and abort after emission without finishing");
 const valuesSerializerStart = status.indexOf("static void append_values_array(");
 const valuesSerializerEnd = status.indexOf("\n}\n\n// The HomeHub rows", valuesSerializerStart);
 assert.ok(valuesSerializerStart >= 0 && valuesSerializerEnd > valuesSerializerStart,
@@ -851,14 +854,24 @@ assert.match(poll, /if \(!hp_uart_init\([\s\S]{0,900}?dwell_record\(nullptr, 0, 
 assert.match(poll, /if \((?:config\(\)\.profile|config_profile\(\)) == "auto"\)[\s\S]{0,2200}?dwell_record\(nullptr, 0, generation\);/,
   "a board whose X10A never resolves a profile must age its restored state ages out, or a reboot " +
   "would present the frozen pre-reboot durations as current");
-assert.match(poll, /checkup_record\(fresh\.data\(\)[\s\S]{0,900}?dwell_record\(fresh\.data\(\), fresh\.size\(\),\s*cycle_generation,\s*static_cast<uint32_t>\(\(service_max_gap_us \+ 999999\) \/ 1000000\)\);/,
-  "the normal cycle must fold the state ages beside the checkup, from the same row set");
 // The reduction has to read `fresh` — the rows that ANSWERED this cycle — and not the committed
 // cache, which no longer knows which rows were missing. A row absent from `fresh` IS the evidence.
+const dwellCheckupAt = poll.indexOf("checkup_record(fresh.data()");
+const dwellTokenAt = poll.indexOf("HpValuesIdentity pending_cache_identity;", dwellCheckupAt);
+const dwellFoldAt = poll.indexOf("dwell_record(fresh.data()", dwellTokenAt);
 const commitAt = poll.search(/s_cache\s*=\s*std::move\(fresh\)/);
-assert.ok(commitAt > 0, "poll_once must still commit the cache by moving `fresh`");
-assert.ok(poll.indexOf("dwell_record(fresh.data(), fresh.size(), cycle_generation,") < commitAt,
-  "dwell_record must see `fresh` before the commit moves it away, or absent rows read as unchanged");
+assert.ok(dwellCheckupAt >= 0 && dwellTokenAt > dwellCheckupAt && dwellFoldAt > dwellTokenAt &&
+          commitAt > dwellFoldAt,
+  "poll must stage the next cache identity, fold dwell from fresh rows, then commit those rows");
+assert.match(poll.slice(dwellTokenAt, dwellFoldAt),
+  /\{\s*Lock lk\(s_mtx\);\s*if \(s_target_generation\.load\(std::memory_order_acquire\) != cycle_generation\) return;\s*pending_cache_identity = \{prof\.id, c\.x10a_identity_fp, cycle_generation,\s*s_cache_revision \+ 1\};\s*\}/,
+  "the prospective dwell token must include the profile, source and next revision under the cache lock");
+assert.match(poll.slice(dwellFoldAt, commitAt),
+  /dwell_record\(fresh\.data\(\), fresh\.size\(\),\s*cycle_generation,\s*static_cast<uint32_t>\(\(service_max_gap_us \+ 999999\) \/ 1000000\),\s*&pending_cache_identity\);/,
+  "the normal dwell fold must preserve fresh-row absence, the service-gap bound and its cache token");
+assert.match(poll.slice(commitAt),
+  /s_cache\s*=\s*std::move\(fresh\);\s*s_cache_profile\s*= prof\.id;\s*s_cache_identity_fp\s*= c\.x10a_identity_fp;\s*\+\+s_cache_revision;\s*s_cache_source_generation = cycle_generation;/,
+  "the committed cache must publish the same profile, source generation and staged next revision");
 
 // ── 8. `known == false` renders as an ABSENT key, never as a zero ───────────────────────────────
 // Section 6's rule one field down. A dwell of 0 is a real reading ("it changed just now"); a row the

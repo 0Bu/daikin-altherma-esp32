@@ -262,6 +262,145 @@
       }
     },
     {
+      "runner": "scripts/run-mock-tests.sh --coverage",
+      "compilers": {
+        "clang-17-darwin": "Apple clang version 17.0.0 (clang-1700.6.4.2); arm64",
+        "gcc-13-linux-ubuntu24": "g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0; aarch64; espressif/idf:v6.1",
+        "gcc-15-linux-ubuntu26": "g++-15 (Ubuntu 15.2.0-16ubuntu1) 15.2.0; aarch64; Ubuntu 26.04",
+        "gcc-15-github-linux-ubuntu26": "g++-15 (Ubuntu 15.2.0-16ubuntu1) 15.2.0; x86_64; local Ubuntu 26.04 Docker"
+      },
+      "architectures": {
+        "clang-17-darwin": "arm64",
+        "gcc-13-linux-ubuntu24": "aarch64",
+        "gcc-15-linux-ubuntu26": "aarch64",
+        "gcc-15-github-linux-ubuntu26": "x86_64"
+      },
+      "hosted_confirmation": "The Ubuntu 26.04 x86_64 GCC 15 profile was measured locally with the hosted profile selector. Authoritative GitHub CI confirmation of the tested head remains pending.",
+      "scope": "Bounded HTTP ingress, typed configuration fields, shared UTF-8 escaping, MCP body-limit framing and committed values identity. Targeted positive and negative checks raise every changed historical ratio; all unrelated inventories and the 95-percent line floor remain unchanged.",
+      "sources": {
+        "main/logic/http_config_fields.hpp": "d41729fa1d032251c5ab27139cc3c6a20a3a2469823b9baf3fecc9b89715236e",
+        "main/logic/http_ingress.hpp": "e9ab52818539cd5e9eda32d8d2416d72be1daa85aedd153f814945211a9f4e6f",
+        "main/logic/json.hpp": "f63577afe5fd4c7a0e66ab79696bf88dc7e844af161213ec8b3da204de7b27a1",
+        "main/logic/mcp.hpp": "7607639a59457633ff8b0531aa0aa7ed5fca2a1118f7ee075fe98cd6103dda5c",
+        "main/logic/state_dwell.hpp": "e39dc2fab637d24b9e09b24214793d34700053c4851fbdb6c6f1665688fdc26d",
+        "main/logic/utf8.hpp": "39f339e2aa9c0b460edeb8ef3bbd37b9a0bc35b6e22b92ab99d6f3c2c18c831a",
+        "main/logic/values_identity.hpp": "4f6eb0edb39a5f7dd3acd580b18110ad289c84751102ad379da70f246144dfab"
+      },
+      "test_source_sha256": "0a8196cf4fc9007956dbf1def5565d05124eaf4531f186e6d4cec12af7ca9108",
+      "compile_source_closure": {
+        "files": 161,
+        "sha256": "c1ba6ff1a7f3ebb481d5d470e83825b2468c380accc4ac410712e6bb543326c9",
+        "method": "Normalized non-system -MM dependencies are identical across all four compiler/architecture measurements."
+      },
+      "local_executable_lines": {
+        "clang-17-darwin": [
+          9174,
+          9346
+        ],
+        "gcc-13-linux-ubuntu24": [
+          8953,
+          9237
+        ],
+        "gcc-15-linux-ubuntu26": [
+          8955,
+          9239
+        ],
+        "gcc-15-github-linux-ubuntu26": [
+          8953,
+          9239
+        ]
+      }
+    },
+    {
+      "runner": "scripts/run-mock-tests.sh --coverage",
+      "compilers": {
+        "clang-17-darwin": "Apple clang version 17.0.0 (clang-1700.6.4.2)",
+        "gcc-13-linux-ubuntu24": "g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+        "gcc-15-linux-ubuntu26": "g++-15 (Ubuntu 15.2.0-16ubuntu1) 15.2.0",
+        "gcc-15-github-linux-ubuntu26": "g++-15 (Ubuntu 15.2.0-16ubuntu1) 15.2.0"
+      },
+      "architectures": {
+        "clang-17-darwin": "arm64",
+        "gcc-13-linux-ubuntu24": "aarch64",
+        "gcc-15-linux-ubuntu26": "aarch64",
+        "gcc-15-github-linux-ubuntu26": "x86_64"
+      },
+      "hosted_confirmation": "Ubuntu 26.04 x86_64 GCC 15 was measured locally using the hosted profile selector. Authoritative GitHub confirmation of the final head remains pending.",
+      "scope": "Integral round-trip validation and bounded string-view arguments retain every branch inventory across four compiler profiles. All existing CHECKs, historical ratios and the 95-percent executable-line floor are retained.",
+      "sources": {
+        "main/logic/http_config_fields.hpp": "2445da5ca11302ff0c7d9d2a94fab3b64630aa45d68a90b0331c40636b0d449b",
+        "main/logic/json.hpp": "b8a2e500ad59bb8ff30c19b2f07625f334258c72556344b382b7d5d8e0440e6f"
+      },
+      "test_source_sha256": "0a8196cf4fc9007956dbf1def5565d05124eaf4531f186e6d4cec12af7ca9108",
+      "compile_source_closure": {
+        "files": 161,
+        "sha256": "8cb22a9795a20c9ffd7088d654fced6a2b51b01b1012890b287f71ae2a956380",
+        "method": "Normalized non-system -MM dependencies and current input hashes are identical across all four compiler/architecture measurements."
+      },
+      "local_executable_lines": {
+        "clang-17-darwin": [
+          9176,
+          9348
+        ],
+        "gcc-13-linux-ubuntu24": [
+          8955,
+          9239
+        ],
+        "gcc-15-linux-ubuntu26": [
+          8957,
+          9241
+        ],
+        "gcc-15-github-linux-ubuntu26": [
+          8955,
+          9241
+        ]
+      }
+    },
+    {
+      "runner": "scripts/run-mock-tests.sh --coverage",
+      "compilers": {
+        "clang-17-darwin": "Apple clang version 17.0.0 (clang-1700.6.4.2)",
+        "gcc-13-linux-ubuntu24": "g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+        "gcc-15-linux-ubuntu26": "g++-15 (Ubuntu 15.2.0-16ubuntu1) 15.2.0",
+        "gcc-15-github-linux-ubuntu26": "g++-15 (Ubuntu 15.2.0-16ubuntu1) 15.2.0"
+      },
+      "architectures": {
+        "clang-17-darwin": "arm64",
+        "gcc-13-linux-ubuntu24": "aarch64",
+        "gcc-15-linux-ubuntu26": "aarch64",
+        "gcc-15-github-linux-ubuntu26": "x86_64"
+      },
+      "hosted_confirmation": "Ubuntu 26.04 x86_64 GCC 15 was measured locally using the hosted profile selector. Authoritative GitHub confirmation of the final head remains pending.",
+      "scope": "Explicit MQTT counting and emission function boundaries retain every branch inventory across four compiler profiles. All existing CHECKs, historical ratios and the 95-percent executable-line floor are retained.",
+      "sources": {
+        "main/logic/mqtt_group.hpp": "542367305c306b3537d8966b99f8fccd619b63d5762e111c859cfd36360ce7be"
+      },
+      "test_source_sha256": "0a8196cf4fc9007956dbf1def5565d05124eaf4531f186e6d4cec12af7ca9108",
+      "compile_source_closure": {
+        "files": 161,
+        "sha256": "62e2decc258a149c15eab7c690fee3adfd9f360a74e09efa027710d2e715ea10",
+        "method": "Normalized non-system -MM dependencies and current input hashes are identical across all four compiler/architecture measurements."
+      },
+      "local_executable_lines": {
+        "clang-17-darwin": [
+          9176,
+          9348
+        ],
+        "gcc-13-linux-ubuntu24": [
+          8955,
+          9239
+        ],
+        "gcc-15-linux-ubuntu26": [
+          8957,
+          9241
+        ],
+        "gcc-15-github-linux-ubuntu26": [
+          8955,
+          9241
+        ]
+      }
+    },
+    {
       "compilers": {
         "clang-17-darwin": "Apple Clang 17.0.0",
         "gcc-13-linux-ubuntu24": "ESP-IDF v6.1 container GCC 13.3.0",
@@ -273,6 +412,66 @@
       "sources": {
         "main/logic/config_model.hpp": "5c62344ae93b15fe8d53756c7514141b9e1bb77ef5319f3deaee7e40c8995fa7",
         "main/logic/config_transaction.hpp": "7984c3f82bfd02d7de7c11549b620045daf0feef637fb2601eca256635bbef0c"
+      }
+    },
+    {
+      "runner": "scripts/run-mock-tests.sh --coverage",
+      "compilers": {
+        "clang-17-darwin": "Apple clang version 17.0.0 (clang-1700.6.4.2)",
+        "gcc-13-linux-ubuntu24": "g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+        "gcc-15-linux-ubuntu26": "g++-15 (Ubuntu 15.2.0-16ubuntu1) 15.2.0",
+        "gcc-15-github-linux-ubuntu26": "g++-15 (Ubuntu 15.2.0-16ubuntu1) 15.2.0"
+      },
+      "architectures": {
+        "clang-17-darwin": "arm64",
+        "gcc-13-linux-ubuntu24": "aarch64",
+        "gcc-15-linux-ubuntu26": "aarch64",
+        "gcc-15-github-linux-ubuntu26": "x86_64"
+      },
+      "hosted_confirmation": "The integrated Ubuntu 26.04 x86_64 GCC 15 profile was measured locally. Authoritative GitHub CI confirmation of the final merge head remains pending.",
+      "scope": "Integrated configuration, recovery and HTTP logic is measured from one frozen source snapshot on all four compiler profiles. All 18 incoming measurement records, all 416 enforced inventories, every historical ratio and the 95-percent line floor are retained.",
+      "sources": {
+        "main/logic/board_pins.hpp": "4c9311c33002eebff6b02e9ab77e509c9e0d6c0244fb54491a0292b8627d0e37",
+        "main/logic/boot_guard.hpp": "ed4e5e6e0ff2cd7000562d0b259ea00e303f7b959a3a479098a042c78a4574ba",
+        "main/logic/bootlog.hpp": "0077ef4a7cae82e5d813cd5dfe88c2ad1c08ba59d8910d246d172182d3d2d868",
+        "main/logic/button.hpp": "ac3272bfbb04931a7d6f6be05f5436961bbd0c5fb188670a86ea29c2c95c6771",
+        "main/logic/config_model.hpp": "5c62344ae93b15fe8d53756c7514141b9e1bb77ef5319f3deaee7e40c8995fa7",
+        "main/logic/config_store.hpp": "5d9fcad9221700b84fe894262072e0d07a112e6909cabfe4e5f0383cb3187bd5",
+        "main/logic/config_transaction.hpp": "7984c3f82bfd02d7de7c11549b620045daf0feef637fb2601eca256635bbef0c",
+        "main/logic/heap_watchdog.hpp": "f485f0f6bf27f1be0de93110fff374f70baf9f02892d93f59165f8c89cccf628",
+        "main/logic/heartbeat.hpp": "2570f02e1ec0d4227cd1f6a45fba2104df1baf24aa93ca36ede223b4c0c63193",
+        "main/logic/http_config_fields.hpp": "2445da5ca11302ff0c7d9d2a94fab3b64630aa45d68a90b0331c40636b0d449b",
+        "main/logic/http_ingress.hpp": "e9ab52818539cd5e9eda32d8d2416d72be1daa85aedd153f814945211a9f4e6f",
+        "main/logic/json.hpp": "b8a2e500ad59bb8ff30c19b2f07625f334258c72556344b382b7d5d8e0440e6f",
+        "main/logic/led_pattern.hpp": "6c16915d85292e1453e030843c5061e20912b29a96f08d3dcaf317f6f3364326",
+        "main/logic/mcp.hpp": "7607639a59457633ff8b0531aa0aa7ed5fca2a1118f7ee075fe98cd6103dda5c",
+        "main/logic/state_dwell.hpp": "e39dc2fab637d24b9e09b24214793d34700053c4851fbdb6c6f1665688fdc26d",
+        "main/logic/utf8.hpp": "39f339e2aa9c0b460edeb8ef3bbd37b9a0bc35b6e22b92ab99d6f3c2c18c831a",
+        "main/logic/values_identity.hpp": "4f6eb0edb39a5f7dd3acd580b18110ad289c84751102ad379da70f246144dfab"
+      },
+      "test_source_sha256": "aa3b96da83b0c4167dbd9ea8dea572d70d760dde44d1239bb017c0a314667106",
+      "compile_source_closure": {
+        "files": 161,
+        "sha256": "fd3225b870d4841f88578ed621017c6913b7c20bba430cb9d0d62d34bc9844b3",
+        "method": "Unchanged canonical runner in isolated public source snapshots; normalized non-system -MM dependencies and hashes are identical across all four profiles."
+      },
+      "local_executable_lines": {
+        "clang-17-darwin": [
+          9364,
+          9537
+        ],
+        "gcc-13-linux-ubuntu24": [
+          9107,
+          9391
+        ],
+        "gcc-15-linux-ubuntu26": [
+          9109,
+          9393
+        ],
+        "gcc-15-github-linux-ubuntu26": [
+          9107,
+          9393
+        ]
       }
     }
   ],
@@ -472,8 +671,8 @@
         "taken": 4
       },
       "main/logic/json.hpp": {
-        "outcomes": 68,
-        "taken": 49
+        "outcomes": 88,
+        "taken": 69
       },
       "main/logic/json_integer.hpp": {
         "outcomes": 10,
@@ -496,8 +695,8 @@
         "taken": 58
       },
       "main/logic/mcp.hpp": {
-        "taken": 433,
-        "outcomes": 641
+        "taken": 450,
+        "outcomes": 617
       },
       "main/logic/modbus.hpp": {
         "outcomes": 108,
@@ -628,8 +827,8 @@
         "taken": 45
       },
       "main/logic/state_dwell.hpp": {
-        "outcomes": 116,
-        "taken": 110
+        "outcomes": 122,
+        "taken": 117
       },
       "main/logic/syslog_policy.hpp": {
         "outcomes": 2,
@@ -678,6 +877,22 @@
       "main/logic/mqtt_discovery_owner.hpp": {
         "taken": 231,
         "outcomes": 274
+      },
+      "main/logic/http_config_fields.hpp": {
+        "taken": 22,
+        "outcomes": 22
+      },
+      "main/logic/http_ingress.hpp": {
+        "taken": 30,
+        "outcomes": 30
+      },
+      "main/logic/utf8.hpp": {
+        "taken": 30,
+        "outcomes": 30
+      },
+      "main/logic/values_identity.hpp": {
+        "taken": 14,
+        "outcomes": 16
       }
     },
     "gcc-13-linux-ubuntu24": {
@@ -874,8 +1089,8 @@
         "taken": 6
       },
       "main/logic/json.hpp": {
-        "outcomes": 66,
-        "taken": 48
+        "outcomes": 92,
+        "taken": 71
       },
       "main/logic/json_integer.hpp": {
         "outcomes": 178,
@@ -898,8 +1113,8 @@
         "taken": 69
       },
       "main/logic/mcp.hpp": {
-        "taken": 457,
-        "outcomes": 685
+        "taken": 475,
+        "outcomes": 661
       },
       "main/logic/modbus.hpp": {
         "outcomes": 120,
@@ -1022,8 +1237,8 @@
         "taken": 56
       },
       "main/logic/state_dwell.hpp": {
-        "outcomes": 128,
-        "taken": 121
+        "outcomes": 134,
+        "taken": 128
       },
       "main/logic/syslog_policy.hpp": {
         "outcomes": 2,
@@ -1080,6 +1295,22 @@
       "main/logic/mqtt_discovery_owner.hpp": {
         "taken": 258,
         "outcomes": 274
+      },
+      "main/logic/http_config_fields.hpp": {
+        "taken": 30,
+        "outcomes": 30
+      },
+      "main/logic/http_ingress.hpp": {
+        "taken": 36,
+        "outcomes": 36
+      },
+      "main/logic/utf8.hpp": {
+        "taken": 30,
+        "outcomes": 30
+      },
+      "main/logic/values_identity.hpp": {
+        "taken": 14,
+        "outcomes": 14
       }
     },
     "gcc-15-github-linux-ubuntu26": {
@@ -1276,8 +1507,8 @@
         "taken": 6
       },
       "main/logic/json.hpp": {
-        "outcomes": 66,
-        "taken": 48
+        "outcomes": 92,
+        "taken": 71
       },
       "main/logic/json_integer.hpp": {
         "outcomes": 178,
@@ -1300,8 +1531,8 @@
         "taken": 69
       },
       "main/logic/mcp.hpp": {
-        "taken": 457,
-        "outcomes": 685
+        "taken": 475,
+        "outcomes": 661
       },
       "main/logic/modbus.hpp": {
         "outcomes": 120,
@@ -1424,8 +1655,8 @@
         "taken": 56
       },
       "main/logic/state_dwell.hpp": {
-        "outcomes": 128,
-        "taken": 121
+        "outcomes": 134,
+        "taken": 128
       },
       "main/logic/syslog_policy.hpp": {
         "outcomes": 2,
@@ -1482,6 +1713,22 @@
       "main/logic/mqtt_discovery_owner.hpp": {
         "taken": 258,
         "outcomes": 274
+      },
+      "main/logic/http_config_fields.hpp": {
+        "taken": 30,
+        "outcomes": 30
+      },
+      "main/logic/http_ingress.hpp": {
+        "taken": 36,
+        "outcomes": 36
+      },
+      "main/logic/utf8.hpp": {
+        "taken": 30,
+        "outcomes": 30
+      },
+      "main/logic/values_identity.hpp": {
+        "taken": 14,
+        "outcomes": 14
       }
     },
     "gcc-15-linux-ubuntu26": {
@@ -1678,8 +1925,8 @@
         "taken": 6
       },
       "main/logic/json.hpp": {
-        "outcomes": 66,
-        "taken": 48
+        "outcomes": 92,
+        "taken": 71
       },
       "main/logic/json_integer.hpp": {
         "outcomes": 178,
@@ -1702,8 +1949,8 @@
         "taken": 69
       },
       "main/logic/mcp.hpp": {
-        "taken": 457,
-        "outcomes": 685
+        "taken": 475,
+        "outcomes": 661
       },
       "main/logic/modbus.hpp": {
         "outcomes": 120,
@@ -1826,8 +2073,8 @@
         "taken": 56
       },
       "main/logic/state_dwell.hpp": {
-        "outcomes": 128,
-        "taken": 121
+        "outcomes": 134,
+        "taken": 128
       },
       "main/logic/syslog_policy.hpp": {
         "outcomes": 2,
@@ -1884,6 +2131,22 @@
       "main/logic/mqtt_discovery_owner.hpp": {
         "taken": 258,
         "outcomes": 274
+      },
+      "main/logic/http_config_fields.hpp": {
+        "taken": 30,
+        "outcomes": 30
+      },
+      "main/logic/http_ingress.hpp": {
+        "taken": 36,
+        "outcomes": 36
+      },
+      "main/logic/utf8.hpp": {
+        "taken": 30,
+        "outcomes": 30
+      },
+      "main/logic/values_identity.hpp": {
+        "taken": 14,
+        "outcomes": 14
       }
     }
   },

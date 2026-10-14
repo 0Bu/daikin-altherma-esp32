@@ -3,10 +3,14 @@ import fs from "node:fs";
 const read = file => fs.readFileSync(new URL(`../${file}`, import.meta.url), "utf8");
 const config = read("main/http_config.cpp");
 assert.doesNotMatch(config, /cJSON_Parse\s*\(/, "all config ingress must use bounded parsing");
-const readers = [...config.matchAll(/const int\s+body_len\s*=\s*http_read_body\(req, body(?:\.data\(\))?, (?:sizeof\(body\)|body\.size\(\))\);/g)];
-const parsers = [...config.matchAll(/json_parse_document\(std::string_view\(body(?:\.data\(\))?, static_cast<size_t>\(body_len\)\)\)/g)];
-assert.equal(readers.length, 14, "all 14 current JSON config bodies must retain their actual byte count");
-assert.equal(parsers.length, readers.length, "each parser must include embedded NULs in its bounded input");
+const readers = [...config.matchAll(/const int\s+length\s*=\s*http_read_body\(req, body\.get\(\), capacity\);/g)];
+const parsers = [...config.matchAll(/json_parse_document\(std::string_view\(body\.get\(\), static_cast<size_t>\(length\)\)\)/g)];
+const consumers = [...config.matchAll(/JsonGuard\s+j\(read_config_document\(req,\s*\d+,\s*parse_error\)\);/g)];
+assert.equal(readers.length, 1, "configuration ingress must share the byte-counted reader");
+assert.equal(parsers.length, 1, "the shared parser must include embedded NULs in its bounded input");
+assert.equal(consumers.length, 14, "all 14 current JSON config bodies must own the shared parsed document");
+assert.match(config, /if \(length < 0\)\s*\{\s*error = "bad body";\s*return nullptr;/,
+  "a failed bounded read must never reach the parser");
 const guard = read("main/json_guard.hpp");
 assert.match(guard, /json_parse_document\(std::string_view payload\)\s*\{\s*if \(!json_payload_is_object\(payload\)\) return nullptr;/,
   "configuration ingress must reject non-object roots before parsing or applying defaults");
@@ -29,7 +33,9 @@ assert.equal([...mqtt.matchAll(/!json_payload_strings_ok\(std::string_view\(fram
   "both MQTT frame consumers must reject unrepresentable strings before parsing");
 console.log("JSON ingress: every cJSON config body bounded; Weather preflight before parser");
 
-assert.match(config, /parse_ref_temp_request[\s\S]*?std::vector<char> body\(8192\)/,
+assert.match(config, /std::unique_ptr<char\[\]>\s+body\(new char\[capacity\]\)/,
+  "shared request scratch must have bounded heap ownership");
+assert.match(config, /parse_ref_temp_request[\s\S]*?read_config_document\(req, 8192, parse_error\)/,
   "the combined escaped-source request must fit without a large HTTP stack frame");
 const topic = "\\".repeat(192), field = "\\".repeat(128);
 const body = JSON.stringify({ topic, temperature_path: field, setpoint_topic: topic,

@@ -63,7 +63,42 @@ try {
 
   const seedFile = path.join(seededRoot, "test/test_ui_use_cases.mjs");
   const originalSeedFile = fs.readFileSync(seedFile, "utf8");
+  // Pin full literal capture across each quote style and the exact UTF-8/escape fixtures.
+  // Each seed is one complete source string; no split name can hide a policy regression.
+  const positiveSsidSeeds = [
+    "const ssid = \"ExampleNet\";",
+    "const ssid = 'ExampleNet';",
+    "const ssid = `ExampleNet`;",
+    "const privacySeed = { \"ssid\": \"new-net\" };",
+    "const privacySeed = { \"wifi_ssid\": \"test-wifi\" };",
+    "const wifi_ssid = \"Café \\\"quoted\\\"\\\\line\\n\";",
+    "const privacySeed = { \"ssid\": \" \\\"é\\\\網 \" };",
+  ];
+  for (const [index, seed] of positiveSsidSeeds.entries()) {
+    fs.writeFileSync(seedFile, `${originalSeedFile}\n${seed}\n`);
+    const seeded = spawnSync("/bin/bash", ["scripts/run-public-readiness-audit.sh"], {
+      cwd: seededRoot,
+      env: { ...process.env, PATH: `${bin}:/usr/bin:/bin` },
+      encoding: "utf8",
+    });
+    assert.equal(seeded.status, 0,
+      `public-readiness audit rejected approved complete SSID literal ${index}\n${seeded.stdout}\n${seeded.stderr}`);
+  }
+  fs.writeFileSync(seedFile, originalSeedFile);
+
   const privacySeeds = [
+    ["escaped quote followed by unapproved Unicode-SSID suffix",
+      "const wifi_ssid = \"Café \\\"quoted\\\"\\\\line\\n PrivateFixture\";", /WiFi fixture SSIDs/],
+    ["unapproved name after escaped Unicode JSON quote",
+      "const privacySeed = { \"ssid\": \" \\\"é\\\\網 PrivateFixture \" };", /WiFi fixture SSIDs/],
+    ["unapproved name after escaped double quote",
+      "const ssid = \"ExampleNet\\\"PrivateFixture\";", /WiFi fixture SSIDs/],
+    ["unapproved name after escaped single quote",
+      "const ssid = \u0027ExampleNet\\\u0027PrivateFixture\u0027;", /WiFi fixture SSIDs/],
+    ["unapproved name after escaped backtick",
+      "const ssid = \u0060ExampleNet\\\u0060PrivateFixture\u0060;", /WiFi fixture SSIDs/],
+    ["incomplete quoted SSID",
+      "const ssid = \"ExampleNet\\\"PrivateFixture;", /WiFi fixture SSIDs/],
     ["compact hardware id", ['const privacySeed = { device_', 'id: "012345', '6789ab" };'].join(""),
       /compact hardware identifier/],
     ["backtick SSID", ["const privacySeed = { ss", "id: `Private", "FixtureNet` };"].join(""),

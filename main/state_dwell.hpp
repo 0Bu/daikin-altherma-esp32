@@ -38,7 +38,8 @@ namespace daik {
 // Successful sweeps supply their profile-specific query/sleep bound. Explicit unread samples
 // always break continuity, including short OTA/weather holds, independently of that allowance.
 void dwell_record(const CachedValue* v, size_t n, uint32_t source_generation,
-                  uint32_t max_observed_gap_s = logic::DWELL_MAX_GAP_S);
+                  uint32_t                max_observed_gap_s     = logic::DWELL_MAX_GAP_S,
+                  const HpValuesIdentity* pending_cache_identity = nullptr);
 
 // Judge what the previous boot left in .noinit and adopt or wipe it. app_main calls this ONCE,
 // before any producer task exists, which is what makes the decision single-threaded and lock-free.
@@ -66,9 +67,9 @@ void dwell_reset();
 // owner's state ages after NVS has already been erased.
 void dwell_forget();
 
-// What this board can say about one row, or `known == false` when the answer is nothing. Copies a
-// plain POD out under the lock, so nothing allocates inside the critical section (AGENTS.md →
-// Memory, concurrency, and HTTP safety).
-logic::DwellReading dwell_reading(uint8_t reg, uint8_t off, int conv);
+// Snapshot metadata for one committed cache: source, profile, revision and decoded state must
+// all match. Caller prepares `out` before the lock; no allocation or nested cache lock occurs.
+void dwell_readings_snapshot(const CachedValue* values, size_t count,
+                             const HpValuesIdentity& identity, logic::DwellReading* out);
 
 } // namespace daik
