@@ -57,6 +57,8 @@ const mutations = [
     before: "req->method == HTTP_POST && ota_busy()", after: "false" },
   { name: "heap-policy-bypass", file: "common", scenario: "ota_exact_route_guard",
     before: "heap_largest_internal_block() < 6144", after: "false" },
+  { name: "ap-ota-exemption", file: "common", scenario: "ota_exact_route_guard",
+    before: /const bool ota_route\s*=\s*!provisioning_ap_active\(\) &&\s*/, after: "const bool ota_route = " },
   { name: "registration-failure-silenced", file: "common", scenario: "startup_and_registration_failures",
     before: 'if (err != ESP_OK) diag_printf', after: 'if (false) diag_printf' },
   { name: "unread-body-settlement-bypass", file: "common", scenario: "unread_body_bound",
@@ -91,6 +93,8 @@ const mutations = [
     before: 'return requested == "2025-06-18" ||', after: 'return requested == "2025-03-26" || requested == "2025-06-18" ||' },
   { name: "get-sse-returned-html", file: "mcp", scenario: "mcp_get_transport_headers",
     before: 'http_accepts_media_type(accept, "text/event-stream") &&', after: 'false &&' },
+  { name: "zero-weight-html-accepted", file: "request", scenario: "mcp_get_transport_headers",
+    before: /accepted\s*= http_quality_nonzero\(http_accept_trim_ows\(parameter.substr\(equal \+ 1\)\)\);/, after: "accepted = true;" },
   { name: "legacy-ota-prefix-exemption", file: "request", scenario: "ota_exact_route_guard", special: "legacy-ota" },
   { name: "ota-method-exemption", file: "request", scenario: "ota_exact_route_guard",
     before: 'if (is_post) return uri == "/ota/update";', after: 'if (uri == "/ota/update") return true;' },
@@ -219,7 +223,7 @@ try {
     claimLimits: [
       "Complete unextracted production http_common.cpp, http_server.cpp and mcp_server.cpp translation units execute.",
       "Only the four status/config/OTA/captive registration functions are extracted verbatim. Their service bodies are counted adapters; production body/config/OTA implementations are not exercised.",
-      "Actual SDK registration invokes the production common trampoline; independent checked-in URI/method/order oracles assert AP5 and LAN39.",
+      "The SDK registration adapter invokes the production common trampoline; independent checked-in URI/method/order oracles assert AP5 and LAN39.",
       "MCP parser, version/notification/dispatch/catalog/framing and common HTTP headers/body/time/exception guards run against SDK-shaped adapters; snapshot serializers are controlled shared adapters.",
       "HTTP sockets, FreeRTOS scheduling, live device heap/stack, NVS, physical source truth, signing, OTA delivery and rendered browser behavior are separate evidence.",
     ] };

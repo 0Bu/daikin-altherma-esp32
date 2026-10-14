@@ -7,10 +7,10 @@
         "gcc-15-linux-ubuntu26": "Ubuntu 26.04 aarch64 GCC 15.2.0"
       },
       "runner": "scripts/run-mock-tests.sh --coverage",
-      "scope": "Exact OTA paths and methods, Accept token boundaries, UTF-8 families, null parse-error IDs and notification shape controls raise both changed-header coverage ratios; all other inventories and historical floors retained",
+      "scope": "Exact OTA paths/methods/AP surfaces, quoted Accept separators and nonzero RFC 9110 weights, UTF-8 families, null parse-error IDs and notification shape controls raise both changed-header coverage ratios; all other inventories and historical floors retained",
       "hosted_confirmation": "Local GCC 15 inventory measured; authoritative GitHub Ubuntu 26 confirmation pending",
       "sources": {
-        "main/logic/http_request.hpp": "3c47dca78afb57862606eb99d43c8854ebcd1c1374f4b14f88a3495a7ea18216",
+        "main/logic/http_request.hpp": "bf8822074d90b5bd064cf9166e61aef711dd8e11769b5410b0ad7a0f2d825e13",
         "main/logic/mcp.hpp": "444e41f5b1420b907fc65fdf835d6f997e8232d840f13fb7e5cb4ba3b5bbb3cc"
       }
     },
@@ -446,8 +446,8 @@
         "taken": 2
       },
       "main/logic/http_request.hpp": {
-        "taken": 102,
-        "outcomes": 112
+        "taken": 150,
+        "outcomes": 160
       },
       "main/logic/http_surface.hpp": {
         "outcomes": 8,
@@ -848,8 +848,8 @@
         "taken": 2
       },
       "main/logic/http_request.hpp": {
-        "taken": 137,
-        "outcomes": 162
+        "taken": 197,
+        "outcomes": 226
       },
       "main/logic/http_surface.hpp": {
         "outcomes": 12,
@@ -1250,8 +1250,8 @@
         "taken": 2
       },
       "main/logic/http_request.hpp": {
-        "taken": 137,
-        "outcomes": 162
+        "taken": 197,
+        "outcomes": 226
       },
       "main/logic/http_surface.hpp": {
         "outcomes": 12,
@@ -1652,8 +1652,8 @@
         "taken": 2
       },
       "main/logic/http_request.hpp": {
-        "taken": 137,
-        "outcomes": 162
+        "taken": 197,
+        "outcomes": 226
       },
       "main/logic/http_surface.hpp": {
         "outcomes": 12,

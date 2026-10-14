@@ -12163,6 +12163,26 @@ static void test_http_request_policy() {
     CHECK(!http_accepts_media_type("text/html", "text/event-stream"));
     CHECK(!http_accepts_media_type("", "text/event-stream"));
     CHECK(!http_accepts_media_type(" , ", "text/event-stream"));
+    CHECK(!http_accepts_media_type("text/html;q=0", "text/html"));
+    CHECK(!http_accepts_media_type("text/html;q=0.000", "text/html"));
+    CHECK(http_accepts_media_type("text/html;Q=0.001", "text/html"));
+    CHECK(http_accepts_media_type("text/html; q = 1.000", "text/html"));
+    CHECK(http_accepts_media_type("text/html;q=1", "text/html"));
+    CHECK(http_accepts_media_type("text/html;q=1.", "text/html"));
+    CHECK(!http_accepts_media_type("text/html;q=0.", "text/html"));
+    CHECK(!http_accepts_media_type("text/html;q=0", "text/html"));
+    for (const auto* value : {"", "2", "-1", "1.1", "0.0001", "1x", "0.x", "0./", "0.:", "\"1\""}) {
+        CHECK(!http_accepts_media_type(std::string("text/html;q=") + value, "text/html"));
+    }
+    CHECK(!http_accepts_media_type("text/html;q", "text/html"));
+    CHECK(!http_accepts_media_type("text/html;q=1;q=1", "text/html"));
+    CHECK(!http_accepts_media_type("text/html;q=0;q=1", "text/html"));
+    CHECK(http_accepts_media_type("text/html;q=0, text/html;q=0.5", "text/html"));
+    CHECK(!http_accepts_media_type("text/html;note=\"a,b;c\";q=0", "text/html"));
+    CHECK(http_accepts_media_type("application/json;note=\"a,b;c\",text/html", "text/html"));
+    CHECK(!http_accepts_media_type("text/html;note=\"a\\\"b;c\";q=0", "text/html"));
+    CHECK(http_accepts_media_type("text/html;note=\"a\\\\b\";q=0.5", "text/html"));
+    CHECK(!http_accepts_media_type("*/*", "text/event-stream"));
 }
 
 // logic/lwt_select.hpp — the leaving-water MEASUREMENT picker that feeds ΔT / heat output / COP.

@@ -403,6 +403,13 @@ int main(int argc, char** argv) {
         check(invoke("/ota/update", HTTP_POST).status == "503 Service Unavailable" &&
                   handler_calls == 0,
               "busy POST reached update handler");
+        start(true);
+        largest = 6143;
+        for (const auto* uri : {"/ota/status", "/ota/check", "/ota/changelog", "/ota/update"}) {
+            handler_calls = 0;
+            check(invoke(uri, HTTP_GET).status == "503 Service Unavailable" && handler_calls == 0,
+                  "unregistered AP OTA route bypassed heap guard");
+        }
     });
     run("exception_boundary", [] {
         start();
@@ -684,6 +691,18 @@ int main(int argc, char** argv) {
         mixed.headers["Accept"] = "text/html, text/event-stream";
         check(dispatch(mixed, "/mcp", HTTP_GET) == ESP_OK && mixed.status == "200 OK",
               "browser help negotiation rejected HTML");
+        for (const auto* accept :
+             {"text/event-stream,text/html;q=0", "text/event-stream;q=1,text/html;Q=0.000",
+              "text/html;note=\"comma,semicolon;\";q=0,text/event-stream"}) {
+            auto excluded              = request();
+            excluded.headers["Accept"] = accept;
+            check(dispatch(excluded, "/mcp", HTTP_GET) == ESP_OK &&
+                      excluded.status == "405 Method Not Allowed" && excluded.response.empty(),
+                  "excluded HTML bypassed SSE rejection");
+        }
+        mixed.headers["Accept"] = "text/event-stream,text/html;q=0.001";
+        check(dispatch(mixed, "/mcp", HTTP_GET) == ESP_OK && mixed.status == "200 OK",
+              "nonzero HTML weight rejected browser help");
         auto long_header              = request();
         long_header.headers["Accept"] = std::string(192, 'x');
         check(dispatch(long_header, "/mcp", HTTP_GET) == ESP_OK &&

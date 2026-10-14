@@ -1,7 +1,7 @@
 # HTTP server and MCP production runtime fixture
 
 Run `node test/test_http_server_runtime.mjs`; add `--sanitizer=undefined` for non-recovering UBSan.
-The suite needs only Node and a C++20 compiler. Complete JSON response bytes are emitted as hex and
+The suite needs Node, a C++20 compiler and a Git checkout. Complete JSON response bytes are emitted as hex and
 validated independently using Node's fatal UTF-8 decoder and native `JSON.parse`.
 `HTTP_RUNTIME_RECORD` optionally saves commands, source hashes and results to a private evidence file.
 

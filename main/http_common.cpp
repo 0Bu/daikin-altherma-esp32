@@ -127,10 +127,11 @@ static esp_err_t handle_all(httpd_req_t* req) {
         if (!provisioning_ap_active() && !trusted_lan_headers_allowed(req))
             return reject_request(req, "403 Forbidden", "request origin not allowed");
 
-        if (ota_download_active() && !http_is_ota_route(req->uri, req->method == HTTP_POST))
+        const bool ota_route =
+            !provisioning_ap_active() && http_is_ota_route(req->uri, req->method == HTTP_POST);
+        if (ota_download_active() && !ota_route)
             return reject_request(req, "503 Service Unavailable", "update in progress");
-        if (heap_largest_internal_block() < 6144 &&
-            !http_is_ota_route(req->uri, req->method == HTTP_POST))
+        if (heap_largest_internal_block() < 6144 && !ota_route)
             return reject_request(req, "503 Service Unavailable", "heap low");
 
         // All body-bearing POST handlers parse JSON. text/plain and HTML-form bodies are
