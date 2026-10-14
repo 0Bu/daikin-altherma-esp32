@@ -179,7 +179,7 @@ I18N.cs = localeValues([
   /* check.status.collecting */ "KONTROLA",
   /* check.status.observation */ "MĚŘENÍ",
   /* check.status.experimental */ "ZKUŠEBNĚ",
-  /* check.status.unavailable */ "NEPLATÍ",
+  /* check.status.unavailable */ "N/A",
   /* check.detail.value_label */ "Hodnota:",
   /* check.detail.assessment_label */ "Vyhodnocení:",
   /* check.detail.ok */ "Pravidlo se v čitelných datech neaktivovalo.",

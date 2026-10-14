@@ -134,8 +134,9 @@ Charging, internal-pump activity, an apparent draw, implausible temperature or e
 discards a candidate. A charge witness sustained for two minutes, or seen after an unmeasured gap,
 arms a 45-minute settling filter; unread time directly before a witness, or an unread tail after a
 short one, counts toward the two minutes. Every DHW evaluation that starts without a compatible
-handoff (boot, reset, consent or circulation change) first holds the same 45 minutes. Settling and
-that hold count down only on samples that read both witnesses. A completed window at
+handoff (power loss, crash, consent, identity, circulation or long-gap reset) first holds the same
+45 minutes. Settling and that hold count down only on samples that read both witnesses. A completed
+window at
 or above 0.8 K/h produces **NOTE** immediately. Other completed windows remain observations; no
 eligible window remains **CHECKING**; the "no eligible window in 24 h" statement needs 24 hours of DHW
 scope, which restarts when collection starts, at a DHW reset and at a restore that dropped DHW hours.
@@ -162,7 +163,7 @@ draw, so quiet accepted windows cannot rule out loss elsewhere. Draws, stratific
 thermosiphoning and valve behaviour can produce similar traces; pump overlap is correlation.
 
 A charge that no sample witnessed can still admit its settling tail as apparent cooling, and a short
-witness followed by a gap longer than the normal poll gap arms no settling. An intentional restart
+witness followed by a gap longer than the normal poll gap can arm no settling. An intentional restart
 during the start hold loses its remainder; power loss, panic, identity changes and incompatible
 handoffs start a new hold. Discard totals retain
 only an OR-ed reason set, not per-hour provenance or dominant cause. Blindness may reflect bus

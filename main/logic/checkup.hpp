@@ -774,6 +774,7 @@ inline void dhw_loss_adopt(DhwLossState& st, const DhwLossCarry& c, int64_t now_
     st.settle_remaining_s = c.settle_remaining_s;
     st.hold_remaining_s   = 0; // the handoff carries the real settle: no fresh state
     st.charge_run_s = c.charge_run_s;
+    st.blind_run_s        = c.blind_run_s; // an unread tail after a short witness still counts
     if (!(c.flags & DHW_LOSS_CARRY_SEGMENT)) return;
 
     // Elapsed AND blind, the same seconds on both sides: they advance the candidate's age and can
@@ -786,8 +787,7 @@ inline void dhw_loss_adopt(DhwLossState& st, const DhwLossCarry& c, int64_t now_
     st.segment_start_tenths = c.segment_start_tenths;
     st.segment_circulation_known_s = c.segment_circulation_known_s;
     st.segment_circulation_on_s = c.segment_circulation_on_s;
-    st.segment_blind_s = c.segment_blind_s;
-    st.blind_run_s = c.blind_run_s;
+    st.segment_blind_s             = c.segment_blind_s;
     // Attribution as "pump continuously off" cannot cross an interval nobody observed.
     st.circulation_off_run_s = 0;
 

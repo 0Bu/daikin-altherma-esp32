@@ -205,7 +205,7 @@ I18N.fr = localeValues([
   /* check.detail.dhw_reason.reading */ "R5T non plausible",
   /* check.detail.dhw_reason.blind */ "relevés manquants : X10A sans réponse ou interrogation en pause",
   /* check.detail.collecting_unknown */ "Pas d’évaluation actuelle.",
-  /* check.detail.observation */ "Observation seule ; aucune limite universelle OK/AVERTISSEMENT.",
+  /* check.detail.observation */ "Observation seule ; aucune limite universelle OK/ALERTE.",
   /* check.detail.experimental */ "Compteurs expérimentaux ; stabilité n’exclut pas une limitation.",
   /* check.detail.unavailable */ "Aucun signal évaluable dans ce profil.",
   /* check.starts */ (n) => `${n} ${n === 1 ? "démarrage" : "démarrages"}`,
@@ -1210,7 +1210,7 @@ MODEL_DESCRIPTION_I18N.fr = modelDescriptionValues([
   ["Capteur R5T : un point, pas une énergie. Règle interne ≥0,8 K/h ; vers 1,85 K/h, exclusion possible comme puisage. Circulation ne prouve pas la cause."], // health_dhw_loss
   ["≥12 chauffages complets, moyenne <10 min; ≥90% de tous les cycles complets classés. Règle interne, pas Daikin; ECS, froid et non classés exclus."], // health_cycling
   ["Dégivrage : ≥3 associés, >15% du temps de marche du compresseur si états compresseur et dégivrage lisibles. Règle interne, pas Daikin; humidité et température de toute la batterie absentes."], // health_defrost
-  ["Pression : règle interne commune ≤1,0 bar ; 60 s continues observées donnent AVERTISSEMENT. Pas universelle ; manuel du modèle."], // health_pressure
+  ["Pression : règle interne commune ≤1,0 bar ; 60 s continues observées donnent ALERTE. Pas universelle ; manuel du modèle."], // health_pressure
   ["Débit après 60 s de pompe. Seuil selon même modèle/mode/conditions ; pas nominal ni preuve de débit insuffisant."], // health_flow
   ["Temps ON de BUH/BSH ; pas énergie ni preuve de chaleur inutile."], // health_heater
   ["5 compteurs expérimentaux : hausses comparables ; lacunes/reset ignorés. Stabilité n’exclut pas limitation ni ne prouve cause."], // health_retries

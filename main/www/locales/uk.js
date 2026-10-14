@@ -205,7 +205,7 @@ I18N.uk = localeValues([
   /* check.detail.dhw_reason.reading */ "неправдоподібне значення R5T",
   /* check.detail.dhw_reason.blind */ "бракує показань: X10A мовчить або опитування призупинено",
   /* check.detail.collecting_unknown */ "Немає поточної оцінки.",
-  /* check.detail.observation */ "Лише спостереження; без загальної межі OK/ПОПЕРЕДЖЕННЯ.",
+  /* check.detail.observation */ "Лише спостереження; без загальної межі OK/УВАГА.",
   /* check.detail.experimental */ "Експериментальні лічильники; сталість не виключає обмеження.",
   /* check.detail.unavailable */ "Немає придатного сигналу в цьому профілі.",
   /* check.starts */ (n) => `${n} ${n % 10 === 1 && n % 100 !== 11 ? "запуск" : n % 10 >= 2 && n % 10 <= 4 && !(n % 100 >= 12 && n % 100 <= 14) ? "запуски" : "запусків"}`,

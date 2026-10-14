@@ -52,9 +52,9 @@ Optional outdoor min/mean belongs only to each accepted population and changes n
 Tank cooling retains completed/notable window counts, the greatest accepted one-hour R5T drop and
 optional circulation correlation. Rejected windows and their OR-ed reason set explain filter
 limitations, not a defect or dominant cause. There is no tank-energy calculation or green loss
-assessment. A fresh filter (power loss, crash, reset, identity or circulation change) waits 45 minutes
-before the first candidate; an intentional restart carries the remaining settling time instead. A
-charge no reading saw can still affect the next candidate.
+assessment. A fresh filter (power loss, crash, diagnostics on/off, identity, circulation or long-gap
+reset) waits 45 minutes before the first candidate; a planned restart carries the remaining settling
+time instead. A charge no reading saw can still affect the next candidate.
 
 The independent circulation witness's broker, topic, value/time paths, maximum age, thresholds and
 confirmation time bind the DHW evidence identity. Editing them clears only that check and its

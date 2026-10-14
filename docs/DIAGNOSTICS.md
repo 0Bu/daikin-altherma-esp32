@@ -74,9 +74,10 @@ had a sufficiently observed pump-off state.
 **Important limit:** Charging, pump activity, apparent draws and missing readings exclude time. Fast
 continuous cooling above about **1.85 K/h** can resemble a draw and be excluded too. One sensor
 in a stratified tank does not measure whole-tank heat or electricity loss, and pump overlap does not
-prove a cause. After a charge seen for at least two minutes, or a fresh start (power loss, crash,
-reset, consent or circulation change), the check waits 45 minutes before a window; unread valve or heater
-readings extend that wait. An intentional restart keeps only the remaining settling time. A charge no
+prove a cause. After a charge seen for at least two minutes, or a fresh start (power loss, crash, switching Plant
+diagnostics on or off, a new unit identity, a circulation-witness change or a long reading gap), the
+check waits 45 minutes before a window; unread valve or heater
+readings extend that wait. A planned restart, such as an update, keeps only the remaining settling time. A charge no
 reading saw can still affect a window.
 
 **Evidence and limits:** [Tank cooling](DIAGNOSTIC_EVIDENCE.md#diagnosis-dhw-loss)
@@ -97,8 +98,8 @@ no usable compressor observation remains **CHECKING**.
 **Important limit:** There is no pooled all-mode assessment, and an unfinished long run cannot dilute
 completed short runs. Twelve runs and ten minutes are project heuristics, not Daikin limits. These
 figures do not identify oversizing or hydraulic imbalance. Optional outdoor min/mean is context for
-accepted heating runs only. A sweep that read nothing for up to 15 seconds inside a run (an update
-check, a weather download or a silent bus) keeps its class; a start hidden by an unreadable reading counts as an unclassified run.
+accepted heating runs only. A pause of up to 15 seconds in which the board read nothing (an update
+check, a weather download or a silent link) does not unclassify a run; a start hidden by an unreadable reading counts as an unclassified run.
 After a restart, restored hours can lack the completion of a run that crossed an hour boundary, so
 the result stays **MEASURED** until those hours leave the window. If the compressor stops during a
 defrost, one heating run counts as several; whether it does has not been checked yet.

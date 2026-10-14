@@ -177,11 +177,12 @@ heating_mode_active, room_source_unix_s, room_age_s, sequence, evaluations, samp
 States: `off`, `recording`, `hold`, `degraded`, `blocked`. Reasons: `disabled`, `sample_recorded`,
 `sampling_interval`, `room_unavailable`, `x10a_unavailable`, `homehub_unavailable`, `plant_gate_unknown`,
 `plant_inactive`, `forecast_unavailable`, `clock_invalid`, `heating_mode_unknown`, `non_heating_mode`,
-`sampler_inactive`. Numeric codes are stable; retired 3/4 are unused. Safe mode reports
-`sampler_inactive` (14) when configuration is armed but its MQTT sampler never started.
+`sampler_inactive`. Numeric codes are stable; retired 3/4 are unused. `sampler_inactive`
+(14) means configuration is armed but the MQTT sampler is not running: safe mode, the boot window or a
+failed MQTT start.
 
 Arming requires diagnostics consent, a configured MQTT broker, an MQTT room path with a fixed or
-mapped target, and active HomeHub; forecast is optional. Recording requires fresh room-time evidence.
+mapped target, and a configured HomeHub host; forecast is optional. Recording requires fresh room-time evidence.
 Error values are null unless established. Sequence plus absolute time identifies a recorded event. Room error is not an LWT offset or actuator result.
 
 The legacy outdoor pair is fresh/plausible ENV III; `plant_*` is HomeHub input 44 from the current

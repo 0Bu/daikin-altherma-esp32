@@ -16781,6 +16781,23 @@ static void test_checkup() {
             run(st, b, t, 1, true, false);
             CHECK(st.settle_remaining_s == DHW_LOSS_SETTLE_S - 1 && st.blind_run_s == 0);
         }
+        {
+            // A planned restart carries that unread tail too: a minute of seen charge and a 70 s
+            // unread tail before the handoff still arm the settle at the first readable sample.
+            DhwLossState  st = dhw_past_hold();
+            DhwLossBucket b;
+            int64_t       t = 0;
+            run(st, b, t, 10, true, false);
+            run(st, b, t, 60, true, true);
+            run(st, b, t, 70, false, false);
+            CHECK(st.settle_remaining_s == 0 && st.blind_run_s == 70);
+            DhwLossState adopted;
+            dhw_loss_adopt(adopted, dhw_loss_checkpoint(st, t), 0);
+            CHECK(adopted.blind_run_s == 70);
+            int64_t t2 = 0;
+            run(adopted, b, t2, 1, true, false);
+            CHECK(adopted.settle_remaining_s == DHW_LOSS_SETTLE_S - 1);
+        }
     }
 
     {
