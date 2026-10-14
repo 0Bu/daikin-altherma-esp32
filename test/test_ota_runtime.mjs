@@ -45,7 +45,7 @@ function replaceOnce(text, before, after, name) {
 try {
   const baseline = execute(compile(sourcePath, "production"), []);
   assert.equal(baseline.status, 0, `production OTA cases\n${baseline.stdout}${baseline.stderr}`);
-  assert.match(baseline.stdout, /PASS total=50\b/);
+  assert.match(baseline.stdout, /PASS total=51\b/);
   console.log(baseline.stdout.trim());
 
   const mutations = [
@@ -113,6 +113,11 @@ try {
       name: "held-install-latch", scenario: "reset_hold",
       before: "s_install_held   = true;",
       after: "/* mutation: a held install does not refuse later operations */",
+    },
+    {
+      name: "health-giveup-latch", scenario: "health_timeout_held",
+      before: "gave_up = true;",
+      after: "/* mutation: a held give-up may still commit a late healthy sample */",
     },
     {
       name: "latched-start", scenario: "reset_latched",
@@ -228,7 +233,7 @@ try {
       `${mutation.name}: only the specific assertion failure counts`);
     console.log(`negative control ${mutation.name}: rejected by ${mutation.scenario}`);
   }
-  console.log(`production OTA runtime: 50 cases, ${mutations.length} negative controls; source sha256=`
+  console.log(`production OTA runtime: 51 cases, ${mutations.length} negative controls; source sha256=`
     + createHash("sha256").update(source).digest("hex"));
 } finally {
   fs.rmSync(dir, { recursive: true, force: true });

@@ -543,6 +543,16 @@ void health(const char* name) {
     if (std::strcmp(name, "health_valid") == 0) s.image_state = ESP_OTA_IMG_VALID;
     if (std::strcmp(name, "health_unarmed") == 0) s.image_state = ESP_OTA_IMG_NEW;
     if (std::strcmp(name, "health_timeout") == 0) s.health_offline = true;
+    // The rollback restart is held by a factory reset; the service then recovers, and only later
+    // does the hold end. The gate gave up, so it must not mark the image valid meanwhile, and it
+    // restarts as soon as the hold is released.
+    const bool held_timeout = std::strcmp(name, "health_timeout_held") == 0;
+    if (held_timeout) {
+        s.health_offline  = true;
+        s.reset_hold      = true;
+        s.heal_at         = 610000;
+        s.release_hold_at = 615000;
+    }
     if (std::strcmp(name, "health_mark_error") == 0) s.mark_result = ESP_FAIL;
     bool reject = s.health_offline;
     if (std::strcmp(name, "health_heap_boundary") == 0) {
@@ -630,6 +640,9 @@ void health(const char* name) {
         REQUIRE(s.health_stack_samples == 1);
         REQUIRE(status.image_state == (s.image_state == ESP_OTA_IMG_VALID ? "valid" : "unarmed"));
         REQUIRE(s.marked == 0 && s.restart == 0 && s.ticks == 1000);
+    } else if (held_timeout) {
+        REQUIRE(s.marked == 0 && s.restart == 1 && s.restarted_at == 615000);
+        REQUIRE(status.image_state == "pending_verify" && status.rollback_pending);
     } else if (reject) {
         REQUIRE(s.marked == 0 && s.restart == 1 && s.restarted_at == 602000);
         REQUIRE(status.image_state == "pending_verify" && status.rollback_pending);
@@ -748,14 +761,26 @@ int main(int argc, char** argv) {
         std::cout << "PASS " << name << '\n';
         ++count;
     }
-    const char* health_cases[] = {
-        "health_unknown",       "health_valid",         "health_unarmed",
-        "health_commit",        "health_timeout",       "health_mark_error",
-        "health_task_error",    "health_heap_boundary", "health_low_free",
-        "health_low_block",     "health_heap_restart",  "health_mqtt_skip",
-        "health_poll_skip",     "health_x10a_missing",  "health_x10a_proven",
-        "health_x10a_optional", "health_ap_recovery",   "health_task_error_unknown",
-        "health_static_storage"};
+    const char* health_cases[] = {"health_unknown",
+                                  "health_valid",
+                                  "health_unarmed",
+                                  "health_commit",
+                                  "health_timeout",
+                                  "health_timeout_held",
+                                  "health_mark_error",
+                                  "health_task_error",
+                                  "health_heap_boundary",
+                                  "health_low_free",
+                                  "health_low_block",
+                                  "health_heap_restart",
+                                  "health_mqtt_skip",
+                                  "health_poll_skip",
+                                  "health_x10a_missing",
+                                  "health_x10a_proven",
+                                  "health_x10a_optional",
+                                  "health_ap_recovery",
+                                  "health_task_error_unknown",
+                                  "health_static_storage"};
     for (const auto* name : health_cases) {
         if (argc > 1 && std::strcmp(argv[1], name) != 0) continue;
         try {

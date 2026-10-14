@@ -2019,6 +2019,10 @@ static void health_gate_task(void*) {
     // the boot record this window exists to explain — heap_guard.cpp's throttle, for the same
     // reason.
     bool skip_reported = false;
+    // Latched by the first GiveUp. While a factory reset holds the rollback restart the loop keeps
+    // running, and a late healthy sample must not turn the verdict into a Commit that keeps an
+    // image this gate has already given up on.
+    bool gave_up = false;
     for (int elapsed = 0;; elapsed += kHealthPollS) {
         stack_watch_sample(StackWatch::OtaHealth);
         // THE BODY SELF-GUARDS, like every other allocating task loop here (AGENTS.md → Memory,
@@ -2037,7 +2041,8 @@ static void health_gate_task(void*) {
         try {
             const OtaServiceHealth service = ota_service_health();
             const HealthVerdict    v =
-                health_gate_decide(elapsed, kHealthBaseWindowS, kHealthHardCapS, service);
+                gave_up ? HealthVerdict::GiveUp
+                           : health_gate_decide(elapsed, kHealthBaseWindowS, kHealthHardCapS, service);
             if (v == HealthVerdict::Commit) {
                 // The return value decides whether this image survives the next reboot, so it is
                 // not one to discard: a failed commit leaves the image PENDING_VERIFY and the
@@ -2065,9 +2070,11 @@ static void health_gate_task(void*) {
             // (nvs_restart_held_by_factory_reset says so once per boot): a reset that fails and
             // releases the latch must still get this known-bad image rolled back.
             if (v == HealthVerdict::GiveUp) {
-                ESP_LOGW("ota",
-                         "health gate: service proof failed after %ds; rebooting to roll back",
-                         elapsed);
+                if (!gave_up)
+                    ESP_LOGW("ota",
+                             "health gate: service proof failed after %ds; rebooting to roll back",
+                             elapsed);
+                gave_up = true;
                 vTaskDelay(pdMS_TO_TICKS(1000));
                 stack_watch_sample(StackWatch::OtaHealth);
                 if (nvs_restart_held_by_factory_reset("ota")) continue;
