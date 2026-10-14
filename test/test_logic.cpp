@@ -6750,6 +6750,11 @@ static void test_button() {
         t += dt;
         return button_update(st, pressed, t);
     };
+    // A debounced press: BUTTON_PRESS_SAMPLES clean pressed samples at the sample period, so the
+    // hold is in progress (dated from the first of them) when the block below starts timing it.
+    auto start_hold = [&] {
+        for (int i = 0; i < BUTTON_PRESS_SAMPLES; i++) step(true, BUTTON_SAMPLE_MS);
+    };
 
     // A short press does nothing at all — not even an indicator hand-back (nothing was asserted).
     CHECK(step(true, 20) == ButtonEvent::None);
@@ -6776,7 +6781,7 @@ static void test_button() {
     // ABORT: released after the warning but before the threshold -> Aborted, and NOTHING fired.
     st = ButtonState{};
     t  = 0;
-    step(true, 20);
+    start_hold();
     CHECK(step(true, BUTTON_ARM_MS) == ButtonEvent::Armed);
     step(true, BUTTON_FIRE_MS - BUTTON_ARM_MS - 200); // right up to the edge
     CHECK(!st.fired);
@@ -6790,7 +6795,7 @@ static void test_button() {
     // silent abort with nothing on screen to explain it.
     st = ButtonState{};
     t  = 0;
-    step(true, 20);
+    start_hold();
     const uint64_t started = st.down_at_ms;
     step(true, 1000);
     CHECK(step(false, 20) == ButtonEvent::None); // one bad sample
@@ -6804,7 +6809,7 @@ static void test_button() {
     // enough, and reporting Armed first would just delay what they asked for by a whole sample.
     st = ButtonState{};
     t  = 0;
-    step(true, 20);
+    start_hold();
     CHECK(step(true, BUTTON_FIRE_MS + 1000) == ButtonEvent::Fired);
 
     // Released while idle stays silent no matter how long.
@@ -6815,7 +6820,7 @@ static void test_button() {
     // already rebooted in the normal case.
     st = ButtonState{};
     t  = 0;
-    step(true, 20);
+    start_hold();
     step(true, BUTTON_FIRE_MS + 100);
     CHECK(st.fired);
     step(false, 20);
@@ -6827,6 +6832,203 @@ static void test_button() {
     CHECK(BUTTON_FIRE_MS - BUTTON_ARM_MS >= 2000);
     CHECK(BUTTON_RELEASE_SAMPLES * BUTTON_SAMPLE_MS <
           BUTTON_ARM_MS); // debounce can't eat the warning
+}
+
+// The press debounce, the boot gate and the end of a hold whose reset returned. Each block names
+// the defect it pins: an undebounced pin that fires, a bounced boot that arms, a warning left lit.
+static void test_button_debounce_and_boot_gate() {
+    // A clean press keeps its exact boundaries, measured from the FIRST pressed sample: the press
+    // debounce delays when the hold is KNOWN, never when it began.
+    {
+        ButtonState st;
+        CHECK(button_update(st, true, 0) == ButtonEvent::None);
+        CHECK(!st.down); // one pressed sample is not a press yet
+        CHECK(button_update(st, true, 20) == ButtonEvent::None);
+        CHECK(!st.down);
+        CHECK(button_update(st, true, 40) == ButtonEvent::None);
+        CHECK(st.down && st.down_at_ms == 0); // confirmed, dated from its first sample
+        CHECK(button_update(st, true, 1499) == ButtonEvent::None);
+        CHECK(button_update(st, true, 1500) == ButtonEvent::Armed);
+        CHECK(button_update(st, true, 4999) == ButtonEvent::None);
+        CHECK(button_update(st, true, 5000) == ButtonEvent::Fired);
+        CHECK(button_update(st, true, 5020) == ButtonEvent::None); // no refire
+        // The confirmation lands well inside the arm window at the shipped sample period.
+        CHECK((BUTTON_PRESS_SAMPLES - 1) * BUTTON_SAMPLE_MS < BUTTON_ARM_MS);
+    }
+
+    // An undebounced contact that reads pressed in ONE sample of every three — or two of three —
+    // never shows three consecutive pressed samples, so it never even starts a hold. Before the
+    // press debounce, the one-of-three pattern never showed three consecutive RELEASED samples
+    // either, and fired at 5 s. Driven at the shipped 20 ms period and at the 10 ms that two
+    // 100 Hz ticks can produce.
+    for (const uint64_t period : {uint64_t(10), uint64_t(BUTTON_SAMPLE_MS)}) {
+        for (const int pressed_of_three : {1, 2}) {
+            ButtonState st;
+            int         events    = 0;
+            bool        ever_down = false;
+            for (uint64_t i = 0; i * period <= 10000; ++i) {
+                const bool pressed = static_cast<int>(i % 3) < pressed_of_three;
+                if (button_update(st, pressed, i * period) != ButtonEvent::None) ++events;
+                ever_down = ever_down || st.down;
+            }
+            CHECK(events == 0 && !ever_down);
+        }
+    }
+
+    // A debounced press released before the arm point is a real hold that ends silently: nothing
+    // was asserted, so nothing is handed back (the two-sample "short press" in test_button above
+    // never even became a hold).
+    {
+        ButtonState st;
+        for (uint64_t t = 0; t <= 1000; t += BUTTON_SAMPLE_MS) button_update(st, true, t);
+        CHECK(st.down && !st.armed);
+        CHECK(button_update(st, false, 1020) == ButtonEvent::None);
+        CHECK(button_update(st, false, 1040) == ButtonEvent::None);
+        CHECK(button_update(st, false, 1060) == ButtonEvent::None);
+        CHECK(!st.down && st.release_run == 0);
+    }
+
+    // A released sample while the press is still forming restarts it: the hold is dated from the
+    // first sample of the run that actually reached BUTTON_PRESS_SAMPLES.
+    {
+        ButtonState st;
+        button_update(st, true, 0);
+        button_update(st, true, 20);
+        CHECK(button_update(st, false, 40) == ButtonEvent::None && st.press_run == 0 && !st.down);
+        button_update(st, true, 60);
+        button_update(st, true, 80);
+        CHECK(!st.down);
+        CHECK(button_update(st, true, 100) == ButtonEvent::None);
+        CHECK(st.down && st.down_at_ms == 60);
+    }
+
+    // The boot gate needs BUTTON_RELEASE_SAMPLES consecutive released samples — the evidence a real
+    // release needs — and stays open once it has seen them.
+    {
+        ButtonBootGate gate;
+        CHECK(!button_boot_gate_open(gate, true));  // held at boot
+        CHECK(!button_boot_gate_open(gate, false)); // a single bounce
+        CHECK(!button_boot_gate_open(gate, true));  // still closed: the run restarts
+        CHECK(!button_boot_gate_open(gate, false));
+        CHECK(!button_boot_gate_open(gate, false)); // two released samples are not proof either
+        CHECK(!button_boot_gate_open(gate, true));
+        CHECK(!button_boot_gate_open(gate, false));
+        CHECK(!button_boot_gate_open(gate, false));
+        CHECK(button_boot_gate_open(gate, false)); // the third consecutive one opens it
+        CHECK(button_boot_gate_open(gate, true));  // ...for good: a later press IS a press
+        CHECK(gate.open);
+    }
+
+    // The composition recovery_button.cpp runs (gate first, then the classifier): a contact held
+    // through boot with one bounced released sample — or a bounce of two — never arms and never
+    // fires, however long it stays closed. With the old one-sample gate the first case fired.
+    for (const uint64_t bounce_samples : {uint64_t(1), uint64_t(2)}) {
+        ButtonBootGate gate;
+        ButtonState    st;
+        int            events = 0;
+        for (uint64_t t = 0; t <= 20000; t += BUTTON_SAMPLE_MS) {
+            const bool pressed = t < 400 || t >= 400 + bounce_samples * BUTTON_SAMPLE_MS;
+            if (button_boot_gate_open(gate, pressed) &&
+                button_update(st, pressed, t) != ButtonEvent::None)
+                ++events;
+        }
+        CHECK(!gate.open && events == 0 && !st.down);
+    }
+    // ...and three released samples open the gate, after which a clean hold keeps its schedule.
+    {
+        ButtonBootGate gate;
+        ButtonState    st;
+        uint64_t       armed_at = 0, fired_at = 0;
+        for (uint64_t t = 0; t <= 8000; t += BUTTON_SAMPLE_MS) {
+            const bool pressed = !(t >= 1000 && t <= 1040); // released at 1000, 1020, 1040
+            if (!button_boot_gate_open(gate, pressed)) continue;
+            const ButtonEvent e = button_update(st, pressed, t);
+            if (e == ButtonEvent::Armed) armed_at = t;
+            if (e == ButtonEvent::Fired) fired_at = t;
+        }
+        CHECK(armed_at == 1060 + BUTTON_ARM_MS && fired_at == 1060 + BUTTON_FIRE_MS);
+    }
+
+    // After Fired, a reset that RETURNS (failed or incomplete) has already handed the indicator
+    // back. The still-held button must not re-light the armed warning, and its release must leave
+    // the indicator dark. The caller's indicator rule is modelled exactly as recovery_button.cpp
+    // applies it: Armed lights WipeArmed, Aborted clears it, Fired runs a reset that — here — fails
+    // and clears it. Chosen semantics: a fired hold never arms again and releases silently (None).
+    const auto indicate = [](ButtonEvent e, LedSignal& signal) {
+        if (e == ButtonEvent::Armed) signal = LedSignal::WipeArmed;
+        if (e == ButtonEvent::Aborted || e == ButtonEvent::Fired) signal = LedSignal::None;
+    };
+    // (a) A coarse sample that crosses BOTH thresholds fires without an Armed first — the case that
+    // used to report Armed on the next still-held sample after the failed reset and then, with
+    // nothing to clear it on release, leave the strobe latched.
+    {
+        ButtonState st;
+        LedSignal   signal = LedSignal::None;
+        int         armed = 0, fired = 0, aborted = 0;
+        const auto  feed = [&](bool pressed, uint64_t t) {
+            const ButtonEvent e = button_update(st, pressed, t);
+            armed += e == ButtonEvent::Armed;
+            fired += e == ButtonEvent::Fired;
+            aborted += e == ButtonEvent::Aborted;
+            indicate(e, signal);
+            return e;
+        };
+        feed(true, 0);
+        feed(true, 20);
+        feed(true, 40);
+        CHECK(feed(true, 6000) == ButtonEvent::Fired && armed == 0);
+        CHECK(st.armed && st.fired); // Fired closed the Armed edge for this hold
+        for (uint64_t t = 6020; t <= 30000; t += BUTTON_SAMPLE_MS) feed(true, t);
+        CHECK(armed == 0 && fired == 1 && signal == LedSignal::None);
+        feed(false, 30020);
+        feed(false, 30040);
+        CHECK(feed(false, 30060) == ButtonEvent::None); // released: silent, not Aborted
+        CHECK(!st.down && aborted == 0 && signal == LedSignal::None);
+        // The retry path stays a deliberate second hold that behaves like the first.
+        for (uint64_t t = 31000; t <= 36000; t += BUTTON_SAMPLE_MS) feed(true, t);
+        CHECK(armed == 1 && fired == 2 && signal == LedSignal::None);
+    }
+    // (b) The ordinary path — Armed at 1.5 s, Fired at 5 s, the reset fails — ends the same way.
+    {
+        ButtonState st;
+        LedSignal   signal = LedSignal::None;
+        int         armed = 0, fired = 0;
+        for (uint64_t t = 0; t <= 20000; t += BUTTON_SAMPLE_MS) {
+            const ButtonEvent e = button_update(st, true, t);
+            armed += e == ButtonEvent::Armed;
+            fired += e == ButtonEvent::Fired;
+            indicate(e, signal);
+        }
+        CHECK(armed == 1 && fired == 1 && signal == LedSignal::None);
+        ButtonEvent last = ButtonEvent::None;
+        for (int i = 0; i < BUTTON_RELEASE_SAMPLES; i++) {
+            last = button_update(st, false, 20020 + 20 * static_cast<uint64_t>(i));
+            indicate(last, signal);
+        }
+        CHECK(last == ButtonEvent::None && !st.down && signal == LedSignal::None);
+    }
+
+    // A SAMPLING STALL is a coarse sample period (button.hpp's file comment): the samples on either
+    // side of the gap are one hold dated from its first pressed sample. Pinned so the trade-off
+    // stays deliberate. Pressed at 0, the task stalls, pressed at 5000 and 5020: the third sample
+    // confirms the press and the hold fires at once — without an Armed warning first.
+    {
+        ButtonState st;
+        CHECK(button_update(st, true, 0) == ButtonEvent::None);
+        CHECK(button_update(st, true, 5000) == ButtonEvent::None); // two samples: not yet a press
+        CHECK(button_update(st, true, 5020) == ButtonEvent::Fired);
+        CHECK(st.down_at_ms == 0 && st.armed && st.fired);
+    }
+    // ...and a stall that spans only the arm point reports Armed on the first sample after it.
+    {
+        ButtonState st;
+        button_update(st, true, 0);
+        button_update(st, true, 20);
+        button_update(st, true, 40);
+        CHECK(button_update(st, true, 3000) == ButtonEvent::Armed);
+        CHECK(button_update(st, true, 3020) == ButtonEvent::None);
+        CHECK(button_update(st, true, 5000) == ButtonEvent::Fired);
+    }
 }
 
 static void test_crashinfo() {
@@ -24888,6 +25090,7 @@ int main() {
     test_board_presets();
     test_led_pattern();
     test_button();
+    test_button_debounce_and_boot_gate();
     test_discovery();
     test_binary_catalog();
     test_binary_semantics();

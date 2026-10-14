@@ -6,19 +6,23 @@
 #include "diag_crash.hpp"
 #include "diag_log.hpp"
 #include "history.hpp"
+#include "mqtt_retirement_store.hpp"
 #include "nvs_storage.hpp"
 #include "state_dwell.hpp"
 #include "status_led.hpp"
 #include "wifi.hpp"
 #include "logic/button.hpp"
+#include "logic/config_transaction.hpp" // CONFIG_KEY_SERVICE — the "cfg" blob the seed restores
 
 #include "driver/gpio.h"
-#include "esp_log.h"
 #include "esp_system.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "task_config.hpp"   // TASK_PRIO_* — the firmware-wide priority table
 #include "freertos/task.h"
+
+#include <cstdint>
+#include <vector>
 
 namespace daik {
 namespace {
@@ -34,9 +38,18 @@ constexpr int WIPE_TOTAL_MS  = 1500;
 
 void factory_reset() {
     status_led_signal(LedSignal::Wiping);
-    diag_printf("button: held %lus — FACTORY RESET, erasing all stored config (daik_cfg)\n",
+    diag_printf("button: held %lus — FACTORY RESET, erasing stored config (daik_cfg), history, "
+                "coredump and MQTT retirement record; board hardware is kept\n",
                 static_cast<unsigned long>(BUTTON_FIRE_MS / 1000));
     const int64_t t0 = esp_timer_get_time();
+    // The board-hardware statement (preset, indicator, this button) survives the reset: without it
+    // the next boot would come up with the button and indicator unconfigured — the default — and
+    // the recovery path the user just used would be gone from the board until someone restates it
+    // in the setup portal. It is built from the RAM config BEFORE anything is erased, so a failure
+    // here (out of memory) costs only the seed — the reset proceeds without it and says so — and
+    // nothing after the first erase has to allocate for it.
+    std::vector<uint8_t> seed;
+    const bool           have_seed = config_factory_seed_blob(seed);
     vTaskDelay(pdMS_TO_TICKS(WIPE_LEAD_MS));
 
     const esp_err_t e = nvs_erase_all();
@@ -49,17 +62,30 @@ void factory_reset() {
     if (e == ESP_OK && wifi_e == ESP_OK && history_erased) dwell_forget();
     const bool crash_erased = e == ESP_OK && wifi_e == ESP_OK && history_erased
         ? diag_crash_forget() : false;
+    // The MQTT retirement record lives in its own "mqtt_retire" namespace, which nvs_erase_all()
+    // does not touch. It names the base, board and profile this installation last announced — the
+    // previous owner's broker layout — and a reset that left it behind would start the next owner's
+    // first discovery from someone else's history. A REQUIRED step: its failure leaves the reset
+    // incomplete like the erases above. Its writer refuses behind the latch nvs_erase_all() just
+    // set, so the running MQTT task cannot recreate it before the reboot.
+    const bool retire_erased = crash_erased && mqtt_retirement_forget();
 
     // Hold the signal to its full visible duration regardless of how fast the erase ran.
     const int elapsed = static_cast<int>((esp_timer_get_time() - t0) / 1000);
     if (elapsed < WIPE_TOTAL_MS) vTaskDelay(pdMS_TO_TICKS(WIPE_TOTAL_MS - elapsed));
 
     if (e != ESP_OK) {
-        // Rebooting now would come back up on the config we just told the user was gone. Stay up,
-        // hand the indicator back, and name the error — the web UI is still reachable on the old
-        // network (which is the failure this button exists for, so the user is probably not on it),
-        // but /diag + syslog at least record WHY the reset did nothing.
-        diag_printf("button: factory reset FAILED (%s) — config left intact, NOT rebooting\n",
+        // A failed namespace erase does NOT mean nothing was erased: IDF removes the entries one by
+        // one, so a flash error can leave part of the stored config gone, and a failed commit can
+        // follow an erase that already landed. Rebooting would come back up on whatever survived.
+        // Stay up on the intact RAM config instead — nvs_erase_all() has released its latch, so the
+        // next successful settings save rewrites the stored config blob from it — hand the
+        // indicator back, and name the error: the web UI is still reachable on the old network
+        // (which is the failure this button exists for, so the user is probably not on it), but
+        // /diag + syslog at least record WHY the reset did not finish.
+        diag_printf("button: factory reset FAILED (%s) — stored config may be partly erased; NOT "
+                    "rebooting, the running config stays in use; release and hold again to "
+                    "retry\n",
                     esp_err_to_name(e));
         status_led_signal(LedSignal::None);
         return;
@@ -68,11 +94,35 @@ void factory_reset() {
         // NVS is already empty, but rebooting would turn a partial reset into a privacy breach: the
         // next setup could restore old trend data or expose an old raw memory dump. Stay in this
         // boot with producers suppressed; releasing and holding again retries the failed erase.
-        diag_printf("button: factory reset INCOMPLETE — wifi=%s history=%s coredump=%s; NOT rebooting, release and hold again to retry\n",
+        diag_printf("button: factory reset INCOMPLETE — wifi=%s history=%s coredump=%s "
+                    "mqtt_retire=pending; NOT rebooting, release and hold again to retry\n",
                     esp_err_to_name(wifi_e), history_erased ? "erased" : "pending",
                     crash_erased ? "erased" : "pending");
         status_led_signal(LedSignal::None);
         return;
+    }
+    if (!retire_erased) {
+        // Everything else is gone; the retirement record is not. Same rule, same retry: the NVS
+        // latch stays set, so nothing recreates the record while this boot waits for the next hold.
+        diag_printf("button: factory reset INCOMPLETE — MQTT retirement record not erased; NOT "
+                    "rebooting, release and hold again to retry\n");
+        status_led_signal(LedSignal::None);
+        return;
+    }
+    // Every required erase succeeded. Only now is the board-hardware seed written back — through
+    // the one write the latch still allows, and never ahead of an erase that could still fail. Best
+    // effort: without it the reset is still complete and private; the next boot merely starts with
+    // no indicator or button configured, which the user can restate in the setup portal.
+    if (!have_seed) {
+        diag_printf("button: board hardware not kept (seed unavailable) — set the board again in "
+                    "the setup portal\n");
+    } else {
+        const esp_err_t seed_e =
+            nvs_set_blob_after_factory_reset(CONFIG_KEY_SERVICE, seed.data(), seed.size());
+        if (seed_e != ESP_OK)
+            diag_printf("button: board hardware not kept (%s) — set the board again in the setup "
+                        "portal\n",
+                        esp_err_to_name(seed_e));
     }
     diag_printf("button: factory reset complete — rebooting into the setup portal\n");
     stack_watch_sample(StackWatch::Button);
@@ -105,10 +155,12 @@ void button_task(void*) {
 
     // A button already held at boot is NOT a press. A stuck switch, a wiring short, or a user who
     // powered the board up with a finger on it would otherwise start a hold that fires 5 s into the
-    // boot — before the user could possibly have decided to reset anything. Wait for the pin to
-    // read released once before arming the state machine.
-    bool ready = false;
-    ButtonState st;
+    // boot — before the user could possibly have decided to reset anything. The state machine goes
+    // live only after the pin has read released for BUTTON_RELEASE_SAMPLES consecutive samples
+    // (logic/button.hpp, button_boot_gate_open): a single bounced "released" sample of a contact
+    // that is in fact still closed is not that evidence.
+    ButtonBootGate gate;
+    ButtonState    st;
 
     diag_printf("button: recovery button on GPIO%d (active %s) — hold %lus to factory reset\n",
                 gpio, active_low ? "low" : "high",
@@ -120,9 +172,9 @@ void button_task(void*) {
         // safety). A dropped sample costs nothing — the hold is re-evaluated next tick.
         try {
             const bool pressed = (gpio_get_level(pin) == 0) == active_low;
-            if (!ready) {
-                if (!pressed) ready = true;      // pin has been observed released — now it's live
-            } else {
+            // Until the gate opens every sample is consumed here; the one that opens it is a
+            // released sample, which button_update treats as idle.
+            if (button_boot_gate_open(gate, pressed)) {
                 switch (button_update(st, pressed, esp_timer_get_time() / 1000)) {
                 case ButtonEvent::Armed:
                     diag_printf("button: held — release now to abort, keep holding to factory reset\n");
@@ -133,12 +185,14 @@ void button_task(void*) {
                     status_led_signal(LedSignal::None);
                     break;
                 case ButtonEvent::Fired:
-                    // Reboots on success. If it returns, the erase FAILED — and the state is left
+                    // Reboots on success. If it returns, the reset FAILED or is INCOMPLETE, it has
+                    // already handed the indicator back (LedSignal::None) — and the state is left
                     // alone deliberately: `st.fired` stays set, so the still-held button cannot
                     // re-fire every five seconds and bury the one diag line that explains why in a
-                    // repeating loop of identical attempts. Retrying costs the user a release and a
-                    // second press, which is the right price for an operation that just reported a
-                    // wedged flash.
+                    // repeating loop of identical attempts, and `st.armed` stays set with it, so
+                    // the same hold cannot re-light the armed warning either. Its release is silent
+                    // (None, not Aborted). Retrying costs the user a release and a second press,
+                    // which is the right price for an operation that just reported a wedged flash.
                     factory_reset();
                     break;
                 case ButtonEvent::None:
@@ -158,8 +212,11 @@ void recovery_button_start() {
     int gpio = -1;
     with_config([&gpio](const Config& c) { gpio = c.btn_gpio; });
     if (gpio < 0) return; // no button configured — the default
+    // A configured recovery button that silently does not exist is the worst way for this to fail:
+    // the owner finds out only when holding it is their last way in. /diag + syslog, not just the
+    // serial console nobody has attached.
     if (xTaskCreate(button_task, "recovery_btn", 3072, nullptr, TASK_PRIO_BUTTON, nullptr) != pdPASS)
-        ESP_LOGW("button", "recovery-button task alloc failed — factory-reset button disabled this boot");
+        diag_printf("button: recovery-button task alloc failed — button disabled this boot\n");
 }
 
 } // namespace daik

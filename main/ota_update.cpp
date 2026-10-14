@@ -36,6 +36,7 @@
 #include "http_deadline.hpp"
 #include "mqtt_ha.hpp"
 #include "net.hpp"
+#include "nvs_storage.hpp" // nvs_factory_reset_latched — both restarts defer to a factory reset
 #include "provisioning.hpp"
 #include "syslog.hpp"
 #include "stack_watch.hpp"
@@ -1016,6 +1017,26 @@ void run_check(const OtaTaskArgs& request) {
         diag_printf("ota: changelog expiry timer unavailable; using no-notes fallback\n");
 }
 
+// The install validated and SELECTED the new image, but a factory reset latched NVS before the
+// restart: rebooting now would come up on a namespace the reset is still erasing — a partial reset
+// that looks like a finished one — so the restart is refused. Nothing is lost: the boot partition
+// already points at the new image, so the reset's own reboot (or, if the reset does not complete,
+// whatever restarts the board next) starts it PENDING_VERIFY under the ordinary health gate and
+// probation, exactly as this restart would have. The worker parks here instead of returning: that
+// would clear s_busy, and a second install in this boot would rewrite the very slot that is
+// selected to boot next. One /diag line; the status keeps "done" (the install did complete) with a
+// truthful message.
+[[noreturn]] void hold_installed_image_for_factory_reset() {
+    diag_printf("ota: update installed, restart refused — a factory reset is erasing stored data; "
+                "the new image starts on the next reboot\n");
+    {
+        Lock lk(s_mtx);
+        s_status.message = "Installed; starts on the next reboot (factory reset in progress)";
+    }
+    stack_watch_sample(StackWatch::Ota);
+    for (;;) vTaskDelay(pdMS_TO_TICKS(60 * 1000));
+}
+
 void run_update(const OtaTaskArgs& request) {
     const bool       allow_downgrade = request.mode == OtaTaskMode::Downgrade;
     const char*      running         = esp_app_get_description()->version;
@@ -1673,6 +1694,11 @@ void run_update(const OtaTaskArgs& request) {
     // Outlive both the 1 Hz browser and the gate's 2 Hz connection-churn-bounded observer, with
     // enough LAN/HTTPD scheduling margin for either to retain completed-verifier evidence.
     vTaskDelay(pdMS_TO_TICKS(kDoneBeforeRebootMs));
+    // Checked after that wait, at the last moment: see hold_installed_image_for_factory_reset.
+    if (nvs_factory_reset_latched()) {
+        hold_installed_image_for_factory_reset(); // never returns
+        return;
+    }
     esp_restart();
 }
 
@@ -2026,6 +2052,11 @@ static void health_gate_task(void*) {
                 }
                 break;
             }
+            // A factory reset that latched NVS owns the next restart: rebooting now would come up
+            // on a namespace it is still erasing. Refusing costs the rollback nothing — the image
+            // stays PENDING_VERIFY, so the reset's own reboot (or whatever restarts the board next,
+            // if the reset does not complete) rolls it back in the bootloader exactly as this
+            // restart would have. The gate therefore ends here with one /diag line.
             if (v == HealthVerdict::GiveUp) {
                 ESP_LOGW("ota",
                          "health gate: service proof failed after %ds; rebooting while "
@@ -2033,6 +2064,11 @@ static void health_gate_task(void*) {
                          elapsed);
                 vTaskDelay(pdMS_TO_TICKS(1000));
                 stack_watch_sample(StackWatch::OtaHealth);
+                if (nvs_factory_reset_latched()) {
+                    diag_printf("ota: health gate gave up, restart refused — a factory reset is "
+                                "erasing stored data; the next reboot rolls back\n");
+                    break;
+                }
                 esp_restart();
                 break; // esp_restart() does not return; keep the fail-closed intent explicit.
             }

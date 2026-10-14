@@ -280,6 +280,8 @@ bool     mqtt_x10a_publish_proven() { return sdk::state.x10a_proven; }
 NetLink  net_kind() { return sdk::state.health_offline ? NetLink::None : NetLink::Wifi; }
 bool     provisioning_ap_active() { return sdk::state.recovery_ap; }
 void     diag_printf(const char*, ...) {}
+// No factory reset runs in these cases; both OTA restarts take their ordinary path.
+bool     nvs_factory_reset_latched() { return false; }
 bool     http_deadline_init() noexcept { return true; }
 bool     http_deadline_ready() noexcept { return true; }
 HttpSocketDeadline::~HttpSocketDeadline() { disarm(); }

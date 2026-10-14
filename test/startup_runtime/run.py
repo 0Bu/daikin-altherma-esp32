@@ -56,7 +56,9 @@ for name, source in sources.items(): compile_object(source, name)
 baseline = link('led', 'button', 'baseline')
 scenarios = ['led_gpio_high', 'led_gpio_low', 'led_ws2812', 'led_mqtt_oom', 'led_hp_oom',
              'button_low', 'button_high', 'led_disabled', 'button_disabled',
-             'led_init_fail', 'button_init_fail', 'stack_minima']
+             'led_init_fail', 'button_init_fail', 'stack_minima',
+             'button_task_alloc_fail', 'button_boot_gate', 'button_reset_complete',
+             'button_reset_seed_fail', 'button_reset_no_seed', 'button_reset_retire_fail']
 passes = []
 for scenario in scenarios:
     r = command([str(baseline), scenario])
@@ -97,7 +99,26 @@ for target, anchor_before, anchor_after, scenario, oracle in [
      'boot_minimum_survives_task_recreation'),
     ('stack', 'static_cast<uint32_t>(uxTaskGetStackHighWaterMark(nullptr));',
      'static_cast<uint32_t>(uxTaskGetStackHighWaterMark(nullptr)) * 4;', 'stack_minima',
-     'stack_minimum_retains_exact_esp_idf_byte_unit')]:
+     'stack_minimum_retains_exact_esp_idf_byte_unit'),
+    # The production task must consult the boot gate: without it a contact held through boot
+    # starts a hold and fires on its own.
+    ('button', 'if (button_boot_gate_open(gate, pressed)) {',
+     'if ((static_cast<void>(gate), true)) {', 'button_boot_gate',
+     'boot_gate_holds_through_one_and_two_sample_bounces'),
+    # The retirement-record erase is a required step, not a best-effort one.
+    ('button', 'const bool retire_erased = crash_erased && mqtt_retirement_forget();',
+     'const bool retire_erased = crash_erased;', 'button_reset_complete',
+     'reset_order_is_seed_then_every_erase_then_seed_write'),
+    ('button', 'if (!retire_erased) {', 'if (false) {', 'button_reset_retire_fail',
+     'retirement_erase_failure_is_incomplete_without_seed_or_restart'),
+    # The seed is built before the first erase and written only after the last one.
+    ('button', 'const bool have_seed = config_factory_seed_blob(seed);',
+     'const bool have_seed = false;', 'button_reset_complete',
+     'reset_order_is_seed_then_every_erase_then_seed_write'),
+    # A task-creation failure must reach /diag, not only the serial console.
+    ('button', 'diag_printf("button: recovery-button task alloc failed',
+     'std::printf("button: recovery-button task alloc failed', 'button_task_alloc_fail',
+     'button_task_alloc_failure_reaches_diag')]:
     contents = sources[target].read_text()
     pattern = re.compile(r'\s+'.join(re.escape(part) for part in re.split(r'\s+', anchor_before.strip())))
     if len(pattern.findall(contents)) != 1:
@@ -126,7 +147,7 @@ git_head = subprocess.run(['git', '-c', 'core.fsmonitor=false', '-C', str(REPO),
 record = {'compiler': version, 'sanitizers': args.sanitizer, 'commands': commands, 'passed_scenarios': passes, 'negative_controls': controls, 'input_sha256': manifest,
           'production_head': git_head.stdout.strip() if git_head.returncode == 0 else None,
           'source_and_build_binding': ['Complete current LED, button and stack-sampler sources compile as separate production-shaped translation units, then link with the fixture object.', 'Actual production config.hpp, Config model, with_config and stack null formatter compile unchanged; only config-lock/reference primitives, current-task FreeRTOS watermark and full config() failpoint are adapted.', 'No production source files are rewritten; mutations are complete source copies under this temporary directory.'],
-          'limits': ['The SDK adapter records GPIO/RMT/task calls and supplies controlled watermark bytes; it does not run ESP-IDF drivers, physical pins, firmware stacks or FreeRTOS scheduling.', 'External diagnostic and destructive service functions are adapters; every destructive call is counted and all scenarios require zero.', 'Configured tasks terminate the host process at their first scheduled delay; startup failures run their retirement path. Subsequent blink cycles, button holds, real erase behavior and recovery persistence are untested.', 'LED MQTT/hp snapshot errors are injected std::bad_alloc at the external status adapter, proving the production loop exception boundary, dark fallback and 1 s delay.', 'The stack_minima scenario tests the actual shared sampler and formatter with controlled current-owner byte marks, including a recreated-task mark; it is not measured device headroom.']}
+          'limits': ['The SDK adapter records GPIO/RMT/task calls and supplies controlled watermark bytes; it does not run ESP-IDF drivers, physical pins, firmware stacks or FreeRTOS scheduling.', 'External diagnostic and destructive service functions are adapters; every destructive call is counted, every startup scenario requires zero, and the button_reset_* / button_boot_gate scenarios record their call order and choose their results.', 'Startup scenarios terminate the host process at their first scheduled delay; startup failures run their retirement path. The button_boot_gate and button_reset_* scenarios drive a scripted 20 ms GPIO input through the production task, its boot gate and the real factory_reset() control flow; blink cycles, real NVS/flash erase behavior, the board seed contents and recovery persistence across a reboot remain untested.', 'LED MQTT/hp snapshot errors are injected std::bad_alloc at the external status adapter, proving the production loop exception boundary, dark fallback and 1 s delay.', 'The stack_minima scenario tests the actual shared sampler and formatter with controlled current-owner byte marks, including a recreated-task mark; it is not measured device headroom.']}
 (OUT / 'evidence.json').write_text(json.dumps(record, indent=2) + '\n')
 (OUT / 'inputs.sha256').write_text(''.join(sha + '  ' + path + '\n' for path, sha in manifest.items()))
 (OUT / 'commands.txt').write_text('\n'.join(commands) + '\n')

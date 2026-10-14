@@ -12,6 +12,7 @@
 #include "config.hpp"
 #include "diag_log.hpp"
 #include "logic/config_model.hpp"
+#include "nvs_storage.hpp" // nvs_factory_reset_latched — the fallback restart defers to a reset
 #include "ota_update.hpp"
 #include "task_config.hpp"
 #include "stack_watch.hpp"
@@ -568,6 +569,7 @@ EthInfo net_eth_info() {
 
 static void eth_fallback_task(void*) {
     EthFallbackWatch watch{};
+    bool             reset_refusal_logged = false; // one /diag line per boot, not one per window
     for (;;) {
         stack_watch_sample(StackWatch::EthFallback);
         vTaskDelay(pdMS_TO_TICKS(ETH_FALLBACK_PERIOD_S * 1000));
@@ -588,10 +590,26 @@ static void eth_fallback_task(void*) {
                             "reboot\n");
                 continue;
             }
+            // A factory reset that has latched NVS owns the next restart, for the same reason an
+            // OTA owns it: rebooting now would come up on a namespace the reset is still erasing —
+            // a partial reset that looks like a finished one. A complete reset reboots the board
+            // itself (into the setup portal, where the radio comes up anyway); an incomplete one
+            // stays up on purpose until the owner retries. Like the OTA deferral, the spent watch
+            // simply re-earns its verdict.
+            if (nvs_factory_reset_latched()) {
+                if (!reset_refusal_logged)
+                    diag_printf("net: Ethernet still down, but a factory reset is erasing stored "
+                                "data — not rebooting\n");
+                reset_refusal_logged = true;
+                continue;
+            }
             diag_printf("net: Ethernet has been down for %d s and WiFi is configured — rebooting "
                         "to come up on the radio\n", ETH_FALLBACK_PERIOD_S * ETH_FALLBACK_PERIODS);
             vTaskDelay(pdMS_TO_TICKS(500));   // let the diag line reach syslog first
             stack_watch_sample(StackWatch::EthFallback);
+            // The reset can latch during that drain. Last check before the point of no return; the
+            // refusal line above reports it on the next window if this boot is still up then.
+            if (nvs_factory_reset_latched()) continue;
             esp_restart();
         } catch (const std::exception& e) {
             diag_printf("net: fallback watch cycle failed (%s) — retrying\n", e.what());
