@@ -41,8 +41,12 @@ unsigned             reboots = 0, delays = 0, runtime_changes = 0, env_probes = 
 unsigned mqtt_inits = 0, mqtt_starts = 0, mqtt_stops = 0, mqtt_destroys = 0, semaphore_deletes = 0;
 unsigned dns_calls = 0, socket_calls = 0, socket_closes = 0, weather_commits = 0;
 unsigned post_write_allocations = 0, stale_attempts = 0, save_fault = 0;
-bool     tracking = false, durable_started = false, network = true, dns_ok = true, tcp_ok = true;
-bool     semaphore_ok = true, mqtt_init_ok = true, mqtt_connected = true, mqtt_error = false;
+
+size_t live_arrays = 0, body_capacity = 0;
+bool   fail_next_array = false;
+
+bool   tracking = false, durable_started = false, network = true, dns_ok = true, tcp_ok = true;
+bool   semaphore_ok = true, mqtt_init_ok = true, mqtt_connected = true, mqtt_error = false;
 bool   mqtt_register_ok = true, mqtt_start_ok = true, mqtt_wait_ok = true, semaphore_given = false;
 bool   proof_ok = true, weather_admission = true, refresh_ok = true;
 size_t largest_block            = 65536;
@@ -87,7 +91,7 @@ void reset() {
     current.board_preset_id    = daik::BoardPresetId::Custom;
     current.led_gpio = current.btn_gpio    = -1;
     current.env3_enabled                   = false;
-    current.wifi_ssid                      = "fixture-old";
+    current.wifi_ssid                      = "test-wifi";
     current.wifi_pass                      = "fixture-old-pass";
     current.mqtt_uri                       = "mqtts://old.invalid";
     current.mqtt_user                      = "old-user";
@@ -107,8 +111,8 @@ void reset() {
     current.circulation_power_path         = "apower";
     current.circulation_time_path          = "timestamp";
     current.weather_enabled                = true;
-    current.weather_latitude_e6            = 50000000;
-    current.weather_longitude_e6           = 8000000;
+    current.weather_latitude_e6            = 0;
+    current.weather_longitude_e6           = 0;
     current.diagnostics_enabled            = true;
     current.diagnostics_generation         = 9;
     current.ota_channel                    = daik::OtaChannel::Release;
@@ -122,6 +126,8 @@ void reset() {
     env_probes = body_reads = mqtt_inits = mqtt_starts = mqtt_stops = mqtt_destroys = 0;
     semaphore_deletes = dns_calls = socket_calls = socket_closes = weather_commits = 0;
     post_write_allocations = stale_attempts = save_fault = 0;
+    body_capacity                                        = 0;
+    fail_next_array                                      = false;
     network = dns_ok = tcp_ok = semaphore_ok = mqtt_init_ok = mqtt_connected = true;
     mqtt_register_ok = mqtt_start_ok = mqtt_wait_ok = proof_ok = weather_admission = refresh_ok =
         true;
@@ -143,7 +149,7 @@ struct Route {
     bool        reboot;
 };
 const Route routes[] = {
-    {"wifi", daik::set_wifi, R"({"ssid":"fixture-new","pass":"fixture-pass"})", true},
+    {"wifi", daik::set_wifi, R"({"ssid":"new-net","pass":"fixture-pass"})", true},
     {"mqtt", daik::set_mqtt,
      R"({"broker":"mqtts://fixture.invalid","user":"new-user","pass":"new-pass","base":"fixture-new-base"})",
      true},
@@ -159,7 +165,7 @@ const Route routes[] = {
      false},
     {"syslog", daik::set_syslog, R"({"host":"collector.invalid","port":1514})", true},
     {"ntp", daik::set_ntp, R"({"server":"new.pool.invalid"})", true},
-    {"weather", daik::set_weather, R"({"latitude":"51.123456","longitude":"7.987654"})", false},
+    {"weather", daik::set_weather, R"({"latitude":"12.345678","longitude":"23.456789"})", false},
     {"board", daik::set_board,
      R"({"preset_id":"custom","led_gpio":21,"led_type":0,"btn_gpio":-1,"env3_enabled":false})",
      true},
@@ -259,13 +265,27 @@ void* operator new(size_t size) {
     if (void* memory = std::malloc(size ? size : 1)) return memory;
     throw std::bad_alloc();
 }
-void* operator new[](size_t size) { return ::operator new(size); }
-void  operator delete(void* memory) noexcept { std::free(memory); }
-void  operator delete[](void* memory) noexcept { std::free(memory); }
-void  operator delete(void* memory, size_t) noexcept { std::free(memory); }
-void  operator delete[](void* memory, size_t) noexcept { std::free(memory); }
+void* operator new[](size_t size) {
+    if (fixture::fail_next_array) {
+        fixture::fail_next_array = false;
+        throw std::bad_alloc();
+    }
+    void* memory = ::operator new(size);
+    ++fixture::live_arrays;
+    return memory;
+}
+void operator delete(void* memory) noexcept { std::free(memory); }
+void operator delete[](void* memory) noexcept {
+    if (memory) --fixture::live_arrays;
+    std::free(memory);
+}
+void operator delete(void* memory, size_t) noexcept { std::free(memory); }
+void operator delete[](void* memory, size_t) noexcept { ::operator delete[](memory); }
 
 namespace daik {
+bool hp_probe_run(uint8_t, HpProbeReply&, int) {
+    fixture::fail("malformed query reached a physical probe");
+}
 Config config() {
     ++fixture::config_reads;
     return fixture::current;
@@ -350,6 +370,7 @@ esp_err_t http_send_json(httpd_req_t* request, const char* body) {
 }
 int http_read_body(httpd_req_t* request, char* buffer, size_t capacity) {
     ++fixture::body_reads;
+    fixture::body_capacity = capacity;
     if (request->body_failed || request->body.size() >= capacity) return -1;
     std::memcpy(buffer, request->body.data(), request->body.size());
     buffer[request->body.size()] = '\0';
@@ -667,7 +688,7 @@ void bounds_and_modes() {
           "explicit empty broker/credential clear/base reset must remain valid");
     prepare(route("weather"));
     const auto refresh =
-        invoke(daik::set_weather, R"({"latitude":"50","longitude":"8","refresh":true})");
+        invoke(daik::set_weather, R"({"latitude":"0","longitude":"0","refresh":true})");
     check(refresh.status == "200 OK" && saves == 0 && runtime_changes == 0,
           "unchanged explicit weather refresh must remain nonpersistent");
     daik::JsonGuard response(daik::json_parse_document(refresh.response));
@@ -676,8 +697,8 @@ void bounds_and_modes() {
               cJSON_IsTrue(cJSON_GetObjectItem(response, "refresh_requested")),
           "weather refresh response must carry its causal token");
     prepare(route("weather"));
-    rejection(route("weather"), R"({"latitude":"51","longitude":"8","refresh":true})",
-              "409 Conflict");
+    rejection(route("weather"),
+              R"({"latitude":"12.345678","longitude":"23.456789","refresh":true})", "409 Conflict");
 }
 void unchanged() {
     for (const auto& candidate : routes) {
@@ -731,6 +752,52 @@ void persistence_failure() {
                   "best-effort link maintenance must not reject committed service change");
         }
 }
+void request_scratch() {
+    struct RequestScope {
+        Handler handler;
+        size_t  capacity;
+    };
+    const RequestScope scopes[] = {
+        {daik::set_wifi, 512},         {daik::set_mqtt, 512},        {daik::set_ref_temp, 8192},
+        {daik::set_circulation, 1280}, {daik::set_diagnostics, 128}, {daik::set_hp, 2048},
+        {daik::set_syslog, 512},       {daik::set_ntp, 256},         {daik::set_weather, 256},
+        {daik::set_board, 512},        {daik::set_env3, 256},        {daik::set_ota, 128},
+        {daik::set_lang, 128},         {daik::hp_query_probe, 192},
+    };
+    for (const auto& scope : scopes) {
+        reset();
+        check(live_arrays == 0, "previous request leaked bounded scratch");
+        const auto  saved_service = service, saved_link = fixture::link;
+        httpd_req_t request;
+        request.body = "{}";
+        request.response.reserve(8192);
+        request.status.reserve(128);
+        request.content_type.reserve(128);
+        fail_next_array = true;
+        bool caught     = false;
+        try {
+            scope.handler(&request);
+        } catch (const std::bad_alloc&) {
+            caught = true; // The independently tested common trampoline owns the clean 503.
+        }
+        fail_next_array = false;
+        check(caught && live_arrays == 0 && body_reads == 0,
+              "scratch OOM did not propagate before body parsing");
+        check(service == saved_service && fixture::link == saved_link && saves == 0 &&
+                  reboots == 0 && config_reads == 0 && runtime_changes == 0,
+              "scratch OOM reached config, persistence or runtime mutation");
+        reset();
+        const auto invalid = invoke(scope.handler, "{");
+        check(invalid.status == "400 Bad Request" && body_capacity == scope.capacity &&
+                  live_arrays == 0 && saves == 0 && runtime_changes == 0,
+              "invalid JSON changed capacity, leaked scratch or reached a mutation");
+        reset();
+        const auto failed_body = invoke(scope.handler, "{}", true);
+        check(failed_body.status == "400 Bad Request" && body_capacity == scope.capacity &&
+                  live_arrays == 0 && saves == 0 && runtime_changes == 0,
+              "body failure changed capacity, leaked scratch or reached a mutation");
+    }
+}
 void ingress() {
     for (const auto& candidate : routes) {
         for (const char* body :
@@ -783,7 +850,7 @@ void missing_and_disabled() {
     }
     const auto& wifi = route("wifi");
     prepare(wifi);
-    const auto open = invoke(wifi.handler, R"({"ssid":"Open fixture"})");
+    const auto open = invoke(wifi.handler, R"({"ssid":"ExampleNet"})");
     check(open.status == "200 OK" && current.wifi_pass.empty(),
           "missing WiFi pass keeps documented open-network meaning");
 }
@@ -924,6 +991,7 @@ int main(int argc, char** argv) {
                           {"bounds_and_modes", test::bounds_and_modes},
                           {"unchanged", test::unchanged},
                           {"persistence_failure", test::persistence_failure},
+                          {"request_scratch", test::request_scratch},
                           {"ingress", test::ingress},
                           {"missing_and_disabled", test::missing_and_disabled},
                           {"special_chars", test::special_chars},

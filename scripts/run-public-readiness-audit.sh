@@ -373,11 +373,36 @@ function rejectUnexpectedLiteral(pattern, allowed, message) {
   process.exit(1);
 }
 
-rejectUnexpectedLiteral(
-  /(?:\b(?:wifi_)?ssid\b|["'](?:wifi_)?ssid["'])\s*(?:=|:)\s*["'`]([^"'`]*)["'`]/i,
-  new Set(["", "ExampleNet", "fallback", "home", "test-wifi", "net", "new-net", " my wifi ", "sentinel"]),
-  "WiFi fixture SSIDs must use one of the reviewed synthetic literals",
-);
+const allowedFixtureSsids = new Set([
+  "", "ExampleNet", "fallback", "home", "test-wifi", "net", "new-net", " my wifi ", "sentinel",
+  // Exact synthetic HTTP serializer/ingress fixtures exercise UTF-8, quotes, backslashes and
+  // whitespace. Compare the complete raw literal, preserving the existing no-normalization rule.
+  String.raw`Café \"quoted\"\\line\n`,
+  String.raw` \"é\\網 `,
+]);
+const unapprovedFixtureSsids = [];
+for (const { file, text } of fixtures) {
+  const pattern = /(?:\b(?:wifi_)?ssid\b|["'](?:wifi_)?ssid["'])\s*(?:=|:)\s*(["'`])/gi;
+  for (const match of text.matchAll(pattern)) {
+    const quote = match[1];
+    const start = match.index + match[0].length;
+    let end = start;
+    // Escaped quotes belong to the literal. Stopping at one would approve only a prefix and
+    // silently hide a later unapproved name. An incomplete literal also fails the exact-set check.
+    for (; end < text.length; ++end) {
+      if (text[end] === "\\") { ++end; continue; }
+      if (text[end] === quote) break;
+    }
+    if (end < text.length && allowedFixtureSsids.has(text.slice(start, end))) continue;
+    const line = text.slice(0, match.index).split("\n").length;
+    unapprovedFixtureSsids.push(`${file}:${line}: unapproved fixture literal`);
+  }
+}
+if (unapprovedFixtureSsids.length) {
+  console.error("WiFi fixture SSIDs must use one of the reviewed synthetic literals");
+  for (const line of unapprovedFixtureSsids) console.error(line);
+  process.exit(1);
+}
 rejectUnexpectedLiteral(
   /\b(?:ref_temp_name|circulation_name)\b\s*=\s*["']([^"']*)["']/i,
   new Set(["", "Living room", "DHW circulation", "DHW circulation pump", "Example sensor"]),

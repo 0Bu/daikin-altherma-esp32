@@ -161,7 +161,8 @@ the shared HTTP exception trampoline and real devices remain outside its [scope]
 After dependency resolution, the target-build entry point also runs
 `python3 test/http_config_runtime/run.py --real-cjson managed_components/espressif__cjson/cJSON --sanitizer undefined`.
 This complete configuration/OTA HTTP fixture exercises every setter, exact field types, write
-failure replies, missing values and query flags with real cJSON and CFG-03's transaction. SDK/NVS
+failure replies, missing values and query flags with real cJSON and CFG-03's transaction. It also
+checks all request scratch limits, allocation-failure propagation and release on parse/read errors. SDK/NVS
 effects remain recording adapters; [the matrix](http_config_runtime/README.md) states the limits.
 Locally, `node test/test_http_config_runtime.mjs` invokes the same runner after dependencies exist.
 

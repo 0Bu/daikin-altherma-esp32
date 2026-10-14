@@ -70,6 +70,7 @@
 #include <cstdio>
 #include <cstring>
 #include <string>
+#include <memory>
 #include <string_view>
 #include <utility>
 #include <vector>
@@ -312,21 +313,25 @@ static void append_status_json(JsonOut& j, bool redact) {
     const BoardPreset* selected_board = board_selected_preset(c);
 
     j += "{";
-    j += "\"version\":" + jstr(esp_app_get_description()->version) + ",";
-    j += "\"platform\":" + jstr(CONFIG_IDF_TARGET) + ",";
+    j += "\"version\":";
+    json_append_quoted(j, esp_app_get_description()->version);
+    j += ",";
+    j += "\"platform\":";
+    json_append_quoted(j, CONFIG_IDF_TARGET);
+    j += ",";
     j += "\"uptime_s\":" + std::to_string(esp_timer_get_time() / 1000000) + ",";
     char boot_id[17];
     std::snprintf(boot_id, sizeof(boot_id), "%016llx",
                   static_cast<unsigned long long>(s_status_boot_id));
     j += "\"boot_id\":";
-    j += jstr(boot_id);
+    json_append_quoted(j, boot_id);
     j += ",";
     // Build identity: the running app's ELF sha (hex) — matches a core dump to the exact firmware
     // that produced it (scripts/decode-coredump.sh), and pairs with last_crash below.
     char elf_sha[65] = {0};
     esp_app_get_elf_sha256(elf_sha, sizeof(elf_sha));
     j += "\"app_elf_sha256\":";
-    j += jstr(elf_sha);
+    json_append_quoted(j, elf_sha);
     j += ",";
     // GPIOs the UI offers in the RX/TX pin dropdown. A concrete selected board narrows the generic
     // ESP32-S3 chip-safe set to pads its PCB actually exposes; Custom keeps the generic list because
@@ -382,11 +387,11 @@ static void append_status_json(JsonOut& j, bool redact) {
         j += ",\"user_set\":";
         j += c.board_user_set ? "true" : "false";
         j += ",\"preset_id\":";
-        j += jstr(c.board_user_set ? board_preset_key(c.board_preset_id) : "");
+        json_append_quoted(j, c.board_user_set ? board_preset_key(c.board_preset_id) : "");
         j += ",\"preset_name\":";
-        j += jstr(selected_board ? selected_board->name : "");
+        json_append_quoted(j, selected_board ? selected_board->name : "");
         j += ",\"vendor\":";
-        j += jstr(board_vendor_name(board_selected_vendor(c)));
+        json_append_quoted(j, board_vendor_name(board_selected_vendor(c)));
         j += ",\"pins_local\":[";
         for (int i = 0; i < nlpins; i++) {
             if (i) j += ",";
@@ -415,11 +420,11 @@ static void append_status_json(JsonOut& j, bool redact) {
         for (int i = 0; i < npre; i++) {
             if (i) j += ",";
             j += "{\"id\":";
-            j += jstr(presets[i]->key);
+            json_append_quoted(j, presets[i]->key);
             j += ",\"name\":";
-            j += jstr(presets[i]->name);
+            json_append_quoted(j, presets[i]->name);
             j += ",\"vendor\":";
-            j += jstr(board_vendor_name(presets[i]->vendor));
+            json_append_quoted(j, board_vendor_name(presets[i]->vendor));
             j += ",\"led_gpio\":";
             j += std::to_string(presets[i]->led_gpio);
             j += ",\"led_type\":";
@@ -494,7 +499,9 @@ static void append_status_json(JsonOut& j, bool redact) {
         j += ",\"pressure_hpa\":";
         j += env_fresh ? env_press : "null";
         j += ",\"error\":";
-        j += jstr(!env_supported ? "unsupported_board" : env_enabled ? env.error : "disabled");
+        json_append_quoted(j, !env_supported ? "unsupported_board"
+                              : env_enabled  ? env.error
+                                             : "disabled");
         j += ",\"samples\":";
         j += std::to_string(env.samples);
         j += ",\"errors\":";
@@ -508,7 +515,7 @@ static void append_status_json(JsonOut& j, bool redact) {
         for (int i = 0; i < nepre; ++i) {
             if (i) j += ",";
             j += "{\"name\":";
-            j += jstr(epresets[i]->name);
+            json_append_quoted(j, epresets[i]->name);
             j += ",\"sda\":";
             j += std::to_string(epresets[i]->sda);
             j += ",\"scl\":";
@@ -562,7 +569,7 @@ static void append_status_json(JsonOut& j, bool redact) {
                      eth.mac[1], eth.mac[2], eth.mac[3], eth.mac[4], eth.mac[5]);
         const NetLink kind = net_kind();
         j += "\"net\":{\"kind\":";
-        j += jstr(net_link_str(kind));
+        json_append_quoted(j, net_link_str(kind));
         j += ",\"ip\":";
         j += jstr_r(kind == NetLink::Eth ? eth.ip : kind == NetLink::Wifi ? wi.ip : "", redact);
         j += ",\"eth\":{\"supported\":";
@@ -611,7 +618,7 @@ static void append_status_json(JsonOut& j, bool redact) {
         j += jstr_r(m.broker, redact);
         if (!m.error.empty()) {
             j += ",\"error\":";
-            j += jstr(m.error);
+            json_append_quoted(j, m.error);
         }
         // The installation's base topic, ALWAYS the effective one — the empty stored value means
         // "the compile-time default" (logic/mqtt_base.hpp), and reporting "" would make a default
@@ -991,7 +998,7 @@ static void append_status_json(JsonOut& j, bool redact) {
         j += weather_configured ? "true" : "false";
         j += ",\"provider\":\"open-meteo\"";
         j += ",\"model\":";
-        j += jstr(wf.model);
+        json_append_quoted(j, wf.model);
         j += ",\"fetch_interval_s\":";
         j += std::to_string(WEATHER_FETCH_INTERVAL_S);
         j += ",\"max_age_s\":";
@@ -1615,7 +1622,7 @@ static void append_status_json(JsonOut& j, bool redact) {
         j += ",\"poll_skipped\":";
         j += std::to_string(hp_skipped_cycles());
         j += ",\"reset_reason\":";
-        j += jstr(reset_reason_name(diag_crash_info().reason));
+        json_append_quoted(j, reset_reason_name(diag_crash_info().reason));
         j += ",\"safe_mode\":";
         j += safe_mode_active() ? "true" : "false";
         // WHY it is minimal, so the recovery banner can give advice that fits the cause: a
@@ -1879,7 +1886,7 @@ static esp_err_t h_status(httpd_req_t* req) {
 struct ValuesSnapshot {
     std::vector<CachedValue> x10a;
     std::vector<uint8_t> x10a_label_ambiguous;
-    std::vector<logic::DwellReading> x10a_dwell;
+    std::unique_ptr<logic::DwellReading[]> x10a_dwell;
     std::vector<CachedValue> modbus;
     bool modbus_live = false;
 };
@@ -1887,37 +1894,41 @@ struct ValuesSnapshot {
 // Copy every source before sending the first response byte. Besides giving the two wire surfaces
 // one snapshot contract, this keeps an allocation failure in the shared HTTP guard's clean-503
 // window: once chunked transfer starts, the response status can no longer be changed.
-static ValuesSnapshot take_values_snapshot() {
+// Measure staging separately from the stream frame; both are included in the stack path budget.
+__attribute__((noinline)) static ValuesSnapshot take_values_snapshot() {
     ValuesSnapshot snapshot;
-    HpValuesIdentity x10a_identity;
+    {
+        HpValuesIdentity x10a_identity;
 
-    for (int attempt = 0; attempt < 2; ++attempt) {
-        uint32_t     cap_rev  = 0;
-        const size_t x10a_cap = hp_values_capacity(&cap_rev);
-        if (snapshot.x10a.size() < x10a_cap) {
-            snapshot.x10a.resize(x10a_cap ? x10a_cap : 1);
+        for (int attempt = 0; attempt < 2; ++attempt) {
+            uint32_t     cap_rev  = 0;
+            const size_t x10a_cap = hp_values_capacity(&cap_rev);
+            if (snapshot.x10a.size() < x10a_cap) {
+                snapshot.x10a.resize(x10a_cap ? x10a_cap : 1);
+            }
+            size_t       total    = 0;
+            uint32_t     snap_rev = 0;
+            const size_t n = hp_values_snapshot(snapshot.x10a.data(), snapshot.x10a.size(), &total,
+                                                &snap_rev, &x10a_identity);
+            if (attempt == 0 && (total > snapshot.x10a.size() || snap_rev != cap_rev)) {
+                snapshot.x10a.resize(total ? total : 1);
+                continue;
+            }
+            snapshot.x10a.resize(n);
+            break;
         }
-        size_t       total    = 0;
-        uint32_t     snap_rev = 0;
-        const size_t n = hp_values_snapshot(snapshot.x10a.data(), snapshot.x10a.size(), &total,
-                                            &snap_rev, &x10a_identity);
-        if (attempt == 0 && (total > snapshot.x10a.size() || snap_rev != cap_rev)) {
-            snapshot.x10a.resize(total ? total : 1);
-            continue;
+        snapshot.x10a_label_ambiguous.resize(snapshot.x10a.size());
+        for (size_t i = 0; i < snapshot.x10a.size(); i++) {
+            // object_id()/ha_slug() owns a temporary std::string. Resolve it before transfer starts
+            // so even that small allocation remains inside the clean-503 window.
+            snapshot.x10a_label_ambiguous[i] =
+                label_slug_is_ambiguous(object_id(snapshot.x10a[i].label)) ? 1 : 0;
         }
-        snapshot.x10a.resize(n);
-        break;
-    }
-    snapshot.x10a_label_ambiguous.resize(snapshot.x10a.size());
-    for (size_t i = 0; i < snapshot.x10a.size(); i++) {
-        // object_id()/ha_slug() owns a temporary std::string. Resolve it before transfer starts so
-        // even that small allocation remains inside the clean-503 window.
-        snapshot.x10a_label_ambiguous[i] =
-            label_slug_is_ambiguous(object_id(snapshot.x10a[i].label)) ? 1 : 0;
-    }
-    snapshot.x10a_dwell.resize(snapshot.x10a.size());
-    dwell_readings_snapshot(snapshot.x10a.data(), snapshot.x10a.size(), x10a_identity,
-                            snapshot.x10a_dwell.data());
+        if (!snapshot.x10a.empty())
+            snapshot.x10a_dwell = std::make_unique<logic::DwellReading[]>(snapshot.x10a.size());
+        dwell_readings_snapshot(snapshot.x10a.data(), snapshot.x10a.size(), x10a_identity,
+                                snapshot.x10a_dwell.get());
+    } // The borrowed cache identity is only needed while staging this source's dwell readings.
 
     // The initial status read is only a cheap skip. mb_values_snapshot() re-checks liveness after
     // copying the cache and closes both disconnect and reconnect races with generation counters.
@@ -1960,8 +1971,8 @@ static void append_json_uint(JsonOut& out, uint64_t value) {
 // covering a row the C++ test still gates.
 template <typename JsonOut>
 static void append_values_array(JsonOut& j, const std::vector<CachedValue>& v,
-                                const std::vector<uint8_t>&             ambiguous,
-                                const std::vector<logic::DwellReading>& dwell) {
+                                const std::vector<uint8_t>&                   ambiguous,
+                                const std::unique_ptr<logic::DwellReading[]>& dwell) {
     j += "[";
     // Successive += rather than one a + b + c + … chain: a chain materialises every intermediate
     // std::string in the same frame, and this runs on the httpd task (see AGENTS.md → Memory,
@@ -2032,7 +2043,8 @@ static void append_values_array(JsonOut& j, const std::vector<CachedValue>& v,
         // arriving in a new place. No value, no age — and the firmware decides that, so a consumer
         // that is not the browser cannot reach a different answer.
         if (logic::dwell_row_tracked(v[i].reg, v[i].off, v[i].conv) && !v[i].value.empty()) {
-            const logic::DwellReading dw = i < dwell.size() ? dwell[i] : logic::DwellReading{};
+            // The batch owns exactly one POD per copied value; no growth or lookup during transfer.
+            const logic::DwellReading dw = dwell ? dwell[i] : logic::DwellReading{};
             // `known` false is a first-class answer and is emitted as ABSENCE: a silent bus, a page
             // that stopped answering, a row seen too long ago to vouch for. An omitted key says "no
             // reading"; a zero would say "it changed just now".
@@ -2277,8 +2289,11 @@ static esp_err_t h_history(httpd_req_t* req) {
     const int mb_t = modbus ? logic::homehub_history_index(id) : -1;
     const bool    native_modbus    = modbus && mb_active_profile() == ModbusProfile::Altherma4;
     const int env_t = env3_source ? env3_history_index(id) : -1;
-    const Config& active_config = config();
-    const bool env3_configured  = active_config.env3_enabled && env3_board_supported(active_config);
+    bool          env3_configured  = false;
+    {
+        const Config active_config = config();
+        env3_configured = active_config.env3_enabled && env3_board_supported(active_config);
+    } // Release the configuration snapshot before constructing the streamed history response.
     const bool x10a_unknown = !modbus && !env3_source && (!def_ || t >= logic::TREND_COUNT);
     const bool    missing_quiet =
         native_modbus && mb_t >= 0 && logic::HOMEHUB_HISTORIES[mb_t].offset == 9;
@@ -2420,15 +2435,19 @@ static esp_err_t h_history(httpd_req_t* req) {
 }
 
 static esp_err_t h_diag(httpd_req_t* req) {
-    char q[64];
-    if (!read_query(req, q)) return query_too_long(req); // never downgrade a requested redaction
-    // GET is read-only. Destructive clearing is POST /diag/clear, so a link, prefetch or image
-    // request can never erase the evidence it was trying to retrieve. ?verbose only changes the
-    // setting when present.
-    char v[4];
-    if (httpd_query_key_value(q, "verbose", v, sizeof(v)) == ESP_OK)
-        diag_set_verbose(query_flag_on(v));
-    const bool redact = query_flag(q, "redact");
+    bool redact = false;
+    {
+        char q[64];
+        if (!read_query(req, q))
+            return query_too_long(req); // never downgrade a requested redaction
+        // GET is read-only. Destructive clearing is POST /diag/clear, so a link, prefetch or image
+        // request can never erase the evidence it was trying to retrieve. ?verbose only changes the
+        // setting when present.
+        char v[4];
+        if (httpd_query_key_value(q, "verbose", v, sizeof(v)) == ESP_OK)
+            diag_set_verbose(query_flag_on(v));
+        redact = query_flag(q, "redact");
+    } // Query scratch has no borrowed consumer during the diagnostic transfer.
     // Plain diagnostics copy into static storage. Redacted per-line strings require their own
     // OTA admission check before the bounded stream starts.
     if (redact && ota_download_active()) return network_tls_busy(req);

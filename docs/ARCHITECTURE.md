@@ -248,6 +248,10 @@ The common HTTP admission guard rejects every non-OTA route during active OTA, i
 and both diagnostic-log forms. It also refuses non-OTA work below a 6,144-byte contiguous internal
 block. The loaded UI observes progress through compact `/ota/status`; reloading assets is unavailable.
 
+Configuration routes allocate request scratch only up to their existing API body limit. The shared
+parser releases it once cJSON owns the document, before configuration snapshots or persistence;
+scratch allocation failure reaches the common 503 boundary without changing settings.
+
 Large status, value, history, log and MCP responses stream bounded chunks. Before first emission,
 allocation failure becomes HTTP 503. After emission starts, close an incomplete stream rather than
 trying to send a second response or unwinding through C dispatch. Status and MCP have explicit

@@ -90,7 +90,7 @@ const mutations=[
   {name:"dwell-code-bypass",file:"dwellLogic",scenario:"dwell_state_and_identity",
     before:"slots[static_cast<size_t>(i)].code != code",after:"false"},
   {name:"omitted-dwell-staging",file:"status",scenario:"dwell_state_and_identity",
-    before:/dwell_readings_snapshot\(snapshot.x10a.data\(\), snapshot.x10a.size\(\), x10a_identity,\s*snapshot.x10a_dwell.data\(\)\);/,
+    before:/dwell_readings_snapshot\(snapshot.x10a.data\(\), snapshot.x10a.size\(\), x10a_identity,\s*snapshot.x10a_dwell.get\(\)\);/,
     after:"/* mutation: omit prepared dwell metadata */"},
   {name:"utf8-output-bypass",file:"json",scenario:"invalid_utf8_output",
     before:"if (u >= 0x80) {",after:"if (false) {"},

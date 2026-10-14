@@ -111,13 +111,13 @@ bool json_post_allowed(httpd_req_t* req) {
 }
 
 bool request_framing_allowed(httpd_req_t* req) {
-    char length[32] = {}, transfer[32] = {};
+    char value[32]      = {};
     bool length_present = false, transfer_present = false;
-    if (!read_header(req, "Transfer-Encoding", transfer, sizeof(transfer), transfer_present) ||
-        transfer_present ||
-        !read_header(req, "Content-Length", length, sizeof(length), length_present))
+    // Only presence matters for unsupported transfer coding, including a supplied-empty field.
+    if (!read_header(req, "Transfer-Encoding", value, 1, transfer_present) || transfer_present ||
+        !read_header(req, "Content-Length", value, sizeof(value), length_present))
         return false;
-    return !length_present || http_content_length_matches(length, req->content_len);
+    return !length_present || http_content_length_matches(value, req->content_len);
 }
 
 // Settle the body bytes the client still owes after its response (logic/http_body.hpp explains why

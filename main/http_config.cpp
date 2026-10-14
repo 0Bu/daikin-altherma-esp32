@@ -61,6 +61,7 @@
 #include <cstdio>       // snprintf — the probe's fixed-precision value + register rendering
 #include <cstring>
 #include <initializer_list>
+#include <memory>
 #include <string_view>
 
 namespace daik {
@@ -174,36 +175,68 @@ static bool jb(cJSON* o, const char* k, bool def) {
     return cJSON_IsBool(v) ? cJSON_IsTrue(v) : def;
 }
 
-struct ConfigRequestField {
-    const char*         name;
-    HttpConfigFieldType type;
-    const char*         error; // internal literal; send_err must never interpolate caller text
-};
-
-static const char* config_request_field_error(cJSON*                                    root,
-                                              std::initializer_list<ConfigRequestField> fields) {
-    for (const ConfigRequestField& field : fields) {
-        const cJSON*              item   = cJSON_GetObjectItem(root, field.name);
-        const HttpConfigFieldType actual = !item                  ? HttpConfigFieldType::Missing
-                                           : cJSON_IsString(item) ? HttpConfigFieldType::String
-                                           : cJSON_IsBool(item)   ? HttpConfigFieldType::Boolean
-                                           : cJSON_IsNumber(item) ? HttpConfigFieldType::Number
-                                                                  : HttpConfigFieldType::Other;
-        if (!http_config_field_valid(field.type, actual, item ? item->valuedouble : 0.0))
-            return field.error;
+// Field groups share one expected type and common error text. Only internal field names reach
+// snprintf. The single HTTP worker dispatches these private parsers serially; the caller copies
+// the error before another request can enter. Fixed storage avoids allocation and literal/table
+// duplication, including when a parser returns the error to its owning handler.
+static const char* config_request_field_error(cJSON* root, HttpConfigFieldType expected,
+                                              std::initializer_list<const char*> fields) {
+    static char error[64];
+    for (const char* name : fields) {
+        const cJSON* item = cJSON_GetObjectItem(root, name);
+        // cJSON's public type stores ownership flags above its low-byte value kind.
+        HttpConfigFieldType actual = HttpConfigFieldType::Missing;
+        if (item) {
+            switch (item->type & 0xff) {
+            case cJSON_String:
+                actual = HttpConfigFieldType::String;
+                break;
+            case cJSON_False:
+            case cJSON_True:
+                actual = HttpConfigFieldType::Boolean;
+                break;
+            case cJSON_Number:
+                actual = HttpConfigFieldType::Number;
+                break;
+            default:
+                actual = HttpConfigFieldType::Other;
+                break;
+            }
+        }
+        if (!http_config_field_valid(expected, actual, item ? item->valuedouble : 0.0)) {
+            const char* kind = expected == HttpConfigFieldType::String    ? "a string"
+                               : expected == HttpConfigFieldType::Boolean ? "boolean"
+                               : expected == HttpConfigFieldType::Integer ? "a whole number"
+                                                                          : "a number";
+            snprintf(error, sizeof(error), "%s must be %s", name, kind);
+            return error;
+        }
     }
     return nullptr;
 }
 
+// Keep bounded request scratch out of Config-heavy handler frames and share the parse path.
+// cJSON owns its parsed keys and strings; scratch is freed before the caller applies any setting.
+// Allocation failure propagates to the common HTTP 503 boundary before persistence or reboot.
+__attribute__((noinline)) static cJSON* read_config_document(httpd_req_t* req, size_t capacity,
+                                                             const char*& error) {
+    std::unique_ptr<char[]> body(new char[capacity]);
+    const int               length = http_read_body(req, body.get(), capacity);
+    if (length < 0) {
+        error = "bad body";
+        return nullptr;
+    }
+    cJSON* root = json_parse_document(std::string_view(body.get(), static_cast<size_t>(length)));
+    error       = root ? nullptr : "bad json";
+    return root;
+}
+
 static esp_err_t set_wifi(httpd_req_t* req) {
-    char body[512];
-    const int body_len = http_read_body(req, body, sizeof(body));
-    if (body_len < 0) return send_err(req, "400 Bad Request", "bad body");
-    JsonGuard j(json_parse_document(std::string_view(body, static_cast<size_t>(body_len))));
-    if (!j) return send_err(req, "400 Bad Request", "bad json");
-    if (const char* error = config_request_field_error(
-            j, {{"ssid", HttpConfigFieldType::String, "ssid must be a string"},
-                {"pass", HttpConfigFieldType::String, "pass must be a string"}}))
+    const char* parse_error = nullptr;
+    JsonGuard   j(read_config_document(req, 512, parse_error));
+    if (!j) return send_err(req, "400 Bad Request", parse_error);
+    if (const char* error =
+            config_request_field_error(j, HttpConfigFieldType::String, {"ssid", "pass"}))
         return send_err(req, "400 Bad Request", error);
     std::string ssid = js(j, "ssid");
     std::string pass = js(j, "pass");
@@ -348,17 +381,14 @@ static bool tcp_port_probe(const struct in_addr& ip, int port, int timeout_ms) {
 }
 
 static esp_err_t set_mqtt(httpd_req_t* req) {
-    char body[512];
-    const int body_len = http_read_body(req, body, sizeof(body));
-    if (body_len < 0) return send_err(req, "400 Bad Request", "bad body");
-    JsonGuard j(json_parse_document(std::string_view(body, static_cast<size_t>(body_len))));
-    if (!j) return send_err(req, "400 Bad Request", "bad json");
-    if (const char* error = config_request_field_error(
-            j, {{"broker", HttpConfigFieldType::String, "broker must be a string"},
-                {"user", HttpConfigFieldType::String, "user must be a string"},
-                {"pass", HttpConfigFieldType::String, "pass must be a string"},
-                {"base", HttpConfigFieldType::String, "base must be a string"},
-                {"clear_creds", HttpConfigFieldType::Boolean, "clear_creds must be boolean"}}))
+    const char* parse_error = nullptr;
+    JsonGuard   j(read_config_document(req, 512, parse_error));
+    if (!j) return send_err(req, "400 Bad Request", parse_error);
+    if (const char* error = config_request_field_error(j, HttpConfigFieldType::String,
+                                                       {"broker", "user", "pass", "base"}))
+        return send_err(req, "400 Bad Request", error);
+    if (const char* error =
+            config_request_field_error(j, HttpConfigFieldType::Boolean, {"clear_creds"}))
         return send_err(req, "400 Bad Request", error);
     std::string broker      = js(j, "broker");
     std::string user        = js(j, "user");
@@ -548,22 +578,13 @@ struct RefTempRequest {
 static const char* parse_ref_temp_request(httpd_req_t* req, RefTempRequest& out) {
     // Three independently escaped MQTT topic/path mappings can exceed 1536 JSON bytes.
     // Keep the bounded body off the HTTP stack; the handler's OOM boundary returns 503.
-    std::vector<char> body(8192);
-    const int         body_len = http_read_body(req, body.data(), body.size());
-    if (body_len < 0) return "bad body";
-    JsonGuard j(json_parse_document(std::string_view(body.data(), static_cast<size_t>(body_len))));
-    if (!j) return "bad json";
+    const char* parse_error = nullptr;
+    JsonGuard   j(read_config_document(req, 8192, parse_error));
+    if (!j) return parse_error;
     if (const char* error = config_request_field_error(
-            j,
-            {{"name", HttpConfigFieldType::String, "name must be a string"},
-             {"topic", HttpConfigFieldType::String, "topic must be a string"},
-             {"temperature_path", HttpConfigFieldType::String, "temperature_path must be a string"},
-             {"setpoint_topic", HttpConfigFieldType::String, "setpoint_topic must be a string"},
-             {"setpoint_path", HttpConfigFieldType::String, "setpoint_path must be a string"},
-             {"timestamp_topic", HttpConfigFieldType::String, "timestamp_topic must be a string"},
-             {"timestamp_path", HttpConfigFieldType::String, "timestamp_path must be a string"},
-             {"enabled_path", HttpConfigFieldType::String, "enabled_path must be a string"},
-             {"hvac_mode_path", HttpConfigFieldType::String, "hvac_mode_path must be a string"}}))
+            j, HttpConfigFieldType::String,
+            {"name", "topic", "temperature_path", "setpoint_topic", "setpoint_path",
+             "timestamp_topic", "timestamp_path", "enabled_path", "hvac_mode_path"}))
         return error;
     out.name      = js(j, "name");
     out.topic     = js(j, "topic");
@@ -684,17 +705,11 @@ static bool parse_tenths_w(cJSON* root, const char* key, uint16_t fallback, uint
 }
 
 static const char* parse_circulation_request(httpd_req_t* req, CirculationRequest& out) {
-    char body[1280];
-    const int body_len = http_read_body(req, body, sizeof(body));
-    if (body_len < 0) return "bad body";
-    JsonGuard j(json_parse_document(std::string_view(body, static_cast<size_t>(body_len))));
-    if (!j) return "bad json";
+    const char* parse_error = nullptr;
+    JsonGuard   j(read_config_document(req, 1280, parse_error));
+    if (!j) return parse_error;
     if (const char* error = config_request_field_error(
-            j,
-            {{"name", HttpConfigFieldType::String, "name must be a string"},
-             {"topic", HttpConfigFieldType::String, "topic must be a string"},
-             {"power_path", HttpConfigFieldType::String, "power_path must be a string"},
-             {"timestamp_path", HttpConfigFieldType::String, "timestamp_path must be a string"}}))
+            j, HttpConfigFieldType::String, {"name", "topic", "power_path", "timestamp_path"}))
         return error;
     out.name = js(j, "name");
     out.topic = js(j, "topic");
@@ -766,11 +781,9 @@ static esp_err_t test_circulation(httpd_req_t* req) {
 // Every transition gets a new generation before any runtime producer is woken, so RAM/flash evidence
 // from an earlier interval fails closed even across a power loss immediately after this response.
 static esp_err_t set_diagnostics(httpd_req_t* req) {
-    char body[128];
-    const int body_len = http_read_body(req, body, sizeof(body));
-    if (body_len < 0) return send_err(req, "400 Bad Request", "bad body");
-    JsonGuard j(json_parse_document(std::string_view(body, static_cast<size_t>(body_len))));
-    if (!j) return send_err(req, "400 Bad Request", "bad json");
+    const char* parse_error = nullptr;
+    JsonGuard   j(read_config_document(req, 128, parse_error));
+    if (!j) return send_err(req, "400 Bad Request", parse_error);
     cJSON* item = cJSON_GetObjectItemCaseSensitive(j, "enabled");
     if (!cJSON_IsBool(item)) {
         j.reset();
@@ -849,18 +862,14 @@ static esp_err_t set_circulation(httpd_req_t* req) {
 static constexpr int SET_HP_SAVE_ATTEMPTS = 3;
 
 static esp_err_t set_hp(httpd_req_t* req) {
-    char body[2048];
-    const int body_len = http_read_body(req, body, sizeof(body));
-    if (body_len < 0) return send_err(req, "400 Bad Request", "bad body");
-    JsonGuard j(json_parse_document(std::string_view(body, static_cast<size_t>(body_len))));
-    if (!j) return send_err(req, "400 Bad Request", "bad json");
-    if (const char* error = config_request_field_error(
-            j, {{"profile", HttpConfigFieldType::String, "profile must be a string"},
-                {"rx", HttpConfigFieldType::Integer, "rx must be a whole number"},
-                {"tx", HttpConfigFieldType::Integer, "tx must be a whole number"},
-                {"mb_host", HttpConfigFieldType::String, "mb_host must be a string"},
-                {"mb_port", HttpConfigFieldType::Integer, "mb_port must be a whole number"},
-                {"mb_unit_id", HttpConfigFieldType::Integer, "mb_unit_id must be a whole number"}}))
+    const char* parse_error = nullptr;
+    JsonGuard   j(read_config_document(req, 2048, parse_error));
+    if (!j) return send_err(req, "400 Bad Request", parse_error);
+    if (const char* error =
+            config_request_field_error(j, HttpConfigFieldType::String, {"profile", "mb_host"}))
+        return send_err(req, "400 Bad Request", error);
+    if (const char* error = config_request_field_error(j, HttpConfigFieldType::Integer,
+                                                       {"rx", "tx", "mb_port", "mb_unit_id"}))
         return send_err(req, "400 Bad Request", error);
     // The RX/TX pins are the physical X10A wiring: PERSISTED so a manual override survives a reboot
     // (config_save_link below). The model "profile" is session-only — only touched when the request
@@ -1031,14 +1040,12 @@ static esp_err_t discover_homehub_now(httpd_req_t* req) {
 }
 
 static esp_err_t set_syslog(httpd_req_t* req) {
-    char body[512];
-    const int body_len = http_read_body(req, body, sizeof(body));
-    if (body_len < 0) return send_err(req, "400 Bad Request", "bad body");
-    JsonGuard j(json_parse_document(std::string_view(body, static_cast<size_t>(body_len))));
-    if (!j) return send_err(req, "400 Bad Request", "bad json");
-    if (const char* error = config_request_field_error(
-            j, {{"host", HttpConfigFieldType::String, "host must be a string"},
-                {"port", HttpConfigFieldType::Integer, "port must be a whole number"}}))
+    const char* parse_error = nullptr;
+    JsonGuard   j(read_config_document(req, 512, parse_error));
+    if (!j) return send_err(req, "400 Bad Request", parse_error);
+    if (const char* error = config_request_field_error(j, HttpConfigFieldType::String, {"host"}))
+        return send_err(req, "400 Bad Request", error);
+    if (const char* error = config_request_field_error(j, HttpConfigFieldType::Integer, {"port"}))
         return send_err(req, "400 Bad Request", error);
     std::string host = js(j, "host");
     int port = ji(j, "port", 514);
@@ -1080,13 +1087,10 @@ static esp_err_t set_syslog(httpd_req_t* req) {
 // SNTP client itself just fails to resolve a garbage name and keeps retrying, same as a bad syslog
 // host does today).
 static esp_err_t set_ntp(httpd_req_t* req) {
-    char body[256];
-    const int body_len = http_read_body(req, body, sizeof(body));
-    if (body_len < 0) return send_err(req, "400 Bad Request", "bad body");
-    JsonGuard j(json_parse_document(std::string_view(body, static_cast<size_t>(body_len))));
-    if (!j) return send_err(req, "400 Bad Request", "bad json");
-    if (const char* error = config_request_field_error(
-            j, {{"server", HttpConfigFieldType::String, "server must be a string"}}))
+    const char* parse_error = nullptr;
+    JsonGuard   j(read_config_document(req, 256, parse_error));
+    if (!j) return send_err(req, "400 Bad Request", parse_error);
+    if (const char* error = config_request_field_error(j, HttpConfigFieldType::String, {"server"}))
         return send_err(req, "400 Bad Request", error);
     std::string server = js(j, "server");
     j.reset();
@@ -1110,14 +1114,11 @@ static esp_err_t set_ntp(httpd_req_t* req) {
 // exactly matches the enabled saved location, so release HIL can schedule a real weather TLS cycle
 // without changing or rewriting NVS.
 static esp_err_t set_weather(httpd_req_t* req) {
-    char body[256];
-    const int body_len = http_read_body(req, body, sizeof(body));
-    if (body_len < 0) return send_err(req, "400 Bad Request", "bad body");
-    JsonGuard j(json_parse_document(std::string_view(body, static_cast<size_t>(body_len))));
-    if (!j) return send_err(req, "400 Bad Request", "bad json");
-    if (const char* error = config_request_field_error(
-            j, {{"latitude", HttpConfigFieldType::String, "latitude must be a string"},
-                {"longitude", HttpConfigFieldType::String, "longitude must be a string"}}))
+    const char* parse_error = nullptr;
+    JsonGuard   j(read_config_document(req, 256, parse_error));
+    if (!j) return send_err(req, "400 Bad Request", parse_error);
+    if (const char* error =
+            config_request_field_error(j, HttpConfigFieldType::String, {"latitude", "longitude"}))
         return send_err(req, "400 Bad Request", error);
     const std::string latitude = js(j, "latitude");
     const std::string longitude = js(j, "longitude");
@@ -1184,21 +1185,18 @@ static esp_err_t set_weather(httpd_req_t* req) {
 // a whole class of failure bought for nothing, since changing an indicator pin is a once-per-board
 // action. A reboot is also what the four service endpoints already do, so the UI path is identical.
 static esp_err_t set_board(httpd_req_t* req) {
-    char body[512];
-    const int body_len = http_read_body(req, body, sizeof(body));
-    if (body_len < 0) return send_err(req, "400 Bad Request", "bad body");
-    JsonGuard j(json_parse_document(std::string_view(body, static_cast<size_t>(body_len))));
-    if (!j) return send_err(req, "400 Bad Request", "bad json");
+    const char* parse_error = nullptr;
+    JsonGuard   j(read_config_document(req, 512, parse_error));
+    if (!j) return send_err(req, "400 Bad Request", parse_error);
+    if (const char* error =
+            config_request_field_error(j, HttpConfigFieldType::String, {"preset_id"}))
+        return send_err(req, "400 Bad Request", error);
     if (const char* error = config_request_field_error(
-            j, {{"preset_id", HttpConfigFieldType::String, "preset_id must be a string"},
-                {"led_gpio", HttpConfigFieldType::Integer, "led_gpio must be a whole number"},
-                {"led_type", HttpConfigFieldType::Integer, "led_type must be a whole number"},
-                {"led_inverted", HttpConfigFieldType::Boolean, "led_inverted must be boolean"},
-                {"btn_gpio", HttpConfigFieldType::Integer, "btn_gpio must be a whole number"},
-                {"btn_active_low", HttpConfigFieldType::Boolean, "btn_active_low must be boolean"},
-                {"env3_enabled", HttpConfigFieldType::Boolean, "env3_enabled must be boolean"},
-                {"env3_sda", HttpConfigFieldType::Integer, "env3_sda must be a whole number"},
-                {"env3_scl", HttpConfigFieldType::Integer, "env3_scl must be a whole number"}}))
+            j, HttpConfigFieldType::Integer,
+            {"led_gpio", "led_type", "btn_gpio", "env3_sda", "env3_scl"}))
+        return send_err(req, "400 Bad Request", error);
+    if (const char* error = config_request_field_error(
+            j, HttpConfigFieldType::Boolean, {"led_inverted", "btn_active_low", "env3_enabled"}))
         return send_err(req, "400 Bad Request", error);
     const Config& cur = config();
     Config c = cur;
@@ -1210,7 +1208,7 @@ static esp_err_t set_board(httpd_req_t* req) {
     c.env3_enabled   = jb(j, "env3_enabled", c.env3_enabled);
     c.env3_sda       = ji(j, "env3_sda", c.env3_sda);
     c.env3_scl       = ji(j, "env3_scl", c.env3_scl);
-    cJSON* preset_item = cJSON_GetObjectItem(j, "preset_id");
+    cJSON*            preset_item = cJSON_GetObjectItem(j, "preset_id");
     const bool preset_sent = preset_item != nullptr;
     const std::string preset_key = preset_sent ? preset_item->valuestring : "";
     j.reset();
@@ -1272,15 +1270,14 @@ static esp_err_t set_board(httpd_req_t* req) {
 // measurement and QMP6988 its chip id on the selected pair. Thus a blue Save button cannot persist
 // a wiring guess and reboot into a permanently unavailable sensor.
 static esp_err_t set_env3(httpd_req_t* req) {
-    char body[256];
-    const int body_len = http_read_body(req, body, sizeof(body));
-    if (body_len < 0) return send_err(req, "400 Bad Request", "bad body");
-    JsonGuard j(json_parse_document(std::string_view(body, static_cast<size_t>(body_len))));
-    if (!j) return send_err(req, "400 Bad Request", "bad json");
-    if (const char* error = config_request_field_error(
-            j, {{"enabled", HttpConfigFieldType::Boolean, "enabled must be boolean"},
-                {"sda", HttpConfigFieldType::Integer, "sda must be a whole number"},
-                {"scl", HttpConfigFieldType::Integer, "scl must be a whole number"}}))
+    const char* parse_error = nullptr;
+    JsonGuard   j(read_config_document(req, 256, parse_error));
+    if (!j) return send_err(req, "400 Bad Request", parse_error);
+    if (const char* error =
+            config_request_field_error(j, HttpConfigFieldType::Boolean, {"enabled"}))
+        return send_err(req, "400 Bad Request", error);
+    if (const char* error =
+            config_request_field_error(j, HttpConfigFieldType::Integer, {"sda", "scl"}))
         return send_err(req, "400 Bad Request", error);
     const Config cur = config();
     Config c = cur;
@@ -1310,11 +1307,9 @@ static esp_err_t set_env3(httpd_req_t* req) {
 // when it fetches, so the very next check already uses the new feed. An unknown channel name is
 // REJECTED rather than defaulted: answering {"ok":true} to a typo would look like a saved setting.
 static esp_err_t set_ota(httpd_req_t* req) {
-    char body[128];
-    const int body_len = http_read_body(req, body, sizeof(body));
-    if (body_len < 0) return send_err(req, "400 Bad Request", "bad body");
-    JsonGuard j(json_parse_document(std::string_view(body, static_cast<size_t>(body_len))));
-    if (!j) return send_err(req, "400 Bad Request", "bad json");
+    const char* parse_error = nullptr;
+    JsonGuard   j(read_config_document(req, 128, parse_error));
+    if (!j) return send_err(req, "400 Bad Request", parse_error);
     std::string channel = js(j, "channel");
     j.reset();
 
@@ -1336,11 +1331,9 @@ static esp_err_t set_ota(httpd_req_t* req) {
 // so the next poll already applies it. An unknown name is REJECTED rather than defaulted: answering
 // {"ok":true} to a typo would look like a saved setting.
 static esp_err_t set_lang(httpd_req_t* req) {
-    char body[128];
-    const int body_len = http_read_body(req, body, sizeof(body));
-    if (body_len < 0) return send_err(req, "400 Bad Request", "bad body");
-    JsonGuard j(json_parse_document(std::string_view(body, static_cast<size_t>(body_len))));
-    if (!j) return send_err(req, "400 Bad Request", "bad json");
+    const char* parse_error = nullptr;
+    JsonGuard   j(read_config_document(req, 128, parse_error));
+    if (!j) return send_err(req, "400 Bad Request", parse_error);
     std::string lang = js(j, "lang");
     j.reset();
 
@@ -1421,11 +1414,9 @@ static void probe_append_decode(JsonOut& out, const ProbeDecode& d) {
 }
 
 static esp_err_t hp_query_probe(httpd_req_t* req) {
-    char body[192];
-    const int body_len = http_read_body(req, body, sizeof(body));
-    if (body_len < 0) return send_err(req, "400 Bad Request", "bad body");
-    JsonGuard j(json_parse_document(std::string_view(body, static_cast<size_t>(body_len))));
-    if (!j) return send_err(req, "400 Bad Request", "bad json");
+    const char* parse_error = nullptr;
+    JsonGuard   j(read_config_document(req, 192, parse_error));
+    if (!j) return send_err(req, "400 Bad Request", parse_error);
     ProbeRequest q;
     const auto   read_integer = [&](const char* key, int fallback, int& out) {
         const cJSON* item = cJSON_GetObjectItem(j, key);

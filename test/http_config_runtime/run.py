@@ -73,6 +73,10 @@ def inputs(depfiles):
 
 
 def replace_once(text, old, new, tag):
+    if isinstance(old, re.Pattern):
+        if len(list(old.finditer(text))) != 1:
+            raise RuntimeError('mutation needs a unique source anchor: ' + tag)
+        return old.sub(new, text, count=1)
     if text.count(old) != 1:
         raise RuntimeError('mutation needs a unique source anchor: ' + tag)
     return text.replace(old, new)
@@ -115,10 +119,18 @@ controls = [rejected(original_binary, 'wrong_types', 'original-present-type'),
 
 # Mutant headers bind explicitly at their one quoted include; the entire HTTP TU still compiles.
 mutations = [
+    ('leaked_request_scratch', 'source', re.compile(r'error\s*= root \? nullptr : "bad json";'),
+     'static_cast<void>(body.release());\n    error = root ? nullptr : "bad json";', 'request_scratch'),
+    ('swallowed_request_scratch_oom', 'source',
+     'std::unique_ptr<char[]> body(new char[capacity]);',
+     'std::unique_ptr<char[]> body;\n    try { body.reset(new char[capacity]); }\n'
+     '    catch (const std::bad_alloc&) { error = "bad body"; return nullptr; }', 'request_scratch'),
+    ('changed_request_capacity', 'source', 'http_read_body(req, body.get(), capacity)',
+     'http_read_body(req, body.get(), capacity - 1)', 'request_scratch'),
     ('ignore_present_types', 'source',
-     'if (!http_config_field_valid(field.type, actual, item ? item->valuedouble : 0.0))',
-     'if ((static_cast<void>(field), static_cast<void>(actual), false))', 'wrong_types'),
-    ('truncate_integer', 'fields', ' || std::trunc(value) != value', '', 'integer_fields'),
+     'if (!http_config_field_valid(expected, actual, item ? item->valuedouble : 0.0))',
+     'if ((static_cast<void>(expected), static_cast<void>(actual), false))', 'wrong_types'),
+    ('truncate_integer', 'fields', 'if (static_cast<double>(whole) != value) return false;', '', 'integer_fields'),
     ('missing_rejected', 'fields',
      'if (actual == HttpConfigFieldType::Missing) return true;',
      'if (actual == HttpConfigFieldType::Missing) return false;', 'missing_and_disabled'),

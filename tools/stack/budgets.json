@@ -2036,6 +2036,22 @@
     "mqtt_owner_service": {
       "pattern": "^daik::service_discovery_owner_guard\\(",
       "max_bytes": 64
+    },
+    "config_document": {
+      "pattern": "^(?:daik::read_config_document\\([^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daikL20read_config_documentEP9httpd_reqjRPKc\\$(?:constprop|isra|part)\\$[0-9]+$)",
+      "max_bytes": 48
+    },
+    "http_values_snapshot": {
+      "pattern": "^(?:daik::take_values_snapshot\\(\\)(?: \\[clone .+\\])?$|_ZN4daikL20take_values_snapshotEv\\$(?:constprop|isra|part)\\$[0-9]+$)",
+      "max_bytes": 208
+    },
+    "mqtt_modbus_count": {
+      "pattern": "^daik::flat_json_size\\(",
+      "max_bytes": 80
+    },
+    "mqtt_modbus_emit": {
+      "pattern": "^void daik::append_flat_json<std::__cxx11::basic_string<char,",
+      "max_bytes": 48
     }
   },
   "paths": {
@@ -2162,6 +2178,7 @@
     "httpd_config_hp": {
       "symbols": [
         "config_hp",
+        "config_document",
         "cjson_parse_length_opts",
         "cjson_parse_value",
         "cjson_delete",
@@ -2177,6 +2194,7 @@
     "httpd_config_mqtt": {
       "symbols": [
         "config_mqtt",
+        "config_document",
         "cjson_parse_length_opts",
         "cjson_parse_value",
         "cjson_delete",
@@ -2192,6 +2210,7 @@
     "httpd_config_board": {
       "symbols": [
         "config_board",
+        "config_document",
         "cjson_parse_length_opts",
         "cjson_parse_value",
         "cjson_delete",
@@ -2207,6 +2226,7 @@
     "httpd_config_env3": {
       "symbols": [
         "config_env3",
+        "config_document",
         "cjson_parse_length_opts",
         "cjson_parse_value",
         "cjson_delete",
@@ -2222,6 +2242,7 @@
     "httpd_config_weather": {
       "symbols": [
         "config_weather",
+        "config_document",
         "cjson_parse_length_opts",
         "cjson_parse_value",
         "cjson_delete",
@@ -2237,6 +2258,7 @@
     "httpd_config_diagnostics": {
       "symbols": [
         "config_diagnostics",
+        "config_document",
         "cjson_parse_length_opts",
         "cjson_parse_value",
         "cjson_delete",
@@ -2252,6 +2274,7 @@
     "httpd_config_circulation": {
       "symbols": [
         "config_circulation",
+        "config_document",
         "circulation_parser",
         "cjson_parse_length_opts",
         "cjson_parse_value",
@@ -2267,7 +2290,8 @@
     },
     "httpd_hp_query_probe": {
       "symbols": [
-        "hp_query_probe"
+        "hp_query_probe",
+        "config_document"
       ],
       "multipliers": {},
       "base_bytes": 1536,
@@ -2289,6 +2313,7 @@
     "httpd_config_save": {
       "symbols": [
         "config_hp",
+        "config_document",
         "config_save",
         "config_save_whole",
         "config_transaction",
@@ -2301,6 +2326,7 @@
     "httpd_config_save_link": {
       "symbols": [
         "config_hp",
+        "config_document",
         "config_save_link",
         "config_save_whole",
         "config_transaction",
@@ -2321,7 +2347,8 @@
     },
     "httpd_mqtt_tls": {
       "symbols": [
-        "config_mqtt"
+        "config_mqtt",
+        "config_document"
       ],
       "multipliers": {},
       "base_bytes": 5632,
@@ -2691,7 +2718,8 @@
     },
     "httpd_values": {
       "symbols": [
-        "http_values"
+        "http_values",
+        "http_values_snapshot"
       ],
       "multipliers": {},
       "base_bytes": 1536,
@@ -3181,7 +3209,9 @@
       "symbols": [
         "mqtt_task",
         "mqtt_modbus_values",
-        "mqtt_modbus_payload"
+        "mqtt_modbus_payload",
+        "mqtt_modbus_count",
+        "mqtt_modbus_emit"
       ],
       "multipliers": {},
       "base_bytes": 1536,
@@ -3326,6 +3356,7 @@
     "httpd_i2c_read": {
       "symbols": [
         "config_env3",
+        "config_document",
         "i2c_daik_env3_probe_int_int",
         "env3_read",
         "i2c_i2c_master_transmit_receive",
@@ -3341,6 +3372,7 @@
     "httpd_i2c_write": {
       "symbols": [
         "config_env3",
+        "config_document",
         "i2c_daik_env3_probe_int_int",
         "i2c_i2c_master_transmit",
         "i2c_i2c_master_multi_buffer_transmit",
@@ -3356,6 +3388,7 @@
     "httpd_i2c_receive": {
       "symbols": [
         "config_env3",
+        "config_document",
         "i2c_daik_env3_probe_int_int",
         "i2c_i2c_master_receive",
         "i2c_s_i2c_synchronous_transaction",
@@ -3370,6 +3403,7 @@
     "httpd_shutdown_wifi_journal": {
       "symbols": [
         "config_wifi",
+        "config_document",
         "http_reboot",
         "sdk_restart",
         "history_shutdown",
@@ -3384,6 +3418,7 @@
     "httpd_shutdown_wifi_checkup": {
       "symbols": [
         "config_wifi",
+        "config_document",
         "http_reboot",
         "sdk_restart",
         "checkup_shutdown",
@@ -3396,6 +3431,7 @@
     "httpd_shutdown_mqtt_journal": {
       "symbols": [
         "config_mqtt",
+        "config_document",
         "http_reboot",
         "sdk_restart",
         "history_shutdown",
@@ -3410,6 +3446,7 @@
     "httpd_shutdown_mqtt_checkup": {
       "symbols": [
         "config_mqtt",
+        "config_document",
         "http_reboot",
         "sdk_restart",
         "checkup_shutdown",
@@ -3422,6 +3459,7 @@
     "httpd_shutdown_syslog_journal": {
       "symbols": [
         "config_syslog",
+        "config_document",
         "http_reboot",
         "sdk_restart",
         "history_shutdown",
@@ -3436,6 +3474,7 @@
     "httpd_shutdown_syslog_checkup": {
       "symbols": [
         "config_syslog",
+        "config_document",
         "http_reboot",
         "sdk_restart",
         "checkup_shutdown",
@@ -3448,6 +3487,7 @@
     "httpd_shutdown_ntp_journal": {
       "symbols": [
         "config_ntp",
+        "config_document",
         "http_reboot",
         "sdk_restart",
         "history_shutdown",
@@ -3462,6 +3502,7 @@
     "httpd_shutdown_ntp_checkup": {
       "symbols": [
         "config_ntp",
+        "config_document",
         "http_reboot",
         "sdk_restart",
         "checkup_shutdown",
@@ -3474,6 +3515,7 @@
     "httpd_shutdown_board_journal": {
       "symbols": [
         "config_board",
+        "config_document",
         "http_reboot",
         "sdk_restart",
         "history_shutdown",
@@ -3488,6 +3530,7 @@
     "httpd_shutdown_board_checkup": {
       "symbols": [
         "config_board",
+        "config_document",
         "http_reboot",
         "sdk_restart",
         "checkup_shutdown",
@@ -3500,6 +3543,7 @@
     "httpd_shutdown_env3_journal": {
       "symbols": [
         "config_env3",
+        "config_document",
         "http_reboot",
         "sdk_restart",
         "history_shutdown",
@@ -3514,6 +3558,7 @@
     "httpd_shutdown_env3_checkup": {
       "symbols": [
         "config_env3",
+        "config_document",
         "http_reboot",
         "sdk_restart",
         "checkup_shutdown",

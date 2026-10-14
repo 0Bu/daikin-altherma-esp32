@@ -11,9 +11,12 @@ enum class HttpConfigFieldType { Missing, String, Boolean, Number, Integer, Othe
 
 inline bool http_config_integer_value(double value, int& out) noexcept {
     if (!std::isfinite(value) || value < std::numeric_limits<int>::min() ||
-        value > std::numeric_limits<int>::max() || std::trunc(value) != value)
+        value > std::numeric_limits<int>::max())
         return false;
-    out = static_cast<int>(value);
+    // Range checks make the conversion defined; its round trip rejects every fraction.
+    const int whole = static_cast<int>(value);
+    if (static_cast<double>(whole) != value) return false;
+    out = whole;
     return true;
 }
 

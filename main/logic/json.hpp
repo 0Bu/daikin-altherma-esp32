@@ -40,11 +40,12 @@ inline void json_append_escaped(JsonOut& out, std::string_view s) {
         // like 0xC3 tests as -61 and a signed `c < 0x20` would mangle every non-ASCII SSID.
         const unsigned char u = static_cast<unsigned char>(c);
         if (u >= 0x80) {
-            const size_t count = utf8_sequence_length(s.substr(i));
+            const size_t count = utf8_sequence_length(std::string_view(s.data() + i, s.size() - i));
             if (!count) {
                 out += "\\ufffd";
             } else {
-                out += s.substr(i, count);
+                // The loop bounds i; the validator bounds count by the remaining input.
+                out += std::string_view(s.data() + i, count);
                 i += count - 1;
             }
             continue;

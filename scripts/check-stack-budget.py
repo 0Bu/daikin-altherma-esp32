@@ -14,6 +14,7 @@ import hashlib
 import json
 import os
 import re
+import struct
 import subprocess
 import sys
 import tempfile
@@ -320,7 +321,7 @@ SHUTDOWN_HTTP_CALLERS = {
     "ntp": "config_ntp", "board": "config_board", "env3": "config_env3",
 }
 SHUTDOWN_CALLERS = {
-    **{f"httpd_shutdown_{name}": [symbol, "http_reboot", "sdk_restart"]
+    **{f"httpd_shutdown_{name}": [symbol, "config_document", "http_reboot", "sdk_restart"]
        for name, symbol in SHUTDOWN_HTTP_CALLERS.items()},
     "poll_shutdown": ["poll_task", "heap_guard", "sdk_restart"],
     "eth_shutdown": ["eth_task", "sdk_restart"],
@@ -1391,6 +1392,96 @@ def validate_mqtt_discovery_paths(budgets: dict[str, Any], mqtt_source: str,
         raise BudgetError("MQTT discovery source: bounded JSON recursion/rejection frame changed")
 
 
+CONFIG_DOCUMENT_OWNERS = frozenset({
+    "config_hp", "config_mqtt", "config_board", "config_env3", "config_weather",
+    "config_diagnostics", "config_circulation", "circulation_parser", "hp_query_probe",
+    "config_wifi", "config_syslog", "config_ntp",
+})
+CONFIG_DOCUMENT_PATHS = frozenset({
+    "httpd_config_hp", "httpd_config_mqtt", "httpd_config_board", "httpd_config_env3",
+    "httpd_config_weather", "httpd_config_diagnostics", "httpd_config_circulation",
+    "httpd_hp_query_probe", "httpd_config_save", "httpd_config_save_link", "httpd_mqtt_tls",
+    "httpd_i2c_read", "httpd_i2c_write", "httpd_i2c_receive",
+    *(f"httpd_shutdown_{name}_{phase}" for name in SHUTDOWN_HTTP_CALLERS
+      for phase in ("journal", "checkup")),
+})
+STAGED_STACK_LIMITS = {"config_document": 48, "http_values_snapshot": 208,
+                       "mqtt_modbus_count": 80, "mqtt_modbus_emit": 48}
+CONFIG_DOCUMENT_CALLS = {
+    "set_wifi": 512, "set_mqtt": 512, "parse_ref_temp_request": 8192,
+    "parse_circulation_request": 1280, "set_diagnostics": 128, "set_weather": 256,
+    "set_hp": 2048, "set_syslog": 512, "set_ntp": 256, "set_board": 512,
+    "set_env3": 256, "set_ota": 128, "set_lang": 128, "hp_query_probe": 192,
+}
+
+
+def validate_staged_stack_paths(budgets: dict[str, Any], sources: dict[str, str],
+                                mqtt_group: str) -> None:
+    # These sequential phases are deliberately summed, retaining every earlier caller bound,
+    # SDK continuation and path ceiling. No outlined work disappears into an unmeasured helper.
+    for symbol, maximum in STAGED_STACK_LIMITS.items():
+        rule = budgets["symbols"].get(symbol)
+        if rule is None or rule["max_bytes"] != maximum:
+            raise BudgetError(f"staged stack: reviewed required frame {symbol}/{maximum} changed")
+    values = budgets["paths"].get("httpd_values", {})
+    modbus = budgets["paths"].get("mqtt_modbus_build", {})
+    if (values.get("symbols") != ["http_values", "http_values_snapshot"]
+            or values.get("multipliers") != {} or values.get("base_bytes") != 1536
+            or values.get("max_bytes") != 8192):
+        raise BudgetError("staged stack: complete values caller/snapshot path changed")
+    if (modbus.get("symbols") != ["mqtt_task", "mqtt_modbus_values", "mqtt_modbus_payload",
+                                  "mqtt_modbus_count", "mqtt_modbus_emit"]
+            or modbus.get("multipliers") != {} or modbus.get("base_bytes") != 1536
+            or modbus.get("max_bytes") != 5120):
+        raise BudgetError("staged stack: complete Modbus caller/count/emission path changed")
+    if (not (CONFIG_DOCUMENT_PATHS | {"httpd_values"}) <= set(budgets["tasks"]["httpd"]["paths"])
+            or "mqtt_modbus_build" not in budgets["tasks"]["mqtt"]["paths"]):
+        raise BudgetError("staged stack: measured phase task ownership changed")
+    config_paths = {name for name, rule in budgets["paths"].items()
+                    if name.startswith("httpd_") and set(rule["symbols"]) & CONFIG_DOCUMENT_OWNERS}
+    if config_paths != CONFIG_DOCUMENT_PATHS:
+        raise BudgetError("staged stack: config document path inventory changed")
+    for name in config_paths:
+        if budgets["paths"][name]["symbols"].count("config_document") != 1:
+            raise BudgetError(f"staged stack: config document frame missing from {name}")
+
+    config = stack_source_code(sources["main/http_config.cpp"])
+    status = stack_source_code(sources["main/http_status.cpp"])
+    if (not re.search(r"__attribute__\(\(noinline\)\)\s+static\s+cJSON\*\s+read_config_document\(", config)
+            or not re.search(r"__attribute__\(\(noinline\)\)\s+static\s+ValuesSnapshot\s+take_values_snapshot\(", status)):
+        raise BudgetError("staged stack: measured parser/snapshot outlining changed")
+    document = stack_function_body(config, "read_config_document")
+    if (not re.search(r"std::unique_ptr<char\[\]>\s+body\(new\s+char\[capacity\]\);", document)
+            or len(re.findall(r"\bhttp_read_body\(req,\s*body\.get\(\),\s*capacity\)", document)) != 1
+            or len(re.findall(r"\bjson_parse_document\(std::string_view\(body\.get\(\),\s*"
+                              r"static_cast<size_t>\(length\)\)\)", document)) != 1
+            or not re.search(r"return\s+root;\s*$", document)):
+        raise BudgetError("staged stack: parser heap scratch and bounded adapter changed")
+    if len(re.findall(r"\bread_config_document\s*\(", config)) != len(CONFIG_DOCUMENT_CALLS) + 1:
+        raise BudgetError("staged stack: config document caller inventory changed")
+    for name, capacity in CONFIG_DOCUMENT_CALLS.items():
+        body = stack_function_body(config, name)
+        if len(re.findall(r"\bread_config_document\(req,\s*" + str(capacity)
+                          + r",\s*parse_error\)", body)) != 1:
+            raise BudgetError(f"staged stack: config document caller/capacity changed in {name}")
+    values_body = stack_function_body(status, "http_send_values_json")
+    if (len(re.findall(r"\btake_values_snapshot\(\)", values_body)) != 1
+            or len(re.findall(r"\bHttpJsonChunks\b", values_body)) != 1
+            or not re.search(r"ValuesSnapshot\s+snapshot\s*=\s*take_values_snapshot\(\);\s*"
+                             r"HttpJsonChunks\s+j\(", values_body)):
+        raise BudgetError("staged stack: values preparation must finish before transfer")
+    group = stack_source_code(mqtt_group)
+    if (not re.search(r"inline\s+__attribute__\(\(noinline\)\)\s+size_t\s+flat_json_size\(", group)
+            or not re.search(r"inline\s+__attribute__\(\(noinline\)\)\s+std::string\s+build_flat_json\(", group)):
+        raise BudgetError("staged stack: counted Modbus phases must remain separately measured")
+    count_body = stack_function_body(group, "flat_json_size")
+    payload_body = stack_function_body(group, "build_flat_json")
+    if (len(re.findall(r"\bappend_flat_json\(out,\s*vals\)", count_body)) != 1
+            or len(re.findall(r"\bflat_json_size\(vals\)", payload_body)) != 1
+            or len(re.findall(r"\bappend_flat_json\(j,\s*vals\)", payload_body)) != 1):
+        raise BudgetError("staged stack: shared Modbus count/emission encoder changed")
+
+
 def validate_source_contract(budgets: dict[str, Any]) -> None:
     sources = {path: (REPO / path).read_text(encoding="utf-8")
                for path, _ in TASK_ALLOCATIONS.values()}
@@ -1410,6 +1501,8 @@ def validate_source_contract(budgets: dict[str, Any]) -> None:
         (REPO / "main/logic/ota_manifest.hpp").read_text(encoding="utf-8"))
     validate_http_stack(budgets, (REPO / "main/http_server.cpp").read_text(encoding="utf-8"))
     validate_status_diagnosis_paths(budgets, sources)
+    validate_staged_stack_paths(budgets, sources,
+                                (REPO / "main/logic/mqtt_group.hpp").read_text(encoding="utf-8"))
     validate_shutdown_paths(budgets, sources)
     validate_json_recursion(
         budgets, (REPO / "main/logic/payload_complete.hpp").read_text(encoding="utf-8"),
@@ -1654,22 +1747,439 @@ def evaluate(frames: dict[str, int], budgets: dict[str, Any]) -> dict[str, int]:
     return selected
 
 
-def disassemble(elf: Path, objdump: str) -> str:
-    if not elf.is_file():
-        raise BudgetError(f"ELF does not exist: {elf}")
+RAW_DETECT_SYMBOL = "_ZN4daik13hp_detect_runEv"
+RAW_DETECT_NAME = "daik::hp_detect_run()"
+
+
+def stack_tool_output(arguments: list[str]) -> str:
     try:
         result = subprocess.run(
-            [objdump, "-d", "-C", str(elf)],
+            arguments,
             check=False,
             capture_output=True,
             text=True,
         )
     except OSError as exc:
-        raise BudgetError(f"cannot execute {objdump}: {exc}") from exc
+        raise BudgetError(f"cannot execute {arguments[0]}: {exc}") from exc
     if result.returncode != 0:
         detail = result.stderr.strip() or f"exit {result.returncode}"
-        raise BudgetError(f"objdump failed: {detail}")
+        raise BudgetError(f"{arguments[0]} failed: {detail}")
     return result.stdout
+
+
+def raw_detect_code(data: bytes, nm_text: str, expected_address: int) -> tuple[int, bytes]:
+    """Bind the sole unannotated app body to nm and its actual ELF32 function symbol."""
+    matches = [line.split() for line in nm_text.splitlines()
+               if line.split() and line.split()[-1] == RAW_DETECT_SYMBOL]
+    if (len(matches) != 1 or len(matches[0]) != 4 or matches[0][2] != "T"
+            or not all(re.fullmatch(r"[0-9a-fA-F]+", value) for value in matches[0][:2])):
+        raise BudgetError("raw hp_detect_run: exactly one defined global nm function is required")
+    address, size = (int(value, 16) for value in matches[0][:2])
+    if address != expected_address or size < 4:
+        raise BudgetError("raw hp_detect_run: nm entry address/size disagrees with disassembly")
+
+    def bounded(offset: int, length: int) -> bytes:
+        if offset < 0 or length < 0 or offset + length > len(data):
+            raise BudgetError("raw hp_detect_run: truncated ELF range")
+        return data[offset:offset + length]
+
+    if len(data) < 52 or data[:7] != b"\x7fELF\x01\x01\x01":
+        raise BudgetError("raw hp_detect_run: ELF32 little-endian image is required")
+    header = struct.unpack("<16sHHIIIIIHHHHHH", bounded(0, 52))
+    if (header[1:4] != (2, 94, 1) or header[8] != 52 or header[11] != 40
+            or header[12] == 0 or header[13] >= header[12]):
+        raise BudgetError("raw hp_detect_run: unsupported Xtensa executable ELF header")
+    table = bounded(header[6], header[11] * header[12])
+    sections = list(struct.iter_unpack("<IIIIIIIIII", table))
+
+    def section_data(index: int, kind: int) -> bytes:
+        if index >= len(sections) or sections[index][1] != kind:
+            raise BudgetError("raw hp_detect_run: missing ELF symbol/string section")
+        section = sections[index]
+        return bounded(section[4], section[5])
+
+    def string(table: bytes, offset: int) -> bytes:
+        if offset >= len(table) or (end := table.find(b"\0", offset)) < 0:
+            raise BudgetError("raw hp_detect_run: unterminated ELF name")
+        return table[offset:end]
+
+    names = section_data(header[13], 3)
+    symbols = []
+    for section in sections:
+        if section[1] != 2:
+            continue
+        if section[9] != 16 or section[5] % 16:
+            raise BudgetError("raw hp_detect_run: malformed ELF symbol table")
+        strings = section_data(section[6], 3)
+        for symbol in struct.iter_unpack("<IIIBBH", bounded(section[4], section[5])):
+            if string(strings, symbol[0]) == RAW_DETECT_SYMBOL.encode("ascii"):
+                symbols.append(symbol)
+    if (len(symbols) != 1 or symbols[0][1:3] != (address, size)
+            or symbols[0][3] != 0x12 or symbols[0][5] >= len(sections)):
+        raise BudgetError("raw hp_detect_run: nm disagrees with the unique ELF function symbol")
+    section = sections[symbols[0][5]]
+    if (section[1] != 1 or section[2] & 6 != 6
+            or string(names, section[0]) not in (b".text", b".flash.text", b".iram0.text")
+            or address < section[3] or address + size > section[3] + section[5]):
+        raise BudgetError("raw hp_detect_run: function escapes executable text section")
+    code = bounded(section[4] + address - section[3], size)
+    if int.from_bytes(code[:3], "little") & 0xFFF != 0x136:
+        raise BudgetError("raw hp_detect_run: first bytes are not the Xtensa ENTRY opcode")
+    return address, code
+
+
+def raw_detect_body(decoded: str, address: int, code: bytes) -> str:
+    """Require byte-for-byte, gap-free decoding of the entire body, including movsp."""
+    cursor = address
+    headers = 0
+    sections = 0
+    instructions = []
+    for line in decoded.splitlines():
+        if SECTION_RE.match(line):
+            sections += 1
+            if sections != 1 or line != "Disassembly of section .data:":
+                raise BudgetError("raw hp_detect_run: unexpected raw disassembly section")
+        elif header := FUNCTION_RE.match(line):
+            headers += 1
+            if (sections != 1 or headers != 1 or int(header.group(1), 16) != address
+                    or header.group(2) != ".data"):
+                raise BudgetError("raw hp_detect_run: wrong or duplicate raw function entry")
+        elif instruction := INSTRUCTION_RE.match(line):
+            raw, mnemonic = instruction.group(2), (instruction.group(3) or "").strip()
+            if (headers != 1 or int(instruction.group(1), 16) != cursor
+                    or len(raw) not in (4, 6, 8, 16) or not mnemonic
+                    or not re.fullmatch(r"[a-z][a-z0-9_.]*(?:\s+.*)?", mnemonic)
+                    or mnemonic.split()[0] in ("ill", "ill.n", "unknown")):
+                raise BudgetError("raw hp_detect_run: incomplete or invalid raw instruction decoding")
+            raw_bytes = bytes.fromhex(raw)
+            offset = cursor - address
+            if raw_bytes != code[offset:offset + len(raw_bytes)]:
+                raise BudgetError("raw hp_detect_run: decoded instruction bytes disagree with ELF")
+            cursor += len(raw_bytes)
+            instructions.append(line)
+        elif re.match(r"^\s*[0-9a-fA-F]+:", line):
+            raise BudgetError("raw hp_detect_run: truncated raw instruction line")
+    if sections != 1 or headers != 1 or not instructions or cursor != address + len(code):
+        raise BudgetError("raw hp_detect_run: decoder did not cover the complete function")
+    first = INSTRUCTION_RE.match(instructions[0])
+    entry = ENTRY_RE.fullmatch((first.group(3) or "").strip())
+    frame = (int.from_bytes(code[:3], "little") >> 12) * 8
+    if entry is None or int(entry.group(1), 0) != frame or len(first.group(2)) != 6:
+        raise BudgetError("raw hp_detect_run: decoded first ENTRY disagrees with ELF opcode")
+    return f"{address:08x} <{RAW_DETECT_NAME}>:\n" + "\n".join(instructions) + "\n\n"
+
+
+def restore_raw_detect(disassembly: str, data: bytes, elf: Path, objdump: str) -> str:
+    lines = disassembly.splitlines(keepends=True)
+    matches = [index for index, line in enumerate(lines)
+               if (header := FUNCTION_RE.match(line)) and header.group(2) == RAW_DETECT_NAME]
+    if not matches:
+        return disassembly  # The unchanged required-symbol gate rejects absence.
+    if len(matches) != 1:
+        raise BudgetError("raw hp_detect_run: duplicate application function")
+    start = matches[0]
+    header = FUNCTION_RE.match(lines[start])
+    address = int(header.group(1), 16)
+    end = next((index for index in range(start + 1, len(lines))
+                if FUNCTION_RE.match(lines[index]) or SECTION_RE.match(lines[index])), len(lines))
+    first = next((INSTRUCTION_RE.match(line) for line in lines[start + 1:end]
+                  if re.match(r"^\s*[0-9a-fA-F]+:", line)), None)
+    if (first is None or len(first.group(2)) != 8
+            or (first.group(3) or "").strip()
+            and not re.fullmatch(r"\.word\s+0x[0-9a-fA-F]{8}", first.group(3).strip())):
+        return disassembly  # Ordinary/malformed prologues retain the original strict parser.
+    if int(first.group(1), 16) != address:
+        raise BudgetError("raw hp_detect_run: packed first instruction is not at symbol entry")
+    if not objdump.endswith("objdump"):
+        raise BudgetError("raw hp_detect_run: cannot bind nm to the supplied objdump tool")
+    nm = objdump[:-len("objdump")] + "nm"
+    actual_address, code = raw_detect_code(
+        data, stack_tool_output([nm, "-n", "-S", "--defined-only", str(elf)]), address)
+    word = int(first.group(2), 16)
+    mnemonic = (first.group(3) or "").strip()
+    if (word != int.from_bytes(code[:4], "little")
+            or mnemonic and word != int(mnemonic.split()[1], 16)):
+        raise BudgetError("raw hp_detect_run: packed first word disagrees with ELF bytes")
+    if end < len(lines) and (next_header := FUNCTION_RE.match(lines[end])):
+        if int(next_header.group(1), 16) < address + len(code):
+            raise BudgetError("raw hp_detect_run: nested symbol overlaps the complete function")
+    # Missing .xt.prop ranges make pinned objdump print this app body as data. Decode only its
+    # nm/ELF-bound bytes, preserving the complete body for the unchanged dynamic-stack checks.
+    with tempfile.TemporaryDirectory(prefix="daikin-stack-hp-detect-") as temporary:
+        raw_file = Path(temporary) / "hp-detect.raw"
+        raw_file.write_bytes(code)
+        decoded = stack_tool_output([objdump, "-D", "-b", "binary", "-m", "xtensa",
+                                     f"--adjust-vma=0x{actual_address:x}", str(raw_file)])
+    replacement = raw_detect_body(decoded, actual_address, code)
+    return "".join(lines[:start]) + replacement + "".join(lines[end:])
+
+
+def disassemble(elf: Path, objdump: str) -> str:
+    try:
+        data = elf.read_bytes()
+    except OSError as exc:
+        raise BudgetError(f"cannot read ELF {elf}: {exc}") from exc
+    before = hashlib.sha256(data).digest()
+    try:
+        text = stack_tool_output([objdump, "-d", "-C", str(elf)])
+        return restore_raw_detect(text, data, elf, objdump)
+    finally:
+        try:
+            after = hashlib.sha256(elf.read_bytes()).digest()
+        except OSError as exc:
+            raise BudgetError(f"cannot reread ELF {elf}: {exc}") from exc
+        if before != after:
+            raise BudgetError("ELF changed during stack disassembly; discard the mixed evidence")
+
+
+def raw_detect_self_test(fixture: str, budgets: dict[str, Any]) -> int:
+    from unittest.mock import patch
+
+    anchor = re.search(r"(?m)^([0-9a-f]+) <" + re.escape(RAW_DETECT_NAME) + r">:\n[^\n]+\n", fixture)
+    assert anchor is not None
+    address = int(anchor.group(1), 16)
+    code = bytes.fromhex("36610b1df0")  # Independently fixed ENTRY1456 + RETW.N bytes.
+    raw = (f"Disassembly of section .data:\n{address:08x} <.data>:\n"
+           f"{address:x}: 36610b entry a1, 0x5b0\n{address + 3:x}: 1df0 retw.n\n")
+    nm = f"{address:08x} 00000005 T {RAW_DETECT_SYMBOL}\n"
+    objdump = "xtensa-esp32s3-elf-objdump"
+    controls = 0
+
+    def image(body: bytes = code, flags: int = 6, symbol: str = RAW_DETECT_SYMBOL,
+              declared_size: int | None = None) -> bytes:
+        names = b"\0.flash.text\0.symtab\0.strtab\0.shstrtab\0"
+        strings = b"\0" + symbol.encode("ascii") + b"\0"
+        data = bytearray(52)
+
+        def append(value: bytes) -> int:
+            offset = len(data)
+            data.extend(value)
+            return offset
+
+        code_offset = append(body)
+        strings_offset = append(strings)
+        names_offset = append(names)
+        symbols = bytes(16) + struct.pack("<IIIBBH", 1, address,
+                                         len(body) if declared_size is None else declared_size,
+                                         0x12, 0, 1)
+        symbols_offset = append(symbols)
+        sections = [(0,) * 10,
+                    (names.index(b".flash.text"), 1, flags, address, code_offset, len(body), 0, 0, 1, 0),
+                    (names.index(b".symtab"), 2, 0, 0, symbols_offset, len(symbols), 3, 1, 4, 16),
+                    (names.index(b".strtab"), 3, 0, 0, strings_offset, len(strings), 0, 0, 1, 0),
+                    (names.index(b".shstrtab"), 3, 0, 0, names_offset, len(names), 0, 0, 1, 0)]
+        section_offset = append(b"".join(struct.pack("<IIIIIIIIII", *section) for section in sections))
+        identity = b"\x7fELF\x01\x01\x01" + bytes(9)
+        data[:52] = struct.pack("<16sHHIIIIIHHHHHH", identity, 2, 94, 1, address,
+                               0, section_offset, 0, 52, 0, 0, 40, len(sections), 4)
+        return bytes(data)
+
+    def packed(body: bytes = code, word: int | None = None, mnemonic: str = "") -> str:
+        value = int.from_bytes(body[:4], "little") if word is None else word
+        block = f"{address:08x} <{RAW_DETECT_NAME}>:\n{address:x}: {value:08x} {mnemonic}\n"
+        # The existing frame fixture uses one address per anchor, rather than real code extents.
+        # Keep its remaining anchors in a separate mock section from this complete function.
+        return (fixture[:anchor.start()] + block + "Disassembly of section .fixture-rest:\n"
+                + fixture[anchor.end():])
+
+    def exercise(elf_bytes: bytes | None = None, standard: str | None = None,
+                 nm_text: str = nm, decoded: str = raw, mutation: bool = False,
+                 failure: str = "") -> tuple[str, list[str]]:
+        calls = []
+        with tempfile.TemporaryDirectory(prefix="daikin-stack-raw-selftest-") as temporary:
+            elf = Path(temporary) / "fixture.elf"
+            elf.write_bytes(image() if elf_bytes is None else elf_bytes)
+
+            def tool(arguments: list[str], **_kwargs: Any) -> subprocess.CompletedProcess[str]:
+                if arguments == [objdump, "-d", "-C", str(elf)]:
+                    calls.append("standard")
+                    output = packed() if standard is None else standard
+                elif arguments == ["xtensa-esp32s3-elf-nm", "-n", "-S", "--defined-only", str(elf)]:
+                    calls.append("nm")
+                    output = nm_text
+                else:
+                    assert arguments[:-1] == [objdump, "-D", "-b", "binary", "-m", "xtensa",
+                                              f"--adjust-vma=0x{address:x}"]
+                    # This assertion checks the full production adapter's actual raw input,
+                    # independently of the shaped decoder output supplied by each control.
+                    assert Path(arguments[-1]).read_bytes() == raw_detect_code(
+                        elf.read_bytes(), nm_text, address)[1]
+                    calls.append("raw")
+                    output = decoded
+                    if mutation:
+                        elf.write_bytes(elf.read_bytes() + b"changed during decode")
+                return subprocess.CompletedProcess(arguments, 1 if failure == calls[-1] else 0,
+                                                   output, "injected SDK reader failure")
+
+            with patch.object(subprocess, "run", tool):
+                return disassemble(elf, objdump), calls
+
+    restored, calls = exercise()
+    assert calls == ["standard", "nm", "raw"]
+    assert parse_frames(restored, budgets)[RAW_DETECT_NAME] == 1456
+    evaluate(parse_frames(restored, budgets), budgets)
+    assert parse_frames(exercise(standard=packed(mnemonic=".word 0x1d0b6136"))[0], budgets)[RAW_DETECT_NAME] == 1456
+    unchanged, calls = exercise(standard=fixture)
+    assert unchanged == fixture and calls == ["standard"]
+
+    def reject(name: str, expected: str, **options: Any) -> None:
+        nonlocal controls
+        try:
+            result, _ = exercise(**options)
+            evaluate(parse_frames(result, budgets), budgets)
+        except BudgetError as exc:
+            assert expected in str(exc), (name, str(exc))
+        else:
+            raise AssertionError(f"self-test accepted raw application control {name}")
+        controls += 1
+
+    reject("missing nm symbol", "global nm function", nm_text="")
+    reject("duplicate nm symbol", "global nm function", nm_text=nm + nm)
+    reject("cloned nm symbol", "global nm function", nm_text=nm.replace(RAW_DETECT_SYMBOL, RAW_DETECT_SYMBOL + "$isra$0"))
+    reject("data nm symbol", "global nm function", nm_text=nm.replace(" T ", " D "))
+    reject("wrong nm entry", "entry address/size", nm_text=nm.replace(f"{address:08x}", f"{address + 1:08x}"))
+    reject("wrong nm size", "unique ELF function", nm_text=nm.replace("00000005", "00000004"))
+    reject("wrong ELF symbol", "unique ELF function", elf_bytes=image(symbol=RAW_DETECT_SYMBOL + "$isra$0"))
+    reject("non-executable text", "executable text section", elf_bytes=image(flags=2))
+    reject("non-allocated text", "executable text section", elf_bytes=image(flags=4))
+    reject("symbol beyond text", "executable text section", elf_bytes=image(declared_size=6), nm_text=nm.replace("00000005", "00000006"))
+    reject("truncated ELF", "truncated ELF", elf_bytes=image()[:-1])
+    reject("wrong ELF format", "ELF32 little-endian", elf_bytes=b"bad" + image()[3:])
+    reject("wrong machine", "Xtensa executable", elf_bytes=image()[:18] + b"\x03\0" + image()[20:])
+    reject("wrong first opcode", "ENTRY opcode", elf_bytes=image(bytes.fromhex("35610b1df0")), standard=packed(bytes.fromhex("35610b1df0")))
+    reject("word differs from bytes", "packed first word", standard=packed(word=0x1d0b6137))
+    reject("word differs from mnemonic", "packed first word", standard=packed(mnemonic=".word 0x1d0b6137"))
+    reject("packed later entry", "symbol entry", standard=packed().replace(f"\n{address:x}:", f"\n{address + 1:x}:"))
+    reject("nested symbol in raw body", "nested symbol", standard=packed().replace(
+        "Disassembly of section .fixture-rest:\n", ""))
+    reject("wrong raw start", "raw function entry", decoded=raw.replace(f"{address:08x} <.data>", f"{address + 1:08x} <.data>"))
+    reject("raw instruction gap", "invalid raw instruction", decoded=raw.replace(f"{address + 3:x}:", f"{address + 4:x}:"))
+    reject("raw instruction overlap", "invalid raw instruction", decoded=raw.replace(f"{address + 3:x}:", f"{address + 2:x}:"))
+    reject("decoder byte drift", "instruction bytes disagree", decoded=raw.replace("1df0", "1cf0"))
+    reject("truncated raw tail", "complete function", decoded=raw.split(f"{address + 3:x}:")[0])
+    reject("truncated raw line", "truncated raw instruction", decoded=raw.replace("1df0 retw.n", ""))
+    reject("raw data directive", "invalid raw instruction", decoded=raw.replace("retw.n", ".word 0xf01d"))
+    reject("raw invalid opcode", "invalid raw instruction", decoded=raw.replace("retw.n", "ill.n"))
+    reject("raw bad opcode", "invalid raw instruction", decoded=raw.replace("retw.n", "(bad)"))
+    reject("raw wrong ENTRY immediate", "ENTRY disagrees", decoded=raw.replace("0x5b0", "0x5a0"))
+    reject("raw missing ENTRY", "ENTRY disagrees", decoded=raw.replace("entry a1, 0x5b0", "nop"))
+    reject("duplicate raw header", "duplicate raw function", decoded=raw + f"{address:08x} <.data>:\n")
+    reject("wrong raw section", "raw disassembly section", decoded=raw.replace("section .data:", "section .text:"))
+    reject("changed original ELF", "ELF changed during", mutation=True)
+    for failing_tool in ("standard", "nm", "raw"):
+        reject("failed " + failing_tool, "failed:", failure=failing_tool)
+    zero = bytes.fromhex("3601001df0")
+    reject("zero frame", "empty first stack frame", elf_bytes=image(zero), standard=packed(zero),
+           decoded=raw.replace("36610b", "360100").replace("0x5b0", "0"))
+    over = bytes.fromhex("36a10b1df0")
+    reject("frame above unchanged ceiling", "poll_detect", elf_bytes=image(over), standard=packed(over),
+           decoded=raw.replace("36610b", "36a10b").replace("0x5b0", "0x5d0"))
+    dynamic = bytes.fromhex("36610b1018001df0")
+    dynamic_raw = raw.split(f"{address + 3:x}:")[0] + (
+        f"{address + 3:x}: 101800 movsp a1, a8\n{address + 6:x}: 1df0 retw.n\n")
+    reject("dynamic stack after valid ENTRY", "unreviewed dynamic stack", elf_bytes=image(dynamic),
+           standard=packed(dynamic), nm_text=nm.replace("00000005", "00000008"), decoded=dynamic_raw)
+    reject("unknown packed application", "first prologue", standard=fixture.replace(
+        "1: 004136          entry a1, 1232", "1: 00006136"))
+    return controls
+
+
+def staged_stack_self_test(budgets: dict[str, Any]) -> int:
+    sources = {path: (REPO / path).read_text(encoding="utf-8")
+               for path in ("main/http_config.cpp", "main/http_status.cpp")}
+    group = (REPO / "main/logic/mqtt_group.hpp").read_text(encoding="utf-8")
+    validate_staged_stack_paths(budgets, sources, group)
+    validate_staged_stack_paths(
+        budgets, {path: re.sub(r"\s+", " \n ", stack_source_code(source))
+                  for path, source in sources.items()},
+        re.sub(r"\s+", " \n ", stack_source_code(group)))
+    controls = 0
+
+    def reject(name: str, changed: dict[str, Any], changed_sources: dict[str, str] | None = None,
+               changed_group: str | None = None) -> None:
+        nonlocal controls
+        try:
+            validate_staged_stack_paths(changed, changed_sources or sources,
+                                        group if changed_group is None else changed_group)
+        except BudgetError as exc:
+            assert "staged stack:" in str(exc), (name, str(exc))
+        else:
+            raise AssertionError(f"staged stack model accepted {name}")
+        controls += 1
+
+    for symbol, maximum in STAGED_STACK_LIMITS.items():
+        for missing in (False, True):
+            changed = json.loads(json.dumps(budgets))
+            if missing:
+                del changed["symbols"][symbol]
+            else:
+                changed["symbols"][symbol]["max_bytes"] = maximum + 16
+            reject(f"{'missing' if missing else 'raised'} reviewed {symbol} bound", changed)
+    for path, member in (("httpd_values", "http_values_snapshot"),
+                         ("mqtt_modbus_build", "mqtt_modbus_payload"),
+                         ("mqtt_modbus_build", "mqtt_modbus_count"),
+                         ("mqtt_modbus_build", "mqtt_modbus_emit"),
+                         *((path, "config_document") for path in sorted(CONFIG_DOCUMENT_PATHS))):
+        changed = json.loads(json.dumps(budgets))
+        changed["paths"][path]["symbols"].remove(member)
+        reject(f"missing {member} in {path}", changed)
+    for path in sorted(CONFIG_DOCUMENT_PATHS | {"httpd_values", "mqtt_modbus_build"}):
+        changed = json.loads(json.dumps(budgets))
+        del changed["paths"][path]
+        reject(f"missing phase path {path}", changed)
+    for owner, path in (("httpd", "httpd_values"), ("httpd", "httpd_config_hp"),
+                        ("mqtt", "mqtt_modbus_build")):
+        changed = json.loads(json.dumps(budgets))
+        changed["tasks"][owner]["paths"].remove(path)
+        reject(f"missing {owner} ownership of {path}", changed)
+
+    for path, original, replacement in (
+        ("main/http_config.cpp", "__attribute__((noinline)) static cJSON*",
+         "static cJSON*"),
+        ("main/http_status.cpp", "__attribute__((noinline)) static ValuesSnapshot",
+         "static ValuesSnapshot"),
+        ("main/http_config.cpp", "body(new char[capacity]);", "body(new char[capacity + 1]);"),
+        ("main/http_config.cpp", "std::unique_ptr<char[]> body(new char[capacity]);",
+         "std::unique_ptr<char[]> body;"),
+        ("main/http_config.cpp", "http_read_body(req, body.get(), capacity)",
+         "http_read_body(req, body.get(), capacity + 1)"),
+        ("main/http_config.cpp", "static_cast<size_t>(length)", "capacity"),
+        ("main/http_status.cpp", "ValuesSnapshot snapshot = take_values_snapshot();",
+         "ValuesSnapshot snapshot;"),
+        ("main/http_status.cpp", "ValuesSnapshot snapshot = take_values_snapshot();",
+         "HttpJsonChunks early(HttpChunkEmitter{req});\n"
+         "    ValuesSnapshot snapshot = take_values_snapshot();"),
+    ):
+        changed_sources = dict(sources)
+        changed_sources[path] = changed_sources[path].replace(original, replacement, 1)
+        assert changed_sources[path] != sources[path], original
+        reject(f"changed phase source {original}", budgets, changed_sources)
+    for name, capacity in CONFIG_DOCUMENT_CALLS.items():
+        original = f"read_config_document(req, {capacity}, parse_error)"
+        body = stack_function_body(stack_source_code(sources["main/http_config.cpp"]), name)
+        assert original in body, name
+        # Blanking preserves offsets; mutate only this caller when capacities repeat.
+        definition = re.search(r"\b" + name + r"\([^;{}()]*\)\s*\{",
+                               stack_source_code(sources["main/http_config.cpp"])).end()
+        index = sources["main/http_config.cpp"].index(original, definition)
+        changed_sources = dict(sources)
+        config = sources["main/http_config.cpp"]
+        changed_sources["main/http_config.cpp"] = (
+            config[:index] + original.replace(str(capacity), str(capacity + 1))
+            + config[index + len(original):])
+        reject(f"changed {name} request capacity", budgets, changed_sources)
+    for original, replacement in (
+        ("inline __attribute__((noinline)) size_t flat_json_size(",
+         "inline size_t flat_json_size("),
+        ("inline __attribute__((noinline)) std::string", "inline std::string"),
+        ("append_flat_json(out, vals);", "other_json(out, vals);"),
+        ("const size_t bytes = flat_json_size(vals);", "const size_t bytes = 0;"),
+        ("append_flat_json(j, vals);", "other_json(j, vals);"),
+    ):
+        changed_group = group.replace(original, replacement, 1)
+        assert changed_group != group, original
+        reject(f"changed shared encoder phase {original}", budgets, changed_group=changed_group)
+    return controls
 
 
 def self_test() -> None:
@@ -1825,6 +2335,10 @@ def self_test() -> None:
      'daik::history_start()': 64,
      'daik::mb_autodiscover_initial()': 64,
      'daik::http_send_values_json(httpd_req*, std::basic_string_view<char, std::char_traits<char> >, std::basic_string_view<char, std::char_traits<char> >)': 64,
+     'daik::take_values_snapshot()': 208,
+     '_ZN4daikL20read_config_documentEP9httpd_reqjRPKc$constprop$0': 48,
+     'daik::flat_json_size(std::vector<daik::GroupedValue, std::allocator<daik::GroupedValue> > const&)': 80,
+     'void daik::append_flat_json<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > >(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >&, std::vector<daik::GroupedValue, std::allocator<daik::GroupedValue> > const&)': 48,
      'daik::h_history(httpd_req*)': 64,
      'daik::h_diag(httpd_req*)': 64,
      'daik::redact_diag_line[abi:cxx11](std::basic_string_view<char, std::char_traits<char> >)': 48,
@@ -2300,6 +2814,8 @@ def self_test() -> None:
     fixture = fixture.replace("   3: 004136          entry a1, 4848\n",
                               "   3: 004136          entry a1, 4848\n" + number_calls)
     budgets = load_budgets(DEFAULT_BUDGETS)
+    raw_detect_controls = raw_detect_self_test(fixture, budgets)
+    staged_stack_controls = staged_stack_self_test(budgets)
     validate_source_contract(budgets)
     frames = parse_frames(fixture)
 
@@ -2324,14 +2840,14 @@ def self_test() -> None:
     assert selected["path:weather_task_parse"] == 6352
     assert selected["ota_health_task"] == 80
     assert selected["path:ota_health_gate"] == 2128
-    assert selected["path:httpd_config_hp"] == 6480
-    assert selected["path:httpd_config_circulation"] == 5664
-    assert selected["path:httpd_hp_query_probe"] == 4256
+    assert selected["path:httpd_config_hp"] == 6528
+    assert selected["path:httpd_config_circulation"] == 5712
+    assert selected["path:httpd_hp_query_probe"] == 4304
     assert selected["path:httpd_mcp_parse"] == 3536
-    assert selected["path:httpd_config_save"] == 8000
-    assert selected["path:httpd_config_save_link"] == 8000
+    assert selected["path:httpd_config_save"] == 8048
+    assert selected["path:httpd_config_save_link"] == 8048
     assert selected["path:httpd_wifi_scan"] == 5248
-    assert selected["path:httpd_mqtt_tls"] == 7968
+    assert selected["path:httpd_mqtt_tls"] == 8016
 
     discovery_sources = [(REPO / name).read_text(encoding="utf-8") for name in (
         "main/mqtt_ha.cpp", "main/logic/mqtt_discovery_owner.hpp", "main/logic/ota_manifest.hpp")]
@@ -3438,12 +3954,13 @@ def self_test() -> None:
             reject_document("changed bounded DMA recursion", mutated, "one-level/sibling recursion contract")
     print(f"stack budget self-test: PASS ({negative_checks} malformed schemas rejected, "
           f"{inventory_controls} inventory/growth/allocation/reserve controls, "
-          f"9 dynamic/first-prologue, {packed_controls} packed SDK, "
+          f"9 dynamic/first-prologue, {packed_controls} packed SDK, {raw_detect_controls} raw-app controls, "
           f"{queue_controls} queue-source, {diagnostic_controls} diagnostic-source, "
           f"{tls_source_controls} TLS-client-source, {sdk_recursion_controls} SDK-recursion, "
           f"{integer_disassembly_controls} integer-disassembly, {integer_source_controls} integer-source/path, "
           f"{retirement_controls} MQTT-retirement/SDK/codec path, "
           f"{discovery_controls} MQTT-discovery/source/depth path, "
+          f"{staged_stack_controls} staged-source/path, "
           f"{diagnosis_controls} diagnosis-source/path, "
           f"{numeric_disassembly_controls} diagnosis-numeric-calls, "
           f"{shutdown_controls} shutdown-source/path, "

@@ -310,6 +310,95 @@
           9239
         ]
       }
+    },
+    {
+      "runner": "scripts/run-mock-tests.sh --coverage",
+      "compilers": {
+        "clang-17-darwin": "Apple clang version 17.0.0 (clang-1700.6.4.2)",
+        "gcc-13-linux-ubuntu24": "g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+        "gcc-15-linux-ubuntu26": "g++-15 (Ubuntu 15.2.0-16ubuntu1) 15.2.0",
+        "gcc-15-github-linux-ubuntu26": "g++-15 (Ubuntu 15.2.0-16ubuntu1) 15.2.0"
+      },
+      "architectures": {
+        "clang-17-darwin": "arm64",
+        "gcc-13-linux-ubuntu24": "aarch64",
+        "gcc-15-linux-ubuntu26": "aarch64",
+        "gcc-15-github-linux-ubuntu26": "x86_64"
+      },
+      "hosted_confirmation": "Ubuntu 26.04 x86_64 GCC 15 was measured locally using the hosted profile selector. Authoritative GitHub confirmation of the final head remains pending.",
+      "scope": "Integral round-trip validation and bounded string-view arguments retain every branch inventory across four compiler profiles. All existing CHECKs, historical ratios and the 95-percent executable-line floor are retained.",
+      "sources": {
+        "main/logic/http_config_fields.hpp": "2445da5ca11302ff0c7d9d2a94fab3b64630aa45d68a90b0331c40636b0d449b",
+        "main/logic/json.hpp": "b8a2e500ad59bb8ff30c19b2f07625f334258c72556344b382b7d5d8e0440e6f"
+      },
+      "test_source_sha256": "0a8196cf4fc9007956dbf1def5565d05124eaf4531f186e6d4cec12af7ca9108",
+      "compile_source_closure": {
+        "files": 161,
+        "sha256": "8cb22a9795a20c9ffd7088d654fced6a2b51b01b1012890b287f71ae2a956380",
+        "method": "Normalized non-system -MM dependencies and current input hashes are identical across all four compiler/architecture measurements."
+      },
+      "local_executable_lines": {
+        "clang-17-darwin": [
+          9176,
+          9348
+        ],
+        "gcc-13-linux-ubuntu24": [
+          8955,
+          9239
+        ],
+        "gcc-15-linux-ubuntu26": [
+          8957,
+          9241
+        ],
+        "gcc-15-github-linux-ubuntu26": [
+          8955,
+          9241
+        ]
+      }
+    },
+    {
+      "runner": "scripts/run-mock-tests.sh --coverage",
+      "compilers": {
+        "clang-17-darwin": "Apple clang version 17.0.0 (clang-1700.6.4.2)",
+        "gcc-13-linux-ubuntu24": "g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+        "gcc-15-linux-ubuntu26": "g++-15 (Ubuntu 15.2.0-16ubuntu1) 15.2.0",
+        "gcc-15-github-linux-ubuntu26": "g++-15 (Ubuntu 15.2.0-16ubuntu1) 15.2.0"
+      },
+      "architectures": {
+        "clang-17-darwin": "arm64",
+        "gcc-13-linux-ubuntu24": "aarch64",
+        "gcc-15-linux-ubuntu26": "aarch64",
+        "gcc-15-github-linux-ubuntu26": "x86_64"
+      },
+      "hosted_confirmation": "Ubuntu 26.04 x86_64 GCC 15 was measured locally using the hosted profile selector. Authoritative GitHub confirmation of the final head remains pending.",
+      "scope": "Explicit MQTT counting and emission function boundaries retain every branch inventory across four compiler profiles. All existing CHECKs, historical ratios and the 95-percent executable-line floor are retained.",
+      "sources": {
+        "main/logic/mqtt_group.hpp": "542367305c306b3537d8966b99f8fccd619b63d5762e111c859cfd36360ce7be"
+      },
+      "test_source_sha256": "0a8196cf4fc9007956dbf1def5565d05124eaf4531f186e6d4cec12af7ca9108",
+      "compile_source_closure": {
+        "files": 161,
+        "sha256": "62e2decc258a149c15eab7c690fee3adfd9f360a74e09efa027710d2e715ea10",
+        "method": "Normalized non-system -MM dependencies and current input hashes are identical across all four compiler/architecture measurements."
+      },
+      "local_executable_lines": {
+        "clang-17-darwin": [
+          9176,
+          9348
+        ],
+        "gcc-13-linux-ubuntu24": [
+          8955,
+          9239
+        ],
+        "gcc-15-linux-ubuntu26": [
+          8957,
+          9241
+        ],
+        "gcc-15-github-linux-ubuntu26": [
+          8955,
+          9241
+        ]
+      }
     }
   ],
   "method": "Exact taken/outcome inventories are measured by scripts/run-mock-tests.sh --coverage and bound to compiler family, major version and platform; hosted profiles additionally bind the runner image. The gate rejects inventory mismatches and any historical ratio decrease. Updated hosted inventories require authoritative CI confirmation. Historical measurement notes remain in Git; profiles contain the enforced counts. Measurements below identify changed sources and local compiler provenance without changing checker rules or the 95-percent executable-line floor.",
