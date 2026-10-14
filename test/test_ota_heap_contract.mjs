@@ -321,7 +321,7 @@ const namedHttpSymbols = {
   config_circulation: ["set_circulation", 976], circulation_parser: ["parse_circulation_request", 1408],
   hp_query_probe: ["hp_query_probe", 2736], mcp_parser: ["mcp_parse", 256],
   config_save: ["config_save", 32], config_save_link: ["config_save_link", 32],
-  config_save_whole: ["save_whole", 48], config_nvs_blob: ["nvs_set_blob", 48],
+  config_save_whole: ["save_whole", 64], config_nvs_blob: ["nvs_set_blob", 48],
   http_scan: ["h_scan", 768], wifi_scan: ["wifi_scan", 1920],
 };
 for (const [key, [name, maximum]] of Object.entries(namedHttpSymbols)) {
@@ -329,7 +329,7 @@ for (const [key, [name, maximum]] of Object.entries(namedHttpSymbols)) {
   assert.equal(stackBudgets.symbols[key].max_bytes, maximum);
 }
 assert.equal(stackBudgets.symbols.config_transaction.pattern,
-  "^_ZN4daik23config_save_transactionINS_12_GLOBAL__N_112NvsBlobStoreEEENS_17ConfigSaveOutcomeERNS_6ConfigERKS4_bRT_\\$constprop\\$[0-9]+$");
+  "^_ZN4daik23config_save_transactionINS_12_GLOBAL__N_112NvsBlobStoreEEENS_17ConfigSaveOutcomeERNS_6ConfigERKS4_bRT_RKNS_15LocalPinsRepairE\\$constprop\\$[0-9]+$");
 assert.equal(stackBudgets.symbols.config_transaction.max_bytes, 1600,
   "the real NvsBlobStore transaction must have a measured frame independent of the HTTP allowance");
 assert.match(config, /save_whole\([\s\S]*?config_save_transaction\([\s\S]*?config_save\([\s\S]*?save_whole\([\s\S]*?config_save_link\([\s\S]*?save_whole\(/,

@@ -1751,7 +1751,7 @@ def self_test() -> None:
   23: 004136          entry a1, 32
 00000024 <daik::save_whole(daik::Config const&, bool)>:
   24: 004136          entry a1, 48
-00000025 <_ZN4daik23config_save_transactionINS_12_GLOBAL__N_112NvsBlobStoreEEENS_17ConfigSaveOutcomeERNS_6ConfigERKS4_bRT_$constprop$0>:
+00000025 <_ZN4daik23config_save_transactionINS_12_GLOBAL__N_112NvsBlobStoreEEENS_17ConfigSaveOutcomeERNS_6ConfigERKS4_bRT_RKNS_15LocalPinsRepairE$constprop$0>:
   25: 004136          entry a1, 1600
 00000026 <daik::nvs_set_blob(char const*, void const*, unsigned int)>:
   26: 004136          entry a1, 48
@@ -2231,6 +2231,35 @@ def self_test() -> None:
         'spi1_start': 32,
         'spi1_end': 32,
         'esp_mqtt_client_enqueue': 128,
+        'daik::config_factory_seed_blob(std::vector<unsigned char, std::allocator<unsigned char> >&)': 80,
+        'daik::seed_without_blob(daik::Config&, bool)': 64,
+        '_ZZN4daikL17seed_without_blobERNS_6ConfigEbENKUlPKcS3_E_clES3_S3_$isra$0': 64,
+        'daik::config_blob_serialize(daik::ConfigBlob const&)': 48,
+        'daik::detail::blob_put_str(std::vector<unsigned char, std::allocator<unsigned char> >&, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&)': 64,
+        'std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >::basic_string<std::allocator<char> >(char const*, std::allocator<char> const&)': 48,
+        'std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >::_M_create(unsigned int&, unsigned int)': 32,
+        'std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >::_S_allocate(std::allocator<char>&, unsigned int)': 32,
+        '_ZNSt6vectorIhSaIhEE12emplace_backIJhEEERhDpOT_$isra$0': 32,
+        'operator new(unsigned int)': 32,
+        '__cxa_throw': 32,
+        '_Unwind_RaiseException': 176,
+        '_Unwind_RaiseException_Phase2': 80,
+        'uw_frame_state_for': 48,
+        '_Unwind_Find_FDE': 48,
+        'pthread_mutex_lock': 32,
+        'pthread_mutex_init_if_static': 32,
+        'pthread_mutex_init': 32,
+        'daik::nvs_erase_all()': 48,
+        'daik::nvs_set_blob_after_factory_reset(char const*, void const*, unsigned int)': 48,
+        'daik::mqtt_retirement_forget()': 48,
+        'nvs_erase_all': 48,
+        'nvs::NVSHandleSimple::erase_all()': 32,
+        'nvs::Storage::eraseNamespace(unsigned char, bool)': 64,
+        'daik::history_flash_forget()': 48,
+        'daik::dwell_forget()': 48,
+        'daik::diag_crash_forget()': 32,
+        'esp_core_dump_image_erase': 48,
+        'daik::wifi_forget_persisted_config()': 192,
     })
     for index, (name, frame) in enumerate(extra_frames.items(), 0x1000):
         fixture += f"\n{index:08x} <{name}>:\n{index:x}: 004136 entry a1, {frame}\n"

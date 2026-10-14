@@ -15,7 +15,12 @@
 //      the reconciling whole-struct config_save;
 //   4. every attempt of /set_hp reads a fresh config() and applies the parsed patch to it, and a
 //      Stale result re-runs that derivation instead of reporting success or committing the old one;
-//   5. the runtime harness executes the production transactions and holds no sequence of its own.
+//   5. the runtime harness executes the production transactions and holds no sequence of its own;
+//   6. a stored "cfg" blob config_load could not use (CFG-05/a) is kept: the verdict sets one flag,
+//      only a landed explicit service save clears it, and every AUTOMATIC writer of the blob asks it
+//      before writing, while the explicit /set_* handlers do not;
+//   7. a refused /set_board save maps to a conflict and the preset offer list withholds detected
+//      Ethernet pads (CFG-08/b, CFG-08/c).
 import assert from "node:assert/strict";
 import fs from "node:fs";
 
@@ -49,9 +54,18 @@ const copy = at(save, /Config\s+c\s*=\s*requested;/, staleReturn);
 const reconcile = at(save,
   /if \(revision == ConfigSaveRevision::ReconcileDetected\)\s*reconcile_detected_config\(c, live\);/,
   copy);
-const serviceStage = at(save,
-  /if \(!owns_link\) \{\s*const ConfigBlob b = config_blob_from\(c\);\s*if \(!config_blob_strings_fit\(b\)\)/,
+// CFG-08/b: a reconciled link that lands on a requested local pin refuses the save, after the
+// reconcile and before anything is serialized or written.
+const localPins = at(save,
+  /if \(config_reconcile_breaks_local_pins\(requested, c\)\) \{\s*out\.result = ConfigSaveResult::Stale;\s*return out;\s*\}/,
   reconcile);
+assert.ok(localPins > reconcile,
+  "a service save must refuse a reconciled link that collides with its local pins");
+// The stored-pin patch for a load-time link yield touches only the staged blob, before its length
+// check, serialization and every write.
+const serviceStage = at(save,
+  /if \(!owns_link\) \{\s*ConfigBlob b = config_blob_from\(c\);\s*config_blob_keep_yielded_pins\(b, config_yield_standing\(yielded, c\)\);\s*if \(!config_blob_strings_fit\(b\)\)/,
+  localPins);
 const linkStage = at(save, /link_blob_serialize\(/, serviceStage);
 const published = at(save, /Config\s+published\s*=\s*std::move\(c\);/, linkStage);
 const firstWrite = save.indexOf("store.write_blob(");
@@ -88,8 +102,11 @@ assert.match(save,
 // The key spelling the writers use is the one config_load reads.
 assert.match(transaction, /CONFIG_KEY_SERVICE = "cfg";/, "the service entry key is on-flash format");
 assert.match(transaction, /CONFIG_KEY_LINK\s*=\s*"link";/, "the link entry key is on-flash format");
-assert.match(config, /nvs_get_blob\("cfg", raw\)/, "config_load must read the service entry");
-assert.match(config, /nvs_get_blob\("link", link_raw\)/, "config_load must read the link entry");
+// The tri-state read: "no entry" and "an entry this build cannot use" must stay distinguishable.
+assert.match(config, /nvs_read_blob\("cfg", raw\)/, "config_load must read the service entry");
+assert.match(config, /nvs_read_blob\("link", link_raw\)/, "config_load must read the link entry");
+assert.doesNotMatch(config, /nvs_get_blob\(/,
+  "config_load must not collapse a missing entry and an unreadable one into one false");
 
 // 2. config.cpp reaches NVS for these paths only through the transactions.
 assert.equal(count(config, /nvs_set_blob\(/), 1,
@@ -102,7 +119,7 @@ const saveWholeEnd = config.indexOf("\nbool config_save(const Config& c)", saveW
 assert.ok(saveWholeStart >= 0 && saveWholeEnd > saveWholeStart, "the one whole-struct save must remain identifiable");
 const saveWhole = config.slice(saveWholeStart, saveWholeEnd);
 const lock = at(saveWhole, /Lock\s+lk\(g_mtx\);/);
-const run = saveWhole.indexOf("config_save_transaction(g_cfg, requested, owns_link, store)");
+const run = saveWhole.indexOf("config_save_transaction(g_cfg, requested, owns_link, store, s_load_yield)");
 assert.ok(lock >= 0 && run > lock,
   "the transaction must run on the live config under the mutex that detection commits under");
 assert.doesNotMatch(saveWhole, /g_cfg\s*=|runtime_revision|nvs_set_blob\(/,
@@ -187,5 +204,91 @@ for (const [file, text] of [["fake_runtime.hpp", harness], ["runtime_integration
     `${file} must not carry a private copy of the save or commit sequence`);
 assert.doesNotMatch(harness, /runtime_revision\s*(?:=[^=]|\+\+|\+=)/,
   "the harness must not version the config itself; only the transactions bump the revision");
+
+// 6. A stored blob this boot could not use is kept until an explicit save.
+const loadStart = config.indexOf("void config_load()");
+const loadEnd = config.indexOf("\n// The NVS side of the logic/config_transaction.hpp transactions", loadStart);
+assert.ok(loadStart >= 0 && loadEnd > loadStart, "config_load must remain identifiable");
+const load = config.slice(loadStart, loadEnd);
+const cfgRead = at(load, /nvs_read_blob\("cfg", raw\)/);
+const verdict = at(load, /config_load_verdict\(stored_entry_read\(cfg_read\), blob_loaded\)/, cfgRead);
+const flagSet = at(load,
+  /s_cfg_blob_unreadable\.store\(!config_load_allows_automatic_writes\(cfg_verdict\),/, verdict);
+assert.ok(cfgRead >= 0 && verdict > cfgRead && flagSet > verdict,
+  "config_load must derive the keep-stored flag from the verdict of the service read");
+assert.equal(count(config, /s_cfg_blob_unreadable\.store\(/), 2,
+  "only config_load (set) and a landed service save (clear) may change the keep-stored flag");
+assert.match(saveWhole,
+  /if \(!owns_link && out\.result == ConfigSaveResult::Saved\)\s*s_cfg_blob_unreadable\.store\(false,/,
+  "only a landed explicit service save may clear the keep-stored flag");
+assert.match(config,
+  /bool config_stored_blob_unreadable\(\) \{\s*return s_cfg_blob_unreadable\.load\(std::memory_order_acquire\);\s*\}/,
+  "the automatic writers must read the flag config_load set");
+
+// Every automatic writer of the service blob asks before its config_save; none of them may write
+// first and ask afterwards.
+const modbus = read("main/hp_modbus.cpp");
+const discoveryStart = modbus.indexOf("void mb_autodiscover_initial()");
+const discoveryEnd = modbus.indexOf("// Non-blocking connect", discoveryStart);
+assert.ok(discoveryStart >= 0 && discoveryEnd > discoveryStart, "initial discovery must remain identifiable");
+const discovery = modbus.slice(discoveryStart, discoveryEnd);
+const discoveryGate = at(discovery, /if \(config_stored_blob_unreadable\(\)\) \{[^}]*return;\s*\}/);
+assert.ok(discoveryGate >= 0 &&
+          discoveryGate < discovery.indexOf("discover_homehub_bounded(") &&
+          discoveryGate < discovery.indexOf("config_save(c)"),
+  "the initial HomeHub search must skip, before searching or saving, when the stored blob is kept");
+const wifi = read("main/wifi.cpp");
+const rollbackStart = wifi.indexOf("void wifi_finish_sta_rollback()");
+const successStart = wifi.indexOf("void wifi_finish_sta_success()", rollbackStart);
+const successEnd = wifi.indexOf("\nbool wifi_start_sta()", successStart);
+assert.ok(rollbackStart >= 0 && successStart > rollbackStart && successEnd > successStart,
+  "the WiFi boot-time saves must remain identifiable");
+const rollback = wifi.slice(rollbackStart, successStart);
+const success = wifi.slice(successStart, successEnd);
+assert.match(rollback,
+  /const bool keep_stored = config_stored_blob_unreadable\(\);\s*if \(!keep_stored && config_save\(rollback_cfg\)\)/,
+  "the rollback restore must not persist over a kept stored blob");
+assert.equal(count(rollback, /config_save\(/), 1, "the rollback restore has exactly one save");
+const successGate = at(success, /if \(config_stored_blob_unreadable\(\)\) \{[\s\S]*?return;\s*\}/);
+assert.ok(successGate >= 0 && successGate < success.indexOf("config_save(success_cfg)"),
+  "clearing the rollback backup must not persist over a kept stored blob");
+// Explicit owner saves are exactly what may replace a kept blob: no HTTP handler consults the flag.
+assert.doesNotMatch(http, /config_stored_blob_unreadable/,
+  "explicit /set_* saves must stay able to replace a stored blob this boot could not use");
+
+// The load-path repairs run where the host-tested helpers assume (CFG-08/a and CFG-08/c): a stored
+// non-canonical "absent" is normalized before the board check can revoke the board, and the
+// indicator/button yield to the FINAL X10A pair — after the link fallback, before ENV III's re-check.
+const normalize = at(load, /config_normalize_absent_local_pins\(c\)/);
+const boardCheck = at(load, /board_hw_valid\(probe, why,/);
+assert.ok(normalize >= 0 && boardCheck > normalize,
+  "config_load must normalize a stored GPIO below -1 before the board check");
+const linkFallback = at(load, /c\.rx_pin = CONFIG_DAIKIN_RX_PIN;\s*c\.tx_pin = CONFIG_DAIKIN_TX_PIN;/);
+const yieldPins = at(load, /config_yield_local_pins_to_link\(c\)/, linkFallback);
+const envRecheck = at(load, /if \(c\.env3_enabled\) \{/, yieldPins);
+assert.ok(linkFallback >= 0 && yieldPins > linkFallback && envRecheck > yieldPins,
+  "config_load must yield the indicator/button to the final X10A pair right after its fallback");
+
+// 7. /set_board and /set_env3 answer a refused (Stale) save as a conflict, re-checking the live
+// link without a third Config copy; the preset rows honour detected Ethernet pads like the pins.
+const failureStart = http.indexOf("static esp_err_t send_local_pins_save_failure(");
+const failureEnd = http.indexOf("\n}\n", failureStart);
+assert.ok(failureStart >= 0 && failureEnd > failureStart,
+  "the shared local-pin save failure answer must remain identifiable");
+assert.match(http.slice(failureStart, failureEnd),
+  /config_link_snapshot\(\);[\s\S]*?if \(config_local_pins_collide_with_link\(proposed\)\)\s*return send_err\(req, "409 Conflict",[\s\S]*?return send_err\(req, "500 Internal Server Error", "config write failed"\);/,
+  "a save refused for a link collision must answer 409, a failed write 500");
+for (const [route, next] of [["set_board", "set_env3"], ["set_env3", "set_ota"]]) {
+  const start = http.indexOf(`static esp_err_t ${route}(`);
+  const end = http.indexOf(`static esp_err_t ${next}(`, start);
+  assert.ok(start >= 0 && end > start, `the /${route} handler must remain identifiable`);
+  assert.match(http.slice(start, end),
+    /if \(!config_save\(c\)\) return send_local_pins_save_failure\(req, c\);/,
+    `/${route} must map a failed save through the shared conflict-aware answer`);
+}
+const status = read("main/http_status.cpp");
+assert.match(status,
+  /board_presets_offerable\(presets, BOARD_PRESETS_MAX, hw_octal_spi\(\),\s*config_board_reserved_pins\(c, net_eth_reserved_pins\(\)\)\)/,
+  "the board preset rows must withhold detected Ethernet pads like the pin pickers");
 
 console.log("config ownership: X10A /set_hp saves are link-only, revision-checked and re-derived on conflict");

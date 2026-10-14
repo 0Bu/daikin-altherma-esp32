@@ -3,6 +3,7 @@
 // binding constraint on these chips) — see the note in http_common.cpp.
 #include "http_server.hpp"
 #include "http_handlers.hpp"
+#include "diag_log.hpp" // diag_printf — a failed start must not be serial-only
 #include "esp_http_server.h"
 #include "esp_log.h"
 #include "provisioning.hpp"   // provisioning_ap_active — picks the HTTP trust surface (F01)
@@ -37,8 +38,15 @@ void http_start() {
     cfg.lru_purge_enable = true;
     // Named ELF path ceilings include bounded JSON recursion and retain 2 KiB for headroom.
     cfg.stack_size = 10240;
-    if (httpd_start(&s_server, &cfg) != ESP_OK) {
-        ESP_LOGE("http", "server start failed");
+    const esp_err_t start_err = httpd_start(&s_server, &cfg);
+    if (start_err != ESP_OK) {
+        // No retry and no restart, as before: everything main.cpp starts after this still starts
+        // and works without the web UI, and a reboot loop would take it down with it. But the
+        // failure is no longer serial-only. The diag ring cannot be read over HTTP once this has
+        // failed — diag_printf also forwards to syslog (started before this), which is then the one
+        // place a remote reader can learn why the web UI is gone. (It echoes to serial too.)
+        diag_printf("http: server start failed (%s) — no web UI, API, MCP or OTA until a reboot\n",
+                    esp_err_to_name(start_err));
         return;
     }
     // Pick the trust surface from the ONE fact that decides it: is the OPEN provisioning SoftAP

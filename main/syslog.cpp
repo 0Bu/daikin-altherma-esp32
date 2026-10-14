@@ -6,7 +6,9 @@
 #include "ota_update.hpp"
 #include "diag_crash.hpp"
 #include "diag_log.hpp"
+#include "heap_guard.hpp" // heap_guard_restarts — the boot record's heap_restarts=
 #include "logic/redact.hpp"
+#include "nvs_storage.hpp" // nvs_storage_available — the boot record's nvs=
 #include "safe_mode.hpp"
 #include "sntp_time.hpp"
 #include "weather_forecast.hpp"
@@ -308,6 +310,12 @@ static bool syslog_replay_boot(int& sock, const struct sockaddr_in& dest) {
         id.elf_sha   = elf_sha;
         id.reason    = diag_crash_info().reason;
         id.safe_mode = safe_mode_active();
+        // The recovery state, settled at the top of app_main before this task existed — which is
+        // why its own /diag lines never reach a collector and this record has to carry it.
+        id.cause         = safe_mode_cause();
+        id.crash_boots   = safe_mode_crash_boots();
+        id.heap_restarts = heap_guard_restarts();
+        id.nvs_ok        = nvs_storage_available();
 
         const std::string boot = build_boot_line(id);
         if (syslog_sendto(sock, dest, boot.data(), boot.size()) != SendResult::Ok) return false;
@@ -335,7 +343,8 @@ void syslog_init() {
     // syslog, so bail. Status ownership uses static storage; only the ping semaphore is advisory.
     if (!s_ping.done) diag_printf("syslog: ping semaphore alloc failed — reachability degraded\n");
     if (!s_queue) {
-        diag_printf("syslog: message queue alloc failed — syslog forwarding disabled this boot\n");
+        diag_printf("syslog: %s alloc failed — syslog forwarding disabled this boot\n",
+                    "message queue");
         return;
     }
 
@@ -547,7 +556,7 @@ void syslog_init() {
                 // thin for that call chain.
             },
             "syslog_task", 6144, nullptr, TASK_PRIO_SYSLOG, nullptr))
-        diag_printf("syslog: task alloc failed — syslog forwarding disabled this boot\n");
+        diag_printf("syslog: %s alloc failed — syslog forwarding disabled this boot\n", "task");
 }
 
 bool syslog_network_quiesced() { return s_network_quiesced.load(std::memory_order_acquire); }

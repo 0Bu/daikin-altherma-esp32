@@ -399,9 +399,12 @@ static void append_status_json(JsonOut& j, bool redact) {
         // this payload: one source, no second fetch to fail, and the presets cannot arrive
         // disagreeing with the pin lists they must fit inside. Two fixed rows (~170 bytes) —
         // bounded, unlike the per-value payloads the heap rules are about.
+        // Filtered by the same reservations as pins_local above, detected Ethernet pads included:
+        // POST /set_board refuses an indicator or button on them, so a preset that puts one there
+        // is not a pick.
         const BoardPreset* presets[BOARD_PRESETS_MAX];
         int npre = board_presets_offerable(presets, BOARD_PRESETS_MAX, hw_octal_spi(),
-                                           config_board_reserved_pins(c));
+                                           config_board_reserved_pins(c, net_eth_reserved_pins()));
         // An explicitly selected board is identity, not a promise that its optional onboard
         // defaults are still enabled. Keep it in the selector even when a customized LED/button or
         // another live reservation means re-applying the factory fields would currently be
@@ -1583,12 +1586,13 @@ static void append_status_json(JsonOut& j, bool redact) {
     // reset_reason reuses the boot-time cached reason (diag_crash.cpp) mapped via
     // logic/reset_reason.hpp; safe_mode is the latched boot-loop recovery flag (safe_mode.cpp —
     // true once too many crash boots accumulated, so poll + MQTT were skipped). heap_restarts is
-    // how many CONSECUTIVE heap-watchdog restarts preceded this boot (heap_guard.cpp): that restart
+    // how many heap-watchdog restarts this boot inherited (heap_guard.cpp): that restart
     // is an esp_restart(), so reset_reason reads "sw" — the same value a config save produces — and
     // without this field a board restarting itself every five minutes would be indistinguishable
     // from one somebody kept saving settings on, which is exactly the unattributable reboot this
-    // block exists to prevent. 0 on any ordinary boot. Small numbers + a short slug appended to the
-    // existing builder — no large contiguous allocation, and nothing here is a `+` chain.
+    // block exists to prevent. 0 after a clean boot; a crash boot carries it. Small numbers + a
+    // short slug appended to the existing builder — no large contiguous allocation, and nothing
+    // here is a `+` chain.
     //
     // Beside them, what that headroom already COST while the board DID survive (legacy-380): cycles
     // the two 1 s task loops produced nothing on. mqtt_skipped/poll_skipped are OOM-guard catches —

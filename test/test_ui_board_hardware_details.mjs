@@ -27,20 +27,23 @@ const firmwarePattern = (phase) => {
 
 const patterns = [
   ["Off", [0, 0, 0, 0, 0, 0, 1000], "off",
-    "Off — no Wi-Fi mode active.", "Aus — kein WLAN-Modus aktiv.",
-    "Off — no Wi-Fi mode active.", "Aus — kein WLAN-Modus aktiv."],
+    "Off — no network active.", "Aus — kein Netzwerk aktiv.",
+    "Off — no network active.", "Aus — kein Netzwerk aktiv."],
   ["SetupPortal", [0, 0, 255, 1, 1000, 1000, 0], "setup",
     "Blue, blinking slowly — setup portal active.", "Blau, langsam blinkend — Setup-Portal aktiv.",
     "Blinking slowly — setup portal active.", "Langsam blinkend — Setup-Portal aktiv."],
   ["Connecting", [255, 160, 0, 1, 100, 100, 0], "connecting",
-    "Yellow, blinking quickly — connecting to Wi-Fi.", "Gelb, schnell blinkend — WLAN wird verbunden.",
-    "Blinking quickly — connecting to Wi-Fi.", "Schnell blinkend — WLAN wird verbunden."],
+    "Yellow, blinking quickly — connecting to the network.", "Gelb, schnell blinkend — Netzwerk wird verbunden.",
+    "Blinking quickly — connecting to the network.", "Schnell blinkend — Netzwerk wird verbunden."],
+  // led_phase() reads the network, X10A and MQTT only: HomeHub, ENV III, syslog, NTP and weather
+  // never change this pattern, so the legend must not promise "all configured connections".
   ["Healthy", [0, 255, 0, 1, 500, 0, 0], "healthy",
-    "Green, solid — all configured connections ready.", "Grün, dauerhaft — alle konfigurierten Verbindungen bereit.",
-    "Solid — all configured connections ready.", "Dauerlicht — alle konfigurierten Verbindungen bereit."],
+    "Green, solid — X10A and, if configured, MQTT connected.", "Grün, dauerhaft — X10A und, falls eingerichtet, MQTT verbunden.",
+    "Solid — X10A and, if configured, MQTT connected.", "Dauerlicht — X10A und, falls eingerichtet, MQTT verbunden."],
+  // Recovery mode never starts the X10A poller, so a networked recovery boot shows this pattern too.
   ["BusDown", [255, 0, 0, 2, 120, 150, 1000], "bus_down",
-    "Red, double flash — X10A disconnected.", "Rot, Doppelblitz — X10A getrennt.",
-    "Double flash — X10A disconnected.", "Doppelblitz — X10A getrennt."],
+    "Red, double flash — X10A disconnected or recovery mode.", "Rot, Doppelblitz — X10A getrennt oder Wiederherstellungsmodus.",
+    "Double flash — X10A disconnected or recovery mode.", "Doppelblitz — X10A getrennt oder Wiederherstellungsmodus."],
   ["MqttDown", [255, 90, 0, 1, 300, 300, 0], "mqtt_down",
     "Orange, blinking — X10A connected, MQTT disconnected.", "Orange, blinkend — X10A verbunden, MQTT getrennt.",
     "Blinking at medium speed — X10A connected, MQTT disconnected.", "Mittelschnell blinkend — X10A verbunden, MQTT getrennt."],
@@ -51,6 +54,15 @@ const patterns = [
     "White, solid — factory reset/data erase in progress; do not disconnect power.", "Weiß, dauerhaft — Werksreset/Datenlöschung läuft; Strom nicht trennen.",
     "Solid after very rapid blinking — factory reset/data erase in progress; do not disconnect power.", "Dauerlicht nach sehr schnellem Blinken — Werksreset/Datenlöschung läuft; Strom nicht trennen."],
 ];
+
+// The legends name exactly what the phase decision reads. A new input (HomeHub, ENV III, a recovery
+// flag) changes what a pattern means, so it must fail here until the copy is reviewed with it.
+const ledInputs = ledPatternSource.match(/struct LedInputs \{([\s\S]*?)\n\};/);
+assert.ok(ledInputs, "missing LedInputs");
+assert.deepEqual(
+  [...ledInputs[1].replace(/\/\/[^\n]*/g, "").matchAll(/\b(\w+)\s*=\s*[^;]+;/g)].map((m) => m[1]),
+  ["ap_mode", "link_mode", "link_up", "mqtt_configured", "mqtt_connected", "hp_connected", "signal"],
+  "LED phase inputs changed; review every visible legend deliberately");
 
 for (const [phase, expectedPattern, suffix, rgbEnglish, rgbGerman, gpioEnglish, gpioGerman] of patterns) {
   assert.deepEqual(firmwarePattern(phase), expectedPattern,
@@ -66,6 +78,7 @@ for (const [phase, expectedPattern, suffix, rgbEnglish, rgbGerman, gpioEnglish, 
 const englishResetHint = I18N.en["board.hint"];
 for (const expected of [
   /Permanently erases Wi-Fi\/all settings/,
+  /\(only the board, status LED and reset button choice is kept\)/,
   /recorded history\/trends/,
   /state durations/,
   /raw core dump/,
@@ -76,6 +89,7 @@ for (const expected of [
 const germanResetHint = I18N.de["board.hint"];
 for (const expected of [
   /Löscht dauerhaft WLAN\/alle Einstellungen/,
+  /\(nur die Wahl von Board, Status-LED und Reset-Taster bleibt erhalten\)/,
   /Historie\/Trends/,
   /Zustandsdauern/,
   /Roh-Core-Dump/,

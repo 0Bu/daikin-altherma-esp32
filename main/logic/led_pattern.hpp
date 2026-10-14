@@ -40,12 +40,13 @@ enum class LedSignal : uint8_t {
 };
 
 enum class LedPhase : uint8_t {
-    Off,           // no transport at all this boot / indicator idle
-    SetupPortal,   // SoftAP provisioning portal up
-    Connecting,    // a transport exists but holds no address yet
-    Healthy,       // link + X10A up, MQTT connected or not configured
-    BusDown,       // X10A link down — outranks MqttDown (the bus is the point of the device)
-    MqttDown,      // X10A up, but a configured broker is not connected
+    Off,         // no transport at all this boot / indicator idle
+    SetupPortal, // SoftAP provisioning portal up
+    Connecting,  // a transport exists but holds no address yet
+    Healthy,     // link + X10A up, MQTT connected or not configured (no other source is read)
+    BusDown,     // X10A link down — outranks MqttDown (the bus is the point of the device); also
+                 // every networked recovery-mode boot, which never starts the X10A poller
+    MqttDown,    // X10A up, but a configured broker is not connected
     WipeArmed,
     Wiping,
 };
@@ -120,9 +121,12 @@ inline LedPattern led_pattern(LedPhase p) {
 
 // Wiping and Healthy are both SOLID, so a monochrome LED cannot tell them apart by shape. That is
 // deliberate and safe only because of how the wipe is reached: the button task asserts Wiping ONLY
-// while a human is holding the button down, immediately after the unmistakable WipeArmed strobe,
-// and the board reboots into Connecting a moment later. There is no way to arrive at a steady
-// "solid" and be unsure which one it is. Asserted in the tests so the reasoning is on record.
+// while a human is holding the button down, normally right after the unmistakable WipeArmed strobe,
+// and only for the erase itself. A successful reset then reboots into the SetupPortal heartbeat (no
+// WiFi credentials survive it). A failed or incomplete one hands the indicator back and the board
+// returns to whatever operating phase it was in, with no failure pattern of its own — a known
+// indication gap: on a Healthy board a monochrome LED goes from solid to solid, and only /diag and
+// syslog say the reset did not finish. Asserted in the tests so the reasoning is on record.
 inline bool led_phase_is_solid(LedPhase p) {
     const LedPattern pat = led_pattern(p);
     return pat.pulses == 1 && pat.off_ms == 0 && pat.gap_ms == 0;

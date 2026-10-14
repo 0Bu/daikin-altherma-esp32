@@ -665,7 +665,7 @@ function faultValue() {
 // ── Recovery (safe) mode banner ──────────────────────────────────────────
 // Shown when /status.sys.safe_mode is true — the device crash-looped on a bad config and came up
 // minimally (network + web UI + OTA only; the X10A poll engine and MQTT bridge are paused). It is not
-// dismissible: it reflects a LIVE state and clears itself once a healthy reboot leaves safe mode. The
+// dismissible: it reflects a LIVE state and clears itself once a clean reboot leaves safe mode. The
 // recovery controls (behind the gear: the RX/TX pins on the Protocol card, the WiFi/MQTT modals)
 // stay fully usable.
 function renderRecoveryBanner() {

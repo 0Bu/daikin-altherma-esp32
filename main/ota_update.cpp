@@ -36,6 +36,7 @@
 #include "http_deadline.hpp"
 #include "mqtt_ha.hpp"
 #include "net.hpp"
+#include "nvs_storage.hpp" // nvs_restart_held_by_factory_reset — both restarts defer to a reset
 #include "provisioning.hpp"
 #include "syslog.hpp"
 #include "stack_watch.hpp"
@@ -88,6 +89,10 @@ using Lock = SemGuard;
 // both reachable from the network and a double-tap in the UI must not spawn two TLS sessions.
 bool     s_busy       = false;
 uint32_t s_generation = 0;
+// Set once an installed image's restart was held for a factory reset (record_installed_image_held):
+// the boot partition already selects that image, so no further check or install may run in this
+// boot and rewrite the slot it boots next. Guarded by s_mtx.
+bool s_install_held = false;
 
 // Optional release notes are kept out of OtaStatus: /ota/status is polled once a second during the
 // most heap-constrained part of an update, and copying/JSON-quoting 1 KiB of prose there would make
@@ -504,7 +509,7 @@ void set_progress(int pct) {
 
 bool wait_for_weather_quiesce() {
     if (!weather_fetch_active()) return true;
-    diag_printf("ota: waiting for the in-flight weather TLS client to release heap\n");
+    diag_printf("ota: waiting for the %s to release heap\n", "in-flight weather TLS client");
     const TickType_t started = xTaskGetTickCount();
     while (weather_fetch_active() && xTaskGetTickCount() - started < kWeatherWait)
         vTaskDelay(kAllocatorRetryDelay);
@@ -518,13 +523,13 @@ bool wait_for_weather_quiesce() {
 
 bool wait_for_poll_quiesce() {
     if (hp_poll_ota_quiesced()) return true;
-    diag_printf("ota: waiting for the in-flight X10A poll cycle to release heap\n");
+    diag_printf("ota: waiting for the %s to release heap\n", "in-flight X10A poll cycle");
     const TickType_t started = xTaskGetTickCount();
     while (!hp_poll_ota_quiesced() && xTaskGetTickCount() - started < kPollQuiesceWait)
         vTaskDelay(kAllocatorRetryDelay);
     if (hp_poll_ota_quiesced()) return true;
     const OtaHeapSample sample = ota_heap_sample();
-    diag_printf("ota: X10A poll task did not acknowledge quiesce (free=%u B largest=%u B)\n",
+    diag_printf("ota: %s did not acknowledge quiesce (free=%u B largest=%u B)\n", "X10A poll task",
                 static_cast<unsigned>(sample.free_bytes),
                 static_cast<unsigned>(sample.largest_internal_block));
     return false;
@@ -532,13 +537,13 @@ bool wait_for_poll_quiesce() {
 
 bool wait_for_mqtt_quiesce() {
     if (mqtt_publish_network_quiesced()) return true;
-    diag_printf("ota: waiting for the MQTT publish cycle to release heap\n");
+    diag_printf("ota: waiting for the %s to release heap\n", "MQTT publish cycle");
     const TickType_t started = xTaskGetTickCount();
     while (!mqtt_publish_network_quiesced() && xTaskGetTickCount() - started < kPollQuiesceWait)
         vTaskDelay(kAllocatorRetryDelay);
     if (mqtt_publish_network_quiesced()) return true;
     const OtaHeapSample sample = ota_heap_sample();
-    diag_printf("ota: MQTT publisher did not acknowledge quiesce (free=%u B largest=%u B)\n",
+    diag_printf("ota: %s did not acknowledge quiesce (free=%u B largest=%u B)\n", "MQTT publisher",
                 static_cast<unsigned>(sample.free_bytes),
                 static_cast<unsigned>(sample.largest_internal_block));
     return false;
@@ -546,28 +551,28 @@ bool wait_for_mqtt_quiesce() {
 
 bool wait_for_mqtt_transport_quiesce() {
     if (mqtt_transport_network_quiesced()) return true;
-    diag_printf("ota: waiting for the esp-mqtt transport to release heap\n");
+    diag_printf("ota: waiting for the %s to release heap\n", "esp-mqtt transport");
     const TickType_t started = xTaskGetTickCount();
     while (!mqtt_transport_network_quiesced() && xTaskGetTickCount() - started < kPollQuiesceWait)
         vTaskDelay(kAllocatorRetryDelay);
     if (mqtt_transport_network_quiesced()) return true;
     const OtaHeapSample sample = ota_heap_sample();
-    diag_printf("ota: esp-mqtt transport did not acknowledge quiesce (free=%u B largest=%u B)\n",
-                static_cast<unsigned>(sample.free_bytes),
+    diag_printf("ota: %s did not acknowledge quiesce (free=%u B largest=%u B)\n",
+                "esp-mqtt transport", static_cast<unsigned>(sample.free_bytes),
                 static_cast<unsigned>(sample.largest_internal_block));
     return false;
 }
 
 bool wait_for_modbus_quiesce() {
     if (mb_network_quiesced() && hp_modbus_ota_quiesced()) return true;
-    diag_printf("ota: waiting for the in-flight HomeHub cycle to release heap\n");
+    diag_printf("ota: waiting for the %s to release heap\n", "in-flight HomeHub cycle");
     const TickType_t started = xTaskGetTickCount();
     while ((!mb_network_quiesced() || !hp_modbus_ota_quiesced()) &&
            xTaskGetTickCount() - started < kPollQuiesceWait)
         vTaskDelay(kAllocatorRetryDelay);
     if (mb_network_quiesced() && hp_modbus_ota_quiesced()) return true;
     const OtaHeapSample sample = ota_heap_sample();
-    diag_printf("ota: HomeHub task did not acknowledge quiesce (free=%u B largest=%u B)\n",
+    diag_printf("ota: %s did not acknowledge quiesce (free=%u B largest=%u B)\n", "HomeHub task",
                 static_cast<unsigned>(sample.free_bytes),
                 static_cast<unsigned>(sample.largest_internal_block));
     return false;
@@ -575,13 +580,13 @@ bool wait_for_modbus_quiesce() {
 
 bool wait_for_syslog_quiesce() {
     if (syslog_network_quiesced()) return true;
-    diag_printf("ota: waiting for the in-flight Syslog cycle to release heap\n");
+    diag_printf("ota: waiting for the %s to release heap\n", "in-flight Syslog cycle");
     const TickType_t started = xTaskGetTickCount();
     while (!syslog_network_quiesced() && xTaskGetTickCount() - started < kPollQuiesceWait)
         vTaskDelay(kAllocatorRetryDelay);
     if (syslog_network_quiesced()) return true;
     const OtaHeapSample sample = ota_heap_sample();
-    diag_printf("ota: Syslog task did not acknowledge quiesce (free=%u B largest=%u B)\n",
+    diag_printf("ota: %s did not acknowledge quiesce (free=%u B largest=%u B)\n", "Syslog task",
                 static_cast<unsigned>(sample.free_bytes),
                 static_cast<unsigned>(sample.largest_internal_block));
     return false;
@@ -757,7 +762,7 @@ bool fetch_manifest_identity_once(const std::string& url, OtaManifestIdentity& o
             }
         }
     }
-    diag_printf("ota: manifest TLS sample (free=%u B largest=%u B)\n",
+    diag_printf("ota: %s TLS sample (free=%u B largest=%u B)\n", "manifest",
                 static_cast<unsigned>(manifest_open_heap.free_bytes),
                 static_cast<unsigned>(manifest_open_heap.largest_internal_block));
     close_http_client(c, socket_deadline);
@@ -1016,6 +1021,22 @@ void run_check(const OtaTaskArgs& request) {
         diag_printf("ota: changelog expiry timer unavailable; using no-notes fallback\n");
 }
 
+// The install validated and SELECTED the new image, but a factory reset latched NVS before the
+// restart: rebooting now would come up on a namespace the reset is still erasing — a partial reset
+// that looks like a finished one — so the restart is refused. Nothing is lost: the boot partition
+// already points at the new image, so the reset's own reboot (or, if the reset does not complete,
+// whatever restarts the board next) starts it PENDING_VERIFY under the ordinary health gate and
+// probation, exactly as this restart would have. The worker returns normally, so its network lease
+// ends (MQTT resumes, /status and /diag answer again); s_install_held instead refuses every later
+// check or install in this boot, which would otherwise rewrite the very slot selected to boot
+// next. The /diag line is nvs_restart_held_by_factory_reset's; the status keeps "done" (the
+// install did complete) with a truthful message.
+void record_installed_image_held() {
+    Lock lk(s_mtx);
+    s_install_held   = true;
+    s_status.message = "Installed; starts on next reboot (factory reset)";
+}
+
 void run_update(const OtaTaskArgs& request) {
     const bool       allow_downgrade = request.mode == OtaTaskMode::Downgrade;
     const char*      running         = esp_app_get_description()->version;
@@ -1158,7 +1179,7 @@ void run_update(const OtaTaskArgs& request) {
                                          : "Update server returned an error");
         return;
     }
-    diag_printf("ota: transfer TLS sample (free=%u B largest=%u B)\n",
+    diag_printf("ota: %s TLS sample (free=%u B largest=%u B)\n", "transfer",
                 static_cast<unsigned>(transfer_open_heap.free_bytes),
                 static_cast<unsigned>(transfer_open_heap.largest_internal_block));
 
@@ -1169,7 +1190,7 @@ void run_update(const OtaTaskArgs& request) {
     if (!buffer) {
         close_http_client(client, socket_deadline);
         const OtaHeapSample failed = ota_heap_sample();
-        diag_printf("ota: download-buffer allocation failed (free=%u B largest=%u B)\n",
+        diag_printf("ota: %s-buffer allocation failed (free=%u B largest=%u B)\n", "download",
                     static_cast<unsigned>(failed.free_bytes),
                     static_cast<unsigned>(failed.largest_internal_block));
         set_state("error", "Not enough memory for the update download — retry after reboot");
@@ -1515,7 +1536,7 @@ void run_update(const OtaTaskArgs& request) {
             heap_caps_malloc(kOtaBufSize, MALLOC_CAP_8BIT | MALLOC_CAP_INTERNAL));
         if (!buffer) {
             const OtaHeapSample failed = ota_heap_sample();
-            diag_printf("ota: resume-buffer allocation failed (free=%u B largest=%u B)\n",
+            diag_printf("ota: %s-buffer allocation failed (free=%u B largest=%u B)\n", "resume",
                         static_cast<unsigned>(failed.free_bytes),
                         static_cast<unsigned>(failed.largest_internal_block));
             e                = ESP_ERR_NO_MEM;
@@ -1628,7 +1649,7 @@ void run_update(const OtaTaskArgs& request) {
                         static_cast<unsigned>(after.largest_internal_block));
             set_state("error", "Update rejected: image validation failed");
         } else {
-            diag_printf("ota: esp_ota_end failed (%s; free=%u B largest=%u B)\n",
+            diag_printf("ota: %s failed (%s; free=%u B largest=%u B)\n", "esp_ota_end",
                         esp_err_to_name(e), static_cast<unsigned>(after.free_bytes),
                         static_cast<unsigned>(after.largest_internal_block));
             set_state("error", "Couldn't install the update");
@@ -1649,8 +1670,9 @@ void run_update(const OtaTaskArgs& request) {
     e = esp_ota_set_boot_partition(update_partition);
     if (e != ESP_OK) {
         const OtaHeapSample after = ota_heap_sample();
-        diag_printf("ota: validated image but boot selection failed (%s; free=%u B largest=%u B)\n",
-                    esp_err_to_name(e), static_cast<unsigned>(after.free_bytes),
+        diag_printf("ota: %s failed (%s; free=%u B largest=%u B)\n",
+                    "validated image but boot selection", esp_err_to_name(e),
+                    static_cast<unsigned>(after.free_bytes),
                     static_cast<unsigned>(after.largest_internal_block));
         set_state("error", e == ESP_ERR_OTA_VALIDATE_FAILED
                                ? "Update rejected: image validation failed"
@@ -1673,6 +1695,11 @@ void run_update(const OtaTaskArgs& request) {
     // Outlive both the 1 Hz browser and the gate's 2 Hz connection-churn-bounded observer, with
     // enough LAN/HTTPD scheduling margin for either to retain completed-verifier evidence.
     vTaskDelay(pdMS_TO_TICKS(kDoneBeforeRebootMs));
+    // Checked after that wait, at the last moment: see record_installed_image_held.
+    if (nvs_restart_held_by_factory_reset("ota")) {
+        record_installed_image_held();
+        return;
+    }
     esp_restart();
 }
 
@@ -1731,8 +1758,9 @@ void ota_task(void*) {
             }
         }
         // Captures checks, refused installs and every caught-exception path before the worker
-        // sleeps again. Successful installs sample explicitly after boot selection because they
-        // reboot from run_update() and never reach here.
+        // sleeps again, and an install whose restart a factory reset held. Other successful
+        // installs sample explicitly after boot selection because they reboot from run_update()
+        // and never reach here.
         stack_watch_sample(StackWatch::Ota);
         {
             Lock lk(s_mtx);
@@ -1753,6 +1781,9 @@ uint32_t next_generation(uint32_t current) {
 // contiguous block the following TLS gate is about to measure.
 uint32_t start_locked(const OtaTaskArgs& request, uint32_t previous_generation) {
     if (!s_ota_task) return 0;
+    // No new operation once an install's restart was held, nor while a factory reset is erasing:
+    // an install finishing then could only be held too, with nothing gained.
+    if (s_install_held || nvs_factory_reset_latched()) return 0;
     s_busy                 = true;
     s_task_args            = request;
     s_generation           = next_generation(previous_generation);
@@ -1988,6 +2019,10 @@ static void health_gate_task(void*) {
     // the boot record this window exists to explain — heap_guard.cpp's throttle, for the same
     // reason.
     bool skip_reported = false;
+    // Latched by the first GiveUp. While a factory reset holds the rollback restart the loop keeps
+    // running, and a late healthy sample must not turn the verdict into a Commit that keeps an
+    // image this gate has already given up on.
+    bool gave_up = false;
     for (int elapsed = 0;; elapsed += kHealthPollS) {
         stack_watch_sample(StackWatch::OtaHealth);
         // THE BODY SELF-GUARDS, like every other allocating task loop here (AGENTS.md → Memory,
@@ -2006,7 +2041,8 @@ static void health_gate_task(void*) {
         try {
             const OtaServiceHealth service = ota_service_health();
             const HealthVerdict    v =
-                health_gate_decide(elapsed, kHealthBaseWindowS, kHealthHardCapS, service);
+                gave_up ? HealthVerdict::GiveUp
+                           : health_gate_decide(elapsed, kHealthBaseWindowS, kHealthHardCapS, service);
             if (v == HealthVerdict::Commit) {
                 // The return value decides whether this image survives the next reboot, so it is
                 // not one to discard: a failed commit leaves the image PENDING_VERIFY and the
@@ -2021,18 +2057,27 @@ static void health_gate_task(void*) {
                              elapsed, net_link_str(service.link));
                 } else {
                     diag_printf("ota: health gate passed but marking the image valid failed (%s) — "
-                                "the next reboot rolls back to the previous firmware\n",
+                                "the next reboot rolls back\n",
                                 esp_err_to_name(e));
                 }
                 break;
             }
+            // A factory reset that latched NVS owns the next restart: rebooting now would come up
+            // on a namespace it is still erasing. Refusing costs the rollback nothing — the image
+            // stays PENDING_VERIFY, so the reset's own reboot (or whatever restarts the board next,
+            // if the reset does not complete) rolls it back in the bootloader exactly as this
+            // restart would have. The gate keeps asking once a second instead of ending
+            // (nvs_restart_held_by_factory_reset says so once per boot): a reset that fails and
+            // releases the latch must still get this known-bad image rolled back.
             if (v == HealthVerdict::GiveUp) {
-                ESP_LOGW("ota",
-                         "health gate: service proof failed after %ds; rebooting while "
-                         "PENDING_VERIFY -> rollback to the previous firmware",
-                         elapsed);
+                if (!gave_up)
+                    ESP_LOGW("ota",
+                             "health gate: service proof failed after %ds; rebooting to roll back",
+                             elapsed);
+                gave_up = true;
                 vTaskDelay(pdMS_TO_TICKS(1000));
                 stack_watch_sample(StackWatch::OtaHealth);
+                if (nvs_restart_held_by_factory_reset("ota")) continue;
                 esp_restart();
                 break; // esp_restart() does not return; keep the fail-closed intent explicit.
             }
@@ -2044,8 +2089,8 @@ static void health_gate_task(void*) {
         } catch (...) {
             if (!skip_reported) {
                 skip_reported = true;
-                diag_printf(
-                    "ota: health-gate cycle skipped (unknown exception) — still observing\n");
+                diag_printf("ota: health-gate cycle skipped (%s) — still observing\n",
+                            "unknown exception");
             }
         }
         vTaskDelay(pdMS_TO_TICKS(kHealthPollS * 1000));

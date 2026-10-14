@@ -11,10 +11,11 @@
 //
 // The button is the offline cure: hold BUTTON_FIRE_MS (logic/button.hpp) and the firmware erases
 // the whole "daik_cfg" NVS namespace, legacy WiFi flash credentials, history journal plus
-// trend/dwell RAM, and the raw coredump. It reboots into the setup portal only when every privacy
-// erase succeeds. Press classification — including the arm checkpoint that warns before anything is
-// destroyed — is the pure, host-tested logic/button.hpp; this file coordinates GPIO, storage and
-// the indicator.
+// trend/dwell RAM, the raw coredump and the MQTT retirement record, then seeds only the stated
+// board hardware (config_factory_seed_blob) so this button and the indicator still work. It reboots
+// into the setup portal only when every privacy erase succeeds. Press classification — including
+// the arm checkpoint that warns before anything is destroyed — is the pure, host-tested
+// logic/button.hpp; this file coordinates GPIO, storage and the indicator.
 //
 // Runtime-configured (config_model.hpp btn_gpio/btn_active_low) and DISABLED by default, because an
 // unconfigured input floats and a floating pin that reads "pressed" for five seconds would wipe a

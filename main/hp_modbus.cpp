@@ -392,6 +392,15 @@ bool mb_discover_homehub(std::string& found) {
 void mb_autodiscover_initial() {
     Config c = config();
     if (!config_modbus_should_search(c)) return;
+    // A stored settings blob this build could not use (a newer layout after a rollback, damage, a
+    // read error) leaves the running config on the fallback, whose pending search decision is not
+    // the owner's. Persisting its outcome would replace that blob with the fallback image, so skip
+    // the search entirely rather than spend it on a result that may not be written. The decision
+    // stays pending and runs on the first networked boot after an explicit save.
+    if (config_stored_blob_unreadable()) {
+        diag_printf("modbus: initial mDNS search skipped — stored settings unreadable, kept\n");
+        return;
+    }
     // Do not consume the one-shot decision in the captive portal or before a LAN lease exists. The
     // next networked boot is still the device's first meaningful opportunity to see the HomeHub.
     if (!net_is_up()) {

@@ -6,7 +6,9 @@
 #include <string>
 #include <vector>
 #include "nvs.h"
+#include "freertos/semphr.h"
 #include "mqtt_retirement_store.hpp"
+#include "nvs_storage.hpp"
 
 static void check(bool value, const char* name) {
     if (!value) {
@@ -20,18 +22,73 @@ struct FakeNvs {
     bool                 present    = false;
     esp_err_t            open_error = ESP_OK, query_error = ESP_OK, read_error = ESP_OK;
     esp_err_t            set_error = ESP_OK, commit_error = ESP_OK;
+    esp_err_t            readwrite_open_error = ESP_OK, erase_error = ESP_OK;
     int                  opens = 0, queries = 0, reads = 0, sets = 0, commits = 0, closes = 0;
+    int                  readwrite_opens = 0, erases = 0;
     int                  returned_read_size = -1;
     nvs_open_mode_t      mode               = NVS_READONLY;
 };
 static FakeNvs fake;
 
+// The store's mutex and the factory-reset latch. Constant-initialized: the production adapter
+// creates its mutex during static initialization, before main() runs.
+struct FakeLock {
+    StaticSemaphore_t* storage   = nullptr;
+    bool               held      = false;
+    bool               fail_take = false;
+    int                creations = 0, takes = 0, gives = 0;
+};
+static FakeLock lock;
+static bool     latched     = false;
+static int      latch_reads = 0;
+
+SemaphoreHandle_t xSemaphoreCreateMutexStatic(StaticSemaphore_t* storage) {
+    ++lock.creations;
+    lock.storage = storage;
+    return storage;
+}
+BaseType_t xSemaphoreTake(SemaphoreHandle_t semaphore, TickType_t) {
+    check(semaphore && semaphore == lock.storage, "ONLY_THE_STORE_MUTEX_IS_TAKEN");
+    if (lock.fail_take) return pdFALSE;
+    check(!lock.held, "STORE_MUTEX_NEVER_TAKEN_RECURSIVELY");
+    lock.held = true;
+    ++lock.takes;
+    return pdTRUE;
+}
+BaseType_t xSemaphoreGive(SemaphoreHandle_t semaphore) {
+    check(semaphore == lock.storage && lock.held, "STORE_MUTEX_GIVEN_ONLY_WHEN_HELD");
+    lock.held = false;
+    ++lock.gives;
+    return pdTRUE;
+}
+namespace daik {
+bool nvs_factory_reset_latched() {
+    // Read under the store mutex, or a save could pass the check just before the reset latches
+    // and still write after mqtt_retirement_forget() has erased the record.
+    check(lock.held, "LATCH_CHECKED_UNDER_STORE_LOCK");
+    ++latch_reads;
+    return latched;
+}
+} // namespace daik
+
 esp_err_t nvs_open(const char* name, nvs_open_mode_t mode, nvs_handle_t* handle) {
     check(std::strcmp(name, "mqtt_retire") == 0, "DEDICATED_NAMESPACE_NEVER_SERVICE_CONFIG");
     ++fake.opens;
     fake.mode = mode;
+    if (mode == NVS_READWRITE) ++fake.readwrite_opens;
     if (fake.open_error != ESP_OK) return fake.open_error;
+    if (mode == NVS_READWRITE && fake.readwrite_open_error != ESP_OK)
+        return fake.readwrite_open_error;
     *handle = 42;
+    return ESP_OK;
+}
+esp_err_t nvs_erase_all(nvs_handle_t handle) {
+    check(handle == 42 && fake.mode == NVS_READWRITE, "FORGET_USES_READWRITE_HANDLE");
+    check(lock.held, "FORGET_SERIALIZED_WITH_SAVE");
+    ++fake.erases;
+    if (fake.erase_error != ESP_OK) return fake.erase_error;
+    fake.stored.clear();
+    fake.present = false;
     return ESP_OK;
 }
 esp_err_t nvs_get_blob(nvs_handle_t handle, const char* key, void* destination, size_t* size) {
@@ -55,6 +112,7 @@ esp_err_t nvs_get_blob(nvs_handle_t handle, const char* key, void* destination, 
 esp_err_t nvs_set_blob(nvs_handle_t handle, const char* key, const void* data, size_t size) {
     check(handle == 42 && fake.mode == NVS_READWRITE, "SAVE_USES_READWRITE_HANDLE");
     check(std::strcmp(key, "provenance") == 0, "DEDICATED_KEY_NEVER_CONFIG_OR_LINK");
+    check(lock.held, "SAVE_WRITES_UNDER_STORE_LOCK");
     ++fake.sets;
     if (fake.set_error != ESP_OK) return fake.set_error;
     const auto* bytes = static_cast<const uint8_t*>(data);
@@ -276,6 +334,81 @@ static void codec_boundaries() {
           "INVALID_RECORD_NEVER_OPENS_OR_WRITES_NVS");
 }
 
+// The factory reset's erase of this store: everything in the dedicated namespace goes, a store that
+// was never written is already "erased", and every failure is reported so the reset stays
+// incomplete instead of rebooting over a surviving record.
+static void forget() {
+    check(lock.creations == 1, "STORE_MUTEX_CREATED_ONCE_AT_STATIC_INIT");
+    fake            = {};
+    fake.open_error = ESP_ERR_NVS_NOT_FOUND;
+    check(mqtt_retirement_forget(), "MISSING_NAMESPACE_FORGET_IS_SUCCESS");
+    check(fake.readwrite_opens == 0 && fake.erases == 0 && fake.closes == 0,
+          "MISSING_NAMESPACE_NEVER_CREATED");
+    fake = {};
+    check(mqtt_retirement_forget() && fake.erases == 1 && fake.commits == 1,
+          "EMPTY_NAMESPACE_FORGET_IS_SUCCESS");
+    fake = {};
+    seed(record());
+    const int takes = lock.takes;
+    check(mqtt_retirement_forget(), "FORGET_REMOVES_RECORD");
+    check(fake.erases == 1 && fake.commits == 1 && fake.opens == fake.closes && !lock.held &&
+              lock.takes == takes + 1 && lock.gives == lock.takes,
+          "FORGET_CLOSES_EVERY_HANDLE_AND_RELEASES_THE_LOCK");
+    MqttRetirementRecord loaded;
+    check(mqtt_retirement_store_load(loaded) == MqttRetirementStoreLoad::Missing,
+          "FORGET_REMOVES_RECORD");
+    fake            = {};
+    fake.open_error = ESP_FAIL;
+    check(!mqtt_retirement_forget() && fake.erases == 0, "FORGET_OPEN_ERROR_FAILS");
+    fake = {};
+    seed(record());
+    fake.readwrite_open_error = ESP_FAIL;
+    check(!mqtt_retirement_forget() && fake.erases == 0 && fake.present,
+          "FORGET_READWRITE_OPEN_ERROR_FAILS");
+    fake = {};
+    seed(record());
+    fake.erase_error = ESP_FAIL;
+    check(!mqtt_retirement_forget() && fake.present && fake.commits == 0 &&
+              fake.opens == fake.closes,
+          "FORGET_ERASE_ERROR_FAILS");
+    fake = {};
+    seed(record());
+    fake.commit_error = ESP_FAIL;
+    check(!mqtt_retirement_forget() && fake.opens == fake.closes, "FORGET_COMMIT_ERROR_FAILS");
+    fake = {};
+    seed(record());
+    lock.fail_take = true;
+    check(!mqtt_retirement_forget() && fake.opens == 0, "FORGET_WITHOUT_LOCK_TOUCHES_NOTHING");
+    lock.fail_take = false;
+    // The reset calls this behind the latch it has just set; the latch must not stop the erase.
+    latched = true;
+    check(mqtt_retirement_forget() && !fake.present, "FORGET_RUNS_BEHIND_THE_LATCH");
+    latched = false;
+}
+// Behind the factory-reset latch the MQTT task's save is refused before it touches NVS, under the
+// same lock the erase takes — the record cannot come back between the erase and the reboot.
+static void latched_save() {
+    const auto value = record();
+    latched          = true;
+    fake             = {};
+    const int reads  = latch_reads;
+    check(!mqtt_retirement_store_save(value), "LATCHED_SAVE_REFUSED");
+    check(fake.opens == 0 && fake.sets == 0 && latch_reads == reads + 1 && !lock.held,
+          "LATCHED_SAVE_REFUSED");
+    // Repeated retries stay refused and never recreate the record.
+    for (int i = 0; i < 3; ++i) check(!mqtt_retirement_store_save(value), "LATCHED_SAVE_REFUSED");
+    check(!fake.present, "LATCHED_SAVE_REFUSED");
+    latched = false;
+    check(mqtt_retirement_store_save(value) && fake.present && !lock.held &&
+              lock.takes == lock.gives,
+          "UNLATCHED_SAVE_WRITES_UNDER_STORE_LOCK");
+    fake           = {};
+    lock.fail_take = true;
+    check(!mqtt_retirement_store_save(value) && fake.opens == 0,
+          "SAVE_WITHOUT_LOCK_TOUCHES_NOTHING");
+    lock.fail_take = false;
+}
+
 int main(int argc, char** argv) {
     check(argc == 2, "SCENARIO_REQUIRED");
     const std::string name = argv[1];
@@ -295,6 +428,10 @@ int main(int argc, char** argv) {
         wire_reference();
     else if (name == "codec_boundaries")
         codec_boundaries();
+    else if (name == "forget")
+        forget();
+    else if (name == "latched_save")
+        latched_save();
     else
         check(false, "UNKNOWN_SCENARIO");
     std::printf("PASS %s\n", name.c_str());

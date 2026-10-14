@@ -21,6 +21,8 @@
 // the diag vocabulary.
 #include "crashinfo.hpp"
 
+#include <cstdio>
+#include <cstring>
 #include <string>
 
 namespace daik {
@@ -35,7 +37,27 @@ struct BootIdent {
     const char* elf_sha   = "";   // esp_app_get_elf_sha256() of the running image
     uint32_t    reason    = 0;    // raw esp_reset_reason_t value
     bool        safe_mode = false; // the latched boot-loop recovery flag (safe_mode.cpp)
+
+    // The recovery state this boot established, APPENDED after the fields above so a collector that
+    // already extracts version/elf_sha256/reset/safe_mode keeps working unchanged. Every one of
+    // these is decided before the syslog task exists — the crash counter and NVS state at the very
+    // top of app_main — so their own /diag lines never reach the log stream; this record is the
+    // only way they leave the device without somebody reading /diag in time.
+    const char* cause         = nullptr; // safe_mode_cause(): "crash_loop", "heap", or nullptr
+    int         crash_boots   = 0;    // safe_mode_crash_boots(): the crash count this boot acted on
+    unsigned    heap_restarts = 0;    // heap_guard_restarts(): the heap ladder position honoured
+    bool        nvs_ok        = true; // nvs_storage_available(): false = no persistence this boot
 };
+
+// The `cause=` value. A closed vocabulary rather than the caller's string verbatim: the record is
+// logfmt, an unexpected value with a space in it would split the field, and safe_mode.cpp only ever
+// assigns the two literals below. Anything else is named "unknown" instead of being passed through.
+inline const char* boot_cause_slug(const char* cause) noexcept {
+    if (!cause || !cause[0]) return "none";
+    if (std::strcmp(cause, "crash_loop") == 0) return "crash_loop";
+    if (std::strcmp(cause, "heap") == 0) return "heap";
+    return "unknown";
+}
 
 // One line, always emitted (a clean boot is worth a build-identity marker too). Empty version/hash
 // degrade to "?" rather than an empty value, so the key never renders as a dangling "version=".
@@ -47,6 +69,14 @@ inline std::string build_boot_line(const BootIdent& b) {
     s += " reset=";
     s += crash_reason_slug(b.reason);   // ONE reset vocabulary — see reset_reason.hpp
     s += b.safe_mode ? " safe_mode=yes" : " safe_mode=no";
+    // The appended recovery fields in one allocation-free step. Every value is bounded — a closed
+    // slug, two integers, a two-way flag: at most 79 characters even for INT_MIN and UINT_MAX — so
+    // the buffer cannot truncate.
+    char tail[112];
+    std::snprintf(tail, sizeof(tail), " cause=%s crash_boots=%d heap_restarts=%u nvs=%s",
+                  boot_cause_slug(b.cause), b.crash_boots, b.heap_restarts,
+                  b.nvs_ok ? "ok" : "degraded");
+    s += tail;
     return s;
 }
 

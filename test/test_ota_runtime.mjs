@@ -45,7 +45,7 @@ function replaceOnce(text, before, after, name) {
 try {
   const baseline = execute(compile(sourcePath, "production"), []);
   assert.equal(baseline.status, 0, `production OTA cases\n${baseline.stdout}${baseline.stderr}`);
-  assert.match(baseline.stdout, /PASS total=48\b/);
+  assert.match(baseline.stdout, /PASS total=51\b/);
   console.log(baseline.stdout.trim());
 
   const mutations = [
@@ -103,6 +103,26 @@ try {
       name: "mqtt-resume", scenario: "header_exception",
       before: "mqtt_transport_resume_after_network_heap();",
       after: "/* mutation: omit MQTT resume */",
+    },
+    {
+      name: "held-install-restart", scenario: "reset_hold",
+      before: "record_installed_image_held();\n        return;",
+      after: "record_installed_image_held(); /* mutation: restart anyway */",
+    },
+    {
+      name: "held-install-latch", scenario: "reset_hold",
+      before: "s_install_held   = true;",
+      after: "/* mutation: a held install does not refuse later operations */",
+    },
+    {
+      name: "health-giveup-latch", scenario: "health_timeout_held",
+      before: "gave_up = true;",
+      after: "/* mutation: a held give-up may still commit a late healthy sample */",
+    },
+    {
+      name: "latched-start", scenario: "reset_latched",
+      before: "if (s_install_held || nvs_factory_reset_latched()) return 0;",
+      after: "if (s_install_held) return 0; /* mutation: start while a reset erases */",
     },
     {
       name: "busy-tail", scenario: "header_exception",
@@ -213,7 +233,7 @@ try {
       `${mutation.name}: only the specific assertion failure counts`);
     console.log(`negative control ${mutation.name}: rejected by ${mutation.scenario}`);
   }
-  console.log(`production OTA runtime: 48 cases, ${mutations.length} negative controls; source sha256=`
+  console.log(`production OTA runtime: 51 cases, ${mutations.length} negative controls; source sha256=`
     + createHash("sha256").update(source).digest("hex"));
 } finally {
   fs.rmSync(dir, { recursive: true, force: true });
