@@ -428,6 +428,12 @@ static __attribute__((noinline)) void wifi_finish_sta_rollback() {
     const bool keep_stored = config_stored_blob_unreadable();
     if (!keep_stored && config_save(rollback_cfg)) {
         vTaskDelay(pdMS_TO_TICKS(500));
+        // A save that landed just before a factory reset latched must not restart into the erase:
+        // the reset owns the next reboot (nvs_storage.hpp, nvs_factory_reset_latched).
+        if (nvs_factory_reset_latched()) {
+            diag_printf("wifi: rollback restart refused — a factory reset is erasing stored data\n");
+            return;
+        }
         esp_restart();
     }
     if (keep_stored) {

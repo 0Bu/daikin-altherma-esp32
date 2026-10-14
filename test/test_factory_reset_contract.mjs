@@ -283,16 +283,9 @@ assert.ok(!ifStatements(reset, seedWrite, restart).some((b) => /\breturn\b/.test
 // finished reset. A site passes when, in its own function, an `if (nvs_factory_reset_latched())`
 // whose body leaves (return/continue/break) sits in a block that also contains the restart, and no
 // vTaskDelay separates the last such check from the restart: the latch is re-read after any wait.
-// Documented exceptions, each with the structural reason that is itself asserted:
-//   * wifi.cpp's credential-rollback restart follows config_save(), which nvs_set_blob refuses
-//     behind the latch. Its 500 ms syslog drain is still an unchecked window; a latch check there
-//     satisfies the general rule instead.
-//   * PENDING_INTEGRATION: a file whose guard lands from a parallel change. Tolerated only while
-//     the file does not mention the latch at all; once it does, the general rule applies AND the
-//     entry must be deleted (a stale entry fails), so the exception cannot outlive its reason.
-const PENDING_INTEGRATION = new Map([
-  ["main/heap_guard.cpp", "the heap-watchdog restart's latch guard is integrated separately"],
-]);
+// There is no exception: even wifi.cpp's credential-rollback restart, which only follows a
+// config_save() the latch refuses, re-checks after its syslog drain, because a save that landed
+// just before the latch would otherwise restart into the erase.
 function refusalGuards(s, at) {
   const fn = enclosingFunction(s, at);
   const refusals = ifStatements(s, fn.open, at)
@@ -312,28 +305,10 @@ function refusalGuards(s, at) {
 for (const rel of mainSources) {
   const s = source(rel).structure;
   const sites = calls(s, "esp_restart");
-  if (rel === "main/recovery_button.cpp" || sites.length === 0) {
-    if (PENDING_INTEGRATION.has(rel) && /\bnvs_factory_reset_latched\b/.test(s))
-      assert.fail(`${rel}: the latch guard has landed — delete its PENDING_INTEGRATION entry`);
-    continue;
-  }
-  if (PENDING_INTEGRATION.has(rel)) {
-    assert.ok(!/\bnvs_factory_reset_latched\b/.test(s),
-      `${rel}: the latch guard has landed — delete its PENDING_INTEGRATION entry so the general ` +
-      "rule checks it");
-    console.log(`factory reset: ${rel} restart pending integration (${PENDING_INTEGRATION.get(rel)})`);
-    continue;
-  }
+  if (rel === "main/recovery_button.cpp" || sites.length === 0) continue;
   for (const at of sites) {
     const problem = refusalGuards(s, at);
-    if (!problem) continue;
-    if (rel === "main/wifi.cpp") {
-      const gate = enclosingBraces(s, at)[0];
-      assert.match(gate.head, /\bif\s*\(\s*config_save\s*\(/,
-        "wifi.cpp's rollback restart must stay behind the config_save() that the latch refuses");
-      continue;
-    }
-    assert.fail(`${rel}: esp_restart() reachable during a factory reset — ${problem}`);
+    if (problem) assert.fail(`${rel}: esp_restart() reachable during a factory reset — ${problem}`);
   }
 }
 

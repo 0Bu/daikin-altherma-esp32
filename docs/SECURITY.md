@@ -182,7 +182,8 @@ WiFi-driver NVS before driver startup; STA/AP credentials use RAM storage every 
 Mandatory-startup or persistence failures remain outside the recovery guarantee, as does an unsigned
 image failure before `app_main`. Heap breadcrumbs separately bound retries; `safe_mode_cause` distinguishes them.
 Recovery is best effort and adds no endpoint or privilege. Factory reset is destructive and must
-complete all configured data erasures before declaring success.
+complete all configured data erasures, including the MQTT retirement record, before declaring
+success; it keeps only the board hardware statement, and no other restart runs while it erases.
 
 ## Signing key lifecycle
 

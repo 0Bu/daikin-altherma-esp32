@@ -310,6 +310,8 @@ and profile, never credentials or active configuration. A known predecessor is r
 replacement is saved, and the replacement is saved before discovery. Reload after a real reboot
 therefore resumes known-profile cleanup. A missing first-upgrade record cannot recover an unknown
 older profile; a corrupt/incompatible record blocks new X10A discovery rather than guessing.
+The recovery-button factory reset erases this record and refuses new saves until it reboots, so a
+profile announced before the reset needs the owner migration below.
 An abandoned broker/base or replacement board is an owner migration boundary: the new connection
 does not authenticate to the old broker or blindly delete another installation's topics.
 

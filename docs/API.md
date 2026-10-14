@@ -355,8 +355,11 @@ byte/version layouts.
 A failed route-owned save returns `500 {ok:false,error:"config write failed"}` with no reboot/live
 apply. Unrelated link-cache maintenance failure is logged without rejecting an already committed
 service blob; an X10A save requires its atomic link write. Never move/resize `nvs@0x9000`.
-Recovery-button factory reset also clears driver credentials, RAM history/dwell, the flash journal
-and raw dump. Any erase failure reports an incomplete reset rather than pretending success.
+Recovery-button factory reset also clears driver credentials, RAM history/dwell, the flash journal,
+the raw dump and the MQTT retirement record, then rewrites only the stated board hardware (preset,
+indicator, button) as a fresh `cfg` blob, best effort. Any erase failure reports an incomplete
+reset rather than pretending success; while the reset holds the NVS latch, saves fail and every
+other restart is refused.
 
 ### Network settings
 

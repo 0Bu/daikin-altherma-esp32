@@ -388,6 +388,9 @@ Heap statistics, source liveness and task stack minima are visible without a bro
 `/status`. Unstarted tasks report a null stack sample. Board memory trends run independently of a
 successful X10A sweep; their sampling/persistence must not borrow plant availability. Recovery
 button factory reset is destructive to configuration and history and requires explicit authorization.
+While it holds the NVS write latch, every other restart (rebooting saves, Ethernet fallback, OTA
+install and health gate, heap watchdog, WiFi rollback) refuses and logs once; an OTA image already
+selected boots, or a pending image rolls back, on the reset's own reboot.
 
 <a id="web-ui-config-flow"></a>
 ## Configuration ownership

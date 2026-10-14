@@ -115,6 +115,7 @@ void config_unlock() {
 const Config& config_ref_locked() { return adapter::cfg; }
 } // namespace detail
 bool      nvs_storage_available() { return true; }
+bool      nvs_factory_reset_latched() { return false; }
 void      net_mdns_start() { ++sdk::mdns_starts; }
 bool      net_is_up() { return wifi_link_up(); }
 bool      ota_download_active() { return false; }
