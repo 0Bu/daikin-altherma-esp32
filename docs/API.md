@@ -16,7 +16,13 @@ Body-bearing POSTs require `Content-Type: application/json`. Bodies are reassemb
 fixed capacity with room for a terminator; empty, oversized, truncated or stalled bodies are rejected.
 Configuration JSON requires one object and at most 16 container levels; scalars, arrays, raw or
 decoded NUL and trailing non-whitespace fail before any setting is applied.
-Body acceptance checks a 30-second absolute budget before and after each receive. Unread-body
+Request bodies use Content-Length; Transfer-Encoding is unsupported. A supplied length must match
+the SDK's representable body length; mismatched or unsupported framing closes the connection.
+Supplied configuration fields must have their documented JSON type; integer fields require finite,
+representable whole numbers. Missing fields retain the route's documented meaning.
+Incoming socket reads share one 30-second monotonic budget across headers, body and SDK purge;
+progress cannot extend it. A blocking receive can add its five-second timeout. Successful body
+settlement resets the budget for the next keep-alive request. Unread-body
 cleanup admits receives for two seconds and checks an 8 KiB cap after each 128-byte receive
 (up to 8 KiB + 128 bytes); an active receive can add its socket timeout. Larger/slower cleanup
 closes the connection.
@@ -25,11 +31,11 @@ stable `code`. A conflict/proof requirement is 409, failed hardware evidence 422
 persistence failure 500, and OOM/busy/unavailable service 503. Success and a saved setting are
 separate facts: inspect `ok`, `saved` and `reboot` where the route returns them.
 
-Status, values, history, diagnostic text and MCP results stream bounded chunks. Chunk boundaries
+Status, values, history, WiFi scans, diagnostic text and MCP results stream bounded chunks. Chunk boundaries
 have no JSON/domain meaning. An allocation failure before emission returns 503; a later failure
-closes status/MCP streams; values serialize a pre-staged snapshot without allocation. `/diag` and
-`/history` retain the outer-guard limitation after emission: a new error response cannot replace
-already-sent data. Clients must reject truncated JSON.
+closes an incomplete stream without appending a replacement response. Values and dwell metadata
+are staged before emission. Valid UTF-8 text is preserved; each invalid text byte is represented by
+U+FFFD in JSON output without changing configuration. Clients must reject truncated JSON.
 
 During active OTA, every non-OTA route fails fast with a small busy-503, including assets, both
 `/models` and `/diag` forms and MCP. Only OTA routes remain reachable. The common admission guard
@@ -262,6 +268,8 @@ Their `value` is a string or null.
 `concept` is structural HomeHub pairing. Selector semantics prevent valve/heater paths being shown
 as generic switches. `held:true` means the outdoor page has stopped refreshing. An absent duration
 is unknown, zero is a newly observed transition, and `dwell_min:true` makes duration a lower bound.
+Dwell metadata must match the copied cache revision, source identity and decoded state; a mismatch
+is unknown rather than a duration borrowed from another reading.
 
 Modbus rows contain `label`, `value`, `unit`, `off`, with applicable `binary`, `enum`, `profile`, `concept`,
 `history`. Numeric, flag and enum `value` fields are JSON numbers or null; text values are strings or

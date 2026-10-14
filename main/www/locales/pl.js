@@ -1,4 +1,4 @@
-// translation-source: 22a1c00755c5e710f675904d8503fe9efb3cfb475acba640fc78c686e833d886
+// translation-source: 094b6d8e9805ef6f1340361c7b7628c5db490a2ea1fe8f32355cfd8c17e686a0
 const plNoun = (n, one, few, many) => {
   const value = Math.abs(Number(n)), mod10 = value % 10, mod100 = value % 100;
   return value === 1 ? one
@@ -511,8 +511,8 @@ I18N.pl = localeValues([
   /* wifi.title */ "Konfiguracja WiFi",
   /* wifi.ssid */ "Sieć WiFi (SSID)",
   /* wifi.pass */ "Hasło WiFi",
-  /* wifi.err_ssid */ "SSID może mieć najwyżej 32 znaki",
-  /* wifi.err_pass */ "Hasło musi być puste (sieć otwarta) albo mieć od 8 do 63 znaków",
+  /* wifi.err_ssid */ "SSID musi mieć od 1 do 32 bajtów UTF-8",
+  /* wifi.err_pass */ "Hasło musi być puste (sieć otwarta) albo mieć od 8 do 63 bajtów UTF-8",
   /* wifi.hint */ "Wpisz nazwę sieci WiFi. Jeśli urządzenie nie może się połączyć, automatycznie przywróci poprzednie ustawienia WiFi.",
   /* mqtt.title */ "Broker MQTT",
   /* mqtt.hostport */ "Host : port",

@@ -104,3 +104,6 @@ node test/test_detect_runtime.mjs
 # Execute the shared HTTP registration/MCP dispatcher and the actual outgoing deadline watchdog.
 node test/test_http_server_runtime.mjs
 node test/test_http_deadline_runtime.mjs
+
+# Execute the real response builders with independent allocation/transport/snapshot oracles.
+node test/test_http_stream_runtime.mjs

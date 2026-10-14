@@ -1,4 +1,4 @@
-// translation-source: 22a1c00755c5e710f675904d8503fe9efb3cfb475acba640fc78c686e833d886
+// translation-source: 094b6d8e9805ef6f1340361c7b7628c5db490a2ea1fe8f32355cfd8c17e686a0
 I18N.uk = localeValues([
   /* sys.nodata */ "Немає даних",
   /* sys.unreachable */ "Недоступно",
@@ -506,8 +506,8 @@ I18N.uk = localeValues([
   /* wifi.title */ "Налаштування WiFi",
   /* wifi.ssid */ "Мережа WiFi (SSID)",
   /* wifi.pass */ "Пароль WiFi",
-  /* wifi.err_ssid */ "SSID не може перевищувати 32 символи",
-  /* wifi.err_pass */ "Пароль має бути порожнім (відкрита мережа) або містити від 8 до 63 символів",
+  /* wifi.err_ssid */ "SSID має містити від 1 до 32 байтів UTF-8",
+  /* wifi.err_pass */ "Пароль має бути порожнім (відкрита мережа) або містити від 8 до 63 байтів UTF-8",
   /* wifi.hint */ "Введіть назву мережі WiFi. Якщо пристрій не зможе підключитися, він автоматично відновить попередні налаштування WiFi.",
   /* mqtt.title */ "Брокер MQTT",
   /* mqtt.hostport */ "Вузол : порт",

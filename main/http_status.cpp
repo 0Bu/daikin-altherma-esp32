@@ -70,6 +70,7 @@
 #include <cstdio>
 #include <cstring>
 #include <string>
+#include <memory>
 #include <string_view>
 #include <utility>
 #include <vector>
@@ -312,21 +313,25 @@ static void append_status_json(JsonOut& j, bool redact) {
     const BoardPreset* selected_board = board_selected_preset(c);
 
     j += "{";
-    j += "\"version\":" + jstr(esp_app_get_description()->version) + ",";
-    j += "\"platform\":" + jstr(CONFIG_IDF_TARGET) + ",";
+    j += "\"version\":";
+    json_append_quoted(j, esp_app_get_description()->version);
+    j += ",";
+    j += "\"platform\":";
+    json_append_quoted(j, CONFIG_IDF_TARGET);
+    j += ",";
     j += "\"uptime_s\":" + std::to_string(esp_timer_get_time() / 1000000) + ",";
     char boot_id[17];
     std::snprintf(boot_id, sizeof(boot_id), "%016llx",
                   static_cast<unsigned long long>(s_status_boot_id));
     j += "\"boot_id\":";
-    j += jstr(boot_id);
+    json_append_quoted(j, boot_id);
     j += ",";
     // Build identity: the running app's ELF sha (hex) — matches a core dump to the exact firmware
     // that produced it (scripts/decode-coredump.sh), and pairs with last_crash below.
     char elf_sha[65] = {0};
     esp_app_get_elf_sha256(elf_sha, sizeof(elf_sha));
     j += "\"app_elf_sha256\":";
-    j += jstr(elf_sha);
+    json_append_quoted(j, elf_sha);
     j += ",";
     // GPIOs the UI offers in the RX/TX pin dropdown. A concrete selected board narrows the generic
     // ESP32-S3 chip-safe set to pads its PCB actually exposes; Custom keeps the generic list because
@@ -382,11 +387,11 @@ static void append_status_json(JsonOut& j, bool redact) {
         j += ",\"user_set\":";
         j += c.board_user_set ? "true" : "false";
         j += ",\"preset_id\":";
-        j += jstr(c.board_user_set ? board_preset_key(c.board_preset_id) : "");
+        json_append_quoted(j, c.board_user_set ? board_preset_key(c.board_preset_id) : "");
         j += ",\"preset_name\":";
-        j += jstr(selected_board ? selected_board->name : "");
+        json_append_quoted(j, selected_board ? selected_board->name : "");
         j += ",\"vendor\":";
-        j += jstr(board_vendor_name(board_selected_vendor(c)));
+        json_append_quoted(j, board_vendor_name(board_selected_vendor(c)));
         j += ",\"pins_local\":[";
         for (int i = 0; i < nlpins; i++) {
             if (i) j += ",";
@@ -418,11 +423,11 @@ static void append_status_json(JsonOut& j, bool redact) {
         for (int i = 0; i < npre; i++) {
             if (i) j += ",";
             j += "{\"id\":";
-            j += jstr(presets[i]->key);
+            json_append_quoted(j, presets[i]->key);
             j += ",\"name\":";
-            j += jstr(presets[i]->name);
+            json_append_quoted(j, presets[i]->name);
             j += ",\"vendor\":";
-            j += jstr(board_vendor_name(presets[i]->vendor));
+            json_append_quoted(j, board_vendor_name(presets[i]->vendor));
             j += ",\"led_gpio\":";
             j += std::to_string(presets[i]->led_gpio);
             j += ",\"led_type\":";
@@ -497,7 +502,9 @@ static void append_status_json(JsonOut& j, bool redact) {
         j += ",\"pressure_hpa\":";
         j += env_fresh ? env_press : "null";
         j += ",\"error\":";
-        j += jstr(!env_supported ? "unsupported_board" : env_enabled ? env.error : "disabled");
+        json_append_quoted(j, !env_supported ? "unsupported_board"
+                              : env_enabled  ? env.error
+                                             : "disabled");
         j += ",\"samples\":";
         j += std::to_string(env.samples);
         j += ",\"errors\":";
@@ -511,7 +518,7 @@ static void append_status_json(JsonOut& j, bool redact) {
         for (int i = 0; i < nepre; ++i) {
             if (i) j += ",";
             j += "{\"name\":";
-            j += jstr(epresets[i]->name);
+            json_append_quoted(j, epresets[i]->name);
             j += ",\"sda\":";
             j += std::to_string(epresets[i]->sda);
             j += ",\"scl\":";
@@ -565,7 +572,7 @@ static void append_status_json(JsonOut& j, bool redact) {
                      eth.mac[1], eth.mac[2], eth.mac[3], eth.mac[4], eth.mac[5]);
         const NetLink kind = net_kind();
         j += "\"net\":{\"kind\":";
-        j += jstr(net_link_str(kind));
+        json_append_quoted(j, net_link_str(kind));
         j += ",\"ip\":";
         j += jstr_r(kind == NetLink::Eth ? eth.ip : kind == NetLink::Wifi ? wi.ip : "", redact);
         j += ",\"eth\":{\"supported\":";
@@ -614,7 +621,7 @@ static void append_status_json(JsonOut& j, bool redact) {
         j += jstr_r(m.broker, redact);
         if (!m.error.empty()) {
             j += ",\"error\":";
-            j += jstr(m.error);
+            json_append_quoted(j, m.error);
         }
         // The installation's base topic, ALWAYS the effective one — the empty stored value means
         // "the compile-time default" (logic/mqtt_base.hpp), and reporting "" would make a default
@@ -740,13 +747,16 @@ static void append_status_json(JsonOut& j, bool redact) {
         j += ",\"source_unix_s\":";
         j += rt.has_value && rt.has_source_time ? std::to_string(rt.source_unix_s) : "null";
         j += ",\"timestamp_source\":";
-        j += rt.has_value ? jstr(rt.timestamp_source) : "null";
+        if (rt.has_value)
+            json_append_quoted(j, rt.timestamp_source);
+        else
+            j += "null";
         j += ",\"age_s\":";
         j += freshness.age_known ? std::to_string(freshness.age_s) : "null";
         j += ",\"fresh\":";
         j += freshness.fresh ? "true" : "false";
         j += ",\"freshness_reason\":";
-        j += jstr(freshness.reason);
+        json_append_quoted(j, freshness.reason);
         j += ",\"temperature_valid\":";
         j += room.temperature_valid ? "true" : "false";
         j += ",\"setpoint_valid\":";
@@ -756,7 +766,7 @@ static void append_status_json(JsonOut& j, bool redact) {
         j += ",\"room_error_k\":";
         j += room.has_room_error ? ref_error_k : "null";
         j += ",\"reason\":";
-        j += jstr(reference_room_reason_name(room.reason));
+        json_append_quoted(j, reference_room_reason_name(room.reason));
         j += ",\"reason_code\":";
         j += std::to_string(static_cast<unsigned>(room.reason));
         j += ",\"retained\":";
@@ -769,11 +779,11 @@ static void append_status_json(JsonOut& j, bool redact) {
         j += std::to_string(rt.rejections);
         if (!rt.eligibility_error.empty()) {
             j += ",\"eligibility_error\":";
-            j += jstr(rt.eligibility_error);
+            json_append_quoted(j, rt.eligibility_error);
         }
         if (!rt.error.empty()) {
             j += ",\"error\":";
-            j += jstr(rt.error);
+            json_append_quoted(j, rt.error);
         }
         j += "},";
     }
@@ -824,33 +834,39 @@ static void append_status_json(JsonOut& j, bool redact) {
                  ? std::to_string(heating_curve.outdoor_temperature_c)
                  : "null";
         j += ",\"outdoor_source\":";
-        j += heating_curve.has_outdoor_temperature
-                 ? jstr(logic::outdoor_source_name(heating_curve.outdoor_source))
-                 : "null";
+        if (heating_curve.has_outdoor_temperature)
+            json_append_quoted(j, logic::outdoor_source_name(heating_curve.outdoor_source));
+        else
+            j += "null";
         j += ",\"last_sample_outdoor_temperature_c\":";
         j += heating_curve.has_last_sample_outdoor
                  ? std::to_string(heating_curve.last_sample_outdoor_temperature_c)
                  : "null";
         j += ",\"last_sample_outdoor_source\":";
-        j += heating_curve.has_last_sample_outdoor
-                 ? jstr(logic::outdoor_source_name(heating_curve.last_sample_outdoor_source))
-                 : "null";
+        if (heating_curve.has_last_sample_outdoor)
+            json_append_quoted(
+                j, logic::outdoor_source_name(heating_curve.last_sample_outdoor_source));
+        else
+            j += "null";
         j += ",\"plant_outdoor_temperature_c\":";
         j += heating_curve.has_plant_outdoor_temperature
                  ? std::to_string(heating_curve.plant_outdoor_temperature_c)
                  : "null";
         j += ",\"plant_outdoor_source\":";
-        j += heating_curve.has_plant_outdoor_temperature
-                 ? jstr(logic::outdoor_source_name(heating_curve.plant_outdoor_source))
-                 : "null";
+        if (heating_curve.has_plant_outdoor_temperature)
+            json_append_quoted(j, logic::outdoor_source_name(heating_curve.plant_outdoor_source));
+        else
+            j += "null";
         j += ",\"last_sample_plant_outdoor_temperature_c\":";
         j += heating_curve.has_last_sample_plant_outdoor
                  ? std::to_string(heating_curve.last_sample_plant_outdoor_temperature_c)
                  : "null";
         j += ",\"last_sample_plant_outdoor_source\":";
-        j += heating_curve.has_last_sample_plant_outdoor
-                 ? jstr(logic::outdoor_source_name(heating_curve.last_sample_plant_outdoor_source))
-                 : "null";
+        if (heating_curve.has_last_sample_plant_outdoor)
+            json_append_quoted(
+                j, logic::outdoor_source_name(heating_curve.last_sample_plant_outdoor_source));
+        else
+            j += "null";
         j += ",\"forecast_available\":";
         j += heating_curve.forecast_available ? "true" : "false";
         j += ",\"plant_gate_known\":";
@@ -918,7 +934,7 @@ static void append_status_json(JsonOut& j, bool redact) {
         j += ",\"power_w\":";
         j += circulation.has_value ? circulation_power : "null";
         j += ",\"state\":";
-        j += jstr(circulation_power_state_name(circulation.state));
+        json_append_quoted(j, circulation_power_state_name(circulation.state));
         j += ",\"source_at\":";
         j += circulation.has_value && circulation.has_source_time
                  ? jstr(rfc3339_utc(circulation.source_unix_s))
@@ -928,13 +944,16 @@ static void append_status_json(JsonOut& j, bool redact) {
                  ? std::to_string(circulation.source_unix_s)
                  : "null";
         j += ",\"timestamp_source\":";
-        j += circulation.has_value ? jstr(circulation.timestamp_source) : "null";
+        if (circulation.has_value)
+            json_append_quoted(j, circulation.timestamp_source);
+        else
+            j += "null";
         j += ",\"age_s\":";
         j += circulation.age_known ? std::to_string(circulation.age_s) : "null";
         j += ",\"fresh\":";
         j += circulation.fresh ? "true" : "false";
         j += ",\"freshness_reason\":";
-        j += jstr(circulation.freshness_reason);
+        json_append_quoted(j, circulation.freshness_reason);
         j += ",\"retained\":";
         j += circulation.has_value && circulation.retained ? "true" : "false";
         j += ",\"messages\":";
@@ -945,7 +964,7 @@ static void append_status_json(JsonOut& j, bool redact) {
         j += std::to_string(circulation.rejections);
         if (!circulation.error.empty()) {
             j += ",\"error\":";
-            j += jstr(circulation.error);
+            json_append_quoted(j, circulation.error);
         }
         j += "},";
     }
@@ -994,7 +1013,7 @@ static void append_status_json(JsonOut& j, bool redact) {
         j += weather_configured ? "true" : "false";
         j += ",\"provider\":\"open-meteo\"";
         j += ",\"model\":";
-        j += jstr(wf.model);
+        json_append_quoted(j, wf.model);
         j += ",\"fetch_interval_s\":";
         j += std::to_string(WEATHER_FETCH_INTERVAL_S);
         j += ",\"max_age_s\":";
@@ -1053,7 +1072,7 @@ static void append_status_json(JsonOut& j, bool redact) {
         j += ",\"fresh\":";
         j += weather.fresh ? "true" : "false";
         j += ",\"freshness_reason\":";
-        j += jstr(weather.reason);
+        json_append_quoted(j, weather.reason);
         j += ",\"successes\":";
         j += std::to_string(wf.successes);
         j += ",\"errors\":";
@@ -1076,11 +1095,11 @@ static void append_status_json(JsonOut& j, bool redact) {
             j += ",\"reason\":\"diagnostics_disabled\"";
         } else if (!wf.reason.empty()) {
             j += ",\"reason\":";
-            j += jstr(wf.reason);
+            json_append_quoted(j, wf.reason);
         }
         if (weather_source_active && !wf.error.empty()) {
             j += ",\"error\":";
-            j += jstr(wf.error);
+            json_append_quoted(j, wf.error);
         }
         j += "},";
     }
@@ -1100,7 +1119,7 @@ static void append_status_json(JsonOut& j, bool redact) {
         j += std::to_string(sy.port);
         if (!sy.error.empty()) {
             j += ",\"error\":";
-            j += jstr(sy.error);
+            json_append_quoted(j, sy.error);
         }
         j += "},";
     }
@@ -1128,7 +1147,7 @@ static void append_status_json(JsonOut& j, bool redact) {
     }
 
     j += "\"profile\":{\"id\":";
-    j += jstr(c.profile);
+    json_append_quoted(j, c.profile);
     j += "},";
 
     // The HomeHub Modbus stack — a SECOND, INDEPENDENT source, never an alternative to the X10A
@@ -1144,9 +1163,9 @@ static void append_status_json(JsonOut& j, bool redact) {
     j += ",\"discovering\":";          j += mb.discovering ? "true" : "false";
     j += ",\"searched\":";             j += c.mb_discovery_done ? "true" : "false";
     j += ",\"profile\":";
-    j += jstr(modbus_profile_name(mb.profile));
+    json_append_quoted(j, modbus_profile_name(mb.profile));
     j += ",\"profile_basis\":";
-    j += jstr(modbus_profile_basis_name(mb.profile_basis));
+    json_append_quoted(j, modbus_profile_basis_name(mb.profile_basis));
     // The ADDRESS comes from the CONFIG, the STATE from the live link.
     // Reading the address off the link status was wrong before the first connect ever succeeded:
     // ModbusStatus is zero-initialised, so a device that had never dialled reported port 0 and unit
@@ -1179,8 +1198,10 @@ static void append_status_json(JsonOut& j, bool redact) {
         // `error` remains the complete English /diag + Syslog wording for API compatibility and
         // fallback clients. The structured companions let the web UI localise it without parsing
         // prose, while preserving errno/exception/parser detail and the exact EKRHH register.
-        j += ",\"error\":";      j += jstr(mb.last_error);
-        j += ",\"error_code\":"; j += jstr(mb.last_error_code);
+        j += ",\"error\":";
+        json_append_quoted(j, mb.last_error);
+        j += ",\"error_code\":";
+        json_append_quoted(j, mb.last_error_code);
         if (mb.last_error_detail >= 0) {
             j += ",\"error_detail\":"; j += std::to_string(mb.last_error_detail);
         }
@@ -1209,7 +1230,7 @@ static void append_status_json(JsonOut& j, bool redact) {
     // means the liveness record could not measure the X10A raster. (The checkup's health.persist
     // below does report "flash" when its window was rebuilt from the journal.)
     j += ",\"persist\":";
-    j += jstr(history_persist_state());
+    json_append_quoted(j, history_persist_state());
     // The same question for the per-row STATE AGES (logic/state_dwell.hpp), which ride the same
     // .noinit medium under the same integrity rules (safe mode, reset reason, magic, version,
     // catalog, CRC). The trend rings' age guards (not_committed, stale_commit) do not apply: the
@@ -1219,7 +1240,7 @@ static void append_status_json(JsonOut& j, bool redact) {
     // concurrency, and HTTP safety), and one more key in an existing object is the cheapest honest
     // place to say it.
     j += ",\"dwell_persist\":";
-    j += jstr(dwell_persist_state());
+    json_append_quoted(j, dwell_persist_state());
     j += ",\"rows\":[";
     bool first_trend = true;
     for (size_t t = 0; t < logic::TREND_COUNT; t++) {
@@ -1228,9 +1249,9 @@ static void append_status_json(JsonOut& j, bool redact) {
         if (!first_trend) j += ",";
         first_trend = false;
         j += "{\"id\":";
-        j += jstr(logic::TRENDS[t].id);
+        json_append_quoted(j, logic::TRENDS[t].id);
         j += ",\"label\":";
-        j += jstr(lbl);
+        json_append_quoted(j, lbl);
         j += "}";
     }
     j += "],\"modbus_rows\":[";
@@ -1251,9 +1272,9 @@ static void append_status_json(JsonOut& j, bool redact) {
             if (!first_mb_trend) j += ",";
             first_mb_trend = false;
             j += "{\"id\":";
-            j += jstr(hh.trend_id);
+            json_append_quoted(j, hh.trend_id);
             j += ",\"label\":";
-            j += jstr(r->label);
+            json_append_quoted(j, r->label);
             j += "}";
         }
     }
@@ -1265,9 +1286,9 @@ static void append_status_json(JsonOut& j, bool redact) {
         for (size_t et = 0; et < ENV3_HISTORY_COUNT; ++et) {
             if (et) j += ",";
             j += "{\"id\":";
-            j += jstr(ENV3_HISTORIES[et].id);
+            json_append_quoted(j, ENV3_HISTORIES[et].id);
             j += ",\"label\":";
-            j += jstr(ENV3_HISTORIES[et].label);
+            json_append_quoted(j, ENV3_HISTORIES[et].label);
             j += "}";
         }
     }
@@ -1619,7 +1640,7 @@ static void append_status_json(JsonOut& j, bool redact) {
         j += ",\"poll_skipped\":";
         j += std::to_string(hp_skipped_cycles());
         j += ",\"reset_reason\":";
-        j += jstr(reset_reason_name(diag_crash_info().reason));
+        json_append_quoted(j, reset_reason_name(diag_crash_info().reason));
         j += ",\"safe_mode\":";
         j += safe_mode_active() ? "true" : "false";
         // WHY it is minimal, so the recovery banner can give advice that fits the cause: a
@@ -1680,7 +1701,7 @@ static void append_status_json(JsonOut& j, bool redact) {
     // from (that is exactly the state between picking a channel and installing from it), so the
     // setting is reported on its own rather than inferred from the version string.
     j += "\"ota\":{\"channel\":";
-    j += jstr(ota_channel_name(c.ota_channel));
+    json_append_quoted(j, ota_channel_name(c.ota_channel));
     j += "},";
 
     // The web UI's manual language override (logic/ui_lang.hpp; POST /set_lang). "auto" (the default)
@@ -1688,7 +1709,7 @@ static void append_status_json(JsonOut& j, bool redact) {
     // Reported here for the same reason as the channel: the ESP32 card's language selector renders
     // from /status, and the browser applies a named language over its navigator.language guess.
     j += "\"ui\":{\"lang\":";
-    j += jstr(ui_lang_name(c.ui_lang));
+    json_append_quoted(j, ui_lang_name(c.ui_lang));
     j += "},";
 
     // Current reset/fault plus optional stored-dump summary of unknown age; null on a clean boot.
@@ -1883,6 +1904,7 @@ static esp_err_t h_status(httpd_req_t* req) {
 struct ValuesSnapshot {
     std::vector<CachedValue> x10a;
     std::vector<uint8_t> x10a_label_ambiguous;
+    std::unique_ptr<logic::DwellReading[]> x10a_dwell;
     std::vector<CachedValue> modbus;
     bool modbus_live = false;
 };
@@ -1890,33 +1912,41 @@ struct ValuesSnapshot {
 // Copy every source before sending the first response byte. Besides giving the two wire surfaces
 // one snapshot contract, this keeps an allocation failure in the shared HTTP guard's clean-503
 // window: once chunked transfer starts, the response status can no longer be changed.
-static ValuesSnapshot take_values_snapshot() {
+// Measure staging separately from the stream frame; both are included in the stack path budget.
+__attribute__((noinline)) static ValuesSnapshot take_values_snapshot() {
     ValuesSnapshot snapshot;
+    {
+        HpValuesIdentity x10a_identity;
 
-    for (int attempt = 0; attempt < 2; ++attempt) {
-        uint32_t     cap_rev  = 0;
-        const size_t x10a_cap = hp_values_capacity(&cap_rev);
-        if (snapshot.x10a.size() < x10a_cap) {
-            snapshot.x10a.resize(x10a_cap ? x10a_cap : 1);
+        for (int attempt = 0; attempt < 2; ++attempt) {
+            uint32_t     cap_rev  = 0;
+            const size_t x10a_cap = hp_values_capacity(&cap_rev);
+            if (snapshot.x10a.size() < x10a_cap) {
+                snapshot.x10a.resize(x10a_cap ? x10a_cap : 1);
+            }
+            size_t       total    = 0;
+            uint32_t     snap_rev = 0;
+            const size_t n = hp_values_snapshot(snapshot.x10a.data(), snapshot.x10a.size(), &total,
+                                                &snap_rev, &x10a_identity);
+            if (attempt == 0 && (total > snapshot.x10a.size() || snap_rev != cap_rev)) {
+                snapshot.x10a.resize(total ? total : 1);
+                continue;
+            }
+            snapshot.x10a.resize(n);
+            break;
         }
-        size_t       total    = 0;
-        uint32_t     snap_rev = 0;
-        const size_t n =
-            hp_values_snapshot(snapshot.x10a.data(), snapshot.x10a.size(), &total, &snap_rev);
-        if (attempt == 0 && (total > snapshot.x10a.size() || snap_rev != cap_rev)) {
-            snapshot.x10a.resize(total ? total : 1);
-            continue;
+        snapshot.x10a_label_ambiguous.resize(snapshot.x10a.size());
+        for (size_t i = 0; i < snapshot.x10a.size(); i++) {
+            // object_id()/ha_slug() owns a temporary std::string. Resolve it before transfer starts
+            // so even that small allocation remains inside the clean-503 window.
+            snapshot.x10a_label_ambiguous[i] =
+                label_slug_is_ambiguous(object_id(snapshot.x10a[i].label)) ? 1 : 0;
         }
-        snapshot.x10a.resize(n);
-        break;
-    }
-    snapshot.x10a_label_ambiguous.resize(snapshot.x10a.size());
-    for (size_t i = 0; i < snapshot.x10a.size(); i++) {
-        // object_id()/ha_slug() owns a temporary std::string. Resolve it before transfer starts so
-        // even that small allocation remains inside the clean-503 window.
-        snapshot.x10a_label_ambiguous[i] =
-            label_slug_is_ambiguous(object_id(snapshot.x10a[i].label)) ? 1 : 0;
-    }
+        if (!snapshot.x10a.empty())
+            snapshot.x10a_dwell = std::make_unique<logic::DwellReading[]>(snapshot.x10a.size());
+        dwell_readings_snapshot(snapshot.x10a.data(), snapshot.x10a.size(), x10a_identity,
+                                snapshot.x10a_dwell.get());
+    } // The borrowed cache identity is only needed while staging this source's dwell readings.
 
     // The initial status read is only a cheap skip. mb_values_snapshot() re-checks liveness after
     // copying the cache and closes both disconnect and reconnect races with generation counters.
@@ -1959,7 +1989,8 @@ static void append_json_uint(JsonOut& out, uint64_t value) {
 // covering a row the C++ test still gates.
 template <typename JsonOut>
 static void append_values_array(JsonOut& j, const std::vector<CachedValue>& v,
-                                const std::vector<uint8_t>& ambiguous) {
+                                const std::vector<uint8_t>&                   ambiguous,
+                                const std::unique_ptr<logic::DwellReading[]>& dwell) {
     j += "[";
     // Successive += rather than one a + b + c + … chain: a chain materialises every intermediate
     // std::string in the same frame, and this runs on the httpd task (see AGENTS.md → Memory,
@@ -2030,7 +2061,8 @@ static void append_values_array(JsonOut& j, const std::vector<CachedValue>& v,
         // arriving in a new place. No value, no age — and the firmware decides that, so a consumer
         // that is not the browser cannot reach a different answer.
         if (logic::dwell_row_tracked(v[i].reg, v[i].off, v[i].conv) && !v[i].value.empty()) {
-            const logic::DwellReading dw = dwell_reading(v[i].reg, v[i].off, v[i].conv);
+            // The batch owns exactly one POD per copied value; no growth or lookup during transfer.
+            const logic::DwellReading dw = dwell ? dwell[i] : logic::DwellReading{};
             // `known` false is a first-class answer and is emitted as ABSENCE: a silent bus, a page
             // that stopped answering, a row seen too long ago to vouch for. An omitted key says "no
             // reading"; a zero would say "it changed just now".
@@ -2118,7 +2150,7 @@ static void append_modbus_values_array(JsonOut& j, const std::vector<CachedValue
 template <typename JsonOut>
 static void append_values_json(JsonOut& j, const ValuesSnapshot& snapshot) {
     j += "{\"values\":";
-    append_values_array(j, snapshot.x10a, snapshot.x10a_label_ambiguous);
+    append_values_array(j, snapshot.x10a, snapshot.x10a_label_ambiguous, snapshot.x10a_dwell);
     // Emitted only while the link is CONNECTED, not merely enabled. That is a payload invariant
     // worth having: if the `modbus` array is present, every row in it was read this cycle. Gating on
     // `enabled` alone served the last good cache after the link dropped, and a consumer has no way
@@ -2148,10 +2180,14 @@ esp_err_t http_send_values_json(httpd_req_t* req, std::string_view prefix,
     ValuesSnapshot snapshot = take_values_snapshot();
     HttpJsonChunks j(HttpChunkEmitter{req});
     httpd_resp_set_type(req, "application/json");
-    j += prefix;
-    append_values_json(j, snapshot);
-    j += suffix;
-    return j.finish() ? ESP_OK : ESP_FAIL;
+    return finish_bounded_stream(j,
+                                 [prefix, suffix, &snapshot](auto& out) {
+                                     out += prefix;
+                                     append_values_json(out, snapshot);
+                                     out += suffix;
+                                 })
+               ? ESP_OK
+               : ESP_FAIL;
 }
 
 static esp_err_t h_values(httpd_req_t* req) {
@@ -2245,8 +2281,8 @@ static esp_err_t h_models(httpd_req_t* req) {
 // new allocation on a heap where the largest contiguous block is the binding limit, and chunking
 // costs nothing here.
 static esp_err_t h_history(httpd_req_t* req) {
-    // History is intentionally chunked, yet still owns a growing string and label temporaries.
-    // Keep that churn outside the firmware TLS operation just like /status and /values.
+    // Snapshot/header preparation allocates before transfer. Keep it outside firmware TLS;
+    // the finished header and numeric samples then use the shared bounded stream boundary.
     if (ota_download_active()) return network_tls_busy(req);
     char q[96] = {0};
     char id[32] = {0};
@@ -2271,8 +2307,11 @@ static esp_err_t h_history(httpd_req_t* req) {
     const int mb_t = modbus ? logic::homehub_history_index(id) : -1;
     const bool    native_modbus    = modbus && mb_active_profile() == ModbusProfile::Altherma4;
     const int env_t = env3_source ? env3_history_index(id) : -1;
-    const Config& active_config = config();
-    const bool env3_configured  = active_config.env3_enabled && env3_board_supported(active_config);
+    bool          env3_configured  = false;
+    {
+        const Config active_config = config();
+        env3_configured = active_config.env3_enabled && env3_board_supported(active_config);
+    } // Release the configuration snapshot before constructing the streamed history response.
     const bool x10a_unknown = !modbus && !env3_source && (!def_ || t >= logic::TREND_COUNT);
     const bool    missing_quiet =
         native_modbus && mb_t >= 0 && logic::HOMEHUB_HISTORIES[mb_t].offset == 9;
@@ -2336,16 +2375,16 @@ static esp_err_t h_history(httpd_req_t* req) {
     std::snprintf(boot_id, sizeof(boot_id), "%016llx",
                   static_cast<unsigned long long>(s_status_boot_id));
     j += ",\"boot_id\":";
-    j += jstr(boot_id);
+    json_append_quoted(j, boot_id);
     j += ",\"label\":";
-    j += jstr(lbl);
+    json_append_quoted(j, lbl);
     j += ",\"dt\":";
     j += std::to_string(logic::HISTORY_DT_S);
     // The ROW's unit, never a hardcoded "°C": the trends mix °C, bar and unitless rows, and the
     // browser prints this string straight into the range readout and the crosshair. A bar row
     // labelled °C is exactly the legacy-35–legacy-39 shape.
     j += ",\"unit\":";
-    j += jstr(unit);
+    json_append_quoted(j, unit);
     const TimeStatus ts = time_status();
     const int32_t    newest_age = history_meta.newest_age_s;
     if (ts.synced && n && newest_age >= 0) {
@@ -2379,48 +2418,56 @@ static esp_err_t h_history(httpd_req_t* req) {
         httpd_resp_set_status(req, "503 Service Unavailable");
         return http_send_json(req, "{\"ok\":false,\"error\":\"history changed; retry\"}");
     }
+    HttpJsonChunks chunks(HttpChunkEmitter{req});
     httpd_resp_set_type(req, "application/json");
-    for (size_t i = 0; i < n; i++) {
-        if (i) j += ",";
-        // TENTHS on the wire, as plain integers — the browser scales by 10. Integers rather than
-        // "41.6": shorter (a 288-sample body is ~1.1 KB instead of ~1.5 KB), exactly representable,
-        // and no formatting code to get the sign or a trailing zero wrong. The `unit` field says
-        // what they are tenths OF, and www/js/history.js's histHtml documents the same contract on its side.
-        if (logic::history_is_absent(samples[i])) j += "null";
-        else j += std::to_string(static_cast<int>(samples[i]));
-        // Flush every 64 samples so the peak string stays a few hundred bytes rather than the whole
-        // body — the point of chunking here.
-        if ((i & 63) == 63) {
-            if (httpd_resp_send_chunk(req, j.c_str(), j.size()) != ESP_OK) return ESP_FAIL;
-            j.clear();
-        }
-    }
-    j += "],\"held\":[";
-    for (size_t i = 0; i < nruns; i++) {
-        if (i) j += ",";
-        j += "[";
-        j += std::to_string(runs[i][0]);
-        j += ",";
-        j += std::to_string(runs[i][1]);
-        j += "]";
-    }
-    j += "]}";
-    if (httpd_resp_send_chunk(req, j.c_str(), j.size()) != ESP_OK) return ESP_FAIL;
-    return httpd_resp_send_chunk(req, nullptr, 0);      // terminate the chunked response
+    return finish_bounded_stream(chunks,
+                                 [&](auto& out) {
+                                     out += j;
+                                     for (size_t i = 0; i < n; i++) {
+                                         if (i) out += ",";
+                                         // Samples are bounded signed tenths. Format without
+                                         // allocation after transfer starts.
+                                         if (logic::history_is_absent(samples[i]))
+                                             out += "null";
+                                         else {
+                                             const int value = static_cast<int>(samples[i]);
+                                             if (value < 0) out += '-';
+                                             append_json_uint(
+                                                 out, value < 0 ? static_cast<unsigned>(-value)
+                                                                : static_cast<unsigned>(value));
+                                         }
+                                     }
+                                     out += "],\"held\":[";
+                                     for (size_t i = 0; i < nruns; i++) {
+                                         if (i) out += ",";
+                                         out += "[";
+                                         append_json_uint(out, runs[i][0]);
+                                         out += ",";
+                                         append_json_uint(out, runs[i][1]);
+                                         out += "]";
+                                     }
+                                     out += "]}";
+                                 })
+               ? ESP_OK
+               : ESP_FAIL;
 }
 
 static esp_err_t h_diag(httpd_req_t* req) {
-    char q[64];
-    if (!read_query(req, q)) return query_too_long(req); // never downgrade a requested redaction
-    // GET is read-only. Destructive clearing is POST /diag/clear, so a link, prefetch or image
-    // request can never erase the evidence it was trying to retrieve. ?verbose only changes the
-    // setting when present.
-    char v[4];
-    if (httpd_query_key_value(q, "verbose", v, sizeof(v)) == ESP_OK)
-        diag_set_verbose(query_flag_on(v));
-    const bool redact = query_flag(q, "redact");
-    // Plain /diag copies into static storage and is useful while OTA is in flight. Redaction owns
-    // per-line strings and a 1280-byte growable chunk, so only that allocation-rich variant waits.
+    bool redact = false;
+    {
+        char q[64];
+        if (!read_query(req, q))
+            return query_too_long(req); // never downgrade a requested redaction
+        // GET is read-only. Destructive clearing is POST /diag/clear, so a link, prefetch or image
+        // request can never erase the evidence it was trying to retrieve. ?verbose only changes the
+        // setting when present.
+        char v[4];
+        if (httpd_query_key_value(q, "verbose", v, sizeof(v)) == ESP_OK)
+            diag_set_verbose(query_flag_on(v));
+        redact = query_flag(q, "redact");
+    } // Query scratch has no borrowed consumer during the diagnostic transfer.
+    // Plain diagnostics copy into static storage. Redacted per-line strings require their own
+    // OTA admission check before the bounded stream starts.
     if (redact && ota_download_active()) return network_tls_busy(req);
     static char  buf[6144];
     const size_t max_dump = ota_download_active() ? 512 : sizeof(buf);
@@ -2438,27 +2485,22 @@ static esp_err_t h_diag(httpd_req_t* req) {
         return httpd_resp_send_chunk(req, nullptr, 0);
     }
 
-    // Redacted: a handful of log statements interpolate a host, an IP or an SSID (logic/redact.hpp).
-    // Rewritten line by line and flushed in ~1 KB chunks, rather than as one redacted copy of the
-    // whole ring: a replacement is longer than most values it replaces, so the result can GROW, and
-    // the two answers to that are a second ~8 KB .bss buffer or a ~6 KB contiguous heap allocation
-    // on a heap whose real ceiling is its largest contiguous block. The chunk costs neither, and
-    // batching keeps it to a handful of sends instead of one per line.
-    std::string chunk;
-    chunk.reserve(1280);
-    for (size_t start = 0; start < n; ) {
-        size_t eol = start;
-        while (eol < n && buf[eol] != '\n') eol++;
-        if (eol < n) eol++;                                   // keep the newline with its line
-        chunk += redact_diag_line(std::string_view(buf + start, eol - start));
-        start = eol;
-        if (chunk.size() >= 1024) {
-            if (httpd_resp_send_chunk(req, chunk.c_str(), chunk.size()) != ESP_OK) return ESP_FAIL;
-            chunk.clear();
-        }
-    }
-    if (!chunk.empty() && httpd_resp_send_chunk(req, chunk.c_str(), chunk.size()) != ESP_OK) return ESP_FAIL;
-    return httpd_resp_send_chunk(req, nullptr, 0);            // terminate the chunked response
+    // Redact each record without materializing the ring. A late per-line allocation failure
+    // closes the committed stream instead of reaching the outer guard's clean-error response.
+    HttpJsonChunks chunks(HttpChunkEmitter{req});
+    return finish_bounded_stream(chunks,
+                                 [&](auto& out) {
+                                     for (size_t start = 0; start < n;) {
+                                         size_t eol = start;
+                                         while (eol < n && buf[eol] != '\n') ++eol;
+                                         if (eol < n) ++eol;
+                                         out += redact_diag_line(
+                                             std::string_view(buf + start, eol - start));
+                                         start = eol;
+                                     }
+                                 })
+               ? ESP_OK
+               : ESP_FAIL;
 }
 
 static esp_err_t h_diag_clear(httpd_req_t* req) {
@@ -2553,19 +2595,28 @@ static esp_err_t h_scan(httpd_req_t* req) {
     // A scan materializes arbitrary nearby SSIDs and asks the Wi-Fi stack for a concurrent radio
     // operation. Neither belongs between OTA's admission sample and its TLS/X509 allocations.
     if (ota_download_active()) return network_tls_busy(req);
-    WifiScanEntry e[20];
-    int n = wifi_scan(e, 20);
-    std::string j = "{\"networks\":[";
-    for (int i = 0; i < n; i++) {
-        if (i) j += ",";
-        j += "{\"ssid\":";
-        j += jstr(e[i].ssid);
-        j += ",\"rssi\":";
-        j += std::to_string(e[i].rssi);
-        j += "}";
-    }
-    j += "]}";
-    return http_send_json(req, j.c_str());
+    WifiScanEntry  e[20];
+    int            n = wifi_scan(e, 20);
+    HttpJsonChunks chunks(HttpChunkEmitter{req});
+    httpd_resp_set_type(req, "application/json");
+    return finish_bounded_stream(chunks,
+                                 [&e, n](auto& out) {
+                                     out += "{\"networks\":[";
+                                     for (int i = 0; i < n; i++) {
+                                         if (i) out += ',';
+                                         out += "{\"ssid\":";
+                                         json_append_quoted(out, e[i].ssid);
+                                         out += ",\"rssi\":";
+                                         const int rssi = e[i].rssi;
+                                         if (rssi < 0) out += '-';
+                                         append_json_uint(
+                                             out, static_cast<unsigned>(rssi < 0 ? -rssi : rssi));
+                                         out += '}';
+                                     }
+                                     out += "]}";
+                                 })
+               ? ESP_OK
+               : ESP_FAIL;
 }
 
 void http_register_status(httpd_handle_t s, HttpSurface surface) {

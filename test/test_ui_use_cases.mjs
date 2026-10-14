@@ -215,6 +215,7 @@ const context = vm.createContext({
   location,
   URL,
   URLSearchParams,
+  TextEncoder,
   Blob,
   AbortController,
   setTimeout: () => 1,
@@ -1149,4 +1150,29 @@ for (const mode of ["ok", "reboot"]) {
 ui.S.busy = false;
 fetchState.mode = "ok";
 
-console.log(`UI use cases: ${cases.length} routed modals + ${ui.TRANSIENT_MODALS.length} transient decision, navigation, Cancel/backdrop/Escape, accepted/rejected/invalid Save paths`);
+// Credential limits are UTF-8 byte counts, not JavaScript UTF-16 lengths. Exercise the actual
+// dashboard submit listener and require it to submit the original opaque text unchanged.
+for (const [ssid, pass, accepted] of [
+  ["ä".repeat(16), "ä".repeat(4), true],
+  ["ä".repeat(17), "password8", false],
+  ["😀".repeat(8), "", true],
+  ["😀".repeat(9), "password8", false],
+  ["Network", "ä".repeat(31) + "a", true],
+  ["Network", "ä".repeat(32), false],
+  [" spaced ", "quoted\\\"pass", true],
+]) {
+  ui.S.busy = false;
+  ui.openWifi();
+  document.getElementById("wfSSID").value = ssid;
+  document.getElementById("wfPass").value = pass;
+  const before = fetchState.calls.filter(call => call.url === "/set_wifi").length;
+  await document.getElementById("wifiForm").fire("submit");
+  await settle();
+  const calls = fetchState.calls.filter(call => call.url === "/set_wifi");
+  assert.equal(calls.length, before + Number(accepted), "WiFi form must enforce UTF-8 byte limits");
+  if (accepted) assert.deepEqual(calls.at(-1).body, { ssid, pass });
+  else assert.equal(document.getElementById("wifiModal").hidden, false);
+  await document.getElementById("wfCancel").onclick();
+}
+
+console.log(`UI use cases: ${cases.length} routed modals + ${ui.TRANSIENT_MODALS.length} transient decision, navigation, Cancel/backdrop/Escape, accepted/rejected/invalid Save paths, UTF-8 credential boundaries`);

@@ -15,6 +15,9 @@ esp_err_t http_send_gzip(httpd_req_t* req, const char* content_type,
                          const unsigned char* start, const unsigned char* end);
 // Read a JSON request body into a bounded buffer; returns bytes or <0.
 int       http_read_body(httpd_req_t* req, char* buf, size_t max);
+// Install the total receive budget before the SDK starts parsing a new socket's request.
+esp_err_t http_open_session(httpd_handle_t server, int socket);
+void      http_close_session(httpd_handle_t server, int socket);
 
 // Stream an optional small protocol prefix/suffix around the exact /status or /values object. Both
 // device routes and MCP use the same bounded sink; neither materialises a complete response whose

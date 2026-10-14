@@ -1,4 +1,4 @@
-// translation-source: 22a1c00755c5e710f675904d8503fe9efb3cfb475acba640fc78c686e833d886
+// translation-source: 094b6d8e9805ef6f1340361c7b7628c5db490a2ea1fe8f32355cfd8c17e686a0
 I18N.de = localeValues([
   /* sys.nodata */ "Keine Daten",
   /* sys.unreachable */ "Nicht erreichbar",
@@ -506,8 +506,8 @@ I18N.de = localeValues([
   /* wifi.title */ "WLAN-Konfiguration",
   /* wifi.ssid */ "WLAN-Netzwerk · SSID",
   /* wifi.pass */ "WLAN-Passwort",
-  /* wifi.err_ssid */ "SSID darf höchstens 32 Zeichen haben",
-  /* wifi.err_pass */ "Für ein offenes Netz muss das Passwort leer sein, sonst 8–63 Zeichen lang",
+  /* wifi.err_ssid */ "SSID muss 1–32 UTF-8-Bytes lang sein",
+  /* wifi.err_pass */ "Für ein offenes Netz muss das Passwort leer sein, sonst 8–63 UTF-8-Bytes lang",
   /* wifi.hint */ "Gib den Namen des WLANs ein. Falls die Verbindung scheitert, stellt das Gerät automatisch die vorherigen WLAN-Einstellungen wieder her.",
   /* mqtt.title */ "MQTT-Broker",
   /* mqtt.hostport */ "Host : Port",

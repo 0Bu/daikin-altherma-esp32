@@ -9,6 +9,7 @@
 #include "logic/crc.hpp"        // Protocol — the framing a probe reply was read with
 #include "logic/hp_probe.hpp"   // ProbeStatus — the outcomes hp_probe_run() reports
 #include "logic/refrigerant_service.hpp"
+#include "logic/values_identity.hpp"
 
 namespace daik {
 
@@ -86,7 +87,8 @@ size_t hp_values_capacity(uint32_t* revision_out = nullptr);
 // Thread-safe snapshot copy of the current value cache. Returns count written; zero once the last
 // real X10A reply is 15 seconds old, including skipped/OOM polls that left connected/cache intact.
 size_t hp_values_snapshot(CachedValue* out, size_t max, size_t* total_out = nullptr,
-                          uint32_t* revision_out = nullptr);
+                          uint32_t*         revision_out = nullptr,
+                          HpValuesIdentity* identity_out = nullptr);
 
 // Copy the current cache into a caller-prepared, profile-stable layout. The caller supplies the
 // row identities (label/reg/off/conv) and pre-reserves each value string. Missing rows are cleared

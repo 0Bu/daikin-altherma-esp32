@@ -273,8 +273,10 @@ function wireRestOfApp() {
     // to join, a different network than the one the user selected.
     const ssid = $("wfSSID").value;
     const pass = $("wfPass").value;
+    const ssidBytes = new TextEncoder().encode(ssid).length;
+    const passBytes = new TextEncoder().encode(pass).length;
     let valid = true;
-    if (!ssid || ssid.length > 32) {
+    if (!ssidBytes || ssidBytes > 32) {
       $("wfSSID").classList.add("invalid");
       $("wfSSIDError").hidden = false;
       valid = false;
@@ -282,7 +284,7 @@ function wireRestOfApp() {
       $("wfSSID").classList.remove("invalid");
       $("wfSSIDError").hidden = true;
     }
-    if (pass.length > 0 && (pass.length < 8 || pass.length > 63)) {
+    if (passBytes > 0 && (passBytes < 8 || passBytes > 63)) {
       $("wfPass").classList.add("invalid");
       $("wfPassError").hidden = false;
       valid = false;
