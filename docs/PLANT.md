@@ -102,7 +102,7 @@ source clears them, and older replies cannot restore them. A reboot starts a new
 even when the device later restores compatible saved trends.
 
 <a id="refrigerant-service-observation"></a>
-## Refrigerant circuit during heating
+## Refrigerant when heating
 
 A separate passive row records one continuous ordinary space-heating run. It is not a ninth health
 check and starts without a service mode or plant-diagnostics opt-in. Until this boot detects a

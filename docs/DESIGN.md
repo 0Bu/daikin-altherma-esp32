@@ -339,7 +339,7 @@ Pressure distinguishes an immediate low sample from sustained confirmation; flow
 only; BSH/BUH have separate clocks and sub-minute activity remains visible. Source limitations and
 all rule details are maintained in [DIAGNOSTICS.md](DIAGNOSTICS.md) and its evidence reference.
 
-A separate neutral Refrigerant circuit during heating row uses passive fresh-sweep observation.
+A separate neutral Refrigerant when heating row uses passive fresh-sweep observation.
 It needs no 24-hour opt-in and contributes no badge/count/verdict. It appears only after signal
 coverage is evaluated this boot, may remain waiting/paused with limits, offers no action and is
 cleanly absent on older firmware. Copy says ordinary polling cannot command full load, prove

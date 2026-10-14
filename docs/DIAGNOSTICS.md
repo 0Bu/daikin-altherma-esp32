@@ -20,9 +20,9 @@ the installation's health.
 | **NOTE** | A notable accepted observation or unit-reported warning; it does not identify a defect or cause. |
 | **WARNING** | A current unit-reported fault, or pressure confirmed continuously at or below the project's boundary during the window. |
 | **CHECKING** | A required day, signal coverage or eligible observation is missing. The detail names what is missing. |
-| **MEASURED ONLY** | A measurement or event population without enough evidence for a good/bad assessment. |
-| **EXPERIMENTAL** | A counter comparison whose complete manufacturer semantics are unknown. |
-| **NOT AVAILABLE** | The active profile does not supply the required signals. |
+| **MEASURED** | A measurement or event population without enough evidence for a good/bad assessment. |
+| **TRIAL** | An experimental counter comparison whose complete manufacturer semantics are unknown. |
+| **N/A** | The active profile does not supply the required signals. |
 
 A reassuring day-based result needs both the full 24-hour span and at least 90% usable coverage
 of its own signals. Current fault state is separate. Missing or stale X10A data cannot establish a
@@ -87,7 +87,7 @@ remain unclassified.
 **Meaning:** At least **12 completed space-heating runs**, with at least **90% of all completed runs
 classified**, can carry the assessment. An average below **10 minutes** produces **NOTE** as soon as
 this population exists. **OK** additionally needs a full day and 90% readable classification time.
-Smaller or insufficiently classified populations are **MEASURED ONLY**, with the reason shown;
+Smaller or insufficiently classified populations are **MEASURED**, with the reason shown;
 no usable compressor observation remains **CHECKING**.
 
 **Important limit:** There is no pooled all-mode assessment, and an unfinished long run cannot dilute
@@ -104,7 +104,7 @@ accepted heating runs only.
 while the compressor and defrost signals were both readable.
 
 **Meaning:** At least **three paired events** and more than **15%** defrost share produce **NOTE**.
-Both are project heuristics. Fewer events or no paired compressor runtime remain **MEASURED ONLY**;
+Both are project heuristics. Fewer events or no paired compressor runtime remain **MEASURED**;
 no readable defrost observation remains **CHECKING**.
 A reassuring assessment additionally needs a full day and 90% paired signal coverage.
 
@@ -137,7 +137,7 @@ normal value does not erase an earlier low reading.
 **In plain language:** The board reports the lowest accepted flow after the internal pump has run
 continuously for at least sixty seconds.
 
-**Meaning:** The result is **MEASURED ONLY**. It filters pump-off and initial run-up values; it does
+**Meaning:** The result is **MEASURED**. It filters pump-off and initial run-up values; it does
 not establish part load or retain the operating mode of the minimum.
 
 **Important limit:** Required flow differs by model, heating, cooling, DHW and defrost conditions.
@@ -151,7 +151,7 @@ The minimum is not a design-flow measurement or a diagnosis of restricted flow.
 **In plain language:** The board separately counts observed active seconds for the water-circuit
 electric backup heater (**BUH**) and tank electric booster heater (**BSH**).
 
-**Meaning:** **MEASURED ONLY** appears as soon as there is readable runtime evidence; it does not
+**Meaning:** **MEASURED** appears as soon as there is readable runtime evidence; it does not
 wait for a full day. A reported zero applies only to the observed intervals. A missing heater signal
 remains absent, rather than being counted as off.
 
@@ -166,7 +166,7 @@ Controller settings, weather and operating schedules can make this activity inte
 **In plain language:** The board compares five internal counters at consecutive readable endpoints,
 with a known compressor state. Only a comparable increase counts as an observed event.
 
-**Meaning:** A usable comparison without an increase shows **EXPERIMENTAL**; a comparable increase
+**Meaning:** A usable comparison without an increase shows **TRIAL**; a comparable increase
 shows **NOTE**. Both retain experimental evidence and appear without a full-day wait. A non-zero
 startup value is a baseline, and a decrease has no established reset or wrap interpretation.
 
@@ -177,7 +177,7 @@ changes or their cause.
 **Evidence and limits:** [Protection-limit changes](DIAGNOSTIC_EVIDENCE.md#diagnosis-retries)
 
 <a id="refrigerant-service-observation"></a>
-## Refrigerant circuit during heating
+## Refrigerant when heating
 
 This expandable row is technical context, **not a ninth health diagnosis**. It watches existing
 read-only X10A traffic automatically without Plant diagnostics opt-in or a service mode. Until this
@@ -192,10 +192,10 @@ established for heating. Optional missing comparison data remains an explicit li
 
 | Row status | Meaning |
 |---|---|
-| **NOT AVAILABLE** | The detected profile lacks a required signal. |
-| **WAITING FOR HEATING RUN** | No suitable ordinary run now; recording starts automatically when conditions fit. |
+| **N/A** | The detected profile lacks a required signal. |
+| **WAITING** | No suitable ordinary heating run now; recording starts automatically when conditions fit. |
 | **RECORDING** | Continuous fresh observation with the complete optional context. |
-| **RECORDING · SOME DATA MISSING** | Recording, with optional temperature/pressure-side/outdoor/controller-phase context missing at least once. |
+| **PARTIAL** | Recording, with optional temperature/pressure-side/outdoor/controller-phase context missing at least once. |
 | **PAUSED** | A required reading/condition, expected sequence or profile-declared phase witness ended continuity. The next suitable run begins at zero. |
 
 Duration and min/mean/max describe **one uninterrupted window**. The permitted poll gap depends on

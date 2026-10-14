@@ -53,7 +53,7 @@ interface.
 <a id="refrigerant-service-observation"></a>
 ### Separate refrigerant service observation
 
-The UI names this row **Refrigerant circuit during heating** so an owner does not mistake it for a
+The UI names this row **Refrigerant when heating** so an owner does not mistake it for a
 controller service mode. This object is deliberately outside the eight-diagnosis evidence matrix
 and `/status.health`. It is an **observation**, not a manufacturer limit, project heuristic, health
 verdict, or completion test. It starts automatically from ordinary read-only X10A polling during a
@@ -276,7 +276,7 @@ emergency operation after a heat-pump failure ([D1], sections 8.4.6 and 8.4.9, p
 
 **Firmware rule:** The diagnosis separately totals observed active seconds for electric backup
 heater (BUH) steps in the water circuit and the tank booster heater (BSH). Usable runtime evidence
-is published immediately as **MEASURED ONLY**, without waiting for 24 hours. A zero applies only to
+is published immediately as **MEASURED**, without waiting for 24 hours. A zero applies only to
 readable observed intervals; unsupported or unreadable inputs remain null. Proving BUH off requires
 every profile-provided step to be readable; either readable active step proves on. See the Heater
 branch in [checkup.hpp](../main/logic/checkup.hpp).
@@ -297,7 +297,7 @@ including high pressure, compressor overheating, and inverter overcurrent, in it
 **Firmware rule:** The same exact counter must increase between comparable readable endpoints.
 All profile-declared counters and the compressor state must be readable at both endpoints. A
 non-zero startup value is a baseline; a decrease invalidates the comparison. A usable comparison
-without an increase displays **EXPERIMENTAL**; a comparable increase displays **NOTE**. Both retain
+without an increase displays **TRIAL**; a comparable increase displays **NOTE**. Both retain
 experimental evidence and appear without a day-long wait. The retained event flag does not identify
 which counter increased or when. See checkup_retry_index(),
 CHECKUP_RETRY_COUNT and the Retries branch in [checkup.hpp](../main/logic/checkup.hpp).
