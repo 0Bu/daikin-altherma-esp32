@@ -437,8 +437,8 @@ static __attribute__((noinline)) void wifi_finish_sta_rollback() {
         esp_restart();
     }
     if (keep_stored) {
-        diag_printf("wifi: rollback restore to '%s' not persisted — the stored settings could not "
-                    "be read and are kept until an explicit save; opening the setup portal\n",
+        diag_printf("wifi: rollback restore to '%s' was not persisted — the stored settings could "
+                    "not be read and are kept until an explicit save; opening the setup portal\n",
                     DiagLogIdentifier(rollback_cfg.wifi_ssid).c_str());
         return;
     }
@@ -463,9 +463,9 @@ static __attribute__((noinline)) void wifi_finish_sta_success() {
         // flag would write the legacy/default fallback over it. This session already ignores the
         // flag (s_rollback_pending above); only a later boot could still act on it.
         if (config_stored_blob_unreadable()) {
-            diag_printf("wifi: rollback backup ('%s') not cleared — the stored settings could not "
-                        "be read and are kept until an explicit save; a later connect failure may "
-                        "restore it\n",
+            diag_printf("wifi: could not clear the rollback backup ('%s') — the stored settings "
+                        "could not be read and are kept until an explicit save; a later connect "
+                        "failure may restore it\n",
                         DiagLogIdentifier(success_cfg.wifi_ssid_backup).c_str());
             return;
         }
