@@ -52,14 +52,12 @@ static_assert(std::atomic<bool>::is_always_lock_free,
 
 __attribute__((noinline)) void socket_deadline_watchdog_task(void*) noexcept {
     // With LWIP_NETCONN_SEM_PER_THREAD=1, the first BSD socket API on a task lazily allocates an
-    // internal StaticSemaphore_t. Do it exactly once at boot, before TLS pressure, and verify the
-    // selected IDF port returned its initialized semaphore. In ESP-IDF v6.1 the API returns nullptr
-    // after either allocation or static-semaphore creation failure; its sys_sem_valid macro is not
-    // C++ compatible because it takes the address of a C compound literal. A failed prime leaves
-    // the task parked and keeps
-    // ready=false, so neither OTA nor Weather can start a transfer which cannot be interrupted.
+    // internal StaticSemaphore_t. Prime at boot before TLS pressure. The IDF port can return a
+    // nonnull semaphore even when pthread_setspecific failed; an immediate lookup must return
+    // the same pointer to prove this task retained it. These two bounded boot lookups keep a
+    // failed prime parked with ready=false, before OTA or Weather can start a transfer.
     sys_sem_t* const thread_sem = sys_thread_sem_get();
-    const bool       primed     = thread_sem != nullptr;
+    const bool       primed     = thread_sem != nullptr && sys_thread_sem_get() == thread_sem;
     s_deadline.lwip_primed.store(primed, std::memory_order_release);
     if (s_deadline.init_completion) (void)xSemaphoreGive(s_deadline.init_completion);
     if (!primed) {

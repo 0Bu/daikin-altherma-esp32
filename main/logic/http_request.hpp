@@ -103,13 +103,30 @@ inline bool http_json_content_type(std::string_view value) {
     return !params.empty();
 }
 
-// Returns true if the requested URI belongs to the OTA subsystem (/ota/status, /ota/check,
-// /ota/update). When memory is low or an OTA update is actively downloading, all non-OTA routes
+// Only registered OTA paths may bypass the busy/low-heap guard. Unknown /ota/... GETs reach the
+// SPA catch-all, so a prefix match would admit a dashboard asset beside the writer's TLS heap.
+// When memory is low or an OTA update is actively downloading, all non-OTA routes
 // are early-rejected with 503 so background browser polling doesn't fragment the TLS receive heap.
-inline bool http_is_ota_route(std::string_view uri) {
-    if (uri == "/ota") return true;
-    if (uri.size() > 4 && uri.substr(0, 4) == "/ota" && (uri[4] == '/' || uri[4] == '?'))
-        return true;
+inline bool http_is_ota_route(std::string_view uri, bool is_post = false) {
+    uri = uri.substr(0, uri.find('?'));
+    if (is_post) return uri == "/ota/update";
+    return uri == "/ota/status" || uri == "/ota/check" || uri == "/ota/changelog";
+}
+
+// Accept media types are case-insensitive comma-separated tokens; parameters do not rename them.
+inline bool http_accepts_media_type(std::string_view accept, std::string_view wanted) {
+    while (!accept.empty()) {
+        const size_t     comma = accept.find(',');
+        std::string_view media = accept.substr(0, comma);
+        media                  = media.substr(0, media.find(';'));
+        while (!media.empty() && (media.front() == ' ' || media.front() == '\t'))
+            media.remove_prefix(1);
+        while (!media.empty() && (media.back() == ' ' || media.back() == '\t'))
+            media.remove_suffix(1);
+        if (http_ascii_iequal(media, wanted)) return true;
+        if (comma == std::string_view::npos) break;
+        accept.remove_prefix(comma + 1);
+    }
     return false;
 }
 

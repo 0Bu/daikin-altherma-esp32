@@ -341,7 +341,9 @@ before network ownership returns to MQTT and before the worker sleeps.
 covers headers and body within the original monotonic deadline; expiry wakes a preallocated worker
 that performs socket shutdown. The HTTP owner joins it before close, redirect or Range reuse.
 Pre-socket DNS/TCP/TLS/request setup remains limited by the client's timeout and a post-open budget
-check. Timer/task/lwIP-prime failure disables OTA and Weather downloads for that boot. Later saves
+check. Boot priming requires two identical nonnull thread-semaphore lookups, so failed SDK
+thread-local registration cannot masquerade as readiness. Timer/task/prime failure disables OTA and
+Weather downloads for that boot. Later saves
 cannot relabel a missing worker as waiting.
 
 Only allocator-shaped TLS setup failure gets one cleaned-up setup retry. A validated known-length
