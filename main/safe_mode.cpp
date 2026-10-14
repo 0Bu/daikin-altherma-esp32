@@ -1,9 +1,10 @@
-// Boot-loop safe mode (see safe_mode.hpp). Pure decision logic is logic/boot_guard.hpp (host-tested);
-// this file is the thin device glue: the NVS crash counter + the esp_reset_reason() read + the
-// healthy-uptime timer.
+// Boot-loop safe mode (see safe_mode.hpp). Pure decision logic is logic/boot_guard.hpp
+// (host-tested); this file is the thin device glue: the boot classification, the NVS crash counter
+// + the esp_reset_reason() read + the healthy-uptime timer.
 #include "safe_mode.hpp"
 
 #include "logic/boot_guard.hpp"
+#include "heap_guard.hpp" // heap_guard_take_restart_marker — the watchdog's half of the evidence
 #include "nvs_storage.hpp"
 #include "diag_log.hpp"
 
@@ -22,43 +23,66 @@ static bool s_safe_mode = false;
 // heap watchdog reaches when allocation is already failing, so it must not be able to allocate.
 static const char* s_cause = nullptr;
 static esp_timer_handle_t s_healthy_timer = nullptr;
+// This boot's classification and the crash count it acted on. Written once by safe_mode_begin(), on
+// the main task before any other task exists, and only read afterwards.
+static BootKind s_boot_kind   = BootKind::Clean;
+static int      s_crash_boots = 0;
 
 void safe_mode_begin() {
     const int reason = static_cast<int>(esp_reset_reason());
-    if (boot_reset_was_crash(reason)) {
-        const int32_t stored = nvs_get_i32(BOOT_FAILS_KEY, 0);
-        const int     next   = boot_next_fail_count(stored);
-        // Commit BEFORE the risky subsystems so the bump survives another crash.
-        const esp_err_t err = nvs_set_i32(BOOT_FAILS_KEY, next);
-        s_safe_mode = boot_should_enter_safe_mode(next);
-        if (s_safe_mode) s_cause = "crash_loop";
+    // The heap watchdog's marker is read — and CLEARED — here and nowhere else, on every boot and
+    // whatever the reset reason, so it can explain at most the one reset that followed it.
+    // boot_classify() believes it only together with reset reason "sw".
+    const bool heap_marker = heap_guard_take_restart_marker();
+    s_boot_kind            = boot_classify(reason, heap_marker);
+
+    const int32_t          stored = nvs_get_i32(BOOT_FAILS_KEY, 0);
+    const CrashCounterStep step   = boot_crash_counter_step(s_boot_kind, stored);
+    s_crash_boots                 = step.count;
+    s_safe_mode                   = step.safe_mode;
+    s_cause                       = step.safe_mode ? "crash_loop" : nullptr;
+    // Commit BEFORE the risky subsystems (this runs before config_load), so a crash boot's bump
+    // survives the next crash.
+    const esp_err_t err = step.write ? nvs_set_i32(BOOT_FAILS_KEY, step.count) : ESP_OK;
+
+    switch (s_boot_kind) {
+    case BootKind::Crash:
         if (err == ESP_OK) {
-            diag_printf("boot: crash reset, crash_boots=%d%s\n",
-                        next, s_safe_mode ? " -> SAFE MODE (poll + MQTT paused)" : "");
+            diag_printf("boot: crash reset, crash_boots=%d%s\n", step.count,
+                        s_safe_mode ? " -> SAFE MODE (poll + MQTT paused)" : "");
         } else {
-            // Report what NVS still holds, not the RAM-only `next`. A failed write means every
-            // crash boot re-reads `stored` and recomputes the same `next`, so the count can never
-            // reach the threshold — the crash loop this guard exists for would spin forever. A
-            // wedged flash is itself a plausible cause of that loop, so this line is the only
-            // warning that the guard is out of action.
+            // Report what NVS still holds, not the RAM-only count. A failed write means every
+            // crash boot re-reads `stored` and recomputes the same count, so it can never reach
+            // the threshold — the crash loop this guard exists for would spin forever. A wedged
+            // flash is itself a plausible cause of that loop, so this line is the only warning
+            // that the guard is out of action.
             diag_printf("boot: crash reset, FAILED to persist crash counter (err=%s) — stuck at "
-                        "%ld, safe mode cannot latch%s\n", esp_err_to_name(err),
-                        static_cast<long>(stored),
+                        "%ld, safe mode cannot latch%s\n",
+                        esp_err_to_name(err), static_cast<long>(stored),
                         s_safe_mode ? " (SAFE MODE this boot only)" : "");
         }
-    } else {
-        // Clean / intentional reboot (power-on, config-save restart, OTA) — a burst of these during
-        // provisioning must never accumulate into a false trip, so reset the counter.
-        if (nvs_get_i32(BOOT_FAILS_KEY, 0) != 0) {
-            const esp_err_t err = nvs_set_i32(BOOT_FAILS_KEY, 0);
-            if (err != ESP_OK)
-                diag_printf("boot: FAILED to clear crash counter (err=%s) — unrelated crash boots "
-                            "keep accumulating and may false-trip safe mode\n", esp_err_to_name(err));
-        }
-        s_safe_mode = false;
-        s_cause     = nullptr;
+        break;
+    case BootKind::HeapWatchdogRestart:
+        // Neither a crash nor a clean start: the count is carried without a write, so a fault that
+        // alternates between watchdog restarts and crashes still climbs this ladder instead of
+        // having it wiped by every "sw" reset. Said only when there is a count to carry.
+        if (step.count != 0)
+            diag_printf("boot: heap-watchdog restart, crash counter carried at %d\n", step.count);
+        break;
+    case BootKind::Clean:
+        // Clean / intentional reboot (power-on, config-save restart, OTA) — a burst of these
+        // during provisioning must never accumulate into a false trip, so the counter was reset.
+        if (err != ESP_OK)
+            diag_printf("boot: FAILED to clear crash counter (err=%s) — unrelated crash boots "
+                        "keep accumulating and may false-trip safe mode\n",
+                        esp_err_to_name(err));
+        break;
     }
 }
+
+BootKind safe_mode_boot_kind() { return s_boot_kind; }
+
+int safe_mode_crash_boots() { return s_crash_boots; }
 
 bool safe_mode_active() { return s_safe_mode; }
 
@@ -71,6 +95,10 @@ void safe_mode_latch_heap() {
     s_cause     = "heap";
 }
 
+// boot_fails ONLY. The heap watchdog's ladder (heap_rst) is deliberately not touched: ten healthy
+// minutes say nothing about a shortage that takes longer to build, and only a clean boot clears it
+// (logic/boot_guard.hpp's boot_heap_ladder_step). safe_mode_crash_boots() keeps reporting the count
+// this boot started with.
 static void healthy_timer_cb(void* arg) {
     if (nvs_get_i32(BOOT_FAILS_KEY, 0) != 0) {
         const esp_err_t err = nvs_set_i32(BOOT_FAILS_KEY, 0);
@@ -101,9 +129,11 @@ void safe_mode_arm_healthy() {
     // than skipped silently: a counter that deliberately does NOT age out looks like a bug to the
     // next person reading /diag, and the line names the way out.
     if (!boot_healthy_timer_arms(s_safe_mode)) {
-        diag_printf("boot: SAFE MODE — healthy timer NOT armed; with the poll engine and MQTT down, "
-                    "staying up says nothing about the fault. Fix the config or install a newer "
-                    "build — any clean reboot clears the counter\n");
+        diag_printf(
+            "boot: SAFE MODE — healthy timer NOT armed; with the poll engine and MQTT down, "
+            "staying up says nothing about the fault. Fix the config or install a newer "
+            "build — a power cycle, a rebooting save, an OTA install or a factory reset "
+            "clears the counter\n");
         return;
     }
 

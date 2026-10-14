@@ -56,12 +56,17 @@ static void boot_sequence() {
     // firmware mismatch. Repair or erasure requires the owner's explicit recovery action.
     // We continue on purpose (the web-UI recovery surface must still come up, and nvs_get_* already
     // fall back to their defaults when nvs_open fails) but make the degraded state LOUD, and replay
-    // it into the diag ring below once it exists so it also reaches /diag + syslog.
+    // it into the diag ring below once it exists so it reaches /diag. It cannot reach syslog as
+    // that line — syslog_init() runs much later, and a diag line written before it is never
+    // forwarded — so the syslog boot record carries it instead, as nvs=degraded
+    // (logic/bootlog.hpp).
     esp_err_t nvs_err = nvs_flash_init();
     daik::diag_log_init();
     // Allocation-free locks make the durable counter available before network/config/hardware
     // initialization can fail. A failed NVS initialization still cannot persist that counter.
     daik::nvs_storage_init(nvs_err == ESP_OK);
+    // Classify this boot ONCE (crash / heap-watchdog restart / clean) and apply the crash counter —
+    // before config_load and everything else that can crash, so a crash boot is counted first.
     daik::safe_mode_begin();
     if (nvs_err != ESP_OK)
         ESP_LOGE(TAG, "nvs_flash_init failed: %s — continuing WITHOUT persistence this boot "
@@ -97,7 +102,7 @@ static void boot_sequence() {
     // factory reset is the only way back in.
     daik::status_led_start();
     daik::recovery_button_start();
-    daik::heap_guard_begin();            // read + clear the heap-watchdog restart breadcrumb this boot inherited
+    daik::heap_guard_begin(); // the same classification's heap half: honour or clear heap_rst
     daik::syslog_init();
     const daik::Config& cfg = daik::config();
     ESP_LOGI(TAG, "daikin-altherma-esp32 %s", esp_app_get_description()->version);
@@ -194,16 +199,16 @@ static void boot_sequence() {
 //   • RETURNING would leave a half-initialised firmware claiming to run — some services up, some
 //     not, and /status reporting a device that does not exist.
 //   • esp_restart() looks like the careful option and is the worst one: safe_mode_begin()
-//   classifies
-//     a "sw" reset as an INTENTIONAL reboot and CLEARS the crash counter on it
+//     classifies a "sw" reset as a CLEAN, intentional reboot and CLEARS the crash counter on it
 //     (boot_reset_was_crash excludes it by name, so a provisioning burst cannot false-trip safe
-//     mode). A boot sequence that throws every time would therefore restart forever without ever
+//     mode; only the heap watchdog's own marked restart is told apart, and it is no crash either).
+//     A boot sequence that throws every time would therefore restart forever without ever
 //     accumulating a single crash boot — the one failure mode safe mode exists to end, made
 //     permanent by the mechanism meant to end it.
 //   • abort() panics, which is a crash reset. With initialized, writable NVS, the early guard
-//   counts
-//     it before risky subsystem startup; four crash boots latch safe mode and suppress the optional
-//     consumers. A fault in mandatory startup or unavailable NVS still requires separate recovery.
+//     counts it before risky subsystem startup; four crash boots latch safe mode and suppress the
+//     optional consumers. A fault in mandatory startup or unavailable NVS still requires separate
+//     recovery.
 [[noreturn]] static void boot_failed(const char* what) {
     // Serial first, because it is the only sink guaranteed to exist this early — the diag ring may
     // not be initialised, and syslog certainly is not.

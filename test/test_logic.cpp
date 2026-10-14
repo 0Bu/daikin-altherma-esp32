@@ -5836,6 +5836,403 @@ static void test_heap_watchdog() {
     CHECK(HEAP_CRITICAL_BYTES < 12u * 1024u);
 }
 
+// ── One boot classification, two independent recovery counters (logic/boot_guard.hpp) ──────────
+static void test_boot_classification() {
+    // The healthy window is the decided ten minutes, and it outlasts the heap watchdog's own hold:
+    // a shortage that crashes before the watchdog can act must still accumulate crash boots.
+    CHECK(BOOT_HEALTHY_S == 600);
+    CHECK(static_cast<uint32_t>(BOOT_HEALTHY_S) * 1000u >= 2u * HEAP_CRITICAL_HOLD_MS);
+
+    // EVERY reset reason, without and with the heap watchdog's marker, plus out-of-range codes. The
+    // crash set wins over the marker; the marker is believed with "sw" alone.
+    for (int r = -1; r <= 20; ++r) {
+        const bool crash = boot_reset_was_crash(r);
+        CHECK(boot_classify(r, false) == (crash ? BootKind::Crash : BootKind::Clean));
+        const BootKind expected_marked =
+            crash ? BootKind::Crash : (r == 3 ? BootKind::HeapWatchdogRestart : BootKind::Clean);
+        CHECK(boot_classify(r, true) == expected_marked);
+    }
+    // ...and spelled out for the cases the design rests on.
+    CHECK(boot_classify(3, true) == BootKind::HeapWatchdogRestart); // sw + marker: its own restart
+    CHECK(boot_classify(3, false) == BootKind::Clean); // sw alone: a save, an OTA, a factory reset
+    CHECK(boot_classify(1, true) ==
+          BootKind::Clean); // poweron + a STALE pattern: RAM means nothing
+    CHECK(boot_classify(1, false) == BootKind::Clean);
+    CHECK(boot_classify(2, true) == BootKind::Clean); // ext (pin reset)
+    CHECK(boot_classify(0, true) == BootKind::Clean); // unknown
+    CHECK(boot_classify(8, true) == BootKind::Clean); // deepsleep
+    for (int r : {10, 11, 12, 13, 14, 15}) {          // sdio usb jtag efuse pwr_glitch cpu_lockup
+        CHECK(boot_classify(r, false) == BootKind::Clean);
+        CHECK(boot_classify(r, true) == BootKind::Clean);
+    }
+    for (int r : {4, 5, 6, 7, 9}) { // panic int_wdt task_wdt wdt brownout
+        CHECK(boot_classify(r, false) == BootKind::Crash);
+        // A panic in esp_restart()'s shutdown handlers AFTER the marker went in is still a crash.
+        CHECK(boot_classify(r, true) == BootKind::Crash);
+    }
+
+    // The marker: one valid pattern, read AND cleared by the first take, garbage cleared too.
+    HeapRestartMarker m{0, 0};
+    CHECK(!heap_restart_marker_take(m));
+    heap_restart_marker_arm(m);
+    CHECK(m.magic == HEAP_RESTART_MARKER_MAGIC && m.check == ~HEAP_RESTART_MARKER_MAGIC);
+    CHECK(heap_restart_marker_take(m));
+    CHECK(m.magic == 0 && m.check == 0);
+    CHECK(!heap_restart_marker_take(m)); // one restart, one explanation — never a second boot
+    // Half a pattern is no pattern: power-on SRAM that happens to hold one of the two words.
+    HeapRestartMarker magic_only{HEAP_RESTART_MARKER_MAGIC, 0};
+    CHECK(!heap_restart_marker_take(magic_only));
+    CHECK(magic_only.magic == 0 && magic_only.check == 0);
+    HeapRestartMarker check_only{0, ~HEAP_RESTART_MARKER_MAGIC};
+    CHECK(!heap_restart_marker_take(check_only));
+    HeapRestartMarker uncomplemented{HEAP_RESTART_MARKER_MAGIC, HEAP_RESTART_MARKER_MAGIC};
+    CHECK(!heap_restart_marker_take(uncomplemented));
+    // A valid pattern found after a power-on: taken (so it is gone), and the boot is still Clean.
+    HeapRestartMarker stale{0, 0};
+    heap_restart_marker_arm(stale);
+    CHECK(boot_classify(1, heap_restart_marker_take(stale)) == BootKind::Clean);
+    CHECK(boot_classify(3, heap_restart_marker_take(stale)) == BootKind::Clean);
+
+    // ── boot_fails: the crash half ──
+    CHECK(boot_fail_count_sane(0) == 0);
+    CHECK(boot_fail_count_sane(7) == 7);
+    CHECK(boot_fail_count_sane(BOOT_FAIL_MAX) == BOOT_FAIL_MAX);
+    CHECK(boot_fail_count_sane(-1) == 0);
+    CHECK(boot_fail_count_sane(BOOT_FAIL_MAX + 1) == 0);
+    // Crash: increment and persist, latch AT the threshold, saturate, start over from garbage.
+    CrashCounterStep c = boot_crash_counter_step(BootKind::Crash, 0);
+    CHECK(c.count == 1 && c.write && !c.safe_mode);
+    c = boot_crash_counter_step(BootKind::Crash, BOOT_FAIL_THRESHOLD - 2);
+    CHECK(c.count == BOOT_FAIL_THRESHOLD - 1 && c.write && !c.safe_mode);
+    c = boot_crash_counter_step(BootKind::Crash, BOOT_FAIL_THRESHOLD - 1);
+    CHECK(c.count == BOOT_FAIL_THRESHOLD && c.write && c.safe_mode);
+    c = boot_crash_counter_step(BootKind::Crash, BOOT_FAIL_MAX - 1);
+    CHECK(c.count == BOOT_FAIL_MAX && c.write && c.safe_mode);
+    c = boot_crash_counter_step(BootKind::Crash, BOOT_FAIL_MAX); // saturated, still written
+    CHECK(c.count == BOOT_FAIL_MAX && c.write && c.safe_mode);
+    c = boot_crash_counter_step(BootKind::Crash, -7);
+    CHECK(c.count == 1 && c.write && !c.safe_mode);
+    c = boot_crash_counter_step(BootKind::Crash, BOOT_FAIL_MAX + 1);
+    CHECK(c.count == 1 && c.write && !c.safe_mode);
+    // The heap watchdog's restart: carried as stored, NEVER written, never latches — not even at
+    // the threshold, because it is not a crash.
+    c = boot_crash_counter_step(BootKind::HeapWatchdogRestart, 0);
+    CHECK(c.count == 0 && !c.write && !c.safe_mode);
+    c = boot_crash_counter_step(BootKind::HeapWatchdogRestart, 2);
+    CHECK(c.count == 2 && !c.write && !c.safe_mode);
+    c = boot_crash_counter_step(BootKind::HeapWatchdogRestart, BOOT_FAIL_THRESHOLD);
+    CHECK(c.count == BOOT_FAIL_THRESHOLD && !c.write && !c.safe_mode);
+    c = boot_crash_counter_step(BootKind::HeapWatchdogRestart, BOOT_FAIL_MAX);
+    CHECK(c.count == BOOT_FAIL_MAX && !c.write && !c.safe_mode);
+    c = boot_crash_counter_step(BootKind::HeapWatchdogRestart, -1);
+    CHECK(c.count == 0 && !c.write && !c.safe_mode);
+    c = boot_crash_counter_step(BootKind::HeapWatchdogRestart, BOOT_FAIL_MAX + 1);
+    CHECK(c.count == 0 && !c.write && !c.safe_mode);
+    // Clean: cleared, and written only when something is stored — garbage included.
+    c = boot_crash_counter_step(BootKind::Clean, 0);
+    CHECK(c.count == 0 && !c.write && !c.safe_mode);
+    c = boot_crash_counter_step(BootKind::Clean, 3);
+    CHECK(c.count == 0 && c.write && !c.safe_mode);
+    c = boot_crash_counter_step(BootKind::Clean, BOOT_FAIL_MAX);
+    CHECK(c.count == 0 && c.write && !c.safe_mode);
+    c = boot_crash_counter_step(BootKind::Clean, -1);
+    CHECK(c.count == 0 && c.write && !c.safe_mode);
+
+    // ── heap_rst: the heap half ──
+    // Clean: never honoured, cleared when anything is stored.
+    HeapLadderStep h = boot_heap_ladder_step(BootKind::Clean, 0);
+    CHECK(h.restarts == 0 && !h.clear);
+    h = boot_heap_ladder_step(BootKind::Clean, 2);
+    CHECK(h.restarts == 0 && h.clear);
+    h = boot_heap_ladder_step(BootKind::Clean, -3);
+    CHECK(h.restarts == 0 && h.clear);
+    // A count STUCK at the cap (its clear keeps failing) must never bring a clean boot — a power
+    // cycle, the banner's own instruction — up minimal.
+    h = boot_heap_ladder_step(BootKind::Clean, HEAP_MAX_CONSECUTIVE_RESTARTS);
+    CHECK(h.restarts == 0 && h.clear && !heap_boot_must_be_minimal(h.restarts));
+    // The watchdog's own restart: the ladder continues, untouched; the cap comes up minimal.
+    h = boot_heap_ladder_step(BootKind::HeapWatchdogRestart, 2);
+    CHECK(h.restarts == 2 && !h.clear && !heap_boot_must_be_minimal(h.restarts));
+    h = boot_heap_ladder_step(BootKind::HeapWatchdogRestart, HEAP_MAX_CONSECUTIVE_RESTARTS);
+    CHECK(h.restarts == HEAP_MAX_CONSECUTIVE_RESTARTS && !h.clear &&
+          heap_boot_must_be_minimal(h.restarts));
+    h = boot_heap_ladder_step(BootKind::HeapWatchdogRestart, -1);
+    CHECK(h.restarts == 0 && !h.clear);
+    // A crash carries the ladder too — including at the cap, so a crash inside the minimal boot
+    // comes back minimal rather than handing the full stack another five restarts.
+    h = boot_heap_ladder_step(BootKind::Crash, 3);
+    CHECK(h.restarts == 3 && !h.clear && !heap_boot_must_be_minimal(h.restarts));
+    h = boot_heap_ladder_step(BootKind::Crash, HEAP_MAX_CONSECUTIVE_RESTARTS);
+    CHECK(h.restarts == HEAP_MAX_CONSECUTIVE_RESTARTS && !h.clear &&
+          heap_boot_must_be_minimal(h.restarts));
+    h = boot_heap_ladder_step(BootKind::Crash, HEAP_MAX_CONSECUTIVE_RESTARTS + 1);
+    CHECK(h.restarts == 0 && !h.clear);
+
+    // INDEPENDENCE, as a property over every stored value: a crash boot never writes heap_rst, and
+    // the heap watchdog's restart never writes boot_fails. Only a clean boot clears both.
+    for (int32_t stored = -2; stored <= BOOT_FAIL_MAX + 2; ++stored) {
+        CHECK(!boot_heap_ladder_step(BootKind::Crash, stored).clear);
+        CHECK(!boot_heap_ladder_step(BootKind::HeapWatchdogRestart, stored).clear);
+        CHECK(!boot_crash_counter_step(BootKind::HeapWatchdogRestart, stored).write);
+        CHECK(boot_crash_counter_step(BootKind::Clean, stored).write == (stored != 0));
+        CHECK(boot_heap_ladder_step(BootKind::Clean, stored).clear == (stored != 0));
+        CHECK(boot_heap_ladder_step(BootKind::Clean, stored).restarts == 0);
+    }
+}
+
+// A host model of the boot glue, built from the REAL pure functions above: safe_mode_begin()
+// (marker take, classification, crash step), heap_guard_begin() (heap step, minimal latch), the
+// healthy timer and the heap watchdog's restart site (breadcrumb write, marker, esp_restart). It is
+// a model of the glue's order, not of the target — reset timing on hardware is not proven here —
+// but it is what shows the two ladders reaching their ends instead of resetting each other.
+namespace boot_ladder_model {
+enum Reset : int { POWERON = 1, SW = 3, PANIC = 4 };
+constexpr int BOOT_SEQ_S = 10;   // app_main start -> safe_mode_arm_healthy (network etc.)
+constexpr int HORIZON_S  = 7200; // a boot that survives two hours is treated as stable
+struct Store {
+    int32_t boot_fails = 0;
+    int32_t heap_rst   = 0;
+    bool    writable   = true;
+};
+struct View {
+    int         index      = 0;
+    bool        safe       = false;
+    const char* cause      = nullptr;
+    uint8_t     restarts   = 0;
+    BootKind    kind       = BootKind::Clean;
+    int         prev_reset = POWERON;
+};
+struct Fault {
+    int crash_at_s      = -1; // full-stack crash (panic) this many seconds in
+    int safe_crash_at_s = -1; // crash also in safe mode (a mandatory subsystem)
+    int leak_from_s     = -1; // the largest block drops to 1 KiB from here on
+    int user_reset_at_s = -1; // an owner action: power cycle or rebooting save
+    int user_reset      = SW;
+};
+struct Summary {
+    int         boots = 0, full_stack = 0, safe_boots = 0, first_safe = -1;
+    const char* first_cause           = nullptr;
+    int         max_boot_fails        = 0;
+    bool        stable                = false;
+    int         safe_after_poweron    = 0; // safe boots whose previous reset was a power cycle
+    int         full_after_first_safe = 0; // full-stack boots after safe mode was first reached
+};
+
+// What safe_mode_begin() and heap_guard_begin() decide for this boot, applied to the store and the
+// marker exactly as the glue applies them.
+inline View begin_boot(Store& nvs, HeapRestartMarker& marker, int reset, int index) {
+    View v;
+    v.index      = index;
+    v.prev_reset = reset;
+    // safe_mode_begin(): take the marker, classify once, apply the crash half.
+    v.kind                    = boot_classify(reset, heap_restart_marker_take(marker));
+    const CrashCounterStep cs = boot_crash_counter_step(v.kind, nvs.boot_fails);
+    if (cs.write && nvs.writable) nvs.boot_fails = cs.count;
+    v.safe  = cs.safe_mode;
+    v.cause = v.safe ? "crash_loop" : nullptr;
+    // heap_guard_begin(): the heap half of the same classification, then the end of the ladder.
+    const HeapLadderStep hs = boot_heap_ladder_step(v.kind, nvs.heap_rst);
+    if (hs.clear && nvs.writable) nvs.heap_rst = 0;
+    v.restarts = hs.restarts;
+    if (heap_boot_must_be_minimal(v.restarts)) {
+        v.safe  = true;
+        v.cause = "heap";
+    }
+    return v;
+}
+
+// The rest of the boot, one second at a time: the healthy timer, the scripted faults and the heap
+// watchdog's restart site. Returns the reset that ends it; `stable` when it survives the horizon.
+inline int live_boot(Store& nvs, HeapRestartMarker& marker, const View& v, const Fault& f,
+                     bool& stable) {
+    const bool   armed = boot_healthy_timer_arms(v.safe); // safe_mode_arm_healthy()
+    HeapWatchdog wd;
+    for (int t = 0; t <= HORIZON_S; ++t) {
+        if (armed && t == BOOT_SEQ_S + BOOT_HEALTHY_S && nvs.boot_fails != 0 && nvs.writable)
+            nvs.boot_fails = 0; // healthy_timer_cb: boot_fails ONLY
+        if (!v.safe && t == f.crash_at_s) return PANIC;
+        if (v.safe && t == f.safe_crash_at_s) return PANIC;
+        if (t == f.user_reset_at_s) return f.user_reset;
+        // heap_guard_sample() runs in the poll task, which safe mode never creates.
+        if (!v.safe && t >= BOOT_SEQ_S) {
+            const size_t block =
+                (f.leak_from_s >= 0 && t >= f.leak_from_s) ? size_t(1024) : size_t(64 * 1024);
+            const HeapVerdict hv = heap_watch(wd, {block, static_cast<uint32_t>(t) * 1000u, false});
+            if (hv.action == HeapAction::Restart && heap_may_restart(v.restarts)) {
+                if (nvs.writable) nvs.heap_rst = v.restarts + 1; // best-effort breadcrumb
+                heap_restart_marker_arm(marker);                 // immediately before...
+                return SW;                                       // ...esp_restart()
+            }
+        }
+    }
+    stable = true;
+    return POWERON;
+}
+
+template <typename Script>
+Summary simulate(Store nvs, int max_boots, Script script, int ro_from_boot = -1) {
+    Summary           s;
+    HeapRestartMarker marker{0, 0};
+    int               reset = POWERON;
+    for (int i = 1; i <= max_boots; ++i) {
+        if (ro_from_boot > 0 && i >= ro_from_boot) nvs.writable = false;
+        // A power-on leaves .noinit holding whatever the SRAM came up with. Model the WORST case: a
+        // valid pattern left over, which the classification must still ignore.
+        if (reset == POWERON) heap_restart_marker_arm(marker);
+        const View v      = begin_boot(nvs, marker, reset, i);
+        bool       stable = false;
+        const int  next   = live_boot(nvs, marker, v, script(v), stable);
+        s.boots++;
+        if (v.safe) {
+            s.safe_boots++;
+            if (v.prev_reset == POWERON && i > 1) s.safe_after_poweron++;
+            if (s.first_safe < 0) {
+                s.first_safe  = i;
+                s.first_cause = v.cause;
+            }
+        } else {
+            s.full_stack++;
+            if (s.first_safe > 0) s.full_after_first_safe++;
+        }
+        if (nvs.boot_fails > s.max_boot_fails) s.max_boot_fails = nvs.boot_fails;
+        if (stable) {
+            s.stable = true;
+            break;
+        }
+        reset = next;
+    }
+    return s;
+}
+
+inline bool cause_is(const Summary& s, const char* want) {
+    return s.first_cause != nullptr && std::strcmp(s.first_cause, want) == 0;
+}
+} // namespace boot_ladder_model
+
+static void test_boot_recovery_ladders() {
+    using namespace boot_ladder_model;
+    // The baseline: a config crash 5 s into every full-stack boot latches on the 4th crash
+    // boot (boot 5: boot 1 is the clean power-on that starts it), and the quiet safe mode parks.
+    const Summary early = simulate(Store{}, 30, [](const View&) {
+        Fault f;
+        f.crash_at_s = 5;
+        return f;
+    });
+    CHECK(early.first_safe == 5 && cause_is(early, "crash_loop") && early.full_stack == 4 &&
+          early.stable);
+
+    // The same crash 45 s into every boot. With the old 30 s window the timer cleared the
+    // counter first and the device looped for ever with boot_fails never above 1; with 600 s it
+    // latches exactly like the baseline.
+    const Summary late = simulate(Store{}, 30, [](const View&) {
+        Fault f;
+        f.crash_at_s = 45;
+        return f;
+    });
+    CHECK(late.first_safe == 5 && cause_is(late, "crash_loop") && late.full_stack == 4 &&
+          late.stable);
+    // ...and the window is still a window: a crash only after ten healthy minutes never
+    // accumulates.
+    const Summary after_window = simulate(Store{}, 30, [](const View&) {
+        Fault f;
+        f.crash_at_s = BOOT_SEQ_S + BOOT_HEALTHY_S + 60;
+        return f;
+    });
+    CHECK(after_window.first_safe < 0 && after_window.max_boot_fails <= 1 && !after_window.stable);
+
+    // A sustained wedge 60 s into every boot climbs the watchdog's ladder: five restarts, then
+    // boot 6 comes up minimal with cause "heap" and stays up.
+    const Summary wedge = simulate(Store{}, 30, [](const View&) {
+        Fault f;
+        f.leak_from_s = 60;
+        return f;
+    });
+    CHECK(wedge.first_safe == 6 && cause_is(wedge, "heap") && wedge.full_stack == 5 &&
+          wedge.stable);
+    CHECK(wedge.max_boot_fails == 0); // the watchdog's restarts never counted as crashes
+
+    // The same leak, but it panics at 200 s, inside the watchdog's 300 s hold: the watchdog
+    // never acts, and only the 600 s window lets the crash ladder see it.
+    const Summary leak_panics = simulate(Store{}, 30, [](const View&) {
+        Fault f;
+        f.leak_from_s = 60;
+        f.crash_at_s  = 200;
+        return f;
+    });
+    CHECK(leak_panics.first_safe == 5 && cause_is(leak_panics, "crash_loop") && leak_panics.stable);
+
+    // The two ladders used to reset each other: watchdog restart on odd boots, a panic 20 s
+    // into even ones. Every "sw" cleared boot_fails and every boot consumed heap_rst, so neither
+    // climbed past 1, for ever. Independent, the crash ladder reaches its threshold.
+    const Summary alternating = simulate(Store{}, 50, [](const View& v) {
+        Fault f;
+        f.leak_from_s = 60;
+        if (v.index % 2 == 0) f.crash_at_s = 20;
+        return f;
+    });
+    // Boot 1 is clean, then each crash boot adds one and each watchdog boot carries it: the 4th
+    // crash boot is boot 9. The heap ladder climbs alongside (4 by then), carried by every crash.
+    CHECK(alternating.first_safe == 2 * BOOT_FAIL_THRESHOLD + 1 &&
+          cause_is(alternating, "crash_loop") && alternating.stable);
+
+    // Four watchdog restarts, then one panic at 330 s (before the hold ends), repeating. The
+    // crash used to wipe the heap ladder at 4 every time; now it carries it, and the next restart
+    // reaches the cap.
+    const Summary late_panic = simulate(Store{}, 60, [](const View& v) {
+        Fault f;
+        f.leak_from_s = 60;
+        if (v.index % 5 == 0) f.crash_at_s = 330;
+        return f;
+    });
+    CHECK(late_panic.first_safe == 7 && cause_is(late_panic, "heap") && late_panic.stable);
+
+    // Latched crash-loop safe mode, exited by a rebooting save (sw, no marker) on boot 5: a
+    // clean boot, so the full stack returns and needs BOOT_FAIL_THRESHOLD new crashes to latch
+    // again.
+    const Summary save_exit = simulate(Store{}, 12, [](const View& v) {
+        Fault f;
+        f.crash_at_s = 5;
+        if (v.safe && v.index == 5) f.user_reset_at_s = 60;
+        return f;
+    });
+    CHECK(save_exit.safe_boots >= 2 && save_exit.full_stack == 2 * BOOT_FAIL_THRESHOLD &&
+          save_exit.stable);
+
+    // A crash INSIDE heap safe mode (a mandatory subsystem). It no longer hands the full
+    // stack a fresh ladder: the crash carries heap_rst, so every later boot stays minimal.
+    const Summary crash_in_minimal = simulate(Store{}, 14, [](const View& v) {
+        Fault f;
+        f.leak_from_s = 60;
+        if (v.safe) f.safe_crash_at_s = 100;
+        return f;
+    });
+    CHECK(crash_in_minimal.first_safe == 6 && cause_is(crash_in_minimal, "heap") &&
+          crash_in_minimal.full_after_first_safe == 0);
+
+    // The cap is reached with working NVS, then from boot 6 on every write fails, and every
+    // minimal boot is ended by a POWER CYCLE. A count stuck at the cap used to bring every later
+    // boot up minimal, power cycles included; now no boot after a power cycle is minimal.
+    const Summary stuck_cap = simulate(
+        Store{}, 15,
+        [](const View& v) {
+            Fault f;
+            f.leak_from_s = 60;
+            if (v.safe) {
+                f.user_reset_at_s = 120;
+                f.user_reset      = POWERON;
+            }
+            return f;
+        },
+        /*ro_from_boot=*/6);
+    CHECK(stuck_cap.first_safe == 6 && cause_is(stuck_cap, "heap"));
+    CHECK(stuck_cap.safe_after_poweron == 0);
+    // With every write failing, the clean boot cannot clear the stale cap and the watchdog cannot
+    // write its own count either — so the boot after its next restart honours the stale cap (the
+    // over-count heap_restart_count_sane documents). Boots 1-5 climbed the ladder; from then on
+    // every power cycle (boots 7, 9, 11, 13, 15) still gets the full stack.
+    CHECK(stuck_cap.full_stack == 10 && stuck_cap.safe_boots == 5);
+}
+
 static void test_health_gate() {
     // base=90s, cap=300s. A normal boot needs link + service proof; a real portal is its own
     // recovery surface for an unconfigured board.
@@ -8073,7 +8470,8 @@ static void test_bootlog() {
     id.elf_sha = "deadbeef";
     id.reason  = 1; // poweron
     CHECK(build_boot_line(id) ==
-          "boot: version=1.4.2 elf_sha256=deadbeef reset=poweron safe_mode=no");
+          "boot: version=1.4.2 elf_sha256=deadbeef reset=poweron safe_mode=no"
+          " cause=none crash_boots=0 heap_restarts=0 nvs=ok");
 
     // Safe mode is visible in the log stream: it explains a device that is up but publishes
     // nothing.
@@ -8081,15 +8479,18 @@ static void test_bootlog() {
     safe.reason    = 6; // task_wdt
     safe.safe_mode = true;
     CHECK(build_boot_line(safe) ==
-          "boot: version=1.4.2 elf_sha256=deadbeef reset=task_wdt safe_mode=yes");
+          "boot: version=1.4.2 elf_sha256=deadbeef reset=task_wdt safe_mode=yes"
+          " cause=none crash_boots=0 heap_restarts=0 nvs=ok");
 
     // Missing identity degrades to "?" — never a dangling "version= elf_sha256=".
     BootIdent blank;
-    CHECK(build_boot_line(blank) == "boot: version=? elf_sha256=? reset=unknown safe_mode=no");
+    CHECK(build_boot_line(blank) == "boot: version=? elf_sha256=? reset=unknown safe_mode=no"
+                                    " cause=none crash_boots=0 heap_restarts=0 nvs=ok");
     BootIdent nulls;
     nulls.version = nullptr;
     nulls.elf_sha = nullptr;
-    CHECK(build_boot_line(nulls) == "boot: version=? elf_sha256=? reset=unknown safe_mode=no");
+    CHECK(build_boot_line(nulls) == "boot: version=? elf_sha256=? reset=unknown safe_mode=no"
+                                    " cause=none crash_boots=0 heap_restarts=0 nvs=ok");
 
     std::string lines[CRASH_LOG_LINE_MAX];
 
@@ -8409,6 +8810,90 @@ static void test_bootlog() {
     // guard), so a record that ever picked up that substring would be silently unsendable.
     for (int i = 0; i < wn; i++) CHECK(lines[i].find("syslog:") == std::string::npos);
     CHECK(build_boot_line(id).find("syslog:") == std::string::npos);
+}
+
+// The recovery fields APPENDED to the boot record: decided at the top of app_main, before syslog
+// exists, so this record is the only way they leave the device.
+static void test_bootlog_recovery_fields() {
+    BootIdent id;
+    id.version = "1.4.2";
+    id.elf_sha = "deadbeef";
+
+    // A crash-loop latch: the reset that triggered it, the cause and the count it acted on.
+    BootIdent crash   = id;
+    crash.reason      = 4; // panic
+    crash.safe_mode   = true;
+    crash.cause       = "crash_loop";
+    crash.crash_boots = 4;
+    CHECK(build_boot_line(crash) ==
+          "boot: version=1.4.2 elf_sha256=deadbeef reset=panic safe_mode=yes cause=crash_loop "
+          "crash_boots=4 heap_restarts=0 nvs=ok");
+
+    // The end of the heap ladder: a "sw" reset that only heap_restarts= can attribute.
+    BootIdent heap     = id;
+    heap.reason        = 3; // sw
+    heap.safe_mode     = true;
+    heap.cause         = "heap";
+    heap.heap_restarts = 5;
+    CHECK(build_boot_line(heap) ==
+          "boot: version=1.4.2 elf_sha256=deadbeef reset=sw safe_mode=yes cause=heap "
+          "crash_boots=0 heap_restarts=5 nvs=ok");
+
+    // A degraded NVS boot, with a crash count and a carried heap ladder, not (yet) safe mode.
+    BootIdent degraded     = id;
+    degraded.reason        = 6; // task_wdt
+    degraded.crash_boots   = 2;
+    degraded.heap_restarts = 3;
+    degraded.nvs_ok        = false;
+    CHECK(build_boot_line(degraded) ==
+          "boot: version=1.4.2 elf_sha256=deadbeef reset=task_wdt safe_mode=no cause=none "
+          "crash_boots=2 heap_restarts=3 nvs=degraded");
+
+    // The cause vocabulary is CLOSED: nothing else is passed through verbatim into a logfmt record.
+    CHECK(std::string(boot_cause_slug(nullptr)) == "none");
+    CHECK(std::string(boot_cause_slug("")) == "none");
+    CHECK(std::string(boot_cause_slug("crash_loop")) == "crash_loop");
+    CHECK(std::string(boot_cause_slug("heap")) == "heap");
+    CHECK(std::string(boot_cause_slug("heap leak")) == "unknown");
+    CHECK(std::string(boot_cause_slug("crash")) == "unknown");
+    BootIdent odd = id;
+    odd.cause     = "two words";
+    CHECK(build_boot_line(odd).find(" cause=unknown ") != std::string::npos);
+
+    // COMPATIBILITY: the record still starts with exactly the fields an existing collector
+    // extracts, in the same order — the new ones are only ever appended.
+    const std::string line   = build_boot_line(crash);
+    const std::string legacy = "boot: version=1.4.2 elf_sha256=deadbeef reset=panic safe_mode=yes";
+    CHECK(line.compare(0, legacy.size(), legacy) == 0 && line[legacy.size()] == ' ');
+
+    // WORST CASE fits one datagram whole. The boot record is sent straight down syslog_sendto(),
+    // whose packet is 320 bytes; its RFC 5424 header with a full timestamp and the default
+    // 21-character hostname takes 61, leaving 258. 240 leaves room for a longer hostname too.
+    const size_t      BOOT_LINE_BUDGET = 240;
+    BootIdent         worst;
+    const std::string version(31, '9'); // esp_app_desc_t.version is char[32]
+    const std::string sha(64, 'f');
+    worst.version       = version.c_str();
+    worst.elf_sha       = sha.c_str();
+    worst.reason        = 14; // pwr_glitch — the longest reset slug
+    worst.safe_mode     = true;
+    worst.cause         = "crash_loop";
+    worst.crash_boots   = BOOT_FAIL_MAX;
+    worst.heap_restarts = 255;
+    worst.nvs_ok        = false;
+    CHECK(build_boot_line(worst).size() <= BOOT_LINE_BUDGET);
+    CHECK(build_boot_line(worst).find("syslog:") == std::string::npos);
+
+    // The appended fields are formatted into a fixed buffer: even out-of-contract extremes must
+    // come out whole, never truncated into a record that parses as something else.
+    BootIdent extreme      = worst;
+    extreme.crash_boots    = std::numeric_limits<int>::min();
+    extreme.heap_restarts  = std::numeric_limits<unsigned>::max();
+    const std::string tail = " cause=crash_loop crash_boots=-2147483648 heap_restarts=4294967295 "
+                             "nvs=degraded";
+    const std::string full = build_boot_line(extreme);
+    CHECK(full.size() > tail.size() &&
+          full.compare(full.size() - tail.size(), tail.size(), tail) == 0);
 }
 
 // ── syslog send-failure policy (logic/syslog_policy.hpp) ─────────────────────────────────────
@@ -24434,6 +24919,7 @@ int main() {
     test_heartbeat();
     test_crashinfo();
     test_bootlog();
+    test_bootlog_recovery_fields();
     test_syslog_policy();
     test_timestamp();
     test_hexdump();
@@ -24443,6 +24929,8 @@ int main() {
     test_reset_reason();
     test_boot_guard();
     test_heap_watchdog();
+    test_boot_classification();
+    test_boot_recovery_ladders();
     test_health_gate();
     test_captive();
     test_http_body();

@@ -317,6 +317,9 @@ void env3_start() {
         pdPASS) {
         publish_error("task_start_failed");
         ESP_LOGE("env3", "task start failed");
+        // /status names the state (task_start_failed); /diag and syslog say when and why, which a
+        // board without a serial console otherwise never learns.
+        diag_printf("env3: task start FAILED (out of memory) — ENV III not read this boot\n");
         return;
     }
     ESP_LOGI("env3", "ENV III started: SDA=%d SCL=%d", cfg.env3_sda, cfg.env3_scl);

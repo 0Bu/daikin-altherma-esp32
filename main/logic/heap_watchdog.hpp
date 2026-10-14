@@ -106,9 +106,16 @@ inline constexpr uint32_t HEAP_CRITICAL_HOLD_MS = 300000;   // 5 minutes
 // not fix this particular fault: if the shortage re-develops from a fresh boot within minutes we
 // would otherwise reboot forever, and a reboot loop drops MQTT availability and the poll cycle on
 // every pass. Staying up in the degraded state is also useless, but it stops cycling the radio, it
-// keeps the web UI and OTA reachable so a newer build can be installed, and it leaves a reset reason
-// somebody can read. The count resets on any ordinary boot, so this can only ever bound a genuine
-// restart LOOP, never an isolated self-heal.
+// keeps the web UI and OTA reachable so a newer build can be installed, and it leaves a reset
+// reason somebody can read.
+//
+// "Consecutive" means: not interrupted by a CLEAN boot (boot_guard.hpp's BootKind) — a power cycle,
+// a settings save that reboots, an OTA install, a factory reset. Only such a boot clears the count.
+// A crash reset carries it unchanged, because a crash is no evidence that the shortage is gone: a
+// leak that sometimes panics before the hold elapses used to wipe the ladder every time it did, and
+// never reached its end. The consequence is accepted rather than hidden: restarts on a board that
+// nobody power-cycles or reconfigures keep counting however far apart they are, crash boots between
+// them included, until one clean boot starts the count over.
 inline constexpr uint8_t HEAP_MAX_CONSECUTIVE_RESTARTS = 5;
 
 // The action AND the transition that produced it. The transitions exist so the sample site can
@@ -172,15 +179,23 @@ inline constexpr bool heap_may_restart(uint8_t consecutive) {
 // cap is. Note the ASYMMETRY with heap_restart_count_sane(): an unreadable breadcrumb reads as 0,
 // so it under-counts, so it can only ever fail towards a NORMAL boot. Forcing a device into safe
 // mode on a garbled byte would take away the heat pump readings that are the point of the product,
-// which is the one direction this must not fail in.
+// which is the one direction this must not fail in. For the same reason a CLEAN boot never honours
+// the breadcrumb at all (boot_guard.hpp's boot_heap_ladder_step): a count stuck at the cap because
+// NVS refuses the clear can never bring a power-cycled device up minimal.
 inline constexpr bool heap_boot_must_be_minimal(uint8_t consecutive) {
     return !heap_may_restart(consecutive);
 }
 
 // How many consecutive watchdog restarts the persisted breadcrumb represents. Anything that is not
-// one of ours — a negative value, or a count past the cap from a garbled or future writer — reads as
-// 0, so an unusable breadcrumb can only ever UNDER-count. That direction is deliberate: under-counting
-// costs at most a few extra restarts, while over-counting would SUPPRESS a restart the device needs.
+// one of ours — a negative value, or a count past the cap from a garbled or future writer — reads
+// as 0, so an UNUSABLE breadcrumb can only ever under-count. That direction is deliberate:
+// under-counting costs at most a few extra restarts, while over-counting would SUPPRESS a restart
+// the device needs.
+//
+// What this cannot see is a STALE but well-formed count. A clean boot that fails to clear the
+// breadcrumb ignores it (boot_heap_ladder_step), but it stays in NVS, and a later crash or watchdog
+// boot — which carry the count by design — honours it: an over-count. It needs a failing NVS write
+// first, /diag says so when it happens, and a power cycle still never comes up minimal on it.
 inline constexpr uint8_t heap_restart_count_sane(int32_t stored) {
     if (stored < 0 || stored > HEAP_MAX_CONSECUTIVE_RESTARTS) return 0;
     return static_cast<uint8_t>(stored);
@@ -195,15 +210,24 @@ inline constexpr uint32_t heap_restart_in_ms(uint32_t critical_ms) {
 // Feed one sample. Call it on a fixed cadence; the decision uses elapsed TIME, not sample count, so
 // the cadence can change without moving the threshold.
 inline HeapVerdict heap_watch(HeapWatchdog& w, const HeapSample& s) {
-    // An OTA legitimately holds the largest allocations this firmware ever makes (a TLS session plus
-    // the image window), so a low reading during one proves nothing. CLEAR the run rather than merely
-    // skipping the sample: skipping would let a critical run that started BEFORE the download resume
-    // its clock afterwards and fire mid-install, which is the one restart that could leave a
-    // half-written slot behind.
+    // An OTA legitimately holds the largest allocations this firmware ever makes (a TLS session
+    // plus the image window), so a low reading during one proves nothing. CLEAR the run rather than
+    // merely skipping the sample: skipping would let a critical run that started BEFORE the
+    // download resume its clock afterwards and fire mid-install, which is the one restart that
+    // could leave a half-written slot behind.
+    //
     // ENDING a run and OPENING one are asked with different thresholds (see HEAP_RECOVERY_BYTES):
     // a run ends only once the block is clear of the band, while a new one opens only below
     // HEAP_CRITICAL_BYTES. In between, an OPEN run keeps running and a CLOSED one stays closed —
     // which is what stops a flickering heap from resetting its own countdown forever.
+    //
+    // ONE sample at or above HEAP_RECOVERY_BYTES is enough to end a run, and that is a deliberate
+    // rule with a known blind spot rather than an oversight: a heap that climbs clear of the band
+    // for a single second every few minutes resets the 300 s clock each time and never restarts the
+    // board. Demanding a sustained recovery would add a second clock to a path whose whole design
+    // goal is to fire only on a wedge no transient explains; a heap that really does reach 8 KB,
+    // even briefly, is still serving allocations, and the per-cycle bad_alloc guards keep handling
+    // what a restart would have papered over. Under-restarting stays the safe direction.
     if (s.ota_busy || s.largest_block >= HEAP_RECOVERY_BYTES) {
         if (!w.critical) return {HeapAction::Ok, 0, false};
         // Ending a run is worth a line: it is the difference between "the device healed itself" and

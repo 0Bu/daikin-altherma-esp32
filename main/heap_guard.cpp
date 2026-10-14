@@ -3,6 +3,7 @@
 // restart.
 #include "heap_guard.hpp"
 
+#include "logic/boot_guard.hpp" // the boot classification, HeapRestartMarker
 #include "logic/heap_watchdog.hpp"
 #include "diag_log.hpp"
 #include "nvs_storage.hpp"
@@ -11,9 +12,12 @@
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "esp_attr.h" // __NOINIT_ATTR — the restart marker must survive esp_restart()
 #include "esp_heap_caps.h"
 #include "esp_system.h"
 #include "esp_timer.h"
+
+#include <type_traits>
 
 namespace daik {
 
@@ -26,9 +30,20 @@ namespace {
 const char* HEAP_RESTARTS_KEY = "heap_rst";
 
 HeapWatchdog s_wd;
-uint8_t      s_restarts = 0;      // consecutive watchdog restarts this boot inherited
+uint8_t      s_restarts          = 0; // consecutive watchdog restarts this boot honours
 bool         s_exhausted_logged = false;
+bool         s_reset_hold_logged = false; // the factory-reset hold has been said on /diag
 uint32_t     s_watch_minutes = 0; // countdown lines already emitted for the current critical run
+
+// The watchdog's "the next reset is mine" statement (logic/boot_guard.hpp's HeapRestartMarker), in
+// .noinit DRAM: not zeroed by start-up, so it survives the esp_restart() it explains — the same
+// medium the history rings ride across a reset that keeps power. Armed in exactly one place,
+// immediately before that esp_restart() in heap_guard_sample(); read and cleared in exactly one,
+// heap_guard_take_restart_marker(), from safe_mode_begin() at the top of every boot. Plain data, so
+// the definition emits no initialiser image into the NOLOAD section.
+static_assert(std::is_trivially_default_constructible<HeapRestartMarker>::value,
+              "an initialiser on the restart marker would be dropped from .noinit silently");
+__NOINIT_ATTR volatile HeapRestartMarker s_restart_marker;
 
 // Transition (Armed/Recovered) narration budget. The Watching line below has always been throttled,
 // for a reason stated there — the diag ring is 6 KB, and a line a second evicts the episode's own
@@ -76,6 +91,16 @@ void note_suppressed() {
     s_suppressed = 0;
 }
 
+// The restart is held while a factory reset is erasing stored data (heap_guard.hpp says why). Said
+// once per boot, not once a second: the run stays critical, so the Restart verdict comes back on
+// every later sample and asks again.
+void note_restart_held_for_factory_reset() {
+    if (s_reset_hold_logged) return;
+    s_reset_hold_logged = true;
+    diag_printf("heap: restart HELD — a factory reset is erasing stored data and restarts the "
+                "device itself; restarting now could boot a partially erased device\n");
+}
+
 } // namespace
 
 size_t heap_largest_internal_block() {
@@ -84,9 +109,32 @@ size_t heap_largest_internal_block() {
 
 uint8_t heap_guard_restarts() { return s_restarts; }
 
+bool heap_guard_take_restart_marker() { return heap_restart_marker_take(s_restart_marker); }
+
 void heap_guard_begin() {
-    s_restarts = heap_restart_count_sane(nvs_get_i32(HEAP_RESTARTS_KEY, 0));
-    if (s_restarts == 0) return;   // the ordinary case writes nothing at all
+    // The heap half of the ONE classification safe_mode_begin() made for this boot. A clean boot
+    // never honours the stored count, whatever it holds; a crash or watchdog boot carries it as is.
+    const BootKind       kind   = safe_mode_boot_kind();
+    const int32_t        stored = nvs_get_i32(HEAP_RESTARTS_KEY, 0);
+    const HeapLadderStep step   = boot_heap_ladder_step(kind, stored);
+    s_restarts                  = step.restarts;
+
+    if (step.clear) {
+        // A clean boot with a count stored: the owner power-cycled, saved, updated or reset, and
+        // the ladder starts over. Only a FAILED clear is worth a line.
+        const esp_err_t err = nvs_set_i32(HEAP_RESTARTS_KEY, 0);
+        if (err != ESP_OK) {
+            // Not the bad direction it used to be: a clean boot ignores the stale count, so a power
+            // cycle can never come up minimal on it (boot_heap_ladder_step). What it still costs is
+            // a head start for the next CRASH or watchdog boot, which carries the stored count by
+            // design — so this boot says so, with the figure that would be inherited.
+            diag_printf("heap: clean boot, FAILED to clear a stored heap-restart count of %ld "
+                        "(err=%s) — ignored now, but a later crash or watchdog restart would "
+                        "inherit it\n",
+                        static_cast<long>(stored), esp_err_to_name(err));
+        }
+    }
+    if (s_restarts == 0) return; // nothing inherited: the ordinary case
 
     // THE END OF THE LADDER (legacy-407). A boot that inherited the full count is the one the cap
     // used to let come up with everything running and then sit there, wedged and unreachable, five
@@ -99,6 +147,11 @@ void heap_guard_begin() {
     // poll task, heap_guard_sample() is only ever called from it, so no further restart is
     // reachable from this state. What the sample site's own cap branch guards is now the case where
     // that invariant has been broken.
+    //
+    // The breadcrumb is NOT cleared here any more: it stays at the cap until a clean boot, so a
+    // crash inside the minimal boot comes back minimal rather than handing the full stack another
+    // ladder — a crash is no evidence that the shortage is gone. The power cycle this line
+    // recommends is a clean boot, and a clean boot never honours the count (boot_heap_ladder_step).
     if (heap_boot_must_be_minimal(s_restarts)) {
         safe_mode_latch_heap();
         diag_printf("heap: %u consecutive restarts did not fix the shortage — coming up MINIMAL "
@@ -107,22 +160,12 @@ void heap_guard_begin() {
                     static_cast<unsigned>(s_restarts));
     }
 
-    // Clear it NOW, so the count only ever spans restarts this guard actually made: a device that
-    // reaches this line again without the watchdog having re-written the key in between has had an
-    // ordinary boot, and the run is over.
-    const esp_err_t err = nvs_set_i32(HEAP_RESTARTS_KEY, 0);
-    if (err == ESP_OK) {
-        diag_printf("heap: this boot follows %u consecutive heap-watchdog restart(s)\n",
-                    static_cast<unsigned>(s_restarts));
-    } else {
-        // The bad direction, so it is said loudly: a breadcrumb stuck at the cap makes
-        // heap_may_restart() refuse forever, and the watchdog silently stops being able to escape a
-        // real wedge. The device stays up and reachable either way, which is why this is a warning
-        // and not a refusal to boot.
-        diag_printf("heap: this boot follows %u consecutive heap-watchdog restart(s), but FAILED to "
-                    "clear the counter (err=%s) — the watchdog may refuse further restarts\n",
-                    static_cast<unsigned>(s_restarts), esp_err_to_name(err));
-    }
+    // Carried, not consumed: the next watchdog restart writes s_restarts + 1 itself, and a crash
+    // boot in between inherits the same count again. Which of the two this boot is matters to the
+    // reader — a crash in the middle of a ladder is a different story from a clean climb.
+    diag_printf("heap: this boot follows %u consecutive heap-watchdog restart(s)%s\n",
+                static_cast<unsigned>(s_restarts),
+                kind == BootKind::Crash ? ", carried across a crash reset" : "");
 }
 
 void heap_guard_sample() {
@@ -197,6 +240,13 @@ void heap_guard_sample() {
                 }
                 return;
             }
+            // A factory reset is erasing stored data: hold the restart, and touch nothing — no
+            // breadcrumb write, no marker (heap_guard.hpp). Asked BEFORE the write, so a held
+            // restart leaves no count behind for a restart that never happened.
+            if (nvs_factory_reset_latched()) {
+                note_restart_held_for_factory_reset();
+                return;
+            }
             {
                 // Flush the flap count BEFORE the restart line: this is the last chance it has to
                 // reach syslog, and "the heap was flapping" is part of why the device rebooted.
@@ -225,6 +275,18 @@ void heap_guard_sample() {
             // moment to drain the datagram before the reset — best-effort, and bounded well inside
             // the poll task's own watchdog budget (reset at the top of this cycle).
             vTaskDelay(pdMS_TO_TICKS(300));
+            // Asked again after the drain: the recovery button can latch its reset during those
+            // 300 ms, and the latch, not the first answer, is what a restart must respect.
+            if (nvs_factory_reset_latched()) {
+                note_restart_held_for_factory_reset();
+                return;
+            }
+            // The marker goes in LAST, immediately before the restart and nowhere else, so it can
+            // only ever describe this esp_restart(): every path that leaves above — the cap, the
+            // factory-reset hold — leaves it unset, and no other "sw" reset (a settings save, an
+            // OTA install) can be taken for the watchdog's own (logic/boot_guard.hpp's
+            // boot_classify).
+            heap_restart_marker_arm(s_restart_marker);
             esp_restart();
     }
 }

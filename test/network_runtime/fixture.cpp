@@ -120,6 +120,10 @@ bool      net_is_up() { return wifi_link_up(); }
 bool      ota_download_active() { return false; }
 bool      weather_fetch_active() { return false; }
 bool      safe_mode_active() { return false; }
+// The boot record's recovery fields (logic/bootlog.hpp): an ordinary clean boot.
+const char* safe_mode_cause() { return nullptr; }
+int         safe_mode_crash_boots() { return 0; }
+uint8_t     heap_guard_restarts() { return 0; }
 CrashInfo diag_crash_info() { return CrashInfo{}; }
 void      time_now(int64_t& unix_s, int32_t& ms) {
     unix_s = adapter::unix_s;

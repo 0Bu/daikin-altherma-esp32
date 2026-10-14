@@ -220,8 +220,15 @@ void status_led_start() {
     if (c.led_gpio < 0) return;   // no indicator on this board — nothing to drive
     // Purely cosmetic, so a failed task is harmless — but don't swallow the allocation failure
     // silently. 3 KB (up from 2 KB): the WS2812 path calls into led_strip/RMT from this stack.
-    if (xTaskCreate(status_led_task, "status_led", 3072, nullptr, TASK_PRIO_LED, nullptr) != pdPASS)
+    // Said on /diag as well as serial, like the driver failures in indicator_init(): a dark
+    // indicator otherwise reads exactly like a wrong pin, and serial is the one sink a deployed
+    // board does not have.
+    if (xTaskCreate(status_led_task, "status_led", 3072, nullptr, TASK_PRIO_LED, nullptr) !=
+        pdPASS) {
         ESP_LOGW("led", "status-LED task alloc failed — indicator disabled this boot");
+        diag_printf(
+            "led: indicator task start FAILED (out of memory) — indicator dark this boot\n");
+    }
 }
 
 } // namespace daik
