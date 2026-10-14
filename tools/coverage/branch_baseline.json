@@ -491,7 +491,7 @@
       "hosted_confirmation": "The Ubuntu 26.04 x86_64 GCC 15 counts of the three changed headers were measured locally under emulation and equal the aarch64 GCC 15 counts. Unchanged headers keep their hosted counts; authoritative GitHub CI confirmation of the final merge head remains pending.",
       "scope": "Plant-diagnosis fixes (DHW settling and scope, run censoring, class population, consent generation, refrigerant high-side selection) raise the outcome inventories and ratios of the three changed headers on all four profiles; all other inventories and historical floors are retained.",
       "sources": {
-        "main/logic/checkup.hpp": "1f9cdb65c09ad674162047f6c14cd98aef4129a81950c8ec9384eccbb8fc8573",
+        "main/logic/checkup.hpp": "1deb4699aeb1da540db13658652fbcfedf598b5b616358d5dcfe635f977cbe9a",
         "main/logic/config_model.hpp": "fa10bbe779ace82388a8ed7f512ba83ae72d7d372c94a599d6adc1b357a0d446",
         "main/logic/refrigerant_service.hpp": "7d32469e63f9c7b7dbf234772ff2bb5714719f2730d279c2ecaf65d331ba7558"
       },
@@ -552,8 +552,8 @@
         "taken": 6
       },
       "main/logic/checkup.hpp": {
-        "taken": 778,
-        "outcomes": 855
+        "outcomes": 855,
+        "taken": 778
       },
       "main/logic/checkup_persist.hpp": {
         "outcomes": 125,
@@ -568,8 +568,8 @@
         "taken": 53
       },
       "main/logic/config_model.hpp": {
-        "taken": 261,
-        "outcomes": 316
+        "outcomes": 316,
+        "taken": 261
       },
       "main/logic/config_store.hpp": {
         "outcomes": 486,
@@ -856,8 +856,8 @@
         "taken": 216
       },
       "main/logic/refrigerant_service.hpp": {
-        "taken": 206,
-        "outcomes": 252
+        "outcomes": 252,
+        "taken": 206
       },
       "main/logic/registers.hpp": {
         "outcomes": 10,
@@ -970,8 +970,8 @@
         "taken": 8
       },
       "main/logic/checkup.hpp": {
-        "taken": 900,
-        "outcomes": 989
+        "outcomes": 989,
+        "taken": 900
       },
       "main/logic/checkup_persist.hpp": {
         "outcomes": 153,
@@ -986,8 +986,8 @@
         "taken": 53
       },
       "main/logic/config_model.hpp": {
-        "taken": 294,
-        "outcomes": 338
+        "outcomes": 338,
+        "taken": 294
       },
       "main/logic/config_store.hpp": {
         "outcomes": 460,
@@ -1266,8 +1266,8 @@
         "taken": 252
       },
       "main/logic/refrigerant_service.hpp": {
-        "taken": 241,
-        "outcomes": 302
+        "outcomes": 302,
+        "taken": 241
       },
       "main/logic/registers.hpp": {
         "outcomes": 12,
@@ -1388,8 +1388,8 @@
         "taken": 8
       },
       "main/logic/checkup.hpp": {
-        "taken": 900,
-        "outcomes": 989
+        "outcomes": 989,
+        "taken": 900
       },
       "main/logic/checkup_persist.hpp": {
         "outcomes": 153,
@@ -1404,8 +1404,8 @@
         "taken": 53
       },
       "main/logic/config_model.hpp": {
-        "taken": 294,
-        "outcomes": 338
+        "outcomes": 338,
+        "taken": 294
       },
       "main/logic/config_store.hpp": {
         "outcomes": 460,
@@ -1684,8 +1684,8 @@
         "taken": 252
       },
       "main/logic/refrigerant_service.hpp": {
-        "taken": 241,
-        "outcomes": 302
+        "outcomes": 302,
+        "taken": 241
       },
       "main/logic/registers.hpp": {
         "outcomes": 12,
@@ -1806,8 +1806,8 @@
         "taken": 8
       },
       "main/logic/checkup.hpp": {
-        "taken": 900,
-        "outcomes": 989
+        "outcomes": 989,
+        "taken": 900
       },
       "main/logic/checkup_persist.hpp": {
         "outcomes": 153,
@@ -1822,8 +1822,8 @@
         "taken": 53
       },
       "main/logic/config_model.hpp": {
-        "taken": 294,
-        "outcomes": 338
+        "outcomes": 338,
+        "taken": 294
       },
       "main/logic/config_store.hpp": {
         "outcomes": 460,
@@ -2102,8 +2102,8 @@
         "taken": 252
       },
       "main/logic/refrigerant_service.hpp": {
-        "taken": 241,
-        "outcomes": 302
+        "outcomes": 302,
+        "taken": 241
       },
       "main/logic/registers.hpp": {
         "outcomes": 12,
