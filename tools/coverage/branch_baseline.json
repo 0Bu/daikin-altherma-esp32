@@ -269,9 +269,10 @@
       },
       "hosted_confirmation": "gcc-15-github-linux-ubuntu26 repeats the local GCC 15 inventory; authoritative CI pending",
       "runner": "scripts/run-mock-tests.sh --coverage",
-      "scope": "The link yield records the stored pins and the factory seed restores them; every added outcome is taken and both ratios rise. All other inventories and historical floors retained.",
+      "scope": "The link yield records the stored indicator/button pins; every service save writes them into the cfg blob and the factory seed restores them until a save re-states the part. Both changed headers raise their ratios; all other inventories and historical floors retained.",
       "sources": {
-        "main/logic/config_model.hpp": "d004a39893df3872a6eec3ebb2699032ab7bd6e1f20f4ea844f7488eb5b2379a"
+        "main/logic/config_model.hpp": "8487542454e1f8ba0b962dbcd746017317d8ea43d3bffbfd6451f33b22542907",
+        "main/logic/config_transaction.hpp": "2726d021358201a3cc0e1861c4d25164004b6f4cf886d3a5d47e10ebd6552ada"
       }
     }
   ],
@@ -327,16 +328,16 @@
         "taken": 53
       },
       "main/logic/config_model.hpp": {
-        "outcomes": 292,
-        "taken": 238
+        "outcomes": 296,
+        "taken": 243
       },
       "main/logic/config_store.hpp": {
         "outcomes": 486,
         "taken": 313
       },
       "main/logic/config_transaction.hpp": {
-        "outcomes": 104,
-        "taken": 69
+        "outcomes": 114,
+        "taken": 78
       },
       "main/logic/conv_override.hpp": {
         "outcomes": 8,
@@ -729,16 +730,16 @@
         "taken": 53
       },
       "main/logic/config_model.hpp": {
-        "outcomes": 312,
-        "taken": 267
+        "outcomes": 316,
+        "taken": 272
       },
       "main/logic/config_store.hpp": {
         "outcomes": 460,
         "taken": 320
       },
       "main/logic/config_transaction.hpp": {
-        "outcomes": 102,
-        "taken": 69
+        "outcomes": 110,
+        "taken": 77
       },
       "main/logic/conv_override.hpp": {
         "outcomes": 8,
@@ -1131,16 +1132,16 @@
         "taken": 53
       },
       "main/logic/config_model.hpp": {
-        "outcomes": 312,
-        "taken": 267
+        "outcomes": 316,
+        "taken": 272
       },
       "main/logic/config_store.hpp": {
         "outcomes": 460,
         "taken": 320
       },
       "main/logic/config_transaction.hpp": {
-        "outcomes": 102,
-        "taken": 69
+        "outcomes": 110,
+        "taken": 77
       },
       "main/logic/conv_override.hpp": {
         "outcomes": 8,
@@ -1533,16 +1534,16 @@
         "taken": 53
       },
       "main/logic/config_model.hpp": {
-        "outcomes": 312,
-        "taken": 267
+        "outcomes": 316,
+        "taken": 272
       },
       "main/logic/config_store.hpp": {
         "outcomes": 460,
         "taken": 320
       },
       "main/logic/config_transaction.hpp": {
-        "outcomes": 102,
-        "taken": 69
+        "outcomes": 110,
+        "taken": 77
       },
       "main/logic/conv_override.hpp": {
         "outcomes": 8,

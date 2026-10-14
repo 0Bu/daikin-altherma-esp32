@@ -154,7 +154,7 @@
       "max_bytes": 64
     },
     "config_transaction": {
-      "pattern": "^_ZN4daik23config_save_transactionINS_12_GLOBAL__N_112NvsBlobStoreEEENS_17ConfigSaveOutcomeERNS_6ConfigERKS4_bRT_\\$constprop\\$[0-9]+$",
+      "pattern": "^_ZN4daik23config_save_transactionINS_12_GLOBAL__N_112NvsBlobStoreEEENS_17ConfigSaveOutcomeERNS_6ConfigERKS4_bRT_RKNS_15LocalPinsRepairE\\$constprop\\$[0-9]+$",
       "max_bytes": 1600
     },
     "config_nvs_blob": {

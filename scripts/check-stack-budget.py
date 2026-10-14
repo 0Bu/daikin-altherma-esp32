@@ -1751,7 +1751,7 @@ def self_test() -> None:
   23: 004136          entry a1, 32
 00000024 <daik::save_whole(daik::Config const&, bool)>:
   24: 004136          entry a1, 48
-00000025 <_ZN4daik23config_save_transactionINS_12_GLOBAL__N_112NvsBlobStoreEEENS_17ConfigSaveOutcomeERNS_6ConfigERKS4_bRT_$constprop$0>:
+00000025 <_ZN4daik23config_save_transactionINS_12_GLOBAL__N_112NvsBlobStoreEEENS_17ConfigSaveOutcomeERNS_6ConfigERKS4_bRT_RKNS_15LocalPinsRepairE$constprop$0>:
   25: 004136          entry a1, 1600
 00000026 <daik::nvs_set_blob(char const*, void const*, unsigned int)>:
   26: 004136          entry a1, 48
