@@ -40,13 +40,13 @@ enum class LedSignal : uint8_t {
 };
 
 enum class LedPhase : uint8_t {
-    Off,           // no transport at all this boot / indicator idle
-    SetupPortal,   // SoftAP provisioning portal up
-    Connecting,    // a transport exists but holds no address yet
-    Healthy,       // link + X10A up, MQTT connected or not configured (no other source is read)
-    BusDown,       // X10A link down — outranks MqttDown (the bus is the point of the device); also
-                   // every networked recovery-mode boot, which never starts the X10A poller
-    MqttDown,      // X10A up, but a configured broker is not connected
+    Off,         // no transport at all this boot / indicator idle
+    SetupPortal, // SoftAP provisioning portal up
+    Connecting,  // a transport exists but holds no address yet
+    Healthy,     // link + X10A up, MQTT connected or not configured (no other source is read)
+    BusDown,     // X10A link down — outranks MqttDown (the bus is the point of the device); also
+                 // every networked recovery-mode boot, which never starts the X10A poller
+    MqttDown,    // X10A up, but a configured broker is not connected
     WipeArmed,
     Wiping,
 };

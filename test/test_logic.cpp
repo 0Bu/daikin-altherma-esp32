@@ -2739,9 +2739,9 @@ static void test_config_link_fallback_yield() {
     // The identity stays: a disabled onboard part does not change which board this is.
     CHECK(c.board_user_set && c.board_preset_id == BoardPresetId::Custom);
     CHECK(board_identity_valid(c, why));
-    // The yield remembers the stored pin, and a factory reset carries THAT, not this boot's RAM-only
-    // repair: the reset erases the link the yield was made for, and carrying -1 would leave the
-    // indicator off for good once the owner moves the link elsewhere.
+    // The yield remembers the stored pin, and a factory reset carries THAT, not this boot's
+    // RAM-only repair: the reset erases the link the yield was made for, and carrying -1 would
+    // leave the indicator off for good once the owner moves the link elsewhere.
     CHECK(led.led_gpio == 44 && led.btn_gpio == -1);
     {
         BoardHardwareStatement s = config_board_hardware(c);

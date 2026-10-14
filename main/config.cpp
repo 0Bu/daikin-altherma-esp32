@@ -26,9 +26,9 @@ static SemaphoreHandle_t g_mtx = nullptr;   // guards g_cfg; created in config_l
 // Rejected or ReadError); cleared by the first explicit service save that lands. Atomic rather than
 // under g_mtx: the automatic writers ask it before they take any config snapshot.
 static std::atomic<bool> s_cfg_blob_unreadable{false};
-// The indicator/button pins config_load yielded to a fallback X10A link this boot (RAM only), so the
-// factory seed carries the stored statement (config_unyield_board_hardware). Cleared under g_mtx by
-// the first service save that lands, which rewrites the stored statement from RAM.
+// The indicator/button pins config_load yielded to a fallback X10A link this boot (RAM only), so
+// the factory seed carries the stored statement (config_unyield_board_hardware). Cleared under
+// g_mtx by the first service save that lands, which rewrites the stored statement from RAM.
 static LocalPinsRepair s_load_yield;
 
 // The board-local hardware as this BUILD was configured — the first-boot / recovery values for the

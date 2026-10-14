@@ -654,12 +654,13 @@ inline void config_carry_board_hardware(Config& fresh, const Config& current) {
 }
 
 // A factory reset carries the board statement as STORED, not as this boot's link fallback repaired
-// it. config_yield_local_pins_to_link is RAM-only and made for a link the reset erases; carrying its
-// -1 would turn that repair into the owner's lasting choice, and the indicator or button would stay
-// off after the link moves elsewhere (a fresh boot whose default link still collides simply yields
-// again). A part re-stated since the yield (no longer -1) keeps its live value; config.cpp forgets
-// the yield once a service save has rewritten the stored statement from RAM.
-inline void config_unyield_board_hardware(BoardHardwareStatement& s, const LocalPinsRepair& yielded) {
+// it. config_yield_local_pins_to_link is RAM-only and made for a link the reset erases; carrying
+// its -1 would turn that repair into the owner's lasting choice, and the indicator or button would
+// stay off after the link moves elsewhere (a fresh boot whose default link still collides simply
+// yields again). A part re-stated since the yield (no longer -1) keeps its live value; config.cpp
+// forgets the yield once a service save has rewritten the stored statement from RAM.
+inline void config_unyield_board_hardware(BoardHardwareStatement& s,
+                                          const LocalPinsRepair&  yielded) {
     if (yielded.led && s.led_gpio == -1) s.led_gpio = yielded.led_gpio;
     if (yielded.btn && s.btn_gpio == -1) s.btn_gpio = yielded.btn_gpio;
 }
