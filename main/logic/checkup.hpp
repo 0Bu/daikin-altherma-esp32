@@ -645,7 +645,7 @@ struct DhwLossState {
     }
 };
 
-constexpr uint32_t DHW_LOSS_WINDOW_S = 3600;             // R5T resolves only 0.1 K
+constexpr uint32_t DHW_LOSS_WINDOW_S      = 3600; // R5T resolves only 0.1 K
 constexpr uint32_t DHW_LOSS_DRAW_WINDOW_S = 10 * 60;
 // Project filter: any positive charge witness discards the candidate. At least 120 seconds
 // of witness also starts a 45-minute settling allowance. A discontinuous positive sample takes
