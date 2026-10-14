@@ -180,11 +180,9 @@ States: `off`, `recording`, `hold`, `degraded`, `blocked`. Reasons: `disabled`, 
 `sampler_inactive`. Numeric codes are stable; retired 3/4 are unused. Safe mode reports
 `sampler_inactive` (14) when configuration is armed but its MQTT sampler never started.
 
-Arming requires diagnostics consent, a configured MQTT broker, configured MQTT room/target paths and
-active HomeHub; forecast
-is optional. Recording requires fresh room-time evidence. Error values are null unless established.
-Sequence plus absolute time identifies a
-recorded event. Room error is not an LWT offset or actuator result.
+Arming requires diagnostics consent, a configured MQTT broker, an MQTT room path with a fixed or
+mapped target, and active HomeHub; forecast is optional. Recording requires fresh room-time evidence.
+Error values are null unless established. Sequence plus absolute time identifies a recorded event. Room error is not an LWT offset or actuator result.
 
 The legacy outdoor pair is fresh/plausible ENV III; `plant_*` is HomeHub input 44 from the current
 session. Current and recorded-event values remain separate and name their source. Both are optional

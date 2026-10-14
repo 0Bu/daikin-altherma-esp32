@@ -53,7 +53,7 @@ interface.
 <a id="refrigerant-service-observation"></a>
 ### Separate refrigerant service observation
 
-The UI names this row **Refrigerant when heating** so an owner does not mistake it for a
+The UI names this row **Refrigerant (heating)** so an owner does not mistake it for a
 controller service mode. This object is deliberately outside the eight-diagnosis evidence matrix
 and `/status.health`. It is an **observation**, not a manufacturer limit, project heuristic, health
 verdict, or completion test. It starts automatically from ordinary read-only X10A polling during a

@@ -34,8 +34,7 @@ results; [DIAGNOSTIC_EVIDENCE.md](DIAGNOSTIC_EVIDENCE.md) owns thresholds and cl
 Each completed X10A sweep contributes only the rows it read. Integrated state time requires readable
 endpoints and bounded gaps; a pulse entirely between sweeps can still be missed. Five-minute trends
 cannot reconstruct completed runs or quiet tank hours and are not reused as diagnosis evidence.
-Temporary allocation/TLS pauses preserve profile capabilities while adding no observed time; inside a
-compressor run a pause of up to 15 s is bounded blind time and keeps the run's class.
+Temporary allocation/TLS pauses preserve profile capabilities while adding no observed time.
 
 Read-time source age, elapsed lifecycle span and per-signal coverage are separate facts. A stopped
 producer cannot retain a current all-clear. Historical findings remain age-bounded; observation-only rows
@@ -53,8 +52,9 @@ Optional outdoor min/mean belongs only to each accepted population and changes n
 Tank cooling retains completed/notable window counts, the greatest accepted one-hour R5T drop and
 optional circulation correlation. Rejected windows and their OR-ed reason set explain filter
 limitations, not a defect or dominant cause. There is no tank-energy calculation or green loss
-assessment. Every fresh start waits 45 minutes before the first candidate; a charge no reading saw
-can still affect the next one.
+assessment. A fresh filter (power loss, crash, reset, identity or circulation change) waits 45 minutes
+before the first candidate; an intentional restart carries the remaining settling time instead. A
+charge no reading saw can still affect the next candidate.
 
 The independent circulation witness's broker, topic, value/time paths, maximum age, thresholds and
 confirmation time bind the DHW evidence identity. Editing them clears only that check and its
@@ -96,15 +96,15 @@ Adoption books **five seconds plus all new-boot uptime through source confirmati
 Together with earlier gaps, exceeding either two minutes of continuous blindness or 10% of the
 candidate hour discards the carried candidate. This restart discard is not counted in `aborts`, so their
 count can under-report restarts; later unread samples use ordinary blind/discard accounting.
-`candidate_s` and `settle_remaining_s` expose carried progress. Neither blind nor settling time is
-observed evidence. Same-boot journal creation does not prove restoration after power loss.
+`candidate_s` and `settle_remaining_s` expose carried progress; the 45-minute start hold is not
+reported in `settle_remaining_s`. Neither blind nor settling time is observed evidence. Same-boot journal creation does not prove restoration after power loss.
 
 Browser trends and pinned points have a separate source/boot identity. Changing or deleting a
 source clears them, and older replies cannot restore them. A reboot starts a new browser lifetime
 even when the device later restores compatible saved trends.
 
 <a id="refrigerant-service-observation"></a>
-## Refrigerant when heating
+## Refrigerant (heating)
 
 A separate passive row records one continuous ordinary space-heating run. It is not a ninth health
 check and starts without a service mode or plant-diagnostics opt-in. Until this boot detects a

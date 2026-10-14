@@ -1192,8 +1192,8 @@ inline bool checkup_step(CheckupState& st, CheckupBucket& b, const CheckupSample
         // Carry the run in flight. A class input that stops answering or changes forfeits the class
         // but not the run: it still completes and is counted as censored. An unreadable compressor
         // row forfeits it too — a duration nobody watched must not enter a mean. The one bounded
-        // exception is a sweep that read NO row at all (the firmware's own network/OTA quiesce, an
-        // OOM catch): up to CHECKUP_MAX_GAP_S of it keeps the class, and the known-running sample
+        // exception is a sweep that read NO row at all (network/OTA quiesce, OOM catch, a silent
+        // bus): up to CHECKUP_MAX_GAP_S of it keeps the class, and the known-running sample
         // that ends it books the elapsed seconds. A known OFF after it still censors (below).
         if (st.run_open) {
             const bool was_running = st.prev_rps_known && st.prev_rps_running;

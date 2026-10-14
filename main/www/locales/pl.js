@@ -1,4 +1,4 @@
-// translation-source: a5a6f3725ede8e98cf262de294412581e8c392ad653d14d59168677a0fc728fe
+// translation-source: a4d25fbd5f065a9d4715eb7230fd183ed1f4eba4c36fa1fd89855058db8f05bb
 const plNoun = (n, one, few, many) => {
   const value = Math.abs(Number(n)), mod10 = value % 10, mod100 = value % 100;
   return value === 1 ? one
@@ -151,9 +151,9 @@ I18N.pl = localeValues([
   /* card.checkup */ "Diagnostyka instalacji · 24 h",
   /* service.title */ "Obieg chł. (ogrzewanie)",
   /* service.state.waiting */ "CZEKA",
-  /* service.state.observing */ "REJESTRUJE",
+  /* service.state.observing */ "ZAPIS",
   /* service.state.limited */ "CZĘŚCIOWO",
-  /* service.state.interrupted */ "WSTRZYMANE",
+  /* service.state.interrupted */ "PAUZA",
   /* service.row.window */ "Zarejestrowano dotąd",
   /* service.row.reason */ "Dlaczego ten stan?",
   /* service.reason.unsupported_profile */ "Ten model nie udostępnia wszystkich potrzebnych odczytów.",
@@ -179,12 +179,12 @@ I18N.pl = localeValues([
   /* check.heater */ "Grzałki",
   /* check.retries */ "Liczniki ochrony",
   /* check.status.ok */ "OK",
-  /* check.status.info */ "UWAGA",
-  /* check.status.warn */ "OSTRZEŻENIE",
+  /* check.status.info */ "INFO",
+  /* check.status.warn */ "UWAGA",
   /* check.status.collecting */ "W TOKU",
   /* check.status.observation */ "POMIAR",
   /* check.status.experimental */ "TESTOWO",
-  /* check.status.unavailable */ "NIE DOTYCZY",
+  /* check.status.unavailable */ "N/D",
   /* check.detail.value_label */ "Wartość:",
   /* check.detail.assessment_label */ "Ocena:",
   /* check.detail.ok */ "Reguła nie zadziałała w czytelnych danych.",

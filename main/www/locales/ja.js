@@ -1,4 +1,4 @@
-// translation-source: a5a6f3725ede8e98cf262de294412581e8c392ad653d14d59168677a0fc728fe
+// translation-source: a4d25fbd5f065a9d4715eb7230fd183ed1f4eba4c36fa1fd89855058db8f05bb
 I18N.ja = localeValues([
   /* sys.nodata */ "データなし",
   /* sys.unreachable */ "接続不可",

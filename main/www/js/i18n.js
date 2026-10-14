@@ -269,7 +269,7 @@ const I18N = {
     // the reader is being shown a rolling aggregate, and "Water pressure" would read as the live figure
     // that is already in the value list further down.
     "card.checkup": "Plant diagnostics · 24 h",
-    "service.title": "Refrigerant when heating",
+    "service.title": "Refrigerant (heating)",
     "service.state.waiting": "WAITING",
     "service.state.observing": "RECORDING",
     "service.state.limited": "PARTIAL",

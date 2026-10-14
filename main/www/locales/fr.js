@@ -1,4 +1,4 @@
-// translation-source: a5a6f3725ede8e98cf262de294412581e8c392ad653d14d59168677a0fc728fe
+// translation-source: a4d25fbd5f065a9d4715eb7230fd183ed1f4eba4c36fa1fd89855058db8f05bb
 I18N.fr = localeValues([
   /* sys.nodata */ "Aucune donnée",
   /* sys.unreachable */ "Injoignable",
@@ -144,7 +144,7 @@ I18N.fr = localeValues([
   /* card.candidates */ "Modèles possibles",
   /* card.oueeprom */ "ID de l’unité extérieure",
   /* card.checkup */ "Diagnostic de l’installation · 24 h",
-  /* service.title */ "Frigorigène en chauffage",
+  /* service.title */ "Frigorigène (chauff.)",
   /* service.state.waiting */ "EN ATTENTE",
   /* service.state.observing */ "ENREGISTRE",
   /* service.state.limited */ "PARTIEL",

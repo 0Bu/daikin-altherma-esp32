@@ -74,9 +74,10 @@ had a sufficiently observed pump-off state.
 **Important limit:** Charging, pump activity, apparent draws and missing readings exclude time. Fast
 continuous cooling above about **1.85 K/h** can resemble a draw and be excluded too. One sensor
 in a stratified tank does not measure whole-tank heat or electricity loss, and pump overlap does not
-prove a cause. After a charge seen for at least two minutes, or a fresh start (power-up, reset,
-consent or circulation change), the check waits 45 minutes before a window; unread valve or heater
-readings extend that wait. A charge no reading saw can still affect a window.
+prove a cause. After a charge seen for at least two minutes, or a fresh start (power loss, crash,
+reset, consent or circulation change), the check waits 45 minutes before a window; unread valve or heater
+readings extend that wait. An intentional restart keeps only the remaining settling time. A charge no
+reading saw can still affect a window.
 
 **Evidence and limits:** [Tank cooling](DIAGNOSTIC_EVIDENCE.md#diagnosis-dhw-loss)
 
@@ -184,7 +185,7 @@ changes or their cause.
 **Evidence and limits:** [Protection-limit changes](DIAGNOSTIC_EVIDENCE.md#diagnosis-retries)
 
 <a id="refrigerant-service-observation"></a>
-## Refrigerant when heating
+## Refrigerant (heating)
 
 This expandable row is technical context, **not a ninth health diagnosis**. It watches existing
 read-only X10A traffic automatically without Plant diagnostics opt-in or a service mode. Until this

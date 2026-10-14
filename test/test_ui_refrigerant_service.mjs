@@ -87,7 +87,7 @@ const observed = {
 ui.set(observed);
 let html = ui.card();
 assert.match(html, /Plant diagnostics · 24 h/);
-assert.match(html, /Refrigerant when heating/);
+assert.match(html, /Refrigerant \(heating\)/);
 assert.match(html, />RECORDING</);
 assert.match(html, /1 min · 4 readings/);
 assert.match(html, /One space-heating run, separate from 24-hour checks/);
