@@ -657,12 +657,21 @@ inline void config_carry_board_hardware(Config& fresh, const Config& current) {
 // it. config_yield_local_pins_to_link is RAM-only and made for a link the reset erases; carrying
 // its -1 would turn that repair into the owner's lasting choice, and the indicator or button would
 // stay off after the link moves elsewhere (a fresh boot whose default link still collides simply
-// yields again). A part re-stated since the yield (no longer -1) keeps its live value; config.cpp
-// forgets the yield once a service save has rewritten the stored statement from RAM.
+// yields again). A part re-stated since the yield (no longer -1) keeps its live value. Every
+// service save applies the same rule to the blob it writes (config_save_transaction).
 inline void config_unyield_board_hardware(BoardHardwareStatement& s,
                                           const LocalPinsRepair&  yielded) {
     if (yielded.led && s.led_gpio == -1) s.led_gpio = yielded.led_gpio;
     if (yielded.btn && s.btn_gpio == -1) s.btn_gpio = yielded.btn_gpio;
+}
+
+// A landed service save that states a real pin for a yielded part ends the yield for that part: the
+// stored value is the owner's from then on. A save that leaves the part at -1 cannot be told apart
+// from one that never touched it (the dashboard shows the yielded part as None), so it keeps the
+// stored pin; the owner who wants it gone moves the X10A link first.
+inline void config_yield_forget_restated(LocalPinsRepair& yielded, const Config& saved) {
+    if (saved.led_gpio != -1) yielded.led = false;
+    if (saved.btn_gpio != -1) yielded.btn = false;
 }
 
 // Validate a config coming from the web UI. Returns false + a reason on the first problem. Pass the

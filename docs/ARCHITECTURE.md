@@ -78,7 +78,9 @@ Every boot starts with model `auto`; model identity is RAM-only. The physical li
 CRC-protected atomic `link` blob (RX, TX, protocol and observation identity). Its loaded pins are
 validated against chip reservations and current board claims; an unusable pair falls back to the
 build default, and an indicator, button or ENV III mapping on that final pair is disabled for the
-boot (RAM only). Detection uses narrow,
+boot. Saves and a factory reset in that boot keep the stored indicator and button pins until a save
+states a real pin for the part; an ENV III mapping disabled this way is stored disabled by the next
+service save. Detection uses narrow,
 revision-checked setters, never a whole configuration snapshot that could revert a concurrent save.
 
 The poll task performs detection while the profile is `auto`:
@@ -394,7 +396,7 @@ While it holds the NVS write latch, every other restart (rebooting saves, Ethern
 install and health gate, heap watchdog, WiFi rollback) refuses and logs once, and no OTA operation
 starts; an OTA image already selected boots on the next reboot (no further OTA runs in that boot),
 and the health gate keeps retrying its rollback restart. A held save reboot is not retried if the
-reset fails.
+reset fails. Each path checks the latch immediately before it restarts, not under the latch's lock.
 
 <a id="web-ui-config-flow"></a>
 ## Configuration ownership

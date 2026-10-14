@@ -122,6 +122,16 @@ inline ConfigBlob config_blob_from(const Config& c) {
     return b;
 }
 
+// The stored statement keeps each indicator/button pin this boot's link fallback yielded (RAM only,
+// config_yield_local_pins_to_link) while the saved value is still the yielded -1. A service save
+// serializes the RAM view, and in the yield boot that includes the WiFi setup a factory reset
+// requires, the first HomeHub search and a WiFi rollback: without this the repair would become the
+// owner's lasting choice. Applied to the blob only, so RAM keeps the yield for this boot.
+inline void config_blob_keep_yielded_pins(ConfigBlob& b, const LocalPinsRepair& yielded) {
+    if (yielded.led && b.led_gpio == -1) b.led_gpio = yielded.led_gpio;
+    if (yielded.btn && b.btn_gpio == -1) b.btn_gpio = yielded.btn_gpio;
+}
+
 // One whole-struct save: config_save (owns_link == false) and the X10A config_save_link (true).
 //
 // Every writer of `live` runs under the caller's config mutex, so the order below is the only
@@ -155,10 +165,12 @@ inline ConfigBlob config_blob_from(const Config& c) {
 //    other) or the Kconfig defaults, so such a write would silently destroy the whole config at the
 //    next boot. This is the last point where every field is together.
 //
-// `live` changes (all of it, revision bumped) only on Saved.
+// `live` changes (all of it, revision bumped) only on Saved. `yielded` is the caller's record of
+// the load-time link yield (config_blob_keep_yielded_pins); the default records none.
 template <class Store>
 ConfigSaveOutcome config_save_transaction(Config& live, const Config& requested, bool owns_link,
-                                          Store& store) {
+                                          Store&                 store,
+                                          const LocalPinsRepair& yielded = LocalPinsRepair{}) {
     ConfigSaveOutcome        out;
     const ConfigSaveRevision revision =
         config_save_revision(owns_link, requested.runtime_revision, live.runtime_revision);
@@ -177,7 +189,8 @@ ConfigSaveOutcome config_save_transaction(Config& live, const Config& requested,
 
     std::vector<uint8_t> service;
     if (!owns_link) {
-        const ConfigBlob b = config_blob_from(c);
+        ConfigBlob b = config_blob_from(c);
+        config_blob_keep_yielded_pins(b, yielded);
         if (!config_blob_strings_fit(b)) {
             out.failed = ConfigSaveStep::FieldTooLong;
             return out;

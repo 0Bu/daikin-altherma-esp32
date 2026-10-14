@@ -350,8 +350,8 @@ assert.match(config, /s_load_yield\s*=\s*yielded;/,
   "config_load must remember which indicator/button pins the link fallback yielded");
 assert.match(config, /bool config_factory_seed_blob\([\s\S]*?Lock lk\(g_mtx\);\s*board = config_board_hardware\(g_cfg\);\s*config_unyield_board_hardware\(board, s_load_yield\);/,
   "the factory seed must carry the stored pins, not this boot's RAM-only yield");
-assert.match(config, /config_save_transaction\([\s\S]*?if \(!owns_link && out\.result == ConfigSaveResult::Saved\) s_load_yield = LocalPinsRepair\{\};\s*\}/,
-  "a landed service save rewrites the stored statement, so it must forget the yield under the lock");
+assert.match(config, /config_save_transaction\(g_cfg, requested, owns_link, store, s_load_yield\);[\s\S]*?if \(!owns_link && out\.result == ConfigSaveResult::Saved\)\s*config_yield_forget_restated\(s_load_yield, requested\);\s*\}/,
+  "every service save must keep the yielded pins, and forget a part only after it is re-stated, under the lock");
 const httpConfig = code("main/http_config.cpp");
 assert.match(httpConfig, /reset_checkup && c\.profile != "auto"[\s\S]*?history_x10a_identity\([\s\S]*?if \(c\.x10a_identity_fp != 0\)[\s\S]*?history_reset_on_detect\(c\.x10a_identity_fp\)/,
   "manual concrete-profile or wiring-only updates must install a nonzero history scope");

@@ -27,8 +27,9 @@ static SemaphoreHandle_t g_mtx = nullptr;   // guards g_cfg; created in config_l
 // under g_mtx: the automatic writers ask it before they take any config snapshot.
 static std::atomic<bool> s_cfg_blob_unreadable{false};
 // The indicator/button pins config_load yielded to a fallback X10A link this boot (RAM only), so
-// the factory seed carries the stored statement (config_unyield_board_hardware). Cleared under
-// g_mtx by the first service save that lands, which rewrites the stored statement from RAM.
+// every service save and the factory seed keep the stored statement (config_blob_keep_yielded_pins,
+// config_unyield_board_hardware). A part is forgotten, under g_mtx, once a landed save states a
+// real pin for it (config_yield_forget_restated).
 static LocalPinsRepair s_load_yield;
 
 // The board-local hardware as this BUILD was configured — the first-boot / recovery values for the
@@ -522,10 +523,11 @@ static ConfigSaveResult save_whole(const Config& requested, bool owns_link) {
     {
         Lock         lk(g_mtx);
         NvsBlobStore store;
-        out = config_save_transaction(g_cfg, requested, owns_link, store);
+        out     = config_save_transaction(g_cfg, requested, owns_link, store, s_load_yield);
         live_rx = g_cfg.rx_pin;
         live_tx = g_cfg.tx_pin;
-        if (!owns_link && out.result == ConfigSaveResult::Saved) s_load_yield = LocalPinsRepair{};
+        if (!owns_link && out.result == ConfigSaveResult::Saved)
+            config_yield_forget_restated(s_load_yield, requested);
     }
     // A service save that landed wrote a fresh "cfg" blob, so a stored blob this boot could not use
     // has now been replaced by the owner's explicit choice and the automatic writers may write

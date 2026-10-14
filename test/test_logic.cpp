@@ -2163,6 +2163,64 @@ static void test_config_transaction() {
         CHECK(link.identity_fp == 0x11111111u);
     }
 
+    // A service save in a boot whose X10A fallback yielded the indicator (RAM -1): "cfg" keeps the
+    // stored pin while RAM keeps the yield — the WiFi setup a factory reset requires must not store
+    // the repair as the owner's choice. A save that states a real pin replaces it, and only that
+    // ends the yield for the part (tracker card CFG-08/a).
+    {
+        Config live   = config_tx_live();
+        live.led_gpio = -1; // yielded from GPIO44 at load
+        live.btn_gpio = 41; // not yielded
+        ConfigTxStore store;
+        store.seed(live);
+        LocalPinsRepair yielded;
+        yielded.led      = true;
+        yielded.led_gpio = 44;
+        Config req       = live;
+        req.wifi_ssid    = "after-reset";
+        CHECK(config_save_transaction(live, req, false, store, yielded).result ==
+              ConfigSaveResult::Saved);
+        CHECK(config_tx_durable_service(store).led_gpio == 44);
+        CHECK(config_tx_durable_service(store).btn_gpio == 41);
+        CHECK(live.led_gpio == -1 && live.wifi_ssid == "after-reset");
+        config_yield_forget_restated(yielded, req);
+        CHECK(yielded.led && yielded.led_gpio == 44); // -1 is not a re-statement
+        // Without the record the same save stores the RAM view.
+        Config        plain_live = live;
+        ConfigTxStore plain;
+        plain.seed(plain_live);
+        Config plain_req = plain_live;
+        CHECK(config_save_transaction(plain_live, plain_req, false, plain).result ==
+              ConfigSaveResult::Saved);
+        CHECK(config_tx_durable_service(plain).led_gpio == -1);
+        // A real pin wins and ends the yield for that part only.
+        req          = live;
+        req.led_gpio = 5;
+        CHECK(config_save_transaction(live, req, false, store, yielded).result ==
+              ConfigSaveResult::Saved);
+        CHECK(config_tx_durable_service(store).led_gpio == 5 && live.led_gpio == 5);
+        yielded.btn      = true;
+        yielded.btn_gpio = 43;
+        config_yield_forget_restated(yielded, req);
+        CHECK(!yielded.led && !yielded.btn); // btn 41 is a real pin too
+        ConfigBlob b;
+        b.led_gpio = -1;
+        b.btn_gpio = -1;
+        LocalPinsRepair btn_only;
+        btn_only.btn      = true;
+        btn_only.btn_gpio = 43;
+        config_blob_keep_yielded_pins(b, btn_only);
+        CHECK(b.led_gpio == -1 && b.btn_gpio == 43);
+        b.btn_gpio = 7; // a stated button is written as stated
+        config_blob_keep_yielded_pins(b, btn_only);
+        CHECK(b.btn_gpio == 7);
+        Config none_saved; // both parts left at -1: nothing is forgotten
+        none_saved.led_gpio = -1;
+        none_saved.btn_gpio = -1;
+        config_yield_forget_restated(btn_only, none_saved);
+        CHECK(btn_only.btn && !btn_only.led);
+    }
+
     // The field-length boundary: CONFIG_BLOB_MAX_STR is accepted, one more is refused with nothing
     // written, because the decoder would reject that blob and drop the whole config at next boot.
     {
@@ -2775,6 +2833,11 @@ static void test_config_link_fallback_yield() {
         BoardHardwareStatement s = config_board_hardware(b);
         config_unyield_board_hardware(s, btn);
         CHECK(s.btn_gpio == 43 && s.led_gpio == 21);
+        // A button re-stated since the yield keeps its live value.
+        BoardHardwareStatement restated = config_board_hardware(b);
+        restated.btn_gpio               = 4;
+        config_unyield_board_hardware(restated, btn);
+        CHECK(restated.btn_gpio == 4);
     }
     CHECK(board_hw_valid(b, why, 48, false));
     Config both;

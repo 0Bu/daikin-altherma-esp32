@@ -44,9 +44,10 @@ void factory_reset() {
                 static_cast<unsigned long>(BUTTON_FIRE_MS / 1000));
     const int64_t t0 = esp_timer_get_time();
     // The board-hardware statement (preset, indicator, this button) survives the reset: without it
-    // the next boot would come up with the button and indicator unconfigured — the default — and
-    // the recovery path the user just used would be gone from the board until someone restates it
-    // in the setup portal. It is built from the RAM config BEFORE anything is erased, so a failure
+    // the next boot would come up with the build's default indicator and no button, and the
+    // recovery path the user just used would be gone from the board until someone restates it
+    // in the Board hardware dialog. It is built from the RAM config (with any pin this boot's X10A
+    // fallback disabled restored to its stored value) BEFORE anything is erased, so a failure
     // here (out of memory) costs only the seed — the reset proceeds without it and says so — and
     // nothing after the first erase has to allocate for it.
     std::vector<uint8_t> seed;
