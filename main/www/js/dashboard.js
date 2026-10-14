@@ -1480,7 +1480,7 @@ function checkupMetricValue(c) {
       const parts = [];
       const buh = checkupHeaterRuntime(c.buh_s, c.buh_min);
       const bsh = checkupHeaterRuntime(c.bsh_s, c.bsh_min);
-      if (buh) parts.push(buh);
+      if (buh) parts.push(t("check.buh_runtime", buh));
       if (bsh) parts.push(t("check.tank_runtime", bsh));
       return parts.join(" · ");
     }

@@ -87,7 +87,7 @@ const observed = {
 ui.set(observed);
 let html = ui.card();
 assert.match(html, /Plant diagnostics · 24 h/);
-assert.match(html, /Refrigerant circuit during heating/);
+assert.match(html, /Refrigerant when heating/);
 assert.match(html, />RECORDING</);
 assert.match(html, /1 min · 4 readings/);
 assert.match(html, /One space-heating run, separate from 24-hour checks/);
@@ -137,7 +137,7 @@ for (const [blocker, reason] of [
 ]) {
   ui.set({ state: "waiting", continuous_s: 0, samples: 0, blocker });
   const waiting = ui.card();
-  assert.match(waiting, />WAITING FOR HEATING RUN</);
+  assert.match(waiting, />WAITING</);
   assert.ok(waiting.includes(reason));
 }
 
@@ -155,7 +155,7 @@ ui.lang("de");
 ui.set({ ...observed, state: "limited", special_phases_known: false,
   limitations: ["pressure_sides_incomplete"] });
 html = ui.card();
-assert.match(html, /MISST · ZUSATZWERTE FEHLEN/);
+assert.match(html, />LÜCKENHAFT</);
 assert.match(html, /label="Verdichter">min. 0 · Mittel 27,5 · max. 40 rps/);
 assert.match(html, /Druckseite\(n\)/);
 assert.match(html, /unabhängig von der 24-h-Diagnose/);
@@ -163,6 +163,6 @@ assert.match(html, /Ventil: Befehl, keine gemessene Stellung/);
 ui.set({ state: "unsupported", continuous_s: 0, samples: 0,
   blocker: "unsupported_profile", special_phases_known: false });
 html = ui.card();
-assert.match(html, />NICHT VERFÜGBAR</);
+assert.match(html, />ENTFÄLLT</);
 assert.match(html, /Dieses Modell stellt nicht alle benötigten Messwerte bereit/);
 console.log("refrigerant observation UI contract: actual ranges, named limits and single-run scope verified");

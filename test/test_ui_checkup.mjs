@@ -132,10 +132,10 @@ ui.setLang("en");
 
 // Missing channels stay absent; observed zero and a positive sub-minute runtime stay distinct.
 for (const [payload, expected] of [
-  [{ buh_min: 7, bsh_min: null }, "7 min"],
+  [{ buh_min: 7, bsh_min: null }, "backup 7 min"],
   [{ buh_min: null, bsh_min: 9 }, "tank 9 min"],
-  [{ buh_s: 0, bsh_s: 0 }, "0 min · tank 0 min"],
-  [{ buh_s: 1, bsh_s: 59 }, "<1 min · tank <1 min"],
+  [{ buh_s: 0, bsh_s: 0 }, "backup 0 min · tank 0 min"],
+  [{ buh_s: 1, bsh_s: 59 }, "backup <1 min · tank <1 min"],
 ]) assert.equal(ui.metric({ id: "heater", verdict: "ok", ...payload }), expected);
 for (const c of [
   { id: "cycling", starts: null }, { id: "defrost", count: null },
@@ -211,7 +211,7 @@ assert.equal(ui.metric({ ...dhw, max_k_h: 0.8, windows: 1, high_windows: 1,
              "maximum 0.8 K/h · 1/1 windows: threshold reached · pump attribution incomplete");
 assert.match(ui.detail(dhw), /Project hint at ≥0.8 K\/h; cause unproven/);
 assert.doesNotMatch(ui.detail(dhw, true), /200 l|COP|kWh|24 h:/);
-assert.equal(ui.value({ ...dhw, verdict: "ok", evidence: "observation" }), "MEASURED ONLY");
+assert.equal(ui.value({ ...dhw, verdict: "ok", evidence: "observation" }), "MEASURED");
 assert.match(ui.detail({ ...dhw, verdict: "ok", evidence: "observation" }), /omitted hours may cool faster/);
 const waiting = {
   id: "dhw_loss", verdict: "collecting", reason: "no_eligible_windows",
@@ -237,7 +237,7 @@ assert.match(detail, /Missing replies or board-side polling pauses/);
 assert.match(detail, /establishes nothing about the tank/);
 assert.doesNotMatch(detail, /tank temperature went unread|because the X10A link|resolved|call service/);
 assert.equal(ui.value(blocked), "CHECKING");
-assert.equal(ui.value({ ...blocked, verdict: "unavailable", blocked: false }), "NOT AVAILABLE");
+assert.equal(ui.value({ ...blocked, verdict: "unavailable", blocked: false }), "N/A");
 assert.match(ui.detail({ ...blocked, verdict: "collecting" }), /No eligible one-hour window in 24 h/);
 
 detail = ui.detail({ id: "heater", verdict: "ok", evidence: "observation", buh_s: 0,
@@ -265,7 +265,7 @@ detail = ui.detail({ ...cycling, verdict: "ok", evidence: "observation", split: 
                      reason: "class_population_incomplete" });
 assert.match(detail, /Incomplete classification/);
 assert.doesNotMatch(detail, /Assessed on all runs together|all runs are assessed together/);
-assert.equal(ui.value({ ...cycling, verdict: "ok", evidence: "observation" }), "MEASURED ONLY");
+assert.equal(ui.value({ ...cycling, verdict: "ok", evidence: "observation" }), "MEASURED");
 assert.match(ui.detail({ ...cycling, verdict: "ok", evidence: "observation",
                         reason: "heating_runs_insufficient" }), /Fewer than 12 eligible completed heating runs/);
 
@@ -309,9 +309,9 @@ assert.match(ui.detail({ ...defrost, verdict: "ok", evidence: "observation",
                         reason: "defrost_events_insufficient" }), /Fewer than three paired defrosts/);
 assert.match(ui.detail({ id: "defrost", verdict: "ok", evidence: "observation",
                          reason: "no_paired_runtime", count: 3 }), /event count only/);
-assert.equal(ui.value({ id: "retries", verdict: "ok", evidence: "experimental", seen: 0 }), "EXPERIMENTAL");
-assert.equal(ui.value({ id: "flow", verdict: "ok", evidence: "observation" }), "MEASURED ONLY");
-assert.equal(ui.value({ id: "heater", verdict: "ok", evidence: "observation" }), "MEASURED ONLY");
+assert.equal(ui.value({ id: "retries", verdict: "ok", evidence: "experimental", seen: 0 }), "TRIAL");
+assert.equal(ui.value({ id: "flow", verdict: "ok", evidence: "observation" }), "MEASURED");
+assert.equal(ui.value({ id: "heater", verdict: "ok", evidence: "observation" }), "MEASURED");
 
 // The badge counts the highest-severity serialized findings; unrelated metadata cannot turn it
 // into a health score. Pure observations never get a fake assessment denominator.
@@ -329,7 +329,7 @@ context.S.status.health = { status: "unavailable", assessable: 0, evaluated: 0,
   checks: [{ id: "flow", verdict: "ok", evidence: "observation", min_l_min: 8.4 }] };
 card = ui.card();
 assert.match(card, />Observations<\/span>/);
-assert.doesNotMatch(card, /0\/0|NOT AVAILABLE<\/span>|>OK</);
+assert.doesNotMatch(card, /0\/0|N\/A<\/span>|>OK</);
 context.S.status.health = { status: "warn", checks: [dhw, { ...pressure, verdict: "warn" }] };
 assert.match(ui.card(), />1 warning<\/span>/);
 assert.doesNotMatch(ui.card(), />1 note<\/span>/);
