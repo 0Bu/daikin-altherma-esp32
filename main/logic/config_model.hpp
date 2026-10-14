@@ -325,7 +325,9 @@ inline bool config_save_succeeded(bool blob_ok, bool link_ok, bool require_link)
 // handler's config() snapshot and its save:
 //
 //   * a service save owns no detection field, so it carries the newly detected link and model
-//     forward (reconcile_detected_config) and still commits its own fields;
+//     forward (reconcile_detected_config) and still commits its own fields — unless that carried
+//     link collides with the indicator, button or ENV III pins it requests, which refuses it as
+//     Stale too (config_reconcile_breaks_local_pins, below);
 //   * an X10A /set_hp owns the link and derives profile, protocol, fingerprint validity and the
 //     observation identity from the snapshot it read. Committing that snapshot would revert the
 //     detection that landed meanwhile, and patching it with newer detection fields would mix two
@@ -437,6 +439,15 @@ inline ReservedPins config_board_reserved_pins(const Config& c) {
 inline ReservedPins config_env3_reserved_pins(const Config& c) {
     return ReservedPins{c.rx_pin, c.tx_pin, c.led_gpio, c.btn_gpio};
 }
+// The board-local reservations plus `extra`, the pads a DETECTED Ethernet controller clocks
+// (net.hpp's net_eth_reserved_pins(); see board_hw_valid() below for why no stored setting can
+// state them). /set_board refuses an indicator or button on those pads, so every board-local offer
+// — the pin pickers and the preset rows alike — must withhold them too, or the UI offers a pick
+// whose only outcome is a 400. Eight slots hold the worst case: the link pair, an enabled ENV III
+// pair and the four SPI pads.
+inline ReservedPins config_board_reserved_pins(const Config& c, const ReservedPins& extra) {
+    return config_board_reserved_pins(c).plus(extra);
+}
 
 // Validate the board-local hardware half of a config (POST /set_board, and the load path). Separate
 // from validate() below because it is checked on its own route and must name its own field; the two
@@ -456,6 +467,18 @@ inline ReservedPins config_env3_reserved_pins(const Config& c) {
 inline bool board_hw_valid(const Config& c, std::string& reason, int max_gpio = 48,
                            bool octal_spi = true, const ReservedPins& extra = {}) {
     if (!led_type_valid(c.led_type)) { reason = "led_type unknown"; return false; }
+    // -1 is the one spelling of "absent". Anything below it is not a pin either, and accepting it
+    // would persist a value whose meaning every reader has to guess; config_load normalizes a
+    // stored one instead (config_normalize_absent_local_pins below) rather than reject the whole
+    // board.
+    if (c.led_gpio < -1) {
+        reason = "led_gpio out of range";
+        return false;
+    }
+    if (c.btn_gpio < -1) {
+        reason = "btn_gpio out of range";
+        return false;
+    }
     if (c.led_gpio >= 0) {
         if (!gpio_in_range(c.led_gpio, max_gpio))          { reason = "led_gpio out of range";  return false; }
         if (!board_pin_local_io(c.led_gpio, octal_spi))    { reason = "led_gpio is a reserved GPIO"; return false; }
@@ -472,6 +495,78 @@ inline bool board_hw_valid(const Config& c, std::string& reason, int max_gpio = 
     if (c.led_gpio >= 0 && extra.claims(c.led_gpio)) { reason = "led_gpio is in use by Ethernet"; return false; }
     if (c.btn_gpio >= 0 && extra.claims(c.btn_gpio)) { reason = "btn_gpio is in use by Ethernet"; return false; }
     return true;
+}
+
+// Which board-local pins a load-path repair changed, so config_load can name each one in /diag.
+struct LocalPinsRepair {
+    bool led = false;
+    bool btn = false;
+};
+
+// An older build accepted any negative indicator/button GPIO from a raw POST and persisted it;
+// every driver already treated it as "absent". board_hw_valid() now refuses such a value on the
+// request path, so the LOAD path must canonicalize it to -1 before that check runs — otherwise a
+// stored -2 would revoke the whole board statement and swap in the build defaults, rewriting a
+// legacy field the owner never touched. Normalizing changes no behaviour: absent stays absent.
+inline LocalPinsRepair config_normalize_absent_local_pins(Config& c) {
+    LocalPinsRepair r;
+    if (c.led_gpio < -1) {
+        c.led_gpio = -1;
+        r.led      = true;
+    }
+    if (c.btn_gpio < -1) {
+        c.btn_gpio = -1;
+        r.btn      = true;
+    }
+    return r;
+}
+
+// The cross-feature collision rules that depend on WHERE the X10A link sits: the indicator, the
+// button and an enabled ENV III must not share a GPIO with RX or TX. board_hw_valid() and
+// env3_config_valid() enforce these same pairs, together with the chip rules, on the request and
+// load paths; this is the subset that a change of the link ALONE can break, which is what the load
+// fallback and the save transaction's reconcile need to ask without knowing the build's octal flag
+// or the detected Ethernet pads. Absent pins (-1) claim nothing.
+inline bool config_local_pins_collide_with_link(const Config& c) {
+    const ReservedPins link = config_link_pins(c);
+    if (link.claims(c.led_gpio) || link.claims(c.btn_gpio)) return true;
+    return c.env3_enabled && (link.claims(c.env3_sda) || link.claims(c.env3_scl));
+}
+
+// After config_load has replaced an unusable stored X10A pair with the build default, that default
+// can land on a pin the indicator or the button holds (a Custom LED on GPIO44 is legal while the
+// link sits on 1/2, and collides once a damaged link entry falls back to 44/43). The link is the
+// primary function and the indicator/button are optional, so they YIELD — disabled (-1), exactly as
+// an optional ENV III already yields to the same fallback — instead of leaving a snapshot that
+// fails board_hw_valid() and validate() and keeps detection from trying any candidate at all. RAM
+// only, like every other load-path repair: the stored pins stay for the owner, and the board
+// identity is kept because a disabled onboard part does not change which board this is.
+inline LocalPinsRepair config_yield_local_pins_to_link(Config& c) {
+    const ReservedPins link = config_link_pins(c);
+    LocalPinsRepair    r;
+    if (link.claims(c.led_gpio)) {
+        c.led_gpio = -1;
+        r.led      = true;
+    }
+    if (link.claims(c.btn_gpio)) {
+        c.btn_gpio = -1;
+        r.btn      = true;
+    }
+    return r;
+}
+
+// The save transaction's half of the same rule (logic/config_transaction.hpp). A service save whose
+// snapshot a detection commit overtook carries the newly detected link forward
+// (reconcile_detected_config), but its request was validated against its OWN snapshot's link. If
+// the carried link now lands on a pin the request claims — a /set_board moving the indicator to
+// GPIO43 while a sweep that started earlier commits 44/43 — committing would persist exactly the
+// collision config_load has to undo on the next boot. Such a save is refused as Stale instead: the
+// handler answers a conflict, and a resubmitted request is validated against the live link. Only a
+// link the reconcile CHANGED counts: a snapshot that already collides (state an older build left)
+// is not this save's doing, and refusing it would fail every unrelated save until the pins change.
+inline bool config_reconcile_breaks_local_pins(const Config& requested, const Config& reconciled) {
+    return (reconciled.rx_pin != requested.rx_pin || reconciled.tx_pin != requested.tx_pin) &&
+           config_local_pins_collide_with_link(reconciled);
 }
 
 // ── What POST /set_board actually has to DO ─────────────────────────────────────────────────────
@@ -499,6 +594,58 @@ inline bool board_reboot_needed(const Config& want, const Config& cur) { return 
 // real statement change, even though no driver needs a reboot.
 inline bool board_save_needed(const Config& want, const Config& cur) {
     return !board_hw_same(want, cur) || !board_identity_same(want, cur);
+}
+
+// ── What a factory reset keeps ──────────────────────────────────────────────────────────────────
+// The board hardware statement: the five board-local hardware values plus the explicit identity
+// that rides with them. A factory reset erases everything else, but these describe the PCB rather
+// than the installation. Erasing them would turn an AtomS3 Lite's recovery button off (the build
+// default leaves the button absent) on exactly the boot after its owner used it, and would drive
+// the build's default indicator (a plain LED on the XIAO's GPIO21) on a board whose LED sits
+// elsewhere. POD, so config.cpp can copy it out of the live config under the config mutex without
+// allocating.
+struct BoardHardwareStatement {
+    bool          user_set       = false;
+    BoardPresetId preset_id      = BoardPresetId::Custom;
+    int           led_gpio       = -1;
+    int           led_type       = static_cast<int>(LedType::Gpio);
+    bool          led_inverted   = false;
+    int           btn_gpio       = -1;
+    bool          btn_active_low = true;
+};
+
+inline BoardHardwareStatement config_board_hardware(const Config& c) {
+    BoardHardwareStatement s;
+    s.user_set       = c.board_user_set;
+    s.preset_id      = c.board_preset_id;
+    s.led_gpio       = c.led_gpio;
+    s.led_type       = c.led_type;
+    s.led_inverted   = c.led_inverted;
+    s.btn_gpio       = c.btn_gpio;
+    s.btn_active_low = c.btn_active_low;
+    return s;
+}
+
+// Carry a statement onto `fresh`, the config of a factory-fresh device, and NOTHING else: WiFi and
+// MQTT credentials, syslog, NTP, HomeHub (and its pending one-shot search), ENV III, weather,
+// diagnostics consent, the UI language and the OTA channel all stay at the fresh device's values.
+// Only a STATED board is carried. Without board_user_set the live values are merely the build's
+// defaults (or a load-path repair of them), which the fresh device already holds — and carrying a
+// repaired value such as an indicator disabled for a link collision would keep that repair after
+// the link it was made for has been erased.
+inline void config_carry_board_hardware(Config& fresh, const BoardHardwareStatement& s) {
+    if (!s.user_set) return;
+    fresh.board_user_set  = true;
+    fresh.board_preset_id = s.preset_id;
+    fresh.led_gpio        = s.led_gpio;
+    fresh.led_type        = s.led_type;
+    fresh.led_inverted    = s.led_inverted;
+    fresh.btn_gpio        = s.btn_gpio;
+    fresh.btn_active_low  = s.btn_active_low;
+}
+
+inline void config_carry_board_hardware(Config& fresh, const Config& current) {
+    config_carry_board_hardware(fresh, config_board_hardware(current));
 }
 
 // Validate a config coming from the web UI. Returns false + a reason on the first problem. Pass the

@@ -399,9 +399,12 @@ static void append_status_json(JsonOut& j, bool redact) {
         // this payload: one source, no second fetch to fail, and the presets cannot arrive
         // disagreeing with the pin lists they must fit inside. Two fixed rows (~170 bytes) —
         // bounded, unlike the per-value payloads the heap rules are about.
+        // Filtered by the same reservations as pins_local above, detected Ethernet pads included:
+        // POST /set_board refuses an indicator or button on them, so a preset that puts one there
+        // is not a pick.
         const BoardPreset* presets[BOARD_PRESETS_MAX];
         int npre = board_presets_offerable(presets, BOARD_PRESETS_MAX, hw_octal_spi(),
-                                           config_board_reserved_pins(c));
+                                           config_board_reserved_pins(c, net_eth_reserved_pins()));
         // An explicitly selected board is identity, not a promise that its optional onboard
         // defaults are still enabled. Keep it in the selector even when a customized LED/button or
         // another live reservation means re-applying the factory fields would currently be

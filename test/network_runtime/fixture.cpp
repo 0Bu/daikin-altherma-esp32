@@ -90,6 +90,9 @@ bool   config_save(const Config& c) {
     return adapter::save_ok;
 }
 bool config_wifi_configured() { return !adapter::cfg.wifi_ssid.empty(); }
+// Every scenario here loads a usable stored blob; the kept-blob gate is pinned at source level by
+// test/test_config_ownership_contract.mjs.
+bool config_stored_blob_unreadable() { return false; }
 namespace detail {
 void config_lock() {
     if (!syslog_episode::active) return;

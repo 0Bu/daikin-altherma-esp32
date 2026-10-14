@@ -421,9 +421,20 @@ static __attribute__((noinline)) void wifi_finish_sta_rollback() {
     // if the write failed the next boot re-reads the SAME new credentials, spends the whole
     // window again and rolls back again — a reboot loop for as long as NVS misbehaves, with
     // no way in. On failure fall through to the setup portal below: reachable beats looping.
-    if (config_save(rollback_cfg)) {
+    // The same not-persisted path is taken ON PURPOSE when this boot could not use the stored
+    // settings blob (config_stored_blob_unreadable): the credentials running now are the
+    // legacy/default fallback, and saving their restore would replace that blob with the fallback
+    // image. The setup portal lets the owner decide explicitly instead.
+    const bool keep_stored = config_stored_blob_unreadable();
+    if (!keep_stored && config_save(rollback_cfg)) {
         vTaskDelay(pdMS_TO_TICKS(500));
         esp_restart();
+    }
+    if (keep_stored) {
+        diag_printf("wifi: rollback restore to '%s' not persisted — the stored settings could not "
+                    "be read and are kept until an explicit save; opening the setup portal\n",
+                    DiagLogIdentifier(rollback_cfg.wifi_ssid).c_str());
+        return;
     }
     // A false result here now means the one atomic blob did not land — not an unrelated
     // self-healing link-cache maintenance failure — so the restored credentials themselves
@@ -442,6 +453,16 @@ static __attribute__((noinline)) void wifi_finish_sta_success() {
     s_rollback_pending = false;
     Config success_cfg = config();
     if (success_cfg.wifi_rollback_active) {
+        // A stored settings blob this boot could not use is kept for an explicit save: clearing the
+        // flag would write the legacy/default fallback over it. This session already ignores the
+        // flag (s_rollback_pending above); only a later boot could still act on it.
+        if (config_stored_blob_unreadable()) {
+            diag_printf("wifi: rollback backup ('%s') not cleared — the stored settings could not "
+                        "be read and are kept until an explicit save; a later connect failure may "
+                        "restore it\n",
+                        DiagLogIdentifier(success_cfg.wifi_ssid_backup).c_str());
+            return;
+        }
         const std::string stale_backup = success_cfg.wifi_ssid_backup;
         success_cfg.wifi_rollback_active = false;
         success_cfg.wifi_ssid_backup = "";

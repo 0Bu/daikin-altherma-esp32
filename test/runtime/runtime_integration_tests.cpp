@@ -142,8 +142,10 @@ void test_config_detection_http_interleaving() {
     DetectedLinkCommit      detection;
     bool                    model_saved = false;
     daik::ConfigSaveOutcome http;
+    // 16/17: a detected pair on config_named's enabled ENV III pins (2/1) would make the stale
+    // service save below a refused collision instead (test_config_reconcile_local_pin_collision).
     scheduler.after(10, [&] {
-        detection = coordinator.commit_detected_link(initial_revision, 1, 2, daik::Protocol::S,
+        detection = coordinator.commit_detected_link(initial_revision, 16, 17, daik::Protocol::S,
                                                      0xAABBCCDDu);
     });
     scheduler.after(15, [&] {
@@ -158,8 +160,8 @@ void test_config_detection_http_interleaving() {
     CHECK_EQ(http.result, daik::ConfigSaveResult::Saved);
     CHECK_EQ(scheduler.now_ms(), uint64_t{20});
     CHECK_EQ(coordinator.snapshot().mqtt_uri, std::string("mqtts://new-broker.local"));
-    CHECK_EQ(coordinator.snapshot().rx_pin, 1);
-    CHECK_EQ(coordinator.snapshot().tx_pin, 2);
+    CHECK_EQ(coordinator.snapshot().rx_pin, 16);
+    CHECK_EQ(coordinator.snapshot().tx_pin, 17);
     CHECK(coordinator.snapshot().proto == daik::Protocol::S);
     CHECK_EQ(coordinator.snapshot().profile, std::string("altherma3_r_erga"));
     CHECK_EQ(coordinator.snapshot().fp_valid, true);
@@ -225,6 +227,56 @@ void test_config_detection_http_interleaving() {
         CHECK_EQ(coordinator.snapshot().profile, std::string("altherma3_r_erga"));
         CHECK_EQ(coordinator.snapshot().fp_valid, true);
     }
+}
+
+// A /set_board snapshot moves the indicator onto a pin that a detection commit, landing before the
+// save runs, then gives the X10A link (tracker card CFG-08/b). The production transaction refuses
+// the save as Stale over the fake NVS: nothing reaches flash, a reboot finds the previous service
+// entry and the detected link, and RAM keeps the detected link with the indicator unclaimed.
+void test_config_reconcile_local_pin_collision() {
+    FakeNvs      nvs;
+    daik::Config initial = config_named("board");
+    initial.env3_enabled = false;
+    initial.rx_pin       = 1;
+    initial.tx_pin       = 2;
+    ConfigCoordinator coordinator(nvs, initial);
+    seed_durable(coordinator);
+
+    daik::Config board_form   = coordinator.snapshot();
+    board_form.led_gpio       = 43; // valid against this snapshot's 1/2 link
+    board_form.board_user_set = true;
+
+    VirtualScheduler        scheduler;
+    DetectedLinkCommit      detection;
+    daik::ConfigSaveOutcome http;
+    size_t                  sets_before_save = 0;
+    scheduler.after(10, [&] {
+        detection = coordinator.commit_detected_link(board_form.runtime_revision, 44, 43,
+                                                     daik::Protocol::I, 0x0BADF00Du);
+    });
+    scheduler.after(20, [&] {
+        sets_before_save = nvs.set_calls();
+        http             = coordinator.save(board_form, /*owns_link=*/false);
+    });
+    scheduler.run();
+
+    CHECK(detection.committed);
+    CHECK_EQ(http.result, daik::ConfigSaveResult::Stale);
+    CHECK_EQ(http.failed, daik::ConfigSaveStep::None);
+    CHECK_EQ(nvs.set_calls(), sets_before_save);
+    CHECK_EQ(coordinator.snapshot().led_gpio, -1);
+    CHECK_EQ(coordinator.snapshot().rx_pin, 44);
+    CHECK_EQ(coordinator.snapshot().tx_pin, 43);
+
+    ConfigPersistenceAdapter rebooted(nvs);
+    daik::ConfigBlob         service;
+    daik::LinkBlob           link;
+    CHECK(rebooted.load_config(service));
+    CHECK(rebooted.load_link(link));
+    CHECK_EQ(service.led_gpio, -1);
+    CHECK(!service.board_user_set);
+    CHECK_EQ(link.rx_pin, 44);
+    CHECK_EQ(link.tx_pin, 43);
 }
 
 void test_config_save_failure_boundaries() {
@@ -810,6 +862,8 @@ int main(int argc, char** argv) {
          [=] { test_nvs_atomic_save_reboot_and_failures(mutate_atomicity); }},
         {"config detection and HTTP controlled interleaving",
          test_config_detection_http_interleaving},
+        {"config reconcile refuses a detected link onto requested local pins",
+         test_config_reconcile_local_pin_collision},
         {"config save failure boundaries", test_config_save_failure_boundaries},
         {"config transactions allocate nothing after the first write",
          [=] {

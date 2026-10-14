@@ -2230,7 +2230,9 @@ static void test_config_transaction() {
         ConfigTxStore store;
         store.seed(live);
         const Config stale = live; // taken at revision 5
-        apply_link(live, 1, 2, Protocol::S, 0xAABBCCDDu);
+        // 16/17, not a pair on the fixture's enabled ENV III pins (2/1): a carried link that
+        // collides with them is refused instead (test_config_reconcile_local_pins).
+        apply_link(live, 16, 17, Protocol::S, 0xAABBCCDDu);
         apply_model(live, "altherma3_r_erga", 0x5u, 60, 80, "1234");
         live.runtime_revision       = 7;
         Config req                  = stale;
@@ -2238,9 +2240,9 @@ static void test_config_transaction() {
         const ConfigSaveOutcome out = config_save_transaction(live, req, false, store);
         CHECK(out.result == ConfigSaveResult::Saved && out.failed == ConfigSaveStep::None);
         const LinkBlob link = config_tx_durable_link(store);
-        CHECK(link.rx_pin == 1 && link.tx_pin == 2 && link.proto == 'S');
+        CHECK(link.rx_pin == 16 && link.tx_pin == 17 && link.proto == 'S');
         CHECK(link.identity_fp == 0xAABBCCDDu);
-        CHECK(live.rx_pin == 1 && live.tx_pin == 2 && live.proto == Protocol::S);
+        CHECK(live.rx_pin == 16 && live.tx_pin == 17 && live.proto == Protocol::S);
         CHECK(live.profile == "altherma3_r_erga" && live.fp_valid && live.fp_pages == 0x5u);
         CHECK(live.wifi_ssid == "new-net" && live.runtime_revision == 8);
     }
@@ -2436,6 +2438,549 @@ static void test_config_transaction() {
         CHECK(live.runtime_revision == 6);
         CHECK(live.wifi_ssid == "home" && live.rx_pin == 44 && live.tx_pin == 43);
     }
+}
+
+// A stored image with its trailing CRC recomputed, so an edit exercises the rule it targets instead
+// of tripping the CRC first. Both entries end in a CRC over everything before it.
+static void config_test_reseal(std::vector<uint8_t>& raw) {
+    raw.resize(raw.size() - 4);
+    const uint32_t crc = config_crc32(raw.data(), raw.size());
+    for (int shift = 0; shift < 32; shift += 8) raw.push_back(static_cast<uint8_t>(crc >> shift));
+}
+
+// config_load's verdict for a "cfg" read, decoded by the production decoder.
+static ConfigLoadVerdict config_test_cfg_verdict(StoredEntryRead             read,
+                                                 const std::vector<uint8_t>& raw) {
+    ConfigBlob b;
+    const bool decoded =
+        read == StoredEntryRead::Present && config_blob_deserialize(raw.data(), raw.size(), b);
+    return config_load_verdict(read, decoded);
+}
+
+static ConfigLoadVerdict config_test_link_verdict(StoredEntryRead             read,
+                                                  const std::vector<uint8_t>& raw) {
+    LinkBlob   l;
+    const bool decoded =
+        read == StoredEntryRead::Present && link_blob_deserialize(raw.data(), raw.size(), l);
+    return config_load_verdict(read, decoded);
+}
+
+static std::string config_test_cfg_reason(const std::vector<uint8_t>& raw) {
+    return stored_blob_reject_reason(raw.data(), raw.size(), CONFIG_BLOB_MAGIC_TEXT,
+                                     CONFIG_BLOB_VERSION_MIN, CONFIG_BLOB_VERSION);
+}
+
+// logic/config_store.hpp — what config_load makes of a stored entry (tracker card CFG-05/a). A
+// missing entry and one this build cannot use must reach different verdicts, because only the
+// former may be overwritten by an automatic writer: the latter is a newer layout after a rollback,
+// or damage, and holds settings the owner gets back by updating again or repairing.
+static void test_config_load_verdict() {
+    const std::vector<uint8_t> valid = config_blob_serialize(config_blob_from(config_tx_live()));
+
+    // The verdict table, one row per way a stored "cfg" entry can look.
+    CHECK(config_test_cfg_verdict(StoredEntryRead::NotFound, {}) == ConfigLoadVerdict::Absent);
+    CHECK(config_test_cfg_verdict(StoredEntryRead::Present, valid) == ConfigLoadVerdict::Loaded);
+
+    std::vector<uint8_t> newer = valid; // what a later build wrote: CRC intact, version beyond ours
+    newer[4]                   = static_cast<uint8_t>(CONFIG_BLOB_VERSION + 1);
+    config_test_reseal(newer);
+    CHECK(config_test_cfg_verdict(StoredEntryRead::Present, newer) == ConfigLoadVerdict::Rejected);
+
+    std::vector<uint8_t> crc_damage = valid; // one flipped body bit, CRC left as written
+    crc_damage[7] ^= 0x01;
+    CHECK(config_test_cfg_verdict(StoredEntryRead::Present, crc_damage) ==
+          ConfigLoadVerdict::Rejected);
+
+    std::vector<uint8_t> truncated = valid; // last body byte gone, CRC recomputed over the rest
+    truncated.erase(truncated.end() - 5);
+    config_test_reseal(truncated);
+    CHECK(config_test_cfg_verdict(StoredEntryRead::Present, truncated) ==
+          ConfigLoadVerdict::Rejected);
+
+    std::vector<uint8_t> trailing = valid; // one byte past the v19 body, CRC recomputed
+    trailing.insert(trailing.end() - 4, 0x00);
+    config_test_reseal(trailing);
+    CHECK(config_test_cfg_verdict(StoredEntryRead::Present, trailing) ==
+          ConfigLoadVerdict::Rejected);
+
+    // A read error stays a read error even if the bytes would have decoded: nothing was read.
+    CHECK(config_test_cfg_verdict(StoredEntryRead::ReadError, valid) ==
+          ConfigLoadVerdict::ReadError);
+    // `decoded` means nothing without a Present read, and an unknown read state fails closed.
+    CHECK(config_load_verdict(StoredEntryRead::NotFound, true) == ConfigLoadVerdict::Absent);
+    CHECK(config_load_verdict(static_cast<StoredEntryRead>(7), true) ==
+          ConfigLoadVerdict::ReadError);
+
+    // The gating decision: automatic writers (initial HomeHub search, WiFi rollback bookkeeping)
+    // may replace the stored entry only when nothing usable is at stake.
+    CHECK(config_load_allows_automatic_writes(ConfigLoadVerdict::Absent));
+    CHECK(config_load_allows_automatic_writes(ConfigLoadVerdict::Loaded));
+    CHECK(!config_load_allows_automatic_writes(ConfigLoadVerdict::Rejected));
+    CHECK(!config_load_allows_automatic_writes(ConfigLoadVerdict::ReadError));
+    CHECK(!config_load_allows_automatic_writes(static_cast<ConfigLoadVerdict>(9)));
+
+    // What the /diag line of a rejected entry names: its stored version byte and why.
+    CHECK(stored_blob_version(valid.data(), valid.size(), CONFIG_BLOB_MAGIC_TEXT) ==
+          CONFIG_BLOB_VERSION);
+    CHECK(stored_blob_version(newer.data(), newer.size(), CONFIG_BLOB_MAGIC_TEXT) ==
+          CONFIG_BLOB_VERSION + 1);
+    CHECK(config_test_cfg_reason(newer) == "newer layout than this build reads");
+    CHECK(config_test_cfg_reason(crc_damage) == "damaged (length or CRC check failed)");
+    CHECK(config_test_cfg_reason(truncated) == "damaged (length or CRC check failed)");
+    CHECK(config_test_cfg_reason(trailing) == "damaged (length or CRC check failed)");
+    std::vector<uint8_t> v0 = valid;
+    v0[4]                   = 0;
+    config_test_reseal(v0);
+    CHECK(config_test_cfg_verdict(StoredEntryRead::Present, v0) == ConfigLoadVerdict::Rejected);
+    CHECK(stored_blob_version(v0.data(), v0.size(), CONFIG_BLOB_MAGIC_TEXT) == 0);
+    CHECK(config_test_cfg_reason(v0) == "unknown older layout");
+    // No byte of an entry without the expected header names a layout.
+    for (size_t i = 0; i < 4; ++i) {
+        std::vector<uint8_t> foreign = valid;
+        foreign[i] ^= 0x20;
+        CHECK(stored_blob_version(foreign.data(), foreign.size(), CONFIG_BLOB_MAGIC_TEXT) == -1);
+        CHECK(config_test_cfg_reason(foreign) == "no recognised header");
+    }
+    CHECK(stored_blob_version(valid.data(), 4, CONFIG_BLOB_MAGIC_TEXT) ==
+          -1); // too short for the header
+    CHECK(stored_blob_version(nullptr, valid.size(), CONFIG_BLOB_MAGIC_TEXT) == -1);
+    CHECK(stored_blob_version(valid.data(), valid.size(), nullptr) == -1);
+
+    // The link entry: same verdicts, its own magic and its one wire version.
+    const std::vector<uint8_t> link = link_blob_serialize(LinkBlob{44, 43, 'I', 0x1234u});
+    CHECK(link[4] == LINK_BLOB_VERSION);
+    CHECK(stored_blob_version(link.data(), link.size(), LINK_BLOB_MAGIC_TEXT) == LINK_BLOB_VERSION);
+    CHECK(config_test_link_verdict(StoredEntryRead::NotFound, {}) == ConfigLoadVerdict::Absent);
+    CHECK(config_test_link_verdict(StoredEntryRead::Present, link) == ConfigLoadVerdict::Loaded);
+    CHECK(config_test_link_verdict(StoredEntryRead::ReadError, link) ==
+          ConfigLoadVerdict::ReadError);
+    std::vector<uint8_t> link_v2 = link;
+    link_v2[4]                   = 2;
+    config_test_reseal(link_v2);
+    CHECK(config_test_link_verdict(StoredEntryRead::Present, link_v2) ==
+          ConfigLoadVerdict::Rejected);
+    CHECK(stored_blob_version(link_v2.data(), link_v2.size(), LINK_BLOB_MAGIC_TEXT) == 2);
+    CHECK(std::string(stored_blob_reject_reason(
+              link_v2.data(), link_v2.size(), LINK_BLOB_MAGIC_TEXT, LINK_BLOB_VERSION,
+              LINK_BLOB_VERSION)) == "newer layout than this build reads");
+    std::vector<uint8_t> link_long = link;
+    link_long.insert(link_long.end() - 4, 0x00);
+    config_test_reseal(link_long);
+    CHECK(config_test_link_verdict(StoredEntryRead::Present, link_long) ==
+          ConfigLoadVerdict::Rejected);
+    CHECK(std::string(stored_blob_reject_reason(
+              link_long.data(), link_long.size(), LINK_BLOB_MAGIC_TEXT, LINK_BLOB_VERSION,
+              LINK_BLOB_VERSION)) == "damaged (length or CRC check failed)");
+    // The two headers cannot be mistaken for each other.
+    CHECK(stored_blob_version(link.data(), link.size(), CONFIG_BLOB_MAGIC_TEXT) == -1);
+    CHECK(stored_blob_version(valid.data(), valid.size(), LINK_BLOB_MAGIC_TEXT) == -1);
+}
+
+// logic/config_model.hpp — what a factory reset keeps (owner decision for tracker card CFG-06): the
+// board hardware statement and nothing else. config.cpp's config_factory_seed_blob builds the
+// fresh device with Kconfig defaults, carries the statement with this helper and serializes it with
+// the service-blob serializer every save uses; this pins the pure half of that pipeline.
+static void test_config_factory_seed() {
+    // An installation with every carried-or-not setting away from its default.
+    Config current                 = config_tx_live();
+    current.wifi_ssid_backup       = "fallback";
+    current.wifi_pass_backup       = "old-pass";
+    current.wifi_rollback_active   = true;
+    current.wifi_rolled_back       = true;
+    current.mqtt_user              = "mqtt-user";
+    current.mqtt_pass              = "mqtt-pass";
+    current.mqtt_base              = "daikin-altherma-esp32/plant";
+    current.syslog_port            = 1514;
+    current.ref_temp_topic         = "home/room";
+    current.circulation_topic      = "home/pump";
+    current.weather_enabled        = true;
+    current.weather_latitude_e6    = 12345678;
+    current.weather_longitude_e6   = 23456789;
+    current.diagnostics_enabled    = true;
+    current.diagnostics_generation = 4;
+    current.ui_lang                = UiLang::De;
+    current.ota_channel            = OtaChannel::Dev;
+    current.mb_discovery_done      = true;
+    current.env3_sda               = 5;
+    current.env3_scl               = 6;
+
+    const Config               factory; // the fresh device's non-Kconfig defaults
+    const std::vector<uint8_t> factory_raw = config_blob_serialize(config_blob_from(factory));
+
+    int                count = 0;
+    const BoardPreset* all   = board_presets_all(count);
+    CHECK(count >= 2);
+    for (int i = 0; i < count; ++i) {
+        const BoardPreset& p    = all[i];
+        current.board_user_set  = true;
+        current.board_preset_id = p.id;
+        current.led_gpio        = p.led_gpio;
+        current.led_type        = p.led_type;
+        current.led_inverted    = p.led_inverted;
+        current.btn_gpio        = p.btn_gpio;
+        current.btn_active_low  = p.btn_active_low;
+
+        const BoardHardwareStatement s = config_board_hardware(current);
+        CHECK(s.user_set && s.preset_id == p.id && s.led_gpio == p.led_gpio);
+        CHECK(s.led_type == p.led_type && s.led_inverted == p.led_inverted);
+        CHECK(s.btn_gpio == p.btn_gpio && s.btn_active_low == p.btn_active_low);
+
+        Config fresh;
+        config_carry_board_hardware(fresh, current);
+        // Exactly the statement moved: the serialized result equals a factory config whose seven
+        // board fields alone were set, so no other persisted field can have carried.
+        Config expected                = factory;
+        expected.board_user_set        = true;
+        expected.board_preset_id       = p.id;
+        expected.led_gpio              = p.led_gpio;
+        expected.led_type              = p.led_type;
+        expected.led_inverted          = p.led_inverted;
+        expected.btn_gpio              = p.btn_gpio;
+        expected.btn_active_low        = p.btn_active_low;
+        const std::vector<uint8_t> raw = config_blob_serialize(config_blob_from(fresh));
+        CHECK(raw == config_blob_serialize(config_blob_from(expected)));
+        CHECK(raw != factory_raw);
+
+        // The carried fields round-trip through the decoder config_load uses.
+        ConfigBlob back;
+        CHECK(config_blob_deserialize(raw.data(), raw.size(), back));
+        CHECK(back.has_board && back.has_board_identity && back.board_user_set);
+        CHECK(back.board_preset_id == static_cast<int32_t>(p.id));
+        CHECK(back.led_gpio == p.led_gpio && back.led_type == p.led_type);
+        CHECK(back.led_inverted == p.led_inverted);
+        CHECK(back.btn_gpio == p.btn_gpio && back.btn_active_low == p.btn_active_low);
+        // ...and nothing else did: credentials, services, sources, consent, language and channel
+        // read back at the fresh device's values.
+        CHECK(back.wifi_ssid.empty() && back.wifi_pass.empty() && back.wifi_ssid_backup.empty());
+        CHECK(!back.wifi_rollback_active && !back.wifi_rolled_back);
+        CHECK(back.mqtt_uri.empty() && back.mqtt_user.empty() && back.mqtt_pass.empty());
+        CHECK(back.mqtt_base.empty() && back.syslog_host.empty() && back.ntp_server.empty());
+        CHECK(back.ref_temp_topic.empty() && back.circulation_topic.empty());
+        CHECK(!back.weather_enabled && back.weather_latitude_e6 == 0);
+        CHECK(!back.diagnostics_enabled && back.diagnostics_generation == 0);
+        CHECK(back.ui_lang == ui_lang_to_int(UiLang::Auto));
+        CHECK(back.ota_channel == ota_channel_to_int(OtaChannel::Release));
+        CHECK(!back.env3_enabled && back.env3_sda == 2 && back.env3_scl == 1);
+        CHECK(back.mb_host.empty() && back.mb_port == MODBUS_TCP_PORT);
+        // The one-shot HomeHub search is pending again, as on a new device.
+        CHECK(back.has_modbus_discovery_state && !back.mb_discovery_done);
+        CHECK(!config_modbus_discovery_done_on_load(
+            back.has_modbus, back.has_modbus_discovery_state, back.mb_discovery_done));
+
+        // The result validates on the build these presets are offered on (Quad flash) with the
+        // fresh device's link, and its blob can always be read back.
+        std::string why;
+        CHECK(board_hw_valid(fresh, why, 48, /*octal_spi=*/false));
+        CHECK(board_identity_valid(fresh, why));
+        CHECK(validate(fresh, why, 48, /*octal_spi=*/false, config_reserved_pins(fresh)));
+        CHECK(config_blob_strings_fit(config_blob_from(fresh)));
+    }
+
+    // A deliberately saved Custom board with the indicator off and a button carries as stated.
+    {
+        Config custom          = current;
+        custom.board_user_set  = true;
+        custom.board_preset_id = BoardPresetId::Custom;
+        custom.led_gpio        = -1;
+        custom.btn_gpio        = 4;
+        custom.btn_active_low  = false;
+        Config fresh;
+        config_carry_board_hardware(fresh, custom);
+        CHECK(fresh.board_user_set && fresh.board_preset_id == BoardPresetId::Custom);
+        CHECK(fresh.led_gpio == -1 && fresh.btn_gpio == 4 && !fresh.btn_active_low);
+        CHECK(fresh.wifi_ssid.empty() && !fresh.env3_enabled && !fresh.mb_discovery_done);
+    }
+
+    // An UNSTATED board carries nothing — not even a load-path repair of the build defaults (an
+    // indicator disabled for a link collision whose link the reset erases).
+    {
+        Config untouched          = current;
+        untouched.board_user_set  = false;
+        untouched.board_preset_id = BoardPresetId::Custom;
+        untouched.led_gpio        = -1;
+        untouched.btn_gpio        = 4;
+        Config fresh;
+        config_carry_board_hardware(fresh, untouched);
+        CHECK(config_blob_serialize(config_blob_from(fresh)) == factory_raw);
+    }
+}
+
+// logic/config_model.hpp — the X10A load fallback against the board-local pins (tracker card
+// CFG-08/a). config_load replaces an unusable stored pair with the build default; when that
+// default lands on the indicator or the button, they yield to the link exactly as ENV III does.
+static void test_config_link_fallback_yield() {
+    std::string why;
+    // A Custom indicator on GPIO44 is legal while the X10A link sits on 1/2.
+    Config c;
+    c.board_user_set  = true;
+    c.board_preset_id = BoardPresetId::Custom;
+    c.led_gpio        = 44;
+    c.led_type        = static_cast<int>(LedType::Gpio);
+    c.rx_pin          = 1;
+    c.tx_pin          = 2;
+    CHECK(board_hw_valid(c, why, 48, /*octal_spi=*/false));
+    // The link entry is missing or damaged and no legacy pins exist, so config_load takes the build
+    // default 44/43 — and its own link_pins_safe re-check rejects that pair too, because the
+    // indicator holds 44, and falls back to the very same default.
+    c.rx_pin = 44;
+    c.tx_pin = 43;
+    CHECK(!link_pins_safe(c.rx_pin, c.tx_pin, false, config_reserved_pins(c)));
+    // Without the yield the snapshot fails both validators (and detection has no candidate).
+    CHECK(config_local_pins_collide_with_link(c));
+    CHECK(!board_hw_valid(c, why, 48, false) && why == "led_gpio is in use by the X10A link");
+    CHECK(!validate(c, why, 48, false, config_reserved_pins(c)));
+    // With it, the indicator is disabled and everything validates against the final pair.
+    const LocalPinsRepair led = config_yield_local_pins_to_link(c);
+    CHECK(led.led && !led.btn && c.led_gpio == -1);
+    CHECK(board_hw_valid(c, why, 48, false));
+    CHECK(validate(c, why, 48, false, config_reserved_pins(c)));
+    CHECK(link_pins_safe(c.rx_pin, c.tx_pin, false, config_reserved_pins(c)));
+    CHECK(!config_local_pins_collide_with_link(c));
+    // The identity stays: a disabled onboard part does not change which board this is.
+    CHECK(c.board_user_set && c.board_preset_id == BoardPresetId::Custom);
+    CHECK(board_identity_valid(c, why));
+
+    // The button on either wire yields the same way; an indicator elsewhere stays.
+    Config b;
+    b.led_gpio                = 21;
+    b.btn_gpio                = 43;
+    b.rx_pin                  = 44;
+    b.tx_pin                  = 43;
+    const LocalPinsRepair btn = config_yield_local_pins_to_link(b);
+    CHECK(!btn.led && btn.btn && b.btn_gpio == -1 && b.led_gpio == 21);
+    CHECK(board_hw_valid(b, why, 48, false));
+    Config both;
+    both.led_gpio             = 44;
+    both.btn_gpio             = 43;
+    both.rx_pin               = 43;
+    both.tx_pin               = 44;
+    const LocalPinsRepair two = config_yield_local_pins_to_link(both);
+    CHECK(two.led && two.btn && both.led_gpio == -1 && both.btn_gpio == -1);
+    // Nothing to yield: no change, and absent pins claim nothing.
+    Config none;
+    none.rx_pin              = 44;
+    none.tx_pin              = 43;
+    const LocalPinsRepair no = config_yield_local_pins_to_link(none);
+    CHECK(!no.led && !no.btn && none.led_gpio == -1 && none.btn_gpio == -1);
+    // ENV III on the link is a collision too, but it is config.cpp's env3_config_valid re-check
+    // that disables it; this helper only ever touches the indicator and the button.
+    Config env;
+    env.env3_enabled = true;
+    env.env3_sda     = 5;
+    env.env3_scl     = 43;
+    env.rx_pin       = 44;
+    env.tx_pin       = 43;
+    CHECK(config_local_pins_collide_with_link(env));
+    const LocalPinsRepair env_yield = config_yield_local_pins_to_link(env);
+    CHECK(!env_yield.led && !env_yield.btn && env.env3_enabled);
+    env.env3_scl = 6;
+    CHECK(!config_local_pins_collide_with_link(env));
+    env.env3_sda = 44;
+    CHECK(config_local_pins_collide_with_link(env));
+    env.env3_enabled = false; // a disabled ENV III claims nothing
+    CHECK(!config_local_pins_collide_with_link(env));
+}
+
+// logic/config_model.hpp + config_transaction.hpp — a service save that a detection commit
+// overtook must not carry the new link onto a pin the request claims (tracker card CFG-08/b).
+static void test_config_reconcile_local_pins() {
+    // The pure rule: only a link the reconcile CHANGED, and only onto a claimed pin.
+    Config requested;
+    requested.rx_pin   = 1;
+    requested.tx_pin   = 2;
+    requested.led_gpio = 43;
+    Config reconciled  = requested;
+    reconciled.rx_pin  = 44;
+    reconciled.tx_pin  = 43;
+    CHECK(config_reconcile_breaks_local_pins(requested, reconciled));
+    reconciled.rx_pin = 1; // only TX moved — still onto the indicator
+    CHECK(config_reconcile_breaks_local_pins(requested, reconciled));
+    reconciled.rx_pin = 43; // only RX moved
+    reconciled.tx_pin = 2;
+    CHECK(config_reconcile_breaks_local_pins(requested, reconciled));
+    reconciled.rx_pin = 16; // moved, but nowhere the request claims
+    reconciled.tx_pin = 17;
+    CHECK(!config_reconcile_breaks_local_pins(requested, reconciled));
+    // A snapshot that already collides is not this save's doing.
+    Config colliding   = requested;
+    colliding.led_gpio = 1;
+    CHECK(config_local_pins_collide_with_link(colliding));
+    CHECK(!config_reconcile_breaks_local_pins(colliding, colliding));
+    // The button and an enabled ENV III count like the indicator.
+    Config btn       = requested;
+    btn.led_gpio     = -1;
+    btn.btn_gpio     = 44;
+    Config btn_moved = btn;
+    btn_moved.rx_pin = 44;
+    btn_moved.tx_pin = 43;
+    CHECK(config_reconcile_breaks_local_pins(btn, btn_moved));
+    Config env       = requested;
+    env.led_gpio     = -1;
+    env.env3_enabled = true;
+    env.env3_sda     = 43;
+    env.env3_scl     = 5;
+    Config env_moved = env;
+    env_moved.rx_pin = 44;
+    env_moved.tx_pin = 43;
+    CHECK(config_reconcile_breaks_local_pins(env, env_moved));
+    env.env3_enabled       = false;
+    env_moved.env3_enabled = false;
+    CHECK(!config_reconcile_breaks_local_pins(env, env_moved));
+
+    // The race through the production transaction: a /set_board snapshot (revision 5, X10A on 1/2)
+    // moves the indicator to GPIO43, which validates against that snapshot. A sweep that started
+    // earlier commits 44/43 before the save runs. The save is refused as Stale with nothing written
+    // and nothing published.
+    {
+        Config live       = config_tx_live();
+        live.env3_enabled = false;
+        live.rx_pin       = 1;
+        live.tx_pin       = 2;
+        ConfigTxStore store;
+        store.seed(live);
+        Config req         = live;
+        req.led_gpio       = 43;
+        req.board_user_set = true;
+        std::string why;
+        CHECK(board_hw_valid(req, why, 48, /*octal_spi=*/false));
+        apply_link(live, 44, 43, Protocol::I, 0x22222222u);
+        live.runtime_revision                  = 6;
+        const auto              durable_before = store.durable;
+        const auto              live_before    = config_tx_state(live);
+        const ConfigSaveOutcome out =
+            config_save_transaction(live, req, /*owns_link=*/false, store);
+        CHECK(out.result == ConfigSaveResult::Stale);
+        CHECK(out.failed == ConfigSaveStep::None && out.store_error == 0);
+        CHECK(store.attempts.empty());
+        CHECK(store.durable == durable_before);
+        CHECK(config_tx_state(live) == live_before);
+        CHECK(live.led_gpio == -1 && live.rx_pin == 44 && live.tx_pin == 43);
+        // The resubmitted form, derived from a fresh snapshot, is refused by the request validator
+        // with the link named — the honest answer the 409 points the owner to.
+        Config again   = live;
+        again.led_gpio = 43;
+        CHECK(!board_hw_valid(again, why, 48, false));
+        CHECK(why.find("X10A") != std::string::npos);
+    }
+    // ENV III enabled in the same save onto the pins detection then takes: refused the same way.
+    {
+        Config live       = config_tx_live();
+        live.env3_enabled = false;
+        ConfigTxStore store;
+        store.seed(live);
+        Config req       = live;
+        req.env3_enabled = true;
+        req.env3_sda     = 5;
+        req.env3_scl     = 6;
+        apply_link(live, 5, 6, Protocol::I, 0x33333333u);
+        live.runtime_revision = 6;
+        CHECK(config_save_transaction(live, req, false, store).result == ConfigSaveResult::Stale);
+        CHECK(store.attempts.empty() && !live.env3_enabled);
+    }
+    // A detected link elsewhere is carried forward and the save commits, indicator included.
+    {
+        Config live       = config_tx_live();
+        live.env3_enabled = false;
+        live.rx_pin       = 1;
+        live.tx_pin       = 2;
+        ConfigTxStore store;
+        store.seed(live);
+        Config req   = live;
+        req.led_gpio = 43;
+        apply_link(live, 16, 17, Protocol::I, 0x44444444u);
+        live.runtime_revision = 6;
+        CHECK(config_save_transaction(live, req, false, store).result == ConfigSaveResult::Saved);
+        CHECK(config_tx_attempts_are(store, {"cfg", "link"}));
+        CHECK(live.led_gpio == 43 && live.rx_pin == 16 && live.tx_pin == 17);
+        CHECK(config_tx_durable_service(store).led_gpio == 43);
+        CHECK(config_tx_durable_link(store).rx_pin == 16);
+    }
+    // A current snapshot never trips the rule, even one that already collides (an older build's
+    // state): the save is not refused for something it did not cause.
+    {
+        Config live       = config_tx_live();
+        live.env3_enabled = false;
+        live.led_gpio     = 44;
+        ConfigTxStore store;
+        store.seed(live);
+        Config req    = live;
+        req.wifi_ssid = "new-net";
+        CHECK(config_save_transaction(live, req, false, store).result == ConfigSaveResult::Saved);
+        CHECK(live.wifi_ssid == "new-net");
+    }
+}
+
+// logic/config_model.hpp — "absent" has one spelling for the indicator and the button, and every
+// board-local offer withholds detected Ethernet pads (tracker card CFG-08/c).
+static void test_config_board_pin_canonical_absent() {
+    std::string why;
+    // The request path refuses a GPIO below -1 and names the field.
+    Config c;
+    c.led_gpio = -2;
+    CHECK(!board_hw_valid(c, why, 48, /*octal_spi=*/false) && why == "led_gpio out of range");
+    c.led_gpio = -1;
+    c.btn_gpio = -7;
+    CHECK(!board_hw_valid(c, why, 48, false) && why == "btn_gpio out of range");
+    c.btn_gpio = -1;
+    CHECK(board_hw_valid(c, why, 48, false));
+
+    // The load path normalizes instead. A stored AtomS3 Lite statement whose indicator an older
+    // build saved as -2 keeps its identity and its button: without the normalization the load
+    // check (rx/tx excluded, as config.cpp runs it) fails and config_load would swap the whole
+    // board for the build defaults.
+    Config stored;
+    stored.board_user_set  = true;
+    stored.board_preset_id = BoardPresetId::M5StackAtomS3Lite;
+    stored.led_gpio        = -2;
+    stored.led_type        = static_cast<int>(LedType::Ws2812);
+    stored.btn_gpio        = 41;
+    Config probe           = stored;
+    probe.rx_pin = probe.tx_pin = -1;
+    CHECK(!board_hw_valid(probe, why, 48, false));
+    const LocalPinsRepair led = config_normalize_absent_local_pins(stored);
+    CHECK(led.led && !led.btn && stored.led_gpio == -1 && stored.btn_gpio == 41);
+    probe        = stored;
+    probe.rx_pin = probe.tx_pin = -1;
+    CHECK(board_hw_valid(probe, why, 48, false));
+    CHECK(board_identity_valid(stored, why) && board_selected_preset(stored) != nullptr);
+    // Both at once, at the extreme; canonical values (including a reserved pin, which is
+    // validation's business, not normalization's) are left alone.
+    Config both;
+    both.led_gpio                  = std::numeric_limits<int>::min();
+    both.btn_gpio                  = -2;
+    const LocalPinsRepair both_fix = config_normalize_absent_local_pins(both);
+    CHECK(both_fix.led && both_fix.btn && both.led_gpio == -1 && both.btn_gpio == -1);
+    Config canonical;
+    canonical.led_gpio       = 0;
+    canonical.btn_gpio       = -1;
+    const LocalPinsRepair no = config_normalize_absent_local_pins(canonical);
+    CHECK(!no.led && !no.btn && canonical.led_gpio == 0 && canonical.btn_gpio == -1);
+
+    // Detected Ethernet pads join the board-local reservations, beside the link and ENV III, and
+    // the worst case still fits the eight slots.
+    Config s;
+    s.rx_pin       = 44;
+    s.tx_pin       = 43;
+    s.env3_enabled = true;
+    s.env3_sda     = 2;
+    s.env3_scl     = 1;
+    const ReservedPins eth{5, 6, 7, 8};
+    const ReservedPins r = config_board_reserved_pins(s, eth);
+    for (int pin : {44, 43, 2, 1, 5, 6, 7, 8}) CHECK(r.claims(pin));
+    CHECK(!r.claims(21) && !r.claims(-1));
+    // The preset rows honour that extra reservation. No shipped preset puts its indicator or
+    // button on a W5500 pad, so today the pads withhold nothing; a pad under the XIAO's GPIO21
+    // proves the extra set reaches the filter.
+    const BoardPreset* buf[BOARD_PRESETS_MAX];
+    const int          all_n = board_presets_offerable(buf, BOARD_PRESETS_MAX, false,
+                                                       config_board_reserved_pins(s, ReservedPins{}));
+    CHECK(all_n >= 2);
+    CHECK(board_presets_offerable(buf, BOARD_PRESETS_MAX, false,
+                                  config_board_reserved_pins(s, eth)) == all_n);
+    const int n = board_presets_offerable(buf, BOARD_PRESETS_MAX, false,
+                                          config_board_reserved_pins(s, ReservedPins{21}));
+    CHECK(n == all_n - 1);
+    for (int i = 0; i < n; ++i) CHECK(buf[i]->id != BoardPresetId::SeeedXiaoEsp32S3);
 }
 
 // The HA installation DEVICE identity (logic/ha_device.hpp). The one property that matters: it is a
@@ -23847,6 +24392,11 @@ int main() {
     test_no_publish();
     test_config_model();
     test_config_transaction();
+    test_config_load_verdict();
+    test_config_factory_seed();
+    test_config_link_fallback_yield();
+    test_config_reconcile_local_pins();
+    test_config_board_pin_canonical_absent();
     test_board_pins();
     test_ha_device();
     test_board_pins_local();

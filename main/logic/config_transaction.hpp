@@ -141,15 +141,19 @@ inline ConfigBlob config_blob_from(const Config& c) {
 //  * The only concurrent writer is auto-detection, so a snapshot older than a detection commit is
 //    decided by config_save_revision under the mutex: a service save carries the detected link and
 //    model forward, an X10A save (which derived its model fields from that snapshot) is refused as
-//    Stale before anything is copied, serialized or written.
+//    Stale before anything is copied, serialized or written. A service save is refused as Stale
+//    too, after the reconcile but still before anything is serialized or written, when the link it
+//    carried forward lands on an indicator, button or ENV III pin the request claims
+//    (config_reconcile_breaks_local_pins): the request was validated against its snapshot's link,
+//    and committing it would persist a collision the next boot must undo.
 //  * Everything that can throw is staged before the first durable write: the Config copy, the blobs
 //    and the RAM successor. After that boundary only checked writes and a nothrow move remain, so
 //    an allocation failure can never answer "failed" for a change that is already durable.
 //  * A service blob that this build could not decode again is refused, not written. The decoder
-//    rejects the WHOLE blob when any string exceeds CONFIG_BLOB_MAX_STR and the fallback is the
-//    legacy per-key layout a blob-era device never populated, so such a write would silently
-//    destroy the whole config at the next boot. This is the last point where every field is
-//    together.
+//    rejects the WHOLE blob when any string exceeds CONFIG_BLOB_MAX_STR, and the fallback is only
+//    the legacy per-key layout (stale per-key-era values on an upgraded device, nothing on any
+//    other) or the Kconfig defaults, so such a write would silently destroy the whole config at the
+//    next boot. This is the last point where every field is together.
 //
 // `live` changes (all of it, revision bumped) only on Saved.
 template <class Store>
@@ -164,6 +168,12 @@ ConfigSaveOutcome config_save_transaction(Config& live, const Config& requested,
     }
     Config c = requested;
     if (revision == ConfigSaveRevision::ReconcileDetected) reconcile_detected_config(c, live);
+    // Only a reconcile can move the link away from what the request was validated against, so a
+    // current snapshot never trips this; nothing has been serialized or written yet.
+    if (config_reconcile_breaks_local_pins(requested, c)) {
+        out.result = ConfigSaveResult::Stale;
+        return out;
+    }
 
     std::vector<uint8_t> service;
     if (!owns_link) {
