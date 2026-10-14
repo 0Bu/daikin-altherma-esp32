@@ -2165,8 +2165,8 @@ static void test_config_transaction() {
 
     // A service save in a boot whose X10A link took the indicator's pin (RAM -1): "cfg" keeps the
     // stored pin while RAM keeps the yield — the WiFi setup a factory reset requires must not store
-    // the repair as the owner's choice. A save that states a real pin replaces it, and only that
-    // ends the yield for the part (tracker card CFG-08/a).
+    // the repair as the owner's choice. A save that states a real pin replaces it; that, or a save
+    // giving the stored pin to another board part, ends the yield for the part (CFG-08/a).
     {
         Config live   = config_tx_live();
         live.led_gpio = -1; // yielded from GPIO44 at load
