@@ -404,9 +404,12 @@ static void append_status_json(JsonOut& j, bool redact) {
         // this payload: one source, no second fetch to fail, and the presets cannot arrive
         // disagreeing with the pin lists they must fit inside. Two fixed rows (~170 bytes) —
         // bounded, unlike the per-value payloads the heap rules are about.
+        // Filtered by the same reservations as pins_local above, detected Ethernet pads included:
+        // POST /set_board refuses an indicator or button on them, so a preset that puts one there
+        // is not a pick.
         const BoardPreset* presets[BOARD_PRESETS_MAX];
         int npre = board_presets_offerable(presets, BOARD_PRESETS_MAX, hw_octal_spi(),
-                                           config_board_reserved_pins(c));
+                                           config_board_reserved_pins(c, net_eth_reserved_pins()));
         // An explicitly selected board is identity, not a promise that its optional onboard
         // defaults are still enabled. Keep it in the selector even when a customized LED/button or
         // another live reservation means re-applying the factory fields would currently be
@@ -744,13 +747,16 @@ static void append_status_json(JsonOut& j, bool redact) {
         j += ",\"source_unix_s\":";
         j += rt.has_value && rt.has_source_time ? std::to_string(rt.source_unix_s) : "null";
         j += ",\"timestamp_source\":";
-        j += rt.has_value ? jstr(rt.timestamp_source) : "null";
+        if (rt.has_value)
+            json_append_quoted(j, rt.timestamp_source);
+        else
+            j += "null";
         j += ",\"age_s\":";
         j += freshness.age_known ? std::to_string(freshness.age_s) : "null";
         j += ",\"fresh\":";
         j += freshness.fresh ? "true" : "false";
         j += ",\"freshness_reason\":";
-        j += jstr(freshness.reason);
+        json_append_quoted(j, freshness.reason);
         j += ",\"temperature_valid\":";
         j += room.temperature_valid ? "true" : "false";
         j += ",\"setpoint_valid\":";
@@ -760,7 +766,7 @@ static void append_status_json(JsonOut& j, bool redact) {
         j += ",\"room_error_k\":";
         j += room.has_room_error ? ref_error_k : "null";
         j += ",\"reason\":";
-        j += jstr(reference_room_reason_name(room.reason));
+        json_append_quoted(j, reference_room_reason_name(room.reason));
         j += ",\"reason_code\":";
         j += std::to_string(static_cast<unsigned>(room.reason));
         j += ",\"retained\":";
@@ -773,11 +779,11 @@ static void append_status_json(JsonOut& j, bool redact) {
         j += std::to_string(rt.rejections);
         if (!rt.eligibility_error.empty()) {
             j += ",\"eligibility_error\":";
-            j += jstr(rt.eligibility_error);
+            json_append_quoted(j, rt.eligibility_error);
         }
         if (!rt.error.empty()) {
             j += ",\"error\":";
-            j += jstr(rt.error);
+            json_append_quoted(j, rt.error);
         }
         j += "},";
     }
@@ -828,33 +834,39 @@ static void append_status_json(JsonOut& j, bool redact) {
                  ? std::to_string(heating_curve.outdoor_temperature_c)
                  : "null";
         j += ",\"outdoor_source\":";
-        j += heating_curve.has_outdoor_temperature
-                 ? jstr(logic::outdoor_source_name(heating_curve.outdoor_source))
-                 : "null";
+        if (heating_curve.has_outdoor_temperature)
+            json_append_quoted(j, logic::outdoor_source_name(heating_curve.outdoor_source));
+        else
+            j += "null";
         j += ",\"last_sample_outdoor_temperature_c\":";
         j += heating_curve.has_last_sample_outdoor
                  ? std::to_string(heating_curve.last_sample_outdoor_temperature_c)
                  : "null";
         j += ",\"last_sample_outdoor_source\":";
-        j += heating_curve.has_last_sample_outdoor
-                 ? jstr(logic::outdoor_source_name(heating_curve.last_sample_outdoor_source))
-                 : "null";
+        if (heating_curve.has_last_sample_outdoor)
+            json_append_quoted(
+                j, logic::outdoor_source_name(heating_curve.last_sample_outdoor_source));
+        else
+            j += "null";
         j += ",\"plant_outdoor_temperature_c\":";
         j += heating_curve.has_plant_outdoor_temperature
                  ? std::to_string(heating_curve.plant_outdoor_temperature_c)
                  : "null";
         j += ",\"plant_outdoor_source\":";
-        j += heating_curve.has_plant_outdoor_temperature
-                 ? jstr(logic::outdoor_source_name(heating_curve.plant_outdoor_source))
-                 : "null";
+        if (heating_curve.has_plant_outdoor_temperature)
+            json_append_quoted(j, logic::outdoor_source_name(heating_curve.plant_outdoor_source));
+        else
+            j += "null";
         j += ",\"last_sample_plant_outdoor_temperature_c\":";
         j += heating_curve.has_last_sample_plant_outdoor
                  ? std::to_string(heating_curve.last_sample_plant_outdoor_temperature_c)
                  : "null";
         j += ",\"last_sample_plant_outdoor_source\":";
-        j += heating_curve.has_last_sample_plant_outdoor
-                 ? jstr(logic::outdoor_source_name(heating_curve.last_sample_plant_outdoor_source))
-                 : "null";
+        if (heating_curve.has_last_sample_plant_outdoor)
+            json_append_quoted(
+                j, logic::outdoor_source_name(heating_curve.last_sample_plant_outdoor_source));
+        else
+            j += "null";
         j += ",\"forecast_available\":";
         j += heating_curve.forecast_available ? "true" : "false";
         j += ",\"plant_gate_known\":";
@@ -922,7 +934,7 @@ static void append_status_json(JsonOut& j, bool redact) {
         j += ",\"power_w\":";
         j += circulation.has_value ? circulation_power : "null";
         j += ",\"state\":";
-        j += jstr(circulation_power_state_name(circulation.state));
+        json_append_quoted(j, circulation_power_state_name(circulation.state));
         j += ",\"source_at\":";
         j += circulation.has_value && circulation.has_source_time
                  ? jstr(rfc3339_utc(circulation.source_unix_s))
@@ -932,13 +944,16 @@ static void append_status_json(JsonOut& j, bool redact) {
                  ? std::to_string(circulation.source_unix_s)
                  : "null";
         j += ",\"timestamp_source\":";
-        j += circulation.has_value ? jstr(circulation.timestamp_source) : "null";
+        if (circulation.has_value)
+            json_append_quoted(j, circulation.timestamp_source);
+        else
+            j += "null";
         j += ",\"age_s\":";
         j += circulation.age_known ? std::to_string(circulation.age_s) : "null";
         j += ",\"fresh\":";
         j += circulation.fresh ? "true" : "false";
         j += ",\"freshness_reason\":";
-        j += jstr(circulation.freshness_reason);
+        json_append_quoted(j, circulation.freshness_reason);
         j += ",\"retained\":";
         j += circulation.has_value && circulation.retained ? "true" : "false";
         j += ",\"messages\":";
@@ -949,7 +964,7 @@ static void append_status_json(JsonOut& j, bool redact) {
         j += std::to_string(circulation.rejections);
         if (!circulation.error.empty()) {
             j += ",\"error\":";
-            j += jstr(circulation.error);
+            json_append_quoted(j, circulation.error);
         }
         j += "},";
     }
@@ -1057,7 +1072,7 @@ static void append_status_json(JsonOut& j, bool redact) {
         j += ",\"fresh\":";
         j += weather.fresh ? "true" : "false";
         j += ",\"freshness_reason\":";
-        j += jstr(weather.reason);
+        json_append_quoted(j, weather.reason);
         j += ",\"successes\":";
         j += std::to_string(wf.successes);
         j += ",\"errors\":";
@@ -1080,11 +1095,11 @@ static void append_status_json(JsonOut& j, bool redact) {
             j += ",\"reason\":\"diagnostics_disabled\"";
         } else if (!wf.reason.empty()) {
             j += ",\"reason\":";
-            j += jstr(wf.reason);
+            json_append_quoted(j, wf.reason);
         }
         if (weather_source_active && !wf.error.empty()) {
             j += ",\"error\":";
-            j += jstr(wf.error);
+            json_append_quoted(j, wf.error);
         }
         j += "},";
     }
@@ -1104,7 +1119,7 @@ static void append_status_json(JsonOut& j, bool redact) {
         j += std::to_string(sy.port);
         if (!sy.error.empty()) {
             j += ",\"error\":";
-            j += jstr(sy.error);
+            json_append_quoted(j, sy.error);
         }
         j += "},";
     }
@@ -1132,7 +1147,7 @@ static void append_status_json(JsonOut& j, bool redact) {
     }
 
     j += "\"profile\":{\"id\":";
-    j += jstr(c.profile);
+    json_append_quoted(j, c.profile);
     j += "},";
 
     // The HomeHub Modbus stack — a SECOND, INDEPENDENT source, never an alternative to the X10A
@@ -1148,9 +1163,9 @@ static void append_status_json(JsonOut& j, bool redact) {
     j += ",\"discovering\":";          j += mb.discovering ? "true" : "false";
     j += ",\"searched\":";             j += c.mb_discovery_done ? "true" : "false";
     j += ",\"profile\":";
-    j += jstr(modbus_profile_name(mb.profile));
+    json_append_quoted(j, modbus_profile_name(mb.profile));
     j += ",\"profile_basis\":";
-    j += jstr(modbus_profile_basis_name(mb.profile_basis));
+    json_append_quoted(j, modbus_profile_basis_name(mb.profile_basis));
     // The ADDRESS comes from the CONFIG, the STATE from the live link.
     // Reading the address off the link status was wrong before the first connect ever succeeded:
     // ModbusStatus is zero-initialised, so a device that had never dialled reported port 0 and unit
@@ -1183,8 +1198,10 @@ static void append_status_json(JsonOut& j, bool redact) {
         // `error` remains the complete English /diag + Syslog wording for API compatibility and
         // fallback clients. The structured companions let the web UI localise it without parsing
         // prose, while preserving errno/exception/parser detail and the exact EKRHH register.
-        j += ",\"error\":";      j += jstr(mb.last_error);
-        j += ",\"error_code\":"; j += jstr(mb.last_error_code);
+        j += ",\"error\":";
+        json_append_quoted(j, mb.last_error);
+        j += ",\"error_code\":";
+        json_append_quoted(j, mb.last_error_code);
         if (mb.last_error_detail >= 0) {
             j += ",\"error_detail\":"; j += std::to_string(mb.last_error_detail);
         }
@@ -1213,7 +1230,7 @@ static void append_status_json(JsonOut& j, bool redact) {
     // means the liveness record could not measure the X10A raster. (The checkup's health.persist
     // below does report "flash" when its window was rebuilt from the journal.)
     j += ",\"persist\":";
-    j += jstr(history_persist_state());
+    json_append_quoted(j, history_persist_state());
     // The same question for the per-row STATE AGES (logic/state_dwell.hpp), which ride the same
     // .noinit medium under the same integrity rules (safe mode, reset reason, magic, version,
     // catalog, CRC). The trend rings' age guards (not_committed, stale_commit) do not apply: the
@@ -1223,7 +1240,7 @@ static void append_status_json(JsonOut& j, bool redact) {
     // concurrency, and HTTP safety), and one more key in an existing object is the cheapest honest
     // place to say it.
     j += ",\"dwell_persist\":";
-    j += jstr(dwell_persist_state());
+    json_append_quoted(j, dwell_persist_state());
     j += ",\"rows\":[";
     bool first_trend = true;
     for (size_t t = 0; t < logic::TREND_COUNT; t++) {
@@ -1232,9 +1249,9 @@ static void append_status_json(JsonOut& j, bool redact) {
         if (!first_trend) j += ",";
         first_trend = false;
         j += "{\"id\":";
-        j += jstr(logic::TRENDS[t].id);
+        json_append_quoted(j, logic::TRENDS[t].id);
         j += ",\"label\":";
-        j += jstr(lbl);
+        json_append_quoted(j, lbl);
         j += "}";
     }
     j += "],\"modbus_rows\":[";
@@ -1255,9 +1272,9 @@ static void append_status_json(JsonOut& j, bool redact) {
             if (!first_mb_trend) j += ",";
             first_mb_trend = false;
             j += "{\"id\":";
-            j += jstr(hh.trend_id);
+            json_append_quoted(j, hh.trend_id);
             j += ",\"label\":";
-            j += jstr(r->label);
+            json_append_quoted(j, r->label);
             j += "}";
         }
     }
@@ -1269,9 +1286,9 @@ static void append_status_json(JsonOut& j, bool redact) {
         for (size_t et = 0; et < ENV3_HISTORY_COUNT; ++et) {
             if (et) j += ",";
             j += "{\"id\":";
-            j += jstr(ENV3_HISTORIES[et].id);
+            json_append_quoted(j, ENV3_HISTORIES[et].id);
             j += ",\"label\":";
-            j += jstr(ENV3_HISTORIES[et].label);
+            json_append_quoted(j, ENV3_HISTORIES[et].label);
             j += "}";
         }
     }
@@ -1590,12 +1607,13 @@ static void append_status_json(JsonOut& j, bool redact) {
     // reset_reason reuses the boot-time cached reason (diag_crash.cpp) mapped via
     // logic/reset_reason.hpp; safe_mode is the latched boot-loop recovery flag (safe_mode.cpp —
     // true once too many crash boots accumulated, so poll + MQTT were skipped). heap_restarts is
-    // how many CONSECUTIVE heap-watchdog restarts preceded this boot (heap_guard.cpp): that restart
+    // how many heap-watchdog restarts this boot inherited (heap_guard.cpp): that restart
     // is an esp_restart(), so reset_reason reads "sw" — the same value a config save produces — and
     // without this field a board restarting itself every five minutes would be indistinguishable
     // from one somebody kept saving settings on, which is exactly the unattributable reboot this
-    // block exists to prevent. 0 on any ordinary boot. Small numbers + a short slug appended to the
-    // existing builder — no large contiguous allocation, and nothing here is a `+` chain.
+    // block exists to prevent. 0 after a clean boot; a crash boot carries it. Small numbers + a
+    // short slug appended to the existing builder — no large contiguous allocation, and nothing
+    // here is a `+` chain.
     //
     // Beside them, what that headroom already COST while the board DID survive (legacy-380): cycles
     // the two 1 s task loops produced nothing on. mqtt_skipped/poll_skipped are OOM-guard catches —
@@ -1683,7 +1701,7 @@ static void append_status_json(JsonOut& j, bool redact) {
     // from (that is exactly the state between picking a channel and installing from it), so the
     // setting is reported on its own rather than inferred from the version string.
     j += "\"ota\":{\"channel\":";
-    j += jstr(ota_channel_name(c.ota_channel));
+    json_append_quoted(j, ota_channel_name(c.ota_channel));
     j += "},";
 
     // The web UI's manual language override (logic/ui_lang.hpp; POST /set_lang). "auto" (the default)
@@ -1691,7 +1709,7 @@ static void append_status_json(JsonOut& j, bool redact) {
     // Reported here for the same reason as the channel: the ESP32 card's language selector renders
     // from /status, and the browser applies a named language over its navigator.language guess.
     j += "\"ui\":{\"lang\":";
-    j += jstr(ui_lang_name(c.ui_lang));
+    json_append_quoted(j, ui_lang_name(c.ui_lang));
     j += "},";
 
     // Current reset/fault plus optional stored-dump summary of unknown age; null on a clean boot.
@@ -2357,16 +2375,16 @@ static esp_err_t h_history(httpd_req_t* req) {
     std::snprintf(boot_id, sizeof(boot_id), "%016llx",
                   static_cast<unsigned long long>(s_status_boot_id));
     j += ",\"boot_id\":";
-    j += jstr(boot_id);
+    json_append_quoted(j, boot_id);
     j += ",\"label\":";
-    j += jstr(lbl);
+    json_append_quoted(j, lbl);
     j += ",\"dt\":";
     j += std::to_string(logic::HISTORY_DT_S);
     // The ROW's unit, never a hardcoded "°C": the trends mix °C, bar and unitless rows, and the
     // browser prints this string straight into the range readout and the crosshair. A bar row
     // labelled °C is exactly the legacy-35–legacy-39 shape.
     j += ",\"unit\":";
-    j += jstr(unit);
+    json_append_quoted(j, unit);
     const TimeStatus ts = time_status();
     const int32_t    newest_age = history_meta.newest_age_s;
     if (ts.synced && n && newest_age >= 0) {
@@ -2583,7 +2601,7 @@ static esp_err_t h_scan(httpd_req_t* req) {
     for (int i = 0; i < n; i++) {
         if (i) j += ",";
         j += "{\"ssid\":";
-        j += jstr(e[i].ssid);
+        json_append_quoted(j, e[i].ssid);
         j += ",\"rssi\":";
         j += std::to_string(e[i].rssi);
         j += "}";

@@ -151,10 +151,10 @@
     },
     "config_save_whole": {
       "pattern": "^daik::save_whole\\(",
-      "max_bytes": 48
+      "max_bytes": 64
     },
     "config_transaction": {
-      "pattern": "^_ZN4daik23config_save_transactionINS_12_GLOBAL__N_112NvsBlobStoreEEENS_17ConfigSaveOutcomeERNS_6ConfigERKS4_bRT_\\$constprop\\$[0-9]+$",
+      "pattern": "^_ZN4daik23config_save_transactionINS_12_GLOBAL__N_112NvsBlobStoreEEENS_17ConfigSaveOutcomeERNS_6ConfigERKS4_bRT_RKNS_15LocalPinsRepairE\\$constprop\\$[0-9]+$",
       "max_bytes": 1600
     },
     "config_nvs_blob": {
@@ -335,7 +335,7 @@
     },
     "button_task": {
       "pattern": "^(?:daik::(?:\\(anonymous namespace\\)::)?button_task\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?11button_task[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
-      "max_bytes": 96
+      "max_bytes": 128
     },
     "wifi_task": {
       "pattern": "^(?:daik::(?:\\(anonymous namespace\\)::)?wifi_watchdog_task\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?18wifi_watchdog_task[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
@@ -395,7 +395,7 @@
     },
     "syslog_task": {
       "pattern": "^_ZZN4daik11syslog_initEvENKUlPvE_clES0_\\$constprop\\$[0-9]+$",
-      "max_bytes": 704
+      "max_bytes": 720
     },
     "syslog_task_entry": {
       "pattern": "^daik::syslog_init\\(\\)::\\{lambda\\(void\\*\\)\\x231\\}::_FUN\\(void\\*\\)$",
@@ -2052,6 +2052,138 @@
     "mqtt_modbus_emit": {
       "pattern": "^void daik::append_flat_json<std::__cxx11::basic_string<char,",
       "max_bytes": 48
+    },
+    "config_factory_seed": {
+      "pattern": "^daik::config_factory_seed_blob\\(",
+      "max_bytes": 80
+    },
+    "config_seed_defaults": {
+      "pattern": "^daik::seed_without_blob\\(",
+      "max_bytes": 64
+    },
+    "config_seed_string": {
+      "pattern": "^_ZZN4daikL17seed_without_blobERNS_6ConfigEbENKUlPKcS3_E_clES3_S3_\\$isra\\$[0-9]+$",
+      "max_bytes": 64
+    },
+    "config_blob_serialize": {
+      "pattern": "^daik::config_blob_serialize\\(",
+      "max_bytes": 48
+    },
+    "config_blob_put_str": {
+      "pattern": "^daik::detail::blob_put_str\\(",
+      "max_bytes": 64
+    },
+    "cxx_string_from_cstr": {
+      "pattern": "^std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >::basic_string<std::allocator<char> >\\(char const\\*, std::allocator<char> const&\\)$",
+      "max_bytes": 48
+    },
+    "cxx_string_create": {
+      "pattern": "^std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >::_M_create\\(unsigned int&, unsigned int\\)$",
+      "max_bytes": 32
+    },
+    "cxx_string_allocate": {
+      "pattern": "^std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >::_S_allocate\\(std::allocator<char>&, unsigned int\\)$",
+      "max_bytes": 32
+    },
+    "cxx_vector_emplace": {
+      "pattern": "^_ZNSt6vectorIhSaIhEE12emplace_backIJhEEERhDpOT_\\$isra\\$[0-9]+$",
+      "max_bytes": 32
+    },
+    "cxx_new": {
+      "pattern": "^operator new\\(unsigned int\\)$",
+      "max_bytes": 32
+    },
+    "cxx_throw": {
+      "pattern": "^__cxa_throw$",
+      "max_bytes": 32
+    },
+    "cxx_raise": {
+      "pattern": "^_Unwind_RaiseException$",
+      "max_bytes": 176
+    },
+    "cxx_raise_phase2": {
+      "pattern": "^_Unwind_RaiseException_Phase2$",
+      "max_bytes": 80
+    },
+    "cxx_frame_state": {
+      "pattern": "^uw_frame_state_for$",
+      "max_bytes": 48
+    },
+    "cxx_find_fde": {
+      "pattern": "^_Unwind_Find_FDE$",
+      "max_bytes": 48
+    },
+    "sdk_pthread_lock": {
+      "pattern": "^pthread_mutex_lock$",
+      "max_bytes": 32
+    },
+    "sdk_pthread_lazy_init": {
+      "pattern": "^pthread_mutex_init_if_static$",
+      "max_bytes": 32
+    },
+    "sdk_pthread_init": {
+      "pattern": "^pthread_mutex_init$",
+      "max_bytes": 32
+    },
+    "sdk_mutex_create": {
+      "pattern": "^xQueueCreateMutex$",
+      "max_bytes": 32
+    },
+    "sdk_queue_create": {
+      "pattern": "^xQueueGenericCreate$",
+      "max_bytes": 32
+    },
+    "sdk_port_malloc": {
+      "pattern": "^pvPortMalloc$",
+      "max_bytes": 32
+    },
+    "config_nvs_erase": {
+      "pattern": "^daik::nvs_erase_all\\(",
+      "max_bytes": 48
+    },
+    "config_nvs_seed": {
+      "pattern": "^daik::nvs_set_blob_after_factory_reset\\(",
+      "max_bytes": 48
+    },
+    "mqtt_retirement_forget": {
+      "pattern": "^daik::mqtt_retirement_forget\\(",
+      "max_bytes": 48
+    },
+    "sdk_nvs_erase_all": {
+      "pattern": "^nvs_erase_all$",
+      "max_bytes": 48
+    },
+    "sdk_nvs_handle_erase_all": {
+      "pattern": "^nvs::NVSHandleSimple::erase_all\\(",
+      "max_bytes": 32
+    },
+    "sdk_nvs_erase_namespace": {
+      "pattern": "^nvs::Storage::eraseNamespace\\(",
+      "max_bytes": 64
+    },
+    "history_forget": {
+      "pattern": "^daik::history_flash_forget\\(",
+      "max_bytes": 48
+    },
+    "dwell_forget": {
+      "pattern": "^daik::dwell_forget\\(",
+      "max_bytes": 48
+    },
+    "sem_guard_release": {
+      "pattern": "^daik::SemGuard::~SemGuard\\(\\)$",
+      "max_bytes": 32
+    },
+    "diag_crash_forget": {
+      "pattern": "^daik::diag_crash_forget\\(",
+      "max_bytes": 32
+    },
+    "coredump_erase": {
+      "pattern": "^esp_core_dump_image_erase$",
+      "max_bytes": 48
+    },
+    "wifi_forget": {
+      "pattern": "^daik::wifi_forget_persisted_config\\(",
+      "max_bytes": 192
     }
   },
   "paths": {
@@ -4817,6 +4949,795 @@
       "multipliers": {},
       "base_bytes": 1536,
       "max_bytes": 5120
+    },
+    "button_seed_defaults": {
+      "symbols": [
+        "button_task",
+        "config_factory_seed",
+        "config_seed_defaults",
+        "config_seed_string",
+        "cxx_string_from_cstr",
+        "cxx_string_create",
+        "cxx_string_allocate",
+        "cxx_new",
+        "sdk_malloc",
+        "sdk_malloc_default",
+        "sdk_malloc_caps",
+        "sdk_malloc_base",
+        "sdk_malloc_aligned",
+        "sdk_multi_aligned_offset",
+        "sdk_multi_aligned_impl",
+        "sdk_multi_lock",
+        "sdk_queue_critical",
+        "sdk_queue_compare_swap",
+        "runtime_task_entry"
+      ],
+      "multipliers": {},
+      "base_bytes": 192,
+      "max_bytes": 2048
+    },
+    "button_seed_serialize": {
+      "symbols": [
+        "button_task",
+        "config_factory_seed",
+        "config_blob_serialize",
+        "config_blob_put_str",
+        "cxx_vector_emplace",
+        "cxx_new",
+        "sdk_malloc",
+        "sdk_malloc_default",
+        "sdk_malloc_caps",
+        "sdk_malloc_base",
+        "sdk_malloc_aligned",
+        "sdk_multi_aligned_offset",
+        "sdk_multi_aligned_impl",
+        "sdk_multi_lock",
+        "sdk_queue_critical",
+        "sdk_queue_compare_swap",
+        "runtime_task_entry"
+      ],
+      "multipliers": {},
+      "base_bytes": 192,
+      "max_bytes": 2048
+    },
+    "button_seed_unwind": {
+      "symbols": [
+        "button_task",
+        "config_factory_seed",
+        "config_seed_defaults",
+        "config_seed_string",
+        "cxx_string_from_cstr",
+        "cxx_string_create",
+        "cxx_string_allocate",
+        "cxx_new",
+        "cxx_throw",
+        "cxx_raise",
+        "cxx_raise_phase2",
+        "cxx_frame_state",
+        "cxx_find_fde",
+        "sdk_pthread_lock",
+        "sdk_pthread_lazy_init",
+        "sdk_pthread_init",
+        "sdk_mutex_create",
+        "sdk_queue_create",
+        "sdk_port_malloc",
+        "sdk_malloc_caps",
+        "sdk_malloc_base",
+        "sdk_malloc_aligned",
+        "sdk_multi_aligned_offset",
+        "sdk_multi_aligned_impl",
+        "sdk_multi_lock",
+        "sdk_queue_critical",
+        "sdk_queue_compare_swap",
+        "runtime_task_entry"
+      ],
+      "multipliers": {},
+      "base_bytes": 192,
+      "max_bytes": 2048
+    },
+    "button_retirement_forget_open": {
+      "symbols": [
+        "button_task",
+        "mqtt_retirement_forget",
+        "sdk_nvs_open",
+        "sdk_nvs_open_partition",
+        "sdk_nvs_manager_open",
+        "sdk_nvs_namespace",
+        "tls_calloc",
+        "sdk_malloc_caps",
+        "sdk_malloc_base",
+        "sdk_malloc_aligned",
+        "sdk_multi_aligned_offset",
+        "sdk_multi_aligned_impl",
+        "sdk_multi_lock",
+        "sdk_queue_critical",
+        "sdk_queue_compare_swap",
+        "runtime_task_entry"
+      ],
+      "multipliers": {},
+      "base_bytes": 192,
+      "max_bytes": 2048
+    },
+    "button_retirement_forget_namespace_compaction": {
+      "symbols": [
+        "button_task",
+        "mqtt_retirement_forget",
+        "sdk_nvs_open",
+        "sdk_nvs_open_partition",
+        "sdk_nvs_manager_open",
+        "sdk_nvs_namespace",
+        "sdk_nvs_write",
+        "sdk_nvs_request_page",
+        "sdk_nvs_page_copy",
+        "sdk_nvs_page_init",
+        "sdk_nvs_page_write_entry",
+        "sdk_nvs_partition_write",
+        "sdk_partition_write",
+        "sdk_flash_write",
+        "sdk_flash_driver_write",
+        "sdk_flash_driver_page_program",
+        "sdk_flash_wait_idle",
+        "sdk_flash_read_reg",
+        "sdk_flash_host_status",
+        "sdk_flash_host_program",
+        "sdk_flash_hal_program",
+        "sdk_flash_hal_common",
+        "sdk_flash_hal_poll",
+        "sdk_flash_os_start",
+        "sdk_flash_os_end",
+        "runtime_task_entry"
+      ],
+      "multipliers": {},
+      "base_bytes": 192,
+      "max_bytes": 2048
+    },
+    "button_retirement_forget_namespace_erase": {
+      "symbols": [
+        "button_task",
+        "mqtt_retirement_forget",
+        "sdk_nvs_open",
+        "sdk_nvs_open_partition",
+        "sdk_nvs_manager_open",
+        "sdk_nvs_namespace",
+        "sdk_nvs_write",
+        "sdk_nvs_request_page",
+        "sdk_nvs_activate_page",
+        "sdk_nvs_page_erase",
+        "sdk_nvs_partition_erase",
+        "sdk_partition_erase",
+        "sdk_flash_erase",
+        "sdk_flash_driver_erase",
+        "sdk_flash_wait_idle",
+        "sdk_flash_read_reg",
+        "sdk_flash_host_status",
+        "sdk_flash_host_erase",
+        "sdk_flash_hal_common",
+        "sdk_flash_hal_poll",
+        "sdk_flash_os_start",
+        "sdk_flash_os_end",
+        "runtime_task_entry"
+      ],
+      "multipliers": {},
+      "base_bytes": 192,
+      "max_bytes": 2048
+    },
+    "button_retirement_forget_erase_all": {
+      "symbols": [
+        "button_task",
+        "mqtt_retirement_forget",
+        "sdk_nvs_erase_all",
+        "sdk_nvs_handle_erase_all",
+        "sdk_nvs_erase_namespace",
+        "sdk_nvs_page_erase_item",
+        "sdk_nvs_page_erase_entry",
+        "sdk_nvs_page_alter_range",
+        "sdk_nvs_partition_write",
+        "sdk_partition_write",
+        "sdk_flash_write",
+        "sdk_flash_driver_write",
+        "sdk_flash_driver_page_program",
+        "sdk_flash_wait_idle",
+        "sdk_flash_read_reg",
+        "sdk_flash_host_status",
+        "sdk_flash_host_program",
+        "sdk_flash_hal_program",
+        "sdk_flash_hal_common",
+        "sdk_flash_hal_poll",
+        "sdk_flash_os_start",
+        "sdk_flash_os_end",
+        "runtime_task_entry"
+      ],
+      "multipliers": {},
+      "base_bytes": 192,
+      "max_bytes": 2048
+    },
+    "button_retirement_forget_commit": {
+      "symbols": [
+        "button_task",
+        "mqtt_retirement_forget",
+        "sdk_nvs_commit",
+        "sdk_nvs_handle_commit",
+        "runtime_task_entry"
+      ],
+      "multipliers": {},
+      "base_bytes": 192,
+      "max_bytes": 2048
+    },
+    "button_retirement_forget_close": {
+      "symbols": [
+        "button_task",
+        "mqtt_retirement_forget",
+        "sdk_nvs_close",
+        "tls_calloc",
+        "sdk_malloc_caps",
+        "sdk_malloc_base",
+        "sdk_malloc_aligned",
+        "sdk_multi_aligned_offset",
+        "sdk_multi_aligned_impl",
+        "sdk_multi_lock",
+        "sdk_queue_critical",
+        "sdk_queue_compare_swap",
+        "runtime_task_entry"
+      ],
+      "multipliers": {},
+      "base_bytes": 192,
+      "max_bytes": 2048
+    },
+    "button_seed_store_open": {
+      "symbols": [
+        "button_task",
+        "config_nvs_seed",
+        "sdk_nvs_open",
+        "sdk_nvs_open_partition",
+        "sdk_nvs_manager_open",
+        "sdk_nvs_namespace",
+        "tls_calloc",
+        "sdk_malloc_caps",
+        "sdk_malloc_base",
+        "sdk_malloc_aligned",
+        "sdk_multi_aligned_offset",
+        "sdk_multi_aligned_impl",
+        "sdk_multi_lock",
+        "sdk_queue_critical",
+        "sdk_queue_compare_swap",
+        "runtime_task_entry"
+      ],
+      "multipliers": {},
+      "base_bytes": 192,
+      "max_bytes": 2048
+    },
+    "button_seed_store_namespace_compaction": {
+      "symbols": [
+        "button_task",
+        "config_nvs_seed",
+        "sdk_nvs_open",
+        "sdk_nvs_open_partition",
+        "sdk_nvs_manager_open",
+        "sdk_nvs_namespace",
+        "sdk_nvs_write",
+        "sdk_nvs_request_page",
+        "sdk_nvs_page_copy",
+        "sdk_nvs_page_init",
+        "sdk_nvs_page_write_entry",
+        "sdk_nvs_partition_write",
+        "sdk_partition_write",
+        "sdk_flash_write",
+        "sdk_flash_driver_write",
+        "sdk_flash_driver_page_program",
+        "sdk_flash_wait_idle",
+        "sdk_flash_read_reg",
+        "sdk_flash_host_status",
+        "sdk_flash_host_program",
+        "sdk_flash_hal_program",
+        "sdk_flash_hal_common",
+        "sdk_flash_hal_poll",
+        "sdk_flash_os_start",
+        "sdk_flash_os_end",
+        "runtime_task_entry"
+      ],
+      "multipliers": {},
+      "base_bytes": 192,
+      "max_bytes": 2048
+    },
+    "button_seed_store_namespace_erase": {
+      "symbols": [
+        "button_task",
+        "config_nvs_seed",
+        "sdk_nvs_open",
+        "sdk_nvs_open_partition",
+        "sdk_nvs_manager_open",
+        "sdk_nvs_namespace",
+        "sdk_nvs_write",
+        "sdk_nvs_request_page",
+        "sdk_nvs_activate_page",
+        "sdk_nvs_page_erase",
+        "sdk_nvs_partition_erase",
+        "sdk_partition_erase",
+        "sdk_flash_erase",
+        "sdk_flash_driver_erase",
+        "sdk_flash_wait_idle",
+        "sdk_flash_read_reg",
+        "sdk_flash_host_status",
+        "sdk_flash_host_erase",
+        "sdk_flash_hal_common",
+        "sdk_flash_hal_poll",
+        "sdk_flash_os_start",
+        "sdk_flash_os_end",
+        "runtime_task_entry"
+      ],
+      "multipliers": {},
+      "base_bytes": 192,
+      "max_bytes": 2048
+    },
+    "button_seed_store_write": {
+      "symbols": [
+        "button_task",
+        "config_nvs_seed",
+        "sdk_nvs_set_blob",
+        "sdk_nvs_handle_set",
+        "sdk_nvs_write",
+        "sdk_nvs_write_multi",
+        "sdk_nvs_page_write",
+        "sdk_nvs_page_write_entry",
+        "sdk_nvs_page_write_data",
+        "sdk_nvs_partition_write",
+        "sdk_partition_write",
+        "sdk_flash_write",
+        "sdk_flash_driver_write",
+        "sdk_flash_driver_page_program",
+        "sdk_flash_wait_idle",
+        "sdk_flash_read_reg",
+        "sdk_flash_host_status",
+        "sdk_flash_host_program",
+        "sdk_flash_hal_program",
+        "sdk_flash_hal_common",
+        "sdk_flash_hal_poll",
+        "sdk_flash_os_start",
+        "sdk_flash_os_end",
+        "runtime_task_entry"
+      ],
+      "multipliers": {},
+      "base_bytes": 192,
+      "max_bytes": 2048
+    },
+    "button_seed_store_compaction": {
+      "symbols": [
+        "button_task",
+        "config_nvs_seed",
+        "sdk_nvs_set_blob",
+        "sdk_nvs_handle_set",
+        "sdk_nvs_write",
+        "sdk_nvs_write_multi",
+        "sdk_nvs_request_page",
+        "sdk_nvs_page_copy",
+        "sdk_nvs_page_init",
+        "sdk_nvs_page_write_entry",
+        "sdk_nvs_partition_write",
+        "sdk_partition_write",
+        "sdk_flash_write",
+        "sdk_flash_driver_write",
+        "sdk_flash_driver_page_program",
+        "sdk_flash_wait_idle",
+        "sdk_flash_read_reg",
+        "sdk_flash_host_status",
+        "sdk_flash_host_program",
+        "sdk_flash_hal_program",
+        "sdk_flash_hal_common",
+        "sdk_flash_hal_poll",
+        "sdk_flash_os_start",
+        "sdk_flash_os_end",
+        "runtime_task_entry"
+      ],
+      "multipliers": {},
+      "base_bytes": 192,
+      "max_bytes": 2048
+    },
+    "button_seed_store_compaction_erase": {
+      "symbols": [
+        "button_task",
+        "config_nvs_seed",
+        "sdk_nvs_set_blob",
+        "sdk_nvs_handle_set",
+        "sdk_nvs_write",
+        "sdk_nvs_write_multi",
+        "sdk_nvs_request_page",
+        "sdk_nvs_activate_page",
+        "sdk_nvs_page_erase",
+        "sdk_nvs_partition_erase",
+        "sdk_partition_erase",
+        "sdk_flash_erase",
+        "sdk_flash_driver_erase",
+        "sdk_flash_wait_idle",
+        "sdk_flash_read_reg",
+        "sdk_flash_host_status",
+        "sdk_flash_host_erase",
+        "sdk_flash_hal_common",
+        "sdk_flash_hal_poll",
+        "sdk_flash_os_start",
+        "sdk_flash_os_end",
+        "runtime_task_entry"
+      ],
+      "multipliers": {},
+      "base_bytes": 192,
+      "max_bytes": 2048
+    },
+    "button_seed_store_compare": {
+      "symbols": [
+        "button_task",
+        "config_nvs_seed",
+        "sdk_nvs_set_blob",
+        "sdk_nvs_handle_set",
+        "sdk_nvs_write",
+        "sdk_nvs_cmp_multi",
+        "sdk_nvs_page_cmp",
+        "sdk_nvs_page_read_entry",
+        "sdk_nvs_partition_read",
+        "sdk_partition_read",
+        "sdk_flash_read",
+        "sdk_flash_driver_read",
+        "sdk_flash_hal_read",
+        "sdk_flash_hal_poll",
+        "runtime_task_entry"
+      ],
+      "multipliers": {},
+      "base_bytes": 192,
+      "max_bytes": 2048
+    },
+    "button_seed_store_find": {
+      "symbols": [
+        "button_task",
+        "config_nvs_seed",
+        "sdk_nvs_set_blob",
+        "sdk_nvs_handle_set",
+        "sdk_nvs_write",
+        "sdk_nvs_find",
+        "sdk_nvs_page_find",
+        "sdk_nvs_page_read_entry",
+        "sdk_nvs_partition_read",
+        "sdk_partition_read",
+        "sdk_flash_read",
+        "sdk_flash_driver_read",
+        "sdk_flash_hal_read",
+        "sdk_flash_hal_poll",
+        "runtime_task_entry"
+      ],
+      "multipliers": {},
+      "base_bytes": 192,
+      "max_bytes": 2048
+    },
+    "button_seed_store_erase_old": {
+      "symbols": [
+        "button_task",
+        "config_nvs_seed",
+        "sdk_nvs_set_blob",
+        "sdk_nvs_handle_set",
+        "sdk_nvs_write",
+        "sdk_nvs_erase_multi",
+        "sdk_nvs_page_erase_item",
+        "sdk_nvs_page_erase_entry",
+        "sdk_nvs_page_alter_range",
+        "sdk_nvs_partition_write",
+        "sdk_partition_write",
+        "sdk_flash_write",
+        "sdk_flash_driver_write",
+        "sdk_flash_driver_page_program",
+        "sdk_flash_wait_idle",
+        "sdk_flash_read_reg",
+        "sdk_flash_host_status",
+        "sdk_flash_host_program",
+        "sdk_flash_hal_program",
+        "sdk_flash_hal_common",
+        "sdk_flash_hal_poll",
+        "sdk_flash_os_start",
+        "sdk_flash_os_end",
+        "runtime_task_entry"
+      ],
+      "multipliers": {},
+      "base_bytes": 192,
+      "max_bytes": 2048
+    },
+    "button_seed_store_commit": {
+      "symbols": [
+        "button_task",
+        "config_nvs_seed",
+        "sdk_nvs_commit",
+        "sdk_nvs_handle_commit",
+        "runtime_task_entry"
+      ],
+      "multipliers": {},
+      "base_bytes": 192,
+      "max_bytes": 2048
+    },
+    "button_seed_store_close": {
+      "symbols": [
+        "button_task",
+        "config_nvs_seed",
+        "sdk_nvs_close",
+        "tls_calloc",
+        "sdk_malloc_caps",
+        "sdk_malloc_base",
+        "sdk_malloc_aligned",
+        "sdk_multi_aligned_offset",
+        "sdk_multi_aligned_impl",
+        "sdk_multi_lock",
+        "sdk_queue_critical",
+        "sdk_queue_compare_swap",
+        "runtime_task_entry"
+      ],
+      "multipliers": {},
+      "base_bytes": 192,
+      "max_bytes": 2048
+    },
+    "button_config_erase_open": {
+      "symbols": [
+        "button_task",
+        "config_nvs_erase",
+        "sdk_nvs_open",
+        "sdk_nvs_open_partition",
+        "sdk_nvs_manager_open",
+        "sdk_nvs_namespace",
+        "tls_calloc",
+        "sdk_malloc_caps",
+        "sdk_malloc_base",
+        "sdk_malloc_aligned",
+        "sdk_multi_aligned_offset",
+        "sdk_multi_aligned_impl",
+        "sdk_multi_lock",
+        "sdk_queue_critical",
+        "sdk_queue_compare_swap",
+        "runtime_task_entry"
+      ],
+      "multipliers": {},
+      "base_bytes": 192,
+      "max_bytes": 2048
+    },
+    "button_config_erase_namespace_compaction": {
+      "symbols": [
+        "button_task",
+        "config_nvs_erase",
+        "sdk_nvs_open",
+        "sdk_nvs_open_partition",
+        "sdk_nvs_manager_open",
+        "sdk_nvs_namespace",
+        "sdk_nvs_write",
+        "sdk_nvs_request_page",
+        "sdk_nvs_page_copy",
+        "sdk_nvs_page_init",
+        "sdk_nvs_page_write_entry",
+        "sdk_nvs_partition_write",
+        "sdk_partition_write",
+        "sdk_flash_write",
+        "sdk_flash_driver_write",
+        "sdk_flash_driver_page_program",
+        "sdk_flash_wait_idle",
+        "sdk_flash_read_reg",
+        "sdk_flash_host_status",
+        "sdk_flash_host_program",
+        "sdk_flash_hal_program",
+        "sdk_flash_hal_common",
+        "sdk_flash_hal_poll",
+        "sdk_flash_os_start",
+        "sdk_flash_os_end",
+        "runtime_task_entry"
+      ],
+      "multipliers": {},
+      "base_bytes": 192,
+      "max_bytes": 2048
+    },
+    "button_config_erase_namespace_erase": {
+      "symbols": [
+        "button_task",
+        "config_nvs_erase",
+        "sdk_nvs_open",
+        "sdk_nvs_open_partition",
+        "sdk_nvs_manager_open",
+        "sdk_nvs_namespace",
+        "sdk_nvs_write",
+        "sdk_nvs_request_page",
+        "sdk_nvs_activate_page",
+        "sdk_nvs_page_erase",
+        "sdk_nvs_partition_erase",
+        "sdk_partition_erase",
+        "sdk_flash_erase",
+        "sdk_flash_driver_erase",
+        "sdk_flash_wait_idle",
+        "sdk_flash_read_reg",
+        "sdk_flash_host_status",
+        "sdk_flash_host_erase",
+        "sdk_flash_hal_common",
+        "sdk_flash_hal_poll",
+        "sdk_flash_os_start",
+        "sdk_flash_os_end",
+        "runtime_task_entry"
+      ],
+      "multipliers": {},
+      "base_bytes": 192,
+      "max_bytes": 2048
+    },
+    "button_config_erase_erase_all": {
+      "symbols": [
+        "button_task",
+        "config_nvs_erase",
+        "sdk_nvs_erase_all",
+        "sdk_nvs_handle_erase_all",
+        "sdk_nvs_erase_namespace",
+        "sdk_nvs_page_erase_item",
+        "sdk_nvs_page_erase_entry",
+        "sdk_nvs_page_alter_range",
+        "sdk_nvs_partition_write",
+        "sdk_partition_write",
+        "sdk_flash_write",
+        "sdk_flash_driver_write",
+        "sdk_flash_driver_page_program",
+        "sdk_flash_wait_idle",
+        "sdk_flash_read_reg",
+        "sdk_flash_host_status",
+        "sdk_flash_host_program",
+        "sdk_flash_hal_program",
+        "sdk_flash_hal_common",
+        "sdk_flash_hal_poll",
+        "sdk_flash_os_start",
+        "sdk_flash_os_end",
+        "runtime_task_entry"
+      ],
+      "multipliers": {},
+      "base_bytes": 192,
+      "max_bytes": 2048
+    },
+    "button_config_erase_commit": {
+      "symbols": [
+        "button_task",
+        "config_nvs_erase",
+        "sdk_nvs_commit",
+        "sdk_nvs_handle_commit",
+        "runtime_task_entry"
+      ],
+      "multipliers": {},
+      "base_bytes": 192,
+      "max_bytes": 2048
+    },
+    "button_config_erase_close": {
+      "symbols": [
+        "button_task",
+        "config_nvs_erase",
+        "sdk_nvs_close",
+        "tls_calloc",
+        "sdk_malloc_caps",
+        "sdk_malloc_base",
+        "sdk_malloc_aligned",
+        "sdk_multi_aligned_offset",
+        "sdk_multi_aligned_impl",
+        "sdk_multi_lock",
+        "sdk_queue_critical",
+        "sdk_queue_compare_swap",
+        "runtime_task_entry"
+      ],
+      "multipliers": {},
+      "base_bytes": 192,
+      "max_bytes": 2048
+    },
+    "button_history_forget_erase": {
+      "symbols": [
+        "button_task",
+        "history_forget",
+        "sdk_partition_erase",
+        "sdk_flash_erase",
+        "sdk_flash_driver_erase",
+        "sdk_flash_wait_idle",
+        "sdk_flash_read_reg",
+        "sdk_flash_host_status",
+        "sdk_flash_host_erase",
+        "sdk_flash_hal_common",
+        "sdk_flash_hal_poll",
+        "sdk_flash_os_start",
+        "sdk_flash_os_end",
+        "runtime_task_entry"
+      ],
+      "multipliers": {},
+      "base_bytes": 192,
+      "max_bytes": 2048
+    },
+    "button_history_forget_diagnostic": {
+      "symbols": [
+        "button_task",
+        "history_forget",
+        "diag_log",
+        "sdk_log",
+        "sdk_vprintf",
+        "sdk_vfprintf",
+        "sdk_bufio_put",
+        "sdk_bufio_allocate",
+        "sdk_malloc",
+        "sdk_malloc_default",
+        "sdk_malloc_caps",
+        "sdk_malloc_base",
+        "sdk_malloc_aligned",
+        "sdk_multi_aligned_offset",
+        "sdk_multi_aligned_impl",
+        "sdk_multi_lock",
+        "sdk_queue_critical",
+        "sdk_queue_compare_swap",
+        "runtime_task_entry"
+      ],
+      "multipliers": {},
+      "base_bytes": 192,
+      "max_bytes": 2048
+    },
+    "button_dwell_forget": {
+      "symbols": [
+        "button_task",
+        "dwell_forget",
+        "sem_guard_release",
+        "sdk_queue_send",
+        "sdk_queue_remove_event",
+        "sdk_queue_yield_required",
+        "sdk_queue_yield_other",
+        "sdk_queue_crosscore_yield",
+        "sdk_queue_crosscore_send",
+        "sdk_queue_critical",
+        "sdk_queue_compare_swap",
+        "runtime_task_entry"
+      ],
+      "multipliers": {},
+      "base_bytes": 192,
+      "max_bytes": 2048
+    },
+    "button_crash_forget_erase": {
+      "symbols": [
+        "button_task",
+        "diag_crash_forget",
+        "coredump_erase",
+        "sdk_partition_erase",
+        "sdk_flash_erase",
+        "sdk_flash_driver_erase",
+        "sdk_flash_wait_idle",
+        "sdk_flash_read_reg",
+        "sdk_flash_host_status",
+        "sdk_flash_host_erase",
+        "sdk_flash_hal_common",
+        "sdk_flash_hal_poll",
+        "sdk_flash_os_start",
+        "sdk_flash_os_end",
+        "runtime_task_entry"
+      ],
+      "multipliers": {},
+      "base_bytes": 192,
+      "max_bytes": 2048
+    },
+    "button_crash_forget_diagnostic": {
+      "symbols": [
+        "button_task",
+        "diag_crash_forget",
+        "diag_log",
+        "sdk_log",
+        "sdk_vprintf",
+        "sdk_vfprintf",
+        "sdk_bufio_put",
+        "sdk_bufio_allocate",
+        "sdk_malloc",
+        "sdk_malloc_default",
+        "sdk_malloc_caps",
+        "sdk_malloc_base",
+        "sdk_malloc_aligned",
+        "sdk_multi_aligned_offset",
+        "sdk_multi_aligned_impl",
+        "sdk_multi_lock",
+        "sdk_queue_critical",
+        "sdk_queue_compare_swap",
+        "runtime_task_entry"
+      ],
+      "multipliers": {},
+      "base_bytes": 192,
+      "max_bytes": 2048
+    },
+    "button_wifi_forget": {
+      "symbols": [
+        "button_task",
+        "wifi_forget"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 2048
     }
   },
   "tasks": {
@@ -5022,7 +5943,39 @@
         "button_diagnostic_console_buffer",
         "button_diagnostic_console_write",
         "button_shutdown_history_touch",
-        "button_shutdown_checkup"
+        "button_shutdown_checkup",
+        "button_seed_defaults",
+        "button_seed_serialize",
+        "button_seed_unwind",
+        "button_retirement_forget_open",
+        "button_retirement_forget_namespace_compaction",
+        "button_retirement_forget_namespace_erase",
+        "button_retirement_forget_erase_all",
+        "button_retirement_forget_commit",
+        "button_retirement_forget_close",
+        "button_seed_store_open",
+        "button_seed_store_namespace_compaction",
+        "button_seed_store_namespace_erase",
+        "button_seed_store_write",
+        "button_seed_store_compaction",
+        "button_seed_store_compaction_erase",
+        "button_seed_store_compare",
+        "button_seed_store_find",
+        "button_seed_store_erase_old",
+        "button_seed_store_commit",
+        "button_seed_store_close",
+        "button_config_erase_open",
+        "button_config_erase_namespace_compaction",
+        "button_config_erase_namespace_erase",
+        "button_config_erase_erase_all",
+        "button_config_erase_commit",
+        "button_config_erase_close",
+        "button_history_forget_erase",
+        "button_history_forget_diagnostic",
+        "button_dwell_forget",
+        "button_crash_forget_erase",
+        "button_crash_forget_diagnostic",
+        "button_wifi_forget"
       ]
     },
     "wifi": {

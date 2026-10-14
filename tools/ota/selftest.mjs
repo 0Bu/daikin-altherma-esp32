@@ -138,8 +138,9 @@ try {
     ["the WiFi scan frame ceiling hides growth", () =>
       replaceBudgetMember("symbols", "wifi_scan", "max_bytes", 1920, 4096)],
     ["the save wrapper bypasses the measured transaction", () =>
-      replaceOnce("main/config.cpp", "out = config_save_transaction(g_cfg, requested, owns_link, store);",
-        "out = config_save_transaction_bypassed(g_cfg, requested, owns_link, store);")],
+      replaceOnce("main/config.cpp",
+        "out     = config_save_transaction(g_cfg, requested, owns_link, store, s_load_yield);",
+        "out     = config_save_transaction_bypassed(g_cfg, requested, owns_link, store, s_load_yield);")],
     ["the save path folds SDK-NVS into its HTTP allowance", () =>
       replaceBudgetMember("paths", "httpd_config_save", "base_bytes", 3072, 1536)],
     ["the link-save path omits its native transaction", () =>

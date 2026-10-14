@@ -90,6 +90,9 @@ bool   config_save(const Config& c) {
     return adapter::save_ok;
 }
 bool config_wifi_configured() { return !adapter::cfg.wifi_ssid.empty(); }
+// Every scenario here loads a usable stored blob; the kept-blob gate is pinned at source level by
+// test/test_config_ownership_contract.mjs.
+bool config_stored_blob_unreadable() { return false; }
 namespace detail {
 void config_lock() {
     if (!syslog_episode::active) return;
@@ -112,11 +115,16 @@ void config_unlock() {
 const Config& config_ref_locked() { return adapter::cfg; }
 } // namespace detail
 bool      nvs_storage_available() { return true; }
+bool      nvs_restart_held_by_factory_reset(const char*) { return false; }
 void      net_mdns_start() { ++sdk::mdns_starts; }
 bool      net_is_up() { return wifi_link_up(); }
 bool      ota_download_active() { return false; }
 bool      weather_fetch_active() { return false; }
 bool      safe_mode_active() { return false; }
+// The boot record's recovery fields (logic/bootlog.hpp): an ordinary clean boot.
+const char* safe_mode_cause() { return nullptr; }
+int         safe_mode_crash_boots() { return 0; }
+uint8_t     heap_guard_restarts() { return 0; }
 CrashInfo diag_crash_info() { return CrashInfo{}; }
 void      time_now(int64_t& unix_s, int32_t& ms) {
     unix_s = adapter::unix_s;

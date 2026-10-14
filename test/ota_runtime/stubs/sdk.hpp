@@ -139,6 +139,9 @@ struct State {
     bool      reject_new = false, interrupt = false;
     bool      fail_task_create = false, health_offline = false;
     bool      recovery_ap = false, hp_live = false, x10a_required = false, x10a_proven = false;
+    // Factory-reset latch adapter: `reset_latched` is what nvs_factory_reset_latched() reads
+    // (operation start); `reset_hold` is what the last-moment restart refusal answers.
+    bool                 reset_latched = false, reset_hold = false;
     size_t    free_bytes = 128 * 1024, largest_block = 64 * 1024;
     uint8_t   heap_restarts = 0;
     uint32_t  mqtt_skips = 0, poll_skips = 0;
@@ -147,6 +150,7 @@ struct State {
     int                  marked = 0, created = 0;
     int                  stalled_service = 0;
     TickType_t           marked_at = 0, restarted_at = 0;
+    TickType_t           heal_at = 0, release_hold_at = 0; // 0 = never (health_timeout_held)
     TickType_t           ticks         = 1000;
     int                  notifications = 0, withdraw = 0, pause = 0, resume = 0, restart = 0;
     int client_acquired = 0, client_closed = 0, client_cleaned = 0, firmware_acquired = 0,
@@ -190,7 +194,14 @@ inline BaseType_t xSemaphoreGive(SemaphoreHandle_t m) {
     return pdTRUE;
 }
 inline TickType_t   xTaskGetTickCount() { return sdk::state.ticks; }
-inline void         vTaskDelay(TickType_t n) { sdk::state.ticks += n; }
+inline void         vTaskDelay(TickType_t n) {
+    sdk::state.ticks += n;
+    // Scripted health_timeout_held timeline: the service recovers, later the reset hold ends.
+    if (sdk::state.heal_at && sdk::state.ticks >= sdk::state.heal_at)
+        sdk::state.health_offline = false;
+    if (sdk::state.release_hold_at && sdk::state.ticks >= sdk::state.release_hold_at)
+        sdk::state.reset_hold = false;
+}
 inline void         vTaskDelete(TaskHandle_t) {}
 inline TaskHandle_t xTaskCreateStatic(void (*fn)(void*), const char* name, unsigned bytes,
                                       void* arg, unsigned, StackType_t* stack,

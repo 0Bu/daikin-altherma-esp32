@@ -80,6 +80,9 @@ bool config_save(const Config& c) {
     adapter::cfg = c;
     return true;
 }
+// Every scenario here loads a usable stored blob; the kept-blob gate of the initial HomeHub search
+// is pinned at source level by test/test_config_ownership_contract.mjs.
+bool config_stored_blob_unreadable() { return false; }
 namespace detail {
 void          config_lock() { adapter::config_mutex.lock(); }
 void          config_unlock() { adapter::config_mutex.unlock(); }

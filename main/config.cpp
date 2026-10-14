@@ -13,13 +13,24 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "rtos_guard.hpp"   // SemGuard — the ONE unwind-safe mutex guard
+#include <atomic>
 #include <cstdlib>          // abort() — the fail-stop when the config mutex can't be created
+#include <memory> // unique_ptr — the factory seed builds its Config off the caller's stack
 #include <vector>
 
 namespace daik {
 
 static Config            g_cfg;
 static SemaphoreHandle_t g_mtx = nullptr;   // guards g_cfg; created in config_load() before tasks start
+// Set by config_load when the stored "cfg" blob was present but unusable (ConfigLoadVerdict
+// Rejected or ReadError); cleared by the first explicit service save that lands. Atomic rather than
+// under g_mtx: the automatic writers ask it before they take any config snapshot.
+static std::atomic<bool> s_cfg_blob_unreadable{false};
+// The indicator/button pins config_load yielded to the X10A link this boot (RAM only), so
+// every service save and the factory seed keep the stored statement (config_blob_keep_yielded_pins,
+// config_unyield_board_hardware). A part is forgotten, under g_mtx, once a landed save states a
+// real pin for it or gives its stored pin to another board part (config_yield_forget_restated).
+static LocalPinsRepair s_load_yield;
 
 // The board-local hardware as this BUILD was configured — the first-boot / recovery values for the
 // indicator + recovery button, exactly as CONFIG_DAIKIN_RX_PIN is for the X10A link. Kconfig is the
@@ -47,6 +58,46 @@ static void seed_board_defaults(Config& c) {
 #else
     c.btn_active_low = false;
 #endif
+}
+
+// The persisted settings of a device whose "cfg" blob config_load does not use (absent, rejected or
+// unreadable): the pre-blob per-key layout, which a device upgraded from that era still holds (no
+// current build writes or erases those keys), else the Kconfig defaults. `read_legacy_keys` is
+// false for the factory seed (config_factory_seed_blob), which describes the device AFTER the
+// erase has removed those keys — one list of defaults, so the seed cannot drift from what a
+// factory-fresh boot actually loads.
+static void seed_without_blob(Config& c, bool read_legacy_keys) {
+    const auto str = [read_legacy_keys](const char* key, const char* def) {
+        return read_legacy_keys ? nvs_get_str(key, def) : std::string(def);
+    };
+    const auto i32 = [read_legacy_keys](const char* key, int32_t def) {
+        return read_legacy_keys ? nvs_get_i32(key, def) : def;
+    };
+    c.wifi_ssid            = str("wifi_ssid", CONFIG_DAIKIN_WIFI_SSID);
+    c.wifi_pass            = str("wifi_pass", CONFIG_DAIKIN_WIFI_PASSWORD);
+    c.wifi_ssid_backup     = str("wifi_ssid_back", "");
+    c.wifi_pass_backup     = str("wifi_pass_back", "");
+    c.wifi_rollback_active = i32("wifi_rollback", 0) != 0;
+    c.wifi_rolled_back     = i32("wifi_rolledbk", 0) != 0;
+    c.mqtt_uri             = str("mqtt_uri", CONFIG_DAIKIN_MQTT_BROKER_URI);
+    c.mqtt_user            = str("mqtt_user", CONFIG_DAIKIN_MQTT_USERNAME);
+    c.mqtt_pass            = str("mqtt_pass", CONFIG_DAIKIN_MQTT_PASSWORD);
+    c.syslog_host          = str("syslog_host", CONFIG_DAIKIN_SYSLOG_HOST);
+    c.syslog_port          = i32("syslog_port", CONFIG_DAIKIN_SYSLOG_PORT);
+    c.ntp_server           = str("ntp_server", CONFIG_DAIKIN_NTP_SERVER);
+    seed_board_defaults(c); // the legacy layout never held these — Kconfig is all there is
+}
+
+static StoredEntryRead stored_entry_read(NvsBlobRead r) {
+    switch (r) {
+    case NvsBlobRead::Ok:
+        return StoredEntryRead::Present;
+    case NvsBlobRead::NotFound:
+        return StoredEntryRead::NotFound;
+    case NvsBlobRead::Error:
+        break;
+    }
+    return StoredEntryRead::ReadError;
 }
 
 // RAII guard around g_mtx. Releases on exception too, so a std::bad_alloc thrown while copying
@@ -132,15 +183,40 @@ void config_load() {
     }
     Config c;
     // Persisted user settings: WiFi + MQTT + syslog + NTP. These are read FIRST from the atomic
-    // CRC-checked "cfg" blob (logic/config_store.hpp); it is written all-or-nothing by config_save, so
-    // it is never half-updated. If it is absent (a fresh device, or an OTA upgrade from the pre-blob
-    // per-key layout) or fails its CRC, fall back to the legacy individual keys — which for a fresh
-    // device are just the Kconfig defaults. (The hostname is fixed at CONFIG_DAIKIN_HOSTNAME, the poll
-    // cadence at POLL_INTERVAL_S, labels are English-only.)
+    // CRC-checked "cfg" blob (logic/config_store.hpp); it is written all-or-nothing by config_save,
+    // so it is never half-updated. If it is absent (a fresh device, or an OTA upgrade from the
+    // pre-blob per-key layout) or cannot be used, fall back to the legacy individual keys — which
+    // for a fresh device are just the Kconfig defaults. (The hostname is fixed at
+    // CONFIG_DAIKIN_HOSTNAME, the poll cadence at POLL_INTERVAL_S, labels are English-only.)
+    //
+    // The fallback is the same for "absent" and "unusable", but what may happen to the stored entry
+    // is not (logic/config_store.hpp, ConfigLoadVerdict). An entry that is present but rejected — a
+    // newer layout after a downgrade or rollback, damage, truncation — or that could not be read is
+    // KEPT: the automatic writers ask config_stored_blob_unreadable() and skip their write, so only
+    // an explicit owner save replaces it, and updating to a build that reads it restores it all.
     ConfigBlob b;
     std::vector<uint8_t> raw;
-    const bool blob_loaded = nvs_get_blob("cfg", raw) &&
-                             config_blob_deserialize(raw.data(), raw.size(), b);
+    const NvsBlobRead    cfg_read = nvs_read_blob("cfg", raw);
+    const bool           blob_loaded =
+        cfg_read == NvsBlobRead::Ok && config_blob_deserialize(raw.data(), raw.size(), b);
+    const ConfigLoadVerdict cfg_verdict =
+        config_load_verdict(stored_entry_read(cfg_read), blob_loaded);
+    s_cfg_blob_unreadable.store(!config_load_allows_automatic_writes(cfg_verdict),
+                                std::memory_order_release);
+    if (cfg_verdict == ConfigLoadVerdict::Rejected) {
+        // Running on the legacy/default settings; the stored blob is kept until an explicit save.
+        diag_printf("config: stored settings rejected (%u B, v%d, reads v%u-v%u: %s) — defaults in "
+                    "use, blob kept\n",
+                    static_cast<unsigned>(raw.size()),
+                    stored_blob_version(raw.data(), raw.size(), CONFIG_BLOB_MAGIC_TEXT),
+                    static_cast<unsigned>(CONFIG_BLOB_VERSION_MIN),
+                    static_cast<unsigned>(CONFIG_BLOB_VERSION),
+                    stored_blob_reject_reason(raw.data(), raw.size(), CONFIG_BLOB_MAGIC_TEXT,
+                                              CONFIG_BLOB_VERSION_MIN, CONFIG_BLOB_VERSION));
+    } else if (cfg_verdict == ConfigLoadVerdict::ReadError) {
+        diag_printf("config: stored settings unreadable (NVS read error) — defaults in use, blob "
+                    "kept\n");
+    }
     if (blob_loaded) {
         c.wifi_ssid = b.wifi_ssid;                     c.wifi_pass = b.wifi_pass;
         c.wifi_ssid_backup = b.wifi_ssid_backup;       c.wifi_pass_backup = b.wifi_pass_backup;
@@ -241,19 +317,19 @@ void config_load() {
         }
     } else {
         // Legacy / first-boot fallback (per-key + Kconfig defaults).
-        c.wifi_ssid = nvs_get_str("wifi_ssid", CONFIG_DAIKIN_WIFI_SSID);
-        c.wifi_pass = nvs_get_str("wifi_pass", CONFIG_DAIKIN_WIFI_PASSWORD);
-        c.wifi_ssid_backup = nvs_get_str("wifi_ssid_back", "");
-        c.wifi_pass_backup = nvs_get_str("wifi_pass_back", "");
-        c.wifi_rollback_active = nvs_get_i32("wifi_rollback", 0) != 0;
-        c.wifi_rolled_back = nvs_get_i32("wifi_rolledbk", 0) != 0;
-        c.mqtt_uri  = nvs_get_str("mqtt_uri", CONFIG_DAIKIN_MQTT_BROKER_URI);
-        c.mqtt_user = nvs_get_str("mqtt_user", CONFIG_DAIKIN_MQTT_USERNAME);
-        c.mqtt_pass = nvs_get_str("mqtt_pass", CONFIG_DAIKIN_MQTT_PASSWORD);
-        c.syslog_host = nvs_get_str("syslog_host", CONFIG_DAIKIN_SYSLOG_HOST);
-        c.syslog_port = nvs_get_i32("syslog_port", CONFIG_DAIKIN_SYSLOG_PORT);
-        c.ntp_server = nvs_get_str("ntp_server", CONFIG_DAIKIN_NTP_SERVER);
-        seed_board_defaults(c);   // the legacy layout never held these — Kconfig is all there is
+        seed_without_blob(c, /*read_legacy_keys=*/true);
+    }
+    // An indicator or button GPIO below -1 is a stored "absent" in a non-canonical spelling (an
+    // older build accepted it from a raw POST). Canonicalize it BEFORE anything compares or
+    // validates the board fields: board_hw_valid() refuses it now, and that refusal must not revoke
+    // a board the owner configured.
+    {
+        const LocalPinsRepair normalized = config_normalize_absent_local_pins(c);
+        if (normalized.led || normalized.btn)
+            diag_printf("config: persisted %s%s%s GPIO below -1 read as absent (-1)\n",
+                        normalized.led ? "indicator" : "",
+                        normalized.led && normalized.btn ? "/" : "",
+                        normalized.btn ? "button" : "");
     }
     // Before blob v12 the separate `board_set` key recorded only that the hardware form had been
     // submitted. Recover the same preset name that old UI derived from the stored fields, but never
@@ -268,8 +344,8 @@ void config_load() {
     // there, and both of these pins are DRIVEN (an output, or an input with a pull). A bad one is
     // not cosmetic — pointing the indicator at a flash pad corrupts flash traffic, and pointing the
     // button at a floating pad factory-resets the device by itself. The link pins are excluded from
-    // this particular check (rx/tx are re-validated separately, just below, against the board pins
-    // that survive here) so the two checks can't deadlock each other into rejecting both.
+    // this particular check (rx/tx are re-validated separately, just below, by the chip rule; the
+    // board parts then yield to the final pair) so the two checks can't reject each other.
     {
         Config probe = c;
         probe.rx_pin = probe.tx_pin = -1;
@@ -315,16 +391,42 @@ void config_load() {
     }
 
     // Persisted X10A LINK cache: RX/TX pins + protocol. New builds use one CRC-protected blob so a
-    // failed/interrupted pin swap cannot leave a mixed pair. Legacy per-key values are accepted only
-    // until the first successful save/detection migrates them.
-    // it is cached (fallback = compile-time Kconfig default) and tried FIRST by the detection sweep;
-    // a change is re-persisted (hp_poll.cpp poll_detect). The sweep still tries the defaults too, so
-    // a stale cache self-heals. The MODEL is NOT persisted — profile + fingerprint below stay the
-    // sentinel/empty and are re-detected on every boot (a swapped unit is re-identified).
+    // failed/interrupted pin swap cannot leave a mixed pair. Legacy per-key values are read only
+    // while no usable link entry exists; the first successful save/detection writes the entry.
+    // The link is cached (fallback = compile-time Kconfig default) and tried FIRST by the detection
+    // sweep; a change is re-persisted (hp_poll.cpp poll_detect). The sweep tries only the cached
+    // pair, the build-default pair and their swaps (hp_detect.cpp), so a stale or damaged cache
+    // recovers by itself only when the X10A wires sit on one of those; on any other pins it stays
+    // wrong until POST /set_hp names the wiring. The MODEL is NOT persisted — profile + fingerprint
+    // below stay the sentinel/empty and are re-detected on every boot (a swapped unit is
+    // re-identified).
     std::vector<uint8_t> link_raw;
     LinkBlob link_blob;
-    const bool link_blob_loaded = nvs_get_blob("link", link_raw) &&
-                                  link_blob_deserialize(link_raw.data(), link_raw.size(), link_blob);
+    const NvsBlobRead    link_read = nvs_read_blob("link", link_raw);
+    const bool           link_blob_loaded =
+        link_read == NvsBlobRead::Ok &&
+        link_blob_deserialize(link_raw.data(), link_raw.size(), link_blob);
+    // A present-but-unusable entry is not an error the boot can repair, but it IS why the pins
+    // below are the legacy/default pair rather than the ones the owner last saved. Nothing gates on
+    // it: the cache has its own writers (detection, /set_hp) and holds no setting beyond the
+    // wiring.
+    switch (config_load_verdict(stored_entry_read(link_read), link_blob_loaded)) {
+    case ConfigLoadVerdict::Rejected:
+        // The legacy/build-default pins stay until detection or /set_hp rewrites the entry.
+        diag_printf("config: stored X10A link rejected (%u B, v%d: %s) — default pins in use\n",
+                    static_cast<unsigned>(link_raw.size()),
+                    stored_blob_version(link_raw.data(), link_raw.size(), LINK_BLOB_MAGIC_TEXT),
+                    stored_blob_reject_reason(link_raw.data(), link_raw.size(),
+                                              LINK_BLOB_MAGIC_TEXT, LINK_BLOB_VERSION,
+                                              LINK_BLOB_VERSION));
+        break;
+    case ConfigLoadVerdict::ReadError:
+        diag_printf("config: stored X10A link unreadable (NVS read error) — default pins in use\n");
+        break;
+    case ConfigLoadVerdict::Absent:
+    case ConfigLoadVerdict::Loaded:
+        break;
+    }
     c.rx_pin = link_blob_loaded ? link_blob.rx_pin
                                 : nvs_get_i32("rx_pin", CONFIG_DAIKIN_RX_PIN);
     c.tx_pin = link_blob_loaded ? link_blob.tx_pin
@@ -341,20 +443,40 @@ void config_load() {
         }
     }
     // Re-check on the way IN even though the blob is atomic: older per-key layouts, corruption, a
-    // different board's NVS image and future format mistakes are all still untrusted. A guard, not a
-    // repair: the sweep already drops an rx == tx candidate and falls back to these
-    // same defaults (hp_detect.cpp), so the bus still comes up. link_pins_safe adds the checks the
-    // sweep lacks — the upper GPIO bound AND the chip-reserved-pin rule (board_pins.hpp), the same
-    // rule the request path enforces (validate) — so a pair that reaches flash via a curl POST to
-    // /set_hp (flash/strapping/JTAG pad) is not silently re-tried every boot into a crash loop, and
-    // /status never reports an unconfigurable link as fact. Not re-persisted: poll_detect writes the
+    // different board's NVS image and future format mistakes are all still untrusted. A guard, not
+    // a repair: the sweep already drops an rx == tx candidate and falls back to these same defaults
+    // (hp_detect.cpp), so the bus still comes up. link_pins_safe adds the checks the sweep lacks —
+    // the upper GPIO bound AND the chip-reserved-pin rule (board_pins.hpp), the same rule the
+    // request path enforces (validate) — so a pair that reaches flash via a curl POST to /set_hp
+    // (flash/strapping/JTAG pad) is not silently re-tried every boot into a crash loop, and /status
+    // never reports an unconfigurable link as fact. Not re-persisted: poll_detect writes the
     // winning pins back once the bus answers; until then the line below repeats each boot.
-    if (!link_pins_safe(c.rx_pin, c.tx_pin, hw_octal_spi(), config_reserved_pins(c),
+    // The indicator, the button and ENV III are NOT reservations here: the link is the primary
+    // function and they yield to the final pair just below. A stored pair that one of their stored
+    // pins collides with (one /set_hp chose while that part was yielded, or a legacy pair) keeps
+    // working instead of falling back to a default that may sit on the very same pin.
+    if (!link_pins_safe(c.rx_pin, c.tx_pin, hw_octal_spi(), ReservedPins{},
                         SOC_GPIO_PIN_COUNT - 1)) {
         diag_printf("config: persisted X10A pins rejected (rx=%d tx=%d) — using build defaults %d/%d\n",
                     c.rx_pin, c.tx_pin, CONFIG_DAIKIN_RX_PIN, CONFIG_DAIKIN_TX_PIN);
         c.rx_pin = CONFIG_DAIKIN_RX_PIN;
         c.tx_pin = CONFIG_DAIKIN_TX_PIN;
+    }
+    // The final pair, stored or fallback, can land on the indicator or the button: a Custom LED on
+    // GPIO44 is legal while the link sits on 1/2, and collides once a missing or damaged link entry
+    // falls back to the 44/43 default. The board check above ran with the link excluded, so nothing
+    // else catches it, and the snapshot would then fail board_hw_valid() and validate() and leave
+    // detection with no permitted candidate. The optional parts yield to the primary link for this
+    // boot, as ENV III does below; saves keep their stored pins (s_load_yield); ENV III saves off.
+    {
+        const LocalPinsRepair yielded = config_yield_local_pins_to_link(c);
+        s_load_yield                  = yielded; // before publish(): no task runs yet
+        if (yielded.led)
+            diag_printf("config: %s disabled — GPIO taken by the X10A link (rx=%d tx=%d)\n",
+                        "indicator", c.rx_pin, c.tx_pin);
+        if (yielded.btn)
+            diag_printf("config: %s disabled — GPIO taken by the X10A link (rx=%d tx=%d)\n",
+                        "recovery button", c.rx_pin, c.tx_pin);
     }
     // The fallback pair above can itself collide with ENV III (for example a damaged link cache is
     // replaced by the XIAO 44/43 defaults while an ENV mapping already uses them). Optional ENV
@@ -399,11 +521,27 @@ static_assert(ESP_OK == 0, "the transactions read a zero store code as success")
 // when /set_hp races a long detection sweep; the flash write is rare and may hold readers briefly.
 static ConfigSaveResult save_whole(const Config& requested, bool owns_link) {
     ConfigSaveOutcome out;
+    int               live_rx = -1, live_tx = -1; // the link a refused service save would carry
     {
         Lock         lk(g_mtx);
         NvsBlobStore store;
-        out = config_save_transaction(g_cfg, requested, owns_link, store);
+        out     = config_save_transaction(g_cfg, requested, owns_link, store, s_load_yield);
+        live_rx = g_cfg.rx_pin;
+        live_tx = g_cfg.tx_pin;
+        if (!owns_link && out.result == ConfigSaveResult::Saved)
+            config_yield_forget_restated(s_load_yield, requested);
     }
+    // A service save that landed wrote a fresh "cfg" blob, so a stored blob this boot could not use
+    // has now been replaced by the owner's explicit choice and the automatic writers may write
+    // again. An X10A save writes no service blob and leaves the flag as it was.
+    if (!owns_link && out.result == ConfigSaveResult::Saved)
+        s_cfg_blob_unreadable.store(false, std::memory_order_release);
+    // A Stale X10A save is routine (its handler re-derives and retries), but a Stale SERVICE save
+    // is the reconcile refusing a newer detected link that collides with the requested local pins.
+    if (!owns_link && out.result == ConfigSaveResult::Stale)
+        diag_printf("config: save refused — detected X10A link (rx=%d tx=%d) collides with the "
+                    "requested local pins\n",
+                    live_rx, live_tx);
     switch (out.failed) {
     case ConfigSaveStep::None:
         break;
@@ -412,12 +550,12 @@ static ConfigSaveResult save_whole(const Config& requested, bool owns_link) {
                     static_cast<unsigned>(CONFIG_BLOB_MAX_STR));
         break;
     case ConfigSaveStep::ServiceWrite:
-        diag_printf("config: NVS blob write failed key=cfg err=%s — nothing saved\n",
+        diag_printf("config: NVS blob write failed key=%s err=%s — nothing saved\n", "cfg",
                     esp_err_to_name(out.store_error));
         break;
     case ConfigSaveStep::LinkWrite:
         if (owns_link)
-            diag_printf("config: NVS blob write failed key=link err=%s — nothing saved\n",
+            diag_printf("config: NVS blob write failed key=%s err=%s — nothing saved\n", "link",
                         esp_err_to_name(out.store_error));
         else
             diag_printf("config: atomic link-cache write failed after service save (%s; previous "
@@ -433,6 +571,45 @@ bool config_save(const Config& c) {
 }
 
 ConfigSaveResult config_save_link(const Config& c) { return save_whole(c, /*owns_link=*/true); }
+
+bool config_stored_blob_unreadable() {
+    return s_cfg_blob_unreadable.load(std::memory_order_acquire);
+}
+
+// The factory reset's seed (config.hpp). Three rules shape it:
+//   * the fresh half is EXACTLY what config_load builds for an absent "cfg" blob with no legacy
+//   keys
+//     (seed_without_blob, the Config member defaults, HomeHub discovery pending), so a reset device
+//     is indistinguishable from a new one apart from the carried statement;
+//   * only the board hardware statement is carried (logic/config_model.hpp,
+//     config_carry_board_hardware), as stored rather than as this boot's link yield left it
+//     (config_unyield_board_hardware), copied out under the mutex as POD — nothing allocates while
+//     the config mutex is held;
+//   * the Config and its blob image live on the heap, not on the caller's stack: the caller is the
+//     recovery-button task, whose stack is a few KiB, and each of the two is a sizeable part of it.
+// Every allocation failure answers false; nothing here throws to the caller.
+bool config_factory_seed_blob(std::vector<uint8_t>& out) {
+    BoardHardwareStatement board;
+    {
+        Lock lk(g_mtx);
+        board = config_board_hardware(g_cfg);
+        config_unyield_board_hardware(board, config_yield_standing(s_load_yield, g_cfg));
+    }
+    try {
+        // A failed allocation throws std::bad_alloc into the catch below, like every other one
+        // here.
+        std::unique_ptr<Config> fresh(new Config());
+        seed_without_blob(*fresh, /*read_legacy_keys=*/false);
+        config_carry_board_hardware(*fresh, board);
+        std::unique_ptr<ConfigBlob> blob(new ConfigBlob(config_blob_from(*fresh)));
+        if (!config_blob_strings_fit(*blob)) return false;
+        std::vector<uint8_t> raw = config_blob_serialize(*blob);
+        out.swap(raw);
+        return true;
+    } catch (...) { // std::bad_alloc in practice; the reset must go on without a seed, not abort
+        return false;
+    }
+}
 
 // ── Field-owned commits (the detection path) ─────────────────────────────────────────────────────
 // These exist so the poll task never writes a field it doesn't own. It snapshots the config, then

@@ -101,6 +101,11 @@ command([CXX, *FLAGS, '-MM', '-MF', OUT / 'preflight.d',
 before = inputs([OUT / 'preflight.d', OUT / 'cjson.d'])
 source_text, ota_text = SOURCE.read_text(), OTA_SOURCE.read_text()
 binary = compile(SOURCE, 'production')
+legacy = command([binary, 'legacy_cases'])
+if 'PASS total=13 assertions=5233\n' not in legacy.stdout:
+    raise RuntimeError('the original thirteen behavioral groups changed their assertion inventory\n'
+                       + legacy.stdout)
+print('PRESERVED ORIGINAL CASES ' + legacy.stdout.splitlines()[-1])
 baseline = command([binary])
 print(baseline.stdout, end='')
 
@@ -150,14 +155,39 @@ mutations = [
      'downgrade = true;', 'query_flags'),
     ('nonobject_root', 'json', 'if (!json_payload_is_object(payload)) return nullptr;', '', 'ingress'),
     ('escaped_zero', 'payload', 'if (all_zero) return false;', 'static_cast<void>(all_zero);', 'ingress'),
+    ('ignore_factory_reset_after_delay', 'source',
+     'if (nvs_restart_held_by_factory_reset("config")) return;', '', 'factory_reset_reboot'),
+    ('check_factory_reset_before_delay', 'source',
+     'vTaskDelay(pdMS_TO_TICKS(400));\n    if (nvs_restart_held_by_factory_reset("config")) return;',
+     'if (nvs_restart_held_by_factory_reset("config")) return;\n    vTaskDelay(pdMS_TO_TICKS(400));',
+     'factory_reset_reboot'),
+    ('board_conflict_is_write_failure', 'board',
+     'if (!config_save(c)) return send_local_pins_save_failure(req, c);',
+     'if (!config_save(c)) return send_err(req, "500 Internal Server Error", "config write failed");',
+     'local_pin_reconcile'),
+    ('env_conflict_is_write_failure', 'env',
+     'if (!config_save(c)) return send_local_pins_save_failure(req, c);',
+     'if (!config_save(c)) return send_err(req, "500 Internal Server Error", "config write failed");',
+     'local_pin_reconcile'),
+    ('copy_config_after_failed_pin_save', 'pins',
+     'const ConfigLinkSnapshot link = config_link_snapshot();',
+     'const Config link = config();', 'local_pin_reconcile'),
+    ('write_failure_is_pin_conflict', 'pins',
+     'return send_err(req, "500 Internal Server Error", "config write failed");',
+     'return send_err(req, "409 Conflict", "config write failed");', 'local_pin_reconcile'),
+    ('allow_reconciled_pin_collision', 'transaction',
+     'if (config_reconcile_breaks_local_pins(requested, c)) {',
+     'if ((static_cast<void>(requested), false)) {', 'local_pin_reconcile'),
 ]
 for tag, target, old, new, case in mutations:
     config_source, ota_source = SOURCE, OTA_SOURCE
-    if target in ('source', 'wifi', 'env'):
+    if target in ('source', 'wifi', 'env', 'board', 'pins'):
         text = source_text
-        if target in ('wifi', 'env'):
-            start = text.index('static esp_err_t set_' + ('wifi' if target == 'wifi' else 'env3') + '(')
-            end = text.index('\nstatic ', start + 1) if target == 'env' else text.index('\n// ── /set_mqtt', start)
+        if target in ('wifi', 'env', 'board', 'pins'):
+            function = {'wifi': 'set_wifi', 'env': 'set_env3', 'board': 'set_board',
+                        'pins': 'send_local_pins_save_failure'}[target]
+            start = text.index('static esp_err_t ' + function + '(')
+            end = text.index('\nstatic ', start + 1) if target != 'wifi' else text.index('\n// ── /set_mqtt', start)
             scope = replace_once(text[start:end], old, new, tag)
             text = text[:start] + scope + text[end:]
         else:
@@ -168,17 +198,18 @@ for tag, target, old, new, case in mutations:
         ota_source = OUT / (tag + '.cpp')
         ota_source.write_text(replace_once(ota_text, old, new, tag))
     else:
-        if target == 'payload':
-            # OTA's manifest also includes this shared header. Copy the header closure for BOTH
-            # complete TUs so #pragma once cannot accidentally load an original second definition.
+        if target in ('payload', 'transaction'):
+            # Bind the mutated production header closure for BOTH complete TUs, so a quoted
+            # config.hpp include or #pragma once cannot retain an original second definition.
             copied_main = OUT / tag / 'main'
             for path in (ROOT / 'main').rglob('*'):
                 if path.is_file() and path.suffix in ('.hpp', '.h'):
                     copied = copied_main / path.relative_to(ROOT / 'main')
                     copied.parent.mkdir(parents=True, exist_ok=True)
                     shutil.copy2(path, copied)
-            payload = copied_main / 'logic/payload_complete.hpp'
-            payload.write_text(replace_once(payload.read_text(), old, new, tag))
+            mutated_header = copied_main / ('logic/payload_complete.hpp' if target == 'payload'
+                                           else 'logic/config_transaction.hpp')
+            mutated_header.write_text(replace_once(mutated_header.read_text(), old, new, tag))
             config_source, ota_source = copied_main / 'http_config.cpp', copied_main / 'http_ota.cpp'
             config_source.write_text(source_text)
             ota_source.write_text(ota_text)
@@ -202,12 +233,15 @@ after = inputs([OUT / 'production.d', OUT / 'cjson.d'])
 if after != before:
     raise RuntimeError('compile inputs changed during the run')
 record = {'compiler': compiler, 'sanitizer': args.sanitizer, 'commands': commands,
-          'baseline_stdout': baseline.stdout, 'original_commit': original_commit,
+          'baseline_stdout': baseline.stdout, 'preserved_original_case_stdout': legacy.stdout,
+          'original_commit': original_commit,
           'original_sha256': hashlib.sha256(original.encode()).hexdigest(),
           'original_positive_stdout': original_positive.stdout,
           'negative_controls': controls, 'input_sha256': after,
           'claim_limits': ['Complete production http_config.cpp and http_ota.cpp compile; actual setter handlers and ota_do execute.',
-                           'Real resolved cJSON, JsonGuard, shared ingress, pure validators and config_save_transaction execute.',
+                           'Real resolved cJSON, JsonGuard, shared ingress, pure validators, config_save_transaction and config_commit_detected_link_transaction execute.',
+                           'Factory reset latch and config_link_snapshot are allocation-free recording adapters; actual HTTP checks after the delay execute.',
+                           'The fixture passes no load-yield record to the transaction; production config.cpp s_load_yield lifecycle and persisted yielded pins belong to CFG-03.',
                            'HTTP reads/replies, SDK event delivery, network/syscalls, sensors, runtime reconfiguration and atomic entry writes are recording adapters.',
                            'No real NVS failure, power loss, RTOS timing, live broker/sensor, physical side effect, target heap/stack or rendered UI proof.']}
 (OUT / 'evidence.json').write_text(json.dumps(record, indent=2) + '\n')

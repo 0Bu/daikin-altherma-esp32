@@ -32,17 +32,29 @@ Unknown fields retain the existing forward-compatible behavior.
 | UI language | Required supported string enum | Service save, applied on next UI poll, no reboot |
 
 A failed route-owned write must return `500 {ok:false,error:...}` without live publication,
-reboot or runtime reconfiguration. The recording store calls the already accepted CFG-03 production
-transaction: atomic entries are independent, service saves require `cfg` and treat link-cache
+reboot or runtime reconfiguration. The recording store calls the current production transaction:
+atomic entries are independent, service saves require `cfg` and treat link-cache
 maintenance as best effort, while X10A saves write only `link`. Entry failures here are simulated;
 this fixture does not expand CFG-03's physical evidence claims. Response/store capacities are staged
 before execution so the C++ allocation witness can observe the real endpoint's post-write path.
 
+Concurrent detection cases execute `config_commit_detected_link_transaction` between the handler's
+snapshot validation and `config_save_transaction`. A newly detected RX/TX collision with a requested
+indicator, button or ENV III pin must return 409 without an HTTP write, runtime change or reboot;
+the independent detection cache write remains intact. Adjacent noncolliding detections must save
+and reboot normally, while a genuine service write failure after reconciliation must still return
+500. The conflict response uses the allocation-free link snapshot adapter instead of another full
+configuration copy. The six rebooting setters also execute the real delayed restart with a reset
+latch introduced during its 400 ms response window: the save and response already succeeded, but
+the reset then owns the restart. An unlatched window still restarts, and a latch already set holds it.
+
 The immutable original HTTP source at `819a2c98ad7e331ce1527ca85f4acb7127e55734` must pass positive
 setters and fail the two specific regressions: a present wrong type taking missing-field semantics,
 and a fractional integer being truncated. Additional compiling mutants independently remove type,
-missing-value, persistence, runtime ordering, probe, domain, query and ingress defenses. Only the
-selected assertion counts as rejection; compilation failures, crashes and timeouts never do.
+missing-value, persistence, runtime ordering, probe, domain, query, ingress, post-delay reset and
+reconciliation defenses. The original thirteen groups retain all 5,233 assertions; two additional
+groups cover integration with detection and reset. Only the selected assertion counts as rejection;
+compilation failures, crashes and timeouts never do.
 
 Unique temporary output directories retain `evidence.json`, `commands.txt`, binaries, mutation
 sources and `inputs.sha256`. The baseline manifest hashes every non-system compile input and rejects
@@ -51,4 +63,7 @@ input changes during the run. Hardware network/sensor access is replaced by reco
 Limits: no real NVS failure, power-loss durability, RTOS scheduling, live MQTT authentication, sensor
 measurement, physical source behavior, ESP32 heap/stack margin or rendered UI is proven. HTTP body,
 reply and service adapters do not execute the shared LAN/OOM trampoline; that belongs to the server
-fixture. The OTA HTTP query test records an update handoff and never downloads or installs firmware.
+fixture. The reset latch and link snapshot are recording adapters, and a reset does not erase any
+storage here. This fixture passes no load-yield record to the transaction; production `config.cpp`
+and its `s_load_yield` lifecycle and stored yielded pins remain CFG-03's evidence responsibility.
+The OTA HTTP query test records an update handoff and never downloads or installs firmware.

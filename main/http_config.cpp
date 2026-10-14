@@ -38,6 +38,7 @@
 #include "hp_modbus.hpp"        // mb_reconfigure — start/stop the second, independent stack
 #include "mqtt_ha.hpp"          // mqtt_reference_reconfigure — re-evaluate its master-gated binding
 #include "net.hpp"              // net_eth_reserved_pins — the pads a detected W5500 is clocking
+#include "nvs_storage.hpp" // nvs_restart_held_by_factory_reset — reboot_soon defers to a reset
 #include "weather_forecast.hpp"
 
 #include "cJSON.h"
@@ -66,7 +67,18 @@
 
 namespace daik {
 
-static void reboot_soon() { vTaskDelay(pdMS_TO_TICKS(400)); esp_restart(); }
+// Every /set_* that persists and reboots ends here, ~400 ms after answering {"reboot":true}. A
+// factory reset that latched NVS inside that window owns the next restart: rebooting now would
+// come up on a namespace the reset is still erasing — a partial reset that looks like a finished
+// one. Refuse instead (nvs_restart_held_by_factory_reset says so once per boot): a complete reset
+// reboots the board itself, and an incomplete one stays up on purpose until the owner retries it.
+// The save that led here landed before the latch, so the reset erases it along with everything
+// else.
+static void reboot_soon() {
+    vTaskDelay(pdMS_TO_TICKS(400));
+    if (nvs_restart_held_by_factory_reset("config")) return;
+    esp_restart();
+}
 
 // Every write endpoint answers a rejection as {"ok":false,"error":…} (DESIGN.md §8: a 4xx becomes an
 // inline field error). Both callers — the dashboard modals and the setup portal — read `error` out of
@@ -97,6 +109,23 @@ static esp_err_t send_err_code(httpd_req_t* req, const char* status,
 static esp_err_t send_env3_err(httpd_req_t* req, const char* status,
                                const char* code, const char* msg) {
     return send_err_code(req, status, code, msg);
+}
+
+// The answer to a failed /set_board or /set_env3 save. The save transaction refuses the snapshot
+// when a detection commit that landed after it moved the X10A link onto a pin the form claims
+// (logic/config_model.hpp, config_reconcile_breaks_local_pins): committing would persist a
+// collision the next boot must undo. That is a conflict with a concurrent change, not a failed
+// write, so it answers 409 like /set_hp's stale save; a resubmitted form is validated against the
+// live link and names the pin. The live pair comes from the allocation-free snapshot: the caller's
+// frame already holds two Configs.
+static esp_err_t send_local_pins_save_failure(httpd_req_t* req, Config& proposed) {
+    const ConfigLinkSnapshot link = config_link_snapshot();
+    proposed.rx_pin               = link.rx_pin;
+    proposed.tx_pin               = link.tx_pin;
+    if (config_local_pins_collide_with_link(proposed))
+        return send_err(req, "409 Conflict",
+                        "X10A link changed during save; check the pins and retry");
+    return send_err(req, "500 Internal Server Error", "config write failed");
 }
 
 // Shared test-before-persist gate for the standalone compatibility endpoint and the integrated
@@ -1252,7 +1281,7 @@ static esp_err_t set_board(httpd_req_t* req) {
     if (!board_env_save_needed(c, cur))
         return http_send_json(req, "{\"ok\":true,\"reboot\":false}");   // nothing to write, no reboot
 
-    if (!config_save(c)) return send_err(req, "500 Internal Server Error", "config write failed");
+    if (!config_save(c)) return send_local_pins_save_failure(req, c);
     // Only the statement moved: persisted, but no driver's pin changed, so no reboot. `saved` is
     // what keeps the ANSWER honest — {"reboot":false} alone makes the UI say "no changes", which
     // would report a write to NVS as nothing having happened. Additive, so the four routes that
@@ -1291,7 +1320,7 @@ static esp_err_t set_env3(httpd_req_t* req) {
 
     if (env3_config_same(c, cur))
         return http_send_json(req, "{\"ok\":true,\"reboot\":false}");
-    if (!config_save(c)) return send_err(req, "500 Internal Server Error", "config write failed");
+    if (!config_save(c)) return send_local_pins_save_failure(req, c);
     http_send_json(req, "{\"ok\":true,\"reboot\":true}");
     reboot_soon();
     return ESP_OK;

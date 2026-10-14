@@ -42,6 +42,13 @@ unsigned mqtt_inits = 0, mqtt_starts = 0, mqtt_stops = 0, mqtt_destroys = 0, sem
 unsigned dns_calls = 0, socket_calls = 0, socket_closes = 0, weather_commits = 0;
 unsigned post_write_allocations = 0, stale_attempts = 0, save_fault = 0;
 
+unsigned detection_writes = 0, link_snapshot_reads = 0, restart_guard_calls = 0;
+bool     detect_before_service_save = false, reset_latched = false, latch_during_delay = false;
+bool     restart_guard_after_delay = false;
+int      detected_rx = -1, detected_tx = -1;
+
+daik::ConfigSaveOutcome last_save_outcome;
+
 size_t live_arrays = 0, body_capacity = 0;
 bool   fail_next_array = false;
 
@@ -68,16 +75,23 @@ void check(bool valid, const char* reason) {
     if (!valid) fail(reason);
 }
 struct Store {
-    int write_blob(const char* key, const uint8_t* bytes, size_t size) {
+    bool detection = false;
+    int  write_blob(const char* key, const uint8_t* bytes, size_t size) {
         const bool is_service = std::strcmp(key, "cfg") == 0;
-        if (is_service)
+        if (detection) {
+            if (is_service) fail("detection wrote the HTTP service domain");
+            ++detection_writes;
+        } else if (is_service)
             ++service_writes;
         else
             ++link_writes;
+        if (reset_latched) return ESP_FAIL;
         if (save_fault == (is_service ? 1U : 2U)) return ESP_FAIL;
         auto& target = is_service ? service : link;
         target.assign(bytes, bytes + size); // capacities were reserved before request execution
-        durable_started = true;
+        // A detection cache commit is independent of the endpoint's first durable write. Its
+        // transaction may publish while HTTP is still staging its own requested successor.
+        if (!detection) durable_started = true;
         return ESP_OK;
     }
 };
@@ -126,8 +140,13 @@ void reset() {
     env_probes = body_reads = mqtt_inits = mqtt_starts = mqtt_stops = mqtt_destroys = 0;
     semaphore_deletes = dns_calls = socket_calls = socket_closes = weather_commits = 0;
     post_write_allocations = stale_attempts = save_fault = 0;
-    body_capacity                                        = 0;
-    fail_next_array                                      = false;
+    detection_writes = link_snapshot_reads = restart_guard_calls = 0;
+    detect_before_service_save = reset_latched = latch_during_delay = false;
+    restart_guard_after_delay                                       = false;
+    detected_rx = detected_tx = -1;
+    last_save_outcome         = {};
+    body_capacity             = 0;
+    fail_next_array           = false;
     network = dns_ok = tcp_ok = semaphore_ok = mqtt_init_ok = mqtt_connected = true;
     mqtt_register_ok = mqtt_start_ok = mqtt_wait_ok = proof_ok = weather_admission = refresh_ok =
         true;
@@ -290,11 +309,29 @@ Config config() {
     ++fixture::config_reads;
     return fixture::current;
 }
+ConfigLinkSnapshot config_link_snapshot() {
+    ++fixture::link_snapshot_reads;
+    return {fixture::current.proto, fixture::current.rx_pin, fixture::current.tx_pin};
+}
 bool config_save(const Config& requested) {
     ++fixture::saves;
+    if (fixture::detect_before_service_save) {
+        fixture::detect_before_service_save = false;
+        fixture::Store detected_store{true};
+        bool           link_saved         = false;
+        uint32_t       committed_revision = 0;
+        // Execute the real detection transaction at the boundary between the handler's snapshot
+        // validation and its real service transaction, instead of fabricating a save failure.
+        const bool committed = config_commit_detected_link_transaction(
+            fixture::current, fixture::current.runtime_revision, fixture::detected_rx,
+            fixture::detected_tx, Protocol::I, 0x51c07U, detected_store, link_saved,
+            committed_revision);
+        if (!committed || !link_saved || committed_revision != fixture::current.runtime_revision)
+            fixture::fail("prepared concurrent detection did not commit its real transaction");
+    }
     fixture::Store store;
-    return config_save_transaction(fixture::current, requested, false, store).result ==
-           ConfigSaveResult::Saved;
+    fixture::last_save_outcome = config_save_transaction(fixture::current, requested, false, store);
+    return fixture::last_save_outcome.result == ConfigSaveResult::Saved;
 }
 ConfigSaveResult config_save_link(const Config& requested) {
     ++fixture::saves;
@@ -304,6 +341,12 @@ ConfigSaveResult config_save_link(const Config& requested) {
     }
     fixture::Store store;
     return config_save_transaction(fixture::current, requested, true, store).result;
+}
+bool nvs_restart_held_by_factory_reset(const char* who) {
+    if (std::strcmp(who, "config") != 0) fixture::fail("restart guard has wrong caller identity");
+    ++fixture::restart_guard_calls;
+    fixture::restart_guard_after_delay = fixture::delays != 0;
+    return fixture::reset_latched;
 }
 bool         config_diagnostics_enabled() { return fixture::current.diagnostics_enabled; }
 bool         hw_octal_spi() { return false; }
@@ -386,6 +429,7 @@ uint32_t ota_update_async(uint32_t after, const char*, const char*, const char*,
 void vTaskDelay(TickType_t delay) {
     fixture::check(delay == 400, "reboot delay must remain bounded");
     ++fixture::delays;
+    if (fixture::latch_during_delay) fixture::reset_latched = true;
 }
 void              esp_restart() { ++fixture::reboots; }
 SemaphoreHandle_t xSemaphoreCreateBinary() {
@@ -961,6 +1005,117 @@ void hp_revisions() {
     prepare(candidate);
     rejection(candidate, R"({"rx":9,"mb_host":"new.invalid"})");
 }
+void factory_reset_reboot() {
+    for (const auto& candidate : routes) {
+        if (!candidate.reboot) continue;
+        for (const bool latch : {false, true}) {
+            prepare(candidate);
+            latch_during_delay  = latch;
+            const auto response = invoke(candidate.handler, candidate.valid);
+            check(response.status == "200 OK" && saves == 1 && service_writes == 1 &&
+                      link_writes == 1,
+                  "a reset starting in the response window must follow a completed setter save");
+            check(delays == 1 && restart_guard_calls == 1 && restart_guard_after_delay,
+                  "actual rebooting setter must check the reset latch after its response delay");
+            check(reset_latched == latch && reboots == (latch ? 0U : 1U),
+                  "setter reboot ignored the factory reset that latched during its delay");
+            daik::JsonGuard document(daik::json_parse_document(response.response));
+            check(bool(document) && cJSON_IsTrue(cJSON_GetObjectItem(document, "ok")) &&
+                      cJSON_IsTrue(cJSON_GetObjectItem(document, "reboot")),
+                  "a later factory reset must not rewrite the completed setter response");
+        }
+    }
+    reset();
+    reset_latched = true;
+    daik::reboot_soon();
+    check(delays == 1 && restart_guard_calls == 1 && restart_guard_after_delay && reboots == 0,
+          "an already latched factory reset must keep the actual delayed restart held");
+}
+void local_pin_reconcile() {
+    struct Scenario {
+        const char* route;
+        const char* body;
+        int         collide_rx, collide_tx;
+        int         allowed_rx, allowed_tx;
+        bool        sensor;
+    };
+    const Scenario scenarios[] = {
+        {"board", route("board").valid, 21, 22, 9, 10, false},
+        {"board", route("board").valid, 22, 21, 9, 10, false},
+        {"board", R"({"preset_id":"custom","led_gpio":-1,"btn_gpio":9})", 9, 10, 22, 23, false},
+        {"board",
+         R"({"preset_id":"m5stack_atoms3_lite","env3_enabled":true,"env3_sda":2,"env3_scl":1})", 2,
+         1, 9, 10, true},
+        {"env3", route("env3").valid, 2, 1, 9, 10, true},
+        {"env3", route("env3").valid, 1, 2, 9, 10, true},
+    };
+    for (const auto& scenario : scenarios) {
+        const auto& candidate = route(scenario.route);
+        for (unsigned mode = 0; mode != 3; ++mode) {
+            prepare(candidate);
+            const auto before_service = service;
+            const auto before_ram = daik::config_blob_serialize(daik::config_blob_from(current));
+            const uint32_t before_revision = current.runtime_revision;
+            detect_before_service_save     = true;
+            detected_rx                    = mode == 0 ? scenario.collide_rx : scenario.allowed_rx;
+            detected_tx                    = mode == 0 ? scenario.collide_tx : scenario.allowed_tx;
+            if (mode == 2)
+                save_fault = 1; // Real route-owned write failure after safe reconciliation.
+            const auto response = invoke(candidate.handler, scenario.body);
+            check(detection_writes == 1 && current.rx_pin == detected_rx &&
+                      current.tx_pin == detected_tx && current.x10a_identity_fp == 0x51c07U,
+                  "the actual detection transaction did not retain its independently owned link");
+            check(saves == 1 && config_reads == 1 &&
+                      env_probes == static_cast<unsigned>(scenario.sensor),
+                  "local pin conflict must occur after one validated snapshot and required probe");
+            if (mode == 1) {
+                check(response.status == "200 OK" &&
+                          last_save_outcome.result == daik::ConfigSaveResult::Saved &&
+                          last_save_outcome.failed == daik::ConfigSaveStep::None,
+                      "noncolliding detection must allow the actual service transaction");
+                check(
+                    service_writes == 1 && link_writes == 1 && link_snapshot_reads == 0 &&
+                        reboots == 1 && delays == 1 && runtime_changes == 0 &&
+                        current.runtime_revision ==
+                            daik::config_next_revision(daik::config_next_revision(before_revision)),
+                    "safe reconcile did not publish and reboot exactly one HTTP successor");
+                check(service != before_service &&
+                          daik::config_blob_serialize(daik::config_blob_from(current)) !=
+                              before_ram,
+                      "safe reconcile did not persist the validated local pin change");
+            } else {
+                check(response.status == (mode == 0 ? "409 Conflict" : "500 Internal Server Error"),
+                      "local pin reconcile must distinguish a concurrent collision from a write "
+                      "failure");
+                check(last_save_outcome.result == (mode == 0 ? daik::ConfigSaveResult::Stale
+                                                             : daik::ConfigSaveResult::Failed) &&
+                          last_save_outcome.failed == (mode == 0
+                                                           ? daik::ConfigSaveStep::None
+                                                           : daik::ConfigSaveStep::ServiceWrite),
+                      "local pin HTTP response did not follow the actual transaction outcome");
+                check(service == before_service &&
+                          daik::config_blob_serialize(daik::config_blob_from(current)) ==
+                              before_ram &&
+                          service_writes == (mode == 0 ? 0U : 1U) && link_writes == 0 &&
+                          current.runtime_revision == daik::config_next_revision(before_revision),
+                      "refused local pin save changed HTTP durability or RAM beyond detection");
+                check(
+                    link_snapshot_reads == 1 && reboots == 0 && delays == 0 &&
+                        runtime_changes == 0 && weather_commits == 0,
+                    "refused local pin save copied Config, rebooted or changed a runtime producer");
+                daik::JsonGuard document(daik::json_parse_document(response.response));
+                const cJSON*    error = cJSON_GetObjectItem(document, "error");
+                check(bool(document) && cJSON_IsFalse(cJSON_GetObjectItem(document, "ok")) &&
+                          cJSON_IsString(error) &&
+                          std::strcmp(
+                              error->valuestring,
+                              mode == 0 ? "X10A link changed during save; check the pins and retry"
+                                        : "config write failed") == 0,
+                      "local pin save must return the stable JSON explanation for its outcome");
+            }
+        }
+    }
+}
 void query_flags() {
     for (const char* value : {"", "0", "1", "true", "10", "1x", "2", "11111111"}) {
         reset();
@@ -997,10 +1152,19 @@ int main(int argc, char** argv) {
                           {"special_chars", test::special_chars},
                           {"preflight_failures", test::preflight_failures},
                           {"hp_revisions", test::hp_revisions},
+                          {"factory_reset_reboot", test::factory_reset_reboot},
+                          {"local_pin_reconcile", test::local_pin_reconcile},
                           {"query_flags", test::query_flags}};
     unsigned   ran     = 0;
     for (const auto& candidate : cases) {
-        if (argc > 1 && std::strcmp(argv[1], candidate.name) != 0) continue;
+        if (argc > 1) {
+            if (std::strcmp(argv[1], "legacy_cases") == 0) {
+                if (std::strcmp(candidate.name, "factory_reset_reboot") == 0 ||
+                    std::strcmp(candidate.name, "local_pin_reconcile") == 0)
+                    continue;
+            } else if (std::strcmp(argv[1], candidate.name) != 0)
+                continue;
+        }
         oracle = candidate.name;
         candidate.run();
         ++ran;

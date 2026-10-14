@@ -399,6 +399,80 @@
           9241
         ]
       }
+    },
+    {
+      "compilers": {
+        "clang-17-darwin": "Apple Clang 17.0.0",
+        "gcc-13-linux-ubuntu24": "ESP-IDF v6.1 container GCC 13.3.0",
+        "gcc-15-linux-ubuntu26": "Ubuntu 26.04 aarch64 GCC 15.2.0-16ubuntu1"
+      },
+      "hosted_confirmation": "gcc-15-github-linux-ubuntu26 repeats the local GCC 15 inventory; authoritative CI pending",
+      "runner": "scripts/run-mock-tests.sh --coverage",
+      "scope": "The link yield records the stored indicator/button pins; every service save writes them into the cfg blob and the factory seed restores them while the yield stands, i.e. until a save states a real pin for the part or gives its stored pin to another board part. This record names only config_model.hpp and config_transaction.hpp; both ratios rise against base.",
+      "sources": {
+        "main/logic/config_model.hpp": "5c62344ae93b15fe8d53756c7514141b9e1bb77ef5319f3deaee7e40c8995fa7",
+        "main/logic/config_transaction.hpp": "7984c3f82bfd02d7de7c11549b620045daf0feef637fb2601eca256635bbef0c"
+      }
+    },
+    {
+      "runner": "scripts/run-mock-tests.sh --coverage",
+      "compilers": {
+        "clang-17-darwin": "Apple clang version 17.0.0 (clang-1700.6.4.2)",
+        "gcc-13-linux-ubuntu24": "g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+        "gcc-15-linux-ubuntu26": "g++-15 (Ubuntu 15.2.0-16ubuntu1) 15.2.0",
+        "gcc-15-github-linux-ubuntu26": "g++-15 (Ubuntu 15.2.0-16ubuntu1) 15.2.0"
+      },
+      "architectures": {
+        "clang-17-darwin": "arm64",
+        "gcc-13-linux-ubuntu24": "aarch64",
+        "gcc-15-linux-ubuntu26": "aarch64",
+        "gcc-15-github-linux-ubuntu26": "x86_64"
+      },
+      "hosted_confirmation": "The integrated Ubuntu 26.04 x86_64 GCC 15 profile was measured locally. Authoritative GitHub CI confirmation of the final merge head remains pending.",
+      "scope": "Integrated configuration, recovery and HTTP logic is measured from one frozen source snapshot on all four compiler profiles. All 18 incoming measurement records, all 416 enforced inventories, every historical ratio and the 95-percent line floor are retained.",
+      "sources": {
+        "main/logic/board_pins.hpp": "4c9311c33002eebff6b02e9ab77e509c9e0d6c0244fb54491a0292b8627d0e37",
+        "main/logic/boot_guard.hpp": "ed4e5e6e0ff2cd7000562d0b259ea00e303f7b959a3a479098a042c78a4574ba",
+        "main/logic/bootlog.hpp": "0077ef4a7cae82e5d813cd5dfe88c2ad1c08ba59d8910d246d172182d3d2d868",
+        "main/logic/button.hpp": "ac3272bfbb04931a7d6f6be05f5436961bbd0c5fb188670a86ea29c2c95c6771",
+        "main/logic/config_model.hpp": "5c62344ae93b15fe8d53756c7514141b9e1bb77ef5319f3deaee7e40c8995fa7",
+        "main/logic/config_store.hpp": "5d9fcad9221700b84fe894262072e0d07a112e6909cabfe4e5f0383cb3187bd5",
+        "main/logic/config_transaction.hpp": "7984c3f82bfd02d7de7c11549b620045daf0feef637fb2601eca256635bbef0c",
+        "main/logic/heap_watchdog.hpp": "f485f0f6bf27f1be0de93110fff374f70baf9f02892d93f59165f8c89cccf628",
+        "main/logic/heartbeat.hpp": "2570f02e1ec0d4227cd1f6a45fba2104df1baf24aa93ca36ede223b4c0c63193",
+        "main/logic/http_config_fields.hpp": "2445da5ca11302ff0c7d9d2a94fab3b64630aa45d68a90b0331c40636b0d449b",
+        "main/logic/http_ingress.hpp": "e9ab52818539cd5e9eda32d8d2416d72be1daa85aedd153f814945211a9f4e6f",
+        "main/logic/json.hpp": "b8a2e500ad59bb8ff30c19b2f07625f334258c72556344b382b7d5d8e0440e6f",
+        "main/logic/led_pattern.hpp": "6c16915d85292e1453e030843c5061e20912b29a96f08d3dcaf317f6f3364326",
+        "main/logic/mcp.hpp": "7607639a59457633ff8b0531aa0aa7ed5fca2a1118f7ee075fe98cd6103dda5c",
+        "main/logic/state_dwell.hpp": "e39dc2fab637d24b9e09b24214793d34700053c4851fbdb6c6f1665688fdc26d",
+        "main/logic/utf8.hpp": "39f339e2aa9c0b460edeb8ef3bbd37b9a0bc35b6e22b92ab99d6f3c2c18c831a",
+        "main/logic/values_identity.hpp": "4f6eb0edb39a5f7dd3acd580b18110ad289c84751102ad379da70f246144dfab"
+      },
+      "test_source_sha256": "aa3b96da83b0c4167dbd9ea8dea572d70d760dde44d1239bb017c0a314667106",
+      "compile_source_closure": {
+        "files": 161,
+        "sha256": "fd3225b870d4841f88578ed621017c6913b7c20bba430cb9d0d62d34bc9844b3",
+        "method": "Unchanged canonical runner in isolated public source snapshots; normalized non-system -MM dependencies and hashes are identical across all four profiles."
+      },
+      "local_executable_lines": {
+        "clang-17-darwin": [
+          9364,
+          9537
+        ],
+        "gcc-13-linux-ubuntu24": [
+          9107,
+          9391
+        ],
+        "gcc-15-linux-ubuntu26": [
+          9109,
+          9393
+        ],
+        "gcc-15-github-linux-ubuntu26": [
+          9107,
+          9393
+        ]
+      }
     }
   ],
   "method": "Exact taken/outcome inventories are measured by scripts/run-mock-tests.sh --coverage and bound to compiler family, major version and platform; hosted profiles additionally bind the runner image. The gate rejects inventory mismatches and any historical ratio decrease. Updated hosted inventories require authoritative CI confirmation. Historical measurement notes remain in Git; profiles contain the enforced counts. Measurements below identify changed sources and local compiler provenance without changing checker rules or the 95-percent executable-line floor.",
@@ -421,16 +495,16 @@
         "taken": 76
       },
       "main/logic/boot_guard.hpp": {
-        "outcomes": 8,
-        "taken": 8
+        "outcomes": 22,
+        "taken": 22
       },
       "main/logic/bootlog.hpp": {
-        "outcomes": 88,
-        "taken": 63
+        "outcomes": 98,
+        "taken": 72
       },
       "main/logic/button.hpp": {
-        "outcomes": 18,
-        "taken": 18
+        "outcomes": 26,
+        "taken": 26
       },
       "main/logic/captive.hpp": {
         "outcomes": 6,
@@ -453,16 +527,16 @@
         "taken": 53
       },
       "main/logic/config_model.hpp": {
-        "outcomes": 256,
-        "taken": 203
+        "outcomes": 312,
+        "taken": 257
       },
       "main/logic/config_store.hpp": {
-        "outcomes": 464,
-        "taken": 288
+        "outcomes": 486,
+        "taken": 313
       },
       "main/logic/config_transaction.hpp": {
-        "outcomes": 100,
-        "taken": 66
+        "outcomes": 114,
+        "taken": 78
       },
       "main/logic/conv_override.hpp": {
         "outcomes": 8,
@@ -533,8 +607,8 @@
         "taken": 18
       },
       "main/logic/heap_watchdog.hpp": {
-        "outcomes": 18,
-        "taken": 18
+        "outcomes": 22,
+        "taken": 22
       },
       "main/logic/heartbeat.hpp": {
         "outcomes": 330,
@@ -839,16 +913,16 @@
         "taken": 85
       },
       "main/logic/boot_guard.hpp": {
-        "outcomes": 8,
-        "taken": 8
+        "outcomes": 22,
+        "taken": 22
       },
       "main/logic/bootlog.hpp": {
-        "outcomes": 94,
-        "taken": 68
+        "outcomes": 106,
+        "taken": 79
       },
       "main/logic/button.hpp": {
-        "outcomes": 22,
-        "taken": 21
+        "outcomes": 30,
+        "taken": 30
       },
       "main/logic/captive.hpp": {
         "outcomes": 8,
@@ -871,16 +945,16 @@
         "taken": 53
       },
       "main/logic/config_model.hpp": {
-        "outcomes": 270,
-        "taken": 226
+        "outcomes": 334,
+        "taken": 290
       },
       "main/logic/config_store.hpp": {
-        "outcomes": 434,
-        "taken": 291
+        "outcomes": 460,
+        "taken": 320
       },
       "main/logic/config_transaction.hpp": {
-        "outcomes": 100,
-        "taken": 67
+        "outcomes": 110,
+        "taken": 77
       },
       "main/logic/conv_override.hpp": {
         "outcomes": 8,
@@ -1257,16 +1331,16 @@
         "taken": 85
       },
       "main/logic/boot_guard.hpp": {
-        "outcomes": 8,
-        "taken": 8
+        "outcomes": 22,
+        "taken": 22
       },
       "main/logic/bootlog.hpp": {
-        "outcomes": 94,
-        "taken": 68
+        "outcomes": 106,
+        "taken": 79
       },
       "main/logic/button.hpp": {
-        "outcomes": 22,
-        "taken": 21
+        "outcomes": 30,
+        "taken": 30
       },
       "main/logic/captive.hpp": {
         "outcomes": 8,
@@ -1289,16 +1363,16 @@
         "taken": 53
       },
       "main/logic/config_model.hpp": {
-        "outcomes": 270,
-        "taken": 226
+        "outcomes": 334,
+        "taken": 290
       },
       "main/logic/config_store.hpp": {
-        "outcomes": 434,
-        "taken": 291
+        "outcomes": 460,
+        "taken": 320
       },
       "main/logic/config_transaction.hpp": {
-        "outcomes": 100,
-        "taken": 67
+        "outcomes": 110,
+        "taken": 77
       },
       "main/logic/conv_override.hpp": {
         "outcomes": 8,
@@ -1675,16 +1749,16 @@
         "taken": 85
       },
       "main/logic/boot_guard.hpp": {
-        "outcomes": 8,
-        "taken": 8
+        "outcomes": 22,
+        "taken": 22
       },
       "main/logic/bootlog.hpp": {
-        "outcomes": 94,
-        "taken": 68
+        "outcomes": 106,
+        "taken": 79
       },
       "main/logic/button.hpp": {
-        "outcomes": 22,
-        "taken": 21
+        "outcomes": 30,
+        "taken": 30
       },
       "main/logic/captive.hpp": {
         "outcomes": 8,
@@ -1707,16 +1781,16 @@
         "taken": 53
       },
       "main/logic/config_model.hpp": {
-        "outcomes": 270,
-        "taken": 226
+        "outcomes": 334,
+        "taken": 290
       },
       "main/logic/config_store.hpp": {
-        "outcomes": 434,
-        "taken": 291
+        "outcomes": 460,
+        "taken": 320
       },
       "main/logic/config_transaction.hpp": {
-        "outcomes": 100,
-        "taken": 67
+        "outcomes": 110,
+        "taken": 77
       },
       "main/logic/conv_override.hpp": {
         "outcomes": 8,

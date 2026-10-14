@@ -122,6 +122,17 @@ inline ConfigBlob config_blob_from(const Config& c) {
     return b;
 }
 
+// The stored statement keeps each indicator/button pin this boot yielded to the X10A link (RAM
+// only, config_yield_local_pins_to_link) while that yield still stands (config_yield_standing). A
+// service save serializes the RAM view, and in the yield boot that includes the WiFi setup a
+// factory reset requires, the first HomeHub search and a WiFi rollback: without this the repair
+// would become the owner's lasting choice. Applied to the blob only, so RAM keeps the yield for
+// this boot.
+inline void config_blob_keep_yielded_pins(ConfigBlob& b, const LocalPinsRepair& yielded) {
+    if (yielded.led && b.led_gpio == -1) b.led_gpio = yielded.led_gpio;
+    if (yielded.btn && b.btn_gpio == -1) b.btn_gpio = yielded.btn_gpio;
+}
+
 // One whole-struct save: config_save (owns_link == false) and the X10A config_save_link (true).
 //
 // Every writer of `live` runs under the caller's config mutex, so the order below is the only
@@ -141,20 +152,26 @@ inline ConfigBlob config_blob_from(const Config& c) {
 //  * The only concurrent writer is auto-detection, so a snapshot older than a detection commit is
 //    decided by config_save_revision under the mutex: a service save carries the detected link and
 //    model forward, an X10A save (which derived its model fields from that snapshot) is refused as
-//    Stale before anything is copied, serialized or written.
+//    Stale before anything is copied, serialized or written. A service save is refused as Stale
+//    too, after the reconcile but still before anything is serialized or written, when the link it
+//    carried forward lands on an indicator, button or ENV III pin the request claims
+//    (config_reconcile_breaks_local_pins): the request was validated against its snapshot's link,
+//    and committing it would persist a collision the next boot must undo.
 //  * Everything that can throw is staged before the first durable write: the Config copy, the blobs
 //    and the RAM successor. After that boundary only checked writes and a nothrow move remain, so
 //    an allocation failure can never answer "failed" for a change that is already durable.
 //  * A service blob that this build could not decode again is refused, not written. The decoder
-//    rejects the WHOLE blob when any string exceeds CONFIG_BLOB_MAX_STR and the fallback is the
-//    legacy per-key layout a blob-era device never populated, so such a write would silently
-//    destroy the whole config at the next boot. This is the last point where every field is
-//    together.
+//    rejects the WHOLE blob when any string exceeds CONFIG_BLOB_MAX_STR, and the fallback is only
+//    the legacy per-key layout (stale per-key-era values on an upgraded device, nothing on any
+//    other) or the Kconfig defaults, so such a write would silently destroy the whole config at the
+//    next boot. This is the last point where every field is together.
 //
-// `live` changes (all of it, revision bumped) only on Saved.
+// `live` changes (all of it, revision bumped) only on Saved. `yielded` is the caller's record of
+// the load-time link yield (config_blob_keep_yielded_pins); the default records none.
 template <class Store>
 ConfigSaveOutcome config_save_transaction(Config& live, const Config& requested, bool owns_link,
-                                          Store& store) {
+                                          Store&                 store,
+                                          const LocalPinsRepair& yielded = LocalPinsRepair{}) {
     ConfigSaveOutcome        out;
     const ConfigSaveRevision revision =
         config_save_revision(owns_link, requested.runtime_revision, live.runtime_revision);
@@ -164,10 +181,17 @@ ConfigSaveOutcome config_save_transaction(Config& live, const Config& requested,
     }
     Config c = requested;
     if (revision == ConfigSaveRevision::ReconcileDetected) reconcile_detected_config(c, live);
+    // Only a reconcile can move the link away from what the request was validated against, so a
+    // current snapshot never trips this; nothing has been serialized or written yet.
+    if (config_reconcile_breaks_local_pins(requested, c)) {
+        out.result = ConfigSaveResult::Stale;
+        return out;
+    }
 
     std::vector<uint8_t> service;
     if (!owns_link) {
-        const ConfigBlob b = config_blob_from(c);
+        ConfigBlob b = config_blob_from(c);
+        config_blob_keep_yielded_pins(b, config_yield_standing(yielded, c));
         if (!config_blob_strings_fit(b)) {
             out.failed = ConfigSaveStep::FieldTooLong;
             return out;

@@ -53,6 +53,12 @@ inline unsigned    strip_creates = 0, strip_clears = 0, strip_pixels = 0, strip_
 inline unsigned    mqtt_reads = 0, hp_reads = 0, destructive_calls = 0, delays = 0;
 inline bool        fail_mqtt_snapshot = false, fail_hp_snapshot = false;
 inline bool                   fail_gpio_config = false, in_task = false;
+inline bool                   fail_task_create = false;
+inline unsigned               restarts         = 0;
+// Optional per-sample input script: the level returned by the Nth gpio_get_level() call (0-based),
+// so a scenario can drive a whole hold through the production button task.
+inline int (*level_for_read)(unsigned read_index) = nullptr;
+inline void (*on_restart)()                       = nullptr;
 inline uint32_t               current_stack_bytes = 2048;
 inline wifi_mode_t wifi_mode = WIFI_MODE_NULL;
 inline int      read_level = 1, read_gpio = -1, first_gpio = -1, first_level = -1, last_level = -1;
@@ -83,6 +89,7 @@ inline esp_err_t gpio_set_level(gpio_num_t pin, int level) {
     return ESP_OK;
 }
 inline int gpio_get_level(gpio_num_t pin) {
+    if (sdk::level_for_read) sdk::read_level = sdk::level_for_read(sdk::gpio_reads);
     ++sdk::gpio_reads;
     sdk::read_gpio = pin;
     return sdk::read_level;
@@ -119,6 +126,7 @@ inline esp_err_t led_strip_refresh(led_strip_handle_t) {
 }
 inline BaseType_t xTaskCreate(void (*fn)(void*), const char* name, uint32_t stack, void*,
                               UBaseType_t priority, TaskHandle_t*) {
+    if (sdk::fail_task_create) return 0; // pdFAIL: the allocation failed, nothing was registered
     ++sdk::task_creates;
     sdk::task_fn       = fn;
     sdk::task_stack    = stack;
@@ -140,4 +148,8 @@ inline void vTaskDelay(TickType_t ticks) {
     if (sdk::on_delay) sdk::on_delay(ticks);
 }
 inline int64_t esp_timer_get_time() { return sdk::now_us; }
-inline void    esp_restart() { ++sdk::destructive_calls; }
+inline void    esp_restart() {
+    ++sdk::destructive_calls;
+    ++sdk::restarts;
+    if (sdk::on_restart) sdk::on_restart();
+}

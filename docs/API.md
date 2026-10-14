@@ -68,7 +68,7 @@ physical measurement. `?redact=1` applies the [report redaction contract](SECURI
 |---|---|---|
 | Root | `version`, `platform`, `uptime_s`, `boot_id`, `app_elf_sha256`, `pins_avail` | Running build, uptime, 16-hex-digit random per-boot token and X10A-eligible GPIOs. The configured nine-character ELF hash prefix helps correlate symbols; it is not full artifact/flash verification. |
 | `board` | `led_gpio`, `led_type`, `led_inverted`, `btn_gpio`, `btn_active_low`, `user_set`, `preset_id`, `preset_name`, `vendor`, `pins_local`, `presets` | Persisted hardware identity and local-I/O candidates, excluding current X10A claims. A preset fills fields; submission saves them. |
-| `board.presets[]` | `id`, `name`, `vendor`, `led_gpio`, `led_type`, `led_inverted`, `btn_gpio`, `btn_active_low`, `i2c_pins` | Supported hardware presets. A selected identity remains listed even if its original factory pins are now unavailable. |
+| `board.presets[]` | `id`, `name`, `vendor`, `led_gpio`, `led_type`, `led_inverted`, `btn_gpio`, `btn_active_low`, `i2c_pins` | Supported hardware presets. A selected identity remains listed even if its original factory pins are now unavailable; other presets whose pins are claimed (including detected Ethernet) are withheld. |
 | `wifi` | `ssid`, `ip`, `rssi`, `connected`, `bssid`, `mac`, `std`, `rolled_back` | BSSID/PHY standard are null offline. `rolled_back` is sticky until the next WiFi save. |
 | `net` | `kind`, `ip`, `eth` | Active transport (`none`, `wifi`, `eth`) and its address, independent of X10A/HomeHub. |
 | `net.eth` | `supported`, `present`, `link`, `lease`, `ip`, `mac`, `speed_mbps`, `full_duplex`, `pins{ sclk,cs,miso,mosi }` | Build support, detected controller, cable and DHCP are distinct. Speed/duplex are null without link. |
@@ -337,8 +337,11 @@ measurement. `main/logic/hp_probe.hpp` owns bounds and statuses. No Modbus write
 ## Configuration and persistence
 
 All service settings are serialized into one CRC/length-checked atomic `cfg` NVS blob in namespace
-`daik_cfg`. Supported older versions migrate. An absent, malformed or unsupported blob is rejected;
-loading then falls back to legacy individual keys and, where absent, Kconfig defaults.
+`daik_cfg`. Supported older versions migrate. An absent, malformed, newer or unreadable blob falls
+back to legacy individual keys and, where absent, Kconfig defaults. Only an absent blob may be
+replaced automatically: an unusable one is kept, reported in `/diag` with size, version and reason,
+and replaced only by an explicit `/set_*` save. Until then the initial HomeHub search is skipped and
+WiFi rollback bookkeeping is not persisted; a pending rollback restore opens the setup portal.
 HTTP owns ordinary writes; initial HomeHub discovery may write before HTTP starts. The physical
 X10A link has its separate atomic `link` blob and revision-checked detection writer. A whole-struct
 detection write must not overwrite a concurrent service save. `config_save_link()` writes only
@@ -347,9 +350,9 @@ the link blob; it does not migrate or write the service blob.
 | NVS item | Purpose |
 |---|---|
 | `cfg` | Credentials and WiFi backup/rollback flags; MQTT/base, syslog, NTP, board identity, OTA channel, language, HomeHub/discovery latch, room/circulation mappings, weather, ENV III, diagnostics consent/generation |
-| `link` | Complete RX/TX/protocol/observation-identity cache; failed write preserves the previous complete entry |
-| Legacy per-key credentials/services, `rx_pin`, `tx_pin`, `proto`, `board_set` | Migration inputs, superseded by successful blob saves |
-| `boot_fails`, `heap_rst` | Crash-loop and bounded heap-restart breadcrumbs |
+| `link` | Complete RX/TX/protocol/observation-identity cache; failed write preserves the previous complete entry. A rejected entry is reported in `/diag`; only detection (cached pair, build default, their swaps) or `/set_hp` rewrites it |
+| Legacy per-key credentials/services, `rx_pin`, `tx_pin`, `proto`, `board_set` | Read-only fallback inputs on devices upgraded from the per-key era; never written, removed only by a factory reset |
+| `boot_fails`, `heap_rst` | Independent crash-loop and bounded heap-restart counters; which boot or uptime clears which is in [ARCHITECTURE.md](ARCHITECTURE.md#boot-loop-safe-mode-config-recovery) |
 
 The current service layout is v19. Retired v9 actuation and v14 controller-mode bytes keep their
 positions, are written zero and ignored. Pre-v18 HomeHub configurations migrate as already searched
@@ -360,8 +363,10 @@ byte/version layouts.
 A failed route-owned save returns `500 {ok:false,error:"config write failed"}` with no reboot/live
 apply. Unrelated link-cache maintenance failure is logged without rejecting an already committed
 service blob; an X10A save requires its atomic link write. Never move/resize `nvs@0x9000`.
-Recovery-button factory reset also clears driver credentials, RAM history/dwell, the flash journal
-and raw dump. Any erase failure reports an incomplete reset rather than pretending success.
+The [recovery-button factory reset](BOARDS.md#recovery-button) leaves only the stated board
+hardware, rewritten as a fresh `cfg` blob, best effort. Any erase failure reports an incomplete
+reset rather than pretending success; while the reset holds the NVS latch, saves fail and every
+other restart is refused.
 
 ### Network settings
 
@@ -402,14 +407,19 @@ commit; live socket ownership remains with its task. X10A remains independent.
 `POST /set_board` accepts `preset_id`, `led_gpio`, `led_type`, `led_inverted`, `btn_gpio`,
 `btn_active_low`, `env3_enabled`, `env3_sda`, `env3_scl`. A stable known preset id is required when
 provided; old clients can use exact-match migration. LED type is 0 (plain) or 1 (WS2812), -1 GPIO
-means absent. Pin claims must not collide with X10A, the other onboard part or ENV III.
-A board identity statement can save with no reboot; changing task-owned pins/accessory reboots.
+means absent; values below -1 are rejected, and a stored one loads as -1. In a boot whose X10A link
+took a part's stored pin, -1 for that part keeps the stored pin until a save in that boot states a
+real pin for the part or gives that pin to another board part ([Detection](ARCHITECTURE.md#detection)).
+Pin claims must not
+collide with X10A, the other onboard part or ENV III. A board identity statement can save with no reboot; changing task-owned pins/accessory reboots.
 Switching away from M5Stack retires ENV III in the same atomic save.
 
 `POST /set_env3` is the compatibility route (`enabled`, `sda`, `scl`, all optional). Both board routes
 share the same preflight: enabling new pins probes SHT30/QMP6988 (422 if absent, 503 if busy), enabling
 running pins needs fresh evidence (422 if unreachable), moving an active bus is 409 `env3_disable_first`.
 Disabling needs no hardware proof. Responses include machine codes; only successful real changes reboot.
+If detection commits an X10A link onto a claimed pin while either save is in flight, nothing is
+saved and the route answers 409 without a machine code.
 
 ### Plant diagnostics and sources
 
