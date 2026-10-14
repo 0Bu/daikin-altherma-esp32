@@ -538,14 +538,15 @@ inline bool config_local_pins_collide_with_link(const Config& c) {
     return c.env3_enabled && (link.claims(c.env3_sda) || link.claims(c.env3_scl));
 }
 
-// After config_load has replaced an unusable stored X10A pair with the build default, that default
-// can land on a pin the indicator or the button holds (a Custom LED on GPIO44 is legal while the
-// link sits on 1/2, and collides once a damaged link entry falls back to 44/43). The link is the
-// primary function and the indicator/button are optional, so they YIELD — disabled (-1), exactly as
-// an optional ENV III already yields to the same fallback — instead of leaving a snapshot that
-// fails board_hw_valid() and validate() and keeps detection from trying any candidate at all. RAM
-// only, like every other load-path repair: the stored pins stay for the owner, and the board
-// identity is kept because a disabled onboard part does not change which board this is.
+// The final X10A pair config_load settles on — the stored one, or the build default after an
+// unusable stored pair — can land on a pin the indicator or the button holds (a Custom LED on
+// GPIO44 is legal while the link sits on 1/2, and collides once a damaged link entry falls back to
+// 44/43). The link is the primary function and the indicator/button are optional, so they YIELD —
+// disabled (-1), exactly as an optional ENV III yields to the same pair — instead of leaving a
+// snapshot that fails board_hw_valid() and validate() and keeps detection from trying any
+// candidate at all. RAM only: saves and the factory seed keep the stored pins
+// (config_yield_standing), and the board identity is kept because a disabled onboard part does not
+// change which board this is.
 inline LocalPinsRepair config_yield_local_pins_to_link(Config& c) {
     const ReservedPins link = config_link_pins(c);
     LocalPinsRepair    r;

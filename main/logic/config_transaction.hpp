@@ -122,11 +122,12 @@ inline ConfigBlob config_blob_from(const Config& c) {
     return b;
 }
 
-// The stored statement keeps each indicator/button pin this boot's link fallback yielded (RAM only,
-// config_yield_local_pins_to_link) while the saved value is still the yielded -1. A service save
-// serializes the RAM view, and in the yield boot that includes the WiFi setup a factory reset
-// requires, the first HomeHub search and a WiFi rollback: without this the repair would become the
-// owner's lasting choice. Applied to the blob only, so RAM keeps the yield for this boot.
+// The stored statement keeps each indicator/button pin this boot yielded to the X10A link (RAM
+// only, config_yield_local_pins_to_link) while that yield still stands (config_yield_standing). A
+// service save serializes the RAM view, and in the yield boot that includes the WiFi setup a
+// factory reset requires, the first HomeHub search and a WiFi rollback: without this the repair
+// would become the owner's lasting choice. Applied to the blob only, so RAM keeps the yield for
+// this boot.
 inline void config_blob_keep_yielded_pins(ConfigBlob& b, const LocalPinsRepair& yielded) {
     if (yielded.led && b.led_gpio == -1) b.led_gpio = yielded.led_gpio;
     if (yielded.btn && b.btn_gpio == -1) b.btn_gpio = yielded.btn_gpio;

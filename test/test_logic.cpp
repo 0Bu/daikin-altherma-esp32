@@ -2238,6 +2238,11 @@ static void test_config_transaction() {
         moved.btn_gpio           = 44; // the button now takes the indicator's stored pin
         LocalPinsRepair standing = config_yield_standing(both, moved);
         CHECK(!standing.led && !standing.btn); // the button is re-stated with a real pin too
+        // The forget step after that save applies the same rule: a later save in this boot that
+        // moves the button away again must not bring the indicator's stored pin back.
+        LocalPinsRepair after = both;
+        config_yield_forget_restated(after, moved);
+        CHECK(!after.led && !after.btn);
         moved.btn_gpio = -1;
         moved.led_gpio = 43; // the indicator takes the button's stored pin
         standing       = config_yield_standing(both, moved);

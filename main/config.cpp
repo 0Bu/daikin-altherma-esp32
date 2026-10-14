@@ -29,7 +29,7 @@ static std::atomic<bool> s_cfg_blob_unreadable{false};
 // The indicator/button pins config_load yielded to the X10A link this boot (RAM only), so
 // every service save and the factory seed keep the stored statement (config_blob_keep_yielded_pins,
 // config_unyield_board_hardware). A part is forgotten, under g_mtx, once a landed save states a
-// real pin for it (config_yield_forget_restated).
+// real pin for it or gives its stored pin to another board part (config_yield_forget_restated).
 static LocalPinsRepair s_load_yield;
 
 // The board-local hardware as this BUILD was configured — the first-boot / recovery values for the
@@ -344,8 +344,8 @@ void config_load() {
     // there, and both of these pins are DRIVEN (an output, or an input with a pull). A bad one is
     // not cosmetic — pointing the indicator at a flash pad corrupts flash traffic, and pointing the
     // button at a floating pad factory-resets the device by itself. The link pins are excluded from
-    // this particular check (rx/tx are re-validated separately, just below, against the board pins
-    // that survive here) so the two checks can't deadlock each other into rejecting both.
+    // this particular check (rx/tx are re-validated separately, just below, by the chip rule; the
+    // board parts then yield to the final pair) so the two checks can't reject each other.
     {
         Config probe = c;
         probe.rx_pin = probe.tx_pin = -1;
