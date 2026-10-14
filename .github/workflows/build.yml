@@ -784,7 +784,10 @@ jobs:
         with:
           esp_idf_version: v6.1
           target: esp32s3
-          command: ./scripts/ci-build-all.sh --compile-only --source-sha "${{ github.event.pull_request.head.sha }}" "${{ steps.stamp.outputs.disp }}"
+          command: >-
+            apt-get update &&
+            apt-get install -y --no-install-recommends clang-18 libclang-rt-18-dev &&
+            ./scripts/ci-build-all.sh --compile-only --source-sha "${{ github.event.pull_request.head.sha }}" "${{ steps.stamp.outputs.disp }}"
 
       - name: Publish firmware size summary
         if: always() && needs.mechanical_gates.result == 'success' && needs.mechanical_gates.outputs.firmware == 'yes'
@@ -1042,7 +1045,10 @@ jobs:
           # bins don't embed makes every device download an "update" that changes nothing, forever.
           # ci-build-all.sh reads the version back out of the built image and fails if the two ever
           # drift apart again.
-          command: ./scripts/ci-build-all.sh --source-sha "${{ github.sha }}" --changelog-file ota-changelog.json "${{ steps.stamp.outputs.disp }}"
+          command: >-
+            apt-get update &&
+            apt-get install -y --no-install-recommends clang-18 libclang-rt-18-dev &&
+            ./scripts/ci-build-all.sh --source-sha "${{ github.sha }}" --changelog-file ota-changelog.json "${{ steps.stamp.outputs.disp }}"
 
       - name: Publish firmware size summary
         if: always()

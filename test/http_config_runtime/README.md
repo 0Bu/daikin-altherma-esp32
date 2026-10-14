@@ -7,6 +7,14 @@ compiles complete `main/http_config.cpp` and `main/http_ota.cpp` with the real c
 shared JSON ingress, pure validators and `config_save_transaction`. It invokes the actual setter
 handlers and `ota_do`, rather than extracting or rewriting their decisions.
 
+CI runs the complete matrix with its default GNU C/C++ pair and again with
+`CC=clang-18 CXX=clang++-18 python3 test/http_config_runtime/run.py --sanitizer undefined`.
+GCC 13's UBSan rejects the inline constexpr
+profile-table assertions because of [GCC PR71962](https://gcc.gnu.org/pipermail/gcc-patches/2025-July/688469.html).
+Clang keeps every assertion and the full UBSan instrumentation; no null-check override or sanitizer
+suppression is used. The sanitized runner also compiles a deliberate signed overflow into a copied
+setter and requires a nonzero exit with the matching UBSan diagnostic before that setter can pass.
+
 The fixture covers all 54 documented fields and all 13 setters. X10A and HomeHub use separate
 `/set_hp` rows because they own different durable entries. Every row exercises valid, invalid and
 missing inputs, route-owned write failures, response JSON, runtime changes and reboot behavior.
@@ -52,13 +60,16 @@ The immutable original HTTP source at `819a2c98ad7e331ce1527ca85f4acb7127e55734`
 setters and fail the two specific regressions: a present wrong type taking missing-field semantics,
 and a fractional integer being truncated. Additional compiling mutants independently remove type,
 missing-value, persistence, runtime ordering, probe, domain, query, ingress, post-delay reset and
-reconciliation defenses. The original thirteen groups retain all 5,233 assertions; two additional
-groups cover integration with detection and reset. Only the selected assertion counts as rejection;
+reconciliation defenses. Both compiler runs retain fifteen groups, 5,477 assertions and 22 compiling
+controls; the original thirteen groups retain all 5,233 assertions. The two additional groups cover
+integration with detection and reset. Only the selected assertion counts as rejection;
 compilation failures, crashes and timeouts never do.
 
 Unique temporary output directories retain `evidence.json`, `commands.txt`, binaries, mutation
 sources and `inputs.sha256`. The baseline manifest hashes every non-system compile input and rejects
-input changes during the run. Hardware network/sensor access is replaced by recording adapters.
+input changes during the run. Evidence records both compiler versions, command names and the
+sanitizer tripwire's commands, source hash and result. Hardware network/sensor access is replaced by
+recording adapters.
 
 Limits: no real NVS failure, power-loss durability, RTOS scheduling, live MQTT authentication, sensor
 measurement, physical source behavior, ESP32 heap/stack margin or rendered UI is proven. HTTP body,

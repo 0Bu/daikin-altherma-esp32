@@ -158,12 +158,14 @@ the actual `/hp/query` handler for strict numeric fields, defaults, status/frame
 bounded serialization, with named compiling mutations. HTTP transport and UART handoff are adapters;
 the shared HTTP exception trampoline and real devices remain outside its [scope](query_http_runtime/README.md).
 
-After dependency resolution, the target-build entry point also runs
-`python3 test/http_config_runtime/run.py --real-cjson managed_components/espressif__cjson/cJSON --sanitizer undefined`.
+After dependency resolution, the target-build entry point also runs the complete
+`python3 test/http_config_runtime/run.py` matrix with its default compiler and again with
+`CC=clang-18 CXX=clang++-18` and `--sanitizer undefined`, using the resolved cJSON source in both runs.
 This complete configuration/OTA HTTP fixture exercises every setter, exact field types, write
 failure replies, missing values and query flags with real cJSON and CFG-03's transaction. It also
 checks all request scratch limits, allocation-failure propagation and release on parse/read errors. SDK/NVS
-effects remain recording adapters; [the matrix](http_config_runtime/README.md) states the limits.
+effects remain recording adapters; [the matrix](http_config_runtime/README.md) explains the GCC
+constexpr workaround, preserved assertions, sanitizer tripwire and evidence limits.
 Locally, `node test/test_http_config_runtime.mjs` invokes the same runner after dependencies exist.
 
 The contract runner executes additional compiled production consumers:

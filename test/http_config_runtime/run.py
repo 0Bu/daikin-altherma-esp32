@@ -92,6 +92,7 @@ def rejected(binary, case, tag):
             'stdout': result.stdout, 'stderr': result.stderr}
 
 
+c_compiler = command([CC, '--version']).stdout.strip()
 compiler = command([CXX, '--version']).stdout.strip()
 command([CC, '-MMD', '-MF', OUT / 'cjson.d', '-c', CJSON / 'cJSON.c', '-I' + str(CJSON),
          *SAN, '-o', OUT / 'cjson.o'])
@@ -107,7 +108,35 @@ if 'PASS total=13 assertions=5233\n' not in legacy.stdout:
                        + legacy.stdout)
 print('PRESERVED ORIGINAL CASES ' + legacy.stdout.splitlines()[-1])
 baseline = command([binary])
+if 'PASS total=15 assertions=5477\n' not in baseline.stdout:
+    raise RuntimeError('the complete behavioral groups changed their assertion inventory\n'
+                       + baseline.stdout)
 print(baseline.stdout, end='')
+
+sanitizer_control = None
+if args.sanitizer == 'undefined':
+    # Compile the same complete HTTP fixture with one deliberate overflow in its actual setter.
+    # A successful compile or an ordinary assertion failure cannot certify UBSan instrumentation.
+    tripwire_text = replace_once(
+        source_text, 'static esp_err_t set_lang(httpd_req_t* req) {',
+        'static esp_err_t set_lang(httpd_req_t* req) {\n'
+        '    volatile int sanitizer_tripwire = std::numeric_limits<int>::max();\n'
+        '    sanitizer_tripwire = sanitizer_tripwire + 1;', 'signed-overflow-tripwire')
+    tripwire_source = OUT / 'signed-overflow-tripwire.cpp'
+    tripwire_source.write_text(tripwire_text)
+    tripwire_start = len(commands)
+    tripwire_binary = compile(tripwire_source, 'signed-overflow-tripwire')
+    tripwire = command([tripwire_binary, 'valid_setters'], False)
+    if tripwire.returncode == 0 or not re.search(
+            r'runtime error: signed integer overflow:', tripwire.stderr):
+        raise RuntimeError('UBSan must terminate the signed-overflow setter tripwire\n'
+                           + tripwire.stdout + tripwire.stderr)
+    sanitizer_control = {
+        'name': 'signed-overflow-tripwire', 'case': 'valid_setters',
+        'commands': commands[tripwire_start:], 'exit_code': tripwire.returncode,
+        'stdout': tripwire.stdout, 'stderr': tripwire.stderr,
+        'source_sha256': hashlib.sha256(tripwire_text.encode()).hexdigest()}
+    print('SANITIZER CONTROL signed overflow terminated the setter before its passing oracle')
 
 # The original production TU must pass real positive setters before failing the two named
 # regression oracles. Compiling failures, arbitrary signals and timeouts never count as controls.
@@ -232,7 +261,11 @@ for tag, target, old, new, case in mutations:
 after = inputs([OUT / 'production.d', OUT / 'cjson.d'])
 if after != before:
     raise RuntimeError('compile inputs changed during the run')
-record = {'compiler': compiler, 'sanitizer': args.sanitizer, 'commands': commands,
+if len(controls) != 22:
+    raise RuntimeError('the complete compiling negative-control inventory changed')
+record = {'compiler': compiler, 'c_compiler': c_compiler,
+          'compiler_commands': {'c': CC, 'cxx': CXX},
+          'sanitizer': args.sanitizer, 'sanitizer_control': sanitizer_control, 'commands': commands,
           'baseline_stdout': baseline.stdout, 'preserved_original_case_stdout': legacy.stdout,
           'original_commit': original_commit,
           'original_sha256': hashlib.sha256(original.encode()).hexdigest(),
