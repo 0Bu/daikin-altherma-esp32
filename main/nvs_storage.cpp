@@ -122,16 +122,39 @@ esp_err_t nvs_erase_all() {
     return e;
 }
 
-bool nvs_get_blob(const char* key, std::vector<uint8_t>& out) {
+bool nvs_factory_reset_latched() { return s_writes_disabled.load(std::memory_order_acquire); }
+
+esp_err_t nvs_set_blob_after_factory_reset(const char* key, const void* data, size_t len) {
+    Lock lk(s_write_mtx);
+    if (!lk.acquired() || !s_writes_disabled.load(std::memory_order_acquire))
+        return ESP_ERR_INVALID_STATE;
     nvs_handle_t h;
-    if (::nvs_open(NS, NVS_READONLY, &h) != ESP_OK) return false;
+    esp_err_t e = ::nvs_open(NS, NVS_READWRITE, &h);
+    if (e != ESP_OK) return e;
+    e = ::nvs_set_blob(h, key, data, len);
+    if (e == ESP_OK) e = ::nvs_commit(h);
+    ::nvs_close(h);
+    return e;
+}
+
+NvsBlobRead nvs_read_blob(const char* key, std::vector<uint8_t>& out) {
+    nvs_handle_t h;
+    // A read-only open of a namespace that was never written reports NOT_FOUND: a fresh device.
+    const esp_err_t open_err = ::nvs_open(NS, NVS_READONLY, &h);
+    if (open_err == ESP_ERR_NVS_NOT_FOUND) return NvsBlobRead::NotFound;
+    if (open_err != ESP_OK) return NvsBlobRead::Error;
     size_t len = 0;
     esp_err_t e = ::nvs_get_blob(h, key, nullptr, &len);   // query size first
-    if (e != ESP_OK || len == 0) { ::nvs_close(h); return false; }
+    if (e == ESP_ERR_NVS_NOT_FOUND) { ::nvs_close(h); return NvsBlobRead::NotFound; }
+    if (e != ESP_OK || len == 0) { ::nvs_close(h); return NvsBlobRead::Error; }
     out.resize(len);
     e = ::nvs_get_blob(h, key, out.data(), &len);
     ::nvs_close(h);
-    return e == ESP_OK;
+    return e == ESP_OK ? NvsBlobRead::Ok : NvsBlobRead::Error;
+}
+
+bool nvs_get_blob(const char* key, std::vector<uint8_t>& out) {
+    return nvs_read_blob(key, out) == NvsBlobRead::Ok;
 }
 
 } // namespace daik

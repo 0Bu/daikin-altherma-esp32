@@ -3,8 +3,10 @@
 // (namespace "daik_cfg"). Loaded once at boot; the web UI mutates it via the /set_* handlers.
 #include "logic/config_model.hpp"
 #include "logic/config_transaction.hpp" // ConfigSaveResult
+#include <cstdint>
 #include <type_traits>
 #include <utility>
+#include <vector>
 
 namespace daik {
 
@@ -56,6 +58,18 @@ template <typename F> auto with_config(F&& f) -> decltype(f(std::declval<const C
 
 // Load from NVS, seeding any missing key from its Kconfig default.
 void config_load();
+
+// True when this boot found a stored "cfg" blob it could not use (a newer layout after a downgrade
+// or rollback, damage, or a read error) rather than no blob at all. The running config is then the
+// fallback, and automatic writers (the one-shot HomeHub search, WiFi rollback bookkeeping) must not
+// replace the stored blob; an explicit owner save still may.
+bool config_stored_blob_unreadable();
+
+// The serialized "cfg" blob of a factory-fresh device that keeps this board's hardware statement
+// (preset, indicator and recovery button). The factory reset builds it BEFORE erasing NVS and
+// writes it after a complete erase, so the button and indicator still work on the next boot. False
+// when it could not be built (for example out of memory); the reset then proceeds without it.
+bool config_factory_seed_blob(std::vector<uint8_t>& out);
 
 // The four fallible writers below (config_save, config_save_link and the two detection commits) are
 // [[nodiscard]], for the reason nvs_storage.hpp's setters carry it one layer down: a dropped result
