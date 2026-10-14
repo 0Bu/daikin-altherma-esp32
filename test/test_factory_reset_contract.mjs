@@ -347,7 +347,7 @@ assert.match(code("main/logic/config_transaction.hpp"),
 // The seed carries the STORED board statement: the load path's link yield is RAM-only, so the pins
 // it disabled are restored into the seed until a service save rewrites the stored statement.
 assert.match(config, /s_load_yield\s*=\s*yielded;/,
-  "config_load must remember which indicator/button pins the link fallback yielded");
+  "config_load must remember which indicator/button pins it yielded to the X10A link");
 assert.match(config, /bool config_factory_seed_blob\([\s\S]*?Lock lk\(g_mtx\);\s*board = config_board_hardware\(g_cfg\);\s*config_unyield_board_hardware\(board, config_yield_standing\(s_load_yield, g_cfg\)\);/,
   "the factory seed must carry the stored pins, not this boot's RAM-only yield");
 // The stored link wins over the optional board parts at load; they yield to it afterwards.

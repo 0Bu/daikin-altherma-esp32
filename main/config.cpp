@@ -582,7 +582,7 @@ bool config_stored_blob_unreadable() {
 //     (seed_without_blob, the Config member defaults, HomeHub discovery pending), so a reset device
 //     is indistinguishable from a new one apart from the carried statement;
 //   * only the board hardware statement is carried (logic/config_model.hpp,
-//     config_carry_board_hardware), as stored rather than as this boot's link fallback yielded it
+//     config_carry_board_hardware), as stored rather than as this boot's link yield left it
 //     (config_unyield_board_hardware), copied out under the mutex as POD — nothing allocates while
 //     the config mutex is held;
 //   * the Config and its blob image live on the heap, not on the caller's stack: the caller is the

@@ -2163,7 +2163,7 @@ static void test_config_transaction() {
         CHECK(link.identity_fp == 0x11111111u);
     }
 
-    // A service save in a boot whose X10A fallback yielded the indicator (RAM -1): "cfg" keeps the
+    // A service save in a boot whose X10A link took the indicator's pin (RAM -1): "cfg" keeps the
     // stored pin while RAM keeps the yield — the WiFi setup a factory reset requires must not store
     // the repair as the owner's choice. A save that states a real pin replaces it, and only that
     // ends the yield for the part (tracker card CFG-08/a).

@@ -656,7 +656,7 @@ inline void config_carry_board_hardware(Config& fresh, const Config& current) {
     config_carry_board_hardware(fresh, config_board_hardware(current));
 }
 
-// A factory reset carries the board statement as STORED, not as this boot's link fallback repaired
+// A factory reset carries the board statement as STORED, not as this boot's yield to the link left
 // it. config_yield_local_pins_to_link is RAM-only and made for a link the reset erases; carrying
 // its -1 would turn that repair into the owner's lasting choice, and the indicator or button would
 // stay off after the link moves elsewhere (a fresh boot whose default link still collides simply

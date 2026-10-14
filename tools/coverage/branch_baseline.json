@@ -269,9 +269,9 @@
       },
       "hosted_confirmation": "gcc-15-github-linux-ubuntu26 repeats the local GCC 15 inventory; authoritative CI pending",
       "runner": "scripts/run-mock-tests.sh --coverage",
-      "scope": "The link yield records the stored indicator/button pins; every service save writes them into the cfg blob and the factory seed restores them while the yield stands, i.e. until a save states a real pin for the part or gives its stored pin to another board part. Against base, both changed headers raise their ratios; all other inventories and historical floors retained.",
+      "scope": "The link yield records the stored indicator/button pins; every service save writes them into the cfg blob and the factory seed restores them while the yield stands, i.e. until a save states a real pin for the part or gives its stored pin to another board part. This record names only config_model.hpp and config_transaction.hpp; both ratios rise against base.",
       "sources": {
-        "main/logic/config_model.hpp": "a4a5126a6300f69b6ac000d7de27a1919d6320bad78f01afaf08cff33d36f21b",
+        "main/logic/config_model.hpp": "5c62344ae93b15fe8d53756c7514141b9e1bb77ef5319f3deaee7e40c8995fa7",
         "main/logic/config_transaction.hpp": "7984c3f82bfd02d7de7c11549b620045daf0feef637fb2601eca256635bbef0c"
       }
     }

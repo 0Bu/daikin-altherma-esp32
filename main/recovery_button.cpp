@@ -47,7 +47,7 @@ void factory_reset() {
     // the next boot would come up with the build's default indicator and no button, and the
     // recovery path the user just used would be gone from the board until someone restates it
     // in the Board hardware dialog. It is built from the RAM config (with any pin this boot's X10A
-    // fallback disabled restored to its stored value) BEFORE anything is erased, so a failure
+    // link took restored to its stored value) BEFORE anything is erased, so a failure
     // here (out of memory) costs only the seed — the reset proceeds without it and says so — and
     // nothing after the first erase has to allocate for it.
     std::vector<uint8_t> seed;
