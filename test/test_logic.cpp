@@ -12730,9 +12730,13 @@ static void test_heating_curve_diagnosis() {
     Config no_weather          = dependencies;
     no_weather.weather_enabled = false;
     CHECK(heating_curve_diagnosis_armed(no_weather));
-    CHECK(diagnostics_next_generation(0) == 1);
-    CHECK(diagnostics_next_generation(41) == 42);
-    CHECK(diagnostics_next_generation(UINT32_MAX) == 1);
+    // DIAG-01/b: leaving the default (also a rejected config blob's fallback) takes the caller's
+    // entropy, never a fixed 1 that an older interval's surviving journal records already carry.
+    volatile uint32_t default_generation = 0, draw = 0x5eed1234u; // runtime values: real branches
+    CHECK(diagnostics_next_generation(default_generation, draw) == 0x5eed1234u);
+    CHECK(diagnostics_next_generation(0, 0) == 1); // a zero draw still leaves the default
+    CHECK(diagnostics_next_generation(41, draw) == 42);
+    CHECK(diagnostics_next_generation(UINT32_MAX, draw) == 1);
 
     // ── The snapshot the evaluator never touched ────────────────────────────────────────────────
     // The sampler lives on the MQTT publish task, which safe mode never creates (main.cpp skips
@@ -14848,6 +14852,14 @@ static void test_history() {
     }
 }
 
+// A DHW filter past its fresh-state hold (DIAG-02/a). The scenarios that start from this test the
+// filter's own rules; the hold has its own CHECKs in test_checkup().
+static logic::DhwLossState dhw_past_hold() {
+    logic::DhwLossState st;
+    st.hold_remaining_s = 0;
+    return st;
+}
+
 // ── The rolling X10A operating observation (logic/checkup.hpp, issue legacy-208)
 // ───────────────────── Three things are worth testing here and one of them is worth most of the
 // file:
@@ -15231,20 +15243,24 @@ static void test_checkup() {
         checkup_step(st, b, s, 1'000'000);
         s.outdoor = outdoor_x10a_evidence(true, true, true, -3.0);
         checkup_step(st, b, s, 2'000'000);
+        s.outdoor = outdoor_x10a_evidence(true, true, true, -1.0);
+        checkup_step(st, b, s, 3'000'000);
         s.rps_running = false;
         s.outdoor     = {};
-        checkup_step(st, b, s, 3'000'000);
+        checkup_step(st, b, s, 4'000'000);
+        // DIAG-03/e: page 0x20 precedes the 0x30 compressor row and holds the previous run's value
+        // while idle, so the start-edge sample (-5.0) is not this run's outdoor context.
         CHECK(b.space_runs == 1 && b.cycling_outdoor.samples == 2);
-        CHECK(b.cycling_outdoor.min_tenths == -50 &&
-              checkup_outdoor_mean_tenths(b.cycling_outdoor) == -40);
+        CHECK(b.cycling_outdoor.min_tenths == -30 &&
+              checkup_outdoor_mean_tenths(b.cycling_outdoor) == -20);
         CheckupRing ring;
         ring.pending = b;
         const CheckupReport weather_report =
             checkup_evaluate(checkup_aggregate(ring), CheckupCoverage{}, FaultClass::Unknown);
         CHECK(weather_report.cycling_outdoor.source == OutdoorSource::X10a);
         CHECK(weather_report.cycling_outdoor.samples == 2 &&
-              weather_report.cycling_outdoor.min_tenths == -50 &&
-              weather_report.cycling_outdoor.mean_tenths == -40);
+              weather_report.cycling_outdoor.min_tenths == -30 &&
+              weather_report.cycling_outdoor.mean_tenths == -20);
 
         // Defrost context follows its simultaneously-known compressor denominator, not a generic
         // page-0x20 sample. Unknown defrost evidence contributes nothing.
@@ -15517,6 +15533,70 @@ static void test_checkup() {
         t2 += 1'000'000;
         checkup_step(st2, b2, s2, t2);
         CHECK(b2.censored_runs == 1 && b2.space_runs == 0);
+    }
+    {
+        // DIAG-03/a: a sweep that read NO row at all (n == 0: the weather/OTA network quiesce, an
+        // OOM catch) is the firmware pausing, not a readable sweep that lost the compressor row.
+        // Up to CHECKUP_MAX_GAP_S of it inside a run keeps the class and books the elapsed time;
+        // longer, or a known OFF right after it, still censors (the lost-row case is above).
+        auto pause_run = [](int pause_s, bool stop_after) {
+            CheckupState  st;
+            CheckupBucket b;
+            CheckupSample s;
+            s.rps_known = s.valve_known = true;
+            s.operating_mode            = CheckupOperatingMode::Heating;
+            int64_t t                   = 0;
+            checkup_step(st, b, s, t += 1'000'000);
+            s.rps_running = true;
+            for (int i = 0; i < 300; i++) checkup_step(st, b, s, t += 1'000'000);
+            CheckupSample blind;
+            blind.x10a_blind = true;
+            for (int i = 0; i < pause_s; i++) checkup_step(st, b, blind, t += 1'000'000);
+            for (int i = 0; i < (stop_after ? 0 : 300); i++) checkup_step(st, b, s, t += 1'000'000);
+            s.rps_running = false;
+            checkup_step(st, b, s, t += 1'000'000);
+            return b;
+        };
+        const CheckupBucket paused = pause_run(4, false);
+        CHECK(paused.space_runs == 1 && paused.censored_runs == 0);
+        CHECK(paused.space_run_s == 299 + 4 + 300); // start sample to last running sample
+        const CheckupBucket at_bound = pause_run(static_cast<int>(CHECKUP_MAX_GAP_S), false);
+        CHECK(at_bound.space_runs == 1 && at_bound.censored_runs == 0);
+        const CheckupBucket too_long = pause_run(static_cast<int>(CHECKUP_MAX_GAP_S) + 1, false);
+        CHECK(too_long.space_runs == 0 && too_long.censored_runs == 1);
+        const CheckupBucket stopped = pause_run(4, true); // the stop hid inside the pause
+        CHECK(stopped.space_runs == 0 && stopped.censored_runs == 1);
+    }
+    {
+        // DIAG-03/b: known OFF, an unreadable sweep, known ON hides at least one start. It is
+        // counted, and its run opens censored because its beginning was not witnessed. A real gap
+        // still forgets the last known state, so no start is read across one.
+        CheckupState  st;
+        CheckupBucket b;
+        CheckupSample s;
+        s.rps_known = s.valve_known = true;
+        s.operating_mode            = CheckupOperatingMode::Heating;
+        CheckupSample lost          = s;
+        lost.rps_known              = false; // page 0x30 timed out this sweep
+        checkup_step(st, b, s, 1'000'000);
+        checkup_step(st, b, lost, 2'000'000);
+        s.rps_running = true;
+        for (int64_t sec = 3; sec <= 300; sec++) checkup_step(st, b, s, sec * 1'000'000);
+        CHECK(b.starts == 1 && st.run_open);
+        s.rps_running = false;
+        checkup_step(st, b, s, 301'000'000);
+        CHECK(b.censored_runs == 1 && b.space_runs == 0 && !st.run_open);
+
+        CheckupState  g;
+        CheckupBucket gb;
+        CheckupSample on = s;
+        on.rps_running   = true;
+        checkup_step(g, gb, s, 1'000'000); // known OFF
+        const int64_t after_gap = (2 + static_cast<int64_t>(CHECKUP_MAX_GAP_S)) * 1'000'000;
+        checkup_step(g, gb, lost, after_gap);
+        checkup_step(g, gb, on, after_gap + 1'000'000);
+        checkup_step(g, gb, on, after_gap + 2'000'000);
+        CHECK(gb.starts == 0 && !g.run_open);
     }
     {
         // The compressor page can disappear while the stop occurs and return already OFF. The old
@@ -16181,7 +16261,7 @@ static void test_checkup() {
         // power known OFF continuously, a 1.0 K/h decline becomes attributable only after the
         // independent two-hour off-settling guard; the first hour is still a real high-loss
         // finding, just not yet an off-pump one.
-        DhwLossState  st;
+        DhwLossState  st = dhw_past_hold();
         DhwLossBucket b;
         CheckupSample s;
         s.valve_known = s.pump_known = s.bsh_known = true;
@@ -16199,7 +16279,7 @@ static void test_checkup() {
 
         // The same measured loss with ~5.7 W continuously present is correlated with pump
         // operation.
-        DhwLossState  on_st;
+        DhwLossState  on_st = dhw_past_hold();
         DhwLossBucket on_b;
         s.circulation_on = true;
         for (int sec = 0; sec <= 3610; sec += 10) {
@@ -16210,7 +16290,7 @@ static void test_checkup() {
 
         // A 0.4 K step inside ten minutes is draw-like contamination. It resets the candidate
         // rather than becoming a spectacular heat-loss rate in the diagnosis.
-        DhwLossState  draw_st;
+        DhwLossState  draw_st = dhw_past_hold();
         DhwLossBucket draw_b;
         s.circulation_on = false;
         for (int sec = 0; sec <= 3600; sec += 10) {
@@ -16226,7 +16306,7 @@ static void test_checkup() {
         // diverter is by definition worse than the 1.2 K/h healthy-with-circulation reference
         // figure). The constant carries the measurement and why raising it is a domain decision.
         auto windows_at = [](int tenths_per_h) {
-            DhwLossState  rs;
+            DhwLossState  rs = dhw_past_hold();
             DhwLossBucket rb;
             CheckupSample r;
             r.valve_known = r.pump_known = r.bsh_known = true;
@@ -16249,7 +16329,7 @@ static void test_checkup() {
         // A positive tank-charge witness starts the 45-minute settling guard even when a different
         // state row timed out in the same sweep. Recovering that row must not admit the charge
         // tail.
-        DhwLossState  settle_st;
+        DhwLossState  settle_st = dhw_past_hold();
         DhwLossBucket settle_b;
         s.valve_known = true;
         s.valve_dhw   = true;
@@ -16268,7 +16348,7 @@ static void test_checkup() {
         // An intentional reboot checkpoints relative ages, not the old boot's esp_timer values.
         // The candidate keeps every OBSERVED second, while the fixed reboot seam is booked as blind
         // and therefore cannot buy evidence.  Another clean half-hour completes the original hour.
-        DhwLossState  ota_st;
+        DhwLossState  ota_st = dhw_past_hold();
         DhwLossBucket ota_b;
         s.valve_known = s.pump_known = s.bsh_known = true;
         s.valve_dhw = s.pump_on = s.bsh_on = false;
@@ -16295,7 +16375,7 @@ static void test_checkup() {
         // Repeated dev-channel OTAs shorter than one hour used to make this check collect forever.
         // Four 15-minute boots now finish one clean hour; each handoff preserves the pending bucket
         // just as checkup.cpp's shutdown payload does.
-        DhwLossState  short_boot;
+        DhwLossState  short_boot = dhw_past_hold();
         DhwLossBucket short_pending;
         unsigned      observed_total = 0;
         for (int boot = 0; boot < 4; boot++) {
@@ -16465,7 +16545,7 @@ static void test_checkup() {
         };
 
         // Continuous samples, so the "unmeasured gap counts as proven" branch is not what arms it.
-        DhwLossState  st;
+        DhwLossState  st = dhw_past_hold();
         DhwLossBucket b;
         int64_t       us = 0;
         // Two quiet samples: the first only establishes continuity, the second opens the candidate.
@@ -16503,7 +16583,7 @@ static void test_checkup() {
         // Clearing the run there would mean a charge ending soon after a timeout armed NO settle
         // and its own tail was measured as standing tank loss — a leak reported where there is
         // none, which is the one direction this check must never fail in.
-        DhwLossState  blind_st;
+        DhwLossState  blind_st = dhw_past_hold();
         DhwLossBucket blind_b;
         for (int sec = 0; sec <= 10; sec++)
             dhw_loss_step(blind_st, blind_b, quiet(500), static_cast<int64_t>(sec) * 1000000);
@@ -16530,7 +16610,7 @@ static void test_checkup() {
         CHECK(blind_st.charge_run_s == 0);
 
         // BSH is the second witness and is bounded identically.
-        DhwLossState  bsh_st;
+        DhwLossState  bsh_st = dhw_past_hold();
         DhwLossBucket bsh_b;
         for (int sec = 0; sec <= 10; sec++)
             dhw_loss_step(bsh_st, bsh_b, quiet(500), static_cast<int64_t>(sec) * 1000000);
@@ -16594,6 +16674,101 @@ static void test_checkup() {
     }
 
     {
+        // DIAG-02/a: A CHARGE THE SWEEP SAW ONLY PART OF IS STILL A CHARGE, AND ITS SETTLE IS NOT
+        // SPENT BLIND. Page 0x60 carries both witnesses while R5T (0x61) can keep answering.
+        auto read = [](bool rows, bool charging) {
+            CheckupSample s;
+            s.valve_known = s.pump_known = s.bsh_known = rows;
+            s.valve_dhw                                = rows && charging;
+            s.r5t_ok                                   = true;
+            s.r5t_tenths                               = 500;
+            return s;
+        };
+        auto run = [&read](DhwLossState& st, DhwLossBucket& b, int64_t& t, int secs, bool rows,
+                           bool charging) {
+            for (int i = 0; i < secs; i++)
+                dhw_loss_step(st, b, read(rows, charging), t += 1'000'000);
+        };
+        {
+            // The charge end hid in an unread stretch: the settle waits for the witnesses.
+            DhwLossState  st = dhw_past_hold();
+            DhwLossBucket b;
+            int64_t       t = 0;
+            run(st, b, t, 10, true, false);
+            run(st, b, t, 180, true, true);
+            CHECK(st.settle_remaining_s == DHW_LOSS_SETTLE_S);
+            run(st, b, t, static_cast<int>(DHW_LOSS_SETTLE_S), false, false);
+            CHECK(st.settle_remaining_s == DHW_LOSS_SETTLE_S);
+            CheckupSample half = read(true, false);
+            half.bsh_known     = false; // one witness read is not both
+            dhw_loss_step(st, b, half, t += 1'000'000);
+            CHECK(st.settle_remaining_s == DHW_LOSS_SETTLE_S);
+            run(st, b, t, 1, true, false);
+            CHECK(st.settle_remaining_s == DHW_LOSS_SETTLE_S - 1);
+        }
+        {
+            // The charge START hid: only its last minute was seen, after ten unread minutes.
+            DhwLossState  st = dhw_past_hold();
+            DhwLossBucket b;
+            int64_t       t = 0;
+            run(st, b, t, 10, true, false);
+            run(st, b, t, 600, false, false);
+            run(st, b, t, 60, true, true);
+            CHECK(st.settle_remaining_s == DHW_LOSS_SETTLE_S);
+        }
+        {
+            // A short seen witness whose tail went unread may have run on: seen + tail past the
+            // bound arms the settle at the first sample that reads both witnesses again.
+            DhwLossState  st = dhw_past_hold();
+            DhwLossBucket b;
+            int64_t       t = 0;
+            run(st, b, t, 10, true, false);
+            run(st, b, t, 60, true, true);
+            run(st, b, t, 90, false, false);
+            CHECK(st.settle_remaining_s == 0);
+            run(st, b, t, 1, true, false);
+            CHECK(st.settle_remaining_s == DHW_LOSS_SETTLE_S - 1);
+        }
+        {
+            // A FRESH filter (boot without handoff, consent change, DHW reset) cannot see a charge
+            // that ended just before its first sample, so it holds one settle first. The hold is no
+            // charge settle in progress, books no abort, is not spent blind, and an adopted
+            // handoff, which carries the real settle, has none.
+            DhwLossState  st;
+            DhwLossBucket b;
+            int64_t       t = 0;
+            CHECK(st.hold_remaining_s == DHW_LOSS_SETTLE_S);
+            run(st, b, t, static_cast<int>(DHW_LOSS_SETTLE_S), true, false);
+            CHECK(st.hold_remaining_s == 1 && st.segment_start_us < 0);
+            CHECK(dhw_loss_progress(st, t).settle_remaining_s == 0);
+            CHECK(dhw_loss_progress(st, t).candidate_observed_s == 0);
+            run(st, b, t, 600, false, false);
+            CHECK(st.hold_remaining_s == 1);
+            run(st, b, t, 2, true, false);
+            CHECK(st.hold_remaining_s == 0 && st.segment_start_us >= 0);
+            CHECK(b.aborts == 0 && b.windows == 0);
+            DhwLossState adopted;
+            dhw_loss_adopt(adopted, DhwLossCarry{}, 0);
+            CHECK(adopted.hold_remaining_s == 0);
+
+            // End to end: a fresh filter 100 s after a charge, its settling tail falling 1.5 K/h
+            // for the rest of the 45 minutes, then 0.3 K/h standing loss. No hour may measure the
+            // tail.
+            DhwLossState  fresh;
+            DhwLossBucket fb;
+            for (int sec = 0; sec <= 3 * 3600; sec++) {
+                const int     since_end = 100 + sec;
+                const int     drop_mk   = since_end < 2700 ? 1500 * since_end / 3600
+                                                           : 1125 + 300 * (since_end - 2700) / 3600;
+                CheckupSample s         = read(true, false);
+                s.r5t_tenths            = (55000 - drop_mk) / 100;
+                dhw_loss_step(fresh, fb, s, static_cast<int64_t>(sec) * 1000000);
+            }
+            CHECK(fb.windows >= 1 && fb.high_windows == 0);
+        }
+    }
+
+    {
         // WHAT THE WINDOW DISCARDED, and the verdict that follows from it. Each disqualifier books
         // its own reason so the card can name where to look; the settle's per-cycle reset does not,
         // because the charge that armed it already booked one and there is no candidate left.
@@ -16605,7 +16780,7 @@ static void test_checkup() {
             return s;
         };
         auto aborted_by = [&standing](void (*disturb)(CheckupSample&)) {
-            DhwLossState  st;
+            DhwLossState  st = dhw_past_hold();
             DhwLossBucket b;
             for (int sec = 0; sec <= 600; sec++) // 10 min of clean candidate
                 dhw_loss_step(st, b, standing(), static_cast<int64_t>(sec) * 1000000);
@@ -16626,7 +16801,7 @@ static void test_checkup() {
         CHECK(by_blind.aborts == 0); // one unread sweep is inside the blind budget
         {
             // …but exhausting that budget is an abort, and it says so.
-            DhwLossState  st;
+            DhwLossState  st = dhw_past_hold();
             DhwLossBucket b;
             for (int sec = 0; sec <= 600; sec++)
                 dhw_loss_step(st, b, standing(), static_cast<int64_t>(sec) * 1000000);
@@ -16640,7 +16815,7 @@ static void test_checkup() {
         }
         {
             // The settle's own resets are not aborts: one charge, one discarded candidate.
-            DhwLossState  st;
+            DhwLossState  st = dhw_past_hold();
             DhwLossBucket b;
             for (int sec = 0; sec <= 600; sec++)
                 dhw_loss_step(st, b, standing(), static_cast<int64_t>(sec) * 1000000);
@@ -16666,6 +16841,7 @@ static void test_checkup() {
         dhw.aborts         = DHW_LOSS_BLOCKED_MIN_ABORTS;
         dhw.abort_reasons  = DHW_ABORT_CHARGE | DHW_ABORT_PUMP;
         dhw.best_aborted_s = 2400;
+        dhw.full_span      = true;
         {
             const CheckupReport r = checkup_evaluate(w, cov, FaultClass::Normal, dhw);
             CHECK(r[CheckupCheck::DhwLoss].verdict == CheckupVerdict::Collecting);
@@ -16678,6 +16854,24 @@ static void test_checkup() {
             // and must not drag the card's overall verdict.
             CHECK(r.overall != CheckupVerdict::Collecting);
         }
+        // DIAG-02/b: the X10A lifecycle alone does not license it. A DHW-only reset (a circulation
+        // remap) or a restore that dropped DHW hours restarts the DHW scope and not that lifecycle,
+        // so six aborts after a reset at 6 h of a full day are "not yet", never "not in 24 h".
+        {
+            DhwLossWindow restarted = dhw;
+            restarted.full_span =
+                dhw_loss_scope_full(w.full_span, 6 * 3600 * 1000000LL, CHECKUP_WINDOW_US);
+            CHECK(!restarted.full_span);
+            CHECK(!checkup_evaluate(w, cov, FaultClass::Normal, restarted).dhw_blocked);
+        }
+        volatile bool    lifecycle = true; // runtime values: each operand is a real branch
+        volatile int64_t never = -1, scope = 0;
+        CHECK(dhw_loss_scope_full(lifecycle, never, 0)); // no DHW-only restart: lifecycle decides
+        CHECK(!dhw_loss_scope_full(lifecycle, scope, CHECKUP_WINDOW_US - 1));
+        CHECK(dhw_loss_scope_full(lifecycle, scope, CHECKUP_WINDOW_US));
+        lifecycle = false;
+        CHECK(!dhw_loss_scope_full(lifecycle, never, CHECKUP_WINDOW_US));
+        CHECK(!dhw_loss_scope_full(lifecycle, scope, CHECKUP_WINDOW_US)); // never without it
         // One abort short of the bar is still "not yet".
         dhw.aborts = DHW_LOSS_BLOCKED_MIN_ABORTS - 1;
         {
@@ -16747,7 +16941,7 @@ static void test_checkup() {
         // observed, because the second half is what keeps the first honest.
         auto blind_at = [](int blind_from_s, int blind_len_s, bool drop_page_60,
                            int* observed_out) {
-            DhwLossState  st;
+            DhwLossState  st = dhw_past_hold();
             DhwLossBucket b;
             CheckupSample s;
             s.valve_dhw = s.pump_on = s.bsh_on = false;
@@ -16777,7 +16971,7 @@ static void test_checkup() {
         CHECK(blind_at(1800, DHW_LOSS_BLIND_RUN_MAX_S + 1, true, nullptr) == 0);
         int spread = 0;
         {
-            DhwLossState  st;
+            DhwLossState  st = dhw_past_hold();
             DhwLossBucket b;
             CheckupSample s;
             s.valve_dhw = s.pump_on = s.bsh_on = false;
@@ -16796,7 +16990,7 @@ static void test_checkup() {
         // A DRAW hidden inside a blind run is still caught: the anchor standing when vision was
         // lost is what the first sighted sample is judged against, before it is re-armed.
         {
-            DhwLossState  st;
+            DhwLossState  st = dhw_past_hold();
             DhwLossBucket b;
             CheckupSample s;
             s.valve_dhw = s.pump_on = s.bsh_on = false;
@@ -16814,7 +17008,7 @@ static void test_checkup() {
         // And a state the sweep CAN see stays disqualifying. The fix separates "unknown" from
         // "known and busy"; it must not make the second permissive.
         {
-            DhwLossState  st;
+            DhwLossState  st = dhw_past_hold();
             DhwLossBucket b;
             CheckupSample s;
             s.valve_known = s.pump_known = s.bsh_known = true;
@@ -16978,6 +17172,19 @@ static void test_checkup() {
         w.censored_runs = 1; // 12/13 >=90%
         CHECK(checkup_evaluate(w, split, FaultClass::Normal)[CheckupCheck::Cycling].verdict ==
               CheckupVerdict::Info);
+        // DIAG-03/c: witnessed starts beyond one still-open run are unclassified runs too. A window
+        // restored from the journal keeps every start while the completions of hour-crossing runs
+        // never reached it; judging only the runs that fit inside one hour is a false NOTE.
+        w.censored_runs = 0;
+        w.starts        = 14; // 12 complete, one may still be open, one completion missing: 12/13
+        CHECK(checkup_evaluate(w, split, FaultClass::Normal)[CheckupCheck::Cycling].verdict ==
+              CheckupVerdict::Info);
+        w.starts = 15; // 12/14 <90%
+        r        = checkup_evaluate(w, split, FaultClass::Normal);
+        CHECK(r[CheckupCheck::Cycling].observation_only);
+        CHECK(r[CheckupCheck::Cycling].reason == CheckupReason::ClassPopulationIncomplete);
+        w.starts           = 0;
+        w.censored_runs    = 1;
         w.class_observed_s = 0;
         r                  = checkup_evaluate(w, split, FaultClass::Normal);
         CHECK(r[CheckupCheck::Cycling].reason == CheckupReason::ClassCoverage);
@@ -21120,13 +21327,14 @@ static void test_history_identity() {
         // ... including the consent interval: a re-enable is a new generation, so what an earlier
         // interval recorded can never be restored into it even under an identical mapping.
         CHECK(moves([](Config& c) {
-            c.diagnostics_generation = diagnostics_next_generation(c.diagnostics_generation);
+            c.diagnostics_generation = diagnostics_next_generation(c.diagnostics_generation, 7u);
         }));
         // (The generation never wraps back to the default-off value, so a consent interval is never
         // confused with the pre-opt-in one.)
         volatile uint32_t last_generation = UINT32_MAX; // runtime values: the wrap is a real branch
-        CHECK(diagnostics_next_generation(last_generation) == 1u);
-        CHECK(diagnostics_next_generation(0) == 1u);
+        volatile uint32_t no_entropy      = 0;
+        CHECK(diagnostics_next_generation(last_generation, 7u) == 1u);
+        CHECK(diagnostics_next_generation(0, no_entropy) != 0u);
         // Field boundaries are real: moving a character between the topic and the path differs.
         CHECK(moves([](Config& c) {
             c.circulation_topic      = "example/circulation/statusa";
@@ -25123,9 +25331,11 @@ static void test_history_adoption_booking() {
         const CheckupRestore refusal   = CheckupRestore::NotCommitted;
         const int64_t        old_start = first_candidate_s(rt(refusal) == CheckupRestore::Accept);
         const int64_t new_start = first_candidate_s(checkup_restore_keeps_dhw_handoff(rt(refusal)));
-        // OLD: a candidate hour starts within seconds, inside the 45 minutes the charge is owed.
-        CHECK(old_start >= 0 && old_start < static_cast<int64_t>(DHW_LOSS_SETTLE_S));
-        CHECK(old_start < static_cast<int64_t>(carry.settle_remaining_s));
+        // OLD (the handoff discarded, a fresh filter): a candidate hour used to start within
+        // seconds, inside the 45 minutes the charge is owed. The fresh-state hold (DIAG-02/a) now
+        // waits one full settle first, because a fresh filter cannot see a charge that ended just
+        // before it.
+        CHECK(old_start >= static_cast<int64_t>(DHW_LOSS_SETTLE_S));
         // NEW: nothing starts before the carried settle is spent.
         CHECK(new_start >= static_cast<int64_t>(carry.settle_remaining_s));
         // A refusal that says the record cannot be believed keeps the old (discarding) behaviour.

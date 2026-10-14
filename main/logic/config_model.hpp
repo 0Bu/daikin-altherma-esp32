@@ -260,8 +260,11 @@ inline bool heating_curve_diagnosis_armed(const Config& c) {
 
 // Zero is the migration/default-off generation. Once the owner makes an explicit choice, use a
 // non-zero value and never wrap back to zero; this keeps old anonymous diagnostic journal entries
-// outside every future consent interval.
-inline constexpr uint32_t diagnostics_next_generation(uint32_t current) {
+// outside every future consent interval. Zero is also where a rejected or unreadable config blob
+// falls back while the diagnostic journal survives, so leaving it takes the caller's random
+// `entropy` instead of 1: a counter restarted at 1 could re-admit an older interval's records.
+inline constexpr uint32_t diagnostics_next_generation(uint32_t current, uint32_t entropy) {
+    if (!current) return entropy ? entropy : 1u;
     return current == UINT32_MAX ? 1u : current + 1u;
 }
 
