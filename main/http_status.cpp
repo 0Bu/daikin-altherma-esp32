@@ -1586,12 +1586,13 @@ static void append_status_json(JsonOut& j, bool redact) {
     // reset_reason reuses the boot-time cached reason (diag_crash.cpp) mapped via
     // logic/reset_reason.hpp; safe_mode is the latched boot-loop recovery flag (safe_mode.cpp —
     // true once too many crash boots accumulated, so poll + MQTT were skipped). heap_restarts is
-    // how many CONSECUTIVE heap-watchdog restarts preceded this boot (heap_guard.cpp): that restart
+    // how many heap-watchdog restarts this boot inherited (heap_guard.cpp): that restart
     // is an esp_restart(), so reset_reason reads "sw" — the same value a config save produces — and
     // without this field a board restarting itself every five minutes would be indistinguishable
     // from one somebody kept saving settings on, which is exactly the unattributable reboot this
-    // block exists to prevent. 0 on any ordinary boot. Small numbers + a short slug appended to the
-    // existing builder — no large contiguous allocation, and nothing here is a `+` chain.
+    // block exists to prevent. 0 after a clean boot; a crash boot carries it. Small numbers + a
+    // short slug appended to the existing builder — no large contiguous allocation, and nothing
+    // here is a `+` chain.
     //
     // Beside them, what that headroom already COST while the board DID survive (legacy-380): cycles
     // the two 1 s task loops produced nothing on. mqtt_skipped/poll_skipped are OOM-guard catches —

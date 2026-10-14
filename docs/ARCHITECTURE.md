@@ -76,7 +76,9 @@ missing, sentinel and boundary inputs.
 
 Every boot starts with model `auto`; model identity is RAM-only. The physical link is a persisted,
 CRC-protected atomic `link` blob (RX, TX, protocol and observation identity). Its loaded pins are
-validated against chip reservations and current board claims. Detection uses narrow,
+validated against chip reservations and current board claims; an unusable pair falls back to the
+build default, and an indicator, button or ENV III mapping on that final pair is disabled for the
+boot (RAM only). Detection uses narrow,
 revision-checked setters, never a whole configuration snapshot that could revert a concurrent save.
 
 The poll task performs detection while the profile is `auto`:
@@ -308,8 +310,11 @@ silence from a blind probe: two silent periods or ten blind periods cause re-ass
 
 SNTP starts after configuration load and provides wall time asynchronously. The configured server
 string stays stable for lwIP's retained pointer; changing it reboots. Syslog is optional cleartext
-UDP, with boot/crash replay and bounded diagnostic lines. `queue_dropped` counts queue refusal,
-not confirmed collector loss; internal syslog diagnostics are filtered and delivery is best effort.
+UDP, with boot/crash replay and bounded diagnostic lines. Recovery decisions precede syslog
+startup, so the boot record appends `cause`, `crash_boots`, `heap_restarts` and `nvs` to version,
+ELF, reset reason and `safe_mode`; fields are only ever appended. `queue_dropped` counts queue
+refusal, not confirmed collector loss; internal syslog diagnostics are filtered and delivery is
+best effort.
 Neither uptime nor the RAM log proves
 that earlier boots did not occur.
 
@@ -364,14 +369,20 @@ before marking it dismissed; a failed erase cannot falsely report success. The d
 routes are `POST /diag/clear`, `POST /coredump/clear` and `POST /crash/dismiss`.
 
 The boot guard runs after NVS initialization and its static lock, before config, network and OTA
-startup. Repeated fault boots latch crash-loop safe mode: retain network/HTTP recovery if mandatory
-startup succeeds and skip optional plant workers. The 30-second healthy timer never clears a
-latched safe mode merely because those workers are suppressed. NVS init errors never trigger an
-automatic partition erase; failed initialization disables WiFi-driver NVS before driver startup.
-Heap recovery watches the largest internal block with separate arming/recovery thresholds and a
-continuous hold before restart. NVS breadcrumbs bound repeated heap restarts and eventually latch
-heap safe mode. OTA clears an armed heap-restart run. Safe mode is best-effort recovery, not proof
-that a leak elsewhere is resolved; `safe_mode_cause` distinguishes heap from crash loop.
+startup. It classifies each boot once: a crash, a heap-watchdog restart (a software reset the
+watchdog marked in `.noinit` RAM just before restarting) or a clean boot. A crash counts toward
+crash-loop safe mode and carries the heap-restart count; a watchdog restart carries the crash
+count; only a clean boot (power cycle, rebooting save, OTA install, factory reset) clears both.
+Four crash boots latch crash-loop safe mode: retain network/HTTP recovery if mandatory startup
+succeeds and skip optional plant workers. Ten minutes of uptime clear the crash count; that timer
+is never armed while safe mode is latched, because suppressed workers prove nothing. NVS init
+errors never trigger an automatic partition erase; failed initialization disables WiFi-driver NVS
+before driver startup. Heap recovery watches the largest internal block with separate
+arming/recovery thresholds and a continuous hold before restart; one sample at or above the
+recovery threshold ends the hold. NVS breadcrumbs bound repeated heap restarts and eventually latch
+heap safe mode until the next clean boot; the watchdog holds its restart while a factory reset
+erases. Safe mode is best-effort recovery, not proof that a leak elsewhere is resolved;
+`safe_mode_cause` distinguishes heap from crash loop.
 
 Heap statistics, source liveness and task stack minima are visible without a broker through
 `/status`. Unstarted tasks report a null stack sample. Board memory trends run independently of a
@@ -387,6 +398,9 @@ Configuration is staged, validated and durably committed before live apply or re
 route-owned persistence failure, retain the previous valid state and return an explicit error.
 X10A and HomeHub are separate durability domains: update X10A and HomeHub in separate requests.
 No allocating live handoff may begin after durable commit unless it was staged beforehand.
+A stored service blob this build cannot use (newer layout, damage, read error) is kept: automatic
+writers skip their write and only an explicit save replaces it. A service save whose reconciled
+detected link collides with its requested local pins is refused as stale before any write.
 
 NVS layout, request validation, omission/deletion behavior and endpoint reboot effects are in
 [API.md](API.md#configuration-and-persistence). Board reservations apply in both directions, whoever

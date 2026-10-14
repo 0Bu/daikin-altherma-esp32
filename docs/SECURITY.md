@@ -174,7 +174,9 @@ artifact identity, injection, reboot, API and rendered UI evidence must be repor
 
 Crash-loop and heap-watchdog safe mode retain network/HTTP recovery while omitting optional plant
 workers. The guard runs after NVS initialization and its static lock, before Netif, OTA and config.
-Four crash boots latch recovery; healthy uptime clears the counter only outside latched safe mode.
+Four crash boots latch recovery; ten minutes of uptime clear the crash count only outside latched
+safe mode. Heap-watchdog restarts are counted separately and neither count is cleared by the
+other's resets; only a clean boot clears both, and a clean boot never comes up in heap safe mode.
 NVS initialization errors never erase the partition automatically. Failed initialization disables
 WiFi-driver NVS before driver startup; STA/AP credentials use RAM storage every boot.
 Mandatory-startup or persistence failures remain outside the recovery guarantee, as does an unsigned

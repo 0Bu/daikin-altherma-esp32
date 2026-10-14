@@ -106,9 +106,9 @@ DetectResult hp_detect_run() {
 
     // 1. Pin + protocol sweep. Candidate RX/TX pairs, in order: the persisted-cache pins (c.rx/tx,
     //    tried FIRST), their swap (a swapped X10A wire is the most common mistake), then the
-    //    per-target Kconfig default and its swap — so a stale/default cache still self-heals to the
-    //    real wiring. All pins are X10A-designated (no arbitrary GPIO probing). Keep the framing +
-    //    pins that answer.
+    //    per-target Kconfig default and its swap — so a stale cache recovers when the real wiring
+    //    is one of these pairs; any other wiring needs /set_hp. All pins are X10A-designated (no
+    //    arbitrary GPIO probing). Keep the framing + pins that answer.
     struct PinPair {
         int rx, tx;
     };

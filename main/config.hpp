@@ -80,7 +80,8 @@ bool config_factory_seed_blob(std::vector<uint8_t>& out);
 // main/CMakeLists.txt already pins -Werror=unused-result on this component.
 
 // Persist the given config to NVS. The credential/service/board/channel fields are one atomic blob;
-// the X10A link cache (RX/TX/proto/history identity) is a separate self-healing durability domain.
+// the X10A link cache (RX/TX/proto/history identity) is a separate durability domain that detection
+// or /set_hp rewrites.
 // Callers succeed once the blob lands even if best-effort cache maintenance fails afterwards. A
 // snapshot older than a detection commit carries the newly detected link and model forward
 // (logic/config_model.hpp, config_save_revision). The model (profile + fingerprint) is NOT written.
