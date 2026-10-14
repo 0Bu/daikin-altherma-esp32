@@ -187,8 +187,9 @@ trusted source time. Actual/target range is 5–35 °C and optional enabled/HVAC
 Gate order establishes HomeHub connectivity, normal space operation (register 53), then Heating
 rather than Cooling (register 38), before room/X10A/clock evidence. An inactive plant or confirmed
 Cooling yields neutral **HOLD**; unknown/stale prerequisites yield **BLOCK**. A transient hold/block
-preserves the sample cadence and last event. Deleting the room source/HomeHub or disabling
-plant diagnostics disarms and clears sample memory.
+preserves the sample cadence and last event. Saving the room source or the diagnostics consent clears
+sample memory and cadence at once, even inside one sampler cycle; deleting the room source/HomeHub or
+disabling plant diagnostics also disarms.
 
 Each event can store two distinct optional outdoor axes: HomeHub input 44 from the current
 cycle/session, and fresh/plausible ENV III from its actual placement. Missing context is null and

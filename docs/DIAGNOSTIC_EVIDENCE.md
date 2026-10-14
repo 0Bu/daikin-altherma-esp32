@@ -77,7 +77,10 @@ defrost off, all declared fault rows current and normal, and every profile-provi
 witness current and inactive. A profile which lacks one or more of those optional phase witnesses
 may still produce a `limited` window; a witness declared by the profile but unreadable in one sweep
 is required current evidence and ends an active window. Discharge temperature, EEV command, and at least one structurally
-identified refrigerant-pressure side are mandatory. Cooling is excluded because the available
+identified refrigerant-pressure side are mandatory. The high side has one sensor per profile, fixed by
+coverage: the hydronic transducer (0x62/15) when it is a structural refrigerant pressure, otherwise the
+outdoor high-pressure row (0x20/12); a sweep that lost that page leaves the side missing instead of
+substituting the other transducer. Cooling is excluded because the available
 pressure-side evidence is heating-specific. Missing required data, a mode/valve/fault/phase change,
 non-monotonic time, or a gap beyond the profile-sized poll allowance ends the window. A source
 generation change resets continuity and may accept the current qualifying sample as the first sample
