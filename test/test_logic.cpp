@@ -16766,6 +16766,21 @@ static void test_checkup() {
             }
             CHECK(fb.windows >= 1 && fb.high_windows == 0);
         }
+        {
+            // While a settle or the hold is running, unread time is blind time too: the witness
+            // rules above must see it. Ten seconds of hold left, a minute of seen charge, then an
+            // unread 90 s tail: seen + tail is past the bound, exactly as without a hold.
+            DhwLossState  st;
+            DhwLossBucket b;
+            int64_t       t = 0;
+            run(st, b, t, static_cast<int>(DHW_LOSS_SETTLE_S) - 9, true, false);
+            CHECK(st.hold_remaining_s == 10);
+            run(st, b, t, 60, true, true);
+            run(st, b, t, 90, false, false);
+            CHECK(st.blind_run_s == 90);
+            run(st, b, t, 1, true, false);
+            CHECK(st.settle_remaining_s == DHW_LOSS_SETTLE_S - 1 && st.blind_run_s == 0);
+        }
     }
 
     {

@@ -897,10 +897,14 @@ inline void dhw_loss_step(DhwLossState& st, DhwLossBucket& b, const CheckupSampl
     }
     if (st.settle_remaining_s || st.hold_remaining_s) {
         // Spent only on samples that read both witnesses: an unread one may hide a charge still
-        // running, which is no settling. The fresh-state hold runs on the same clock.
+        // running, which is no settling. The fresh-state hold runs on the same clock. That unread
+        // time is blind time here too, so the witness rules above still see it.
         if (s.valve_known && s.bsh_known) {
             st.settle_remaining_s -= std::min(dt, st.settle_remaining_s);
             st.hold_remaining_s -= std::min(dt, st.hold_remaining_s);
+            st.blind_run_s = 0;
+        } else {
+            st.blind_run_s = checkup_add_u32(st.blind_run_s, dt);
         }
         // Not an abort: the charge that armed this already booked one, and there is no candidate
         // left to discard. Counting these would report one aborted hour per second of settling.
