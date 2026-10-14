@@ -467,7 +467,7 @@ void config_load() {
     // falls back to the 44/43 default. The board check above ran with the link excluded, so nothing
     // else catches it, and the snapshot would then fail board_hw_valid() and validate() and leave
     // detection with no permitted candidate. The optional parts yield to the primary link for this
-    // boot, as ENV III does just below; saves keep their stored pins (s_load_yield), not ENV III's.
+    // boot, as ENV III does below; saves keep their stored pins (s_load_yield); ENV III saves off.
     {
         const LocalPinsRepair yielded = config_yield_local_pins_to_link(c);
         s_load_yield                  = yielded; // before publish(): no task runs yet
