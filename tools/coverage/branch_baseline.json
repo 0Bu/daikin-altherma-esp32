@@ -271,8 +271,8 @@
       "runner": "scripts/run-mock-tests.sh --coverage",
       "scope": "The link yield records the stored indicator/button pins; every service save writes them into the cfg blob and the factory seed restores them until a save re-states the part. Both changed headers raise their ratios; all other inventories and historical floors retained.",
       "sources": {
-        "main/logic/config_model.hpp": "8487542454e1f8ba0b962dbcd746017317d8ea43d3bffbfd6451f33b22542907",
-        "main/logic/config_transaction.hpp": "2726d021358201a3cc0e1861c4d25164004b6f4cf886d3a5d47e10ebd6552ada"
+        "main/logic/config_model.hpp": "ce03cf4a38edd596947181ffafc81e7763ebf14f7b3fd6485dbbe752fbef796a",
+        "main/logic/config_transaction.hpp": "3f1709df9ad354faf9dce16050620dd4586af98708c02782764953e6b5040c76"
       }
     }
   ],
@@ -328,8 +328,8 @@
         "taken": 53
       },
       "main/logic/config_model.hpp": {
-        "outcomes": 296,
-        "taken": 243
+        "outcomes": 312,
+        "taken": 257
       },
       "main/logic/config_store.hpp": {
         "outcomes": 486,
@@ -730,8 +730,8 @@
         "taken": 53
       },
       "main/logic/config_model.hpp": {
-        "outcomes": 316,
-        "taken": 272
+        "outcomes": 334,
+        "taken": 290
       },
       "main/logic/config_store.hpp": {
         "outcomes": 460,
@@ -1132,8 +1132,8 @@
         "taken": 53
       },
       "main/logic/config_model.hpp": {
-        "outcomes": 316,
-        "taken": 272
+        "outcomes": 334,
+        "taken": 290
       },
       "main/logic/config_store.hpp": {
         "outcomes": 460,
@@ -1534,8 +1534,8 @@
         "taken": 53
       },
       "main/logic/config_model.hpp": {
-        "outcomes": 316,
-        "taken": 272
+        "outcomes": 334,
+        "taken": 290
       },
       "main/logic/config_store.hpp": {
         "outcomes": 460,
