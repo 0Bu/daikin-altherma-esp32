@@ -3775,6 +3775,9 @@ void mqtt_reference_reconfigure() {
     // Without the mutex (safe mode, or its allocation failed at boot) no task publishes a status,
     // so the defaults stay untouched; the bumped epoch already withdraws every reader.
     if (lk.acquired()) s_ref_status = ReferenceTemperatureStatus{};
+    // The same consent/room-source boundary ends the heating-curve sample scope at once (counters
+    // and sequence continue); without the mutex no task ever evaluated it, so nothing is forgotten.
+    if (lk.acquired()) s_heating_curve_diagnosis.forget_samples();
 }
 
 CirculationSourceStatus circulation_source_status(const Config& c) {

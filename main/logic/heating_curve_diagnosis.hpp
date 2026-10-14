@@ -208,8 +208,7 @@ public:
         s_.room_age_s = in.room_age_s;
 
         if (!in.armed) {
-            reset_samples();
-            last_now_ms_ = -1;
+            forget_samples();
             s_.state = HeatingCurveState::Off;
             s_.reason = HeatingCurveReason::Disabled;
             return s_;
@@ -266,6 +265,17 @@ public:
         return s_;
     }
 
+    // A consent or room-source boundary: the previous scope's event must not stand as the last
+    // sample, and its cadence must not delay the first eligible reading of the new scope. Waiting
+    // for a disarmed evaluate() is not enough — an opt-out and opt-in inside one task cycle, or a
+    // skipped cycle, never produces one. Counters and `sequence` continue: a sequence reset is the
+    // documented reboot signal. POD stores only, so a caller may hold a raw mutex. One out-of-line
+    // body serves this boundary and the disarm path above (flash headroom).
+    __attribute__((noinline)) void forget_samples() noexcept {
+        reset_samples();
+        last_now_ms_ = -1;
+    }
+
 private:
     const HeatingCurveSnapshot& hold(HeatingCurveReason reason) {
         s_.state = HeatingCurveState::Hold;
@@ -281,7 +291,7 @@ private:
         return s_;
     }
 
-    void reset_samples() {
+    void reset_samples() noexcept {
         last_sample_ms_ = -1;
         s_.has_last_sample = false;
         s_.last_sample_room_error_k = 0.0;

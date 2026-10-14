@@ -1611,6 +1611,96 @@ void outgoing_curve() {
     require(json_witness::live == 0 && sdk::locks == 0 && sdk::takes == sdk::gives,
             "CURVE_TELEMETRY_RELEASES_JSON_AND_MUTEX_OWNERSHIP");
 }
+// One recorded event under the first scope, then the 30-minute cadence visibly holding.
+void curve_first_scope_event() {
+    adapter::modbus.enabled = adapter::modbus.connected = true;
+    adapter::modbus.plant_gate_known = adapter::modbus.plant_gate_active = true;
+    adapter::modbus.heating_mode_known = adapter::modbus.heating_mode_active = true;
+    adapter::cfg.mb_host                                                     = "homehub-fixture";
+    daik::on_mqtt(nullptr, "mqtt", MQTT_EVENT_CONNECTED, nullptr);
+    daik::service_reference_subscription(adapter::cfg, daik::s_ref_requested_epoch.load());
+    feed("room", R"({"temperature":20.5,"time":1700000100,"enabled":true})");
+    daik::service_reference_frames(adapter::cfg);
+    daik::evaluate_heating_curve(adapter::cfg, true);
+    sdk::ticks += 60 * 1000;
+    const auto held = daik::evaluate_heating_curve(adapter::cfg, true);
+    require(held.reason == daik::logic::HeatingCurveReason::SamplingInterval &&
+                held.sequence == 1 && daik::heating_curve_diagnosis_armed(adapter::cfg) &&
+                held.last_sample_unix_s == 1700000100 && held.last_sample_room_error_k == 1.5,
+            "CURVE_FIRST_SCOPE_EVENT_AND_CADENCE_ACTIVE");
+}
+// The boundary itself, as POST /set_diagnostics and /set_ref_temp invoke it: allocation-free,
+// lock-balanced, and the prior event is gone before any task cycle runs.
+void curve_boundary(void (*change)(), const char* forgotten_assertion) {
+    sdk::fail_next_new = true;
+    change();
+    const bool unspent = sdk::fail_next_new;
+    sdk::fail_next_new = false;
+    require(unspent && sdk::locks == 0 && sdk::takes == sdk::gives,
+            "CURVE_BOUNDARY_ALLOCATION_FREE_AND_LOCK_BALANCED");
+    const auto now = daik::heating_curve_status();
+    require(!now.has_last_sample && now.last_sample_unix_s == -1, forgotten_assertion);
+    require(now.sequence == 1 && now.samples == 1 && now.evaluations == 2,
+            "CURVE_BOUNDARY_KEEPS_SEQUENCE_AND_COUNTERS");
+}
+// The first eligible reading of the new scope records at once; sequence and counters continue.
+void curve_new_scope_event(const char* topic, const char* payload, double error_k,
+                           const char* recorded_assertion) {
+    sdk::ticks += 4 * 60 * 1000; // five minutes after the first event, inside its old cadence
+    daik::service_reference_subscription(adapter::cfg, daik::s_ref_requested_epoch.load());
+    feed(topic, payload);
+    daik::service_reference_frames(adapter::cfg);
+    const auto s = daik::evaluate_heating_curve(adapter::cfg, true);
+    require(s.reason == daik::logic::HeatingCurveReason::ForecastUnavailable && s.has_last_sample &&
+                s.last_sample_room_error_k == error_k && s.last_sample_unix_s == 1700000400,
+            recorded_assertion);
+    require(s.sequence == 2 && s.samples == 2 && s.evaluations == 3,
+            "CURVE_BOUNDARY_KEEPS_SEQUENCE_AND_COUNTERS");
+    daik::publish_heating_curve_telemetry(adapter::cfg);
+    require(sdk::publish_calls >= 1 && sdk::published[sdk::publish_calls - 1].accepted,
+            "CURVE_BOUNDARY_TELEMETRY_PUBLISHED");
+    daik::JsonGuard root(parse_wire(sdk::published[sdk::publish_calls - 1]));
+    cJSON*          diagnosis = cJSON_GetObjectItemCaseSensitive(root.get(), "diagnosis");
+    cJSON*          last      = cJSON_GetObjectItemCaseSensitive(diagnosis, "last_sample");
+    require(cJSON_IsObject(last), "CURVE_BOUNDARY_LAST_SAMPLE_ON_WIRE");
+    wire_number(last, "room_error_k", error_k, "CURVE_BOUNDARY_WIRE_EVENT_IS_NEW_SCOPE");
+    wire_number(last, "unix_s", 1700000400, "CURVE_BOUNDARY_WIRE_EVENT_TIME_IS_NEW_SCOPE");
+    wire_number(last, "sequence", 2, "CURVE_BOUNDARY_WIRE_SEQUENCE_CONTINUES");
+    require(sdk::locks == 0 && sdk::takes == sdk::gives, "CURVE_BOUNDARY_MUTEX_RELEASED");
+}
+void curve_consent_boundary() {
+    // Safe mode / failed mutex allocation: no sampler task exists, nothing is touched or locked.
+    daik::mqtt_reference_reconfigure();
+    const auto untouched = daik::heating_curve_status();
+    require(sdk::takes == 0 && untouched.state == daik::logic::HeatingCurveState::Off &&
+                !untouched.has_last_sample && untouched.sequence == 0,
+            "CURVE_BOUNDARY_WITHOUT_MUTEX_TOUCHES_NOTHING");
+    initial_config();
+    curve_first_scope_event();
+    // Opt-out and opt-in inside one task cycle: no disarmed evaluation ever runs in between.
+    curve_boundary(
+        [] {
+            adapter::cfg.diagnostics_enabled = false;
+            daik::mqtt_reference_reconfigure();
+            adapter::cfg.diagnostics_enabled = true;
+            daik::mqtt_reference_reconfigure();
+        },
+        "CURVE_CONSENT_BOUNDARY_FORGETS_PRIOR_EVENT_IMMEDIATELY");
+    curve_new_scope_event("room", R"({"temperature":18.0,"time":1700000400,"enabled":true})", 4.0,
+                          "CURVE_CONSENT_BOUNDARY_SAMPLES_NEW_SCOPE_AT_ONCE");
+}
+void curve_room_source_boundary() {
+    initial_config();
+    curve_first_scope_event();
+    curve_boundary(
+        [] {
+            adapter::cfg.ref_temp_topic = "room_b";
+            daik::mqtt_reference_reconfigure();
+        },
+        "CURVE_ROOM_SOURCE_BOUNDARY_FORGETS_PRIOR_EVENT_IMMEDIATELY");
+    curve_new_scope_event("room_b", R"({"temperature":19.0,"time":1700000400,"enabled":true})", 3.0,
+                          "CURVE_ROOM_SOURCE_BOUNDARY_SAMPLES_NEW_SOURCE_AT_ONCE");
+}
 void scalar_snapshot_helpers() {
     initial_config();
     daik::on_mqtt(nullptr, "mqtt", MQTT_EVENT_CONNECTED, nullptr);
@@ -3958,6 +4048,10 @@ int main(int argc, char** argv) {
             outgoing_weather();
         else if (std::strcmp(scenario, "outgoing_curve") == 0)
             outgoing_curve();
+        else if (std::strcmp(scenario, "curve_consent_boundary") == 0)
+            curve_consent_boundary();
+        else if (std::strcmp(scenario, "curve_room_source_boundary") == 0)
+            curve_room_source_boundary();
         else if (std::strcmp(scenario, "scalar_snapshot_helpers") == 0)
             scalar_snapshot_helpers();
         else if (std::strcmp(scenario, "real_json_consumers") == 0)

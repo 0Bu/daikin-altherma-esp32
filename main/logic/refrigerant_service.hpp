@@ -126,6 +126,9 @@ struct RefrigerantServiceCoverage {
     bool startup = false;
     bool oil_return = false;
     bool pressure_equalizing = false;
+    // The high side's ONE sensor for this profile: the hydronic transducer (0x62/15) when it is a
+    // structural refrigerant pressure, otherwise the outdoor row (0x20/12). Never chosen per sweep.
+    bool hydronic_pressure = false;
 };
 
 inline void refrigerant_service_cover_row(RefrigerantServiceCoverage& c, unsigned reg,
@@ -144,8 +147,10 @@ inline void refrigerant_service_cover_row(RefrigerantServiceCoverage& c, unsigne
     if (reg == 0x30 && off == 3 && conv == 151) c.eev_command = true;
     if (refrigerant_pressure) {
         if (reg == 0x20 && off == 14) c.low_pressure = true;
-        else if ((reg == 0x20 && off == 12) || (reg == 0x62 && off == 15))
+        else if (reg == 0x20 && off == 12)
             c.high_pressure = true;
+        else if (reg == 0x62 && off == 15)
+            c.high_pressure = c.hydronic_pressure = true;
     }
     if (reg == 0x20 && off == 0 && conv == 105) c.outdoor_air = true;
     if (reg == 0x20 && off == 2 && conv == 105) c.outdoor_hx = true;
@@ -153,6 +158,23 @@ inline void refrigerant_service_cover_row(RefrigerantServiceCoverage& c, unsigne
     if (reg == 0x10 && off == 1 && conv == 305) c.startup = true;
     if (reg == 0x10 && off == 1 && conv == 303) c.oil_return = true;
     if (reg == 0x10 && off == 1 && conv == 302) c.pressure_equalizing = true;
+}
+
+// The single conv-105 row a sweep may read for the high side, fixed by coverage. Splicing a
+// second transducer in for one lost page would mix two sensors in one window's min/mean/max; a
+// lost page instead leaves the side missing (limited). A profile without a structural high-side
+// row reads none, so an unidentified 0x20/12 row (a heat-sink temperature on some) never counts.
+struct RefrigerantServiceRow {
+    bool    available;
+    uint8_t reg;
+    uint8_t off;
+};
+
+inline RefrigerantServiceRow
+refrigerant_service_high_pressure_row(const RefrigerantServiceCoverage& c) {
+    if (c.hydronic_pressure) return {true, 0x62, 15};
+    if (c.high_pressure) return {true, 0x20, 12};
+    return {false, 0, 0};
 }
 
 inline bool refrigerant_service_supported(const RefrigerantServiceCoverage& c) {

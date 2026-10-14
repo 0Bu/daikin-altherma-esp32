@@ -803,6 +803,55 @@ static void run_mqtt_scalar_source() {
     sample(false, false, "mqtt_scalar_future_observation_unknown");
 }
 
+// The fresh, unheld conv-105 cache row as decoded tenths (the converter's own bar scaling): proves
+// the row a sampler must NOT read was present in the same sweep.
+static bool cached_tenths(uint8_t reg, uint8_t off, int& tenths) {
+    for (const auto& row : daik::s_cache)
+        if (row.reg == reg && row.off == off && row.conv == 105)
+            return !row.held && daik::logic::history_parse_tenths(row.value.c_str(), tenths);
+    return false;
+}
+
+// The refrigerant service reads ONE high-side sensor per profile through the real sampler: a lost
+// hydronic page leaves the side missing rather than splicing in the outdoor transducer, and a
+// temperature at 0x20/12 never stands in for a pressure. Synthetic bytes, not physical readings.
+static void run_refrigerant(const char* name) {
+    using namespace daik;
+    const auto& sample = s_refrigerant_service_cycle_sample;
+    if (!std::strcmp(name, "refrigerant_one_sensor")) {
+        setup_populated(); // both structural high-side rows: 0x62/15 and 0x20/12
+        put16(0x62, 15, 200);
+        put16(0x20, 12, 230);
+        poll_once();
+        int hydronic = 0, outdoor = 0;
+        oracle(cached_tenths(0x62, 15, hydronic) && cached_tenths(0x20, 12, outdoor) &&
+                   hydronic != outdoor,
+               "refrigerant_two_distinct_fresh_high_side_rows");
+        oracle(sample.high_pressure_ok && sample.high_pressure_tenths == hydronic,
+               "refrigerant_high_side_reads_selected_sensor");
+        adapter::available[0x62] = false;
+        sdk::now_us += 1000000;
+        poll_once();
+        oracle(cached_tenths(0x20, 12, outdoor), "refrigerant_outdoor_sensor_fresh_in_same_sweep");
+        oracle(!sample.high_pressure_ok, "refrigerant_lost_page_never_substitutes_other_sensor");
+    } else if (!std::strcmp(name, "refrigerant_unidentified_row")) {
+        setup("altherma_lt_da_pair_bml"); // 0x20/12 conv 105 is a heat-sink temperature here
+        adapter::populated = true;
+        for (unsigned reg = 0; reg < 256; ++reg) {
+            adapter::available[reg]    = true;
+            adapter::page_lengths[reg] = 40;
+        }
+        adapter::pages[0x30][0] = 42;
+        put16(0x20, 12, 450);
+        poll_once();
+        int heat_sink = 0;
+        oracle(cached_tenths(0x20, 12, heat_sink) && heat_sink == 450,
+               "refrigerant_unidentified_row_fresh_in_sweep");
+        oracle(!sample.high_pressure_ok, "refrigerant_unidentified_row_never_high_side");
+    } else
+        oracle(false, "known_refrigerant_case");
+}
+
 int main(int argc, char** argv) {
     const char* name = argc > 1 ? argv[1] : "oom_raii";
     if (!std::strcmp(name, "oom_raii"))
@@ -817,6 +866,8 @@ int main(int argc, char** argv) {
         run_mqtt_scalar_source();
     else if (!std::strncmp(name, "raw_", 4))
         run_raw(name);
+    else if (!std::strncmp(name, "refrigerant_", 12))
+        run_refrigerant(name);
     else
         oracle(false, "known_runtime_case");
     std::printf("PASS CASE %s\n", name);

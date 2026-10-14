@@ -12673,6 +12673,32 @@ static void test_heating_curve_diagnosis() {
     in.now_ms = 20;
     CHECK(rearm.evaluate(in).sequence == 2 && rearm.snapshot().has_last_sample);
 
+    // A consent or room-source boundary forgets the previous scope's event and cadence without a
+    // disarmed evaluation in between (opt-out and opt-in inside one task cycle). Counters and the
+    // sequence continue (a reset reads as a reboot), and the new scope's first eligible reading
+    // records at once instead of waiting out the old 30-minute interval.
+    HeatingCurveDiagnosis boundary;
+    in              = ready();
+    in.room_error_k = 1.5;
+    in.outdoor      = outdoor_env3_evidence(true, true, -3.0);
+    CHECK(boundary.evaluate(in).sequence == 1 && boundary.snapshot().has_last_sample_outdoor);
+    in.now_ms = 1000;
+    CHECK(boundary.evaluate(in).reason == HeatingCurveReason::SamplingInterval);
+    boundary.forget_samples();
+    const HeatingCurveSnapshot forgotten = boundary.snapshot();
+    CHECK(!forgotten.has_last_sample && !forgotten.has_last_sample_outdoor &&
+          forgotten.last_sample_unix_s == -1 && forgotten.last_sample_room_error_k == 0.0);
+    CHECK(forgotten.sequence == 1 && forgotten.samples == 1 && forgotten.evaluations == 2);
+    in.now_ms       = 300000; // five minutes later, inside the forgotten cadence
+    in.now_unix_s   = 1770000300;
+    in.room_error_k = 4.0;
+    in.outdoor      = OutdoorEvidence{};
+    const HeatingCurveSnapshot rescoped = boundary.evaluate(in);
+    CHECK(rescoped.reason == HeatingCurveReason::SampleRecorded && rescoped.sequence == 2 &&
+          rescoped.samples == 2 && rescoped.evaluations == 3);
+    CHECK(approx(rescoped.last_sample_room_error_k, 4.0) &&
+          rescoped.last_sample_unix_s == 1770000300 && !rescoped.has_last_sample_outdoor);
+
     // ARMING requires the explicit master diagnostics opt-in plus every visible source dependency.
     // This remains independent of the retired controller mode: there is no /set_dynamic_lwt and no
     // actuator. Explicitly deleting HomeHub disarms the dependent sampler too.
@@ -19354,6 +19380,79 @@ static void test_refrigerant_service() {
     refrigerant_service_cover_row(water, 0x62, 11, 105, false);
     CHECK(!water.high_pressure && !water.low_pressure);
     CHECK(!refrigerant_service_supported(water));
+    CHECK(!refrigerant_service_high_pressure_row(water).available);
+
+    // ONE high-side sensor per profile, fixed by coverage. A structural hydronic transducer is that
+    // sensor even when the outdoor row exists too; the outdoor row is used only without it; an
+    // unidentified row at either address (no saturation twin) selects nothing.
+    CHECK(c.hydronic_pressure);
+    RefrigerantServiceCoverage both_rows = c;
+    refrigerant_service_cover_row(both_rows, 0x20, 12, 105, true);
+    const RefrigerantServiceRow both = refrigerant_service_high_pressure_row(both_rows);
+    CHECK(both.available && both.reg == 0x62 && both.off == 15);
+    RefrigerantServiceCoverage outdoor_only;
+    refrigerant_service_cover_row(outdoor_only, 0x62, 15, 105, false);
+    refrigerant_service_cover_row(outdoor_only, 0x20, 12, 105, true);
+    const RefrigerantServiceRow outdoor = refrigerant_service_high_pressure_row(outdoor_only);
+    CHECK(!outdoor_only.hydronic_pressure && outdoor_only.high_pressure);
+    CHECK(outdoor.available && outdoor.reg == 0x20 && outdoor.off == 12);
+    RefrigerantServiceCoverage unidentified;
+    refrigerant_service_cover_row(unidentified, 0x62, 15, 105, false);
+    refrigerant_service_cover_row(unidentified, 0x20, 12, 105, false);
+    CHECK(!unidentified.high_pressure && !unidentified.hydronic_pressure);
+    CHECK(!refrigerant_service_high_pressure_row(unidentified).available);
+
+    // Over the shipped catalog, exactly as hp_poll.cpp builds coverage: the selected row is always
+    // a publishable conv-105 structural refrigerant pressure, `high_pressure` keeps its former
+    // two-address meaning, and a profile whose 0x20/12 conv-105 row is something else (a heat-sink
+    // or fin temperature) never selects it.
+    int hydronic_profiles = 0, outdoor_profiles = 0, unidentified_outdoor = 0;
+    for (const auto& p : def::profiles) {
+        const auto                 v = def::resolved(p);
+        RefrigerantServiceCoverage pc;
+        bool                       former_high = false, other_outdoor = false;
+        for (size_t i = 0; i < v.count(); i++) {
+            if (!row_publishable(v[i])) continue;
+            const ValueDef d    = adjudicated(v[i]);
+            const bool     refp = fg_is_refrigerant_pressure(v, i);
+            refrigerant_service_cover_row(pc, d.reg, d.offset, d.conv, refp);
+            if (refp && ((d.reg == 0x20 && d.offset == 12) || (d.reg == 0x62 && d.offset == 15)))
+                former_high = true;
+            if (!refp && d.reg == 0x20 && d.offset == 12 && d.conv == 105) other_outdoor = true;
+        }
+        CHECK(pc.high_pressure == former_high);
+        const RefrigerantServiceRow row = refrigerant_service_high_pressure_row(pc);
+        CHECK(row.available == pc.high_pressure);
+        if (row.available) {
+            bool structural = false;
+            for (size_t i = 0; i < v.count(); i++) {
+                const ValueDef d = adjudicated(v[i]);
+                if (row_publishable(v[i]) && d.reg == row.reg && d.offset == row.off &&
+                    d.conv == 105 && fg_is_refrigerant_pressure(v, i))
+                    structural = true;
+            }
+            CHECK(structural);
+            (row.reg == 0x62 ? hydronic_profiles : outdoor_profiles)++;
+        }
+        if (other_outdoor) {
+            CHECK(!(row.available && row.reg == 0x20));
+            unidentified_outdoor++;
+        }
+    }
+    CHECK(hydronic_profiles > 0 && outdoor_profiles > 0 && unidentified_outdoor > 0);
+    // A detectable profile that carries BOTH structural rows reads only the hydronic one.
+    const auto dual_view = def::resolved(def::lookup("altherma_ebla_edla_d_series_4_8kw_monobloc"));
+    RefrigerantServiceCoverage dual;
+    bool                       dual_outdoor = false;
+    for (size_t i = 0; i < dual_view.count(); i++) {
+        if (!row_publishable(dual_view[i])) continue;
+        const ValueDef d    = adjudicated(dual_view[i]);
+        const bool     refp = fg_is_refrigerant_pressure(dual_view, i);
+        refrigerant_service_cover_row(dual, d.reg, d.offset, d.conv, refp);
+        if (refp && d.reg == 0x20 && d.offset == 12) dual_outdoor = true;
+    }
+    CHECK(dual_outdoor && dual.hydronic_pressure &&
+          refrigerant_service_high_pressure_row(dual).reg == 0x62);
     CHECK(refrigerant_service_mode_from_text("Heating") == RefrigerantServiceMode::Heating);
     CHECK(refrigerant_service_mode_from_text("Cooling") == RefrigerantServiceMode::Cooling);
     CHECK(refrigerant_service_mode_from_text("Heating + DHW") == RefrigerantServiceMode::Other);
@@ -19403,6 +19502,27 @@ static void test_refrigerant_service() {
     CHECK(snap.state == RefrigerantServiceState::Observing && snap.samples == 2);
     CHECK(snap.continuous_s == 1);
     CHECK(snap.discharge.available && snap.discharge.mean_tenths == 840);
+
+    // A lost hydronic page is a missing high side (the sampler no longer reads 0x20/12 instead):
+    // the window continues LIMITED for its whole length and its high-pressure figure keeps only
+    // the selected sensor, never a 20/21/23 bar mix of two transducers.
+    RefrigerantServiceTracker one_sensor;
+    RefrigerantServiceSample  hydronic = s;
+    hydronic.high_pressure_tenths      = 200;
+    refrigerant_service_record(one_sensor, c, hydronic, 300000000, 11, service_gap_us);
+    refrigerant_service_record(one_sensor, c, hydronic, 301000000, 11, service_gap_us);
+    CHECK(one_sensor.state == RefrigerantServiceState::Observing);
+    RefrigerantServiceSample lost_page = hydronic;
+    lost_page.high_pressure_ok         = false;
+    lost_page.high_pressure_tenths     = 0;
+    refrigerant_service_record(one_sensor, c, lost_page, 302000000, 11, service_gap_us);
+    CHECK(one_sensor.state == RefrigerantServiceState::Limited && one_sensor.samples == 3);
+    CHECK(one_sensor.limitation_mask & RefrigerantServicePressureSides);
+    refrigerant_service_record(one_sensor, c, hydronic, 303000000, 11, service_gap_us);
+    CHECK(one_sensor.state == RefrigerantServiceState::Limited && one_sensor.samples == 4);
+    CHECK(one_sensor.high_pressure.samples == 3 && one_sensor.high_pressure.min_tenths == 200 &&
+          one_sensor.high_pressure.max_tenths == 200 &&
+          one_sensor.high_pressure.mean_tenths() == 200);
 
     RefrigerantServiceSample unknown_valve = s;
     unknown_valve.valve_known              = false;

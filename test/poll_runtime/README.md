@@ -23,6 +23,9 @@ tallies, saturation carry, tickets and the boot capture budget do not leak betwe
   foreign wakes against the absolute deadline.
 - Raw-capture cases require actual successful 0x10/0x20 payloads, test recovery after both are absent,
   one available page, the 32-byte line bound and at most eight successful rounds per boot.
+- Refrigerant cases run the real service sampler on shipped profiles: with both structural high-side
+  rows fresh it reads the hydronic one, a lost 0x62 page leaves the side missing while 0x20/12 is
+  fresh, and a heat-sink temperature at 0x20/12 is never read as the high-side pressure.
 
 Every semantic mutation must compile and fail its named oracle. Compile commands, complete input
 hashes, case results and mutation output are retained in the printed temporary `evidence.json`.
