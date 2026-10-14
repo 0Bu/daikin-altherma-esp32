@@ -89,6 +89,10 @@ using Lock = SemGuard;
 // both reachable from the network and a double-tap in the UI must not spawn two TLS sessions.
 bool     s_busy       = false;
 uint32_t s_generation = 0;
+// Set once an installed image's restart was held for a factory reset (record_installed_image_held):
+// the boot partition already selects that image, so no further check or install may run in this
+// boot and rewrite the slot it boots next. Guarded by s_mtx.
+bool s_install_held = false;
 
 // Optional release notes are kept out of OtaStatus: /ota/status is polled once a second during the
 // most heap-constrained part of an update, and copying/JSON-quoting 1 KiB of prose there would make
@@ -1022,17 +1026,15 @@ void run_check(const OtaTaskArgs& request) {
 // that looks like a finished one — so the restart is refused. Nothing is lost: the boot partition
 // already points at the new image, so the reset's own reboot (or, if the reset does not complete,
 // whatever restarts the board next) starts it PENDING_VERIFY under the ordinary health gate and
-// probation, exactly as this restart would have. The worker parks here instead of returning: that
-// would clear s_busy, and a second install in this boot would rewrite the very slot that is
-// selected to boot next. The /diag line is nvs_restart_held_by_factory_reset's; the status keeps
-// "done" (the install did complete) with a truthful message.
-[[noreturn]] void hold_installed_image_for_factory_reset() {
-    {
-        Lock lk(s_mtx);
-        s_status.message = "Installed; starts on next reboot (factory reset)";
-    }
-    stack_watch_sample(StackWatch::Ota);
-    for (;;) vTaskDelay(pdMS_TO_TICKS(60 * 1000));
+// probation, exactly as this restart would have. The worker returns normally, so its network lease
+// ends (MQTT resumes, /status and /diag answer again); s_install_held instead refuses every later
+// check or install in this boot, which would otherwise rewrite the very slot selected to boot
+// next. The /diag line is nvs_restart_held_by_factory_reset's; the status keeps "done" (the
+// install did complete) with a truthful message.
+void record_installed_image_held() {
+    Lock lk(s_mtx);
+    s_install_held   = true;
+    s_status.message = "Installed; starts on next reboot (factory reset)";
 }
 
 void run_update(const OtaTaskArgs& request) {
@@ -1693,9 +1695,9 @@ void run_update(const OtaTaskArgs& request) {
     // Outlive both the 1 Hz browser and the gate's 2 Hz connection-churn-bounded observer, with
     // enough LAN/HTTPD scheduling margin for either to retain completed-verifier evidence.
     vTaskDelay(pdMS_TO_TICKS(kDoneBeforeRebootMs));
-    // Checked after that wait, at the last moment: see hold_installed_image_for_factory_reset.
+    // Checked after that wait, at the last moment: see record_installed_image_held.
     if (nvs_restart_held_by_factory_reset("ota")) {
-        hold_installed_image_for_factory_reset(); // never returns
+        record_installed_image_held();
         return;
     }
     esp_restart();
@@ -1756,8 +1758,9 @@ void ota_task(void*) {
             }
         }
         // Captures checks, refused installs and every caught-exception path before the worker
-        // sleeps again. Successful installs sample explicitly after boot selection because they
-        // reboot from run_update() and never reach here.
+        // sleeps again, and an install whose restart a factory reset held. Other successful
+        // installs sample explicitly after boot selection because they reboot from run_update()
+        // and never reach here.
         stack_watch_sample(StackWatch::Ota);
         {
             Lock lk(s_mtx);
@@ -1778,6 +1781,9 @@ uint32_t next_generation(uint32_t current) {
 // contiguous block the following TLS gate is about to measure.
 uint32_t start_locked(const OtaTaskArgs& request, uint32_t previous_generation) {
     if (!s_ota_task) return 0;
+    // No new operation once an install's restart was held, nor while a factory reset is erasing:
+    // an install finishing then could only be held too, with nothing gained.
+    if (s_install_held || nvs_factory_reset_latched()) return 0;
     s_busy                 = true;
     s_task_args            = request;
     s_generation           = next_generation(previous_generation);
@@ -2055,15 +2061,16 @@ static void health_gate_task(void*) {
             // on a namespace it is still erasing. Refusing costs the rollback nothing — the image
             // stays PENDING_VERIFY, so the reset's own reboot (or whatever restarts the board next,
             // if the reset does not complete) rolls it back in the bootloader exactly as this
-            // restart would have. The gate therefore ends here (nvs_restart_held_by_factory_reset
-            // says so once per boot).
+            // restart would have. The gate keeps asking once a second instead of ending
+            // (nvs_restart_held_by_factory_reset says so once per boot): a reset that fails and
+            // releases the latch must still get this known-bad image rolled back.
             if (v == HealthVerdict::GiveUp) {
                 ESP_LOGW("ota",
                          "health gate: service proof failed after %ds; rebooting to roll back",
                          elapsed);
                 vTaskDelay(pdMS_TO_TICKS(1000));
                 stack_watch_sample(StackWatch::OtaHealth);
-                if (nvs_restart_held_by_factory_reset("ota")) break;
+                if (nvs_restart_held_by_factory_reset("ota")) continue;
                 esp_restart();
                 break; // esp_restart() does not return; keep the fail-closed intent explicit.
             }

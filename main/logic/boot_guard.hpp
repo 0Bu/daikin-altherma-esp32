@@ -133,8 +133,10 @@ inline bool boot_reset_was_crash(int reset_reason) {
 //               the shortage is gone).
 //   HeapWatchdogRestart — boot_fails carried untouched (not a crash, and not evidence of health
 //               either); heap_rst carried, so the ladder continues.
-//   Clean     — both cleared: a power cycle, a rebooting save, an OTA install or a factory reset
-//               is the owner acting, and the start of a fresh attempt.
+//   Clean     — both cleared: any other non-crash reset. Mostly the owner acting (power cycle,
+//               rebooting save, OTA install, factory reset), but also the firmware's own unmarked
+//               software restarts (Ethernet fallback, WiFi rollback, health-gate rollback); each
+//               starts a fresh attempt.
 // The healthy timer still clears boot_fails only (boot_healthy_timer_arms); nothing but a Clean
 // boot clears heap_rst.
 enum class BootKind : uint8_t {

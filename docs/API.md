@@ -344,7 +344,7 @@ the link blob; it does not migrate or write the service blob.
 | `cfg` | Credentials and WiFi backup/rollback flags; MQTT/base, syslog, NTP, board identity, OTA channel, language, HomeHub/discovery latch, room/circulation mappings, weather, ENV III, diagnostics consent/generation |
 | `link` | Complete RX/TX/protocol/observation-identity cache; failed write preserves the previous complete entry. A rejected entry is reported in `/diag`; only detection (cached pair, build default, their swaps) or `/set_hp` rewrites it |
 | Legacy per-key credentials/services, `rx_pin`, `tx_pin`, `proto`, `board_set` | Read-only fallback inputs on devices upgraded from the per-key era; never written, removed only by a factory reset |
-| `boot_fails`, `heap_rst` | Independent crash-loop and bounded heap-restart counters; only a clean boot clears both |
+| `boot_fails`, `heap_rst` | Independent crash-loop and bounded heap-restart counters; a clean boot (non-crash, not the watchdog's own restart) clears both, ten minutes of uptime clear `boot_fails` |
 
 The current service layout is v19. Retired v9 actuation and v14 controller-mode bytes keep their
 positions, are written zero and ignored. Pre-v18 HomeHub configurations migrate as already searched
@@ -410,6 +410,7 @@ Switching away from M5Stack retires ENV III in the same atomic save.
 share the same preflight: enabling new pins probes SHT30/QMP6988 (422 if absent, 503 if busy), enabling
 running pins needs fresh evidence (422 if unreachable), moving an active bus is 409 `env3_disable_first`.
 Disabling needs no hardware proof. Responses include machine codes; only successful real changes reboot.
+Both routes answer a save that a concurrently detected X10A link would collide with as 409.
 
 ### Plant diagnostics and sources
 

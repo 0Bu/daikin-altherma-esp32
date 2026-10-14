@@ -139,6 +139,9 @@ struct State {
     bool      reject_new = false, interrupt = false;
     bool      fail_task_create = false, health_offline = false;
     bool      recovery_ap = false, hp_live = false, x10a_required = false, x10a_proven = false;
+    // Factory-reset latch adapter: `reset_latched` is what nvs_factory_reset_latched() reads
+    // (operation start); `reset_hold` is what the last-moment restart refusal answers.
+    bool                 reset_latched = false, reset_hold = false;
     size_t    free_bytes = 128 * 1024, largest_block = 64 * 1024;
     uint8_t   heap_restarts = 0;
     uint32_t  mqtt_skips = 0, poll_skips = 0;

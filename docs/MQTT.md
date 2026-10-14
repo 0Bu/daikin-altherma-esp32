@@ -188,8 +188,8 @@ The payload is flat. Fields are numeric except the stated text fields; connectiv
 
 Stack minima are null until sampled; WiFi RSSI/BSSID are null when offline. `max_alloc` is contiguous
 heap headroom. `heap_restarts` counts watchdog resets inherited by this boot, is carried across
-crash boots, returns to zero on the next clean boot (power cycle, rebooting save, OTA install,
-factory reset) and uses HA state class `measurement`. `mqtt_skipped` counts a publish
+crash boots, returns to zero on the next clean boot (any non-crash reset other than the watchdog's
+own) and uses HA state class `measurement`. `mqtt_skipped` counts a publish
 cycle interrupted by an allocation failure or the flat Modbus payload exceeding its **4 KiB**
 bound; earlier topics in that cycle may already have published. `mqtt_quiesced` counts deliberate
 OTA/Weather TLS pauses; `poll_skipped` counts sweeps not performed. These use `total_increasing`.

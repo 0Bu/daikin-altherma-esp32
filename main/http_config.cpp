@@ -108,6 +108,23 @@ static esp_err_t send_env3_err(httpd_req_t* req, const char* status,
     return send_err_code(req, status, code, msg);
 }
 
+// The answer to a failed /set_board or /set_env3 save. The save transaction refuses the snapshot
+// when a detection commit that landed after it moved the X10A link onto a pin the form claims
+// (logic/config_model.hpp, config_reconcile_breaks_local_pins): committing would persist a
+// collision the next boot must undo. That is a conflict with a concurrent change, not a failed
+// write, so it answers 409 like /set_hp's stale save; a resubmitted form is validated against the
+// live link and names the pin. The live pair comes from the allocation-free snapshot: the caller's
+// frame already holds two Configs.
+static esp_err_t send_local_pins_save_failure(httpd_req_t* req, Config& proposed) {
+    const ConfigLinkSnapshot link = config_link_snapshot();
+    proposed.rx_pin               = link.rx_pin;
+    proposed.tx_pin               = link.tx_pin;
+    if (config_local_pins_collide_with_link(proposed))
+        return send_err(req, "409 Conflict",
+                        "X10A link changed during save; check the pins and retry");
+    return send_err(req, "500 Internal Server Error", "config write failed");
+}
+
 // Shared test-before-persist gate for the standalone compatibility endpoint and the integrated
 // Board Hardware form. The caller owns the one eventual config_save(), so a failed sensor probe can
 // never leave board identity/peripherals saved while ENV III stayed behind (or vice versa).
@@ -1187,22 +1204,7 @@ static esp_err_t set_board(httpd_req_t* req) {
     if (!board_env_save_needed(c, cur))
         return http_send_json(req, "{\"ok\":true,\"reboot\":false}");   // nothing to write, no reboot
 
-    if (!config_save(c)) {
-        // The save transaction refuses this snapshot when a detection commit that landed after it
-        // moved the X10A link onto a pin this form claims (logic/config_model.hpp,
-        // config_reconcile_breaks_local_pins): committing would persist a collision the next boot
-        // must undo. That is a conflict with a concurrent change, not a failed write, so it answers
-        // 409 like /set_hp's stale save; a resubmitted form is validated against the live link and
-        // names the pin. The live pair comes from the allocation-free snapshot: this frame already
-        // holds two Configs.
-        const ConfigLinkSnapshot link = config_link_snapshot();
-        c.rx_pin                      = link.rx_pin;
-        c.tx_pin                      = link.tx_pin;
-        if (config_local_pins_collide_with_link(c))
-            return send_err(req, "409 Conflict",
-                            "X10A link changed during save; check the pins and retry");
-        return send_err(req, "500 Internal Server Error", "config write failed");
-    }
+    if (!config_save(c)) return send_local_pins_save_failure(req, c);
     // Only the statement moved: persisted, but no driver's pin changed, so no reboot. `saved` is
     // what keeps the ANSWER honest — {"reboot":false} alone makes the UI say "no changes", which
     // would report a write to NVS as nothing having happened. Additive, so the four routes that
@@ -1237,7 +1239,7 @@ static esp_err_t set_env3(httpd_req_t* req) {
 
     if (env3_config_same(c, cur))
         return http_send_json(req, "{\"ok\":true,\"reboot\":false}");
-    if (!config_save(c)) return send_err(req, "500 Internal Server Error", "config write failed");
+    if (!config_save(c)) return send_local_pins_save_failure(req, c);
     http_send_json(req, "{\"ok\":true,\"reboot\":true}");
     reboot_soon();
     return ESP_OK;

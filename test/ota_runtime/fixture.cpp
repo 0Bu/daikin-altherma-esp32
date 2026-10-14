@@ -280,8 +280,9 @@ bool     mqtt_x10a_publish_proven() { return sdk::state.x10a_proven; }
 NetLink  net_kind() { return sdk::state.health_offline ? NetLink::None : NetLink::Wifi; }
 bool     provisioning_ap_active() { return sdk::state.recovery_ap; }
 void     diag_printf(const char*, ...) {}
-// No factory reset runs in these cases; both OTA restarts take their ordinary path.
-bool     nvs_restart_held_by_factory_reset(const char*) { return false; }
+// Only the reset_hold/reset_latched cases model a factory reset; the others take the ordinary path.
+bool     nvs_factory_reset_latched() { return sdk::state.reset_latched; }
+bool     nvs_restart_held_by_factory_reset(const char*) { return sdk::state.reset_hold; }
 bool     http_deadline_init() noexcept { return true; }
 bool     http_deadline_ready() noexcept { return true; }
 HttpSocketDeadline::~HttpSocketDeadline() { disarm(); }
@@ -346,11 +347,60 @@ void reset(sdk::Fault fault) {
     std::memcpy(s.image + sizeof(header) + sizeof(esp_image_segment_header_t), &app, sizeof(app));
     daik::s_status = daik::OtaStatus{};
     daik::s_network_active.store(false);
-    daik::s_busy       = false;
-    daik::s_ota_task   = nullptr;
+    daik::s_busy         = false;
+    daik::s_install_held = false;
+    daik::s_ota_task     = nullptr;
     daik::s_generation = 0;
     daik::s_health_gate_armed.store(false);
     daik::s_task_args = daik::OtaTaskArgs{};
+}
+
+daik::OtaTaskArgs update_request() {
+    using namespace daik;
+    OtaTaskArgs request{};
+    request.mode    = OtaTaskMode::Update;
+    request.channel = OtaChannel::Dev;
+    REQUIRE(ota_default_feed_urls(OtaChannel::Dev, CONFIG_DAIKIN_OTA_MANIFEST_URL,
+                                  CONFIG_DAIKIN_OTA_FIRMWARE_BASE_URL, request.offer.feed));
+    std::strcpy(request.offer.version.data(), long_version);
+    std::memset(request.offer.app_sha256.data(), 'a', 64);
+    request.offer.app_sha256[64] = '\0';
+    return request;
+}
+
+// A factory reset latches during the install's done window, so the restart is held. The worker
+// must still return: its network lease ends (MQTT resumes, /status answers again) and busy clears,
+// while no later check or install may start in this boot — not even once the latch is released —
+// because the boot partition already selects the image a second install would rewrite.
+void reset_hold() {
+    reset(sdk::Fault::None);
+    using namespace daik;
+    ota_update_init();
+    const OtaTaskArgs request = update_request();
+    sdk::state.reset_hold     = true;
+    REQUIRE(start_locked(request, 0) != 0);
+    try {
+        s_ota_task->fn(s_ota_task->arg);
+    } catch (const sdk::Stop&) {}
+    const auto& s = sdk::state;
+    REQUIRE(s.selected == 1 && s.ota_ended == 1 && s.restart == 0);
+    REQUIRE(!ota_busy() && !ota_download_active());
+    REQUIRE(s.withdraw == 1 && s.pause == 1 && s.resume == 1);
+    REQUIRE(s_status.state == "done" && s_status.progress == 100);
+    REQUIRE(s_status.message == "Installed; starts on next reboot (factory reset)");
+    sdk::state.reset_hold = false;
+    REQUIRE(start_locked(request, s_generation) == 0);
+    REQUIRE(!ota_busy());
+}
+
+// No check or install starts while a factory reset holds the latch.
+void reset_latched() {
+    reset(sdk::Fault::None);
+    using namespace daik;
+    ota_update_init();
+    sdk::state.reset_latched = true;
+    REQUIRE(start_locked(update_request(), 0) == 0);
+    REQUIRE(!ota_busy() && sdk::state.notifications == 0);
 }
 
 void mutex_storage() {
@@ -659,6 +709,19 @@ int main(int argc, char** argv) {
             return dynamic_cast<const test::AssertionFailure*>(&e) ? 1 : 2;
         }
         std::cout << "PASS manifest_bounds\n";
+        ++count;
+    }
+    for (const auto& held : {std::make_pair("reset_hold", &test::reset_hold),
+                             std::make_pair("reset_latched", &test::reset_latched)}) {
+        if (argc > 1 && std::strcmp(argv[1], held.first) != 0) continue;
+        try {
+            held.second();
+        } catch (const std::exception& e) {
+            std::cerr << (dynamic_cast<const test::AssertionFailure*>(&e) ? "ASSERT " : "ERROR ")
+                      << held.first << ": " << e.what() << '\n';
+            return dynamic_cast<const test::AssertionFailure*>(&e) ? 1 : 2;
+        }
+        std::cout << "PASS " << held.first << '\n';
         ++count;
     }
     if (argc == 1 || std::strcmp(argv[1], "image_binding") == 0) {

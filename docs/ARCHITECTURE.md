@@ -372,7 +372,8 @@ The boot guard runs after NVS initialization and its static lock, before config,
 startup. It classifies each boot once: a crash, a heap-watchdog restart (a software reset the
 watchdog marked in `.noinit` RAM just before restarting) or a clean boot. A crash counts toward
 crash-loop safe mode and carries the heap-restart count; a watchdog restart carries the crash
-count; only a clean boot (power cycle, rebooting save, OTA install, factory reset) clears both.
+count; only a clean boot (any other non-crash reset: power cycle, any software restart such as a
+rebooting save, OTA install, Ethernet fallback or factory reset) clears both.
 Four crash boots latch crash-loop safe mode: retain network/HTTP recovery if mandatory startup
 succeeds and skip optional plant workers. Ten minutes of uptime clear the crash count; that timer
 is never armed while safe mode is latched, because suppressed workers prove nothing. NVS init
@@ -381,7 +382,8 @@ before driver startup. Heap recovery watches the largest internal block with sep
 arming/recovery thresholds and a continuous hold before restart; one sample at or above the
 recovery threshold ends the hold. NVS breadcrumbs bound repeated heap restarts and eventually latch
 heap safe mode until the next clean boot; the watchdog holds its restart while a factory reset
-erases. Safe mode is best-effort recovery, not proof that a leak elsewhere is resolved;
+erases, and an OTA in flight excuses a critical heap. Safe mode is best-effort recovery, not
+proof that a leak elsewhere is resolved;
 `safe_mode_cause` distinguishes heap from crash loop.
 
 Heap statistics, source liveness and task stack minima are visible without a broker through
@@ -389,8 +391,10 @@ Heap statistics, source liveness and task stack minima are visible without a bro
 successful X10A sweep; their sampling/persistence must not borrow plant availability. Recovery
 button factory reset is destructive to configuration and history and requires explicit authorization.
 While it holds the NVS write latch, every other restart (rebooting saves, Ethernet fallback, OTA
-install and health gate, heap watchdog, WiFi rollback) refuses and logs once; an OTA image already
-selected boots, or a pending image rolls back, on the reset's own reboot.
+install and health gate, heap watchdog, WiFi rollback) refuses and logs once, and no OTA operation
+starts; an OTA image already selected boots on the next reboot (no further OTA runs in that boot),
+and the health gate keeps retrying its rollback restart. A held save reboot is not retried if the
+reset fails. The refusal is checked immediately before each restart, not under the latch's lock.
 
 <a id="web-ui-config-flow"></a>
 ## Configuration ownership

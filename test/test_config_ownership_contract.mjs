@@ -267,15 +267,23 @@ const envRecheck = at(load, /if \(c\.env3_enabled\) \{/, yieldPins);
 assert.ok(linkFallback >= 0 && yieldPins > linkFallback && envRecheck > yieldPins,
   "config_load must yield the indicator/button to the final X10A pair right after its fallback");
 
-// 7. /set_board answers a refused (Stale) save as a conflict, re-checking the live link without a
-// third Config copy; the preset rows honour detected Ethernet pads like the pin lists.
-const setBoardStart = http.indexOf("static esp_err_t set_board(");
-const setBoardEnd = http.indexOf("static esp_err_t set_env3(", setBoardStart);
-assert.ok(setBoardStart >= 0 && setBoardEnd > setBoardStart, "the /set_board handler must remain identifiable");
-const setBoard = http.slice(setBoardStart, setBoardEnd);
-assert.match(setBoard,
-  /if \(!config_save\(c\)\) \{[\s\S]*?config_link_snapshot\(\);[\s\S]*?if \(config_local_pins_collide_with_link\(c\)\)\s*return send_err\(req, "409 Conflict",[\s\S]*?return send_err\(req, "500 Internal Server Error", "config write failed"\);\s*\}/,
-  "a /set_board save refused for a link collision must answer 409, a failed write 500");
+// 7. /set_board and /set_env3 answer a refused (Stale) save as a conflict, re-checking the live
+// link without a third Config copy; the preset rows honour detected Ethernet pads like the pins.
+const failureStart = http.indexOf("static esp_err_t send_local_pins_save_failure(");
+const failureEnd = http.indexOf("\n}\n", failureStart);
+assert.ok(failureStart >= 0 && failureEnd > failureStart,
+  "the shared local-pin save failure answer must remain identifiable");
+assert.match(http.slice(failureStart, failureEnd),
+  /config_link_snapshot\(\);[\s\S]*?if \(config_local_pins_collide_with_link\(proposed\)\)\s*return send_err\(req, "409 Conflict",[\s\S]*?return send_err\(req, "500 Internal Server Error", "config write failed"\);/,
+  "a save refused for a link collision must answer 409, a failed write 500");
+for (const [route, next] of [["set_board", "set_env3"], ["set_env3", "set_ota"]]) {
+  const start = http.indexOf(`static esp_err_t ${route}(`);
+  const end = http.indexOf(`static esp_err_t ${next}(`, start);
+  assert.ok(start >= 0 && end > start, `the /${route} handler must remain identifiable`);
+  assert.match(http.slice(start, end),
+    /if \(!config_save\(c\)\) return send_local_pins_save_failure\(req, c\);/,
+    `/${route} must map a failed save through the shared conflict-aware answer`);
+}
 const status = read("main/http_status.cpp");
 assert.match(status,
   /board_presets_offerable\(presets, BOARD_PRESETS_MAX, hw_octal_spi\(\),\s*config_board_reserved_pins\(c, net_eth_reserved_pins\(\)\)\)/,
