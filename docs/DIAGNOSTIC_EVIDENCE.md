@@ -76,11 +76,13 @@ values during confirmed space heating, with running compressor, non-DHW valve,
 defrost off, all declared fault rows current and normal, and every profile-provided special-phase
 witness current and inactive. A profile which lacks one or more of those optional phase witnesses
 may still produce a `limited` window; a witness declared by the profile but unreadable in one sweep
-is required current evidence and ends an active window. Discharge temperature, EEV command, and at least one structurally
-identified refrigerant-pressure side are mandatory. The high side has one sensor per profile, fixed by
-coverage: the hydronic transducer (0x62/15) when it is a structural refrigerant pressure, otherwise the
-outdoor high-pressure row (0x20/12); a sweep that lost that page leaves the side missing instead of
-substituting the other transducer. Cooling is excluded because the available
+is required current evidence and ends an active window. Discharge temperature, EEV command, and at
+least one structurally identified refrigerant-pressure side are mandatory. The high side has one sensor
+per profile, fixed by coverage: the hydronic transducer (0x62/15) when it is a structural refrigerant
+pressure, otherwise the outdoor high-pressure row (0x20/12); a sweep that lost that page leaves the side
+missing instead of substituting the other transducer. Whether real units of the profiles that rely on
+0x20/12 alone populate it while running is unverified; one that does not shows a missing side, not a
+value. Cooling is excluded because the available
 pressure-side evidence is heating-specific. Missing required data, a mode/valve/fault/phase change,
 non-monotonic time, or a gap beyond the profile-sized poll allowance ends the window. A source
 generation change resets continuity and may accept the current qualifying sample as the first sample
@@ -136,9 +138,10 @@ handoff (boot, reset, consent or circulation change) first holds the same 45 min
 that hold count down only on samples that read both witnesses. A completed window at
 or above 0.8 K/h produces **NOTE** immediately. Other completed windows remain observations; no
 eligible window remains **CHECKING**; the "no eligible window in 24 h" statement needs 24 hours of DHW
-scope since the last start or DHW reset. There is no reassuring tank-loss verdict or six-hour acceptance
-test. The result retains the maximum rate (floored to 0.1 K/h), completed/notable window counts and circulation correlation,
-not individual rates, an average or an energy integral.
+scope, which restarts when collection starts, at a DHW reset and at a restore that dropped DHW hours.
+There is no reassuring tank-loss verdict or six-hour acceptance test. The result retains the maximum
+rate (floored to 0.1 K/h), completed/notable window counts and circulation correlation, not
+individual rates, an average or an energy integral.
 
 Changing the circulation broker, mapping or interpretation retires DHW records and the ongoing
 filter, without discarding independent X10A checks. Display-name edits do not change evidence identity.
@@ -176,11 +179,12 @@ supports the relevance of very short runs but does not provide a universal Daiki
 
 **Firmware rule:** Starts and continuously witnessed completed runs are retained separately.
 Readable unchanged valve/mode inputs classify completed runs as space heating, DHW or cooling;
-mixed or gapped runs are censored. A sweep that read no X10A row at all (a firmware pause) inside a
-run is bounded blind time and censors only beyond 15 seconds; a start hidden by an unreadable sample
-opens a censored run. The classified share uses the larger of completed runs and starts minus one,
-so completions a restart lost keep the result an observation. Only at least 12 completed space-heating runs and at least 90%
-of all completed runs classified can support the heating assessment. A mean below ten minutes then
+mixed or gapped runs are censored. A sweep that read no X10A row at all (a firmware pause or a
+wholly silent bus sweep) inside a run is bounded blind time and censors only beyond 15 seconds; a
+start hidden by an unreadable sample opens a censored run. The classified share uses the larger of
+completed runs and starts minus one, so completions a restart lost keep the result an observation.
+Only at least 12 completed space-heating runs and at least 90% of all completed runs classified can
+support the heating assessment. A mean below ten minutes then
 produces **NOTE** immediately. An absence-of-short-run assessment additionally requires a full
 24-hour span and at least CHECKUP_REQUIRED_S of paired classification time.
 
@@ -196,13 +200,13 @@ completed heating runs, from samples whose predecessor was also running, and cha
 project heuristics, not limits copied from R1 or specified by Daikin. R1 studied different,
 non-modulating units and supports only the general relevance of short runs and system hydraulics.
 The page-0x20 mapping and positive-compressor freshness pairing are project protocol evidence.
-No defrost has been observed on a plant yet (none since recording began in July): if the compressor
-stops at defrost entry or exit, one heating run counts as several. That plant evidence belongs to the
-hardware acceptance cards.
+The 15-second all-blind tolerance and the larger-of-completed-runs-and-starts-minus-one population
+are project rules.
 
 **Not established:** The note identifies neither oversizing nor incorrect hydraulic balancing.
 The observed run population and its outdoor context do not establish building load, delivered heat
-or continuous weather coverage.
+or continuous weather coverage. Defrost behaviour has not yet been observed by this project; if the
+compressor stops at defrost entry or exit, one heating run counts as several.
 
 <a id="diagnosis-defrost"></a>
 ### 4. Defrost events (`defrost`)
@@ -309,7 +313,7 @@ including high pressure, compressor overheating, and inverter overcurrent, in it
 **Firmware rule:** The same exact counter must increase between comparable readable endpoints.
 All profile-declared counters and the compressor state must be readable at both endpoints. A
 non-zero startup value is a baseline; a decrease invalidates the comparison. A usable comparison
-without an increase displays **TRIAL**; a comparable increase displays **NOTE**. Both retain
+without an increase displays **TENTATIVE**; a comparable increase displays **NOTE**. Both retain
 experimental evidence and appear without a day-long wait. The retained event flag does not identify
 which counter increased or when. See checkup_retry_index(),
 CHECKUP_RETRY_COUNT and the Retries branch in [checkup.hpp](../main/logic/checkup.hpp).

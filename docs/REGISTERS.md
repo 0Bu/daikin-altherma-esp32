@@ -255,8 +255,8 @@ e.g. byte `0x94` → high nibble `9` → `U`, low nibble `4` → `4` → **`U4`*
 yields a blank first character (the code is shown as its single second character). Error *class* comes
 from `conv 203` (Normal / Error / Warning / Caution).
 
-`logic/error_codes.hpp` holds an optional code → short-English-description lookup for 63 two-character
-codes. The repository does not record the source document or revision of this table, so a description
+`logic/error_codes.hpp` holds an optional code → short-English-description lookup for the two-character
+codes listed in its `ERROR_CODE_TABLE`. The repository does not record the source document or revision of this table, so a description
 is a generic hint, not the meaning for a specific model; the unit's own manual remains authoritative. `hp_convert.cpp`
 appends the description to the published value when the table covers the decoded code (e.g. `U4:
 Indoor/outdoor unit communication problem`), and otherwise leaves the bare code unchanged. It is a

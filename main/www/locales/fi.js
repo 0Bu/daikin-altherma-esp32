@@ -1,4 +1,4 @@
-// translation-source: 6ad396b52b12e89d57ea56e0b172481c35788ec0819264d5dad7c8cff5b1912f
+// translation-source: a5a6f3725ede8e98cf262de294412581e8c392ad653d14d59168677a0fc728fe
 I18N.fi = localeValues([
   /* sys.nodata */ "Ei tietoja",
   /* sys.unreachable */ "Ei tavoiteta",
@@ -179,7 +179,7 @@ I18N.fi = localeValues([
   /* check.status.collecting */ "KESKEN",
   /* check.status.observation */ "MITTAUS",
   /* check.status.experimental */ "KOKEILU",
-  /* check.status.unavailable */ "PUUTTUU",
+  /* check.status.unavailable */ "EI KOSKE",
   /* check.detail.value_label */ "Arvo:",
   /* check.detail.assessment_label */ "Arvio:",
   /* check.detail.ok */ "Sääntö ei lauennut luettavissa tiedoissa.",

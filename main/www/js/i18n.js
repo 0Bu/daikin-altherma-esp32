@@ -296,7 +296,7 @@ const I18N = {
     "check.retries": "Protection counters",
     "check.status.ok": "OK", "check.status.info": "NOTE",
     "check.status.warn": "WARNING", "check.status.collecting": "CHECKING",
-    "check.status.observation": "MEASURED", "check.status.experimental": "TRIAL",
+    "check.status.observation": "MEASURED", "check.status.experimental": "TENTATIVE",
     "check.status.unavailable": "N/A",
     "check.detail.value_label": "Value:",
     "check.detail.assessment_label": "Assessment:",

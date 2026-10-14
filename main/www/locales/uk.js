@@ -1,4 +1,4 @@
-// translation-source: 6ad396b52b12e89d57ea56e0b172481c35788ec0819264d5dad7c8cff5b1912f
+// translation-source: a5a6f3725ede8e98cf262de294412581e8c392ad653d14d59168677a0fc728fe
 I18N.uk = localeValues([
   /* sys.nodata */ "Немає даних",
   /* sys.unreachable */ "Недоступно",
@@ -144,7 +144,7 @@ I18N.uk = localeValues([
   /* card.candidates */ "Можливі моделі",
   /* card.oueeprom */ "Ідентифікатор зовнішнього блока",
   /* card.checkup */ "Діагностика системи · 24 год",
-  /* service.title */ "Контур холодоагенту",
+  /* service.title */ "Холодоагент (опалення)",
   /* service.state.waiting */ "ОЧІКУЄ",
   /* service.state.observing */ "ЗАПИСУЄ",
   /* service.state.limited */ "ЧАСТКОВО",
@@ -179,7 +179,7 @@ I18N.uk = localeValues([
   /* check.status.collecting */ "ПЕРЕВІРКА",
   /* check.status.observation */ "ВИМІР",
   /* check.status.experimental */ "ТЕСТОВО",
-  /* check.status.unavailable */ "НЕМАЄ",
+  /* check.status.unavailable */ "Н/Д",
   /* check.detail.value_label */ "Значення:",
   /* check.detail.assessment_label */ "Оцінка:",
   /* check.detail.ok */ "Правило не спрацювало в читабельних даних.",

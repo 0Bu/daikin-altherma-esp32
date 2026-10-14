@@ -1,4 +1,4 @@
-// translation-source: 6ad396b52b12e89d57ea56e0b172481c35788ec0819264d5dad7c8cff5b1912f
+// translation-source: a5a6f3725ede8e98cf262de294412581e8c392ad653d14d59168677a0fc728fe
 const plNoun = (n, one, few, many) => {
   const value = Math.abs(Number(n)), mod10 = value % 10, mod100 = value % 100;
   return value === 1 ? one
@@ -149,7 +149,7 @@ I18N.pl = localeValues([
   /* card.candidates */ "Możliwe modele",
   /* card.oueeprom */ "ID jednostki zewnętrznej",
   /* card.checkup */ "Diagnostyka instalacji · 24 h",
-  /* service.title */ "Obieg chłodniczy",
+  /* service.title */ "Obieg chł. (ogrzewanie)",
   /* service.state.waiting */ "CZEKA",
   /* service.state.observing */ "REJESTRUJE",
   /* service.state.limited */ "CZĘŚCIOWO",
@@ -184,7 +184,7 @@ I18N.pl = localeValues([
   /* check.status.collecting */ "W TOKU",
   /* check.status.observation */ "POMIAR",
   /* check.status.experimental */ "TESTOWO",
-  /* check.status.unavailable */ "BRAK",
+  /* check.status.unavailable */ "NIE DOTYCZY",
   /* check.detail.value_label */ "Wartość:",
   /* check.detail.assessment_label */ "Ocena:",
   /* check.detail.ok */ "Reguła nie zadziałała w czytelnych danych.",

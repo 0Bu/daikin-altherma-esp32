@@ -1,4 +1,4 @@
-// translation-source: 6ad396b52b12e89d57ea56e0b172481c35788ec0819264d5dad7c8cff5b1912f
+// translation-source: a5a6f3725ede8e98cf262de294412581e8c392ad653d14d59168677a0fc728fe
 I18N.it = localeValues([
   /* sys.nodata */ "Nessun dato",
   /* sys.unreachable */ "Non raggiungibile",
@@ -144,7 +144,7 @@ I18N.it = localeValues([
   /* card.candidates */ "Modelli possibili",
   /* card.oueeprom */ "ID unità esterna",
   /* card.checkup */ "Diagnostica impianto · 24 h",
-  /* service.title */ "Circuito frigorifero",
+  /* service.title */ "Circuito frigo (risc.)",
   /* service.state.waiting */ "IN ATTESA",
   /* service.state.observing */ "REGISTRA",
   /* service.state.limited */ "PARZIALE",

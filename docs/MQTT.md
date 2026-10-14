@@ -218,7 +218,7 @@ and missing configured eligibility gates fail closed. Configured `enabled_path` 
 configured `hvac_mode_path` must report `heat`. Independent temperature/target/time topics are
 supported; a separate time topic must carry the measurement time of the same temperature sample, because
 the firmware cannot verify that pairing and ages a retained temperature by it. Targets have no age check:
-a mapped or fixed target is treated as the standing setpoint. fixed targets cannot coexist with a mapped target. [API.md](API.md) owns request bounds.
+a mapped or fixed target is treated as the standing setpoint. Fixed targets cannot coexist with a mapped target. [API.md](API.md) owns request bounds.
 
 `<base>/heating_curve` has `schema_version:3` and two top-level objects:
 

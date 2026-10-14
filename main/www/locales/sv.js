@@ -1,4 +1,4 @@
-// translation-source: 6ad396b52b12e89d57ea56e0b172481c35788ec0819264d5dad7c8cff5b1912f
+// translation-source: a5a6f3725ede8e98cf262de294412581e8c392ad653d14d59168677a0fc728fe
 I18N.sv = localeValues([
   /* sys.nodata */ "Inga data",
   /* sys.unreachable */ "Inte tillgänglig",
@@ -179,7 +179,7 @@ I18N.sv = localeValues([
   /* check.status.collecting */ "SAMLAR IN",
   /* check.status.observation */ "MÄTVÄRDE",
   /* check.status.experimental */ "TESTVIS",
-  /* check.status.unavailable */ "SAKNAS",
+  /* check.status.unavailable */ "EJ AKTUELL",
   /* check.detail.value_label */ "Mätning:",
   /* check.detail.assessment_label */ "Bedömning:",
   /* check.detail.ok */ "Regeln utlöstes inte i läsbara data.",

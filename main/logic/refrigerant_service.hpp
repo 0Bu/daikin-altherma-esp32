@@ -104,7 +104,7 @@ inline const char* refrigerant_service_mode_name(RefrigerantServiceMode m) {
 }
 
 // Capability comes from publishable, converter-adjudicated profile rows.  `high_pressure` includes
-// the always-live hydronic-page refrigerant transducer where present; it never includes Water
+// the hydronic-page refrigerant transducer where structurally identified; it never includes Water
 // pressure.  The four special phases are profile-specific today, so their absence limits claim
 // strength instead of disabling useful raw observation.
 struct RefrigerantServiceCoverage {

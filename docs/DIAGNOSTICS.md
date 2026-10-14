@@ -21,7 +21,7 @@ the installation's health.
 | **WARNING** | A current unit-reported fault, or pressure confirmed continuously at or below the project's boundary during the window. |
 | **CHECKING** | A required day, signal coverage or eligible observation is missing. The detail names what is missing. |
 | **MEASURED** | A measurement or event population without enough evidence for a good/bad assessment. |
-| **TRIAL** | An experimental counter comparison whose complete manufacturer semantics are unknown. |
+| **TENTATIVE** | An experimental counter comparison whose complete manufacturer semantics are unknown. |
 | **N/A** | The active profile does not supply the required signals. |
 
 A reassuring day-based result needs both the full 24-hour span and at least 90% usable coverage
@@ -67,15 +67,16 @@ the completed window count and how many reached the project's **0.8 K/h** note t
 
 **Meaning:** At least one such window produces **NOTE**. Other completed windows are **MEASURED**;
 no eligible window means **CHECKING**; "no eligible window in 24 h" needs a full day of tank-cooling
-evidence since the last start or circulation change. There is no green tank-loss result. An optional
+evidence since collection started or the circulation witness changed. There is no green tank-loss result. An optional
 circulation-power witness shows how many notable windows overlapped electrical pump operation or
 had a sufficiently observed pump-off state.
 
 **Important limit:** Charging, pump activity, apparent draws and missing readings exclude time. Fast
 continuous cooling above about **1.85 K/h** can resemble a draw and be excluded too. One sensor
 in a stratified tank does not measure whole-tank heat or electricity loss, and pump overlap does not
-prove a cause. After a seen charge, a restart or a reset the check waits 45 minutes before a window;
-unread valve or heater readings extend that wait. A charge no reading saw can still affect a window.
+prove a cause. After a charge seen for at least two minutes, or a fresh start (power-up, reset,
+consent or circulation change), the check waits 45 minutes before a window; unread valve or heater
+readings extend that wait. A charge no reading saw can still affect a window.
 
 **Evidence and limits:** [Tank cooling](DIAGNOSTIC_EVIDENCE.md#diagnosis-dhw-loss)
 
@@ -95,11 +96,11 @@ no usable compressor observation remains **CHECKING**.
 **Important limit:** There is no pooled all-mode assessment, and an unfinished long run cannot dilute
 completed short runs. Twelve runs and ten minutes are project heuristics, not Daikin limits. These
 figures do not identify oversizing or hydraulic imbalance. Optional outdoor min/mean is context for
-accepted heating runs only. Firmware pauses of up to 15 seconds inside a run (update check, weather
-download) keep its class; a start hidden by an unreadable reading counts as an unclassified run.
+accepted heating runs only. A sweep that read nothing for up to 15 seconds inside a run (an update
+check, a weather download or a silent bus) keeps its class; a start hidden by an unreadable reading counts as an unclassified run.
 After a restart, restored hours can lack the completion of a run that crossed an hour boundary, so
 the result stays **MEASURED** until those hours leave the window. If the compressor stops during a
-defrost, one heating run counts as several; this has not yet been observed on a plant.
+defrost, one heating run counts as several; whether it does has not been checked yet.
 
 **Evidence and limits:** [Compressor cycling](DIAGNOSTIC_EVIDENCE.md#diagnosis-cycling)
 
@@ -172,7 +173,7 @@ Controller settings, weather and operating schedules can make this activity inte
 **In plain language:** The board compares five internal counters at consecutive readable endpoints,
 with a known compressor state. Only a comparable increase counts as an observed event.
 
-**Meaning:** A usable comparison without an increase shows **TRIAL**; a comparable increase
+**Meaning:** A usable comparison without an increase shows **TENTATIVE**; a comparable increase
 shows **NOTE**. Both retain experimental evidence and appear without a full-day wait. A non-zero
 startup value is a baseline, and a decrease has no established reset or wrap interpretation.
 

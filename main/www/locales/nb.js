@@ -1,4 +1,4 @@
-// translation-source: 6ad396b52b12e89d57ea56e0b172481c35788ec0819264d5dad7c8cff5b1912f
+// translation-source: a5a6f3725ede8e98cf262de294412581e8c392ad653d14d59168677a0fc728fe
 I18N.nb = localeValues([
   /* sys.nodata */ "Ingen data",
   /* sys.unreachable */ "Ikke tilgjengelig",
@@ -179,7 +179,7 @@ I18N.nb = localeValues([
   /* check.status.collecting */ "SAMLER",
   /* check.status.observation */ "MÅLING",
   /* check.status.experimental */ "TESTVIS",
-  /* check.status.unavailable */ "MANGLER",
+  /* check.status.unavailable */ "IKKE AKTUELT",
   /* check.detail.value_label */ "Måling:",
   /* check.detail.assessment_label */ "Vurdering:",
   /* check.detail.ok */ "Regelen ble ikke utløst i lesbare data.",

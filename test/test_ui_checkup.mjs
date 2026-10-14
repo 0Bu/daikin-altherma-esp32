@@ -309,7 +309,7 @@ assert.match(ui.detail({ ...defrost, verdict: "ok", evidence: "observation",
                         reason: "defrost_events_insufficient" }), /Fewer than three paired defrosts/);
 assert.match(ui.detail({ id: "defrost", verdict: "ok", evidence: "observation",
                          reason: "no_paired_runtime", count: 3 }), /event count only/);
-assert.equal(ui.value({ id: "retries", verdict: "ok", evidence: "experimental", seen: 0 }), "TRIAL");
+assert.equal(ui.value({ id: "retries", verdict: "ok", evidence: "experimental", seen: 0 }), "TENTATIVE");
 assert.equal(ui.value({ id: "flow", verdict: "ok", evidence: "observation" }), "MEASURED");
 assert.equal(ui.value({ id: "heater", verdict: "ok", evidence: "observation" }), "MEASURED");
 
