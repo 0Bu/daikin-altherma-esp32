@@ -73,9 +73,9 @@ void safe_mode_begin() {
         // Clean / intentional reboot (power-on, config-save restart, OTA) — a burst of these
         // during provisioning must never accumulate into a false trip, so the counter was reset.
         if (err != ESP_OK)
-            diag_printf("boot: FAILED to clear crash counter (err=%s) — unrelated crash boots "
-                        "keep accumulating and may false-trip safe mode\n",
-                        esp_err_to_name(err));
+            diag_printf("boot: %s, FAILED to clear crash counter (err=%s) — unrelated crashes "
+                        "may false-trip safe mode\n",
+                        "clean boot", esp_err_to_name(err));
         break;
     }
 }
@@ -105,9 +105,9 @@ static void healthy_timer_cb(void* arg) {
         if (err == ESP_OK)
             diag_printf("boot: healthy for %ds, cleared crash counter\n", BOOT_HEALTHY_S);
         else
-            diag_printf("boot: healthy for %ds, FAILED to clear crash counter (err=%s) — unrelated "
-                        "crash boots keep accumulating and may false-trip safe mode\n",
-                        BOOT_HEALTHY_S, esp_err_to_name(err));
+            diag_printf("boot: %s, FAILED to clear crash counter (err=%s) — unrelated crashes "
+                        "may false-trip safe mode\n",
+                        "healthy timer", esp_err_to_name(err));
     }
 
     // esp_timer stops a one-shot before entering its callback, but keeps the timer object allocated
@@ -124,16 +124,15 @@ static void healthy_timer_cb(void* arg) {
 }
 
 void safe_mode_arm_healthy() {
-    // Refused while safe mode is latched — see boot_healthy_timer_arms() for why staying up with the
-    // poll engine and MQTT switched off is not evidence that the fault is gone. Said out loud rather
-    // than skipped silently: a counter that deliberately does NOT age out looks like a bug to the
-    // next person reading /diag, and the line names the way out.
+    // Refused while safe mode is latched — see boot_healthy_timer_arms() for why staying up with
+    // the poll engine and MQTT switched off is not evidence that the fault is gone. Said out loud
+    // rather than skipped silently: a counter that deliberately does NOT age out looks like a bug
+    // to the next person reading /diag, and the line names the way out: fix the config or install a
+    // newer build, then any clean reboot (a power cycle, a rebooting save, an OTA install or a
+    // factory reset) clears the counter.
     if (!boot_healthy_timer_arms(s_safe_mode)) {
-        diag_printf(
-            "boot: SAFE MODE — healthy timer NOT armed; with the poll engine and MQTT down, "
-            "staying up says nothing about the fault. Fix the config or install a newer "
-            "build — a power cycle, a rebooting save, an OTA install or a factory reset "
-            "clears the counter\n");
+        diag_printf("boot: SAFE MODE — healthy timer NOT armed; fix the config or update, then a "
+                    "clean reboot clears the counter\n");
         return;
     }
 
@@ -149,16 +148,18 @@ void safe_mode_arm_healthy() {
     args.name            = "safe_healthy";
     const esp_err_t create_err = esp_timer_create(&args, &s_healthy_timer);
     if (create_err != ESP_OK) {
-        diag_printf("boot: FAILED to create healthy timer (err=%s) — crash counter will not age "
-                    "out this boot\n", esp_err_to_name(create_err));
+        diag_printf("boot: FAILED to %s healthy timer (err=%s) — crash counter will not age out "
+                    "this boot\n",
+                    "create", esp_err_to_name(create_err));
         return;
     }
 
     const esp_err_t start_err = esp_timer_start_once(
         s_healthy_timer, static_cast<uint64_t>(BOOT_HEALTHY_S) * 1000000ULL);
     if (start_err != ESP_OK) {
-        diag_printf("boot: FAILED to start healthy timer (err=%s) — crash counter will not age "
-                    "out this boot\n", esp_err_to_name(start_err));
+        diag_printf("boot: FAILED to %s healthy timer (err=%s) — crash counter will not age out "
+                    "this boot\n",
+                    "start", esp_err_to_name(start_err));
         const esp_err_t delete_err = esp_timer_delete(s_healthy_timer);
         if (delete_err == ESP_OK)
             s_healthy_timer = nullptr;

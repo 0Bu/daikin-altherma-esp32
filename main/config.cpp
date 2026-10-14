@@ -16,7 +16,6 @@
 #include <atomic>
 #include <cstdlib>          // abort() — the fail-stop when the config mutex can't be created
 #include <memory> // unique_ptr — the factory seed builds its Config off the caller's stack
-#include <new>    // std::nothrow, std::bad_alloc
 #include <vector>
 
 namespace daik {
@@ -200,19 +199,18 @@ void config_load() {
     s_cfg_blob_unreadable.store(!config_load_allows_automatic_writes(cfg_verdict),
                                 std::memory_order_release);
     if (cfg_verdict == ConfigLoadVerdict::Rejected) {
-        diag_printf(
-            "config: stored settings blob rejected (%u bytes, stored version %d, this build "
-            "reads v%u-v%u: %s) — running on legacy/default settings; the stored blob is "
-            "kept until an explicit save\n",
-            static_cast<unsigned>(raw.size()),
-            stored_blob_version(raw.data(), raw.size(), CONFIG_BLOB_MAGIC_TEXT),
-            static_cast<unsigned>(CONFIG_BLOB_VERSION_MIN),
-            static_cast<unsigned>(CONFIG_BLOB_VERSION),
-            stored_blob_reject_reason(raw.data(), raw.size(), CONFIG_BLOB_MAGIC_TEXT,
-                                      CONFIG_BLOB_VERSION_MIN, CONFIG_BLOB_VERSION));
+        // Running on the legacy/default settings; the stored blob is kept until an explicit save.
+        diag_printf("config: stored settings rejected (%u B, v%d, reads v%u-v%u: %s) — defaults in "
+                    "use, blob kept\n",
+                    static_cast<unsigned>(raw.size()),
+                    stored_blob_version(raw.data(), raw.size(), CONFIG_BLOB_MAGIC_TEXT),
+                    static_cast<unsigned>(CONFIG_BLOB_VERSION_MIN),
+                    static_cast<unsigned>(CONFIG_BLOB_VERSION),
+                    stored_blob_reject_reason(raw.data(), raw.size(), CONFIG_BLOB_MAGIC_TEXT,
+                                              CONFIG_BLOB_VERSION_MIN, CONFIG_BLOB_VERSION));
     } else if (cfg_verdict == ConfigLoadVerdict::ReadError) {
-        diag_printf("config: stored settings blob could not be read (NVS read error) — running on "
-                    "legacy/default settings; the stored entry is kept until an explicit save\n");
+        diag_printf("config: stored settings unreadable (NVS read error) — defaults in use, blob "
+                    "kept\n");
     }
     if (blob_loaded) {
         c.wifi_ssid = b.wifi_ssid;                     c.wifi_pass = b.wifi_pass;
@@ -409,8 +407,8 @@ void config_load() {
     // wiring.
     switch (config_load_verdict(stored_entry_read(link_read), link_blob_loaded)) {
     case ConfigLoadVerdict::Rejected:
-        diag_printf("config: stored X10A link entry rejected (%u bytes, stored version %d: %s) — "
-                    "using the legacy/build-default pins until detection or /set_hp rewrites it\n",
+        // The legacy/build-default pins stay until detection or /set_hp rewrites the entry.
+        diag_printf("config: stored X10A link rejected (%u B, v%d: %s) — default pins in use\n",
                     static_cast<unsigned>(link_raw.size()),
                     stored_blob_version(link_raw.data(), link_raw.size(), LINK_BLOB_MAGIC_TEXT),
                     stored_blob_reject_reason(link_raw.data(), link_raw.size(),
@@ -418,8 +416,7 @@ void config_load() {
                                               LINK_BLOB_VERSION));
         break;
     case ConfigLoadVerdict::ReadError:
-        diag_printf("config: stored X10A link entry could not be read (NVS read error) — using the "
-                    "legacy/build-default pins\n");
+        diag_printf("config: stored X10A link unreadable (NVS read error) — default pins in use\n");
         break;
     case ConfigLoadVerdict::Absent:
     case ConfigLoadVerdict::Loaded:
@@ -465,13 +462,13 @@ void config_load() {
     {
         const LocalPinsRepair yielded = config_yield_local_pins_to_link(c);
         if (yielded.led)
-            diag_printf("config: indicator disabled — its GPIO is the X10A link's (rx=%d tx=%d) "
-                        "after the link fallback\n",
-                        c.rx_pin, c.tx_pin);
+            diag_printf(
+                "config: %s disabled — GPIO taken by the fallback X10A link (rx=%d tx=%d)\n",
+                "indicator", c.rx_pin, c.tx_pin);
         if (yielded.btn)
-            diag_printf("config: recovery button disabled — its GPIO is the X10A link's (rx=%d "
-                        "tx=%d) after the link fallback\n",
-                        c.rx_pin, c.tx_pin);
+            diag_printf(
+                "config: %s disabled — GPIO taken by the fallback X10A link (rx=%d tx=%d)\n",
+                "recovery button", c.rx_pin, c.tx_pin);
     }
     // The fallback pair above can itself collide with ENV III (for example a damaged link cache is
     // replaced by the XIAO 44/43 defaults while an ENV mapping already uses them). Optional ENV
@@ -532,10 +529,9 @@ static ConfigSaveResult save_whole(const Config& requested, bool owns_link) {
     // A Stale X10A save is routine (its handler re-derives and retries), but a Stale SERVICE save
     // is the reconcile refusing a newer detected link that collides with the requested local pins.
     if (!owns_link && out.result == ConfigSaveResult::Stale)
-        diag_printf(
-            "config: save refused — the X10A link detected meanwhile (rx=%d tx=%d) collides "
-            "with the requested indicator/button/ENV III pins\n",
-            live_rx, live_tx);
+        diag_printf("config: save refused — detected X10A link (rx=%d tx=%d) collides with the "
+                    "requested local pins\n",
+                    live_rx, live_tx);
     switch (out.failed) {
     case ConfigSaveStep::None:
         break;
@@ -544,12 +540,12 @@ static ConfigSaveResult save_whole(const Config& requested, bool owns_link) {
                     static_cast<unsigned>(CONFIG_BLOB_MAX_STR));
         break;
     case ConfigSaveStep::ServiceWrite:
-        diag_printf("config: NVS blob write failed key=cfg err=%s — nothing saved\n",
+        diag_printf("config: NVS blob write failed key=%s err=%s — nothing saved\n", "cfg",
                     esp_err_to_name(out.store_error));
         break;
     case ConfigSaveStep::LinkWrite:
         if (owns_link)
-            diag_printf("config: NVS blob write failed key=link err=%s — nothing saved\n",
+            diag_printf("config: NVS blob write failed key=%s err=%s — nothing saved\n", "link",
                         esp_err_to_name(out.store_error));
         else
             diag_printf("config: atomic link-cache write failed after service save (%s; previous "
@@ -588,12 +584,13 @@ bool config_factory_seed_blob(std::vector<uint8_t>& out) {
         board = config_board_hardware(g_cfg);
     }
     try {
-        std::unique_ptr<Config> fresh(new (std::nothrow) Config());
-        if (!fresh) return false;
+        // A failed allocation throws std::bad_alloc into the catch below, like every other one
+        // here.
+        std::unique_ptr<Config> fresh(new Config());
         seed_without_blob(*fresh, /*read_legacy_keys=*/false);
         config_carry_board_hardware(*fresh, board);
-        std::unique_ptr<ConfigBlob> blob(new (std::nothrow) ConfigBlob(config_blob_from(*fresh)));
-        if (!blob || !config_blob_strings_fit(*blob)) return false;
+        std::unique_ptr<ConfigBlob> blob(new ConfigBlob(config_blob_from(*fresh)));
+        if (!config_blob_strings_fit(*blob)) return false;
         std::vector<uint8_t> raw = config_blob_serialize(*blob);
         out.swap(raw);
         return true;

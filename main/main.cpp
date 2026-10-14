@@ -68,9 +68,9 @@ static void boot_sequence() {
     // Classify this boot ONCE (crash / heap-watchdog restart / clean) and apply the crash counter —
     // before config_load and everything else that can crash, so a crash boot is counted first.
     daik::safe_mode_begin();
+    // Not durable this boot: the config, the WiFi-rollback backup and the safe-mode crash counter.
     if (nvs_err != ESP_OK)
-        ESP_LOGE(TAG, "nvs_flash_init failed: %s — continuing WITHOUT persistence this boot "
-                      "(config, WiFi-rollback backup and the safe-mode crash counter are not durable)",
+        ESP_LOGE(TAG, "nvs_flash_init failed: %s — continuing WITHOUT persistence this boot",
                  esp_err_to_name(nvs_err));
     // ESP-NETIF is a process-wide singleton and its API contract requires exactly one call from
     // app startup. Keeping it here also makes the STA-failure -> setup-portal fallback safe: both
@@ -179,7 +179,8 @@ static void boot_sequence() {
         // recovered through the web UI, and every optional consumer stays out of the way.
         daik::mb_start();
     } else {
-        ESP_LOGW(TAG, "SAFE MODE: ENV III + X10A + HomeHub + MQTT + Open-Meteo weather skipped — recover the config via the web UI");
+        // Recovery goes through the web UI, which safe mode keeps up.
+        ESP_LOGW(TAG, "SAFE MODE: ENV III, X10A, HomeHub, MQTT and weather skipped");
     }
     daik::ota_health_gate_arm();         // keep rollback armed until this image proves healthy
     daik::safe_mode_arm_healthy();       // clear the crash counter after BOOT_HEALTHY_S of continuous uptime

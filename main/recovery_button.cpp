@@ -38,8 +38,9 @@ constexpr int WIPE_TOTAL_MS  = 1500;
 
 void factory_reset() {
     status_led_signal(LedSignal::Wiping);
-    diag_printf("button: held %lus — FACTORY RESET, erasing stored config (daik_cfg), history, "
-                "coredump and MQTT retirement record; board hardware is kept\n",
+    // Erases the stored config (daik_cfg), history, coredump and MQTT retirement record; the board
+    // hardware statement is kept (the seed below).
+    diag_printf("button: held %lus — FACTORY RESET, erasing all but the board hardware\n",
                 static_cast<unsigned long>(BUTTON_FIRE_MS / 1000));
     const int64_t t0 = esp_timer_get_time();
     // The board-hardware statement (preset, indicator, this button) survives the reset: without it
@@ -83,9 +84,8 @@ void factory_reset() {
         // indicator back, and name the error: the web UI is still reachable on the old network
         // (which is the failure this button exists for, so the user is probably not on it), but
         // /diag + syslog at least record WHY the reset did not finish.
-        diag_printf("button: factory reset FAILED (%s) — stored config may be partly erased; NOT "
-                    "rebooting, the running config stays in use; release and hold again to "
-                    "retry\n",
+        diag_printf("button: factory reset FAILED (%s) — config may be partly erased; NOT "
+                    "rebooting, hold again to retry\n",
                     esp_err_to_name(e));
         status_led_signal(LedSignal::None);
         return;
@@ -95,17 +95,19 @@ void factory_reset() {
         // next setup could restore old trend data or expose an old raw memory dump. Stay in this
         // boot with producers suppressed; releasing and holding again retries the failed erase.
         diag_printf("button: factory reset INCOMPLETE — wifi=%s history=%s coredump=%s "
-                    "mqtt_retire=pending; NOT rebooting, release and hold again to retry\n",
+                    "mqtt_retire=%s; NOT rebooting, hold again to retry\n",
                     esp_err_to_name(wifi_e), history_erased ? "erased" : "pending",
-                    crash_erased ? "erased" : "pending");
+                    crash_erased ? "erased" : "pending", "pending");
         status_led_signal(LedSignal::None);
         return;
     }
     if (!retire_erased) {
-        // Everything else is gone; the retirement record is not. Same rule, same retry: the NVS
-        // latch stays set, so nothing recreates the record while this boot waits for the next hold.
-        diag_printf("button: factory reset INCOMPLETE — MQTT retirement record not erased; NOT "
-                    "rebooting, release and hold again to retry\n");
+        // Everything else is gone; the retirement record is not. Same rule, same retry (and the
+        // same line): the NVS latch stays set, so nothing recreates the record while this boot
+        // waits for the next hold.
+        diag_printf("button: factory reset INCOMPLETE — wifi=%s history=%s coredump=%s "
+                    "mqtt_retire=%s; NOT rebooting, hold again to retry\n",
+                    "ESP_OK", "erased", "erased", "pending");
         status_led_signal(LedSignal::None);
         return;
     }
@@ -113,17 +115,12 @@ void factory_reset() {
     // the one write the latch still allows, and never ahead of an erase that could still fail. Best
     // effort: without it the reset is still complete and private; the next boot merely starts with
     // no indicator or button configured, which the user can restate in the setup portal.
-    if (!have_seed) {
-        diag_printf("button: board hardware not kept (seed unavailable) — set the board again in "
-                    "the setup portal\n");
-    } else {
-        const esp_err_t seed_e =
-            nvs_set_blob_after_factory_reset(CONFIG_KEY_SERVICE, seed.data(), seed.size());
-        if (seed_e != ESP_OK)
-            diag_printf("button: board hardware not kept (%s) — set the board again in the setup "
-                        "portal\n",
-                        esp_err_to_name(seed_e));
-    }
+    const esp_err_t seed_e =
+        have_seed ? nvs_set_blob_after_factory_reset(CONFIG_KEY_SERVICE, seed.data(), seed.size())
+                  : ESP_FAIL;
+    if (seed_e != ESP_OK)
+        diag_printf("button: board hardware not kept (%s) — set it again in the setup portal\n",
+                    have_seed ? esp_err_to_name(seed_e) : "seed unavailable");
     diag_printf("button: factory reset complete — rebooting into the setup portal\n");
     stack_watch_sample(StackWatch::Button);
     esp_restart();

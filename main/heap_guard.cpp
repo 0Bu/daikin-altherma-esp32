@@ -30,9 +30,8 @@ namespace {
 const char* HEAP_RESTARTS_KEY = "heap_rst";
 
 HeapWatchdog s_wd;
-uint8_t      s_restarts          = 0; // consecutive watchdog restarts this boot honours
+uint8_t      s_restarts         = 0; // consecutive watchdog restarts this boot honours
 bool         s_exhausted_logged = false;
-bool         s_reset_hold_logged = false; // the factory-reset hold has been said on /diag
 uint32_t     s_watch_minutes = 0; // countdown lines already emitted for the current critical run
 
 // The watchdog's "the next reset is mine" statement (logic/boot_guard.hpp's HeapRestartMarker), in
@@ -84,21 +83,10 @@ bool transition_may_log(uint32_t now) {
 // them is how a format string acquires a wrong argument.
 void note_suppressed() {
     if (s_suppressed == 0) return;
-    diag_printf("heap: %lu further transition(s) in the last %lus were not logged — the heap is "
-                "flapping across the critical band\n",
+    diag_printf("heap: %lu more transition(s) in %lus not logged — flapping across the band\n",
                 static_cast<unsigned long>(s_suppressed),
                 static_cast<unsigned long>(TRANSITION_QUIET_MS / 1000));
     s_suppressed = 0;
-}
-
-// The restart is held while a factory reset is erasing stored data (heap_guard.hpp says why). Said
-// once per boot, not once a second: the run stays critical, so the Restart verdict comes back on
-// every later sample and asks again.
-void note_restart_held_for_factory_reset() {
-    if (s_reset_hold_logged) return;
-    s_reset_hold_logged = true;
-    diag_printf("heap: restart HELD — a factory reset is erasing stored data and restarts the "
-                "device itself; restarting now could boot a partially erased device\n");
 }
 
 } // namespace
@@ -128,9 +116,8 @@ void heap_guard_begin() {
             // cycle can never come up minimal on it (boot_heap_ladder_step). What it still costs is
             // a head start for the next CRASH or watchdog boot, which carries the stored count by
             // design — so this boot says so, with the figure that would be inherited.
-            diag_printf("heap: clean boot, FAILED to clear a stored heap-restart count of %ld "
-                        "(err=%s) — ignored now, but a later crash or watchdog restart would "
-                        "inherit it\n",
+            diag_printf("heap: clean boot, FAILED to clear heap-restart count %ld (err=%s) — a "
+                        "later crash would inherit it\n",
                         static_cast<long>(stored), esp_err_to_name(err));
         }
     }
@@ -154,9 +141,10 @@ void heap_guard_begin() {
     // recommends is a clean boot, and a clean boot never honours the count (boot_heap_ladder_step).
     if (heap_boot_must_be_minimal(s_restarts)) {
         safe_mode_latch_heap();
-        diag_printf("heap: %u consecutive restarts did not fix the shortage — coming up MINIMAL "
-                    "(poll engine + MQTT never started) so the web UI and OTA have the heap to "
-                    "answer. Install a newer build; a power cycle retries the full stack\n",
+        // MINIMAL: the poll engine and MQTT never start, so the web UI and OTA have the heap to
+        // answer. A newer build is the fix; a power cycle retries the full stack.
+        diag_printf("heap: %u restarts did not fix the shortage — coming up MINIMAL (no poll, no "
+                    "MQTT); update or power cycle\n",
                     static_cast<unsigned>(s_restarts));
     }
 
@@ -211,8 +199,8 @@ void heap_guard_sample() {
             if (!transition_may_log(s.now_ms)) return;
             note_suppressed();
             if (v.ota_excused)
-                diag_printf("heap: critical run of %lus set aside — an OTA is in flight and holds "
-                            "the largest allocations this firmware makes\n",
+                // An OTA holds the largest allocations this firmware makes.
+                diag_printf("heap: critical run of %lus set aside — an OTA is in flight\n",
                             static_cast<unsigned long>(v.critical_ms / 1000));
             else
                 diag_printf("heap: recovered after %lus (largest internal block %u B)\n",
@@ -227,26 +215,24 @@ void heap_guard_sample() {
                 if (!s_exhausted_logged) {
                     s_exhausted_logged = true;
                     // Not reachable while the invariant holds: a boot that inherited the full count
-                    // comes up in safe mode (heap_guard_begin), and safe mode never creates the poll
-                    // task this function is called from. Kept, and worded as the anomaly it would
-                    // be, because deleting it would remove the only thing bounding the ladder if
-                    // that invariant is ever broken — and an unbounded restart loop is a worse
-                    // failure than the wedge.
-                    diag_printf("heap: still critical after %lus at the restart cap (%u) while NOT "
-                                "minimal — the end-of-ladder safe-mode latch did not take. Staying "
-                                "up rather than restarting forever; install a newer build\n",
-                                static_cast<unsigned long>(v.critical_ms / 1000),
-                                static_cast<unsigned>(s_restarts));
+                    // comes up in safe mode (heap_guard_begin), and safe mode never creates the
+                    // poll task this function is called from. Kept, and worded as the anomaly it
+                    // would be, because deleting it would remove the only thing bounding the ladder
+                    // if that invariant is ever broken — and an unbounded restart loop is a worse
+                    // failure than the wedge. NOT minimal means the end-of-ladder safe-mode latch
+                    // did not take; staying up beats restarting forever.
+                    diag_printf(
+                        "heap: critical %lus at the restart cap (%u), NOT minimal — staying "
+                        "up; install a newer build\n",
+                        static_cast<unsigned long>(v.critical_ms / 1000),
+                        static_cast<unsigned>(s_restarts));
                 }
                 return;
             }
             // A factory reset is erasing stored data: hold the restart, and touch nothing — no
             // breadcrumb write, no marker (heap_guard.hpp). Asked BEFORE the write, so a held
             // restart leaves no count behind for a restart that never happened.
-            if (nvs_factory_reset_latched()) {
-                note_restart_held_for_factory_reset();
-                return;
-            }
+            if (nvs_restart_held_by_factory_reset("heap")) return;
             {
                 // Flush the flap count BEFORE the restart line: this is the last chance it has to
                 // reach syslog, and "the heap was flapping" is part of why the device rebooted.
@@ -277,10 +263,7 @@ void heap_guard_sample() {
             vTaskDelay(pdMS_TO_TICKS(300));
             // Asked again after the drain: the recovery button can latch its reset during those
             // 300 ms, and the latch, not the first answer, is what a restart must respect.
-            if (nvs_factory_reset_latched()) {
-                note_restart_held_for_factory_reset();
-                return;
-            }
+            if (nvs_restart_held_by_factory_reset("heap")) return;
             // The marker goes in LAST, immediately before the restart and nowhere else, so it can
             // only ever describe this esp_restart(): every path that leaves above — the cap, the
             // factory-reset hold — leaves it unset, and no other "sw" reset (a settings save, an

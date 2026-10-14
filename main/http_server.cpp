@@ -44,10 +44,8 @@ void http_start() {
         // and works without the web UI, and a reboot loop would take it down with it. But the
         // failure is no longer serial-only. The diag ring cannot be read over HTTP once this has
         // failed — diag_printf also forwards to syslog (started before this), which is then the one
-        // place a remote reader can learn why the web UI is gone.
-        ESP_LOGE("http", "server start failed: %s", esp_err_to_name(start_err));
-        diag_printf("http: server start FAILED (%s) — no web UI, API, MCP or OTA this boot; a "
-                    "reboot retries\n",
+        // place a remote reader can learn why the web UI is gone. (It echoes to serial too.)
+        diag_printf("http: server start failed (%s) — no web UI, API, MCP or OTA until a reboot\n",
                     esp_err_to_name(start_err));
         return;
     }

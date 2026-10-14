@@ -113,7 +113,8 @@ assert.equal(count(sample, /\besp_restart\s*\(/g), 1, "the heap watchdog has exa
 // ── 4. No heap-watchdog restart while a factory reset is erasing ─────────────────────────────────
 const restartCase = sample.slice(sample.indexOf("case HeapAction::Restart:"));
 assert.ok(restartCase.length < sample.length, "the Restart verdict must remain identifiable");
-const guardRe = /if \(nvs_factory_reset_latched\(\)\) \{\s*note_restart_held_for_factory_reset\(\);\s*return;\s*\}/g;
+// `code` blanks the helper's "<who>" argument, keeping only its quotes.
+const guardRe = /if \(nvs_restart_held_by_factory_reset\(" *"\)\) return;/g;
 const holds = [...restartCase.matchAll(guardRe)].map((m) => m.index);
 const write = restartCase.indexOf("nvs_set_i32(HEAP_RESTARTS_KEY");
 const drain = restartCase.indexOf("vTaskDelay(pdMS_TO_TICKS(300));");

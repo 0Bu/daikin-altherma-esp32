@@ -52,8 +52,8 @@ bool heap_guard_take_restart_marker();
 // NEVER RESTARTS DURING A FACTORY RESET. While nvs_factory_reset_latched() holds, the recovery
 // button is erasing stored data; it restarts the device itself when the erase completes, and
 // deliberately not when it fails. A restart in that window would boot a partially erased device
-// that looks like a finished reset. The restart is held, said once on /diag, and the device keeps
-// running.
+// that looks like a finished reset. The restart is held (nvs_restart_held_by_factory_reset says so
+// on /diag, once per boot), and the device keeps running.
 void heap_guard_sample();
 
 } // namespace daik

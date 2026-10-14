@@ -398,8 +398,7 @@ void mb_autodiscover_initial() {
     // the search entirely rather than spend it on a result that may not be written. The decision
     // stays pending and runs on the first networked boot after an explicit save.
     if (config_stored_blob_unreadable()) {
-        diag_printf("modbus: initial mDNS search skipped — the stored settings could not be read "
-                    "and are kept until an explicit save\n");
+        diag_printf("modbus: initial mDNS search skipped — stored settings unreadable, kept\n");
         return;
     }
     // Do not consume the one-shot decision in the captive portal or before a LAN lease exists. The

@@ -343,7 +343,8 @@ void syslog_init() {
     // syslog, so bail. Status ownership uses static storage; only the ping semaphore is advisory.
     if (!s_ping.done) diag_printf("syslog: ping semaphore alloc failed — reachability degraded\n");
     if (!s_queue) {
-        diag_printf("syslog: message queue alloc failed — syslog forwarding disabled this boot\n");
+        diag_printf("syslog: %s alloc failed — syslog forwarding disabled this boot\n",
+                    "message queue");
         return;
     }
 
@@ -555,7 +556,7 @@ void syslog_init() {
                 // thin for that call chain.
             },
             "syslog_task", 6144, nullptr, TASK_PRIO_SYSLOG, nullptr))
-        diag_printf("syslog: task alloc failed — syslog forwarding disabled this boot\n");
+        diag_printf("syslog: %s alloc failed — syslog forwarding disabled this boot\n", "task");
 }
 
 bool syslog_network_quiesced() { return s_network_quiesced.load(std::memory_order_acquire); }

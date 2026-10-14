@@ -280,27 +280,45 @@ assert.ok(!ifStatements(reset, seedWrite, restart).some((b) => /\breturn\b/.test
 
 // ── Every OTHER restart refuses while the factory-reset latch is set ──────────────────────────
 // A restart after nvs_erase_all() latched would boot a partially erased device that looks like a
-// finished reset. A site passes when, in its own function, an `if (nvs_factory_reset_latched())`
-// whose body leaves (return/continue/break) sits in a block that also contains the restart, and no
-// vTaskDelay separates the last such check from the restart: the latch is re-read after any wait.
+// finished reset. A site passes when, in its own function, an `if (nvs_factory_reset_latched())` or
+// `if (nvs_restart_held_by_factory_reset("<who>"))` (the same latch read, plus its once-per-boot
+// /diag line) whose body leaves (return/continue/break) sits in a block that also contains the
+// restart, and no vTaskDelay separates the last such check from the restart: the latch is re-read
+// after any wait.
 // There is no exception: even wifi.cpp's credential-rollback restart, which only follows a
 // config_save() the latch refuses, re-checks after its syslog drain, because a save that landed
 // just before the latch would otherwise restart into the erase.
 function refusalGuards(s, at) {
   const fn = enclosingFunction(s, at);
   const refusals = ifStatements(s, fn.open, at)
-    .filter((b) => /^nvs_factory_reset_latched\(\)$/.test(b.cond.replace(/\s+/g, "")) &&
+    // `structure` blanks string literals, so the helper's argument reads as `""` here.
+    .filter((b) => /^(?:nvs_factory_reset_latched\(\)|nvs_restart_held_by_factory_reset\(""\))$/
+                     .test(b.cond.replace(/\s+/g, "")) &&
                    /\b(return|continue|break)\b/.test(s.slice(b.bodyAt, b.bodyEnd)) &&
                    b.bodyEnd <= at)
     .filter((b) => {
       const block = enclosingBraces(s, b.at)[0];
       return block.open < at && at < block.close;
     });
-  if (refusals.length === 0) return "no `if (nvs_factory_reset_latched())` refusal precedes it";
+  if (refusals.length === 0) return "no factory-reset latch refusal precedes it";
   const last = refusals[refusals.length - 1];
   if (/\bvTaskDelay\s*\(/.test(s.slice(last.bodyEnd, at)))
     return "a vTaskDelay separates the last latch check from the restart";
   return "";
+}
+// The shared helper is accepted above only because it IS the latch read: it must answer false
+// exactly when the latch is clear and true whenever it is set, with nothing able to wait in between.
+{
+  const nvsStructure = source("main/nvs_storage.cpp").structure;
+  const at = nvsStructure.indexOf("bool nvs_restart_held_by_factory_reset(");
+  assert.ok(at >= 0, "nvs_storage.cpp must define nvs_restart_held_by_factory_reset()");
+  const open = nvsStructure.indexOf("{", at);
+  const held = nvsStructure.slice(open, matching(nvsStructure, open) + 1);
+  assert.match(held, /^\{[^]*?if\s*\(\s*!\s*nvs_factory_reset_latched\(\)\s*\)\s*return\s+false;[^]*\breturn\s+true;\s*\}$/,
+    "nvs_restart_held_by_factory_reset() must return the factory-reset latch");
+  assert.equal((held.match(/\breturn\b/g) || []).length, 2,
+    "nvs_restart_held_by_factory_reset() answers the latch and nothing else");
+  assert.doesNotMatch(held, /\bvTaskDelay\s*\(/, "the latch helper must not wait");
 }
 for (const rel of mainSources) {
   const s = source(rel).structure;

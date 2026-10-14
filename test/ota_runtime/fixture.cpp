@@ -281,7 +281,7 @@ NetLink  net_kind() { return sdk::state.health_offline ? NetLink::None : NetLink
 bool     provisioning_ap_active() { return sdk::state.recovery_ap; }
 void     diag_printf(const char*, ...) {}
 // No factory reset runs in these cases; both OTA restarts take their ordinary path.
-bool     nvs_factory_reset_latched() { return false; }
+bool     nvs_restart_held_by_factory_reset(const char*) { return false; }
 bool     http_deadline_init() noexcept { return true; }
 bool     http_deadline_ready() noexcept { return true; }
 HttpSocketDeadline::~HttpSocketDeadline() { disarm(); }

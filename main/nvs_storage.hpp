@@ -62,6 +62,13 @@ NvsBlobRead nvs_read_blob(const char* key, std::vector<uint8_t>& out);
 // a partially erased device that looks like a finished reset.
 bool nvs_factory_reset_latched();
 
+// The refusal every such restart site asks, immediately before its esp_restart() with no wait in
+// between: nvs_factory_reset_latched(), and when it holds, one "<who>: restart held, factory reset
+// in progress" line per boot on /diag (the first site to be held says it; the others stay quiet,
+// since a held site asks again on every later cycle). Allocation-free. A complete reset reboots
+// the board itself; an incomplete one stays up on purpose until the owner retries it.
+bool nvs_restart_held_by_factory_reset(const char* who);
+
 // The one write allowed behind the latch: after a SUCCESSFUL nvs_erase_all() the factory reset
 // seeds the board-hardware statement it keeps (config_factory_seed_blob). Refused unless the latch
 // is set, so no ordinary writer can use it to bypass the reset.

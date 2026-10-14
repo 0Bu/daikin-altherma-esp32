@@ -37,7 +37,7 @@
 #include "hp_modbus.hpp"        // mb_reconfigure — start/stop the second, independent stack
 #include "mqtt_ha.hpp"          // mqtt_reference_reconfigure — re-evaluate its master-gated binding
 #include "net.hpp"              // net_eth_reserved_pins — the pads a detected W5500 is clocking
-#include "nvs_storage.hpp" // nvs_factory_reset_latched — reboot_soon defers to a factory reset
+#include "nvs_storage.hpp" // nvs_restart_held_by_factory_reset — reboot_soon defers to a reset
 #include "weather_forecast.hpp"
 
 #include "cJSON.h"
@@ -56,7 +56,6 @@
 #include <sys/socket.h>
 #include <netdb.h>
 #include <fcntl.h>
-#include <atomic>
 #include <cmath>
 #include <cerrno>       // errno / EINPROGRESS in the non-blocking TCP probe
 #include <cstdio>       // snprintf — the probe's fixed-precision value + register rendering
@@ -68,19 +67,13 @@ namespace daik {
 // Every /set_* that persists and reboots ends here, ~400 ms after answering {"reboot":true}. A
 // factory reset that latched NVS inside that window owns the next restart: rebooting now would
 // come up on a namespace the reset is still erasing — a partial reset that looks like a finished
-// one. Refuse instead (one /diag line per boot, not one per save): a complete reset reboots the
-// board itself, and an incomplete one stays up on purpose until the owner retries it. The save
-// that led here landed before the latch, so the reset erases it along with everything else.
-static std::atomic<bool> s_reboot_refusal_logged{false};
-
+// one. Refuse instead (nvs_restart_held_by_factory_reset says so once per boot): a complete reset
+// reboots the board itself, and an incomplete one stays up on purpose until the owner retries it.
+// The save that led here landed before the latch, so the reset erases it along with everything
+// else.
 static void reboot_soon() {
     vTaskDelay(pdMS_TO_TICKS(400));
-    if (nvs_factory_reset_latched()) {
-        if (!s_reboot_refusal_logged.exchange(true))
-            diag_printf("config: reboot after the save refused — a factory reset is erasing stored "
-                        "data\n");
-        return;
-    }
+    if (nvs_restart_held_by_factory_reset("config")) return;
     esp_restart();
 }
 

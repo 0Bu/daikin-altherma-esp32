@@ -218,7 +218,9 @@ static void wifi_watchdog_task(void*) {
         // Without the completion semaphore every probe would report Unmeasurable (gateway_probe
         // guards on it), which the policy eventually reads as a wedge and would re-associate a
         // healthy link on a timer. Don't run blind — retire the task and log it.
-        diag_printf("wifi: watchdog semaphore alloc failed — ghost-association recovery disabled\n");
+        diag_printf("wifi: watchdog %s alloc failed — ghost-association recovery disabled this "
+                    "boot\n",
+                    "semaphore");
         stack_watch_sample(StackWatch::WifiWatchdog);
         vTaskDelete(nullptr);
         return;
@@ -429,26 +431,18 @@ static __attribute__((noinline)) void wifi_finish_sta_rollback() {
     if (!keep_stored && config_save(rollback_cfg)) {
         vTaskDelay(pdMS_TO_TICKS(500));
         // A save that landed just before a factory reset latched must not restart into the erase:
-        // the reset owns the next reboot (nvs_storage.hpp, nvs_factory_reset_latched).
-        if (nvs_factory_reset_latched()) {
-            diag_printf("wifi: rollback restart refused — a factory reset is erasing stored data\n");
-            return;
-        }
+        // the reset owns the next reboot (nvs_storage.hpp, nvs_restart_held_by_factory_reset).
+        if (nvs_restart_held_by_factory_reset("wifi")) return;
         esp_restart();
     }
-    if (keep_stored) {
-        diag_printf("wifi: rollback restore to '%s' was not persisted — the stored settings could "
-                    "not be read and are kept until an explicit save; opening the setup portal\n",
-                    DiagLogIdentifier(rollback_cfg.wifi_ssid).c_str());
-        return;
-    }
-    // A false result here now means the one atomic blob did not land — not an unrelated
-    // self-healing link-cache maintenance failure — so the restored credentials themselves
-    // are definitely not durable. Erring toward the portal costs a re-entry; rebooting would
-    // re-read the rejected credentials and risk the loop this branch exists to avoid.
-    diag_printf("wifi: rollback restore to '%s' was not persisted — opening the setup "
-                "portal rather than risk a reboot loop\n",
-                DiagLogIdentifier(rollback_cfg.wifi_ssid).c_str());
+    // Not persisted, either on purpose (keep_stored: the stored settings could not be read and are
+    // kept until an explicit save) or because the one atomic blob did not land — not an unrelated
+    // self-healing link-cache maintenance failure — so the restored credentials themselves are
+    // definitely not durable. Erring toward the portal costs a re-entry; rebooting would re-read
+    // the rejected credentials and risk the loop this branch exists to avoid.
+    diag_printf("wifi: rollback restore to '%s' was not persisted — %sopening the setup portal\n",
+                DiagLogIdentifier(rollback_cfg.wifi_ssid).c_str(),
+                keep_stored ? "stored settings kept; " : "");
 }
 
 static __attribute__((noinline)) void wifi_finish_sta_success() {
@@ -461,12 +455,13 @@ static __attribute__((noinline)) void wifi_finish_sta_success() {
     if (success_cfg.wifi_rollback_active) {
         // A stored settings blob this boot could not use is kept for an explicit save: clearing the
         // flag would write the legacy/default fallback over it. This session already ignores the
-        // flag (s_rollback_pending above); only a later boot could still act on it.
+        // flag (s_rollback_pending above); only a later boot could still act on it. Both lines
+        // below share one format.
         if (config_stored_blob_unreadable()) {
-            diag_printf("wifi: could not clear the rollback backup ('%s') — the stored settings "
-                        "could not be read and are kept until an explicit save; a later connect "
-                        "failure may restore it\n",
-                        DiagLogIdentifier(success_cfg.wifi_ssid_backup).c_str());
+            diag_printf("wifi: could not clear the rollback backup ('%s') — "
+                        "%sa later connect failure may restore it\n",
+                        DiagLogIdentifier(success_cfg.wifi_ssid_backup).c_str(),
+                        "stored settings kept; ");
             return;
         }
         const std::string stale_backup = success_cfg.wifi_ssid_backup;
@@ -478,8 +473,8 @@ static __attribute__((noinline)) void wifi_finish_sta_success() {
         // connection is good, and refusing it over a stale flag would be the worse trade.
         if (!config_save(success_cfg))
             diag_printf("wifi: could not clear the rollback backup ('%s') — "
-                        "a later connect failure may restore it\n",
-                        DiagLogIdentifier(stale_backup).c_str());
+                        "%sa later connect failure may restore it\n",
+                        DiagLogIdentifier(stale_backup).c_str(), "");
     }
 }
 
@@ -504,7 +499,9 @@ bool wifi_start_sta() {
     // an overflow into an immediate panic — which would land during the memory-pressure wedge this
     // watchdog exists to break, i.e. exactly when it must not.
     if (xTaskCreate(wifi_watchdog_task, "wifi_wd", 4096, nullptr, TASK_PRIO_WIFI_WD, nullptr) != pdPASS)
-        diag_printf("wifi: watchdog task alloc failed — ghost-association recovery disabled this boot\n");
+        diag_printf("wifi: watchdog %s alloc failed — ghost-association recovery disabled this "
+                    "boot\n",
+                    "task");
     return true;
 }
 

@@ -1,6 +1,7 @@
 // Thin NVS helpers for the "daik_cfg" namespace. See nvs_storage.hpp. IDF's own nvs_* C
 // functions are called with a leading :: so they don't collide with our daik::nvs_* wrappers.
 #include "nvs_storage.hpp"
+#include "diag_log.hpp" // diag_printf — the factory-reset restart hold is said once per boot
 #include "nvs.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
@@ -124,12 +125,24 @@ esp_err_t nvs_erase_all() {
 
 bool nvs_factory_reset_latched() { return s_writes_disabled.load(std::memory_order_acquire); }
 
+bool nvs_restart_held_by_factory_reset(const char* who) {
+    // A plain load and store, not an exchange (a compare-and-swap loop on this core): two sites
+    // held in the same instant could both say it, which costs one duplicate line and nothing else.
+    static std::atomic<bool> s_said{false};
+    if (!nvs_factory_reset_latched()) return false;
+    if (!s_said.load(std::memory_order_relaxed)) {
+        s_said.store(true, std::memory_order_relaxed);
+        diag_printf("%s: restart held, factory reset in progress\n", who);
+    }
+    return true;
+}
+
 esp_err_t nvs_set_blob_after_factory_reset(const char* key, const void* data, size_t len) {
     Lock lk(s_write_mtx);
     if (!lk.acquired() || !s_writes_disabled.load(std::memory_order_acquire))
         return ESP_ERR_INVALID_STATE;
     nvs_handle_t h;
-    esp_err_t e = ::nvs_open(NS, NVS_READWRITE, &h);
+    esp_err_t    e = ::nvs_open(NS, NVS_READWRITE, &h);
     if (e != ESP_OK) return e;
     e = ::nvs_set_blob(h, key, data, len);
     if (e == ESP_OK) e = ::nvs_commit(h);
@@ -145,8 +158,14 @@ NvsBlobRead nvs_read_blob(const char* key, std::vector<uint8_t>& out) {
     if (open_err != ESP_OK) return NvsBlobRead::Error;
     size_t len = 0;
     esp_err_t e = ::nvs_get_blob(h, key, nullptr, &len);   // query size first
-    if (e == ESP_ERR_NVS_NOT_FOUND) { ::nvs_close(h); return NvsBlobRead::NotFound; }
-    if (e != ESP_OK || len == 0) { ::nvs_close(h); return NvsBlobRead::Error; }
+    if (e == ESP_ERR_NVS_NOT_FOUND) {
+        ::nvs_close(h);
+        return NvsBlobRead::NotFound;
+    }
+    if (e != ESP_OK || len == 0) {
+        ::nvs_close(h);
+        return NvsBlobRead::Error;
+    }
     out.resize(len);
     e = ::nvs_get_blob(h, key, out.data(), &len);
     ::nvs_close(h);
