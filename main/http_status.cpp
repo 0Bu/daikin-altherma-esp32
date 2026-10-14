@@ -2595,19 +2595,28 @@ static esp_err_t h_scan(httpd_req_t* req) {
     // A scan materializes arbitrary nearby SSIDs and asks the Wi-Fi stack for a concurrent radio
     // operation. Neither belongs between OTA's admission sample and its TLS/X509 allocations.
     if (ota_download_active()) return network_tls_busy(req);
-    WifiScanEntry e[20];
-    int n = wifi_scan(e, 20);
-    std::string j = "{\"networks\":[";
-    for (int i = 0; i < n; i++) {
-        if (i) j += ",";
-        j += "{\"ssid\":";
-        json_append_quoted(j, e[i].ssid);
-        j += ",\"rssi\":";
-        j += std::to_string(e[i].rssi);
-        j += "}";
-    }
-    j += "]}";
-    return http_send_json(req, j.c_str());
+    WifiScanEntry  e[20];
+    int            n = wifi_scan(e, 20);
+    HttpJsonChunks chunks(HttpChunkEmitter{req});
+    httpd_resp_set_type(req, "application/json");
+    return finish_bounded_stream(chunks,
+                                 [&e, n](auto& out) {
+                                     out += "{\"networks\":[";
+                                     for (int i = 0; i < n; i++) {
+                                         if (i) out += ',';
+                                         out += "{\"ssid\":";
+                                         json_append_quoted(out, e[i].ssid);
+                                         out += ",\"rssi\":";
+                                         const int rssi = e[i].rssi;
+                                         if (rssi < 0) out += '-';
+                                         append_json_uint(
+                                             out, static_cast<unsigned>(rssi < 0 ? -rssi : rssi));
+                                         out += '}';
+                                     }
+                                     out += "]}";
+                                 })
+               ? ESP_OK
+               : ESP_FAIL;
 }
 
 void http_register_status(httpd_handle_t s, HttpSurface surface) {

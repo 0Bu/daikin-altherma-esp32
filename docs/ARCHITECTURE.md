@@ -256,10 +256,10 @@ Configuration routes allocate request scratch only up to their existing API body
 parser releases it once cJSON owns the document, before configuration snapshots or persistence;
 scratch allocation failure reaches the common 503 boundary without changing settings.
 
-Large status, value, history, log and MCP responses stream bounded chunks. Before first emission,
+Large status, value, history, WiFi scan, log and MCP responses stream bounded chunks. Before first emission,
 allocation failure becomes HTTP 503. After emission starts, close an incomplete stream rather than
 trying to send a second response or unwinding through C dispatch. Status and MCP have explicit
-incomplete-stream handling, as do values, history and diagnostic logs. Values pre-stage readings
+incomplete-stream handling, as do values, history, WiFi scans and diagnostic logs. Values pre-stage readings
 and dwell metadata bound to the same cache/source identity and decoded state. A snapshot remains internally
 consistent even when another source updates during serialization; separately sampled sources do
 not become one simultaneous physical observation.

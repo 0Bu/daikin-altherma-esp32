@@ -53,7 +53,7 @@ struct httpd_config_t {
 inline httpd_config_t HTTPD_DEFAULT_CONFIG() { return {}; }
 namespace sdk {
 inline bool   track_allocations = false;
-inline size_t allocations = 0, fail_allocation = 0;
+inline size_t allocations = 0, fail_allocation = 0, largest_allocation = 0;
 inline void (*after_chunk)() = nullptr;
 struct TransportAllocation {
     bool previous = track_allocations;

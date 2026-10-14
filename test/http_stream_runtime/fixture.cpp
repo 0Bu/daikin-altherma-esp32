@@ -11,9 +11,12 @@ logic::DwellReading dwell_reading(uint8_t, uint8_t, int);
 #endif
 
 void* operator new(size_t size) {
-    if (sdk::track_allocations && ++sdk::allocations == sdk::fail_allocation) {
-        sdk::fail_allocation = 0;
-        throw std::bad_alloc();
+    if (sdk::track_allocations) {
+        sdk::largest_allocation = std::max(sdk::largest_allocation, size);
+        if (++sdk::allocations == sdk::fail_allocation) {
+            sdk::fail_allocation = 0;
+            throw std::bad_alloc();
+        }
     }
     if (void* memory = std::malloc(size ? size : 1)) return memory;
     throw std::bad_alloc();
@@ -39,6 +42,10 @@ inline uint32_t                       epoch                = 42;
 inline int                            failure = 0, stage_race = 0;
 inline unsigned                       stack_samples = 0;
 inline unsigned                       wifi_calls    = 0;
+inline daik::WifiScanEntry            scan_rows[20]{};
+inline int                            scan_count = 0, scan_failure = 0;
+inline unsigned                       scan_calls             = 0;
+inline size_t                         scan_first_allocations = 0;
 inline std::string                    log;
 [[noreturn]] void                     fail(const char* message) {
     std::fprintf(stderr, "FAIL %s: %s\n", oracle.c_str(), message);
@@ -55,6 +62,7 @@ void emit(const httpd_req_t& req, const char* name) {
 void reset() {
     sdk::track_allocations = false;
     sdk::allocations = sdk::fail_allocation = 0;
+    sdk::largest_allocation                 = 0;
     sdk::after_chunk                        = nullptr;
     current                                 = {};
     current.profile                         = "generic";
@@ -64,11 +72,15 @@ void reset() {
     epoch                                              = 42;
     failure = stage_race = 0;
     stack_samples = wifi_calls = 0;
-    sdk::now                   = 10000000;
-    sdk::clock_step            = 0;
-    fixture_ticks              = 0;
-    fixture_delay              = nullptr;
-    identity                   = {"generic", 0x1234, 7, 11};
+    scan_count = scan_failure = 0;
+    scan_calls                = 0;
+    scan_first_allocations    = 0;
+    std::memset(scan_rows, 0, sizeof(scan_rows));
+    sdk::now        = 10000000;
+    sdk::clock_step = 0;
+    fixture_ticks   = 0;
+    fixture_delay   = nullptr;
+    identity        = {"generic", 0x1234, 7, 11};
     rows.clear();
     modbus_rows.clear();
     for (size_t i = 0; i < 129; ++i) {
@@ -98,15 +110,16 @@ httpd_req_t request() {
 }
 esp_err_t invoke(httpd_req_t& req, const char* uri, esp_err_t (*handler)(httpd_req_t*),
                  size_t fail_at = 0) {
-    req.uri                = uri;
-    req.method             = HTTP_GET;
-    req.user_ctx           = reinterpret_cast<void*>(handler);
-    sdk::allocations       = 0;
-    sdk::fail_allocation   = fail_at;
-    sdk::track_allocations = true;
-    const auto result      = daik::handle_then_settle_body(&req);
-    sdk::track_allocations = false;
-    sdk::fail_allocation   = 0;
+    req.uri                 = uri;
+    req.method              = HTTP_GET;
+    req.user_ctx            = reinterpret_cast<void*>(handler);
+    sdk::allocations        = 0;
+    sdk::largest_allocation = 0;
+    sdk::fail_allocation    = fail_at;
+    sdk::track_allocations  = true;
+    const auto result       = daik::handle_then_settle_body(&req);
+    sdk::track_allocations  = false;
+    sdk::fail_allocation    = 0;
     return result;
 }
 void next_request() {
@@ -119,6 +132,14 @@ void successful(const httpd_req_t& req) {
     check(req.status == "200 OK" && req.final_chunks == 1 && req.max_chunk <= 1024 &&
               req.replacement_responses == 0 && req.late_status_changes == 0,
           "completed stream is unbounded or replaced");
+}
+void maximum_scan() {
+    scan_count = 20;
+    for (int i = 0; i < scan_count; ++i) {
+        std::memset(scan_rows[i].ssid, 0x80, 32);
+        scan_rows[i].ssid[32] = '\0';
+        scan_rows[i].rssi = static_cast<int8_t>(i == 0 ? -128 : i == 18 ? 0 : i == 19 ? 127 : -i);
+    }
 }
 void allocation_sweep(const char* uri, esp_err_t (*handler)(httpd_req_t*)) {
     auto baseline = request();
@@ -186,6 +207,14 @@ WifiInfo    wifi_info() {
     info.connected = true;
     info.rssi      = -42;
     return info;
+}
+int wifi_scan(WifiScanEntry* out, int max) {
+    ++fixture::scan_calls;
+    if (fixture::scan_failure == 1) throw std::bad_alloc();
+    if (fixture::scan_failure == 2) throw std::runtime_error("injected scan failure");
+    const int n = std::min(max, fixture::scan_count);
+    std::copy_n(fixture::scan_rows, n, out);
+    return n;
 }
 EthInfo                           net_eth_info() { return {}; }
 EthPins                           net_eth_pins() { return {}; }
@@ -485,6 +514,69 @@ int main(int argc, char** argv) {
               "protocol prefix/suffix failed");
         successful(req);
         emit(req, "framed-values");
+    });
+    run("scan_completed_oracles", [] {
+        maximum_scan();
+        sdk::after_chunk = [] {
+            scan_first_allocations = sdk::allocations;
+            // The service changes after emission; only the prepared fixed-size snapshot may
+            // reach the wire. Existing public SSID encoding remains the shared JSON encoder.
+            std::memset(scan_rows, 0, sizeof(scan_rows));
+        };
+        auto req = request();
+        check(invoke(req, "/scan", daik::h_scan) == ESP_OK, "maximum scan failed");
+        check(sdk::largest_allocation <= 2048 && sdk::allocations == scan_first_allocations,
+              "scan materialized a body or allocated after emission");
+        successful(req);
+        check(req.response.size() > 4096 && req.chunks >= 5, "maximum scan was truncated");
+        emit(req, "scan-maximum-invalid");
+        std::printf("SCAN bytes=%zu chunks=%u allocations=%zu largest_allocation=%zu\n",
+                    req.response.size(), req.chunks, sdk::allocations, sdk::largest_allocation);
+        sdk::after_chunk = nullptr;
+        scan_count       = 0;
+        req              = request();
+        check(invoke(req, "/scan", daik::h_scan) == ESP_OK, "empty scan failed");
+        successful(req);
+        emit(req, "scan-empty");
+        scan_count = 1;
+        std::strcpy(scan_rows[0].ssid, "Café \"quoted\"\\line\n");
+        scan_rows[0].rssi = -42;
+        req               = request();
+        check(invoke(req, "/scan", daik::h_scan) == ESP_OK, "escaped Unicode scan failed");
+        successful(req);
+        emit(req, "scan-unicode-escape");
+    });
+    run("scan_failure_boundaries", [] {
+        maximum_scan();
+        allocation_sweep("/scan", daik::h_scan);
+        chunk_sweep("/scan", daik::h_scan);
+        for (const int injected : {1, 2}) {
+            scan_failure = injected;
+            auto req     = request();
+            check(invoke(req, "/scan", daik::h_scan) == ESP_OK && req.emission_attempts == 0 &&
+                      req.status == (injected == 1 ? "503 Service Unavailable"
+                                                   : "500 Internal Server Error") &&
+                      req.response == (injected == 1 ? "out of memory" : "handler error"),
+                  "pre-send scan exception escaped its clean error boundary");
+            scan_failure = 0;
+            next_request();
+            sdk::after_chunk = injected == 1 ? +[] { throw std::bad_alloc(); } : +[] {
+                throw std::runtime_error("scan send failure");
+            };
+            req              = request();
+            check(invoke(req, "/scan", daik::h_scan) == ESP_FAIL && req.emission_attempts == 1 &&
+                      req.final_chunks == 0 && req.replacement_responses == 0 &&
+                      req.late_status_changes == 0,
+                  "midstream scan exception appended an error response");
+            sdk::after_chunk = nullptr;
+            next_request();
+        }
+        ota        = true;
+        scan_calls = 0;
+        auto req   = request();
+        check(invoke(req, "/scan", daik::h_scan) == ESP_OK && scan_calls == 0 &&
+                  req.status == "503 Service Unavailable" && req.emission_attempts == 0,
+              "OTA admission reached the scan service");
     });
     check(count > 0, "unknown oracle");
     std::printf("PASS total=%u\n", count);

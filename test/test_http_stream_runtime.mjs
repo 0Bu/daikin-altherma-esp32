@@ -16,6 +16,24 @@ const paths={ common:"main/http_common.cpp",status:"main/http_status.cpp",dwell:
 const sources=Object.fromEntries(Object.entries(paths).map(([key,file])=>[key,fs.readFileSync(path.join(root,file),"utf8")]));
 const frozen=JSON.parse(fs.readFileSync(path.join(fixture,"legacy_handlers.json"),"utf8"));
 assert.equal(frozen.base_commit,"819a2c98ad7e331ce1527ca85f4acb7127e55734");
+// Complete pre-streaming handler from c9835ea0fa1862615b7cceb71cf8a6e43c199547.
+// Compile it in the full production unit so the independent memory/transport oracle rejects it.
+const legacyScan=String.raw`static esp_err_t h_scan(httpd_req_t* req) {
+    if (ota_download_active()) return network_tls_busy(req);
+    WifiScanEntry e[20];
+    int n = wifi_scan(e, 20);
+    std::string j = "{\"networks\":[";
+    for (int i = 0; i < n; i++) {
+        if (i) j += ",";
+        j += "{\"ssid\":";
+        json_append_quoted(j, e[i].ssid);
+        j += ",\"rssi\":";
+        j += std::to_string(e[i].rssi);
+        j += "}";
+    }
+    j += "]}";
+    return http_send_json(req, j.c_str());
+}`;
 function functionText(source,name,templated=false) {
   const regex=templated?new RegExp(`template <typename JsonOut>\\s*\\nstatic void ${name}\\([^]*?\\n}`)
     :new RegExp(`(?:static )?(?:esp_err_t|logic::DwellReading) ${name}\\([^]*?\\n}`);
@@ -49,6 +67,15 @@ function compile(tag,mutation) {
         .replace(/append_values_array\(j, snapshot.x10a, snapshot.x10a_label_ambiguous,\s*snapshot.x10a_dwell\);/,
                  "append_values_array(j, snapshot.x10a, snapshot.x10a_label_ambiguous);");
       effective.dwell+="\nnamespace daik {\n"+frozen.dwell+"\n}\n";
+    } else if(mutation.special==="legacy-scan") {
+      effective.status=effective.status.replace(functionText(effective.status,"h_scan"),legacyScan);
+    } else if(mutation.special==="scan-boundary") {
+      const before=functionText(effective.status,"h_scan");
+      const after=before.replace("return finish_bounded_stream(chunks,","auto append =")
+        .replace(/\}\)\s*\? ESP_OK\s*:\s*ESP_FAIL;/,"};\n    append(chunks);\n    return chunks.finish() ? ESP_OK : ESP_FAIL;");
+      assert.notEqual(before,after,"scan boundary mutation must bind production handler");
+      assert.doesNotMatch(after,/finish_bounded_stream/);
+      effective.status=effective.status.replace(before,after);
     } else {
     const before=mutation.before;
     const count=typeof before==="string"?effective[mutation.file].split(before).length-1:
@@ -94,11 +121,13 @@ const mutations=[
     after:"/* mutation: omit prepared dwell metadata */"},
   {name:"utf8-output-bypass",file:"json",scenario:"invalid_utf8_output",
     before:"if (u >= 0x80) {",after:"if (false) {"},
+  {name:"original-growing-scan-body",special:"legacy-scan",scenario:"scan_completed_oracles"},
+  {name:"scan-boundary-bypass",special:"scan-boundary",scenario:"scan_failure_boundaries"},
 ];
 try {
   const compiler=execute(cxx,["--version"]).stdout.trim();
   const baseline=execute(compile("production"),[]);
-  assert.match(baseline.stdout,/PASS total=12\b/);
+  assert.match(baseline.stdout,/PASS total=14\b/);
   const wires=[]; const decoder=new TextDecoder("utf-8",{fatal:true});
   for(const line of baseline.stdout.trim().split("\n")) {
     if(!line.startsWith("WIRE ")) {console.log(line);continue;}
@@ -137,6 +166,18 @@ try {
       assert.equal(doc.modbus[2].binary,true);assert.deepEqual(doc.modbus.map(row=>row.off),[22,40,4,40]);
     }
     if(name==="framed-values") {assert.equal(doc.result.values.length,129);assert.equal(doc.result.values[0].dwell_s,5);}
+    if(name==="scan-empty") assert.deepEqual(doc,{networks:[]});
+    if(name==="scan-maximum-invalid") {
+      assert.deepEqual(Object.keys(doc),["networks"]);
+      assert.equal(doc.networks.length,20);
+      for(const [i,row] of doc.networks.entries()) {
+        assert.deepEqual(Object.keys(row),["ssid","rssi"]);
+        assert.equal(Array.from(row.ssid).length,32);
+        assert.ok(Array.from(row.ssid).every(character=>character.codePointAt(0)===0xfffd));
+        assert.equal(row.rssi,i===0?-128:i===18?0:i===19?127:-i);
+      }
+    }
+    if(name==="scan-unicode-escape") assert.deepEqual(doc,{networks:[{ssid:"Café \"quoted\"\\line\n",rssi:-42}]});
     wires.push({name,type,hex});
   }
   const controls=[];
@@ -181,5 +222,5 @@ try {
       "Dwell producer and batch-reader execute; UART poll/cache provider is a controlled immutable-snapshot adapter.",
       "Source/header hashes bind local evidence. Hardware scheduling, target heap/stack and source truth are separate."]};
   if(process.env.HTTP_STREAM_RECORD) fs.writeFileSync(process.env.HTTP_STREAM_RECORD,JSON.stringify(record,null,2)+"\n");
-  console.log(`production HTTP stream runtime: 12 cases, ${controls.length} compiling negative controls`);
+  console.log(`production HTTP stream runtime: 14 cases, ${controls.length} compiling negative controls`);
 } finally {fs.rmSync(temporary,{recursive:true,force:true});}

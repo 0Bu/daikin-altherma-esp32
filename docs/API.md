@@ -31,7 +31,7 @@ stable `code`. A conflict/proof requirement is 409, failed hardware evidence 422
 persistence failure 500, and OOM/busy/unavailable service 503. Success and a saved setting are
 separate facts: inspect `ok`, `saved` and `reboot` where the route returns them.
 
-Status, values, history, diagnostic text and MCP results stream bounded chunks. Chunk boundaries
+Status, values, history, WiFi scans, diagnostic text and MCP results stream bounded chunks. Chunk boundaries
 have no JSON/domain meaning. An allocation failure before emission returns 503; a later failure
 closes an incomplete stream without appending a replacement response. Values and dwell metadata
 are staged before emission. Valid UTF-8 text is preserved; each invalid text byte is represented by
