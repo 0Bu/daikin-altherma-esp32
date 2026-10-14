@@ -76,11 +76,11 @@ missing, sentinel and boundary inputs.
 
 Every boot starts with model `auto`; model identity is RAM-only. The physical link is a persisted,
 CRC-protected atomic `link` blob (RX, TX, protocol and observation identity). Its loaded pins are
-validated against chip reservations and current board claims; an unusable pair falls back to the
-build default, and an indicator, button or ENV III mapping on that final pair is disabled for the
+validated against chip reservations; an unusable pair falls back to the build default. The link is
+the primary function: an indicator, button or ENV III mapping on the final pair is disabled for the
 boot. Saves and a factory reset in that boot keep the stored indicator and button pins until a save
-states a real pin for the part; an ENV III mapping disabled this way is stored disabled by the next
-service save. Detection uses narrow,
+states a real pin for the part or gives that pin to another board part; an ENV III mapping disabled
+this way is stored disabled by the next service save. Detection uses narrow,
 revision-checked setters, never a whole configuration snapshot that could revert a concurrent save.
 
 The poll task performs detection while the profile is `auto`:

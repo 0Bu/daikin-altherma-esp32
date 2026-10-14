@@ -401,12 +401,14 @@ inline bool link_pins_valid(int rx, int tx, int max_gpio = 48) {
 
 // The full link rule: the pair rule (above) PLUS the chip-reserved-pin rule (logic/board_pins.hpp).
 // Two individually-legal, distinct pins are still an illegal link if either names a pad this
-// chip/build reserves (SPI flash, strapping, JTAG, USB-Serial/JTAG, octal-SPI) or the pin the status
-// indicator or the recovery button already occupies — the range-only link_pins_valid could not see
-// those. Both the request path (validate) and the LOAD path (config.cpp) apply it, so a /set_hp and a
-// persisted cache can only hold a pair the UI would also have offered. `octal_spi` is supplied by the
-// caller from Kconfig (config.cpp hw_octal_spi()) and `reserved` from the live config
-// (config_reserved_pins), keeping this header CONFIG_-free.
+// chip/build reserves (SPI flash, strapping, JTAG, USB-Serial/JTAG, octal-SPI) or the pin the
+// status indicator or the recovery button already occupies — the range-only link_pins_valid could
+// not see those. The request path (validate) passes the live board claims, so /set_hp can only
+// store a pair the UI would also have offered; the LOAD path (config.cpp) passes none, because the
+// stored link wins over the optional board parts, which then yield to it
+// (config_yield_local_pins_to_link). `octal_spi` is supplied by the caller from Kconfig (config.cpp
+// hw_octal_spi()) and `reserved` from the live config (config_reserved_pins), keeping this header
+// CONFIG_-free.
 inline bool link_pins_safe(int rx, int tx, bool octal_spi, const ReservedPins& reserved,
                            int max_gpio = 48) {
     return link_pins_valid(rx, tx, max_gpio)
@@ -415,8 +417,8 @@ inline bool link_pins_safe(int rx, int tx, bool octal_spi, const ReservedPins& r
 }
 
 // The GPIOs the firmware itself drives, as board_pins.hpp's `reserved` input. One accessor so the
-// three places that need it — /status's pin dropdown, /set_hp's validation and config_load()'s
-// load-path re-check — cannot disagree about which pins are spoken for.
+// places that need it — /status's pin dropdown and /set_hp's validation — cannot disagree about
+// which pins are spoken for.
 inline ReservedPins config_reserved_pins(const Config& c) {
     return c.env3_enabled ? ReservedPins{c.led_gpio, c.btn_gpio, c.env3_sda, c.env3_scl}
                           : ReservedPins{c.led_gpio, c.btn_gpio};
@@ -665,13 +667,28 @@ inline void config_unyield_board_hardware(BoardHardwareStatement& s,
     if (yielded.btn && s.btn_gpio == -1) s.btn_gpio = yielded.btn_gpio;
 }
 
-// A landed service save that states a real pin for a yielded part ends the yield for that part: the
-// stored value is the owner's from then on. A save that leaves the part at -1 cannot be told apart
-// from one that never touched it (the dashboard shows the yielded part as None), so it keeps the
-// stored pin; the owner who wants it gone moves the X10A link first.
+// The part of a yield record that still stands against `saved`. A part ends its yield once the save
+// states a real pin for it — the stored value is the owner's from then on — or gives its stored pin
+// to another board-local part (the other of indicator/button, or an enabled ENV III bus): keeping
+// the stored pin then would store a collision that config_load rejects as a whole board statement.
+// A save that leaves the part at -1 and its pin free cannot be told apart from one that never
+// touched it (the dashboard shows the yielded part as None), so it keeps the stored pin; the owner
+// who wants it gone moves the X10A link first.
+inline LocalPinsRepair config_yield_standing(const LocalPinsRepair& yielded,
+                                             const Config&          saved) noexcept {
+    const auto claimed = [&saved](int pin, int other_part) {
+        return pin >= 0 && (other_part == pin || (saved.env3_enabled && (saved.env3_sda == pin ||
+                                                                         saved.env3_scl == pin)));
+    };
+    LocalPinsRepair r = yielded;
+    if (saved.led_gpio != -1 || claimed(r.led_gpio, saved.btn_gpio)) r.led = false;
+    if (saved.btn_gpio != -1 || claimed(r.btn_gpio, saved.led_gpio)) r.btn = false;
+    return r;
+}
+
+// After a landed service save, keep only what still stands (config_yield_standing).
 inline void config_yield_forget_restated(LocalPinsRepair& yielded, const Config& saved) {
-    if (saved.led_gpio != -1) yielded.led = false;
-    if (saved.btn_gpio != -1) yielded.btn = false;
+    yielded = config_yield_standing(yielded, saved);
 }
 
 // Validate a config coming from the web UI. Returns false + a reason on the first problem. Pass the

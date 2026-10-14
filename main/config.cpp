@@ -26,7 +26,7 @@ static SemaphoreHandle_t g_mtx = nullptr;   // guards g_cfg; created in config_l
 // Rejected or ReadError); cleared by the first explicit service save that lands. Atomic rather than
 // under g_mtx: the automatic writers ask it before they take any config snapshot.
 static std::atomic<bool> s_cfg_blob_unreadable{false};
-// The indicator/button pins config_load yielded to a fallback X10A link this boot (RAM only), so
+// The indicator/button pins config_load yielded to the X10A link this boot (RAM only), so
 // every service save and the factory seed keep the stored statement (config_blob_keep_yielded_pins,
 // config_unyield_board_hardware). A part is forgotten, under g_mtx, once a landed save states a
 // real pin for it (config_yield_forget_restated).
@@ -443,38 +443,40 @@ void config_load() {
         }
     }
     // Re-check on the way IN even though the blob is atomic: older per-key layouts, corruption, a
-    // different board's NVS image and future format mistakes are all still untrusted. A guard, not a
-    // repair: the sweep already drops an rx == tx candidate and falls back to these
-    // same defaults (hp_detect.cpp), so the bus still comes up. link_pins_safe adds the checks the
-    // sweep lacks — the upper GPIO bound AND the chip-reserved-pin rule (board_pins.hpp), the same
-    // rule the request path enforces (validate) — so a pair that reaches flash via a curl POST to
-    // /set_hp (flash/strapping/JTAG pad) is not silently re-tried every boot into a crash loop, and
-    // /status never reports an unconfigurable link as fact. Not re-persisted: poll_detect writes the
+    // different board's NVS image and future format mistakes are all still untrusted. A guard, not
+    // a repair: the sweep already drops an rx == tx candidate and falls back to these same defaults
+    // (hp_detect.cpp), so the bus still comes up. link_pins_safe adds the checks the sweep lacks —
+    // the upper GPIO bound AND the chip-reserved-pin rule (board_pins.hpp), the same rule the
+    // request path enforces (validate) — so a pair that reaches flash via a curl POST to /set_hp
+    // (flash/strapping/JTAG pad) is not silently re-tried every boot into a crash loop, and /status
+    // never reports an unconfigurable link as fact. Not re-persisted: poll_detect writes the
     // winning pins back once the bus answers; until then the line below repeats each boot.
-    if (!link_pins_safe(c.rx_pin, c.tx_pin, hw_octal_spi(), config_reserved_pins(c),
+    // The indicator, the button and ENV III are NOT reservations here: the link is the primary
+    // function and they yield to the final pair just below. A stored pair that one of their stored
+    // pins collides with (one /set_hp chose while that part was yielded, or a legacy pair) keeps
+    // working instead of falling back to a default that may sit on the very same pin.
+    if (!link_pins_safe(c.rx_pin, c.tx_pin, hw_octal_spi(), ReservedPins{},
                         SOC_GPIO_PIN_COUNT - 1)) {
         diag_printf("config: persisted X10A pins rejected (rx=%d tx=%d) — using build defaults %d/%d\n",
                     c.rx_pin, c.tx_pin, CONFIG_DAIKIN_RX_PIN, CONFIG_DAIKIN_TX_PIN);
         c.rx_pin = CONFIG_DAIKIN_RX_PIN;
         c.tx_pin = CONFIG_DAIKIN_TX_PIN;
     }
-    // The fallback pair can land on the indicator or the button too: a Custom LED on GPIO44 is
-    // legal while the link sits on 1/2, and collides once a missing or damaged link entry falls
-    // back to the 44/43 default. The board check above ran with the link excluded, so nothing else
-    // catches it, and the snapshot would then fail board_hw_valid() and validate() and leave
-    // detection with no permitted candidate. The optional parts yield to the primary link (RAM
-    // only; the stored pins stay for repair), exactly as ENV III does just below.
+    // The final pair, stored or fallback, can land on the indicator or the button: a Custom LED on
+    // GPIO44 is legal while the link sits on 1/2, and collides once a missing or damaged link entry
+    // falls back to the 44/43 default. The board check above ran with the link excluded, so nothing
+    // else catches it, and the snapshot would then fail board_hw_valid() and validate() and leave
+    // detection with no permitted candidate. The optional parts yield to the primary link for this
+    // boot; saves keep their stored pins (s_load_yield), exactly as ENV III yields just below.
     {
         const LocalPinsRepair yielded = config_yield_local_pins_to_link(c);
         s_load_yield                  = yielded; // before publish(): no task runs yet
         if (yielded.led)
-            diag_printf(
-                "config: %s disabled — GPIO taken by the fallback X10A link (rx=%d tx=%d)\n",
-                "indicator", c.rx_pin, c.tx_pin);
+            diag_printf("config: %s disabled — GPIO taken by the X10A link (rx=%d tx=%d)\n",
+                        "indicator", c.rx_pin, c.tx_pin);
         if (yielded.btn)
-            diag_printf(
-                "config: %s disabled — GPIO taken by the fallback X10A link (rx=%d tx=%d)\n",
-                "recovery button", c.rx_pin, c.tx_pin);
+            diag_printf("config: %s disabled — GPIO taken by the X10A link (rx=%d tx=%d)\n",
+                        "recovery button", c.rx_pin, c.tx_pin);
     }
     // The fallback pair above can itself collide with ENV III (for example a damaged link cache is
     // replaced by the XIAO 44/43 defaults while an ENV mapping already uses them). Optional ENV
@@ -591,7 +593,7 @@ bool config_factory_seed_blob(std::vector<uint8_t>& out) {
     {
         Lock lk(g_mtx);
         board = config_board_hardware(g_cfg);
-        config_unyield_board_hardware(board, s_load_yield);
+        config_unyield_board_hardware(board, config_yield_standing(s_load_yield, g_cfg));
     }
     try {
         // A failed allocation throws std::bad_alloc into the catch below, like every other one

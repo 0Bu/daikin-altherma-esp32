@@ -190,7 +190,7 @@ ConfigSaveOutcome config_save_transaction(Config& live, const Config& requested,
     std::vector<uint8_t> service;
     if (!owns_link) {
         ConfigBlob b = config_blob_from(c);
-        config_blob_keep_yielded_pins(b, yielded);
+        config_blob_keep_yielded_pins(b, config_yield_standing(yielded, c));
         if (!config_blob_strings_fit(b)) {
             out.failed = ConfigSaveStep::FieldTooLong;
             return out;

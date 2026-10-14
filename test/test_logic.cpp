@@ -2214,11 +2214,68 @@ static void test_config_transaction() {
         b.btn_gpio = 7; // a stated button is written as stated
         config_blob_keep_yielded_pins(b, btn_only);
         CHECK(b.btn_gpio == 7);
+        LocalPinsRepair led_only;
+        led_only.led      = true;
+        led_only.led_gpio = 44;
+        b.led_gpio        = 9; // ...and so is a stated indicator
+        config_blob_keep_yielded_pins(b, led_only);
+        CHECK(b.led_gpio == 9);
         Config none_saved; // both parts left at -1: nothing is forgotten
         none_saved.led_gpio = -1;
         none_saved.btn_gpio = -1;
         config_yield_forget_restated(btn_only, none_saved);
         CHECK(btn_only.btn && !btn_only.led);
+
+        // A yielded pin the save gives to another board part ends the yield: keeping it would store
+        // a collision that config_load rejects as a whole board statement.
+        LocalPinsRepair both;
+        both.led      = true;
+        both.led_gpio = 44;
+        both.btn      = true;
+        both.btn_gpio = 43;
+        Config moved;
+        moved.led_gpio           = -1;
+        moved.btn_gpio           = 44; // the button now takes the indicator's stored pin
+        LocalPinsRepair standing = config_yield_standing(both, moved);
+        CHECK(!standing.led && !standing.btn); // the button is re-stated with a real pin too
+        moved.btn_gpio = -1;
+        moved.led_gpio = 43; // the indicator takes the button's stored pin
+        standing       = config_yield_standing(both, moved);
+        CHECK(!standing.led && !standing.btn);
+        moved.led_gpio     = -1;
+        moved.env3_enabled = true; // an enabled ENV III bus on either stored pin counts too
+        moved.env3_sda     = 44;
+        moved.env3_scl     = 6;
+        standing           = config_yield_standing(both, moved);
+        CHECK(!standing.led && standing.btn);
+        moved.env3_sda = 5;
+        moved.env3_scl = 43;
+        standing       = config_yield_standing(both, moved);
+        CHECK(standing.led && !standing.btn);
+        moved.env3_enabled = false; // a disabled ENV III claims nothing
+        standing           = config_yield_standing(both, moved);
+        CHECK(standing.led && standing.btn);
+
+        // Through the transaction: the button saved onto the yielded indicator pin stores no
+        // collision.
+        Config clash_live   = config_tx_live();
+        clash_live.led_gpio = -1; // yielded from GPIO44
+        clash_live.btn_gpio = -1;
+        ConfigTxStore clash;
+        clash.seed(clash_live);
+        LocalPinsRepair led44;
+        led44.led          = true;
+        led44.led_gpio     = 44;
+        Config clash_req   = clash_live;
+        clash_req.btn_gpio = 44;
+        CHECK(config_save_transaction(clash_live, clash_req, false, clash, led44).result ==
+              ConfigSaveResult::Saved);
+        CHECK(config_tx_durable_service(clash).led_gpio == -1);
+        CHECK(config_tx_durable_service(clash).btn_gpio == 44);
+        // ...and the factory seed carries the same: no indicator on the button's pin.
+        BoardHardwareStatement seed = config_board_hardware(clash_live);
+        config_unyield_board_hardware(seed, config_yield_standing(led44, clash_live));
+        CHECK(seed.led_gpio == -1 && seed.btn_gpio == 44);
     }
 
     // The field-length boundary: CONFIG_BLOB_MAX_STR is accepted, one more is refused with nothing
@@ -2778,11 +2835,21 @@ static void test_config_link_fallback_yield() {
     c.tx_pin          = 2;
     CHECK(board_hw_valid(c, why, 48, /*octal_spi=*/false));
     // The link entry is missing or damaged and no legacy pins exist, so config_load takes the build
-    // default 44/43 — and its own link_pins_safe re-check rejects that pair too, because the
-    // indicator holds 44, and falls back to the very same default.
+    // default 44/43. Its load re-check applies the chip rule only (the link wins over the optional
+    // parts), so the pair stands; a request-path check with the board claims would refuse it.
     c.rx_pin = 44;
     c.tx_pin = 43;
+    CHECK(link_pins_safe(c.rx_pin, c.tx_pin, false, ReservedPins{}));
     CHECK(!link_pins_safe(c.rx_pin, c.tx_pin, false, config_reserved_pins(c)));
+    // The same holds for a stored pair the owner chose while the indicator was yielded (44/7): it
+    // stands at load, and the stored indicator yields to it again.
+    {
+        Config chosen = c;
+        chosen.tx_pin = 7;
+        CHECK(link_pins_safe(chosen.rx_pin, chosen.tx_pin, false, ReservedPins{}));
+        const LocalPinsRepair again = config_yield_local_pins_to_link(chosen);
+        CHECK(again.led && again.led_gpio == 44 && chosen.led_gpio == -1);
+    }
     // Without the yield the snapshot fails both validators (and detection has no candidate).
     CHECK(config_local_pins_collide_with_link(c));
     CHECK(!board_hw_valid(c, why, 48, false) && why == "led_gpio is in use by the X10A link");

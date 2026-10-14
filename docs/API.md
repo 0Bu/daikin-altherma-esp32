@@ -399,7 +399,8 @@ commit; live socket ownership remains with its task. X10A remains independent.
 `POST /set_board` accepts `preset_id`, `led_gpio`, `led_type`, `led_inverted`, `btn_gpio`,
 `btn_active_low`, `env3_enabled`, `env3_sda`, `env3_scl`. A stable known preset id is required when
 provided; old clients can use exact-match migration. LED type is 0 (plain) or 1 (WS2812), -1 GPIO
-means absent; values below -1 are rejected, and a stored one loads as -1. Pin claims must not
+means absent; values below -1 are rejected, and a stored one loads as -1. In a boot whose X10A link
+took a part's stored pin, -1 for that part keeps the stored pin ([Detection](ARCHITECTURE.md#detection)). Pin claims must not
 collide with X10A, the other onboard part or ENV III. A board identity statement can save with no reboot; changing task-owned pins/accessory reboots.
 Switching away from M5Stack retires ENV III in the same atomic save.
 

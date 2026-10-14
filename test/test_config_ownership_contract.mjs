@@ -64,7 +64,7 @@ assert.ok(localPins > reconcile,
 // The stored-pin patch for a load-time link yield touches only the staged blob, before its length
 // check, serialization and every write.
 const serviceStage = at(save,
-  /if \(!owns_link\) \{\s*ConfigBlob b = config_blob_from\(c\);\s*config_blob_keep_yielded_pins\(b, yielded\);\s*if \(!config_blob_strings_fit\(b\)\)/,
+  /if \(!owns_link\) \{\s*ConfigBlob b = config_blob_from\(c\);\s*config_blob_keep_yielded_pins\(b, config_yield_standing\(yielded, c\)\);\s*if \(!config_blob_strings_fit\(b\)\)/,
   localPins);
 const linkStage = at(save, /link_blob_serialize\(/, serviceStage);
 const published = at(save, /Config\s+published\s*=\s*std::move\(c\);/, linkStage);
