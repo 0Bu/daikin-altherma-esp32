@@ -39,6 +39,13 @@ int32_t     nvs_get_i32(const char* key, int32_t def);   // used for the persist
 [[nodiscard]] esp_err_t nvs_set_blob(const char* key, const void* data, size_t len);
 bool                    nvs_get_blob(const char* key, std::vector<uint8_t>& out);
 
+// The same read with the reason it produced nothing. config_load must tell a fresh device (no
+// entry) from a stored blob it could not read: only the former may be treated as factory-fresh.
+// Error covers an unavailable namespace other than "not found", a size query or read failure and
+// an empty entry.
+enum class NvsBlobRead { Ok, NotFound, Error };
+NvsBlobRead nvs_read_blob(const char* key, std::vector<uint8_t>& out);
+
 // Erase the ENTIRE "daik_cfg" namespace: WiFi credentials + the rollback backup, MQTT broker and
 // credentials, syslog, NTP, the X10A link cache and the safe-mode crash counter. The factory reset
 // behind the physical recovery button (recovery_button.cpp) — the only config reset that does not
@@ -48,5 +55,24 @@ bool                    nvs_get_blob(const char* key, std::vector<uint8_t>& out)
 // the latch is established under the same mutex as in-flight writes, so no task can recreate a key
 // in the visible confirmation delay after the erase.
 [[nodiscard]] esp_err_t nvs_erase_all();
+
+// True from the moment nvs_erase_all() latched the setters off until the reboot, i.e. while a
+// factory reset is erasing or has erased stored data. Every restart path other than the completed
+// reset itself must refuse to restart while this is set: a reboot in that window would come up on
+// a partially erased device that looks like a finished reset.
+bool nvs_factory_reset_latched();
+
+// The refusal every such restart site asks, immediately before its esp_restart() with no wait in
+// between: nvs_factory_reset_latched(), and when it holds, one "<who>: restart held, factory reset
+// in progress" line per boot on /diag (the first site to be held says it; the others stay quiet,
+// since a held site asks again on every later cycle). Allocation-free. A complete reset reboots
+// the board itself; an incomplete one stays up on purpose until the owner retries it.
+bool nvs_restart_held_by_factory_reset(const char* who);
+
+// The one write allowed behind the latch: after a SUCCESSFUL nvs_erase_all() the factory reset
+// seeds the board-hardware statement it keeps (config_factory_seed_blob). Refused unless the latch
+// is set, so no ordinary writer can use it to bypass the reset.
+[[nodiscard]] esp_err_t nvs_set_blob_after_factory_reset(const char* key, const void* data,
+                                                         size_t len);
 
 } // namespace daik

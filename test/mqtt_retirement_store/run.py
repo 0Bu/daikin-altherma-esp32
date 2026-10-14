@@ -23,8 +23,13 @@ inputs = {
     ROOT / 'main/mqtt_retirement_store.hpp': 'mqtt_retirement_store.hpp',
     ROOT / 'main/logic/mqtt_retirement_store.hpp': 'logic/mqtt_retirement_store.hpp',
     ROOT / 'main/logic/config_store.hpp': 'logic/config_store.hpp',
+    ROOT / 'main/nvs_storage.hpp': 'nvs_storage.hpp',
+    ROOT / 'main/rtos_guard.hpp': 'rtos_guard.hpp',
     HERE / 'fixture.cpp': 'fixture.cpp',
     HERE / 'stubs/nvs.h': 'nvs.h',
+    HERE / 'stubs/esp_err.h': 'esp_err.h',
+    HERE / 'stubs/freertos/FreeRTOS.h': 'freertos/FreeRTOS.h',
+    HERE / 'stubs/freertos/semphr.h': 'freertos/semphr.h',
 }
 
 
@@ -63,7 +68,8 @@ def compile_source(directory, name):
 
 
 scenarios = ['missing', 'read_failures', 'bounded_load', 'save_failures',
-             'roundtrip', 'corrupt_load', 'wire_reference', 'codec_boundaries']
+             'roundtrip', 'corrupt_load', 'wire_reference', 'codec_boundaries',
+             'forget', 'latched_save']
 binary = compile_source(snapshot, 'production-store')
 for scenario in scenarios:
     print(execute([binary, scenario]).stdout.strip())
@@ -103,6 +109,34 @@ mutations = [
      'LOAD_FAILURE_NEVER_EXPOSES_PARTIAL_RECORD'),
     ('noncanonical-padding-accepted', 'corrupt_load', 'logic/mqtt_retirement_store.hpp',
      '(j >= length && field[j] != 0)', 'false', 'NONCANONICAL_PADDING_REJECTED'),
+    # The factory-reset boundary: the save refuses behind the latch, under the same lock the
+    # erase takes, and the erase reports every failure.
+    ('latch-ignored', 'latched_save', 'adapter.cpp',
+     'if (!lk.acquired() || nvs_factory_reset_latched()) return false;',
+     'if (!lk.acquired()) return false;', 'LATCHED_SAVE_REFUSED'),
+    ('save-latch-unlocked', 'latched_save', 'adapter.cpp',
+     'Lock lk(s_mtx);\n    // The latch is read UNDER',
+     'struct { bool acquired() const { return true; } } lk;\n    // The latch is read UNDER',
+     'LATCH_CHECKED_UNDER_STORE_LOCK'),
+    ('forget-unlocked', 'forget', 'adapter.cpp',
+     'Lock lk(s_mtx);\n    if (!lk.acquired()) return false;\n    nvs_handle_t handle;\n    // Probe',
+     'struct { bool acquired() const { return true; } } lk;\n    if (!lk.acquired()) return false;\n'
+     '    nvs_handle_t handle;\n    // Probe',
+     'FORGET_SERIALIZED_WITH_SAVE'),
+    ('forget-missing-namespace-as-error', 'forget', 'adapter.cpp',
+     'if (probed == ESP_ERR_NVS_NOT_FOUND) return true;',
+     'if (probed == ESP_ERR_NVS_NOT_FOUND) return false;', 'MISSING_NAMESPACE_FORGET_IS_SUCCESS'),
+    ('forget-creates-namespace', 'forget', 'adapter.cpp',
+     'const esp_err_t probed = ::nvs_open(NAMESPACE, NVS_READONLY, &handle);',
+     'const esp_err_t probed = ::nvs_open(NAMESPACE, NVS_READWRITE, &handle);',
+     'MISSING_NAMESPACE_NEVER_CREATED'),
+    ('forget-erase-ignored', 'forget', 'adapter.cpp',
+     'esp_err_t erased = ::nvs_erase_all(handle);',
+     'esp_err_t erased = (static_cast<void>(::nvs_erase_all(handle)), ESP_OK);',
+     'FORGET_ERASE_ERROR_FAILS'),
+    ('forget-commit-ignored', 'forget', 'adapter.cpp',
+     'if (erased == ESP_OK) erased = ::nvs_commit(handle);',
+     'if (erased == ESP_OK) (void)::nvs_commit(handle);', 'FORGET_COMMIT_ERROR_FAILS'),
 ]
 controls = {}
 for name, scenario, relative, old, new, assertion in mutations:

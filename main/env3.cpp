@@ -316,7 +316,10 @@ void env3_start() {
     if (xTaskCreate(task, "env3", 4096, const_cast<TaskPins*>(&pins), TASK_PRIO_ENV3, nullptr) !=
         pdPASS) {
         publish_error("task_start_failed");
-        ESP_LOGE("env3", "task start failed");
+        // /status names the state (task_start_failed); /diag and syslog (and serial, which
+        // diag_printf echoes to) say when and why, which a board without a serial console
+        // otherwise never learns.
+        diag_printf("env3: task alloc FAILED — ENV III not read this boot\n");
         return;
     }
     ESP_LOGI("env3", "ENV III started: SDA=%d SCL=%d", cfg.env3_sda, cfg.env3_scl);

@@ -12,6 +12,7 @@
 #include "config.hpp"
 #include "diag_log.hpp"
 #include "logic/config_model.hpp"
+#include "nvs_storage.hpp" // nvs_restart_held_by_factory_reset — the fallback restart defers
 #include "ota_update.hpp"
 #include "task_config.hpp"
 #include "stack_watch.hpp"
@@ -182,8 +183,9 @@ bool net_eth_probe() {
     const Config& c = config();
     const ReservedPins in_use = config_reserved_pins(c).plus(config_link_pins(c));
     if (!net_eth_probe_allowed(pins, in_use)) {
-        diag_printf("net: not probing for Ethernet — GPIO%d/%d/%d/%d overlap the configured "
-                    "X10A/sensor/indicator pins\n", pins.sclk, pins.cs, pins.miso, pins.mosi);
+        // The configured pins: the X10A link, the sensor and the indicator.
+        diag_printf("net: not probing for Ethernet — GPIO%d/%d/%d/%d overlap configured pins\n",
+                    pins.sclk, pins.cs, pins.miso, pins.mosi);
         return false;
     }
 
@@ -392,7 +394,7 @@ bool net_eth_start() {
 
     s_events = xEventGroupCreate();
     if (!s_events) {
-        diag_printf("net: Ethernet event group alloc failed — continuing on WiFi\n");
+        diag_printf("net: %s — continuing on WiFi\n", "Ethernet event group alloc failed");
         return false;
     }
 
@@ -404,7 +406,7 @@ bool net_eth_start() {
     netif_cfg.base               = &base_cfg;
     s_eth_netif = esp_netif_new(&netif_cfg);
     if (!s_eth_netif) {
-        diag_printf("net: Ethernet netif alloc failed — continuing on WiFi\n");
+        diag_printf("net: %s — continuing on WiFi\n", "Ethernet netif alloc failed");
         return false;
     }
     // Advertise the hostname over DHCP (option 12) BEFORE the lease is requested, exactly as the
@@ -438,13 +440,13 @@ bool net_eth_start() {
     owned.phy = esp_eth_phy_new_w5500(&phy_cfg);
     owned.mac = esp_eth_mac_new_w5500(&w5500_cfg, &mac_cfg);
     if (!owned.mac || !owned.phy) {
-        diag_printf("net: W5500 mac/phy alloc failed — continuing on WiFi\n");
+        diag_printf("net: %s — continuing on WiFi\n", "W5500 mac/phy alloc failed");
         return false;
     }
 
     esp_eth_config_t eth_cfg = ETH_DEFAULT_CONFIG(owned.mac, owned.phy);
     if (esp_eth_driver_install(&eth_cfg, &s_eth_handle) != ESP_OK) {
-        diag_printf("net: W5500 driver install failed — continuing on WiFi\n");
+        diag_printf("net: %s — continuing on WiFi\n", "W5500 driver install failed");
         return false;
     }
 
@@ -457,7 +459,7 @@ bool net_eth_start() {
 
     s_eth_glue = esp_eth_new_netif_glue(s_eth_handle);
     if (!s_eth_glue || esp_netif_attach(s_eth_netif, s_eth_glue) != ESP_OK) {
-        diag_printf("net: W5500 netif attach failed — continuing on WiFi\n");
+        diag_printf("net: %s — continuing on WiFi\n", "W5500 netif attach failed");
         return false;
     }
 
@@ -501,8 +503,8 @@ bool net_eth_start() {
         if (bits & GOT_IP_BIT) break;    // a fast DHCP server can beat the link event here
     }
     if (!(bits & GOT_IP_BIT) && !s_link.load()) {
-        diag_printf("net: no Ethernet link after %d ms — no cable or a dead port; the driver stays "
-                    "up and will claim the wire if it appears\n", kLinkGraceMs);
+        diag_printf("net: no Ethernet link after %d ms — the driver stays up for a later cable\n",
+                    kLinkGraceMs);
         return false;
     }
 
@@ -588,10 +590,19 @@ static void eth_fallback_task(void*) {
                             "reboot\n");
                 continue;
             }
-            diag_printf("net: Ethernet has been down for %d s and WiFi is configured — rebooting "
-                        "to come up on the radio\n", ETH_FALLBACK_PERIOD_S * ETH_FALLBACK_PERIODS);
+            // A factory reset that has latched NVS owns the next restart, for the same reason an
+            // OTA owns it: rebooting now would come up on a namespace the reset is still erasing —
+            // a partial reset that looks like a finished one. A complete reset reboots the board
+            // itself (into the setup portal, where the radio comes up anyway); an incomplete one
+            // stays up on purpose until the owner retries. Like the OTA deferral, the spent watch
+            // simply re-earns its verdict.
+            if (nvs_restart_held_by_factory_reset("net")) continue;
+            diag_printf("net: Ethernet down for %d s, WiFi configured — rebooting onto WiFi\n",
+                        ETH_FALLBACK_PERIOD_S * ETH_FALLBACK_PERIODS);
             vTaskDelay(pdMS_TO_TICKS(500));   // let the diag line reach syslog first
             stack_watch_sample(StackWatch::EthFallback);
+            // The reset can latch during that drain: last check before the point of no return.
+            if (nvs_restart_held_by_factory_reset("net")) continue;
             esp_restart();
         } catch (const std::exception& e) {
             diag_printf("net: fallback watch cycle failed (%s) — retrying\n", e.what());

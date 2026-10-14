@@ -137,9 +137,10 @@ inline int board_pins_offerable(int* out, int cap, bool octal_spi, ReservedPins 
 }
 
 // Membership test for the SAME set board_pins_offerable() emits: is `pin` chip-safe for this build
-// AND not the firmware-reserved pin? The authoritative request path (config_model.hpp validate) and
-// the load-path guard (config.cpp) both call this so the pins a /set_hp — or a persisted link cache
-// — can hold match exactly the set the UI offers. Without it, validate()'s range-only check
+// AND not the firmware-reserved pin? The authoritative request path (config_model.hpp validate)
+// calls this with the live reservations, so a /set_hp can hold exactly the set the UI offers; the
+// load-path guard (config.cpp) calls it with none, so a persisted link cache passes the chip rule
+// and the board parts yield to it. Without it, validate()'s range-only check
 // accepted a curl POST that routed the X10A UART onto the SPI-flash pins (GPIO26-32): flash traffic
 // corrupts, the board crash-loops, and the toxic pair is already persisted so every boot re-tries
 // it.

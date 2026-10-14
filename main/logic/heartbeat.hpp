@@ -24,8 +24,8 @@ struct HeartbeatFields {
     uint32_t    free_heap     = 0;   // esp_get_free_heap_size()
     uint32_t    min_free_heap = 0;   // esp_get_minimum_free_heap_size() — worst-case low-water mark
     uint32_t    max_alloc     = 0;   // heap_caps_get_largest_free_block() — the binding OOM limit
-    // HOW MANY CONSECUTIVE HEAP-WATCHDOG RESTARTS preceded this boot (heap_guard_restarts(); 0 on
-    // an ordinary one). Already on /status.sys, and it belongs here for the reason
+    // HOW MANY HEAP-WATCHDOG RESTARTS this boot inherited (heap_guard_restarts(); 0 after a clean
+    // boot, carried across crash boots). Already on /status.sys, and it belongs here for the reason
     // reset_reason_code does: without it a self-restarting board is INDISTINGUISHABLE in a metrics
     // store from a healthy one somebody keeps saving settings on. The restart heap_guard.cpp makes
     // is an esp_restart(), so it reports the same "sw" reset reason a /set_* save produces and
@@ -35,8 +35,8 @@ struct HeartbeatFields {
     // spent a week reconstructing from syslog.
     //
     // NOT `total_increasing`: this is a per-boot CONSTANT, not a counter. It reports the count the
-    // boot inherited and heap_guard_begin() clears the breadcrumb, so it reads 2 for the whole life
-    // of the third boot in a ladder and 0 for the whole life of the next healthy one.
+    // boot inherited; only a clean boot clears the breadcrumb (logic/boot_guard.hpp), so it reads
+    // 2 for the whole life of the third boot in a ladder and 0 for the life of the next clean one.
     uint8_t     heap_restarts = 0;
     // THE OTHER MEMORY BUDGET (stack_watch.hpp). Bytes free at the worst point since boot, per
     // watched task; 0 = never sampled and is rendered as JSON null, never as a number — a task that
@@ -338,7 +338,7 @@ inline const HeartbeatSensor HEARTBEAT_SENSORS[] = {
     // for both, which is exactly the ambiguity this resolves.
     //
     // `measurement`, NOT `total_increasing`: the value is the count this BOOT inherited and it
-    // returns to 0 on the next healthy boot, so a monotonic state class would make HA's long-term
+    // returns to 0 on the next clean boot, so a monotonic state class would make HA's long-term
     // statistics read every recovery as a counter reset and every ladder as an unrelated new total.
     {"sensor", "heap_restarts", "Heap Watchdog Restarts", "heap_restarts", "", "", "measurement"},
     {"sensor", "uptime", "Uptime", "uptime_s", "s", "duration", "measurement"},

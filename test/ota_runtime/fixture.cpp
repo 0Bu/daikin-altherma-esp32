@@ -280,6 +280,9 @@ bool     mqtt_x10a_publish_proven() { return sdk::state.x10a_proven; }
 NetLink  net_kind() { return sdk::state.health_offline ? NetLink::None : NetLink::Wifi; }
 bool     provisioning_ap_active() { return sdk::state.recovery_ap; }
 void     diag_printf(const char*, ...) {}
+// Only the reset_hold/reset_latched cases model a factory reset; the others take the ordinary path.
+bool     nvs_factory_reset_latched() { return sdk::state.reset_latched; }
+bool     nvs_restart_held_by_factory_reset(const char*) { return sdk::state.reset_hold; }
 bool     http_deadline_init() noexcept { return true; }
 bool     http_deadline_ready() noexcept { return true; }
 HttpSocketDeadline::~HttpSocketDeadline() { disarm(); }
@@ -344,11 +347,60 @@ void reset(sdk::Fault fault) {
     std::memcpy(s.image + sizeof(header) + sizeof(esp_image_segment_header_t), &app, sizeof(app));
     daik::s_status = daik::OtaStatus{};
     daik::s_network_active.store(false);
-    daik::s_busy       = false;
-    daik::s_ota_task   = nullptr;
+    daik::s_busy         = false;
+    daik::s_install_held = false;
+    daik::s_ota_task     = nullptr;
     daik::s_generation = 0;
     daik::s_health_gate_armed.store(false);
     daik::s_task_args = daik::OtaTaskArgs{};
+}
+
+daik::OtaTaskArgs update_request() {
+    using namespace daik;
+    OtaTaskArgs request{};
+    request.mode    = OtaTaskMode::Update;
+    request.channel = OtaChannel::Dev;
+    REQUIRE(ota_default_feed_urls(OtaChannel::Dev, CONFIG_DAIKIN_OTA_MANIFEST_URL,
+                                  CONFIG_DAIKIN_OTA_FIRMWARE_BASE_URL, request.offer.feed));
+    std::strcpy(request.offer.version.data(), long_version);
+    std::memset(request.offer.app_sha256.data(), 'a', 64);
+    request.offer.app_sha256[64] = '\0';
+    return request;
+}
+
+// A factory reset latches during the install's done window, so the restart is held. The worker
+// must still return: its network lease ends (MQTT resumes, /status answers again) and busy clears,
+// while no later check or install may start in this boot — not even once the latch is released —
+// because the boot partition already selects the image a second install would rewrite.
+void reset_hold() {
+    reset(sdk::Fault::None);
+    using namespace daik;
+    ota_update_init();
+    const OtaTaskArgs request = update_request();
+    sdk::state.reset_hold     = true;
+    REQUIRE(start_locked(request, 0) != 0);
+    try {
+        s_ota_task->fn(s_ota_task->arg);
+    } catch (const sdk::Stop&) {}
+    const auto& s = sdk::state;
+    REQUIRE(s.selected == 1 && s.ota_ended == 1 && s.restart == 0);
+    REQUIRE(!ota_busy() && !ota_download_active());
+    REQUIRE(s.withdraw == 1 && s.pause == 1 && s.resume == 1);
+    REQUIRE(s_status.state == "done" && s_status.progress == 100);
+    REQUIRE(s_status.message == "Installed; starts on next reboot (factory reset)");
+    sdk::state.reset_hold = false;
+    REQUIRE(start_locked(request, s_generation) == 0);
+    REQUIRE(!ota_busy());
+}
+
+// No check or install starts while a factory reset holds the latch.
+void reset_latched() {
+    reset(sdk::Fault::None);
+    using namespace daik;
+    ota_update_init();
+    sdk::state.reset_latched = true;
+    REQUIRE(start_locked(update_request(), 0) == 0);
+    REQUIRE(!ota_busy() && sdk::state.notifications == 0);
 }
 
 void mutex_storage() {
@@ -491,6 +543,16 @@ void health(const char* name) {
     if (std::strcmp(name, "health_valid") == 0) s.image_state = ESP_OTA_IMG_VALID;
     if (std::strcmp(name, "health_unarmed") == 0) s.image_state = ESP_OTA_IMG_NEW;
     if (std::strcmp(name, "health_timeout") == 0) s.health_offline = true;
+    // The rollback restart is held by a factory reset; the service then recovers, and only later
+    // does the hold end. The gate gave up, so it must not mark the image valid meanwhile, and it
+    // restarts as soon as the hold is released.
+    const bool held_timeout = std::strcmp(name, "health_timeout_held") == 0;
+    if (held_timeout) {
+        s.health_offline  = true;
+        s.reset_hold      = true;
+        s.heal_at         = 610000;
+        s.release_hold_at = 615000;
+    }
     if (std::strcmp(name, "health_mark_error") == 0) s.mark_result = ESP_FAIL;
     bool reject = s.health_offline;
     if (std::strcmp(name, "health_heap_boundary") == 0) {
@@ -578,6 +640,9 @@ void health(const char* name) {
         REQUIRE(s.health_stack_samples == 1);
         REQUIRE(status.image_state == (s.image_state == ESP_OTA_IMG_VALID ? "valid" : "unarmed"));
         REQUIRE(s.marked == 0 && s.restart == 0 && s.ticks == 1000);
+    } else if (held_timeout) {
+        REQUIRE(s.marked == 0 && s.restart == 1 && s.restarted_at == 615000);
+        REQUIRE(status.image_state == "pending_verify" && status.rollback_pending);
     } else if (reject) {
         REQUIRE(s.marked == 0 && s.restart == 1 && s.restarted_at == 602000);
         REQUIRE(status.image_state == "pending_verify" && status.rollback_pending);
@@ -659,6 +724,19 @@ int main(int argc, char** argv) {
         std::cout << "PASS manifest_bounds\n";
         ++count;
     }
+    for (const auto& held : {std::make_pair("reset_hold", &test::reset_hold),
+                             std::make_pair("reset_latched", &test::reset_latched)}) {
+        if (argc > 1 && std::strcmp(argv[1], held.first) != 0) continue;
+        try {
+            held.second();
+        } catch (const std::exception& e) {
+            std::cerr << (dynamic_cast<const test::AssertionFailure*>(&e) ? "ASSERT " : "ERROR ")
+                      << held.first << ": " << e.what() << '\n';
+            return dynamic_cast<const test::AssertionFailure*>(&e) ? 1 : 2;
+        }
+        std::cout << "PASS " << held.first << '\n';
+        ++count;
+    }
     if (argc == 1 || std::strcmp(argv[1], "image_binding") == 0) {
         try {
             test::worker(sdk::Fault::None, 0, false, true);
@@ -683,14 +761,26 @@ int main(int argc, char** argv) {
         std::cout << "PASS " << name << '\n';
         ++count;
     }
-    const char* health_cases[] = {
-        "health_unknown",       "health_valid",         "health_unarmed",
-        "health_commit",        "health_timeout",       "health_mark_error",
-        "health_task_error",    "health_heap_boundary", "health_low_free",
-        "health_low_block",     "health_heap_restart",  "health_mqtt_skip",
-        "health_poll_skip",     "health_x10a_missing",  "health_x10a_proven",
-        "health_x10a_optional", "health_ap_recovery",   "health_task_error_unknown",
-        "health_static_storage"};
+    const char* health_cases[] = {"health_unknown",
+                                  "health_valid",
+                                  "health_unarmed",
+                                  "health_commit",
+                                  "health_timeout",
+                                  "health_timeout_held",
+                                  "health_mark_error",
+                                  "health_task_error",
+                                  "health_heap_boundary",
+                                  "health_low_free",
+                                  "health_low_block",
+                                  "health_heap_restart",
+                                  "health_mqtt_skip",
+                                  "health_poll_skip",
+                                  "health_x10a_missing",
+                                  "health_x10a_proven",
+                                  "health_x10a_optional",
+                                  "health_ap_recovery",
+                                  "health_task_error_unknown",
+                                  "health_static_storage"};
     for (const auto* name : health_cases) {
         if (argc > 1 && std::strcmp(argv[1], name) != 0) continue;
         try {

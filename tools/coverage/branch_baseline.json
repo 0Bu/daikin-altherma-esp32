@@ -260,6 +260,20 @@
         "main/logic/mqtt_retirement.hpp": "0dbe80bceb64328963029d5f7ad5f9b10adc85ccc1e5ee5020cfee4ff6cac187",
         "test/test_logic.cpp": "06ea64cf0550e919f4be2af5345862ff6e0d57a92c940ea3d7eb28eac733dbcc"
       }
+    },
+    {
+      "compilers": {
+        "clang-17-darwin": "Apple Clang 17.0.0",
+        "gcc-13-linux-ubuntu24": "ESP-IDF v6.1 container GCC 13.3.0",
+        "gcc-15-linux-ubuntu26": "Ubuntu 26.04 aarch64 GCC 15.2.0-16ubuntu1"
+      },
+      "hosted_confirmation": "gcc-15-github-linux-ubuntu26 repeats the local GCC 15 inventory; authoritative CI pending",
+      "runner": "scripts/run-mock-tests.sh --coverage",
+      "scope": "The link yield records the stored indicator/button pins; every service save writes them into the cfg blob and the factory seed restores them while the yield stands, i.e. until a save states a real pin for the part or gives its stored pin to another board part. This record names only config_model.hpp and config_transaction.hpp; both ratios rise against base.",
+      "sources": {
+        "main/logic/config_model.hpp": "5c62344ae93b15fe8d53756c7514141b9e1bb77ef5319f3deaee7e40c8995fa7",
+        "main/logic/config_transaction.hpp": "7984c3f82bfd02d7de7c11549b620045daf0feef637fb2601eca256635bbef0c"
+      }
     }
   ],
   "method": "Exact taken/outcome inventories are measured by scripts/run-mock-tests.sh --coverage and bound to compiler family, major version and platform; hosted profiles additionally bind the runner image. The gate rejects inventory mismatches and any historical ratio decrease. Updated hosted inventories require authoritative CI confirmation. Historical measurement notes remain in Git; profiles contain the enforced counts. Measurements below identify changed sources and local compiler provenance without changing checker rules or the 95-percent executable-line floor.",
@@ -282,16 +296,16 @@
         "taken": 76
       },
       "main/logic/boot_guard.hpp": {
-        "outcomes": 8,
-        "taken": 8
+        "outcomes": 22,
+        "taken": 22
       },
       "main/logic/bootlog.hpp": {
-        "outcomes": 88,
-        "taken": 63
+        "outcomes": 98,
+        "taken": 72
       },
       "main/logic/button.hpp": {
-        "outcomes": 18,
-        "taken": 18
+        "outcomes": 26,
+        "taken": 26
       },
       "main/logic/captive.hpp": {
         "outcomes": 6,
@@ -314,16 +328,16 @@
         "taken": 53
       },
       "main/logic/config_model.hpp": {
-        "outcomes": 256,
-        "taken": 203
+        "outcomes": 312,
+        "taken": 257
       },
       "main/logic/config_store.hpp": {
-        "outcomes": 464,
-        "taken": 288
+        "outcomes": 486,
+        "taken": 313
       },
       "main/logic/config_transaction.hpp": {
-        "outcomes": 100,
-        "taken": 66
+        "outcomes": 114,
+        "taken": 78
       },
       "main/logic/conv_override.hpp": {
         "outcomes": 8,
@@ -394,8 +408,8 @@
         "taken": 18
       },
       "main/logic/heap_watchdog.hpp": {
-        "outcomes": 18,
-        "taken": 18
+        "outcomes": 22,
+        "taken": 22
       },
       "main/logic/heartbeat.hpp": {
         "outcomes": 330,
@@ -684,16 +698,16 @@
         "taken": 85
       },
       "main/logic/boot_guard.hpp": {
-        "outcomes": 8,
-        "taken": 8
+        "outcomes": 22,
+        "taken": 22
       },
       "main/logic/bootlog.hpp": {
-        "outcomes": 94,
-        "taken": 68
+        "outcomes": 106,
+        "taken": 79
       },
       "main/logic/button.hpp": {
-        "outcomes": 22,
-        "taken": 21
+        "outcomes": 30,
+        "taken": 30
       },
       "main/logic/captive.hpp": {
         "outcomes": 8,
@@ -716,16 +730,16 @@
         "taken": 53
       },
       "main/logic/config_model.hpp": {
-        "outcomes": 270,
-        "taken": 226
+        "outcomes": 334,
+        "taken": 290
       },
       "main/logic/config_store.hpp": {
-        "outcomes": 434,
-        "taken": 291
+        "outcomes": 460,
+        "taken": 320
       },
       "main/logic/config_transaction.hpp": {
-        "outcomes": 100,
-        "taken": 67
+        "outcomes": 110,
+        "taken": 77
       },
       "main/logic/conv_override.hpp": {
         "outcomes": 8,
@@ -1086,16 +1100,16 @@
         "taken": 85
       },
       "main/logic/boot_guard.hpp": {
-        "outcomes": 8,
-        "taken": 8
+        "outcomes": 22,
+        "taken": 22
       },
       "main/logic/bootlog.hpp": {
-        "outcomes": 94,
-        "taken": 68
+        "outcomes": 106,
+        "taken": 79
       },
       "main/logic/button.hpp": {
-        "outcomes": 22,
-        "taken": 21
+        "outcomes": 30,
+        "taken": 30
       },
       "main/logic/captive.hpp": {
         "outcomes": 8,
@@ -1118,16 +1132,16 @@
         "taken": 53
       },
       "main/logic/config_model.hpp": {
-        "outcomes": 270,
-        "taken": 226
+        "outcomes": 334,
+        "taken": 290
       },
       "main/logic/config_store.hpp": {
-        "outcomes": 434,
-        "taken": 291
+        "outcomes": 460,
+        "taken": 320
       },
       "main/logic/config_transaction.hpp": {
-        "outcomes": 100,
-        "taken": 67
+        "outcomes": 110,
+        "taken": 77
       },
       "main/logic/conv_override.hpp": {
         "outcomes": 8,
@@ -1488,16 +1502,16 @@
         "taken": 85
       },
       "main/logic/boot_guard.hpp": {
-        "outcomes": 8,
-        "taken": 8
+        "outcomes": 22,
+        "taken": 22
       },
       "main/logic/bootlog.hpp": {
-        "outcomes": 94,
-        "taken": 68
+        "outcomes": 106,
+        "taken": 79
       },
       "main/logic/button.hpp": {
-        "outcomes": 22,
-        "taken": 21
+        "outcomes": 30,
+        "taken": 30
       },
       "main/logic/captive.hpp": {
         "outcomes": 8,
@@ -1520,16 +1534,16 @@
         "taken": 53
       },
       "main/logic/config_model.hpp": {
-        "outcomes": 270,
-        "taken": 226
+        "outcomes": 334,
+        "taken": 290
       },
       "main/logic/config_store.hpp": {
-        "outcomes": 434,
-        "taken": 291
+        "outcomes": 460,
+        "taken": 320
       },
       "main/logic/config_transaction.hpp": {
-        "outcomes": 100,
-        "taken": 67
+        "outcomes": 110,
+        "taken": 77
       },
       "main/logic/conv_override.hpp": {
         "outcomes": 8,

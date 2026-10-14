@@ -187,8 +187,9 @@ The payload is flat. Fields are numeric except the stated text fields; connectiv
 | HomeHub | `modbus_enabled`, `modbus_connected`, `modbus_rx`, `modbus_fails`. |
 
 Stack minima are null until sampled; WiFi RSSI/BSSID are null when offline. `max_alloc` is contiguous
-heap headroom. `heap_restarts` counts consecutive watchdog resets inherited by this boot, returns to
-zero on a later healthy boot and uses HA state class `measurement`. `mqtt_skipped` counts a publish
+heap headroom. `heap_restarts` counts watchdog resets inherited by this boot, returns to zero on a
+clean boot ([classification](ARCHITECTURE.md#boot-loop-safe-mode-config-recovery)) and uses HA
+state class `measurement`. `mqtt_skipped` counts a publish
 cycle interrupted by an allocation failure or the flat Modbus payload exceeding its **4 KiB**
 bound; earlier topics in that cycle may already have published. `mqtt_quiesced` counts deliberate
 OTA/Weather TLS pauses; `poll_skipped` counts sweeps not performed. These use `total_increasing`.
@@ -309,6 +310,8 @@ and profile, never credentials or active configuration. A known predecessor is r
 replacement is saved, and the replacement is saved before discovery. Reload after a real reboot
 therefore resumes known-profile cleanup. A missing first-upgrade record cannot recover an unknown
 older profile; a corrupt/incompatible record blocks new X10A discovery rather than guessing.
+The recovery-button factory reset erases this record and refuses new saves until it reboots, so a
+profile announced before the reset needs the owner migration below.
 An abandoned broker/base or replacement board is an owner migration boundary: the new connection
 does not authenticate to the old broker or blindly delete another installation's topics.
 

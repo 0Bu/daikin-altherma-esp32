@@ -9,13 +9,39 @@
 #include "task_config.hpp"
 #include "stack_watch.hpp"
 #include "logic/heartbeat.hpp"
+#include "mqtt_retirement_store.hpp"
+#include "nvs_storage.hpp"
 #include <cstdlib>
+#include <initializer_list>
 #include <new>
 #include <string>
+#include <vector>
 namespace adapter {
 daik::Config cfg;
 bool         button = false, ws2812 = false, disabled = false;
 const char*  scenario = nullptr;
+// Hold scenarios: what each reset step returns, and the order the production reset called them.
+esp_err_t   erase_result = ESP_FAIL, wifi_result = ESP_FAIL, seed_write_result = ESP_OK;
+bool        history_result = false, crash_result = false, retire_result = false;
+bool        seed_result = true;
+std::string order;
+unsigned    erase_calls = 0, seed_calls = 0, seed_writes = 0;
+// /diag lines by kind — the format string is what identifies them; the adapter never formats.
+unsigned diag_lines = 0, armed_lines = 0, fired_lines = 0, failed_lines = 0;
+unsigned incomplete_lines = 0, not_kept_lines = 0, alloc_lines = 0;
+// The input script of a hold scenario: consecutive (samples, pressed) runs.
+struct Run {
+    unsigned samples;
+    bool     pressed;
+};
+std::vector<Run> script;
+unsigned         script_total = 0, phase_end = 0;
+bool             phase_checked = false;
+
+void step(const char* name) {
+    if (!order.empty()) order += ',';
+    order += name;
+}
 } // namespace adapter
 namespace daik {
 // Deliberate adapter contract: ANY legacy full snapshot fails, while actual with_config runs.
@@ -37,7 +63,16 @@ const Config& config_ref_locked() {
     return adapter::cfg;
 }
 } // namespace detail
-void       diag_printf(const char*, ...) {}
+void diag_printf(const char* fmt, ...) {
+    ++adapter::diag_lines;
+    const std::string line = fmt;
+    if (line.rfind("button: held — release now", 0) == 0) ++adapter::armed_lines;
+    if (line.find("FACTORY RESET") != std::string::npos) ++adapter::fired_lines;
+    if (line.find("factory reset FAILED") != std::string::npos) ++adapter::failed_lines;
+    if (line.find("factory reset INCOMPLETE") != std::string::npos) ++adapter::incomplete_lines;
+    if (line.find("board hardware not kept") != std::string::npos) ++adapter::not_kept_lines;
+    if (line.find("task alloc failed") != std::string::npos) ++adapter::alloc_lines;
+}
 bool       net_eth_present() { return false; }
 bool       net_is_up() { return true; }
 MqttStatus mqtt_status() {
@@ -55,22 +90,54 @@ HpStats hp_stats() {
     out.connected = true;
     return out;
 }
+// Every destructive step is counted (the startup scenarios require zero) and, for the hold
+// scenarios, recorded in call order with a scenario-chosen result.
 esp_err_t nvs_erase_all() {
     ++sdk::destructive_calls;
-    return ESP_FAIL;
+    ++adapter::erase_calls;
+    adapter::step("erase");
+    return adapter::erase_result;
 }
 esp_err_t wifi_forget_persisted_config() {
     ++sdk::destructive_calls;
-    return ESP_FAIL;
+    adapter::step("wifi");
+    return adapter::wifi_result;
 }
 bool history_flash_forget() {
     ++sdk::destructive_calls;
-    return false;
+    adapter::step("history");
+    return adapter::history_result;
 }
-void dwell_forget() { ++sdk::destructive_calls; }
+void dwell_forget() {
+    ++sdk::destructive_calls;
+    adapter::step("dwell");
+}
 bool diag_crash_forget() {
     ++sdk::destructive_calls;
-    return false;
+    adapter::step("crash");
+    return adapter::crash_result;
+}
+bool mqtt_retirement_forget() noexcept {
+    ++sdk::destructive_calls;
+    adapter::step("retire");
+    return adapter::retire_result;
+}
+// The board-hardware seed: built from RAM (not destructive), written only behind the latch.
+bool config_factory_seed_blob(std::vector<uint8_t>& out) {
+    ++adapter::seed_calls;
+    adapter::step("seed");
+    if (!adapter::seed_result) return false;
+    out = {0x44, 0x4b, 0x43, 0x31};
+    return true;
+}
+esp_err_t nvs_set_blob_after_factory_reset(const char* key, const void* data, size_t len) {
+    ++sdk::destructive_calls;
+    ++adapter::seed_writes;
+    const auto* bytes = static_cast<const uint8_t*>(data);
+    const bool  exact =
+        std::string(key) == "cfg" && len == 4 && bytes[0] == 0x44 && bytes[3] == 0x31;
+    adapter::step(exact ? "seed_write" : "seed_write_wrong_payload");
+    return adapter::seed_write_result;
 }
 } // namespace daik
 static void oracle(bool pass, const char* name) {
@@ -158,6 +225,121 @@ static void first_delay(TickType_t ticks) {
     // Exit the host process at the first scheduled wait; no synthetic exception enters task catch.
     std::exit(0);
 }
+// ── Hold scenarios: a scripted input drives the production button task through its boot gate,
+// a full hold and the real factory_reset(). 20 ms per sample, as every vTaskDelay advances the
+// adapter clock by its own length; the factory reset's own waits read no GPIO.
+static int scripted_level(unsigned read_index) {
+    bool pressed = false; // past the script: released
+    for (const adapter::Run& run : adapter::script) {
+        if (read_index < run.samples) {
+            pressed = run.pressed;
+            break;
+        }
+        read_index -= run.samples;
+    }
+    return (pressed == adapter::cfg.btn_active_low) ? 0 : 1;
+}
+static void use_script(std::initializer_list<adapter::Run> runs) {
+    adapter::script.assign(runs);
+    adapter::script_total = 0;
+    for (const adapter::Run& run : adapter::script) adapter::script_total += run.samples;
+    sdk::level_for_read = scripted_level;
+}
+static void finish_hold(const char* summary) {
+    std::printf("PASS scenario=%s %s; order=%s\n", adapter::scenario, summary,
+                adapter::order.empty() ? "-" : adapter::order.c_str());
+    std::exit(0);
+}
+static void hold_scenario_end() {
+    const std::string s = adapter::scenario;
+    if (s == "button_boot_gate") {
+        // The gate opened only on the three released samples; the hold that followed armed once,
+        // fired once, and its failed erase neither rebooted nor reached any later step.
+        oracle(adapter::armed_lines == 1 && adapter::fired_lines == 1,
+               "gated_hold_arms_and_fires_once");
+        oracle(adapter::order == "seed,erase" && adapter::failed_lines == 1 && sdk::restarts == 0,
+               "failed_erase_stops_before_any_later_step_or_restart");
+        finish_hold("bounced boot never armed; three released samples opened the gate");
+    }
+    if (s == "button_reset_retire_fail") {
+        oracle(adapter::order == "seed,erase,wifi,history,dwell,crash,retire",
+               "reset_runs_every_erase_in_fail_closed_order");
+        oracle(adapter::incomplete_lines == 1 && adapter::seed_writes == 0 && sdk::restarts == 0,
+               "retirement_erase_failure_is_incomplete_without_seed_or_restart");
+        oracle(adapter::fired_lines == 1, "held_button_fires_once_after_incomplete_reset");
+        finish_hold("unerased retirement record kept the board up");
+    }
+    oracle(false, "hold_scenario_reaches_restart_or_end");
+}
+static void hold_delay(TickType_t) {
+    if (!adapter::phase_checked && adapter::phase_end && sdk::gpio_reads >= adapter::phase_end) {
+        adapter::phase_checked = true;
+        // Held through boot with a one-sample and a two-sample released bounce, then held for
+        // six more seconds: neither bounce is a release, so the state machine never went live.
+        oracle(adapter::armed_lines == 0 && adapter::fired_lines == 0 && adapter::seed_calls == 0 &&
+                   adapter::erase_calls == 0,
+               "boot_gate_holds_through_one_and_two_sample_bounces");
+    }
+    if (sdk::gpio_reads >= adapter::script_total) hold_scenario_end();
+}
+static void hold_restart() {
+    const std::string s = adapter::scenario;
+    // The scenarios whose reset must NOT finish fail here under their own oracle names.
+    oracle(s != "button_boot_gate", "failed_erase_stops_before_any_later_step_or_restart");
+    oracle(s != "button_reset_retire_fail",
+           "retirement_erase_failure_is_incomplete_without_seed_or_restart");
+    oracle(adapter::fired_lines == 1 && adapter::armed_lines == 1, "complete_hold_arms_then_fires");
+    if (s == "button_reset_complete") {
+        oracle(adapter::order == "seed,erase,wifi,history,dwell,crash,retire,seed_write",
+               "reset_order_is_seed_then_every_erase_then_seed_write");
+        oracle(adapter::not_kept_lines == 0 && adapter::incomplete_lines == 0,
+               "complete_reset_keeps_board_hardware");
+        finish_hold("every erase, then the seed write, then the one restart");
+    }
+    if (s == "button_reset_seed_fail") {
+        oracle(adapter::order == "seed,erase,wifi,history,dwell,crash,retire,seed_write" &&
+                   adapter::not_kept_lines == 1,
+               "failed_seed_write_is_reported_and_reset_still_completes");
+        finish_hold("seed write failed; reset still completed");
+    }
+    if (s == "button_reset_no_seed") {
+        oracle(adapter::order == "seed,erase,wifi,history,dwell,crash,retire" &&
+                   adapter::seed_writes == 0 && adapter::not_kept_lines == 1,
+               "unbuilt_seed_is_reported_and_reset_still_completes");
+        finish_hold("no seed; reset still completed");
+    }
+    oracle(false, "restart_only_after_a_complete_reset");
+}
+static bool start_hold_scenario(const std::string& s) {
+    if (s == "button_boot_gate") {
+        // Held at boot; one released bounce; held; two released; held 6 s — still gated. Then
+        // three released samples open the gate, and a 6 s hold arms and fires (erase fails).
+        use_script({{20, true},
+                    {1, false},
+                    {20, true},
+                    {2, false},
+                    {300, true},
+                    {3, false},
+                    {300, true},
+                    {5, false}});
+        adapter::phase_end = 20 + 1 + 20 + 2 + 300;
+    } else if (s == "button_reset_complete" || s == "button_reset_seed_fail" ||
+               s == "button_reset_no_seed" || s == "button_reset_retire_fail") {
+        use_script({{3, false}, {300, true}, {5, false}});
+        adapter::erase_result      = ESP_OK;
+        adapter::wifi_result       = ESP_OK;
+        adapter::history_result    = true;
+        adapter::crash_result      = true;
+        adapter::retire_result     = s != "button_reset_retire_fail";
+        adapter::seed_result       = s != "button_reset_no_seed";
+        adapter::seed_write_result = s == "button_reset_seed_fail" ? ESP_FAIL : ESP_OK;
+    } else {
+        return false;
+    }
+    sdk::on_delay   = hold_delay;
+    sdk::on_restart = hold_restart;
+    return true;
+}
 static void stack_minimum_contract() {
     using namespace daik;
     for (unsigned i = 0; i < static_cast<unsigned>(StackWatch::COUNT); ++i) {
@@ -218,7 +400,9 @@ int main(int argc, char** argv) {
     sdk::fail_hp_snapshot       = scenario == "led_hp_oom";
     sdk::fail_gpio_config       = scenario == "led_init_fail" || scenario == "button_init_fail";
     if (sdk::fail_mqtt_snapshot || sdk::fail_hp_snapshot) sdk::wifi_mode = WIFI_MODE_STA;
+    sdk::fail_task_create = scenario == "button_task_alloc_fail";
     sdk::on_delay = first_delay;
+    start_hold_scenario(scenario); // a hold scenario replaces the first-delay exit with its script
     try {
         if (adapter::button)
             daik::recovery_button_start();
@@ -230,6 +414,15 @@ int main(int argc, char** argv) {
     }
     oracle(sdk::config_copies == 0 && sdk::lock_depth == 0,
            "starter_scalar_snapshot_no_copy_or_lock_retention");
+    if (sdk::fail_task_create) {
+        // A configured button whose task could not be created must say so where the owner looks.
+        oracle(sdk::task_creates == 0 && adapter::alloc_lines == 1 && adapter::diag_lines == 1 &&
+                   sdk::destructive_calls == 0,
+               "button_task_alloc_failure_reaches_diag");
+        std::printf("PASS scenario=%s task allocation failure reported through /diag\n",
+                    adapter::scenario);
+        return 0;
+    }
     if (adapter::disabled) {
         for (unsigned i = 0; i < static_cast<unsigned>(daik::StackWatch::COUNT); ++i)
             oracle(daik::stack_watch_min_free_bytes(static_cast<daik::StackWatch>(i)) == 0,

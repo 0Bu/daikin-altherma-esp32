@@ -198,11 +198,12 @@ struct ConfigBlob {
 
 inline constexpr uint8_t  CONFIG_BLOB_MAGIC0  = 'D', CONFIG_BLOB_MAGIC1 = 'K',
                           CONFIG_BLOB_MAGIC2  = 'C', CONFIG_BLOB_MAGIC3 = '1';
-// v2 appended the board-local hardware block, v3 the OTA update channel, v4 the UI language override,
-// v5 the HomeHub Modbus stack, v6 its now-legacy enable compatibility bit, v7 one MQTT-backed
-// reference-temperature mapping, v8 its source timestamp + maximum-age fields, and v9 activates the
-// formerly inert actuation bit without changing the byte layout, and v10 the direct Open-Meteo
-// location, v11 appends ENV III enable + SDA/SCL pins, and v12 appends the explicit board-preset id
+// v2 appended the board-local hardware block, v3 the OTA update channel, v4 the UI language
+// override, v5 the HomeHub Modbus stack, v6 its now-legacy enable compatibility bit, v7 one
+// MQTT-backed reference-temperature mapping, v8 its source timestamp + maximum-age fields, and v9
+// activates the formerly inert actuation bit without changing the byte layout, and v10 the direct
+// Open-Meteo location, v11 appends ENV III enable + SDA/SCL pins, and v12 appends the explicit
+// board-preset id
 // + selected flag, v13 appends room setpoint/enabled/HVAC mappings, and v14 appends one byte that
 // carried the OFF/SHADOW dynamic-LWT mode and is now retired — written zero, ignored on read, since
 // the diagnosis has no controller mode; v15 appends the independent circulation-
@@ -214,9 +215,10 @@ inline constexpr uint8_t  CONFIG_BLOB_MAGIC0  = 'D', CONFIG_BLOB_MAGIC1 = 'K',
 // v5-v8 actuation bits decode OFF and every pre-v14 controller mode migrates OFF.
 // Bumping the version rather than reusing the previous one is what makes the trailing-garbage check
 // below still exact per version; OLDER blobs are ACCEPTED on read (see config_blob_deserialize)
-// because rejecting them would drop a user's WiFi and MQTT credentials on the OTA that introduced the
-// field — the fallback path is the legacy per-key layout, which a device written by a blob-era build
-// has never populated.
+// because rejecting them would drop a user's WiFi and MQTT credentials on the OTA that introduced
+// the field. The fallback path is no substitute: it is the legacy per-key layout, which only a
+// device upgraded from the per-key era still holds (frozen at that era's values — no current build
+// writes or erases those keys), and otherwise the Kconfig defaults.
 inline constexpr uint8_t  CONFIG_BLOB_VERSION     = 19;
 inline constexpr uint8_t  CONFIG_BLOB_VERSION_MIN = 1;
 // A string field longer than this is treated as corruption on decode: real credentials are short, so a
@@ -225,10 +227,10 @@ inline constexpr uint16_t CONFIG_BLOB_MAX_STR = 512;
 
 // THE WRITE SIDE OF THAT SAME BOUND. The decoder rejects the WHOLE BLOB when any string exceeds it,
 // so a serializer that writes one is not producing a slightly-wrong config — it is producing a
-// config that cannot be read back at all, and the fallback is the legacy per-key layout a blob-era
-// device has never populated. The board then boots into the setup portal having silently lost WiFi,
-// MQTT, syslog, NTP, board hardware, OTA channel, language, ENV III, both MQTT sources and the
-// weather location.
+// config that cannot be read back at all, and the fallback is the legacy per-key layout (stale
+// per-key-era values on an upgraded device, nothing on any other) or the Kconfig defaults. The
+// board then boots — typically into the setup portal — having silently lost WiFi, MQTT, syslog,
+// NTP, board hardware, OTA channel, language, ENV III, both MQTT sources and the weather location.
 //
 // It was reachable: every other string here is bounded by its own validator or by its route's body
 // buffer, but `mb_host` was documented as "free text like syslog_host" while its route reads a
@@ -283,9 +285,11 @@ inline void blob_put_str(std::vector<uint8_t>& v, const std::string& s) {
 }  // namespace detail
 
 // The independently-owned X10A link cache. One NVS blob entry, rather than three committed keys:
-// changing {44,43} to {43,44} must never leave {43,43} on flash if the second write fails. Detection
-// may still self-heal a stale cache, but atomicity means an HTTP 500 cannot become accepted state on
-// the next boot. Kept separate from ConfigBlob because the poll task legitimately updates it.
+// changing {44,43} to {43,44} must never leave {43,43} on flash if the second write fails.
+// Detection rewrites a stale cache only when the bus answers on a pair its sweep tries (the cached
+// pins, the build default and their swaps), but atomicity means an HTTP 500 cannot become accepted
+// state on the next boot. Kept separate from ConfigBlob because the poll task legitimately updates
+// it.
 struct LinkBlob {
     int32_t rx_pin = -1;
     int32_t tx_pin = -1;
@@ -294,12 +298,15 @@ struct LinkBlob {
 };
 
 inline constexpr size_t LINK_BLOB_BYTES = 4 + 1 + 4 + 4 + 1 + 4 + 4;
+// The one wire version: written by link_blob_serialize and the only one link_blob_deserialize
+// takes.
+inline constexpr uint8_t LINK_BLOB_VERSION = 1;
 
 inline std::vector<uint8_t> link_blob_serialize(const LinkBlob& link) {
     std::vector<uint8_t> v;
     v.reserve(LINK_BLOB_BYTES);
     v.push_back('D'); v.push_back('K'); v.push_back('L'); v.push_back('1');
-    v.push_back(1);  // wire version
+    v.push_back(LINK_BLOB_VERSION);
     detail::blob_put_u32(v, static_cast<uint32_t>(link.rx_pin));
     detail::blob_put_u32(v, static_cast<uint32_t>(link.tx_pin));
     v.push_back(static_cast<uint8_t>(link.proto));
@@ -309,8 +316,8 @@ inline std::vector<uint8_t> link_blob_serialize(const LinkBlob& link) {
 }
 
 inline bool link_blob_deserialize(const uint8_t* d, size_t n, LinkBlob& out) {
-    if (!d || n != LINK_BLOB_BYTES || d[0] != 'D' || d[1] != 'K' || d[2] != 'L' ||
-        d[3] != '1' || d[4] != 1)
+    if (!d || n != LINK_BLOB_BYTES || d[0] != 'D' || d[1] != 'K' || d[2] != 'L' || d[3] != '1' ||
+        d[4] != LINK_BLOB_VERSION)
         return false;
     const uint32_t want = static_cast<uint32_t>(d[n - 4]) |
         (static_cast<uint32_t>(d[n - 3]) << 8) |
@@ -575,6 +582,88 @@ inline bool config_blob_deserialize(const uint8_t* d, size_t n, ConfigBlob& out)
     c.syslog_port          = static_cast<int32_t>(port);
     out = c;
     return true;
+}
+
+// ── What config_load made of a stored entry ──────────────────────────────────────────────────────
+// "No stored entry" and "a stored entry this build cannot use" used to look identical at boot: both
+// fell back to the legacy per-key layout or the Kconfig defaults, and the first AUTOMATIC write
+// (the one-shot HomeHub search, the WiFi rollback bookkeeping) then replaced the stored blob with
+// that fallback. After a downgrade or a rollback to a build that cannot read the newer layout its
+// successor wrote, that silently destroyed every setting the owner would have got back by updating
+// again — and a damaged blob lost whatever a repair could still have recovered. Only WHY the stored
+// entry produced nothing separates the two, so that reason is kept and decided here, IDF-free.
+//
+// How reading one stored entry went, before any decode. The IDF caller maps its NVS read
+// (nvs_storage.hpp NvsBlobRead) onto this so the verdict below stays host-testable.
+enum class StoredEntryRead : uint8_t {
+    Present,   // an entry was read in full; whether it decodes is the next question
+    NotFound,  // no entry: a fresh device, one from the per-key era, or one after a factory reset
+    ReadError, // an entry may exist but was not read (NVS unavailable, read failure, empty entry)
+};
+
+enum class ConfigLoadVerdict : uint8_t {
+    Absent,    // nothing is stored: the fallback IS this device's configuration
+    Loaded,    // the stored entry decoded and is the configuration
+    Rejected,  // an entry is stored but did not decode (newer layout, damage, truncation)
+    ReadError, // an entry could not be read at all
+};
+
+// `decoded` is only meaningful for a Present read. An unknown read state fails closed: it is
+// treated as a read error, the verdict under which nothing automatic may overwrite the entry.
+inline ConfigLoadVerdict config_load_verdict(StoredEntryRead read, bool decoded) {
+    switch (read) {
+    case StoredEntryRead::Present:
+        return decoded ? ConfigLoadVerdict::Loaded : ConfigLoadVerdict::Rejected;
+    case StoredEntryRead::NotFound:
+        return ConfigLoadVerdict::Absent;
+    case StoredEntryRead::ReadError:
+        break;
+    }
+    return ConfigLoadVerdict::ReadError;
+}
+
+// Whether an AUTOMATIC writer may replace the stored "cfg" entry this boot. Only when nothing
+// usable is at stake: an absent entry (the fallback is all there is) or one that loaded (the writer
+// rewrites what it read). A rejected or unreadable entry is kept until an explicit owner save — the
+// one writer entitled to decide that the running fallback should replace it. The automatic writers
+// skip their write rather than persist the fallback; their decision is retried on a later boot.
+inline bool config_load_allows_automatic_writes(ConfigLoadVerdict v) {
+    return v == ConfigLoadVerdict::Absent || v == ConfigLoadVerdict::Loaded;
+}
+
+// The two entries' four-byte magic as text, the `magic` argument of the two helpers below. The
+// service one is checked against the byte constants its serializer writes; the link one is pinned
+// by the host tests reading a serialized link entry back through stored_blob_version().
+inline constexpr char CONFIG_BLOB_MAGIC_TEXT[] = "DKC1";
+inline constexpr char LINK_BLOB_MAGIC_TEXT[]   = "DKL1";
+static_assert(CONFIG_BLOB_MAGIC_TEXT[0] == CONFIG_BLOB_MAGIC0 &&
+                  CONFIG_BLOB_MAGIC_TEXT[1] == CONFIG_BLOB_MAGIC1 &&
+                  CONFIG_BLOB_MAGIC_TEXT[2] == CONFIG_BLOB_MAGIC2 &&
+                  CONFIG_BLOB_MAGIC_TEXT[3] == CONFIG_BLOB_MAGIC3,
+              "the service blob's magic text must match the bytes its serializer writes");
+
+// The layout version a stored entry claims: its fifth byte, after the four-byte magic both entries
+// start with. -1 when the entry is too short for that header or carries another magic — then no
+// byte of it can be trusted to name a layout. Only the diagnostic line of a rejected entry reads
+// it; the decoders remain the sole authority on what is accepted.
+inline int stored_blob_version(const uint8_t* d, size_t n, const char* magic) {
+    if (d == nullptr || magic == nullptr || n < 5) return -1;
+    for (size_t i = 0; i < 4; ++i)
+        if (d[i] != static_cast<uint8_t>(magic[i])) return -1;
+    return d[4];
+}
+
+// Why a stored entry that was read in full did not decode, in words for that same diagnostic line.
+// [min_version, max_version] is the range this build reads. The last case covers every structural
+// failure inside a known layout — a CRC mismatch, a truncated or over-long body, an over-long
+// string — which the decoder deliberately does not tell apart.
+inline const char* stored_blob_reject_reason(const uint8_t* d, size_t n, const char* magic,
+                                             int min_version, int max_version) {
+    const int version = stored_blob_version(d, n, magic);
+    if (version < 0) return "no recognised header";
+    if (version > max_version) return "newer layout than this build reads";
+    if (version < min_version) return "unknown older layout";
+    return "damaged (length or CRC check failed)";
 }
 
 }  // namespace daik

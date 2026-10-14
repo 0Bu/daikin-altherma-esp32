@@ -2163,6 +2163,126 @@ static void test_config_transaction() {
         CHECK(link.identity_fp == 0x11111111u);
     }
 
+    // A service save in a boot whose X10A link took the indicator's pin (RAM -1): "cfg" keeps the
+    // stored pin while RAM keeps the yield — the WiFi setup a factory reset requires must not store
+    // the repair as the owner's choice. A save that states a real pin replaces it; that, or a save
+    // giving the stored pin to another board part, ends the yield for the part (CFG-08/a).
+    {
+        Config live   = config_tx_live();
+        live.led_gpio = -1; // yielded from GPIO44 at load
+        live.btn_gpio = 41; // not yielded
+        ConfigTxStore store;
+        store.seed(live);
+        LocalPinsRepair yielded;
+        yielded.led      = true;
+        yielded.led_gpio = 44;
+        Config req       = live;
+        req.wifi_ssid    = "new-net";
+        CHECK(config_save_transaction(live, req, false, store, yielded).result ==
+              ConfigSaveResult::Saved);
+        CHECK(config_tx_durable_service(store).led_gpio == 44);
+        CHECK(config_tx_durable_service(store).btn_gpio == 41);
+        CHECK(live.led_gpio == -1 && live.wifi_ssid == "new-net");
+        config_yield_forget_restated(yielded, req);
+        CHECK(yielded.led && yielded.led_gpio == 44); // -1 is not a re-statement
+        // Without the record the same save stores the RAM view.
+        Config        plain_live = live;
+        ConfigTxStore plain;
+        plain.seed(plain_live);
+        Config plain_req = plain_live;
+        CHECK(config_save_transaction(plain_live, plain_req, false, plain).result ==
+              ConfigSaveResult::Saved);
+        CHECK(config_tx_durable_service(plain).led_gpio == -1);
+        // A real pin wins and ends the yield for that part only.
+        req          = live;
+        req.led_gpio = 5;
+        CHECK(config_save_transaction(live, req, false, store, yielded).result ==
+              ConfigSaveResult::Saved);
+        CHECK(config_tx_durable_service(store).led_gpio == 5 && live.led_gpio == 5);
+        yielded.btn      = true;
+        yielded.btn_gpio = 43;
+        config_yield_forget_restated(yielded, req);
+        CHECK(!yielded.led && !yielded.btn); // btn 41 is a real pin too
+        ConfigBlob b;
+        b.led_gpio = -1;
+        b.btn_gpio = -1;
+        LocalPinsRepair btn_only;
+        btn_only.btn      = true;
+        btn_only.btn_gpio = 43;
+        config_blob_keep_yielded_pins(b, btn_only);
+        CHECK(b.led_gpio == -1 && b.btn_gpio == 43);
+        b.btn_gpio = 7; // a stated button is written as stated
+        config_blob_keep_yielded_pins(b, btn_only);
+        CHECK(b.btn_gpio == 7);
+        LocalPinsRepair led_only;
+        led_only.led      = true;
+        led_only.led_gpio = 44;
+        b.led_gpio        = 9; // ...and so is a stated indicator
+        config_blob_keep_yielded_pins(b, led_only);
+        CHECK(b.led_gpio == 9);
+        Config none_saved; // both parts left at -1: nothing is forgotten
+        none_saved.led_gpio = -1;
+        none_saved.btn_gpio = -1;
+        config_yield_forget_restated(btn_only, none_saved);
+        CHECK(btn_only.btn && !btn_only.led);
+
+        // A yielded pin the save gives to another board part ends the yield: keeping it would store
+        // a collision that config_load rejects as a whole board statement.
+        LocalPinsRepair both;
+        both.led      = true;
+        both.led_gpio = 44;
+        both.btn      = true;
+        both.btn_gpio = 43;
+        Config moved;
+        moved.led_gpio           = -1;
+        moved.btn_gpio           = 44; // the button now takes the indicator's stored pin
+        LocalPinsRepair standing = config_yield_standing(both, moved);
+        CHECK(!standing.led && !standing.btn); // the button is re-stated with a real pin too
+        // The forget step after that save applies the same rule: a later save in this boot that
+        // moves the button away again must not bring the indicator's stored pin back.
+        LocalPinsRepair after = both;
+        config_yield_forget_restated(after, moved);
+        CHECK(!after.led && !after.btn);
+        moved.btn_gpio = -1;
+        moved.led_gpio = 43; // the indicator takes the button's stored pin
+        standing       = config_yield_standing(both, moved);
+        CHECK(!standing.led && !standing.btn);
+        moved.led_gpio     = -1;
+        moved.env3_enabled = true; // an enabled ENV III bus on either stored pin counts too
+        moved.env3_sda     = 44;
+        moved.env3_scl     = 6;
+        standing           = config_yield_standing(both, moved);
+        CHECK(!standing.led && standing.btn);
+        moved.env3_sda = 5;
+        moved.env3_scl = 43;
+        standing       = config_yield_standing(both, moved);
+        CHECK(standing.led && !standing.btn);
+        moved.env3_enabled = false; // a disabled ENV III claims nothing
+        standing           = config_yield_standing(both, moved);
+        CHECK(standing.led && standing.btn);
+
+        // Through the transaction: the button saved onto the yielded indicator pin stores no
+        // collision.
+        Config clash_live   = config_tx_live();
+        clash_live.led_gpio = -1; // yielded from GPIO44
+        clash_live.btn_gpio = -1;
+        ConfigTxStore clash;
+        clash.seed(clash_live);
+        LocalPinsRepair led44;
+        led44.led          = true;
+        led44.led_gpio     = 44;
+        Config clash_req   = clash_live;
+        clash_req.btn_gpio = 44;
+        CHECK(config_save_transaction(clash_live, clash_req, false, clash, led44).result ==
+              ConfigSaveResult::Saved);
+        CHECK(config_tx_durable_service(clash).led_gpio == -1);
+        CHECK(config_tx_durable_service(clash).btn_gpio == 44);
+        // ...and the factory seed carries the same: no indicator on the button's pin.
+        BoardHardwareStatement seed = config_board_hardware(clash_live);
+        config_unyield_board_hardware(seed, config_yield_standing(led44, clash_live));
+        CHECK(seed.led_gpio == -1 && seed.btn_gpio == 44);
+    }
+
     // The field-length boundary: CONFIG_BLOB_MAX_STR is accepted, one more is refused with nothing
     // written, because the decoder would reject that blob and drop the whole config at next boot.
     {
@@ -2230,7 +2350,9 @@ static void test_config_transaction() {
         ConfigTxStore store;
         store.seed(live);
         const Config stale = live; // taken at revision 5
-        apply_link(live, 1, 2, Protocol::S, 0xAABBCCDDu);
+        // 16/17, not a pair on the fixture's enabled ENV III pins (2/1): a carried link that
+        // collides with them is refused instead (test_config_reconcile_local_pins).
+        apply_link(live, 16, 17, Protocol::S, 0xAABBCCDDu);
         apply_model(live, "altherma3_r_erga", 0x5u, 60, 80, "1234");
         live.runtime_revision       = 7;
         Config req                  = stale;
@@ -2238,9 +2360,9 @@ static void test_config_transaction() {
         const ConfigSaveOutcome out = config_save_transaction(live, req, false, store);
         CHECK(out.result == ConfigSaveResult::Saved && out.failed == ConfigSaveStep::None);
         const LinkBlob link = config_tx_durable_link(store);
-        CHECK(link.rx_pin == 1 && link.tx_pin == 2 && link.proto == 'S');
+        CHECK(link.rx_pin == 16 && link.tx_pin == 17 && link.proto == 'S');
         CHECK(link.identity_fp == 0xAABBCCDDu);
-        CHECK(live.rx_pin == 1 && live.tx_pin == 2 && live.proto == Protocol::S);
+        CHECK(live.rx_pin == 16 && live.tx_pin == 17 && live.proto == Protocol::S);
         CHECK(live.profile == "altherma3_r_erga" && live.fp_valid && live.fp_pages == 0x5u);
         CHECK(live.wifi_ssid == "new-net" && live.runtime_revision == 8);
     }
@@ -2436,6 +2558,592 @@ static void test_config_transaction() {
         CHECK(live.runtime_revision == 6);
         CHECK(live.wifi_ssid == "home" && live.rx_pin == 44 && live.tx_pin == 43);
     }
+}
+
+// A stored image with its trailing CRC recomputed, so an edit exercises the rule it targets instead
+// of tripping the CRC first. Both entries end in a CRC over everything before it.
+static void config_test_reseal(std::vector<uint8_t>& raw) {
+    raw.resize(raw.size() - 4);
+    const uint32_t crc = config_crc32(raw.data(), raw.size());
+    for (int shift = 0; shift < 32; shift += 8) raw.push_back(static_cast<uint8_t>(crc >> shift));
+}
+
+// config_load's verdict for a "cfg" read, decoded by the production decoder.
+static ConfigLoadVerdict config_test_cfg_verdict(StoredEntryRead             read,
+                                                 const std::vector<uint8_t>& raw) {
+    ConfigBlob b;
+    const bool decoded =
+        read == StoredEntryRead::Present && config_blob_deserialize(raw.data(), raw.size(), b);
+    return config_load_verdict(read, decoded);
+}
+
+static ConfigLoadVerdict config_test_link_verdict(StoredEntryRead             read,
+                                                  const std::vector<uint8_t>& raw) {
+    LinkBlob   l;
+    const bool decoded =
+        read == StoredEntryRead::Present && link_blob_deserialize(raw.data(), raw.size(), l);
+    return config_load_verdict(read, decoded);
+}
+
+static std::string config_test_cfg_reason(const std::vector<uint8_t>& raw) {
+    return stored_blob_reject_reason(raw.data(), raw.size(), CONFIG_BLOB_MAGIC_TEXT,
+                                     CONFIG_BLOB_VERSION_MIN, CONFIG_BLOB_VERSION);
+}
+
+// logic/config_store.hpp — what config_load makes of a stored entry (tracker card CFG-05/a). A
+// missing entry and one this build cannot use must reach different verdicts, because only the
+// former may be overwritten by an automatic writer: the latter is a newer layout after a rollback,
+// or damage, and holds settings the owner gets back by updating again or repairing.
+static void test_config_load_verdict() {
+    const std::vector<uint8_t> valid = config_blob_serialize(config_blob_from(config_tx_live()));
+
+    // The verdict table, one row per way a stored "cfg" entry can look.
+    CHECK(config_test_cfg_verdict(StoredEntryRead::NotFound, {}) == ConfigLoadVerdict::Absent);
+    CHECK(config_test_cfg_verdict(StoredEntryRead::Present, valid) == ConfigLoadVerdict::Loaded);
+
+    std::vector<uint8_t> newer = valid; // what a later build wrote: CRC intact, version beyond ours
+    newer[4]                   = static_cast<uint8_t>(CONFIG_BLOB_VERSION + 1);
+    config_test_reseal(newer);
+    CHECK(config_test_cfg_verdict(StoredEntryRead::Present, newer) == ConfigLoadVerdict::Rejected);
+
+    std::vector<uint8_t> crc_damage = valid; // one flipped body bit, CRC left as written
+    crc_damage[7] ^= 0x01;
+    CHECK(config_test_cfg_verdict(StoredEntryRead::Present, crc_damage) ==
+          ConfigLoadVerdict::Rejected);
+
+    std::vector<uint8_t> truncated = valid; // last body byte gone, CRC recomputed over the rest
+    truncated.erase(truncated.end() - 5);
+    config_test_reseal(truncated);
+    CHECK(config_test_cfg_verdict(StoredEntryRead::Present, truncated) ==
+          ConfigLoadVerdict::Rejected);
+
+    std::vector<uint8_t> trailing = valid; // one byte past the v19 body, CRC recomputed
+    trailing.insert(trailing.end() - 4, 0x00);
+    config_test_reseal(trailing);
+    CHECK(config_test_cfg_verdict(StoredEntryRead::Present, trailing) ==
+          ConfigLoadVerdict::Rejected);
+
+    // A read error stays a read error even if the bytes would have decoded: nothing was read.
+    CHECK(config_test_cfg_verdict(StoredEntryRead::ReadError, valid) ==
+          ConfigLoadVerdict::ReadError);
+    // `decoded` means nothing without a Present read, and an unknown read state fails closed.
+    CHECK(config_load_verdict(StoredEntryRead::NotFound, true) == ConfigLoadVerdict::Absent);
+    CHECK(config_load_verdict(static_cast<StoredEntryRead>(7), true) ==
+          ConfigLoadVerdict::ReadError);
+
+    // The gating decision: automatic writers (initial HomeHub search, WiFi rollback bookkeeping)
+    // may replace the stored entry only when nothing usable is at stake.
+    CHECK(config_load_allows_automatic_writes(ConfigLoadVerdict::Absent));
+    CHECK(config_load_allows_automatic_writes(ConfigLoadVerdict::Loaded));
+    CHECK(!config_load_allows_automatic_writes(ConfigLoadVerdict::Rejected));
+    CHECK(!config_load_allows_automatic_writes(ConfigLoadVerdict::ReadError));
+    CHECK(!config_load_allows_automatic_writes(static_cast<ConfigLoadVerdict>(9)));
+
+    // What the /diag line of a rejected entry names: its stored version byte and why.
+    CHECK(stored_blob_version(valid.data(), valid.size(), CONFIG_BLOB_MAGIC_TEXT) ==
+          CONFIG_BLOB_VERSION);
+    CHECK(stored_blob_version(newer.data(), newer.size(), CONFIG_BLOB_MAGIC_TEXT) ==
+          CONFIG_BLOB_VERSION + 1);
+    CHECK(config_test_cfg_reason(newer) == "newer layout than this build reads");
+    CHECK(config_test_cfg_reason(crc_damage) == "damaged (length or CRC check failed)");
+    CHECK(config_test_cfg_reason(truncated) == "damaged (length or CRC check failed)");
+    CHECK(config_test_cfg_reason(trailing) == "damaged (length or CRC check failed)");
+    std::vector<uint8_t> v0 = valid;
+    v0[4]                   = 0;
+    config_test_reseal(v0);
+    CHECK(config_test_cfg_verdict(StoredEntryRead::Present, v0) == ConfigLoadVerdict::Rejected);
+    CHECK(stored_blob_version(v0.data(), v0.size(), CONFIG_BLOB_MAGIC_TEXT) == 0);
+    CHECK(config_test_cfg_reason(v0) == "unknown older layout");
+    // No byte of an entry without the expected header names a layout.
+    for (size_t i = 0; i < 4; ++i) {
+        std::vector<uint8_t> foreign = valid;
+        foreign[i] ^= 0x20;
+        CHECK(stored_blob_version(foreign.data(), foreign.size(), CONFIG_BLOB_MAGIC_TEXT) == -1);
+        CHECK(config_test_cfg_reason(foreign) == "no recognised header");
+    }
+    CHECK(stored_blob_version(valid.data(), 4, CONFIG_BLOB_MAGIC_TEXT) ==
+          -1); // too short for the header
+    CHECK(stored_blob_version(nullptr, valid.size(), CONFIG_BLOB_MAGIC_TEXT) == -1);
+    CHECK(stored_blob_version(valid.data(), valid.size(), nullptr) == -1);
+
+    // The link entry: same verdicts, its own magic and its one wire version.
+    const std::vector<uint8_t> link = link_blob_serialize(LinkBlob{44, 43, 'I', 0x1234u});
+    CHECK(link[4] == LINK_BLOB_VERSION);
+    CHECK(stored_blob_version(link.data(), link.size(), LINK_BLOB_MAGIC_TEXT) == LINK_BLOB_VERSION);
+    CHECK(config_test_link_verdict(StoredEntryRead::NotFound, {}) == ConfigLoadVerdict::Absent);
+    CHECK(config_test_link_verdict(StoredEntryRead::Present, link) == ConfigLoadVerdict::Loaded);
+    CHECK(config_test_link_verdict(StoredEntryRead::ReadError, link) ==
+          ConfigLoadVerdict::ReadError);
+    std::vector<uint8_t> link_v2 = link;
+    link_v2[4]                   = 2;
+    config_test_reseal(link_v2);
+    CHECK(config_test_link_verdict(StoredEntryRead::Present, link_v2) ==
+          ConfigLoadVerdict::Rejected);
+    CHECK(stored_blob_version(link_v2.data(), link_v2.size(), LINK_BLOB_MAGIC_TEXT) == 2);
+    CHECK(std::string(stored_blob_reject_reason(
+              link_v2.data(), link_v2.size(), LINK_BLOB_MAGIC_TEXT, LINK_BLOB_VERSION,
+              LINK_BLOB_VERSION)) == "newer layout than this build reads");
+    std::vector<uint8_t> link_long = link;
+    link_long.insert(link_long.end() - 4, 0x00);
+    config_test_reseal(link_long);
+    CHECK(config_test_link_verdict(StoredEntryRead::Present, link_long) ==
+          ConfigLoadVerdict::Rejected);
+    CHECK(std::string(stored_blob_reject_reason(
+              link_long.data(), link_long.size(), LINK_BLOB_MAGIC_TEXT, LINK_BLOB_VERSION,
+              LINK_BLOB_VERSION)) == "damaged (length or CRC check failed)");
+    // The two headers cannot be mistaken for each other.
+    CHECK(stored_blob_version(link.data(), link.size(), CONFIG_BLOB_MAGIC_TEXT) == -1);
+    CHECK(stored_blob_version(valid.data(), valid.size(), LINK_BLOB_MAGIC_TEXT) == -1);
+}
+
+// logic/config_model.hpp — what a factory reset keeps (owner decision for tracker card CFG-06): the
+// board hardware statement and nothing else. config.cpp's config_factory_seed_blob builds the
+// fresh device with Kconfig defaults, carries the statement with this helper and serializes it with
+// the service-blob serializer every save uses; this pins the pure half of that pipeline.
+static void test_config_factory_seed() {
+    // An installation with every carried-or-not setting away from its default.
+    Config current                 = config_tx_live();
+    current.wifi_ssid_backup       = "fallback";
+    current.wifi_pass_backup       = "old-pass";
+    current.wifi_rollback_active   = true;
+    current.wifi_rolled_back       = true;
+    current.mqtt_user              = "mqtt-user";
+    current.mqtt_pass              = "mqtt-pass";
+    current.mqtt_base              = "daikin-altherma-esp32/plant";
+    current.syslog_port            = 1514;
+    current.ref_temp_topic         = "home/room";
+    current.circulation_topic      = "home/pump";
+    current.weather_enabled        = true;
+    current.weather_latitude_e6    = 12345678;
+    current.weather_longitude_e6   = 23456789;
+    current.diagnostics_enabled    = true;
+    current.diagnostics_generation = 4;
+    current.ui_lang                = UiLang::De;
+    current.ota_channel            = OtaChannel::Dev;
+    current.mb_discovery_done      = true;
+    current.env3_sda               = 5;
+    current.env3_scl               = 6;
+
+    const Config               factory; // the fresh device's non-Kconfig defaults
+    const std::vector<uint8_t> factory_raw = config_blob_serialize(config_blob_from(factory));
+
+    int                count = 0;
+    const BoardPreset* all   = board_presets_all(count);
+    CHECK(count >= 2);
+    for (int i = 0; i < count; ++i) {
+        const BoardPreset& p    = all[i];
+        current.board_user_set  = true;
+        current.board_preset_id = p.id;
+        current.led_gpio        = p.led_gpio;
+        current.led_type        = p.led_type;
+        current.led_inverted    = p.led_inverted;
+        current.btn_gpio        = p.btn_gpio;
+        current.btn_active_low  = p.btn_active_low;
+
+        const BoardHardwareStatement s = config_board_hardware(current);
+        CHECK(s.user_set && s.preset_id == p.id && s.led_gpio == p.led_gpio);
+        CHECK(s.led_type == p.led_type && s.led_inverted == p.led_inverted);
+        CHECK(s.btn_gpio == p.btn_gpio && s.btn_active_low == p.btn_active_low);
+
+        Config fresh;
+        config_carry_board_hardware(fresh, current);
+        // Exactly the statement moved: the serialized result equals a factory config whose seven
+        // board fields alone were set, so no other persisted field can have carried.
+        Config expected                = factory;
+        expected.board_user_set        = true;
+        expected.board_preset_id       = p.id;
+        expected.led_gpio              = p.led_gpio;
+        expected.led_type              = p.led_type;
+        expected.led_inverted          = p.led_inverted;
+        expected.btn_gpio              = p.btn_gpio;
+        expected.btn_active_low        = p.btn_active_low;
+        const std::vector<uint8_t> raw = config_blob_serialize(config_blob_from(fresh));
+        CHECK(raw == config_blob_serialize(config_blob_from(expected)));
+        CHECK(raw != factory_raw);
+
+        // The carried fields round-trip through the decoder config_load uses.
+        ConfigBlob back;
+        CHECK(config_blob_deserialize(raw.data(), raw.size(), back));
+        CHECK(back.has_board && back.has_board_identity && back.board_user_set);
+        CHECK(back.board_preset_id == static_cast<int32_t>(p.id));
+        CHECK(back.led_gpio == p.led_gpio && back.led_type == p.led_type);
+        CHECK(back.led_inverted == p.led_inverted);
+        CHECK(back.btn_gpio == p.btn_gpio && back.btn_active_low == p.btn_active_low);
+        // ...and nothing else did: credentials, services, sources, consent, language and channel
+        // read back at the fresh device's values.
+        CHECK(back.wifi_ssid.empty() && back.wifi_pass.empty() && back.wifi_ssid_backup.empty());
+        CHECK(!back.wifi_rollback_active && !back.wifi_rolled_back);
+        CHECK(back.mqtt_uri.empty() && back.mqtt_user.empty() && back.mqtt_pass.empty());
+        CHECK(back.mqtt_base.empty() && back.syslog_host.empty() && back.ntp_server.empty());
+        CHECK(back.ref_temp_topic.empty() && back.circulation_topic.empty());
+        CHECK(!back.weather_enabled && back.weather_latitude_e6 == 0);
+        CHECK(!back.diagnostics_enabled && back.diagnostics_generation == 0);
+        CHECK(back.ui_lang == ui_lang_to_int(UiLang::Auto));
+        CHECK(back.ota_channel == ota_channel_to_int(OtaChannel::Release));
+        CHECK(!back.env3_enabled && back.env3_sda == 2 && back.env3_scl == 1);
+        CHECK(back.mb_host.empty() && back.mb_port == MODBUS_TCP_PORT);
+        // The one-shot HomeHub search is pending again, as on a new device.
+        CHECK(back.has_modbus_discovery_state && !back.mb_discovery_done);
+        CHECK(!config_modbus_discovery_done_on_load(
+            back.has_modbus, back.has_modbus_discovery_state, back.mb_discovery_done));
+
+        // The result validates on the build these presets are offered on (Quad flash) with the
+        // fresh device's link, and its blob can always be read back.
+        std::string why;
+        CHECK(board_hw_valid(fresh, why, 48, /*octal_spi=*/false));
+        CHECK(board_identity_valid(fresh, why));
+        CHECK(validate(fresh, why, 48, /*octal_spi=*/false, config_reserved_pins(fresh)));
+        CHECK(config_blob_strings_fit(config_blob_from(fresh)));
+    }
+
+    // A deliberately saved Custom board with the indicator off and a button carries as stated.
+    {
+        Config custom          = current;
+        custom.board_user_set  = true;
+        custom.board_preset_id = BoardPresetId::Custom;
+        custom.led_gpio        = -1;
+        custom.btn_gpio        = 4;
+        custom.btn_active_low  = false;
+        Config fresh;
+        config_carry_board_hardware(fresh, custom);
+        CHECK(fresh.board_user_set && fresh.board_preset_id == BoardPresetId::Custom);
+        CHECK(fresh.led_gpio == -1 && fresh.btn_gpio == 4 && !fresh.btn_active_low);
+        CHECK(fresh.wifi_ssid.empty() && !fresh.env3_enabled && !fresh.mb_discovery_done);
+    }
+
+    // An UNSTATED board carries nothing — not even a load-path repair of the build defaults (an
+    // indicator disabled for a link collision whose link the reset erases).
+    {
+        Config untouched          = current;
+        untouched.board_user_set  = false;
+        untouched.board_preset_id = BoardPresetId::Custom;
+        untouched.led_gpio        = -1;
+        untouched.btn_gpio        = 4;
+        Config fresh;
+        config_carry_board_hardware(fresh, untouched);
+        CHECK(config_blob_serialize(config_blob_from(fresh)) == factory_raw);
+    }
+}
+
+// logic/config_model.hpp — the X10A load fallback against the board-local pins (tracker card
+// CFG-08/a). config_load replaces an unusable stored pair with the build default; when that
+// default lands on the indicator or the button, they yield to the link exactly as ENV III does.
+static void test_config_link_fallback_yield() {
+    std::string why;
+    // A Custom indicator on GPIO44 is legal while the X10A link sits on 1/2.
+    Config c;
+    c.board_user_set  = true;
+    c.board_preset_id = BoardPresetId::Custom;
+    c.led_gpio        = 44;
+    c.led_type        = static_cast<int>(LedType::Gpio);
+    c.rx_pin          = 1;
+    c.tx_pin          = 2;
+    CHECK(board_hw_valid(c, why, 48, /*octal_spi=*/false));
+    // The link entry is missing or damaged and no legacy pins exist, so config_load takes the build
+    // default 44/43. Its load re-check applies the chip rule only (the link wins over the optional
+    // parts), so the pair stands; a request-path check with the board claims would refuse it.
+    c.rx_pin = 44;
+    c.tx_pin = 43;
+    CHECK(link_pins_safe(c.rx_pin, c.tx_pin, false, ReservedPins{}));
+    CHECK(!link_pins_safe(c.rx_pin, c.tx_pin, false, config_reserved_pins(c)));
+    // The same holds for a stored pair the owner chose while the indicator was yielded (44/7): it
+    // stands at load, and the stored indicator yields to it again.
+    {
+        Config chosen = c;
+        chosen.tx_pin = 7;
+        CHECK(link_pins_safe(chosen.rx_pin, chosen.tx_pin, false, ReservedPins{}));
+        const LocalPinsRepair again = config_yield_local_pins_to_link(chosen);
+        CHECK(again.led && again.led_gpio == 44 && chosen.led_gpio == -1);
+    }
+    // Without the yield the snapshot fails both validators (and detection has no candidate).
+    CHECK(config_local_pins_collide_with_link(c));
+    CHECK(!board_hw_valid(c, why, 48, false) && why == "led_gpio is in use by the X10A link");
+    CHECK(!validate(c, why, 48, false, config_reserved_pins(c)));
+    // With it, the indicator is disabled and everything validates against the final pair.
+    const LocalPinsRepair led = config_yield_local_pins_to_link(c);
+    CHECK(led.led && !led.btn && c.led_gpio == -1);
+    CHECK(board_hw_valid(c, why, 48, false));
+    CHECK(validate(c, why, 48, false, config_reserved_pins(c)));
+    CHECK(link_pins_safe(c.rx_pin, c.tx_pin, false, config_reserved_pins(c)));
+    CHECK(!config_local_pins_collide_with_link(c));
+    // The identity stays: a disabled onboard part does not change which board this is.
+    CHECK(c.board_user_set && c.board_preset_id == BoardPresetId::Custom);
+    CHECK(board_identity_valid(c, why));
+    // The yield remembers the stored pin, and a factory reset carries THAT, not this boot's
+    // RAM-only repair: the reset erases the link the yield was made for, and carrying -1 would
+    // leave the indicator off for good once the owner moves the link elsewhere.
+    CHECK(led.led_gpio == 44 && led.btn_gpio == -1);
+    {
+        BoardHardwareStatement s = config_board_hardware(c);
+        CHECK(s.user_set && s.led_gpio == -1); // what the live config alone would carry
+        config_unyield_board_hardware(s, led);
+        CHECK(s.led_gpio == 44 && s.btn_gpio == -1);
+        Config fresh;
+        config_carry_board_hardware(fresh, s);
+        CHECK(fresh.board_user_set && fresh.led_gpio == 44);
+        // A part re-stated since the yield keeps its live value...
+        BoardHardwareStatement restated = config_board_hardware(c);
+        restated.led_gpio               = 5;
+        config_unyield_board_hardware(restated, led);
+        CHECK(restated.led_gpio == 5);
+        // ...and a part the yield did not touch is never rewritten.
+        BoardHardwareStatement untouched = config_board_hardware(c);
+        config_unyield_board_hardware(untouched, LocalPinsRepair{});
+        CHECK(untouched.led_gpio == -1 && untouched.btn_gpio == -1);
+    }
+
+    // The button on either wire yields the same way; an indicator elsewhere stays.
+    Config b;
+    b.led_gpio                = 21;
+    b.btn_gpio                = 43;
+    b.rx_pin                  = 44;
+    b.tx_pin                  = 43;
+    const LocalPinsRepair btn = config_yield_local_pins_to_link(b);
+    CHECK(!btn.led && btn.btn && b.btn_gpio == -1 && b.led_gpio == 21);
+    CHECK(btn.btn_gpio == 43 && btn.led_gpio == -1);
+    {
+        BoardHardwareStatement s = config_board_hardware(b);
+        config_unyield_board_hardware(s, btn);
+        CHECK(s.btn_gpio == 43 && s.led_gpio == 21);
+        // A button re-stated since the yield keeps its live value.
+        BoardHardwareStatement restated = config_board_hardware(b);
+        restated.btn_gpio               = 4;
+        config_unyield_board_hardware(restated, btn);
+        CHECK(restated.btn_gpio == 4);
+    }
+    CHECK(board_hw_valid(b, why, 48, false));
+    Config both;
+    both.led_gpio             = 44;
+    both.btn_gpio             = 43;
+    both.rx_pin               = 43;
+    both.tx_pin               = 44;
+    const LocalPinsRepair two = config_yield_local_pins_to_link(both);
+    CHECK(two.led && two.btn && both.led_gpio == -1 && both.btn_gpio == -1);
+    // Nothing to yield: no change, and absent pins claim nothing.
+    Config none;
+    none.rx_pin              = 44;
+    none.tx_pin              = 43;
+    const LocalPinsRepair no = config_yield_local_pins_to_link(none);
+    CHECK(!no.led && !no.btn && none.led_gpio == -1 && none.btn_gpio == -1);
+    // ENV III on the link is a collision too, but it is config.cpp's env3_config_valid re-check
+    // that disables it; this helper only ever touches the indicator and the button.
+    Config env;
+    env.env3_enabled = true;
+    env.env3_sda     = 5;
+    env.env3_scl     = 43;
+    env.rx_pin       = 44;
+    env.tx_pin       = 43;
+    CHECK(config_local_pins_collide_with_link(env));
+    const LocalPinsRepair env_yield = config_yield_local_pins_to_link(env);
+    CHECK(!env_yield.led && !env_yield.btn && env.env3_enabled);
+    env.env3_scl = 6;
+    CHECK(!config_local_pins_collide_with_link(env));
+    env.env3_sda = 44;
+    CHECK(config_local_pins_collide_with_link(env));
+    env.env3_enabled = false; // a disabled ENV III claims nothing
+    CHECK(!config_local_pins_collide_with_link(env));
+}
+
+// logic/config_model.hpp + config_transaction.hpp — a service save that a detection commit
+// overtook must not carry the new link onto a pin the request claims (tracker card CFG-08/b).
+static void test_config_reconcile_local_pins() {
+    // The pure rule: only a link the reconcile CHANGED, and only onto a claimed pin.
+    Config requested;
+    requested.rx_pin   = 1;
+    requested.tx_pin   = 2;
+    requested.led_gpio = 43;
+    Config reconciled  = requested;
+    reconciled.rx_pin  = 44;
+    reconciled.tx_pin  = 43;
+    CHECK(config_reconcile_breaks_local_pins(requested, reconciled));
+    reconciled.rx_pin = 1; // only TX moved — still onto the indicator
+    CHECK(config_reconcile_breaks_local_pins(requested, reconciled));
+    reconciled.rx_pin = 43; // only RX moved
+    reconciled.tx_pin = 2;
+    CHECK(config_reconcile_breaks_local_pins(requested, reconciled));
+    reconciled.rx_pin = 16; // moved, but nowhere the request claims
+    reconciled.tx_pin = 17;
+    CHECK(!config_reconcile_breaks_local_pins(requested, reconciled));
+    // A snapshot that already collides is not this save's doing.
+    Config colliding   = requested;
+    colliding.led_gpio = 1;
+    CHECK(config_local_pins_collide_with_link(colliding));
+    CHECK(!config_reconcile_breaks_local_pins(colliding, colliding));
+    // The button and an enabled ENV III count like the indicator.
+    Config btn       = requested;
+    btn.led_gpio     = -1;
+    btn.btn_gpio     = 44;
+    Config btn_moved = btn;
+    btn_moved.rx_pin = 44;
+    btn_moved.tx_pin = 43;
+    CHECK(config_reconcile_breaks_local_pins(btn, btn_moved));
+    Config env       = requested;
+    env.led_gpio     = -1;
+    env.env3_enabled = true;
+    env.env3_sda     = 43;
+    env.env3_scl     = 5;
+    Config env_moved = env;
+    env_moved.rx_pin = 44;
+    env_moved.tx_pin = 43;
+    CHECK(config_reconcile_breaks_local_pins(env, env_moved));
+    env.env3_enabled       = false;
+    env_moved.env3_enabled = false;
+    CHECK(!config_reconcile_breaks_local_pins(env, env_moved));
+
+    // The race through the production transaction: a /set_board snapshot (revision 5, X10A on 1/2)
+    // moves the indicator to GPIO43, which validates against that snapshot. A sweep that started
+    // earlier commits 44/43 before the save runs. The save is refused as Stale with nothing written
+    // and nothing published.
+    {
+        Config live       = config_tx_live();
+        live.env3_enabled = false;
+        live.rx_pin       = 1;
+        live.tx_pin       = 2;
+        ConfigTxStore store;
+        store.seed(live);
+        Config req         = live;
+        req.led_gpio       = 43;
+        req.board_user_set = true;
+        std::string why;
+        CHECK(board_hw_valid(req, why, 48, /*octal_spi=*/false));
+        apply_link(live, 44, 43, Protocol::I, 0x22222222u);
+        live.runtime_revision                  = 6;
+        const auto              durable_before = store.durable;
+        const auto              live_before    = config_tx_state(live);
+        const ConfigSaveOutcome out =
+            config_save_transaction(live, req, /*owns_link=*/false, store);
+        CHECK(out.result == ConfigSaveResult::Stale);
+        CHECK(out.failed == ConfigSaveStep::None && out.store_error == 0);
+        CHECK(store.attempts.empty());
+        CHECK(store.durable == durable_before);
+        CHECK(config_tx_state(live) == live_before);
+        CHECK(live.led_gpio == -1 && live.rx_pin == 44 && live.tx_pin == 43);
+        // The resubmitted form, derived from a fresh snapshot, is refused by the request validator
+        // with the link named — the honest answer the 409 points the owner to.
+        Config again   = live;
+        again.led_gpio = 43;
+        CHECK(!board_hw_valid(again, why, 48, false));
+        CHECK(why.find("X10A") != std::string::npos);
+    }
+    // ENV III enabled in the same save onto the pins detection then takes: refused the same way.
+    {
+        Config live       = config_tx_live();
+        live.env3_enabled = false;
+        ConfigTxStore store;
+        store.seed(live);
+        Config req       = live;
+        req.env3_enabled = true;
+        req.env3_sda     = 5;
+        req.env3_scl     = 6;
+        apply_link(live, 5, 6, Protocol::I, 0x33333333u);
+        live.runtime_revision = 6;
+        CHECK(config_save_transaction(live, req, false, store).result == ConfigSaveResult::Stale);
+        CHECK(store.attempts.empty() && !live.env3_enabled);
+    }
+    // A detected link elsewhere is carried forward and the save commits, indicator included.
+    {
+        Config live       = config_tx_live();
+        live.env3_enabled = false;
+        live.rx_pin       = 1;
+        live.tx_pin       = 2;
+        ConfigTxStore store;
+        store.seed(live);
+        Config req   = live;
+        req.led_gpio = 43;
+        apply_link(live, 16, 17, Protocol::I, 0x44444444u);
+        live.runtime_revision = 6;
+        CHECK(config_save_transaction(live, req, false, store).result == ConfigSaveResult::Saved);
+        CHECK(config_tx_attempts_are(store, {"cfg", "link"}));
+        CHECK(live.led_gpio == 43 && live.rx_pin == 16 && live.tx_pin == 17);
+        CHECK(config_tx_durable_service(store).led_gpio == 43);
+        CHECK(config_tx_durable_link(store).rx_pin == 16);
+    }
+    // A current snapshot never trips the rule, even one that already collides (an older build's
+    // state): the save is not refused for something it did not cause.
+    {
+        Config live       = config_tx_live();
+        live.env3_enabled = false;
+        live.led_gpio     = 44;
+        ConfigTxStore store;
+        store.seed(live);
+        Config req    = live;
+        req.wifi_ssid = "new-net";
+        CHECK(config_save_transaction(live, req, false, store).result == ConfigSaveResult::Saved);
+        CHECK(live.wifi_ssid == "new-net");
+    }
+}
+
+// logic/config_model.hpp — "absent" has one spelling for the indicator and the button, and every
+// board-local offer withholds detected Ethernet pads (tracker card CFG-08/c).
+static void test_config_board_pin_canonical_absent() {
+    std::string why;
+    // The request path refuses a GPIO below -1 and names the field.
+    Config c;
+    c.led_gpio = -2;
+    CHECK(!board_hw_valid(c, why, 48, /*octal_spi=*/false) && why == "led_gpio out of range");
+    c.led_gpio = -1;
+    c.btn_gpio = -7;
+    CHECK(!board_hw_valid(c, why, 48, false) && why == "btn_gpio out of range");
+    c.btn_gpio = -1;
+    CHECK(board_hw_valid(c, why, 48, false));
+
+    // The load path normalizes instead. A stored AtomS3 Lite statement whose indicator an older
+    // build saved as -2 keeps its identity and its button: without the normalization the load
+    // check (rx/tx excluded, as config.cpp runs it) fails and config_load would swap the whole
+    // board for the build defaults.
+    Config stored;
+    stored.board_user_set  = true;
+    stored.board_preset_id = BoardPresetId::M5StackAtomS3Lite;
+    stored.led_gpio        = -2;
+    stored.led_type        = static_cast<int>(LedType::Ws2812);
+    stored.btn_gpio        = 41;
+    Config probe           = stored;
+    probe.rx_pin = probe.tx_pin = -1;
+    CHECK(!board_hw_valid(probe, why, 48, false));
+    const LocalPinsRepair led = config_normalize_absent_local_pins(stored);
+    CHECK(led.led && !led.btn && stored.led_gpio == -1 && stored.btn_gpio == 41);
+    probe        = stored;
+    probe.rx_pin = probe.tx_pin = -1;
+    CHECK(board_hw_valid(probe, why, 48, false));
+    CHECK(board_identity_valid(stored, why) && board_selected_preset(stored) != nullptr);
+    // Both at once, at the extreme; canonical values (including a reserved pin, which is
+    // validation's business, not normalization's) are left alone.
+    Config both;
+    both.led_gpio                  = std::numeric_limits<int>::min();
+    both.btn_gpio                  = -2;
+    const LocalPinsRepair both_fix = config_normalize_absent_local_pins(both);
+    CHECK(both_fix.led && both_fix.btn && both.led_gpio == -1 && both.btn_gpio == -1);
+    Config canonical;
+    canonical.led_gpio       = 0;
+    canonical.btn_gpio       = -1;
+    const LocalPinsRepair no = config_normalize_absent_local_pins(canonical);
+    CHECK(!no.led && !no.btn && canonical.led_gpio == 0 && canonical.btn_gpio == -1);
+
+    // Detected Ethernet pads join the board-local reservations, beside the link and ENV III, and
+    // the worst case still fits the eight slots.
+    Config s;
+    s.rx_pin       = 44;
+    s.tx_pin       = 43;
+    s.env3_enabled = true;
+    s.env3_sda     = 2;
+    s.env3_scl     = 1;
+    const ReservedPins eth{5, 6, 7, 8};
+    const ReservedPins r = config_board_reserved_pins(s, eth);
+    for (int pin : {44, 43, 2, 1, 5, 6, 7, 8}) CHECK(r.claims(pin));
+    CHECK(!r.claims(21) && !r.claims(-1));
+    // The preset rows honour that extra reservation. No shipped preset puts its indicator or
+    // button on a W5500 pad, so today the pads withhold nothing; a pad under the XIAO's GPIO21
+    // proves the extra set reaches the filter.
+    const BoardPreset* buf[BOARD_PRESETS_MAX];
+    const int          all_n = board_presets_offerable(buf, BOARD_PRESETS_MAX, false,
+                                                       config_board_reserved_pins(s, ReservedPins{}));
+    CHECK(all_n >= 2);
+    CHECK(board_presets_offerable(buf, BOARD_PRESETS_MAX, false,
+                                  config_board_reserved_pins(s, eth)) == all_n);
+    const int n = board_presets_offerable(buf, BOARD_PRESETS_MAX, false,
+                                          config_board_reserved_pins(s, ReservedPins{21}));
+    CHECK(n == all_n - 1);
+    for (int i = 0; i < n; ++i) CHECK(buf[i]->id != BoardPresetId::SeeedXiaoEsp32S3);
 }
 
 // The HA installation DEVICE identity (logic/ha_device.hpp). The one property that matters: it is a
@@ -5291,6 +5999,403 @@ static void test_heap_watchdog() {
     CHECK(HEAP_CRITICAL_BYTES < 12u * 1024u);
 }
 
+// ── One boot classification, two independent recovery counters (logic/boot_guard.hpp) ──────────
+static void test_boot_classification() {
+    // The healthy window is the decided ten minutes, and it outlasts the heap watchdog's own hold:
+    // a shortage that crashes before the watchdog can act must still accumulate crash boots.
+    CHECK(BOOT_HEALTHY_S == 600);
+    CHECK(static_cast<uint32_t>(BOOT_HEALTHY_S) * 1000u >= 2u * HEAP_CRITICAL_HOLD_MS);
+
+    // EVERY reset reason, without and with the heap watchdog's marker, plus out-of-range codes. The
+    // crash set wins over the marker; the marker is believed with "sw" alone.
+    for (int r = -1; r <= 20; ++r) {
+        const bool crash = boot_reset_was_crash(r);
+        CHECK(boot_classify(r, false) == (crash ? BootKind::Crash : BootKind::Clean));
+        const BootKind expected_marked =
+            crash ? BootKind::Crash : (r == 3 ? BootKind::HeapWatchdogRestart : BootKind::Clean);
+        CHECK(boot_classify(r, true) == expected_marked);
+    }
+    // ...and spelled out for the cases the design rests on.
+    CHECK(boot_classify(3, true) == BootKind::HeapWatchdogRestart); // sw + marker: its own restart
+    CHECK(boot_classify(3, false) == BootKind::Clean); // sw alone: a save, an OTA, a factory reset
+    CHECK(boot_classify(1, true) ==
+          BootKind::Clean); // poweron + a STALE pattern: RAM means nothing
+    CHECK(boot_classify(1, false) == BootKind::Clean);
+    CHECK(boot_classify(2, true) == BootKind::Clean); // ext (pin reset)
+    CHECK(boot_classify(0, true) == BootKind::Clean); // unknown
+    CHECK(boot_classify(8, true) == BootKind::Clean); // deepsleep
+    for (int r : {10, 11, 12, 13, 14, 15}) {          // sdio usb jtag efuse pwr_glitch cpu_lockup
+        CHECK(boot_classify(r, false) == BootKind::Clean);
+        CHECK(boot_classify(r, true) == BootKind::Clean);
+    }
+    for (int r : {4, 5, 6, 7, 9}) { // panic int_wdt task_wdt wdt brownout
+        CHECK(boot_classify(r, false) == BootKind::Crash);
+        // A panic in esp_restart()'s shutdown handlers AFTER the marker went in is still a crash.
+        CHECK(boot_classify(r, true) == BootKind::Crash);
+    }
+
+    // The marker: one valid pattern, read AND cleared by the first take, garbage cleared too.
+    HeapRestartMarker m{0, 0};
+    CHECK(!heap_restart_marker_take(m));
+    heap_restart_marker_arm(m);
+    CHECK(m.magic == HEAP_RESTART_MARKER_MAGIC && m.check == ~HEAP_RESTART_MARKER_MAGIC);
+    CHECK(heap_restart_marker_take(m));
+    CHECK(m.magic == 0 && m.check == 0);
+    CHECK(!heap_restart_marker_take(m)); // one restart, one explanation — never a second boot
+    // Half a pattern is no pattern: power-on SRAM that happens to hold one of the two words.
+    HeapRestartMarker magic_only{HEAP_RESTART_MARKER_MAGIC, 0};
+    CHECK(!heap_restart_marker_take(magic_only));
+    CHECK(magic_only.magic == 0 && magic_only.check == 0);
+    HeapRestartMarker check_only{0, ~HEAP_RESTART_MARKER_MAGIC};
+    CHECK(!heap_restart_marker_take(check_only));
+    HeapRestartMarker uncomplemented{HEAP_RESTART_MARKER_MAGIC, HEAP_RESTART_MARKER_MAGIC};
+    CHECK(!heap_restart_marker_take(uncomplemented));
+    // A valid pattern found after a power-on: taken (so it is gone), and the boot is still Clean.
+    HeapRestartMarker stale{0, 0};
+    heap_restart_marker_arm(stale);
+    CHECK(boot_classify(1, heap_restart_marker_take(stale)) == BootKind::Clean);
+    CHECK(boot_classify(3, heap_restart_marker_take(stale)) == BootKind::Clean);
+
+    // ── boot_fails: the crash half ──
+    CHECK(boot_fail_count_sane(0) == 0);
+    CHECK(boot_fail_count_sane(7) == 7);
+    CHECK(boot_fail_count_sane(BOOT_FAIL_MAX) == BOOT_FAIL_MAX);
+    CHECK(boot_fail_count_sane(-1) == 0);
+    CHECK(boot_fail_count_sane(BOOT_FAIL_MAX + 1) == 0);
+    // Crash: increment and persist, latch AT the threshold, saturate, start over from garbage.
+    CrashCounterStep c = boot_crash_counter_step(BootKind::Crash, 0);
+    CHECK(c.count == 1 && c.write && !c.safe_mode);
+    c = boot_crash_counter_step(BootKind::Crash, BOOT_FAIL_THRESHOLD - 2);
+    CHECK(c.count == BOOT_FAIL_THRESHOLD - 1 && c.write && !c.safe_mode);
+    c = boot_crash_counter_step(BootKind::Crash, BOOT_FAIL_THRESHOLD - 1);
+    CHECK(c.count == BOOT_FAIL_THRESHOLD && c.write && c.safe_mode);
+    c = boot_crash_counter_step(BootKind::Crash, BOOT_FAIL_MAX - 1);
+    CHECK(c.count == BOOT_FAIL_MAX && c.write && c.safe_mode);
+    c = boot_crash_counter_step(BootKind::Crash, BOOT_FAIL_MAX); // saturated, still written
+    CHECK(c.count == BOOT_FAIL_MAX && c.write && c.safe_mode);
+    c = boot_crash_counter_step(BootKind::Crash, -7);
+    CHECK(c.count == 1 && c.write && !c.safe_mode);
+    c = boot_crash_counter_step(BootKind::Crash, BOOT_FAIL_MAX + 1);
+    CHECK(c.count == 1 && c.write && !c.safe_mode);
+    // The heap watchdog's restart: carried as stored, NEVER written, never latches — not even at
+    // the threshold, because it is not a crash.
+    c = boot_crash_counter_step(BootKind::HeapWatchdogRestart, 0);
+    CHECK(c.count == 0 && !c.write && !c.safe_mode);
+    c = boot_crash_counter_step(BootKind::HeapWatchdogRestart, 2);
+    CHECK(c.count == 2 && !c.write && !c.safe_mode);
+    c = boot_crash_counter_step(BootKind::HeapWatchdogRestart, BOOT_FAIL_THRESHOLD);
+    CHECK(c.count == BOOT_FAIL_THRESHOLD && !c.write && !c.safe_mode);
+    c = boot_crash_counter_step(BootKind::HeapWatchdogRestart, BOOT_FAIL_MAX);
+    CHECK(c.count == BOOT_FAIL_MAX && !c.write && !c.safe_mode);
+    c = boot_crash_counter_step(BootKind::HeapWatchdogRestart, -1);
+    CHECK(c.count == 0 && !c.write && !c.safe_mode);
+    c = boot_crash_counter_step(BootKind::HeapWatchdogRestart, BOOT_FAIL_MAX + 1);
+    CHECK(c.count == 0 && !c.write && !c.safe_mode);
+    // Clean: cleared, and written only when something is stored — garbage included.
+    c = boot_crash_counter_step(BootKind::Clean, 0);
+    CHECK(c.count == 0 && !c.write && !c.safe_mode);
+    c = boot_crash_counter_step(BootKind::Clean, 3);
+    CHECK(c.count == 0 && c.write && !c.safe_mode);
+    c = boot_crash_counter_step(BootKind::Clean, BOOT_FAIL_MAX);
+    CHECK(c.count == 0 && c.write && !c.safe_mode);
+    c = boot_crash_counter_step(BootKind::Clean, -1);
+    CHECK(c.count == 0 && c.write && !c.safe_mode);
+
+    // ── heap_rst: the heap half ──
+    // Clean: never honoured, cleared when anything is stored.
+    HeapLadderStep h = boot_heap_ladder_step(BootKind::Clean, 0);
+    CHECK(h.restarts == 0 && !h.clear);
+    h = boot_heap_ladder_step(BootKind::Clean, 2);
+    CHECK(h.restarts == 0 && h.clear);
+    h = boot_heap_ladder_step(BootKind::Clean, -3);
+    CHECK(h.restarts == 0 && h.clear);
+    // A count STUCK at the cap (its clear keeps failing) must never bring a clean boot — a power
+    // cycle, the banner's own instruction — up minimal.
+    h = boot_heap_ladder_step(BootKind::Clean, HEAP_MAX_CONSECUTIVE_RESTARTS);
+    CHECK(h.restarts == 0 && h.clear && !heap_boot_must_be_minimal(h.restarts));
+    // The watchdog's own restart: the ladder continues, untouched; the cap comes up minimal.
+    h = boot_heap_ladder_step(BootKind::HeapWatchdogRestart, 2);
+    CHECK(h.restarts == 2 && !h.clear && !heap_boot_must_be_minimal(h.restarts));
+    h = boot_heap_ladder_step(BootKind::HeapWatchdogRestart, HEAP_MAX_CONSECUTIVE_RESTARTS);
+    CHECK(h.restarts == HEAP_MAX_CONSECUTIVE_RESTARTS && !h.clear &&
+          heap_boot_must_be_minimal(h.restarts));
+    h = boot_heap_ladder_step(BootKind::HeapWatchdogRestart, -1);
+    CHECK(h.restarts == 0 && !h.clear);
+    // A crash carries the ladder too — including at the cap, so a crash inside the minimal boot
+    // comes back minimal rather than handing the full stack another five restarts.
+    h = boot_heap_ladder_step(BootKind::Crash, 3);
+    CHECK(h.restarts == 3 && !h.clear && !heap_boot_must_be_minimal(h.restarts));
+    h = boot_heap_ladder_step(BootKind::Crash, HEAP_MAX_CONSECUTIVE_RESTARTS);
+    CHECK(h.restarts == HEAP_MAX_CONSECUTIVE_RESTARTS && !h.clear &&
+          heap_boot_must_be_minimal(h.restarts));
+    h = boot_heap_ladder_step(BootKind::Crash, HEAP_MAX_CONSECUTIVE_RESTARTS + 1);
+    CHECK(h.restarts == 0 && !h.clear);
+
+    // INDEPENDENCE, as a property over every stored value: a crash boot never writes heap_rst, and
+    // the heap watchdog's restart never writes boot_fails. Only a clean boot clears both.
+    for (int32_t stored = -2; stored <= BOOT_FAIL_MAX + 2; ++stored) {
+        CHECK(!boot_heap_ladder_step(BootKind::Crash, stored).clear);
+        CHECK(!boot_heap_ladder_step(BootKind::HeapWatchdogRestart, stored).clear);
+        CHECK(!boot_crash_counter_step(BootKind::HeapWatchdogRestart, stored).write);
+        CHECK(boot_crash_counter_step(BootKind::Clean, stored).write == (stored != 0));
+        CHECK(boot_heap_ladder_step(BootKind::Clean, stored).clear == (stored != 0));
+        CHECK(boot_heap_ladder_step(BootKind::Clean, stored).restarts == 0);
+    }
+}
+
+// A host model of the boot glue, built from the REAL pure functions above: safe_mode_begin()
+// (marker take, classification, crash step), heap_guard_begin() (heap step, minimal latch), the
+// healthy timer and the heap watchdog's restart site (breadcrumb write, marker, esp_restart). It is
+// a model of the glue's order, not of the target — reset timing on hardware is not proven here —
+// but it is what shows the two ladders reaching their ends instead of resetting each other.
+namespace boot_ladder_model {
+enum Reset : int { POWERON = 1, SW = 3, PANIC = 4 };
+constexpr int BOOT_SEQ_S = 10;   // app_main start -> safe_mode_arm_healthy (network etc.)
+constexpr int HORIZON_S  = 7200; // a boot that survives two hours is treated as stable
+struct Store {
+    int32_t boot_fails = 0;
+    int32_t heap_rst   = 0;
+    bool    writable   = true;
+};
+struct View {
+    int         index      = 0;
+    bool        safe       = false;
+    const char* cause      = nullptr;
+    uint8_t     restarts   = 0;
+    BootKind    kind       = BootKind::Clean;
+    int         prev_reset = POWERON;
+};
+struct Fault {
+    int crash_at_s      = -1; // full-stack crash (panic) this many seconds in
+    int safe_crash_at_s = -1; // crash also in safe mode (a mandatory subsystem)
+    int leak_from_s     = -1; // the largest block drops to 1 KiB from here on
+    int user_reset_at_s = -1; // an owner action: power cycle or rebooting save
+    int user_reset      = SW;
+};
+struct Summary {
+    int         boots = 0, full_stack = 0, safe_boots = 0, first_safe = -1;
+    const char* first_cause           = nullptr;
+    int         max_boot_fails        = 0;
+    bool        stable                = false;
+    int         safe_after_poweron    = 0; // safe boots whose previous reset was a power cycle
+    int         full_after_first_safe = 0; // full-stack boots after safe mode was first reached
+};
+
+// What safe_mode_begin() and heap_guard_begin() decide for this boot, applied to the store and the
+// marker exactly as the glue applies them.
+inline View begin_boot(Store& nvs, HeapRestartMarker& marker, int reset, int index) {
+    View v;
+    v.index      = index;
+    v.prev_reset = reset;
+    // safe_mode_begin(): take the marker, classify once, apply the crash half.
+    v.kind                    = boot_classify(reset, heap_restart_marker_take(marker));
+    const CrashCounterStep cs = boot_crash_counter_step(v.kind, nvs.boot_fails);
+    if (cs.write && nvs.writable) nvs.boot_fails = cs.count;
+    v.safe  = cs.safe_mode;
+    v.cause = v.safe ? "crash_loop" : nullptr;
+    // heap_guard_begin(): the heap half of the same classification, then the end of the ladder.
+    const HeapLadderStep hs = boot_heap_ladder_step(v.kind, nvs.heap_rst);
+    if (hs.clear && nvs.writable) nvs.heap_rst = 0;
+    v.restarts = hs.restarts;
+    if (heap_boot_must_be_minimal(v.restarts)) {
+        v.safe  = true;
+        v.cause = "heap";
+    }
+    return v;
+}
+
+// The rest of the boot, one second at a time: the healthy timer, the scripted faults and the heap
+// watchdog's restart site. Returns the reset that ends it; `stable` when it survives the horizon.
+inline int live_boot(Store& nvs, HeapRestartMarker& marker, const View& v, const Fault& f,
+                     bool& stable) {
+    const bool   armed = boot_healthy_timer_arms(v.safe); // safe_mode_arm_healthy()
+    HeapWatchdog wd;
+    for (int t = 0; t <= HORIZON_S; ++t) {
+        if (armed && t == BOOT_SEQ_S + BOOT_HEALTHY_S && nvs.boot_fails != 0 && nvs.writable)
+            nvs.boot_fails = 0; // healthy_timer_cb: boot_fails ONLY
+        if (!v.safe && t == f.crash_at_s) return PANIC;
+        if (v.safe && t == f.safe_crash_at_s) return PANIC;
+        if (t == f.user_reset_at_s) return f.user_reset;
+        // heap_guard_sample() runs in the poll task, which safe mode never creates.
+        if (!v.safe && t >= BOOT_SEQ_S) {
+            const size_t block =
+                (f.leak_from_s >= 0 && t >= f.leak_from_s) ? size_t(1024) : size_t(64 * 1024);
+            const HeapVerdict hv = heap_watch(wd, {block, static_cast<uint32_t>(t) * 1000u, false});
+            if (hv.action == HeapAction::Restart && heap_may_restart(v.restarts)) {
+                if (nvs.writable) nvs.heap_rst = v.restarts + 1; // best-effort breadcrumb
+                heap_restart_marker_arm(marker);                 // immediately before...
+                return SW;                                       // ...esp_restart()
+            }
+        }
+    }
+    stable = true;
+    return POWERON;
+}
+
+template <typename Script>
+Summary simulate(Store nvs, int max_boots, Script script, int ro_from_boot = -1) {
+    Summary           s;
+    HeapRestartMarker marker{0, 0};
+    int               reset = POWERON;
+    for (int i = 1; i <= max_boots; ++i) {
+        if (ro_from_boot > 0 && i >= ro_from_boot) nvs.writable = false;
+        // A power-on leaves .noinit holding whatever the SRAM came up with. Model the WORST case: a
+        // valid pattern left over, which the classification must still ignore.
+        if (reset == POWERON) heap_restart_marker_arm(marker);
+        const View v      = begin_boot(nvs, marker, reset, i);
+        bool       stable = false;
+        const int  next   = live_boot(nvs, marker, v, script(v), stable);
+        s.boots++;
+        if (v.safe) {
+            s.safe_boots++;
+            if (v.prev_reset == POWERON && i > 1) s.safe_after_poweron++;
+            if (s.first_safe < 0) {
+                s.first_safe  = i;
+                s.first_cause = v.cause;
+            }
+        } else {
+            s.full_stack++;
+            if (s.first_safe > 0) s.full_after_first_safe++;
+        }
+        if (nvs.boot_fails > s.max_boot_fails) s.max_boot_fails = nvs.boot_fails;
+        if (stable) {
+            s.stable = true;
+            break;
+        }
+        reset = next;
+    }
+    return s;
+}
+
+inline bool cause_is(const Summary& s, const char* want) {
+    return s.first_cause != nullptr && std::strcmp(s.first_cause, want) == 0;
+}
+} // namespace boot_ladder_model
+
+static void test_boot_recovery_ladders() {
+    using namespace boot_ladder_model;
+    // The baseline: a config crash 5 s into every full-stack boot latches on the 4th crash
+    // boot (boot 5: boot 1 is the clean power-on that starts it), and the quiet safe mode parks.
+    const Summary early = simulate(Store{}, 30, [](const View&) {
+        Fault f;
+        f.crash_at_s = 5;
+        return f;
+    });
+    CHECK(early.first_safe == 5 && cause_is(early, "crash_loop") && early.full_stack == 4 &&
+          early.stable);
+
+    // The same crash 45 s into every boot. With the old 30 s window the timer cleared the
+    // counter first and the device looped for ever with boot_fails never above 1; with 600 s it
+    // latches exactly like the baseline.
+    const Summary late = simulate(Store{}, 30, [](const View&) {
+        Fault f;
+        f.crash_at_s = 45;
+        return f;
+    });
+    CHECK(late.first_safe == 5 && cause_is(late, "crash_loop") && late.full_stack == 4 &&
+          late.stable);
+    // ...and the window is still a window: a crash only after ten healthy minutes never
+    // accumulates.
+    const Summary after_window = simulate(Store{}, 30, [](const View&) {
+        Fault f;
+        f.crash_at_s = BOOT_SEQ_S + BOOT_HEALTHY_S + 60;
+        return f;
+    });
+    CHECK(after_window.first_safe < 0 && after_window.max_boot_fails <= 1 && !after_window.stable);
+
+    // A sustained wedge 60 s into every boot climbs the watchdog's ladder: five restarts, then
+    // boot 6 comes up minimal with cause "heap" and stays up.
+    const Summary wedge = simulate(Store{}, 30, [](const View&) {
+        Fault f;
+        f.leak_from_s = 60;
+        return f;
+    });
+    CHECK(wedge.first_safe == 6 && cause_is(wedge, "heap") && wedge.full_stack == 5 &&
+          wedge.stable);
+    CHECK(wedge.max_boot_fails == 0); // the watchdog's restarts never counted as crashes
+
+    // The same leak, but it panics at 200 s, inside the watchdog's 300 s hold: the watchdog
+    // never acts, and only the 600 s window lets the crash ladder see it.
+    const Summary leak_panics = simulate(Store{}, 30, [](const View&) {
+        Fault f;
+        f.leak_from_s = 60;
+        f.crash_at_s  = 200;
+        return f;
+    });
+    CHECK(leak_panics.first_safe == 5 && cause_is(leak_panics, "crash_loop") && leak_panics.stable);
+
+    // The two ladders used to reset each other: watchdog restart on odd boots, a panic 20 s
+    // into even ones. Every "sw" cleared boot_fails and every boot consumed heap_rst, so neither
+    // climbed past 1, for ever. Independent, the crash ladder reaches its threshold.
+    const Summary alternating = simulate(Store{}, 50, [](const View& v) {
+        Fault f;
+        f.leak_from_s = 60;
+        if (v.index % 2 == 0) f.crash_at_s = 20;
+        return f;
+    });
+    // Boot 1 is clean, then each crash boot adds one and each watchdog boot carries it: the 4th
+    // crash boot is boot 9. The heap ladder climbs alongside (4 by then), carried by every crash.
+    CHECK(alternating.first_safe == 2 * BOOT_FAIL_THRESHOLD + 1 &&
+          cause_is(alternating, "crash_loop") && alternating.stable);
+
+    // Four watchdog restarts, then one panic at 330 s (before the hold ends), repeating. The
+    // crash used to wipe the heap ladder at 4 every time; now it carries it, and the next restart
+    // reaches the cap.
+    const Summary late_panic = simulate(Store{}, 60, [](const View& v) {
+        Fault f;
+        f.leak_from_s = 60;
+        if (v.index % 5 == 0) f.crash_at_s = 330;
+        return f;
+    });
+    CHECK(late_panic.first_safe == 7 && cause_is(late_panic, "heap") && late_panic.stable);
+
+    // Latched crash-loop safe mode, exited by a rebooting save (sw, no marker) on boot 5: a
+    // clean boot, so the full stack returns and needs BOOT_FAIL_THRESHOLD new crashes to latch
+    // again.
+    const Summary save_exit = simulate(Store{}, 12, [](const View& v) {
+        Fault f;
+        f.crash_at_s = 5;
+        if (v.safe && v.index == 5) f.user_reset_at_s = 60;
+        return f;
+    });
+    CHECK(save_exit.safe_boots >= 2 && save_exit.full_stack == 2 * BOOT_FAIL_THRESHOLD &&
+          save_exit.stable);
+
+    // A crash INSIDE heap safe mode (a mandatory subsystem). It no longer hands the full
+    // stack a fresh ladder: the crash carries heap_rst, so every later boot stays minimal.
+    const Summary crash_in_minimal = simulate(Store{}, 14, [](const View& v) {
+        Fault f;
+        f.leak_from_s = 60;
+        if (v.safe) f.safe_crash_at_s = 100;
+        return f;
+    });
+    CHECK(crash_in_minimal.first_safe == 6 && cause_is(crash_in_minimal, "heap") &&
+          crash_in_minimal.full_after_first_safe == 0);
+
+    // The cap is reached with working NVS, then from boot 6 on every write fails, and every
+    // minimal boot is ended by a POWER CYCLE. A count stuck at the cap used to bring every later
+    // boot up minimal, power cycles included; now no boot after a power cycle is minimal.
+    const Summary stuck_cap = simulate(
+        Store{}, 15,
+        [](const View& v) {
+            Fault f;
+            f.leak_from_s = 60;
+            if (v.safe) {
+                f.user_reset_at_s = 120;
+                f.user_reset      = POWERON;
+            }
+            return f;
+        },
+        /*ro_from_boot=*/6);
+    CHECK(stuck_cap.first_safe == 6 && cause_is(stuck_cap, "heap"));
+    CHECK(stuck_cap.safe_after_poweron == 0);
+    // With every write failing, the clean boot cannot clear the stale cap and the watchdog cannot
+    // write its own count either — so the boot after its next restart honours the stale cap (the
+    // over-count heap_restart_count_sane documents). Boots 1-5 climbed the ladder; from then on
+    // every power cycle (boots 7, 9, 11, 13, 15) still gets the full stack.
+    CHECK(stuck_cap.full_stack == 10 && stuck_cap.safe_boots == 5);
+}
+
 static void test_health_gate() {
     // base=90s, cap=300s. A normal boot needs link + service proof; a real portal is its own
     // recovery surface for an unconfigured board.
@@ -5808,6 +6913,11 @@ static void test_button() {
         t += dt;
         return button_update(st, pressed, t);
     };
+    // A debounced press: BUTTON_PRESS_SAMPLES clean pressed samples at the sample period, so the
+    // hold is in progress (dated from the first of them) when the block below starts timing it.
+    auto start_hold = [&] {
+        for (int i = 0; i < BUTTON_PRESS_SAMPLES; i++) step(true, BUTTON_SAMPLE_MS);
+    };
 
     // A short press does nothing at all — not even an indicator hand-back (nothing was asserted).
     CHECK(step(true, 20) == ButtonEvent::None);
@@ -5834,7 +6944,7 @@ static void test_button() {
     // ABORT: released after the warning but before the threshold -> Aborted, and NOTHING fired.
     st = ButtonState{};
     t  = 0;
-    step(true, 20);
+    start_hold();
     CHECK(step(true, BUTTON_ARM_MS) == ButtonEvent::Armed);
     step(true, BUTTON_FIRE_MS - BUTTON_ARM_MS - 200); // right up to the edge
     CHECK(!st.fired);
@@ -5848,7 +6958,7 @@ static void test_button() {
     // silent abort with nothing on screen to explain it.
     st = ButtonState{};
     t  = 0;
-    step(true, 20);
+    start_hold();
     const uint64_t started = st.down_at_ms;
     step(true, 1000);
     CHECK(step(false, 20) == ButtonEvent::None); // one bad sample
@@ -5862,7 +6972,7 @@ static void test_button() {
     // enough, and reporting Armed first would just delay what they asked for by a whole sample.
     st = ButtonState{};
     t  = 0;
-    step(true, 20);
+    start_hold();
     CHECK(step(true, BUTTON_FIRE_MS + 1000) == ButtonEvent::Fired);
 
     // Released while idle stays silent no matter how long.
@@ -5873,7 +6983,7 @@ static void test_button() {
     // already rebooted in the normal case.
     st = ButtonState{};
     t  = 0;
-    step(true, 20);
+    start_hold();
     step(true, BUTTON_FIRE_MS + 100);
     CHECK(st.fired);
     step(false, 20);
@@ -5885,6 +6995,203 @@ static void test_button() {
     CHECK(BUTTON_FIRE_MS - BUTTON_ARM_MS >= 2000);
     CHECK(BUTTON_RELEASE_SAMPLES * BUTTON_SAMPLE_MS <
           BUTTON_ARM_MS); // debounce can't eat the warning
+}
+
+// The press debounce, the boot gate and the end of a hold whose reset returned. Each block names
+// the defect it pins: an undebounced pin that fires, a bounced boot that arms, a warning left lit.
+static void test_button_debounce_and_boot_gate() {
+    // A clean press keeps its exact boundaries, measured from the FIRST pressed sample: the press
+    // debounce delays when the hold is KNOWN, never when it began.
+    {
+        ButtonState st;
+        CHECK(button_update(st, true, 0) == ButtonEvent::None);
+        CHECK(!st.down); // one pressed sample is not a press yet
+        CHECK(button_update(st, true, 20) == ButtonEvent::None);
+        CHECK(!st.down);
+        CHECK(button_update(st, true, 40) == ButtonEvent::None);
+        CHECK(st.down && st.down_at_ms == 0); // confirmed, dated from its first sample
+        CHECK(button_update(st, true, 1499) == ButtonEvent::None);
+        CHECK(button_update(st, true, 1500) == ButtonEvent::Armed);
+        CHECK(button_update(st, true, 4999) == ButtonEvent::None);
+        CHECK(button_update(st, true, 5000) == ButtonEvent::Fired);
+        CHECK(button_update(st, true, 5020) == ButtonEvent::None); // no refire
+        // The confirmation lands well inside the arm window at the shipped sample period.
+        CHECK((BUTTON_PRESS_SAMPLES - 1) * BUTTON_SAMPLE_MS < BUTTON_ARM_MS);
+    }
+
+    // An undebounced contact that reads pressed in ONE sample of every three — or two of three —
+    // never shows three consecutive pressed samples, so it never even starts a hold. Before the
+    // press debounce, the one-of-three pattern never showed three consecutive RELEASED samples
+    // either, and fired at 5 s. Driven at the shipped 20 ms period and at the 10 ms that two
+    // 100 Hz ticks can produce.
+    for (const uint64_t period : {uint64_t(10), uint64_t(BUTTON_SAMPLE_MS)}) {
+        for (const int pressed_of_three : {1, 2}) {
+            ButtonState st;
+            int         events    = 0;
+            bool        ever_down = false;
+            for (uint64_t i = 0; i * period <= 10000; ++i) {
+                const bool pressed = static_cast<int>(i % 3) < pressed_of_three;
+                if (button_update(st, pressed, i * period) != ButtonEvent::None) ++events;
+                ever_down = ever_down || st.down;
+            }
+            CHECK(events == 0 && !ever_down);
+        }
+    }
+
+    // A debounced press released before the arm point is a real hold that ends silently: nothing
+    // was asserted, so nothing is handed back (the two-sample "short press" in test_button above
+    // never even became a hold).
+    {
+        ButtonState st;
+        for (uint64_t t = 0; t <= 1000; t += BUTTON_SAMPLE_MS) button_update(st, true, t);
+        CHECK(st.down && !st.armed);
+        CHECK(button_update(st, false, 1020) == ButtonEvent::None);
+        CHECK(button_update(st, false, 1040) == ButtonEvent::None);
+        CHECK(button_update(st, false, 1060) == ButtonEvent::None);
+        CHECK(!st.down && st.release_run == 0);
+    }
+
+    // A released sample while the press is still forming restarts it: the hold is dated from the
+    // first sample of the run that actually reached BUTTON_PRESS_SAMPLES.
+    {
+        ButtonState st;
+        button_update(st, true, 0);
+        button_update(st, true, 20);
+        CHECK(button_update(st, false, 40) == ButtonEvent::None && st.press_run == 0 && !st.down);
+        button_update(st, true, 60);
+        button_update(st, true, 80);
+        CHECK(!st.down);
+        CHECK(button_update(st, true, 100) == ButtonEvent::None);
+        CHECK(st.down && st.down_at_ms == 60);
+    }
+
+    // The boot gate needs BUTTON_RELEASE_SAMPLES consecutive released samples — the evidence a real
+    // release needs — and stays open once it has seen them.
+    {
+        ButtonBootGate gate;
+        CHECK(!button_boot_gate_open(gate, true));  // held at boot
+        CHECK(!button_boot_gate_open(gate, false)); // a single bounce
+        CHECK(!button_boot_gate_open(gate, true));  // still closed: the run restarts
+        CHECK(!button_boot_gate_open(gate, false));
+        CHECK(!button_boot_gate_open(gate, false)); // two released samples are not proof either
+        CHECK(!button_boot_gate_open(gate, true));
+        CHECK(!button_boot_gate_open(gate, false));
+        CHECK(!button_boot_gate_open(gate, false));
+        CHECK(button_boot_gate_open(gate, false)); // the third consecutive one opens it
+        CHECK(button_boot_gate_open(gate, true));  // ...for good: a later press IS a press
+        CHECK(gate.open);
+    }
+
+    // The composition recovery_button.cpp runs (gate first, then the classifier): a contact held
+    // through boot with one bounced released sample — or a bounce of two — never arms and never
+    // fires, however long it stays closed. With the old one-sample gate the first case fired.
+    for (const uint64_t bounce_samples : {uint64_t(1), uint64_t(2)}) {
+        ButtonBootGate gate;
+        ButtonState    st;
+        int            events = 0;
+        for (uint64_t t = 0; t <= 20000; t += BUTTON_SAMPLE_MS) {
+            const bool pressed = t < 400 || t >= 400 + bounce_samples * BUTTON_SAMPLE_MS;
+            if (button_boot_gate_open(gate, pressed) &&
+                button_update(st, pressed, t) != ButtonEvent::None)
+                ++events;
+        }
+        CHECK(!gate.open && events == 0 && !st.down);
+    }
+    // ...and three released samples open the gate, after which a clean hold keeps its schedule.
+    {
+        ButtonBootGate gate;
+        ButtonState    st;
+        uint64_t       armed_at = 0, fired_at = 0;
+        for (uint64_t t = 0; t <= 8000; t += BUTTON_SAMPLE_MS) {
+            const bool pressed = !(t >= 1000 && t <= 1040); // released at 1000, 1020, 1040
+            if (!button_boot_gate_open(gate, pressed)) continue;
+            const ButtonEvent e = button_update(st, pressed, t);
+            if (e == ButtonEvent::Armed) armed_at = t;
+            if (e == ButtonEvent::Fired) fired_at = t;
+        }
+        CHECK(armed_at == 1060 + BUTTON_ARM_MS && fired_at == 1060 + BUTTON_FIRE_MS);
+    }
+
+    // After Fired, a reset that RETURNS (failed or incomplete) has already handed the indicator
+    // back. The still-held button must not re-light the armed warning, and its release must leave
+    // the indicator dark. The caller's indicator rule is modelled exactly as recovery_button.cpp
+    // applies it: Armed lights WipeArmed, Aborted clears it, Fired runs a reset that — here — fails
+    // and clears it. Chosen semantics: a fired hold never arms again and releases silently (None).
+    const auto indicate = [](ButtonEvent e, LedSignal& signal) {
+        if (e == ButtonEvent::Armed) signal = LedSignal::WipeArmed;
+        if (e == ButtonEvent::Aborted || e == ButtonEvent::Fired) signal = LedSignal::None;
+    };
+    // (a) A coarse sample that crosses BOTH thresholds fires without an Armed first — the case that
+    // used to report Armed on the next still-held sample after the failed reset and then, with
+    // nothing to clear it on release, leave the strobe latched.
+    {
+        ButtonState st;
+        LedSignal   signal = LedSignal::None;
+        int         armed = 0, fired = 0, aborted = 0;
+        const auto  feed = [&](bool pressed, uint64_t t) {
+            const ButtonEvent e = button_update(st, pressed, t);
+            armed += e == ButtonEvent::Armed;
+            fired += e == ButtonEvent::Fired;
+            aborted += e == ButtonEvent::Aborted;
+            indicate(e, signal);
+            return e;
+        };
+        feed(true, 0);
+        feed(true, 20);
+        feed(true, 40);
+        CHECK(feed(true, 6000) == ButtonEvent::Fired && armed == 0);
+        CHECK(st.armed && st.fired); // Fired closed the Armed edge for this hold
+        for (uint64_t t = 6020; t <= 30000; t += BUTTON_SAMPLE_MS) feed(true, t);
+        CHECK(armed == 0 && fired == 1 && signal == LedSignal::None);
+        feed(false, 30020);
+        feed(false, 30040);
+        CHECK(feed(false, 30060) == ButtonEvent::None); // released: silent, not Aborted
+        CHECK(!st.down && aborted == 0 && signal == LedSignal::None);
+        // The retry path stays a deliberate second hold that behaves like the first.
+        for (uint64_t t = 31000; t <= 36000; t += BUTTON_SAMPLE_MS) feed(true, t);
+        CHECK(armed == 1 && fired == 2 && signal == LedSignal::None);
+    }
+    // (b) The ordinary path — Armed at 1.5 s, Fired at 5 s, the reset fails — ends the same way.
+    {
+        ButtonState st;
+        LedSignal   signal = LedSignal::None;
+        int         armed = 0, fired = 0;
+        for (uint64_t t = 0; t <= 20000; t += BUTTON_SAMPLE_MS) {
+            const ButtonEvent e = button_update(st, true, t);
+            armed += e == ButtonEvent::Armed;
+            fired += e == ButtonEvent::Fired;
+            indicate(e, signal);
+        }
+        CHECK(armed == 1 && fired == 1 && signal == LedSignal::None);
+        ButtonEvent last = ButtonEvent::None;
+        for (int i = 0; i < BUTTON_RELEASE_SAMPLES; i++) {
+            last = button_update(st, false, 20020 + 20 * static_cast<uint64_t>(i));
+            indicate(last, signal);
+        }
+        CHECK(last == ButtonEvent::None && !st.down && signal == LedSignal::None);
+    }
+
+    // A SAMPLING STALL is a coarse sample period (button.hpp's file comment): the samples on either
+    // side of the gap are one hold dated from its first pressed sample. Pinned so the trade-off
+    // stays deliberate. Pressed at 0, the task stalls, pressed at 5000 and 5020: the third sample
+    // confirms the press and the hold fires at once — without an Armed warning first.
+    {
+        ButtonState st;
+        CHECK(button_update(st, true, 0) == ButtonEvent::None);
+        CHECK(button_update(st, true, 5000) == ButtonEvent::None); // two samples: not yet a press
+        CHECK(button_update(st, true, 5020) == ButtonEvent::Fired);
+        CHECK(st.down_at_ms == 0 && st.armed && st.fired);
+    }
+    // ...and a stall that spans only the arm point reports Armed on the first sample after it.
+    {
+        ButtonState st;
+        button_update(st, true, 0);
+        button_update(st, true, 20);
+        button_update(st, true, 40);
+        CHECK(button_update(st, true, 3000) == ButtonEvent::Armed);
+        CHECK(button_update(st, true, 3020) == ButtonEvent::None);
+        CHECK(button_update(st, true, 5000) == ButtonEvent::Fired);
+    }
 }
 
 static void test_crashinfo() {
@@ -7528,7 +8835,8 @@ static void test_bootlog() {
     id.elf_sha = "deadbeef";
     id.reason  = 1; // poweron
     CHECK(build_boot_line(id) ==
-          "boot: version=1.4.2 elf_sha256=deadbeef reset=poweron safe_mode=no");
+          "boot: version=1.4.2 elf_sha256=deadbeef reset=poweron safe_mode=no"
+          " cause=none crash_boots=0 heap_restarts=0 nvs=ok");
 
     // Safe mode is visible in the log stream: it explains a device that is up but publishes
     // nothing.
@@ -7536,15 +8844,18 @@ static void test_bootlog() {
     safe.reason    = 6; // task_wdt
     safe.safe_mode = true;
     CHECK(build_boot_line(safe) ==
-          "boot: version=1.4.2 elf_sha256=deadbeef reset=task_wdt safe_mode=yes");
+          "boot: version=1.4.2 elf_sha256=deadbeef reset=task_wdt safe_mode=yes"
+          " cause=none crash_boots=0 heap_restarts=0 nvs=ok");
 
     // Missing identity degrades to "?" — never a dangling "version= elf_sha256=".
     BootIdent blank;
-    CHECK(build_boot_line(blank) == "boot: version=? elf_sha256=? reset=unknown safe_mode=no");
+    CHECK(build_boot_line(blank) == "boot: version=? elf_sha256=? reset=unknown safe_mode=no"
+                                    " cause=none crash_boots=0 heap_restarts=0 nvs=ok");
     BootIdent nulls;
     nulls.version = nullptr;
     nulls.elf_sha = nullptr;
-    CHECK(build_boot_line(nulls) == "boot: version=? elf_sha256=? reset=unknown safe_mode=no");
+    CHECK(build_boot_line(nulls) == "boot: version=? elf_sha256=? reset=unknown safe_mode=no"
+                                    " cause=none crash_boots=0 heap_restarts=0 nvs=ok");
 
     std::string lines[CRASH_LOG_LINE_MAX];
 
@@ -7864,6 +9175,90 @@ static void test_bootlog() {
     // guard), so a record that ever picked up that substring would be silently unsendable.
     for (int i = 0; i < wn; i++) CHECK(lines[i].find("syslog:") == std::string::npos);
     CHECK(build_boot_line(id).find("syslog:") == std::string::npos);
+}
+
+// The recovery fields APPENDED to the boot record: decided at the top of app_main, before syslog
+// exists, so this record is the only way they leave the device.
+static void test_bootlog_recovery_fields() {
+    BootIdent id;
+    id.version = "1.4.2";
+    id.elf_sha = "deadbeef";
+
+    // A crash-loop latch: the reset that triggered it, the cause and the count it acted on.
+    BootIdent crash   = id;
+    crash.reason      = 4; // panic
+    crash.safe_mode   = true;
+    crash.cause       = "crash_loop";
+    crash.crash_boots = 4;
+    CHECK(build_boot_line(crash) ==
+          "boot: version=1.4.2 elf_sha256=deadbeef reset=panic safe_mode=yes cause=crash_loop "
+          "crash_boots=4 heap_restarts=0 nvs=ok");
+
+    // The end of the heap ladder: a "sw" reset that only heap_restarts= can attribute.
+    BootIdent heap     = id;
+    heap.reason        = 3; // sw
+    heap.safe_mode     = true;
+    heap.cause         = "heap";
+    heap.heap_restarts = 5;
+    CHECK(build_boot_line(heap) ==
+          "boot: version=1.4.2 elf_sha256=deadbeef reset=sw safe_mode=yes cause=heap "
+          "crash_boots=0 heap_restarts=5 nvs=ok");
+
+    // A degraded NVS boot, with a crash count and a carried heap ladder, not (yet) safe mode.
+    BootIdent degraded     = id;
+    degraded.reason        = 6; // task_wdt
+    degraded.crash_boots   = 2;
+    degraded.heap_restarts = 3;
+    degraded.nvs_ok        = false;
+    CHECK(build_boot_line(degraded) ==
+          "boot: version=1.4.2 elf_sha256=deadbeef reset=task_wdt safe_mode=no cause=none "
+          "crash_boots=2 heap_restarts=3 nvs=degraded");
+
+    // The cause vocabulary is CLOSED: nothing else is passed through verbatim into a logfmt record.
+    CHECK(std::string(boot_cause_slug(nullptr)) == "none");
+    CHECK(std::string(boot_cause_slug("")) == "none");
+    CHECK(std::string(boot_cause_slug("crash_loop")) == "crash_loop");
+    CHECK(std::string(boot_cause_slug("heap")) == "heap");
+    CHECK(std::string(boot_cause_slug("heap leak")) == "unknown");
+    CHECK(std::string(boot_cause_slug("crash")) == "unknown");
+    BootIdent odd = id;
+    odd.cause     = "two words";
+    CHECK(build_boot_line(odd).find(" cause=unknown ") != std::string::npos);
+
+    // COMPATIBILITY: the record still starts with exactly the fields an existing collector
+    // extracts, in the same order — the new ones are only ever appended.
+    const std::string line   = build_boot_line(crash);
+    const std::string legacy = "boot: version=1.4.2 elf_sha256=deadbeef reset=panic safe_mode=yes";
+    CHECK(line.compare(0, legacy.size(), legacy) == 0 && line[legacy.size()] == ' ');
+
+    // WORST CASE fits one datagram whole. The boot record is sent straight down syslog_sendto(),
+    // whose packet is 320 bytes; its RFC 5424 header with a full timestamp and the default
+    // 21-character hostname takes 61, leaving 258. 240 leaves room for a longer hostname too.
+    const size_t      BOOT_LINE_BUDGET = 240;
+    BootIdent         worst;
+    const std::string version(31, '9'); // esp_app_desc_t.version is char[32]
+    const std::string sha(64, 'f');
+    worst.version       = version.c_str();
+    worst.elf_sha       = sha.c_str();
+    worst.reason        = 14; // pwr_glitch — the longest reset slug
+    worst.safe_mode     = true;
+    worst.cause         = "crash_loop";
+    worst.crash_boots   = BOOT_FAIL_MAX;
+    worst.heap_restarts = 255;
+    worst.nvs_ok        = false;
+    CHECK(build_boot_line(worst).size() <= BOOT_LINE_BUDGET);
+    CHECK(build_boot_line(worst).find("syslog:") == std::string::npos);
+
+    // The appended fields are formatted into a fixed buffer: even out-of-contract extremes must
+    // come out whole, never truncated into a record that parses as something else.
+    BootIdent extreme      = worst;
+    extreme.crash_boots    = std::numeric_limits<int>::min();
+    extreme.heap_restarts  = std::numeric_limits<unsigned>::max();
+    const std::string tail = " cause=crash_loop crash_boots=-2147483648 heap_restarts=4294967295 "
+                             "nvs=degraded";
+    const std::string full = build_boot_line(extreme);
+    CHECK(full.size() > tail.size() &&
+          full.compare(full.size() - tail.size(), tail.size(), tail) == 0);
 }
 
 // ── syslog send-failure policy (logic/syslog_policy.hpp) ─────────────────────────────────────
@@ -23847,12 +25242,18 @@ int main() {
     test_no_publish();
     test_config_model();
     test_config_transaction();
+    test_config_load_verdict();
+    test_config_factory_seed();
+    test_config_link_fallback_yield();
+    test_config_reconcile_local_pins();
+    test_config_board_pin_canonical_absent();
     test_board_pins();
     test_ha_device();
     test_board_pins_local();
     test_board_presets();
     test_led_pattern();
     test_button();
+    test_button_debounce_and_boot_gate();
     test_discovery();
     test_binary_catalog();
     test_binary_semantics();
@@ -23884,6 +25285,7 @@ int main() {
     test_heartbeat();
     test_crashinfo();
     test_bootlog();
+    test_bootlog_recovery_fields();
     test_syslog_policy();
     test_timestamp();
     test_hexdump();
@@ -23893,6 +25295,8 @@ int main() {
     test_reset_reason();
     test_boot_guard();
     test_heap_watchdog();
+    test_boot_classification();
+    test_boot_recovery_ladders();
     test_health_gate();
     test_captive();
     test_http_body();

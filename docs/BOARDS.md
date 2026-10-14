@@ -36,8 +36,8 @@ W5500 Ethernet is optional. [WIRING.md](WIRING.md) owns X10A voltages and connec
 | GPIO4 IR LED | Unused. |
 
 The preset key is `m5stack_atoms3_lite`. Its indicator reports setup (blue), connecting (yellow),
-healthy (green), X10A down (red double-flash) or MQTT down (orange). Reset arming strobes red;
-erasure is solid white.
+X10A and any configured MQTT up (green), X10A down or recovery mode (red double-flash) or MQTT
+down (orange). Reset arming strobes red; erasure is solid white.
 
 GPIO39 is physically exposed as “CLK_OUT3” but is dedicated JTAG and unavailable for X10A or ENV III.
 GPIO41 is also a JTAG pad, allowed for the board's own button; using it conflicts with an external
@@ -125,10 +125,15 @@ wired; a floating input can trigger an unintended reset.
 
 ## Recovery button
 
-Holding a configured button for five seconds erases serialized settings, legacy WiFi credentials,
-history/trend/state-age data and the raw coredump. It reboots into setup only after every erase
-succeeds; an incomplete wipe remains on the current boot and is reported. Release while arming to
-abort. Preserve needed configuration and crash evidence before using it.
+Holding a configured button for five seconds erases serialized settings, legacy and WiFi-driver
+credentials, history/trend/state-age data (RAM and flash journal), the raw coredump and the MQTT
+retirement record; the stated board hardware (preset, indicator, button) is kept, best effort, so
+the button still works afterwards.
+A hold counts only after three consecutive pressed samples, and a button held at boot stays
+inactive until it reads released three times. It reboots into setup only after every erase
+succeeds; an incomplete wipe remains on the current boot, is reported in `/diag`, and the indicator
+returns to its normal pattern. Release while arming to abort. Preserve needed configuration and
+crash evidence before using it.
 
 ## Feature availability by board
 
