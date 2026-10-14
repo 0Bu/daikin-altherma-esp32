@@ -4,6 +4,7 @@
 // snapshots as /status and /values.
 #include "http_handlers.hpp"
 #include "logic/mcp.hpp"
+#include "logic/http_request.hpp"
 #include "ota_update.hpp"
 #include "esp_app_desc.h"
 #include "esp_http_server.h"
@@ -29,22 +30,24 @@ static esp_err_t mcp_post(httpd_req_t* req) {
         httpd_resp_set_type(req, "text/plain");
         return httpd_resp_sendstr(req, "Network TLS operation in progress; retry shortly");
     }
-    // Stateless operation still honours the per-request negotiated-version header. Its absence is
-    // the specification's 2025-03-26 compatibility default; a present unknown revision fails closed.
-    const size_t version_len = httpd_req_get_hdr_value_len(req, "MCP-Protocol-Version");
-    if (version_len) {
-        char version[24];
-        if (version_len >= sizeof(version) ||
-            httpd_req_get_hdr_value_str(req, "MCP-Protocol-Version",
-                                        version, sizeof(version)) != ESP_OK ||
-            !mcp_protocol_supported(version))
-            return mcp_transport_error(req, "400 Bad Request",
-                                       "Unsupported MCP-Protocol-Version");
-    }
+    // Stateless operation requires the negotiated version on every post-initialize message.
+    // The headerless compatibility default predates structuredContent and is unsupported here.
+    const size_t    version_len = httpd_req_get_hdr_value_len(req, "MCP-Protocol-Version");
+    char            version[24] = {};
+    const esp_err_t version_result =
+        version_len < sizeof(version)
+            ? httpd_req_get_hdr_value_str(req, "MCP-Protocol-Version", version, sizeof(version))
+            : ESP_ERR_HTTPD_RESULT_TRUNC;
+    const bool version_present = version_result != ESP_ERR_NOT_FOUND;
+    if (version_present && (version_result != ESP_OK || !mcp_protocol_supported(version)))
+        return mcp_transport_error(req, "400 Bad Request", "Unsupported MCP-Protocol-Version");
 
-    char body[1024];
-    const int n = http_read_body(req, body, sizeof(body));
+    char       body[1024];
+    const int  n = http_read_body(req, body, sizeof(body));
     McpRequest r = mcp_parse(n >= 0 ? body : nullptr, n);
+
+    if (!version_present && r.method != McpMethod::Initialize)
+        return mcp_transport_error(req, "400 Bad Request", "MCP-Protocol-Version required");
 
     // Streamable HTTP accepts notifications with 202 and no body. There is deliberately no session
     // state to mutate; notifications/initialized is accepted in the same way as any valid notice.
@@ -99,6 +102,21 @@ static esp_err_t mcp_post(httpd_req_t* req) {
 }
 
 static esp_err_t mcp_get(httpd_req_t* req) {
+    // Human HTML help and an MCP event-stream request share the URL. This server has no SSE;
+    // refuse clients asking for that transport instead of returning an HTML protocol response.
+    const size_t accept_len = httpd_req_get_hdr_value_len(req, "Accept");
+    if (accept_len) {
+        char accept[192];
+        if (accept_len >= sizeof(accept) ||
+            httpd_req_get_hdr_value_str(req, "Accept", accept, sizeof(accept)) != ESP_OK)
+            return mcp_transport_error(req, "400 Bad Request", "Invalid Accept header");
+        if (http_accepts_media_type(accept, "text/event-stream") &&
+            !http_accepts_media_type(accept, "text/html")) {
+            httpd_resp_set_status(req, "405 Method Not Allowed");
+            httpd_resp_set_hdr(req, "Allow", "POST");
+            return httpd_resp_send(req, nullptr, 0);
+        }
+    }
     // One URL, method-selected: a person gets local setup help; an MCP client POSTs the protocol.
     // The static page has no external assets or network activity. Inline CSS/JS is unavoidable
     // because the asset is deliberately one pre-gzipped response in flash.

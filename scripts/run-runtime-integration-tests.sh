@@ -100,3 +100,7 @@ python3 test/mqtt_retirement_store/run.py
 node test/test_uart_runtime.mjs
 # The complete detector retains candidate pin policy, transport causes and real profile selection.
 node test/test_detect_runtime.mjs
+
+# Execute the shared HTTP registration/MCP dispatcher and the actual outgoing deadline watchdog.
+node test/test_http_server_runtime.mjs
+node test/test_http_deadline_runtime.mjs

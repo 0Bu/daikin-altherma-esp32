@@ -44,7 +44,7 @@ also refuses non-OTA work below a 6,144-byte contiguous internal block. During W
 | `/favicon.ico` | Embedded setup/dashboard icon |
 | `/heat-pump-icon.png` | Dashboard app icon; LAN only |
 | `/locale.js?lang=<code>` | Device-local compressed locale with app-image ETag; LAN only |
-| `/mcp` | Embedded dependency-free MCP setup page, no outbound requests; see [MCP.md](MCP.md) |
+| `/mcp` | Embedded MCP setup page; no API or external requests. SSE-only GET receives 405; see [MCP.md](MCP.md) |
 
 The UI locale codes are `en`, `de`, `es`, `fr`, `it`, `pl`, `cs`, `uk`, `zh`, `ja`, `nb`, `sv`, `fi`.
 Catalog value labels and API error prose remain English. The browser UI polls; there is no `/events`

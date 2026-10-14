@@ -11642,11 +11642,19 @@ static void test_mcp() {
                 "\"params\":{},\"params\":{}}")
               .error == -32600);
 
-    // A valid notification has no JSON-RPC response. Its method/params do not change that rule.
+    // Valid notifications have no response; malformed params are not an accepted notification.
     McpRequest r = parse("{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\"}");
     CHECK(!r.error && r.notification && r.id_kind == McpIdKind::None);
     r = parse("{\"jsonrpc\":\"2.0\",\"method\":\"tools/call\",\"params\":7}");
-    CHECK(!r.error && r.notification);
+    CHECK(r.error == -32600 && !r.notification && r.id_raw == "null");
+    for (const char* params : {"null", "[]", "true", "\"scalar\""}) {
+        r = parse(std::string(
+                      "{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\",\"params\":") +
+                  params + "}");
+        CHECK(r.error == -32600 && !r.notification);
+    }
+    CHECK(parse("{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\",\"params\":{}}")
+              .notification);
 
     // initialize negotiates a supported revision verbatim and otherwise offers this server's newest
     // supported revision. The issue's intentionally-minimal params:{} example remains accepted.
@@ -11655,10 +11663,14 @@ static void test_mcp() {
               "\"clientInfo\":{\"name\":\"test\",\"version\":\"1\"}}}");
     CHECK(!r.error && r.method == McpMethod::Initialize && r.protocol_version == "2025-06-18" &&
           r.id_raw == "1");
-    for (const char* version : {"2025-03-26", "2025-06-18", "2025-11-25"}) {
+    for (const char* version : {"2025-06-18", "2025-11-25"}) {
         CHECK(mcp_protocol_supported(version));
     }
+    CHECK(!mcp_protocol_supported("2025-03-26"));
     CHECK(!mcp_protocol_supported("2024-11-05"));
+    r = parse("{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{"
+              "\"protocolVersion\":\"2025-03-26\"}}");
+    CHECK(!r.error && r.protocol_version == MCP_PROTOCOL_LATEST);
     r = parse("{\"jsonrpc\":\"2.0\",\"id\":\"init\",\"method\":\"initialize\","
               "\"params\":{\"protocolVersion\":\"2099-01-01\"}}");
     CHECK(!r.error && r.protocol_version == MCP_PROTOCOL_LATEST && r.id_raw == "\"init\"");
@@ -11722,6 +11734,35 @@ static void test_mcp() {
     CHECK(!r.error && r.id_kind == McpIdKind::String && r.id_raw == "\"a\\\\\\\"b\"");
     r = parse("{\"jsonrpc\":\"2.0\",\"id\":null,\"method\":\"tools/list\"}");
     CHECK(!r.error && r.id_kind == McpIdKind::Null && r.id_raw == "null");
+    for (const char* bad :
+         {"\x80", "\xC0\xAF", "\xC1\xBF", "\xE0\x80\x80", "\xED\xA0\x80", "\xF0\x80\x80\x80",
+          "\xF4\x90\x80\x80", "\xF5\x80\x80\x80", "\xFF", "\xC2", "\xE2\x82", "\xF0\x9F\x98",
+          "\xC2x", "\xE2x\x80", "\xF0\x80x\x80"}) {
+        r = parse(std::string("{\"jsonrpc\":\"2.0\",\"id\":\"") + bad +
+                  "\",\"method\":\"tools/list\"}");
+        CHECK(r.error == -32700 && r.id_raw == "null" && !r.notification);
+        r = parse(
+            std::string("{\"jsonrpc\":\"2.0\",\"id\":7,\"method\":\"tools/list\",\"extra\":\"") +
+            bad + "\"}");
+        CHECK(r.error == -32700 && r.id_raw == "null");
+    }
+    for (const char* valid :
+         {"\x7F", "\xC2\x80", "\xDF\xBF", "\xE0\xA0\x80", "\xED\x9F\xBF", "\xEE\x80\x80",
+          "\xEF\xBF\xBF", "\xF0\x90\x80\x80", "\xF4\x8F\xBF\xBF"}) {
+        const std::string id = std::string("\"") + valid + "\"";
+        r = parse(std::string("{\"jsonrpc\":\"2.0\",\"id\":") + id + ",\"method\":\"tools/list\"}");
+        CHECK(!r.error && r.id_raw == id);
+    }
+    // Truncation at every position after a valid ID still has no response identity.
+    const std::string complete = "{\"jsonrpc\":\"2.0\",\"id\":7,\"method\":\"tools/list\"}";
+    for (size_t n = 1; n < complete.size(); ++n) {
+        r = parse(complete.substr(0, n));
+        CHECK(r.error == -32700 && r.id_raw == "null");
+    }
+    r = parse(complete + "garbage");
+    CHECK(r.error == -32700 && r.id_raw == "null");
+    r = parse("{\"jsonrpc\":\"2.0\",\"id\":7,\"method\":\"tools/list\",}");
+    CHECK(r.error == -32700 && r.id_raw == "null");
     const std::string ok = mcp_result("-1.25e+2", "{\"ok\":true}");
     CHECK(ok == "{\"jsonrpc\":\"2.0\",\"id\":-1.25e+2,\"result\":{\"ok\":true}}");
     const std::string err = mcp_error("\"x\"", -32602, "bad \"args\"");
@@ -12087,17 +12128,26 @@ static void test_http_request_policy() {
     CHECK(!http_json_content_type("application/jsonp"));
     CHECK(!http_json_content_type("application/json;"));
 
-    CHECK(http_is_ota_route("/ota"));
-    CHECK(http_is_ota_route("/ota?foo=1"));
-    CHECK(http_is_ota_route("/ota/"));
-    CHECK(http_is_ota_route("/ota/update"));
-    CHECK(http_is_ota_route("/ota/update?url=http://foo"));
+    CHECK(!http_is_ota_route("/ota"));
+    CHECK(!http_is_ota_route("/ota?foo=1"));
+    CHECK(!http_is_ota_route("/ota/"));
+    CHECK(http_is_ota_route("/ota/update", true));
+    CHECK(http_is_ota_route("/ota/update?url=http://foo", true));
+    CHECK(!http_is_ota_route("/ota/update"));
+    CHECK(!http_is_ota_route("/ota/status", true));
+    CHECK(!http_is_ota_route("/ota/check", true));
+    CHECK(!http_is_ota_route("/ota/changelog", true));
+    CHECK(!http_is_ota_route("/ota/not-a-route", true));
     CHECK(http_is_ota_route("/ota/check"));
     CHECK(http_is_ota_route("/ota/check?foo=1"));
     CHECK(http_is_ota_route("/ota/status"));
     CHECK(http_is_ota_route("/ota/status?clear=1"));
-    CHECK(http_is_ota_route("/ota/apply"));
-    CHECK(http_is_ota_route("/ota/apply?reboot=1"));
+    CHECK(http_is_ota_route("/ota/changelog"));
+    CHECK(http_is_ota_route("/ota/changelog?generation=1"));
+    CHECK(!http_is_ota_route("/ota/apply"));
+    CHECK(!http_is_ota_route("/ota/apply?reboot=1"));
+    CHECK(!http_is_ota_route("/ota/not-a-route"));
+    CHECK(!http_is_ota_route("/ota/status/"));
     CHECK(!http_is_ota_route(""));
     CHECK(!http_is_ota_route("/"));
     CHECK(!http_is_ota_route("/status"));
@@ -12106,6 +12156,33 @@ static void test_http_request_policy() {
     CHECK(!http_is_ota_route("/set_ota"));
     CHECK(!http_is_ota_route("/otax"));
     CHECK(!http_is_ota_route("/ota_bad"));
+    CHECK(http_accepts_media_type("application/json, TEXT/Event-Stream ; charset=utf-8",
+                                  "text/event-stream"));
+    CHECK(http_accepts_media_type("\ttext/html\t, application/xhtml+xml", "text/html"));
+    CHECK(!http_accepts_media_type("text/event-stream-extra", "text/event-stream"));
+    CHECK(!http_accepts_media_type("text/html", "text/event-stream"));
+    CHECK(!http_accepts_media_type("", "text/event-stream"));
+    CHECK(!http_accepts_media_type(" , ", "text/event-stream"));
+    CHECK(!http_accepts_media_type("text/html;q=0", "text/html"));
+    CHECK(!http_accepts_media_type("text/html;q=0.000", "text/html"));
+    CHECK(http_accepts_media_type("text/html;Q=0.001", "text/html"));
+    CHECK(http_accepts_media_type("text/html; q = 1.000", "text/html"));
+    CHECK(http_accepts_media_type("text/html;q=1", "text/html"));
+    CHECK(http_accepts_media_type("text/html;q=1.", "text/html"));
+    CHECK(!http_accepts_media_type("text/html;q=0.", "text/html"));
+    CHECK(!http_accepts_media_type("text/html;q=0", "text/html"));
+    for (const auto* value : {"", "2", "-1", "1.1", "0.0001", "1x", "0.x", "0./", "0.:", "\"1\""}) {
+        CHECK(!http_accepts_media_type(std::string("text/html;q=") + value, "text/html"));
+    }
+    CHECK(!http_accepts_media_type("text/html;q", "text/html"));
+    CHECK(!http_accepts_media_type("text/html;q=1;q=1", "text/html"));
+    CHECK(!http_accepts_media_type("text/html;q=0;q=1", "text/html"));
+    CHECK(http_accepts_media_type("text/html;q=0, text/html;q=0.5", "text/html"));
+    CHECK(!http_accepts_media_type("text/html;note=\"a,b;c\";q=0", "text/html"));
+    CHECK(http_accepts_media_type("application/json;note=\"a,b;c\",text/html", "text/html"));
+    CHECK(!http_accepts_media_type("text/html;note=\"a\\\"b;c\";q=0", "text/html"));
+    CHECK(http_accepts_media_type("text/html;note=\"a\\\\b\";q=0.5", "text/html"));
+    CHECK(!http_accepts_media_type("*/*", "text/event-stream"));
 }
 
 // logic/lwt_select.hpp — the leaving-water MEASUREMENT picker that feeds ΔT / heat output / COP.

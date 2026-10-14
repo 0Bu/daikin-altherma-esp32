@@ -49,8 +49,8 @@ assert.match(server, /http_send_gzip\(req,\s*"text\/html",\s*mcp_html_gz_start/s
   "GET /mcp must serve the embedded page");
 assert.match(server, /Content-Security-Policy/, "page response must carry a CSP");
 assert.match(server, /connect-src 'none'/, "static page CSP must prohibit network connections");
-assert.doesNotMatch(server, /405 Method Not Allowed|POST only/,
-  "GET /mcp must no longer return the placeholder 405 response");
+assert.match(server, /http_accepts_media_type\(accept, "text\/event-stream"\)/,
+  "GET /mcp must distinguish an SSE client from the browser help page");
 
 // The copy buttons restore their own label after 1600 ms. That label used to be read fresh on every
 // click — AFTER the clipboard await — and the pending restore was never cancelled, so a second click
