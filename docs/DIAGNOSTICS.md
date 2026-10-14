@@ -62,18 +62,20 @@ The observation establishes neither a cause nor why a message stopped appearing.
 ### Domestic-hot-water tank cooling
 
 **In plain language:** The board measures the temperature drop at tank sensor R5T during eligible
-one-hour windows. It displays the largest completed-hour drop, the completed window count and
-how many reached the project's **0.8 K/h** note threshold.
+one-hour windows. It displays the largest completed-window cooling rate (rounded down to 0.1 K/h),
+the completed window count and how many reached the project's **0.8 K/h** note threshold.
 
-**Meaning:** At least one such window produces **NOTE**. Other completed windows are **MEASURED
-ONLY**; no eligible window means **CHECKING**. There is no green tank-loss result. An optional
+**Meaning:** At least one such window produces **NOTE**. Other completed windows are **MEASURED**;
+no eligible window means **CHECKING**; "no eligible window in 24 h" needs a full day of tank-cooling
+evidence since the last start or circulation change. There is no green tank-loss result. An optional
 circulation-power witness shows how many notable windows overlapped electrical pump operation or
 had a sufficiently observed pump-off state.
 
 **Important limit:** Charging, pump activity, apparent draws and missing readings exclude time. Fast
 continuous cooling above about **1.85 K/h** can resemble a draw and be excluded too. One sensor
 in a stratified tank does not measure whole-tank heat or electricity loss, and pump overlap does not
-prove a cause. An unobserved charge or lost settling filter can affect the first accepted window.
+prove a cause. After a seen charge, a restart or a reset the check waits 45 minutes before a window;
+unread valve or heater readings extend that wait. A charge no reading saw can still affect a window.
 
 **Evidence and limits:** [Tank cooling](DIAGNOSTIC_EVIDENCE.md#diagnosis-dhw-loss)
 
@@ -93,7 +95,11 @@ no usable compressor observation remains **CHECKING**.
 **Important limit:** There is no pooled all-mode assessment, and an unfinished long run cannot dilute
 completed short runs. Twelve runs and ten minutes are project heuristics, not Daikin limits. These
 figures do not identify oversizing or hydraulic imbalance. Optional outdoor min/mean is context for
-accepted heating runs only.
+accepted heating runs only. Firmware pauses of up to 15 seconds inside a run (update check, weather
+download) keep its class; a start hidden by an unreadable reading counts as an unclassified run.
+After a restart, restored hours can lack the completion of a run that crossed an hour boundary, so
+the result stays **MEASURED** until those hours leave the window. If the compressor stops during a
+defrost, one heating run counts as several; this has not yet been observed on a plant.
 
 **Evidence and limits:** [Compressor cycling](DIAGNOSTIC_EVIDENCE.md#diagnosis-cycling)
 
@@ -101,7 +107,7 @@ accepted heating runs only.
 ### Defrost events
 
 **In plain language:** The board counts observed defrost starts and the seconds spent defrosting
-while the compressor and defrost signals were both readable.
+while the compressor ran and both signals were readable.
 
 **Meaning:** At least **three paired events** and more than **15%** defrost share produce **NOTE**.
 Both are project heuristics. Fewer events or no paired compressor runtime remain **MEASURED**;

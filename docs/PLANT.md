@@ -34,7 +34,8 @@ results; [DIAGNOSTIC_EVIDENCE.md](DIAGNOSTIC_EVIDENCE.md) owns thresholds and cl
 Each completed X10A sweep contributes only the rows it read. Integrated state time requires readable
 endpoints and bounded gaps; a pulse entirely between sweeps can still be missed. Five-minute trends
 cannot reconstruct completed runs or quiet tank hours and are not reused as diagnosis evidence.
-Temporary allocation/TLS pauses preserve profile capabilities while adding no observed time.
+Temporary allocation/TLS pauses preserve profile capabilities while adding no observed time; inside a
+compressor run a pause of up to 15 s is bounded blind time and keeps the run's class.
 
 Read-time source age, elapsed lifecycle span and per-signal coverage are separate facts. A stopped
 producer cannot retain a current all-clear. Historical findings remain age-bounded; observation-only rows
@@ -52,7 +53,8 @@ Optional outdoor min/mean belongs only to each accepted population and changes n
 Tank cooling retains completed/notable window counts, the greatest accepted one-hour R5T drop and
 optional circulation correlation. Rejected windows and their OR-ed reason set explain filter
 limitations, not a defect or dominant cause. There is no tank-energy calculation or green loss
-assessment. A hidden charge or lost settling filter can affect the next candidate.
+assessment. Every fresh start waits 45 minutes before the first candidate; a charge no reading saw
+can still affect the next one.
 
 The independent circulation witness's broker, topic, value/time paths, maximum age, thresholds and
 confirmation time bind the DHW evidence identity. Editing them clears only that check and its

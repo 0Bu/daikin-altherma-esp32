@@ -130,10 +130,14 @@ matter.
 **Firmware rule:** Complete eligible one-hour windows measure the drop at tank sensor R5T.
 Charging, internal-pump activity, an apparent draw, implausible temperature or excessive blindness
 discards a candidate. A charge witness sustained for two minutes, or seen after an unmeasured gap,
-arms a 45-minute settling filter. A completed window at
+arms a 45-minute settling filter; unread time directly before a witness, or an unread tail after a
+short one, counts toward the two minutes. Every DHW evaluation that starts without a compatible
+handoff (boot, reset, consent or circulation change) first holds the same 45 minutes. Settling and
+that hold count down only on samples that read both witnesses. A completed window at
 or above 0.8 K/h produces **NOTE** immediately. Other completed windows remain observations; no
-eligible window remains **CHECKING**. There is no reassuring tank-loss verdict or six-hour acceptance
-test. The result retains the maximum rate, completed/notable window counts and circulation correlation,
+eligible window remains **CHECKING**; the "no eligible window in 24 h" statement needs 24 hours of DHW
+scope since the last start or DHW reset. There is no reassuring tank-loss verdict or six-hour acceptance
+test. The result retains the maximum rate (floored to 0.1 K/h), completed/notable window counts and circulation correlation,
 not individual rates, an average or an energy integral.
 
 Changing the circulation broker, mapping or interpretation retires DHW records and the ongoing
@@ -154,11 +158,10 @@ daily consumption or replacement electricity. Fast continuous cooling can be exc
 draw, so quiet accepted windows cannot rule out loss elsewhere. Draws, stratification, circulation,
 thermosiphoning and valve behaviour can produce similar traces; pump overlap is correlation.
 
-A charge hidden by unreadable data or a restart that loses the settling filter can admit a settling
-tail as apparent cooling. The two-minute charge guard also treats a charge witness at the first sample
-or after a long sample gap as sufficient to arm settling; a wholly unseen charge cannot arm it.
-Settling counts down through unread samples within the normal poll gap, but longer gaps hold it.
-Power loss, panic, identity changes and incompatible handoffs lose the filter. Discard totals retain
+A charge that no sample witnessed can still admit its settling tail as apparent cooling, and a short
+witness followed by a gap longer than the normal poll gap arms no settling. An intentional restart
+during the start hold loses its remainder; power loss, panic, identity changes and incompatible
+handoffs start a new hold. Discard totals retain
 only an OR-ed reason set, not per-hour provenance or dominant cause. Blindness may reflect bus
 timeouts or firmware pauses and establishes no wiring defect.
 
@@ -173,7 +176,10 @@ supports the relevance of very short runs but does not provide a universal Daiki
 
 **Firmware rule:** Starts and continuously witnessed completed runs are retained separately.
 Readable unchanged valve/mode inputs classify completed runs as space heating, DHW or cooling;
-mixed or gapped runs are censored. Only at least 12 completed space-heating runs and at least 90%
+mixed or gapped runs are censored. A sweep that read no X10A row at all (a firmware pause) inside a
+run is bounded blind time and censors only beyond 15 seconds; a start hidden by an unreadable sample
+opens a censored run. The classified share uses the larger of completed runs and starts minus one,
+so completions a restart lost keep the result an observation. Only at least 12 completed space-heating runs and at least 90%
 of all completed runs classified can support the heating assessment. A mean below ten minutes then
 produces **NOTE** immediately. An absence-of-short-run assessment additionally requires a full
 24-hour span and at least CHECKUP_REQUIRED_S of paired classification time.
@@ -184,12 +190,15 @@ There is no pooled starts/runtime fallback, and unfinished
 runs never enter the completed mean. Completed-run evidence ages with its start edge. See
 CHECKUP_CYCLING_MIN_STARTS, CHECKUP_CYCLING_SHORT_RUN_S and CHECKUP_CYCLING_CLASSIFIED_PCT in
 [checkup.hpp](../main/logic/checkup.hpp). Fresh X10A outdoor minimum/mean accompanies only accepted
-completed heating runs and changes no threshold.
+completed heating runs, from samples whose predecessor was also running, and changes no threshold.
 
 **Project boundary:** Twelve heating runs, ten minutes and the 90% evidence requirements are
 project heuristics, not limits copied from R1 or specified by Daikin. R1 studied different,
 non-modulating units and supports only the general relevance of short runs and system hydraulics.
 The page-0x20 mapping and positive-compressor freshness pairing are project protocol evidence.
+No defrost has been observed on a plant yet (none since recording began in July): if the compressor
+stops at defrost entry or exit, one heating run counts as several. That plant evidence belongs to the
+hardware acceptance cards.
 
 **Not established:** The note identifies neither oversizing nor incorrect hydraulic balancing.
 The observed run population and its outdoor context do not establish building load, delivered heat
