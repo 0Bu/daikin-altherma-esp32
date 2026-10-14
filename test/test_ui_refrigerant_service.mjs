@@ -165,4 +165,12 @@ ui.set({ state: "unsupported", continuous_s: 0, samples: 0,
 html = ui.card();
 assert.match(html, />ENTFÄLLT</);
 assert.match(html, /Dieses Modell stellt nicht alle benötigten Messwerte bereit/);
+// Copy regression pin (U3): the unit_fault reason must name a reported warning, not only a fault.
+for (const [locale, warning] of [["en", /\bwarning\b/], ["de", /\bWarnung\b/]]) {
+  ui.lang(locale);
+  ui.set({ state: "waiting", continuous_s: 0, samples: 0, blocker: "unit_fault" });
+  html = ui.card();
+  assert.match(html, />(?:WAITING|WARTET)</, `${locale} unit_fault waiting state`);
+  assert.match(html, warning, `${locale} unit_fault reason must mention the warning case`);
+}
 console.log("refrigerant observation UI contract: actual ranges, named limits and single-run scope verified");

@@ -11,7 +11,7 @@ python3 test/mqtt_runtime/run.py --real-cjson managed_components/espressif__cjso
 
 `--root` can select a checkout explicitly. `CC` and `CXX` select the host compilers. Each run creates its own directory through Python `tempfile`, respecting `TMPDIR`. It retains complete source snapshots, binaries, dependency files, exact commands and a manifest with source/cJSON/header/fixture hashes. It never writes repository files, downloads dependencies or deletes shared files.
 
-Seventy-one scenarios contain named assertions:
+Every entry of the `scenarios` list in `run.py` contains named assertions; a full run prints one `PASS <scenario> (<n> named checks)` line per entry. The scenarios cover:
 
 - Real C++ allocation failure in reference/circulation status snapshots: normal delay, released activity/mutex ownership, preserved values/source-time watermarks and successful later iteration.
 - Immediate source withdrawal after reconfiguration despite the next actual Config-copy allocation failure, followed by recovery.
@@ -49,7 +49,7 @@ Seventy-one scenarios contain named assertions:
 - SDK rejection of initial/outage source-offline, transport-online, source-online and changed X10A state preserves the last accepted marker/generation and retries. Config-copy OOM cannot prevent allocation-free withdrawal or draining an already delivered cleanup ACK.
 - Distinct full-MAC boards with the same last three bytes receive distinct client and secondary device IDs. A failed eFuse read prevents client initialization/start and reports an explicit error. Automatic cleanup never guesses ownership of a short-MAC-era namespace.
 
-Ninety-six temporary whole-production-source mutants must fail their expected named assertion. They independently break allocation/lock ownership, subscription epochs and retries, wire fields and suppression, source freshness and availability, hardware identity, cleanup admission/ACK/cursor/fairness, or journal load/save ordering and error handling. New controls restore the periodic admission/timer defects, the P→Q→P announcement/cache defects, and allocating, unbounded or falsely complete replacement scans. Compile failure, crash or a different assertion is not accepted as mutation evidence.
+Every entry of the `mutations` inventory in `run.py` is a temporary whole-production-source mutant that must fail its expected named assertion; a full run prints one `REJECTED <name>` line per entry. They independently break allocation/lock ownership, subscription epochs and retries, wire fields and suppression, source freshness and availability, hardware identity, cleanup admission/ACK/cursor/fairness, or journal load/save ordering and error handling. New controls restore the periodic admission/timer defects, the P→Q→P announcement/cache defects, and allocating, unbounded or falsely complete replacement scans. Compile failure, crash or a different assertion is not accepted as mutation evidence.
 
 `--scenario NAME` may be repeated to run selected scenarios and their associated compiling negative controls; an omitted selector runs the full inventory. The manifest records the actual selection.
 

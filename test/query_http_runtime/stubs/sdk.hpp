@@ -18,6 +18,7 @@ inline SemaphoreHandle_t xSemaphoreCreateBinary() { return nullptr; }
 inline BaseType_t        xSemaphoreTake(SemaphoreHandle_t, TickType_t) { return pdFALSE; }
 inline BaseType_t        xSemaphoreGive(SemaphoreHandle_t) { return pdTRUE; }
 inline void              vSemaphoreDelete(SemaphoreHandle_t) {}
+inline uint32_t esp_random() { throw std::runtime_error("unrelated random source reached"); }
 using esp_event_base_t       = const char*;
 using esp_mqtt_event_id_t    = int;
 constexpr int MQTT_EVENT_ANY = -1, MQTT_EVENT_CONNECTED = 1, MQTT_EVENT_DISCONNECTED = 2,

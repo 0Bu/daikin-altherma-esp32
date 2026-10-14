@@ -28,7 +28,7 @@ Unknown fields retain the existing forward-compatible behavior.
 | MQTT | String fields, boolean credential clear, base/URI rules and broker preflight; absent broker disables, empty credentials keep, absent base keeps | Service save and reboot; unchanged skips probe/save |
 | Reference temperature | String mappings, fixed-target precision/bounds, integer age; absent topic disables; old single-topic fallback preserved | Service save and live rebind; unchanged still rebinds |
 | Circulation | String mappings, numeric thresholds/age/confirmation and current proof; absent topic disables without proof | Service save and live source update |
-| Diagnostics | Required boolean consent; unchanged is a no-op | Service save, new generation and live producer resets |
+| Diagnostics | Required boolean consent; unchanged is a no-op | Service save, new generation (random draw from 0, then +1) and live producer resets |
 | X10A | Optional profile and exact integer GPIO patch; board/protocol/pin validation; mixed HomeHub request rejected | Link-only save, bounded stale retries and live resets |
 | HomeHub | Optional string host/integer port/unit; host ≤512 bytes, port 1–65535, unit 1–247 | Service save and separate Modbus/history/retained cleanup |
 | Syslog | String host, integer port/range; absent host disables, port defaults 514 | Service save and reboot; unchanged is a no-op |
@@ -56,13 +56,22 @@ configuration copy. The six rebooting setters also execute the real delayed rest
 latch introduced during its 400 ms response window: the save and response already succeeded, but
 the reset then owns the restart. An unlatched window still restarts, and a latch already set holds it.
 
+The consent-generation group starts from the default generation 0 with a fixture-controlled
+`esp_random()` adapter. The first opt-in must persist that exact draw in the service entry, RAM and
+the live checkup producer; each re-toggle advances by one without a new draw, an unchanged request
+draws nothing, and a zero draw still yields a non-zero generation. Compiling mutants that pass 0 instead of the draw,
+discard the draw's value or take a fresh draw on every transition must fail this group.
+
 The immutable original HTTP source at `819a2c98ad7e331ce1527ca85f4acb7127e55734` must pass positive
 setters and fail the two specific regressions: a present wrong type taking missing-field semantics,
-and a fractional integer being truncated. Additional compiling mutants independently remove type,
-missing-value, persistence, runtime ordering, probe, domain, query, ingress, post-delay reset and
-reconciliation defenses. Both compiler runs retain fifteen groups, 5,477 assertions and 22 compiling
-controls; the original thirteen groups retain all 5,233 assertions. The two additional groups cover
-integration with detection and reset. Only the selected assertion counts as rejection;
+and a fractional integer being truncated. It predates the two-argument generation helper, so the
+runner rewrites its one call with entropy 1, which reproduces the original one-argument result for
+every generation; the evidence records both the original and the adapted source hash. Additional
+compiling mutants independently remove type, missing-value, persistence, runtime ordering, probe,
+domain, query, ingress, post-delay reset, reconciliation and generation-entropy defenses. Both
+compiler runs retain sixteen groups, 5,517 assertions and 25 compiling controls; the original
+thirteen groups retain all 5,233 assertions. The three additional groups cover integration with
+detection, reset and the consent generation. Only the selected assertion counts as rejection;
 compilation failures, crashes and timeouts never do.
 
 Unique temporary output directories retain `evidence.json`, `commands.txt`, binaries, mutation

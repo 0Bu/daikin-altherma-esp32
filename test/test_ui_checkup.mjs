@@ -359,6 +359,30 @@ assert.match(ui.detail({ id: "fault", verdict: "info", active: 0 }), /weder Ursa
 assert.equal(ui.metric(pressure), "0 bar");
 assert.match(ui.detail(pressure), /Aktueller Wasserdruck:">1,5 bar/);
 
+// Copy regression pins for corrected diagnosis claims (U3). The DHW loss peak is a highest
+// observed rate, not a bound: no shipped locale may lead it with an "at most" adverb.
+assert.match(ui.text("de", "check.loss_max", "0,8"), /^Höchstwert 0,8 K\/h$/,
+             "de check.loss_max must read as the observed Höchstwert");
+for (const lang of locales) {
+  assert.doesNotMatch(ui.text(lang, "check.loss_max", "0,8"),
+                      /^(?:maximal|enintään|högst|maksimalt|maksymalnie)(?=\s)/u,
+                      `${lang} check.loss_max must name the observed peak, not an upper bound`);
+}
+// The heating-curve room source does not need its own timestamp; the inactive state does not
+// know why the sampler is stopped; a non-heating HomeHub mode is not necessarily cooling.
+for (const [lang, stamped, cause, notHeating, label, coolingLabel] of [
+  ["en", /timestamped/i, /safe mode|crash/i, /\bnot heating\b/, /^Not heating ·/, /^Cooling ·/],
+  ["de", /zeitgestempelt/i, /Sicherheitsmodus|abgesichert|Absturz/i, /\bkein Heiz/, /^Kein Heizbetrieb ·/,
+    /^Kühlbetrieb ·/],
+]) {
+  assert.doesNotMatch(ui.text(lang, "dyn.state_help_setup"), stamped, `${lang} setup help`);
+  assert.doesNotMatch(ui.text(lang, "dyn.state_help_inactive"), cause, `${lang} inactive help`);
+  assert.match(ui.text(lang, "dyn.state_cooling"), label, `${lang} non-heating state label`);
+  assert.doesNotMatch(ui.text(lang, "dyn.state_cooling"), coolingLabel, `${lang} non-heating state label`);
+  assert.match(ui.text(lang, "dyn.state_help_cooling"), notHeating, `${lang} non-heating state help`);
+}
+ui.setLang("de");
+
 const descriptionContext = {};
 vm.runInNewContext(`${explanationSource}; this.model = MODEL_DESCRIPTIONS;`, descriptionContext);
 const allCheckupCopy = [
