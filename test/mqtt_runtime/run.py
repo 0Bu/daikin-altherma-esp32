@@ -115,7 +115,8 @@ scenarios = ['discovery_guard_clean', 'discovery_guard_default', 'discovery_guar
              'probe_saved_config_without_owner', 'probe_active_shared_prior_owner',
              'sdk_event_stack_owner', 'outgoing_heartbeat', 'outgoing_weather',
              'outgoing_curve', 'curve_consent_boundary', 'curve_room_source_boundary',
-             'scalar_snapshot_helpers', 'discovery_topic_roundtrip',
+             'curve_boundary_during_evaluation', 'scalar_snapshot_helpers',
+             'discovery_topic_roundtrip',
              'callback_fragments', 'callback_payload_bounds', 'callback_epoch_cutover',
              'callback_queue_full', 'callback_timestamp_order', 'probe_capture_generation',
              'probe_proof_expiry']
@@ -392,6 +393,18 @@ mutations = [
      's_heating_curve_diagnosis.forget_samples();',
      's_heating_curve_diagnosis = logic::HeatingCurveDiagnosis{};',
      'CURVE_BOUNDARY_KEEPS_SEQUENCE_AND_COUNTERS', 1),
+    ('curve-stale-scope-evaluated', 'curve_boundary_during_evaluation',
+     'if (s_ref_requested_epoch.load(std::memory_order_acquire) != scope_epoch)',
+     '(void)scope_epoch;\n    if (false)',
+     'CURVE_BOUNDARY_DURING_EVALUATION_RECORDS_NOTHING', 1),
+    ('curve-scope-epoch-captured-late', 'curve_boundary_during_evaluation',
+     '''    Lock lk(s_mtx);
+    if (s_ref_requested_epoch.load(std::memory_order_acquire) != scope_epoch)''',
+     '''    (void)scope_epoch;
+    const uint32_t late_epoch = s_ref_requested_epoch.load(std::memory_order_acquire);
+    Lock lk(s_mtx);
+    if (s_ref_requested_epoch.load(std::memory_order_acquire) != late_epoch)''',
+     'CURVE_BOUNDARY_DURING_EVALUATION_RECORDS_NOTHING', 1),
     ('scalar-hp-age-discarded', 'scalar_snapshot_helpers',
      'return mqtt_publish_gate_step(state, hp.recent, s_connected.load());',
      'return mqtt_publish_gate_step(state, true, s_connected.load());',
