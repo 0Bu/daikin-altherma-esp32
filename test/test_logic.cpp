@@ -2177,12 +2177,12 @@ static void test_config_transaction() {
         yielded.led      = true;
         yielded.led_gpio = 44;
         Config req       = live;
-        req.wifi_ssid    = "after-reset";
+        req.wifi_ssid    = "new-net";
         CHECK(config_save_transaction(live, req, false, store, yielded).result ==
               ConfigSaveResult::Saved);
         CHECK(config_tx_durable_service(store).led_gpio == 44);
         CHECK(config_tx_durable_service(store).btn_gpio == 41);
-        CHECK(live.led_gpio == -1 && live.wifi_ssid == "after-reset");
+        CHECK(live.led_gpio == -1 && live.wifi_ssid == "new-net");
         config_yield_forget_restated(yielded, req);
         CHECK(yielded.led && yielded.led_gpio == 44); // -1 is not a re-statement
         // Without the record the same save stores the RAM view.

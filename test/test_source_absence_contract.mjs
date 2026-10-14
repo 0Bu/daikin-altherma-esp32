@@ -610,7 +610,7 @@ assert.ok(configSaveStart >= 0 && configSaveEnd > configSaveStart && serviceSeri
 assert.match(configSaveBody,
   /static_assert\(std::is_nothrow_move_assignable_v<Config>/,
   "the only post-NVS Config publication operation must be statically non-throwing");
-assert.match(configSource, /config_save_transaction\(g_cfg, requested, owns_link, store\)/,
+assert.match(configSource, /config_save_transaction\(g_cfg, requested, owns_link, store, s_load_yield\)/,
   "save_whole must run the transaction whose staging order is pinned above");
 
 const cleanupStart = mqtt.indexOf("static RetainedCleanupCycle service_requested_topic_cleanup(");

@@ -61,8 +61,10 @@ const localPins = at(save,
   reconcile);
 assert.ok(localPins > reconcile,
   "a service save must refuse a reconciled link that collides with its local pins");
+// The stored-pin patch for a load-time link yield touches only the staged blob, before its length
+// check, serialization and every write.
 const serviceStage = at(save,
-  /if \(!owns_link\) \{\s*const ConfigBlob b = config_blob_from\(c\);\s*if \(!config_blob_strings_fit\(b\)\)/,
+  /if \(!owns_link\) \{\s*ConfigBlob b = config_blob_from\(c\);\s*config_blob_keep_yielded_pins\(b, yielded\);\s*if \(!config_blob_strings_fit\(b\)\)/,
   localPins);
 const linkStage = at(save, /link_blob_serialize\(/, serviceStage);
 const published = at(save, /Config\s+published\s*=\s*std::move\(c\);/, linkStage);
@@ -117,7 +119,7 @@ const saveWholeEnd = config.indexOf("\nbool config_save(const Config& c)", saveW
 assert.ok(saveWholeStart >= 0 && saveWholeEnd > saveWholeStart, "the one whole-struct save must remain identifiable");
 const saveWhole = config.slice(saveWholeStart, saveWholeEnd);
 const lock = at(saveWhole, /Lock\s+lk\(g_mtx\);/);
-const run = saveWhole.indexOf("config_save_transaction(g_cfg, requested, owns_link, store)");
+const run = saveWhole.indexOf("config_save_transaction(g_cfg, requested, owns_link, store, s_load_yield)");
 assert.ok(lock >= 0 && run > lock,
   "the transaction must run on the live config under the mutex that detection commits under");
 assert.doesNotMatch(saveWhole, /g_cfg\s*=|runtime_revision|nvs_set_blob\(/,
