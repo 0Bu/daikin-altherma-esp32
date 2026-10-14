@@ -1,4 +1,4 @@
-// translation-source: eb1bf7194d5b04fde1d4c42c3d33a86f36a932dbc9b646550c376c791cb1056b
+// translation-source: 1193f01400aed83045a3e10a1b4f35886a2c1805d9922e2301a21ba3fb27a905
 I18N.fi = localeValues([
   /* sys.nodata */ "Ei tietoja",
   /* sys.unreachable */ "Ei tavoiteta",
@@ -787,7 +787,7 @@ I18N.fi = localeValues([
   /* board.led_gpio_wiping */ "Jatkuva nopean vilkun jälkeen — tehdasasetusten palautus/tietojen poisto; älä katkaise virtaa.",
   /* board.ledinv */ "Aktiivinen LOW (LED palaa nastan ollessa LOW)",
   /* board.btninv */ "Aktiivinen LOW (painike kytkee nastan GND:hen)",
-  /* board.hint */ "Tehdasasetusten palautus: pidä 5 s. Poistaa pysyvästi Wi-Fi/kaikki asetukset, historian/trendit, tilojen kestoajat ja raakaydindumpin. Wi-Fi-määritysportaali avautuu vain, jos kaikki tiedot saadaan poistettua kokonaan ja onnistuneesti. Muuten vapauta ja pidä uudelleen 5 s. Valitse Ei mitään ilman painiketta.",
+  /* board.hint */ "Tehdasasetusten palautus: pidä 5 s. Poistaa pysyvästi Wi-Fi/kaikki asetukset tätä laitteistovalintaa lukuun ottamatta, historian/trendit, tilojen kestoajat ja raakaydindumpin. Wi-Fi-määritysportaali avautuu vain, jos kaikki tiedot saadaan poistettua kokonaan ja onnistuneesti. Muuten vapauta ja pidä uudelleen 5 s. Valitse Ei mitään ilman painiketta.",
   /* card.hardware */ "Laitteisto",
   /* card.hw_off */ "Ei mitään",
   /* card.hw_led */ (pin, kind) => `GPIO${pin} · ${kind}`,

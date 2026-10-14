@@ -1,4 +1,4 @@
-// translation-source: eb1bf7194d5b04fde1d4c42c3d33a86f36a932dbc9b646550c376c791cb1056b
+// translation-source: 1193f01400aed83045a3e10a1b4f35886a2c1805d9922e2301a21ba3fb27a905
 I18N.es = localeValues([
   /* sys.nodata */ "Sin datos",
   /* sys.unreachable */ "No accesible",
@@ -787,7 +787,7 @@ I18N.es = localeValues([
   /* board.led_gpio_wiping */ "Fijo tras parpadeo muy rápido — restablecimiento/borrado en curso; no desconectes la alimentación.",
   /* board.ledinv */ "Activo en nivel bajo (el LED se enciende cuando el pin está en LOW)",
   /* board.btninv */ "Activo en nivel bajo (el botón conecta el pin a GND)",
-  /* board.hint */ "Restablecimiento de fábrica: mantén pulsado 5 s. Borra permanentemente Wi-Fi/todos los ajustes, historial/tendencias, duraciones de estado y volcado de memoria sin procesar. El portal de configuración (Wi-Fi) solo se abre tras un borrado completo y correcto. Si no, suelta y mantén otros 5 s. Elige «Ninguno» sin botón.",
+  /* board.hint */ "Restablecimiento de fábrica: mantén pulsado 5 s. Borra permanentemente Wi-Fi/todos los ajustes salvo esta selección de hardware, historial/tendencias, duraciones de estado y volcado de memoria sin procesar. El portal de configuración (Wi-Fi) solo se abre tras un borrado completo y correcto. Si no, suelta y mantén otros 5 s. Elige «Ninguno» sin botón.",
   /* card.hardware */ "Hardware",
   /* card.hw_off */ "Ninguno",
   /* card.hw_led */ (pin, kind) => `GPIO${pin} · ${kind}`,

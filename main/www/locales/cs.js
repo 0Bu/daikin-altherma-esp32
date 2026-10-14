@@ -1,4 +1,4 @@
-// translation-source: eb1bf7194d5b04fde1d4c42c3d33a86f36a932dbc9b646550c376c791cb1056b
+// translation-source: 1193f01400aed83045a3e10a1b4f35886a2c1805d9922e2301a21ba3fb27a905
 I18N.cs = localeValues([
   /* sys.nodata */ "Žádná data",
   /* sys.unreachable */ "Nedostupné",
@@ -787,7 +787,7 @@ I18N.cs = localeValues([
   /* board.led_gpio_wiping */ "Po rychlém blikání svítí — reset/mazání dat; neodpojujte napájení.",
   /* board.ledinv */ "Aktivní v nízké úrovni (LED svítí, když je pin buzen na LOW)",
   /* board.btninv */ "Aktivní v nízké úrovni (tlačítko spojí pin s GND)",
-  /* board.hint */ "Tovární reset: podržte 5 s. Trvale smaže Wi-Fi/všechna nastavení, historii/trendy, délky stavů a nezpracovaný výpis po pádu. Konfigurační portál (Wi-Fi) se otevře jen po úplném a úspěšném smazání. Jinak uvolněte a znovu podržte 5 s. Bez tlačítka vyberte „Žádná“.",
+  /* board.hint */ "Tovární reset: podržte 5 s. Trvale smaže Wi-Fi/všechna nastavení kromě tohoto výběru hardwaru, historii/trendy, délky stavů a nezpracovaný výpis po pádu. Konfigurační portál (Wi-Fi) se otevře jen po úplném a úspěšném smazání. Jinak uvolněte a znovu podržte 5 s. Bez tlačítka vyberte „Žádná“.",
   /* card.hardware */ "Vybavení",
   /* card.hw_off */ "Žádné",
   /* card.hw_led */ (pin, kind) => `GPIO${pin} · ${kind}`,

@@ -1,4 +1,4 @@
-// translation-source: eb1bf7194d5b04fde1d4c42c3d33a86f36a932dbc9b646550c376c791cb1056b
+// translation-source: 1193f01400aed83045a3e10a1b4f35886a2c1805d9922e2301a21ba3fb27a905
 I18N.it = localeValues([
   /* sys.nodata */ "Nessun dato",
   /* sys.unreachable */ "Non raggiungibile",
@@ -787,7 +787,7 @@ I18N.it = localeValues([
   /* board.led_gpio_wiping */ "Fisso dopo un lampeggio rapido — ripristino/cancellazione in corso; non scollegare l'alimentazione.",
   /* board.ledinv */ "Attivo basso (il LED si accende quando il pin è portato a LOW)",
   /* board.btninv */ "Attivo basso (il pulsante collega il pin a GND)",
-  /* board.hint */ "Ripristino di fabbrica: tenere premuto 5 s. Cancella definitivamente Wi-Fi/tutte le impostazioni, cronologia/tendenze, durate degli stati e core dump non elaborato. Il portale di configurazione (Wi-Fi) si apre solo dopo una cancellazione completa e riuscita. Altrimenti rilasciare e premere altri 5 s. Scegliere “Nessuno” senza pulsante.",
+  /* board.hint */ "Ripristino di fabbrica: tenere premuto 5 s. Cancella definitivamente Wi-Fi/tutte le impostazioni tranne questa selezione hardware, cronologia/tendenze, durate degli stati e core dump non elaborato. Il portale di configurazione (Wi-Fi) si apre solo dopo una cancellazione completa e riuscita. Altrimenti rilasciare e premere altri 5 s. Scegliere “Nessuno” senza pulsante.",
   /* card.hardware */ "Hardware",
   /* card.hw_off */ "Nessuno",
   /* card.hw_led */ (pin, kind) => `GPIO${pin} · ${kind}`,

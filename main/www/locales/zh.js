@@ -1,4 +1,4 @@
-// translation-source: eb1bf7194d5b04fde1d4c42c3d33a86f36a932dbc9b646550c376c791cb1056b
+// translation-source: 1193f01400aed83045a3e10a1b4f35886a2c1805d9922e2301a21ba3fb27a905
 I18N.zh = localeValues([
   /* sys.nodata */ "无数据",
   /* sys.unreachable */ "无法访问",
@@ -787,7 +787,7 @@ I18N.zh = localeValues([
   /* board.led_gpio_wiping */ "极速闪烁后常亮 — 正在恢复出厂设置/清除数据；请勿断电。",
   /* board.ledinv */ "低电平有效（引脚为 LOW 时 LED 点亮）",
   /* board.btninv */ "低电平有效（按钮将引脚接到 GND）",
-  /* board.hint */ "恢复出厂设置：按住 5 秒，永久清除 Wi-Fi/全部设置、历史/趋势、状态持续时间和原始核心转储。全部清除成功后才打开配置门户；否则松开后再按 5 秒重试。未接按钮请选择“无”。",
+  /* board.hint */ "恢复出厂设置：按住 5 秒，永久清除 Wi-Fi/全部设置（保留此硬件选择）、历史/趋势、状态持续时间和原始核心转储。全部清除成功后才打开配置门户；否则松开后再按 5 秒重试。未接按钮请选择“无”。",
   /* card.hardware */ "硬件",
   /* card.hw_off */ "无",
   /* card.hw_led */ (pin, kind) => `GPIO${pin} · ${kind}`,

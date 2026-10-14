@@ -1,4 +1,4 @@
-// translation-source: eb1bf7194d5b04fde1d4c42c3d33a86f36a932dbc9b646550c376c791cb1056b
+// translation-source: 1193f01400aed83045a3e10a1b4f35886a2c1805d9922e2301a21ba3fb27a905
 I18N.nb = localeValues([
   /* sys.nodata */ "Ingen data",
   /* sys.unreachable */ "Ikke tilgjengelig",
@@ -787,7 +787,7 @@ I18N.nb = localeValues([
   /* board.led_gpio_wiping */ "Fast lys etter rask blinking — fabrikktilbakestilling/datasletting; ikke koble fra strømmen.",
   /* board.ledinv */ "Aktiv ved LOW — LED lyser ved lavt pinnenivå",
   /* board.btninv */ "Aktiv ved LOW — knappen trekker pinnen til GND",
-  /* board.hint */ "Fabrikktilbakestilling: hold 5 s. Sletter Wi-Fi/alle innstillinger, historikk/trender, tilstandsvarighet og rå kjernedump permanent. Oppsettportalen (Wi-Fi) åpnes bare etter fullført og vellykket sletting. Ellers slipp og hold igjen i 5 s. Velg «Ingen» uten knapp.",
+  /* board.hint */ "Fabrikktilbakestilling: hold 5 s. Sletter Wi-Fi/alle innstillinger unntatt dette maskinvarevalget, historikk/trender, tilstandsvarighet og rå kjernedump permanent. Oppsettportalen (Wi-Fi) åpnes bare etter fullført og vellykket sletting. Ellers slipp og hold igjen i 5 s. Velg «Ingen» uten knapp.",
   /* card.hardware */ "Maskinvare",
   /* card.hw_off */ "Ingen",
   /* card.hw_led */ (pin, kind) => `GPIO${pin} · ${kind}`,

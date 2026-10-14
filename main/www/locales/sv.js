@@ -1,4 +1,4 @@
-// translation-source: eb1bf7194d5b04fde1d4c42c3d33a86f36a932dbc9b646550c376c791cb1056b
+// translation-source: 1193f01400aed83045a3e10a1b4f35886a2c1805d9922e2301a21ba3fb27a905
 I18N.sv = localeValues([
   /* sys.nodata */ "Inga data",
   /* sys.unreachable */ "Inte tillgänglig",
@@ -787,7 +787,7 @@ I18N.sv = localeValues([
   /* board.led_gpio_wiping */ "Fast sken efter snabb blinkning — fabriksåterställning/dataradering; koppla inte från strömmen.",
   /* board.ledinv */ "Aktiv vid LOW — LED lyser vid låg stiftnivå",
   /* board.btninv */ "Aktiv vid LOW — knappen drar stiftet till GND",
-  /* board.hint */ "Fabriksåterställning: håll 5 s. Raderar permanent Wi-Fi/alla inställningar, historik/trender, tillståndstider och rå kärndump. Konfigurationsportalen (Wi-Fi) öppnas bara efter fullständig och lyckad radering. Annars släpp och håll igen i 5 s. Välj «Ingen» utan knapp.",
+  /* board.hint */ "Fabriksåterställning: håll 5 s. Raderar permanent Wi-Fi/alla inställningar utom detta hårdvaruval, historik/trender, tillståndstider och rå kärndump. Konfigurationsportalen (Wi-Fi) öppnas bara efter fullständig och lyckad radering. Annars släpp och håll igen i 5 s. Välj «Ingen» utan knapp.",
   /* card.hardware */ "Maskinvara",
   /* card.hw_off */ "Ingen",
   /* card.hw_led */ (pin, kind) => `GPIO${pin} · ${kind}`,
