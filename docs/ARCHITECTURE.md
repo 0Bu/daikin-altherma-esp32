@@ -394,7 +394,7 @@ While it holds the NVS write latch, every other restart (rebooting saves, Ethern
 install and health gate, heap watchdog, WiFi rollback) refuses and logs once, and no OTA operation
 starts; an OTA image already selected boots on the next reboot (no further OTA runs in that boot),
 and the health gate keeps retrying its rollback restart. A held save reboot is not retried if the
-reset fails. The refusal is checked immediately before each restart, not under the latch's lock.
+reset fails.
 
 <a id="web-ui-config-flow"></a>
 ## Configuration ownership

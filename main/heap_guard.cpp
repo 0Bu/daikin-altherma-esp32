@@ -230,8 +230,11 @@ void heap_guard_sample() {
                 return;
             }
             // A factory reset is erasing stored data: hold the restart, and touch nothing — no
-            // breadcrumb write, no marker (heap_guard.hpp). Asked BEFORE the write, so a held
-            // restart leaves no count behind for a restart that never happened.
+            // breadcrumb write, no marker (heap_guard.hpp). Asked BEFORE the write, so a reset that
+            // already latched leaves no count behind. One that latches during the drain below
+            // finds the count already written: a completed reset erases it with everything else,
+            // and a failed one leaves it one step high for the next crash boot — the safe
+            // direction (safe mode a restart sooner), never a missed escalation.
             if (nvs_restart_held_by_factory_reset("heap")) return;
             {
                 // Flush the flap count BEFORE the restart line: this is the last chance it has to

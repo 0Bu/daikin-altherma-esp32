@@ -26,6 +26,10 @@ static SemaphoreHandle_t g_mtx = nullptr;   // guards g_cfg; created in config_l
 // Rejected or ReadError); cleared by the first explicit service save that lands. Atomic rather than
 // under g_mtx: the automatic writers ask it before they take any config snapshot.
 static std::atomic<bool> s_cfg_blob_unreadable{false};
+// The indicator/button pins config_load yielded to a fallback X10A link this boot (RAM only), so the
+// factory seed carries the stored statement (config_unyield_board_hardware). Cleared under g_mtx by
+// the first service save that lands, which rewrites the stored statement from RAM.
+static LocalPinsRepair s_load_yield;
 
 // The board-local hardware as this BUILD was configured — the first-boot / recovery values for the
 // indicator + recovery button, exactly as CONFIG_DAIKIN_RX_PIN is for the X10A link. Kconfig is the
@@ -461,6 +465,7 @@ void config_load() {
     // only; the stored pins stay for repair), exactly as ENV III does just below.
     {
         const LocalPinsRepair yielded = config_yield_local_pins_to_link(c);
+        s_load_yield                  = yielded; // before publish(): no task runs yet
         if (yielded.led)
             diag_printf(
                 "config: %s disabled — GPIO taken by the fallback X10A link (rx=%d tx=%d)\n",
@@ -520,6 +525,7 @@ static ConfigSaveResult save_whole(const Config& requested, bool owns_link) {
         out = config_save_transaction(g_cfg, requested, owns_link, store);
         live_rx = g_cfg.rx_pin;
         live_tx = g_cfg.tx_pin;
+        if (!owns_link && out.result == ConfigSaveResult::Saved) s_load_yield = LocalPinsRepair{};
     }
     // A service save that landed wrote a fresh "cfg" blob, so a stored blob this boot could not use
     // has now been replaced by the owner's explicit choice and the automatic writers may write
@@ -572,8 +578,9 @@ bool config_stored_blob_unreadable() {
 //     (seed_without_blob, the Config member defaults, HomeHub discovery pending), so a reset device
 //     is indistinguishable from a new one apart from the carried statement;
 //   * only the board hardware statement is carried (logic/config_model.hpp,
-//     config_carry_board_hardware), copied out under the mutex as POD — nothing allocates while the
-//     config mutex is held;
+//     config_carry_board_hardware), as stored rather than as this boot's link fallback yielded it
+//     (config_unyield_board_hardware), copied out under the mutex as POD — nothing allocates while
+//     the config mutex is held;
 //   * the Config and its blob image live on the heap, not on the caller's stack: the caller is the
 //     recovery-button task, whose stack is a few KiB, and each of the two is a sizeable part of it.
 // Every allocation failure answers false; nothing here throws to the caller.
@@ -582,6 +589,7 @@ bool config_factory_seed_blob(std::vector<uint8_t>& out) {
     {
         Lock lk(g_mtx);
         board = config_board_hardware(g_cfg);
+        config_unyield_board_hardware(board, s_load_yield);
     }
     try {
         // A failed allocation throws std::bad_alloc into the catch below, like every other one

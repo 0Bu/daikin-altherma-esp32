@@ -95,7 +95,7 @@ when NVS is preserved. Confirm signature/build identity and recovery state after
 | Ordinary separate `flash_args` | Leaves `nvs@0x9000` untouched; verify the exact plan before use |
 | Browser **Erase** | Deliberate whole-chip factory reset |
 | Published `-merged.bin` at `0x0` | Manual factory-reset image; gap padding overwrites NVS |
-| Recovery button held 5 seconds | Erases configured namespace, WiFi-driver credentials, RAM history/dwell, flash journal, raw dump and MQTT retirement record, keeping the stated board hardware; failure reports incomplete reset |
+| Recovery button held 5 seconds | Erases all stored data except the stated board hardware ([list](BOARDS.md#recovery-button)); failure reports incomplete reset |
 
 For an explicitly requested manual factory-reset flash of a verified official merged image:
 

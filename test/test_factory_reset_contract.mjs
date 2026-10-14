@@ -344,6 +344,14 @@ assert.match(config, /config_commit_detected_link\([\s\S]*?Lock lk\(g_mtx\)[\s\S
 assert.match(code("main/logic/config_transaction.hpp"),
   /config_commit_detected_link_transaction\([\s\S]*?live\.runtime_revision != expected_revision[\s\S]*?store\.write_blob\(CONFIG_KEY_LINK/,
   "the detection link write must be a revision-checked config transaction");
+// The seed carries the STORED board statement: the load path's link yield is RAM-only, so the pins
+// it disabled are restored into the seed until a service save rewrites the stored statement.
+assert.match(config, /s_load_yield\s*=\s*yielded;/,
+  "config_load must remember which indicator/button pins the link fallback yielded");
+assert.match(config, /bool config_factory_seed_blob\([\s\S]*?Lock lk\(g_mtx\);\s*board = config_board_hardware\(g_cfg\);\s*config_unyield_board_hardware\(board, s_load_yield\);/,
+  "the factory seed must carry the stored pins, not this boot's RAM-only yield");
+assert.match(config, /config_save_transaction\([\s\S]*?if \(!owns_link && out\.result == ConfigSaveResult::Saved\) s_load_yield = LocalPinsRepair\{\};\s*\}/,
+  "a landed service save rewrites the stored statement, so it must forget the yield under the lock");
 const httpConfig = code("main/http_config.cpp");
 assert.match(httpConfig, /reset_checkup && c\.profile != "auto"[\s\S]*?history_x10a_identity\([\s\S]*?if \(c\.x10a_identity_fp != 0\)[\s\S]*?history_reset_on_detect\(c\.x10a_identity_fp\)/,
   "manual concrete-profile or wiring-only updates must install a nonzero history scope");

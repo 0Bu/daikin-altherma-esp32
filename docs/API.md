@@ -344,7 +344,7 @@ the link blob; it does not migrate or write the service blob.
 | `cfg` | Credentials and WiFi backup/rollback flags; MQTT/base, syslog, NTP, board identity, OTA channel, language, HomeHub/discovery latch, room/circulation mappings, weather, ENV III, diagnostics consent/generation |
 | `link` | Complete RX/TX/protocol/observation-identity cache; failed write preserves the previous complete entry. A rejected entry is reported in `/diag`; only detection (cached pair, build default, their swaps) or `/set_hp` rewrites it |
 | Legacy per-key credentials/services, `rx_pin`, `tx_pin`, `proto`, `board_set` | Read-only fallback inputs on devices upgraded from the per-key era; never written, removed only by a factory reset |
-| `boot_fails`, `heap_rst` | Independent crash-loop and bounded heap-restart counters; a clean boot (non-crash, not the watchdog's own restart) clears both, ten minutes of uptime clear `boot_fails` |
+| `boot_fails`, `heap_rst` | Independent crash-loop and bounded heap-restart counters; which boot or uptime clears which is in [ARCHITECTURE.md](ARCHITECTURE.md#boot-loop-safe-mode-config-recovery) |
 
 The current service layout is v19. Retired v9 actuation and v14 controller-mode bytes keep their
 positions, are written zero and ignored. Pre-v18 HomeHub configurations migrate as already searched
@@ -355,9 +355,8 @@ byte/version layouts.
 A failed route-owned save returns `500 {ok:false,error:"config write failed"}` with no reboot/live
 apply. Unrelated link-cache maintenance failure is logged without rejecting an already committed
 service blob; an X10A save requires its atomic link write. Never move/resize `nvs@0x9000`.
-Recovery-button factory reset also clears driver credentials, RAM history/dwell, the flash journal,
-the raw dump and the MQTT retirement record, then rewrites only the stated board hardware (preset,
-indicator, button) as a fresh `cfg` blob, best effort. Any erase failure reports an incomplete
+The [recovery-button factory reset](BOARDS.md#recovery-button) leaves only the stated board
+hardware, rewritten as a fresh `cfg` blob, best effort. Any erase failure reports an incomplete
 reset rather than pretending success; while the reset holds the NVS latch, saves fail and every
 other restart is refused.
 
@@ -401,16 +400,15 @@ commit; live socket ownership remains with its task. X10A remains independent.
 `btn_active_low`, `env3_enabled`, `env3_sda`, `env3_scl`. A stable known preset id is required when
 provided; old clients can use exact-match migration. LED type is 0 (plain) or 1 (WS2812), -1 GPIO
 means absent; values below -1 are rejected, and a stored one loads as -1. Pin claims must not
-collide with X10A, the other onboard part or ENV III. If detection commits an X10A link onto a
-claimed pin while the save is in flight, nothing is saved and the route answers 409.
-A board identity statement can save with no reboot; changing task-owned pins/accessory reboots.
+collide with X10A, the other onboard part or ENV III. A board identity statement can save with no reboot; changing task-owned pins/accessory reboots.
 Switching away from M5Stack retires ENV III in the same atomic save.
 
 `POST /set_env3` is the compatibility route (`enabled`, `sda`, `scl`, all optional). Both board routes
 share the same preflight: enabling new pins probes SHT30/QMP6988 (422 if absent, 503 if busy), enabling
 running pins needs fresh evidence (422 if unreachable), moving an active bus is 409 `env3_disable_first`.
 Disabling needs no hardware proof. Responses include machine codes; only successful real changes reboot.
-Both routes answer a save that a concurrently detected X10A link would collide with as 409.
+If detection commits an X10A link onto a claimed pin while either save is in flight, nothing is
+saved and the route answers 409 without a machine code.
 
 ### Plant diagnostics and sources
 

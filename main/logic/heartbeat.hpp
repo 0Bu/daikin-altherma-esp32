@@ -338,7 +338,7 @@ inline const HeartbeatSensor HEARTBEAT_SENSORS[] = {
     // for both, which is exactly the ambiguity this resolves.
     //
     // `measurement`, NOT `total_increasing`: the value is the count this BOOT inherited and it
-    // returns to 0 on the next healthy boot, so a monotonic state class would make HA's long-term
+    // returns to 0 on the next clean boot, so a monotonic state class would make HA's long-term
     // statistics read every recovery as a counter reset and every ladder as an unrelated new total.
     {"sensor", "heap_restarts", "Heap Watchdog Restarts", "heap_restarts", "", "", "measurement"},
     {"sensor", "uptime", "Uptime", "uptime_s", "s", "duration", "measurement"},

@@ -497,10 +497,13 @@ inline bool board_hw_valid(const Config& c, std::string& reason, int max_gpio = 
     return true;
 }
 
-// Which board-local pins a load-path repair changed, so config_load can name each one in /diag.
+// Which board-local pins a load-path repair changed, so config_load can name each one in /diag. The
+// link yield below also records the stored pin it disabled; the normalization leaves those at -1.
 struct LocalPinsRepair {
-    bool led = false;
-    bool btn = false;
+    bool led      = false;
+    bool btn      = false;
+    int  led_gpio = -1;
+    int  btn_gpio = -1;
 };
 
 // An older build accepted any negative indicator/button GPIO from a raw POST and persisted it;
@@ -545,10 +548,12 @@ inline LocalPinsRepair config_yield_local_pins_to_link(Config& c) {
     const ReservedPins link = config_link_pins(c);
     LocalPinsRepair    r;
     if (link.claims(c.led_gpio)) {
+        r.led_gpio = c.led_gpio;
         c.led_gpio = -1;
         r.led      = true;
     }
     if (link.claims(c.btn_gpio)) {
+        r.btn_gpio = c.btn_gpio;
         c.btn_gpio = -1;
         r.btn      = true;
     }
@@ -646,6 +651,17 @@ inline void config_carry_board_hardware(Config& fresh, const BoardHardwareStatem
 
 inline void config_carry_board_hardware(Config& fresh, const Config& current) {
     config_carry_board_hardware(fresh, config_board_hardware(current));
+}
+
+// A factory reset carries the board statement as STORED, not as this boot's link fallback repaired
+// it. config_yield_local_pins_to_link is RAM-only and made for a link the reset erases; carrying its
+// -1 would turn that repair into the owner's lasting choice, and the indicator or button would stay
+// off after the link moves elsewhere (a fresh boot whose default link still collides simply yields
+// again). A part re-stated since the yield (no longer -1) keeps its live value; config.cpp forgets
+// the yield once a service save has rewritten the stored statement from RAM.
+inline void config_unyield_board_hardware(BoardHardwareStatement& s, const LocalPinsRepair& yielded) {
+    if (yielded.led && s.led_gpio == -1) s.led_gpio = yielded.led_gpio;
+    if (yielded.btn && s.btn_gpio == -1) s.btn_gpio = yielded.btn_gpio;
 }
 
 // Validate a config coming from the web UI. Returns false + a reason on the first problem. Pass the

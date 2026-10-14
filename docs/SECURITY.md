@@ -174,17 +174,16 @@ artifact identity, injection, reboot, API and rendered UI evidence must be repor
 
 Crash-loop and heap-watchdog safe mode retain network/HTTP recovery while omitting optional plant
 workers. The guard runs after NVS initialization and its static lock, before Netif, OTA and config.
-Four crash boots latch recovery; ten minutes of uptime clear the crash count only outside latched
-safe mode. Heap-watchdog restarts are counted separately and neither count is cleared by the
-other's resets; only a clean boot (any non-crash reset other than the watchdog's own) clears both,
-and a clean boot never comes up in heap safe mode.
+Four crash boots latch recovery, and heap-watchdog restarts are bounded by their own count;
+[ARCHITECTURE.md](ARCHITECTURE.md#boot-loop-safe-mode-config-recovery) owns how a boot is
+classified and what clears each count.
 NVS initialization errors never erase the partition automatically. Failed initialization disables
 WiFi-driver NVS before driver startup; STA/AP credentials use RAM storage every boot.
 Mandatory-startup or persistence failures remain outside the recovery guarantee, as does an unsigned
 image failure before `app_main`. `safe_mode_cause` distinguishes heap from crash loop.
 Recovery is best effort and adds no endpoint or privilege. Factory reset is destructive and must
-complete all configured data erasures, including the MQTT retirement record, before declaring
-success; it keeps only the board hardware statement, and no other restart runs while it erases.
+complete every erasure [BOARDS.md](BOARDS.md#recovery-button) lists before declaring success; no
+other restart runs while it erases.
 
 ## Signing key lifecycle
 

@@ -2739,6 +2739,28 @@ static void test_config_link_fallback_yield() {
     // The identity stays: a disabled onboard part does not change which board this is.
     CHECK(c.board_user_set && c.board_preset_id == BoardPresetId::Custom);
     CHECK(board_identity_valid(c, why));
+    // The yield remembers the stored pin, and a factory reset carries THAT, not this boot's RAM-only
+    // repair: the reset erases the link the yield was made for, and carrying -1 would leave the
+    // indicator off for good once the owner moves the link elsewhere.
+    CHECK(led.led_gpio == 44 && led.btn_gpio == -1);
+    {
+        BoardHardwareStatement s = config_board_hardware(c);
+        CHECK(s.user_set && s.led_gpio == -1); // what the live config alone would carry
+        config_unyield_board_hardware(s, led);
+        CHECK(s.led_gpio == 44 && s.btn_gpio == -1);
+        Config fresh;
+        config_carry_board_hardware(fresh, s);
+        CHECK(fresh.board_user_set && fresh.led_gpio == 44);
+        // A part re-stated since the yield keeps its live value...
+        BoardHardwareStatement restated = config_board_hardware(c);
+        restated.led_gpio               = 5;
+        config_unyield_board_hardware(restated, led);
+        CHECK(restated.led_gpio == 5);
+        // ...and a part the yield did not touch is never rewritten.
+        BoardHardwareStatement untouched = config_board_hardware(c);
+        config_unyield_board_hardware(untouched, LocalPinsRepair{});
+        CHECK(untouched.led_gpio == -1 && untouched.btn_gpio == -1);
+    }
 
     // The button on either wire yields the same way; an indicator elsewhere stays.
     Config b;
@@ -2748,6 +2770,12 @@ static void test_config_link_fallback_yield() {
     b.tx_pin                  = 43;
     const LocalPinsRepair btn = config_yield_local_pins_to_link(b);
     CHECK(!btn.led && btn.btn && b.btn_gpio == -1 && b.led_gpio == 21);
+    CHECK(btn.btn_gpio == 43 && btn.led_gpio == -1);
+    {
+        BoardHardwareStatement s = config_board_hardware(b);
+        config_unyield_board_hardware(s, btn);
+        CHECK(s.btn_gpio == 43 && s.led_gpio == 21);
+    }
     CHECK(board_hw_valid(b, why, 48, false));
     Config both;
     both.led_gpio             = 44;

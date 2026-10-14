@@ -114,12 +114,13 @@ void factory_reset() {
     // Every required erase succeeded. Only now is the board-hardware seed written back — through
     // the one write the latch still allows, and never ahead of an erase that could still fail. Best
     // effort: without it the reset is still complete and private; the next boot merely starts with
-    // no indicator or button configured, which the user can restate in the setup portal.
+    // the build's default indicator and no button, which the user can restate in the Board hardware
+    // dialog once the device is back on WiFi (the setup portal accepts WiFi credentials only).
     const esp_err_t seed_e =
         have_seed ? nvs_set_blob_after_factory_reset(CONFIG_KEY_SERVICE, seed.data(), seed.size())
                   : ESP_FAIL;
     if (seed_e != ESP_OK)
-        diag_printf("button: board hardware not kept (%s) — set it again in the setup portal\n",
+        diag_printf("button: board hardware not kept (%s) — set it again under Board hardware\n",
                     have_seed ? esp_err_to_name(seed_e) : "seed unavailable");
     diag_printf("button: factory reset complete — rebooting into the setup portal\n");
     stack_watch_sample(StackWatch::Button);

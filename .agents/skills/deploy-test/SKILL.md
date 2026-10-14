@@ -136,8 +136,9 @@ OTA gate (`--confirm-bench bench --install-bench`), never through this skill.
    exercise ends. Across the soak, `uptime_s` must keep rising. At the end of the run,
    `.sys.mqtt_skipped` and `.sys.poll_skipped` (both start at 0 on every boot) must be 0, and so must
    `.sys.heap_restarts`. The latter counts heap-watchdog restarts that NVS carries until the next
-   clean boot (`main/logic/boot_guard.hpp`); the reset after a USB write is clean and clears it,
-   so a non-zero value during the run was produced by the new image. If a hardware negative control
+   clean boot (`main/logic/boot_guard.hpp`). The reset after a USB write is clean and clears it
+   when `.sys.reset_reason` right after the write is not a crash class (panic, watchdog,
+   brownout); only then was a non-zero value during the run produced by the new image. If a hardware negative control
    exists (the same check failing on the previous image), record it. A USB soak is not pressure or stress evidence; the bench gate provides that
    after the merge.
 
