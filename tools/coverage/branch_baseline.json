@@ -491,27 +491,27 @@
       "hosted_confirmation": "The Ubuntu 26.04 x86_64 GCC 15 counts of the three changed headers were measured locally under emulation and equal the aarch64 GCC 15 counts. Unchanged headers keep their hosted counts; authoritative GitHub CI confirmation of the final merge head remains pending.",
       "scope": "Plant-diagnosis fixes (DHW settling and scope, run censoring, class population, consent generation, refrigerant high-side selection) raise the outcome inventories and ratios of the three changed headers on all four profiles; all other inventories and historical floors are retained.",
       "sources": {
-        "main/logic/checkup.hpp": "16d860f59f0d5e96f58dee3c351983663e6d123babc1ca75643fbed4f3371168",
+        "main/logic/checkup.hpp": "1f9cdb65c09ad674162047f6c14cd98aef4129a81950c8ec9384eccbb8fc8573",
         "main/logic/config_model.hpp": "fa10bbe779ace82388a8ed7f512ba83ae72d7d372c94a599d6adc1b357a0d446",
-        "main/logic/refrigerant_service.hpp": "2ef2cd4bfe33bc2a36b18a7b83ab9bdfa5b2620150f37fbc89339b5a97cd4383"
+        "main/logic/refrigerant_service.hpp": "7d32469e63f9c7b7dbf234772ff2bb5714719f2730d279c2ecaf65d331ba7558"
       },
-      "test_source_sha256": "54673accaae4d1423af5c548c0959ad5fb4c81ce22c816b63744ce2140912c13",
+      "test_source_sha256": "583d9db2c58e0df6ebb3cf1938b887e889d1587049f4fb2fd3abd62f9293764d",
       "local_executable_lines": {
         "clang-17-darwin": [
-          9406,
-          9578
+          9408,
+          9580
         ],
         "gcc-13-linux-ubuntu24": [
-          9137,
-          9420
-        ],
-        "gcc-15-linux-ubuntu26": [
           9139,
           9422
         ],
+        "gcc-15-linux-ubuntu26": [
+          9141,
+          9424
+        ],
         "gcc-15-github-linux-ubuntu26": [
-          9137,
-          9422
+          9139,
+          9424
         ]
       }
     }
