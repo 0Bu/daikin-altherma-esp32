@@ -4,6 +4,8 @@
 #include <functional>
 #include <new>
 #include <stdexcept>
+#include <unistd.h>
+#include <fcntl.h>
 #include "http_handlers.hpp"
 #include "stack_watch.hpp"
 
@@ -14,6 +16,7 @@ inline size_t      largest       = 32768;
 inline unsigned    handler_calls = 0, status_calls = 0, values_calls = 0, stack_samples = 0;
 inline unsigned    status_generation = 7, values_generation = 19;
 inline int         failure = 0;
+inline bool        fail_nothrow = false;
 inline std::string status_prefix, status_suffix, values_prefix, values_suffix;
 [[noreturn]] void  fail(const char* reason) {
     std::fprintf(stderr, "FAIL %s: %s\n", oracle.c_str(), reason);
@@ -24,6 +27,15 @@ void check(bool value, const char* reason) {
 }
 esp_err_t handler(httpd_req_t* req, const char* name);
 } // namespace fixture
+
+void* operator new(size_t size, const std::nothrow_t&) noexcept {
+    if (fixture::fail_nothrow) return nullptr;
+    try {
+        return ::operator new(size);
+    } catch (...) {
+        return nullptr;
+    }
+}
 
 #include HTTP_COMMON_SOURCE
 #include HTTP_SERVER_SOURCE
@@ -37,12 +49,17 @@ asm(".globl _binary_mcp_html_gz_start\n"
 
 namespace fixture {
 void reset() {
+    for (auto& [fd, session] : sdk::sessions)
+        if (session.context && session.free_context) session.free_context(session.context);
+    sdk::sessions.clear();
+    sdk::fail_receive_override = false;
     ap = download = busy = false;
     largest              = 32768;
     handler_calls = status_calls = values_calls = stack_samples = 0;
     status_generation                                           = 7;
     values_generation                                           = 19;
     failure                                                     = 0;
+    fail_nothrow                                                = false;
     status_prefix.clear();
     status_suffix.clear();
     values_prefix.clear();
@@ -148,6 +165,33 @@ const char* tool_request(bool status) {
                ? R"({"jsonrpc":"2.0","id":"wire-id","method":"tools/call","params":{"name":"get_status","arguments":{}}})"
                : R"({"jsonrpc":"2.0","id":"wire-id","method":"tools/call","params":{"name":"get_hp_values","arguments":{}}})";
 }
+struct SocketPair {
+    int  fd[2]           = {-1, -1};
+    bool receiver_closed = false;
+    SocketPair() {
+        check(socketpair(AF_UNIX, SOCK_STREAM, 0, fd) == 0, "socketpair failed");
+        sdk::sessions[fd[1]] = {};
+        check(sdk::config.open_fn &&
+                  sdk::config.open_fn(reinterpret_cast<void*>(1), fd[1]) == ESP_OK,
+              "startup failed to install ingress protection");
+        check(sdk::sessions[fd[1]].receive != nullptr, "receive override absent");
+    }
+    ~SocketPair() {
+        auto it = sdk::sessions.find(fd[1]);
+        if (it != sdk::sessions.end()) {
+            if (it->second.context && it->second.free_context)
+                it->second.free_context(it->second.context);
+            sdk::sessions.erase(it);
+        }
+        if (fd[0] >= 0) close(fd[0]);
+        if (fd[1] >= 0 && !receiver_closed) close(fd[1]);
+    }
+    int byte() {
+        check(send(fd[0], "x", 1, 0) == 1, "fragment send failed");
+        char out = 0;
+        return sdk::sessions[fd[1]].receive(reinterpret_cast<void*>(1), fd[1], &out, 1, 0);
+    }
+};
 void reject_headers(const char* key, std::string value) {
     auto req         = request();
     req.headers[key] = std::move(value);
@@ -320,8 +364,8 @@ int main(int argc, char** argv) {
         missing.headers["Sec-Fetch-Site"] = "same-origin";
         check(dispatch(missing, "/status", HTTP_GET) == ESP_OK && missing.status == "403 Forbidden",
               "browser signals without Host accepted");
-        auto unreadable           = request();
-        unreadable.header_failure = true;
+        auto unreadable          = request();
+        unreadable.failed_header = "Host";
         check(dispatch(unreadable, "/status", HTTP_GET) == ESP_OK &&
                   unreadable.status == "403 Forbidden",
               "failed Host read accepted");
@@ -744,9 +788,9 @@ int main(int argc, char** argv) {
         auto req            = request(tool_request(true));
         req.headers["Host"] = "invalid.example";
         check(dispatch(req, "/mcp", HTTP_POST) == ESP_OK &&
-                  req.status == "503 Service Unavailable" && req.header_reads == 0 &&
+                  req.status == "503 Service Unavailable" && req.header_reads == 2 &&
                   status_calls == 0 && values_calls == 0,
-              "busy MCP parsed headers or fetched snapshots");
+              "busy MCP parsed non-framing headers or fetched snapshots");
         busy     = false;
         download = true;
         req      = request(tool_request(false));
@@ -760,6 +804,169 @@ int main(int argc, char** argv) {
         check(dispatch(req, "/mcp", HTTP_POST) == ESP_OK &&
                   req.status == "503 Service Unavailable" && status_calls == 0 && values_calls == 0,
               "low-heap MCP fetched snapshot");
+    });
+    run("incoming_progress_budget", [] {
+        start();
+        check(sdk::config.recv_wait_timeout == 5, "blocking receive ceiling changed");
+        SocketPair pair;
+        for (unsigned i = 0; i < 12; ++i) {
+            sdk::now = i * 2'500'000LL;
+            check(pair.byte() == 1, "healthy bounded fragment was refused");
+        }
+        sdk::now = 30'000'000LL;
+        check(pair.byte() == HTTPD_SOCK_ERR_FAIL, "progress reset the total ingress budget");
+    });
+    run("incoming_final_read_expiry", [] {
+        start();
+        SocketPair pair;
+        sdk::clock_step = 30'000'000LL;
+        check(pair.byte() == HTTPD_SOCK_ERR_FAIL, "last received byte bypassed total expiry");
+    });
+    run("incoming_keepalive_budget", [] {
+        start();
+        SocketPair pair;
+        check(pair.byte() == 1, "first request fragment failed");
+        auto req   = request();
+        req.sockfd = pair.fd[1];
+        check(dispatch(req, "/status", HTTP_GET) == ESP_OK, "request settlement failed");
+        auto* state = static_cast<daik::HttpIngressSession*>(sdk::sessions[pair.fd[1]].context);
+        check(state && !state->budget.active, "successful settlement retained old budget");
+        sdk::now = 90'000'000LL;
+        check(pair.byte() == 1, "idle keepalive time poisoned the next request");
+    });
+    run("incoming_admission_failure", [] {
+        start();
+        const auto server = reinterpret_cast<void*>(1);
+        check(sdk::config.open_fn(server, 999) == ESP_FAIL, "missing session admitted protection");
+        sdk::sessions[998]         = {};
+        sdk::fail_receive_override = true;
+        check(sdk::config.open_fn(server, 998) == ESP_FAIL, "failed override admitted a session");
+        check(sdk::sessions[998].context && sdk::sessions[998].free_context,
+              "failed open did not leave cleanup with the SDK owner");
+    });
+    run("incoming_socket_failures", [] {
+        start();
+        SocketPair pair;
+        const auto server  = reinterpret_cast<void*>(1);
+        const auto receive = sdk::sessions[pair.fd[1]].receive;
+        char       byte    = 0;
+        check(receive(server, pair.fd[1], nullptr, 1, 0) == HTTPD_SOCK_ERR_FAIL,
+              "null receive buffer admitted");
+        check(receive(server, 999, &byte, 1, 0) == HTTPD_SOCK_ERR_FAIL,
+              "unprotected receive admitted");
+        const timeval wait{0, 1000};
+        check(setsockopt(pair.fd[1], SOL_SOCKET, SO_RCVTIMEO, &wait, sizeof(wait)) == 0,
+              "host timeout setup failed");
+        check(receive(server, pair.fd[1], &byte, 1, 0) == HTTPD_SOCK_ERR_TIMEOUT,
+              "socket timeout lost SDK classification");
+        check(shutdown(pair.fd[0], SHUT_WR) == 0, "peer shutdown failed");
+        check(receive(server, pair.fd[1], &byte, 1, 0) == 0, "peer close did not propagate");
+        close(pair.fd[1]);
+        pair.receiver_closed = true;
+        check(receive(server, pair.fd[1], &byte, 1, 0) == HTTPD_SOCK_ERR_FAIL,
+              "hard socket error was treated as timeout");
+    });
+    run("incoming_body_framing", [] {
+        start();
+        char bytes[16] = {};
+        auto req       = request("{}\n");
+        req.fragment   = 1;
+        check(daik::http_read_body(&req, bytes, sizeof(bytes)) == 3 && std::string(bytes) == "{}\n",
+              "valid fragmented body failed");
+        req             = request("{}");
+        req.content_len = 8;
+        check(daik::http_read_body(&req, bytes, sizeof(bytes)) < 0,
+              "incomplete announced body was accepted");
+        req                = request("{}");
+        req.receive_script = {HTTPD_SOCK_ERR_TIMEOUT, 1, 1};
+        check(daik::http_read_body(&req, bytes, sizeof(bytes)) == 2,
+              "recoverable body timeout was refused");
+        req             = request("{}");
+        sdk::clock_step = 15'000'000LL;
+        check(daik::http_read_body(&req, bytes, sizeof(bytes)) < 0,
+              "final body read bypassed absolute body deadline");
+    });
+    run("incoming_wire_length_guard", [] {
+        start();
+        auto unreadable           = request();
+        unreadable.header_failure = true;
+        check(dispatch(unreadable, "/status", HTTP_GET) == ESP_FAIL &&
+                  unreadable.status == "400 Bad Request" && handler_calls == 0,
+              "unreadable framing reached handler or settlement");
+        for (const char* invalid :
+             {"4294967296", "4294967295", "", "-1", "1x", "999999999999999999999999999999999999"}) {
+            auto req                      = request();
+            req.headers["Content-Length"] = invalid;
+            check(dispatch(req, "/status", HTTP_GET) == ESP_FAIL &&
+                      req.status == "400 Bad Request" && handler_calls == 0 && req.recv_calls == 0,
+                  "narrowed or malformed wire length reached handler/purge");
+        }
+        for (const char* transfer : {"chunked", "identity", ""}) {
+            auto req                         = request();
+            req.headers["Transfer-Encoding"] = transfer;
+            check(dispatch(req, "/status", HTTP_GET) == ESP_FAIL &&
+                      req.status == "400 Bad Request" && handler_calls == 0,
+                  "unsupported body framing reached handler");
+        }
+        auto req                      = request();
+        req.headers["Content-Length"] = "0";
+        check(dispatch(req, "/status", HTTP_GET) == ESP_OK && handler_calls == 1,
+              "refused framing poisoned subsequent valid request");
+    });
+    run("incoming_early_framing", [] {
+        start();
+        for (const bool during_ota : {false, true}) {
+            busy = during_ota;
+            for (const bool transfer : {false, true}) {
+                for (const char* narrowed : {"4294967296", "4294967295"}) {
+                    auto req            = request();
+                    req.headers["Host"] = "invalid.example";
+                    if (transfer)
+                        req.headers["Transfer-Encoding"] = "chunked";
+                    else
+                        req.headers["Content-Length"] = narrowed;
+                    check(dispatch(req, "/mcp", HTTP_POST) == ESP_FAIL &&
+                              req.status == "400 Bad Request" && req.recv_calls == 0 &&
+                              status_calls == 0 && values_calls == 0,
+                          "early rejection kept unsupported framing alive");
+                }
+            }
+        }
+    });
+    run("incoming_close_owner", [] {
+        start();
+        const auto server = reinterpret_cast<void*>(1);
+        // Mirror IDF 6.1's session-delete then accept-exit sequence with real descriptors.
+        // The session callback must leave a failed opening descriptor valid until accept-exit.
+        for (const bool oom : {false, true}) {
+            int fd[2];
+            check(socketpair(AF_UNIX, SOCK_STREAM, 0, fd) == 0, "failure socketpair failed");
+            sdk::sessions[fd[1]]       = {};
+            fail_nothrow               = oom;
+            sdk::fail_receive_override = !oom;
+            check(sdk::config.open_fn(server, fd[1]) != ESP_OK, "failed admission accepted");
+            fail_nothrow               = false;
+            sdk::fail_receive_override = false;
+            if (sdk::config.close_fn)
+                sdk::config.close_fn(server, fd[1]);
+            else
+                close(fd[1]);
+            auto& session = sdk::sessions.at(fd[1]);
+            check(oom ? session.context == nullptr : session.context != nullptr,
+                  "allocation/override failure context ownership lost");
+            if (session.context && session.free_context) session.free_context(session.context);
+            sdk::sessions.erase(fd[1]);
+            check(fcntl(fd[1], F_GETFD) >= 0, "session delete closed failed opening descriptor");
+            check(close(fd[1]) == 0, "accept-exit lost sole close ownership");
+            close(fd[0]);
+        }
+        SocketPair pair;
+        check(sdk::config.close_fn != nullptr, "normal session missing close callback");
+        sdk::config.close_fn(server, pair.fd[1]);
+        pair.receiver_closed = true;
+        errno                = 0;
+        check(fcntl(pair.fd[1], F_GETFD) == -1 && errno == EBADF,
+              "admitted session callback failed to close descriptor");
     });
     check(cases != 0, "unknown requested oracle");
     std::printf("PASS total=%u\n", cases);

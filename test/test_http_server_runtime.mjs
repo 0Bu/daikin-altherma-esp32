@@ -62,7 +62,27 @@ const mutations = [
   { name: "registration-failure-silenced", file: "common", scenario: "startup_and_registration_failures",
     before: 'if (err != ESP_OK) diag_printf', after: 'if (false) diag_printf' },
   { name: "unread-body-settlement-bypass", file: "common", scenario: "unread_body_bound",
-    before: "return discard_unread_body(req) ? ESP_OK : ESP_FAIL;", after: "return ESP_OK;" },
+    before: "if (!discard_unread_body(req)) return ESP_FAIL;", after: "if (false) return ESP_FAIL;" },
+  { name: "incoming-budget-not-installed", file: "server", scenario: "incoming_progress_budget",
+    before: /cfg\.open_fn\s*= http_open_session;/, after: "cfg.open_fn = nullptr;" },
+  { name: "incoming-progress-resets-budget", file: "common", scenario: "incoming_progress_budget",
+    before: "if (!budget->admit(esp_timer_get_time()))", after: "budget->finish(); if (!budget->admit(esp_timer_get_time()))" },
+  { name: "incoming-final-read-expiry-bypass", file: "common", scenario: "incoming_final_read_expiry",
+    before: "if (budget->expired(esp_timer_get_time()))", after: "if (false)" },
+  { name: "incoming-keepalive-reset-missing", file: "common", scenario: "incoming_keepalive_budget",
+    before: "if (state) state->budget.finish();", after: "if (false) state->budget.finish();" },
+  { name: "incoming-override-failure-admitted", file: "common", scenario: "incoming_admission_failure",
+    before: "if (result == ESP_OK) budget->admitted = true;\n    return result;",
+    after: "budget->admitted = true; return ESP_OK;" },
+  { name: "incoming-framing-guard-bypass", file: "common", scenario: "incoming_wire_length_guard",
+    before: "if (!request_framing_allowed(req))", after: "if (false)" },
+  { name: "incoming-early-framing-bypass", file: "common", scenario: "incoming_early_framing",
+    before: "if (!request_framing_allowed(req))",
+    after: "if (!ota_busy() && trusted_lan_headers_allowed(req) && !request_framing_allowed(req))" },
+  { name: "incoming-failed-open-double-close", file: "common", scenario: "incoming_close_owner",
+    before: "if (state && state->admitted) close(socket);", after: "if (state) close(socket);" },
+  { name: "incoming-sdk-default-close", file: "server", scenario: "incoming_close_owner",
+    before: /cfg\.close_fn\s*= http_close_session;/, after: "cfg.close_fn = nullptr;" },
   { name: "oom-response-regression", file: "common", scenario: "exception_boundary",
     before: 'httpd_resp_sendstr(req, "out of memory")', after: 'httpd_resp_sendstr(req, "handler error")' },
   { name: "route-capacity-regression", file: "server", scenario: "registration_oracle",
@@ -137,7 +157,7 @@ function compile(tag, mutation) {
 try {
   const compiler = execute(cxx,["--version"]).stdout.trim();
   const baseline = execute(compile("production"),[]);
-  assert.match(baseline.stdout,/PASS total=21\b/);
+  assert.match(baseline.stdout,/PASS total=30\b/);
   const wireResponses = [];
   const decoder = new TextDecoder("utf-8", { fatal: true });
   for (const line of baseline.stdout.trim().split("\n")) {
@@ -206,7 +226,7 @@ try {
     console.log("sanitizer control: signed-overflow tripwire terminated before passing oracle");
   }
   for (const [key,file] of Object.entries(sourcePaths))
-    assert.equal(fs.readFileSync(path.join(root,file),"utf8"),sources[key],`production source changed while fixture ran: ${file}`);
+    assert.equal(sha(fs.readFileSync(path.join(root,file),"utf8")),sha(sources[key]),`production source changed while fixture ran: ${file}`);
   const sourceHashes = Object.fromEntries(Object.entries(sourcePaths).map(([key,file]) => [file,sha(sources[key])]));
   sourceHashes["dependencies.lock"] = sha(fs.readFileSync(path.join(root,"dependencies.lock")));
   sourceHashes["test/test_http_server_runtime.mjs"] = sha(fs.readFileSync(fileURLToPath(import.meta.url)));
@@ -228,6 +248,6 @@ try {
       "HTTP sockets, FreeRTOS scheduling, live device heap/stack, NVS, physical source truth, signing, OTA delivery and rendered browser behavior are separate evidence.",
     ] };
   if (process.env.HTTP_RUNTIME_RECORD) fs.writeFileSync(process.env.HTTP_RUNTIME_RECORD,JSON.stringify(record,null,2)+"\n");
-  console.log(`production HTTP server runtime: 21 cases, ${negativeControls.length} compiling negative controls; sanitizer=${record.sanitizers}`);
+  console.log(`production HTTP server runtime: 30 cases, ${negativeControls.length} compiling negative controls; sanitizer=${record.sanitizers}`);
   for (const [file,hash] of Object.entries(sourceHashes)) console.log(`input ${file} sha256=${hash}`);
 } finally { fs.rmSync(temporary,{ recursive: true, force: true }); }

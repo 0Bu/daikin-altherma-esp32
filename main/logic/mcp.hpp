@@ -109,34 +109,12 @@ public:
             if (c < 0x20) return false;
             if (c != '\\') {
                 if (c >= 0x80) {
-                    const char* const start    = p_ - 1;
-                    unsigned          cp       = 0;
-                    unsigned          minimum  = 0;
-                    size_t            trailing = 0;
-                    if (c >= 0xC2 && c <= 0xDF) {
-                        cp       = c & 0x1F;
-                        minimum  = 0x80;
-                        trailing = 1;
-                    } else if (c >= 0xE0 && c <= 0xEF) {
-                        cp       = c & 0x0F;
-                        minimum  = 0x800;
-                        trailing = 2;
-                    } else if (c >= 0xF0 && c <= 0xF4) {
-                        cp       = c & 0x07;
-                        minimum  = 0x10000;
-                        trailing = 3;
-                    } else {
-                        return false;
-                    }
-                    if (static_cast<size_t>(end_ - p_) < trailing) return false;
-                    for (size_t i = 0; i < trailing; ++i) {
-                        const unsigned char next = static_cast<unsigned char>(*p_++);
-                        if ((next & 0xC0) != 0x80) return false;
-                        cp = (cp << 6) | (next & 0x3F);
-                    }
-                    if (cp < minimum || cp > 0x10FFFF || (cp >= 0xD800 && cp <= 0xDFFF))
-                        return false;
-                    if (out) out->append(start, trailing + 1);
+                    const char* const start = p_ - 1;
+                    const size_t      count = utf8_sequence_length(
+                        std::string_view(start, static_cast<size_t>(end_ - start)));
+                    if (!count) return false;
+                    p_ = start + count;
+                    if (out) out->append(start, count);
                     continue;
                 }
                 if (out) *out += static_cast<char>(c);

@@ -1,4 +1,4 @@
-// translation-source: eb1bf7194d5b04fde1d4c42c3d33a86f36a932dbc9b646550c376c791cb1056b
+// translation-source: e25998e4ffbe8b2f6c1d6042ef119b29a42c67760570c1f53bd2aeeab1e1c838
 I18N.fr = localeValues([
   /* sys.nodata */ "Aucune donnée",
   /* sys.unreachable */ "Injoignable",
@@ -506,8 +506,8 @@ I18N.fr = localeValues([
   /* wifi.title */ "Configuration WiFi",
   /* wifi.ssid */ "Réseau WiFi (SSID)",
   /* wifi.pass */ "Mot de passe WiFi",
-  /* wifi.err_ssid */ "Le SSID ne doit pas dépasser 32 caractères",
-  /* wifi.err_pass */ "Le mot de passe doit être vide (réseau ouvert) ou contenir entre 8 et 63 caractères",
+  /* wifi.err_ssid */ "Le SSID doit contenir de 1 à 32 octets UTF-8",
+  /* wifi.err_pass */ "Le mot de passe doit être vide (réseau ouvert) ou contenir de 8 à 63 octets UTF-8",
   /* wifi.hint */ "Saisissez le nom du réseau WiFi. Si l’appareil ne peut pas se connecter, il restaure automatiquement les paramètres WiFi précédents.",
   /* mqtt.title */ "Broker MQTT",
   /* mqtt.hostport */ "Hôte : port",

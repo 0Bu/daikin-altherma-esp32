@@ -53,6 +53,18 @@ fi
 
 echo "ui selftest: historical ENV III modal-action failure is detected"
 
+# Independently restore the real WiFi form's UTF-16 length bug, then require a behavioral failure.
+cp "$proj/main/www/js/settings.js" "$tmp/main/www/js/settings.js"
+sed -e 's/new TextEncoder().encode(ssid).length/ssid.length/' \
+    -e 's/new TextEncoder().encode(pass).length/pass.length/' \
+  "$tmp/main/www/js/bootstrap.js" > "$tmp/main/www/js/bootstrap.js.mutated"
+mv "$tmp/main/www/js/bootstrap.js.mutated" "$tmp/main/www/js/bootstrap.js"
+if (cd "$tmp" && node test/test_ui_use_cases.mjs >/dev/null 2>&1); then
+  echo "ui selftest: WiFi UTF-16 length regression escaped the interaction matrix" >&2
+  exit 1
+fi
+echo "ui selftest: WiFi UTF-8 byte-length regression is detected"
+
 # Re-seed the iPhone failure: legacy 100vh includes Safari's browser chrome and lets a long dialog
 # extend below the actually visible viewport. The focused layout contract must reject that rollback.
 sed 's/height: 100vh; height: 100dvh;/height: 100vh;/' \

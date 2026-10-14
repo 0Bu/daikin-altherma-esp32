@@ -850,12 +850,12 @@
         <span class="field-label plain" data-i18n="wifi.ssid">WiFi network (SSID)</span>
         <input class="input" name="ssid" id="wfSSID" placeholder="SSID" required autocomplete="off">
       </label>
-      <p class="hint err" id="wfSSIDError" data-i18n="wifi.err_ssid" hidden>SSID must be 32 characters or less</p>
+      <p class="hint err" id="wfSSIDError" data-i18n="wifi.err_ssid" hidden>SSID must be 1–32 UTF-8 bytes</p>
       <label class="field">
         <span class="field-label plain" data-i18n="wifi.pass">WiFi password</span>
         <input class="input" name="pass" id="wfPass" type="password" placeholder="••••••••" autocomplete="off">
       </label>
-      <p class="hint err" id="wfPassError" data-i18n="wifi.err_pass" hidden>Password must be empty (open network) or between 8 and 63 characters</p>
+      <p class="hint err" id="wfPassError" data-i18n="wifi.err_pass" hidden>Password must be empty (open network) or 8–63 UTF-8 bytes</p>
       <p class="hint" data-i18n="wifi.hint">Enter the WiFi network name. If the device cannot connect, it restores the previous WiFi settings automatically.</p>
       <div class="modal-actions">
         <button class="btn secondary" type="button" id="wfCancel" data-i18n="btn.cancel">Cancel</button>

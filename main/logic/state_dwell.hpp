@@ -204,6 +204,15 @@ inline DwellReading dwell_lookup(const DwellSlot* slots, size_t n, uint8_t reg, 
     return r;
 }
 
+// Metadata belongs to a particular decoded state, not just its register coordinates.
+inline DwellReading dwell_lookup_for_value(const DwellSlot* slots, size_t n, uint8_t reg,
+                                           uint8_t off, int conv, uint8_t code) {
+    if (code == DWELL_CODE_NONE) return {};
+    const int i = dwell_find(slots, n, reg, off, conv);
+    if (i < 0 || slots[static_cast<size_t>(i)].code != code) return {};
+    return dwell_lookup(slots, n, reg, off, conv);
+}
+
 // ── The step ────────────────────────────────────────────────────────────────────────────────────
 // One poll cycle. `dt_s` is the elapsed seconds since the previous call; the caller derives it from
 // the monotonic clock, so an SNTP jump mid-boot cannot move a dwell.

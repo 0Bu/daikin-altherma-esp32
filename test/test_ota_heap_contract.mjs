@@ -1445,8 +1445,10 @@ const valuesSend = httpStatus.slice(valuesSendStart, valuesSendEnd);
 const valuesOtaGate = valuesSend.indexOf("if (ota_download_active())");
 const valuesWait = valuesSend.indexOf("wait_for_values_tls_owner()");
 const valuesSnapshot = valuesSend.indexOf("take_values_snapshot()", valuesWait);
-assert.ok(valuesOtaGate >= 0 && valuesWait > valuesOtaGate && valuesSnapshot > valuesWait,
-  "/values must refuse OTA and finish its weather wait before allocating the model-sized snapshot");
+const valuesStream = valuesSend.indexOf("return finish_bounded_stream(j,", valuesSnapshot);
+assert.ok(valuesOtaGate >= 0 && valuesWait > valuesOtaGate && valuesSnapshot > valuesWait &&
+          valuesStream > valuesSnapshot,
+  "/values must refuse OTA and finish its weather wait before snapshot allocation and bounded emission");
 assert.match(valuesSend,
   /if\s*\(ota_download_active\(\)\)\s*return network_tls_busy\(req\);[\s\S]{0,180}?if\s*\(!wait_for_values_tls_owner\(\)\s*\|\|\s*ota_download_active\(\)\)\s*return network_tls_busy\(req\);/,
   "a refused TLS-owner wait and its final OTA recheck must precede the values snapshot allocation");
@@ -1492,14 +1494,18 @@ const historyHandler = httpStatus.slice(historyStart, historyEnd);
 assert.ok(historyStart >= 0 && historyEnd > historyStart, "/history must remain identifiable");
 assert.match(historyHandler,
   /if\s*\(ota_download_active\(\)\)\s*return network_tls_busy\(req\);[\s\S]{0,180}?char q\[/,
-  "/history must refuse OTA before its growing string and label temporaries");
+  "/history must refuse OTA before query processing, snapshots and bounded emission");
+assert.match(historyHandler, /finish_bounded_stream\(chunks,/,
+  "/history must use the same pre-emission exception and post-emission abort boundary");
 const diagStart = httpStatus.indexOf("static esp_err_t h_diag(");
 const diagEnd = httpStatus.indexOf("static esp_err_t h_diag_clear(", diagStart);
 const diagHandler = httpStatus.slice(diagStart, diagEnd);
 assert.ok(diagStart >= 0 && diagEnd > diagStart, "/diag must remain identifiable");
 assert.match(diagHandler,
-  /if\s*\(redact\s*&&\s*ota_download_active\(\)\)\s*return network_tls_busy\(req\);[\s\S]{0,1600}?chunk\.reserve\(1280\)/,
-  "redacted /diag must refuse OTA before its growable chunk while plain static-ring diagnostics remain available");
+  /if\s*\(redact\s*&&\s*ota_download_active\(\)\)\s*return network_tls_busy\(req\);[\s\S]{0,1600}?HttpJsonChunks\s+chunks/,
+  "redacted /diag must refuse OTA before its bounded stream and per-line allocations");
+assert.match(diagHandler, /finish_bounded_stream\(chunks,/,
+  "redacted /diag must abort post-emission failures without a replacement response");
 assert.match(diagHandler,
   /ota_download_active\(\)\s*\?\s*512\s*:\s*sizeof\(buf\)/,
   "plain /diag must clamp ring dump to 512 B during active OTA to prevent multi-pbuf lwIP heap fragmentation");

@@ -1,4 +1,4 @@
-// translation-source: eb1bf7194d5b04fde1d4c42c3d33a86f36a932dbc9b646550c376c791cb1056b
+// translation-source: e25998e4ffbe8b2f6c1d6042ef119b29a42c67760570c1f53bd2aeeab1e1c838
 I18N.es = localeValues([
   /* sys.nodata */ "Sin datos",
   /* sys.unreachable */ "No accesible",
@@ -506,8 +506,8 @@ I18N.es = localeValues([
   /* wifi.title */ "Configuración WiFi",
   /* wifi.ssid */ "Red WiFi (SSID)",
   /* wifi.pass */ "Contraseña WiFi",
-  /* wifi.err_ssid */ "El SSID debe tener 32 caracteres o menos",
-  /* wifi.err_pass */ "La contraseña debe estar vacía (red abierta) o tener entre 8 y 63 caracteres",
+  /* wifi.err_ssid */ "El SSID debe tener entre 1 y 32 bytes UTF-8",
+  /* wifi.err_pass */ "La contraseña debe estar vacía (red abierta) o tener entre 8 y 63 bytes UTF-8",
   /* wifi.hint */ "Introduce el nombre de la red WiFi. Si el dispositivo no puede conectarse, restaura automáticamente los ajustes WiFi anteriores.",
   /* mqtt.title */ "Bróker MQTT",
   /* mqtt.hostport */ "Host : puerto",

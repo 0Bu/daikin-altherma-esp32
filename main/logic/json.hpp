@@ -22,20 +22,33 @@
 // on either layer as covering the other.
 #include <string>
 #include <string_view>
+#include "utf8.hpp"
 
 namespace daik {
 
 // Append `s` to `out` as the INSIDE of a JSON string (callers supply the quotes), escaping the
-// full RFC 8259 set. Everything from 0x20 up other than '"' and '\' passes through verbatim —
-// including 0x7F (DEL), which the RFC does NOT require escaping, and raw UTF-8, whose bytes are
-// legal unescaped and must survive intact for an SSID like "Café".
+// full RFC 8259 set. Valid UTF-8 remains byte-identical. Device strings such as SSIDs can also
+// contain arbitrary bytes: each ill-formed byte becomes U+FFFD in the response, without changing
+// stored/source text. DEL (0x7F) does not need escaping. This never repairs an invalid encoding
+// into a different Unicode scalar or lets one bad field invalidate the complete JSON document.
 template <typename JsonOut>
 inline void json_append_escaped(JsonOut& out, std::string_view s) {
     static const char hex[] = "0123456789abcdef";
-    for (const char c : s) {
+    for (size_t i = 0; i < s.size(); ++i) {
+        const char c = s[i];
         // MUST be unsigned: `char` is signed on both xtensa and the host, so a UTF-8 lead byte
         // like 0xC3 tests as -61 and a signed `c < 0x20` would mangle every non-ASCII SSID.
         const unsigned char u = static_cast<unsigned char>(c);
+        if (u >= 0x80) {
+            const size_t count = utf8_sequence_length(s.substr(i));
+            if (!count) {
+                out += "\\ufffd";
+            } else {
+                out += s.substr(i, count);
+                i += count - 1;
+            }
+            continue;
+        }
         switch (u) {
             case '"':  out += "\\\""; break;
             case '\\': out += "\\\\"; break;

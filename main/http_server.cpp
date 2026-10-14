@@ -35,6 +35,11 @@ void http_start() {
     // locale asset route raised it to 38; the streamed OTA changelog route makes the exact total 39.
     cfg.max_uri_handlers = 39;
     cfg.lru_purge_enable = true;
+    // Covers header parsing, body reads and the SDK's own leftover purge. Each blocking receive
+    // retains the SDK's five-second timeout, so receive occupancy is at most 30 s + one timeout.
+    cfg.recv_wait_timeout = 5;
+    cfg.open_fn           = http_open_session;
+    cfg.close_fn          = http_close_session;
     // Named ELF path ceilings include bounded JSON recursion and retain 2 KiB for headroom.
     cfg.stack_size = 10240;
     if (httpd_start(&s_server, &cfg) != ESP_OK) {

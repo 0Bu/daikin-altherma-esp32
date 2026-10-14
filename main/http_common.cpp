@@ -13,12 +13,16 @@
 #include "provisioning.hpp"
 #include "stack_watch.hpp"
 #include "logic/http_body.hpp"
+#include "logic/http_ingress.hpp"
 #include "logic/http_request.hpp"
 #include "wifi.hpp"
 #include "esp_err.h"
 #include "esp_timer.h"
 #include <cstring>
 #include <new>          // std::bad_alloc
+#include <cerrno>
+#include <unistd.h>
+#include "lwip/sockets.h"
 
 namespace daik {
 
@@ -30,6 +34,33 @@ namespace daik {
 // overflowed twice (v1.0.12, legacy-318) and was diagnosed both times from a core dump. Costs one
 // FreeRTOS read per request; the number leaves the board on the MQTT heartbeat (stack_watch.hpp).
 namespace {
+struct HttpIngressSession {
+    HttpIngressBudget budget;
+    bool              admitted = false;
+};
+void free_ingress_budget(void* state) { delete static_cast<HttpIngressSession*>(state); }
+
+int receive_with_budget(httpd_handle_t server, int socket, char* bytes, size_t size, int flags) {
+    auto* state = static_cast<HttpIngressSession*>(httpd_sess_get_transport_ctx(server, socket));
+    if (!state || !state->admitted || !bytes) return HTTPD_SOCK_ERR_FAIL;
+    auto* budget = &state->budget;
+    if (!budget->admit(esp_timer_get_time())) return HTTPD_SOCK_ERR_FAIL;
+    const int received     = recv(socket, bytes, size, flags);
+    const int socket_error = errno;
+    // A last successful read must not admit a request that finished after its total budget.
+    if (budget->expired(esp_timer_get_time())) return HTTPD_SOCK_ERR_FAIL;
+    if (received >= 0) return received;
+    return socket_error == EAGAIN || socket_error == EWOULDBLOCK || socket_error == EINTR
+               ? HTTPD_SOCK_ERR_TIMEOUT
+               : HTTPD_SOCK_ERR_FAIL;
+}
+
+void finish_receive_budget(httpd_req_t* req) {
+    auto* state = static_cast<HttpIngressSession*>(
+        httpd_sess_get_transport_ctx(req->handle, httpd_req_to_sockfd(req)));
+    if (state) state->budget.finish();
+}
+
 struct SampleHttpdStackOnExit {
     ~SampleHttpdStackOnExit() { stack_watch_sample(StackWatch::Httpd); }
 };
@@ -79,6 +110,16 @@ bool json_post_allowed(httpd_req_t* req) {
            http_json_content_type(content_type);
 }
 
+bool request_framing_allowed(httpd_req_t* req) {
+    char length[32] = {}, transfer[32] = {};
+    bool length_present = false, transfer_present = false;
+    if (!read_header(req, "Transfer-Encoding", transfer, sizeof(transfer), transfer_present) ||
+        transfer_present ||
+        !read_header(req, "Content-Length", length, sizeof(length), length_present))
+        return false;
+    return !length_present || http_content_length_matches(length, req->content_len);
+}
+
 // Settle the body bytes the client still owes after its response (logic/http_body.hpp explains why
 // IDF's own purge must never receive an unbounded remainder). noinline keeps the scratch buffer out
 // of handle_then_settle_body's frame, which inlines handle_all under the deepest call chain on this
@@ -107,9 +148,16 @@ __attribute__((noinline)) bool discard_unread_body(httpd_req_t* req) {
 // than crashing the device (which would also drop the poll cycle + MQTT availability).
 static esp_err_t handle_all(httpd_req_t* req) {
     SampleHttpdStackOnExit sampler;
-    auto fn = reinterpret_cast<esp_err_t (*)(httpd_req_t*)>(req->user_ctx);
-    if (!fn) return httpd_resp_send_500(req);
+    auto                   fn = reinterpret_cast<esp_err_t (*)(httpd_req_t*)>(req->user_ctx);
     try {
+        // Framing must precede every successful early response. IDF exposes a size_t length
+        // parsed from uint64_t and does not decode chunked bodies; closing here prevents an
+        // unread suffix becoming another request even when the narrowed length is zero.
+        if (!request_framing_allowed(req)) {
+            reject_request(req, "400 Bad Request", "unsupported request framing");
+            return ESP_FAIL;
+        }
+        if (!fn) return httpd_resp_send_500(req);
         // Once the async OTA task owns TLS, every other POST is either allocation-rich (JSON,
         // Config, DNS/MQTT probes) or can reboot/change device state underneath the inactive-slot
         // write. Refuse before Host/body parsing and before any route-specific allocation. The
@@ -159,7 +207,33 @@ static esp_err_t handle_all(httpd_req_t* req) {
 static esp_err_t handle_then_settle_body(httpd_req_t* req) {
     const esp_err_t result = handle_all(req);
     if (result != ESP_OK) return result;
-    return discard_unread_body(req) ? ESP_OK : ESP_FAIL;
+    if (!discard_unread_body(req)) return ESP_FAIL;
+    finish_receive_budget(req);
+    return ESP_OK;
+}
+
+esp_err_t http_open_session(httpd_handle_t server, int socket) {
+    // The SDK owns this small context and frees it on every close, including failed opening.
+    // No HTTP callback can unwind through the SDK's C frames.
+    auto* budget = new (std::nothrow) HttpIngressSession;
+    if (!budget) return ESP_ERR_NO_MEM;
+    httpd_sess_set_transport_ctx(server, socket, budget, free_ingress_budget);
+    if (httpd_sess_get_transport_ctx(server, socket) != budget) {
+        delete budget;
+        return ESP_FAIL;
+    }
+    const esp_err_t result = httpd_sess_set_recv_override(server, socket, receive_with_budget);
+    if (result == ESP_OK) budget->admitted = true;
+    return result;
+}
+
+void http_close_session(httpd_handle_t server, int socket) {
+    const auto* state =
+        static_cast<HttpIngressSession*>(httpd_sess_get_transport_ctx(server, socket));
+    // IDF 6.1 deletes a failed open session, then accept_conn closes its descriptor again.
+    // Failed admission therefore leaves the one close to accept_conn. Admitted sessions close
+    // here normally; the SDK frees the transport context after this callback in both cases.
+    if (state && state->admitted) close(socket);
 }
 
 void http_register(httpd_handle_t s, const char* uri, httpd_method_t method,

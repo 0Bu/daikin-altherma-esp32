@@ -260,6 +260,56 @@
         "main/logic/mqtt_retirement.hpp": "0dbe80bceb64328963029d5f7ad5f9b10adc85ccc1e5ee5020cfee4ff6cac187",
         "test/test_logic.cpp": "06ea64cf0550e919f4be2af5345862ff6e0d57a92c940ea3d7eb28eac733dbcc"
       }
+    },
+    {
+      "runner": "scripts/run-mock-tests.sh --coverage",
+      "compilers": {
+        "clang-17-darwin": "Apple clang version 17.0.0 (clang-1700.6.4.2); arm64",
+        "gcc-13-linux-ubuntu24": "g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0; aarch64; espressif/idf:v6.1",
+        "gcc-15-linux-ubuntu26": "g++-15 (Ubuntu 15.2.0-16ubuntu1) 15.2.0; aarch64; Ubuntu 26.04",
+        "gcc-15-github-linux-ubuntu26": "g++-15 (Ubuntu 15.2.0-16ubuntu1) 15.2.0; x86_64; local Ubuntu 26.04 Docker"
+      },
+      "architectures": {
+        "clang-17-darwin": "arm64",
+        "gcc-13-linux-ubuntu24": "aarch64",
+        "gcc-15-linux-ubuntu26": "aarch64",
+        "gcc-15-github-linux-ubuntu26": "x86_64"
+      },
+      "hosted_confirmation": "The Ubuntu 26.04 x86_64 GCC 15 profile was measured locally with the hosted profile selector. Authoritative GitHub CI confirmation of the tested head remains pending.",
+      "scope": "Bounded HTTP ingress, typed configuration fields, shared UTF-8 escaping, MCP body-limit framing and committed values identity. Targeted positive and negative checks raise every changed historical ratio; all unrelated inventories and the 95-percent line floor remain unchanged.",
+      "sources": {
+        "main/logic/http_config_fields.hpp": "d41729fa1d032251c5ab27139cc3c6a20a3a2469823b9baf3fecc9b89715236e",
+        "main/logic/http_ingress.hpp": "e9ab52818539cd5e9eda32d8d2416d72be1daa85aedd153f814945211a9f4e6f",
+        "main/logic/json.hpp": "f63577afe5fd4c7a0e66ab79696bf88dc7e844af161213ec8b3da204de7b27a1",
+        "main/logic/mcp.hpp": "7607639a59457633ff8b0531aa0aa7ed5fca2a1118f7ee075fe98cd6103dda5c",
+        "main/logic/state_dwell.hpp": "e39dc2fab637d24b9e09b24214793d34700053c4851fbdb6c6f1665688fdc26d",
+        "main/logic/utf8.hpp": "39f339e2aa9c0b460edeb8ef3bbd37b9a0bc35b6e22b92ab99d6f3c2c18c831a",
+        "main/logic/values_identity.hpp": "4f6eb0edb39a5f7dd3acd580b18110ad289c84751102ad379da70f246144dfab"
+      },
+      "test_source_sha256": "0a8196cf4fc9007956dbf1def5565d05124eaf4531f186e6d4cec12af7ca9108",
+      "compile_source_closure": {
+        "files": 161,
+        "sha256": "c1ba6ff1a7f3ebb481d5d470e83825b2468c380accc4ac410712e6bb543326c9",
+        "method": "Normalized non-system -MM dependencies are identical across all four compiler/architecture measurements."
+      },
+      "local_executable_lines": {
+        "clang-17-darwin": [
+          9174,
+          9346
+        ],
+        "gcc-13-linux-ubuntu24": [
+          8953,
+          9237
+        ],
+        "gcc-15-linux-ubuntu26": [
+          8955,
+          9239
+        ],
+        "gcc-15-github-linux-ubuntu26": [
+          8953,
+          9239
+        ]
+      }
     }
   ],
   "method": "Exact taken/outcome inventories are measured by scripts/run-mock-tests.sh --coverage and bound to compiler family, major version and platform; hosted profiles additionally bind the runner image. The gate rejects inventory mismatches and any historical ratio decrease. Updated hosted inventories require authoritative CI confirmation. Historical measurement notes remain in Git; profiles contain the enforced counts. Measurements below identify changed sources and local compiler provenance without changing checker rules or the 95-percent executable-line floor.",
@@ -458,8 +508,8 @@
         "taken": 4
       },
       "main/logic/json.hpp": {
-        "outcomes": 68,
-        "taken": 49
+        "outcomes": 88,
+        "taken": 69
       },
       "main/logic/json_integer.hpp": {
         "outcomes": 10,
@@ -482,8 +532,8 @@
         "taken": 58
       },
       "main/logic/mcp.hpp": {
-        "taken": 433,
-        "outcomes": 641
+        "taken": 450,
+        "outcomes": 617
       },
       "main/logic/modbus.hpp": {
         "outcomes": 108,
@@ -614,8 +664,8 @@
         "taken": 45
       },
       "main/logic/state_dwell.hpp": {
-        "outcomes": 116,
-        "taken": 110
+        "outcomes": 122,
+        "taken": 117
       },
       "main/logic/syslog_policy.hpp": {
         "outcomes": 2,
@@ -664,6 +714,22 @@
       "main/logic/mqtt_discovery_owner.hpp": {
         "taken": 231,
         "outcomes": 274
+      },
+      "main/logic/http_config_fields.hpp": {
+        "taken": 22,
+        "outcomes": 22
+      },
+      "main/logic/http_ingress.hpp": {
+        "taken": 30,
+        "outcomes": 30
+      },
+      "main/logic/utf8.hpp": {
+        "taken": 30,
+        "outcomes": 30
+      },
+      "main/logic/values_identity.hpp": {
+        "taken": 14,
+        "outcomes": 16
       }
     },
     "gcc-13-linux-ubuntu24": {
@@ -860,8 +926,8 @@
         "taken": 6
       },
       "main/logic/json.hpp": {
-        "outcomes": 66,
-        "taken": 48
+        "outcomes": 92,
+        "taken": 71
       },
       "main/logic/json_integer.hpp": {
         "outcomes": 178,
@@ -884,8 +950,8 @@
         "taken": 69
       },
       "main/logic/mcp.hpp": {
-        "taken": 457,
-        "outcomes": 685
+        "taken": 475,
+        "outcomes": 661
       },
       "main/logic/modbus.hpp": {
         "outcomes": 120,
@@ -1008,8 +1074,8 @@
         "taken": 56
       },
       "main/logic/state_dwell.hpp": {
-        "outcomes": 128,
-        "taken": 121
+        "outcomes": 134,
+        "taken": 128
       },
       "main/logic/syslog_policy.hpp": {
         "outcomes": 2,
@@ -1066,6 +1132,22 @@
       "main/logic/mqtt_discovery_owner.hpp": {
         "taken": 258,
         "outcomes": 274
+      },
+      "main/logic/http_config_fields.hpp": {
+        "taken": 30,
+        "outcomes": 30
+      },
+      "main/logic/http_ingress.hpp": {
+        "taken": 36,
+        "outcomes": 36
+      },
+      "main/logic/utf8.hpp": {
+        "taken": 30,
+        "outcomes": 30
+      },
+      "main/logic/values_identity.hpp": {
+        "taken": 14,
+        "outcomes": 14
       }
     },
     "gcc-15-github-linux-ubuntu26": {
@@ -1262,8 +1344,8 @@
         "taken": 6
       },
       "main/logic/json.hpp": {
-        "outcomes": 66,
-        "taken": 48
+        "outcomes": 92,
+        "taken": 71
       },
       "main/logic/json_integer.hpp": {
         "outcomes": 178,
@@ -1286,8 +1368,8 @@
         "taken": 69
       },
       "main/logic/mcp.hpp": {
-        "taken": 457,
-        "outcomes": 685
+        "taken": 475,
+        "outcomes": 661
       },
       "main/logic/modbus.hpp": {
         "outcomes": 120,
@@ -1410,8 +1492,8 @@
         "taken": 56
       },
       "main/logic/state_dwell.hpp": {
-        "outcomes": 128,
-        "taken": 121
+        "outcomes": 134,
+        "taken": 128
       },
       "main/logic/syslog_policy.hpp": {
         "outcomes": 2,
@@ -1468,6 +1550,22 @@
       "main/logic/mqtt_discovery_owner.hpp": {
         "taken": 258,
         "outcomes": 274
+      },
+      "main/logic/http_config_fields.hpp": {
+        "taken": 30,
+        "outcomes": 30
+      },
+      "main/logic/http_ingress.hpp": {
+        "taken": 36,
+        "outcomes": 36
+      },
+      "main/logic/utf8.hpp": {
+        "taken": 30,
+        "outcomes": 30
+      },
+      "main/logic/values_identity.hpp": {
+        "taken": 14,
+        "outcomes": 14
       }
     },
     "gcc-15-linux-ubuntu26": {
@@ -1664,8 +1762,8 @@
         "taken": 6
       },
       "main/logic/json.hpp": {
-        "outcomes": 66,
-        "taken": 48
+        "outcomes": 92,
+        "taken": 71
       },
       "main/logic/json_integer.hpp": {
         "outcomes": 178,
@@ -1688,8 +1786,8 @@
         "taken": 69
       },
       "main/logic/mcp.hpp": {
-        "taken": 457,
-        "outcomes": 685
+        "taken": 475,
+        "outcomes": 661
       },
       "main/logic/modbus.hpp": {
         "outcomes": 120,
@@ -1812,8 +1910,8 @@
         "taken": 56
       },
       "main/logic/state_dwell.hpp": {
-        "outcomes": 128,
-        "taken": 121
+        "outcomes": 134,
+        "taken": 128
       },
       "main/logic/syslog_policy.hpp": {
         "outcomes": 2,
@@ -1870,6 +1968,22 @@
       "main/logic/mqtt_discovery_owner.hpp": {
         "taken": 258,
         "outcomes": 274
+      },
+      "main/logic/http_config_fields.hpp": {
+        "taken": 30,
+        "outcomes": 30
+      },
+      "main/logic/http_ingress.hpp": {
+        "taken": 36,
+        "outcomes": 36
+      },
+      "main/logic/utf8.hpp": {
+        "taken": 30,
+        "outcomes": 30
+      },
+      "main/logic/values_identity.hpp": {
+        "taken": 14,
+        "outcomes": 14
       }
     }
   },

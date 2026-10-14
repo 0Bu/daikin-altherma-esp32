@@ -203,6 +203,9 @@ for t in "${TARGETS[@]}"; do
     python3 test/json_ingress_runtime/run.py --real-cjson managed_components/espressif__cjson/cJSON
     python3 test/mqtt_runtime/run.py --real-cjson managed_components/espressif__cjson/cJSON
     python3 test/query_http_runtime/run.py --real-cjson managed_components/espressif__cjson/cJSON
+    # Complete configuration endpoints need the exact resolved cJSON source, unavailable in the
+    # dependency-free mechanical job. Retain CFG-03's transaction and execute them here.
+    python3 test/http_config_runtime/run.py --real-cjson managed_components/espressif__cjson/cJSON --sanitizer undefined
     sfx="$(suffix "$t")"
     app="$BUILD_DIR/daikin-altherma-esp32.bin"
     repro_app=""

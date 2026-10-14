@@ -59,6 +59,7 @@ uint32_t s_model_fp = 0;
 bool     s_adopt_detect_grace = false;
 std::atomic<bool> s_reset_requested{false};
 logic::DwellRestore s_persist_verdict = logic::DwellRestore::NoRecord;
+HpValuesIdentity    s_published_identity; // boot-local only; does not change the persistence layout
 
 // Everything in a critical section here is a plain integer copy — nothing allocates — so the
 // guard's unwind safety is belt-and-braces rather than the reason it is used.
@@ -114,12 +115,12 @@ bool apply_reset_locked() {
 // exists, so the whole decision is single-threaded and needs no lock — the property checkup_start()
 // and history_start() rely on too.
 void dwell_start() {
-    // Create the lock HERE, not on first use. checkup.cpp carries the note about why, having already
-    // removed the lazy version: a mutex allocated by the poll task inside the record path is read by
-    // the httpd task through dwell_reading() while another core is writing the handle — an
-    // unsynchronized read of the very pointer that synchronizes everything else in this file. It is
-    // free to avoid, because app_main calls this before any producer task exists, the same property
-    // history_start() and checkup_start() already rely on for the identical creation.
+    // Create the lock HERE, not on first use. checkup.cpp carries the note about why, having
+    // already removed the lazy version: a mutex allocated by the poll task inside the record path
+    // is read by the httpd task through dwell_readings_snapshot() while another core is writing the
+    // handle — an unsynchronized read of the very pointer that synchronizes everything else in this
+    // file. It is free to avoid, because app_main calls this before any producer task exists, the
+    // same property history_start() and checkup_start() already rely on for the identical creation.
     if (!s_mtx) {
         s_mtx = xSemaphoreCreateMutex();
         if (!s_mtx) diag_printf("dwell: mutex alloc failed — state ages disabled this boot\n");
@@ -211,7 +212,7 @@ void dwell_reset_on_detect(const char* profile_id) {
 }
 
 void dwell_record(const CachedValue* v, size_t n, uint32_t source_generation,
-                  uint32_t max_observed_gap_s) {
+                  uint32_t max_observed_gap_s, const HpValuesIdentity* pending_cache_identity) {
     // dwell_start() creates it; absent means its alloc failed -> no state ages this boot. Saying so
     // once, there, rather than from this 1 Hz path: an unlatched line here would put ~86k copies of
     // itself through the 6 KB diag ring every day and evict the boot record, the crash records and
@@ -266,6 +267,7 @@ void dwell_record(const CachedValue* v, size_t n, uint32_t source_generation,
     Lock lk(s_mtx);
     if (!lk.acquired()) return;
     if (!hp_poll_generation_matches(source_generation)) return;
+    s_published_identity = {};
     if (apply_reset_locked()) return;          // discard this sample with the identity it belonged to
     uint32_t dt_s = 0;
     // `>= 0`, never `> 0`: esp_timer's zero is a real previous instant (an adopted table resumes
@@ -277,19 +279,24 @@ void dwell_record(const CachedValue* v, size_t n, uint32_t source_generation,
     s_last_us = now_us;
     logic::dwell_step_with_cadence(P().slots, logic::DWELL_MAX_SLOTS, obs, obs_n, dt_s,
                                    max_observed_gap_s);
+    if (pending_cache_identity && pending_cache_identity->source_generation == source_generation)
+        s_published_identity = *pending_cache_identity;
     persist_seal();
 }
 
-logic::DwellReading dwell_reading(uint8_t reg, uint8_t off, int conv) {
-    if (!s_mtx) return logic::DwellReading{};   // its alloc failed: no state ages this boot
-    // A pending reset is consumed by the RECORD path, so between the request and the next poll
-    // cycle the table still holds the previous identity's ages. Answer "nothing to say" rather than
-    // serve them: the caller asked for /set_hp or /detect precisely because the unit or the link
-    // changed, and a run measured on the old one is not a shorter answer, it is a wrong one.
-    // checkup_report() makes the same refusal for the same window.
-    if (s_reset_requested.load()) return logic::DwellReading{};
+void dwell_readings_snapshot(const CachedValue* values, size_t count,
+                             const HpValuesIdentity& identity, logic::DwellReading* out) {
+    if (!out) return;
+    for (size_t i = 0; i < count; ++i) out[i] = {};
+    if (!s_mtx || (!values && count)) return;
     Lock lk(s_mtx);
-    return logic::dwell_lookup(P().slots, logic::DWELL_MAX_SLOTS, reg, off, conv);
+    if (!lk.acquired() || s_reset_requested.load() ||
+        !hp_values_identity_matches(identity, s_published_identity))
+        return;
+    for (size_t i = 0; i < count; ++i)
+        out[i] = logic::dwell_lookup_for_value(
+            P().slots, logic::DWELL_MAX_SLOTS, values[i].reg, values[i].off, values[i].conv,
+            logic::dwell_code(values[i].conv, values[i].value.c_str()));
 }
 
 } // namespace daik

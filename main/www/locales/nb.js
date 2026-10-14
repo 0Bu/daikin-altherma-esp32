@@ -1,4 +1,4 @@
-// translation-source: eb1bf7194d5b04fde1d4c42c3d33a86f36a932dbc9b646550c376c791cb1056b
+// translation-source: e25998e4ffbe8b2f6c1d6042ef119b29a42c67760570c1f53bd2aeeab1e1c838
 I18N.nb = localeValues([
   /* sys.nodata */ "Ingen data",
   /* sys.unreachable */ "Ikke tilgjengelig",
@@ -506,8 +506,8 @@ I18N.nb = localeValues([
   /* wifi.title */ "Wi-Fi-oppsett",
   /* wifi.ssid */ "Wi-Fi-nettverk · SSID",
   /* wifi.pass */ "Wi-Fi-passord",
-  /* wifi.err_ssid */ "SSID kan ha høyst 32 tegn",
-  /* wifi.err_pass */ "Passordet må være tomt for åpne nettverk, ellers 8–63 tegn",
+  /* wifi.err_ssid */ "SSID må være 1–32 UTF-8-byte",
+  /* wifi.err_pass */ "Passordet må være tomt for åpne nettverk, ellers 8–63 UTF-8-byte",
   /* wifi.hint */ "Angi Wi-Fi-navnet. Hvis tilkoblingen mislykkes, gjenoppretter enheten automatisk de forrige innstillingene.",
   /* mqtt.title */ "MQTT-broker",
   /* mqtt.hostport */ "Vert : port",

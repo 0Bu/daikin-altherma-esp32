@@ -1879,6 +1879,7 @@ static esp_err_t h_status(httpd_req_t* req) {
 struct ValuesSnapshot {
     std::vector<CachedValue> x10a;
     std::vector<uint8_t> x10a_label_ambiguous;
+    std::vector<logic::DwellReading> x10a_dwell;
     std::vector<CachedValue> modbus;
     bool modbus_live = false;
 };
@@ -1888,6 +1889,7 @@ struct ValuesSnapshot {
 // window: once chunked transfer starts, the response status can no longer be changed.
 static ValuesSnapshot take_values_snapshot() {
     ValuesSnapshot snapshot;
+    HpValuesIdentity x10a_identity;
 
     for (int attempt = 0; attempt < 2; ++attempt) {
         uint32_t     cap_rev  = 0;
@@ -1897,8 +1899,8 @@ static ValuesSnapshot take_values_snapshot() {
         }
         size_t       total    = 0;
         uint32_t     snap_rev = 0;
-        const size_t n =
-            hp_values_snapshot(snapshot.x10a.data(), snapshot.x10a.size(), &total, &snap_rev);
+        const size_t n = hp_values_snapshot(snapshot.x10a.data(), snapshot.x10a.size(), &total,
+                                            &snap_rev, &x10a_identity);
         if (attempt == 0 && (total > snapshot.x10a.size() || snap_rev != cap_rev)) {
             snapshot.x10a.resize(total ? total : 1);
             continue;
@@ -1913,6 +1915,9 @@ static ValuesSnapshot take_values_snapshot() {
         snapshot.x10a_label_ambiguous[i] =
             label_slug_is_ambiguous(object_id(snapshot.x10a[i].label)) ? 1 : 0;
     }
+    snapshot.x10a_dwell.resize(snapshot.x10a.size());
+    dwell_readings_snapshot(snapshot.x10a.data(), snapshot.x10a.size(), x10a_identity,
+                            snapshot.x10a_dwell.data());
 
     // The initial status read is only a cheap skip. mb_values_snapshot() re-checks liveness after
     // copying the cache and closes both disconnect and reconnect races with generation counters.
@@ -1955,7 +1960,8 @@ static void append_json_uint(JsonOut& out, uint64_t value) {
 // covering a row the C++ test still gates.
 template <typename JsonOut>
 static void append_values_array(JsonOut& j, const std::vector<CachedValue>& v,
-                                const std::vector<uint8_t>& ambiguous) {
+                                const std::vector<uint8_t>&             ambiguous,
+                                const std::vector<logic::DwellReading>& dwell) {
     j += "[";
     // Successive += rather than one a + b + c + … chain: a chain materialises every intermediate
     // std::string in the same frame, and this runs on the httpd task (see AGENTS.md → Memory,
@@ -2026,7 +2032,7 @@ static void append_values_array(JsonOut& j, const std::vector<CachedValue>& v,
         // arriving in a new place. No value, no age — and the firmware decides that, so a consumer
         // that is not the browser cannot reach a different answer.
         if (logic::dwell_row_tracked(v[i].reg, v[i].off, v[i].conv) && !v[i].value.empty()) {
-            const logic::DwellReading dw = dwell_reading(v[i].reg, v[i].off, v[i].conv);
+            const logic::DwellReading dw = i < dwell.size() ? dwell[i] : logic::DwellReading{};
             // `known` false is a first-class answer and is emitted as ABSENCE: a silent bus, a page
             // that stopped answering, a row seen too long ago to vouch for. An omitted key says "no
             // reading"; a zero would say "it changed just now".
@@ -2114,7 +2120,7 @@ static void append_modbus_values_array(JsonOut& j, const std::vector<CachedValue
 template <typename JsonOut>
 static void append_values_json(JsonOut& j, const ValuesSnapshot& snapshot) {
     j += "{\"values\":";
-    append_values_array(j, snapshot.x10a, snapshot.x10a_label_ambiguous);
+    append_values_array(j, snapshot.x10a, snapshot.x10a_label_ambiguous, snapshot.x10a_dwell);
     // Emitted only while the link is CONNECTED, not merely enabled. That is a payload invariant
     // worth having: if the `modbus` array is present, every row in it was read this cycle. Gating on
     // `enabled` alone served the last good cache after the link dropped, and a consumer has no way
@@ -2144,10 +2150,14 @@ esp_err_t http_send_values_json(httpd_req_t* req, std::string_view prefix,
     ValuesSnapshot snapshot = take_values_snapshot();
     HttpJsonChunks j(HttpChunkEmitter{req});
     httpd_resp_set_type(req, "application/json");
-    j += prefix;
-    append_values_json(j, snapshot);
-    j += suffix;
-    return j.finish() ? ESP_OK : ESP_FAIL;
+    return finish_bounded_stream(j,
+                                 [prefix, suffix, &snapshot](auto& out) {
+                                     out += prefix;
+                                     append_values_json(out, snapshot);
+                                     out += suffix;
+                                 })
+               ? ESP_OK
+               : ESP_FAIL;
 }
 
 static esp_err_t h_values(httpd_req_t* req) {
@@ -2241,8 +2251,8 @@ static esp_err_t h_models(httpd_req_t* req) {
 // new allocation on a heap where the largest contiguous block is the binding limit, and chunking
 // costs nothing here.
 static esp_err_t h_history(httpd_req_t* req) {
-    // History is intentionally chunked, yet still owns a growing string and label temporaries.
-    // Keep that churn outside the firmware TLS operation just like /status and /values.
+    // Snapshot/header preparation allocates before transfer. Keep it outside firmware TLS;
+    // the finished header and numeric samples then use the shared bounded stream boundary.
     if (ota_download_active()) return network_tls_busy(req);
     char q[96] = {0};
     char id[32] = {0};
@@ -2375,34 +2385,38 @@ static esp_err_t h_history(httpd_req_t* req) {
         httpd_resp_set_status(req, "503 Service Unavailable");
         return http_send_json(req, "{\"ok\":false,\"error\":\"history changed; retry\"}");
     }
+    HttpJsonChunks chunks(HttpChunkEmitter{req});
     httpd_resp_set_type(req, "application/json");
-    for (size_t i = 0; i < n; i++) {
-        if (i) j += ",";
-        // TENTHS on the wire, as plain integers — the browser scales by 10. Integers rather than
-        // "41.6": shorter (a 288-sample body is ~1.1 KB instead of ~1.5 KB), exactly representable,
-        // and no formatting code to get the sign or a trailing zero wrong. The `unit` field says
-        // what they are tenths OF, and www/js/history.js's histHtml documents the same contract on its side.
-        if (logic::history_is_absent(samples[i])) j += "null";
-        else j += std::to_string(static_cast<int>(samples[i]));
-        // Flush every 64 samples so the peak string stays a few hundred bytes rather than the whole
-        // body — the point of chunking here.
-        if ((i & 63) == 63) {
-            if (httpd_resp_send_chunk(req, j.c_str(), j.size()) != ESP_OK) return ESP_FAIL;
-            j.clear();
-        }
-    }
-    j += "],\"held\":[";
-    for (size_t i = 0; i < nruns; i++) {
-        if (i) j += ",";
-        j += "[";
-        j += std::to_string(runs[i][0]);
-        j += ",";
-        j += std::to_string(runs[i][1]);
-        j += "]";
-    }
-    j += "]}";
-    if (httpd_resp_send_chunk(req, j.c_str(), j.size()) != ESP_OK) return ESP_FAIL;
-    return httpd_resp_send_chunk(req, nullptr, 0);      // terminate the chunked response
+    return finish_bounded_stream(chunks,
+                                 [&](auto& out) {
+                                     out += j;
+                                     for (size_t i = 0; i < n; i++) {
+                                         if (i) out += ",";
+                                         // Samples are bounded signed tenths. Format without
+                                         // allocation after transfer starts.
+                                         if (logic::history_is_absent(samples[i]))
+                                             out += "null";
+                                         else {
+                                             const int value = static_cast<int>(samples[i]);
+                                             if (value < 0) out += '-';
+                                             append_json_uint(
+                                                 out, value < 0 ? static_cast<unsigned>(-value)
+                                                                : static_cast<unsigned>(value));
+                                         }
+                                     }
+                                     out += "],\"held\":[";
+                                     for (size_t i = 0; i < nruns; i++) {
+                                         if (i) out += ",";
+                                         out += "[";
+                                         append_json_uint(out, runs[i][0]);
+                                         out += ",";
+                                         append_json_uint(out, runs[i][1]);
+                                         out += "]";
+                                     }
+                                     out += "]}";
+                                 })
+               ? ESP_OK
+               : ESP_FAIL;
 }
 
 static esp_err_t h_diag(httpd_req_t* req) {
@@ -2415,8 +2429,8 @@ static esp_err_t h_diag(httpd_req_t* req) {
     if (httpd_query_key_value(q, "verbose", v, sizeof(v)) == ESP_OK)
         diag_set_verbose(query_flag_on(v));
     const bool redact = query_flag(q, "redact");
-    // Plain /diag copies into static storage and is useful while OTA is in flight. Redaction owns
-    // per-line strings and a 1280-byte growable chunk, so only that allocation-rich variant waits.
+    // Plain diagnostics copy into static storage. Redacted per-line strings require their own
+    // OTA admission check before the bounded stream starts.
     if (redact && ota_download_active()) return network_tls_busy(req);
     static char  buf[6144];
     const size_t max_dump = ota_download_active() ? 512 : sizeof(buf);
@@ -2434,27 +2448,22 @@ static esp_err_t h_diag(httpd_req_t* req) {
         return httpd_resp_send_chunk(req, nullptr, 0);
     }
 
-    // Redacted: a handful of log statements interpolate a host, an IP or an SSID (logic/redact.hpp).
-    // Rewritten line by line and flushed in ~1 KB chunks, rather than as one redacted copy of the
-    // whole ring: a replacement is longer than most values it replaces, so the result can GROW, and
-    // the two answers to that are a second ~8 KB .bss buffer or a ~6 KB contiguous heap allocation
-    // on a heap whose real ceiling is its largest contiguous block. The chunk costs neither, and
-    // batching keeps it to a handful of sends instead of one per line.
-    std::string chunk;
-    chunk.reserve(1280);
-    for (size_t start = 0; start < n; ) {
-        size_t eol = start;
-        while (eol < n && buf[eol] != '\n') eol++;
-        if (eol < n) eol++;                                   // keep the newline with its line
-        chunk += redact_diag_line(std::string_view(buf + start, eol - start));
-        start = eol;
-        if (chunk.size() >= 1024) {
-            if (httpd_resp_send_chunk(req, chunk.c_str(), chunk.size()) != ESP_OK) return ESP_FAIL;
-            chunk.clear();
-        }
-    }
-    if (!chunk.empty() && httpd_resp_send_chunk(req, chunk.c_str(), chunk.size()) != ESP_OK) return ESP_FAIL;
-    return httpd_resp_send_chunk(req, nullptr, 0);            // terminate the chunked response
+    // Redact each record without materializing the ring. A late per-line allocation failure
+    // closes the committed stream instead of reaching the outer guard's clean-error response.
+    HttpJsonChunks chunks(HttpChunkEmitter{req});
+    return finish_bounded_stream(chunks,
+                                 [&](auto& out) {
+                                     for (size_t start = 0; start < n;) {
+                                         size_t eol = start;
+                                         while (eol < n && buf[eol] != '\n') ++eol;
+                                         if (eol < n) ++eol;
+                                         out += redact_diag_line(
+                                             std::string_view(buf + start, eol - start));
+                                         start = eol;
+                                     }
+                                 })
+               ? ESP_OK
+               : ESP_FAIL;
 }
 
 static esp_err_t h_diag_clear(httpd_req_t* req) {

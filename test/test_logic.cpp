@@ -66,6 +66,9 @@
 #include "logic/hp_query_log.hpp"
 #include "logic/modbus_profile.hpp"
 #include "logic/http_body.hpp"
+#include "logic/http_ingress.hpp"
+#include "logic/http_config_fields.hpp"
+#include "logic/values_identity.hpp"
 #include "logic/http_cache.hpp"
 #include "logic/http_deadline.hpp"
 #include "logic/http_request.hpp"
@@ -3449,7 +3452,7 @@ static void test_json() {
 
     // The streaming whole-value form is the exact same encoder used by /values and MCP. A tiny
     // chunk bound forces quotes, UTF-8 and every escape family across transport boundaries.
-    const std::string mixed = std::string("Café \\\"\n\t") + std::string("\0\x1f", 2);
+    const std::string mixed = std::string("Café \\\"\n\t") + std::string("\0\x1f\x80", 3);
     std::string       streamed;
     size_t            finals = 0;
     auto              emit   = [&](std::string_view bytes, bool final) {
@@ -3463,6 +3466,7 @@ static void test_json() {
     json_append_quoted(chunks, mixed);
     CHECK(chunks.finish());
     CHECK(streamed == json_quote(mixed));
+    CHECK(streamed.find("\\ufffd") != std::string::npos);
     CHECK(finals == 1 && chunks.max_buffered() <= 4);
 
     // An OOM before the first emission must escape to the HTTP trampoline, which can still select a
@@ -3548,6 +3552,13 @@ static void test_json() {
     CHECK(bounded.ok() && std::string(bounded.data()) == "\"a\\nb\"");
     bounded += "0123456789";
     CHECK(!bounded.ok());
+    bounded = FixedBuffer<16>{};
+    json_append_quoted(bounded, "é\x80");
+    CHECK(bounded.ok() && std::string(bounded.data()) == "\"é\\ufffd\"");
+    X10aCacheProbeOut encoded_probe, reference_probe;
+    json_append_quoted(encoded_probe, "é\x80");
+    reference_probe += "\"é\\ufffd\"";
+    CHECK(encoded_probe.n == reference_probe.n && encoded_probe.digest == reference_probe.digest);
 }
 
 static void test_mqtt_group() {
@@ -8510,6 +8521,133 @@ static void test_captive() {
 }
 
 // ── request-body reassembly (logic/http_body.hpp) ────────────────────────────────────────────
+static void test_http139_boundaries() {
+    CHECK(http_content_length_matches("0", 0));
+    CHECK(http_content_length_matches("0002", 2));
+    CHECK(http_content_length_matches(" \t2\t ", 2));
+    CHECK(!http_content_length_matches("", 0));
+    CHECK(!http_content_length_matches(" \t", 0));
+    CHECK(!http_content_length_matches("-2", 2));
+    CHECK(!http_content_length_matches("+2", 2));
+    CHECK(!http_content_length_matches("2x", 2));
+    CHECK(!http_content_length_matches("2", 3));
+    CHECK(!http_content_length_matches("4294967296", 0));
+    CHECK(!http_content_length_matches("4294967295", 0));
+    CHECK(!http_content_length_matches("99999999999999999999999999999999", 0));
+    CHECK(http_content_length_matches(std::to_string(std::numeric_limits<size_t>::max()),
+                                      std::numeric_limits<size_t>::max()));
+    HttpIngressBudget budget;
+    CHECK(!budget.expired(0));
+    CHECK(!budget.admit(-1));
+    CHECK(budget.admit(0));
+    CHECK(budget.admit(HTTP_INGRESS_BUDGET_US - 1));
+    CHECK(!budget.admit(HTTP_INGRESS_BUDGET_US));
+    CHECK(!budget.admit(HTTP_INGRESS_BUDGET_US + 1));
+    budget.finish();
+    CHECK(budget.admit(100'000'000));
+    CHECK(!budget.admit(99'999'999));
+    budget.finish();
+    CHECK(budget.admit(200'000'000));
+
+    using F = HttpConfigFieldType;
+    for (const auto expected : {F::String, F::Boolean, F::Number, F::Integer, F::Other}) {
+        CHECK(http_config_field_valid(expected, F::Missing));
+        CHECK(!http_config_field_valid(expected, F::Other));
+    }
+    CHECK(http_config_field_valid(F::String, F::String));
+    CHECK(!http_config_field_valid(F::String, F::Boolean));
+    CHECK(http_config_field_valid(F::Boolean, F::Boolean));
+    CHECK(!http_config_field_valid(F::Boolean, F::String));
+    CHECK(http_config_field_valid(F::Number, F::Number, 1.25));
+    CHECK(!http_config_field_valid(F::Number, F::String));
+    CHECK(!http_config_field_valid(F::Number, F::Number, std::numeric_limits<double>::infinity()));
+    CHECK(http_config_field_valid(F::Integer, F::Number, 502));
+    CHECK(!http_config_field_valid(F::Integer, F::Number, 502.9));
+    CHECK(!http_config_field_valid(F::Integer, F::String));
+    int integer = 123;
+    CHECK(http_config_integer_value(std::numeric_limits<int>::min(), integer));
+    CHECK(integer == std::numeric_limits<int>::min());
+    CHECK(http_config_integer_value(std::numeric_limits<int>::max(), integer));
+    CHECK(integer == std::numeric_limits<int>::max());
+    CHECK(http_config_integer_value(-1, integer) && integer == -1);
+    CHECK(!http_config_integer_value(1.5, integer) && integer == -1);
+    CHECK(!http_config_integer_value(std::numeric_limits<double>::quiet_NaN(), integer));
+    CHECK(!http_config_integer_value(std::numeric_limits<double>::infinity(), integer));
+    CHECK(!http_config_integer_value(double(std::numeric_limits<int>::min()) - 1, integer));
+    CHECK(!http_config_integer_value(double(std::numeric_limits<int>::max()) + 1, integer));
+
+    CHECK(utf8_sequence_length("") == 0);
+    CHECK(utf8_sequence_length("A") == 1);
+    CHECK(utf8_sequence_length("\xc2\x80") == 2);
+    CHECK(utf8_sequence_length("\xe0\xa0\x80") == 3);
+    CHECK(utf8_sequence_length("\xf0\x90\x80\x80") == 4);
+    CHECK(utf8_sequence_length("\xf4\x8f\xbf\xbf") == 4);
+    for (const std::string_view bytes :
+         {"\x80", "\xc0\xaf", "\xf5\x80\x80\x80", "\xe2\x82", "\xc2 A", "\xe0\x80\x80",
+          "\xed\xa0\x80", "\xf4\x90\x80\x80"})
+        CHECK(utf8_sequence_length(bytes) == 0);
+    std::string encoded;
+    json_append_quoted(encoded, "Café 😀");
+    CHECK(encoded == "\"Café 😀\"");
+    encoded.clear();
+    json_append_quoted(encoded, "\x80\xc0\xaf\xe2\x82");
+    CHECK(encoded == "\"\\ufffd\\ufffd\\ufffd\\ufffd\\ufffd\"");
+    CHECK(json_escaped_size("\x80\xc0\xaf\xe2\x82") == 30);
+    CHECK(json_escaped_size("é") == 2);
+
+    // The shared UTF-8 scanner must behave identically while copying an ID and skipping unknown
+    // fields. JSON grammar edge cases exercise the same parser without widening MCP methods.
+    const std::string unicode_request =
+        R"({"jsonrpc":"2.0","id":"Café 😀","method":"tools/list","extra":{"é":"😀"}})";
+    const auto unicode_mcp = mcp_parse(unicode_request.data(), unicode_request.size());
+    CHECK(unicode_mcp.error == 0 && unicode_mcp.method == McpMethod::ToolsList);
+    const std::string number_request =
+        R"({"jsonrpc":"2.0","id":1,"method":"tools/list","extra":[0,-2,1.25,2e+3,3E-2,0.5]})";
+    CHECK(mcp_parse(number_request.data(), number_request.size()).error == 0);
+    for (const std::string_view bad :
+         {R"({"x":01})", R"({"x":0z})", R"({"x":1.z})", R"({"x":1e})", R"({"x":1e+})",
+          R"({"x":1e-z})", R"({"x":"\q"})", R"({"x":"\u00zz"})", R"({"x":"\uD800\u0000"})"})
+        CHECK(mcp_parse(bad.data(), bad.size()).error == -32700);
+    const std::string      escapes = R"("\"\\\/\b\f\n\r\t\u00e9\u20ac\ud83d\ude00")";
+    mcp_detail::JsonReader reader(escapes.data(), escapes.data() + escapes.size());
+    std::string            decoded;
+    CHECK(reader.string(&decoded) && reader.done());
+    CHECK(decoded == "\"\\/\b\f\n\r\té€😀");
+    mcp_detail::JsonReader skipped(escapes.data(), escapes.data() + escapes.size());
+    CHECK(skipped.string() && skipped.done());
+
+    const HpValuesIdentity a{"fixture", 91, 7, 12};
+    CHECK(hp_values_identity_matches(a, a));
+    CHECK(!hp_values_identity_matches(a, {"fixture", 91, 0, 12}));
+    CHECK(!hp_values_identity_matches({"fixture", 91, 0, 12}, a));
+    CHECK(!hp_values_identity_matches(a, {"fixture", 91, 7, 13}));
+    CHECK(!hp_values_identity_matches(a, {"fixture", 92, 7, 12}));
+    CHECK(!hp_values_identity_matches(a, {"other", 91, 7, 12}));
+    CHECK(!hp_values_identity_matches(a, {nullptr, 91, 7, 12}));
+    CHECK(!hp_values_identity_matches({nullptr, 91, 7, 12}, a));
+    logic::DwellSlot slot{};
+    slot.reg         = 0x10;
+    slot.off         = 2;
+    slot.conv        = 217;
+    slot.code        = 1;
+    slot.flags       = logic::DWELL_F_USED | logic::DWELL_F_EXACT;
+    slot.since_s     = 73;
+    slot.blind_s     = 4;
+    const auto dwell = logic::dwell_lookup_for_value(&slot, 1, 0x10, 2, 217, 1);
+    CHECK(dwell.known && dwell.exact && dwell.since_s == 73 && dwell.blind_s == 4);
+    CHECK(!logic::dwell_lookup_for_value(&slot, 1, 0x10, 2, 217, 0).known);
+    CHECK(!logic::dwell_lookup_for_value(&slot, 1, 0x10, 2, 217, 2).known);
+    CHECK(!logic::dwell_lookup_for_value(&slot, 1, 0x10, 2, 217, logic::DWELL_CODE_NONE).known);
+    CHECK(!logic::dwell_lookup_for_value(&slot, 1, 0x11, 2, 217, 1).known);
+    slot.flags |= logic::DWELL_F_STALE;
+    CHECK(!logic::dwell_lookup_for_value(&slot, 1, 0x10, 2, 217, 1).known);
+    std::array<logic::DwellSlot, logic::DWELL_MAX_SLOTS + 1> oversize{};
+    oversize.back().flags   = logic::DWELL_F_USED;
+    oversize.back().since_s = 37;
+    logic::dwell_step(oversize.data(), oversize.size(), nullptr, 0, 1);
+    CHECK(oversize.back().since_s == 37);
+}
+
 static void test_http_body() {
     // The common case: the body arrives in one recv, is NUL-terminated, and reports its length.
     {
@@ -23895,6 +24033,7 @@ int main() {
     test_heap_watchdog();
     test_health_gate();
     test_captive();
+    test_http139_boundaries();
     test_http_body();
     test_http_body_discard();
     test_uart_plan();

@@ -56,6 +56,7 @@ static std::vector<CachedValue> s_cache;
 static const char*              s_cache_profile = "";  // static def::Profile::id, guarded by s_mtx
 static uint64_t                 s_cache_identity_fp = 0; // same committed source, guarded by s_mtx
 static uint32_t                 s_cache_revision = 0; // every cache/reconfigure commit, guarded by s_mtx
+static uint32_t                          s_cache_source_generation = 0;
 static HpStats               s_stats;
 static int64_t               s_last_ok_us = -1;
 static logic::RefrigerantServiceTracker  s_refrigerant_service;
@@ -534,8 +535,18 @@ static void poll_once() {
     // `fresh`, which is exactly the evidence the dwell needs to book blind seconds rather than
     // extend a run it did not watch. Reading it anywhere else would see a cache that has already
     // forgotten which rows were missing this cycle.
+    HpValuesIdentity pending_cache_identity;
+    {
+        Lock lk(s_mtx);
+        if (s_target_generation.load(std::memory_order_acquire) != cycle_generation) return;
+        pending_cache_identity = {prof.id, c.x10a_identity_fp, cycle_generation,
+                                  s_cache_revision + 1};
+    }
+    // Publish the dwell fold as the SAME upcoming cache commit. A reader holding revision N
+    // must refuse this N+1 table while the cache commit below is still pending.
     dwell_record(fresh.data(), fresh.size(), cycle_generation,
-                 static_cast<uint32_t>((service_max_gap_us + 999999) / 1000000));
+                 static_cast<uint32_t>((service_max_gap_us + 999999) / 1000000),
+                 &pending_cache_identity);
 
     // One commit, one lock site, and deliberately non-allocating: the vector move-assign steals
     // fresh's buffer and last_error is swapped (noexcept) rather than assigned, so the critical
@@ -557,6 +568,7 @@ static void poll_once() {
         s_cache_profile    = prof.id;
         s_cache_identity_fp = c.x10a_identity_fp;
         ++s_cache_revision;
+        s_cache_source_generation = cycle_generation;
         s_cache_generation.fetch_add(1, std::memory_order_release);
         s_stats.connected  = any_ok;
         s_stats.registers  = regs;
@@ -1044,7 +1056,9 @@ static bool x10a_cache_recent_locked() {
     return x10a_source_time_is_recent(esp_timer_get_time(), s_last_ok_us);
 }
 
-size_t hp_values_snapshot(CachedValue* out, size_t max, size_t* total_out, uint32_t* revision_out) {
+size_t hp_values_snapshot(CachedValue* out, size_t max, size_t* total_out, uint32_t* revision_out,
+                          HpValuesIdentity* identity_out) {
+    if (identity_out) *identity_out = {};
     if (!s_mtx) {
         if (total_out) *total_out = 0;
         if (revision_out) *revision_out = 0;
@@ -1057,6 +1071,9 @@ size_t hp_values_snapshot(CachedValue* out, size_t max, size_t* total_out, uint3
         return 0;
     }
     if (total_out) *total_out = s_cache.size();
+    if (identity_out)
+        *identity_out = {s_cache_profile, s_cache_identity_fp, s_cache_source_generation,
+                         s_cache_revision};
     size_t n = s_cache.size() < max ? s_cache.size() : max;
     for (size_t i = 0; i < n; i++) out[i] = s_cache[i];
     return n;
@@ -1244,6 +1261,7 @@ void hp_poll_reconfigure() {
     s_cache.clear();
     s_cache_profile = "";
     s_cache_identity_fp = 0;
+    s_cache_source_generation = 0;
     ++s_cache_revision;
     s_cache_generation.fetch_add(1, std::memory_order_release);
     s_stats.connected = false;

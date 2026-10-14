@@ -1,4 +1,4 @@
-// translation-source: eb1bf7194d5b04fde1d4c42c3d33a86f36a932dbc9b646550c376c791cb1056b
+// translation-source: e25998e4ffbe8b2f6c1d6042ef119b29a42c67760570c1f53bd2aeeab1e1c838
 I18N.cs = localeValues([
   /* sys.nodata */ "Žádná data",
   /* sys.unreachable */ "Nedostupné",
@@ -506,8 +506,8 @@ I18N.cs = localeValues([
   /* wifi.title */ "Konfigurace WiFi",
   /* wifi.ssid */ "Síť WiFi (SSID)",
   /* wifi.pass */ "Heslo WiFi",
-  /* wifi.err_ssid */ "SSID může mít nejvýše 32 znaků",
-  /* wifi.err_pass */ "Heslo musí být prázdné (otevřená síť) nebo mít 8 až 63 znaků",
+  /* wifi.err_ssid */ "SSID musí mít 1 až 32 bajtů UTF-8",
+  /* wifi.err_pass */ "Heslo musí být prázdné (otevřená síť) nebo mít 8 až 63 bajtů UTF-8",
   /* wifi.hint */ "Zadejte název sítě WiFi. Pokud se zařízení nemůže připojit, automaticky obnoví předchozí nastavení WiFi.",
   /* mqtt.title */ "Broker MQTT",
   /* mqtt.hostport */ "Hostitel : port",

@@ -1,4 +1,4 @@
-// translation-source: eb1bf7194d5b04fde1d4c42c3d33a86f36a932dbc9b646550c376c791cb1056b
+// translation-source: e25998e4ffbe8b2f6c1d6042ef119b29a42c67760570c1f53bd2aeeab1e1c838
 I18N.ja = localeValues([
   /* sys.nodata */ "データなし",
   /* sys.unreachable */ "接続不可",
@@ -506,8 +506,8 @@ I18N.ja = localeValues([
   /* wifi.title */ "WiFi設定",
   /* wifi.ssid */ "WiFiネットワーク（SSID）",
   /* wifi.pass */ "WiFiパスワード",
-  /* wifi.err_ssid */ "SSIDは32文字以内です",
-  /* wifi.err_pass */ "パスワードは空（公開ネットワーク）または8～63文字です",
+  /* wifi.err_ssid */ "SSIDはUTF-8で1～32バイトです",
+  /* wifi.err_pass */ "パスワードは空（公開ネットワーク）またはUTF-8で8～63バイトです",
   /* wifi.hint */ "WiFi名を入力してください。接続できない場合は以前のWiFi設定へ自動で戻します。",
   /* mqtt.title */ "MQTTブローカー",
   /* mqtt.hostport */ "ホスト : ポート",

@@ -88,9 +88,11 @@ button:disabled { opacity: .6; cursor: default; box-shadow: none; }
   // caught before the POST. The server stays authoritative — this only saves a round-trip, and its
   // rejection is rendered inline below.
   function credError(ssid, pass) {
-    if (!ssid || ssid.length > 32) return "Enter a network name (1–32 characters).";
-    if (pass.length > 0 && (pass.length < 8 || pass.length > 63))
-      return "Password must be empty (open network) or 8–63 characters.";
+    const ssidBytes = new TextEncoder().encode(ssid).length;
+    const passBytes = new TextEncoder().encode(pass).length;
+    if (!ssidBytes || ssidBytes > 32) return "Enter a network name (1–32 UTF-8 bytes).";
+    if (passBytes > 0 && (passBytes < 8 || passBytes > 63))
+      return "Password must be empty (open network) or 8–63 UTF-8 bytes.";
     return "";
   }
   // A rejection body is {"ok":false,"error":…} JSON; tolerate a plain-text body too, so the portal

@@ -132,6 +132,9 @@ The same runner also executes complete production units through SDK/service adap
 | `python3 test/mqtt_retirement_store/run.py` | Complete retirement NVS adapter: fixed wire/CRC record, bounded reload, unchanged output on failure, checked saves and write-through commit failures. Synthetic NVS does not prove real reboot or power-loss restoration. |
 | `node test/test_uart_runtime.mjs` | Complete `hp_comm.cpp`: 22 cases and 14 named mutations distinguish local SDK errors from device silence, retain partial bytes, detection/probe mappings and legacy results, and preserve I/S framing, deadlines and single-request behavior. SDK/clock adapters do not prove electrical behavior or explain historical NoReply events. |
 | `node test/test_detect_runtime.mjs` | Complete detector with real profile registry and pin rules: reserved candidates, local failures, bounded retries, capacities and ambiguous membership. Synthetic frames do not establish physical Protocol S or electrical behavior. [Limits](detect_runtime/README.md). |
+| `node test/test_http_server_runtime.mjs` | Complete common/startup/MCP units: registration, request policy, incoming receive budgets and framing, protocol/error dispatch and real socket fragments. Other service handlers and shared status/value serializers are adapters. [Limits](http_server_runtime/README.md). |
+| `node test/test_http_deadline_runtime.mjs` | Complete outgoing deadline watchdog: priming/admission, expiry/shutdown acknowledgement and descriptor reuse. SDK scheduling and physical TLS interruption remain separate. [Limits](http_deadline_runtime/README.md). |
+| `node test/test_http_stream_runtime.mjs` | Complete common/status/dwell units: independent JSON/UTF-8 oracles, all observed allocation/chunk failure points, next-request recovery and cache-bound dwell snapshots. SDK/source providers are adapters. [Limits](http_stream_runtime/README.md). |
 
 After the pinned IDF build resolves `espressif/cjson` from `dependencies.lock`, run
 `node test/test_src_runtime.mjs --real-cjson managed_components/espressif__cjson/cJSON` for the same
@@ -154,6 +157,13 @@ The same build also runs `python3 test/query_http_runtime/run.py` with resolved 
 the actual `/hp/query` handler for strict numeric fields, defaults, status/frame/decode output and
 bounded serialization, with named compiling mutations. HTTP transport and UART handoff are adapters;
 the shared HTTP exception trampoline and real devices remain outside its [scope](query_http_runtime/README.md).
+
+After dependency resolution, the target-build entry point also runs
+`python3 test/http_config_runtime/run.py --real-cjson managed_components/espressif__cjson/cJSON --sanitizer undefined`.
+This complete configuration/OTA HTTP fixture exercises every setter, exact field types, write
+failure replies, missing values and query flags with real cJSON and CFG-03's transaction. SDK/NVS
+effects remain recording adapters; [the matrix](http_config_runtime/README.md) states the limits.
+Locally, `node test/test_http_config_runtime.mjs` invokes the same runner after dependencies exist.
 
 The contract runner executes additional compiled production consumers:
 

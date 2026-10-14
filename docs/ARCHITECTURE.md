@@ -251,11 +251,16 @@ block. The loaded UI observes progress through compact `/ota/status`; reloading 
 Large status, value, history, log and MCP responses stream bounded chunks. Before first emission,
 allocation failure becomes HTTP 503. After emission starts, close an incomplete stream rather than
 trying to send a second response or unwinding through C dispatch. Status and MCP have explicit
-incomplete-stream handling; values pre-stage and serialize without allocation. The outer guard
-cannot safely replace an already-emitted `/diag` or `/history` response (the tracked HTTP-03 limit).
-A snapshot remains internally
+incomplete-stream handling, as do values, history and diagnostic logs. Values pre-stage readings
+and dwell metadata bound to the same cache/source identity and decoded state. A snapshot remains internally
 consistent even when another source updates during serialization; separately sampled sources do
 not become one simultaneous physical observation.
+
+The SDK receive override in `http_common.cpp` starts one monotonic request budget before header
+parsing. Body reads and SDK purge retain it; successful settlement resets it for keep-alive. The
+session close callback leaves failed admission descriptors to the SDK accept path, avoiding its
+double-close path; the SDK frees the context for both failed and admitted sessions. The
+exact limits and JSON field/encoding rules belong in [API.md](API.md).
 
 <a id="home-assistant-mqtt-bridge-mqtt_hacpp"></a>
 ## MQTT ownership
