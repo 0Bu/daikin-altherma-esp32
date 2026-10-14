@@ -260,6 +260,19 @@
         "main/logic/mqtt_retirement.hpp": "0dbe80bceb64328963029d5f7ad5f9b10adc85ccc1e5ee5020cfee4ff6cac187",
         "test/test_logic.cpp": "06ea64cf0550e919f4be2af5345862ff6e0d57a92c940ea3d7eb28eac733dbcc"
       }
+    },
+    {
+      "compilers": {
+        "clang-17-darwin": "Apple Clang 17.0.0",
+        "gcc-13-linux-ubuntu24": "ESP-IDF v6.1 container GCC 13.3.0",
+        "gcc-15-linux-ubuntu26": "Ubuntu 26.04 aarch64 GCC 15.2.0-16ubuntu1"
+      },
+      "hosted_confirmation": "gcc-15-github-linux-ubuntu26 repeats the local GCC 15 inventory; authoritative CI pending",
+      "runner": "scripts/run-mock-tests.sh --coverage",
+      "scope": "The link yield records the stored pins and the factory seed restores them; every added outcome is taken and both ratios rise. All other inventories and historical floors retained.",
+      "sources": {
+        "main/logic/config_model.hpp": "d004a39893df3872a6eec3ebb2699032ab7bd6e1f20f4ea844f7488eb5b2379a"
+      }
     }
   ],
   "method": "Exact taken/outcome inventories are measured by scripts/run-mock-tests.sh --coverage and bound to compiler family, major version and platform; hosted profiles additionally bind the runner image. The gate rejects inventory mismatches and any historical ratio decrease. Updated hosted inventories require authoritative CI confirmation. Historical measurement notes remain in Git; profiles contain the enforced counts. Measurements below identify changed sources and local compiler provenance without changing checker rules or the 95-percent executable-line floor.",
@@ -314,8 +327,8 @@
         "taken": 53
       },
       "main/logic/config_model.hpp": {
-        "outcomes": 284,
-        "taken": 231
+        "outcomes": 292,
+        "taken": 238
       },
       "main/logic/config_store.hpp": {
         "outcomes": 486,
@@ -716,8 +729,8 @@
         "taken": 53
       },
       "main/logic/config_model.hpp": {
-        "outcomes": 304,
-        "taken": 260
+        "outcomes": 312,
+        "taken": 267
       },
       "main/logic/config_store.hpp": {
         "outcomes": 460,
@@ -1118,8 +1131,8 @@
         "taken": 53
       },
       "main/logic/config_model.hpp": {
-        "outcomes": 304,
-        "taken": 260
+        "outcomes": 312,
+        "taken": 267
       },
       "main/logic/config_store.hpp": {
         "outcomes": 460,
@@ -1520,8 +1533,8 @@
         "taken": 53
       },
       "main/logic/config_model.hpp": {
-        "outcomes": 304,
-        "taken": 260
+        "outcomes": 312,
+        "taken": 267
       },
       "main/logic/config_store.hpp": {
         "outcomes": 460,
