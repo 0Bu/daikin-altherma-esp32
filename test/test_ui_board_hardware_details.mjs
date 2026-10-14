@@ -66,6 +66,7 @@ for (const [phase, expectedPattern, suffix, rgbEnglish, rgbGerman, gpioEnglish, 
 const englishResetHint = I18N.en["board.hint"];
 for (const expected of [
   /Permanently erases Wi-Fi\/all settings/,
+  /\(only the board, status LED and reset button choice is kept\)/,
   /recorded history\/trends/,
   /state durations/,
   /raw core dump/,
@@ -76,6 +77,7 @@ for (const expected of [
 const germanResetHint = I18N.de["board.hint"];
 for (const expected of [
   /Löscht dauerhaft WLAN\/alle Einstellungen/,
+  /\(nur die Wahl von Board, Status-LED und Reset-Taster bleibt erhalten\)/,
   /Historie\/Trends/,
   /Zustandsdauern/,
   /Roh-Core-Dump/,

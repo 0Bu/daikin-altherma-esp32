@@ -1,4 +1,4 @@
-// translation-source: 1193f01400aed83045a3e10a1b4f35886a2c1805d9922e2301a21ba3fb27a905
+// translation-source: fde36399cd8e3129277c6ac54b4b2650e5653aa9581c2c0df568a89af9846ac7
 I18N.de = localeValues([
   /* sys.nodata */ "Keine Daten",
   /* sys.unreachable */ "Nicht erreichbar",
@@ -787,7 +787,7 @@ I18N.de = localeValues([
   /* board.led_gpio_wiping */ "Dauerlicht nach sehr schnellem Blinken — Werksreset/Datenlöschung läuft; Strom nicht trennen.",
   /* board.ledinv */ "Aktiv bei LOW — LED leuchtet bei niedrigem Pin-Pegel",
   /* board.btninv */ "Aktiv bei LOW — Taster zieht den Pin auf GND",
-  /* board.hint */ "Werksreset: Taster 5 s halten. Löscht dauerhaft WLAN/alle Einstellungen außer dieser Hardware-Auswahl, Historie/Trends, Zustandsdauern und Roh-Core-Dump. Das Einrichtungs-WLAN (Setup-Portal) öffnet sich nur nach vollständig erfolgreichem Löschen. Sonst loslassen und erneut 5 s halten. Ohne Taster „Keine“ wählen.",
+  /* board.hint */ "Werksreset: Taster 5 s halten. Löscht dauerhaft WLAN/alle Einstellungen (nur die Wahl von Board, Status-LED und Reset-Taster bleibt erhalten), Historie/Trends, Zustandsdauern und Roh-Core-Dump. Das Einrichtungs-WLAN (Setup-Portal) öffnet sich nur nach vollständig erfolgreichem Löschen. Sonst loslassen und erneut 5 s halten. Ohne Taster „Keine“ wählen.",
   /* card.hardware */ "Hardware",
   /* card.hw_off */ "Keine",
   /* card.hw_led */ (pin, kind) => `GPIO${pin} · ${kind}`,

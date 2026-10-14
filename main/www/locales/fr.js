@@ -1,4 +1,4 @@
-// translation-source: 1193f01400aed83045a3e10a1b4f35886a2c1805d9922e2301a21ba3fb27a905
+// translation-source: fde36399cd8e3129277c6ac54b4b2650e5653aa9581c2c0df568a89af9846ac7
 I18N.fr = localeValues([
   /* sys.nodata */ "Aucune donnée",
   /* sys.unreachable */ "Injoignable",
@@ -787,7 +787,7 @@ I18N.fr = localeValues([
   /* board.led_gpio_wiping */ "Fixe après clignotement très rapide — réinitialisation/effacement en cours ; ne coupez pas l’alimentation.",
   /* board.ledinv */ "Actif au niveau bas (la LED s’allume lorsque la broche est commandée LOW)",
   /* board.btninv */ "Actif au niveau bas (le bouton relie la broche à GND)",
-  /* board.hint */ "Réinitialisation d’usine : maintenez 5 s. Efface définitivement le Wi-Fi/tous les paramètres sauf ce choix de matériel, l’historique/les tendances, les durées d’état et le vidage mémoire brut. Le portail de configuration (Wi-Fi) ne s’ouvre qu’après un effacement complet et réussi. Sinon, relâchez puis maintenez encore 5 s. Choisissez « Aucun » sans bouton.",
+  /* board.hint */ "Réinitialisation d’usine : maintenez 5 s. Efface définitivement le Wi-Fi/tous les paramètres (seul le choix de carte, de LED d’état et de bouton de réinitialisation est conservé), l’historique/les tendances, les durées d’état et le vidage mémoire brut. Le portail de configuration (Wi-Fi) ne s’ouvre qu’après un effacement complet et réussi. Sinon, relâchez puis maintenez encore 5 s. Choisissez « Aucun » sans bouton.",
   /* card.hardware */ "Matériel",
   /* card.hw_off */ "Aucun",
   /* card.hw_led */ (pin, kind) => `GPIO${pin} · ${kind}`,

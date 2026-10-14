@@ -181,7 +181,7 @@ and a clean boot never comes up in heap safe mode.
 NVS initialization errors never erase the partition automatically. Failed initialization disables
 WiFi-driver NVS before driver startup; STA/AP credentials use RAM storage every boot.
 Mandatory-startup or persistence failures remain outside the recovery guarantee, as does an unsigned
-image failure before `app_main`. Heap breadcrumbs separately bound retries; `safe_mode_cause` distinguishes them.
+image failure before `app_main`. `safe_mode_cause` distinguishes heap from crash loop.
 Recovery is best effort and adds no endpoint or privilege. Factory reset is destructive and must
 complete all configured data erasures, including the MQTT retirement record, before declaring
 success; it keeps only the board hardware statement, and no other restart runs while it erases.

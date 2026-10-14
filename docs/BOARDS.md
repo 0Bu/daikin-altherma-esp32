@@ -127,11 +127,12 @@ wired; a floating input can trigger an unintended reset.
 
 Holding a configured button for five seconds erases serialized settings, legacy WiFi credentials,
 history/trend/state-age data, the raw coredump and the MQTT retirement record; the stated board
-hardware (preset, indicator, button) is kept so the button still works afterwards. A hold counts
-only after three consecutive pressed samples, and a button held at boot stays inactive until it
-reads released three times. It reboots into setup only after every erase succeeds; an incomplete
-wipe remains on the current boot, is reported in `/diag` and shows no indicator pattern. Release
-while arming to abort. Preserve needed configuration and crash evidence before using it.
+hardware (preset, indicator, button) is kept, best effort, so the button still works afterwards.
+A hold counts only after three consecutive pressed samples, and a button held at boot stays
+inactive until it reads released three times. It reboots into setup only after every erase
+succeeds; an incomplete wipe remains on the current boot, is reported in `/diag`, and the indicator
+returns to its normal pattern. Release while arming to abort. Preserve needed configuration and
+crash evidence before using it.
 
 ## Feature availability by board
 

@@ -789,7 +789,7 @@ const I18N = {
     "board.led_gpio_wiping": "Solid after very rapid blinking — factory reset/data erase in progress; do not disconnect power.",
     "board.ledinv": "Active low (LED lights when the pin is driven LOW)",
     "board.btninv": "Active low (button shorts the pin to GND)",
-    "board.hint": "Factory reset: hold 5 seconds. Permanently erases Wi-Fi/all settings except this hardware selection, recorded history/trends, state durations, and the raw core dump. The setup portal opens only after the full wipe succeeds. If not, release and hold again for 5 seconds. Select “None” if no button is connected.",
+    "board.hint": "Factory reset: hold 5 seconds. Permanently erases Wi-Fi/all settings (only the board, status LED and reset button choice is kept), recorded history/trends, state durations, and the raw core dump. The setup portal opens only after the full wipe succeeds. If not, release and hold again for 5 seconds. Select “None” if no button is connected.",
     "card.hardware": "Hardware", "card.hw_off": "None",
     "card.hw_led": (pin, kind) => `GPIO${pin} · ${kind}`, "card.hw_btn": (pin) => `GPIO${pin}`,
     "card.hw_board_m5stack": "M5Stack AtomS3 Lite is a compact ESP32-S3 board with an onboard WS2812 RGB status LED.",

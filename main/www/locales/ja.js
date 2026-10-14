@@ -1,4 +1,4 @@
-// translation-source: 1193f01400aed83045a3e10a1b4f35886a2c1805d9922e2301a21ba3fb27a905
+// translation-source: fde36399cd8e3129277c6ac54b4b2650e5653aa9581c2c0df568a89af9846ac7
 I18N.ja = localeValues([
   /* sys.nodata */ "データなし",
   /* sys.unreachable */ "接続不可",
@@ -787,7 +787,7 @@ I18N.ja = localeValues([
   /* board.led_gpio_wiping */ "超高速点滅後に点灯 — 初期化/データ完全消去中。電源を切らないでください。",
   /* board.ledinv */ "アクティブLOW（端子LOWでLED点灯）",
   /* board.btninv */ "アクティブLOW（ボタンで端子をGNDへ短絡）",
-  /* board.hint */ "工場出荷時リセット：ボタンを5秒押す。Wi-Fi/全設定（このハードウェア選択を除く）、履歴/トレンド、状態継続時間、未加工コアダンプを完全消去。全消去成功時のみ設定ポータルが開く。開かなければ離して再度5秒押す。未接続なら「なし」。",
+  /* board.hint */ "工場出荷時リセット：ボタンを5秒押す。Wi-Fi/全設定（基板・状態LED・リセットボタンの選択のみ保持）、履歴/トレンド、状態継続時間、未加工コアダンプを完全消去。全消去成功時のみ設定ポータルが開く。開かなければ離して再度5秒押す。未接続なら「なし」。",
   /* card.hardware */ "ハードウェア",
   /* card.hw_off */ "なし",
   /* card.hw_led */ (pin, kind) => `GPIO${pin} · ${kind}`,

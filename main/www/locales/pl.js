@@ -1,4 +1,4 @@
-// translation-source: 1193f01400aed83045a3e10a1b4f35886a2c1805d9922e2301a21ba3fb27a905
+// translation-source: fde36399cd8e3129277c6ac54b4b2650e5653aa9581c2c0df568a89af9846ac7
 const plNoun = (n, one, few, many) => {
   const value = Math.abs(Number(n)), mod10 = value % 10, mod100 = value % 100;
   return value === 1 ? one
@@ -792,7 +792,7 @@ I18N.pl = localeValues([
   /* board.led_gpio_wiping */ "Świeci stale po szybkim miganiu — reset/kasowanie danych; nie odłączaj zasilania.",
   /* board.ledinv */ "Aktywny stan niski (dioda świeci, gdy pin jest ustawiony na LOW)",
   /* board.btninv */ "Aktywny stan niski (przycisk zwiera pin do GND)",
-  /* board.hint */ "Reset fabryczny: przytrzymaj 5 s. Trwale kasuje Wi-Fi/wszystkie ustawienia oprócz tego wyboru sprzętu, historię/trendy, czasy stanów i surowy zrzut po awarii. Portal konfiguracyjny (Wi-Fi) otworzy się tylko po całkowitym i pomyślnym skasowaniu danych. Jeśli nie, zwolnij i przytrzymaj ponownie 5 s. Bez przycisku wybierz „Brak”.",
+  /* board.hint */ "Reset fabryczny: przytrzymaj 5 s. Trwale kasuje Wi-Fi/wszystkie ustawienia (zostaje tylko wybór płytki, diody stanu i przycisku reset), historię/trendy, czasy stanów i surowy zrzut po awarii. Portal konfiguracyjny (Wi-Fi) otworzy się tylko po całkowitym i pomyślnym skasowaniu danych. Jeśli nie, zwolnij i przytrzymaj ponownie 5 s. Bez przycisku wybierz „Brak”.",
   /* card.hardware */ "Sprzęt",
   /* card.hw_off */ "Brak",
   /* card.hw_led */ (pin, kind) => `GPIO${pin} · ${kind}`,
