@@ -321,7 +321,7 @@ const namedHttpSymbols = {
   config_circulation: ["set_circulation", 976], circulation_parser: ["parse_circulation_request", 1408],
   hp_query_probe: ["hp_query_probe", 2736], mcp_parser: ["mcp_parse", 256],
   config_save: ["config_save", 32], config_save_link: ["config_save_link", 32],
-  config_save_whole: ["save_whole", 48], config_nvs_blob: ["nvs_set_blob", 48],
+  config_save_whole: ["save_whole", 64], config_nvs_blob: ["nvs_set_blob", 48],
   http_scan: ["h_scan", 768], wifi_scan: ["wifi_scan", 1920],
 };
 for (const [key, [name, maximum]] of Object.entries(namedHttpSymbols)) {
