@@ -1,4 +1,4 @@
-// translation-source: fde36399cd8e3129277c6ac54b4b2650e5653aa9581c2c0df568a89af9846ac7
+// translation-source: 22a1c00755c5e710f675904d8503fe9efb3cfb475acba640fc78c686e833d886
 const plNoun = (n, one, few, many) => {
   const value = Math.abs(Number(n)), mod10 = value % 10, mod100 = value % 100;
   return value === 1 ? one
@@ -774,19 +774,19 @@ I18N.pl = localeValues([
   /* board.btnpin */ "Pin przycisku reset",
   /* board.ledlegend_rgb */ "Kolory i wzory migania diody LED",
   /* board.ledlegend_gpio */ "Wzory migania diody LED",
-  /* board.led_rgb_off */ "Wyłączona — brak aktywnego trybu Wi-Fi.",
+  /* board.led_rgb_off */ "Wyłączona — brak aktywnej sieci.",
   /* board.led_rgb_setup */ "Niebieska, wolno miga — portal konfiguracji aktywny.",
-  /* board.led_rgb_connecting */ "Żółta, szybko miga — łączenie z Wi-Fi.",
-  /* board.led_rgb_healthy */ "Zielona, świeci stale — wszystkie skonfigurowane połączenia gotowe.",
-  /* board.led_rgb_bus_down */ "Czerwona, podwójny błysk — X10A rozłączone.",
+  /* board.led_rgb_connecting */ "Żółta, szybko miga — łączenie z siecią.",
+  /* board.led_rgb_healthy */ "Zielona, świeci stale — X10A i, jeśli skonfigurowano, MQTT połączone.",
+  /* board.led_rgb_bus_down */ "Czerwona, podwójny błysk — X10A rozłączone lub tryb odzyskiwania.",
   /* board.led_rgb_mqtt_down */ "Pomarańczowa, miga — X10A połączone, MQTT rozłączone.",
   /* board.led_rgb_wipe_armed */ "Czerwona, bardzo szybko miga — kasowanie uzbrojone; zwolnij, aby anulować.",
   /* board.led_rgb_wiping */ "Biała, świeci stale — reset/kasowanie danych; nie odłączaj zasilania.",
-  /* board.led_gpio_off */ "Wyłączona — brak aktywnego trybu Wi-Fi.",
+  /* board.led_gpio_off */ "Wyłączona — brak aktywnej sieci.",
   /* board.led_gpio_setup */ "Wolno miga — portal konfiguracji aktywny.",
-  /* board.led_gpio_connecting */ "Szybko miga — łączenie z Wi-Fi.",
-  /* board.led_gpio_healthy */ "Świeci stale — wszystkie skonfigurowane połączenia gotowe.",
-  /* board.led_gpio_bus_down */ "Podwójny błysk — X10A rozłączone.",
+  /* board.led_gpio_connecting */ "Szybko miga — łączenie z siecią.",
+  /* board.led_gpio_healthy */ "Świeci stale — X10A i, jeśli skonfigurowano, MQTT połączone.",
+  /* board.led_gpio_bus_down */ "Podwójny błysk — X10A rozłączone lub tryb odzyskiwania.",
   /* board.led_gpio_mqtt_down */ "Miga ze średnią szybkością — X10A połączone, MQTT rozłączone.",
   /* board.led_gpio_wipe_armed */ "Bardzo szybko miga — kasowanie uzbrojone; zwolnij, aby anulować.",
   /* board.led_gpio_wiping */ "Świeci stale po szybkim miganiu — reset/kasowanie danych; nie odłączaj zasilania.",
