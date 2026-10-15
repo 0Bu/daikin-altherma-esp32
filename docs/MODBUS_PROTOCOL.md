@@ -325,12 +325,12 @@ numeric agreement or difference is asserted for native flow/pressure while their
 The sentinel filter remains a conservative project rule; the guide explicitly documents unavailable
 32766 for input 23 but does not establish the complete EKRHH sentinel vocabulary for every native row.
 
-To complete HUB-02, record the matching model/MMI version and compare raw registers 49/68/79 with
+For future physical validation, record the matching model/MMI version and compare raw registers 49/68/79 with
 simultaneous controller readings or independent references across more than one operating point.
 Confirm profile selection and compare the corrected enum states, quiet selection versus discrete
 input 12, and available native holding registers. No simulator, host test or ordinary
-HomeHub bench run substitutes for that physical acceptance. HUB-02 remains open until this evidence
-resolves the assumptions and any necessary follow-up fixes pass their own checks.
+HomeHub bench run substitutes for that physical acceptance. The completed software review does not
+establish these physical interpretations; they remain unverified pending such evidence.
 
 ### Automatic profile detection and fail-closed fallback
 
