@@ -116,6 +116,8 @@ class Element {
     descNoteHtml: (lead, text) => `<div class="vdesc-p"><span class="vdesc-n">${lead}</span> ${text}</div>`,
     hasHist: () => false,
     setLangFromStatus: () => { languageHydrations += 1; },
+    // Real live-data/SVG invalidation is covered by test_ui_ota_snapshot_render.mjs.
+    invalidateLiveReadings: () => {},
     renderOtaDashboardStatus: () => { dashboardStatusPaints += 1; },
     j: async () => ({ state: "updating", generation: 7, progress: 78, current: "1.4.72-dev.333", channel: "dev" }),
     setTimeout: () => 1,

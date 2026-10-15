@@ -40,6 +40,9 @@ const cache = () => ({ saved_at_ms: Date.now(), status: status(), ...values() })
 
 function harness(cached, transform = (text) => text) {
   const elements = new Map(), storage = new Map(), routes = new Map();
+  const timers = new Map();
+  let clock = Date.now(), nextTimer = 0, reloads = 0;
+  class Clock extends Date { static now() { return clock; } }
   if (cached) storage.set(cacheKey, JSON.stringify(cached));
   const flows = ["fPhe", "fSup1", "fSup2", "fSup3", "fRet", "fHeat", "fHeatRet", "rfHot", "rfPhe", "rfCold"];
   const controls = [{ disabled: false, dataset: {} }];
@@ -52,7 +55,11 @@ function harness(cached, transform = (text) => text) {
         toggle(name, on) { if (on) names.add(name); else names.delete(name); } },
       setAttribute(name, value) { this[name] = String(value); }, removeAttribute(name) { delete this[name]; },
       appendChild(child) { this.children.push(child); return child; }, closest: () => null,
-      querySelector: () => null,
+      getAttribute(name) { return this[name] ?? null; },
+      querySelector(selector) {
+        const suffix = { ".crash-title": "Title", ".ota-alert-message": "Message", ".ota-alert-close": "Close" }[selector];
+        return suffix ? element(id + suffix) : null;
+      },
       querySelectorAll(selector) {
         if (selector.includes(".sc-flow")) return flows.map(element);
         if (selector === "button, select, input") return controls;
@@ -63,11 +70,13 @@ function harness(cached, transform = (text) => text) {
   const document = { activeElement: null, getElementById: element, createElement: element,
     querySelectorAll: () => [] };
   const context = vm.createContext({ document, navigator: { language: "en" },
-    location: { hostname: "fixture.invalid" }, localStorage: { getItem: () => null, setItem() {} },
+    Date: Clock, location: { hostname: "fixture.invalid", reload: () => { reloads++; } },
+    localStorage: { getItem: () => null, setItem() {} },
     sessionStorage: { getItem: (key) => storage.get(key) ?? null,
       setItem: (key, value) => storage.set(key, value), removeItem: (key) => storage.delete(key) },
-    setTimeout: () => 1, clearTimeout() {},
-    fetch: (url) => routes.get(String(url))(),
+    setTimeout: (fn, ms) => { const id = ++nextTimer; timers.set(id, { fn, ms }); return id; },
+    clearTimeout: (id) => timers.delete(id),
+    fetch: (url) => routes.get(String(url).split("?")[0])(),
   });
   context.window = context;
   vm.runInContext(transform(source) + `
@@ -76,16 +85,21 @@ function harness(cached, transform = (text) => text) {
     renderRollbackBanner = () => {};
     renderCrashBanner = () => {};
     renderHeaderMeta = () => {};
-    renderSettings = () => {};
+    renderSettings = () => syncOtaSettingsLock();
     renderCards = () => {};
     renderInspect = () => {};
-    paintOtaAlert = () => {};
-    this.ui = { S, resumeOta, refreshStatus, refreshValues, renderApp, renderLive };
+    this.ui = { S, resumeOta, refreshStatus, refreshValues, renderApp, renderLive, otaCacheRestore };
   `, context);
   const statusReply = deferred(), compactReply = deferred();
   routes.set("/status", () => statusReply.promise);
   routes.set("/ota/status", () => compactReply.promise);
-  return { ...context.ui, storage, routes, statusReply, compactReply, controls, element };
+  return { ...context.ui, storage, routes, statusReply, compactReply, controls, element,
+    get reloads() { return reloads; }, advance: (ms) => { clock += ms; },
+    async tick(ms = 1000) {
+      const pending = [...timers].find(([, timer]) => timer.ms === ms);
+      assert.ok(pending, `production must schedule a ${ms} ms timer`);
+      timers.delete(pending[0]); clock += ms; pending[1].fn(); await settle();
+    } };
 }
 const compact = { state: "updating", generation: 7, current: "snapshot-test", progress: 78, channel: "dev" };
 const observe = (h) => ({ lwt: h.element("svLwt").textContent, pth: h.element("svPth").textContent,
@@ -93,8 +107,7 @@ const observe = (h) => ({ lwt: h.element("svLwt").textContent, pth: h.element("s
   pump: h.element("schem").classList.contains("pump-on"),
   headline: h.element("svMode").textContent, detail: h.element("svStatus").textContent });
 
-for (const order of ["status-first", "cache-first"]) {
-  const h = harness(cache());
+async function startup(h, order) {
   const resume = h.resumeOta(), initial = h.refreshStatus(false);
   if (order === "status-first") {
     h.statusReply.resolve(response({}, 503)); await settle();
@@ -106,6 +119,11 @@ for (const order of ["status-first", "cache-first"]) {
     h.statusReply.resolve(response({}, 503));
   }
   await resume; await initial; await settle();
+}
+
+for (const order of ["status-first", "cache-first"]) {
+  const h = harness(cache());
+  await startup(h, order);
   assert.equal(h.S.otaCached, true);
   assert.equal(observe(h).lwt, "35.0", `${order}: restored R1T must reach the real schematic`);
   assert.notEqual(h.S.live, null, `${order}: restored values must reach the actual live-data builder`);
@@ -138,6 +156,86 @@ for (const order of ["status-first", "cache-first"]) {
   assert.equal(observe(h).fan, false); assert.equal(observe(h).pump, false);
 }
 
+for (const order of ["status-first", "cache-first"]) {
+  for (const terminal of ["error", "timeout", "reboot-timeout"]) {
+    const h = harness(cache());
+    await startup(h, order);
+    let reason;
+    if (terminal === "error") {
+      reason = "Signature verification failed";
+      h.routes.set("/ota/status", async () => response({ state: "error", generation: 7, busy: false, message: reason }));
+      await h.tick();
+    } else if (terminal === "timeout") {
+      reason = "timed out";
+      for (let i = 0; i < 300; i++) await h.tick();
+    } else {
+      reason = "installed — reload the page";
+      h.routes.set("/ota/status", async () => response({ state: "done", generation: 7, busy: true }));
+      await h.tick();
+      assert.equal(h.S.otaCached, true, "a successful install retains its snapshot while awaiting reboot");
+      assert.equal(h.controls[0].disabled, true);
+      h.advance(120001); await h.tick();
+    }
+    assert.equal(h.S.otaCached, false, `${order}/${terminal}: terminal flow must retire the cached frame`);
+    assert.equal(h.S.busy, false); assert.equal(h.S.otaBusy, false); assert.equal(h.S.otaInstalling, false);
+    assert.equal(h.storage.has(cacheKey), false);
+    assert.equal(h.S.otaAlert, reason); assert.equal(h.element("otaAlertDashMessage").textContent, reason);
+    assert.equal(h.controls[0].disabled, false);
+    h.renderApp(); h.renderLive();
+    assert.equal(h.S.live, null); assert.equal(observe(h).lwt, "—");
+    assert.equal(observe(h).fan, false); assert.equal(observe(h).pump, false);
+    assert.notEqual(observe(h).headline, "Firmware update");
+    h.routes.set("/status", async () => { throw new Error("offline"); });
+    h.routes.set("/values", async () => { throw new Error("offline"); });
+    await h.refreshStatus(); await h.refreshValues(); h.renderApp();
+    assert.equal(observe(h).lwt, "—"); assert.equal(h.S.otaCached, false);
+    assert.equal(h.element("otaAlertDashMessage").textContent, reason);
+    h.routes.set("/status", async () => response({ ...status(), uptime_s: 101 }));
+    h.routes.set("/values", async () => response(values("38.0")));
+    await h.refreshStatus(); await h.refreshValues();
+    assert.equal(observe(h).lwt, "38.0"); assert.equal(h.S.otaCached, false);
+    assert.equal(h.controls[0].disabled, false);
+    assert.equal(h.element("otaAlertDashMessage").textContent, reason, "fresh reads do not dismiss the terminal alert");
+  }
+
+  const h = harness(cache());
+  await startup(h, order);
+  h.routes.set("/status", async () => response({ ...status(), uptime_s: 101 }));
+  h.routes.set("/values", async () => response(values("38.0")));
+  await h.refreshStatus(); await h.refreshValues();
+  h.routes.set("/ota/status", async () => response({ state: "error", generation: 7, busy: false, message: "Download failed" }));
+  await h.tick(); h.renderApp();
+  assert.equal(observe(h).lwt, "38.0", "a terminal error must preserve a genuinely fresh frame");
+  assert.equal(h.S.transportUnavailable, null); assert.equal(h.controls[0].disabled, false);
+
+  const reboot = harness(cache());
+  await startup(reboot, order);
+  reboot.routes.set("/status", async () => response({ ...status(), uptime_s: 1 }));
+  reboot.routes.set("/ota/status", async () => response({ state: "done", generation: 7, busy: true }));
+  await reboot.tick();
+  assert.equal(reboot.reloads, 1); assert.equal(reboot.S.otaCached, true);
+  assert.equal(reboot.controls[0].disabled, true, "successful reboot handoff retains its lock until reload");
+}
+
+// Clearing the compact observer's idle/error/check-only cache lease also retires any restored
+// presentation. No live frame is manufactured while those operations release their write lock.
+for (const state of ["idle", "error", "checking"]) {
+  const h = harness(cache());
+  assert.equal(await h.otaCacheRestore(compact), true);
+  const resumed = h.resumeOta();
+  h.compactReply.resolve(response({ state, generation: 7, busy: state === "checking", message: "Check failed" }));
+  await resumed; await settle();
+  if (state === "checking") {
+    h.routes.set("/ota/status", async () => response({ state: "idle", generation: 7, busy: false }));
+    await h.tick();
+  }
+  h.renderApp();
+  assert.equal(h.S.otaCached, false); assert.equal(h.S.live, null);
+  assert.equal(observe(h).lwt, "—"); assert.equal(h.controls[0].disabled, false);
+  assert.equal(h.storage.has(cacheKey), false);
+  assert.notEqual(observe(h).headline, "Firmware update");
+}
+
 for (const invalid of [null, { ...cache(), saved_at_ms: Date.now() - 16 * 60 * 1000 },
   { ...cache(), status: { ...status(), version: "other-version" } }]) {
   const h = harness(invalid);
@@ -150,6 +248,24 @@ for (const invalid of [null, { ...cache(), saved_at_ms: Date.now() - 16 * 60 * 1
   assert.equal(observe(h).fan, false); assert.equal(observe(h).pump, false);
   assert.doesNotMatch(observe(h).detail, /last received state/);
   assert.equal(h.storage.has(cacheKey), false);
+}
+
+{
+  const h = harness(cache(), (text) => {
+    const retirement = '  if (S.otaCached) {\n    S.otaCached = false;\n    invalidateLiveReadings("status");\n  }\n';
+    const mutated = text.replace(retirement, "");
+    assert.notEqual(mutated, text, "terminal negative control must remove actual cache retirement");
+    return mutated;
+  });
+  await startup(h, "status-first");
+  h.routes.set("/ota/status", async () => response({ state: "error", generation: 7, busy: false, message: "Download failed" }));
+  await h.tick(); h.renderApp();
+  assert.equal(h.S.otaCached, true, "the compiling mutant must reproduce the stale cached lifetime");
+  assert.equal(h.controls[0].disabled, true, "the missing retirement must reproduce the terminal write lock");
+  assert.equal(observe(h).headline, "Firmware update");
+  assert.equal(observe(h).lwt, "35.0");
+  assert.equal(h.storage.has(cacheKey), false, "storage deletion alone does not retire the in-memory frame");
+  assert.equal(h.element("otaAlertDashMessage").textContent, "Download failed");
 }
 
 // Both historical bugs must remain independently observable in compiling production variants.
@@ -179,4 +295,4 @@ for (const [before, after, broken] of [
     assert.doesNotMatch(observe(h).detail, /last received state/);
   }
 }
-console.log("OTA cached snapshot: real schematic, startup races, fresh-frame recovery and rejected caches pass");
+console.log("OTA snapshot: real schematic, startup races, terminal flows, reboot handoff and fresh recovery pass");

@@ -955,6 +955,10 @@ function otaCacheStorage() {
 }
 function otaCacheClear() {
   try { otaCacheStorage()?.removeItem(OTA_RENDER_CACHE_KEY); } catch { /* best effort */ }
+  if (S.otaCached) {
+    S.otaCached = false;
+    invalidateLiveReadings("status");
+  }
 }
 function otaCacheStore() {
   if (!S.status || typeof S.status.version !== "string") return false;
@@ -1059,10 +1063,12 @@ const OTA_CHECK_POLL_TRIES = 150;
 function otaFail(text) {
   S.otaInstalling = false;
   S.otaBusy = false;
+  const wasCached = S.otaCached;
   otaCacheClear();
   syncOtaSettingsLock();
   otaInline("");
   otaAlert(text);
+  if (!wasCached) renderApp();
 }
 
 let otaDecisionResolve = null;
@@ -1284,6 +1290,7 @@ async function resumeOta(s = null) {
       if (s.state === "error") { otaFail(s.message || t("ota.failed")); return; }
       if (s.state !== "updating" && s.state !== "done") {
         S.otaBusy = false;
+        otaCacheClear();
         otaInline("");
         return;
       }
@@ -1379,9 +1386,8 @@ function otaWaitReboot() {
     // settles the question either way. Never answered at all: a reload would replace the one status
     // line the user has with a browser error page, so keep the message and let them choose when.
     if (s) { location.reload(); return; }
-    S.busy = false; S.otaBusy = false; S.otaInstalling = false;
-    otaInline("");
-    otaAlert(t("ota.reload_hint"));
+    S.busy = false;
+    otaFail(t("ota.reload_hint"));
   };
   probe();
 }
