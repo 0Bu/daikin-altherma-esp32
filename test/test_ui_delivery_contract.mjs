@@ -9,6 +9,7 @@ import path from "node:path";
 import vm from "node:vm";
 import zlib from "node:zlib";
 import { fileURLToPath } from "node:url";
+import { spliceInlineAssets } from "../tools/ui/inline_page.mjs";
 import { readAppSource } from "../tools/ui/read_app_source.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -23,11 +24,49 @@ try {
   const html = fs.readFileSync(path.join(root, "main/www/index.html"), "utf8");
   const css = fs.readFileSync(path.join(root, "main/www/style.css"), "utf8");
   const app = readAppSource();
-  const assembled = html
-    .replace("/*@@INLINE:style.css@@*/\n", css)
-    .replace("//@@INLINE:app.js@@\n", app);
+  const assembled = spliceInlineAssets(html, { css, js: app });
   assert.notEqual(assembled, html, "test assembly must replace both inline markers");
   fs.writeFileSync(input, assembled);
+
+  // Host pages must be byte-identical to the firmware page. inline_assets.cmake splices with
+  // string(REPLACE), which copies asset bytes literally; String.prototype.replace(string, string)
+  // expands $$, $&, $`, $' and $<name> in its replacement and once dropped a dollar sign from
+  // settings.js, so the render gate executed a room-source formatter the device never ships.
+  // The oracle is an independent literal splice; the render gate's assembler runs as the gate runs it.
+  const literalSplice = (page, marker, asset) => {
+    const at = page.indexOf(marker);
+    assert.ok(at >= 0 && page.indexOf(marker, at + marker.length) < 0, `marker ${marker.trim()} must appear once`);
+    return page.slice(0, at) + asset + page.slice(at + marker.length);
+  };
+  const firstDifference = (actual, expected) => {
+    let i = 0;
+    while (i < actual.length && i < expected.length && actual[i] === expected[i]) i++;
+    return `first difference at byte ${i} (line ${expected.slice(0, i).split("\n").length}): ` +
+      `${JSON.stringify(actual.slice(Math.max(0, i - 30), i + 12))} vs firmware ` +
+      `${JSON.stringify(expected.slice(Math.max(0, i - 30), i + 12))}`;
+  };
+  const firmwarePage = literalSplice(literalSplice(html, "/*@@INLINE:style.css@@*/\n", css),
+    "//@@INLINE:app.js@@\n", app);
+  const dollarSequence = "}$${";
+  assert.ok(app.includes(dollarSequence),
+    "premise: settings.js formatRefSource keeps the literal dollar separator this check guards");
+  const gatePath = path.join(work, "render-gate.html");
+  const gateRun = childProcess.spawnSync(process.execPath, ["tools/browser/assemble_page.mjs", gatePath],
+    { cwd: root, encoding: "utf8" });
+  assert.equal(gateRun.status, 0, gateRun.stderr || gateRun.stdout);
+  const gatePage = fs.readFileSync(gatePath, "utf8");
+  for (const [name, page] of [["render-gate assembler", gatePage], ["delivery-test assembly", assembled]]) {
+    assert.ok(page === firmwarePage,
+      `${name} must equal the literal firmware splice; ${firstDifference(page, firmwarePage)}`);
+    assert.equal(page.split(dollarSequence).length, app.split(dollarSequence).length,
+      `${name} must keep every ${dollarSequence} from settings.js`);
+  }
+  const replacementPatterns = "a $$ b $& c $` d $' e $<name> f $1";
+  assert.equal(spliceInlineAssets(
+    "<style>\n/*@@INLINE:style.css@@*/\n</style><script>\n//@@INLINE:app.js@@\n</script>",
+    { css: replacementPatterns, js: replacementPatterns }),
+  `<style>\n${replacementPatterns}</style><script>\n${replacementPatterns}</script>`,
+  "the shared host splice must copy every String.prototype.replace pattern literally");
 
   const tool = path.join(root, "tools/web_asset/minify_and_gzip.py");
   const run = (output, extra = []) => childProcess.spawnSync("python3", [
@@ -99,9 +138,10 @@ try {
   // credential and server-rejection paths, and reuse every MCP clipboard interleaving control
   // against the shipped script, so a parseable but behavior-changing reduction cannot pass.
   const setupSource = fs.readFileSync(path.join(root, "main/www/setup.html"), "utf8");
-  const mcpSource = fs.readFileSync(path.join(root, "main/www/mcp_dashboard.html"), "utf8")
-    .replace("/*@@INLINE:style.css@@*/\n", fs.readFileSync(path.join(root, "main/www/mcp_dashboard.css"), "utf8"))
-    .replace("//@@INLINE:app.js@@\n", fs.readFileSync(path.join(root, "main/www/mcp_dashboard.js"), "utf8"));
+  const mcpSource = spliceInlineAssets(fs.readFileSync(path.join(root, "main/www/mcp_dashboard.html"), "utf8"), {
+    css: fs.readFileSync(path.join(root, "main/www/mcp_dashboard.css"), "utf8"),
+    js: fs.readFileSync(path.join(root, "main/www/mcp_dashboard.js"), "utf8"),
+  });
   const shipped = {};
   for (const [name, source, cap] of [["setup", setupSource, 4096], ["mcp", mcpSource, 8192]]) {
     const src = path.join(work, `${name}.html`);
