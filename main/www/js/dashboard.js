@@ -1743,7 +1743,8 @@ function connLinks() {
   }
 
   return S.transportUnavailable === "status"
-    ? links.map(l => ({ ...l, cls: "dim", state: t("sys.nodata"), detail: t("ota.snapshot_value") })) : links;
+    ? links.map(l => ({ ...l, cls: "dim", state: t("sys.nodata"), detail: "",
+      value: l.edit === "wifi" ? esc(w.ssid || "—") : l.value })) : links;
 }
 // The row conveys state by colour alone (the value IS the address/name, just tinted) — DESIGN.md
 // §9's "status never conveyed by colour alone" would otherwise be broken for colourblind users and

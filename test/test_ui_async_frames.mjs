@@ -185,6 +185,8 @@ console.log("UI status/value ordering, lazy locale leases, transport loss and im
       assert.ok(html.includes("dyn.outdoor_detail_sample"), "recorded events remain bounded historical evidence");
     }
     assert.equal(v.connLinks().some(link => link.cls === "ok"), current);
+    if (!current) assert.ok(v.connLinks().every(link => !link.detail && !link.value.includes("signal")),
+      "a lost status frame must not invent per-service errors or retain a current radio-strength claim");
     h.S.scrub = "held-chart"; // The snapshot warning must update even while a plot owns focus.
     v.renderSettings();
     assert.equal(snapshot.hidden, current);
