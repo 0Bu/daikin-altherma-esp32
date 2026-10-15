@@ -72,6 +72,12 @@ It never stacks requests behind a slow response. Each fetch is bounded at 6 seco
 off to at most 30 seconds. Hidden tabs suspend polling and becoming visible retries immediately.
 The plant's poll engine has its separate cadence. There is no WebSocket/push transport.
 
+Only the latest requested status can update the screen; value replies also belong to that source
+lifetime. Failed reads retire live measurements and stop unsupported motion until a fresh frame
+arrives; Settings labels retained status as a snapshot and suppresses current sensor claims.
+A changed application-image identity reloads the page before using the new image's data
+or positional locale catalogs.
+
 The dashboard stays readable while configuration or updates run. Every asynchronous state has an
 explicit result. An answered 503 is busy/retryable, not an unreachable device. Losing HTTP contact
 and losing only X10A are rendered separately.
@@ -93,7 +99,8 @@ Network-derived strings use DOM text/value properties and are never interpreted 
 Connections rows open centred dialogs over the dimmed Settings view. Cancel, backdrop and Escape
 write nothing. Save disables its button during the request, reads the response, and enters reboot/
 reconnect only when accepted and a reboot is required. A no-change result closes without waiting
-for a reboot. Rejection leaves the user's draft intact.
+for a reboot. While Save is pending, dismissal and navigation wait for its result; rejection leaves
+the user's draft intact. Setup feedback and ordinary save toasts are announced to assistive tools.
 
 | Editor | Required behavior |
 |---|---|
@@ -393,12 +400,13 @@ and rollback still require the new page. After the bounded wait, an answering de
 never answers, preserve the installed/reload instruction rather than replace it with a browser error.
 Sequence guards prevent old result timers from clearing a newer operation.
 
-On page load, compact OTA status can adopt an in-flight download even if large status/values requests
-are busy. A same-tab, at-most-15-minute snapshot is usable only when its version matches current
+On page load or a busy full-status response, compact OTA status can adopt an in-flight download
+even if large status/values requests are refused. A same-tab, at-most-15-minute snapshot is usable only when its version matches current
 OTA status. Label it Last received state and lock Settings writes. A later full pair supersedes it.
 Without a valid cache, show only current OTA/Firmware facts. Successful compact OTA status proves
 reachability and must not be overwritten by a generic unreachable message. Clear snapshots on idle
-or terminal failure; snapshots never become plant history.
+startup/check completion or terminal failure. Idle after an observed download retains the snapshot
+and write lock during the bounded reboot wait; snapshots never become plant history.
 
 ### 5.5 Installer landing page (`docs/index.html`, GitHub Pages)
 

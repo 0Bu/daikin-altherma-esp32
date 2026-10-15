@@ -7,6 +7,9 @@ import vm from "node:vm";
 import { readAppFragments, readHistoryLifecycle } from "../tools/ui/read_app_source.mjs";
 
 const otaSource = readAppFragments(["history.js", "settings.js", "bootstrap.js"]);
+const stateSource = readAppFragments(["app_state.js"]);
+const imageLeaseSource = stateSource.slice(stateSource.indexOf("function acceptImageLease("),
+  stateSource.indexOf("function invalidateLiveReadings("));
 assert.doesNotMatch(otaSource,
   /histPreferRam|histOtaSnapshot|histOtaRestore|captureHistoriesForOta|otaHistoryCacheRestore/,
   "measurement history must come from device flash, never a sessionStorage handoff");
@@ -40,7 +43,7 @@ class Element {
 {
   const elements = elementsFor(
     "hdrIp", "verLink", "settingsVer", "connTile", "settingsCards", "otaStat", "otaStatSet",
-    "settingsDot", "btnSettings",
+    "settingsDot", "btnSettings", "statusSnapshot",
   );
   const connAction = new Element("conn-action");
   const settingsAction = new Element("settings-action");
@@ -116,12 +119,14 @@ class Element {
     descNoteHtml: (lead, text) => `<div class="vdesc-p"><span class="vdesc-n">${lead}</span> ${text}</div>`,
     hasHist: () => false,
     setLangFromStatus: () => { languageHydrations += 1; },
+    // Real live-data/SVG invalidation is covered by test_ui_ota_snapshot_render.mjs.
+    invalidateLiveReadings: () => {},
     renderOtaDashboardStatus: () => { dashboardStatusPaints += 1; },
-    j: async () => ({ state: "updating", progress: 78, current: "1.4.72-dev.333", channel: "dev" }),
+    j: async () => ({ state: "updating", generation: 7, progress: 78, current: "1.4.72-dev.333", channel: "dev" }),
     setTimeout: () => 1,
     clearTimeout: () => {},
   };
-  const source = readHistoryLifecycle() + readAppFragments(["dashboard.js", "settings.js"]);
+  const source = readHistoryLifecycle() + imageLeaseSource + readAppFragments(["dashboard.js", "settings.js"]);
   const sandbox = vm.createContext(context);
   vm.runInContext(
     `${source}\nthis.__api = { resumeOta, renderSettings, otaCacheRestore };`,
@@ -172,7 +177,7 @@ function elementsFor(...ids) {
 {
   const elements = elementsFor(
     "hdrIp", "verLink", "settingsVer", "connTile", "settingsCards", "otaStat", "otaStatSet",
-    "settingsDot", "btnSettings",
+    "settingsDot", "btnSettings", "statusSnapshot",
   );
   const S = {
     status: null, busy: false, otaBusy: false, otaInstalling: false, otaShown: false, otaView: null,
@@ -211,13 +216,13 @@ function elementsFor(...ids) {
     descNoteHtml: (lead, text) => `<div class="vdesc-p"><span class="vdesc-n">${lead}</span> ${text}</div>`,
     hasHist: () => false,
     renderOtaDashboardStatus: () => { dashboardStatusPaints += 1; },
-    j: async () => ({ state: "updating", progress: 48, current: "1.4.72-dev.333", channel: "dev" }),
+    j: async () => ({ state: "updating", generation: 7, progress: 48, current: "1.4.72-dev.333", channel: "dev" }),
     // Keep otaWatch at its first delay. An unresolved Promise without a real timer does not keep the
     // Node process alive, while the assertions can inspect the adopted in-flight state.
     setTimeout: () => 1,
     clearTimeout: () => {},
   };
-  const source = readHistoryLifecycle() + readAppFragments(["dashboard.js", "settings.js"]);
+  const source = readHistoryLifecycle() + imageLeaseSource + readAppFragments(["dashboard.js", "settings.js"]);
   const sandbox = vm.createContext(context);
   vm.runInContext(
     `${source}\nthis.__api = { resumeOta, renderSettings };`,

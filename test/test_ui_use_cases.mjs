@@ -68,6 +68,9 @@ class Element {
     return suffix && this.id.startsWith("otaAlert")
       ? this.doc.getElementById(this.id + suffix) : null;
   }
+  querySelectorAll() {
+    return (this.doc.modalControls?.get(this.id) || []).map((id) => this.doc.getElementById(id));
+  }
   focus() { this.doc.activeElement = this; }
   blur() { if (this.doc.activeElement === this) this.doc.activeElement = null; }
   setAttribute(name, value) { this[name] = String(value); }
@@ -78,7 +81,7 @@ class Element {
   setSelectionRange(start, end) { this.selectionStart = start; this.selectionEnd = end; }
   matches() { return false; }
   closest() { return null; }
-  contains() { return false; }
+  contains(child) { return this.doc.modalControls?.get(this.id)?.includes(child.id) || false; }
   setPointerCapture() {}
 }
 
@@ -125,6 +128,12 @@ const response = (ok, payload, status = ok ? 200 : 400) => ({
 const fetch = async (url, options = {}) => {
   const body = options.body ? JSON.parse(options.body) : null;
   fetchState.calls.push({ url, body });
+  if (fetchState.mode === "source_delete")
+    return new Promise((resolve, reject) => { fetchState.pending.set(url, { resolve, reject }); });
+  if (fetchState.mode === "homehub_interleaved" && ["/discover_homehub", "/set_hp"].includes(url))
+    return new Promise((resolve, reject) => { fetchState.pending.set(url, { resolve, reject }); });
+  if (fetchState.mode === "delayed")
+    return new Promise((resolve, reject) => { fetchState.respond = resolve; fetchState.fail = reject; });
   if (fetchState.mode === "throw") throw new Error("unreachable");
   if (fetchState.mode === "env3_missing" && url === "/set_board")
     return response(false, {
@@ -232,6 +241,7 @@ const source = readAppFragments(["i18n.js"]) + readUiLocale("de") +
 vm.runInContext(`${source}
   toast = () => {};
   renderApp = () => {};
+  const productionRefreshStatus = refreshStatus;
   refreshStatus = async () => true;
   collectBugReport = async () => ({ text: "redacted report", failed: false });
   this.__ui = {
@@ -240,6 +250,8 @@ vm.runInContext(`${source}
     otaFail, paintOtaAlert, dismissOtaAlert,
     openWifi, openMqtt, openRefTemp, openCirculation, openWeather, openSyslog,
     openNtp, openHomehub, openBoard, openBug,
+    refreshStatus: productionRefreshStatus,
+    realStatusReader: () => { refreshStatus = productionRefreshStatus; },
   };`, context, { filename: "main/www/app.sources" });
 const ui = context.__ui;
 
@@ -299,6 +311,13 @@ const cases = [
 
 const html = fs.readFileSync(new URL("../main/www/index.html", import.meta.url), "utf8");
 const htmlModals = [...html.matchAll(/<div class="modal" id="([^"]+Modal)"/g)].map((match) => match[1]).sort();
+document.modalControls = new Map();
+const modalStarts = [...html.matchAll(/<div class="modal" id="([^"]+Modal)"/g)];
+for (let i = 0; i < modalStarts.length; i++) {
+  const block = html.slice(modalStarts[i].index, modalStarts[i + 1]?.index ?? html.length);
+  document.modalControls.set(modalStarts[i][1],
+    [...block.matchAll(/<(?:button|input|select|textarea)\b[^>]*\bid="([^"]+)"/g)].map((match) => match[1]));
+}
 assert.deepEqual([...ui.MODALS].sort(), htmlModals, "MODALS must name every modal in the shipped HTML");
 assert.deepEqual(cases.map((item) => item.modal).sort(), [...ui.ROUTED_MODALS].sort(),
   "the settings interaction matrix must cover every routed modal");
@@ -1069,6 +1088,17 @@ assert.ok(mqttSave, "Save must POST /set_mqtt");
 assert.equal(mqttSave.body.base, "daikin-bench-2",
   "the base topic must be sent, trimmed — a stray space is a different topic to a broker");
 
+// Effective default and custom bases both preserve their stored representation when untouched.
+for (const custom of [false, true]) {
+  ui.S.status.mqtt.base_custom = custom;
+  fetchState.calls.length = 0; ui.S.busy = false; open(mqttCase);
+  await document.getElementById("mqttForm").fire("submit"); await settle();
+  const unchanged = fetchState.calls.find((call) => call.url === "/set_mqtt");
+  assert.equal(Object.hasOwn(unchanged.body, "base"), false,
+    "an unchanged effective base must be omitted: the API preserves the stored default/custom choice");
+}
+ui.S.status.mqtt.base_custom = false;
+
 // 2. A coded refusal lands on the BASE field with the German translation of that exact code, and
 //    leaves the broker field alone. The browser keeps no copy of the rules (logic/mqtt_base.hpp owns
 //    them), so this path is the only feedback the user gets.
@@ -1175,4 +1205,121 @@ for (const [ssid, pass, accepted] of [
   await document.getElementById("wfCancel").onclick();
 }
 
-console.log(`UI use cases: ${cases.length} routed modals + ${ui.TRANSIENT_MODALS.length} transient decision, navigation, Cancel/backdrop/Escape, accepted/rejected/invalid Save paths, UTF-8 credential boundaries`);
+// An in-flight write owns its form until its verdict. Cancel/Escape/backdrop/Back cannot hide the
+// still-applying request, and a refusal must restore the same editable dialog with inline feedback.
+for (const dismiss of ["cancel", "backdrop", "escape", "back"]) {
+  for (const accepted of [false, true]) {
+    const item = mqttCase;
+    fetchState.mode = "delayed"; ui.S.busy = false; open(item);
+    const submitted = document.getElementById(item.form).fire("submit");
+    await settle();
+    assert.equal(ui.S.pendingSave?.modal, item.modal);
+    assert.equal(document.getElementById("mqBroker").disabled, true);
+    if (dismiss === "escape") await document.fire("keydown", { key: "Escape" });
+    else if (dismiss === "back") history.back();
+    else await document.getElementById(item[dismiss]).onclick();
+    assert.equal(document.getElementById(item.modal).hidden, false);
+    assert.equal(location.hash, "#settings/mqtt");
+    fetchState.respond(response(accepted, accepted ? { reboot: false, saved: true } : { error: "refused" }));
+    await submitted; await settle();
+    assert.equal(ui.S.pendingSave, null);
+    assert.equal(ui.S.busy, false);
+    assert.equal(document.getElementById("mqBroker").disabled, false);
+    assert.equal(document.getElementById(item.modal).hidden, accepted);
+    if (!accepted) {
+      assert.equal(document.getElementById("mqError").hidden, false);
+      assert.equal(document.getElementById("mqError").textContent, "refused");
+    }
+  }
+}
+// A discovery already in flight must lose its draft ownership as soon as Save takes the form.
+// Test both completion orders: neither a late discovery nor its finally may rewrite/unlock a
+// pending save, and a rejected save must restore a usable Search button without reopening.
+for (const order of ["discovery-first", "rejection-first"]) {
+  const item = cases.find((item) => item.modal === "homehubModal");
+  fetchState.mode = "homehub_interleaved"; fetchState.pending = new Map();
+  ui.S.busy = false; open(item);
+  const searchButton = document.getElementById("hhSearch");
+  const idleLabel = searchButton.textContent;
+  const search = searchButton.onclick();
+  await settle();
+  const discovery = fetchState.pending.get("/discover_homehub");
+  assert.equal(searchButton.disabled, true);
+  document.getElementById("hhHost").value = "operator-choice.local";
+  const save = document.getElementById("homehubForm").fire("submit");
+  await settle();
+  const write = fetchState.pending.get("/set_hp");
+  assert.ok(write, "Save must use the draft already chosen by the operator");
+  const searches = fetchState.calls.filter((call) => call.url === "/discover_homehub").length;
+  assert.equal(await searchButton.onclick(), false, "Search cannot replace a pending Save's draft");
+  assert.equal(fetchState.calls.filter((call) => call.url === "/discover_homehub").length, searches);
+  const sent = fetchState.calls.filter((call) => call.url === "/set_hp").at(-1);
+  assert.equal(sent.body.mb_host, "operator-choice.local");
+  const finishSearch = async () => {
+    discovery.resolve(response(true, { host: "late-discovery.local" }));
+    await search; await settle();
+    assert.equal(document.getElementById("hhHost").value, "operator-choice.local",
+      "retired discovery cannot overwrite the saved or rejected draft");
+  };
+  if (order === "discovery-first") {
+    await finishSearch();
+    assert.equal(searchButton.disabled, true, "discovery completion cannot unlock the pending form");
+  }
+  write.resolve(response(false, { error: "HomeHub save refused" }));
+  await save; await settle();
+  assert.equal(document.getElementById("homehubModal").hidden, false);
+  assert.equal(ui.S.busy, false); assert.equal(ui.S.pendingSave, null);
+  assert.equal(searchButton.disabled, false, "rejection must restore Search even if it began disabled");
+  assert.equal(searchButton.textContent, idleLabel);
+  const retry = searchButton.onclick();
+  await settle();
+  if (order === "rejection-first") {
+    await finishSearch();
+    assert.equal(searchButton.disabled, true, "retired discovery cannot unlock a newer search");
+  }
+  fetchState.pending.get("/discover_homehub").resolve(response(true, { host: "retry-discovery.local" }));
+  await retry; await settle();
+  assert.equal(document.getElementById("hhHost").value, "retry-discovery.local");
+  assert.equal(searchButton.disabled, false);
+  assert.equal(searchButton.textContent, idleLabel);
+}
+fetchState.mode = "ok";
+
+// A delete acknowledgement belongs to the status/source frame on which Delete was chosen. An
+// intervening real status can already contain another session's new mapping and its new history.
+ui.realStatusReader();
+for (const [modal, button, key, endpoint] of [
+  ["refTempModal", "rtDeleteBtn", "reference_temperature", "/set_ref_temp"],
+  ["circulationModal", "circDeleteBtn", "circulation_source", "/set_circulation"],
+]) {
+  fetchState.mode = "source_delete"; fetchState.pending = new Map();
+  ui.S.busy = false;
+  const original = { ...ui.S.status, version: "source-delete-fixture", app_elf_sha256: "fixture-elf",
+    boot_id: "0123456789abcdef", ui: { lang: "de" },
+    [key]: { configured: true, name: "Original", topic: "fixture/original", max_age_s: 600 } };
+  const initial = ui.refreshStatus(false);
+  fetchState.pending.get("/status").resolve(response(true, original)); await initial;
+  open(cases.find((item) => item.modal === modal));
+  const deletion = document.getElementById(button).fire("click"); await settle();
+  const acknowledgement = fetchState.pending.get(endpoint);
+  assert.ok(acknowledgement, "the real Delete handler must have issued its POST");
+  const replacement = { ...original[key], name: "New mapping", topic: "fixture/new-source" };
+  const next = { ...original, [key]: replacement };
+  const newer = ui.refreshStatus(false);
+  fetchState.pending.get("/status").resolve(response(true, next)); await newer;
+  ui.S.hist.set("new-source", { v: [42] });
+  ui.S.histPin.set("new-source", { i: 0, gen: 1 });
+  const epoch = ui.S.histEpoch;
+  const reads = fetchState.calls.filter((call) => call.url === "/status").length;
+  acknowledgement.resolve(response(true, { saved: true })); await settle();
+  assert.equal(ui.S.status[key], replacement, "a delayed Delete cannot clear a newer accepted mapping");
+  assert.equal(ui.S.histEpoch, epoch, "a delayed Delete cannot retire the newer source's history");
+  assert.equal(ui.S.hist.has("new-source"), true); assert.equal(ui.S.histPin.has("new-source"), true);
+  assert.equal(fetchState.calls.filter((call) => call.url === "/status").length, reads + 1,
+    "the guarded reconciliation read must run even when the optimistic clear loses ownership");
+  fetchState.pending.get("/status").resolve(response(true, next)); await deletion;
+  assert.equal(ui.S.status[key], replacement); assert.equal(ui.S.busy, false);
+  assert.equal(document.getElementById(modal).hidden, true);
+}
+fetchState.mode = "ok";
+console.log(`UI use cases: ${cases.length} routed modals + ${ui.TRANSIENT_MODALS.length} transient decision, navigation, Cancel/backdrop/Escape, accepted/rejected/invalid Save paths, UTF-8 credential boundaries, pending-save lifetime and source-owned Delete acknowledgements`);

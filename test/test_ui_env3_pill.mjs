@@ -218,6 +218,30 @@ assert.equal(sandbox.__api.tooltipHtml(3),
   `<span class="vhist-tip-line env-pressure">Luftdruck  1.008,0 hPa</span>`,
   "forecast provenance stays neutral while all three forecast rows keep their series colours");
 
+// Transport loss retires only the live status claims. The dated historical measurements remain
+// inspectable; a values-only error does not erase independent freshly obtained ENV III status.
+S.transportUnavailable = "status";
+sandbox.__api.render();
+assert.equal(elements.svEnv3Temp.textContent, "— °C");
+assert.equal(elements.gEnv3.classList.contains("fresh"), false);
+assert.equal(elements.inspNow.textContent, "— °C", "an already-open inspector must lose its live reading");
+assert.doesNotMatch(elements.inspBody.innerHTML, /21,5 °C|48 %|1\.007 hPa|Sensor: Aktuell/);
+assert.match(elements.inspHist.innerHTML, /env-temperature[\s\S]*env-humidity[\s\S]*env-pressure/,
+  "dated measurements remain available when the live status transport fails");
+assert.doesNotMatch(elements.inspHist.innerHTML, /env-forecast-temperature/,
+  "forecast freshness cannot be asserted from the failed status transport");
+assert.equal(S.hist.get("env3:env3_temperature").v[2], 215);
+S.transportUnavailable = "values";
+sandbox.__api.render();
+assert.equal(elements.svEnv3Temp.textContent, "21,5 °C");
+assert.equal(elements.gEnv3.classList.contains("fresh"), true);
+assert.equal(elements.inspNow.textContent, "21,5 °C");
+assert.match(elements.inspHist.innerHTML, /env-forecast-temperature/);
+S.transportUnavailable = null;
+sandbox.__api.render();
+assert.equal(elements.svEnv3Temp.textContent, "21,5 °C");
+assert.equal(elements.gEnv3.classList.contains("fresh"), true);
+
 S.status.env3 = { ...S.status.env3, fresh: false, error: "collecting" };
 S.inspSig = "";
 sandbox.__api.render();
