@@ -41,7 +41,7 @@ const cache = () => ({ saved_at_ms: Date.now(), status: status(), ...values() })
 function harness(cached, transform = (text) => text) {
   const elements = new Map(), storage = new Map(), routes = new Map();
   const timers = new Map();
-  let clock = Date.now(), nextTimer = 0, reloads = 0;
+  let clock = Date.now(), nextTimer = 0, reloads = 0, paints = 0;
   class Clock extends Date { static now() { return clock; } }
   if (cached) storage.set(cacheKey, JSON.stringify(cached));
   const flows = ["fPhe", "fSup1", "fSup2", "fSup3", "fRet", "fHeat", "fHeatRet", "rfHot", "rfPhe", "rfCold"];
@@ -77,6 +77,7 @@ function harness(cached, transform = (text) => text) {
     setTimeout: (fn, ms) => { const id = ++nextTimer; timers.set(id, { fn, ms }); return id; },
     clearTimeout: (id) => timers.delete(id),
     fetch: (url) => routes.get(String(url).split("?")[0])(),
+    onPaint: () => { paints++; },
   });
   context.window = context;
   vm.runInContext(transform(source) + `
@@ -88,13 +89,17 @@ function harness(cached, transform = (text) => text) {
     renderSettings = () => syncOtaSettingsLock();
     renderCards = () => {};
     renderInspect = () => {};
-    this.ui = { S, resumeOta, refreshStatus, refreshValues, renderApp, renderLive, otaCacheRestore };
+    const actualRenderApp = renderApp;
+    renderApp = () => { onPaint(); return actualRenderApp(); };
+    this.ui = { S, resumeOta, refreshStatus, refreshValues, renderApp, renderLive, otaCacheRestore,
+      language: () => LANG };
   `, context);
   const statusReply = deferred(), compactReply = deferred();
   routes.set("/status", () => statusReply.promise);
   routes.set("/ota/status", () => compactReply.promise);
-  return { ...context.ui, storage, routes, statusReply, compactReply, controls, element,
-    get reloads() { return reloads; }, advance: (ms) => { clock += ms; },
+  return { ...context.ui, context, storage, routes, statusReply, compactReply, controls, element,
+    get reloads() { return reloads; }, get paints() { return paints; }, advance: (ms) => { clock += ms; },
+    timerCount: (ms) => [...timers.values()].filter((timer) => timer.ms === ms).length,
     async tick(ms = 1000) {
       const pending = [...timers].find(([, timer]) => timer.ms === ms);
       assert.ok(pending, `production must schedule a ${ms} ms timer`);
@@ -234,6 +239,9 @@ for (const state of ["idle", "error", "checking"]) {
   assert.equal(observe(h).lwt, "—"); assert.equal(h.controls[0].disabled, false);
   assert.equal(h.storage.has(cacheKey), false);
   assert.notEqual(observe(h).headline, "Firmware update");
+  assert.equal(h.S.imageLease.elf, "image-a", "idle/error/check retirement retains the page's image identity");
+  h.routes.set("/status", async () => response({ ...status(), app_elf_sha256: "image-b" }));
+  assert.equal(await h.refreshStatus(), false); assert.equal(h.reloads, 1);
 }
 
 for (const invalid of [null, { ...cache(), saved_at_ms: Date.now() - 16 * 60 * 1000 },
@@ -248,6 +256,161 @@ for (const invalid of [null, { ...cache(), saved_at_ms: Date.now() - 16 * 60 * 1
   assert.equal(observe(h).fan, false); assert.equal(observe(h).pump, false);
   assert.doesNotMatch(observe(h).detail, /last received state/);
   assert.equal(h.storage.has(cacheKey), false);
+  assert.equal(h.S.imageLease.version, compact.current);
+  assert.equal(h.S.imageLease.elf, "", "rejected cache must contribute no firmware identity");
+  h.routes.set("/status", async () => response({ ...status(), app_elf_sha256: "confirmed-image" }));
+  assert.equal(await h.refreshStatus(), true);
+  assert.equal(h.S.imageLease.elf, "confirmed-image", "a partial compact lease learns the first full ELF");
+  h.routes.set("/status", async () => response({ ...status(), app_elf_sha256: "image-b" }));
+  assert.equal(await h.refreshStatus(), false); assert.equal(h.reloads, 1);
+}
+
+// A compact version hint is useful without a snapshot too, but an invalid cached ELF is never used.
+{
+  const h = harness(null);
+  const resumed = h.resumeOta(); h.compactReply.resolve(response(compact)); await resumed; await settle();
+  assert.equal(h.S.imageLease.version, compact.current); assert.equal(h.S.imageLease.elf, "");
+  h.routes.set("/status", async () => response({ ...status(), version: "image-b-version" }));
+  assert.equal(await h.refreshStatus(), false); assert.equal(h.reloads, 1); assert.equal(h.S.status, null);
+}
+
+// Cache validation precedes identity admission. Even a valid snapshot cannot replace an image
+// identity already established by this page; remove it before reloading so it cannot loop.
+{
+  const h = harness(cache());
+  h.S.imageLease = { version: "snapshot-test", elf: "image-b" };
+  assert.equal(await h.otaCacheRestore(compact), false);
+  assert.equal(h.reloads, 1); assert.equal(h.S.status, null); assert.equal(h.storage.has(cacheKey), false);
+}
+
+// A delayed compact reply contributes only an initial hint. It cannot replace a full image lease
+// already established by a newer successful status response during the startup race.
+{
+  const h = harness(cache()), resumed = h.resumeOta(), initial = h.refreshStatus(false);
+  const fresh = { ...status(), version: "fresh-page-version", app_elf_sha256: "fresh-page-image" };
+  h.statusReply.resolve(response(fresh)); await initial;
+  h.compactReply.resolve(response(compact)); await resumed; await settle();
+  assert.equal(h.S.status, fresh); assert.equal(h.S.imageLease.elf, "fresh-page-image");
+  assert.equal(h.S.imageLease.version, "fresh-page-version"); assert.equal(h.reloads, 0);
+  assert.equal(h.S.otaCached, false);
+}
+
+// A restored image remains the page's identity even when the full status never worked and the
+// observer misses done. The first post-reboot response must reload before the old page adopts it.
+for (const order of ["status-first", "cache-first"]) {
+  for (const changed of [{ version: "image-b-version" }, { app_elf_sha256: "image-b" }]) {
+    const h = harness(cache());
+    await startup(h, order);
+    h.routes.set("/ota/status", async () => response({ ...compact, state: "idle", busy: false }));
+    await h.tick(); // Missed done: the real watcher enters its bounded reboot observer.
+    const prior = h.S.status;
+    h.routes.set("/status", async () => response({ ...status(), ...changed, uptime_s: 1 }));
+    assert.equal(await h.refreshStatus(), false, `${order}: the new image cannot enter the old page`);
+    assert.equal(h.reloads, 1); assert.equal(h.S.imageReloading, true);
+    assert.equal(h.S.status, prior, "cross-image status must never become the render source");
+    assert.equal(h.storage.has(cacheKey), false, "the next page must not re-adopt the stale cache");
+    assert.equal(h.S.otaCached, false); assert.equal(h.S.live, null);
+    assert.equal(observe(h).lwt, "—"); assert.equal(observe(h).fan, false); assert.equal(observe(h).pump, false);
+  }
+}
+
+// Loading a snapshot's lazy locale is another async boundary. Superseding/retiring its frame or
+// changing image cannot reactivate that locale or trigger a late snapshot repaint afterward.
+for (const superseding of ["source", "image", "idle", "pending-failure"]) {
+  const cached = cache(); cached.status.ui.lang = "fr";
+  const h = harness(cached), locale = deferred();
+  h.context.localePromise = locale.promise;
+  vm.runInContext(`
+    localeReady = (lang) => lang !== "fr";
+    loadLocale = () => localePromise;
+    applyStaticI18n = () => {};
+    labelSchematicHits = () => {};
+    renderHeader = () => {};
+  `, h.context);
+  let restoring;
+  if (superseding === "idle") restoring = h.otaCacheRestore(compact);
+  else {
+    const resumed = h.resumeOta(); h.compactReply.resolve(response(compact)); await resumed; await settle();
+  }
+  assert.equal(h.S.otaCached, true); assert.equal(h.language(), "en");
+  if (superseding === "idle") {
+    const resumed = h.resumeOta();
+    h.compactReply.resolve(response({ ...compact, state: "idle", busy: false })); await resumed;
+  } else {
+    h.routes.set("/status", async () => superseding === "pending-failure" ? response({}, 503) :
+      response({ ...status(), ...(superseding === "image" ? { app_elf_sha256: "image-b" } :
+        { profile: { id: "profile-b" } }) }));
+    if (superseding === "pending-failure") {
+      h.routes.set("/ota/status", async () => { throw new Error("compact offline"); });
+    }
+    await h.refreshStatus(false);
+  }
+  const paints = h.paints;
+  locale.resolve(true);
+  if (restoring) assert.equal(await restoring, false);
+  await settle();
+  assert.equal(h.language(), "en", "a superseded locale cannot activate from the cache");
+  if (superseding === "pending-failure") {
+    assert.equal(h.S.otaCached, true); assert.equal(observe(h).lwt, "35.0");
+    assert.match(observe(h).detail, /last received state/);
+  } else {
+    assert.equal(h.paints, paints, "a retired cache cannot repaint after its locale resolves");
+    assert.equal(h.S.otaCached, false); assert.equal(h.S.live, null); assert.equal(observe(h).lwt, "—");
+    assert.equal(observe(h).fan, false); assert.equal(observe(h).pump, false);
+  }
+  if (superseding === "image") assert.equal(h.timerCount(1000), 0, "reloading cannot start a late OTA watcher");
+}
+
+// Independent compiling negative controls reproduce each identity bug in actual production code.
+for (const defect of ["cached-image", "cached-source"]) {
+  const h = harness(cache(), (text) => {
+    const before = defect === "cached-image" ? "  if (!acceptImageLease(cached.status)) return false;\n" :
+      '  if (S.histEpoch !== epoch) {\n    S.otaCached = false;\n    otaCacheClear();\n    invalidateLiveReadings("values");\n  }';
+    const after = defect === "cached-image" ? "" : '  if (S.histEpoch !== epoch) invalidateLiveReadings("values");';
+    const mutated = text.replace(before, after);
+    assert.notEqual(mutated, text, `${defect}: mutate the actual identity protection`);
+    return mutated;
+  });
+  await startup(h, "status-first");
+  h.routes.set("/status", async () => response({ ...status(), ...(defect === "cached-image" ?
+    { app_elf_sha256: "image-b" } : { profile: { id: "profile-b" } }) }));
+  assert.equal(await h.refreshStatus(), true);
+  assert.equal(h.reloads, 0);
+  if (defect === "cached-image") assert.equal(h.S.status.app_elf_sha256, "image-b",
+    "without the restored image lease, an old page consumes a new same-version image");
+  else {
+    h.routes.set("/values", async () => { throw new Error("new source unavailable"); });
+    await h.refreshValues(); h.renderApp();
+    assert.equal(h.S.status.profile.id, "profile-b"); assert.equal(h.S.otaCached, true);
+    assert.equal(observe(h).lwt, "35.0"); assert.equal(observe(h).fan, true); assert.equal(observe(h).pump, true);
+  }
+}
+
+// Source identity cannot be promoted together with cached measurements from another installation.
+// Test independent X10A, HomeHub and boot lifetimes, with actual status/value/renderer functions.
+for (const order of ["status-first", "cache-first"]) {
+  for (const changed of [{ profile: { id: "profile-b" } },
+    { modbus: { ...status().modbus, host: "hub-b" } }, { boot_id: "boot-b" }]) {
+    const h = harness(cache());
+    await startup(h, order);
+    const next = { ...status(), ...changed, uptime_s: 101 };
+    h.routes.set("/status", async () => response(next));
+    assert.equal(await h.refreshStatus(), true);
+    assert.equal(h.S.status, next); assert.equal(h.reloads, 0);
+    assert.equal(h.S.otaCached, false, "a new source retires the old snapshot before any repaint");
+    assert.equal(h.storage.has(cacheKey), false); assert.equal(h.S.transportUnavailable, "values");
+    assert.equal(h.S._values.length, 0); assert.equal(h.S._modbus.length, 0);
+    assert.equal(h.S.live, null); assert.equal(observe(h).lwt, "—");
+    assert.equal(observe(h).fan, false); assert.equal(observe(h).pump, false);
+    h.routes.set("/values", async () => { throw new Error("new source unavailable"); });
+    await h.refreshValues(); h.renderApp(); h.renderLive();
+    assert.equal(h.S.live, null); assert.equal(observe(h).lwt, "—");
+    assert.equal(observe(h).fan, false); assert.equal(observe(h).pump, false);
+    h.routes.set("/values", async () => response(values("38.0")));
+    await h.refreshStatus(); await h.refreshValues();
+    assert.equal(h.S.otaCached, false); assert.equal(observe(h).lwt, "38.0");
+    assert.equal(observe(h).fan, true); assert.equal(observe(h).pump, true);
+  }
 }
 
 {
@@ -295,4 +458,4 @@ for (const [before, after, broken] of [
     assert.doesNotMatch(observe(h).detail, /last received state/);
   }
 }
-console.log("OTA snapshot: real schematic, startup races, terminal flows, reboot handoff and fresh recovery pass");
+console.log("OTA snapshot: real schematic, image/source leases, startup races, terminal flows and fresh recovery pass");

@@ -7,6 +7,9 @@ import vm from "node:vm";
 import { readAppFragments, readHistoryLifecycle } from "../tools/ui/read_app_source.mjs";
 
 const otaSource = readAppFragments(["history.js", "settings.js", "bootstrap.js"]);
+const stateSource = readAppFragments(["app_state.js"]);
+const imageLeaseSource = stateSource.slice(stateSource.indexOf("function acceptImageLease("),
+  stateSource.indexOf("function invalidateLiveReadings("));
 assert.doesNotMatch(otaSource,
   /histPreferRam|histOtaSnapshot|histOtaRestore|captureHistoriesForOta|otaHistoryCacheRestore/,
   "measurement history must come from device flash, never a sessionStorage handoff");
@@ -123,7 +126,7 @@ class Element {
     setTimeout: () => 1,
     clearTimeout: () => {},
   };
-  const source = readHistoryLifecycle() + readAppFragments(["dashboard.js", "settings.js"]);
+  const source = readHistoryLifecycle() + imageLeaseSource + readAppFragments(["dashboard.js", "settings.js"]);
   const sandbox = vm.createContext(context);
   vm.runInContext(
     `${source}\nthis.__api = { resumeOta, renderSettings, otaCacheRestore };`,
@@ -219,7 +222,7 @@ function elementsFor(...ids) {
     setTimeout: () => 1,
     clearTimeout: () => {},
   };
-  const source = readHistoryLifecycle() + readAppFragments(["dashboard.js", "settings.js"]);
+  const source = readHistoryLifecycle() + imageLeaseSource + readAppFragments(["dashboard.js", "settings.js"]);
   const sandbox = vm.createContext(context);
   vm.runInContext(
     `${source}\nthis.__api = { resumeOta, renderSettings };`,

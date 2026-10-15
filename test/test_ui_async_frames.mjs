@@ -26,8 +26,10 @@ function harness(reboot = false) {
     t: (key) => key,
   });
   const i18n = read("i18n");
+  const settings = read("settings");
+  const cacheLifecycle = settings.slice(settings.indexOf("const OTA_RENDER_CACHE_KEY"), settings.indexOf("function otaCacheStore()"));
   vm.runInContext(i18n.slice(i18n.indexOf("function activateLang(next)")) + "\n" +
-    read("app_state") + "\n" + read("dashboard") + (reboot ? "\n" + read("settings") : "") + `
+    read("app_state") + "\n" + read("dashboard") + "\n" + (reboot ? settings : cacheLifecycle) + `
       renderApp = () => events.push("paint");
       renderHeader = () => {};
       hpProbeIsOpen = () => false;

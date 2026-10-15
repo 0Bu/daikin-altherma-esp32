@@ -945,8 +945,8 @@ function otaInlineClear(delay = 3500) {
 
 // Keep one complete render frame across a same-tab reload during OTA. sessionStorage is deliberately
 // narrower than localStorage: it is origin- and tab-scoped, disappears with the tab, and does not
-// teach a second browser anything the compact /ota/status response did not prove. The version and
-// age checks below prevent a snapshot from another firmware run being adopted as current.
+// teach a second browser anything the compact /ota/status response did not prove. Version, age and
+// image leases bound the explicitly cached frame until a complete fresh frame replaces it.
 const OTA_RENDER_CACHE_KEY = "daikinOtaRenderV1";
 const OTA_RENDER_CACHE_MAX_AGE_MS = 15 * 60 * 1000;
 function otaCacheStorage() {
@@ -993,6 +993,7 @@ async function otaCacheRestore(otaStatus) {
     cached.status.version === otaStatus.current && Array.isArray(cached.values) &&
     Array.isArray(cached.modbus);
   if (!valid) { otaCacheClear(); return false; }
+  if (!acceptImageLease(cached.status)) return false;
 
   S.status = cached.status;
   syncHistSources();
@@ -1001,7 +1002,10 @@ async function otaCacheRestore(otaStatus) {
   S.otaCached = true;
   S.transportUnavailable = null;
   S.transportBusy = false;
-  await setLangFromStatus(S.status);
+  const request = S.statusRequest;
+  const current = () => S.status === cached.status && S.otaCached && !S.imageReloading;
+  await setLangFromStatus(cached.status, () => current() && request === S.statusRequest);
+  if (!current()) return false;
   renderApp();
   return true;
 }
@@ -1263,6 +1267,9 @@ async function probeRunningOta() {
     let s;
     try { s = await j("/ota/status", { signal: typeof pollSignal === "function" ? pollSignal() : undefined }); }
     catch { return false; }
+    if (S.imageReloading) return false;
+    if (!S.imageLease?.version && typeof s?.current === "string" && s.current)
+      acceptImageLease({ version: s.current });
     if (otaActive(s)) { void resumeOta(s); return true; }
     if (s?.state === "error") { otaCacheClear(); otaAlert(s.message || t("ota.failed")); }
     else otaCacheClear();
@@ -1300,6 +1307,7 @@ async function resumeOta(s = null) {
     // running version, /status is still the largest response the device builds and may legitimately
     // be unavailable while OTA TLS owns the scarce heap; retain the accurate OTA-only shell then.
     const restored = await otaCacheRestore(s);
+    if (S.imageReloading) return;
     const otaOnly = !restored && renderOtaResumeShell(s);
     syncOtaSettingsLock();
     if (s.state === "updating") otaInline(t("ota.pct", s.progress ?? 0), { ring: true, pct: s.progress ?? 0 });

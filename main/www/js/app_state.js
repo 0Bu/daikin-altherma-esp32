@@ -464,8 +464,10 @@ function acceptImageLease(s) {
   const previous = S.imageLease;
   const changed = previous && ((previous.elf && s.app_elf_sha256 && previous.elf !== s.app_elf_sha256) ||
     (previous.version && s.version && previous.version !== s.version));
-  if (changed) { S.imageReloading = true; location.reload(); return false; }
-  S.imageLease ||= { elf: s.app_elf_sha256 || "", version: s.version || "" };
+  if (changed) { S.imageReloading = true; otaCacheClear(); location.reload(); return false; }
+  const lease = S.imageLease ||= { elf: "", version: "" };
+  lease.elf ||= s.app_elf_sha256 || "";
+  lease.version ||= s.version || "";
   return true;
 }
 function invalidateLiveReadings(reason, busy = false) {
@@ -503,7 +505,11 @@ async function readStatusFrame(paint = true, timeout, quiet = false) {
   S.statusAcceptedRequest = request;
   const epoch = S.histEpoch;
   syncHistSources();
-  if (S.histEpoch !== epoch) invalidateLiveReadings("values");
+  if (S.histEpoch !== epoch) {
+    S.otaCached = false;
+    otaCacheClear();
+    invalidateLiveReadings("values");
+  }
   if (S.transportUnavailable === "status") { S.transportUnavailable = "values"; S.transportBusy = false; }
   const profile = s?.profile?.id || "";
   if (hpProbeIsOpen() && profile !== S.hpProbeCatalogProfile && !S.hpProbeCatalogBusy)
