@@ -327,6 +327,10 @@ try {
   assert.equal(historyBaseline.status, 0, `HIL-history baseline failed: ${historyBaseline.stderr}`);
 
   const cases = [
+    ["HIL history accepts an unchanged cold-cycle boot identity", () =>
+      replaceOnce("scripts/production-ota-gate.py",
+        'if identity[0] != boot or (cold and identity[0] == expected["boot"]):',
+        'if identity[0] != boot:'), "hil-history"],
     ["HIL history accepts ambiguous wall buckets", () =>
       replaceOnce("scripts/production-ota-gate.py",
         "if min(phase, HIL_HISTORY_DT_S - phase) <= HIL_HISTORY_ANCHOR_MARGIN_S:",

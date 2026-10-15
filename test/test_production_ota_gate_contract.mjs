@@ -692,9 +692,10 @@ for raw in (b"HTTP/1.1 200 OK\r\nContent-Length: 8193\r\n\r\n" + b" " * 8191 + b
         rejected(lambda: gate["request_history_deadline"](endpoint, "leaving_water", timeout=5),
                  "oversized/truncated/duplicate/nonfinite transport")
 
-def wait_fixture(*, expected=None, cold=False, change=None, status_change=None):
+def wait_fixture(*, expected=None, cold=False, change=None, status_change=None, cold_boot=None):
     clock, reads = [0.0], [0]
     boot = new_boot if cold else old_boot
+    if cold_boot is not None: boot = cold_boot
     def read_status(*a, **k):
         reads[0] += 1
         value = status(boot)
@@ -713,6 +714,8 @@ def wait_fixture(*, expected=None, cold=False, change=None, status_change=None):
             version="2.0.0", elf="123456789", boot=boot, expected=expected, cold=cold)
 baseline = wait_fixture()
 restored = wait_fixture(expected=baseline, cold=True)
+rejected(lambda: wait_fixture(expected=baseline, cold=True, cold_boot=old_boot),
+         "unchanged boot at the cold status boundary")
 delayed_reads = [0]
 def delayed_restore(p):
     delayed_reads[0] += 1
