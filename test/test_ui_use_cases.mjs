@@ -128,6 +128,8 @@ const response = (ok, payload, status = ok ? 200 : 400) => ({
 const fetch = async (url, options = {}) => {
   const body = options.body ? JSON.parse(options.body) : null;
   fetchState.calls.push({ url, body });
+  if (fetchState.mode === "homehub_interleaved" && ["/discover_homehub", "/set_hp"].includes(url))
+    return new Promise((resolve, reject) => { fetchState.pending.set(url, { resolve, reject }); });
   if (fetchState.mode === "delayed")
     return new Promise((resolve, reject) => { fetchState.respond = resolve; fetchState.fail = reject; });
   if (fetchState.mode === "throw") throw new Error("unreachable");
@@ -1224,6 +1226,57 @@ for (const dismiss of ["cancel", "backdrop", "escape", "back"]) {
       assert.equal(document.getElementById("mqError").textContent, "refused");
     }
   }
+}
+// A discovery already in flight must lose its draft ownership as soon as Save takes the form.
+// Test both completion orders: neither a late discovery nor its finally may rewrite/unlock a
+// pending save, and a rejected save must restore a usable Search button without reopening.
+for (const order of ["discovery-first", "rejection-first"]) {
+  const item = cases.find((item) => item.modal === "homehubModal");
+  fetchState.mode = "homehub_interleaved"; fetchState.pending = new Map();
+  ui.S.busy = false; open(item);
+  const searchButton = document.getElementById("hhSearch");
+  const idleLabel = searchButton.textContent;
+  const search = searchButton.onclick();
+  await settle();
+  const discovery = fetchState.pending.get("/discover_homehub");
+  assert.equal(searchButton.disabled, true);
+  document.getElementById("hhHost").value = "operator-choice.local";
+  const save = document.getElementById("homehubForm").fire("submit");
+  await settle();
+  const write = fetchState.pending.get("/set_hp");
+  assert.ok(write, "Save must use the draft already chosen by the operator");
+  const searches = fetchState.calls.filter((call) => call.url === "/discover_homehub").length;
+  assert.equal(await searchButton.onclick(), false, "Search cannot replace a pending Save's draft");
+  assert.equal(fetchState.calls.filter((call) => call.url === "/discover_homehub").length, searches);
+  const sent = fetchState.calls.filter((call) => call.url === "/set_hp").at(-1);
+  assert.equal(sent.body.mb_host, "operator-choice.local");
+  const finishSearch = async () => {
+    discovery.resolve(response(true, { host: "late-discovery.local" }));
+    await search; await settle();
+    assert.equal(document.getElementById("hhHost").value, "operator-choice.local",
+      "retired discovery cannot overwrite the saved or rejected draft");
+  };
+  if (order === "discovery-first") {
+    await finishSearch();
+    assert.equal(searchButton.disabled, true, "discovery completion cannot unlock the pending form");
+  }
+  write.resolve(response(false, { error: "HomeHub save refused" }));
+  await save; await settle();
+  assert.equal(document.getElementById("homehubModal").hidden, false);
+  assert.equal(ui.S.busy, false); assert.equal(ui.S.pendingSave, null);
+  assert.equal(searchButton.disabled, false, "rejection must restore Search even if it began disabled");
+  assert.equal(searchButton.textContent, idleLabel);
+  const retry = searchButton.onclick();
+  await settle();
+  if (order === "rejection-first") {
+    await finishSearch();
+    assert.equal(searchButton.disabled, true, "retired discovery cannot unlock a newer search");
+  }
+  fetchState.pending.get("/discover_homehub").resolve(response(true, { host: "retry-discovery.local" }));
+  await retry; await settle();
+  assert.equal(document.getElementById("hhHost").value, "retry-discovery.local");
+  assert.equal(searchButton.disabled, false);
+  assert.equal(searchButton.textContent, idleLabel);
 }
 fetchState.mode = "ok";
 console.log(`UI use cases: ${cases.length} routed modals + ${ui.TRANSIENT_MODALS.length} transient decision, navigation, Cancel/backdrop/Escape, accepted/rejected/invalid Save paths, UTF-8 credential boundaries, pending-save lifetime`);

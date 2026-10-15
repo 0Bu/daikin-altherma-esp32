@@ -372,6 +372,7 @@ function closeHomehub() {
 }
 
 async function searchHomehub() {
+  if (S.pendingSave?.modal === "homehubModal") return false;
   const generation = ++homehubSearchGeneration;
   const button = $("hhSearch"), error = $("hhError"), host = $("hhHost");
   host.classList.remove("invalid");
@@ -1018,7 +1019,8 @@ function syncOtaSettingsLock() {
 // Poll /ota/status until `state` leaves the set we're waiting on, or we run out of patience.
 // Every OTA phase is asynchronous on the device (the download runs on its own worker so the single
 // httpd worker stays free), so the UI's whole job here is to watch a state machine it does not drive.
-async function otaPoll(waitStates, tries, onTick, expectedGeneration = null, requireReleased = false) {
+async function otaPoll(waitStates, tries, onTick, expectedGeneration = null, requireReleased = false,
+                       allowUpdateTransition = false) {
   for (let i = 0; i < tries; i++) {
     await new Promise((r) => setTimeout(r, 1000));
     let s;
@@ -1029,11 +1031,13 @@ async function otaPoll(waitStates, tries, onTick, expectedGeneration = null, req
     // A freshly accepted operation owns its generation before the 1.1 s quiesce lead changes `state`.
     // The check flow must therefore wait for the authoritative busy release, not consume the old
     // idle/error payload that happens to remain visible during that lead.
-    if (expectedGeneration !== null && requireReleased && s.busy) continue;
+    const updateTransition = allowUpdateTransition && ["updating", "done"].includes(s.state);
+    if (expectedGeneration !== null && requireReleased && s.busy && !updateTransition) continue;
     // Update acceptance has the same lead. A terminal `done` is intentionally allowed while busy
     // because the device reboots from run_update before the operation tail can clear the flag; an
     // inherited idle/error payload is not evidence that the new operation finished.
-    if (expectedGeneration !== null && s.busy && !waitStates.includes(s.state) && s.state !== "done")
+    if (expectedGeneration !== null && s.busy && !waitStates.includes(s.state) && s.state !== "done" &&
+        !updateTransition)
       continue;
     if (!waitStates.includes(s.state)) return s;
   }
@@ -1271,7 +1275,9 @@ async function resumeOta(s = null) {
     if (s.state !== "updating" && s.state !== "done") {
       otaInline("", { ring: true });
       renderOtaDashboardStatus();
-      s = await otaPoll(["checking"], OTA_CHECK_POLL_TRIES, null, generation, true);
+      // An observer can first see the update's busy lease with the preceding check state still
+      // visible. Join its download before busy is released; the initiating check keeps its stricter rule.
+      s = await otaPoll(["checking"], OTA_CHECK_POLL_TRIES, null, generation, true, true);
       if (!s) { otaFail(t("ota.timeout")); return; }
       if (s.state === "error") { otaFail(s.message || t("ota.failed")); return; }
       if (s.state !== "updating" && s.state !== "done") {
@@ -1386,6 +1392,12 @@ function setBusy(id, on, busyLabel = "btn.saving") {
   if (!b) return;
   const modal = typeof MODALS !== "undefined" && MODALS.find((name) => $(name)?.contains?.(b));
   if (on && modal && !S.pendingSave) {
+    if (modal === "homehubModal") {
+      // Retire discovery before capturing the form's idle state for rejection/retry.
+      ++homehubSearchGeneration;
+      $("hhSearch").disabled = false;
+      $("hhSearch").textContent = t("hh.search");
+    }
     const controls = Array.from($(modal).querySelectorAll("button, input, select, textarea"));
     S.pendingSave = { modal, controls: controls.map((control) => [control, control.disabled]) };
     controls.forEach((control) => { control.disabled = true; });

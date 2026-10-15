@@ -94,3 +94,81 @@ for (const compact of [new Error("offline"), { state: "updating", generation: nu
   assert.equal(h.events.some((event) => event.startsWith("watch:")), false);
 }
 console.log("UI compact OTA adoption: bounded second-tab discovery, generation, write lock and failure truth pass");
+
+// Keep the actual otaPoll/otaWatch loops here. Busy stays true throughout the firmware's update
+// and reboot handoff, including the inherited state visible before the worker starts.
+function realPollHarness() {
+  const events = [], timers = [], controls = [{ disabled: false, dataset: {} }];
+  let compact;
+  const context = vm.createContext({
+    $: () => ({ querySelectorAll: () => controls }), events,
+    t: (key, value) => key === "ota.pct" ? `progress:${value}` : key,
+    j: async () => ({ ...compact }),
+    setTimeout: (callback) => { timers.push(callback); return timers.length; },
+    clearTimeout() {},
+  });
+  vm.runInContext(source + `
+    renderApp = () => {};
+    sysSet = () => {};
+    otaInline = (text) => events.push(text);
+    otaAlert = (text) => events.push("alert:" + text);
+    otaWaitReboot = () => events.push("wait-reboot");
+    const originalWatch = otaWatch;
+    otaWatch = (generation) => { events.push("watch:" + generation); return originalWatch(generation); };
+    this.ui = { S, resumeOta, otaPoll };
+  `, context);
+  context.ui.S.status = { version: "same" };
+  return {
+    ...context.ui, events, controls,
+    async tick(value) {
+      compact = value;
+      await settle();
+      assert.ok(timers.length, "the production loop must have scheduled its next bounded poll");
+      timers.shift()();
+      await settle();
+    },
+  };
+}
+
+for (const inherited of ["idle", "checking", "error"]) {
+  const h = realPollHarness();
+  const state = (state, extra = {}) => ({ state, generation: 70, busy: true, current: "same", ...extra });
+  const observing = h.resumeOta(state(inherited));
+  await settle();
+  for (const old of ["idle", "error"]) {
+    await h.tick(state(old));
+    assert.equal(h.S.otaBusy, true);
+    assert.equal(h.S.otaInstalling, false, "busy inherited state does not prove worker startup");
+    assert.equal(h.events.some((event) => event.startsWith("alert:")), false);
+    assert.equal(h.events.includes("wait-reboot"), false);
+  }
+  await h.tick(state("updating", { progress: 27 }));
+  assert.equal(h.S.otaInstalling, true, "same-generation busy update must join the real download watcher");
+  assert.equal(h.controls[0].disabled, true);
+  assert.ok(h.events.includes("progress:27"));
+  await h.resumeOta(state("updating", { progress: 27 }));
+  assert.deepEqual(h.events.filter((event) => event.startsWith("watch:")), ["watch:70"]);
+  await h.tick(state("updating", { progress: 65 }));
+  assert.ok(h.events.includes("progress:65"));
+  await h.tick(state("done", { progress: 100 }));
+  await observing;
+  assert.equal(h.events.filter((event) => event === "wait-reboot").length, 1);
+  assert.equal(h.S.otaBusy, true, "writes remain locked through the reboot handoff");
+}
+
+// The initiating check still requires authoritative release. Observer transition permission must
+// not make an inherited updating/done payload accept an unfinished local manifest check.
+{
+  const h = realPollHarness();
+  let released = false;
+  const checking = h.otaPoll(["checking"], 3, null, 80, true).then((result) => {
+    released = true; return result;
+  });
+  for (const state of ["updating", "done"]) {
+    await h.tick({ state, generation: 80, busy: true });
+    assert.equal(released, false);
+  }
+  await h.tick({ state: "idle", generation: 80, busy: false });
+  assert.equal((await checking).state, "idle");
+}
+console.log("UI OTA observer real-loop transitions and initiating-check release contract pass");
