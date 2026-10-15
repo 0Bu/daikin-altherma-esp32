@@ -1782,8 +1782,10 @@ static logic::HeatingCurveSnapshot evaluate_heating_curve(const Config& cfg, boo
     in.room_error_k = room.room_error_k;
     in.x10a_connected        = x10a_connected;
     in.homehub_connected = mbs.connected;
-    in.plant_gate_known = mbs.plant_gate_known;
-    in.plant_gate_active = mbs.plant_gate_active;
+    const auto plant_gate    = logic::heating_curve_space_operation_gate(
+        mbs.plant_gate_known, mbs.plant_gate_active, mbs.space_route_known, mbs.space_route_active);
+    in.plant_gate_known    = plant_gate.known;
+    in.plant_gate_active   = plant_gate.active;
     in.heating_mode_known = mbs.heating_mode_known;
     in.heating_mode_active = mbs.heating_mode_active;
     in.forecast_available = cfg.weather_enabled && wx.available && wx_freshness.fresh;

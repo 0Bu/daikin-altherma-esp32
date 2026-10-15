@@ -1,4 +1,4 @@
-// translation-source: a4d25fbd5f065a9d4715eb7230fd183ed1f4eba4c36fa1fd89855058db8f05bb
+// translation-source: 7480385d29565e389fed9481d6e1b12d6ed936d5931d38c0113cd63cd42a0341
 I18N.fi = localeValues([
   /* sys.nodata */ "Ei tietoja",
   /* sys.unreachable */ "Ei tavoiteta",
@@ -583,7 +583,7 @@ I18N.fi = localeValues([
   /* dyn.shadow_strategy */ "Raaka huonepoikkeama · 30 min",
   /* dyn.card_help */ "Selvästi tunnistetun tilalämmityksen aikana laite tallentaa 30 minuutin välein vertailuhuoneen lämpötilan eron tavoitteesta sekä saatavilla olevan ulkolämpötilan. Pidempi kehitys yhdessä käyntiajan, menoveden alarajan ja termostaatin kanssa voi näyttää käyrän suuntaa. 1 K huonepoikkeama ei tarkoita 1 K menovesimuutosta. Toiminto ei ohjaa lämpöpumppua.",
   /* dyn.state_help_recording */ "Tilalämmitys ja kelvollinen huonetulo on vahvistettu, joten raaka huonevirhe tallennetaan. Tulkitse kausisuunta käyntiajan ja rajoitusten kanssa; yksi näyte ei ole johtopäätös.",
-  /* dyn.state_help_waiting */ "Laitteisto ei ole nyt normaalissa tilalämmityksessä, joten näytettä ei tallenneta. Kesällä tämä on odotettu tila, ei vika.",
+  /* dyn.state_help_waiting */ "Sopivaa lämmitysjaksoa ei nyt ole: tilalämmitys on levossa tai venttiili ohjaa veden käyttövesivaraajaan. Näytettä ei tallenneta; tämä on normaali tauko, ei vika.",
   /* dyn.state_help_cooling */ "HomeHub ilmoittaa normaalin tilakäytön, mutta tila ei ole lämmitys. Tällaiset ikkunat jätetään lämmityskäyräaineiston ulkopuolelle.",
   /* dyn.state_help_blocked */ "Tarvittava tulo puuttuu, joten mitään ei tallenneta. Tallennus jatkuu tulon palattua; vanhoja tai epäselviä mittaustietoja ei käytetä.",
   /* dyn.state_help_room */ "Huonelukema saapuu, mutta siitä ei nyt saada kelvollista poikkeamaa tavoitteesta. Näytettä ei muodosteta ennen kuin lähde kelpaa.",
@@ -591,7 +591,7 @@ I18N.fi = localeValues([
   /* dyn.state_help_inactive */ "Lähteet on määritetty, mutta MQTT-näytteenotto ei ole käynnissä, joten mitään ei arvioida. Asetukset säilyvät; tallennus jatkuu, kun näytteenotto toimii taas.",
   /* dyn.state_help_no_broker */ "Huonelähde on tallennettu, mutta MQTT-välittäjää ei ole määritetty. Määritä se Yhteydet-kortissa; lähde säilyy ja tallennus alkaa automaattisesti.",
   /* dyn.state_help_setup_homehub */ "HomeHub tarvitaan todellisen tilalämmityksen erottamiseen käyttövedestä ja seisokista. Määritä sen osoite Protokolla-kortissa.",
-  /* dyn.state_help_homehub_disabled */ "Diagnostiikka riippuu kahdesta HomeHub-signaalista. Tyhjäksi asetettu osoite pysäyttää sekä Modbusin että tämän diagnostiikan.",
+  /* dyn.state_help_homehub_disabled */ "Diagnostiikka riippuu HomeHubin laitetiedoista. Tyhjäksi asetettu osoite pysäyttää sekä Modbusin että tämän diagnostiikan.",
   /* dyn.strategy_help */ "Näyte on huonetavoite miinus huonelämpötila: positiivinen tarkoittaa liian kylmää, negatiivinen liian lämmintä. Kuollutta aluetta, pyöristystä tai rajoitusta ei ole. Arvo ei ole kalibroitu menoveden korjaus. Vertailuhuoneen pitää edustaa lämmitettyä aluetta; sen termostaatti tai suljetut venttiilit voivat peittää liian korkean käyrän. Lue kehitys yhdessä menoveden alarajan ja lämmityspyynnön kanssa.",
   /* env.title */ "Ulkoanturi",
   /* env.card */ "Ulkoilmasto",

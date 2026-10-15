@@ -225,11 +225,15 @@ a mapped or fixed target is treated as the standing setpoint. Fixed targets cann
 | Object | Fields |
 |---|---|
 | `room` | `source_id:"living_room"`, `calibration_k:0`, `temperature_valid`, `setpoint_valid`, `control_eligible`, nullable `temperature_c`, `setpoint_c`, `error_k`, `source_unix_s`, `age_s`, `reason_code`, `counters.{messages,errors,rejections}`. |
-| `diagnosis` | `method_version:2`, `armed`, `state`, `reason`, `sample_eligible`, `forecast_available`, `outdoor_available`, `outdoor_source`, `outdoor_source_code`, `plant_outdoor_available`, `plant_outdoor_source`, `plant_outdoor_source_code`. |
+| `diagnosis` | `method_version:3`, `armed`, `state`, `reason`, `sample_eligible`, `forecast_available`, `outdoor_available`, `outdoor_source`, `outdoor_source_code`, `plant_outdoor_available`, `plant_outdoor_source`, `plant_outdoor_source_code`. |
 | `diagnosis.gates` | `plant_known`, `plant_active`, `heating_mode_known`, `heating_mode_active`. |
 | `diagnosis.room_evidence` | Nullable `current_error_k`, `source_unix_s`, `age_s`. |
 | `diagnosis.last_sample` | Nullable `room_error_k`, `unix_s`, `outdoor_temperature_c`, `plant_outdoor_temperature_c`; `outdoor_source`, `outdoor_source_code`, `plant_outdoor_source`, `plant_outdoor_source_code`; numeric `sequence`. |
 | `diagnosis.counters` | `evaluations`, `samples`, `holds`, `blocks`. |
+
+`diagnosis.gates.plant_*` combines normal-operation input 53 with independent space routing
+(input 37 = 0); the raw `/status.modbus.plant_gate_*` fields still describe input 53 alone.
+[PLANT.md](PLANT.md#heating-curve-diagnosis) owns the admission rule and method-version boundary.
 
 Boolean facts use numeric 1/0; unestablished numbers are null. Source codes are 0 `none`, 1 `x10a`,
 2 `homehub`, 3 `env3`; the two recorded axes use their own current source. HomeHub input 44 must be

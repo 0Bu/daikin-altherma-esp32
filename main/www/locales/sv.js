@@ -1,4 +1,4 @@
-// translation-source: a4d25fbd5f065a9d4715eb7230fd183ed1f4eba4c36fa1fd89855058db8f05bb
+// translation-source: 7480385d29565e389fed9481d6e1b12d6ed936d5931d38c0113cd63cd42a0341
 I18N.sv = localeValues([
   /* sys.nodata */ "Inga data",
   /* sys.unreachable */ "Inte tillgänglig",
@@ -583,7 +583,7 @@ I18N.sv = localeValues([
   /* dyn.shadow_strategy */ "Rått rumsavvikelse · 30 min",
   /* dyn.card_help */ "Var 30:e minut i säker rumsuppvärmning sparas rumsmål minus rumstemperatur, med valfri utetemperatur. Bedöm bara säsongstrenden med drifttid, minsta framledning och termostat; 1 K här är inte 1 K framledning. Endast avläsning.",
   /* dyn.state_help_recording */ "Bekräftad rumsuppvärmning och giltig rumskälla registrerar rå avvikelse. Bedöm säsongstrenden med drifttid och begränsning, inte ett värde.",
-  /* dyn.state_help_waiting */ "Anläggningen är inte i normal rumsdrift, så inget värde sparas. På sommaren är detta normalt.",
+  /* dyn.state_help_waiting */ "Inget lämpligt uppvärmningsfönster finns: rumskretsen vilar eller ventilen leder vattnet till varmvattenberedaren. Inget värde sparas; detta är en normal paus, inget fel.",
   /* dyn.state_help_cooling */ "HomeHub rapporterar rumsdrift, men läget är inte uppvärmning. Sådana fönster utelämnas avsiktligt från värmekurvdata.",
   /* dyn.state_help_blocked */ "En nödvändig ingång saknas. Registreringen fortsätter när den återkommer; gamla eller tvetydiga data används aldrig.",
   /* dyn.state_help_room */ "Rumsvärdet når enheten men ger ingen giltig avvikelse från målet. Registreringen fortsätter först när källan kan användas.",
@@ -591,7 +591,7 @@ I18N.sv = localeValues([
   /* dyn.state_help_inactive */ "Källorna finns, men MQTT-insamlingen körs inte, så inget utvärderas. Inställningarna behålls; registreringen fortsätter när insamlingen körs igen.",
   /* dyn.state_help_no_broker */ "Rumskällan är sparad men ingen MQTT-broker är konfigurerad. Ange en broker under Anslutningar; källan behålls och registreringen startar automatiskt.",
   /* dyn.state_help_setup_homehub */ "Diagnosen behöver HomeHub för att skilja uppvärmning från varmvatten och stillestånd. Ange HomeHub-adressen på protokollkortet.",
-  /* dyn.state_help_homehub_disabled */ "Diagnosen behöver två HomeHub-signaler. En uttryckligen tom HomeHub-adress stänger av både Modbus och denna diagnos.",
+  /* dyn.state_help_homehub_disabled */ "Diagnosen behöver anläggningsdata från HomeHub. En uttryckligen tom HomeHub-adress stänger av både Modbus och denna diagnos.",
   /* dyn.strategy_help */ "Rumsmål minus rumstemperatur: positivt är för kallt, negativt för varmt; ingen dödzon eller avrundning. Det är en okalibrerad indikator, inte framledningsförskjutning. Läs trenden med D2-begränsning och värmebehov; termostat/ventiler kan dölja en hög kurva.",
   /* env.title */ "Utomhussensor",
   /* env.card */ "Uteklimat",

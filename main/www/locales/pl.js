@@ -1,4 +1,4 @@
-// translation-source: a4d25fbd5f065a9d4715eb7230fd183ed1f4eba4c36fa1fd89855058db8f05bb
+// translation-source: 7480385d29565e389fed9481d6e1b12d6ed936d5931d38c0113cd63cd42a0341
 const plNoun = (n, one, few, many) => {
   const value = Math.abs(Number(n)), mod10 = value % 10, mod100 = value % 100;
   return value === 1 ? one
@@ -588,7 +588,7 @@ I18N.pl = localeValues([
   /* dyn.shadow_strategy */ "Surowe odchylenie temperatury pomieszczenia · 30 min",
   /* dyn.card_help */ "Co 30 minut podczas jednoznacznie rozpoznanego ogrzewania pomieszczeń firmware rejestruje odchylenie temperatury pomieszczenia referencyjnego od wartości docelowej wraz z temperaturą zewnętrzną w tej chwili, jeśli dostarcza ją czujnik. W połączeniu z czasem pracy, minimalnymi ograniczeniami temperatury wody zasilającej i aktywnością termostatu długoterminowy przebieg może wskazać, czy krzywa grzewcza jest zwykle zbyt wysoka lub zbyt niska. Odchylenie temperatury pomieszczenia o 1 K nie oznacza automatycznie zmiany temperatury wody zasilającej o 1 K. Ta funkcja tylko odczytuje dane i nie zapisuje niczego do pompy ciepła.",
   /* dyn.state_help_recording */ "Potwierdzone ogrzewanie pomieszczeń działa, a dane z pomieszczenia są prawidłowe, dlatego rejestrowane są surowe próbki błędu temperatury. Oceniaj przebieg sezonu wraz z czasem pracy i danymi o ograniczeniach; pojedyncza próbka nie jest werdyktem.",
-  /* dyn.state_help_waiting */ "Instalacja nie pracuje teraz w normalnym trybie pomieszczeń, dlatego próbka nie jest rejestrowana. Latem jest to normalny, oczekiwany stan, a nie usterka.",
+  /* dyn.state_help_waiting */ "Brak odpowiedniego okresu ogrzewania: obieg pomieszczeń jest nieaktywny albo zawór kieruje wodę do zasobnika. Próbka nie jest zapisywana; to zwykła przerwa, nie usterka.",
   /* dyn.state_help_cooling */ "HomeHub zgłasza normalną pracę obiegu pomieszczeń, ale bieżący tryb nie jest ogrzewaniem. Takie okna są celowo wykluczone ze zbioru danych krzywej grzewczej.",
   /* dyn.state_help_blocked */ "Brakuje wymaganego wejścia, dlatego nic nie jest rejestrowane. Rejestrowanie zostanie wznowione, gdy wróci; nieaktualne ani niejednoznaczne dane nigdy nie są próbkowane.",
   /* dyn.state_help_room */ "Odczyt z pomieszczenia dociera do urządzenia, ale obecnie nie pozwala obliczyć prawidłowego odchylenia od celu. Próbka nie powstanie, dopóki źródło nie będzie ponownie użyteczne.",
@@ -596,7 +596,7 @@ I18N.pl = localeValues([
   /* dyn.state_help_inactive */ "Źródła są skonfigurowane, ale próbnik MQTT nie działa, więc nic nie jest oceniane. Ustawienia pozostają; rejestrowanie wznowi się, gdy próbnik znów zadziała.",
   /* dyn.state_help_no_broker */ "Źródło temperatury pomieszczenia jest zapisane, ale diagnostyka odczytuje je przez MQTT, a broker nie jest skonfigurowany. Ustaw brokera na karcie Połączenia; zapisane źródło zostanie zachowane, a rejestrowanie uruchomi się automatycznie.",
   /* dyn.state_help_setup_homehub */ "Diagnostyka wymaga HomeHub, aby określić, kiedy instalacja rzeczywiście ogrzewa; bez niego nie odróżni okna ogrzewania od ciepłej wody ani postoju. Ustaw adres HomeHub na karcie Protokół.",
-  /* dyn.state_help_homehub_disabled */ "Ta diagnostyka zależy od dwóch sygnałów instalacji HomeHub. Przy jawnie pustym adresie HomeHub nie działa ani Modbus, ani ta zależna diagnostyka.",
+  /* dyn.state_help_homehub_disabled */ "Ta diagnostyka zależy od danych instalacji HomeHub. Przy jawnie pustym adresie HomeHub nie działa ani Modbus, ani ta zależna diagnostyka.",
   /* dyn.strategy_help */ "Próbka to docelowa temperatura pomieszczenia minus rzeczywista temperatura pomieszczenia: wartość dodatnia oznacza temperaturę poniżej celu, ujemna — powyżej. Nie ma strefy nieczułości, zaokrąglania, ograniczenia ani limitu szybkości zmian. To nieskalibrowany wskaźnik, nie żądana korekta temperatury wody zasilającej. Pomieszczenie referencyjne musi reprezentować ogrzewaną strefę. Jego termostat lub zamknięte zawory tworzą wewnętrzną pętlę regulacji: mogą usunąć zapotrzebowanie na ciepło i ukryć zbyt wysoką krzywą. Oceniaj przebieg temperatury pomieszczenia wraz z częstością utrzymywania temperatury wody zasilającej na minimum (udział ograniczenia D2) oraz rzeczywistego zapotrzebowania strefy na ciepło.",
   /* env.title */ "Czujnik zewnętrzny",
   /* env.card */ "Klimat zewnętrzny",

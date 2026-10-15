@@ -5,12 +5,12 @@
 // WHY. The HomeHub map was read one register at a time, once per POLL_INTERVAL_S: 32 MBAP
 // round-trips a second, ~2.8 million requests a day, against a hub that also serves the Onecta app,
 // the unit's MMI, evcc and whatever else on the LAN speaks to it. Nothing about the map required
-// that. The EKRHH offsets fall into ten contiguous runs. Two facts are time-critical gates — plant
-// operation and current mode — and input 44 is time-critical event context that legacy-441 requires
-// from the same poll cycle. Everything else is a water temperature, a flow rate or a setpoint
-// read-back, none of which moves meaningfully inside five seconds, and all of which folds into a
-// five-MINUTE history bucket. So: batch the runs, read the whole map on a slower cadence, and keep
-// only gates plus the named outdoor context at 1 Hz.
+// that. The EKRHH offsets fall into ten contiguous runs. Plant operation, space routing and current
+// mode are time-critical gates, and input 44 is time-critical event context that legacy-441
+// requires from the same poll cycle. Everything else is a water temperature, a flow rate or a
+// setpoint read-back, none of which moves meaningfully inside five seconds, and all of which folds
+// into a five-MINUTE history bucket. So: batch the runs, read the whole map on a slower cadence,
+// and keep only gates plus the named outdoor context at 1 Hz.
 //
 // WHY PURE. Both halves are the off-by-one a .cpp hides until it is in the field, and both fail
 // SILENTLY rather than loudly:
@@ -59,12 +59,13 @@ inline constexpr uint8_t MB_PLAN_MAX_REGS = 16;
 // the traffic. It is NOT chosen from how fast water temperatures move — that would allow far more.
 inline constexpr uint32_t MB_FULL_CYCLE_TICKS = 5;
 
-// The offsets that must stay current at the poll cadence: input register 53 (normal space operation)
-// and 38 (heating rather than cooling) are diagnosis gates. Input 44 is NOT a gate; it is the
-// optional plant outdoor context attached to an eligible event. Its 40..45 batch does not overlap
-// either gate batch, so naming it separately here deliberately spends one bundled read per gate
-// cycle to make "answered this cycle" true rather than borrowing the five-second value cache.
-inline constexpr uint16_t MB_GATE_OFFSETS[] = {38, 53};
+// The offsets that must stay current at the poll cadence: input register 53 (normal space
+// operation) and 37 (space rather than DHW routing), 38 (heating rather than cooling) are diagnosis
+// gates. Inputs 37 and 38 already share a batch. Input 44 is NOT a gate; it is the optional plant
+// outdoor context attached to an eligible event. Its 40..45 batch does not overlap either gate
+// batch, so naming it separately here deliberately spends one bundled read per gate cycle to make
+// "answered this cycle" true rather than borrowing the five-second value cache.
+inline constexpr uint16_t MB_GATE_OFFSETS[] = {37, 38, 53};
 inline constexpr size_t   MB_GATE_OFFSET_COUNT =
     sizeof(MB_GATE_OFFSETS) / sizeof(MB_GATE_OFFSETS[0]);
 inline constexpr uint16_t MB_CONTEXT_OFFSETS[] = {44};
@@ -177,7 +178,7 @@ constexpr int mb_plan_build(const MbFunc* spaces, const uint16_t* offsets, int n
 // Must this batch be read on a fast cycle? Derived from the offsets the batch covers, so a batch
 // containing a gate or the named event context carries its neighbours along at no extra cost. This
 // is why the fast cycle also refreshes the 3-way valve, compressor flag, flow, power and room
-// temperature even though only the two gates plus input 44 are committed outside the value cache.
+// temperature even though only the gates plus input 44 are committed outside the value cache.
 constexpr bool mb_batch_is_fast(const MbBatch& b) {
     for (uint16_t k = 0; k < b.count; k++)
         if (mb_offset_is_gate(b.space, static_cast<uint16_t>(b.first_offset + k)) ||

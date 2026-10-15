@@ -13,7 +13,8 @@
 
 namespace daik::logic {
 
-inline constexpr uint8_t HEATING_CURVE_DIAGNOSIS_METHOD_VERSION = 2;
+// v3 excludes DHW routing even when the normal-space-operation flag remains active.
+inline constexpr uint8_t HEATING_CURVE_DIAGNOSIS_METHOD_VERSION = 3;
 inline constexpr int64_t HEATING_CURVE_SAMPLE_CADENCE_MS = 30 * 60 * 1000;
 
 enum class HeatingCurveState : uint8_t {
@@ -102,6 +103,23 @@ inline HeatingCurveReason heating_curve_reported_reason(bool armed_by_config,
                                                         HeatingCurveReason reason) {
     return heating_curve_sampler_inactive(armed_by_config, state, reason)
          ? HeatingCurveReason::SamplerInactive : reason;
+}
+
+struct HeatingCurvePlantGate {
+    bool known;
+    bool active;
+};
+
+// HomeHub normal-operation flags need not be mutually exclusive. Input 37 independently
+// identifies space (0) versus DHW (1) routing (EKRHH 4P744838-1E, section 9.2.2).
+// A known veto is an ordinary hold; otherwise both observations must be known to admit a sample.
+inline constexpr HeatingCurvePlantGate heating_curve_space_operation_gate(bool operation_known,
+                                                                          bool operation_active,
+                                                                          bool route_known,
+                                                                          bool route_space) {
+    const bool inactive = (operation_known && !operation_active) || (route_known && !route_space);
+    return {inactive || (operation_known && route_known),
+            operation_known && operation_active && route_known && route_space};
 }
 
 struct HeatingCurveInputs {

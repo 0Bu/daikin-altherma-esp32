@@ -1,4 +1,4 @@
-// translation-source: a4d25fbd5f065a9d4715eb7230fd183ed1f4eba4c36fa1fd89855058db8f05bb
+// translation-source: 7480385d29565e389fed9481d6e1b12d6ed936d5931d38c0113cd63cd42a0341
 I18N.cs = localeValues([
   /* sys.nodata */ "Žádná data",
   /* sys.unreachable */ "Nedostupné",
@@ -583,7 +583,7 @@ I18N.cs = localeValues([
   /* dyn.shadow_strategy */ "Hrubá odchylka místnosti · 30 min",
   /* dyn.card_help */ "Každých 30 minut během jednoznačně rozpoznaného vytápění prostoru firmware zaznamená rozdíl mezi teplotou referenční místnosti a jejím cílem spolu s venkovní teplotou v daném okamžiku, pokud ji poskytuje některý snímač. Spolu s dobou běhu, minimálními limity výstupní vody a činností termostatu může dlouhodobější průběh ukázat, zda bývá topná křivka příliš vysoká nebo příliš nízká. Odchylka místnosti 1 K automaticky neznamená změnu výstupní vody o 1 K. Tato funkce pouze čte data a nic do tepelného čerpadla nezapisuje.",
   /* dyn.state_help_recording */ "Běží potvrzené vytápění prostoru a vstup místnosti je platný, proto se zaznamenávají hrubé vzorky chyby místnosti. Sezónní trend čtěte spolu s dobou běhu a údaji o omezení; jeden vzorek není závěr.",
-  /* dyn.state_help_waiting */ "Soustava právě není v normálním prostorovém provozu, proto se vzorek nezaznamenává. V létě jde o normální očekávaný stav, nikoli poruchu.",
+  /* dyn.state_help_waiting */ "Právě není vhodné okno pro vytápění: prostorový okruh je nečinný nebo ventil směruje vodu do zásobníku. Vzorek se nezaznamenává; jde o běžnou pauzu, nikoli poruchu.",
   /* dyn.state_help_cooling */ "HomeHub hlásí normální prostorový provoz, ale aktuální režim není vytápění. Taková okna jsou ze souboru dat pro topnou křivku záměrně vyloučena.",
   /* dyn.state_help_blocked */ "Chybí povinný vstup, proto se nic nezaznamenává. Záznam se obnoví, jakmile se vstup vrátí; zastaralá nebo nejednoznačná data se nikdy nepřebírají.",
   /* dyn.state_help_room */ "Hodnota z místnosti se dostává do zařízení, ale právě z ní nelze vytvořit platnou odchylku od cíle. Dokud nebude zdroj opět použitelný, vzorek nevznikne.",
@@ -591,7 +591,7 @@ I18N.cs = localeValues([
   /* dyn.state_help_inactive */ "Zdroje jsou nastaveny, ale vzorkovač MQTT neběží, takže se nic nevyhodnocuje. Nastavení zůstává; záznam pokračuje, jakmile vzorkovač znovu poběží.",
   /* dyn.state_help_no_broker */ "Zdroj místnosti je uložen, ale diagnostika jej čte přes MQTT a není nastaven žádný broker. Nastavte broker na kartě Připojení; uložený zdroj místnosti zůstane zachován a záznam se spustí sám.",
   /* dyn.state_help_setup_homehub */ "Diagnostika potřebuje HomeHub, aby poznala, kdy soustava skutečně vytápí; bez něj nerozliší topné okno od ohřevu teplé vody nebo klidu. Nastavte adresu HomeHubu na kartě Protokol.",
-  /* dyn.state_help_homehub_disabled */ "Tato diagnostika závisí na dvou signálech soustavy z HomeHubu. Je-li adresa HomeHubu výslovně prázdná, neběží Modbus ani tato závislá diagnostika.",
+  /* dyn.state_help_homehub_disabled */ "Tato diagnostika závisí na údajích soustavy z HomeHubu. Je-li adresa HomeHubu výslovně prázdná, neběží Modbus ani tato závislá diagnostika.",
   /* dyn.strategy_help */ "Vzorek je cílová teplota místnosti minus skutečná teplota místnosti: kladná hodnota znamená, že je místnost pod cílem, záporná že je nad ním. Nepoužívá se žádné neutrální pásmo, zaokrouhlení, omezení ani omezení rychlosti změny. Jde o nekalibrovaný ukazatel, nikoli požadovanou korekci výstupní vody. Referenční místnost musí zastupovat vytápěnou zónu. Její vlastní termostat nebo zavřené ventily tvoří vnitřní regulační smyčku: mohou odstranit požadavek na teplo a skrýt příliš vysokou křivku. Průběh místnosti čtěte spolu s četností, kdy je teplota výstupní vody držena na minimu (podíl omezení D2), a s četností skutečných požadavků zóny na teplo.",
   /* env.title */ "Venkovní snímač",
   /* env.card */ "Venkovní klima",

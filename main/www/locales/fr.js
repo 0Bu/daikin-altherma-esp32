@@ -1,4 +1,4 @@
-// translation-source: a4d25fbd5f065a9d4715eb7230fd183ed1f4eba4c36fa1fd89855058db8f05bb
+// translation-source: 7480385d29565e389fed9481d6e1b12d6ed936d5931d38c0113cd63cd42a0341
 I18N.fr = localeValues([
   /* sys.nodata */ "Aucune donnée",
   /* sys.unreachable */ "Injoignable",
@@ -583,7 +583,7 @@ I18N.fr = localeValues([
   /* dyn.shadow_strategy */ "Écart ambiant brut · 30 min",
   /* dyn.card_help */ "Toutes les 30 minutes pendant un chauffage des locaux clairement identifié, le micrologiciel enregistre l’écart entre la température de la pièce de référence et sa cible, ainsi que la température extérieure à cet instant lorsqu’un capteur la fournit. Avec la durée de fonctionnement, les limites minimales de température de départ d’eau et l’activité du thermostat, la tendance à long terme peut montrer si la courbe de chauffe tend à être trop haute ou trop basse. Un écart ambiant de 1 K n’implique pas automatiquement une modification de 1 K du départ d’eau. Cette fonction lit uniquement les données et n’écrit rien dans la pompe à chaleur.",
   /* dyn.state_help_recording */ "Le chauffage des locaux confirmé fonctionne et l’entrée de pièce est valide ; les échantillons bruts d’erreur ambiante sont donc enregistrés. Interprétez une tendance saisonnière avec la durée de fonctionnement et les données d’écrêtement ; un seul échantillon n’est pas un verdict.",
-  /* dyn.state_help_waiting */ "L’installation n’est pas actuellement en fonctionnement normal des locaux, aucun échantillon n’est donc enregistré. Pendant l’été, il s’agit de l’état normal attendu et non d’un défaut.",
+  /* dyn.state_help_waiting */ "Aucune période de chauffage des locaux n’est admissible : ce circuit est au repos ou la vanne dirige l’eau vers le ballon. Aucun échantillon n’est enregistré ; cette pause normale n’est pas un défaut.",
   /* dyn.state_help_cooling */ "HomeHub signale un fonctionnement normal des locaux, mais le mode actuel n’est pas le chauffage. Ces fenêtres sont volontairement exclues du jeu de données de la courbe de chauffe.",
   /* dyn.state_help_blocked */ "Une entrée requise est manquante, rien n’est donc enregistré. L’enregistrement reprend dès son retour ; les données périmées ou ambiguës ne sont jamais échantillonnées.",
   /* dyn.state_help_room */ "Le relevé de pièce parvient à l’appareil, mais ne peut pas actuellement fournir un écart valide par rapport à la cible. Aucun échantillon n’est formé tant que la source n’est pas de nouveau exploitable.",
@@ -591,7 +591,7 @@ I18N.fr = localeValues([
   /* dyn.state_help_inactive */ "Les sources sont configurées, mais l’échantillonneur MQTT ne fonctionne pas : rien n’est évalué. Les réglages sont conservés ; l’enregistrement reprend dès qu’il fonctionne de nouveau.",
   /* dyn.state_help_no_broker */ "Une source de pièce est enregistrée, mais le diagnostic la lit via MQTT et aucun broker n’est configuré. Configurez le broker dans la carte Connexions ; la source enregistrée est conservée et l’enregistrement démarre automatiquement.",
   /* dyn.state_help_setup_homehub */ "Le diagnostic a besoin du HomeHub pour savoir quand l’installation chauffe réellement ; sans lui, il ne peut pas distinguer une fenêtre de chauffage de l’eau chaude ou d’un arrêt. Configurez l’adresse du HomeHub dans la carte Protocole.",
-  /* dyn.state_help_homehub_disabled */ "Ce diagnostic dépend de deux signaux de l’installation HomeHub. Lorsque l’adresse HomeHub est explicitement vide, ni Modbus ni ce diagnostic dépendant ne fonctionnent.",
+  /* dyn.state_help_homehub_disabled */ "Ce diagnostic dépend de données de l’installation HomeHub. Lorsque l’adresse HomeHub est explicitement vide, ni Modbus ni ce diagnostic dépendant ne fonctionnent.",
   /* dyn.strategy_help */ "L’échantillon est la température cible de la pièce moins sa température réelle : une valeur positive signifie que la pièce est sous la cible, une valeur négative qu’elle est au-dessus. Il n’y a ni zone morte, ni arrondi, ni limitation, ni limite de vitesse. Il s’agit d’un indicateur non étalonné, et non d’un décalage demandé de la température de départ d’eau. La pièce de référence doit représenter la zone chauffée. Son propre thermostat ou des vannes fermées forment une boucle de régulation interne : ils peuvent supprimer la demande de chaleur et masquer une courbe trop haute. Interprétez la tendance ambiante avec la fréquence à laquelle la température de départ d’eau est maintenue à son minimum (part d’écrêtement D2) et la fréquence à laquelle la zone demande effectivement de la chaleur.",
   /* env.title */ "Capteur extérieur",
   /* env.card */ "Climat extérieur",

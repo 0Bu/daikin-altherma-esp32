@@ -153,6 +153,7 @@ void reset() {
     s_full_cache_status_ms = -1;
     s_plant_gate_ms        = -1;
     s_heating_mode_ms      = -1;
+    s_space_route_ms       = -1;
     s_plant_outdoor_ms     = -1;
     s_req_host.clear();
     s_req_port   = 0;
@@ -468,11 +469,14 @@ void seed_cache() {
     s_full_cache_status_ms       = 1000;
     s_plant_gate_ms              = 1000;
     s_heating_mode_ms            = 1000;
+    s_space_route_ms             = 1000;
     s_plant_outdoor_ms           = 1000;
     s_status.plant_gate_known    = true;
     s_status.plant_gate_active   = true;
     s_status.heating_mode_known  = true;
     s_status.heating_mode_active = true;
+    s_status.space_route_known   = true;
+    s_status.space_route_active  = true;
     s_status.plant_outdoor       = logic::outdoor_homehub_evidence(true, true, 12.0);
     CachedValue cv;
     cv.value = "12";
@@ -506,6 +510,7 @@ void expiry() {
     REQUIRE(!mb_values_live());
     auto status = mb_status();
     REQUIRE(status.values == 0 && !status.plant_gate_known && !status.heating_mode_known &&
+            !status.space_route_known && !status.space_route_active &&
             !status.plant_outdoor.available);
     reset();
     seed_cache();
@@ -524,7 +529,8 @@ void expiry() {
     mb_record_poll_gap();
     REQUIRE(!mb_values_live());
     status = mb_status();
-    REQUIRE(status.values == 0 && !status.plant_gate_known);
+    REQUIRE(status.values == 0 && !status.plant_gate_known && !status.space_route_known &&
+            !status.space_route_active);
     std::cout << "bounds reply=" << MB_REPLY_MAX_AGE_S << "s cache=" << MB_CACHE_MAX_AGE_S << "s\n";
 }
 void reconfigure_generations() {
@@ -539,7 +545,8 @@ void reconfigure_generations() {
     REQUIRE(s_cache.empty() && mb_cache_generation() == revision + 1);
     const auto status = mb_status();
     REQUIRE(!status.connected && status.values == 0 && !status.plant_gate_known &&
-            !status.heating_mode_known);
+            !status.heating_mode_known && !status.space_route_known && !status.space_route_active);
+    REQUIRE(s_space_route_ms == -1);
     REQUIRE(status.last_error_code.empty());
     REQUIRE(!status_target("old", 502, 1, false, gen));
     REQUIRE(!status_error("old", "old", 2, 53, true, gen));
@@ -580,6 +587,7 @@ struct Peer {
     std::atomic<bool>     break_link{false};
     std::atomic<bool>     batch_exception{false};
     std::atomic<bool>         probe_exception{false};
+    std::atomic<bool>         space_route_exception{false};
     std::mutex                response_mutex;
     std::vector<RegisterWord> words;
     std::vector<WireRequest>  wire_requests;
@@ -632,6 +640,7 @@ struct Peer {
                 }
                 std::vector<uint8_t> r;
                 if ((batch_exception && qty > 1) ||
+                    (space_route_exception && req[7] == 4 && addr == 36 && qty == 1) ||
                     (probe_exception && req[7] == 4 && addr == 78 && qty == 1))
                     r = {req[0], req[1], 0, 0, 0, 3, req[6], uint8_t(req[7] | 0x80), 2};
                 else {
@@ -999,7 +1008,7 @@ void definition_snapshot_cutover() {
 }
 void poll_full_fast_break() {
     reset();
-    Peer peer;
+    Peer peer(false, ModbusProfile::HomeHub, {{MbFunc::ReadInput, 37, 0}});
     mb_poll_once();
     const auto revision = mb_cache_generation();
     const auto count    = s_cache.size();
@@ -1007,22 +1016,24 @@ void poll_full_fast_break() {
     REQUIRE(mb_values_live());
     auto st = mb_status();
     REQUIRE(st.connected && st.plant_gate_known && st.plant_gate_active && st.heating_mode_known &&
-            st.heating_mode_active);
+            st.heating_mode_active && st.space_route_known && st.space_route_active);
     REQUIRE(st.plant_outdoor.available && st.plant_outdoor.temperature_c == 12.0);
     const auto requests = peer.requests.load();
     peer.outdoor        = 1800;
+    peer.set_word(MbFunc::ReadInput, 37, 1);
     sdk::clock_us.fetch_add(1000000);
     mb_poll_once();
     st = mb_status();
     REQUIRE(mb_cache_generation() == revision && s_cache.size() == count);
     REQUIRE(st.plant_outdoor.temperature_c == 18.0);
+    REQUIRE(st.space_route_known && !st.space_route_active);
     REQUIRE(peer.requests.load() > requests && peer.requests.load() - requests < MB_PLAN.count);
     peer.break_link = true;
     sdk::clock_us.fetch_add(1000000);
     mb_poll_once();
     st = mb_status();
     REQUIRE(!st.connected && st.values == 0 && !st.plant_gate_known && !st.heating_mode_known &&
-            !st.plant_outdoor.available);
+            !st.space_route_known && !st.space_route_active && !st.plant_outdoor.available);
     REQUIRE(!mb_values_live());
     REQUIRE(st.last_error_code == "connection_closed");
 }
@@ -1041,6 +1052,152 @@ void poll_batch_fallback() {
     mb_poll_once();
     REQUIRE(mb_values_live());
     REQUIRE(peer.requests > first);
+}
+void space_route_values() {
+    // Independent wire expectations: 0 is the space circuit, 1 is DHW, and neither an unknown enum
+    // nor a protocol sentinel proves either route. Both profiles and both commit paths use the
+    // actual production row decoder; the fast path must not rebuild the full values cache.
+    struct RouteCase {
+        uint16_t raw;
+        bool     known, active;
+    };
+    const RouteCase cases[]{{0, true, true},
+                            {1, true, false},
+                            {2, false, false},
+                            {MB_WAIT, false, false},
+                            {MB_UNAVAILABLE, false, false},
+                            {MB_UNSUPPORTED, false, false}};
+    for (const auto profile : {ModbusProfile::HomeHub, ModbusProfile::Altherma4}) {
+        reset();
+        Peer peer(false, profile, {{MbFunc::ReadInput, 37, 0}});
+        mb_poll_once();
+        REQUIRE(mb_status().space_route_known && mb_status().space_route_active);
+        for (uint32_t tick : {0u, 1u}) {
+            for (const auto& expected : cases) {
+                peer.set_word(MbFunc::ReadInput, 37, expected.raw);
+                s_cycle_tick = tick;
+                sdk::clock_us.fetch_add(1000000);
+                const auto revision = mb_cache_generation();
+                mb_poll_once();
+                const auto st = mb_status();
+                REQUIRE(st.connected && st.plant_gate_known && st.plant_gate_active &&
+                        st.heating_mode_known && st.heating_mode_active);
+                REQUIRE(st.space_route_known == expected.known);
+                REQUIRE(st.space_route_active == expected.active);
+                REQUIRE(s_space_route_ms == (expected.known ? sdk::clock_us / 1000 : -1));
+                REQUIRE((mb_cache_generation() != revision) == (tick == 0));
+            }
+        }
+    }
+}
+void space_route_missing() {
+    for (const auto profile : {ModbusProfile::HomeHub, ModbusProfile::Altherma4}) {
+        reset();
+        Peer peer(false, profile, {{MbFunc::ReadInput, 37, 0}});
+        mb_poll_once();
+        REQUIRE(mb_status().space_route_known && mb_status().space_route_active);
+        for (uint32_t tick : {0u, 1u}) {
+            // An exception for this one register leaves the socket and other gate replies healthy.
+            // Their new replies must not renew the previously observed space-route word.
+            peer.batch_exception       = true;
+            peer.space_route_exception = true;
+            s_cycle_tick               = tick;
+            sdk::clock_us.fetch_add(1000000);
+            mb_poll_once();
+            auto st = mb_status();
+            REQUIRE(st.connected && st.plant_gate_known && st.plant_gate_active &&
+                    st.heating_mode_known && st.heating_mode_active);
+            REQUIRE(!st.space_route_known && !st.space_route_active && s_space_route_ms == -1);
+            REQUIRE(st.last_error_register == 37);
+            peer.space_route_exception = false;
+            s_cycle_tick               = tick;
+            sdk::clock_us.fetch_add(1000000);
+            mb_poll_once();
+            st = mb_status();
+            REQUIRE(st.connected && st.space_route_known && st.space_route_active);
+        }
+    }
+}
+void space_route_age() {
+    reset();
+    seed_cache();
+    sdk::clock_us   = (1000 + MB_REPLY_MAX_AGE_S * 1000LL) * 1000;
+    s_last_reply_ms = sdk::clock_us / 1000;
+    REQUIRE(mb_status().space_route_known && mb_status().space_route_active);
+    sdk::clock_us.fetch_add(1000); // The first millisecond beyond the inclusive own-reply bound.
+    s_last_reply_ms   = sdk::clock_us / 1000;
+    s_plant_gate_ms   = s_last_reply_ms;
+    s_heating_mode_ms = s_last_reply_ms;
+    auto st           = mb_status();
+    REQUIRE(st.connected && st.plant_gate_known && st.heating_mode_known);
+    REQUIRE(!st.space_route_known && !st.space_route_active);
+    for (int64_t absent_or_future : {int64_t{-1}, s_last_reply_ms + 1}) {
+        s_space_route_ms = absent_or_future;
+        st               = mb_status();
+        REQUIRE(st.connected && !st.space_route_known && !st.space_route_active);
+    }
+    for (uint32_t tick : {0u, 1u}) {
+        reset();
+        Peer peer(false, ModbusProfile::HomeHub, {{MbFunc::ReadInput, 37, 0}});
+        mb_poll_once();
+        REQUIRE(mb_status().space_route_known && mb_status().space_route_active);
+        peer.batch_exception      = true;
+        s_cycle_tick              = tick;
+        sdk::transport_time_model = true;
+        mb_poll_once();
+        sdk::transport_time_model = false;
+        const int64_t now_ms      = sdk::clock_us / 1000;
+        st                        = mb_status();
+        // Execute the complete long fallback sweep. Its late successful replies and final commit
+        // cannot turn the early input37 response into a newly observed route, on either path.
+        REQUIRE(st.connected && mb_values_live());
+        REQUIRE(logic::modbus_observation_age_s(s_space_route_ms, now_ms) > MB_REPLY_MAX_AGE_S);
+        REQUIRE(!st.space_route_known && !st.space_route_active);
+    }
+}
+void space_route_cutover() {
+    for (bool fast : {false, true}) {
+        reset();
+        Peer peer(false, ModbusProfile::HomeHub, {{MbFunc::ReadInput, 37, 0}});
+        mb_poll_once();
+        REQUIRE(mb_status().space_route_known && mb_status().space_route_active);
+        s_cycle_tick             = fast ? 1 : 0;
+        const auto revision      = s_mb_cache_revision.load();
+        int        fast_requests = 0;
+        for (int i = 0; i < MB_PLAN.count; ++i)
+            if (logic::mb_batch_is_fast(MB_PLAN.batch[i])) ++fast_requests;
+        const auto final_rx_ok              = s_status.rx_ok + fast_requests;
+        bool       called                   = false;
+        int        releases_after_last_read = 0;
+        sdk::on_mutex_give                  = [&] {
+            if (called) return;
+            if (fast) {
+                if (s_status.rx_ok != final_rx_ok || ++releases_after_last_read != 2) return;
+            } else if (s_mb_cache_revision.load() == revision) {
+                return;
+            }
+            called               = true;
+            adapter::cfg.mb_host = "replacement-unresolved";
+            mb_reconfigure(false);
+        };
+        mb_poll_once();
+        sdk::on_mutex_give = {};
+        REQUIRE(called && !mb_values_live());
+        const auto st = mb_status();
+        REQUIRE(!st.connected && !st.space_route_known && !st.space_route_active);
+        // Check the actual commit too: mb_status's disconnected-age filter must not conceal an
+        // old target's affirmative route or response timestamp written after reconfiguration.
+        REQUIRE(!s_status.space_route_known && !s_status.space_route_active &&
+                s_space_route_ms == -1);
+    }
+    reset();
+    Peer peer(false, ModbusProfile::HomeHub, {{MbFunc::ReadInput, 37, 0}});
+    mb_poll_once();
+    REQUIRE(mb_status().space_route_known && mb_status().space_route_active);
+    close_sock();
+    REQUIRE(status_socket_open("successor-session", 502, 1, s_target_generation));
+    const auto st = mb_status();
+    REQUIRE(!st.space_route_known && !st.space_route_active && s_space_route_ms == -1);
 }
 void poll_cutover() {
     // A source change after the initial current-session check must still invalidate commit.
@@ -1114,14 +1271,16 @@ void zero_cache_commit() {
     Peer peer;
     mb_poll_once();
     REQUIRE(s_cache_commit_ms == 0 && s_full_cache_status_ms == 0 && s_last_reply_ms == 0);
-    REQUIRE(s_plant_gate_ms == 0 && s_heating_mode_ms == 0 && s_plant_outdoor_ms == 0);
+    REQUIRE(s_plant_gate_ms == 0 && s_heating_mode_ms == 0 && s_space_route_ms == 0 &&
+            s_plant_outdoor_ms == 0);
     CachedValue rows[64];
     bool        live = false;
     REQUIRE(mb_values_snapshot(rows, 64, live) == static_cast<size_t>(def::HOMEHUB_REG_COUNT));
     REQUIRE(live && mb_values_live());
     const auto st = mb_status();
     REQUIRE(st.connected && st.values == def::HOMEHUB_REG_COUNT);
-    REQUIRE(st.plant_gate_known && st.heating_mode_known && st.plant_outdoor.available);
+    REQUIRE(st.plant_gate_known && st.heating_mode_known && st.space_route_known &&
+            !st.space_route_active && st.plant_outdoor.available);
 }
 
 void profile_cutover() {
@@ -1338,6 +1497,10 @@ int main(int argc, char** argv) {
                     {"definition_snapshot_cutover", test::definition_snapshot_cutover},
                     {"poll_full_fast_break", test::poll_full_fast_break},
                     {"poll_batch_fallback", test::poll_batch_fallback},
+                    {"space_route_values", test::space_route_values},
+                    {"space_route_missing", test::space_route_missing},
+                    {"space_route_age", test::space_route_age},
+                    {"space_route_cutover", test::space_route_cutover},
                     {"poll_cutover", test::poll_cutover},
                     {"zero_cache_commit", test::zero_cache_commit},
                     {"profile_cutover", test::profile_cutover},

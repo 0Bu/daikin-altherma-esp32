@@ -101,12 +101,13 @@ inline constexpr HomeHubReg HOMEHUB_REGS[] = {
     // 3):
     // that one says heating-vs-cooling, i.e. which SEASON the unit is configured for, and reads 1
     // (heat) throughout a DHW run — so a headline built from it would announce "heating" while the
-    // diverter is on the tank. These two say whether each circuit is actually being served.
+    // diverter is on the tank. The normal-operation flags can both be on; input 37 identifies
+    // the route independently, so neither flag alone proves which circuit is being served.
     {52, MbFunc::ReadInput, MbType::Int16, 1, "", "DHW normal operation", HomeHubValueKind::Binary},
     {53, MbFunc::ReadInput, MbType::Int16, 1, "", "Space heating/cooling normal operation",
      HomeHubValueKind::Binary},
     // Unlike offset 53, this CURRENT mode distinguishes the active heating and cooling seasons.
-    // The diagnosis combines both: 53 proves normal space operation, 38 proves it is HEATING.
+    // The diagnosis requires 53 active, 37 on space, and 38 on HEATING.
     {38, MbFunc::ReadInput, MbType::Int16, 1, "", "Current operation mode",
      HomeHubValueKind::CurrentOperationMode},
     // ── Temperatures (input, Temp16 = signed /100 °C)
