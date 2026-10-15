@@ -405,7 +405,8 @@ even if large status/values requests are refused. A same-tab, at-most-15-minute 
 OTA status. Label it Last received state and lock Settings writes. A later full pair supersedes it.
 Without a valid cache, show only current OTA/Firmware facts. Successful compact OTA status proves
 reachability and must not be overwritten by a generic unreachable message. Clear snapshots on idle
-or terminal failure; snapshots never become plant history.
+startup/check completion or terminal failure. Idle after an observed download retains the snapshot
+and write lock during the bounded reboot wait; snapshots never become plant history.
 
 ### 5.5 Installer landing page (`docs/index.html`, GitHub Pages)
 
