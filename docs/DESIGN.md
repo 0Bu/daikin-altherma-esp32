@@ -73,8 +73,9 @@ off to at most 30 seconds. Hidden tabs suspend polling and becoming visible retr
 The plant's poll engine has its separate cadence. There is no WebSocket/push transport.
 
 Only the latest requested status can update the screen; value replies also belong to that source
-lifetime. Failed reads blank current measurements and stop unsupported motion until a fresh frame
-arrives. A changed application-image identity reloads the page before using the new image's data
+lifetime. Failed reads retire live measurements and stop unsupported motion until a fresh frame
+arrives; Settings labels retained status as a snapshot and suppresses current sensor claims.
+A changed application-image identity reloads the page before using the new image's data
 or positional locale catalogs.
 
 The dashboard stays readable while configuration or updates run. Every asynchronous state has an

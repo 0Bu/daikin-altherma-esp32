@@ -424,10 +424,8 @@ static esp_err_t set_mqtt(httpd_req_t* req) {
     std::string user        = js(j, "user");
     std::string pass        = js(j, "pass");
     const bool  clear_creds = jb(j, "clear_creds", false);
-    // OPTIONAL, and absent must mean "keep", not "reset to the compile-time default". The dashboard
-    // always sends it, but this is a documented HTTP route: a script, or a browser still holding a
-    // cached pre-v16 bundle, posts broker+credentials alone — and defaulting on absence would move a
-    // deliberately-renamed installation back onto the shared base and merge it with another board.
+    // OPTIONAL: absence keeps the stored base, including its implicit compile-time default.
+    // The dashboard omits an unchanged value; other clients can post broker+credentials alone too.
     const bool  base_given  = cJSON_HasObjectItem(j, "base");
     std::string base        = js(j, "base");
     j.reset();

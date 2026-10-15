@@ -159,7 +159,7 @@ p = sys.argv[1]; s = open(p).read()
 i = s.index('data-insp="rwt"')
 j = s.index('</g>', i)
 blk = s[i:j]
-new = blk.replace('x="382"', 'x="640"').replace('x="415"', 'x="673"').replace('M415 431', 'M673 431')
+new = blk.replace('x="380"', 'x="640"').replace('x="413"', 'x="673"').replace('M413 431', 'M673 431')
 if new == blk: sys.exit(1)
 open(p, 'w').write(s[:i] + new + s[j:])
 PY
@@ -410,7 +410,7 @@ reset
 patch_file "$WORK/main/www/index.html" <<'PY'
 import sys
 p = sys.argv[1]; s = open(p).read()
-old = '<rect class="sc-pill" x="451" y="386" width="60" height="22" rx="11"/>'
+old = '<rect class="sc-pill" x="448" y="386" width="64" height="22" rx="11"/>'
 if old not in s: sys.exit(1)
 open(p, 'w').write(s.replace(old, '<rect class="sc-pill" x="461" y="386" width="46" height="22" rx="11"/>', 1))
 PY

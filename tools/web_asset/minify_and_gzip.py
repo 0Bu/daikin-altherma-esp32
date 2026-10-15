@@ -38,10 +38,9 @@ _REGEX_PREFIX_WORDS = {
 class TemplateProtector:
     """Hide complete template literals from rJSmin, which supports only unnested templates.
 
-    This UI deliberately uses nested templates extensively.  Protecting the complete outer literal
-    keeps both its raw text and every `${...}` expression byte-identical while rJSmin safely reduces
-    the surrounding classic-script syntax.  The scanner understands strings, comments and regular
-    expressions so braces/backticks inside them cannot terminate a template expression early.
+    Keep raw template chunks byte-identical and recursively minify only their `${...}` expressions.
+    The scanner understands strings, comments and regular expressions so braces/backticks inside
+    them cannot terminate an expression early. Nested templates receive the same protection.
     """
 
     def __init__(self, source: str):
@@ -173,6 +172,25 @@ class TemplateProtector:
                 pos, can_start_regex = self._step(pos, can_start_regex)
         raise ValueError("unterminated ${...} template expression")
 
+    def _minify_template(self, start: int, end: int) -> str:
+        pieces: list[str] = []
+        raw_start = start
+        pos = start + 1
+        while pos < end - 1:
+            if self.source[pos] == "\\":
+                pos += 2
+            elif self.source.startswith("${", pos):
+                expression = pos + 2
+                finish = self._expression(expression) - 1
+                pieces.extend((self.source[raw_start:expression],
+                               minify_javascript(self.source[expression:finish])))
+                raw_start = finish
+                pos = finish + 1
+            else:
+                pos += 1
+        pieces.append(self.source[raw_start:end])
+        return "".join(pieces)
+
     def protect(self) -> str:
         pieces: list[str] = []
         last = 0
@@ -183,7 +201,7 @@ class TemplateProtector:
                 end = self._template(pos)
                 placeholder = f"{self.prefix}{len(self.literals):06d}__"
                 pieces.extend((self.source[last:pos], placeholder))
-                self.literals.append((placeholder, self.source[pos:end]))
+                self.literals.append((placeholder, self._minify_template(pos, end)))
                 pos = end
                 last = end
                 can_start_regex = False

@@ -1017,6 +1017,22 @@ try {
       assertLayout(await page.evaluate(layoutAudit), `${viewport.name}/${locale}/settings`);
       await assertAccessibility(page, `${viewport.name}/${locale}/settings`, { nativeTree: true });
 
+      for (const busy of [false, true]) {
+        await page.evaluate(`S.transportUnavailable = "status"; S.transportBusy = ${busy}; renderApp(); true`);
+        assert.equal(await page.evaluate(`(() => {
+          const note = document.getElementById("statusSnapshot");
+          return !note.hidden && note.getAttribute("role") === "status" &&
+            note.innerText.includes(t("ota.snapshot_value")) &&
+            note.innerText.includes(t(${JSON.stringify(busy ? "toast.busy_retry" : "toast.unreachable")})) &&
+            !document.querySelector("#connTile .conn-val.ok");
+        })()`), true, `${viewport.name}/${locale}/settings: lost status labels every retained frame as a snapshot`);
+        assertLayout(await page.evaluate(layoutAudit), `${viewport.name}/${locale}/settings/status-loss`);
+        await assertAccessibility(page, `${viewport.name}/${locale}/settings/status-loss`, { nativeTree: true });
+      }
+      await page.evaluate('S.transportUnavailable = null; S.transportBusy = false; renderApp(); true');
+      assert.equal(await page.evaluate('document.getElementById("statusSnapshot").hidden'), true,
+        `${viewport.name}/${locale}/settings: fresh status removes the snapshot warning`);
+
       await page.evaluate(`otaFail(${JSON.stringify(otaMemoryError)}); renderApp(); true`);
       await page.frame();
       assertLayout(await page.evaluate(layoutAudit), `${viewport.name}/${locale}/settings/ota-error`);

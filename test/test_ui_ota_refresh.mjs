@@ -40,7 +40,7 @@ class Element {
 {
   const elements = elementsFor(
     "hdrIp", "verLink", "settingsVer", "connTile", "settingsCards", "otaStat", "otaStatSet",
-    "settingsDot", "btnSettings",
+    "settingsDot", "btnSettings", "statusSnapshot",
   );
   const connAction = new Element("conn-action");
   const settingsAction = new Element("settings-action");
@@ -172,7 +172,7 @@ function elementsFor(...ids) {
 {
   const elements = elementsFor(
     "hdrIp", "verLink", "settingsVer", "connTile", "settingsCards", "otaStat", "otaStatSet",
-    "settingsDot", "btnSettings",
+    "settingsDot", "btnSettings", "statusSnapshot",
   );
   const S = {
     status: null, busy: false, otaBusy: false, otaInstalling: false, otaShown: false, otaView: null,
