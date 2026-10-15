@@ -235,6 +235,21 @@ pending state and forced return to bootstrap with unchanged pins/profile/MQTT/ch
 install, require exact candidate identity, completed validation, positive heap evidence and at least
 1 KiB OTA-stack reserve by 45 seconds before releasing that watchdog; observe 105-second health,
 explicit valid/non-pending state and a cold power cycle with retained configuration/history.
+Before any feed lease or OTA write, require a synchronized clock and two informative, dated X10A
+trend canaries with older completed non-null cells. Capture them again on the valid candidate before
+the cold cycle; after restart, compare the same absolute five-minute buckets, units, values and
+explicit gaps under stable boot/epoch, profile and link identities. Both acquisition and restore
+wait at most 180 seconds. Empty, missing, changed or shifted history cannot pass merely because
+`history.persist` reports `power_cycle`. Positive old-cell restoration proves those cells were
+durable; the API does not expose a pre-write flash-commit counter.
+
+The API rounds sample age differently from the journal at subsecond boundaries. An anchor within
+six seconds (`HTTP_TIMEOUT_S + 1`) of either bucket edge is unavailable evidence; the controller
+never shifts data to obtain a match. Persistent ambiguity fails the run, including before writes,
+even if the underlying restore was intact. Each canary needs variation or an existing gap to make
+time shifts observable. The receipt records this exclusion and counts for the two inspected trends,
+not raw measurements. It does not prove all trends, completed diagnostic hours or physical sensor
+truth. Executed host fixtures prove controller behavior, not a physical cold cycle.
 
 Then exercise the candidate's own writer through a verified bootstrap downgrade under another
 watchdog; capture pre-reboot evidence, prove pending bootstrap, force rollback to the valid candidate,

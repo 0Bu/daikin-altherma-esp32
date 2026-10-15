@@ -18,6 +18,7 @@ import argparse
 import base64
 from contextlib import contextmanager
 from dataclasses import dataclass
+from datetime import datetime
 import hashlib
 import json
 import os
@@ -101,6 +102,11 @@ HIL_FEED_HEADERS = frozenset((HIL_MANIFEST_HEADER, HIL_FIRMWARE_BASE_HEADER))
 HIL_FEED_URL_MAX_BYTES = 255
 RELEASE_HIL_MANIFEST_MAX_BYTES = 1024
 RELEASE_HIL_APP_MAX_BYTES = 0x1F0000
+HIL_HISTORY_MAX_BYTES = 8192
+HIL_HISTORY_WAIT_S = 180
+HIL_HISTORY_DT_S = 300
+HIL_HISTORY_ANCHOR_MARGIN_S = HTTP_TIMEOUT_S + 1
+HIL_HISTORY_ROWS = ("leaving_water", "return_water", "dhw_tank", "water_pressure", "flow")
 # The oldest supported signed release used by the ordinary bench full-download cycle reads one
 # fixed 1024-byte manifest frame. Any larger dev manifest must fail before the gate contacts a
 # board, otherwise the release could be installed successfully and then be unable to restore dev.
@@ -2845,6 +2851,205 @@ def persistence_snapshot(
     return snapshot
 
 
+class HistoryEvidenceUnavailable(GateError):
+    """A bounded retry may acquire missing evidence; this is never a passing result."""
+
+
+def request_history_deadline(
+    endpoint: ResolvedHttpEndpoint, row: str, *, timeout: float,
+) -> dict[str, Any]:
+    if row not in HIL_HISTORY_ROWS:
+        fail("release-HIL history row is not an eligible X10A measurement")
+    path = "/history?" + urlencode({"row": row, "source": "x10a"})
+    raw = request_bytes_deadline(
+        endpoint, path, timeout=timeout, max_body_bytes=HIL_HISTORY_MAX_BYTES,
+        allow_chunked=True,
+    )
+    value = strict_json(raw, "release-HIL history response")
+    if not isinstance(value, dict):
+        fail("release-HIL history response is not an object")
+    return value
+
+
+def hil_history_status(status: dict[str, Any]) -> tuple[tuple[Any, ...], int]:
+    boot = status.get("boot_id")
+    history = status.get("history", {})
+    if not isinstance(history, dict):
+        fail("release-HIL history status is not an object")
+    epoch = history.get("epoch")
+    if not isinstance(boot, str) or re.fullmatch(r"[0-9a-f]{16}", boot) is None or \
+       type(epoch) is not int or not 0 < epoch <= 0xffffffff or \
+       history.get("dt") != HIL_HISTORY_DT_S or type(history.get("dt")) is not int:
+        fail("release-HIL history has no valid boot/epoch/raster identity")
+    ntp = status.get("ntp", {})
+    if not isinstance(ntp, dict):
+        fail("release-HIL history clock is not an object")
+    if ntp.get("synced") is not True:
+        raise HistoryEvidenceUnavailable("release-HIL history clock is not synchronized")
+    try:
+        instant = datetime.fromisoformat(ntp["time"].replace("Z", "+00:00"))
+        if instant.utcoffset() is None or instant.utcoffset().total_seconds() != 0:
+            raise ValueError("undated clock")
+        wall = int(instant.timestamp())
+    except (KeyError, TypeError, AttributeError, ValueError, OverflowError):
+        fail("release-HIL history clock has no valid absolute time")
+    hp, profile = status.get("hp", {}), status.get("profile", {})
+    if not isinstance(hp, dict) or not isinstance(profile, dict):
+        fail("release-HIL history source identity is not an object")
+    profile = profile.get("id")
+    if hp.get("connected") is not True or not isinstance(profile, str) or profile in ("", "auto"):
+        raise HistoryEvidenceUnavailable("release-HIL history has no confirmed X10A profile")
+    pins = (hp.get("rx"), hp.get("tx"))
+    if any(type(pin) is not int or pin < 0 for pin in pins) or \
+       not isinstance(hp.get("proto"), str) or not hp["proto"]:
+        fail("release-HIL history has no valid X10A link identity")
+    return (boot, epoch, profile, *pins, hp["proto"]), wall
+
+
+def hil_history_cells(
+    payload: dict[str, Any], row: str, identity: tuple[Any, ...], wall: int,
+) -> dict[str, Any]:
+    if payload.get("id") != row or payload.get("source") != "x10a" or \
+       payload.get("boot_id") != identity[0] or payload.get("epoch") != identity[1] or \
+       type(payload.get("epoch")) is not int or payload.get("dt") != HIL_HISTORY_DT_S or \
+       type(payload.get("dt")) is not int or not isinstance(payload.get("unit"), str) or \
+       len(payload["unit"]) > 16:
+        fail("release-HIL history response changed row/source/boot/epoch/unit/raster identity")
+    values, t0 = payload.get("v"), payload.get("t0")
+    if not isinstance(values, list) or len(values) > 288 or \
+       any(value is not None and (type(value) is not int or not -32768 <= value <= 32767)
+           for value in values) or payload.get("held") != []:
+        fail("release-HIL history measurement cells or held metadata are invalid")
+    if not values or t0 is None:
+        raise HistoryEvidenceUnavailable("release-HIL history has no dated completed cells")
+    if type(t0) is not int or t0 <= 0 or \
+       t0 + (len(values) - 1) * HIL_HISTORY_DT_S > wall + HTTP_TIMEOUT_S + 1:
+        fail("release-HIL history has invalid or future sample time")
+    # The API floors age before subtracting; the journal retains the subsecond remainder.
+    # At a boundary unix=900, age=0.5 s gives API bucket 3 but journal bucket 2.
+    # A request also samples wall time after the ring. Refuse the entire uncertainty margin;
+    # never repair a mismatch by trying neighbouring buckets.
+    phase = t0 % HIL_HISTORY_DT_S
+    if min(phase, HIL_HISTORY_DT_S - phase) <= HIL_HISTORY_ANCHOR_MARGIN_S:
+        raise HistoryEvidenceUnavailable("release-HIL history wall bucket is ambiguous")
+    first = t0 // HIL_HISTORY_DT_S
+    return {"unit": payload["unit"], "cells": {first + i: value for i, value in enumerate(values)}}
+
+
+def hil_history_canary(series: dict[str, Any], wall: int) -> dict[str, Any]:
+    # Leave four hours of retention reserve and two recent buckets outside the acceptance window.
+    current = wall // HIL_HISTORY_DT_S
+    cells = {bucket: value for bucket, value in series["cells"].items()
+             if current - 240 <= bucket <= current - 2}
+    observed = [bucket for bucket, value in cells.items() if value is not None]
+    if len(observed) < 2:
+        raise HistoryEvidenceUnavailable("release-HIL history needs two older non-null cells per row")
+    cells = {bucket: value for bucket, value in cells.items() if observed[0] <= bucket <= observed[-1]}
+    if len(set(value for value in cells.values() if value is not None)) < 2 and \
+       not any(value is None for value in cells.values()):
+        raise HistoryEvidenceUnavailable("release-HIL history canary has no variation or explicit gap")
+    return {"unit": series["unit"], "cells": cells}
+
+
+def compare_hil_history(expected: dict[str, Any], actual: dict[str, Any]) -> None:
+    if actual["unit"] != expected["unit"]:
+        fail("release-HIL history measurement unit changed")
+    for bucket, value in expected["cells"].items():
+        if bucket not in actual["cells"] or actual["cells"][bucket] != value:
+            raise HistoryEvidenceUnavailable("release-HIL history did not restore the exact dated cells/gaps")
+
+
+def wait_hil_history(
+    endpoint: ResolvedHttpEndpoint, *, host: str, mac: str, version: str, elf: str,
+    boot: str, expected: dict[str, Any] | None = None, cold: bool = False,
+) -> dict[str, Any]:
+    deadline = time.monotonic() + HIL_HISTORY_WAIT_S
+    last = "no history sample"
+    while time.monotonic() < deadline:
+        def remaining() -> float:
+            left = deadline - time.monotonic()
+            if left <= 0:
+                raise HistoryEvidenceUnavailable("release-HIL history deadline expired")
+            return min(left, HTTP_TIMEOUT_S)
+
+        try:
+            started = time.monotonic()
+            before = request_status_deadline(endpoint, timeout=remaining())
+            validate_identity(before, host=host, mac=mac, version=version, elf=elf)
+            identity, wall = hil_history_status(before)
+            if identity[0] != boot or (cold and identity[0] == expected["boot"]):
+                fail("release-HIL history did not remain on the required boot")
+            if expected is not None and identity[2:] != expected["scope"]:
+                fail("release-HIL history physical source/profile changed")
+            rows = before["history"].get("rows")
+            if not isinstance(rows, list) or any(not isinstance(row, dict) for row in rows):
+                fail("release-HIL history row catalog is invalid")
+            ids = [row.get("id") for row in rows]
+            if any(not isinstance(row, str) for row in ids) or len(ids) != len(set(ids)):
+                fail("release-HIL history row catalog has invalid/duplicate ids")
+            wanted = list(expected["series"]) if expected is not None else HIL_HISTORY_ROWS
+            selected = {}
+            for row in wanted:
+                if row not in ids:
+                    if expected is not None:
+                        raise HistoryEvidenceUnavailable("release-HIL history canary row disappeared")
+                    continue
+                payload = request_history_deadline(endpoint, row, timeout=remaining())
+                try:
+                    series = hil_history_cells(payload, row, identity,
+                                               wall + int(time.monotonic() - started))
+                    if cold:
+                        compare_hil_history(expected["series"][row], series)
+                        series = expected["series"][row]
+                    else:
+                        series = hil_history_canary(series, wall)
+                    selected[row] = series
+                except HistoryEvidenceUnavailable:
+                    if expected is not None:
+                        raise
+                    continue
+                if len(selected) == 2:
+                    break
+            if len(selected) != 2:
+                raise HistoryEvidenceUnavailable("release-HIL history needs two informative X10A canaries")
+            after = request_status_deadline(endpoint, timeout=remaining())
+            validate_identity(after, host=host, mac=mac, version=version, elf=elf)
+            after_identity, after_wall = hil_history_status(after)
+            elapsed = time.monotonic() - started
+            if after_identity != identity:
+                fail("release-HIL history boot/epoch/source changed during snapshot")
+            if not 0 <= required_uptime(after, "history after") - \
+                    required_uptime(before, "history before") <= elapsed + 2:
+                fail("release-HIL history uptime changed during snapshot")
+            if abs(after_wall - wall - elapsed) > 2:
+                raise HistoryEvidenceUnavailable("release-HIL history clock changed during snapshot")
+            if time.monotonic() >= deadline:
+                raise HistoryEvidenceUnavailable("release-HIL history deadline expired after snapshot")
+            return {"boot": identity[0], "epoch": identity[1], "scope": identity[2:], "series": selected}
+        except HistoryEvidenceUnavailable as error:
+            last = str(error)
+        except HTTPError as error:
+            if error.code != 503:
+                raise
+            last = "history service temporarily unavailable"
+        except (CompactTransportError, OSError, TimeoutError):
+            last = "history transport temporarily unavailable"
+        left = deadline - time.monotonic()
+        if left > 0:
+            time.sleep(min(1, left))
+    fail(f"release-HIL history acceptance incomplete: {last}")
+
+
+def hil_history_summary(evidence: dict[str, Any]) -> dict[str, Any]:
+    return {"restored": True, "raster_s": HIL_HISTORY_DT_S,
+            "anchor_boundary_exclusion_s": HIL_HISTORY_ANCHOR_MARGIN_S, "rows": [
+        {"id": row, "cells": len(series["cells"]),
+         "non_null": sum(value is not None for value in series["cells"].values()),
+         "gaps": sum(value is None for value in series["cells"].values())}
+        for row, series in evidence["series"].items()
+    ]}
+
+
 def require_stack_evidence(status: dict[str, Any], tasks: list[str], minimum: int) -> dict[str, int]:
     stack = status.get("sys", {}).get("stack_min_free_bytes")
     if not isinstance(stack, dict):
@@ -3510,6 +3715,10 @@ def run_release_hil(
     persistent = persistence_snapshot(
         before, lab["persistence_paths"], lab["persistence_canaries"],
     )
+    history_preflight = wait_hil_history(
+        initial_endpoint, host=host, mac=mac, version=old_version, elf=old_elf,
+        boot=before.get("boot_id"),
+    )
 
     with leased_release_hil_feed(
         lab["feed_control_url"], lab["feed_controller_id"],
@@ -3569,6 +3778,11 @@ def run_release_hil(
             committed_status, host=host, mac=mac, version=version, elf=elf,
         )
         wait_for_ota_image_state(committed_endpoint, rollback_pending=False)
+        history_before_cold = wait_hil_history(
+            committed_endpoint, host=host, mac=mac, version=version, elf=elf,
+            boot=committed_status.get("boot_id"), expected=history_preflight,
+        )
+        require_feed_active()
         release_hil_power_cycle(lab, power_token)
         cold = wait_for_identity(host, mac, version, elf)
         require_release_hil_channel(cold, lab["channel"])
@@ -3582,6 +3796,11 @@ def run_release_hil(
             fail("release-HIL configuration changed across committed-image cold restart")
         if cold.get("history", {}).get("persist") != "power_cycle":
             fail("release-HIL cold restart did not report the history power-cycle boundary")
+        history_restored = wait_hil_history(
+            cold_endpoint, host=host, mac=mac, version=version, elf=elf,
+            boot=cold.get("boot_id"), expected=history_before_cold, cold=True,
+        )
+        require_feed_active()
 
         # Prove the committed candidate's own OTA writer, rather than only the bootstrap writer
         # used by the two candidate installs above. The candidate downloads and selects the exact
@@ -3662,6 +3881,7 @@ def run_release_hil(
             },
             "committed_health_uptime_s": health.get("uptime_s"),
             "cold_restore": "power_cycle",
+            "history_restore": hil_history_summary(history_restored),
             "stack_min_free_bytes": stack,
             "stress": stress,
         },

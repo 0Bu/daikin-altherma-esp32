@@ -594,6 +594,240 @@ const coldReceipt = spawnSync("python3", [
 assert.equal(coldReceipt.status, 0,
   `cold pressure and durable blocked receipts must preserve evidence: ${coldReceipt.stderr}`);
 
+// Executed HIL history fixtures. Every transport, clock, artifact and controller is local/fake.
+// The mutation runner executes this probe directly so unrelated errors cannot kill a mutant.
+const hilHistoryProbe = String.raw`
+import contextlib, copy, hashlib, json, runpy, sys, tempfile
+from datetime import datetime, timezone
+from pathlib import Path
+from unittest.mock import patch
+gate = runpy.run_path(sys.argv[1], run_name="hil_history_probe")
+ns = gate["main"].__globals__
+def check(condition, label):
+    assert condition, "HIL_HISTORY: " + label
+def rejected(call, label):
+    try:
+        call()
+    except (gate["GateError"], gate["CompactTransportError"], TimeoutError):
+        return
+    check(False, label + " was accepted")
+old_boot, new_boot = "a" * 16, "b" * 16
+wall, anchor = 1800003000, 1800000060
+def status(boot=old_boot, version="2.0.0", elf="123456789"):
+    return {"boot_id": boot, "version": version, "app_elf_sha256": elf, "uptime_s": 105,
+        "wifi": {"mac": "FIXTURE", "connected": True, "rolled_back": False},
+        "ntp": {"synced": True, "time": datetime.fromtimestamp(wall, timezone.utc).isoformat()},
+        "hp": {"connected": True, "rx": 44, "tx": 43, "proto": "I", "crc_err": 0, "timeout_err": 0},
+        "profile": {"id": "fixture"}, "ota": {"channel": "release"},
+        "mqtt": {"base": "canary", "base_custom": True},
+        "sys": {"heap_restarts": 0, "mqtt_skipped": 0, "poll_skipped": 0},
+        "history": {"epoch": 1, "dt": 300, "persist": "power_cycle",
+                    "rows": [{"id": "leaving_water"}, {"id": "return_water"}]}}
+def payload(row="leaving_water", boot=old_boot):
+    return {"id": row, "source": "x10a", "boot_id": boot, "epoch": 1, "dt": 300,
+            "unit": "degC", "t0": anchor, "v": [120, None, 130, 140, 150], "held": []}
+identity, _ = gate["hil_history_status"](status())
+cells = gate["hil_history_cells"](payload(), "leaving_water", identity, wall)
+canary = gate["hil_history_canary"](cells, wall)
+check(list(canary["cells"].values()) == [120, None, 130, 140, 150], "baseline discarded gaps")
+shifted_seconds = payload(); shifted_seconds["t0"] += 60
+gate["compare_hil_history"](canary, gate["hil_history_cells"](
+    shifted_seconds, "leaving_water", identity, wall))
+appended = payload(); appended["v"] += [None, 160]
+gate["compare_hil_history"](canary, gate["hil_history_cells"](
+    appended, "leaving_water", identity, wall))
+for field, value in [("source", "modbus"), ("id", "flow"), ("boot_id", new_boot),
+                     ("epoch", 2), ("dt", True), ("unit", None), ("v", [True]),
+                     ("v", [float("nan")]), ("v", [1] * 289), ("held", [[0, 1]])]:
+    bad = payload(); bad[field] = value
+    rejected(lambda: gate["hil_history_cells"](bad, "leaving_water", identity, wall), "invalid " + field)
+for mutation in ("missing", "changed", "gap filled", "bucket shifted", "new only", "unit changed"):
+    bad = payload()
+    if mutation == "missing": bad["v"] = bad["v"][1:]; bad["t0"] += 300
+    if mutation == "changed": bad["v"][0] = 121
+    if mutation == "gap filled": bad["v"][1] = 0
+    if mutation == "bucket shifted": bad["t0"] += 300
+    if mutation == "new only": bad["t0"] = wall - 540; bad["v"] = [120, 130]
+    if mutation == "unit changed": bad["unit"] = "bar"
+    actual = gate["hil_history_cells"](bad, "leaving_water", identity, wall)
+    rejected(lambda: gate["compare_hil_history"](canary, actual), mutation)
+constant = payload(); constant["v"] = [120] * 5
+rejected(lambda: gate["hil_history_canary"](gate["hil_history_cells"](
+    constant, "leaving_water", identity, wall), wall), "uninformative constant canary")
+
+# Concrete subsecond regression: the route floors 0.5 s to zero, the journal subtracts one second.
+check(900 // 300 == 3 and (900 - 1) // 300 == 2, "subsecond ambiguity fixture")
+ambiguous = payload(); ambiguous.update(t0=900, v=[120, 130])
+rejected(lambda: gate["hil_history_cells"](ambiguous, "leaving_water", identity, wall),
+         "900 s / 500000 us ambiguous anchor")
+margin = ns["HIL_HISTORY_ANCHOR_MARGIN_S"]
+for phase in list(range(margin + 1)) + list(range(300 - margin, 300)):
+    ambiguous = payload(); ambiguous["t0"] = anchor // 300 * 300 + phase
+    rejected(lambda: gate["hil_history_cells"](ambiguous, "leaving_water", identity, wall),
+             "uncertain wall phase " + str(phase))
+
+# Real bounded HTTP parser and the new reader, fed an in-memory socket, including chunked framing.
+class Wire:
+    def __init__(self, raw): self.raw, self.sent = raw, b""
+    def settimeout(self, value): check(0 < value <= 5, "transport timeout not bounded")
+    def connect(self, address): pass
+    def sendall(self, value): self.sent += value
+    def recv(self, count):
+        value, self.raw = self.raw[:count], self.raw[count:]
+        return value
+    def close(self): pass
+endpoint = ns["ResolvedHttpEndpoint"](2, 1, 6, ("fixture.invalid", 80), "fixture.invalid")
+body = json.dumps(payload()).encode()
+wire = Wire(b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n" +
+    format(len(body), "x").encode() + b"\r\n" + body + b"\r\n0\r\n\r\n")
+with patch.object(ns["socket"], "socket", lambda *a: wire):
+    check(gate["request_history_deadline"](endpoint, "leaving_water", timeout=5) == payload(),
+          "valid chunked history refused")
+check(b"GET /history?row=leaving_water&source=x10a HTTP/1.1" in wire.sent, "source query omitted")
+for raw in (b"HTTP/1.1 200 OK\r\nContent-Length: 8193\r\n\r\n" + b" " * 8191 + b"{}",
+            b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n4\r\n{}",
+            b"HTTP/1.1 200 OK\r\nContent-Length: 13\r\n\r\n{\"v\":1,\"v\":2}",
+            b"HTTP/1.1 200 OK\r\nContent-Length: 3\r\n\r\nNaN"):
+    with patch.object(ns["socket"], "socket", lambda *a: Wire(raw)):
+        rejected(lambda: gate["request_history_deadline"](endpoint, "leaving_water", timeout=5),
+                 "oversized/truncated/duplicate/nonfinite transport")
+
+def wait_fixture(*, expected=None, cold=False, change=None, status_change=None):
+    clock, reads = [0.0], [0]
+    boot = new_boot if cold else old_boot
+    def read_status(*a, **k):
+        reads[0] += 1
+        value = status(boot)
+        return status_change(value, reads[0]) if status_change else value
+    def read_history(_endpoint, row, **kwargs):
+        value = payload(row, boot)
+        return change(value) if change else value
+    def sleep(seconds):
+        clock[0] += seconds
+        check(clock[0] <= 4, "history wait exceeded its absolute deadline")
+    with patch.dict(ns, {"request_status_deadline": read_status,
+                        "request_history_deadline": read_history, "HIL_HISTORY_WAIT_S": 2}), \
+         patch.object(ns["time"], "monotonic", lambda: clock[0]), \
+         patch.object(ns["time"], "sleep", sleep):
+        return gate["wait_hil_history"](endpoint, host="fixture.invalid", mac="FIXTURE",
+            version="2.0.0", elf="123456789", boot=boot, expected=expected, cold=cold)
+baseline = wait_fixture()
+restored = wait_fixture(expected=baseline, cold=True)
+delayed_reads = [0]
+def delayed_restore(p):
+    delayed_reads[0] += 1
+    return {**p, "v": []} if delayed_reads[0] == 1 else p
+wait_fixture(expected=baseline, cold=True, change=delayed_restore)
+check(delayed_reads[0] == 3, "delayed scan did not reach a positive bounded restore")
+check(gate["hil_history_summary"](restored) == {"restored": True, "raster_s": 300,
+    "anchor_boundary_exclusion_s": margin, "rows": [
+    {"id": "leaving_water", "cells": 5, "non_null": 4, "gaps": 1},
+    {"id": "return_water", "cells": 5, "non_null": 4, "gaps": 1}]}, "summary lost positive evidence")
+check("120" not in json.dumps(gate["hil_history_summary"](restored)), "summary exposed raw values")
+for name, change in [
+    ("empty", lambda p: {**p, "v": []}),
+    ("ambiguous", lambda p: {**p, "t0": anchor // 300 * 300}),
+    ("gap filled", lambda p: {**p, "v": [120, 0, 130, 140, 150]}),
+    ("new only", lambda p: {**p, "t0": wall - 540, "v": [120, 130]})]:
+    rejected(lambda: wait_fixture(expected=baseline, cold=True, change=change), name + " cold restore")
+rejected(lambda: wait_fixture(change=lambda p: {**p, "t0": anchor // 300 * 300}),
+         "ambiguous preflight")
+for name, change in [
+    ("changed epoch", lambda s, n: {**s, "history": {**s["history"], "epoch": 2 if n % 2 == 0 else 1}}),
+    ("changed source", lambda s, n: {**s, "profile": {"id": "other"}}),
+    ("unchanged cold boot", lambda s, n: {**s, "boot_id": old_boot}),
+    ("unsynchronized", lambda s, n: {**s, "ntp": {"synced": False}}),
+    ("single row", lambda s, n: {**s, "history": {**s["history"], "rows": [{"id": "leaving_water"}]}}),
+    ("clock step", lambda s, n: {**s, "ntp": {"synced": True, "time":
+        datetime.fromtimestamp(wall + (30 if n % 2 == 0 else 0), timezone.utc).isoformat()}})]:
+    rejected(lambda: wait_fixture(expected=baseline, cold=True, status_change=change), name)
+
+# Execute the real HIL orchestrator; all artifact/controller/feed/device dependencies are fake.
+def run_hil(*, missing=False, cold_bad=False):
+    events, clock = [], [0.0]
+    current = {"version": "2.0.0", "elf": "123456789", "boot": old_boot, "installs": 0}
+    def board(): return status(current["boot"], current["version"], current["elf"])
+    def get_status(*a, **k): return board()
+    def get_history(_endpoint, row, **kwargs):
+        events.append("history")
+        value = payload(row, current["boot"])
+        if missing: value["v"] = []
+        if cold_bad and "power" in events: value["v"][1] = 0
+        return value
+    @contextlib.contextmanager
+    def feed(*a, **k):
+        events.append("feed")
+        yield lambda: None
+    @contextlib.contextmanager
+    def watchdog(*a, **k):
+        def trigger():
+            current.update(version="2.0.0" if current["installs"] == 1 else "2.0.1",
+                           elf="123456789" if current["installs"] == 1 else "abcdef123",
+                           boot=str(current["installs"]) * 16)
+        yield (lambda: None), trigger, (lambda: None)
+    def install(**kwargs):
+        current["installs"] += 1
+        events.append("install" + str(current["installs"]))
+        current.update(version=kwargs["version"], elf=kwargs["elf"],
+                       boot=str(current["installs"] + 3) * 16)
+        return {**board(), "uptime_s": 13}, {}
+    def power(*args):
+        events.append("power")
+        current["boot"] = new_boot
+    def sleep(seconds):
+        clock[0] += seconds
+        check(clock[0] <= 4, "orchestrator history wait exceeded deadline")
+    lab = {"host": "fixture.invalid", "mac": "FIXTURE", "bootstrap_version": "2.0.0",
+        "bootstrap_elf": "123456789", "bootstrap_app_sha256": "c" * 64,
+        "channel": "release", "manifest_url": "https://candidate.invalid/manifest.json",
+        "firmware_base_url": "https://candidate.invalid/", "feed_control_url": "https://feed.invalid/",
+        "feed_controller_id": "fixture-feed", "bootstrap_manifest_url": "https://bootstrap.invalid/manifest.json",
+        "bootstrap_firmware_base_url": "https://bootstrap.invalid/", "require_x10a": True,
+        "require_weather": True, "required_stack_tasks": ["httpd", "poll", "mqtt", "weather"],
+        "min_stack_free_bytes": 1024, "persistence_paths": ["hp.rx", "hp.tx", "profile.id", "ota.channel",
+            "mqtt.base", "mqtt.base_custom"], "persistence_canaries": {"mqtt.base": "canary", "mqtt.base_custom": True}}
+    with tempfile.TemporaryDirectory() as folder:
+        app = Path(folder) / "app.bin"; app.write_bytes(b"public-fixture")
+        sha = hashlib.sha256(app.read_bytes()).hexdigest()
+        manifest = Path(folder) / "manifest.json"
+        manifest.write_text(json.dumps({"version": "2.0.1", "provenance": {
+            "source_sha": "a" * 40, "app_sha256": sha}}))
+        replacements = {"verify_release_hil_source": lambda *a: None, "run_checked": lambda *a, **k: "fixture",
+            "verify_image": lambda *a: "abcdef123", "load_release_hil_inventory": lambda: lab,
+            "verify_release_hil_bootstrap_artifact": lambda *a: {}, "resolve_http_endpoint": lambda *a: endpoint,
+            "request_status_deadline": get_status, "request_history_deadline": get_history,
+            "leased_release_hil_feed": feed, "require_exact_release_hil_feed": lambda *a: None,
+            "pending_image_power_watchdog": watchdog, "release_hil_install_once": install,
+            "wait_for_identity": lambda *a: board(), "wait_for_bench_health_window": lambda *a, **k: board(),
+            "wait_for_ota_image_state": lambda *a, **k: {"image_state": "valid", "rollback_pending": False},
+            "release_hil_power_cycle": power, "stress_board": lambda **k: {},
+            "require_stack_evidence": lambda *a: {}, "HIL_HISTORY_WAIT_S": 2}
+        with patch.dict(ns, replacements), patch.object(ns["time"], "monotonic", lambda: clock[0]), \
+             patch.object(ns["time"], "sleep", sleep):
+            try:
+                result = gate["run_release_hil"](manifest_path=manifest, app_path=app,
+                    source_sha="a" * 40, version="2.0.1", app_sha256=sha, power_token="fake", feed_token="fake")
+            except gate["GateError"]:
+                check(missing or cold_bad, "valid HIL fixture refused")
+                if missing: check("feed" not in events and "install1" not in events, "missing prerequisites reached mutation")
+                if cold_bad: check("install3" not in events, "failed restore continued into candidate writer")
+                return
+    check(not missing and not cold_bad, "HIL passed without retained history")
+    check(events.index("history") < events.index("feed") < events.index("install1"), "history preflight was late")
+    power_index, writer_index = events.index("power"), events.index("install3")
+    check("history" in events[events.index("install2"):power_index], "no candidate baseline before cold cycle")
+    check("history" in events[power_index:writer_index], "no positive comparison after cold cycle")
+    check(result["lab"].get("history_restore", {}).get("restored") is True, "receipt has no positive data proof")
+run_hil()
+run_hil(missing=True)
+run_hil(cold_bad=True)
+print("HIL history behavioral fixtures passed")
+`;
+const hilHistory = spawnSync("python3", [
+  "-I", "-B", "-c", hilHistoryProbe, path.join(root, "scripts/production-ota-gate.py"),
+], { encoding: "utf8", timeout: 10000 });
+assert.equal(hilHistory.status, 0, `HIL history evidence fixtures failed: ${hilHistory.stderr}`);
+
 // Role, artifact and timing boundaries.
 assert.match(gate, /BENCH_ROLE\s*=\s*"bench"[\s\S]{0,100}?PRODUCTION_ROLE\s*=\s*"production"/);
 assert.match(gate, /bench and production inventory identities must be distinct/);
