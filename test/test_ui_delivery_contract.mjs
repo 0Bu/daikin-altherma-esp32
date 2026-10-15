@@ -9,6 +9,7 @@ import path from "node:path";
 import vm from "node:vm";
 import zlib from "node:zlib";
 import { fileURLToPath } from "node:url";
+import { spliceInlineAssets } from "../tools/ui/inline_page.mjs";
 import { readAppSource } from "../tools/ui/read_app_source.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -23,11 +24,49 @@ try {
   const html = fs.readFileSync(path.join(root, "main/www/index.html"), "utf8");
   const css = fs.readFileSync(path.join(root, "main/www/style.css"), "utf8");
   const app = readAppSource();
-  const assembled = html
-    .replace("/*@@INLINE:style.css@@*/\n", css)
-    .replace("//@@INLINE:app.js@@\n", app);
+  const assembled = spliceInlineAssets(html, { css, js: app });
   assert.notEqual(assembled, html, "test assembly must replace both inline markers");
   fs.writeFileSync(input, assembled);
+
+  // Host pages must be byte-identical to the firmware page. inline_assets.cmake splices with
+  // string(REPLACE), which copies asset bytes literally; String.prototype.replace(string, string)
+  // expands $$, $&, $` and $' in its replacement and once dropped a dollar sign from
+  // settings.js, so the render gate executed a room-source formatter the device never ships.
+  // The oracle is an independent literal splice; the render gate's assembler runs as the gate runs it.
+  const literalSplice = (page, marker, asset) => {
+    const at = page.indexOf(marker);
+    assert.ok(at >= 0 && page.indexOf(marker, at + marker.length) < 0, `marker ${marker.trim()} must appear once`);
+    return page.slice(0, at) + asset + page.slice(at + marker.length);
+  };
+  const firstDifference = (actual, expected) => {
+    let i = 0;
+    while (i < actual.length && i < expected.length && actual[i] === expected[i]) i++;
+    return `first difference at byte ${i} (line ${expected.slice(0, i).split("\n").length}): ` +
+      `${JSON.stringify(actual.slice(Math.max(0, i - 30), i + 12))} vs firmware ` +
+      `${JSON.stringify(expected.slice(Math.max(0, i - 30), i + 12))}`;
+  };
+  const firmwarePage = literalSplice(literalSplice(html, "/*@@INLINE:style.css@@*/\n", css),
+    "//@@INLINE:app.js@@\n", app);
+  const dollarSequence = "}$${";
+  assert.ok(app.includes(dollarSequence),
+    "premise: settings.js formatRefSource keeps the literal dollar separator this check guards");
+  const gatePath = path.join(work, "render-gate.html");
+  const gateRun = childProcess.spawnSync(process.execPath, ["tools/browser/assemble_page.mjs", gatePath],
+    { cwd: root, encoding: "utf8" });
+  assert.equal(gateRun.status, 0, gateRun.stderr || gateRun.stdout);
+  const gatePage = fs.readFileSync(gatePath, "utf8");
+  for (const [name, page] of [["render-gate assembler", gatePage], ["delivery-test assembly", assembled]]) {
+    assert.ok(page === firmwarePage,
+      `${name} must equal the literal firmware splice; ${firstDifference(page, firmwarePage)}`);
+    assert.equal(page.split(dollarSequence).length, app.split(dollarSequence).length,
+      `${name} must keep every ${dollarSequence} from settings.js`);
+  }
+  const replacementPatterns = "a $$ b $& c $` d $' e $<name> f $1";
+  assert.equal(spliceInlineAssets(
+    "<style>\n/*@@INLINE:style.css@@*/\n</style><script>\n//@@INLINE:app.js@@\n</script>",
+    { css: replacementPatterns, js: replacementPatterns }),
+  `<style>\n${replacementPatterns}</style><script>\n${replacementPatterns}</script>`,
+  "the shared host splice must copy every String.prototype.replace pattern literally");
 
   const tool = path.join(root, "tools/web_asset/minify_and_gzip.py");
   const run = (output, extra = []) => childProcess.spawnSync("python3", [
@@ -99,9 +138,10 @@ try {
   // credential and server-rejection paths, and reuse every MCP clipboard interleaving control
   // against the shipped script, so a parseable but behavior-changing reduction cannot pass.
   const setupSource = fs.readFileSync(path.join(root, "main/www/setup.html"), "utf8");
-  const mcpSource = fs.readFileSync(path.join(root, "main/www/mcp_dashboard.html"), "utf8")
-    .replace("/*@@INLINE:style.css@@*/\n", fs.readFileSync(path.join(root, "main/www/mcp_dashboard.css"), "utf8"))
-    .replace("//@@INLINE:app.js@@\n", fs.readFileSync(path.join(root, "main/www/mcp_dashboard.js"), "utf8"));
+  const mcpSource = spliceInlineAssets(fs.readFileSync(path.join(root, "main/www/mcp_dashboard.html"), "utf8"), {
+    css: fs.readFileSync(path.join(root, "main/www/mcp_dashboard.css"), "utf8"),
+    js: fs.readFileSync(path.join(root, "main/www/mcp_dashboard.js"), "utf8"),
+  });
   const shipped = {};
   for (const [name, source, cap] of [["setup", setupSource, 4096], ["mcp", mcpSource, 8192]]) {
     const src = path.join(work, `${name}.html`);
@@ -181,6 +221,92 @@ try {
   assert.deepEqual(Array.from(fixtureContext.fixtureResult),
     ["Request failed for register 7.", "Request failed."],
     "nested template literal text must remain byte-for-byte meaningful after minification");
+
+  const adversarialScript = [
+    'const tag = (strings, ...values) => ({ cooked: Array.from(strings), raw: Array.from(strings.raw), values });',
+    'const nested = (flag) => tag` first  \\n ${ flag ? ` nested ${ (() => { const brace = /[{}]/; /* expression-only marker } */ return brace.test("}"); })() } ` : " off " } end `;',
+    'const raw = String.raw` left\\n \\t \\\\ \\${literal} ${ (() => { /* raw-expression marker */ return 24 / 6 / 2; })() } right `;',
+    'const escaped = tag`quote\\` and \\${literal} ${ 5 }`;',
+    'const invalidCooked = tag`invalid\\unicode ${ 7 }`;',
+    'const multiline = tag` first\n  second ${ 2 }  \n tail `;',
+    'const line = `answer ${ (() => { return 3 // line-comment marker }\n + 2; })() }`;',
+    'const asi = `answer ${ (() => { return\n 99; })() }`;',
+    'const object = `object ${ ({ text: "}", regex: /}/, nested: ` raw ${ /[{}]/.test("{") } ` }).nested }`;',
+    'const control = `control ${ (() => { if (true) /[{}]/.test("}"); return 7; })() }`;',
+    'this.fixtureResult = [nested(true), nested(false), raw, escaped, invalidCooked, multiline, line, asi, object, control];',
+  ].join("\n");
+  fs.writeFileSync(fixtureInput, `<style>.x{color:red}</style><script>${adversarialScript}</script>`);
+  const adversarialRun = childProcess.spawnSync("python3", [tool, "--input", fixtureInput,
+    "--output", fixtureGzip, "--max-gzip-bytes", String(budget)], { cwd: root, encoding: "utf8" });
+  assert.equal(adversarialRun.status, 0, adversarialRun.stderr || adversarialRun.stdout);
+  const adversarialMin = zlib.gunzipSync(fs.readFileSync(fixtureGzip)).toString("utf8")
+    .match(/<script>([\s\S]*?)<\/script>/)[1];
+  const beforeContext = vm.createContext({}), afterContext = vm.createContext({});
+  vm.runInContext(adversarialScript, beforeContext);
+  vm.runInContext(adversarialMin, afterContext);
+  assert.deepEqual(JSON.parse(JSON.stringify(afterContext.fixtureResult)),
+    JSON.parse(JSON.stringify(beforeContext.fixtureResult)),
+    "recursive expression minification must preserve raw/cooked tagged chunks, regexes, nested braces and ASI");
+  assert.doesNotMatch(adversarialMin, /expression-only marker|raw-expression marker|line-comment marker/,
+    "comments inside template expressions must be removed through the production minifier");
+  assert.match(adversarialMin, /return\n99/,
+    "an automatic-semicolon-insertion return newline must remain significant");
+
+  // Execute the actual decoded dashboard script and its unminified source. These formatters carry
+  // nested template substitutions used by configuration payloads and visible readouts.
+  const productionContext = (source) => {
+    assert.match(source, /boot\(\);?\s*$/, "the test must intercept only the final boot call");
+    const context = vm.createContext({ navigator: { language: "en" },
+      localStorage: { getItem: () => null, setItem() {} },
+      document: { getElementById: () => null } });
+    vm.runInContext(source.replace(/boot\(\);?\s*$/, "") +
+      "\nthis.__format = { formatRefSource, parseRefSource, I18N };", context);
+    return context;
+  };
+  const originalProduction = productionContext(app);
+  const shippedProduction = productionContext(script[1]);
+  for (const [topic, field] of [["room/state", "temperature"], ["room$state", "t$C"],
+    [" room\\state ", " .raw$key\\ "], ["$SYS/room", ""], ["", ""]]) {
+    const before = originalProduction.__format.formatRefSource(topic, field);
+    const after = shippedProduction.__format.formatRefSource(topic, field);
+    assert.equal(after, before, "actual compressed dashboard must retain MQTT mapping bytes");
+    assert.equal(JSON.stringify(shippedProduction.__format.parseRefSource(after)),
+      JSON.stringify(originalProduction.__format.parseRefSource(before)));
+  }
+
+  // Compare every shipped locale's values/functions, including English from the real dashboard
+  // payload. Each external catalog goes through the same locale gzip tool as firmware builds.
+  const catalogExports = "this.__catalogs = { I18N, INSPECT_I18N, HOMEHUB_LABEL_I18N, " +
+    "DESCRIPTION_I18N, MODEL_DESCRIPTION_I18N, FAULT_CODE_I18N, MB_DELTA_I18N };";
+  const localeTool = path.join(root, "tools/web_asset/minify_js_and_gzip.py");
+  const localeCodes = [...app.match(/const UI_LANGS = Object\.freeze\(\[([\s\S]*?)\]\)/)[1]
+    .matchAll(/"([a-z]{2})"/g)].map((match) => match[1]);
+  assert.equal(localeCodes.length, 13, "the semantic comparison must cover all thirteen shipped locales");
+  for (const code of localeCodes.filter((code) => code !== "en")) {
+    const file = path.join(root, `main/www/locales/${code}.js`);
+    const output = path.join(work, `locale-${code}.js.gz`);
+    const reduced = childProcess.spawnSync("python3", [localeTool, "--input", file, "--output", output,
+      "--max-gzip-bytes", "32768"], { cwd: root, encoding: "utf8" });
+    assert.equal(reduced.status, 0, reduced.stderr || reduced.stdout);
+    vm.runInContext(fs.readFileSync(file, "utf8"), originalProduction);
+    vm.runInContext(zlib.gunzipSync(fs.readFileSync(output)).toString("utf8"), shippedProduction);
+  }
+  vm.runInContext(catalogExports, originalProduction);
+  vm.runInContext(catalogExports, shippedProduction);
+  const argumentsCases = [[], [0, 0, 0, 0, 0], [1, 1, 1, 1, 1], [2, 2, 2, 2, 2],
+    [21, 21, 21, 21, 21], ["a", "b", "c", "d", "e"], [null, null, null, null, null]];
+  const semanticValue = (value) => {
+    if (typeof value === "function") return argumentsCases.map((args) => {
+      try { return ["value", value(...args)]; }
+      catch (error) { return ["error", error.name, error.message]; }
+    });
+    if (Array.isArray(value)) return Array.from(value, semanticValue);
+    if (value && typeof value === "object") return Object.fromEntries(Object.keys(value).sort()
+      .map((key) => [key, semanticValue(value[key])]));
+    return value;
+  };
+  assert.deepEqual(semanticValue(shippedProduction.__catalogs), semanticValue(originalProduction.__catalogs),
+    "all actual locale expressions must preserve their visible values after gzip delivery");
 
   // Markup stripping deletes bytes from the page, so its refusals matter more than its yield: a
   // wrongly-stripped page still parses and still renders, and shows the loss only where the

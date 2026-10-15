@@ -36,9 +36,11 @@ function harness({ crash, secure = true, failure = "", deleteFailure = "" } = {}
   const fetch = async (url, options) => {
     state.calls.push({ url, method: options?.method || "GET" });
     if (url === "/crash/dismiss") {
+      if (state.deleteResponse) return state.deleteResponse;
       if (state.deleteFailure === "network") throw new Error("delete unavailable");
       return { ok: !state.deleteFailure, status: state.deleteFailure ? 503 : 200 };
     }
+    if (url === "/status") return { ok: true, json: async () => state.nextStatus };
     assert.ok(url === "/diag" || url === "/diag?redact=1", `unexpected evidence request ${url}`);
     if (failure === "network") throw new Error("network unavailable");
     return {
@@ -55,8 +57,9 @@ function harness({ crash, secure = true, failure = "", deleteFailure = "" } = {}
     localStorage: { getItem() { return null; }, setItem() {} },
     window: { isSecureContext: secure },
     navigator: { language: "en", clipboard: { async writeText(text) { state.copies.push(text); } } },
+    pollSignal() {}, hpProbeIsOpen: () => false, hydrateRoutedPopup() {},
   });
-  vm.runInContext(source + "\nglobalThis.api = { S, t, renderCrashBanner, copyDiagnostics, deleteCrashReport };", context);
+  vm.runInContext(source + "\nglobalThis.api = { S, t, refreshStatus, renderCrashBanner, copyDiagnostics, deleteCrashReport };", context);
   context.api.S.status = {
     version: "SEC02-fixture", platform: "esp32s3", app_elf_sha256: ELF_PREFIX,
     ntp: { server: PRIVATE }, wifi: { ssid: PRIVATE },
@@ -245,4 +248,53 @@ for (const deleteFailure of ["http", "network"]) {
   ]);
 }
 
-console.log(`crash provenance: ${cases.length * 2} real production renderer/copy states, acquisition failures and delete outcomes passed`);
+// The old device acknowledgement may arrive after /status has already learned a different crash.
+// It can suppress only the report it dismissed, never clear or hide the newly observed evidence.
+{
+  const h = harness({ crash: { reason: "panic", fault: true, coredump: true, ...SUMMARY } });
+  h.api.renderCrashBanner();
+  const dismissed = h.banner.dataset.sig;
+  let acknowledge;
+  h.state.deleteResponse = new Promise((resolve) => { acknowledge = resolve; });
+  const pending = h.api.deleteCrashReport(dismissed);
+  const newerCrash = { reason: "task_wdt", fault: true, coredump: true,
+    task: "new_httpd", pc: "0x42007777", elf_sha256: ELF_PREFIX };
+  h.state.nextStatus = { ...h.api.S.status, last_crash: newerCrash };
+  assert.equal(await h.api.refreshStatus(false), true);
+  h.api.renderCrashBanner();
+  const current = h.banner.dataset.sig;
+  assert.notEqual(current, dismissed);
+  acknowledge({ ok: true, status: 200 }); await pending;
+  assert.equal(h.api.S.status.last_crash, newerCrash,
+    "a delayed dismiss acknowledgement must retain a different currently observed crash");
+  assert.equal(h.api.S.crashDismissed, dismissed);
+  assert.equal(h.banner.hidden, false); assert.equal(h.banner.dataset.sig, current);
+  assert.match(h.banner.innerHTML, /new_httpd/);
+  h.api.renderCrashBanner(); assert.equal(h.banner.hidden, false, "ordinary repaints retain the new report");
+}
+
+// Identical task/PC/reason can recur after a reboot. A past dismissal, whether already completed
+// or still awaiting its POST acknowledgement, owns only the earlier boot's report.
+for (const delayed of [false, true]) {
+  const crash = { reason: "panic", fault: true, coredump: true, ...SUMMARY };
+  const h = harness({ crash });
+  h.api.S.status.boot_id = "0123456789abcdef";
+  h.api.renderCrashBanner();
+  const dismissed = h.banner.dataset.sig;
+  let acknowledge;
+  if (delayed) h.state.deleteResponse = new Promise((resolve) => { acknowledge = resolve; });
+  const pending = h.api.deleteCrashReport(dismissed);
+  if (!delayed) await pending;
+  const repeated = { ...crash };
+  h.state.nextStatus = { ...h.api.S.status, boot_id: "fedcba9876543210", last_crash: repeated };
+  assert.equal(await h.api.refreshStatus(false), true);
+  h.api.renderCrashBanner();
+  assert.notEqual(h.banner.dataset.sig, dismissed, "the crash identity must include the boot");
+  assert.equal(h.banner.hidden, false, "an earlier boot's dismissal cannot hide a repeated crash");
+  if (delayed) { acknowledge({ ok: true, status: 200 }); await pending; }
+  assert.equal(h.api.S.status.last_crash, repeated);
+  h.api.renderCrashBanner(); assert.equal(h.banner.hidden, false);
+  assert.equal(h.api.S.crashDismissed, dismissed);
+}
+
+console.log(`crash provenance: ${cases.length * 2} real production renderer/copy states, acquisition failures and boot-bound delete outcomes passed`);

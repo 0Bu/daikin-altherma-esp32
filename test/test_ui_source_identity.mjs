@@ -20,6 +20,7 @@ const context = {
 vm.createContext(context);
 const settings = read("settings");
 vm.runInContext(read("app_state") + "\n" + read("history") + "\n" +
+  settings.slice(settings.indexOf("const OTA_RENDER_CACHE_KEY"), settings.indexOf("function otaCacheStore()")) + "\n" +
   settings.slice(settings.indexOf("function fillRefTemp()"),
     settings.indexOf("// ── DHW circulation-pump")) + `
   renderApp = () => {};

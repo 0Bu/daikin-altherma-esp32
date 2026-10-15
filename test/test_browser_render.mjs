@@ -157,6 +157,89 @@ async function assertAccessibility(page, context, { nativeTree = false } = {}) {
   assert.deepEqual(unnamedAx, [], `${context}: browser accessibility tree contains unnamed controls`);
 }
 
+async function assertSetup(page, server, viewport) {
+  await page.navigate(server.url + "setup.html");
+  await page.viewport(viewport.width, viewport.height);
+  const context = `${viewport.name}/setup`;
+  assertLayout(await page.evaluate(layoutAudit), context);
+  await assertAccessibility(page, context, { nativeTree: true });
+  assert.equal(await page.evaluate(`(() => {
+    const message = document.getElementById("msg");
+    return message.getAttribute("role") === "status" &&
+      message.getAttribute("aria-live") === "polite" &&
+      message.getAttribute("aria-atomic") === "true" &&
+      ["ssid", "pass"].every(id => document.getElementById(id).getAttribute("aria-describedby") === "msg");
+  })()`), true, `${context}: feedback must be announced and associated with both fields`);
+  const initialTree = await page.accessibilityTree();
+  assert.ok(initialTree.some(node => node.role?.value === "status" &&
+    node.properties?.some(property => property.name === "live" && property.value?.value === "polite")),
+  `${context}: native browser tree must expose the live status region`);
+
+  const submit = async (ssid, pass) => {
+    await page.evaluate(`(() => {
+      document.getElementById("ssid").value = ${JSON.stringify(ssid)};
+      document.getElementById("pass").value = ${JSON.stringify(pass)};
+      document.getElementById("btn").click();
+      return true;
+    })()`);
+  };
+  const start = server.setupRequests.length;
+  await submit("fixture", "short");
+  await page.waitFor("document.getElementById('msg').textContent.includes('Password must be empty')");
+  assert.equal(server.setupRequests.length, start, `${context}: invalid input must not reach the device`);
+  const ssid = " my wifi ";
+  for (const [status, body, expected] of [
+    [400, { error: "Rejected fixture credentials" }, "Rejected fixture credentials"],
+    [500, { error: "Could not save settings" }, "Could not save settings"],
+    [503, { error: "out of memory" }, "Device busy"],
+  ]) {
+    server.setSetupReply({ status, body });
+    const before = server.setupRequests.length;
+    await submit(ssid, "fixture-password");
+    await page.waitFor(`document.getElementById('msg').textContent.includes(${JSON.stringify(expected)}) && !document.getElementById('btn').disabled`);
+    assert.equal(server.setupRequests.length, before + 1, `${context}/${status}: one write attempt`);
+    assert.deepEqual(server.setupRequests.at(-1), { ssid, pass: "fixture-password" },
+      `${context}/${status}: exact opaque credentials reach the endpoint`);
+    assert.equal(await page.evaluate("document.getElementById('ssid').value"), ssid,
+      `${context}/${status}: rejection preserves the editable draft`);
+    assertLayout(await page.evaluate(layoutAudit), `${context}/${status}`);
+    await assertAccessibility(page, `${context}/${status}`, { nativeTree: true });
+  }
+  server.setSetupReply({ status: 200, body: { ok: true, reboot: true } });
+  await submit(ssid, "");
+  await page.waitFor("document.getElementById('msg').textContent.includes('Saved — rebooting')");
+  assert.equal(await page.evaluate("document.getElementById('btn').disabled"), true,
+    `${context}: an accepted save stays disabled while rebooting`);
+  assert.deepEqual(server.setupRequests.at(-1), { ssid, pass: "" },
+    `${context}: open-network credentials remain an explicit empty password`);
+  assertLayout(await page.evaluate(layoutAudit), `${context}/accepted`);
+  const unexpected = page.diagnostics.filter(message =>
+    !/^page log: Failed to load resource: the server responded with a status of (400|500|503)\b/.test(message));
+  assert.deepEqual(unexpected, [], `${context}: only the deliberately rejected HTTP resources may log errors`);
+  page.clearDiagnostics();
+  console.log(`browser setup checked: ${viewport.name}; exact gzip asset, rejected/accepted writes and native live feedback`);
+}
+
+async function assertFlowSwitchWords(page, context) {
+  const fits = await page.evaluate(`(() => {
+    const previous = S._values;
+    try {
+      S._values = previous.filter(row => !/water flow switch/i.test(row.label || ""));
+      const row = { label: "Water flow switch", value: "1" };
+      S._values.push(row);
+      return ["1", "0"].map(value => {
+        row.value = value; renderApp();
+        const text = document.getElementById("svFlowSwitch").getBBox();
+        const pill = document.querySelector("#gFlowSwitch rect").getBBox();
+        return { text: document.getElementById("svFlowSwitch").textContent,
+          left: text.x - pill.x, right: pill.x + pill.width - text.x - text.width };
+      });
+    } finally { S._values = previous; renderApp(); }
+  })()`);
+  for (const fit of fits) assert.ok(fit.left >= 4 && fit.right >= 4,
+    `${context}: flow-switch word ${JSON.stringify(fit.text)} needs 4 px padding (${fit.left}/${fit.right})`);
+}
+
 async function assertModalKeyboard(page, modalId, context, { route = true } = {}) {
   assert.deepEqual(await page.evaluate(`(() => {
     const modal = document.getElementById(${JSON.stringify(modalId)});
@@ -711,6 +794,13 @@ try {
   }
   await page.evaluate("pollStop(); true");
 
+  assert.equal(await page.evaluate(`(() => {
+    const feedback = document.getElementById("toasts");
+    return feedback.getAttribute("role") === "status" &&
+      feedback.getAttribute("aria-live") === "polite" &&
+      feedback.getAttribute("aria-atomic") === "false";
+  })()`), true, "dashboard feedback must announce new notices without repeating older toasts");
+
   assert.deepEqual(await page.evaluate(`(async () => {
     const response = await fetch('/favicon.ico');
     const decoded = await response.arrayBuffer();
@@ -835,6 +925,8 @@ try {
     await openModalWithKeyboard(page, "refTempModal", modalTriggers.refTempModal,
       "selftest/desktop/de/refTempModal", { route: false });
     throw new Error("route-isolation-bypass mutation unexpectedly survived the route gate");
+  } else if (process.argv.includes("--setup-only")) {
+    for (const viewport of viewports) await assertSetup(page, server, viewport);
   } else if (process.argv.includes("--diagnosis-only")) {
     // A focused rendering pass for diagnosis-copy iterations. The default full matrix below and
     // the supervisor's independent mutation controls remain unchanged.
@@ -875,6 +967,7 @@ try {
       await page.frame();
       assertLayout(await page.evaluate(layoutAudit), `${viewport.name}/${locale}/dashboard`);
       await assertAccessibility(page, `${viewport.name}/${locale}/dashboard`, { nativeTree: true });
+      await assertFlowSwitchWords(page, `${viewport.name}/${locale}/flow-switch`);
       await assertPlantDiagnosis(page, `${viewport.name}/${locale}/diagnosis`);
       await assertNativeAltherma4(page, `${viewport.name}/${locale}/native-altherma4`);
       nativeAltherma4Checks++;
@@ -923,6 +1016,22 @@ try {
       await page.waitFor("document.getElementById('viewSettings').classList.contains('active')");
       assertLayout(await page.evaluate(layoutAudit), `${viewport.name}/${locale}/settings`);
       await assertAccessibility(page, `${viewport.name}/${locale}/settings`, { nativeTree: true });
+
+      for (const busy of [false, true]) {
+        await page.evaluate(`S.transportUnavailable = "status"; S.transportBusy = ${busy}; renderApp(); true`);
+        assert.equal(await page.evaluate(`(() => {
+          const note = document.getElementById("statusSnapshot");
+          return !note.hidden && note.getAttribute("role") === "status" &&
+            note.innerText.includes(t("ota.snapshot_value")) &&
+            note.innerText.includes(t(${JSON.stringify(busy ? "toast.busy_retry" : "toast.unreachable")})) &&
+            !document.querySelector("#connTile .conn-val.ok, #connTile .conn-detail, #connTile .signal");
+        })()`), true, `${viewport.name}/${locale}/settings: lost status labels every retained frame as a snapshot`);
+        assertLayout(await page.evaluate(layoutAudit), `${viewport.name}/${locale}/settings/status-loss`);
+        await assertAccessibility(page, `${viewport.name}/${locale}/settings/status-loss`, { nativeTree: true });
+      }
+      await page.evaluate('S.transportUnavailable = null; S.transportBusy = false; renderApp(); true');
+      assert.equal(await page.evaluate('document.getElementById("statusSnapshot").hidden'), true,
+        `${viewport.name}/${locale}/settings: fresh status removes the snapshot warning`);
 
       await page.evaluate(`otaFail(${JSON.stringify(otaMemoryError)}); renderApp(); true`);
       await page.frame();
@@ -1043,6 +1152,7 @@ try {
     "native Altherma 4 must render and open its rows in every shipped locale and viewport");
 
   assert.deepEqual(page.diagnostics, [], "real page must emit no console errors or uncaught exceptions");
+  for (const viewport of viewports) await assertSetup(page, server, viewport);
   console.log(`browser render gate passed: ${browser.product}; ${browserLocales.length} locales; ` +
     `${viewports.length} viewports; native AX + keyboard on dashboard/settings/all routed modals; ` +
     "native Altherma 4 numeric metadata + localized pointer-opened accordions; " +

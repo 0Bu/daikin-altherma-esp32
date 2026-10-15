@@ -65,11 +65,11 @@ button:disabled { opacity: .6; cursor: default; box-shadow: none; }
            one field where a silent edit costs a failed connect + a reboot into this same portal. -->
       <label for="ssid">WiFi network (SSID)</label>
       <input id="ssid" name="ssid" type="text" placeholder="Network name (SSID)" required
-             autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false">
+             autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" aria-describedby="msg">
       <label for="pass">Password</label>
-      <input id="pass" name="pass" type="password" autocomplete="off" placeholder="WiFi password">
+      <input id="pass" name="pass" type="password" autocomplete="off" placeholder="WiFi password" aria-describedby="msg">
       <button type="submit" id="btn">Save &amp; reboot</button>
-      <div class="msg" id="msg"></div>
+      <div class="msg" id="msg" role="status" aria-live="polite" aria-atomic="true"></div>
     </form>
     <p class="served">served from daikin-altherma-esp32-setup · 192.168.4.1</p>
   </div>

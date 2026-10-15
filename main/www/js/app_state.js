@@ -105,6 +105,7 @@ const S = {
   // browser tab. The data stays useful, but is explicitly labelled as a snapshot until one new
   // /status + /values pair lands; it must never silently masquerade as a live plant reading.
   otaCached: false,
+  transportUnavailable: null,
 };
 
 // ── History source lifecycle ─────────────────────────────────────────────
@@ -262,6 +263,7 @@ function closeOverlayForReplacement(id) {
 }
 
 function openOverlay(id) {
+  if (S.pendingSave?.modal && S.pendingSave.modal !== id) return false;
   const modal = $(id);
   // Only one overlay can own the screen. This is mostly a defensive invariant (the UI exposes no
   // popup-to-popup action), but it also keeps a manually changed hash deterministic.
@@ -276,6 +278,7 @@ function openOverlay(id) {
   syncModalScrollLock();
   const dialog = modal.querySelector?.('[role="dialog"]');
   dialog?.focus?.({ preventScroll: true });
+  return true;
 }
 
 function closeOverlay(id) {
@@ -284,7 +287,7 @@ function closeOverlay(id) {
 }
 
 function openPopup(id) {
-  openOverlay(id);
+  if (openOverlay(id) === false) return;
   if (_applyingRoute) return;
 
   if (S.stage !== "settings") showStage("settings");
@@ -297,6 +300,7 @@ function openPopup(id) {
 }
 
 function closePopup(id) {
+  if (S.pendingSave?.modal === id) return false;
   closeOverlay(id);
   if (_routePopupNeedsHydration === id) _routePopupNeedsHydration = null;
   if (!_applyingRoute && parseRoute(location.hash).popup === id) returnToRoute("settings");
@@ -342,6 +346,10 @@ function closePopupForRoute(id) {
 }
 
 function applyRouteFromLocation() {
+  if (S.pendingSave?.modal) {
+    writeRoute("settings", S.pendingSave.modal, { replace: true, parent: "#settings" });
+    return;
+  }
   let route = parseRoute(location.hash);
   let unavailablePopup = false;
   const h = browserHistory();
@@ -449,27 +457,73 @@ function toast(msg, type = "info") {
 }
 
 // ── Status (drives every screen) ─────────────────────────────────────────
-// Returns whether the fetch landed, so the poll loop can back off on a device that stopped
-// answering. Its failure path IS the unreachable banner — every caller wants that, and a second
-// copy of the decision in the loop could disagree with this one.
+// Live status adoption shares the request, image and source leases below. The reboot watcher
+// uses a shorter deadline and quiet failure feedback while the normal poll reports unreachability.
+function acceptImageLease(s) {
+  if (S.imageReloading) return false;
+  const previous = S.imageLease;
+  const changed = previous && ((previous.elf && s.app_elf_sha256 && previous.elf !== s.app_elf_sha256) ||
+    (previous.version && s.version && previous.version !== s.version));
+  if (changed) { S.imageReloading = true; otaCacheClear(); location.reload(); return false; }
+  const lease = S.imageLease ||= { elf: "", version: "" };
+  lease.elf ||= s.app_elf_sha256 || "";
+  lease.version ||= s.version || "";
+  return true;
+}
+function invalidateLiveReadings(reason, busy = false) {
+  S.valuesRequest = (S.valuesRequest || 0) + 1;
+  if (S.otaCached) return;
+  S._values = []; S._modbus = []; S.live = null;
+  S.transportUnavailable = reason;
+  S.transportBusy = busy;
+  renderApp();
+}
 async function refreshStatus(paint = true) {
+  return !!(await readStatusFrame(paint));
+}
+// Return the accepted request id so an async observer can recheck ownership before its callback.
+async function readStatusFrame(paint = true, timeout, quiet = false) {
+  const request = S.statusRequest = (S.statusRequest || 0) + 1;
+  const current = () => request === S.statusRequest && !S.imageReloading;
   let s;
-  try { s = await j("/status", { signal: pollSignal() }); } catch { markUnreachable(); return false; }
+  try { s = await j("/status", { signal: pollSignal(timeout) }); }
+  catch (error) {
+    if (!current()) return false;
+    const busy = String(error.message) === "503";
+    if (!S.otaCached) invalidateLiveReadings("status", busy);
+    if (quiet) return false;
+    const ota = busy && typeof probeRunningOta === "function"
+      ? await probeRunningOta() : false;
+    if (!current()) return false;
+    if (ota) renderOtaDashboardStatus(); else markUnreachable();
+    return false;
+  }
+  if (!current() || !acceptImageLease(s)) return false;
+  await setLangFromStatus(s, current);
+  if (!current()) return false;
   S.status = s;
+  S.statusAcceptedRequest = request;
+  const epoch = S.histEpoch;
   syncHistSources();
+  if (S.histEpoch !== epoch) {
+    S.otaCached = false;
+    otaCacheClear();
+    invalidateLiveReadings("values");
+  }
+  if (S.transportUnavailable === "status") { S.transportUnavailable = "values"; S.transportBusy = false; }
   const profile = s?.profile?.id || "";
   if (hpProbeIsOpen() && profile !== S.hpProbeCatalogProfile && !S.hpProbeCatalogBusy)
     loadHpProbeCatalog(profile);
   hydrateRoutedPopup();
-  await setLangFromStatus(s);  // load/apply the device language before painting this frame
   if (paint) renderApp();
-  return true;
+  return request;
 }
 function markUnreachable() {
   // A live /ota/status response has already proved that the board is reachable. The full /status
   // payload is its largest HTTP allocation and can be refused while the HTTPS OTA task owns the
   // scarce contiguous heap. Do not turn that expected resource window into a red device failure.
   if (S.otaInstalling || S.otaBusy) { renderOtaDashboardStatus(); return; }
+  if (S.transportBusy) { sysSet(t("sys.nodata"), t("toast.busy_retry"), "idle"); return; }
   sysSet(t("sys.unreachable"), t("sys.unreachable_sub"), "err");
 }
 
@@ -502,7 +556,13 @@ function renderApp() {
   // that ARE being measured instead of going blank while data is arriving.
   S.live = (hp.connected && (S._values || []).length > 0) || (x10aDown() && mbLive() && (S._modbus || []).length)
     ? liveData() : null;
-  if (!hp.connected) {
+  if (S.transportUnavailable) S.live = null;
+  if (S.otaCached) renderOtaDashboardStatus();
+  else if (S.transportUnavailable) {
+    if (S.otaInstalling || S.otaBusy) renderOtaDashboardStatus();
+    else if (S.transportUnavailable === "status") markUnreachable();
+    else sysSet(t("sys.nodata"), t(S.transportBusy ? "toast.busy_retry" : "toast.unreachable"), "dim");
+  } else if (!hp.connected) {
     // "No data" would contradict a drawing full of Modbus readings. What is genuinely unknown here is
     // the heat pump's own STATE — the operating mode and the fault class are X10A-only, the HomeHub
     // carries no equivalent — so the headline says that the X10A link is down and stops short of
@@ -762,6 +822,7 @@ function crashReportTask(task) {
   return JSON.stringify(task).replace(/[\u0085\u2028\u2029]/g,
     (char) => "\\u" + char.charCodeAt(0).toString(16).padStart(4, "0"));
 }
+function crashSignature(c) { return `${S.status?.boot_id || ""}:${c.reason}:${c.pc || ""}:${c.task || ""}`; }
 
 function renderCrashBanner() {
   const el = $("crashBanner"), c = S.status?.last_crash;
@@ -775,9 +836,8 @@ function renderCrashBanner() {
   // step is showing. Keying the re-render on `sig` alone would leave a stale "Download crash report"
   // button pointing at a dump that is gone — a 404 — until a reload, and would freeze the confirm
   // step out of the DOM. They must stay SEPARATE attributes: the click handler reads dataset.sig, so
-  // folding the draw state into it would compare "usb::true:" against sig "usb::" and silently break
-  // the button.
-  const sig  = `${c.reason}:${c.pc || ""}:${c.task || ""}`;
+  // folding the draw state into it would change the action identity and silently break the button.
+  const sig  = crashSignature(c);
   const ask  = S.crashAsk === sig;
   // The crash identity stays language-neutral (`sig`, used by the delete flow), while the DRAW
   // signature includes LANG because every visible label/action in the banner is localised.
@@ -887,8 +947,9 @@ async function deleteCrashReport(sig) {
   try { ok = (await fetch("/crash/dismiss", { method: "POST" })).ok; } catch { ok = false; }
   if (!ok) { toast(t("crash.delete_fail"), "err"); renderCrashBanner(); return; }
   S.crashDismissed = sig;
-  if (S.status) S.status.last_crash = null;
-  $("crashBanner").hidden = true;
+  const current = S.status?.last_crash;
+  if (current && crashSignature(current) === sig) S.status.last_crash = null;
+  renderCrashBanner();
   toast(t("crash.deleted"), "ok");
 }
 

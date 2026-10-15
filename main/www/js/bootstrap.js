@@ -166,7 +166,10 @@ function wireTrendScrub(gv) {
     const step = e.key === "ArrowLeft" ? -1 : e.key === "ArrowRight" ? 1 : 0;
     if (!step && !["Home", "End", "Escape", "Enter", " "].includes(e.key)) return;
     e.preventDefault();                       // arrows would otherwise scroll the page
-    if (e.key === "Escape") { S.histPin.delete(plot.dataset.hist); scrubEnd(plot); return renderTrendHosts(); }
+    if (e.key === "Escape") {
+      e.stopPropagation();
+      S.histPin.delete(plot.dataset.hist); scrubEnd(plot); return renderTrendHosts();
+    }
     if (e.key === "Enter" || e.key === " ") {   // pin what the arrow keys are reading out
       const cur = plot.dataset.cur == null ? n - 1 : +plot.dataset.cur;
       return histPinToggle(plot.dataset.hist, cur, plot.dataset.source || "");
@@ -177,6 +180,7 @@ function wireTrendScrub(gv) {
     scrubMove(plot, +plot.dataset.cur);
   });
   gv.addEventListener("focusout", (e) => {
+    if (S.trendRebuilding) return;
     const plot = trendPlotFromTarget(e.target);
     if (plot) { delete plot.dataset.cur; scrubEnd(plot); }
   });
@@ -329,7 +333,8 @@ function wireRestOfApp() {
       user: $("mqUser").value,
       pass: $("mqPass").value,
       clear_creds: $("mqClearCreds").checked,   // explicit credential clear (blank fields keep them)
-      base: $("mqBase").value.trim(),
+      ...($("mqBase").value.trim() === $("mqBase").dataset.original ? {}
+        : { base: $("mqBase").value.trim() }),
     }, {
       btn: "mqBtn",
       mapError: (code, message) => {
@@ -483,6 +488,7 @@ function wireRestOfApp() {
   $("rtDeleteBtn").onclick = async () => {
     if (S.busy) { toast(t("toast.applying"), "info"); return; }
     if (!S.status?.reference_temperature?.configured) return;
+    const status = S.status;
     S.busy = true;
     setRefTempActionBusy("rtDeleteBtn", true, "ref.deleting");
     const idle = () => { S.busy = false; setRefTempActionBusy("rtDeleteBtn", false); };
@@ -501,9 +507,9 @@ function wireRestOfApp() {
       const msg = await errorOf(r, t("toast.rejected"));
       idle(); showRefTempRequestError(msg); return;
     }
-    // The accepted empty mapping is already authoritative. Clear the local copy before releasing
-    // the dialog so a fast reopen cannot render the old mapping while /status is still refreshing.
-    S.status.reference_temperature = { configured: false, max_age_s: 600 };
+    // Retire this mapping before reopening, unless a newer status already owns the source.
+    if (S.status === status && !S.imageReloading)
+      status.reference_temperature = { configured: false, max_age_s: 600 };
     idle(); closeRefTemp();
     toast(t("ref.deleted"), "ok");
     await refreshStatus();
@@ -599,6 +605,7 @@ function wireRestOfApp() {
   $("circDeleteBtn").onclick = async () => {
     if (S.busy) { toast(t("toast.applying"), "info"); return; }
     if (!S.status?.circulation_source?.configured) return;
+    const status = S.status;
     S.busy = true;
     setCirculationActionBusy("circDeleteBtn", true, "circ.deleting");
     const idle = () => { S.busy = false; setCirculationActionBusy("circDeleteBtn", false); };
@@ -613,8 +620,10 @@ function wireRestOfApp() {
       const msg = await errorOf(r, t("toast.rejected"));
       idle(); showCirculationRequestError(msg); return;
     }
-    invalidateHistSources();
-    S.status.circulation_source = { configured: false, max_age_s: 120 };
+    if (S.status === status && !S.imageReloading) {
+      invalidateHistSources();
+      status.circulation_source = { configured: false, max_age_s: 120 };
+    }
     idle(); closeCirculation();
     toast(t("circ.deleted"), "ok");
     await refreshStatus();
@@ -755,9 +764,12 @@ function wireRestOfApp() {
     const unit = +($("hhUnit").value.trim() || 1);
     if (!Number.isInteger(port) || port < 1 || port > 65535) return bad("hhPort", t("hh.err_port"));
     if (!Number.isInteger(unit) || unit < 1 || unit > 247)   return bad("hhUnit", t("hh.err_unit"));
+    if (S.busy) { toast(t("toast.applying"), "info"); return; }
+    S.busy = true;
     setBusy("hhBtn", true);
     const ok = await applyLive({ mb_host: host, mb_port: port, mb_unit_id: unit }, t("hh.saved"));
     setBusy("hhBtn", false);
+    S.busy = false;
     if (!ok) return;
     closeHomehub();
     await refreshStatus();

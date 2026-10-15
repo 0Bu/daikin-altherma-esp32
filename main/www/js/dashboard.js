@@ -97,8 +97,19 @@ function groupOf(v) {
 // same loop and says so on failure), and a values fetch that lost a race with a reboot must not
 // overwrite a banner the status fetch is about to set correctly either way.
 async function refreshValues(paint = true) {
+  const request = S.valuesRequest = (S.valuesRequest || 0) + 1;
+  const statusRequest = S.statusRequest, epoch = S.histEpoch;
+  const current = () => request === S.valuesRequest && statusRequest === S.statusRequest &&
+    (statusRequest == null || statusRequest === S.statusAcceptedRequest) &&
+    epoch === S.histEpoch && !S.imageReloading;
   let r;
-  try { r = await j("/values", { signal: pollSignal() }); } catch { return false; }
+  try { r = await j("/values", { signal: pollSignal() }); }
+  catch (error) {
+    if (current()) invalidateLiveReadings(S.transportUnavailable === "status" ? "status" : "values",
+      String(error.message) === "503");
+    return false;
+  }
+  if (!current() || S.transportUnavailable === "status") return false;
   S._values = r.values || r || [];
   // The SECOND source, from the independent HomeHub stack (docs/MODBUS_PROTOCOL.md). Absent entirely
   // when that stack is off, which is exactly how a device without a HomeHub behaves — no Modbus row,
@@ -109,6 +120,8 @@ async function refreshValues(paint = true) {
   // they supersede a restored OTA snapshot. While installation continues, keep this newer complete
   // frame as the next reload's bounded fallback.
   S.otaCached = false;
+  S.transportUnavailable = null;
+  S.transportBusy = false;
   if (S.otaInstalling) otaCacheStore();
   if (paint) renderApp();
   return true;
@@ -494,6 +507,8 @@ function firmwareRow(version) {
 // forever, while the room source one row up in the same card said so plainly (`ref.broker_off`). A
 // row that cannot say why it is empty is a row that reads as a broken sensor.
 function circulationSourceStatus(c, mqtt) {
+  if (S.transportUnavailable === "status")
+    return { key: "unavailable", text: t("circ.unavailable"), cls: "dim" };
   if (!c.configured) return { key: "not_configured", text: t("circ.not_configured"), cls: "dim" };
   if (!mqtt.configured) return { key: "broker_off", text: t("circ.broker_off"), cls: "err" };
   if (c.error) return { key: "unavailable", text: t("circ.unavailable"), cls: "err" };
@@ -515,7 +530,7 @@ function circulationSettingsCardHtml() {
   if (c.configured) {
     const source = c.name || "MQTT";
     body = descNoteHtml(t("circ.detail.source"), source);
-    if (c.has_value) {
+    if (c.has_value && S.transportUnavailable !== "status") {
       const power = Number(c.power_w).toLocaleString(LANG,
         { maximumFractionDigits: 1 });
       body += descNoteHtml(t("circ.detail.power"), `${power} W`);
@@ -523,7 +538,7 @@ function circulationSettingsCardHtml() {
     // The row header identifies WHICH pump is configured. Its current assessment belongs here with
     // the evidence, including waiting/error states that do not have a power value yet.
     body += descNoteHtml(t("circ.detail.state"), value);
-    if (c.has_value && Number.isFinite(c.age_s))
+    if (c.has_value && S.transportUnavailable !== "status" && Number.isFinite(c.age_s))
       body += descNoteHtml(t("circ.detail.age"), checkupDuration(c.age_s));
     body += `<div class="vdesc-p">${esc(t("circ.settings_help"))}</div>`;
   }
@@ -634,6 +649,7 @@ function dynamicInfoRow(key, label, value, valueCls, bodyHtml, action = "", titl
 // Old values remain visible when freshness fails because they are useful diagnostic evidence; the
 // status paragraph says explicitly that they are no longer current.
 function weatherSourceDetailHtml(w, outdoor, solar) {
+  if (S.transportUnavailable === "status") return descNoteHtml(t("sys.nodata"), t("ota.snapshot_value"));
   let statusKey;
   let detailText;
   const reason = w.freshness_reason || w.reason;
@@ -699,6 +715,8 @@ function roomSourceName(r) { return r.name || "MQTT"; }
 // unusable as an active heating reference. Keep that distinction in one result so the row can stay
 // amber for the blocked diagnosis without falsely calling the measurement itself unusable.
 function roomSourceStatus(r, mqtt) {
+  if (S.transportUnavailable === "status")
+    return { key: "unavailable", detail: t("sys.nodata"), cls: "dim" };
   if (!r.configured)
     return { key: "not_configured", detail: t("ref.detail.setup"), cls: "dim" };
   if (!mqtt.configured)
@@ -749,7 +767,7 @@ function roomSourceDetailHtml(r, status, temperature, setpoint, age) {
   let html = descNoteHtml(t("ref.detail.status_label"), roomSourceStatusText(status));
   if (status.diagnosis)
     html += descNoteHtml(t("ref.detail.diagnosis_label"), roomSourceStatusText(status.diagnosis));
-  if (r.has_value) {
+  if (r.has_value && S.transportUnavailable !== "status") {
     html += descNoteHtml(t("ref.detail.temperature_label"), t("ref.detail.temperature", temperature));
     if (r.has_setpoint)
       html += descNoteHtml(t("ref.detail.setpoint_label"), t("ref.detail.setpoint", setpoint));
@@ -848,7 +866,7 @@ function outdoorAxisRow(d, env) {
   // prints "0,0 °C" — a real reading invented out of absence, the one thing this row's own copy
   // promises it does not do. undefined happens to be safe (NaN); null is not.
   const num = (v) => (typeof v === "number" && Number.isFinite(v) ? v : null);
-  const live = num(d.outdoor_temperature_c);
+  const live = S.transportUnavailable === "status" ? null : num(d.outdoor_temperature_c);
   const hasLive = live !== null;
   const sample = num(d.last_sample_outdoor_temperature_c);
   const hasSample = sample !== null;
@@ -917,7 +935,7 @@ function outdoorSourceLabel(source) {
 // optional accessory whose mounting position the firmware cannot know. Neither value is a gate.
 function plantOutdoorAxisRow(d, modbus) {
   const num = (v) => (typeof v === "number" && Number.isFinite(v) ? v : null);
-  const live = num(d.plant_outdoor_temperature_c);
+  const live = S.transportUnavailable === "status" ? null : num(d.plant_outdoor_temperature_c);
   const sample = num(d.last_sample_plant_outdoor_temperature_c);
   const hasEvent = num(d.last_sample_room_error_k) !== null;
   const liveSource = typeof d.plant_outdoor_source === "string"
@@ -999,7 +1017,7 @@ function dynamicControlCardHtml() {
       LANG, { maximumFractionDigits: 0 });
   }
   if (w.configured && w.fetching) weatherCls = "warn";
-  else if (w.configured && w.has_value) {
+  else if (w.configured && w.has_value && S.transportUnavailable !== "status") {
     if (w.fresh) weatherCls = "ok";
     else weatherCls = w.error ? "err" : "warn";
   } else if (w.configured) weatherCls = w.error ? "err" : "warn";
@@ -1724,7 +1742,9 @@ function connLinks() {
       detail, state: detail ? t("conn.error", detail) : state });
   }
 
-  return links;
+  return S.transportUnavailable === "status"
+    ? links.map(l => ({ ...l, cls: "dim", state: t("sys.nodata"), detail: "",
+      value: l.edit === "wifi" ? esc(w.ssid || "—") : l.value })) : links;
 }
 // The row conveys state by colour alone (the value IS the address/name, just tinted) — DESIGN.md
 // §9's "status never conveyed by colour alone" would otherwise be broken for colourblind users and
@@ -1774,6 +1794,10 @@ function settingsConnectionsDown() {
 // Firmware, then the always-visible heating-curve diagnosis at the bottom, rendered together by
 // esp32CardHtml().
 function renderSettings() {
+  const snapshot = $("statusSnapshot");
+  snapshot.hidden = S.transportUnavailable !== "status";
+  if (!snapshot.hidden) snapshot.textContent = `${t("ota.snapshot_label")}: ${t("ota.snapshot_value")} · ` +
+    t(S.transportBusy ? "toast.busy_retry" : "toast.unreachable");
   // Both containers are rebuilt on every poll (link state, pins and the OTA row all change). The
   // Protocol card's RX/TX pin dropdown is interactive, so skip the rebuild while it is focused/open — otherwise the
   // poll would collapse it mid-pick. It resumes once focus leaves (onPinPick blurs it after

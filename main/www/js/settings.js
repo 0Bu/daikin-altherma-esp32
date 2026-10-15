@@ -38,8 +38,9 @@ function fillMqtt() {
   $("mqPass").value = "";
   // Prefilled with the EFFECTIVE base — /status reports the compile-time default when nothing is
   // stored, so this field always shows where the device actually publishes rather than a blank that
-  // reads like "not set". Submitting it unchanged is a no-op the firmware short-circuits.
+  // reads like "not set". Omit an unchanged field when posting so a default stays a default.
   $("mqBase").value = m.base || "";
+  $("mqBase").dataset.original = $("mqBase").value;
   setMqttClear(false);
   $("mqClearRow").hidden = !m.has_creds;
 }
@@ -363,6 +364,7 @@ function openHomehub() {
   openPopup("homehubModal");
 }
 function closeHomehub() {
+  if (S.pendingSave?.modal === "homehubModal") return;
   ++homehubSearchGeneration;
   closePopup("homehubModal");
   $("hhSearch").disabled = false;
@@ -370,6 +372,7 @@ function closeHomehub() {
 }
 
 async function searchHomehub() {
+  if (S.pendingSave?.modal === "homehubModal") return false;
   const generation = ++homehubSearchGeneration;
   const button = $("hhSearch"), error = $("hhError"), host = $("hhHost");
   host.classList.remove("invalid");
@@ -942,8 +945,8 @@ function otaInlineClear(delay = 3500) {
 
 // Keep one complete render frame across a same-tab reload during OTA. sessionStorage is deliberately
 // narrower than localStorage: it is origin- and tab-scoped, disappears with the tab, and does not
-// teach a second browser anything the compact /ota/status response did not prove. The version and
-// age checks below prevent a snapshot from another firmware run being adopted as current.
+// teach a second browser anything the compact /ota/status response did not prove. Version, age and
+// image leases bound the explicitly cached frame until a complete fresh frame replaces it.
 const OTA_RENDER_CACHE_KEY = "daikinOtaRenderV1";
 const OTA_RENDER_CACHE_MAX_AGE_MS = 15 * 60 * 1000;
 function otaCacheStorage() {
@@ -952,6 +955,10 @@ function otaCacheStorage() {
 }
 function otaCacheClear() {
   try { otaCacheStorage()?.removeItem(OTA_RENDER_CACHE_KEY); } catch { /* best effort */ }
+  if (S.otaCached) {
+    S.otaCached = false;
+    invalidateLiveReadings("status");
+  }
 }
 function otaCacheStore() {
   if (!S.status || typeof S.status.version !== "string") return false;
@@ -986,13 +993,19 @@ async function otaCacheRestore(otaStatus) {
     cached.status.version === otaStatus.current && Array.isArray(cached.values) &&
     Array.isArray(cached.modbus);
   if (!valid) { otaCacheClear(); return false; }
+  if (!acceptImageLease(cached.status)) return false;
 
   S.status = cached.status;
   syncHistSources();
   S._values = cached.values;
   S._modbus = cached.modbus;
   S.otaCached = true;
-  await setLangFromStatus(S.status);
+  S.transportUnavailable = null;
+  S.transportBusy = false;
+  const request = S.statusRequest;
+  const current = () => S.status === cached.status && S.otaCached && !S.imageReloading;
+  await setLangFromStatus(cached.status, () => current() && request === S.statusRequest);
+  if (!current()) return false;
   renderApp();
   return true;
 }
@@ -1003,7 +1016,7 @@ async function otaCacheRestore(otaStatus) {
 // at the exact time their context is most useful. Guard the optional DOM methods so the browser-free
 // UI tests and the pre-status recovery shell share this exact production path.
 function syncOtaSettingsLock() {
-  const locked = !!(S.otaInstalling || S.otaCached);
+  const locked = !!(S.otaBusy || S.otaInstalling || S.otaCached);
   for (const id of ["connTile", "settingsCards"]) {
     const controls = $(id)?.querySelectorAll?.("button, select, input") || [];
     for (const control of controls) {
@@ -1016,22 +1029,25 @@ function syncOtaSettingsLock() {
 // Poll /ota/status until `state` leaves the set we're waiting on, or we run out of patience.
 // Every OTA phase is asynchronous on the device (the download runs on its own worker so the single
 // httpd worker stays free), so the UI's whole job here is to watch a state machine it does not drive.
-async function otaPoll(waitStates, tries, onTick, expectedGeneration = null, requireReleased = false) {
+async function otaPoll(waitStates, tries, onTick, expectedGeneration = null, requireReleased = false,
+                       allowUpdateTransition = false) {
   for (let i = 0; i < tries; i++) {
     await new Promise((r) => setTimeout(r, 1000));
     let s;
     try { s = await j("/ota/status"); } catch { continue; }   // a dropped poll is not a failure
-    if (onTick) onTick(s);
     if (expectedGeneration !== null && s.generation !== expectedGeneration)
       return { state: "error", message: t("ota.replaced") };
+    if (onTick) onTick(s);
     // A freshly accepted operation owns its generation before the 1.1 s quiesce lead changes `state`.
     // The check flow must therefore wait for the authoritative busy release, not consume the old
     // idle/error payload that happens to remain visible during that lead.
-    if (expectedGeneration !== null && requireReleased && s.busy) continue;
+    const updateTransition = allowUpdateTransition && ["updating", "done"].includes(s.state);
+    if (expectedGeneration !== null && requireReleased && s.busy && !updateTransition) continue;
     // Update acceptance has the same lead. A terminal `done` is intentionally allowed while busy
     // because the device reboots from run_update before the operation tail can clear the flag; an
     // inherited idle/error payload is not evidence that the new operation finished.
-    if (expectedGeneration !== null && s.busy && !waitStates.includes(s.state) && s.state !== "done")
+    if (expectedGeneration !== null && s.busy && !waitStates.includes(s.state) && s.state !== "done" &&
+        !updateTransition)
       continue;
     if (!waitStates.includes(s.state)) return s;
   }
@@ -1051,10 +1067,12 @@ const OTA_CHECK_POLL_TRIES = 150;
 function otaFail(text) {
   S.otaInstalling = false;
   S.otaBusy = false;
+  const wasCached = S.otaCached;
   otaCacheClear();
   syncOtaSettingsLock();
   otaInline("");
   otaAlert(text);
+  if (!wasCached) renderApp();
 }
 
 let otaDecisionResolve = null;
@@ -1238,31 +1256,63 @@ function otaWatch(expectedGeneration = null) {
 // On page load, adopt an update that is already running on the device (a reload during a download,
 // or a second browser tab). Silent when nothing is happening — a plain GET that finds `idle` leaves
 // the header exactly as it was.
-async function resumeOta() {
-  let s;
-  try { s = await j("/ota/status"); } catch { return; }
-  if (s?.state === "error") {
-    otaCacheClear();
-    otaAlert(s.message || t("ota.failed"));
-    return;
-  }
-  if (!s || (s.state !== "updating" && s.state !== "done")) {
-    otaCacheClear();
-    return;
-  }
+function otaActive(s) {
+  return Number.isInteger(s?.generation) && s.generation > 0 &&
+    (s.busy === true || ["checking", "updating", "done"].includes(s.state));
+}
+async function probeRunningOta() {
+  if (S.otaBusy) return true;
+  if (S.otaProbe) return S.otaProbe;
+  S.otaProbe = (async () => {
+    let s;
+    try { s = await j("/ota/status", { signal: typeof pollSignal === "function" ? pollSignal() : undefined }); }
+    catch { return false; }
+    if (S.imageReloading) return false;
+    if (!S.imageLease?.version && typeof s?.current === "string" && s.current)
+      acceptImageLease({ version: s.current });
+    if (otaActive(s)) { void resumeOta(s); return true; }
+    if (s?.state === "error") { otaCacheClear(); otaAlert(s.message || t("ota.failed")); }
+    else otaCacheClear();
+    return false;
+  })();
+  try { return await S.otaProbe; }
+  finally { S.otaProbe = null; }
+}
+async function resumeOta(s = null) {
+  if (!s) { await probeRunningOta(); return; }
+  if (!otaActive(s)) return;
   if (S.otaBusy) return;
-  S.busy = true; S.otaBusy = true; S.otaInstalling = true;
+  S.busy = true; S.otaBusy = true;
+  const generation = s.generation;
   let handedOff = false;
   try {
+    syncOtaSettingsLock();
+    if (s.state !== "updating" && s.state !== "done") {
+      otaInline("", { ring: true });
+      renderOtaDashboardStatus();
+      // An observer can first see the update's busy lease with the preceding check state still
+      // visible. Join its download before busy is released; the initiating check keeps its stricter rule.
+      s = await otaPoll(["checking"], OTA_CHECK_POLL_TRIES, null, generation, true, true);
+      if (!s) { otaFail(t("ota.timeout")); return; }
+      if (s.state === "error") { otaFail(s.message || t("ota.failed")); return; }
+      if (s.state !== "updating" && s.state !== "done") {
+        S.otaBusy = false;
+        otaCacheClear();
+        otaInline("");
+        return;
+      }
+    }
+    S.otaInstalling = true;
     // Prefer the complete last frame saved by this tab. If it is absent, stale or belongs to another
     // running version, /status is still the largest response the device builds and may legitimately
     // be unavailable while OTA TLS owns the scarce heap; retain the accurate OTA-only shell then.
     const restored = await otaCacheRestore(s);
+    if (S.imageReloading) return;
     const otaOnly = !restored && renderOtaResumeShell(s);
     syncOtaSettingsLock();
     if (s.state === "updating") otaInline(t("ota.pct", s.progress ?? 0), { ring: true, pct: s.progress ?? 0 });
     if (restored || otaOnly) renderOtaDashboardStatus();
-    const done = s.state === "done" ? s : await otaWatch(s.generation ?? null);
+    const done = s.state === "done" ? s : await otaWatch(generation);
     if (!done)                  { otaFail(t("ota.timeout")); return; }
     if (done.state === "error") { otaFail(done.message || t("ota.failed")); return; }
     otaInline(t("ota.rebooting"), { ring: true, pct: 100 });
@@ -1272,6 +1322,7 @@ async function resumeOta() {
   } finally {
     if (!handedOff) S.busy = false;
     if (!handedOff && S.otaBusy) S.otaBusy = false;
+    if (!handedOff) syncOtaSettingsLock();
   }
 }
 
@@ -1343,9 +1394,8 @@ function otaWaitReboot() {
     // settles the question either way. Never answered at all: a reload would replace the one status
     // line the user has with a browser error page, so keep the message and let them choose when.
     if (s) { location.reload(); return; }
-    S.busy = false; S.otaBusy = false; S.otaInstalling = false;
-    otaInline("");
-    otaAlert(t("ota.reload_hint"));
+    S.busy = false;
+    otaFail(t("ota.reload_hint"));
   };
   probe();
 }
@@ -1356,6 +1406,21 @@ function otaWaitReboot() {
 function setBusy(id, on, busyLabel = "btn.saving") {
   const b = $(id);
   if (!b) return;
+  const modal = typeof MODALS !== "undefined" && MODALS.find((name) => $(name)?.contains?.(b));
+  if (on && modal && !S.pendingSave) {
+    if (modal === "homehubModal") {
+      // Retire discovery before capturing the form's idle state for rejection/retry.
+      ++homehubSearchGeneration;
+      $("hhSearch").disabled = false;
+      $("hhSearch").textContent = t("hh.search");
+    }
+    const controls = Array.from($(modal).querySelectorAll("button, input, select, textarea"));
+    S.pendingSave = { modal, controls: controls.map((control) => [control, control.disabled]) };
+    controls.forEach((control) => { control.disabled = true; });
+  } else if (!on && modal && S.pendingSave?.modal === modal) {
+    S.pendingSave.controls.forEach(([control, disabled]) => { control.disabled = disabled; });
+    S.pendingSave = null;
+  }
   b.disabled = on;
   if (on) {
     if (b.dataset.label == null) b.dataset.label = b.textContent;   // remember the idle label once
@@ -1399,11 +1464,10 @@ async function errorOf(r, fallback) {
 function rebootPoll(then) {
   const deadline = Date.now() + REBOOT_POLL_WAIT_MS;
   const probe = async () => {
-    let s = null;
-    try { s = await j("/status", { signal: pollSignal(REBOOT_PROBE_TIMEOUT_MS) }); }
-    catch { /* unreachable or mid-reboot: expected here, not a failure */ }
-    if (s) {
-      S.status = s; syncHistSources(); S.busy = false;
+    const accepted = await readStatusFrame(false, REBOOT_PROBE_TIMEOUT_MS, true);
+    if (S.imageReloading) return;
+    if (accepted && accepted === S.statusRequest) {
+      S.busy = false;
       toast(t("toast.saved"), "ok");
       then();
       return;

@@ -159,7 +159,7 @@ p = sys.argv[1]; s = open(p).read()
 i = s.index('data-insp="rwt"')
 j = s.index('</g>', i)
 blk = s[i:j]
-new = blk.replace('x="386"', 'x="640"').replace('x="419"', 'x="673"').replace('M419 431', 'M673 431')
+new = blk.replace('x="380"', 'x="640"').replace('x="413"', 'x="673"').replace('M413 431', 'M673 431')
 if new == blk: sys.exit(1)
 open(p, 'w').write(s[:i] + new + s[j:])
 PY
@@ -402,6 +402,31 @@ if new == s: sys.exit(1)
 open(p, 'w').write(new)
 PY
 run_case "neighbouring locale labels overlapping are caught" 1 "G013"
+
+# 14bd — the shipped overflow: a state pill whose markup holds only "—" while the UI writes the
+# translated state.on/state.off into it. The flow-switch pill was 46 px wide and French "MARCHE"
+# ran past both ends, with a green audit, because the measured text was the placeholder.
+reset
+patch_file "$WORK/main/www/index.html" <<'PY'
+import sys
+p = sys.argv[1]; s = open(p).read()
+old = '<rect class="sc-pill" x="448" y="386" width="64" height="22" rx="11"/>'
+if old not in s: sys.exit(1)
+open(p, 'w').write(s.replace(old, '<rect class="sc-pill" x="461" y="386" width="46" height="22" rx="11"/>', 1))
+PY
+run_case "a runtime state word overflowing its pill is caught" 1 "G004 flow_switch/fr"
+
+# 14be — the runtime-word table drifting from the UI. A new word written into the flow-switch pill
+# must be measured too, or the case above goes blind the next time the copy changes.
+reset
+patch_file "$WORK/main/www/js/schematic.js" <<'PY'
+import sys
+p = sys.argv[1]; s = open(p).read()
+old = 'setTxt("svFlowSwitch", d.flowSwitch == null ? "—" : t(d.flowSwitch ? "state.on" : "state.off"));'
+if s.count(old) != 1: sys.exit(1)
+open(p, 'w').write(s.replace(old, old.replace('"state.off"', '"schem.flow_switch"'), 1))
+PY
+run_case "an unmeasured runtime word is caught" 1 "S012 svFlowSwitch"
 
 # 14c — a pipe that is not axis-aligned. A 4 px skew over an 80 px run is invisible in review and
 # permanent in the image.

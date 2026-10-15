@@ -3,6 +3,7 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import vm from "node:vm";
+import { spliceInlineAssets } from "../tools/ui/inline_page.mjs";
 
 const read = (path) => fs.readFileSync(new URL(path, import.meta.url), "utf8");
 const html = read("../main/www/mcp_dashboard.html");
@@ -20,9 +21,8 @@ assert.equal(occurrences(html, "//@@INLINE:app.js@@"), 1, "JS marker must appear
 assert.equal(occurrences(css, "@@INLINE:"), 0, "CSS must not contain asset markers");
 assert.equal(occurrences(js, "@@INLINE:"), 0, "JS must not contain asset markers");
 
-const assembled = html
-  .replace("/*@@INLINE:style.css@@*/\n", css)
-  .replace("//@@INLINE:app.js@@\n", js);
+// Literal splice, as inline_assets.cmake does (String.prototype.replace would expand "$" patterns).
+const assembled = spliceInlineAssets(html, { css, js });
 assert.ok(!assembled.includes("@@INLINE:"), "assembled page must not retain markers");
 assert.ok(assembled.includes("Model Context Protocol") && assembled.includes("Streamable HTTP"),
   "page must explain what the endpoint is and name its transport");
