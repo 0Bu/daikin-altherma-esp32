@@ -245,10 +245,12 @@ durable; the API does not expose a pre-write flash-commit counter.
 
 The API rounds sample age differently from the journal at subsecond boundaries. An anchor within
 six seconds (`HTTP_TIMEOUT_S + 1`) of either bucket edge is unavailable evidence; the controller
-never shifts data to obtain a match. Persistent ambiguity fails the run, including before writes,
-even if the underlying restore was intact. Each canary needs variation or an existing gap to make
-time shifts observable. The receipt records this exclusion and counts for the two inspected trends,
-not raw measurements. It does not prove all trends, completed diagnostic hours or physical sensor
+never shifts data to obtain a match. Between bootstrap, candidate and cold snapshots, device wall
+time must follow elapsed host monotonic time within 12 seconds (twice that exclusion). A witnessed
+clock discontinuity fails immediately; retries cannot replace its evidence. Persistent ambiguity
+also fails, even if the restore was intact. Each canary needs variation or an existing gap. The
+receipt records the clock tolerance, exclusion and counts for the two inspected trends, without raw
+timestamps or measurements. It does not prove all trends, completed diagnostic hours or physical sensor
 truth. Executed host fixtures prove controller behavior, not a physical cold cycle.
 
 Then exercise the candidate's own writer through a verified bootstrap downgrade under another

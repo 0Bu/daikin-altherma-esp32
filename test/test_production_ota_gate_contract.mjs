@@ -626,6 +626,11 @@ def status(boot=old_boot, version="2.0.0", elf="123456789"):
 def payload(row="leaving_water", boot=old_boot):
     return {"id": row, "source": "x10a", "boot_id": boot, "epoch": 1, "dt": 300,
             "unit": "degC", "t0": anchor, "v": [120, None, 130, 140, 150], "held": []}
+def periodic_payload(row="leaving_water", boot=old_boot, offset=0):
+    value = payload(row, boot)
+    value.update(t0=(wall // 300 - 288) * 300 + 60 + offset,
+                 v=([120, 130] if row == "leaving_water" else [220, 230]) * 144)
+    return value
 identity, _ = gate["hil_history_status"](status())
 cells = gate["hil_history_cells"](payload(), "leaving_water", identity, wall)
 canary = gate["hil_history_canary"](cells, wall)
@@ -692,20 +697,23 @@ for raw in (b"HTTP/1.1 200 OK\r\nContent-Length: 8193\r\n\r\n" + b" " * 8191 + b
         rejected(lambda: gate["request_history_deadline"](endpoint, "leaving_water", timeout=5),
                  "oversized/truncated/duplicate/nonfinite transport")
 
-def wait_fixture(*, expected=None, cold=False, change=None, status_change=None, cold_boot=None):
-    clock, reads = [0.0], [0]
+def wait_fixture(*, expected=None, cold=False, change=None, status_change=None, cold_boot=None,
+                 periodic=False, host_elapsed=0, wall_step=0):
+    clock, reads = [float(host_elapsed)], [0]
     boot = new_boot if cold else old_boot
     if cold_boot is not None: boot = cold_boot
     def read_status(*a, **k):
         reads[0] += 1
         value = status(boot)
+        value["ntp"]["time"] = datetime.fromtimestamp(
+            wall + int(clock[0]) + wall_step, timezone.utc).isoformat()
         return status_change(value, reads[0]) if status_change else value
     def read_history(_endpoint, row, **kwargs):
-        value = payload(row, boot)
+        value = periodic_payload(row, boot, int(clock[0] // 300) * 300 + wall_step) if periodic else payload(row, boot)
         return change(value) if change else value
     def sleep(seconds):
         clock[0] += seconds
-        check(clock[0] <= 4, "history wait exceeded its absolute deadline")
+        check(clock[0] <= host_elapsed + 4, "history wait exceeded its absolute deadline")
     with patch.dict(ns, {"request_status_deadline": read_status,
                         "request_history_deadline": read_history, "HIL_HISTORY_WAIT_S": 2}), \
          patch.object(ns["time"], "monotonic", lambda: clock[0]), \
@@ -723,6 +731,7 @@ def delayed_restore(p):
 wait_fixture(expected=baseline, cold=True, change=delayed_restore)
 check(delayed_reads[0] == 3, "delayed scan did not reach a positive bounded restore")
 check(gate["hil_history_summary"](restored) == {"restored": True, "raster_s": 300,
+    "clock_continuity_checked": True, "clock_continuity_tolerance_s": 2 * margin,
     "anchor_boundary_exclusion_s": margin, "rows": [
     {"id": "leaving_water", "cells": 5, "non_null": 4, "gaps": 1},
     {"id": "return_water", "cells": 5, "non_null": 4, "gaps": 1}]}, "summary lost positive evidence")
@@ -745,15 +754,74 @@ for name, change in [
         datetime.fromtimestamp(wall + (30 if n % 2 == 0 else 0), timezone.utc).isoformat()}})]:
     rejected(lambda: wait_fixture(expected=baseline, cold=True, status_change=change), name)
 
+# A two-bucket wall-clock step aliases informative alternating data in both 288-cell rasters.
+# Older restored reserve supplies the shifted prefix, so comparing cells alone really passes.
+periodic_baseline = wait_fixture(periodic=True)
+for row, expected in periodic_baseline["series"].items():
+    aliased = periodic_payload(row, new_boot, 600)
+    cold_identity, _ = gate["hil_history_status"](status(new_boot))
+    gate["compare_hil_history"](expected,
+        gate["hil_history_cells"](aliased, row, cold_identity, wall + 600))
+    check(len(aliased["v"]) == 288 and len(expected["cells"]) > 200,
+          "periodic counterexample lacks restored reserve")
+def clock_rejected(call, label):
+    try:
+        call()
+    except gate["GateError"] as error:
+        check("clock continuity" in str(error), label + " failed without its clock guard")
+        return
+    check(False, label + " was accepted")
+clock_rejected(lambda: wait_fixture(expected=periodic_baseline, cold=True, periodic=True, wall_step=600),
+               "periodic 288-cell forward clock step")
+clock_rejected(lambda: wait_fixture(expected=periodic_baseline, periodic=True, wall_step=600),
+               "bootstrap-to-candidate clock step")
+clock_rejected(lambda: wait_fixture(expected=periodic_baseline, cold=True, periodic=True, wall_step=-600),
+               "backward clock step")
+elapsed_restore = wait_fixture(expected=periodic_baseline, cold=True, periodic=True, host_elapsed=600)
+check(elapsed_restore["wall_s"] - periodic_baseline["wall_s"] == 600 and
+      elapsed_restore["host_monotonic_s"] - periodic_baseline["host_monotonic_s"] == 600,
+      "genuine elapsed time was not retained privately")
+public_summary = json.dumps(gate["hil_history_summary"](elapsed_restore))
+check("wall_s" not in public_summary and "host_monotonic_s" not in public_summary and
+      str(wall) not in public_summary, "receipt exposed raw clock anchors")
+# An initially empty acquisition must keep its first clock witness across retries.
+retry_history_reads = [0]
+def retry_history(value):
+    retry_history_reads[0] += 1
+    return {**value, "v": []} if retry_history_reads[0] <= 2 else {**value, "t0": value["t0"] + 600}
+def retry_clock(value, count):
+    if count >= 2:
+        instant = datetime.fromisoformat(value["ntp"]["time"]).timestamp() + 600
+        value["ntp"]["time"] = datetime.fromtimestamp(instant, timezone.utc).isoformat()
+    return value
+clock_rejected(lambda: wait_fixture(periodic=True, change=retry_history, status_change=retry_clock),
+               "clock step after an unavailable acquisition")
+check(retry_history_reads[0] == 2, "witnessed clock step was resampled")
+bracket_reads = []
+def one_bracket_step(value, count):
+    bracket_reads.append(count)
+    if count == 2:
+        instant = datetime.fromisoformat(value["ntp"]["time"]).timestamp() + 30
+        value["ntp"]["time"] = datetime.fromtimestamp(instant, timezone.utc).isoformat()
+    return value
+rejected(lambda: wait_fixture(expected=periodic_baseline, cold=True, periodic=True,
+                              status_change=one_bracket_step), "witnessed bracketed clock step")
+check(bracket_reads == [1, 2], "bracketed clock step was forgotten by retry")
+
 # Execute the real HIL orchestrator; all artifact/controller/feed/device dependencies are fake.
-def run_hil(*, missing=False, cold_bad=False):
+def run_hil(*, missing=False, cold_bad=False, periodic=False, clock_step=0, clock_stage="cold", elapsed_s=0):
     events, clock = [], [0.0]
-    current = {"version": "2.0.0", "elf": "123456789", "boot": old_boot, "installs": 0}
-    def board(): return status(current["boot"], current["version"], current["elf"])
+    current = {"version": "2.0.0", "elf": "123456789", "boot": old_boot, "installs": 0, "offset": 0}
+    def board():
+        value = status(current["boot"], current["version"], current["elf"])
+        value["ntp"]["time"] = datetime.fromtimestamp(
+            wall + int(clock[0]) + current["offset"], timezone.utc).isoformat()
+        return value
     def get_status(*a, **k): return board()
     def get_history(_endpoint, row, **kwargs):
         events.append("history")
-        value = payload(row, current["boot"])
+        value = periodic_payload(row, current["boot"], int(clock[0] // 300) * 300 + current["offset"]) \
+            if periodic else payload(row, current["boot"])
         if missing: value["v"] = []
         if cold_bad and "power" in events: value["v"][1] = 0
         return value
@@ -773,13 +841,16 @@ def run_hil(*, missing=False, cold_bad=False):
         events.append("install" + str(current["installs"]))
         current.update(version=kwargs["version"], elf=kwargs["elf"],
                        boot=str(current["installs"] + 3) * 16)
+        if current["installs"] == 2 and clock_stage == "candidate": current["offset"] = clock_step
         return {**board(), "uptime_s": 13}, {}
     def power(*args):
         events.append("power")
         current["boot"] = new_boot
+        if clock_stage == "cold": current["offset"] = clock_step
+        clock[0] += elapsed_s
     def sleep(seconds):
         clock[0] += seconds
-        check(clock[0] <= 4, "orchestrator history wait exceeded deadline")
+        check(clock[0] <= elapsed_s + 4, "orchestrator history wait exceeded deadline")
     lab = {"host": "fixture.invalid", "mac": "FIXTURE", "bootstrap_version": "2.0.0",
         "bootstrap_elf": "123456789", "bootstrap_app_sha256": "c" * 64,
         "channel": "release", "manifest_url": "https://candidate.invalid/manifest.json",
@@ -810,12 +881,17 @@ def run_hil(*, missing=False, cold_bad=False):
             try:
                 result = gate["run_release_hil"](manifest_path=manifest, app_path=app,
                     source_sha="a" * 40, version="2.0.1", app_sha256=sha, power_token="fake", feed_token="fake")
-            except gate["GateError"]:
-                check(missing or cold_bad, "valid HIL fixture refused")
+            except gate["GateError"] as error:
+                check(missing or cold_bad or clock_step, "valid HIL fixture refused")
                 if missing: check("feed" not in events and "install1" not in events, "missing prerequisites reached mutation")
                 if cold_bad: check("install3" not in events, "failed restore continued into candidate writer")
+                if clock_step:
+                    check("clock continuity" in str(error), "periodic clock step failed without its cross-snapshot guard")
+                    check("install3" not in events, "periodic clock step continued into candidate writer")
+                    if clock_stage == "candidate": check("power" not in events, "candidate clock step continued into cold cycle")
                 return
     check(not missing and not cold_bad, "HIL passed without retained history")
+    check(not clock_step, "periodic clock step reached an HIL success receipt")
     check(events.index("history") < events.index("feed") < events.index("install1"), "history preflight was late")
     power_index, writer_index = events.index("power"), events.index("install3")
     check("history" in events[events.index("install2"):power_index], "no candidate baseline before cold cycle")
@@ -824,6 +900,9 @@ def run_hil(*, missing=False, cold_bad=False):
 run_hil()
 run_hil(missing=True)
 run_hil(cold_bad=True)
+run_hil(periodic=True, elapsed_s=600)
+run_hil(periodic=True, clock_step=600)
+run_hil(periodic=True, clock_step=600, clock_stage="candidate")
 print("HIL history behavioral fixtures passed")
 `;
 const hilHistory = spawnSync("python3", [

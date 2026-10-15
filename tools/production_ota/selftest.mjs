@@ -327,6 +327,14 @@ try {
   assert.equal(historyBaseline.status, 0, `HIL-history baseline failed: ${historyBaseline.stderr}`);
 
   const cases = [
+    ["HIL history accepts an aliased cross-snapshot clock step", () =>
+      replaceOnce("scripts/production-ota-gate.py",
+        'require_hil_history_clock_continuity(clock_reference, wall, started)',
+        'pass  # seeded cross-snapshot clock continuity omission'), "hil-history"],
+    ["HIL history retries away a witnessed clock discontinuity", () =>
+      replaceOnce("scripts/production-ota-gate.py",
+        'fail("release-HIL history clock changed during snapshot")',
+        'raise HistoryEvidenceUnavailable("release-HIL history clock changed during snapshot")'), "hil-history"],
     ["HIL history accepts an unchanged cold-cycle boot identity", () =>
       replaceOnce("scripts/production-ota-gate.py",
         'if identity[0] != boot or (cold and identity[0] == expected["boot"]):',

@@ -106,6 +106,7 @@ HIL_HISTORY_MAX_BYTES = 8192
 HIL_HISTORY_WAIT_S = 180
 HIL_HISTORY_DT_S = 300
 HIL_HISTORY_ANCHOR_MARGIN_S = HTTP_TIMEOUT_S + 1
+HIL_HISTORY_CLOCK_TOLERANCE_S = 2 * HIL_HISTORY_ANCHOR_MARGIN_S
 HIL_HISTORY_ROWS = ("leaving_water", "return_water", "dhw_tank", "water_pressure", "flow")
 # The oldest supported signed release used by the ordinary bench full-download cycle reads one
 # fixed 1024-byte manifest frame. Any larger dev manifest must fail before the gate contacts a
@@ -2959,11 +2960,21 @@ def compare_hil_history(expected: dict[str, Any], actual: dict[str, Any]) -> Non
             raise HistoryEvidenceUnavailable("release-HIL history did not restore the exact dated cells/gaps")
 
 
+def require_hil_history_clock_continuity(
+    previous: dict[str, Any], wall: int, sampled_at: float,
+) -> None:
+    elapsed = sampled_at - previous["host_monotonic_s"]
+    skew = wall - previous["wall_s"] - elapsed
+    if elapsed < 0 or not -HIL_HISTORY_CLOCK_TOLERANCE_S <= skew <= HIL_HISTORY_CLOCK_TOLERANCE_S:
+        fail("release-HIL history clock continuity changed between snapshots")
+
+
 def wait_hil_history(
     endpoint: ResolvedHttpEndpoint, *, host: str, mac: str, version: str, elf: str,
     boot: str, expected: dict[str, Any] | None = None, cold: bool = False,
 ) -> dict[str, Any]:
     deadline = time.monotonic() + HIL_HISTORY_WAIT_S
+    clock_reference = expected
     last = "no history sample"
     while time.monotonic() < deadline:
         def remaining() -> float:
@@ -2977,6 +2988,10 @@ def wait_hil_history(
             before = request_status_deadline(endpoint, timeout=remaining())
             validate_identity(before, host=host, mac=mac, version=version, elf=elf)
             identity, wall = hil_history_status(before)
+            if clock_reference is None:
+                clock_reference = {"wall_s": wall, "host_monotonic_s": started}
+            else:
+                require_hil_history_clock_continuity(clock_reference, wall, started)
             if identity[0] != boot or (cold and identity[0] == expected["boot"]):
                 fail("release-HIL history did not remain on the required boot")
             if expected is not None and identity[2:] != expected["scope"]:
@@ -3022,10 +3037,12 @@ def wait_hil_history(
                     required_uptime(before, "history before") <= elapsed + 2:
                 fail("release-HIL history uptime changed during snapshot")
             if abs(after_wall - wall - elapsed) > 2:
-                raise HistoryEvidenceUnavailable("release-HIL history clock changed during snapshot")
+                fail("release-HIL history clock changed during snapshot")
             if time.monotonic() >= deadline:
                 raise HistoryEvidenceUnavailable("release-HIL history deadline expired after snapshot")
-            return {"boot": identity[0], "epoch": identity[1], "scope": identity[2:], "series": selected}
+            return {"boot": identity[0], "epoch": identity[1], "scope": identity[2:], "series": selected,
+                    "wall_s": wall, "host_monotonic_s": started,
+                    "clock_continuity_checked": expected is not None}
         except HistoryEvidenceUnavailable as error:
             last = str(error)
         except HTTPError as error:
@@ -3042,6 +3059,8 @@ def wait_hil_history(
 
 def hil_history_summary(evidence: dict[str, Any]) -> dict[str, Any]:
     return {"restored": True, "raster_s": HIL_HISTORY_DT_S,
+            "clock_continuity_checked": evidence["clock_continuity_checked"],
+            "clock_continuity_tolerance_s": HIL_HISTORY_CLOCK_TOLERANCE_S,
             "anchor_boundary_exclusion_s": HIL_HISTORY_ANCHOR_MARGIN_S, "rows": [
         {"id": row, "cells": len(series["cells"]),
          "non_null": sum(value is not None for value in series["cells"].values()),
