@@ -1,6 +1,6 @@
 # Evidence and limits of the plant diagnostics
 
-<!-- diagnostic-evidence-contract: 84ded6b157100ea5e1817f26db9a97fb545abf6557c4afb60d1e783d546acf45 -->
+<!-- diagnostic-evidence-contract: 57ee28f2d2e2034db5c8fb8d98419f75afa1642f42b498e79da7036c2ff146c4 -->
 
 For every row in the **Plant diagnostics · 24 h** card, this page answers four questions:
 
@@ -53,7 +53,7 @@ interface.
 <a id="refrigerant-service-observation"></a>
 ### Separate refrigerant service observation
 
-The UI names this row **Refrigerant circuit during heating** so an owner does not mistake it for a
+The UI names this row **Refrigerant (heating)** so an owner does not mistake it for a
 controller service mode. This object is deliberately outside the eight-diagnosis evidence matrix
 and `/status.health`. It is an **observation**, not a manufacturer limit, project heuristic, health
 verdict, or completion test. It starts automatically from ordinary read-only X10A polling during a
@@ -76,8 +76,13 @@ values during confirmed space heating, with running compressor, non-DHW valve,
 defrost off, all declared fault rows current and normal, and every profile-provided special-phase
 witness current and inactive. A profile which lacks one or more of those optional phase witnesses
 may still produce a `limited` window; a witness declared by the profile but unreadable in one sweep
-is required current evidence and ends an active window. Discharge temperature, EEV command, and at least one structurally
-identified refrigerant-pressure side are mandatory. Cooling is excluded because the available
+is required current evidence and ends an active window. Discharge temperature, EEV command, and at
+least one structurally identified refrigerant-pressure side are mandatory. The high side has one sensor
+per profile, fixed by coverage: the hydronic transducer (0x62/15) when it is a structural refrigerant
+pressure, otherwise the outdoor high-pressure row (0x20/12); a sweep that lost that page leaves the side
+missing instead of substituting the other transducer. Whether real units of the profiles that rely on
+0x20/12 alone populate it while running is unverified; one that does not shows a missing side, not a
+value. Cooling is excluded because the available
 pressure-side evidence is heating-specific. Missing required data, a mode/valve/fault/phase change,
 non-monotonic time, or a gap beyond the profile-sized poll allowance ends the window. A source
 generation change resets continuity and may accept the current qualifying sample as the first sample
@@ -127,11 +132,17 @@ matter.
 **Firmware rule:** Complete eligible one-hour windows measure the drop at tank sensor R5T.
 Charging, internal-pump activity, an apparent draw, implausible temperature or excessive blindness
 discards a candidate. A charge witness sustained for two minutes, or seen after an unmeasured gap,
-arms a 45-minute settling filter. A completed window at
+arms a 45-minute settling filter; unread time directly before a witness, or an unread tail after a
+short one, counts toward the two minutes. Every DHW evaluation that starts without a compatible
+handoff (power loss, crash, consent, identity, circulation or long-gap reset) first holds the same
+45 minutes. Settling and that hold count down only on samples that read both witnesses. A completed
+window at
 or above 0.8 K/h produces **NOTE** immediately. Other completed windows remain observations; no
-eligible window remains **CHECKING**. There is no reassuring tank-loss verdict or six-hour acceptance
-test. The result retains the maximum rate, completed/notable window counts and circulation correlation,
-not individual rates, an average or an energy integral.
+eligible window remains **CHECKING**; the "no eligible window in 24 h" statement needs 24 hours of DHW
+scope, which restarts when collection starts, at a DHW reset and at a restore that dropped DHW hours.
+There is no reassuring tank-loss verdict or six-hour acceptance test. The result retains the maximum
+rate (floored to 0.1 K/h), completed/notable window counts and circulation correlation, not
+individual rates, an average or an energy integral.
 
 Changing the circulation broker, mapping or interpretation retires DHW records and the ongoing
 filter, without discarding independent X10A checks. Display-name edits do not change evidence identity.
@@ -151,11 +162,10 @@ daily consumption or replacement electricity. Fast continuous cooling can be exc
 draw, so quiet accepted windows cannot rule out loss elsewhere. Draws, stratification, circulation,
 thermosiphoning and valve behaviour can produce similar traces; pump overlap is correlation.
 
-A charge hidden by unreadable data or a restart that loses the settling filter can admit a settling
-tail as apparent cooling. The two-minute charge guard also treats a charge witness at the first sample
-or after a long sample gap as sufficient to arm settling; a wholly unseen charge cannot arm it.
-Settling counts down through unread samples within the normal poll gap, but longer gaps hold it.
-Power loss, panic, identity changes and incompatible handoffs lose the filter. Discard totals retain
+A charge that no sample witnessed can still admit its settling tail as apparent cooling, and a short
+witness followed by a gap longer than the normal poll gap can arm no settling. An intentional restart
+during the start hold loses its remainder; power loss, panic, identity changes and incompatible
+handoffs start a new hold. Discard totals retain
 only an OR-ed reason set, not per-hour provenance or dominant cause. Blindness may reflect bus
 timeouts or firmware pauses and establishes no wiring defect.
 
@@ -170,8 +180,12 @@ supports the relevance of very short runs but does not provide a universal Daiki
 
 **Firmware rule:** Starts and continuously witnessed completed runs are retained separately.
 Readable unchanged valve/mode inputs classify completed runs as space heating, DHW or cooling;
-mixed or gapped runs are censored. Only at least 12 completed space-heating runs and at least 90%
-of all completed runs classified can support the heating assessment. A mean below ten minutes then
+mixed or gapped runs are censored. A sweep that read no X10A row at all (a firmware pause or a
+wholly silent bus sweep) inside a run is bounded blind time and censors only beyond 15 seconds; a
+start hidden by an unreadable sample opens a censored run. The classified share uses the larger of
+completed runs and starts minus one, so completions a restart lost keep the result an observation.
+Only at least 12 completed space-heating runs and at least 90% of all completed runs classified can
+support the heating assessment. A mean below ten minutes then
 produces **NOTE** immediately. An absence-of-short-run assessment additionally requires a full
 24-hour span and at least CHECKUP_REQUIRED_S of paired classification time.
 
@@ -181,16 +195,19 @@ There is no pooled starts/runtime fallback, and unfinished
 runs never enter the completed mean. Completed-run evidence ages with its start edge. See
 CHECKUP_CYCLING_MIN_STARTS, CHECKUP_CYCLING_SHORT_RUN_S and CHECKUP_CYCLING_CLASSIFIED_PCT in
 [checkup.hpp](../main/logic/checkup.hpp). Fresh X10A outdoor minimum/mean accompanies only accepted
-completed heating runs and changes no threshold.
+completed heating runs, from samples whose predecessor was also running, and changes no threshold.
 
 **Project boundary:** Twelve heating runs, ten minutes and the 90% evidence requirements are
 project heuristics, not limits copied from R1 or specified by Daikin. R1 studied different,
 non-modulating units and supports only the general relevance of short runs and system hydraulics.
 The page-0x20 mapping and positive-compressor freshness pairing are project protocol evidence.
+The 15-second all-blind tolerance and the larger-of-completed-runs-and-starts-minus-one population
+are project rules.
 
 **Not established:** The note identifies neither oversizing nor incorrect hydraulic balancing.
 The observed run population and its outdoor context do not establish building load, delivered heat
-or continuous weather coverage.
+or continuous weather coverage. Defrost behaviour has not yet been observed by this project; if the
+compressor stops at defrost entry or exit, one heating run counts as several.
 
 <a id="diagnosis-defrost"></a>
 ### 4. Defrost events (`defrost`)
@@ -276,7 +293,7 @@ emergency operation after a heat-pump failure ([D1], sections 8.4.6 and 8.4.9, p
 
 **Firmware rule:** The diagnosis separately totals observed active seconds for electric backup
 heater (BUH) steps in the water circuit and the tank booster heater (BSH). Usable runtime evidence
-is published immediately as **MEASURED ONLY**, without waiting for 24 hours. A zero applies only to
+is published immediately as **MEASURED**, without waiting for 24 hours. A zero applies only to
 readable observed intervals; unsupported or unreadable inputs remain null. Proving BUH off requires
 every profile-provided step to be readable; either readable active step proves on. See the Heater
 branch in [checkup.hpp](../main/logic/checkup.hpp).
@@ -297,7 +314,7 @@ including high pressure, compressor overheating, and inverter overcurrent, in it
 **Firmware rule:** The same exact counter must increase between comparable readable endpoints.
 All profile-declared counters and the compressor state must be readable at both endpoints. A
 non-zero startup value is a baseline; a decrease invalidates the comparison. A usable comparison
-without an increase displays **EXPERIMENTAL**; a comparable increase displays **NOTE**. Both retain
+without an increase displays **TENTATIVE**; a comparable increase displays **NOTE**. Both retain
 experimental evidence and appear without a day-long wait. The retained event flag does not identify
 which counter increased or when. See checkup_retry_index(),
 CHECKUP_RETRY_COUNT and the Retries branch in [checkup.hpp](../main/logic/checkup.hpp).

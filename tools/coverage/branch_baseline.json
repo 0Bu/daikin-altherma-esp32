@@ -473,6 +473,47 @@
           9393
         ]
       }
+    },
+    {
+      "runner": "scripts/run-mock-tests.sh --coverage",
+      "compilers": {
+        "clang-17-darwin": "Apple clang version 17.0.0 (clang-1700.6.4.2)",
+        "gcc-13-linux-ubuntu24": "ESP-IDF v6.1 container GCC 13.3.0",
+        "gcc-15-linux-ubuntu26": "g++-15 (Ubuntu 15.2.0-16ubuntu1) 15.2.0",
+        "gcc-15-github-linux-ubuntu26": "g++-15 (Ubuntu 15.2.0-16ubuntu1) 15.2.0"
+      },
+      "architectures": {
+        "clang-17-darwin": "arm64",
+        "gcc-13-linux-ubuntu24": "aarch64",
+        "gcc-15-linux-ubuntu26": "aarch64",
+        "gcc-15-github-linux-ubuntu26": "x86_64"
+      },
+      "hosted_confirmation": "The Ubuntu 26.04 x86_64 GCC 15 counts of the three changed headers were measured locally under emulation and equal the aarch64 GCC 15 counts. Unchanged headers keep their hosted counts; authoritative GitHub CI confirmation of the final merge head remains pending.",
+      "scope": "Plant-diagnosis fixes (DHW settling and scope, run censoring, class population, consent generation, refrigerant high-side selection) raise the outcome inventories and ratios of the three changed headers on all four profiles; all other inventories and historical floors are retained.",
+      "sources": {
+        "main/logic/checkup.hpp": "77699d65bee727e9184b9793624faf69e8f6141a2202cbafa70b2a7f7d1e4e94",
+        "main/logic/config_model.hpp": "fa10bbe779ace82388a8ed7f512ba83ae72d7d372c94a599d6adc1b357a0d446",
+        "main/logic/refrigerant_service.hpp": "7d32469e63f9c7b7dbf234772ff2bb5714719f2730d279c2ecaf65d331ba7558"
+      },
+      "test_source_sha256": "9e319ce41a50c49f3827c101b583303d692fe950ef6ff7a27167413448620643",
+      "local_executable_lines": {
+        "clang-17-darwin": [
+          9408,
+          9580
+        ],
+        "gcc-13-linux-ubuntu24": [
+          9139,
+          9422
+        ],
+        "gcc-15-linux-ubuntu26": [
+          9141,
+          9424
+        ],
+        "gcc-15-github-linux-ubuntu26": [
+          9139,
+          9424
+        ]
+      }
     }
   ],
   "method": "Exact taken/outcome inventories are measured by scripts/run-mock-tests.sh --coverage and bound to compiler family, major version and platform; hosted profiles additionally bind the runner image. The gate rejects inventory mismatches and any historical ratio decrease. Updated hosted inventories require authoritative CI confirmation. Historical measurement notes remain in Git; profiles contain the enforced counts. Measurements below identify changed sources and local compiler provenance without changing checker rules or the 95-percent executable-line floor.",
@@ -511,8 +552,8 @@
         "taken": 6
       },
       "main/logic/checkup.hpp": {
-        "outcomes": 825,
-        "taken": 748
+        "outcomes": 855,
+        "taken": 778
       },
       "main/logic/checkup_persist.hpp": {
         "outcomes": 125,
@@ -527,8 +568,8 @@
         "taken": 53
       },
       "main/logic/config_model.hpp": {
-        "outcomes": 312,
-        "taken": 257
+        "outcomes": 316,
+        "taken": 261
       },
       "main/logic/config_store.hpp": {
         "outcomes": 486,
@@ -815,8 +856,8 @@
         "taken": 216
       },
       "main/logic/refrigerant_service.hpp": {
-        "outcomes": 246,
-        "taken": 186
+        "outcomes": 252,
+        "taken": 206
       },
       "main/logic/registers.hpp": {
         "outcomes": 10,
@@ -929,8 +970,8 @@
         "taken": 8
       },
       "main/logic/checkup.hpp": {
-        "outcomes": 951,
-        "taken": 861
+        "outcomes": 989,
+        "taken": 900
       },
       "main/logic/checkup_persist.hpp": {
         "outcomes": 153,
@@ -945,8 +986,8 @@
         "taken": 53
       },
       "main/logic/config_model.hpp": {
-        "outcomes": 334,
-        "taken": 290
+        "outcomes": 338,
+        "taken": 294
       },
       "main/logic/config_store.hpp": {
         "outcomes": 460,
@@ -1225,8 +1266,8 @@
         "taken": 252
       },
       "main/logic/refrigerant_service.hpp": {
-        "outcomes": 298,
-        "taken": 222
+        "outcomes": 302,
+        "taken": 241
       },
       "main/logic/registers.hpp": {
         "outcomes": 12,
@@ -1347,8 +1388,8 @@
         "taken": 8
       },
       "main/logic/checkup.hpp": {
-        "outcomes": 953,
-        "taken": 863
+        "outcomes": 989,
+        "taken": 900
       },
       "main/logic/checkup_persist.hpp": {
         "outcomes": 153,
@@ -1363,8 +1404,8 @@
         "taken": 53
       },
       "main/logic/config_model.hpp": {
-        "outcomes": 334,
-        "taken": 290
+        "outcomes": 338,
+        "taken": 294
       },
       "main/logic/config_store.hpp": {
         "outcomes": 460,
@@ -1643,8 +1684,8 @@
         "taken": 252
       },
       "main/logic/refrigerant_service.hpp": {
-        "outcomes": 298,
-        "taken": 222
+        "outcomes": 302,
+        "taken": 241
       },
       "main/logic/registers.hpp": {
         "outcomes": 12,
@@ -1765,8 +1806,8 @@
         "taken": 8
       },
       "main/logic/checkup.hpp": {
-        "outcomes": 953,
-        "taken": 863
+        "outcomes": 989,
+        "taken": 900
       },
       "main/logic/checkup_persist.hpp": {
         "outcomes": 153,
@@ -1781,8 +1822,8 @@
         "taken": 53
       },
       "main/logic/config_model.hpp": {
-        "outcomes": 334,
-        "taken": 290
+        "outcomes": 338,
+        "taken": 294
       },
       "main/logic/config_store.hpp": {
         "outcomes": 460,
@@ -2061,8 +2102,8 @@
         "taken": 252
       },
       "main/logic/refrigerant_service.hpp": {
-        "outcomes": 298,
-        "taken": 222
+        "outcomes": 302,
+        "taken": 241
       },
       "main/logic/registers.hpp": {
         "outcomes": 12,

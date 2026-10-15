@@ -1737,6 +1737,10 @@ static logic::HeatingCurveSnapshot evaluate_heating_curve(const Config& cfg, boo
         Lock lk(s_mtx);
         return s_heating_curve_diagnosis.evaluate(in);
     }
+    // Every input below belongs to the consent/room-source scope current at this load. A
+    // reconfiguration before the evaluation lock forgets that scope's cadence, so evaluating these
+    // reads afterwards would record the old room reading as the new scope's first event.
+    const uint32_t scope_epoch = s_ref_requested_epoch.load(std::memory_order_acquire);
     const ReferenceTemperatureStatus rt         = reference_temperature_status(cfg);
     const uint64_t now_ms = static_cast<uint64_t>(esp_timer_get_time() / 1000);
     int64_t now_unix_s = -1;
@@ -1806,6 +1810,8 @@ static logic::HeatingCurveSnapshot evaluate_heating_curve(const Config& cfg, boo
     in.room_age_known = freshness.age_known;
     in.room_age_s = freshness.age_s;
     Lock lk(s_mtx);
+    if (s_ref_requested_epoch.load(std::memory_order_acquire) != scope_epoch)
+        return s_heating_curve_diagnosis.snapshot(); // stale scope: record nothing this cycle
     return s_heating_curve_diagnosis.evaluate(in);
 }
 
@@ -3775,6 +3781,9 @@ void mqtt_reference_reconfigure() {
     // Without the mutex (safe mode, or its allocation failed at boot) no task publishes a status,
     // so the defaults stay untouched; the bumped epoch already withdraws every reader.
     if (lk.acquired()) s_ref_status = ReferenceTemperatureStatus{};
+    // The same consent/room-source boundary ends the heating-curve sample scope at once (counters
+    // and sequence continue); without the mutex no task ever evaluated it, so nothing is forgotten.
+    if (lk.acquired()) s_heating_curve_diagnosis.forget_samples();
 }
 
 CirculationSourceStatus circulation_source_status(const Config& c) {

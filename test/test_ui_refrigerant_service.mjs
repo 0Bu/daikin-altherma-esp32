@@ -87,7 +87,7 @@ const observed = {
 ui.set(observed);
 let html = ui.card();
 assert.match(html, /Plant diagnostics · 24 h/);
-assert.match(html, /Refrigerant circuit during heating/);
+assert.match(html, /Refrigerant \(heating\)/);
 assert.match(html, />RECORDING</);
 assert.match(html, /1 min · 4 readings/);
 assert.match(html, /One space-heating run, separate from 24-hour checks/);
@@ -137,7 +137,7 @@ for (const [blocker, reason] of [
 ]) {
   ui.set({ state: "waiting", continuous_s: 0, samples: 0, blocker });
   const waiting = ui.card();
-  assert.match(waiting, />WAITING FOR HEATING RUN</);
+  assert.match(waiting, />WAITING</);
   assert.ok(waiting.includes(reason));
 }
 
@@ -155,7 +155,7 @@ ui.lang("de");
 ui.set({ ...observed, state: "limited", special_phases_known: false,
   limitations: ["pressure_sides_incomplete"] });
 html = ui.card();
-assert.match(html, /MISST · ZUSATZWERTE FEHLEN/);
+assert.match(html, />LÜCKENHAFT</);
 assert.match(html, /label="Verdichter">min. 0 · Mittel 27,5 · max. 40 rps/);
 assert.match(html, /Druckseite\(n\)/);
 assert.match(html, /unabhängig von der 24-h-Diagnose/);
@@ -163,6 +163,14 @@ assert.match(html, /Ventil: Befehl, keine gemessene Stellung/);
 ui.set({ state: "unsupported", continuous_s: 0, samples: 0,
   blocker: "unsupported_profile", special_phases_known: false });
 html = ui.card();
-assert.match(html, />NICHT VERFÜGBAR</);
+assert.match(html, />ENTFÄLLT</);
 assert.match(html, /Dieses Modell stellt nicht alle benötigten Messwerte bereit/);
+// Copy regression pin (U3): the unit_fault reason must name a reported warning, not only a fault.
+for (const [locale, warning] of [["en", /\bwarning\b/], ["de", /\bWarnung\b/]]) {
+  ui.lang(locale);
+  ui.set({ state: "waiting", continuous_s: 0, samples: 0, blocker: "unit_fault" });
+  html = ui.card();
+  assert.match(html, />(?:WAITING|WARTET)</, `${locale} unit_fault waiting state`);
+  assert.match(html, warning, `${locale} unit_fault reason must mention the warning case`);
+}
 console.log("refrigerant observation UI contract: actual ranges, named limits and single-run scope verified");

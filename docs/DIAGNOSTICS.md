@@ -1,6 +1,6 @@
 # Plant diagnostics in plain language
 
-<!-- user-docs-contract: 51b6d9404d292e048cc74f7d995291848f25bdc008068eacabda28c1c93fb4fe -->
+<!-- user-docs-contract: 6e206904007b5293cc751ecdb57e0d824287cc8a0d75c06bbfa41a8984a88f26 -->
 
 Plant diagnostics **reads measurements and counts events; it does not control the heat pump**.
 It is off by default. Enable **Plant diagnostics** under **Settings → Firmware** to start an evidence
@@ -20,9 +20,9 @@ the installation's health.
 | **NOTE** | A notable accepted observation or unit-reported warning; it does not identify a defect or cause. |
 | **WARNING** | A current unit-reported fault, or pressure confirmed continuously at or below the project's boundary during the window. |
 | **CHECKING** | A required day, signal coverage or eligible observation is missing. The detail names what is missing. |
-| **MEASURED ONLY** | A measurement or event population without enough evidence for a good/bad assessment. |
-| **EXPERIMENTAL** | A counter comparison whose complete manufacturer semantics are unknown. |
-| **NOT AVAILABLE** | The active profile does not supply the required signals. |
+| **MEASURED** | A measurement or event population without enough evidence for a good/bad assessment. |
+| **TENTATIVE** | An experimental counter comparison whose complete manufacturer semantics are unknown. |
+| **N/A** | The active profile does not supply the required signals. |
 
 A reassuring day-based result needs both the full 24-hour span and at least 90% usable coverage
 of its own signals. Current fault state is separate. Missing or stale X10A data cannot establish a
@@ -62,18 +62,23 @@ The observation establishes neither a cause nor why a message stopped appearing.
 ### Domestic-hot-water tank cooling
 
 **In plain language:** The board measures the temperature drop at tank sensor R5T during eligible
-one-hour windows. It displays the largest completed-hour drop, the completed window count and
-how many reached the project's **0.8 K/h** note threshold.
+one-hour windows. It displays the largest completed-window cooling rate (rounded down to 0.1 K/h),
+the completed window count and how many reached the project's **0.8 K/h** note threshold.
 
-**Meaning:** At least one such window produces **NOTE**. Other completed windows are **MEASURED
-ONLY**; no eligible window means **CHECKING**. There is no green tank-loss result. An optional
+**Meaning:** At least one such window produces **NOTE**. Other completed windows are **MEASURED**;
+no eligible window means **CHECKING**; "no eligible window in 24 h" needs a full day of tank-cooling
+evidence since collection started or the circulation witness changed. There is no green tank-loss result. An optional
 circulation-power witness shows how many notable windows overlapped electrical pump operation or
 had a sufficiently observed pump-off state.
 
 **Important limit:** Charging, pump activity, apparent draws and missing readings exclude time. Fast
 continuous cooling above about **1.85 K/h** can resemble a draw and be excluded too. One sensor
 in a stratified tank does not measure whole-tank heat or electricity loss, and pump overlap does not
-prove a cause. An unobserved charge or lost settling filter can affect the first accepted window.
+prove a cause. After a charge seen for at least two minutes, or a fresh start (power loss, crash, switching Plant
+diagnostics on or off, a new unit identity, a circulation-witness change or a long reading gap), the
+check waits 45 minutes before a window; unread valve or heater
+readings extend that wait. A planned restart, such as an update, keeps only the remaining settling time. A charge no
+reading saw can still affect a window.
 
 **Evidence and limits:** [Tank cooling](DIAGNOSTIC_EVIDENCE.md#diagnosis-dhw-loss)
 
@@ -87,13 +92,17 @@ remain unclassified.
 **Meaning:** At least **12 completed space-heating runs**, with at least **90% of all completed runs
 classified**, can carry the assessment. An average below **10 minutes** produces **NOTE** as soon as
 this population exists. **OK** additionally needs a full day and 90% readable classification time.
-Smaller or insufficiently classified populations are **MEASURED ONLY**, with the reason shown;
+Smaller or insufficiently classified populations are **MEASURED**, with the reason shown;
 no usable compressor observation remains **CHECKING**.
 
 **Important limit:** There is no pooled all-mode assessment, and an unfinished long run cannot dilute
 completed short runs. Twelve runs and ten minutes are project heuristics, not Daikin limits. These
 figures do not identify oversizing or hydraulic imbalance. Optional outdoor min/mean is context for
-accepted heating runs only.
+accepted heating runs only. A pause of up to 15 seconds in which the board read nothing (an update
+check, a weather download or a silent link) does not unclassify a run; a start hidden by an unreadable reading counts as an unclassified run.
+After a restart, restored hours can lack the completion of a run that crossed an hour boundary, so
+the result stays **MEASURED** until those hours leave the window. If the compressor stops during a
+defrost, one heating run counts as several; whether it does has not been checked yet.
 
 **Evidence and limits:** [Compressor cycling](DIAGNOSTIC_EVIDENCE.md#diagnosis-cycling)
 
@@ -101,10 +110,10 @@ accepted heating runs only.
 ### Defrost events
 
 **In plain language:** The board counts observed defrost starts and the seconds spent defrosting
-while the compressor and defrost signals were both readable.
+while the compressor ran and both signals were readable.
 
 **Meaning:** At least **three paired events** and more than **15%** defrost share produce **NOTE**.
-Both are project heuristics. Fewer events or no paired compressor runtime remain **MEASURED ONLY**;
+Both are project heuristics. Fewer events or no paired compressor runtime remain **MEASURED**;
 no readable defrost observation remains **CHECKING**.
 A reassuring assessment additionally needs a full day and 90% paired signal coverage.
 
@@ -137,7 +146,7 @@ normal value does not erase an earlier low reading.
 **In plain language:** The board reports the lowest accepted flow after the internal pump has run
 continuously for at least sixty seconds.
 
-**Meaning:** The result is **MEASURED ONLY**. It filters pump-off and initial run-up values; it does
+**Meaning:** The result is **MEASURED**. It filters pump-off and initial run-up values; it does
 not establish part load or retain the operating mode of the minimum.
 
 **Important limit:** Required flow differs by model, heating, cooling, DHW and defrost conditions.
@@ -151,7 +160,7 @@ The minimum is not a design-flow measurement or a diagnosis of restricted flow.
 **In plain language:** The board separately counts observed active seconds for the water-circuit
 electric backup heater (**BUH**) and tank electric booster heater (**BSH**).
 
-**Meaning:** **MEASURED ONLY** appears as soon as there is readable runtime evidence; it does not
+**Meaning:** **MEASURED** appears as soon as there is readable runtime evidence; it does not
 wait for a full day. A reported zero applies only to the observed intervals. A missing heater signal
 remains absent, rather than being counted as off.
 
@@ -166,7 +175,7 @@ Controller settings, weather and operating schedules can make this activity inte
 **In plain language:** The board compares five internal counters at consecutive readable endpoints,
 with a known compressor state. Only a comparable increase counts as an observed event.
 
-**Meaning:** A usable comparison without an increase shows **EXPERIMENTAL**; a comparable increase
+**Meaning:** A usable comparison without an increase shows **TENTATIVE**; a comparable increase
 shows **NOTE**. Both retain experimental evidence and appear without a full-day wait. A non-zero
 startup value is a baseline, and a decrease has no established reset or wrap interpretation.
 
@@ -177,7 +186,7 @@ changes or their cause.
 **Evidence and limits:** [Protection-limit changes](DIAGNOSTIC_EVIDENCE.md#diagnosis-retries)
 
 <a id="refrigerant-service-observation"></a>
-## Refrigerant circuit during heating
+## Refrigerant (heating)
 
 This expandable row is technical context, **not a ninth health diagnosis**. It watches existing
 read-only X10A traffic automatically without Plant diagnostics opt-in or a service mode. Until this
@@ -192,10 +201,10 @@ established for heating. Optional missing comparison data remains an explicit li
 
 | Row status | Meaning |
 |---|---|
-| **NOT AVAILABLE** | The detected profile lacks a required signal. |
-| **WAITING FOR HEATING RUN** | No suitable ordinary run now; recording starts automatically when conditions fit. |
+| **N/A** | The detected profile lacks a required signal. |
+| **WAITING** | No suitable ordinary heating run now; recording starts automatically when conditions fit. |
 | **RECORDING** | Continuous fresh observation with the complete optional context. |
-| **RECORDING · SOME DATA MISSING** | Recording, with optional temperature/pressure-side/outdoor/controller-phase context missing at least once. |
+| **PARTIAL** | Recording, with optional temperature/pressure-side/outdoor/controller-phase context missing at least once. |
 | **PAUSED** | A required reading/condition, expected sequence or profile-declared phase witness ended continuity. The next suitable run begins at zero. |
 
 Duration and min/mean/max describe **one uninterrupted window**. The permitted poll gap depends on

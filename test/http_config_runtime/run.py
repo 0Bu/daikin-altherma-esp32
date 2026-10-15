@@ -108,7 +108,7 @@ if 'PASS total=13 assertions=5233\n' not in legacy.stdout:
                        + legacy.stdout)
 print('PRESERVED ORIGINAL CASES ' + legacy.stdout.splitlines()[-1])
 baseline = command([binary])
-if 'PASS total=15 assertions=5477\n' not in baseline.stdout:
+if 'PASS total=16 assertions=5517\n' not in baseline.stdout:
     raise RuntimeError('the complete behavioral groups changed their assertion inventory\n'
                        + baseline.stdout)
 print(baseline.stdout, end='')
@@ -141,8 +141,14 @@ if args.sanitizer == 'undefined':
 # The original production TU must pass real positive setters before failing the two named
 # regression oracles. Compiling failures, arbitrary signals and timeouts never count as controls.
 original_commit = '819a2c98ad7e331ce1527ca85f4acb7127e55734'
-original = command(['git', '-c', 'core.fsmonitor=false', '-C', ROOT, 'show',
-                    original_commit + ':main/http_config.cpp']).stdout
+original_text = command(['git', '-c', 'core.fsmonitor=false', '-C', ROOT, 'show',
+                         original_commit + ':main/http_config.cpp']).stdout
+# The original predates the two-argument consent-generation helper in the current headers. Entropy
+# 1 reproduces its one-argument result for every generation (0 -> 1, n -> n + 1, max -> 1), so the
+# adapted call changes no behavior that its positive setters or two named regressions observe.
+original = replace_once(
+    original_text, 'diagnostics_next_generation(c.diagnostics_generation)',
+    'diagnostics_next_generation(c.diagnostics_generation, 1u)', 'original-generation-signature')
 original_path = OUT / 'original.cpp'
 original_path.write_text(original)
 original_binary = compile(original_path, 'original')
@@ -207,6 +213,19 @@ mutations = [
     ('allow_reconciled_pin_collision', 'transaction',
      'if (config_reconcile_breaks_local_pins(requested, c)) {',
      'if ((static_cast<void>(requested), false)) {', 'local_pin_reconcile'),
+    # The first opt-in from generation 0 must persist the actual draw, not the old restart at 1:
+    # omitting esp_random() fails the draw count, discarding its value fails the persisted value.
+    ('generation_without_entropy', 'source',
+     'diagnostics_next_generation(c.diagnostics_generation, esp_random())',
+     'diagnostics_next_generation(c.diagnostics_generation, 0u)', 'diagnostics_generation'),
+    ('generation_draw_discarded', 'source',
+     'diagnostics_next_generation(c.diagnostics_generation, esp_random())',
+     'diagnostics_next_generation(c.diagnostics_generation, esp_random() & 0u)',
+     'diagnostics_generation'),
+    # A later transition advances by one instead of taking a fresh draw.
+    ('generation_redrawn_each_transition', 'source',
+     'diagnostics_next_generation(c.diagnostics_generation, esp_random())',
+     'diagnostics_next_generation(0u, esp_random())', 'diagnostics_generation'),
 ]
 for tag, target, old, new, case in mutations:
     config_source, ota_source = SOURCE, OTA_SOURCE
@@ -261,14 +280,15 @@ for tag, target, old, new, case in mutations:
 after = inputs([OUT / 'production.d', OUT / 'cjson.d'])
 if after != before:
     raise RuntimeError('compile inputs changed during the run')
-if len(controls) != 22:
+if len(controls) != 25:
     raise RuntimeError('the complete compiling negative-control inventory changed')
 record = {'compiler': compiler, 'c_compiler': c_compiler,
           'compiler_commands': {'c': CC, 'cxx': CXX},
           'sanitizer': args.sanitizer, 'sanitizer_control': sanitizer_control, 'commands': commands,
           'baseline_stdout': baseline.stdout, 'preserved_original_case_stdout': legacy.stdout,
           'original_commit': original_commit,
-          'original_sha256': hashlib.sha256(original.encode()).hexdigest(),
+          'original_sha256': hashlib.sha256(original_text.encode()).hexdigest(),
+          'original_adapted_sha256': hashlib.sha256(original.encode()).hexdigest(),
           'original_positive_stdout': original_positive.stdout,
           'negative_controls': controls, 'input_sha256': after,
           'claim_limits': ['Complete production http_config.cpp and http_ota.cpp compile; actual setter handlers and ota_do execute.',

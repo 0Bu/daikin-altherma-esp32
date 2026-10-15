@@ -239,13 +239,13 @@ static void refrigerant_service_sample(
     s.liquid_ok = refrigerant_service_reading(values, count, 0x20, 10, 105,
                                                s.liquid_tenths);
     s.eev_ok = refrigerant_service_reading(values, count, 0x30, 3, 151, s.eev_tenths);
-    // Prefer the always-live hydronic-page refrigerant transducer.  If it is absent/unavailable,
-    // accept the outdoor high-side row from this SAME fresh sweep; Water pressure is at 0x62/11 and
-    // can never reach either branch.
-    s.high_pressure_ok = refrigerant_service_reading(values, count, 0x62, 15, 105,
-                                                      s.high_pressure_tenths) ||
-                         refrigerant_service_reading(values, count, 0x20, 12, 105,
-                                                      s.high_pressure_tenths);
+    // The profile's ONE high-side sensor, chosen by coverage rather than by which page answered:
+    // a lost page leaves the side missing instead of splicing in the other transducer. Water
+    // pressure is at 0x62/11 and can never be selected.
+    const auto high = logic::refrigerant_service_high_pressure_row(coverage);
+    s.high_pressure_ok =
+        high.available &&
+        refrigerant_service_reading(values, count, high.reg, high.off, 105, s.high_pressure_tenths);
     s.low_pressure_ok = refrigerant_service_reading(values, count, 0x20, 14, 105,
                                                      s.low_pressure_tenths);
     s.outdoor_air_ok = refrigerant_service_reading(values, count, 0x20, 0, 105,

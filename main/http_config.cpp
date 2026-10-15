@@ -43,6 +43,7 @@
 
 #include "cJSON.h"
 #include "esp_http_server.h"
+#include "esp_random.h" // esp_random — the first consent generation after the default
 #include "esp_system.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -826,7 +827,7 @@ static esp_err_t set_diagnostics(httpd_req_t* req) {
         return http_send_json(req, "{\"ok\":true,\"saved\":false,\"reboot\":false}");
     const bool weather_was_publishable = c.diagnostics_enabled && c.weather_enabled;
     c.diagnostics_enabled = enabled;
-    c.diagnostics_generation = diagnostics_next_generation(c.diagnostics_generation);
+    c.diagnostics_generation = diagnostics_next_generation(c.diagnostics_generation, esp_random());
     WeatherSourceChange weather_change(c.weather_enabled, enabled);
     if (!weather_change)
         return send_err(req, "503 Service Unavailable",

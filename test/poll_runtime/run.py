@@ -21,7 +21,7 @@ CASES = [
     'saturation_wire_gap', 'saturation_commit_gap',
     'probe_no_task', 'probe_busy', 'probe_drain', 'probe_deadline', 'probe_late', 'probe_wrap',
     'raw_recovery', 'raw_empty', 'raw_stopped_recovery', 'raw_one_page', 'raw_budget',
-    'mqtt_scalar_source',
+    'mqtt_scalar_source', 'refrigerant_one_sensor', 'refrigerant_unidentified_row',
 ]
 REGRESSION_ORACLES = {
     'detect_silent': 'detect_silence_breaks_confirmation',
@@ -39,6 +39,8 @@ REGRESSION_ORACLES = {
     'probe_wrap': 'probe_wrap_b_rejects_duplicate_a_ticket',
     'raw_recovery': 'raw_absent_pages_do_not_consume_round',
     'raw_empty': 'raw_empty_payloads_do_not_consume_round',
+    'refrigerant_one_sensor': 'refrigerant_lost_page_never_substitutes_other_sensor',
+    'refrigerant_unidentified_row': 'refrigerant_unidentified_row_never_high_side',
 }
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--root', type=Path, default=HERE.parents[1], help='Repository root; defaults to installed test directory parent')
@@ -266,6 +268,14 @@ mutations = {
          '} catch (...) { Lock lk(s_mtx); if (s_target_generation.load(std::memory_order_acquire) == cycle_generation) reset_detect_confirmation(); throw; }\n// Commit ONLY the fields detection owns',
          'DetectResult d;\n    try {\n        d = hp_detect_run();'],
         'detect_post_return_staging_oom_breaks_confirmation', 'detect_staging_oom'),
+    'fall_back_to_other_high_pressure_sensor': (
+        'const auto high = logic::refrigerant_service_high_pressure_row(coverage);\n    s.high_pressure_ok =\n        high.available &&\n        refrigerant_service_reading(values, count, high.reg, high.off, 105, s.high_pressure_tenths);',
+        's.high_pressure_ok = refrigerant_service_reading(values, count, 0x62, 15, 105, s.high_pressure_tenths) ||\n                         refrigerant_service_reading(values, count, 0x20, 12, 105, s.high_pressure_tenths);',
+        'refrigerant_lost_page_never_substitutes_other_sensor', 'refrigerant_one_sensor'),
+    'read_outdoor_high_pressure_without_coverage': (
+        'const auto high = logic::refrigerant_service_high_pressure_row(coverage);\n    s.high_pressure_ok =\n        high.available &&\n        refrigerant_service_reading(values, count, high.reg, high.off, 105, s.high_pressure_tenths);',
+        's.high_pressure_ok = refrigerant_service_reading(values, count, 0x20, 12, 105, s.high_pressure_tenths);',
+        'refrigerant_unidentified_row_never_high_side', 'refrigerant_unidentified_row'),
     'copy_model_arguments_after_link_commit': (
         'link_revision, std::move(detected_profile), d.page_mask, d.kw_tenths, d.iu_kw_tenths, std::move(d.eeprom)',
         'link_revision, detected_profile, d.page_mask, d.kw_tenths, d.iu_kw_tenths, d.eeprom',

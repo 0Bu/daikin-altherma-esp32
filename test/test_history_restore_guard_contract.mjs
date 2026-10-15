@@ -361,4 +361,38 @@ assert.equal(count(task, emptyCallback), 3,
 assert.equal(count(task,
   /checkup_record\(nullptr, 0, false, false, logic::CheckupCoverage\{\}, generation\);/g), 1,
   "the unidentified-profile path still explicitly withdraws profile capability");
+
+// The blind-time and DHW-scope rules in logic/checkup.hpp are host-tested; these pin the facts the
+// target glue feeds them. An empty sweep (a held or failed cycle) is the one blind sample: neither
+// a constant nor a later overwrite may replace it.
+assert.match(cRecord, /s\.x10a_blind = !n;/,
+  "the sample's X10A blindness must come from the empty-sweep condition");
+assert.equal(count(checkup, /\.x10a_blind =/g), 1,
+  "no other assignment may override the empty-sweep blindness of the sample");
+// Every restart of DHW evidence without the shared lifecycle stamps its scope start, so a DHW
+// window cannot claim full-day coverage across that restart.
+assert.match(dhwReset, /s_dhw_scope_us = esp_timer_get_time\(\);/,
+  "the DHW-only reset must stamp the DHW scope start");
+assert.match(cFlash,
+  /logic::checkup_journal_dhw_identity_matches\(rec->payload, s_dhw_source_fp\)\) db = rec->payload\.dhw; else s_dhw_scope_us = now_us;/,
+  "a restore that refuses DHW identity must stamp the DHW scope at the restore instant");
+assert.match(cFlash, /const int64_t now_us = esp_timer_get_time\(\);/,
+  "the restore instant must be the current monotonic time");
+assert.equal(count(checkup, /(?<!int64_t )s_dhw_scope_us = /g), 3,
+  "the DHW scope changes only at the shared wipe, the DHW-only reset and the refused restore");
+
+// The consent generation the journal admission compares: the first opt-in from the default 0 takes
+// the platform random draw, so a counter restarted after a lost config cannot re-admit old records.
+const httpConfig = code("main/http_config.cpp");
+assert.match(httpConfig, /#include "esp_random\.h"/,
+  "the consent handler must include the platform random source");
+const setDiagnostics = body(httpConfig, "static esp_err_t set_diagnostics(httpd_req_t* req)");
+const nextGeneration =
+  "c.diagnostics_generation = diagnostics_next_generation(c.diagnostics_generation, esp_random());";
+assert.ok(setDiagnostics.includes(nextGeneration),
+  "set_diagnostics must pass esp_random() as the generation entropy");
+assert.ok(setDiagnostics.indexOf(nextGeneration) < setDiagnostics.indexOf("config_save(c)"),
+  "the new generation must be persisted by the transition's own save");
+assert.equal(count(httpConfig, /diagnostics_next_generation\(/g), 1,
+  "no second consent transition may advance the generation without the random draw");
 console.log("history restore guard contract: ok");

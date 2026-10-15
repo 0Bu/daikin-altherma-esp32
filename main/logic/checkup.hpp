@@ -422,6 +422,9 @@ struct CheckupSample {
     CheckupOperatingMode operating_mode = CheckupOperatingMode::Unknown;
     bool circulation_configured = false;
     bool circulation_known = false, circulation_on = false;
+    // The caller read no X10A row at all (n == 0: a network/OTA quiesce, an OOM catch, a silent
+    // sweep) — distinct from a readable sweep that lost only some rows. See the run carry below.
+    bool x10a_blind = false;
 
     bool bar_ok  = false;  int bar_tenths  = 0;
     bool flow_ok = false;  int flow_tenths = 0;
@@ -458,6 +461,11 @@ struct CheckupState {
     bool     prev_flow_valid       = false;
     bool     prev_class_known      = false;
     bool     prev_any_known        = false;
+    // The last KNOWN compressor state of this continuous segment (a real gap clears it), and the
+    // all-blind seconds in the open run since its last known-running sample (each such sample, the
+    // start included, clears them). Both sit in existing padding: CheckupState does not grow.
+    bool     last_rps_known = false, last_rps_running = false;
+    uint8_t  run_blind_s           = 0;
     uint16_t pump_run_s      = 0;       // continuous known-on time, reset by off/unknown/gap
     uint16_t bar_low_run_s    = 0;       // consecutive valid samples at/below documented boundary
     uint8_t  prev_retry_known_mask = 0;
@@ -596,6 +604,8 @@ struct DhwLossRing {
     }
 };
 
+constexpr uint32_t DHW_LOSS_SETTLE_S = 45 * 60; // issue legacy-349 method after a tank charge
+
 struct DhwLossState {
     int64_t last_us = -1;
     int64_t segment_start_us = -1;
@@ -621,6 +631,11 @@ struct DhwLossState {
     // dhw_loss_step's blindness rule.
     uint32_t segment_blind_s = 0;
     uint32_t blind_run_s = 0;
+    // A FRESH filter cannot know whether a charge ended just before its first sample, so it waits
+    // one settle before its first candidate. Not a charge settle: progress never reports it, it
+    // books no abort, and only dhw_loss_adopt (a sealed handoff that carries the real settle)
+    // clears it.
+    uint32_t hold_remaining_s = DHW_LOSS_SETTLE_S;
 
     void reset_segment() {
         segment_start_us = draw_anchor_us = -1;
@@ -630,8 +645,7 @@ struct DhwLossState {
     }
 };
 
-constexpr uint32_t DHW_LOSS_WINDOW_S = 3600;             // R5T resolves only 0.1 K
-constexpr uint32_t DHW_LOSS_SETTLE_S      = 45 * 60; // issue legacy-349 method after a tank charge
+constexpr uint32_t DHW_LOSS_WINDOW_S      = 3600; // R5T resolves only 0.1 K
 constexpr uint32_t DHW_LOSS_DRAW_WINDOW_S = 10 * 60;
 // Project filter: any positive charge witness discards the candidate. At least 120 seconds
 // of witness also starts a 45-minute settling allowance. A discontinuous positive sample takes
@@ -649,9 +663,10 @@ constexpr int      DHW_LOSS_DRAW_DROP_TENTHS = 4;        // ~1.85 K/h effective,
 constexpr int      DHW_LOSS_HIGH_TENTHS_K_H = 8;         // project heuristic, not a Daikin limit
 // Missing rows are blind time, not proof of a charge or an off state. A candidate tolerates
 // at most 120 consecutive blind seconds and 10% in total, subtracting them from observed time.
-// These project allowances can miss a charge within a gap. Settling counts from the last seen
-// witness and can be shortened by an unseen charge end; a fresh state also loses an old settle.
-// An integrity-valid, source-matched intentional-reboot handoff can retain the remaining settle.
+// These project allowances can miss a charge within a gap. Settling is spent only on samples
+// that read both witnesses, an unread stretch beside a seen witness counts as charge time, and a
+// fresh state holds one settle before its first candidate (it cannot see a charge that just ended).
+// An integrity-valid, source-matched intentional-reboot handoff retains the remaining settle.
 // See the DHW limitations in docs/DIAGNOSTIC_EVIDENCE.md; no allowance proves the tank was idle.
 constexpr uint32_t DHW_LOSS_BLIND_RUN_MAX_S = 120;
 constexpr uint32_t DHW_LOSS_BLIND_MAX_PCT   = 10;
@@ -757,7 +772,9 @@ inline void dhw_loss_adopt(DhwLossState& st, const DhwLossCarry& c, int64_t now_
     st = DhwLossState{};
     st.last_us = now_us;
     st.settle_remaining_s = c.settle_remaining_s;
+    st.hold_remaining_s   = 0; // the handoff carries the real settle: no fresh state
     st.charge_run_s = c.charge_run_s;
+    st.blind_run_s        = c.blind_run_s; // an unread tail after a short witness still counts
     if (!(c.flags & DHW_LOSS_CARRY_SEGMENT)) return;
 
     // Elapsed AND blind, the same seconds on both sides: they advance the candidate's age and can
@@ -770,8 +787,7 @@ inline void dhw_loss_adopt(DhwLossState& st, const DhwLossCarry& c, int64_t now_
     st.segment_start_tenths = c.segment_start_tenths;
     st.segment_circulation_known_s = c.segment_circulation_known_s;
     st.segment_circulation_on_s = c.segment_circulation_on_s;
-    st.segment_blind_s = c.segment_blind_s;
-    st.blind_run_s = c.blind_run_s;
+    st.segment_blind_s             = c.segment_blind_s;
     // Attribution as "pump continuously off" cannot cross an interval nobody observed.
     st.circulation_off_run_s = 0;
 
@@ -846,8 +862,11 @@ inline void dhw_loss_step(DhwLossState& st, DhwLossBucket& b, const CheckupSampl
     // tank loss as soon as the timed-out row recovered.
     const bool heating_tank = (s.valve_known && s.valve_dhw) || (s.bsh_known && s.bsh_on);
     if (heating_tank) {
-        // A gap cannot establish a short witness: conservatively apply the settling allowance.
-        const uint32_t seen = continuous ? dt : DHW_LOSS_CHARGE_MIN_S;
+        // A gap cannot establish a short witness: conservatively apply the settling allowance. The
+        // unread stretch just before a continuous witness may have been charge time, so it counts.
+        const uint32_t seen =
+            continuous ? checkup_add_u32(st.blind_run_s, dt) : DHW_LOSS_CHARGE_MIN_S;
+        st.blind_run_s  = 0;
         st.charge_run_s = std::min<uint32_t>(UINT32_MAX - seen, st.charge_run_s) + seen;
         if (st.charge_run_s >= DHW_LOSS_CHARGE_MIN_S) st.settle_remaining_s = DHW_LOSS_SETTLE_S;
         // Every positive witness ends the candidate; only a sustained witness arms settling.
@@ -861,7 +880,14 @@ inline void dhw_loss_step(DhwLossState& st, DhwLossBucket& b, const CheckupSampl
     // settle at all and admit its own tail as standing tank loss — the false-leak direction this
     // check must never fail in. At the reference installation's measured timeout rate (47 in 8.2 h)
     // that is not a corner case. Staying armed across a blind stretch only ever spends MORE settle.
-    if (s.valve_known && s.bsh_known) st.charge_run_s = 0;
+    // The same rule after the witness: a short seen charge with an unread tail may have run on, so
+    // seen + tail past the bound arms the settle at the first sample that reads both witnesses.
+    if (s.valve_known && s.bsh_known) {
+        if (st.charge_run_s &&
+            checkup_add_u32(st.charge_run_s, st.blind_run_s) >= DHW_LOSS_CHARGE_MIN_S)
+            st.settle_remaining_s = DHW_LOSS_SETTLE_S;
+        st.charge_run_s = 0;
+    }
     if (!continuous) {
         // Past CHECKUP_MAX_GAP_S the firmware was not watching — a wedged read, a burst of timed-out
         // pages, a reboot. That is BLIND time of a known length, not a plant state, so it is
@@ -869,8 +895,17 @@ inline void dhw_loss_step(DhwLossState& st, DhwLossBucket& b, const CheckupSampl
         if (!dhw_loss_blind_ok(st, gap_s)) dhw_loss_abort(st, b, DHW_ABORT_BLIND, now_us);
         return;
     }
-    if (st.settle_remaining_s) {
-        st.settle_remaining_s = dt >= st.settle_remaining_s ? 0 : st.settle_remaining_s - dt;
+    if (st.settle_remaining_s || st.hold_remaining_s) {
+        // Spent only on samples that read both witnesses: an unread one may hide a charge still
+        // running, which is no settling. The fresh-state hold runs on the same clock. That unread
+        // time is blind time here too, so the witness rules above still see it.
+        if (s.valve_known && s.bsh_known) {
+            st.settle_remaining_s -= std::min(dt, st.settle_remaining_s);
+            st.hold_remaining_s -= std::min(dt, st.hold_remaining_s);
+            st.blind_run_s = 0;
+        } else {
+            st.blind_run_s = checkup_add_u32(st.blind_run_s, dt);
+        }
         // Not an abort: the charge that armed this already booked one, and there is no candidate
         // left to discard. Counting these would report one aborted hour per second of settling.
         st.reset_segment();
@@ -1132,9 +1167,12 @@ inline bool checkup_step(CheckupState& st, CheckupBucket& b, const CheckupSample
         }
 
         // Edges. Both sides must be KNOWN — an unreadable cycle in the middle of a run breaks the
-        // chain rather than manufacturing a stop and a start on either side of itself.
+        // chain rather than manufacturing a stop and a start on either side of itself. A start is
+        // judged against the last KNOWN state of this continuous segment (the previous sample's
+        // whenever it was readable): known OFF, unreadable, known ON hides at least one start, so
+        // it is counted, and its run opens censored because its beginning was not witnessed.
         const bool rps_edge_known = st.prev_rps_known && s.rps_known;
-        if (rps_edge_known && !st.prev_rps_running && s.rps_running) {
+        if (s.rps_known && s.rps_running && st.last_rps_known && !st.last_rps_running) {
             // An older run whose stop hid inside an unreadable interval must not be overwritten by
             // the new start. It completed, but neither its duration nor class survived the gap.
             if (st.run_open) {
@@ -1147,24 +1185,36 @@ inline bool checkup_step(CheckupState& st, CheckupBucket& b, const CheckupSample
             st.run_open       = true;
             st.run_s          = 0;
             st.run_class      = checkup_run_class(s);
-            st.run_class_pure = st.run_class != CheckupRunClass::Unknown;
+            st.run_class_pure   = st.prev_rps_known && st.run_class != CheckupRunClass::Unknown;
             st.run_start_bucket = current_bucket;
             st.run_outdoor = CheckupOutdoorStats{};
         }
         // Carry the run in flight. A class input that stops answering or changes forfeits the class
         // but not the run: it still completes and is counted as censored. An unreadable compressor
-        // row forfeits it too — a duration nobody watched must not enter a mean.
+        // row forfeits it too — a duration nobody watched must not enter a mean. The one bounded
+        // exception is a sweep that read NO row at all (network/OTA quiesce, OOM catch, a silent
+        // bus): up to CHECKUP_MAX_GAP_S of it keeps the class, and the known-running sample
+        // that ends it books the elapsed seconds. A known OFF after it still censors (below).
         if (st.run_open) {
+            const bool was_running = st.prev_rps_known && st.prev_rps_running;
             if (!s.rps_known) {
-                st.run_class_pure = false;
+                st.run_blind_s = checkup_add_u8(st.run_blind_s, dt);
+                if (!s.x10a_blind || st.run_blind_s > CHECKUP_MAX_GAP_S) st.run_class_pure = false;
             } else if (s.rps_running) {
-                if (st.prev_rps_known && st.prev_rps_running)
-                    st.run_s = checkup_add_u32(st.run_s, dt);
+                // A pure run after an unknown predecessor can only be resuming from that bounded
+                // pause; a start sample (known OFF before it) books no elapsed time.
+                if (was_running || (!st.prev_rps_known && st.run_class_pure))
+                    st.run_s = checkup_add_u32(st.run_s, dt + st.run_blind_s);
                 const CheckupRunClass current_class = checkup_run_class(s);
                 if (current_class == CheckupRunClass::Unknown || current_class != st.run_class)
                     st.run_class_pure = false;
-                if (st.run_class_pure && st.run_class == CheckupRunClass::SpaceHeating)
+                // Page 0x20 is read before the 0x30 compressor row and holds the previous run's
+                // values while the unit is idle, so only a sample whose predecessor was already
+                // running is fresh outdoor context.
+                if (was_running && st.run_class_pure &&
+                    st.run_class == CheckupRunClass::SpaceHeating)
                     checkup_outdoor_add(st.run_outdoor, s.outdoor);
+                st.run_blind_s = 0;
             }
         }
         // A known OFF completes every open run. With a known ON predecessor it is the normal edge;
@@ -1184,6 +1234,7 @@ inline bool checkup_step(CheckupState& st, CheckupBucket& b, const CheckupSample
     } else {
         st.pump_run_s = 0;
         st.bar_low_run_s = 0;
+        st.last_rps_known = false; // no edge is read across a real gap
         // Past the gap bound the firmware was not watching, so a run open across it has neither a
         // witnessed length nor a provable class. It is closed as CENSORED rather than dropped: it
         // happened, and the count is what stops "no verdict" from reading as "nothing ran".
@@ -1211,6 +1262,10 @@ inline bool checkup_step(CheckupState& st, CheckupBucket& b, const CheckupSample
 
     st.prev_rps_known   = s.rps_known;
     st.prev_rps_running = s.rps_running;
+    if (s.rps_known) {
+        st.last_rps_known   = true;
+        st.last_rps_running = s.rps_running;
+    }
     st.prev_dfr_known   = s.defrost_known;
     st.prev_dfr_on      = s.defrost_on;
     st.prev_pump_known  = s.pump_known;
@@ -1342,7 +1397,16 @@ struct DhwLossWindow {
     uint32_t best_aborted_s = 0;   // the longest DISCARDED candidate, never a completed one
     uint8_t  abort_reasons = 0;
     int max_loss_tenths_k_h = CHECKUP_ABSENT;
+    // The DHW evidence itself spans 24 h (dhw_loss_scope_full). The X10A lifecycle alone does not
+    // say so: a DHW-only reset or restore empties this ring without restarting that one.
+    bool full_span = false;
 };
+
+// `scope_us` is when DHW evidence last restarted without the X10A lifecycle; negative when it never
+// did, and the shared lifecycle decides alone.
+constexpr bool dhw_loss_scope_full(bool lifecycle_full, int64_t scope_us, int64_t now_us) {
+    return lifecycle_full && (scope_us < 0 || now_us - scope_us >= CHECKUP_WINDOW_US);
+}
 
 inline DhwLossWindow dhw_loss_aggregate(const DhwLossRing& r) {
     DhwLossWindow w;
@@ -1769,7 +1833,8 @@ inline CheckupReport checkup_evaluate(const CheckupWindow& w, const CheckupCover
     r.dhw_abort_reasons = dhw.abort_reasons;
     r.dhw_best_aborted_s = dhw.best_aborted_s;
     const bool dhw_supported = cov.r5t && cov.valve && cov.pump && cov.bsh;
-    r.dhw_blocked = dhw_supported && w.full_span && dhw.windows == 0 && !dhw.high_windows &&
+    // "No eligible window in 24 h" needs 24 h of DHW evidence scope, not only of X10A lifecycle.
+    r.dhw_blocked = dhw_supported && dhw.full_span && dhw.windows == 0 && !dhw.high_windows &&
                     dhw.aborts >= DHW_LOSS_BLOCKED_MIN_ABORTS;
     if (!dhw_supported) {
         set(CheckupCheck::DhwLoss, CheckupVerdict::Unavailable, 0, 0);
@@ -1793,9 +1858,13 @@ inline CheckupReport checkup_evaluate(const CheckupWindow& w, const CheckupCover
     const bool     class_witnessed = cov.valve && cov.mode && w.class_observed_s > 0;
     const uint32_t classified      = w.space_runs + w.dhw_runs + w.cooling_runs;
     const uint32_t completed       = classified + w.censored_runs;
+    // A witnessed start whose completion is not in the window is an unclassified run too: one may
+    // still be open, but a restored window whose hour-crossing completions never reached the
+    // journal must not judge only the runs that happened to fit inside one hour.
+    const uint32_t population = std::max<uint32_t>(completed, w.starts ? w.starts - 1 : 0);
     const bool     population_ready =
         completed && static_cast<uint64_t>(classified) * 100u >=
-                         static_cast<uint64_t>(completed) * CHECKUP_CYCLING_CLASSIFIED_PCT;
+                         static_cast<uint64_t>(population) * CHECKUP_CYCLING_CLASSIFIED_PCT;
     const int space_mean = w.space_runs ? static_cast<int>(w.space_run_s / w.space_runs) : -1;
     const int dhw_mean           = w.dhw_runs ? static_cast<int>(w.dhw_run_s / w.dhw_runs) : -1;
     r.cycling_cooling_runs       = class_witnessed ? static_cast<int32_t>(w.cooling_runs) : -1;

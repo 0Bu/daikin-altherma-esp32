@@ -123,6 +123,9 @@ bool                  s_reboot_saved_this_boot = false;
 // adopted.
 constexpr int64_t      kNoCommitUs = INT64_MIN;
 int64_t                s_last_commit_us = kNoCommitUs;
+// When DHW evidence last restarted without the shared lifecycle (a DHW-only reset, or a restore
+// that dropped DHW hours), in this boot's monotonic clock; -1 while the lifecycle alone decides.
+int64_t                s_dhw_scope_us      = -1;
 uint8_t                s_live_commit_count = 0; // completed in THIS monotonic clock, max 23
 
 // One-shot journal-reconstruction scratch. Static for the poll task's measured 8 KiB stack: 23
@@ -266,6 +269,7 @@ void persist_wipe(bool keep_handoff = false) {
     P().boots_since_commit = 0; // reserved integrity counter; no completed RAM hours are adopted
     s_last_commit_us = kNoCommitUs;
     s_live_commit_count = 0;
+    s_dhw_scope_us         = -1; // both rings restart together
     s_source_last_us       = -1;
     s_pressure_now         = -1;
     persist_seal();     // keeps s_model_fp: the identity belongs to what is recorded NEXT, and the
@@ -293,6 +297,7 @@ bool apply_dhw_reset_locked() {
     P().dhw.count         = P().ring.count;
     s_dhw_source_fp       = s_requested_dhw_source_fp.load();
     s_dhw_state = logic::DhwLossState{};
+    s_dhw_scope_us        = esp_timer_get_time(); // the X10A lifecycle keeps running
     P().dhw_handoff.magic = 0;
     persist_seal();
     return true;
@@ -492,6 +497,7 @@ void checkup_record(const CachedValue* v, size_t n, bool rps_known, bool rps_run
     if (unix_s > 0 && unix_s <= UINT32_MAX) s.unix_s = static_cast<uint32_t>(unix_s);
     s.rps_known   = rps_known;
     s.rps_running = rps_running;
+    s.x10a_blind  = !n; // a held or failed cycle read nothing: bounded blind time, not a lost row
 
     flag_state(v, n, logic::CHECKUP_LOC_DEFROST, s.defrost_known, s.defrost_on);
     flag_state(v, n, logic::CHECKUP_LOC_PUMP,    s.pump_known,    s.pump_on);
@@ -692,9 +698,11 @@ logic::CheckupReport checkup_report() {
         logic::CHECKUP_WINDOW_S, live_span_us / 1000000 + P().ring.carried_span_us / 1000000));
     auto           window      = logic::checkup_aggregate(P().ring);
     window.full_span           = span_s >= logic::CHECKUP_WINDOW_S;
+    logic::DhwLossWindow dhw =
+        s_dhw_reset_requested.load() ? logic::DhwLossWindow{} : logic::dhw_loss_aggregate(P().dhw);
+    dhw.full_span = logic::dhw_loss_scope_full(window.full_span, s_dhw_scope_us, now_us);
     logic::CheckupReport report = logic::checkup_evaluate(
-        window, s_cov, source_fresh ? s_fault_now : FaultClass::Unknown,
-        s_dhw_reset_requested.load() ? logic::DhwLossWindow{} : logic::dhw_loss_aggregate(P().dhw));
+        window, s_cov, source_fresh ? s_fault_now : FaultClass::Unknown, dhw);
     report.pressure_current_tenths = source_fresh ? s_pressure_now : -1;
     if (source_fresh && !s_dhw_reset_requested.load()) {
         const int64_t progress_us =
@@ -878,6 +886,8 @@ CheckupFlashRestoreResult checkup_flash_restore(const CheckupFlashRecord* record
             if (!s_dhw_reset_requested.load() &&
                 logic::checkup_journal_dhw_identity_matches(rec->payload, s_dhw_source_fp))
                 db = rec->payload.dhw;
+            else
+                s_dhw_scope_us = now_us; // the DHW evidence restarts here, the X10A span does not
             expiry = logic::checkup_restore_expiry_us(rec->payload.end_unix_s, now_unix_s, now_us);
         }
         s_restored_expiry_us[P().ring.head] =
