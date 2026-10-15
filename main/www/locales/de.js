@@ -1,4 +1,4 @@
-// translation-source: 09c3fdac925087931d318f9ce22d7034bce44909b6df588cfec0ac9d51b46029
+// translation-source: 7480385d29565e389fed9481d6e1b12d6ed936d5931d38c0113cd63cd42a0341
 I18N.de = localeValues([
   /* sys.nodata */ "Keine Daten",
   /* sys.unreachable */ "Nicht erreichbar",
@@ -583,7 +583,7 @@ I18N.de = localeValues([
   /* dyn.shadow_strategy */ "Rohe Raumabweichung · 30 min",
   /* dyn.card_help */ "Alle 30 Minuten zeichnet die Firmware bei eindeutig erkanntem Raumheizbetrieb auf, wie weit die Temperatur des Referenzraums vom Sollwert abweicht — zusammen mit der Außentemperatur in diesem Moment, sofern ein Sensor sie liefert. Zusammen mit Laufzeit, Mindestgrenze der Vorlauftemperatur und Thermostataktivität kann der längerfristige Verlauf zeigen, ob die Heizkurve tendenziell zu hoch oder zu niedrig liegt. Eine Raumabweichung von 1 K bedeutet nicht automatisch 1 K Änderung am Vorlauf. Diese Funktion liest nur und schreibt nichts an die Wärmepumpe.",
   /* dyn.state_help_recording */ "Bestätigter Raumheizbetrieb läuft und der Raumeingang ist gültig; deshalb werden rohe Raumabweichungen aufgezeichnet. Erst ein Saisontrend zusammen mit Laufzeit- und Clipping-Messwerten ist aussagekräftig, nicht ein Einzelwert.",
-  /* dyn.state_help_waiting */ "Die Anlage befindet sich gerade nicht im normalen Raumbetrieb; deshalb wird kein Wert erfasst. Über den Sommer ist das der normale, erwartete Zustand und kein Fehler.",
+  /* dyn.state_help_waiting */ "Gerade liegt kein geeignetes Raumheizfenster vor: Der Raumbetrieb ruht oder das Ventil steht auf Warmwasser. Es wird kein Wert erfasst; diese normale Pause ist kein Fehler.",
   /* dyn.state_help_cooling */ "HomeHub meldet normalen Raumbetrieb, der aktuelle Modus ist aber kein Heizen. Solche Fenster werden bewusst aus dem Heizkurven-Datensatz ausgeschlossen.",
   /* dyn.state_help_blocked */ "Ein benötigter Eingang fehlt, deshalb wird nichts erfasst. Sobald er zurückkommt, läuft die Aufzeichnung weiter; veraltete oder mehrdeutige Messwerte werden nie übernommen.",
   /* dyn.state_help_room */ "Der Raumwert erreicht das Gerät, liefert derzeit aber keine gültige Abweichung vom Sollwert. Erst wenn die Quelle wieder verwertbar ist, wird weiter erfasst.",

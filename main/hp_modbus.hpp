@@ -16,8 +16,8 @@
 // register-54 actuator built for legacy-300 was REMOVED with the retirement of dynamic LWT
 // actuation (legacy-294 — SHADOW is the terminal state of that epic). No Modbus write function code
 // is issued anywhere in this firmware, there is no intent API, and there is no HTTP/MQTT/MCP write
-// route. The observation-only pieces kept from that work are the two PLANT GATES below: ordinary
-// FC04 reads that prove normal space operation and distinguish heating from cooling.
+// route. The observation-only prerequisites below use ordinary FC04 reads to establish normal
+// space operation, its independent valve route and heating rather than cooling.
 #include <cstddef>
 #include <cstdint>
 #include <string>
@@ -37,6 +37,10 @@ struct ModbusStatus {
     ModbusProfile profile     = ModbusProfile::Auto; // detected/active Modbus profile
     ModbusProfileBasis profile_basis =
         ModbusProfileBasis::Probing; // basis: probing, affirmative, fallback
+    // These route flags fit the existing alignment gap before host on ESP32-S3. Keep status
+    // snapshots at their existing size: HTTP and MQTT also copy this object on their task stacks.
+    bool        space_route_known  = false;
+    bool        space_route_active = false;
     std::string host;                // configured address ("" = disabled)
     int         port    = 0;
     int         unit_id = 0;
@@ -58,8 +62,6 @@ struct ModbusStatus {
     // read as "inactive", which would look like an ordinary quiet plant.
     bool        plant_gate_known  = false;
     bool        plant_gate_active = false;
-    bool        space_route_known   = false;
-    bool        space_route_active  = false;
     bool        heating_mode_known  = false;
     bool        heating_mode_active = false;
     // Plant-side outdoor context from input register 44. Unlike the full value cache, this row is

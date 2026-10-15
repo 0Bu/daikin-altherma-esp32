@@ -1,4 +1,4 @@
-// translation-source: 09c3fdac925087931d318f9ce22d7034bce44909b6df588cfec0ac9d51b46029
+// translation-source: 7480385d29565e389fed9481d6e1b12d6ed936d5931d38c0113cd63cd42a0341
 I18N.cs = localeValues([
   /* sys.nodata */ "Žádná data",
   /* sys.unreachable */ "Nedostupné",
@@ -583,7 +583,7 @@ I18N.cs = localeValues([
   /* dyn.shadow_strategy */ "Hrubá odchylka místnosti · 30 min",
   /* dyn.card_help */ "Každých 30 minut během jednoznačně rozpoznaného vytápění prostoru firmware zaznamená rozdíl mezi teplotou referenční místnosti a jejím cílem spolu s venkovní teplotou v daném okamžiku, pokud ji poskytuje některý snímač. Spolu s dobou běhu, minimálními limity výstupní vody a činností termostatu může dlouhodobější průběh ukázat, zda bývá topná křivka příliš vysoká nebo příliš nízká. Odchylka místnosti 1 K automaticky neznamená změnu výstupní vody o 1 K. Tato funkce pouze čte data a nic do tepelného čerpadla nezapisuje.",
   /* dyn.state_help_recording */ "Běží potvrzené vytápění prostoru a vstup místnosti je platný, proto se zaznamenávají hrubé vzorky chyby místnosti. Sezónní trend čtěte spolu s dobou běhu a údaji o omezení; jeden vzorek není závěr.",
-  /* dyn.state_help_waiting */ "Soustava právě není v normálním prostorovém provozu, proto se vzorek nezaznamenává. V létě jde o normální očekávaný stav, nikoli poruchu.",
+  /* dyn.state_help_waiting */ "Právě není vhodné okno pro vytápění: prostorový okruh je nečinný nebo ventil směruje vodu do zásobníku. Vzorek se nezaznamenává; jde o běžnou pauzu, nikoli poruchu.",
   /* dyn.state_help_cooling */ "HomeHub hlásí normální prostorový provoz, ale aktuální režim není vytápění. Taková okna jsou ze souboru dat pro topnou křivku záměrně vyloučena.",
   /* dyn.state_help_blocked */ "Chybí povinný vstup, proto se nic nezaznamenává. Záznam se obnoví, jakmile se vstup vrátí; zastaralá nebo nejednoznačná data se nikdy nepřebírají.",
   /* dyn.state_help_room */ "Hodnota z místnosti se dostává do zařízení, ale právě z ní nelze vytvořit platnou odchylku od cíle. Dokud nebude zdroj opět použitelný, vzorek nevznikne.",

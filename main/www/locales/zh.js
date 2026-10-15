@@ -1,4 +1,4 @@
-// translation-source: 09c3fdac925087931d318f9ce22d7034bce44909b6df588cfec0ac9d51b46029
+// translation-source: 7480385d29565e389fed9481d6e1b12d6ed936d5931d38c0113cd63cd42a0341
 I18N.zh = localeValues([
   /* sys.nodata */ "无数据",
   /* sys.unreachable */ "无法访问",
@@ -583,7 +583,7 @@ I18N.zh = localeValues([
   /* dyn.shadow_strategy */ "原始室温偏差 · 30 分钟",
   /* dyn.card_help */ "确认空间供暖时每 30 分钟记录室温偏差及可用的室外温度。趋势需结合运行时长、最低出水限幅和温控器；1 K 偏差不等于调 1 K 出水。本功能只读。",
   /* dyn.state_help_recording */ "已确认的空间供暖正在运行，且室温输入有效，因此正在记录原始室温误差。请结合运行时长和限幅数据评估季节趋势；单个样本不是结论。",
-  /* dyn.state_help_waiting */ "设备当前不在正常空间运行，因此不记录样本。夏季通常如此，并非故障。",
+  /* dyn.state_help_waiting */ "当前没有符合条件的供暖时段：供暖回路空闲，或阀门将水导向生活热水水箱。因此不记录样本；这是正常暂停，并非故障。",
   /* dyn.state_help_cooling */ "HomeHub 报告空间运行，但当前不是制热模式；此类窗口特意不纳入气候补偿曲线数据。",
   /* dyn.state_help_blocked */ "缺少必要输入，因此不记录。输入恢复后会继续；陈旧或含糊的数据绝不会采样。",
   /* dyn.state_help_room */ "室温读数已到达设备，但目前无法形成相对目标的有效偏差；来源恢复可用前不会创建样本。",

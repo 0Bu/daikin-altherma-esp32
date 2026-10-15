@@ -956,17 +956,21 @@ static void mb_poll_once() {
     std::vector<CachedValue> fresh;
     if (full) fresh.reserve(def::ALTHERMA4_REG_COUNT);
     MbFailure first_failure;
-    bool plant_gate_known = false;
-    bool plant_gate_active = false;
-    bool      space_route_known     = false;
-    bool      space_route_active    = false;
-    bool heating_mode_known = false;
-    bool heating_mode_active = false;
+    // One capture in take_row instead of nine independent references. Keeping these small facts
+    // together avoids growing the poll frame each time an admission operand is added.
+    struct PlantGates {
+        bool    plant_gate_known    = false;
+        bool    plant_gate_active   = false;
+        bool    space_route_known   = false;
+        bool    space_route_active  = false;
+        bool    heating_mode_known  = false;
+        bool    heating_mode_active = false;
+        int64_t plant_gate_ms       = -1;
+        int64_t space_route_ms      = -1;
+        int64_t heating_mode_ms     = -1;
+    } gates;
     bool outdoor_row_answered = false;
     double outdoor_temperature_c = 0.0;
-    int64_t   plant_gate_ms         = -1;
-    int64_t   space_route_ms        = -1;
-    int64_t   heating_mode_ms       = -1;
     int64_t   plant_outdoor_ms      = -1;
 
     // Preserve the first failure, but never let a harmless per-register exception hide a timeout: if
@@ -985,21 +989,21 @@ static void mb_poll_once() {
         // distinguishes heating from cooling. A sentinel/out-of-range word leaves `known`
         // false: an unknown gate must never read as "inactive", which is an ordinary quiet plant.
         if (r.space == MbFunc::ReadInput && r.offset == 53 && !mb_is_special(raw) && raw <= 1) {
-            plant_gate_known = true;
-            plant_gate_active = raw == 1;
-            plant_gate_ms     = observed_ms;
+            gates.plant_gate_known  = true;
+            gates.plant_gate_active = raw == 1;
+            gates.plant_gate_ms     = observed_ms;
         }
         if (r.space == MbFunc::ReadInput && r.offset == 37 && !mb_is_special(raw) && raw <= 1) {
-            space_route_known  = true;
-            space_route_active = raw == 0;
-            space_route_ms     = observed_ms;
+            gates.space_route_known  = true;
+            gates.space_route_active = raw == 0;
+            gates.space_route_ms     = observed_ms;
         }
         if (r.space == MbFunc::ReadInput && r.offset == 38 && !mb_is_special(raw) &&
             (raw == 1 || raw == 2 ||
              (raw == 0 && r.kind == def::HomeHubValueKind::Altherma4CurrentOperationMode))) {
-            heating_mode_known = true;
-            heating_mode_active = raw == 1;
-            heating_mode_ms     = observed_ms;
+            gates.heating_mode_known  = true;
+            gates.heating_mode_active = raw == 1;
+            gates.heating_mode_ms     = observed_ms;
         }
         // Input 44's 40..45 batch is explicitly selected on every fast cycle by modbus_plan.hpp.
         // Decode the exact reply word here; the current-session half of freshness is applied after
@@ -1265,17 +1269,17 @@ static void mb_poll_once() {
                 s_status.profile       = s_active_profile.load(std::memory_order_relaxed);
                 s_status.profile_basis = s_probe_tracker.profile_basis;
             }
-            s_status.plant_gate_known = final_current_session && plant_gate_known;
-            s_status.plant_gate_active = final_current_session && plant_gate_active;
-            s_status.space_route_known   = final_current_session && space_route_known;
-            s_status.space_route_active  = final_current_session && space_route_active;
-            s_status.heating_mode_known = final_current_session && heating_mode_known;
-            s_status.heating_mode_active = final_current_session && heating_mode_active;
+            s_status.plant_gate_known    = final_current_session && gates.plant_gate_known;
+            s_status.plant_gate_active   = final_current_session && gates.plant_gate_active;
+            s_status.space_route_known   = final_current_session && gates.space_route_known;
+            s_status.space_route_active  = final_current_session && gates.space_route_active;
+            s_status.heating_mode_known  = final_current_session && gates.heating_mode_known;
+            s_status.heating_mode_active = final_current_session && gates.heating_mode_active;
             s_status.plant_outdoor = final_current_session ? plant_outdoor
                                                             : logic::OutdoorEvidence{};
-            s_plant_gate_ms              = final_current_session ? plant_gate_ms : -1;
-            s_space_route_ms             = final_current_session ? space_route_ms : -1;
-            s_heating_mode_ms            = final_current_session ? heating_mode_ms : -1;
+            s_plant_gate_ms              = final_current_session ? gates.plant_gate_ms : -1;
+            s_space_route_ms             = final_current_session ? gates.space_route_ms : -1;
+            s_heating_mode_ms            = final_current_session ? gates.heating_mode_ms : -1;
             s_plant_outdoor_ms           = final_current_session ? plant_outdoor_ms : -1;
         }
         // The writer itself rechecks target generation under s_mtx, closing the last window between
@@ -1339,18 +1343,18 @@ static void mb_poll_once() {
             s_status.profile       = s_active_profile.load(std::memory_order_relaxed);
             s_status.profile_basis = s_probe_tracker.profile_basis;
         }
-        s_status.plant_gate_known = final_current_session && plant_gate_known;
-        s_status.plant_gate_active = final_current_session && plant_gate_active;
-        s_status.space_route_known   = final_current_session && space_route_known;
-        s_status.space_route_active  = final_current_session && space_route_active;
-        s_status.heating_mode_known = final_current_session && heating_mode_known;
-        s_status.heating_mode_active = final_current_session && heating_mode_active;
+        s_status.plant_gate_known    = final_current_session && gates.plant_gate_known;
+        s_status.plant_gate_active   = final_current_session && gates.plant_gate_active;
+        s_status.space_route_known   = final_current_session && gates.space_route_known;
+        s_status.space_route_active  = final_current_session && gates.space_route_active;
+        s_status.heating_mode_known  = final_current_session && gates.heating_mode_known;
+        s_status.heating_mode_active = final_current_session && gates.heating_mode_active;
         s_status.plant_outdoor = final_current_session ? plant_outdoor
                                                         : logic::OutdoorEvidence{};
         s_full_cache_status_ms       = final_current_session ? cache_commit_ms : -1;
-        s_plant_gate_ms              = final_current_session ? plant_gate_ms : -1;
-        s_space_route_ms             = final_current_session ? space_route_ms : -1;
-        s_heating_mode_ms            = final_current_session ? heating_mode_ms : -1;
+        s_plant_gate_ms              = final_current_session ? gates.plant_gate_ms : -1;
+        s_space_route_ms             = final_current_session ? gates.space_route_ms : -1;
+        s_heating_mode_ms            = final_current_session ? gates.heating_mode_ms : -1;
         s_plant_outdoor_ms           = final_current_session ? plant_outdoor_ms : -1;
     }
     report_cycle_result(final_current_session);

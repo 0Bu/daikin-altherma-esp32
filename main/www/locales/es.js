@@ -1,4 +1,4 @@
-// translation-source: 09c3fdac925087931d318f9ce22d7034bce44909b6df588cfec0ac9d51b46029
+// translation-source: 7480385d29565e389fed9481d6e1b12d6ed936d5931d38c0113cd63cd42a0341
 I18N.es = localeValues([
   /* sys.nodata */ "Sin datos",
   /* sys.unreachable */ "No accesible",
@@ -583,7 +583,7 @@ I18N.es = localeValues([
   /* dyn.shadow_strategy */ "Desviación ambiente bruta · 30 min",
   /* dyn.card_help */ "Cada 30 minutos durante una calefacción de espacios claramente identificada, el firmware registra cuánto se desvía la temperatura de la habitación de referencia de su objetivo, junto con la temperatura exterior de ese momento cuando la proporciona un sensor. Junto con el tiempo de funcionamiento, los límites mínimos de temperatura del agua de impulsión y la actividad del termostato, el patrón a largo plazo puede mostrar si la curva de calefacción tiende a ser demasiado alta o baja. Una desviación ambiente de 1 K no implica automáticamente un cambio de 1 K en el agua de impulsión. Esta función solo lee datos y no escribe nada en la bomba de calor.",
   /* dyn.state_help_recording */ "La calefacción de espacios confirmada está funcionando y la entrada de habitación es válida, por lo que se registran muestras brutas del error ambiente. Interpreta una tendencia estacional junto con el tiempo de funcionamiento y los datos de recorte; una sola muestra no es un veredicto.",
-  /* dyn.state_help_waiting */ "La instalación no está ahora en funcionamiento normal de climatización, por lo que no se registra ninguna muestra. Durante el verano es el estado normal y esperado, no un fallo.",
+  /* dyn.state_help_waiting */ "Ahora no hay una ventana válida de calefacción: la climatización está inactiva o la válvula dirige el agua al depósito. No se registra ninguna muestra; es una pausa normal, no un fallo.",
   /* dyn.state_help_cooling */ "HomeHub informa de funcionamiento normal de climatización, pero el modo actual no es calefacción. Esas ventanas se excluyen deliberadamente del conjunto de datos de la curva de calefacción.",
   /* dyn.state_help_blocked */ "Falta una entrada necesaria, por lo que no se registra nada. El registro se reanuda cuando vuelve; nunca se muestrean datos antiguos o ambiguos.",
   /* dyn.state_help_room */ "La lectura de habitación llega al dispositivo, pero ahora no puede proporcionar una desviación válida respecto al objetivo. No se genera ninguna muestra hasta que la fuente vuelva a ser utilizable.",

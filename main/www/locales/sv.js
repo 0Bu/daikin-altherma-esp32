@@ -1,4 +1,4 @@
-// translation-source: 09c3fdac925087931d318f9ce22d7034bce44909b6df588cfec0ac9d51b46029
+// translation-source: 7480385d29565e389fed9481d6e1b12d6ed936d5931d38c0113cd63cd42a0341
 I18N.sv = localeValues([
   /* sys.nodata */ "Inga data",
   /* sys.unreachable */ "Inte tillgänglig",
@@ -583,7 +583,7 @@ I18N.sv = localeValues([
   /* dyn.shadow_strategy */ "Rått rumsavvikelse · 30 min",
   /* dyn.card_help */ "Var 30:e minut i säker rumsuppvärmning sparas rumsmål minus rumstemperatur, med valfri utetemperatur. Bedöm bara säsongstrenden med drifttid, minsta framledning och termostat; 1 K här är inte 1 K framledning. Endast avläsning.",
   /* dyn.state_help_recording */ "Bekräftad rumsuppvärmning och giltig rumskälla registrerar rå avvikelse. Bedöm säsongstrenden med drifttid och begränsning, inte ett värde.",
-  /* dyn.state_help_waiting */ "Anläggningen är inte i normal rumsdrift, så inget värde sparas. På sommaren är detta normalt.",
+  /* dyn.state_help_waiting */ "Inget lämpligt uppvärmningsfönster finns: rumskretsen vilar eller ventilen leder vattnet till varmvattenberedaren. Inget värde sparas; detta är en normal paus, inget fel.",
   /* dyn.state_help_cooling */ "HomeHub rapporterar rumsdrift, men läget är inte uppvärmning. Sådana fönster utelämnas avsiktligt från värmekurvdata.",
   /* dyn.state_help_blocked */ "En nödvändig ingång saknas. Registreringen fortsätter när den återkommer; gamla eller tvetydiga data används aldrig.",
   /* dyn.state_help_room */ "Rumsvärdet når enheten men ger ingen giltig avvikelse från målet. Registreringen fortsätter först när källan kan användas.",

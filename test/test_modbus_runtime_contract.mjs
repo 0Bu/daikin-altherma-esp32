@@ -116,8 +116,8 @@ try {
     })),
     {
       name: "space-route-polarity", scenario: "space_route_values",
-      before: "space_route_active = raw == 0;",
-      after: "space_route_active = raw == 1;",
+      before: /gates\.space_route_active\s*= raw == 0;/,
+      after: "gates.space_route_active = raw == 1;",
     },
     {
       name: "space-route-unknown-word", scenario: "space_route_values",
@@ -137,31 +137,31 @@ try {
     ...[{ name: "full", indent: 8 }, { name: "fast", indent: 12 }].flatMap(({ name, indent }) => [
       {
         name: `${name}-space-route-known`, scenario: "space_route_values",
-        before: new RegExp(`^ {${indent}}s_status\\.space_route_known\\s*= final_current_session && space_route_known;`, "m"),
+        before: new RegExp(`^ {${indent}}s_status\\.space_route_known\\s*= final_current_session && gates\\.space_route_known;`, "m"),
         after: "s_status.space_route_known = false;",
       },
       {
         name: `${name}-space-route-active`, scenario: "space_route_values",
-        before: new RegExp(`^ {${indent}}s_status\\.space_route_active\\s*= final_current_session && space_route_active;`, "m"),
+        before: new RegExp(`^ {${indent}}s_status\\.space_route_active\\s*= final_current_session && gates\\.space_route_active;`, "m"),
         after: "s_status.space_route_active = false;",
       },
       {
         name: `${name}-space-route-session`, scenario: "space_route_cutover",
-        before: new RegExp(`^ {${indent}}s_status\\.space_route_known\\s*= final_current_session && space_route_known;`, "m"),
-        after: "s_status.space_route_known = space_route_known;",
+        before: new RegExp(`^ {${indent}}s_status\\.space_route_known\\s*= final_current_session && gates\\.space_route_known;`, "m"),
+        after: "s_status.space_route_known = gates.space_route_known;",
       },
       {
         name: `${name}-space-route-time`, scenario: "space_route_age",
-        before: new RegExp(`^ {${indent}}s_space_route_ms\\s*= final_current_session \\? space_route_ms : -1;`, "m"),
+        before: new RegExp(`^ {${indent}}s_space_route_ms\\s*= final_current_session \\? gates\\.space_route_ms : -1;`, "m"),
         after: "s_space_route_ms = final_current_session ? esp_timer_get_time() / 1000 : -1;",
       },
       {
         name: `${name}-space-route-time-session`, scenario: "space_route_cutover",
-        before: new RegExp(`^ {${indent}}s_space_route_ms\\s*= final_current_session \\? space_route_ms : -1;`, "m"),
-        after: "s_space_route_ms = space_route_ms;",
+        before: new RegExp(`^ {${indent}}s_space_route_ms\\s*= final_current_session \\? gates\\.space_route_ms : -1;`, "m"),
+        after: "s_space_route_ms = gates.space_route_ms;",
       },
     ]),
-    ...[{ member: "s_heating_mode_ms", local: "heating_mode_ms" },
+    ...[{ member: "s_heating_mode_ms", local: "gates\\.heating_mode_ms" },
       { member: "s_plant_outdoor_ms", local: "plant_outdoor_ms" }].map(({ member, local }) => ({
       name: `completed-sweep-${member}`, scenario: "gate_age",
       before: new RegExp(`^ {8}${member}\\s*= final_current_session \\? ${local} : -1;`, "m"),

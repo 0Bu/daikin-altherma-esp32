@@ -1,4 +1,4 @@
-// translation-source: 09c3fdac925087931d318f9ce22d7034bce44909b6df588cfec0ac9d51b46029
+// translation-source: 7480385d29565e389fed9481d6e1b12d6ed936d5931d38c0113cd63cd42a0341
 I18N.nb = localeValues([
   /* sys.nodata */ "Ingen data",
   /* sys.unreachable */ "Ikke tilgjengelig",
@@ -583,7 +583,7 @@ I18N.nb = localeValues([
   /* dyn.shadow_strategy */ "Rått romavvik · 30 min",
   /* dyn.card_help */ "Hvert 30. minutt i sikkert identifisert romoppvarming lagres avviket mellom referanserom og mål, med utetemperatur når tilgjengelig. Sesongtrenden sammen med driftstid, minste turtemperatur og termostataktivitet kan vise om varmekurven ligger høyt eller lavt. 1 K romavvik betyr ikke 1 K turendring. Funksjonen er skrivebeskyttet.",
   /* dyn.state_help_recording */ "Bekreftet romoppvarming og gyldig rominngang gjør at rå romavvik registreres. Bare en sesongtrend sammen med driftstid og klipping er meningsfull, ikke én verdi.",
-  /* dyn.state_help_waiting */ "Anlegget er ikke i normal romdrift, så ingen verdi lagres. Om sommeren er dette normalt.",
+  /* dyn.state_help_waiting */ "Ingen egnet oppvarmingsperiode nå: romkretsen står i ro eller ventilen leder vannet til varmtvannsberederen. Ingen verdi lagres; dette er en vanlig pause, ingen feil.",
   /* dyn.state_help_cooling */ "HomeHub melder romdrift, men modusen er ikke oppvarming. Slike vinduer utelates bevisst fra varmekurvedataene.",
   /* dyn.state_help_blocked */ "En nødvendig inngang mangler. Registreringen fortsetter når den kommer tilbake; gamle eller tvetydige data brukes aldri.",
   /* dyn.state_help_room */ "Romverdien når enheten, men gir ikke et gyldig avvik fra målet. Registreringen fortsetter først når kilden kan brukes.",

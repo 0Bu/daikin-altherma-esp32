@@ -1,4 +1,4 @@
-// translation-source: 09c3fdac925087931d318f9ce22d7034bce44909b6df588cfec0ac9d51b46029
+// translation-source: 7480385d29565e389fed9481d6e1b12d6ed936d5931d38c0113cd63cd42a0341
 I18N.fi = localeValues([
   /* sys.nodata */ "Ei tietoja",
   /* sys.unreachable */ "Ei tavoiteta",
@@ -583,7 +583,7 @@ I18N.fi = localeValues([
   /* dyn.shadow_strategy */ "Raaka huonepoikkeama · 30 min",
   /* dyn.card_help */ "Selvästi tunnistetun tilalämmityksen aikana laite tallentaa 30 minuutin välein vertailuhuoneen lämpötilan eron tavoitteesta sekä saatavilla olevan ulkolämpötilan. Pidempi kehitys yhdessä käyntiajan, menoveden alarajan ja termostaatin kanssa voi näyttää käyrän suuntaa. 1 K huonepoikkeama ei tarkoita 1 K menovesimuutosta. Toiminto ei ohjaa lämpöpumppua.",
   /* dyn.state_help_recording */ "Tilalämmitys ja kelvollinen huonetulo on vahvistettu, joten raaka huonevirhe tallennetaan. Tulkitse kausisuunta käyntiajan ja rajoitusten kanssa; yksi näyte ei ole johtopäätös.",
-  /* dyn.state_help_waiting */ "Laitteisto ei ole nyt normaalissa tilalämmityksessä, joten näytettä ei tallenneta. Kesällä tämä on odotettu tila, ei vika.",
+  /* dyn.state_help_waiting */ "Sopivaa lämmitysjaksoa ei nyt ole: tilalämmitys on levossa tai venttiili ohjaa veden käyttövesivaraajaan. Näytettä ei tallenneta; tämä on normaali tauko, ei vika.",
   /* dyn.state_help_cooling */ "HomeHub ilmoittaa normaalin tilakäytön, mutta tila ei ole lämmitys. Tällaiset ikkunat jätetään lämmityskäyräaineiston ulkopuolelle.",
   /* dyn.state_help_blocked */ "Tarvittava tulo puuttuu, joten mitään ei tallenneta. Tallennus jatkuu tulon palattua; vanhoja tai epäselviä mittaustietoja ei käytetä.",
   /* dyn.state_help_room */ "Huonelukema saapuu, mutta siitä ei nyt saada kelvollista poikkeamaa tavoitteesta. Näytettä ei muodosteta ennen kuin lähde kelpaa.",
