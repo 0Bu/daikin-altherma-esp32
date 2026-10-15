@@ -216,7 +216,9 @@ trusted RFC3339/Unix source time. A mapped timestamp that has not arrived leaves
 invalid/future/backward timestamps, stale values
 and missing configured eligibility gates fail closed. Configured `enabled_path` must report enabled;
 configured `hvac_mode_path` must report `heat`. Independent temperature/target/time topics are
-supported; fixed targets cannot coexist with a mapped target. [API.md](API.md) owns request bounds.
+supported; a separate time topic must carry the measurement time of the same temperature sample, because
+the firmware cannot verify that pairing and ages a retained temperature by it. Targets have no age check:
+a mapped or fixed target is treated as the standing setpoint. Fixed targets cannot coexist with a mapped target. [API.md](API.md) owns request bounds.
 
 `<base>/heating_curve` has `schema_version:3` and two top-level objects:
 
@@ -246,8 +248,9 @@ Diagnosis state codes: 0 off, 1 recording, 2 hold, 3 degraded, 4 blocked. Reason
 13 non-heating. Codes 3/4 are retired and never reused.
 
 An eligible event records raw **target − actual** room deviation at most every 30 minutes, with
-absolute `last_sample.unix_s` and an incremented `sequence`. Count **sequence increases**, not the
-repeated 10 s publications. Sequence/uptime reset denotes a reboot. This is not a leaving-water
+absolute `last_sample.unix_s` and an incremented `sequence`. `unix_s` is the evaluation time; the
+room reading it used can be up to the configured maximum age older. Count **sequence increases**,
+not the repeated 10 s publications. Sequence/uptime reset denotes a reboot. This is not a leaving-water
 offset. Schema v2 added the ENV III axis; v3 adds HomeHub's separate axis/provenance without changing
 method v2. Current-room and last-event fields must not be confused. Sampler limits: [PLANT.md](PLANT.md).
 

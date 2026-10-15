@@ -52,7 +52,9 @@ Optional outdoor min/mean belongs only to each accepted population and changes n
 Tank cooling retains completed/notable window counts, the greatest accepted one-hour R5T drop and
 optional circulation correlation. Rejected windows and their OR-ed reason set explain filter
 limitations, not a defect or dominant cause. There is no tank-energy calculation or green loss
-assessment. A hidden charge or lost settling filter can affect the next candidate.
+assessment. A fresh filter (power loss, crash, diagnostics on/off, identity, circulation or long-gap
+reset) waits 45 minutes before the first candidate; a planned restart carries the remaining settling
+time instead. A charge no reading saw can still affect the next candidate.
 
 The independent circulation witness's broker, topic, value/time paths, maximum age, thresholds and
 confirmation time bind the DHW evidence identity. Editing them clears only that check and its
@@ -94,15 +96,15 @@ Adoption books **five seconds plus all new-boot uptime through source confirmati
 Together with earlier gaps, exceeding either two minutes of continuous blindness or 10% of the
 candidate hour discards the carried candidate. This restart discard is not counted in `aborts`, so their
 count can under-report restarts; later unread samples use ordinary blind/discard accounting.
-`candidate_s` and `settle_remaining_s` expose carried progress. Neither blind nor settling time is
-observed evidence. Same-boot journal creation does not prove restoration after power loss.
+`candidate_s` and `settle_remaining_s` expose carried progress; the 45-minute start hold is not
+reported in `settle_remaining_s`. Neither blind nor settling time is observed evidence. Same-boot journal creation does not prove restoration after power loss.
 
 Browser trends and pinned points have a separate source/boot identity. Changing or deleting a
 source clears them, and older replies cannot restore them. A reboot starts a new browser lifetime
 even when the device later restores compatible saved trends.
 
 <a id="refrigerant-service-observation"></a>
-## Refrigerant circuit during heating
+## Refrigerant (heating)
 
 A separate passive row records one continuous ordinary space-heating run. It is not a ninth health
 check and starts without a service mode or plant-diagnostics opt-in. Until this boot detects a
@@ -187,8 +189,9 @@ trusted source time. Actual/target range is 5–35 °C and optional enabled/HVAC
 Gate order establishes HomeHub connectivity, normal space operation (register 53), then Heating
 rather than Cooling (register 38), before room/X10A/clock evidence. An inactive plant or confirmed
 Cooling yields neutral **HOLD**; unknown/stale prerequisites yield **BLOCK**. A transient hold/block
-preserves the sample cadence and last event. Deleting the room source/HomeHub or disabling
-plant diagnostics disarms and clears sample memory.
+preserves the sample cadence and last event. Saving the room source or the diagnostics consent clears
+sample memory and cadence at once, even inside one sampler cycle; deleting the room source/HomeHub or
+disabling plant diagnostics also disarms.
 
 Each event can store two distinct optional outdoor axes: HomeHub input 44 from the current
 cycle/session, and fresh/plausible ENV III from its actual placement. Missing context is null and

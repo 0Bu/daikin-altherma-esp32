@@ -177,13 +177,13 @@ heating_mode_active, room_source_unix_s, room_age_s, sequence, evaluations, samp
 States: `off`, `recording`, `hold`, `degraded`, `blocked`. Reasons: `disabled`, `sample_recorded`,
 `sampling_interval`, `room_unavailable`, `x10a_unavailable`, `homehub_unavailable`, `plant_gate_unknown`,
 `plant_inactive`, `forecast_unavailable`, `clock_invalid`, `heating_mode_unknown`, `non_heating_mode`,
-`sampler_inactive`. Numeric codes are stable; retired 3/4 are unused. Safe mode reports
-`sampler_inactive` (14) when configuration is armed but its MQTT sampler never started.
+`sampler_inactive`. Numeric codes are stable; retired 3/4 are unused. `sampler_inactive`
+(14) means configuration is armed but the MQTT sampler is not running: safe mode, the boot window or a
+failed MQTT start.
 
-Arming requires diagnostics consent, configured MQTT room/target paths and active HomeHub; forecast
-is optional. Recording requires fresh room-time evidence. Error values are null unless established.
-Sequence plus absolute time identifies a
-recorded event. Room error is not an LWT offset or actuator result.
+Arming requires diagnostics consent, a configured MQTT broker, an MQTT room path with a fixed or
+mapped target, and a configured HomeHub host; forecast is optional. Recording requires fresh room-time evidence.
+Error values are null unless established. Sequence plus absolute time identifies a recorded event. Room error is not an LWT offset or actuator result.
 
 The legacy outdoor pair is fresh/plausible ENV III; `plant_*` is HomeHub input 44 from the current
 session. Current and recorded-event values remain separate and name their source. Both are optional
@@ -200,8 +200,9 @@ Individual Modbus/ENV III rings may be retired beside an X10A `accept`. Dwell v4
 blind time itself, so its verdict can be `accept` beside trend age refusals.
 
 `health` fields: `covered_s`, `span_s`, `source_fresh`, `source_age_s`, `persist`, `full_span`,
-`available`, `assessable`, `evaluated`, `status`, `checks`. Disabled diagnostics keeps the object but
-no accumulated checks. `span_s` is elapsed lifecycle time capped at 24 hours; `covered_s` is observed
+`available`, `assessable`, `evaluated`, `status`, `checks`. Disabled diagnostics, and a reset that is
+still pending, keep the object with placeholder checks: each reads `unavailable`/`unsupported` and
+carries no accumulated evidence, so read `persist` and `diagnostics.enabled` rather than the reason. `span_s` is elapsed lifecycle time capped at 24 hours; `covered_s` is observed
 bus context. Each check has its own `observed_s`/`required_s`, so one signal cannot lend coverage to
 another. `source_age_s` is null before a nonempty X10A sample; empty pause/failure callbacks cannot
 renew it. `source_fresh` applies the 15-second observation-age bound at read time. A stale source

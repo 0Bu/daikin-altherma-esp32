@@ -125,7 +125,7 @@ for (const [key, count] of markerCounts) {
 
 const ordered = markers.filter((marker) => requiredKeys.includes(marker[1]));
 const preamble = doc.slice(0, ordered[0]?.index ?? doc.length);
-for (const status of ["OK", "NOTE", "WARNING", "CHECKING", "MEASURED ONLY", "EXPERIMENTAL", "NOT AVAILABLE"]) {
+for (const status of ["OK", "NOTE", "WARNING", "CHECKING", "MEASURED", "TENTATIVE", "N/A"]) {
   if (!preamble.includes(status)) add("U008", "status guide", `status '${status}' is not explained before the first diagnosis`);
 }
 for (let i = 0; i < ordered.length; i++) {

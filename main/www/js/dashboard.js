@@ -777,8 +777,8 @@ function roomSourceDetailHtml(r, status, temperature, setpoint, age) {
 //    exactly what is wrong, so it is what gets printed.
 //  - SAMPLER_INACTIVE means the device is ARMED — a room source is mapped and a broker is configured
 //    — and yet nothing is evaluating it, because the task the sampler lives on was never created.
-//    That is safe mode. "Set up a room source" would send the reader to fix the one thing already
-//    done, so this names the real state and says the recording resumes by itself.
+//    Safe mode, the boot window or a failed MQTT start. "Set up a room source" would send the reader
+//    to fix the one thing already done, so this names the real state (safe mode only when it is).
 //  - OFF plus a CONFIGURED room source is the other half of the same mistake, and it is not the same
 //    state: arming also requires a broker (heating_curve_diagnosis_armed), so clearing the broker
 //    disarms a fully-configured room source. The old copy told those users to set up the source they
@@ -1480,7 +1480,7 @@ function checkupMetricValue(c) {
       const parts = [];
       const buh = checkupHeaterRuntime(c.buh_s, c.buh_min);
       const bsh = checkupHeaterRuntime(c.bsh_s, c.bsh_min);
-      if (buh) parts.push(buh);
+      if (buh) parts.push(t("check.buh_runtime", buh));
       if (bsh) parts.push(t("check.tank_runtime", bsh));
       return parts.join(" · ");
     }

@@ -23,6 +23,7 @@ SemaphoreHandle_t xSemaphoreCreateBinary();
 BaseType_t        xSemaphoreTake(SemaphoreHandle_t, TickType_t);
 BaseType_t        xSemaphoreGive(SemaphoreHandle_t);
 void              vSemaphoreDelete(SemaphoreHandle_t);
+uint32_t          esp_random(); // fixture-controlled entropy; calls are counted
 
 using esp_event_base_t       = const char*;
 using esp_mqtt_event_id_t    = int;

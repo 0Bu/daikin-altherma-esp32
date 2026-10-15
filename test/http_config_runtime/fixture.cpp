@@ -65,6 +65,10 @@ int                      mqtt_token = 1, semaphore_token = 1;
 esp_mqtt_client_config_t mqtt_config;
 unsigned                 ota_calls     = 0;
 bool                     ota_downgrade = false;
+// esp_random() adapter: the value the next draw returns and how often the TU drew one, plus the
+// generation the handler handed to the live checkup producer.
+uint32_t random_value = 0x10203040U, runtime_generation = 0;
+unsigned random_calls = 0, runtime_generation_calls = 0;
 
 [[noreturn]] void fail(const char* reason) {
     std::fprintf(stderr, "FAIL oracle=%s: %s\n", oracle, reason);
@@ -73,6 +77,15 @@ bool                     ota_downgrade = false;
 void check(bool valid, const char* reason) {
     ++checks;
     if (!valid) fail(reason);
+}
+uint32_t random_draw() {
+    ++random_calls;
+    return random_value;
+}
+void checkup_generation(uint32_t generation) {
+    ++runtime_changes;
+    ++runtime_generation_calls;
+    runtime_generation = generation;
 }
 struct Store {
     bool detection = false;
@@ -159,6 +172,8 @@ void reset() {
     mqtt_context                            = nullptr;
     ota_calls                               = 0;
     ota_downgrade                           = false;
+    random_value                            = 0x10203040U;
+    random_calls = runtime_generation = runtime_generation_calls = 0;
 }
 using Handler = esp_err_t (*)(httpd_req_t*);
 struct Route {
@@ -358,7 +373,7 @@ void         mqtt_reference_reconfigure() { ++fixture::runtime_changes; }
 void         mqtt_circulation_reconfigure(bool) { ++fixture::runtime_changes; }
 void         mqtt_request_weather_cleanup() { ++fixture::runtime_changes; }
 void         mqtt_request_modbus_cleanup() { ++fixture::runtime_changes; }
-void         checkup_set_diagnostics(bool, uint32_t) { ++fixture::runtime_changes; }
+void         checkup_set_diagnostics(bool, uint32_t g) { fixture::checkup_generation(g); }
 void         checkup_reset() { ++fixture::runtime_changes; }
 void         checkup_reset_on_detect(const char*, uint32_t) { ++fixture::runtime_changes; }
 void         dwell_reset() { ++fixture::runtime_changes; }
@@ -432,6 +447,7 @@ void vTaskDelay(TickType_t delay) {
     if (fixture::latch_during_delay) fixture::reset_latched = true;
 }
 void              esp_restart() { ++fixture::reboots; }
+uint32_t          esp_random() { return fixture::random_draw(); }
 SemaphoreHandle_t xSemaphoreCreateBinary() {
     return fixture::semaphore_ok ? &fixture::semaphore_token : nullptr;
 }
@@ -1132,6 +1148,59 @@ void query_flags() {
     check(daik::ota_do(&missing) == ESP_OK && ota_calls == 1 && !ota_downgrade,
           "missing downgrade flag must not inherit previous request permission");
 }
+uint32_t persisted_generation() {
+    daik::ConfigBlob blob;
+    check(daik::config_blob_deserialize(service.data(), service.size(), blob),
+          "persisted service entry does not decode");
+    return blob.diagnostics_generation;
+}
+// One actual /set_diagnostics transition from the stated generation with the given draw. Returns
+// the generation the handler committed to RAM, the durable service entry and the live producer.
+uint32_t transition(bool enabled, uint32_t draw) {
+    saves = service_writes = link_writes = runtime_changes = weather_commits = 0;
+    random_calls = runtime_generation_calls = 0;
+    durable_started                         = false;
+    random_value                            = draw;
+    const auto response =
+        invoke(daik::set_diagnostics, enabled ? R"({"enabled":true})" : R"({"enabled":false})");
+    check(response.status == "200 OK" && saves == 1 && service_writes == 1,
+          "diagnostics transition did not save exactly once");
+    check(random_calls == 1, "diagnostics transition must draw esp_random() exactly once");
+    check(current.diagnostics_enabled == enabled && runtime_generation_calls == 1,
+          "diagnostics transition did not publish the requested consent");
+    check(persisted_generation() == current.diagnostics_generation &&
+              runtime_generation == current.diagnostics_generation,
+          "durable, RAM and live producer generations disagree");
+    return current.diagnostics_generation;
+}
+void diagnostics_generation() {
+    // Default/migrated configuration: consent OFF at generation 0, as Config{} and pre-v19 load.
+    const auto from_default = [] {
+        reset();
+        current.diagnostics_enabled    = false;
+        current.diagnostics_generation = 0;
+        service = daik::config_blob_serialize(daik::config_blob_from(current));
+        service.reserve(16384);
+        check(persisted_generation() == 0, "fixture must start from the default generation");
+    };
+    from_default();
+    const uint32_t draw = 0x6d2b79f5U; // independent of the logic test's draw
+    check(transition(true, draw) == draw,
+          "first opt-in from generation 0 must persist the actual esp_random() draw");
+    // Later transitions advance by one; a newer draw must not restart the sequence.
+    check(transition(false, 0x0badf00dU) == draw + 1U,
+          "a re-toggle must advance the persisted generation by one");
+    check(transition(true, 0U) == draw + 2U, "a second re-toggle must advance by one again");
+    saves = random_calls = runtime_generation_calls = 0;
+    durable_started                                 = false;
+    const auto unchanged = invoke(daik::set_diagnostics, R"({"enabled":true})");
+    check(unchanged.status == "200 OK" && saves == 0 && random_calls == 0 &&
+              runtime_generation_calls == 0 && persisted_generation() == draw + 2U,
+          "an unchanged consent request must keep its generation without a draw");
+    // A zero draw still leaves the default generation for a non-zero one.
+    from_default();
+    check(transition(true, 0U) == 1U, "a zero draw must still leave generation 0");
+}
 } // namespace test
 
 int main(int argc, char** argv) {
@@ -1154,13 +1223,15 @@ int main(int argc, char** argv) {
                           {"hp_revisions", test::hp_revisions},
                           {"factory_reset_reboot", test::factory_reset_reboot},
                           {"local_pin_reconcile", test::local_pin_reconcile},
-                          {"query_flags", test::query_flags}};
+                          {"query_flags", test::query_flags},
+                          {"diagnostics_generation", test::diagnostics_generation}};
     unsigned   ran     = 0;
     for (const auto& candidate : cases) {
         if (argc > 1) {
             if (std::strcmp(argv[1], "legacy_cases") == 0) {
                 if (std::strcmp(candidate.name, "factory_reset_reboot") == 0 ||
-                    std::strcmp(candidate.name, "local_pin_reconcile") == 0)
+                    std::strcmp(candidate.name, "local_pin_reconcile") == 0 ||
+                    std::strcmp(candidate.name, "diagnostics_generation") == 0)
                     continue;
             } else if (std::strcmp(argv[1], candidate.name) != 0)
                 continue;
