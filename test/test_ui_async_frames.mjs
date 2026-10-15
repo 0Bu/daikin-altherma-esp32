@@ -166,7 +166,7 @@ console.log("UI status/value ordering, lazy locale leases, transport loss and im
     last_sample_outdoor_temperature_c: 17.5, last_sample_plant_outdoor_temperature_c: 16.5,
     last_sample_plant_outdoor_source: "homehub" };
   h.S.status = frame("en", { reference_temperature: room, weather_forecast: weather,
-    mqtt: { configured: true, connected: true }, wifi: { connected: true, ssid: "fixture" },
+    mqtt: { configured: true, connected: true }, wifi: { connected: true, ssid: "test-wifi" },
     circulation_source: { configured: true, has_value: true, fresh: true, state: "on", power_w: 4.5, age_s: 1 } });
   const config = JSON.stringify(h.S.status);
   for (const unavailable of [null, "values", "status", null]) {
