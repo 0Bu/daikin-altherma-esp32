@@ -114,7 +114,7 @@ scenarios = ['discovery_guard_clean', 'discovery_guard_default', 'discovery_guar
              'probe_active_replacement', 'probe_active_replacement_retire_rejection',
              'probe_saved_config_without_owner', 'probe_active_shared_prior_owner',
              'sdk_event_stack_owner', 'outgoing_heartbeat', 'outgoing_weather',
-             'outgoing_curve', 'curve_consent_boundary', 'curve_room_source_boundary',
+             'outgoing_curve', 'curve_space_route_gate', 'curve_consent_boundary', 'curve_room_source_boundary',
              'curve_boundary_during_evaluation', 'scalar_snapshot_helpers',
              'discovery_topic_roundtrip',
              'callback_fragments', 'callback_payload_bounds', 'callback_epoch_cutover',
@@ -133,6 +133,14 @@ for scenario in scenarios:
     print(result.stdout.strip())
 
 mutations = [
+    ('curve-dhw-route-veto-bypassed', 'curve_space_route_gate',
+     'in.plant_gate_active = plant_gate.active;',
+     'in.plant_gate_active = mbs.plant_gate_active;',
+     'CURVE_DHW_ROUTE_BLOCKS_SPACE_HEATING_SAMPLE', 1),
+    ('curve-unknown-route-borrowed-permission', 'curve_space_route_gate',
+     'in.plant_gate_known = plant_gate.known;',
+     'in.plant_gate_known = mbs.plant_gate_known;',
+     'CURVE_UNKNOWN_ROUTE_CANNOT_BORROW_RAW_SPACE_PERMISSION', 1),
     ('periodic-rejected-delete-advance', 'periodic_discovery_delivery',
      'if (!retire_exact_topic(MqttRetirementOwner::PeriodicDiscovery, topic)) return;',
      '(void)retire_exact_topic(MqttRetirementOwner::PeriodicDiscovery, topic);',

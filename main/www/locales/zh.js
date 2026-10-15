@@ -1,4 +1,4 @@
-// translation-source: a4d25fbd5f065a9d4715eb7230fd183ed1f4eba4c36fa1fd89855058db8f05bb
+// translation-source: 7480385d29565e389fed9481d6e1b12d6ed936d5931d38c0113cd63cd42a0341
 I18N.zh = localeValues([
   /* sys.nodata */ "无数据",
   /* sys.unreachable */ "无法访问",
@@ -583,7 +583,7 @@ I18N.zh = localeValues([
   /* dyn.shadow_strategy */ "原始室温偏差 · 30 分钟",
   /* dyn.card_help */ "确认空间供暖时每 30 分钟记录室温偏差及可用的室外温度。趋势需结合运行时长、最低出水限幅和温控器；1 K 偏差不等于调 1 K 出水。本功能只读。",
   /* dyn.state_help_recording */ "已确认的空间供暖正在运行，且室温输入有效，因此正在记录原始室温误差。请结合运行时长和限幅数据评估季节趋势；单个样本不是结论。",
-  /* dyn.state_help_waiting */ "设备当前不在正常空间运行，因此不记录样本。夏季通常如此，并非故障。",
+  /* dyn.state_help_waiting */ "当前没有符合条件的供暖时段：供暖回路空闲，或阀门将水导向生活热水水箱。因此不记录样本；这是正常暂停，并非故障。",
   /* dyn.state_help_cooling */ "HomeHub 报告空间运行，但当前不是制热模式；此类窗口特意不纳入气候补偿曲线数据。",
   /* dyn.state_help_blocked */ "缺少必要输入，因此不记录。输入恢复后会继续；陈旧或含糊的数据绝不会采样。",
   /* dyn.state_help_room */ "室温读数已到达设备，但目前无法形成相对目标的有效偏差；来源恢复可用前不会创建样本。",
@@ -591,7 +591,7 @@ I18N.zh = localeValues([
   /* dyn.state_help_inactive */ "已配置但 MQTT 采样器未运行，因此不评估；设置保留，采样器恢复运行后自动继续记录。",
   /* dyn.state_help_no_broker */ "已保存室温源，但诊断通过 MQTT 读取，而未配置代理。请在“连接”中设置代理；保存的室温源会保留，随后自动开始记录。",
   /* dyn.state_help_setup_homehub */ "诊断需要 HomeHub 判断设备是否真正供暖；没有它就无法区分供暖、生活热水或停止。请在“协议”中设置 HomeHub 地址。",
-  /* dyn.state_help_homehub_disabled */ "此诊断依赖两个 HomeHub 设备信号。HomeHub 地址明确留空时，Modbus 和该诊断都不会运行。",
+  /* dyn.state_help_homehub_disabled */ "此诊断依赖 HomeHub 设备数据。HomeHub 地址明确留空时，Modbus 和该诊断都不会运行。",
   /* dyn.strategy_help */ "样本=目标室温−实际室温，正值偏冷；不做死区、舍入或限速，也不是出水修正。房间须有代表性；温控器/阀门可能掩盖曲线过高。请结合 D2 最低限幅和供暖请求率。",
   /* env.title */ "外部传感器",
   /* env.card */ "室外气象",

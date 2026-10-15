@@ -186,9 +186,13 @@ With no timestamp mapping, only live non-retained arrival time is accepted; a re
 trusted source time. Actual/target range is 5–35 °C and optional enabled/HVAC mappings must pass.
 [MQTT.md](MQTT.md#room-input-and-heating-curve-evidence) defines freshness, reason codes and payloads.
 
-Gate order establishes HomeHub connectivity, normal space operation (register 53), then Heating
-rather than Cooling (register 38), before room/X10A/clock evidence. An inactive plant or confirmed
-Cooling yields neutral **HOLD**; unknown/stale prerequisites yield **BLOCK**. A transient hold/block
+Method 3 first establishes HomeHub connectivity, active normal space operation (input 53) with
+space routing (input 37 = 0), then Heating rather than Cooling (input 38), before room/X10A/clock
+evidence. The [EKRHH Installer reference guide, 4P744838-1E (2026.01), §9.2.2, page 43](https://www.daikin.eu/content/dam/document-library/Installer-reference-guide/heat/accessories/ekrhh/EKRHH_Installer%20reference%20guide_4PEN744838-1E_English.pdf)
+defines the valve independently; normal-operation flags do not establish exclusive routing.
+Each prerequisite needs its own current-session reply within the seven-second project bound.
+Known inactivity, DHW routing or Cooling yields neutral **HOLD**; otherwise unknown/stale
+prerequisites yield **BLOCK**. A transient hold/block
 preserves the sample cadence and last event. Saving the room source or the diagnostics consent clears
 sample memory and cadence at once, even inside one sampler cycle; deleting the room source/HomeHub or
 disabling plant diagnostics also disarms.

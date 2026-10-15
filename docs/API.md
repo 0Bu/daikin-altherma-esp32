@@ -174,6 +174,10 @@ forecast_available, plant_gate_known, plant_gate_active, heating_mode_known,
 heating_mode_active, room_source_unix_s, room_age_s, sequence, evaluations, samples, holds, blocks
 ```
 
+`heating_curve.plant_gate_*` reports the combined input-53/space-route prerequisite defined in
+[PLANT.md](PLANT.md#heating-curve-diagnosis); `modbus.plant_gate_*` remains the raw input-53 fact.
+Method version 3 adds the independently fresh space-route requirement; the payload shape is unchanged.
+
 States: `off`, `recording`, `hold`, `degraded`, `blocked`. Reasons: `disabled`, `sample_recorded`,
 `sampling_interval`, `room_unavailable`, `x10a_unavailable`, `homehub_unavailable`, `plant_gate_unknown`,
 `plant_inactive`, `forecast_unavailable`, `clock_invalid`, `heating_mode_unknown`, `non_heating_mode`,

@@ -16,8 +16,8 @@
 // register-54 actuator built for legacy-300 was REMOVED with the retirement of dynamic LWT
 // actuation (legacy-294 — SHADOW is the terminal state of that epic). No Modbus write function code
 // is issued anywhere in this firmware, there is no intent API, and there is no HTTP/MQTT/MCP write
-// route. The observation-only pieces kept from that work are the two PLANT GATES below: ordinary
-// FC04 reads that prove normal space operation and distinguish heating from cooling.
+// route. The observation-only prerequisites below use ordinary FC04 reads to establish normal
+// space operation, its independent valve route and heating rather than cooling.
 #include <cstddef>
 #include <cstdint>
 #include <string>
@@ -37,6 +37,10 @@ struct ModbusStatus {
     ModbusProfile profile     = ModbusProfile::Auto; // detected/active Modbus profile
     ModbusProfileBasis profile_basis =
         ModbusProfileBasis::Probing; // basis: probing, affirmative, fallback
+    // These route flags fit the existing alignment gap before host on ESP32-S3. Keep status
+    // snapshots at their existing size: HTTP and MQTT also copy this object on their task stacks.
+    bool        space_route_known  = false;
+    bool        space_route_active = false;
     std::string host;                // configured address ("" = disabled)
     int         port    = 0;
     int         unit_id = 0;
@@ -51,8 +55,8 @@ struct ModbusStatus {
     int         last_error_detail   = -1;
     int         last_error_register = 0;
     // HomeHub input register 53 says SPACE HEATING OR COOLING is in normal operation. It cannot by
-    // itself license a heating-curve sample. Input register 38 supplies the current mode; both must
-    // be known and mode must be Heating before the diagnosis records a room-error sample. `known`
+    // itself license a heating-curve sample. Input 37 must report space routing and input 38 must
+    // report Heating before the diagnosis records a room-error sample. `known`
     // is false whenever the register did not answer this cycle, answered a sentinel or its own
     // successful reply is older than the seven-second project bound — an unknown gate must never
     // read as "inactive", which would look like an ordinary quiet plant.

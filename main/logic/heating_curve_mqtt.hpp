@@ -11,9 +11,8 @@
 namespace daik {
 
 // v3 adds a distinct plant-side outdoor axis and explicit provenance for both plant and ENV III
-// readings. Purely additive, and the SAMPLING METHOD is untouched — the room error is still derived
-// exactly as in v1/v2, so `method_version` deliberately stays 2 and archived events remain
-// comparable across this change. The schema version is what describes payload SHAPE.
+// readings. The schema version describes payload SHAPE; method_version separately identifies the
+// sampler's eligibility rule, including v3's independent space-route prerequisite.
 inline constexpr uint8_t HEATING_CURVE_MQTT_SCHEMA_VERSION = 3;
 
 struct HeatingCurveMqttFields {

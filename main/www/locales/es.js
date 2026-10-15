@@ -1,4 +1,4 @@
-// translation-source: a4d25fbd5f065a9d4715eb7230fd183ed1f4eba4c36fa1fd89855058db8f05bb
+// translation-source: 7480385d29565e389fed9481d6e1b12d6ed936d5931d38c0113cd63cd42a0341
 I18N.es = localeValues([
   /* sys.nodata */ "Sin datos",
   /* sys.unreachable */ "No accesible",
@@ -583,7 +583,7 @@ I18N.es = localeValues([
   /* dyn.shadow_strategy */ "Desviación ambiente bruta · 30 min",
   /* dyn.card_help */ "Cada 30 minutos durante una calefacción de espacios claramente identificada, el firmware registra cuánto se desvía la temperatura de la habitación de referencia de su objetivo, junto con la temperatura exterior de ese momento cuando la proporciona un sensor. Junto con el tiempo de funcionamiento, los límites mínimos de temperatura del agua de impulsión y la actividad del termostato, el patrón a largo plazo puede mostrar si la curva de calefacción tiende a ser demasiado alta o baja. Una desviación ambiente de 1 K no implica automáticamente un cambio de 1 K en el agua de impulsión. Esta función solo lee datos y no escribe nada en la bomba de calor.",
   /* dyn.state_help_recording */ "La calefacción de espacios confirmada está funcionando y la entrada de habitación es válida, por lo que se registran muestras brutas del error ambiente. Interpreta una tendencia estacional junto con el tiempo de funcionamiento y los datos de recorte; una sola muestra no es un veredicto.",
-  /* dyn.state_help_waiting */ "La instalación no está ahora en funcionamiento normal de climatización, por lo que no se registra ninguna muestra. Durante el verano es el estado normal y esperado, no un fallo.",
+  /* dyn.state_help_waiting */ "Ahora no hay una ventana válida de calefacción: la climatización está inactiva o la válvula dirige el agua al depósito. No se registra ninguna muestra; es una pausa normal, no un fallo.",
   /* dyn.state_help_cooling */ "HomeHub informa de funcionamiento normal de climatización, pero el modo actual no es calefacción. Esas ventanas se excluyen deliberadamente del conjunto de datos de la curva de calefacción.",
   /* dyn.state_help_blocked */ "Falta una entrada necesaria, por lo que no se registra nada. El registro se reanuda cuando vuelve; nunca se muestrean datos antiguos o ambiguos.",
   /* dyn.state_help_room */ "La lectura de habitación llega al dispositivo, pero ahora no puede proporcionar una desviación válida respecto al objetivo. No se genera ninguna muestra hasta que la fuente vuelva a ser utilizable.",
@@ -591,7 +591,7 @@ I18N.es = localeValues([
   /* dyn.state_help_inactive */ "Las fuentes están configuradas, pero el muestreador MQTT no funciona, así que no se evalúa nada. La configuración se conserva; el registro se reanuda cuando vuelva a funcionar.",
   /* dyn.state_help_no_broker */ "Hay una fuente de habitación guardada, pero el diagnóstico la lee mediante MQTT y no hay ningún bróker configurado. Configura el bróker en la tarjeta Conexiones; se conserva la fuente guardada y el registro comienza por sí solo.",
   /* dyn.state_help_setup_homehub */ "El diagnóstico necesita que HomeHub indique cuándo la instalación está calentando realmente; sin él no puede distinguir una ventana de calefacción del agua caliente o una parada. Configura la dirección de HomeHub en la tarjeta Protocolo.",
-  /* dyn.state_help_homehub_disabled */ "Este diagnóstico depende de dos señales de la instalación de HomeHub. Si la dirección de HomeHub está explícitamente vacía, no se ejecutan ni Modbus ni este diagnóstico dependiente.",
+  /* dyn.state_help_homehub_disabled */ "Este diagnóstico depende de los datos de la instalación de HomeHub. Si la dirección de HomeHub está explícitamente vacía, no se ejecutan ni Modbus ni este diagnóstico dependiente.",
   /* dyn.strategy_help */ "La muestra es la temperatura objetivo de la habitación menos la temperatura real: un valor positivo significa que la habitación está por debajo del objetivo; uno negativo, que está por encima. No hay banda muerta, redondeo, limitación ni límite de velocidad. Es un indicador sin calibrar, no una corrección solicitada del agua de impulsión. La habitación de referencia debe representar la zona climatizada. Su propio termostato o unas válvulas cerradas forman un bucle de control interno: pueden eliminar la demanda de calor y ocultar una curva demasiado alta. Interpreta la tendencia ambiente junto con la frecuencia con la que la temperatura del agua de impulsión se mantiene en su mínimo (porcentaje de recorte D2) y la frecuencia con la que la zona solicita calor realmente.",
   /* env.title */ "Sensor exterior",
   /* env.card */ "Clima exterior",

@@ -1,4 +1,4 @@
-// translation-source: a4d25fbd5f065a9d4715eb7230fd183ed1f4eba4c36fa1fd89855058db8f05bb
+// translation-source: 7480385d29565e389fed9481d6e1b12d6ed936d5931d38c0113cd63cd42a0341
 I18N.it = localeValues([
   /* sys.nodata */ "Nessun dato",
   /* sys.unreachable */ "Non raggiungibile",
@@ -583,7 +583,7 @@ I18N.it = localeValues([
   /* dyn.shadow_strategy */ "Deviazione ambiente grezza · 30 min",
   /* dyn.card_help */ "Ogni 30 minuti, durante un riscaldamento ambienti chiaramente identificato, il firmware registra di quanto la temperatura dell'ambiente di riferimento si discosta dall'obiettivo, insieme alla temperatura esterna di quel momento se un sensore la fornisce. Insieme a durata di funzionamento, limiti minimi della temperatura di mandata e attività del termostato, l'andamento nel lungo periodo può indicare se la curva climatica tende a essere troppo alta o troppo bassa. Una deviazione ambiente di 1 K non implica automaticamente una variazione di 1 K dell'acqua di mandata. Questa funzione legge soltanto i dati e non scrive nulla nella pompa di calore.",
   /* dyn.state_help_recording */ "Il riscaldamento ambienti confermato è in funzione e l'ingresso ambiente è valido, quindi vengono registrati campioni grezzi dell'errore ambiente. Valutare l'andamento stagionale insieme a durata di funzionamento e dati di limitazione; un singolo campione non è un verdetto.",
-  /* dyn.state_help_waiting */ "Al momento l'impianto non è in normale funzionamento ambienti, quindi non viene registrato alcun campione. Durante l'estate questo è lo stato normale previsto, non un guasto.",
+  /* dyn.state_help_waiting */ "Non c'è una finestra valida di riscaldamento: il circuito ambienti è inattivo oppure la valvola dirige l'acqua al bollitore. Non viene registrato alcun campione; è una pausa normale, non un guasto.",
   /* dyn.state_help_cooling */ "HomeHub segnala il normale funzionamento ambienti, ma la modalità attuale non è il riscaldamento. Tali finestre sono escluse intenzionalmente dai dati della curva climatica.",
   /* dyn.state_help_blocked */ "Manca un ingresso necessario, quindi non viene registrato nulla. La registrazione riprende quando torna disponibile; dati vecchi o ambigui non vengono mai campionati.",
   /* dyn.state_help_room */ "La lettura ambiente raggiunge il dispositivo, ma al momento non può fornire una deviazione valida dall'obiettivo. Non viene creato alcun campione finché la sorgente non torna utilizzabile.",
@@ -591,7 +591,7 @@ I18N.it = localeValues([
   /* dyn.state_help_inactive */ "Le sorgenti sono configurate, ma il campionatore MQTT non è in funzione, quindi nulla viene valutato. Le impostazioni restano; la registrazione riprende quando torna in funzione.",
   /* dyn.state_help_no_broker */ "È salvata una sorgente ambiente, ma la diagnosi la legge tramite MQTT e non è configurato alcun broker. Impostare il broker nella scheda Connessioni; la sorgente ambiente salvata viene conservata e la registrazione si avvia automaticamente.",
   /* dyn.state_help_setup_homehub */ "La diagnosi necessita di HomeHub per sapere quando l'impianto sta realmente riscaldando; senza non può distinguere una finestra di riscaldamento dall'acqua calda o da un arresto. Impostare l'indirizzo HomeHub nella scheda Protocollo.",
-  /* dyn.state_help_homehub_disabled */ "Questa diagnosi dipende da due segnali dell'impianto HomeHub. Se l'indirizzo HomeHub è esplicitamente vuoto, non vengono eseguiti né Modbus né questa diagnosi dipendente.",
+  /* dyn.state_help_homehub_disabled */ "Questa diagnosi dipende da dati dell'impianto HomeHub. Se l'indirizzo HomeHub è esplicitamente vuoto, non vengono eseguiti né Modbus né questa diagnosi dipendente.",
   /* dyn.strategy_help */ "Il campione è la temperatura obiettivo ambiente meno la temperatura ambiente effettiva: positivo significa che l'ambiente è sotto l'obiettivo, negativo che è sopra. Non vengono applicati banda morta, arrotondamento, limitazione o limite di variazione. È un indicatore non calibrato, non una correzione richiesta della temperatura di mandata. L'ambiente di riferimento deve rappresentare la zona riscaldata. Il suo termostato o valvole chiuse formano un anello di regolazione interno: possono eliminare la richiesta di calore e nascondere una curva troppo alta. Valutare l'andamento ambiente insieme alla frequenza con cui la temperatura di mandata resta al minimo (quota di limitazione D2) e alla frequenza con cui la zona richiede effettivamente calore.",
   /* env.title */ "Sensore esterno",
   /* env.card */ "Clima esterno",

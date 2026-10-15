@@ -14,7 +14,7 @@ const read = rel => fs.readFileSync(path.join(root, rel), "utf8");
 
 const diagnosis = read("main/logic/heating_curve_diagnosis.hpp");
 assert.match(diagnosis, /class HeatingCurveDiagnosis/);
-assert.match(diagnosis, /HEATING_CURVE_DIAGNOSIS_METHOD_VERSION\s*=\s*2/);
+assert.match(diagnosis, /HEATING_CURVE_DIAGNOSIS_METHOD_VERSION\s*=\s*3/);
 assert.doesNotMatch(diagnosis,
   /DYNAMIC_LWT_P_GAIN|DYNAMIC_LWT_DEADBAND|DYNAMIC_LWT_OFFSET_(?:MIN|MAX)|DYNAMIC_LWT_MAX_STEP|\brequested_offset_k\b|\bp_term_k\b|\bbounded_offset_k\b|\brate_limited\b/,
   "diagnosis must sample raw room error, not retain actuator shaping");
@@ -23,8 +23,8 @@ assert.doesNotMatch(diagnosis, /#include\s+"(?:hp_modbus|homehub_actuator)\.hpp"
 assert.ok(!fs.existsSync(path.join(root, "main/logic/homehub_actuator.hpp")),
   "the retired actuator contract must stay deleted");
 
-// Register 53 is heating OR cooling. A sample is allowed only after the independent current-mode
-// witness proves HEATING. Idle summer operation remains a neutral hold before room-source checks.
+// Register 53 is heating OR cooling. Input37 must independently establish the space route, while
+// current mode proves HEATING. Idle summer operation remains a neutral hold before room checks.
 const evalStart = diagnosis.indexOf("const HeatingCurveSnapshot& evaluate(");
 const evalBody = diagnosis.slice(evalStart, diagnosis.indexOf("private:", evalStart));
 assert.match(evalBody,
@@ -67,6 +67,13 @@ const evaluateEnd = mqtt.indexOf("std::string build_heartbeat_payload()", evalua
 assert.ok(evaluateStart >= 0 && evaluateEnd > evaluateStart,
   "runtime diagnosis adapter boundary must remain identifiable");
 const evaluator = mqtt.slice(evaluateStart, evaluateEnd);
+assert.match(evaluator,
+  /heating_curve_space_operation_gate\(\s*mbs\.plant_gate_known\s*,\s*mbs\.plant_gate_active\s*,\s*mbs\.space_route_known\s*,\s*mbs\.space_route_active\s*\)/,
+  "the adapter must combine current operation53 and valve37 evidence from the same Modbus snapshot");
+assert.match(evaluator, /in\.plant_gate_known\s*=\s*plant_gate\.known\s*;/);
+assert.match(evaluator, /in\.plant_gate_active\s*=\s*plant_gate\.active\s*;/);
+assert.doesNotMatch(evaluator, /in\.plant_gate_(?:known|active)\s*=\s*mbs\.plant_gate_(?:known|active)/,
+  "raw operation53 cannot bypass the independent valve-route qualifier");
 assert.match(evaluator, /heating_mode_known = mbs\.heating_mode_known/);
 assert.match(evaluator, /heating_mode_active = mbs\.heating_mode_active/);
 assert.match(evaluator, /outdoor_env3_evidence\(/,

@@ -6,6 +6,18 @@
         "gcc-13-linux-ubuntu24": "ESP-IDF v6.1 container GCC 13.3.0",
         "gcc-15-linux-ubuntu26": "Ubuntu 26.04 aarch64 GCC 15.2.0"
       },
+      "hosted_confirmation": "Local GCC 15 inventory measured; authoritative GitHub Ubuntu 26 confirmation pending",
+      "runner": "scripts/run-mock-tests.sh --coverage",
+      "scope": "Independent space-route admission: all added helper outcomes taken by the complete sixteen-tuple truth table; historical floors and other inventories retained",
+      "source": "main/logic/heating_curve_diagnosis.hpp",
+      "source_sha256": "ce3b8326aef41f5bb94066233b9d727f52dbdae6f5dc4eaef16b84ab203b83dd"
+    },
+    {
+      "compilers": {
+        "clang-17-darwin": "Apple Clang 17.0.0",
+        "gcc-13-linux-ubuntu24": "ESP-IDF v6.1 container GCC 13.3.0",
+        "gcc-15-linux-ubuntu26": "Ubuntu 26.04 aarch64 GCC 15.2.0"
+      },
       "runner": "scripts/run-mock-tests.sh --coverage",
       "scope": "Exact OTA paths/methods/AP surfaces, quoted Accept separators and nonzero RFC 9110 weights, UTF-8 families, null parse-error IDs and notification shape controls raise both changed-header coverage ratios; all other inventories and historical floors retained",
       "hosted_confirmation": "Local GCC 15 inventory measured; authoritative GitHub Ubuntu 26 confirmation pending",
@@ -656,8 +668,8 @@
         "taken": 180
       },
       "main/logic/heating_curve_diagnosis.hpp": {
-        "outcomes": 66,
-        "taken": 51
+        "outcomes": 82,
+        "taken": 67
       },
       "main/logic/heating_curve_mqtt.hpp": {
         "outcomes": 310,
@@ -1074,8 +1086,8 @@
         "taken": 159
       },
       "main/logic/heating_curve_diagnosis.hpp": {
-        "outcomes": 78,
-        "taken": 62
+        "outcomes": 100,
+        "taken": 84
       },
       "main/logic/heating_curve_mqtt.hpp": {
         "outcomes": 274,
@@ -1492,8 +1504,8 @@
         "taken": 133
       },
       "main/logic/heating_curve_diagnosis.hpp": {
-        "outcomes": 78,
-        "taken": 62
+        "outcomes": 100,
+        "taken": 84
       },
       "main/logic/heating_curve_mqtt.hpp": {
         "outcomes": 240,
@@ -1910,8 +1922,8 @@
         "taken": 159
       },
       "main/logic/heating_curve_diagnosis.hpp": {
-        "outcomes": 78,
-        "taken": 62
+        "outcomes": 100,
+        "taken": 84
       },
       "main/logic/heating_curve_mqtt.hpp": {
         "outcomes": 274,
