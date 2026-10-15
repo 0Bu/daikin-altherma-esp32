@@ -97,8 +97,19 @@ function groupOf(v) {
 // same loop and says so on failure), and a values fetch that lost a race with a reboot must not
 // overwrite a banner the status fetch is about to set correctly either way.
 async function refreshValues(paint = true) {
+  const request = S.valuesRequest = (S.valuesRequest || 0) + 1;
+  const statusRequest = S.statusRequest, epoch = S.histEpoch;
+  const current = () => request === S.valuesRequest && statusRequest === S.statusRequest &&
+    (statusRequest == null || statusRequest === S.statusAcceptedRequest) &&
+    epoch === S.histEpoch && !S.imageReloading;
   let r;
-  try { r = await j("/values", { signal: pollSignal() }); } catch { return false; }
+  try { r = await j("/values", { signal: pollSignal() }); }
+  catch (error) {
+    if (current()) invalidateLiveReadings(S.transportUnavailable === "status" ? "status" : "values",
+      String(error.message) === "503");
+    return false;
+  }
+  if (!current() || S.transportUnavailable === "status") return false;
   S._values = r.values || r || [];
   // The SECOND source, from the independent HomeHub stack (docs/MODBUS_PROTOCOL.md). Absent entirely
   // when that stack is off, which is exactly how a device without a HomeHub behaves — no Modbus row,
@@ -109,6 +120,8 @@ async function refreshValues(paint = true) {
   // they supersede a restored OTA snapshot. While installation continues, keep this newer complete
   // frame as the next reload's bounded fallback.
   S.otaCached = false;
+  S.transportUnavailable = null;
+  S.transportBusy = false;
   if (S.otaInstalling) otaCacheStore();
   if (paint) renderApp();
   return true;

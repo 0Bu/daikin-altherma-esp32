@@ -117,7 +117,7 @@ class Element {
     hasHist: () => false,
     setLangFromStatus: () => { languageHydrations += 1; },
     renderOtaDashboardStatus: () => { dashboardStatusPaints += 1; },
-    j: async () => ({ state: "updating", progress: 78, current: "1.4.72-dev.333", channel: "dev" }),
+    j: async () => ({ state: "updating", generation: 7, progress: 78, current: "1.4.72-dev.333", channel: "dev" }),
     setTimeout: () => 1,
     clearTimeout: () => {},
   };
@@ -211,7 +211,7 @@ function elementsFor(...ids) {
     descNoteHtml: (lead, text) => `<div class="vdesc-p"><span class="vdesc-n">${lead}</span> ${text}</div>`,
     hasHist: () => false,
     renderOtaDashboardStatus: () => { dashboardStatusPaints += 1; },
-    j: async () => ({ state: "updating", progress: 48, current: "1.4.72-dev.333", channel: "dev" }),
+    j: async () => ({ state: "updating", generation: 7, progress: 48, current: "1.4.72-dev.333", channel: "dev" }),
     // Keep otaWatch at its first delay. An unresolved Promise without a real timer does not keep the
     // Node process alive, while the assertions can inspect the adopted in-flight state.
     setTimeout: () => 1,

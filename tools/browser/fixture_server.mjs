@@ -1,6 +1,8 @@
 import fs from "node:fs";
 import http from "node:http";
 import path from "node:path";
+import os from "node:os";
+import { spawnSync } from "node:child_process";
 import { gzipSync } from "node:zlib";
 
 const JSON_HEADERS = { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" };
@@ -63,11 +65,38 @@ export async function startFixtureServer({ pageFile, projectRoot }) {
   const localeDir = path.join(projectRoot, "main/www/locales");
   const icon = fs.readFileSync(path.join(projectRoot, "main/www/heat_pump_icon.png"));
   const favicon = gzipSync(fs.readFileSync(path.join(projectRoot, "main/www/favicon.ico")), { level: 9 });
+  const setupWork = fs.mkdtempSync(path.join(os.tmpdir(), "daikin-setup-render-"));
+  let setup;
+  try {
+    const output = path.join(setupWork, "setup.html.gz");
+    const built = spawnSync("python3", [path.join(projectRoot, "tools/web_asset/minify_and_gzip.py"),
+      "--input", path.join(projectRoot, "main/www/setup.html"), "--output", output,
+      "--max-gzip-bytes", "4096"], { cwd: projectRoot, encoding: "utf8" });
+    if (built.status !== 0) throw new Error(built.stderr || built.stdout || "setup asset build failed");
+    setup = fs.readFileSync(output);
+  } finally { fs.rmSync(setupWork, { recursive: true, force: true }); }
+  const setupRequests = [];
+  let setupReply = { status: 200, body: { ok: true, reboot: true } };
 
   const server = http.createServer((request, response) => {
     const url = new URL(request.url, "http://127.0.0.1");
     if (url.pathname === "/" || url.pathname === "/index.html")
       return send(response, 200, "text/html; charset=utf-8", html);
+    if (url.pathname === "/setup.html") {
+      response.writeHead(200, { "Content-Type": "text/html; charset=utf-8",
+        "Content-Encoding": "gzip", "Cache-Control": "no-store" });
+      return response.end(setup);
+    }
+    if (url.pathname === "/set_wifi" && request.method === "POST") {
+      let body = "";
+      request.on("data", (chunk) => { body += chunk; });
+      request.on("end", () => {
+        setupRequests.push(JSON.parse(body));
+        response.writeHead(setupReply.status, JSON_HEADERS);
+        response.end(JSON.stringify(setupReply.body));
+      });
+      return;
+    }
     if (url.pathname === "/heat-pump-icon.png") return send(response, 200, "image/png", icon);
     if (url.pathname === "/favicon.ico") {
       response.writeHead(200, { "Content-Type": "image/vnd.microsoft.icon", "Content-Encoding": "gzip", "Cache-Control": "no-store" });
@@ -107,6 +136,8 @@ export async function startFixtureServer({ pageFile, projectRoot }) {
   const address = server.address();
   return {
     url: `http://127.0.0.1:${address.port}/`,
+    setupRequests,
+    setSetupReply(reply) { setupReply = reply; },
     close: () => new Promise((resolve, reject) => {
       server.closeIdleConnections?.();
       server.closeAllConnections?.();

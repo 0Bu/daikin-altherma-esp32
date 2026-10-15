@@ -433,6 +433,7 @@ const WEATHER_FORECAST_SERIES = Object.freeze([
 // the right of "now"; stale, incomplete or malformed responses disappear instead of being drawn as
 // plausible measurements. Device NTP time, not the browser clock, is the shared axis anchor.
 function weatherForecastView() {
+  if (S.transportUnavailable === "status") return null;
   const w = S.status?.weather_forecast;
   const nowMs = Date.parse(S.status?.ntp?.time || "");
   if (!w?.configured || !w.available || !w.fresh || !Array.isArray(w.hourly) ||
@@ -728,6 +729,7 @@ function stateHistoryCurrent(id, source) {
 
   if (source !== "x10a") return { present: false, value: null };
   if (id === "circulation_state") {
+    if (S.transportUnavailable === "status") return { present: true, value: null };
     const c = S.status?.circulation_source;
     if (!c) return { present: false, value: null };
     const value = c.configured && c.has_value && c.fresh
@@ -1734,7 +1736,18 @@ function scrubEnd(plot) {
 // can hold the SAME series at once, so a resume that refreshed only one would leave another showing
 // a pin the user has since moved.
 function renderTrendHosts() {
-  renderCards(); renderInspect(); renderSettings();
+  const active = typeof document === "undefined" ? null : document.activeElement;
+  const host = active?.closest?.("#valueGroups, #inspHist, #settingsCards");
+  const id = active?.dataset?.hist, source = active?.dataset?.source || "", cursor = active?.dataset?.cur;
+  S.trendRebuilding = true;
+  try { renderCards(); renderInspect(); renderSettings(); }
+  finally { S.trendRebuilding = false; }
+  if (!host || !id) return;
+  const next = Array.from(host.querySelectorAll("[data-hist]")).find((plot) =>
+    plot.dataset.hist === id && (plot.dataset.source || "") === source);
+  if (!next) return;
+  next.focus({ preventScroll: true });
+  if (cursor != null) { next.dataset.cur = cursor; scrubMove(next, +cursor); }
 }
 
 const chevIcon = `<svg class="vrow-chev" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>`;

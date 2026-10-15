@@ -527,6 +527,30 @@ const textWidth = (s, size, weight) =>
 // (sign, three digits, one decimal) so the fit check sees what the user does.
 const LIVE_SAMPLE = '-88.8';
 
+// Some sv elements receive WORDS at runtime, not numbers: the binary states print the translated
+// state.on/state.off, the 3-way valve prints its branch, the space-operation pill its on/off phrase.
+// Their markup holds only a placeholder ("—", "3WV"), so measuring the markup, or the numeric
+// sample, called a 46 px pill roomy while French "MARCHE" overflowed it. Each entry lists every
+// i18n key and every literal the UI can write into that element (read from js/schematic.js); the
+// widest one in each shipped locale is what the geometry rules measure. S012 checks the translated
+// keys against the assembled writers; literal variants still need source review.
+const RUNTIME_TEXT = new Map(Object.entries({
+  svFlowSwitch: { keys: ['state.on', 'state.off'], literals: ['—'] },
+  svValve2: { keys: ['state.on', 'state.off'], literals: ['—'] },
+  svValve: { keys: ['schem.to_dhw', 'schem.to_space'], literals: ['3WV'] },
+  svSpaceH: { keys: ['chip.space_on', 'chip.space_off'], literals: ['—'] },
+  svSpaceCircuit: { keys: ['schem.space_circuit', 'schem.heating', 'schem.cooling'], literals: [] },
+}));
+const glyphUnits = (s) => [...s].reduce((a, c) => a + charW(c), 0);
+function widestRuntimeText(id, lang) {
+  const spec = RUNTIME_TEXT.get(id);
+  const candidates = [...spec.literals, ...spec.keys.map((key) => {
+    const v = I18N[lang] && I18N[lang][key] != null ? I18N[lang][key] : I18N.en[key];
+    return typeof v === 'string' ? v : '';
+  })];
+  return candidates.reduce((widest, c) => (glyphUnits(c) > glyphUnits(widest) ? c : widest), '');
+}
+
 // ── walk the tree, resolving transforms, classes and text ────────────────────────────────────────
 const nodes = [];         // every drawable, with its absolute bbox
 const allEls = [];        // every element, drawable or not (a <g> carries the hit target)
@@ -560,6 +584,8 @@ function textVariants(el) {
   for (const L of langs) {
     let s = '';
     const walk = (node) => {
+      // Runtime words replace whatever the markup holds, including a data-i18n default.
+      if (node.attrs.id && RUNTIME_TEXT.has(node.attrs.id)) { s += widestRuntimeText(node.attrs.id, L); return; }
       const key = node.attrs['data-i18n'];
       if (key) {
         const v = I18N[L] && I18N[L][key] != null ? I18N[L][key] : I18N.en[key];
@@ -572,7 +598,9 @@ function textVariants(el) {
           const child = node.children.find((c) => c.off === r.off);
           if (!child) continue;
           if (child.tag === 'title') continue;         // accessible name, never painted
-          if (child.attrs.id && /^sv/.test(child.attrs.id)) { s += LIVE_SAMPLE; continue; }
+          if (child.attrs.id && /^sv/.test(child.attrs.id) && !RUNTIME_TEXT.has(child.attrs.id)) {
+            s += LIVE_SAMPLE; continue;
+          }
           walk(child);
         }
       }
@@ -798,6 +826,46 @@ for (const id of [...appSvIds].sort()) {
   if (!byId.has(id)) add('S005', id, `the UI writes "${id}" but the SVG has no such id`,
     'setTxt() on a missing element is a silent no-op — the reading never appears');
 }
+// S012: RUNTIME_TEXT must name exactly the translated words the UI writes into each sv element.
+// Every setTxt("svX", …) argument is scanned for string literals that are I18N keys; an element the
+// UI fills with translated words but the table does not list is measured by its markup placeholder
+// or as a number, which is how the flow-switch pill overflowed in French with a green audit.
+{
+  const written = new Map();
+  for (const m of appSrc.matchAll(/\bsetTxt\(\s*["'](sv\w+)["']\s*,([\s\S]*?)\);/g)) {
+    const keys = [...m[2].matchAll(/["']([\w-]+(?:\.[\w-]+)+)["']/g)].map((k) => k[1]).filter((k) => I18N.en[k] !== undefined);
+    if (keys.length === 0) continue;
+    if (!written.has(m[1])) written.set(m[1], new Set());
+    for (const k of keys) written.get(m[1]).add(k);
+  }
+  if (written.size === 0) {
+    die(2, `found no translated setTxt("sv…", …) write in ${APP} — the runtime-text scan stopped ` +
+           'recognising the UI\'s writers; fix it before trusting the fit checks');
+  }
+  for (const [id, keys] of [...written].sort()) {
+    if (!byId.has(id)) continue;                                   // S005 already reports it
+    const spec = RUNTIME_TEXT.get(id);
+    if (!spec) {
+      add('S012', id, `the UI writes translated words into "${id}" (${[...keys].sort().join(', ')}) but the audit measures its markup`,
+        'add the element to RUNTIME_TEXT in tools/schematic/check_schematic.mjs so its widest locale is fit-checked');
+      continue;
+    }
+    const listed = new Set(spec.keys);
+    const missing = [...keys].filter((k) => !listed.has(k)).sort();
+    const stale = [...listed].filter((k) => !keys.has(k)).sort();
+    if (missing.length || stale.length) {
+      add('S012', id, `RUNTIME_TEXT.${id} does not match the keys the UI writes` +
+        (missing.length ? `; unmeasured: ${missing.join(', ')}` : '') + (stale.length ? `; never written: ${stale.join(', ')}` : ''),
+        'a word the table omits is never fit-checked; a word the UI no longer writes widens nothing real');
+    }
+  }
+  for (const id of [...RUNTIME_TEXT.keys()].sort()) {
+    if (!written.has(id)) {
+      add('S012', id, `RUNTIME_TEXT.${id} lists runtime words, but the UI writes no translated text into "${id}"`,
+        'delete the stale entry, or the audit measures words the drawing never shows');
+    }
+  }
+}
 // S006: static markup is localised from I18N at boot; a key missing from a dict prints the KEY.
 for (const n of allEls) {
   const key = n.el.attrs['data-i18n'];
@@ -917,7 +985,8 @@ for (const p of pills) {
     add('G004', `${hitKey(p)}/${lang}`,
       `"${t.text[lang]}" does not fit its pill (${at(t)})`,
       `estimated ${fx(t.width)} px of text in ${fx(avail)} px of pill (${fx(t.width - avail)} px over; ` +
-      `the estimate is Helvetica-class metrics at ${t.font.size} px, ±5 %, with a "${LIVE_SAMPLE}" reading)`);
+      `the estimate is Helvetica-class metrics at ${t.font.size} px, ±5 %, with a "${LIVE_SAMPLE}" reading ` +
+      'and the widest runtime word)');
   }
 }
 // G013: neighbouring labels on one baseline must remain separate in every locale. This is the
@@ -1399,6 +1468,7 @@ console.error(
   '  S010 `sample` matches no DESCRIPTIONS entry (the explainer opens blank)\n' +
   '  S009 stray text in the SVG               S000 stale ledger line\n' +
   '  S011 a pipe inside no hit target — unhoverable, and it fails silently\n' +
+  '  S012 runtime words written into an sv element are not all measured (RUNTIME_TEXT drift)\n' +
   '  G001 drawn outside the viewBox           G002 overlapping pill/box\n' +
   '  G003 label crossed by a pipe             G004 text overflows its pill (estimate — see the slack)\n' +
   '  G005 pipe not axis-aligned               G006 pill too far from / not over its run\n' +

@@ -32,12 +32,14 @@ class Host {
     listeners.push(listener);
     this.listeners.set(type, listeners);
   }
-  fire(type, target, clientX = 0) {
+  fire(type, target, clientX = 0, key = "") {
     const event = {
-      type, target, clientX, pointerId: 7, relatedTarget: null, key: "",
+      type, target, clientX, pointerId: 7, relatedTarget: null, key,
       preventDefault() {},
+      stopPropagation() { this.stopped = true; },
     };
     for (const listener of this.listeners.get(type) || []) listener(event);
+    return event;
   }
 }
 
@@ -82,4 +84,62 @@ assert.deepEqual(calls, [
   ["end"], ["pin", "valve_dhw", 13, ""],
 ], "a drag starting on the tooltip moves and pins the newly selected sample");
 
-console.log("UI trend touch tests passed");
+// Exercise the real pin/rebuild functions: a keyboard user keeps both the focused replacement plot
+// and its chosen cursor after pinning/unpinning. Escape belongs to this plot, not its inspector.
+{
+  const keyboardHost = new Host();
+  const document = { activeElement: null };
+  let current;
+  const graphHost = { querySelectorAll: () => [current] };
+  const makePlot = () => ({
+    dataset: { hist: "temperature", source: "", n: "20" },
+    parentElement: { querySelector: () => ({ hidden: false }) },
+    closest(selector) {
+      if (selector === "[data-hist]") return this;
+      if (selector === "#valueGroups, #inspHist, #settingsCards") return graphHost;
+      return null;
+    },
+    querySelector: () => ({ hidden: false }), querySelectorAll: () => [],
+    focus() { document.activeElement = this; },
+  });
+  current = makePlot(); current.focus();
+  const state = { histPin: new Map(), scrub: null, insp: "temperature" };
+  const moves = [];
+  const ctx = vm.createContext({
+    S: state, document, clearTimeout() {},
+    historyData: { v: Array.from({ length: 20 }, (_, i) => i), dt: 300, t0: 1000 },
+    renderCards: () => {
+      keyboardHost.fire("focusout", current);
+      document.activeElement = null; current = makePlot();
+    },
+    renderInspect() {}, renderSettings() {},
+  });
+  const historySource = readAppFragments(["history.js"]);
+  vm.runInContext(historySource + "\n" + bootstrap + `
+    historyView = () => historyData;
+    scrubCount = () => 20;
+    scrubMove = (plot, i) => moves.push(i);
+    this.wireKeyboard = wireTrendScrub;
+  `, ctx);
+  ctx.moves = moves;
+  ctx.wireKeyboard(keyboardHost);
+  keyboardHost.fire("keydown", current, 0, "Home");
+  keyboardHost.fire("keydown", current, 0, "ArrowRight");
+  const first = current;
+  keyboardHost.fire("keydown", current, 0, "Enter");
+  assert.notEqual(current, first, "pinning must exercise the actual DOM replacement path");
+  assert.equal(document.activeElement, current, "the replacement plot keeps keyboard focus");
+  assert.equal(+current.dataset.cur, 1, "the replacement plot keeps the chosen cursor");
+  assert.equal(state.histPin.get("temperature").t, 1300);
+  keyboardHost.fire("keydown", current, 0, "ArrowRight");
+  assert.equal(+current.dataset.cur, 2, "continued arrows start at the preserved cursor");
+  const escape = keyboardHost.fire("keydown", current, 0, "Escape");
+  assert.equal(escape.stopped, true, "Escape must not reach the inspector's close handler");
+  assert.equal(state.histPin.has("temperature"), false);
+  assert.equal(document.activeElement, current);
+  assert.equal(+current.dataset.cur, 2);
+  assert.equal(state.insp, "temperature");
+  assert.equal(moves.at(-1), 2);
+}
+
+console.log("UI trend touch and keyboard pin/rebuild focus tests passed");

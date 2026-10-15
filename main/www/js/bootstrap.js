@@ -166,7 +166,10 @@ function wireTrendScrub(gv) {
     const step = e.key === "ArrowLeft" ? -1 : e.key === "ArrowRight" ? 1 : 0;
     if (!step && !["Home", "End", "Escape", "Enter", " "].includes(e.key)) return;
     e.preventDefault();                       // arrows would otherwise scroll the page
-    if (e.key === "Escape") { S.histPin.delete(plot.dataset.hist); scrubEnd(plot); return renderTrendHosts(); }
+    if (e.key === "Escape") {
+      e.stopPropagation();
+      S.histPin.delete(plot.dataset.hist); scrubEnd(plot); return renderTrendHosts();
+    }
     if (e.key === "Enter" || e.key === " ") {   // pin what the arrow keys are reading out
       const cur = plot.dataset.cur == null ? n - 1 : +plot.dataset.cur;
       return histPinToggle(plot.dataset.hist, cur, plot.dataset.source || "");
@@ -177,6 +180,7 @@ function wireTrendScrub(gv) {
     scrubMove(plot, +plot.dataset.cur);
   });
   gv.addEventListener("focusout", (e) => {
+    if (S.trendRebuilding) return;
     const plot = trendPlotFromTarget(e.target);
     if (plot) { delete plot.dataset.cur; scrubEnd(plot); }
   });
@@ -329,7 +333,8 @@ function wireRestOfApp() {
       user: $("mqUser").value,
       pass: $("mqPass").value,
       clear_creds: $("mqClearCreds").checked,   // explicit credential clear (blank fields keep them)
-      base: $("mqBase").value.trim(),
+      ...($("mqBase").value.trim() === $("mqBase").dataset.original ? {}
+        : { base: $("mqBase").value.trim() }),
     }, {
       btn: "mqBtn",
       mapError: (code, message) => {
@@ -755,9 +760,12 @@ function wireRestOfApp() {
     const unit = +($("hhUnit").value.trim() || 1);
     if (!Number.isInteger(port) || port < 1 || port > 65535) return bad("hhPort", t("hh.err_port"));
     if (!Number.isInteger(unit) || unit < 1 || unit > 247)   return bad("hhUnit", t("hh.err_unit"));
+    if (S.busy) { toast(t("toast.applying"), "info"); return; }
+    S.busy = true;
     setBusy("hhBtn", true);
     const ok = await applyLive({ mb_host: host, mb_port: port, mb_unit_id: unit }, t("hh.saved"));
     setBusy("hhBtn", false);
+    S.busy = false;
     if (!ok) return;
     closeHomehub();
     await refreshStatus();

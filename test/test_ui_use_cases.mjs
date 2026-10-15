@@ -68,6 +68,9 @@ class Element {
     return suffix && this.id.startsWith("otaAlert")
       ? this.doc.getElementById(this.id + suffix) : null;
   }
+  querySelectorAll() {
+    return (this.doc.modalControls?.get(this.id) || []).map((id) => this.doc.getElementById(id));
+  }
   focus() { this.doc.activeElement = this; }
   blur() { if (this.doc.activeElement === this) this.doc.activeElement = null; }
   setAttribute(name, value) { this[name] = String(value); }
@@ -78,7 +81,7 @@ class Element {
   setSelectionRange(start, end) { this.selectionStart = start; this.selectionEnd = end; }
   matches() { return false; }
   closest() { return null; }
-  contains() { return false; }
+  contains(child) { return this.doc.modalControls?.get(this.id)?.includes(child.id) || false; }
   setPointerCapture() {}
 }
 
@@ -125,6 +128,8 @@ const response = (ok, payload, status = ok ? 200 : 400) => ({
 const fetch = async (url, options = {}) => {
   const body = options.body ? JSON.parse(options.body) : null;
   fetchState.calls.push({ url, body });
+  if (fetchState.mode === "delayed")
+    return new Promise((resolve, reject) => { fetchState.respond = resolve; fetchState.fail = reject; });
   if (fetchState.mode === "throw") throw new Error("unreachable");
   if (fetchState.mode === "env3_missing" && url === "/set_board")
     return response(false, {
@@ -299,6 +304,13 @@ const cases = [
 
 const html = fs.readFileSync(new URL("../main/www/index.html", import.meta.url), "utf8");
 const htmlModals = [...html.matchAll(/<div class="modal" id="([^"]+Modal)"/g)].map((match) => match[1]).sort();
+document.modalControls = new Map();
+const modalStarts = [...html.matchAll(/<div class="modal" id="([^"]+Modal)"/g)];
+for (let i = 0; i < modalStarts.length; i++) {
+  const block = html.slice(modalStarts[i].index, modalStarts[i + 1]?.index ?? html.length);
+  document.modalControls.set(modalStarts[i][1],
+    [...block.matchAll(/<(?:button|input|select|textarea)\b[^>]*\bid="([^"]+)"/g)].map((match) => match[1]));
+}
 assert.deepEqual([...ui.MODALS].sort(), htmlModals, "MODALS must name every modal in the shipped HTML");
 assert.deepEqual(cases.map((item) => item.modal).sort(), [...ui.ROUTED_MODALS].sort(),
   "the settings interaction matrix must cover every routed modal");
@@ -1069,6 +1081,17 @@ assert.ok(mqttSave, "Save must POST /set_mqtt");
 assert.equal(mqttSave.body.base, "daikin-bench-2",
   "the base topic must be sent, trimmed — a stray space is a different topic to a broker");
 
+// Effective default and custom bases both preserve their stored representation when untouched.
+for (const custom of [false, true]) {
+  ui.S.status.mqtt.base_custom = custom;
+  fetchState.calls.length = 0; ui.S.busy = false; open(mqttCase);
+  await document.getElementById("mqttForm").fire("submit"); await settle();
+  const unchanged = fetchState.calls.find((call) => call.url === "/set_mqtt");
+  assert.equal(Object.hasOwn(unchanged.body, "base"), false,
+    "an unchanged effective base must be omitted: the API preserves the stored default/custom choice");
+}
+ui.S.status.mqtt.base_custom = false;
+
 // 2. A coded refusal lands on the BASE field with the German translation of that exact code, and
 //    leaves the broker field alone. The browser keeps no copy of the rules (logic/mqtt_base.hpp owns
 //    them), so this path is the only feedback the user gets.
@@ -1175,4 +1198,32 @@ for (const [ssid, pass, accepted] of [
   await document.getElementById("wfCancel").onclick();
 }
 
-console.log(`UI use cases: ${cases.length} routed modals + ${ui.TRANSIENT_MODALS.length} transient decision, navigation, Cancel/backdrop/Escape, accepted/rejected/invalid Save paths, UTF-8 credential boundaries`);
+// An in-flight write owns its form until its verdict. Cancel/Escape/backdrop/Back cannot hide the
+// still-applying request, and a refusal must restore the same editable dialog with inline feedback.
+for (const dismiss of ["cancel", "backdrop", "escape", "back"]) {
+  for (const accepted of [false, true]) {
+    const item = mqttCase;
+    fetchState.mode = "delayed"; ui.S.busy = false; open(item);
+    const submitted = document.getElementById(item.form).fire("submit");
+    await settle();
+    assert.equal(ui.S.pendingSave?.modal, item.modal);
+    assert.equal(document.getElementById("mqBroker").disabled, true);
+    if (dismiss === "escape") await document.fire("keydown", { key: "Escape" });
+    else if (dismiss === "back") history.back();
+    else await document.getElementById(item[dismiss]).onclick();
+    assert.equal(document.getElementById(item.modal).hidden, false);
+    assert.equal(location.hash, "#settings/mqtt");
+    fetchState.respond(response(accepted, accepted ? { reboot: false, saved: true } : { error: "refused" }));
+    await submitted; await settle();
+    assert.equal(ui.S.pendingSave, null);
+    assert.equal(ui.S.busy, false);
+    assert.equal(document.getElementById("mqBroker").disabled, false);
+    assert.equal(document.getElementById(item.modal).hidden, accepted);
+    if (!accepted) {
+      assert.equal(document.getElementById("mqError").hidden, false);
+      assert.equal(document.getElementById("mqError").textContent, "refused");
+    }
+  }
+}
+fetchState.mode = "ok";
+console.log(`UI use cases: ${cases.length} routed modals + ${ui.TRANSIENT_MODALS.length} transient decision, navigation, Cancel/backdrop/Escape, accepted/rejected/invalid Save paths, UTF-8 credential boundaries, pending-save lifetime`);

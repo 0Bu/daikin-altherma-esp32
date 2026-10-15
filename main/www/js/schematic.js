@@ -529,6 +529,7 @@ function updateSchematicStateA11y(d) {
 // sensor, and a live HomeHub must not make a stale ENV sample current. Keep its formatter and state
 // decision in one place so the compact header pill and the inspector always tell the same truth.
 function env3State(env) {
+  if (S.transportUnavailable === "status") return { text: t("env.unavailable"), cls: "err" };
   const cls = env3ConnectionTone(env);
   return cls === "ok" ? { text: t("env.live"), cls }
     : cls === "warn" ? { text: t("env.collecting"), cls }
@@ -536,7 +537,7 @@ function env3State(env) {
 }
 
 function env3Value(env, key, digits, unit) {
-  if (!env.fresh || !Number.isFinite(Number(env[key]))) return `— ${unit}`;
+  if (S.transportUnavailable === "status" || !env.fresh || !Number.isFinite(Number(env[key]))) return `— ${unit}`;
   const locale = LANG;
   const value = Number(env[key]).toLocaleString(locale,
     { minimumFractionDigits: digits, maximumFractionDigits: digits });
@@ -566,7 +567,7 @@ function renderEnv3Pill() {
   const temperature = env3Value(env, "temperature_c", 1, "°C");
   const state = env3State(env);
   setTxt("svEnv3Temp", temperature);
-  group.classList.toggle("fresh", env.fresh === true);
+  group.classList.toggle("fresh", S.transportUnavailable !== "status" && env.fresh === true);
   const label = `${t("env.card")}: ${temperature}; ${state.text}`;
   group.setAttribute("aria-label", label);
   const title = group.querySelector(":scope > title");
@@ -1582,7 +1583,7 @@ function inspectSig(e) {
   if (!e) return "";
   if (e.env3) {
     const env = S.status?.env3 || {};
-    return [LANG, S.insp, env.supported, env.enabled, env.fresh, env.error || "",
+    return [LANG, S.insp, S.transportUnavailable === "status", env.supported, env.enabled, env.fresh, env.error || "",
             env.temperature_c, env.humidity_pct, env.pressure_hpa].join("|");
   }
   const d = S.live;
@@ -1624,7 +1625,7 @@ function renderInspectHist(e, row) {
       return `${s.id}:${h ? (h.err ? "e" : h.gen) : ""}`;
     });
     const pin = S.histPin.get(ENV3_COMBINED_ID);
-    const sig = [LANG, ENV3_COMBINED_ID, ...seriesSig,
+    const sig = [LANG, ENV3_COMBINED_ID, S.transportUnavailable === "status", ...seriesSig,
                  pin ? (pin.t ?? `${pin.i}/${pin.gen}`) : ""].join("|");
     if (sig === S.inspHistSig) return;
     S.inspHistSig = sig;

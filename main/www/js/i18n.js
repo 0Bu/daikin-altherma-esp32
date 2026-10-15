@@ -960,15 +960,18 @@ function activateLang(next) {
   if (typeof renderHeader === "function") renderHeader();
   return true;
 }
-function setLang(next) {
+let _languageRequest = 0;
+function setLang(next, current = () => true) {
+  const request = ++_languageRequest;
+  const activate = (lang) => request === _languageRequest && current() ? activateLang(lang) : false;
   if (!uiLangSupported(next)) next = autoLang();
-  if (localeReady(next)) return activateLang(next);
-  return loadLocale(next).then((loaded) => activateLang(loaded ? next : "en"));
+  if (localeReady(next)) return activate(next);
+  return loadLocale(next).then((loaded) => activate(loaded ? next : "en"));
 }
 // Reconcile the language with the device's stored override (/status.ui.lang): a supported language
 // forces that language on this client; "auto" (or a pre-override device that omits the field) hands
 // the choice back to the browser. Called from refreshStatus before the frame is painted.
-function setLangFromStatus(s) {
+function setLangFromStatus(s, current = () => true) {
   const stored = s && s.ui && s.ui.lang;
-  return setLang(uiLangSupported(stored) ? stored : autoLang());
+  return setLang(uiLangSupported(stored) ? stored : autoLang(), current);
 }

@@ -38,8 +38,9 @@ function fillMqtt() {
   $("mqPass").value = "";
   // Prefilled with the EFFECTIVE base — /status reports the compile-time default when nothing is
   // stored, so this field always shows where the device actually publishes rather than a blank that
-  // reads like "not set". Submitting it unchanged is a no-op the firmware short-circuits.
+  // reads like "not set". Omit an unchanged field when posting so a default stays a default.
   $("mqBase").value = m.base || "";
+  $("mqBase").dataset.original = $("mqBase").value;
   setMqttClear(false);
   $("mqClearRow").hidden = !m.has_creds;
 }
@@ -363,6 +364,7 @@ function openHomehub() {
   openPopup("homehubModal");
 }
 function closeHomehub() {
+  if (S.pendingSave?.modal === "homehubModal") return;
   ++homehubSearchGeneration;
   closePopup("homehubModal");
   $("hhSearch").disabled = false;
@@ -1003,7 +1005,7 @@ async function otaCacheRestore(otaStatus) {
 // at the exact time their context is most useful. Guard the optional DOM methods so the browser-free
 // UI tests and the pre-status recovery shell share this exact production path.
 function syncOtaSettingsLock() {
-  const locked = !!(S.otaInstalling || S.otaCached);
+  const locked = !!(S.otaBusy || S.otaInstalling || S.otaCached);
   for (const id of ["connTile", "settingsCards"]) {
     const controls = $(id)?.querySelectorAll?.("button, select, input") || [];
     for (const control of controls) {
@@ -1021,9 +1023,9 @@ async function otaPoll(waitStates, tries, onTick, expectedGeneration = null, req
     await new Promise((r) => setTimeout(r, 1000));
     let s;
     try { s = await j("/ota/status"); } catch { continue; }   // a dropped poll is not a failure
-    if (onTick) onTick(s);
     if (expectedGeneration !== null && s.generation !== expectedGeneration)
       return { state: "error", message: t("ota.replaced") };
+    if (onTick) onTick(s);
     // A freshly accepted operation owns its generation before the 1.1 s quiesce lead changes `state`.
     // The check flow must therefore wait for the authoritative busy release, not consume the old
     // idle/error payload that happens to remain visible during that lead.
@@ -1238,22 +1240,47 @@ function otaWatch(expectedGeneration = null) {
 // On page load, adopt an update that is already running on the device (a reload during a download,
 // or a second browser tab). Silent when nothing is happening — a plain GET that finds `idle` leaves
 // the header exactly as it was.
-async function resumeOta() {
-  let s;
-  try { s = await j("/ota/status"); } catch { return; }
-  if (s?.state === "error") {
-    otaCacheClear();
-    otaAlert(s.message || t("ota.failed"));
-    return;
-  }
-  if (!s || (s.state !== "updating" && s.state !== "done")) {
-    otaCacheClear();
-    return;
-  }
+function otaActive(s) {
+  return Number.isInteger(s?.generation) && s.generation > 0 &&
+    (s.busy === true || ["checking", "updating", "done"].includes(s.state));
+}
+async function probeRunningOta() {
+  if (S.otaBusy) return true;
+  if (S.otaProbe) return S.otaProbe;
+  S.otaProbe = (async () => {
+    let s;
+    try { s = await j("/ota/status", { signal: typeof pollSignal === "function" ? pollSignal() : undefined }); }
+    catch { return false; }
+    if (otaActive(s)) { void resumeOta(s); return true; }
+    if (s?.state === "error") { otaCacheClear(); otaAlert(s.message || t("ota.failed")); }
+    else otaCacheClear();
+    return false;
+  })();
+  try { return await S.otaProbe; }
+  finally { S.otaProbe = null; }
+}
+async function resumeOta(s = null) {
+  if (!s) { await probeRunningOta(); return; }
+  if (!otaActive(s)) return;
   if (S.otaBusy) return;
-  S.busy = true; S.otaBusy = true; S.otaInstalling = true;
+  S.busy = true; S.otaBusy = true;
+  const generation = s.generation;
   let handedOff = false;
   try {
+    syncOtaSettingsLock();
+    if (s.state !== "updating" && s.state !== "done") {
+      otaInline("", { ring: true });
+      renderOtaDashboardStatus();
+      s = await otaPoll(["checking"], OTA_CHECK_POLL_TRIES, null, generation, true);
+      if (!s) { otaFail(t("ota.timeout")); return; }
+      if (s.state === "error") { otaFail(s.message || t("ota.failed")); return; }
+      if (s.state !== "updating" && s.state !== "done") {
+        S.otaBusy = false;
+        otaInline("");
+        return;
+      }
+    }
+    S.otaInstalling = true;
     // Prefer the complete last frame saved by this tab. If it is absent, stale or belongs to another
     // running version, /status is still the largest response the device builds and may legitimately
     // be unavailable while OTA TLS owns the scarce heap; retain the accurate OTA-only shell then.
@@ -1262,7 +1289,7 @@ async function resumeOta() {
     syncOtaSettingsLock();
     if (s.state === "updating") otaInline(t("ota.pct", s.progress ?? 0), { ring: true, pct: s.progress ?? 0 });
     if (restored || otaOnly) renderOtaDashboardStatus();
-    const done = s.state === "done" ? s : await otaWatch(s.generation ?? null);
+    const done = s.state === "done" ? s : await otaWatch(generation);
     if (!done)                  { otaFail(t("ota.timeout")); return; }
     if (done.state === "error") { otaFail(done.message || t("ota.failed")); return; }
     otaInline(t("ota.rebooting"), { ring: true, pct: 100 });
@@ -1272,6 +1299,7 @@ async function resumeOta() {
   } finally {
     if (!handedOff) S.busy = false;
     if (!handedOff && S.otaBusy) S.otaBusy = false;
+    if (!handedOff) syncOtaSettingsLock();
   }
 }
 
@@ -1356,6 +1384,15 @@ function otaWaitReboot() {
 function setBusy(id, on, busyLabel = "btn.saving") {
   const b = $(id);
   if (!b) return;
+  const modal = typeof MODALS !== "undefined" && MODALS.find((name) => $(name)?.contains?.(b));
+  if (on && modal && !S.pendingSave) {
+    const controls = Array.from($(modal).querySelectorAll("button, input, select, textarea"));
+    S.pendingSave = { modal, controls: controls.map((control) => [control, control.disabled]) };
+    controls.forEach((control) => { control.disabled = true; });
+  } else if (!on && modal && S.pendingSave?.modal === modal) {
+    S.pendingSave.controls.forEach(([control, disabled]) => { control.disabled = disabled; });
+    S.pendingSave = null;
+  }
   b.disabled = on;
   if (on) {
     if (b.dataset.label == null) b.dataset.label = b.textContent;   // remember the idle label once

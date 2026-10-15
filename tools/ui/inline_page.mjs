@@ -1,7 +1,7 @@
 // Host-side twin of main/www/inline_assets.cmake: splice the stylesheet and the script into their
 // marker lines of a page shell exactly as the firmware build does. CMake's string(REPLACE) copies
 // the asset bytes literally. String.prototype.replace(string, string) does not: its replacement
-// argument expands $$, $&, $`, $' and $<name>, so a template literal such as `${a}$${b}` would reach
+// argument expands $$, $&, $` and $', so a template literal such as `${a}$${b}` would reach
 // a host-rendered page with one dollar sign fewer than the device serves. Every host assembler that
 // claims to reproduce the shipped page goes through this one literal splice.
 
