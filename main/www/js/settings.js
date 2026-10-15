@@ -995,6 +995,8 @@ async function otaCacheRestore(otaStatus) {
   S._values = cached.values;
   S._modbus = cached.modbus;
   S.otaCached = true;
+  S.transportUnavailable = null;
+  S.transportBusy = false;
   await setLangFromStatus(S.status);
   renderApp();
   return true;

@@ -547,7 +547,8 @@ function renderApp() {
   S.live = (hp.connected && (S._values || []).length > 0) || (x10aDown() && mbLive() && (S._modbus || []).length)
     ? liveData() : null;
   if (S.transportUnavailable) S.live = null;
-  if (S.transportUnavailable) {
+  if (S.otaCached) renderOtaDashboardStatus();
+  else if (S.transportUnavailable) {
     if (S.otaInstalling || S.otaBusy) renderOtaDashboardStatus();
     else if (S.transportUnavailable === "status") markUnreachable();
     else sysSet(t("sys.nodata"), t(S.transportBusy ? "toast.busy_retry" : "toast.unreachable"), "dim");

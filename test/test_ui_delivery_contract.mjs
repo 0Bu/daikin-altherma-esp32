@@ -30,7 +30,7 @@ try {
 
   // Host pages must be byte-identical to the firmware page. inline_assets.cmake splices with
   // string(REPLACE), which copies asset bytes literally; String.prototype.replace(string, string)
-  // expands $$, $&, $`, $' and $<name> in its replacement and once dropped a dollar sign from
+  // expands $$, $&, $` and $' in its replacement and once dropped a dollar sign from
   // settings.js, so the render gate executed a room-source formatter the device never ships.
   // The oracle is an independent literal splice; the render gate's assembler runs as the gate runs it.
   const literalSplice = (page, marker, asset) => {
