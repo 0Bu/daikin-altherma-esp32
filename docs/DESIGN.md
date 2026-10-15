@@ -119,8 +119,9 @@ chrome or the keyboard open.
 X10A identifies its protocol and model at each boot. The physical RX/TX link may persist; the model
 is not a saved selection. Protocol and link status are read-only. Connected RX/TX pins are plain
 values; offline pins become selectors constrained by the actual board's exposed, unreserved GPIOs.
-Custom uses the generic chip-safe list. Keep the current pin visible even if it is outside the
-current choices. A pin change reruns detection using the selected pair and its swap.
+Custom uses the generic chip-safe list and retains off-list configured pins. Named boards suggest
+a distinct permitted pair if the cached pair is unavailable. Opening the view does not save these
+suggestions; changing a pin submits the displayed pair and reruns detection with that pair and its swap.
 
 HomeHub is an independent optional read-only instrument, with its own cache, liveness and
 configuration. Fresh firmware performs one bounded search on its first networked boot and persists
