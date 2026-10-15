@@ -457,9 +457,8 @@ function toast(msg, type = "info") {
 }
 
 // ── Status (drives every screen) ─────────────────────────────────────────
-// Returns whether the fetch landed, so the poll loop can back off on a device that stopped
-// answering. Its failure path IS the unreachable banner — every caller wants that, and a second
-// copy of the decision in the loop could disagree with this one.
+// Live status adoption shares the request, image and source leases below. The reboot watcher
+// uses a shorter deadline and quiet failure feedback while the normal poll reports unreachability.
 function acceptImageLease(s) {
   if (S.imageReloading) return false;
   const previous = S.imageLease;
@@ -478,14 +477,19 @@ function invalidateLiveReadings(reason, busy = false) {
   renderApp();
 }
 async function refreshStatus(paint = true) {
+  return !!(await readStatusFrame(paint));
+}
+// Return the accepted request id so an async observer can recheck ownership before its callback.
+async function readStatusFrame(paint = true, timeout, quiet = false) {
   const request = S.statusRequest = (S.statusRequest || 0) + 1;
   const current = () => request === S.statusRequest && !S.imageReloading;
   let s;
-  try { s = await j("/status", { signal: pollSignal() }); }
+  try { s = await j("/status", { signal: pollSignal(timeout) }); }
   catch (error) {
     if (!current()) return false;
     const busy = String(error.message) === "503";
     if (!S.otaCached) invalidateLiveReadings("status", busy);
+    if (quiet) return false;
     const ota = busy && typeof probeRunningOta === "function"
       ? await probeRunningOta() : false;
     if (!current()) return false;
@@ -506,7 +510,7 @@ async function refreshStatus(paint = true) {
     loadHpProbeCatalog(profile);
   hydrateRoutedPopup();
   if (paint) renderApp();
-  return true;
+  return request;
 }
 function markUnreachable() {
   // A live /ota/status response has already proved that the board is reachable. The full /status
@@ -812,6 +816,7 @@ function crashReportTask(task) {
   return JSON.stringify(task).replace(/[\u0085\u2028\u2029]/g,
     (char) => "\\u" + char.charCodeAt(0).toString(16).padStart(4, "0"));
 }
+function crashSignature(c) { return `${S.status?.boot_id || ""}:${c.reason}:${c.pc || ""}:${c.task || ""}`; }
 
 function renderCrashBanner() {
   const el = $("crashBanner"), c = S.status?.last_crash;
@@ -825,9 +830,8 @@ function renderCrashBanner() {
   // step is showing. Keying the re-render on `sig` alone would leave a stale "Download crash report"
   // button pointing at a dump that is gone — a 404 — until a reload, and would freeze the confirm
   // step out of the DOM. They must stay SEPARATE attributes: the click handler reads dataset.sig, so
-  // folding the draw state into it would compare "usb::true:" against sig "usb::" and silently break
-  // the button.
-  const sig  = `${c.reason}:${c.pc || ""}:${c.task || ""}`;
+  // folding the draw state into it would change the action identity and silently break the button.
+  const sig  = crashSignature(c);
   const ask  = S.crashAsk === sig;
   // The crash identity stays language-neutral (`sig`, used by the delete flow), while the DRAW
   // signature includes LANG because every visible label/action in the banner is localised.
@@ -937,8 +941,9 @@ async function deleteCrashReport(sig) {
   try { ok = (await fetch("/crash/dismiss", { method: "POST" })).ok; } catch { ok = false; }
   if (!ok) { toast(t("crash.delete_fail"), "err"); renderCrashBanner(); return; }
   S.crashDismissed = sig;
-  if (S.status) S.status.last_crash = null;
-  $("crashBanner").hidden = true;
+  const current = S.status?.last_crash;
+  if (current && crashSignature(current) === sig) S.status.last_crash = null;
+  renderCrashBanner();
   toast(t("crash.deleted"), "ok");
 }
 

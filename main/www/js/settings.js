@@ -1456,11 +1456,10 @@ async function errorOf(r, fallback) {
 function rebootPoll(then) {
   const deadline = Date.now() + REBOOT_POLL_WAIT_MS;
   const probe = async () => {
-    let s = null;
-    try { s = await j("/status", { signal: pollSignal(REBOOT_PROBE_TIMEOUT_MS) }); }
-    catch { /* unreachable or mid-reboot: expected here, not a failure */ }
-    if (s) {
-      S.status = s; syncHistSources(); S.busy = false;
+    const accepted = await readStatusFrame(false, REBOOT_PROBE_TIMEOUT_MS, true);
+    if (S.imageReloading) return;
+    if (accepted && accepted === S.statusRequest) {
+      S.busy = false;
       toast(t("toast.saved"), "ok");
       then();
       return;

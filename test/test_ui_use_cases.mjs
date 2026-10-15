@@ -128,6 +128,8 @@ const response = (ok, payload, status = ok ? 200 : 400) => ({
 const fetch = async (url, options = {}) => {
   const body = options.body ? JSON.parse(options.body) : null;
   fetchState.calls.push({ url, body });
+  if (fetchState.mode === "source_delete")
+    return new Promise((resolve, reject) => { fetchState.pending.set(url, { resolve, reject }); });
   if (fetchState.mode === "homehub_interleaved" && ["/discover_homehub", "/set_hp"].includes(url))
     return new Promise((resolve, reject) => { fetchState.pending.set(url, { resolve, reject }); });
   if (fetchState.mode === "delayed")
@@ -239,6 +241,7 @@ const source = readAppFragments(["i18n.js"]) + readUiLocale("de") +
 vm.runInContext(`${source}
   toast = () => {};
   renderApp = () => {};
+  const productionRefreshStatus = refreshStatus;
   refreshStatus = async () => true;
   collectBugReport = async () => ({ text: "redacted report", failed: false });
   this.__ui = {
@@ -247,6 +250,8 @@ vm.runInContext(`${source}
     otaFail, paintOtaAlert, dismissOtaAlert,
     openWifi, openMqtt, openRefTemp, openCirculation, openWeather, openSyslog,
     openNtp, openHomehub, openBoard, openBug,
+    refreshStatus: productionRefreshStatus,
+    realStatusReader: () => { refreshStatus = productionRefreshStatus; },
   };`, context, { filename: "main/www/app.sources" });
 const ui = context.__ui;
 
@@ -1279,4 +1284,42 @@ for (const order of ["discovery-first", "rejection-first"]) {
   assert.equal(searchButton.textContent, idleLabel);
 }
 fetchState.mode = "ok";
-console.log(`UI use cases: ${cases.length} routed modals + ${ui.TRANSIENT_MODALS.length} transient decision, navigation, Cancel/backdrop/Escape, accepted/rejected/invalid Save paths, UTF-8 credential boundaries, pending-save lifetime`);
+
+// A delete acknowledgement belongs to the status/source frame on which Delete was chosen. An
+// intervening real status can already contain another session's new mapping and its new history.
+ui.realStatusReader();
+for (const [modal, button, key, endpoint] of [
+  ["refTempModal", "rtDeleteBtn", "reference_temperature", "/set_ref_temp"],
+  ["circulationModal", "circDeleteBtn", "circulation_source", "/set_circulation"],
+]) {
+  fetchState.mode = "source_delete"; fetchState.pending = new Map();
+  ui.S.busy = false;
+  const original = { ...ui.S.status, version: "source-delete-fixture", app_elf_sha256: "fixture-elf",
+    boot_id: "0123456789abcdef", ui: { lang: "de" },
+    [key]: { configured: true, name: "Original", topic: "fixture/original", max_age_s: 600 } };
+  const initial = ui.refreshStatus(false);
+  fetchState.pending.get("/status").resolve(response(true, original)); await initial;
+  open(cases.find((item) => item.modal === modal));
+  const deletion = document.getElementById(button).fire("click"); await settle();
+  const acknowledgement = fetchState.pending.get(endpoint);
+  assert.ok(acknowledgement, "the real Delete handler must have issued its POST");
+  const replacement = { ...original[key], name: "New mapping", topic: "fixture/new-source" };
+  const next = { ...original, [key]: replacement };
+  const newer = ui.refreshStatus(false);
+  fetchState.pending.get("/status").resolve(response(true, next)); await newer;
+  ui.S.hist.set("new-source", { v: [42] });
+  ui.S.histPin.set("new-source", { i: 0, gen: 1 });
+  const epoch = ui.S.histEpoch;
+  const reads = fetchState.calls.filter((call) => call.url === "/status").length;
+  acknowledgement.resolve(response(true, { saved: true })); await settle();
+  assert.equal(ui.S.status[key], replacement, "a delayed Delete cannot clear a newer accepted mapping");
+  assert.equal(ui.S.histEpoch, epoch, "a delayed Delete cannot retire the newer source's history");
+  assert.equal(ui.S.hist.has("new-source"), true); assert.equal(ui.S.histPin.has("new-source"), true);
+  assert.equal(fetchState.calls.filter((call) => call.url === "/status").length, reads + 1,
+    "the guarded reconciliation read must run even when the optimistic clear loses ownership");
+  fetchState.pending.get("/status").resolve(response(true, next)); await deletion;
+  assert.equal(ui.S.status[key], replacement); assert.equal(ui.S.busy, false);
+  assert.equal(document.getElementById(modal).hidden, true);
+}
+fetchState.mode = "ok";
+console.log(`UI use cases: ${cases.length} routed modals + ${ui.TRANSIENT_MODALS.length} transient decision, navigation, Cancel/backdrop/Escape, accepted/rejected/invalid Save paths, UTF-8 credential boundaries, pending-save lifetime and source-owned Delete acknowledgements`);

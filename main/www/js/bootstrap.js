@@ -488,6 +488,7 @@ function wireRestOfApp() {
   $("rtDeleteBtn").onclick = async () => {
     if (S.busy) { toast(t("toast.applying"), "info"); return; }
     if (!S.status?.reference_temperature?.configured) return;
+    const status = S.status;
     S.busy = true;
     setRefTempActionBusy("rtDeleteBtn", true, "ref.deleting");
     const idle = () => { S.busy = false; setRefTempActionBusy("rtDeleteBtn", false); };
@@ -506,9 +507,9 @@ function wireRestOfApp() {
       const msg = await errorOf(r, t("toast.rejected"));
       idle(); showRefTempRequestError(msg); return;
     }
-    // The accepted empty mapping is already authoritative. Clear the local copy before releasing
-    // the dialog so a fast reopen cannot render the old mapping while /status is still refreshing.
-    S.status.reference_temperature = { configured: false, max_age_s: 600 };
+    // Retire this mapping before reopening, unless a newer status already owns the source.
+    if (S.status === status && !S.imageReloading)
+      status.reference_temperature = { configured: false, max_age_s: 600 };
     idle(); closeRefTemp();
     toast(t("ref.deleted"), "ok");
     await refreshStatus();
@@ -604,6 +605,7 @@ function wireRestOfApp() {
   $("circDeleteBtn").onclick = async () => {
     if (S.busy) { toast(t("toast.applying"), "info"); return; }
     if (!S.status?.circulation_source?.configured) return;
+    const status = S.status;
     S.busy = true;
     setCirculationActionBusy("circDeleteBtn", true, "circ.deleting");
     const idle = () => { S.busy = false; setCirculationActionBusy("circDeleteBtn", false); };
@@ -618,8 +620,10 @@ function wireRestOfApp() {
       const msg = await errorOf(r, t("toast.rejected"));
       idle(); showCirculationRequestError(msg); return;
     }
-    invalidateHistSources();
-    S.status.circulation_source = { configured: false, max_age_s: 120 };
+    if (S.status === status && !S.imageReloading) {
+      invalidateHistSources();
+      status.circulation_source = { configured: false, max_age_s: 120 };
+    }
     idle(); closeCirculation();
     toast(t("circ.deleted"), "ok");
     await refreshStatus();

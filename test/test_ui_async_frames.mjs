@@ -8,32 +8,45 @@ const later = () => {
   const promise = new Promise((yes, no) => { resolve = yes; reject = no; });
   return { promise, resolve, reject };
 };
-function harness() {
-  const requests = [], locales = new Map(), events = [];
+function harness(reboot = false) {
+  const requests = [], locales = new Map(), events = [], timers = [];
+  let now = 0;
   const context = vm.createContext({
     LANG: "en", navigator: { language: "en" },
     uiLangSupported: (lang) => ["en", "de", "fr"].includes(lang), autoLang: () => "en",
     localeReady: (lang) => lang !== "fr", loadLocale: (lang) => {
       const pending = later(); locales.set(lang, pending); return pending.promise;
     },
-    lsSet() {}, applyStaticI18n() {}, labelSchematicHits() {},
+    lsSet() {}, applyStaticI18n() {}, labelSchematicHits() {}, afterHydrate() {},
     location: { reload: () => events.push("reload") },
-    pollSignal() {}, hpProbeIsOpen: () => false,
-    j: (url) => { const pending = later(); requests.push({ url, ...pending }); return pending.promise; },
+    Date: class extends Date { static now() { return now; } },
+    setTimeout: (fn, delay) => { timers.push({ fn, delay }); return timers.length; },
+    pollSignal: (timeout = 6000) => ({ timeout }), hpProbeIsOpen: () => false,
+    j: (url, options) => { const pending = later(); requests.push({ url, options, ...pending }); return pending.promise; },
     t: (key) => key,
   });
   const i18n = read("i18n");
   vm.runInContext(i18n.slice(i18n.indexOf("function activateLang(next)")) + "\n" +
-    read("app_state") + "\n" + read("dashboard") + `
+    read("app_state") + "\n" + read("dashboard") + (reboot ? "\n" + read("settings") : "") + `
       renderApp = () => events.push("paint");
       renderHeader = () => {};
-      hydrateRoutedPopup = () => events.push("hydrate:" + S.status.ui.lang);
+      hpProbeIsOpen = () => false;
+      toast = (message, kind) => events.push(kind + ":" + message);
+      hydrateRoutedPopup = () => { events.push("hydrate:" + S.status.ui.lang); afterHydrate(); };
       markUnreachable = () => events.push("unreachable");
-      this.ui = { S, refreshStatus, refreshValues, setLang, language: () => LANG };
+      this.ui = { S, refreshStatus, refreshValues, setLang, language: () => LANG,
+        rebootPoll: typeof rebootPoll === "function" ? rebootPoll : null };
     `, context);
   context.events = events;
   context.ui.S._values = []; context.ui.S._modbus = [];
-  return { ...context.ui, context, requests, locales, events };
+  return { ...context.ui, context, requests, locales, events, timers,
+    runTimer() {
+      assert.equal(timers.length, 1, "reboot probes stay serial and have exactly one next timer");
+      const timer = timers.shift(); now += timer.delay;
+      return { delay: timer.delay, done: timer.fn() };
+    },
+    advance(ms) { now += ms; },
+  };
 }
 
 const frame = (lang = "en", patch = {}) => ({ version: "same", app_elf_sha256: "elf-a",
@@ -139,6 +152,134 @@ for (const change of [{ app_elf_sha256: "elf-b" }, { version: "new" }]) {
   assert.deepEqual(h.events, ["reload"]);
 }
 console.log("UI status/value ordering, lazy locale leases, transport loss and image lease pass");
+
+// Configuration reboot probes share the ordinary status lease. An older probe cannot overwrite a
+// newer poll, discard its histories or falsely complete the save (including after a late failure).
+for (const failOld of [false, true]) {
+  const h = harness(true);
+  let callbacks = 0;
+  const initial = h.refreshStatus(false); h.requests[0].resolve(frame()); await initial;
+  h.S.busy = true; h.events.length = 0;
+  h.rebootPoll(() => { callbacks++; });
+  const old = h.runTimer();
+  assert.equal(old.delay, 1500); assert.equal(h.requests[1].options.signal.timeout, 3000);
+  assert.equal(h.timers.length, 0, "no next probe is scheduled while this request is outstanding");
+  const current = h.refreshStatus(false);
+  assert.equal(h.requests[2].options.signal.timeout, 6000);
+  h.requests[2].resolve(frame("de")); await current;
+  h.S.hist.set("sentinel", { v: [42] });
+  h.S._values = [{ value: 22 }]; h.S.live = { pump: 90 };
+  if (failOld) h.requests[1].reject(new Error("old reboot transport"));
+  else h.requests[1].resolve(frame("en", { history: { epoch: 0 } }));
+  await old.done;
+  assert.equal(h.S.status.ui.lang, "de", "late reboot success cannot replace a newer normal status");
+  assert.equal(h.S.statusAcceptedRequest, h.S.statusRequest);
+  assert.equal(h.language(), "de"); assert.equal(h.S.hist.has("sentinel"), true);
+  assert.equal(h.S._values[0].value, 22); assert.equal(h.S.live.pump, 90);
+  assert.equal(h.S.transportUnavailable, null);
+  assert.equal(h.S.busy, true); assert.equal(callbacks, 0);
+  assert.deepEqual(h.events, ["hydrate:de"]);
+  const retry = h.runTimer(); h.requests[3].resolve(frame("de")); await retry.done;
+  assert.equal(callbacks, 1); assert.equal(h.S.busy, false); assert.equal(h.timers.length, 0);
+  assert.deepEqual(h.events, ["hydrate:de", "hydrate:de", "ok:toast.saved"]);
+}
+
+// Reversing issuance order gives the bounded reboot probe ownership. A late ordinary success or
+// failure and an old /values reply cannot contaminate the accepted reboot/source identity.
+for (const failOld of [false, true]) {
+  const h = harness(true);
+  const initial = h.refreshStatus(false); h.requests[0].resolve(frame()); await initial;
+  const oldStatus = h.refreshStatus(false), oldValues = h.refreshValues(false);
+  let callbacks = 0;
+  h.S.busy = true; h.events.length = 0;
+  h.rebootPoll(() => { callbacks++; });
+  const reboot = h.runTimer();
+  h.requests[3].resolve(frame("de", { boot_id: "boot-b", profile: { id: "b" } }));
+  await reboot.done;
+  assert.equal(h.S.status.boot_id, "boot-b"); assert.equal(h.language(), "de");
+  assert.equal(h.S.statusAcceptedRequest, h.S.statusRequest);
+  assert.equal(callbacks, 1); assert.equal(h.S.busy, false);
+  assert.equal(h.S.transportUnavailable, "values");
+  if (failOld) h.requests[1].reject(new Error("old poll transport"));
+  else h.requests[1].resolve(frame());
+  h.requests[2].resolve({ values: [{ value: 999 }] });
+  assert.equal(await oldStatus, false); assert.equal(await oldValues, false);
+  assert.equal(h.S.status.boot_id, "boot-b"); assert.equal(h.S._values.length, 0);
+  assert.equal(callbacks, 1); assert.equal(h.timers.length, 0);
+  assert.deepEqual(h.events, ["paint", "hydrate:de", "ok:toast.saved"]);
+}
+
+// A current failed reboot probe retires live claims even when no ordinary poll runs. Its quiet
+// feedback never calls Saved; a later complete status/value pair restores the source normally.
+{
+  const h = harness(true);
+  const initial = h.refreshStatus(false); h.requests[0].resolve(frame()); await initial;
+  h.S._values = [{ value: 99 }]; h.S._modbus = [{ value: 88 }]; h.S.live = { pump: 90 };
+  let callbacks = 0;
+  h.S.busy = true; h.events.length = 0;
+  h.rebootPoll(() => { callbacks++; });
+  const failed = h.runTimer(); h.requests[1].reject(new Error("reboot transport")); await failed.done;
+  assert.equal(h.S.live, null); assert.equal(h.S._values.length, 0); assert.equal(h.S._modbus.length, 0);
+  assert.equal(h.S.transportUnavailable, "status"); assert.equal(h.S.busy, true);
+  assert.equal(callbacks, 0); assert.deepEqual(h.events, ["paint"]);
+  const recovered = h.runTimer(); h.requests[2].resolve(frame()); await recovered.done;
+  assert.equal(callbacks, 1); assert.equal(h.S.busy, false);
+  assert.equal(h.S.transportUnavailable, "values");
+  const values = h.refreshValues(false); h.requests[3].resolve({ values: [{ value: 7 }] }); await values;
+  assert.equal(h.S.transportUnavailable, null); assert.equal(h.S._values[0].value, 7);
+  assert.equal(h.timers.length, 0);
+}
+
+// No compatible status before the wall-clock deadline releases the applying lock once. Each probe
+// still has its own short deadline; waiting for a response never creates concurrent probe timers.
+{
+  const h = harness(true);
+  h.S.busy = true;
+  let callbacks = 0;
+  h.rebootPoll(() => { callbacks++; });
+  const first = h.runTimer(); h.advance(20000);
+  h.requests[0].reject(new Error("still rebooting")); await first.done;
+  assert.equal(h.S.busy, false); assert.equal(callbacks, 0); assert.equal(h.timers.length, 0);
+  assert.deepEqual(h.events, ["paint", "info:toast.rebooted"]);
+}
+
+// A config save can coincide with another session's firmware update. Reload before consulting its
+// positional catalogs or rendering its response, including a new ELF with an unchanged version.
+for (const change of [{ app_elf_sha256: "elf-b" }, { version: "new" }]) {
+  const h = harness(true);
+  const identity = change.version ? { app_elf_sha256: "" } : {};
+  const initial = h.refreshStatus(false); h.requests[0].resolve(frame("en", identity)); await initial;
+  const accepted = h.S.status;
+  h.S.busy = true; h.events.length = 0;
+  let callbacks = 0;
+  h.rebootPoll(() => { callbacks++; });
+  const changed = h.runTimer(); h.requests[1].resolve(frame("fr", { ...identity, ...change })); await changed.done;
+  assert.equal(h.S.imageReloading, true); assert.equal(h.S.status, accepted);
+  assert.equal(h.locales.size, 0); assert.equal(callbacks, 0); assert.equal(h.timers.length, 0);
+  assert.deepEqual(h.events, ["reload"]);
+}
+// The acceptance promise itself is an async boundary: a newer poll can start after the probe
+// committed but before its caller resumes. Saved still belongs only to the currently owned read.
+{
+  const h = harness(true);
+  let callbacks = 0;
+  h.S.busy = true;
+  h.rebootPoll(() => { callbacks++; });
+  let newer;
+  h.context.afterHydrate = () => {
+    h.context.afterHydrate = () => {};
+    queueMicrotask(() => { newer = h.refreshStatus(false); });
+  };
+  const reboot = h.runTimer(); h.requests[0].resolve(frame());
+  await reboot.done;
+  assert.equal(h.S.status?.boot_id, "boot-a", "exercise the committed-read/caller-resume gap");
+  assert.equal(callbacks, 0); assert.equal(h.S.busy, true);
+  assert.equal(h.events.includes("ok:toast.saved"), false);
+  h.requests[1].resolve(frame("de")); await newer;
+  const retry = h.runTimer(); h.requests[2].resolve(frame("de")); await retry.done;
+  assert.equal(callbacks, 1); assert.equal(h.S.busy, false); assert.equal(h.timers.length, 0);
+}
+console.log("UI config reboot probes: shared status/image leases, serial deadlines and truthful recovery pass");
 
 // Settings must not keep calling cached status measurements current after the full status
 // transport fails. A values-only loss leaves these independently status-owned sources usable.
