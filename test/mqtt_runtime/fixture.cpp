@@ -1611,7 +1611,7 @@ void outgoing_curve() {
         wire_number(room, "age_s", 0, "CURVE_FRESH_ROOM_AGE_ON_WIRE");
         cJSON* diagnosis = cJSON_GetObjectItemCaseSensitive(root.get(), "diagnosis");
         require(cJSON_IsObject(diagnosis), "CURVE_DIAGNOSIS_IS_INDEPENDENT_OBJECT");
-        wire_number(diagnosis, "method_version", 2, "CURVE_METHOD_VERSION_ON_WIRE");
+        wire_number(diagnosis, "method_version", 3, "CURVE_METHOD_VERSION_ON_WIRE");
         wire_number(diagnosis, "armed", 0, "CURVE_UNEVALUATED_DIAGNOSIS_DOES_NOT_CLAIM_ARMED");
     }
     adapter::cfg.diagnostics_enabled = false;
@@ -1620,11 +1620,99 @@ void outgoing_curve() {
     require(json_witness::live == 0 && sdk::locks == 0 && sdk::takes == sdk::gives,
             "CURVE_TELEMETRY_RELEASES_JSON_AND_MUTEX_OWNERSHIP");
 }
+void curve_space_route_gate() {
+    initial_config();
+    adapter::cfg.mb_host    = "homehub-fixture";
+    adapter::modbus.enabled = adapter::modbus.connected = true;
+    adapter::modbus.profile                             = daik::ModbusProfile::HomeHub;
+    adapter::modbus.plant_gate_known = adapter::modbus.plant_gate_active = true;
+    adapter::modbus.heating_mode_known = adapter::modbus.heating_mode_active = true;
+    adapter::modbus.space_route_known                                        = true;
+    adapter::modbus.space_route_active = false; // Fresh input37=1: DHW, despite input53=1/mode38=1.
+    daik::on_mqtt(nullptr, "mqtt", MQTT_EVENT_CONNECTED, nullptr);
+    daik::service_reference_subscription(adapter::cfg, daik::s_ref_requested_epoch.load());
+    feed("room", R"({"temperature":20.5,"time":1700000100,"enabled":true})");
+    daik::service_reference_frames(adapter::cfg);
+    const auto dhw = daik::evaluate_heating_curve(adapter::cfg, true);
+    require(dhw.armed && dhw.state == daik::logic::HeatingCurveState::Hold &&
+                dhw.reason == daik::logic::HeatingCurveReason::PlantInactive &&
+                dhw.plant_gate_known && !dhw.plant_gate_active && !dhw.sample_eligible &&
+                !dhw.has_current_room_error && !dhw.has_last_sample && dhw.sequence == 0 &&
+                dhw.samples == 0,
+            "CURVE_DHW_ROUTE_BLOCKS_SPACE_HEATING_SAMPLE");
+    daik::publish_heating_curve_telemetry(adapter::cfg);
+    require(sdk::publish_calls == 1 && sdk::published[0].accepted, "CURVE_DHW_TELEMETRY_PUBLISHED");
+    {
+        daik::JsonGuard root(parse_wire(sdk::published[0]));
+        cJSON*          room      = cJSON_GetObjectItemCaseSensitive(root.get(), "room");
+        cJSON*          diagnosis = cJSON_GetObjectItemCaseSensitive(root.get(), "diagnosis");
+        cJSON*          gates     = cJSON_GetObjectItemCaseSensitive(diagnosis, "gates");
+        wire_number(room, "control_eligible", 1, "CURVE_DHW_VETO_KEEPS_VALID_ROOM_SOURCE");
+        wire_number(diagnosis, "sample_eligible", 0, "CURVE_DHW_VETO_ON_WIRE");
+        wire_number(gates, "plant_known", 1, "CURVE_DHW_ROUTE_KNOWN_ON_WIRE");
+        wire_number(gates, "plant_active", 0, "CURVE_DHW_ROUTE_INACTIVE_ON_WIRE");
+    }
+    // mb_status() withdraws known when input37 is missing, invalid, expired or from an old session.
+    // Either leftover raw Boolean must remain unable to license a sample at this adapter boundary.
+    adapter::modbus.space_route_known = false;
+    for (bool stale_route_space : {false, true}) {
+        adapter::modbus.space_route_active = stale_route_space;
+        const auto unknown                 = daik::evaluate_heating_curve(adapter::cfg, true);
+        require(unknown.state == daik::logic::HeatingCurveState::Blocked &&
+                    unknown.reason == daik::logic::HeatingCurveReason::PlantGateUnknown &&
+                    !unknown.plant_gate_known && !unknown.plant_gate_active &&
+                    !unknown.sample_eligible && !unknown.has_last_sample && unknown.sequence == 0 &&
+                    unknown.samples == 0,
+                "CURVE_UNKNOWN_ROUTE_CANNOT_BORROW_RAW_SPACE_PERMISSION");
+    }
+    adapter::modbus.plant_gate_active = false;
+    const auto idle                   = daik::evaluate_heating_curve(adapter::cfg, true);
+    require(idle.state == daik::logic::HeatingCurveState::Hold &&
+                idle.reason == daik::logic::HeatingCurveReason::PlantInactive &&
+                !idle.sample_eligible && !idle.has_last_sample,
+            "CURVE_INACTIVE_OPERATION_STAYS_HOLD_WITH_UNKNOWN_ROUTE");
+    adapter::modbus.plant_gate_active = true;
+    adapter::modbus.space_route_known = adapter::modbus.space_route_active = true;
+    const auto space = daik::evaluate_heating_curve(adapter::cfg, true);
+    require(space.sample_eligible && space.has_current_room_error && space.has_last_sample &&
+                space.reason == daik::logic::HeatingCurveReason::ForecastUnavailable &&
+                space.last_sample_room_error_k == 1.5 && space.last_sample_unix_s == 1700000100 &&
+                space.sequence == 1 && space.samples == 1,
+            "CURVE_SPACE_ROUTE_RECORDS_WITH_VALID_INDEPENDENT_INPUTS");
+    // The native profile has the same input37 semantics. A due event must still be vetoed for DHW,
+    // and the veto must not consume the cadence or erase the earlier dated event.
+    adapter::modbus.profile = daik::ModbusProfile::Altherma4;
+    sdk::ticks += daik::logic::HEATING_CURVE_SAMPLE_CADENCE_MS;
+    feed("room", R"({"temperature":20.5,"time":1700001900,"enabled":true})");
+    daik::service_reference_frames(adapter::cfg);
+    adapter::modbus.space_route_active = false;
+    const auto native_dhw              = daik::evaluate_heating_curve(adapter::cfg, true);
+    require(!native_dhw.sample_eligible && !native_dhw.has_current_room_error &&
+                native_dhw.reason == daik::logic::HeatingCurveReason::PlantInactive &&
+                native_dhw.has_last_sample && native_dhw.last_sample_unix_s == 1700000100 &&
+                native_dhw.sequence == 1 && native_dhw.samples == 1,
+            "CURVE_NATIVE_DHW_ROUTE_PRESERVES_PRIOR_EVENT_WITHOUT_NEW_SAMPLE");
+    adapter::modbus.space_route_active  = true;
+    adapter::modbus.heating_mode_active = false; // Native input38=0/None is known non-heating.
+    const auto native_none              = daik::evaluate_heating_curve(adapter::cfg, true);
+    require(!native_none.sample_eligible &&
+                native_none.reason == daik::logic::HeatingCurveReason::NonHeatingMode &&
+                native_none.sequence == 1 && native_none.samples == 1,
+            "CURVE_NATIVE_NONE_MODE_REMAINS_EXCLUDED");
+    adapter::modbus.heating_mode_active = true;
+    const auto resumed                  = daik::evaluate_heating_curve(adapter::cfg, true);
+    require(resumed.sample_eligible && resumed.last_sample_unix_s == 1700001900 &&
+                resumed.sequence == 2 && resumed.samples == 2,
+            "CURVE_DHW_VETO_DOES_NOT_CONSUME_ELIGIBLE_CADENCE");
+    require(json_witness::live == 0 && sdk::locks == 0 && sdk::takes == sdk::gives,
+            "CURVE_SPACE_ROUTE_TEST_RELEASES_JSON_AND_MUTEX_OWNERSHIP");
+}
 // One recorded event under the first scope, then the 30-minute cadence visibly holding.
 void curve_first_scope_event() {
     adapter::modbus.enabled = adapter::modbus.connected = true;
     adapter::modbus.plant_gate_known = adapter::modbus.plant_gate_active = true;
     adapter::modbus.heating_mode_known = adapter::modbus.heating_mode_active = true;
+    adapter::modbus.space_route_known = adapter::modbus.space_route_active   = true;
     adapter::cfg.mb_host                                                     = "homehub-fixture";
     daik::on_mqtt(nullptr, "mqtt", MQTT_EVENT_CONNECTED, nullptr);
     daik::service_reference_subscription(adapter::cfg, daik::s_ref_requested_epoch.load());
@@ -4089,6 +4177,8 @@ int main(int argc, char** argv) {
             outgoing_weather();
         else if (std::strcmp(scenario, "outgoing_curve") == 0)
             outgoing_curve();
+        else if (std::strcmp(scenario, "curve_space_route_gate") == 0)
+            curve_space_route_gate();
         else if (std::strcmp(scenario, "curve_consent_boundary") == 0)
             curve_consent_boundary();
         else if (std::strcmp(scenario, "curve_room_source_boundary") == 0)

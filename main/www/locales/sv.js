@@ -1,4 +1,4 @@
-// translation-source: a4d25fbd5f065a9d4715eb7230fd183ed1f4eba4c36fa1fd89855058db8f05bb
+// translation-source: 09c3fdac925087931d318f9ce22d7034bce44909b6df588cfec0ac9d51b46029
 I18N.sv = localeValues([
   /* sys.nodata */ "Inga data",
   /* sys.unreachable */ "Inte tillgänglig",
@@ -591,7 +591,7 @@ I18N.sv = localeValues([
   /* dyn.state_help_inactive */ "Källorna finns, men MQTT-insamlingen körs inte, så inget utvärderas. Inställningarna behålls; registreringen fortsätter när insamlingen körs igen.",
   /* dyn.state_help_no_broker */ "Rumskällan är sparad men ingen MQTT-broker är konfigurerad. Ange en broker under Anslutningar; källan behålls och registreringen startar automatiskt.",
   /* dyn.state_help_setup_homehub */ "Diagnosen behöver HomeHub för att skilja uppvärmning från varmvatten och stillestånd. Ange HomeHub-adressen på protokollkortet.",
-  /* dyn.state_help_homehub_disabled */ "Diagnosen behöver två HomeHub-signaler. En uttryckligen tom HomeHub-adress stänger av både Modbus och denna diagnos.",
+  /* dyn.state_help_homehub_disabled */ "Diagnosen behöver anläggningsdata från HomeHub. En uttryckligen tom HomeHub-adress stänger av både Modbus och denna diagnos.",
   /* dyn.strategy_help */ "Rumsmål minus rumstemperatur: positivt är för kallt, negativt för varmt; ingen dödzon eller avrundning. Det är en okalibrerad indikator, inte framledningsförskjutning. Läs trenden med D2-begränsning och värmebehov; termostat/ventiler kan dölja en hög kurva.",
   /* env.title */ "Utomhussensor",
   /* env.card */ "Uteklimat",

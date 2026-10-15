@@ -1,4 +1,4 @@
-// translation-source: a4d25fbd5f065a9d4715eb7230fd183ed1f4eba4c36fa1fd89855058db8f05bb
+// translation-source: 09c3fdac925087931d318f9ce22d7034bce44909b6df588cfec0ac9d51b46029
 I18N.es = localeValues([
   /* sys.nodata */ "Sin datos",
   /* sys.unreachable */ "No accesible",
@@ -591,7 +591,7 @@ I18N.es = localeValues([
   /* dyn.state_help_inactive */ "Las fuentes están configuradas, pero el muestreador MQTT no funciona, así que no se evalúa nada. La configuración se conserva; el registro se reanuda cuando vuelva a funcionar.",
   /* dyn.state_help_no_broker */ "Hay una fuente de habitación guardada, pero el diagnóstico la lee mediante MQTT y no hay ningún bróker configurado. Configura el bróker en la tarjeta Conexiones; se conserva la fuente guardada y el registro comienza por sí solo.",
   /* dyn.state_help_setup_homehub */ "El diagnóstico necesita que HomeHub indique cuándo la instalación está calentando realmente; sin él no puede distinguir una ventana de calefacción del agua caliente o una parada. Configura la dirección de HomeHub en la tarjeta Protocolo.",
-  /* dyn.state_help_homehub_disabled */ "Este diagnóstico depende de dos señales de la instalación de HomeHub. Si la dirección de HomeHub está explícitamente vacía, no se ejecutan ni Modbus ni este diagnóstico dependiente.",
+  /* dyn.state_help_homehub_disabled */ "Este diagnóstico depende de los datos de la instalación de HomeHub. Si la dirección de HomeHub está explícitamente vacía, no se ejecutan ni Modbus ni este diagnóstico dependiente.",
   /* dyn.strategy_help */ "La muestra es la temperatura objetivo de la habitación menos la temperatura real: un valor positivo significa que la habitación está por debajo del objetivo; uno negativo, que está por encima. No hay banda muerta, redondeo, limitación ni límite de velocidad. Es un indicador sin calibrar, no una corrección solicitada del agua de impulsión. La habitación de referencia debe representar la zona climatizada. Su propio termostato o unas válvulas cerradas forman un bucle de control interno: pueden eliminar la demanda de calor y ocultar una curva demasiado alta. Interpreta la tendencia ambiente junto con la frecuencia con la que la temperatura del agua de impulsión se mantiene en su mínimo (porcentaje de recorte D2) y la frecuencia con la que la zona solicita calor realmente.",
   /* env.title */ "Sensor exterior",
   /* env.card */ "Clima exterior",

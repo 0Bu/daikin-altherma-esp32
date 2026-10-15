@@ -219,8 +219,8 @@ whatever the first cycle read.
   spaces, so a full cycle is ten requests. The per-request cap is 16 registers, far below the
   protocol's 125: a batch is the unit of *loss* as much as of saving, and the longest run here is six.
 * **Two cadences.** A **full** cycle every fifth poll tick; the four between it read three fast
-  batches. Two carry the diagnosis gates — input register 53 (normal space operation) and 38
-  (heating rather than cooling). The third carries input 44, optional plant outdoor context which
+  batches. Two carry the diagnosis gates — inputs 53 (normal space operation), 37 (space rather than
+  DHW routing) and 38 (heating rather than cooling). The third carries input 44, optional plant outdoor context which
   legacy-441 requires from the same current cycle. It is explicitly **not** a gate. The extra 40–45 batch
   is one deliberate bundled request; borrowing the five-second cache would not establish event-time
   freshness. Neighbouring registers ride these batches because leaving them out saves no request.
@@ -245,7 +245,7 @@ whatever the first cycle read.
   otherwise `/status`, `/diag` and Syslog would oscillate between failure and recovery every five
   seconds without evidence that the row recovered.
 
-Transport progress does not renew an earlier measurement. Gate53, heating-mode38 and outdoor44
+Transport progress does not renew an earlier measurement. Gate53, space-route37, heating-mode38 and outdoor44
 each retain the successful response's monotonic observation time and expire individually after the
 existing seven-second project bound. The full cache retains its separate 537-second bound, including
 bounded slow fallback requests; `/status.modbus.values` stops counting it when it expires, even if

@@ -1,4 +1,4 @@
-// translation-source: a4d25fbd5f065a9d4715eb7230fd183ed1f4eba4c36fa1fd89855058db8f05bb
+// translation-source: 09c3fdac925087931d318f9ce22d7034bce44909b6df588cfec0ac9d51b46029
 I18N.ja = localeValues([
   /* sys.nodata */ "データなし",
   /* sys.unreachable */ "接続不可",
@@ -591,7 +591,7 @@ I18N.ja = localeValues([
   /* dyn.state_help_inactive */ "ソースは設定済みですが、MQTT採取器が動作していないため評価されません。設定は保持され、採取器が再び動作すると記録を再開します。",
   /* dyn.state_help_no_broker */ "室温ソースは保存済みですがMQTTブローカーが未設定です。接続カードで設定すると自動で記録を開始します。",
   /* dyn.state_help_setup_homehub */ "実際の暖房時間を判別するにはHomeHubが必要です。ないとDHWや停止と区別できません。プロトコルカードでアドレスを設定してください。",
-  /* dyn.state_help_homehub_disabled */ "この診断はHomeHubの2信号に依存します。アドレスが空ならModbusも診断も動作しません。",
+  /* dyn.state_help_homehub_disabled */ "この診断はHomeHubの設備データに依存します。アドレスが空ならModbusも診断も動作しません。",
   /* dyn.strategy_help */ "採取値は目標室温−実室温です。正なら目標未満、負なら超過。デッドバンド、丸め、制限はなく、校正済みの往水補正値ではありません。基準室は暖房ゾーンを代表する必要があり、サーモや閉弁が過高な曲線を隠す場合があります。往水最低値での制限割合と熱要求も合わせて読みます。",
   /* env.title */ "外気センサー",
   /* env.card */ "屋外環境",

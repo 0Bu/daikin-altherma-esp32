@@ -52,7 +52,7 @@ try {
   const binary = compile(sourcePath, "production");
   const baseline = execute(binary, [], 20000);
   assert.equal(baseline.status, 0, `production runtime cases\n${baseline.stdout}${baseline.stderr}`);
-  assert.match(baseline.stdout, /PASS total=31\b/);
+  assert.match(baseline.stdout, /PASS total=35\b/);
   console.log(baseline.stdout.trim());
 
   // A successfully compiled mutation must fail its particular behavioral oracle. A crash,
@@ -114,6 +114,53 @@ try {
       before: `logic::modbus_observation_age_s(${timestamp}, now_ms)`,
       after: "logic::modbus_observation_age_s(s_last_reply_ms, now_ms)",
     })),
+    {
+      name: "space-route-polarity", scenario: "space_route_values",
+      before: "space_route_active = raw == 0;",
+      after: "space_route_active = raw == 1;",
+    },
+    {
+      name: "space-route-unknown-word", scenario: "space_route_values",
+      before: "r.offset == 37 && !mb_is_special(raw) && raw <= 1",
+      after: "r.offset == 37 && !mb_is_special(raw)",
+    },
+    {
+      name: "space-route-reply-age", scenario: "space_route_age",
+      before: "logic::modbus_observation_age_s(s_space_route_ms, now_ms)",
+      after: "logic::modbus_observation_age_s(s_last_reply_ms, now_ms)",
+    },
+    {
+      name: "space-route-session-reset", scenario: "space_route_cutover",
+      before: /^ {4}s_space_route_ms\s*= -1;$/m,
+      after: "/* mutation: retain the preceding session's input37 response timestamp */",
+    },
+    ...[{ name: "full", indent: 8 }, { name: "fast", indent: 12 }].flatMap(({ name, indent }) => [
+      {
+        name: `${name}-space-route-known`, scenario: "space_route_values",
+        before: new RegExp(`^ {${indent}}s_status\\.space_route_known\\s*= final_current_session && space_route_known;`, "m"),
+        after: "s_status.space_route_known = false;",
+      },
+      {
+        name: `${name}-space-route-active`, scenario: "space_route_values",
+        before: new RegExp(`^ {${indent}}s_status\\.space_route_active\\s*= final_current_session && space_route_active;`, "m"),
+        after: "s_status.space_route_active = false;",
+      },
+      {
+        name: `${name}-space-route-session`, scenario: "space_route_cutover",
+        before: new RegExp(`^ {${indent}}s_status\\.space_route_known\\s*= final_current_session && space_route_known;`, "m"),
+        after: "s_status.space_route_known = space_route_known;",
+      },
+      {
+        name: `${name}-space-route-time`, scenario: "space_route_age",
+        before: new RegExp(`^ {${indent}}s_space_route_ms\\s*= final_current_session \\? space_route_ms : -1;`, "m"),
+        after: "s_space_route_ms = final_current_session ? esp_timer_get_time() / 1000 : -1;",
+      },
+      {
+        name: `${name}-space-route-time-session`, scenario: "space_route_cutover",
+        before: new RegExp(`^ {${indent}}s_space_route_ms\\s*= final_current_session \\? space_route_ms : -1;`, "m"),
+        after: "s_space_route_ms = space_route_ms;",
+      },
+    ]),
     ...[{ member: "s_heating_mode_ms", local: "heating_mode_ms" },
       { member: "s_plant_outdoor_ms", local: "plant_outdoor_ms" }].map(({ member, local }) => ({
       name: `completed-sweep-${member}`, scenario: "gate_age",
@@ -135,7 +182,7 @@ try {
       `${mutation.name}: only its specific assertion failure counts`);
     console.log(`negative control ${mutation.name}: rejected by ${mutation.scenario}`);
   }
-  console.log(`production Modbus runtime: 31 cases, ${mutations.length} negative controls; source sha256=${sourceHash}`);
+  console.log(`production Modbus runtime: 35 cases, ${mutations.length} negative controls; source sha256=${sourceHash}`);
 } finally {
   fs.rmSync(dir, { recursive: true, force: true });
 }

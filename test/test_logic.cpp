@@ -7626,6 +7626,7 @@ static void test_modbus_plan() {
     // Space is half the key: offset 3 exists in BOTH spaces and is a different register in each.
     CHECK(mb_offset_is_gate(MbFunc::ReadInput, 53));
     CHECK(mb_offset_is_gate(MbFunc::ReadInput, 38));
+    CHECK(mb_offset_is_gate(MbFunc::ReadInput, 37));
     CHECK(!mb_offset_is_gate(MbFunc::ReadHolding, 53));
     CHECK(!mb_offset_is_gate(MbFunc::ReadInput, 52)); // DHW operation is not a gate
 
@@ -12415,6 +12416,21 @@ static void test_circulation_source() {
 
 static void test_heating_curve_diagnosis() {
     using namespace daik::logic;
+
+    // Bit order: operation known, operation active, route known, route space.
+    // Known quiet/DHW holds; incomplete evidence blocks. Only the final tuple admits a sample.
+    constexpr HeatingCurvePlantGate expected[] = {
+        {false, false}, {true, false}, {false, false}, {false, false},
+        {true, false},  {true, false}, {true, false},  {true, false},
+        {false, false}, {true, false}, {false, false}, {false, false},
+        {false, false}, {true, false}, {false, false}, {true, true},
+    };
+    for (unsigned bits = 0; bits < 16; ++bits) {
+        const auto gate =
+            heating_curve_space_operation_gate(bits & 1, bits & 2, bits & 4, bits & 8);
+        CHECK(gate.known == expected[bits].known);
+        CHECK(gate.active == expected[bits].active);
+    }
 
     auto ready = [] {
         HeatingCurveInputs in;

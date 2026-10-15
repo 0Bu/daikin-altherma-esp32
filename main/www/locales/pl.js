@@ -1,4 +1,4 @@
-// translation-source: a4d25fbd5f065a9d4715eb7230fd183ed1f4eba4c36fa1fd89855058db8f05bb
+// translation-source: 09c3fdac925087931d318f9ce22d7034bce44909b6df588cfec0ac9d51b46029
 const plNoun = (n, one, few, many) => {
   const value = Math.abs(Number(n)), mod10 = value % 10, mod100 = value % 100;
   return value === 1 ? one
@@ -596,7 +596,7 @@ I18N.pl = localeValues([
   /* dyn.state_help_inactive */ "Źródła są skonfigurowane, ale próbnik MQTT nie działa, więc nic nie jest oceniane. Ustawienia pozostają; rejestrowanie wznowi się, gdy próbnik znów zadziała.",
   /* dyn.state_help_no_broker */ "Źródło temperatury pomieszczenia jest zapisane, ale diagnostyka odczytuje je przez MQTT, a broker nie jest skonfigurowany. Ustaw brokera na karcie Połączenia; zapisane źródło zostanie zachowane, a rejestrowanie uruchomi się automatycznie.",
   /* dyn.state_help_setup_homehub */ "Diagnostyka wymaga HomeHub, aby określić, kiedy instalacja rzeczywiście ogrzewa; bez niego nie odróżni okna ogrzewania od ciepłej wody ani postoju. Ustaw adres HomeHub na karcie Protokół.",
-  /* dyn.state_help_homehub_disabled */ "Ta diagnostyka zależy od dwóch sygnałów instalacji HomeHub. Przy jawnie pustym adresie HomeHub nie działa ani Modbus, ani ta zależna diagnostyka.",
+  /* dyn.state_help_homehub_disabled */ "Ta diagnostyka zależy od danych instalacji HomeHub. Przy jawnie pustym adresie HomeHub nie działa ani Modbus, ani ta zależna diagnostyka.",
   /* dyn.strategy_help */ "Próbka to docelowa temperatura pomieszczenia minus rzeczywista temperatura pomieszczenia: wartość dodatnia oznacza temperaturę poniżej celu, ujemna — powyżej. Nie ma strefy nieczułości, zaokrąglania, ograniczenia ani limitu szybkości zmian. To nieskalibrowany wskaźnik, nie żądana korekta temperatury wody zasilającej. Pomieszczenie referencyjne musi reprezentować ogrzewaną strefę. Jego termostat lub zamknięte zawory tworzą wewnętrzną pętlę regulacji: mogą usunąć zapotrzebowanie na ciepło i ukryć zbyt wysoką krzywą. Oceniaj przebieg temperatury pomieszczenia wraz z częstością utrzymywania temperatury wody zasilającej na minimum (udział ograniczenia D2) oraz rzeczywistego zapotrzebowania strefy na ciepło.",
   /* env.title */ "Czujnik zewnętrzny",
   /* env.card */ "Klimat zewnętrzny",

@@ -82,6 +82,7 @@ static int64_t           s_last_reply_ms = -1;  // guarded by s_mtx; this sessio
 static bool s_poll_observed = false;            // guarded by s_mtx; last attempted cycle completed
 static int64_t s_full_cache_status_ms    = -1; // guarded by s_mtx; exact cache commit time mirror
 static int64_t s_plant_gate_ms           = -1; // guarded by s_mtx; successful input53 reply time
+static int64_t s_space_route_ms          = -1; // guarded by s_mtx; successful input37 reply time
 static int64_t s_heating_mode_ms         = -1; // guarded by s_mtx; successful input38 reply time
 static int64_t s_plant_outdoor_ms        = -1; // guarded by s_mtx; successful input44 reply time
 
@@ -173,6 +174,7 @@ static uint32_t mb_reply_age_locked() {
 static void reset_observation_times_locked() {
     s_full_cache_status_ms = -1;
     s_plant_gate_ms        = -1;
+    s_space_route_ms       = -1;
     s_heating_mode_ms      = -1;
     s_plant_outdoor_ms     = -1;
 }
@@ -861,6 +863,11 @@ ModbusStatus mb_status() {
         s.plant_gate_active = false;
     }
     if (!observed ||
+        logic::modbus_observation_age_s(s_space_route_ms, now_ms) > MB_REPLY_MAX_AGE_S) {
+        s.space_route_known  = false;
+        s.space_route_active = false;
+    }
+    if (!observed ||
         logic::modbus_observation_age_s(s_heating_mode_ms, now_ms) > MB_REPLY_MAX_AGE_S) {
         s.heating_mode_known  = false;
         s.heating_mode_active = false;
@@ -942,7 +949,7 @@ static void mb_poll_once() {
         cycle_generation = s_link_generation;
     }
 
-    // A FULL cycle rebuilds the cache; a fast cycle refreshes the two gating facts plus input 44's
+    // A FULL cycle rebuilds the cache; a fast cycle refreshes the gating facts plus input 44's
     // optional event context, and deliberately commits no partial value cache.
     const bool full = logic::mb_cycle_is_full(s_cycle_tick);
 
@@ -951,11 +958,14 @@ static void mb_poll_once() {
     MbFailure first_failure;
     bool plant_gate_known = false;
     bool plant_gate_active = false;
+    bool      space_route_known     = false;
+    bool      space_route_active    = false;
     bool heating_mode_known = false;
     bool heating_mode_active = false;
     bool outdoor_row_answered = false;
     double outdoor_temperature_c = 0.0;
     int64_t   plant_gate_ms         = -1;
+    int64_t   space_route_ms        = -1;
     int64_t   heating_mode_ms       = -1;
     int64_t   plant_outdoor_ms      = -1;
 
@@ -971,13 +981,18 @@ static void mb_poll_once() {
     // the SAME word the row is built from — they are not a second read and cannot disagree with it.
     const auto take_row = [&](const def::HomeHubReg& r, uint16_t raw, int64_t observed_ms) {
         // THE SPACE-OPERATION GATE — input register 53 explicitly covers heating AND cooling. It
-        // separates normal space operation from DHW/standstill, but only input register 38 below can
-        // distinguish a heating window from cooling. A sentinel/out-of-range word leaves `known`
+        // does not exclude DHW routing: input 37 must independently report space, and input 38
+        // distinguishes heating from cooling. A sentinel/out-of-range word leaves `known`
         // false: an unknown gate must never read as "inactive", which is an ordinary quiet plant.
         if (r.space == MbFunc::ReadInput && r.offset == 53 && !mb_is_special(raw) && raw <= 1) {
             plant_gate_known = true;
             plant_gate_active = raw == 1;
             plant_gate_ms     = observed_ms;
+        }
+        if (r.space == MbFunc::ReadInput && r.offset == 37 && !mb_is_special(raw) && raw <= 1) {
+            space_route_known  = true;
+            space_route_active = raw == 0;
+            space_route_ms     = observed_ms;
         }
         if (r.space == MbFunc::ReadInput && r.offset == 38 && !mb_is_special(raw) &&
             (raw == 1 || raw == 2 ||
@@ -1252,11 +1267,14 @@ static void mb_poll_once() {
             }
             s_status.plant_gate_known = final_current_session && plant_gate_known;
             s_status.plant_gate_active = final_current_session && plant_gate_active;
+            s_status.space_route_known   = final_current_session && space_route_known;
+            s_status.space_route_active  = final_current_session && space_route_active;
             s_status.heating_mode_known = final_current_session && heating_mode_known;
             s_status.heating_mode_active = final_current_session && heating_mode_active;
             s_status.plant_outdoor = final_current_session ? plant_outdoor
                                                             : logic::OutdoorEvidence{};
             s_plant_gate_ms              = final_current_session ? plant_gate_ms : -1;
+            s_space_route_ms             = final_current_session ? space_route_ms : -1;
             s_heating_mode_ms            = final_current_session ? heating_mode_ms : -1;
             s_plant_outdoor_ms           = final_current_session ? plant_outdoor_ms : -1;
         }
@@ -1323,12 +1341,15 @@ static void mb_poll_once() {
         }
         s_status.plant_gate_known = final_current_session && plant_gate_known;
         s_status.plant_gate_active = final_current_session && plant_gate_active;
+        s_status.space_route_known   = final_current_session && space_route_known;
+        s_status.space_route_active  = final_current_session && space_route_active;
         s_status.heating_mode_known = final_current_session && heating_mode_known;
         s_status.heating_mode_active = final_current_session && heating_mode_active;
         s_status.plant_outdoor = final_current_session ? plant_outdoor
                                                         : logic::OutdoorEvidence{};
         s_full_cache_status_ms       = final_current_session ? cache_commit_ms : -1;
         s_plant_gate_ms              = final_current_session ? plant_gate_ms : -1;
+        s_space_route_ms             = final_current_session ? space_route_ms : -1;
         s_heating_mode_ms            = final_current_session ? heating_mode_ms : -1;
         s_plant_outdoor_ms           = final_current_session ? plant_outdoor_ms : -1;
     }
@@ -1541,6 +1562,8 @@ void mb_reconfigure(bool enabled) noexcept {
         s_status.values              = 0;
         s_status.plant_gate_known    = false;
         s_status.plant_gate_active   = false;
+        s_status.space_route_known   = false;
+        s_status.space_route_active  = false;
         s_status.heating_mode_known  = false;
         s_status.heating_mode_active = false;
         s_status.plant_outdoor       = logic::OutdoorEvidence{};

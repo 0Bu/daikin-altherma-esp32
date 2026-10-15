@@ -1,4 +1,4 @@
-// translation-source: a4d25fbd5f065a9d4715eb7230fd183ed1f4eba4c36fa1fd89855058db8f05bb
+// translation-source: 09c3fdac925087931d318f9ce22d7034bce44909b6df588cfec0ac9d51b46029
 I18N.fi = localeValues([
   /* sys.nodata */ "Ei tietoja",
   /* sys.unreachable */ "Ei tavoiteta",
@@ -591,7 +591,7 @@ I18N.fi = localeValues([
   /* dyn.state_help_inactive */ "Lähteet on määritetty, mutta MQTT-näytteenotto ei ole käynnissä, joten mitään ei arvioida. Asetukset säilyvät; tallennus jatkuu, kun näytteenotto toimii taas.",
   /* dyn.state_help_no_broker */ "Huonelähde on tallennettu, mutta MQTT-välittäjää ei ole määritetty. Määritä se Yhteydet-kortissa; lähde säilyy ja tallennus alkaa automaattisesti.",
   /* dyn.state_help_setup_homehub */ "HomeHub tarvitaan todellisen tilalämmityksen erottamiseen käyttövedestä ja seisokista. Määritä sen osoite Protokolla-kortissa.",
-  /* dyn.state_help_homehub_disabled */ "Diagnostiikka riippuu kahdesta HomeHub-signaalista. Tyhjäksi asetettu osoite pysäyttää sekä Modbusin että tämän diagnostiikan.",
+  /* dyn.state_help_homehub_disabled */ "Diagnostiikka riippuu HomeHubin laitetiedoista. Tyhjäksi asetettu osoite pysäyttää sekä Modbusin että tämän diagnostiikan.",
   /* dyn.strategy_help */ "Näyte on huonetavoite miinus huonelämpötila: positiivinen tarkoittaa liian kylmää, negatiivinen liian lämmintä. Kuollutta aluetta, pyöristystä tai rajoitusta ei ole. Arvo ei ole kalibroitu menoveden korjaus. Vertailuhuoneen pitää edustaa lämmitettyä aluetta; sen termostaatti tai suljetut venttiilit voivat peittää liian korkean käyrän. Lue kehitys yhdessä menoveden alarajan ja lämmityspyynnön kanssa.",
   /* env.title */ "Ulkoanturi",
   /* env.card */ "Ulkoilmasto",

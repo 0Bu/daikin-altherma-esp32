@@ -1,4 +1,4 @@
-// translation-source: a4d25fbd5f065a9d4715eb7230fd183ed1f4eba4c36fa1fd89855058db8f05bb
+// translation-source: 09c3fdac925087931d318f9ce22d7034bce44909b6df588cfec0ac9d51b46029
 I18N.cs = localeValues([
   /* sys.nodata */ "Žádná data",
   /* sys.unreachable */ "Nedostupné",
@@ -591,7 +591,7 @@ I18N.cs = localeValues([
   /* dyn.state_help_inactive */ "Zdroje jsou nastaveny, ale vzorkovač MQTT neběží, takže se nic nevyhodnocuje. Nastavení zůstává; záznam pokračuje, jakmile vzorkovač znovu poběží.",
   /* dyn.state_help_no_broker */ "Zdroj místnosti je uložen, ale diagnostika jej čte přes MQTT a není nastaven žádný broker. Nastavte broker na kartě Připojení; uložený zdroj místnosti zůstane zachován a záznam se spustí sám.",
   /* dyn.state_help_setup_homehub */ "Diagnostika potřebuje HomeHub, aby poznala, kdy soustava skutečně vytápí; bez něj nerozliší topné okno od ohřevu teplé vody nebo klidu. Nastavte adresu HomeHubu na kartě Protokol.",
-  /* dyn.state_help_homehub_disabled */ "Tato diagnostika závisí na dvou signálech soustavy z HomeHubu. Je-li adresa HomeHubu výslovně prázdná, neběží Modbus ani tato závislá diagnostika.",
+  /* dyn.state_help_homehub_disabled */ "Tato diagnostika závisí na údajích soustavy z HomeHubu. Je-li adresa HomeHubu výslovně prázdná, neběží Modbus ani tato závislá diagnostika.",
   /* dyn.strategy_help */ "Vzorek je cílová teplota místnosti minus skutečná teplota místnosti: kladná hodnota znamená, že je místnost pod cílem, záporná že je nad ním. Nepoužívá se žádné neutrální pásmo, zaokrouhlení, omezení ani omezení rychlosti změny. Jde o nekalibrovaný ukazatel, nikoli požadovanou korekci výstupní vody. Referenční místnost musí zastupovat vytápěnou zónu. Její vlastní termostat nebo zavřené ventily tvoří vnitřní regulační smyčku: mohou odstranit požadavek na teplo a skrýt příliš vysokou křivku. Průběh místnosti čtěte spolu s četností, kdy je teplota výstupní vody držena na minimu (podíl omezení D2), a s četností skutečných požadavků zóny na teplo.",
   /* env.title */ "Venkovní snímač",
   /* env.card */ "Venkovní klima",

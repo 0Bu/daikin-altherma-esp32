@@ -1,4 +1,4 @@
-// translation-source: a4d25fbd5f065a9d4715eb7230fd183ed1f4eba4c36fa1fd89855058db8f05bb
+// translation-source: 09c3fdac925087931d318f9ce22d7034bce44909b6df588cfec0ac9d51b46029
 I18N.de = localeValues([
   /* sys.nodata */ "Keine Daten",
   /* sys.unreachable */ "Nicht erreichbar",
@@ -591,7 +591,7 @@ I18N.de = localeValues([
   /* dyn.state_help_inactive */ "Die Quellen sind konfiguriert, aber die MQTT-Erfassung läuft nicht, daher wird nichts ausgewertet. Die Einstellungen bleiben erhalten; die Aufzeichnung setzt wieder ein, sobald die Erfassung läuft.",
   /* dyn.state_help_no_broker */ "Eine Raumquelle ist gespeichert, aber die Diagnose liest sie über MQTT, und es ist kein Broker konfiguriert. Broker in der Verbindungen-Karte eintragen; die gespeicherte Raumquelle bleibt erhalten und die Aufzeichnung startet von selbst.",
   /* dyn.state_help_setup_homehub */ "Die Diagnose braucht den HomeHub, um zu erfahren, wann die Anlage wirklich heizt; ohne ihn lässt sich ein Heizfenster nicht von Warmwasser oder Stillstand unterscheiden. Die HomeHub-Adresse steht in der Protokoll-Karte.",
-  /* dyn.state_help_homehub_disabled */ "Diese Diagnose benötigt zwei Anlagensignale des HomeHub. Ist die HomeHub-Adresse ausdrücklich leer, laufen weder Modbus noch diese abhängige Diagnose.",
+  /* dyn.state_help_homehub_disabled */ "Diese Diagnose benötigt Anlagendaten des HomeHub. Ist die HomeHub-Adresse ausdrücklich leer, laufen weder Modbus noch diese abhängige Diagnose.",
   /* dyn.strategy_help */ "Erfasst wird Raum-Sollwert minus Ist-Raumtemperatur: positiv bedeutet zu kalt, negativ bedeutet zu warm. Es gibt keine Totzone, Rundung, Begrenzung oder Schrittlimit. Das ist ein unkalibrierter Indikator und kein angeforderter Vorlauf-Offset. Der Referenzraum muss die beheizte Zone repräsentieren. Sein eigener Thermostat oder geschlossene Ventile bilden einen inneren Regelkreis: Sie können die Wärmeanforderung beenden und eine zu hohe Heizkurve verdecken. Den Raumverlauf deshalb zusammen damit lesen, wie oft die Vorlauftemperatur an ihrer Mindestgrenze liegt (D2-Clipping-Anteil) und wie oft die Zone tatsächlich Wärme anfordert.",
   /* env.title */ "Außensensor",
   /* env.card */ "Außenklima",

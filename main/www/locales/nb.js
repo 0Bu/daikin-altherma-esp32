@@ -1,4 +1,4 @@
-// translation-source: a4d25fbd5f065a9d4715eb7230fd183ed1f4eba4c36fa1fd89855058db8f05bb
+// translation-source: 09c3fdac925087931d318f9ce22d7034bce44909b6df588cfec0ac9d51b46029
 I18N.nb = localeValues([
   /* sys.nodata */ "Ingen data",
   /* sys.unreachable */ "Ikke tilgjengelig",
@@ -591,7 +591,7 @@ I18N.nb = localeValues([
   /* dyn.state_help_inactive */ "Kildene er konfigurert, men MQTT-innsamlingen kjører ikke, så ingenting vurderes. Innstillingene beholdes; registreringen fortsetter når innsamlingen kjører igjen.",
   /* dyn.state_help_no_broker */ "Romkilden er lagret, men ingen MQTT-broker er konfigurert. Angi broker under Tilkoblinger; kilden beholdes og registrering starter automatisk.",
   /* dyn.state_help_setup_homehub */ "Diagnosen trenger HomeHub for å skille oppvarming fra tappevann og stillstand. Angi HomeHub-adressen på protokollkortet.",
-  /* dyn.state_help_homehub_disabled */ "Diagnosen trenger to HomeHub-signaler. En uttrykkelig tom HomeHub-adresse slår av både Modbus og denne diagnosen.",
+  /* dyn.state_help_homehub_disabled */ "Diagnosen trenger anleggsdata fra HomeHub. En uttrykkelig tom HomeHub-adresse slår av både Modbus og denne diagnosen.",
   /* dyn.strategy_help */ "Signalet er rommål minus målt romtemperatur: positivt er for kaldt, negativt for varmt. Ingen dødsone, avrunding, grense eller trinn brukes. Det er en ukalibrert indikator, ikke ønsket turtemperaturforskyvning. Referanserommet må representere sonen; egen termostat eller stengte ventiler kan stoppe behovet og skjule en for høy kurve. Les derfor trenden sammen med D2-klipping ved minste turtemperatur og faktisk varmebehov.",
   /* env.title */ "Utesensor",
   /* env.card */ "Uteklima",

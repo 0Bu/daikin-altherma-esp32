@@ -1,4 +1,4 @@
-// translation-source: a4d25fbd5f065a9d4715eb7230fd183ed1f4eba4c36fa1fd89855058db8f05bb
+// translation-source: 09c3fdac925087931d318f9ce22d7034bce44909b6df588cfec0ac9d51b46029
 I18N.it = localeValues([
   /* sys.nodata */ "Nessun dato",
   /* sys.unreachable */ "Non raggiungibile",
@@ -591,7 +591,7 @@ I18N.it = localeValues([
   /* dyn.state_help_inactive */ "Le sorgenti sono configurate, ma il campionatore MQTT non è in funzione, quindi nulla viene valutato. Le impostazioni restano; la registrazione riprende quando torna in funzione.",
   /* dyn.state_help_no_broker */ "È salvata una sorgente ambiente, ma la diagnosi la legge tramite MQTT e non è configurato alcun broker. Impostare il broker nella scheda Connessioni; la sorgente ambiente salvata viene conservata e la registrazione si avvia automaticamente.",
   /* dyn.state_help_setup_homehub */ "La diagnosi necessita di HomeHub per sapere quando l'impianto sta realmente riscaldando; senza non può distinguere una finestra di riscaldamento dall'acqua calda o da un arresto. Impostare l'indirizzo HomeHub nella scheda Protocollo.",
-  /* dyn.state_help_homehub_disabled */ "Questa diagnosi dipende da due segnali dell'impianto HomeHub. Se l'indirizzo HomeHub è esplicitamente vuoto, non vengono eseguiti né Modbus né questa diagnosi dipendente.",
+  /* dyn.state_help_homehub_disabled */ "Questa diagnosi dipende da dati dell'impianto HomeHub. Se l'indirizzo HomeHub è esplicitamente vuoto, non vengono eseguiti né Modbus né questa diagnosi dipendente.",
   /* dyn.strategy_help */ "Il campione è la temperatura obiettivo ambiente meno la temperatura ambiente effettiva: positivo significa che l'ambiente è sotto l'obiettivo, negativo che è sopra. Non vengono applicati banda morta, arrotondamento, limitazione o limite di variazione. È un indicatore non calibrato, non una correzione richiesta della temperatura di mandata. L'ambiente di riferimento deve rappresentare la zona riscaldata. Il suo termostato o valvole chiuse formano un anello di regolazione interno: possono eliminare la richiesta di calore e nascondere una curva troppo alta. Valutare l'andamento ambiente insieme alla frequenza con cui la temperatura di mandata resta al minimo (quota di limitazione D2) e alla frequenza con cui la zona richiede effettivamente calore.",
   /* env.title */ "Sensore esterno",
   /* env.card */ "Clima esterno",
