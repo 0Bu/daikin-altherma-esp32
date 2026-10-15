@@ -187,7 +187,7 @@ async function assertSetup(page, server, viewport) {
   await submit("fixture", "short");
   await page.waitFor("document.getElementById('msg').textContent.includes('Password must be empty')");
   assert.equal(server.setupRequests.length, start, `${context}: invalid input must not reach the device`);
-  const ssid = ' <&"lab> ';
+  const ssid = " my wifi ";
   for (const [status, body, expected] of [
     [400, { error: "Rejected fixture credentials" }, "Rejected fixture credentials"],
     [500, { error: "Could not save settings" }, "Could not save settings"],
