@@ -399,6 +399,30 @@ try {
         'if False:'), "cold-receipt"],
     ["bench pressure permits a late boot", () =>
       replaceOnce("scripts/production-ota-gate.py", "MAX_TEST_START_UPTIME_S = 120", "MAX_TEST_START_UPTIME_S = 180"), "cold-receipt"],
+    ["readiness admits pressure before heap recovery", () =>
+      replaceOnce("scripts/production-ota-gate.py", "and heap_ready:", ":"), "cold-receipt"],
+    ["readiness ignores free heap", () =>
+      replaceOnce("scripts/production-ota-gate.py",
+        'int(ready_system.get("free_heap", 0)) >= MIN_FINAL_FREE_HEAP', 'True'), "cold-receipt"],
+    ["readiness ignores contiguous heap", () =>
+      replaceOnce("scripts/production-ota-gate.py",
+        'int(ready_system.get("max_alloc", 0)) >= MIN_FINAL_LARGEST_BLOCK', 'True'), "cold-receipt"],
+    ["readiness renews its deadline on every sample", () =>
+      replaceOnce("scripts/production-ota-gate.py",
+        'remaining = ready_deadline - time.monotonic()\n        if remaining <= 0:',
+        'remaining = OTA_CHECK_TIMEOUT_S\n        if remaining <= 0:'), "cold-receipt"],
+    ["readiness accepts responses after the deadline", () =>
+      replaceOnce("scripts/production-ota-gate.py",
+        'remaining = ready_deadline - time.monotonic()\n        if remaining <= 0:',
+        'remaining = ready_deadline - time.monotonic()\n        if remaining <= 0 and not heap_ready:'), "cold-receipt"],
+    ["readiness status request exceeds the remaining budget", () =>
+      replaceOnce("scripts/production-ota-gate.py",
+        'started = request_status_deadline(pinned_endpoint, timeout=min(1, remaining))',
+        'started = request_status_deadline(pinned_endpoint, timeout=1)'), "cold-receipt"],
+    ["readiness requests status after sleep expired", () =>
+      replaceOnce("scripts/production-ota-gate.py",
+        'remaining = ready_deadline - time.monotonic()\n        if remaining <= 0:\n            continue',
+        'remaining = ready_deadline - time.monotonic()\n        if False:\n            continue'), "cold-receipt"],
     ["main repeats warm bench pressure after restore", () =>
       replaceOnce("scripts/production-ota-gate.py", '    test_evidence = full_download_evidence["cold_stress"]',
         '    test_evidence = stress_board(host=bench["host"])'), "cold-receipt"],
@@ -508,8 +532,8 @@ try {
     ["post-reboot bench pressure no longer waits for MQTT", () =>
       replaceOnce(
         "scripts/production-ota-gate.py",
-        "if mqtt_connected is True and (not require_weather or fetching is False):",
-        "if require_weather and mqtt_connected is True and fetching is False:",
+        "if mqtt_connected is True and (not require_weather or fetching is False) and heap_ready:",
+        "if require_weather and mqtt_connected is True and fetching is False and heap_ready:",
       )],
     ["post-reboot readiness absorbs allocation failures", () =>
       replaceOnce(
