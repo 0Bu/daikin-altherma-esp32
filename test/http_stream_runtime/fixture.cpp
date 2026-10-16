@@ -37,6 +37,7 @@ inline daik::Config                   current;
 inline std::vector<daik::CachedValue> rows, modbus_rows;
 inline daik::HpValuesIdentity         identity{"generic", 0x1234, 7, 11};
 inline bool                           ota = false, weather = false, modbus_live = false;
+inline bool                           config_unreadable    = false;
 inline bool                           change_history_epoch = false;
 inline uint32_t                       epoch                = 42;
 inline int                            failure = 0, stage_race = 0;
@@ -69,6 +70,7 @@ void reset() {
     current.wifi_ssid                       = "Café \"quoted\"\\line\n";
     current.mqtt_base                       = "daikin-altherma-esp32";
     ota = weather = modbus_live = change_history_epoch = false;
+    config_unreadable                                  = false;
     epoch                                              = 42;
     failure = stage_race = 0;
     stack_samples = wifi_calls = 0;
@@ -190,6 +192,7 @@ void chunk_sweep(const char* uri, esp_err_t (*handler)(httpd_req_t*)) {
 namespace daik {
 Config      config() { return fixture::current; }
 std::string config_profile() { return fixture::current.profile; }
+bool        config_stored_blob_unreadable() { return fixture::config_unreadable; }
 bool        hw_octal_spi() { return false; }
 bool        provisioning_ap_active() { return false; }
 bool        ota_download_active() { return fixture::ota; }
@@ -354,14 +357,52 @@ int main(int argc, char** argv) {
             emit(req, uri);
         }
     });
+    run("config_unreadable_status", [] {
+        for (const bool unreadable : {false, true}) {
+            config_unreadable = unreadable;
+            for (const bool redact : {false, true}) {
+                auto req = request();
+                check(invoke(req, redact ? "/status?redact=1" : "/status", daik::h_status) ==
+                          ESP_OK,
+                      "stored configuration status failed");
+                successful(req);
+                check((req.response.find("\"config_unreadable\":") != std::string::npos) ==
+                          unreadable,
+                      "stored configuration warning omitted or fabricated");
+                if (unreadable)
+                    check(req.response.find("\"config_unreadable\":true") != std::string::npos,
+                          "stored configuration warning is not literal true");
+                emit(req, unreadable
+                              ? (redact ? "config-unreadable-redacted" : "config-unreadable-plain")
+                              : (redact ? "config-readable-redacted" : "config-readable-plain"));
+            }
+        }
+        config_unreadable = false;
+        current           = {};
+        for (const bool redact : {false, true}) {
+            auto req = request();
+            check(invoke(req, redact ? "/status?redact=1" : "/status", daik::h_status) == ESP_OK,
+                  "unconfigured status failed");
+            successful(req);
+            check(req.response.find("\"config_unreadable\":") == std::string::npos,
+                  "unconfigured device has a stored configuration warning");
+            emit(req, redact ? "config-absent-redacted" : "config-absent-plain");
+        }
+    });
     run("allocation_failures", [] {
         allocation_sweep("/status", daik::h_status);
+        config_unreadable = true;
+        allocation_sweep("/status?redact=1", daik::h_status);
+        config_unreadable = false;
         allocation_sweep("/values", daik::h_values);
         allocation_sweep("/history?row=leaving_water", daik::h_history);
         allocation_sweep("/diag?redact=1", daik::h_diag);
     });
     run("chunk_failures", [] {
         chunk_sweep("/status", daik::h_status);
+        config_unreadable = true;
+        chunk_sweep("/status?redact=1", daik::h_status);
+        config_unreadable = false;
         chunk_sweep("/values", daik::h_values);
         chunk_sweep("/history?row=leaving_water", daik::h_history);
         chunk_sweep("/diag", daik::h_diag);
@@ -514,6 +555,15 @@ int main(int argc, char** argv) {
               "protocol prefix/suffix failed");
         successful(req);
         emit(req, "framed-values");
+        config_unreadable = true;
+        req               = request();
+        check(invoke(req, "/status",
+                     [](httpd_req_t* request) {
+                         return daik::http_send_status_json(request, "{\"result\":", "}", true);
+                     }) == ESP_OK,
+              "status protocol prefix/suffix failed");
+        successful(req);
+        emit(req, "framed-status-redacted");
     });
     run("scan_completed_oracles", [] {
         maximum_scan();

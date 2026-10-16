@@ -12453,6 +12453,102 @@ static void test_heating_curve_diagnosis() {
         return in;
     };
 
+    // Current diagnosis expires independently of the 30-minute event cadence, even when every
+    // consumer keeps reading it. Time zero is a real evaluation time, not an uninitialized marker.
+    {
+        HeatingCurveDiagnosis frozen;
+        CHECK(noexcept(frozen.snapshot_at(0)));
+        const auto never = frozen.snapshot_at(INT64_MAX);
+        CHECK(never.state == HeatingCurveState::Off &&
+              never.reason == HeatingCurveReason::Disabled);
+        CHECK(heating_curve_reported_reason(true, never.state, never.reason) ==
+              HeatingCurveReason::SamplerInactive);
+        HeatingCurveInputs fi = ready();
+        fi.outdoor            = outdoor_env3_evidence(true, true, -4.5);
+        fi.plant_outdoor      = outdoor_homehub_evidence(true, true, -3.25);
+        const auto first      = frozen.evaluate(fi);
+        CHECK(frozen.snapshot_at(0).sample_eligible);
+        CHECK(frozen.snapshot_at(HEATING_CURVE_EVALUATION_MAX_AGE_MS).sample_eligible);
+        for (int64_t read_at : {HEATING_CURVE_EVALUATION_MAX_AGE_MS + 1, int64_t{9000}, int64_t{-1},
+                                int64_t{INT64_MAX}}) {
+            const auto aged = frozen.snapshot_at(read_at);
+            CHECK(aged.armed && aged.state == HeatingCurveState::Blocked &&
+                  aged.reason == HeatingCurveReason::EvaluationStale);
+            CHECK(std::string(heating_curve_reason_name(aged.reason)) == "evaluation_stale");
+            CHECK(!aged.sample_eligible && !aged.has_current_room_error &&
+                  !aged.forecast_available && !aged.plant_gate_known && !aged.plant_gate_active &&
+                  !aged.heating_mode_known && !aged.heating_mode_active);
+            CHECK(!aged.has_outdoor_temperature && aged.outdoor_source == OutdoorSource::None &&
+                  !aged.has_plant_outdoor_temperature &&
+                  aged.plant_outdoor_source == OutdoorSource::None);
+            CHECK(!aged.room_has_source_time && aged.room_source_unix_s == -1 &&
+                  !aged.room_age_known && aged.room_age_s == 0);
+            CHECK(aged.has_last_sample && aged.last_sample_unix_s == first.last_sample_unix_s &&
+                  aged.last_sample_room_error_k == first.last_sample_room_error_k &&
+                  aged.has_last_sample_outdoor &&
+                  aged.last_sample_outdoor_source == OutdoorSource::Env3 &&
+                  aged.last_sample_outdoor_temperature_c == -4.5 &&
+                  aged.has_last_sample_plant_outdoor &&
+                  aged.last_sample_plant_outdoor_source == OutdoorSource::HomeHub &&
+                  aged.last_sample_plant_outdoor_temperature_c == -3.25);
+            CHECK(aged.sequence == first.sequence && aged.samples == first.samples &&
+                  aged.evaluations == first.evaluations && aged.holds == first.holds &&
+                  aged.blocks == first.blocks);
+        }
+        CHECK(frozen.snapshot().state == HeatingCurveState::Recording);
+        CHECK(frozen.snapshot().sample_eligible); // A read cannot mutate the owner's sampler.
+        fi.now_ms = 9001;
+        fi.now_unix_s += 9;
+        const auto resumed = frozen.evaluate(fi);
+        CHECK(resumed.reason == HeatingCurveReason::SamplingInterval &&
+              resumed.sequence == first.sequence && resumed.samples == first.samples &&
+              resumed.evaluations == first.evaluations + 1);
+        CHECK(frozen.snapshot_at(9001).sample_eligible);
+        CHECK(frozen.snapshot_at(9000).reason == HeatingCurveReason::EvaluationStale);
+        CHECK(frozen.snapshot_at(12001).sample_eligible);
+        CHECK(frozen.snapshot_at(12002).reason == HeatingCurveReason::EvaluationStale);
+        frozen.forget_samples();
+        const auto replaced = frozen.snapshot_at(9001);
+        CHECK(replaced.reason == HeatingCurveReason::EvaluationStale && !replaced.sample_eligible &&
+              !replaced.has_last_sample && replaced.sequence == first.sequence &&
+              replaced.evaluations == resumed.evaluations);
+        fi.now_ms = 9002;
+        CHECK(frozen.evaluate(fi).sequence == first.sequence + 1);
+        fi.armed = false;
+        frozen.evaluate(fi);
+        const auto disabled = frozen.snapshot_at(INT64_MAX);
+        CHECK(disabled.state == HeatingCurveState::Off &&
+              disabled.reason == HeatingCurveReason::Disabled && !disabled.sample_eligible &&
+              !disabled.has_last_sample);
+    }
+    // HOLD and BLOCK are genuine fresh evaluations too, although their early-return paths do not
+    // update the event/clock anchor. A first sample without forecast expires in exactly the same
+    // way.
+    {
+        HeatingCurveDiagnosis states;
+        HeatingCurveInputs    si = ready();
+        si.plant_gate_active     = false;
+        CHECK(states.evaluate(si).state == HeatingCurveState::Hold);
+        si.now_ms = 3001;
+        states.evaluate(si);
+        CHECK(states.snapshot_at(6001).state == HeatingCurveState::Hold);
+        CHECK(states.snapshot_at(6002).reason == HeatingCurveReason::EvaluationStale);
+        si.now_ms            = 6003;
+        si.homehub_connected = false;
+        CHECK(states.evaluate(si).reason == HeatingCurveReason::HomeHubUnavailable);
+        CHECK(states.snapshot_at(9003).reason == HeatingCurveReason::HomeHubUnavailable);
+        CHECK(states.snapshot_at(9004).reason == HeatingCurveReason::EvaluationStale);
+        si                    = ready();
+        si.now_ms             = 9005;
+        si.forecast_available = false;
+        CHECK(states.evaluate(si).state == HeatingCurveState::Degraded);
+        CHECK(states.snapshot_at(12006).reason == HeatingCurveReason::EvaluationStale);
+        CHECK(states.snapshot_at(12006).samples == 1);
+        si.now_ms = -1;
+        CHECK(states.evaluate(si).reason == HeatingCurveReason::ClockInvalid);
+        CHECK(states.snapshot_at(0).reason == HeatingCurveReason::EvaluationStale);
+    }
+
     HeatingCurveDiagnosis      diagnosis;
     HeatingCurveInputs         in; // default: no room source configured, so nothing is armed
     const HeatingCurveSnapshot off = diagnosis.evaluate(in);

@@ -1,4 +1,4 @@
-// translation-source: 7480385d29565e389fed9481d6e1b12d6ed936d5931d38c0113cd63cd42a0341
+// translation-source: 6a7c8bdd68e0dbde1e916efab20768c5704a2a988360239d3ab300b76d2039aa
 I18N.fi = localeValues([
   /* sys.nodata */ "Ei tietoja",
   /* sys.unreachable */ "Ei tavoiteta",
@@ -29,6 +29,8 @@ I18N.fi = localeValues([
   /* sys.fault_line */ (c) => "Vika · " + c + " — tarkista Daikin-vikakoodi.",
   /* sys.warning_line */ (c) => "Varoitus · " + c + " — tarkista lämpöpumppu.",
   /* sys.polled */ (s) => `Luettu ${s} s sitten`,
+  /* config.unreadable_title */ "Palveluasetuksia ei voi lukea",
+  /* config.unreadable_meta */ "Tämä versio ei voinut lukea tallennettuja palveluasetuksia. Se käyttää vara-asetuksia eikä ole korvannut säilytettyä kopiota. Uudempi yhteensopiva laiteohjelmisto saattaa palauttaa sen. Palveluasetusten onnistunut tallennus korvaa sen; pelkkien X10A-nastojen tai protokollan tallennus ei.",
   /* recovery.title */ "Palautustila",
   /* recovery.meta_heap */ "Muisti loppui toistuvasti ja laite käynnistyi uudelleen. Lämpöpumppuyhteys ja MQTT on nyt poistettu käytöstä, jotta käyttöliittymä säilyy tavoitettavana. Asetukset ovat todennäköisesti kunnossa — asenna uudempi laiteohjelmisto Asetuksista. Virran katkaiseminen ja kytkeminen uudelleen käynnistää kaikki palvelut uudelleen.",
   /* recovery.meta */ "Laite käynnistyi toistuvasti uudelleen ja siirtyi palautustilaan. Lämpöpumppu- ja MQTT-yhteydet on keskeytetty. Tarkista asetukset, erityisesti Asetukset-näkymän Protokolla-kortin RX/TX-nastat, ja käynnistä laite uudelleen.",
@@ -546,6 +548,7 @@ I18N.fi = localeValues([
   /* dyn.state_homehub_disabled */ "Diagnostiikka pois · HomeHub poistettu",
   /* dyn.state_no_broker */ "Ei tallenna · ei MQTT-välittäjää",
   /* dyn.state_safe_mode */ "Ei tallenna · vikasietotila",
+  /* dyn.state_stale */ "Ei äskettäistä arviointia",
   /* dyn.state_inactive */ "Ei tallenna · näytteenotto ei käy",
   /* dyn.room_off */ "Huonetermostaatti pois päältä",
   /* dyn.room_not_heating */ "Huonetermostaatti ei ole lämmitystilassa",
@@ -588,6 +591,7 @@ I18N.fi = localeValues([
   /* dyn.state_help_blocked */ "Tarvittava tulo puuttuu, joten mitään ei tallenneta. Tallennus jatkuu tulon palattua; vanhoja tai epäselviä mittaustietoja ei käytetä.",
   /* dyn.state_help_room */ "Huonelukema saapuu, mutta siitä ei nyt saada kelvollista poikkeamaa tavoitteesta. Näytettä ei muodosteta ennen kuin lähde kelpaa.",
   /* dyn.state_help_setup */ "Diagnostiikka alkaa, kun MQTT-huonelähde ja tavoite tallennetaan. Ennuste on valinnainen vertailu; sijaintia ei tarvitse luovuttaa.",
+  /* dyn.state_help_stale */ "Tätä tarkistusta ei ole ajettu äskettäin. Sen nykyiset syötteet ovat tuntemattomia; viimeisin tapahtuma säilytetään. Tämä ei osoita välittäjän tai anturin vikaa.",
   /* dyn.state_help_inactive */ "Lähteet on määritetty, mutta MQTT-näytteenotto ei ole käynnissä, joten mitään ei arvioida. Asetukset säilyvät; tallennus jatkuu, kun näytteenotto toimii taas.",
   /* dyn.state_help_no_broker */ "Huonelähde on tallennettu, mutta MQTT-välittäjää ei ole määritetty. Määritä se Yhteydet-kortissa; lähde säilyy ja tallennus alkaa automaattisesti.",
   /* dyn.state_help_setup_homehub */ "HomeHub tarvitaan todellisen tilalämmityksen erottamiseen käyttövedestä ja seisokista. Määritä sen osoite Protokolla-kortissa.",

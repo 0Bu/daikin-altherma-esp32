@@ -43,6 +43,7 @@ const layoutAudit = `(() => {
   const candidates = document.querySelectorAll(
     "button, [role=button], [role=dialog], .field-label, .field-help, .hint, .section-label, " +
     ".hdr-title, .hdr-name, .conn-label, .conn-value, .vrow-label, .vrow-val, .ota-alert-message, " +
+    ".recovery-banner .crash-title, .recovery-banner .crash-meta, " +
     "#valueGroups .vitem.open .vdesc-inner, #valueGroups .vitem.open .vdesc-body, " +
     "#valueGroups .vitem.open .vdesc-p"
   );
@@ -369,6 +370,68 @@ async function activateLocale(page, locale) {
   })()`);
   assert.equal(result.lang, locale, `${locale}: html lang must follow the active catalog`);
   await page.frame();
+}
+
+async function assertStatusTruth(page, context) {
+  await page.evaluate(`(() => {
+    window.__statusTruthPrevious = { status: S.status, open: new Set(S.descOpen) };
+    S.descOpen.delete("dynamic:outdoor"); S.descOpen.delete("dynamic:plant-outdoor");
+    S.status = { ...S.status, sys: { ...S.status.sys, config_unreadable: true },
+      reference_temperature: { configured: true, name: "Example room", topic: "room/state",
+        has_value: true, temperature_c: 21.5, has_setpoint: true, setpoint_c: 22, age_s: 1,
+        fresh: true, freshness_reason: "fresh", temperature_valid: true, control_eligible: true,
+        reason: "eligible", room_error_k: -0.5 },
+      env3: { ...S.status.env3, enabled: true, connected: true, fresh: true, temperature_c: 12.4 },
+      heating_curve: { armed: true, state: "blocked", reason: "evaluation_stale", reason_code: 15,
+        sample_eligible: false, current_room_error_k: null, outdoor_temperature_c: null,
+        plant_outdoor_temperature_c: null, plant_outdoor_source: null, forecast_available: false,
+        last_sample_room_error_k: -0.4, last_sample_unix_s: 1780000000,
+        last_sample_outdoor_temperature_c: 12.3, last_sample_outdoor_source: "env3",
+        last_sample_plant_outdoor_temperature_c: 8.9, last_sample_plant_outdoor_source: "homehub" } };
+    renderApp();
+    return true;
+  })()`);
+  try {
+    for (const [stage, id] of [["dashboard", "configWarningDash"], ["settings", "configWarningSettings"]]) {
+      await page.evaluate(`showStage(${JSON.stringify(stage)}); renderApp(); renderApp(); true`);
+      await page.frame();
+      assert.equal(await page.evaluate(`(() => {
+        const note = document.getElementById(${JSON.stringify(id)});
+        return !note.hidden && note.getAttribute("role") === "alert" &&
+          note.innerText.includes(t("config.unreadable_title")) &&
+          note.innerText.includes(t("config.unreadable_meta")) &&
+          !note.querySelector("button, [role=button], input, a, [tabindex]");
+      })()`), true, `${context}/${stage}: current unreadable settings warning persists without dismissal`);
+      assertLayout(await page.evaluate(layoutAudit), `${context}/${stage}`);
+      await assertAccessibility(page, `${context}/${stage}`, { nativeTree: true });
+      await captureNativeEvidence(page, `${context}/${stage}`, id);
+    }
+    assert.deepEqual(await page.evaluate(`(() => {
+      const state = document.getElementById("dynamic-state-detail").textContent;
+      const room = document.getElementById("dynamic-room-sources-detail");
+      return { stale: state.includes(t("dyn.state_help_stale")),
+        inactive: state.includes(t("dyn.state_help_inactive")),
+        freshRoom: roomSourceStatus(S.status.reference_temperature, S.status.mqtt).cls === "ok",
+        roomCopy: room.textContent.includes(t("ref.status.measurement_valid")),
+        historical: S.status.heating_curve.last_sample_room_error_k === -0.4 };
+    })()`), { stale: true, inactive: false, freshRoom: true, roomCopy: true, historical: true },
+    `${context}: stale check remains distinct from its independently fresh room source and past event`);
+    for (const [id, sample, source] of [["outdoor", 12.3, "ENV III"], ["plant-outdoor", 8.9, "HomeHub"]]) {
+      await clickDisclosure(page, `[data-desc="dynamic:${id}"]`);
+      assert.equal(await page.evaluate(`(() => {
+        const text = document.getElementById(${JSON.stringify(`dynamic-${id}-detail`)}).innerText;
+        return text.includes(t("dyn.outdoor_status_idle", ${JSON.stringify(source)})) &&
+          text.includes((${sample}).toLocaleString(LANG,
+            { minimumFractionDigits: 1, maximumFractionDigits: 1 }));
+      })()`), true, `${context}/${id}: stale evaluation keeps the last sample without blaming the sensor`);
+      assertLayout(await page.evaluate(layoutAudit), `${context}/${id}`);
+      await assertAccessibility(page, `${context}/${id}`, { nativeTree: true });
+    }
+  } finally {
+    await page.evaluate(`S.status = window.__statusTruthPrevious.status;
+      S.descOpen = window.__statusTruthPrevious.open; delete window.__statusTruthPrevious;
+      S.clickHold = false; showStage("dashboard"); renderApp(); true`);
+  }
 }
 
 // Native A4 metadata belongs to each cached /values row. Use the actual Modbus card/accordions,
@@ -969,6 +1032,7 @@ try {
       await assertAccessibility(page, `${viewport.name}/${locale}/dashboard`, { nativeTree: true });
       await assertFlowSwitchWords(page, `${viewport.name}/${locale}/flow-switch`);
       await assertPlantDiagnosis(page, `${viewport.name}/${locale}/diagnosis`);
+      await assertStatusTruth(page, `${viewport.name}/${locale}/status-truth`);
       await assertNativeAltherma4(page, `${viewport.name}/${locale}/native-altherma4`);
       nativeAltherma4Checks++;
 

@@ -73,6 +73,13 @@
              crash-looped on a bad config and came up minimally). Rendered by renderRecoveryBanner();
              not dismissible — it reflects a live state and clears itself on a healthy reboot. -->
         <div class="recovery-banner" id="recoveryBanner" hidden></div>
+        <div class="recovery-banner crash-head" id="configWarningDash" role="alert" hidden>
+          <span class="crash-ico" aria-hidden="true">!</span>
+          <div class="crash-txt">
+            <div class="crash-title" data-i18n="config.unreadable_title">Service settings unreadable</div>
+            <div class="crash-meta" data-i18n="config.unreadable_meta"></div>
+          </div>
+        </div>
         <!-- WiFi rollback banner: shown when /status.wifi.rolled_back is true (the last /set_wifi was
              undone — the new credentials never connected, so the device restored the old ones and
              rebooted). Rendered by renderRollbackBanner(); not dismissible — the marker is sticky
@@ -822,6 +829,13 @@
           <button class="iconbtn bordered ota-alert-close" data-ota-alert-close>×</button>
         </div>
         <div class="recovery-banner" id="statusSnapshot" role="status" hidden></div>
+        <div class="recovery-banner crash-head" id="configWarningSettings" role="alert" hidden>
+          <span class="crash-ico" aria-hidden="true">!</span>
+          <div class="crash-txt">
+            <div class="crash-title" data-i18n="config.unreadable_title">Service settings unreadable</div>
+            <div class="crash-meta" data-i18n="config.unreadable_meta"></div>
+          </div>
+        </div>
         <div class="conn-tile" id="connTile"></div>
         <div id="settingsCards"></div>
         <!-- Product · version · the report action. "Report a bug" was the ESP32 card's last ROW

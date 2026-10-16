@@ -193,7 +193,8 @@ void config_load() {
     // is not (logic/config_store.hpp, ConfigLoadVerdict). An entry that is present but rejected — a
     // newer layout after a downgrade or rollback, damage, truncation — or that could not be read is
     // KEPT: the automatic writers ask config_stored_blob_unreadable() and skip their write, so only
-    // an explicit owner save replaces it, and updating to a build that reads it restores it all.
+    // an explicit service-settings save replaces it. A compatible build can recover a valid blob;
+    // damaged or unreadable bytes may remain unusable.
     ConfigBlob b;
     std::vector<uint8_t> raw;
     const NvsBlobRead    cfg_read = nvs_read_blob("cfg", raw);

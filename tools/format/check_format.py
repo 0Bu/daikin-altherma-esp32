@@ -4,6 +4,8 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
+import json
 from pathlib import Path
 import re
 import subprocess
@@ -87,6 +89,17 @@ def eligible(path: Path, root: Path) -> bool:
         return False
     if path.suffix not in SUFFIXES or not relative.parts:
         return False
+    if len(relative.parts) == 5 and relative.parts[:4] == (
+        "tools", "web_asset", "vendor", "zopfli"
+    ):
+        # Preserve upstream formatting only for byte-identical, manifest-listed source files.
+        # New or edited files here remain eligible; the first-party adapter lives outside this path.
+        manifest_path = path.parent / "UPSTREAM.json"
+        if manifest_path.is_file():
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            expected = manifest.get("files", {}).get(path.name)
+            if expected and hashlib.sha256(path.read_bytes()).hexdigest() == expected:
+                return False
     if relative.parts[0] == "main":
         return len(relative.parts) >= 2 and relative.parts[1] != "def"
     return relative.parts[0] in {"test", "tools"}

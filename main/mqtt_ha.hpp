@@ -80,8 +80,8 @@ struct ReferenceTemperatureStatus {
 // predecessor's raw sample while subscription work is pending, paused or failed.
 ReferenceTemperatureStatus reference_temperature_status(const Config& expected);
 
-// Last write-free controller evaluation. The state machine is owned by mqtt_task and guarded by
-// the MQTT status mutex; HTTP/status readers receive a copy. No actuator object crosses this API.
+// MQTT-owned diagnosis, projected against monotonic evaluation age under its status mutex.
+// Stale current context is withheld; dated events survive. Reading never evaluates or samples.
 logic::HeatingCurveSnapshot heating_curve_status();
 
 // Wake the existing MQTT task after POST /set_ref_temp. Topic changes are re-evaluated live without

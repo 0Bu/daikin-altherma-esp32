@@ -69,10 +69,13 @@ try {
   "the shared host splice must copy every String.prototype.replace pattern literally");
 
   const tool = path.join(root, "tools/web_asset/minify_and_gzip.py");
-  const run = (output, extra = []) => childProcess.spawnSync("python3", [
+  const run = (output, extra = [], env = {}) => childProcess.spawnSync("python3", [
     tool, "--input", input, "--output", output,
+    "--gzip-encoder", "zopfli", "--zopfli-iterations", "5",
     "--max-gzip-bytes", String(budget), ...extra,
-  ], { cwd: root, encoding: "utf8" });
+  ], { cwd: root, encoding: "utf8", env: {
+    ...process.env, WEB_ASSET_CACHE_DIR: path.join(work, "encoder-cache"), ...env,
+  } });
 
   const first = run(gzipA, ["--html-output", minifiedPath]);
   assert.equal(first.status, 0, first.stderr || first.stdout);
@@ -87,18 +90,28 @@ try {
   const minified = fs.readFileSync(minifiedPath, "utf8");
   assert.equal(zlib.gunzipSync(compressed).toString("utf8"), minified,
     "checked minified HTML must be the exact compressed payload");
-  const tuned = run(gzipB, ["--gzip-memory-level", "7"]);
-  assert.equal(tuned.status, 0, tuned.stderr || tuned.stdout);
-  const tunedBytes = fs.readFileSync(gzipB);
-  assert.deepEqual(zlib.gunzipSync(tunedBytes), zlib.gunzipSync(compressed),
-    "firmware compression tuning must preserve every decoded page byte");
-  assert.equal(tunedBytes[9], 255, "tuned gzip must use deterministic host-independent metadata");
-  const tunedRepeat = run(gzipB, ["--gzip-memory-level", "7"]);
-  assert.equal(tunedRepeat.status, 0, tunedRepeat.stderr || tunedRepeat.stdout);
-  assert.deepEqual(fs.readFileSync(gzipB), tunedBytes, "tuned gzip must remain deterministic");
+  assert.deepEqual(compressed.subarray(0, 10), Buffer.from("1f8b08000000000002ff", "hex"),
+    "the index gzip must have deterministic host-independent metadata");
+  const zlibControl = zlib.gzipSync(Buffer.from(minified), { level: 9, memLevel: 7 });
+  assert.ok(compressed.length < zlibControl.length,
+    "the selected Zopfli encoder must improve on the former index zlib setting");
+  const unavailablePath = path.join(work, "unavailable.html.gz");
+  const unavailable = run(unavailablePath, [], {
+    HOST_CC: path.join(work, "missing-native-cc"),
+    WEB_ASSET_CACHE_DIR: path.join(work, "unavailable-cache"),
+  });
+  assert.notEqual(unavailable.status, 0, "a missing native encoder must not fall back to zlib");
+  assert.match(unavailable.stderr, /native C compiler/);
+  assert.ok(!fs.existsSync(unavailablePath), "a refused encoder must not publish an artifact");
+  const wrongIterations = run(unavailablePath, ["--zopfli-iterations", "4"]);
+  assert.notEqual(wrongIterations.status, 0, "the production encoder requires exactly five iterations");
   assert.match(fs.readFileSync(path.join(root, "main/CMakeLists.txt"), "utf8"),
-    /--output "\$\{CMAKE_CURRENT_BINARY_DIR\}\/index\.html\.gz"\s+--gzip-memory-level 7/,
-    "the tested compression parameter must be the firmware build parameter");
+    /--output "\$\{CMAKE_CURRENT_BINARY_DIR\}\/index\.html\.gz"\s+--gzip-encoder zopfli --zopfli-iterations 5/,
+    "the tested encoder and iteration count must be the firmware build parameters");
+  const upstream = JSON.parse(fs.readFileSync(path.join(root,
+    "tools/web_asset/vendor/zopfli/UPSTREAM.json"), "utf8"));
+  assert.equal(upstream.commit, "bd64b2f0553d4f1ef4e6627647c5d9fc8c71ffc0");
+  assert.equal(upstream.tag, "zopfli-1.0.3");
   assert.ok(minified.length < assembled.length * 0.7,
     "CSS/JS syntax minification must remove meaningful source-only weight");
 
@@ -286,11 +299,16 @@ try {
     const file = path.join(root, `main/www/locales/${code}.js`);
     const output = path.join(work, `locale-${code}.js.gz`);
     const reduced = childProcess.spawnSync("python3", [localeTool, "--input", file, "--output", output,
-      "--max-gzip-bytes", "32768"], { cwd: root, encoding: "utf8" });
+      "--max-gzip-bytes", "32768"], { cwd: root, encoding: "utf8", env: {
+        ...process.env, HOST_CC: path.join(work, "missing-native-cc"),
+        WEB_ASSET_CACHE_DIR: path.join(work, "locale-unused-cache"),
+      } });
     assert.equal(reduced.status, 0, reduced.stderr || reduced.stdout);
     vm.runInContext(fs.readFileSync(file, "utf8"), originalProduction);
     vm.runInContext(zlib.gunzipSync(fs.readFileSync(output)).toString("utf8"), shippedProduction);
   }
+  assert.ok(!fs.existsSync(path.join(work, "locale-unused-cache")),
+    "independent locale minification must not acquire the native index encoder");
   vm.runInContext(catalogExports, originalProduction);
   vm.runInContext(catalogExports, shippedProduction);
   const argumentsCases = [[], [0, 0, 0, 0, 0], [1, 1, 1, 1, 1], [2, 2, 2, 2, 2],

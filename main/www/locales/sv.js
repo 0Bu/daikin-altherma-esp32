@@ -1,4 +1,4 @@
-// translation-source: 7480385d29565e389fed9481d6e1b12d6ed936d5931d38c0113cd63cd42a0341
+// translation-source: 6a7c8bdd68e0dbde1e916efab20768c5704a2a988360239d3ab300b76d2039aa
 I18N.sv = localeValues([
   /* sys.nodata */ "Inga data",
   /* sys.unreachable */ "Inte tillgänglig",
@@ -29,6 +29,8 @@ I18N.sv = localeValues([
   /* sys.fault_line */ (c) => "Fel · " + c + " — kontrollera Daikin-felkoden.",
   /* sys.warning_line */ (c) => "Varning · " + c + " — kontrollera värmepumpen.",
   /* sys.polled */ (s) => `läst för ${s} s sedan`,
+  /* config.unreadable_title */ "Tjänsteinställningar kan inte läsas",
+  /* config.unreadable_meta */ "Den här versionen kunde inte läsa sparade tjänsteinställningar. Den använder reservinställningar och har inte ersatt den bevarade kopian. Nyare kompatibel firmware kan kanske återställa den. När tjänsteinställningar sparas utan fel ersätts den; att bara spara X10A-stift eller protokoll gör inte det.",
   /* recovery.title */ "Återställningsläge",
   /* recovery.meta_heap */ "Minnesbrist orsakade flera omstarter. Värmepumpsanslutning och MQTT är pausade så webbsidan fungerar. Installera nyare firmware under Inställningar; en omstart genom att bryta och återansluta strömmen provar alla funktioner igen.",
   /* recovery.meta */ "Flera omstarter utlöste återställningsläge med pausad värmepumpsanslutning och MQTT. Kontrollera konfigurationen, särskilt RX/TX-stiften, och starta om.",
@@ -546,6 +548,7 @@ I18N.sv = localeValues([
   /* dyn.state_homehub_disabled */ "Diagnos av — HomeHub avaktiverad",
   /* dyn.state_no_broker */ "Registrerar inte — ingen MQTT-broker",
   /* dyn.state_safe_mode */ "Registrerar inte — säkert läge",
+  /* dyn.state_stale */ "Inte utvärderad nyligen",
   /* dyn.state_inactive */ "Registrerar inte — insamling kör inte",
   /* dyn.room_off */ "Rumstermostaten är av",
   /* dyn.room_not_heating */ "Rumstermostaten står inte på värme",
@@ -588,6 +591,7 @@ I18N.sv = localeValues([
   /* dyn.state_help_blocked */ "En nödvändig ingång saknas. Registreringen fortsätter när den återkommer; gamla eller tvetydiga data används aldrig.",
   /* dyn.state_help_room */ "Rumsvärdet når enheten men ger ingen giltig avvikelse från målet. Registreringen fortsätter först när källan kan användas.",
   /* dyn.state_help_setup */ "Diagnosen startar när en MQTT-rumskälla med målvärde har sparats. Prognosen är valfri; platsen behöver inte delas.",
+  /* dyn.state_help_stale */ "Den här kontrollen har inte körts nyligen. Dess aktuella indata är okända; den senaste händelsen bevaras. Detta påvisar inte ett fel i brokern eller en sensor.",
   /* dyn.state_help_inactive */ "Källorna finns, men MQTT-insamlingen körs inte, så inget utvärderas. Inställningarna behålls; registreringen fortsätter när insamlingen körs igen.",
   /* dyn.state_help_no_broker */ "Rumskällan är sparad men ingen MQTT-broker är konfigurerad. Ange en broker under Anslutningar; källan behålls och registreringen startar automatiskt.",
   /* dyn.state_help_setup_homehub */ "Diagnosen behöver HomeHub för att skilja uppvärmning från varmvatten och stillestånd. Ange HomeHub-adressen på protokollkortet.",

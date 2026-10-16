@@ -1,4 +1,4 @@
-// translation-source: 7480385d29565e389fed9481d6e1b12d6ed936d5931d38c0113cd63cd42a0341
+// translation-source: 6a7c8bdd68e0dbde1e916efab20768c5704a2a988360239d3ab300b76d2039aa
 I18N.nb = localeValues([
   /* sys.nodata */ "Ingen data",
   /* sys.unreachable */ "Ikke tilgjengelig",
@@ -29,6 +29,8 @@ I18N.nb = localeValues([
   /* sys.fault_line */ (c) => "Feil · " + c + " — kontroller Daikin-feilkoden.",
   /* sys.warning_line */ (c) => "Advarsel · " + c + " — kontroller varmepumpen.",
   /* sys.polled */ (s) => `lest for ${s} s siden`,
+  /* config.unreadable_title */ "Tjenesteinnstillinger kan ikke leses",
+  /* config.unreadable_meta */ "Denne versjonen kunne ikke lese lagrede tjenesteinnstillinger. Den bruker reserveinnstillinger og har ikke erstattet den bevarte kopien. Nyere kompatibel fastvare kan kanskje gjenopprette den. Vellykket lagring av tjenesteinnstillinger erstatter den; lagring av bare X10A-pinner eller protokoll gjør ikke det.",
   /* recovery.title */ "Gjenopprettingsmodus",
   /* recovery.meta_heap */ "Enheten gikk flere ganger tom for minne og startet på nytt. Den kjører nå uten varmepumpeforbindelse og MQTT, slik at nettsiden er tilgjengelig. Konfigurasjonen er trolig i orden — installer nyere fastvare under Innstillinger. En omstart ved å bryte og koble til strømmen igjen prøver alle funksjoner på nytt.",
   /* recovery.meta */ "Enheten har startet på nytt flere ganger og er i gjenopprettingsmodus. Varmepumpeforbindelsen og MQTT er satt på pause. Kontroller konfigurasjonen, særlig RX/TX-pinnene på protokollkortet, og start enheten på nytt.",
@@ -546,6 +548,7 @@ I18N.nb = localeValues([
   /* dyn.state_homehub_disabled */ "Diagnose av — HomeHub deaktivert",
   /* dyn.state_no_broker */ "Registrerer ikke — ingen MQTT-broker",
   /* dyn.state_safe_mode */ "Registrerer ikke — sikker modus",
+  /* dyn.state_stale */ "Ikke vurdert nylig",
   /* dyn.state_inactive */ "Registrerer ikke — innsamling kjører ikke",
   /* dyn.room_off */ "Romtermostaten er av",
   /* dyn.room_not_heating */ "Romtermostaten står ikke på varme",
@@ -588,6 +591,7 @@ I18N.nb = localeValues([
   /* dyn.state_help_blocked */ "En nødvendig inngang mangler. Registreringen fortsetter når den kommer tilbake; gamle eller tvetydige data brukes aldri.",
   /* dyn.state_help_room */ "Romverdien når enheten, men gir ikke et gyldig avvik fra målet. Registreringen fortsetter først når kilden kan brukes.",
   /* dyn.state_help_setup */ "Diagnosen starter når en MQTT-romkilde med målverdi er lagret. Prognosen er valgfri; sted trenger ikke deles.",
+  /* dyn.state_help_stale */ "Denne kontrollen har ikke kjørt nylig. De gjeldende inndataene er ukjente; siste hendelse er bevart. Dette påviser ikke en feil i megleren eller en sensor.",
   /* dyn.state_help_inactive */ "Kildene er konfigurert, men MQTT-innsamlingen kjører ikke, så ingenting vurderes. Innstillingene beholdes; registreringen fortsetter når innsamlingen kjører igjen.",
   /* dyn.state_help_no_broker */ "Romkilden er lagret, men ingen MQTT-broker er konfigurert. Angi broker under Tilkoblinger; kilden beholdes og registrering starter automatisk.",
   /* dyn.state_help_setup_homehub */ "Diagnosen trenger HomeHub for å skille oppvarming fra tappevann og stillstand. Angi HomeHub-adressen på protokollkortet.",

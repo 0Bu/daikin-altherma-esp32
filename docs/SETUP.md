@@ -105,3 +105,8 @@ collect a [bug report](REPORTING.md).
 To update later, tap the firmware version in the header or **Settings → Firmware**. Read the offered
 version, channel and changelog before confirming. An unreachable or invalid feed is a check error,
 not an “up to date” result. Release and development feeds are selected under **Update channel**.
+
+If **Service settings unreadable** appears, this build uses fallback settings and has kept the stored
+copy. Compatible newer firmware may recover it; damaged data may remain unreadable. A successful
+service-settings save replaces that copy, so review the warning before saving. Changing only X10A
+pins or protocol preserves it. The warning clears when a later status no longer reports the condition.

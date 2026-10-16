@@ -218,6 +218,15 @@ instruments.
 
 **Evidence and limits:** [Refrigerant circuit observation](DIAGNOSTIC_EVIDENCE.md#refrigerant-service-observation)
 
+## Heating-curve evaluation freshness
+
+**In plain language:** **Not evaluated recently** means the heating-curve check has not evaluated
+its inputs recently enough to describe their current state. The last recorded event remains dated
+evidence; the independent room source may still be fresh. This status identifies no broker, sensor
+or plant fault. [PLANT.md](PLANT.md#heating-curve-diagnosis) owns its age and event rules;
+[the evidence boundary](DIAGNOSTIC_EVIDENCE.md#heating-curve-evaluation-freshness) separates this
+project rule from plant conclusions.
+
 ## What the diagnosis cannot do
 
 The card cannot establish refrigerant charge, hydraulic balancing, mechanical wear, the cause of

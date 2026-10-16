@@ -1954,8 +1954,8 @@ static __attribute__((noinline)) std::string build_heating_curve_payload(const C
     f.room_errors = rt.errors;
     f.room_rejections = rt.rejections;
 
-    // Evaluation runs every mqtt_task cycle, outside the publication gate. This is the latest
-    // fail-closed snapshot, not a second evaluation tied to the 10-second reporting cadence.
+    // The shared reader expires an evaluation when mqtt_task skipped its owner stage; reading
+    // does not evaluate again or create an event on the 10-second publication cadence.
     const logic::HeatingCurveSnapshot diagnosis = heating_curve_status();
     f.method_version = logic::HEATING_CURVE_DIAGNOSIS_METHOD_VERSION;
     f.armed = diagnosis.armed;
@@ -3767,9 +3767,9 @@ ReferenceTemperatureStatus reference_temperature_status(const Config& expected) 
 }
 
 logic::HeatingCurveSnapshot heating_curve_status() {
-    if (!s_mtx) return s_heating_curve_diagnosis.snapshot();
+    static_assert(logic::HEATING_CURVE_EVALUATION_MAX_AGE_MS == 3 * POLL_INTERVAL_S * 1000);
     Lock lk(s_mtx);
-    return s_heating_curve_diagnosis.snapshot();
+    return s_heating_curve_diagnosis.snapshot_at(esp_timer_get_time() / 1000);
 }
 
 void mqtt_reference_reconfigure() {
