@@ -39,7 +39,14 @@ def _private_cache(path: Path) -> Path:
     info = path.lstat()
     if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid() or info.st_mode & 0o077:
         raise RuntimeError("Zopfli cache must be a private directory owned by the current user")
-    return path
+    canonical = path.resolve(strict=True)
+    # An ancestor alias can hide writable directories above its otherwise protected target.
+    for parent in canonical.parents:
+        info = parent.stat()
+        if not stat.S_ISDIR(info.st_mode) or info.st_uid not in owners or (
+                info.st_mode & 0o022 and not info.st_mode & stat.S_ISVTX):
+            raise RuntimeError("Zopfli cache ancestor must not allow unprotected shared writes")
+    return canonical
 
 
 def _native_helper() -> Path:

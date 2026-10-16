@@ -136,6 +136,30 @@ try {
   assert.notEqual(unsafeAncestor.status, 0, "a private leaf must not hide an unsafe ancestor");
   assert.match(unsafeAncestor.stderr, /cache ancestor/);
 
+  const hiddenTarget = path.join(sharedParent, "protected-target");
+  fs.mkdirSync(hiddenTarget, { mode: 0o700 });
+  const hiddenCache = path.join(hiddenTarget, "cache");
+  fs.mkdirSync(hiddenCache, { mode: 0o700 });
+  fs.copyFileSync(helperPath, path.join(hiddenCache, helperName));
+  fs.chmodSync(path.join(hiddenCache, helperName), 0o700);
+  const unsafeAlias = path.join(work, "unsafe-target-alias");
+  fs.symlinkSync(hiddenTarget, unsafeAlias, "dir");
+  const hiddenAncestor = run(path.join(work, "hidden-ancestor.gz"), [], {
+    WEB_ASSET_CACHE_DIR: path.join(unsafeAlias, "cache"),
+  });
+  assert.notEqual(hiddenAncestor.status, 0, "an ancestor alias must not hide shared-writable parents");
+  assert.match(hiddenAncestor.stderr, /cache ancestor/);
+
+  const protectedAlias = path.join(work, "protected-alias");
+  fs.symlinkSync(work, protectedAlias, "dir");
+  const aliasOutput = path.join(work, "protected-alias.gz");
+  const acceptedAlias = run(aliasOutput, [], {
+    WEB_ASSET_CACHE_DIR: path.join(protectedAlias, "encoder-cache"),
+  });
+  assert.equal(acceptedAlias.status, 0, acceptedAlias.stderr || acceptedAlias.stdout);
+  assert.deepEqual(fs.readFileSync(aliasOutput), fs.readFileSync(gzipA),
+    "a protected ancestor alias must retain the same valid encoder output");
+
   const concurrent = childProcess.spawnSync("python3", ["-c", [
     "import concurrent.futures, gzip, os, sys",
     "os.umask(0)",
