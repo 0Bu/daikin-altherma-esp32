@@ -18,6 +18,30 @@ ADAPTER = ROOT / "zopfli_gzip.c"
 FLAGS = ("-O2", "-std=c99")
 
 
+def _private_cache(path: Path) -> Path:
+    path = path.absolute()
+    owners = {0, os.getuid()}
+    for parent in reversed(path.parents):
+        try:
+            info = parent.lstat()
+        except FileNotFoundError:
+            parent.mkdir(mode=0o700, exist_ok=True)
+            info = parent.lstat()
+        if info.st_uid not in owners:
+            raise RuntimeError("Zopfli cache ancestor has an untrusted owner")
+        # System aliases such as /var are safe only when both link and target are trusted.
+        if stat.S_ISLNK(info.st_mode):
+            info = parent.stat()
+        if not stat.S_ISDIR(info.st_mode) or info.st_uid not in owners or (
+                info.st_mode & 0o022 and not info.st_mode & stat.S_ISVTX):
+            raise RuntimeError("Zopfli cache ancestor must not allow unprotected shared writes")
+    path.mkdir(mode=0o700, exist_ok=True)
+    info = path.lstat()
+    if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid() or info.st_mode & 0o077:
+        raise RuntimeError("Zopfli cache must be a private directory owned by the current user")
+    return path
+
+
 def _native_helper() -> Path:
     manifest = json.loads((VENDOR / "UPSTREAM.json").read_text(encoding="utf-8"))
     for name, expected in manifest["files"].items():
@@ -40,13 +64,17 @@ def _native_helper() -> Path:
     }
     key = hashlib.sha256(json.dumps(identity, sort_keys=True).encode()).hexdigest()
     default_cache = Path(tempfile.gettempdir()) / f"daikin-altherma-esp32-zopfli-{os.getuid()}"
-    cache = Path(os.environ.get("WEB_ASSET_CACHE_DIR", default_cache))
-    cache.mkdir(mode=0o700, parents=True, exist_ok=True)
-    info = cache.lstat()
-    if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid() or info.st_mode & 0o077:
-        raise RuntimeError("Zopfli cache must be a private directory owned by the current user")
+    cache = _private_cache(Path(os.environ.get("WEB_ASSET_CACHE_DIR", default_cache)))
     helper = cache / key
-    if helper.is_file() and os.access(helper, os.X_OK):
+    try:
+        info = helper.lstat()
+    except FileNotFoundError:
+        info = None
+    if info is not None:
+        if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid() or (
+                info.st_mode & 0o022 or not info.st_mode & stat.S_IXUSR):
+            raise RuntimeError("Zopfli cached helper must be a regular, executable, owned file "
+                               "without group/world write access")
         return helper
     with tempfile.TemporaryDirectory(prefix="build-", dir=cache) as temporary:
         executable = Path(temporary) / "encoder"

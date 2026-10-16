@@ -79,8 +79,78 @@ try {
 
   const first = run(gzipA, ["--html-output", minifiedPath]);
   assert.equal(first.status, 0, first.stderr || first.stdout);
+  const cache = path.join(work, "encoder-cache");
+  const helperNames = fs.readdirSync(cache);
+  assert.equal(helperNames.length, 1, "a completed build must publish one cache entry");
+  const helperName = helperNames[0];
+  const helperPath = path.join(cache, helperName);
+  const cachedBefore = fs.statSync(helperPath);
   const second = run(gzipB);
   assert.equal(second.status, 0, second.stderr || second.stdout);
+  const cachedAfter = fs.statSync(helperPath);
+  assert.equal(cachedAfter.ino, cachedBefore.ino, "a valid regular helper must be reused");
+  assert.equal(cachedAfter.mtimeMs, cachedBefore.mtimeMs, "a cache hit must not recompile");
+
+  // A key-named link must fail before executing its target, even if that target is executable.
+  const poisonedCache = path.join(work, "poisoned-cache");
+  fs.mkdirSync(poisonedCache, { mode: 0o700 });
+  const marker = path.join(work, "external-target-executed");
+  const externalTarget = path.join(work, "external-encoder");
+  fs.writeFileSync(externalTarget, "#!/usr/bin/env python3\nfrom pathlib import Path\n" +
+    `Path(${JSON.stringify(marker)}).write_text("executed")\n`, { mode: 0o700 });
+  fs.symlinkSync(externalTarget, path.join(poisonedCache, helperName));
+  const poisoned = run(path.join(work, "poisoned.gz"), [], { WEB_ASSET_CACHE_DIR: poisonedCache });
+  assert.notEqual(poisoned.status, 0, "a cached helper symlink must be rejected");
+  assert.match(poisoned.stderr, /cached helper/);
+  assert.ok(!fs.existsSync(marker), "a symlink target outside the cache must never execute");
+
+  const nonregularCache = path.join(work, "nonregular-cache");
+  fs.mkdirSync(nonregularCache, { mode: 0o700 });
+  fs.mkdirSync(path.join(nonregularCache, helperName));
+  const nonregular = run(path.join(work, "nonregular.gz"), [], {
+    WEB_ASSET_CACHE_DIR: nonregularCache,
+  });
+  assert.notEqual(nonregular.status, 0, "a nonregular cached helper must be rejected");
+  assert.match(nonregular.stderr, /cached helper/);
+
+  for (const mode of [0o720, 0o702]) {
+    const writableCache = path.join(work, `writable-cache-${mode}`);
+    fs.mkdirSync(writableCache, { mode: 0o700 });
+    const unsafeHelper = path.join(writableCache, helperName);
+    fs.copyFileSync(helperPath, unsafeHelper);
+    fs.chmodSync(unsafeHelper, mode);
+    const refused = run(path.join(work, `writable-${mode}.gz`), [], {
+      WEB_ASSET_CACHE_DIR: writableCache,
+    });
+    assert.notEqual(refused.status, 0, "group/world-writable helpers must not execute");
+    assert.match(refused.stderr, /cached helper/);
+  }
+  const sharedParent = path.join(work, "shared-parent");
+  const unsafeCache = path.join(sharedParent, "private-cache");
+  fs.mkdirSync(sharedParent);
+  fs.chmodSync(sharedParent, 0o777);
+  fs.mkdirSync(unsafeCache, { mode: 0o700 });
+  const unsafeAncestor = run(path.join(work, "unsafe-ancestor.gz"), [], {
+    WEB_ASSET_CACHE_DIR: unsafeCache,
+  });
+  assert.notEqual(unsafeAncestor.status, 0, "a private leaf must not hide an unsafe ancestor");
+  assert.match(unsafeAncestor.stderr, /cache ancestor/);
+
+  const concurrent = childProcess.spawnSync("python3", ["-c", [
+    "import concurrent.futures, gzip, os, sys",
+    "os.umask(0)",
+    "sys.path.insert(0, sys.argv[1])",
+    "from zopfli_gzip import compress",
+    "with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:",
+    "    results = list(pool.map(lambda _: compress(b'parallel cache proof', 5), range(2)))",
+    "assert results[0] == results[1]",
+    "assert gzip.decompress(results[0]) == b'parallel cache proof'",
+  ].join("\n"), path.dirname(tool)], { cwd: root, encoding: "utf8", env: {
+    ...process.env, WEB_ASSET_CACHE_DIR: path.join(work, "concurrent-parent", "nested", "cache"),
+  } });
+  assert.equal(concurrent.status, 0, concurrent.stderr || concurrent.stdout);
+  assert.equal(fs.statSync(path.join(work, "concurrent-parent")).mode & 0o077, 0,
+    "new custom-cache ancestors must remain private even with a permissive umask");
 
   const compressed = fs.readFileSync(gzipA);
   assert.ok(compressed.length <= budget,
