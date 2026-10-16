@@ -113,7 +113,7 @@ stored configuration was erased.
 ## Role-pinned OTA
 
 Every agent-run OTA write uses the **direct, unchained** `scripts/production-ota-gate.py`. It requires
-a clean exact source tree, the official dev manifest, expected source/version/application SHA,
+a clean exact source tree, an official manifest, expected source/version/application SHA,
 ESP32-S3 metadata, signature, range behavior and host contracts. Device targets come exclusively
 from the local schema-versioned inventory, never a hostname argument:
 
@@ -128,17 +128,29 @@ from the local schema-versioned inventory, never a hostname argument:
 Its path is `$XDG_CONFIG_HOME/daikin-altherma-esp32/production-ota.json`, or below `~/.config`.
 Roles must identify distinct devices. Inventory is private and untracked.
 
+Default delivery targets `dev/manifest.json` and a `<next-release>-dev.<n>` version. An explicitly
+requested stable Release delivery uses `https://0bu.github.io/daikin-altherma-esp32/manifest.json`
+and `X.Y.Z` instead in the same command shapes below. Both require the target artifact's source to
+match the clean runner `HEAD`; a gate change therefore needs a new publication from its reviewed,
+merged source. A Release target also requires its exact source tag from the official GitHub remote.
+Publication and device delivery remain separate authorizations.
+
+The gate binds one check/update generation transiently to the chosen official feed and preserves
+the device's saved dev or Release preference. Report the installed artifact feed separately from
+that preference; installation does not change which feed future checks follow. Arbitrary URLs,
+saved channel changes and production downgrade overrides are outside this path.
+
 ### Ordinary bench delivery
 
-After the exact dev artifact is published, an explicitly authorized bench update uses:
+After the exact artifact is published, an explicitly authorized bench update uses:
 
 ```bash
 scripts/production-ota-gate.py --manifest-url https://0bu.github.io/daikin-altherma-esp32/dev/manifest.json --expected-source-sha <40-lowercase-hex-main-sha> --expected-version <dev-version> --expected-app-sha256 <64-lowercase-hex-app-sha256> --expected-current-version <bench-current-version> --confirm-bench bench --install-bench
 ```
 
-This mode returns before constructing a production target or release leg. Before its single update
+This mode returns before constructing a production target or excursion leg. Before its single update
 POST it requires the inventory MAC/current-version lease, current ELF, connected non-rollback WiFi,
-dev channel, MQTT, no safe mode/fault/allocation skips and safe internal heap.
+unchanged saved channel, MQTT, no safe mode/fault/allocation skips and safe internal heap.
 
 Acceptance must return the immediate successor operation generation. Observe completed validation,
 positive operation-local free/largest-block minima and at least 1 KiB OTA-stack reserve **before
@@ -165,26 +177,31 @@ scripts/production-ota-gate.py --manifest-url https://0bu.github.io/daikin-althe
 
 The transaction has two distinct stages:
 
-1. **Bench release round trip.** Verify the official raw dev manifest fits the oldest restore writer's
-   1024-byte ASCII/no-escape frame; inventory belongs in sibling `artifacts.json`. Require stable
-   source/version tag, except the gate's exact signed historical stable tuple. Rebind raw dev
-   hash/source/version/application SHA before release selection and immediately before writing.
-   Keep the bench's dev channel, with only the accepted check transiently bound to release.
-   Download and validate the complete signed release under HTTP pressure, survive its probation,
-   return through official dev to the exact target, witness pending rollback, run three-minute
-   pressure immediately and confirm the valid/disarmed image afterward as in bench acceptance.
+1. **Bench full-download round trip.** A dev target takes a pinned official stable excursion and
+   returns to dev; a stable target takes a pinned official dev excursion and returns to Release.
+   For stable promotion, that dev artifact must have the target's source and numeric version core:
+   wait for the exact main dev build before publishing its stable Release, then freeze both feeds.
+   Verify both signed binaries and their source/version/application SHA. Require the stable
+   source/version tag, except the gate's exact signed historical stable excursion tuple. The
+   historical restore writer needs the raw dev manifest's 1024-byte ASCII/no-escape frame;
+   inventory belongs in sibling `artifacts.json`. Raw target manifests remain bounded to 1024 bytes.
+   Rebind the raw target and excursion manifests before their corresponding writes. Preserve the
+   saved channel and bind each check to its exact official feed. Download and validate the complete
+   excursion under HTTP pressure, survive probation, restore the exact target, witness pending
+   rollback, run three-minute pressure immediately and confirm the valid/disarmed image afterward.
    Wait past pending-image probation before each replacement. The legacy return offer must remain
    continuously idle for three seconds before its one restore write.
 2. **Production canary.** Before the sole production POST, observe two consecutive MQTT-connected,
    Weather-idle samples within 15 seconds while old identity, uptime and live X10A remain stable.
    Heap-restart, MQTT-skip, poll-skip and CRC counters must not change; X10A timeout delta stays within
-   three. Bind the completed dev check generation/channel/version/SHA, require successor generation,
+   three. Bind the completed target check generation/feed/version/SHA, require successor generation,
    capture validation/heap/stack evidence, then observe target identity, rollback/crash/safe mode,
-   live values and retained X10A MQTT through a separate three-minute read-only canary.
+   live values and retained X10A MQTT through a separate three-minute read-only canary. Before
+   success, require an explicit valid/disarmed image with stable identity, uptime and counters.
 
-**Do not publish dev during this transaction.** The old release cannot retain the transient feed
-headers; its return reads the mutable official dev path. Manifest drift, failed return, pending
-image or bad bench pressure stops before production contact. Pressure readiness has a bounded
+**Do not publish either participating feed during this transaction.** The old release cannot retain
+transient feed headers; its return reads the mutable official dev path. Manifest drift, failed return,
+pending image or bad bench pressure stops before production contact. Pressure readiness has a bounded
 MQTT reconnect window and requires at least 24 KiB free heap and a 16 KiB largest block in that same
 window. Pressure must still start within 120 seconds of boot with unchanged uptime/counter guards;
 a paused or unsafe-heap baseline is not accepted as a healthy start.

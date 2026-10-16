@@ -936,12 +936,14 @@ def canonical_production_ota_command(payload: dict[str, Any], command: str) -> b
         return False
     if tokens[1:] == ["--self-test"]:
         return True
-    exact_values = {
-        "--manifest-url": "https://0bu.github.io/daikin-altherma-esp32/dev/manifest.json",
+    core = r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)"
+    feed_versions = {
+        "https://0bu.github.io/daikin-altherma-esp32/dev/manifest.json": core + r"-dev\.(?:0|[1-9][0-9]*)",
+        "https://0bu.github.io/daikin-altherma-esp32/manifest.json": core,
     }
+    exact_values: dict[str, str] = {}
     patterns = {
         "--expected-source-sha": r"[0-9a-f]{40}",
-        "--expected-version": r"[0-9A-Za-z._+-]+-dev\.[0-9]+",
         "--expected-app-sha256": r"[0-9a-f]{64}",
     }
     flags: set[str] = set()
@@ -956,7 +958,7 @@ def canonical_production_ota_command(payload: dict[str, Any], command: str) -> b
     else:
         return False  # production staging without execution already performs bench writes
 
-    expected_options = set(exact_values) | set(patterns)
+    expected_options = set(exact_values) | set(patterns) | {"--manifest-url", "--expected-version"}
     seen_options: dict[str, str] = {}
     seen_flags: set[str] = set()
     index = 1
@@ -973,6 +975,9 @@ def canonical_production_ota_command(payload: dict[str, Any], command: str) -> b
     if set(seen_options) != expected_options or seen_flags != flags:
         return False
     if any(seen_options[option] != expected for option, expected in exact_values.items()):
+        return False
+    version_pattern = feed_versions.get(seen_options["--manifest-url"])
+    if version_pattern is None or re.fullmatch(version_pattern, seen_options["--expected-version"]) is None:
         return False
     if seen_options.get("--expected-current-version") == seen_options["--expected-version"]:
         return False

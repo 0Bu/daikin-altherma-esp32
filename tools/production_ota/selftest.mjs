@@ -19,6 +19,14 @@ const historyProbeStart = centralSource.indexOf("const hilHistoryProbe = String.
 const historyProbeEnd = centralSource.indexOf("\n`;", historyProbeStart);
 assert.ok(historyProbeStart >= 0 && historyProbeEnd > historyProbeStart, "missing executed HIL-history probe");
 const historyProbe = centralSource.slice(historyProbeStart + "const hilHistoryProbe = String.raw`".length, historyProbeEnd);
+const stableProbeStart = centralSource.indexOf("const stableDeliveryProbe = String.raw`");
+const stableProbeEnd = centralSource.indexOf("\n`;", stableProbeStart);
+assert.ok(stableProbeStart >= 0 && stableProbeEnd > stableProbeStart, "missing executed stable-delivery probe");
+const stableProbe = centralSource.slice(stableProbeStart + "const stableDeliveryProbe = String.raw`".length, stableProbeEnd);
+const productionProbeStart = centralSource.indexOf("const productionProbationProbe = String.raw`");
+const productionProbeEnd = centralSource.indexOf("\n`;", productionProbeStart);
+assert.ok(productionProbeStart >= 0 && productionProbeEnd > productionProbeStart, "missing executed production-probation probe");
+const productionProbe = centralSource.slice(productionProbeStart + "const productionProbationProbe = String.raw`".length, productionProbeEnd);
 const files = [
   "scripts/production-ota-gate.py",
   "tools/agent-hooks/agent_hook.py",
@@ -114,11 +122,12 @@ const supplementalContract = () => {
   assert.match(fullDownload, /record_bench_pressure_failure\(kind, error, counts, unexpected, lock\)/);
   assert.match(fullDownload, /worker\.join[\s\S]*?worker\.is_alive\(\)/);
   assert.match(fullDownload, /if unexpected:[\s\S]*?fail\(/);
-  assert.equal((fullDownload.match(/require_official_dev_manifest_snapshot\(/g) || []).length, 2);
+  assert.equal((fullDownload.match(/require_official_manifest_snapshot\(/g) || []).length, 2);
+  assert.equal((fullDownload.match(/rebind_feeds\(\)/g) || []).length, 5);
   assert.match(fullDownload,
-    /wait_for_ota_offer\([\s\S]{0,260}?expected_channel="dev"[\s\S]{0,220}?hil_manifest_url=OFFICIAL_RELEASE_MANIFEST_URL[\s\S]{0,160}?hil_firmware_base_url=OFFICIAL_RELEASE_FIRMWARE_BASE_URL/);
+    /wait_for_ota_offer\([\s\S]{0,260}?expected_channel=saved_channel[\s\S]{0,220}?preserve_saved_channel=True, \*\*official_feed_override\(release_manifest_url\)/);
   assert.match(fullDownload,
-    /post_update_once\([\s\S]{0,180}?expected_channel="dev"[\s\S]{0,80}?allow_downgrade=True/);
+    /post_update_once\([\s\S]{0,180}?expected_channel=saved_channel[\s\S]{0,80}?allow_downgrade=True/);
   assert.doesNotMatch(fullDownload, /set_update_channel/);
   const limitedRemoteDocument = section(
     gate, "def request_limited_bytes(", "\ndef request_json(",
@@ -313,6 +322,12 @@ const runColdReceipt = () => spawnSync("python3", [
 const runHilHistory = () => spawnSync("python3", [
   "-I", "-B", "-c", historyProbe, path.join(tmp, "scripts/production-ota-gate.py"),
 ], { encoding: "utf8", timeout: 10000 });
+const runStableDelivery = () => spawnSync("python3", [
+  "-I", "-B", "-c", stableProbe, path.join(tmp, "scripts/production-ota-gate.py"),
+], { encoding: "utf8", timeout: 10000 });
+const runProductionProbation = () => spawnSync("python3", [
+  "-I", "-B", "-c", productionProbe, path.join(tmp, "scripts/production-ota-gate.py"),
+], { encoding: "utf8", timeout: 10000 });
 
 try {
   restore();
@@ -325,8 +340,47 @@ try {
   assert.equal(coldBaseline.status, 0, `cold receipt baseline failed: ${coldBaseline.stderr}`);
   const historyBaseline = runHilHistory();
   assert.equal(historyBaseline.status, 0, `HIL-history baseline failed: ${historyBaseline.stderr}`);
+  const stableBaseline = runStableDelivery();
+  assert.equal(stableBaseline.status, 0, `stable-delivery baseline failed: ${stableBaseline.stderr}`);
+  const productionBaseline = runProductionProbation();
+  assert.equal(productionBaseline.status, 0, `production-probation baseline failed: ${productionBaseline.stderr}`);
 
   const cases = [
+    ["production acceptance omits explicit valid/disarmed probation", () =>
+      replaceOnce("scripts/production-ota-gate.py",
+        /production_probation, final_status = confirm_production_probation\([\s\S]*?\n    \)/,
+        'production_probation, final_status = ({}, returned)'), "production-probation"],
+    ["production probation omits MQTT and X10A liveness", () =>
+      replaceOnce("scripts/production-ota-gate.py",
+        'saved_channel=saved_channel, require_x10a=True,',
+        'saved_channel=saved_channel, require_x10a=False,'), "production-probation"],
+    ["production probation is not journaled before final acceptance", () =>
+      replaceOnce("scripts/production-ota-gate.py",
+        'journal_checkpoint("production_probation_confirmed", production={',
+        'journal_checkpoint("probation_milestone_bypassed", production={'), "production-probation"],
+    ["remote release tag lookup loses its finite subprocess deadline", () =>
+      replaceOnce("scripts/production-ota-gate.py",
+        '], capture=True, timeout=RELEASE_TAG_TIMEOUT_S)',
+        '], capture=True)'), "stable-delivery"],
+    ["stable target accepts the historical excursion tag exception", () =>
+      replaceOnce("scripts/production-ota-gate.py",
+        'if not allow_legacy and source_sha != tagged_source:',
+        'if False:'), "stable-delivery"],
+    ["official host image can differ from the device's fixed binary path", () =>
+      replaceOnce("scripts/production-ota-gate.py",
+        'if path != "daikin-altherma-esp32.bin":', 'if False:'), "stable-delivery"],
+    ["stable bench write ignores saved-channel drift after its accepted check", () =>
+      replaceOnce("scripts/production-ota-gate.py",
+        '        require_saved_channel(before_write, saved_channel)',
+        '        pass  # seeded channel drift bypass'), "stable-delivery"],
+    ["stable delivery accepts replaced raw feed bytes with the same identity", () =>
+      replaceOnce("scripts/production-ota-gate.py",
+        'if hashlib.sha256(manifest_bytes).hexdigest() != expected_manifest_sha256:',
+        'if False:'), "stable-delivery"],
+    ["stable restore skips completed writer heap and stack validation", () =>
+      replaceOnce("scripts/production-ota-gate.py",
+        '    if not legacy_restore:\n        require_ota_transfer_evidence(',
+        '    if False:\n        require_ota_transfer_evidence('), "stable-delivery"],
     ["HIL history accepts an aliased cross-snapshot clock step", () =>
       replaceOnce("scripts/production-ota-gate.py",
         'require_hil_history_clock_continuity(clock_reference, wall, started)',
@@ -391,8 +445,8 @@ try {
       replaceOnce("scripts/production-ota-gate.py", '    cold_stress = stress_board(',
         '    wait_for_bench_health_window(host, mac, target_version, target_elf, phase="target")\n    cold_stress = stress_board('), "cold-receipt"],
     ["bench restore omits its pending-image witness", () =>
-      replaceOnce("scripts/production-ota-gate.py", 'expected_channel="dev", require_pending_image=True,',
-        'expected_channel="dev", require_pending_image=False,'), "cold-receipt"],
+      replaceOnce("scripts/production-ota-gate.py", 'expected_channel=saved_channel, require_pending_image=True,',
+        'expected_channel=saved_channel, require_pending_image=False,'), "cold-receipt"],
     ["bench pressure accepts an already confirmed image", () =>
       replaceOnce("scripts/production-ota-gate.py",
         'if probation_before.get("image_state") != "pending_verify" or \\\n           probation_before.get("rollback_pending") is not True:',
@@ -476,8 +530,8 @@ try {
     ["journal omits durable directory fsync", () =>
       replaceOnce("scripts/production-ota-gate.py", 'os.fsync(directory_descriptor)', 'pass  # seeded missing directory sync'), "cold-receipt"],
     ["bench confirmation accepts a hidden reboot", () =>
-      replaceOnce("scripts/production-ota-gate.py", 'if uptime < last_uptime:\n            fail("bench rebooted after its cold pressure window")',
-        'if False:\n            fail("bench rebooted after its cold pressure window")'), "cold-receipt"],
+      replaceOnce("scripts/production-ota-gate.py", 'if uptime < last_uptime:\n            fail(f"{host} rebooted after its pressure window")',
+        'if False:\n            fail(f"{host} rebooted after its pressure window")'), "cold-receipt"],
     ["bench confirmation ignores changed failure counters", () =>
       replaceOnce("scripts/production-ota-gate.py", 'if any(current[key] != baseline[key]\n               for key in ("heap_restarts", "mqtt_skipped", "poll_skipped", "crc_err")):',
         'if False:'), "cold-receipt"],
@@ -961,19 +1015,19 @@ try {
         "manifest_bytes = request_bytes(")],
     ["the first official dev snapshot rebind is bypassed", () =>
       replaceNth("scripts/production-ota-gate.py",
-        "require_official_dev_manifest_snapshot(\n        target_manifest_sha256, target_source_sha, target_version, target_sha256,\n    )",
-        "official_dev_manifest_snapshot_bypassed(\n        target_manifest_sha256, target_source_sha, target_version, target_sha256,\n    )", 1)],
+        "    rebind_feeds()\n",
+        "    rebind_feeds_bypassed()\n", 1)],
     ["the final official dev snapshot rebind is bypassed", () =>
       replaceNth("scripts/production-ota-gate.py",
-        "require_official_dev_manifest_snapshot(\n            target_manifest_sha256, target_source_sha, target_version, target_sha256,\n        )",
-        "official_dev_manifest_snapshot_bypassed(\n            target_manifest_sha256, target_source_sha, target_version, target_sha256,\n        )", 1)],
+        "        rebind_feeds()\n",
+        "        rebind_feeds_bypassed()\n", 1)],
     ["the ordinary release leg drops its transient manifest binding", () =>
       replaceOnce("scripts/production-ota-gate.py",
-        "hil_manifest_url=OFFICIAL_RELEASE_MANIFEST_URL,",
-        "hil_manifest_url=None,")],
+        "preserve_saved_channel=True, **official_feed_override(release_manifest_url),",
+        "preserve_saved_channel=True,")],
     ["the ordinary release write expects a persisted release channel", () =>
       replaceOnce("scripts/production-ota-gate.py",
-        "expected_channel=\"dev\", allow_downgrade=True,\n        )\n        evidence[\"release_write_acknowledged\"] = True\n        journal_checkpoint(\"bench_release_write_acknowledged\")\n        release_status = wait_for_new_firmware(",
+        "expected_channel=saved_channel, allow_downgrade=True,\n        )\n        evidence[\"release_write_acknowledged\"] = True\n        journal_checkpoint(\"bench_release_write_acknowledged\")\n        release_status = wait_for_new_firmware(",
         "expected_channel=\"release\", allow_downgrade=True,\n        )\n        evidence[\"release_write_acknowledged\"] = True\n        journal_checkpoint(\"bench_release_write_acknowledged\")\n        release_status = wait_for_new_firmware(")],
     ["the official release manifest fetch is no longer host-memory bounded", () =>
       replaceOnce("scripts/production-ota-gate.py",
@@ -1024,11 +1078,15 @@ try {
     restore();
     mutate();
     const result = executedProbe === "cold-receipt" ? runColdReceipt() :
-      executedProbe === "hil-history" ? runHilHistory() : runContracts();
+      executedProbe === "hil-history" ? runHilHistory() :
+      executedProbe === "stable-delivery" ? runStableDelivery() :
+      executedProbe === "production-probation" ? runProductionProbation() : runContracts();
     if (result.status === 0) throw new Error(`production OTA contracts missed mutation: ${name}`);
-    if (executedProbe === "cold-receipt" || executedProbe === "hil-history") {
+    if (["cold-receipt", "hil-history", "stable-delivery", "production-probation"].includes(executedProbe)) {
       assert.equal(result.status, 1, `mutation failed without its behavioral assertion: ${name}\n${result.stderr}`);
-      assert.match(result.stderr, executedProbe === "cold-receipt" ? /AssertionError: COLD_RECEIPT:/ : /AssertionError: HIL_HISTORY:/,
+      assert.match(result.stderr, executedProbe === "cold-receipt" ? /AssertionError: COLD_RECEIPT:/ :
+        executedProbe === "stable-delivery" ? /AssertionError: STABLE_DELIVERY:/ :
+        executedProbe === "production-probation" ? /AssertionError: PRODUCTION_PROBATION:/ : /AssertionError: HIL_HISTORY:/,
         `syntax, timeout, signal or unrelated error cannot kill ${name}`);
     }
     caught++;

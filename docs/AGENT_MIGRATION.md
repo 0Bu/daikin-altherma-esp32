@@ -145,10 +145,10 @@ fails closed on both missing and extra project skills.
   expansions and command chains do not receive that exception. Secret and target guards still apply.
 - The hook blocks direct `/ota/update` writes, including interpreter, alternate HTTP-client and
   quote-split forms. It admits two direct, unchained canonical `scripts/production-ota-gate.py`
-  shapes with the official dev manifest and exact artifact/source/current-version lease. Ordinary
-  bench delivery requires `--confirm-bench bench --install-bench`, owns one un-retried write only to
-  the private-inventory `bench`, and returns before production. Production promotion separately
-  requires `--confirm-production production --execute`, owns its bench-first staging and one
+  shapes with the official dev or stable Release manifest and exact artifact/source/current-version
+  lease. Ordinary bench delivery requires `--confirm-bench bench --install-bench`, owns one
+  un-retried write only to the private-inventory `bench`, and returns before production. Production
+  promotion requires `--confirm-production production --execute`, owns its bench-first staging and one
   production write, then observes the canary read-only. Copying, wrapping, chaining or a raw POST is
   not equivalent; production staging without `--execute` still mutates the bench. The standalone
   lab-HIL shape is deliberately not admitted as an ordinary agent command and is not invoked by the
@@ -345,20 +345,22 @@ retired copies. A rollback must rerun the configuration, hook, policy, and exact
 
 ## Delivery details
 
-Ordinary official dev delivery to an OTA-capable inventory bench uses the direct, unchained
-`scripts/production-ota-gate.py --confirm-bench bench --install-bench` shape described by the
-delivery skills, with all artifact/source/current-version lease arguments. It binds the exact
-signed artifact, owns one un-retried POST only to the bench, survives rollback probation and stress,
+Official dev delivery, or explicitly requested stable Release delivery, to an OTA-capable inventory
+bench uses the direct, unchained `scripts/production-ota-gate.py --confirm-bench bench --install-bench`
+shape described by the delivery skills, with all artifact/source/current-version lease arguments.
+It binds the exact signed artifact, owns one un-retried POST only to the bench, survives rollback probation and stress,
 and cannot contact production. This is artifact delivery; an explicitly requested pre-merge USB
 test of an exact local head is a separate acceptance path.
 
 Production promotion is a distinct `--confirm-production production --execute` transaction. Bench
 staging and stress precede the production POST, then read-only canary and retained-X10A checks.
 Staging without `--execute` still mutates the bench and needs its authorized delivery scope. The
-gate accepts only the current official dev manifest. Direct `/ota/update`, including a channel
-switch with `downgrade=1`, is never an agent alternative. A production image that passed probation
-is corrected through a reviewed fix or revert and the same bench-first roll-forward chain; an image
-that failed probation is reverted by the bootloader. Preserve failed-gate evidence and obtain
+gate accepts only the current official dev or root Release manifest with its matching version form;
+transient feed binding preserves the saved dev or Release preference. Its full bench round trip and
+artifact checks are defined in [Maintenance](MAINTENANCE.md#production-promotion). Direct
+`/ota/update`, including a channel switch with `downgrade=1`, is never an agent alternative. A
+production image that passed probation is corrected through a reviewed fix or revert and the same
+bench-first roll-forward chain. Failed probation is reverted by the bootloader. Preserve failed-gate evidence and obtain
 fresh authorization for a blocked complete rerun rather than retrying a write.
 
 Signed, NVS-preserving USB writes to inventory roles are limited to bootstrap, recovery and the
