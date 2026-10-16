@@ -1,4 +1,4 @@
-// translation-source: 7480385d29565e389fed9481d6e1b12d6ed936d5931d38c0113cd63cd42a0341
+// translation-source: 6a7c8bdd68e0dbde1e916efab20768c5704a2a988360239d3ab300b76d2039aa
 I18N.fr = localeValues([
   /* sys.nodata */ "Aucune donnée",
   /* sys.unreachable */ "Injoignable",
@@ -29,6 +29,8 @@ I18N.fr = localeValues([
   /* sys.fault_line */ (c) => "Défaut · " + c + " — vérifiez le code de défaut Daikin.",
   /* sys.warning_line */ (c) => "Avertissement · " + c + " — vérifiez la pompe à chaleur.",
   /* sys.polled */ (s) => `Interrogé il y a ${s} s`,
+  /* config.unreadable_title */ "Réglages des services illisibles",
+  /* config.unreadable_meta */ "Cette version n’a pas pu lire les réglages des services enregistrés. Elle utilise des réglages de repli et n’a pas remplacé la copie conservée. Un micrologiciel compatible plus récent pourrait la restaurer. Un enregistrement réussi des réglages des services la remplace ; enregistrer seulement les broches X10A ou le protocole ne la remplace pas.",
   /* recovery.title */ "Mode de récupération",
   /* recovery.meta_heap */ "L’appareil a manqué de mémoire à plusieurs reprises et a redémarré. Il fonctionne maintenant avec la connexion à la pompe à chaleur et MQTT désactivés, afin que l’interface web reste accessible. La configuration est très probablement correcte — installez une version plus récente du micrologiciel dans Paramètres. Une mise hors tension puis sous tension relance la pile complète.",
   /* recovery.meta */ "L’appareil a redémarré à plusieurs reprises et est passé en mode de récupération. La communication avec la pompe à chaleur et MQTT est suspendue. Vérifiez la configuration — en particulier les broches RX/TX de la carte Protocole dans Paramètres — puis redémarrez l’appareil.",
@@ -546,6 +548,7 @@ I18N.fr = localeValues([
   /* dyn.state_homehub_disabled */ "Diagnostic arrêté — HomeHub désactivé",
   /* dyn.state_no_broker */ "Aucun enregistrement — aucun broker MQTT",
   /* dyn.state_safe_mode */ "Aucun enregistrement — mode sécurisé",
+  /* dyn.state_stale */ "Pas d’évaluation récente",
   /* dyn.state_inactive */ "Aucun enregistrement — échantillonneur arrêté",
   /* dyn.room_off */ "Thermostat d’ambiance arrêté",
   /* dyn.room_not_heating */ "Thermostat d’ambiance pas en mode chauffage",
@@ -588,6 +591,7 @@ I18N.fr = localeValues([
   /* dyn.state_help_blocked */ "Une entrée requise est manquante, rien n’est donc enregistré. L’enregistrement reprend dès son retour ; les données périmées ou ambiguës ne sont jamais échantillonnées.",
   /* dyn.state_help_room */ "Le relevé de pièce parvient à l’appareil, mais ne peut pas actuellement fournir un écart valide par rapport à la cible. Aucun échantillon n’est formé tant que la source n’est pas de nouveau exploitable.",
   /* dyn.state_help_setup */ "Le diagnostic démarre lorsqu’une source de pièce MQTT avec une cible est enregistrée. Les prévisions fournissent des valeurs comparatives facultatives ; aucune indication de l’emplacement n’est nécessaire.",
+  /* dyn.state_help_stale */ "Ce contrôle n’a pas été exécuté récemment. Ses données actuelles sont inconnues ; le dernier événement est conservé. Cela n’identifie pas de panne du courtier ni d’un capteur.",
   /* dyn.state_help_inactive */ "Les sources sont configurées, mais l’échantillonneur MQTT ne fonctionne pas : rien n’est évalué. Les réglages sont conservés ; l’enregistrement reprend dès qu’il fonctionne de nouveau.",
   /* dyn.state_help_no_broker */ "Une source de pièce est enregistrée, mais le diagnostic la lit via MQTT et aucun broker n’est configuré. Configurez le broker dans la carte Connexions ; la source enregistrée est conservée et l’enregistrement démarre automatiquement.",
   /* dyn.state_help_setup_homehub */ "Le diagnostic a besoin du HomeHub pour savoir quand l’installation chauffe réellement ; sans lui, il ne peut pas distinguer une fenêtre de chauffage de l’eau chaude ou d’un arrêt. Configurez l’adresse du HomeHub dans la carte Protocole.",

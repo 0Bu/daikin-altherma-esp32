@@ -16,6 +16,8 @@ namespace daik::logic {
 // v3 excludes DHW routing even when the normal-space-operation flag remains active.
 inline constexpr uint8_t HEATING_CURVE_DIAGNOSIS_METHOD_VERSION = 3;
 inline constexpr int64_t HEATING_CURVE_SAMPLE_CADENCE_MS = 30 * 60 * 1000;
+// Three nominal MQTT evaluation cycles; mqtt_ha.cpp pins this to its actual poll cadence.
+inline constexpr int64_t HEATING_CURVE_EVALUATION_MAX_AGE_MS = 3000;
 
 enum class HeatingCurveState : uint8_t {
     Off       = 0,
@@ -41,15 +43,16 @@ enum class HeatingCurveReason : uint8_t {
     HeatingModeUnknown  = 12,
     NonHeatingMode      = 13,
     // The sampler is not RUNNING at all — it lives on the MQTT publish task, which does not exist
-    // when the broker is unconfigured (mqtt_ha.cpp returns before creating it) or when the board came
-    // up in safe mode (main.cpp skips every optional consumer). The snapshot is then still
+    // when the broker is unconfigured (mqtt_ha.cpp returns before creating it) or when the board
+    // came up in safe mode (main.cpp skips every optional consumer). The snapshot is then still
     // default-constructed, i.e. Off/Disabled, while `armed` is derived from the saved room mapping
     // plus active HomeHub at
-    // request time — so /status reported `armed:true` beside `reason:"disabled"`, and the UI, keying
-    // on the state alone, told the reader to set up the very room source sitting configured one row
-    // below. This reason exists so those two situations stop sharing a wording: Disabled means "no
-    // room source is mapped", this one means "one is, and nothing is evaluating it".
-    SamplerInactive     = 14,
+    // request time — so /status reported `armed:true` beside `reason:"disabled"`, and the UI,
+    // keying on the state alone, told the reader to set up the very room source sitting configured
+    // one row below. This reason exists so those two situations stop sharing a wording: Disabled
+    // means "no room source is mapped", this one means "one is, and nothing is evaluating it".
+    SamplerInactive = 14,
+    EvaluationStale = 15,
 };
 
 inline const char* heating_curve_state_name(HeatingCurveState state) {
@@ -78,6 +81,8 @@ inline const char* heating_curve_reason_name(HeatingCurveReason reason) {
     case HeatingCurveReason::HeatingModeUnknown:  return "heating_mode_unknown";
     case HeatingCurveReason::NonHeatingMode:      return "non_heating_mode";
     case HeatingCurveReason::SamplerInactive:     return "sampler_inactive";
+    case HeatingCurveReason::EvaluationStale:
+        return "evaluation_stale";
     }
     return "clock_invalid";
 }
@@ -200,7 +205,36 @@ class HeatingCurveDiagnosis {
 public:
     const HeatingCurveSnapshot& snapshot() const { return s_; }
 
+    // Reading ages only the current verdict. It neither evaluates inputs nor advances the event
+    // cadence/counters; dated samples keep the evidence captured at their original evaluation.
+    HeatingCurveSnapshot snapshot_at(int64_t now_ms) const noexcept {
+        HeatingCurveSnapshot out = s_;
+        if (out.armed && (last_evaluation_ms_ < 0 || now_ms < last_evaluation_ms_ ||
+                          now_ms - last_evaluation_ms_ > HEATING_CURVE_EVALUATION_MAX_AGE_MS)) {
+            out.state                         = HeatingCurveState::Blocked;
+            out.reason                        = HeatingCurveReason::EvaluationStale;
+            out.sample_eligible               = false;
+            out.has_current_room_error        = false;
+            out.current_room_error_k          = 0.0;
+            out.forecast_available            = false;
+            out.has_outdoor_temperature       = false;
+            out.outdoor_source                = OutdoorSource::None;
+            out.outdoor_temperature_c         = 0.0;
+            out.has_plant_outdoor_temperature = false;
+            out.plant_outdoor_source          = OutdoorSource::None;
+            out.plant_outdoor_temperature_c   = 0.0;
+            out.plant_gate_known = out.plant_gate_active = false;
+            out.heating_mode_known = out.heating_mode_active = false;
+            out.room_has_source_time                         = false;
+            out.room_source_unix_s                           = -1;
+            out.room_age_known                               = false;
+            out.room_age_s                                   = 0;
+        }
+        return out;
+    }
+
     const HeatingCurveSnapshot& evaluate(const HeatingCurveInputs& in) {
+        last_evaluation_ms_       = in.now_ms;
         s_.armed = in.armed;
         s_.sample_eligible = false;
         s_.has_current_room_error = false;
@@ -292,6 +326,7 @@ public:
     __attribute__((noinline)) void forget_samples() noexcept {
         reset_samples();
         last_now_ms_ = -1;
+        last_evaluation_ms_ = -1;
     }
 
 private:
@@ -325,6 +360,7 @@ private:
     HeatingCurveSnapshot s_{};
     int64_t last_sample_ms_ = -1;
     int64_t last_now_ms_ = -1;
+    int64_t              last_evaluation_ms_ = -1;
 };
 
 }  // namespace daik::logic

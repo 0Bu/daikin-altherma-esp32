@@ -1,4 +1,4 @@
-// translation-source: 7480385d29565e389fed9481d6e1b12d6ed936d5931d38c0113cd63cd42a0341
+// translation-source: 6a7c8bdd68e0dbde1e916efab20768c5704a2a988360239d3ab300b76d2039aa
 const plNoun = (n, one, few, many) => {
   const value = Math.abs(Number(n)), mod10 = value % 10, mod100 = value % 100;
   return value === 1 ? one
@@ -34,6 +34,8 @@ I18N.pl = localeValues([
   /* sys.fault_line */ (c) => "Usterka · " + c + " — sprawdź kod usterki Daikin.",
   /* sys.warning_line */ (c) => "Ostrzeżenie · " + c + " — sprawdź pompę ciepła.",
   /* sys.polled */ (s) => `Odczytano ${s} s temu`,
+  /* config.unreadable_title */ "Nieczytelne ustawienia usług",
+  /* config.unreadable_meta */ "Ta wersja nie mogła odczytać zapisanych ustawień usług. Używa ustawień zastępczych i nie zastąpiła zachowanej kopii. Nowsze zgodne oprogramowanie może ją przywrócić. Udany zapis ustawień usług ją zastępuje; zapis samych pinów X10A lub protokołu nie.",
   /* recovery.title */ "Tryb odzyskiwania",
   /* recovery.meta_heap */ "Urządzeniu wielokrotnie zabrakło pamięci i uruchomiło się ponownie. Działa teraz z wyłączonym połączeniem z pompą ciepła i MQTT, aby interfejs WWW pozostał dostępny. Konfiguracja jest najprawdopodobniej prawidłowa — zainstaluj nowszą wersję firmware w Ustawieniach. Wyłączenie i ponowne włączenie zasilania ponawia uruchomienie pełnego zestawu usług.",
   /* recovery.meta */ "Urządzenie wielokrotnie uruchomiło się ponownie i weszło w tryb odzyskiwania. Komunikacja z pompą ciepła i MQTT jest wstrzymana. Sprawdź konfigurację — zwłaszcza piny RX/TX na karcie Protokół w Ustawieniach — a następnie uruchom urządzenie ponownie.",
@@ -551,6 +553,7 @@ I18N.pl = localeValues([
   /* dyn.state_homehub_disabled */ "Diagnostyka wyłączona — HomeHub wyłączony",
   /* dyn.state_no_broker */ "Brak rejestrowania — brak brokera MQTT",
   /* dyn.state_safe_mode */ "Brak rejestrowania — tryb bezpieczny",
+  /* dyn.state_stale */ "Brak niedawnej oceny",
   /* dyn.state_inactive */ "Brak rejestrowania — próbnik nie działa",
   /* dyn.room_off */ "Termostat pokojowy wyłączony",
   /* dyn.room_not_heating */ "Termostat pokojowy nie jest w trybie ogrzewania",
@@ -593,6 +596,7 @@ I18N.pl = localeValues([
   /* dyn.state_help_blocked */ "Brakuje wymaganego wejścia, dlatego nic nie jest rejestrowane. Rejestrowanie zostanie wznowione, gdy wróci; nieaktualne ani niejednoznaczne dane nigdy nie są próbkowane.",
   /* dyn.state_help_room */ "Odczyt z pomieszczenia dociera do urządzenia, ale obecnie nie pozwala obliczyć prawidłowego odchylenia od celu. Próbka nie powstanie, dopóki źródło nie będzie ponownie użyteczne.",
   /* dyn.state_help_setup */ "Diagnostyka rozpoczyna się po zapisaniu źródła temperatury pomieszczenia MQTT z wartością docelową. Prognoza dostarcza opcjonalnych wartości porównawczych; ujawnianie lokalizacji nie jest wymagane.",
+  /* dyn.state_help_stale */ "Ta kontrola nie była ostatnio wykonywana. Jej bieżące dane są nieznane; ostatnie zdarzenie zostaje zachowane. Nie wskazuje to awarii brokera ani czujnika.",
   /* dyn.state_help_inactive */ "Źródła są skonfigurowane, ale próbnik MQTT nie działa, więc nic nie jest oceniane. Ustawienia pozostają; rejestrowanie wznowi się, gdy próbnik znów zadziała.",
   /* dyn.state_help_no_broker */ "Źródło temperatury pomieszczenia jest zapisane, ale diagnostyka odczytuje je przez MQTT, a broker nie jest skonfigurowany. Ustaw brokera na karcie Połączenia; zapisane źródło zostanie zachowane, a rejestrowanie uruchomi się automatycznie.",
   /* dyn.state_help_setup_homehub */ "Diagnostyka wymaga HomeHub, aby określić, kiedy instalacja rzeczywiście ogrzewa; bez niego nie odróżni okna ogrzewania od ciepłej wody ani postoju. Ustaw adres HomeHub na karcie Protokół.",

@@ -1,4 +1,4 @@
-// translation-source: 7480385d29565e389fed9481d6e1b12d6ed936d5931d38c0113cd63cd42a0341
+// translation-source: 6a7c8bdd68e0dbde1e916efab20768c5704a2a988360239d3ab300b76d2039aa
 I18N.cs = localeValues([
   /* sys.nodata */ "Žádná data",
   /* sys.unreachable */ "Nedostupné",
@@ -29,6 +29,8 @@ I18N.cs = localeValues([
   /* sys.fault_line */ (c) => "Porucha · " + c + " — zkontrolujte kód poruchy Daikin.",
   /* sys.warning_line */ (c) => "Varování · " + c + " — zkontrolujte tepelné čerpadlo.",
   /* sys.polled */ (s) => `Naposledy načteno před ${s} s`,
+  /* config.unreadable_title */ "Nečitelné nastavení služeb",
+  /* config.unreadable_meta */ "Tato verze nedokázala přečíst uložené nastavení služeb. Používá náhradní nastavení a zachovanou kopii nenahradila. Novější kompatibilní firmware ji možná obnoví. Úspěšné uložení nastavení služeb ji nahradí; uložení pouze pinů X10A nebo protokolu ne.",
   /* recovery.title */ "Režim obnovení",
   /* recovery.meta_heap */ "Zařízení opakovaně vyčerpalo paměť a samo se restartovalo. Nyní běží s vypnutým připojením k tepelnému čerpadlu a MQTT, aby zůstalo dostupné webové rozhraní. Konfigurace je s největší pravděpodobností v pořádku — v Nastavení nainstalujte novější verzi firmwaru. Vypnutí a zapnutí napájení zkusí znovu spustit celý systém.",
   /* recovery.meta */ "Zařízení se opakovaně restartovalo a přešlo do režimu obnovení. Komunikace s tepelným čerpadlem a MQTT je pozastavena. Zkontrolujte konfiguraci — zejména piny RX/TX na kartě Protokol v Nastavení — a poté zařízení restartujte.",
@@ -546,6 +548,7 @@ I18N.cs = localeValues([
   /* dyn.state_homehub_disabled */ "Diagnostika vypnuta — HomeHub je vypnutý",
   /* dyn.state_no_broker */ "Nezaznamenává se — chybí broker MQTT",
   /* dyn.state_safe_mode */ "Nezaznamenává se — nouzový režim",
+  /* dyn.state_stale */ "Bez nedávného vyhodnocení",
   /* dyn.state_inactive */ "Nezaznamenává se — vzorkovač neběží",
   /* dyn.room_off */ "Pokojový termostat je vypnutý",
   /* dyn.room_not_heating */ "Pokojový termostat není v režimu vytápění",
@@ -588,6 +591,7 @@ I18N.cs = localeValues([
   /* dyn.state_help_blocked */ "Chybí povinný vstup, proto se nic nezaznamenává. Záznam se obnoví, jakmile se vstup vrátí; zastaralá nebo nejednoznačná data se nikdy nepřebírají.",
   /* dyn.state_help_room */ "Hodnota z místnosti se dostává do zařízení, ale právě z ní nelze vytvořit platnou odchylku od cíle. Dokud nebude zdroj opět použitelný, vzorek nevznikne.",
   /* dyn.state_help_setup */ "Diagnostika se spustí po uložení zdroje místnosti MQTT s cílem. Předpověď poskytuje volitelné srovnávací hodnoty; není nutné uvádět polohu.",
+  /* dyn.state_help_stale */ "Tato kontrola v poslední době neproběhla. Její aktuální vstupy jsou neznámé; poslední událost zůstává zachována. To neurčuje poruchu brokeru ani snímače.",
   /* dyn.state_help_inactive */ "Zdroje jsou nastaveny, ale vzorkovač MQTT neběží, takže se nic nevyhodnocuje. Nastavení zůstává; záznam pokračuje, jakmile vzorkovač znovu poběží.",
   /* dyn.state_help_no_broker */ "Zdroj místnosti je uložen, ale diagnostika jej čte přes MQTT a není nastaven žádný broker. Nastavte broker na kartě Připojení; uložený zdroj místnosti zůstane zachován a záznam se spustí sám.",
   /* dyn.state_help_setup_homehub */ "Diagnostika potřebuje HomeHub, aby poznala, kdy soustava skutečně vytápí; bez něj nerozliší topné okno od ohřevu teplé vody nebo klidu. Nastavte adresu HomeHubu na kartě Protokol.",

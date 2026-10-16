@@ -802,6 +802,8 @@ function roomSourceDetailHtml(r, status, temperature, setpoint, age) {
 //    disarms a fully-configured room source. The old copy told those users to set up the source they
 //    were looking at.
 function dynamicStateRow(d, room, weather, modbus, mqtt, sys) {
+  if (d.reason === "evaluation_stale")
+    return { key: "dyn.state_stale", cls: "", help: "dyn.state_help_stale" };
   if (d.reason === "sampler_inactive") {
     return { key: sys.safe_mode ? "dyn.state_safe_mode" : "dyn.state_inactive",
              cls: "warn", help: "dyn.state_help_inactive" };
@@ -876,7 +878,7 @@ function outdoorAxisRow(d, env) {
   // Clearing the broker disarms the diagnosis while leaving ENV III perfectly healthy, so without
   // this the row would warn about the sensor and send the reader to check hardware that is fine —
   // the same mistake as telling someone to set up the room source sitting one row below.
-  const evaluating = d.armed === true && d.reason !== "sampler_inactive";
+  const evaluating = d.armed === true && !["sampler_inactive", "evaluation_stale"].includes(d.reason);
   // NO-BREAK SPACE before the unit. Both readings this formats now sit in the tongue, where a lead-in
   // ("Aktueller Messwert") and the number share one wrapping paragraph — so a plain space still puts
   // "22,2" and "°C" on two lines at a phone width, which reads as a layout fault rather than as a
@@ -946,7 +948,7 @@ function plantOutdoorAxisRow(d, modbus) {
   const fmt = (n) => `${n.toLocaleString(LANG,
     { minimumFractionDigits: 1, maximumFractionDigits: 1 })} °C`;
 
-  const evaluating = d.armed === true && d.reason !== "sampler_inactive";
+  const evaluating = d.armed === true && !["sampler_inactive", "evaluation_stale"].includes(d.reason);
   let statusKey = "dyn.outdoor_status_absent";
   if (live !== null) statusKey = "dyn.outdoor_status_live";
   else if (source && evaluating) statusKey = "dyn.outdoor_status_unavailable";

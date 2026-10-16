@@ -1,4 +1,4 @@
-// translation-source: 7480385d29565e389fed9481d6e1b12d6ed936d5931d38c0113cd63cd42a0341
+// translation-source: 6a7c8bdd68e0dbde1e916efab20768c5704a2a988360239d3ab300b76d2039aa
 I18N.it = localeValues([
   /* sys.nodata */ "Nessun dato",
   /* sys.unreachable */ "Non raggiungibile",
@@ -29,6 +29,8 @@ I18N.it = localeValues([
   /* sys.fault_line */ (c) => "Guasto · " + c + " — controllare il codice di guasto Daikin.",
   /* sys.warning_line */ (c) => "Avviso · " + c + " — controllare la pompa di calore.",
   /* sys.polled */ (s) => `Interrogato ${s} s fa`,
+  /* config.unreadable_title */ "Impostazioni dei servizi illeggibili",
+  /* config.unreadable_meta */ "Questa versione non ha potuto leggere le impostazioni dei servizi salvate. Usa impostazioni di ripiego e non ha sostituito la copia conservata. Un firmware compatibile più recente potrebbe ripristinarla. Salvare correttamente le impostazioni dei servizi la sostituisce; salvare solo i pin X10A o il protocollo no.",
   /* recovery.title */ "Modalità di ripristino",
   /* recovery.meta_heap */ "Il dispositivo ha esaurito ripetutamente la memoria e si è riavviato. Ora funziona con il collegamento alla pompa di calore e MQTT disattivati, così l'interfaccia web resta raggiungibile. La configurazione è molto probabilmente corretta — installare una versione firmware più recente in Impostazioni. Spegnendo e riaccendendo viene ritentato l'avvio completo.",
   /* recovery.meta */ "Il dispositivo si è riavviato ripetutamente ed è entrato in modalità di ripristino. La comunicazione con la pompa di calore e MQTT è in pausa. Controllare la configurazione — in particolare i pin RX/TX nella scheda Protocollo delle Impostazioni — quindi riavviare il dispositivo.",
@@ -546,6 +548,7 @@ I18N.it = localeValues([
   /* dyn.state_homehub_disabled */ "Diagnosi disattivata — HomeHub disattivato",
   /* dyn.state_no_broker */ "Registrazione non attiva — nessun broker MQTT",
   /* dyn.state_safe_mode */ "Registrazione non attiva — modalità provvisoria",
+  /* dyn.state_stale */ "Nessuna valutazione recente",
   /* dyn.state_inactive */ "Registrazione non attiva — campionatore fermo",
   /* dyn.room_off */ "Termostato ambiente spento",
   /* dyn.room_not_heating */ "Termostato ambiente non in riscaldamento",
@@ -588,6 +591,7 @@ I18N.it = localeValues([
   /* dyn.state_help_blocked */ "Manca un ingresso necessario, quindi non viene registrato nulla. La registrazione riprende quando torna disponibile; dati vecchi o ambigui non vengono mai campionati.",
   /* dyn.state_help_room */ "La lettura ambiente raggiunge il dispositivo, ma al momento non può fornire una deviazione valida dall'obiettivo. Non viene creato alcun campione finché la sorgente non torna utilizzabile.",
   /* dyn.state_help_setup */ "La diagnosi inizia quando viene salvata una sorgente ambiente MQTT con obiettivo. Le previsioni forniscono valori comparativi facoltativi; non è necessario indicare la posizione.",
+  /* dyn.state_help_stale */ "Questo controllo non è stato eseguito di recente. I suoi dati attuali sono sconosciuti; l’ultimo evento viene conservato. Questo non identifica un guasto del broker o di un sensore.",
   /* dyn.state_help_inactive */ "Le sorgenti sono configurate, ma il campionatore MQTT non è in funzione, quindi nulla viene valutato. Le impostazioni restano; la registrazione riprende quando torna in funzione.",
   /* dyn.state_help_no_broker */ "È salvata una sorgente ambiente, ma la diagnosi la legge tramite MQTT e non è configurato alcun broker. Impostare il broker nella scheda Connessioni; la sorgente ambiente salvata viene conservata e la registrazione si avvia automaticamente.",
   /* dyn.state_help_setup_homehub */ "La diagnosi necessita di HomeHub per sapere quando l'impianto sta realmente riscaldando; senza non può distinguere una finestra di riscaldamento dall'acqua calda o da un arresto. Impostare l'indirizzo HomeHub nella scheda Protocollo.",

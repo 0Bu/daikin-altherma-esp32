@@ -532,6 +532,7 @@ function markUnreachable() {
 // and rendering the hidden ones costs a few string builds — far cheaper than a per-screen refresh
 // scheme that has to remember to run when a view is switched to.
 function renderApp() {
+  renderConfigWarning();
   renderRecoveryBanner();
   renderRollbackBanner();
   renderCrashBanner();
@@ -720,6 +721,12 @@ function faultValue() {
   if (bad) return String(bad.value);
   if (codes.length) return String(codes[0].value);
   return pickValue(/fault|error/i);
+}
+
+// The kept service-settings copy is unreadable by this build; only a new status can clear it.
+function renderConfigWarning() {
+  for (const id of ["configWarningDash", "configWarningSettings"])
+    $(id).hidden = S.status?.sys?.config_unreadable !== true;
 }
 
 // ── Recovery (safe) mode banner ──────────────────────────────────────────

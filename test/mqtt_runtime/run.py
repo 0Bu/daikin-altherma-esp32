@@ -114,7 +114,7 @@ scenarios = ['discovery_guard_clean', 'discovery_guard_default', 'discovery_guar
              'probe_active_replacement', 'probe_active_replacement_retire_rejection',
              'probe_saved_config_without_owner', 'probe_active_shared_prior_owner',
              'sdk_event_stack_owner', 'outgoing_heartbeat', 'outgoing_weather',
-             'outgoing_curve', 'curve_space_route_gate', 'curve_consent_boundary', 'curve_room_source_boundary',
+             'outgoing_curve', 'curve_space_route_gate', 'curve_evaluation_age', 'curve_consent_boundary', 'curve_room_source_boundary',
              'curve_boundary_during_evaluation', 'scalar_snapshot_helpers',
              'discovery_topic_roundtrip',
              'callback_fragments', 'callback_payload_bounds', 'callback_epoch_cutover',
@@ -648,6 +648,20 @@ mutations.extend([
      'return !binding.empty() && topic == std::string_view(binding);',
      '(void)topic; (void)binding; return false;',
      'DISCOVERY_EXACT_SAVED_REFERENCE_RECEIVES_EARLY_RETAINED_DATA', 1),
+])
+mutations.extend([
+    ('curve-evaluation-age-omitted', 'curve_evaluation_age',
+     'return s_heating_curve_diagnosis.snapshot_at(esp_timer_get_time() / 1000);',
+     'return s_heating_curve_diagnosis.snapshot();',
+     'CURVE_EVALUATION_FIRST_MILLISECOND_EXPIRES', 1),
+    ('curve-evaluation-age-one-ms-late', 'curve_evaluation_age',
+     'return s_heating_curve_diagnosis.snapshot_at(esp_timer_get_time() / 1000);',
+     'return s_heating_curve_diagnosis.snapshot_at(esp_timer_get_time() / 1000 - 1);',
+     'CURVE_EVALUATION_FIRST_MILLISECOND_EXPIRES', 1),
+    ('curve-evaluation-recovery-omitted', 'curve_evaluation_age',
+     'evaluate_heating_curve(ref_config, x10a_connected);',
+     'if (sdk::delays < 5) evaluate_heating_curve(ref_config, x10a_connected);',
+     'CURVE_OWNER_RESUMES_WITHOUT_DUPLICATE_EVENT', 1),
 ])
 for name, scenario, before, after, assertion, count in mutations:
     if scenario not in scenarios:

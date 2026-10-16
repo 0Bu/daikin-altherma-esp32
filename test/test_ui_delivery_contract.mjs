@@ -69,15 +69,112 @@ try {
   "the shared host splice must copy every String.prototype.replace pattern literally");
 
   const tool = path.join(root, "tools/web_asset/minify_and_gzip.py");
-  const run = (output, extra = []) => childProcess.spawnSync("python3", [
+  const run = (output, extra = [], env = {}) => childProcess.spawnSync("python3", [
     tool, "--input", input, "--output", output,
+    "--gzip-encoder", "zopfli", "--zopfli-iterations", "5",
     "--max-gzip-bytes", String(budget), ...extra,
-  ], { cwd: root, encoding: "utf8" });
+  ], { cwd: root, encoding: "utf8", env: {
+    ...process.env, WEB_ASSET_CACHE_DIR: path.join(work, "encoder-cache"), ...env,
+  } });
 
   const first = run(gzipA, ["--html-output", minifiedPath]);
   assert.equal(first.status, 0, first.stderr || first.stdout);
+  const cache = path.join(work, "encoder-cache");
+  const helperNames = fs.readdirSync(cache);
+  assert.equal(helperNames.length, 1, "a completed build must publish one cache entry");
+  const helperName = helperNames[0];
+  const helperPath = path.join(cache, helperName);
+  const cachedBefore = fs.statSync(helperPath);
   const second = run(gzipB);
   assert.equal(second.status, 0, second.stderr || second.stdout);
+  const cachedAfter = fs.statSync(helperPath);
+  assert.equal(cachedAfter.ino, cachedBefore.ino, "a valid regular helper must be reused");
+  assert.equal(cachedAfter.mtimeMs, cachedBefore.mtimeMs, "a cache hit must not recompile");
+
+  // A key-named link must fail before executing its target, even if that target is executable.
+  const poisonedCache = path.join(work, "poisoned-cache");
+  fs.mkdirSync(poisonedCache, { mode: 0o700 });
+  const marker = path.join(work, "external-target-executed");
+  const externalTarget = path.join(work, "external-encoder");
+  fs.writeFileSync(externalTarget, "#!/usr/bin/env python3\nfrom pathlib import Path\n" +
+    `Path(${JSON.stringify(marker)}).write_text("executed")\n`, { mode: 0o700 });
+  fs.symlinkSync(externalTarget, path.join(poisonedCache, helperName));
+  const poisoned = run(path.join(work, "poisoned.gz"), [], { WEB_ASSET_CACHE_DIR: poisonedCache });
+  assert.notEqual(poisoned.status, 0, "a cached helper symlink must be rejected");
+  assert.match(poisoned.stderr, /cached helper/);
+  assert.ok(!fs.existsSync(marker), "a symlink target outside the cache must never execute");
+
+  const nonregularCache = path.join(work, "nonregular-cache");
+  fs.mkdirSync(nonregularCache, { mode: 0o700 });
+  fs.mkdirSync(path.join(nonregularCache, helperName));
+  const nonregular = run(path.join(work, "nonregular.gz"), [], {
+    WEB_ASSET_CACHE_DIR: nonregularCache,
+  });
+  assert.notEqual(nonregular.status, 0, "a nonregular cached helper must be rejected");
+  assert.match(nonregular.stderr, /cached helper/);
+
+  for (const mode of [0o720, 0o702]) {
+    const writableCache = path.join(work, `writable-cache-${mode}`);
+    fs.mkdirSync(writableCache, { mode: 0o700 });
+    const unsafeHelper = path.join(writableCache, helperName);
+    fs.copyFileSync(helperPath, unsafeHelper);
+    fs.chmodSync(unsafeHelper, mode);
+    const refused = run(path.join(work, `writable-${mode}.gz`), [], {
+      WEB_ASSET_CACHE_DIR: writableCache,
+    });
+    assert.notEqual(refused.status, 0, "group/world-writable helpers must not execute");
+    assert.match(refused.stderr, /cached helper/);
+  }
+  const sharedParent = path.join(work, "shared-parent");
+  const unsafeCache = path.join(sharedParent, "private-cache");
+  fs.mkdirSync(sharedParent);
+  fs.chmodSync(sharedParent, 0o777);
+  fs.mkdirSync(unsafeCache, { mode: 0o700 });
+  const unsafeAncestor = run(path.join(work, "unsafe-ancestor.gz"), [], {
+    WEB_ASSET_CACHE_DIR: unsafeCache,
+  });
+  assert.notEqual(unsafeAncestor.status, 0, "a private leaf must not hide an unsafe ancestor");
+  assert.match(unsafeAncestor.stderr, /cache ancestor/);
+
+  const hiddenTarget = path.join(sharedParent, "protected-target");
+  fs.mkdirSync(hiddenTarget, { mode: 0o700 });
+  const hiddenCache = path.join(hiddenTarget, "cache");
+  fs.mkdirSync(hiddenCache, { mode: 0o700 });
+  fs.copyFileSync(helperPath, path.join(hiddenCache, helperName));
+  fs.chmodSync(path.join(hiddenCache, helperName), 0o700);
+  const unsafeAlias = path.join(work, "unsafe-target-alias");
+  fs.symlinkSync(hiddenTarget, unsafeAlias, "dir");
+  const hiddenAncestor = run(path.join(work, "hidden-ancestor.gz"), [], {
+    WEB_ASSET_CACHE_DIR: path.join(unsafeAlias, "cache"),
+  });
+  assert.notEqual(hiddenAncestor.status, 0, "an ancestor alias must not hide shared-writable parents");
+  assert.match(hiddenAncestor.stderr, /cache ancestor/);
+
+  const protectedAlias = path.join(work, "protected-alias");
+  fs.symlinkSync(work, protectedAlias, "dir");
+  const aliasOutput = path.join(work, "protected-alias.gz");
+  const acceptedAlias = run(aliasOutput, [], {
+    WEB_ASSET_CACHE_DIR: path.join(protectedAlias, "encoder-cache"),
+  });
+  assert.equal(acceptedAlias.status, 0, acceptedAlias.stderr || acceptedAlias.stdout);
+  assert.deepEqual(fs.readFileSync(aliasOutput), fs.readFileSync(gzipA),
+    "a protected ancestor alias must retain the same valid encoder output");
+
+  const concurrent = childProcess.spawnSync("python3", ["-c", [
+    "import concurrent.futures, gzip, os, sys",
+    "os.umask(0)",
+    "sys.path.insert(0, sys.argv[1])",
+    "from zopfli_gzip import compress",
+    "with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:",
+    "    results = list(pool.map(lambda _: compress(b'parallel cache proof', 5), range(2)))",
+    "assert results[0] == results[1]",
+    "assert gzip.decompress(results[0]) == b'parallel cache proof'",
+  ].join("\n"), path.dirname(tool)], { cwd: root, encoding: "utf8", env: {
+    ...process.env, WEB_ASSET_CACHE_DIR: path.join(work, "concurrent-parent", "nested", "cache"),
+  } });
+  assert.equal(concurrent.status, 0, concurrent.stderr || concurrent.stdout);
+  assert.equal(fs.statSync(path.join(work, "concurrent-parent")).mode & 0o077, 0,
+    "new custom-cache ancestors must remain private even with a permissive umask");
 
   const compressed = fs.readFileSync(gzipA);
   assert.ok(compressed.length <= budget,
@@ -87,18 +184,28 @@ try {
   const minified = fs.readFileSync(minifiedPath, "utf8");
   assert.equal(zlib.gunzipSync(compressed).toString("utf8"), minified,
     "checked minified HTML must be the exact compressed payload");
-  const tuned = run(gzipB, ["--gzip-memory-level", "7"]);
-  assert.equal(tuned.status, 0, tuned.stderr || tuned.stdout);
-  const tunedBytes = fs.readFileSync(gzipB);
-  assert.deepEqual(zlib.gunzipSync(tunedBytes), zlib.gunzipSync(compressed),
-    "firmware compression tuning must preserve every decoded page byte");
-  assert.equal(tunedBytes[9], 255, "tuned gzip must use deterministic host-independent metadata");
-  const tunedRepeat = run(gzipB, ["--gzip-memory-level", "7"]);
-  assert.equal(tunedRepeat.status, 0, tunedRepeat.stderr || tunedRepeat.stdout);
-  assert.deepEqual(fs.readFileSync(gzipB), tunedBytes, "tuned gzip must remain deterministic");
+  assert.deepEqual(compressed.subarray(0, 10), Buffer.from("1f8b08000000000002ff", "hex"),
+    "the index gzip must have deterministic host-independent metadata");
+  const zlibControl = zlib.gzipSync(Buffer.from(minified), { level: 9, memLevel: 7 });
+  assert.ok(compressed.length < zlibControl.length,
+    "the selected Zopfli encoder must improve on the former index zlib setting");
+  const unavailablePath = path.join(work, "unavailable.html.gz");
+  const unavailable = run(unavailablePath, [], {
+    HOST_CC: path.join(work, "missing-native-cc"),
+    WEB_ASSET_CACHE_DIR: path.join(work, "unavailable-cache"),
+  });
+  assert.notEqual(unavailable.status, 0, "a missing native encoder must not fall back to zlib");
+  assert.match(unavailable.stderr, /native C compiler/);
+  assert.ok(!fs.existsSync(unavailablePath), "a refused encoder must not publish an artifact");
+  const wrongIterations = run(unavailablePath, ["--zopfli-iterations", "4"]);
+  assert.notEqual(wrongIterations.status, 0, "the production encoder requires exactly five iterations");
   assert.match(fs.readFileSync(path.join(root, "main/CMakeLists.txt"), "utf8"),
-    /--output "\$\{CMAKE_CURRENT_BINARY_DIR\}\/index\.html\.gz"\s+--gzip-memory-level 7/,
-    "the tested compression parameter must be the firmware build parameter");
+    /--output "\$\{CMAKE_CURRENT_BINARY_DIR\}\/index\.html\.gz"\s+--gzip-encoder zopfli --zopfli-iterations 5/,
+    "the tested encoder and iteration count must be the firmware build parameters");
+  const upstream = JSON.parse(fs.readFileSync(path.join(root,
+    "tools/web_asset/vendor/zopfli/UPSTREAM.json"), "utf8"));
+  assert.equal(upstream.commit, "bd64b2f0553d4f1ef4e6627647c5d9fc8c71ffc0");
+  assert.equal(upstream.tag, "zopfli-1.0.3");
   assert.ok(minified.length < assembled.length * 0.7,
     "CSS/JS syntax minification must remove meaningful source-only weight");
 
@@ -286,11 +393,16 @@ try {
     const file = path.join(root, `main/www/locales/${code}.js`);
     const output = path.join(work, `locale-${code}.js.gz`);
     const reduced = childProcess.spawnSync("python3", [localeTool, "--input", file, "--output", output,
-      "--max-gzip-bytes", "32768"], { cwd: root, encoding: "utf8" });
+      "--max-gzip-bytes", "32768"], { cwd: root, encoding: "utf8", env: {
+        ...process.env, HOST_CC: path.join(work, "missing-native-cc"),
+        WEB_ASSET_CACHE_DIR: path.join(work, "locale-unused-cache"),
+      } });
     assert.equal(reduced.status, 0, reduced.stderr || reduced.stdout);
     vm.runInContext(fs.readFileSync(file, "utf8"), originalProduction);
     vm.runInContext(zlib.gunzipSync(fs.readFileSync(output)).toString("utf8"), shippedProduction);
   }
+  assert.ok(!fs.existsSync(path.join(work, "locale-unused-cache")),
+    "independent locale minification must not acquire the native index encoder");
   vm.runInContext(catalogExports, originalProduction);
   vm.runInContext(catalogExports, shippedProduction);
   const argumentsCases = [[], [0, 0, 0, 0, 0], [1, 1, 1, 1, 1], [2, 2, 2, 2, 2],

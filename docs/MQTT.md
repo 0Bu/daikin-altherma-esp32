@@ -235,6 +235,12 @@ a mapped or fixed target is treated as the standing setpoint. Fixed targets cann
 (input 37 = 0); the raw `/status.modbus.plant_gate_*` fields still describe input 53 alone.
 [PLANT.md](PLANT.md#heating-curve-diagnosis) owns the admission rule and method-version boundary.
 
+The same age-projected diagnosis serves HTTP and MQTT: `reason:15` (`evaluation_stale`), `state:4`
+and `sample_eligible:0` mean the owner has not evaluated recently. Current diagnosis evidence is null
+or unavailable, while `last_sample`, counters and independently fresh `room` evidence are preserved.
+Reads neither renew that evaluation nor create events. The project age rule is defined in
+[PLANT.md](PLANT.md#heating-curve-diagnosis); schema 3 and method 3 remain unchanged.
+
 Boolean facts use numeric 1/0; unestablished numbers are null. Source codes are 0 `none`, 1 `x10a`,
 2 `homehub`, 3 `env3`; the two recorded axes use their own current source. HomeHub input 44 must be
 from the current Modbus cycle/session; ENV III must be fresh/plausible and its physical placement
@@ -249,7 +255,8 @@ The textual slug is `/status.reference_temperature.reason`.
 Diagnosis state codes: 0 off, 1 recording, 2 hold, 3 degraded, 4 blocked. Reason codes: 0 disabled,
 1 sample recorded, 2 interval, 5 room unavailable, 6 X10A unavailable, 7 HomeHub unavailable,
 8 plant gate unknown, 9 plant inactive, 10 forecast unavailable, 11 clock invalid, 12 mode unknown,
-13 non-heating. Codes 3/4 are retired and never reused.
+13 non-heating, 15 evaluation stale. Codes 3/4 are retired and never reused; 14 sampler inactive
+describes an unstarted owner on HTTP, before MQTT can publish.
 
 An eligible event records raw **target − actual** room deviation at most every 30 minutes, with
 absolute `last_sample.unix_s` and an incremented `sequence`. `unix_s` is the evaluation time; the

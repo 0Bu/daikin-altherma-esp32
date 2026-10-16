@@ -1726,6 +1726,90 @@ void curve_first_scope_event() {
                 held.last_sample_unix_s == 1700000100 && held.last_sample_room_error_k == 1.5,
             "CURVE_FIRST_SCOPE_EVENT_AND_CADENCE_ACTIVE");
 }
+// Skip the real task's evaluation stage through repeated allocation failures. Independent status
+// reads and the actual MQTT builder must age the same verdict without refreshing it or its events.
+void curve_evaluation_age() {
+    initial_config();
+    curve_first_scope_event();
+    adapter::hp.connected           = true;
+    adapter::hp.last_ok_s           = 0;
+    adapter::cfg.weather_enabled    = true;
+    adapter::weather.available      = true;
+    adapter::weather.has_value      = true;
+    adapter::weather.fetched_unix_s = 1700000000 + sdk::ticks / 1000;
+    daik::logic::HeatingCurveSnapshot baseline;
+    sdk::on_delay = [&](TickType_t delay) {
+        check_cycle(delay);
+        sdk::fail_locked_new = true;
+        const auto now       = daik::heating_curve_status();
+        require(sdk::fail_locked_new && sdk::locks == 0 && sdk::takes == sdk::gives,
+                "CURVE_AGED_READER_ALLOCATION_FREE_AND_LOCK_BALANCED");
+        sdk::fail_locked_new = false;
+        if (sdk::delays == 1) {
+            require(now.state == daik::logic::HeatingCurveState::Recording && now.sample_eligible,
+                    "CURVE_FRESH_OWNER_EVALUATION_RECORDS");
+            baseline = now;
+        } else if (sdk::delays <= 3) {
+            require(now.state == daik::logic::HeatingCurveState::Recording && now.sample_eligible,
+                    "CURVE_EVALUATION_AGE_BOUND_IS_INCLUSIVE");
+            if (sdk::delays == 3) {
+                ++sdk::ticks;
+                require(daik::heating_curve_status().reason ==
+                            daik::logic::HeatingCurveReason::EvaluationStale,
+                        "CURVE_EVALUATION_FIRST_MILLISECOND_EXPIRES");
+            }
+        } else if (sdk::delays <= 5) {
+            require(now.state == daik::logic::HeatingCurveState::Blocked &&
+                        now.reason == daik::logic::HeatingCurveReason::EvaluationStale &&
+                        !now.sample_eligible && !now.has_current_room_error &&
+                        !now.forecast_available && !now.plant_gate_known &&
+                        !now.heating_mode_known && !now.room_has_source_time && !now.room_age_known,
+                    "CURVE_FROZEN_STATE_EXPIRES_AFTER_THREE_CYCLES");
+            require(now.sequence == baseline.sequence && now.samples == baseline.samples &&
+                        now.evaluations == baseline.evaluations && now.holds == baseline.holds &&
+                        now.blocks == baseline.blocks && now.has_last_sample &&
+                        now.last_sample_unix_s == baseline.last_sample_unix_s &&
+                        now.last_sample_room_error_k == baseline.last_sample_room_error_k,
+                    "CURVE_STALE_READ_PRESERVES_EVENT_CADENCE_AND_COUNTERS");
+            daik::publish_heating_curve_telemetry(adapter::cfg);
+            daik::JsonGuard root(parse_wire(sdk::published[sdk::publish_calls - 1]));
+            cJSON*          diagnosis = cJSON_GetObjectItemCaseSensitive(root.get(), "diagnosis");
+            cJSON*          room      = cJSON_GetObjectItemCaseSensitive(root.get(), "room");
+            cJSON*          last      = cJSON_GetObjectItemCaseSensitive(diagnosis, "last_sample");
+            cJSON*          evidence = cJSON_GetObjectItemCaseSensitive(diagnosis, "room_evidence");
+            wire_number(diagnosis, "state", 4, "CURVE_STALE_PROJECTION_ON_MQTT_WIRE");
+            wire_number(diagnosis, "reason", 15, "CURVE_STALE_PROJECTION_ON_MQTT_WIRE");
+            wire_number(diagnosis, "sample_eligible", 0, "CURVE_STALE_PROJECTION_ON_MQTT_WIRE");
+            wire_number(room, "control_eligible", 1,
+                        "CURVE_STALE_DIAGNOSIS_KEEPS_FRESH_ROOM_SOURCE");
+            require(cJSON_IsNull(cJSON_GetObjectItemCaseSensitive(evidence, "current_error_k")) &&
+                        cJSON_IsNull(cJSON_GetObjectItemCaseSensitive(evidence, "source_unix_s")) &&
+                        cJSON_IsNull(cJSON_GetObjectItemCaseSensitive(evidence, "age_s")),
+                    "CURVE_STALE_MQTT_WITHHOLDS_CURRENT_DIAGNOSIS_EVIDENCE");
+            wire_number(last, "sequence", baseline.sequence,
+                        "CURVE_STALE_MQTT_PRESERVES_DATED_EVENT");
+            wire_number(last, "unix_s", baseline.last_sample_unix_s,
+                        "CURVE_STALE_MQTT_PRESERVES_DATED_EVENT");
+        } else {
+            require(now.state == daik::logic::HeatingCurveState::Recording && now.sample_eligible &&
+                        now.reason == daik::logic::HeatingCurveReason::SamplingInterval &&
+                        now.sequence == baseline.sequence && now.samples == baseline.samples &&
+                        now.evaluations == baseline.evaluations + 1,
+                    "CURVE_OWNER_RESUMES_WITHOUT_DUPLICATE_EVENT");
+            require(sdk::failed_news == 4 && daik::mqtt_skip_stats().skipped == 4,
+                    "CURVE_REAL_TASK_SKIPPED_FOUR_EVALUATION_STAGES");
+            throw StopTask{};
+        }
+        // Four skipped stages, then a genuine owner evaluation must recover on the next cycle.
+        if (sdk::delays < 5) sdk::fail_next_new = true;
+    };
+    try {
+        sdk::task_fn(nullptr);
+    } catch (const StopTask&) {}
+    require(json_witness::live == 0 && sdk::locks == 0 && sdk::takes == sdk::gives,
+            "CURVE_AGE_FIXTURE_RELEASES_JSON_AND_MUTEX_OWNERSHIP");
+}
+
 // The boundary itself, as POST /set_diagnostics and /set_ref_temp invoke it: allocation-free,
 // lock-balanced, and the prior event is gone before any task cycle runs.
 void curve_boundary(void (*change)(), const char* forgotten_assertion) {
@@ -4179,6 +4263,8 @@ int main(int argc, char** argv) {
             outgoing_curve();
         else if (std::strcmp(scenario, "curve_space_route_gate") == 0)
             curve_space_route_gate();
+        else if (std::strcmp(scenario, "curve_evaluation_age") == 0)
+            curve_evaluation_age();
         else if (std::strcmp(scenario, "curve_consent_boundary") == 0)
             curve_consent_boundary();
         else if (std::strcmp(scenario, "curve_room_source_boundary") == 0)

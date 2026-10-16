@@ -1,6 +1,6 @@
 # Evidence and limits of the plant diagnostics
 
-<!-- diagnostic-evidence-contract: 57ee28f2d2e2034db5c8fb8d98419f75afa1642f42b498e79da7036c2ff146c4 -->
+<!-- diagnostic-evidence-contract: 7a869bb9c94b87ea41d91f819f7132ad92794fb4d7744c6437a713e1996f3922 -->
 
 For every row in the **Plant diagnostics · 24 h** card, this page answers four questions:
 
@@ -367,6 +367,22 @@ cannot be reconstructed from the retained flag.
   (2009), 2701–2707, DOI 10.1016/j.applthermaleng.2009.01.003:
   [publisher page and abstract][R2-doi]. The study supports dependence on outdoor conditions, not
   this project's 15% heuristic.
+
+## Heating-curve evaluation freshness
+
+**External evidence:** None is required for this internal producer-age observation; it is not a
+manufacturer timing limit or a diagnosis of the plant.
+
+**Firmware rule:** HTTP and MQTT read the same age-projected MQTT-owner evaluation. Expiration
+withholds current diagnosis context while preserving dated events, counters and sample cadence.
+[PLANT.md](PLANT.md#heating-curve-diagnosis) owns the complete age and recovery rule.
+
+**Project boundary:** The expiry bound is a project choice tied to the nominal evaluation cadence.
+Readers never evaluate inputs or renew their own evidence. A delayed legitimate task stage can
+therefore temporarily report **Not evaluated recently**.
+
+**Not established:** This status identifies no transport, sensor, broker or plant failure, and does
+not change the freshness of the independently observed room source or prove heating-season behavior.
 
 ## Maintenance rule
 

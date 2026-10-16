@@ -1641,6 +1641,7 @@ static void append_status_json(JsonOut& j, bool redact) {
         j += std::to_string(hp_skipped_cycles());
         j += ",\"reset_reason\":";
         json_append_quoted(j, reset_reason_name(diag_crash_info().reason));
+        if (config_stored_blob_unreadable()) j += ",\"config_unreadable\":true";
         j += ",\"safe_mode\":";
         j += safe_mode_active() ? "true" : "false";
         // WHY it is minimal, so the recovery banner can give advice that fits the cause: a

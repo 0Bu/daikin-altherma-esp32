@@ -82,7 +82,7 @@ physical measurement. `?redact=1` applies the [report redaction contract](SECURI
 | `profile` | `id` | This boot's selected profile; never a durable model lock. |
 | `detect` | `proto`, `rx`, `tx`, `valid`, `capacity_kw`, `capacity_kw_iu`, `ou_eeprom`, `candidates`, `families`, `ambiguous`, `model{ name,family,marketing }` or null | Fingerprint and candidates. Ambiguity leaves unestablished model fields null; decoder `profile.id` is separate. Outdoor and indoor capacities are separate and null without evidence. |
 | `modbus` | `enabled`, `connected`, `discovering`, `searched`, `profile`, `profile_basis`, `host`, `port`, `unit_id`, `rx`, `fails`, `values`, `task_stack_min_free_bytes`, `plant_gate_known`, `plant_gate_active`, `heating_mode_known`, `heating_mode_active`, optional `error`, `error_code`, `error_detail`, `error_register` | Independent read-only Modbus. Profile/basis identify HomeHub or native Altherma 4 semantics. Empty host disables it. Manual discovery is request-local; `discovering` stays false. Gate and mode need individually fresh valid replies. |
-| `sys` | `free_heap`, `min_free_heap`, `max_alloc`, `heap_restarts`, `mqtt_skipped`, `mqtt_quiesced`, `poll_skipped`, `reset_reason`, `safe_mode`, `safe_mode_cause`, `stack_min_free_bytes` | Heap bytes, largest internal block, allocation/quiesce counters, reset and recovery state. |
+| `sys` | `free_heap`, `min_free_heap`, `max_alloc`, `heap_restarts`, `mqtt_skipped`, `mqtt_quiesced`, `poll_skipped`, `reset_reason`, optional `config_unreadable:true`, `safe_mode`, `safe_mode_cause`, `stack_min_free_bytes` | Heap bytes (`max_alloc`: largest contiguous internal block), cycle loss, reset/recovery and kept unreadable service settings; the optional flag survives redaction. |
 | `sys.stack_min_free_bytes` | `httpd`, `poll`, `mqtt`, `modbus`, `weather`, `ota`, `syslog`, `env3`, `led`, `button`, `wifi_watchdog`, `eth_fallback`, `captive_dns`, `ota_health`, `http_deadline`, `main`, `sdk_mqtt` | Boot-local sampled minimum free stack bytes; null until that task was sampled. Samples survive task recreation. `sdk_mqtt` uses transport-task callbacks; synchronous caller error events do not sample it. |
 | `last_crash` | null or `{reason,reason_code,fault,coredump[,task,pc,backtrace,corrupted,elf_sha256]}` | Current boot reset/fault plus any stored dump summary. Stored incident age/reset relationship remain unknown even for matching ELF. Proven foreign dumps are preserved but suppressed. Dump presence is live; dismissal preserves `sys.reset_reason`. |
 
@@ -181,9 +181,14 @@ Method version 3 adds the independently fresh space-route requirement; the paylo
 States: `off`, `recording`, `hold`, `degraded`, `blocked`. Reasons: `disabled`, `sample_recorded`,
 `sampling_interval`, `room_unavailable`, `x10a_unavailable`, `homehub_unavailable`, `plant_gate_unknown`,
 `plant_inactive`, `forecast_unavailable`, `clock_invalid`, `heating_mode_unknown`, `non_heating_mode`,
-`sampler_inactive`. Numeric codes are stable; retired 3/4 are unused. `sampler_inactive`
+`sampler_inactive`, `evaluation_stale`. Numeric codes are stable; retired 3/4 are unused. `sampler_inactive`
 (14) means configuration is armed but the MQTT sampler is not running: safe mode, the boot window or a
 failed MQTT start.
+
+`evaluation_stale` (15) reports a previously armed evaluation that is no longer current: state
+`blocked`, `sample_eligible:false`, current error/source time/age and outdoor readings null,
+current source names null, forecast/known/active flags false. Dated samples and counters remain
+unchanged. [PLANT.md](PLANT.md#heating-curve-diagnosis) owns the evaluation-age rule; method 3 is unchanged.
 
 Arming requires diagnostics consent, a configured MQTT broker, an MQTT room path with a fixed or
 mapped target, and a configured HomeHub host; forecast is optional. Recording requires fresh room-time evidence.
@@ -344,8 +349,11 @@ measurement. `main/logic/hp_probe.hpp` owns bounds and statuses. No Modbus write
 All service settings are serialized into one CRC/length-checked atomic `cfg` NVS blob in namespace
 `daik_cfg`. Supported older versions migrate. An absent, malformed, newer or unreadable blob falls
 back to legacy individual keys and, where absent, Kconfig defaults. Only an absent blob may be
-replaced automatically: an unusable one is kept, reported in `/diag` with size, version and reason,
-and replaced only by an explicit `/set_*` save. Until then the initial HomeHub search is skipped and
+replaced automatically: an unusable one is kept and reported in `/diag` with size, version and reason.
+`sys.config_unreadable:true` and a persistent dashboard/Settings warning expose this condition;
+the field is absent otherwise. A compatible newer build may recover valid stored data, but damaged
+or unreadable bytes are not guaranteed recoverable. Only a successful explicit service-settings
+save replaces the kept `cfg`; `/set_hp` writes only `link`. Until then initial HomeHub search is skipped and
 WiFi rollback bookkeeping is not persisted; a pending rollback restore opens the setup portal.
 HTTP owns ordinary writes; initial HomeHub discovery may write before HTTP starts. The physical
 X10A link has its separate atomic `link` blob and revision-checked detection writer. A whole-struct

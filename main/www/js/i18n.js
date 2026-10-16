@@ -172,6 +172,8 @@ const I18N = {
     "sys.fault_line": (c) => "Fault · " + c + " — check the Daikin fault code.",
     "sys.warning_line": (c) => "Warning · " + c + " — check the heat pump.",
     "sys.polled": (s) => `Polled ${s}s ago`,
+    "config.unreadable_title": "Service settings unreadable",
+    "config.unreadable_meta": "This build could not read stored service settings. It uses fallback settings and has not replaced the stored copy. Compatible newer firmware may restore it. A successful service-settings save replaces it; saving only X10A pins or protocol does not.",
     "recovery.title": "Recovery mode",
     // Two causes reach recovery mode and need OPPOSITE advice. The crash-loop text sends the
     // reader to the configuration; saying that after a heap give-up would send them to fix
@@ -607,6 +609,7 @@ const I18N = {
     "dyn.state_setup_room": "Set up a room source", "dyn.state_setup_homehub": "HomeHub not set up",
     "dyn.state_homehub_disabled": "Diagnosis off — HomeHub disabled",
     "dyn.state_no_broker": "Not recording — no MQTT broker", "dyn.state_safe_mode": "Not recording — safe mode",
+    "dyn.state_stale": "Not evaluated recently",
     "dyn.state_inactive": "Not recording — sampler not running",
     "dyn.room_off": "Room thermostat switched off", "dyn.room_not_heating": "Room thermostat not on heating",
     "dyn.room_stale": "Room reading too old", "dyn.room_no_value": "Waiting for a room reading",
@@ -643,6 +646,7 @@ const I18N = {
     "dyn.state_help_blocked": "A required input is missing, so nothing is being recorded. Recording resumes once it returns; stale or ambiguous evidence is never sampled.",
     "dyn.state_help_room": "The room reading reaches the device, but it cannot currently provide a valid deviation from target. No sample is formed until the source becomes usable again.",
     "dyn.state_help_setup": "The diagnosis starts when an MQTT room source with a target is saved. The forecast is optional comparison evidence; no location disclosure is required.",
+    "dyn.state_help_stale": "This check has not run recently. Its current inputs are unknown; the last event is kept. This does not identify a broker or sensor fault.",
     "dyn.state_help_inactive": "The sources are configured, but the MQTT sampler is not running, so nothing is evaluated. Settings are kept; recording resumes once the sampler runs again.",
     "dyn.state_help_no_broker": "A room source is saved, but the diagnosis reads it over MQTT and no broker is configured. Set the broker in the Connections card; the saved room source is kept and recording starts by itself.",
     "dyn.state_help_setup_homehub": "The diagnosis needs the HomeHub to tell it when the plant is actually heating; without one it cannot tell a heating window apart from hot water or a standstill. Set the HomeHub address in the Protocol card.",

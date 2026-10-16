@@ -197,6 +197,16 @@ preserves the sample cadence and last event. Saving the room source or the diagn
 sample memory and cadence at once, even inside one sampler cycle; deleting the room source/HomeHub or
 disabling plant diagnostics also disarms.
 
+Current evaluation has a separate **three-second project age bound**, three nominal one-second MQTT
+task cycles, inclusive of the boundary. Each real evaluation renews it, including HOLD/BLOCK; reads
+do not. Beyond that bound or with invalid monotonic time, it reports **Not evaluated recently**
+(`blocked` / `evaluation_stale`), with current diagnosis context withheld. Last recorded events,
+their source axes, sequence, counters and 30-minute cadence remain unchanged. A fresh owner evaluation
+restores the current state. This reports evaluation freshness, not a sensor, broker or plant fault;
+the independently aged room source can remain fresh. A sampler that never started keeps its existing
+inactive state, and a disarmed evaluation remains off. A scope change still clears samples as above
+and invalidates the current evaluation until its owner runs again.
+
 Each event can store two distinct optional outdoor axes: HomeHub input 44 from the current
 cycle/session, and fresh/plausible ENV III from its actual placement. Missing context is null and
 never gates an event. Without outdoor context, room error cannot distinguish a steep curve from an

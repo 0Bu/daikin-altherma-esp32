@@ -1,4 +1,4 @@
-// translation-source: 7480385d29565e389fed9481d6e1b12d6ed936d5931d38c0113cd63cd42a0341
+// translation-source: 6a7c8bdd68e0dbde1e916efab20768c5704a2a988360239d3ab300b76d2039aa
 I18N.ja = localeValues([
   /* sys.nodata */ "データなし",
   /* sys.unreachable */ "接続不可",
@@ -29,6 +29,8 @@ I18N.ja = localeValues([
   /* sys.fault_line */ (c) => "異常 · " + c + " — Daikin異常コードを確認してください。",
   /* sys.warning_line */ (c) => "警告 · " + c + " — ヒートポンプを確認してください。",
   /* sys.polled */ (s) => `${s}秒前に取得`,
+  /* config.unreadable_title */ "サービス設定を読み取れません",
+  /* config.unreadable_meta */ "このバージョンは保存済みのサービス設定を読み取れず、代替設定を使用しています。保持したコピーは置き換えていません。互換性のある新しいファームウェアで復元できる可能性があります。サービス設定の保存に成功するとコピーは置き換わりますが、X10A ピンまたはプロトコルのみの保存では置き換わりません。",
   /* recovery.title */ "復旧モード",
   /* recovery.meta_heap */ "メモリ不足で再起動を繰り返したため、画面を維持できるようヒートポンプ接続とMQTTを停止しています。設定は通常そのままで問題ありません。設定画面から新しいファームウェアを導入してください。電源を入れ直すと全機能を再試行します。",
   /* recovery.meta */ "再起動を繰り返したため復旧モードに入り、ヒートポンプ通信とMQTTを停止しています。設定、特に設定のプロトコル欄にあるRX/TXピンを確認して再起動してください。",
@@ -546,6 +548,7 @@ I18N.ja = localeValues([
   /* dyn.state_homehub_disabled */ "診断停止 · HomeHub無効",
   /* dyn.state_no_broker */ "記録停止 · MQTTなし",
   /* dyn.state_safe_mode */ "記録停止 · セーフモード",
+  /* dyn.state_stale */ "最近評価されていません",
   /* dyn.state_inactive */ "記録停止 · 採取器停止",
   /* dyn.room_off */ "室温サーモ停止",
   /* dyn.room_not_heating */ "室温サーモが暖房モードではありません",
@@ -588,6 +591,7 @@ I18N.ja = localeValues([
   /* dyn.state_help_blocked */ "必要な入力がないため記録していません。入力が戻れば再開し、古いデータや曖昧なデータは採取しません。",
   /* dyn.state_help_room */ "室温値は届いていますが、現在は目標との差を有効に算出できません。ソースが有効になるまで採取しません。",
   /* dyn.state_help_setup */ "目標付きのMQTT室温ソースを保存すると診断を開始します。予報は任意で、位置情報の提供は不要です。",
+  /* dyn.state_help_stale */ "このチェックは最近実行されていません。現在の入力は不明ですが、最後のイベントは保持されています。これだけではブローカーやセンサーの故障とは判断できません。",
   /* dyn.state_help_inactive */ "ソースは設定済みですが、MQTT採取器が動作していないため評価されません。設定は保持され、採取器が再び動作すると記録を再開します。",
   /* dyn.state_help_no_broker */ "室温ソースは保存済みですがMQTTブローカーが未設定です。接続カードで設定すると自動で記録を開始します。",
   /* dyn.state_help_setup_homehub */ "実際の暖房時間を判別するにはHomeHubが必要です。ないとDHWや停止と区別できません。プロトコルカードでアドレスを設定してください。",

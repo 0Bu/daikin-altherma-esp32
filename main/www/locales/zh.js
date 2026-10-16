@@ -1,4 +1,4 @@
-// translation-source: 7480385d29565e389fed9481d6e1b12d6ed936d5931d38c0113cd63cd42a0341
+// translation-source: 6a7c8bdd68e0dbde1e916efab20768c5704a2a988360239d3ab300b76d2039aa
 I18N.zh = localeValues([
   /* sys.nodata */ "无数据",
   /* sys.unreachable */ "无法访问",
@@ -29,6 +29,8 @@ I18N.zh = localeValues([
   /* sys.fault_line */ (c) => "故障 · " + c + " — 请查看 Daikin 故障代码。",
   /* sys.warning_line */ (c) => "警告 · " + c + " — 请检查热泵。",
   /* sys.polled */ (s) => `${s} 秒前轮询`,
+  /* config.unreadable_title */ "无法读取服务设置",
+  /* config.unreadable_meta */ "此版本无法读取已存储的服务设置，正在使用备用设置，尚未替换保留的副本。兼容的较新固件可能恢复它。成功保存服务设置会替换该副本；仅保存 X10A 引脚或协议不会替换。",
   /* recovery.title */ "恢复模式",
   /* recovery.meta_heap */ "多次内存耗尽重启后，已停用热泵连接/MQTT 以保网页可用。请安装较新固件；重新上电会尝试完整启动。",
   /* recovery.meta */ "多次重启后进入恢复模式并暂停热泵通信/MQTT。检查“设置 → 协议”的 RX/TX 后重启。",
@@ -546,6 +548,7 @@ I18N.zh = localeValues([
   /* dyn.state_homehub_disabled */ "诊断已停用 — HomeHub 已停用",
   /* dyn.state_no_broker */ "未记录 — 无 MQTT 代理",
   /* dyn.state_safe_mode */ "未记录 — 安全模式",
+  /* dyn.state_stale */ "近期未评估",
   /* dyn.state_inactive */ "未记录 — 采样器已停止",
   /* dyn.room_off */ "室内温控器已关闭",
   /* dyn.room_not_heating */ "室内温控器未供暖",
@@ -588,6 +591,7 @@ I18N.zh = localeValues([
   /* dyn.state_help_blocked */ "缺少必要输入，因此不记录。输入恢复后会继续；陈旧或含糊的数据绝不会采样。",
   /* dyn.state_help_room */ "室温读数已到达设备，但目前无法形成相对目标的有效偏差；来源恢复可用前不会创建样本。",
   /* dyn.state_help_setup */ "保存带目标的 MQTT 室温源后开始诊断。天气预报仅为可选对照，不要求上传位置。",
+  /* dyn.state_help_stale */ "此项检查近期未运行。当前输入未知，最后一次事件仍保留。这不能判定消息代理或传感器故障。",
   /* dyn.state_help_inactive */ "已配置但 MQTT 采样器未运行，因此不评估；设置保留，采样器恢复运行后自动继续记录。",
   /* dyn.state_help_no_broker */ "已保存室温源，但诊断通过 MQTT 读取，而未配置代理。请在“连接”中设置代理；保存的室温源会保留，随后自动开始记录。",
   /* dyn.state_help_setup_homehub */ "诊断需要 HomeHub 判断设备是否真正供暖；没有它就无法区分供暖、生活热水或停止。请在“协议”中设置 HomeHub 地址。",
