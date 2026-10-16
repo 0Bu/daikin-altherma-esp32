@@ -185,8 +185,9 @@ The transaction has two distinct stages:
 **Do not publish dev during this transaction.** The old release cannot retain the transient feed
 headers; its return reads the mutable official dev path. Manifest drift, failed return, pending
 image or bad bench pressure stops before production contact. Pressure readiness has a bounded
-MQTT reconnect window and binds uptime/counters before starting; a paused baseline is not accepted
-as a healthy start.
+MQTT reconnect window and requires at least 24 KiB free heap and a 16 KiB largest block in that same
+window. Pressure must still start within 120 seconds of boot with unchanged uptime/counter guards;
+a paused or unsafe-heap baseline is not accepted as a healthy start.
 
 Configured production Weather additionally needs an exact non-zero requested/started/completed/
 success token and a success-counter advance. OTA serialization may defer the same outstanding

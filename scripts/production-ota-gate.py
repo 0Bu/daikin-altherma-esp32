@@ -1577,7 +1577,8 @@ def stress_board(
     # Wait for that boot-local baseline even on the bench path that has no Weather requirement;
     # otherwise a healthy restore races the immediate pressure precondition. When Weather is part
     # of the canary, the same bounded loop also waits for its current owner to become idle so an
-    # ordinary fetch cannot masquerade as the explicit HIL refresh below.
+    # ordinary fetch cannot masquerade as the explicit HIL refresh below. Heap capacity must join
+    # that readiness decision: MQTT can reconnect before other transient boot allocations settle.
     ready_deadline = time.monotonic() + OTA_CHECK_TIMEOUT_S
     last_ready_uptime = initial_uptime
     while True:
@@ -1589,18 +1590,30 @@ def stress_board(
             fetching = weather_state.get("fetching") if isinstance(weather_state, dict) else None
             if not isinstance(fetching, bool):
                 fail(f"{host} weather status has no boolean fetching state")
-        if mqtt_connected is True and (not require_weather or fetching is False):
-            if not require_x10a or (hp.get("connected") is True and int(hp.get("values", 0)) > 0):
-                break
-        if time.monotonic() >= ready_deadline:
+        ready_system = started.get("sys", {})
+        heap_ready = int(ready_system.get("free_heap", 0)) >= MIN_FINAL_FREE_HEAP and \
+            int(ready_system.get("max_alloc", 0)) >= MIN_FINAL_LARGEST_BLOCK
+        remaining = ready_deadline - time.monotonic()
+        if remaining <= 0:
             if mqtt_connected is not True:
                 fail(f"{host} MQTT did not connect before the pressure window")
             if require_x10a and (not hp.get("connected") or int(hp.get("values", 0)) <= 0):
                 fail(f"{host} X10A did not connect or deliver values before the pressure window")
-            fail(f"{host} weather did not become idle before its HIL refresh")
-        time.sleep(0.1)
+            if require_weather and fetching is not False:
+                fail(f"{host} weather did not become idle before its HIL refresh")
+            if heap_ready:
+                fail(f"{host} pressure readiness deadline expired")
+            fail(f"{host} readiness window ended without safe heap "
+                 f"(free={ready_system.get('free_heap')}, largest={ready_system.get('max_alloc')})")
+        if mqtt_connected is True and (not require_weather or fetching is False) and heap_ready:
+            if not require_x10a or (hp.get("connected") is True and int(hp.get("values", 0)) > 0):
+                break
+        time.sleep(min(0.1, remaining))
+        remaining = ready_deadline - time.monotonic()
+        if remaining <= 0:
+            continue
         try:
-            started = request_status_deadline(pinned_endpoint, timeout=1)
+            started = request_status_deadline(pinned_endpoint, timeout=min(1, remaining))
         except HTTPError as error:
             if error.code != 503:
                 raise

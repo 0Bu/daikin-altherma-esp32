@@ -353,6 +353,84 @@ for image_state, rollback_pending, uptime, accepted in (
         else:
             check(False, "pressure precondition did not run")
 
+# Heap readiness may recover during the existing window; exercise the actual admission path,
+# ending at its durable checkpoint before pressure workers or any live request can start.
+for production in (False, True):
+    for scenario in ("free recovery", "block recovery", "both recovery", "threshold boundary",
+                     "free shortage", "block shortage", "deadline recovery", "late response",
+                     "sleep expiry", "remaining budget", "late boot", "reboot",
+                     "heap_restarts", "mqtt_skipped", "poll_skipped", "mac", "version", "elf"):
+        label = ("production " if production else "bench ") + scenario
+        accepted = scenario in ("free recovery", "block recovery", "both recovery",
+                                "threshold boundary", "remaining budget")
+        virtual, requests, entered = [0.0], [0], []
+        host = "production.invalid" if production else "bench.invalid"
+        def readiness_status(endpoint, *, timeout):
+            check(endpoint == host, label + ": endpoint changed")
+            requests[0] += 1
+            check(requests[0] < 1300, label + ": readiness lost its absolute deadline")
+            if requests[0] > 1:
+                check(0 < timeout <= min(1, 120 - virtual[0]),
+                      label + ": status request exceeded its remaining deadline")
+            result = board(uptime=10)
+            result["wifi"] = {"mac": "02:00:00:00:00:01", "connected": True, "rolled_back": False}
+            result["sys"]["safe_mode"] = False
+            result["hp"].update(connected=True, values=129)
+            result["weather_forecast"] = {"fetching": False}
+            result["sys"].update(free_heap=ns["MIN_FINAL_FREE_HEAP"],
+                                 max_alloc=ns["MIN_FINAL_LARGEST_BLOCK"])
+            first = requests[0] == 1
+            if scenario == "threshold boundary": return result
+            shortage = first or scenario in ("free shortage", "block shortage")
+            if scenario == "deadline recovery": shortage = virtual[0] < 120.25
+            if scenario == "remaining budget":
+                shortage = requests[0] <= 2
+                if requests[0] == 2: virtual[0] = 119.75
+                if requests[0] == 3:
+                    virtual[0], result["uptime_s"] = 119.99, 120
+            if shortage:
+                field = "max_alloc" if scenario in ("block recovery", "block shortage") else "free_heap"
+                result["sys"][field] -= 1
+                if scenario == "both recovery": result["sys"]["max_alloc"] -= 1
+            elif scenario == "late response": virtual[0] = 120.0
+            elif scenario == "late boot": result["uptime_s"] = 121
+            elif scenario == "reboot": result["uptime_s"] = 9
+            elif scenario in ("heap_restarts", "mqtt_skipped", "poll_skipped"):
+                result["sys"][scenario] = 1
+            elif scenario == "mac": result["wifi"]["mac"] = "other"
+            elif scenario == "version": result["version"] = writer
+            elif scenario == "elf": result["app_elf_sha256"] = old_elf
+            return result
+        def readiness_sleep(seconds):
+            check(0 < seconds <= min(0.1, 120 - virtual[0]),
+                  label + ": sleep exceeded its remaining deadline")
+            virtual[0] += 120 if scenario == "sleep expiry" else seconds
+        def readiness_checkpoint(phase, **updates):
+            expected = "production_pressure_started" if production else "bench_cold_pressure_started"
+            check(phase == expected, label + ": wrong pressure checkpoint")
+            entered.append(virtual[0])
+            raise PressureStart()
+        with patch.dict(ns, {"resolve_http_endpoint": lambda host: host,
+            "request_status_deadline": readiness_status,
+            "request_json_deadline": lambda *a, **k: {"image_state": "pending_verify", "rollback_pending": True},
+            "journal_checkpoint": readiness_checkpoint}), \
+            patch.object(ns["time"], "monotonic", lambda: virtual[0]), \
+            patch.object(ns["time"], "sleep", readiness_sleep):
+            try:
+                gate["stress_board"](host=host, mac="02:00:00:00:00:01", version=target, elf=elf,
+                    require_x10a=production, require_weather=production,
+                    expected_app_sha256=sha, expected_channel="dev", require_pending_image=not production)
+            except PressureStart:
+                check(accepted, label + ": unsafe readiness admitted pressure")
+                check(virtual[0] < 120, label + ": pressure entered after deadline")
+                check(requests[0] > 1 or scenario == "threshold boundary",
+                      label + ": transient heap was not observed again")
+            except gate["GateError"]:
+                check(not accepted, label + ": timely heap recovery was rejected")
+            else:
+                check(False, label + ": pressure checkpoint did not run")
+        check(bool(entered) == accepted, label + ": admission result disagrees")
+
 # Confirmation belongs to the same boot, counters and identity that completed pressure.
 for uptime, skip, state, pending, timeout_before, timeout_after, accepted in (
     (194, 0, "valid", False, 0, 0, True), (3, 0, "valid", False, 0, 0, False),
@@ -1028,8 +1106,8 @@ assert.match(stress,
   /if int\(ready_system\.get\("free_heap", 0\)\) < MIN_FINAL_FREE_HEAP or \\\s+int\(ready_system\.get\("max_alloc", 0\)\) < MIN_FINAL_LARGEST_BLOCK:\s+fail\(f"\{host\} readiness window ended without safe heap"\)/,
   "readiness must prove free and contiguous heap before pressure");
 assert.match(stress,
-  /if mqtt_connected is True and \(not require_weather or fetching is False\):/,
-  "every post-reboot pressure path must wait boundedly for MQTT, even without Weather");
+  /if mqtt_connected is True and \(not require_weather or fetching is False\) and heap_ready:/,
+  "every pressure path must jointly wait for MQTT, heap and any required Weather readiness");
 assert.match(stress, /MQTT did not connect before the pressure window/);
 assert.match(stress, /weather did not become idle before its HIL refresh/);
 assert.match(stress, /except HTTPError as error:[\s\S]{0,100}?error\.code != 503/,
