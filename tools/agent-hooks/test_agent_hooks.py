@@ -22,6 +22,46 @@ import merge_payload
 
 
 class AgentHookFastTests(unittest.TestCase):
+    def test_canonical_ota_feed_and_version_are_bound_together(self):
+        base = "https://0bu.github.io/daikin-altherma-esp32/"
+
+        def command(feed, version, role="production", current="1.2.2"):
+            action = "--confirm-bench bench --install-bench" if role == "bench" else \
+                "--confirm-production production --execute"
+            return ("scripts/production-ota-gate.py --manifest-url " + feed +
+                    " --expected-source-sha " + "a" * 40 + " --expected-version " + version +
+                    " --expected-app-sha256 " + "b" * 64 +
+                    " --expected-current-version " + current + " " + action)
+
+        def admitted(value):
+            payload = {"cwd": str(ROOT), "tool_name": "exec_command", "tool_input": {"cmd": value}}
+            return agent_hook.canonical_production_ota_command(payload, value)
+
+        for role in ("bench", "production"):
+            for feed, version in ((base + "manifest.json", "1.2.3"),
+                                  (base + "dev/manifest.json", "1.2.3-dev.4")):
+                with self.subTest(role=role, feed=feed, version=version):
+                    value = command(feed, version, role)
+                    self.assertTrue(admitted(value))
+                    self.assertEqual(self.run_pre_tool({"cwd": str(ROOT), "tool_name": "exec_command",
+                                                       "tool_input": {"cmd": value}}), (0, ""))
+                    for prefix, suffix in (("python3 ", ""), ("env ", ""),
+                                           ("", " --skip-tests"), ("", " --channel release"),
+                                           ("", " --manifest-url " + feed), ("", "; true")):
+                        self.assertFalse(admitted(prefix + value + suffix))
+                    self.assertFalse(admitted(command(feed, version, role, current=version)))
+            for feed, version in ((base + "manifest.json", "1.2.3-dev.4"),
+                                  (base + "dev/manifest.json", "1.2.3"),
+                                  (base + "manifest.json?source=dev", "1.2.3"),
+                                  (base + "manifest.json#release", "1.2.3"),
+                                  (base.replace("https:", "http:") + "manifest.json", "1.2.3"),
+                                  (base.replace("0bu.github.io", "foreign.invalid") + "manifest.json", "1.2.3")):
+                self.assertFalse(admitted(command(feed, version, role)))
+            for version in ("01.2.3", "1.02.3", "1.2.03", "1.2.3+build", "v1.2.3", "1.2.3-rc.1"):
+                self.assertFalse(admitted(command(base + "manifest.json", version, role)))
+            for version in ("01.2.3-dev.4", "1.2.3-dev.04", "1.2.3-dev.4+build"):
+                self.assertFalse(admitted(command(base + "dev/manifest.json", version, role)))
+
     def test_literal_pr_create_title_is_data_and_transport_checks_remain(self):
         for title in ("Modernize agent workflows and pre-push audits", "Document git push and cd checks",
                       "Explain gh pr merge and mergePullRequest", "User's git push guidance"):

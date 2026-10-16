@@ -1,6 +1,6 @@
 ---
 name: deploy-prod
-description: Execute quality gates, merge the PR to main, wait for the CI dev build, run the canonical bench delivery gate, then the canonical production promotion gate, with an automated fix-and-retry loop on findings. Use when the change is ready for production delivery.
+description: Execute quality gates, merge the PR to main, verify the published dev artifact or explicitly requested stable Release, then run canonical bench delivery and production promotion with a fix-and-retry loop on findings. Use when the change is ready for production delivery.
 ---
 
 # deploy-prod
@@ -14,6 +14,7 @@ from start" or equivalent) explicitly authorizes the whole chain below:
 - running the deterministic gates and the review skills, and stamping their PR records;
 - merging the PR to `main` through the repository CAS merge path, after its required checks passed;
 - watching the CI run on `main` until the dev feed is published;
+- stable Release publication and delivery when the user explicitly requests them;
 - the automatic release-baseline handoff in Step 3a when that accepted main head's cumulative dev
   changelog exceeds its existing capacity; this publication needs no additional approval;
 - the canonical bench delivery gate on the `bench` role, then the canonical promotion gate on the
@@ -25,7 +26,8 @@ from start" or equivalent) explicitly authorizes the whole chain below:
 
 It does **not** authorize:
 - touching unrelated devices, or changing heat pump parameters or live device configuration;
-- direct `/ota/update` writes, releases outside Step 3a, force pushes, or bypassing branch protection;
+- direct `/ota/update` writes, releases without an explicit request or Step 3a qualification, force
+  pushes, or bypassing branch protection;
 - `erase_flash`, NVS erasure, or a partition table change on any board;
 - skipping a required gate, review record or failing check.
 
@@ -138,6 +140,23 @@ This automates the maintainer delivery handoff through the existing workflow, no
 release trigger on every GitHub push. A release publishes artifacts only; it neither changes a
 device's configured channel nor replaces the separate canonical bench/production acceptance.
 
+### 3b. Explicitly requested stable Release delivery
+
+When the user requests Release publication and delivery, use the literal workflow dispatch in
+Step 3a.3 with the requested `X.Y.Z` and validated main source. Require the signed public Release
+manifest/app, exact-source GitHub tag and GitHub Release before continuing. The target source must
+match the clean gate runner's `HEAD`, so changes to this gate require a new Release after their
+reviewed merge. Keep the already published official dev artifact with the same source and numeric
+version core for the bench excursion; do not dispatch a next-core dev build after the Release.
+Ordinary dev delivery creates no Release except the qualified Step 3a handoff. For Release delivery,
+each reviewed fix or revert repeats this publication before its bench and production delivery.
+
+For Steps 4 and 5, replace the dev manifest URL with
+`https://0bu.github.io/daikin-altherma-esp32/manifest.json` and the target version with `X.Y.Z`.
+Keep the source and application hashes pinned to that Release. These are the same admitted command
+shapes; no saved-channel change is needed. Full feed binding and round-trip rules are in
+[Maintenance](../../../docs/MAINTENANCE.md#role-pinned-ota).
+
 ### 4. Bench delivery gate
 
 The gate requires a clean checkout whose `HEAD` is the merge commit. The hook admits only the
@@ -166,8 +185,8 @@ scripts/production-ota-gate.py --manifest-url https://0bu.github.io/daikin-althe
 ```
 
 This transaction does four things:
-1. proves the candidate on the bench under HTTP pressure;
-2. restores the bench target and runs sustained stress;
+1. proves the complete signed opposite-feed download on the bench under HTTP pressure;
+2. restores the exact target feed/artifact and runs sustained stress;
 3. performs at most one POST to the production role;
 4. verifies the read-only canary.
 
@@ -185,7 +204,8 @@ Case B**. A failure before the production write, during bench staging, is **Case
 ### 6. Report success
 
 When both devices are verified healthy:
-- report the new version string and ELF SHA;
+- report the new version string, ELF SHA and installed artifact feed separately from the preserved
+  saved-channel preference;
 - summarize device metrics (uptime, heap, MQTT status, X10A status);
 - confirm the rollout to both the bench and the production heat pump, and list every additional PR
   the failure loop merged.
@@ -249,9 +269,10 @@ loop is part of the authorized chain.
 
 An agent cannot roll production back by OTA. Direct `/ota/update` writes, including the trusted-LAN
 `downgrade=1` channel switch (`main/logic/version_cmp.hpp`), are blocked. The gate binds only the
-current official dev manifest. If the image failed its rollback probation, the bootloader has
-already returned production to the previous image; otherwise production keeps the faulty build until
-a roll-forward lands. In both cases, read production's version from `/status` before the next
+current official dev or explicitly requested Release manifest. If the image failed its rollback
+probation, the bootloader has already returned production to the previous image; otherwise production
+keeps the faulty build until a roll-forward lands. In both cases, read production's version from
+`/status` before the next
 Step 5. The heat pump itself keeps running: this firmware only observes it, and the HomeHub link is
 read-only.
 

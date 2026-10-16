@@ -116,7 +116,9 @@ skill/reviewer asserts:
   commit SHAs, 64-hex ELF SHAs, and rollback/probation checks. Its merge, CI, gate and signing commands
   must keep the hook-accepted literal one-line forms. Its production failure path must stay a
   roll-forward, because the hook blocks direct `/ota/update` writes, including the `downgrade=1`
-  switch in `main/logic/version_cmp.hpp`, and the gate binds only the current dev manifest.
+  switch in `main/logic/version_cmp.hpp`. The gate binds only the current official dev manifest or
+  an explicitly requested official stable Release, preserves the saved channel and proves the full
+  opposite-feed bench round trip before production.
 - **`$deploy-test`** — pre-merge USB bench test of an exact local head. Verify against `scripts/idf-docker.sh`,
   Secure Boot v2 signing with `$OTA_SIGNING_KEY_FILE`, `scripts/require-signed.sh`, flash args skipping
   `nvs@0x9000`, MAC identity via `esptool chip-id`, `scripts/verify-device-health.sh`, and the automated

@@ -173,10 +173,11 @@ documentation.
   authorized device update, verify version/signature, reboot reason, rollback/safe-mode state, heap
   and stack health, X10A/Modbus link state, connectivity, and the requested user-visible behavior.
 - Every agent-run OTA write must use direct, unchained `scripts/production-ota-gate.py`.
-  Ordinary official dev delivery to `bench` uses `--confirm-bench bench --install-bench` and cannot
-  contact production. Production promotion uses the distinct `--confirm-production production
-  --execute` transaction. Each mode binds the signed artifact and source, permits one un-retried
-  target POST, and requires probation and stress; follow the complete runbook.
+  Official dev delivery, or an explicitly requested stable Release delivery, to `bench` uses
+  `--confirm-bench bench --install-bench` and cannot contact production. Production promotion uses
+  the distinct `--confirm-production production --execute` transaction. Each mode binds the signed
+  artifact, official feed and source without changing the saved channel, permits one un-retried
+  target POST, and requires probation and stress; follow [the runbook](docs/MAINTENANCE.md#role-pinned-ota).
 - Signed, NVS-preserving USB writes to the inventory roles are limited to bootstrap, recovery, and
   the explicitly requested pre-merge test of an exact local head on the bench (`$deploy-test`, or
   `$flash-esp32` naming the bench under the same rules). Production takes USB only for bootstrap and

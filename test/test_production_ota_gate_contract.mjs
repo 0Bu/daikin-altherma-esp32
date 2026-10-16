@@ -130,9 +130,9 @@ cases.append(("reject absent stack", {key: value for key, value in valid.items()
                                     if key != "ota_stack_min_free_bytes"}))
 for label, transfer_sample in cases:
     events = []
-    old_status = {"version": writer_version, "app_elf_sha256": writer_elf, "uptime_s": 1}
-    target_status = {"version": target_version, "app_elf_sha256": target_elf, "uptime_s": 1}
-    def post_once(endpoint, generation, version, sha):
+    old_status = {"version": writer_version, "app_elf_sha256": writer_elf, "uptime_s": 1, "ota": {"channel": "dev"}}
+    target_status = {"version": target_version, "app_elf_sha256": target_elf, "uptime_s": 1, "ota": {"channel": "dev"}}
+    def post_once(endpoint, generation, version, sha, **kwargs):
         assert (endpoint, generation, version, sha) == ("production.invalid", 7, target_version, app_sha)
         events.append("post")
         return 8
@@ -165,6 +165,7 @@ for label, transfer_sample in cases:
         "parse_args": lambda: args, "request_limited_bytes": lambda *a, **k: b"{}",
         "validate_manifest": lambda *a: "https://feed.invalid/app.bin",
         "require_legacy_bench_restore_manifest": lambda *a: None,
+        "require_official_manifest_snapshot": lambda *a: None,
         "verify_local_source": lambda *a: None, "request_bytes": lambda *a, **k: b"image",
         "verify_image": lambda *a: target_elf, "verify_http_range_support": lambda *a: None,
         "run_local_gates": lambda: None,
@@ -177,7 +178,7 @@ for label, transfer_sample in cases:
         "exercise_bench_full_download": bench_cycle, "stress_board": stress,
         "resolve_http_endpoint": lambda host: host, "request_status_deadline": status,
         "wait_for_production_promotion_readiness": lambda endpoint, before, **k: before,
-        "wait_for_ota_offer": lambda *a: 7, "post_update_once": post_once,
+        "wait_for_ota_offer": lambda *a, **k: 7, "post_update_once": post_once,
         "wait_for_new_firmware": wait, "require_ota_transfer_evidence": verify,
         "verify_retained_x10a": lambda *a: {"rows": 1},
     }
@@ -257,13 +258,15 @@ def install_confirm(**kwargs):
     events.append("valid")
     return {"image_state": "valid", "rollback_pending": False, "uptime_s": 194}
 common = {"resolve_http_endpoint": lambda host: host, "validate_identity": lambda *a, **k: None,
+          "require_official_manifest_snapshot": lambda *a: None,
           "request_status_deadline": lambda *a, **k: board(writer, old_elf),
           "wait_for_ota_offer": lambda *a, **k: 7, "post_update_once": install_post,
           "wait_for_new_firmware": install_wait, "stress_board": cold_stress,
           "wait_for_bench_health_window": warm_health, "confirm_bench_probation": install_confirm}
 with patch.dict(ns, common):
     installed = gate["install_bench_target"](host="bench.invalid", mac="bench", current_version=writer,
-        target_version=target, target_sha256=sha, target_elf=elf)
+        target_version=target, target_sha256=sha, target_elf=elf,
+        target_source_sha="b" * 40, target_manifest_sha256="c" * 64)
 check(events == ["post", "returned", "cold stress", "valid"], "bench acceptance order")
 check(installed.get("probation_confirmed") is True, "bench accepted without valid probation")
 
@@ -309,7 +312,7 @@ def cycle_confirm(**kwargs):
     events.append("valid")
     return {"image_state": "valid", "rollback_pending": False, "uptime_s": 194}
 with patch.dict(ns, {"resolve_http_endpoint": lambda host: host,
-    "validate_identity": lambda *a, **k: None, "require_official_dev_manifest_snapshot": lambda *a: None,
+    "validate_identity": lambda *a, **k: None, "require_official_manifest_snapshot": lambda *a: None,
     "wait_for_ota_offer": lambda *a, **k: 7, "post_update_once": lambda *a, **k: 8,
     "request_status_deadline": cycle_status, "request_values_deadline": cycle_values,
     "request_diag_deadline": lambda *a, **k: b"diagnostics", "request_json_deadline": cycle_json,
@@ -320,7 +323,8 @@ with patch.dict(ns, {"resolve_http_endpoint": lambda host: host,
     cycle = gate["exercise_bench_full_download"](host="bench.invalid", mac="bench",
         target_source_sha="b" * 40, target_version=target, target_sha256=sha,
         target_manifest_sha256="c" * 64, target_elf=elf, release_version="1.0.2",
-        release_sha256="d" * 64, release_elf=old_elf)
+        release_sha256="d" * 64, release_elf=old_elf,
+        release_source_sha="e" * 40, release_manifest_sha256="f" * 64)
 check(events[-2:] == ["cold stress", "valid"], "restore omitted cold pressure or confirmation")
 check(cycle.get("cold_stress") == stress_receipt, "restore dropped completed cold pressure")
 
@@ -555,6 +559,7 @@ for failing_phase in (None, "ack lost", "compact ack lost", "return", "stress", 
         syncs.append(fd)
         original_fsync(fd)
     patches = {"parse_args": lambda: args, "request_limited_bytes": lambda *a, **k: b"{}",
+        "require_official_manifest_snapshot": lambda *a: None,
         "validate_manifest": lambda *a: "https://feed.invalid/app.bin", "require_legacy_bench_restore_manifest": lambda *a: None,
         "verify_local_source": lambda *a: None, "request_bytes": lambda *a, **k: b"image",
         "verify_image": lambda *a: elf, "verify_http_range_support": lambda *a: None, "run_local_gates": lambda: None,
@@ -566,7 +571,7 @@ for failing_phase in (None, "ack lost", "compact ack lost", "return", "stress", 
         "stress_board": stress, "resolve_http_endpoint": lambda host: host,
         "request_status_deadline": read_status,
         "wait_for_production_promotion_readiness": lambda endpoint, before, **k: before,
-        "wait_for_ota_offer": lambda *a: 7, "post_update_once": post, "wait_for_new_firmware": wait,
+        "wait_for_ota_offer": lambda *a, **k: 7, "post_update_once": post, "wait_for_new_firmware": wait,
         "verify_retained_x10a": retained}
     output, errors = io.StringIO(), io.StringIO()
     journal = None
@@ -1036,7 +1041,7 @@ assert.match(limitedRemoteDocument, /threading\.Thread\([\s\S]{0,140}?daemon=Tru
 assert.match(limitedRemoteDocument, /if not completed\.wait\(timeout\):/,
   "bounded manifest fetches must have a whole-operation deadline, not only socket inactivity timeouts");
 const devManifestSnapshot = section(
-  gate, "def require_official_dev_manifest_snapshot(", "\ndef validate_release_manifest(",
+  gate, "def require_official_manifest_snapshot(", "\ndef require_legacy_bench_restore_manifest(",
 );
 assert.match(devManifestSnapshot,
   /manifest_bytes\s*=\s*request_limited_bytes\([\s\S]{0,220}?LEGACY_BENCH_RESTORE_MANIFEST_MAX_BYTES/,
@@ -1062,6 +1067,303 @@ assert.ok(rawDevManifest >= 0 && restorePreflight > rawDevManifest &&
   benchContact > releaseSourceCheck &&
   benchDowngrade > benchContact,
   "restore compatibility and release source binding must precede all bench mutation");
+
+// Exercise stable delivery with the real manifest validators, saved-channel checks, generation
+// offer/update handshake, raw-feed rebinds and transfer verifier. Timers, signing and transports
+// are fixtures; no inventory, network or device is contacted.
+const stableDeliveryProbe = String.raw`
+import contextlib, hashlib, io, json, runpy, shutil, sys
+from types import SimpleNamespace
+from urllib.error import HTTPError
+from urllib.parse import parse_qs, urlparse
+from unittest.mock import patch
+g = runpy.run_path(sys.argv[1], run_name="stable_delivery_probe")
+ns = g["main"].__globals__
+root, dev = g["OFFICIAL_RELEASE_MANIFEST_URL"], g["OFFICIAL_MANIFEST_URL"]
+source, app, other_app = "b" * 40, "a" * 64, "c" * 64
+target, other, elf, other_elf = "2.0.0", "2.0.0-dev.5", "abcdef123", "123abcdef"
+mac = "02:00:00:00:00:01"
+def check(condition, label): assert condition, "STABLE_DELIVERY: " + label
+def rejected(action, label):
+    try: action()
+    except g["GateError"]: return
+    raise AssertionError("STABLE_DELIVERY: accepted " + label)
+def manifest(version, sha):
+    return {"version": version, "provenance": {"source_sha": source, "app_sha256": sha},
+            "builds": [{"chipFamily": "ESP32-S3", "parts": [
+                {"path": "daikin-altherma-esp32.bin", "offset": 0x20000}]}]}
+documents = {root: json.dumps(manifest(target, app), separators=(",", ":")).encode(),
+             dev: json.dumps(manifest(other, other_app), separators=(",", ":")).encode()}
+digests = {url: hashlib.sha256(raw).hexdigest() for url, raw in documents.items()}
+check(g["validate_manifest"](root, manifest(target, app), source, target, app) ==
+      root.replace("manifest.json", "daikin-altherma-esp32.bin"), "stable fixed app URL")
+for url, version in ((root, other), (dev, target), (root + "?x=1", target),
+                     (root.replace("https:", "http:"), target), (root, "02.0.0"),
+                     (root, "2.0.0-rc.1"), (dev, "2.0.0-dev.05")):
+    rejected(lambda: g["official_artifact_feed"](url, version), "URL/version " + version)
+for path in ("app.bin", "../daikin-altherma-esp32.bin", "https://foreign.invalid/app.bin"):
+    rejected(lambda: g["official_app_url"](root, path), "host/device binary URL mismatch")
+for field, value in (("source_sha", "d" * 40), ("app_sha256", "d" * 64)):
+    wrong = manifest(target, app); wrong["provenance"][field] = value
+    rejected(lambda: g["validate_manifest"](root, wrong, source, target, app), "manifest " + field)
+
+# A local conflicting tag never decides this binding. Only the canonical remote result is read.
+tag = "refs/tags/v" + target
+for response, valid in ((source + "\t" + tag + "\n", True),
+                        ("d" * 40 + "\t" + tag + "\n" + source + "\t" + tag + "^{}\n", True),
+                        ("", False), (source + "\t" + tag + "^{}\n", False),
+                        (source + "\t" + tag + "\n" + source + "\t" + tag + "\n", False),
+                        ("d" * 40 + "\t" + tag + "\n", False),
+                        (source + "\trefs/heads/main\n", False)):
+    def remote(argv, **kwargs):
+        check(argv == ["git", "ls-remote", "https://github.com/0Bu/daikin-altherma-esp32.git",
+                       tag, tag + "^{}"], "release tag used noncanonical repository")
+        return response
+    with patch.dict(ns, {"run_checked": remote}):
+        if valid: g["verify_release_source_binding"](target, source, app, allow_legacy=False)
+        else: rejected(lambda: g["verify_release_source_binding"](target, source, app, allow_legacy=False),
+                       "missing/ambiguous/wrong official tag")
+with patch.dict(ns, {"run_checked": lambda *a, **k: "d" * 40 + "\trefs/tags/v1.0.2\n"}):
+    rejected(lambda: g["verify_release_source_binding"](g["LEGACY_RELEASE_VERSION"],
+        g["LEGACY_RELEASE_SOURCE_SHA"], g["LEGACY_RELEASE_APP_SHA256"], allow_legacy=False),
+        "historical excursion exception as stable target")
+
+counters = {key: 0 for key in ("heap_restarts", "mqtt_skipped", "poll_skipped", "crc_err", "timeout_err")}
+transfer = {"state": "done", "heap_min_free_bytes": 32768,
+            "heap_min_largest_block_bytes": 16384, "ota_stack_min_free_bytes": 1536}
+for saved in ("dev", "release"):
+  for defect, writes_expected in ((None, 2), ("wrong feed", 0), ("wrong generation", 0), ("wrong lease channel", 0),
+      ("wrong hash", 0), ("wrong version", 0), ("wrong MAC", 0), ("saved drift", 0),
+      ("target drift", 0), ("excursion drift", 0), ("restore target drift", 1),
+      ("restore excursion drift", 1), ("legacy restore", 1), ("missing done", 1),
+      ("missing stack", 1), ("zero heap", 1), ("restore missing stack", 2),
+      ("restore missing done", 2), ("restore wrong feed", 1), ("ack lost", 1),
+      ("wrong update generation", 1)):
+    events, writes = [], []
+    state = {"version": target, "elf": elf, "offer": None, "worker": False, "reads": 0}
+    def board():
+        channel = "release" if saved == "dev" else "dev"
+        return {"version": state["version"], "app_elf_sha256": state["elf"], "uptime_s": 13,
+                "wifi": {"mac": "02:00:00:00:00:ff" if defect == "wrong MAC" else mac,
+                         "connected": True, "rolled_back": False},
+                "ota": {"channel": channel if defect == "saved drift" and state["offer"] else saved},
+                "sys": {"free_heap": 65536, "max_alloc": 32768, "reset_reason": "sw", **counters},
+                "hp": {"crc_err": 0, "timeout_err": 0}, "mqtt": {"connected": True}}
+    def read_manifest(url, *args, **kwargs):
+        plain = url.split("?")[0]
+        check(plain in documents, "nonofficial manifest requested")
+        state["reads"] += 1
+        drift = ((defect == "target drift" and plain == root and state["offer"]) or
+                 (defect == "excursion drift" and plain == dev and state["offer"]) or
+                 (defect == "restore target drift" and plain == root and writes) or
+                 (defect == "restore excursion drift" and plain == dev and writes))
+        return documents[plain] + (b" " if drift else b"")
+    class Stop:
+        def __init__(self): self.stopped = False
+        def is_set(self): return self.stopped
+        def wait(self, seconds): self.stopped = True
+        def set(self): self.stopped = True
+    stop = Stop()
+    class Worker:
+        name = "fixture worker"
+        def __init__(self, *, target, args, daemon): self.target, self.args = target, args
+        def start(self):
+            stop.stopped, state["worker"] = False, True
+            try: self.target(*self.args)
+            finally: state["worker"] = False
+        def join(self, timeout): pass
+        def is_alive(self): return False
+    def status(endpoint, **kwargs):
+        check(endpoint == "bench.invalid", "production contacted during bench proof")
+        if state["worker"]: raise HTTPError("http://bench.invalid", 503, "busy", {}, None)
+        return board()
+    def values(*args, **kwargs): raise HTTPError("http://bench.invalid", 503, "busy", {}, None)
+    def request(endpoint, route, *, method="GET", extra_headers=None, **kwargs):
+        check(endpoint == "bench.invalid", "production contacted during bench proof")
+        if route.startswith("/ota/check?"):
+            wanted = dev if not writes else root
+            check(extra_headers == {g["HIL_MANIFEST_HEADER"]: wanted,
+                g["HIL_FIRMWARE_BASE_HEADER"]: wanted.replace("manifest.json", "")},
+                "check did not pin exact opposite/target feed")
+            if defect == "legacy restore" and writes: return {"ok": True}
+            state["offer"] = {"generation": 7, "busy": False, "state": "idle",
+                "available": other if not writes else target,
+                "available_sha256": other_app if not writes else app,
+                "channel": saved, "available_channel": saved, "update_available": bool(writes),
+                "downgrade": not writes, "effective_manifest_url": wanted,
+                "effective_firmware_base_url": wanted.replace("manifest.json", "")}
+            if defect == "wrong feed": state["offer"]["effective_manifest_url"] = root
+            if defect == "restore wrong feed" and writes: state["offer"]["effective_manifest_url"] = dev
+            if defect == "wrong generation": state["offer"]["generation"] = 8
+            if defect == "wrong lease channel": state["offer"]["available_channel"] = "wrong"
+            if defect == "wrong hash": state["offer"]["available_sha256"] = "d" * 64
+            if defect == "wrong version": state["offer"]["available"] = "9.0.0"
+            return {"ok": True, "generation": 7}
+        if route == "/ota/status": return state["offer"] or {}
+        check(route.startswith("/ota/update?") and method == "POST", "unbound update endpoint")
+        query = parse_qs(urlparse(route).query)
+        check(query == {"after": ["7"], "channel": [saved],
+              "version": [other if not writes else target],
+              "sha256": [other_app if not writes else app],
+              **({"downgrade": ["1"]} if not writes else {})}, "write lost exact generation/artifact")
+        check(events[-1] in ("bench_release_write_attempted", "bench_restore_attempted"),
+              "write lacked attempted-write milestone")
+        writes.append(query)
+        if defect == "ack lost": raise OSError("uncertain write")
+        return {"ok": True, "generation": 9 if defect == "wrong update generation" else 8}
+    def wait(host, version, image, endpoint, evidence):
+        sample = dict(transfer)
+        if defect == "missing done": sample["state"] = "updating"
+        if defect == "missing stack": sample.pop("ota_stack_min_free_bytes")
+        if defect == "zero heap": sample["heap_min_free_bytes"] = 0
+        if defect == "restore missing stack" and len(writes) == 2: sample.pop("ota_stack_min_free_bytes")
+        if defect == "restore missing done" and len(writes) == 2: sample["state"] = "updating"
+        g["record_ota_transfer_evidence"](sample, evidence)
+        state["version"], state["elf"] = version, image
+        return board()
+    def stress(**kwargs):
+        check(len(writes) == 2 and state["version"] == target, "stress preceded exact stable restore")
+        check(kwargs["require_pending_image"] is True and kwargs["expected_channel"] == saved and
+              kwargs["hil_manifest_url"] == root and kwargs["preserve_saved_channel"] is True,
+              "cold stress lost pending/root/saved-channel binding")
+        events.append("cold stress")
+        return {"uptime": [13, 193], "counters_after": counters}
+    def confirm(**kwargs):
+        check(events[-1] == "bench_restore_stress_passed" and kwargs["saved_channel"] == saved,
+              "probation preceded cold stress or lost channel")
+        return {"uptime_s": 194, "image_state": "valid", "rollback_pending": False}
+    replacements = {"resolve_http_endpoint": lambda host: host, "request_status_deadline": status,
+        "request_values_deadline": values, "request_diag_deadline": lambda *a, **k: b"diag",
+        "request_json_deadline": request, "request_limited_bytes": read_manifest,
+        "wait_for_new_firmware": wait, "wait_for_bench_health_window": lambda *a, **k: board(),
+        "stress_board": stress, "confirm_bench_probation": confirm,
+        "journal_checkpoint": lambda phase, **kwargs: events.append(phase)}
+    with patch.dict(ns, replacements), patch.object(ns["threading"], "Event", lambda: stop), \
+         patch.object(ns["threading"], "Thread", Worker), patch.object(ns["time"], "sleep", lambda *a: None):
+        try:
+            receipt = g["exercise_bench_full_download"](host="bench.invalid", mac=mac,
+                target_source_sha=source, target_version=target, target_sha256=app,
+                target_manifest_sha256=digests[root], target_elf=elf, release_version=other,
+                release_sha256=other_app, release_elf=other_elf, release_source_sha=source,
+                release_manifest_sha256=digests[dev], target_manifest_url=root)
+        except (g["GateError"], OSError): check(defect is not None, "healthy stable route failed")
+        else:
+            check(defect is None, "unsafe stable route accepted: " + str(defect))
+            check(receipt["artifact_feed"] == "release" and receipt["saved_channel"] == saved,
+                  "receipt conflates artifact feed and preference")
+        check(len(writes) == writes_expected, "wrong write/retry count for " + str(defect))
+
+# The first delivery stage is an ordinary stable bench install, independently of promotion's
+# round trip above. Keep the real installer, raw-feed checks, offer/update handshake and writer
+# telemetry verifier; only transport, elapsed pressure and confirmation are fixtures.
+for saved in ("dev", "release"):
+  for ambiguous_ack in (False, True):
+    events, writes, resolved = [], [], []
+    state = {"installed": False}
+    def install_board():
+        return {"version": target if state["installed"] else other,
+                "app_elf_sha256": elf if state["installed"] else other_elf, "uptime_s": 13,
+                "wifi": {"mac": mac, "connected": True, "rolled_back": False},
+                "ota": {"channel": saved}, "mqtt": {"connected": True},
+                "sys": {"free_heap": 65536, "max_alloc": 32768, "reset_reason": "sw", **counters},
+                "hp": {"crc_err": 0, "timeout_err": 0}}
+    def resolve_install(host):
+        resolved.append(host)
+        check(host == "bench.invalid", "production resolved during stable bench install")
+        return host
+    def install_request(endpoint, route, *, method="GET", extra_headers=None, **kwargs):
+        check(endpoint == "bench.invalid", "production contacted during stable bench install")
+        if route.startswith("/ota/check?"):
+            check(extra_headers == {g["HIL_MANIFEST_HEADER"]: root,
+                g["HIL_FIRMWARE_BASE_HEADER"]: root.replace("manifest.json", "")},
+                "stable installer lost its exact root offer headers")
+            events.append("check")
+            return {"ok": True, "generation": 7}
+        if route == "/ota/status":
+            return {"generation": 7, "busy": False, "state": "idle", "channel": saved,
+                    "available": target, "available_sha256": app, "available_channel": saved,
+                    "update_available": True, "effective_manifest_url": root,
+                    "effective_firmware_base_url": root.replace("manifest.json", "")}
+        check(route.startswith("/ota/update?") and method == "POST", "stable installer used unbound POST")
+        check(events[-1] == "bench_write_attempted", "stable installer omitted pre-write milestone")
+        query = parse_qs(urlparse(route).query)
+        check(query == {"after": ["7"], "channel": [saved], "version": [target], "sha256": [app]},
+              "stable installer POST lost exact feed lease/artifact identity")
+        writes.append(query)
+        if ambiguous_ack: raise OSError("fixture accepted write lost its acknowledgement")
+        return {"ok": True, "generation": 8}
+    def install_return(host, version, image, endpoint, evidence):
+        check((host, version, image, endpoint) == ("bench.invalid", target, elf, "bench.invalid"),
+              "stable installer waited for the wrong return identity")
+        g["record_ota_transfer_evidence"](transfer, evidence)
+        state["installed"] = True
+        events.append("returned")
+        return install_board()
+    def install_stress(**kwargs):
+        check(state["installed"] and len(writes) == 1 and
+              events[-1] == "bench_transfer_verified", "stable installer stressed before writer verification")
+        check(kwargs["host"] == "bench.invalid" and kwargs["version"] == target and kwargs["elf"] == elf and
+              kwargs["expected_app_sha256"] == app and kwargs["expected_channel"] == saved and
+              kwargs["require_pending_image"] is True and kwargs["preserve_saved_channel"] is True and
+              kwargs["hil_manifest_url"] == root and
+              kwargs["hil_firmware_base_url"] == root.replace("manifest.json", ""),
+              "stable installer cold stress lost root feed, saved channel or pending-image witness")
+        events.append("cold stress")
+        return {"uptime": [13, 193], "counters_after": counters}
+    def install_confirm(**kwargs):
+        check(events[-1] == "bench_stress_passed" and kwargs["saved_channel"] == saved,
+              "stable installer confirmation preceded cold stress or lost saved channel")
+        return {"uptime_s": 194, "image_state": "valid", "rollback_pending": False}
+    with patch.dict(ns, {"resolve_http_endpoint": resolve_install,
+        "request_status_deadline": lambda *a, **k: install_board(),
+        "request_json_deadline": install_request,
+        "request_limited_bytes": lambda url, *a, **k: documents[url.split("?")[0]],
+        "wait_for_new_firmware": install_return, "stress_board": install_stress,
+        "confirm_bench_probation": install_confirm,
+        "journal_checkpoint": lambda phase, **kwargs: events.append(phase)}):
+        try:
+            installed = g["install_bench_target"](host="bench.invalid", mac=mac,
+                current_version=other, target_version=target, target_sha256=app, target_elf=elf,
+                target_manifest_url=root, target_source_sha=source, target_manifest_sha256=digests[root])
+        except OSError:
+            check(ambiguous_ack and not state["installed"] and "cold stress" not in events,
+                  "ambiguous stable bench acknowledgment continued acceptance")
+        else:
+            check(not ambiguous_ack and installed["probation_confirmed"] is True and
+                  installed["transfer_verified"] is True and installed["artifact_feed"] == "release" and
+                  installed["saved_channel"] == saved and installed["ota_download_heap"]["saw_done"] is True and
+                  installed["ota_download_heap"]["ota_stack_min_free_bytes"] == 1536,
+                  "stable bench install lost completed writer/confirmation/feed evidence")
+        check(len(writes) == 1 and resolved == ["bench.invalid"],
+              "stable bench install retried its sole write or resolved production")
+
+# main must stop on a failed bench proof before resolving or reading production.
+args = SimpleNamespace(self_test=False, release_hil=False, execute=True, confirm_release_hil=None,
+    artifact_manifest=None, artifact_app=None, install_bench=False, confirm_bench=None,
+    confirm_production="production", expected_current_version=other, manifest_url=root,
+    expected_source_sha=source, expected_version=target, expected_app_sha256=app)
+def bench_failed(**kwargs): raise g["GateError"]("fixture bench proof failed")
+with patch.dict(ns, {"parse_args": lambda: args,
+    "request_limited_bytes": lambda url, *a, **k: documents[url.split("?")[0]],
+    "verify_release_source_binding": lambda *a, **k: None, "verify_local_source": lambda *a: None,
+    "request_bytes": lambda *a, **k: b"image", "verify_image": lambda *a: elf,
+    "verify_http_range_support": lambda *a: None, "run_local_gates": lambda: None,
+    "load_inventory": lambda: {"bench": {"host": "bench.invalid", "mac": mac},
+                               "production": {"host": "production.invalid", "mac": "other"}},
+    "request_json": lambda host, route: {"version": target, "app_elf_sha256": elf, "ota": {"channel": "dev"},
+        "wifi": {"mac": mac, "connected": True}},
+    "wait_for_bench_health_window": lambda *a, **k: {}, "exercise_bench_full_download": bench_failed,
+    "resolve_http_endpoint": lambda host: (_ for _ in ()).throw(AssertionError("production contacted"))}), \
+    contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+    try: rejected(g["main"], "production after failed bench")
+    finally:
+        if ns["ACTIVE_JOURNAL"] is not None: shutil.rmtree(ns["ACTIVE_JOURNAL"].directory)
+`;
+const stableDelivery = spawnSync("python3", [
+  "-I", "-B", "-c", stableDeliveryProbe, path.join(root, "scripts/production-ota-gate.py"),
+], { encoding: "utf8" });
+assert.equal(stableDelivery.status, 0,
+  `stable delivery must bind feeds, source, preference, writer evidence and role order: ${stableDelivery.stderr}`);
 
 // One resolved identity owns every pre-write and pressure request.
 const boundedTransport = section(gate, "def read_bounded_http_response(", "\ndef verify_http_range_support(");
@@ -1277,14 +1579,16 @@ for (const helper of ["request_status_deadline", "request_values_deadline", "req
     `bench binary pressure must use pinned ${helper}`);
 }
 assert.match(fullDownload,
-  /pinned_release\s*=\s*request_status_deadline\(status_endpoint[\s\S]{0,240}?validate_identity\([\s\S]{0,300}?request_json_deadline\([\s\S]{0,120}?"\/ota\/check/,
+  /pinned_release\s*=\s*request_status_deadline\(status_endpoint[\s\S]{0,240}?validate_identity\([\s\S]{0,180}?require_saved_channel\(pinned_release, saved_channel\)[\s\S]*?restore_generation = wait_for_ota_offer\(/,
   "the endpoint must be revalidated after the hostname-only health dwell and before restore");
-assert.equal(occurrences(fullDownload, "require_official_dev_manifest_snapshot("), 2,
-  "the mutable dev feed must be rebound before release selection and immediately before its write");
+assert.equal(occurrences(fullDownload, "require_official_manifest_snapshot("), 2,
+  "the shared rebind must validate both raw target and excursion feeds");
+assert.equal(occurrences(fullDownload, "rebind_feeds()"), 5,
+  "both feeds must be rebound before outbound selection/write and each restore write");
 assert.match(fullDownload,
-  /wait_for_ota_offer\([\s\S]{0,260}?expected_channel="dev"[\s\S]{0,220}?hil_manifest_url=OFFICIAL_RELEASE_MANIFEST_URL[\s\S]{0,160}?hil_firmware_base_url=OFFICIAL_RELEASE_FIRMWARE_BASE_URL/);
+  /wait_for_ota_offer\([\s\S]{0,260}?expected_channel=saved_channel[\s\S]{0,220}?preserve_saved_channel=True, \*\*official_feed_override\(release_manifest_url\)/);
 assert.match(fullDownload,
-  /post_update_once\([\s\S]{0,180}?expected_channel="dev"[\s\S]{0,80}?allow_downgrade=True/,
+  /post_update_once\([\s\S]{0,180}?expected_channel=saved_channel[\s\S]{0,80}?allow_downgrade=True/,
   "the release write must consume the accepted transient HIL generation without persisting a channel switch");
 assert.doesNotMatch(fullDownload, /set_update_channel/,
   "the bench release exercise must not persist a channel change before its sole write");

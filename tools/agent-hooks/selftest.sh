@@ -548,6 +548,21 @@ guard_case "canonical argument-bound production OTA gate is allowed" \
 canonical_bench_ota_gate="$root/scripts/production-ota-gate.py --manifest-url https://0bu.github.io/daikin-altherma-esp32/dev/manifest.json --expected-source-sha abcdef1234567890abcdef1234567890abcdef12 --expected-version 1.2.3-dev.4 --expected-app-sha256 bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb --expected-current-version 1.2.3-dev.3 --confirm-bench bench --install-bench"
 guard_case "canonical argument-bound bench-only OTA gate is allowed" \
     "$(payload exec_command command "$canonical_bench_ota_gate")" ""
+canonical_release_gate="${canonical_ota_gate/\/dev\/manifest.json/\/manifest.json}"
+canonical_release_gate="${canonical_release_gate/--expected-version 1.2.3-dev.4/--expected-version 1.2.3}"
+canonical_release_gate="${canonical_release_gate/--expected-current-version 1.2.3 /--expected-current-version 1.2.3-dev.4 }"
+guard_case "canonical stable production OTA gate is allowed" \
+    "$(payload exec_command command "$canonical_release_gate")" ""
+canonical_release_bench_gate="${canonical_bench_ota_gate/\/dev\/manifest.json/\/manifest.json}"
+canonical_release_bench_gate="${canonical_release_bench_gate/--expected-version 1.2.3-dev.4/--expected-version 1.2.3}"
+guard_case "canonical stable bench OTA gate is allowed" \
+    "$(payload exec_command command "$canonical_release_bench_gate")" ""
+guard_case "stable version cannot be offered through the dev manifest" \
+    "$(payload exec_command command "${canonical_release_gate/\/manifest.json/\/dev\/manifest.json}")" deny
+guard_case "dev version cannot be offered through the release manifest" \
+    "$(payload exec_command command "${canonical_release_bench_gate/--expected-version 1.2.3 /--expected-version 1.2.3-dev.4 }")" deny
+guard_case "stable gate cannot change the saved channel" \
+    "$(payload exec_command command "$canonical_release_bench_gate --channel release")" deny
 guard_case "canonical bench gate cannot be chained into a watcher" \
     "$(payload exec_command command "$canonical_bench_ota_gate; curl -sS http://bench.invalid/status")" deny
 guard_case "bench gate cannot name the production confirmation too" \

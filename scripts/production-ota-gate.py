@@ -2,12 +2,12 @@
 """Fail-closed role-pinned OTA delivery gate.
 
 The bench mode is the only agent-approved path to install an ordinary update on the private-inventory
-test board. It verifies one exact signed dev artifact, performs at most one POST on the bench role,
+test board. It verifies one exact signed official artifact, performs at most one POST on the bench role,
 runs sustained pressure during rollback probation and requires confirmation. It cannot contact the
 production role.
 
 The production mode additionally proves that exact image on the bench role by making it perform a
-complete signed release download under concurrent HTTP pressure, restores the exact dev target,
+complete signed opposite-feed download under concurrent HTTP pressure, restores the exact target,
 runs the sustained pressure gate, then performs at most one POST on the distinct production role and
 observes the canary read-only. Neither mode creates a release or retries a write.
 """
@@ -86,7 +86,6 @@ PROMOTION_READY_SAMPLE_INTERVAL_S = 0.1
 LEGACY_OFFER_STABLE_SECONDS = 3.0
 BENCH_HEALTH_WINDOW_S = 105
 BENCH_HEALTH_WINDOW_TIMEOUT_S = 150
-DEV_MANIFEST_SUFFIX = "/dev/manifest.json"
 OFFICIAL_MANIFEST_URL = "https://0bu.github.io/daikin-altherma-esp32/dev/manifest.json"
 OFFICIAL_RELEASE_MANIFEST_URL = "https://0bu.github.io/daikin-altherma-esp32/manifest.json"
 OFFICIAL_RELEASE_FIRMWARE_BASE_URL = "https://0bu.github.io/daikin-altherma-esp32/"
@@ -262,6 +261,9 @@ def public_receipt(journal: GateJournal) -> dict[str, Any]:
             elif key == "executed" and (value is None or isinstance(value, bool)):
                 output[key] = value
             elif key == "image_state" and value in ("pending_verify", "valid"):
+                output[key] = value
+            elif key in ("artifact_feed", "saved_channel", "excursion_feed") and \
+                 value in ("dev", "release"):
                 output[key] = value
             elif key in boolean_fields and isinstance(value, bool):
                 output[key] = value
@@ -1177,15 +1179,13 @@ def validate_manifest(
     expected_version: str,
     expected_app_sha256: str,
 ) -> str:
-    parsed = urlparse(manifest_url)
-    if manifest_url != OFFICIAL_MANIFEST_URL or parsed.scheme != "https" or not parsed.path.endswith(DEV_MANIFEST_SUFFIX):
-        fail("manifest must be the official HTTPS dev channel; release/foreign manifests are forbidden")
-    if not re.fullmatch(r"[0-9a-f]{40}", expected_source_sha):
+    official_artifact_feed(manifest_url, expected_version)
+    if not isinstance(expected_source_sha, str) or not re.fullmatch(r"[0-9a-f]{40}", expected_source_sha):
         fail("expected source SHA must be lowercase 40-hex")
-    if not re.fullmatch(r"[0-9a-f]{64}", expected_app_sha256):
+    if not isinstance(expected_app_sha256, str) or not re.fullmatch(r"[0-9a-f]{64}", expected_app_sha256):
         fail("expected app SHA-256 must be lowercase 64-hex")
-    if manifest.get("version") != expected_version or "-dev." not in expected_version:
-        fail("manifest version is not the explicitly expected dev version")
+    if manifest.get("version") != expected_version:
+        fail("manifest version is not the explicitly expected version")
     provenance = manifest.get("provenance")
     if not isinstance(provenance, dict):
         fail("manifest provenance is missing")
@@ -1207,7 +1207,62 @@ def validate_manifest(
                     candidates.append(path)
     if len(candidates) != 1:
         fail("manifest must name exactly one ESP32-S3 application at offset 0x20000")
-    return urljoin(manifest_url, candidates[0])
+    return official_app_url(manifest_url, candidates[0])
+
+
+def official_artifact_feed(manifest_url: str, version: str) -> str:
+    """Bind the command to one official feed and its exact version grammar before network I/O."""
+    number = r"(?:0|[1-9][0-9]*)"
+    stable = rf"{number}\.{number}\.{number}"
+    if not isinstance(version, str):
+        fail("official artifact version is missing")
+    if manifest_url == OFFICIAL_MANIFEST_URL and re.fullmatch(rf"{stable}-dev\.{number}", version):
+        return "dev"
+    if manifest_url == OFFICIAL_RELEASE_MANIFEST_URL and re.fullmatch(stable, version):
+        return "release"
+    fail("manifest must be the exact official dev or release URL with its matching version")
+
+
+def official_app_url(manifest_url: str, path: str) -> str:
+    if path != "daikin-altherma-esp32.bin":
+        fail("official manifest must name the firmware writer's fixed application filename")
+    return urljoin(manifest_url, path)
+
+
+def require_saved_channel(status: dict[str, Any], expected: str | None = None) -> str:
+    """The persisted preference is separate from the transient artifact feed."""
+    ota = status.get("ota")
+    channel = ota.get("channel") if isinstance(ota, dict) else None
+    if channel not in ("dev", "release") or (expected is not None and channel != expected):
+        fail("saved OTA channel is invalid or changed during delivery")
+    return channel
+
+
+def official_feed_override(manifest_url: str) -> dict[str, str]:
+    if manifest_url not in (OFFICIAL_MANIFEST_URL, OFFICIAL_RELEASE_MANIFEST_URL):
+        fail("OTA override is not an official feed")
+    return {"hil_manifest_url": manifest_url,
+            "hil_firmware_base_url": urljoin(manifest_url, "./")}
+
+
+def require_official_manifest_snapshot(
+    manifest_url: str, expected_manifest_sha256: str, expected_source_sha: str,
+    expected_version: str, expected_app_sha256: str,
+) -> None:
+    """Rebind raw mutable feed bytes as well as its exact identity immediately before a write."""
+    manifest_bytes = request_limited_bytes(
+        cache_busted(manifest_url), "official manifest rebind",
+        LEGACY_BENCH_RESTORE_MANIFEST_MAX_BYTES,
+    )
+    if hashlib.sha256(manifest_bytes).hexdigest() != expected_manifest_sha256:
+        fail("official manifest changed after initial validation")
+    manifest = strict_json(manifest_bytes, "official manifest rebind")
+    if not isinstance(manifest, dict):
+        fail("official manifest rebind is not a JSON object")
+    validate_manifest(manifest_url, manifest, expected_source_sha, expected_version,
+                      expected_app_sha256)
+    if manifest_url == OFFICIAL_MANIFEST_URL:
+        require_legacy_bench_restore_manifest(manifest_bytes, manifest)
 
 
 def require_legacy_bench_restore_manifest(
@@ -1233,21 +1288,11 @@ def require_official_dev_manifest_snapshot(
     expected_manifest_sha256: str, expected_source_sha: str,
     expected_version: str, expected_app_sha256: str,
 ) -> None:
-    """Rebind the mutable dev feed immediately before the bench release write."""
-    manifest_bytes = request_limited_bytes(
-        cache_busted(OFFICIAL_MANIFEST_URL), "official dev manifest rebind",
-        LEGACY_BENCH_RESTORE_MANIFEST_MAX_BYTES,
+    """Compatibility entry point for the original dev-feed contract."""
+    require_official_manifest_snapshot(
+        OFFICIAL_MANIFEST_URL, expected_manifest_sha256, expected_source_sha,
+        expected_version, expected_app_sha256,
     )
-    if hashlib.sha256(manifest_bytes).hexdigest() != expected_manifest_sha256:
-        fail("official dev manifest changed after initial validation")
-    manifest = strict_json(manifest_bytes, "official dev manifest rebind")
-    if not isinstance(manifest, dict):
-        fail("official dev manifest rebind is not a JSON object")
-    validate_manifest(
-        OFFICIAL_MANIFEST_URL, manifest, expected_source_sha, expected_version,
-        expected_app_sha256,
-    )
-    require_legacy_bench_restore_manifest(manifest_bytes, manifest)
 
 
 def validate_release_manifest(
@@ -1258,8 +1303,9 @@ def validate_release_manifest(
         fail("bench rollback exercise requires the official release manifest")
     version = manifest.get("version")
     provenance = manifest.get("provenance")
-    if not isinstance(version, str) or not version or "-dev." in version:
+    if not isinstance(version, str):
         fail("official release manifest does not name a stable version")
+    official_artifact_feed(manifest_url, version)
     if not isinstance(provenance, dict):
         fail("official release manifest provenance is missing")
     source_sha = provenance.get("source_sha")
@@ -1282,7 +1328,7 @@ def validate_release_manifest(
                     candidates.append(path)
     if len(candidates) != 1:
         fail("official release manifest must name exactly one ESP32-S3 application")
-    return version, app_sha256, urljoin(manifest_url, candidates[0]), source_sha
+    return version, app_sha256, official_app_url(manifest_url, candidates[0]), source_sha
 
 
 def require_release_source_binding(
@@ -1301,10 +1347,27 @@ def require_release_source_binding(
     )
 
 
-def verify_release_source_binding(version: str, source_sha: str, app_sha256: str) -> None:
-    tagged_source = run_checked(
-        ["git", "rev-parse", f"v{version}^{{commit}}"], capture=True,
-    ).strip()
+def verify_release_source_binding(
+    version: str, source_sha: str, app_sha256: str, *, allow_legacy: bool = True,
+) -> None:
+    official_artifact_feed(OFFICIAL_RELEASE_MANIFEST_URL, version)
+    tag = f"refs/tags/v{version}"
+    remote = run_checked([
+        "git", "ls-remote", "https://github.com/0Bu/daikin-altherma-esp32.git",
+        tag, tag + "^{}",
+    ], capture=True)
+    refs: dict[str, str] = {}
+    for line in remote.splitlines():
+        fields = line.split()
+        if len(fields) != 2 or fields[1] not in (tag, tag + "^{}") or \
+           re.fullmatch(r"[0-9a-f]{40}", fields[0]) is None or fields[1] in refs:
+            fail("official release tag response is ambiguous")
+        refs[fields[1]] = fields[0]
+    tagged_source = refs.get(tag + "^{}", refs.get(tag))
+    if tagged_source is None or tag not in refs:
+        fail("official release tag is missing")
+    if not allow_legacy and source_sha != tagged_source:
+        fail("target release source does not match its official tag")
     require_release_source_binding(version, source_sha, app_sha256, tagged_source)
 
 
@@ -1334,7 +1397,7 @@ def verify_image(binary: bytes, expected_version: str, expected_sha256: str) -> 
     target = re.search(r"^(?:Detected image type:\s*ESP32-S3|ESP32-S3 Image Header)$",
                        info, re.MULTILINE)
     if not version or version.group(1) != expected_version or not elf or not target:
-        fail("signed image metadata does not match expected ESP32-S3 dev build")
+        fail("signed image metadata does not match expected ESP32-S3 build")
     return elf.group(1)[:9]
 
 
@@ -1559,6 +1622,7 @@ def stress_board(
     require_weather: bool, expected_app_sha256: str, expected_channel: str,
     hil_manifest_url: str | None = None, hil_firmware_base_url: str | None = None,
     require_pending_image: bool = False,
+    preserve_saved_channel: bool = False,
 ) -> dict[str, Any]:
     if (hil_manifest_url is None) != (hil_firmware_base_url is None):
         fail("stress HIL feed expectation must be a complete pair")
@@ -1568,6 +1632,8 @@ def stress_board(
     pinned_endpoint = resolve_http_endpoint(host)
     started = request_status_deadline(pinned_endpoint, timeout=HTTP_TIMEOUT_S)
     validate_identity(started, host=host, mac=mac, version=version, elf=elf)
+    if preserve_saved_channel:
+        require_saved_channel(started, expected_channel)
     initial_uptime = required_uptime(started, f"{host} initial readiness status")
     initial_counters = board_counters(started)
     readiness_keys = ("heap_restarts", "mqtt_skipped", "poll_skipped")
@@ -1621,6 +1687,8 @@ def stress_board(
         except (CompactTransportError, OSError, TimeoutError):
             continue
         validate_identity(started, host=host, mac=mac, version=version, elf=elf)
+        if preserve_saved_channel:
+            require_saved_channel(started, expected_channel)
         ready_uptime = required_uptime(started, f"{host} readiness status")
         if ready_uptime < last_ready_uptime:
             fail(f"{host} rebooted while waiting for pressure readiness")
@@ -1688,6 +1756,8 @@ def stress_board(
                     pinned_endpoint, timeout=HTTP_TIMEOUT_S,
                 )
                 validate_identity(status, host=host, mac=mac, version=version, elf=elf)
+                if preserve_saved_channel:
+                    require_saved_channel(status, expected_channel)
                 hp = status.get("hp", {})
                 mqtt = status.get("mqtt", {})
                 weather = status.get("weather_forecast", {})
@@ -2104,6 +2174,8 @@ def stress_board(
         if any(later < earlier for earlier, later in zip(uptimes, uptimes[1:])):
             fail(f"{host} rebooted during post-stress Weather recovery")
 
+    if preserve_saved_channel:
+        require_saved_channel(finished, expected_channel)
     weather = finished.get("weather_forecast", {})
     if require_weather:
         if not weather.get("configured"):
@@ -2238,7 +2310,7 @@ def ota_offer_ready(
 ) -> bool:
     """Accept only the completed status of the exact synchronously accepted check task."""
     generation = status.get("generation")
-    if not isinstance(generation, int) or generation != expected_generation:
+    if not isinstance(generation, int) or isinstance(generation, bool) or generation != expected_generation:
         fail("OTA operation generation changed during offer check")
     if status.get("busy") is True:
         return False
@@ -2268,6 +2340,7 @@ def wait_for_ota_offer(
     endpoint: ResolvedHttpEndpoint, expected_version: str, expected_app_sha256: str,
     *, expected_channel: str = "dev", allow_downgrade: bool = False,
     hil_manifest_url: str | None = None, hil_firmware_base_url: str | None = None,
+    preserve_saved_channel: bool = False,
 ) -> int:
     if (hil_manifest_url is None) != (hil_firmware_base_url is None):
         fail("OTA HIL feed override must be a complete pair")
@@ -2282,7 +2355,7 @@ def wait_for_ota_offer(
     except HTTPError as error:
         fail(f"firmware refused OTA check with HTTP {error.code}")
     generation = accepted.get("generation")
-    if accepted.get("ok") is not True or not isinstance(generation, int) or generation <= 0:
+    if accepted.get("ok") is not True or not isinstance(generation, int) or isinstance(generation, bool) or generation <= 0:
         fail(
             "firmware lacks or refused the OTA generation handshake; "
             "use one signed NVS-preserving USB bootstrap — no update POST was sent"
@@ -2290,6 +2363,8 @@ def wait_for_ota_offer(
     deadline = time.monotonic() + OTA_CHECK_TIMEOUT_S
     while time.monotonic() < deadline:
         status = request_json_deadline(endpoint, "/ota/status", timeout=HTTP_TIMEOUT_S)
+        if preserve_saved_channel and status.get("channel") != expected_channel:
+            fail("saved OTA channel changed during offer check")
         if ota_offer_ready(
             status, expected_version, expected_app_sha256, generation,
             expected_channel, allow_downgrade, hil_manifest_url, hil_firmware_base_url,
@@ -2322,7 +2397,7 @@ def post_update_once(
     except HTTPError as error:
         fail(f"firmware refused the sole OTA update write with HTTP {error.code}")
     generation = accepted.get("generation")
-    if accepted.get("ok") is not True or not isinstance(generation, int) or generation <= 0:
+    if accepted.get("ok") is not True or not isinstance(generation, int) or isinstance(generation, bool) or generation <= 0:
         fail("firmware did not accept the sole OTA update write")
     expected_generation = 1 if check_generation == 0xFFFFFFFF else check_generation + 1
     if generation != expected_generation:
@@ -2398,6 +2473,7 @@ def wait_for_new_firmware(
 
 def wait_for_bench_health_window(
     host: str, mac: str, version: str, elf: str, *, phase: str,
+    saved_channel: str | None = None,
 ) -> dict[str, Any]:
     """Require one exact bench image to remain healthy beyond the rollback commit window.
 
@@ -2423,6 +2499,8 @@ def wait_for_bench_health_window(
         validate_identity(
             status, host=host, mac=mac, version=version, elf=elf,
         )
+        if saved_channel is not None:
+            require_saved_channel(status, saved_channel)
         counters = board_counters(status)
         system = status.get("sys", {})
         if int(status.get("uptime_s", 0)) >= BENCH_HEALTH_WINDOW_S:
@@ -2458,6 +2536,7 @@ def wait_for_legacy_offer(endpoint: ResolvedHttpEndpoint, expected_version: str)
 
 def confirm_bench_probation(
     *, host: str, mac: str, version: str, elf: str, stress: dict[str, Any],
+    saved_channel: str | None = None,
 ) -> dict[str, Any]:
     """Confirm the same stressed boot without losing its counters or accepting a hidden reboot."""
     endpoint = resolve_http_endpoint(host)
@@ -2469,6 +2548,8 @@ def confirm_bench_probation(
     def validate_confirmation_status(status: dict[str, Any]) -> int:
         nonlocal last_uptime, last_timeout
         validate_identity(status, host=host, mac=mac, version=version, elf=elf)
+        if saved_channel is not None:
+            require_saved_channel(status, saved_channel)
         uptime = required_uptime(status, "bench probation confirmation")
         if uptime < last_uptime:
             fail("bench rebooted after its cold pressure window")
@@ -2530,13 +2611,15 @@ def exercise_bench_full_download(
     *, host: str, mac: str, target_source_sha: str, target_version: str,
     target_sha256: str, target_manifest_sha256: str, target_elf: str,
     release_version: str, release_sha256: str, release_elf: str,
+    release_source_sha: str, release_manifest_sha256: str,
+    target_manifest_url: str = OFFICIAL_MANIFEST_URL,
 ) -> dict[str, Any]:
     """Make the target firmware itself perform one complete signed binary TLS transfer.
 
-    The exact target first binds one check generation to the official release feed without changing
-    its configured dev channel, then installs that older signed build under concurrent HTTP pressure.
-    The release restores through that configured official dev feed. This happens only on the
-    private-inventory bench role and closes the old manifest-only gap.
+    The exact target writes the independently verified opposite official feed under HTTP pressure,
+    then that writer restores the exact target. A stable target requires its same-source dev writer
+    and modern generation/explicit-feed support on both legs. Only the original dev route permits
+    the exact historical stable return writer. Saved channel preferences never change.
     """
     if release_version == target_version:
         fail("bench full-download exercise needs a release distinct from the target")
@@ -2545,17 +2628,32 @@ def exercise_bench_full_download(
     validate_identity(
         pinned_before, host=host, mac=mac, version=target_version, elf=target_elf,
     )
-    require_official_dev_manifest_snapshot(
-        target_manifest_sha256, target_source_sha, target_version, target_sha256,
-    )
-    # The current target supports one non-persistent feed binding on /ota/check. Use it for the
-    # release leg so the configured channel remains dev even if a later pre-write check fails, and
-    # so the checked release URL survives unchanged through its exact update generation.
+    artifact_feed = official_artifact_feed(target_manifest_url, target_version)
+    saved_channel = require_saved_channel(pinned_before)
+    release_manifest_url = OFFICIAL_RELEASE_MANIFEST_URL if artifact_feed == "dev" else OFFICIAL_MANIFEST_URL
+    if artifact_feed == "release" and (
+        release_source_sha != target_source_sha or
+        release_version.split("-dev.")[0] != target_version
+    ):
+        fail("stable excursion requires the same-source, same-core official dev writer")
+
+    def rebind_feeds() -> None:
+        require_official_manifest_snapshot(
+            target_manifest_url, target_manifest_sha256, target_source_sha, target_version,
+            target_sha256,
+        )
+        require_official_manifest_snapshot(
+            release_manifest_url, release_manifest_sha256, release_source_sha, release_version,
+            release_sha256,
+        )
+
+    rebind_feeds()
+    # Bind the opposite feed without changing the saved preference, including if a later check
+    # fails. Its URL remains part of the exact accepted update generation.
     generation = wait_for_ota_offer(
         status_endpoint, release_version, release_sha256,
-        expected_channel="dev", allow_downgrade=True,
-        hil_manifest_url=OFFICIAL_RELEASE_MANIFEST_URL,
-        hil_firmware_base_url=OFFICIAL_RELEASE_FIRMWARE_BASE_URL,
+        expected_channel=saved_channel, allow_downgrade=True,
+        preserve_saved_channel=True, **official_feed_override(release_manifest_url),
     )
 
     stop = threading.Event()
@@ -2572,6 +2670,8 @@ def exercise_bench_full_download(
     evidence: dict[str, Any] = {
         "release_version": release_version, "release_elf": release_elf, "pressure": counts,
         "target_download_heap": target_transfer, "restore_download_heap": restore_transfer,
+        "artifact_feed": artifact_feed, "saved_channel": saved_channel,
+        "excursion_feed": "release" if artifact_feed == "dev" else "dev",
     }
     journal_checkpoint("bench_full_download_started", test_board={"full_binary_download": evidence})
 
@@ -2612,14 +2712,17 @@ def exercise_bench_full_download(
     time.sleep(0.5)
 
     try:
-        require_official_dev_manifest_snapshot(
-            target_manifest_sha256, target_source_sha, target_version, target_sha256,
+        rebind_feeds()
+        before_write = request_status_deadline(status_endpoint, timeout=HTTP_TIMEOUT_S)
+        validate_identity(
+            before_write, host=host, mac=mac, version=target_version, elf=target_elf,
         )
+        require_saved_channel(before_write, saved_channel)
         evidence["release_write_attempted"] = True
         journal_checkpoint("bench_release_write_attempted")
         post_update_once(
             status_endpoint, generation, release_version, release_sha256,
-            expected_channel="dev", allow_downgrade=True,
+            expected_channel=saved_channel, allow_downgrade=True,
         )
         evidence["release_write_acknowledged"] = True
         journal_checkpoint("bench_release_write_acknowledged")
@@ -2636,6 +2739,7 @@ def exercise_bench_full_download(
     validate_identity(
         release_status, host=host, mac=mac, version=release_version, elf=release_elf,
     )
+    require_saved_channel(release_status, saved_channel)
     journal_checkpoint("bench_release_returned")
     if unexpected:
         fail(f"{host} bench binary pressure had unexpected HTTP failures: {'; '.join(unexpected)}")
@@ -2647,47 +2751,71 @@ def exercise_bench_full_download(
         fail(f"{host} target OTA did not expose sampled operation-local heap minima")
     if target_transfer.get("saw_done") is not True:
         fail(f"{host} target OTA never exposed its completed validation state")
+    require_ota_transfer_evidence(
+        host, target_transfer, phase="bench full download",
+        writer_version=target_version, writer_elf=target_elf,
+    )
 
     release_health_window = wait_for_bench_health_window(
-        host, mac, release_version, release_elf, phase="release",
+        host, mac, release_version, release_elf, phase="release", saved_channel=saved_channel,
     )
     evidence["release_health_window_uptime_s"] = release_health_window.get("uptime_s")
     journal_checkpoint("bench_release_health_passed")
 
-    # Restore the exact target from the official dev feed. Current releases use the atomic
-    # generation handshake; an older still-supported release may predate it, so only this BENCH
-    # return leg accepts its legacy one-shot endpoint. Final version+ELF identity remains exact.
+    # Restore the exact target through its official feed. Only the historical stable writer in the
+    # original dev-target route may use the legacy bench endpoint. Stable targets require modern
+    # generation, explicit-feed and writer telemetry throughout.
     # The health dwell reads by hostname. Revalidate the original resolved endpoint immediately
     # before its next write so a DHCP move plus old-address reuse cannot redirect the restore.
     pinned_release = request_status_deadline(status_endpoint, timeout=HTTP_TIMEOUT_S)
     validate_identity(
         pinned_release, host=host, mac=mac, version=release_version, elf=release_elf,
     )
-    accepted = request_json_deadline(
-        status_endpoint, f"/ota/check?ms={int(time.time() * 1000)}", timeout=HTTP_TIMEOUT_S,
-    )
-    restore_generation = accepted.get("generation")
-    if isinstance(restore_generation, int) and restore_generation > 0:
-        deadline = time.monotonic() + OTA_CHECK_TIMEOUT_S
-        while time.monotonic() < deadline:
-            status = request_json_deadline(
-                status_endpoint, "/ota/status", timeout=HTTP_TIMEOUT_S,
-            )
-            if ota_offer_ready(
-                status, target_version, target_sha256, restore_generation, "dev", False,
-            ):
-                break
-            time.sleep(OTA_OFFER_POLL_SECONDS)
-        else:
-            fail("bench return check did not settle on the exact dev artifact")
-        journal_checkpoint("bench_restore_attempted")
-        post_update_once(status_endpoint, restore_generation, target_version, target_sha256)
-    else:
+    require_saved_channel(pinned_release, saved_channel)
+    rebind_feeds()
+    legacy_restore = artifact_feed == "dev" and saved_channel == "dev" and (
+        release_version, release_elf, release_sha256,
+    ) == (LEGACY_RELEASE_VERSION, LEGACY_RELEASE_ELF_ID, LEGACY_RELEASE_APP_SHA256)
+    restore_generation = None
+    if legacy_restore:
+        accepted = request_json_deadline(
+            status_endpoint, f"/ota/check?ms={int(time.time() * 1000)}", timeout=HTTP_TIMEOUT_S,
+        )
         if accepted.get("ok") is not True:
             fail("legacy bench firmware refused the dev return check")
-        wait_for_legacy_offer(status_endpoint, target_version)
+        candidate_generation = accepted.get("generation")
+        if isinstance(candidate_generation, int) and not isinstance(candidate_generation, bool) and \
+           candidate_generation > 0:
+            restore_generation = candidate_generation
+            deadline = time.monotonic() + OTA_CHECK_TIMEOUT_S
+            while time.monotonic() < deadline:
+                status = request_json_deadline(
+                    status_endpoint, "/ota/status", timeout=HTTP_TIMEOUT_S,
+                )
+                if ota_offer_ready(
+                    status, target_version, target_sha256, restore_generation, saved_channel, False,
+                ):
+                    break
+                time.sleep(OTA_OFFER_POLL_SECONDS)
+            else:
+                fail("bench return check did not settle on the exact dev artifact")
+        else:
+            wait_for_legacy_offer(status_endpoint, target_version)
+    else:
+        restore_generation = wait_for_ota_offer(
+            status_endpoint, target_version, target_sha256, expected_channel=saved_channel,
+            preserve_saved_channel=True, **official_feed_override(target_manifest_url),
+        )
+    rebind_feeds()
+    before_restore = request_status_deadline(status_endpoint, timeout=HTTP_TIMEOUT_S)
+    validate_identity(before_restore, host=host, mac=mac, version=release_version, elf=release_elf)
+    require_saved_channel(before_restore, saved_channel)
+    journal_checkpoint("bench_restore_attempted")
+    if restore_generation is not None:
+        post_update_once(status_endpoint, restore_generation, target_version, target_sha256,
+                         expected_channel=saved_channel)
+    else:
         # Exactly one un-retried BENCH restore write; production never uses this legacy endpoint.
-        journal_checkpoint("bench_restore_attempted")
         restored = request_json_deadline(
             status_endpoint, "/ota/update", method="POST", timeout=HTTP_TIMEOUT_S,
         )
@@ -2701,6 +2829,12 @@ def exercise_bench_full_download(
     validate_identity(
         target_status, host=host, mac=mac, version=target_version, elf=target_elf,
     )
+    require_saved_channel(target_status, saved_channel)
+    if not legacy_restore:
+        require_ota_transfer_evidence(
+            host, restore_transfer, phase="bench restore",
+            writer_version=release_version, writer_elf=release_elf,
+        )
     evidence.update({"returned_version": target_status.get("version"),
                      "returned_elf": target_status.get("app_elf_sha256")})
     journal_checkpoint("bench_restored")
@@ -2709,12 +2843,14 @@ def exercise_bench_full_download(
     cold_stress = stress_board(
         host=host, mac=mac, version=target_version, elf=target_elf,
         require_x10a=False, require_weather=False,
-        expected_app_sha256=target_sha256, expected_channel="dev", require_pending_image=True,
+        expected_app_sha256=target_sha256, expected_channel=saved_channel, require_pending_image=True,
+        preserve_saved_channel=True, **official_feed_override(target_manifest_url),
     )
     evidence["cold_stress"] = cold_stress
     journal_checkpoint("bench_restore_stress_passed")
     evidence["probation_after"] = confirm_bench_probation(
         host=host, mac=mac, version=target_version, elf=target_elf, stress=cold_stress,
+        saved_channel=saved_channel,
     )
     journal_checkpoint("bench_restore_probation_confirmed")
     return evidence
@@ -2753,8 +2889,10 @@ def require_ota_transfer_evidence(
 def install_bench_target(
     *, host: str, mac: str, current_version: str, target_version: str,
     target_sha256: str, target_elf: str,
+    target_manifest_url: str = OFFICIAL_MANIFEST_URL,
+    target_source_sha: str, target_manifest_sha256: str,
 ) -> dict[str, Any]:
-    """Install exactly one signed dev artifact on the inventory-pinned bench role.
+    """Install exactly one signed official artifact on the inventory-pinned bench role.
 
     This function has no production-board argument by construction. It owns one un-retried update
     write, then all remaining acceptance is read-only.
@@ -2769,8 +2907,8 @@ def install_bench_target(
     )
     if current_version == target_version:
         fail("bench already names the target version; refusing a redundant update write")
-    if before.get("ota", {}).get("channel") != "dev":
-        fail("bench must already follow the official dev channel")
+    saved_channel = require_saved_channel(before)
+    artifact_feed = official_artifact_feed(target_manifest_url, target_version)
     if not before.get("mqtt", {}).get("connected"):
         fail("bench MQTT must be connected before OTA")
     counters = board_counters(before)
@@ -2781,16 +2919,28 @@ def install_bench_target(
        int(system.get("max_alloc", 0)) < MIN_FINAL_LARGEST_BLOCK:
         fail("bench does not have safe heap before OTA")
 
-    check_generation = wait_for_ota_offer(status_endpoint, target_version, target_sha256)
+    require_official_manifest_snapshot(target_manifest_url, target_manifest_sha256,
+                                      target_source_sha, target_version, target_sha256)
+    check_generation = wait_for_ota_offer(
+        status_endpoint, target_version, target_sha256, expected_channel=saved_channel,
+        preserve_saved_channel=True, **official_feed_override(target_manifest_url),
+    )
+    require_official_manifest_snapshot(target_manifest_url, target_manifest_sha256,
+                                      target_source_sha, target_version, target_sha256)
+    before_write = request_status_deadline(status_endpoint, timeout=HTTP_TIMEOUT_S)
+    validate_identity(before_write, host=host, mac=mac, version=current_version, elf=current_elf)
+    require_saved_channel(before_write, saved_channel)
     transfer: dict[str, Any] = {}
     evidence: dict[str, Any] = {
         "role": BENCH_ROLE, "executed": None, "write_attempted": True,
         "previous_version": current_version, "check_generation": check_generation,
         "ota_download_heap": transfer,
+        "artifact_feed": artifact_feed, "saved_channel": saved_channel,
     }
     journal_checkpoint("bench_write_attempted", test_board=evidence)
     update_generation = post_update_once(
         status_endpoint, check_generation, target_version, target_sha256,
+        expected_channel=saved_channel,
     )
     evidence.update({"executed": True, "write_acknowledged": True,
                      "update_generation": update_generation})
@@ -2801,6 +2951,7 @@ def install_bench_target(
     validate_identity(
         returned, host=host, mac=mac, version=target_version, elf=target_elf,
     )
+    require_saved_channel(returned, saved_channel)
     evidence["target_returned"] = True
     journal_checkpoint("bench_target_returned", test_board=evidence)
     if returned.get("sys", {}).get("reset_reason") != "sw":
@@ -2814,12 +2965,14 @@ def install_bench_target(
     stress = stress_board(
         host=host, mac=mac, version=target_version, elf=target_elf,
         require_x10a=False, require_weather=False,
-        expected_app_sha256=target_sha256, expected_channel="dev", require_pending_image=True,
+        expected_app_sha256=target_sha256, expected_channel=saved_channel, require_pending_image=True,
+        preserve_saved_channel=True, **official_feed_override(target_manifest_url),
     )
     evidence.update({"stress": stress, "stress_passed": True})
     journal_checkpoint("bench_stress_passed", test_board=evidence)
     probation = confirm_bench_probation(
         host=host, mac=mac, version=target_version, elf=target_elf, stress=stress,
+        saved_channel=saved_channel,
     )
     evidence.update({"probation_after": probation, "probation_confirmed": True,
                      "target_health_window_uptime_s": probation["uptime_s"]})
@@ -3990,9 +4143,9 @@ def self_test() -> None:
     fixture = {
         "version": "1.2.3-dev.4",
         "provenance": {"source_sha": source, "app_sha256": app},
-        "builds": [{"chipFamily": "ESP32-S3", "parts": [{"path": "app.bin", "offset": 0x20000}]}],
+        "builds": [{"chipFamily": "ESP32-S3", "parts": [{"path": "daikin-altherma-esp32.bin", "offset": 0x20000}]}],
     }
-    assert validate_manifest(OFFICIAL_MANIFEST_URL, fixture, source, "1.2.3-dev.4", app) == "https://0bu.github.io/daikin-altherma-esp32/dev/app.bin"
+    assert validate_manifest(OFFICIAL_MANIFEST_URL, fixture, source, "1.2.3-dev.4", app) == "https://0bu.github.io/daikin-altherma-esp32/dev/daikin-altherma-esp32.bin"
     compact_manifest = json.dumps(fixture, separators=(",", ":")).encode()
     require_legacy_bench_restore_manifest(compact_manifest, fixture)
     original_limited_request = globals()["request_limited_bytes"]
@@ -4040,7 +4193,7 @@ def self_test() -> None:
     }
     assert validate_release_manifest(
         OFFICIAL_RELEASE_MANIFEST_URL, release_fixture,
-    ) == ("1.2.3", app, "https://0bu.github.io/daikin-altherma-esp32/app.bin", source)
+    ) == ("1.2.3", app, "https://0bu.github.io/daikin-altherma-esp32/daikin-altherma-esp32.bin", source)
     require_release_source_binding("1.2.3", source, app, source)
     require_release_source_binding(
         LEGACY_RELEASE_VERSION, LEGACY_RELEASE_SOURCE_SHA, LEGACY_RELEASE_APP_SHA256,
@@ -5506,19 +5659,24 @@ def main() -> int:
     missing = [name for name, value in required.items() if not value]
     if missing:
         fail(f"missing required arguments: {', '.join(missing)}")
+    artifact_feed = official_artifact_feed(args.manifest_url, args.expected_version)
     ACTIVE_JOURNAL = GateJournal()
     manifest_bytes = request_limited_bytes(
-        cache_busted(args.manifest_url), "official dev manifest",
+        cache_busted(args.manifest_url), "official target manifest",
         LEGACY_BENCH_RESTORE_MANIFEST_MAX_BYTES,
     )
-    manifest = strict_json(manifest_bytes, "official dev manifest")
+    manifest = strict_json(manifest_bytes, "official target manifest")
     if not isinstance(manifest, dict):
         fail("manifest is not a JSON object")
     app_url = validate_manifest(
         args.manifest_url, manifest, args.expected_source_sha, args.expected_version,
         args.expected_app_sha256,
     )
-    require_legacy_bench_restore_manifest(manifest_bytes, manifest)
+    if artifact_feed == "dev":
+        require_legacy_bench_restore_manifest(manifest_bytes, manifest)
+    else:
+        verify_release_source_binding(args.expected_version, args.expected_source_sha,
+                                      args.expected_app_sha256, allow_legacy=False)
     manifest_sha256 = hashlib.sha256(manifest_bytes).hexdigest()
     verify_local_source(args.expected_source_sha)
     binary = request_bytes(cache_busted(app_url), timeout=30)
@@ -5527,7 +5685,7 @@ def main() -> int:
     run_local_gates()
     journal_checkpoint("artifact_verified", artifact={
         "version": args.expected_version, "source_sha": args.expected_source_sha,
-        "app_sha256": args.expected_app_sha256, "elf": elf, "channel": "dev",
+        "app_sha256": args.expected_app_sha256, "elf": elf, "artifact_feed": artifact_feed,
         "release_created": False,
     })
     result = ACTIVE_JOURNAL.receipt
@@ -5547,6 +5705,8 @@ def main() -> int:
             target_version=args.expected_version,
             target_sha256=args.expected_app_sha256,
             target_elf=elf,
+            target_manifest_url=args.manifest_url, target_source_sha=args.expected_source_sha,
+            target_manifest_sha256=manifest_sha256,
         )
         journal_checkpoint("bench_completed", test_board={
             "host": bench["host"], "mac": bench["mac"], **bench_evidence,
@@ -5555,17 +5715,30 @@ def main() -> int:
         print(json.dumps(result, indent=2, sort_keys=True))
         return 0
 
+    release_manifest_url = OFFICIAL_RELEASE_MANIFEST_URL if artifact_feed == "dev" else OFFICIAL_MANIFEST_URL
     release_manifest_bytes = request_limited_bytes(
-        cache_busted(OFFICIAL_RELEASE_MANIFEST_URL), "official release manifest",
+        cache_busted(release_manifest_url), "official excursion manifest",
         LEGACY_BENCH_RESTORE_MANIFEST_MAX_BYTES,
     )
-    release_manifest = strict_json(release_manifest_bytes, "official release manifest")
+    release_manifest = strict_json(release_manifest_bytes, "official excursion manifest")
     if not isinstance(release_manifest, dict):
-        fail("official release manifest is not a JSON object")
-    release_version, release_sha256, release_url, release_source_sha = validate_release_manifest(
-        OFFICIAL_RELEASE_MANIFEST_URL, release_manifest,
-    )
-    verify_release_source_binding(release_version, release_source_sha, release_sha256)
+        fail("official excursion manifest is not a JSON object")
+    if artifact_feed == "dev":
+        release_version, release_sha256, release_url, release_source_sha = validate_release_manifest(
+            OFFICIAL_RELEASE_MANIFEST_URL, release_manifest,
+        )
+        verify_release_source_binding(release_version, release_source_sha, release_sha256)
+    else:
+        release_version = release_manifest.get("version")
+        provenance = release_manifest.get("provenance", {})
+        release_source_sha = provenance.get("source_sha") if isinstance(provenance, dict) else None
+        release_sha256 = provenance.get("app_sha256") if isinstance(provenance, dict) else None
+        if not isinstance(release_version, str) or release_source_sha != args.expected_source_sha or \
+           release_version.split("-dev.")[0] != args.expected_version:
+            fail("stable excursion requires the same-source, same-core official dev writer")
+        release_url = validate_manifest(OFFICIAL_MANIFEST_URL, release_manifest,
+                                        args.expected_source_sha, release_version, release_sha256)
+        require_legacy_bench_restore_manifest(release_manifest_bytes, release_manifest)
     release_binary = request_bytes(cache_busted(release_url), timeout=30)
     release_elf = verify_image(release_binary, release_version, release_sha256)
     verify_http_range_support(release_url, release_binary)
@@ -5576,6 +5749,7 @@ def main() -> int:
     validate_identity(test_before, host=bench["host"], mac=bench["mac"], version=args.expected_version, elf=elf)
     target_health_window = wait_for_bench_health_window(
         bench["host"], bench["mac"], args.expected_version, elf, phase="target",
+        saved_channel=require_saved_channel(test_before),
     )
     full_download_evidence = exercise_bench_full_download(
         host=bench["host"], mac=bench["mac"],
@@ -5583,6 +5757,9 @@ def main() -> int:
         target_sha256=args.expected_app_sha256, target_manifest_sha256=manifest_sha256,
         target_elf=elf, release_version=release_version, release_sha256=release_sha256,
         release_elf=release_elf,
+        release_source_sha=release_source_sha,
+        release_manifest_sha256=hashlib.sha256(release_manifest_bytes).hexdigest(),
+        target_manifest_url=args.manifest_url,
     )
     # The restore owns the cold pending-image pressure and confirmation. Repeating stress here
     # would measure a warmed, already confirmed boot and can no longer cover probation.
@@ -5609,25 +5786,42 @@ def main() -> int:
         production_before, host=production["host"], mac=production["mac"],
         version=args.expected_current_version, elf=str(production_before.get("app_elf_sha256", "")),
     )
+    saved_channel = require_saved_channel(production_before)
     production_before = wait_for_production_promotion_readiness(
         production_status_endpoint, production_before,
         host=production["host"], mac=production["mac"],
         version=args.expected_current_version,
         elf=str(production_before.get("app_elf_sha256", "")),
     )
+    require_saved_channel(production_before, saved_channel)
+    require_official_manifest_snapshot(args.manifest_url, manifest_sha256,
+                                      args.expected_source_sha, args.expected_version,
+                                      args.expected_app_sha256)
     check_generation = wait_for_ota_offer(
         production_status_endpoint, args.expected_version, args.expected_app_sha256,
+        expected_channel=saved_channel, preserve_saved_channel=True,
+        **official_feed_override(args.manifest_url),
     )
+    require_official_manifest_snapshot(args.manifest_url, manifest_sha256,
+                                      args.expected_source_sha, args.expected_version,
+                                      args.expected_app_sha256)
+    before_write = request_status_deadline(production_status_endpoint, timeout=HTTP_TIMEOUT_S)
+    validate_identity(before_write, host=production["host"], mac=production["mac"],
+                      version=args.expected_current_version,
+                      elf=str(production_before.get("app_elf_sha256", "")))
+    require_saved_channel(before_write, saved_channel)
     production_transfer: dict[str, Any] = {}
     journal_checkpoint("production_write_attempted", production={
         "executed": None, "write_attempted": True, "role": PRODUCTION_ROLE,
         "host": production["host"], "mac": production["mac"],
         "previous_version": args.expected_current_version, "check_generation": check_generation,
         "ota_download_heap": production_transfer,
+        "artifact_feed": artifact_feed, "saved_channel": saved_channel,
     })
     update_generation = post_update_once(
         production_status_endpoint, check_generation,
         args.expected_version, args.expected_app_sha256,
+        expected_channel=saved_channel,
     )
     journal_checkpoint("production_write_acknowledged", production={
         "executed": True, "write_acknowledged": True, "update_generation": update_generation,
@@ -5637,6 +5831,7 @@ def main() -> int:
         production_transfer,
     )
     validate_identity(returned, host=production["host"], mac=production["mac"], version=args.expected_version, elf=elf)
+    require_saved_channel(returned, saved_channel)
     journal_checkpoint("production_target_returned", production={"target_returned": True})
     require_ota_transfer_evidence(
         production["host"], production_transfer, phase="production target",
@@ -5647,7 +5842,8 @@ def main() -> int:
     production_evidence = stress_board(
         host=production["host"], mac=production["mac"], version=args.expected_version, elf=elf,
         require_x10a=True, require_weather=True,
-        expected_app_sha256=args.expected_app_sha256, expected_channel="dev",
+        expected_app_sha256=args.expected_app_sha256, expected_channel=saved_channel,
+        preserve_saved_channel=True, **official_feed_override(args.manifest_url),
     )
     journal_checkpoint("production_stress_passed", production={
         "stress_passed": True, "stress": production_evidence,
@@ -5658,6 +5854,7 @@ def main() -> int:
         final_status, host=production["host"], mac=production["mac"],
         version=args.expected_version, elf=elf,
     )
+    require_saved_channel(final_status, saved_channel)
     retained = verify_retained_x10a(final_status)
     journal_checkpoint("production_retained_passed", production={
         "retained_passed": True, "retained_x10a": retained,
