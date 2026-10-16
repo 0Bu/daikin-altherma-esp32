@@ -254,7 +254,7 @@ OTA reload adoption and stable narrow-row interaction.
 | `run-browser-render-tests.sh` | Assembled production page in real Chrome at 320/1200 px across shipped locales; overflow, console, native accessibility tree, keyboard, Escape and reduced motion |
 | `run-ui-gif-audit.sh` | Recording fingerprint, frame/timing and GIF/stamp currency; stale or unverifiable footage blocks merge |
 
-Localization currently binds 894 keys across thirteen languages, each locale's 32 KiB gzip cap and
+Localization binds the complete key catalog across thirteen languages, each locale's 32 KiB gzip cap and
 the 283 KiB aggregate guard. Native Altherma 4 limits remain visible in standalone, paired and
 replacement readings, including unchanged values with changed definition metadata. The browser
 matrix performs 390 value disclosures and 104 schematic-inspector pointer clicks across locales and

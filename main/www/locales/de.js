@@ -1,4 +1,4 @@
-// translation-source: 7480385d29565e389fed9481d6e1b12d6ed936d5931d38c0113cd63cd42a0341
+// translation-source: 6a7c8bdd68e0dbde1e916efab20768c5704a2a988360239d3ab300b76d2039aa
 I18N.de = localeValues([
   /* sys.nodata */ "Keine Daten",
   /* sys.unreachable */ "Nicht erreichbar",
@@ -29,6 +29,8 @@ I18N.de = localeValues([
   /* sys.fault_line */ (c) => "Störung · " + c + " — Daikin-Fehlercode prüfen.",
   /* sys.warning_line */ (c) => "Warnung · " + c + " — Wärmepumpe prüfen.",
   /* sys.polled */ (s) => `vor ${s}s abgefragt`,
+  /* config.unreadable_title */ "Diensteinstellungen nicht lesbar",
+  /* config.unreadable_meta */ "Diese Firmware konnte die gespeicherten Diensteinstellungen nicht lesen. Sie nutzt Ersatzwerte und hat die gespeicherte Kopie nicht ersetzt. Eine kompatible neuere Firmware kann sie möglicherweise wiederherstellen. Erfolgreiches Speichern von Diensteinstellungen ersetzt sie; nur X10A-Pins oder Protokoll zu speichern nicht.",
   /* recovery.title */ "Wiederherstellungsmodus",
   /* recovery.meta_heap */ "Dem Gerät ist wiederholt der Speicher ausgegangen, es hat sich daraufhin selbst neu gestartet. Es läuft jetzt ohne Verbindung zur Wärmepumpe und ohne MQTT, damit die Weboberfläche erreichbar bleibt. Die Konfiguration ist höchstwahrscheinlich in Ordnung — installiere unter Einstellungen eine neuere Firmware. Ein Neustart durch Trennen der Stromversorgung startet alle Dienste erneut.",
   /* recovery.meta */ "Das Gerät wurde mehrfach neu gestartet und ist deshalb im Wiederherstellungsmodus. Die Verbindung zur Wärmepumpe und MQTT sind pausiert. Prüfe die Konfiguration — besonders die RX/TX-Pins auf der Protokoll-Karte in den Einstellungen — und starte das Gerät danach neu.",
@@ -546,6 +548,7 @@ I18N.de = localeValues([
   /* dyn.state_homehub_disabled */ "Diagnose aus — HomeHub deaktiviert",
   /* dyn.state_no_broker */ "Zeichnet nicht auf — kein MQTT-Broker",
   /* dyn.state_safe_mode */ "Zeichnet nicht auf — Sicherheitsmodus",
+  /* dyn.state_stale */ "Keine aktuelle Auswertung",
   /* dyn.state_inactive */ "Zeichnet nicht auf — Erfassung läuft nicht",
   /* dyn.room_off */ "Raumthermostat ausgeschaltet",
   /* dyn.room_not_heating */ "Raumthermostat nicht auf Heizen",
@@ -588,6 +591,7 @@ I18N.de = localeValues([
   /* dyn.state_help_blocked */ "Ein benötigter Eingang fehlt, deshalb wird nichts erfasst. Sobald er zurückkommt, läuft die Aufzeichnung weiter; veraltete oder mehrdeutige Messwerte werden nie übernommen.",
   /* dyn.state_help_room */ "Der Raumwert erreicht das Gerät, liefert derzeit aber keine gültige Abweichung vom Sollwert. Erst wenn die Quelle wieder verwertbar ist, wird weiter erfasst.",
   /* dyn.state_help_setup */ "Die Diagnose startet, sobald eine MQTT-Raumquelle mit Sollwert gespeichert ist. Die Prognose liefert optionale Vergleichswerte; ein Standort muss nicht angegeben werden.",
+  /* dyn.state_help_stale */ "Diese Prüfung wurde seit einiger Zeit nicht ausgeführt. Ihre aktuellen Eingaben sind unbekannt; das letzte Ereignis bleibt erhalten. Das weist keinen Broker- oder Sensorfehler nach.",
   /* dyn.state_help_inactive */ "Die Quellen sind konfiguriert, aber die MQTT-Erfassung läuft nicht, daher wird nichts ausgewertet. Die Einstellungen bleiben erhalten; die Aufzeichnung setzt wieder ein, sobald die Erfassung läuft.",
   /* dyn.state_help_no_broker */ "Eine Raumquelle ist gespeichert, aber die Diagnose liest sie über MQTT, und es ist kein Broker konfiguriert. Broker in der Verbindungen-Karte eintragen; die gespeicherte Raumquelle bleibt erhalten und die Aufzeichnung startet von selbst.",
   /* dyn.state_help_setup_homehub */ "Die Diagnose braucht den HomeHub, um zu erfahren, wann die Anlage wirklich heizt; ohne ihn lässt sich ein Heizfenster nicht von Warmwasser oder Stillstand unterscheiden. Die HomeHub-Adresse steht in der Protokoll-Karte.",

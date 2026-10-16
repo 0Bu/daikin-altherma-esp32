@@ -193,6 +193,10 @@ set_source_files_properties(mqtt_ha.cpp PROPERTIES COMPILE_OPTIONS
 set(APP_JS_MANIFEST "${CMAKE_CURRENT_SOURCE_DIR}/www/app.sources")
 set(UI_MINIFIER "${CMAKE_CURRENT_SOURCE_DIR}/../tools/web_asset/minify_and_gzip.py")
 set(UI_LOCALE_MINIFIER "${CMAKE_CURRENT_SOURCE_DIR}/../tools/web_asset/minify_js_and_gzip.py")
+set(UI_ZOPFLI_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../tools/web_asset")
+file(GLOB UI_ZOPFLI_SOURCES CONFIGURE_DEPENDS
+    "${UI_ZOPFLI_ROOT}/vendor/zopfli/*.c"
+    "${UI_ZOPFLI_ROOT}/vendor/zopfli/*.h")
 set(UI_MINIFIER_VENDOR
     "${CMAKE_CURRENT_SOURCE_DIR}/../tools/web_asset/vendor/rjsmin.py"
     "${CMAKE_CURRENT_SOURCE_DIR}/../tools/web_asset/vendor/rcssmin.py")
@@ -230,11 +234,15 @@ add_custom_command(
     COMMAND ${PYTHON} "${UI_MINIFIER}"
             --input "${CMAKE_CURRENT_BINARY_DIR}/index_inlined.html"
             --output "${CMAKE_CURRENT_BINARY_DIR}/index.html.gz"
-            --gzip-memory-level 7
+            --gzip-encoder zopfli --zopfli-iterations 5
             --max-gzip-bytes ${UI_GZIP_MAX_BYTES}
     DEPENDS "${CMAKE_CURRENT_BINARY_DIR}/index_inlined.html"
             "${UI_MINIFIER}"
             ${UI_MINIFIER_VENDOR}
+            "${UI_ZOPFLI_ROOT}/zopfli_gzip.py"
+            "${UI_ZOPFLI_ROOT}/zopfli_gzip.c"
+            "${UI_ZOPFLI_ROOT}/vendor/zopfli/UPSTREAM.json"
+            ${UI_ZOPFLI_SOURCES}
     COMMENT "Minifying and gzipping web UI (limit: ${UI_GZIP_MAX_BYTES} bytes)"
     VERBATIM)
 add_custom_target(gen_index_gz DEPENDS "${CMAKE_CURRENT_BINARY_DIR}/index.html.gz")

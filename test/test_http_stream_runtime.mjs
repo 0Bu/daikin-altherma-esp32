@@ -123,12 +123,28 @@ const mutations=[
     before:"if (u >= 0x80) {",after:"if (false) {"},
   {name:"original-growing-scan-body",special:"legacy-scan",scenario:"scan_completed_oracles"},
   {name:"scan-boundary-bypass",special:"scan-boundary",scenario:"scan_failure_boundaries"},
+  {name:"omitted-config-unreadable",file:"status",scenario:"config_unreadable_status",
+    before:'if (config_stored_blob_unreadable()) j += ",\\\"config_unreadable\\\":true";',
+    after:"/* mutation: omit stored configuration warning */"},
+  {name:"inverted-config-unreadable",file:"status",scenario:"config_unreadable_status",
+    before:'if (config_stored_blob_unreadable()) j += ",\\\"config_unreadable\\\":true";',
+    after:'if (!config_stored_blob_unreadable()) j += ",\\\"config_unreadable\\\":true";'},
 ];
 try {
   const compiler=execute(cxx,["--version"]).stdout.trim();
   const baseline=execute(compile("production"),[]);
-  assert.match(baseline.stdout,/PASS total=14\b/);
+  const caseCount=Number(baseline.stdout.match(/^PASS total=(\d+)$/m)?.[1]);
+  assert.equal(caseCount,15);
+  assert.equal(caseCount,[...baseline.stdout.matchAll(/^PASS (?!total=)\S+$/gm)].length);
   const wires=[]; const decoder=new TextDecoder("utf-8",{fatal:true});
+  const configCases=new Map([
+    ["config-readable-plain",{unreadable:false,redact:false,absent:false}],
+    ["config-readable-redacted",{unreadable:false,redact:true,absent:false}],
+    ["config-unreadable-plain",{unreadable:true,redact:false,absent:false}],
+    ["config-unreadable-redacted",{unreadable:true,redact:true,absent:false}],
+    ["config-absent-plain",{unreadable:false,redact:false,absent:true}],
+    ["config-absent-redacted",{unreadable:false,redact:true,absent:true}],
+  ]);
   for(const line of baseline.stdout.trim().split("\n")) {
     if(!line.startsWith("WIRE ")) {console.log(line);continue;}
     const [,name,type,hex]=line.match(/^WIRE (\S+) (json|text) ([0-9a-f]*)$/)||[];
@@ -139,6 +155,14 @@ try {
       assert.equal(doc.version,"fixture-version"); assert.equal(doc.platform,"esp32s3");
       assert.equal(doc.wifi.ssid,'Café "quoted"\\line\n'); assert.equal(doc.wifi.rssi,-42);
       assert.equal(doc.sys.stack_min_free_bytes.httpd,null);
+      assert.equal(Object.hasOwn(doc.sys,"config_unreadable"),false);
+    }
+    if(configCases.has(name)) {
+      const expected=configCases.get(name);
+      assert.equal(Object.hasOwn(doc.sys,"config_unreadable"),expected.unreadable,name);
+      if(expected.unreadable) assert.equal(doc.sys.config_unreadable,true,name);
+      assert.equal(doc.wifi.ssid,expected.absent?"":expected.redact?"<redacted>":'Café "quoted"\\line\n',name);
+      configCases.delete(name);
     }
     if(name==="/values") {
       assert.equal(doc.values.length,129); assert.equal(doc.values[0].value,"0");
@@ -166,6 +190,11 @@ try {
       assert.equal(doc.modbus[2].binary,true);assert.deepEqual(doc.modbus.map(row=>row.off),[22,40,4,40]);
     }
     if(name==="framed-values") {assert.equal(doc.result.values.length,129);assert.equal(doc.result.values[0].dwell_s,5);}
+    if(name==="framed-status-redacted") {
+      assert.deepEqual(Object.keys(doc),["result"]);
+      assert.equal(doc.result.sys.config_unreadable,true);
+      assert.equal(doc.result.wifi.ssid,"<redacted>");
+    }
     if(name==="scan-empty") assert.deepEqual(doc,{networks:[]});
     if(name==="scan-maximum-invalid") {
       assert.deepEqual(Object.keys(doc),["networks"]);
@@ -180,6 +209,7 @@ try {
     if(name==="scan-unicode-escape") assert.deepEqual(doc,{networks:[{ssid:"Café \"quoted\"\\line\n",rssi:-42}]});
     wires.push({name,type,hex});
   }
+  assert.equal(configCases.size,0,"all plain/redacted stored and absent configuration cases must run");
   const controls=[];
   if(!process.argv.includes("--no-mutations")) for(const mutation of mutations) {
     const result=execute(compile(mutation.name,mutation),[mutation.scenario],false);
@@ -222,5 +252,5 @@ try {
       "Dwell producer and batch-reader execute; UART poll/cache provider is a controlled immutable-snapshot adapter.",
       "Source/header hashes bind local evidence. Hardware scheduling, target heap/stack and source truth are separate."]};
   if(process.env.HTTP_STREAM_RECORD) fs.writeFileSync(process.env.HTTP_STREAM_RECORD,JSON.stringify(record,null,2)+"\n");
-  console.log(`production HTTP stream runtime: 14 cases, ${controls.length} compiling negative controls`);
+  console.log(`production HTTP stream runtime: ${caseCount} cases, ${controls.length} compiling negative controls`);
 } finally {fs.rmSync(temporary,{recursive:true,force:true});}

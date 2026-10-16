@@ -343,13 +343,28 @@ def main() -> int:
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--html-output", type=Path)
     parser.add_argument("--max-gzip-bytes", required=True, type=positive_int)
+    parser.add_argument("--gzip-encoder", choices=("zlib", "zopfli"), default="zlib")
+    parser.add_argument("--zopfli-iterations", type=int, choices=(5,))
     parser.add_argument("--gzip-memory-level", type=int, choices=range(1, 10))
     args = parser.parse_args()
+    if args.gzip_encoder == "zopfli" and (
+            args.zopfli_iterations != 5 or args.gzip_memory_level is not None):
+        parser.error("Zopfli requires --zopfli-iterations 5 and no --gzip-memory-level")
+    if args.gzip_encoder != "zopfli" and args.zopfli_iterations is not None:
+        parser.error("--zopfli-iterations requires --gzip-encoder zopfli")
 
     source = args.input.read_text(encoding="utf-8")
     minified = minify_page(source)
     payload = minified.encode("utf-8")
-    if args.gzip_memory_level is None:
+    if args.gzip_encoder == "zopfli":
+        # Locale minification imports this module without needing a native compiler.
+        from zopfli_gzip import compress
+        try:
+            compressed = compress(payload, args.zopfli_iterations)
+        except (OSError, RuntimeError) as error:
+            print(f"dashboard gzip: {error}", file=sys.stderr)
+            return 2
+    elif args.gzip_memory_level is None:
         compressed = gzip.compress(payload, compresslevel=9, mtime=0)
     else:
         compressor = zlib.compressobj(9, zlib.DEFLATED, 31, args.gzip_memory_level)

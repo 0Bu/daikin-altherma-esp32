@@ -1,4 +1,4 @@
-// translation-source: 7480385d29565e389fed9481d6e1b12d6ed936d5931d38c0113cd63cd42a0341
+// translation-source: 6a7c8bdd68e0dbde1e916efab20768c5704a2a988360239d3ab300b76d2039aa
 I18N.es = localeValues([
   /* sys.nodata */ "Sin datos",
   /* sys.unreachable */ "No accesible",
@@ -29,6 +29,8 @@ I18N.es = localeValues([
   /* sys.fault_line */ (c) => "Fallo · " + c + " — comprueba el código de fallo de Daikin.",
   /* sys.warning_line */ (c) => "Aviso · " + c + " — comprueba la bomba de calor.",
   /* sys.polled */ (s) => `Consultado hace ${s} s`,
+  /* config.unreadable_title */ "Ajustes de servicios ilegibles",
+  /* config.unreadable_meta */ "Esta versión no pudo leer los ajustes de servicios guardados. Usa ajustes de reserva y no ha sustituido la copia guardada. Un firmware compatible más reciente podría restaurarla. Guardar correctamente los ajustes de servicios la sustituye; guardar solo pines X10A o protocolo no.",
   /* recovery.title */ "Modo de recuperación",
   /* recovery.meta_heap */ "El dispositivo se quedó sin memoria repetidamente y se reinició. Ahora funciona con la conexión a la bomba de calor y MQTT desactivados para que la interfaz web siga accesible. Es muy probable que la configuración sea correcta: instala una versión de firmware más reciente en Ajustes. Un ciclo de alimentación vuelve a intentar iniciar todos los componentes.",
   /* recovery.meta */ "El dispositivo se reinició repetidamente y entró en modo de recuperación. La comunicación con la bomba de calor y MQTT está en pausa. Comprueba la configuración, especialmente los pines RX/TX de la tarjeta Protocolo en Ajustes, y reinicia el dispositivo.",
@@ -546,6 +548,7 @@ I18N.es = localeValues([
   /* dyn.state_homehub_disabled */ "Diagnóstico apagado — HomeHub desactivado",
   /* dyn.state_no_broker */ "Sin registrar — no hay bróker MQTT",
   /* dyn.state_safe_mode */ "Sin registrar — modo seguro",
+  /* dyn.state_stale */ "Sin evaluación reciente",
   /* dyn.state_inactive */ "Sin registrar — muestreador detenido",
   /* dyn.room_off */ "Termostato de habitación apagado",
   /* dyn.room_not_heating */ "El termostato de habitación no está en calefacción",
@@ -588,6 +591,7 @@ I18N.es = localeValues([
   /* dyn.state_help_blocked */ "Falta una entrada necesaria, por lo que no se registra nada. El registro se reanuda cuando vuelve; nunca se muestrean datos antiguos o ambiguos.",
   /* dyn.state_help_room */ "La lectura de habitación llega al dispositivo, pero ahora no puede proporcionar una desviación válida respecto al objetivo. No se genera ninguna muestra hasta que la fuente vuelva a ser utilizable.",
   /* dyn.state_help_setup */ "El diagnóstico comienza cuando se guarda una fuente MQTT de habitación con un objetivo. La previsión proporciona valores comparativos opcionales; no es necesario revelar la ubicación.",
+  /* dyn.state_help_stale */ "Esta comprobación no se ha ejecutado recientemente. Sus datos actuales son desconocidos; se conserva el último evento. Esto no identifica un fallo del bróker ni de un sensor.",
   /* dyn.state_help_inactive */ "Las fuentes están configuradas, pero el muestreador MQTT no funciona, así que no se evalúa nada. La configuración se conserva; el registro se reanuda cuando vuelva a funcionar.",
   /* dyn.state_help_no_broker */ "Hay una fuente de habitación guardada, pero el diagnóstico la lee mediante MQTT y no hay ningún bróker configurado. Configura el bróker en la tarjeta Conexiones; se conserva la fuente guardada y el registro comienza por sí solo.",
   /* dyn.state_help_setup_homehub */ "El diagnóstico necesita que HomeHub indique cuándo la instalación está calentando realmente; sin él no puede distinguir una ventana de calefacción del agua caliente o una parada. Configura la dirección de HomeHub en la tarjeta Protocolo.",

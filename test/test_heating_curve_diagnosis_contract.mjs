@@ -141,6 +141,15 @@ const telemetryPublish = task.indexOf("publish_heating_curve_telemetry(ref_confi
 assert.ok(heartbeatPublish > publishGate && telemetryPublish > heartbeatPublish,
   "technical heartbeat and bounded heating-curve telemetry must share the independent transport cadence");
 
+const statusGetter = mqtt.slice(mqtt.indexOf("logic::HeatingCurveSnapshot heating_curve_status()"),
+  mqtt.indexOf("void mqtt_reference_reconfigure()"));
+assert.match(statusGetter, /snapshot_at\(esp_timer_get_time\(\)\s*\/\s*1000\)/,
+  "all diagnosis readers must age the same snapshot against monotonic evaluation time");
+assert.doesNotMatch(statusGetter, /\.evaluate\(/,
+  "a status read must neither evaluate inputs nor create a heating-curve event");
+assert.match(mqtt, /const logic::HeatingCurveSnapshot diagnosis = heating_curve_status\(\);/,
+  "MQTT must publish the same age-projected diagnosis as HTTP");
+
 const heartbeat = read("main/logic/heartbeat.hpp");
 assert.doesNotMatch(heartbeat, /room_(?:source|temperature|setpoint|control|error|age|messages|rejections)|heating_curve_/,
   "room-source and heating-curve domain telemetry must stay out of the board/link heartbeat");

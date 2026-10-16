@@ -80,6 +80,32 @@ run_check
 check_status "generated definitions stay out of the first-party format gate" 0 "$?"
 
 seed_good
+mkdir -p "$TMP/tools/web_asset/vendor/zopfli"
+printf 'int upstream() {\n  return 1;\n}\n' >"$TMP/tools/web_asset/vendor/zopfli/upstream.c"
+python3 - "$TMP/tools/web_asset/vendor/zopfli" <<'PY'
+import hashlib, json, pathlib, sys
+directory = pathlib.Path(sys.argv[1])
+source = directory / "upstream.c"
+(directory / "UPSTREAM.json").write_text(json.dumps({
+    "files": {source.name: hashlib.sha256(source.read_bytes()).hexdigest()}
+}))
+PY
+run_check
+check_status "hash-pinned upstream Zopfli formatting is preserved" 0 "$?"
+printf 'int added() {\n  return 2;\n}\n' >>"$TMP/tools/web_asset/vendor/zopfli/upstream.c"
+run_check
+check_status "editing a pinned source restores first-party formatting checks" 1 "$?"
+rm "$TMP/tools/web_asset/vendor/zopfli/upstream.c"
+printf 'int added() {\n  return 2;\n}\n' >"$TMP/tools/web_asset/vendor/zopfli/unlisted.c"
+run_check
+check_status "unlisted code under the vendor path is not exempt" 1 "$?"
+rm "$TMP/tools/web_asset/vendor/zopfli/unlisted.c"
+printf 'int adapter() {\n  return 2;\n}\n' >"$TMP/tools/web_asset/adapter.c"
+run_check
+check_status "the adjacent first-party encoder adapter remains checked" 1 "$?"
+rm -rf "$TMP/tools/web_asset"
+
+seed_good
 printf 'int audit() {\treturn 1; }\n' >"$TMP/tools/audit/good.cpp"
 run_check
 check_status "first-party C++ tooling is inside the format gate" 1 "$?"
