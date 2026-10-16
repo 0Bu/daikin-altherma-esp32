@@ -180,6 +180,8 @@ for label, transfer_sample in cases:
         "wait_for_production_promotion_readiness": lambda endpoint, before, **k: before,
         "wait_for_ota_offer": lambda *a, **k: 7, "post_update_once": post_once,
         "wait_for_new_firmware": wait, "require_ota_transfer_evidence": verify,
+        "confirm_production_probation": lambda **k: (
+            {"image_state": "valid", "rollback_pending": False, "uptime_s": 181}, target_status),
         "verify_retained_x10a": lambda *a: {"rows": 1},
     }
     output = io.StringIO()
@@ -573,6 +575,8 @@ for failing_phase in (None, "ack lost", "compact ack lost", "return", "stress", 
         "wait_for_production_promotion_readiness": lambda endpoint, before, **k: before,
         "wait_for_ota_offer": lambda *a, **k: 7, "post_update_once": post, "wait_for_new_firmware": wait,
         "verify_retained_x10a": retained}
+    patches["confirm_production_probation"] = lambda **k: (
+        {"image_state": "valid", "rollback_pending": False, "uptime_s": 194}, board())
     output, errors = io.StringIO(), io.StringIO()
     journal = None
     try:
@@ -1128,6 +1132,24 @@ with patch.dict(ns, {"run_checked": lambda *a, **k: "d" * 40 + "\trefs/tags/v1.0
         g["LEGACY_RELEASE_SOURCE_SHA"], g["LEGACY_RELEASE_APP_SHA256"], allow_legacy=False),
         "historical excursion exception as stable target")
 
+# Exercise the real subprocess helper: the remote lookup has one finite whole-process deadline,
+# maps timeout to GateError and performs no retry. Existing local subprocess calls stay unbounded.
+calls = []
+def stalled_tag(argv, **kwargs):
+    calls.append((argv, kwargs))
+    check(kwargs.get("timeout") == g["RELEASE_TAG_TIMEOUT_S"] and
+          0 < kwargs.get("timeout", 0) <= 60, "remote release tag lookup lost its finite deadline")
+    raise ns["subprocess"].TimeoutExpired(argv, kwargs["timeout"])
+with patch.object(ns["subprocess"], "run", stalled_tag):
+    rejected(lambda: g["verify_release_source_binding"](target, source, app, allow_legacy=False),
+             "remote tag process timeout")
+check(len(calls) == 1, "remote tag timeout retried the lookup")
+def local_command(argv, **kwargs):
+    check("timeout" not in kwargs, "optional remote timeout changed existing local helper behavior")
+    return SimpleNamespace(returncode=0, stdout="fixture", stderr="")
+with patch.object(ns["subprocess"], "run", local_command):
+    check(g["run_checked"](["git", "rev-parse", "HEAD"], capture=True) == "fixture", "local helper result")
+
 counters = {key: 0 for key in ("heap_restarts", "mqtt_skipped", "poll_skipped", "crc_err", "timeout_err")}
 transfer = {"state": "done", "heap_min_free_bytes": 32768,
             "heap_min_largest_block_bytes": 16384, "ota_stack_min_free_bytes": 1536}
@@ -1364,6 +1386,178 @@ const stableDelivery = spawnSync("python3", [
 ], { encoding: "utf8" });
 assert.equal(stableDelivery.status, 0,
   `stable delivery must bind feeds, source, preference, writer evidence and role order: ${stableDelivery.stderr}`);
+
+// Execute dev and stable production main paths through the real shared probation verifier. A
+// successful canary cannot replace an explicit valid/disarmed image bracketed by fresh full status.
+const productionProbationProbe = String.raw`
+import contextlib, hashlib, io, json, runpy, shutil, sys
+from types import SimpleNamespace
+from urllib.parse import parse_qs, urlparse
+from unittest.mock import patch
+g = runpy.run_path(sys.argv[1], run_name="production_probation_probe")
+ns = g["main"].__globals__
+root, dev = g["OFFICIAL_RELEASE_MANIFEST_URL"], g["OFFICIAL_MANIFEST_URL"]
+source, app, other_app = "b" * 40, "a" * 64, "c" * 64
+elf, old_elf, writer = "abcdef123", "123abcdef", "1.9.9-dev.1"
+bench_mac, prod_mac = "02:00:00:00:00:01", "02:00:00:00:00:02"
+counters = {key: 0 for key in ("heap_restarts", "mqtt_skipped", "poll_skipped", "crc_err", "timeout_err")}
+def check(condition, label): assert condition, "PRODUCTION_PROBATION: " + label
+def manifest(version, sha):
+    return {"version": version, "provenance": {"source_sha": source, "app_sha256": sha},
+            "builds": [{"chipFamily": "ESP32-S3", "parts": [
+                {"path": "daikin-altherma-esp32.bin", "offset": 0x20000}]}]}
+for feed in (dev, root):
+ for saved in ("dev", "release"):
+  for defect in (None, "pending then valid", "pending forever", "unknown", "missing image", "missing pending",
+      "valid armed", "pending disarmed", "reboot", "heap_restarts", "mqtt_skipped", "poll_skipped",
+      "crc_err", "timeout regression", "timeout excess", "timeout boundary", "mac", "version", "elf", "channel",
+      "mqtt", "x10a", "values", "free_heap", "largest_block", "ack lost", "tag timeout"):
+    target = "2.0.0-dev.5" if feed == dev else "2.0.0"
+    documents = {feed: json.dumps(manifest(target, app), separators=(",", ":")).encode()}
+    other_feed = root if feed == dev else dev
+    other_version = "2.0.0" if feed == dev else "2.0.0-dev.5"
+    documents[other_feed] = json.dumps(manifest(other_version, other_app), separators=(",", ":")).encode()
+    events, writes, sequence, reads = [], [], [], []
+    virtual = [0.0]
+    def board(version=target, image=elf, uptime=13, mac=prod_mac):
+        return {"version": version, "app_elf_sha256": image, "uptime_s": uptime,
+            "wifi": {"mac": mac, "connected": True, "rolled_back": False}, "ota": {"channel": saved},
+            "sys": {"free_heap": 65536, "max_alloc": 32768, "reset_reason": "sw", **counters},
+            "mqtt": {"connected": True}, "hp": {"connected": True, "values": 129,
+                                                 "crc_err": 0, "timeout_err": 5}}
+    baseline = {**counters, "timeout_err": 5}
+    stress = {"uptime": [13, 193], "counters_after": baseline}
+    args = SimpleNamespace(self_test=False, release_hil=False, execute=True, confirm_release_hil=None,
+        artifact_manifest=None, artifact_app=None, install_bench=False, confirm_bench=None,
+        confirm_production="production", expected_current_version=writer, manifest_url=feed,
+        expected_source_sha=source, expected_version=target, expected_app_sha256=app)
+    def verify_tag(*args, **kwargs):
+        if defect == "tag timeout": raise g["GateError"]("fixture source lookup timeout")
+    def read_manifest(url, *args, **kwargs):
+        return documents[url.split("?")[0]]
+    def bench_cycle(**kwargs):
+        events.append("bench passed")
+        return {"cold_stress": stress}
+    def resolve(host):
+        reads.append(host)
+        check(host == "production.invalid" and "bench passed" in events,
+              "production resolved before bench proof")
+        return host
+    def full_status(endpoint, *, timeout):
+        check(endpoint == "production.invalid" and 0 < timeout <= g["HTTP_TIMEOUT_S"], "unbounded/wrong status request")
+        if "returned" not in events: return board(writer, old_elf)
+        if "stress passed" not in events: return board()
+        after_image = bool(sequence) and sequence[-1] == "image"
+        sequence.append("status")
+        status = board(uptime=206 if after_image else 194)
+        if after_image:
+            if defect == "reboot": status["uptime_s"] = 3
+            if defect in ("heap_restarts", "mqtt_skipped", "poll_skipped"): status["sys"][defect] = 1
+            if defect == "crc_err": status["hp"]["crc_err"] = 1
+            if defect == "timeout regression": status["hp"]["timeout_err"] = 4
+            if defect == "timeout excess": status["hp"]["timeout_err"] = 9
+            if defect == "timeout boundary": status["hp"]["timeout_err"] = 8
+            if defect == "mac": status["wifi"]["mac"] = bench_mac
+            if defect == "version": status["version"] = writer
+            if defect == "elf": status["app_elf_sha256"] = old_elf
+            if defect == "channel": status["ota"]["channel"] = "other"
+            if defect == "mqtt": status["mqtt"]["connected"] = False
+            if defect == "x10a": status["hp"]["connected"] = False
+            if defect == "values": status["hp"]["values"] = 0
+            if defect == "free_heap": status["sys"]["free_heap"] = g["MIN_FINAL_FREE_HEAP"] - 1
+            if defect == "largest_block": status["sys"]["max_alloc"] = g["MIN_FINAL_LARGEST_BLOCK"] - 1
+        return status
+    def offer(endpoint, version, sha, **kwargs):
+        check((endpoint, version, sha) == ("production.invalid", target, app) and
+              kwargs["expected_channel"] == saved and kwargs["preserve_saved_channel"] is True and
+              kwargs["hil_manifest_url"] == feed, "production offer lost feed/preference binding")
+        return 7
+    def json_request(endpoint, route, *, method="GET", **kwargs):
+        check(endpoint == "production.invalid", "probation contacted another endpoint")
+        if route.startswith("/ota/update?"):
+            check(method == "POST" and ns["ACTIVE_JOURNAL"].phases[-1] == "production_write_attempted",
+                  "production write omitted durable attempt")
+            query = parse_qs(urlparse(route).query)
+            check(query == {"after": ["7"], "channel": [saved], "version": [target], "sha256": [app]},
+                  "production POST lost exact lease")
+            writes.append(query)
+            if defect == "ack lost": raise OSError("fixture uncertain update acknowledgement")
+            return {"ok": True, "generation": 8}
+        check(route == "/ota/status" and method == "GET", "probation used a mutating/noncompact route")
+        sequence.append("image")
+        image = {"image_state": "valid", "rollback_pending": False}
+        if defect == "pending forever" or (defect == "pending then valid" and sequence.count("image") == 1):
+            image = {"image_state": "pending_verify", "rollback_pending": True}
+        if defect == "unknown": image["image_state"] = "unknown"
+        if defect == "missing image": image.pop("image_state")
+        if defect == "missing pending": image.pop("rollback_pending")
+        if defect == "valid armed": image["rollback_pending"] = True
+        if defect == "pending disarmed": image = {"image_state": "pending_verify", "rollback_pending": False}
+        return image
+    def returned(host, version, image, endpoint, evidence):
+        g["record_ota_transfer_evidence"]({"state": "done", "heap_min_free_bytes": 32768,
+            "heap_min_largest_block_bytes": 16384, "ota_stack_min_free_bytes": 1536}, evidence)
+        events.append("returned")
+        return board()
+    def canary(**kwargs):
+        check(kwargs["require_x10a"] is True and kwargs["require_weather"] is True and
+              kwargs["expected_channel"] == saved and kwargs["hil_manifest_url"] == feed,
+              "production canary weakened liveness/feed requirements")
+        events.append("stress passed")
+        return stress
+    def retained(status):
+        check(sequence[-3:] == ["status", "image", "status"], "retained check preceded bracketed valid image")
+        check(ns["ACTIVE_JOURNAL"].phases[-1] == "production_probation_confirmed" and
+              ns["ACTIVE_JOURNAL"].receipt["production"]["probation_after"]["image_state"] == "valid",
+              "valid/disarmed probation was not durable before retained acceptance")
+        return {"retained": True, "rows": 1}
+    def read_bench(host, route):
+        check(host == "bench.invalid" and route == "/status", "wrong bench bootstrap identity request")
+        reads.append(host)
+        return board(mac=bench_mac)
+    replacements = {"parse_args": lambda: args, "request_limited_bytes": read_manifest,
+        "verify_local_source": lambda *a: None, "verify_release_source_binding": verify_tag,
+        "request_bytes": lambda *a, **k: b"image", "verify_image": lambda *a: elf,
+        "verify_http_range_support": lambda *a: None, "run_local_gates": lambda: None,
+        "load_inventory": lambda: {"bench": {"host": "bench.invalid", "mac": bench_mac},
+                                   "production": {"host": "production.invalid", "mac": prod_mac}},
+        "request_json": read_bench,
+        "wait_for_bench_health_window": lambda *a, **k: board(mac=bench_mac),
+        "exercise_bench_full_download": bench_cycle, "resolve_http_endpoint": resolve,
+        "request_status_deadline": full_status, "wait_for_ota_offer": offer,
+        "request_json_deadline": json_request, "wait_for_new_firmware": returned,
+        "wait_for_production_promotion_readiness": lambda endpoint, before, **k: before,
+        "stress_board": canary, "verify_retained_x10a": retained}
+    output, errors = io.StringIO(), io.StringIO()
+    with patch.dict(ns, replacements), patch.object(ns["time"], "monotonic", lambda: virtual[0]), \
+         patch.object(ns["os"], "fsync", lambda *a: None), \
+         patch.object(ns["time"], "sleep", lambda seconds: virtual.__setitem__(0, virtual[0] + max(seconds, 0.001))), \
+         contextlib.redirect_stdout(output), contextlib.redirect_stderr(errors):
+        try:
+            result = g["cli_main"]()
+            document = json.loads(output.getvalue())
+            accepted = defect in (None, "pending then valid", "timeout boundary")
+            check(result == (0 if accepted else 2), "unsafe/rejected production probation: " + str(defect))
+            check(len(writes) == (0 if defect == "tag timeout" else 1), "failed production probation retried a POST")
+            if accepted:
+                probation = document["production"]["probation_after"]
+                check(document["production"]["probation_confirmed"] is True and probation == {
+                    "image_state": "valid", "rollback_pending": False, "uptime_s": 206},
+                    "production success lost explicit probation evidence")
+            else:
+                check(document["outcome"] == "blocked" and "completed" not in ns["ACTIVE_JOURNAL"].phases,
+                      "failed probation published completion")
+                if defect in ("tag timeout", "ack lost"):
+                    check(not sequence, "source/ambiguous write failure continued probation queries")
+                if defect == "tag timeout": check(not reads, "source timeout contacted production")
+        finally:
+            if ns["ACTIVE_JOURNAL"] is not None: shutil.rmtree(ns["ACTIVE_JOURNAL"].directory)
+`;
+const productionProbation = spawnSync("python3", [
+  "-I", "-B", "-c", productionProbationProbe, path.join(root, "scripts/production-ota-gate.py"),
+], { encoding: "utf8" });
+assert.equal(productionProbation.status, 0,
+  `dev/stable production must confirm the same valid and disarmed stressed boot: ${productionProbation.stderr}`);
 
 // One resolved identity owns every pre-write and pressure request.
 const boundedTransport = section(gate, "def read_bounded_http_response(", "\ndef verify_http_range_support(");

@@ -59,6 +59,7 @@ MIN_FINAL_FREE_HEAP = 24 * 1024
 MIN_FINAL_LARGEST_BLOCK = 16 * 1024
 MAX_X10A_TIMEOUT_DELTA = 3
 HTTP_TIMEOUT_S = 5
+RELEASE_TAG_TIMEOUT_S = 30
 OTA_CHECK_TIMEOUT_S = 120
 POST_STRESS_HEADROOM_TIMEOUT_S = 420
 POST_STRESS_HEADROOM_STABLE_SAMPLES = 2
@@ -289,6 +290,7 @@ def public_receipt(journal: GateJournal) -> dict[str, Any]:
         "bench_restored", "bench_restore_stress_passed", "bench_restore_probation_confirmed",
         "bench_completed", "production_write_attempted", "production_write_acknowledged",
         "production_target_returned", "production_transfer_verified", "production_pressure_started", "production_stress_passed",
+        "production_probation_confirmed",
         "production_retained_passed", "completed", "blocked",
     }
     return {**project(journal.receipt), "phases": [phase for phase in journal.phases if phase in phases]}
@@ -789,14 +791,18 @@ def load_release_hil_inventory(
     }
 
 
-def run_checked(argv: list[str], *, capture: bool = False) -> str:
-    result = subprocess.run(
-        argv,
-        cwd=ROOT,
-        check=False,
-        text=True,
-        capture_output=capture,
-    )
+def run_checked(argv: list[str], *, capture: bool = False, timeout: float | None = None) -> str:
+    try:
+        result = subprocess.run(
+            argv,
+            cwd=ROOT,
+            check=False,
+            text=True,
+            capture_output=capture,
+            **({"timeout": timeout} if timeout is not None else {}),
+        )
+    except subprocess.TimeoutExpired:
+        fail("command exceeded its execution deadline; refusing without retry")
     if result.returncode != 0:
         detail = (result.stderr or result.stdout or "").strip() if capture else ""
         fail(f"command failed ({' '.join(argv)}): {detail or f'exit {result.returncode}'}")
@@ -1355,7 +1361,7 @@ def verify_release_source_binding(
     remote = run_checked([
         "git", "ls-remote", "https://github.com/0Bu/daikin-altherma-esp32.git",
         tag, tag + "^{}",
-    ], capture=True)
+    ], capture=True, timeout=RELEASE_TAG_TIMEOUT_S)
     refs: dict[str, str] = {}
     for line in remote.splitlines():
         fields = line.split()
@@ -2534,10 +2540,10 @@ def wait_for_legacy_offer(endpoint: ResolvedHttpEndpoint, expected_version: str)
     fail("legacy bench OTA check did not settle on the exact dev version")
 
 
-def confirm_bench_probation(
+def confirm_ota_probation(
     *, host: str, mac: str, version: str, elf: str, stress: dict[str, Any],
-    saved_channel: str | None = None,
-) -> dict[str, Any]:
+    saved_channel: str | None = None, require_x10a: bool = False,
+) -> tuple[dict[str, Any], dict[str, Any]]:
     """Confirm the same stressed boot without losing its counters or accepting a hidden reboot."""
     endpoint = resolve_http_endpoint(host)
     deadline = time.monotonic() + BENCH_HEALTH_WINDOW_TIMEOUT_S
@@ -2550,22 +2556,29 @@ def confirm_bench_probation(
         validate_identity(status, host=host, mac=mac, version=version, elf=elf)
         if saved_channel is not None:
             require_saved_channel(status, saved_channel)
-        uptime = required_uptime(status, "bench probation confirmation")
+        uptime = required_uptime(status, "OTA probation confirmation")
         if uptime < last_uptime:
-            fail("bench rebooted after its cold pressure window")
+            fail(f"{host} rebooted after its pressure window")
         last_uptime = uptime
         current = board_counters(status)
         if any(current[key] != baseline[key]
                for key in ("heap_restarts", "mqtt_skipped", "poll_skipped", "crc_err")):
-            fail("bench counters changed after its cold pressure window")
+            fail(f"{host} counters changed after its pressure window")
         if current["timeout_err"] < last_timeout or \
            current["timeout_err"] - baseline["timeout_err"] > MAX_X10A_TIMEOUT_DELTA:
-            fail("bench timeout counter regressed or exceeded its confirmation allowance")
+            fail(f"{host} timeout counter regressed or exceeded its confirmation allowance")
         last_timeout = current["timeout_err"]
         system = status.get("sys", {})
         if int(system.get("free_heap", 0)) < MIN_FINAL_FREE_HEAP or \
            int(system.get("max_alloc", 0)) < MIN_FINAL_LARGEST_BLOCK:
-            fail("bench probation confirmation lost safe heap")
+            fail(f"{host} probation confirmation lost safe heap")
+        if require_x10a:
+            hp = status.get("hp", {})
+            values = hp.get("values")
+            if status.get("mqtt", {}).get("connected") is not True or \
+               hp.get("connected") is not True or not isinstance(values, int) or \
+               isinstance(values, bool) or values <= 0:
+                fail(f"{host} probation confirmation lost MQTT or X10A liveness")
         return uptime
 
     while time.monotonic() < deadline:
@@ -2581,16 +2594,37 @@ def confirm_bench_probation(
         if image.get("image_state") == "valid" and image.get("rollback_pending") is False:
             remaining = deadline - time.monotonic()
             if remaining <= 0:
-                fail("bench confirmation deadline expired before its final status")
+                fail(f"{host} confirmation deadline expired before its final status")
             confirmed = request_status_deadline(endpoint, timeout=min(remaining, HTTP_TIMEOUT_S))
             if time.monotonic() >= deadline:
-                fail("bench confirmation final status exceeded its absolute deadline")
+                fail(f"{host} confirmation final status exceeded its absolute deadline")
             confirmed_uptime = validate_confirmation_status(confirmed)
-            return {"image_state": "valid", "rollback_pending": False, "uptime_s": confirmed_uptime}
+            return ({"image_state": "valid", "rollback_pending": False,
+                     "uptime_s": confirmed_uptime}, confirmed)
         if image.get("image_state") != "pending_verify" or image.get("rollback_pending") is not True:
-            fail("bench probation confirmation lost the armed image identity")
+            fail(f"{host} probation confirmation lost the armed image identity")
         time.sleep(min(1, max(0.0, deadline - time.monotonic())))
-    fail("bench stressed boot did not become valid within its confirmation deadline")
+    fail(f"{host} stressed boot did not become valid within its confirmation deadline")
+
+
+def confirm_bench_probation(
+    *, host: str, mac: str, version: str, elf: str, stress: dict[str, Any],
+    saved_channel: str | None = None,
+) -> dict[str, Any]:
+    evidence, _status = confirm_ota_probation(
+        host=host, mac=mac, version=version, elf=elf, stress=stress, saved_channel=saved_channel,
+    )
+    return evidence
+
+
+def confirm_production_probation(
+    *, host: str, mac: str, version: str, elf: str, stress: dict[str, Any], saved_channel: str,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Require a disarmed production boot and return the exact final liveness/identity witness."""
+    return confirm_ota_probation(
+        host=host, mac=mac, version=version, elf=elf, stress=stress,
+        saved_channel=saved_channel, require_x10a=True,
+    )
 
 
 def record_bench_pressure_failure(
@@ -5848,8 +5882,13 @@ def main() -> int:
     journal_checkpoint("production_stress_passed", production={
         "stress_passed": True, "stress": production_evidence,
     })
-    final_status_endpoint = resolve_http_endpoint(production["host"])
-    final_status = request_status_deadline(final_status_endpoint, timeout=HTTP_TIMEOUT_S)
+    production_probation, final_status = confirm_production_probation(
+        host=production["host"], mac=production["mac"], version=args.expected_version,
+        elf=elf, stress=production_evidence, saved_channel=saved_channel,
+    )
+    journal_checkpoint("production_probation_confirmed", production={
+        "probation_confirmed": True, "probation_after": production_probation,
+    })
     validate_identity(
         final_status, host=production["host"], mac=production["mac"],
         version=args.expected_version, elf=elf,

@@ -196,7 +196,8 @@ The transaction has two distinct stages:
    Heap-restart, MQTT-skip, poll-skip and CRC counters must not change; X10A timeout delta stays within
    three. Bind the completed target check generation/feed/version/SHA, require successor generation,
    capture validation/heap/stack evidence, then observe target identity, rollback/crash/safe mode,
-   live values and retained X10A MQTT through a separate three-minute read-only canary.
+   live values and retained X10A MQTT through a separate three-minute read-only canary. Before
+   success, require an explicit valid/disarmed image with stable identity, uptime and counters.
 
 **Do not publish either participating feed during this transaction.** The old release cannot retain
 transient feed headers; its return reads the mutable official dev path. Manifest drift, failed return,

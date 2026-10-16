@@ -188,7 +188,7 @@ This transaction does four things:
 1. proves the complete signed opposite-feed download on the bench under HTTP pressure;
 2. restores the exact target feed/artifact and runs sustained stress;
 3. performs at most one POST to the production role;
-4. verifies the read-only canary.
+4. verifies the read-only canary and explicit valid/rollback-disarmed production image.
 
 The promotion gate itself checks:
 - HTTP `/status` answers with the new version;

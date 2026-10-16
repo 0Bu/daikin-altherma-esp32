@@ -23,6 +23,10 @@ const stableProbeStart = centralSource.indexOf("const stableDeliveryProbe = Stri
 const stableProbeEnd = centralSource.indexOf("\n`;", stableProbeStart);
 assert.ok(stableProbeStart >= 0 && stableProbeEnd > stableProbeStart, "missing executed stable-delivery probe");
 const stableProbe = centralSource.slice(stableProbeStart + "const stableDeliveryProbe = String.raw`".length, stableProbeEnd);
+const productionProbeStart = centralSource.indexOf("const productionProbationProbe = String.raw`");
+const productionProbeEnd = centralSource.indexOf("\n`;", productionProbeStart);
+assert.ok(productionProbeStart >= 0 && productionProbeEnd > productionProbeStart, "missing executed production-probation probe");
+const productionProbe = centralSource.slice(productionProbeStart + "const productionProbationProbe = String.raw`".length, productionProbeEnd);
 const files = [
   "scripts/production-ota-gate.py",
   "tools/agent-hooks/agent_hook.py",
@@ -321,6 +325,9 @@ const runHilHistory = () => spawnSync("python3", [
 const runStableDelivery = () => spawnSync("python3", [
   "-I", "-B", "-c", stableProbe, path.join(tmp, "scripts/production-ota-gate.py"),
 ], { encoding: "utf8", timeout: 10000 });
+const runProductionProbation = () => spawnSync("python3", [
+  "-I", "-B", "-c", productionProbe, path.join(tmp, "scripts/production-ota-gate.py"),
+], { encoding: "utf8", timeout: 10000 });
 
 try {
   restore();
@@ -335,8 +342,26 @@ try {
   assert.equal(historyBaseline.status, 0, `HIL-history baseline failed: ${historyBaseline.stderr}`);
   const stableBaseline = runStableDelivery();
   assert.equal(stableBaseline.status, 0, `stable-delivery baseline failed: ${stableBaseline.stderr}`);
+  const productionBaseline = runProductionProbation();
+  assert.equal(productionBaseline.status, 0, `production-probation baseline failed: ${productionBaseline.stderr}`);
 
   const cases = [
+    ["production acceptance omits explicit valid/disarmed probation", () =>
+      replaceOnce("scripts/production-ota-gate.py",
+        /production_probation, final_status = confirm_production_probation\([\s\S]*?\n    \)/,
+        'production_probation, final_status = ({}, returned)'), "production-probation"],
+    ["production probation omits MQTT and X10A liveness", () =>
+      replaceOnce("scripts/production-ota-gate.py",
+        'saved_channel=saved_channel, require_x10a=True,',
+        'saved_channel=saved_channel, require_x10a=False,'), "production-probation"],
+    ["production probation is not journaled before final acceptance", () =>
+      replaceOnce("scripts/production-ota-gate.py",
+        'journal_checkpoint("production_probation_confirmed", production={',
+        'journal_checkpoint("probation_milestone_bypassed", production={'), "production-probation"],
+    ["remote release tag lookup loses its finite subprocess deadline", () =>
+      replaceOnce("scripts/production-ota-gate.py",
+        '], capture=True, timeout=RELEASE_TAG_TIMEOUT_S)',
+        '], capture=True)'), "stable-delivery"],
     ["stable target accepts the historical excursion tag exception", () =>
       replaceOnce("scripts/production-ota-gate.py",
         'if not allow_legacy and source_sha != tagged_source:',
@@ -505,8 +530,8 @@ try {
     ["journal omits durable directory fsync", () =>
       replaceOnce("scripts/production-ota-gate.py", 'os.fsync(directory_descriptor)', 'pass  # seeded missing directory sync'), "cold-receipt"],
     ["bench confirmation accepts a hidden reboot", () =>
-      replaceOnce("scripts/production-ota-gate.py", 'if uptime < last_uptime:\n            fail("bench rebooted after its cold pressure window")',
-        'if False:\n            fail("bench rebooted after its cold pressure window")'), "cold-receipt"],
+      replaceOnce("scripts/production-ota-gate.py", 'if uptime < last_uptime:\n            fail(f"{host} rebooted after its pressure window")',
+        'if False:\n            fail(f"{host} rebooted after its pressure window")'), "cold-receipt"],
     ["bench confirmation ignores changed failure counters", () =>
       replaceOnce("scripts/production-ota-gate.py", 'if any(current[key] != baseline[key]\n               for key in ("heap_restarts", "mqtt_skipped", "poll_skipped", "crc_err")):',
         'if False:'), "cold-receipt"],
@@ -1054,12 +1079,14 @@ try {
     mutate();
     const result = executedProbe === "cold-receipt" ? runColdReceipt() :
       executedProbe === "hil-history" ? runHilHistory() :
-      executedProbe === "stable-delivery" ? runStableDelivery() : runContracts();
+      executedProbe === "stable-delivery" ? runStableDelivery() :
+      executedProbe === "production-probation" ? runProductionProbation() : runContracts();
     if (result.status === 0) throw new Error(`production OTA contracts missed mutation: ${name}`);
-    if (executedProbe === "cold-receipt" || executedProbe === "hil-history" || executedProbe === "stable-delivery") {
+    if (["cold-receipt", "hil-history", "stable-delivery", "production-probation"].includes(executedProbe)) {
       assert.equal(result.status, 1, `mutation failed without its behavioral assertion: ${name}\n${result.stderr}`);
       assert.match(result.stderr, executedProbe === "cold-receipt" ? /AssertionError: COLD_RECEIPT:/ :
-        executedProbe === "stable-delivery" ? /AssertionError: STABLE_DELIVERY:/ : /AssertionError: HIL_HISTORY:/,
+        executedProbe === "stable-delivery" ? /AssertionError: STABLE_DELIVERY:/ :
+        executedProbe === "production-probation" ? /AssertionError: PRODUCTION_PROBATION:/ : /AssertionError: HIL_HISTORY:/,
         `syntax, timeout, signal or unrelated error cannot kill ${name}`);
     }
     caught++;
