@@ -15,6 +15,10 @@ const coldProbeStart = centralSource.indexOf("const coldReceiptProbe = String.ra
 const coldProbeEnd = centralSource.indexOf("\n`;", coldProbeStart);
 assert.ok(coldProbeStart >= 0 && coldProbeEnd > coldProbeStart, "missing executed cold-receipt probe");
 const coldProbe = centralSource.slice(coldProbeStart + "const coldReceiptProbe = String.raw`".length, coldProbeEnd);
+const historyProbeStart = centralSource.indexOf("const hilHistoryProbe = String.raw`");
+const historyProbeEnd = centralSource.indexOf("\n`;", historyProbeStart);
+assert.ok(historyProbeStart >= 0 && historyProbeEnd > historyProbeStart, "missing executed HIL-history probe");
+const historyProbe = centralSource.slice(historyProbeStart + "const hilHistoryProbe = String.raw`".length, historyProbeEnd);
 const files = [
   "scripts/production-ota-gate.py",
   "tools/agent-hooks/agent_hook.py",
@@ -306,6 +310,9 @@ const runContracts = () => {
 const runColdReceipt = () => spawnSync("python3", [
   "-I", "-B", "-c", coldProbe, path.join(tmp, "scripts/production-ota-gate.py"),
 ], { encoding: "utf8", timeout: 10000 });
+const runHilHistory = () => spawnSync("python3", [
+  "-I", "-B", "-c", historyProbe, path.join(tmp, "scripts/production-ota-gate.py"),
+], { encoding: "utf8", timeout: 10000 });
 
 try {
   restore();
@@ -316,8 +323,54 @@ try {
   }
   const coldBaseline = runColdReceipt();
   assert.equal(coldBaseline.status, 0, `cold receipt baseline failed: ${coldBaseline.stderr}`);
+  const historyBaseline = runHilHistory();
+  assert.equal(historyBaseline.status, 0, `HIL-history baseline failed: ${historyBaseline.stderr}`);
 
   const cases = [
+    ["HIL history accepts an aliased cross-snapshot clock step", () =>
+      replaceOnce("scripts/production-ota-gate.py",
+        'require_hil_history_clock_continuity(clock_reference, wall, started)',
+        'pass  # seeded cross-snapshot clock continuity omission'), "hil-history"],
+    ["HIL history retries away a witnessed clock discontinuity", () =>
+      replaceOnce("scripts/production-ota-gate.py",
+        'fail("release-HIL history clock changed during snapshot")',
+        'raise HistoryEvidenceUnavailable("release-HIL history clock changed during snapshot")'), "hil-history"],
+    ["HIL history accepts an unchanged cold-cycle boot identity", () =>
+      replaceOnce("scripts/production-ota-gate.py",
+        'if identity[0] != boot or (cold and identity[0] == expected["boot"]):',
+        'if identity[0] != boot:'), "hil-history"],
+    ["HIL history accepts ambiguous wall buckets", () =>
+      replaceOnce("scripts/production-ota-gate.py",
+        "if min(phase, HIL_HISTORY_DT_S - phase) <= HIL_HISTORY_ANCHOR_MARGIN_S:",
+        "if False:"), "hil-history"],
+    ["HIL history loses the exact value and gap comparison", () =>
+      replaceOnce("scripts/production-ota-gate.py",
+        'if bucket not in actual["cells"] or actual["cells"][bucket] != value:',
+        'if bucket not in actual["cells"]:'), "hil-history"],
+    ["HIL history omits its positive cold restore comparison", () =>
+      replaceOnce("scripts/production-ota-gate.py",
+        'compare_hil_history(expected["series"][row], series)',
+        'pass  # seeded positive-restore omission'), "hil-history"],
+    ["HIL history accepts a response from another epoch", () =>
+      replaceOnce("scripts/production-ota-gate.py",
+        'payload.get("epoch") != identity[1]', 'False'), "hil-history"],
+    ["HIL history accepts a changed measurement unit", () =>
+      replaceOnce("scripts/production-ota-gate.py",
+        'if actual["unit"] != expected["unit"]:', 'if False:'), "hil-history"],
+    ["HIL history loses its response-size bound", () =>
+      replaceOnce("scripts/production-ota-gate.py",
+        'max_body_bytes=HIL_HISTORY_MAX_BYTES,', 'max_body_bytes=STATUS_MAX_BYTES,'), "hil-history"],
+    ["HIL history waits without an absolute restore deadline", () =>
+      replaceOnce("scripts/production-ota-gate.py",
+        'deadline = time.monotonic() + HIL_HISTORY_WAIT_S', 'deadline = float("inf")'), "hil-history"],
+    ["HIL history preflight starts after a mutating feed lease", () => {
+      const preflight = '    history_preflight = wait_hil_history(\n' +
+        '        initial_endpoint, host=host, mac=mac, version=old_version, elf=old_elf,\n' +
+        '        boot=before.get("boot_id"),\n    )\n';
+      replaceOnce("scripts/production-ota-gate.py", preflight, "");
+      replaceOnce("scripts/production-ota-gate.py", '    ) as require_feed_active:\n',
+        '    ) as require_feed_active:\n' + preflight.split("\n").filter(Boolean).map(line => "    " + line).join("\n") + "\n");
+    }, "hil-history"],
     ["blocked journal loses the HTTP route and callsite", () =>
       replaceOnce("scripts/production-ota-gate.py",
         'error_context=private_failure_context(error, ACTIVE_JOURNAL)',
@@ -946,11 +999,12 @@ try {
   for (const [name, mutate, executedProbe] of cases) {
     restore();
     mutate();
-    const result = executedProbe === "cold-receipt" ? runColdReceipt() : runContracts();
+    const result = executedProbe === "cold-receipt" ? runColdReceipt() :
+      executedProbe === "hil-history" ? runHilHistory() : runContracts();
     if (result.status === 0) throw new Error(`production OTA contracts missed mutation: ${name}`);
-    if (executedProbe === "cold-receipt") {
+    if (executedProbe === "cold-receipt" || executedProbe === "hil-history") {
       assert.equal(result.status, 1, `mutation failed without its behavioral assertion: ${name}\n${result.stderr}`);
-      assert.match(result.stderr, /AssertionError: COLD_RECEIPT:/,
+      assert.match(result.stderr, executedProbe === "cold-receipt" ? /AssertionError: COLD_RECEIPT:/ : /AssertionError: HIL_HISTORY:/,
         `syntax, timeout, signal or unrelated error cannot kill ${name}`);
     }
     caught++;
