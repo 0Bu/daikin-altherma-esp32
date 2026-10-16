@@ -255,7 +255,8 @@ The textual slug is `/status.reference_temperature.reason`.
 Diagnosis state codes: 0 off, 1 recording, 2 hold, 3 degraded, 4 blocked. Reason codes: 0 disabled,
 1 sample recorded, 2 interval, 5 room unavailable, 6 X10A unavailable, 7 HomeHub unavailable,
 8 plant gate unknown, 9 plant inactive, 10 forecast unavailable, 11 clock invalid, 12 mode unknown,
-13 non-heating. Codes 3/4 are retired and never reused.
+13 non-heating, 15 evaluation stale. Codes 3/4 are retired and never reused; 14 sampler inactive
+describes an unstarted owner on HTTP, before MQTT can publish.
 
 An eligible event records raw **target − actual** room deviation at most every 30 minutes, with
 absolute `last_sample.unix_s` and an incremented `sequence`. `unix_s` is the evaluation time; the
