@@ -13,7 +13,7 @@ boot failure latching, original deadline remainder and wrap, exclusive ownership
 draining, destructor cleanup, `ENOTCONN` and fail-closed shutdown/stop/acknowledgement errors. C++
 allocations inside the real timer callback are counted.
 
-The original production source at `26e9bffd3a9a33181e2f3af1b0cc405cca64ae39` passes the ordinary
+The original production source at `28223041fb3f6e5e849e4d3695df2142d15040b5` passes the ordinary
 stop/disarm positive control and fails the unregistered-semaphore regression case. The wrapper also
 compiles defense-removing mutations and requires the selected behavioral assertion to reject each
 one. Compilation failures, unknown aborts, signals and timeouts never count as successful controls.

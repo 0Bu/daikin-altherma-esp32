@@ -15,7 +15,7 @@ const paths={ common:"main/http_common.cpp",status:"main/http_status.cpp",dwell:
   dwellLogic:"main/logic/state_dwell.hpp" };
 const sources=Object.fromEntries(Object.entries(paths).map(([key,file])=>[key,fs.readFileSync(path.join(root,file),"utf8")]));
 const frozen=JSON.parse(fs.readFileSync(path.join(fixture,"legacy_handlers.json"),"utf8"));
-assert.equal(frozen.base_commit,"819a2c98ad7e331ce1527ca85f4acb7127e55734");
+assert.equal(frozen.base_commit,"e99da78f38901cfc1421cec7f74e44dbbb632486");
 // Complete pre-streaming handler from c9835ea0fa1862615b7cceb71cf8a6e43c199547.
 // Compile it in the full production unit so the independent memory/transport oracle rejects it.
 const legacyScan=String.raw`static esp_err_t h_scan(httpd_req_t* req) {

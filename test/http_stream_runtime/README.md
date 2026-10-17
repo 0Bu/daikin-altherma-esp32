@@ -26,7 +26,7 @@ allocation, every data/final-send failure, pre-send and midstream exceptions, sn
 OTA admission are exercised independently. The SDK Wi-Fi scan itself is a controlled fixed-array
 adapter; target radio behavior and SDK-internal allocations require separate device evidence.
 
-`legacy_handlers.json` freezes original functions from commit `819a2c98…` only for compiling
+`legacy_handlers.json` freezes original functions from commit `e99da78f…` only for compiling
 negative controls. Restoring old history/redaction bodies reproduces their post-send error-response
 defects; restoring the old live Dwell serializer/getter reproduces its mixed-state metadata.
 Additional compiling controls remove individual stream, snapshot, epoch, code and UTF-8 guards.

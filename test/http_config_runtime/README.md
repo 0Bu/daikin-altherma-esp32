@@ -62,7 +62,7 @@ the live checkup producer; each re-toggle advances by one without a new draw, an
 draws nothing, and a zero draw still yields a non-zero generation. Compiling mutants that pass 0 instead of the draw,
 discard the draw's value or take a fresh draw on every transition must fail this group.
 
-The immutable original HTTP source at `819a2c98ad7e331ce1527ca85f4acb7127e55734` must pass positive
+The immutable original HTTP source at `e99da78f38901cfc1421cec7f74e44dbbb632486` must pass positive
 setters and fail the two specific regressions: a present wrong type taking missing-field semantics,
 and a fractional integer being truncated. It predates the two-argument generation helper, so the
 runner rewrites its one call with entropy 1, which reproduces the original one-argument result for

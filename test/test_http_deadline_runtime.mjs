@@ -12,7 +12,7 @@ const fixture = path.join(root, "test/http_deadline_runtime/fixture.cpp");
 const production = path.join(root, "main/http_deadline.cpp");
 const source = fs.readFileSync(production, "utf8");
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), "daikin-http-deadline-runtime-"));
-const originalCommit = "26e9bffd3a9a33181e2f3af1b0cc405cca64ae39";
+const originalCommit = "28223041fb3f6e5e849e4d3695df2142d15040b5";
 const scenarios = [
   "init_success", "prime_null", "prime_unregistered", "prime_lost",
   "init_sem_1", "init_sem_2", "init_sem_3", "init_task", "init_timeout", "init_timer",

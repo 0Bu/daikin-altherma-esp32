@@ -143,13 +143,20 @@ def classify(
         return False, "commit signature metadata is missing"
     for role in ("author", "committer"):
         actor = commit.get(role)
-        if not isinstance(actor, dict) or actor.get("login") not in {"renovate-bot", "renovate[bot]"}:
-            return False, f"commit {role} is not the configured Renovate identity"
         signature = git_commit.get(role)
-        if not isinstance(signature, dict) or (
-            signature.get("name") not in {"Renovate Bot", "Renovate"}
-            or signature.get("email") != "renovate@whitesourcesoftware.com"
-        ):
+        if not isinstance(actor, dict) or not isinstance(signature, dict):
+            return False, f"commit {role} is not the configured Renovate identity"
+        is_bot_id = (
+            actor.get("login") in {"renovate-bot", "renovate[bot]"}
+            and signature.get("name") in {"Renovate Bot", "Renovate"}
+            and signature.get("email") == "renovate@whitesourcesoftware.com"
+        )
+        is_owner_id = (
+            actor.get("login") == "0Bu"
+            and signature.get("name") == "Oleg Burau"
+            and signature.get("email") == "4757856+0Bu@users.noreply.github.com"
+        )
+        if not (is_bot_id or is_owner_id):
             return False, f"commit {role} signature metadata is not Renovate's"
     parents = commit.get("parents")
     if not isinstance(parents, list) or len(parents) != 1:

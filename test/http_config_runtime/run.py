@@ -140,7 +140,7 @@ if args.sanitizer == 'undefined':
 
 # The original production TU must pass real positive setters before failing the two named
 # regression oracles. Compiling failures, arbitrary signals and timeouts never count as controls.
-original_commit = '819a2c98ad7e331ce1527ca85f4acb7127e55734'
+original_commit = 'e99da78f38901cfc1421cec7f74e44dbbb632486'
 original_text = command(['git', '-c', 'core.fsmonitor=false', '-C', ROOT, 'show',
                          original_commit + ':main/http_config.cpp']).stdout
 # The original predates the two-argument consent-generation helper in the current headers. Entropy
