@@ -1,1 +1,1 @@
-{"version":"1.0.10","changelog":"Wait for heap readiness before pressure\nExpose kept settings and expire stale curve evaluations\nVerify actual trend restoration after cold power cycle\nExclude DHW routing from heating curve samples\nKeep device UI state current across failures, saves and OTA\nAvoid full-day waits for flow observations"}
+{"version":"1.0.11","changelog":"Maintenance and reliability improvements."}
