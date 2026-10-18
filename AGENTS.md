@@ -128,6 +128,17 @@ code, and documentation; do not shorten it to `daikin-altherma`. Other project n
 the README "Scope & credits" attribution when required, not in product code or ordinary project
 documentation.
 
+## Reuse and attribution
+
+When copying or adapting original material from this repository into another
+project, preserve all applicable copyright, license and third-party notices.
+
+Please credit [daikin-altherma-esp32](https://github.com/0Bu/daikin-altherma-esp32)
+in the destination's README or third-party notices, and identify the source
+commit and reused files in the change description.
+
+This attribution request does not add conditions to the MIT License.
+
 ## Environment and verification boundaries
 
 - The firmware target is `esp32s3`. Resolve ESP-IDF through the repository scripts, workflow and
