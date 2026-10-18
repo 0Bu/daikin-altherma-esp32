@@ -577,6 +577,36 @@
           9454
         ]
       }
+    },
+    {
+      "runner": "scripts/run-mock-tests.sh --coverage",
+      "compilers": {
+        "clang-17-darwin": "Apple Clang 17.0.0",
+        "gcc-13-linux-ubuntu24": "GCC 13 via CI-pinned ESP-IDF v6.1 container",
+        "gcc-15-linux-ubuntu26": "GCC 15.2.0-16ubuntu1, Ubuntu 26.04 Docker (aarch64)"
+      },
+      "hosted_confirmation": "Hosted confirmation pending: only these three hosted-header entries use the measured local GCC 15 aarch64 inventory as a CI candidate. No hosted execution is claimed; authoritative GitHub CI confirmation is required before merge. All other hosted inventories remain unchanged.",
+      "scope": "Profile-scoped A0/2 decode adjudication and allocation-free row measurement metadata add fully taken outcomes; removing temporary discovery strings removes instrumentation outcomes. All existing per-header coverage ratios, other inventories and the 95-percent line floor are retained.",
+      "sources": {
+        "main/logic/conv_override.hpp": "3d2065761cbb8e45b2c14b6b99b17684e51b4353d66221239dd73a8ddaa521a6",
+        "main/logic/convert.hpp": "5302ac7d83b61d8baa827f280039632233a46bdcc348af5c03519e6f30477744",
+        "main/logic/discovery.hpp": "dafbd17327e0220b3abd84e9aaa8ef5ea6a2a34de0d3d167df806571e488b426"
+      },
+      "test_source_sha256": "960aadc4a1034cac7c60f7f1a843b3af66f0744393eb3c0be21c133f61834156",
+      "local_executable_lines": {
+        "clang-17-darwin": [
+          9471,
+          9643
+        ],
+        "gcc-13-linux-ubuntu24": [
+          9197,
+          9480
+        ],
+        "gcc-15-linux-ubuntu26": [
+          9199,
+          9482
+        ]
+      }
     }
   ],
   "method": "Exact taken/outcome inventories are measured by scripts/run-mock-tests.sh --coverage and bound to compiler family, major version and platform; hosted profiles additionally bind the runner image. The gate rejects inventory mismatches and any historical ratio decrease. Updated hosted inventories require authoritative CI confirmation. Historical measurement notes remain in Git; profiles contain the enforced counts. Measurements below identify changed sources and local compiler provenance without changing checker rules or the 95-percent executable-line floor.",
@@ -643,12 +673,12 @@
         "taken": 78
       },
       "main/logic/conv_override.hpp": {
-        "outcomes": 8,
-        "taken": 7
+        "outcomes": 26,
+        "taken": 25
       },
       "main/logic/convert.hpp": {
-        "outcomes": 156,
-        "taken": 149
+        "outcomes": 192,
+        "taken": 185
       },
       "main/logic/cop_scope.hpp": {
         "outcomes": 30,
@@ -680,7 +710,7 @@
       },
       "main/logic/discovery.hpp": {
         "taken": 147,
-        "outcomes": 266
+        "outcomes": 264
       },
       "main/logic/env3.hpp": {
         "outcomes": 120,
@@ -1061,12 +1091,12 @@
         "taken": 77
       },
       "main/logic/conv_override.hpp": {
-        "outcomes": 8,
-        "taken": 8
+        "outcomes": 30,
+        "taken": 30
       },
       "main/logic/convert.hpp": {
-        "outcomes": 166,
-        "taken": 157
+        "outcomes": 206,
+        "taken": 197
       },
       "main/logic/cop_scope.hpp": {
         "outcomes": 36,
@@ -1098,7 +1128,7 @@
       },
       "main/logic/discovery.hpp": {
         "taken": 161,
-        "outcomes": 288
+        "outcomes": 286
       },
       "main/logic/env3.hpp": {
         "outcomes": 144,
@@ -1479,12 +1509,12 @@
         "taken": 77
       },
       "main/logic/conv_override.hpp": {
-        "outcomes": 8,
-        "taken": 8
+        "outcomes": 30,
+        "taken": 30
       },
       "main/logic/convert.hpp": {
-        "outcomes": 166,
-        "taken": 157
+        "outcomes": 206,
+        "taken": 197
       },
       "main/logic/cop_scope.hpp": {
         "outcomes": 36,
@@ -1516,7 +1546,7 @@
       },
       "main/logic/discovery.hpp": {
         "taken": 161,
-        "outcomes": 288
+        "outcomes": 286
       },
       "main/logic/env3.hpp": {
         "outcomes": 144,
@@ -1897,12 +1927,12 @@
         "taken": 77
       },
       "main/logic/conv_override.hpp": {
-        "outcomes": 8,
-        "taken": 8
+        "outcomes": 30,
+        "taken": 30
       },
       "main/logic/convert.hpp": {
-        "outcomes": 166,
-        "taken": 157
+        "outcomes": 206,
+        "taken": 197
       },
       "main/logic/cop_scope.hpp": {
         "outcomes": 36,
@@ -1934,7 +1964,7 @@
       },
       "main/logic/discovery.hpp": {
         "taken": 161,
-        "outcomes": 288
+        "outcomes": 286
       },
       "main/logic/env3.hpp": {
         "outcomes": 144,

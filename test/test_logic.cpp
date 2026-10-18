@@ -4535,7 +4535,7 @@ static void test_mqtt_group() {
         std::vector<GroupedValue>    direct_expected;
         std::set<std::string>        aligned_identities;
         for (size_t i = 0; i < profile.count(); i++) {
-            const ValueDef d = logic::adjudicated(profile[i]);
+            const ValueDef d = logic::adjudicated(profile, i);
             if (!row_publishable(d)) continue;
             const std::string identity = std::to_string(d.reg) + "/" + std::to_string(d.offset) +
                                          "/" + std::to_string(d.conv) + "/" + d.label;
@@ -8061,7 +8061,7 @@ static void test_homehub_map() {
             const char* want = HOMEHUB_CONCEPTS[i].concept_id;
             int         hits = 0;
             for (size_t k = 0; k < view.count(); k++) {
-                const ValueDef d = adjudicated(view[k]);
+                const ValueDef d = adjudicated(view, k);
                 const char*    got =
                     x10a_concept_for(d.reg, d.offset, unit_for_datatype(d.type), d.conv);
                 if (got && trend_cstr_eq(got, want)) hits++;
@@ -8082,7 +8082,7 @@ static void test_homehub_map() {
             if (!daik::def::is_detection_model(prof.id)) continue;
             const auto view = daik::def::resolved(prof);
             for (size_t k = 0; k < view.count(); k++) {
-                const ValueDef d = adjudicated(view[k]);
+                const ValueDef d = adjudicated(view, k);
                 const char*    got =
                     x10a_concept_for(d.reg, d.offset, unit_for_datatype(d.type), d.conv);
                 if (got && trend_cstr_eq(got, HOMEHUB_CONCEPTS[i].concept_id)) total++;
@@ -8122,7 +8122,7 @@ static void test_homehub_map() {
             const auto view = daik::def::resolved(prof);
             int        hits = 0;
             for (size_t k = 0; k < view.count(); k++) {
-                const ValueDef d = adjudicated(view[k]);
+                const ValueDef d = adjudicated(view, k);
                 const char*    got =
                     x10a_concept_for(d.reg, d.offset, unit_for_datatype(d.type), d.conv);
                 if (got && trend_cstr_eq(got, st.concept_id)) {
@@ -8157,7 +8157,7 @@ static void test_homehub_map() {
                 if (!daik::def::is_detection_model(prof.id)) continue;
                 const auto view = daik::def::resolved(prof);
                 for (size_t k = 0; k < view.count(); k++) {
-                    const ValueDef d = adjudicated(view[k]);
+                    const ValueDef d = adjudicated(view, k);
                     const char*    got =
                         x10a_concept_for(d.reg, d.offset, unit_for_datatype(d.type), d.conv);
                     if (got && trend_cstr_eq(got, cid)) {
@@ -17795,7 +17795,7 @@ static void test_checkup() {
             // Match production exactly: withhold non-publishable rows first, then apply converter
             // and label adjudication before deriving capability.
             if (!row_publishable(view[i])) continue;
-            const ValueDef row = logic::adjudicated(view[i]);
+            const ValueDef row = logic::adjudicated(view, i);
             if (checkup_is_fault_class(row.conv)) {
                 fault_row = true;
                 fault_rows++;
@@ -17819,7 +17819,7 @@ static void test_checkup() {
             const char*           matched_label = nullptr;
             for (size_t i = 0; i < n; i++) {
                 if (!row_publishable(view[i])) continue;
-                const ValueDef row = logic::adjudicated(view[i]);
+                const ValueDef row = logic::adjudicated(view, i);
                 if (checkup_row_matches(l, row.reg, row.offset, row.conv)) {
                     hits++;
                     matched_label = row.label;
@@ -18467,7 +18467,7 @@ static void test_metric_identity() {
             // override (logic/label_override.hpp, legacy-230 A) changes that word — so a row's
             // series suffix is its adjudicated label's slug, not the generator's.
             actual.insert(std::string(group_for_page(v.reg)) + "_" +
-                          object_id(logic::adjudicated(v).label));
+                          object_id(logic::adjudicated(v, p.id).label));
         }
 
     std::set<std::string> expected(EXPECTED, EXPECTED + EXPECTED_N);
@@ -18493,7 +18493,7 @@ static void test_metric_identity() {
         for (size_t i = 0; i < p.count; i++) {
             const auto& v = p.values[i];
             if (v.no_publish) continue;
-            CHECK(expected.count(row_object_id(logic::adjudicated(v))) == 1);
+            CHECK(expected.count(row_object_id(logic::adjudicated(v, p.id))) == 1);
         }
 
     // ── The ambiguity ledger: which labels the catalog places on more than one page (legacy-221)
@@ -18645,7 +18645,7 @@ static void test_tie_break_identity() {
         std::vector<std::string> field; // the WIRE, label-free
         std::set<std::string>    ids;   // what it publishes
         for (size_t i = 0; i < view.count(); i++) {
-            const ValueDef d = logic::adjudicated(view[i]);
+            const ValueDef d = logic::adjudicated(view, i);
             char           f[48];
             std::snprintf(f, sizeof(f), "%02X/%d/%d/%d/%d", d.reg, (int)d.offset, d.conv,
                           (int)d.size, d.type);
@@ -18952,7 +18952,7 @@ static void test_tie_break_reach() {
         std::set<std::string>    ids;
         const logic::ProfileView v = def::resolved(p);
         for (size_t i = 0; i < v.count(); i++) {
-            const ValueDef d = logic::adjudicated(v[i]);
+            const ValueDef d = logic::adjudicated(v, i);
             if (!row_publishable(d) || !conv_publishable(d.conv) || object_id(d.label).empty())
                 continue;
             ids.insert(row_object_id(d));
@@ -19117,7 +19117,7 @@ static void test_entity_identity() {
         };
 
         for (size_t i = 0; i < view.count(); i++) {
-            const ValueDef d = logic::adjudicated(view[i]);
+            const ValueDef d = logic::adjudicated(view, i);
             if (!row_publishable(d) || !conv_publishable(d.conv) || object_id(d.label).empty())
                 continue;
             char loc[32];
@@ -19180,7 +19180,7 @@ static std::set<std::string> all_profile_entity_ids(const def::Profile& profile,
         ids.insert(actual);
     };
     for (size_t i = 0; i < view.count(); ++i) {
-        const ValueDef row = logic::adjudicated(view[i]);
+        const ValueDef row = logic::adjudicated(view, i);
         if (!row_publishable(row) || !conv_publishable(row.conv) || object_id(row.label).empty())
             continue;
         claim(discovery_config(node, board, x10a_topic(base), availability_topic(base), row),
@@ -19227,7 +19227,7 @@ static void test_mqtt_discovery_owner() {
         for (const auto& profile : def::profiles) {
             const auto view = def::resolved(profile);
             for (size_t i = 0; i < view.count(); ++i) {
-                const ValueDef row = logic::adjudicated(view[i]);
+                const ValueDef row = logic::adjudicated(view, i);
                 if (!row_publishable(row) || !conv_publishable(row.conv) ||
                     object_id(row.label).empty())
                     continue;
@@ -19764,7 +19764,7 @@ static void test_refrigerant_service() {
         bool                       former_high = false, other_outdoor = false;
         for (size_t i = 0; i < v.count(); i++) {
             if (!row_publishable(v[i])) continue;
-            const ValueDef d    = adjudicated(v[i]);
+            const ValueDef d    = adjudicated(v, i);
             const bool     refp = fg_is_refrigerant_pressure(v, i);
             refrigerant_service_cover_row(pc, d.reg, d.offset, d.conv, refp);
             if (refp && ((d.reg == 0x20 && d.offset == 12) || (d.reg == 0x62 && d.offset == 15)))
@@ -19777,7 +19777,7 @@ static void test_refrigerant_service() {
         if (row.available) {
             bool structural = false;
             for (size_t i = 0; i < v.count(); i++) {
-                const ValueDef d = adjudicated(v[i]);
+                const ValueDef d = adjudicated(v, i);
                 if (row_publishable(v[i]) && d.reg == row.reg && d.offset == row.off &&
                     d.conv == 105 && fg_is_refrigerant_pressure(v, i))
                     structural = true;
@@ -19797,7 +19797,7 @@ static void test_refrigerant_service() {
     bool                       dual_outdoor = false;
     for (size_t i = 0; i < dual_view.count(); i++) {
         if (!row_publishable(dual_view[i])) continue;
-        const ValueDef d    = adjudicated(dual_view[i]);
+        const ValueDef d    = adjudicated(dual_view, i);
         const bool     refp = fg_is_refrigerant_pressure(dual_view, i);
         refrigerant_service_cover_row(dual, d.reg, d.offset, d.conv, refp);
         if (refp && d.reg == 0x20 && d.offset == 12) dual_outdoor = true;
@@ -22317,6 +22317,138 @@ static void test_conv_override() {
     CHECK(display_decimals(row.conv) == 1);
 }
 
+static void test_outdoor_hx_profile_scale() {
+    constexpr const char* proven = "altherma_erga_e_ehv_ehb_ehvz_e_ej_series_04_08kw";
+    const ValueDef        generated{0xA0, 2, 119, 2, 1, "Outdoor heat exchanger temp."};
+    const ValueDef        corrected = logic::adjudicated(generated, proven);
+    CHECK(corrected.conv == 103);
+    CHECK(row_object_id(corrected) == row_object_id(generated));
+    CHECK(object_id(corrected.label) == object_id(generated.label));
+    CHECK(logic::adjudicated(generated).conv == 119);
+    CHECK(logic::adjudicated(generated, "unknown").conv == 119);
+    CHECK(logic::adjudicated(generated, "").conv == 119);
+    CHECK(logic::adjudicated(generated, "altherma_ebla_edla_d_series_4_8kw_monobloc").conv == 103);
+    CHECK(logic::adjudicated(generated, "altherma_erga_d_ehv_ehb_ehvz_dj_series_04_08_kw").conv ==
+          119);
+    for (int field = 0; field < 6; ++field) {
+        ValueDef other = generated;
+        if (field == 0) other.reg = 0xA1;
+        if (field == 1) other.offset = 0;
+        if (field == 2) other.conv = 114;
+        if (field == 3) other.size = 1;
+        if (field == 4) other.type = 2;
+        if (field == 5) other.label = nullptr;
+        CHECK(logic::adjudicated(other, proven).conv == other.conv);
+    }
+    ValueDef renamed = generated;
+    renamed.label    = "Outdoor heat exchanger temp. extra";
+    CHECK(logic::adjudicated(renamed, proven).conv == 119);
+    // Real catalog self-retirement pin: the proven profile and its known runtime representative
+    // change one row each. Identical coordinates on other profiles do not inherit this evidence.
+    size_t changes = 0;
+    for (const auto& profile : def::profiles) {
+        const auto view = def::resolved(profile);
+        CHECK(view.profile_id == profile.id);
+        for (size_t i = 0; i < view.count(); ++i) {
+            const auto baseline = logic::adjudicated(view[i]);
+            const auto scoped   = logic::adjudicated(view, i);
+            CHECK(scoped.reg == baseline.reg && scoped.offset == baseline.offset &&
+                  scoped.size == baseline.size && scoped.type == baseline.type &&
+                  scoped.label == baseline.label && scoped.no_publish == baseline.no_publish);
+            if (scoped.conv != baseline.conv) {
+                ++changes;
+                CHECK(std::strcmp(profile.id, proven) == 0 ||
+                      std::strcmp(profile.id, "altherma_ebla_edla_d_series_4_8kw_monobloc") == 0);
+                CHECK(baseline.reg == 0xA0 && baseline.offset == 2 && baseline.conv == 119);
+                CHECK(scoped.conv == 103);
+            }
+            if (view[i].conv == 114) CHECK(scoped.conv == baseline.conv);
+        }
+    }
+    CHECK(changes == 2);
+    const uint8_t bytes[][2] = {{0x80, 0xFF}, {0x00, 0x01}, {0x00, 0xFA}, {0x80, 0x17}};
+    const double  expected[] = {-0.5, 1.0, -6.0, 23.5};
+    for (size_t i = 0; i < 4; ++i) {
+        const auto r = convert(corrected, bytes[i]);
+        CHECK(r.ok && std::abs(r.value - expected[i]) < 1e-9);
+        CHECK(reading_plausible(corrected, r));
+    }
+    const uint8_t absent[] = {0x00, 0x80};
+    const auto    invalid  = convert(corrected, absent);
+    CHECK(invalid.ok && invalid.value == -128.0);
+    CHECK(!reading_plausible(corrected, invalid));
+    CHECK(!convert(generated, absent).ok); // intrinsic 119 sentinel remains unchanged
+    const ValueDef unchanged114{0xA0, 2, 114, 2, 1, "Outdoor heat exchanger temp."};
+    CHECK(convert(unchanged114, bytes[1]).value == 25.6);
+    uint8_t absent_page[16] = {};
+    absent_page[10] = absent_page[11] = 0xFF;
+    CHECK(!value_available(corrected, true, 0.0, absent_page, sizeof(absent_page)));
+}
+
+static void test_row_measurement_metadata() {
+    const auto& profile = def::lookup("altherma_erga_e_ehv_ehb_ehvz_e_ej_series_04_08kw");
+    size_t      found   = 0;
+    for (size_t i = 0; i < profile.count; ++i) {
+        const auto& row  = profile.values[i];
+        const char* unit = nullptr;
+        const char* dc   = nullptr;
+        if (std::strcmp(row.label, "Flow sensor (l/min)") == 0) {
+            unit = "L/min";
+            dc   = "volume_flow_rate";
+        } else if (std::strcmp(row.label, "INV primary current (A)") == 0 ||
+                   std::strcmp(row.label, "INV secondary current (A)") == 0) {
+            unit = "A";
+            dc   = "current";
+        } else if (std::strcmp(row.label, "INV frequency (rps)") == 0) {
+            unit = "rps";
+            dc   = "";
+        }
+        if (!unit) continue;
+        ++found;
+        const auto meta = metadata_for_row(row);
+        CHECK(std::strcmp(unit_for_row(row), unit) == 0);
+        CHECK(std::strcmp(meta.device_class, dc) == 0 && meta.measurement);
+        const auto json = discovery_config("node", "board", "base/x10a", "base/status", row);
+        CHECK(json.find(std::string("\"unit_of_meas\":\"") + unit + "\"") != std::string::npos);
+        CHECK(json.find("\"stat_cla\":\"measurement\"") != std::string::npos);
+        if (*dc)
+            CHECK(json.find(std::string("\"dev_cla\":\"") + dc + "\"") != std::string::npos);
+        else
+            CHECK(json.find("\"dev_cla\"") == std::string::npos);
+        // A familiar label at an unrelated coordinate/width/converter grants no metadata.
+        for (int field = 0; field < 4; ++field) {
+            ValueDef unrelated = row;
+            if (field == 0) unrelated.reg = 0xFF;
+            if (field == 1) unrelated.offset = 31;
+            if (field == 2) unrelated.conv = 151;
+            if (field == 3) unrelated.size = 4;
+            const auto unknown = metadata_for_row(unrelated);
+            CHECK(!unknown.unit[0] && !unknown.device_class[0] && !unknown.measurement);
+        }
+    }
+    CHECK(found == 4);
+    const ValueDef secondary_alias{0x21, 0, 105, 2, -1, "INV secondary current (A)"};
+    CHECK(std::strcmp(unit_for_row(secondary_alias), "A") == 0);
+    const ValueDef negatives[] = {
+        {0x60, 0, 300, 1, -1, "Pump (A)"},
+        {0x60, 1, 217, 1, -1, "Operation Mode"},
+        {0x60, 2, 203, 1, -1, "Error Code"},
+        {0x30, 1, 211, 1, -1, "Fan 1 (step)"},
+        {0x60, 3, 151, 2, -1, "Count (l/min)"},
+        {0x21, 0, 105, 2, -1, nullptr},
+        {0x62, 9, 105, 2, -1, "Flow sensor (l/min) extra"},
+    };
+    for (const auto& row : negatives) {
+        const auto meta = metadata_for_row(row);
+        CHECK(!meta.unit[0] && !meta.device_class[0] && !meta.measurement);
+        if (!row.label) continue;
+        const auto json = discovery_config("node", "board", "base/x10a", "base/status", row);
+        CHECK(json.find("\"unit_of_meas\"") == std::string::npos);
+        CHECK(json.find("\"dev_cla\"") == std::string::npos);
+        CHECK(json.find("\"stat_cla\"") == std::string::npos);
+    }
+}
+
 // ── The label ledger (logic/label_override.hpp) — legacy-230 A
 // ────────────────────────────────────────── The sibling of test_conv_override(): the same
 // "generated table is wrong, corrected in logic/, pinned against the real catalog" shape — but for
@@ -23388,7 +23520,7 @@ static void test_mqtt_retirement_identity() {
     for (const auto& profile : def::profiles) {
         const auto resolved = def::resolved(profile);
         for (size_t i = 0; i < resolved.count(); ++i) {
-            const ValueDef row = logic::adjudicated(resolved[i]);
+            const ValueDef row = logic::adjudicated(resolved, i);
             if (!conv_publishable(row.conv) || object_id(row.label).empty()) continue;
             CHECK(mqtt_retirement_identity_make(identity, row) ==
                   MqttRetirementIdentityResult::Ready);
@@ -25837,6 +25969,8 @@ int main() {
     test_ou_stale();
     test_cop_scope();
     test_conv_override();
+    test_outdoor_hx_profile_scale();
+    test_row_measurement_metadata();
     test_label_override();
     test_availability();
     test_fault_state();

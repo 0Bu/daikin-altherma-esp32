@@ -22,7 +22,7 @@
 // physical range that looks nicer. Fitting a scale to make a number plausible is exactly how
 // legacy-35–legacy-39 shipped.
 //
-// ── The one entry: Target Evap. Temp. (0x10/6), conv 114 -> conv 109 ─────────────────────────────
+// ── Catalog-wide entry: Target Evap. Temp. (0x10/6), conv 114 -> conv 109 ────────────────────────
 //
 // legacy-194 opened this as "conv 114 x0.1 publishes 145.9-199.6 °C mid-run — physically
 // impossible, but spec-conformant and audit-clean", ruled out every non-scale explanation
@@ -86,6 +86,7 @@
 // 0.0.)
 #include "value_def.hpp"
 #include "label_override.hpp"   // the sibling ledger adjudicated() also composes (the row's LABEL)
+#include "profile_view.hpp"
 
 #include <cstddef>
 
@@ -124,11 +125,29 @@ inline constexpr int effective_conv(uint8_t reg, uint8_t offset, int conv) {
 // generated table and this adjudication as two separate, separately-reviewable things. (Both keys
 // read the ORIGINAL d.conv, so the two verdicts compose independently and order-free.)
 // availability.hpp stays separate: it WITHHOLDS a value, it does not rewrite the row.
-inline constexpr ValueDef adjudicated(const ValueDef& d) {
+// A0/2 on the ERGA-E 4–8 kW profile has an independently confirmed signed Q8.8 encoding.
+// Also admit its register-identical EBLA/EDLA D 4–8 kW runtime representative: detect_best uses
+// that id for the reference ERGA unit (detect_identity.hpp). This is not independent confirmation
+// of another hardware family. No other table alias or 119 field inherits that evidence. Match
+// the complete row and exact id; absent context leaves the generated converter untouched.
+// The 0x8000 marker remains absent at hp_format's °C envelope (-128 °C).
+inline constexpr bool outdoor_hx_q8_8(const ValueDef& d, const char* profile_id) {
+    return profile_id &&
+           (label_str_eq(profile_id, "altherma_erga_e_ehv_ehb_ehvz_e_ej_series_04_08kw") ||
+            label_str_eq(profile_id, "altherma_ebla_edla_d_series_4_8kw_monobloc")) &&
+           d.reg == 0xA0 && d.offset == 2 && d.conv == 119 && d.size == 2 && d.type == 1 &&
+           d.label && label_str_eq(d.label, "Outdoor heat exchanger temp.");
+}
+
+inline constexpr ValueDef adjudicated(const ValueDef& d, const char* profile_id = nullptr) {
     ValueDef out = d;
-    out.conv  = effective_conv(d.reg, d.offset, d.conv);
+    out.conv     = outdoor_hx_q8_8(d, profile_id) ? 103 : effective_conv(d.reg, d.offset, d.conv);
     out.label = effective_label(d.reg, d.offset, d.conv, d.label);
     return out;
+}
+
+inline ValueDef adjudicated(const ProfileView& profile, size_t i) {
+    return adjudicated(profile[i], profile.profile_id);
 }
 
 } // namespace daik::logic

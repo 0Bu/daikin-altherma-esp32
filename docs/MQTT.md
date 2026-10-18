@@ -82,7 +82,11 @@ A discovery config references the shared X10A state topic with explicit missing-
 Missing keys or entire groups produce `None`, so numeric, binary and text entities become
 **unknown** instead of keeping an older state. Quarantined/detect-only rows create no entity.
 
-Units and device classes come from the catalog datatype/converter. Rows flagged detect-only or
+Units and device classes come from the catalog datatype/converter and bounded row metadata in
+[`convert.hpp`](../main/logic/convert.hpp). The identified flow/current/rotational-speed rows carry
+`L/min`, `A` and `rps` with `measurement` statistics. Flow uses `volume_flow_rate`, current uses
+`current`, and rotational speed has no device class. The same metadata supplies `/values` units;
+entity identities and numeric state values stay unchanged. Rows flagged detect-only or
 without a publishable converter create no entity. Discovery is streamed incrementally instead of
 allocating the entire catalog payload. Full builders:
 [`mqtt_group.hpp`](../main/logic/mqtt_group.hpp), [`ha_device.hpp`](../main/logic/ha_device.hpp).

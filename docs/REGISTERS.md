@@ -463,6 +463,16 @@ the I/U capacity code (`0x60` offset 6).
 
 #### Register `0xA0`
 
+**Scoped decode correction:** field feedback for ERGA08EVH7 establishes signed little-endian
+`raw / 256` for offset 2, "Outdoor heat exchanger temp." (`80 FF` → −0.5 °C;
+`80 17` → 23.5 °C). [`conv_override.hpp`](../main/logic/conv_override.hpp) therefore uses converter
+103 for this exact row on the ERGA E 4–8 kW profile and its explicit register-identical EBLA/EDLA D
+4–8 kW runtime representative (see [`detect_identity.hpp`](../main/logic/detect_identity.hpp)).
+The representative is not independent confirmation of another hardware family. Other profiles,
+other converter-119 fields and converter 114 retain their existing semantics. The generated table
+below remains 119; `00 80` still publishes no value because −128 °C fails the temperature envelope,
+and an absent outdoor unit remains absent.
+
 | Off | Len | Conv | Bit | Type | Value |
 |----:|----:|:----:|:---:|:----:|-------|
 | 0 | 2 | 119 |  | °C | Suction temp |

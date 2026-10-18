@@ -4,9 +4,9 @@
 //
 // WHY A VIEW AND NOT A MERGED ARRAY — the rows are `constexpr` tables in flash; concatenating 43 of
 // them at build time is not expressible, and doing it at runtime would mean a heap allocation on
-// the poll path (every second) for data that never changes. A view is three pointers and three
-// lengths, all pointing at static storage: no allocation, nothing to free, nothing to strand a
-// mutex.
+// the poll path (every second) for data that never changes. A view has three row spans and one
+// profile-id pointer, all referencing static storage: no allocation, nothing to free, nothing to
+// strand a mutex.
 //
 // WHY EVERY CONSUMER AND NOT JUST THE DECODER — four call sites read the row set, and they are not
 // independent: hp_poll decodes them into the cache, mqtt_ha announces one HA discovery config per
@@ -64,6 +64,7 @@ struct ProfileView {
     size_t          extra_count = 0;
     const ValueDef* extra2      = nullptr;
     size_t          extra2_count = 0;
+    const char*     profile_id = nullptr; // exact model context; never inferred from shared storage
 
     size_t count() const { return base_count + extra_count + extra2_count; }
 

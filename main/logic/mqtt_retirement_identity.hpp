@@ -99,7 +99,7 @@ inline MqttRetirementPresence mqtt_retirement_scan_step(const MqttRetirementIden
                                                         size_t& work) noexcept {
     while (scan.result == MqttRetirementPresence::Pending && scan.row < profile.count() && work) {
         --work;
-        const ValueDef row = logic::adjudicated(profile[scan.row++]);
+        const ValueDef row = logic::adjudicated(profile, scan.row++);
         if (!row_publishable(row) || !conv_publishable(row.conv)) continue;
         bool has_object = false;
         if (mqtt_retirement_identity_matches(identity, row, nullptr, &has_object))

@@ -1026,9 +1026,10 @@ static bool retract_stale_values(const std::string& profile_id) {
         const size_t       shape = s_stale_values_step % shapes;
         const size_t       entry = s_stale_values_step / shapes;
         const ValueDef     raw   = prof[entry % prof.count()];
-        const ValueDef     d     = shape < 2 ? logic::adjudicated(raw) : raw;
+        const ValueDef     d     = shape < 2 ? logic::adjudicated(raw, prof.profile_id) : raw;
         const std::string& node  = s_node;
-        const bool relabeled     = !logic::label_str_eq(raw.label, logic::adjudicated(raw).label);
+        const bool         relabeled =
+            !logic::label_str_eq(raw.label, logic::adjudicated(raw, prof.profile_id).label);
         if (!conv_publishable(d.conv) || object_id(d.label).empty() || (shape >= 2 && !relabeled) ||
             ((shape == 1 || shape == 4) && !conv_is_binary(d.conv))) {
             ++s_stale_values_step;
@@ -1178,7 +1179,7 @@ static bool retract_profile_cutover(const std::string& profile_id) {
             s_retiring_scan                                   = {};
             continue;
         }
-        const ValueDef d         = logic::adjudicated(prof[s_retiring_profile_row]);
+        const ValueDef d         = logic::adjudicated(prof, s_retiring_profile_row);
         const size_t   shape     = s_retiring_profile_shape;
         const bool     candidate = conv_publishable(d.conv) &&
                                (!s_retiring_current_unpublishable || !row_publishable(d)) &&
@@ -1306,7 +1307,7 @@ static bool publish_x10a_discovery() {
     s_discovered_profile.swap(discovered);
     bool accepted = true;
     for (size_t i = 0; i < prof.count(); i++) {
-        const ValueDef  d = logic::adjudicated(prof[i]);   // wire truth, not the generator label
+        const ValueDef d = logic::adjudicated(prof, i); // wire truth, not the generator label
         // The confirmed pre-pass already removed current quarantined/detect-only configs and
         // their companions. No unavailable or unproven row may be reintroduced here.
         if (!row_publishable(d)) {

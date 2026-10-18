@@ -76,7 +76,7 @@ std::map<std::string, std::set<std::string>> catalog_ids(const std::string& pref
         if (!def::is_detection_model(p.id)) continue;   // fixtures + `generic` cannot be assigned
         const logic::ProfileView v = def::resolved(p);
         for (size_t i = 0; i < v.count(); i++) {
-            const ValueDef d = logic::adjudicated(v[i]);
+            const ValueDef d = logic::adjudicated(v, i);
             if (!row_publishable(d) || !conv_publishable(d.conv)) continue;
             const std::string obj = object_id(d.label);
             if (obj.empty()) continue;
