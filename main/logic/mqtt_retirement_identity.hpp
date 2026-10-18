@@ -93,10 +93,10 @@ struct MqttRetirementScan {
 
 // A slice may only report Absent after exhausting the entire replacement. Each row consumes work,
 // including disabled/grid rows and all of that row's bounded companion comparisons. No allocation.
-inline MqttRetirementPresence mqtt_retirement_scan_step(const MqttRetirementIdentity& identity,
-                                                        const logic::ProfileView&     profile,
-                                                        MqttRetirementScan&           scan,
-                                                        size_t& work) noexcept {
+// Keep this modeled stack boundary outlined; inline supplies header linkage only.
+inline __attribute__((noinline)) MqttRetirementPresence
+mqtt_retirement_scan_step(const MqttRetirementIdentity& identity, const logic::ProfileView& profile,
+                          MqttRetirementScan& scan, size_t& work) noexcept {
     while (scan.result == MqttRetirementPresence::Pending && scan.row < profile.count() && work) {
         --work;
         const ValueDef row = logic::adjudicated(profile, scan.row++);

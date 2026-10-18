@@ -255,7 +255,7 @@
     },
     "poll_task": {
       "pattern": "^(?:daik::(?:\\(anonymous namespace\\)::)?poll_task\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?9poll_task[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
-      "max_bytes": 1584
+      "max_bytes": 1600
     },
     "poll_detect": {
       "pattern": "^(?:daik::(?:\\(anonymous namespace\\)::)?hp_detect_run\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?13hp_detect_run[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",

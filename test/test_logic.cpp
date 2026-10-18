@@ -17951,6 +17951,8 @@ static void test_no_publish() {
 static void test_profile_view() {
     using namespace daik::logic;
 
+    CHECK(sizeof(ProfileView) <= 6 * sizeof(const ValueDef*));
+
     // THE OVERLAY RULE: a supplement applies only if the base already reads its page. This is what
     // keeps a hand-written block from doing what hand-editing a generated table would do — move
     // detection — and from adding a per-cycle bus round-trip (and, on a model that does not answer,
@@ -17975,6 +17977,14 @@ static void test_profile_view() {
     // these rows, and the deletion must not have to be atomic with the call-site cleanup.
     CHECK(profile_view(base_with, 2, nullptr, 0, 0x10).count() == 2);
 
+    // An oversized overlay must be refused before scanning its rows or truncating its length.
+    // These pointers name one real row only: scanning the claimed length would be out-of-bounds.
+    const size_t oversized = static_cast<size_t>(UINT16_MAX) + 1;
+    const auto   rejected  = profile_view(base_with, 2, extra, oversized, 0x10);
+    CHECK(rejected.count() == 2 && !rejected.extra && rejected.extra_count == 0);
+    const auto boundary = profile_view(base_with, 2, extra, UINT16_MAX, 0x10);
+    CHECK(boundary.extra == extra && boundary.extra_count == UINT16_MAX);
+
     // A second block may span several pages, but every one must already be present in the generated
     // base. It is appended after the ordinary supplement and withheld atomically if even one page
     // is absent; one supplement can never bootstrap a page for another.
@@ -17985,6 +17995,13 @@ static void test_profile_view() {
     CHECK(applied2[2].conv == 310);
     CHECK(applied2[3].reg == 0x60 && applied2[4].reg == 0x10);
     CHECK(applied2.extra2_count == 2);
+    auto contextual       = applied;
+    contextual.profile_id = "altherma_erga_e_ehv_ehb_ehvz_e_ej_series_04_08kw";
+    const auto rejected2  = profile_view_extend_existing_pages(contextual, mixed_ok, oversized);
+    CHECK(rejected2.count() == contextual.count() && !rejected2.extra2 &&
+          rejected2.extra2_count == 0 && rejected2.profile_id == contextual.profile_id);
+    const auto contextual2 = profile_view_extend_existing_pages(contextual, mixed_ok, 2);
+    CHECK(contextual2.profile_id == contextual.profile_id && contextual2.extra2_count == 2);
     ValueDef   mixed_missing[] = {{0x60, 11, 306, 1, -1, "Thermal protector"},
                                   {0x62, 2, 302, 1, -1, "System OFF"}};
     const auto skipped2        = profile_view_extend_existing_pages(applied, mixed_missing, 2);

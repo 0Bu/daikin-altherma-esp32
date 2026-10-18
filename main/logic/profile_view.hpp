@@ -61,10 +61,12 @@ struct ProfileView {
     const ValueDef* base       = nullptr;
     size_t          base_count = 0;
     const ValueDef* extra      = nullptr;   // nullptr / 0 when the supplement does not apply
-    size_t          extra_count = 0;
     const ValueDef* extra2      = nullptr;
-    size_t          extra2_count = 0;
     const char*     profile_id = nullptr; // exact model context; never inferred from shared storage
+    // Supplement blocks are small static tables. Bound their lengths before narrowing so the
+    // borrowed context fits the original view size without consuming another task-stack slot.
+    uint16_t extra_count  = 0;
+    uint16_t extra2_count = 0;
 
     size_t count() const { return base_count + extra_count + extra2_count; }
 
@@ -74,6 +76,9 @@ struct ProfileView {
         return i < extra_count ? extra[i] : extra2[i - extra_count];
     }
 };
+
+static_assert(sizeof(ProfileView) <= 6 * sizeof(const ValueDef*),
+              "profile context must fit the original six-slot view stack budget");
 
 // THE OVERLAY RULE: a supplement block is applied ONLY IF the base profile ALREADY references the
 // block's register page.
@@ -102,9 +107,9 @@ inline ProfileView profile_view(const ValueDef* base, size_t n,
     ProfileView v;
     v.base       = base;
     v.base_count = n;
-    if (extra && m > 0 && profile_has_page(base, n, extra_page)) {
+    if (extra && m > 0 && m <= UINT16_MAX && profile_has_page(base, n, extra_page)) {
         v.extra       = extra;
-        v.extra_count = m;
+        v.extra_count = static_cast<uint16_t>(m);
     }
     return v;
 }
@@ -116,11 +121,11 @@ inline ProfileView profile_view(const ValueDef* base, size_t n,
 // justify a page introduced by another supplement.
 inline ProfileView profile_view_extend_existing_pages(ProfileView v,
                                                        const ValueDef* extra, size_t m) {
-    if (!extra || m == 0 || v.extra2 || v.extra2_count) return v;
+    if (!extra || m == 0 || m > UINT16_MAX || v.extra2 || v.extra2_count) return v;
     for (size_t i = 0; i < m; i++)
         if (!profile_has_page(v.base, v.base_count, extra[i].reg)) return v;
     v.extra2       = extra;
-    v.extra2_count = m;
+    v.extra2_count = static_cast<uint16_t>(m);
     return v;
 }
 

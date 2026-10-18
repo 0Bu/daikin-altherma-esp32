@@ -634,6 +634,34 @@
           9491
         ]
       }
+    },
+    {
+      "runner": "scripts/run-mock-tests.sh --coverage",
+      "compilers": {
+        "clang-17-darwin": "Apple clang version 17.0.0 (clang-1700.6.4.2)",
+        "gcc-13-linux-ubuntu24": "g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0 via CI-pinned ESP-IDF v6.1 container",
+        "gcc-15-linux-ubuntu26": "g++ (Ubuntu 15.2.0-16ubuntu1) 15.2.0, aarch64"
+      },
+      "hosted_confirmation": "Hosted confirmation pending: only profile_view.hpp uses the measured local GCC 15 aarch64 inventory as a CI candidate. No hosted execution is claimed; authoritative GitHub CI confirmation is required before merge. All other hosted inventories remain unchanged.",
+      "scope": "Bounded supplement lengths retain the original six-slot view size and borrowed profile context. Both oversize guards are taken before narrowing or scanning, with accepted-boundary and context-preservation controls. Every prior ratio and all other header inventories and line floors are retained.",
+      "validation_boundary": "All three local C++ and coverage inventories were measured. Clang and local GCC 15 completed the canonical entrypoint, including presenter and JavaScript checks. GCC 13 passed coverage and its exact branch ratchet, then stopped at the later presenter prerequisite because the pinned container lacks Node.",
+      "source": "main/logic/profile_view.hpp",
+      "source_sha256": "236bd68f2b7ae730880c59c9966e5b2ef6ed56eb46facb718323d9116d529b3e",
+      "test_source_sha256": "73edca824707c8252b74a86115c05e46e60ffd60a68b29d3174f761ea53e7962",
+      "local_executable_lines": {
+        "clang-17-darwin": [
+          9481,
+          9653
+        ],
+        "gcc-13-linux-ubuntu24": [
+          9206,
+          9489
+        ],
+        "gcc-15-linux-ubuntu26": [
+          9208,
+          9491
+        ]
+      }
     }
   ],
   "method": "Exact taken/outcome inventories are measured by scripts/run-mock-tests.sh --coverage and bound to compiler family, major version and platform; hosted profiles additionally bind the runner image. The gate rejects inventory mismatches and any historical ratio decrease. Updated hosted inventories require authoritative CI confirmation. Historical measurement notes remain in Git; profiles contain the enforced counts. Measurements below identify changed sources and local compiler provenance without changing checker rules or the 95-percent executable-line floor.",
@@ -956,8 +984,8 @@
         "taken": 108
       },
       "main/logic/profile_view.hpp": {
-        "outcomes": 50,
-        "taken": 45
+        "outcomes": 54,
+        "taken": 49
       },
       "main/logic/query_flag.hpp": {
         "outcomes": 4,
@@ -1366,8 +1394,8 @@
         "taken": 122
       },
       "main/logic/profile_view.hpp": {
-        "outcomes": 52,
-        "taken": 47
+        "outcomes": 56,
+        "taken": 51
       },
       "main/logic/query_flag.hpp": {
         "outcomes": 6,
@@ -1784,8 +1812,8 @@
         "taken": 122
       },
       "main/logic/profile_view.hpp": {
-        "outcomes": 52,
-        "taken": 47
+        "outcomes": 56,
+        "taken": 51
       },
       "main/logic/query_flag.hpp": {
         "outcomes": 6,
@@ -2202,8 +2230,8 @@
         "taken": 122
       },
       "main/logic/profile_view.hpp": {
-        "outcomes": 52,
-        "taken": 47
+        "outcomes": 56,
+        "taken": 51
       },
       "main/logic/query_flag.hpp": {
         "outcomes": 6,
