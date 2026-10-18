@@ -161,6 +161,10 @@ counters, recovered heap and MQTT. Afterwards allow at most 150 seconds to confi
 monotonic stressed uptime and `valid`/rollback-disarmed state. Confirmation permits at most three
 expected unwired X10A timeouts. Physical X10A and Weather are not bench prerequisites.
 
+Raw board probes wait for peer close within the original request deadline before completing.
+The exact end sample is journaled before the final pressure, counter and heap checks, so a failed
+heap check retains its measured values. Peer close does not prove TCP memory reclamation.
+
 The sole old-writer exception is the gate's exact historical `1.0.2` version/ELF identity with an
 absent OTA-stack field. Numeric below-limit stack, missing validation/heap evidence or another
 writer is refused. The returned current target still passes full health/pressure gates. That
