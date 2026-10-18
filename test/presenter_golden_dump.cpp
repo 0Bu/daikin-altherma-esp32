@@ -127,7 +127,7 @@ int main() {
     for (const auto& p : def::profiles) {
         const auto v = def::resolved(p);
         for (size_t i = 0; i < v.count(); i++) {
-            const ValueDef row = adjudicated(v[i]);
+            const ValueDef row = adjudicated(v, i);
             seen.emplace(std::string(row.label), static_cast<unsigned>(row.reg));
         }
     }

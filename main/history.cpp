@@ -58,10 +58,8 @@ constexpr size_t kLabelMax = 64;
 struct Trend {
     logic::TrendRing ring;
     char             label[kLabelMax] = {0};
-    // The row's OWN unit, captured with the label — never assumed to be °C. The catalog mixes them
-    // freely (bar for the two pressures, none at all for flow/rps/pump, where the unit lives in the
-    // label text), and a chart whose range readout and crosshair print "°C" over a bar series is
-    // the legacy-35–legacy-39 shape: well-formed, plausible, wrongly labelled.
+    // Current display unit copied from the poll cache, including explicit L/min, rps and A.
+    // This is separate from the frozen TrendDef.unit used by persisted series identity.
     char             unit[8] = {0};
 };
 

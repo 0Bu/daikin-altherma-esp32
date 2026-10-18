@@ -295,8 +295,15 @@ const PEL_INSPECT = evalTable('const PEL_INSPECT = {', '\n};', '{', 'PEL_INSPECT
   pelMeasured: noop, pelApproxText: noop, fmt1: noop,
   PEL_MEASURED_WHAT: {}, PEL_ESTIMATED_WHAT: {},
 });
+const roomSelector = appSrc.match(/^const ROOM_TEMP_RE = (.+);$/m);
+if (!roomSelector) die(2, 'ROOM_TEMP_RE definition missing');
+let ROOM_TEMP_RE;
+try { ROOM_TEMP_RE = vm.runInNewContext(roomSelector[1], {}, { timeout: 5000 }); }
+catch (e) { die(2, `ROOM_TEMP_RE does not evaluate: ${e.message}`); }
+if (Object.prototype.toString.call(ROOM_TEMP_RE) !== '[object RegExp]')
+  die(2, 'ROOM_TEMP_RE is not a regular expression');
 const INSPECT = evalTable('const INSPECT = {', '\n};', '{', 'INSPECT', {
-  lwtRow: noop, rwtRow: noop, postBuhRow: noop, vRow: noop, pickValue: noop, PEL_INSPECT,
+  lwtRow: noop, rwtRow: noop, postBuhRow: noop, vRow: noop, pickValue: noop, PEL_INSPECT, ROOM_TEMP_RE,
   OUTDOOR_HX_RE: /^(?:2 phase thermistor \(R4T\)|O\/U Heat Exch\. Temp\.(?:\(R4T\))?|O\/U Heat Exchanger Temp|Outdoor heat exchanger temp\.|R4T-Deicer temp\.)$/i,
 });
 function loadI18n() {

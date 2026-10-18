@@ -12,6 +12,7 @@
 // skipped rather than reported wrong.
 #include <cmath>
 #include <cstdint>
+#include <cstring>
 #include <limits>
 #include "value_def.hpp"
 #include "registers.hpp"
@@ -562,12 +563,6 @@ inline const char* unit_for_datatype(int dataType) {
     }
 }
 
-// Single authority for a row's display/telemetry unit, consolidating the conv-312 (Delta-Tr in K)
-// special case.
-inline const char* unit_for_row(const ValueDef& def) {
-    if (def.conv == 312) return "K";
-    return unit_for_datatype(def.type);
-}
 inline const char* device_class_for_datatype(int dataType) {
     switch (dataType) {
     case 1:
@@ -580,5 +575,34 @@ inline const char* device_class_for_datatype(int dataType) {
         return "";
     }
 }
+
+struct RowMetadata {
+    const char* unit;
+    const char* device_class;
+    bool        measurement;
+};
+
+// One bounded, allocation-free authority for API units and HA discovery. Generic catalog
+// datatypes need exact row identities, not substring guesses from arbitrary labels. Rotational
+// speed stays rps without HA's electrical-frequency device class; it is still a measurement.
+inline RowMetadata metadata_for_row(const ValueDef& def) {
+    if (def.type == -1 && def.label) {
+        if (def.reg == 0x62 && def.offset == 9 && def.conv == 105 && def.size == 2 &&
+            std::strcmp(def.label, "Flow sensor (l/min)") == 0)
+            return {"L/min", "volume_flow_rate", true};
+        if (def.reg == 0x21 && def.conv == 105 && def.size == 2 &&
+            ((def.offset == 0 && std::strcmp(def.label, "INV primary current (A)") == 0) ||
+             ((def.offset == 0 || def.offset == 2) &&
+              std::strcmp(def.label, "INV secondary current (A)") == 0)))
+            return {"A", "current", true};
+        if (def.reg == 0x30 && def.offset == 0 && def.conv == 152 && def.size == 1 &&
+            std::strcmp(def.label, "INV frequency (rps)") == 0)
+            return {"rps", "", true};
+    }
+    const char* dc = device_class_for_datatype(def.type);
+    return {def.conv == 312 ? "K" : unit_for_datatype(def.type), dc, dc[0] != '\0'};
+}
+
+inline const char* unit_for_row(const ValueDef& def) { return metadata_for_row(def).unit; }
 
 } // namespace daik

@@ -5,9 +5,8 @@
 //
 // The gates that already exist answer narrower questions and cannot answer this one:
 //
-//   • convert.hpp decodes bytes. Converters 114/119 already drop the catalog's own `0x8000`
-//     no-data marker, which is the ONLY absence the wire format itself expresses.
-//   • reading_plausible() drops a decoded value outside the physical envelope (±200 °C, a
+//   • convert.hpp decodes bytes. Converters 114/119 reject the catalog's `0x8000` no-data marker.
+//   • reading_plausible() drops a decoded value outside project bounds (−60 to 200 °C, a
 //     refrigerant pressure at 0 bar). It is a value test, so it can only catch a number that is
 //     impossible — never one that is ordinary and still not a reading.
 //   • ValueDef::no_publish marks a row the GENERATOR knows is an absent-feature placeholder on this
@@ -245,26 +244,13 @@ inline constexpr PageAbsenceRule PAGE_ABSENCE_RULES[] = {
     // 0xA0 — the same absent second outdoor unit, one page earlier, and it needed a different
     // witness because this reply is NOT all-zero: on the reference installation it reads
     //   [00 00 80 0c 00 00 00 00 00 00 ff ff 00 00 00 00]
-    // and both non-zero fields are themselves absence markers. Bytes 10-11 are the O/U MPU id, and
-    // 0xFFFF is what a bus position reads when no MPU answers from it; bytes 12-13 are the
-    // operation
-    // words (52C output, 4-way valve, crank-case heater, the three solenoids, HPS/safeguard) and
-    // not
-    // one bit of them has ever been set. Everything else is zero.
+    // Bytes 10-11 are the O/U MPU id; the structural witness requires 0xFFFF AND both operation/
+    // flag bytes 12-13 zero. Low-byte quantization is not absence evidence: 0x00/0x80 can encode
+    // valid half-degree Q8.8 temperatures. Even a plausible decoded value remains withheld while
+    // the structural signature holds.
     //
-    // The three analog rows behind that signature published exactly 0.0 °C for 316771 consecutive
-    // samples over 60 days (suction, liquid pipe, compressor port), and the fourth is worse than a
-    // zero: 0xA0/2 published 89.6-192.0 °C, seven distinct values in seven days and every one of
-    // them an exact multiple of 12.8 °C — its raw low byte never leaves 0x00/0x80, which is not how
-    // a
-    // thermistor read at 0.1 °C resolution behaves. reading_plausible() cannot refuse those: 192 °C
-    // is inside its ±200 °C envelope. That is the legacy-35–legacy-39 shape, and it is what makes
-    // this page a
-    // defect rather than a tidiness question.
-    //
-    // BOTH conditions are required, and the redundancy is the point: the id alone is the argument,
-    // the silent flag words are the corroboration, and demanding both means anything ambiguous
-    // publishes. The absence is read off THIS page's own bytes on every cycle — no claim is made
+    // BOTH conditions are required, so an identified MPU or any asserted output publishes.
+    // The absence is read off THIS page's own bytes on every cycle — no claim is made
     // about which models fit a second outdoor unit, which is the claim legacy-224 says nobody may
     // make
     // from one installation.

@@ -200,6 +200,11 @@ The space-operation flag is not thermostat demand and may be ON in Cooling with 
 R1T/R4T are internal exchanger sensors; they do not establish emitter temperatures or building load.
 BUH stage, BSH, Quiet, Defrost and BOOST stay on the component/subject they describe.
 
+The room reading accepts the catalog's `Indoor ambient temp…` and exact `RT Temp.` labels in
+both the drawing and inspector. Hybrid supplies the latter by default; other profiles supply it
+only when the row is published. Missing readings remain absent, and live X10A/HomeHub priority
+is unchanged.
+
 Each pill has one reading and one target; a second value is permitted only for the same quantity's
 setpoint. Repeat-unit readings normally need a quantity name. The documented exception is the refrigerant
 pressure-above/temperature-below convention: high/low pressure and discharge temperature are

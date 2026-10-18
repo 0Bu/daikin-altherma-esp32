@@ -268,8 +268,7 @@ inline std::string discovery_config(const std::string& node, const std::string& 
                                     const std::string& avail_topic, const ValueDef& def) {
     const std::string obj   = object_id(def.label);
     const std::string group = group_for_page(def.reg);
-    const std::string unit  = unit_for_row(def);
-    const std::string dc    = device_class_for_datatype(def.type);
+    const RowMetadata meta  = metadata_for_row(def);
     std::string j = "{";
     // name/uniq_id are the ENTITY identity and carry the group (legacy-221); `obj` below is the
     // STATE key and must not — it is what mqtt_group.hpp nests and what VictoriaMetrics is keyed on
@@ -293,8 +292,17 @@ inline std::string discovery_config(const std::string& node, const std::string& 
     // exactly the kind of guess that produced legacy-35–legacy-39 — so it is deliberately left
     // unset rather than inferred.
     if (conv_is_binary(def.conv)) { j += "\"pl_on\":\"1\",\"pl_off\":\"0\","; }
-    if (!unit.empty()) { j += "\"unit_of_meas\":\""; j += unit; j += "\","; }
-    if (!dc.empty())   { j += "\"dev_cla\":\"";      j += dc;   j += "\","; j += "\"stat_cla\":\"measurement\","; }
+    if (meta.unit[0]) {
+        j += "\"unit_of_meas\":\"";
+        j += meta.unit;
+        j += "\",";
+    }
+    if (meta.device_class[0]) {
+        j += "\"dev_cla\":\"";
+        j += meta.device_class;
+        j += "\",";
+    }
+    if (meta.measurement) j += "\"stat_cla\":\"measurement\",";
     j += device_json(node, board_id);
     j += "}";
     return j;

@@ -2,28 +2,15 @@
 // Pure hex rendering for RAW X10A page payloads on the diag log. IDF-free, so the truncation and
 // bounds behaviour are host-tested rather than discovered on a board.
 //
-// Why this exists: HTTP exposes only DECODED values (/values, /status.detect), so when a decoded
-// value is physically impossible there is no way to tell a wrong converter from a wrong byte offset
-// from a page whose layout simply differs on this unit — the wire bytes are the only evidence that
-// separates them, and they never leave the device. The 0xA0/0xA1 (O/U-II) rows are exactly that
-// case: several read a constant 0.0 while others read ~190 °C on the same unit under load, which is
-// the signature of an offset/layout mismatch, not a dead page. One diag line per probed page turns
-// that from a hypothesis into a decidable question.
+// Decoded values alone cannot distinguish a wrong converter, byte offset or model layout from an
+// unpopulated measurement. Raw replies preserve that distinction. Numeric patterns on 0xA0/0xA1
+// alone establish neither presence nor absence; availability.hpp evaluates structural evidence.
+// Even a temperature inside reading_plausible()'s −60 to 200 °C envelope can be a wrong decode:
+// Target Evap. Temp. once reached 199.6 °C before its converter adjudication. Dumps of identity,
+// outdoor and indoor pages provide the wire evidence needed to resolve such cases.
 //
-// The sharper case is a reading that is impossible yet lands INSIDE reading_plausible()'s ±200 °C
-// window, so no gate ever fires and it reaches Home Assistant and Grafana as a real measurement:
-// measured on a live unit, Target Evap. Temp. (page 0x10 offset 6) reached 199.6 °C — 0.4 °C under
-// the ceiling — and the two outdoor pressures (page 0x20 offsets 12/14) stayed at 0.0 bar through
-// every sample taken while the compressor ran at 42 rps with 104.5 °C discharge, where an R32 high
-// side runs 25-40 bar. A plausibility bound cannot catch those; only the wire bytes distinguish an
-// absent sensor from a wrong offset, which is why 0x10 and 0x20 are dumped too.
-//
-// HISTORICAL LIMITATION: this dump is emitted ONLY on a detect pass — at boot, or on POST /detect.
-// A detect pass essentially never coincides with a compressor run, and Target Evap. Temp. was only
-// wrong WHILE the compressor ran. legacy-209 added the complementary runtime capture and the
-// resulting wire evidence resolved legacy-194 through logic/conv_override.hpp. The detect dump
-// remains intentionally separate: it answers page/layout questions during discovery, while
-// raw_capture.hpp samples a bounded number of running-state frames.
+// Detection uses this renderer for discovery probes. The separate raw_capture.hpp cadence samples
+// a bounded number of running-state frames, which discovery alone may miss.
 #include <cstdint>
 
 namespace daik {

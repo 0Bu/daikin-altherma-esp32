@@ -132,10 +132,10 @@ enum class TrendKind : uint8_t {
 
 // `reg`/`off`/`unit` are the LOCATOR for an ordinary Row (see the header note). BinaryState and
 // BinaryEvent also carry `conv`, because the 3-way valve and BSH share their dimensionless byte
-// with five unrelated state bits. `unit` is the string the poll cache carries for the row —
-// convert.hpp's unit_for_row(): "°C", "bar", "A", or "" for a row whose unit lives in its label
-// ("Flow sensor (l/min)"). It is spelled out here rather than taken as a type code so this header
-// stays free of convert.hpp; the catalog test checks the two agree.
+// with five unrelated state bits. `unit` is the original catalog unit and part of the persisted
+// series identity. Three formerly empty units now have explicit poll-cache metadata; the bounded
+// compatibility rule below accepts those spellings without changing the stored catalog. Keeping
+// the strings here rather than datatype codes leaves this header free of convert.hpp.
 //
 // `label` is EMPTY for a Row — which profile row it resolved to is discovered at runtime, and its
 // label is how the browser attaches the series to the value row it is already drawing. A derived
@@ -289,8 +289,22 @@ constexpr HistorySample history_bytes_tenths_kib(uint32_t bytes) {
                                                      : static_cast<HistorySample>(tenths);
 }
 
-// Does this cached row carry the value a trend addresses? Three exact comparisons, no matching and
-// no heuristics: whatever the profile calls the row, the byte window and the unit are the value's
+// The original catalog units remain frozen for persisted series identity. Accept the newly
+// explicit measurement units only for these three existing row locators; empty legacy units
+// still match directly. This must not merge pressure/temperature twins sharing one byte window.
+constexpr bool trend_unit_matches(const TrendDef& d, const char* unit) {
+    if (trend_cstr_eq(unit, d.unit)) return true;
+    if (d.kind != TrendKind::Row || !trend_cstr_eq(d.unit, "")) return false;
+    return (d.reg == 0x62 && d.off == 9 && trend_cstr_eq(d.id, "flow") &&
+            trend_cstr_eq(unit, "L/min")) ||
+           (d.reg == 0x30 && d.off == 0 && trend_cstr_eq(d.id, "comp_rps") &&
+            trend_cstr_eq(unit, "rps")) ||
+           (d.reg == 0x21 && d.off == 0 && trend_cstr_eq(d.id, "inv_current") &&
+            trend_cstr_eq(unit, "A"));
+}
+
+// Does this cached row carry the value a trend addresses? Exact coordinates and bounded unit
+// compatibility: whatever the profile calls the row, the byte window and the unit are the value's
 // identity. A profile that does not carry the row yields no match at all (see trend_select).
 // A BOARD trend matches nothing here — it is not looking for a row, and a locator of (0, 0) must
 // never be allowed to collide with one.
@@ -298,7 +312,7 @@ constexpr bool trend_row_matches(const TrendDef& d, unsigned reg, unsigned off, 
                                  int conv = -1) {
     const bool row_kind = d.kind == TrendKind::Row || d.kind == TrendKind::BinaryState ||
                           d.kind == TrendKind::BinaryEvent;
-    return row_kind && reg == d.reg && off == d.off && trend_cstr_eq(unit, d.unit) &&
+    return row_kind && reg == d.reg && off == d.off && trend_unit_matches(d, unit) &&
            (d.conv < 0 || conv == d.conv);
 }
 

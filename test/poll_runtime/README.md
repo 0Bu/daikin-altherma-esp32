@@ -4,6 +4,10 @@
 tables and production logic headers. Cases run as separate processes, so static caches, detection
 tallies, saturation carry, tickets and the boot capture budget do not leak between cases.
 
+- `outdoor_hx_scale` runs signed Q8.8 samples through the complete poll/formatter/cache path,
+  the known detector representative and an excluded profile, plus invalid/absent-unit controls.
+  Its mutation removes the profile context and must reproduce the old scale failure.
+
 - `oom_raii` keeps the original seven task iterations, real reserve/copy allocation failures,
   cache aging, quiescence, recovery and mutex-unwind checks and their six semantic controls.
 - Detection cases feed the real `poll_detect()` with independent adapter sweeps: adjacent agreeing

@@ -166,11 +166,14 @@ try { js = readAppSource(P("main/www/app.sources")); }
 catch (e) { die(e.message); }
 
 const figure = block(html, /<figure\b[^>]*\bid="schem"/, "figure", "schematic card");
+// liveData shares this selector with the inspector. Its definition still changes painted pixels.
+const roomSelectorSource = js.match(/^const ROOM_TEMP_RE = .+;$/m)?.[0];
+if (!roomSelectorSource) die("app.sources has no ROOM_TEMP_RE definition");
 
 const parts = {
   "schematic markup": figure,
   "schematic css": schematicCss(css),
-  "painting code": FNS.map((n) => fnSource(js, n)).join("\n"),
+  "painting code": [...FNS.map((n) => fnSource(js, n)), roomSelectorSource].join("\n"),
   "drawing strings": i18nForFigure(figure, js),
   "scenes": read("tools/uigif/scenes.js"),
   "framing": read("scripts/record-dashboard-gif.sh"),

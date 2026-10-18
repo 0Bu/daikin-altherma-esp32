@@ -511,6 +511,16 @@ open(p, 'w').write(s.replace('d="M387 180 H 425"', 'd="M378 180 H 425"', 1))
 PY
 run_case "…and it measures boxes, not just discs" 1 "G011 wsup|phe"
 
+# A factored production selector is an input, never a silently supplied checker default.
+reset
+patch_file "$WORK/main/www/js/schematic.js" <<'PY'
+import sys
+p = sys.argv[1]; s = open(p).read()
+if 'const ROOM_TEMP_RE = ' not in s: sys.exit(1)
+open(p, 'w').write(s.replace('const ROOM_TEMP_RE = ', 'const OMIT_ROOM_TEMP_RE = ', 1))
+PY
+run_case "missing production room selector fails closed" 2 "ROOM_TEMP_RE definition missing"
+
 echo
 if [ "$fail" -eq 0 ]; then
     echo "schematic audit selftest: all $pass cases caught"

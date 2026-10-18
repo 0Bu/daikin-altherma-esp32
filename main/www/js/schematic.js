@@ -17,6 +17,7 @@ const vOn = (re) => { const r = vRow(re); return r ? String(r.value).trim() === 
 // other families call the same location a deicer or two-phase thermistor. Keep the alternatives
 // exact so "Heat exchanger mid-temp." at offset 8 can never substitute for this R4T curve.
 const OUTDOOR_HX_RE = /^(?:2 phase thermistor \(R4T\)|O\/U Heat Exch\. Temp\.(?:\(R4T\))?|O\/U Heat Exchanger Temp|Outdoor heat exchanger temp\.|R4T-Deicer temp\.)$/i;
+const ROOM_TEMP_RE = /^(?:indoor ambient temp|RT Temp\.$)/i;
 
 // The outdoor unit's OWN register pages — logic/ou_stale.hpp's ou_page_holds_over(), transcribed:
 // 0x20 (outdoor sensors) and 0x21 (inverter) are only refreshed while the compressor runs, so with
@@ -241,7 +242,7 @@ function liveData() {
     r3t: vNum(/refrig\. temp\. liquid side/i),
     tank: vNum(/dhw tank temp/i),
     tankSet: vNum(/dhw setpoint/i),
-    room: vNum(/^indoor ambient temp/i),
+    room: vNum(ROOM_TEMP_RE),
     roomSet: vNum(/^rt setpoint/i),
     // The catalog currently exposes only the HEATING target. Quoting it while cooling would compare
     // a valid measured ΔT with the wrong controller target, so it is attached after mode resolution.
@@ -1209,19 +1210,19 @@ const INSPECT = {
               de: `Wasser wird zum ${activeSpaceKind(d) === "cool" ? "Kühlkreis" : activeSpaceKind(d) === "heat" ? "Heizkreis" : "Raumkreis"} geführt. Der interne R1T misst ${degC(d.lwt)}; kein nachgeschalteter Fühler bestätigt die Flächentemperatur.` }
         : { en: "Current pump and flow readings do not establish circulation through the space branch.",
             de: "Die aktuellen Pumpen- und Durchflusswerte belegen keine Zirkulation durch den Raumzweig." },
-    rows: [/^indoor ambient temp/i, /^rt setpoint/i, { sel: /^space heating operation/i, cid: "space_op" }],
+    rows: [ROOM_TEMP_RE, /^rt setpoint/i, { sel: /^space heating operation/i, cid: "space_op" }],
   },
   // This catalog row is normal space heat/cool operation, not a heating demand. "Thermostat ON/OFF"
   // remains with the indoor-unit status byte; neither bit alone proves compressor operation.
   spaceh: {
     t: { en: "Space heating/cooling operation", de: "Raumheiz-/kühlbetrieb" },
     re: /^space heating operation/i, sample: "Space heating Operation ON/OFF",
-    rows: [/^space heating operation/i, /^indoor ambient temp/i, /^rt setpoint/i],
+    rows: [/^space heating operation/i, ROOM_TEMP_RE, /^rt setpoint/i],
   },
   room: {
     t: { en: "Room temperature", de: "Raumtemperatur" },
-    re: /^indoor ambient temp/i, sample: "Indoor Ambient Temp. (R1T)",
-    rows: [/^indoor ambient temp/i, /^rt setpoint/i],
+    re: ROOM_TEMP_RE, sample: "Indoor Ambient Temp. (R1T)",
+    rows: [ROOM_TEMP_RE, /^rt setpoint/i],
   },
   pump: {
     t: { en: "Circulation pump", de: "Umwälzpumpe" },

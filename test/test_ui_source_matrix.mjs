@@ -98,7 +98,71 @@ function ctx({ x10a, mbEnabled, mbConnected, values = [], modbus = [], elements 
     context, { filename: "main/www/app.sources" });
   context.__api.S = context.S;
   context.__api.setTxLang = (lang) => { context.LANG = lang; };
+  context.__api.renderLiveFixture = () => vm.runInContext(
+    "renderEnv3Pill = () => {}; renderInspect = () => {}; renderLive();", context);
   return context.__api;
+}
+
+// Hybrid's default room sensor uses RT Temp.; HPSU6 uses the same label only when that row
+// actually reaches /values. The source selector, drawing and inspector must agree on that row.
+{
+  for (const profile of ["altherma_hybrid", "altherma_hpsu6_ultra"]) {
+    const catalog = fs.readFileSync(new URL(`../main/def/${profile}.hpp`, import.meta.url), "utf8");
+    assert.match(catalog, /\{0x61, 12, 105, 2, 1, "RT Temp\."\}/);
+    assert.match(catalog, /\{0x62, 5, 105, 2, 1, "RT setpoint"\}/);
+  }
+  const hybrid = fs.readFileSync(new URL("../main/def/altherma_hybrid.hpp", import.meta.url), "utf8");
+  assert.match(hybrid, /"RT Temp\."\},\s*\/\/ default_on/);
+  const room = X("RT Temp.", "21.5", "room_temp", { off: 12 });
+  const setpoint = X("RT setpoint", "22.0", "room_setpoint", { reg: 0x62, off: 5 });
+  const hubRoom = M(50, "Remote controller room temperature Main", "23.0", "room_temp");
+  const nodes = new Map();
+  const elements = new Proxy({}, { get: (_, id) => {
+    if (!nodes.has(id)) {
+      const classes = new Set();
+      nodes.set(id, { textContent: "", setAttribute() {}, closest: () => null,
+        classList: { add: (c) => classes.add(c), remove: (c) => classes.delete(c),
+          contains: (c) => classes.has(c),
+          toggle: (c, on) => { if (on) classes.add(c); else classes.delete(c); } } });
+    }
+    return nodes.get(id);
+  } });
+  const c = ctx({ x10a: true, mbEnabled: false, mbConnected: false,
+                  values: [room, setpoint], elements });
+  c.S.live = c.liveData();
+  assert.equal(c.S.live.room, 21.5);
+  assert.equal(c.S.live.roomSet, 22);
+  c.renderLiveFixture();
+  assert.equal(nodes.get("svRoom").textContent, "21.5");
+  assert.equal(nodes.get("svRoomSet").textContent, "22.0");
+  assert.equal(nodes.get("schem").classList.contains("no-room"), false);
+  assert.equal(c.inspCurRow(c.INSPECT.room), room);
+  for (const entry of [c.INSPECT.room, c.INSPECT.heat, c.INSPECT.spaceh])
+    assert.ok(c.inspMembers(entry, null, null).some((m) => m.x10a === room),
+      "each room/component inspector resolves the actual Hybrid room row");
+  for (const missing of [[], [X("RT Temp.", null, "room_temp")],
+                         [X("RT Temp. unsupported suffix", "99", "room_temp")]]) {
+    c.S._values = [...missing, setpoint];
+    c.S.live = c.liveData();
+    assert.equal(c.S.live.room, null, "absent, withheld or unrelated room rows never become zero");
+    c.renderLiveFixture();
+    assert.equal(nodes.get("schem").classList.contains("no-room"), true);
+    assert.equal(nodes.get("svRoom").textContent, "—");
+  }
+  for (const label of ["RT Temp.", "Indoor ambient temp. (R1T)"]) {
+    const measured = { ...room, label };
+    const both = ctx({ x10a: true, mbEnabled: true, mbConnected: true,
+                       values: [measured, setpoint], modbus: [hubRoom] });
+    assert.equal(both.liveData().room, 21.5, "live X10A room wins over HomeHub");
+    assert.equal(both.inspCurRow(both.INSPECT.room), measured);
+    both.S.status.hp.connected = false;
+    assert.equal(both.liveData().room, 23, "live HomeHub substitutes for a lost X10A source");
+    both.S.status.modbus.connected = false;
+    assert.equal(both.mbVal(50), null, "stale HomeHub is never a fallback reading");
+    both.S.status.hp.connected = true;
+    both.S._values = [setpoint];
+    assert.equal(both.liveData().room, null, "missing X10A room plus stale HomeHub remains absent");
+  }
 }
 
 // Boost, BSH and both outdoor modes are permanent state pills. Their compact faces keep only the

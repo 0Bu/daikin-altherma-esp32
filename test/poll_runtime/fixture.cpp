@@ -12,6 +12,7 @@
 #error "Bind the complete production hp_poll.cpp"
 #endif
 #include POLL_PRODUCTION_SOURCE
+#include "def/signatures.hpp"
 void* operator new(size_t n) {
     sdk::last_new_bytes = n;
     if (sdk::fail_next_new) {
@@ -465,6 +466,71 @@ static void put16(uint8_t reg, unsigned offset, uint16_t raw) {
     adapter::pages[reg][offset + 1] = static_cast<uint8_t>(raw >> 8);
 }
 
+static void run_outdoor_hx_scale() {
+    setup("altherma_erga_e_ehv_ehb_ehvz_e_ej_series_04_08kw");
+    adapter::populated          = true;
+    adapter::available[0xA0]    = true;
+    adapter::page_lengths[0xA0] = 16;
+    adapter::pages[0xA0][10]    = 1; // identified unit, not the absent-second-outdoor marker
+    const uint16_t raw[]        = {0xFF80, 0x0100, 0xFA00, 0x1780, 0x8000};
+    const char*    expected[]   = {"-0.5", "1.0", "-6.0", "23.5", ""};
+    for (size_t i = 0; i < 5; ++i) {
+        put16(0xA0, 2, raw[i]);
+        daik::poll_once();
+        bool found = false;
+        for (const auto& row : daik::s_cache) {
+            if (row.reg != 0xA0 || row.off != 2) continue;
+            found = true;
+            oracle(row.conv == 103 && row.value == expected[i] && !std::strcmp(row.unit, "°C"),
+                   "outdoor_hx_profile_scale_reaches_cache");
+        }
+        oracle(found, "outdoor_hx_real_profile_row_present");
+    }
+    // Resolve the known ERGA fingerprint through the real detector before the formatter/cache.
+    int               signature_count = 0;
+    const auto*       sigs            = daik::def::signatures(signature_count);
+    daik::Fingerprint fingerprint{};
+    fingerprint.page_mask      = 0x1bff;
+    fingerprint.iu_kw_tenths   = 80;
+    const char* representative = daik::detect_best(sigs, signature_count, fingerprint);
+    oracle(representative &&
+               !std::strcmp(representative, "altherma_ebla_edla_d_series_4_8kw_monobloc"),
+           "outdoor_hx_known_representative");
+    adapter::cfg.profile = representative;
+    put16(0xA0, 2, 0x1780);
+    daik::poll_once();
+    bool represented = false;
+    for (const auto& row : daik::s_cache)
+        if (row.reg == 0xA0 && row.off == 2) {
+            represented = true;
+            oracle(row.conv == 103 && row.value == "23.5",
+                   "outdoor_hx_detected_representative_corrected");
+        }
+    oracle(represented, "outdoor_hx_representative_row_present");
+    // Another register-identical table alias remains outside the explicit evidence scope.
+    adapter::cfg.profile = "altherma_erga_d_ehv_ehb_ehvz_dj_series_04_08_kw";
+    put16(0xA0, 2, 0x0100);
+    daik::poll_once();
+    bool unproven = false;
+    for (const auto& row : daik::s_cache)
+        if (row.reg == 0xA0 && row.off == 2) {
+            unproven = true;
+            oracle(row.conv == 119 && row.value == "25.6", "outdoor_hx_unproven_profile_unchanged");
+        }
+    oracle(unproven, "outdoor_hx_unproven_row_present");
+    adapter::cfg.profile = "altherma_erga_e_ehv_ehb_ehvz_e_ej_series_04_08kw";
+    std::memset(adapter::pages[0xA0], 0, sizeof(adapter::pages[0xA0]));
+    adapter::pages[0xA0][10] = adapter::pages[0xA0][11] = 0xFF;
+    daik::poll_once();
+    bool absent = false;
+    for (const auto& row : daik::s_cache)
+        if (row.reg == 0xA0 && row.off == 2) {
+            absent = true;
+            oracle(row.value.empty(), "outdoor_hx_absent_unit_stays_absent");
+        }
+    oracle(absent, "outdoor_hx_absent_row_present");
+}
+
 static uint16_t pressure_for(double target) {
     const daik::ValueDef row{0x62, 15, 405, 2, 1, "Pressure sensor(T)"};
     for (uint16_t raw = 1; raw <= 470; ++raw) {
@@ -864,6 +930,8 @@ int main(int argc, char** argv) {
         run_probe(name);
     else if (!std::strcmp(name, "mqtt_scalar_source"))
         run_mqtt_scalar_source();
+    else if (!std::strcmp(name, "outdoor_hx_scale"))
+        run_outdoor_hx_scale();
     else if (!std::strncmp(name, "raw_", 4))
         run_raw(name);
     else if (!std::strncmp(name, "refrigerant_", 12))

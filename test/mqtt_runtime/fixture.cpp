@@ -3379,7 +3379,7 @@ std::set<std::string> fixture_profile_topics(const std::string& profile) {
     std::set<std::string> topics;
     const auto            rows = daik::def::resolved(daik::def::lookup(profile.c_str()));
     for (size_t i = 0; i < rows.count(); ++i) {
-        const auto row = daik::logic::adjudicated(rows[i]);
+        const auto row = daik::logic::adjudicated(rows, i);
         if (!daik::row_publishable(row) || !daik::conv_publishable(row.conv) ||
             daik::object_id(row.label).empty())
             continue;
@@ -3418,7 +3418,7 @@ void profile_cutover_delivery() {
                 daik::s_retiring_profile_shape == 0 &&
                 daik::discovery_topic(
                     daik::s_prefix, daik::s_node,
-                    daik::logic::adjudicated(old_rows[daik::s_retiring_profile_row])) ==
+                    daik::logic::adjudicated(old_rows, daik::s_retiring_profile_row)) ==
                     sdk::published[0].topic.data(),
             "PROFILE_REJECTED_RETIREMENT_RETAINS_EXACT_CURSOR");
     require(sdk::publish_calls == 1 && sdk::published[0].length == 0,
