@@ -285,7 +285,7 @@ static void poll_once() {
     uint32_t service_register_count = 0;
     for (size_t i = 0; i < view.count(); i++) {
         if (!row_publishable(view[i])) continue;
-        const ValueDef row = logic::adjudicated(view[i]);
+        const ValueDef row                  = logic::adjudicated(view, i);
         const uint8_t service_register_bit = static_cast<uint8_t>(1U << (row.reg & 7U));
         if (!(s_refrigerant_service_seen_registers[row.reg >> 3U] & service_register_bit)) {
             s_refrigerant_service_seen_registers[row.reg >> 3U] |= service_register_bit;
@@ -444,7 +444,7 @@ static void poll_once() {
             // (logic/conv_override.hpp). Applied HERE, at the point the row enters the pipeline, so
             // the decode, the cached converter id and everything downstream that keys on it —
             // published_kind, conv_is_binary, display_decimals — cannot disagree about one row.
-            const ValueDef def = logic::adjudicated(view[k]);
+            const ValueDef def = logic::adjudicated(view, k);
             CachedValue cv;
             cv.label = def.label;
             cv.unit  = unit_for_row(def);

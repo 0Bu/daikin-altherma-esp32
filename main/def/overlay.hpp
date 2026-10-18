@@ -178,6 +178,7 @@ inline bool observability_applies(const Profile& p) {
 inline logic::ProfileView resolved(const Profile& p) {
     logic::ProfileView v =
         logic::profile_view(p.values, p.count, retry_rows, RETRY_ROW_COUNT, OVERLAY_PAGE);
+    v.profile_id = p.id;
     if (!observability_applies(p)) return v;
     return logic::profile_view_extend_existing_pages(v, observability_rows,
                                                      OBSERVABILITY_ROW_COUNT);

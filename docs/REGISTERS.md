@@ -28,16 +28,16 @@ matching `daik::ValueDef` in [`logic/value_def.hpp`](../main/logic/value_def.hpp
 | `offset` | Byte offset of the value **within the reply payload** (payload starts at byte 3 for protocol `I`) |
 | `conv` | Converter id — how the bytes become a number/enum (see [§3](#3-converter-reference)) |
 | `size` | Field width in bytes (1 or 2) |
-| `type` | Publication unit/`device_class`: `1`=°C, `2`=bar, `3`=A, `-1`=generic. Independent of `conv` |
+| `type` | Default publication unit/`device_class`: `1`=°C, `2`=bar, `3`=A, `-1`=generic. Independent of `conv` |
 | `label` | Human label (English) |
 
 A model profile is just an array of these rows. One register request feeds many rows (all the
 values whose `reg` matches), each sliced out by `(offset, size)` and decoded by `conv`.
 
 > **`type` vs `conv`.** `conv` decides the intrinsic wire decode (sign, scale, enum). `type` decides
-> the HA unit/`device_class` and normalizes pressure from wire kgf/cm² to published bar. Current
-> values often carry `type = -1` and put "(A)" in the label; their numeric scale still comes from
-> `conv`.
+> the default HA unit/`device_class` and normalizes pressure from wire kgf/cm² to published bar.
+> Exact row-metadata exceptions are defined in [MQTT identity and discovery](MQTT.md#identity-and-discovery);
+> they do not change the numeric scale supplied by `conv`.
 
 ---
 
@@ -336,7 +336,7 @@ the I/U capacity code (`0x60` offset 6).
 > with conv `109`** (legacy-194,
 > legacy-209). With conv `114` this row read
 > **240.6 °C at rest** and **145.9 → 199.6 °C while the compressor runs** — impossible for an
-> evaporating temperature, and the run-time values land *inside* `reading_plausible()`'s ±200 °C
+> evaporating temperature, and the run-time values land *inside* `reading_plausible()`'s −60 to 200 °C
 > envelope, so nothing masked them. legacy-194 ruled out offset shift, endianness, width and catalog drift
 > and stopped at two surviving scales, `×0.01` and `÷128`, calling for run-time wire bytes to decide.
 >
@@ -463,6 +463,16 @@ the I/U capacity code (`0x60` offset 6).
 
 #### Register `0xA0`
 
+**Scoped decode correction:** field feedback for ERGA08EVH7 establishes signed little-endian
+`raw / 256` for offset 2, "Outdoor heat exchanger temp." (`80 FF` → −0.5 °C;
+`80 17` → 23.5 °C). [`conv_override.hpp`](../main/logic/conv_override.hpp) therefore uses converter
+103 for this exact row on the ERGA E 4–8 kW profile and its explicit register-identical EBLA/EDLA D
+4–8 kW runtime representative (see [`detect_identity.hpp`](../main/logic/detect_identity.hpp)).
+The representative is not independent confirmation of another hardware family. Other profiles,
+other converter-119 fields and converter 114 retain their existing semantics. The generated table
+below remains 119; `00 80` still publishes no value because −128 °C fails the temperature envelope,
+and an absent outdoor unit remains absent.
+
 | Off | Len | Conv | Bit | Type | Value |
 |----:|----:|:----:|:---:|:----:|-------|
 | 0 | 2 | 119 |  | °C | Suction temp |
@@ -487,22 +497,18 @@ the I/U capacity code (`0x60` offset 6).
 | 14 | 2 | 105 |  | °C | Compressor port temperature |
 
 > **Absent second-outdoor-unit signature (legacy-224).** On the audited installation this page answers
-> `00 00 80 0c 00 00 00 00 00 00 ff ff 00 00 00 00` — and both non-zero fields are themselves
-> absence markers: the O/U MPU id at offsets 10-11 reads `0xFFFF` (no MPU answers from that bus
-> position) and the two operation words at 12-13 have never had a bit set. `logic/availability.hpp`
+> `00 00 80 0c 00 00 00 00 00 00 ff ff 00 00 00 00`. The O/U MPU id at offsets 10-11 reads
+> `0xFFFF` (no MPU answers from that bus position) and neither operation/flag byte at 12-13 asserts
+> an output. `logic/availability.hpp`
 > (`PAGE_ABSENCE_RULES`, signature `UnidentifiedUnit`) therefore withholds **every row on this page**
 > while both hold, and a reply shorter than 14 bytes proves nothing. Both conditions are required so
 > that anything ambiguous publishes: an MPU that identifies itself is a fitted unit however quiet it
 > is, and a unit asserting any output is fitted however it identifies itself.
 >
-> What it withholds, measured on that installation: `Suction temp`, `Liquid pipe temp.` and
-> `Compressor port temperature` published exactly `0.0 °C` for 316 771 consecutive samples over 60
-> days, and `Outdoor heat exchanger temp.` at offset 2 published `89.6-192.0 °C` — seven distinct
-> values in seven days, every one an exact multiple of `12.8 °C`, because its raw low byte never
-> leaves `0x00`/`0x80`. That last one is not a temperature under any scale, and the ±200 °C envelope
-> of `reading_plausible()` cannot refuse it. `Expansion valve 3 (pls) [OU-II]` at offset 8 is covered
-> too while keeping its own conv-151 pulse ceiling (§3.1) for the populated case — the reason the
-> verdict is keyed on the page rather than on the rows.
+> Byte quantization alone proves no absence: low bytes `0x00`/`0x80` can encode valid half-degree
+> temperatures under Q8.8. The structural signature above is the absence witness; while it holds,
+> even plausible decoded temperatures remain withheld. `Expansion valve 3 (pls) [OU-II]` at offset
+> 8 is covered too, while retaining its own conv-151 pulse ceiling (§3.1) for a populated page.
 
 #### Register `0xA1`
 
@@ -742,9 +748,9 @@ Protocol S operation mode and diagnostic fault codes.
 
 ## 6. Home Assistant mapping
 
-- **Unit / device_class** come from the `type` field: `1 → °C / temperature`, `2 → bar / pressure`,
-  `3 → A / current`, else generic. See `unit_for_datatype()` / `device_class_for_datatype()` in
-  [`logic/convert.hpp`](../main/logic/convert.hpp).
+- **Unit / device_class** default to the `type` field. Exact row exceptions and statistics metadata
+  follow [MQTT identity and discovery](MQTT.md#identity-and-discovery), implemented by
+  `metadata_for_row()` in [`logic/convert.hpp`](../main/logic/convert.hpp).
 - **Enum values** (operation mode, indoor mode, error class) are best exposed as text sensors.
 - **Bit flags** (`conv 300–307`) map naturally to `binary_sensor`s and publish numeric `1`/`0`.
 - A value whose converter is not implemented returns `unimpl` and is simply skipped — never reported

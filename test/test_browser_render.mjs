@@ -835,6 +835,143 @@ async function assertNativeAltherma4(page, context) {
   }
 }
 
+async function assertHybridRoom(page, context, locale) {
+  const decimal = new Intl.NumberFormat(locale, {
+    minimumFractionDigits: 1, maximumFractionDigits: 1,
+  });
+  await page.waitFor("!S.clickHold");
+  try {
+    await page.evaluate(`(() => {
+      window.__browserHybridRoomOriginal = { ...S };
+      S.status = structuredClone(S.status);
+      S.status.hp.connected = true;
+      S.status.diagnostics.enabled = false;
+      S.status.profile = { id: "altherma_hybrid", name: "Altherma Hybrid" };
+      S.status.modbus = { ...S.status.modbus, host: "", enabled: false, connected: false };
+      S.status.history = { rows: [], modbus_rows: [], env3_rows: [] };
+      S._modbus = [];
+      // These are the Hybrid catalog's own labels, including its default RT Temp. spelling.
+      S._values = [
+        { label: "I/U operation mode", value: "Heating", reg: 0x60 },
+        { label: "Outlet Water Heat Exch. Temp. (R1T)", value: "35.0", unit: "°C", reg: 0x61, off: 2 },
+        { label: "Outlet Water BUH Temp. (R2T)", value: "35.2", unit: "°C", reg: 0x61, off: 4 },
+        { label: "Inlet water temp.(R4T)", value: "30.0", unit: "°C", reg: 0x61, off: 8 },
+        { label: "RT Temp.", value: "21.5", unit: "°C", reg: 0x61, off: 12, concept: "room_temp" },
+        { label: "RT setpoint", value: "22.0", unit: "°C", reg: 0x62, off: 5 },
+      ];
+      S.descOpen = new Set();
+      S.hist = new Map();
+      S.histPin = new Map();
+      S.histBusy = new Set();
+      S.histRequests = new Map();
+      S.insp = null;
+      S.inspSig = null;
+      S.inspHistSig = null;
+      S.scrub = null;
+      S.clickHold = false;
+      renderApp();
+      return true;
+    })()`);
+    await page.frame();
+    assert.deepEqual(await page.evaluate(`(() => {
+      const room = document.querySelector("#schem [data-insp=room]");
+      const rect = room.getBoundingClientRect();
+      return {
+        noSubstitute: !mbLive() && S._modbus.length === 0 &&
+          !S._values.some(row => /^indoor ambient temp/i.test(row.label)),
+        room: S.live.room, target: S.live.roomSet,
+        visible: !document.getElementById("schem").classList.contains("no-room") &&
+          getComputedStyle(room).display !== "none" && rect.width > 0 && rect.height > 0,
+        roomText: document.getElementById("svRoom").textContent,
+        targetText: document.getElementById("svRoomSet").textContent,
+        preBuh: S.live.lwt, postBuh: S.live.r2t,
+        preBuhText: document.getElementById("svLwt").textContent,
+        postBuhText: document.getElementById("svR2t").textContent,
+      };
+    })()`), { noSubstitute: true, room: 21.5, target: 22, visible: true,
+      roomText: decimal.format(21.5), targetText: decimal.format(22), preBuh: 35, postBuh: 35.2,
+      preBuhText: decimal.format(35), postBuhText: decimal.format(35.2) },
+    `${context}: the original Hybrid room reading and target must render without a substitute source`);
+
+    await page.waitFor(`!document.getElementById("inspect").classList.contains("open") &&
+      document.getElementById("inspect").getAnimations({subtree: true})
+        .every(animation => animation.playState !== "running")`);
+    await page.evaluate(`document.querySelector("#schem [data-insp=room]")
+      .scrollIntoView({block: "center", behavior: "instant"}); true`);
+    await page.frame();
+    const point = await page.evaluate(`(() => {
+      const hit = document.querySelector("#schem [data-insp=room] .sc-hitarea");
+      const rect = hit.getBoundingClientRect();
+      const point = {x: rect.left + rect.width / 2, y: rect.top + rect.height / 2};
+      return {...point, target: document.elementFromPoint(point.x, point.y)
+        ?.closest("[data-insp]")?.dataset.insp};
+    })()`);
+    assert.equal(point.target, "room", `${context}: pointer must reach the actual room hit target`);
+    const {x, y} = point;
+    await page.send("Input.dispatchMouseEvent", {type: "mouseMoved", x, y});
+    await page.send("Input.dispatchMouseEvent",
+      {type: "mousePressed", button: "left", clickCount: 1, x, y});
+    await page.send("Input.dispatchMouseEvent",
+      {type: "mouseReleased", button: "left", clickCount: 1, x, y});
+    await page.waitFor(`S.insp === "room" && document.getElementById("inspect").classList.contains("open") &&
+      document.getElementById("inspect").getAnimations({subtree: true})
+        .every(animation => animation.playState !== "running")`);
+    // The inspector preserves the source row's numeric text; the schematic formats it by locale.
+    assert.deepEqual(await page.evaluate(`(() => ({
+      label: inspCurRow(INSPECT.room)?.label,
+      value: document.getElementById("inspNow").textContent,
+      source: document.getElementById("inspSrc").textContent,
+      expectedSource: displayReadingLabel("RT Temp.", inspCurRow(INSPECT.room)),
+      substitute: !!mbForInspect("room"),
+    }))()`), { label: "RT Temp.", value: "21.5 °C",
+      source: await page.evaluate('displayReadingLabel("RT Temp.", inspCurRow(INSPECT.room))'),
+      expectedSource: await page.evaluate('displayReadingLabel("RT Temp.", inspCurRow(INSPECT.room))'),
+      substitute: false }, `${context}: a real room click must expose the original reading and its source`);
+    assertLayout(await page.evaluate(layoutAudit), `${context}/inspector`);
+    await assertAccessibility(page, `${context}/inspector`, { nativeTree: true });
+    await captureNativeEvidence(page, `${context}/schematic`, "schem");
+    await captureNativeEvidence(page, `${context}/inspector`, "inspect");
+
+    for (const withheld of [false, true]) {
+      await page.evaluate(`(() => {
+        S._values = S._values.filter(row => row.label !== "RT Temp.");
+        if (${withheld}) S._values.push({ label: "RT Temp.", value: null, unit: "°C",
+          reg: 0x61, off: 12, concept: "room_temp" });
+        renderApp();
+        return true;
+      })()`);
+      await page.frame();
+      assert.deepEqual(await page.evaluate(`(() => ({
+        room: S.live.room,
+        blank: document.getElementById("svRoom").textContent,
+        hidden: document.getElementById("schem").classList.contains("no-room") &&
+          getComputedStyle(document.querySelector("#schem [data-insp=room]")).display === "none",
+        inspector: document.getElementById("inspNow").textContent,
+        preBuh: S.live.lwt, postBuh: S.live.r2t,
+      }))()`), { room: null, blank: "—", hidden: true, inspector: "—", preBuh: 35, postBuh: 35.2 },
+      `${context}/${withheld ? "withheld" : "missing"}: no room reading must remain absent in drawing and inspector`);
+      assertLayout(await page.evaluate(layoutAudit), `${context}/missing-room`);
+    }
+    await captureNativeEvidence(page, `${context}/missing-room`, "schem");
+    assert.deepEqual(page.diagnostics, [], `${context}: room rendering and real clicks must emit no browser errors`);
+  } finally {
+    await page.waitFor("!S.clickHold");
+    assert.equal(await page.evaluate(`(() => {
+      const original = window.__browserHybridRoomOriginal;
+      Object.assign(S, original);
+      S.inspSig = null;
+      S.inspHistSig = null;
+      renderApp();
+      window.scrollTo(0, 0);
+      delete window.__browserHybridRoomOriginal;
+      return S.status === original.status && S._values === original._values &&
+        S._modbus === original._modbus && S.descOpen === original.descOpen &&
+        document.getElementById("inspect").classList.contains("open") === !!INSPECT[S.insp];
+    })()`), true, `${context}: the original source and inspector state must be restored`);
+    await page.frame();
+  }
+}
+
 let browser, server;
 try {
   server = await startFixtureServer({ pageFile, projectRoot: ROOT });
@@ -1017,6 +1154,7 @@ try {
   let routedKeyboardOpens = 0;
   let isolatedKeyboardOpens = 0;
   let nativeAltherma4Checks = 0;
+  let hybridRoomChecks = 0;
   for (const viewport of viewports) {
     // The mutation seeds one complete locale's route budget, then exercises this same assertion on
     // the first extra route. It proves the boundary without running a deliberately flooded modal
@@ -1035,6 +1173,8 @@ try {
       await assertStatusTruth(page, `${viewport.name}/${locale}/status-truth`);
       await assertNativeAltherma4(page, `${viewport.name}/${locale}/native-altherma4`);
       nativeAltherma4Checks++;
+      await assertHybridRoom(page, `${viewport.name}/${locale}/hybrid-room`, locale);
+      hybridRoomChecks++;
 
       // Firmware errors are intentionally preserved verbatim because they carry the safe next step.
       // Unlike compact progress labels, they can be a sentence. Exercise the production failure
@@ -1214,12 +1354,15 @@ try {
     "every remaining locale requires the route-isolated keyboard/modal lifecycle");
   assert.equal(nativeAltherma4Checks, viewports.length * browserLocales.length,
     "native Altherma 4 must render and open its rows in every shipped locale and viewport");
+  assert.equal(hybridRoomChecks, viewports.length * browserLocales.length,
+    "Hybrid room readings and their inspector must render in every shipped locale and viewport");
 
   assert.deepEqual(page.diagnostics, [], "real page must emit no console errors or uncaught exceptions");
   for (const viewport of viewports) await assertSetup(page, server, viewport);
   console.log(`browser render gate passed: ${browser.product}; ${browserLocales.length} locales; ` +
     `${viewports.length} viewports; native AX + keyboard on dashboard/settings/all routed modals; ` +
     "native Altherma 4 numeric metadata + localized pointer-opened accordions; " +
+    "Hybrid room source + pointer-opened inspector + honest absence; " +
     "bounded real History roundtrips; reduced motion on dashboard/settings/WiFi/progress/disclosures");
   }
 } finally {
