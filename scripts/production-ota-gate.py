@@ -19,6 +19,7 @@ import base64
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime
+import errno
 import hashlib
 import json
 import os
@@ -248,6 +249,7 @@ def public_receipt(journal: GateJournal) -> dict[str, Any]:
     object_fields = {
         "artifact", "test_board", "production", "full_binary_download", "ota_download_heap",
         "target_download_heap", "restore_download_heap", "stress", "cold_stress", "samples",
+        "pressure_sample",
         "tls_busy_503", "pressure", "counters_before", "counters_after", "retained_x10a",
         "probation_before", "probation_after",
     }
@@ -285,6 +287,8 @@ def public_receipt(journal: GateJournal) -> dict[str, Any]:
         "started", "artifact_verified", "bench_write_attempted", "bench_write_acknowledged",
         "bench_target_returned", "bench_transfer_verified", "bench_stress_passed",
         "bench_probation_confirmed", "bench_cold_pressure_started", "bench_full_download_started",
+        "bench_pressure_sampled", "production_pressure_sampled",
+        "bench_recovery_sampled", "production_recovery_sampled",
         "bench_release_write_attempted", "bench_release_write_acknowledged", "bench_release_returned",
         "bench_release_health_passed", "bench_restore_attempted", "bench_restore_acknowledged",
         "bench_restored", "bench_restore_stress_passed", "bench_restore_probation_confirmed",
@@ -896,9 +900,30 @@ def resolve_http_endpoint(host: str) -> ResolvedHttpEndpoint:
     fail(f"board host {host} has no TCP address")
 
 
+def finish_plain_http_response(connection: socket.socket, deadline: float) -> None:
+    """Observe the raw HTTP peer's close without renewing the request deadline."""
+    def apply_remaining_timeout() -> None:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise TimeoutError("HTTP request exceeded its whole-request deadline")
+        connection.settimeout(remaining)
+
+    apply_remaining_timeout()
+    try:
+        connection.shutdown(socket.SHUT_WR)
+    except OSError as error:
+        # A peer that already closed can make shutdown report ENOTCONN on macOS. Still require EOF.
+        if error.errno != errno.ENOTCONN:
+            raise
+    apply_remaining_timeout()
+    if connection.recv(1):
+        fail("HTTP response has bytes after its framed body")
+    apply_remaining_timeout()
+
+
 def read_bounded_http_response(
     connection: socket.socket, host_header: str, path: str, deadline: float, *,
-    max_body_bytes: int, allow_chunked: bool,
+    max_body_bytes: int, allow_chunked: bool, require_peer_close: bool = False,
 ) -> bytes:
     """Read one bounded HTTP body while every receive consumes one absolute deadline."""
     if max_body_bytes <= 0:
@@ -1010,6 +1035,10 @@ def read_bounded_http_response(
                 raise CompactTransportError("HTTP response ended before its declared body")
             body.extend(chunk)
 
+    if require_peer_close:
+        # Raw board probes must finish the server close path before the next handler samples heap.
+        # This does not prove lwIP PCB reclamation; HTTPS controller sockets keep their TLS lifecycle.
+        finish_plain_http_response(connection, deadline)
     apply_remaining_timeout()
     # Only classify an HTTP error after its complete framing passed the same strict bounds. This
     # prevents an ambiguous CL+TE or malformed chunked response from counting as an expected 503
@@ -1098,7 +1127,7 @@ def request_bytes_deadline(
         connection.sendall(request_headers + body)
         return read_bounded_http_response(
             connection, endpoint.host_header, path, deadline,
-            max_body_bytes=max_body_bytes, allow_chunked=allow_chunked,
+            max_body_bytes=max_body_bytes, allow_chunked=allow_chunked, require_peer_close=True,
         )
     finally:
         connection.close()
@@ -1969,6 +1998,21 @@ def stress_board(
         uptimes=uptimes,
     )
     final = board_counters(finished)
+    system = finished.get("sys", {})
+    pressure_evidence = {
+        "probation_before": probation_before, "samples": dict(samples),
+        "tls_busy_503": dict(busy_503), "uptime": list(uptimes),
+        "counters_before": baseline, "counters_after": final,
+        "free_heap": system.get("free_heap"),
+        "largest_block": system.get("max_alloc"),
+    }
+    if require_pending_image or require_x10a:
+        journal_checkpoint(
+            "bench_pressure_sampled" if require_pending_image else "production_pressure_sampled",
+            **{("test_board" if require_pending_image else "production"): {
+                "stress": pressure_evidence,
+            }},
+        )
     if errors:
         fail(f"{host} live stress had errors: {'; '.join(errors)}")
     if samples["status"] < MIN_STATUS_SAMPLES or samples["values"] < MIN_VALUES_SAMPLES or samples["diag"] < MIN_DIAG_SAMPLES:
@@ -1986,12 +2030,12 @@ def stress_board(
         require_x10a=require_x10a, baseline=baseline, final=final,
     ):
         fail(f"{host} X10A timeout delta exceeded {MAX_X10A_TIMEOUT_DELTA}")
-    system = finished.get("sys", {})
     if int(system.get("free_heap", 0)) < MIN_FINAL_FREE_HEAP:
         fail(f"{host} final internal free heap is below {MIN_FINAL_FREE_HEAP} bytes")
     if int(system.get("max_alloc", 0)) < MIN_FINAL_LARGEST_BLOCK:
         fail(f"{host} final largest block is below {MIN_FINAL_LARGEST_BLOCK} bytes")
 
+    pressure_sample = None
     if require_weather and weather_headroom_deferred:
         # The stress phase has now passed in full and every allocating probe has been joined. Keep
         # the exact failed token bound while waiting passively for two stable host-visible headroom
@@ -2158,6 +2202,21 @@ def stress_board(
             )
 
         final = board_counters(finished)
+        system = finished.get("sys", {})
+        pressure_sample = {
+            key: pressure_evidence[key]
+            for key in ("uptime", "counters_after", "free_heap", "largest_block")
+        }
+        if require_pending_image or require_x10a:
+            journal_checkpoint(
+                "bench_recovery_sampled" if require_pending_image else "production_recovery_sampled",
+                **{("test_board" if require_pending_image else "production"): {
+                    "stress": {**pressure_evidence, "pressure_sample": pressure_sample,
+                               "uptime": list(uptimes), "counters_after": final,
+                               "free_heap": system.get("free_heap"),
+                               "largest_block": system.get("max_alloc")},
+                }},
+            )
         for key in ("heap_restarts", "mqtt_skipped", "poll_skipped", "crc_err"):
             if final[key] != baseline[key]:
                 fail(f"{host} {key} changed during post-stress Weather recovery "
@@ -2172,7 +2231,6 @@ def stress_board(
             fail(f"{host} lost X10A during post-stress Weather recovery")
         if not finished.get("mqtt", {}).get("connected"):
             fail(f"{host} MQTT was not connected after post-stress Weather recovery")
-        system = finished.get("sys", {})
         if int(system.get("free_heap", 0)) < MIN_FINAL_FREE_HEAP:
             fail(f"{host} final internal free heap is below {MIN_FINAL_FREE_HEAP} bytes")
         if int(system.get("max_alloc", 0)) < MIN_FINAL_LARGEST_BLOCK:
@@ -2208,6 +2266,7 @@ def stress_board(
         "counters_after": final,
         "free_heap": int(system.get("free_heap", 0)),
         "largest_block": int(system.get("max_alloc", 0)),
+        **({"pressure_sample": pressure_sample} if pressure_sample is not None else {}),
         "ota_check": {"state": ota_check.get("state"), "available": ota_check.get("available")},
         "weather_refresh": None if weather_refresh_status is None else {
             "token": weather_refresh_token,
@@ -4818,6 +4877,9 @@ def self_test() -> None:
 
         def recv(self, size: int) -> bytes:
             return pinned_client.recv(size)
+
+        def shutdown(self, how: int) -> None:
+            pinned_client.shutdown(how)
 
         def close(self) -> None:
             pinned_client.close()

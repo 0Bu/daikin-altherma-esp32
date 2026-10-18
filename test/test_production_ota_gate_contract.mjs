@@ -760,13 +760,16 @@ for phase in list(range(margin + 1)) + list(range(300 - margin, 300)):
 
 # Real bounded HTTP parser and the new reader, fed an in-memory socket, including chunked framing.
 class Wire:
-    def __init__(self, raw): self.raw, self.sent = raw, b""
+    def __init__(self, raw): self.raw, self.sent, self.write_closed = raw, b"", False
     def settimeout(self, value): check(0 < value <= 5, "transport timeout not bounded")
     def connect(self, address): pass
     def sendall(self, value): self.sent += value
     def recv(self, count):
         value, self.raw = self.raw[:count], self.raw[count:]
         return value
+    def shutdown(self, how):
+        check(how == ns["socket"].SHUT_WR, "history request did not half-close its write side")
+        self.write_closed = True
     def close(self): pass
 endpoint = ns["ResolvedHttpEndpoint"](2, 1, 6, ("fixture.invalid", 80), "fixture.invalid")
 body = json.dumps(payload()).encode()
@@ -776,6 +779,7 @@ with patch.object(ns["socket"], "socket", lambda *a: wire):
     check(gate["request_history_deadline"](endpoint, "leaving_water", timeout=5) == payload(),
           "valid chunked history refused")
 check(b"GET /history?row=leaving_water&source=x10a HTTP/1.1" in wire.sent, "source query omitted")
+check(wire.write_closed, "history request returned before the peer-close handshake")
 for raw in (b"HTTP/1.1 200 OK\r\nContent-Length: 8193\r\n\r\n" + b" " * 8191 + b"{}",
             b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n4\r\n{}",
             b"HTTP/1.1 200 OK\r\nContent-Length: 13\r\n\r\n{\"v\":1,\"v\":2}",
