@@ -5,9 +5,8 @@
 //
 // The gates that already exist answer narrower questions and cannot answer this one:
 //
-//   • convert.hpp decodes bytes. Converters 114/119 already drop the catalog's own `0x8000`
-//     no-data marker, which is the ONLY absence the wire format itself expresses.
-//   • reading_plausible() drops a decoded value outside the physical envelope (±200 °C, a
+//   • convert.hpp decodes bytes. Converters 114/119 reject the catalog's `0x8000` no-data marker.
+//   • reading_plausible() drops a decoded value outside project bounds (−60 to 200 °C, a
 //     refrigerant pressure at 0 bar). It is a value test, so it can only catch a number that is
 //     impossible — never one that is ordinary and still not a reading.
 //   • ValueDef::no_publish marks a row the GENERATOR knows is an absent-feature placeholder on this

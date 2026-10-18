@@ -336,7 +336,7 @@ the I/U capacity code (`0x60` offset 6).
 > with conv `109`** (legacy-194,
 > legacy-209). With conv `114` this row read
 > **240.6 °C at rest** and **145.9 → 199.6 °C while the compressor runs** — impossible for an
-> evaporating temperature, and the run-time values land *inside* `reading_plausible()`'s ±200 °C
+> evaporating temperature, and the run-time values land *inside* `reading_plausible()`'s −60 to 200 °C
 > envelope, so nothing masked them. legacy-194 ruled out offset shift, endianness, width and catalog drift
 > and stopped at two surviving scales, `×0.01` and `÷128`, calling for run-time wire bytes to decide.
 >

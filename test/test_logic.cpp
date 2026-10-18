@@ -1058,8 +1058,8 @@ static void test_convert() {
     // The two run-time readings are impossible as an evaporating temperature — a coil that absorbs
     // heat from 22.5 °C air cannot itself be at 145-200 °C — yet the ENVELOPE admits both. That
     // hole is unchanged and is asserted here as the standing contradiction it is.
-    CHECK(reading_plausible(evap, convert(evap, evap1996)));  // <- still WRONG, still inside ±200
-    CHECK(reading_plausible(evap, convert(evap, evap1459)));  // <- still WRONG, still inside ±200
+    CHECK(reading_plausible(evap, convert(evap, evap1996)));  // wrong, below the 200 °C ceiling
+    CHECK(reading_plausible(evap, convert(evap, evap1459)));  // wrong, below the 200 °C ceiling
     CHECK(!reading_plausible(evap, convert(evap, evap2406))); // the at-rest value IS caught (>200)
     // Decoded as the wire actually encodes it, the SAME bytes read as a textbook evaporating
     // temperature — and now inside the envelope for the right reason rather than by luck.
@@ -8061,7 +8061,7 @@ static void test_homehub_map() {
             const char* want = HOMEHUB_CONCEPTS[i].concept_id;
             int         hits = 0;
             for (size_t k = 0; k < view.count(); k++) {
-                const ValueDef d = adjudicated(view, k);
+                const ValueDef d   = adjudicated(view, k);
                 const char*    got = x10a_concept_for(d.reg, d.offset, unit_for_row(d), d.conv);
                 if (got && trend_cstr_eq(got, want)) hits++;
             }
@@ -8081,7 +8081,7 @@ static void test_homehub_map() {
             if (!daik::def::is_detection_model(prof.id)) continue;
             const auto view = daik::def::resolved(prof);
             for (size_t k = 0; k < view.count(); k++) {
-                const ValueDef d = adjudicated(view, k);
+                const ValueDef d   = adjudicated(view, k);
                 const char*    got = x10a_concept_for(d.reg, d.offset, unit_for_row(d), d.conv);
                 if (got && trend_cstr_eq(got, HOMEHUB_CONCEPTS[i].concept_id)) total++;
             }
@@ -8120,7 +8120,7 @@ static void test_homehub_map() {
             const auto view = daik::def::resolved(prof);
             int        hits = 0;
             for (size_t k = 0; k < view.count(); k++) {
-                const ValueDef d = adjudicated(view, k);
+                const ValueDef d   = adjudicated(view, k);
                 const char*    got = x10a_concept_for(d.reg, d.offset, unit_for_row(d), d.conv);
                 if (got && trend_cstr_eq(got, st.concept_id)) {
                     hits++;
@@ -8154,7 +8154,7 @@ static void test_homehub_map() {
                 if (!daik::def::is_detection_model(prof.id)) continue;
                 const auto view = daik::def::resolved(prof);
                 for (size_t k = 0; k < view.count(); k++) {
-                    const ValueDef d = adjudicated(view, k);
+                    const ValueDef d   = adjudicated(view, k);
                     const char*    got = x10a_concept_for(d.reg, d.offset, unit_for_row(d), d.conv);
                     if (got && trend_cstr_eq(got, cid)) {
                         n++;
@@ -14689,8 +14689,8 @@ static void test_history() {
         // value the device published, for every 0.1 step across the plausible range — hp_convert
         // writes
         // "%.1f" and this reads it back, and a float that landed one ULP low would truncate to the
-        // wrong tenth and shift a whole chart by 0.1 °C with nothing to show it. ±200 °C is
-        // reading_plausible()'s own window, so this covers everything that can reach a trend.
+        // wrong tenth and shift a whole chart by 0.1 °C with nothing to show it. The −200 to 200 °C
+        // test range includes the full −60 to 200 °C publication window.
         int mismatches = 0;
         for (int tenths = -2000; tenths <= 2000; tenths++) {
             char buf[16];

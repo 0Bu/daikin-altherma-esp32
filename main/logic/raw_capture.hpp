@@ -2,20 +2,16 @@
 // WHEN to put raw X10A page bytes on /diag from the POLL path — the missing half of
 // logic/hexdump.hpp.
 //
-// hexdump.hpp names its original limitation: the raw dump fires only on a DETECT pass (boot, or
-// POST /detect), and a detect pass essentially never coincides with a compressor run. Target Evap.
-// Temp. was only wrong WHILE the compressor ran — at rest it decoded to 240.6 °C and the ±200 °C
-// envelope already dropped it — so the first legacy-194 diagnosis had to be back-derived from a
-// number already rounded to one decimal. The runtime capture requested in legacy-209 supplied the
-// missing wire evidence and legacy-194 is now resolved through logic/conv_override.hpp; this
-// cadence remains useful for the next converter or layout mismatch.
+// A detect-pass dump may miss the running state. Before the Target Evap. Temp. adjudication,
+// its 240.6 °C stopped-state decode exceeded the 200 °C ceiling and was withheld, while wrong
+// running-state values passed the envelope. Runtime wire evidence resolved that distinction
+// through logic/conv_override.hpp; this cadence remains useful for later converter/layout cases.
 //
 // The cadence is the whole design. A dump every poll cycle would be 1 line/second into a 6 KB diag
 // ring and out to syslog — it would evict the rest of the boot's evidence within a minute, which is
 // precisely how the crash records used to be lost (see syslog.cpp's boot replay). So:
 //
-//   • nothing while the compressor is stopped — the detect-pass dump already covers that state, and
-//     it is the state where the value is NOT wrong;
+//   • nothing while the compressor is stopped — the detect-pass dump already covers that state;
 //   • one dump on the stopped → running EDGE, which is the sample that matters most (it is the
 //     transition where legacy-194 measured the row stepping into the impossible range);
 //   • then one every RAW_CAPTURE_PERIOD_S while it keeps running, so a long run yields a short
