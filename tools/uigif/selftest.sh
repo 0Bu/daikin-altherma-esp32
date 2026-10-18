@@ -72,6 +72,10 @@ check "pump direction changed"  1 U001 \
     perl -0pi -e 's/(@keyframes pump-spin[^}]*rotate\()360deg/${1}-360deg/' main/www/style.css
 check "painting code changed"  1 U001 \
     perl -0pi -e 's/(function renderLive\(\) \{)/$1\n  \/\* selftest \*\//' main/www/js/schematic.js
+check "room selector changed"  1 U001 \
+    perl -0pi -e 's/^const ROOM_TEMP_RE = /const ROOM_TEMP_RE = \/* selftest *\/ /m' main/www/js/schematic.js
+check "room selector removed"  2 - \
+    perl -0pi -e 's/^const ROOM_TEMP_RE = /const OMIT_ROOM_TEMP_RE = /m' main/www/js/schematic.js
 check "scenes changed"         1 U001 \
     perl -0pi -e 's/(name: "Standby")/$1 \/* selftest *\//' tools/uigif/scenes.js
 check "recorder framing changed" 1 U001 \

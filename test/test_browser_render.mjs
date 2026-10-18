@@ -916,13 +916,14 @@ async function assertHybridRoom(page, context, locale) {
     await page.waitFor(`S.insp === "room" && document.getElementById("inspect").classList.contains("open") &&
       document.getElementById("inspect").getAnimations({subtree: true})
         .every(animation => animation.playState !== "running")`);
+    // The inspector preserves the source row's numeric text; the schematic formats it by locale.
     assert.deepEqual(await page.evaluate(`(() => ({
       label: inspCurRow(INSPECT.room)?.label,
       value: document.getElementById("inspNow").textContent,
       source: document.getElementById("inspSrc").textContent,
       expectedSource: displayReadingLabel("RT Temp.", inspCurRow(INSPECT.room)),
       substitute: !!mbForInspect("room"),
-    }))()`), { label: "RT Temp.", value: `${decimal.format(21.5)} °C`,
+    }))()`), { label: "RT Temp.", value: "21.5 °C",
       source: await page.evaluate('displayReadingLabel("RT Temp.", inspCurRow(INSPECT.room))'),
       expectedSource: await page.evaluate('displayReadingLabel("RT Temp.", inspCurRow(INSPECT.room))'),
       substitute: false }, `${context}: a real room click must expose the original reading and its source`);

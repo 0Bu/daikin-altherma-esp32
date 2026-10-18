@@ -8062,8 +8062,7 @@ static void test_homehub_map() {
             int         hits = 0;
             for (size_t k = 0; k < view.count(); k++) {
                 const ValueDef d = adjudicated(view, k);
-                const char*    got =
-                    x10a_concept_for(d.reg, d.offset, unit_for_datatype(d.type), d.conv);
+                const char*    got = x10a_concept_for(d.reg, d.offset, unit_for_row(d), d.conv);
                 if (got && trend_cstr_eq(got, want)) hits++;
             }
             // 0 is legitimate — a profile need not carry every quantity (a monobloc has no room
@@ -8083,8 +8082,7 @@ static void test_homehub_map() {
             const auto view = daik::def::resolved(prof);
             for (size_t k = 0; k < view.count(); k++) {
                 const ValueDef d = adjudicated(view, k);
-                const char*    got =
-                    x10a_concept_for(d.reg, d.offset, unit_for_datatype(d.type), d.conv);
+                const char*    got = x10a_concept_for(d.reg, d.offset, unit_for_row(d), d.conv);
                 if (got && trend_cstr_eq(got, HOMEHUB_CONCEPTS[i].concept_id)) total++;
             }
         }
@@ -8123,8 +8121,7 @@ static void test_homehub_map() {
             int        hits = 0;
             for (size_t k = 0; k < view.count(); k++) {
                 const ValueDef d = adjudicated(view, k);
-                const char*    got =
-                    x10a_concept_for(d.reg, d.offset, unit_for_datatype(d.type), d.conv);
+                const char*    got = x10a_concept_for(d.reg, d.offset, unit_for_row(d), d.conv);
                 if (got && trend_cstr_eq(got, st.concept_id)) {
                     hits++;
                     // A state is a BIT FLAG — if this ever resolved a numeric row, the UI would put
@@ -8158,8 +8155,7 @@ static void test_homehub_map() {
                 const auto view = daik::def::resolved(prof);
                 for (size_t k = 0; k < view.count(); k++) {
                     const ValueDef d = adjudicated(view, k);
-                    const char*    got =
-                        x10a_concept_for(d.reg, d.offset, unit_for_datatype(d.type), d.conv);
+                    const char*    got = x10a_concept_for(d.reg, d.offset, unit_for_row(d), d.conv);
                     if (got && trend_cstr_eq(got, cid)) {
                         n++;
                         break;
@@ -14367,6 +14363,61 @@ static void test_cop_scope() {
 // and (b) a sample taken while the outdoor unit is asleep is stored as HELD_OVER, not as the number
 // the bus returned. Without (b) a summer day's outdoor-air trend is a staircase of last-run values
 // that reads exactly like weather.
+static void test_history_measurement_units() {
+    using namespace logic;
+    struct Case {
+        const char* id;
+        unsigned    reg;
+        unsigned    off;
+        const char* unit;
+    };
+    const Case cases[] = {
+        {"flow", 0x62, 9, "L/min"}, {"comp_rps", 0x30, 0, "rps"}, {"inv_current", 0x21, 0, "A"}};
+    for (const auto& item : cases) {
+        const auto* trend = trend_by_id(item.id);
+        CHECK(trend && trend->kind == TrendKind::Row);
+        if (!trend) continue;
+        CHECK(trend->reg == item.reg && trend->off == item.off && trend->unit[0] == '\0');
+        const bool history_explicit_measurement_unit_admitted =
+            trend_row_matches(*trend, item.reg, item.off, item.unit);
+        CHECK(history_explicit_measurement_unit_admitted);
+        CHECK(trend_row_matches(*trend, item.reg, item.off, ""));
+        CHECK(!trend_row_matches(*trend, item.reg + 1, item.off, item.unit));
+        CHECK(!trend_row_matches(*trend, item.reg, item.off + 1, item.unit));
+        CHECK(!trend_row_matches(*trend, item.reg, item.off, nullptr));
+        for (const char* wrong : {"bar", "°C", "Hz", "rpm", "l/min", "unknown"})
+            CHECK(!trend_row_matches(*trend, item.reg, item.off, wrong));
+        TrendDef changed = *trend;
+        changed.id       = "unrelated";
+        CHECK(!trend_row_matches(changed, item.reg, item.off, item.unit));
+        changed.id = nullptr;
+        CHECK(!trend_row_matches(changed, item.reg, item.off, item.unit));
+        changed = *trend;
+        changed.reg++;
+        CHECK(!trend_row_matches(changed, changed.reg, item.off, item.unit));
+        changed = *trend;
+        changed.off++;
+        CHECK(!trend_row_matches(changed, item.reg, changed.off, item.unit));
+        changed      = *trend;
+        changed.kind = TrendKind::BinaryState;
+        CHECK(!trend_row_matches(changed, item.reg, item.off, item.unit));
+        changed      = *trend;
+        changed.unit = "unexpected";
+        CHECK(!trend_row_matches(changed, item.reg, item.off, item.unit));
+        CHECK(!history_row_identity_changed("same sensor", 0, "same sensor"));
+    }
+    const auto* pressure = trend_by_id("circuit_pressure");
+    CHECK(pressure && trend_row_matches(*pressure, 0x62, 15, "bar"));
+    CHECK(pressure && !trend_row_matches(*pressure, 0x62, 15, "°C"));
+    const TrendDef temperature_twin{"pressure_temperature", TrendKind::Row, 0x62, 15, "°C", ""};
+    CHECK(trend_row_matches(temperature_twin, 0x62, 15, "°C"));
+    CHECK(!trend_row_matches(temperature_twin, 0x62, 15, "bar"));
+    CHECK(!trend_row_matches(temperature_twin, 0x62, 15, ""));
+    // The upgrade changes accepted cache metadata, never the catalog bytes used by persisted
+    // series ids. This is the pre-upgrade fingerprint, not a newly accepted replacement.
+    CHECK(history_catalog_fingerprint() == 0xa1783c86u);
+}
+
 static void test_history() {
     using namespace logic;
 
@@ -14750,9 +14801,9 @@ static void test_history() {
     // quantity — so both halves are measured here rather than assumed. `min_profiles` is the count
     // measured over today's catalog: a generated profile that moved a row, or a generator run that
     // dropped one, has to fail here and not on someone's dashboard. `unit_type` is the catalog's
-    // own type code (convert.hpp: 1 = °C, 2 = bar, -1 = none) and must agree with the unit string
-    // the TRENDS entry addresses the row by — GET /history prints that string into the chart's
-    // range readout and its crosshair.
+    // own type code (convert.hpp: 1 = °C, 2 = bar, -1 = generic). Matching uses the adjudicated
+    // row's actual unit_for_row metadata, exactly like the poll cache; legacy datatype-only
+    // fixtures would hide a unit upgrade that stopped the recorder finding a row.
     struct TrendExpect {
         const char* id;
         int         min_profiles;
@@ -14816,18 +14867,20 @@ static void test_history() {
     int found[TREND_COUNT] = {0};
     for (const auto& p : def::profiles) {
         if (!def::is_detection_model(p.id)) continue;
+        const auto  view = def::resolved(p);
         const char* labels[512];
         const char* units[512];
         uint8_t     regs[512];
         uint8_t     offs[512];
         int16_t     convs[512];
-        size_t      n = p.count < 512 ? p.count : 512;
+        size_t      n = view.count() < 512 ? view.count() : 512;
         for (size_t i = 0; i < n; i++) {
-            labels[i] = p.values[i].label;
-            units[i]  = unit_for_datatype(p.values[i].type);
-            regs[i]   = p.values[i].reg;
-            offs[i]   = p.values[i].offset;
-            convs[i]  = static_cast<int16_t>(p.values[i].conv);
+            const auto row = adjudicated(view, i);
+            labels[i]      = row.label;
+            units[i]       = unit_for_row(row);
+            regs[i]        = row.reg;
+            offs[i]        = row.offset;
+            convs[i]       = static_cast<int16_t>(row.conv);
         }
 
         int picked[TREND_COUNT];
@@ -14847,10 +14900,10 @@ static void test_history() {
                 if (trend_row_matches(*d, regs[i], offs[i], units[i], convs[i])) hits++;
             CHECK(hits == 1);
 
-            CHECK(p.values[picked[t]].type == kExpect[t].unit_type);
-            CHECK(trend_cstr_eq(d->unit, unit_for_datatype(kExpect[t].unit_type)));
+            CHECK(view[picked[t]].type == kExpect[t].unit_type);
+            CHECK(trend_unit_matches(*d, units[picked[t]]));
             // One width per trend, so the tenths the ring stores are exact rather than rounded.
-            CHECK(p.values[picked[t]].size == kExpect[t].size);
+            CHECK(view[picked[t]].size == kExpect[t].size);
             // The legacy-121 rule, now a consequence of the locator rather than a filter: a target
             // lives at its own offset, so no trend can reach one. Asserted over the whole catalog
             // because a generated rename is exactly how it would come back.
@@ -14946,16 +14999,18 @@ static void test_history() {
     // locators: same concept, same rows. Cheapest possible proof — the labels still say so.
     for (const auto& p : def::profiles) {
         if (!def::is_detection_model(p.id)) continue;
+        const auto  view = def::resolved(p);
         const char* labels[512];
         const char* units[512];
         uint8_t     regs[512];
         uint8_t     offs[512];
-        size_t      n = p.count < 512 ? p.count : 512;
+        size_t      n = view.count() < 512 ? view.count() : 512;
         for (size_t i = 0; i < n; i++) {
-            labels[i] = p.values[i].label;
-            units[i]  = unit_for_datatype(p.values[i].type);
-            regs[i]   = p.values[i].reg;
-            offs[i]   = p.values[i].offset;
+            const auto row = adjudicated(view, i);
+            labels[i]      = row.label;
+            units[i]       = unit_for_row(row);
+            regs[i]        = row.reg;
+            offs[i]        = row.offset;
         }
         const int dhw = trend_select(*trend_by_id("dhw_tank"), regs, offs, units, n);
         const int oa  = trend_select(*trend_by_id("outdoor_air"), regs, offs, units, n);
@@ -25982,6 +26037,7 @@ int main() {
     test_mqtt_retirement_store();
     test_mqtt_publish_gate();
     test_published_kind();
+    test_history_measurement_units();
     test_history();
     test_checkup();
     test_checkup_evidence_overhaul();
