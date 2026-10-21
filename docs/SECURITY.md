@@ -187,6 +187,40 @@ other restart runs while it erases.
 
 ## Signing key lifecycle
 
+### Generate a new signing key
+
+For a new independent installation or deliberate key rotation, generate the key on a trusted offline
+machine. Run **one** of the following alternatives in a private directory outside the repository.
+Choose a new output filename: OpenSSL can overwrite an existing key.
+
+With `espsecure` from esptool 5.x:
+
+```bash
+umask 077
+espsecure generate-signing-key --version 2 --scheme rsa3072 ota_signing_key.pem
+```
+
+Use `espsecure` without the `.py` suffix and `generate-signing-key` with hyphens.
+The old `espsecure.py` and `generate_signing_key` spellings are deprecated and emit warnings;
+see the [esptool v5 migration guide](https://docs.espressif.com/projects/esptool/en/latest/esp32s3/migration-guide.html).
+
+Alternatively, use [OpenSSL `genpkey`](https://docs.openssl.org/3.4/man1/openssl-genpkey/):
+
+```bash
+umask 077
+openssl genpkey -algorithm RSA \
+  -pkeyopt rsa_keygen_bits:3072 -pkeyopt rsa_keygen_pubexp:65537 \
+  -out ota_signing_key.pem
+```
+
+Both commands create an unencrypted RSA-3072 PEM private key with public exponent 65537, as required
+by this project's signing tools. Keep access restricted and retain a protected offline backup.
+Each run creates a different signing identity; devices that trust the official key or another
+existing key reject OTA images signed with the new key. Follow the rotation requirements below
+before use.
+
+### Storage and rotation
+
 The private RSA-3072 PEM stays offline and is never committed or inspected by agents. CI materializes
 `OTA_SIGNING_KEY` only in the trusted builder; an `always()` step runs `rm -f ota_signing_key.pem`.
 That is ephemeral workspace cleanup, not secure storage-media erasure. Missing signing material
