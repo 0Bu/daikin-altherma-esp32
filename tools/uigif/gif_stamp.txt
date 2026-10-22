@@ -9,14 +9,14 @@
 # is to RE-RECORD (that is what the stamp is for), never to edit this file — and the writer
 # refuses a stamp whose ui moved while gif stayed identical, because that is what re-stamping an
 # old recording looks like from here.
-ui=b3cf55c45b78213e0a45eb45352725d34c67b4908f556c7b98c350a059c754cf
-part.schematic_markup=ce630032c7152809f77cf35f343ee599c66e6185793a1bdb0631af1d403f9c56
+ui=56bffbf48a354b0014367a38deb637f7aec798007cff883b26957b661a636610
+part.schematic_markup=cc2409ce27534377def4e6c9a99cba97b2f2bea4afac2710c3ee2437dddda277
 part.schematic_css=307479fca3342bbd6f1c5a2199b6086181566b875a7f96e0b4f10870c38593af
 part.painting_code=03f6aeb44170c48b19cdd3b2709b5a2a472c2cb800f1217f0a918f90195d8a70
 part.drawing_strings=9426d060f37e1b83838020b51b38e6d581adafaf4947fb09fe7bfb78b66080a1
 part.scenes=94fcd04bc49aad9a85234fea94a44b5e3547fd1a20c5bad6270928de93fe275b
 part.framing=467960462503a34f0a64760f4d90b756a7130bf097ae659b045cf2b37598fec8
-gif=69f356c3978925a4e18bd0293f129738252deca13c0c353ce435e174244fec19
+gif=9c21f364af2f75f54722ada4602810755c307cb14a71bc21bb9690c2ca35ebb9
 frames=135
 size=900x524
-recorded=2026-10-18
+recorded=2026-10-22
