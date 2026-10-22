@@ -192,7 +192,7 @@ plate heat exchanger are gas/liquid; the lower line is not a suction line.
 | Tank | Tank temperature and setpoint inside; permanent BSH/E-heater state belongs here |
 | Space circuit | Named room reading and target inside; space heating/cooling operation on the riser outside |
 | Common return after branch junction → R4T → PHE | Return temperature belongs to the shared run, never the heating-only leg |
-| Return pills | Two left-aligned columns of equal-width pills: water pressure above R4T, binary flow-switch state above flow |
+| Return pills | Two left-aligned columns, each one pill width: water pressure above R4T, binary flow-switch state above flow |
 | PHE | Signed ΔT, estimated capacity and COP/EER are drawn on the plate |
 | Outdoor unit | Estimated electrical input is drawn where electrical power enters |
 
@@ -234,7 +234,8 @@ seasonal efficiency.
 
 The 3-way valve selects the animated hydraulic branch. Water flow has mode-aware warm/cold colours;
 pump-only circulation is neutral. Cooling/defrost reverse refrigerant motion. Active BUH uses the
-warning tint; BSH has an independent heater-wave overlay rather than animating the tank coil.
+warning tint; active BSH turns the tank's perimeter dashes a fixed orange, distinct from the
+red/blue hydronic charge.
 Rotors stay centred on their hubs, rotate clockwise only when running, and carry no rotating
 flow-direction arrow. Direction belongs to pipe dashes.
 

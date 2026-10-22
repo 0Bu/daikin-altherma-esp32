@@ -217,7 +217,7 @@ run_case "a pipe in no hit target is caught" 1 "S011"
 
 echo "== 4. the HEIZUNG label struck through by the heating riser =="
 # It rendered as "HEIZUNC". A label may still sit ON a pipe when an opaque pill or box painted after
-# it covers the stroke (that is how the thermostat pill sits on the riser), so the check is paint
+# it covers the stroke (that is how the space-operation pill sits on the riser), so the check is paint
 # order, not overlap — and this label, moved onto the run, has nothing over it.
 reset
 patch_file "$WORK/main/www/index.html" <<'PY'

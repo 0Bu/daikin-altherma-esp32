@@ -419,10 +419,16 @@ assert.ok(wpPill.x - (pheBox.x + pheBox.width) >= 4,
   "the first return-pill column must stand clear of the plate");
 assert.ok(flowSwitchPill.x - (wpPill.x + wpPill.width) >= 8,
   "the two return-pill columns must not crowd each other");
-// The tank sits right beside the flow-switch pill, only a few px apart horizontally, so it must end
-// clearly ABOVE it: level with the pill, its lower-left corner read as stuck to the return readings.
+// The flow-switch pill sits under the tank's lower-left corner, so the tank must end clearly ABOVE
+// it: level with the pill, the corner read as stuck to the return readings. Its caption is the
+// element closest to that corner, and no audit rule measures a caption against a box.
 assert.ok(flowSwitchPill.y - (tankBox.y + tankBox.height) >= 16,
-  "the DHW tank must end clearly above the flow-switch pill beside it");
+  "the DHW tank must end clearly above the flow-switch pill under its corner");
+const flowSwitchCaption = schematicGroup("flow_switch")
+  .match(/<text class="sc-sub" x="[0-9.]+" y="([0-9.]+)"[^>]*font-size:([0-9.]+)px/);
+assert.ok(flowSwitchCaption, "the flow-switch pill must keep its sized caption");
+assert.ok(Number(flowSwitchCaption[1]) - Number(flowSwitchCaption[2]) >= tankBox.y + tankBox.height + 4,
+  "the flow-switch caption must stay clear of the DHW tank's lower edge");
 // The 2WV and space-operation pills ride the space riser as one centred pair between the supply
 // leg's turn (the valve's y) and the space box top.
 const spaceBox = schematicRect("heat", "sc-box");

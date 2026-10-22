@@ -552,8 +552,9 @@
                      The SPACE circuit takes the L-shaped run on the RIGHT (out along the supply level
                      to x=720, down into its box, back along y=420 to the junction at x=610). In and
                      out of a store is one vertical run through the box, and offsetting the return by
-                     a few px read as a kink in a straight pipe. The two drops cannot be confused for
-                     one pipe — the boxes sit between them, and they carry opposite flow colours. -->
+                     a few px read as a kink in a straight pipe. Each branch's supply and return share
+                     one axis yet cannot be confused for one pipe — its box sits between them, and they
+                     carry opposite flow colours. -->
                 <g class="g-dhw">
                   <g class="sc-hit" data-insp="wtank" role="button" tabindex="0">
                     <path class="sc-pipe" d="M610 180 V 258"/>
@@ -590,12 +591,13 @@
                   </g>
                   <!-- X10A BSH is the tank's electric immersion heater, not BUH step 1/2 in the
                        hydronic supply. It can run while compressor, circulation pump and flow are
-                       all zero, so it must NOT drive the perimeter flow (which specifically means
-                       hydronic charging). Its own signal is the pill plus the tank OUTLINE turning
-                       orange (.bsh-on .sc-tank) — the electric heat source, distinct from the
-                       red/blue charging flow. Its pill always says only "Heizstab": compact and
-                       centred instead of spanning the tank, orange while active and light grey while
-                       off/unknown. The inspector keeps the exact ON/OFF/unknown state in words. -->
+                       all zero, so it must NOT switch on the hydronic charging flow (the .on state of
+                       the fTank* overlays, which means water is moving). Its own signal is the pill
+                       plus the tank's perimeter dashes in a FIXED orange (#schem.bsh-on .sc-tank-flow
+                       in style.css) — the electric heat source, distinct from the red/blue hydronic
+                       charge. Its pill always says only "Heizstab": compact and centred instead of
+                       spanning the tank, orange while active and light grey while off/unknown. The
+                       inspector keeps the exact ON/OFF/unknown state in words. -->
                   <g id="gBshState" class="sc-bsh-state sc-hit" data-insp="bsh" role="button"
                      tabindex="0">
                     <rect class="sc-bsh-state-box" x="541" y="286" width="70" height="16" rx="8"/>
@@ -625,7 +627,7 @@
                 <path class="sc-flow water-flow hot" id="fHeat" d="M610 180 H 720 V 258"/>
                 <!-- Optional 2-way-valve output. Its state is distinct from the configured/current
                      operating mode and from the 3WV. It belongs to the SPACE circuit, so it rides the
-                     space-supply riser — the right-hand drop (x=720) into the RAUMKREIS box —
+                     space-supply riser — the right-hand drop (x=720) into the SPACE CIRCUIT box —
                      centered on that riser, which is also the box's centre, so the wide pill covers
                      the pipe it names. Stacked directly ABOVE the space-operation pill, the PAIR is
                      centred on the riser between the supply leg's turn (y=180) and the box top
@@ -712,7 +714,7 @@
                   <text class="sc-sub" x="416" y="467" text-anchor="middle" data-i18n="schem.return">R4T</text>
                   <path class="sc-tie" d="M416 431 V 424"/>
                 </g>
-                <!-- The three return sensors sit on the run's COMMON section — left of x=610, where
+                <!-- The return sensors sit on the run's COMMON section — left of x=610, where
                      the tank branch joins the heating branch. That is not decoration: R4T is at the
                      indoor unit's water INLET, downstream of the merge, so it reads whichever branch
                      is flowing (the tank's during a DHW cycle, the heating's otherwise) and belongs
@@ -725,7 +727,8 @@
                      column shares one width, so its two ties drop to the run on one vertical line
                      and the readings stack instead of staggering. The upper labels stay above their
                      pills and the lower ones below, leaving the pipe itself clear. The tank box ends
-                     20 px above the upper row, so the second column may sit under its corner. -->
+                     20 px above the upper row and about 7 px above its captions, so the second
+                     column may sit under its corner. -->
                 <g class="sc-hit" data-insp="flow" role="button" tabindex="0">
                   <rect class="sc-pill" x="466" y="431" width="82" height="22" rx="11"/>
                   <text class="sc-val" x="507" y="446" text-anchor="middle"><tspan id="svFlow">—</tspan> l/min</text>
