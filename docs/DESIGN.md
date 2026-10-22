@@ -188,11 +188,11 @@ plate heat exchanger are gas/liquid; the lower line is not a suction line.
 |---|---|
 | PHE → R1T → BUH → circulation pump → R2T → 3-way valve | Pump is on supply. R1T is before electric backup heat; R2T is after heater/pump. BUH/pump occupy a balanced flush sequence. |
 | R1T and R2T pills | Same value/name baselines, with ties to their separate measuring runs |
-| 3-way valve → tank or space circuit | Parallel loads side by side on one level, not consecutive stages |
+| 3-way valve → tank or space circuit | Parallel loads side by side on one level, not consecutive stages: tank left on the valve's straight drop, space circuit right on the L-shaped run |
 | Tank | Tank temperature and setpoint inside; permanent BSH/E-heater state belongs here |
 | Space circuit | Named room reading and target inside; space heating/cooling operation on the riser outside |
 | Common return after branch junction → R4T → PHE | Return temperature belongs to the shared run, never the heating-only leg |
-| Return pills | R4T directly below water pressure, flow to its right, binary flow-switch state above/right; balanced horizontal spacing |
+| Return pills | Two left-aligned columns of equal-width pills: water pressure above R4T, binary flow-switch state above flow |
 | PHE | Signed ΔT, estimated capacity and COP/EER are drawn on the plate |
 | Outdoor unit | Estimated electrical input is drawn where electrical power enters |
 

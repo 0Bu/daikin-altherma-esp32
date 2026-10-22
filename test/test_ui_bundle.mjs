@@ -391,7 +391,7 @@ assert.ok(flowPill.cx > r4tPill.cx && flowPill.y === r4tPill.y,
 assert.ok(flowSwitchPill.cx > wpPill.cx && flowSwitchPill.y === wpPill.y,
   "the flow-switch state must sit above the return line, right of water pressure");
 const pheBox = schematicRect("phe", "sc-plate");
-const spaceBox = schematicRect("heat", "sc-box");
+const tankBox = schematicRect("tank", "sc-box sc-tank");
 const buhBox = schematicRect("buh", "sc-buh");
 const pumpGroup = schematicGroup("pump");
 const pumpCircle = pumpGroup.match(/transform="translate\(([0-9.]+) ([0-9.]+)\)"[^]*<circle class="sc-valve" r="([0-9.]+)"/);
@@ -409,13 +409,30 @@ const supplyComponentGaps = [
 ];
 assert.ok(Math.max(...supplyComponentGaps) - Math.min(...supplyComponentGaps) <= 1,
   "BUH and pump must divide the PHE-to-valve corridor into equal clearances");
-const upperGaps = [
-  wpPill.x - (pheBox.x + pheBox.width),
-  flowSwitchPill.x - (wpPill.x + wpPill.width),
-  spaceBox.x - (flowSwitchPill.x + flowSwitchPill.width),
-];
-assert.ok(Math.max(...upperGaps) - Math.min(...upperGaps) <= 1,
-  "water pressure and flow switch must divide the PHE-to-space gap into equal clearances");
+// The return pills are a two-column grid, left-aligned: water pressure over R4T, flow switch over
+// flow. Equal widths per column keep both ties of a column on one vertical line.
+assert.ok(wpPill.x === r4tPill.x && wpPill.width === r4tPill.width,
+  "water pressure and R4T must form one left-aligned column of equal width");
+assert.ok(flowSwitchPill.x === flowPill.x && flowSwitchPill.width === flowPill.width,
+  "flow switch and flow must form one left-aligned column of equal width");
+assert.ok(wpPill.x - (pheBox.x + pheBox.width) >= 4,
+  "the first return-pill column must stand clear of the plate");
+assert.ok(flowSwitchPill.x - (wpPill.x + wpPill.width) >= 8,
+  "the two return-pill columns must not crowd each other");
+// The tank sits right beside the flow-switch pill, only a few px apart horizontally, so it must end
+// clearly ABOVE it: level with the pill, its lower-left corner read as stuck to the return readings.
+assert.ok(flowSwitchPill.y - (tankBox.y + tankBox.height) >= 16,
+  "the DHW tank must end clearly above the flow-switch pill beside it");
+// The 2WV and space-operation pills ride the space riser as one centred pair between the supply
+// leg's turn (the valve's y) and the space box top.
+const spaceBox = schematicRect("heat", "sc-box");
+const valve2Pill = pillRect("valve2");
+const spaceOpPill = pillRect("spaceh");
+const riserPairGaps = [valve2Pill.y - Number(valveCircle[2]), spaceBox.y - (spaceOpPill.y + spaceOpPill.height)];
+assert.ok(valve2Pill.cx === spaceBox.cx && spaceOpPill.cx === spaceBox.cx,
+  "the 2WV and space-operation pills must be centred on the space riser");
+assert.ok(Math.abs(riserPairGaps[0] - riserPairGaps[1]) <= 6,
+  "the 2WV / space-operation pair must sit centred between the supply leg and the space box");
 assert.match(html, /data-insp="ouhx"[\s\S]*id="svOuHx"/,
   "the outdoor heat-exchanger R4T must remain visible inside the outdoor unit");
 assert.match(app, /ouhx:[\s\S]*trend: "outdoor_heat_exchanger"/,
