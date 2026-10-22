@@ -100,7 +100,8 @@ const supplementalContract = () => {
   assert.match(transport, /re\.fullmatch\(rb"\[0-9A-Fa-f\]\+", size_text\)/);
   assert.match(transport, /chunk_size\s*>\s*max_body_bytes\s*-\s*len\(body\)/);
   assert.match(transport, /trailers or bytes after its terminator/);
-  assert.match(transport, /if status < 200 or status >= 300:\s*\n\s*raise HTTPError/);
+  assert.match(transport,
+    /if status < 200 or status >= 300:\s*\n\s*error = HTTPError\([^)]*\)\s*\n(?:\s*#[^\n]*\n)*\s*error\.gate_text = printable_error_text\(bytes\(body\)\)\s*\n\s*raise error\n/);
   assert.ok(
     transport.indexOf("if status < 200 or status >= 300:") >
       transport.indexOf("chunked HTTP response has trailers or bytes after its terminator"),
