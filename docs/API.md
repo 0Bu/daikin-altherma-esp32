@@ -40,7 +40,8 @@ U+FFFD in JSON output without changing configuration. Clients must reject trunca
 During active OTA, every non-OTA route fails fast with a small busy-503, including assets, both
 `/models` and `/diag` forms and MCP. Only OTA routes remain reachable. The common admission guard
 also refuses non-OTA work below a 6,144-byte contiguous internal block. During Weather TLS, `/values` waits in
-250-ms steps for at most four seconds, then returns busy-503.
+250-ms steps for at most four seconds, then returns busy-503 with the body
+`network operation in progress`.
 
 ## Assets
 

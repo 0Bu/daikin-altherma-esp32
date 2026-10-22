@@ -83,6 +83,20 @@ STATUS_MAX_BYTES = 32 * 1024
 VALUES_MAX_BYTES = 128 * 1024
 DIAG_MAX_BYTES = 8 * 1024
 MQTT_RECOVERY_TIMEOUT_S = 15
+# GET /values waits boundedly (kValuesTlsWait) behind the board's own Weather TLS client, then answers
+# 503 with exactly this text (main/http_status.cpp network_tls_busy). The firmware starts that client on
+# its own after boot or after an OTA pre-emption, so the refusal can fall outside the gate's scheduled
+# TLS window; it is expected there only while the board itself reports its Weather client fetching.
+WEATHER_TLS_BUSY_TEXT = "network operation in progress"
+WEATHER_TLS_EVIDENCE_MARGIN_S = 1.0
+# A Weather fetch measured at 4.0-5.6 s refuses at most one /values probe (4 s wait + 1 s probe
+# interval); two still cover a fetch of about ten seconds. Longer Weather ownership blocks the gate.
+MAX_WEATHER_REFUSALS_PER_EPISODE = 2
+# Outside the gate's own window the board starts only the fetch resumed after the gate's OTA check
+# pre-empted it, plus explicit refreshes: its retries wait WEATHER_RETRY_INTERVAL_S
+# (main/logic/weather_forecast.hpp), longer than the window. Four covers two fetches at the cap above.
+MAX_WEATHER_REFUSALS_PER_WINDOW = 4
+HTTP_ERROR_TEXT_MAX = 80
 PROMOTION_READY_STABLE_SAMPLES = 2
 PROMOTION_READY_SAMPLE_INTERVAL_S = 0.1
 LEGACY_OFFER_STABLE_SECONDS = 3.0
@@ -250,7 +264,8 @@ def public_receipt(journal: GateJournal) -> dict[str, Any]:
         "artifact", "test_board", "production", "full_binary_download", "ota_download_heap",
         "target_download_heap", "restore_download_heap", "stress", "cold_stress", "samples",
         "pressure_sample",
-        "tls_busy_503", "pressure", "counters_before", "counters_after", "retained_x10a",
+        "tls_busy_503", "firmware_weather_busy_503", "pressure", "counters_before",
+        "counters_after", "retained_x10a",
         "probation_before", "probation_after",
     }
 
@@ -1044,11 +1059,86 @@ def read_bounded_http_response(
     # prevents an ambiguous CL+TE or malformed chunked response from counting as an expected 503
     # busy witness in the HIL stress window.
     if status < 200 or status >= 300:
-        raise HTTPError(
+        error = HTTPError(
             f"http://{host_header}{path}", status,
             "HTTP request failed", None, None,
         )
+        # The refusal text names the firmware branch that refused (heap low, out of memory, network
+        # operation in progress); a status code alone cannot tell them apart.
+        error.gate_text = printable_error_text(bytes(body))
+        raise error
     return bytes(body)
+
+
+def printable_error_text(body: bytes) -> str:
+    text = body[:HTTP_ERROR_TEXT_MAX].decode("utf-8", "replace")
+    return "".join(character if character.isprintable() else "?" for character in text).strip()
+
+
+def http_error_text(error: BaseException) -> str:
+    # Not getattr: on Python 3.9 an HTTPError without a response file forwards unknown attributes to
+    # that missing file and raises KeyError instead of returning the default.
+    text = vars(error).get("gate_text", "")
+    return text if isinstance(text, str) else ""
+
+
+def weather_tls_refusal_explained(
+    kind: str, text: str, started: float, finished: float,
+    weather_samples: list[tuple[float, bool]],
+) -> bool:
+    """A /values 503 outside the scheduled TLS window is the firmware's bounded Weather refusal only
+    when it carries exactly that text and a /status sample taken around the request shows the board's
+    own Weather client fetching. Any other text (heap low, out of memory, update in progress) or the
+    same text without that board evidence remains a stress error."""
+    if kind != "values" or text != WEATHER_TLS_BUSY_TEXT:
+        return False
+    low = started - WEATHER_TLS_EVIDENCE_MARGIN_S
+    high = finished + WEATHER_TLS_EVIDENCE_MARGIN_S
+    return any(fetching is True and low <= at <= high for at, fetching in weather_samples)
+
+
+def classify_weather_refusals(
+    refusals: list[tuple[float, float, str]], weather_samples: list[tuple[float, bool]],
+) -> tuple[int, list[tuple[int, str]]]:
+    """Split /values refusals (request start, response, text) into the accepted count and the
+    unexplained ones with a reason. One continuous `fetching` episode may excuse at most
+    MAX_WEATHER_REFUSALS_PER_EPISODE refusals and the window at most MAX_WEATHER_REFUSALS_PER_WINDOW,
+    so an abnormally long Weather ownership or a fetch loop still blocks."""
+    ordered = sorted(weather_samples)
+    episodes: list[tuple[float, int]] = []  # (sample time, episode) for every fetching sample
+    episode, previous = 0, False
+    for at, fetching in ordered:
+        if fetching and not previous:
+            episode += 1
+        if fetching:
+            episodes.append((at, episode))
+        previous = fetching
+    used: dict[int, int] = {}
+    accepted = 0
+    unexplained: list[tuple[int, str]] = []
+    for index, (started, finished, text) in enumerate(refusals):
+        if not weather_tls_refusal_explained("values", text, started, finished, weather_samples):
+            reason = "no board Weather witness" if text == WEATHER_TLS_BUSY_TEXT else \
+                "not the firmware TLS-busy refusal"
+            unexplained.append((index, reason))
+            continue
+        low, high = started - WEATHER_TLS_EVIDENCE_MARGIN_S, finished + WEATHER_TLS_EVIDENCE_MARGIN_S
+        candidates = [number for at, number in episodes if low <= at <= high]
+        if not candidates:
+            unexplained.append((index, "no board Weather witness"))
+            continue
+        if accepted >= MAX_WEATHER_REFUSALS_PER_WINDOW:
+            unexplained.append((index, f"beyond {MAX_WEATHER_REFUSALS_PER_WINDOW} per pressure window"))
+            continue
+        # A refusal whose evidence spans an exhausted fetch and a fresh one belongs to the fresh one.
+        owner = next((number for number in candidates
+                      if used.get(number, 0) < MAX_WEATHER_REFUSALS_PER_EPISODE), None)
+        if owner is None:
+            unexplained.append((index, f"beyond {MAX_WEATHER_REFUSALS_PER_EPISODE} per Weather fetch"))
+            continue
+        used[owner] = used.get(owner, 0) + 1
+        accepted += 1
+    return accepted, unexplained
 
 
 def read_bounded_json_response(
@@ -1758,11 +1848,17 @@ def stress_board(
     if require_weather and not isinstance(weather_before, dict):
         fail(f"{host} weather status is not an object")
     deadline = time.monotonic() + STRESS_SECONDS
+    stress_started = deadline - STRESS_SECONDS
     lock = threading.Lock()
     samples: dict[str, int] = {"status": 0, "values": 0, "diag": 0}
     busy_503: dict[str, int] = {"status": 0, "values": 0}
+    firmware_weather_busy_503: dict[str, int] = {"values": 0}
     errors: list[str] = []
     uptimes: list[int] = [initial_uptime, started_uptime]
+    # (host time, board reported its own Weather client fetching) for every successful /status.
+    weather_samples: list[tuple[float, bool]] = []
+    # /values 503s outside the scheduled window: (request start, response, text, description).
+    values_refusals: list[tuple[float, float, str, str]] = []
     if require_pending_image or require_x10a:
         journal_checkpoint(
             "bench_cold_pressure_started" if require_pending_image else "production_pressure_started",
@@ -1777,14 +1873,24 @@ def stress_board(
     mqtt_recovery_expected = threading.Event()
     mqtt_recovery = MqttRecoveryTracker(int(weather_before.get("successes", 0)))
 
-    def remember(kind: str, error: BaseException) -> None:
+    def describe(kind: str, error: BaseException, started_at: float | None, last_uptime: int) -> str:
+        detail = f"{kind}: {error}"
+        text = http_error_text(error)
+        if text:
+            detail += f" ({text})"
+        if started_at is not None:
+            detail += f" at +{started_at - stress_started:.2f}s, last uptime {last_uptime}s"
+        return detail
+
+    def remember(kind: str, error: BaseException, started_at: float | None = None) -> None:
         with lock:
             if len(errors) < 20:
-                errors.append(f"{kind}: {error}")
+                errors.append(describe(kind, error, started_at, uptimes[-1]))
 
     def status_loop() -> None:
         nonlocal disconnected
         while time.monotonic() < deadline:
+            request_started = time.monotonic()
             try:
                 ota_expected_before = mqtt_recovery_expected.is_set()
                 status = request_status_deadline(
@@ -1820,18 +1926,20 @@ def stress_board(
                 with lock:
                     samples["status"] += 1
                     uptimes.append(required_uptime(status, f"{host} sampled stress status"))
+                    weather_samples.append((now, weather.get("fetching") is True))
             except HTTPError as error:
                 if error.code == 503 and scheduled_tls_active.is_set():
                     with lock:
                         busy_503["status"] += 1
                 else:
-                    remember("status", error)
+                    remember("status", error, request_started)
             except BaseException as error:  # keep the other probes running and report every failure
-                remember("status", error)
+                remember("status", error, request_started)
             time.sleep(min(0.25, max(0.0, deadline - time.monotonic())))
 
     def json_loop(path: str, kind: str, interval: float) -> None:
         while time.monotonic() < deadline:
+            request_started = time.monotonic()
             try:
                 if kind == "values":
                     request_values_deadline(pinned_endpoint, timeout=HTTP_TIMEOUT_S)
@@ -1845,10 +1953,19 @@ def stress_board(
                 if kind in ("values", "diag") and error.code == 503 and scheduled_tls_active.is_set():
                     with lock:
                         busy_503[kind] = busy_503.get(kind, 0) + 1
+                elif kind == "values" and error.code == 503:
+                    # Judged after the workers stop, against the complete /status timeline: the
+                    # sole HTTP worker parks inside this refusal, so the board's own Weather witness
+                    # may only be answered after it.
+                    with lock:
+                        values_refusals.append((
+                            request_started, time.monotonic(), http_error_text(error),
+                            describe(kind, error, request_started, uptimes[-1]),
+                        ))
                 else:
-                    remember(kind, error)
+                    remember(kind, error, request_started)
             except BaseException as error:
-                remember(kind, error)
+                remember(kind, error, request_started)
             time.sleep(min(interval, max(0.0, deadline - time.monotonic())))
 
     workers = [
@@ -1982,6 +2099,18 @@ def stress_board(
         if worker.is_alive():
             fail(f"{host} live stress worker did not stop at the shared deadline")
 
+    # Outside the scheduled window a /values refusal is accepted only as the firmware's bounded
+    # Weather refusal with the board's own Weather witness around it, and only a bounded number per
+    # Weather fetch and window; everything else is an error.
+    accepted_refusals, unexplained = classify_weather_refusals(
+        [(started_at, finished_at, text) for started_at, finished_at, text, _ in values_refusals],
+        weather_samples,
+    )
+    firmware_weather_busy_503["values"] = accepted_refusals
+    for index, reason in unexplained:
+        if len(errors) < 20:
+            errors.append(f"{values_refusals[index][3]}; {reason}")
+
     # No future weather edge can justify a sample after the pressure workers have stopped.
     disconnected += mqtt_recovery.finish()
 
@@ -2001,7 +2130,8 @@ def stress_board(
     system = finished.get("sys", {})
     pressure_evidence = {
         "probation_before": probation_before, "samples": dict(samples),
-        "tls_busy_503": dict(busy_503), "uptime": list(uptimes),
+        "tls_busy_503": dict(busy_503),
+        "firmware_weather_busy_503": dict(firmware_weather_busy_503), "uptime": list(uptimes),
         "counters_before": baseline, "counters_after": final,
         "free_heap": system.get("free_heap"),
         "largest_block": system.get("max_alloc"),
@@ -2261,6 +2391,7 @@ def stress_board(
         "probation_before": probation_before,
         "samples": samples,
         "tls_busy_503": busy_503,
+        "firmware_weather_busy_503": firmware_weather_busy_503,
         "uptime": [uptimes[0], uptimes[-1]],
         "counters_before": baseline,
         "counters_after": final,

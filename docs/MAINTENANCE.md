@@ -164,6 +164,15 @@ expected unwired X10A timeouts. Physical X10A and Weather are not bench prerequi
 Raw board probes wait for peer close within the original request deadline before completing.
 The exact end sample is journaled before the final pressure, counter and heap checks, so a failed
 heap check retains its measured values. Peer close does not prove TCP memory reclamation.
+In every gate pressure window (bench delivery, promotion round trip, production and lab-HIL),
+busy-503s during the gate's own Weather-refresh/manifest-TLS window are expected and required
+(`tls_busy_503`). Outside it, a `/values` 503 counts as expected only when its body is exactly the
+firmware's TLS-busy text ([API](API.md)) and a `/status` sample from one second before the request to
+one second after its refusal shows the board's own Weather client fetching, at most
+`MAX_WEATHER_REFUSALS_PER_EPISODE` per continuous fetch and `MAX_WEATHER_REFUSALS_PER_WINDOW` per
+window; the receipt counts these as `firmware_weather_busy_503`. Every other refusal blocks. Each
+blocking error names any response text, its time in the window and the last sampled uptime; a
+rejected `/values` refusal also names why it was not accepted.
 
 The sole old-writer exception is the gate's exact historical `1.0.2` version/ELF identity with an
 absent OTA-stack field. Numeric below-limit stack, missing validation/heap evidence or another
