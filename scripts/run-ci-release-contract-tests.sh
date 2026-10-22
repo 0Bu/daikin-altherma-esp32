@@ -299,7 +299,9 @@ for boundary in (
     require(boundary in transport, f"bounded HTTP framing omits {boundary}")
 http_error = transport.find("if status < 200 or status >= 300:")
 framing_end = transport.find("chunked HTTP response has trailers or bytes after its terminator")
-require(http_error > framing_end >= 0 and "raise HTTPError" in transport[http_error:],
+error_tail = transport[http_error:]
+require(http_error > framing_end >= 0 and "error = HTTPError(" in error_tail and
+        "raise error" in error_tail,
         "HTTP errors are classified before strict response framing is complete")
 
 # All pressure requests share the identity-pinned endpoint and preserve parser failures across the
