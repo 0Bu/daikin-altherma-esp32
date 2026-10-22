@@ -175,20 +175,43 @@ function ctx({ x10a, mbEnabled, mbConnected, values = [], modbus = [], elements 
   assert.match(index, /id="gBshState"[\s\S]*?data-i18n="schem\.bsh_label"/,
     "the heater pill keeps only its stable component name");
   assert.match(index,
-    /class="sc-bsh-state-box" x="683" y="318" width="70" height="16" rx="8"/,
+    /class="sc-bsh-state-box" x="541" y="286" width="70" height="16" rx="8"/,
     "the heater pill stays compact and centred inside the tank");
-  assert.match(index, /class="sc-box sc-tank" x="660" y="290" width="120" height="108"/,
+  assert.match(index, /class="sc-box sc-tank" x="518" y="258" width="120" height="108"/,
     "the DHW tank keeps the shared compact consumer width and matches the space box height");
-  assert.match(index, /class="sc-box" x="518" y="290" width="120" height="108"/,
-    "the space circuit matches the DHW tank width; its top is lowered to give the pills above more room");
+  assert.match(index, /class="sc-box" x="660" y="258" width="120" height="108"/,
+    "the space circuit matches the DHW tank width and shares its band");
+  // Tank LEFT on the valve's straight drop, space circuit RIGHT on the L-shaped run. Each flow
+  // overlay must ride its own branch's pipe, or a DHW cycle animates the heating leg (and back).
+  assert.match(index, /data-insp="wtank"[^>]*>\s*<path class="sc-pipe" d="M610 180 V 258"\/>\s*<path class="sc-pipe" d="M610 366 V 420"\/>/,
+    "the DHW tank owns the valve's straight drop and its return on the same axis");
+  assert.match(index, /data-insp="wheat"[^>]*>\s*<path class="sc-pipe" d="M610 180 H 720 V 258"\/>\s*<path class="sc-pipe" d="M720 366 V 420 H 610"\/>/,
+    "the space circuit owns the right-hand L-shaped supply and return");
+  for (const [id, d] of [["fTank", "M610 180 V 258"], ["fTankRet", "M610 366 V 420"],
+                         ["fHeat", "M610 180 H 720 V 258"], ["fHeatRet", "M720 366 V 420 H 610"]]) {
+    assert.match(index, new RegExp(`id="${id}" d="${d}"`), `#${id} animates its own branch's pipe`);
+  }
+  // The perimeter flows trace a box EDGE, so the audit's overlay-on-pipe rule (G010) skips them:
+  // pin each half to its own box, starting and ending where that branch's riser meets it.
+  for (const [id, d] of [
+    ["fTankEdgeL", "M610 258 H532 A14 14 0 0 0 518 272 V352 A14 14 0 0 0 532 366 H610"],
+    ["fTankEdgeR", "M610 258 H624 A14 14 0 0 1 638 272 V352 A14 14 0 0 1 624 366 H610"],
+    ["fSpaceEdgeL", "M720 258 H674 A14 14 0 0 0 660 272 V352 A14 14 0 0 0 674 366 H720"],
+    ["fSpaceEdgeR", "M720 258 H766 A14 14 0 0 1 780 272 V352 A14 14 0 0 1 766 366 H720"]]) {
+    assert.match(index, new RegExp(`id="${id}" d="${d}"`), `#${id} runs on its own box's perimeter`);
+  }
+  assert.match(index, /id="tankFlow" gradientUnits="userSpaceOnUse" x1="578" y1="258" x2="578" y2="366"/,
+    "the tank's charging gradient spans the tank box");
+  assert.match(index, /id="spaceFlow" gradientUnits="userSpaceOnUse" x1="720" y1="258" x2="720" y2="366"/,
+    "the space-circuit gradient spans the space box");
   assert.match(index,
-    /class="sc-emitter" d="M538 320 v28 M558 320 v28 M578 320 v28 M598 320 v28 M618 320 v28"/,
+    /class="sc-emitter" d="M680 288 v28 M700 288 v28 M720 288 v28 M740 288 v28 M760 288 v28"/,
     "the emitter bars extend to the room-reading block");
   assert.match(index,
-    /class="sc-val" x="578" y="368"[^>]*>[\s\S]*?id="svRoom"/,
+    /class="sc-val" x="720" y="336"[^>]*>[\s\S]*?id="svRoom"/,
     "the room temperature shares the DHW temperature baseline");
   assert.match(index,
-    /class="sc-sub" x="578" y="385"[^>]*>[\s\S]*?id="svRoomSet"/,
+    /class="sc-sub" x="720" y="353"[^>]*>[\s\S]*?id="svRoomSet"/,
     "the room setpoint shares the DHW setpoint baseline");
   assert.match(style,
     /\.no-room \.sc-emitter \{[^}]*transform:\s*scaleY\(2\.5\)[^}]*transform-origin:\s*top/,

@@ -325,7 +325,7 @@ svg .sc-snow .sc-val, svg .sc-quiet .sc-val {
 #gSpaceH.on .sc-pill { stroke: var(--ok); }
 #gSpaceH.on .sc-val { fill: var(--ok); }
 .sc-selector .sc-pill { fill: var(--hatch); stroke: var(--pipe); transition: fill .3s, stroke .3s; }
-/* OPAQUE fill, not a translucent wash: both pills sit ON the space riser (x=610), so a see-through
+/* OPAQUE fill, not a translucent wash: both pills sit ON the space riser (x=720), so a see-through
    fill let the dashed flow show through the pill — the opaque --hatch of the resting .sc-selector
    already hid it, and the ON state must not regress that. --brand-tint is the same opaque tint the
    compressor and BUH already use, so the pill still reads as a filled-blue "on". */
