@@ -112,7 +112,8 @@ namespace daik {
 
 // GET /values needs one contiguous 40-byte CachedValue slot per live X10A row (5,160 B on the
 // 129-row production profile). Weather/OTA TLS can temporarily leave less than that even though the
-// heap recovers immediately. Weather is a short request, so /values waits boundedly behind it.
+// heap recovers immediately. Weather's TLS phase is short, so /values waits boundedly behind it;
+// its lead and quiesce interval holds no TLS memory and admits /values, which Weather then drains.
 // OTA can own TLS for almost a minute; both /values and the allocation-rich /status snapshot fail
 // fast there, leaving the single HTTP worker available for the compact /ota/status progress route.
 // Diagnostics use a static ring buffer and remain reachable. This is request-time coordination,
@@ -120,19 +121,35 @@ namespace daik {
 constexpr TickType_t kValuesTlsWait = pdMS_TO_TICKS(4000);
 constexpr TickType_t kValuesTlsRetry = pdMS_TO_TICKS(250);
 
-static bool wait_for_values_tls_owner() {
+// One admitted /values reader in Weather's exclusion. It stays counted until the snapshot and its
+// stream are released, including when an allocation failure unwinds to the 503 boundary.
+struct ValuesTlsReader {
+    ValuesTlsReader()                                  = default;
+    ValuesTlsReader(const ValuesTlsReader&)            = delete;
+    ValuesTlsReader& operator=(const ValuesTlsReader&) = delete;
+    ~ValuesTlsReader() {
+        if (admitted) weather_values_reader_leave();
+    }
+    bool admitted = false;
+};
+
+static bool wait_for_values_tls_owner(ValuesTlsReader& reader) {
     const TickType_t started = xTaskGetTickCount();
     for (;;) {
         const TickType_t elapsed = xTaskGetTickCount() - started;
-        // Read Weather first and OTA second. During their serialized hand-off OTA raises its flag
-        // before Weather releases its own, so this order cannot manufacture an idle false/false
-        // snapshot by taking one side of the transition from each owner.
-        const bool weather_active = weather_fetch_active();
-        const bool ota_active     = ota_download_active();
-        const auto decision       = logic::http_values_wait_decision(
-            ota_active, weather_active, static_cast<uint32_t>(elapsed * portTICK_PERIOD_MS),
+        // Enter Weather's reader count first, then read OTA. The TLS phase ends before Weather's
+        // network admission does; a reader admitted in between, like one admitted while both are
+        // idle, is covered by the OTA recheck after this wait and by OTA's lead and headroom.
+        const bool weather_tls = !weather_values_reader_enter();
+        const bool ota_active  = ota_download_active();
+        const auto decision    = logic::http_values_wait_decision(
+            ota_active, weather_tls, static_cast<uint32_t>(elapsed * portTICK_PERIOD_MS),
             static_cast<uint32_t>(kValuesTlsWait * portTICK_PERIOD_MS));
-        if (decision == logic::HttpValuesWaitDecision::Ready) return true;
+        if (decision == logic::HttpValuesWaitDecision::Ready) {
+            reader.admitted = true;
+            return true;
+        }
+        if (!weather_tls) weather_values_reader_leave();
         if (decision == logic::HttpValuesWaitDecision::Refuse) return false;
         vTaskDelay(kValuesTlsRetry);
     }
@@ -2177,7 +2194,8 @@ esp_err_t http_send_values_json(httpd_req_t* req, std::string_view prefix,
     // Do not park the sole HTTP worker for the lifetime of a firmware download. Weather remains a
     // bounded wait because it is short; OTA progress must stay responsive through /ota/status.
     if (ota_download_active()) return network_tls_busy(req);
-    if (!wait_for_values_tls_owner() || ota_download_active()) return network_tls_busy(req);
+    ValuesTlsReader reader;
+    if (!wait_for_values_tls_owner(reader) || ota_download_active()) return network_tls_busy(req);
     ValuesSnapshot snapshot = take_values_snapshot();
     HttpJsonChunks j(HttpChunkEmitter{req});
     httpd_resp_set_type(req, "application/json");

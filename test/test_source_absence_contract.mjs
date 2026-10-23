@@ -453,7 +453,7 @@ assert.match(weatherCycle,
   /current\.diagnostics_generation\s*!=\s*cfg\.diagnostics_generation/,
   "an in-flight Weather result must not cross a diagnostics consent generation");
 assert.match(weatherCycle,
-  /const WeatherConfigSnapshot before_fetch = weather_config\(\)[\s\S]{0,500}?s_source_generation\.load\([^)]*\) != source_generation[\s\S]{0,500}?before_fetch\.diagnostics_generation != cfg\.diagnostics_generation[\s\S]{0,500}?!source_preempted\)[\s\S]{0,100}?ok = fetch_forecast/,
+  /const WeatherConfigSnapshot before_fetch = weather_config\(\)[\s\S]{0,500}?s_source_generation\.load\([^)]*\) != source_generation[\s\S]{0,500}?before_fetch\.diagnostics_generation != cfg\.diagnostics_generation[\s\S]{0,500}?!source_preempted\)\s*\{\s*WeatherTlsPhase tls_phase;\s*values_quiesce_failed = !tls_phase\.values_quiesced\(\);\s*if \(!values_quiesce_failed\)\s*ok = fetch_forecast/,
   "Weather must revalidate token, consent and location after quiesce and before starting HTTPS");
 const successStart = weatherCycle.indexOf("if (ok) {");
 const successEnd = weatherCycle.indexOf("if (updated)", successStart);

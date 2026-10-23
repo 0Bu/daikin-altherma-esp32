@@ -110,6 +110,8 @@ const mutations=[
     before:"failed_ = true;\n            return;",after:"buffer_.clear(); return;"},
   {name:"omitted-final-send",file:"chunks",scenario:"completed_oracles",
     before:"if (!failed_ && !emit_(std::string_view(), true)) failed_ = true;",after:"/* omitted final send */"},
+  {name:"leaked-values-reader",file:"status",scenario:"weather_and_ota_admission",
+    before:"if (!weather_tls) weather_values_reader_leave();",after:"/* mutation: keep a refused reader counted */"},
   {name:"history-epoch-bypass",file:"status",scenario:"history_epoch_refusal",
     before:"if (history_snapshot_epoch != history_epoch())",after:"if (false)"},
   {name:"dwell-identity-bypass",file:"dwell",scenario:"dwell_state_and_identity",
