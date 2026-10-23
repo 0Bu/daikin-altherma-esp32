@@ -23,18 +23,23 @@ USB power. Record the two GPIOs you wired so you can select them later.
 
 Connect the board by USB using a data-capable cable. Open the
 [web installer](https://0bu.github.io/daikin-altherma-esp32/) in a browser that supports Web Serial,
-select the board's serial port and install the release firmware.
+select **Connect** and the board's serial port. The installer reads which firmware the board runs,
+shows it in the log and restarts the board. With exactly one port already permitted for the site,
+it connects by itself when the page loads and when the board is plugged in.
 
-Leave **Erase** unchecked when updating a configured board: the installer writes around NVS and
-preserves its settings. **Erase** is a factory reset and removes them. The manual merged image also
-overwrites NVS; it is not a settings-preserving update.
+**Flash** updates a configured board: it writes around NVS and preserves its settings. It is offered
+when the board already runs this firmware with NVS in the same place, or when the board could not be
+read. **Clean flash** is a factory reset and removes the settings; for other firmware or an empty
+chip it is the only choice. Select one of them; the log ends with `Installed <version>` and the
+board's restart.
+The manual merged image also overwrites NVS; it is not a settings-preserving update.
 
 Published application images are signed. A source build requires signing and
 `scripts/require-signed.sh` before flashing; an unsigned application cannot boot. The complete
 source-build and manual-flash procedure is in [MAINTENANCE.md](MAINTENANCE.md).
 
-After closing the serial connection, select **Remove browser permission** on the installer page
-to forget this site's paired port permission. The control is unavailable during a flash.
+**Disconnect** closes the port and, where the browser supports it, removes this site's permission
+for it; unplugging the cable only disconnects. Disconnect is unavailable during a flash.
 
 ## 3. Join the network
 

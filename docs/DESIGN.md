@@ -417,24 +417,33 @@ and write lock during the bounded reboot wait; snapshots never become plant hist
 
 ### 5.5 Installer landing page (`docs/index.html`, GitHub Pages)
 
-The installer uses the shared brand and card language in an English-only shell. Its four-step rail
-becomes horizontal at 780 px and facts/choices stack at 520 px, without viewport overflow.
+The installer uses the shared brand and card language in an English-only shell: one card with the
+mark, product name and offered version with its channel, then the device and firmware button groups,
+which wrap when the card is narrow and each take a full row below 520 px, without viewport overflow.
+The serial log hangs below the card as a dark tongue; an After flashing card follows. The tongue
+slides out once a port is chosen and back in on Disconnect or unplug; a warning or error slides it
+out without a connection, so none is hidden. A closed tongue is inert.
 
-Select USB device invokes the native port chooser; probing, compatibility, manifest/artifact checks,
-optional erase, sparse writes, real byte progress, reset and errors stay inline. Device/Connection/
-Compatibility facts derive from the actual probe. Only a compatible ESP32-S3 and validated artifact
-plan enable installation. Version and flashed parts come from the same selected manifest; failure
-cannot enable a stale version. Release versus Development provenance comes from the page path.
+Connect invokes the native port chooser, then probes the chip, requires at least 8 MB of flash and
+reads, without writing, the installed partition table, both `otadata` sectors and the boot app header.
+Disconnect takes Connect's place and, where the browser can, also forgets the port's permission;
+unplugging only disconnects.
+With exactly one port already granted, the page connects to it on load and on replug.
 
-Keep configuration is the recommended default and preserves NVS erase sectors. Erase everything is
-an explicit destructive choice. Success follows reset and transport close. The after-flash steps
-separate first/erased setup from ordinary updates and preserve breaker-off wiring instructions.
+Flash keeps NVS, coredump and history; Clean flash erases all flash first. Flash is offered only when
+the installed app is this project and its NVS partition has the offered label, offset and size, which
+includes the former 4 MB layout. Otherwise Flash is hidden and refused, and Clean flash takes the
+primary look. An unreadable device keeps both, because an unneeded erase loses configuration while an
+in-place update can still be followed by Clean flash; once the table is read, NVS elsewhere still
+rules out Flash even if the app header cannot be read. Progress fills the pressed button.
 
-The Connection tile toggles the real 115200-baud serial monitor. Its inset tongue pushes the next
-card down; closing cancels the reader, releases locks and closes the port while retaining visible
-history. Flashing closes the monitor first. Remove browser permission only forgets a closed granted
-port, never interrupts ownership, and clears selected state after success. Without a grant there is
-no permission-release chooser. See [SETUP.md](SETUP.md) for the owner task sequence.
+Everything the page reports goes to the log as time-stamped lines between the device's own output:
+the probe, the installed firmware, refusals, failures and the 115200-baud boot after Connect, Reset
+and an install. The log has a fixed, window-dependent height, shows no horizontal scrollbar and
+follows new lines only while scrolled to its end. Version and flashed parts come from the same verified manifest; failure cannot
+enable a stale version. Release versus Development comes from the page path. `?trace` adds the
+esptool-js packet trace. The After flashing steps separate first/erased setup from ordinary updates
+and preserve breaker-off wiring instructions. See [SETUP.md](SETUP.md) for the owner task sequence.
 
 ### 5.6 Settings — the screen behind the gear (Connections + ESP32 + heating-curve diagnosis)
 

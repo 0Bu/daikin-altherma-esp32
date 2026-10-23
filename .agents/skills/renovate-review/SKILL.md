@@ -46,7 +46,7 @@ scripts/gh-with-git-credentials.sh --repo github.com/0Bu/daikin-altherma-esp32 p
 
 | Changed | Dependency | What it needs |
 |---|---|---|
-| `docs/index.html` | `esptool-js` | §2 — a real Web Serial flash |
+| `docs/index.html` (import of `docs/vendor/esptool-js-*.bundle.js`) | `esptool-js` | §2 — vendor the bundle, then a real Web Serial flash |
 | `.github/workflows/build.yml` (`esp_idf_version:`) | `espressif/esp-idf` | §3 — a real build + a running board |
 | the Renovate runner pin in `.github/workflows/renovate.yaml` | `renovatebot/github-action` | protected-base CI attests the exact pin-line-only patch, then GitHub-native automerge may complete it without human records |
 | other action pins | other GitHub Actions | ordinary human review records and an explicit manual merge |
@@ -71,11 +71,23 @@ cryptographic proof; moving Renovate to a GitHub App would strengthen it.
 
 ## 2. esptool-js — the browser installer
 
-One line changes (the CDN pin), every gate passes, and **nothing automated touches the electrical
-flash path** — which is exactly what differs between versions. The inline installer depends on
-`Transport`, `ESPLoader.main()`, sparse `writeFlash()`, `reportProgress()` and `after("hard_reset")`.
-These can all keep their TypeScript shape while changing reset or stream-lock behaviour that only
-fails on real hardware. The reference board is native USB-Serial/JTAG, where reset is most fragile.
+The installer imports an unmodified bundle vendored under `docs/vendor/`. Renovate renames only the
+import in `docs/index.html`; the installer tests fail until the matching bundle exists. Vendor it
+first: download the tarball from the npm registry, compare its SHA-512 with the registry's
+`dist.integrity`, copy `package/bundle.js` unchanged to `docs/vendor/esptool-js-<new>.bundle.js` and
+`package/LICENSE`, under the same two-line integrity header, to `docs/vendor/esptool-js-<new>.LICENSE`.
+Remove the old pair, add the new bundle's SHA-256 to `VENDORED_ESPTOOL_SHA256` in
+`test/web_installer.test.mjs`, and update the other version references; the vendoring test reports
+them one at a time (footer link, `scripts/build-pages.sh`, `scripts/verify-published-artifacts.py`,
+`THIRD_PARTY_NOTICES.md`).
+
+Even then **nothing automated touches the electrical flash path**, which is exactly what differs
+between versions. The installer depends on `Transport`, `ESPLoader.main()`, `detectFlashSize()`,
+`readFlash()`, `eraseFlash()`, sparse `writeFlash()`, `reportProgress()` and `after("hard_reset")`. Its shared transport also subclasses
+`Transport` and relies on `device`, `reader` and `baudrate` to take over an open port and hand it on
+without closing it. These can keep their TypeScript shape while changing reset or stream-lock
+behaviour that only fails on real hardware. The reference board is native USB-Serial/JTAG, where
+reset is most fragile.
 
 **There is no PR preview to click.** The per-PR preview installer is retired, and pull-request CI
 deliberately publishes no flashable artifact. The source/API and Node checks below remain available,
@@ -102,14 +114,19 @@ Keep extraction outside the repository. Do not delete or replace an existing wor
 make room for review inputs.
 
 - `Transport` still has to open, read, reset and close the same Web Serial port without leaving a
-  lock behind for the on-page Serial Monitor.
+  lock behind for the on-page log, and `connect()`, `reader` and `device` must still allow the shared
+  transport to reuse an open port and release it with both streams unlocked.
+- `ESPLoader.readFlash()` must still return the requested bytes for the read-only installed-firmware
+  check, which reads in 256-byte steps.
 - `ESPLoader.writeFlash()` must still accept `Uint8Array` parts plus `flashSize`/`flashMode`/
   `flashFreq: "keep"`, `compress: true`, and the three-argument progress callback.
 - `ESPLoader.after("hard_reset")` must still restore the running firmware on the native
   USB-JTAG/Serial path.
 
-Run `node --test test/web_installer.test.mjs` against the bump. It gates our manifest selection,
-weighted sparse-part progress and no-Erase boundary. Then inspect the changed dependency source for
+Run `node --test test/web_installer.test.mjs` against the bump. It gates the vendored bundle, our
+manifest selection, weighted sparse-part progress and the keep-data Flash boundary. One contract test
+loads the real vendored `Transport`; the lifecycle tests use fake ports and a fake loader, so none of
+them proves the real flash path. Then inspect the changed dependency source for
 the methods above; do not infer compatibility from an unchanged exported type alone.
 
 ### 2.2 Establish the pre-merge flash boundary

@@ -2,6 +2,8 @@
 # Assemble the GitHub Pages site (the browser installer) into _site/ from the built dist/:
 #   _site/index.html      the installer page (docs/index.html)
 #   _site/*.mjs           local installer behavior modules
+#   _site/esptool-js-*    the vendored, unmodified esptool-js bundle and its license (docs/vendor/);
+#                         flat like every other site file, which the readback requires
 #   _site/heat-pump-icon.png  the same canonical brand mark embedded in the firmware UI
 #   _site/manifest.json   esptool-js installer + OTA manifest
 #   _site/artifacts.json  exact manifest-bound inventory for public-byte readback
@@ -43,6 +45,7 @@ esac
 rm -rf "$OUT"; mkdir -p "$OUT"
 
 cp docs/index.html docs/serial-port-release.mjs docs/web-installer.mjs "$OUT/"
+cp docs/vendor/esptool-js-0.7.0.bundle.js docs/vendor/esptool-js-0.7.0.LICENSE "$OUT/"
 cp main/www/heat_pump_icon.png "$OUT/heat-pump-icon.png"
 cp LICENSE "$OUT/LICENSE.txt"
 cp THIRD_PARTY_NOTICES.md "$OUT/THIRD_PARTY_NOTICES.md"
