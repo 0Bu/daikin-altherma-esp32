@@ -505,6 +505,8 @@ require("Rebind release tag immediately before release mutation" in publish and
 relevant = re.search(r"relevant='([^']+)'", text)
 require(relevant is not None and "web-installer[.]mjs" in relevant.group(1),
         "docs/web-installer.mjs is missing from change trigger")
+require(re.search(relevant.group(1), "docs/vendor/esptool-js-0.7.0.bundle.js") is not None,
+        "the vendored esptool-js bundle is missing from change trigger")
 require(re.search(relevant.group(1), "scripts/production-ota-gate.py") is not None,
         "production OTA gate changes do not publish an exact-source dev artifact")
 for release_input in (

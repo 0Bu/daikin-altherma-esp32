@@ -16,10 +16,10 @@
     },
     {
       "customType": "regex",
-      "description": "Bump the esptool-js version pinned in the browser installer",
+      "description": "Bump the esptool-js version the browser installer imports from its vendored bundle. Renovate only renames the import; the bundle itself must be vendored by hand (see the esptool-js prBodyNotes), and the installer tests fail until it is.",
       "managerFilePatterns": ["/^docs/index\\.html$/"],
       "matchStrings": [
-        "esptool-js@(?<currentValue>[0-9]+(\\.[0-9]+){0,2})/"
+        "esptool-js-(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)\\.bundle\\.js"
       ],
       "datasourceTemplate": "npm",
       "depNameTemplate": "esptool-js"
@@ -36,6 +36,13 @@
       "description": "Never auto-merge a tracked firmware dependency. A green build proves the firmware compiles — it does NOT prove the X10A decode path still matches a real heat pump, that WiFi/MQTT behaviour survives an ESP-IDF bump, or that the browser installer still flashes (esptool-js, which the build never exercises). A human reviews and merges these manually. The separately named Renovate runner Action remains the sole automerge class.",
       "matchDepNames": ["espressif/esp-idf", "esptool-js"],
       "automerge": false
+    },
+    {
+      "description": "Say what an esptool-js bump still needs: Renovate cannot vendor the bundle.",
+      "matchDepNames": ["esptool-js"],
+      "prBodyNotes": [
+        "Renovate renamed only the import. Vendor the matching bundle as `$renovate-review` §2 describes (npm tarball checked against `dist.integrity`, unmodified `bundle.js`, license with integrity header, reviewed SHA-256 in the test); `node --test test/web_installer.test.mjs` fails until that is complete."
+      ]
     },
     {
       "description": "Remind to re-check the ESP-IDF API surface on a major bump.",

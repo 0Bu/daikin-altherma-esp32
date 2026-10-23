@@ -33,7 +33,7 @@ ARTIFACT_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*\.bin$")
 SITE_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 REQUIRED_SITE_FILES = {
     "index.html", "serial-port-release.mjs", "web-installer.mjs", "heat-pump-icon.png",
-    "LICENSE.txt", "THIRD_PARTY_NOTICES.md", "Apache-2.0.txt", "manifest.json",
+    "esptool-js-0.7.0.bundle.js", "esptool-js-0.7.0.LICENSE", "LICENSE.txt", "THIRD_PARTY_NOTICES.md", "Apache-2.0.txt", "manifest.json",
     "artifacts.json", "changelog.json", "daikin-altherma-esp32.bin",
 }
 
