@@ -37,6 +37,8 @@ inline daik::Config                   current;
 inline std::vector<daik::CachedValue> rows, modbus_rows;
 inline daik::HpValuesIdentity         identity{"generic", 0x1234, 7, 11};
 inline bool                           ota = false, weather = false, modbus_live = false;
+// Weather's TLS phase is `weather`; readers counts admitted /values snapshots in that exclusion.
+inline int                            values_readers = 0, values_readers_peak = 0;
 inline bool                           config_unreadable    = false;
 inline bool                           change_history_epoch = false;
 inline uint32_t                       epoch                = 42;
@@ -70,6 +72,7 @@ void reset() {
     current.wifi_ssid                       = "Café \"quoted\"\\line\n";
     current.mqtt_base                       = "daikin-altherma-esp32";
     ota = weather = modbus_live = change_history_epoch = false;
+    values_readers = values_readers_peak               = 0;
     config_unreadable                                  = false;
     epoch                                              = 42;
     failure = stage_race = 0;
@@ -239,6 +242,13 @@ CirculationSourceStatus           circulation_source_status(const Config&) { ret
 CirculationPumpSample             circulation_pump_sample() { return {}; }
 WeatherForecastStatus             weather_forecast_status() { return {}; }
 bool                              weather_fetch_active() { return fixture::weather; }
+bool                              weather_values_reader_enter() noexcept {
+    if (fixture::weather) return false;
+    fixture::values_readers_peak =
+        std::max(fixture::values_readers_peak, ++fixture::values_readers);
+    return true;
+}
+void weather_values_reader_leave() noexcept { --fixture::values_readers; }
 SyslogStatus                      syslog_status() { return {}; }
 HpStats                           hp_stats() { return {}; }
 uint32_t                          hp_skipped_cycles() { return 0; }
@@ -340,6 +350,7 @@ int main(int argc, char** argv) {
         oracle = name;
         reset();
         fn();
+        check(values_readers == 0, "a /values reader stayed in Weather's TLS exclusion");
         ++count;
         std::printf("PASS %s\n", name);
     };
@@ -442,9 +453,13 @@ int main(int argc, char** argv) {
         emit(req, "epoch-refusal");
     });
     run("weather_and_ota_admission", [] {
+        auto req = request();
+        check(invoke(req, "/values", daik::h_values) == ESP_OK && fixture_ticks == 0 &&
+                  values_readers_peak == 1 && values_readers == 0,
+              "an idle Weather TLS phase delayed /values or left its reader counted");
         weather       = true;
         fixture_delay = [](TickType_t) { fixture::weather = false; };
-        auto req      = request();
+        req           = request();
         check(invoke(req, "/values", daik::h_values) == ESP_OK && fixture_ticks == 250,
               "short Weather wait changed");
         weather       = true;
@@ -453,6 +468,20 @@ int main(int argc, char** argv) {
         check(invoke(req, "/values", daik::h_values) == ESP_OK &&
                   req.status == "503 Service Unavailable" && fixture_ticks == 4250,
               "Weather wait is unbounded");
+        // The TLS phase ends while OTA starts: the next pass counts the reader, OTA refuses it, and
+        // the count must be released or every later Weather cycle defers as http_busy.
+        weather             = true;
+        values_readers_peak = 0;
+        fixture_delay       = [](TickType_t) {
+            fixture::weather = false;
+            fixture::ota     = true;
+        };
+        req = request();
+        check(invoke(req, "/values", daik::h_values) == ESP_OK &&
+                  req.status == "503 Service Unavailable" && values_readers_peak == 1 &&
+                  values_readers == 0,
+              "a reader counted and then refused for OTA stayed in Weather's TLS exclusion");
+        fixture_delay = nullptr;
         ota = true;
         req = request();
         check(invoke(req, "/status", daik::h_status) == ESP_OK &&

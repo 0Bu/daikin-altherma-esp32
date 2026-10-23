@@ -65,5 +65,11 @@ WeatherForecastStatus weather_forecast_status();
 // Lock-free signal for the allocation-rich HTTPS interval. The MQTT publisher reads this before
 // constructing its snapshots so it can leave the largest contiguous heap block to TLS.
 bool weather_fetch_active();
+// /values admission against the narrower TLS phase only (logic::ValuesTlsExclusion). enter()
+// returns false while Weather holds TLS memory; every true return needs exactly one leave() once
+// the snapshot and its stream are released. Weather waits for entered readers before its heap
+// sample, so /values may run through the lead and quiesce interval.
+bool weather_values_reader_enter() noexcept;
+void weather_values_reader_leave() noexcept;
 
 }  // namespace daik

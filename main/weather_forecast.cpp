@@ -8,6 +8,7 @@
 #include "hp_modbus.hpp"
 #include "hp_poll.hpp"
 #include "logic/http_deadline.hpp"
+#include "logic/http_values_wait.hpp"
 #include "logic/open_meteo.hpp"
 #include "logic/payload_complete.hpp"
 #include "logic/weather_forecast.hpp"
@@ -50,6 +51,11 @@ constexpr TickType_t kDownloadDeadline = pdMS_TO_TICKS(60000);
 constexpr int         kNetworkQuiesceLeadMs = 1100;
 constexpr int         kPollQuiesceWaitMs    = 15000;
 constexpr int         kAllocatorRetryMs     = 250;
+// An admitted /values stream normally ends within milliseconds. Each write may stall for
+// HTTPD_DEFAULT_CONFIG's five-second send_wait_timeout (kept by main/http_server.cpp), so a stream
+// still running after that is deferred as http_busy instead of being waited for.
+constexpr uint32_t    kValuesQuiesceWaitMs  = 5000;
+constexpr int         kValuesQuiesceStepMs  = 20;
 constexpr TickType_t  kSourceCancelWait     = pdMS_TO_TICKS(4000);
 constexpr int         kTaskStack            = 12288;
 constexpr UBaseType_t kTaskPrio             = TASK_PRIO_WEATHER; // see main/task_config.hpp
@@ -63,6 +69,7 @@ std::atomic<WeatherTaskStartState> s_task_start_state{WeatherTaskStartState::Not
 enum class SourceAdmission : uint8_t { Idle, Network, SourceChangePending, SourceChange };
 std::atomic<SourceAdmission> s_source_admission{SourceAdmission::Idle};
 std::atomic<uint32_t>        s_source_generation{0};
+logic::ValuesTlsExclusion    s_values_tls;
 // Guarded by s_mtx. These live outside s_status so a source-status invalidation cannot erase an
 // accepted HIL request or let an old source's completion be mistaken for the replacement source.
 uint64_t s_refresh_next_token      = 0;
@@ -162,6 +169,30 @@ private:
                                                        std::memory_order_acquire))
             return;
         std::abort();
+    }
+};
+
+// The TLS allocation phase inside an admitted NetworkActivity. /values runs freely through the lead
+// and quiesce interval; this raises the phase before reading the reader count (see
+// logic::ValuesTlsExclusion) and lowers it on every exit once the client and JSON tree are gone.
+struct WeatherTlsPhase {
+    WeatherTlsPhase() noexcept { s_values_tls.begin_tls(); }
+    ~WeatherTlsPhase() { s_values_tls.end_tls(); }
+    WeatherTlsPhase(const WeatherTlsPhase&)            = delete;
+    WeatherTlsPhase& operator=(const WeatherTlsPhase&) = delete;
+
+    // Bounded wait for a /values stream admitted before the phase was raised.
+    bool values_quiesced() noexcept {
+        const TickType_t started = xTaskGetTickCount();
+        for (;;) {
+            const uint32_t elapsed_ms =
+                static_cast<uint32_t>((xTaskGetTickCount() - started) * portTICK_PERIOD_MS);
+            const auto decision = logic::weather_values_quiesce_decision(
+                s_values_tls.readers(), elapsed_ms, kValuesQuiesceWaitMs);
+            if (decision == logic::WeatherValuesQuiesceDecision::Ready) return true;
+            if (decision == logic::WeatherValuesQuiesceDecision::Busy) return false;
+            vTaskDelay(pdMS_TO_TICKS(kValuesQuiesceStepMs));
+        }
     }
 };
 
@@ -591,6 +622,7 @@ __attribute__((noinline)) WeatherCycleWait weather_cycle(uint32_t               
     bool                  mqtt_quiesce_failed   = false;
     bool                  modbus_quiesce_failed = false;
     bool                  syslog_quiesce_failed = false;
+    bool                  values_quiesce_failed = false;
     bool                  source_preempted      = false;
     bool                  heap_refused          = false;
     HttpClientProbe       headroom;
@@ -627,8 +659,12 @@ __attribute__((noinline)) WeatherCycleWait weather_cycle(uint32_t               
             before_fetch.weather_latitude_e6 != cfg.weather_latitude_e6 ||
             before_fetch.weather_longitude_e6 != cfg.weather_longitude_e6;
         if (!ota_preempted && !poll_quiesce_failed && !mqtt_quiesce_failed &&
-            !modbus_quiesce_failed && !syslog_quiesce_failed && !source_preempted)
-            ok = fetch_forecast(cfg, sample, error, heap_refused, headroom);
+            !modbus_quiesce_failed && !syslog_quiesce_failed && !source_preempted) {
+            WeatherTlsPhase tls_phase;
+            values_quiesce_failed = !tls_phase.values_quiesced();
+            if (!values_quiesce_failed)
+                ok = fetch_forecast(cfg, sample, error, heap_refused, headroom);
+        }
     }
     stack_watch_sample(StackWatch::Weather);
     // A location/consent save may race the old request. Bind every result and failure to
@@ -676,13 +712,14 @@ __attribute__((noinline)) WeatherCycleWait weather_cycle(uint32_t               
         return {pdMS_TO_TICKS(1000), false};
     }
     if (poll_quiesce_failed || mqtt_quiesce_failed || modbus_quiesce_failed ||
-        syslog_quiesce_failed) {
+        syslog_quiesce_failed || values_quiesce_failed) {
         const HttpClientProbe blocked = http_client_probe();
         diag_printf("weather: %s did not quiesce (free=%u B largest=%u B)\n",
                     poll_quiesce_failed     ? "X10A poll"
                     : mqtt_quiesce_failed   ? "MQTT publisher"
                     : modbus_quiesce_failed ? "HomeHub poll"
-                                            : "Syslog",
+                    : syslog_quiesce_failed ? "Syslog"
+                                            : "HTTP /values",
                     static_cast<unsigned>(blocked.free_internal),
                     static_cast<unsigned>(blocked.largest_internal));
         {
@@ -693,7 +730,8 @@ __attribute__((noinline)) WeatherCycleWait weather_cycle(uint32_t               
             s_status.reason   = poll_quiesce_failed     ? "x10a_busy"
                                 : mqtt_quiesce_failed   ? "mqtt_busy"
                                 : modbus_quiesce_failed ? "homehub_busy"
-                                                        : "syslog_busy";
+                                : syslog_quiesce_failed ? "syslog_busy"
+                                                        : "http_busy";
         }
         refresh_attempt.finish(false);
         return {pdMS_TO_TICKS(WEATHER_RETRY_INTERVAL_S * 1000u), false};
@@ -1035,5 +1073,9 @@ bool weather_fetch_active() {
     const SourceAdmission state = s_source_admission.load(std::memory_order_acquire);
     return state == SourceAdmission::Network || state == SourceAdmission::SourceChangePending;
 }
+
+bool weather_values_reader_enter() noexcept { return s_values_tls.try_enter_reader(); }
+
+void weather_values_reader_leave() noexcept { s_values_tls.leave_reader(); }
 
 } // namespace daik
