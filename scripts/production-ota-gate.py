@@ -1586,10 +1586,12 @@ def production_promotion_snapshot_ready(
                 f"({baseline_counters[key]} -> {counters[key]})"
             )
     if counters["timeout_err"] - baseline_counters["timeout_err"] > MAX_X10A_TIMEOUT_DELTA:
-        fail(f"production X10A timeout delta exceeded {MAX_X10A_TIMEOUT_DELTA} before promotion")
+        fail(f"production X10A timeout delta exceeded {MAX_X10A_TIMEOUT_DELTA} before promotion "
+             f"({x10a_evidence(status, baseline_counters)})")
     hp = status.get("hp", {})
     if not hp.get("connected") or int(hp.get("values", 0)) <= 0:
-        fail("production X10A must remain live while waiting for promotion readiness")
+        fail("production X10A must remain live while waiting for promotion readiness "
+             f"({x10a_evidence(status, baseline_counters)})")
     weather = status.get("weather_forecast")
     if not isinstance(weather, dict) or not isinstance(weather.get("fetching"), bool):
         fail("production weather status has no boolean fetching state before promotion")
@@ -1704,6 +1706,30 @@ def x10a_timeout_delta_exceeded(
     return require_x10a and final["timeout_err"] - baseline["timeout_err"] > MAX_X10A_TIMEOUT_DELTA
 
 
+def x10a_evidence(status: dict[str, Any], baseline: dict[str, int]) -> str:
+    """Name the sampled X10A facts behind a block without echoing board-supplied text.
+
+    A silent bus raises the timeout delta. Polling the firmware paused (for example while a manifest
+    check waits for heap) leaves the delta unchanged and only ages `last_ok_s`.
+    """
+    hp = status.get("hp")
+    hp = hp if isinstance(hp, dict) else {}
+
+    def shown(key: str) -> str:
+        value = hp.get(key)
+        if isinstance(value, bool):
+            return "true" if value else "false"
+        if isinstance(value, int):
+            return str(value)
+        return "absent" if value is None else "malformed"
+
+    timeout = hp.get("timeout_err")
+    delta = "unknown" if isinstance(timeout, bool) or not isinstance(timeout, int) else \
+        str(timeout - baseline["timeout_err"])
+    return (f"connected={shown('connected')}, values={shown('values')}, "
+            f"last_ok_s={shown('last_ok_s')}, timeout delta {delta}, limit {MAX_X10A_TIMEOUT_DELTA}")
+
+
 def wait_for_post_stress_mqtt_recovery(
     endpoint: ResolvedHttpEndpoint, initial: dict[str, Any], *, host: str, mac: str,
     version: str, elf: str, uptimes: list[int],
@@ -1789,7 +1815,8 @@ def stress_board(
             if mqtt_connected is not True:
                 fail(f"{host} MQTT did not connect before the pressure window")
             if require_x10a and (not hp.get("connected") or int(hp.get("values", 0)) <= 0):
-                fail(f"{host} X10A did not connect or deliver values before the pressure window")
+                fail(f"{host} X10A did not connect or deliver values before the pressure window "
+                     f"({x10a_evidence(started, initial_counters)})")
             if require_weather and fetching is not False:
                 fail(f"{host} weather did not become idle before its HIL refresh")
             if heap_ready:
@@ -1869,6 +1896,9 @@ def stress_board(
             }},
         )
     disconnected = 0
+    # Written only by the status worker, like `disconnected`; the first X10A loss keeps its evidence.
+    x10a_lost = 0
+    first_x10a_loss: str | None = None
     scheduled_tls_active = threading.Event()
     mqtt_recovery_expected = threading.Event()
     mqtt_recovery = MqttRecoveryTracker(int(weather_before.get("successes", 0)))
@@ -1888,7 +1918,7 @@ def stress_board(
                 errors.append(describe(kind, error, started_at, uptimes[-1]))
 
     def status_loop() -> None:
-        nonlocal disconnected
+        nonlocal disconnected, x10a_lost, first_x10a_loss
         while time.monotonic() < deadline:
             request_started = time.monotonic()
             try:
@@ -1913,6 +1943,10 @@ def stress_board(
                 # tracker also defers a straddling mixed snapshot until that evidence can arrive.
                 if require_x10a and (not hp.get("connected") or int(hp.get("values", 0)) <= 0):
                     disconnected += 1
+                    x10a_lost += 1
+                    if first_x10a_loss is None:
+                        first_x10a_loss = (f"at +{now - stress_started:.2f}s "
+                                           f"({x10a_evidence(status, baseline)})")
                 disconnected += mqtt_recovery.observe(
                     now=now,
                     mqtt_connected=bool(mqtt.get("connected")),
@@ -2152,14 +2186,18 @@ def stress_board(
     if any(later < earlier for earlier, later in zip(uptimes, uptimes[1:])):
         fail(f"{host} rebooted during live stress")
     if disconnected:
-        fail(f"{host} lost a required MQTT/X10A connection in {disconnected} status samples")
+        x10a_detail = "" if first_x10a_loss is None else \
+            f"; X10A in {x10a_lost} of them, first {first_x10a_loss}"
+        fail(f"{host} lost a required MQTT/X10A connection in {disconnected} status samples"
+             f"{x10a_detail}")
     for key in ("heap_restarts", "mqtt_skipped", "poll_skipped", "crc_err"):
         if final[key] != baseline[key]:
             fail(f"{host} {key} changed during live stress ({baseline[key]} -> {final[key]})")
     if x10a_timeout_delta_exceeded(
         require_x10a=require_x10a, baseline=baseline, final=final,
     ):
-        fail(f"{host} X10A timeout delta exceeded {MAX_X10A_TIMEOUT_DELTA}")
+        fail(f"{host} X10A timeout delta exceeded {MAX_X10A_TIMEOUT_DELTA} "
+             f"({x10a_evidence(finished, baseline)})")
     if int(system.get("free_heap", 0)) < MIN_FINAL_FREE_HEAP:
         fail(f"{host} final internal free heap is below {MIN_FINAL_FREE_HEAP} bytes")
     if int(system.get("max_alloc", 0)) < MIN_FINAL_LARGEST_BLOCK:
@@ -2217,10 +2255,12 @@ def stress_board(
             if x10a_timeout_delta_exceeded(
                 require_x10a=require_x10a, baseline=baseline, final=ready_counters,
             ):
-                fail(f"{host} X10A timeout delta exceeded {MAX_X10A_TIMEOUT_DELTA}")
+                fail(f"{host} X10A timeout delta exceeded {MAX_X10A_TIMEOUT_DELTA} "
+                     f"({x10a_evidence(candidate, baseline)})")
             hp = candidate.get("hp", {})
             if require_x10a and (not hp.get("connected") or int(hp.get("values", 0)) <= 0):
-                fail(f"{host} lost X10A while waiting for post-stress headroom")
+                fail(f"{host} lost X10A while waiting for post-stress headroom "
+                     f"({x10a_evidence(candidate, baseline)})")
             ready_system = candidate.get("sys", {})
             ready = \
                 deferred_weather.get("fetching") is False and \
@@ -2354,11 +2394,13 @@ def stress_board(
         if x10a_timeout_delta_exceeded(
             require_x10a=require_x10a, baseline=baseline, final=final,
         ):
-            fail(f"{host} X10A timeout delta exceeded {MAX_X10A_TIMEOUT_DELTA}")
+            fail(f"{host} X10A timeout delta exceeded {MAX_X10A_TIMEOUT_DELTA} "
+                 f"({x10a_evidence(finished, baseline)})")
         final_hp = finished.get("hp", {})
         if require_x10a and \
            (not final_hp.get("connected") or int(final_hp.get("values", 0)) <= 0):
-            fail(f"{host} lost X10A during post-stress Weather recovery")
+            fail(f"{host} lost X10A during post-stress Weather recovery "
+                 f"({x10a_evidence(finished, baseline)})")
         if not finished.get("mqtt", {}).get("connected"):
             fail(f"{host} MQTT was not connected after post-stress Weather recovery")
         if int(system.get("free_heap", 0)) < MIN_FINAL_FREE_HEAP:
@@ -2756,7 +2798,8 @@ def confirm_ota_probation(
             fail(f"{host} counters changed after its pressure window")
         if current["timeout_err"] < last_timeout or \
            current["timeout_err"] - baseline["timeout_err"] > MAX_X10A_TIMEOUT_DELTA:
-            fail(f"{host} timeout counter regressed or exceeded its confirmation allowance")
+            fail(f"{host} timeout counter regressed or exceeded its confirmation allowance "
+                 f"({x10a_evidence(status, baseline)})")
         last_timeout = current["timeout_err"]
         system = status.get("sys", {})
         if int(system.get("free_heap", 0)) < MIN_FINAL_FREE_HEAP or \
@@ -2768,7 +2811,8 @@ def confirm_ota_probation(
             if status.get("mqtt", {}).get("connected") is not True or \
                hp.get("connected") is not True or not isinstance(values, int) or \
                isinstance(values, bool) or values <= 0:
-                fail(f"{host} probation confirmation lost MQTT or X10A liveness")
+                fail(f"{host} probation confirmation lost MQTT or X10A liveness "
+                     f"({x10a_evidence(status, baseline)})")
         return uptime
 
     while time.monotonic() < deadline:
