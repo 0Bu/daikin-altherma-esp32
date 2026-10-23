@@ -388,7 +388,7 @@ for t in "${TARGETS[@]}"; do
 
         # Stage only the byte ranges named by flash_args for Web Serial. Carving them from the
         # merged image retains merge-bin's header preparation, while separate manifest parts leave
-        # NVS and every other gap untouched on a no-Erase update.
+        # NVS and every other gap untouched on a keep-data Flash.
         web_parts=""
         web_part_count=0
         while read -r off rel; do

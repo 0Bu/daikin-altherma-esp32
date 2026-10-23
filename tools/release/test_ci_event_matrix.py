@@ -176,7 +176,8 @@ class CIEventMatrixTests(unittest.TestCase):
         positives = ['LICENSE', 'THIRD_PARTY_NOTICES.md', 'main/hp_poll.cpp', 'main/www/index.html',
                      'CMakeLists.txt', 'sdkconfig.defaults', 'dependencies.lock', 'partitions.csv',
                      'version.txt', 'docs/index.html', 'docs/serial-port-release.mjs',
-                     'docs/web-installer.mjs', '.github/workflows/build.yml',
+                     'docs/web-installer.mjs', 'docs/vendor/esptool-js-0.7.0.bundle.js',
+                     'docs/vendor/esptool-js-0.7.0.LICENSE', '.github/workflows/build.yml',
                      'scripts/pages-commit-payload.mjs', 'tools/version/fixture.py',
                      'tools/web_asset/fixture.py', 'tools/release/fixture.py', 'tools/stack/fixture.py']
         positives += [f'scripts/{name}.sh' for name in (
@@ -189,7 +190,8 @@ class CIEventMatrixTests(unittest.TestCase):
         negatives = ['README.md', 'docs/ARCHITECTURE.md', 'docs/REGISTERS.md', 'docs/FEATURES.md',
                      '.github/workflows/cleanup-pr-artifacts.yml', '.github/workflows/pr-policy.yml',
                      'test/test_logic.cpp', 'tools/domain/fixture.py', 'mainly/unrelated.cpp',
-                     'docs/web-installer.mjs.backup', 'scripts/ci-build-all.sh.backup']
+                     'docs/web-installer.mjs.backup', 'scripts/ci-build-all.sh.backup',
+                     'docs/vendor/esptool-js-0.7.0.bundle.js.backup', 'docs/vendor/README.md']
         for name, expected in [(p, 'yes') for p in positives] + [(p, 'no') for p in negatives]:
             with self.subTest(path=name):
                 self.write(name)
