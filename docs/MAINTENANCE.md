@@ -240,6 +240,14 @@ follows failed acceptance. A staging command without `--execute` still writes th
 an admitted read-only preflight. Preserve failure evidence; a later healthy sample does not turn
 that transaction into a pass.
 
+Leave both boards alone while the gate runs: no UI or API update check, settings save or Weather
+refresh. The gate cannot tell such an operation from a fault. A manifest check pauses X10A polling
+for its whole run, including a heap wait of up to `kTransferHeadroomMaxAttempts` ×
+`kHeadroomRetryDelay` (`main/ota_update.cpp`). If the pause outlasts `MQTT_X10A_OFFLINE_GRACE_S`
+(`main/logic/mqtt_publish_gate.hpp`), `/status` reports X10A as lost. Every X10A block names
+`connected`, `values`, `last_ok_s` and the timeout delta against the gate's baseline. A silent bus
+raises the delta. Paused polling leaves the delta unchanged and only ages `last_ok_s`.
+
 Firmware predating production's busy/generation/artifact handshake fails before its POST. Its
 one-time migration is separately authorized signed, NVS-preserving USB application bootstrap;
 there is no timing-based legacy production fallback. This gate creates no release.
