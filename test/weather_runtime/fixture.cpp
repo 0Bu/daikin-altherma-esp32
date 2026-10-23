@@ -597,6 +597,48 @@ void task_consent_generation() {
     REQUIRE(sdk::inits == 1 && !result.has_value && !result.available);
     REQUIRE(result.reason == "diagnostics_disabled");
 }
+// /values may enter during the lead; Weather must raise its TLS phase, drain that reader before any
+// HTTP client exists, refuse new readers while TLS runs, lower the phase afterwards, and fail
+// closed as http_busy without a client when a reader never leaves.
+void task_values_reader_drain() {
+    reset();
+    sdk::body             = prepare();
+    bool lead_reader      = false;
+    bool drained_in_phase = false;
+    bool refused_in_tls   = false;
+    int  drain_steps      = 0;
+    sdk::on_delay         = [&](TickType_t delay) {
+        if (delay == 1100) {
+            lead_reader = weather_values_reader_enter();
+        } else if (delay == 20 && ++drain_steps == 3) {
+            drained_in_phase = s_values_tls.tls_active() && sdk::inits == 0;
+            weather_values_reader_leave();
+        }
+    };
+    sdk::on_open = [&] {
+        refused_in_tls = !weather_values_reader_enter() && s_values_tls.tls_active();
+    };
+    auto result = task_iteration();
+    REQUIRE(lead_reader && drain_steps == 3 && drained_in_phase && refused_in_tls);
+    REQUIRE(result.has_value && result.available && sdk::inits == 1);
+    REQUIRE(!s_values_tls.tls_active() && s_values_tls.readers() == 0);
+    REQUIRE(weather_values_reader_enter());
+    weather_values_reader_leave();
+    reset();
+    sdk::body = prepare();
+    weather_forecast_start();
+    uint64_t token = 0;
+    REQUIRE(weather_forecast_request_refresh(token) && token != 0);
+    sdk::on_delay = [](TickType_t delay) {
+        if (delay == 1100) REQUIRE(weather_values_reader_enter());
+    };
+    result = task_iteration();
+    REQUIRE(!result.has_value && result.state == "waiting" && result.reason == "http_busy");
+    REQUIRE(result.refresh_completed_token == token && result.refresh_success_token != token);
+    REQUIRE(sdk::inits == 0 && sdk::pauses == 1 && sdk::resumes == 1);
+    REQUIRE(!s_values_tls.tls_active() && s_values_tls.readers() == 1);
+    weather_values_reader_leave();
+}
 void task_oom_start() {
     reset();
     sdk::task_fails = true;
@@ -817,6 +859,7 @@ const Case cases[] = {{"epoch_bounds", epoch_bounds},
                       {"source_transaction", source_transaction},
                       {"source_admission_generation", source_admission_generation},
                       {"task_consent_generation", task_consent_generation},
+                      {"task_values_reader_drain", task_values_reader_drain},
                       {"task_oom_start", task_oom_start},
                       {"task_success", task_success},
                       {"task_rejected_retains_sample", task_rejected_retains_sample},

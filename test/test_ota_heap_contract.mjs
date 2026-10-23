@@ -1455,30 +1455,65 @@ assert.ok(valuesSendStart >= 0 && valuesSendEnd > valuesSendStart,
   "the shared /values + MCP sender must remain identifiable");
 const valuesSend = httpStatus.slice(valuesSendStart, valuesSendEnd);
 const valuesOtaGate = valuesSend.indexOf("if (ota_download_active())");
-const valuesWait = valuesSend.indexOf("wait_for_values_tls_owner()");
+const valuesReader = valuesSend.indexOf("ValuesTlsReader reader;", valuesOtaGate);
+const valuesWait = valuesSend.indexOf("wait_for_values_tls_owner(reader)", valuesReader);
 const valuesSnapshot = valuesSend.indexOf("take_values_snapshot()", valuesWait);
 const valuesStream = valuesSend.indexOf("return finish_bounded_stream(j,", valuesSnapshot);
-assert.ok(valuesOtaGate >= 0 && valuesWait > valuesOtaGate && valuesSnapshot > valuesWait &&
-          valuesStream > valuesSnapshot,
-  "/values must refuse OTA and finish its weather wait before snapshot allocation and bounded emission");
+assert.ok(valuesOtaGate >= 0 && valuesReader > valuesOtaGate && valuesWait > valuesReader &&
+          valuesSnapshot > valuesWait && valuesStream > valuesSnapshot,
+  "/values must refuse OTA, hold its Weather reader before the snapshot and stream, and finish its wait first");
 assert.match(valuesSend,
-  /if\s*\(ota_download_active\(\)\)\s*return network_tls_busy\(req\);[\s\S]{0,180}?if\s*\(!wait_for_values_tls_owner\(\)\s*\|\|\s*ota_download_active\(\)\)\s*return network_tls_busy\(req\);/,
-  "a refused TLS-owner wait and its final OTA recheck must precede the values snapshot allocation");
-assert.equal(occurrences(httpStatus, "wait_for_values_tls_owner()"), 2,
+  /if\s*\(ota_download_active\(\)\)\s*return network_tls_busy\(req\);\s*ValuesTlsReader reader;\s*if\s*\(!wait_for_values_tls_owner\(reader\)\s*\|\|\s*ota_download_active\(\)\)\s*return network_tls_busy\(req\);/,
+  "a refused TLS-phase wait and its final OTA recheck must precede the values snapshot allocation");
+assert.equal(occurrences(httpStatus, "wait_for_values_tls_owner("), 2,
   "only the wait helper and the shared values sender may use the values-only gate");
 assert.match(httpStatus,
   /network_tls_busy\(httpd_req_t\* req\)[\s\S]*?503 Service Unavailable[\s\S]*?text\/plain[\s\S]*?network operation in progress/,
   "the bounded refusal must stay a small explicit pre-response busy-503");
-const valuesWaitStart = httpStatus.indexOf("static bool wait_for_values_tls_owner()");
+assert.match(httpStatus,
+  /struct ValuesTlsReader \{[\s\S]{0,320}?~ValuesTlsReader\(\) \{\s*if \(admitted\) weather_values_reader_leave\(\);\s*\}/,
+  "an admitted /values reader must leave Weather's exclusion on every exit, including unwinding");
+const valuesWaitStart = httpStatus.indexOf("static bool wait_for_values_tls_owner(ValuesTlsReader& reader)");
 const valuesWaitEnd = httpStatus.indexOf("static esp_err_t network_tls_busy", valuesWaitStart);
 const valuesWaitHelper = httpStatus.slice(valuesWaitStart, valuesWaitEnd);
-const weatherRead = valuesWaitHelper.indexOf("const bool weather_active = weather_fetch_active()");
-const otaRead = valuesWaitHelper.indexOf("const bool ota_active     = ota_download_active()", weatherRead);
+const weatherRead = valuesWaitHelper.indexOf("const bool weather_tls = !weather_values_reader_enter()");
+const otaRead = valuesWaitHelper.indexOf("const bool ota_active  = ota_download_active()", weatherRead);
 const waitDecision = valuesWaitHelper.indexOf(
-  "http_values_wait_decision(\n            ota_active, weather_active", otaRead);
+  "http_values_wait_decision(\n            ota_active, weather_tls", otaRead);
+const readerAdmitted = valuesWaitHelper.indexOf("reader.admitted = true;", waitDecision);
+const readerReleased = valuesWaitHelper.indexOf("if (!weather_tls) weather_values_reader_leave();",
+  readerAdmitted);
+const readerRefused = valuesWaitHelper.indexOf("Refuse) return false;", readerReleased);
 assert.ok(valuesWaitStart >= 0 && valuesWaitEnd > valuesWaitStart && weatherRead >= 0 &&
-  otaRead > weatherRead && waitDecision > otaRead,
-  "the wait must read Weather then OTA before deciding, so their hand-off cannot look idle");
+  otaRead > weatherRead && waitDecision > otaRead && readerAdmitted > waitDecision &&
+  readerReleased > readerAdmitted && readerRefused > readerReleased,
+  "the wait must enter Weather's count then read OTA, and release a counted reader it does not admit");
+assert.doesNotMatch(valuesWaitHelper, /weather_fetch_active\(\)/,
+  "/values must wait only for Weather's TLS phase, not for its lead and quiesce interval");
+const exclusion = read("main/logic/http_values_wait.hpp");
+assert.match(exclusion,
+  /bool try_enter_reader\(\) noexcept \{\s*readers_\.fetch_add\(1, std::memory_order_seq_cst\);\s*if \(!tls_\.load\(std::memory_order_seq_cst\)\) return true;\s*readers_\.fetch_sub\(1, std::memory_order_seq_cst\);/,
+  "a /values reader must be counted before it reads the TLS phase, sequentially consistent");
+assert.match(exclusion,
+  /void\s+begin_tls\(\) noexcept \{ tls_\.store\(true, std::memory_order_seq_cst\); \}/,
+  "Weather must raise its TLS phase sequentially consistent before reading the reader count");
+assert.match(exclusion,
+  /uint32_t readers\(\) const noexcept \{ return readers_\.load\(std::memory_order_seq_cst\); \}/,
+  "Weather's reader-count read must stay sequentially consistent, or it may pass its own phase store");
+const weatherPhaseStart = weather.indexOf("struct WeatherTlsPhase {");
+const weatherPhaseEnd = weather.indexOf("struct HttpClientCleanup", weatherPhaseStart);
+const weatherPhase = weather.slice(weatherPhaseStart, weatherPhaseEnd);
+assert.ok(weatherPhaseStart >= 0 && weatherPhaseEnd > weatherPhaseStart &&
+  weatherPhase.includes("WeatherTlsPhase() noexcept { s_values_tls.begin_tls(); }") &&
+  weatherPhase.includes("~WeatherTlsPhase() { s_values_tls.end_tls(); }") &&
+  /weather_values_quiesce_decision\(\s*s_values_tls\.readers\(\), elapsed_ms, kValuesQuiesceWaitMs\)/
+    .test(weatherPhase),
+  "Weather's TLS phase must be raised and lowered by scope and drain readers with a bounded wait");
+assert.match(weather,
+  /WeatherTlsPhase tls_phase;\s*values_quiesce_failed = !tls_phase\.values_quiesced\(\);\s*if \(!values_quiesce_failed\)\s*ok = fetch_forecast\(/,
+  "Weather must drain admitted /values readers after raising its TLS phase and before any HTTPS allocation");
+assert.match(weather, /syslog_quiesce_failed \? "syslog_busy"\s*:\s*"http_busy"/,
+  "a /values reader that never leaves must defer Weather as an explicit http_busy wait");
 assert.match(httpStatus, /kValuesTlsWait\s*=\s*pdMS_TO_TICKS\(4000\)/,
   "the values wait must remain below the five-second live-gate request timeout");
 assert.match(httpStatus, /kValuesTlsRetry\s*=\s*pdMS_TO_TICKS\(250\)/,

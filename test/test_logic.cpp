@@ -5118,6 +5118,33 @@ static void test_http_values_wait() {
           HttpValuesWaitDecision::Ready);
 }
 
+// /values may run through Weather's lead, but its snapshot must never overlap the TLS phase. Each
+// side announces itself before reading the other, so a reader is either refused or counted before
+// Weather's heap sample; a refused reader leaves no count behind, and Weather's wait is bounded.
+static void test_values_tls_exclusion() {
+    using logic::WeatherValuesQuiesceDecision;
+    logic::ValuesTlsExclusion x;
+    CHECK(!x.tls_active() && x.readers() == 0);
+    CHECK(x.try_enter_reader() && x.readers() == 1); // admitted during the lead
+    x.begin_tls();
+    CHECK(x.tls_active() && x.readers() == 1);        // Weather sees the earlier reader
+    CHECK(!x.try_enter_reader() && x.readers() == 1); // a new reader is refused, not counted
+    x.leave_reader();
+    CHECK(x.readers() == 0);
+    x.end_tls();
+    CHECK(!x.tls_active() && x.try_enter_reader() && x.readers() == 1);
+    x.leave_reader();
+    CHECK(x.readers() == 0);
+    CHECK(logic::weather_values_quiesce_decision(0, 0, 5000) ==
+          WeatherValuesQuiesceDecision::Ready);
+    CHECK(logic::weather_values_quiesce_decision(0, 5000, 5000) ==
+          WeatherValuesQuiesceDecision::Ready);
+    CHECK(logic::weather_values_quiesce_decision(1, 4999, 5000) ==
+          WeatherValuesQuiesceDecision::Wait);
+    CHECK(logic::weather_values_quiesce_decision(1, 5000, 5000) ==
+          WeatherValuesQuiesceDecision::Busy);
+}
+
 // The initial feed must be absolute HTTPS; redirects may use an ordinary relative reference but
 // can never downgrade the transport or hide a new authority behind `//`. Exercise parser-confusion
 // shapes as well as the happy path because esp_http_client, not this small policy, does full URL
@@ -26099,6 +26126,7 @@ int main() {
     test_ota_headroom();
     test_weather_fetch_headroom();
     test_http_values_wait();
+    test_values_tls_exclusion();
     test_http_deadline();
     test_ota_transport();
     test_heartbeat();

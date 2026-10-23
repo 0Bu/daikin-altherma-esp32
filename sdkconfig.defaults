@@ -15,6 +15,12 @@ CONFIG_ESPTOOLPY_FLASHSIZE_8MB=y
 CONFIG_PARTITION_TABLE_CUSTOM=y
 CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
 
+# CPU clock: the S3 maximum instead of the SDK's 160 MHz default. HTTPS certificate-chain checks run
+# in software (no ECC accelerator), and Weather's TLS phase holds /values and the X10A/MQTT/Modbus
+# quiesce for its whole duration; that phase shrinks by about the clock ratio. Power management is
+# not enabled, so this is the fixed clock.
+CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
+
 # Console over native USB-Serial/JTAG — present on esp32s3 (the XIAO
 # ESP32-S3 exposes it on its USB-C port). This console is a SEPARATE UART from the
 # heat-pump X10A link (rx_pin/tx_pin), so device logs never collide with the

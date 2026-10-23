@@ -342,7 +342,9 @@ validation and boot selection. [SECURITY.md](SECURITY.md) owns trust and rollbac
 OTA and Weather announce network ownership before TLS. MQTT stops its complete transport and
 acknowledges; X10A, HomeHub and Syslog stand aside before allocation-rich work. An in-flight Weather
 request gets a bounded unwind window; OTA wins future admission. A 1.1-second lead lets an existing
-publisher cycle finish. Stale quiesce flags have a bounded ten-minute cap, longer than valid OTA
+publisher cycle finish. `/values` snapshots may run through that lead; Weather then raises its TLS
+phase, drains admitted snapshots for at most five seconds (else `http_busy`) and only then takes its
+admission sample. Stale quiesce flags have a bounded ten-minute cap, longer than valid OTA
 transfer and host observation budgets. MQTT restarts after stable headroom with exponential backoff
 on client-start failure. No model-sized HTTP/MQTT buffer remains allocated for the boot.
 

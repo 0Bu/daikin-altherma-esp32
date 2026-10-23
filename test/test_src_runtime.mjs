@@ -142,6 +142,21 @@ const mutations = [
     after: "return weather_config_snapshot(config());",
   },
   {
+    name: "weather-tls-without-values-drain", file: "weather", scenario: "task_values_reader_drain",
+    before: "values_quiesce_failed = !tls_phase.values_quiesced();",
+    after: "values_quiesce_failed = false; /* mutation: TLS may start beside a /values snapshot */",
+  },
+  {
+    name: "weather-tls-phase-not-raised", file: "weather", scenario: "task_values_reader_drain",
+    before: "WeatherTlsPhase() noexcept { s_values_tls.begin_tls(); }",
+    after: "WeatherTlsPhase() noexcept {}",
+  },
+  {
+    name: "weather-tls-phase-never-lowered", file: "weather", scenario: "task_values_reader_drain",
+    before: "~WeatherTlsPhase() { s_values_tls.end_tls(); }",
+    after: "~WeatherTlsPhase() {}",
+  },
+  {
     name: "weather-retained-request-buffer", file: "weather", scenario: "task_allocation_lifetimes",
     before: "NetworkActivity       activity(source_generation);",
     after: "NetworkActivity       activity(source_generation); static std::string retained_request_buffer; retained_request_buffer.reserve(64);",
@@ -154,7 +169,7 @@ try {
       path.join(cjsonDir, "cJSON.c"), "-o", cjsonObject]);
     assert.equal(result.status, 0, `lock-resolved cJSON must compile\n${result.stdout}${result.stderr}`);
   }
-  for (const [file, count] of [["env3", 8], ["weather", 18]]) {
+  for (const [file, count] of [["env3", 8], ["weather", 19]]) {
     const binary = compile(`production-${file}`, file);
     const result = execute(binary, []);
     assert.equal(result.status, 0, `${result.stdout}${result.stderr}`);

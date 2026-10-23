@@ -703,30 +703,49 @@ try {
         /(esp_err_t http_send_values_json\([\s\S]{0,420}?)if \(ota_download_active\(\)\) return network_tls_busy\(req\);/,
         "$1if (false) return network_tls_busy(req);")],
     ["values wait ignores OTA becoming active behind Weather", () =>
-      replaceOnce("main/http_status.cpp", "const bool ota_active     = ota_download_active();",
-        "const bool ota_active     = false;")],
+      replaceOnce("main/http_status.cpp", "const bool ota_active  = ota_download_active();",
+        "const bool ota_active  = false;")],
     ["values wait tears the Weather-to-OTA hand-off", () =>
       replaceOnce(
         "main/http_status.cpp",
-        "const bool weather_active = weather_fetch_active();\n        const bool ota_active     = ota_download_active();",
-        "const bool ota_active     = ota_download_active();\n        const bool weather_active = weather_fetch_active();",
+        "const bool weather_tls = !weather_values_reader_enter();\n        const bool ota_active  = ota_download_active();",
+        "const bool ota_active  = ota_download_active();\n        const bool weather_tls = !weather_values_reader_enter();",
       )],
     ["values snapshots no longer wait behind a weather TLS owner", () =>
-      replaceOnce("main/http_status.cpp", "const bool weather_active = weather_fetch_active();",
-        "const bool weather_active = false;")],
+      replaceOnce("main/http_status.cpp", "const bool weather_tls = !weather_values_reader_enter();",
+        "const bool weather_tls = false;")],
+    ["values snapshots wait through Weather's lead again", () =>
+      replaceOnce("main/http_status.cpp", "const bool weather_tls = !weather_values_reader_enter();",
+        "const bool weather_tls = weather_fetch_active() || !weather_values_reader_enter();")],
+    ["an admitted values reader never leaves Weather's exclusion", () =>
+      replaceOnce("main/http_status.cpp", "if (admitted) weather_values_reader_leave();",
+        "(void)admitted;")],
+    ["a values reader reads the TLS phase before it is counted", () =>
+      replaceOnce("main/logic/http_values_wait.hpp",
+        "readers_.fetch_add(1, std::memory_order_seq_cst);\n        if (!tls_.load(std::memory_order_seq_cst)) return true;",
+        "if (!tls_.load(std::memory_order_seq_cst)) return readers_.fetch_add(1) >= 0;")],
+    ["a counted values reader refused for OTA is never released", () =>
+      replaceOnce("main/http_status.cpp", "if (!weather_tls) weather_values_reader_leave();", "")],
+    ["Weather reads the values reader count with acquire ordering only", () =>
+      replaceOnce("main/logic/http_values_wait.hpp",
+        "return readers_.load(std::memory_order_seq_cst);",
+        "return readers_.load(std::memory_order_acquire);")],
+    ["Weather starts TLS beside an admitted values snapshot", () =>
+      replaceOnce("main/weather_forecast.cpp", "values_quiesce_failed = !tls_phase.values_quiesced();",
+        "values_quiesce_failed = false;")],
     ["the values TLS wait exceeds the live request timeout", () =>
       replaceOnce("main/http_status.cpp", "pdMS_TO_TICKS(4000)",
         "pdMS_TO_TICKS(6000)")],
     ["the values snapshot bypasses its TLS-owner wait", () =>
       replaceOnce(
         "main/http_status.cpp",
-        /(esp_err_t http_send_values_json\([\s\S]{0,520}?)if \(!wait_for_values_tls_owner\(\) \|\|/,
-        "$1if (!wait_for_values_tls_owner_bypassed() ||",
+        /(esp_err_t http_send_values_json\([\s\S]{0,520}?)if \(!wait_for_values_tls_owner\(reader\) \|\|/,
+        "$1if (!wait_for_values_tls_owner_bypassed(reader) ||",
       )],
     ["the values snapshot drops its final OTA recheck", () =>
       replaceOnce(
         "main/http_status.cpp",
-        /(esp_err_t http_send_values_json\([\s\S]{0,520}?if \(!wait_for_values_tls_owner\(\) \|\| )ota_download_active\(\)/,
+        /(esp_err_t http_send_values_json\([\s\S]{0,520}?if \(!wait_for_values_tls_owner\(reader\) \|\| )ota_download_active\(\)/,
         "$1false",
       )],
     ["the X10A poll no longer enters the bounded OTA quiesce", () =>

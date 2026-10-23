@@ -662,6 +662,34 @@
           9491
         ]
       }
+    },
+    {
+      "runner": "scripts/run-mock-tests.sh --coverage",
+      "compilers": {
+        "clang-17-darwin": "Apple clang version 17.0.0 (clang-1700.6.4.2)",
+        "gcc-13-linux-ubuntu24": "g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0 via CI-pinned ESP-IDF v6.1 container",
+        "gcc-15-linux-ubuntu26": "g++ (Ubuntu 15.2.0-16ubuntu1) 15.2.0, Ubuntu 26.04 Docker (aarch64)"
+      },
+      "hosted_confirmation": "Hosted confirmation pending: only http_values_wait.hpp uses the measured local GCC 15 aarch64 inventory as a CI candidate. No hosted execution is claimed; authoritative GitHub CI confirmation is required before merge. All other hosted inventories remain unchanged.",
+      "scope": "The /values-versus-Weather TLS exclusion and its bounded drain decision add fully taken outcomes beside the unchanged wait decision. Every prior ratio, all other header inventories and the 95-percent line floor are retained.",
+      "validation_boundary": "All three local C++ and coverage inventories were measured. Clang completed the canonical entrypoint. GCC 13 and GCC 15 were run in containers until the branch ratchet reported the new counts; the later presenter and JavaScript steps were not run there.",
+      "source": "main/logic/http_values_wait.hpp",
+      "source_sha256": "e0363552aaa5fcfac23192147733709ab22557fae6f0fcec83b2e0db46c97253",
+      "test_source_sha256": "6624530bb7fd84196f9919a9ef394067224c320d1bd0bae335af9bb2f0fbd12e",
+      "local_executable_lines": {
+        "clang-17-darwin": [
+          9499,
+          9671
+        ],
+        "gcc-13-linux-ubuntu24": [
+          9220,
+          9503
+        ],
+        "gcc-15-linux-ubuntu26": [
+          9222,
+          9505
+        ]
+      }
     }
   ],
   "method": "Exact taken/outcome inventories are measured by scripts/run-mock-tests.sh --coverage and bound to compiler family, major version and platform; hosted profiles additionally bind the runner image. The gate rejects inventory mismatches and any historical ratio decrease. Updated hosted inventories require authoritative CI confirmation. Historical measurement notes remain in Git; profiles contain the enforced counts. Measurements below identify changed sources and local compiler provenance without changing checker rules or the 95-percent executable-line floor.",
@@ -856,8 +884,8 @@
         "taken": 8
       },
       "main/logic/http_values_wait.hpp": {
-        "outcomes": 4,
-        "taken": 4
+        "outcomes": 8,
+        "taken": 8
       },
       "main/logic/json.hpp": {
         "outcomes": 88,
@@ -1274,8 +1302,8 @@
         "taken": 12
       },
       "main/logic/http_values_wait.hpp": {
-        "outcomes": 6,
-        "taken": 6
+        "outcomes": 12,
+        "taken": 12
       },
       "main/logic/json.hpp": {
         "outcomes": 92,
@@ -1692,8 +1720,8 @@
         "taken": 12
       },
       "main/logic/http_values_wait.hpp": {
-        "outcomes": 6,
-        "taken": 6
+        "outcomes": 12,
+        "taken": 12
       },
       "main/logic/json.hpp": {
         "outcomes": 92,
@@ -2110,8 +2138,8 @@
         "taken": 12
       },
       "main/logic/http_values_wait.hpp": {
-        "outcomes": 6,
-        "taken": 6
+        "outcomes": 12,
+        "taken": 12
       },
       "main/logic/json.hpp": {
         "outcomes": 92,
