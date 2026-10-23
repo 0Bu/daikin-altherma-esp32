@@ -240,11 +240,12 @@ follows failed acceptance. A staging command without `--execute` still writes th
 an admitted read-only preflight. Preserve failure evidence; a later healthy sample does not turn
 that transaction into a pass.
 
-Leave both boards alone while the gate runs: no UI or API update check, settings save or Weather
-refresh. The gate cannot tell such an operation from a fault. A manifest check pauses X10A polling
-for its whole run, including a heap wait of up to `kTransferHeadroomMaxAttempts` ×
-`kHeadroomRetryDelay` (`main/ota_update.cpp`). If the pause outlasts `MQTT_X10A_OFFLINE_GRACE_S`
-(`main/logic/mqtt_publish_gate.hpp`), `/status` reports X10A as lost. Every X10A block names
+Leave every board the gate contacts alone while it runs: no UI or API update check, settings save or
+Weather refresh. The gate cannot tell such an operation from a fault. A manifest check pauses X10A
+polling for its whole run, including heap waits of up to `kTransferHeadroomMaxAttempts` ×
+`kHeadroomRetryDelay` each (`main/ota_update.cpp`). Once `last_ok_s` reaches
+`MQTT_X10A_OFFLINE_GRACE_S` (`main/logic/mqtt_publish_gate.hpp`), `/status` reports X10A as lost
+([API](API.md)) until the next answering sweep. Every X10A liveness or timeout-delta block names
 `connected`, `values`, `last_ok_s` and the timeout delta against the gate's baseline. A silent bus
 raises the delta. Paused polling leaves the delta unchanged and only ages `last_ok_s`.
 

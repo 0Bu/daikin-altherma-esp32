@@ -93,8 +93,8 @@ def board(uptime, hp=LIVE, refresh=2):
     return {"version": version, "app_elf_sha256": elf, "uptime_s": uptime,
         "wifi": {"mac": mac, "connected": True, "rolled_back": False, "ssid": "ExampleNet"},
         "mqtt": {"connected": True, "broker": "private"},
-        "weather_forecast": {"configured": True, "fetching": False, "latitude": "1.0",
-            "longitude": "2.0", "successes": int(refresh == 2), "errors": 0,
+        "weather_forecast": {"configured": True, "fetching": False, "latitude": "12.345678",
+            "longitude": "23.456789", "successes": int(refresh == 2), "errors": 0,
             "state": "ok" if refresh == 2 else "waiting",
             "reason": "" if refresh == 2 else "heap_headroom",
             "fetched_at": 1700000000 if refresh == 2 else 0,
@@ -268,7 +268,7 @@ const blank = run("no-evidence");
 assert.notEqual(blank.status, 0, "an evidence-free formatter must fail the probe");
 assert.match(blank.stderr, /X10A_BLOCK_NAMES_EVIDENCE/);
 
-// Negative control 2: the 2026-10-23 incident's site reverted to its evidence-free message.
+// Negative control 2: the post-stress headroom block reverted to its evidence-free message.
 // Seeded on a scratch copy of the real gate, never on the source.
 const source = fs.readFileSync(gatePath, "utf8");
 const site = /(fail\(f"\{host\} lost X10A while waiting for post-stress headroom) "\n\s+f"\(\{x10a_evidence\(candidate, baseline\)\}\)"\)/;
