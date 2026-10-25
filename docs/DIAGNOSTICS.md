@@ -20,6 +20,7 @@ the installation's health.
 | **NOTE** | A notable accepted observation or unit-reported warning; it does not identify a defect or cause. |
 | **WARNING** | A current unit-reported fault, or pressure confirmed continuously at or below the project's boundary during the window. |
 | **CHECKING** | A required day, signal coverage or eligible observation is missing. The detail names what is missing. |
+| **NO WINDOW** | A full day of tank-cooling evidence produced no completed hour; the detail names the exclusions. |
 | **MEASURED** | A measurement or event population without enough evidence for a good/bad assessment. |
 | **TENTATIVE** | An experimental counter comparison whose complete manufacturer semantics are unknown. |
 | **N/A** | The active profile does not supply the required signals. |
@@ -66,7 +67,8 @@ completed one-hour windows, in **K/h** (one kelvin of cooling equals one degree 
 shows how many windows reached **0.8 K/h** and how many contained internal water-pump activity or
 a draw-like drop. Those counts cover all windows and may overlap; they do not describe the maximum
 window individually. Rapid continuous cooling remains visible even when it resembles water use;
-confirmed endpoint readings keep an isolated temperature spike out of the rate.
+endpoint confirmation rejects isolated jumps larger than 0.2 K. Smaller excursions can still
+affect the rate and the project's note threshold.
 
 **Meaning:** **NOTE** needs at least one window at or above the project's 0.8 K/h threshold without
 either marker. Other completed windows are **MEASURED**, including marked high rates. Without a

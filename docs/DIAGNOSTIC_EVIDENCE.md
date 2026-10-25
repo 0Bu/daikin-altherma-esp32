@@ -1,6 +1,6 @@
 # Evidence and limits of the plant diagnostics
 
-<!-- diagnostic-evidence-contract: ef40c06263c49147660505f394a187daba063185010afb54d15d1cfa8a5f2e48 -->
+<!-- diagnostic-evidence-contract: 4809a7138446d7a24f926cefa76bd24239abb1b0635ee61f5270c6b4d9bbaada -->
 
 For every row in the **Plant diagnostics · 24 h** card, this page answers four questions:
 
@@ -130,8 +130,9 @@ This supports an illustrative heat calculation, not whole-tank calorimetry from 
 
 **Firmware rule:** Complete one-hour windows retain the net temperature drop at tank sensor R5T,
 floored to 0.1 K/h; a net rise contributes zero cooling. Each endpoint needs two consecutive
-readable temperatures within 0.2 K, so an isolated spike cannot set an hourly rate. Confirmation
-starts afresh after a reboot. Charging, implausible readings and excessive
+readable temperatures within 0.2 K, rejecting isolated jumps beyond that tolerance. Smaller
+excursions can still affect the rate and threshold crossing. Confirmation starts afresh after a
+reboot. Charging, implausible readings and excessive
 blind time discard a candidate. A charge witnessed for two minutes, or seen after an unmeasured gap,
 arms a 45-minute settle; unread time beside a witness counts toward those two minutes. A fresh
 filter also holds 45 minutes. Both timers advance only with readable valve and tank-heater witnesses.
