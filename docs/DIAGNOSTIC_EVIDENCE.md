@@ -1,6 +1,6 @@
 # Evidence and limits of the plant diagnostics
 
-<!-- diagnostic-evidence-contract: 4809a7138446d7a24f926cefa76bd24239abb1b0635ee61f5270c6b4d9bbaada -->
+<!-- diagnostic-evidence-contract: 533d8e6d6c469bb8d0418f011de8eefdccf585c515eb64480f43a654c5979b33 -->
 
 For every row in the **Plant diagnostics · 24 h** card, this page answers four questions:
 
@@ -125,7 +125,7 @@ cause, spontaneous recovery, absence of intervention or code-specific service co
 
 **External evidence:** EU standing loss is heat power at specified water and ambient temperatures;
 volume and standing loss are separate declared parameters ([E1], Article 2(17), Annex III section 7).
-Water's specific heat is approximately 4.18 kJ/(kg K) ([E2], “Why heat capacity is important”).
+Water's specific heat is approximately 4.18 kJ/(kg K) ([E2], liquid-phase heat capacity and molar mass).
 This supports an illustrative heat calculation, not whole-tank calorimetry from one sensor.
 
 **Firmware rule:** Complete one-hour windows retain the net temperature drop at tank sensor R5T,
@@ -356,9 +356,10 @@ cannot be reconstructed from the retained flag.
 
 <a id="source-e2"></a>
 
-- **[E2]** U.S. Geological Survey Water Science School, *Specific Heat Capacity and Water*,
-  24 August 2026: [official article][E2-web], section “Why heat capacity is important”.
-  Used for water's approximately 4.18 kJ/(kg K) heat capacity; checked 25 October 2026.
+- **[E2]** NIST Chemistry WebBook, SRD 69, *Water*, CAS 7732-18-5: [official data][E2-web],
+  “Liquid Phase Heat Capacity (Shomate Equation)”, 298–500 K, and molecular weight 18.0153 g/mol.
+  Underlying source: M. W. Chase Jr., *NIST-JANAF Thermochemical Tables*, fourth edition,
+  1998. The equation gives approximately 4.18 kJ/(kg K) at 298.15–333.15 K; checked 25 October 2026.
 
 <a id="source-r1"></a>
 
@@ -423,7 +424,7 @@ prove that a source is technically applicable; that remains the human part of th
 [D1-pdf]: https://my.daikin.eu/content/dam/document-library/Installer-reference-guide/heat/EHBH-D6V%2C%20EHBH-D9W%2C%20EHBX-D6V%2C%20EHBX-D9W%2C%20ERGA04-08DV%2C%20ERGA04-08DVA_4PEN496758-1B_2019_10_Installer%20reference%20guide_English.pdf
 [D2-pdf]: https://www.daikin.eu/content/dam/document-library/Installer-reference-guide/heat/air-to-water-heat-pump-high-temperature/epra14-18dw7/EPRA014-018D%28V.W%29.EPRA14-18D%28V.W%297.ETVH16UE6V%287%29_Installer%20reference%20guide_4PEN644738-1D_English.pdf
 [E1-web]: https://eur-lex.europa.eu/eli/reg/2013/814/oj/eng
-[E2-web]: https://www.usgs.gov/water-science-school/science/specific-heat-capacity-and-water
+[E2-web]: https://webbook.nist.gov/cgi/cbook.cgi?ID=C7732185&Units=SI&Mask=2#Thermo-Condensed
 [R1-web]: https://www.gov.uk/government/publications/heat-pump-performance-effects-of-cycling
 [R1-pdf]: https://assets.publishing.service.gov.uk/media/5a78e0d9e5274a2acd18a7c6/7389-effects-cycling-heat-pump-performance.pdf
 [R2-doi]: https://doi.org/10.1016/j.applthermaleng.2009.01.003
