@@ -228,13 +228,22 @@ evidence is a measurement, not a good/bad assessment. The reading order and main
 | Id | Evidence fields |
 |---|---|
 | `fault` | `active` |
-| `dhw_loss` | `max_k_h`, `windows`, `high_windows`, `high_with_pump`, `high_pump_off`, `circulation_on_s`, `circulation_known_s`, `candidate_s`, `settle_remaining_s`, `aborts`, `abort_reasons`, `best_aborted_s`, `blocked` |
+| `dhw_loss` | `max_k_h`, `windows`, `high_windows`, `quiet_high_windows`, `draw_windows`, `pump_windows`, `high_with_pump`, `high_pump_off`, `circulation_on_s`, `circulation_known_s`, `candidate_s`, `settle_remaining_s`, `aborts`, `abort_reasons`, `best_aborted_s`, `blocked` |
 | `cycling` | `starts`, `mean_run_s`, `space_runs`, `space_mean_run_s`, `dhw_runs`, `dhw_mean_run_s`, `cooling_runs`, `censored_runs`, `split`, `outdoor_source`, `outdoor_min_c`, `outdoor_mean_c`, `outdoor_samples` |
 | `defrost` | `count`, `share_pct`, `paired_count`, `defrost_s`, `run_s`, `outdoor_source`, `outdoor_min_c`, `outdoor_mean_c`, `outdoor_samples` |
 | `pressure` | `min_bar`, `current_bar`, `min_unix_s`, `confirmed_low` |
 | `flow` | `min_l_min` |
 | `heater` | `buh_min`, `bsh_min`, `buh_s`, `bsh_s`, `buh_observed_s`, `bsh_observed_s` |
 | `retries` | `seen` |
+
+For `dhw_loss`, `max_k_h` is the maximum completed one-hour **net sensor cooling**, not standing
+heat loss. `high_windows` counts rates ≥0.8 K/h; only the subset `quiet_high_windows` with no
+internal-pump or draw-like marker gives `info`. `draw_windows` and `pump_windows` count all marked
+windows independently and can overlap; they do not identify the maximum's context. `blocked:true`
+with `unavailable`/`no_eligible_windows` means a full DHW evidence day without a completed window,
+even if no candidate could open. It does not establish signal coverage or a cause. The `reading`
+abort reason includes invalid temperatures and an unconfirmed closing endpoint after a 30-second
+grace. An unsupported profile also uses `unavailable`, with `blocked:false`.
 
 Unestablished numeric evidence is null. `reason` is empty when no qualification applies; otherwise:
 `unsupported`, `day_incomplete`, `input_coverage`, `no_eligible_windows`, `class_unavailable`,

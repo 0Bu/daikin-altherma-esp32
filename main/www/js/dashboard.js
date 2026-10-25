@@ -1260,6 +1260,9 @@ function checkupDuration(s) {
 
 function checkupStatusKey(c) {
   const verdict = typeof c === "string" ? c : c?.verdict;
+  // Older firmware reported this completed, unsuccessful day as collecting. Keep its
+  // evidence visible without promising that another hour will necessarily produce a result.
+  if (c?.id === "dhw_loss" && c.blocked === true) return "unavailable";
   if (verdict === "ok" && c?.evidence === "observation") return "observation";
   if (verdict === "ok" && c?.evidence === "experimental") return "experimental";
   return ["ok", "info", "warn", "collecting", "unavailable"].includes(verdict)
@@ -1267,7 +1270,26 @@ function checkupStatusKey(c) {
 }
 
 function checkupStatusText(c) {
+  if (c?.id === "dhw_loss" && c.blocked === true) return t("check.status.no_window");
   return t(`check.status.${checkupStatusKey(c)}`);
+}
+
+function checkupDhwHasRate(c) {
+  return c.verdict !== "unavailable" && c.blocked !== true &&
+         Number.isFinite(c.max_k_h) && c.max_k_h >= 0 &&
+         Number.isFinite(c.windows) && c.windows >= 1;
+}
+
+function checkupDhwEnergy(c) {
+  if (!checkupDhwHasRate(c) || c.blocked === true || c.verdict === "unavailable") return "";
+  // Illustration only: assumed uniform 200 l of water, 0.001163 kWh/(l K).
+  // A single R5T sensor and an unknown actual COP cannot meter tank/electrical energy.
+  const heat = c.max_k_h * 200 * 0.001163;
+  if (!Number.isFinite(heat)) return "";
+  const fmt = (n, digits) => n.toLocaleString(LANG,
+    { minimumFractionDigits: digits, maximumFractionDigits: digits });
+  return `<div class="vdesc-p">${esc(t("check.detail.dhw_energy",
+    fmt(c.max_k_h, 1), fmt(heat, 2), fmt(heat / 3, 2), fmt(heat / 2.5, 2)))}</div>`;
 }
 
 // Fault copy follows the unit’s reported class. A remembered message does not establish
@@ -1304,9 +1326,9 @@ function checkupDetailHtml(c, fullSpan = c.full_span === true, report = {}) {
   // Discard reasons are aggregates, without a per-candidate cause ranking. Missing readings
   // include necessary valve/heater/pump inputs as well as tank temperature; missing X10A
   // replies and deliberate board-side polling pauses can both create that gap.
-  if (statusKey === "collecting" && c.id === "dhw_loss" && c.blocked) {
+  if (c.id === "dhw_loss" && c.blocked === true) {
     const reasons = Array.isArray(c.abort_reasons) ? c.abort_reasons : [];
-    const blindOnly = reasons.length === 1 && reasons[0] === "blind";
+    const blindOnly = Number(c.aborts) > 0 && reasons.length === 1 && reasons[0] === "blind";
     const sentence = blindOnly
       ? t("check.detail.dhw_blocked_link", Number(c.aborts) || 0,
           checkupDuration(c.best_aborted_s))
@@ -1354,7 +1376,7 @@ function checkupDetailHtml(c, fullSpan = c.full_span === true, report = {}) {
   // combined runtime/start assessment when older payloads contain its mean.
   if (c.id === "cycling" && c.space_runs != null)
     detail += t("check.detail.cycling_split");
-  if (c.id === "dhw_loss" && statusKey !== "collecting" && Number(c.aborts) > 0)
+  if (c.id === "dhw_loss" && statusKey !== "collecting" && !c.blocked && Number(c.aborts) > 0)
     detail += t("check.detail.dhw_aborted", Number(c.aborts), checkupDhwReasons(c),
                 checkupDuration(c.best_aborted_s));
   if ((c.id === "cycling" || c.id === "defrost") && checkupOutdoorContext(c))
@@ -1396,7 +1418,15 @@ function checkupDetailHtml(c, fullSpan = c.full_span === true, report = {}) {
     pressure = descNoteHtml(t("check.detail.current_label"), current) +
                descNoteHtml(t("check.detail.minimum_time_label"), when);
   }
-  return reading + assessment + pressure + scope;
+  let dhwContext = "";
+  if (c.id === "dhw_loss" && checkupDhwHasRate(c) && !c.blocked &&
+      Number.isFinite(c.pump_windows) && Number.isFinite(c.draw_windows) &&
+      Number.isFinite(c.quiet_high_windows))
+    dhwContext = `<div class="vdesc-p">${esc(t("check.detail.dhw_context",
+      c.pump_windows.toLocaleString(LANG), c.draw_windows.toLocaleString(LANG),
+      c.quiet_high_windows.toLocaleString(LANG)))}</div>`;
+  return reading + assessment + dhwContext + pressure + scope +
+         (c.id === "dhw_loss" ? checkupDhwEnergy(c) : "");
 }
 
 function checkupDefrostShare(c) {
@@ -1457,14 +1487,14 @@ function checkupMetricValue(c) {
       if (c.active == null) return t("check.fault_unknown");
       return t("check.fault_none");
     case "dhw_loss": {
-      if (c.max_k_h == null) return c.windows ? t("check.loss_windows", c.windows) : "";
-      const rate = Number(c.max_k_h).toLocaleString(LANG,
+      if (c.blocked === true) return "";
+      if (!checkupDhwHasRate(c)) return Number.isFinite(c.windows) && c.windows > 0
+        ? t("check.loss_windows", c.windows) : "";
+      const rate = c.max_k_h.toLocaleString(LANG,
         { maximumFractionDigits: 1 });
-      const attribution = c.high_pump_off > 0 ? t("check.loss_pump_off")
-        : c.high_with_pump > 0 ? t("check.loss_with_pump")
-        : c.high_windows > 0 ? t("check.loss_unattributed") : "";
       const high = c.high_windows == null ? "" : t("check.loss_high", c.high_windows, c.windows || 0);
-      return [t("check.loss_max", rate), high || t("check.loss_windows", c.windows || 0), attribution].filter(Boolean).join(" · ");
+      // Circulation counts aggregate several hours; they cannot qualify the maximum hour.
+      return [t("check.loss_max", rate), high || t("check.loss_windows", c.windows || 0)].filter(Boolean).join(" · ");
     }
     case "cycling": {
       if (c.starts == null) return "";

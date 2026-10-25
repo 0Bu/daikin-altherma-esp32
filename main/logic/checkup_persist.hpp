@@ -144,8 +144,9 @@ inline uint32_t checkup_fp_loc(uint32_t crc, const CheckupLocator& l) {
 // name, which is exactly the substitution a CRC cannot see.
 inline uint32_t checkup_layout_fingerprint() {
     uint32_t crc = CONFIG_CRC32_INIT;
-    // Endpoint-qualified duration accounting and completed-heating-only assessment.
-    crc = checkup_fp_u32(crc, 2u);
+    // Net DHW sensor cooling retains draw-like/pump-active windows with explicit context.
+    // Older filtered rates and candidates must not be interpreted under this observation rule.
+    crc = checkup_fp_u32(crc, 4u);
     crc = checkup_fp_u32(crc, static_cast<uint32_t>(sizeof(CheckupBucket)));
     crc = checkup_fp_u32(crc, static_cast<uint32_t>(sizeof(DhwLossBucket)));
     crc = checkup_fp_u32(crc, static_cast<uint32_t>(sizeof(CheckupRing)));
@@ -167,17 +168,17 @@ inline uint32_t checkup_layout_fingerprint() {
             crc = checkup_fp_u32(crc, static_cast<uint32_t>(
                       checkup_retry_index(0x10u, off, conv) + 1));
     crc = checkup_fp_u32(crc, DHW_LOSS_WINDOW_S);
+    crc = checkup_fp_u32(crc, DHW_LOSS_CLOSE_GRACE_S);
+    crc = checkup_fp_u32(crc, DHW_LOSS_ENDPOINT_DELTA_TENTHS);
     crc = checkup_fp_u32(crc, DHW_LOSS_SETTLE_S);
     crc = checkup_fp_u32(crc, DHW_LOSS_DRAW_WINDOW_S);
     crc = checkup_fp_u32(crc, static_cast<uint32_t>(DHW_LOSS_DRAW_DROP_TENTHS));
     crc = checkup_fp_u32(crc, static_cast<uint32_t>(DHW_LOSS_HIGH_TENTHS_K_H));
     crc = checkup_fp_u32(crc, DHW_LOSS_BLIND_RUN_MAX_S);
     crc = checkup_fp_u32(crc, DHW_LOSS_BLIND_MAX_PCT);
-    // Both decide what a stored counter MEANS, so both belong here: the charge minimum changes which
-    // events armed a settle (and therefore which hours ever became candidates), and the blocked
-    // threshold changes what an `aborts` tally concludes.
+    // The charge minimum changes which events armed a settle and therefore which hours became
+    // candidates. The semantic version above also binds a full day without any completed hour.
     crc = checkup_fp_u32(crc, DHW_LOSS_CHARGE_MIN_S);
-    crc = checkup_fp_u32(crc, DHW_LOSS_BLOCKED_MIN_ABORTS);
     crc = checkup_fp_u32(crc, DHW_LOSS_CIRC_KNOWN_PCT);
     crc = checkup_fp_u32(crc, DHW_LOSS_CIRC_MIN_ON_S);
     crc = checkup_fp_u32(crc, DHW_LOSS_CIRC_OFF_SETTLE_S);
@@ -331,6 +332,8 @@ inline uint32_t checkup_dhw_handoff_layout_fingerprint() {
     crc = checkup_fp_u32(crc, DHW_LOSS_REBOOT_BLIND_S);
     crc = checkup_fp_u32(crc, DHW_LOSS_CARRY_SEGMENT);
     crc = checkup_fp_u32(crc, DHW_LOSS_CARRY_DRAW);
+    crc          = checkup_fp_u32(crc, DHW_LOSS_CARRY_DRAW_LIKE);
+    crc          = checkup_fp_u32(crc, DHW_LOSS_CARRY_PUMP_ON);
     return config_crc32_final(crc);
 }
 
@@ -364,6 +367,9 @@ inline uint32_t checkup_dhw_handoff_crc(uint32_t model_fp,
     crc = checkup_fp_u32(crc, b.high_windows);
     crc = checkup_fp_u32(crc, b.high_with_pump);
     crc = checkup_fp_u32(crc, b.high_pump_off);
+    crc                    = checkup_fp_u32(crc, b.draw_windows);
+    crc                    = checkup_fp_u32(crc, b.pump_windows);
+    crc                    = checkup_fp_u32(crc, b.quiet_high_windows);
     crc = checkup_fp_u32(crc, b.best_aborted_s);
     crc = checkup_fp_u32(crc, b.aborts);
     crc = checkup_fp_u32(crc, b.abort_reasons);

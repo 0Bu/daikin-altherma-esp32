@@ -61,7 +61,7 @@ const catalog = catalogContext.__catalog;
 const lazyDomainCodes = ["zh", "ja", "nb", "sv", "fi"];
 const englishKeys = Object.keys(catalog.en).sort();
 const englishKeyOrder = Object.keys(catalog.en);
-assert.equal(englishKeys.length, 936, "the test must track the complete current UI catalog");
+assert.equal(englishKeys.length, 934, "the test must track the complete current UI catalog");
 for (const [code, source] of localeSources) {
   const specialist = source.indexOf(`INSPECT_I18N.${code}`);
   const baseSource = specialist < 0 ? source : source.slice(0, specialist);
@@ -152,7 +152,19 @@ for (const code of codes) {
   const verdict = catalog[code]["check.detail.dhw_blocked_link"](2, 20);
   assert.ok(verdict.trim(), `${code} blind verdict must explain the missing evidence`);
   assert.doesNotMatch(verdict, /RX\/TX/, `${code} must not prescribe wiring work from an unobserved interval`);
+  const noAttempt = catalog[code]["check.detail.dhw_blocked"](0, "", "0 min");
+  assert.ok(noAttempt.includes("24"), `${code} retains the no-window day scope`);
+  assert.doesNotMatch(noAttempt, /0 min|\(\)|（）|\b0\b/,
+    `${code} no confirmed opening must not invent discarded candidates`);
 }
+// This reason includes a plausible endpoint that was not confirmed within the closing grace.
+// It must not claim that every failed confirmation was an implausible R5T reading.
+for (const [code, unconfirmed] of Object.entries({
+  en: /unconfirmed/, de: /unbestätigt/, es: /sin confirmar/, fr: /non confirmé/,
+  it: /non confermato/, pl: /niepotwierdzone/, cs: /nepotvrzené/, uk: /непідтверджене/,
+  zh: /未确认/, ja: /未確認/, nb: /ubekreftet/, sv: /obekräftad/, fi: /vahvistamaton/,
+})) assert.match(catalog[code]["check.detail.dhw_reason.reading"], unconfirmed,
+  `${code} reading reason must include unconfirmed endpoints`);
 // ZH once said the tank "has no problem", a reassurance a NOT AVAILABLE result cannot give; it must
 // stay as neutral as the English "says nothing about the tank". JA uses one term for "paused" in
 // both the list item and the verdict. Missing replies and local query pauses remain distinct.
@@ -324,7 +336,8 @@ for (const code of codes.slice(2)) {
   checkLocalizedRows(code, modelRows, Object.values(modelSchema), "model-description");
   const joined = (id) => modelCopy[id].join(" ");
   assert.match(joined("health_dhw_loss"), /0[,.]8/, `${code} loses the 0.8 K/h project threshold`);
-  assert.match(joined("health_dhw_loss"), /1[,.]85/, `${code} loses the 1.85 K/h detection limit`);
+  assert.doesNotMatch(joined("health_dhw_loss"), /1[,.]85/,
+    `${code} must not revive the removed upper cooling detection limit`);
   assert.match(joined("health_cycling"), /\b10\b/, `${code} loses the 10 min cycling threshold`);
   assert.match(joined("health_cycling"), /\b12\b/, `${code} loses the 12-run population`);
   assert.match(joined("health_cycling"), checkupDenominators[code][0],

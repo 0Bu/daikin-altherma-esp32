@@ -1,6 +1,6 @@
 # Evidence and limits of the plant diagnostics
 
-<!-- diagnostic-evidence-contract: 7a869bb9c94b87ea41d91f819f7132ad92794fb4d7744c6437a713e1996f3922 -->
+<!-- diagnostic-evidence-contract: 50e5e9091302632e41b4d0115e807ff26d59d56652f88ab3d11fe258c554d4c1 -->
 
 For every row in the **Plant diagnostics · 24 h** card, this page answers four questions:
 
@@ -123,51 +123,54 @@ cause, spontaneous recovery, absence of intervention or code-specific service co
 <a id="diagnosis-dhw-loss"></a>
 ### 2. Domestic-hot-water tank cooling (`dhw_loss`)
 
-**External evidence:** The EU defines a hot-water storage tank's standing loss as the heat power in
-watts emitted at specified water and ambient temperatures. Storage volume and standing loss are
-separate declared technical parameters ([E1], Article 2(17) and Annex III, section 7). This supports
-that tank heat loss is real and measurable, while also showing that test conditions and tank size
-matter.
+**External evidence:** EU standing loss is heat power at specified water and ambient temperatures;
+volume and standing loss are separate declared parameters ([E1], Article 2(17), Annex III section 7).
+Water's specific heat is approximately 4.18 kJ/(kg K) ([E2], liquid-phase heat capacity and molar mass).
+This supports an illustrative heat calculation, not whole-tank calorimetry from one sensor.
 
-**Firmware rule:** Complete eligible one-hour windows measure the drop at tank sensor R5T.
-Charging, internal-pump activity, an apparent draw, implausible temperature or excessive blindness
-discards a candidate. A charge witness sustained for two minutes, or seen after an unmeasured gap,
-arms a 45-minute settling filter; unread time directly before a witness, or an unread tail after a
-short one, counts toward the two minutes. Every DHW evaluation that starts without a compatible
-handoff (power loss, crash, consent, identity, circulation or long-gap reset) first holds the same
-45 minutes. Settling and that hold count down only on samples that read both witnesses. A completed
-window at
-or above 0.8 K/h produces **NOTE** immediately. Other completed windows remain observations; no
-eligible window remains **CHECKING**; the "no eligible window in 24 h" statement needs 24 hours of DHW
-scope, which restarts when collection starts, at a DHW reset and at a restore that dropped DHW hours.
-There is no reassuring tank-loss verdict or six-hour acceptance test. The result retains the maximum
-rate (floored to 0.1 K/h), completed/notable window counts and circulation correlation, not
-individual rates, an average or an energy integral.
+**Firmware rule:** Complete one-hour windows retain the net temperature drop at tank sensor R5T,
+floored to 0.1 K/h; a net rise contributes zero cooling. Each endpoint needs two consecutive
+readable temperatures within 0.2 K, rejecting isolated jumps beyond that tolerance. Smaller
+excursions can still affect the rate and threshold crossing. Confirmation starts afresh after a
+reboot. A closing endpoint must confirm within 30 seconds after the hour; later confirmation
+discards the candidate rather than reporting a multi-hour average as an hour. Charging, implausible readings and excessive
+blind time discard a candidate. A charge witnessed for two minutes, or seen after an unmeasured gap,
+arms a 45-minute settle; unread time beside a witness counts toward those two minutes. A fresh
+filter also holds 45 minutes. Both timers advance only with readable valve and tank-heater witnesses.
 
-Changing the circulation broker, mapping or interpretation retires DHW records and the ongoing
-filter, without discarding independent X10A checks. Display-name edits do not change evidence identity.
-A dated journal interval or one-shot restart candidate must match both scopes. See DHW_LOSS_* and
-the DhwLoss branch in [checkup.hpp](../main/logic/checkup.hpp); [PLANT.md](PLANT.md#reboot-and-persistence)
-owns the compatible-restart blind-time allowance and admission rules.
+Internal water-pump activity and a drop of 0.4 K within a ten-minute anchor mark the completed
+window instead of discarding its measured change. The latter can also be steady rapid cooling;
+it is not proof of a draw. The report retains all/high-rate window counts, their maximum, separate
+pump/draw-like counts (which may overlap), and optional external circulation correlation. Only a
+window at or above 0.8 K/h with neither marker gives **NOTE**; all other completed windows are
+**MEASURED**. Marker absence does not prove that no water was used. With no completed window the
+row is **CHECKING**; after a full DHW scope day with no completed window it becomes **NO WINDOW**,
+even if no candidate could open. This states missing hourly measurements, not full signal coverage,
+a cause or a promise that more waiting will produce a measurement.
 
-**Project boundary:** The 0.8 K/h threshold, 45-minute settling period, apparent-draw filter and
-roughly 1.85 K/h upper detection band are project heuristics, not Daikin limits or the EU test method.
-Candidates tolerate at most 120 seconds of one blind stretch and 10% blind time in total; blind
-seconds are excluded from observation coverage. Pump overlap needs at least 90% known circulation
-state and five minutes on; a pump-off label additionally requires two hours of known-off settling.
-These bounds describe this filter, not an identified physical cause.
+**Project boundary:** These thresholds, endpoint confirmation with a 30-second closing grace,
+one-hour intervals and settling filters are project choices,
+not Daikin limits or the EU standing-loss test. Candidates tolerate at most 120 consecutive blind
+seconds and 10% blind time overall; coverage excludes blind seconds. External circulation overlap
+needs 90% known state and five minutes on; its pump-off label also needs two hours known off.
+It is distinct from the heat pump's internal water pump and establishes no cause.
 
-**Not established:** A single point in a stratified tank cannot measure whole-tank thermal loss,
-daily consumption or replacement electricity. Fast continuous cooling can be excluded as an apparent
-draw, so quiet accepted windows cannot rule out loss elsewhere. Draws, stratification, circulation,
-thermosiphoning and valve behaviour can produce similar traces; pump overlap is correlation.
+The UI illustrates one hour at the maximum measured rate using an **assumed** uniformly cooling
+200 l of water: heat = 200 × 0.001163 × K/h kWh per hour; electricity = heat / **assumed COP 2.5–3**.
+The coefficient approximates 1 kg/l and water's heat capacity. COP means heat delivered per unit
+of electricity; that range is an example, not a measured or manufacturer-promised efficiency.
+The maximum is never multiplied by the window count or labelled measured daily consumption.
 
-A charge that no sample witnessed can still admit its settling tail as apparent cooling, and a short
-witness followed by a gap longer than the normal poll gap can arm no settling. An intentional restart
-during the start hold loses its remainder; power loss, panic, identity changes and incompatible
-handoffs start a new hold. Discard totals retain
-only an OR-ed reason set, not per-hour provenance or dominant cause. Blindness may reflect bus
-timeouts or firmware pauses and establishes no wiring defect.
+**Not established:** R5T is one point in a stratified tank. Net sensor cooling cannot establish
+whole-tank heat loss, wasted energy, actual replacement electricity, a failed valve or a cause.
+Draws may remove useful hot water; stratification, circulation and thermosiphoning can also change
+this temperature. Zero net cooling does not mean zero heat transfer. No marker proves hydraulic
+isolation, and no accepted window excludes losses in discarded intervals. Unseen charging can
+still affect a later window. Missing replies or polling pauses establish no wiring defect.
+
+Changing circulation identity retires DHW evidence independently; changed evaluation/layout rejects
+older filtered records and candidates. [PLANT.md](PLANT.md#reboot-and-persistence) owns restart,
+source and journal admission rules; [API.md](API.md) owns the evidence fields.
 
 <a id="diagnosis-cycling"></a>
 ### 3. Compressor cycling (`cycling`)
@@ -354,6 +357,13 @@ cannot be reconstructed from the retained flag.
   heaters and hot-water storage tanks: [official EUR-Lex text][E1-web]. Sections used: Article 2(17),
   Annex II section 2, and Annex III section 7.
 
+<a id="source-e2"></a>
+
+- **[E2]** NIST Chemistry WebBook, SRD 69, *Water*, CAS 7732-18-5: [official data][E2-web],
+  “Liquid Phase Heat Capacity (Shomate Equation)”, 298–500 K, and molecular weight 18.0153 g/mol.
+  Underlying source: M. W. Chase Jr., *NIST-JANAF Thermochemical Tables*, fourth edition,
+  1998. The equation gives approximately 4.18 kJ/(kg K) at 298.15–333.15 K; checked 25 October 2026.
+
 <a id="source-r1"></a>
 
 - **[R1]** Robert Green / EA Technology for DECC, *The Effects of Cycling on Heat Pump Performance*,
@@ -411,11 +421,13 @@ prove that a source is technically applicable; that remains the human part of th
 [D1]: #source-d1
 [D2]: #source-d2
 [E1]: #source-e1
+[E2]: #source-e2
 [R1]: #source-r1
 [R2]: #source-r2
 [D1-pdf]: https://my.daikin.eu/content/dam/document-library/Installer-reference-guide/heat/EHBH-D6V%2C%20EHBH-D9W%2C%20EHBX-D6V%2C%20EHBX-D9W%2C%20ERGA04-08DV%2C%20ERGA04-08DVA_4PEN496758-1B_2019_10_Installer%20reference%20guide_English.pdf
 [D2-pdf]: https://www.daikin.eu/content/dam/document-library/Installer-reference-guide/heat/air-to-water-heat-pump-high-temperature/epra14-18dw7/EPRA014-018D%28V.W%29.EPRA14-18D%28V.W%297.ETVH16UE6V%287%29_Installer%20reference%20guide_4PEN644738-1D_English.pdf
 [E1-web]: https://eur-lex.europa.eu/eli/reg/2013/814/oj/eng
+[E2-web]: https://webbook.nist.gov/cgi/cbook.cgi?ID=C7732185&Units=SI&Mask=2#Thermo-Condensed
 [R1-web]: https://www.gov.uk/government/publications/heat-pump-performance-effects-of-cycling
 [R1-pdf]: https://assets.publishing.service.gov.uk/media/5a78e0d9e5274a2acd18a7c6/7389-effects-cycling-heat-pump-performance.pdf
 [R2-doi]: https://doi.org/10.1016/j.applthermaleng.2009.01.003

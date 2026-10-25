@@ -15181,8 +15181,8 @@ static void test_checkup_evidence_overhaul() {
     checkup_outdoor_merge(bounded, completed.cycling_outdoor);
     CHECK(bounded.samples == CHECKUP_WINDOW_S && bounded.sum_tenths == original_sum);
 
-    // Mixed slow/fast cooling: fast drops are discarded as draw-like, so the remaining slow hours
-    // cannot support a green tank verdict. This reproduces the former false-clear case.
+    // Mixed slow/fast cooling: retain both rates, marking the ambiguous fast hours.
+    // The observed maximum must not turn into a green tank verdict or an automatic loss alarm.
     DhwLossState  tank;
     DhwLossRing   cooling;
     CheckupSample quiet;
@@ -15199,7 +15199,9 @@ static void test_checkup_evidence_overhaul() {
     CheckupWindow window;
     window.full_span = true;
     const auto loss  = dhw_loss_aggregate(cooling);
-    CHECK(loss.windows >= 6 && loss.aborts > 0 && loss.high_windows == 0);
+    CHECK(loss.windows >= 20 && loss.aborts == 0 && loss.high_windows > 0);
+    CHECK(loss.max_loss_tenths_k_h == 20 && loss.draw_windows > 0);
+    CHECK(loss.quiet_high_windows == 0);
     auto report = checkup_evaluate(window, cov, FaultClass::Unknown, loss);
     CHECK(report[CheckupCheck::DhwLoss].observation_only);
     CHECK(std::string(checkup_result_evidence_name(
@@ -15208,6 +15210,7 @@ static void test_checkup_evidence_overhaul() {
           report.overall == CheckupVerdict::Unavailable);
     DhwLossWindow notable       = loss;
     notable.high_windows        = 1;
+    notable.quiet_high_windows  = 1;
     notable.max_loss_tenths_k_h = 10;
     CHECK(checkup_evaluate(window, cov, FaultClass::Unknown, notable).overall ==
           CheckupVerdict::Info);
@@ -15378,6 +15381,7 @@ static void test_checkup() {
     CHECK(sizeof(CheckupOutdoorStats) == 12);
     CHECK(sizeof(CheckupBucket) == 80);
     CHECK(CHECKUP_BYTES == 1920);
+    CHECK(sizeof(DhwLossBucket) == 20 && DHW_LOSS_BYTES == 480);
 
     // --- saturation -----------------------------------------------------------------------------
     // A wrap would turn the worst imaginable cycling into a perfect score.
@@ -16482,23 +16486,21 @@ static void test_checkup() {
         }
         CHECK(on_b.windows == 1 && on_b.high_with_pump == 1 && on_b.high_pump_off == 0);
 
-        // A 0.4 K step inside ten minutes is draw-like contamination. It resets the candidate
-        // rather than becoming a spectacular heat-loss rate in the diagnosis.
+        // A 0.4 K step remains a measured net drop, with a draw-like marker.
+        // It must not become a standing-loss hint.
         DhwLossState  draw_st = dhw_past_hold();
         DhwLossBucket draw_b;
         s.circulation_on = false;
-        for (int sec = 0; sec <= 3600; sec += 10) {
+        for (int sec = 0; sec <= 3610; sec += 10) {
             s.r5t_tenths = sec < 300 ? 500 : 496;
             dhw_loss_step(draw_st, draw_b, s, static_cast<int64_t>(sec) * 1000000);
         }
-        CHECK(draw_b.windows == 0 && draw_b.high_windows == 0);
+        CHECK(draw_b.windows == 1 && draw_b.high_windows == 0);
+        CHECK(draw_b.draw_windows == 1 && draw_b.aborts == 0);
+        CHECK(draw_b.max_loss_tenths_k_h == 4 && draw_b.quiet_high_windows == 0);
 
-        // THE BLIND BAND, pinned so it stays visible and so widening the filter shows up HERE as a
-        // deliberate change rather than as a quiet behavioural drift. The draw filter cannot tell a
-        // steady decline from a draw, so above ~1.85 K/h no window ever completes and the check
-        // answers `collecting` forever — in the severity range it exists to find (a leaking
-        // diverter is by definition worse than the 1.2 K/h healthy-with-circulation reference
-        // figure). The constant carries the measurement and why raising it is a domain decision.
+        // Regression: the old apparent-draw veto erased steady rates above ~1.85 K/h.
+        // All plausible net declines now complete; the context marker bounds their meaning.
         auto windows_at = [](int tenths_per_h) {
             DhwLossState  rs = dhw_past_hold();
             DhwLossBucket rb;
@@ -16515,10 +16517,10 @@ static void test_checkup() {
             return static_cast<int>(rb.windows);
         };
         CHECK(windows_at(8) == 3);  // 0.8 K/h — the high-loss threshold itself, seen
-        CHECK(windows_at(12) == 3); // 1.2 K/h — the healthy-with-circulation reference, seen
-        CHECK(windows_at(18) == 3); // 1.8 K/h — the last rate fully seen
-        CHECK(windows_at(19) == 0); // 1.9 K/h — and from here the check is structurally blind
-        CHECK(windows_at(60) == 0); // 6.0 K/h — a severe standing loss reports nothing at all
+        CHECK(windows_at(12) == 3); // 1.2 K/h
+        CHECK(windows_at(18) == 3); // 1.8 K/h
+        CHECK(windows_at(19) == 3); // 1.9 K/h — formerly invisible
+        CHECK(windows_at(60) == 3); // 6.0 K/h — keep the measurement, without claiming its cause
 
         // A positive tank-charge witness starts the 45-minute settling guard even when a different
         // state row timed out in the same sweep. Recovering that row must not admit the charge
@@ -17016,13 +17018,14 @@ static void test_checkup() {
             return b;
         };
         const DhwLossBucket by_pump = aborted_by([](CheckupSample& s) { s.pump_on = true; });
-        CHECK(by_pump.aborts == 1 && by_pump.abort_reasons == DHW_ABORT_PUMP);
+        CHECK(by_pump.aborts == 0 && by_pump.abort_reasons == 0);
         // How far the best one got is what separates "close, but interrupted" from "never starts".
-        CHECK(by_pump.best_aborted_s == 600);
+        CHECK(by_pump.best_aborted_s == 0);
         const DhwLossBucket by_reading = aborted_by([](CheckupSample& s) { s.r5t_tenths = 950; });
         CHECK(by_reading.abort_reasons == DHW_ABORT_READING);
+        CHECK(by_reading.best_aborted_s == 600);
         const DhwLossBucket by_draw = aborted_by([](CheckupSample& s) { s.r5t_tenths = 495; });
-        CHECK(by_draw.abort_reasons == DHW_ABORT_DRAW);
+        CHECK(by_draw.aborts == 0 && by_draw.abort_reasons == 0);
         const DhwLossBucket by_blind = aborted_by([](CheckupSample& s) { s.r5t_ok = false; });
         CHECK(by_blind.aborts == 0); // one unread sweep is inside the blind budget
         {
@@ -17055,25 +17058,23 @@ static void test_checkup() {
             CHECK(b.aborts == 1);
         }
 
-        // THE VERDICT. A full lifecycle with no completed window and six discarded ones is a plant
-        // that will not grant the method its 105 minutes — a different answer from "not yet", and
-        // reported as Unavailable so it says nothing either way instead of holding the whole card
-        // at `collecting` for the life of the installation.
+        // A complete scoped day without a completed hour is unavailable, even if unstable
+        // endpoints never allowed a candidate to open. It says nothing about a plant defect.
         CheckupCoverage cov;
         cov.r5t = cov.valve = cov.pump = cov.bsh = true;
         CheckupWindow w;
         w.full_span = true;
         DhwLossWindow dhw;
-        dhw.aborts         = DHW_LOSS_BLOCKED_MIN_ABORTS;
+        dhw.aborts         = 6;
         dhw.abort_reasons  = DHW_ABORT_CHARGE | DHW_ABORT_PUMP;
         dhw.best_aborted_s = 2400;
         dhw.full_span      = true;
         {
             const CheckupReport r = checkup_evaluate(w, cov, FaultClass::Normal, dhw);
-            CHECK(r[CheckupCheck::DhwLoss].verdict == CheckupVerdict::Collecting);
+            CHECK(r[CheckupCheck::DhwLoss].verdict == CheckupVerdict::Unavailable);
             CHECK(r[CheckupCheck::DhwLoss].reason == CheckupReason::NoEligibleWindows);
             CHECK(r.dhw_blocked);
-            CHECK(r.dhw_aborts == DHW_LOSS_BLOCKED_MIN_ABORTS);
+            CHECK(r.dhw_aborts == 6);
             CHECK(r.dhw_best_aborted_s == 2400);
             CHECK(r.dhw_abort_reasons == (DHW_ABORT_CHARGE | DHW_ABORT_PUMP));
             // Unavailable says nothing either way: it must not be counted as an assessable check
@@ -17098,18 +17099,20 @@ static void test_checkup() {
         lifecycle = false;
         CHECK(!dhw_loss_scope_full(lifecycle, never, CHECKUP_WINDOW_US));
         CHECK(!dhw_loss_scope_full(lifecycle, scope, CHECKUP_WINDOW_US)); // never without it
-        // One abort short of the bar is still "not yet".
-        dhw.aborts = DHW_LOSS_BLOCKED_MIN_ABORTS - 1;
+        // The discarded-attempt count cannot make an unsuccessful full day wait forever.
+        dhw.aborts = 5;
         {
             const CheckupReport r = checkup_evaluate(w, cov, FaultClass::Normal, dhw);
-            CHECK(r[CheckupCheck::DhwLoss].verdict == CheckupVerdict::Collecting);
-            CHECK(!r.dhw_blocked);
+            CHECK(r[CheckupCheck::DhwLoss].verdict == CheckupVerdict::Unavailable);
+            CHECK(r.dhw_blocked);
         }
-        // A DEAD BUS measured nothing and discarded nothing — `collecting` stays the honest answer
-        // there, which is exactly what `aborts` separates.
+        // No confirmed opening (or no readable input) also means no completed hour. Missing
+        // coverage stays missing; this is not an all-clear or a claim about the cause.
         dhw.aborts = 0;
-        CHECK(checkup_evaluate(w, cov, FaultClass::Normal, dhw)[CheckupCheck::DhwLoss].verdict ==
-              CheckupVerdict::Collecting);
+        dhw.abort_reasons      = 0;
+        const auto no_attempts = checkup_evaluate(w, cov, FaultClass::Normal, dhw);
+        CHECK(no_attempts[CheckupCheck::DhwLoss].verdict == CheckupVerdict::Unavailable);
+        CHECK(no_attempts.dhw_blocked && no_attempts.dhw_aborts == 0);
         // An incomplete lifecycle is never blocked, however many candidates it lost.
         dhw.aborts  = 50;
         w.full_span = false;
@@ -17119,6 +17122,7 @@ static void test_checkup() {
         // because the plant is also busy.
         w.full_span             = true;
         dhw.high_windows        = 1;
+        dhw.quiet_high_windows  = 1;
         dhw.max_loss_tenths_k_h = 12;
         {
             const CheckupReport r = checkup_evaluate(w, cov, FaultClass::Normal, dhw);
@@ -17213,8 +17217,9 @@ static void test_checkup() {
         }
         CHECK(spread == 0);
 
-        // A DRAW hidden inside a blind run is still caught: the anchor standing when vision was
-        // lost is what the first sighted sample is judged against, before it is re-armed.
+        // A draw-like change hidden inside a permitted blind run is still marked: the anchor
+        // standing when vision was lost is what the first sighted sample is judged against, before
+        // it is re-armed.
         {
             DhwLossState  st = dhw_past_hold();
             DhwLossBucket b;
@@ -17228,11 +17233,11 @@ static void test_checkup() {
                 s.r5t_tenths = sec < 1800 ? 500 : 494; // 0.6 K vanished while unobserved
                 dhw_loss_step(st, b, s, static_cast<int64_t>(sec) * 1000000);
             }
-            CHECK(b.windows == 0);
+            CHECK(b.windows == 1 && b.draw_windows == 1 && b.aborts == 0);
+            CHECK(b.observed_s == 3570 && b.max_loss_tenths_k_h == 6);
         }
 
-        // And a state the sweep CAN see stays disqualifying. The fix separates "unknown" from
-        // "known and busy"; it must not make the second permissive.
+        // An observed internal-pump state is context, not a reason to erase R5T.
         {
             DhwLossState  st = dhw_past_hold();
             DhwLossBucket b;
@@ -17245,8 +17250,158 @@ static void test_checkup() {
                 s.r5t_tenths = 500 - sec / 720;
                 dhw_loss_step(st, b, s, static_cast<int64_t>(sec) * 1000000);
             }
-            CHECK(b.windows == 0);
+            CHECK(b.windows == 1 && b.pump_windows == 1 && b.aborts == 0);
         }
+    }
+
+    {
+        // Independent endpoint references: ordinary use and steady rapid cooling must remain
+        // visible, while neither a draw-like shape nor internal-pump activity is a loss alarm.
+        auto trace = [](int drop_tenths, bool step, bool pump) {
+            DhwLossState  st = dhw_past_hold();
+            DhwLossRing   ring;
+            CheckupSample s;
+            s.valve_known = s.pump_known = s.bsh_known = s.r5t_ok = true;
+            s.pump_on                                             = pump;
+            for (int sec = 0; sec <= 3601; ++sec) {
+                s.r5t_tenths = 600 - (step ? (sec >= 1800 ? drop_tenths : 0)
+                                           : drop_tenths * std::max(0, sec - 1) / 3600);
+                dhw_loss_step(st, ring.pending, s, static_cast<int64_t>(sec) * 1000000);
+            }
+            return dhw_loss_aggregate(ring);
+        };
+        CheckupCoverage cov;
+        cov.r5t = cov.valve = cov.pump = cov.bsh = true;
+        CheckupWindow scope;
+        for (const auto& w :
+             {trace(60, false, false), trace(36, false, true), trace(60, true, false),
+              trace(10, false, true), trace(60, true, true)}) {
+            CHECK(w.windows == 1 && w.observed_s == 3600 && w.aborts == 0);
+            CHECK(w.high_windows == 1 && w.quiet_high_windows == 0);
+            const auto report = checkup_evaluate(scope, cov, FaultClass::Unknown, w);
+            CHECK(report[CheckupCheck::DhwLoss].verdict == CheckupVerdict::Ok);
+            CHECK(report[CheckupCheck::DhwLoss].observation_only);
+            CHECK(report.overall == CheckupVerdict::Unavailable);
+            CHECK(report.dhw_draw_windows == w.draw_windows);
+            CHECK(report.dhw_pump_windows == w.pump_windows);
+        }
+        CHECK(trace(60, false, false).max_loss_tenths_k_h == 60);
+        CHECK(trace(36, false, true).max_loss_tenths_k_h == 36);
+        CHECK(trace(60, true, false).draw_windows == 1);
+        CHECK(trace(10, false, true).pump_windows == 1);
+        CHECK(trace(60, true, true).draw_windows == 1 &&
+              trace(60, true, true).pump_windows == 1); // overlapping counts, not two hours
+        const auto quiet = trace(10, false, false);
+        CHECK(quiet.quiet_high_windows == 1 && quiet.draw_windows == 0);
+        CHECK(checkup_evaluate(scope, cov, FaultClass::Unknown, quiet)[CheckupCheck::DhwLoss]
+                  .verdict == CheckupVerdict::Info);
+        const auto warming = trace(-10, false, false);
+        CHECK(warming.windows == 1 && warming.max_loss_tenths_k_h == 0);
+        CHECK(warming.high_windows == 0 && warming.quiet_high_windows == 0);
+
+        // An isolated plausible zero exactly at the closing seam must not become 60 K/h.
+        // The return jump needs confirmation too; a sustained real draw still passes above.
+        DhwLossState  spike = dhw_past_hold();
+        DhwLossBucket spike_bucket;
+        CheckupSample spike_sample;
+        spike_sample.valve_known = spike_sample.pump_known = spike_sample.bsh_known =
+            spike_sample.r5t_ok                            = true;
+        for (int sec = 0; sec <= 3603; ++sec) {
+            spike_sample.r5t_tenths = sec == 3601 ? 0 : 600;
+            dhw_loss_step(spike, spike_bucket, spike_sample, static_cast<int64_t>(sec) * 1000000);
+            if (sec >= 3601 && sec < 3603) CHECK(spike_bucket.windows == 0);
+        }
+        CHECK(spike_bucket.windows == 1 && spike_bucket.max_loss_tenths_k_h == 0);
+        CHECK(spike_bucket.quiet_high_windows == 0);
+
+        // An unconfirmed spike before the opening endpoint is outside the next window's context.
+        spike        = dhw_past_hold();
+        spike_bucket = DhwLossBucket{};
+        for (int sec = 0; sec <= 3604; ++sec) {
+            spike_sample.r5t_tenths = sec == 0   ? 500
+                                      : sec == 2 ? 0
+                                                 : 600 - std::max(0, sec - 4) / 360;
+            dhw_loss_step(spike, spike_bucket, spike_sample, static_cast<int64_t>(sec) * 1000000);
+        }
+        CHECK(spike_bucket.windows == 1 && spike_bucket.max_loss_tenths_k_h == 10);
+        CHECK(spike_bucket.draw_windows == 0 && spike_bucket.quiet_high_windows == 1);
+
+        // The opening endpoint needs the same protection, including a valid zero at first sight.
+        spike        = dhw_past_hold();
+        spike_bucket = DhwLossBucket{};
+        for (int sec = 0; sec <= 3602; ++sec) {
+            spike_sample.r5t_tenths = sec == 0 ? 0 : 600;
+            dhw_loss_step(spike, spike_bucket, spike_sample, static_cast<int64_t>(sec) * 1000000);
+        }
+        CHECK(spike_bucket.windows == 1 && spike_bucket.max_loss_tenths_k_h == 0);
+
+        // An unstable closing endpoint cannot turn six hours into one hourly rate. Allow
+        // two normal polling intervals for recovery, including confirmation exactly at the bound.
+        CHECK(DHW_LOSS_CLOSE_GRACE_S == 30);
+        auto unstable_close = [](int stable_at, int stable_tenths, int until) {
+            DhwLossState  st = dhw_past_hold();
+            DhwLossBucket bucket;
+            CheckupSample sample;
+            sample.valve_known = sample.pump_known = sample.bsh_known = sample.r5t_ok = true;
+            for (int sec = 0; sec <= until; ++sec) {
+                sample.r5t_tenths = sec <= 3600        ? 600 - sec / 360
+                                    : sec >= stable_at ? stable_tenths
+                                                       : (sec % 2 ? 587 : 590);
+                dhw_loss_step(st, bucket, sample, static_cast<int64_t>(sec) * 1000000);
+            }
+            return bucket;
+        };
+        const auto timely_close = unstable_close(3630, 590, 3631);
+        CHECK(timely_close.windows == 1 && timely_close.aborts == 0);
+        CHECK(timely_close.max_loss_tenths_k_h == 9); // actual 3630-second span, floored
+        const auto late_close = unstable_close(3631, 587, 3632);
+        CHECK(late_close.windows == 0 && late_close.aborts == 1);
+        CHECK(late_close.abort_reasons == DHW_ABORT_READING);
+        DhwLossRing rejected;
+        rejected.pending = late_close;
+        rejected.commit(0);
+        const auto rejected_day = dhw_loss_aggregate(rejected);
+        CHECK(rejected_day.aborts == 1 && rejected_day.abort_reasons == DHW_ABORT_READING);
+        CHECK(rejected_day.best_aborted_s == 3631 && rejected_day.windows == 0);
+        const auto hours_late = unstable_close(6 * 3600, 587, 6 * 3600 + 2);
+        CHECK(hours_late.windows == 0 && hours_late.aborts == 1);
+        CHECK(hours_late.max_loss_tenths_k_h == CHECKUP_ABSENT);
+
+        // Context survives a compatible restart, then clears with the completed hour or abort.
+        DhwLossState  st = dhw_past_hold();
+        DhwLossBucket b;
+        CheckupSample s;
+        s.valve_known = s.pump_known = s.bsh_known = s.r5t_ok = true;
+        for (int sec = 0; sec <= 1801; ++sec) {
+            s.pump_on    = sec == 600;
+            s.r5t_tenths = sec < 900 ? 600 : 580;
+            dhw_loss_step(st, b, s, static_cast<int64_t>(sec) * 1000000);
+        }
+        const auto carry = dhw_loss_checkpoint(st, 1801LL * 1000000);
+        CHECK((carry.flags & DHW_LOSS_CARRY_DRAW_LIKE) != 0);
+        CHECK((carry.flags & DHW_LOSS_CARRY_PUMP_ON) != 0);
+        DhwLossState resumed;
+        dhw_loss_adopt(resumed, carry, 0);
+        CHECK(resumed.segment_draw_like && resumed.segment_pump_on);
+        for (int sec = 1; sec <= 1800; ++sec)
+            dhw_loss_step(resumed, b, s, static_cast<int64_t>(sec) * 1000000);
+        CHECK(b.windows == 1 && b.draw_windows == 1 && b.pump_windows == 1);
+        CHECK(!resumed.segment_draw_like && !resumed.segment_pump_on);
+        s.valve_dhw = true;
+        dhw_loss_step(resumed, b, s, 1801LL * 1000000);
+        CHECK(resumed.segment_start_us < 0 && !resumed.segment_draw_like &&
+              !resumed.segment_pump_on);
+
+        DhwLossHandoffPayload handoff;
+        const auto            crc    = checkup_dhw_handoff_crc(7, handoff);
+        handoff.pending.draw_windows = 1;
+        CHECK(checkup_dhw_handoff_crc(7, handoff) != crc);
+        handoff.pending              = DhwLossBucket{};
+        handoff.pending.pump_windows = 1;
+        CHECK(checkup_dhw_handoff_crc(7, handoff) != crc);
+        handoff.pending                    = DhwLossBucket{};
+        handoff.pending.quiet_high_windows = 1;
+        CHECK(checkup_dhw_handoff_crc(7, handoff) != crc);
     }
 
     // --- verdicts -------------------------------------------------------------------------------

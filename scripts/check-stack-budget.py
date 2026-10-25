@@ -678,11 +678,11 @@ def validate_status_numeric_calls(disassembly: str, budgets: dict[str, Any]) -> 
     serializer = re.compile(budgets["symbols"]["status_serializer"]["pattern"])
     direct = re.compile(r"^\s*[0-9a-f]+:\s+[0-9a-f]+\s+call8\s+[0-9a-f]+\s+<"
                         + re.escape(STATUS_HEALTH_NUMBER_SYMBOL) + r">\s*$")
-    # The compiler merges two branch tails from the 27 source invocations into 25 calls.
-    if (len(references) != 25
+    # The compiler merges two branch tails from the 30 source invocations into 28 calls.
+    if (len(references) != 28
             or any(not serializer.search(caller) or not direct.match(line)
                    for caller, line in references)):
-        raise BudgetError("diagnosis numeric calls: 25 direct serializer calls require review")
+        raise BudgetError("diagnosis numeric calls: 28 direct serializer calls require review")
 
 
 def parse_frames(disassembly: str, budgets: dict[str, Any] | None = None) -> dict[str, int]:
@@ -813,7 +813,7 @@ def validate_status_diagnosis_paths(budgets: dict[str, Any], sources: dict[str, 
                              code["main/mcp_server.cpp"])
             or re.search(r"\b(?:checkup_report|http_send_status_json)\s*\(", code["main/hp_poll.cpp"])):
         raise BudgetError("diagnosis status source: direct/MCP-only serializer caller contract changed")
-    if (len(re.findall(r"\bnum\s*\(", status)) != 27
+    if (len(re.findall(r"\bnum\s*\(", status)) != 30
             or not re.search(r"auto num = \[&j\]\(const char\* name, int v\) "
                              r"__attribute__\(\(noinline\)\)\s*\{", status)
             or not re.search(r"if \(v < 0\)\s*\{[^{}]*return;\s*\}\s*"
@@ -2839,7 +2839,7 @@ def self_test() -> None:
 229: fff7a5 call8 200 <{double_body}>
 """
     number_calls = "".join(f"{0x3003 + offset:x}: fff7a5 call8 3000 <{STATUS_HEALTH_NUMBER_SYMBOL}>\n"
-                           for offset in range(25))
+                           for offset in range(28))
     fixture = fixture.replace("   3: 004136          entry a1, 4848\n",
                               "   3: 004136          entry a1, 4848\n" + number_calls)
     budgets = load_budgets(DEFAULT_BUDGETS)
