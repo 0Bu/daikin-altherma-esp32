@@ -1,6 +1,6 @@
 # Evidence and limits of the plant diagnostics
 
-<!-- diagnostic-evidence-contract: 7a869bb9c94b87ea41d91f819f7132ad92794fb4d7744c6437a713e1996f3922 -->
+<!-- diagnostic-evidence-contract: 631c64a2b18c828a40a8a6e9b8ed940cddb8a9a9169b0bc1bc46ed9e0bc48361 -->
 
 For every row in the **Plant diagnostics · 24 h** card, this page answers four questions:
 
@@ -192,19 +192,30 @@ produces **NOTE** immediately. An absence-of-short-run assessment additionally r
 Missing classification, fewer than 12 heating runs or an inadequate classified population remains
 an observation with an explicit reason; absent compressor evidence remains CHECKING.
 There is no pooled starts/runtime fallback, and unfinished
-runs never enter the completed mean. Completed-run evidence ages with its start edge. See
-CHECKUP_CYCLING_MIN_STARTS, CHECKUP_CYCLING_SHORT_RUN_S and CHECKUP_CYCLING_CLASSIFIED_PCT in
-[checkup.hpp](../main/logic/checkup.hpp). Fresh X10A outdoor minimum/mean accompanies only accepted
-completed heating runs, from samples whose predecessor was also running, and changes no threshold.
+runs never enter the completed mean. Completed-run evidence ages with its start edge. Each completed space-heating run is also partitioned
+into one of four stop-edge counters (`stop_overshoot_runs`, `stop_thermostat_runs`,
+`stop_defrost_dhw_runs`, `stop_other_runs`) whose sum equals `space_runs`: (1) defrost active or 3-way
+valve on DHW at stop (`CHECKUP_LOC_DEFROST`, `CHECKUP_LOC_VALVE`), (2) indoor thermostat ON at stop
+(`CHECKUP_LOC_IU_THERMO`) with leaving water `R1T` (`CHECKUP_LOC_R1T`) at least `+2.0 K`
+(`CHECKUP_CYCLING_OVERSHOOT_TENTHS`) above `LW setpoint (main)` (`CHECKUP_LOC_LWT_SETPOINT`) on the
+stop or last running sample, (3) indoor thermostat witnessed ON during the run and OFF at stop without
+overshoot, or (4) other/unestablished stop context. See
+CHECKUP_CYCLING_MIN_STARTS, CHECKUP_CYCLING_SHORT_RUN_S, CHECKUP_CYCLING_CLASSIFIED_PCT and
+CHECKUP_CYCLING_OVERSHOOT_TENTHS in [checkup.hpp](../main/logic/checkup.hpp). Fresh X10A outdoor
+minimum/mean accompanies only accepted completed heating runs, from samples whose predecessor was
+also running, and changes no threshold.
 
-**Project boundary:** Twelve heating runs, ten minutes and the 90% evidence requirements are
+**Project boundary:** Twelve heating runs, ten minutes, the 90% evidence requirements and the `+2.0 K`
+stop-overshoot margin (`CHECKUP_CYCLING_OVERSHOOT_TENTHS`) are
 project heuristics, not limits copied from R1 or specified by Daikin. R1 studied different,
 non-modulating units and supports only the general relevance of short runs and system hydraulics.
 The page-0x20 mapping and positive-compressor freshness pairing are project protocol evidence.
 The 15-second all-blind tolerance and the larger-of-completed-runs-and-starts-minus-one population
 are project rules.
 
-**Not established:** The note identifies neither oversizing nor incorrect hydraulic balancing.
+**Not established:** The note and stop-edge breakdown identify neither oversizing nor incorrect
+hydraulic balancing as a proven root cause; an overshoot stop shows only that `R1T` exceeded the main
+setpoint by at least `2.0 K` while thermostat demand stayed on.
 The observed run population and its outdoor context do not establish building load, delivered heat
 or continuous weather coverage. Defrost behaviour has not yet been observed by this project; if the
 compressor stops at defrost entry or exit, one heating run counts as several.

@@ -1,4 +1,4 @@
-// translation-source: 35f2b17396ef51dd6a1c1fe8b1c07561fe6a16c726430e5785295bdb9dfc18aa
+// translation-source: 5d3605b58bf1c8148c5d36a8c6202142d5b474d0d52a75e242b2503a67dec0e5
 I18N.zh = localeValues([
   /* sys.nodata */ "无数据",
   /* sys.unreachable */ "无法访问",
@@ -217,6 +217,7 @@ I18N.zh = localeValues([
   /* check.cycling_dhw */ (a, b) => `热水 ${a} · 平均 ${b}`,
   /* check.cycling_cooling */ (n) => `制冷：排除 ${n} 个`,
   /* check.cycling_censored */ (n) => `${n} 个未分类`,
+  /* check.cycling_stops */ (a, b, c, d) => `停机: 超温 ${a} · 温控器 ${b} · 除霜/热水 ${c} · 其他 ${d}`,
   /* check.outdoor_one */ (source, mean) => `${source} ${mean} °C`,
   /* check.outdoor_range */ (source, min, mean) => `${source} 最低 ${min} °C · 平均 ${mean} °C`,
   /* check.min */ (m) => `${m} 分钟`,
@@ -1212,7 +1213,7 @@ DESCRIPTION_I18N.zh = descriptionValues([
 MODEL_DESCRIPTION_I18N.zh = modelDescriptionValues([
   ["机组消息，不证明原因或已解决。"], // health_fault
   ["水箱传感器R5T：单点，非能量。项目规则≥0.8 K/h；约1.85 K/h可按取水排除。循环重叠不证明原因。"], // health_dhw_loss
-  ["≥12次完整供暖、平均<10分钟；所有完整运行中≥90%已分类。项目规则非Daikin限值；排除热水、制冷、未分类。"], // health_cycling
+  ["≥12次完整供暖、平均<10分钟；所有完整运行中≥90%已分类并统计停机原因（超温≥+2.0 K、温控器、除霜/热水、其他）。项目规则非Daikin限值；排除热水、制冷、未分类。"], // health_cycling
   ["除霜：≥3次配对、>15%压缩机运行时间，仅计压缩机及除霜状态均可读时段。项目规则非Daikin限值；缺少湿度及整个盘管温度。"], // health_defrost
   ["水压：共同项目规则≤1.0 bar；连续观察60秒后警告。非通用，按该机型手册。"], // health_pressure
   ["水泵60秒后流量。限值需同机型/模式/条件；非额定，也不证明不足。"], // health_flow

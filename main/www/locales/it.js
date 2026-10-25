@@ -1,4 +1,4 @@
-// translation-source: 35f2b17396ef51dd6a1c1fe8b1c07561fe6a16c726430e5785295bdb9dfc18aa
+// translation-source: 5d3605b58bf1c8148c5d36a8c6202142d5b474d0d52a75e242b2503a67dec0e5
 I18N.it = localeValues([
   /* sys.nodata */ "Nessun dato",
   /* sys.unreachable */ "Non raggiungibile",
@@ -217,6 +217,7 @@ I18N.it = localeValues([
   /* check.cycling_dhw */ (a, b) => `ACS ${a} · media ${b}`,
   /* check.cycling_cooling */ (n) => `raffrescamento: ${n} ${n === 1 ? "escluso" : "esclusi"}`,
   /* check.cycling_censored */ (n) => `${n} ${n === 1 ? "non classificato" : "non classificati"}`,
+  /* check.cycling_stops */ (a, b, c, d) => `arresti: superamento ${a} · termostato ${b} · sbrinamento/ACS ${c} · altri ${d}`,
   /* check.outdoor_one */ (source, mean) => `${source} ${mean} °C`,
   /* check.outdoor_range */ (source, min, mean) => `${source} min ${min} °C · media ${mean} °C`,
   /* check.min */ (m) => `${m} min`,
@@ -1212,7 +1213,7 @@ DESCRIPTION_I18N.it = descriptionValues([
 MODEL_DESCRIPTION_I18N.it = modelDescriptionValues([
   ["Messaggi della pompa; non provano causa né risoluzione."], // health_fault
   ["Sensore R5T: un punto, non energia. Regola interna ≥0,8 K/h; verso 1,85 K/h possibile esclusione come prelievo. Circolazione non prova causa."], // health_dhw_loss
-  ["≥12 cicli completi di riscaldamento, media <10 min; ≥90% di tutti i cicli completati classificati. Regola interna, non Daikin; esclusi ACS, freddo e non classificati."], // health_cycling
+  ["≥12 cicli completi di riscaldamento, media <10 min; ≥90% di tutti i cicli completati classificati e arresti suddivisi (superamento ≥+2,0 K, termostato, sbrinamento/ACS, altri). Regola interna, non Daikin; esclusi ACS, freddo e non classificati."], // health_cycling
   ["Sbrinamento: ≥3 associati, >15% del tempo di marcia del compressore con stati compressore e sbrinamento leggibili. Regola interna, non Daikin; mancano umidità e temperatura dell’intera batteria."], // health_defrost
   ["Pressione: regola interna comune ≤1,0 bar; 60 s continui osservati danno AVVISO. Non universale; vale il manuale del modello."], // health_pressure
   ["Portata dopo 60 s di pompa. Limite per stesso modello/modo/condizioni; non nominale né prova di portata insufficiente."], // health_flow

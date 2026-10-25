@@ -1,4 +1,4 @@
-// translation-source: 35f2b17396ef51dd6a1c1fe8b1c07561fe6a16c726430e5785295bdb9dfc18aa
+// translation-source: 5d3605b58bf1c8148c5d36a8c6202142d5b474d0d52a75e242b2503a67dec0e5
 I18N.fr = localeValues([
   /* sys.nodata */ "Aucune donnée",
   /* sys.unreachable */ "Injoignable",
@@ -217,6 +217,7 @@ I18N.fr = localeValues([
   /* check.cycling_dhw */ (a, b) => `ECS ${a} · moyenne ${b}`,
   /* check.cycling_cooling */ (n) => `rafraîchissement : ${n} ${n === 1 ? "exclu" : "exclus"}`,
   /* check.cycling_censored */ (n) => `${n} ${n === 1 ? "non classé" : "non classés"}`,
+  /* check.cycling_stops */ (a, b, c, d) => `arrêts: dépassement ${a} · thermostat ${b} · dégivrage/ECS ${c} · autres ${d}`,
   /* check.outdoor_one */ (source, mean) => `${source} ${mean} °C`,
   /* check.outdoor_range */ (source, min, mean) => `${source} min. ${min} °C · moyenne ${mean} °C`,
   /* check.min */ (m) => `${m} min`,
@@ -1212,7 +1213,7 @@ DESCRIPTION_I18N.fr = descriptionValues([
 MODEL_DESCRIPTION_I18N.fr = modelDescriptionValues([
   ["Messages de la pompe ; ni cause ni résolution prouvées."], // health_fault
   ["Capteur R5T : un point, pas une énergie. Règle interne ≥0,8 K/h ; vers 1,85 K/h, exclusion possible comme puisage. Circulation ne prouve pas la cause."], // health_dhw_loss
-  ["≥12 chauffages complets, moyenne <10 min; ≥90% de tous les cycles complets classés. Règle interne, pas Daikin; ECS, froid et non classés exclus."], // health_cycling
+  ["≥12 chauffages complets, moyenne <10 min; ≥90% de tous les cycles complets classés et arrêts ventilés (dépassement ≥+2,0 K, thermostat, dégivrage/ECS, autres). Règle interne, pas Daikin; ECS, froid et non classés exclus."], // health_cycling
   ["Dégivrage : ≥3 associés, >15% du temps de marche du compresseur si états compresseur et dégivrage lisibles. Règle interne, pas Daikin; humidité et température de toute la batterie absentes."], // health_defrost
   ["Pression : règle interne commune ≤1,0 bar ; 60 s continues observées donnent ALERTE. Pas universelle ; manuel du modèle."], // health_pressure
   ["Débit après 60 s de pompe. Seuil selon même modèle/mode/conditions ; pas nominal ni preuve de débit insuffisant."], // health_flow

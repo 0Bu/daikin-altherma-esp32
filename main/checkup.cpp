@@ -499,10 +499,11 @@ void checkup_record(const CachedValue* v, size_t n, bool rps_known, bool rps_run
     s.rps_running = rps_running;
     s.x10a_blind  = !n; // a held or failed cycle read nothing: bounded blind time, not a lost row
 
-    flag_state(v, n, logic::CHECKUP_LOC_DEFROST, s.defrost_known, s.defrost_on);
-    flag_state(v, n, logic::CHECKUP_LOC_PUMP,    s.pump_known,    s.pump_on);
-    flag_state(v, n, logic::CHECKUP_LOC_BSH,     s.bsh_known,     s.bsh_on);
-    flag_state(v, n, logic::CHECKUP_LOC_VALVE,   s.valve_known,   s.valve_dhw);
+    flag_state(v, n, logic::CHECKUP_LOC_DEFROST,   s.defrost_known, s.defrost_on);
+    flag_state(v, n, logic::CHECKUP_LOC_PUMP,      s.pump_known,    s.pump_on);
+    flag_state(v, n, logic::CHECKUP_LOC_BSH,       s.bsh_known,     s.bsh_on);
+    flag_state(v, n, logic::CHECKUP_LOC_VALVE,     s.valve_known,   s.valve_dhw);
+    flag_state(v, n, logic::CHECKUP_LOC_IU_THERMO, s.thermo_known,  s.thermo_on);
     s.operating_mode = operating_mode(v, n);
     // Either active step proves the aggregate BUH is on. Proving it is OFF needs every step carried
     // by this profile to be readable; one readable zero plus one timed-out step remains unknown.
@@ -515,9 +516,11 @@ void checkup_record(const CachedValue* v, size_t n, bool rps_known, bool rps_run
                    (!coverage.buh1 || b1_known) &&
                    (!coverage.buh2 || b2_known));
 
-    s.bar_ok  = reading(v, n, logic::CHECKUP_LOC_PRESSURE, s.bar_tenths);
-    s.flow_ok = reading(v, n, logic::CHECKUP_LOC_FLOW,     s.flow_tenths);
-    s.r5t_ok  = reading(v, n, logic::CHECKUP_LOC_R5T,      s.r5t_tenths);
+    s.bar_ok          = reading(v, n, logic::CHECKUP_LOC_PRESSURE,     s.bar_tenths);
+    s.flow_ok         = reading(v, n, logic::CHECKUP_LOC_FLOW,         s.flow_tenths);
+    s.r5t_ok          = reading(v, n, logic::CHECKUP_LOC_R5T,          s.r5t_tenths);
+    s.r1t_ok          = reading(v, n, logic::CHECKUP_LOC_R1T,          s.r1t_tenths);
+    s.lwt_setpoint_ok = reading(v, n, logic::CHECKUP_LOC_LWT_SETPOINT, s.lwt_setpoint_tenths);
     // Page 0x20 can answer with the last run's outdoor value while the unit sleeps. The shared
     // evidence helper therefore requires THIS-cycle row presence plus a positively running RPS
     // witness. In particular, `held == false` with unknown RPS is not freshness.

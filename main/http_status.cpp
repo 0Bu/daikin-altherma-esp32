@@ -1481,6 +1481,10 @@ static void append_status_json(JsonOut& j, bool redact) {
                 num("mean_run_s", ck.b);
                 num("space_runs", ck.c);
                 num("space_mean_run_s", ck.d);
+                num("stop_overshoot_runs", hr.cycling_stop_overshoot);
+                num("stop_thermostat_runs", hr.cycling_stop_thermostat);
+                num("stop_defrost_dhw_runs", hr.cycling_stop_defrost_dhw);
+                num("stop_other_runs", hr.cycling_stop_other);
                 num("dhw_runs", ck.e);
                 num("dhw_mean_run_s", ck.f);
                 num("cooling_runs", hr.cycling_cooling_runs);

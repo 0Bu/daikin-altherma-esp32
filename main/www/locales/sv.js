@@ -1,4 +1,4 @@
-// translation-source: 35f2b17396ef51dd6a1c1fe8b1c07561fe6a16c726430e5785295bdb9dfc18aa
+// translation-source: 5d3605b58bf1c8148c5d36a8c6202142d5b474d0d52a75e242b2503a67dec0e5
 I18N.sv = localeValues([
   /* sys.nodata */ "Inga data",
   /* sys.unreachable */ "Inte tillgänglig",
@@ -217,6 +217,7 @@ I18N.sv = localeValues([
   /* check.cycling_dhw */ (a, b) => `varmvatten ${a} · medel ${b}`,
   /* check.cycling_cooling */ (n) => `Kylning ${n} ${n === 1 ? "utelämnad" : "utelämnade"}`,
   /* check.cycling_censored */ (n) => `${n} utan klass`,
+  /* check.cycling_stops */ (a, b, c, d) => `stopp: övertemp. ${a} · termostat ${b} · avfrost./VV ${c} · övriga ${d}`,
   /* check.outdoor_one */ (source, mean) => `${source} ${mean} °C`,
   /* check.outdoor_range */ (source, min, mean) => `${source} min. ${min} °C · medel ${mean} °C`,
   /* check.min */ (m) => `${m} min`,
@@ -1229,7 +1230,7 @@ DESCRIPTION_I18N.sv = descriptionValues([
 MODEL_DESCRIPTION_I18N.sv = modelDescriptionValues([
   ["Enhetens meddelanden; inga bevis på orsak eller lösning."], // health_fault
   ["Tankgivare R5T: en punkt, inte energi. Intern regel ≥0,8 K/h; nära 1,85 K/h kan uteslutas som tappning. Cirkulationsöverlapp bevisar inte orsak."], // health_dhw_loss
-  ["≥12 avslutade värmekörningar, medel <10 min; ≥90% av alla avslutade körningar klassificerade. Intern regel, inte Daikin; varmvatten, kylning och oklassificerade utesluts."], // health_cycling
+  ["≥12 avslutade värmekörningar, medel <10 min; ≥90% av alla avslutade körningar klassificerade och stopp uppdelade (övertemp. ≥+2,0 K, termostat, avfrostning/VV, övriga). Intern regel, inte Daikin; varmvatten, kylning och oklassificerade utesluts."], // health_cycling
   ["Avfrostning: ≥3 parade, >15% av kompressorns drifttid där både kompressor- och avfrostningsstatus kan läsas. Intern regel, inte Daikin; fuktighet och hela värmeväxlarens temperatur saknas."], // health_defrost
   ["Tryck: gemensam intern regel ≤1,0 bar; 60 s kontinuerligt observerat ger varning. Inte universell; modellmanual gäller."], // health_pressure
   ["Flöde efter 60 s pump. Gräns kräver samma modell/läge/förhållanden; inte nominellt eller bevis på för lågt flöde."], // health_flow

@@ -15376,8 +15376,8 @@ static void test_checkup() {
     // so a field added without the conversation shows up as a failing test rather than as headroom
     // quietly spent. Wider complete-run/context counts and a dated pressure minimum add 384 bytes.
     CHECK(sizeof(CheckupOutdoorStats) == 12);
-    CHECK(sizeof(CheckupBucket) == 80);
-    CHECK(CHECKUP_BYTES == 1920);
+    CHECK(sizeof(CheckupBucket) == 84);
+    CHECK(CHECKUP_BYTES == 2016);
 
     // --- saturation -----------------------------------------------------------------------------
     // A wrap would turn the worst imaginable cycling into a perfect score.
@@ -15606,6 +15606,129 @@ static void test_checkup() {
         s.operating_mode = CheckupOperatingMode::Heating;
         tick(300, true, false);
         CHECK(b.space_runs == 1 && b.space_run_s == 599);
+    }
+    {
+        // ── STOP-EDGE CLASSIFICATION FOR COMPLETED SPACE-HEATING RUNS ────────────────────────────
+        CheckupRing   ring;
+        CheckupState  st;
+        CheckupSample s;
+        s.rps_known       = true;
+        s.valve_known     = true;
+        s.defrost_known   = true;
+        s.thermo_known    = true;
+        s.r1t_ok          = true;
+        s.lwt_setpoint_ok = true;
+        s.operating_mode  = CheckupOperatingMode::Heating;
+        int64_t t         = 0;
+        auto    step_s    = [&](int secs) {
+            for (int i = 0; i < secs; i++) {
+                t += 1'000'000;
+                ring.observe(t);
+                checkup_step(st, ring.pending, s, t, &ring);
+            }
+        };
+
+        // Baseline idle sample
+        s.rps_running = false;
+        s.valve_dhw   = false;
+        s.defrost_on  = false;
+        s.thermo_on   = false;
+        s.r1t_tenths  = 300;
+        s.lwt_setpoint_tenths = 350;
+        step_s(1);
+
+        // 1. Overshoot stop: thermostat stays ON, R1T = 37.5 C >= setpoint 35.0 C + 2.0 K
+        s.rps_running = true;
+        s.thermo_on   = true;
+        s.r1t_tenths  = 375;
+        step_s(300);
+        s.rps_running = false;
+        step_s(1);
+        CHECK(ring.pending.space_runs == 1);
+        CHECK(ring.pending.stop_overshoot == 1);
+        CHECK(ring.pending.stop_thermostat_cut == 0);
+        CHECK(ring.pending.stop_defrost_dhw == 0);
+        CHECK(ring.pending.stop_other == 0);
+
+        // 2. Thermostat cut: thermostat was ON during run, transitions to OFF at stop without overshoot
+        s.rps_running = true;
+        s.thermo_on   = true;
+        s.r1t_tenths  = 355; // +0.5 K < +2.0 K
+        step_s(300);
+        s.rps_running = false;
+        s.thermo_on   = false;
+        step_s(1);
+        CHECK(ring.pending.space_runs == 2);
+        CHECK(ring.pending.stop_overshoot == 1);
+        CHECK(ring.pending.stop_thermostat_cut == 1);
+
+        // 3. Defrost / DHW interruption at stop edge
+        s.rps_running = true;
+        s.thermo_on   = true;
+        s.r1t_tenths  = 380; // even with high R1T, defrost at stop takes precedence
+        step_s(300);
+        s.rps_running = false;
+        s.defrost_on  = true;
+        step_s(1);
+        s.defrost_on  = false;
+        CHECK(ring.pending.space_runs == 3);
+        CHECK(ring.pending.stop_defrost_dhw == 1);
+
+        // 4. Other stop: thermostat stays ON, no defrost/DHW, R1T within +1.0 K of setpoint;
+        // also exercise out-of-range temperature rejection (< -200 and > 1000 tenths) and
+        // valve_dhw / prev_dfr_on branches at stop.
+        s.rps_running = true;
+        s.thermo_on   = true;
+        s.r1t_tenths  = -500;
+        s.lwt_setpoint_tenths = 1500;
+        step_s(10);
+        s.r1t_tenths  = 360;
+        s.lwt_setpoint_tenths = 350;
+        step_s(290);
+        s.rps_running = false;
+        step_s(1);
+        CHECK(ring.pending.space_runs == 4);
+        CHECK(ring.pending.stop_other == 1);
+
+        // 5. Valve switches to DHW on the stop sample itself -> stop_defrost_dhw
+        s.rps_running = true;
+        s.valve_dhw   = false;
+        step_s(300);
+        s.rps_running = false;
+        s.valve_dhw   = true;
+        step_s(1);
+        s.valve_dhw   = false;
+        CHECK(ring.pending.space_runs == 5);
+        CHECK(ring.pending.stop_defrost_dhw == 2);
+
+        // 6. Defrost active on the final running sample before stop -> stop_defrost_dhw
+        s.rps_running = true;
+        s.defrost_on  = true;
+        step_s(300);
+        s.rps_running = false;
+        s.defrost_on  = false;
+        step_s(1);
+        CHECK(ring.pending.space_runs == 6);
+        CHECK(ring.pending.stop_defrost_dhw == 3);
+        CHECK(ring.pending.stop_overshoot + ring.pending.stop_thermostat_cut +
+                  ring.pending.stop_defrost_dhw + ring.pending.stop_other ==
+              ring.pending.space_runs);
+
+        CheckupCoverage cov;
+        cov.rps          = true;
+        cov.valve        = true;
+        cov.mode         = true;
+        cov.thermo       = true;
+        cov.r1t          = true;
+        cov.lwt_setpoint = true;
+        const CheckupWindow win = checkup_aggregate(ring);
+        CHECK(win.stop_overshoot == 1 && win.stop_thermostat_cut == 1 &&
+              win.stop_defrost_dhw == 3 && win.stop_other == 1);
+        const CheckupReport rep = checkup_evaluate(win, cov, FaultClass::Normal);
+        CHECK(rep.cycling_stop_overshoot == 1);
+        CHECK(rep.cycling_stop_thermostat == 1);
+        CHECK(rep.cycling_stop_defrost_dhw == 3);
+        CHECK(rep.cycling_stop_other == 1);
     }
     {
         // ── THE REVIEWER'S REPRODUCER (legacy-443): a valve switch is not a compressor cycle
@@ -17854,6 +17977,9 @@ static void test_checkup() {
         // converter.
         {&CHECKUP_LOC_VALVE, "way valve", 39},
         {&CHECKUP_LOC_IU_MODE, "i/u operation mode", 39},
+        {&CHECKUP_LOC_IU_THERMO, "thermostat on/off", 39},
+        {&CHECKUP_LOC_LWT_SETPOINT, "setpoint (main)", 39},
+        {&CHECKUP_LOC_R1T, "r1t", 39},
         {&CHECKUP_LOC_R5T, "r5t", 39},
     };
     constexpr size_t kCheckupCount = sizeof(kCheckup) / sizeof(kCheckup[0]);

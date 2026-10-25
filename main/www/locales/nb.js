@@ -1,4 +1,4 @@
-// translation-source: 35f2b17396ef51dd6a1c1fe8b1c07561fe6a16c726430e5785295bdb9dfc18aa
+// translation-source: 5d3605b58bf1c8148c5d36a8c6202142d5b474d0d52a75e242b2503a67dec0e5
 I18N.nb = localeValues([
   /* sys.nodata */ "Ingen data",
   /* sys.unreachable */ "Ikke tilgjengelig",
@@ -217,6 +217,7 @@ I18N.nb = localeValues([
   /* check.cycling_dhw */ (a, b) => `varmtvann ${a} · snitt ${b}`,
   /* check.cycling_cooling */ (n) => `Kjøling ${n} utelatt`,
   /* check.cycling_censored */ (n) => `${n} uten klasse`,
+  /* check.cycling_stops */ (a, b, c, d) => `stopp: overtemp. ${a} · termostat ${b} · avising/VV ${c} · andre ${d}`,
   /* check.outdoor_one */ (source, mean) => `${source} ${mean} °C`,
   /* check.outdoor_range */ (source, min, mean) => `${source} min. ${min} °C · snitt ${mean} °C`,
   /* check.min */ (m) => `${m} min`,
@@ -1229,7 +1230,7 @@ DESCRIPTION_I18N.nb = descriptionValues([
 MODEL_DESCRIPTION_I18N.nb = modelDescriptionValues([
   ["Enhetens meldinger; ingen årsaks- eller løsningsbevis."], // health_fault
   ["Tanksensor R5T: ett punkt, ikke energi. Intern regel ≥0,8 K/h; rundt 1,85 K/h kan utelates som tapping. Sirkulasjonsoverlapp beviser ikke årsak."], // health_dhw_loss
-  ["≥12 fullførte varmekjøringer, snitt <10 min; ≥90% av alle fullførte kjøringer klassifisert. Intern regel, ikke Daikin; varmtvann, kjøling og uklassifiserte utelates."], // health_cycling
+  ["≥12 fullførte varmekjøringer, snitt <10 min; ≥90% av alle fullførte kjøringer klassifisert og stopp fordelt (overtemp. ≥+2,0 K, termostat, avising/VV, andre). Intern regel, ikke Daikin; varmtvann, kjøling og uklassifiserte utelates."], // health_cycling
   ["Avriming: ≥3 parede, >15% av kompressorens driftstid der både kompressor- og avrimingsstatus er lesbar. Intern regel, ikke Daikin; fuktighet og hele varmevekslerens temperatur mangler."], // health_defrost
   ["Trykk: felles intern regel ≤1,0 bar; 60 s kontinuerlig observert gir advarsel. Ikke universell; modellmanual gjelder."], // health_pressure
   ["Strømning etter 60 s pumpe. Grense krever samme modell/modus/forhold; ikke nominell eller lavstrømningsbevis."], // health_flow

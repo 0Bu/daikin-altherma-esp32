@@ -1,4 +1,4 @@
-// translation-source: 35f2b17396ef51dd6a1c1fe8b1c07561fe6a16c726430e5785295bdb9dfc18aa
+// translation-source: 5d3605b58bf1c8148c5d36a8c6202142d5b474d0d52a75e242b2503a67dec0e5
 I18N.cs = localeValues([
   /* sys.nodata */ "Žádná data",
   /* sys.unreachable */ "Nedostupné",
@@ -217,6 +217,7 @@ I18N.cs = localeValues([
   /* check.cycling_dhw */ (a, b) => `TUV ${a} · průměr ${b}`,
   /* check.cycling_cooling */ (n) => `chlazení ${n} vyloučeno`,
   /* check.cycling_censored */ (n) => `${n} ${n === 1 ? "nezařazený" : n >= 2 && n <= 4 ? "nezařazené" : "nezařazených"}`,
+  /* check.cycling_stops */ (a, b, c, d) => `zastavení: překroč. ${a} · termostat ${b} · odtávání/TUV ${c} · jiné ${d}`,
   /* check.outdoor_one */ (source, mean) => `${source} ${mean} °C`,
   /* check.outdoor_range */ (source, min, mean) => `${source} min. ${min} °C · průměr ${mean} °C`,
   /* check.min */ (m) => `${m} min`,
@@ -1183,7 +1184,7 @@ DESCRIPTION_I18N.cs = descriptionValues([
 MODEL_DESCRIPTION_I18N.cs = modelDescriptionValues([
   ["Hlášení čerpadla; neprokazují příčinu ani opravu."], // health_fault
   ["Čidlo R5T: bod, ne energie. Interní práh ≥0,8 K/h; kolem 1,85 K/h možné vyloučení jako odběr. Cirkulace neprokazuje příčinu."], // health_dhw_loss
-  ["≥12 úplných běhů vytápění, průměr <10 min; klasifikováno ≥90% všech dokončených běhů. Interní pravidlo, ne Daikin; TUV, chlazení a neklasifikované vyloučeny."], // health_cycling
+  ["≥12 úplných běhů vytápění, průměr <10 min; klasifikováno ≥90% všech dokončených běhů a dělení zastavení (překročení ≥+2,0 K, termostat, odtávání/TUV, jiné). Interní pravidlo, ne Daikin; TUV, chlazení a neklasifikované vyloučeny."], // health_cycling
   ["Odmrazení: ≥3 spárovaná, >15% doby chodu kompresoru při čitelném stavu kompresoru i odmrazení. Interní pravidlo, ne Daikin; chybí vlhkost a teplota celého výměníku."], // health_defrost
   ["Tlak: společné interní pravidlo ≤1,0 bar; 60 s souvislého pozorování dává varování. Ne univerzální; platí návod modelu."], // health_pressure
   ["Průtok po 60 s čerpadla. Mez vyžaduje stejný model/režim/podmínky; ne jmenovitý ani důkaz malého průtoku."], // health_flow

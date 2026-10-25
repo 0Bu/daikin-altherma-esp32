@@ -1,4 +1,4 @@
-// translation-source: 35f2b17396ef51dd6a1c1fe8b1c07561fe6a16c726430e5785295bdb9dfc18aa
+// translation-source: 5d3605b58bf1c8148c5d36a8c6202142d5b474d0d52a75e242b2503a67dec0e5
 I18N.de = localeValues([
   /* sys.nodata */ "Keine Daten",
   /* sys.unreachable */ "Nicht erreichbar",
@@ -217,6 +217,7 @@ I18N.de = localeValues([
   /* check.cycling_dhw */ (a, b) => `Warmwasser ${a} · Mittel ${b}`,
   /* check.cycling_cooling */ (n) => `Kühlen ${n} ausgeschlossen`,
   /* check.cycling_censored */ (n) => `${n} ohne Zuordnung`,
+  /* check.cycling_stops */ (a, b, c, d) => `Stopps: Übertemp. ${a} · Thermostat ${b} · Abtau/WW ${c} · sonstige ${d}`,
   /* check.outdoor_one */ (source, mean) => `${source} ${mean} °C`,
   /* check.outdoor_range */ (source, min, mean) => `${source} min. ${min} °C · Mittel ${mean} °C`,
   /* check.min */ (m) => `${m} min`,

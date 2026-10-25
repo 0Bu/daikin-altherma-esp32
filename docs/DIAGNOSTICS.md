@@ -1,6 +1,6 @@
 # Plant diagnostics in plain language
 
-<!-- user-docs-contract: 6e206904007b5293cc751ecdb57e0d824287cc8a0d75c06bbfa41a8984a88f26 -->
+<!-- user-docs-contract: 0e49c7bd5c0df69d8d77cb9ab48897ac85b28dd37d285cb875510b38e8c28360 -->
 
 Plant diagnostics **reads measurements and counts events; it does not control the heat pump**.
 It is off by default. Enable **Plant diagnostics** under **Settings → Firmware** to start an evidence
@@ -87,19 +87,26 @@ reading saw can still affect a window.
 
 **In plain language:** The board counts starts and completed compressor runs. Continuous valve and
 mode readings separate space heating, domestic hot water (DHW) and cooling; uncertain or mixed runs
-remain unclassified.
+remain unclassified. Completed space-heating runs are also broken down by what was happening when the
+compressor stopped: leaving water at least **+2.0 K** above the target while the thermostat still
+called for heat (**overshoot**), the indoor thermostat switching off (**thermostat**), a defrost or
+hot-water switch at stop (**defrost/DHW**), or **other**.
 
 **Meaning:** At least **12 completed space-heating runs**, with at least **90% of all completed runs
 classified**, can carry the assessment. An average below **10 minutes** produces **NOTE** as soon as
 this population exists. **OK** additionally needs a full day and 90% readable classification time.
 Smaller or insufficiently classified populations are **MEASURED**, with the reason shown;
-no usable compressor observation remains **CHECKING**.
+no usable compressor observation remains **CHECKING**. When short runs are mostly **overshoot** stops,
+the heat pump produced heat faster than the open circuits could absorb it (for example closed room
+valves or a high heating curve); when they are mostly **thermostat** cuts, the room control ended the
+demand.
 
 **Important limit:** There is no pooled all-mode assessment, and an unfinished long run cannot dilute
-completed short runs. Twelve runs and ten minutes are project heuristics, not Daikin limits. These
-figures do not identify oversizing or hydraulic imbalance. Optional outdoor min/mean is context for
-accepted heating runs only. A pause of up to 15 seconds in which the board read nothing (an update
-check, a weather download or a silent link) does not unclassify a run; a start hidden by an unreadable reading counts as an unclassified run.
+completed short runs. Twelve runs, ten minutes and the **+2.0 K** stop-overshoot margin are project
+heuristics, not Daikin limits. These figures do not prove oversizing, a defective valve or hydraulic
+imbalance on their own. Optional outdoor min/mean is context for accepted heating runs only. A pause
+of up to 15 seconds in which the board read nothing (an update check, a weather download or a silent
+link) does not unclassify a run; a start hidden by an unreadable reading counts as an unclassified run.
 After a restart, restored hours can lack the completion of a run that crossed an hour boundary, so
 the result stays **MEASURED** until those hours leave the window. If the compressor stops during a
 defrost, one heating run counts as several; whether it does has not been checked yet.

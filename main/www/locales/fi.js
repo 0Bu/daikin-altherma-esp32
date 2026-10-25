@@ -1,4 +1,4 @@
-// translation-source: 35f2b17396ef51dd6a1c1fe8b1c07561fe6a16c726430e5785295bdb9dfc18aa
+// translation-source: 5d3605b58bf1c8148c5d36a8c6202142d5b474d0d52a75e242b2503a67dec0e5
 I18N.fi = localeValues([
   /* sys.nodata */ "Ei tietoja",
   /* sys.unreachable */ "Ei tavoiteta",
@@ -217,6 +217,7 @@ I18N.fi = localeValues([
   /* check.cycling_dhw */ (a, b) => `käyttövesi ${a} · keskiarvo ${b}`,
   /* check.cycling_cooling */ (n) => `${n} ${n === 1 ? "jäähdytysjakso" : "jäähdytysjaksoa"} jätetty pois`,
   /* check.cycling_censored */ (n) => `${n} ${n === 1 ? "luokittelematon" : "luokittelematonta"}`,
+  /* check.cycling_stops */ (a, b, c, d) => `pysäytykset: ylitys ${a} · termostaatti ${b} · sulatus/KV ${c} · muut ${d}`,
   /* check.outdoor_one */ (source, mean) => `${source} ${mean} °C`,
   /* check.outdoor_range */ (source, min, mean) => `${source} min ${min} °C · keskiarvo ${mean} °C`,
   /* check.min */ (m) => `${m} min`,
@@ -1069,7 +1070,7 @@ DESCRIPTION_I18N.fi = descriptionValues([
 MODEL_DESCRIPTION_I18N.fi = modelDescriptionValues([
   ["Laitteen ilmoitukset; eivät todista syytä tai ratkaisua."], // health_fault
   ["Varaaja-anturi R5T: yksi piste, ei energiaa. Sisäinen raja ≥0,8 K/h; noin 1,85 K/h voidaan hylätä vedenottona. Kierron samanaikaisuus ei todista syytä."], // health_dhw_loss
-  ["≥12 päättynyttä lämmitysjaksoa, keskiarvo <10 min; ≥90% kaikista päättyneistä jaksoista luokiteltu. Sisäinen sääntö, ei Daikin; käyttövesi, jäähdytys ja luokittelemattomat pois."], // health_cycling
+  ["≥12 päättynyttä lämmitysjaksoa, keskiarvo <10 min; ≥90% kaikista päättyneistä jaksoista luokiteltu ja pysäytykset eritelty (ylitys ≥+2,0 K, termostaatti, sulatus/KV, muut). Sisäinen sääntö, ei Daikin; käyttövesi, jäähdytys ja luokittelemattomat pois."], // health_cycling
   ["Sulatus: ≥3 yhdistettyä, >15% kompressorin käyntiajasta, kun sekä kompressorin että sulatuksen tila on luettavissa. Sisäinen sääntö, ei Daikin; kosteus ja koko kennon lämpötila puuttuvat."], // health_defrost
   ["Paine: yhteinen sisäinen raja ≤1,0 bar; 60 s jatkuvaa havaintoa antaa varoituksen. Ei yleispätevä; mallin ohje pätee."], // health_pressure
   ["Virtaus 60 s pumpun jälkeen. Raja vaatii saman mallin/tilan/olosuhteet; ei nimellisarvo tai pienen virtauksen todiste."], // health_flow

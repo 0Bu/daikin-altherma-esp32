@@ -120,10 +120,22 @@ inline constexpr CheckupLocator CHECKUP_LOC_BSH      = {0x60, 12, 305};  // "BSH
 inline constexpr CheckupLocator CHECKUP_LOC_PUMP     = {0x60, 12, 301};  // "Water pump operation"
 inline constexpr CheckupLocator CHECKUP_LOC_PRESSURE = {0x62, 11, 105};  // "Water pressure" (bar)
 inline constexpr CheckupLocator CHECKUP_LOC_FLOW     = {0x62,  9, 105};  // "Flow sensor (l/min)"
-inline constexpr CheckupLocator CHECKUP_LOC_VALVE    = {0x60, 12, 306};  // 1=DHW, 0=space
-inline constexpr CheckupLocator CHECKUP_LOC_R5T      = {0x61, 10, 105};  // DHW tank sensor, 0.1 °C
-inline constexpr CheckupLocator CHECKUP_LOC_IU_MODE  = {0x60,  2, 315};  // Heating/Cooling/DHW
-inline constexpr CheckupLocator CHECKUP_LOC_OUTDOOR  = {0x20,  0, 105};  // R1T outdoor air, 0.1 °C
+inline constexpr CheckupLocator CHECKUP_LOC_VALVE        = {0x60, 12, 306};  // 1=DHW, 0=space
+inline constexpr CheckupLocator CHECKUP_LOC_R5T          = {0x61, 10, 105};  // DHW tank sensor, 0.1 °C
+inline constexpr CheckupLocator CHECKUP_LOC_IU_MODE      = {0x60,  2, 315};  // Heating/Cooling/DHW
+inline constexpr CheckupLocator CHECKUP_LOC_IU_THERMO    = {0x60,  2, 303};  // Thermostat ON/OFF (1=ON, 0=OFF)
+inline constexpr CheckupLocator CHECKUP_LOC_LWT_SETPOINT = {0x60,  9, 105};  // LW setpoint (main), 0.1 °C
+inline constexpr CheckupLocator CHECKUP_LOC_R1T          = {0x61,  2, 105};  // Leaving water before BUH (R1T), 0.1 °C
+inline constexpr CheckupLocator CHECKUP_LOC_OUTDOOR      = {0x20,  0, 105};  // R1T outdoor air, 0.1 °C
+
+// Leaving-water excess over the active main setpoint (tenths of K) at a space-heating stop edge
+// while thermostat demand stays active. Project heuristic for emitter/modulation overshoot, not a
+// universal Daikin fault limit.
+constexpr int CHECKUP_CYCLING_OVERSHOOT_TENTHS = 20; // +2.0 K
+
+constexpr bool checkup_water_temp_plausible(int tenths) {
+    return tenths >= -200 && tenths <= 1000;
+}
 
 // Does this row carry the value a locator addresses? Three exact comparisons; no matching, no
 // heuristics, and nothing that a re-spelling or a translation could move.
@@ -236,6 +248,12 @@ struct CheckupBucket {
     uint8_t  dhw_runs   = 0;
     uint8_t  cooling_runs = 0; // positively identified room-circuit cooling, reported but not judged
     uint8_t  censored_runs = 0; // completed, but mixed / class-unreadable / gapped: judged by neither
+    // Completed, continuously classified space-heating runs partitioned by witnessed stop-edge
+    // context. Their sum equals `space_runs` in every bucket and rolling window.
+    uint8_t  stop_overshoot      = 0; // stopped with thermostat ON and R1T >= setpoint + 2.0 K
+    uint8_t  stop_thermostat_cut = 0; // indoor thermostat transitioned ON -> OFF without overshoot
+    uint8_t  stop_defrost_dhw    = 0; // defrost active or 3-way valve switched to DHW at stop edge
+    uint8_t  stop_other          = 0; // remaining completed space-heating runs without one primary match
     uint8_t  defrosts   = 0;   // defrost off -> on transitions (saturating)
     uint8_t  paired_defrosts = 0; // same edge with readable compressor witnesses at both endpoints
     uint8_t  flags      = 0;
@@ -249,10 +267,10 @@ constexpr uint8_t CHECKUP_F_WARNING = 1u << 1;   // conv 203 read class Warning/
 constexpr uint8_t CHECKUP_F_RETRY   = 1u << 2;   // a protection-retry counter strictly INCREASED
 constexpr uint8_t CHECKUP_F_LOW_BAR = 1u << 3;   // <=1.0 bar persisted for the confirmation period
 
-// 80 bytes per hour: wider completed-run/context counts and a dated pressure minimum add
-// 384 bytes to the 24-slot ring. No sampling allocation or partition change is involved.
+// 84 bytes per hour: wider completed-run/context counts, stop-edge partition and a dated pressure
+// minimum keep the 24-slot ring within 2016 bytes. No sampling allocation or partition change is involved.
 constexpr size_t CHECKUP_BYTES = sizeof(CheckupBucket) * CHECKUP_BUCKETS;
-static_assert(CHECKUP_BYTES <= 1920,
+static_assert(CHECKUP_BYTES <= 2016,
               "the static checkup ring is too large for this heap-tight board");
 
 // Saturating add for the two event counters: 255 starts in one hour is far outside anything real,
@@ -429,6 +447,9 @@ struct CheckupSample {
     bool bar_ok  = false;  int bar_tenths  = 0;
     bool flow_ok = false;  int flow_tenths = 0;
     bool r5t_ok  = false;  int r5t_tenths  = 0;
+    bool thermo_known = false, thermo_on = false;
+    bool r1t_ok = false;          int r1t_tenths = 0;
+    bool lwt_setpoint_ok = false; int lwt_setpoint_tenths = 0;
     OutdoorEvidence outdoor; // fresh X10A 0x20 only; optional context, never a gate
 
     FaultClass fault = FaultClass::Unknown;             // Unknown when no conv-203 row was read
@@ -483,13 +504,18 @@ struct CheckupState {
     uint32_t run_start_bucket = 0;    // complete-run facts age with the witnessed start edge
     uint32_t run_s          = 0;
     CheckupOutdoorStats run_outdoor; // committed only if this run completes as pure space heating
+    bool     run_thermo_seen_on    = false; // indoor thermostat witnessed ON during the open run
+    bool     run_last_thermo_known = false, run_last_thermo_on = false;
+    bool     run_last_r1t_ok       = false; int16_t run_last_r1t_tenths = 0;
+    bool     run_last_setpoint_ok  = false; int16_t run_last_setpoint_tenths = 0;
 };
 
 // Commit the completed run to its class, or to the censored tally when it could not be classified.
 // One place, because the gap and recovered-OFF paths must reach the same conclusion as the normal
 // stop edge. Returns true when an already sealed completed bucket changed and must be re-sealed.
 inline bool checkup_close_run(CheckupState& st, CheckupBucket& b, CheckupRing* ring = nullptr,
-                              uint32_t current_bucket = 0) {
+                              uint32_t current_bucket = 0,
+                              const CheckupSample* stop_sample = nullptr) {
     if (!st.run_open) return false;
     CheckupBucket* target = &b;
     if (ring) {
@@ -508,11 +534,31 @@ inline bool checkup_close_run(CheckupState& st, CheckupBucket& b, CheckupRing* r
                 target->dhw_runs  = checkup_add_u8(target->dhw_runs, 1);
                 target->dhw_run_s = checkup_add_u32(target->dhw_run_s, st.run_s);
                 break;
-            case CheckupRunClass::SpaceHeating:
+            case CheckupRunClass::SpaceHeating: {
                 target->space_runs  = checkup_add_u8(target->space_runs, 1);
                 target->space_run_s = checkup_add_u32(target->space_run_s, st.run_s);
                 checkup_outdoor_merge(target->cycling_outdoor, st.run_outdoor);
+                const bool dfr_or_dhw =
+                    (stop_sample && ((stop_sample->defrost_known && stop_sample->defrost_on) ||
+                                     (stop_sample->valve_known && stop_sample->valve_dhw))) ||
+                    (st.prev_dfr_known && st.prev_dfr_on);
+                const bool overshoot =
+                    st.run_last_thermo_known && st.run_last_thermo_on &&
+                    st.run_last_r1t_ok && st.run_last_setpoint_ok &&
+                    st.run_last_r1t_tenths - st.run_last_setpoint_tenths >=
+                        CHECKUP_CYCLING_OVERSHOOT_TENTHS;
+                if (dfr_or_dhw) {
+                    target->stop_defrost_dhw = checkup_add_u8(target->stop_defrost_dhw, 1);
+                } else if (overshoot) {
+                    target->stop_overshoot = checkup_add_u8(target->stop_overshoot, 1);
+                } else if (st.run_thermo_seen_on && st.run_last_thermo_known &&
+                           !st.run_last_thermo_on) {
+                    target->stop_thermostat_cut = checkup_add_u8(target->stop_thermostat_cut, 1);
+                } else {
+                    target->stop_other = checkup_add_u8(target->stop_other, 1);
+                }
                 break;
+            }
             case CheckupRunClass::Cooling:
                 target->cooling_runs = checkup_add_u8(target->cooling_runs, 1);
                 break;
@@ -528,6 +574,10 @@ inline bool checkup_close_run(CheckupState& st, CheckupBucket& b, CheckupRing* r
     st.run_start_bucket = 0;
     st.run_s = 0;
     st.run_outdoor = CheckupOutdoorStats{};
+    st.run_thermo_seen_on = false;
+    st.run_last_thermo_known = st.run_last_thermo_on = false;
+    st.run_last_r1t_ok = st.run_last_setpoint_ok = false;
+    st.run_last_r1t_tenths = st.run_last_setpoint_tenths = 0;
     return reseal;
 }
 
@@ -1188,6 +1238,10 @@ inline bool checkup_step(CheckupState& st, CheckupBucket& b, const CheckupSample
             st.run_class_pure   = st.prev_rps_known && st.run_class != CheckupRunClass::Unknown;
             st.run_start_bucket = current_bucket;
             st.run_outdoor = CheckupOutdoorStats{};
+            st.run_thermo_seen_on = false;
+            st.run_last_thermo_known = st.run_last_thermo_on = false;
+            st.run_last_r1t_ok = st.run_last_setpoint_ok = false;
+            st.run_last_r1t_tenths = st.run_last_setpoint_tenths = 0;
         }
         // Carry the run in flight. A class input that stops answering or changes forfeits the class
         // but not the run: it still completes and is counted as censored. An unreadable compressor
@@ -1200,28 +1254,43 @@ inline bool checkup_step(CheckupState& st, CheckupBucket& b, const CheckupSample
             if (!s.rps_known) {
                 st.run_blind_s = checkup_add_u8(st.run_blind_s, dt);
                 if (!s.x10a_blind || st.run_blind_s > CHECKUP_MAX_GAP_S) st.run_class_pure = false;
-            } else if (s.rps_running) {
-                // A pure run after an unknown predecessor can only be resuming from that bounded
-                // pause; a start sample (known OFF before it) books no elapsed time.
-                if (was_running || (!st.prev_rps_known && st.run_class_pure))
-                    st.run_s = checkup_add_u32(st.run_s, dt + st.run_blind_s);
-                const CheckupRunClass current_class = checkup_run_class(s);
-                if (current_class == CheckupRunClass::Unknown || current_class != st.run_class)
-                    st.run_class_pure = false;
-                // Page 0x20 is read before the 0x30 compressor row and holds the previous run's
-                // values while the unit is idle, so only a sample whose predecessor was already
-                // running is fresh outdoor context.
-                if (was_running && st.run_class_pure &&
-                    st.run_class == CheckupRunClass::SpaceHeating)
-                    checkup_outdoor_add(st.run_outdoor, s.outdoor);
-                st.run_blind_s = 0;
+            } else {
+                if (s.thermo_known) {
+                    st.run_last_thermo_known = true;
+                    st.run_last_thermo_on = s.thermo_on;
+                    if (s.rps_running && s.thermo_on) st.run_thermo_seen_on = true;
+                }
+                if (s.r1t_ok && checkup_water_temp_plausible(s.r1t_tenths)) {
+                    st.run_last_r1t_ok = true;
+                    st.run_last_r1t_tenths = static_cast<int16_t>(s.r1t_tenths);
+                }
+                if (s.lwt_setpoint_ok && checkup_water_temp_plausible(s.lwt_setpoint_tenths)) {
+                    st.run_last_setpoint_ok = true;
+                    st.run_last_setpoint_tenths = static_cast<int16_t>(s.lwt_setpoint_tenths);
+                }
+                if (s.rps_running) {
+                    // A pure run after an unknown predecessor can only be resuming from that bounded
+                    // pause; a start sample (known OFF before it) books no elapsed time.
+                    if (was_running || (!st.prev_rps_known && st.run_class_pure))
+                        st.run_s = checkup_add_u32(st.run_s, dt + st.run_blind_s);
+                    const CheckupRunClass current_class = checkup_run_class(s);
+                    if (current_class == CheckupRunClass::Unknown || current_class != st.run_class)
+                        st.run_class_pure = false;
+                    // Page 0x20 is read before the 0x30 compressor row and holds the previous run's
+                    // values while the unit is idle, so only a sample whose predecessor was already
+                    // running is fresh outdoor context.
+                    if (was_running && st.run_class_pure &&
+                        st.run_class == CheckupRunClass::SpaceHeating)
+                        checkup_outdoor_add(st.run_outdoor, s.outdoor);
+                    st.run_blind_s = 0;
+                }
             }
         }
         // A known OFF completes every open run. With a known ON predecessor it is the normal edge;
         // after an unreadable sample it is still a completion, but necessarily censored.
         if (st.run_open && s.rps_known && !s.rps_running) {
             if (!rps_edge_known || !st.prev_rps_running) st.run_class_pure = false;
-            reseal |= checkup_close_run(st, b, ring, current_bucket);
+            reseal |= checkup_close_run(st, b, ring, current_bucket, &s);
         }
         if (st.prev_dfr_known && s.defrost_known && !st.prev_dfr_on && s.defrost_on) {
             b.defrosts = checkup_add_u8(b.defrosts, 1);
@@ -1294,6 +1363,10 @@ struct CheckupWindow {
     uint32_t space_run_s     = 0;
     uint32_t dhw_run_s       = 0;
     uint32_t space_runs      = 0;
+    uint32_t stop_overshoot      = 0;
+    uint32_t stop_thermostat_cut = 0;
+    uint32_t stop_defrost_dhw    = 0;
+    uint32_t stop_other          = 0;
     uint32_t dhw_runs        = 0;
     uint32_t cooling_runs    = 0;
     uint32_t censored_runs   = 0;
@@ -1337,6 +1410,10 @@ inline CheckupWindow checkup_aggregate(const CheckupRing& r) {
         w.space_run_s     += b.space_run_s;
         w.dhw_run_s       += b.dhw_run_s;
         w.space_runs      += b.space_runs;
+        w.stop_overshoot      += b.stop_overshoot;
+        w.stop_thermostat_cut += b.stop_thermostat_cut;
+        w.stop_defrost_dhw    += b.stop_defrost_dhw;
+        w.stop_other          += b.stop_other;
         w.dhw_runs        += b.dhw_runs;
         w.cooling_runs    += b.cooling_runs;
         w.censored_runs   += b.censored_runs;
@@ -1448,6 +1525,9 @@ struct CheckupCoverage {
     bool flow     = false;
     bool valve    = false;
     bool mode     = false;
+    bool thermo   = false;
+    bool r1t      = false;
+    bool lwt_setpoint = false;
     bool r5t      = false;
     bool fault    = false;   // any conv-203 row
     bool retries  = false;   // any exact protection-counter identity from def/overlay.hpp
@@ -1471,6 +1551,9 @@ inline void checkup_cover_row(CheckupCoverage& c, unsigned reg, unsigned off, in
     if (checkup_row_matches(CHECKUP_LOC_FLOW,     reg, off, conv)) c.flow = true;
     if (checkup_row_matches(CHECKUP_LOC_VALVE,    reg, off, conv)) c.valve = true;
     if (checkup_row_matches(CHECKUP_LOC_IU_MODE,  reg, off, conv)) c.mode = true;
+    if (checkup_row_matches(CHECKUP_LOC_IU_THERMO, reg, off, conv)) c.thermo = true;
+    if (checkup_row_matches(CHECKUP_LOC_R1T,      reg, off, conv)) c.r1t = true;
+    if (checkup_row_matches(CHECKUP_LOC_LWT_SETPOINT, reg, off, conv)) c.lwt_setpoint = true;
     if (checkup_row_matches(CHECKUP_LOC_R5T,      reg, off, conv)) c.r5t = true;
     if (checkup_is_fault_class(conv)) {
         c.fault = true;
@@ -1713,6 +1796,10 @@ struct CheckupReport {
     uint32_t          dhw_aborts = 0;
     uint32_t          dhw_best_aborted_s = 0;
     int32_t           cycling_cooling_runs = -1;
+    int32_t           cycling_stop_overshoot = -1;
+    int32_t           cycling_stop_thermostat = -1;
+    int32_t           cycling_stop_defrost_dhw = -1;
+    int32_t           cycling_stop_other = -1;
     CheckupOutdoorReport cycling_outdoor;
     CheckupOutdoorReport defrost_outdoor;
     // True only when completed, classified heating runs carry the heuristic. Pooled starts/runtime
@@ -1868,6 +1955,12 @@ inline CheckupReport checkup_evaluate(const CheckupWindow& w, const CheckupCover
     const int space_mean = w.space_runs ? static_cast<int>(w.space_run_s / w.space_runs) : -1;
     const int dhw_mean           = w.dhw_runs ? static_cast<int>(w.dhw_run_s / w.dhw_runs) : -1;
     r.cycling_cooling_runs       = class_witnessed ? static_cast<int32_t>(w.cooling_runs) : -1;
+    if (cov.rps && class_witnessed) {
+        r.cycling_stop_overshoot   = static_cast<int32_t>(w.stop_overshoot);
+        r.cycling_stop_thermostat  = static_cast<int32_t>(w.stop_thermostat_cut);
+        r.cycling_stop_defrost_dhw = static_cast<int32_t>(w.stop_defrost_dhw);
+        r.cycling_stop_other       = static_cast<int32_t>(w.stop_other);
+    }
     CheckupReason cycling_reason = CheckupReason::None;
     if (!cov.valve || !cov.mode)
         cycling_reason = CheckupReason::ClassUnavailable;

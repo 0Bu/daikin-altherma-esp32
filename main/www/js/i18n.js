@@ -352,6 +352,7 @@ const I18N = {
     "check.cycling_dhw": (a, b) => `hot water ${a} · mean ${b}`,
     "check.cycling_cooling": (n) => `cooling ${n} excluded`,
     "check.cycling_censored": (n) => `${n} unclassified`,
+    "check.cycling_stops": (a, b, c, d) => `stops: overshoot ${a} · thermostat ${b} · defrost/DHW ${c} · other ${d}`,
     "check.outdoor_one": (source, mean) => `${source} ${mean} °C`,
     "check.outdoor_range": (source, min, mean) => `${source} min ${min} °C · mean ${mean} °C`,
     "check.min": (m) => `${m} min`,

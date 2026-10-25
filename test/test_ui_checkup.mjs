@@ -45,7 +45,8 @@ for (const key of [
   "persist",
   "full_span", "available", "assessable", "evaluated", "evidence", "observed_s", "required_s",
   "starts", "mean_run_s", "count", "paired_count", "share_pct", "defrost_s", "run_s",
-  "space_runs", "space_mean_run_s", "dhw_runs", "dhw_mean_run_s", "cooling_runs",
+  "space_runs", "space_mean_run_s", "stop_overshoot_runs", "stop_thermostat_runs",
+  "stop_defrost_dhw_runs", "stop_other_runs", "dhw_runs", "dhw_mean_run_s", "cooling_runs",
   "censored_runs", "split",
   "outdoor_source", "outdoor_min_c", "outdoor_mean_c", "outdoor_samples",
   "min_bar", "current_bar", "min_unix_s", "confirmed_low", "min_l_min",
@@ -252,6 +253,16 @@ const cycling = {
   dhw_runs: 1, dhw_mean_run_s: 7200, cooling_runs: 0, censored_runs: 0,
 };
 assert.equal(ui.metric(cycling), "13 starts · heating 12 · mean 5 min · hot water 1 · mean 2 h");
+assert.equal(
+  ui.metric({
+    ...cycling,
+    stop_overshoot_runs: 7,
+    stop_thermostat_runs: 3,
+    stop_defrost_dhw_runs: 1,
+    stop_other_runs: 1,
+  }),
+  "13 starts · heating 12 · mean 5 min · stops: overshoot 7 · thermostat 3 · defrost/DHW 1 · other 1 · hot water 1 · mean 2 h",
+);
 assert.match(ui.detail(cycling), /≥12 completed heating runs average <10 min/);
 assert.match(ui.detail(cycling), /Only completed, continuously classified space-heating runs/);
 assert.doesNotMatch(ui.metric(cycling), /830|13 min|\/start/);

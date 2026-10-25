@@ -1,4 +1,4 @@
-// translation-source: 35f2b17396ef51dd6a1c1fe8b1c07561fe6a16c726430e5785295bdb9dfc18aa
+// translation-source: 5d3605b58bf1c8148c5d36a8c6202142d5b474d0d52a75e242b2503a67dec0e5
 I18N.ja = localeValues([
   /* sys.nodata */ "データなし",
   /* sys.unreachable */ "接続不可",
@@ -217,6 +217,7 @@ I18N.ja = localeValues([
   /* check.cycling_dhw */ (a, b) => `給湯 ${a} · 平均 ${b}`,
   /* check.cycling_cooling */ (n) => `冷房${n}件を除外`,
   /* check.cycling_censored */ (n) => `未分類${n}件`,
+  /* check.cycling_stops */ (a, b, c, d) => `停止: 超過${a} · サーモ${b} · 除霜/給湯${c} · 他${d}`,
   /* check.outdoor_one */ (source, mean) => `${source} ${mean} °C`,
   /* check.outdoor_range */ (source, min, mean) => `${source} 最低 ${min} °C · 平均 ${mean} °C`,
   /* check.min */ (m) => `${m}分`,
@@ -1069,7 +1070,7 @@ DESCRIPTION_I18N.ja = descriptionValues([
 MODEL_DESCRIPTION_I18N.ja = modelDescriptionValues([
   ["機器の通知。原因や解決の証明ではありません。"], // health_fault
   ["タンクセンサーR5T：単点、非エネルギー。内部基準0.8 K/h以上。約1.85 K/hは取湯として除外され得ます。循環の同時性は原因を証明しません。"], // health_dhw_loss
-  ["暖房完了≥12回、平均<10分；全完了運転の≥90%が分類済み。内部基準、Daikin限界ではありません。給湯・冷房・未分類は除外。"], // health_cycling
+  ["暖房完了≥12回、平均<10分；全完了運転の≥90%が分類済み、停止要因（超過≥+2.0 K・サーモ・除霜/給湯・他）を集計。内部基準、Daikin限界ではありません。給湯・冷房・未分類は除外。"], // health_cycling
   ["対応除霜≥3回、圧縮機と除霜の状態が両方読める圧縮機運転時間の>15%。内部基準、Daikin限界ではありません。湿度とコイル全体の温度なし。"], // health_defrost
   ["水圧：共通内部基準1.0 bar以下、連続観測60秒で警告。全機種共通ではなく対象説明書が基準。"], // health_pressure
   ["ポンプ60秒後の流量。限界は同機種・モード・条件が必要。設計値や不足の証明ではありません。"], // health_flow

@@ -728,8 +728,8 @@
         "taken": 6
       },
       "main/logic/checkup.hpp": {
-        "outcomes": 855,
-        "taken": 778
+        "outcomes": 909,
+        "taken": 830
       },
       "main/logic/checkup_persist.hpp": {
         "outcomes": 125,
@@ -1146,8 +1146,8 @@
         "taken": 8
       },
       "main/logic/checkup.hpp": {
-        "outcomes": 989,
-        "taken": 900
+        "outcomes": 1055,
+        "taken": 963
       },
       "main/logic/checkup_persist.hpp": {
         "outcomes": 153,
@@ -1564,8 +1564,8 @@
         "taken": 8
       },
       "main/logic/checkup.hpp": {
-        "outcomes": 989,
-        "taken": 900
+        "outcomes": 1055,
+        "taken": 963
       },
       "main/logic/checkup_persist.hpp": {
         "outcomes": 153,
@@ -1982,8 +1982,8 @@
         "taken": 8
       },
       "main/logic/checkup.hpp": {
-        "outcomes": 989,
-        "taken": 900
+        "outcomes": 1055,
+        "taken": 963
       },
       "main/logic/checkup_persist.hpp": {
         "outcomes": 153,

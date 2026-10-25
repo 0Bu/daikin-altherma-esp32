@@ -156,6 +156,7 @@ inline uint32_t checkup_layout_fingerprint() {
     crc = checkup_fp_u32(crc, CHECKUP_MAX_GAP_S);
     for (const CheckupLocator& l : {CHECKUP_LOC_BSH, CHECKUP_LOC_PUMP, CHECKUP_LOC_PRESSURE,
                                     CHECKUP_LOC_FLOW, CHECKUP_LOC_VALVE, CHECKUP_LOC_IU_MODE,
+                                    CHECKUP_LOC_IU_THERMO, CHECKUP_LOC_LWT_SETPOINT, CHECKUP_LOC_R1T,
                                     CHECKUP_LOC_R5T, CHECKUP_LOC_OUTDOOR,
                                     CHECKUP_LOC_DEFROST, CHECKUP_LOC_BUH1, CHECKUP_LOC_BUH2})
         crc = checkup_fp_loc(crc, l);
@@ -184,6 +185,7 @@ inline uint32_t checkup_layout_fingerprint() {
     crc = checkup_fp_u32(crc, CHECKUP_FLOW_RUNUP_S);
     crc = checkup_fp_u32(crc, static_cast<uint32_t>(CHECKUP_BAR_WARN_TENTHS));
     crc = checkup_fp_u32(crc, CHECKUP_PRESSURE_CONFIRM_S);
+    crc = checkup_fp_u32(crc, static_cast<uint32_t>(CHECKUP_CYCLING_OVERSHOOT_TENTHS));
     return config_crc32_final(crc);
 }
 

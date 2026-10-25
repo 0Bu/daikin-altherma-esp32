@@ -1474,6 +1474,11 @@ function checkupMetricValue(c) {
         ? t(key, n, "").split(" · ")[0] : t(key, n, checkupDuration(mean));
       const parts = [starts];
       parts.push(cls("check.cycling_space", c.space_runs, c.space_mean_run_s));
+      if (c.space_runs > 0 && c.stop_overshoot_runs != null && c.stop_thermostat_runs != null &&
+          c.stop_defrost_dhw_runs != null && c.stop_other_runs != null) {
+        parts.push(t("check.cycling_stops", c.stop_overshoot_runs, c.stop_thermostat_runs,
+                     c.stop_defrost_dhw_runs, c.stop_other_runs));
+      }
       parts.push(cls("check.cycling_dhw", c.dhw_runs, c.dhw_mean_run_s));
       if (c.cooling_runs > 0) parts.push(t("check.cycling_cooling", c.cooling_runs));
       // Runs that happened and could not be classified. Shown only when there are any: a reader who

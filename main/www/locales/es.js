@@ -1,4 +1,4 @@
-// translation-source: 35f2b17396ef51dd6a1c1fe8b1c07561fe6a16c726430e5785295bdb9dfc18aa
+// translation-source: 5d3605b58bf1c8148c5d36a8c6202142d5b474d0d52a75e242b2503a67dec0e5
 I18N.es = localeValues([
   /* sys.nodata */ "Sin datos",
   /* sys.unreachable */ "No accesible",
@@ -217,6 +217,7 @@ I18N.es = localeValues([
   /* check.cycling_dhw */ (a, b) => `ACS ${a} · media ${b}`,
   /* check.cycling_cooling */ (n) => `refrigeración: ${n === 1 ? "se excluyó 1" : `se excluyeron ${n}`}`,
   /* check.cycling_censored */ (n) => `${n} sin clasificar`,
+  /* check.cycling_stops */ (a, b, c, d) => `paradas: exceso ${a} · termostato ${b} · desescarche/ACS ${c} · otras ${d}`,
   /* check.outdoor_one */ (source, mean) => `${source} ${mean} °C`,
   /* check.outdoor_range */ (source, min, mean) => `${source} mín. ${min} °C · media ${mean} °C`,
   /* check.min */ (m) => `${m} min`,
@@ -1228,7 +1229,7 @@ DESCRIPTION_I18N.es = descriptionValues([
 MODEL_DESCRIPTION_I18N.es = modelDescriptionValues([
   ["Mensajes de la bomba; no prueban causa ni resolución."], // health_fault
   ["Sensor R5T: un punto, no energía. Regla interna ≥0,8 K/h; cerca de 1,85 K/h puede excluirse como extracción. Circulación no prueba causa."], // health_dhw_loss
-  ["≥12 ciclos de calefacción completos, media <10 min; ≥90% de todos los ciclos completos clasificados. Regla interna, no Daikin; excluye ACS, frío y no clasificados."], // health_cycling
+  ["≥12 ciclos de calefacción completos, media <10 min; ≥90% de todos los ciclos completos clasificados y paradas desglosadas (exceso ≥+2,0 K, termostato, desescarche/ACS, otras). Regla interna, no Daikin; excluye ACS, frío y no clasificados."], // health_cycling
   ["Desescarche: ≥3 asociados, >15% del tiempo de marcha del compresor con estados de compresor y desescarche legibles. Regla interna, no Daikin; faltan humedad y temperatura de toda la batería."], // health_defrost
   ["Presión: regla interna común ≤1,0 bar; 60 s continuos observados dan AVISO. No universal; rige el manual del modelo."], // health_pressure
   ["Caudal tras 60 s de bomba. El límite exige mismo modelo/modo/condiciones; no nominal ni prueba de flujo insuficiente."], // health_flow

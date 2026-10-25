@@ -1,4 +1,4 @@
-// translation-source: 35f2b17396ef51dd6a1c1fe8b1c07561fe6a16c726430e5785295bdb9dfc18aa
+// translation-source: 5d3605b58bf1c8148c5d36a8c6202142d5b474d0d52a75e242b2503a67dec0e5
 const plNoun = (n, one, few, many) => {
   const value = Math.abs(Number(n)), mod10 = value % 10, mod100 = value % 100;
   return value === 1 ? one
@@ -222,6 +222,7 @@ I18N.pl = localeValues([
   /* check.cycling_dhw */ (a, b) => `CWU ${a} · średnia ${b}`,
   /* check.cycling_cooling */ (n) => `chłodzenie: wykluczono ${n}`,
   /* check.cycling_censored */ (n) => `${n} ${plNoun(n, "niesklasyfikowany", "niesklasyfikowane", "niesklasyfikowanych")}`,
+  /* check.cycling_stops */ (a, b, c, d) => `stopy: przekrocz. ${a} · termostat ${b} · odszr./CWU ${c} · inne ${d}`,
   /* check.outdoor_one */ (source, mean) => `${source} ${mean} °C`,
   /* check.outdoor_range */ (source, min, mean) => `${source} min. ${min} °C · średnia ${mean} °C`,
   /* check.min */ (m) => `${m} min`,
@@ -1222,7 +1223,7 @@ DESCRIPTION_I18N.pl = descriptionValues([
 MODEL_DESCRIPTION_I18N.pl = modelDescriptionValues([
   ["Komunikaty pompy; nie dowodzą przyczyny ani naprawy."], // health_fault
   ["Czujnik R5T: punkt, nie energia. Reguła projektu ≥0,8 K/h; przy około 1,85 K/h możliwe odrzucenie jako pobór. Cyrkulacja nie dowodzi przyczyny."], // health_dhw_loss
-  ["≥12 pełnych cykli ogrzewania, średnia <10 min; ≥90% wszystkich zakończonych cykli sklasyfikowanych. Reguła projektu, nie Daikin; CWU, chłodzenie i nieklasyfikowane wykluczone."], // health_cycling
+  ["≥12 pełnych cykli ogrzewania, średnia <10 min; ≥90% wszystkich zakończonych cykli sklasyfikowanych oraz podział zatrzymań (przekroczenie ≥+2,0 K, termostat, odszranianie/CWU, inne). Reguła projektu, nie Daikin; CWU, chłodzenie i nieklasyfikowane wykluczone."], // health_cycling
   ["Odszranianie: ≥3 powiązane, >15% czasu pracy sprężarki przy czytelnych stanach sprężarki i odszraniania. Reguła projektu, nie Daikin; brak wilgotności i temperatury całego wymiennika."], // health_defrost
   ["Ciśnienie: wspólna reguła projektu ≤1,0 bar; 60 s ciągłej obserwacji daje ostrzeżenie. Nie uniwersalna; obowiązuje instrukcja modelu."], // health_pressure
   ["Przepływ po 60 s pompy. Limit wymaga tego samego modelu/trybu/warunków; nie nominalny ani dowód małego przepływu."], // health_flow
