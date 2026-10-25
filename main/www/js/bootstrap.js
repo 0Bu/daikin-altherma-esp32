@@ -42,9 +42,23 @@ function wire() {
     if (e.key === "Escape" && !$("otaModal").hidden) settleOtaDecision(false);
   });
 
+  const revealCardName = button => {
+    const nav = $("cardNav"), style = getComputedStyle(nav);
+    if (!button || style.overflowX !== "auto") return;
+    const bounds = nav.getBoundingClientRect(), rect = button.getBoundingClientRect();
+    const inset = parseFloat(style.paddingLeft) || 0;
+    const left = bounds.left + nav.clientLeft + inset;
+    const right = bounds.left + nav.clientLeft + nav.clientWidth - inset;
+    if (rect.left < left) nav.scrollLeft += rect.left - left;
+    else if (rect.right > right) nav.scrollLeft += rect.right - right;
+  };
+  $("cardNav").addEventListener("focusin", (e) => revealCardName(e.target.closest("[data-card]")));
   $("cardNav").addEventListener("click", (e) => {
     const button = e.target.closest("[data-card]");
-    if (button) selectDashboardCard(button.dataset.card);
+    if (button) {
+      selectDashboardCard(button.dataset.card);
+      revealCardName(button);
+    }
   });
 
   // The dashboard card panel (#valueGroups) is rebuilt on every poll, so its row controls

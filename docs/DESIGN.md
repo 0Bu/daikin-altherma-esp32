@@ -509,9 +509,11 @@ Below the schematic, card names select one detail card: Diagnostics first, then 
 groups below, followed by Modbus when available. Diagnostics is selected initially; if the selected
 card is absent, select the first available card. Selection stays local to the open page and survives
 polling, language changes and Settings visits. At widths of at least 650 px, a 202 px sidebar shows
-each name with its icon and a chevron for the selected card. The selection uses a rounded cyan-tint
-background and cyan text inside the shared bordered panel. On smaller screens, names wrap above
-the panel without icons or horizontal scrolling. The short Outdoor unit name opens the complete
+each name with its icon and a chevron for the selected card. The selected name uses cyan text on the
+detail card's surface, with a rounded outline opening into the card: to the right on desktop and
+downward on mobile. Both joins curve into the card with its 17 px corner radius. On smaller screens,
+names stay in one horizontally scrollable row above the panel without icons. Swipe the row to reveal another name,
+then tap it to select its card. The short Outdoor unit name opens the complete
 Refrigerant/outdoor card. Only available cards appear in the selection.
 
 Read groups in this order: Operation, Domestic hot water, Water circuit, Refrigerant/outdoor,
@@ -560,8 +562,8 @@ succeeded. Long-running failure reasons wrap and remain available until acknowle
 ## 9. Responsive & accessibility
 
 The schematic and Settings cards remain a centred single column; dashboard details use §6's
-selectable panel. The page never scrolls horizontally; wide schematic/table
-content scrolls within its card. Keep value plus unit together. When label and value no longer fit,
+selectable panel. The page never scrolls horizontally; the mobile card selector and wide schematic/table
+content scroll within their own containers. Keep value plus unit together. When label and value no longer fit,
 stack the value below/right rather than squeeze labels to single-character columns. Inspector
 headings wrap by content; value labels keep their defined share. Split Settings actions own their
 padding and cannot overlap when stacked. Measure every shipped locale at 320 px.

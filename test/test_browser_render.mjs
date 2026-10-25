@@ -37,12 +37,20 @@ const layoutAudit = `(() => {
   for (const el of document.querySelectorAll("body *")) {
     if (!shown(el) || el.closest(".schem-scroll")) continue;
     const rect = el.getBoundingClientRect();
-    if (rect.left < -1 || rect.right > innerWidth + 1) outside.push(describe(el));
+    // The mobile card picker intentionally clips offscreen names inside its own horizontal
+    // scroller. Audit their visible intersection; the scroller and page still obey viewport bounds.
+    const nav = el.closest("#cardNav");
+    const clip = nav && nav !== el && ["auto", "scroll"].includes(getComputedStyle(nav).overflowX)
+      ? nav.getBoundingClientRect() : null;
+    const left = clip ? Math.max(rect.left, clip.left) : rect.left;
+    const right = clip ? Math.min(rect.right, clip.right) : rect.right;
+    if (right < left) continue;
+    if (left < -1 || right > innerWidth + 1) outside.push(describe(el));
   }
   const clipped = [];
   const candidates = document.querySelectorAll(
     "button, [role=button], [role=dialog], .field-label, .field-help, .hint, .section-label, " +
-    ".hdr-title, .hdr-name, .conn-label, .conn-value, .vrow-label, .vrow-val, .ota-alert-message, " +
+    ".hdr-title, .hdr-name, .conn-label, .conn-value, .vrow-label, .vrow-val, .dashboard-card-label, .ota-alert-message, " +
     ".recovery-banner .crash-title, .recovery-banner .crash-meta, " +
     "#valueGroups .vitem.open .vdesc-inner, #valueGroups .vitem.open .vdesc-body, " +
     "#valueGroups .vitem.open .vdesc-p"
@@ -524,6 +532,14 @@ async function assertDashboardCardAppearance(page, context, viewport) {
       const icon = button.querySelector("svg.dashboard-card-icon");
       const label = button.querySelector("span.dashboard-card-label");
       const chevron = button.querySelector("svg.dashboard-card-chevron");
+      const buttonRect = button.getBoundingClientRect(), labelRect = label?.getBoundingClientRect();
+      const fillet = pseudo => {
+        const decoration = getComputedStyle(button, pseudo);
+        return { content: decoration.content, width: decoration.width, height: decoration.height,
+          position: decoration.position, pointerEvents: decoration.pointerEvents,
+          left: decoration.left, right: decoration.right, top: decoration.top, bottom: decoration.bottom,
+          background: decoration.backgroundImage };
+      };
       return { key: button.dataset.card, pressed: button.getAttribute("aria-pressed"),
         hovered: button.matches(":hover"),
         structure: !!icon && !!label && !!chevron &&
@@ -538,12 +554,22 @@ async function assertDashboardCardAppearance(page, context, viewport) {
         chevronOpacity: chevron ? getComputedStyle(chevron).opacity : null,
         iconWidth: icon?.getBoundingClientRect().width,
         chevronWidth: chevron?.getBoundingClientRect().width,
+        labelFits: !!label && label.scrollWidth <= label.clientWidth + 1 &&
+          labelRect.left >= buttonRect.left + parseFloat(style.paddingLeft) - 1 &&
+          labelRect.right <= buttonRect.right - parseFloat(style.paddingRight) + 1,
+        labelWhiteSpace: label ? getComputedStyle(label).whiteSpace : null,
+        shrink: style.flexShrink,
         color: style.color, background: style.backgroundColor, weight: style.fontWeight,
-        fontSize: style.fontSize, lineHeight: style.lineHeight, radius: style.borderRadius,
+        fontSize: style.fontSize, lineHeight: style.lineHeight,
+        radii: [style.borderTopLeftRadius, style.borderTopRightRadius,
+          style.borderBottomRightRadius, style.borderBottomLeftRadius],
         minHeight: style.minHeight, gap: style.gap,
         padding: [style.paddingTop, style.paddingRight, style.paddingBottom, style.paddingLeft],
         borders: [style.borderTopWidth, style.borderRightWidth, style.borderBottomWidth, style.borderLeftWidth],
-        shadow: style.boxShadow, before: getComputedStyle(button, "::before").content };
+        borderColors: [style.borderTopColor, style.borderRightColor, style.borderBottomColor, style.borderLeftColor],
+        width: buttonRect.width, right: buttonRect.right, bottom: buttonRect.bottom,
+        marginBottom: style.marginBottom, shadow: style.boxShadow,
+        before: fillet("::before"), after: fillet("::after") };
     };
     return { dark: matchMedia("(prefers-color-scheme: dark)").matches,
       coarse: matchMedia("(pointer: coarse)").matches,
@@ -554,37 +580,52 @@ async function assertDashboardCardAppearance(page, context, viewport) {
         colors: [shellStyle.borderTopColor, shellStyle.borderRightColor,
           shellStyle.borderBottomColor, shellStyle.borderLeftColor] },
       nav: { width: nav.getBoundingClientRect().width, background: navStyle.backgroundColor,
-        gap: navStyle.gap,
+        gap: navStyle.gap, wrap: navStyle.flexWrap, overflowX: navStyle.overflowX,
+        shadow: navStyle.boxShadow, scrollbar: navStyle.scrollbarWidth,
         padding: [navStyle.paddingTop, navStyle.paddingRight, navStyle.paddingBottom, navStyle.paddingLeft] },
+      content: { left: document.getElementById("valueGroups").getBoundingClientRect().left,
+        top: document.getElementById("valueGroups").getBoundingClientRect().top },
       buttons: buttons.map(readButton) };
   })()`);
   assert.equal(appearance.desktop, viewport.width >= 650, `${context}: prototype breakpoint is 650 px`);
   const colors = appearance.dark
-    ? { nav: "rgb(29, 37, 45)", border: "rgb(57, 67, 77)", selected: "rgb(25, 62, 80)",
+    ? { nav: "rgb(29, 37, 45)", border: "rgb(57, 67, 77)", selected: "rgb(34, 43, 51)",
       activeText: "rgb(108, 201, 238)", normalText: "rgb(172, 182, 193)" }
-    : { nav: "rgb(248, 250, 251)", border: "rgb(228, 232, 236)", selected: "rgb(229, 244, 250)",
+    : { nav: "rgb(248, 250, 251)", border: "rgb(228, 232, 236)", selected: "rgb(255, 255, 255)",
       activeText: "rgb(19, 143, 186)", normalText: "rgb(108, 118, 129)" };
   assert.deepEqual(appearance.shell, { radius: "17px", widths: Array(4).fill("1px"),
     colors: Array(4).fill(colors.border) }, `${context}: prototype outer border is thin, complete and rounded`);
   assert.equal(appearance.nav.background, colors.nav, `${context}: prototype sidebar surface`);
   assert.equal(appearance.nav.gap, appearance.desktop ? "3px" : "5px", `${context}: prototype name spacing`);
-  assert.deepEqual(appearance.nav.padding, appearance.desktop ? ["12px", "9px", "12px", "9px"]
-    : Array(4).fill("10px"), `${context}: prototype sidebar padding`);
+  assert.deepEqual(appearance.nav.padding, appearance.desktop ? ["17px", "9px", "17px", "9px"]
+    : ["10px", "17px", "0px", "17px"], `${context}: padding reserves the curved tab joins`);
   if (appearance.desktop) assert.equal(appearance.nav.width, 202, `${context}: desktop sidebar is 202 px wide`);
+  assert.equal(appearance.nav.wrap, "nowrap", `${context}: names remain in one desktop column or mobile row`);
+  assert.equal(appearance.nav.overflowX, appearance.desktop ? "visible" : "auto",
+    `${context}: horizontal overflow belongs to the mobile name scroller`);
+  if (appearance.desktop) assert.equal(appearance.nav.shadow, "none", `${context}: desktop uses its vertical seam`);
+  else {
+    assert.equal(appearance.nav.scrollbar, "none", `${context}: mobile scrollbar is hidden locally`);
+    assert.match(appearance.nav.shadow, /inset/, `${context}: mobile seam is an inset bottom line`);
+    assert.ok(appearance.nav.shadow.includes(colors.border), `${context}: mobile seam uses the frame colour`);
+  }
+  const normalWidth = appearance.buttons.find(button => button.pressed !== "true")?.width;
   for (const button of appearance.buttons) {
     const name = `${context}/${button.key}`;
     assert.equal(button.structure, true, `${name}: icon, actual name and trailing chevron are distinct elements`);
     assert.equal(button.decorative, true, `${name}: icon and chevron must stay decorative`);
+    assert.equal(button.labelFits, true, `${name}: the complete name fits its own button`);
+    assert.equal(button.labelWhiteSpace, appearance.desktop ? "normal" : "nowrap",
+      `${name}: desktop labels may wrap while mobile names remain on one line`);
+    assert.equal(button.shrink, "0", `${name}: card names do not shrink away`);
     assert.equal(button.fontSize, appearance.desktop ? "14px" : "12px", `${name}: prototype label size`);
     assert.equal(button.lineHeight, appearance.desktop ? "17.5px" : "15px", `${name}: prototype label line height`);
     assert.equal(button.minHeight, appearance.coarse ? "44px" : "40px", `${name}: readable pointer/touch target`);
-    assert.equal(button.radius, "9px", `${name}: prototype selection radius`);
-    assert.deepEqual(button.borders, Array(4).fill("0px"), `${name}: selection must not add a button border`);
     assert.equal(button.shadow, "none", `${name}: selected state uses the rounded fill without an inset side strip`);
-    assert.ok(["none", "normal"].includes(button.before), `${name}: no decorative side-strip pseudo-element`);
     assert.equal(button.gap, appearance.desktop ? "10px" : "0px", `${name}: prototype icon/name spacing`);
     assert.deepEqual(button.padding, appearance.desktop ? ["10px", "12px", "10px", "12px"]
-      : ["9px", "10px", "9px", "10px"], `${name}: prototype button padding`);
+      : ["9px", "10px", button.pressed === "true" ? "20px" : "9px", "10px"],
+    `${name}: selected mobile tab extends to the panel while its name keeps the baseline`);
     if (appearance.desktop) {
       assert.equal(button.iconDisplay, "block", `${name}: desktop shows its icon`);
       assert.equal(button.chevronDisplay, "block", `${name}: desktop reserves the trailing chevron`);
@@ -597,14 +638,185 @@ async function assertDashboardCardAppearance(page, context, viewport) {
       assert.equal(button.chevronDisplay, "none", `${name}: mobile names omit chevrons`);
     }
     if (button.pressed === "true") {
-      assert.equal(button.background, colors.selected, `${name}: prototype blue selected fill`);
+      assert.equal(button.background, colors.selected, `${name}: selected tab shares the content surface`);
       assert.equal(button.color, colors.activeText, `${name}: prototype selected foreground`);
       assert.equal(button.weight, "650", `${name}: prototype selected weight`);
+      const borders = appearance.desktop ? ["1px", "0px", "1px", "1px"] : ["1px", "1px", "0px", "1px"];
+      assert.deepEqual(button.borders, borders, `${name}: the selected outline opens into the content panel`);
+      assert.deepEqual(button.radii, appearance.desktop ? ["9px", "0px", "0px", "9px"]
+        : ["9px", "9px", "0px", "0px"], `${name}: outside corners round while the joined edge stays open`);
+      for (let index = 0; index < borders.length; index++) if (borders[index] !== "0px")
+        assert.equal(button.borderColors[index], colors.border, `${name}: visible outline matches the frame`);
+      assert.equal(button.marginBottom, "0px", `${name}: selected tab reaches the seam without a lower gap`);
+      assert.ok(Math.abs((appearance.desktop ? button.right : button.bottom) -
+        (appearance.desktop ? appearance.content.left : appearance.content.top)) <= 1,
+      `${name}: open tab edge touches the content panel`);
+      if (appearance.desktop) assert.ok(Math.abs(button.width - normalWidth - 10) <= 1,
+        `${name}: selected desktop tab extends through the ten-pixel sidebar seam`);
+      for (const decoration of [button.before, button.after]) {
+        assert.deepEqual([decoration.content, decoration.position, decoration.pointerEvents,
+          decoration.width, decoration.height], ['""', "absolute", "none", "17px", "17px"],
+        `${name}: non-interactive seventeen-pixel fillets round the two inside corners`);
+        assert.match(decoration.background, /radial-gradient/, `${name}: join fillets are inverse quarter circles`);
+        assert.ok(decoration.background.includes("16px") && decoration.background.includes("17px") &&
+          decoration.background.includes(colors.border) && decoration.background.includes(colors.selected),
+        `${name}: fillet geometry shares the one-pixel outline and content surface`);
+      }
+      assert.deepEqual(appearance.desktop
+        ? [button.before.right, button.before.top, button.after.right, button.after.bottom]
+        : [button.before.left, button.before.bottom, button.after.right, button.after.bottom],
+      appearance.desktop ? ["0px", "-17px", "0px", "-17px"] : ["-17px", "0px", "-17px", "0px"],
+      `${name}: both fillets meet the open tab edge`);
     } else {
+      assert.deepEqual(button.borders, Array(4).fill("1px"), `${name}: inactive border reserves stable name geometry`);
+      assert.deepEqual(button.radii, Array(4).fill("9px"), `${name}: inactive names retain their rounded corners`);
+      assert.equal(button.marginBottom, appearance.desktop ? "0px" : "10px", `${name}: inactive mobile names clear the panel seam`);
+      assert.ok(["none", "normal"].includes(button.before.content) && ["none", "normal"].includes(button.after.content),
+        `${name}: only the selected tab draws join fillets`);
       assert.equal(button.weight, "500", `${name}: prototype inactive weight`);
       if (!button.hovered) assert.equal(button.color, colors.normalText, `${name}: prototype inactive foreground`);
     }
   }
+}
+
+async function assertMobileCardScroller(page, context, current) {
+  const first = '#cardNav button[data-card="diagnosis"]';
+  const last = '#cardNav button[data-card="modbus"]';
+  const visible = selector => `(() => {
+    const nav = document.getElementById("cardNav").getBoundingClientRect();
+    const button = document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect();
+    return button.left >= nav.left - 1 && button.right <= nav.right + 1;
+  })()`;
+  await page.evaluate(`(() => {
+    document.querySelector(${JSON.stringify(first)}).focus();
+    document.activeElement.blur();
+    document.getElementById("cardNav").scrollIntoView({ block: "center", behavior: "instant" });
+    return true;
+  })()`);
+  await page.frame();
+  const dimensions = await page.evaluate(`(() => {
+    const nav = document.getElementById("cardNav");
+    return { overflow: nav.scrollWidth - nav.clientWidth, width: nav.clientWidth,
+      lines: new Set(Array.from(nav.querySelectorAll("button"),
+        button => Math.round(button.getBoundingClientRect().top))).size };
+  })()`);
+  assert.equal(dimensions.lines, 1, `${context}: every mobile name stays in one horizontal row`);
+  assert.ok(dimensions.overflow > dimensions.width,
+    `${context}: fixture has enough names to prove real horizontal navigation`);
+  assert.equal(await page.evaluate(visible(last)), false, `${context}: last Modbus starts offscreen`);
+
+  const swipe = async direction => {
+    const before = await page.evaluate('document.getElementById("cardNav").scrollLeft');
+    const points = await page.evaluate(`(() => {
+      const rect = document.getElementById("cardNav").getBoundingClientRect();
+      return { left: rect.left + 25, right: rect.right - 25, y: rect.top + rect.height / 2 };
+    })()`);
+    const from = direction > 0 ? points.right : points.left;
+    const to = direction > 0 ? points.left : points.right;
+    const touch = x => ({ x, y: points.y, id: 1, radiusX: 1, radiusY: 1, force: 1 });
+    await page.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [touch(from)] });
+    for (const fraction of [0.25, 0.5, 0.75, 1])
+      await page.send("Input.dispatchTouchEvent", { type: "touchMove",
+        touchPoints: [touch(from + (to - from) * fraction)] });
+    await page.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+    await page.waitFor(`(() => {
+      const nav = document.getElementById("cardNav"), delta = nav.scrollLeft - ${before};
+      return delta * ${direction} > 10 || (delta * ${direction} > 0 &&
+        (${direction} > 0 ? nav.scrollLeft >= nav.scrollWidth - nav.clientWidth - 1 : nav.scrollLeft <= 1));
+    })()`, { timeoutMs: 2000 });
+  };
+  await swipe(1);
+  await swipe(-1);
+  assert.equal((await current()).key, "diagnosis", `${context}: swiping names does not select a different card`);
+  const swipeBudget = Math.ceil(dimensions.overflow / Math.max(1, dimensions.width - 50)) + 2;
+  for (let count = 0; count < swipeBudget && !await page.evaluate(visible(last)); count++) await swipe(1);
+  await page.waitFor(visible(last));
+  await page.evaluate('document.activeElement?.blur?.(); true');
+  await captureNativeEvidence(page, `${context}/swiped-last`, "cardBrowser");
+
+  // A native horizontal wheel/trackpad gesture must use the same contained scroller.
+  await page.evaluate(`document.querySelector(${JSON.stringify(first)}).focus(); document.activeElement.blur(); true`);
+  const wheel = await page.evaluate(`(() => {
+    const nav = document.getElementById("cardNav"), rect = nav.getBoundingClientRect();
+    return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2, deltaX: nav.scrollWidth };
+  })()`);
+  await page.send("Input.dispatchMouseEvent", { type: "mouseWheel", deltaY: 0, ...wheel });
+  await page.waitFor(visible(last));
+  const tap = await page.evaluate(`(() => {
+    const rect = document.querySelector(${JSON.stringify(last)}).getBoundingClientRect();
+    return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2, id: 1 };
+  })()`);
+  await page.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [tap] });
+  await page.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+  await page.waitFor('S.dashboardCard === "modbus"');
+  assert.deepEqual(await current(), { key: "modbus", selected: ["modbus"], visible: ["modbus"], labelled: true },
+    `${context}: native tap on the revealed last name selects its actual card`);
+  const beforePoll = await page.evaluate('document.getElementById("cardNav").scrollLeft');
+  const repaintedValue = await page.evaluate(`(() => {
+    S.clickHold = false; S._values[0].value = "13"; renderApp();
+    return document.querySelector('#valueGroups [data-dashboard-card="group:Operation"] .vrow-val')
+      ?.childNodes[0]?.textContent.trim();
+  })()`);
+  assert.equal(repaintedValue, "13", `${context}: changed-value poll really installs a new values frame`);
+  assert.equal((await current()).key, "modbus", `${context}: selected card survives a changed-value poll repaint`);
+  const afterPoll = await page.evaluate('document.getElementById("cardNav").scrollLeft');
+  assert.ok(Math.abs(afterPoll - beforePoll) <= 1, `${context}: poll repaint preserves horizontal position`);
+  assertLayout(await page.evaluate(layoutAudit), `${context}/scrolled-last`);
+
+  // Browser keyboard focus must reveal names without a test-side scrollIntoView call.
+  await page.evaluate(`document.querySelector(${JSON.stringify(first)}).focus(); true`);
+  const keys = await page.evaluate('Array.from(document.querySelectorAll("#cardNav button"), button => button.dataset.card)');
+  for (const key of keys.slice(1)) {
+    await page.key("Tab", { code: "Tab", keyCode: 9 });
+    assert.equal(await page.evaluate('document.activeElement?.dataset.card'), key,
+      `${context}: Tab reaches ${key} in reading order`);
+  }
+  await page.waitFor(visible(last), { timeoutMs: 2000 });
+  assert.equal(await page.evaluate(visible(last)), true, `${context}: keyboard focus scrolls the last name into view`);
+  const modbusLength = await page.evaluate('S._modbus.length');
+  const readerPosition = await page.evaluate(`(() => {
+    S.clickHold = false;
+    S._modbus.push(...Array.from({ length: 40 }, (_, index) => ({ off: 1000 + index,
+      label: "Fixture long-card reading " + index, value: index, unit: "°C", profile: "altherma4" })));
+    renderApp();
+    window.scrollTo(0, document.documentElement.scrollHeight - innerHeight);
+    return { y: scrollY, navBottom: document.getElementById("cardNav").getBoundingClientRect().bottom };
+  })()`);
+  assert.ok(readerPosition.y > 100 && readerPosition.navBottom < 0,
+    `${context}: fixture really places the reader down a long card while the nav keeps keyboard focus`);
+  await page.evaluate(`(() => {
+    window.__browserCardFocusBeforeMembership = document.activeElement;
+    S.clickHold = false;
+    S._values.push({ group: "Fixture additional source", label: "Fixture extra", value: "1" });
+    renderApp(); return true;
+  })()`);
+  assert.equal(await page.evaluate(`!!document.querySelector(
+    '#cardNav button[data-card="group:Fixture additional source"]')`), true,
+    `${context}: added source actually rebuilds the installed navigation`);
+  assert.equal(await page.evaluate('document.activeElement !== window.__browserCardFocusBeforeMembership'), true,
+    `${context}: membership repaint replaces the previously focused button`);
+  assert.equal(await page.evaluate('document.activeElement?.dataset.card'), "modbus",
+    `${context}: membership rebuild restores focus to the same source`);
+  await page.waitFor(visible(last), { timeoutMs: 2000 });
+  assert.equal(await page.evaluate(visible(last)), true,
+    `${context}: restored focus is visible after the horizontal navigation rebuild`);
+  assert.ok(Math.abs(await page.evaluate("scrollY") - readerPosition.y) <= 1,
+    `${context}: restoring nav focus does not move the reader vertically up the long card`);
+  await page.evaluate('S.clickHold = false; S._values.pop(); renderApp(); delete window.__browserCardFocusBeforeMembership; true');
+  assert.equal(await page.evaluate(`!!document.querySelector(
+    '#cardNav button[data-card="group:Fixture additional source"]')`), false,
+    `${context}: removed source really disappears from the installed navigation`);
+  await page.waitFor(visible(last), { timeoutMs: 2000 });
+  assert.equal(await page.evaluate(visible(last)), true, `${context}: removing the extra source keeps focused Modbus visible`);
+  assert.ok(Math.abs(await page.evaluate("scrollY") - readerPosition.y) <= 1,
+    `${context}: removing a source also preserves the reader's vertical position`);
+  await page.evaluate(`S.clickHold = false; S._modbus.splice(${modbusLength}); renderApp(); true`);
+  // Capture the settled selection after the native focus/rebuild checks, so a transient browser
+  // tap highlight is not mistaken for the card's persistent selected styling.
+  await page.evaluate('document.activeElement?.blur?.(); true');
+  await page.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: 0, y: 0 });
+  await page.frame();
+  await captureNativeEvidence(page, `${context}/tapped-modbus`, "cardBrowser");
 }
 
 async function assertDashboardCardNavigation(page, context, viewport) {
@@ -612,6 +824,8 @@ async function assertDashboardCardNavigation(page, context, viewport) {
   const groups = ["Operation", "Domestic hot water", "Water circuit", "Refrigerant / outdoor",
     "Protection", "Electrical", "Device", "Other values", customGroup];
   const expected = ["diagnosis", "model", ...groups.map(group => `group:${group}`), "modbus"];
+  const mobile = viewport.width < 650;
+  await page.send("Emulation.setTouchEmulationEnabled", { enabled: mobile, maxTouchPoints: 1 });
   await page.evaluate(`(() => {
     window.__browserCardsOriginal = { ...S };
     window.__browserCardsFetch = window.fetch;
@@ -670,8 +884,10 @@ async function assertDashboardCardNavigation(page, context, viewport) {
     })()`);
     assert.equal(viewport.name === "phone" ? placement.above : placement.left, true,
       `${context}: navigation is ${viewport.name === "phone" ? "above the card" : "left of the card"}`);
-    if (viewport.name === "phone") assert.ok(placement.lines > 1,
-      `${context}: mobile names wrap into visible rows without a horizontal tab scroller`);
+    if (mobile) {
+      assert.equal(placement.lines, 1, `${context}: mobile names occupy exactly one horizontally scrollable row`);
+      await assertMobileCardScroller(page, context, current);
+    }
 
     for (const key of expected) {
       await clickElement(page, `#cardNav button[data-card=${JSON.stringify(key)}]`);
@@ -679,6 +895,10 @@ async function assertDashboardCardNavigation(page, context, viewport) {
         `${context}/${key}: native click shows exactly the requested card`);
       assertLayout(await page.evaluate(layoutAudit), `${context}/${key}`);
     }
+    await clickElement(page, '#cardNav button[data-card="group:Water circuit"]');
+    await assertDashboardCardAppearance(page, `${context}/middle-water`, viewport);
+    await page.evaluate("document.activeElement?.blur?.(); true");
+    await captureNativeEvidence(page, `${context}/middle-water`, "cardBrowser");
     // A pending disclosure click or active trend must not make card navigation appear unresponsive.
     await page.evaluate('S.clickHold = true; S.scrub = "fixture-trend"; true');
     await clickElement(page, '#cardNav button[data-card="model"]');
@@ -713,6 +933,7 @@ async function assertDashboardCardNavigation(page, context, viewport) {
       S.inspSig = null; S.inspHistSig = null;
       renderApp(); window.scrollTo(0, 0); return true;
     })()`);
+    await page.send("Emulation.setTouchEmulationEnabled", { enabled: false });
     await page.frame();
   }
 }
@@ -1411,18 +1632,20 @@ try {
     for (const scheme of ["light", "dark"]) {
       await page.send("Emulation.setEmulatedMedia", { media: "screen",
         features: [{ name: "prefers-color-scheme", value: scheme }] });
-      for (const viewport of viewports) {
+      const focusedViewports = viewports.flatMap(viewport => viewport.name === "phone"
+        ? [viewport, { name: "phone", width: 390, height: 844 }] : [viewport]);
+      for (const viewport of focusedViewports) {
         await page.viewport(viewport.width, viewport.height);
         for (const locale of ["en", "de"]) {
           await activateLocale(page, locale);
           await page.evaluate("showStage('dashboard'); window.scrollTo(0, 0); true");
-          await assertDashboardCardNavigation(page, `${viewport.name}/${locale}/card-navigation/${scheme}`, viewport);
-          console.log(`card prototype checked: ${viewport.name}/${locale}/${scheme}`);
+          await assertDashboardCardNavigation(page, `${viewport.name}/${locale}/card-navigation/${viewport.width}/${scheme}`, viewport);
+          console.log(`card prototype checked: ${viewport.name}/${viewport.width}/${locale}/${scheme}`);
         }
       }
     }
     assert.deepEqual(page.diagnostics, [], "prototype card states must emit no browser errors");
-    console.log("focused card prototype rendering passed: 2 locales; 2 themes; " + viewports.length + " viewports");
+    console.log("focused card prototype rendering passed: 2 locales; 2 themes; native scrolling at 320/390 px and desktop parity");
   } else if (process.argv.includes("--setup-only")) {
     for (const viewport of viewports) await assertSetup(page, server, viewport);
   } else if (process.argv.includes("--diagnosis-only")) {
@@ -1660,7 +1883,7 @@ try {
   for (const viewport of viewports) await assertSetup(page, server, viewport);
   console.log(`browser render gate passed: ${browser.product}; ${browserLocales.length} locales; ` +
     `${viewports.length} viewports; native AX + keyboard on dashboard/settings/all routed modals; ` +
-    "compact cards + wrapped mobile navigation + native pointer/keyboard selection; " +
+    "connected card tabs + single-row mobile swipe/wheel navigation + native pointer/keyboard selection; " +
     "native Altherma 4 numeric metadata + localized pointer-opened accordions; " +
     "Hybrid room source + pointer-opened inspector + honest absence; " +
     "bounded real History roundtrips; reduced motion on dashboard/settings/WiFi/progress/disclosures");
