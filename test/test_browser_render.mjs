@@ -682,6 +682,12 @@ async function assertMobileCardScroller(page, context, current) {
     try {
       return await page.evaluate(`({ hidden: document.hidden, visibility: document.visibilityState,
         scrollLeft: document.getElementById("cardNav")?.scrollLeft,
+        max: (() => { const nav = document.getElementById("cardNav");
+          return nav && nav.scrollWidth - nav.clientWidth; })(),
+        lastBounds: (() => { const nav = document.getElementById("cardNav");
+          const button = nav?.lastElementChild; if (!button) return null;
+          const n = nav.getBoundingClientRect(), b = button.getBoundingClientRect();
+          return { nav: [n.left, n.right], button: [b.left, b.right] }; })(),
         focused: document.activeElement?.dataset?.card, width: innerWidth })`);
     } catch (error) { return { unavailable: error.message }; }
   };
@@ -734,12 +740,42 @@ async function assertMobileCardScroller(page, context, current) {
     `${context}: fixture has enough names to prove real horizontal navigation`);
   assert.equal(await page.evaluate(visible(last)), false, `${context}: last Modbus starts offscreen`);
 
-  const swipe = async direction => {
-    const before = await page.evaluate('document.getElementById("cardNav").scrollLeft');
-    const points = await page.evaluate(`(() => {
-      const rect = document.getElementById("cardNav").getBoundingClientRect();
-      return { left: rect.left + 25, right: rect.right - 25, y: rect.top + rect.height / 2 };
+  const nativeScroll = async (stage, direction, gesture) => {
+    await foregroundTouch(stage);
+    const before = await page.evaluate(`(() => {
+      const nav = document.getElementById("cardNav"), rect = nav.getBoundingClientRect();
+      const state = { moved: false, ended: false, controller: new AbortController() };
+      nav.__browserCardScroll = state;
+      nav.addEventListener("scroll", () => { state.moved = true; state.ended = false; },
+        { signal: state.controller.signal });
+      nav.addEventListener("scrollend", () => { if (state.moved) state.ended = true; },
+        { signal: state.controller.signal });
+      return { x: nav.scrollLeft, max: nav.scrollWidth - nav.clientWidth,
+        left: rect.left + 25, right: rect.right - 25, y: rect.top + rect.height / 2 };
     })()`);
+    try {
+      assert.ok((direction > 0 ? before.max - before.x : before.x) > 0,
+        `${context}/${stage}: a native gesture requires remaining scroll room in its direction`);
+      await gesture(before);
+      // touchEnd acknowledges delivery, not the end of the compositor's inertial fling. Waiting
+      // only for the first delta can race the next visibility check and start a swipe at max.
+      // A real scrollend settles that gesture before another direction or endpoint is sampled.
+      await page.waitFor(`(() => {
+        const nav = document.getElementById("cardNav"), delta = nav.scrollLeft - ${before.x};
+        return nav.__browserCardScroll?.moved && nav.__browserCardScroll.ended &&
+          (delta * ${direction} > 10 || (delta * ${direction} > 0 &&
+          (${direction} > 0 ? nav.scrollLeft >= nav.scrollWidth - nav.clientWidth - 1 : nav.scrollLeft <= 1)));
+      })()`, { timeoutMs: 2000 });
+      if (traceTouch) console.log(`native scroll ${context}/${stage}/settled`, JSON.stringify(await touchState()));
+    } catch (error) {
+      throw new Error(`${context}/${stage}: native scrolling failed from ${JSON.stringify(before)}; ` +
+        `${JSON.stringify(await touchState())}; ${error.message}`, { cause: error });
+    } finally {
+      await page.evaluate(`(() => { const nav = document.getElementById("cardNav");
+        nav.__browserCardScroll?.controller.abort(); delete nav.__browserCardScroll; return true; })()`);
+    }
+  };
+  const swipe = async direction => nativeScroll(`swipe-${direction > 0 ? "right" : "left"}`, direction, async points => {
     const from = direction > 0 ? points.right : points.left;
     const to = direction > 0 ? points.left : points.right;
     const touch = x => ({ x, y: points.y, id: 1, radiusX: 1, radiusY: 1, force: 1 });
@@ -749,12 +785,14 @@ async function assertMobileCardScroller(page, context, current) {
         touchPoints: [touch(from + (to - from) * fraction)] })),
       { type: "touchEnd", touchPoints: [] },
     ]);
-    await page.waitFor(`(() => {
-      const nav = document.getElementById("cardNav"), delta = nav.scrollLeft - ${before};
-      return delta * ${direction} > 10 || (delta * ${direction} > 0 &&
-        (${direction} > 0 ? nav.scrollLeft >= nav.scrollWidth - nav.clientWidth - 1 : nav.scrollLeft <= 1));
-    })()`, { timeoutMs: 2000 });
+  });
+  const rejectEndpoint = async direction => {
+    let dispatched = false;
+    await assert.rejects(nativeScroll("endpoint-control", direction, async () => { dispatched = true; }),
+      /requires remaining scroll room/, `${context}: a no-op endpoint cannot count as a native gesture`);
+    assert.equal(dispatched, false, `${context}: endpoint guard rejects before dispatching native input`);
   };
+  await rejectEndpoint(-1);
   let backgroundTarget;
   try {
     if (process.env.DAIKIN_BROWSER_TOUCH_BACKGROUND_CONTROL === "1") {
@@ -777,12 +815,12 @@ async function assertMobileCardScroller(page, context, current) {
   // A native horizontal wheel/trackpad gesture must use the same contained scroller.
   await foregroundTouch("wheel");
   await page.evaluate(`document.querySelector(${JSON.stringify(first)}).focus(); document.activeElement.blur(); true`);
-  const wheel = await page.evaluate(`(() => {
-    const nav = document.getElementById("cardNav"), rect = nav.getBoundingClientRect();
-    return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2, deltaX: nav.scrollWidth };
-  })()`);
-  await page.send("Input.dispatchMouseEvent", { type: "mouseWheel", deltaY: 0, ...wheel });
+  await nativeScroll("wheel", 1, async points => {
+    await page.send("Input.dispatchMouseEvent", { type: "mouseWheel", x: (points.left + points.right) / 2,
+      y: points.y, deltaY: 0, deltaX: points.max + dimensions.width });
+  });
   await page.waitFor(visible(last));
+  await rejectEndpoint(1);
   const tap = await page.evaluate(`(() => {
     const rect = document.querySelector(${JSON.stringify(last)}).getBoundingClientRect();
     return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2, id: 1 };
