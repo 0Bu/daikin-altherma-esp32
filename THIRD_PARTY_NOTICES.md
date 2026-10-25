@@ -57,7 +57,7 @@ License:
 ## Web tooling
 
 - Dashboard navigation embeds [Lucide](https://lucide.dev/) icon geometry under the ISC License;
-  its power and chevron-right icons derive from Feather under the MIT License. The complete notices
+  its power icon derives from Feather under the MIT License. The complete notices
   are retained in the license comment in `main/www/js/dashboard.js`, including in the embedded UI.
 - [`esptool-js`](https://github.com/espressif/esptool-js) 0.7.0 is vendored unmodified as
   [`docs/vendor/esptool-js-0.7.0.bundle.js`](docs/vendor/esptool-js-0.7.0.bundle.js) for the Web

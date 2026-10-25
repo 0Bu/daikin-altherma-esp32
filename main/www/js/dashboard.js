@@ -172,10 +172,7 @@ function syncDashboardCards() {
     `<button type="button" class="dashboard-card-button" id="dashboard-card-${index}" ` +
     `data-card="${esc(card.dataset.dashboardCard)}" aria-pressed="false" aria-controls="valueGroups">` +
     `${dashboardCardIcon(card.dataset.dashboardCard)}` +
-    `<span class="dashboard-card-label">${esc(card.dataset.dashboardLabel)}</span>` +
-    `<svg class="dashboard-card-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" ` +
-    `stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" ` +
-    `aria-hidden="true" focusable="false"><path d="m9 18 6-6-6-6"/></svg></button>`).join(""));
+    `<span class="dashboard-card-label">${esc(card.dataset.dashboardLabel)}</span></button>`).join(""));
   for (const card of cards) card.hidden = card !== selected;
   for (const button of nav.querySelectorAll("[data-card]")) {
     const chosen = button.dataset.card === S.dashboardCard;
@@ -209,7 +206,7 @@ function selectDashboardCard(key) {
  * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH
  * THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *
- * Power and chevron-right derive from Feather — The MIT License (MIT)
+ * Power derives from Feather — The MIT License (MIT)
  * Copyright (c) 2013-present Cole Bemis
  * Permission is hereby granted, free of charge, to any person obtaining a copy of this software
  * and associated documentation files (the "Software"), to deal in the Software without restriction,
@@ -225,7 +222,7 @@ function selectDashboardCard(key) {
  */
 const DASHBOARD_CARD_ICONS = Object.freeze({
   diagnosis: '<path d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2"/>',
-  model: '<path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z"/><path d="m3.3 7 8.7 5 8.7-5"/><path d="M12 22V12"/>',
+  model: '<rect x="2" y="5" width="20" height="14" rx="2"/><path d="M5 9h3M5 12h3M5 15h3M5 19v2M19 19v2"/><circle cx="15.5" cy="12" r="4.5"/><path d="M15.5 12c-2-1-3-3-1-4m1 4c2-1 4-1 4 1m-4-1c0 2-1 4-3 3"/>',
   'group:Operation': '<path d="M12 2v10"/><path d="M18.4 6.6a9 9 0 1 1-12.77.04"/>',
   'group:Domestic hot water': '<path d="M14 4v10.54a4 4 0 1 1-4 0V4a2 2 0 0 1 4 0Z"/>',
   'group:Water circuit': '<path d="M7 16.3c2.2 0 4-1.83 4-4.05 0-1.16-.57-2.26-1.71-3.19S7.29 6.75 7 5.3c-.29 1.45-1.14 2.84-2.29 3.76S3 11.1 3 12.25c0 2.22 1.8 4.05 4 4.05z"/><path d="M12.56 6.6A10.97 10.97 0 0 0 14 3.02c.5 2.5 2 4.9 4 6.5s3 3.5 3 5.5a6.98 6.98 0 0 1-11.91 4.97"/>',

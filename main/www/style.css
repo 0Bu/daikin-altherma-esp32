@@ -612,7 +612,7 @@ svg .sc-hit:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px
     var(--dashboard-line) calc(var(--dashboard-join-radius) - 1px),
     var(--dashboard-line) var(--dashboard-join-radius), var(--dashboard-surface) var(--dashboard-join-radius));
 }
-.dashboard-card-icon, .dashboard-card-chevron { display: none; }
+.dashboard-card-icon { display: none; }
 #valueGroups { min-width: 0; }
 #valueGroups > .vgroup + .vgroup { margin-top: 0; }
 #valueGroups > .vgroup[hidden] { display: none; }
@@ -646,10 +646,6 @@ svg .sc-hit:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px
   }
   .dashboard-card-label { white-space: normal; overflow-wrap: anywhere; }
   .dashboard-card-icon { display: block; width: 17px; height: 17px; flex: 0 0 17px; }
-  .dashboard-card-chevron {
-    display: block; margin-left: auto; width: 14px; height: 14px; flex: 0 0 14px; opacity: 0;
-  }
-  .dashboard-card-button[aria-pressed="true"] .dashboard-card-chevron { opacity: 1; }
   #valueGroups > .vgroup > :only-child { padding: 23px 24px 18px; }
 }
 @media (pointer: coarse) {

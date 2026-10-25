@@ -102,9 +102,10 @@ expectSelection("diagnosis", "initial available diagnosis");
 assert.deepEqual(keys(), ["diagnosis", "model", "group:Operation", "modbus"]);
 assert.ok(nav.children.every(button => button.getAttribute("type") === "button" &&
   button.getAttribute("aria-controls") === "valueGroups"), "navigation uses native content-control buttons");
-for (const className of ["dashboard-card-icon", "dashboard-card-label", "dashboard-card-chevron"])
+for (const className of ["dashboard-card-icon", "dashboard-card-label"])
   assert.equal(Array.from(nav.innerHTML.matchAll(new RegExp(`class="${className}"`, "g"))).length, 4,
     `every rendered button has its ${className} element`);
+assert.doesNotMatch(nav.innerHTML, /dashboard-card-chevron/, "card names have no trailing navigation arrow");
 const knownKeys = ["diagnosis", "model", "group:Operation", "group:Domestic hot water", "group:Water circuit",
   "group:Refrigerant / outdoor", "group:Protection", "group:Electrical", "group:Device", "group:Other values", "modbus"];
 const knownIcons = knownKeys.map(key => ui.icon(key));

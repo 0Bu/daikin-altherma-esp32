@@ -509,7 +509,7 @@ Below the schematic, card names select one detail card: Diagnostics first, then 
 groups below, followed by Modbus when available. Diagnostics is selected initially; if the selected
 card is absent, select the first available card. Selection stays local to the open page and survives
 polling, language changes and Settings visits. At widths of at least 650 px, a 202 px sidebar shows
-each name with its icon and a chevron for the selected card. The selected name uses cyan text on the
+each name with its icon. The selected name uses cyan text on the
 detail card's surface, with a rounded outline opening into the card: to the right on desktop and
 downward on mobile. Both joins curve into the card with its 17 px corner radius. On smaller screens,
 names stay in one horizontally scrollable row above the panel without icons. Swipe the row to reveal another name,
