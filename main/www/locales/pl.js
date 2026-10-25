@@ -1,4 +1,4 @@
-// translation-source: 27ca0b00310a57817beb3d013a898499a721ca91fe3bae39f73cc748a141cd9e
+// translation-source: 56ec4b237229b88c50cf6b91ff312bb0f6656edfb91ec07b993d5e2bde0e9ca2
 const plNoun = (n, one, few, many) => {
   const value = Math.abs(Number(n)), mod10 = value % 10, mod100 = value % 100;
   return value === 1 ? one
@@ -189,7 +189,7 @@ I18N.pl = localeValues([
   /* check.status.unavailable */ "N/D",
   /* check.status.no_window */ "BRAK OKNA",
   /* check.detail.dhw_energy */ (a, b, c, d) => `Przykład jednej godziny: 200 l wody stygnącej równomiernie o ${a} K/h → ${b} kWh ciepła; uzupełnienie ${c}–${d} kWh prądu przy założonym COP 2,5–3 (ciepło ÷ prąd). Nie jest to pomiar energii.`,
-  /* check.detail.dhw_context */ (a, b, c) => `Okna: pompa wewnętrzna ${a}; spadek podobny do poboru ${b}; bez oznaczeń ≥0,8 K/h ${c}. Pompa/spadek mogą się pokrywać.`,
+  /* check.detail.dhw_context */ (a, b, c) => `Okna: pompa wewnętrzna ${a}; spadek podobny do poboru ${b}; bez oznaczeń ≥0,8 K/h ${c}. Mogą się pokrywać.`,
   /* check.detail.value_label */ "Wartość:",
   /* check.detail.assessment_label */ "Ocena:",
   /* check.detail.ok */ "Reguła nie zadziałała w czytelnych danych.",
@@ -207,12 +207,12 @@ I18N.pl = localeValues([
   /* check.detail.dhw_settling */ (a, b, c) => `Przyjęte okna godzinowe: ${a}; wykryto ładowanie lub grzałkę zasobnika. Pozostały czas stabilizacji: ${c}.`,
   /* check.detail.dhw_waiting */ (a, b) => `Przyjęte okna godzinowe: ${a}; oczekiwanie na kolejną odpowiednią godzinę.`,
   /* check.detail.dhw_aborted */ (n, reasons, best) => ` ${n} ${plNoun(n, "odrzucone okno kandydujące", "odrzucone okna kandydujące", "odrzuconych okien kandydujących")} (${reasons}); najdłuższe osiągnęło ${best} z 60 min.`,
-  /* check.detail.dhw_blocked */ (a, b, c) => `Brak pełnej godziny w 24 h. Odrzucone okna: ${a} (${b}); najdłuższe ${c}.`,
+  /* check.detail.dhw_blocked */ (a, b, c) => "Brak pełnej godziny w 24 h." + (a > 0 ? ` Odrzucone okna: ${a} (${b}); najdłuższe ${c}.` : ""),
   /* check.detail.dhw_blocked_link */ (a, b) => `Brak odpowiedniego okna godzinowego w 24 h: Przerwane okna: ${a}, przez zbyt długi brak wymaganych odczytów; najdłuższy ${b} z 60 min. Brak odpowiedzi lub przerwy odpytywania tworzą luki. Nie ocenia to zasobnika.`,
   /* check.detail.dhw_reason.charge */ "ładowanie zbiornika",
   /* check.detail.dhw_reason.pump */ "pompa wewnętrzna",
   /* check.detail.dhw_reason.draw */ "spadek podobny do poboru",
-  /* check.detail.dhw_reason.reading */ "niewiarygodne R5T",
+  /* check.detail.dhw_reason.reading */ "R5T niepotwierdzone",
   /* check.detail.dhw_reason.blind */ "brak odczytów: X10A milczy lub odpytywanie wstrzymane",
   /* check.detail.collecting_unknown */ "Brak bieżącej oceny.",
   /* check.detail.observation */ "Tylko obserwacja; bez uniwersalnej granicy OK/UWAGA.",
@@ -1219,7 +1219,7 @@ DESCRIPTION_I18N.pl = descriptionValues([
 
 MODEL_DESCRIPTION_I18N.pl = modelDescriptionValues([
   ["Komunikaty pompy; nie dowodzą przyczyny ani naprawy."], // health_fault
-  ["R5T: godzinne stygnięcie netto w punkcie warstwowego zbiornika, nie energia. Próg projektu ≥0,8 K/h bez oznaczeń pompy/poboru. Ich brak nie dowodzi braku poboru; zerowe stygnięcie netto nie wyklucza strat. Cyrkulacja nie dowodzi przyczyny."], // health_dhw_loss
+  ["R5T: punkt warstwowego zbiornika, nie energia. Próg projektu ≥0,8 K/h bez oznaczeń pompy/poboru. Pobór możliwy bez oznaczeń; 0 K/h nie wyklucza strat. Cyrkulacja nie dowodzi przyczyny."], // health_dhw_loss
   ["≥12 pełnych cykli ogrzewania, średnia <10 min; ≥90% wszystkich zakończonych cykli sklasyfikowanych. Reguła projektu, nie Daikin; CWU, chłodzenie i nieklasyfikowane wykluczone."], // health_cycling
   ["Odszranianie: ≥3 powiązane, >15% czasu pracy sprężarki przy czytelnych stanach sprężarki i odszraniania. Reguła projektu, nie Daikin; brak wilgotności i temperatury całego wymiennika."], // health_defrost
   ["Ciśnienie: wspólna reguła projektu ≤1,0 bar; 60 s ciągłej obserwacji daje ostrzeżenie. Nie uniwersalna; obowiązuje instrukcja modelu."], // health_pressure

@@ -1328,7 +1328,7 @@ function checkupDetailHtml(c, fullSpan = c.full_span === true, report = {}) {
   // replies and deliberate board-side polling pauses can both create that gap.
   if (c.id === "dhw_loss" && c.blocked === true) {
     const reasons = Array.isArray(c.abort_reasons) ? c.abort_reasons : [];
-    const blindOnly = reasons.length === 1 && reasons[0] === "blind";
+    const blindOnly = Number(c.aborts) > 0 && reasons.length === 1 && reasons[0] === "blind";
     const sentence = blindOnly
       ? t("check.detail.dhw_blocked_link", Number(c.aborts) || 0,
           checkupDuration(c.best_aborted_s))

@@ -1,4 +1,4 @@
-// translation-source: 27ca0b00310a57817beb3d013a898499a721ca91fe3bae39f73cc748a141cd9e
+// translation-source: 56ec4b237229b88c50cf6b91ff312bb0f6656edfb91ec07b993d5e2bde0e9ca2
 I18N.ja = localeValues([
   /* sys.nodata */ "データなし",
   /* sys.unreachable */ "接続不可",
@@ -184,7 +184,7 @@ I18N.ja = localeValues([
   /* check.status.unavailable */ "利用不可",
   /* check.status.no_window */ "測定窓なし",
   /* check.detail.dhw_energy */ (a, b, c, d) => `1時間の計算例：200 lの水が均一に${a} K/hで冷却→熱量${b} kWh。仮定のCOP 2.5–3（熱量÷電力量）で補熱に電力${c}–${d} kWh。エネルギー実測値ではありません。`,
-  /* check.detail.dhw_context */ (a, b, c) => `時間窓：内部ポンプ${a}、取湯に似た低下${b}、印なしで≥0.8 K/hが${c}。ポンプと低下は重複し得ます。`,
+  /* check.detail.dhw_context */ (a, b, c) => `時間窓：内部ポンプ${a}、取湯に似た低下${b}、印なしで≥0.8 K/hが${c}。重複し得ます。`,
   /* check.detail.value_label */ "値:",
   /* check.detail.assessment_label */ "評価:",
   /* check.detail.ok */ "読めたデータでこのルールに該当しません。",
@@ -202,12 +202,12 @@ I18N.ja = localeValues([
   /* check.detail.dhw_settling */ (a, b, c) => `採用した時間窓：${a}。タンク加熱またはヒーターを検出。安定待ち残り：${c}。`,
   /* check.detail.dhw_waiting */ (a, b) => `採用した時間窓：${a}。次の適合する1時間を待っています。`,
   /* check.detail.dhw_aborted */ (n, reasons, best) => ` 候補窓${n}件を除外（${reasons}）。最長 ${best}/60分。`,
-  /* check.detail.dhw_blocked */ (a, b, c) => `24 hに有効な1時間なし。破棄した窓${a}（${b}）、最長${c}.`,
+  /* check.detail.dhw_blocked */ (a, b, c) => "24 hに完了した1時間窓なし。" + (a > 0 ? `破棄した窓${a}（${b}）、最長${c}。` : ""),
   /* check.detail.dhw_blocked_link */ (a, b) => `24時間に適合する1時間窓がありません。必要値を長時間読めず${a}候補が終了、最長${b}/60分。応答欠落や基板のポーリング停止で欠測が生じます。タンクの状態は示しません。`,
   /* check.detail.dhw_reason.charge */ "タンク加熱",
   /* check.detail.dhw_reason.pump */ "内部ポンプ",
   /* check.detail.dhw_reason.draw */ "取湯様の低下",
-  /* check.detail.dhw_reason.reading */ "不自然なR5T",
+  /* check.detail.dhw_reason.reading */ "R5T未確認",
   /* check.detail.dhw_reason.blind */ "未読取：X10A応答なしまたはポーリング一時停止",
   /* check.detail.collecting_unknown */ "現在の評価なし。",
   /* check.detail.observation */ "観測のみ。共通のOK/警告基準なし。",
@@ -1066,7 +1066,7 @@ DESCRIPTION_I18N.ja = descriptionValues([
 
 MODEL_DESCRIPTION_I18N.ja = modelDescriptionValues([
   ["機器の通知。原因や解決の証明ではありません。"], // health_fault
-  ["R5T：成層タンク1点の時間あたり正味冷却。エネルギー実測ではありません。内部基準≥0.8 K/hはポンプ・取湯に似た低下の印がない窓のみ。印なしでも取湯なしとは証明できず、正味冷却ゼロでも熱損失は否定できません。循環の重複は原因を証明しません。"], // health_dhw_loss
+  ["R5T：成層タンク1点。エネルギー実測でない。内部基準≥0.8 K/hはポンプ・取湯に似た低下の印がない窓のみ。印なしでも取湯はあり得ます。0 K/hでも熱損失は否定できません。循環の重複は原因を証明しません。"], // health_dhw_loss
   ["暖房完了≥12回、平均<10分；全完了運転の≥90%が分類済み。内部基準、Daikin限界ではありません。給湯・冷房・未分類は除外。"], // health_cycling
   ["対応除霜≥3回、圧縮機と除霜の状態が両方読める圧縮機運転時間の>15%。内部基準、Daikin限界ではありません。湿度とコイル全体の温度なし。"], // health_defrost
   ["水圧：共通内部基準1.0 bar以下、連続観測60秒で警告。全機種共通ではなく対象説明書が基準。"], // health_pressure

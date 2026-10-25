@@ -1,4 +1,4 @@
-// translation-source: 27ca0b00310a57817beb3d013a898499a721ca91fe3bae39f73cc748a141cd9e
+// translation-source: 56ec4b237229b88c50cf6b91ff312bb0f6656edfb91ec07b993d5e2bde0e9ca2
 I18N.it = localeValues([
   /* sys.nodata */ "Nessun dato",
   /* sys.unreachable */ "Non raggiungibile",
@@ -184,7 +184,7 @@ I18N.it = localeValues([
   /* check.status.unavailable */ "N/D",
   /* check.status.no_window */ "NESSUN INTERVALLO",
   /* check.detail.dhw_energy */ (a, b, c, d) => `Esempio per un’ora: 200 l d’acqua raffreddati uniformemente a ${a} K/h → ${b} kWh di calore; reintegro ${c}–${d} kWh elettrici con COP ipotizzato 2,5–3 (calore ÷ elettricità). Non è energia misurata.`,
-  /* check.detail.dhw_context */ (a, b, c) => `Intervalli: pompa interna ${a}; calo simile a prelievo ${b}; senza segnali ≥0,8 K/h ${c}. Pompa/calo possono sovrapporsi.`,
+  /* check.detail.dhw_context */ (a, b, c) => `Intervalli: pompa interna ${a}; calo simile a prelievo ${b}; senza segnali ≥0,8 K/h ${c}. Possono sovrapporsi.`,
   /* check.detail.value_label */ "Valore:",
   /* check.detail.assessment_label */ "Valutazione:",
   /* check.detail.ok */ "La regola non è scattata nei dati leggibili.",
@@ -202,12 +202,12 @@ I18N.it = localeValues([
   /* check.detail.dhw_settling */ (a, b, c) => `Finestre orarie accettate: ${a}; rilevata carica o resistenza del serbatoio. Stabilizzazione restante: ${c}.`,
   /* check.detail.dhw_waiting */ (a, b) => `Finestre orarie accettate: ${a}; attesa della prossima ora idonea.`,
   /* check.detail.dhw_aborted */ (n, reasons, best) => ` ${n} ${n === 1 ? "finestra candidata scartata" : "finestre candidate scartate"} (${reasons}); la più lunga ha raggiunto ${best} di 60 min.`,
-  /* check.detail.dhw_blocked */ (a, b, c) => `Nessuna ora valida in 24 h. Intervalli scartati: ${a} (${b}); il più lungo ${c}.`,
+  /* check.detail.dhw_blocked */ (a, b, c) => "Nessuna ora completa in 24 h." + (a > 0 ? ` Intervalli scartati: ${a} (${b}); il più lungo ${c}.` : ""),
   /* check.detail.dhw_blocked_link */ (a, b) => `Nessuna finestra oraria idonea in 24 h: Finestre interrotte: ${a}, per assenza prolungata delle letture necessarie; più lunga ${b} su 60 min. Risposte mancanti o pause di lettura possono creare la lacuna. Nulla è stabilito sul serbatoio.`,
   /* check.detail.dhw_reason.charge */ "carica del serbatoio",
   /* check.detail.dhw_reason.pump */ "pompa interna",
   /* check.detail.dhw_reason.draw */ "calo simile a un prelievo",
-  /* check.detail.dhw_reason.reading */ "R5T non plausibile",
+  /* check.detail.dhw_reason.reading */ "R5T non confermato",
   /* check.detail.dhw_reason.blind */ "letture mancanti: X10A senza risposta o interrogazione in pausa",
   /* check.detail.collecting_unknown */ "Nessuna valutazione attuale.",
   /* check.detail.observation */ "Solo osservazione; nessun limite universale OK/AVVISO.",
@@ -1209,7 +1209,7 @@ DESCRIPTION_I18N.it = descriptionValues([
 
 MODEL_DESCRIPTION_I18N.it = modelDescriptionValues([
   ["Messaggi della pompa; non provano causa né risoluzione."], // health_fault
-  ["R5T: raffreddamento netto orario in un punto del serbatoio stratificato, non energia. Indizio interno ≥0,8 K/h senza segnali pompa/prelievo. L’assenza di segnali non prova l’assenza di prelievi; zero netto non esclude perdite. Circolazione non prova la causa."], // health_dhw_loss
+  ["R5T: un punto del serbatoio stratificato, non energia. Indizio interno ≥0,8 K/h senza segnali pompa/prelievo. Senza segnali, i prelievi restano possibili; 0 K/h non esclude perdite. Circolazione non prova la causa."], // health_dhw_loss
   ["≥12 cicli completi di riscaldamento, media <10 min; ≥90% di tutti i cicli completati classificati. Regola interna, non Daikin; esclusi ACS, freddo e non classificati."], // health_cycling
   ["Sbrinamento: ≥3 associati, >15% del tempo di marcia del compressore con stati compressore e sbrinamento leggibili. Regola interna, non Daikin; mancano umidità e temperatura dell’intera batteria."], // health_defrost
   ["Pressione: regola interna comune ≤1,0 bar; 60 s continui osservati danno AVVISO. Non universale; vale il manuale del modello."], // health_pressure

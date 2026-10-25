@@ -8,9 +8,9 @@
       },
       "hosted_confirmation": "Local GCC 15 measured; authoritative hosted confirmation pending",
       "runner": "scripts/run-mock-tests.sh --coverage",
-      "scope": "Endpoint spike confirmation, retained net DHW cooling with overlapping pump/draw-like context, quiet-only hint, scoped no-window result and sealed restart flags; changed-header coverage ratios rise and other inventories and historical floors remain unchanged",
+      "scope": "Endpoint confirmation and bounded 30-second close grace, retained net DHW cooling with pump/draw-like context, quiet-only hint, complete-scope no-window result and sealed restart flags; retained aborted-window evidence raises changed-header coverage ratios while all other inventories and historical floors remain unchanged",
       "source": "main/logic/checkup.hpp",
-      "source_sha256": "05a19b1a7b27654e8d69d9583286878ffe9c9c348b2f2160ba2caee1fbbe1ff8"
+      "source_sha256": "1af1b21eed2fecedc1858029ce7fb966cf5ae062ef3d4252f0b64195d2ffd488"
     },
     {
       "compilers": {
@@ -741,7 +741,7 @@
       },
       "main/logic/checkup.hpp": {
         "outcomes": 889,
-        "taken": 814
+        "taken": 815
       },
       "main/logic/checkup_persist.hpp": {
         "outcomes": 125,
@@ -1158,8 +1158,8 @@
         "taken": 8
       },
       "main/logic/checkup.hpp": {
-        "outcomes": 1023,
-        "taken": 938
+        "outcomes": 1025,
+        "taken": 940
       },
       "main/logic/checkup_persist.hpp": {
         "outcomes": 153,
@@ -1576,8 +1576,8 @@
         "taken": 8
       },
       "main/logic/checkup.hpp": {
-        "outcomes": 1023,
-        "taken": 938
+        "outcomes": 1025,
+        "taken": 940
       },
       "main/logic/checkup_persist.hpp": {
         "outcomes": 153,
@@ -1994,8 +1994,8 @@
         "taken": 8
       },
       "main/logic/checkup.hpp": {
-        "outcomes": 1023,
-        "taken": 938
+        "outcomes": 1025,
+        "taken": 940
       },
       "main/logic/checkup_persist.hpp": {
         "outcomes": 153,

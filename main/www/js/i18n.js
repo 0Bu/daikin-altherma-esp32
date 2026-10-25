@@ -302,7 +302,7 @@ const I18N = {
     "check.status.unavailable": "N/A",
     "check.status.no_window": "NO WINDOW",
     "check.detail.dhw_energy": (a, b, c, d) => `Example for one hour: 200 l water cooling uniformly at ${a} K/h → ${b} kWh heat; ${c}–${d} kWh electricity to replace it at assumed COP 2.5–3 (heat ÷ electricity). Not measured energy.`,
-    "check.detail.dhw_context": (a, b, c) => `Hourly windows: internal pump ${a}; draw-like drop ${b}; unmarked ≥0.8 K/h ${c}. Pump/drop counts may overlap.`,
+    "check.detail.dhw_context": (a, b, c) => `Hourly windows: internal pump ${a}; draw-like drop ${b}; unmarked ≥0.8 K/h ${c}. Overlap possible.`,
     "check.detail.value_label": "Value:",
     "check.detail.assessment_label": "Assessment:",
     "check.detail.ok": "This rule did not trigger in readable data.",
@@ -334,12 +334,12 @@ const I18N = {
     // too. That time comes from X10A timeouts AND from board-side pauses (OTA/weather network hold,
     // model detection, a skipped poll cycle, a restart). It therefore says "readings the check
     // needs" (docs/DIAGNOSTICS.md names them) and names both sources without inferring a tank fault.
-    "check.detail.dhw_blocked": (a, b, c) => `No eligible hour in 24 h. Discarded windows: ${a} (${b}); longest ${c}.`,
+    "check.detail.dhw_blocked": (a, b, c) => "No completed hour in 24 h." + (a > 0 ? ` Discarded windows: ${a} (${b}); longest ${c}.` : ""),
     "check.detail.dhw_blocked_link": (a, b) => `No eligible one-hour window in 24 h: Candidate windows interrupted: ${a}, after required readings were unread too long; longest ${b} of 60 min. Missing replies or board-side polling pauses can cause this gap. It establishes nothing about the tank.`,
     "check.detail.dhw_reason.charge": "tank charging",
     "check.detail.dhw_reason.pump": "internal pump",
     "check.detail.dhw_reason.draw": "draw-like drop",
-    "check.detail.dhw_reason.reading": "implausible R5T",
+    "check.detail.dhw_reason.reading": "R5T unconfirmed",
     "check.detail.dhw_reason.blind": "readings missing: X10A silent or polling paused",
     "check.detail.collecting_unknown": "No current assessment.",
     "check.detail.observation": "Observation only; no universal OK/WARNING limit.",

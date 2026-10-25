@@ -1,4 +1,4 @@
-// translation-source: 27ca0b00310a57817beb3d013a898499a721ca91fe3bae39f73cc748a141cd9e
+// translation-source: 56ec4b237229b88c50cf6b91ff312bb0f6656edfb91ec07b993d5e2bde0e9ca2
 I18N.sv = localeValues([
   /* sys.nodata */ "Inga data",
   /* sys.unreachable */ "Inte tillgänglig",
@@ -184,7 +184,7 @@ I18N.sv = localeValues([
   /* check.status.unavailable */ "EJ AKTUELL",
   /* check.status.no_window */ "INGET MÄTFÖNSTER",
   /* check.detail.dhw_energy */ (a, b, c, d) => `Exempel för en timme: 200 l vatten svalnar jämnt med ${a} K/h → ${b} kWh värme; återvärmning ${c}–${d} kWh el vid antagen COP 2,5–3 (värme ÷ el). Inte uppmätt energi.`,
-  /* check.detail.dhw_context */ (a, b, c) => `Timfönster: intern pump ${a}; tappningsliknande fall ${b}; omärkt ≥0,8 K/h ${c}. Pump/fall kan överlappa.`,
+  /* check.detail.dhw_context */ (a, b, c) => `Timfönster: intern pump ${a}; tappningsliknande fall ${b}; omärkt ≥0,8 K/h ${c}. Kan överlappa.`,
   /* check.detail.value_label */ "Mätning:",
   /* check.detail.assessment_label */ "Bedömning:",
   /* check.detail.ok */ "Regeln utlöstes inte i läsbara data.",
@@ -202,12 +202,12 @@ I18N.sv = localeValues([
   /* check.detail.dhw_settling */ (a, b, c) => `Godkända timfönster: ${a}; tankladdning eller tankvärmare upptäckt. Återstående stabilisering: ${c}.`,
   /* check.detail.dhw_waiting */ (a, b) => `Godkända timfönster: ${a}; väntar på nästa lämpliga timme.`,
   /* check.detail.dhw_aborted */ (n, reasons, bäst) => ` ${n} ${n === 1 ? "kandidat blev förkastad" : "kandidater blev förkastade"} (${reasons}); längsta nådde ${bäst} av 60 min.`,
-  /* check.detail.dhw_blocked */ (a, b, c) => `Ingen lämplig timme på 24 h. Förkastade fönster: ${a} (${b}); längsta ${c}.`,
+  /* check.detail.dhw_blocked */ (a, b, c) => "Ingen avslutad timme på 24 h." + (a > 0 ? ` Förkastade fönster: ${a} (${b}); längsta ${c}.` : ""),
   /* check.detail.dhw_blocked_link */ (a, b) => `Inget lämpligt timfönster på 24 h: Avbrutna fönster: ${a}, efter för länge olästa nödvändiga värden; längsta ${b} av 60 min. Uteblivna svar eller läspauser ger luckor. Ingen slutsats om tanken.`,
   /* check.detail.dhw_reason.charge */ "tankladdning",
   /* check.detail.dhw_reason.pump */ "intern pump",
   /* check.detail.dhw_reason.draw */ "tappningsliknande fall",
-  /* check.detail.dhw_reason.reading */ "osannolik R5T",
+  /* check.detail.dhw_reason.reading */ "R5T obekräftad",
   /* check.detail.dhw_reason.blind */ "avläsningar saknas: X10A svarar inte eller avläsningen pausad",
   /* check.detail.collecting_unknown */ "Ingen aktuell bedömning.",
   /* check.detail.observation */ "Bara observation; ingen allmän OK/VARNING-gräns.",
@@ -1226,7 +1226,7 @@ DESCRIPTION_I18N.sv = descriptionValues([
 
 MODEL_DESCRIPTION_I18N.sv = modelDescriptionValues([
   ["Enhetens meddelanden; inga bevis på orsak eller lösning."], // health_fault
-  ["R5T: nettoavsvalning per timme i en punkt i skiktad tank, inte energi. Projekttips ≥0,8 K/h utan pump-/tappmarkörer. Utan markörer kan tappning ändå ha skett; noll nettoavsvalning utesluter inte värmeförlust. Cirkulation bevisar inte orsak."], // health_dhw_loss
+  ["R5T: en punkt i skiktad tank, inte energi. Projekttips ≥0,8 K/h utan pump-/tappmarkörer. Tappning möjlig utan markörer; 0 K/h utesluter inte värmeförlust. Cirkulation bevisar inte orsak."], // health_dhw_loss
   ["≥12 avslutade värmekörningar, medel <10 min; ≥90% av alla avslutade körningar klassificerade. Intern regel, inte Daikin; varmvatten, kylning och oklassificerade utesluts."], // health_cycling
   ["Avfrostning: ≥3 parade, >15% av kompressorns drifttid där både kompressor- och avfrostningsstatus kan läsas. Intern regel, inte Daikin; fuktighet och hela värmeväxlarens temperatur saknas."], // health_defrost
   ["Tryck: gemensam intern regel ≤1,0 bar; 60 s kontinuerligt observerat ger varning. Inte universell; modellmanual gäller."], // health_pressure

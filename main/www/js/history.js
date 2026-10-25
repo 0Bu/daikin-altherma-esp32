@@ -2034,9 +2034,9 @@ const MODEL_DESCRIPTIONS = {
     de: { what: "Aktuelle und gespeicherte Störungsmeldungen der Wärmepumpe.",
           normal: "Eine Meldung belegt keine Ursache; ihr Verschwinden belegt keine Behebung." } },
   health_dhw_loss: {
-    what: "Hourly net cooling at R5T, one point in a stratified tank; not measured tank energy.",
+    what: "R5T: one point in a stratified tank; not measured tank energy.",
     normal: "Project hint ≥0.8 K/h without pump/draw-like markers. Missing markers do not prove no draw; zero net cooling does not exclude heat loss. Circulation overlap is correlation, not cause.",
-    de: { what: "Nettoabkühlung pro Stunde am R5T, einem Punkt im geschichteten Speicher; keine Energiemessung.",
+    de: { what: "R5T: ein Punkt im geschichteten Speicher; keine Energiemessung.",
           normal: "Interner Hinweis ≥0,8 K/h ohne Pumpen-/Zapfmerkmale. Fehlende Merkmale belegen keine Zapffreiheit; null Nettoabkühlung schließt Wärmeverlust nicht aus. Zirkulationsüberschneidung belegt keine Ursache." } },
   health_cycling: {
     what: "Compressor OFF-to-ON starts and durations of complete, consistently classified heating runs.",

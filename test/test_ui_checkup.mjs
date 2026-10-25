@@ -218,7 +218,7 @@ assert.doesNotMatch(ui.metric(mixedCirculation), /pump|circulation|off|during/,
   "an off-pump hour among several windows does not identify the maximum hour's context");
 assert.match(ui.detail(dhw), /An observed hint; its limit is explained below/);
 assert.match(ui.detail(dhw), /internal pump 2; draw-like drop 1; unmarked ≥0.8 K\/h 1/);
-assert.match(ui.detail(dhw), /Pump\/drop counts may overlap/);
+assert.match(ui.detail(dhw), /Overlap possible/);
 assert.match(ui.detail(dhw), /Example for one hour: 200 l water cooling uniformly at 1.2 K\/h/);
 assert.match(ui.detail(dhw), /0.28 kWh heat/);
 assert.match(ui.detail(dhw), /0.09–0.11 kWh electricity to replace it at assumed COP 2.5–3 \(heat ÷ electricity\)/);
@@ -262,7 +262,7 @@ const blocked = {
 };
 detail = ui.detail(blocked);
 assert.match(detail, /Discarded windows: 14 \(tank charging, readings missing: X10A silent or polling paused\)/);
-assert.match(detail, /No eligible hour in 24 h/);
+assert.match(detail, /No completed hour in 24 h/);
 assert.doesNotMatch(detail, /unknown_future_reason|cause dominated|check the X10A wiring|duty cycle/);
 detail = ui.detail({ ...blocked, abort_reasons: ["blind"] });
 assert.match(detail, /required readings were unread too long/);
@@ -274,7 +274,16 @@ assert.equal(ui.value({ ...blocked, verdict: "collecting" }), "NO WINDOW",
   "legacy collecting+blocked must not promise indefinite waiting");
 assert.doesNotMatch(ui.detail(blocked), /CHECKING|200 l|kWh/);
 assert.equal(ui.value({ ...blocked, verdict: "unavailable", blocked: false }), "N/A");
-assert.match(ui.detail({ ...blocked, verdict: "collecting" }), /No eligible hour in 24 h/);
+assert.match(ui.detail({ ...blocked, verdict: "collecting" }), /No completed hour in 24 h/);
+const noAttempt = { ...blocked, aborts: 0, best_aborted_s: 0, abort_reasons: [] };
+assert.equal(ui.value(noAttempt), "NO WINDOW");
+assert.match(ui.detail(noAttempt), /NO WINDOW — No completed hour in 24 h\.<\/detail>/);
+assert.doesNotMatch(ui.detail(noAttempt), /discarded|interrupted|longest|\(\)|CHECKING|kWh/i);
+assert.match(ui.detail({ ...blocked, aborts: 1, abort_reasons: ["reading"] }),
+  /Discarded windows: 1 \(R5T unconfirmed\)/);
+assert.doesNotMatch(ui.detail({ ...blocked, aborts: 1, abort_reasons: ["reading"] }),
+  /implausible|implausibility/i,
+  "valid but not confirmed endpoint jitter must not be described as an implausible temperature");
 for (const lang of locales) {
   const energy = ui.text(lang, "check.detail.dhw_energy", "1.2", "0.28", "0.09", "0.11");
   assert.ok(energy.includes("200") && energy.includes("COP"), `${lang} retains explicit example assumptions`);
@@ -285,7 +294,25 @@ for (const lang of locales) {
   assert.equal(ui.value(blocked), ui.text(lang, "check.status.no_window"), `${lang} labels the blocked day`);
   assert.notEqual(ui.value(blocked), ui.text(lang, "check.status.collecting"), `${lang} does not keep waiting`);
   assert.notEqual(ui.value(blocked), ui.text(lang, "check.status.unavailable"), `${lang} distinguishes unsupported profiles`);
+  const emptyWindow = ui.text(lang, "check.detail.dhw_blocked", 0, "", "0 min");
+  assert.ok(emptyWindow.includes("24"), `${lang} zero-attempt result retains its day scope`);
+  assert.doesNotMatch(emptyWindow, /0 min|\(\)|（）|\b0\b/,
+    `${lang} zero attempts must not invent discarded candidates or a longest attempt`);
+  for (const reasons of [[], ["blind"]]) {
+    const noAttemptDetail = ui.detail({ ...noAttempt, abort_reasons: reasons });
+    assert.ok(noAttemptDetail.includes(emptyWindow), `${lang} zero attempts render the bounded result`);
+    assert.ok(!noAttemptDetail.includes(ui.text(lang, "check.detail.dhw_blocked_link", 0, "0 min")),
+      `${lang} zero attempts do not invent interruptions from a legacy blind flag`);
+    assert.doesNotMatch(noAttemptDetail, /\(\)|（）|kWh/);
+  }
 }
+ui.setLang("de");
+assert.match(ui.detail(noAttempt), /Kein vollständiges Stundenfenster in 24 h\./);
+assert.doesNotMatch(ui.detail(noAttempt), /Verworfen|längster|\(\)/);
+assert.match(ui.detail({ ...blocked, aborts: 1, abort_reasons: ["reading"] }),
+  /R5T unbestätigt/);
+assert.doesNotMatch(ui.detail({ ...blocked, aborts: 1, abort_reasons: ["reading"] }),
+  /unplausibel|unplausible/i);
 ui.setLang("en");
 
 detail = ui.detail({ id: "heater", verdict: "ok", evidence: "observation", buh_s: 0,

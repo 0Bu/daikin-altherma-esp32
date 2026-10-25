@@ -1,4 +1,4 @@
-// translation-source: 27ca0b00310a57817beb3d013a898499a721ca91fe3bae39f73cc748a141cd9e
+// translation-source: 56ec4b237229b88c50cf6b91ff312bb0f6656edfb91ec07b993d5e2bde0e9ca2
 I18N.de = localeValues([
   /* sys.nodata */ "Keine Daten",
   /* sys.unreachable */ "Nicht erreichbar",
@@ -183,8 +183,8 @@ I18N.de = localeValues([
   /* check.status.experimental */ "TESTWEISE",
   /* check.status.unavailable */ "ENTFÄLLT",
   /* check.status.no_window */ "KEIN MESSFENSTER",
-  /* check.detail.dhw_energy */ (a, b, c, d) => `Beispiel für eine Stunde: 200 l Wasser kühlen gleichmäßig mit ${a} K/h ab → ${b} kWh Wärme. Nachheizen: ${c}–${d} kWh Strom bei angenommener Leistungszahl COP 2,5–3 (Wärme ÷ Strom). Keine gemessene Energie.`,
-  /* check.detail.dhw_context */ (a, b, c) => `Stundenfenster: interne Pumpe ${a}; zapfungsähnlicher Abfall ${b}; ohne Pumpen-/Zapfmerkmal ≥0,8 K/h ${c}. Pumpen-/Abfallzahlen können sich überschneiden.`,
+  /* check.detail.dhw_energy */ (a, b, c, d) => `Beispiel für eine Stunde: 200 l Wasser kühlen gleichmäßig mit ${a} K/h ab → ${b} kWh Wärme. Nachheizen: ${c}–${d} kWh Strom bei angenommenem COP 2,5–3 (Wärme ÷ Strom). Keine gemessene Energie.`,
+  /* check.detail.dhw_context */ (a, b, c) => `Fenster: interne Pumpe ${a}; zapfungsähnlicher Abfall ${b}; ohne Pumpen-/Zapfmerkmal ≥0,8 K/h ${c}. Überschneidungen möglich.`,
   /* check.detail.value_label */ "Messwert:",
   /* check.detail.assessment_label */ "Bewertung:",
   /* check.detail.ok */ "Diese Regel löste in den lesbaren Daten nicht aus.",
@@ -202,12 +202,12 @@ I18N.de = localeValues([
   /* check.detail.dhw_settling */ (a, b, c) => `Angenommene Stundenfenster: ${a}; Speicherladung oder Heizstab erkannt. Verbleibende Beruhigungszeit: ${c}.`,
   /* check.detail.dhw_waiting */ (a, b) => `Angenommene Stundenfenster: ${a}; wartet auf die nächste geeignete Stunde.`,
   /* check.detail.dhw_aborted */ (n, reasons, best) => ` ${n} ${n === 1 ? "Kandidat wurde" : "Kandidaten wurden"} verworfen (${reasons}); längster erreichte ${best} von 60 min.`,
-  /* check.detail.dhw_blocked */ (a, b, c) => `Kein geeignetes Stundenfenster in 24 h. Verworfen: ${a} (${b}); längster ${c}.`,
+  /* check.detail.dhw_blocked */ (a, b, c) => "Kein vollständiges Stundenfenster in 24 h." + (a > 0 ? ` Verworfen: ${a} (${b}); längstes ${c}.` : ""),
   /* check.detail.dhw_blocked_link */ (a, b) => `Kein geeignetes Stundenfenster in 24 h: Abgebrochene Fenster: ${a}, weil nötige Werte zu lange ungelesen waren; längster ${b} von 60 min. Fehlende Antworten oder Abfragepausen des Boards erzeugen solche Lücken. Keine Aussage über den Speicher.`,
   /* check.detail.dhw_reason.charge */ "Speicherladung",
   /* check.detail.dhw_reason.pump */ "interne Pumpe",
   /* check.detail.dhw_reason.draw */ "zapfungsähnlicher Abfall",
-  /* check.detail.dhw_reason.reading */ "R5T unplausibel",
+  /* check.detail.dhw_reason.reading */ "R5T unbestätigt",
   /* check.detail.dhw_reason.blind */ "Messwerte fehlen: X10A schweigt oder Abfrage pausiert",
   /* check.detail.collecting_unknown */ "Keine aktuelle Bewertung.",
   /* check.detail.observation */ "Nur Beobachtung; kein allgemeiner OK/WARNUNG-Grenzwert.",

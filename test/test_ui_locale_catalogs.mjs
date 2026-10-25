@@ -152,7 +152,19 @@ for (const code of codes) {
   const verdict = catalog[code]["check.detail.dhw_blocked_link"](2, 20);
   assert.ok(verdict.trim(), `${code} blind verdict must explain the missing evidence`);
   assert.doesNotMatch(verdict, /RX\/TX/, `${code} must not prescribe wiring work from an unobserved interval`);
+  const noAttempt = catalog[code]["check.detail.dhw_blocked"](0, "", "0 min");
+  assert.ok(noAttempt.includes("24"), `${code} retains the no-window day scope`);
+  assert.doesNotMatch(noAttempt, /0 min|\(\)|（）|\b0\b/,
+    `${code} no confirmed opening must not invent discarded candidates`);
 }
+// This reason includes a plausible endpoint that was not confirmed within the closing grace.
+// It must not claim that every failed confirmation was an implausible R5T reading.
+for (const [code, unconfirmed] of Object.entries({
+  en: /unconfirmed/, de: /unbestätigt/, es: /sin confirmar/, fr: /non confirmé/,
+  it: /non confermato/, pl: /niepotwierdzone/, cs: /nepotvrzené/, uk: /непідтверджене/,
+  zh: /未确认/, ja: /未確認/, nb: /ubekreftet/, sv: /obekräftad/, fi: /vahvistamaton/,
+})) assert.match(catalog[code]["check.detail.dhw_reason.reading"], unconfirmed,
+  `${code} reading reason must include unconfirmed endpoints`);
 // ZH once said the tank "has no problem", a reassurance a NOT AVAILABLE result cannot give; it must
 // stay as neutral as the English "says nothing about the tank". JA uses one term for "paused" in
 // both the list item and the verdict. Missing replies and local query pauses remain distinct.

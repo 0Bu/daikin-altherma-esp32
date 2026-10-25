@@ -1,4 +1,4 @@
-// translation-source: 27ca0b00310a57817beb3d013a898499a721ca91fe3bae39f73cc748a141cd9e
+// translation-source: 56ec4b237229b88c50cf6b91ff312bb0f6656edfb91ec07b993d5e2bde0e9ca2
 I18N.zh = localeValues([
   /* sys.nodata */ "无数据",
   /* sys.unreachable */ "无法访问",
@@ -184,7 +184,7 @@ I18N.zh = localeValues([
   /* check.status.unavailable */ "不可用",
   /* check.status.no_window */ "无测量窗口",
   /* check.detail.dhw_energy */ (a, b, c, d) => `一小时示例：200 l水均匀以${a} K/h降温→${b} kWh热量；按假设COP 2.5–3（热量÷电能）补热需${c}–${d} kWh电能。非能量实测。`,
-  /* check.detail.dhw_context */ (a, b, c) => `小时窗口：内部水泵${a}；类似取水骤降${b}；无标记且≥0.8 K/h${c}。水泵/骤降计数可重叠。`,
+  /* check.detail.dhw_context */ (a, b, c) => `小时窗口：内部水泵${a}；类似取水骤降${b}；无标记且≥0.8 K/h${c}。计数可重叠。`,
   /* check.detail.value_label */ "数值：",
   /* check.detail.assessment_label */ "评估：",
   /* check.detail.ok */ "可读数据未触发本项规则。",
@@ -202,12 +202,12 @@ I18N.zh = localeValues([
   /* check.detail.dhw_settling */ (a, b, c) => `已接受的小时窗口：${a}；检测到水箱加热或电加热器。剩余稳定时间：${c}。`,
   /* check.detail.dhw_waiting */ (a, b) => `已接受的小时窗口：${a}；等待下一个符合条件的小时。`,
   /* check.detail.dhw_aborted */ (n, reasons, best) => ` 已丢弃 ${n} 个候选时段（${reasons}）；最长达到 ${best}/60 分钟。`,
-  /* check.detail.dhw_blocked */ (a, b, c) => `24 h无合格小时。丢弃窗口：${a}（${b}）；最长${c}.`,
+  /* check.detail.dhw_blocked */ (a, b, c) => "24 h无完整小时窗口。" + (a > 0 ? `丢弃窗口：${a}（${b}）；最长${c}。` : ""),
   /* check.detail.dhw_blocked_link */ (a, b) => `24小时内无合格小时窗口：${a}个候选因必要读数长期缺失结束；最长${b}/60分钟。缺失回复或设备暂停轮询可产生缺口。不说明水箱状态。`,
   /* check.detail.dhw_reason.charge */ "水箱加热",
   /* check.detail.dhw_reason.pump */ "内部水泵",
   /* check.detail.dhw_reason.draw */ "类似取水的降温",
-  /* check.detail.dhw_reason.reading */ "R5T 读数不可信",
+  /* check.detail.dhw_reason.reading */ "R5T未确认",
   /* check.detail.dhw_reason.blind */ "读数缺失：X10A 无响应或轮询暂停",
   /* check.detail.collecting_unknown */ "无当前评估。",
   /* check.detail.observation */ "仅观察；无通用OK/警告限值。",
@@ -1209,7 +1209,7 @@ DESCRIPTION_I18N.zh = descriptionValues([
 
 MODEL_DESCRIPTION_I18N.zh = modelDescriptionValues([
   ["机组消息，不证明原因或已解决。"], // health_fault
-  ["R5T：分层水箱单点每小时净降温，非能量实测。项目提示≥0.8 K/h仅适用无水泵/类似取水标记窗口。无标记不证明无取水；净降温零不排除热损失。循环重叠不证明原因。"], // health_dhw_loss
+  ["R5T：分层水箱单点，非能量。项目提示≥0.8 K/h仅适用无水泵/类似取水标记窗口。无标记也可能取水；0 K/h不排除热损失。循环重叠不证明原因。"], // health_dhw_loss
   ["≥12次完整供暖、平均<10分钟；所有完整运行中≥90%已分类。项目规则非Daikin限值；排除热水、制冷、未分类。"], // health_cycling
   ["除霜：≥3次配对、>15%压缩机运行时间，仅计压缩机及除霜状态均可读时段。项目规则非Daikin限值；缺少湿度及整个盘管温度。"], // health_defrost
   ["水压：共同项目规则≤1.0 bar；连续观察60秒后警告。非通用，按该机型手册。"], // health_pressure

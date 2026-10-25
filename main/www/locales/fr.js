@@ -1,4 +1,4 @@
-// translation-source: 27ca0b00310a57817beb3d013a898499a721ca91fe3bae39f73cc748a141cd9e
+// translation-source: 56ec4b237229b88c50cf6b91ff312bb0f6656edfb91ec07b993d5e2bde0e9ca2
 I18N.fr = localeValues([
   /* sys.nodata */ "Aucune donnée",
   /* sys.unreachable */ "Injoignable",
@@ -184,7 +184,7 @@ I18N.fr = localeValues([
   /* check.status.unavailable */ "N/D",
   /* check.status.no_window */ "AUCUNE FENÊTRE",
   /* check.detail.dhw_energy */ (a, b, c, d) => `Exemple sur une heure : 200 l d’eau refroidis uniformément à ${a} K/h → ${b} kWh de chaleur ; recharge de ${c}–${d} kWh électriques à COP supposé 2,5–3 (chaleur ÷ électricité). Pas d’énergie mesurée.`,
-  /* check.detail.dhw_context */ (a, b, c) => `Fenêtres : pompe interne ${a} ; chute évoquant un puisage ${b} ; sans indice ≥0,8 K/h ${c}. Pompe/chute peuvent coïncider.`,
+  /* check.detail.dhw_context */ (a, b, c) => `Fenêtres : pompe interne ${a} ; chute évoquant un puisage ${b} ; sans indice ≥0,8 K/h ${c}. Recoupement possible.`,
   /* check.detail.value_label */ "Valeur :",
   /* check.detail.assessment_label */ "Évaluation :",
   /* check.detail.ok */ "Cette règle n’a pas été déclenchée dans les données lisibles.",
@@ -202,12 +202,12 @@ I18N.fr = localeValues([
   /* check.detail.dhw_settling */ (a, b, c) => `Fenêtres horaires admises : ${a} ; charge ou résistance du ballon détectée. Stabilisation restante : ${c}.`,
   /* check.detail.dhw_waiting */ (a, b) => `Fenêtres horaires admises : ${a} ; attente de la prochaine heure admissible.`,
   /* check.detail.dhw_aborted */ (n, reasons, best) => ` ${n} ${n === 1 ? "fenêtre candidate rejetée" : "fenêtres candidates rejetées"} (${reasons}) ; la plus longue a atteint ${best} sur 60 min.`,
-  /* check.detail.dhw_blocked */ (a, b, c) => `Aucune heure admissible en 24 h. Fenêtres écartées : ${a} (${b}) ; la plus longue ${c}.`,
+  /* check.detail.dhw_blocked */ (a, b, c) => "Aucune heure complète en 24 h." + (a > 0 ? ` Fenêtres écartées : ${a} (${b}) ; la plus longue ${c}.` : ""),
   /* check.detail.dhw_blocked_link */ (a, b) => `Aucune fenêtre horaire admissible en 24 h : Fenêtres interrompues : ${a}, après une longue absence des mesures nécessaires ; plus longue ${b} sur 60 min. Réponses manquantes ou pauses de lecture peuvent créer la lacune. Aucun constat sur le ballon.`,
   /* check.detail.dhw_reason.charge */ "charge du ballon",
   /* check.detail.dhw_reason.pump */ "pompe interne",
   /* check.detail.dhw_reason.draw */ "baisse semblable à un puisage",
-  /* check.detail.dhw_reason.reading */ "R5T non plausible",
+  /* check.detail.dhw_reason.reading */ "R5T non confirmé",
   /* check.detail.dhw_reason.blind */ "relevés manquants : X10A sans réponse ou interrogation en pause",
   /* check.detail.collecting_unknown */ "Pas d’évaluation actuelle.",
   /* check.detail.observation */ "Observation seule ; aucune limite universelle OK/ALERTE.",
@@ -1209,7 +1209,7 @@ DESCRIPTION_I18N.fr = descriptionValues([
 
 MODEL_DESCRIPTION_I18N.fr = modelDescriptionValues([
   ["Messages de la pompe ; ni cause ni résolution prouvées."], // health_fault
-  ["R5T : refroidissement net horaire en un point du ballon stratifié, pas une énergie. Indice interne ≥0,8 K/h sans indice pompe/puisage. L’absence d’indice ne prouve pas l’absence de puisage ; zéro net n’exclut pas les pertes. Circulation ne prouve pas la cause."], // health_dhw_loss
+  ["R5T : un point du ballon stratifié, pas une énergie. Indice interne ≥0,8 K/h sans indice pompe/puisage. Sans indice, un puisage reste possible ; 0 K/h n’exclut pas les pertes. Circulation ne prouve pas la cause."], // health_dhw_loss
   ["≥12 chauffages complets, moyenne <10 min; ≥90% de tous les cycles complets classés. Règle interne, pas Daikin; ECS, froid et non classés exclus."], // health_cycling
   ["Dégivrage : ≥3 associés, >15% du temps de marche du compresseur si états compresseur et dégivrage lisibles. Règle interne, pas Daikin; humidité et température de toute la batterie absentes."], // health_defrost
   ["Pression : règle interne commune ≤1,0 bar ; 60 s continues observées donnent ALERTE. Pas universelle ; manuel du modèle."], // health_pressure

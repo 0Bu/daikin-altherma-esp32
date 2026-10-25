@@ -17058,16 +17058,14 @@ static void test_checkup() {
             CHECK(b.aborts == 1);
         }
 
-        // THE VERDICT. A full lifecycle with no completed window and six discarded ones is a plant
-        // that will not grant the method its 105 minutes — a different answer from "not yet", and
-        // reported as Unavailable so it says nothing either way instead of holding the whole card
-        // at `collecting` for the life of the installation.
+        // A complete scoped day without a completed hour is unavailable, even if unstable
+        // endpoints never allowed a candidate to open. It says nothing about a plant defect.
         CheckupCoverage cov;
         cov.r5t = cov.valve = cov.pump = cov.bsh = true;
         CheckupWindow w;
         w.full_span = true;
         DhwLossWindow dhw;
-        dhw.aborts         = DHW_LOSS_BLOCKED_MIN_ABORTS;
+        dhw.aborts         = 6;
         dhw.abort_reasons  = DHW_ABORT_CHARGE | DHW_ABORT_PUMP;
         dhw.best_aborted_s = 2400;
         dhw.full_span      = true;
@@ -17076,7 +17074,7 @@ static void test_checkup() {
             CHECK(r[CheckupCheck::DhwLoss].verdict == CheckupVerdict::Unavailable);
             CHECK(r[CheckupCheck::DhwLoss].reason == CheckupReason::NoEligibleWindows);
             CHECK(r.dhw_blocked);
-            CHECK(r.dhw_aborts == DHW_LOSS_BLOCKED_MIN_ABORTS);
+            CHECK(r.dhw_aborts == 6);
             CHECK(r.dhw_best_aborted_s == 2400);
             CHECK(r.dhw_abort_reasons == (DHW_ABORT_CHARGE | DHW_ABORT_PUMP));
             // Unavailable says nothing either way: it must not be counted as an assessable check
@@ -17101,18 +17099,20 @@ static void test_checkup() {
         lifecycle = false;
         CHECK(!dhw_loss_scope_full(lifecycle, never, CHECKUP_WINDOW_US));
         CHECK(!dhw_loss_scope_full(lifecycle, scope, CHECKUP_WINDOW_US)); // never without it
-        // One abort short of the bar is still "not yet".
-        dhw.aborts = DHW_LOSS_BLOCKED_MIN_ABORTS - 1;
+        // The discarded-attempt count cannot make an unsuccessful full day wait forever.
+        dhw.aborts = 5;
         {
             const CheckupReport r = checkup_evaluate(w, cov, FaultClass::Normal, dhw);
-            CHECK(r[CheckupCheck::DhwLoss].verdict == CheckupVerdict::Collecting);
-            CHECK(!r.dhw_blocked);
+            CHECK(r[CheckupCheck::DhwLoss].verdict == CheckupVerdict::Unavailable);
+            CHECK(r.dhw_blocked);
         }
-        // A DEAD BUS measured nothing and discarded nothing — `collecting` stays the honest answer
-        // there, which is exactly what `aborts` separates.
+        // No confirmed opening (or no readable input) also means no completed hour. Missing
+        // coverage stays missing; this is not an all-clear or a claim about the cause.
         dhw.aborts = 0;
-        CHECK(checkup_evaluate(w, cov, FaultClass::Normal, dhw)[CheckupCheck::DhwLoss].verdict ==
-              CheckupVerdict::Collecting);
+        dhw.abort_reasons      = 0;
+        const auto no_attempts = checkup_evaluate(w, cov, FaultClass::Normal, dhw);
+        CHECK(no_attempts[CheckupCheck::DhwLoss].verdict == CheckupVerdict::Unavailable);
+        CHECK(no_attempts.dhw_blocked && no_attempts.dhw_aborts == 0);
         // An incomplete lifecycle is never blocked, however many candidates it lost.
         dhw.aborts  = 50;
         w.full_span = false;
@@ -17334,6 +17334,38 @@ static void test_checkup() {
             dhw_loss_step(spike, spike_bucket, spike_sample, static_cast<int64_t>(sec) * 1000000);
         }
         CHECK(spike_bucket.windows == 1 && spike_bucket.max_loss_tenths_k_h == 0);
+
+        // An unstable closing endpoint cannot turn six hours into one hourly rate. Allow
+        // two normal polling intervals for recovery, including confirmation exactly at the bound.
+        CHECK(DHW_LOSS_CLOSE_GRACE_S == 30);
+        auto unstable_close = [](int stable_at, int stable_tenths, int until) {
+            DhwLossState  st = dhw_past_hold();
+            DhwLossBucket bucket;
+            CheckupSample sample;
+            sample.valve_known = sample.pump_known = sample.bsh_known = sample.r5t_ok = true;
+            for (int sec = 0; sec <= until; ++sec) {
+                sample.r5t_tenths = sec <= 3600        ? 600 - sec / 360
+                                    : sec >= stable_at ? stable_tenths
+                                                       : (sec % 2 ? 587 : 590);
+                dhw_loss_step(st, bucket, sample, static_cast<int64_t>(sec) * 1000000);
+            }
+            return bucket;
+        };
+        const auto timely_close = unstable_close(3630, 590, 3631);
+        CHECK(timely_close.windows == 1 && timely_close.aborts == 0);
+        CHECK(timely_close.max_loss_tenths_k_h == 9); // actual 3630-second span, floored
+        const auto late_close = unstable_close(3631, 587, 3632);
+        CHECK(late_close.windows == 0 && late_close.aborts == 1);
+        CHECK(late_close.abort_reasons == DHW_ABORT_READING);
+        DhwLossRing rejected;
+        rejected.pending = late_close;
+        rejected.commit(0);
+        const auto rejected_day = dhw_loss_aggregate(rejected);
+        CHECK(rejected_day.aborts == 1 && rejected_day.abort_reasons == DHW_ABORT_READING);
+        CHECK(rejected_day.best_aborted_s == 3631 && rejected_day.windows == 0);
+        const auto hours_late = unstable_close(6 * 3600, 587, 6 * 3600 + 2);
+        CHECK(hours_late.windows == 0 && hours_late.aborts == 1);
+        CHECK(hours_late.max_loss_tenths_k_h == CHECKUP_ABSENT);
 
         // Context survives a compatible restart, then clears with the completed hour or abort.
         DhwLossState  st = dhw_past_hold();

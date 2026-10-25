@@ -240,8 +240,10 @@ For `dhw_loss`, `max_k_h` is the maximum completed one-hour **net sensor cooling
 heat loss. `high_windows` counts rates ≥0.8 K/h; only the subset `quiet_high_windows` with no
 internal-pump or draw-like marker gives `info`. `draw_windows` and `pump_windows` count all marked
 windows independently and can overlap; they do not identify the maximum's context. `blocked:true`
-with `unavailable`/`no_eligible_windows` means a full DHW evidence day with six rejected candidates
-and no completed window; an unsupported profile also uses `unavailable`, with `blocked:false`.
+with `unavailable`/`no_eligible_windows` means a full DHW evidence day without a completed window,
+even if no candidate could open. It does not establish signal coverage or a cause. The `reading`
+abort reason includes invalid temperatures and an unconfirmed closing endpoint after a 30-second
+grace. An unsupported profile also uses `unavailable`, with `blocked:false`.
 
 Unestablished numeric evidence is null. `reason` is empty when no qualification applies; otherwise:
 `unsupported`, `day_incomplete`, `input_coverage`, `no_eligible_windows`, `class_unavailable`,

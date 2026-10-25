@@ -1,6 +1,6 @@
 # Plant diagnostics in plain language
 
-<!-- user-docs-contract: 95ebaafe0cac0300003cb6800244fe5f45f23617db273e120ec26d64d2aa49b0 -->
+<!-- user-docs-contract: 3c3c4a04ef32d4bf325c3460beb83c476b8d030e8ec1ca5f5a56b5171e4f062d -->
 
 Plant diagnostics **reads measurements and counts events; it does not control the heat pump**.
 It is off by default. Enable **Plant diagnostics** under **Settings → Firmware** to start an evidence
@@ -68,12 +68,14 @@ shows how many windows reached **0.8 K/h** and how many contained internal water
 a draw-like drop. Those counts cover all windows and may overlap; they do not describe the maximum
 window individually. Rapid continuous cooling remains visible even when it resembles water use;
 endpoint confirmation rejects isolated jumps larger than 0.2 K. Smaller excursions can still
-affect the rate and the project's note threshold.
+affect the rate and the project's note threshold. If the closing reading cannot be confirmed
+within 30 seconds after the hour, that candidate is discarded instead of becoming a longer average.
 
 **Meaning:** **NOTE** needs at least one window at or above the project's 0.8 K/h threshold without
 either marker. Other completed windows are **MEASURED**, including marked high rates. Without a
 completed window the board shows **CHECKING**, progress or settling time. After a full day of DHW
-evidence with six discarded candidates it says **NO WINDOW** and explains the exclusions.
+scope without a completed hour it says **NO WINDOW**, including when no candidate could open.
+That describes missing measurements, not a tank defect or complete signal coverage.
 
 **Energy example:** For an assumed uniformly cooling **200 l** tank, **1.2 K/h** corresponds to
 about **0.28 kWh of heat per hour**. Replacing that heat at an assumed COP (heat delivered per

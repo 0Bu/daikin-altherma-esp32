@@ -1,4 +1,4 @@
-// translation-source: 27ca0b00310a57817beb3d013a898499a721ca91fe3bae39f73cc748a141cd9e
+// translation-source: 56ec4b237229b88c50cf6b91ff312bb0f6656edfb91ec07b993d5e2bde0e9ca2
 I18N.nb = localeValues([
   /* sys.nodata */ "Ingen data",
   /* sys.unreachable */ "Ikke tilgjengelig",
@@ -184,7 +184,7 @@ I18N.nb = localeValues([
   /* check.status.unavailable */ "N/A",
   /* check.status.no_window */ "INGEN MÅLEPERIODE",
   /* check.detail.dhw_energy */ (a, b, c, d) => `Eksempel for én time: 200 l vann avkjølt jevnt med ${a} K/h → ${b} kWh varme; gjenoppvarming ${c}–${d} kWh strøm ved antatt COP 2,5–3 (varme ÷ strøm). Ikke målt energi.`,
-  /* check.detail.dhw_context */ (a, b, c) => `Timesvinduer: intern pumpe ${a}; tappeliknende fall ${b}; umerket ≥0,8 K/h ${c}. Pumpe/fall kan overlappe.`,
+  /* check.detail.dhw_context */ (a, b, c) => `Vinduer: intern pumpe ${a}; tappeliknende fall ${b}; umerket ≥0,8 K/h ${c}. Kan overlappe.`,
   /* check.detail.value_label */ "Måling:",
   /* check.detail.assessment_label */ "Vurdering:",
   /* check.detail.ok */ "Regelen ble ikke utløst i lesbare data.",
@@ -202,12 +202,12 @@ I18N.nb = localeValues([
   /* check.detail.dhw_settling */ (a, b, c) => `Godtatte timesvinduer: ${a}; tanklading eller tankvarmer oppdaget. Gjenværende stabilisering: ${c}.`,
   /* check.detail.dhw_waiting */ (a, b) => `Godtatte timesvinduer: ${a}; venter på neste egnede time.`,
   /* check.detail.dhw_aborted */ (n, reasons, best) => ` ${n} ${n === 1 ? "kandidat ble" : "kandidater ble"} forkastet (${reasons}); lengste nådde ${best} av 60 min.`,
-  /* check.detail.dhw_blocked */ (a, b, c) => `Ingen egnet time på 24 h. Forkastede vinduer: ${a} (${b}); lengste ${c}.`,
+  /* check.detail.dhw_blocked */ (a, b, c) => "Ingen fullført time på 24 h." + (a > 0 ? ` Forkastede vinduer: ${a} (${b}); lengste ${c}.` : ""),
   /* check.detail.dhw_blocked_link */ (a, b) => `Ingen egnet timesvindu på 24 h: Avbrutte vinduer: ${a}, etter for lenge uleste nødvendige verdier; lengste ${b} av 60 min. Manglende svar eller avlesingspauser kan gi hull. Ingen konklusjon om tanken.`,
   /* check.detail.dhw_reason.charge */ "tanklading",
   /* check.detail.dhw_reason.pump */ "intern pumpe",
   /* check.detail.dhw_reason.draw */ "tappelignende fall",
-  /* check.detail.dhw_reason.reading */ "usannsynlig R5T",
+  /* check.detail.dhw_reason.reading */ "R5T ubekreftet",
   /* check.detail.dhw_reason.blind */ "avlesninger mangler: X10A svarer ikke eller avspørring satt på pause",
   /* check.detail.collecting_unknown */ "Ingen aktuell vurdering.",
   /* check.detail.observation */ "Bare observasjon; ingen universell OK/ADVARSEL-grense.",
@@ -1226,7 +1226,7 @@ DESCRIPTION_I18N.nb = descriptionValues([
 
 MODEL_DESCRIPTION_I18N.nb = modelDescriptionValues([
   ["Enhetens meldinger; ingen årsaks- eller løsningsbevis."], // health_fault
-  ["R5T: netto timesavkjøling i ett punkt i lagdelt tank, ikke energi. Prosjekthint ≥0,8 K/h uten pumpe-/tappemarkører. Manglende markører beviser ikke at ingen tappet; null nettoavkjøling utelukker ikke varmetap. Sirkulasjon beviser ikke årsak."], // health_dhw_loss
+  ["R5T: ett punkt i lagdelt tank, ikke energi. Prosjekthint ≥0,8 K/h uten pumpe-/tappemarkører. Tapping er mulig uten markører; 0 K/h utelukker ikke varmetap. Sirkulasjon beviser ikke årsak."], // health_dhw_loss
   ["≥12 fullførte varmekjøringer, snitt <10 min; ≥90% av alle fullførte kjøringer klassifisert. Intern regel, ikke Daikin; varmtvann, kjøling og uklassifiserte utelates."], // health_cycling
   ["Avriming: ≥3 parede, >15% av kompressorens driftstid der både kompressor- og avrimingsstatus er lesbar. Intern regel, ikke Daikin; fuktighet og hele varmevekslerens temperatur mangler."], // health_defrost
   ["Trykk: felles intern regel ≤1,0 bar; 60 s kontinuerlig observert gir advarsel. Ikke universell; modellmanual gjelder."], // health_pressure

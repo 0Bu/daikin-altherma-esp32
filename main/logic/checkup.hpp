@@ -659,15 +659,15 @@ struct DhwLossState {
 };
 
 constexpr uint32_t DHW_LOSS_WINDOW_S      = 3600; // R5T resolves only 0.1 K
+// Two normal polling intervals allow one isolated bad endpoint and its confirmation to recover.
+// Never reinterpret an arbitrarily long candidate as one hourly observation.
+constexpr uint32_t DHW_LOSS_CLOSE_GRACE_S = 2 * CHECKUP_MAX_GAP_S;
 constexpr uint32_t DHW_LOSS_DRAW_WINDOW_S = 10 * 60;
 // Project filter: any positive charge witness discards the candidate. At least 120 seconds
 // of witness also starts a 45-minute settling allowance. A discontinuous positive sample takes
 // that conservative allowance immediately. This duration does not prove how much heat entered
 // the tank; a shorter or partially unseen charge can still affect the next candidate.
 constexpr uint32_t DHW_LOSS_CHARGE_MIN_S = 120;
-// After a full day with no accepted window, six aborted candidates enable the bounded
-// "no eligible windows" explanation. Accepted windows never establish a tank-wide all-clear.
-constexpr uint32_t DHW_LOSS_BLOCKED_MIN_ABORTS = 6;
 // Four tenths within the ten-minute anchor marks a possible draw. Continuous cooling near
 // 1.9 K/h also meets this shape: keep the measured rate and report the ambiguity as context.
 constexpr int      DHW_LOSS_DRAW_DROP_TENTHS = 4;
@@ -1011,6 +1011,10 @@ inline void dhw_loss_step(DhwLossState& st, DhwLossBucket& b, const CheckupSampl
 
     const uint32_t elapsed_s = dhw_loss_age_s(now_us, st.segment_start_us,
                                               st.segment_carried_s);
+    if (elapsed_s > DHW_LOSS_WINDOW_S + DHW_LOSS_CLOSE_GRACE_S) {
+        dhw_loss_abort(st, b, DHW_ABORT_READING, now_us);
+        return;
+    }
     if (elapsed_s < DHW_LOSS_WINDOW_S || !endpoint_confirmed) return;
     const int drop_tenths = std::max(0, st.segment_start_tenths - s.r5t_tenths);
     // The RATE is per wall-clock hour: both endpoints are measured and the tank cooled for the whole
@@ -1891,8 +1895,8 @@ inline CheckupReport checkup_evaluate(const CheckupWindow& w, const CheckupCover
     r.dhw_quiet_high_windows = dhw.quiet_high_windows;
     const bool dhw_supported = cov.r5t && cov.valve && cov.pump && cov.bsh;
     // "No eligible window in 24 h" needs 24 h of DHW evidence scope, not only of X10A lifecycle.
-    r.dhw_blocked = dhw_supported && w.full_span && dhw.full_span && dhw.windows == 0 &&
-                    !dhw.high_windows && dhw.aborts >= DHW_LOSS_BLOCKED_MIN_ABORTS;
+    r.dhw_blocked =
+        dhw_supported && w.full_span && dhw.full_span && dhw.windows == 0 && !dhw.high_windows;
     if (!dhw_supported) {
         set(CheckupCheck::DhwLoss, CheckupVerdict::Unavailable, 0, 0);
     } else {

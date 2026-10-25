@@ -1,6 +1,6 @@
 # Evidence and limits of the plant diagnostics
 
-<!-- diagnostic-evidence-contract: 533d8e6d6c469bb8d0418f011de8eefdccf585c515eb64480f43a654c5979b33 -->
+<!-- diagnostic-evidence-contract: 50e5e9091302632e41b4d0115e807ff26d59d56652f88ab3d11fe258c554d4c1 -->
 
 For every row in the **Plant diagnostics · 24 h** card, this page answers four questions:
 
@@ -132,7 +132,8 @@ This supports an illustrative heat calculation, not whole-tank calorimetry from 
 floored to 0.1 K/h; a net rise contributes zero cooling. Each endpoint needs two consecutive
 readable temperatures within 0.2 K, rejecting isolated jumps beyond that tolerance. Smaller
 excursions can still affect the rate and threshold crossing. Confirmation starts afresh after a
-reboot. Charging, implausible readings and excessive
+reboot. A closing endpoint must confirm within 30 seconds after the hour; later confirmation
+discards the candidate rather than reporting a multi-hour average as an hour. Charging, implausible readings and excessive
 blind time discard a candidate. A charge witnessed for two minutes, or seen after an unmeasured gap,
 arms a 45-minute settle; unread time beside a witness counts toward those two minutes. A fresh
 filter also holds 45 minutes. Both timers advance only with readable valve and tank-heater witnesses.
@@ -143,10 +144,12 @@ it is not proof of a draw. The report retains all/high-rate window counts, their
 pump/draw-like counts (which may overlap), and optional external circulation correlation. Only a
 window at or above 0.8 K/h with neither marker gives **NOTE**; all other completed windows are
 **MEASURED**. Marker absence does not prove that no water was used. With no completed window the
-row is **CHECKING**; after a full DHW evidence day and six discarded candidates it becomes
-**NO WINDOW**, not a promise that more waiting will produce a measurement.
+row is **CHECKING**; after a full DHW scope day with no completed window it becomes **NO WINDOW**,
+even if no candidate could open. This states missing hourly measurements, not full signal coverage,
+a cause or a promise that more waiting will produce a measurement.
 
-**Project boundary:** These thresholds, endpoint confirmation, one-hour intervals and settling filters are project choices,
+**Project boundary:** These thresholds, endpoint confirmation with a 30-second closing grace,
+one-hour intervals and settling filters are project choices,
 not Daikin limits or the EU standing-loss test. Candidates tolerate at most 120 consecutive blind
 seconds and 10% blind time overall; coverage excludes blind seconds. External circulation overlap
 needs 90% known state and five minutes on; its pump-off label also needs two hours known off.
