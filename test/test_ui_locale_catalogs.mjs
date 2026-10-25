@@ -61,7 +61,7 @@ const catalog = catalogContext.__catalog;
 const lazyDomainCodes = ["zh", "ja", "nb", "sv", "fi"];
 const englishKeys = Object.keys(catalog.en).sort();
 const englishKeyOrder = Object.keys(catalog.en);
-assert.equal(englishKeys.length, 936, "the test must track the complete current UI catalog");
+assert.equal(englishKeys.length, 934, "the test must track the complete current UI catalog");
 for (const [code, source] of localeSources) {
   const specialist = source.indexOf(`INSPECT_I18N.${code}`);
   const baseSource = specialist < 0 ? source : source.slice(0, specialist);
@@ -324,7 +324,8 @@ for (const code of codes.slice(2)) {
   checkLocalizedRows(code, modelRows, Object.values(modelSchema), "model-description");
   const joined = (id) => modelCopy[id].join(" ");
   assert.match(joined("health_dhw_loss"), /0[,.]8/, `${code} loses the 0.8 K/h project threshold`);
-  assert.match(joined("health_dhw_loss"), /1[,.]85/, `${code} loses the 1.85 K/h detection limit`);
+  assert.doesNotMatch(joined("health_dhw_loss"), /1[,.]85/,
+    `${code} must not revive the removed upper cooling detection limit`);
   assert.match(joined("health_cycling"), /\b10\b/, `${code} loses the 10 min cycling threshold`);
   assert.match(joined("health_cycling"), /\b12\b/, `${code} loses the 12-run population`);
   assert.match(joined("health_cycling"), checkupDenominators[code][0],

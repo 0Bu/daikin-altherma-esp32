@@ -510,8 +510,9 @@ async function assertPlantDiagnosis(page, context) {
         { id: "fault", verdict: "ok", evidence: "manufacturer", active: 0 },
         { id: "dhw_loss", verdict: "info", evidence: "heuristic", max_k_h: 1,
           windows: 4, high_windows: 1, high_with_pump: 1, high_pump_off: 0,
+          quiet_high_windows: 1, draw_windows: 1, pump_windows: 2,
           observed_s: 14285, required_s: 3600, circulation_known_s: 14285,
-          circulation_on_s: 3600, aborts: 3, abort_reasons: ["draw", "charge", "blind"],
+          circulation_on_s: 3600, aborts: 3, abort_reasons: ["charge", "blind"],
           best_aborted_s: 2400 },
         { id: "cycling", verdict: "ok", evidence: "observation", reason: "class_unavailable",
           starts: 17, mean_run_s: null, space_runs: null, censored_runs: 3,
@@ -558,6 +559,40 @@ async function assertPlantDiagnosis(page, context) {
     for (const id of ["pressure", "dhw_loss", "cycling", "defrost"])
       await captureNativeEvidence(page, `${context}/${id}`,
         `[data-desc='model:health_${id}']`, ".vitem");
+    // Exercise the formerly blind band, then the exact no-window screenshot state, through the
+    // real accordion. Ordinary use may explain the drop: it stays MEASURED, with a heat example.
+    await page.evaluate(`(() => {
+      Object.assign(S.status.health.checks[1], { verdict: 'ok', evidence: 'observation',
+        max_k_h: 6, quiet_high_windows: 0, draw_windows: 4, pump_windows: 4 });
+      renderApp();
+      return true;
+    })()`);
+    await page.frame();
+    assertLayout(await page.evaluate(layoutAudit), `${context}/dhw-net-cooling`);
+    assert.equal(await page.evaluate(`document.querySelector("[data-desc='model:health_dhw_loss'] .vrow-val").innerText`),
+      await page.evaluate("t('check.status.observation')"),
+      `${context}: marked rapid cooling stays measured`);
+    assert.ok((await page.evaluate(`document.querySelector("[data-desc='model:health_dhw_loss']").closest('.vitem').innerText`))
+      .includes('kWh'), `${context}: measured cooling has the energy illustration`);
+    await captureNativeEvidence(page, `${context}/dhw-net-cooling`,
+      "[data-desc='model:health_dhw_loss']", ".vitem");
+    await page.evaluate(`(() => {
+      Object.assign(S.status.health.checks[1], { verdict: 'unavailable', blocked: true,
+        max_k_h: null, windows: 0, high_windows: 0, quiet_high_windows: 0,
+        draw_windows: 0, pump_windows: 0, aborts: 7, best_aborted_s: 2820,
+        abort_reasons: ['charge', 'blind'] });
+      renderApp();
+      return true;
+    })()`);
+    await page.frame();
+    assertLayout(await page.evaluate(layoutAudit), `${context}/dhw-no-window`);
+    assert.equal(await page.evaluate(`document.querySelector("[data-desc='model:health_dhw_loss'] .vrow-val").innerText`),
+      await page.evaluate("t('check.status.no_window')"),
+      `${context}: a blocked day must not promise ongoing checking`);
+    assert.ok(!(await page.evaluate(`document.querySelector("[data-desc='model:health_dhw_loss']").closest('.vitem').innerText`))
+      .includes('kWh'), `${context}: no measured rate means no energy number`);
+    await captureNativeEvidence(page, `${context}/dhw-no-window`,
+      "[data-desc='model:health_dhw_loss']", ".vitem");
     await page.evaluate(`(() => {
       const h = S.status.health;
       h.source_fresh = false;

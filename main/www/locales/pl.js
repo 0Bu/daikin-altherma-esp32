@@ -1,4 +1,4 @@
-// translation-source: 35f2b17396ef51dd6a1c1fe8b1c07561fe6a16c726430e5785295bdb9dfc18aa
+// translation-source: 27ca0b00310a57817beb3d013a898499a721ca91fe3bae39f73cc748a141cd9e
 const plNoun = (n, one, few, many) => {
   const value = Math.abs(Number(n)), mod10 = value % 10, mod100 = value % 100;
   return value === 1 ? one
@@ -187,6 +187,9 @@ I18N.pl = localeValues([
   /* check.status.observation */ "POMIAR",
   /* check.status.experimental */ "TESTOWO",
   /* check.status.unavailable */ "N/D",
+  /* check.status.no_window */ "BRAK OKNA",
+  /* check.detail.dhw_energy */ (a, b, c, d) => `Przykład jednej godziny: 200 l wody stygnącej równomiernie o ${a} K/h → ${b} kWh ciepła; uzupełnienie ${c}–${d} kWh prądu przy założonym COP 2,5–3 (ciepło ÷ prąd). Nie jest to pomiar energii.`,
+  /* check.detail.dhw_context */ (a, b, c) => `Okna: pompa wewnętrzna ${a}; spadek podobny do poboru ${b}; bez oznaczeń ≥0,8 K/h ${c}. Pompa/spadek mogą się pokrywać.`,
   /* check.detail.value_label */ "Wartość:",
   /* check.detail.assessment_label */ "Ocena:",
   /* check.detail.ok */ "Reguła nie zadziałała w czytelnych danych.",
@@ -204,7 +207,7 @@ I18N.pl = localeValues([
   /* check.detail.dhw_settling */ (a, b, c) => `Przyjęte okna godzinowe: ${a}; wykryto ładowanie lub grzałkę zasobnika. Pozostały czas stabilizacji: ${c}.`,
   /* check.detail.dhw_waiting */ (a, b) => `Przyjęte okna godzinowe: ${a}; oczekiwanie na kolejną odpowiednią godzinę.`,
   /* check.detail.dhw_aborted */ (n, reasons, best) => ` ${n} ${plNoun(n, "odrzucone okno kandydujące", "odrzucone okna kandydujące", "odrzuconych okien kandydujących")} (${reasons}); najdłuższe osiągnęło ${best} z 60 min.`,
-  /* check.detail.dhw_blocked */ (a, b, c) => `Brak odpowiedniego okna godzinowego w 24 h. Odrzucone okna: ${a} (${b}); najdłuższy ${c} z 60 min. Spadek podobny do poboru może być szybkim ciągłym chłodzeniem; przyczyna niepotwierdzona.`,
+  /* check.detail.dhw_blocked */ (a, b, c) => `Brak pełnej godziny w 24 h. Odrzucone okna: ${a} (${b}); najdłuższe ${c}.`,
   /* check.detail.dhw_blocked_link */ (a, b) => `Brak odpowiedniego okna godzinowego w 24 h: Przerwane okna: ${a}, przez zbyt długi brak wymaganych odczytów; najdłuższy ${b} z 60 min. Brak odpowiedzi lub przerwy odpytywania tworzą luki. Nie ocenia to zasobnika.`,
   /* check.detail.dhw_reason.charge */ "ładowanie zbiornika",
   /* check.detail.dhw_reason.pump */ "pompa wewnętrzna",
@@ -228,9 +231,6 @@ I18N.pl = localeValues([
   /* check.tank_runtime */ (d) => `zbiornik ${d}`,
   /* check.buh_runtime */ (d) => `dodatkowa ${d}`,
   /* check.loss_windows */ (n) => `${n} ${plNoun(n, "okno", "okna", "okien")}`,
-  /* check.loss_pump_off */ "również przy wyłączonej pompie cyrkulacyjnej",
-  /* check.loss_with_pump */ "podczas pracy pompy cyrkulacyjnej",
-  /* check.loss_unattributed */ "niepełne przypisanie do pompy",
   /* check.fault_err */ "Usterka aktywna",
   /* check.fault_warn */ "Ostrzeżenie aktywne",
   /* check.fault_past */ "Wystąpiło w ciągu ostatnich 24 h · teraz nieaktywne",
@@ -257,8 +257,6 @@ I18N.pl = localeValues([
   /* check.detail.age_label */ "Wiek ostatniego pomiaru:",
   /* check.detail.horizon_wait */ (a) => `Brakuje pełnego okna 24 godzin: pozostało ${a}.`,
   /* check.detail.fault.ok */ "Brak bieżącego lub zapisanego komunikatu w czytelnych sygnałach usterek.",
-  /* check.detail.dhw_loss.info */ "Wskazówka projektu od 0,8 K/h; przyczyna niepotwierdzona.",
-  /* check.detail.dhw_loss.observation */ "Tylko przyjęte godziny; odrzucone mogą zawierać szybsze chłodzenie.",
   /* check.detail.cycling.info */ "≥12 zakończonych cykli ogrzewania ze średnią <10 min: wskazówka projektu.",
   /* check.detail.cycling.ok */ "Bez wskazówki krótkich zakończonych cykli ogrzewania.",
   /* check.detail.defrost.info */ "≥3 powiązane odszraniania przekraczają 15% czytelnego czasu sprężarki: wskazówka projektu.",
@@ -1221,7 +1219,7 @@ DESCRIPTION_I18N.pl = descriptionValues([
 
 MODEL_DESCRIPTION_I18N.pl = modelDescriptionValues([
   ["Komunikaty pompy; nie dowodzą przyczyny ani naprawy."], // health_fault
-  ["Czujnik R5T: punkt, nie energia. Reguła projektu ≥0,8 K/h; przy około 1,85 K/h możliwe odrzucenie jako pobór. Cyrkulacja nie dowodzi przyczyny."], // health_dhw_loss
+  ["R5T: godzinne stygnięcie netto w punkcie warstwowego zbiornika, nie energia. Próg projektu ≥0,8 K/h bez oznaczeń pompy/poboru. Ich brak nie dowodzi braku poboru; zerowe stygnięcie netto nie wyklucza strat. Cyrkulacja nie dowodzi przyczyny."], // health_dhw_loss
   ["≥12 pełnych cykli ogrzewania, średnia <10 min; ≥90% wszystkich zakończonych cykli sklasyfikowanych. Reguła projektu, nie Daikin; CWU, chłodzenie i nieklasyfikowane wykluczone."], // health_cycling
   ["Odszranianie: ≥3 powiązane, >15% czasu pracy sprężarki przy czytelnych stanach sprężarki i odszraniania. Reguła projektu, nie Daikin; brak wilgotności i temperatury całego wymiennika."], // health_defrost
   ["Ciśnienie: wspólna reguła projektu ≤1,0 bar; 60 s ciągłej obserwacji daje ostrzeżenie. Nie uniwersalna; obowiązuje instrukcja modelu."], // health_pressure

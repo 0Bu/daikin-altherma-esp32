@@ -1,4 +1,4 @@
-// translation-source: 35f2b17396ef51dd6a1c1fe8b1c07561fe6a16c726430e5785295bdb9dfc18aa
+// translation-source: 27ca0b00310a57817beb3d013a898499a721ca91fe3bae39f73cc748a141cd9e
 I18N.fr = localeValues([
   /* sys.nodata */ "Aucune donnée",
   /* sys.unreachable */ "Injoignable",
@@ -182,6 +182,9 @@ I18N.fr = localeValues([
   /* check.status.observation */ "MESURE",
   /* check.status.experimental */ "À L’ESSAI",
   /* check.status.unavailable */ "N/D",
+  /* check.status.no_window */ "AUCUNE FENÊTRE",
+  /* check.detail.dhw_energy */ (a, b, c, d) => `Exemple sur une heure : 200 l d’eau refroidis uniformément à ${a} K/h → ${b} kWh de chaleur ; recharge de ${c}–${d} kWh électriques à COP supposé 2,5–3 (chaleur ÷ électricité). Pas d’énergie mesurée.`,
+  /* check.detail.dhw_context */ (a, b, c) => `Fenêtres : pompe interne ${a} ; chute évoquant un puisage ${b} ; sans indice ≥0,8 K/h ${c}. Pompe/chute peuvent coïncider.`,
   /* check.detail.value_label */ "Valeur :",
   /* check.detail.assessment_label */ "Évaluation :",
   /* check.detail.ok */ "Cette règle n’a pas été déclenchée dans les données lisibles.",
@@ -199,7 +202,7 @@ I18N.fr = localeValues([
   /* check.detail.dhw_settling */ (a, b, c) => `Fenêtres horaires admises : ${a} ; charge ou résistance du ballon détectée. Stabilisation restante : ${c}.`,
   /* check.detail.dhw_waiting */ (a, b) => `Fenêtres horaires admises : ${a} ; attente de la prochaine heure admissible.`,
   /* check.detail.dhw_aborted */ (n, reasons, best) => ` ${n} ${n === 1 ? "fenêtre candidate rejetée" : "fenêtres candidates rejetées"} (${reasons}) ; la plus longue a atteint ${best} sur 60 min.`,
-  /* check.detail.dhw_blocked */ (a, b, c) => `Aucune fenêtre horaire admissible en 24 h. Fenêtres rejetées : ${a} (${b}) ; plus longue ${c} sur 60 min. Une baisse semblable à un puisage peut être un refroidissement continu rapide ; cause non établie.`,
+  /* check.detail.dhw_blocked */ (a, b, c) => `Aucune heure admissible en 24 h. Fenêtres écartées : ${a} (${b}) ; la plus longue ${c}.`,
   /* check.detail.dhw_blocked_link */ (a, b) => `Aucune fenêtre horaire admissible en 24 h : Fenêtres interrompues : ${a}, après une longue absence des mesures nécessaires ; plus longue ${b} sur 60 min. Réponses manquantes ou pauses de lecture peuvent créer la lacune. Aucun constat sur le ballon.`,
   /* check.detail.dhw_reason.charge */ "charge du ballon",
   /* check.detail.dhw_reason.pump */ "pompe interne",
@@ -223,9 +226,6 @@ I18N.fr = localeValues([
   /* check.tank_runtime */ (d) => `ballon ${d}`,
   /* check.buh_runtime */ (d) => `appoint ${d}`,
   /* check.loss_windows */ (n) => `${n} ${n === 1 ? "fenêtre" : "fenêtres"}`,
-  /* check.loss_pump_off */ "également lorsque la pompe de circulation était arrêtée",
-  /* check.loss_with_pump */ "pendant le fonctionnement de la pompe de circulation",
-  /* check.loss_unattributed */ "attribution de la pompe incomplète",
   /* check.fault_err */ "Défaut actif",
   /* check.fault_warn */ "Avertissement actif",
   /* check.fault_past */ "Survenu au cours des dernières 24 h · inactif actuellement",
@@ -252,8 +252,6 @@ I18N.fr = localeValues([
   /* check.detail.age_label */ "Âge de la dernière mesure :",
   /* check.detail.horizon_wait */ (a) => `La fenêtre complète de 24 heures manque encore : ${a} restantes.`,
   /* check.detail.fault.ok */ "Aucun message actuel ou mémorisé dans les signaux de défaut lisibles.",
-  /* check.detail.dhw_loss.info */ "Indice du projet dès 0,8 K/h ; cause non prouvée.",
-  /* check.detail.dhw_loss.observation */ "Heures admises seulement ; les heures exclues peuvent refroidir plus vite.",
   /* check.detail.cycling.info */ "≥12 cycles de chauffage terminés avec moyenne <10 min : indice du projet.",
   /* check.detail.cycling.ok */ "Aucun indice de cycles courts dans les chauffages terminés.",
   /* check.detail.defrost.info */ "≥3 dégivrages associés dépassent 15 % du temps lisible du compresseur : indice du projet.",
@@ -1211,7 +1209,7 @@ DESCRIPTION_I18N.fr = descriptionValues([
 
 MODEL_DESCRIPTION_I18N.fr = modelDescriptionValues([
   ["Messages de la pompe ; ni cause ni résolution prouvées."], // health_fault
-  ["Capteur R5T : un point, pas une énergie. Règle interne ≥0,8 K/h ; vers 1,85 K/h, exclusion possible comme puisage. Circulation ne prouve pas la cause."], // health_dhw_loss
+  ["R5T : refroidissement net horaire en un point du ballon stratifié, pas une énergie. Indice interne ≥0,8 K/h sans indice pompe/puisage. L’absence d’indice ne prouve pas l’absence de puisage ; zéro net n’exclut pas les pertes. Circulation ne prouve pas la cause."], // health_dhw_loss
   ["≥12 chauffages complets, moyenne <10 min; ≥90% de tous les cycles complets classés. Règle interne, pas Daikin; ECS, froid et non classés exclus."], // health_cycling
   ["Dégivrage : ≥3 associés, >15% du temps de marche du compresseur si états compresseur et dégivrage lisibles. Règle interne, pas Daikin; humidité et température de toute la batterie absentes."], // health_defrost
   ["Pression : règle interne commune ≤1,0 bar ; 60 s continues observées donnent ALERTE. Pas universelle ; manuel du modèle."], // health_pressure

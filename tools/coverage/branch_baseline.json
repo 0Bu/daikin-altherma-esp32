@@ -4,6 +4,18 @@
       "compilers": {
         "clang-17-darwin": "Apple Clang 17.0.0",
         "gcc-13-linux-ubuntu24": "ESP-IDF v6.1 container GCC 13.3.0",
+        "gcc-15-linux-ubuntu26": "Ubuntu 26.04 aarch64 GCC 15"
+      },
+      "hosted_confirmation": "Local GCC 15 measured; authoritative hosted confirmation pending",
+      "runner": "scripts/run-mock-tests.sh --coverage",
+      "scope": "Endpoint spike confirmation, retained net DHW cooling with overlapping pump/draw-like context, quiet-only hint, scoped no-window result and sealed restart flags; changed-header coverage ratios rise and other inventories and historical floors remain unchanged",
+      "source": "main/logic/checkup.hpp",
+      "source_sha256": "05a19b1a7b27654e8d69d9583286878ffe9c9c348b2f2160ba2caee1fbbe1ff8"
+    },
+    {
+      "compilers": {
+        "clang-17-darwin": "Apple Clang 17.0.0",
+        "gcc-13-linux-ubuntu24": "ESP-IDF v6.1 container GCC 13.3.0",
         "gcc-15-linux-ubuntu26": "Ubuntu 26.04 aarch64 GCC 15.2.0"
       },
       "hosted_confirmation": "Local GCC 15 inventory measured; authoritative GitHub Ubuntu 26 confirmation pending",
@@ -728,8 +740,8 @@
         "taken": 6
       },
       "main/logic/checkup.hpp": {
-        "outcomes": 855,
-        "taken": 778
+        "outcomes": 889,
+        "taken": 814
       },
       "main/logic/checkup_persist.hpp": {
         "outcomes": 125,
@@ -1146,8 +1158,8 @@
         "taken": 8
       },
       "main/logic/checkup.hpp": {
-        "outcomes": 989,
-        "taken": 900
+        "outcomes": 1023,
+        "taken": 938
       },
       "main/logic/checkup_persist.hpp": {
         "outcomes": 153,
@@ -1564,8 +1576,8 @@
         "taken": 8
       },
       "main/logic/checkup.hpp": {
-        "outcomes": 989,
-        "taken": 900
+        "outcomes": 1023,
+        "taken": 938
       },
       "main/logic/checkup_persist.hpp": {
         "outcomes": 153,
@@ -1982,8 +1994,8 @@
         "taken": 8
       },
       "main/logic/checkup.hpp": {
-        "outcomes": 989,
-        "taken": 900
+        "outcomes": 1023,
+        "taken": 938
       },
       "main/logic/checkup_persist.hpp": {
         "outcomes": 153,

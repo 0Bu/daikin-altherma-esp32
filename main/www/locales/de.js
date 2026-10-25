@@ -1,4 +1,4 @@
-// translation-source: 35f2b17396ef51dd6a1c1fe8b1c07561fe6a16c726430e5785295bdb9dfc18aa
+// translation-source: 27ca0b00310a57817beb3d013a898499a721ca91fe3bae39f73cc748a141cd9e
 I18N.de = localeValues([
   /* sys.nodata */ "Keine Daten",
   /* sys.unreachable */ "Nicht erreichbar",
@@ -182,6 +182,9 @@ I18N.de = localeValues([
   /* check.status.observation */ "MESSWERT",
   /* check.status.experimental */ "TESTWEISE",
   /* check.status.unavailable */ "ENTFÄLLT",
+  /* check.status.no_window */ "KEIN MESSFENSTER",
+  /* check.detail.dhw_energy */ (a, b, c, d) => `Beispiel für eine Stunde: 200 l Wasser kühlen gleichmäßig mit ${a} K/h ab → ${b} kWh Wärme. Nachheizen: ${c}–${d} kWh Strom bei angenommener Leistungszahl COP 2,5–3 (Wärme ÷ Strom). Keine gemessene Energie.`,
+  /* check.detail.dhw_context */ (a, b, c) => `Stundenfenster: interne Pumpe ${a}; zapfungsähnlicher Abfall ${b}; ohne Pumpen-/Zapfmerkmal ≥0,8 K/h ${c}. Pumpen-/Abfallzahlen können sich überschneiden.`,
   /* check.detail.value_label */ "Messwert:",
   /* check.detail.assessment_label */ "Bewertung:",
   /* check.detail.ok */ "Diese Regel löste in den lesbaren Daten nicht aus.",
@@ -199,7 +202,7 @@ I18N.de = localeValues([
   /* check.detail.dhw_settling */ (a, b, c) => `Angenommene Stundenfenster: ${a}; Speicherladung oder Heizstab erkannt. Verbleibende Beruhigungszeit: ${c}.`,
   /* check.detail.dhw_waiting */ (a, b) => `Angenommene Stundenfenster: ${a}; wartet auf die nächste geeignete Stunde.`,
   /* check.detail.dhw_aborted */ (n, reasons, best) => ` ${n} ${n === 1 ? "Kandidat wurde" : "Kandidaten wurden"} verworfen (${reasons}); längster erreichte ${best} von 60 min.`,
-  /* check.detail.dhw_blocked */ (a, b, c) => `Kein geeignetes Stundenfenster in 24 h. Verworfene Fenster: ${a} (${b}); längster ${c} von 60 min. Zapfungsähnliche Abfälle können auch schneller Dauerverlust sein; die Ursache ist nicht belegt.`,
+  /* check.detail.dhw_blocked */ (a, b, c) => `Kein geeignetes Stundenfenster in 24 h. Verworfen: ${a} (${b}); längster ${c}.`,
   /* check.detail.dhw_blocked_link */ (a, b) => `Kein geeignetes Stundenfenster in 24 h: Abgebrochene Fenster: ${a}, weil nötige Werte zu lange ungelesen waren; längster ${b} von 60 min. Fehlende Antworten oder Abfragepausen des Boards erzeugen solche Lücken. Keine Aussage über den Speicher.`,
   /* check.detail.dhw_reason.charge */ "Speicherladung",
   /* check.detail.dhw_reason.pump */ "interne Pumpe",
@@ -223,9 +226,6 @@ I18N.de = localeValues([
   /* check.tank_runtime */ (d) => `Speicher ${d}`,
   /* check.buh_runtime */ (d) => `Zusatz ${d}`,
   /* check.loss_windows */ (n) => `${n} ${n === 1 ? "Fenster" : "Fenster"}`,
-  /* check.loss_pump_off */ "auch bei ausgeschalteter Zirkulationspumpe",
-  /* check.loss_with_pump */ "während Zirkulationspumpenbetrieb",
-  /* check.loss_unattributed */ "Pumpenzuordnung unvollständig",
   /* check.fault_err */ "Störung aktiv",
   /* check.fault_warn */ "Warnung aktiv",
   /* check.fault_past */ "In den letzten 24 h aufgetreten · jetzt nicht mehr aktiv",
@@ -252,8 +252,6 @@ I18N.de = localeValues([
   /* check.detail.age_label */ "Alter der letzten Messung:",
   /* check.detail.horizon_wait */ (a) => `Das vollständige 24-Stunden-Fenster fehlt noch: ${a} verbleiben.`,
   /* check.detail.fault.ok */ "Keine aktuelle oder gespeicherte Meldung in lesbaren Störungssignalen.",
-  /* check.detail.dhw_loss.info */ "interner Hinweis ab 0,8 K/h; Ursache nicht belegt.",
-  /* check.detail.dhw_loss.observation */ "Nur angenommene Stunden; ausgeschlossene Stunden können schneller abkühlen.",
   /* check.detail.cycling.info */ "≥12 abgeschlossene Heizläufe im Mittel unter 10 min: interner Hinweis.",
   /* check.detail.cycling.ok */ "Kein interner Hinweis auf kurze abgeschlossene Heizläufe.",
   /* check.detail.defrost.info */ "≥3 zugeordnete Abtauungen über 15 % der lesbaren Verdichterlaufzeit: interner Hinweis.",

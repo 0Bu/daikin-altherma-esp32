@@ -1,4 +1,4 @@
-// translation-source: 35f2b17396ef51dd6a1c1fe8b1c07561fe6a16c726430e5785295bdb9dfc18aa
+// translation-source: 27ca0b00310a57817beb3d013a898499a721ca91fe3bae39f73cc748a141cd9e
 I18N.fi = localeValues([
   /* sys.nodata */ "Ei tietoja",
   /* sys.unreachable */ "Ei tavoiteta",
@@ -182,6 +182,9 @@ I18N.fi = localeValues([
   /* check.status.observation */ "MITTAUS",
   /* check.status.experimental */ "KOKEILU",
   /* check.status.unavailable */ "EI KOSKE",
+  /* check.status.no_window */ "EI MITTAUSJAKSOA",
+  /* check.detail.dhw_energy */ (a, b, c, d) => `Tunnin esimerkki: 200 l vettä jäähtyy tasaisesti ${a} K/h → ${b} kWh lämpöä; korvaamiseen ${c}–${d} kWh sähköä oletetulla COP 2,5–3 (lämpö ÷ sähkö). Ei mitattu energia.`,
+  /* check.detail.dhw_context */ (a, b, c) => `Tuntijaksot: sisäinen pumppu ${a}; vedenoton kaltainen lasku ${b}; merkitön ≥0,8 K/h ${c}. Pumppu/lasku voivat olla päällekkäisiä.`,
   /* check.detail.value_label */ "Arvo:",
   /* check.detail.assessment_label */ "Arvio:",
   /* check.detail.ok */ "Sääntö ei lauennut luettavissa tiedoissa.",
@@ -199,7 +202,7 @@ I18N.fi = localeValues([
   /* check.detail.dhw_settling */ (a, b, c) => `Hyväksytyt tunti-ikkunat: ${a}; varaajan lataus tai vastus havaittu. Vakiintumista jäljellä: ${c}.`,
   /* check.detail.dhw_waiting */ (a, b) => `Hyväksytyt tunti-ikkunat: ${a}; odotetaan seuraavaa sopivaa tuntia.`,
   /* check.detail.dhw_aborted */ (n, reasons, best) => ` ${n === 1 ? "1 ehdokasikkuna" : `${n} ehdokasikkunaa`} hylätty (${reasons}); pisin ${best}/60 min.`,
-  /* check.detail.dhw_blocked */ (a, b, c) => `Ei kelvollista tunnin ikkunaa 24 h aikana. Hylättyjä ikkunoita: ${a} (${b}); pisin ${c}/60 min. Vedenoton kaltainen lasku voi olla nopeaa jatkuvaa jäähtymistä; syy ei ole vahvistettu.`,
+  /* check.detail.dhw_blocked */ (a, b, c) => `Ei sopivaa tuntia 24 h aikana. Hylätyt jaksot: ${a} (${b}); pisin ${c}.`,
   /* check.detail.dhw_blocked_link */ (a, b) => `Ei kelvollista tunnin ikkunaa 24 h aikana: Päättyneitä ikkunoita: ${a} vaadittujen arvojen pitkään puuttuessa; pisin ${b}/60 min. Puuttuvat vastaukset tai lukutauot voivat aiheuttaa aukon. Varaajasta ei päätellä mitään.`,
   /* check.detail.dhw_reason.charge */ "säiliön lataus",
   /* check.detail.dhw_reason.pump */ "sisäinen pumppu",
@@ -223,9 +226,6 @@ I18N.fi = localeValues([
   /* check.tank_runtime */ (d) => `säiliö ${d}`,
   /* check.buh_runtime */ (d) => `vara ${d}`,
   /* check.loss_windows */ (n) => `${n} ikkuna${n === 1 ? "" : "a"}`,
-  /* check.loss_pump_off */ "myös kiertovesipumpun ollessa pois",
-  /* check.loss_with_pump */ "kiertovesipumpun käydessä",
-  /* check.loss_unattributed */ "pumppukohdistus puutteellinen",
   /* check.fault_err */ "Vika aktiivinen",
   /* check.fault_warn */ "Varoitus aktiivinen",
   /* check.fault_past */ "Ilmeni viimeisen 24 h aikana · ei nyt aktiivinen",
@@ -252,8 +252,6 @@ I18N.fi = localeValues([
   /* check.detail.age_label */ "Viimeisen mittauksen ikä:",
   /* check.detail.horizon_wait */ (a) => `Täysi 24 tunnin ikkuna puuttuu vielä: jäljellä ${a}.`,
   /* check.detail.fault.ok */ "Ei nykyistä tai tallennettua ilmoitusta luettavissa vikasignaaleissa.",
-  /* check.detail.dhw_loss.info */ "Projektin vihje 0,8 K/h alkaen; syy ei ole todistettu.",
-  /* check.detail.dhw_loss.observation */ "Vain hyväksytyt tunnit; hylätyissä voi olla nopeampaa jäähtymistä.",
   /* check.detail.cycling.info */ "≥12 päättynyttä lämmitysjaksoa keskimäärin <10 min: projektin vihje.",
   /* check.detail.cycling.ok */ "Ei lyhyiden päättyneiden lämmitysjaksojen vihjettä.",
   /* check.detail.defrost.info */ "≥3 yhdistettyä sulatusta ylittää 15% luettavasta kompressoriajasta: projektin vihje.",
@@ -1068,7 +1066,7 @@ DESCRIPTION_I18N.fi = descriptionValues([
 
 MODEL_DESCRIPTION_I18N.fi = modelDescriptionValues([
   ["Laitteen ilmoitukset; eivät todista syytä tai ratkaisua."], // health_fault
-  ["Varaaja-anturi R5T: yksi piste, ei energiaa. Sisäinen raja ≥0,8 K/h; noin 1,85 K/h voidaan hylätä vedenottona. Kierron samanaikaisuus ei todista syytä."], // health_dhw_loss
+  ["R5T: tunnin nettojäähtyminen kerrostuneen varaajan pisteessä, ei energia. Projektin vihje ≥0,8 K/h ilman pumppu-/vedenottomerkkejä. Merkkien puute ei osoita vedenoton puuttumista; nollanettojäähtyminen ei sulje pois lämpöhäviötä. Kierto ei osoita syytä."], // health_dhw_loss
   ["≥12 päättynyttä lämmitysjaksoa, keskiarvo <10 min; ≥90% kaikista päättyneistä jaksoista luokiteltu. Sisäinen sääntö, ei Daikin; käyttövesi, jäähdytys ja luokittelemattomat pois."], // health_cycling
   ["Sulatus: ≥3 yhdistettyä, >15% kompressorin käyntiajasta, kun sekä kompressorin että sulatuksen tila on luettavissa. Sisäinen sääntö, ei Daikin; kosteus ja koko kennon lämpötila puuttuvat."], // health_defrost
   ["Paine: yhteinen sisäinen raja ≤1,0 bar; 60 s jatkuvaa havaintoa antaa varoituksen. Ei yleispätevä; mallin ohje pätee."], // health_pressure

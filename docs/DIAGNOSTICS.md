@@ -1,6 +1,6 @@
 # Plant diagnostics in plain language
 
-<!-- user-docs-contract: 6e206904007b5293cc751ecdb57e0d824287cc8a0d75c06bbfa41a8984a88f26 -->
+<!-- user-docs-contract: 95ebaafe0cac0300003cb6800244fe5f45f23617db273e120ec26d64d2aa49b0 -->
 
 Plant diagnostics **reads measurements and counts events; it does not control the heat pump**.
 It is off by default. Enable **Plant diagnostics** under **Settings → Firmware** to start an evidence
@@ -61,24 +61,29 @@ The observation establishes neither a cause nor why a message stopped appearing.
 <!-- user-docs: health_dhw_loss -->
 ### Domestic-hot-water tank cooling
 
-**In plain language:** The board measures the temperature drop at tank sensor R5T during eligible
-one-hour windows. It displays the largest completed-window cooling rate (rounded down to 0.1 K/h),
-the completed window count and how many reached the project's **0.8 K/h** note threshold.
+**In plain language:** The board shows the largest net temperature drop at tank sensor R5T during
+completed one-hour windows, in **K/h** (one kelvin of cooling equals one degree Celsius). It also
+shows how many windows reached **0.8 K/h** and how many contained internal water-pump activity or
+a draw-like drop. Those counts cover all windows and may overlap; they do not describe the maximum
+window individually. Rapid continuous cooling remains visible even when it resembles water use;
+confirmed endpoint readings keep an isolated temperature spike out of the rate.
 
-**Meaning:** At least one such window produces **NOTE**. Other completed windows are **MEASURED**;
-no eligible window means **CHECKING**; "no eligible window in 24 h" needs a full day of tank-cooling
-evidence since collection started or the circulation witness changed. There is no green tank-loss result. An optional
-circulation-power witness shows how many notable windows overlapped electrical pump operation or
-had a sufficiently observed pump-off state.
+**Meaning:** **NOTE** needs at least one window at or above the project's 0.8 K/h threshold without
+either marker. Other completed windows are **MEASURED**, including marked high rates. Without a
+completed window the board shows **CHECKING**, progress or settling time. After a full day of DHW
+evidence with six discarded candidates it says **NO WINDOW** and explains the exclusions.
 
-**Important limit:** Charging, pump activity, apparent draws and missing readings exclude time. Fast
-continuous cooling above about **1.85 K/h** can resemble a draw and be excluded too. One sensor
-in a stratified tank does not measure whole-tank heat or electricity loss, and pump overlap does not
-prove a cause. After a charge seen for at least two minutes, or a fresh start (power loss, crash, switching Plant
-diagnostics on or off, a new unit identity, a circulation-witness change or a long reading gap), the
-check waits 45 minutes before a window; unread valve or heater
-readings extend that wait. A planned restart, such as an update, keeps only the remaining settling time. A charge no
-reading saw can still affect a window.
+**Energy example:** For an assumed uniformly cooling **200 l** tank, **1.2 K/h** corresponds to
+about **0.28 kWh of heat per hour**. Replacing that heat at an assumed COP (heat delivered per
+unit of electricity) of **2.5–3** would require **0.09–0.11 kWh of electricity**. The UI recalculates
+this example from the displayed maximum; it is neither your measured consumption nor a daily sum.
+
+**Important limit:** One sensor in a stratified tank cannot measure whole-tank loss. Water use can
+remove useful heat; zero net cooling does not prove zero loss. Neither a missing draw marker nor
+a valve command proves an undisturbed tank, and optional external circulation overlap proves no
+cause. Charging, its 45-minute settle, a fresh filter's 45-minute hold, invalid temperatures and
+excessive missing readings exclude time; unread charge witnesses extend the wait. A compatible
+planned restart preserves the remaining settling time, but unseen charging can still affect a window.
 
 **Evidence and limits:** [Tank cooling](DIAGNOSTIC_EVIDENCE.md#diagnosis-dhw-loss)
 

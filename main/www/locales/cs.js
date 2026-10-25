@@ -1,4 +1,4 @@
-// translation-source: 35f2b17396ef51dd6a1c1fe8b1c07561fe6a16c726430e5785295bdb9dfc18aa
+// translation-source: 27ca0b00310a57817beb3d013a898499a721ca91fe3bae39f73cc748a141cd9e
 I18N.cs = localeValues([
   /* sys.nodata */ "Žádná data",
   /* sys.unreachable */ "Nedostupné",
@@ -182,6 +182,9 @@ I18N.cs = localeValues([
   /* check.status.observation */ "MĚŘENÍ",
   /* check.status.experimental */ "ZKUŠEBNĚ",
   /* check.status.unavailable */ "N/A",
+  /* check.status.no_window */ "BEZ OKNA",
+  /* check.detail.dhw_energy */ (a, b, c, d) => `Příklad jedné hodiny: 200 l rovnoměrně chladnoucí vody při ${a} K/h → ${b} kWh tepla; doplnění ${c}–${d} kWh elektřiny při předpokládaném COP 2,5–3 (teplo ÷ elektřina). Nejde o měření energie.`,
+  /* check.detail.dhw_context */ (a, b, c) => `Okna: vnitřní čerpadlo ${a}; pokles podobný odběru ${b}; bez značek ≥0,8 K/h ${c}. Čerpadlo/pokles se mohou překrývat.`,
   /* check.detail.value_label */ "Hodnota:",
   /* check.detail.assessment_label */ "Vyhodnocení:",
   /* check.detail.ok */ "Pravidlo se v čitelných datech neaktivovalo.",
@@ -199,7 +202,7 @@ I18N.cs = localeValues([
   /* check.detail.dhw_settling */ (a, b, c) => `Přijatá hodinová okna: ${a}; zjištěn ohřev nebo topná tyč zásobníku. Zbývá ustálení: ${c}.`,
   /* check.detail.dhw_waiting */ (a, b) => `Přijatá hodinová okna: ${a}; čekání na další vhodnou hodinu.`,
   /* check.detail.dhw_aborted */ (n, reasons, best) => ` ${n} ${n === 1 ? "kandidátní okno bylo vyřazeno" : n >= 2 && n <= 4 ? "kandidátní okna byla vyřazena" : "kandidátních oken bylo vyřazeno"} (${reasons}); nejdelší dosáhlo ${best} z 60 min.`,
-  /* check.detail.dhw_blocked */ (a, b, c) => `Žádné vhodné hodinové okno za 24 h. Vyřazená okna: ${a} (${b}); nejdelší ${c} z 60 min. Pokles podobný odběru může být rychlé trvalé chladnutí; příčina neprokázána.`,
+  /* check.detail.dhw_blocked */ (a, b, c) => `Bez vhodné hodiny za 24 h. Vyřazená okna: ${a} (${b}); nejdelší ${c}.`,
   /* check.detail.dhw_blocked_link */ (a, b) => `Žádné vhodné hodinové okno za 24 h: Přerušená okna: ${a}, pro dlouho nečtené nutné hodnoty; nejdelší ${b} z 60 min. Chybějící odpovědi či pauzy dotazování vytvářejí mezery. Nic to neprokazuje o zásobníku.`,
   /* check.detail.dhw_reason.charge */ "nabíjení zásobníku",
   /* check.detail.dhw_reason.pump */ "vnitřní čerpadlo",
@@ -223,9 +226,6 @@ I18N.cs = localeValues([
   /* check.tank_runtime */ (d) => `zásobník ${d}`,
   /* check.buh_runtime */ (d) => `záložní ${d}`,
   /* check.loss_windows */ (n) => `${n} ${n === 1 ? "okno" : n >= 2 && n <= 4 ? "okna" : "oken"}`,
-  /* check.loss_pump_off */ "také při vypnutém oběhovém čerpadle",
-  /* check.loss_with_pump */ "během provozu oběhového čerpadla",
-  /* check.loss_unattributed */ "přiřazení čerpadlu není úplné",
   /* check.fault_err */ "Aktivní porucha",
   /* check.fault_warn */ "Aktivní varování",
   /* check.fault_past */ "Výskyt během posledních 24 h · nyní neaktivní",
@@ -252,8 +252,6 @@ I18N.cs = localeValues([
   /* check.detail.age_label */ "Stáří posledního měření:",
   /* check.detail.horizon_wait */ (a) => `Úplné 24hodinové okno ještě chybí: zbývá ${a}.`,
   /* check.detail.fault.ok */ "Žádné aktuální ani uložené hlášení v čitelných signálech poruch.",
-  /* check.detail.dhw_loss.info */ "Upozornění projektu od 0,8 K/h; příčina neprokázána.",
-  /* check.detail.dhw_loss.observation */ "Jen přijaté hodiny; vyloučené mohou obsahovat rychlejší chladnutí.",
   /* check.detail.cycling.info */ "≥12 dokončených běhů vytápění s průměrem <10 min: upozornění projektu.",
   /* check.detail.cycling.ok */ "Žádné upozornění na krátké dokončené běhy vytápění.",
   /* check.detail.defrost.info */ "≥3 spárovaná odmrazení přesahují 15 % čitelné doby kompresoru: upozornění projektu.",
@@ -1182,7 +1180,7 @@ DESCRIPTION_I18N.cs = descriptionValues([
 
 MODEL_DESCRIPTION_I18N.cs = modelDescriptionValues([
   ["Hlášení čerpadla; neprokazují příčinu ani opravu."], // health_fault
-  ["Čidlo R5T: bod, ne energie. Interní práh ≥0,8 K/h; kolem 1,85 K/h možné vyloučení jako odběr. Cirkulace neprokazuje příčinu."], // health_dhw_loss
+  ["R5T: hodinové čisté chladnutí v bodě vrstveného zásobníku, ne energie. Interní práh ≥0,8 K/h bez značek čerpadla/odběru. Jejich absence neprokazuje nulový odběr; nulové čisté chladnutí nevylučuje ztráty. Cirkulace neprokazuje příčinu."], // health_dhw_loss
   ["≥12 úplných běhů vytápění, průměr <10 min; klasifikováno ≥90% všech dokončených běhů. Interní pravidlo, ne Daikin; TUV, chlazení a neklasifikované vyloučeny."], // health_cycling
   ["Odmrazení: ≥3 spárovaná, >15% doby chodu kompresoru při čitelném stavu kompresoru i odmrazení. Interní pravidlo, ne Daikin; chybí vlhkost a teplota celého výměníku."], // health_defrost
   ["Tlak: společné interní pravidlo ≤1,0 bar; 60 s souvislého pozorování dává varování. Ne univerzální; platí návod modelu."], // health_pressure
