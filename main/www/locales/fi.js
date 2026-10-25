@@ -76,6 +76,8 @@ I18N.fi = localeValues([
   /* bug.redacted */ "Verkon nimi, osoitteet sekä välittäjän ja palvelimien nimet on jo poistettu.",
   /* nav.settings */ "Asetukset",
   /* nav.back */ "Takaisin",
+  /* nav.cards */ "Näkymän kortit",
+  /* nav.diagnosis */ "Diagnostiikka",
   /* nav.settings_alert */ (n) => `Asetukset — ${n} ${n === 1 ? "yhteys" : "yhteyttä"} poikki`,
   /* src.modbus_tag */ "modbus",
   /* src.agree */ "Lähteet täsmäävät",

@@ -76,6 +76,8 @@ I18N.fr = localeValues([
   /* bug.redacted */ "Le nom de votre réseau, les adresses, le broker et les noms de serveur ont déjà été supprimés.",
   /* nav.settings */ "Paramètres",
   /* nav.back */ "Retour",
+  /* nav.cards */ "Cartes du tableau de bord",
+  /* nav.diagnosis */ "Diagnostic",
   /* nav.settings_alert */ (n) => `Paramètres — ${n} ${n === 1 ? "connexion indisponible" : "connexions indisponibles"}`,
   /* src.modbus_tag */ "modbus",
   /* src.agree */ "Les deux sources concordent",

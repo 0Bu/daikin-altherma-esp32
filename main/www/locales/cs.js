@@ -76,6 +76,8 @@ I18N.cs = localeValues([
   /* bug.redacted */ "Název vaší sítě, adresy, broker a názvy serverů již byly odstraněny.",
   /* nav.settings */ "Nastavení",
   /* nav.back */ "Zpět",
+  /* nav.cards */ "Karty přehledu",
+  /* nav.diagnosis */ "Diagnostika",
   /* nav.settings_alert */ (n) => `Nastavení — ${n} ${n === 1 ? "připojení je nedostupné" : n >= 2 && n <= 4 ? "připojení jsou nedostupná" : "připojení je nedostupných"}`,
   /* src.modbus_tag */ "modbus",
   /* src.agree */ "Oba zdroje se shodují",

@@ -76,6 +76,8 @@ I18N.nb = localeValues([
   /* bug.redacted */ "Nettverksnavn, adresser, broker og servernavn er allerede fjernet.",
   /* nav.settings */ "Innstillinger",
   /* nav.back */ "Tilbake",
+  /* nav.cards */ "Oversiktskort",
+  /* nav.diagnosis */ "Diagnostikk",
   /* nav.settings_alert */ (n) => `Innstillinger — ${n} ${n === 1 ? "tilkobling har" : "tilkoblinger har"} feil`,
   /* src.modbus_tag */ "modbus",
   /* src.agree */ "Begge kilder er enige",

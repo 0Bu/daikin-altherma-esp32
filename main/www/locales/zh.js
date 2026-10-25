@@ -76,6 +76,8 @@ I18N.zh = localeValues([
   /* bug.redacted */ "网络名称、地址、代理和服务器名称均已移除。",
   /* nav.settings */ "设置",
   /* nav.back */ "返回",
+  /* nav.cards */ "仪表板卡片",
+  /* nav.diagnosis */ "诊断",
   /* nav.settings_alert */ (n) => `设置 — ${n} 个连接不可用`,
   /* src.modbus_tag */ "modbus",
   /* src.agree */ "两个数据源一致",

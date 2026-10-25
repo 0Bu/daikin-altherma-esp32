@@ -76,6 +76,8 @@ I18N.de = localeValues([
   /* bug.redacted */ "Netzwerkname, Adressen, Broker und Servernamen sind bereits entfernt.",
   /* nav.settings */ "Einstellungen",
   /* nav.back */ "Zurück",
+  /* nav.cards */ "Kartenübersicht",
+  /* nav.diagnosis */ "Diagnose",
   /* nav.settings_alert */ (n) => `Einstellungen — ${n} Verbindung${n === 1 ? "" : "en"} gestört`,
   /* src.modbus_tag */ "modbus",
   /* src.agree */ "Beide Quellen einig",

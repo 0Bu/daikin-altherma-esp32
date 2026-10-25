@@ -458,25 +458,165 @@ const nativeAltherma4Rows = Object.freeze([
     labelKey: "a4.unit_operation", valueKey: "enum.actuator", helpKey: "a4.operation_help" },
 ]);
 
-// Exercise the delegated pointer lifecycle, including the disclosure animation.
-async function clickDisclosure(page, selector) {
+// Use native pointer events so delegated navigation, focus and hit testing all participate.
+async function clickElement(page, selector) {
+  // Native input must reach this owned fixture tab. Chrome may open an internal help/update tab
+  // in a fresh profile; a background fixture also throttles the disclosure's bounded hold timer.
+  await page.send("Page.bringToFront");
+  await page.evaluate(`(() => {
+    const button = document.querySelector(${JSON.stringify(selector)});
+    if (!button) throw new Error("missing pointer target: " + ${JSON.stringify(selector)});
+    button.scrollIntoView({ block: "center", behavior: "instant" });
+    return true;
+  })()`);
+  // A shorter selected card can clamp the document scroll position after the preceding click.
+  // Flush that real layout before taking coordinates, as the inspector pointer fixtures do.
+  await page.frame();
   const point = await page.evaluate(`(() => {
     const button = document.querySelector(${JSON.stringify(selector)});
-    button.scrollIntoView({ block: "center" });
     const rect = button.getBoundingClientRect();
-    return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+    if (!rect.width || !rect.height) throw new Error("hidden pointer target: " + ${JSON.stringify(selector)});
+    const point = { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+    if (document.elementFromPoint(point.x, point.y)?.closest("button") !== button)
+      throw new Error("pointer target is obstructed: " + ${JSON.stringify(selector)});
+    return point;
   })()`);
   await page.send("Input.dispatchMouseEvent", { type: "mouseMoved", ...point });
   await page.send("Input.dispatchMouseEvent",
     { type: "mousePressed", button: "left", clickCount: 1, ...point });
   await page.send("Input.dispatchMouseEvent",
     { type: "mouseReleased", button: "left", clickCount: 1, ...point });
+}
+
+async function activateDashboardCardForSelector(page, selector) {
+  const key = await page.evaluate(`document.querySelector(${JSON.stringify(selector)})
+    ?.closest(".vgroup[data-dashboard-card]")?.dataset.dashboardCard || null`);
+  if (!key) return;
+  const navSelector = `#cardNav button[data-card=${JSON.stringify(key)}]`;
+  if (await page.evaluate(`document.querySelector(${JSON.stringify(navSelector)})
+    ?.getAttribute("aria-pressed") === "true"`)) return;
+  await clickElement(page, navSelector);
+  await page.waitFor(`document.querySelector(${JSON.stringify(navSelector)})
+    ?.getAttribute("aria-pressed") === "true"`);
+}
+
+// Exercise the delegated pointer lifecycle, including the disclosure animation. Value fixtures may
+// target any card; activate its actual navigation entry before measuring its pointer target.
+async function clickDisclosure(page, selector) {
+  await activateDashboardCardForSelector(page, selector);
+  await clickElement(page, selector);
   await page.waitFor(`(() => {
     const button = document.querySelector(${JSON.stringify(selector)});
     const item = button?.closest(".vitem");
     return button?.getAttribute("aria-expanded") === "true" && item.classList.contains("open") &&
       item.getAnimations({ subtree: true }).every((animation) => animation.playState !== "running");
   })()`);
+}
+
+async function assertDashboardCardNavigation(page, context, viewport) {
+  const customGroup = 'Installer "A&B" <view>';
+  const groups = ["Operation", "Domestic hot water", "Water circuit", "Refrigerant / outdoor",
+    "Protection", "Electrical", "Device", "Other values", customGroup];
+  const expected = ["diagnosis", "model", ...groups.map(group => `group:${group}`), "modbus"];
+  await page.evaluate(`(() => {
+    window.__browserCardsOriginal = { ...S };
+    window.__browserCardsFetch = window.fetch;
+    window.__browserCardsRequests = [];
+    window.fetch = (...args) => {
+      window.__browserCardsRequests.push({ url: String(args[0]), method: args[1]?.method || "GET" });
+      return window.__browserCardsFetch(...args);
+    };
+    S.status = structuredClone(S.status);
+    S.status.hp.connected = true;
+    S.status.diagnostics.enabled = true;
+    S.status.health = { status: "ok", full_span: true, source_fresh: true, source_age_s: 1,
+      span_s: 86400, checks: [{ id: "fault", verdict: "ok", evidence: "manufacturer", active: 0 }] };
+    S.status.modbus = { ...S.status.modbus, host: "card.fixture.invalid", enabled: true, connected: true };
+    S._values = ${JSON.stringify(groups)}.map((group, index) => ({
+      group, label: "Fixture reading " + index, value: "12", unit: "°C", reg: 0x61, off: index,
+    }));
+    S._modbus = [{ off: 49, label: "Flow rate", value: 2.6, unit: "L/min", profile: "altherma4" }];
+    S.dashboardCard = "diagnosis";
+    S.descOpen = new Set(); S.scrub = null; S.clickHold = false;
+    renderApp();
+    return true;
+  })()`);
+  try {
+    await page.frame();
+    const entries = await page.evaluate(`Array.from(document.querySelectorAll("#cardNav button[data-card]"),
+      button => ({ key: button.dataset.card, label: button.textContent.trim(),
+        type: button.type, controls: button.getAttribute("aria-controls") }))`);
+    assert.deepEqual(entries.map(entry => entry.key), expected,
+      `${context}: navigation follows actual cards in their existing semantic order`);
+    assert.ok(entries.every(entry => entry.label && entry.type === "button" && entry.controls === "valueGroups"),
+      `${context}: every available card has a named native button controlling the content`);
+    assert.equal(entries.find(entry => entry.key === `group:${customGroup}`).label, customGroup,
+      `${context}: firmware custom group text survives escaped attributes and markup`);
+    const current = async () => page.evaluate(`(() => {
+      const selected = Array.from(document.querySelectorAll("#cardNav button[data-card]"))
+        .filter(button => button.getAttribute("aria-pressed") === "true");
+      const visible = Array.from(document.querySelectorAll("#valueGroups .vgroup[data-dashboard-card]"))
+        .filter(card => !card.hidden && getComputedStyle(card).display !== "none");
+      return { key: S.dashboardCard, selected: selected.map(button => button.dataset.card),
+        visible: visible.map(card => card.dataset.dashboardCard),
+        labelled: selected.length === 1 && document.getElementById("valueGroups")
+          .getAttribute("aria-labelledby") === selected[0].id };
+    })()`);
+    assert.deepEqual(await current(), { key: "diagnosis", selected: ["diagnosis"],
+      visible: ["diagnosis"], labelled: true }, `${context}: diagnosis opens by default`);
+    const placement = await page.evaluate(`(() => {
+      const nav = document.getElementById("cardNav").getBoundingClientRect();
+      const content = document.getElementById("valueGroups").getBoundingClientRect();
+      return { left: nav.right <= content.left + 1, above: nav.bottom <= content.top + 1,
+        lines: new Set(Array.from(document.querySelectorAll("#cardNav button"),
+          button => Math.round(button.getBoundingClientRect().top))).size };
+    })()`);
+    assert.equal(viewport.name === "phone" ? placement.above : placement.left, true,
+      `${context}: navigation is ${viewport.name === "phone" ? "above the card" : "left of the card"}`);
+    if (viewport.name === "phone") assert.ok(placement.lines > 1,
+      `${context}: mobile names wrap into visible rows without a horizontal tab scroller`);
+
+    for (const key of expected) {
+      await clickElement(page, `#cardNav button[data-card=${JSON.stringify(key)}]`);
+      assert.deepEqual(await current(), { key, selected: [key], visible: [key], labelled: true },
+        `${context}/${key}: native click shows exactly the requested card`);
+      assertLayout(await page.evaluate(layoutAudit), `${context}/${key}`);
+    }
+    // A pending disclosure click or active trend must not make card navigation appear unresponsive.
+    await page.evaluate('S.clickHold = true; S.scrub = "fixture-trend"; true');
+    await clickElement(page, '#cardNav button[data-card="model"]');
+    assert.deepEqual(await current(), { key: "model", selected: ["model"], visible: ["model"], labelled: true },
+      `${context}: navigation remains immediate while row rendering is held`);
+    await page.evaluate("S.clickHold = false; S.scrub = null; renderApp(); true");
+    assert.equal((await current()).key, "model", `${context}: a poll repaint preserves the selected card`);
+
+    await page.evaluate(`(() => {
+      const button = document.querySelector('#cardNav button[data-card="diagnosis"]');
+      button.scrollIntoView({ block: "center", behavior: "instant" }); button.focus();
+      return true;
+    })()`);
+    await page.key("Enter", { code: "Enter", keyCode: 13 });
+    assert.equal((await current()).key, "diagnosis", `${context}: Enter activates a focused card name`);
+    await page.evaluate('document.querySelector(\'#cardNav button[data-card="model"]\').focus(); true');
+    await page.key(" ", { code: "Space", keyCode: 32 });
+    assert.equal((await current()).key, "model", `${context}: Space activates a focused card name`);
+    await page.evaluate("showStage('settings'); showStage('dashboard'); renderApp(); true");
+    assert.equal((await current()).key, "model", `${context}: Settings round trip preserves card choice`);
+    await assertAccessibility(page, context, { nativeTree: true });
+    assert.deepEqual(await page.evaluate("window.__browserCardsRequests"), [],
+      `${context}: switching cards performs no requests or configuration writes`);
+    await captureNativeEvidence(page, `${context}/selected`, "cardBrowser");
+  } finally {
+    await page.evaluate(`(() => {
+      Object.assign(S, window.__browserCardsOriginal);
+      window.fetch = window.__browserCardsFetch;
+      delete window.__browserCardsOriginal; delete window.__browserCardsFetch;
+      delete window.__browserCardsRequests;
+      S.inspSig = null; S.inspHistSig = null;
+      renderApp(); window.scrollTo(0, 0); return true;
+    })()`);
+    await page.frame();
+  }
 }
 
 async function captureNativeEvidence(page, context, target = "valueGroups", ancestor = null) {
@@ -501,7 +641,7 @@ async function assertPlantDiagnosis(page, context) {
   // Exercise the shipped renderer with independently scoped observations, including a real zero,
   // an absent heater channel and stale-source evidence. These fixtures do not certify a plant.
   await page.evaluate(`(() => {
-    window.__browserDiagnosisOriginal = { status: S.status, open: new Set(S.descOpen) };
+    window.__browserDiagnosisOriginal = { status: S.status, open: new Set(S.descOpen), card: S.dashboardCard };
     S.status = structuredClone(S.status);
     S.status.health = {
       status: "info", full_span: true, span_s: 86400, source_fresh: true, source_age_s: 1,
@@ -540,6 +680,7 @@ async function assertPlantDiagnosis(page, context) {
     const selector = "[data-desc^='model:health_']";
     assert.equal(await page.evaluate(`document.querySelectorAll(${JSON.stringify(selector)}).length`), 8,
       `${context}: all eight diagnosis rows must render`);
+    await activateDashboardCardForSelector(page, "[data-desc='model:health_pressure']");
     await captureNativeEvidence(page, `${context}/overview`,
       "[data-desc='model:health_pressure']", ".card");
     const selectors = await page.evaluate(`Array.from(document.querySelectorAll(${JSON.stringify(selector)}),
@@ -649,6 +790,7 @@ async function assertPlantDiagnosis(page, context) {
     await page.evaluate(`(() => {
       S.status = window.__browserDiagnosisOriginal.status;
       S.descOpen = window.__browserDiagnosisOriginal.open;
+      S.dashboardCard = window.__browserDiagnosisOriginal.card;
       delete window.__browserDiagnosisOriginal;
       renderApp();
       return true;
@@ -1018,6 +1160,7 @@ try {
 }
 try {
   const { page } = browser;
+  await page.send("Page.bringToFront");
   await page.navigate(server.url);
   try {
     await page.waitFor("typeof S !== 'undefined' && S.status && Array.isArray(S._values) && document.querySelector('#settingsCards .vgroup')");
@@ -1027,7 +1170,11 @@ try {
       body: document.body?.innerText?.slice(0, 120) || "" })`);
     throw new Error(`${error.message}; state=${JSON.stringify(state)}; diagnostics=${page.diagnostics.join(" | ")}`);
   }
-  await page.evaluate("pollStop(); true");
+  // Every case below installs synthetic source frames. Keep automatic polling stopped when the
+  // owned tab is brought forward: the real visibility handler otherwise resumes polling and
+  // replaces those frames with the server's baseline in the middle of a native pointer sequence.
+  // Poll cadence and visibility-resume behavior have separate production-function contract tests.
+  await page.evaluate("pollStop(); pollSchedule = () => {}; true");
 
   assert.equal(await page.evaluate(`(() => {
     const feedback = document.getElementById("toasts");
@@ -1203,6 +1350,7 @@ try {
       await page.frame();
       assertLayout(await page.evaluate(layoutAudit), `${viewport.name}/${locale}/dashboard`);
       await assertAccessibility(page, `${viewport.name}/${locale}/dashboard`, { nativeTree: true });
+      await assertDashboardCardNavigation(page, `${viewport.name}/${locale}/card-navigation`, viewport);
       await assertFlowSwitchWords(page, `${viewport.name}/${locale}/flow-switch`);
       await assertPlantDiagnosis(page, `${viewport.name}/${locale}/diagnosis`);
       await assertStatusTruth(page, `${viewport.name}/${locale}/status-truth`);
@@ -1396,6 +1544,7 @@ try {
   for (const viewport of viewports) await assertSetup(page, server, viewport);
   console.log(`browser render gate passed: ${browser.product}; ${browserLocales.length} locales; ` +
     `${viewports.length} viewports; native AX + keyboard on dashboard/settings/all routed modals; ` +
+    "compact cards + wrapped mobile navigation + native pointer/keyboard selection; " +
     "native Altherma 4 numeric metadata + localized pointer-opened accordions; " +
     "Hybrid room source + pointer-opened inspector + honest absence; " +
     "bounded real History roundtrips; reduced motion on dashboard/settings/WiFi/progress/disclosures");

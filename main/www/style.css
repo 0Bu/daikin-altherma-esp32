@@ -561,7 +561,38 @@ svg .sc-hit:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px
 .btn.danger:hover { filter: brightness(1.08); }
 
 /* ── Value groups (dashboard) ───────────────────────────────────────────── */
-#valueGroups { margin-top: 14px; }
+.dashboard-cards {
+  margin-top: 14px; min-width: 0; background: var(--card); border: 1px solid var(--line);
+  border-radius: var(--r-card); box-shadow: var(--shadow-card);
+}
+.dashboard-cards[hidden] { display: none; }
+.dashboard-card-nav {
+  display: flex; flex-wrap: wrap; gap: 5px; padding: 10px;
+  border-bottom: 1px solid var(--line); background: var(--soft);
+  border-radius: var(--r-card) var(--r-card) 0 0;
+}
+.dashboard-card-button {
+  min-width: 0; min-height: 44px; max-width: 100%; padding: 9px 11px; border: 0;
+  border-radius: 8px; background: transparent; color: var(--fg); cursor: pointer;
+  font: inherit; font-size: 13px; line-height: 1.35; text-align: left; overflow-wrap: anywhere;
+}
+.dashboard-card-button:hover { background: var(--line); }
+.dashboard-card-button[aria-pressed="true"] {
+  background: var(--brand-tint); box-shadow: inset 3px 0 0 var(--brand); font-weight: 650;
+}
+#valueGroups { min-width: 0; }
+#valueGroups > .vgroup + .vgroup { margin-top: 0; }
+#valueGroups > .vgroup[hidden] { display: none; }
+#valueGroups > .vgroup > :only-child { border: 0; box-shadow: none; background: transparent; }
+@media (min-width: 700px) {
+  .dashboard-cards { display: grid; grid-template-columns: 180px minmax(0, 1fr); align-items: start; }
+  .dashboard-card-nav {
+    flex-direction: column; flex-wrap: nowrap; align-self: stretch;
+    border-bottom: 0; border-right: 1px solid var(--line);
+    border-radius: var(--r-card) 0 0 var(--r-card);
+  }
+  .dashboard-card-button { width: 100%; font-size: 14px; }
+}
 .vgroup + .vgroup { margin-top: 12px; }
 .vgroup .section-label { display: block; margin-bottom: 2px; }
 /* Protection group heading marker: shown only while a drop-control flag reads ON. Carries its own
@@ -1338,11 +1369,8 @@ html.modal-open, body.modal-open { overflow: hidden; overscroll-behavior: none; 
 .toast.ok .disc { background: var(--ok); } .toast.err .disc { background: var(--err); }
 @keyframes tin { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
 
-/* Single column at every width (DESIGN.md §9): every card — the system card, each value group and
-   the Connections/ESP32 cards behind the gear — is the same full container width, stacked top-down. (An earlier ≥560px two-column
-   multicol packed the value cards into two columns; it left an empty second column — with a stray
-   card shadow at the column gap — whenever only the ESP32 card showed, e.g. while the heat-pump link
-   is down.) */
+/* The schematic and Settings cards remain full-width. Dashboard details share one panel, with
+   card names to its left on desktop and wrapping above it on phones (DESIGN.md §6). */
 
 /* ≥600px (tablet / desktop): the single mobile-sized column reads small and sparse on a big screen
    (e.g. a wall-mounted tablet) — lots of empty margin, little content. Widen the column and scale the

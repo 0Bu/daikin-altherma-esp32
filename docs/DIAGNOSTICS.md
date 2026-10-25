@@ -6,7 +6,7 @@ Plant diagnostics **reads measurements and counts events; it does not control th
 It is off by default. Enable **Plant diagnostics** under **Settings → Firmware** to start an evidence
 window. Disabling clears this evidence and stops additional room, forecast and circulation collection.
 
-The **Plant diagnostics · 24 h** card appears below the schematic. Open a row for its observation,
+Select **Diagnostics** below the schematic to show the **Plant diagnostics · 24 h** card. Open a row for its observation,
 meaning and limits. A rolling day does not imply that every signal was readable throughout it.
 The summary shows the highest finding severity and the number of affected rows. Without a finding,
 it distinguishes ongoing collection, measurements and completed assessments. It is not a score for

@@ -126,9 +126,8 @@ async function refreshValues(paint = true) {
   if (paint) renderApp();
   return true;
 }
-// Dashboard cards: the rolling plant diagnostics first, directly below the live diagram, followed by the
-// detected unit (Model) and the heat-pump value groups — all one continuous card grid, each block
-// styled like OPERATION. The board (ESP32) card and the
+// Dashboard cards: diagnostics, detected unit and value groups share one selectable panel below
+// the live diagram. The board (ESP32) card and the
 // WiFi/MQTT/Syslog/NTP rows are NOT here: both moved behind the gear onto Settings (renderSettings).
 function renderCards() {
   // Frozen while a trend is being scrubbed (S.scrub): rebuilding innerHTML under an active pointer
@@ -149,6 +148,49 @@ function renderCards() {
     S.status?.diagnostics?.enabled === true && S.status?.hp?.connected);
   setHtml("valueGroups", checkup + statusCardsHtml() +
     valueGroupsHtml(S._values || [], S.status?.hp?.connected));
+  syncDashboardCards();
+}
+
+// Read the installed frame: setHtml may have held a newer one while a row was being tapped.
+// Keep inactive cards mounted so their accordions, trend state and delegated handlers survive.
+function syncDashboardCards() {
+  const browser = $("cardBrowser"), nav = $("cardNav"), host = $("valueGroups");
+  if (!browser || !nav || !host) return;
+  const cards = Array.from(host.querySelectorAll(".vgroup[data-dashboard-card]"));
+  browser.hidden = !cards.length;
+  const selected = cards.find(card => card.dataset.dashboardCard === S.dashboardCard) || cards[0];
+  if (!selected) {
+    setHtml("cardNav", "");
+    host.removeAttribute("aria-labelledby");
+    return;
+  }
+  S.dashboardCard = selected.dataset.dashboardCard;
+  nav.setAttribute("aria-label", t("nav.cards"));
+  const active = document.activeElement;
+  const focused = nav.contains(active) ? active.dataset.card : null;
+  setHtml("cardNav", cards.map((card, index) =>
+    `<button type="button" class="dashboard-card-button" id="dashboard-card-${index}" ` +
+    `data-card="${esc(card.dataset.dashboardCard)}" aria-pressed="false" aria-controls="valueGroups">` +
+    `${esc(card.dataset.dashboardLabel)}</button>`).join(""));
+  for (const card of cards) card.hidden = card !== selected;
+  for (const button of nav.querySelectorAll("[data-card]")) {
+    const chosen = button.dataset.card === S.dashboardCard;
+    button.setAttribute("aria-pressed", chosen ? "true" : "false");
+    if (chosen) host.setAttribute("aria-labelledby", button.id);
+  }
+  if (focused != null && !nav.contains(active)) {
+    const buttons = Array.from(nav.querySelectorAll("[data-card]"));
+    (buttons.find(button => button.dataset.card === focused) ||
+      buttons.find(button => button.dataset.card === S.dashboardCard))?.focus({ preventScroll: true });
+  }
+}
+
+function selectDashboardCard(key) {
+  const cards = $("valueGroups").querySelectorAll(".vgroup[data-dashboard-card]");
+  if (!Array.from(cards).some(card => card.dataset.dashboardCard === key)) return;
+  S.dashboardCard = key;
+  // Selection is immediate even while the pointer hold is protecting a pending values repaint.
+  syncDashboardCards();
 }
 
 // Hold the rebuild for the duration of one click, and make it IMPOSSIBLE to leave held — the same
@@ -188,7 +230,9 @@ function vrow(k, v, opt = {}) {
 // `badgeCls` tints the badge's DOT only ("ok" / "err" / "dim"; the default is --warn). The word
 // itself stays --fg in every state, which is what keeps §9 satisfied: the dot carries the emphasis
 // and the text carries the statement, so a reader who cannot separate the colours loses nothing.
-const vcard = (label, rows, badge, badgeCls) => `<div class="vgroup"><div class="card">` +
+const vcard = (label, rows, badge, badgeCls, key, navLabel = label) =>
+  `<div class="vgroup"${key ? ` data-dashboard-card="${esc(key)}" ` +
+    `data-dashboard-label="${esc(navLabel)}"` : ""}><div class="card">` +
   `<div class="section-label">${esc(label)}` +
   (badge ? `<span class="section-badge ${badgeCls || ""}">${esc(badge)}</span>` : "") +
   `</div>${rows}</div></div>`;
@@ -1215,7 +1259,7 @@ function statusCardsHtml() {
 
   // Model identity is only meaningful while the bus answers — hide the card entirely when the
   // heat-pump link is down instead of naming a unit (or showing a stale capacity) that isn't live.
-  return hp.connected ? vcard(t("card.model"), model) : "";
+  return hp.connected ? vcard(t("card.model"), model, "", "", "model") : "";
 }
 
 // ── The diagnosis card — "is anything worth reporting?" (logic/checkup.hpp, legacy-208/legacy-349) ─────────
@@ -1560,7 +1604,7 @@ function checkupCardHtml(includeHealth = true) {
   // by the badge below and stays visible even when the optional 24-hour diagnoses are switched off.
   const rows = healthRows + refrigerantServiceRowHtml();
   if (!rows) return "";                               // older firmware — no card rather than an empty one
-  if (!healthRows) return vcard(t("card.checkup"), rows);
+  if (!healthRows) return vcard(t("card.checkup"), rows, "", "", "diagnosis", t("nav.diagnosis"));
   // Findings are counts of serialized verdicts, not a health score or a second threshold rule.
   const warnings = h.checks.filter(c => c.verdict === "warn").length;
   const notes = h.checks.filter(c => c.verdict === "info").length;
@@ -1570,7 +1614,7 @@ function checkupCardHtml(includeHealth = true) {
               : h.status === "collecting" ? t("check.summary.collecting")
               : t("check.summary.observations");
   const badgeCls = { warn: "err", ok: "ok", collecting: "dim", unavailable: "dim" }[h.status] || "";
-  return vcard(t("card.checkup"), rows, badge, badgeCls);
+  return vcard(t("card.checkup"), rows, badge, badgeCls, "diagnosis", t("nav.diagnosis"));
 }
 
 // A read-only context window for a qualified refrigerant service check.  This is deliberately not a

@@ -76,6 +76,8 @@ I18N.ja = localeValues([
   /* bug.redacted */ "ネットワーク名、アドレス、ブローカー名、サーバー名は除去済みです。",
   /* nav.settings */ "設定",
   /* nav.back */ "戻る",
+  /* nav.cards */ "ダッシュボードのカード",
+  /* nav.diagnosis */ "診断",
   /* nav.settings_alert */ (n) => `設定 — 接続エラー ${n}件`,
   /* src.modbus_tag */ "modbus",
   /* src.agree */ "両方の値が一致",

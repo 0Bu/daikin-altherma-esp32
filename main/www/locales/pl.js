@@ -81,6 +81,8 @@ I18N.pl = localeValues([
   /* bug.redacted */ "Nazwa sieci, adresy, broker i nazwy serwerów zostały już usunięte.",
   /* nav.settings */ "Ustawienia",
   /* nav.back */ "Wstecz",
+  /* nav.cards */ "Karty panelu",
+  /* nav.diagnosis */ "Diagnostyka",
   /* nav.settings_alert */ (n) => `Ustawienia — ${n} ${plNoun(n, "połączenie niedostępne", "połączenia niedostępne", "połączeń niedostępnych")}`,
   /* src.modbus_tag */ "modbus",
   /* src.agree */ "Oba źródła są zgodne",
