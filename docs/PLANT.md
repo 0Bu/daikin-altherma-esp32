@@ -86,7 +86,7 @@ empty samples advance time without booking observations.
 
 An intentional restart can carry only the ongoing tank-loss filter through a separately sealed
 **one-shot handoff**, adopted after the same full X10A and circulation scopes are confirmed with
-diagnostics enabled and no reset requested. It preserves the quiet-hour candidate/settling timer,
+diagnostics enabled and no reset requested. It preserves the hourly cooling candidate/settling timer,
 never undated completed counters or transient compressor edges. Power loss, crash, changed source
 or incompatible/absent format starts a fresh filter. The current bucket geometry changes the diagnosis journal fingerprint,
 so previous-format hourly records are rejected; handoff v3 also rejects v2. Trend-journal sources
