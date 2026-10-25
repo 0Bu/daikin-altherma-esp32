@@ -78,6 +78,7 @@ I18N.fr = localeValues([
   /* nav.back */ "Retour",
   /* nav.cards */ "Cartes du tableau de bord",
   /* nav.diagnosis */ "Diagnostic",
+  /* nav.outdoor */ "Unité extérieure",
   /* nav.settings_alert */ (n) => `Paramètres — ${n} ${n === 1 ? "connexion indisponible" : "connexions indisponibles"}`,
   /* src.modbus_tag */ "modbus",
   /* src.agree */ "Les deux sources concordent",

@@ -78,6 +78,7 @@ I18N.cs = localeValues([
   /* nav.back */ "Zpět",
   /* nav.cards */ "Karty přehledu",
   /* nav.diagnosis */ "Diagnostika",
+  /* nav.outdoor */ "Venkovní jednotka",
   /* nav.settings_alert */ (n) => `Nastavení — ${n} ${n === 1 ? "připojení je nedostupné" : n >= 2 && n <= 4 ? "připojení jsou nedostupná" : "připojení je nedostupných"}`,
   /* src.modbus_tag */ "modbus",
   /* src.agree */ "Oba zdroje se shodují",

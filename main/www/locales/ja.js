@@ -78,6 +78,7 @@ I18N.ja = localeValues([
   /* nav.back */ "戻る",
   /* nav.cards */ "ダッシュボードのカード",
   /* nav.diagnosis */ "診断",
+  /* nav.outdoor */ "室外機",
   /* nav.settings_alert */ (n) => `設定 — 接続エラー ${n}件`,
   /* src.modbus_tag */ "modbus",
   /* src.agree */ "両方の値が一致",

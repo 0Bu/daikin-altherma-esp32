@@ -78,6 +78,7 @@ I18N.nb = localeValues([
   /* nav.back */ "Tilbake",
   /* nav.cards */ "Oversiktskort",
   /* nav.diagnosis */ "Diagnostikk",
+  /* nav.outdoor */ "Utendørsenhet",
   /* nav.settings_alert */ (n) => `Innstillinger — ${n} ${n === 1 ? "tilkobling har" : "tilkoblinger har"} feil`,
   /* src.modbus_tag */ "modbus",
   /* src.agree */ "Begge kilder er enige",

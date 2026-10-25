@@ -72,7 +72,7 @@ const context = vm.createContext({
 vm.runInContext(readAppFragments(["i18n.js", "app_state.js", "dashboard.js"]) +
   locales.filter(code => code !== "en").map(readUiLocale).join("\n") + `
   this.ui = {
-    S, vcard, sync: syncDashboardCards, select: selectDashboardCard,
+    S, vcard, icon: dashboardCardIcon, sync: syncDashboardCards, select: selectDashboardCard,
     lang: code => { LANG = code; }, text: key => t(key),
     render: (diagnosis, model, values) => {
       checkupCardHtml = () => diagnosis;
@@ -102,6 +102,21 @@ expectSelection("diagnosis", "initial available diagnosis");
 assert.deepEqual(keys(), ["diagnosis", "model", "group:Operation", "modbus"]);
 assert.ok(nav.children.every(button => button.getAttribute("type") === "button" &&
   button.getAttribute("aria-controls") === "valueGroups"), "navigation uses native content-control buttons");
+for (const className of ["dashboard-card-icon", "dashboard-card-label", "dashboard-card-chevron"])
+  assert.equal(Array.from(nav.innerHTML.matchAll(new RegExp(`class="${className}"`, "g"))).length, 4,
+    `every rendered button has its ${className} element`);
+const knownKeys = ["diagnosis", "model", "group:Operation", "group:Domestic hot water", "group:Water circuit",
+  "group:Refrigerant / outdoor", "group:Protection", "group:Electrical", "group:Device", "group:Other values", "modbus"];
+const knownIcons = knownKeys.map(key => ui.icon(key));
+assert.equal(new Set(knownIcons).size, knownKeys.length, "each standard card has its own recognizable icon");
+for (const icon of knownIcons) {
+  assert.match(icon, /<svg[^>]*class="dashboard-card-icon"[^>]*width="17"[^>]*height="17"/);
+  assert.match(icon, /viewBox="0 0 24 24"/, "icon geometry uses the prototype's vector coordinate system");
+  assert.match(icon, /aria-hidden="true" focusable="false"/, "decorative icons do not duplicate spoken card names");
+  assert.match(icon, /<(?:path|rect)\b/, "every icon renders actual self-contained vector geometry");
+}
+assert.equal(ui.icon('group:Installer "<custom>"'), ui.icon("group:Other values"),
+  "firmware custom groups receive a safe fixed icon rather than inserting their key as markup");
 
 const mounted = [...host.children];
 const disclosureState = ui.S.descOpen;

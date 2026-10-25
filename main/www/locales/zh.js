@@ -78,6 +78,7 @@ I18N.zh = localeValues([
   /* nav.back */ "返回",
   /* nav.cards */ "仪表板卡片",
   /* nav.diagnosis */ "诊断",
+  /* nav.outdoor */ "室外机",
   /* nav.settings_alert */ (n) => `设置 — ${n} 个连接不可用`,
   /* src.modbus_tag */ "modbus",
   /* src.agree */ "两个数据源一致",

@@ -2197,7 +2197,8 @@ function valueGroupsHtml(vals, connected) {
     const shown  = prot ? rows.map((v) => (isLimiting(v) ? { ...v, state: "warn" } : v)) : rows;
     const badge  = prot && rows.some(isLimiting) ? t("protect.limiting") : "";
     const label = grouped ? groupLabel(name) : t("group.Values");
-    html += vcard(label, rowsOf(shown), badge, "", `group:${name}`);
+    const navLabel = grouped && name === "Refrigerant / outdoor" ? t("nav.outdoor") : label;
+    html += vcard(label, rowsOf(shown), badge, "", `group:${name}`, navLabel);
   };
   for (const name of order) if (buckets.has(name)) { emit(name, buckets.get(name)); done.add(name); }
   for (const [name, rows] of buckets) if (!done.has(name)) emit(name, rows); // firmware-supplied custom groups

@@ -562,36 +562,58 @@ svg .sc-hit:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px
 
 /* ── Value groups (dashboard) ───────────────────────────────────────────── */
 .dashboard-cards {
-  margin-top: 14px; min-width: 0; background: var(--card); border: 1px solid var(--line);
-  border-radius: var(--r-card); box-shadow: var(--shadow-card);
+  --dashboard-surface: #fff; --dashboard-side: #f8fafb; --dashboard-text: #252e36;
+  --dashboard-muted: #6c7681; --dashboard-line: #e4e8ec; --dashboard-blue: #138fba;
+  --dashboard-selection: #e5f4fa; --dashboard-hover: #f1f5f6; --dashboard-shadow: #1937490c;
+  margin-top: 14px; min-width: 0; background: var(--dashboard-surface);
+  border: 1px solid var(--dashboard-line); border-radius: 17px;
+  box-shadow: 0 5px 18px var(--dashboard-shadow);
 }
 .dashboard-cards[hidden] { display: none; }
 .dashboard-card-nav {
   display: flex; flex-wrap: wrap; gap: 5px; padding: 10px;
-  border-bottom: 1px solid var(--line); background: var(--soft);
-  border-radius: var(--r-card) var(--r-card) 0 0;
+  border-bottom: 1px solid var(--dashboard-line); background: var(--dashboard-side);
+  border-radius: 17px 17px 0 0; min-width: 0;
 }
 .dashboard-card-button {
-  min-width: 0; min-height: 44px; max-width: 100%; padding: 9px 11px; border: 0;
-  border-radius: 8px; background: transparent; color: var(--fg); cursor: pointer;
-  font: inherit; font-size: 13px; line-height: 1.35; text-align: left; overflow-wrap: anywhere;
+  display: flex; align-items: center; gap: 0; min-width: 0; min-height: 40px; max-width: 100%;
+  padding: 9px 10px; border: 0; border-radius: 9px; background: transparent;
+  color: var(--dashboard-muted); cursor: pointer; text-align: left;
+  font: 500 12px/1.25 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
-.dashboard-card-button:hover { background: var(--line); }
+.dashboard-card-label { min-width: 0; overflow-wrap: anywhere; }
+.dashboard-card-button:hover { color: var(--dashboard-text); background: var(--dashboard-hover); }
 .dashboard-card-button[aria-pressed="true"] {
-  background: var(--brand-tint); box-shadow: inset 3px 0 0 var(--brand); font-weight: 650;
+  background: var(--dashboard-selection); color: var(--dashboard-blue); font-weight: 650;
 }
+.dashboard-card-icon, .dashboard-card-chevron { display: none; }
 #valueGroups { min-width: 0; }
 #valueGroups > .vgroup + .vgroup { margin-top: 0; }
 #valueGroups > .vgroup[hidden] { display: none; }
-#valueGroups > .vgroup > :only-child { border: 0; box-shadow: none; background: transparent; }
-@media (min-width: 700px) {
-  .dashboard-cards { display: grid; grid-template-columns: 180px minmax(0, 1fr); align-items: start; }
+#valueGroups > .vgroup > :only-child { padding: 20px 16px 15px; border: 0; box-shadow: none; background: transparent; }
+@media (min-width: 650px) {
+  .dashboard-cards { display: grid; grid-template-columns: 202px minmax(0, 1fr); align-items: stretch; }
   .dashboard-card-nav {
-    flex-direction: column; flex-wrap: nowrap; align-self: stretch;
-    border-bottom: 0; border-right: 1px solid var(--line);
-    border-radius: var(--r-card) 0 0 var(--r-card);
+    flex-direction: column; flex-wrap: nowrap; gap: 3px; padding: 12px 9px;
+    border-bottom: 0; border-right: 1px solid var(--dashboard-line); border-radius: 17px 0 0 17px;
   }
-  .dashboard-card-button { width: 100%; font-size: 14px; }
+  .dashboard-card-button { gap: 10px; width: 100%; padding: 10px 12px; font-size: 14px; }
+  .dashboard-card-icon { display: block; width: 17px; height: 17px; flex: 0 0 17px; }
+  .dashboard-card-chevron {
+    display: block; margin-left: auto; width: 14px; height: 14px; flex: 0 0 14px; opacity: 0;
+  }
+  .dashboard-card-button[aria-pressed="true"] .dashboard-card-chevron { opacity: 1; }
+  #valueGroups > .vgroup > :only-child { padding: 23px 24px 18px; }
+}
+@media (pointer: coarse) {
+  .dashboard-card-button { min-height: 44px; }
+}
+@media (prefers-color-scheme: dark) {
+  .dashboard-cards {
+    --dashboard-surface: #222b33; --dashboard-side: #1d252d; --dashboard-text: #edf2f6;
+    --dashboard-muted: #acb6c1; --dashboard-line: #39434d; --dashboard-blue: #6cc9ee;
+    --dashboard-selection: #193e50; --dashboard-hover: #171e24; --dashboard-shadow: #00000020;
+  }
 }
 .vgroup + .vgroup { margin-top: 12px; }
 .vgroup .section-label { display: block; margin-bottom: 2px; }

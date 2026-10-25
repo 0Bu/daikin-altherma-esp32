@@ -78,6 +78,7 @@ I18N.sv = localeValues([
   /* nav.back */ "Tillbaka",
   /* nav.cards */ "Översiktskort",
   /* nav.diagnosis */ "Diagnostik",
+  /* nav.outdoor */ "Utomhusenhet",
   /* nav.settings_alert */ (n) => `Inställningar — ${n} ${n === 1 ? "anslutning har" : "anslutningar har"} fel`,
   /* src.modbus_tag */ "modbus",
   /* src.agree */ "Båda källorna stämmer överens",

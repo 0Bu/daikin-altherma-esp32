@@ -78,6 +78,7 @@ I18N.fi = localeValues([
   /* nav.back */ "Takaisin",
   /* nav.cards */ "Näkymän kortit",
   /* nav.diagnosis */ "Diagnostiikka",
+  /* nav.outdoor */ "Ulkoyksikkö",
   /* nav.settings_alert */ (n) => `Asetukset — ${n} ${n === 1 ? "yhteys" : "yhteyttä"} poikki`,
   /* src.modbus_tag */ "modbus",
   /* src.agree */ "Lähteet täsmäävät",

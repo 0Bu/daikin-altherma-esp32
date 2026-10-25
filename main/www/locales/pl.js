@@ -83,6 +83,7 @@ I18N.pl = localeValues([
   /* nav.back */ "Wstecz",
   /* nav.cards */ "Karty panelu",
   /* nav.diagnosis */ "Diagnostyka",
+  /* nav.outdoor */ "Jednostka zewnętrzna",
   /* nav.settings_alert */ (n) => `Ustawienia — ${n} ${plNoun(n, "połączenie niedostępne", "połączenia niedostępne", "połączeń niedostępnych")}`,
   /* src.modbus_tag */ "modbus",
   /* src.agree */ "Oba źródła są zgodne",

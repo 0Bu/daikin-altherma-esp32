@@ -78,6 +78,7 @@ I18N.es = localeValues([
   /* nav.back */ "Atrás",
   /* nav.cards */ "Tarjetas del panel",
   /* nav.diagnosis */ "Diagnóstico",
+  /* nav.outdoor */ "Unidad exterior",
   /* nav.settings_alert */ (n) => `Ajustes — ${n} ${n === 1 ? "conexión caída" : "conexiones caídas"}`,
   /* src.modbus_tag */ "modbus",
   /* src.agree */ "Ambas fuentes coinciden",

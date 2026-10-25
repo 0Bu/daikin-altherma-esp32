@@ -513,6 +513,100 @@ async function clickDisclosure(page, selector) {
   })()`);
 }
 
+async function assertDashboardCardAppearance(page, context, viewport) {
+  const appearance = await page.evaluate(`(() => {
+    const browser = document.getElementById("cardBrowser");
+    const nav = document.getElementById("cardNav");
+    const shellStyle = getComputedStyle(browser), navStyle = getComputedStyle(nav);
+    const buttons = Array.from(nav.querySelectorAll("button[data-card]"));
+    const readButton = button => {
+      const style = getComputedStyle(button);
+      const icon = button.querySelector("svg.dashboard-card-icon");
+      const label = button.querySelector("span.dashboard-card-label");
+      const chevron = button.querySelector("svg.dashboard-card-chevron");
+      return { key: button.dataset.card, pressed: button.getAttribute("aria-pressed"),
+        hovered: button.matches(":hover"),
+        structure: !!icon && !!label && !!chevron &&
+          button.querySelectorAll("svg.dashboard-card-icon").length === 1 &&
+          button.querySelectorAll("span.dashboard-card-label").length === 1 &&
+          button.querySelectorAll("svg.dashboard-card-chevron").length === 1 &&
+          label.textContent === button.textContent.trim(),
+        decorative: !!icon && !!chevron && [icon, chevron].every(element =>
+          element.getAttribute("aria-hidden") === "true" && element.getAttribute("focusable") === "false"),
+        iconDisplay: icon ? getComputedStyle(icon).display : null,
+        chevronDisplay: chevron ? getComputedStyle(chevron).display : null,
+        chevronOpacity: chevron ? getComputedStyle(chevron).opacity : null,
+        iconWidth: icon?.getBoundingClientRect().width,
+        chevronWidth: chevron?.getBoundingClientRect().width,
+        color: style.color, background: style.backgroundColor, weight: style.fontWeight,
+        fontSize: style.fontSize, lineHeight: style.lineHeight, radius: style.borderRadius,
+        minHeight: style.minHeight, gap: style.gap,
+        padding: [style.paddingTop, style.paddingRight, style.paddingBottom, style.paddingLeft],
+        borders: [style.borderTopWidth, style.borderRightWidth, style.borderBottomWidth, style.borderLeftWidth],
+        shadow: style.boxShadow, before: getComputedStyle(button, "::before").content };
+    };
+    return { dark: matchMedia("(prefers-color-scheme: dark)").matches,
+      coarse: matchMedia("(pointer: coarse)").matches,
+      desktop: matchMedia("(min-width: 650px)").matches,
+      shell: { radius: shellStyle.borderRadius,
+        widths: [shellStyle.borderTopWidth, shellStyle.borderRightWidth,
+          shellStyle.borderBottomWidth, shellStyle.borderLeftWidth],
+        colors: [shellStyle.borderTopColor, shellStyle.borderRightColor,
+          shellStyle.borderBottomColor, shellStyle.borderLeftColor] },
+      nav: { width: nav.getBoundingClientRect().width, background: navStyle.backgroundColor,
+        gap: navStyle.gap,
+        padding: [navStyle.paddingTop, navStyle.paddingRight, navStyle.paddingBottom, navStyle.paddingLeft] },
+      buttons: buttons.map(readButton) };
+  })()`);
+  assert.equal(appearance.desktop, viewport.width >= 650, `${context}: prototype breakpoint is 650 px`);
+  const colors = appearance.dark
+    ? { nav: "rgb(29, 37, 45)", border: "rgb(57, 67, 77)", selected: "rgb(25, 62, 80)",
+      activeText: "rgb(108, 201, 238)", normalText: "rgb(172, 182, 193)" }
+    : { nav: "rgb(248, 250, 251)", border: "rgb(228, 232, 236)", selected: "rgb(229, 244, 250)",
+      activeText: "rgb(19, 143, 186)", normalText: "rgb(108, 118, 129)" };
+  assert.deepEqual(appearance.shell, { radius: "17px", widths: Array(4).fill("1px"),
+    colors: Array(4).fill(colors.border) }, `${context}: prototype outer border is thin, complete and rounded`);
+  assert.equal(appearance.nav.background, colors.nav, `${context}: prototype sidebar surface`);
+  assert.equal(appearance.nav.gap, appearance.desktop ? "3px" : "5px", `${context}: prototype name spacing`);
+  assert.deepEqual(appearance.nav.padding, appearance.desktop ? ["12px", "9px", "12px", "9px"]
+    : Array(4).fill("10px"), `${context}: prototype sidebar padding`);
+  if (appearance.desktop) assert.equal(appearance.nav.width, 202, `${context}: desktop sidebar is 202 px wide`);
+  for (const button of appearance.buttons) {
+    const name = `${context}/${button.key}`;
+    assert.equal(button.structure, true, `${name}: icon, actual name and trailing chevron are distinct elements`);
+    assert.equal(button.decorative, true, `${name}: icon and chevron must stay decorative`);
+    assert.equal(button.fontSize, appearance.desktop ? "14px" : "12px", `${name}: prototype label size`);
+    assert.equal(button.lineHeight, appearance.desktop ? "17.5px" : "15px", `${name}: prototype label line height`);
+    assert.equal(button.minHeight, appearance.coarse ? "44px" : "40px", `${name}: readable pointer/touch target`);
+    assert.equal(button.radius, "9px", `${name}: prototype selection radius`);
+    assert.deepEqual(button.borders, Array(4).fill("0px"), `${name}: selection must not add a button border`);
+    assert.equal(button.shadow, "none", `${name}: selected state uses the rounded fill without an inset side strip`);
+    assert.ok(["none", "normal"].includes(button.before), `${name}: no decorative side-strip pseudo-element`);
+    assert.equal(button.gap, appearance.desktop ? "10px" : "0px", `${name}: prototype icon/name spacing`);
+    assert.deepEqual(button.padding, appearance.desktop ? ["10px", "12px", "10px", "12px"]
+      : ["9px", "10px", "9px", "10px"], `${name}: prototype button padding`);
+    if (appearance.desktop) {
+      assert.equal(button.iconDisplay, "block", `${name}: desktop shows its icon`);
+      assert.equal(button.chevronDisplay, "block", `${name}: desktop reserves the trailing chevron`);
+      assert.equal(button.iconWidth, 17, `${name}: prototype icon width`);
+      assert.equal(button.chevronWidth, 14, `${name}: prototype chevron width`);
+      assert.equal(button.chevronOpacity, button.pressed === "true" ? "1" : "0",
+        `${name}: only the selected desktop card shows the trailing chevron`);
+    } else {
+      assert.equal(button.iconDisplay, "none", `${name}: mobile names omit decorative icons`);
+      assert.equal(button.chevronDisplay, "none", `${name}: mobile names omit chevrons`);
+    }
+    if (button.pressed === "true") {
+      assert.equal(button.background, colors.selected, `${name}: prototype blue selected fill`);
+      assert.equal(button.color, colors.activeText, `${name}: prototype selected foreground`);
+      assert.equal(button.weight, "650", `${name}: prototype selected weight`);
+    } else {
+      assert.equal(button.weight, "500", `${name}: prototype inactive weight`);
+      if (!button.hovered) assert.equal(button.color, colors.normalText, `${name}: prototype inactive foreground`);
+    }
+  }
+}
+
 async function assertDashboardCardNavigation(page, context, viewport) {
   const customGroup = 'Installer "A&B" <view>';
   const groups = ["Operation", "Domestic hot water", "Water circuit", "Refrigerant / outdoor",
@@ -564,6 +658,9 @@ async function assertDashboardCardNavigation(page, context, viewport) {
     })()`);
     assert.deepEqual(await current(), { key: "diagnosis", selected: ["diagnosis"],
       visible: ["diagnosis"], labelled: true }, `${context}: diagnosis opens by default`);
+    await assertDashboardCardAppearance(page, context, viewport);
+    await page.evaluate("document.activeElement?.blur?.(); true");
+    await captureNativeEvidence(page, `${context}/diagnosis`, "cardBrowser");
     const placement = await page.evaluate(`(() => {
       const nav = document.getElementById("cardNav").getBoundingClientRect();
       const content = document.getElementById("valueGroups").getBoundingClientRect();
@@ -605,6 +702,7 @@ async function assertDashboardCardNavigation(page, context, viewport) {
     await assertAccessibility(page, context, { nativeTree: true });
     assert.deepEqual(await page.evaluate("window.__browserCardsRequests"), [],
       `${context}: switching cards performs no requests or configuration writes`);
+    await page.evaluate("document.activeElement?.blur?.(); true");
     await captureNativeEvidence(page, `${context}/selected`, "cardBrowser");
   } finally {
     await page.evaluate(`(() => {
@@ -1307,6 +1405,24 @@ try {
     await openModalWithKeyboard(page, "refTempModal", modalTriggers.refTempModal,
       "selftest/desktop/de/refTempModal", { route: false });
     throw new Error("route-isolation-bypass mutation unexpectedly survived the route gate");
+  } else if (process.argv.includes("--cards-only")) {
+    // Small prototype-parity pass for sidebar iterations. The normal invocation still owns the
+    // complete locale/modal matrix and the supervisor's independent negative controls.
+    for (const scheme of ["light", "dark"]) {
+      await page.send("Emulation.setEmulatedMedia", { media: "screen",
+        features: [{ name: "prefers-color-scheme", value: scheme }] });
+      for (const viewport of viewports) {
+        await page.viewport(viewport.width, viewport.height);
+        for (const locale of ["en", "de"]) {
+          await activateLocale(page, locale);
+          await page.evaluate("showStage('dashboard'); window.scrollTo(0, 0); true");
+          await assertDashboardCardNavigation(page, `${viewport.name}/${locale}/card-navigation/${scheme}`, viewport);
+          console.log(`card prototype checked: ${viewport.name}/${locale}/${scheme}`);
+        }
+      }
+    }
+    assert.deepEqual(page.diagnostics, [], "prototype card states must emit no browser errors");
+    console.log("focused card prototype rendering passed: 2 locales; 2 themes; " + viewports.length + " viewports");
   } else if (process.argv.includes("--setup-only")) {
     for (const viewport of viewports) await assertSetup(page, server, viewport);
   } else if (process.argv.includes("--diagnosis-only")) {

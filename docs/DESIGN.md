@@ -508,9 +508,11 @@ must preserve focus in every select and any active pointer/scrub/OTA operation.
 Below the schematic, card names select one detail card: Diagnostics first, then Model and the value
 groups below, followed by Modbus when available. Diagnostics is selected initially; if the selected
 card is absent, select the first available card. Selection stays local to the open page and survives
-polling, language changes and Settings visits. Card names appear on the left at widths of at least
-700 px and wrap above the panel on smaller screens; every name stays visible without horizontal
-scrolling. Only available cards appear in the selection.
+polling, language changes and Settings visits. At widths of at least 650 px, a 202 px sidebar shows
+each name with its icon and a chevron for the selected card. The selection uses a rounded cyan-tint
+background and cyan text inside the shared bordered panel. On smaller screens, names wrap above
+the panel without icons or horizontal scrolling. The short Outdoor unit name opens the complete
+Refrigerant/outdoor card. Only available cards appear in the selection.
 
 Read groups in this order: Operation, Domestic hot water, Water circuit, Refrigerant/outdoor,
 Protection, Electrical, then remaining Device/general values. Setpoints belong beside their measured

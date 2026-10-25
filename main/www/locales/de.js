@@ -78,6 +78,7 @@ I18N.de = localeValues([
   /* nav.back */ "Zurück",
   /* nav.cards */ "Kartenübersicht",
   /* nav.diagnosis */ "Diagnose",
+  /* nav.outdoor */ "Außeneinheit",
   /* nav.settings_alert */ (n) => `Einstellungen — ${n} Verbindung${n === 1 ? "" : "en"} gestört`,
   /* src.modbus_tag */ "modbus",
   /* src.agree */ "Beide Quellen einig",
