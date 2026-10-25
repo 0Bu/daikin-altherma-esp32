@@ -1,4 +1,4 @@
-// translation-source: 35f2b17396ef51dd6a1c1fe8b1c07561fe6a16c726430e5785295bdb9dfc18aa
+// translation-source: 56ec4b237229b88c50cf6b91ff312bb0f6656edfb91ec07b993d5e2bde0e9ca2
 I18N.es = localeValues([
   /* sys.nodata */ "Sin datos",
   /* sys.unreachable */ "No accesible",
@@ -182,6 +182,9 @@ I18N.es = localeValues([
   /* check.status.observation */ "MEDICIÓN",
   /* check.status.experimental */ "EN PRUEBA",
   /* check.status.unavailable */ "N/D",
+  /* check.status.no_window */ "SIN INTERVALO",
+  /* check.detail.dhw_energy */ (a, b, c, d) => `Ejemplo de una hora: 200 l de agua enfriándose uniformemente a ${a} K/h → ${b} kWh de calor; reposición de ${c}–${d} kWh eléctricos con COP supuesto 2,5–3 (calor ÷ electricidad). No es energía medida.`,
+  /* check.detail.dhw_context */ (a, b, c) => `Ventanas: bomba interna ${a}; caída similar a consumo ${b}; sin señales ≥0,8 K/h ${c}. Pueden coincidir.`,
   /* check.detail.value_label */ "Valor:",
   /* check.detail.assessment_label */ "Evaluación:",
   /* check.detail.ok */ "La regla no se activó en datos legibles.",
@@ -199,12 +202,12 @@ I18N.es = localeValues([
   /* check.detail.dhw_settling */ (a, b, c) => `Ventanas horarias aceptadas: ${a}; carga o calentador del depósito detectados. Estabilización restante: ${c}.`,
   /* check.detail.dhw_waiting */ (a, b) => `Ventanas horarias aceptadas: ${a}; esperando la siguiente hora válida.`,
   /* check.detail.dhw_aborted */ (n, reasons, best) => ` ${n} ${n === 1 ? "ventana candidata descartada" : "ventanas candidatas descartadas"} (${reasons}); la más larga alcanzó ${best} de 60 min.`,
-  /* check.detail.dhw_blocked */ (a, b, c) => `Sin ventana horaria válida en 24 h. Ventanas descartadas: ${a} (${b}); la mayor ${c} de 60 min. Una caída similar a extracción puede ser enfriamiento continuo rápido; causa no establecida.`,
+  /* check.detail.dhw_blocked */ (a, b, c) => "Ninguna hora completa en 24 h." + (a > 0 ? ` Ventanas descartadas: ${a} (${b}); la más larga ${c}.` : ""),
   /* check.detail.dhw_blocked_link */ (a, b) => `Sin ventana horaria válida en 24 h: Ventanas interrumpidas: ${a}, por lecturas necesarias ausentes demasiado tiempo; mayor ${b} de 60 min. Respuestas ausentes o pausas de consulta pueden producir el hueco. No establece nada del depósito.`,
   /* check.detail.dhw_reason.charge */ "carga del depósito",
   /* check.detail.dhw_reason.pump */ "bomba interna",
   /* check.detail.dhw_reason.draw */ "caída similar a una extracción",
-  /* check.detail.dhw_reason.reading */ "R5T no plausible",
+  /* check.detail.dhw_reason.reading */ "R5T sin confirmar",
   /* check.detail.dhw_reason.blind */ "faltan lecturas: X10A sin respuesta o consultas en pausa",
   /* check.detail.collecting_unknown */ "Sin evaluación actual.",
   /* check.detail.observation */ "Solo observación; sin límite universal OK/AVISO.",
@@ -223,9 +226,6 @@ I18N.es = localeValues([
   /* check.tank_runtime */ (d) => `depósito ${d}`,
   /* check.buh_runtime */ (d) => `apoyo ${d}`,
   /* check.loss_windows */ (n) => `${n} ${n === 1 ? "ventana" : "ventanas"}`,
-  /* check.loss_pump_off */ "también con la bomba de circulación apagada",
-  /* check.loss_with_pump */ "durante el funcionamiento de la bomba de circulación",
-  /* check.loss_unattributed */ "atribución de la bomba incompleta",
   /* check.fault_err */ "Fallo activo",
   /* check.fault_warn */ "Aviso activo",
   /* check.fault_past */ "Ocurrió en las últimas 24 h · ya no está activo",
@@ -252,8 +252,6 @@ I18N.es = localeValues([
   /* check.detail.age_label */ "Edad de la última lectura:",
   /* check.detail.horizon_wait */ (a) => `Falta completar la ventana de 24 horas: quedan ${a}.`,
   /* check.detail.fault.ok */ "Sin mensaje actual ni guardado en señales de fallo legibles.",
-  /* check.detail.dhw_loss.info */ "Indicio del proyecto desde 0,8 K/h; causa no probada.",
-  /* check.detail.dhw_loss.observation */ "Solo horas aceptadas; las excluidas pueden enfriarse más rápido.",
   /* check.detail.cycling.info */ "≥12 ciclos completos de calefacción con media <10 min: indicio del proyecto.",
   /* check.detail.cycling.ok */ "Sin indicio del proyecto de ciclos cortos en calefacción completada.",
   /* check.detail.defrost.info */ "≥3 desescarches asociados superan 15% del tiempo legible del compresor: indicio del proyecto.",
@@ -1227,7 +1225,7 @@ DESCRIPTION_I18N.es = descriptionValues([
 
 MODEL_DESCRIPTION_I18N.es = modelDescriptionValues([
   ["Mensajes de la bomba; no prueban causa ni resolución."], // health_fault
-  ["Sensor R5T: un punto, no energía. Regla interna ≥0,8 K/h; cerca de 1,85 K/h puede excluirse como extracción. Circulación no prueba causa."], // health_dhw_loss
+  ["R5T: un punto del depósito estratificado, no energía. Indicio interno ≥0,8 K/h sin señales de bomba/consumo. Consumo posible sin señales; 0 K/h no excluye pérdidas. Circulación no prueba causa."], // health_dhw_loss
   ["≥12 ciclos de calefacción completos, media <10 min; ≥90% de todos los ciclos completos clasificados. Regla interna, no Daikin; excluye ACS, frío y no clasificados."], // health_cycling
   ["Desescarche: ≥3 asociados, >15% del tiempo de marcha del compresor con estados de compresor y desescarche legibles. Regla interna, no Daikin; faltan humedad y temperatura de toda la batería."], // health_defrost
   ["Presión: regla interna común ≤1,0 bar; 60 s continuos observados dan AVISO. No universal; rige el manual del modelo."], // health_pressure

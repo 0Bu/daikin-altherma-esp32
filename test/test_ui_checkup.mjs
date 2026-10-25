@@ -51,6 +51,7 @@ for (const key of [
   "min_bar", "current_bar", "min_unix_s", "confirmed_low", "min_l_min",
   "buh_min", "bsh_min", "buh_s", "bsh_s", "buh_observed_s", "bsh_observed_s", "active", "seen",
   "max_k_h", "windows", "high_windows", "high_with_pump", "high_pump_off",
+  "draw_windows", "pump_windows", "quiet_high_windows",
   "circulation_on_s", "circulation_known_s", "candidate_s", "settle_remaining_s",
   "aborts", "best_aborted_s", "blocked", "abort_reasons",
 ]) {
@@ -200,19 +201,51 @@ for (const lang of locales) {
 }
 ui.setLang("en");
 
-// Current acquisition must not negate already completed DHW hours. No invented tank/COP example.
+// Current acquisition must not negate completed DHW hours. Energy is an explicit,
+// one-hour illustration from the observed rate, never a meter reading or daily total.
 const dhw = {
   id: "dhw_loss", verdict: "info", evidence: "heuristic", reason: "observation_only",
   max_k_h: 1.2, windows: 6, high_windows: 2, high_with_pump: 2, high_pump_off: 0,
+  draw_windows: 1, pump_windows: 2, quiet_high_windows: 1,
 };
-assert.equal(ui.metric(dhw), "maximum 1.2 K/h · 2/6 windows: threshold reached · during circulation-pump operation");
+assert.equal(ui.metric(dhw), "maximum 1.2 K/h · 2/6 windows: threshold reached");
 assert.equal(ui.metric({ ...dhw, max_k_h: 0.8, windows: 1, high_windows: 1,
                         high_with_pump: 0, high_pump_off: 0 }),
-             "maximum 0.8 K/h · 1/1 windows: threshold reached · pump attribution incomplete");
-assert.match(ui.detail(dhw), /Project hint at ≥0.8 K\/h; cause unproven/);
-assert.doesNotMatch(ui.detail(dhw, true), /200 l|COP|kWh|24 h:/);
+             "maximum 0.8 K/h · 1/1 windows: threshold reached");
+const mixedCirculation = { ...dhw, max_k_h: 6, high_pump_off: 1, high_with_pump: 1 };
+assert.equal(ui.metric(mixedCirculation), "maximum 6 K/h · 2/6 windows: threshold reached");
+assert.doesNotMatch(ui.metric(mixedCirculation), /pump|circulation|off|during/,
+  "an off-pump hour among several windows does not identify the maximum hour's context");
+assert.match(ui.detail(dhw), /An observed hint; its limit is explained below/);
+assert.match(ui.detail(dhw), /internal pump 2; draw-like drop 1; unmarked ≥0.8 K\/h 1/);
+assert.match(ui.detail(dhw), /Overlap possible/);
+assert.match(ui.detail(dhw), /Example for one hour: 200 l water cooling uniformly at 1.2 K\/h/);
+assert.match(ui.detail(dhw), /0.28 kWh heat/);
+assert.match(ui.detail(dhw), /0.09–0.11 kWh electricity to replace it at assumed COP 2.5–3 \(heat ÷ electricity\)/);
+assert.match(ui.detail(dhw), /Not measured energy/);
+assert.doesNotMatch(ui.detail(dhw), /24 h:|per day|1.68|6.70/);
+assert.match(ui.detail({ ...dhw, windows: 24 }), /0.28 kWh heat/,
+  "energy illustration must not multiply the maximum by a window count");
 assert.equal(ui.value({ ...dhw, verdict: "ok", evidence: "observation" }), "MEASURED");
-assert.match(ui.detail({ ...dhw, verdict: "ok", evidence: "observation" }), /omitted hours may cool faster/);
+assert.match(ui.detail({ ...dhw, verdict: "ok", evidence: "observation" }), /Observation only; no universal OK\/WARNING limit/);
+// Zero remains a real observation; missing, non-finite and unsupported evidence cannot
+// manufacture a cooling rate or energy. A high marked rate remains visible as MEASURED.
+const zeroDhw = { ...dhw, verdict: "ok", evidence: "observation", max_k_h: 0,
+  high_windows: 0, high_with_pump: 0, high_pump_off: 0, quiet_high_windows: 0 };
+assert.match(ui.metric(zeroDhw), /^maximum 0 K\/h/);
+assert.match(ui.detail(zeroDhw), /0.00 kWh heat/);
+for (const invalid of [null, undefined, NaN, Infinity, -1, "1.2"]) {
+  assert.equal(ui.metric({ ...dhw, max_k_h: invalid }), "6 windows");
+  assert.doesNotMatch(ui.detail({ ...dhw, max_k_h: invalid }), /200 l|kWh|NaN|Infinity/);
+}
+for (const invalid of [0, null, undefined, NaN, Infinity])
+  assert.doesNotMatch(ui.detail({ ...dhw, windows: invalid }), /200 l|kWh|NaN|Infinity/);
+assert.doesNotMatch(ui.detail({ ...dhw, verdict: "unavailable" }), /200 l|kWh/);
+const markedDhw = { ...dhw, verdict: "ok", evidence: "observation", max_k_h: 2.4,
+  quiet_high_windows: 0 };
+assert.equal(ui.value(markedDhw), "MEASURED");
+assert.match(ui.detail(markedDhw), /maximum 2.4 K\/h/);
+assert.match(ui.detail(markedDhw), /Observation only; no universal OK\/WARNING limit/);
 const waiting = {
   id: "dhw_loss", verdict: "collecting", reason: "no_eligible_windows",
   observed_s: 7200, required_s: 21600, windows: 2,
@@ -224,21 +257,63 @@ assert.doesNotMatch(detail, /no complete.*window yet/);
 assert.match(ui.detail({ ...waiting, observed_s: 0, candidate_s: 3300, required_s: 0 }), /current candidate: 55 min of 1 h/);
 assert.match(ui.detail({ ...waiting, candidate_s: 0, settle_remaining_s: 1200, required_s: 0 }), /Settling time remaining: 20 min/);
 const blocked = {
-  ...waiting, verdict: "collecting", blocked: true, aborts: 14,
+  ...waiting, verdict: "unavailable", windows: 0, blocked: true, aborts: 14,
   best_aborted_s: 3000, abort_reasons: ["charge", "blind", "unknown_future_reason"],
 };
 detail = ui.detail(blocked);
-assert.match(detail, /Candidate windows discarded: 14 \(tank charging, readings missing: X10A silent or polling paused\)/);
-assert.match(detail, /Draw-like drops can also be rapid continuous cooling/);
+assert.match(detail, /Discarded windows: 14 \(tank charging, readings missing: X10A silent or polling paused\)/);
+assert.match(detail, /No completed hour in 24 h/);
 assert.doesNotMatch(detail, /unknown_future_reason|cause dominated|check the X10A wiring|duty cycle/);
 detail = ui.detail({ ...blocked, abort_reasons: ["blind"] });
 assert.match(detail, /required readings were unread too long/);
 assert.match(detail, /Missing replies or board-side polling pauses/);
 assert.match(detail, /establishes nothing about the tank/);
 assert.doesNotMatch(detail, /tank temperature went unread|because the X10A link|resolved|call service/);
-assert.equal(ui.value(blocked), "CHECKING");
+assert.equal(ui.value(blocked), "NO WINDOW");
+assert.equal(ui.value({ ...blocked, verdict: "collecting" }), "NO WINDOW",
+  "legacy collecting+blocked must not promise indefinite waiting");
+assert.doesNotMatch(ui.detail(blocked), /CHECKING|200 l|kWh/);
 assert.equal(ui.value({ ...blocked, verdict: "unavailable", blocked: false }), "N/A");
-assert.match(ui.detail({ ...blocked, verdict: "collecting" }), /No eligible one-hour window in 24 h/);
+assert.match(ui.detail({ ...blocked, verdict: "collecting" }), /No completed hour in 24 h/);
+const noAttempt = { ...blocked, aborts: 0, best_aborted_s: 0, abort_reasons: [] };
+assert.equal(ui.value(noAttempt), "NO WINDOW");
+assert.match(ui.detail(noAttempt), /NO WINDOW — No completed hour in 24 h\.<\/detail>/);
+assert.doesNotMatch(ui.detail(noAttempt), /discarded|interrupted|longest|\(\)|CHECKING|kWh/i);
+assert.match(ui.detail({ ...blocked, aborts: 1, abort_reasons: ["reading"] }),
+  /Discarded windows: 1 \(R5T unconfirmed\)/);
+assert.doesNotMatch(ui.detail({ ...blocked, aborts: 1, abort_reasons: ["reading"] }),
+  /implausible|implausibility/i,
+  "valid but not confirmed endpoint jitter must not be described as an implausible temperature");
+for (const lang of locales) {
+  const energy = ui.text(lang, "check.detail.dhw_energy", "1.2", "0.28", "0.09", "0.11");
+  assert.ok(energy.includes("200") && energy.includes("COP"), `${lang} retains explicit example assumptions`);
+  for (const value of ["1.2", "0.28", "0.09", "0.11"])
+    assert.ok(energy.includes(value), `${lang} retains example quantity ${value}`);
+  assert.ok(ui.detail(dhw).includes("kWh"), `${lang} renders the energy illustration`);
+  assert.ok(!ui.detail({ ...dhw, max_k_h: null }).includes("kWh"), `${lang} hides energy without a rate`);
+  assert.equal(ui.value(blocked), ui.text(lang, "check.status.no_window"), `${lang} labels the blocked day`);
+  assert.notEqual(ui.value(blocked), ui.text(lang, "check.status.collecting"), `${lang} does not keep waiting`);
+  assert.notEqual(ui.value(blocked), ui.text(lang, "check.status.unavailable"), `${lang} distinguishes unsupported profiles`);
+  const emptyWindow = ui.text(lang, "check.detail.dhw_blocked", 0, "", "0 min");
+  assert.ok(emptyWindow.includes("24"), `${lang} zero-attempt result retains its day scope`);
+  assert.doesNotMatch(emptyWindow, /0 min|\(\)|（）|\b0\b/,
+    `${lang} zero attempts must not invent discarded candidates or a longest attempt`);
+  for (const reasons of [[], ["blind"]]) {
+    const noAttemptDetail = ui.detail({ ...noAttempt, abort_reasons: reasons });
+    assert.ok(noAttemptDetail.includes(emptyWindow), `${lang} zero attempts render the bounded result`);
+    assert.ok(!noAttemptDetail.includes(ui.text(lang, "check.detail.dhw_blocked_link", 0, "0 min")),
+      `${lang} zero attempts do not invent interruptions from a legacy blind flag`);
+    assert.doesNotMatch(noAttemptDetail, /\(\)|（）|kWh/);
+  }
+}
+ui.setLang("de");
+assert.match(ui.detail(noAttempt), /Kein vollständiges Stundenfenster in 24 h\./);
+assert.doesNotMatch(ui.detail(noAttempt), /Verworfen|längster|\(\)/);
+assert.match(ui.detail({ ...blocked, aborts: 1, abort_reasons: ["reading"] }),
+  /R5T unbestätigt/);
+assert.doesNotMatch(ui.detail({ ...blocked, aborts: 1, abort_reasons: ["reading"] }),
+  /unplausibel|unplausible/i);
+ui.setLang("en");
 
 detail = ui.detail({ id: "heater", verdict: "ok", evidence: "observation", buh_s: 0,
   bsh_s: 60, buh_observed_s: 7200, bsh_observed_s: 3600 });
@@ -348,13 +423,16 @@ for (const lang of locales) {
       { id: "fault", verdict: "info", active: 0 },
       { id: "fault", verdict: "info", active: null, reason: "source_stale" }]) {
     assert.doesNotMatch(ui.detail(c, false, { span_s: 3600, source_age_s: 900, source_fresh: false }),
-                       /check\.detail\.|undefined|NaN|200 l|COP|kWh/, `missing or misleading ${lang} copy`);
+                       /check\.detail\.|undefined|NaN|Infinity/, `missing or misleading ${lang} copy`);
   }
 }
 ui.setLang("de");
 assert.match(ui.detail(cycling), /im Mittel unter 10 min/);
 assert.doesNotMatch(ui.detail(cycling), /mindestens 12 Läufen unter 10 min/);
-assert.match(ui.detail(dhw), /interner Hinweis ab 0,8 K\/h; Ursache nicht belegt/);
+assert.match(ui.detail(dhw), /Beobachteter Hinweis; seine Grenze steht unten/);
+assert.match(ui.detail(dhw), /Beispiel für eine Stunde: 200 l Wasser/);
+assert.match(ui.detail(dhw), /0,28 kWh Wärme/);
+assert.match(ui.detail(dhw), /0,09–0,11 kWh Strom/);
 assert.match(ui.detail({ id: "fault", verdict: "info", active: 0 }), /weder Ursache noch Behebung/);
 assert.equal(ui.metric(pressure), "0 bar");
 assert.match(ui.detail(pressure), /Aktueller Wasserdruck:">1,5 bar/);
@@ -392,7 +470,7 @@ const allCheckupCopy = [
 for (const pattern of [/Alles in Ordnung/i, /\bAll clear\b/i, /\bhealthy\b|\bhealth status\b/i,
   /\bAnlage (?:ist )?(?:gesund|in Ordnung)\b/i, /cleared on its own|von selbst.*verschwunden/i])
   assert.doesNotMatch(allCheckupCopy, pattern, "diagnosis copy must remain bounded");
-assert.doesNotMatch(allCheckupCopy, /200 l|COP 2[.,]5|each window=maximum|jedes Fenster=Maximum/);
+assert.doesNotMatch(allCheckupCopy, /each window=maximum|jedes Fenster=Maximum/);
 assert.doesNotMatch(explanationSource, /action\.label|b\.action/);
 for (const id of ["fault", "dhw_loss", "cycling", "defrost", "pressure", "flow", "heater", "retries"]) {
   const d = descriptionContext.model[`health_${id}`];
@@ -403,7 +481,9 @@ for (const id of ["fault", "dhw_loss", "cycling", "defrost", "pressure", "flow",
 }
 const model = descriptionContext.model;
 assert.match(JSON.stringify(model.health_dhw_loss), /one point in a stratified tank/);
-assert.match(JSON.stringify(model.health_dhw_loss), /cooling near 1\.85 K\/h or faster may be excluded as draw-like/);
+assert.match(model.health_dhw_loss.normal, /Project hint ≥0.8 K\/h without pump\/draw-like markers/);
+assert.match(model.health_dhw_loss.normal, /Missing markers do not prove no draw/);
+assert.match(model.health_dhw_loss.normal, /zero net cooling does not exclude heat loss/);
 assert.match(JSON.stringify(model.health_dhw_loss), /correlation, not cause/);
 assert.match(JSON.stringify(model.health_cycling), /≥12 heating runs averaging <10 min/);
 assert.match(model.health_cycling.normal, /≥90% of all completed runs classified/);
@@ -439,5 +519,24 @@ for (const [lang, interpretation] of [["en", "How to read it:"], ["de", "So lies
   assert.match(renderedContext.rendered.model("max_alloc", "Memory", "20 kB"),
                /<span class="vdesc-n">Normal:<\/span>/);
   assert.match(renderedContext.rendered.value(), /<span class="vdesc-n">Normal:<\/span>/);
+}
+// Exercise the full production accordion, including the model interpretation that owns
+// the DHW rule and its limits. The compact measurement prefix must not duplicate it.
+for (const lang of locales) {
+  renderedContext.rendered.lang(lang);
+  ui.setLang(lang);
+  const diagnosis = renderedContext.rendered.model("health_dhw_loss", "DHW", ui.value(dhw),
+    { bodyPrefix: ui.detail(dhw) });
+  assert.match(diagnosis, /0[,.]8/, `${lang} expanded diagnosis retains its project threshold`);
+  assert.match(diagnosis, /200/, `${lang} expanded diagnosis retains the example volume`);
+  assert.match(diagnosis, /COP/, `${lang} expanded diagnosis retains its electricity assumption`);
+  assert.match(diagnosis, /kWh/, `${lang} expanded diagnosis includes the measured-rate energy illustration`);
+  assert.doesNotMatch(diagnosis, /check\.detail\.|undefined|NaN/);
+  if (lang === "en") {
+    assert.match(diagnosis, /Missing markers do not prove no draw/);
+    assert.match(diagnosis, /zero net cooling does not exclude heat loss/);
+    assert.match(diagnosis, /correlation, not cause/);
+    assert.match(diagnosis, /not measured tank energy/);
+  }
 }
 console.log("plant-diagnostics UI contract: evidence, lifecycle, localized claims and counterexamples verified");

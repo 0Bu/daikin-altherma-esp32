@@ -1,4 +1,4 @@
-// translation-source: 35f2b17396ef51dd6a1c1fe8b1c07561fe6a16c726430e5785295bdb9dfc18aa
+// translation-source: 56ec4b237229b88c50cf6b91ff312bb0f6656edfb91ec07b993d5e2bde0e9ca2
 I18N.it = localeValues([
   /* sys.nodata */ "Nessun dato",
   /* sys.unreachable */ "Non raggiungibile",
@@ -182,6 +182,9 @@ I18N.it = localeValues([
   /* check.status.observation */ "MISURA",
   /* check.status.experimental */ "IN PROVA",
   /* check.status.unavailable */ "N/D",
+  /* check.status.no_window */ "NESSUN INTERVALLO",
+  /* check.detail.dhw_energy */ (a, b, c, d) => `Esempio per un’ora: 200 l d’acqua raffreddati uniformemente a ${a} K/h → ${b} kWh di calore; reintegro ${c}–${d} kWh elettrici con COP ipotizzato 2,5–3 (calore ÷ elettricità). Non è energia misurata.`,
+  /* check.detail.dhw_context */ (a, b, c) => `Intervalli: pompa interna ${a}; calo simile a prelievo ${b}; senza segnali ≥0,8 K/h ${c}. Possono sovrapporsi.`,
   /* check.detail.value_label */ "Valore:",
   /* check.detail.assessment_label */ "Valutazione:",
   /* check.detail.ok */ "La regola non è scattata nei dati leggibili.",
@@ -199,12 +202,12 @@ I18N.it = localeValues([
   /* check.detail.dhw_settling */ (a, b, c) => `Finestre orarie accettate: ${a}; rilevata carica o resistenza del serbatoio. Stabilizzazione restante: ${c}.`,
   /* check.detail.dhw_waiting */ (a, b) => `Finestre orarie accettate: ${a}; attesa della prossima ora idonea.`,
   /* check.detail.dhw_aborted */ (n, reasons, best) => ` ${n} ${n === 1 ? "finestra candidata scartata" : "finestre candidate scartate"} (${reasons}); la più lunga ha raggiunto ${best} di 60 min.`,
-  /* check.detail.dhw_blocked */ (a, b, c) => `Nessuna finestra oraria idonea in 24 h. Finestre scartate: ${a} (${b}); più lunga ${c} su 60 min. Un calo simile a prelievo può essere raffreddamento continuo rapido; causa non stabilita.`,
+  /* check.detail.dhw_blocked */ (a, b, c) => "Nessuna ora completa in 24 h." + (a > 0 ? ` Intervalli scartati: ${a} (${b}); il più lungo ${c}.` : ""),
   /* check.detail.dhw_blocked_link */ (a, b) => `Nessuna finestra oraria idonea in 24 h: Finestre interrotte: ${a}, per assenza prolungata delle letture necessarie; più lunga ${b} su 60 min. Risposte mancanti o pause di lettura possono creare la lacuna. Nulla è stabilito sul serbatoio.`,
   /* check.detail.dhw_reason.charge */ "carica del serbatoio",
   /* check.detail.dhw_reason.pump */ "pompa interna",
   /* check.detail.dhw_reason.draw */ "calo simile a un prelievo",
-  /* check.detail.dhw_reason.reading */ "R5T non plausibile",
+  /* check.detail.dhw_reason.reading */ "R5T non confermato",
   /* check.detail.dhw_reason.blind */ "letture mancanti: X10A senza risposta o interrogazione in pausa",
   /* check.detail.collecting_unknown */ "Nessuna valutazione attuale.",
   /* check.detail.observation */ "Solo osservazione; nessun limite universale OK/AVVISO.",
@@ -223,9 +226,6 @@ I18N.it = localeValues([
   /* check.tank_runtime */ (d) => `serbatoio ${d}`,
   /* check.buh_runtime */ (d) => `ausiliaria ${d}`,
   /* check.loss_windows */ (n) => `${n} ${n === 1 ? "finestra" : "finestre"}`,
-  /* check.loss_pump_off */ "anche con la pompa di circolazione spenta",
-  /* check.loss_with_pump */ "durante il funzionamento della pompa di circolazione",
-  /* check.loss_unattributed */ "attribuzione alla pompa incompleta",
   /* check.fault_err */ "Guasto attivo",
   /* check.fault_warn */ "Avviso attivo",
   /* check.fault_past */ "Si è verificato nelle ultime 24 h · ora non attivo",
@@ -252,8 +252,6 @@ I18N.it = localeValues([
   /* check.detail.age_label */ "Età dell’ultima misura:",
   /* check.detail.horizon_wait */ (a) => `La finestra completa di 24 ore manca ancora: restano ${a}.`,
   /* check.detail.fault.ok */ "Nessun messaggio attuale o salvato nei segnali di guasto leggibili.",
-  /* check.detail.dhw_loss.info */ "Indizio del progetto da 0,8 K/h; causa non provata.",
-  /* check.detail.dhw_loss.observation */ "Solo ore accettate; le escluse possono raffreddare più rapidamente.",
   /* check.detail.cycling.info */ "≥12 cicli completi di riscaldamento con media <10 min: indizio del progetto.",
   /* check.detail.cycling.ok */ "Nessun indizio di cicli brevi nei riscaldamenti completi.",
   /* check.detail.defrost.info */ "≥3 sbrinamenti associati superano 15% del tempo leggibile del compressore: indizio del progetto.",
@@ -1211,7 +1209,7 @@ DESCRIPTION_I18N.it = descriptionValues([
 
 MODEL_DESCRIPTION_I18N.it = modelDescriptionValues([
   ["Messaggi della pompa; non provano causa né risoluzione."], // health_fault
-  ["Sensore R5T: un punto, non energia. Regola interna ≥0,8 K/h; verso 1,85 K/h possibile esclusione come prelievo. Circolazione non prova causa."], // health_dhw_loss
+  ["R5T: un punto del serbatoio stratificato, non energia. Indizio interno ≥0,8 K/h senza segnali pompa/prelievo. Senza segnali, i prelievi restano possibili; 0 K/h non esclude perdite. Circolazione non prova la causa."], // health_dhw_loss
   ["≥12 cicli completi di riscaldamento, media <10 min; ≥90% di tutti i cicli completati classificati. Regola interna, non Daikin; esclusi ACS, freddo e non classificati."], // health_cycling
   ["Sbrinamento: ≥3 associati, >15% del tempo di marcia del compressore con stati compressore e sbrinamento leggibili. Regola interna, non Daikin; mancano umidità e temperatura dell’intera batteria."], // health_defrost
   ["Pressione: regola interna comune ≤1,0 bar; 60 s continui osservati danno AVVISO. Non universale; vale il manuale del modello."], // health_pressure

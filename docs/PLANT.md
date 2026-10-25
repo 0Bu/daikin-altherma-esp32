@@ -33,7 +33,7 @@ results; [DIAGNOSTIC_EVIDENCE.md](DIAGNOSTIC_EVIDENCE.md) owns thresholds and cl
 
 Each completed X10A sweep contributes only the rows it read. Integrated state time requires readable
 endpoints and bounded gaps; a pulse entirely between sweeps can still be missed. Five-minute trends
-cannot reconstruct completed runs or quiet tank hours and are not reused as diagnosis evidence.
+cannot reconstruct completed runs or hourly tank cooling and are not reused as diagnosis evidence.
 Temporary allocation/TLS pauses preserve profile capabilities while adding no observed time.
 
 Read-time source age, elapsed lifecycle span and per-signal coverage are separate facts. A stopped
@@ -49,12 +49,12 @@ runs cannot dilute that mean. An insufficient heating/classification population 
 observation with an explicit reason. Defrost uses its own paired compressor/defrost population.
 Optional outdoor min/mean belongs only to each accepted population and changes no verdict.
 
-Tank cooling retains completed/notable window counts, the greatest accepted one-hour R5T drop and
-optional circulation correlation. Rejected windows and their OR-ed reason set explain filter
-limitations, not a defect or dominant cause. There is no tank-energy calculation or green loss
-assessment. A fresh filter (power loss, crash, diagnostics on/off, identity, circulation or long-gap
-reset) waits 45 minutes before the first candidate; a planned restart carries the remaining settling
-time instead. A charge no reading saw can still affect the next candidate.
+Tank cooling retains completed/high-rate window counts and the greatest one-hour net R5T drop.
+Pump-active and draw-like windows remain measured with separate context counts; only unmarked high
+rates raise a project note. Exclusions explain missing evidence, not a defect. The UI's assumed-tank
+heat/electricity example is not calorimetry or a green loss assessment; [DIAGNOSTICS.md](DIAGNOSTICS.md)
+explains it. A fresh filter waits 45 minutes; planned restarts carry the remaining settle. Unseen
+charging can still affect a later window.
 
 The independent circulation witness's broker, topic, value/time paths, maximum age, thresholds and
 confirmation time bind the DHW evidence identity. Editing them clears only that check and its
@@ -86,7 +86,7 @@ empty samples advance time without booking observations.
 
 An intentional restart can carry only the ongoing tank-loss filter through a separately sealed
 **one-shot handoff**, adopted after the same full X10A and circulation scopes are confirmed with
-diagnostics enabled and no reset requested. It preserves the quiet-hour candidate/settling timer,
+diagnostics enabled and no reset requested. It preserves the hourly cooling candidate/settling timer,
 never undated completed counters or transient compressor edges. Power loss, crash, changed source
 or incompatible/absent format starts a fresh filter. The current bucket geometry changes the diagnosis journal fingerprint,
 so previous-format hourly records are rejected; handoff v3 also rejects v2. Trend-journal sources

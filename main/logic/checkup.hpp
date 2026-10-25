@@ -73,6 +73,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 
 #include "fault_state.hpp"   // FaultClass — the fault check composes conv 203's own class table
 #include "ou_stale.hpp"      // ou_is_rps_witness — the compressor witness, called not restated
@@ -533,8 +534,9 @@ inline bool checkup_close_run(CheckupState& st, CheckupBucket& b, CheckupRing* r
 
 // ── DHW tank cooling / external circulation correlation ───────────────────────────────────────
 // Kept in its own compact ring with a separate evidence clock. Only
-// completed clean one-hour windows are retained.  Draw-contaminated or charge/settling segments do
-// not contribute observed seconds, so a plausible zero can never be bought with discarded data.
+// completed one-hour net temperature drops are retained. Charge/settling segments do not
+// contribute observed seconds. Pump activity and draw-like drops qualify the observation rather
+// than erasing it: this sensor cannot distinguish standing loss from other cooling mechanisms.
 struct DhwLossBucket {
     uint16_t observed_s = 0;
     uint16_t circulation_known_s = 0;
@@ -554,12 +556,15 @@ struct DhwLossBucket {
     uint8_t high_windows = 0;
     uint8_t high_with_pump = 0;
     uint8_t high_pump_off = 0;
+    uint8_t draw_windows       = 0;
+    uint8_t pump_windows       = 0;
+    uint8_t quiet_high_windows = 0;
 };
 
-// EXACTLY at the stated budget (24 x 16). The next field costs a decision about the budget rather
-// than an edit — which is what the assert is for.
+// Context counts add 96 bytes to the 24-bucket ring, keeping net cooling visible without
+// mislabelling draw-like or pump-active hours as undisturbed standing-loss measurements.
 constexpr size_t DHW_LOSS_BYTES = sizeof(DhwLossBucket) * CHECKUP_BUCKETS;
-static_assert(DHW_LOSS_BYTES <= 384, "DHW loss ring exceeded its static-memory budget");
+static_assert(DHW_LOSS_BYTES <= 480, "DHW loss ring exceeded its static-memory budget");
 
 // Why a candidate hour was discarded. A MASK on the bucket: several causes inside one hour are all
 // true, and folding them to "the last one" would name whichever fired nearest the commit.
@@ -605,6 +610,9 @@ struct DhwLossRing {
 };
 
 constexpr uint32_t DHW_LOSS_SETTLE_S = 45 * 60; // issue legacy-349 method after a tank charge
+// Adjacent readable endpoints must agree within two sensor steps. This rejects an isolated
+// spike as an hourly endpoint without erasing a sustained real draw or steady rapid cooling.
+constexpr int DHW_LOSS_ENDPOINT_DELTA_TENTHS = 2;
 
 struct DhwLossState {
     int64_t last_us = -1;
@@ -636,30 +644,33 @@ struct DhwLossState {
     // books no abort, and only dhw_loss_adopt (a sealed handoff that carries the real settle)
     // clears it.
     uint32_t hold_remaining_s = DHW_LOSS_SETTLE_S;
+    bool     segment_draw_like = false;
+    bool     segment_pump_on   = false;
+    int      endpoint_tenths   = 0;
+    bool     endpoint_known    = false;
 
     void reset_segment() {
         segment_start_us = draw_anchor_us = -1;
         segment_carried_s = draw_anchor_carried_s = 0;
         segment_circulation_known_s = segment_circulation_on_s = 0;
         segment_blind_s = 0;
+        segment_draw_like = segment_pump_on = false;
     }
 };
 
 constexpr uint32_t DHW_LOSS_WINDOW_S      = 3600; // R5T resolves only 0.1 K
+// Two normal polling intervals allow one isolated bad endpoint and its confirmation to recover.
+// Never reinterpret an arbitrarily long candidate as one hourly observation.
+constexpr uint32_t DHW_LOSS_CLOSE_GRACE_S = 2 * CHECKUP_MAX_GAP_S;
 constexpr uint32_t DHW_LOSS_DRAW_WINDOW_S = 10 * 60;
 // Project filter: any positive charge witness discards the candidate. At least 120 seconds
 // of witness also starts a 45-minute settling allowance. A discontinuous positive sample takes
 // that conservative allowance immediately. This duration does not prove how much heat entered
 // the tank; a shorter or partially unseen charge can still affect the next candidate.
 constexpr uint32_t DHW_LOSS_CHARGE_MIN_S = 120;
-// After a full day with no accepted window, six aborted candidates enable the bounded
-// "no eligible windows" explanation. Accepted windows never establish a tank-wide all-clear.
-constexpr uint32_t DHW_LOSS_BLOCKED_MIN_ABORTS = 6;
-// A drop of four tenths within the ten-minute anchor resets the candidate as a possible draw.
-// With quantized R5T samples, continuous cooling near 1.9 K/h can also discard every candidate.
-// The filter cannot distinguish that from withdrawal, so accepted low rates are observations,
-// never evidence excluding faster losses. Both filter and high-rate boundary are project choices.
-constexpr int      DHW_LOSS_DRAW_DROP_TENTHS = 4;        // ~1.85 K/h effective, see above
+// Four tenths within the ten-minute anchor marks a possible draw. Continuous cooling near
+// 1.9 K/h also meets this shape: keep the measured rate and report the ambiguity as context.
+constexpr int      DHW_LOSS_DRAW_DROP_TENTHS = 4;
 constexpr int      DHW_LOSS_HIGH_TENTHS_K_H = 8;         // project heuristic, not a Daikin limit
 // Missing rows are blind time, not proof of a charge or an off state. A candidate tolerates
 // at most 120 consecutive blind seconds and 10% in total, subtracting them from observed time.
@@ -682,6 +693,8 @@ constexpr uint32_t DHW_LOSS_REBOOT_BLIND_S = 5;
 
 constexpr uint8_t DHW_LOSS_CARRY_SEGMENT = 1u << 0;
 constexpr uint8_t DHW_LOSS_CARRY_DRAW     = 1u << 1;
+constexpr uint8_t DHW_LOSS_CARRY_DRAW_LIKE = 1u << 2;
+constexpr uint8_t DHW_LOSS_CARRY_PUMP_ON   = 1u << 3;
 
 // Wire-neutral checkpoint of the in-flight filter.  Absolute esp_timer timestamps cannot cross a
 // reboot; ages can.  The storage seal lives in checkup_persist.hpp, while these translations stay
@@ -721,6 +734,8 @@ inline DhwLossCarry dhw_loss_checkpoint(const DhwLossState& st, int64_t now_us) 
     c.draw_anchor_tenths = static_cast<int16_t>(st.draw_anchor_tenths);
     if (st.segment_start_us >= 0) {
         c.flags |= DHW_LOSS_CARRY_SEGMENT;
+        if (st.segment_draw_like) c.flags |= DHW_LOSS_CARRY_DRAW_LIKE;
+        if (st.segment_pump_on) c.flags |= DHW_LOSS_CARRY_PUMP_ON;
         c.segment_elapsed_s = dhw_loss_age_s(now_us, st.segment_start_us,
                                              st.segment_carried_s);
     }
@@ -771,6 +786,7 @@ inline uint32_t dhw_loss_adopt_blind_s(int64_t now_us) {
 inline void dhw_loss_adopt(DhwLossState& st, const DhwLossCarry& c, int64_t now_us) {
     st = DhwLossState{};
     st.last_us = now_us;
+
     st.settle_remaining_s = c.settle_remaining_s;
     st.hold_remaining_s   = 0; // the handoff carries the real settle: no fresh state
     st.charge_run_s = c.charge_run_s;
@@ -788,6 +804,8 @@ inline void dhw_loss_adopt(DhwLossState& st, const DhwLossCarry& c, int64_t now_
     st.segment_circulation_known_s = c.segment_circulation_known_s;
     st.segment_circulation_on_s = c.segment_circulation_on_s;
     st.segment_blind_s             = c.segment_blind_s;
+    st.segment_draw_like           = (c.flags & DHW_LOSS_CARRY_DRAW_LIKE) != 0;
+    st.segment_pump_on             = (c.flags & DHW_LOSS_CARRY_PUMP_ON) != 0;
     // Attribution as "pump continuously off" cannot cross an interval nobody observed.
     st.circulation_off_run_s = 0;
 
@@ -846,6 +864,17 @@ inline void dhw_loss_step(DhwLossState& st, DhwLossBucket& b, const CheckupSampl
         }
     }
     st.last_us = now_us;
+
+    // A single numerically plausible sample can still be a transient (for example 49, 0, 49).
+    // Require a second nearby reading before either end of a rate is established. An intentional
+    // restart deliberately starts this short confirmation afresh; the carried start was already
+    // confirmed. Charge/settle and context still process every sample immediately.
+    const bool endpoint_valid = s.r5t_ok && s.r5t_tenths >= 0 && s.r5t_tenths <= 900;
+    const bool endpoint_confirmed =
+        continuous && endpoint_valid && st.endpoint_known &&
+        std::abs(st.endpoint_tenths - s.r5t_tenths) <= DHW_LOSS_ENDPOINT_DELTA_TENTHS;
+    st.endpoint_known = endpoint_valid;
+    if (endpoint_valid) st.endpoint_tenths = s.r5t_tenths;
 
     if (continuous && s.circulation_configured && s.circulation_known && !s.circulation_on)
         st.circulation_off_run_s =
@@ -912,18 +941,14 @@ inline void dhw_loss_step(DhwLossState& st, DhwLossBucket& b, const CheckupSampl
         return;
     }
 
-    // A state the sweep could SEE that is incompatible with a standing tank ends the segment. The
-    // two charge witnesses already returned above; what is left is the internal pump (space heating
-    // stirs the hydronics R5T sits in) and an R5T outside the plausible band. `known` is required on
-    // each: an unread row is judged one branch further down, never here.
-    if (s.pump_known && s.pump_on) {
-        dhw_loss_abort(st, b, DHW_ABORT_PUMP, now_us);
-        return;
-    }
+    // Actual charge witnesses already returned above. The internal hydronic pump can run during
+    // space heating while R5T still observes the tank: retain that context, without inferring
+    // either a standing loss or hydraulic isolation from the valve command.
     if (s.r5t_ok && (s.r5t_tenths < 0 || s.r5t_tenths > 900)) {
         dhw_loss_abort(st, b, DHW_ABORT_READING, now_us);
         return;
     }
+    if (s.pump_known && s.pump_on) st.segment_pump_on = true;
 
     // Nothing said the tank is busy — but did the sweep actually READ it? A page that did not answer
     // leaves every row on it absent from this sample (hp_poll replaces the cache with the rows that
@@ -939,7 +964,7 @@ inline void dhw_loss_step(DhwLossState& st, DhwLossBucket& b, const CheckupSampl
         // then re-arm the anchor at a temperature that was actually measured.
         if (st.draw_anchor_us >= 0 &&
             st.draw_anchor_tenths - s.r5t_tenths >= DHW_LOSS_DRAW_DROP_TENTHS)
-            dhw_loss_abort(st, b, DHW_ABORT_DRAW, now_us);
+            st.segment_draw_like = true;
         st.draw_anchor_us = now_us;
         st.draw_anchor_carried_s = 0;
         st.draw_anchor_tenths = s.r5t_tenths;
@@ -953,20 +978,29 @@ inline void dhw_loss_step(DhwLossState& st, DhwLossBucket& b, const CheckupSampl
         st.draw_anchor_carried_s = 0;
         st.draw_anchor_tenths = s.r5t_tenths;
     } else if (st.draw_anchor_tenths - s.r5t_tenths >= DHW_LOSS_DRAW_DROP_TENTHS) {
-        // A draw can mimic a spectacular cooling rate. Discard everything since the anchor, then
-        // start a new candidate segment at the post-draw temperature.
-        dhw_loss_abort(st, b, DHW_ABORT_DRAW, now_us);
+        // A draw and rapid continuous cooling can have the same shape. Keep the net sensor
+        // change, mark the ambiguity, and start a new context anchor without resetting the hour.
+        st.segment_draw_like     = true;
         st.draw_anchor_us = now_us;
         st.draw_anchor_carried_s = 0;
         st.draw_anchor_tenths = s.r5t_tenths;
     }
 
     if (st.segment_start_us < 0) {
+        if (!endpoint_confirmed) return;
         st.segment_start_us = now_us;
         st.segment_carried_s = 0;
         st.segment_start_tenths = s.r5t_tenths;
+        st.segment_pump_on      = s.pump_on;
+        // Context before the confirmed start is outside this window, including an unconfirmed
+        // spike while waiting for its first endpoint.
+        st.segment_draw_like     = false;
+        st.draw_anchor_us        = now_us;
+        st.draw_anchor_carried_s = 0;
+        st.draw_anchor_tenths    = s.r5t_tenths;
         return;
     }
+    st.segment_pump_on = st.segment_pump_on || s.pump_on;
     if (s.circulation_configured && s.circulation_known) {
         st.segment_circulation_known_s =
             std::min<uint32_t>(UINT32_MAX - dt, st.segment_circulation_known_s) + dt;
@@ -977,7 +1011,11 @@ inline void dhw_loss_step(DhwLossState& st, DhwLossBucket& b, const CheckupSampl
 
     const uint32_t elapsed_s = dhw_loss_age_s(now_us, st.segment_start_us,
                                               st.segment_carried_s);
-    if (elapsed_s < DHW_LOSS_WINDOW_S) return;
+    if (elapsed_s > DHW_LOSS_WINDOW_S + DHW_LOSS_CLOSE_GRACE_S) {
+        dhw_loss_abort(st, b, DHW_ABORT_READING, now_us);
+        return;
+    }
+    if (elapsed_s < DHW_LOSS_WINDOW_S || !endpoint_confirmed) return;
     const int drop_tenths = std::max(0, st.segment_start_tenths - s.r5t_tenths);
     // The RATE is per wall-clock hour: both endpoints are measured and the tank cooled for the whole
     // span whether or not the firmware was looking. The EVIDENCE CLOCK is not — observed_s counts
@@ -991,12 +1029,18 @@ inline void dhw_loss_step(DhwLossState& st, DhwLossBucket& b, const CheckupSampl
         b.circulation_known_s, st.segment_circulation_known_s);
     b.circulation_on_s = checkup_add_u16(b.circulation_on_s, st.segment_circulation_on_s);
     b.windows = checkup_add_u8(b.windows, 1);
+    if (st.segment_draw_like) b.draw_windows = checkup_add_u8(b.draw_windows, 1);
+    if (st.segment_pump_on) b.pump_windows = checkup_add_u8(b.pump_windows, 1);
     if (b.max_loss_tenths_k_h == CHECKUP_ABSENT ||
         loss_tenths_k_h > b.max_loss_tenths_k_h)
         b.max_loss_tenths_k_h = static_cast<int16_t>(loss_tenths_k_h);
 
     if (loss_tenths_k_h >= DHW_LOSS_HIGH_TENTHS_K_H) {
         b.high_windows = checkup_add_u8(b.high_windows, 1);
+        // Ordinary hot-water use can produce a large net drop. Only hours without either
+        // context marker carry the project hint; marked hours remain measured observations.
+        if (!st.segment_draw_like && !st.segment_pump_on)
+            b.quiet_high_windows = checkup_add_u8(b.quiet_high_windows, 1);
         // Against the OBSERVED seconds, not the span: the witness is only decoded on cycles this
         // segment could see, so measuring its coverage against blind time would charge it for
         // silence on a different bus.
@@ -1019,6 +1063,11 @@ inline void dhw_loss_step(DhwLossState& st, DhwLossBucket& b, const CheckupSampl
     // would let the first hour's drop-outs spend the second hour's allowance, so a long quiet
     // stretch would grow steadily more likely to be rejected the further into it the plant got.
     st.segment_blind_s = 0;
+    st.segment_draw_like     = false;
+    st.segment_pump_on       = s.pump_on;
+    st.draw_anchor_us        = now_us;
+    st.draw_anchor_carried_s = 0;
+    st.draw_anchor_tenths    = s.r5t_tenths;
 }
 
 // Do not sample a pump's first minute as the day's hydraulic minimum. Ramp-up, valve motion and air
@@ -1393,6 +1442,9 @@ struct DhwLossWindow {
     uint32_t high_windows = 0;
     uint32_t high_with_pump = 0;
     uint32_t high_pump_off = 0;
+    uint32_t draw_windows        = 0;
+    uint32_t pump_windows        = 0;
+    uint32_t quiet_high_windows  = 0;
     uint32_t aborts = 0;
     uint32_t best_aborted_s = 0;   // the longest DISCARDED candidate, never a completed one
     uint8_t  abort_reasons = 0;
@@ -1418,6 +1470,9 @@ inline DhwLossWindow dhw_loss_aggregate(const DhwLossRing& r) {
         w.high_windows += b.high_windows;
         w.high_with_pump += b.high_with_pump;
         w.high_pump_off += b.high_pump_off;
+        w.draw_windows += b.draw_windows;
+        w.pump_windows += b.pump_windows;
+        w.quiet_high_windows += b.quiet_high_windows;
         w.aborts += b.aborts;
         w.abort_reasons = static_cast<uint8_t>(w.abort_reasons | b.abort_reasons);
         if (b.best_aborted_s > w.best_aborted_s) w.best_aborted_s = b.best_aborted_s;
@@ -1712,6 +1767,9 @@ struct CheckupReport {
     // plant that never stands still is).
     uint32_t          dhw_aborts = 0;
     uint32_t          dhw_best_aborted_s = 0;
+    uint32_t             dhw_draw_windows       = 0;
+    uint32_t             dhw_pump_windows       = 0;
+    uint32_t             dhw_quiet_high_windows = 0;
     int32_t           cycling_cooling_runs = -1;
     CheckupOutdoorReport cycling_outdoor;
     CheckupOutdoorReport defrost_outdoor;
@@ -1827,30 +1885,35 @@ inline CheckupReport checkup_evaluate(const CheckupWindow& w, const CheckupCover
         x.g = g;
     };
 
-    // Quiet-hour temperature drops are filtered observations. No green result can exclude
-    // losses in discarded intervals, nor turn one tank sensor into whole-tank calorimetry.
+    // Net sensor cooling remains visible even in a draw-like or pump-active hour. Context
+    // qualifies the observation; it cannot turn one tank sensor into whole-tank calorimetry.
     r.dhw_aborts = dhw.aborts;
     r.dhw_abort_reasons = dhw.abort_reasons;
     r.dhw_best_aborted_s = dhw.best_aborted_s;
+    r.dhw_draw_windows       = dhw.draw_windows;
+    r.dhw_pump_windows       = dhw.pump_windows;
+    r.dhw_quiet_high_windows = dhw.quiet_high_windows;
     const bool dhw_supported = cov.r5t && cov.valve && cov.pump && cov.bsh;
     // "No eligible window in 24 h" needs 24 h of DHW evidence scope, not only of X10A lifecycle.
-    r.dhw_blocked = dhw_supported && dhw.full_span && dhw.windows == 0 && !dhw.high_windows &&
-                    dhw.aborts >= DHW_LOSS_BLOCKED_MIN_ABORTS;
+    r.dhw_blocked =
+        dhw_supported && w.full_span && dhw.full_span && dhw.windows == 0 && !dhw.high_windows;
     if (!dhw_supported) {
         set(CheckupCheck::DhwLoss, CheckupVerdict::Unavailable, 0, 0);
     } else {
-        const auto verdict = dhw.high_windows
+        const auto verdict = dhw.quiet_high_windows
                                  ? CheckupVerdict::Info
-                                 : (dhw.windows ? CheckupVerdict::Ok : CheckupVerdict::Collecting);
+                                 : (dhw.windows ? CheckupVerdict::Ok
+                                                : (r.dhw_blocked ? CheckupVerdict::Unavailable
+                                                                 : CheckupVerdict::Collecting));
         set(CheckupCheck::DhwLoss, verdict, dhw.observed_s, 0,
             dhw.max_loss_tenths_k_h == CHECKUP_ABSENT ? -1 : dhw.max_loss_tenths_k_h,
             static_cast<int>(dhw.windows), static_cast<int>(dhw.high_windows),
             static_cast<int>(dhw.high_with_pump), static_cast<int>(dhw.high_pump_off),
             static_cast<int>(dhw.circulation_on_s), static_cast<int>(dhw.circulation_known_s));
         auto& c            = r.checks[static_cast<size_t>(CheckupCheck::DhwLoss)];
-        c.observation_only = !dhw.high_windows;
+        c.observation_only = !dhw.quiet_high_windows;
         c.reason = dhw.windows ? CheckupReason::ObservationOnly : CheckupReason::NoEligibleWindows;
-        if (dhw.high_windows) c.reason = CheckupReason::None;
+        if (dhw.quiet_high_windows) c.reason = CheckupReason::None;
     }
 
     // Only complete, continuously classified space-heating runs decide cycling. Starts and

@@ -1445,6 +1445,10 @@ static void append_status_json(JsonOut& j, bool redact) {
                 num("high_windows", ck.c);
                 num("high_with_pump", ck.d);
                 num("high_pump_off", ck.e);
+                num("draw_windows", ck.b < 0 ? -1 : static_cast<int>(hr.dhw_draw_windows));
+                num("pump_windows", ck.b < 0 ? -1 : static_cast<int>(hr.dhw_pump_windows));
+                num("quiet_high_windows",
+                    ck.b < 0 ? -1 : static_cast<int>(hr.dhw_quiet_high_windows));
                 num("circulation_on_s", ck.f);
                 num("circulation_known_s", ck.g);
                 j += ",\"candidate_s\":";

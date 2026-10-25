@@ -1760,7 +1760,7 @@ python3 - "$TMP/main/checkup.cpp" <<'PY4'
 import sys
 p = sys.argv[1]
 s = open(p).read()
-old = "s_boot_handoff.pending = logic::DhwLossBucket{};"
+old = "s_boot_handoff.pending = kEmptyDhwLossBucket;"
 seed = s.replace(old, "P().dhw.pending = s_boot_handoff.pending;", 1)
 assert seed != s, "seed 101 did not apply — handoff pending clear moved"
 open(p, "w").write(seed)

@@ -90,6 +90,9 @@ __NOINIT_ATTR PersistStore s_store;
 inline PersistedCheckup& P() { return s_store.v; }
 logic::CheckupState s_state;
 logic::DhwLossState s_dhw_state;
+// Copy a read-only reset template without constructing the expanded state on a caller's stack.
+constexpr logic::DhwLossState  kFreshDhwLossState{};
+constexpr logic::DhwLossBucket kEmptyDhwLossBucket{};
 
 logic::CheckupRestore s_persist_verdict = logic::CheckupRestore::NoRecord;
 uint32_t s_model_fp = 0;
@@ -280,7 +283,7 @@ bool apply_reset_locked() {
     s_boot_handoff_valid = false;
     s_dhw_reset_requested.store(false);
     s_state = logic::CheckupState{};
-    s_dhw_state = logic::DhwLossState{};
+    s_dhw_state = kFreshDhwLossState;
     s_cov = logic::CheckupCoverage{};
     s_fault_now = daik::FaultClass::Unknown;
     persist_wipe(); // clears both rings and the checkpoint to withdraw the previous scope
@@ -296,7 +299,7 @@ bool apply_dhw_reset_locked() {
     P().dhw.head          = P().ring.head;
     P().dhw.count         = P().ring.count;
     s_dhw_source_fp       = s_requested_dhw_source_fp.load();
-    s_dhw_state = logic::DhwLossState{};
+    s_dhw_state           = kFreshDhwLossState;
     s_dhw_scope_us        = esp_timer_get_time(); // the X10A lifecycle keeps running
     P().dhw_handoff.magic = 0;
     persist_seal();
@@ -333,7 +336,7 @@ void checkup_reboot_save() {
     h.payload.source_fp    = s_source_confirmed ? s_source_fp : 0;
     h.payload.dhw_source_fp = s_dhw_source_fp;
     // Completed counters in the open hour have no durable age; never carry them across a boot.
-    h.payload.pending = logic::DhwLossBucket{};
+    h.payload.pending = kEmptyDhwLossBucket;
     h.crc = logic::checkup_dhw_handoff_crc(h.model_fp, h.payload);
 
     const logic::DhwLossProgress p = logic::dhw_loss_progress(s_dhw_state,
@@ -380,7 +383,7 @@ void checkup_start(bool diagnostics_enabled, uint32_t diagnostics_generation) {
             P().dhw_handoff.model_fp, P().model_fp, P().dhw_handoff.crc, P().dhw_handoff.payload);
     if (s_boot_handoff_valid) {
         s_boot_handoff         = P().dhw_handoff.payload;
-        s_boot_handoff.pending = logic::DhwLossBucket{};
+        s_boot_handoff.pending = kEmptyDhwLossBucket;
         s_boot_handoff_model   = P().model_fp;
     }
     // Consume before any producer or detection exists. A second panic cannot replay the handoff.
@@ -412,7 +415,7 @@ void checkup_set_diagnostics(bool enabled, uint32_t generation) {
     s_reset_requested.store(false);
     s_dhw_reset_requested.store(false);
     s_state = logic::CheckupState{};
-    s_dhw_state = logic::DhwLossState{};
+    s_dhw_state = kFreshDhwLossState;
     s_cov = logic::CheckupCoverage{};
     s_fault_now = daik::FaultClass::Unknown;
     persist_wipe();
@@ -653,7 +656,7 @@ void expire_restored_locked() {
     for (size_t i = 0; i < logic::CHECKUP_COMPLETED_BUCKETS; ++i) {
         if (!logic::checkup_restored_expired(s_restored_expiry_us[i], now_us)) continue;
         P().ring.buf[i]         = logic::CheckupBucket{};
-        P().dhw.buf[i]          = logic::DhwLossBucket{};
+        P().dhw.buf[i]          = kEmptyDhwLossBucket;
         s_restored_expiry_us[i] = 0;
         changed                 = true;
     }
@@ -663,9 +666,9 @@ void expire_restored_locked() {
     if (s_state.have_bucket && s_state.last_us >= 0 &&
         logic::checkup_restored_expired(logic::checkup_live_expiry_us(pending_start_us), now_us)) {
         P().ring.pending = logic::CheckupBucket{};
-        P().dhw.pending  = logic::DhwLossBucket{};
+        P().dhw.pending  = kEmptyDhwLossBucket;
         s_state          = logic::CheckupState{};
-        s_dhw_state      = logic::DhwLossState{};
+        s_dhw_state      = kFreshDhwLossState;
         s_fault_now      = FaultClass::Unknown;
         s_pressure_now   = -1;
         changed          = true;

@@ -231,13 +231,15 @@ assert.match(checkupPersist,
 // Only the ongoing DHW candidate may cross an intentional reboot. Completed pending counters
 // have no absolute age and must be cleared both when sealing and when staging a valid handoff.
 // The shutdown lock remains bounded: a busy observer can cost a candidate, never strand OTA.
+assert.match(checkup, /constexpr logic::DhwLossBucket\s+kEmptyDhwLossBucket\{\};/,
+  "the empty pending-counter template retains the production bucket defaults");
 assert.match(checkup,
-  /void checkup_reboot_save\(\)[\s\S]*?(?:Lock\s+lk\(s_mtx,\s*pdMS_TO_TICKS\(200\)\)|xSemaphoreTake\(s_mtx,\s*pdMS_TO_TICKS\(200\)\))[\s\S]*?dhw_loss_checkpoint\(s_dhw_state,[\s\S]*?h\.payload\.pending\s*=\s*logic::DhwLossBucket\{\}/,
+  /void checkup_reboot_save\(\)[\s\S]*?(?:Lock\s+lk\(s_mtx,\s*pdMS_TO_TICKS\(200\)\)|xSemaphoreTake\(s_mtx,\s*pdMS_TO_TICKS\(200\)\))[\s\S]*?dhw_loss_checkpoint\(s_dhw_state,[\s\S]*?h\.payload\.pending\s*=\s*kEmptyDhwLossBucket/,
   "intentional reboot must checkpoint only the ongoing DHW candidate and clear undated pending counters under a bounded lock");
 assert.doesNotMatch(checkup, /h\.payload\.pending\s*=\s*P\(\)\.dhw\.pending/,
   "undated completed pending counters must not enter the reboot checkpoint");
 assert.match(checkup,
-  /checkup_restore_keeps_dhw_handoff\(integrity\)[\s\S]*?checkup_dhw_handoff_valid\([\s\S]*?s_boot_handoff\s*=\s*P\(\)\.dhw_handoff\.payload;\s*s_boot_handoff\.pending\s*=\s*logic::DhwLossBucket\{\}/,
+  /checkup_restore_keeps_dhw_handoff\(integrity\)[\s\S]*?checkup_dhw_handoff_valid\([\s\S]*?s_boot_handoff\s*=\s*P\(\)\.dhw_handoff\.payload;\s*s_boot_handoff\.pending\s*=\s*kEmptyDhwLossBucket/,
   "startup must stage only an integrity-valid candidate and explicitly discard its undated pending counters");
 assert.doesNotMatch(checkup, /P\(\)\.dhw\.pending\s*=\s*(?:P\(\)\.dhw_handoff\.payload|s_boot_handoff)\.pending/,
   "startup must not restore undated completed pending counters");
