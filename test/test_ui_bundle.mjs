@@ -108,8 +108,8 @@ assert.doesNotMatch(app, /function dynamicControlCardHtml\(\)[\s\S]{0,600}?retur
   "the card itself must not invent another visibility rule");
 assert.match(app, /vcard\(t\("card\.fw_title"\), fwRows\) \+[\s\S]{0,160}?diagnosticsEnabled \? circulationSettingsCardHtml\(\) \+ dynamicControlCardHtml\(\) : ""/,
   "dependent plant and heating-curve cards must render only after the Firmware opt-in");
-assert.match(app, /checkupCardHtml\(\s*S\.status\?\.diagnostics\?\.enabled === true && S\.status\?\.hp\?\.connected\)/,
-  "the dashboard's 24-hour diagnosis must share the same master opt-in");
+assert.match(app, /const checkup = S\.status\?\.diagnostics\?\.enabled === true\s*\? checkupCardHtml\(S\.status\?\.hp\?\.connected\) : "";/,
+  "the whole dashboard diagnosis card must share the Firmware master opt-in");
 // A current measurement and its diagnosis eligibility are separate facts. The source row stays
 // amber when the diagnosis is blocked, but the general status must still say the reading is valid.
 assert.match(app, /const diagnosis = !r\.control_eligible[\s\S]{0,180}?key: "unusable"[\s\S]{0,220}?key: "measurement_valid"[\s\S]{0,100}?cls: r\.control_eligible \? "ok" : "warn"/,
