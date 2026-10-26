@@ -28,8 +28,8 @@ const configSource = fs.readFileSync(new URL("../main/http_config.cpp", import.m
 assert.match(dashboardSource, /const GROUP_ORDER = \["Operation"/s,
              "Operation must remain the first live-value group");
 assert.match(dashboardSource,
-             /const checkup = checkupCardHtml\(\s*S\.status\?\.diagnostics\?\.enabled === true && S\.status\?\.hp\?\.connected\);\s*setHtml\("valueGroups",\s*checkup\s*\+\s*statusCardsHtml\(\)\s*\+/s,
-             "plant diagnostics must render first in the post-diagram card stream");
+             /const checkup = S\.status\?\.diagnostics\?\.enabled === true\s*\? checkupCardHtml\(S\.status\?\.hp\?\.connected\) : "";\s*setHtml\("valueGroups",\s*checkup\s*\+\s*statusCardsHtml\(\)\s*\+/s,
+             "the opted-in diagnosis card must precede Model; disabled diagnostics must omit the whole card");
 assert.doesNotMatch(dashboardSource, /checkup \+ service \+|refrigerantServiceCardHtml/,
                     "refrigerant service must not return as a separate dashboard card");
 assert.match(dashboardSource,

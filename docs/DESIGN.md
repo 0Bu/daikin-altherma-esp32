@@ -355,7 +355,8 @@ only; BSH/BUH have separate clocks and sub-minute activity remains visible. Sour
 all rule details are maintained in [DIAGNOSTICS.md](DIAGNOSTICS.md) and its evidence reference.
 
 A separate neutral **Refrigerant (heating)** row uses passive fresh-sweep observation.
-It needs no 24-hour opt-in and contributes no badge/count/verdict. It appears only after signal
+Its collection needs no 24-hour opt-in and contributes no badge/count/verdict. The whole diagnosis
+card is hidden when Plant diagnostics is off. With opt-in, the row appears after signal
 coverage is evaluated this boot, may remain waiting/paused with limits, offers no action and is
 cleanly absent on older firmware. Copy says ordinary polling cannot command full load, prove
 settling/charge, establish a universal range or confirm mechanical EEV motion. EEV pulses describe
@@ -509,8 +510,9 @@ must preserve focus in every select and any active pointer/scrub/OTA operation.
 ## 6. Dashboard value grouping & order
 
 Below the schematic, card names select one detail card: Diagnostics first, then Model and the value
-groups below, followed by Modbus when available. Diagnostics is selected initially; if the selected
-card is absent, select the first available card. Selection stays local to the open page and survives
+groups below, followed by Modbus when available. Diagnostics is selected initially when enabled;
+when disabled, its name and card are absent and Model is the default. If the selected card is absent,
+select the first available card. Selection stays local to the open page and survives
 polling, language changes and Settings visits. At widths of at least 650 px, a 202 px sidebar shows
 each name with its icon. The selected name uses cyan text on the
 detail card's surface, with a rounded outline opening into the card: to the right on desktop and

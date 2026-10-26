@@ -5,6 +5,7 @@
 Plant diagnostics **reads measurements and counts events; it does not control the heat pump**.
 It is off by default. Enable **Plant diagnostics** under **Settings → Firmware** to start an evidence
 window. Disabling clears this evidence and stops additional room, forecast and circulation collection.
+It also hides the Diagnostics name and card; Model becomes the default card when available.
 
 Select **Diagnostics** below the schematic to show the **Plant diagnostics · 24 h** card.
 Open a row for three blocks:
