@@ -1,4 +1,4 @@
-// translation-source: 69a70fe118eb482b63d926feb5045f732f15405b119416d0c242cc974e0e1d00
+// translation-source: 33967449acf2e4c68a9c1a1feb866a3378533feeec8e796587881b7dec62ef92
 I18N.fi = localeValues([
   /* sys.nodata */ "Ei tietoja",
   /* sys.unreachable */ "Ei tavoiteta",
@@ -1068,14 +1068,14 @@ DESCRIPTION_I18N.fi = descriptionValues([
 ]);
 
 MODEL_DESCRIPTION_I18N.fi = modelDescriptionValues([
-  ["Laitteen ilmoitukset; eivät todista syytä tai ratkaisua."], // health_fault
-  ["R5T: kerrostuneen varaajan piste, ei energia. Projektin vihje ≥0,8 K/h ilman pumppu-/vedenottomerkkejä. Vedenotto mahdollista ilman merkkejä; 0 K/h ei sulje pois lämpöhäviötä. Kierto ei osoita syytä."], // health_dhw_loss
-  ["≥12 päättynyttä lämmitysjaksoa, keskiarvo <10 min; ≥90% kaikista päättyneistä jaksoista luokiteltu. Sisäinen sääntö, ei Daikin; käyttövesi, jäähdytys ja luokittelemattomat pois."], // health_cycling
-  ["Sulatus: ≥3 yhdistettyä, >15% kompressorin käyntiajasta, kun sekä kompressorin että sulatuksen tila on luettavissa. Sisäinen sääntö, ei Daikin; kosteus ja koko kennon lämpötila puuttuvat."], // health_defrost
-  ["Paine: yhteinen sisäinen raja ≤1,0 bar; 60 s jatkuvaa havaintoa antaa varoituksen. Ei yleispätevä; mallin ohje pätee."], // health_pressure
-  ["Virtaus 60 s pumpun jälkeen. Raja vaatii saman mallin/tilan/olosuhteet; ei nimellisarvo tai pienen virtauksen todiste."], // health_flow
-  ["BUH/BSH ON-aika; ei energiaa tai turhan lämmön todiste."], // health_heater
-  ["5 kokeellista laskuria: vertailukelpoiset nousut; aukot/reset pois. Vakaus ei sulje pois rajoitusta eikä todista syytä."], // health_retries
+  ["Laitteen ilmoitukset", "eivät todista syytä tai ratkaisua."], // health_fault
+  ["R5T: kerrostuneen varaajan piste, ei energia.", "Projektin vihje ≥0,8 K/h ilman pumppu-/vedenottomerkkejä. Vedenotto mahdollista ilman merkkejä; 0 K/h ei sulje pois lämpöhäviötä. Kierto ei osoita syytä."], // health_dhw_loss
+  ["Kompressorin startit", "≥12 päättynyttä lämmitysjaksoa, keskiarvo <10 min; ≥90% kaikista päättyneistä jaksoista luokiteltu. Sisäinen sääntö, ei Daikin; käyttövesi, jäähdytys ja luokittelemattomat pois."], // health_cycling
+  ["Sulatus", "≥3 yhdistettyä, >15% kompressorin käyntiajasta, kun sekä kompressorin että sulatuksen tila on luettavissa. Sisäinen sääntö, ei Daikin; kosteus ja koko kennon lämpötila puuttuvat."], // health_defrost
+  ["Paine", "yhteinen sisäinen raja ≤1,0 bar; 60 s jatkuvaa havaintoa antaa varoituksen. Ei yleispätevä; mallin ohje pätee."], // health_pressure
+  ["Virtaus 60 s pumpun jälkeen", "Raja vaatii saman mallin/tilan/olosuhteet; ei nimellisarvo tai pienen virtauksen todiste."], // health_flow
+  ["BUH/BSH ON-aika", "ei energiaa tai turhan lämmön todiste."], // health_heater
+  ["5 kokeellista laskuria", "vertailukelpoiset nousut; aukot/reset pois. Vakaus ei sulje pois rajoitusta eikä todista syytä."], // health_retries
   ["RAM 24 h vakaa, laskut palautuvat; jatkuva lasku: ehkä vuoto; sopiva käynnistys virta päällä voi säilyttää RAM-käyrän. Muuten vain flash-lokin sopivat päivätyt 5 min aikasynkin jälkeen; 5 min välein lyhyt katko ei aina näy; avoin/uusimmat tallentamatta voivat puuttua."], // free_heap
   ["Suurin yhtenäinen vapaa RAM-lohko. TLS/OTA tarvitsee suuren yksittäisen lohkon; lasku vakaan kokonaismuistin rinnalla voi tarkoittaa pirstoutumista ja varausvirheitä."], // max_alloc
   ["Ulkoyksikön ID-sivulta luettu nimellisteholuokka, ei nykyinen lämpöteho."], // capacity

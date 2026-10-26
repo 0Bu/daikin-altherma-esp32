@@ -1,4 +1,4 @@
-// translation-source: 69a70fe118eb482b63d926feb5045f732f15405b119416d0c242cc974e0e1d00
+// translation-source: 33967449acf2e4c68a9c1a1feb866a3378533feeec8e796587881b7dec62ef92
 I18N.nb = localeValues([
   /* sys.nodata */ "Ingen data",
   /* sys.unreachable */ "Ikke tilgjengelig",
@@ -1228,14 +1228,14 @@ DESCRIPTION_I18N.nb = descriptionValues([
 ]);
 
 MODEL_DESCRIPTION_I18N.nb = modelDescriptionValues([
-  ["Enhetens meldinger; ingen årsaks- eller løsningsbevis."], // health_fault
-  ["R5T: ett punkt i lagdelt tank, ikke energi. Prosjekthint ≥0,8 K/h uten pumpe-/tappemarkører. Tapping er mulig uten markører; 0 K/h utelukker ikke varmetap. Sirkulasjon beviser ikke årsak."], // health_dhw_loss
-  ["≥12 fullførte varmekjøringer, snitt <10 min; ≥90% av alle fullførte kjøringer klassifisert. Intern regel, ikke Daikin; varmtvann, kjøling og uklassifiserte utelates."], // health_cycling
-  ["Avriming: ≥3 parede, >15% av kompressorens driftstid der både kompressor- og avrimingsstatus er lesbar. Intern regel, ikke Daikin; fuktighet og hele varmevekslerens temperatur mangler."], // health_defrost
-  ["Trykk: felles intern regel ≤1,0 bar; 60 s kontinuerlig observert gir advarsel. Ikke universell; modellmanual gjelder."], // health_pressure
-  ["Strømning etter 60 s pumpe. Grense krever samme modell/modus/forhold; ikke nominell eller lavstrømningsbevis."], // health_flow
-  ["BUH/BSH ON-tid; ikke energi eller bevis på unødig varme."], // health_heater
-  ["5 eksperimentelle tellere: sammenlignbare økninger; hull/reset utelates. Stabilitet utelukker ikke begrensning eller beviser årsak."], // health_retries
+  ["Enhetens meldinger", "ingen årsaks- eller løsningsbevis."], // health_fault
+  ["R5T: ett punkt i lagdelt tank, ikke energi.", "Prosjekthint ≥0,8 K/h uten pumpe-/tappemarkører. Tapping er mulig uten markører; 0 K/h utelukker ikke varmetap. Sirkulasjon beviser ikke årsak."], // health_dhw_loss
+  ["Kompressorstarter", "≥12 fullførte varmekjøringer, snitt <10 min; ≥90% av alle fullførte kjøringer klassifisert. Intern regel, ikke Daikin; varmtvann, kjøling og uklassifiserte utelates."], // health_cycling
+  ["Avriming", "≥3 parede, >15% av kompressorens driftstid der både kompressor- og avrimingsstatus er lesbar. Intern regel, ikke Daikin; fuktighet og hele varmevekslerens temperatur mangler."], // health_defrost
+  ["Trykk", "felles intern regel ≤1,0 bar; 60 s kontinuerlig observert gir advarsel. Ikke universell; modellmanual gjelder."], // health_pressure
+  ["Strømning etter 60 s pumpe", "Grense krever samme modell/modus/forhold; ikke nominell eller lavstrømningsbevis."], // health_flow
+  ["BUH/BSH ON-tid", "ikke energi eller bevis på unødig varme."], // health_heater
+  ["5 eksperimentelle tellere", "sammenlignbare økninger; hull/reset utelates. Stabilitet utelukker ikke begrensning eller beviser årsak."], // health_retries
   ["RAM 24 h: stabil, fall snur; varig fall: mulig lekkasje; kompatibel omstart med strøm: RAM-kurve mulig; ellers kun daterte kompatible 5 min fra flashjournal etter tidssynk. 5 min oppløsning kan skjule korte stopp; åpne/siste ulagrede kan mangle."], // free_heap
   ["Største sammenhengende blokk som TLS/OTA trenger; fall med stabil total-RAM tyder på fragmentering."], // max_alloc
   ["Utedelens nominelle effekt, ikke aktuell produksjon."], // capacity
