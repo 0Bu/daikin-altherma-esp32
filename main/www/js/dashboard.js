@@ -140,12 +140,10 @@ function renderCards() {
   // that is where the click-in-flight and unchanged-markup guards live, and this grid was the one
   // container bypassing both. The unchanged-markup half earns its keep here too — an idle plant or a
   // dropped X10A link produces identical markup, so those polls stop writing at all.
-  // Keep plant diagnostics first in the card stream: #valueGroups immediately follows #hpLive in
-  // the document.  The 24-hour rows still require the explicit diagnostics opt-in and a live X10A
-  // link.  The passive refrigerant-service row does not; checkupCardHtml() keeps the shared card
-  // shell when that independently published observation is the only row available.
-  const checkup = checkupCardHtml(
-    S.status?.diagnostics?.enabled === true && S.status?.hp?.connected);
+  // The opt-in controls the entire diagnosis card and its navigation entry. Its 24-hour rows also
+  // require a live X10A link; passive refrigerant observations keep their independent collection.
+  const checkup = S.status?.diagnostics?.enabled === true
+    ? checkupCardHtml(S.status?.hp?.connected) : "";
   setHtml("valueGroups", checkup + statusCardsHtml() +
     valueGroupsHtml(S._values || [], S.status?.hp?.connected));
   syncDashboardCards();
@@ -1647,8 +1645,8 @@ function checkupCardHtml(includeHealth = true) {
                                    bodyPrefix: checkupDetailHtml(c, h.full_span === true, h) });
     }
   }
-  // This row shares the card visually but remains independent of /status.health: it is not counted
-  // by the badge below and stays visible even when the optional 24-hour diagnoses are switched off.
+  // This row remains independent of /status.health and is not counted by the badge below.
+  // renderCards() gates the whole card on the diagnostics opt-in, including this observation.
   const rows = healthRows + refrigerantServiceRowHtml();
   if (!rows) return "";                               // older firmware — no card rather than an empty one
   if (!healthRows) return vcard(t("card.checkup"), rows, "", "", "diagnosis", t("nav.diagnosis"));
