@@ -1115,9 +1115,12 @@ async function assertPlantDiagnosis(page, context) {
       assert.equal(block.normal, normalLabel, `${context}/${block.id}: Normal last`);
       assert.ok(block.text.every(text => text.trim()), `${context}/${block.id}: no empty block`);
     }
-    const discardedContext = await page.evaluate(`t('check.detail.dhw_aborted', 3,
-      ['draw', 'charge', 'blind'].map(reason => t('check.detail.dhw_reason.' + reason)).join(', '),
-      '40 min').trim()`);
+    const discardedContext = await page.evaluate(`(() => {
+      const fixture = S.status.health.checks.find(check => check.id === 'dhw_loss');
+      return t('check.detail.dhw_aborted', fixture.aborts,
+        fixture.abort_reasons.map(reason => t('check.detail.dhw_reason.' + reason)).join(', '),
+        '40 min').trim();
+    })()`);
     const dhwText = () => page.evaluate(`document.querySelector("[data-desc='model:health_dhw_loss']")
       .closest('.vitem').innerText`);
     assert.ok((await dhwText()).includes(discardedContext),
