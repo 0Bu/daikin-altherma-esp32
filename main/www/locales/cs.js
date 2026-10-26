@@ -1,4 +1,4 @@
-// translation-source: 69a70fe118eb482b63d926feb5045f732f15405b119416d0c242cc974e0e1d00
+// translation-source: 33967449acf2e4c68a9c1a1feb866a3378533feeec8e796587881b7dec62ef92
 I18N.cs = localeValues([
   /* sys.nodata */ "Žádná data",
   /* sys.unreachable */ "Nedostupné",
@@ -1182,14 +1182,14 @@ DESCRIPTION_I18N.cs = descriptionValues([
 ]);
 
 MODEL_DESCRIPTION_I18N.cs = modelDescriptionValues([
-  ["Hlášení čerpadla; neprokazují příčinu ani opravu."], // health_fault
-  ["R5T: bod vrstveného zásobníku, ne energie. Interní práh ≥0,8 K/h bez značek čerpadla/odběru. Odběr možný i bez značek; 0 K/h nevylučuje ztráty. Cirkulace neprokazuje příčinu."], // health_dhw_loss
-  ["≥12 úplných běhů vytápění, průměr <10 min; klasifikováno ≥90% všech dokončených běhů. Interní pravidlo, ne Daikin; TUV, chlazení a neklasifikované vyloučeny."], // health_cycling
-  ["Odmrazení: ≥3 spárovaná, >15% doby chodu kompresoru při čitelném stavu kompresoru i odmrazení. Interní pravidlo, ne Daikin; chybí vlhkost a teplota celého výměníku."], // health_defrost
-  ["Tlak: společné interní pravidlo ≤1,0 bar; 60 s souvislého pozorování dává varování. Ne univerzální; platí návod modelu."], // health_pressure
-  ["Průtok po 60 s čerpadla. Mez vyžaduje stejný model/režim/podmínky; ne jmenovitý ani důkaz malého průtoku."], // health_flow
-  ["Doba ON BUH/BSH; ne energie ani důkaz zbytečného topení."], // health_heater
-  ["5 experimentálních čítačů: srovnatelné nárůsty; mezery/reset vyloučeny. Stabilita nevylučuje omezení ani neprokazuje příčinu."], // health_retries
+  ["Hlášení čerpadla", "neprokazují příčinu ani opravu."], // health_fault
+  ["R5T: bod vrstveného zásobníku, ne energie.", "Interní práh ≥0,8 K/h bez značek čerpadla/odběru. Odběr možný i bez značek; 0 K/h nevylučuje ztráty. Cirkulace neprokazuje příčinu."], // health_dhw_loss
+  ["Starty kompresoru", "≥12 úplných běhů vytápění, průměr <10 min; klasifikováno ≥90% všech dokončených běhů. Interní pravidlo, ne Daikin; TUV, chlazení a neklasifikované vyloučeny."], // health_cycling
+  ["Odmrazení", "≥3 spárovaná, >15% doby chodu kompresoru při čitelném stavu kompresoru i odmrazení. Interní pravidlo, ne Daikin; chybí vlhkost a teplota celého výměníku."], // health_defrost
+  ["Tlak", "společné interní pravidlo ≤1,0 bar; 60 s souvislého pozorování dává varování. Ne univerzální; platí návod modelu."], // health_pressure
+  ["Průtok po 60 s čerpadla", "Mez vyžaduje stejný model/režim/podmínky; ne jmenovitý ani důkaz malého průtoku."], // health_flow
+  ["Doba ON BUH/BSH", "ne energie ani důkaz zbytečného topení."], // health_heater
+  ["5 experimentálních čítačů", "srovnatelné nárůsty; mezery/reset vyloučeny. Stabilita nevylučuje omezení ani neprokazuje příčinu."], // health_retries
   ["RAM 24 h stabilní, poklesy mizí; trvalý pokles: možný únik; napájený kompatibilní restart: průběh RAM možný. Jinak jen datované kompatibilní 5 min z flash žurnálu po seřízení hodin. Rastr 5 min může skrýt krátké pauzy; otevřené/nové neuložené mohou chybět."], // 8
   ["Největší souvislý blok volné RAM. TLS a OTA potřebují jeden velký blok i při vyšším celkovém volnu. Je nejvýše roven volné RAM. Klesá-li při stabilní volné RAM, roste fragmentace haldy a velká alokace může selhat před vyčerpáním paměti."], // 9
   ["Jmenovitý výkon venkovní jednotky z její identifikace; třída hardwaru, ne aktuální výroba."], // 10

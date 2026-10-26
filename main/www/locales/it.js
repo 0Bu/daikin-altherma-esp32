@@ -1,4 +1,4 @@
-// translation-source: 69a70fe118eb482b63d926feb5045f732f15405b119416d0c242cc974e0e1d00
+// translation-source: 33967449acf2e4c68a9c1a1feb866a3378533feeec8e796587881b7dec62ef92
 I18N.it = localeValues([
   /* sys.nodata */ "Nessun dato",
   /* sys.unreachable */ "Non raggiungibile",
@@ -1211,14 +1211,14 @@ DESCRIPTION_I18N.it = descriptionValues([
 ]);
 
 MODEL_DESCRIPTION_I18N.it = modelDescriptionValues([
-  ["Messaggi della pompa; non provano causa né risoluzione."], // health_fault
-  ["R5T: un punto del serbatoio stratificato, non energia. Indizio interno ≥0,8 K/h senza segnali pompa/prelievo. Senza segnali, i prelievi restano possibili; 0 K/h non esclude perdite. Circolazione non prova la causa."], // health_dhw_loss
-  ["≥12 cicli completi di riscaldamento, media <10 min; ≥90% di tutti i cicli completati classificati. Regola interna, non Daikin; esclusi ACS, freddo e non classificati."], // health_cycling
-  ["Sbrinamento: ≥3 associati, >15% del tempo di marcia del compressore con stati compressore e sbrinamento leggibili. Regola interna, non Daikin; mancano umidità e temperatura dell’intera batteria."], // health_defrost
-  ["Pressione: regola interna comune ≤1,0 bar; 60 s continui osservati danno AVVISO. Non universale; vale il manuale del modello."], // health_pressure
-  ["Portata dopo 60 s di pompa. Limite per stesso modello/modo/condizioni; non nominale né prova di portata insufficiente."], // health_flow
-  ["Tempo ON BUH/BSH; non energia né prova di calore inutile."], // health_heater
-  ["5 contatori sperimentali: aumenti comparabili; lacune/reset esclusi. Stabilità non esclude limitazione né prova causa."], // health_retries
+  ["Messaggi della pompa", "non provano causa né risoluzione."], // health_fault
+  ["R5T: un punto del serbatoio stratificato, non energia.", "Indizio interno ≥0,8 K/h senza segnali pompa/prelievo. Senza segnali, i prelievi restano possibili; 0 K/h non esclude perdite. Circolazione non prova la causa."], // health_dhw_loss
+  ["Avvii compressore", "≥12 cicli completi di riscaldamento, media <10 min; ≥90% di tutti i cicli completati classificati. Regola interna, non Daikin; esclusi ACS, freddo e non classificati."], // health_cycling
+  ["Sbrinamento", "≥3 associati, >15% del tempo di marcia del compressore con stati compressore e sbrinamento leggibili. Regola interna, non Daikin; mancano umidità e temperatura dell’intera batteria."], // health_defrost
+  ["Pressione", "regola interna comune ≤1,0 bar; 60 s continui osservati danno AVVISO. Non universale; vale il manuale del modello."], // health_pressure
+  ["Portata dopo 60 s di pompa", "Limite per stesso modello/modo/condizioni; non nominale né prova di portata insufficiente."], // health_flow
+  ["Tempo ON BUH/BSH", "non energia né prova di calore inutile."], // health_heater
+  ["5 contatori sperimentali", "aumenti comparabili; lacune/reset esclusi. Stabilità non esclude limitazione né prova causa."], // health_retries
   ["RAM 24 h: stabile o cali recuperati; calo continuo, possibile perdita; riavvio compatibile alimentato: curva RAM possibile; altrimenti solo 5 min datati compatibili del registro flash a ora sincronizzata. Passi di 5 min possono celare pause brevi; aperto/recenti non salvati possono mancare."], // free_heap
   ["Massimo blocco contiguo richiesto da TLS/OTA; se cala con RAM totale stabile indica frammentazione."], // max_alloc
   ["Capacità nominale dell’unità esterna dalla pagina identificativa, non potenza prodotta ora."], // capacity

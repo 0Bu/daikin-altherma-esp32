@@ -72,7 +72,7 @@ what the value *should* read, and what this row makes of it.
 
 **Exit 2 is not a pass.** It means the spec could not be parsed — the audit checked nothing.
 
-A finding is a **question, not a verdict**: `docs/REGISTERS.md:196-200` is explicit that the §5
+A finding is a **question, not a verdict**: [the register catalog](../../../docs/REGISTERS.md#5-register-catalog-per-model) is explicit that the §5
 table is one representative model and that families differ. Resolve each against the spec and, where
 it matters, a real unit. Genuinely-correct deviations go in `tools/domain/audit_exceptions.txt` with
 evidence and stay visible in the "suppressed" list. What must never happen is adding an entry to
@@ -113,7 +113,7 @@ ranges too. The audit's envelopes catch the impossible; you catch the *implausib
 
 `scripts/run-mock-tests.sh` must pass, and new decode/format logic needs a `CHECK` in
 `test/test_logic.cpp` — catalog-wide guards where a whole class can regress (the pattern issue legacy-39
-established, e.g. the water-pressure loop at `test/test_logic.cpp:209-220`). If the audit itself
+established, e.g. [`test_convert()`'s `wp_checked` catalog guard](../../../test/test_logic.cpp)). If the audit itself
 changed, `tools/domain/selftest.sh` must still catch all four historical bugs.
 
 Report findings grouped by section above. **Block the merge** on: any live audit finding, an

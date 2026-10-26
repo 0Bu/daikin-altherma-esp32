@@ -1,4 +1,4 @@
-// translation-source: 69a70fe118eb482b63d926feb5045f732f15405b119416d0c242cc974e0e1d00
+// translation-source: 33967449acf2e4c68a9c1a1feb866a3378533feeec8e796587881b7dec62ef92
 const plNoun = (n, one, few, many) => {
   const value = Math.abs(Number(n)), mod10 = value % 10, mod100 = value % 100;
   return value === 1 ? one
@@ -1221,14 +1221,14 @@ DESCRIPTION_I18N.pl = descriptionValues([
 ]);
 
 MODEL_DESCRIPTION_I18N.pl = modelDescriptionValues([
-  ["Komunikaty pompy; nie dowodzą przyczyny ani naprawy."], // health_fault
-  ["R5T: punkt warstwowego zbiornika, nie energia. Próg projektu ≥0,8 K/h bez oznaczeń pompy/poboru. Pobór możliwy bez oznaczeń; 0 K/h nie wyklucza strat. Cyrkulacja nie dowodzi przyczyny."], // health_dhw_loss
-  ["≥12 pełnych cykli ogrzewania, średnia <10 min; ≥90% wszystkich zakończonych cykli sklasyfikowanych. Reguła projektu, nie Daikin; CWU, chłodzenie i nieklasyfikowane wykluczone."], // health_cycling
-  ["Odszranianie: ≥3 powiązane, >15% czasu pracy sprężarki przy czytelnych stanach sprężarki i odszraniania. Reguła projektu, nie Daikin; brak wilgotności i temperatury całego wymiennika."], // health_defrost
-  ["Ciśnienie: wspólna reguła projektu ≤1,0 bar; 60 s ciągłej obserwacji daje ostrzeżenie. Nie uniwersalna; obowiązuje instrukcja modelu."], // health_pressure
-  ["Przepływ po 60 s pompy. Limit wymaga tego samego modelu/trybu/warunków; nie nominalny ani dowód małego przepływu."], // health_flow
-  ["Czas ON BUH/BSH; nie energia ani dowód zbędnego grzania."], // health_heater
-  ["5 eksperymentalnych liczników: porównywalne wzrosty; luki/reset pomijane. Stabilność nie wyklucza ograniczeń ani nie dowodzi przyczyny."], // health_retries
+  ["Komunikaty pompy", "nie dowodzą przyczyny ani naprawy."], // health_fault
+  ["R5T: punkt warstwowego zbiornika, nie energia.", "Próg projektu ≥0,8 K/h bez oznaczeń pompy/poboru. Pobór możliwy bez oznaczeń; 0 K/h nie wyklucza strat. Cyrkulacja nie dowodzi przyczyny."], // health_dhw_loss
+  ["Starty sprężarki", "≥12 pełnych cykli ogrzewania, średnia <10 min; ≥90% wszystkich zakończonych cykli sklasyfikowanych. Reguła projektu, nie Daikin; CWU, chłodzenie i nieklasyfikowane wykluczone."], // health_cycling
+  ["Odszranianie", "≥3 powiązane, >15% czasu pracy sprężarki przy czytelnych stanach sprężarki i odszraniania. Reguła projektu, nie Daikin; brak wilgotności i temperatury całego wymiennika."], // health_defrost
+  ["Ciśnienie", "wspólna reguła projektu ≤1,0 bar; 60 s ciągłej obserwacji daje ostrzeżenie. Nie uniwersalna; obowiązuje instrukcja modelu."], // health_pressure
+  ["Przepływ po 60 s pompy", "Limit wymaga tego samego modelu/trybu/warunków; nie nominalny ani dowód małego przepływu."], // health_flow
+  ["Czas ON BUH/BSH", "nie energia ani dowód zbędnego grzania."], // health_heater
+  ["5 eksperymentalnych liczników", "porównywalne wzrosty; luki/reset pomijane. Stabilność nie wyklucza ograniczeń ani nie dowodzi przyczyny."], // health_retries
   ["RAM 24 h: stabilna lub spadki z odbiciem; stały spadek, możliwy wyciek; zgodny restart z zasilaniem: możliwy wykres RAM. Inaczej tylko zgodne datowane 5 min dziennika flash po synchronizacji czasu. Co 5 min krótka przerwa może pozostać niewidoczna; otwarty/ostatnie niezapisane mogą zniknąć."], // 8
   ["Największy ciągły blok wolnej pamięci RAM. TLS i OTA potrzebują jednego dość dużego bloku, nawet gdy łącznie wolnej pamięci jest więcej. Zawsze nie większy niż cała wolna RAM. Jeśli wolna RAM jest stabilna, a ten blok maleje, rośnie fragmentacja sterty i duża alokacja może zawieść przed wyczerpaniem pamięci."], // 9
   ["Nominalna moc jednostki zewnętrznej z jej strony identyfikacyjnej. To klasa sprzętu, nie aktualna produkcja."], // 10

@@ -1,4 +1,4 @@
-// translation-source: 69a70fe118eb482b63d926feb5045f732f15405b119416d0c242cc974e0e1d00
+// translation-source: 33967449acf2e4c68a9c1a1feb866a3378533feeec8e796587881b7dec62ef92
 I18N.fr = localeValues([
   /* sys.nodata */ "Aucune donnée",
   /* sys.unreachable */ "Injoignable",
@@ -1211,14 +1211,14 @@ DESCRIPTION_I18N.fr = descriptionValues([
 ]);
 
 MODEL_DESCRIPTION_I18N.fr = modelDescriptionValues([
-  ["Messages de la pompe ; ni cause ni résolution prouvées."], // health_fault
-  ["R5T : un point du ballon stratifié, pas une énergie. Indice interne ≥0,8 K/h sans indice pompe/puisage. Sans indice, un puisage reste possible ; 0 K/h n’exclut pas les pertes. Circulation ne prouve pas la cause."], // health_dhw_loss
-  ["≥12 chauffages complets, moyenne <10 min; ≥90% de tous les cycles complets classés. Règle interne, pas Daikin; ECS, froid et non classés exclus."], // health_cycling
-  ["Dégivrage : ≥3 associés, >15% du temps de marche du compresseur si états compresseur et dégivrage lisibles. Règle interne, pas Daikin; humidité et température de toute la batterie absentes."], // health_defrost
-  ["Pression : règle interne commune ≤1,0 bar ; 60 s continues observées donnent ALERTE. Pas universelle ; manuel du modèle."], // health_pressure
-  ["Débit après 60 s de pompe. Seuil selon même modèle/mode/conditions ; pas nominal ni preuve de débit insuffisant."], // health_flow
-  ["Temps ON de BUH/BSH ; pas énergie ni preuve de chaleur inutile."], // health_heater
-  ["5 compteurs expérimentaux : hausses comparables ; lacunes/reset ignorés. Stabilité n’exclut pas limitation ni ne prouve cause."], // health_retries
+  ["Messages de la pompe ", "ni cause ni résolution prouvées."], // health_fault
+  ["R5T : un point du ballon stratifié, pas une énergie.", "Indice interne ≥0,8 K/h sans indice pompe/puisage. Sans indice, un puisage reste possible ; 0 K/h n’exclut pas les pertes. Circulation ne prouve pas la cause."], // health_dhw_loss
+  ["Démarrages compresseur", "≥12 chauffages complets, moyenne <10 min; ≥90% de tous les cycles complets classés. Règle interne, pas Daikin; ECS, froid et non classés exclus."], // health_cycling
+  ["Dégivrage ", "≥3 associés, >15% du temps de marche du compresseur si états compresseur et dégivrage lisibles. Règle interne, pas Daikin; humidité et température de toute la batterie absentes."], // health_defrost
+  ["Pression ", "règle interne commune ≤1,0 bar ; 60 s continues observées donnent ALERTE. Pas universelle ; manuel du modèle."], // health_pressure
+  ["Débit après 60 s de pompe", "Seuil selon même modèle/mode/conditions ; pas nominal ni preuve de débit insuffisant."], // health_flow
+  ["Temps ON de BUH/BSH ", "pas énergie ni preuve de chaleur inutile."], // health_heater
+  ["5 compteurs expérimentaux ", "hausses comparables ; lacunes/reset ignorés. Stabilité n’exclut pas limitation ni ne prouve cause."], // health_retries
   ["RAM 24 h stable, creux résorbés; baisse durable: fuite possible. Redémarrage compatible alimenté: courbe RAM possible. Sinon, journal flash requis: 5 min datées compatibles après synchro. Le pas de 5 min peut cacher un bref arrêt. Ouvert/récents non sauvés peuvent manquer."], // free_heap
   ["Plus grand bloc contigu requis par TLS/OTA ; sa baisse avec RAM totale stable indique une fragmentation."], // max_alloc
   ["Puissance nominale de l’unité extérieure, pas sa production actuelle."], // capacity
