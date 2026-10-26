@@ -1,4 +1,4 @@
-// translation-source: 69a70fe118eb482b63d926feb5045f732f15405b119416d0c242cc974e0e1d00
+// translation-source: 33967449acf2e4c68a9c1a1feb866a3378533feeec8e796587881b7dec62ef92
 I18N.es = localeValues([
   /* sys.nodata */ "Sin datos",
   /* sys.unreachable */ "No accesible",
@@ -1227,14 +1227,14 @@ DESCRIPTION_I18N.es = descriptionValues([
 ]);
 
 MODEL_DESCRIPTION_I18N.es = modelDescriptionValues([
-  ["Mensajes de la bomba; no prueban causa ni resolución."], // health_fault
-  ["R5T: un punto del depósito estratificado, no energía. Indicio interno ≥0,8 K/h sin señales de bomba/consumo. Consumo posible sin señales; 0 K/h no excluye pérdidas. Circulación no prueba causa."], // health_dhw_loss
-  ["≥12 ciclos de calefacción completos, media <10 min; ≥90% de todos los ciclos completos clasificados. Regla interna, no Daikin; excluye ACS, frío y no clasificados."], // health_cycling
-  ["Desescarche: ≥3 asociados, >15% del tiempo de marcha del compresor con estados de compresor y desescarche legibles. Regla interna, no Daikin; faltan humedad y temperatura de toda la batería."], // health_defrost
-  ["Presión: regla interna común ≤1,0 bar; 60 s continuos observados dan AVISO. No universal; rige el manual del modelo."], // health_pressure
-  ["Caudal tras 60 s de bomba. El límite exige mismo modelo/modo/condiciones; no nominal ni prueba de flujo insuficiente."], // health_flow
-  ["Tiempo ON de BUH/BSH; no energía ni prueba de calor innecesario."], // health_heater
-  ["5 contadores experimentales: aumentos comparables; ignora huecos/reset. Estabilidad no excluye limitación ni prueba causa."], // health_retries
+  ["Mensajes de la bomba", "no prueban causa ni resolución."], // health_fault
+  ["R5T: un punto del depósito estratificado, no energía.", "Indicio interno ≥0,8 K/h sin señales de bomba/consumo. Consumo posible sin señales; 0 K/h no excluye pérdidas. Circulación no prueba causa."], // health_dhw_loss
+  ["Arranques compresor", "≥12 ciclos de calefacción completos, media <10 min; ≥90% de todos los ciclos completos clasificados. Regla interna, no Daikin; excluye ACS, frío y no clasificados."], // health_cycling
+  ["Desescarche", "≥3 asociados, >15% del tiempo de marcha del compresor con estados de compresor y desescarche legibles. Regla interna, no Daikin; faltan humedad y temperatura de toda la batería."], // health_defrost
+  ["Presión", "regla interna común ≤1,0 bar; 60 s continuos observados dan AVISO. No universal; rige el manual del modelo."], // health_pressure
+  ["Caudal tras 60 s de bomba", "El límite exige mismo modelo/modo/condiciones; no nominal ni prueba de flujo insuficiente."], // health_flow
+  ["Tiempo ON de BUH/BSH", "no energía ni prueba de calor innecesario."], // health_heater
+  ["5 contadores experimentales", "aumentos comparables; ignora huecos/reset. Estabilidad no excluye limitación ni prueba causa."], // health_retries
   ["RAM 24 h: estable o bajadas recuperadas; caída continua, posible fuga. Reinicio compatible alimentado: curva RAM posible; si no, solo 5 min fechados compatibles del registro flash tras ajustar hora; pasos de 5 min pueden ocultar pausas breves; abierto/últimos sin guardar pueden faltar."], // free_heap
   ["Mayor bloque contiguo necesario para TLS/OTA; si cae con RAM total estable, indica fragmentación."], // max_alloc
   ["Capacidad nominal de la unidad exterior, no su producción actual."], // capacity

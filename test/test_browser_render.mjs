@@ -1042,6 +1042,13 @@ async function assertPlantDiagnosis(page, context) {
   await page.evaluate(`(() => {
     window.__browserDiagnosisOriginal = { status: S.status, open: new Set(S.descOpen), card: S.dashboardCard };
     S.status = structuredClone(S.status);
+    S.status.refrigerant_service = {
+      state: 'limited', continuous_s: 75, samples: 4, blocker: null,
+      special_phases_known: false, limitations: ['pressure_sides_incomplete'],
+      metrics: { compressor_rps: { min: 20, mean: 27.5, max: 40 },
+        discharge_c: { min: 46.5, mean: 60.5, max: 81.4 },
+        eev_command_pls: { min: 200, mean: 230.5, max: 250 } }
+    };
     S.status.health = {
       status: "info", full_span: true, span_s: 86400, source_fresh: true, source_age_s: 1,
       available: 8, assessable: 2, evaluated: 2,
@@ -1084,6 +1091,7 @@ async function assertPlantDiagnosis(page, context) {
       "[data-desc='model:health_pressure']", ".card");
     const selectors = await page.evaluate(`Array.from(document.querySelectorAll(${JSON.stringify(selector)}),
       el => '[data-desc="' + el.dataset.desc + '"]')`);
+    selectors.push("[data-desc='service:refrigerant']");
     for (const row of selectors) await clickDisclosure(page, row);
     // The real pointer lifecycle protects the accordion for 600ms after release. Polling is
     // stopped in this fixture, so wait for that protection before explicitly repainting new data.
@@ -1091,6 +1099,22 @@ async function assertPlantDiagnosis(page, context) {
     await page.frame();
     assertLayout(await page.evaluate(layoutAudit), `${context}/expanded`);
     await assertAccessibility(page, `${context}/expanded`, { nativeTree: true });
+    const blocks = await page.evaluate(`Array.from(document.querySelectorAll(
+      "[data-desc^='model:health_'], [data-desc='service:refrigerant']"), row => {
+      const body = row.closest('.vitem').querySelector('.vdesc-body');
+      return { id: row.dataset.desc, count: body.children.length,
+        firstValue: body.children[0]?.firstElementChild?.className,
+        normal: body.children[2]?.querySelector('.vdesc-n')?.innerText,
+        text: Array.from(body.children, block => block.innerText) };
+    })`);
+    assert.equal(blocks.length, 9, `${context}: include the independent refrigerant observation`);
+    const normalLabel = await page.evaluate("t('normal.label')");
+    for (const block of blocks) {
+      assert.equal(block.count, 3, `${context}/${block.id}: exactly three blocks`);
+      assert.equal(block.firstValue, 'vdesc-n', `${context}/${block.id}: value first`);
+      assert.equal(block.normal, normalLabel, `${context}/${block.id}: Normal last`);
+      assert.ok(block.text.every(text => text.trim()), `${context}/${block.id}: no empty block`);
+    }
     assert.equal(await page.evaluate(`document.querySelector("[data-desc='model:health_pressure']")
       .closest('.card').querySelector('.section-badge')?.innerText || ''`),
       await page.evaluate("t('check.summary.notes', 2)"),
@@ -1133,6 +1157,8 @@ async function assertPlantDiagnosis(page, context) {
       .includes('kWh'), `${context}: no measured rate means no energy number`);
     await captureNativeEvidence(page, `${context}/dhw-no-window`,
       "[data-desc='model:health_dhw_loss']", ".vitem");
+    await captureNativeEvidence(page, `${context}/refrigerant`,
+      "[data-desc='service:refrigerant']", ".vitem");
     await page.evaluate(`(() => {
       const h = S.status.health;
       h.source_fresh = false;
@@ -1178,7 +1204,7 @@ async function assertPlantDiagnosis(page, context) {
       `${context}: collecting pressure must retain its missing-day explanation`);
     assert.ok(!flowDetail.includes(missingDay),
       `${context}: collecting flow must not require a full day`);
-    assert.ok(flowDetail.includes(await page.evaluate("t('check.detail.period', '15 min')")),
+    assert.ok(flowDetail.includes(await page.evaluate("t('check.detail.period_label') + ' 15 min'")),
       `${context}: collecting flow must retain its observed period`);
     assert.equal(await page.evaluate(`document.querySelector("[data-desc='model:health_flow'] .vrow-val").innerText`),
       await page.evaluate("t('check.status.collecting')"),

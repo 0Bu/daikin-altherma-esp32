@@ -2030,14 +2030,14 @@ const MODEL_DESCRIPTIONS = {
   // the wrong conclusion from a correct number.
   health_fault: {
     what: "Current and remembered fault messages reported by the heat pump.",
-    normal: "A message does not identify its cause; disappearance does not prove resolution.",
+    normal: "No reported fault message. A message does not identify its cause; disappearance does not prove resolution.",
     de: { what: "Aktuelle und gespeicherte Störungsmeldungen der Wärmepumpe.",
-          normal: "Eine Meldung belegt keine Ursache; ihr Verschwinden belegt keine Behebung." } },
+          normal: "Keine gemeldete Störung. Eine Meldung belegt keine Ursache; ihr Verschwinden belegt keine Behebung." } },
   health_dhw_loss: {
-    what: "R5T: one point in a stratified tank; not measured tank energy.",
-    normal: "Project hint ≥0.8 K/h without pump/draw-like markers. Missing markers do not prove no draw; zero net cooling does not exclude heat loss. Circulation overlap is correlation, not cause.",
-    de: { what: "R5T: ein Punkt im geschichteten Speicher; keine Energiemessung.",
-          normal: "Interner Hinweis ≥0,8 K/h ohne Pumpen-/Zapfmerkmale. Fehlende Merkmale belegen keine Zapffreiheit; null Nettoabkühlung schließt Wärmeverlust nicht aus. Zirkulationsüberschneidung belegt keine Ursache." } },
+    what: "Largest accepted hourly temperature drop at tank sensor R5T.",
+    normal: "Project hint ≥0.8 K/h without pump/draw-like markers. R5T is one point in a stratified tank, not measured tank energy. Missing markers do not prove no draw; zero net cooling does not exclude heat loss. Circulation overlap is correlation, not cause.",
+    de: { what: "Stärkste erfasste Abkühlung pro Stunde am Speichersensor R5T.",
+          normal: "Interner Hinweis ≥0,8 K/h ohne Pumpen-/Zapfmerkmale. R5T misst einen Punkt, keine Energie oder den ganzen Speicher. Fehlende Merkmale belegen keine Zapffreiheit; null Nettoabkühlung schließt Wärmeverlust nicht aus. Zirkulationsüberschneidung belegt keine Ursache." } },
   health_cycling: {
     what: "Compressor OFF-to-ON starts and durations of complete, consistently classified heating runs.",
     normal: "Project hint: ≥12 heating runs averaging <10 min; ≥90% of all completed runs classified. Excludes hot water, cooling and unclassified runs; no Daikin limit.",
@@ -2049,25 +2049,25 @@ const MODEL_DESCRIPTIONS = {
     de: { what: "Abtaustarts und ihr Anteil an der Verdichterlaufzeit bei lesbarem Verdichter- und Abtaustatus.",
           normal: "Interne Regel: ≥3 zugeordnete Vorgänge und >15 %. Luftfeuchte und Temperatur der gesamten Wärmetauscherfläche fehlen; kein Daikin-Störungsgrenzwert." } },
   health_pressure: {
-    what: "Water-pressure samples accepted by the decoder.",
+    what: "Lowest recorded water pressure.",
     normal: "Project rule: ≤1.0 bar gives NOTE; 60 continuously observed seconds gives WARNING. This common threshold is not verified for every model; its exact manual applies.",
-    de: { what: "Vom Decoder angenommene Wasserdruckwerte.",
+    de: { what: "Niedrigster erfasster Wasserdruck.",
           normal: "Interne Regel: ≤1,0 bar ergibt HINWEIS, 60 durchgehend beobachtete Sekunden WARNUNG. Diese verbreitete Grenze ist nicht für jedes Modell bestätigt; maßgeblich ist dessen genaue Anleitung." } },
   health_flow: {
     what: "Lowest flow after 60 continuously observed seconds of internal pump operation.",
-    normal: "Not nominal flow or proof of part load. Manual limits need the same model, mode and conditions; the value alone cannot establish insufficient flow.",
+    normal: "No universal normal value. Not nominal flow or proof of part load. Manual limits need the same model, mode and conditions; the value alone cannot establish insufficient flow.",
     de: { what: "Niedrigster Durchfluss nach 60 durchgehend beobachteten Sekunden mit laufender interner Pumpe.",
-          normal: "Kein Nenndurchfluss oder Teillastnachweis. Anleitungsgrenzen benötigen dasselbe Modell, dieselbe Betriebsart und Bedingungen; der Wert allein belegt keine Unterversorgung." } },
+          normal: "Kein allgemeiner Normalwert. Kein Nenndurchfluss oder Teillastnachweis. Anleitungsgrenzen benötigen dasselbe Modell, dieselbe Betriebsart und Bedingungen; der Wert allein belegt keine Unterversorgung." } },
   health_heater: {
     what: "Observed ON time of the circuit heater (BUH) and tank heater (BSH).",
-    normal: "Runtime is not energy consumption and cannot establish unnecessary heating.",
+    normal: "There is no fixed normal runtime; it depends on heating and hot-water demand. Runtime is not energy consumption and cannot establish unnecessary heating.",
     de: { what: "Beobachtete ON-Zeit des Zusatzheizers (BUH) und Speicherheizstabs (BSH).",
-          normal: "Laufzeit ist kein Energieverbrauch und belegt kein unnötiges Heizen." } },
+          normal: "Es gibt keine feste normale Laufzeit; sie hängt vom Heiz- und Warmwasserbedarf ab. Laufzeit ist kein Energieverbrauch und belegt kein unnötiges Heizen." } },
   health_retries: {
     what: "Comparable rises in five experimental counters, including while stopped or at a compressor-state boundary.",
-    normal: "Gaps, resets and non-rises do not count. Stable counters cannot rule out limiting or identify a cause.",
+    normal: "No verified normal range for these experimental counters. Gaps, resets and non-rises do not count. Stable counters cannot rule out limiting or identify a cause.",
     de: { what: "Vergleichbare Anstiege in fünf experimentellen Zählern, auch im Stillstand oder an Verdichter-Zustandsgrenzen.",
-          normal: "Lücken, Rücksetzungen und fehlende Anstiege zählen nicht. Stabile Zähler schließen Begrenzung nicht aus und belegen keine Ursache." } },
+          normal: "Für diese experimentellen Zähler ist kein Normalbereich belegt. Lücken, Rücksetzungen und fehlende Anstiege zählen nicht. Stabile Zähler schließen Begrenzung nicht aus und belegen keine Ursache." } },
   // The two board-memory rows on the ESP32 card. The copy has one job beyond naming the number: to
   // say what the SHAPE of the curve means, because that is the whole reason these rows exist rather
   // than living on /status alone.
@@ -2123,8 +2123,7 @@ function modelDescRow(id, label, value, opt = {}) {
   // No trend half here: the firmware keeps series for catalog readings, and these rows are model
   // identity — a nameplate fact, not something that moves.
   return descAccordion(`model:${id}`, label, val, opt.cls || "",
-                       (opt.bodyPrefix || "") + descBodyHtml(d, undefined, modelDescriptionCopy(id),
-                         id.startsWith("health_") ? "meaning.label" : "normal.label"));
+                       opt.bodyHtml ?? descBodyHtml(d, undefined, modelDescriptionCopy(id)));
 }
 
 // Toggle a value row's description accordion. Only the LIVE element is flipped here (so the CSS

@@ -96,21 +96,15 @@ assert.match(modbusPollSource,
              "the Modbus task must close the race where an old cycle consumes the HTTP reset");
 
 const context = {
-  S: { status: null },
+  S: { status: null, descOpen: new Set() },
   document: { getElementById: () => null },
   fetch: () => { throw new Error("unexpected fetch in checkup test"); },
   localStorage: { getItem: () => "en", setItem: () => {} },
   navigator: { language: "en" },
-  descNoteHtml: (lead, text) => `<detail label="${lead}">${text}</detail>`,
-  descAccordion: (key, label, value, cls, body) =>
-    `<row id="${key}" tone="${cls}" label="${label}"><value>${value}</value>${body}</row>`,
-  // Keep the renderer's semantic inputs visible in a compact deterministic string; no DOM is needed.
-  modelDescRow: (id, label, value, opt = {}) =>
-    `<row id="${id}" tone="${opt.cls || ""}" label="${label}"><value>${value}</value>${opt.bodyPrefix || ""}</row>`,
 };
 const sandbox = vm.createContext(context);
 vm.runInContext(
-  `${i18nSource}${dashboardSource}
+  `${i18nSource}${dashboardSource}${explanationSource}
    this.__checkup = {
      value: checkupValue,
      metric: checkupMetricValue,
@@ -154,7 +148,7 @@ const collecting = {
 let detail = ui.detail(collecting, true, { span_s: 86400, source_age_s: 5, source_fresh: true });
 assert.match(detail, /Readable signals: 21 h 35 min of 21 h 36 min required/);
 assert.match(detail, /Missing readable time: 1 s/);
-assert.match(detail, /Data window:.*24 h, at most 24 h/);
+assert.match(detail, /Data window: 24 h/);
 assert.doesNotMatch(detail, /full 24-hour window is still missing/);
 detail = ui.detail({ ...collecting, observed_s: 77760, reason: "day_incomplete" }, false,
                    { span_s: 84600, source_age_s: 5, source_fresh: true });
@@ -172,12 +166,12 @@ const collectingFlow = {
 for (const lang of locales) {
   const horizon = ui.text(lang, "check.detail.horizon_wait", "23 h 45 min");
   const completeHorizon = ui.text(lang, "check.detail.horizon_wait", "0 min");
-  const period = ui.text(lang, "check.detail.period", "15 min");
+  const period = `${ui.text(lang, "check.detail.period_label")} 15 min`;
   const ageLabel = ui.text(lang, "check.detail.age_label");
   const flowDetail = ui.detail(collectingFlow, false, partialReport);
   assert.ok(!flowDetail.includes(horizon), `${lang} flow must not require a full day`);
   assert.ok(flowDetail.includes(period), `${lang} flow must retain its observed period`);
-  assert.ok(flowDetail.includes(ageLabel), `${lang} flow must retain source age`);
+  assert.ok(!flowDetail.includes(ageLabel), `${lang} fresh flow need not repeat source age`);
   assert.ok(flowDetail.includes(ui.text(lang, "check.detail.collecting_unknown")),
     `${lang} flow must retain its actual collection state`);
   for (const id of ["pressure", "cycling", "defrost"]) {
@@ -197,6 +191,7 @@ for (const lang of locales) {
     { ...partialReport, source_fresh: false, source_age_s: 120 });
   assert.ok(staleDetail.includes(ui.text(lang, "check.detail.source_stale")),
     `${lang} flow must retain the stale-source explanation`);
+  assert.ok(staleDetail.includes(ageLabel), `${lang} stale flow must retain source age`);
   assert.ok(!staleDetail.includes(horizon), `${lang} a stale source is not a missing day`);
 }
 ui.setLang("en");
@@ -277,7 +272,7 @@ assert.equal(ui.value({ ...blocked, verdict: "unavailable", blocked: false }), "
 assert.match(ui.detail({ ...blocked, verdict: "collecting" }), /No completed hour in 24 h/);
 const noAttempt = { ...blocked, aborts: 0, best_aborted_s: 0, abort_reasons: [] };
 assert.equal(ui.value(noAttempt), "NO WINDOW");
-assert.match(ui.detail(noAttempt), /NO WINDOW — No completed hour in 24 h\.<\/detail>/);
+assert.match(ui.detail(noAttempt), /<div class="vdesc-p">No completed hour in 24 h\.<\/div>/);
 assert.doesNotMatch(ui.detail(noAttempt), /discarded|interrupted|longest|\(\)|CHECKING|kWh/i);
 assert.match(ui.detail({ ...blocked, aborts: 1, abort_reasons: ["reading"] }),
   /Discarded windows: 1 \(R5T unconfirmed\)/);
@@ -327,8 +322,8 @@ const cycling = {
   dhw_runs: 1, dhw_mean_run_s: 7200, cooling_runs: 0, censored_runs: 0,
 };
 assert.equal(ui.metric(cycling), "13 starts · heating 12 · mean 5 min · hot water 1 · mean 2 h");
-assert.match(ui.detail(cycling), /≥12 completed heating runs average <10 min/);
-assert.match(ui.detail(cycling), /Only completed, continuously classified space-heating runs/);
+assert.match(ui.detail(cycling), /≥12 completed heating runs average &lt;10 min/);
+assert.match(ui.detail(cycling), /Excludes hot water, cooling and unclassified runs/);
 assert.doesNotMatch(ui.metric(cycling), /830|13 min|\/start/);
 assert.equal(ui.metric({ ...cycling, space_mean_run_s: 599 }),
              "13 starts · heating 12 · mean 9 min · hot water 1 · mean 2 h");
@@ -353,16 +348,16 @@ const pressure = {
 detail = ui.detail(pressure);
 assert.match(detail, /Retained minimum ≤1.0 bar/);
 assert.match(detail, /continuous 60 s unconfirmed/);
-assert.match(detail, /label="Current water pressure:">1.5 bar/);
-assert.match(detail, /label="Minimum recorded at:">[^<]+/);
+assert.match(detail, /Current water pressure: 1.5 bar/);
+assert.match(detail, /Minimum recorded at: [^<]+/);
 detail = ui.detail({ ...pressure, verdict: "warn", current_bar: null, min_unix_s: null,
                      confirmed_low: true }, true,
                    { span_s: 86400, source_age_s: 900, source_fresh: false });
-assert.match(detail, /WARNING — Recorded continuous ≥60 s at ≤1.0 bar/);
+assert.match(detail, /Recorded continuous ≥60 s at ≤1.0 bar/);
 assert.match(detail, /not a current-pressure statement/);
 assert.match(detail, /No fresh X10A sample/);
-assert.match(detail, /label="Current water pressure:">No data/);
-assert.match(detail, /label="Minimum recorded at:">No data/);
+assert.match(detail, /Current water pressure: No data/);
+assert.match(detail, /Minimum recorded at: No data/);
 
 // Cleared and unreadable-current fault states must not promise automatic resolution or no action.
 detail = ui.detail({ id: "fault", verdict: "info", active: 0 });
@@ -398,7 +393,7 @@ context.S.status = { health: {
 let card = ui.card();
 assert.match(card, />3 notes<\/span>/);
 assert.doesNotMatch(card, /2\/4 checks|checks assessed/);
-assert.match(card, /tone="checkup-val warn"/);
+assert.match(card, /class="vrow-val checkup-val warn"/);
 assert.doesNotMatch(card, /All clear|healthy|8 values|health score/);
 context.S.status.health = { status: "unavailable", assessable: 0, evaluated: 0,
   checks: [{ id: "flow", verdict: "ok", evidence: "observation", min_l_min: 8.4 }] };
@@ -418,6 +413,11 @@ assert.equal(ui.card(), "");
 // Every shipped language must have dynamic copies for the changed states, not English fallback keys.
 for (const lang of locales) {
   ui.setLang(lang);
+  const classification = ui.text(lang, "check.detail.cycling_split").trim();
+  assert.ok(ui.detail(cycling).includes(classification),
+    `${lang} classified heating runs retain their continuous-classification limit`);
+  assert.ok(!ui.detail({ ...cycling, space_runs: null }).includes(classification),
+    `${lang} missing classification must not imply classified heating runs`);
   for (const c of [dhw, pressure, cycling, defrost, waiting,
       { ...cycling, verdict: "ok", evidence: "observation", reason: "class_coverage" },
       { id: "fault", verdict: "info", active: 0 },
@@ -435,7 +435,7 @@ assert.match(ui.detail(dhw), /0,28 kWh Wärme/);
 assert.match(ui.detail(dhw), /0,09–0,11 kWh Strom/);
 assert.match(ui.detail({ id: "fault", verdict: "info", active: 0 }), /weder Ursache noch Behebung/);
 assert.equal(ui.metric(pressure), "0 bar");
-assert.match(ui.detail(pressure), /Aktueller Wasserdruck:">1,5 bar/);
+assert.match(ui.detail(pressure), /Aktueller Wasserdruck: 1,5 bar/);
 
 // Copy regression pins for corrected diagnosis claims (U3). The DHW loss peak is a highest
 // observed rate, not a bound: no shipped locale may lead it with an "at most" adverb.
@@ -499,8 +499,8 @@ assert.match(JSON.stringify(model.health_retries), /Stable counters cannot rule 
 assert.doesNotMatch(JSON.stringify(model.health_retries), /with the compressor running|bei laufendem Verdichter/);
 assert.match(JSON.stringify(model.health_cycling), /von OFF zu ON/);
 
-// Execute the real accordion/body builders: diagnosis rules explain interpretation, while
-// ordinary readings and model rows retain their normal-context label.
+// Execute the real card/body builders. All diagnoses have three ordered blocks in every locale,
+// including absent readings and incomplete evidence, without altering ordinary value explainers.
 const renderedContext = vm.createContext({
   S: { descOpen: new Set() }, document: { getElementById: () => null },
   localStorage: { getItem: () => "en", setItem: () => {} }, navigator: { language: "en" },
@@ -508,17 +508,29 @@ const renderedContext = vm.createContext({
 vm.runInContext(`${i18nSource}${dashboardSource}${explanationSource}
   this.rendered = {
     model: modelDescRow,
+    detail: checkupDetailHtml,
     value: () => descBodyHtml(DESCRIPTIONS.find(d => d.normal)),
     lang: (value) => { LANG = value; },
   };`, renderedContext);
-for (const [lang, interpretation] of [["en", "How to read it:"], ["de", "So liest du es:"]]) {
+for (const lang of locales) {
   renderedContext.rendered.lang(lang);
-  const diagnosis = renderedContext.rendered.model("health_pressure", "Pressure", "NOTE");
-  assert.ok(diagnosis.includes(`<span class="vdesc-n">${interpretation}</span>`));
-  assert.doesNotMatch(diagnosis, /<span class="vdesc-n">Normal:<\/span>/);
-  assert.match(renderedContext.rendered.model("max_alloc", "Memory", "20 kB"),
-               /<span class="vdesc-n">Normal:<\/span>/);
-  assert.match(renderedContext.rendered.value(), /<span class="vdesc-n">Normal:<\/span>/);
+  for (const id of Object.keys(model).filter(id => id.startsWith("health_"))) {
+    for (const verdict of ["ok", "info", "warn", "collecting", "unavailable"]) {
+      const c = { ...pressure, id: id.slice(7), verdict };
+      const body = renderedContext.rendered.detail(c, false, partialReport);
+      const diagnosis = renderedContext.rendered.model(id, "Diagnosis", "NOTE", { bodyHtml: body });
+      assert.equal((diagnosis.match(/class="vdesc-p"/g) || []).length, 3, `${lang}/${id}/${verdict}`);
+      assert.ok(body.startsWith('<div class="vdesc-p"><span class="vdesc-n">'), `${lang}/${id}: value first`);
+      assert.ok(body.includes(`<span class="vdesc-n">${ui.text(lang, "normal.label")}</span>`),
+                `${lang}/${id}: Normal block`);
+      assert.doesNotMatch(body, /undefined|NaN|check\.detail\./);
+    }
+  }
+  if (["en", "de"].includes(lang)) {
+    assert.match(renderedContext.rendered.model("max_alloc", "Memory", "20 kB"),
+                 /<span class="vdesc-n">Normal:<\/span>/);
+    assert.match(renderedContext.rendered.value(), /<span class="vdesc-n">Normal:<\/span>/);
+  }
 }
 // Exercise the full production accordion, including the model interpretation that owns
 // the DHW rule and its limits. The compact measurement prefix must not duplicate it.
@@ -526,7 +538,9 @@ for (const lang of locales) {
   renderedContext.rendered.lang(lang);
   ui.setLang(lang);
   const diagnosis = renderedContext.rendered.model("health_dhw_loss", "DHW", ui.value(dhw),
-    { bodyPrefix: ui.detail(dhw) });
+    { bodyHtml: ui.detail(dhw) });
+  assert.equal((diagnosis.match(/class="vdesc-p"/g) || []).length, 3,
+               `${lang} energy illustration stays inside the three-block explanation`);
   assert.match(diagnosis, /0[,.]8/, `${lang} expanded diagnosis retains its project threshold`);
   assert.match(diagnosis, /200/, `${lang} expanded diagnosis retains the example volume`);
   assert.match(diagnosis, /COP/, `${lang} expanded diagnosis retains its electricity assumption`);

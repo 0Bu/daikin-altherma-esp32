@@ -333,7 +333,10 @@ not establish identical readings. Translated Model rows have stable explanation 
 The optional 24-hour Plant diagnostics rows appear only after Firmware opt-in and while X10A is
 live. Firmware supplies verdict, evidence class, coverage and limits; the browser adds no thresholds.
 Rows cover fault, tank loss, starts, defrost, water pressure, steady flow, heater runtime and retry
-changes. Collapsed states distinguish OK, note, warning, checking, measured, tentative and N/A. Expanders show the reading, bounded assessment, basis, progress and limitations.
+changes. Collapsed states distinguish OK, note, warning, checking, no window, measured, tentative and N/A.
+Every expander in this card has three paragraphs: the reading with its observation window or recorded
+timestamp and a brief description; the current interpretation with relevant data gaps; then **Normal:**
+with expected conditions or assessment limits. The observation window is not a status-since timestamp.
 Observation-only/experimental results cannot become OK or manufacture a health certificate.
 `available`, `assessable` and `evaluated` count different facts; only completed bounded judgments
 belong in the evaluated headline.

@@ -10,6 +10,7 @@ const i18nBase = readAppFragments(["i18n.js"]);
 const localeNames = JSON.parse(i18nBase.match(/const UI_LANGS = Object.freeze\((\[[^\n]+\])\)/)[1]);
 const i18nSource = i18nBase + localeNames.filter(l => l !== "en").map(readUiLocale).join("\n");
 const dashboardSource = readAppFragments(["dashboard.js"]);
+const explanationSource = readAppFragments(["descriptions.js", "history.js"]);
 const statusSource = fs.readFileSync(new URL("../main/http_status.cpp", import.meta.url), "utf8");
 const pollSource = fs.readFileSync(new URL("../main/hp_poll.cpp", import.meta.url), "utf8");
 const logicSource = fs.readFileSync(
@@ -44,20 +45,15 @@ assert.match(pollSource,
              "the resolved profile must publish service state only with committed coverage");
 
 const context = {
-  S: { status: null },
+  S: { status: null, descOpen: new Set() },
   document: { getElementById: () => null },
   fetch: () => { throw new Error("unexpected fetch in service observation test"); },
   localStorage: { getItem: () => "en", setItem: () => {} },
   navigator: { language: "en" },
-  descNoteHtml: (lead, text) => `<detail label="${lead}">${text}</detail>`,
-  descAccordion: (key, label, value, cls, body) =>
-    `<div class="vitem"><button class="vrow vrow-desc" data-desc="${key}">` +
-    `<span class="vrow-label">${label}</span><span class="vrow-val ${cls}">${value}</span>` +
-    `</button><div class="vdesc"><div class="vdesc-body">${body}</div></div></div>`,
 };
 const sandbox = vm.createContext(context);
 vm.runInContext(
-  `${i18nSource}${dashboardSource}
+  `${i18nSource}${dashboardSource}${explanationSource}
    this.__service = {
      row: refrigerantServiceRowHtml,
      card: () => checkupCardHtml(false),
@@ -72,6 +68,8 @@ const ui = sandbox.__service;
 ui.set(null);
 assert.equal(ui.row(), "");
 assert.equal(ui.card(), "");
+ui.set({ state: "waiting", continuous_s: null, samples: null });
+assert.doesNotMatch(ui.row(), /0 min|0 readings/, "missing time must not become a measured zero");
 const observed = {
   kind: "observation", state: "observing", continuous_s: 75, samples: 4,
   mode: "heating", blocker: null, special_phases_known: true,
@@ -93,11 +91,11 @@ assert.match(html, /1 min · 4 readings/);
 assert.match(html, /One space-heating run, separate from 24-hour checks/);
 assert.match(html, /No refrigerant-charge or normal-range diagnosis/);
 assert.match(html, /command, not measured position/);
-assert.match(html, /label="Compressor">min 0 · mean 27.5 · max 40 rps/);
-assert.match(html, /label="Discharge temperature">min 46.5 · mean 60.5 · max 81.4 °C/);
-assert.match(html, /label="Expansion-valve command">min 200 · mean 230.5 · max 250 pls/);
-assert.match(html, /label="High pressure">min 18 · mean 20 · max 22 bar/);
-assert.match(html, /label="Low pressure">min 4 · mean 5 · max 6 bar/);
+assert.match(html, /Compressor: min 0 · mean 27.5 · max 40 rps/);
+assert.match(html, /Discharge temperature: min 46.5 · mean 60.5 · max 81.4 °C/);
+assert.match(html, /Expansion-valve command: min 200 · mean 230.5 · max 250 pls/);
+assert.match(html, /High pressure: min 18 · mean 20 · max 22 bar/);
+assert.match(html, /Low pressure: min 4 · mean 5 · max 6 bar/);
 assert.match(html, /class="vrow vrow-desc"[^>]*data-desc="service:refrigerant"/);
 assert.equal((html.match(/<div class="card">/g) || []).length, 1);
 assert.doesNotMatch(html, /data-action=|<form|<input|>OK</);
@@ -109,7 +107,7 @@ ui.set({ ...observed, metrics: {
   low_pressure_bar: { min: NaN, mean: 5, max: 6 },
 } });
 html = ui.card();
-assert.doesNotMatch(html, /label="Compressor"|label="Discharge temperature"|label="High pressure"|label="Low pressure"/);
+assert.doesNotMatch(html, /Compressor:|Discharge temperature:|High pressure:|Low pressure:/);
 assert.doesNotMatch(html, /min 0|NaN|undefined/);
 
 ui.set({ ...observed, state: "limited", special_phases_known: false,
@@ -150,13 +148,14 @@ for (const locale of localeNames) {
   assert.doesNotMatch(html, /service\.(?:metric|limit|common)|undefined|NaN/, locale);
   for (const unit of ["rps", "°C", "pls", "bar"]) assert.ok(html.includes(unit), `${locale} ${unit}`);
   assert.doesNotMatch(html, />OK</);
+  assert.equal((html.match(/class="vdesc-p"/g) || []).length, 3, `${locale}: exactly three blocks`);
 }
 ui.lang("de");
 ui.set({ ...observed, state: "limited", special_phases_known: false,
   limitations: ["pressure_sides_incomplete"] });
 html = ui.card();
 assert.match(html, />LÜCKENHAFT</);
-assert.match(html, /label="Verdichter">min. 0 · Mittel 27,5 · max. 40 rps/);
+assert.match(html, /Verdichter: min. 0 · Mittel 27,5 · max. 40 rps/);
 assert.match(html, /Druckseite\(n\)/);
 assert.match(html, /unabhängig von der 24-h-Diagnose/);
 assert.match(html, /Ventil: Befehl, keine gemessene Stellung/);

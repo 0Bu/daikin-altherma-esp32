@@ -1379,8 +1379,8 @@ function checkupDhwEnergy(c) {
   if (!Number.isFinite(heat)) return "";
   const fmt = (n, digits) => n.toLocaleString(LANG,
     { minimumFractionDigits: digits, maximumFractionDigits: digits });
-  return `<div class="vdesc-p">${esc(t("check.detail.dhw_energy",
-    fmt(c.max_k_h, 1), fmt(heat, 2), fmt(heat / 3, 2), fmt(heat / 2.5, 2)))}</div>`;
+  return t("check.detail.dhw_energy",
+    fmt(c.max_k_h, 1), fmt(heat, 2), fmt(heat / 3, 2), fmt(heat / 2.5, 2));
 }
 
 // Fault copy follows the unit’s reported class. A remembered message does not establish
@@ -1412,7 +1412,15 @@ function checkupDhwReasons(c) {
 
 function checkupDetailHtml(c, fullSpan = c.full_span === true, report = {}) {
   const statusKey = checkupStatusKey(c);
-  const value = checkupMetricValue(c);
+  const metric = checkupMetricValue(c);
+  const parts = metric.split(" · ");
+  const compactMetric = ["dhw_loss", "cycling", "defrost"].includes(c.id);
+  const value = (compactMetric ? parts.shift() : metric) || checkupStatusText(c);
+  const description = MODEL_DESCRIPTIONS[`health_${c.id}`];
+  const copy = modelDescriptionCopy(`health_${c.id}`);
+  const base = LANG === "de" && description.de ? description.de : description;
+  const what = copy ? copy[0] : base.what;
+  const normal = copy ? copy[1] : base.normal;
   let detail;
   // Discard reasons are aggregates, without a per-candidate cause ranking. Missing readings
   // include necessary valve/heater/pump inputs as well as tank temperature; missing X10A
@@ -1463,61 +1471,59 @@ function checkupDetailHtml(c, fullSpan = c.full_span === true, report = {}) {
     source_stale: "source_stale", no_paired_runtime: "no_paired_runtime",
   }[c.reason];
   if (reasonKey) detail += ` ${t(`check.detail.${reasonKey}`)}`;
-  // Only fully observed, classified heating runs have a cycling verdict. Do not revive a
-  // combined runtime/start assessment when older payloads contain its mean.
+  if (compactMetric && parts.length) detail += ` ${parts.join(" · ")}.`;
   if (c.id === "cycling" && c.space_runs != null)
     detail += t("check.detail.cycling_split");
-  if (c.id === "dhw_loss" && statusKey !== "collecting" && !c.blocked && Number(c.aborts) > 0)
-    detail += t("check.detail.dhw_aborted", Number(c.aborts), checkupDhwReasons(c),
-                checkupDuration(c.best_aborted_s));
   if ((c.id === "cycling" || c.id === "defrost") && checkupOutdoorContext(c))
     detail += t(c.id === "cycling" ? "check.detail.outdoor_cycling"
                                    : "check.detail.outdoor_defrost");
-  const reading = value ? descNoteHtml(t("check.detail.value_label"), value) : "";
-  const assessment = descNoteHtml(t("check.detail.assessment_label"),
-                                  `${checkupStatusText(c)} — ${detail}`);
-  let scope = "";
+  // Three paragraphs: observation with its real time scope, current interpretation, then normal
+  // context. A report window is never a verdict's "since" timestamp.
+  const time = [];
   if (Number.isFinite(report.span_s))
-    scope += descNoteHtml(t("check.detail.period_label"),
-                          t("check.detail.period", checkupDuration(report.span_s)));
-  if (Number.isFinite(report.source_age_s))
-    scope += descNoteHtml(t("check.detail.age_label"), checkupDuration(report.source_age_s));
+    time.push(`${t("check.detail.period_label")} ${checkupDuration(report.span_s)}`);
+  if (c.id === "pressure" && c.min_bar != null) {
+    const when = typeof c.min_unix_s === "number" && c.min_unix_s > 0
+      ? new Date(c.min_unix_s * 1000).toLocaleString(LANG,
+          { dateStyle: "short", timeStyle: "short" }) : t("sys.nodata");
+    time.push(`${t("check.detail.minimum_time_label")} ${when}`);
+    const current = typeof c.current_bar === "number" && Number.isFinite(c.current_bar)
+      ? `${c.current_bar.toLocaleString(LANG, { maximumFractionDigits: 1 })} bar` : t("sys.nodata");
+    detail += ` ${t("check.detail.current_label")} ${current}.`;
+  }
+  if ((report.source_fresh === false || c.reason === "source_stale") && Number.isFinite(report.source_age_s))
+    detail += ` ${t("check.detail.age_label")} ${dwellDuration(report.source_age_s)}.`;
   if (c.id === "heater") {
     const channelCoverage = [["BUH", c.buh_observed_s], ["BSH", c.bsh_observed_s]]
       .filter(([, duration]) => typeof duration === "number" && Number.isFinite(duration))
       .map(([label, duration]) => t("check.detail.channel_coverage", label, checkupDuration(duration)));
-    if (channelCoverage.length) scope += descNoteHtml(t("check.detail.value_label"), channelCoverage.join(" · "));
+    if (channelCoverage.length) detail += ` ${channelCoverage.join(" · ")}.`;
   }
   if (report.source_fresh === false && c.reason !== "source_stale")
-    scope += `<div class="vdesc-p">${esc(t("check.detail.source_stale"))}</div>`;
+    detail += ` ${t("check.detail.source_stale")}`;
   if (statusKey === "collecting" && Number(c.required_s) > Number(c.observed_s))
-    scope += `<div class="vdesc-p">${esc(t("check.detail.coverage_missing",
-         Math.ceil(c.required_s - c.observed_s).toLocaleString(LANG)))}</div>`;
+    detail += ` ${t("check.detail.coverage_missing",
+                    Math.ceil(c.required_s - c.observed_s).toLocaleString(LANG))}`;
   // Only the bounded daily assessments need a complete day; flow waits for eligible pump time.
   if (["pressure", "cycling", "defrost"].includes(c.id) && statusKey === "collecting" &&
       fullSpan === false && Number.isFinite(report.span_s) &&
       ["day_incomplete", "input_coverage"].includes(c.reason))
-    scope += `<div class="vdesc-p">${esc(t("check.detail.horizon_wait",
-                           checkupDuration(Math.max(0, 86400 - report.span_s))))}</div>`;
-  let pressure = "";
-  if (c.id === "pressure" && c.min_bar != null) {
-    const current = typeof c.current_bar === "number" && Number.isFinite(c.current_bar)
-      ? `${c.current_bar.toLocaleString(LANG, { maximumFractionDigits: 1 })} bar` : t("sys.nodata");
-    const when = typeof c.min_unix_s === "number" && c.min_unix_s > 0
-      ? new Date(c.min_unix_s * 1000).toLocaleString(LANG,
-          { dateStyle: "short", timeStyle: "short" }) : t("sys.nodata");
-    pressure = descNoteHtml(t("check.detail.current_label"), current) +
-               descNoteHtml(t("check.detail.minimum_time_label"), when);
-  }
-  let dhwContext = "";
+    detail += ` ${t("check.detail.horizon_wait",
+                   checkupDuration(Math.max(0, 86400 - report.span_s)))}`;
   if (c.id === "dhw_loss" && checkupDhwHasRate(c) && !c.blocked &&
       Number.isFinite(c.pump_windows) && Number.isFinite(c.draw_windows) &&
       Number.isFinite(c.quiet_high_windows))
-    dhwContext = `<div class="vdesc-p">${esc(t("check.detail.dhw_context",
+    detail += ` ${t("check.detail.dhw_context",
       c.pump_windows.toLocaleString(LANG), c.draw_windows.toLocaleString(LANG),
-      c.quiet_high_windows.toLocaleString(LANG)))}</div>`;
-  return reading + assessment + dhwContext + pressure + scope +
-         (c.id === "dhw_loss" ? checkupDhwEnergy(c) : "");
+      c.quiet_high_windows.toLocaleString(LANG))}`;
+  if (c.id === "dhw_loss") {
+    const energy = checkupDhwEnergy(c);
+    if (energy) detail += ` ${energy}`;
+  }
+  return descParaHtml(`<span class="vdesc-n">${esc(value)}</span>` +
+           (time.length ? ` · ${esc(time.join(" · "))}` : "") + ` — ${esc(what)}`) +
+         descParaHtml(esc(detail)) +
+         descNoteHtml(t("normal.label"), normal);
 }
 
 function checkupDefrostShare(c) {
@@ -1644,7 +1650,7 @@ function checkupCardHtml(includeHealth = true) {
       const tone = CHECKUP_TONE[checkupStatusKey(c)] || "";
       healthRows += modelDescRow(`health_${c.id}`, t(key), checkupValue(c),
                                  { cls: `checkup-val${tone ? ` ${tone}` : ""}`,
-                                   bodyPrefix: checkupDetailHtml(c, h.full_span === true, h) });
+                                   bodyHtml: checkupDetailHtml(c, h.full_span === true, h) });
     }
   }
   // This row shares the card visually but remains independent of /status.health: it is not counted
@@ -1680,17 +1686,14 @@ function refrigerantServiceRowHtml() {
     "unsupported_or_unknown_mode", "dhw_path", "defrost", "unit_fault",
     "special_controller_phase", "missing_fresh_signal", "poll_gap"];
 
-  // Lead with the owner-facing operating condition: this recorder starts by itself during ordinary
-  // heating.  The word "service" used to make people think they had to enable an installer mode.
-  let detail = `<div class="vdesc-p">${esc(t("service.common"))}</div>`;
-  const seconds = Number(service.continuous_s), samples = Number(service.samples);
+  const time = [], detail = [];
+  const seconds = service.continuous_s, samples = service.samples;
   if (Number.isFinite(seconds) && seconds >= 0 && Number.isFinite(samples) && samples >= 0)
-    detail += descNoteHtml(t("service.row.window"),
-                           t("service.window", checkupDuration(seconds), Math.floor(samples)));
+    time.push(t("service.window", checkupDuration(seconds), Math.floor(samples)));
   if (typeof service.blocker === "string") {
     const reasonKey = reasonSlugs.includes(service.blocker)
       ? `service.reason.${service.blocker}` : "sys.nodata";
-    detail += descNoteHtml(t("service.row.reason"), t(reasonKey));
+    detail.push(t(reasonKey));
   }
   const metricKeys = [
     ["compressor_rps", "comp", "rps"], ["discharge_c", "disch", "°C"],
@@ -1703,8 +1706,8 @@ function refrigerantServiceRowHtml() {
       continue;
     const number = n => n.toLocaleString(LANG, { maximumFractionDigits: 1 });
     const label = t(`service.metric.${inspectorKey}`);
-    detail += descNoteHtml(label, t("service.metric.range", number(metric.min),
-                                  number(metric.mean), number(metric.max), unit));
+    detail.push(`${label}: ${t("service.metric.range", number(metric.min),
+                              number(metric.mean), number(metric.max), unit)}`);
   }
   const limitations = Array.isArray(service.limitations) ? service.limitations : [];
   const knownLimitations = ["special_phases_unavailable", "temperature_context_incomplete",
@@ -1714,16 +1717,20 @@ function refrigerantServiceRowHtml() {
   // Older additive payloads still expose this one specific missing input.
   if (service.special_phases_known === false && !limitations.includes("special_phases_unavailable"))
     missing.unshift(t("service.limit.special_phases_unavailable"));
-  if (missing.length) detail += descNoteHtml(t("service.row.limits"), missing.join(" · "));
-  // Unsupported and waiting already carry an exact blocker reason. Active-window states add only
-  // the continuity consequence, in owner language rather than transport terminology.
-  const helpKey = ["observing", "limited", "interrupted"].includes(state)
+  if (missing.length) detail.push(`${t("service.row.limits")} ${missing.join(" · ")}`);
+  // Waiting/unsupported carry a blocker; partial windows name missing inputs in the explanation.
+  // Recording and interrupted windows add their continuity consequence beside the time.
+  const helpKey = ["observing", "interrupted"].includes(state)
                 ? `service.help.${state}` : null;
-  if (helpKey) detail += `<div class="vdesc-p">${esc(t(helpKey))}</div>`;
   const status = state === "unsupported" ? t("check.status.unavailable")
                : state === "unknown" ? t("sys.nodata") : t(`service.state.${state}`);
+  const body = descParaHtml(`<span class="vdesc-n">${esc(status)}</span>` +
+                 (time.length ? ` · ${esc(time.join(" · "))}` : "") +
+                 ` — ${esc(t(helpKey || "service.title"))}`) +
+               descParaHtml(esc(detail.length ? detail.join(" · ") : t("sys.nodata"))) +
+               descNoteHtml(t("normal.label"), t("service.common"));
   return descAccordion("service:refrigerant", t("service.title"), esc(status),
-                       `checkup-val${tones[state] ? ` ${tones[state]}` : ""}`, detail);
+                       `checkup-val${tones[state] ? ` ${tones[state]}` : ""}`, body);
 }
 
 // ── Connections tile (Settings — WiFi · MQTT · Syslog · NTP · Modbus) ─────────────────────────

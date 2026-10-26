@@ -1,13 +1,16 @@
 # Plant diagnostics in plain language
 
-<!-- user-docs-contract: c398198a13594a783c71f103bb7d9b98907ec8d9b6b8761292fe85620a7d4152 -->
+<!-- user-docs-contract: 7239cd6b8785600340f9db07e5db09bd5984dbe25b9d3ed4ee84f47fe4443ec1 -->
 
 Plant diagnostics **reads measurements and counts events; it does not control the heat pump**.
 It is off by default. Enable **Plant diagnostics** under **Settings → Firmware** to start an evidence
 window. Disabling clears this evidence and stops additional room, forecast and circulation collection.
 
-Select **Diagnostics** below the schematic to show the **Plant diagnostics · 24 h** card. Open a row for its observation,
-meaning and limits. A rolling day does not imply that every signal was readable throughout it.
+Select **Diagnostics** below the schematic to show the **Plant diagnostics · 24 h** card.
+Open a row for three blocks:
+the reading and its time scope, an explanation of the current result, and **Normal:** with expected
+conditions or assessment limits. The time scope does not say how long a status has been active.
+A rolling day does not imply that every signal was readable throughout it.
 The summary shows the highest finding severity and the number of affected rows. Without a finding,
 it distinguishes ongoing collection, measurements and completed assessments. It is not a score for
 the installation's health.
