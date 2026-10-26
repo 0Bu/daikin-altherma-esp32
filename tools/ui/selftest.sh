@@ -38,7 +38,22 @@ cp -R "$proj/main/www" "$tmp/main/www"
 cp "$proj/test/test_ui_use_cases.mjs" "$tmp/test/"
 cp "$proj/test/test_ui_modal_scroll.mjs" "$tmp/test/"
 cp "$proj/test/test_ui_status_truth.mjs" "$tmp/test/"
+cp "$proj/test/test_ui_card_navigation.mjs" "$tmp/test/"
 cp -R "$proj/tools/ui" "$tmp/tools/ui"
+
+# Removing the whole-card opt-in must fail the executed render/reconcile contract, even when a
+# nonempty passive observation could otherwise keep the diagnosis card alive.
+(cd "$tmp" && node test/test_ui_card_navigation.mjs >/dev/null 2>&1) || {
+  echo "ui selftest: card-navigation fixture fails before mutation" >&2; exit 1; }
+sed 's/^  const checkup = S.status?.diagnostics?.enabled === true$/  const checkup = true/' \
+  "$proj/main/www/js/dashboard.js" > "$tmp/main/www/js/dashboard.js"
+if (cd "$tmp" && node test/test_ui_card_navigation.mjs >"$tmp/diagnostics-opt-in.log" 2>&1); then
+  echo "ui selftest: removed diagnosis opt-in escaped card-navigation checks" >&2; exit 1
+fi
+grep -q 'disabled/absent opt-in removes diagnosis navigation' "$tmp/diagnostics-opt-in.log" || {
+  echo "ui selftest: diagnosis opt-in mutation failed outside its intended assertion" >&2; exit 1; }
+cp "$proj/main/www/js/dashboard.js" "$tmp/main/www/js/dashboard.js"
+echo "ui selftest: a diagnosis card surviving disabled diagnostics is detected"
 
 # These are executed render checks. Establish that the fixture is healthy before disabling each
 # production path independently, so a missing harness dependency cannot make the canaries vacuous.

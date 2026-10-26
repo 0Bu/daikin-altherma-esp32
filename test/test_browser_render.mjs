@@ -999,6 +999,42 @@ async function assertDashboardCardNavigation(page, context, viewport) {
     assert.equal((await current()).key, "model", `${context}: Space activates a focused card name`);
     await page.evaluate("showStage('settings'); showStage('dashboard'); renderApp(); true");
     assert.equal((await current()).key, "model", `${context}: Settings round trip preserves card choice`);
+
+    // A passive service observation used to keep Diagnostics visible despite the master setting.
+    // Keep that real payload and the health rows present while changing only the saved opt-in.
+    await page.evaluate(`(() => {
+      S.status.refrigerant_service = { kind: "observation", state: "waiting",
+        continuous_s: 0, samples: 0, blocker: "compressor_not_running" };
+      renderApp(); return true;
+    })()`);
+    await clickElement(page, '#cardNav button[data-card="diagnosis"]');
+    await page.waitFor("!S.clickHold");
+    await page.evaluate(`(() => {
+      document.querySelector('#cardNav button[data-card="diagnosis"]').focus();
+      S.status.diagnostics.enabled = false; renderApp(); return true;
+    })()`);
+    assert.equal(await page.evaluate(`!!document.querySelector(
+      '#cardNav [data-card="diagnosis"], #valueGroups [data-dashboard-card="diagnosis"]')`), false,
+      `${context}: disabled diagnostics removes its name and whole card, including passive observations`);
+    assert.deepEqual(await current(), { key: "model", selected: ["model"], visible: ["model"], labelled: true },
+      `${context}: disabling the selected diagnosis opens Model with correct accessible naming`);
+    assert.equal(await page.evaluate('document.activeElement?.dataset.card'), "model",
+      `${context}: removing the focused diagnosis restores focus to Model`);
+    assertLayout(await page.evaluate(layoutAudit), `${context}/diagnostics-disabled`);
+    await page.evaluate("document.activeElement?.blur?.(); true");
+    await captureNativeEvidence(page, `${context}/diagnostics-disabled`, "cardBrowser");
+    await clickElement(page, '#cardNav button[data-card="group:Water circuit"]');
+    await page.waitFor("!S.clickHold");
+    await page.evaluate("renderApp(); true");
+    assert.equal((await current()).key, "group:Water circuit",
+      `${context}: polling with diagnostics disabled preserves another selected card`);
+    await page.evaluate("S.status.diagnostics.enabled = true; renderApp(); true");
+    assert.equal((await current()).key, "group:Water circuit",
+      `${context}: enabling diagnostics preserves a valid current selection`);
+    assert.equal(await page.evaluate('!!document.querySelector(\'#cardNav [data-card="diagnosis"]\')'), true,
+      `${context}: enabling diagnostics restores its navigation entry`);
+    await page.evaluate('S.status.diagnostics.enabled = false; S.dashboardCard = "diagnosis"; renderApp(); true');
+    assert.equal((await current()).key, "model", `${context}: a fresh disabled dashboard defaults to Model`);
     await assertAccessibility(page, context, { nativeTree: true });
     assert.deepEqual(await page.evaluate("window.__browserCardsRequests"), [],
       `${context}: switching cards performs no requests or configuration writes`);

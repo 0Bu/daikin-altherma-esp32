@@ -97,6 +97,7 @@ function expectSelection(key, message) {
 }
 
 assert.equal(ui.S.dashboardCard, "diagnosis", "a new dashboard starts with diagnosis selected");
+ui.S.status = { diagnostics: { enabled: true }, hp: { connected: true } };
 ui.render(card("diagnosis"), card("model"), card("group:Operation") + card("modbus"));
 expectSelection("diagnosis", "initial available diagnosis");
 assert.deepEqual(keys(), ["diagnosis", "model", "group:Operation", "modbus"]);
@@ -201,5 +202,32 @@ expectSelection("model", "selection remains immediate during scrubbing");
 ui.S.scrub = null;
 ui.render("", "", card("modbus"));
 expectSelection("modbus", "source reconciliation resumes after the scrub");
+
+// The card-level opt-in must suppress even a nonempty renderer result (e.g. the independent
+// refrigerant observation), not just its 24-hour rows. Exercise the actual render/reconcile path.
+for (const diagnostics of [{ enabled: false }, undefined, { enabled: "true" }]) {
+  ui.S.status.diagnostics = diagnostics;
+  ui.S.dashboardCard = "diagnosis";
+  ui.render(card("diagnosis"), card("model"), card("group:Operation"));
+  assert.deepEqual(keys(), ["model", "group:Operation"], "disabled/absent opt-in removes diagnosis navigation");
+  assert.ok(!host.children.some(element => element.dataset.dashboardCard === "diagnosis"),
+    "disabled/absent opt-in removes diagnosis content rather than only hiding it");
+  expectSelection("model", "Model is the default when diagnosis is disabled");
+}
+ui.S.status.diagnostics = { enabled: true };
+ui.render(card("diagnosis"), card("model"), card("group:Operation"));
+expectSelection("model", "enabling diagnosis preserves an existing valid selection");
+ui.select("diagnosis");
+selected()[0].focus();
+ui.S.status.diagnostics.enabled = false;
+ui.render(card("diagnosis"), card("model"), card("group:Operation"));
+expectSelection("model", "disabling the selected diagnosis falls back to Model");
+assert.equal(document.activeElement.dataset.card, "model", "focus follows the removed diagnosis to Model");
+ui.select("group:Operation");
+ui.render(card("diagnosis"), card("model"), card("group:Operation"));
+expectSelection("group:Operation", "disabled diagnosis preserves other card choices");
+ui.S.dashboardCard = "diagnosis";
+ui.render(card("diagnosis"), "", card("modbus"));
+expectSelection("modbus", "without Model, disabled diagnosis falls back to an available source");
 
 console.log("dashboard card navigation: stable selection, localized labels, availability fallback and held-frame interactions passed");
