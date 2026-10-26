@@ -13,6 +13,8 @@ const S = {
   // element (so the CSS slide
   // animates) and updates this set for the next rebuild to honour.
   descOpen: new Set(),
+  // Local presentation choice, retained across polling, language changes and Settings visits.
+  dashboardCard: "diagnosis",
   // Set while a click is in flight in #valueGroups; suspends the per-poll rebuild so it cannot
   // detach the node the pointer went down on (renderCards explains why that loses the click
   // outright). Released only by a timer, so it can never latch.
@@ -413,7 +415,7 @@ function initNavigation() { applyRouteFromLocation(); }
 //      between polls. NOT enough for #settingsCards any more: the ESP32 card carries the two
 //      board-memory rows again, and free heap moves on each `/status` refresh, so this check degrades
 //      to a plain write there exactly as it does for the value grid — which is why guard 2 below is
-//      armed on all three containers and not only on the one that obviously needed it.
+//      armed on every repainted container, including the card navigation.
 //   2. A click is in flight → don't write. Needed because #valueGroups carries LIVE readings: its
 //      markup differs on almost every `/values` poll, so check 1 degrades to a plain write there and
 //      cannot help. Without this the value rows lost 3–60 % of taps depending on how long the button

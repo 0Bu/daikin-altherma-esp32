@@ -1,4 +1,4 @@
-// translation-source: 56ec4b237229b88c50cf6b91ff312bb0f6656edfb91ec07b993d5e2bde0e9ca2
+// translation-source: 69a70fe118eb482b63d926feb5045f732f15405b119416d0c242cc974e0e1d00
 I18N.ja = localeValues([
   /* sys.nodata */ "データなし",
   /* sys.unreachable */ "接続不可",
@@ -76,6 +76,9 @@ I18N.ja = localeValues([
   /* bug.redacted */ "ネットワーク名、アドレス、ブローカー名、サーバー名は除去済みです。",
   /* nav.settings */ "設定",
   /* nav.back */ "戻る",
+  /* nav.cards */ "ダッシュボードのカード",
+  /* nav.diagnosis */ "診断",
+  /* nav.outdoor */ "室外機",
   /* nav.settings_alert */ (n) => `設定 — 接続エラー ${n}件`,
   /* src.modbus_tag */ "modbus",
   /* src.agree */ "両方の値が一致",

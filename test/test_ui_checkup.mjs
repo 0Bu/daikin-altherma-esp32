@@ -33,7 +33,7 @@ assert.match(dashboardSource,
 assert.doesNotMatch(dashboardSource, /checkup \+ service \+|refrigerantServiceCardHtml/,
                     "refrigerant service must not return as a separate dashboard card");
 assert.match(dashboardSource,
-             /return hp\.connected \? vcard\(t\("card\.model"\), model\) : "";/,
+             /return hp\.connected \? vcard\(t\("card\.model"\), model, "", "", "model"\) : "";/,
              "the Model card must follow plant diagnostics and precede Operation without reviving the removed outdoor card");
 // Pin the existing /status.health surface plus its additive evidence fields at the actual serializer.
 // The UI payloads below are synthetic by design; without this half, a C++ key drift could leave every

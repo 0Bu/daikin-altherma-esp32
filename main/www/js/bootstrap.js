@@ -42,8 +42,27 @@ function wire() {
     if (e.key === "Escape" && !$("otaModal").hidden) settleOtaDecision(false);
   });
 
-  // The dashboard card grid (#valueGroups) is rebuilt on every poll, so its one interactive control
-  // is wired by delegation: tapping a value row (that has a description) expands/collapses its
+  const revealCardName = button => {
+    const nav = $("cardNav"), style = getComputedStyle(nav);
+    if (!button || style.overflowX !== "auto") return;
+    const bounds = nav.getBoundingClientRect(), rect = button.getBoundingClientRect();
+    const inset = parseFloat(style.paddingLeft) || 0;
+    const left = bounds.left + nav.clientLeft + inset;
+    const right = bounds.left + nav.clientLeft + nav.clientWidth - inset;
+    if (rect.left < left) nav.scrollLeft += rect.left - left;
+    else if (rect.right > right) nav.scrollLeft += rect.right - right;
+  };
+  $("cardNav").addEventListener("focusin", (e) => revealCardName(e.target.closest("[data-card]")));
+  $("cardNav").addEventListener("click", (e) => {
+    const button = e.target.closest("[data-card]");
+    if (button) {
+      selectDashboardCard(button.dataset.card);
+      revealCardName(button);
+    }
+  });
+
+  // The dashboard card panel (#valueGroups) is rebuilt on every poll, so its row controls
+  // are wired by delegation: tapping a value row (that has a description) expands/collapses its
   // explainer accordion.
   $("valueGroups").addEventListener("click", (e) => {
     // A scrub that ended on the plot must not fall through to the accordion header and collapse the
@@ -69,8 +88,9 @@ function wire() {
   // Arm the click-in-flight hold from EVERY per-poll container that setHtml guards, not just the
   // value grid: #settingsCards and #connTile rely on the unchanged-markup check alone, which
   // protects them only while their markup is stable — a real state change landing on the exact tap
-  // that opens a config modal would still be lost. Same guard, same three containers, one rule.
-  for (const id of ["valueGroups", "settingsCards", "connTile"]) {
+  // that opens a config modal would still be lost. The card navigation uses the same protection
+  // when the available card list changes.
+  for (const id of ["cardNav", "valueGroups", "settingsCards", "connTile"]) {
     const el = $(id);
     el.addEventListener("pointerdown", () => clickHold(CLICK_HOLD_DOWN_MS));
     // pointerup RE-ARMS a shorter hold rather than releasing: the click, the open animation and the

@@ -213,6 +213,7 @@ const I18N = {
     "bug.copy_fail": "Copy failed — select the text below and copy it by hand",
     "bug.redacted": "Your network name, addresses, broker and server names have already been removed.",
     "nav.settings": "Settings", "nav.back": "Back",
+    "nav.cards": "Dashboard cards", "nav.diagnosis": "Diagnostics", "nav.outdoor": "Outdoor unit",
     "nav.settings_alert": (n) => `Settings — ${n} connection${n === 1 ? "" : "s"} down`,
     // ── The two sources (X10A + the HomeHub Modbus stack) ──
     "src.modbus_tag": "modbus",

@@ -253,6 +253,7 @@ add_dependencies(${COMPONENT_LIB} gen_index_gz)
 # asset by its query parameter. Each file is still linked into the signed application image; no
 # network service participates in localization. A separate tight cap prevents a catalog from
 # quietly becoming another large response even though it is served straight from flash.
+# Reuse the dashboard's pinned, lossless encoder to retain signed-image headroom in the fixed slots.
 set(UI_LOCALE_GZIP_MAX_BYTES 32768)
 set(UI_LOCALE_OUTPUTS "")
 foreach(locale IN LISTS UI_LOCALE_CODES)
@@ -263,8 +264,13 @@ foreach(locale IN LISTS UI_LOCALE_CODES)
         COMMAND ${PYTHON} "${UI_LOCALE_MINIFIER}"
                 --input "${locale_src}"
                 --output "${locale_gz}"
+                --gzip-encoder zopfli
                 --max-gzip-bytes ${UI_LOCALE_GZIP_MAX_BYTES}
         DEPENDS "${locale_src}" "${UI_LOCALE_MINIFIER}" "${UI_MINIFIER}" ${UI_MINIFIER_VENDOR}
+                "${UI_ZOPFLI_ROOT}/zopfli_gzip.py"
+                "${UI_ZOPFLI_ROOT}/zopfli_gzip.c"
+                "${UI_ZOPFLI_ROOT}/vendor/zopfli/UPSTREAM.json"
+                ${UI_ZOPFLI_SOURCES}
         COMMENT "Minifying and gzipping ${locale} UI locale"
         VERBATIM)
     list(APPEND UI_LOCALE_OUTPUTS "${locale_gz}")

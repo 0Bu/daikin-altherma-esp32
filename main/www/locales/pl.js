@@ -1,4 +1,4 @@
-// translation-source: 56ec4b237229b88c50cf6b91ff312bb0f6656edfb91ec07b993d5e2bde0e9ca2
+// translation-source: 69a70fe118eb482b63d926feb5045f732f15405b119416d0c242cc974e0e1d00
 const plNoun = (n, one, few, many) => {
   const value = Math.abs(Number(n)), mod10 = value % 10, mod100 = value % 100;
   return value === 1 ? one
@@ -81,6 +81,9 @@ I18N.pl = localeValues([
   /* bug.redacted */ "Nazwa sieci, adresy, broker i nazwy serwerów zostały już usunięte.",
   /* nav.settings */ "Ustawienia",
   /* nav.back */ "Wstecz",
+  /* nav.cards */ "Karty panelu",
+  /* nav.diagnosis */ "Diagnostyka",
+  /* nav.outdoor */ "Jednostka zewnętrzna",
   /* nav.settings_alert */ (n) => `Ustawienia — ${n} ${plNoun(n, "połączenie niedostępne", "połączenia niedostępne", "połączeń niedostępnych")}`,
   /* src.modbus_tag */ "modbus",
   /* src.agree */ "Oba źródła są zgodne",

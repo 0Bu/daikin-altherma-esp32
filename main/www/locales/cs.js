@@ -1,4 +1,4 @@
-// translation-source: 56ec4b237229b88c50cf6b91ff312bb0f6656edfb91ec07b993d5e2bde0e9ca2
+// translation-source: 69a70fe118eb482b63d926feb5045f732f15405b119416d0c242cc974e0e1d00
 I18N.cs = localeValues([
   /* sys.nodata */ "Žádná data",
   /* sys.unreachable */ "Nedostupné",
@@ -76,6 +76,9 @@ I18N.cs = localeValues([
   /* bug.redacted */ "Název vaší sítě, adresy, broker a názvy serverů již byly odstraněny.",
   /* nav.settings */ "Nastavení",
   /* nav.back */ "Zpět",
+  /* nav.cards */ "Karty přehledu",
+  /* nav.diagnosis */ "Diagnostika",
+  /* nav.outdoor */ "Venkovní jednotka",
   /* nav.settings_alert */ (n) => `Nastavení — ${n} ${n === 1 ? "připojení je nedostupné" : n >= 2 && n <= 4 ? "připojení jsou nedostupná" : "připojení je nedostupných"}`,
   /* src.modbus_tag */ "modbus",
   /* src.agree */ "Oba zdroje se shodují",

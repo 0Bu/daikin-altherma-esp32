@@ -561,7 +561,103 @@ svg .sc-hit:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px
 .btn.danger:hover { filter: brightness(1.08); }
 
 /* ── Value groups (dashboard) ───────────────────────────────────────────── */
-#valueGroups { margin-top: 14px; }
+.dashboard-cards {
+  --dashboard-surface: #fff; --dashboard-side: #f8fafb; --dashboard-text: #252e36;
+  --dashboard-muted: #6c7681; --dashboard-line: #e4e8ec; --dashboard-blue: #138fba;
+  --dashboard-hover: #f1f5f6; --dashboard-shadow: #1937490c; --dashboard-join-radius: 17px;
+  margin-top: 14px; min-width: 0; background: var(--dashboard-surface);
+  border: 1px solid var(--dashboard-line); border-radius: 17px;
+  box-shadow: 0 5px 18px var(--dashboard-shadow);
+}
+.dashboard-cards[hidden] { display: none; }
+.dashboard-card-nav {
+  display: flex; flex-wrap: nowrap; align-items: stretch; gap: 5px; padding: 10px 17px 0;
+  overflow-x: auto; overscroll-behavior-x: contain; scroll-padding-inline: 17px;
+  scrollbar-width: none; box-shadow: inset 0 -1px var(--dashboard-line);
+  background: var(--dashboard-side);
+  border-radius: 17px 17px 0 0; min-width: 0;
+}
+.dashboard-card-nav::-webkit-scrollbar { display: none; }
+.dashboard-card-button {
+  display: flex; flex: 0 0 auto; align-items: center; gap: 0;
+  min-width: 0; min-height: 40px; max-width: none;
+  margin-bottom: 10px; padding: 9px 10px; border: 1px solid transparent;
+  border-radius: 9px; background: transparent;
+  color: var(--dashboard-muted); cursor: pointer; text-align: left;
+  font: 500 12px/1.25 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+.dashboard-card-label { min-width: 0; white-space: nowrap; }
+.dashboard-card-button:hover { color: var(--dashboard-text); background: var(--dashboard-hover); }
+.dashboard-card-button[aria-pressed="true"] {
+  position: relative; z-index: 1; margin-bottom: 0; padding-bottom: 20px;
+  border-color: var(--dashboard-line); border-bottom: 0; border-radius: 9px 9px 0 0;
+  background: var(--dashboard-surface); color: var(--dashboard-blue); font-weight: 650;
+}
+/* Inverse quarter-circles round the join into the content surface. Keep the native name
+   scroller mounted; only the selected button owns these decorative, non-interactive fillets. */
+.dashboard-card-button[aria-pressed="true"]::before,
+.dashboard-card-button[aria-pressed="true"]::after {
+  content: ""; position: absolute; bottom: 0;
+  width: var(--dashboard-join-radius); height: var(--dashboard-join-radius); pointer-events: none;
+}
+.dashboard-card-button[aria-pressed="true"]::before {
+  left: calc(-1 * var(--dashboard-join-radius));
+  background: radial-gradient(circle at top left, transparent calc(var(--dashboard-join-radius) - 1px),
+    var(--dashboard-line) calc(var(--dashboard-join-radius) - 1px),
+    var(--dashboard-line) var(--dashboard-join-radius), var(--dashboard-surface) var(--dashboard-join-radius));
+}
+.dashboard-card-button[aria-pressed="true"]::after {
+  right: calc(-1 * var(--dashboard-join-radius));
+  background: radial-gradient(circle at top right, transparent calc(var(--dashboard-join-radius) - 1px),
+    var(--dashboard-line) calc(var(--dashboard-join-radius) - 1px),
+    var(--dashboard-line) var(--dashboard-join-radius), var(--dashboard-surface) var(--dashboard-join-radius));
+}
+.dashboard-card-icon { display: none; }
+#valueGroups { min-width: 0; }
+#valueGroups > .vgroup + .vgroup { margin-top: 0; }
+#valueGroups > .vgroup[hidden] { display: none; }
+#valueGroups > .vgroup > :only-child { padding: 20px 16px 15px; border: 0; box-shadow: none; background: transparent; }
+@media (min-width: 650px) {
+  .dashboard-cards { display: grid; grid-template-columns: 202px minmax(0, 1fr); align-items: stretch; }
+  .dashboard-card-nav {
+    flex-direction: column; flex-wrap: nowrap; gap: 3px; padding: 17px 9px;
+    overflow: visible; overscroll-behavior-x: auto; scroll-padding-inline: 0;
+    box-shadow: none; border-right: 1px solid var(--dashboard-line); border-radius: 17px 0 0 17px;
+  }
+  .dashboard-card-button {
+    gap: 10px; width: 100%; max-width: 100%; margin-bottom: 0;
+    padding: 10px 12px; font-size: 14px;
+  }
+  .dashboard-card-button[aria-pressed="true"] {
+    width: calc(100% + 10px); max-width: none; margin-right: -10px; padding-bottom: 10px;
+    border-bottom: 1px solid var(--dashboard-line); border-right: 0; border-radius: 9px 0 0 9px;
+  }
+  .dashboard-card-button[aria-pressed="true"]::before {
+    left: auto; right: 0; bottom: auto; top: calc(-1 * var(--dashboard-join-radius));
+    background: radial-gradient(circle at top left, transparent calc(var(--dashboard-join-radius) - 1px),
+      var(--dashboard-line) calc(var(--dashboard-join-radius) - 1px),
+      var(--dashboard-line) var(--dashboard-join-radius), var(--dashboard-surface) var(--dashboard-join-radius));
+  }
+  .dashboard-card-button[aria-pressed="true"]::after {
+    right: 0; bottom: calc(-1 * var(--dashboard-join-radius));
+    background: radial-gradient(circle at bottom left, transparent calc(var(--dashboard-join-radius) - 1px),
+      var(--dashboard-line) calc(var(--dashboard-join-radius) - 1px),
+      var(--dashboard-line) var(--dashboard-join-radius), var(--dashboard-surface) var(--dashboard-join-radius));
+  }
+  .dashboard-card-label { white-space: normal; overflow-wrap: anywhere; }
+  .dashboard-card-icon { display: block; width: 17px; height: 17px; flex: 0 0 17px; }
+  #valueGroups > .vgroup > :only-child { padding: 23px 24px 18px; }
+}
+@media (pointer: coarse) {
+  .dashboard-card-button { min-height: 44px; }
+}
+@media (prefers-color-scheme: dark) {
+  .dashboard-cards {
+    --dashboard-surface: #222b33; --dashboard-side: #1d252d; --dashboard-text: #edf2f6;
+    --dashboard-muted: #acb6c1; --dashboard-line: #39434d; --dashboard-blue: #6cc9ee;
+    --dashboard-hover: #171e24; --dashboard-shadow: #00000020;
+  }
+}
 .vgroup + .vgroup { margin-top: 12px; }
 .vgroup .section-label { display: block; margin-bottom: 2px; }
 /* Protection group heading marker: shown only while a drop-control flag reads ON. Carries its own
@@ -1338,11 +1434,8 @@ html.modal-open, body.modal-open { overflow: hidden; overscroll-behavior: none; 
 .toast.ok .disc { background: var(--ok); } .toast.err .disc { background: var(--err); }
 @keyframes tin { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
 
-/* Single column at every width (DESIGN.md §9): every card — the system card, each value group and
-   the Connections/ESP32 cards behind the gear — is the same full container width, stacked top-down. (An earlier ≥560px two-column
-   multicol packed the value cards into two columns; it left an empty second column — with a stray
-   card shadow at the column gap — whenever only the ESP32 card showed, e.g. while the heat-pump link
-   is down.) */
+/* The schematic and Settings cards remain full-width. Dashboard details share one panel, with
+   card names to its left on desktop and scrolling in one row above it on phones (DESIGN.md §6). */
 
 /* ≥600px (tablet / desktop): the single mobile-sized column reads small and sparse on a big screen
    (e.g. a wall-mounted tablet) — lots of empty margin, little content. Widen the column and scale the

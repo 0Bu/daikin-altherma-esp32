@@ -37,12 +37,20 @@ const layoutAudit = `(() => {
   for (const el of document.querySelectorAll("body *")) {
     if (!shown(el) || el.closest(".schem-scroll")) continue;
     const rect = el.getBoundingClientRect();
-    if (rect.left < -1 || rect.right > innerWidth + 1) outside.push(describe(el));
+    // The mobile card picker intentionally clips offscreen names inside its own horizontal
+    // scroller. Audit their visible intersection; the scroller and page still obey viewport bounds.
+    const nav = el.closest("#cardNav");
+    const clip = nav && nav !== el && ["auto", "scroll"].includes(getComputedStyle(nav).overflowX)
+      ? nav.getBoundingClientRect() : null;
+    const left = clip ? Math.max(rect.left, clip.left) : rect.left;
+    const right = clip ? Math.min(rect.right, clip.right) : rect.right;
+    if (right < left) continue;
+    if (left < -1 || right > innerWidth + 1) outside.push(describe(el));
   }
   const clipped = [];
   const candidates = document.querySelectorAll(
     "button, [role=button], [role=dialog], .field-label, .field-help, .hint, .section-label, " +
-    ".hdr-title, .hdr-name, .conn-label, .conn-value, .vrow-label, .vrow-val, .ota-alert-message, " +
+    ".hdr-title, .hdr-name, .conn-label, .conn-value, .vrow-label, .vrow-val, .dashboard-card-label, .ota-alert-message, " +
     ".recovery-banner .crash-title, .recovery-banner .crash-meta, " +
     "#valueGroups .vitem.open .vdesc-inner, #valueGroups .vitem.open .vdesc-body, " +
     "#valueGroups .vitem.open .vdesc-p"
@@ -458,25 +466,556 @@ const nativeAltherma4Rows = Object.freeze([
     labelKey: "a4.unit_operation", valueKey: "enum.actuator", helpKey: "a4.operation_help" },
 ]);
 
-// Exercise the delegated pointer lifecycle, including the disclosure animation.
-async function clickDisclosure(page, selector) {
+// Use native pointer events so delegated navigation, focus and hit testing all participate.
+async function clickElement(page, selector) {
+  // Native input must reach this owned fixture tab. Chrome may open an internal help/update tab
+  // in a fresh profile; a background fixture also throttles the disclosure's bounded hold timer.
+  await page.send("Page.bringToFront");
+  await page.evaluate(`(() => {
+    const button = document.querySelector(${JSON.stringify(selector)});
+    if (!button) throw new Error("missing pointer target: " + ${JSON.stringify(selector)});
+    button.scrollIntoView({ block: "center", behavior: "instant" });
+    return true;
+  })()`);
+  // A shorter selected card can clamp the document scroll position after the preceding click.
+  // Flush that real layout before taking coordinates, as the inspector pointer fixtures do.
+  await page.frame();
   const point = await page.evaluate(`(() => {
     const button = document.querySelector(${JSON.stringify(selector)});
-    button.scrollIntoView({ block: "center" });
     const rect = button.getBoundingClientRect();
-    return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+    if (!rect.width || !rect.height) throw new Error("hidden pointer target: " + ${JSON.stringify(selector)});
+    const point = { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+    if (document.elementFromPoint(point.x, point.y)?.closest("button") !== button)
+      throw new Error("pointer target is obstructed: " + ${JSON.stringify(selector)});
+    return point;
   })()`);
   await page.send("Input.dispatchMouseEvent", { type: "mouseMoved", ...point });
   await page.send("Input.dispatchMouseEvent",
     { type: "mousePressed", button: "left", clickCount: 1, ...point });
   await page.send("Input.dispatchMouseEvent",
     { type: "mouseReleased", button: "left", clickCount: 1, ...point });
+}
+
+async function activateDashboardCardForSelector(page, selector) {
+  const key = await page.evaluate(`document.querySelector(${JSON.stringify(selector)})
+    ?.closest(".vgroup[data-dashboard-card]")?.dataset.dashboardCard || null`);
+  if (!key) return;
+  const navSelector = `#cardNav button[data-card=${JSON.stringify(key)}]`;
+  if (await page.evaluate(`document.querySelector(${JSON.stringify(navSelector)})
+    ?.getAttribute("aria-pressed") === "true"`)) return;
+  await clickElement(page, navSelector);
+  await page.waitFor(`document.querySelector(${JSON.stringify(navSelector)})
+    ?.getAttribute("aria-pressed") === "true"`);
+}
+
+// Exercise the delegated pointer lifecycle, including the disclosure animation. Value fixtures may
+// target any card; activate its actual navigation entry before measuring its pointer target.
+async function clickDisclosure(page, selector) {
+  await activateDashboardCardForSelector(page, selector);
+  await clickElement(page, selector);
   await page.waitFor(`(() => {
     const button = document.querySelector(${JSON.stringify(selector)});
     const item = button?.closest(".vitem");
     return button?.getAttribute("aria-expanded") === "true" && item.classList.contains("open") &&
       item.getAnimations({ subtree: true }).every((animation) => animation.playState !== "running");
   })()`);
+}
+
+async function assertDashboardCardAppearance(page, context, viewport) {
+  const appearance = await page.evaluate(`(() => {
+    const browser = document.getElementById("cardBrowser");
+    const nav = document.getElementById("cardNav");
+    const shellStyle = getComputedStyle(browser), navStyle = getComputedStyle(nav);
+    const buttons = Array.from(nav.querySelectorAll("button[data-card]"));
+    const readButton = button => {
+      const style = getComputedStyle(button);
+      const icon = button.querySelector("svg.dashboard-card-icon");
+      const label = button.querySelector("span.dashboard-card-label");
+      const buttonRect = button.getBoundingClientRect(), labelRect = label?.getBoundingClientRect();
+      const fillet = pseudo => {
+        const decoration = getComputedStyle(button, pseudo);
+        return { content: decoration.content, width: decoration.width, height: decoration.height,
+          position: decoration.position, pointerEvents: decoration.pointerEvents,
+          left: decoration.left, right: decoration.right, top: decoration.top, bottom: decoration.bottom,
+          background: decoration.backgroundImage };
+      };
+      return { key: button.dataset.card, pressed: button.getAttribute("aria-pressed"),
+        hovered: button.matches(":hover"),
+        structure: !!icon && !!label &&
+          button.querySelectorAll("svg.dashboard-card-icon").length === 1 &&
+          button.querySelectorAll("span.dashboard-card-label").length === 1 &&
+          label.textContent === button.textContent.trim(),
+        noChevron: button.querySelectorAll(".dashboard-card-chevron").length === 0,
+        decorative: !!icon && icon.getAttribute("aria-hidden") === "true" && icon.getAttribute("focusable") === "false",
+        iconDisplay: icon ? getComputedStyle(icon).display : null,
+        iconWidth: icon?.getBoundingClientRect().width,
+        labelFits: !!label && label.scrollWidth <= label.clientWidth + 1 &&
+          labelRect.left >= buttonRect.left + parseFloat(style.paddingLeft) - 1 &&
+          labelRect.right <= buttonRect.right - parseFloat(style.paddingRight) + 1,
+        labelWhiteSpace: label ? getComputedStyle(label).whiteSpace : null,
+        shrink: style.flexShrink,
+        color: style.color, background: style.backgroundColor, weight: style.fontWeight,
+        fontSize: style.fontSize, lineHeight: style.lineHeight,
+        radii: [style.borderTopLeftRadius, style.borderTopRightRadius,
+          style.borderBottomRightRadius, style.borderBottomLeftRadius],
+        minHeight: style.minHeight, gap: style.gap,
+        padding: [style.paddingTop, style.paddingRight, style.paddingBottom, style.paddingLeft],
+        borders: [style.borderTopWidth, style.borderRightWidth, style.borderBottomWidth, style.borderLeftWidth],
+        borderColors: [style.borderTopColor, style.borderRightColor, style.borderBottomColor, style.borderLeftColor],
+        width: buttonRect.width, right: buttonRect.right, bottom: buttonRect.bottom,
+        marginBottom: style.marginBottom, shadow: style.boxShadow,
+        before: fillet("::before"), after: fillet("::after") };
+    };
+    return { dark: matchMedia("(prefers-color-scheme: dark)").matches,
+      coarse: matchMedia("(pointer: coarse)").matches,
+      desktop: matchMedia("(min-width: 650px)").matches,
+      shell: { radius: shellStyle.borderRadius,
+        widths: [shellStyle.borderTopWidth, shellStyle.borderRightWidth,
+          shellStyle.borderBottomWidth, shellStyle.borderLeftWidth],
+        colors: [shellStyle.borderTopColor, shellStyle.borderRightColor,
+          shellStyle.borderBottomColor, shellStyle.borderLeftColor] },
+      nav: { width: nav.getBoundingClientRect().width, background: navStyle.backgroundColor,
+        gap: navStyle.gap, wrap: navStyle.flexWrap, overflowX: navStyle.overflowX,
+        shadow: navStyle.boxShadow, scrollbar: navStyle.scrollbarWidth,
+        padding: [navStyle.paddingTop, navStyle.paddingRight, navStyle.paddingBottom, navStyle.paddingLeft] },
+      content: { left: document.getElementById("valueGroups").getBoundingClientRect().left,
+        top: document.getElementById("valueGroups").getBoundingClientRect().top },
+      buttons: buttons.map(readButton) };
+  })()`);
+  assert.equal(appearance.desktop, viewport.width >= 650, `${context}: prototype breakpoint is 650 px`);
+  const colors = appearance.dark
+    ? { nav: "rgb(29, 37, 45)", border: "rgb(57, 67, 77)", selected: "rgb(34, 43, 51)",
+      activeText: "rgb(108, 201, 238)", normalText: "rgb(172, 182, 193)" }
+    : { nav: "rgb(248, 250, 251)", border: "rgb(228, 232, 236)", selected: "rgb(255, 255, 255)",
+      activeText: "rgb(19, 143, 186)", normalText: "rgb(108, 118, 129)" };
+  assert.deepEqual(appearance.shell, { radius: "17px", widths: Array(4).fill("1px"),
+    colors: Array(4).fill(colors.border) }, `${context}: prototype outer border is thin, complete and rounded`);
+  assert.equal(appearance.nav.background, colors.nav, `${context}: prototype sidebar surface`);
+  assert.equal(appearance.nav.gap, appearance.desktop ? "3px" : "5px", `${context}: prototype name spacing`);
+  assert.deepEqual(appearance.nav.padding, appearance.desktop ? ["17px", "9px", "17px", "9px"]
+    : ["10px", "17px", "0px", "17px"], `${context}: padding reserves the curved tab joins`);
+  if (appearance.desktop) assert.equal(appearance.nav.width, 202, `${context}: desktop sidebar is 202 px wide`);
+  assert.equal(appearance.nav.wrap, "nowrap", `${context}: names remain in one desktop column or mobile row`);
+  assert.equal(appearance.nav.overflowX, appearance.desktop ? "visible" : "auto",
+    `${context}: horizontal overflow belongs to the mobile name scroller`);
+  if (appearance.desktop) assert.equal(appearance.nav.shadow, "none", `${context}: desktop uses its vertical seam`);
+  else {
+    assert.equal(appearance.nav.scrollbar, "none", `${context}: mobile scrollbar is hidden locally`);
+    assert.match(appearance.nav.shadow, /inset/, `${context}: mobile seam is an inset bottom line`);
+    assert.ok(appearance.nav.shadow.includes(colors.border), `${context}: mobile seam uses the frame colour`);
+  }
+  const normalWidth = appearance.buttons.find(button => button.pressed !== "true")?.width;
+  for (const button of appearance.buttons) {
+    const name = `${context}/${button.key}`;
+    assert.equal(button.structure, true, `${name}: decorative icon and actual name are distinct elements`);
+    assert.equal(button.noChevron, true, `${name}: card names have no trailing navigation chevron`);
+    assert.equal(button.decorative, true, `${name}: the icon must stay decorative`);
+    assert.equal(button.labelFits, true, `${name}: the complete name fits its own button`);
+    assert.equal(button.labelWhiteSpace, appearance.desktop ? "normal" : "nowrap",
+      `${name}: desktop labels may wrap while mobile names remain on one line`);
+    assert.equal(button.shrink, "0", `${name}: card names do not shrink away`);
+    assert.equal(button.fontSize, appearance.desktop ? "14px" : "12px", `${name}: prototype label size`);
+    assert.equal(button.lineHeight, appearance.desktop ? "17.5px" : "15px", `${name}: prototype label line height`);
+    assert.equal(button.minHeight, appearance.coarse ? "44px" : "40px", `${name}: readable pointer/touch target`);
+    assert.equal(button.shadow, "none", `${name}: selected state uses the rounded fill without an inset side strip`);
+    assert.equal(button.gap, appearance.desktop ? "10px" : "0px", `${name}: prototype icon/name spacing`);
+    assert.deepEqual(button.padding, appearance.desktop ? ["10px", "12px", "10px", "12px"]
+      : ["9px", "10px", button.pressed === "true" ? "20px" : "9px", "10px"],
+    `${name}: selected mobile tab extends to the panel while its name keeps the baseline`);
+    if (appearance.desktop) {
+      assert.equal(button.iconDisplay, "block", `${name}: desktop shows its icon`);
+      assert.equal(button.iconWidth, 17, `${name}: prototype icon width`);
+    } else {
+      assert.equal(button.iconDisplay, "none", `${name}: mobile names omit decorative icons`);
+    }
+    if (button.pressed === "true") {
+      assert.equal(button.background, colors.selected, `${name}: selected tab shares the content surface`);
+      assert.equal(button.color, colors.activeText, `${name}: prototype selected foreground`);
+      assert.equal(button.weight, "650", `${name}: prototype selected weight`);
+      const borders = appearance.desktop ? ["1px", "0px", "1px", "1px"] : ["1px", "1px", "0px", "1px"];
+      assert.deepEqual(button.borders, borders, `${name}: the selected outline opens into the content panel`);
+      assert.deepEqual(button.radii, appearance.desktop ? ["9px", "0px", "0px", "9px"]
+        : ["9px", "9px", "0px", "0px"], `${name}: outside corners round while the joined edge stays open`);
+      for (let index = 0; index < borders.length; index++) if (borders[index] !== "0px")
+        assert.equal(button.borderColors[index], colors.border, `${name}: visible outline matches the frame`);
+      assert.equal(button.marginBottom, "0px", `${name}: selected tab reaches the seam without a lower gap`);
+      assert.ok(Math.abs((appearance.desktop ? button.right : button.bottom) -
+        (appearance.desktop ? appearance.content.left : appearance.content.top)) <= 1,
+      `${name}: open tab edge touches the content panel`);
+      if (appearance.desktop) assert.ok(Math.abs(button.width - normalWidth - 10) <= 1,
+        `${name}: selected desktop tab extends through the ten-pixel sidebar seam`);
+      for (const decoration of [button.before, button.after]) {
+        assert.deepEqual([decoration.content, decoration.position, decoration.pointerEvents,
+          decoration.width, decoration.height], ['""', "absolute", "none", "17px", "17px"],
+        `${name}: non-interactive seventeen-pixel fillets round the two inside corners`);
+        assert.match(decoration.background, /radial-gradient/, `${name}: join fillets are inverse quarter circles`);
+        assert.ok(decoration.background.includes("16px") && decoration.background.includes("17px") &&
+          decoration.background.includes(colors.border) && decoration.background.includes(colors.selected),
+        `${name}: fillet geometry shares the one-pixel outline and content surface`);
+      }
+      assert.deepEqual(appearance.desktop
+        ? [button.before.right, button.before.top, button.after.right, button.after.bottom]
+        : [button.before.left, button.before.bottom, button.after.right, button.after.bottom],
+      appearance.desktop ? ["0px", "-17px", "0px", "-17px"] : ["-17px", "0px", "-17px", "0px"],
+      `${name}: both fillets meet the open tab edge`);
+    } else {
+      assert.deepEqual(button.borders, Array(4).fill("1px"), `${name}: inactive border reserves stable name geometry`);
+      assert.deepEqual(button.radii, Array(4).fill("9px"), `${name}: inactive names retain their rounded corners`);
+      assert.equal(button.marginBottom, appearance.desktop ? "0px" : "10px", `${name}: inactive mobile names clear the panel seam`);
+      assert.ok(["none", "normal"].includes(button.before.content) && ["none", "normal"].includes(button.after.content),
+        `${name}: only the selected tab draws join fillets`);
+      assert.equal(button.weight, "500", `${name}: prototype inactive weight`);
+      if (!button.hovered) assert.equal(button.color, colors.normalText, `${name}: prototype inactive foreground`);
+    }
+  }
+}
+
+async function assertMobileCardScroller(page, context, current) {
+  const first = '#cardNav button[data-card="diagnosis"]';
+  const last = '#cardNav button[data-card="modbus"]';
+  const visible = selector => `(() => {
+    const nav = document.getElementById("cardNav").getBoundingClientRect();
+    const button = document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect();
+    return button.left >= nav.left - 1 && button.right <= nav.right + 1;
+  })()`;
+  const touchState = async () => {
+    try {
+      return await page.evaluate(`({ hidden: document.hidden, visibility: document.visibilityState,
+        scrollLeft: document.getElementById("cardNav")?.scrollLeft,
+        max: (() => { const nav = document.getElementById("cardNav");
+          return nav && nav.scrollWidth - nav.clientWidth; })(),
+        lastBounds: (() => { const nav = document.getElementById("cardNav");
+          const button = nav?.lastElementChild; if (!button) return null;
+          const n = nav.getBoundingClientRect(), b = button.getBoundingClientRect();
+          return { nav: [n.left, n.right], button: [b.left, b.right] }; })(),
+        focused: document.activeElement?.dataset?.card, width: innerWidth })`);
+    } catch (error) { return { unavailable: error.message }; }
+  };
+  const traceTouch = process.env.DAIKIN_BROWSER_TOUCH_TRACE === "1";
+  const foregroundTouch = async stage => {
+    if (traceTouch) console.log(`raw touch ${context}/${stage}/before`, JSON.stringify(await touchState()));
+    // A fresh owned Chrome profile can open an internal help/update tab after the preceding full
+    // UI case. Unlike mouse clicks, CDP raw touch can wait indefinitely on that background target.
+    await page.send("Page.bringToFront");
+    await page.waitFor('document.visibilityState === "visible" && !document.hidden', { timeoutMs: 2000 });
+  };
+  const touchGesture = async (stage, events) => {
+    let started = false, ended = false, phase = "foreground";
+    try {
+      await foregroundTouch(stage);
+      for (const [index, event] of events.entries()) {
+        phase = `${event.type}-${index}`;
+        if (event.type === "touchStart") started = true;
+        await page.send("Input.dispatchTouchEvent", event);
+        if (event.type === "touchEnd") ended = true;
+      }
+      if (traceTouch) console.log(`raw touch ${context}/${stage}/complete`, JSON.stringify(await touchState()));
+    } catch (error) {
+      throw new Error(`${context}/${stage}/${phase}: native touch delivery failed; ` +
+        `${JSON.stringify(await touchState())}; ${error.message}`, { cause: error });
+    } finally {
+      if (started && !ended) {
+        try {
+          await page.send("Page.bringToFront");
+          await page.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] }, 2000);
+        } catch (error) { console.error(`${context}/${stage}: touchEnd cleanup failed: ${error.message}`); }
+      }
+    }
+  };
+  await page.evaluate(`(() => {
+    document.querySelector(${JSON.stringify(first)}).focus();
+    document.activeElement.blur();
+    document.getElementById("cardNav").scrollIntoView({ block: "center", behavior: "instant" });
+    return true;
+  })()`);
+  await page.frame();
+  const dimensions = await page.evaluate(`(() => {
+    const nav = document.getElementById("cardNav");
+    return { overflow: nav.scrollWidth - nav.clientWidth, width: nav.clientWidth,
+      lines: new Set(Array.from(nav.querySelectorAll("button"),
+        button => Math.round(button.getBoundingClientRect().top))).size };
+  })()`);
+  assert.equal(dimensions.lines, 1, `${context}: every mobile name stays in one horizontal row`);
+  assert.ok(dimensions.overflow > dimensions.width,
+    `${context}: fixture has enough names to prove real horizontal navigation`);
+  assert.equal(await page.evaluate(visible(last)), false, `${context}: last Modbus starts offscreen`);
+
+  const nativeScroll = async (stage, direction, gesture) => {
+    await foregroundTouch(stage);
+    const before = await page.evaluate(`(() => {
+      const nav = document.getElementById("cardNav"), rect = nav.getBoundingClientRect();
+      const state = { moved: false, ended: false, controller: new AbortController() };
+      nav.__browserCardScroll = state;
+      nav.addEventListener("scroll", () => { state.moved = true; state.ended = false; },
+        { signal: state.controller.signal });
+      nav.addEventListener("scrollend", () => { if (state.moved) state.ended = true; },
+        { signal: state.controller.signal });
+      return { x: nav.scrollLeft, max: nav.scrollWidth - nav.clientWidth,
+        left: rect.left + 25, right: rect.right - 25, y: rect.top + rect.height / 2 };
+    })()`);
+    try {
+      assert.ok((direction > 0 ? before.max - before.x : before.x) > 0,
+        `${context}/${stage}: a native gesture requires remaining scroll room in its direction`);
+      await gesture(before);
+      // touchEnd acknowledges delivery, not the end of the compositor's inertial fling. Waiting
+      // only for the first delta can race the next visibility check and start a swipe at max.
+      // A real scrollend settles that gesture before another direction or endpoint is sampled.
+      await page.waitFor(`(() => {
+        const nav = document.getElementById("cardNav"), delta = nav.scrollLeft - ${before.x};
+        return nav.__browserCardScroll?.moved && nav.__browserCardScroll.ended &&
+          (delta * ${direction} > 10 || (delta * ${direction} > 0 &&
+          (${direction} > 0 ? nav.scrollLeft >= nav.scrollWidth - nav.clientWidth - 1 : nav.scrollLeft <= 1)));
+      })()`, { timeoutMs: 2000 });
+      if (traceTouch) console.log(`native scroll ${context}/${stage}/settled`, JSON.stringify(await touchState()));
+    } catch (error) {
+      throw new Error(`${context}/${stage}: native scrolling failed from ${JSON.stringify(before)}; ` +
+        `${JSON.stringify(await touchState())}; ${error.message}`, { cause: error });
+    } finally {
+      await page.evaluate(`(() => { const nav = document.getElementById("cardNav");
+        nav.__browserCardScroll?.controller.abort(); delete nav.__browserCardScroll; return true; })()`);
+    }
+  };
+  const swipe = async direction => nativeScroll(`swipe-${direction > 0 ? "right" : "left"}`, direction, async points => {
+    const from = direction > 0 ? points.right : points.left;
+    const to = direction > 0 ? points.left : points.right;
+    const touch = x => ({ x, y: points.y, id: 1, radiusX: 1, radiusY: 1, force: 1 });
+    await touchGesture(`swipe-${direction > 0 ? "right" : "left"}`, [
+      { type: "touchStart", touchPoints: [touch(from)] },
+      ...[0.25, 0.5, 0.75, 1].map(fraction => ({ type: "touchMove",
+        touchPoints: [touch(from + (to - from) * fraction)] })),
+      { type: "touchEnd", touchPoints: [] },
+    ]);
+  });
+  const rejectEndpoint = async direction => {
+    let dispatched = false;
+    await assert.rejects(nativeScroll("endpoint-control", direction, async () => { dispatched = true; }),
+      /requires remaining scroll room/, `${context}: a no-op endpoint cannot count as a native gesture`);
+    assert.equal(dispatched, false, `${context}: endpoint guard rejects before dispatching native input`);
+  };
+  await rejectEndpoint(-1);
+  let backgroundTarget;
+  try {
+    if (process.env.DAIKIN_BROWSER_TOUCH_BACKGROUND_CONTROL === "1") {
+      ({ targetId: backgroundTarget } = await page.send("Target.createTarget", { url: "about:blank" }));
+      await page.send("Target.activateTarget", { targetId: backgroundTarget });
+      await page.waitFor("document.hidden", { timeoutMs: 2000 });
+    }
+    await swipe(1);
+  } finally {
+    if (backgroundTarget) await page.send("Target.closeTarget", { targetId: backgroundTarget });
+  }
+  await swipe(-1);
+  assert.equal((await current()).key, "diagnosis", `${context}: swiping names does not select a different card`);
+  const swipeBudget = Math.ceil(dimensions.overflow / Math.max(1, dimensions.width - 50)) + 2;
+  for (let count = 0; count < swipeBudget && !await page.evaluate(visible(last)); count++) await swipe(1);
+  await page.waitFor(visible(last));
+  await page.evaluate('document.activeElement?.blur?.(); true');
+  await captureNativeEvidence(page, `${context}/swiped-last`, "cardBrowser");
+
+  // A native horizontal wheel/trackpad gesture must use the same contained scroller.
+  await foregroundTouch("wheel");
+  await page.evaluate(`document.querySelector(${JSON.stringify(first)}).focus(); document.activeElement.blur(); true`);
+  await nativeScroll("wheel", 1, async points => {
+    await page.send("Input.dispatchMouseEvent", { type: "mouseWheel", x: (points.left + points.right) / 2,
+      y: points.y, deltaY: 0, deltaX: points.max + dimensions.width });
+  });
+  await page.waitFor(visible(last));
+  await rejectEndpoint(1);
+  const tap = await page.evaluate(`(() => {
+    const rect = document.querySelector(${JSON.stringify(last)}).getBoundingClientRect();
+    return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2, id: 1 };
+  })()`);
+  await touchGesture("tap-modbus", [
+    { type: "touchStart", touchPoints: [tap] }, { type: "touchEnd", touchPoints: [] },
+  ]);
+  await page.waitFor('S.dashboardCard === "modbus"');
+  assert.deepEqual(await current(), { key: "modbus", selected: ["modbus"], visible: ["modbus"], labelled: true },
+    `${context}: native tap on the revealed last name selects its actual card`);
+  const beforePoll = await page.evaluate('document.getElementById("cardNav").scrollLeft');
+  const repaintedValue = await page.evaluate(`(() => {
+    S.clickHold = false; S._values[0].value = "13"; renderApp();
+    return document.querySelector('#valueGroups [data-dashboard-card="group:Operation"] .vrow-val')
+      ?.childNodes[0]?.textContent.trim();
+  })()`);
+  assert.equal(repaintedValue, "13", `${context}: changed-value poll really installs a new values frame`);
+  assert.equal((await current()).key, "modbus", `${context}: selected card survives a changed-value poll repaint`);
+  const afterPoll = await page.evaluate('document.getElementById("cardNav").scrollLeft');
+  assert.ok(Math.abs(afterPoll - beforePoll) <= 1, `${context}: poll repaint preserves horizontal position`);
+  assertLayout(await page.evaluate(layoutAudit), `${context}/scrolled-last`);
+
+  // Browser keyboard focus must reveal names without a test-side scrollIntoView call.
+  await page.evaluate(`document.querySelector(${JSON.stringify(first)}).focus(); true`);
+  const keys = await page.evaluate('Array.from(document.querySelectorAll("#cardNav button"), button => button.dataset.card)');
+  for (const key of keys.slice(1)) {
+    await page.key("Tab", { code: "Tab", keyCode: 9 });
+    assert.equal(await page.evaluate('document.activeElement?.dataset.card'), key,
+      `${context}: Tab reaches ${key} in reading order`);
+  }
+  await page.waitFor(visible(last), { timeoutMs: 2000 });
+  assert.equal(await page.evaluate(visible(last)), true, `${context}: keyboard focus scrolls the last name into view`);
+  const modbusLength = await page.evaluate('S._modbus.length');
+  const readerPosition = await page.evaluate(`(() => {
+    S.clickHold = false;
+    S._modbus.push(...Array.from({ length: 40 }, (_, index) => ({ off: 1000 + index,
+      label: "Fixture long-card reading " + index, value: index, unit: "°C", profile: "altherma4" })));
+    renderApp();
+    window.scrollTo(0, document.documentElement.scrollHeight - innerHeight);
+    return { y: scrollY, navBottom: document.getElementById("cardNav").getBoundingClientRect().bottom };
+  })()`);
+  assert.ok(readerPosition.y > 100 && readerPosition.navBottom < 0,
+    `${context}: fixture really places the reader down a long card while the nav keeps keyboard focus`);
+  await page.evaluate(`(() => {
+    window.__browserCardFocusBeforeMembership = document.activeElement;
+    S.clickHold = false;
+    S._values.push({ group: "Fixture additional source", label: "Fixture extra", value: "1" });
+    renderApp(); return true;
+  })()`);
+  assert.equal(await page.evaluate(`!!document.querySelector(
+    '#cardNav button[data-card="group:Fixture additional source"]')`), true,
+    `${context}: added source actually rebuilds the installed navigation`);
+  assert.equal(await page.evaluate('document.activeElement !== window.__browserCardFocusBeforeMembership'), true,
+    `${context}: membership repaint replaces the previously focused button`);
+  assert.equal(await page.evaluate('document.activeElement?.dataset.card'), "modbus",
+    `${context}: membership rebuild restores focus to the same source`);
+  await page.waitFor(visible(last), { timeoutMs: 2000 });
+  assert.equal(await page.evaluate(visible(last)), true,
+    `${context}: restored focus is visible after the horizontal navigation rebuild`);
+  assert.ok(Math.abs(await page.evaluate("scrollY") - readerPosition.y) <= 1,
+    `${context}: restoring nav focus does not move the reader vertically up the long card`);
+  await page.evaluate('S.clickHold = false; S._values.pop(); renderApp(); delete window.__browserCardFocusBeforeMembership; true');
+  assert.equal(await page.evaluate(`!!document.querySelector(
+    '#cardNav button[data-card="group:Fixture additional source"]')`), false,
+    `${context}: removed source really disappears from the installed navigation`);
+  await page.waitFor(visible(last), { timeoutMs: 2000 });
+  assert.equal(await page.evaluate(visible(last)), true, `${context}: removing the extra source keeps focused Modbus visible`);
+  assert.ok(Math.abs(await page.evaluate("scrollY") - readerPosition.y) <= 1,
+    `${context}: removing a source also preserves the reader's vertical position`);
+  await page.evaluate(`S.clickHold = false; S._modbus.splice(${modbusLength}); renderApp(); true`);
+  // Capture the settled selection after the native focus/rebuild checks, so a transient browser
+  // tap highlight is not mistaken for the card's persistent selected styling.
+  await page.evaluate('document.activeElement?.blur?.(); true');
+  await page.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: 0, y: 0 });
+  await page.frame();
+  await captureNativeEvidence(page, `${context}/tapped-modbus`, "cardBrowser");
+}
+
+async function assertDashboardCardNavigation(page, context, viewport) {
+  const customGroup = 'Installer "A&B" <view>';
+  const groups = ["Operation", "Domestic hot water", "Water circuit", "Refrigerant / outdoor",
+    "Protection", "Electrical", "Device", "Other values", customGroup];
+  const expected = ["diagnosis", "model", ...groups.map(group => `group:${group}`), "modbus"];
+  const mobile = viewport.width < 650;
+  await page.send("Emulation.setTouchEmulationEnabled", { enabled: mobile, maxTouchPoints: 1 });
+  await page.evaluate(`(() => {
+    window.__browserCardsOriginal = { ...S };
+    window.__browserCardsFetch = window.fetch;
+    window.__browserCardsRequests = [];
+    window.fetch = (...args) => {
+      window.__browserCardsRequests.push({ url: String(args[0]), method: args[1]?.method || "GET" });
+      return window.__browserCardsFetch(...args);
+    };
+    S.status = structuredClone(S.status);
+    S.status.hp.connected = true;
+    S.status.diagnostics.enabled = true;
+    S.status.health = { status: "ok", full_span: true, source_fresh: true, source_age_s: 1,
+      span_s: 86400, checks: [{ id: "fault", verdict: "ok", evidence: "manufacturer", active: 0 }] };
+    S.status.modbus = { ...S.status.modbus, host: "card.fixture.invalid", enabled: true, connected: true };
+    S._values = ${JSON.stringify(groups)}.map((group, index) => ({
+      group, label: "Fixture reading " + index, value: "12", unit: "°C", reg: 0x61, off: index,
+    }));
+    S._modbus = [{ off: 49, label: "Flow rate", value: 2.6, unit: "L/min", profile: "altherma4" }];
+    S.dashboardCard = "diagnosis";
+    S.descOpen = new Set(); S.scrub = null; S.clickHold = false;
+    renderApp();
+    return true;
+  })()`);
+  try {
+    await page.frame();
+    const entries = await page.evaluate(`Array.from(document.querySelectorAll("#cardNav button[data-card]"),
+      button => ({ key: button.dataset.card, label: button.textContent.trim(),
+        type: button.type, controls: button.getAttribute("aria-controls") }))`);
+    assert.deepEqual(entries.map(entry => entry.key), expected,
+      `${context}: navigation follows actual cards in their existing semantic order`);
+    assert.ok(entries.every(entry => entry.label && entry.type === "button" && entry.controls === "valueGroups"),
+      `${context}: every available card has a named native button controlling the content`);
+    assert.equal(entries.find(entry => entry.key === `group:${customGroup}`).label, customGroup,
+      `${context}: firmware custom group text survives escaped attributes and markup`);
+    const current = async () => page.evaluate(`(() => {
+      const selected = Array.from(document.querySelectorAll("#cardNav button[data-card]"))
+        .filter(button => button.getAttribute("aria-pressed") === "true");
+      const visible = Array.from(document.querySelectorAll("#valueGroups .vgroup[data-dashboard-card]"))
+        .filter(card => !card.hidden && getComputedStyle(card).display !== "none");
+      return { key: S.dashboardCard, selected: selected.map(button => button.dataset.card),
+        visible: visible.map(card => card.dataset.dashboardCard),
+        labelled: selected.length === 1 && document.getElementById("valueGroups")
+          .getAttribute("aria-labelledby") === selected[0].id };
+    })()`);
+    assert.deepEqual(await current(), { key: "diagnosis", selected: ["diagnosis"],
+      visible: ["diagnosis"], labelled: true }, `${context}: diagnosis opens by default`);
+    await assertDashboardCardAppearance(page, context, viewport);
+    await page.evaluate("document.activeElement?.blur?.(); true");
+    await captureNativeEvidence(page, `${context}/diagnosis`, "cardBrowser");
+    const placement = await page.evaluate(`(() => {
+      const nav = document.getElementById("cardNav").getBoundingClientRect();
+      const content = document.getElementById("valueGroups").getBoundingClientRect();
+      return { left: nav.right <= content.left + 1, above: nav.bottom <= content.top + 1,
+        lines: new Set(Array.from(document.querySelectorAll("#cardNav button"),
+          button => Math.round(button.getBoundingClientRect().top))).size };
+    })()`);
+    assert.equal(viewport.name === "phone" ? placement.above : placement.left, true,
+      `${context}: navigation is ${viewport.name === "phone" ? "above the card" : "left of the card"}`);
+    if (mobile) {
+      assert.equal(placement.lines, 1, `${context}: mobile names occupy exactly one horizontally scrollable row`);
+      await assertMobileCardScroller(page, context, current);
+    }
+
+    for (const key of expected) {
+      await clickElement(page, `#cardNav button[data-card=${JSON.stringify(key)}]`);
+      assert.deepEqual(await current(), { key, selected: [key], visible: [key], labelled: true },
+        `${context}/${key}: native click shows exactly the requested card`);
+      assertLayout(await page.evaluate(layoutAudit), `${context}/${key}`);
+    }
+    await clickElement(page, '#cardNav button[data-card="group:Water circuit"]');
+    await assertDashboardCardAppearance(page, `${context}/middle-water`, viewport);
+    await page.evaluate("document.activeElement?.blur?.(); true");
+    await captureNativeEvidence(page, `${context}/middle-water`, "cardBrowser");
+    // A pending disclosure click or active trend must not make card navigation appear unresponsive.
+    await page.evaluate('S.clickHold = true; S.scrub = "fixture-trend"; true');
+    await clickElement(page, '#cardNav button[data-card="model"]');
+    assert.deepEqual(await current(), { key: "model", selected: ["model"], visible: ["model"], labelled: true },
+      `${context}: navigation remains immediate while row rendering is held`);
+    await page.evaluate("S.clickHold = false; S.scrub = null; renderApp(); true");
+    assert.equal((await current()).key, "model", `${context}: a poll repaint preserves the selected card`);
+
+    await page.evaluate(`(() => {
+      const button = document.querySelector('#cardNav button[data-card="diagnosis"]');
+      button.scrollIntoView({ block: "center", behavior: "instant" }); button.focus();
+      return true;
+    })()`);
+    await page.key("Enter", { code: "Enter", keyCode: 13 });
+    assert.equal((await current()).key, "diagnosis", `${context}: Enter activates a focused card name`);
+    await page.evaluate('document.querySelector(\'#cardNav button[data-card="model"]\').focus(); true');
+    await page.key(" ", { code: "Space", keyCode: 32 });
+    assert.equal((await current()).key, "model", `${context}: Space activates a focused card name`);
+    await page.evaluate("showStage('settings'); showStage('dashboard'); renderApp(); true");
+    assert.equal((await current()).key, "model", `${context}: Settings round trip preserves card choice`);
+    await assertAccessibility(page, context, { nativeTree: true });
+    assert.deepEqual(await page.evaluate("window.__browserCardsRequests"), [],
+      `${context}: switching cards performs no requests or configuration writes`);
+    await page.evaluate("document.activeElement?.blur?.(); true");
+    await captureNativeEvidence(page, `${context}/selected`, "cardBrowser");
+  } finally {
+    await page.evaluate(`(() => {
+      Object.assign(S, window.__browserCardsOriginal);
+      window.fetch = window.__browserCardsFetch;
+      delete window.__browserCardsOriginal; delete window.__browserCardsFetch;
+      delete window.__browserCardsRequests;
+      S.inspSig = null; S.inspHistSig = null;
+      renderApp(); window.scrollTo(0, 0); return true;
+    })()`);
+    await page.send("Emulation.setTouchEmulationEnabled", { enabled: false });
+    await page.frame();
+  }
 }
 
 async function captureNativeEvidence(page, context, target = "valueGroups", ancestor = null) {
@@ -501,7 +1040,7 @@ async function assertPlantDiagnosis(page, context) {
   // Exercise the shipped renderer with independently scoped observations, including a real zero,
   // an absent heater channel and stale-source evidence. These fixtures do not certify a plant.
   await page.evaluate(`(() => {
-    window.__browserDiagnosisOriginal = { status: S.status, open: new Set(S.descOpen) };
+    window.__browserDiagnosisOriginal = { status: S.status, open: new Set(S.descOpen), card: S.dashboardCard };
     S.status = structuredClone(S.status);
     S.status.health = {
       status: "info", full_span: true, span_s: 86400, source_fresh: true, source_age_s: 1,
@@ -540,6 +1079,7 @@ async function assertPlantDiagnosis(page, context) {
     const selector = "[data-desc^='model:health_']";
     assert.equal(await page.evaluate(`document.querySelectorAll(${JSON.stringify(selector)}).length`), 8,
       `${context}: all eight diagnosis rows must render`);
+    await activateDashboardCardForSelector(page, "[data-desc='model:health_pressure']");
     await captureNativeEvidence(page, `${context}/overview`,
       "[data-desc='model:health_pressure']", ".card");
     const selectors = await page.evaluate(`Array.from(document.querySelectorAll(${JSON.stringify(selector)}),
@@ -649,6 +1189,7 @@ async function assertPlantDiagnosis(page, context) {
     await page.evaluate(`(() => {
       S.status = window.__browserDiagnosisOriginal.status;
       S.descOpen = window.__browserDiagnosisOriginal.open;
+      S.dashboardCard = window.__browserDiagnosisOriginal.card;
       delete window.__browserDiagnosisOriginal;
       renderApp();
       return true;
@@ -1018,6 +1559,7 @@ try {
 }
 try {
   const { page } = browser;
+  await page.send("Page.bringToFront");
   await page.navigate(server.url);
   try {
     await page.waitFor("typeof S !== 'undefined' && S.status && Array.isArray(S._values) && document.querySelector('#settingsCards .vgroup')");
@@ -1027,7 +1569,11 @@ try {
       body: document.body?.innerText?.slice(0, 120) || "" })`);
     throw new Error(`${error.message}; state=${JSON.stringify(state)}; diagnostics=${page.diagnostics.join(" | ")}`);
   }
-  await page.evaluate("pollStop(); true");
+  // Every case below installs synthetic source frames. Keep automatic polling stopped when the
+  // owned tab is brought forward: the real visibility handler otherwise resumes polling and
+  // replaces those frames with the server's baseline in the middle of a native pointer sequence.
+  // Poll cadence and visibility-resume behavior have separate production-function contract tests.
+  await page.evaluate("pollStop(); pollSchedule = () => {}; true");
 
   assert.equal(await page.evaluate(`(() => {
     const feedback = document.getElementById("toasts");
@@ -1160,6 +1706,26 @@ try {
     await openModalWithKeyboard(page, "refTempModal", modalTriggers.refTempModal,
       "selftest/desktop/de/refTempModal", { route: false });
     throw new Error("route-isolation-bypass mutation unexpectedly survived the route gate");
+  } else if (process.argv.includes("--cards-only")) {
+    // Small prototype-parity pass for sidebar iterations. The normal invocation still owns the
+    // complete locale/modal matrix and the supervisor's independent negative controls.
+    const focusedViewports = viewports.flatMap(viewport => viewport.name === "phone"
+      ? [viewport, { name: "phone", width: 390, height: 844 }] : [viewport]);
+    for (const scheme of ["light", "dark"]) {
+      await page.send("Emulation.setEmulatedMedia", { media: "screen",
+        features: [{ name: "prefers-color-scheme", value: scheme }] });
+      for (const viewport of focusedViewports) {
+        await page.viewport(viewport.width, viewport.height);
+        for (const locale of ["en", "de"]) {
+          await activateLocale(page, locale);
+          await page.evaluate("showStage('dashboard'); window.scrollTo(0, 0); true");
+          await assertDashboardCardNavigation(page, `${viewport.name}/${locale}/card-navigation/${viewport.width}/${scheme}`, viewport);
+          console.log(`card prototype checked: ${viewport.name}/${viewport.width}/${locale}/${scheme}`);
+        }
+      }
+    }
+    assert.deepEqual(page.diagnostics, [], "prototype card states must emit no browser errors");
+    console.log(`focused card prototype rendering passed: 2 locales; 2 themes; ${focusedViewports.map(viewport => viewport.width).join("/")} px`);
   } else if (process.argv.includes("--setup-only")) {
     for (const viewport of viewports) await assertSetup(page, server, viewport);
   } else if (process.argv.includes("--diagnosis-only")) {
@@ -1203,6 +1769,7 @@ try {
       await page.frame();
       assertLayout(await page.evaluate(layoutAudit), `${viewport.name}/${locale}/dashboard`);
       await assertAccessibility(page, `${viewport.name}/${locale}/dashboard`, { nativeTree: true });
+      await assertDashboardCardNavigation(page, `${viewport.name}/${locale}/card-navigation`, viewport);
       await assertFlowSwitchWords(page, `${viewport.name}/${locale}/flow-switch`);
       await assertPlantDiagnosis(page, `${viewport.name}/${locale}/diagnosis`);
       await assertStatusTruth(page, `${viewport.name}/${locale}/status-truth`);
@@ -1396,6 +1963,7 @@ try {
   for (const viewport of viewports) await assertSetup(page, server, viewport);
   console.log(`browser render gate passed: ${browser.product}; ${browserLocales.length} locales; ` +
     `${viewports.length} viewports; native AX + keyboard on dashboard/settings/all routed modals; ` +
+    "connected card tabs + single-row mobile swipe/wheel navigation + native pointer/keyboard selection; " +
     "native Altherma 4 numeric metadata + localized pointer-opened accordions; " +
     "Hybrid room source + pointer-opened inspector + honest absence; " +
     "bounded real History roundtrips; reduced motion on dashboard/settings/WiFi/progress/disclosures");

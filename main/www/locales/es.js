@@ -1,4 +1,4 @@
-// translation-source: 56ec4b237229b88c50cf6b91ff312bb0f6656edfb91ec07b993d5e2bde0e9ca2
+// translation-source: 69a70fe118eb482b63d926feb5045f732f15405b119416d0c242cc974e0e1d00
 I18N.es = localeValues([
   /* sys.nodata */ "Sin datos",
   /* sys.unreachable */ "No accesible",
@@ -76,6 +76,9 @@ I18N.es = localeValues([
   /* bug.redacted */ "Ya se han eliminado el nombre de tu red, las direcciones, el bróker y los nombres de servidor.",
   /* nav.settings */ "Ajustes",
   /* nav.back */ "Atrás",
+  /* nav.cards */ "Tarjetas del panel",
+  /* nav.diagnosis */ "Diagnóstico",
+  /* nav.outdoor */ "Unidad exterior",
   /* nav.settings_alert */ (n) => `Ajustes — ${n} ${n === 1 ? "conexión caída" : "conexiones caídas"}`,
   /* src.modbus_tag */ "modbus",
   /* src.agree */ "Ambas fuentes coinciden",

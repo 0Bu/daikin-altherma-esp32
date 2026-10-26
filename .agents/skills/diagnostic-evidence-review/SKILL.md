@@ -61,8 +61,8 @@ heuristic.
   physical relationship.
 - Keep undocumented counter semantics `experimental`. Missing public manufacturer semantics must
   remain an explicit gap, never be filled by confident prose.
-- Keep missing, stale or insufficient evidence `N/A` or `CHECKING`; never turn absence into
-  an `OK` verdict.
+- Preserve the evaluator's unavailable, collecting or observation-only result when evidence is
+  missing, stale or insufficient; never turn absence into an `OK` verdict.
 - Do not infer one root cause from a pattern that has several plausible causes, and do not turn one
   row's `OK` into a healthy-plant claim.
 

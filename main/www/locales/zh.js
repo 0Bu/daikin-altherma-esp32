@@ -1,4 +1,4 @@
-// translation-source: 56ec4b237229b88c50cf6b91ff312bb0f6656edfb91ec07b993d5e2bde0e9ca2
+// translation-source: 69a70fe118eb482b63d926feb5045f732f15405b119416d0c242cc974e0e1d00
 I18N.zh = localeValues([
   /* sys.nodata */ "无数据",
   /* sys.unreachable */ "无法访问",
@@ -76,6 +76,9 @@ I18N.zh = localeValues([
   /* bug.redacted */ "网络名称、地址、代理和服务器名称均已移除。",
   /* nav.settings */ "设置",
   /* nav.back */ "返回",
+  /* nav.cards */ "仪表板卡片",
+  /* nav.diagnosis */ "诊断",
+  /* nav.outdoor */ "室外机",
   /* nav.settings_alert */ (n) => `设置 — ${n} 个连接不可用`,
   /* src.modbus_tag */ "modbus",
   /* src.agree */ "两个数据源一致",
