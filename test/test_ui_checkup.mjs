@@ -418,6 +418,17 @@ for (const lang of locales) {
     `${lang} classified heating runs retain their continuous-classification limit`);
   assert.ok(!ui.detail({ ...cycling, space_runs: null }).includes(classification),
     `${lang} missing classification must not imply classified heating runs`);
+  const interrupted = { ...dhw, aborts: 3, abort_reasons: ["blind"], best_aborted_s: 2400 };
+  const discarded = ui.text(lang, "check.detail.dhw_aborted", 3,
+    ui.text(lang, "check.detail.dhw_reason.blind"), "40 min").trim();
+  for (const verdict of ["info", "ok"]) {
+    const result = { ...interrupted, verdict,
+      evidence: verdict === "ok" ? "observation" : "heuristic" };
+    assert.ok(ui.detail(result).includes(discarded),
+      `${lang}/${verdict} completed windows retain discarded reading-gap evidence`);
+    assert.ok(!ui.detail({ ...result, aborts: 0 }).includes(discarded),
+      `${lang}/${verdict} must not invent discarded reading-gap evidence`);
+  }
   for (const c of [dhw, pressure, cycling, defrost, waiting,
       { ...cycling, verdict: "ok", evidence: "observation", reason: "class_coverage" },
       { id: "fault", verdict: "info", active: 0 },

@@ -1474,6 +1474,9 @@ function checkupDetailHtml(c, fullSpan = c.full_span === true, report = {}) {
   if (compactMetric && parts.length) detail += ` ${parts.join(" · ")}.`;
   if (c.id === "cycling" && c.space_runs != null)
     detail += t("check.detail.cycling_split");
+  if (c.id === "dhw_loss" && statusKey !== "collecting" && !c.blocked && Number(c.aborts) > 0)
+    detail += t("check.detail.dhw_aborted", Number(c.aborts), checkupDhwReasons(c),
+                checkupDuration(c.best_aborted_s));
   if ((c.id === "cycling" || c.id === "defrost") && checkupOutdoorContext(c))
     detail += t(c.id === "cycling" ? "check.detail.outdoor_cycling"
                                    : "check.detail.outdoor_defrost");
