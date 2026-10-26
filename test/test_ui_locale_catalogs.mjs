@@ -61,7 +61,7 @@ const catalog = catalogContext.__catalog;
 const lazyDomainCodes = ["zh", "ja", "nb", "sv", "fi"];
 const englishKeys = Object.keys(catalog.en).sort();
 const englishKeyOrder = Object.keys(catalog.en);
-assert.equal(englishKeys.length, 934, "the test must track the complete current UI catalog");
+assert.equal(englishKeys.length, 937, "the test must track the complete current UI catalog");
 for (const [code, source] of localeSources) {
   const specialist = source.indexOf(`INSPECT_I18N.${code}`);
   const baseSource = specialist < 0 ? source : source.slice(0, specialist);
@@ -488,6 +488,7 @@ const app = readAppSource();
 for (const code of codes.slice(1)) assert.doesNotMatch(app, new RegExp(`I18N\\.${code}\\s*=`));
 const work = fs.mkdtempSync(path.join(os.tmpdir(), "daikin-locales-"));
 let localeGzipTotal = 0;
+let firmwareLocaleGzipTotal = 0;
 try {
   const tool = path.join(root, "tools/web_asset/minify_js_and_gzip.py");
   for (const code of codes.slice(1)) {
@@ -503,6 +504,28 @@ try {
     const minified = zlib.gunzipSync(fs.readFileSync(output)).toString("utf8");
     assert.doesNotThrow(() => new vm.Script(minified, { filename: `${code}.min.js` }),
       `${code} minified locale must still parse`);
+    {
+      // The firmware uses the same pinned encoder as index.html. Keep the independent zlib
+      // default available to host-only consumers, and prove the build choice changes no bytes
+      // after decoding while reducing the flash occupied by the catalogs.
+      const packed = path.join(work, `${code}.zopfli.js.gz`);
+      const encode = () => childProcess.spawnSync("python3", [
+        tool, "--input", path.join(root, `main/www/locales/${code}.js`), "--output", packed,
+        "--gzip-encoder", "zopfli", "--max-gzip-bytes", "32768",
+      ], { cwd: root, encoding: "utf8" });
+      const first = encode();
+      assert.equal(first.status, 0, first.stderr || first.stdout);
+      const bytes = fs.readFileSync(packed);
+      firmwareLocaleGzipTotal += bytes.length;
+      assert.equal(zlib.gunzipSync(bytes).toString("utf8"), minified,
+        "firmware locale compression must preserve every minified source byte");
+      assert.ok(bytes.length < gzipBytes, "the pinned encoder must reduce the embedded locale");
+      if (code === "de") {
+        const second = encode();
+        assert.equal(second.status, 0, second.stderr || second.stdout);
+        assert.deepEqual(fs.readFileSync(packed), bytes, "locale encoding must be deterministic");
+      }
+    }
   }
 } finally {
   fs.rmSync(work, { recursive: true, force: true });
@@ -512,12 +535,16 @@ try {
 // the per-locale 32 KiB cap and the independent firmware image-size gate.
 assert.ok(localeGzipTotal <= 289792,
   `locale assets use ${localeGzipTotal} bytes and exceed the 283 KiB aggregate-growth guard`);
+assert.ok(firmwareLocaleGzipTotal <= localeGzipTotal - 4096,
+  "firmware catalog compression must recover at least one flash sector without dropping copy");
 
 const cmake = fs.readFileSync(path.join(root, "main/CMakeLists.txt"), "utf8");
 const status = fs.readFileSync(path.join(root, "main/http_status.cpp"), "utf8");
 const server = fs.readFileSync(path.join(root, "main/http_server.cpp"), "utf8");
 assert.match(cmake, /set\(UI_LOCALE_CODES de es fr it pl cs uk zh ja nb sv fi\)/);
 assert.match(cmake, /set\(UI_LOCALE_GZIP_MAX_BYTES 32768\)/);
+assert.match(cmake, /--output "\$\{locale_gz\}"\s+--gzip-encoder zopfli/,
+  "firmware locales must retain the pinned compression that fits the signed image");
 assert.match(cmake, /DEPENDS "\$\{locale_src\}" "\$\{UI_LOCALE_MINIFIER\}" "\$\{UI_MINIFIER\}"/,
   "locale assets must rebuild when the shared JavaScript minifier changes");
 for (const code of codes.slice(1)) {

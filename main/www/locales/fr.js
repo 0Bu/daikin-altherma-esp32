@@ -1,4 +1,4 @@
-// translation-source: 56ec4b237229b88c50cf6b91ff312bb0f6656edfb91ec07b993d5e2bde0e9ca2
+// translation-source: 69a70fe118eb482b63d926feb5045f732f15405b119416d0c242cc974e0e1d00
 I18N.fr = localeValues([
   /* sys.nodata */ "Aucune donnée",
   /* sys.unreachable */ "Injoignable",
@@ -76,6 +76,9 @@ I18N.fr = localeValues([
   /* bug.redacted */ "Le nom de votre réseau, les adresses, le broker et les noms de serveur ont déjà été supprimés.",
   /* nav.settings */ "Paramètres",
   /* nav.back */ "Retour",
+  /* nav.cards */ "Cartes du tableau de bord",
+  /* nav.diagnosis */ "Diagnostic",
+  /* nav.outdoor */ "Unité extérieure",
   /* nav.settings_alert */ (n) => `Paramètres — ${n} ${n === 1 ? "connexion indisponible" : "connexions indisponibles"}`,
   /* src.modbus_tag */ "modbus",
   /* src.agree */ "Les deux sources concordent",

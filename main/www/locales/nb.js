@@ -1,4 +1,4 @@
-// translation-source: 56ec4b237229b88c50cf6b91ff312bb0f6656edfb91ec07b993d5e2bde0e9ca2
+// translation-source: 69a70fe118eb482b63d926feb5045f732f15405b119416d0c242cc974e0e1d00
 I18N.nb = localeValues([
   /* sys.nodata */ "Ingen data",
   /* sys.unreachable */ "Ikke tilgjengelig",
@@ -76,6 +76,9 @@ I18N.nb = localeValues([
   /* bug.redacted */ "Nettverksnavn, adresser, broker og servernavn er allerede fjernet.",
   /* nav.settings */ "Innstillinger",
   /* nav.back */ "Tilbake",
+  /* nav.cards */ "Oversiktskort",
+  /* nav.diagnosis */ "Diagnostikk",
+  /* nav.outdoor */ "Utendørsenhet",
   /* nav.settings_alert */ (n) => `Innstillinger — ${n} ${n === 1 ? "tilkobling har" : "tilkoblinger har"} feil`,
   /* src.modbus_tag */ "modbus",
   /* src.agree */ "Begge kilder er enige",

@@ -1,4 +1,4 @@
-// translation-source: 56ec4b237229b88c50cf6b91ff312bb0f6656edfb91ec07b993d5e2bde0e9ca2
+// translation-source: 69a70fe118eb482b63d926feb5045f732f15405b119416d0c242cc974e0e1d00
 I18N.fi = localeValues([
   /* sys.nodata */ "Ei tietoja",
   /* sys.unreachable */ "Ei tavoiteta",
@@ -76,6 +76,9 @@ I18N.fi = localeValues([
   /* bug.redacted */ "Verkon nimi, osoitteet sekä välittäjän ja palvelimien nimet on jo poistettu.",
   /* nav.settings */ "Asetukset",
   /* nav.back */ "Takaisin",
+  /* nav.cards */ "Näkymän kortit",
+  /* nav.diagnosis */ "Diagnostiikka",
+  /* nav.outdoor */ "Ulkoyksikkö",
   /* nav.settings_alert */ (n) => `Asetukset — ${n} ${n === 1 ? "yhteys" : "yhteyttä"} poikki`,
   /* src.modbus_tag */ "modbus",
   /* src.agree */ "Lähteet täsmäävät",

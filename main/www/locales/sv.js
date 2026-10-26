@@ -1,4 +1,4 @@
-// translation-source: 56ec4b237229b88c50cf6b91ff312bb0f6656edfb91ec07b993d5e2bde0e9ca2
+// translation-source: 69a70fe118eb482b63d926feb5045f732f15405b119416d0c242cc974e0e1d00
 I18N.sv = localeValues([
   /* sys.nodata */ "Inga data",
   /* sys.unreachable */ "Inte tillgänglig",
@@ -76,6 +76,9 @@ I18N.sv = localeValues([
   /* bug.redacted */ "Nätverksnamn, adresser, broker och servernamn är redan borttagna.",
   /* nav.settings */ "Inställningar",
   /* nav.back */ "Tillbaka",
+  /* nav.cards */ "Översiktskort",
+  /* nav.diagnosis */ "Diagnostik",
+  /* nav.outdoor */ "Utomhusenhet",
   /* nav.settings_alert */ (n) => `Inställningar — ${n} ${n === 1 ? "anslutning har" : "anslutningar har"} fel`,
   /* src.modbus_tag */ "modbus",
   /* src.agree */ "Båda källorna stämmer överens",

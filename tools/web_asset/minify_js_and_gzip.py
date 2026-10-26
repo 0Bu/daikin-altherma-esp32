@@ -20,11 +20,17 @@ def main() -> int:
     parser.add_argument("--input", required=True, type=Path)
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--max-gzip-bytes", required=True, type=positive_int)
+    parser.add_argument("--gzip-encoder", choices=("zlib", "zopfli"), default="zlib")
     args = parser.parse_args()
 
     source = args.input.read_text(encoding="utf-8")
     minified = minify_javascript(source)
-    compressed = gzip.compress(minified.encode("utf-8"), compresslevel=9, mtime=0)
+    payload = minified.encode("utf-8")
+    if args.gzip_encoder == "zopfli":
+        from zopfli_gzip import compress
+        compressed = compress(payload, 5)
+    else:
+        compressed = gzip.compress(payload, compresslevel=9, mtime=0)
     if len(compressed) > args.max_gzip_bytes:
         parser.error(
             f"locale gzip is {len(compressed)} bytes; budget is {args.max_gzip_bytes} bytes"

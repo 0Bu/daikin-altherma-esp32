@@ -1,4 +1,4 @@
-// translation-source: 56ec4b237229b88c50cf6b91ff312bb0f6656edfb91ec07b993d5e2bde0e9ca2
+// translation-source: 69a70fe118eb482b63d926feb5045f732f15405b119416d0c242cc974e0e1d00
 I18N.uk = localeValues([
   /* sys.nodata */ "Немає даних",
   /* sys.unreachable */ "Недоступно",
@@ -76,6 +76,9 @@ I18N.uk = localeValues([
   /* bug.redacted */ "Назву вашої мережі, адреси, брокер і назви серверів уже вилучено.",
   /* nav.settings */ "Налаштування",
   /* nav.back */ "Назад",
+  /* nav.cards */ "Картки панелі",
+  /* nav.diagnosis */ "Діагностика",
+  /* nav.outdoor */ "Зовнішній блок",
   /* nav.settings_alert */ (n) => `Налаштування — ${n === 1 ? "не працює" : "не працюють"} ${n} ${n % 10 === 1 && n % 100 !== 11 ? "з’єднання" : n % 10 >= 2 && n % 10 <= 4 && !(n % 100 >= 12 && n % 100 <= 14) ? "з’єднання" : "з’єднань"}`,
   /* src.modbus_tag */ "modbus",
   /* src.agree */ "Обидва джерела узгоджуються",
