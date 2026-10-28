@@ -1,7 +1,8 @@
 #pragma once
 // The 24-hour trend rings. One fixed-cadence buffer per entry in logic/history.hpp's TRENDS, fed by
 // the X10A poll task, thirteen rings fed by the independent HomeHub task and three rings fed by ENV
-// III, and read by GET /history. The HomeHub set is eight paired measurements plus BSH,
+// III, and an independent MQTT room-temperature ring, read by GET /history. The HomeHub set is
+// eight paired measurements plus BSH,
 // 3-way-valve, Quiet and Smart-Grid state timelines, and the Modbus-only disinfection state.
 //
 // The buffers are STATIC storage, never heap: on this board the binding limit is the largest
@@ -56,8 +57,8 @@
 
 namespace daik {
 
-// Create the one mutex before any producer task starts. History has three writers (X10A, HomeHub
-// and ENV III), so lazy creation inside one of them would be a race on first boot.
+// Create the one mutex before any producer task starts. X10A, HomeHub, ENV III and MQTT share it;
+// lazy creation inside one of them would be a race on first boot.
 void history_start();
 // Startup-only query, before producers: journal recovery is pending after a successful scan.
 // This does not establish that compatible diagnostic records exist.
@@ -96,6 +97,17 @@ void history_record_board();
 // auto-detection and therefore has no X10A poll cycle, but its configured MQTT witness is still a
 // valid independent source and must keep its timeline moving.
 void history_record_circulation();
+
+// Independent MQTT room actual temperature. Capture generation BEFORE taking Config/source
+// snapshots; a cutover refuses the predecessor's in-flight observation. The recorder allocates
+// nothing and must still be called with valid=false to advance explicit outage gaps.
+void     history_record_room(bool valid, double temperature_c, uint32_t generation);
+uint32_t history_room_generation() noexcept;
+bool     history_room_matches(uint32_t expected_identity) noexcept;
+// Staged identity is derived before a durable config save; zero retires only this source.
+void   history_room_reset(uint32_t identity) noexcept;
+size_t history_room_snapshot(logic::HistorySample* out, size_t max, uint32_t expected_identity,
+                             uint32_t* epoch = nullptr, logic::HistoryMeta* meta = nullptr);
 
 // Feed one HomeHub cycle. The paired measurements/states plus the explicit Smart-Grid and
 // disinfection timelines named in logic/homehub_map.hpp are buffered; other states and setpoints do

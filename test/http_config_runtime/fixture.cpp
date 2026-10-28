@@ -69,6 +69,8 @@ bool                     ota_downgrade = false;
 // generation the handler handed to the live checkup producer.
 uint32_t random_value = 0x10203040U, runtime_generation = 0;
 unsigned random_calls = 0, runtime_generation_calls = 0;
+uint32_t room_history_identity = 0;
+unsigned room_history_resets   = 0;
 
 [[noreturn]] void fail(const char* reason) {
     std::fprintf(stderr, "FAIL oracle=%s: %s\n", oracle, reason);
@@ -174,6 +176,8 @@ void reset() {
     ota_downgrade                           = false;
     random_value                            = 0x10203040U;
     random_calls = runtime_generation = runtime_generation_calls = 0;
+    room_history_identity = daik::logic::history_room_identity(current);
+    room_history_resets   = 0;
 }
 using Handler = esp_err_t (*)(httpd_req_t*);
 struct Route {
@@ -386,6 +390,12 @@ uint32_t     history_x10a_identity(const char* profile, int32_t rx, int32_t tx, 
 void history_checkup_reset() { ++fixture::runtime_changes; }
 void history_circulation_reset() { ++fixture::runtime_changes; }
 void history_modbus_reset(uint32_t) noexcept { ++fixture::runtime_changes; }
+void history_room_reset(uint32_t identity) noexcept {
+    if (fixture::room_history_identity != identity) {
+        fixture::room_history_identity = identity;
+        ++fixture::room_history_resets;
+    }
+}
 void hp_poll_reconfigure() { ++fixture::runtime_changes; }
 void mb_reconfigure(bool) noexcept { ++fixture::runtime_changes; }
 bool mb_discover_homehub(std::string& found) {
@@ -1201,6 +1211,67 @@ void diagnostics_generation() {
     from_default();
     check(transition(true, 0U) == 1U, "a zero draw must still leave generation 0");
 }
+void room_history_lifetime() {
+    reset();
+    const auto send = [](Handler handler, const std::string& body) {
+        durable_started = false;
+        return invoke(handler, body);
+    };
+    const auto generation = [] {
+        daik::ConfigBlob blob;
+        check(daik::config_blob_deserialize(service.data(), service.size(), blob),
+              "room lifetime service entry must decode");
+        check(blob.ref_temp_generation == current.ref_temp_generation,
+              "room lifetime must agree in durable and live config");
+        return blob.ref_temp_generation;
+    };
+    const std::string body = route("ref").valid;
+    check(send(daik::set_ref_temp, body).status == "200 OK", "room source replacement must save");
+    const uint32_t first = generation();
+    check(first != 0 && room_history_resets == 1 &&
+              room_history_identity == daik::logic::history_room_identity(current),
+          "source replacement must durably advance lifetime and cut over matching history");
+    const std::string renamed = changed(body.c_str(), "name", "\"Renamed\"");
+    check(send(daik::set_ref_temp, renamed).status == "200 OK" && generation() == first &&
+              room_history_resets == 1,
+          "rename must preserve actual room-temperature history");
+    const std::string target = changed(renamed.c_str(), "fixed_setpoint_c", "21");
+    check(send(daik::set_ref_temp, target).status == "200 OK" && generation() == first &&
+              room_history_resets == 1,
+          "target-only edit must preserve actual room-temperature history");
+    check(send(daik::set_ref_temp, target).status == "200 OK" && generation() == first &&
+              room_history_resets == 1,
+          "unchanged retry must preserve the historical lifetime");
+    check(send(daik::set_ref_temp, R"({"topic":""})").status == "200 OK" &&
+              generation() == first + 1 && room_history_identity == 0 && room_history_resets == 2,
+          "source deletion must durably retire only its history");
+    check(send(daik::set_ref_temp, body).status == "200 OK" && generation() == first + 2 &&
+              room_history_resets == 3,
+          "readding the prior mapping must not restore its prior history lifetime");
+    const auto     before          = service;
+    const uint32_t before_identity = room_history_identity;
+    const unsigned before_resets   = room_history_resets;
+    save_fault                     = 1;
+    const std::string replacement  = changed(body.c_str(), "topic", "\"fixture/failed-room\"");
+    check(send(daik::set_ref_temp, replacement).status == "500 Internal Server Error" &&
+              service == before && generation() == first + 2 &&
+              room_history_identity == before_identity && room_history_resets == before_resets,
+          "failed room save must preserve durable lifetime and runtime history");
+    save_fault = 0;
+    check(send(daik::set_mqtt, R"({"broker":"","clear_creds":true})").status == "200 OK" &&
+              generation() == first + 3 && room_history_identity == 0,
+          "broker removal must durably retire the room history");
+    check(send(daik::set_mqtt, R"({"broker":"mqtt://room-history.invalid"})").status == "200 OK" &&
+              generation() == first + 4 && room_history_identity != 0,
+          "broker replacement must open a distinct room history lifetime");
+    const uint32_t active = room_history_identity;
+    check(send(daik::set_diagnostics, R"({"enabled":false})").status == "200 OK" &&
+              room_history_identity == 0,
+          "diagnostics withdrawal must retire room history immediately");
+    check(send(daik::set_diagnostics, R"({"enabled":true})").status == "200 OK" &&
+              room_history_identity != 0 && room_history_identity != active,
+          "new diagnostics consent must not revive an earlier room history");
+}
 } // namespace test
 
 int main(int argc, char** argv) {
@@ -1224,14 +1295,16 @@ int main(int argc, char** argv) {
                           {"factory_reset_reboot", test::factory_reset_reboot},
                           {"local_pin_reconcile", test::local_pin_reconcile},
                           {"query_flags", test::query_flags},
-                          {"diagnostics_generation", test::diagnostics_generation}};
+                          {"diagnostics_generation", test::diagnostics_generation},
+                          {"room_history_lifetime", test::room_history_lifetime}};
     unsigned   ran     = 0;
     for (const auto& candidate : cases) {
         if (argc > 1) {
             if (std::strcmp(argv[1], "legacy_cases") == 0) {
                 if (std::strcmp(candidate.name, "factory_reset_reboot") == 0 ||
                     std::strcmp(candidate.name, "local_pin_reconcile") == 0 ||
-                    std::strcmp(candidate.name, "diagnostics_generation") == 0)
+                    std::strcmp(candidate.name, "diagnostics_generation") == 0 ||
+                    std::strcmp(candidate.name, "room_history_lifetime") == 0)
                     continue;
             } else if (std::strcmp(argv[1], candidate.name) != 0)
                 continue;

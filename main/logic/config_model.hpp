@@ -99,6 +99,8 @@ struct Config {
     std::string ref_temp_enabled_path;
     std::string ref_temp_hvac_mode_path;
     uint32_t    ref_temp_max_age_s = REF_TEMP_MAX_AGE_DEFAULT_S;
+    // Durable actual-temperature source lifetime; prevents A -> B -> A from restoring old A data.
+    uint32_t ref_temp_generation = 0;
     // Independent, read-only electrical witness for the potable-water circulation pump.  The
     // board subscribes to the exact MQTT status topic already consumed by observability; it never
     // queries VictoriaMetrics and never controls the relay.  Empty topic disables attribution while
@@ -114,6 +116,7 @@ struct Config {
     // Open-Meteo location in signed microdegrees. The explicit bit keeps (0°, 0°) representable;
     // disabled coordinates are canonicalized to zero and produce no weather traffic.
     bool        weather_enabled = false;
+    bool        diagnostics_enabled = false; // master consent, described below; shares flag padding
     int32_t     weather_latitude_e6 = 0;
     int32_t     weather_longitude_e6 = 0;
     // One explicit, device-wide consent boundary for optional plant diagnostics. OFF is both the
@@ -121,7 +124,6 @@ struct Config {
     // the 24 h checkup, heating-curve evaluation and their MQTT/weather/circulation inputs do not
     // subscribe, fetch, record or publish. Each transition advances the generation so evidence from
     // an earlier consent interval cannot be restored from RAM/flash into a newly enabled one.
-    bool        diagnostics_enabled = false;
     uint32_t    diagnostics_generation = 0;
     std::string syslog_host;       // "" = Syslog disabled
     int         syslog_port = 514;

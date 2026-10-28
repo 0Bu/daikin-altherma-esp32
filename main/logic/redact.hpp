@@ -41,7 +41,7 @@ namespace daik {
 // nothing, e.g. bssid while offline) and from an absent key (an older build).
 inline constexpr const char* REDACTED = "<redacted>";
 
-// The twenty-eight /status values http_status.cpp passes through redact_identifier (via its jstr_r
+// The twenty-nine /status values http_status.cpp passes through redact_identifier (via its jstr_r
 // wrapper). This array is the machine-readable source for tools/redact/check_diag_coverage.py
 // (`--list` prints it); the audit also compares docs/REPORTING.md's public table with it:
 //   wifi.ssid  wifi.ip  wifi.bssid  wifi.mac  mqtt.broker  mqtt.base
@@ -86,6 +86,7 @@ inline constexpr std::string_view REDACTED_STATUS_FIELD_NAMES[] = {
     "net.eth.ip",
     "net.eth.mac",
     "reference_temperature.name",
+    "history.room_rows.label",
     "reference_temperature.topic",
     "reference_temperature.temperature_path",
     "reference_temperature.setpoint_topic",
@@ -105,7 +106,7 @@ inline constexpr std::string_view REDACTED_STATUS_FIELD_NAMES[] = {
     "ntp.server",
     "modbus.host",
 };
-inline constexpr std::size_t REDACTED_STATUS_FIELDS = 28;
+inline constexpr std::size_t REDACTED_STATUS_FIELDS = 29;
 static_assert(REDACTED_STATUS_FIELDS ==
               sizeof(REDACTED_STATUS_FIELD_NAMES) / sizeof(REDACTED_STATUS_FIELD_NAMES[0]));
 

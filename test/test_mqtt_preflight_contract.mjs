@@ -100,7 +100,20 @@ struct esp_mqtt_client_config_t {
     struct { int keepalive = 0; } session;
 };
 struct httpd_req_t { std::string status = "200 OK", body; };
-struct Config { std::string mqtt_uri, mqtt_user, mqtt_pass, mqtt_base; };
+struct Config {
+    std::string mqtt_uri, mqtt_user, mqtt_pass, mqtt_base;
+    uint32_t ref_temp_generation = 0;
+};
+// This focused broker preflight has no configured room source. The complete HTTP runtime fixture
+// separately executes its real identity, generation and post-save history cutover.
+namespace logic { uint32_t history_room_identity(const Config&) { return 0; } }
+uint32_t esp_random() { throw std::runtime_error("unexpected room-source generation draw"); }
+uint32_t diagnostics_next_generation(uint32_t, uint32_t) {
+    throw std::runtime_error("unexpected room-source generation change");
+}
+void history_room_reset(uint32_t identity) {
+    if (identity != 0) throw std::runtime_error("unexpected configured room history");
+}
 enum class Mode { Connected, InitRejected, RegistrationRejected, StartRejected,
                   Timeout, AuthRejected, TcpRejected, Disconnected, SemaphoreRejected };
 struct Recording {

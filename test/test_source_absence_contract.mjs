@@ -302,8 +302,10 @@ assert.match(status, /if \(mb\.enabled\) \{[\s\S]*?HOMEHUB_HISTORIES/,
   "HomeHub trends must be offered only while that stack is enabled");
 assert.match(status, /if \(env_enabled\) \{[\s\S]*?ENV3_HISTORIES/,
   "ENV III trends must be offered only while that sensor is enabled");
-assert.match(status,
-  /bool\s+env3_configured\s*=\s*false;\s*\{\s*const Config active_config = config\(\);\s*env3_configured = active_config\.env3_enabled && env3_board_supported\(active_config\);\s*\}[\s\S]*?env3_source && \(!env3_configured \|\| env_t < 0\)/,
+const historyRoute = status.slice(status.indexOf("static esp_err_t h_history("));
+assert.match(historyRoute, /bool\s+env3_configured\s*=\s*false;/);
+assert.match(historyRoute,
+  /const Config active_config = config\(\);\s*env3_configured = active_config\.env3_enabled && env3_board_supported\(active_config\);[\s\S]*?env3_source && \(!env3_configured \|\| env_t < 0\)/,
   "an explicitly requested ENV III history must fail closed while the source is disabled");
 
 // ── 3. A never-started task must not make a CONFIGURED source read as absent ────────────────────

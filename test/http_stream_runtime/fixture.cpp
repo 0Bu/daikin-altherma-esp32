@@ -38,19 +38,22 @@ inline std::vector<daik::CachedValue> rows, modbus_rows;
 inline daik::HpValuesIdentity         identity{"generic", 0x1234, 7, 11};
 inline bool                           ota = false, weather = false, modbus_live = false;
 // Weather's TLS phase is `weather`; readers counts admitted /values snapshots in that exclusion.
-inline int                            values_readers = 0, values_readers_peak = 0;
-inline bool                           config_unreadable    = false;
-inline bool                           change_history_epoch = false;
-inline uint32_t                       epoch                = 42;
-inline int                            failure = 0, stage_race = 0;
-inline unsigned                       stack_samples = 0;
-inline unsigned                       wifi_calls    = 0;
-inline daik::WifiScanEntry            scan_rows[20]{};
-inline int                            scan_count = 0, scan_failure = 0;
-inline unsigned                       scan_calls             = 0;
-inline size_t                         scan_first_allocations = 0;
-inline std::string                    log;
-[[noreturn]] void                     fail(const char* message) {
+inline int                 values_readers = 0, values_readers_peak = 0;
+inline bool                config_unreadable         = false;
+inline bool                change_history_epoch      = false;
+inline uint32_t            epoch                     = 42;
+inline uint32_t            room_identity             = 0;
+inline bool                room_snapshot_unavailable = false;
+inline unsigned            room_snapshot_calls       = 0;
+inline int                 failure = 0, stage_race = 0;
+inline unsigned            stack_samples = 0;
+inline unsigned            wifi_calls    = 0;
+inline daik::WifiScanEntry scan_rows[20]{};
+inline int                 scan_count = 0, scan_failure = 0;
+inline unsigned            scan_calls             = 0;
+inline size_t              scan_first_allocations = 0;
+inline std::string         log;
+[[noreturn]] void          fail(const char* message) {
     std::fprintf(stderr, "FAIL %s: %s\n", oracle.c_str(), message);
     std::exit(1);
 }
@@ -72,9 +75,12 @@ void reset() {
     current.wifi_ssid                       = "Café \"quoted\"\\line\n";
     current.mqtt_base                       = "daikin-altherma-esp32";
     ota = weather = modbus_live = change_history_epoch = false;
-    values_readers = values_readers_peak               = 0;
-    config_unreadable                                  = false;
-    epoch                                              = 42;
+    values_readers = values_readers_peak = 0;
+    config_unreadable                    = false;
+    epoch                                = 42;
+    room_identity                        = 0;
+    room_snapshot_unavailable            = false;
+    room_snapshot_calls                  = 0;
     failure = stage_race = 0;
     stack_samples = wifi_calls = 0;
     scan_count = scan_failure = 0;
@@ -145,6 +151,19 @@ void maximum_scan() {
         scan_rows[i].ssid[32] = '\0';
         scan_rows[i].rssi = static_cast<int8_t>(i == 0 ? -128 : i == 18 ? 0 : i == 19 ? 127 : -i);
     }
+}
+void configure_room() {
+    current.diagnostics_enabled    = true;
+    current.diagnostics_generation = 7;
+    current.mqtt_uri               = "mqtt://fixture.invalid";
+    current.ref_temp_name          = "Example sensor";
+    // Deliberately synthetic UTF-8, quote, backslash and newline bytes test JSON wire escaping.
+    current.ref_temp_name += " Café \"quote\"\\line\n";
+    current.ref_temp_topic      = "fixture/room/state";
+    current.ref_temp_path       = "temperature";
+    current.ref_temp_generation = 17;
+    room_identity               = daik::logic::history_room_identity(current);
+    check(room_identity != 0, "configured room must have its own history identity");
 }
 void allocation_sweep(const char* uri, esp_err_t (*handler)(httpd_req_t*)) {
     auto baseline = request();
@@ -222,36 +241,36 @@ int wifi_scan(WifiScanEntry* out, int max) {
     std::copy_n(fixture::scan_rows, n, out);
     return n;
 }
-EthInfo                           net_eth_info() { return {}; }
-EthPins                           net_eth_pins() { return {}; }
-ReservedPins                      net_eth_reserved_pins() { return {}; }
-NetLink                           net_kind() { return NetLink::Wifi; }
-bool                              safe_mode_active() { return false; }
-const char*                       safe_mode_cause() { return nullptr; }
-CrashInfo                         diag_crash_info() { return {}; }
-CrashInfo                         diag_crash_info_live() { return {}; }
-bool                              diag_crash_coredump_present() { return false; }
-void                              diag_printf(const char*, ...) {}
-Env3Status                        env3_status() { return {}; }
-MqttStatus                        mqtt_status() { return {}; }
-MqttSkipStats                     mqtt_skip_stats() { return {}; }
-uint32_t                          mqtt_retirement_evidence() noexcept { return 0; }
-ReferenceTemperatureStatus        reference_temperature_status(const Config&) { return {}; }
-logic::HeatingCurveSnapshot       heating_curve_status() { return {}; }
-CirculationSourceStatus           circulation_source_status(const Config&) { return {}; }
-CirculationPumpSample             circulation_pump_sample() { return {}; }
-WeatherForecastStatus             weather_forecast_status() { return {}; }
-bool                              weather_fetch_active() { return fixture::weather; }
-bool                              weather_values_reader_enter() noexcept {
+EthInfo                     net_eth_info() { return {}; }
+EthPins                     net_eth_pins() { return {}; }
+ReservedPins                net_eth_reserved_pins() { return {}; }
+NetLink                     net_kind() { return NetLink::Wifi; }
+bool                        safe_mode_active() { return false; }
+const char*                 safe_mode_cause() { return nullptr; }
+CrashInfo                   diag_crash_info() { return {}; }
+CrashInfo                   diag_crash_info_live() { return {}; }
+bool                        diag_crash_coredump_present() { return false; }
+void                        diag_printf(const char*, ...) {}
+Env3Status                  env3_status() { return {}; }
+MqttStatus                  mqtt_status() { return {}; }
+MqttSkipStats               mqtt_skip_stats() { return {}; }
+uint32_t                    mqtt_retirement_evidence() noexcept { return 0; }
+ReferenceTemperatureStatus  reference_temperature_status(const Config&) { return {}; }
+logic::HeatingCurveSnapshot heating_curve_status() { return {}; }
+CirculationSourceStatus     circulation_source_status(const Config&) { return {}; }
+CirculationPumpSample       circulation_pump_sample() { return {}; }
+WeatherForecastStatus       weather_forecast_status() { return {}; }
+bool                        weather_fetch_active() { return fixture::weather; }
+bool                        weather_values_reader_enter() noexcept {
     if (fixture::weather) return false;
     fixture::values_readers_peak =
         std::max(fixture::values_readers_peak, ++fixture::values_readers);
     return true;
 }
-void weather_values_reader_leave() noexcept { --fixture::values_readers; }
-SyslogStatus                      syslog_status() { return {}; }
-HpStats                           hp_stats() { return {}; }
-uint32_t                          hp_skipped_cycles() { return 0; }
+void         weather_values_reader_leave() noexcept { --fixture::values_readers; }
+SyslogStatus syslog_status() { return {}; }
+HpStats      hp_stats() { return {}; }
+uint32_t     hp_skipped_cycles() { return 0; }
 logic::RefrigerantServiceSnapshot refrigerant_service_status() { return {}; }
 ModbusStatus                      mb_status() {
     ModbusStatus s;
@@ -320,6 +339,25 @@ size_t history_modbus_snapshot(size_t t, logic::HistorySample* out, size_t max, 
 size_t history_env3_snapshot(size_t t, logic::HistorySample* out, size_t max, uint32_t* epoch,
                              logic::HistoryMeta* meta) {
     return history_snapshot(t, out, max, epoch, meta);
+}
+size_t history_room_snapshot(logic::HistorySample* out, size_t max, uint32_t expected_identity,
+                             uint32_t* epoch, logic::HistoryMeta* meta) {
+    ++fixture::room_snapshot_calls;
+    if (epoch) *epoch = 0;
+    if (meta) *meta = {};
+    if (fixture::room_snapshot_unavailable || !expected_identity ||
+        expected_identity != fixture::room_identity)
+        return 0;
+    const size_t n = std::min<size_t>(max, logic::HISTORY_SAMPLES);
+    for (size_t i = 0; i < n; ++i)
+        out[i] = i % 4 == 1 ? logic::HISTORY_NO_READING : static_cast<int16_t>(201 + i % 50);
+    if (epoch) *epoch = fixture::epoch;
+    if (meta) {
+        meta->newest_age_s  = 17;
+        meta->oldest_bucket = 700;
+    }
+    if (fixture::change_history_epoch) ++fixture::epoch;
+    return n;
 }
 TimeStatus time_status() {
     TimeStatus s;
@@ -452,6 +490,97 @@ int main(int argc, char** argv) {
               "history mixed two epochs before send");
         emit(req, "epoch-refusal");
     });
+    run("room_history_completed", [] {
+        configure_room();
+        current.profile = "auto";
+        rows.clear();
+        for (const bool renamed : {false, true}) {
+            if (renamed) current.ref_temp_name = "Living room";
+            const unsigned calls = room_snapshot_calls;
+            auto           req   = request();
+            check(invoke(req, "/history?row=room_temp&source=room", daik::h_history) == ESP_OK,
+                  "independent MQTT room history failed");
+            successful(req);
+            check(room_snapshot_calls == calls + 1 &&
+                      req.response.find("\"id\":\"room_temp\"") != std::string::npos &&
+                      req.response.find("\"source\":\"room\"") != std::string::npos,
+                  "room route borrowed another instrument's snapshot or attribution");
+            check(req.response.find(renamed ? "Living room" : "\\\"quote\\\"\\\\line\\n") !=
+                      std::string::npos,
+                  "configured room label was stale or not JSON escaped");
+            emit(req, renamed ? "room-history-renamed" : "room-history");
+        }
+    });
+    run("room_history_refusals", [] {
+        const char* inactive_names[] = {"room-disabled-diagnostics", "room-disabled-broker",
+                                        "room-disabled-mapping"};
+        for (int missing = 0; missing < 3; ++missing) {
+            configure_room();
+            if (missing == 0) current.diagnostics_enabled = false;
+            if (missing == 1) current.mqtt_uri.clear();
+            if (missing == 2) current.ref_temp_topic.clear();
+            const unsigned calls = room_snapshot_calls;
+            auto           req   = request();
+            check(invoke(req, "/history?row=room_temp&source=room", daik::h_history) == ESP_OK &&
+                      req.status == "404 Not Found" && room_snapshot_calls == calls &&
+                      req.emission_attempts == 0,
+                  "inactive room configuration reached its history snapshot");
+            emit(req, inactive_names[missing]);
+        }
+        configure_room();
+        auto           req   = request();
+        const unsigned calls = room_snapshot_calls;
+        check(invoke(req, "/history?row=leaving_water&source=room", daik::h_history) == ESP_OK &&
+                  req.status == "404 Not Found" && room_snapshot_calls == calls,
+              "room source accepted another instrument's trend id");
+        emit(req, "room-unknown-row");
+        req = request();
+        check(invoke(req, "/history?row=room_temp&source=mqtt", daik::h_history) == ESP_OK &&
+                  req.status == "400 Bad Request" && room_snapshot_calls == calls,
+              "room route accepted the circulation-only MQTT attribution as a source");
+        emit(req, "room-unknown-source");
+        room_snapshot_unavailable = true;
+        req                       = request();
+        check(invoke(req, "/history?row=room_temp&source=room", daik::h_history) == ESP_OK &&
+                  req.status == "503 Service Unavailable" && req.emission_attempts == 0,
+              "unavailable room snapshot emitted a plausible empty curve");
+        emit(req, "room-unavailable");
+        room_snapshot_unavailable = false;
+        room_identity ^= 1u;
+        req = request();
+        check(invoke(req, "/history?row=room_temp&source=room", daik::h_history) == ESP_OK &&
+                  req.status == "503 Service Unavailable" && req.emission_attempts == 0,
+              "room history identity mismatch escaped before-send refusal");
+        emit(req, "room-identity-refusal");
+        configure_room();
+        change_history_epoch = true;
+        req                  = request();
+        check(invoke(req, "/history?row=room_temp&source=room", daik::h_history) == ESP_OK &&
+                  req.status == "503 Service Unavailable" && req.emission_attempts == 0,
+              "room history mixed two epochs before send");
+        emit(req, "room-epoch-refusal");
+    });
+    run("room_history_stream_failures", [] {
+        configure_room();
+        allocation_sweep("/history?row=room_temp&source=room", daik::h_history);
+        chunk_sweep("/history?row=room_temp&source=room", daik::h_history);
+    });
+    run("room_history_status_labels", [] {
+        configure_room();
+        for (const bool redact : {false, true}) {
+            auto req = request();
+            check(invoke(req, redact ? "/status?redact=1" : "/status", daik::h_status) == ESP_OK,
+                  "status failed with configured room history");
+            successful(req);
+            emit(req, redact ? "room-status-redacted" : "room-status-plain");
+        }
+        current.ref_temp_topic.clear();
+        auto req = request();
+        check(invoke(req, "/status?redact=1", daik::h_status) == ESP_OK,
+              "status failed with removed room history");
+        successful(req);
+        emit(req, "room-status-absent");
+    });
     run("weather_and_ota_admission", [] {
         auto req = request();
         check(invoke(req, "/values", daik::h_values) == ESP_OK && fixture_ticks == 0 &&
@@ -482,8 +611,8 @@ int main(int argc, char** argv) {
                   values_readers == 0,
               "a reader counted and then refused for OTA stayed in Weather's TLS exclusion");
         fixture_delay = nullptr;
-        ota = true;
-        req = request();
+        ota           = true;
+        req           = request();
         check(invoke(req, "/status", daik::h_status) == ESP_OK &&
                   req.status == "503 Service Unavailable" && req.emission_attempts == 0,
               "OTA status admission reached serializer");

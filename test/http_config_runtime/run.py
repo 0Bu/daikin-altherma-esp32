@@ -108,7 +108,7 @@ if 'PASS total=13 assertions=5233\n' not in legacy.stdout:
                        + legacy.stdout)
 print('PRESERVED ORIGINAL CASES ' + legacy.stdout.splitlines()[-1])
 baseline = command([binary])
-if 'PASS total=16 assertions=5517\n' not in baseline.stdout:
+if 'PASS total=17 assertions=5581\n' not in baseline.stdout:
     raise RuntimeError('the complete behavioral groups changed their assertion inventory\n'
                        + baseline.stdout)
 print(baseline.stdout, end='')
@@ -177,8 +177,8 @@ mutations = [
     ('ignore_wifi_save_failure', 'wifi', 'if (!config_save(c)) {',
      'if ((static_cast<void>(config_save(c)), false)) {', 'persistence_failure'),
     ('early_reference_runtime', 'source',
-     'if (!config_save(c)) return send_err(req, "500 Internal Server Error", "config write failed");\n    mqtt_reference_reconfigure();',
-     'mqtt_reference_reconfigure();\n    if (!config_save(c)) return send_err(req, "500 Internal Server Error", "config write failed");',
+     'if (!config_save(c)) return send_err(req, "500 Internal Server Error", "config write failed");\n    history_room_reset(room_identity);\n    mqtt_reference_reconfigure();',
+     'mqtt_reference_reconfigure();\n    if (!config_save(c)) return send_err(req, "500 Internal Server Error", "config write failed");\n    history_room_reset(room_identity);',
      'persistence_failure'),
     ('ignore_env_preflight', 'env', 'if (!env_allowed) return env_result;',
      'static_cast<void>(env_allowed); static_cast<void>(env_result);', 'preflight_failures'),
@@ -226,14 +226,25 @@ mutations = [
     ('generation_redrawn_each_transition', 'source',
      'diagnostics_next_generation(c.diagnostics_generation, esp_random())',
      'diagnostics_next_generation(0u, esp_random())', 'diagnostics_generation'),
+    ('room_generation_omitted', 'room',
+     'if (logic::history_room_identity(c) != previous_room_identity)',
+     'if (logic::history_room_identity(c) != previous_room_identity && false)',
+     'room_history_lifetime'),
+    ('room_history_reset_omitted', 'room',
+     'history_room_reset(room_identity);', 'static_cast<void>(room_identity);',
+     'room_history_lifetime'),
+    ('room_history_reset_before_save', 'room',
+     'if (!config_save(c)) return send_err(req, "500 Internal Server Error", "config write failed");\n    history_room_reset(room_identity);',
+     'history_room_reset(room_identity);\n    if (!config_save(c)) return send_err(req, "500 Internal Server Error", "config write failed");',
+     'room_history_lifetime'),
 ]
 for tag, target, old, new, case in mutations:
     config_source, ota_source = SOURCE, OTA_SOURCE
-    if target in ('source', 'wifi', 'env', 'board', 'pins'):
+    if target in ('source', 'wifi', 'env', 'board', 'pins', 'room'):
         text = source_text
-        if target in ('wifi', 'env', 'board', 'pins'):
+        if target in ('wifi', 'env', 'board', 'pins', 'room'):
             function = {'wifi': 'set_wifi', 'env': 'set_env3', 'board': 'set_board',
-                        'pins': 'send_local_pins_save_failure'}[target]
+                        'pins': 'send_local_pins_save_failure', 'room': 'set_ref_temp'}[target]
             start = text.index('static esp_err_t ' + function + '(')
             end = text.index('\nstatic ', start + 1) if target != 'wifi' else text.index('\n// ── /set_mqtt', start)
             scope = replace_once(text[start:end], old, new, tag)
@@ -280,7 +291,7 @@ for tag, target, old, new, case in mutations:
 after = inputs([OUT / 'production.d', OUT / 'cjson.d'])
 if after != before:
     raise RuntimeError('compile inputs changed during the run')
-if len(controls) != 25:
+if len(controls) != 28:
     raise RuntimeError('the complete compiling negative-control inventory changed')
 record = {'compiler': compiler, 'c_compiler': c_compiler,
           'compiler_commands': {'c': CC, 'cxx': CXX},

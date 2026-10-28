@@ -1059,9 +1059,20 @@ async function captureNativeEvidence(page, context, target = "valueGroups", ance
   if (!directory || !/^(desktop\/en|phone\/de)(\/|$)/.test(context)) return;
   assert.ok(path.isAbsolute(directory), "browser evidence directory must be absolute");
   fs.mkdirSync(directory, { recursive: true });
+  const elementQuery = ancestor
+    ? `document.querySelector(${JSON.stringify(target)}).closest(${JSON.stringify(ancestor)})`
+    : `document.getElementById(${JSON.stringify(target)})`;
+  // Accordion classes change before their first expanded layout. Capture the settled surface,
+  // while allowing the schematic's intentional, continuously running CSS animations.
+  await page.waitFor(`(() => {
+    const element = ${elementQuery};
+    if (!element) return false;
+    const rect = element.getBoundingClientRect();
+    return rect.width > 0 && rect.height > 0 && element.getAnimations({subtree:true})
+      .every(animation => !(animation instanceof CSSTransition) || animation.playState !== "running");
+  })()`);
   const clip = await page.evaluate(`(() => {
-    const element = ${ancestor ? `document.querySelector(${JSON.stringify(target)}).closest(${JSON.stringify(ancestor)})`
-                              : `document.getElementById(${JSON.stringify(target)})`};
+    const element = ${elementQuery};
     const rect = element.getBoundingClientRect();
     return { x: rect.left + scrollX, y: rect.top + scrollY,
       width: rect.width, height: rect.height, scale: 1 };
@@ -1582,6 +1593,163 @@ async function assertHybridRoom(page, context, locale) {
     await captureNativeEvidence(page, `${context}/schematic`, "schem");
     await captureNativeEvidence(page, `${context}/inspector`, "inspect");
 
+    // Render the real third-source curve in the same inspector, retaining the device headline.
+    await page.evaluate(`(() => {
+      S.status.diagnostics.enabled = true;
+      S.status.reference_temperature = { configured: true, name: "Meross MTS200B",
+        topic: "fixture/room", temperature_path: "temperature", has_value: true,
+        temperature_c: 23.6, fresh: true, temperature_valid: true, control_eligible: false,
+        reason: "disabled", freshness_reason: "fresh" };
+      S.status.mqtt = { ...S.status.mqtt, configured: true };
+      S.status.history = { ...S.status.history,
+        rows: [{id: "room_temp", label: "RT Temp."}],
+        modbus_rows: [{id: "room_temp", label: "Remote controller room temperature Main"}],
+        room_rows: [{id: "room_temp", label: "Meross MTS200B"}] };
+      syncHistSources();
+      const ring = (v) => ({ at: Date.now(), gen: 1, dt: 300, unit: "°C", b0: 100, held: [], v });
+      S.hist.set("room_temp", ring(Array(288).fill(215)));
+      S.hist.set(histCacheKey("room_temp", "modbus"), ring(Array(288).fill(216)));
+      S.hist.set(histCacheKey("room_temp", "room"), ring(Array.from({length:288},
+        (_, i) => i >= 140 && i < 145 ? null : 230 + Math.round(i / 48))));
+      S.inspHistSig = null;
+      renderApp();
+      return true;
+    })()`);
+    await page.frame();
+    assert.deepEqual(await page.evaluate(`(() => ({
+      sources: historyView("room_temp").series.map(s => s.source),
+      headline: document.getElementById("inspNow").textContent,
+      mqttRow: document.querySelector("#inspRows .room-row").textContent,
+      legend: Array.from(document.querySelectorAll("#inspHist .vhist-source"), el => el.textContent),
+      roomLine: !!document.querySelector("#inspHist .vhist-line.room"),
+      roomArea: !!document.querySelector("#inspHist .vhist-area.room"),
+      gap: historyView("room_temp").series.find(s => s.source === "room").v[142],
+    }))()`), {
+      sources: ["x10a", "modbus", "room"], headline: "21.5 °C",
+      mqttRow: `Meross MTS200B · MQTT${decimal.format(23.6)} °C`,
+      legend: ["X10A", "HomeHub · Modbus", "Meross MTS200B · MQTT"],
+      roomLine: true, roomArea: true, gap: null,
+    }, `${context}: the additional MQTT curve retains all three instruments and the device headline`);
+    assert.ok(await page.evaluate('scrubText(historyView("room_temp"), 142).includes("Meross MTS200B · MQTT " + t("hist.nm"))'),
+      `${context}: a missing MQTT sample is named independently in the common cursor readout`);
+    assertLayout(await page.evaluate(layoutAudit), `${context}/mqtt-room-paired`);
+    await captureNativeEvidence(page, `${context}/mqtt-room-paired`, "inspect");
+
+    // With no plant instrument the independent source stays clickable and owns the current value.
+    await page.evaluate(`(() => {
+      const roomRing = S.hist.get(histCacheKey("room_temp", "room"));
+      S.status.hp.connected = false;
+      S.status.modbus = { ...S.status.modbus, host: "", enabled: false, connected: false };
+      S._values = [];
+      S._modbus = [];
+      S.status.history.rows = [];
+      S.status.history.modbus_rows = [];
+      syncHistSources();
+      S.hist.set(histCacheKey("room_temp", "room"), roomRing);
+      S.insp = null;
+      renderApp();
+      return true;
+    })()`);
+    await page.waitFor(`!document.getElementById("inspect").classList.contains("open") &&
+      document.getElementById("inspect").getAnimations({subtree:true})
+        .every(animation => animation.playState !== "running")`);
+    await page.evaluate('document.querySelector("#schem [data-insp=room]").scrollIntoView({block:"center",behavior:"instant"}); true');
+    await page.frame();
+    const mqttPoint = await page.evaluate(`(() => {
+      const hit = document.querySelector("#schem [data-insp=room] .sc-hitarea");
+      const rect = hit.getBoundingClientRect();
+      return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+    })()`);
+    await page.send("Input.dispatchMouseEvent", {type:"mouseMoved", ...mqttPoint});
+    await page.send("Input.dispatchMouseEvent", {type:"mousePressed", button:"left", clickCount:1, ...mqttPoint});
+    await page.send("Input.dispatchMouseEvent", {type:"mouseReleased", button:"left", clickCount:1, ...mqttPoint});
+    await page.waitFor(`(() => {
+      const panel = document.getElementById("inspect");
+      const rect = panel.getBoundingClientRect();
+      return S.insp === "room" && panel.classList.contains("open") && rect.width > 0 && rect.height > 0 &&
+        panel.getAnimations({subtree:true}).every(animation => animation.playState !== "running");
+    })()`);
+    assert.deepEqual(await page.evaluate(`(() => ({
+      plantSnapshot: S.live, visible: !document.getElementById("schem").classList.contains("no-room"),
+      pill: document.getElementById("svRoom").textContent,
+      source: document.getElementById("inspSrc").textContent,
+      headline: document.getElementById("inspNow").textContent,
+      sourceStatus: document.getElementById("inspBody").textContent ===
+        roomSourceStatusText(roomSourceStatus(S.status.reference_temperature, S.status.mqtt)),
+      sources: historyView("room_temp").series.map(s => s.source),
+      legend: document.querySelector("#inspHist .vhist-source.room")?.textContent,
+    }))()`), { plantSnapshot:null, visible:true, pill:decimal.format(23.6),
+      source:"Meross MTS200B · MQTT", headline:`${decimal.format(23.6)} °C`, sourceStatus:true,
+      sources:["room"], legend:"Meross MTS200B · MQTT" },
+    `${context}: an actual click opens the MQTT-only room instrument without inventing a device sensor`);
+    await page.evaluate(`S.status.reference_temperature.fresh = false;
+      S.status.reference_temperature.freshness_reason = "stale";
+      renderApp(); true`);
+    assert.deepEqual(await page.evaluate(`({
+      headline: document.getElementById("inspNow").textContent,
+      pill: document.getElementById("svRoom").textContent,
+      history: !!document.querySelector("#inspHist .vhist-line.room"),
+      stale: document.getElementById("inspBody").textContent.includes(t("ref.detail.stale"))
+    })`), {headline:"— °C", pill:"—", history:true, stale:true},
+    `${context}: a stale MQTT sample blanks current values while preserving the dated curve`);
+    await page.frame();
+    assertLayout(await page.evaluate(layoutAudit), `${context}/mqtt-room-only`);
+    await assertAccessibility(page, `${context}/mqtt-room-only`, {nativeTree:true});
+    await captureNativeEvidence(page, `${context}/mqtt-room-only`, "inspect");
+
+    await page.evaluate(`(() => {
+      const name = "Meross <img src=x onerror=alert(1)>";
+      S.status.reference_temperature.name = name;
+      S.status.history.room_rows[0].label = name;
+      renderApp();
+      return true;
+    })()`);
+    assert.equal(await page.evaluate(`document.getElementById("inspSrc").textContent ===
+      "Meross <img src=x onerror=alert(1)> · MQTT" &&
+      !document.querySelector("#inspect img") &&
+      document.querySelector("#inspHist .vhist-source.room").textContent ===
+      "Meross <img src=x onerror=alert(1)> · MQTT"`), true,
+    `${context}: configured source names remain escaped text in both inspector and legend`);
+    await page.evaluate(`(() => {
+      S.status.reference_temperature = { ...S.status.reference_temperature, name:"Replacement room",
+        topic:"fixture/replacement", temperature_c:24.1, fresh:true, freshness_reason:"fresh" };
+      S.status.history.room_rows[0].label = "Replacement room";
+      syncHistSources();
+      S.hist.set(histCacheKey("room_temp", "room"),
+        {at:Date.now(), gen:1, dt:300, unit:"°C", b0:388, held:[], v:[241]});
+      renderApp();
+      return true;
+    })()`);
+    assert.deepEqual(await page.evaluate(`({
+      source:document.getElementById("inspSrc").textContent,
+      headline:document.getElementById("inspNow").textContent,
+      readings:historyView("room_temp").series[0].v,
+      single:!!document.querySelector("#inspHist .vhist-pt.room"),
+      oldLine:!!document.querySelector("#inspHist .vhist-line.room")
+    })`), {source:"Replacement room · MQTT", headline:`${decimal.format(24.1)} °C`,
+      readings:[241], single:true, oldLine:false},
+    `${context}: a replacement source starts its own readings instead of inheriting the previous curve`);
+
+    // Retire the mapping, then resume the existing device-only missing-room checks below.
+    await page.evaluate(`(() => {
+      S.status.reference_temperature = { configured:false };
+      S.status.history.room_rows = [];
+      S.status.hp.connected = true;
+      S.status.diagnostics.enabled = false;
+      S._values = [
+        {label:"I/U operation mode",value:"Heating",reg:0x60},
+        {label:"Outlet Water Heat Exch. Temp. (R1T)",value:"35.0",unit:"°C",reg:0x61,off:2},
+        {label:"Outlet Water BUH Temp. (R2T)",value:"35.2",unit:"°C",reg:0x61,off:4},
+        {label:"Inlet water temp.(R4T)",value:"30.0",unit:"°C",reg:0x61,off:8},
+        {label:"RT Temp.",value:"21.5",unit:"°C",reg:0x61,off:12,concept:"room_temp"},
+        {label:"RT setpoint",value:"22.0",unit:"°C",reg:0x62,off:5},
+      ];
+      renderApp();
+      return true;
+    })()`);
+    assert.equal(await page.evaluate('document.querySelector("#inspHist .vhist-source.room") === null'), true,
+      `${context}: removed MQTT mapping cannot leave its former curve behind`);
+
     for (const withheld of [false, true]) {
       await page.evaluate(`(() => {
         S._values = S._values.filter(row => row.label !== "RT Temp.");
@@ -1780,6 +1948,18 @@ try {
     await openModalWithKeyboard(page, "refTempModal", modalTriggers.refTempModal,
       "selftest/desktop/de/refTempModal", { route: false });
     throw new Error("route-isolation-bypass mutation unexpectedly survived the route gate");
+  } else if (process.argv.includes("--room-only")) {
+    for (const viewport of viewports) {
+      await page.viewport(viewport.width, viewport.height);
+      for (const locale of browserLocales) {
+        await activateLocale(page, locale);
+        await page.evaluate("showStage('dashboard'); window.scrollTo(0, 0); true");
+        await assertHybridRoom(page, `${viewport.name}/${locale}/hybrid-room`, locale);
+        console.log(`room render checked: ${viewport.name}/${locale}`);
+      }
+    }
+    assert.deepEqual(page.diagnostics, [], "room source states must emit no browser errors");
+    console.log(`focused room rendering passed: ${browserLocales.length} locales; ${viewports.length} viewports`);
   } else if (process.argv.includes("--cards-only")) {
     // Small prototype-parity pass for sidebar iterations. The normal invocation still owns the
     // complete locale/modal matrix and the supervisor's independent negative controls.

@@ -26,6 +26,7 @@
 #include "logic/binary_semantics.hpp"
 #include "logic/homehub_map.hpp"
 #include "logic/history.hpp"
+#include "logic/history_persist.hpp"
 #include "logic/hp_probe.hpp" // active-profile rows accepted by POST /hp/query
 #include "logic/http_cache.hpp"
 #include "logic/http_values_wait.hpp"
@@ -1309,6 +1310,13 @@ static void append_status_json(JsonOut& j, bool redact) {
             j += "}";
         }
     }
+    j += "],\"room_rows\":[";
+    if (c.diagnostics_enabled && !c.mqtt_uri.empty() && !c.ref_temp_topic.empty() &&
+        !safe_mode_active()) {
+        j += "{\"id\":\"room_temp\",\"label\":";
+        j += jstr_r(c.ref_temp_name, redact);
+        j += "}";
+    }
     j += "]},";
 
     // ── The rolling on-board plant diagnosis (logic/checkup.hpp) ────────────────────────────────
@@ -2327,7 +2335,8 @@ static esp_err_t h_history(httpd_req_t* req) {
     const bool has_source = httpd_query_key_value(q, "source", source, sizeof(source)) == ESP_OK;
     const bool modbus = has_source && std::strcmp(source, "modbus") == 0;
     const bool env3_source = has_source && std::strcmp(source, "env3") == 0;
-    if (has_source && !modbus && !env3_source && std::strcmp(source, "x10a") != 0) {
+    const bool room_source = has_source && std::strcmp(source, "room") == 0;
+    if (has_source && !modbus && !env3_source && !room_source && std::strcmp(source, "x10a") != 0) {
         httpd_resp_set_status(req, "400 Bad Request");
         return http_send_json(req, "{\"ok\":false,\"error\":\"unknown source\"}");
     }
@@ -2340,15 +2349,23 @@ static esp_err_t h_history(httpd_req_t* req) {
     const bool    native_modbus    = modbus && mb_active_profile() == ModbusProfile::Altherma4;
     const int env_t = env3_source ? env3_history_index(id) : -1;
     bool          env3_configured  = false;
+    uint32_t      room_identity    = 0;
+    char          lbl[80] = {0}, unit[8] = {0};
     {
         const Config active_config = config();
         env3_configured = active_config.env3_enabled && env3_board_supported(active_config);
+        if (room_source && !safe_mode_active()) {
+            room_identity = logic::history_room_identity(active_config);
+            std::snprintf(lbl, sizeof(lbl), "%s", active_config.ref_temp_name.c_str());
+        }
     } // Release the configuration snapshot before constructing the streamed history response.
-    const bool x10a_unknown = !modbus && !env3_source && (!def_ || t >= logic::TREND_COUNT);
+    const bool x10a_unknown =
+        !modbus && !env3_source && !room_source && (!def_ || t >= logic::TREND_COUNT);
     const bool    missing_quiet =
         native_modbus && mb_t >= 0 && logic::HOMEHUB_HISTORIES[mb_t].offset == 9;
     if (x10a_unknown || (modbus && (mb_t < 0 || missing_quiet)) ||
-        (env3_source && (!env3_configured || env_t < 0))) {
+        (env3_source && (!env3_configured || env_t < 0)) ||
+        (room_source && (!room_identity || std::strcmp(id, "room_temp") != 0))) {
         httpd_resp_set_status(req, "404 Not Found");
         return http_send_json(req, "{\"ok\":false,\"error\":\"unknown trend\"}");
     }
@@ -2371,13 +2388,16 @@ static esp_err_t h_history(httpd_req_t* req) {
     else if (env3_source)
         n = history_env3_snapshot(static_cast<size_t>(env_t), samples, logic::HISTORY_SAMPLES,
                                   &history_snapshot_epoch, &history_meta);
+    else if (room_source)
+        n = history_room_snapshot(samples, logic::HISTORY_SAMPLES, room_identity,
+                                  &history_snapshot_epoch, &history_meta);
     else
         n = history_snapshot(t, samples, logic::HISTORY_SAMPLES, &history_snapshot_epoch,
                              &history_meta);
-    const size_t nruns = (modbus || env3_source) ? 0
-        : logic::history_held_runs(samples, n, runs, logic::HISTORY_MAX_RUNS);
+    const size_t nruns = (modbus || env3_source || room_source)
+                             ? 0
+                             : logic::history_held_runs(samples, n, runs, logic::HISTORY_MAX_RUNS);
 
-    char lbl[80], unit[8];
     if (modbus) {
         const uint16_t         offset = logic::HOMEHUB_HISTORIES[mb_t].offset;
         const def::HomeHubReg* r =
@@ -2387,18 +2407,26 @@ static esp_err_t h_history(httpd_req_t* req) {
     } else if (env3_source) {
         std::snprintf(lbl, sizeof(lbl), "%s", ENV3_HISTORIES[env_t].label);
         std::snprintf(unit, sizeof(unit), "%s", ENV3_HISTORIES[env_t].unit);
+    } else if (room_source) {
+        std::snprintf(unit, sizeof(unit), "%s", "°C");
     } else {
         history_label(t, lbl, sizeof(lbl));
         history_unit(t, unit, sizeof(unit));
     }
 
     std::string j = "{\"id\":";
-    j += jstr(modbus ? logic::HOMEHUB_HISTORIES[mb_t].trend_id
-                     : env3_source ? ENV3_HISTORIES[env_t].id : def_->id);
+    j += jstr(modbus        ? logic::HOMEHUB_HISTORIES[mb_t].trend_id
+              : env3_source ? ENV3_HISTORIES[env_t].id
+              : room_source ? "room_temp"
+                            : def_->id);
     j += ",\"source\":";
-    const bool mqtt_source = !modbus && !env3_source &&
-                             def_->kind == logic::TrendKind::CirculationState;
-    j += jstr(modbus ? "modbus" : env3_source ? "env3" : mqtt_source ? "mqtt" : "x10a");
+    const bool mqtt_source =
+        !modbus && !env3_source && !room_source && def_->kind == logic::TrendKind::CirculationState;
+    j += jstr(modbus        ? "modbus"
+              : env3_source ? "env3"
+              : room_source ? "room"
+              : mqtt_source ? "mqtt"
+                            : "x10a");
     // Bind the body to the lifetime captured with its samples, not a successor observed while
     // serializing it. The per-boot token also distinguishes equal epochs on different boots.
     j += ",\"epoch\":";

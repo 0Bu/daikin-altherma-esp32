@@ -575,6 +575,7 @@ static esp_err_t set_mqtt(httpd_req_t* req) {
     }
 
     c = config();
+    const uint32_t previous_room_identity = logic::history_room_identity(c);
     c.mqtt_uri  = broker;
     c.mqtt_user = user;
     c.mqtt_pass = pass;
@@ -585,12 +586,16 @@ static esp_err_t set_mqtt(httpd_req_t* req) {
     // longer owns a topic must not be the thing that deletes it (docs/HOME_ASSISTANT.md carries the
     // broker-side sweep, the same manual step a board swap already needs).
     c.mqtt_base = base;
+    if (logic::history_room_identity(c) != previous_room_identity)
+        c.ref_temp_generation = diagnostics_next_generation(c.ref_temp_generation, esp_random());
+    const uint32_t room_identity = logic::history_room_identity(c);
     // The broker just pre-flighted clean, so a failure here is NVS, not the user's input — don't
     // reboot into the old broker while telling them the new one was accepted.
     if (!config_save(c)) {
         httpd_resp_set_status(req, "500 Internal Server Error");
         return http_send_json(req, "{\"ok\":false,\"error\":\"config write failed\"}");
     }
+    history_room_reset(room_identity);
     http_send_json(req, "{\"ok\":true,\"reboot\":true}");
     reboot_soon();
     return ESP_OK;
@@ -695,6 +700,7 @@ static esp_err_t set_ref_temp(httpd_req_t* req) {
         mqtt_reference_reconfigure();                 // retry the saved mapping and clear old evidence
         return http_send_json(req, "{\"ok\":true,\"saved\":false,\"reboot\":false}");
     }
+    const uint32_t previous_room_identity = logic::history_room_identity(c);
     c.ref_temp_name = in.name;
     c.ref_temp_topic = in.topic;
     c.ref_temp_path = in.path;
@@ -706,7 +712,11 @@ static esp_err_t set_ref_temp(httpd_req_t* req) {
     c.ref_temp_enabled_path = in.enabled_path;
     c.ref_temp_hvac_mode_path = in.hvac_mode_path;
     c.ref_temp_max_age_s = in.max_age_s;
+    if (logic::history_room_identity(c) != previous_room_identity)
+        c.ref_temp_generation = diagnostics_next_generation(c.ref_temp_generation, esp_random());
+    const uint32_t room_identity = logic::history_room_identity(c);
     if (!config_save(c)) return send_err(req, "500 Internal Server Error", "config write failed");
+    history_room_reset(room_identity);
     mqtt_reference_reconfigure();
     diag_printf("mqtt: reference temperature mapping saved%s\n", in.topic.empty() ? " (disabled)" : "");
     return http_send_json(req, "{\"ok\":true,\"saved\":true,\"reboot\":false}");
@@ -826,6 +836,7 @@ static esp_err_t set_diagnostics(httpd_req_t* req) {
     const bool weather_was_publishable = c.diagnostics_enabled && c.weather_enabled;
     c.diagnostics_enabled = enabled;
     c.diagnostics_generation = diagnostics_next_generation(c.diagnostics_generation, esp_random());
+    const uint32_t      room_identity = logic::history_room_identity(c);
     WeatherSourceChange weather_change(c.weather_enabled, enabled);
     if (!weather_change)
         return send_err(req, "503 Service Unavailable",
@@ -835,6 +846,7 @@ static esp_err_t set_diagnostics(httpd_req_t* req) {
 
     checkup_set_diagnostics(enabled, c.diagnostics_generation);
     history_checkup_reset();
+    history_room_reset(room_identity);
     mqtt_reference_reconfigure();
     mqtt_circulation_reconfigure(!c.circulation_topic.empty());
     if (weather_was_publishable && !enabled) mqtt_request_weather_cleanup();

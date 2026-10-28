@@ -37,10 +37,10 @@
 
 namespace daik {
 
-using logic::HistorySample;
 using logic::HISTORY_HELD_OVER;
 using logic::HISTORY_NO_READING;
 using logic::HISTORY_SAMPLES;
+using logic::HistorySample;
 using logic::HOMEHUB_HISTORY_COUNT;
 using logic::TREND_COUNT;
 
@@ -137,6 +137,41 @@ __NOINIT_ATTR PersistStore s_store;
 
 // One name for the region, so no call site has to know about the union.
 inline PersistedHistory& P() { return s_store.v; }
+
+// A fourth, independent raster must not alter the retained layout of the original three sources.
+// Its small sealed store and liveness record are adopted independently, including when X10A has
+// never resolved. Pending samples are excluded from its seal, exactly like the original rings.
+struct RoomPersistedHistory {
+    uint32_t         magic;
+    uint16_t         version;
+    uint8_t          boots_since_commit;
+    uint8_t          reserved;
+    uint32_t         schema;
+    uint32_t         identity;
+    uint32_t         crc;
+    int32_t          residual_us;
+    logic::TrendRing ring;
+};
+static_assert(sizeof(RoomPersistedHistory) <= 608,
+              "one room ring and its seal must stay below 608 bytes of static DRAM");
+union RoomPersistStore {
+    RoomPersistedHistory v;
+    RoomPersistStore() {}
+    ~RoomPersistStore() {}
+};
+__NOINIT_ATTR RoomPersistStore s_room_store;
+__NOINIT_ATTR logic::HistoryLiveness s_room_liveness;
+inline RoomPersistedHistory&         R() { return s_room_store.v; }
+
+uint32_t              s_room_bucket             = 0;
+bool                  s_room_have_bucket        = false;
+int64_t               s_room_last_commit_us     = INT64_MIN;
+int64_t               s_room_last_commit_bucket = -1;
+int64_t               s_room_adopt_real_end_us  = INT64_MIN;
+int64_t               s_room_adopt_floor_bucket = INT64_MIN;
+std::atomic<uint32_t> s_room_identity{0};
+std::atomic<uint32_t> s_room_generation{1};
+bool                  s_room_fed = false;
 
 // The liveness record (logic/history_persist.hpp): when the device last gave a sign of life and
 // when each raster last committed, on this boot's clock. Its own seal and its own variable, so the
@@ -300,6 +335,30 @@ inline uint32_t persist_crc() {
     return config_crc32_final(crc);
 }
 
+inline uint32_t room_crc() {
+    uint32_t crc = config_crc32_update(
+        CONFIG_CRC32_INIT, reinterpret_cast<const uint8_t*>(&R().identity), sizeof(R().identity));
+    crc = config_crc32_update(crc, &R().boots_since_commit, sizeof(R().boots_since_commit));
+    crc = config_crc32_update(crc, reinterpret_cast<const uint8_t*>(&R().residual_us),
+                              sizeof(R().residual_us));
+    return config_crc32_final(persist_crc_ring(crc, R().ring));
+}
+
+inline void room_seal_locked() { R().crc = room_crc(); }
+
+inline void room_wipe_locked(uint32_t identity) {
+    static_assert(std::is_trivially_copyable<RoomPersistedHistory>::value,
+                  "retained room history must support byte-wise initialization");
+    // Reset the retained object representation without a same-sized stack temporary.
+    std::memset(reinterpret_cast<unsigned char*>(&R()), 0, sizeof(R()));
+    R().magic    = logic::HISTORY_PERSIST_MAGIC;
+    R().version  = logic::HISTORY_PERSIST_VERSION;
+    R().schema   = logic::HISTORY_ROOM_SCHEMA;
+    R().identity = identity;
+    R().ring.reset();
+    room_seal_locked();
+}
+
 // Called at the end of every record cycle, but only pays the ~30 KB CRC when a commit, a reset or a
 // genuine label change actually moved a sealed byte — about once per five minutes per source rather
 // than five times a second.
@@ -346,8 +405,7 @@ inline void persist_wipe(uint32_t catalog_fp, uint32_t x10a_target_fp, uint32_t 
     persist_seal_locked();
 }
 
-uint32_t current_mb_target_fp() {
-    const Config& c = config();
+uint32_t current_mb_target_fp(const Config& c) {
     return logic::history_homehub_target_fingerprint(
         config_modbus_host(c).c_str(), static_cast<uint32_t>(c.mb_port),
         static_cast<uint32_t>(c.mb_unit_id));
@@ -540,12 +598,12 @@ inline void fold_circulation_locked(const CirculationPumpSample& circulation) {
     }
 }
 
-// Which instrument a ring belongs to. The three are never merged — they keep separate liveness and
+// Which instrument a ring belongs to. The four are never merged — they keep separate liveness and
 // separate rasters, the same reason /values keeps two arrays — but the persistence machinery has to
 // be able to name one ring across all of them. The VALUES are part of the flash record layout, so
 // they are pinned rather than incidental. File-local: no caller outside this translation unit
 // addresses a ring this way.
-enum class HistorySource : uint8_t { X10a = 0, Modbus = 1, Env3 = 2 };
+enum class HistorySource : uint8_t { X10a = 0, Modbus = 1, Env3 = 2, Room = 4 };
 
 // ── One ring, addressed across all three sources ────────────────────────────────────────────────
 // The snapshot machinery (flash and MQTT alike) is generic over the source, so it needs one way to
@@ -553,18 +611,28 @@ enum class HistorySource : uint8_t { X10a = 0, Modbus = 1, Env3 = 2 };
 // rasters, exactly as /values keeps two arrays.
 logic::TrendRing* ring_at(HistorySource src, size_t idx) {
     switch (src) {
-        case HistorySource::X10a:   return idx < TREND_COUNT ? &P().ring[idx].ring : nullptr;
-        case HistorySource::Modbus: return idx < HOMEHUB_HISTORY_COUNT ? &P().mb_ring[idx] : nullptr;
-        case HistorySource::Env3:   return idx < ENV3_HISTORY_COUNT ? &P().env3_ring[idx] : nullptr;
+    case HistorySource::X10a:
+        return idx < TREND_COUNT ? &P().ring[idx].ring : nullptr;
+    case HistorySource::Modbus:
+        return idx < HOMEHUB_HISTORY_COUNT ? &P().mb_ring[idx] : nullptr;
+    case HistorySource::Env3:
+        return idx < ENV3_HISTORY_COUNT ? &P().env3_ring[idx] : nullptr;
+    case HistorySource::Room:
+        return idx == 0 ? &R().ring : nullptr;
     }
     return nullptr;
 }
 
 int64_t source_last_commit_us(HistorySource src) {
     switch (src) {
-        case HistorySource::X10a:   return s_last_commit_us;
-        case HistorySource::Modbus: return s_mb_last_commit_us;
-        case HistorySource::Env3:   return s_env3_last_commit_us;
+    case HistorySource::X10a:
+        return s_last_commit_us;
+    case HistorySource::Modbus:
+        return s_mb_last_commit_us;
+    case HistorySource::Env3:
+        return s_env3_last_commit_us;
+    case HistorySource::Room:
+        return s_room_last_commit_us;
     }
     return -1;
 }
@@ -627,9 +695,12 @@ constexpr size_t kRestoreRingsPerTick = 4;
 
 size_t   s_flash_next_slot = 0;
 uint64_t s_flash_next_sequence = 1;
-int64_t  s_flash_last_bucket[kJournalSources] = {INT64_MIN, INT64_MIN, INT64_MIN, INT64_MIN};
-int64_t  s_flash_newest_bucket[kJournalSources] = {INT64_MIN, INT64_MIN, INT64_MIN, INT64_MIN};
-int64_t  s_flash_oldest_bucket[kJournalSources] = {INT64_MIN, INT64_MIN, INT64_MIN, INT64_MIN};
+int64_t  s_flash_last_bucket[kJournalSources]   = {INT64_MIN, INT64_MIN, INT64_MIN, INT64_MIN,
+                                                   INT64_MIN};
+int64_t  s_flash_newest_bucket[kJournalSources] = {INT64_MIN, INT64_MIN, INT64_MIN, INT64_MIN,
+                                                   INT64_MIN};
+int64_t  s_flash_oldest_bucket[kJournalSources] = {INT64_MIN, INT64_MIN, INT64_MIN, INT64_MIN,
+                                                   INT64_MIN};
 uint16_t s_flash_restore_slots[kJournalSources][HISTORY_SAMPLES] = {};
 uint16_t s_flash_restore_slot_count[kJournalSources] = {};
 size_t   s_flash_restore_ring = 0;
@@ -687,7 +758,47 @@ HistorySource source_of_slot(size_t slot, size_t& idx) {
         idx = slot - TREND_COUNT; return HistorySource::Modbus;
     }
     idx = slot - TREND_COUNT - HOMEHUB_HISTORY_COUNT;
-    return HistorySource::Env3;
+    if (idx < ENV3_HISTORY_COUNT) return HistorySource::Env3;
+    idx -= ENV3_HISTORY_COUNT;
+    return HistorySource::Room;
+}
+
+void room_start_locked(uint32_t want_room, uint32_t reason, bool safe, int64_t start_us) {
+    if (safe) want_room = 0;
+    s_room_identity.store(want_room);
+    const bool room_bookable = logic::history_raster_bookable(logic::history_raster_state(
+        s_room_liveness, logic::HistoryJournalSource::X10a, R().ring.count != 0));
+    const auto room_verdict  = logic::history_restore_verdict(
+        reason, R().magic, R().version, R().schema, logic::HISTORY_ROOM_SCHEMA, R().crc, room_crc(),
+        safe, R().boots_since_commit, room_bookable);
+    if (want_room != 0 && R().identity == want_room &&
+        room_verdict == logic::HistoryRestore::Accept) {
+        const int64_t claim_us    = logic::history_raster_boundary_us(start_us);
+        const bool    has_samples = R().ring.count != 0;
+        const auto    booking     = has_samples
+                                        ? logic::history_adopt_booking(
+                                       s_room_liveness.sign_us, s_room_liveness.commit_us[0],
+                                       logic::DWELL_REBOOT_BLIND_S, claim_us, R().residual_us)
+                                        : logic::HistoryAdoptBooking{0, 0};
+        R().ring.pending          = HISTORY_NO_READING;
+        R().ring.append_gaps(booking.gaps);
+        R().residual_us        = booking.residual_us;
+        R().boots_since_commit = logic::history_counter_next(R().boots_since_commit);
+        logic::history_liveness_begin(s_room_liveness, start_us);
+        if (has_samples) {
+            s_room_have_bucket        = true;
+            s_room_bucket             = logic::history_bucket(claim_us);
+            s_room_last_commit_us     = claim_us;
+            s_room_last_commit_bucket = static_cast<int64_t>(s_room_bucket) - 1;
+            s_room_adopt_real_end_us  = logic::history_adopt_real_end_us(claim_us, booking.gaps);
+            logic::history_liveness_commit(s_room_liveness, logic::HistoryJournalSource::X10a,
+                                           claim_us);
+        }
+        room_seal_locked();
+    } else {
+        room_wipe_locked(want_room);
+        logic::history_liveness_begin(s_room_liveness, start_us);
+    }
 }
 
 } // namespace
@@ -707,7 +818,7 @@ void history_start() {
     const uint32_t want_fp = logic::history_catalog_fingerprint();
     const Config& boot_config = config();
     s_x10a_target_fp.store(boot_config.x10a_identity_fp);
-    const uint32_t want_mb_target_fp = current_mb_target_fp();
+    const uint32_t want_mb_target_fp = current_mb_target_fp(boot_config);
     s_mb_target_fp.store(want_mb_target_fp);
     const uint32_t want_circulation_fp = logic::history_circulation_identity(boot_config);
     s_circulation_fp.store(want_circulation_fp);
@@ -867,6 +978,7 @@ void history_start() {
         // never power-cycled is a memory fault worth seeing.
         diag_printf("history: rings start empty (%s)\n", logic::history_restore_slug(s_persist_verdict));
     }
+    room_start_locked(safe ? 0 : logic::history_room_identity(boot_config), reason, safe, start_us);
     history_flash_start();
     // Registered whether or not a journal exists: the sign of life it records is independent of it
     // (history_flash_save drains only a journal that was found and scanned).
@@ -894,6 +1006,7 @@ void history_liveness_touch() noexcept {
     Lock lk(s_mtx, 0);
     if (!lk.acquired()) return;
     logic::history_liveness_touch(s_liveness, esp_timer_get_time());
+    logic::history_liveness_touch(s_room_liveness, esp_timer_get_time());
 }
 
 uint32_t history_epoch() noexcept { return s_history_epoch.load(std::memory_order_acquire); }
@@ -1006,6 +1119,34 @@ void history_modbus_reset(uint32_t target_fp) noexcept {
 
 uint32_t history_modbus_generation() { return s_mb_identity_generation.load(); }
 
+uint32_t history_room_generation() noexcept { return s_room_generation.load(); }
+
+bool history_room_matches(uint32_t expected_identity) noexcept {
+    return expected_identity != 0 && s_room_identity.load() == expected_identity;
+}
+
+void history_room_reset(uint32_t identity) noexcept {
+    if (!s_mtx) return;
+    Lock flash_lk(s_flash_mtx);
+    if (s_flash_mtx && !flash_lk.acquired()) return;
+    Lock lk(s_mtx);
+    if (!lk.acquired() || identity == s_room_identity.load()) return;
+    s_room_identity.store(identity);
+    uint32_t generation = s_room_generation.load() + 1;
+    s_room_generation.store(generation ? generation : 1);
+    room_wipe_locked(identity);
+    s_room_have_bucket        = false;
+    s_room_last_commit_us     = kNoCommitUs;
+    s_room_last_commit_bucket = -1;
+    s_room_adopt_real_end_us = s_room_adopt_floor_bucket = INT64_MIN;
+    s_room_fed                                           = false;
+    logic::history_liveness_begin(s_room_liveness, esp_timer_get_time());
+    const size_t src         = static_cast<size_t>(logic::HistoryJournalSource::Room);
+    s_flash_last_bucket[src] = s_flash_newest_bucket[src] = s_flash_oldest_bucket[src] = INT64_MIN;
+    s_flash_restore_slot_count[src]                                                    = 0;
+    bump_history_epoch();
+}
+
 void history_circulation_reset() {
     if (!s_mtx) return;
     // The identity of the witness the live configuration defines, read BEFORE the history lock: it
@@ -1094,6 +1235,44 @@ void history_record_circulation() {
     reset_circulation_locked(bucket);
     fold_circulation_locked(circulation);
     persist_seal_locked();
+}
+
+void history_record_room(bool valid, double temperature_c, uint32_t generation) {
+    if (!s_mtx) return;
+    const HistorySample sample = logic::history_room_sample(valid, temperature_c);
+    const int64_t       now_us = esp_timer_get_time();
+    const uint32_t      bucket = logic::history_bucket(now_us);
+    Lock                lk(s_mtx);
+    if (!lk.acquired() || s_flash_forgotten.load() || s_room_identity.load() == 0 ||
+        generation != s_room_generation.load())
+        return;
+    if (s_room_have_bucket && bucket < s_room_bucket) return;
+    s_room_fed = true;
+    logic::history_liveness_touch(s_room_liveness, now_us);
+    bool changed = false;
+    if (!s_room_have_bucket) {
+        const size_t completed = logic::history_completed_samples(bucket);
+        R().ring.reset_with_gaps(completed);
+        if (completed) {
+            s_room_last_commit_us = static_cast<int64_t>(bucket) * logic::HISTORY_DT_S * 1000000;
+            s_room_last_commit_bucket = static_cast<int64_t>(bucket) - 1;
+            logic::history_liveness_commit(s_room_liveness, logic::HistoryJournalSource::X10a,
+                                           s_room_last_commit_us);
+        }
+        changed = true;
+    } else if (bucket > s_room_bucket) {
+        R().ring.commit(logic::history_skipped(s_room_bucket, bucket));
+        s_room_last_commit_us     = now_us;
+        s_room_last_commit_bucket = static_cast<int64_t>(bucket) - 1;
+        R().boots_since_commit    = 0;
+        logic::history_liveness_commit(s_room_liveness, logic::HistoryJournalSource::X10a, now_us);
+        changed = true;
+    }
+    s_room_bucket      = bucket;
+    s_room_have_bucket = true;
+    // Preserve a genuine reading if later messages in this interval are invalid or stale.
+    if (!logic::history_is_absent(sample)) R().ring.fold(sample);
+    if (changed) room_seal_locked();
 }
 
 void history_record(const CachedValue* v, size_t n, uint32_t source_generation) {
@@ -1433,6 +1612,21 @@ size_t history_env3_snapshot(size_t t, HistorySample* out, size_t max, uint32_t*
     return n;
 }
 
+size_t history_room_snapshot(HistorySample* out, size_t max, uint32_t expected_identity,
+                             uint32_t* epoch, logic::HistoryMeta* meta) {
+    if (epoch) *epoch = 0;
+    clear_snapshot_meta(meta);
+    if (!out || !max || !s_mtx) return 0;
+    Lock lk(s_mtx);
+    if (!lk.acquired() || s_flash_forgotten.load() || !history_room_matches(expected_identity) ||
+        R().identity != expected_identity)
+        return 0;
+    if (epoch) *epoch = history_epoch();
+    const size_t n = R().ring.snapshot(out, max);
+    fill_snapshot_meta_locked(meta, s_room_last_commit_us, s_room_last_commit_bucket, n);
+    return n;
+}
+
 // Copied out under the lock rather than returning the pointer: the poll task rewrites these buffers
 // on a model change, and a caller holding the pointer would read one mid-write.
 static size_t copy_under_lock(const char* src, char* out, size_t max) {
@@ -1498,9 +1692,23 @@ bool seed_source_timeline_locked(HistorySource src, int64_t stored_anchor, int64
                                            commit_us);
             break;
         case HistorySource::Env3:
-            if (!s_env3_have_bucket) { s_env3_have_bucket = true; s_env3_bucket = bucket; }
-            s_env3_last_commit_us = commit_us; s_env3_last_commit_bucket = mono_commit_bucket;
+            if (!s_env3_have_bucket) {
+                s_env3_have_bucket = true;
+                s_env3_bucket      = bucket;
+            }
+            s_env3_last_commit_us     = commit_us;
+            s_env3_last_commit_bucket = mono_commit_bucket;
             logic::history_liveness_commit(s_liveness, logic::HistoryJournalSource::Env3,
+                                           commit_us);
+            break;
+        case HistorySource::Room:
+            if (!s_room_have_bucket) {
+                s_room_have_bucket = true;
+                s_room_bucket      = bucket;
+            }
+            s_room_last_commit_us     = commit_us;
+            s_room_last_commit_bucket = mono_commit_bucket;
+            logic::history_liveness_commit(s_room_liveness, logic::HistoryJournalSource::X10a,
                                            commit_us);
             break;
     }
@@ -1523,7 +1731,10 @@ bool splice_locked(HistorySource src, size_t idx, const HistorySample* v, size_t
                                              s_splice_out, HISTORY_SAMPLES);
     if (len <= live_n) return false;                 // nothing older survived the window — not an error
     ring_replace_locked(*r, s_splice_out, len);
-    s_persist_dirty = true;
+    if (src == HistorySource::Room)
+        room_seal_locked();
+    else
+        s_persist_dirty = true;
     return true;
 }
 
@@ -1541,6 +1752,9 @@ static bool history_splice_snapshot(HistorySource src, size_t idx, const logic::
     // be discarded anyway.
     if (src == HistorySource::X10a && s_reset_requested.load()) return false;
     if (src == HistorySource::Modbus && s_mb_reset_requested.load()) return false;
+    if (src == HistorySource::Room &&
+        (!history_room_matches(circulation_identity) || R().identity != circulation_identity))
+        return false;
     // HIST-01/b: the circulation column is the external witness's, not the heat pump's, and its
     // identity moves on its own. While a circulation reset is pending the ring still holds the
     // retired witness's samples. And a block assembled from records of one witness must not be
@@ -1685,13 +1899,14 @@ bool flash_current_layout_matches(const logic::HistoryJournalHeader& h) {
 
 bool flash_record_physically_valid(const FlashJournalRecord& r) {
     const auto& h = r.header;
-    const bool checkup = h.source ==
-        static_cast<uint8_t>(logic::HistoryJournalSource::Checkup);
-    const bool header_ok =
-        checkup
-            ? logic::history_journal_checkup_header_structural_matches(h, logic::CHECKUP_DT_S)
-            : (flash_is_manifest(h) ? logic::history_journal_manifest_header_matches(h)
-                                    : logic::history_journal_trend_header_structural_matches(h));
+    const bool  checkup = h.source == static_cast<uint8_t>(logic::HistoryJournalSource::Checkup);
+    const bool  room    = h.source == static_cast<uint8_t>(logic::HistoryJournalSource::Room);
+    const bool  header_ok =
+        room ? logic::history_journal_room_header_structural_matches(h)
+         : checkup
+             ? logic::history_journal_checkup_header_structural_matches(h, logic::CHECKUP_DT_S)
+             : (flash_is_manifest(h) ? logic::history_journal_manifest_header_matches(h)
+                                     : logic::history_journal_trend_header_structural_matches(h));
     const size_t payload_bytes = logic::history_journal_payload_bytes(h);
     if (!header_ok || payload_bytes > sizeof(r.payload)) return false;
     if (flash_is_manifest(h) && !logic::history_journal_manifest_payload_matches(
@@ -1708,6 +1923,8 @@ bool flash_record_valid(const FlashJournalRecord& r) {
         return logic::history_journal_header_matches(
             h, logic::checkup_journal_fingerprint(),
             static_cast<uint16_t>(logic::CHECKUP_JOURNAL_WORDS), logic::CHECKUP_DT_S);
+    if (h.source == static_cast<uint8_t>(logic::HistoryJournalSource::Room))
+        return logic::history_journal_room_header_matches(h, s_room_identity.load());
     if (!flash_trend_scope_matches(h)) return false;
     return flash_current_layout_matches(h) ||
            logic::history_legacy_disinfection_layout_matches(h) ||
@@ -1715,6 +1932,11 @@ bool flash_record_valid(const FlashJournalRecord& r) {
 }
 
 int flash_record_stored_index(const logic::HistoryJournalHeader& h, size_t current_index) {
+    if (h.source == static_cast<uint8_t>(logic::HistoryJournalSource::Room))
+        return current_index == 0 &&
+                       logic::history_journal_room_header_matches(h, s_room_identity.load())
+                   ? 0
+                   : -1;
     if (h.source >= 3) return -1;
     const auto src = static_cast<logic::HistoryJournalSource>(h.source);
     if (current_index >= logic::history_journal_source_rings(src)) return -1;
@@ -1918,6 +2140,9 @@ bool flash_build_next_record(HistorySource src, FlashJournalRecord& out, TickTyp
     if (src == HistorySource::X10a && (s_x10a_target_fp.load() == 0 || s_reset_requested.load()))
         return false;
     if (src == HistorySource::Modbus && s_mb_reset_requested.load()) return false;
+    if (src == HistorySource::Room &&
+        (s_room_identity.load() == 0 || R().identity != s_room_identity.load() || !s_room_fed))
+        return false;
     // ENV III has no identity to scope its records by, so the only thing that says a ring is being
     // measured is that its producer exists and has fed it this boot. A frozen ring (sensor
     // disabled, or a restore that nothing has extended yet) would otherwise be filed, sample by
@@ -1961,7 +2186,15 @@ bool flash_build_next_record(HistorySource src, FlashJournalRecord& out, TickTyp
             s_flash_last_bucket[src_i], wall_bucket_of_instant_locked(s_adopt_real_end_us[src_i]));
         s_adopt_real_end_us[src_i] = INT64_MIN;
     }
-    const int64_t cursor = src_i < logic::HISTORY_LIVENESS_RASTERS
+    if (src == HistorySource::Room && s_room_adopt_real_end_us != INT64_MIN) {
+        s_room_adopt_floor_bucket = logic::history_adopt_floor_bucket(
+            s_flash_last_bucket[src_i], wall_bucket_of_instant_locked(s_room_adopt_real_end_us));
+        s_room_adopt_real_end_us = INT64_MIN;
+    }
+    const int64_t cursor = src == HistorySource::Room
+                               ? logic::history_adopt_floor_cursor(s_flash_last_bucket[src_i],
+                                                                   s_room_adopt_floor_bucket)
+                           : src_i < logic::HISTORY_LIVENESS_RASTERS
                                ? logic::history_adopt_floor_cursor(s_flash_last_bucket[src_i],
                                                                    s_adopt_floor_bucket[src_i])
                                : s_flash_last_bucket[src_i];
@@ -1975,9 +2208,11 @@ bool flash_build_next_record(HistorySource src, FlashJournalRecord& out, TickTyp
     h.magic = logic::HISTORY_JOURNAL_MAGIC;
     h.version = logic::HISTORY_JOURNAL_VERSION;
     h.source = static_cast<uint8_t>(journal_source(src));
-    h.flags = (src == HistorySource::X10a || src == HistorySource::Modbus)
-        ? logic::HISTORY_JOURNAL_FLAG_TARGET_SCOPED : 0;
-    h.catalog_fp = P().catalog_fp;
+    h.flags =
+        (src == HistorySource::X10a || src == HistorySource::Modbus || src == HistorySource::Room)
+            ? logic::HISTORY_JOURNAL_FLAG_TARGET_SCOPED
+            : 0;
+    h.catalog_fp  = src == HistorySource::Room ? logic::HISTORY_ROOM_SCHEMA : P().catalog_fp;
     h.crc = 0;
     h.commit = logic::HISTORY_JOURNAL_ERASED;
     h.value_count = static_cast<uint16_t>(value_count);
@@ -1985,9 +2220,9 @@ bool flash_build_next_record(HistorySource src, FlashJournalRecord& out, TickTyp
     h.sequence = s_flash_next_sequence;
     h.bucket = target;
     h.dt_s = logic::HISTORY_DT_S;
-    h.rings[0] = static_cast<uint16_t>(TREND_COUNT);
-    h.rings[1] = static_cast<uint16_t>(HOMEHUB_HISTORY_COUNT);
-    h.rings[2] = static_cast<uint16_t>(ENV3_HISTORY_COUNT);
+    h.rings[0]    = src == HistorySource::Room ? 1 : static_cast<uint16_t>(TREND_COUNT);
+    h.rings[1]    = src == HistorySource::Room ? 1 : static_cast<uint16_t>(HOMEHUB_HISTORY_COUNT);
+    h.rings[2]    = src == HistorySource::Room ? 1 : static_cast<uint16_t>(ENV3_HISTORY_COUNT);
     h.reserved = 0xffff;
     if (src == HistorySource::X10a) {
         logic::history_journal_set_scope(h, s_x10a_target_fp.load());
@@ -1999,6 +2234,8 @@ bool flash_build_next_record(HistorySource src, FlashJournalRecord& out, TickTyp
         logic::history_journal_set_circulation_identity(h, P().circulation_fp);
     } else if (src == HistorySource::Modbus) {
         logic::history_journal_set_scope(h, s_mb_target_fp.load());
+    } else if (src == HistorySource::Room) {
+        logic::history_journal_set_scope(h, s_room_identity.load());
     }
     for (size_t i = 0; i < value_count; i++) {
         HistorySample sample = HISTORY_NO_READING;
@@ -2285,16 +2522,15 @@ static void flash_restore_advance_to(size_t ring) {
                 static_cast<unsigned>(s_flash_restored_rings), static_cast<unsigned>(kTotalRings));
 }
 
+// Caller owns s_flash_mtx; the checkup and trend phases share one bounded restore transaction.
 static void history_restore_checkup_flash() {
-    if (s_flash_checkup_restore_done || !s_flash_mtx) return;
+    if (s_flash_checkup_restore_done) return;
     const size_t src = static_cast<size_t>(logic::HistoryJournalSource::Checkup);
     static_assert(sizeof(CheckupFlashRecord) * logic::CHECKUP_COMPLETED_BUCKETS <=
                       sizeof(s_flash_sector),
                   "cold diagnostic restore reuses the 4 KiB journal scan scratch");
     auto* records = reinterpret_cast<CheckupFlashRecord*>(s_flash_sector);
     size_t count = 0;
-    Lock flash_lk(s_flash_mtx, 0);
-    if (!flash_lk.acquired()) return;
     // The index is newest-first. Replay oldest-first so checkup_flash_restore can resolve a
     // duplicate bucket by taking the later entry, matching the trend splice's rule.
     for (size_t k = s_flash_restore_slot_count[src]; k > 0; k--) {
@@ -2332,7 +2568,11 @@ static void history_restore_checkup_flash() {
 // whose indexed window lies beyond the wall bucket is restored from nothing (the splice refuses it)
 // and reported once; it is never re-indexed or rewritten.
 void history_service_flash_restore() {
-    if (s_flash_forgotten.load() || !s_flash_scan_ok || !time_synced()) return;
+    if (!s_flash_mtx || !time_synced()) return;
+    // Resets and factory forget mutate the same endpoints/index. Keep their snapshot, record
+    // selection and final splice in one nonblocking flash transaction (flash -> history).
+    Lock flash_lk(s_flash_mtx, 0);
+    if (!flash_lk.acquired() || s_flash_forgotten.load() || !s_flash_scan_ok) return;
     history_restore_checkup_flash();
     if (s_flash_restore_done) return;
     if (s_flash_restore_ring >= kTotalRings) { s_flash_restore_done = true; return; }
@@ -2371,12 +2611,10 @@ void history_service_flash_restore() {
     // but its circulation column belongs to the external witness it names; the other columns of the
     // same record are restored regardless.
     const uint32_t circ_now                       = s_circulation_fp.load();
+    const uint32_t room_now                       = s_room_identity.load();
     const bool     circ_pending                   = s_circulation_reset_requested.load();
     bool           circ_fed[kRestoreRingsPerTick] = {};
     if (newest != INT64_MIN) {
-        Lock flash_lk(s_flash_mtx, 0);
-        if (!flash_lk.acquired()) return;
-        if (s_flash_forgotten.load()) return;
         // HIST-02/b: a window stamped beyond the wall clock is not restored — the splice below
         // refuses a snapshot newer than the live ring, as it always did — and not re-indexed
         // either: the journal cannot tell a wrong far-future boot from a wrong PAST clock now. The
@@ -2430,7 +2668,8 @@ void history_service_flash_restore() {
                 continue;
             if (start < HISTORY_SAMPLES &&
                 history_splice_snapshot(src, first_idx + b, s_flash_restore_blocks[b] + start,
-                                        HISTORY_SAMPLES - start, 1, newest, circ_now))
+                                        HISTORY_SAMPLES - start, 1, newest,
+                                        src == HistorySource::Room ? room_now : circ_now))
                 s_flash_restored_rings++;
         }
     }
@@ -2438,13 +2677,11 @@ void history_service_flash_restore() {
 }
 
 static size_t history_flash_service_journal(size_t max_records, TickType_t wait_ticks) {
-    if (!s_flash_part || !s_flash_mtx || !s_flash_scan_ok || s_flash_forgotten.load() ||
-        !s_flash_restore_done || !time_synced()) return 0;
+    if (!s_flash_part || !s_flash_mtx || s_flash_forgotten.load() || !time_synced()) return 0;
     Lock flash_lk(s_flash_mtx, wait_ticks);
     if (!flash_lk.acquired()) return 0;
-    // The button task may have requested the wipe after the optimistic check but while this service
-    // was waiting for the flash owner. Never append after the erase completed.
-    if (s_flash_forgotten.load()) return 0;
+    // Read all mutable restore state under its owner lock, including a concurrent factory forget.
+    if (s_flash_forgotten.load() || !s_flash_scan_ok || !s_flash_restore_done) return 0;
     // A failure episode that spent its abandon budget pauses the whole journal (the cursor is one
     // shared position): one attempt per HISTORY_JOURNAL_PAUSED_RETRY_S, none in between.
     if (!logic::history_journal_retry_due(s_flash_fail_paused, esp_timer_get_time(),
@@ -2508,7 +2745,10 @@ static size_t history_flash_service_journal(size_t max_records, TickType_t wait_
 void history_flash_save() {
     if (s_mtx) {
         Lock lk(s_mtx, pdMS_TO_TICKS(50));
-        if (lk.acquired()) logic::history_liveness_touch(s_liveness, esp_timer_get_time());
+        if (lk.acquired()) {
+            logic::history_liveness_touch(s_liveness, esp_timer_get_time());
+            logic::history_liveness_touch(s_room_liveness, esp_timer_get_time());
+        }
     }
     if (!s_flash_part || s_flash_shutdown_started || s_flash_forgotten.load()) return;
     s_flash_shutdown_started = true;
@@ -2531,6 +2771,14 @@ bool history_flash_forget() {
         if (!history_lk.acquired()) return false;
         persist_wipe(logic::history_catalog_fingerprint(), s_x10a_target_fp.load(),
                      s_mb_target_fp.load(), s_circulation_fp.load(), s_env3_enabled);
+        room_wipe_locked(0);
+        s_room_identity.store(0);
+        s_room_have_bucket        = false;
+        s_room_fed                = false;
+        s_room_last_commit_us     = kNoCommitUs;
+        s_room_last_commit_bucket = -1;
+        s_room_adopt_real_end_us = s_room_adopt_floor_bucket = INT64_MIN;
+        logic::history_liveness_begin(s_room_liveness, esp_timer_get_time());
         s_bucket = s_mb_bucket = s_env3_bucket = 0;
         s_have_bucket = s_mb_have_bucket = s_env3_have_bucket = false;
         s_last_commit_us = s_mb_last_commit_us = s_env3_last_commit_us = kNoCommitUs;

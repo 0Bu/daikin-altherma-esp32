@@ -395,6 +395,6 @@ assert.ok(setDiagnostics.includes(nextGeneration),
   "set_diagnostics must pass esp_random() as the generation entropy");
 assert.ok(setDiagnostics.indexOf(nextGeneration) < setDiagnostics.indexOf("config_save(c)"),
   "the new generation must be persisted by the transition's own save");
-assert.equal(count(httpConfig, /diagnostics_next_generation\(/g), 1,
+assert.equal(count(httpConfig, /c\.diagnostics_generation = diagnostics_next_generation\(/g), 1,
   "no second consent transition may advance the generation without the random draw");
 console.log("history restore guard contract: ok");

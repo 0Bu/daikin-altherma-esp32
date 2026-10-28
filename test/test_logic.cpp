@@ -2621,7 +2621,7 @@ static void test_config_load_verdict() {
     CHECK(config_test_cfg_verdict(StoredEntryRead::Present, truncated) ==
           ConfigLoadVerdict::Rejected);
 
-    std::vector<uint8_t> trailing = valid; // one byte past the v19 body, CRC recomputed
+    std::vector<uint8_t> trailing = valid; // one byte past the current body, CRC recomputed
     trailing.insert(trailing.end() - 4, 0x00);
     config_test_reseal(trailing);
     CHECK(config_test_cfg_verdict(StoredEntryRead::Present, trailing) ==
@@ -11416,8 +11416,10 @@ static void test_config_store() {
     const size_t ref_multi_suffix_bytes   = 2 + 2 + 4;
     const size_t discovery_suffix_bytes   = 1;
     const size_t diagnostics_suffix_bytes = 1 + 4;
-    const size_t current_suffix_bytes     = base_suffix_bytes + ref_multi_suffix_bytes +
-                                        discovery_suffix_bytes + diagnostics_suffix_bytes;
+    const size_t room_generation_suffix_bytes = 4;
+    const size_t current_suffix_bytes         = base_suffix_bytes + ref_multi_suffix_bytes +
+                                        discovery_suffix_bytes + diagnostics_suffix_bytes +
+                                        room_generation_suffix_bytes;
     const size_t circ_suffix_bytes =
         2 + circ.circulation_name.size() + 2 + circ.circulation_topic.size() + 2 +
         circ.circulation_power_path.size() + 2 + circ.circulation_time_path.size() + 16;
@@ -11457,7 +11459,7 @@ static void test_config_store() {
     board.board_preset_id   = static_cast<int32_t>(BoardPresetId::M5StackAtomS3Lite);
     board.board_user_set    = true;
     std::vector<uint8_t> bb = config_blob_serialize(board);
-    CHECK(bb[4] == CONFIG_BLOB_VERSION && CONFIG_BLOB_VERSION == 19);
+    CHECK(bb[4] == CONFIG_BLOB_VERSION && CONFIG_BLOB_VERSION == 20);
     ConfigBlob rt;
     CHECK(config_blob_deserialize(bb.data(), bb.size(), rt));
     CHECK(rt.has_board && rt.led_gpio == 35 && rt.led_type == 1 && !rt.led_inverted);
@@ -11523,6 +11525,14 @@ static void test_config_store() {
     CHECK(base_rt.has_modbus_discovery_state && !base_rt.mb_discovery_done);
     CHECK(base_rt.has_diagnostics && !base_rt.diagnostics_enabled &&
           base_rt.diagnostics_generation == 0);
+    // A CRC-valid v20 body with only one byte of the first string's length is still truncated.
+    // It must not replace the previous configuration with a partially decoded/default record.
+    std::vector<uint8_t> short_prefix(base_buf.begin(), base_buf.begin() + 6);
+    short_prefix.resize(10);
+    restamp(short_prefix);
+    out.wifi_ssid = "test-wifi";
+    CHECK(!config_blob_deserialize(short_prefix.data(), short_prefix.size(), out));
+    CHECK(out.wifi_ssid == "test-wifi");
     ConfigBlob multi_source;
     multi_source.ref_temp_setpoint_topic        = "thermostat/status";
     multi_source.ref_temp_time_topic            = "fixture/room-temperature/time";
@@ -11543,7 +11553,10 @@ static void test_config_store() {
     // A genuine v17 blob has the independent room mappings but no discovery decision. The load
     // layer uses has_modbus_discovery_state=false to apply the conservative pre-v18 migration.
     std::vector<uint8_t> v17 = base_buf;
-    v17.erase(v17.end() - 4 - (discovery_suffix_bytes + diagnostics_suffix_bytes), v17.end() - 4);
+    v17.erase(
+        v17.end() - 4 -
+            (discovery_suffix_bytes + diagnostics_suffix_bytes + room_generation_suffix_bytes),
+        v17.end() - 4);
     v17[4] = 17;
     restamp(v17);
     ConfigBlob v17_rt;
@@ -11552,7 +11565,8 @@ static void test_config_store() {
     // A genuine v16 blob has the base topic but not the v17 room-topic extension.
     std::vector<uint8_t> v16 = base_buf;
     v16.erase(v16.end() - 4 -
-                  (ref_multi_suffix_bytes + discovery_suffix_bytes + diagnostics_suffix_bytes),
+                  (ref_multi_suffix_bytes + discovery_suffix_bytes + diagnostics_suffix_bytes +
+                   room_generation_suffix_bytes),
               v16.end() - 4);
     v16[4] = 16;
     restamp(v16);
@@ -11565,7 +11579,8 @@ static void test_config_store() {
     // and taking the user's credentials down with it.
     std::vector<uint8_t> v15 = base_buf;
     v15.erase(v15.end() - 4 -
-                  (16 + ref_multi_suffix_bytes + discovery_suffix_bytes + diagnostics_suffix_bytes),
+                  (16 + ref_multi_suffix_bytes + discovery_suffix_bytes + diagnostics_suffix_bytes +
+                   room_generation_suffix_bytes),
               v15.end() - 4);
     v15[4] = 15;
     restamp(v15);
@@ -11577,7 +11592,8 @@ static void test_config_store() {
     // a zero generation; a v19 stamp missing that complete five-byte block is truncated and
     // rejected.
     std::vector<uint8_t> v18 = base_buf;
-    v18.erase(v18.end() - 4 - diagnostics_suffix_bytes, v18.end() - 4);
+    v18.erase(v18.end() - 4 - (diagnostics_suffix_bytes + room_generation_suffix_bytes),
+              v18.end() - 4);
     v18[4] = 18;
     restamp(v18);
     ConfigBlob v18_rt;
@@ -11588,6 +11604,27 @@ static void test_config_store() {
     v19_short[4]                   = 19;
     restamp(v19_short);
     CHECK(!config_blob_deserialize(v19_short.data(), v19_short.size(), out));
+
+    // v20 adds only the durable room-source generation. A real v19 remains readable with zero;
+    // claiming v20 without the whole four-byte suffix is rejected even with a valid CRC.
+    std::vector<uint8_t> v19 = base_buf;
+    v19.erase(v19.end() - 8, v19.end() - 4);
+    v19[4] = 19;
+    restamp(v19);
+    ConfigBlob v19_rt;
+    CHECK(config_blob_deserialize(v19.data(), v19.size(), v19_rt));
+    CHECK(v19_rt.has_diagnostics && v19_rt.ref_temp_generation == 0);
+    std::vector<uint8_t> v20_short = v19;
+    v20_short[4]                   = 20;
+    restamp(v20_short);
+    CHECK(!config_blob_deserialize(v20_short.data(), v20_short.size(), out));
+    ConfigBlob room_generation;
+    room_generation.ref_temp_generation = UINT32_MAX;
+    const auto room_generation_blob     = config_blob_serialize(room_generation);
+    ConfigBlob room_generation_rt;
+    CHECK(config_blob_deserialize(room_generation_blob.data(), room_generation_blob.size(),
+                                  room_generation_rt));
+    CHECK(room_generation_rt.ref_temp_generation == UINT32_MAX);
 
     // ── v3: the OTA update channel ───────────────────────────────────────────────────────────────
     ConfigBlob chan;
@@ -11659,7 +11696,7 @@ static void test_config_store() {
     mb.mb_unit_id            = 3;
     mb.homehub_enabled       = false;
     std::vector<uint8_t> mbb = config_blob_serialize(mb);
-    CHECK(mbb[4] == CONFIG_BLOB_VERSION && CONFIG_BLOB_VERSION == 19);
+    CHECK(mbb[4] == CONFIG_BLOB_VERSION && CONFIG_BLOB_VERSION == 20);
     ConfigBlob mrt;
     CHECK(config_blob_deserialize(mbb.data(), mbb.size(), mrt));
     CHECK(mrt.has_modbus && mrt.mb_host == "homehub-524288-example.local");
@@ -21289,6 +21326,132 @@ static void test_checkup_persist() {
 // rather than an absent one, so the tests are written against the ways a restore can be wrong while
 // looking right: adopted after a power cycle, adopted across a catalog change, or placed at the
 // wrong instant on the axis.
+static void test_room_history() {
+    using namespace daik::logic;
+    CHECK(history_room_sample(false, 23.6) == HISTORY_NO_READING);
+    CHECK(history_room_sample(true, 23.6) == 236);
+    CHECK(history_room_sample(true, 23.64) == 236);
+    CHECK(history_room_sample(true, 23.66) == 237);
+    CHECK(history_room_sample(true, -0.16) == -2);
+    CHECK(history_room_sample(true, 0.0) == 0);
+    CHECK(history_room_sample(true, std::numeric_limits<double>::quiet_NaN()) ==
+          HISTORY_NO_READING);
+    CHECK(history_room_sample(true, std::numeric_limits<double>::infinity()) == HISTORY_NO_READING);
+    CHECK(history_room_sample(true, -3276.7) == HISTORY_NO_READING);
+    CHECK(history_room_sample(true, 3276.8) == HISTORY_NO_READING);
+    CHECK(history_room_sample(true, -3276.6) == -32766);
+    CHECK(history_room_sample(true, 3276.7) == INT16_MAX);
+
+    Config c;
+    CHECK(history_room_identity(c) == 0);
+    c.diagnostics_enabled = true;
+    CHECK(history_room_identity(c) == 0);
+    c.mqtt_uri = "mqtt://broker.example";
+    CHECK(history_room_identity(c) == 0);
+    c.ref_temp_topic         = "fixture/room";
+    c.ref_temp_path          = "temperature";
+    c.ref_temp_generation    = 5;
+    c.diagnostics_generation = 8;
+    const uint32_t identity  = history_room_identity(c);
+    CHECK(identity != 0);
+    Config renamed                         = c;
+    renamed.ref_temp_name                  = "Example sensor";
+    renamed.ref_temp_fixed_setpoint_tenths = 215;
+    renamed.ref_temp_setpoint_topic        = "fixture/target";
+    renamed.ref_temp_setpoint_path         = "target";
+    renamed.ref_temp_enabled_path          = "enabled";
+    renamed.ref_temp_hvac_mode_path        = "mode";
+    CHECK(history_room_identity(renamed) == identity);
+    auto   changed = [&](const Config& other) { CHECK(history_room_identity(other) != identity); };
+    Config other   = c;
+    other.ref_temp_generation++;
+    changed(other);
+    other = c;
+    other.diagnostics_generation++;
+    changed(other);
+    other = c;
+    other.mqtt_uri += "2";
+    changed(other);
+    other = c;
+    other.ref_temp_topic += "2";
+    changed(other);
+    other = c;
+    other.ref_temp_path += "2";
+    changed(other);
+    other                     = c;
+    other.ref_temp_time_topic = "fixture/time";
+    changed(other);
+    other                    = c;
+    other.ref_temp_time_path = "time";
+    changed(other);
+    Config explicit_time_topic              = other;
+    explicit_time_topic.ref_temp_time_topic = explicit_time_topic.ref_temp_topic;
+    CHECK(history_room_identity(explicit_time_topic) == history_room_identity(other));
+    other = c;
+    other.ref_temp_max_age_s++;
+    changed(other);
+    other                     = c;
+    other.diagnostics_enabled = false;
+    CHECK(history_room_identity(other) == 0);
+
+    HistoryJournalHeader h{};
+    h.magic       = HISTORY_JOURNAL_MAGIC;
+    h.version     = HISTORY_JOURNAL_VERSION;
+    h.source      = static_cast<uint8_t>(HistoryJournalSource::Room);
+    h.flags       = HISTORY_JOURNAL_FLAG_TARGET_SCOPED;
+    h.catalog_fp  = HISTORY_ROOM_SCHEMA;
+    h.commit      = HISTORY_JOURNAL_COMMITTED;
+    h.value_count = 1;
+    h.slot_bytes  = HISTORY_JOURNAL_SLOT_BYTES;
+    h.sequence    = 1;
+    h.bucket      = 100;
+    h.dt_s        = HISTORY_DT_S;
+    h.rings[0] = h.rings[1] = h.rings[2] = 1;
+    history_journal_set_scope(h, identity);
+    CHECK(history_journal_room_header_structural_matches(h));
+    CHECK(history_journal_room_header_matches(h, identity));
+    CHECK(!history_journal_room_header_matches(h, identity ^ 1u));
+    CHECK(!history_journal_room_header_matches(h, 0));
+    CHECK(!history_journal_trend_header_structural_matches(h));
+    CHECK(!history_journal_manifest_header_matches(h));
+    auto rejects = [&](HistoryJournalHeader bad) {
+        CHECK(!history_journal_room_header_structural_matches(bad));
+    };
+    auto bad   = h;
+    bad.source = 3;
+    rejects(bad);
+    bad       = h;
+    bad.flags = 0;
+    rejects(bad);
+    bad = h;
+    history_journal_set_scope(bad, 0);
+    rejects(bad);
+    for (size_t i = 0; i < 3; ++i) {
+        bad          = h;
+        bad.rings[i] = 2;
+        rejects(bad);
+    }
+    bad = h;
+    bad.catalog_fp ^= 1u;
+    CHECK(history_journal_room_header_structural_matches(bad));
+    CHECK(!history_journal_room_header_matches(bad, identity));
+    bad.catalog_fp = 0;
+    rejects(bad);
+    bad             = h;
+    bad.value_count = 2;
+    rejects(bad);
+    bad      = h;
+    bad.dt_s = 60;
+    rejects(bad);
+    const HistorySample sample  = 236;
+    h.crc                       = history_journal_crc_bytes(h, &sample, sizeof(sample));
+    const HistorySample damaged = 237;
+    CHECK(h.crc != history_journal_crc_bytes(h, &damaged, sizeof(damaged)));
+    bad = h;
+    history_journal_set_scope(bad, identity ^ 1u);
+    CHECK(h.crc != history_journal_crc_bytes(bad, &sample, sizeof(sample)));
+}
+
 static void test_history_persist() {
     using namespace logic;
 
@@ -21369,7 +21532,7 @@ static void test_history_persist() {
     CHECK(history_fp_u32(CONFIG_CRC32_INIT, 1) != history_fp_u32(CONFIG_CRC32_INIT, 256));
 
     // --- the official 8 MB append journal -------------------------------------------------------
-    CHECK(HISTORY_FLASH_TOTAL_RINGS == 48);
+    CHECK(HISTORY_FLASH_TOTAL_RINGS == 49);
     CHECK(HISTORY_FLASH_PARTITION_BYTES == 4u * 1024u * 1024u);
     CHECK(HISTORY_FLASH_ERASE_BYTES == 4096);
     CHECK(HISTORY_JOURNAL_HEADER_BYTES == 64);
@@ -21386,7 +21549,10 @@ static void test_history_persist() {
     CHECK(history_journal_source_rings(HistoryJournalSource::Modbus) == 13);
     CHECK(history_journal_source_rings(HistoryJournalSource::Env3) == 3);
     CHECK(history_journal_source_rings(HistoryJournalSource::Checkup) == 0);
-    CHECK(HISTORY_JOURNAL_SOURCE_COUNT == 4);
+    CHECK(HISTORY_JOURNAL_SOURCE_COUNT == 5);
+    CHECK(history_journal_source_rings(HistoryJournalSource::Room) == 1);
+    CHECK(static_cast<unsigned>(HistoryJournalSource::Checkup) == 3);
+    CHECK(static_cast<unsigned>(HistoryJournalSource::Room) == 4);
     CHECK(history_journal_slot_offset(17) == 17 * 256);
     CHECK(history_journal_sector_first_slot(17) == 16);
     CHECK(history_journal_next_sector_slot(15) == 16);
@@ -21505,7 +21671,7 @@ static void test_history_persist() {
     }
     CHECK(HISTORY_FLASH_FUTURE_HOURS == 72);
     CHECK(HISTORY_FLASH_FUTURE_SAMPLES == 864);
-    CHECK(HISTORY_FLASH_FUTURE_RECORDS == 2664);
+    CHECK(HISTORY_FLASH_FUTURE_RECORDS == 3528);
     CHECK(HISTORY_JOURNAL_SLOT_COUNT >= HISTORY_FLASH_FUTURE_RECORDS);
     CHECK(HISTORY_FLASH_PARTITION_OFFSET == 0x400000);
 
@@ -21947,7 +22113,7 @@ static void test_history_persist() {
     CHECK(history_restore_next_source_ring(kModbusFirst - 1) == kModbusFirst);
     CHECK(history_restore_next_source_ring(kModbusFirst) == kEnv3First);
     CHECK(history_restore_next_source_ring(kEnv3First - 1) == kEnv3First);
-    CHECK(history_restore_next_source_ring(kEnv3First) == HISTORY_FLASH_TOTAL_RINGS);
+    CHECK(history_restore_next_source_ring(kEnv3First) == HISTORY_FLASH_TOTAL_RINGS - 1);
     CHECK(history_restore_next_source_ring(HISTORY_FLASH_TOTAL_RINGS - 1) ==
           HISTORY_FLASH_TOTAL_RINGS);
     for (size_t ring = 0; ring < HISTORY_FLASH_TOTAL_RINGS; ++ring) {
@@ -21961,7 +22127,7 @@ static void test_history_persist() {
             ring = history_restore_next_source_ring(ring);
             steps++;
         }
-        CHECK(ring == HISTORY_FLASH_TOTAL_RINGS && steps == 3);
+        CHECK(ring == HISTORY_FLASH_TOTAL_RINGS && steps == 4);
     }
 
     // --- the splice -----------------------------------------------------------------------------
@@ -26686,6 +26852,7 @@ int main() {
     test_refrigerant_service();
     test_state_dwell();
     test_checkup_persist();
+    test_room_history();
     test_history_persist();
     test_history_identity();
     test_checkup_scoped_flash_age();

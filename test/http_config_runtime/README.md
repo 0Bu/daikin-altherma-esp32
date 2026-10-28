@@ -62,6 +62,11 @@ the live checkup producer; each re-toggle advances by one without a new draw, an
 draws nothing, and a zero draw still yields a non-zero generation. Compiling mutants that pass 0 instead of the draw,
 discard the draw's value or take a fresh draw on every transition must fail this group.
 
+Room-history lifetime cases execute the actual room, broker and consent setters: replacement,
+deletion and re-adding advance durable identity, while renaming, target edits and unchanged retries
+preserve it. A failed save must preserve both the stored generation and runtime history; the existing
+allocation witness still forbids allocating after the first durable write.
+
 The immutable original HTTP source at `e99da78f38901cfc1421cec7f74e44dbbb632486` must pass positive
 setters and fail the two specific regressions: a present wrong type taking missing-field semantics,
 and a fractional integer being truncated. It predates the two-argument generation helper, so the
@@ -69,9 +74,9 @@ runner rewrites its one call with entropy 1, which reproduces the original one-a
 every generation; the evidence records both the original and the adapted source hash. Additional
 compiling mutants independently remove type, missing-value, persistence, runtime ordering, probe,
 domain, query, ingress, post-delay reset, reconciliation and generation-entropy defenses. Both
-compiler runs retain sixteen groups, 5,517 assertions and 25 compiling controls; the original
-thirteen groups retain all 5,233 assertions. The three additional groups cover integration with
-detection, reset and the consent generation. Only the selected assertion counts as rejection;
+compiler runs retain seventeen groups, 5,581 assertions and 28 compiling controls; the original
+thirteen groups retain all 5,233 assertions. The additional groups cover integration with detection,
+reset, consent and room-history generations. Only the selected assertion counts as rejection;
 compilation failures, crashes and timeouts never do.
 
 Unique temporary output directories retain `evidence.json`, `commands.txt`, binaries, mutation

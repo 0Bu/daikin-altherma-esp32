@@ -912,6 +912,7 @@ svg .sc-hit:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px
   box-sizing: border-box; border-top: 2px solid var(--vhist-colour);
   background: color-mix(in srgb, var(--vhist-colour) 14%, transparent); }
 .vhist-source.mb { --vhist-colour: var(--src-mb); }
+.vhist-source.room { --vhist-colour: var(--src-room); overflow-wrap: anywhere; }
 .vhist-source small { color: inherit; font-size: 10.5px; }
 /* Component states are categorical timelines, not numeric curves. Paired X10A/HomeHub witnesses
    keep one independent, labelled lane each: ordinary state colour remains comparable across the
@@ -1058,6 +1059,9 @@ svg .sc-hit:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px
 .vhist-area.mb { fill: var(--src-mb); }
 .vhist-pt.mb { fill: var(--src-mb); }
 .vhist-mark.mb { background: var(--src-mb); }
+.vhist-line.room { stroke: var(--src-room); stroke-width: 1.8px; }
+.vhist-area.room, .vhist-pt.room { fill: var(--src-room); }
+.vhist-mark.room, .vhist-now.room { background: var(--src-room); }
 .vhist-source.env-temperature { --vhist-colour: var(--flow-hot); }
 .vhist-mark.env-temperature, .vhist-now.env-temperature { background: var(--flow-hot); }
 .vhist-line.env-temperature { stroke: var(--flow-hot); }
@@ -1475,8 +1479,8 @@ html.modal-open, body.modal-open { overflow: hidden; overscroll-behavior: none; 
    glance while staying quiet, which matters because X10A remains the prominent source: Modbus only
    ever appears as a second opinion inside an explainer, as a marked stand-in while X10A is down, or
    in its own group at the very end of the list. */
-:root { --src-mb:#0E8A8A; --src-mb-soft:rgba(14,138,138,.10); }
-@media (prefers-color-scheme: dark) { :root { --src-mb:#3FB6B6; --src-mb-soft:rgba(63,182,182,.15); } }
+:root { --src-mb:#0E8A8A; --src-mb-soft:rgba(14,138,138,.10); --src-room:#B56B27; }
+@media (prefers-color-scheme: dark) { :root { --src-mb:#3FB6B6; --src-mb-soft:rgba(63,182,182,.15); --src-room:#E6A460; } }
 
 /* The second source inside a value-row accordion is one plain line at the end of its explainer.
    Schematic inspectors instead put the same reading in their divided values section after the
@@ -1514,6 +1518,8 @@ html.modal-open, body.modal-open { overflow: hidden; overscroll-behavior: none; 
    .inspect-row span:first-child/:last-child, which set the two-tone label/value ink; equal
    specificity, won on order, which is why this block stays BELOW them in the file. */
 .inspect-row.mb-row span { color: var(--src-mb); }
+.inspect-row.room-row span, .src-val-room { color: var(--src-room); }
+svg .sc-val.sc-room { fill: var(--src-room); }
 /* A value the Modbus stack supplied: the fallback stand-in, and every row of the Modbus-only group. */
 .vrow-val.src-val-mb, .src-val-mb { color: var(--src-mb); }
 .src-val-mb .vrow-unit { color: var(--src-mb); opacity: .75; }
