@@ -17,9 +17,13 @@
         "gcc-15-linux-ubuntu26": [
           1116,
           1211
+        ],
+        "gcc-15-github-linux-ubuntu26": [
+          1116,
+          1211
         ]
       },
-      "hosted_confirmation": "Authoritative hosted inventory pending; no local inventory substituted."
+      "hosted_confirmation": "Measured GitHub Actions run 40676367864 at 2ebbe43a2c7aa691959df1901a271671c2586e73: 1116/1211 checkup outcomes, 96.98 percent executable lines. All logic tests passed; exact inventory ratchet refreshed from this hosted measurement."
     },
     {
       "compilers": {
@@ -1612,8 +1616,8 @@
         "taken": 8
       },
       "main/logic/checkup.hpp": {
-        "taken": 1083,
-        "outcomes": 1179
+        "taken": 1116,
+        "outcomes": 1211
       },
       "main/logic/checkup_persist.hpp": {
         "outcomes": 153,
