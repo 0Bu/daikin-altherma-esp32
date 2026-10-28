@@ -2,7 +2,7 @@
 
 `node test/test_src_runtime.mjs` compiles the complete current `main/weather_forecast.cpp`, including
 the production Open-Meteo conversion, forecast derivation and source/refresh state machines.
-Eighteen cases and twelve temporary source mutations cover epoch bounds, payload shape/units,
+Cases and temporary source mutations cover epoch bounds, payload shape/units,
 JSON cleanup during allocation failure, HTTP cleanup/completion/caps/deadlines, admission,
 source/consent invalidation, task failure and an exact refresh-success witness. A valid production
 task result survives truncated, malformed and overflowing replacements with an explicit failure;
