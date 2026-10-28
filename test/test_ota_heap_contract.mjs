@@ -359,10 +359,22 @@ assert.ok(stackBudgets.paths.ota_task_manifest_fetch.max_bytes <=
 assert.ok(stackBudgets.paths.ota_health_gate.max_bytes <=
   Number(healthTaskStackMatch[1]) - minimumStackReserve,
 "the rollback-critical health-gate ELF ceiling must leave at least 1 KiB on its task stack");
-for (const pathName of ["weather_task_download", "weather_task_parse"]) {
+const weatherTaskBudget = stackBudgets.tasks.weather;
+assert.equal(weatherTaskBudget.stack_bytes, Number(weatherTaskStackMatch[1]),
+  "Weather path ceilings must bind the actual task allocation");
+assert.ok(weatherTaskBudget.reserve_bytes >= 1536,
+  "Weather must retain its reviewed 1536-byte task reserve");
+for (const pathName of ["weather_task_download", "weather_task_parse", "weather_task_tls",
+  "weather_task_tls_headers", "weather_task_tls_body"]) {
+  assert.ok(weatherTaskBudget.paths.includes(pathName),
+    `${pathName} must remain owned by the Weather task`);
   assert.ok(stackBudgets.paths[pathName].max_bytes <=
-    Number(weatherTaskStackMatch[1]) - minimumStackReserve,
-  `${pathName} must leave at least 1 KiB on the Weather task stack`);
+    Number(weatherTaskStackMatch[1]) - weatherTaskBudget.reserve_bytes,
+  `${pathName} must retain the reviewed Weather task reserve`);
+  if (pathName.startsWith("weather_task_tls")) {
+    assert.equal(stackBudgets.paths[pathName].base_bytes, 4608,
+      `${pathName} must include the complete reviewed SDK TLS envelope`);
+  }
 }
 assert.deepEqual(stackBudgets.paths.weather_task_download.symbols,
   ["weather_task", "weather_cycle", "weather_fetch", "weather_download"]);

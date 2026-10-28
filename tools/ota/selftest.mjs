@@ -184,10 +184,22 @@ try {
         'if False and b"\\\\" in manifest_bytes:')],
     ["the rollback health gate may consume the final 1 KiB reserve", () =>
       replaceBudgetMember("paths", "ota_health_gate", "max_bytes", 3072, 4096)],
-    ["the Weather download path may consume the final 1 KiB reserve", () =>
-      replaceBudgetMember("paths", "weather_task_download", "max_bytes", 11264, 11265)],
-    ["the Weather parse path may consume the final 1 KiB reserve", () =>
-      replaceBudgetMember("paths", "weather_task_parse", "max_bytes", 11264, 11265)],
+    ["the Weather download path may consume its reviewed reserve", () =>
+      replaceBudgetMember("paths", "weather_task_download", "max_bytes", 6656, 6657)],
+    ["the Weather parse path may consume its reviewed reserve", () =>
+      replaceBudgetMember("paths", "weather_task_parse", "max_bytes", 6656, 6657)],
+    ["the Weather task reserve is reduced below its reviewed floor", () =>
+      replaceBudgetMember("tasks", "weather", "reserve_bytes", 1536, 1024)],
+    ...["weather_task_tls", "weather_task_tls_headers", "weather_task_tls_body"].flatMap((name) => [
+      [`${name} consumes its reviewed reserve`, () =>
+        replaceBudgetMember("paths", name, "max_bytes", 6656, 6657)],
+      [`${name} loses the complete SDK TLS allowance`, () =>
+        replaceBudgetMember("paths", name, "base_bytes", 4608, 2048)],
+      [`${name} loses its task owner`, () => mutateBudgets((budgets) => {
+        assert.ok(budgets.tasks.weather.paths.includes(name));
+        budgets.tasks.weather.paths = budgets.tasks.weather.paths.filter((value) => value !== name);
+      })],
+    ]),
     ["the Weather download path omits its live cycle frame", () =>
       omitPathSymbol("weather_task_download", "weather_cycle")],
     ["the Weather parse path omits its live cycle frame", () =>
