@@ -56,9 +56,14 @@ License:
 
 ## Web tooling
 
-- [`esptool-js`](https://github.com/espressif/esptool-js) 0.7.0 is loaded by the Web Serial
-  installer and is licensed under Apache-2.0. Its published bundle contains pako 2.1.0, licensed
-  under MIT and Zlib terms.
+- Dashboard navigation embeds [Lucide](https://lucide.dev/) icon geometry under the ISC License;
+  its power icon derives from Feather under the MIT License. The complete notices
+  are retained in the license comment in `main/www/js/dashboard.js`, including in the embedded UI.
+- [`esptool-js`](https://github.com/espressif/esptool-js) 0.7.0 is vendored unmodified as
+  [`docs/vendor/esptool-js-0.7.0.bundle.js`](docs/vendor/esptool-js-0.7.0.bundle.js) for the Web
+  Serial installer and is licensed under Apache-2.0; its license and npm tarball integrity are in
+  [`docs/vendor/esptool-js-0.7.0.LICENSE`](docs/vendor/esptool-js-0.7.0.LICENSE). The bundle
+  contains pako 2.1.0, licensed under MIT and Zlib terms.
 - `rjsmin.py` 1.2.4 and `rcssmin.py` 1.2.1 are vendored build-only minifiers, Copyright 2011-2025
   André Malo or his licensors, licensed under Apache-2.0. Their license and detailed notice are in
   [`tools/web_asset/vendor/`](tools/web_asset/vendor/README.md).
