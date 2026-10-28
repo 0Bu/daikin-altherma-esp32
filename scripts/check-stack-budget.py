@@ -1513,6 +1513,57 @@ def validate_staged_stack_paths(budgets: dict[str, Any], sources: dict[str, str]
         raise BudgetError("staged stack: shared Modbus count/emission encoder changed")
 
 
+# Independently measured room-source phases. Sequential helpers are conservatively summed; the
+# existing publisher allocation, SDK continuation and 5 KiB path ceilings remain unchanged.
+ROOM_HISTORY_FRAMES = {
+    'mqtt_room_history': ('daik::record_room_history(daik::Config const&, unsigned long)', 256),
+    'room_history_record': ('daik::history_record_room(bool, double, unsigned long)', 64),
+    'room_request_current': ('daik::reference_request_current_locked(unsigned long, daik::Config const&)', 192),
+    'room_config_binding': ('daik::reference_config_binding(daik::Config const&)', 160),
+    'room_applied_binding': ('daik::reference_applied_binding_locked()', 32),
+    'room_binding_matches': ('daik::reference_binding_matches(daik::ReferenceSourceBinding const&, daik::ReferenceSourceBinding const&, bool, bool)', 176),
+    'room_freshness': ('daik::reference_room_freshness(bool, bool, bool, bool, long long, unsigned long long, long long, unsigned long long, unsigned long)', 64),
+    'room_base_freshness': ('daik::reference_freshness(bool, bool, bool, long long, unsigned long long, long long, unsigned long long, unsigned long)', 32),
+    'room_sample': ('daik::reference_room_sample(daik::ReferenceRoomRaw const&, daik::ReferenceFreshness const&)', 96),
+    'room_sample_reason': ('daik::reference_room_freshness_reason(std::basic_string_view<char, std::char_traits<char> >)', 64),
+    'room_sample_reject': ('_ZZN4daik21reference_room_sampleERKNS_16ReferenceRoomRawERKNS_18ReferenceFreshnessEENKUlNS_19ReferenceRoomReasonEE_clES6_$isra$0', 32),
+    'room_time_now': ('daik::time_now(long long&, long&)', 48),
+    'room_history_seal': ('daik::(anonymous namespace)::room_seal_locked()', 32),
+    'room_history_crc': ('daik::(anonymous namespace)::room_crc()', 32),
+    'history_crc_ring': ('daik::(anonymous namespace)::persist_crc_ring(unsigned long, daik::logic::TrendRing const&)', 32),
+    'history_config_crc': ('daik::config_crc32_update(unsigned long, unsigned char const*, unsigned int)', 32),
+    'room_liveness_touch': ('daik::logic::history_liveness_touch(daik::logic::HistoryLiveness&, long long)', 32),
+    'room_liveness_commit': ('daik::logic::history_liveness_commit(daik::logic::HistoryLiveness&, daik::logic::HistoryJournalSource, long long)', 32),
+    'room_liveness_seal': ('daik::logic::history_liveness_seal(daik::logic::HistoryLiveness&)', 32),
+    'room_liveness_crc': ('daik::logic::history_liveness_crc(daik::logic::HistoryLiveness const&)', 80),
+    'room_ring_commit': ('daik::logic::TrendRing::commit(unsigned long)', 32),
+    'room_ring_reset': ('daik::logic::TrendRing::reset_with_gaps(unsigned int)', 32),
+}
+ROOM_HISTORY_PATHS = {
+    'mqtt_room_history_validate': ['mqtt_task', 'mqtt_room_history', 'room_request_current', 'room_config_binding', 'room_applied_binding', 'room_binding_matches', 'room_freshness', 'room_base_freshness', 'room_sample', 'room_sample_reason', 'room_sample_reject', 'room_time_now', 'mqtt_input_lock', 'mqtt_input_unlock'],
+    'mqtt_room_history_commit': ['mqtt_task', 'mqtt_room_history', 'room_history_record', 'room_history_seal', 'room_history_crc', 'history_crc_ring', 'history_config_crc', 'room_liveness_touch', 'room_liveness_commit', 'room_liveness_seal', 'room_liveness_crc', 'room_ring_commit', 'room_ring_reset', 'mqtt_input_lock', 'mqtt_input_unlock'],
+}
+
+
+def validate_room_history_paths(budgets: dict[str, Any], sources: dict[str, str]) -> None:
+    for key, (name, maximum) in ROOM_HISTORY_FRAMES.items():
+        expected = {"pattern": "^" + re.escape(name) + "$", "max_bytes": maximum}
+        if budgets["symbols"].get(key) != expected:
+            raise BudgetError(f"room history: reviewed frame {key}/{maximum} changed")
+    for key, members in ROOM_HISTORY_PATHS.items():
+        expected = {"symbols": members, "multipliers": {}, "base_bytes": 1536, "max_bytes": 5120}
+        if budgets["paths"].get(key) != expected or key not in budgets["tasks"]["mqtt"]["paths"]:
+            raise BudgetError(f"room history: complete publisher path {key} changed")
+    mqtt = stack_source_code(sources["main/mqtt_ha.cpp"])
+    if not re.search(r"static\s+__attribute__\(\(noinline\)\)\s+void\s+record_room_history\s*\(", mqtt):
+        raise BudgetError("room history: independently measured recorder boundary changed")
+    task = stack_function_body(mqtt, "mqtt_task")
+    room = stack_function_body(mqtt, "record_room_history")
+    if (len(re.findall(r"\brecord_room_history\s*\(", task)) != 1
+            or len(re.findall(r"\bhistory_record_room\s*\(", room)) != 1):
+        raise BudgetError("room history: publisher/recorder caller inventory changed")
+
+
 def validate_source_contract(budgets: dict[str, Any]) -> None:
     sources = {path: (REPO / path).read_text(encoding="utf-8")
                for path, _ in TASK_ALLOCATIONS.values()}
@@ -1535,6 +1586,7 @@ def validate_source_contract(budgets: dict[str, Any]) -> None:
     validate_status_diagnosis_paths(budgets, sources)
     validate_staged_stack_paths(budgets, sources,
                                 (REPO / "main/logic/mqtt_group.hpp").read_text(encoding="utf-8"))
+    validate_room_history_paths(budgets, sources)
     validate_shutdown_paths(budgets, sources)
     validate_json_recursion(
         budgets, (REPO / "main/logic/payload_complete.hpp").read_text(encoding="utf-8"),
@@ -2214,6 +2266,48 @@ def staged_stack_self_test(budgets: dict[str, Any]) -> int:
     return controls
 
 
+def room_history_stack_self_test(budgets: dict[str, Any]) -> int:
+    sources = {"main/mqtt_ha.cpp": (REPO / "main/mqtt_ha.cpp").read_text(encoding="utf-8")}
+    validate_room_history_paths(budgets, sources)
+    controls = 0
+
+    def reject(changed: dict[str, Any], changed_source: str | None = None) -> None:
+        nonlocal controls
+        try:
+            validate_room_history_paths(changed, sources if changed_source is None else
+                                        {"main/mqtt_ha.cpp": changed_source})
+        except BudgetError as exc:
+            assert "room history:" in str(exc)
+        else:
+            raise AssertionError("room history stack accepted an omitted caller/boundary")
+        controls += 1
+
+    for key, members in ROOM_HISTORY_PATHS.items():
+        for member in members:
+            changed = json.loads(json.dumps(budgets))
+            changed["paths"][key]["symbols"].remove(member)
+            reject(changed)
+        for field, value in (("base_bytes", 1520), ("max_bytes", 5136)):
+            changed = json.loads(json.dumps(budgets))
+            changed["paths"][key][field] = value
+            reject(changed)
+        changed = json.loads(json.dumps(budgets))
+        changed["tasks"]["mqtt"]["paths"].remove(key)
+        reject(changed)
+    for key in ROOM_HISTORY_FRAMES:
+        changed = json.loads(json.dumps(budgets))
+        changed["symbols"][key]["max_bytes"] += 16
+        reject(changed)
+    source = sources["main/mqtt_ha.cpp"]
+    before = "static __attribute__((noinline)) void record_room_history"
+    assert source.count(before) == 1
+    reject(budgets, source.replace(before, "static void record_room_history"))
+    before = "history_record_room(room.temperature_valid, room.temperature_c, generation);"
+    assert source.count(before) == 1
+    reject(budgets, source.replace(before, "(void)generation;"))
+    return controls
+
+
 def self_test() -> None:
     fixture = """
 00000001 <daik::mcp_post(httpd_req*)>:
@@ -2817,6 +2911,7 @@ def self_test() -> None:
         'esp_core_dump_image_erase': 48,
         'daik::wifi_forget_persisted_config()': 192,
     })
+    extra_frames.update({name: maximum for name, maximum in ROOM_HISTORY_FRAMES.values()})
     for index, (name, frame) in enumerate(extra_frames.items(), 0x1000):
         fixture += f"\n{index:08x} <{name}>:\n{index:x}: 004136 entry a1, {frame}\n"
         if name == 'daik::(anonymous namespace)::button_task(void*)':
@@ -2887,6 +2982,7 @@ def self_test() -> None:
     budgets = load_budgets(DEFAULT_BUDGETS)
     raw_detect_controls = raw_detect_self_test(fixture, budgets)
     staged_stack_controls = staged_stack_self_test(budgets)
+    room_history_controls = room_history_stack_self_test(budgets)
     validate_source_contract(budgets)
     frames = parse_frames(fixture)
 
@@ -4074,6 +4170,7 @@ def self_test() -> None:
           f"{retirement_controls} MQTT-retirement/SDK/codec path, "
           f"{discovery_controls} MQTT-discovery/source/depth path, "
           f"{staged_stack_controls} staged-source/path, "
+          f"{room_history_controls} room-history-source/path, "
           f"{diagnosis_controls} diagnosis-source/path, "
           f"{numeric_disassembly_controls} diagnosis-numeric-calls, "
           f"{shutdown_controls} shutdown-source/path, "

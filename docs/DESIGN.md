@@ -284,7 +284,10 @@ when its numeric values do not change.
 A trended reading has a 24-hour sparkline in its inspector and value expander, with no separate
 history card or range picker. Numeric charts share a light area/darker line grammar; gaps break both,
 and a lone sample is a dot. Paired X10A/HomeHub series share axes and cursor time, with blue/petrol
-source legends. Source replacement never splices two instruments into one series.
+source legends. Room temperature can add the configured MQTT source as a third, separately coloured
+series with its name and MQTT attribution, including when no device room sensor is available.
+The device sensor and MQTT source keep distinct current values and explanations. Source replacement
+never splices two instruments into one series.
 
 Computed readings chart their own units and expressions, not an input relabelled as output.
 Heat output retains signed balance across heating, cooling and defrost; the live pill also applies

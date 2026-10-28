@@ -95,7 +95,8 @@ const context = vm.createContext({
 
 vm.runInContext(`${readAppSource().replace(/\nboot\(\);\s*$/, "\n")}
   this.__ui = { S, t, esp32CardHtml, dynamicControlCardHtml, circulationSettingsCardHtml,
-                refrigerantServiceRowHtml, connLinks, liveData, histHtml, INSPECT, roomSourceStatus };`, context,
+                refrigerantServiceRowHtml, connLinks, liveData, histHtml, INSPECT, roomSourceStatus,
+                hasRoomHist, roomReferencePresent, roomReferenceValue };`, context,
   { filename: "main/www/app.sources" });
 const ui = context.__ui;
 
@@ -158,7 +159,8 @@ const HEALTHY = () => ({
            { id: "max_alloc", label: "Largest free block" },
            { id: "circulation_state", label: "DHW circulation pump" }],
     modbus_rows: [{ id: "dhw_tank", label: "Domestic Hot Water temperature" }],
-    env3_rows: [{ id: "env3_temperature", label: "Outdoor temperature" }] },
+    env3_rows: [{ id: "env3_temperature", label: "Outdoor temperature" }],
+    room_rows: [{ id: "room_temp", label: "Example room" }] },
   health: { covered_s: 86400, full_span: true, available: 7, assessable: 7, evaluated: 7,
     status: "ok", checks: [] },
   refrigerant_service: { kind: "observation", state: "waiting", continuous_s: 0, samples: 0,
@@ -195,9 +197,11 @@ const REMOVE = {
       reason: "disabled", reason_code: 0, sample_eligible: false, current_room_error_k: null,
       last_sample_room_error_k: null, last_sample_unix_s: null, evaluations: 0, samples: 0 };
     s.history.rows = s.history.rows.filter((r) => r.id !== "circulation_state");
+    s.history.room_rows = [];
     return s;
   },
   room(s) {
+    s.history.room_rows = [];
     s.reference_temperature = { configured: false, name: "", topic: "", temperature_path: "",
       setpoint_path: "", timestamp_path: "", enabled_path: "", hvac_mode_path: "", max_age_s: 300,
       subscribed: false, has_value: false, temperature_c: null, has_setpoint: false,
@@ -461,13 +465,20 @@ for (const scenario of SCENARIOS) {
     ...status.history.rows.map((r) => r.id),
     ...status.history.modbus_rows.map((r) => r.id),
     ...status.history.env3_rows.map((r) => r.id),
+    ...(status.history.room_rows || []).map((r) => r.id),
   ]);
-  for (const id of ["circulation_state", "free_heap", "max_alloc", "dhw_tank", "env3_temperature"]) {
+  for (const id of ["circulation_state", "free_heap", "max_alloc", "dhw_tank", "env3_temperature", "room_temp"]) {
     if (offered.has(id)) continue;
     assert.equal(ui.histHtml(id, "", id), "",
       `${scenario.name}: the UI offered a "${id}" chart the device is not buffering`);
     checks++;
   }
+  const roomOffered = !["mqtt", "room", "safeMode"].some((key) => scenario.remove.includes(key));
+  assert.equal(ui.hasRoomHist("room_temp"), roomOffered,
+    `${scenario.name}: the independent MQTT history must follow only its own source lifecycle`);
+  assert.equal(ui.roomReferencePresent(), roomOffered,
+    `${scenario.name}: source outages must not hide another instrument's room history`);
+  checks += 2;
 
   // RULE 6 — a CONFIGURED endpoint must never be reported as "disabled" because its task is not
   // running. /status.modbus.enabled is the one optional-source flag that reports the TASK rather than

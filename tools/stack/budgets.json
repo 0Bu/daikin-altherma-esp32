@@ -2224,6 +2224,94 @@
     "cycling_crc": {
       "pattern": "^daik::\\(anonymous namespace\\)::checkup_persist_crc\\(",
       "max_bytes": 32
+    },
+    "mqtt_room_history": {
+      "pattern": "^daik::record_room_history\\(daik::Config\\ const\\&,\\ unsigned\\ long\\)$",
+      "max_bytes": 256
+    },
+    "room_history_record": {
+      "pattern": "^daik::history_record_room\\(bool,\\ double,\\ unsigned\\ long\\)$",
+      "max_bytes": 64
+    },
+    "room_request_current": {
+      "pattern": "^daik::reference_request_current_locked\\(unsigned\\ long,\\ daik::Config\\ const\\&\\)$",
+      "max_bytes": 192
+    },
+    "room_config_binding": {
+      "pattern": "^daik::reference_config_binding\\(daik::Config\\ const\\&\\)$",
+      "max_bytes": 160
+    },
+    "room_applied_binding": {
+      "pattern": "^daik::reference_applied_binding_locked\\(\\)$",
+      "max_bytes": 32
+    },
+    "room_binding_matches": {
+      "pattern": "^daik::reference_binding_matches\\(daik::ReferenceSourceBinding\\ const\\&,\\ daik::ReferenceSourceBinding\\ const\\&,\\ bool,\\ bool\\)$",
+      "max_bytes": 176
+    },
+    "room_freshness": {
+      "pattern": "^daik::reference_room_freshness\\(bool,\\ bool,\\ bool,\\ bool,\\ long\\ long,\\ unsigned\\ long\\ long,\\ long\\ long,\\ unsigned\\ long\\ long,\\ unsigned\\ long\\)$",
+      "max_bytes": 64
+    },
+    "room_base_freshness": {
+      "pattern": "^daik::reference_freshness\\(bool,\\ bool,\\ bool,\\ long\\ long,\\ unsigned\\ long\\ long,\\ long\\ long,\\ unsigned\\ long\\ long,\\ unsigned\\ long\\)$",
+      "max_bytes": 32
+    },
+    "room_sample": {
+      "pattern": "^daik::reference_room_sample\\(daik::ReferenceRoomRaw\\ const\\&,\\ daik::ReferenceFreshness\\ const\\&\\)$",
+      "max_bytes": 96
+    },
+    "room_sample_reason": {
+      "pattern": "^daik::reference_room_freshness_reason\\(std::basic_string_view<char,\\ std::char_traits<char>\\ >\\)$",
+      "max_bytes": 64
+    },
+    "room_sample_reject": {
+      "pattern": "^_ZZN4daik21reference_room_sampleERKNS_16ReferenceRoomRawERKNS_18ReferenceFreshnessEENKUlNS_19ReferenceRoomReasonEE_clES6_\\$isra\\$0$",
+      "max_bytes": 32
+    },
+    "room_time_now": {
+      "pattern": "^daik::time_now\\(long\\ long\\&,\\ long\\&\\)$",
+      "max_bytes": 48
+    },
+    "room_history_seal": {
+      "pattern": "^daik::\\(anonymous\\ namespace\\)::room_seal_locked\\(\\)$",
+      "max_bytes": 32
+    },
+    "room_history_crc": {
+      "pattern": "^daik::\\(anonymous\\ namespace\\)::room_crc\\(\\)$",
+      "max_bytes": 32
+    },
+    "history_crc_ring": {
+      "pattern": "^daik::\\(anonymous\\ namespace\\)::persist_crc_ring\\(unsigned\\ long,\\ daik::logic::TrendRing\\ const\\&\\)$",
+      "max_bytes": 32
+    },
+    "history_config_crc": {
+      "pattern": "^daik::config_crc32_update\\(unsigned\\ long,\\ unsigned\\ char\\ const\\*,\\ unsigned\\ int\\)$",
+      "max_bytes": 32
+    },
+    "room_liveness_touch": {
+      "pattern": "^daik::logic::history_liveness_touch\\(daik::logic::HistoryLiveness\\&,\\ long\\ long\\)$",
+      "max_bytes": 32
+    },
+    "room_liveness_commit": {
+      "pattern": "^daik::logic::history_liveness_commit\\(daik::logic::HistoryLiveness\\&,\\ daik::logic::HistoryJournalSource,\\ long\\ long\\)$",
+      "max_bytes": 32
+    },
+    "room_liveness_seal": {
+      "pattern": "^daik::logic::history_liveness_seal\\(daik::logic::HistoryLiveness\\&\\)$",
+      "max_bytes": 32
+    },
+    "room_liveness_crc": {
+      "pattern": "^daik::logic::history_liveness_crc\\(daik::logic::HistoryLiveness\\ const\\&\\)$",
+      "max_bytes": 80
+    },
+    "room_ring_commit": {
+      "pattern": "^daik::logic::TrendRing::commit\\(unsigned\\ long\\)$",
+      "max_bytes": 32
+    },
+    "room_ring_reset": {
+      "pattern": "^daik::logic::TrendRing::reset_with_gaps\\(unsigned\\ int\\)$",
+      "max_bytes": 32
     }
   },
   "paths": {
@@ -5853,6 +5941,49 @@
       "multipliers": {},
       "base_bytes": 4608,
       "max_bytes": 6656
+    },
+    "mqtt_room_history_validate": {
+      "symbols": [
+        "mqtt_task",
+        "mqtt_room_history",
+        "room_request_current",
+        "room_config_binding",
+        "room_applied_binding",
+        "room_binding_matches",
+        "room_freshness",
+        "room_base_freshness",
+        "room_sample",
+        "room_sample_reason",
+        "room_sample_reject",
+        "room_time_now",
+        "mqtt_input_lock",
+        "mqtt_input_unlock"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "mqtt_room_history_commit": {
+      "symbols": [
+        "mqtt_task",
+        "mqtt_room_history",
+        "room_history_record",
+        "room_history_seal",
+        "room_history_crc",
+        "history_crc_ring",
+        "history_config_crc",
+        "room_liveness_touch",
+        "room_liveness_commit",
+        "room_liveness_seal",
+        "room_liveness_crc",
+        "room_ring_commit",
+        "room_ring_reset",
+        "mqtt_input_lock",
+        "mqtt_input_unlock"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
     }
   },
   "tasks": {
@@ -5998,7 +6129,9 @@
         "mqtt_discovery_owner_subscribe_tls",
         "mqtt_discovery_owner_subscribe_callback",
         "mqtt_cycling_evidence",
-        "mqtt_cycling_expire"
+        "mqtt_cycling_expire",
+        "mqtt_room_history_validate",
+        "mqtt_room_history_commit"
       ]
     },
     "poll": {
