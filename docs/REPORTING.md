@@ -36,7 +36,7 @@ using the [redaction list](SECURITY.md#report-redaction-contract) before posting
 ## Privacy and crash evidence
 
 The report protects known network/location identifiers and user-entered service/source names, topics
-and paths. The exact **28-field status contract** has one home in
+and paths. The complete **status redaction contract** has one home in
 [SECURITY.md](SECURITY.md#report-redaction-contract). Unset fields remain unset/empty rather than
 inventing a configured service. Room-source HVAC mode keeps only the fixed public vocabulary
 `off`, `heat`, `cool`, `heat_cool`, `auto`, `dry`, `fan_only`; other source text is redacted.

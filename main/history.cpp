@@ -2519,16 +2519,15 @@ static void flash_restore_advance_to(size_t ring) {
                 static_cast<unsigned>(s_flash_restored_rings), static_cast<unsigned>(kTotalRings));
 }
 
+// Caller owns s_flash_mtx; the checkup and trend phases share one bounded restore transaction.
 static void history_restore_checkup_flash() {
-    if (s_flash_checkup_restore_done || !s_flash_mtx) return;
+    if (s_flash_checkup_restore_done) return;
     const size_t src = static_cast<size_t>(logic::HistoryJournalSource::Checkup);
     static_assert(sizeof(CheckupFlashRecord) * logic::CHECKUP_COMPLETED_BUCKETS <=
                       sizeof(s_flash_sector),
                   "cold diagnostic restore reuses the 4 KiB journal scan scratch");
     auto* records = reinterpret_cast<CheckupFlashRecord*>(s_flash_sector);
     size_t count = 0;
-    Lock flash_lk(s_flash_mtx, 0);
-    if (!flash_lk.acquired()) return;
     // The index is newest-first. Replay oldest-first so checkup_flash_restore can resolve a
     // duplicate bucket by taking the later entry, matching the trend splice's rule.
     for (size_t k = s_flash_restore_slot_count[src]; k > 0; k--) {
@@ -2566,7 +2565,11 @@ static void history_restore_checkup_flash() {
 // whose indexed window lies beyond the wall bucket is restored from nothing (the splice refuses it)
 // and reported once; it is never re-indexed or rewritten.
 void history_service_flash_restore() {
-    if (s_flash_forgotten.load() || !s_flash_scan_ok || !time_synced()) return;
+    if (!s_flash_mtx || !time_synced()) return;
+    // Resets and factory forget mutate the same endpoints/index. Keep their snapshot, record
+    // selection and final splice in one nonblocking flash transaction (flash -> history).
+    Lock flash_lk(s_flash_mtx, 0);
+    if (!flash_lk.acquired() || s_flash_forgotten.load() || !s_flash_scan_ok) return;
     history_restore_checkup_flash();
     if (s_flash_restore_done) return;
     if (s_flash_restore_ring >= kTotalRings) { s_flash_restore_done = true; return; }
@@ -2609,9 +2612,6 @@ void history_service_flash_restore() {
     const bool     circ_pending                   = s_circulation_reset_requested.load();
     bool           circ_fed[kRestoreRingsPerTick] = {};
     if (newest != INT64_MIN) {
-        Lock flash_lk(s_flash_mtx, 0);
-        if (!flash_lk.acquired()) return;
-        if (s_flash_forgotten.load()) return;
         // HIST-02/b: a window stamped beyond the wall clock is not restored — the splice below
         // refuses a snapshot newer than the live ring, as it always did — and not re-indexed
         // either: the journal cannot tell a wrong far-future boot from a wrong PAST clock now. The
@@ -2674,13 +2674,11 @@ void history_service_flash_restore() {
 }
 
 static size_t history_flash_service_journal(size_t max_records, TickType_t wait_ticks) {
-    if (!s_flash_part || !s_flash_mtx || !s_flash_scan_ok || s_flash_forgotten.load() ||
-        !s_flash_restore_done || !time_synced()) return 0;
+    if (!s_flash_part || !s_flash_mtx || s_flash_forgotten.load() || !time_synced()) return 0;
     Lock flash_lk(s_flash_mtx, wait_ticks);
     if (!flash_lk.acquired()) return 0;
-    // The button task may have requested the wipe after the optimistic check but while this service
-    // was waiting for the flash owner. Never append after the erase completed.
-    if (s_flash_forgotten.load()) return 0;
+    // Read all mutable restore state under its owner lock, including a concurrent factory forget.
+    if (s_flash_forgotten.load() || !s_flash_scan_ok || !s_flash_restore_done) return 0;
     // A failure episode that spent its abandon budget pauses the whole journal (the cursor is one
     // shared position): one attempt per HISTORY_JOURNAL_PAUSED_RETRY_S, none in between.
     if (!logic::history_journal_retry_due(s_flash_fail_paused, esp_timer_get_time(),
