@@ -140,10 +140,12 @@ jobs:
       pull-requests: read
       actions: read
     runs-on: ubuntu-26.04
-    # Main runs every mutation canary, and so does any PR that touches this file or most tooling;
-    # that complete suite now takes about twenty minutes on hosted runners. The cap stays a
-    # wedged-runner guard with headroom above it, not a budget the healthy suite brushes against.
-    timeout-minutes: 30
+    # Main runs every mutation canary, and so does any PR that touches this file or most tooling.
+    # Read the complete suite's duration from this job's step timings on a recent main run and keep
+    # the cap well above it: a slow runner mirror alone has stretched the clang-format install by
+    # more than a quarter of an hour. The cap stays a wedged-runner guard with headroom above that
+    # duration, not a budget the healthy suite brushes against.
+    timeout-minutes: 60
     outputs:
       firmware: ${{ steps.changes.outputs.firmware }}
     steps:
