@@ -1,6 +1,14 @@
 {
   "version": 1,
   "symbols": {
+    "sdk_http_client_fetch_headers": {
+      "pattern": "^esp_http_client_fetch_headers$",
+      "max_bytes": 32
+    },
+    "sdk_http_client_read": {
+      "pattern": "^esp_http_client_read$",
+      "max_bytes": 64
+    },
     "sdk_http_client_open": {
       "pattern": "^esp_http_client_open$",
       "max_bytes": 48
@@ -5813,6 +5821,38 @@
       "multipliers": {},
       "base_bytes": 1536,
       "max_bytes": 5120
+    },
+    "weather_task_tls_headers": {
+      "symbols": [
+        "weather_task",
+        "weather_cycle",
+        "weather_fetch",
+        "weather_download",
+        "sdk_http_client_fetch_headers",
+        "tls_esp_transport_read",
+        "tls_ssl_read",
+        "tls_esp_tls_conn_read",
+        "tls_esp_mbedtls_read"
+      ],
+      "multipliers": {},
+      "base_bytes": 4608,
+      "max_bytes": 6656
+    },
+    "weather_task_tls_body": {
+      "symbols": [
+        "weather_task",
+        "weather_cycle",
+        "weather_fetch",
+        "weather_download",
+        "sdk_http_client_read",
+        "tls_esp_transport_read",
+        "tls_ssl_read",
+        "tls_esp_tls_conn_read",
+        "tls_esp_mbedtls_read"
+      ],
+      "multipliers": {},
+      "base_bytes": 4608,
+      "max_bytes": 6656
     }
   },
   "tasks": {
@@ -6090,7 +6130,9 @@
       "paths": [
         "weather_task_download",
         "weather_task_tls",
-        "weather_task_parse"
+        "weather_task_parse",
+        "weather_task_tls_headers",
+        "weather_task_tls_body"
       ]
     },
     "ota": {

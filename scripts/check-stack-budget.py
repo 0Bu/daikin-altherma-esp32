@@ -33,6 +33,8 @@ STACK_MOVSP_RE = re.compile(r"movsp\s+a1,")
 PACKED_ENTRY_SYMBOLS = frozenset({
     'esp_http_client_open',
     'esp_http_client_connect',
+    'esp_http_client_fetch_headers',
+    'esp_http_client_read',
     '__wrap_mbedtls_ssl_handshake_client_step',
     '__wrap_mbedtls_ssl_read',
     '__wrap_mbedtls_ssl_write',
@@ -959,17 +961,24 @@ def validate_shutdown_paths(budgets: dict[str, Any], sources: dict[str, str]) ->
 def validate_weather_tls_path(budgets: dict[str, Any]) -> None:
     # The SDK envelope includes the larger WSS prefix. Adding the complete HTTP prefix again
     # deliberately overcounts shared transport/TLS frames, rather than assuming spare task space.
-    members = ["weather_task", "weather_cycle", "weather_fetch", "weather_download",
-               "sdk_http_client_open", "sdk_http_client_connect", "tls_esp_transport_connect",
-               "tls_ssl_connect", "tls_esp_tls_conn_new_sync", "tls_esp_tls_low_level_conn",
-               "tls_esp_mbedtls_handshake"]
+    callers = ["weather_task", "weather_cycle", "weather_fetch", "weather_download"]
+    read = ["tls_esp_transport_read", "tls_ssl_read", "tls_esp_tls_conn_read",
+            "tls_esp_mbedtls_read"]
+    paths = {
+        "weather_task_tls": callers + ["sdk_http_client_open", "sdk_http_client_connect",
+            "tls_esp_transport_connect", "tls_ssl_connect", "tls_esp_tls_conn_new_sync",
+            "tls_esp_tls_low_level_conn", "tls_esp_mbedtls_handshake"],
+        "weather_task_tls_headers": callers + ["sdk_http_client_fetch_headers"] + read,
+        "weather_task_tls_body": callers + ["sdk_http_client_read"] + read,
+    }
     owned = budgets["tasks"]["weather"]
-    rule = budgets["paths"].get("weather_task_tls")
-    if (rule is None or "weather_task_tls" not in owned["paths"] or owned["reserve_bytes"] < 1536
-            or rule["symbols"] != members or rule["multipliers"] != {}
-            or rule["base_bytes"] != SDK_TLS_LIMIT
-            or rule["max_bytes"] != owned["stack_bytes"] - owned["reserve_bytes"]):
-        raise BudgetError("Weather TLS path: complete caller/HTTP prefix/TLS envelope required")
+    for name, members in paths.items():
+        rule = budgets["paths"].get(name)
+        if (rule is None or name not in owned["paths"] or owned["reserve_bytes"] < 1536
+                or rule["symbols"] != members or rule["multipliers"] != {}
+                or rule["base_bytes"] != SDK_TLS_LIMIT
+                or rule["max_bytes"] != owned["stack_bytes"] - owned["reserve_bytes"]):
+            raise BudgetError(f"Weather TLS path {name}: complete caller/HTTP prefix/TLS envelope required")
     for name in ("weather_task_download", "weather_task_parse"):
         if budgets["paths"][name]["base_bytes"] != 2048:
             raise BudgetError("Weather TLS path: separate error/parse allowances must remain")
@@ -2668,6 +2677,8 @@ def self_test() -> None:
     extra_frames.update({
         'esp_http_client_open': 48,
         'esp_http_client_connect': 48,
+        'esp_http_client_fetch_headers': 32,
+        'esp_http_client_read': 64,
         'esp_event_loop_run': 80,
         'daik::on_mqtt(void*, char const*, long, void*)': 80,
         'daik::capture_discovery_owner_frame(esp_mqtt_event_t*)': 96,
@@ -2898,6 +2909,8 @@ def self_test() -> None:
     assert selected["weather_cycle"] == 736
     assert selected["path:weather_task_download"] == 3424
     assert selected["path:weather_task_tls"] == 6320
+    assert selected["path:weather_task_tls_headers"] == 6176
+    assert selected["path:weather_task_tls_body"] == 6208
     assert selected["path:weather_task_parse"] == 5248
     # Restoring the former 1 KiB read buffer adds 768 bytes to the enclosing download frame.
     # The separate error path still fits; only the complete caller + HTTP + TLS composition
@@ -2911,15 +2924,16 @@ def self_test() -> None:
         assert "weather_task_tls" in str(exc)
     else:
         raise AssertionError("self-test accepted the former Weather read-buffer footprint")
-    for member in budgets["paths"]["weather_task_tls"]["symbols"]:
-        changed = json.loads(json.dumps(budgets))
-        changed["paths"]["weather_task_tls"]["symbols"].remove(member)
-        try:
-            validate_weather_tls_path(changed)
-        except BudgetError:
-            pass
-        else:
-            raise AssertionError(f"self-test accepted missing Weather TLS caller {member}")
+    for name in ("weather_task_tls", "weather_task_tls_headers", "weather_task_tls_body"):
+        for member in budgets["paths"][name]["symbols"]:
+            changed = json.loads(json.dumps(budgets))
+            changed["paths"][name]["symbols"].remove(member)
+            try:
+                validate_weather_tls_path(changed)
+            except BudgetError:
+                pass
+            else:
+                raise AssertionError(f"self-test accepted missing {name} caller {member}")
     for field, value in (("base_bytes", SDK_TLS_LIMIT - 16), ("max_bytes", 7168)):
         changed = json.loads(json.dumps(budgets))
         changed["paths"]["weather_task_tls"][field] = value
