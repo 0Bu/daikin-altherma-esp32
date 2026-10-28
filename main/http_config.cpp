@@ -1044,6 +1044,8 @@ static esp_err_t set_hp(httpd_req_t* req) {
             // The HomeHub stack is told separately, because it IS separate: this starts or stops
             // its task and re-resolves its address without touching the X10A poll engine above.
             mb_reconfigure(modbus_enabled);
+            // The heating-curve event and cadence came from the previous endpoint's gates.
+            mqtt_heating_curve_homehub_reset();
             // Publish the tombstone only after generation, status and cache have crossed to the new
             // identity. mqtt_task can then never consume this request and republish predecessor A
             // from the same cycle before the HomeHub owner notices B/disabled.

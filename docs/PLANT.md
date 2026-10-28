@@ -193,9 +193,9 @@ defines the valve independently; normal-operation flags do not establish exclusi
 Each prerequisite needs its own current-session reply within the seven-second project bound.
 Known inactivity, DHW routing or Cooling yields neutral **HOLD**; otherwise unknown/stale
 prerequisites yield **BLOCK**. A transient hold/block
-preserves the sample cadence and last event. Saving the room source or the diagnostics consent clears
-sample memory and cadence at once, even inside one sampler cycle; deleting the room source/HomeHub or
-disabling plant diagnostics also disarms.
+preserves the sample cadence and last event. Saving the room source or the diagnostics consent, or
+changing the HomeHub host, port or unit, clears sample memory and cadence at once, even inside one
+sampler cycle; deleting the room source/HomeHub or disabling plant diagnostics also disarms.
 
 Current evaluation has a separate **three-second project age bound**, three nominal one-second MQTT
 task cycles, inclusive of the boundary. Each real evaluation renews it, including HOLD/BLOCK; reads
