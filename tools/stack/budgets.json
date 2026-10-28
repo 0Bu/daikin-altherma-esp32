@@ -1,6 +1,22 @@
 {
   "version": 1,
   "symbols": {
+    "sdk_http_client_fetch_headers": {
+      "pattern": "^esp_http_client_fetch_headers$",
+      "max_bytes": 32
+    },
+    "sdk_http_client_read": {
+      "pattern": "^esp_http_client_read$",
+      "max_bytes": 64
+    },
+    "sdk_http_client_open": {
+      "pattern": "^esp_http_client_open$",
+      "max_bytes": 48
+    },
+    "sdk_http_client_connect": {
+      "pattern": "^esp_http_client_connect$",
+      "max_bytes": 48
+    },
     "status_serializer": {
       "pattern": "^void daik::append_status_json<daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u> >\\(daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u>&, bool\\)$",
       "max_bytes": 5120
@@ -2303,7 +2319,25 @@
       ],
       "multipliers": {},
       "base_bytes": 2048,
-      "max_bytes": 11264
+      "max_bytes": 6656
+    },
+    "weather_task_tls": {
+      "symbols": [
+        "weather_task",
+        "weather_cycle",
+        "weather_fetch",
+        "weather_download",
+        "sdk_http_client_open",
+        "sdk_http_client_connect",
+        "tls_esp_transport_connect",
+        "tls_ssl_connect",
+        "tls_esp_tls_conn_new_sync",
+        "tls_esp_tls_low_level_conn",
+        "tls_esp_mbedtls_handshake"
+      ],
+      "multipliers": {},
+      "base_bytes": 4608,
+      "max_bytes": 6656
     },
     "weather_task_parse": {
       "symbols": [
@@ -2321,7 +2355,7 @@
         "cjson_delete": 17
       },
       "base_bytes": 2048,
-      "max_bytes": 11264
+      "max_bytes": 6656
     },
     "ota_health_gate": {
       "symbols": [
@@ -5787,6 +5821,38 @@
       "multipliers": {},
       "base_bytes": 1536,
       "max_bytes": 5120
+    },
+    "weather_task_tls_headers": {
+      "symbols": [
+        "weather_task",
+        "weather_cycle",
+        "weather_fetch",
+        "weather_download",
+        "sdk_http_client_fetch_headers",
+        "tls_esp_transport_read",
+        "tls_ssl_read",
+        "tls_esp_tls_conn_read",
+        "tls_esp_mbedtls_read"
+      ],
+      "multipliers": {},
+      "base_bytes": 4608,
+      "max_bytes": 6656
+    },
+    "weather_task_tls_body": {
+      "symbols": [
+        "weather_task",
+        "weather_cycle",
+        "weather_fetch",
+        "weather_download",
+        "sdk_http_client_read",
+        "tls_esp_transport_read",
+        "tls_ssl_read",
+        "tls_esp_tls_conn_read",
+        "tls_esp_mbedtls_read"
+      ],
+      "multipliers": {},
+      "base_bytes": 4608,
+      "max_bytes": 6656
     }
   },
   "tasks": {
@@ -6059,11 +6125,14 @@
       ]
     },
     "weather": {
-      "stack_bytes": 12288,
-      "reserve_bytes": 1024,
+      "stack_bytes": 8192,
+      "reserve_bytes": 1536,
       "paths": [
         "weather_task_download",
-        "weather_task_parse"
+        "weather_task_tls",
+        "weather_task_parse",
+        "weather_task_tls_headers",
+        "weather_task_tls_body"
       ]
     },
     "ota": {
@@ -6113,6 +6182,7 @@
   },
   "sdk": {
     "source_sha256": {
+      "esp_http_client/esp_http_client.c": "b28179259684e4cadbcaff00127ac50ea5c4477536cca1b4df86590694acdf24",
       "mbedtls/mbedtls/tf-psa-crypto/include/psa/crypto_sizes.h": "87693b7058f391a472b34378893452789fdcf0542e6f7bb5612d59b7b4bc2267",
       "mbedtls/mbedtls/tf-psa-crypto/drivers/builtin/src/psa_crypto_rsa.c": "06f3a581c743bced41153e780eebc79e8a90be48c8634d2c070091fdcc74758e",
       "mbedtls/mbedtls/tf-psa-crypto/drivers/builtin/src/psa_crypto_ecp.c": "8d6e2245774ef2f672f3ee29657a9f8bb341fc0224f24d2380d460a2b739b8d5",
