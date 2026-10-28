@@ -15215,6 +15215,10 @@ static void test_checkup_population() {
     CHECK(class_gap.space_runs == 1 && class_gap.censored_runs == 0);
     const auto hidden_change = run(0, 1, 0, true, false, false);
     CHECK(hidden_change.space_runs == 0 && hidden_change.censored_unreadable_runs == 1);
+    const auto hidden_rps_change = run(0, 0, 1, true, false, false);
+    CHECK(hidden_rps_change.space_runs == 0 && hidden_rps_change.dhw_runs == 0 &&
+          hidden_rps_change.censored_unreadable_runs == 1 &&
+          hidden_rps_change.censored_handover_runs == 0);
     CHECK(hidden_change.censored_handover_runs == 0);
     // Even a bridged same-class gap prevents a later handover from being excluded as a fully
     // witnessed mixed run. Its entire elapsed duration remains unsafe population evidence.
@@ -15228,7 +15232,8 @@ static void test_checkup_population() {
     CHECK(run(0, 0, 16, false, false, false).censored_unreadable_runs == 1);
     CHECK(run(0, 0, 1, false, false, true).censored_unreadable_runs == 1);
 
-    auto endpoint_gap = [](bool missing_rps, bool hour_crossing, int64_t endpoint_gap_us) {
+    auto endpoint_gap = [](unsigned gap_kind, bool hour_crossing, int64_t endpoint_gap_us,
+                           bool recovered_dhw = false) {
         CheckupState  state;
         CheckupRing   ring;
         CheckupSample sample;
@@ -15252,11 +15257,14 @@ static void test_checkup_population() {
         tick(start - 1000000);
         sample.rps_running = true;
         tick(start);
-        sample.rps_known   = !missing_rps;
-        sample.valve_known = missing_rps;
+        sample.rps_known   = gap_kind != 1;
+        sample.valve_known = gap_kind != 0;
+        if (gap_kind == 2) sample.operating_mode = CheckupOperatingMode::Other;
         tick(start + 1000000);
         if (hour_crossing) tick(start + 10000000); // production rolls over, discarding this dt
         sample.rps_known = sample.valve_known = true;
+        sample.operating_mode                 = CheckupOperatingMode::Heating;
+        sample.valve_dhw                      = recovered_dhw;
         tick(start + endpoint_gap_us);
         sample.rps_running = false;
         tick(start + endpoint_gap_us + 1000000);
@@ -15264,15 +15272,20 @@ static void test_checkup_population() {
     };
     // The allowance measures the complete monotonic interval between matching readable running
     // endpoints. Neither a fractional recovery nor the production hour-boundary dt=0 may extend it.
-    for (bool missing_rps : {false, true}) {
+    for (unsigned gap_kind : {0u, 1u, 2u}) { // valve missing, RPS missing, readable Other/Stop mode
         for (bool hour_crossing : {false, true}) {
-            const auto boundary = endpoint_gap(missing_rps, hour_crossing, 15000000);
+            const auto boundary = endpoint_gap(gap_kind, hour_crossing, 15000000);
             CHECK(boundary.space_runs == 1 && boundary.censored_runs == 0);
             for (int64_t endpoint_us : {15000001LL, 15500000LL}) {
-                const auto late = endpoint_gap(missing_rps, hour_crossing, endpoint_us);
+                const auto late = endpoint_gap(gap_kind, hour_crossing, endpoint_us);
                 CHECK(late.space_runs == 0 && late.censored_unreadable_runs == 1);
             }
         }
+    }
+    for (bool hour_crossing : {false, true}) {
+        const auto hidden_handover = endpoint_gap(2, hour_crossing, 15000000, true);
+        CHECK(hidden_handover.space_runs == 0 && hidden_handover.censored_unreadable_runs == 1 &&
+              hidden_handover.censored_handover_runs == 0);
     }
 
     const auto replay = checkup_population_fixture();

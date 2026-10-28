@@ -1380,7 +1380,9 @@ inline bool checkup_step(CheckupState& st, CheckupBucket& b, const CheckupSample
                             static_cast<int64_t>(CHECKUP_CYCLING_GAP_S) * 1000000)
                         checkup_censor_run(st, CheckupCensorCause::Unreadable);
                 } else {
-                    const bool class_gap = !st.prev_class_known;
+                    // Readable Other/Stop mode is valid coverage but cannot classify a room run.
+                    // Compare the last paired witnesses, not the raw mode-readability flag.
+                    const bool class_gap = st.run_class_seen_us < st.run_rps_seen_us;
                     const bool gap_ok    = st.run_class_seen_us >= 0 &&
                                         now_us - st.run_class_seen_us <=
                                             static_cast<int64_t>(CHECKUP_CYCLING_GAP_S) * 1000000;
