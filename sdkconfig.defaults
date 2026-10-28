@@ -125,6 +125,10 @@ CONFIG_COMPILER_OPTIMIZATION_SIZE=y
 # Drop code paths this firmware never uses.
 # mbedTLS human-readable error-string tables — we only log numeric TLS codes (MQTTS/OTA). ~6 KB.
 CONFIG_MBEDTLS_ERROR_STRINGS=n
+# TLS client only: OTA, Weather and optional MQTTS connect out; the HTTP service is plain
+# trusted-LAN HTTP and an HTTPS server is not adopted (ESP_IDF_MATRIX.md N07). Without the server
+# role mbedTLS drops its server handshake state machine.
+CONFIG_MBEDTLS_TLS_CLIENT_ONLY=y
 # No TLS session-ticket resumption: our TLS clients (OTA fetch, MQTTS bridge) open few,
 # long-lived connections where resumption buys nothing. ~1.8 KB.
 CONFIG_MBEDTLS_CLIENT_SSL_SESSION_TICKETS=n
@@ -153,6 +157,9 @@ CONFIG_ESP_WIFI_ENABLE_WPA3_OWE_STA=n
 CONFIG_ESP_WIFI_ENABLE_WPA3_OWE_SOFTAP=n
 CONFIG_ESP_WIFI_ENABLE_SAE_PK=n
 CONFIG_ESP_WIFI_SOFTAP_SAE_SUPPORT=n
+# Provisioning stores a PSK station only; no path configures an EAP identity, certificate or
+# WPA2/WPA3-Enterprise network, so the supplicant's enterprise methods are unreachable.
+CONFIG_ESP_WIFI_ENTERPRISE_SUPPORT=n
 
 # The HomeHub lookup uses bounded one-shot mdns_query_ptr calls. It never registers the component's
 # interactive console or continuous mdns_browse_* daemon, so keep those optional 1.12.0 paths out of
