@@ -457,8 +457,7 @@ void transport_chunk_boundaries() {
             for (bool known_length : {true, false}) {
                 reset();
                 sdk::body.resize(length);
-                for (size_t i = 0; i < length; ++i)
-                    sdk::body[i] = static_cast<char>('a' + i % 26);
+                for (size_t i = 0; i < length; ++i) sdk::body[i] = static_cast<char>('a' + i % 26);
                 sdk::chunk_size = chunk;
                 if (known_length) sdk::claimed = static_cast<int64_t>(length);
                 Download d;
