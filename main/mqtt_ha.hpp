@@ -92,7 +92,7 @@ void mqtt_reference_reconfigure();
 // End the heating-curve sample scope after a HomeHub endpoint change (host, port or unit). Last
 // event and 30-minute cadence came from the previous endpoint's gates and outdoor axis.
 // Allocation-free; takes the MQTT owner mutex like mqtt_reference_reconfigure.
-void mqtt_heating_curve_homehub_reset();
+void mqtt_heating_curve_homehub_reset() noexcept;
 
 // Independent read-only power witness for the potable-water circulation pump.  It shares the
 // configured MQTT client but has its own exact topic, parser, freshness and test proof.

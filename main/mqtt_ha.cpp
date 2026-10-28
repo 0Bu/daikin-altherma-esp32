@@ -1741,9 +1741,9 @@ static logic::HeatingCurveSnapshot evaluate_heating_curve(const Config& cfg, boo
         Lock lk(s_mtx);
         return s_heating_curve_diagnosis.evaluate(in);
     }
-    // Every input below belongs to the consent/room-source scope current at this load. A
-    // reconfiguration before the evaluation lock forgets that scope's cadence, so evaluating these
-    // reads afterwards would record the old room reading as the new scope's first event.
+    // Every input below belongs to the consent/room-source and HomeHub endpoint scope current at
+    // these loads. A reconfiguration before the evaluation lock forgets that scope's cadence, so
+    // evaluating these reads afterwards would record an old reading as the new scope's first event.
     const uint32_t scope_epoch = s_ref_requested_epoch.load(std::memory_order_acquire);
     const uint32_t homehub_epoch = s_heating_curve_homehub_epoch.load(std::memory_order_acquire);
     const ReferenceTemperatureStatus rt         = reference_temperature_status(cfg);
@@ -3799,7 +3799,7 @@ void mqtt_reference_reconfigure() {
     if (lk.acquired()) forget_heating_curve_scope();
 }
 
-void mqtt_heating_curve_homehub_reset() {
+void mqtt_heating_curve_homehub_reset() noexcept {
     // Bump first: an evaluation that read endpoint A's status before this point and locks after it
     // records nothing; one that locked before it is forgotten below. Without the mutex no task
     // ever evaluated the sampler, so nothing is forgotten.

@@ -1939,10 +1939,15 @@ void curve_homehub_boundary_during_evaluation() {
         curve_injected = true;
         daik::mqtt_heating_curve_homehub_reset();
     };
+    const int failed_before = sdk::failed_news;
+    sdk::fail_locked_new    = true; // any allocation while s_mtx is held fails the witness
     daik::evaluate_heating_curve(task_copy, true);
+    const bool locked_allocation_free = sdk::fail_locked_new && sdk::failed_news == failed_before;
+    sdk::fail_locked_new              = false;
     require(curve_injected && !adapter::on_env3_status,
             "CURVE_HOMEHUB_RESET_INJECTED_BETWEEN_READ_AND_EVALUATION");
-    require(sdk::locks == 0 && sdk::takes == sdk::gives, "CURVE_HOMEHUB_BOUNDARY_MUTEX_RELEASED");
+    require(locked_allocation_free && sdk::locks == 0 && sdk::takes == sdk::gives,
+            "CURVE_HOMEHUB_STALE_EVALUATION_ALLOCATION_FREE_AND_LOCK_BALANCED");
     const auto now = daik::heating_curve_status();
     require(!now.has_last_sample && now.last_sample_unix_s == -1,
             "CURVE_HOMEHUB_BOUNDARY_DURING_EVALUATION_RECORDS_NOTHING");
