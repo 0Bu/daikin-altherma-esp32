@@ -15155,6 +15155,62 @@ static void test_checkup_population() {
     CHECK(over.dhw_runs == 0 && over.censored_runs == 1 && over.censored_handover_runs == 1);
     const auto bounce = run(22, 0, 0, false, true, false);
     CHECK(bounce.dhw_runs == 0 && bounce.censored_transition_runs == 1);
+    auto terminal_tail = [](CheckupOperatingMode mode, unsigned tail_s, bool missing_valve,
+                            bool missing_mode, bool return_dhw,
+                            CheckupOperatingMode switched_mode = CheckupOperatingMode::Unknown) {
+        CheckupState  state;
+        CheckupBucket bucket;
+        CheckupSample sample;
+        sample.rps_known = sample.valve_known = true;
+        sample.valve_dhw                      = true;
+        sample.operating_mode                 = mode;
+        int64_t now                           = 0;
+        auto    tick = [&]() { checkup_step(state, bucket, sample, now += 1000000); };
+        tick();
+        sample.rps_running = true;
+        for (unsigned second = 0; second < 300; ++second) tick();
+        sample.valve_dhw = false;
+        for (unsigned second = 0; second < tail_s; ++second) {
+            sample.valve_known = !(missing_valve && second == tail_s / 2);
+            const auto current_mode =
+                switched_mode != CheckupOperatingMode::Unknown && second >= tail_s / 2
+                    ? switched_mode
+                    : mode;
+            sample.operating_mode =
+                missing_mode && second == tail_s / 2 ? CheckupOperatingMode::Unknown : current_mode;
+            tick();
+        }
+        if (return_dhw) {
+            sample.valve_dhw = true;
+            tick();
+        }
+        sample.rps_running = false;
+        tick();
+        return bucket;
+    };
+    // "DHW" maps to Other, not Heating. A readable valve return with that mode is a bounded
+    // terminal tail, without fabricating a pure space-heating class for the room circuit.
+    for (unsigned tail : {22u, 30u}) {
+        const auto other = terminal_tail(CheckupOperatingMode::Other, tail, false, false, false);
+        CHECK(other.dhw_runs == 1 && other.censored_runs == 0);
+    }
+    const auto other_long = terminal_tail(CheckupOperatingMode::Other, 31, false, false, false);
+    CHECK(other_long.dhw_runs == 0 && other_long.censored_transition_runs == 1 &&
+          other_long.censored_handover_runs == 0);
+    CHECK(terminal_tail(CheckupOperatingMode::Other, 22, true, false, false)
+              .censored_unreadable_runs == 1);
+    CHECK(terminal_tail(CheckupOperatingMode::Other, 22, false, true, false)
+              .censored_unreadable_runs == 1);
+    CHECK(terminal_tail(CheckupOperatingMode::Cooling, 22, false, false, false)
+              .censored_transition_runs == 1);
+    CHECK(terminal_tail(CheckupOperatingMode::Other, 22, false, false, true)
+              .censored_transition_runs == 1);
+    CHECK(terminal_tail(CheckupOperatingMode::Other, 22, false, false, false,
+                        CheckupOperatingMode::Heating)
+              .censored_transition_runs == 1);
+    CHECK(terminal_tail(CheckupOperatingMode::Heating, 22, false, false, false,
+                        CheckupOperatingMode::Other)
+              .censored_transition_runs == 1);
     const auto class_gap = run(0, 1, 0, false, false, false);
     CHECK(class_gap.space_runs == 1 && class_gap.censored_runs == 0);
     const auto hidden_change = run(0, 1, 0, true, false, false);

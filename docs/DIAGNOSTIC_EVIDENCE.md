@@ -1,6 +1,6 @@
 # Evidence and limits of the plant diagnostics
 
-<!-- diagnostic-evidence-contract: f4f6f0e16f67751b2ae767c6a1d2223fbb389ac6df74f136ed158c96e76b4976 -->
+<!-- diagnostic-evidence-contract: 04417cbd3084edba5c1628ae1879dce2d7e17b765bb8bb8aa8b22731b98e3eb5 -->
 
 For every row in the **Plant diagnostics · 24 h** card, this page answers four questions:
 
@@ -185,8 +185,10 @@ supports the relevance of very short runs but does not provide a universal Daiki
 pure space heating, DHW or cooling. Missing class or RPS readings may bridge at most 15 seconds
 only with matching known-running classes on both sides; that bridge does not add readable coverage.
 A changed recovered class, unknown stop edge or longer gap censors the run. A pure DHW run may
-hold one final valve-to-heating transition for at most 30 seconds, accepted only at a known OFF
-edge. A return to DHW or unreadable tail is not a pure charge. There is no start-edge allowance.
+hold one final valve return to the room circuit for at most 30 seconds, accepted only at a known OFF
+edge. The indoor mode must remain readable and may still say DHW; cooling, a return to the DHW
+valve position or an unreadable tail is not a pure charge. A longer tail with no positively observed
+heating mode is an unaccepted transition, never a proven handover. There is no start-edge allowance.
 Positively observed uninterrupted heating/DHW handovers remain censored with their own cause;
 their space phases never become heating runs. Other causes distinguish unaccepted transitions,
 unreadable class/RPS, journal/window boundaries and unwitnessed starts.

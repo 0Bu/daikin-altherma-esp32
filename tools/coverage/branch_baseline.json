@@ -1,6 +1,27 @@
 {
   "measurement_records": [
     {
+      "runner": "scripts/run-mock-tests.sh --coverage",
+      "scope": "Readable DHW-mode terminal valve return; 22/30-second positive controls, longer/missing/cooling/recovery negative controls and the DHW-mode population replay. Historical ratios retained or raised.",
+      "source": "main/logic/checkup.hpp",
+      "source_sha256": "7a3b092da19cb248af715d6210ec8ea9eb24529cb157ef71601d81ae116be6fc",
+      "measured_profiles": {
+        "clang-17-darwin": [
+          964,
+          1047
+        ],
+        "gcc-13-linux-ubuntu24": [
+          1116,
+          1211
+        ],
+        "gcc-15-linux-ubuntu26": [
+          1116,
+          1211
+        ]
+      },
+      "hosted_confirmation": "Authoritative hosted inventory pending; no local inventory substituted."
+    },
+    {
       "compilers": {
         "clang-17-darwin": "Apple Clang 17.0.0",
         "gcc-13-linux-ubuntu24": "ESP-IDF v6.1 GCC 13.3.0",
@@ -755,8 +776,8 @@
         "taken": 6
       },
       "main/logic/checkup.hpp": {
-        "taken": 943,
-        "outcomes": 1027
+        "taken": 964,
+        "outcomes": 1047
       },
       "main/logic/checkup_persist.hpp": {
         "outcomes": 125,
@@ -1173,8 +1194,8 @@
         "taken": 8
       },
       "main/logic/checkup.hpp": {
-        "taken": 1083,
-        "outcomes": 1179
+        "taken": 1116,
+        "outcomes": 1211
       },
       "main/logic/checkup_persist.hpp": {
         "outcomes": 153,
@@ -2009,8 +2030,8 @@
         "taken": 8
       },
       "main/logic/checkup.hpp": {
-        "taken": 1083,
-        "outcomes": 1179
+        "taken": 1116,
+        "outcomes": 1211
       },
       "main/logic/checkup_persist.hpp": {
         "outcomes": 153,

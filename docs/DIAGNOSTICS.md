@@ -1,6 +1,6 @@
 # Plant diagnostics in plain language
 
-<!-- user-docs-contract: 24dfd812483e0e7a517c518d758aeb2f0df2d4ca99c15c5f0053691e09d1114a -->
+<!-- user-docs-contract: aa287840ef1577697152104c7b3582be776aedac3f4eb1f4cb1ac2c6fdc6605a -->
 
 Plant diagnostics **reads measurements and counts events; it does not control the heat pump**.
 It is off by default. Enable **Plant diagnostics** under **Settings → Firmware** to start an evidence
@@ -116,9 +116,10 @@ completed short runs. Twelve runs and ten minutes are project heuristics, not Da
 figures do not identify oversizing or hydraulic imbalance. Optional outdoor min/mean is context for
 accepted heating runs only. A missing class or compressor reading may bridge at most 15 seconds,
 only between matching known-running classes. Unknown readings never become OFF. A pure DHW charge
-may include a final valve return to heating of at most 30 seconds before a known stop; this project
-allowance is based on observed 6–22 second tails, not a Daikin specification. No start allowance is
-assumed. Saturated or incomplete evidence keeps the row **MEASURED**.
+may include a final valve return to the room circuit of at most 30 seconds before a known stop,
+including when the readable indoor mode still says DHW. A cooling mode or unreadable tail is not
+accepted. This project allowance is based on observed 6–22 second tails, not a Daikin specification.
+No start allowance is assumed. Saturated or incomplete evidence keeps the row **MEASURED**.
 After a restart, restored hours can lack an hour-crossing completion. The population guard detects
 some such losses, not every single loss; persistence repair is tracked separately. If the compressor stops during a
 defrost, one heating run counts as several; whether it does has not been checked yet.

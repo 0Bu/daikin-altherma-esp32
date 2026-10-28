@@ -38,12 +38,14 @@ inline daik::logic::CheckupWindow checkup_population_fixture() {
         tick(false, false);
         for (unsigned second = 0; second < 60; ++second) tick(false, false);
     }
+    sample.operating_mode = CheckupOperatingMode::Other; // actual readable I/U mode: "DHW"
     for (unsigned run = 0; run < 5; ++run) {
         const unsigned tail = 6 + 4 * run;
         for (unsigned second = 0; second <= 1800 - tail; ++second) tick(true, true);
         for (unsigned second = 0; second < tail; ++second) tick(true, false);
         tick(false, false);
     }
+    sample.operating_mode = CheckupOperatingMode::Heating;
     for (unsigned run = 0; run < 4; ++run) {
         for (unsigned second = 0; second < 900; ++second) tick(true, false);
         for (unsigned second = 0; second < 2400; ++second) tick(true, true);

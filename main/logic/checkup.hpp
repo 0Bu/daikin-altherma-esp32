@@ -1331,12 +1331,46 @@ inline bool checkup_step(CheckupState& st, CheckupBucket& b, const CheckupSample
                 // pause; a start sample (known OFF before it) books no elapsed time.
                 if (was_running || (!st.prev_rps_known && st.run_class_pure))
                     st.run_s = checkup_add_u32(st.run_s, dt + st.run_blind_s);
-                if (current_class == CheckupRunClass::Unknown) {
+                // A terminal valve return is identified by readable valve+mode witnesses, not
+                // by inventing a space-heating class. "DHW" mode maps to Other while the valve
+                // already points to the room circuit on the reference installation.
+                const bool terminal_room = s.valve_known && !s.valve_dhw &&
+                                           (s.operating_mode == CheckupOperatingMode::Heating ||
+                                            s.operating_mode == CheckupOperatingMode::Other);
+                const bool begin_tail =
+                    st.run_tail_us < 0 && terminal_room && st.run_class == CheckupRunClass::Dhw &&
+                    st.run_last_class == CheckupRunClass::Dhw &&
+                    st.run_cause == CheckupCensorCause::None && st.prev_rps_known &&
+                    st.prev_rps_running && st.prev_class_known;
+                if (begin_tail || st.run_tail_us >= 0) {
+                    if (!terminal_room) {
+                        const bool readable =
+                            s.valve_known && s.operating_mode != CheckupOperatingMode::Unknown;
+                        checkup_censor_run(st, readable ? CheckupCensorCause::Transition
+                                                        : CheckupCensorCause::Unreadable);
+                        if (readable) {
+                            st.run_last_class    = current_class;
+                            st.run_class_seen_us = now_us;
+                        }
+                        st.run_tail_us = -1;
+                    } else {
+                        if (begin_tail)
+                            st.run_tail_us = now_us;
+                        else if (current_class != st.run_last_class)
+                            checkup_censor_run(st, CheckupCensorCause::Transition);
+                        if (now_us - st.run_tail_us >
+                            static_cast<int64_t>(CHECKUP_CYCLING_DHW_TAIL_S) * 1000000)
+                            checkup_censor_run(st, current_class == CheckupRunClass::SpaceHeating
+                                                       ? CheckupCensorCause::Handover
+                                                       : CheckupCensorCause::Transition);
+                        st.run_last_class    = current_class;
+                        st.run_class_seen_us = now_us;
+                    }
+                } else if (current_class == CheckupRunClass::Unknown) {
                     st.run_had_gap = true;
                     if (st.run_class_seen_us < 0 ||
                         now_us - st.run_class_seen_us >
-                            static_cast<int64_t>(CHECKUP_CYCLING_GAP_S) * 1000000 ||
-                        st.run_tail_us >= 0)
+                            static_cast<int64_t>(CHECKUP_CYCLING_GAP_S) * 1000000)
                         checkup_censor_run(st, CheckupCensorCause::Unreadable);
                 } else {
                     const bool class_gap = !st.prev_class_known;
@@ -1348,28 +1382,13 @@ inline bool checkup_step(CheckupState& st, CheckupBucket& b, const CheckupSample
                                                 current_class != st.run_last_class)))
                         checkup_censor_run(st, CheckupCensorCause::Unreadable);
                     if (current_class != st.run_last_class && !class_gap && st.prev_rps_known) {
-                        if (st.run_class == CheckupRunClass::Dhw &&
-                            st.run_last_class == CheckupRunClass::Dhw &&
-                            current_class == CheckupRunClass::SpaceHeating &&
-                            st.run_cause == CheckupCensorCause::None) {
-                            st.run_tail_us = now_us;
-                        } else if (st.run_tail_us >= 0) {
-                            checkup_censor_run(st, CheckupCensorCause::Transition);
-                            st.run_tail_us = -1;
-                        } else {
-                            const bool handover =
-                                (st.run_last_class == CheckupRunClass::SpaceHeating &&
-                                 current_class == CheckupRunClass::Dhw) ||
-                                (st.run_last_class == CheckupRunClass::Dhw &&
-                                 current_class == CheckupRunClass::SpaceHeating);
-                            checkup_censor_run(st, handover ? CheckupCensorCause::Handover
-                                                            : CheckupCensorCause::Transition);
-                        }
+                        const bool handover = (st.run_last_class == CheckupRunClass::SpaceHeating &&
+                                               current_class == CheckupRunClass::Dhw) ||
+                                              (st.run_last_class == CheckupRunClass::Dhw &&
+                                               current_class == CheckupRunClass::SpaceHeating);
+                        checkup_censor_run(st, handover ? CheckupCensorCause::Handover
+                                                        : CheckupCensorCause::Transition);
                     }
-                    if (st.run_tail_us >= 0 &&
-                        now_us - st.run_tail_us >
-                            static_cast<int64_t>(CHECKUP_CYCLING_DHW_TAIL_S) * 1000000)
-                        checkup_censor_run(st, CheckupCensorCause::Handover);
                     st.run_last_class    = current_class;
                     st.run_class_seen_us = now_us;
                 }
@@ -1392,7 +1411,9 @@ inline bool checkup_step(CheckupState& st, CheckupBucket& b, const CheckupSample
             if (st.run_tail_us >= 0 &&
                 now_us - st.run_tail_us >
                     static_cast<int64_t>(CHECKUP_CYCLING_DHW_TAIL_S) * 1000000)
-                checkup_censor_run(st, CheckupCensorCause::Handover);
+                checkup_censor_run(st, st.run_last_class == CheckupRunClass::SpaceHeating
+                                           ? CheckupCensorCause::Handover
+                                           : CheckupCensorCause::Transition);
             reseal |= checkup_close_run(st, b, ring, current_bucket);
         }
         if (st.prev_dfr_known && s.defrost_known && !st.prev_dfr_on && s.defrost_on) {
