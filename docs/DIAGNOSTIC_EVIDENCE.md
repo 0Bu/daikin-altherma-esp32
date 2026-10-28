@@ -1,6 +1,6 @@
 # Evidence and limits of the plant diagnostics
 
-<!-- diagnostic-evidence-contract: 209907158816ee640552fdcf85f7fa137b77d0f3c6307c1a1eac80857aa86810 -->
+<!-- diagnostic-evidence-contract: 3fffa718b10f461689cf90663113858c200466fc4618cd39d124ba1a3768a5f0 -->
 
 For every row in the **Plant diagnostics · 24 h** card, this page answers four questions:
 
@@ -27,7 +27,8 @@ a current fault all-clear or reassuring assessment. Temporary TLS/allocation pau
 measurement coverage and do not withdraw profile capabilities. Historical findings remain within
 their admissible age; live, restored and open evidence expires even if the producer stops.
 DHW circulation identity is independent and binds broker, topic, value/time paths and interpretation
-parameters. A mismatch retires only tank-cooling evidence. [PLANT.md](PLANT.md#reboot-and-persistence)
+parameters. A mismatch retires only tank-cooling evidence; an hour that completed before a
+circulation-only reset is stored without that identity. [PLANT.md](PLANT.md#reboot-and-persistence)
 owns restoration and restart limits; HomeHub/ENV III remain separate instruments.
 
 A manufacturer statement is not automatically a limit for every Daikin model. The installation
@@ -200,8 +201,13 @@ elapsed runtime must also be completed pure heating runtime; DHW runtime cannot 
 heating runs. Censored elapsed time includes blind intervals and excludes only proven handovers.
 Unwitnessed starts and journal/window boundaries have unknown full durations and always block
 assessment; their runtime is only an observed lower bound. Saturated runtime/counters or inconsistent
-cause counts also block the assessment. These guards detect
-some lost journal completions but cannot establish complete persistence. Only at least 12 completed
+cause counts also block the assessment. A run completing after its start hour was journaled
+re-appends that hour and every later live hour; a restart restores each hour's newest copy. A
+restart before that append (it needs synchronized time and a writable journal) can still lose the
+run, and a power loss during one replay can lose a second revision it was covering. Every start
+beyond one without a completion counts as an unclassified run, so lost runs withhold the
+assessment only once they push the classified share below 90%; until then a lost run is not
+detected and can change the result. Only at least 12 completed
 space-heating runs with both population gates satisfied can support an assessment. A mean below ten minutes then
 produces **NOTE** immediately. An absence-of-short-run assessment additionally requires a full
 24-hour span and at least CHECKUP_REQUIRED_S of paired classification time.

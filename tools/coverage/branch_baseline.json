@@ -1,6 +1,32 @@
 {
   "measurement_records": [
     {
+      "compilers": {
+        "clang-17-darwin": "Apple Clang 17.0.0",
+        "gcc-13-linux-ubuntu24": "ESP-IDF v6.1 container GCC 13.3.0",
+        "gcc-15-linux-ubuntu26": "Ubuntu 26.04 GCC 15.2.0"
+      },
+      "hosted_confirmation": "Both local GCC profiles match exactly; the hosted gcc-15-github-linux-ubuntu26 profile is confirmed by current-head CI",
+      "runner": "scripts/run-mock-tests.sh --coverage",
+      "scope": "Late-completion journal revisions rebased onto the DHW-tail cycling population. The revision-helper checks route their first argument through rt(), so Clang executes every short-circuit operand instead of folding the literal calls; the Clang inventory of this header is measured for the first time. GCC inventories and all other profiles are unchanged.",
+      "source": "main/logic/checkup_persist.hpp",
+      "source_sha256": "eb0d7d0c2acd15023f76aecc34fdaae1307b230d23335087ea54886539a180ed",
+      "measured_profiles": {
+        "clang-17-darwin": [
+          179,
+          179
+        ],
+        "gcc-13-linux-ubuntu24": [
+          211,
+          211
+        ],
+        "gcc-15-linux-ubuntu26": [
+          211,
+          211
+        ]
+      }
+    },
+    {
       "runner": "scripts/run-mock-tests.sh --coverage",
       "scope": "Monotonic endpoint bounds for class/RPS gaps, independent of hourly duration booking. Exact 15-second positive controls and eight late-endpoint negative controls cover both signals, hour rollover and fractional seconds. Ten assertions fail against 61834599 before this correction.",
       "source": "main/logic/checkup.hpp",
@@ -60,6 +86,16 @@
         "main/logic/checkup.hpp": "b7477a99ead97fe3afb41764204ed9b7338a4b9108988fb8113cd295d8d14dc8",
         "main/logic/heartbeat.hpp": "10e039025fde3f80a1f3d59328a00f51f5b80327e7dadbb60d80652090c7f8d5"
       }
+    },
+    {
+      "compilers": {
+        "gcc-13-linux-ubuntu24": "Ubuntu 24.04 x86-64 GCC 13.3.0"
+      },
+      "hosted_confirmation": "Local GCC 13 measured; GCC 15 profiles carry the same all-taken inventory pending authoritative hosted confirmation; Apple Clang 17 not measured",
+      "runner": "scripts/run-mock-tests.sh --coverage",
+      "scope": "Late-completion journal revisions: live revision mapping including the aged-out fallback, boot-latched wall-clock labels and in-bucket end times, rewind target with the clock-step guard and the revision-aware boot index, with every added outcome taken; the late-completion witness also takes one further existing checkup.hpp outcome; all other inventories and historical floors unchanged",
+      "source": "main/logic/checkup_persist.hpp",
+      "source_sha256": "0206bac916bee735daa12922d75b2157c074afd693e3538b3abcaaa53a469e3e"
     },
     {
       "compilers": {
@@ -891,8 +927,8 @@
         "outcomes": 1049
       },
       "main/logic/checkup_persist.hpp": {
-        "outcomes": 125,
-        "taken": 125
+        "outcomes": 179,
+        "taken": 179
       },
       "main/logic/chunk_sink.hpp": {
         "outcomes": 272,
@@ -1309,8 +1345,8 @@
         "outcomes": 1211
       },
       "main/logic/checkup_persist.hpp": {
-        "outcomes": 153,
-        "taken": 153
+        "outcomes": 211,
+        "taken": 211
       },
       "main/logic/chunk_sink.hpp": {
         "outcomes": 308,
@@ -1727,8 +1763,8 @@
         "outcomes": 1211
       },
       "main/logic/checkup_persist.hpp": {
-        "outcomes": 153,
-        "taken": 153
+        "outcomes": 211,
+        "taken": 211
       },
       "main/logic/chunk_sink.hpp": {
         "outcomes": 308,
@@ -2145,8 +2181,8 @@
         "outcomes": 1211
       },
       "main/logic/checkup_persist.hpp": {
-        "outcomes": 153,
-        "taken": 153
+        "outcomes": 211,
+        "taken": 211
       },
       "main/logic/chunk_sink.hpp": {
         "outcomes": 308,

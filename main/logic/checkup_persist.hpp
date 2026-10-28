@@ -312,6 +312,116 @@ inline constexpr int64_t checkup_journal_next_live_bucket(int64_t after_bucket,
     return target < oldest_live ? oldest_live : target;
 }
 
+// ── Late completions of already appended hours ───────────────────────────────────────────────────
+// A run is booked into the hour in which it STARTED, but only when it stops. If that hour's record
+// was appended while the run was still open, the record lacks the run. Re-append the revised hour
+// and let the cursor replay every later live hour from there: append order then stays
+// non-decreasing between rewinds, and the newest copy of each hour carries every later completion.
+// A live revision is at most CHECKUP_COMPLETED_BUCKETS - 1 hours older than the newest live hour.
+inline constexpr int64_t CHECKUP_JOURNAL_REVISION_SPAN =
+    static_cast<int64_t>(CHECKUP_COMPLETED_BUCKETS) - 1;
+
+// The wall-clock bucket of the completed monotonic hour `revised`; INT64_MIN while it is pending,
+// unanchored or without live hours. `current` is the pending monotonic hour that
+// `newest_live_bucket` immediately precedes. A revision older than this boot's `live_count`
+// completed hours maps to the oldest live hour: its own hour has left RAM, but a later completion
+// that relied on its replay still needs one.
+inline constexpr int64_t checkup_journal_revision_bucket(int64_t  newest_live_bucket,
+                                                         uint32_t current, uint32_t revised,
+                                                         size_t live_count) {
+    if (newest_live_bucket == INT64_MIN || revised >= current || !live_count) return INT64_MIN;
+    const uint32_t age = current - 1 - revised;
+    if (age >= live_count) return newest_live_bucket - static_cast<int64_t>(live_count - 1);
+    return newest_live_bucket - static_cast<int64_t>(age);
+}
+
+// One wall-clock label per monotonic hour for the whole boot. Whole-second clocks place the end of
+// a monotonic hour on either side of a wall-hour boundary from one call to the next when it lies
+// within a second of it, and a replay under alternating labels would overwrite neighbouring hours.
+// Latch the offset on first use and move it only for a real clock step of more than one bucket.
+inline int64_t checkup_journal_latched_newest(int64_t& offset, int64_t computed_newest,
+                                              uint32_t newest_monotonic) {
+    if (computed_newest == INT64_MIN) return INT64_MIN;
+    const int64_t monotonic = newest_monotonic;
+    const int64_t drift     = offset == INT64_MIN ? 0 : computed_newest - (monotonic + offset);
+    if (offset == INT64_MIN || drift > 1 || drift < -1) offset = computed_newest - monotonic;
+    return monotonic + offset;
+}
+
+// A record's exact end, kept inside the bucket its latched label names (moved by at most the
+// latch's tolerance, so a label never disagrees with its own end time).
+inline constexpr int64_t checkup_journal_end_in_bucket(int64_t end_unix_s, int64_t bucket) {
+    const int64_t first = bucket * static_cast<int64_t>(CHECKUP_DT_S);
+    const int64_t last  = first + static_cast<int64_t>(CHECKUP_DT_S) - 1;
+    return end_unix_s < first ? first : (end_unix_s > last ? last : end_unix_s);
+}
+
+// The record to append next. A revision that the cursor has not yet passed needs no rewind: its
+// first append already carries the completion. A revision at or behind the cursor is appended
+// again, but never while the cursor is ahead of the newest live hour: after a backward clock step
+// the stored labels belong to other hours, and the journal waits exactly as before.
+inline constexpr int64_t checkup_journal_next_target(int64_t after_bucket,
+                                                     int64_t newest_live_bucket, size_t live_count,
+                                                     int64_t revision_bucket) {
+    if (revision_bucket != INT64_MIN && after_bucket != INT64_MIN &&
+        revision_bucket <= after_bucket && live_count && newest_live_bucket != INT64_MIN &&
+        after_bucket <= newest_live_bucket &&
+        newest_live_bucket - revision_bucket < static_cast<int64_t>(live_count))
+        return revision_bucket;
+    return checkup_journal_next_live_bucket(after_bucket, newest_live_bucket, live_count);
+}
+
+// Boot index over checkup records visited newest-first. Every record appended before a record R is
+// at most CHECKUP_JOURNAL_REVISION_SPAN hours newer than R. The newest-sequence bucket (`anchor`)
+// therefore bounds the restorable hours to anchor ± SPAN: a power loss during a replay can leave
+// older-sequence copies of hours beyond the anchor. Keep the first, i.e. newest, copy of each hour.
+// Once a bucket is more than twice the span older than the anchor, nothing earlier can still reach
+// the final window, which ends at the newest kept hour.
+inline constexpr size_t CHECKUP_JOURNAL_INDEX_CAP =
+    2 * static_cast<size_t>(CHECKUP_JOURNAL_REVISION_SPAN) + 1;
+static_assert(CHECKUP_JOURNAL_INDEX_CAP <= 64, "one bit per candidate hour");
+
+struct CheckupJournalIndex {
+    int64_t  anchor                            = INT64_MIN;
+    uint64_t seen                              = 0; // bit (bucket - anchor + SPAN)
+    uint8_t  count                             = 0;
+    int8_t   offset[CHECKUP_JOURNAL_INDEX_CAP] = {}; // bucket - anchor, in visit order
+};
+
+enum class CheckupJournalIndexStep : uint8_t { Keep, Skip, Stop };
+
+inline CheckupJournalIndexStep checkup_journal_index_step(CheckupJournalIndex& ix, int64_t bucket) {
+    // Records carry wall-clock hours; a negative bucket was never written by this firmware.
+    if (bucket < 0) return CheckupJournalIndexStep::Skip;
+    if (ix.anchor == INT64_MIN) ix.anchor = bucket;
+    const int64_t span = CHECKUP_JOURNAL_REVISION_SPAN;
+    if (bucket < ix.anchor && ix.anchor - bucket > 2 * span) return CheckupJournalIndexStep::Stop;
+    if (bucket < ix.anchor ? ix.anchor - bucket > span : bucket - ix.anchor > span)
+        return CheckupJournalIndexStep::Skip;
+    // One bit per hour of the 45-hour range: `count` can never exceed the offset capacity.
+    const int64_t  delta = bucket - ix.anchor;
+    const uint64_t bit   = uint64_t{1} << static_cast<unsigned>(delta + span);
+    if (ix.seen & bit) return CheckupJournalIndexStep::Skip;
+    ix.seen |= bit;
+    ix.offset[ix.count++] = static_cast<int8_t>(delta);
+    return CheckupJournalIndexStep::Keep;
+}
+
+inline int64_t checkup_journal_index_newest(const CheckupJournalIndex& ix) {
+    if (!ix.count) return INT64_MIN;
+    int8_t newest = ix.offset[0];
+    for (size_t i = 1; i < ix.count; ++i)
+        if (ix.offset[i] > newest) newest = ix.offset[i];
+    return ix.anchor + newest;
+}
+
+// Whether kept entry `i` lies in the restorable window ending at the newest kept hour.
+inline bool checkup_journal_index_retained(const CheckupJournalIndex& ix, size_t i) {
+    if (i >= ix.count) return false;
+    return checkup_journal_index_newest(ix) - (ix.anchor + ix.offset[i]) <=
+           CHECKUP_JOURNAL_REVISION_SPAN;
+}
+
 // ── Intentional-reboot DHW handoff ──────────────────────────────────────────────────────────────
 // Separate from the completed-ring seal on purpose.  The normal seal must remain valid through an
 // unexpected panic while the open buckets change. The best-effort intentional-restart checkpoint

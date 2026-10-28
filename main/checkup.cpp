@@ -130,6 +130,20 @@ int64_t                s_last_commit_us = kNoCommitUs;
 // that dropped DHW hours), in this boot's monotonic clock; -1 while the lifecycle alone decides.
 int64_t                s_dhw_scope_us      = -1;
 uint8_t                s_live_commit_count = 0; // completed in THIS monotonic clock, max 23
+// Oldest completed monotonic hour whose run completed after its journal record may already have
+// been appended. It is appended again and the cursor replays every later live hour; see
+// logic::checkup_journal_next_target. `emitted` and `acked` retire it once that append commits.
+bool                 s_revision_armed   = false;
+uint32_t             s_revision_bucket  = 0;
+int64_t              s_revision_emitted = INT64_MIN;
+std::atomic<int64_t> s_revision_acked{INT64_MIN};
+// Monotonic-to-wall-clock label offset, latched once per boot
+// (logic::checkup_journal_latched_newest).
+int64_t s_journal_label_offset = INT64_MIN;
+// Monotonic hour of the last DHW-only restart. Hours completed before it lost their DHW buckets to
+// the reset, so an append made after it carries no DHW identity for them.
+bool     s_dhw_restart_armed  = false;
+uint32_t s_dhw_restart_bucket = 0;
 
 // One-shot journal-reconstruction scratch. Static for the poll task's measured 8 KiB stack: 23
 // diagnostic records occupy 3,128 bytes and must never become an automatic array on that task.
@@ -276,6 +290,9 @@ void persist_wipe(bool keep_handoff = false) {
     s_dhw_scope_us         = -1; // both rings restart together
     s_source_last_us       = -1;
     s_pressure_now         = -1;
+    s_revision_armed       = false; // the withdrawn hours have nothing left to re-append
+    s_revision_emitted     = INT64_MIN;
+    s_dhw_restart_armed    = false; // no hour older than the wipe remains to be appended
     // Retain s_model_fp for the next record; detection confirms it before consuming a reset.
     checkup_persist_seal();
 }
@@ -303,9 +320,35 @@ bool apply_dhw_reset_locked() {
     s_dhw_source_fp       = s_requested_dhw_source_fp.load();
     s_dhw_state           = kFreshDhwLossState;
     s_dhw_scope_us        = esp_timer_get_time(); // the X10A lifecycle keeps running
+    s_dhw_restart_armed   = true;
+    s_dhw_restart_bucket  = logic::checkup_bucket(s_dhw_scope_us);
     P().dhw_handoff.magic = 0;
     checkup_persist_seal();
     return true;
+}
+
+// This boot's wall-clock label of the newest completed monotonic hour. Caller holds s_mtx and has
+// a commit anchor; the first completed monotonic hour is 0, so the pending one is at least 1.
+int64_t latched_newest_locked(int64_t latest_end_unix_s) {
+    const auto current = static_cast<uint32_t>(
+        s_last_commit_us / (static_cast<int64_t>(logic::CHECKUP_DT_S) * 1000000LL));
+    return logic::checkup_journal_latched_newest(
+        s_journal_label_offset, logic::checkup_journal_bucket(latest_end_unix_s), current - 1);
+}
+
+// Fold one sample into the X10A checkup. A run that completes into its already sealed start hour
+// changes a record the journal may have appended while the run was open: mark that hour for
+// re-appending (the oldest such hour wins, because the replay covers every later one).
+void fold_checkup_locked(const logic::CheckupSample& s, int64_t now) {
+    const bool     run_open  = s_state.run_open;
+    const uint32_t run_start = s_state.run_start_bucket;
+    if (!logic::checkup_step(s_state, P().ring.pending, s, now, &P().ring)) return;
+    if (run_open && (!s_revision_armed || run_start < s_revision_bucket)) {
+        s_revision_armed   = true;
+        s_revision_bucket  = run_start;
+        s_revision_emitted = INT64_MIN;
+    }
+    checkup_persist_seal();
 }
 
 // Best-effort intentional-reboot handoff, attempted once after OTA installation or during
@@ -638,13 +681,11 @@ void checkup_record(const CachedValue* v, size_t n, bool rps_known, bool rps_run
         P().boots_since_commit = 0;
         checkup_persist_seal(); // seal this completed-bucket update; see checkup_persist_crc()
         if (continuous_boundary) s_state.last_us = now; // dt=0, edge witnesses intentionally kept
-        const bool reseal = logic::checkup_step(s_state, P().ring.pending, s, now, &P().ring);
-        if (reseal) checkup_persist_seal();
+        fold_checkup_locked(s, now);
         if (!discard_dhw_sample)
             logic::dhw_loss_step(s_dhw_state, P().dhw.pending, s, now);
     } else {
-        const bool reseal = logic::checkup_step(s_state, P().ring.pending, s, now, &P().ring);
-        if (reseal) checkup_persist_seal();
+        fold_checkup_locked(s, now);
         if (!discard_dhw_sample)
             logic::dhw_loss_step(s_dhw_state, P().dhw.pending, s, now);
     }
@@ -747,13 +788,33 @@ bool checkup_flash_next(int64_t now_unix_s, int64_t after_bucket,
     if (now_us < s_last_commit_us) return false;
     const int64_t latest_end_unix_s =
         now_unix_s - (now_us - s_last_commit_us) / 1000000;
-    const int64_t newest = logic::checkup_journal_bucket(latest_end_unix_s);
+    const int64_t newest = latched_newest_locked(latest_end_unix_s);
     if (newest == INT64_MIN) return false;
     const size_t live_count = s_live_commit_count < P().ring.count
         ? s_live_commit_count : P().ring.count;
-    const int64_t target = logic::checkup_journal_next_live_bucket(
-        after_bucket, newest, live_count);
+    const auto   current    = static_cast<uint32_t>(
+        s_last_commit_us / (static_cast<int64_t>(logic::CHECKUP_DT_S) * 1000000LL));
+    int64_t revision = INT64_MIN;
+    if (s_revision_armed && s_revision_emitted != INT64_MIN &&
+        s_revision_acked.load() == s_revision_emitted) {
+        s_revision_armed = false; // committed; the cursor now replays the later live hours
+    } else if (s_revision_armed) {
+        revision =
+            logic::checkup_journal_revision_bucket(newest, current, s_revision_bucket, live_count);
+        // Not appended yet, or nothing live to anchor it: the ordinary append owns it either way.
+        if (revision == INT64_MIN || after_bucket == INT64_MIN || revision > after_bucket) {
+            s_revision_armed = false;
+            revision         = INT64_MIN;
+        }
+    }
+    if (!s_revision_armed) s_revision_emitted = INT64_MIN;
+    const int64_t target =
+        logic::checkup_journal_next_target(after_bucket, newest, live_count, revision);
     if (target == INT64_MIN) return false;
+    if (target == revision) {
+        s_revision_emitted = target;
+        s_revision_acked.store(INT64_MIN); // only this append's confirmation retires it
+    }
 
     const size_t age = static_cast<size_t>(newest - target);
     const size_t ring_i = (static_cast<size_t>(P().ring.head) +
@@ -767,13 +828,21 @@ bool checkup_flash_next(int64_t now_unix_s, int64_t after_bucket,
     payload.source_fp              = s_source_fp;
     payload.dhw_source_fp          = s_dhw_source_fp;
     payload.diagnostics_generation = s_diagnostics_generation;
-    payload.end_unix_s = latest_end_unix_s -
-        static_cast<int64_t>(age) * logic::CHECKUP_DT_S;
+    payload.end_unix_s             = logic::checkup_journal_end_in_bucket(
+        latest_end_unix_s - static_cast<int64_t>(age) * logic::CHECKUP_DT_S, target);
     payload.checkup = P().ring.buf[ring_i];
     payload.dhw = P().dhw.buf[dhw_i];
+    // An hour completed before a DHW-only restart was emptied by it: never present that empty
+    // bucket as the current circulation source's evidence (a restore then restarts the DHW scope).
+    if (s_dhw_restart_armed && current - 1 - age < s_dhw_restart_bucket) {
+        payload.dhw_source_fp = 0;
+        payload.dhw           = kEmptyDhwLossBucket;
+    }
     bucket = target;
     return logic::checkup_journal_bucket(payload.end_unix_s) == target;
 }
+
+void checkup_flash_appended(int64_t bucket) { s_revision_acked.store(bucket); }
 
 CheckupFlashRestoreResult checkup_flash_restore(const CheckupFlashRecord* records, size_t count,
                                                 int64_t now_unix_s) {
@@ -803,8 +872,10 @@ CheckupFlashRestoreResult checkup_flash_restore(const CheckupFlashRecord* record
     if (P().ring.count && P().ring.count == P().dhw.count &&
         s_last_commit_us != kNoCommitUs && now_us >= s_last_commit_us) {
         const int64_t latest_end = now_unix_s - (now_us - s_last_commit_us) / 1000000;
-        const size_t available = s_live_commit_count < P().ring.count
-            ? s_live_commit_count : P().ring.count;
+        const int64_t newest_label = latched_newest_locked(latest_end);
+        const size_t  available    = newest_label == INT64_MIN              ? 0
+                                     : s_live_commit_count < P().ring.count ? s_live_commit_count
+                                                                            : P().ring.count;
         const size_t oldest_i = (static_cast<size_t>(P().ring.head) +
                                  logic::CHECKUP_COMPLETED_BUCKETS - available) %
                                 logic::CHECKUP_COMPLETED_BUCKETS;
@@ -815,13 +886,14 @@ CheckupFlashRestoreResult checkup_flash_restore(const CheckupFlashRecord* record
             rec.payload.source_fp              = s_source_fp;
             rec.payload.dhw_source_fp          = s_dhw_source_fp;
             rec.payload.diagnostics_generation = s_diagnostics_generation;
-            rec.payload.end_unix_s = latest_end -
-                static_cast<int64_t>(available - 1 - i) * logic::CHECKUP_DT_S;
+            const int64_t label    = newest_label - static_cast<int64_t>(available - 1 - i);
+            rec.payload.end_unix_s = logic::checkup_journal_end_in_bucket(
+                latest_end - static_cast<int64_t>(available - 1 - i) * logic::CHECKUP_DT_S, label);
             rec.payload.checkup =
                 P().ring.buf[(oldest_i + i) % logic::CHECKUP_COMPLETED_BUCKETS];
             rec.payload.dhw =
                 P().dhw.buf[(oldest_i + i) % logic::CHECKUP_COMPLETED_BUCKETS];
-            rec.bucket = logic::checkup_journal_bucket(rec.payload.end_unix_s);
+            rec.bucket = label;
         }
     }
 

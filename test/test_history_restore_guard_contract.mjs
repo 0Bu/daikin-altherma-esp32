@@ -397,4 +397,62 @@ assert.ok(setDiagnostics.indexOf(nextGeneration) < setDiagnostics.indexOf("confi
   "the new generation must be persisted by the transition's own save");
 assert.equal(count(httpConfig, /c\.diagnostics_generation = diagnostics_next_generation\(/g), 1,
   "no second consent transition may advance the generation without the random draw");
+// Late completions of already journaled start hours. logic/checkup_persist.hpp decides which record is next and which
+// copies a boot restores; test_logic.cpp replays the 13-run witness through those rules. These pin
+// the target glue: every fold arms the revised start hour, the writer asks the pure target rule,
+// only the journal's own commit retires it, and the boot scan indexes checkup records solely
+// through the pure index.
+const fold = body(checkup, "void fold_checkup_locked(");
+assert.equal(count(checkup, /logic::checkup_step\(/g), 1,
+  "the checkup is folded only through fold_checkup_locked");
+assert.equal(count(cRecord, /fold_checkup_locked\(s, now\);/g), 2,
+  "both the hour-boundary and the ordinary sample fold arm late completions");
+assert.ok(fold.indexOf("const bool run_open = s_state.run_open;") <
+          fold.indexOf("logic::checkup_step("),
+  "the open run and its start hour are captured before the fold closes them");
+assert.match(fold, /if \(run_open && \(!s_revision_armed \|\| run_start < s_revision_bucket\)\)/,
+  "a later completion may only move the revision to an older start hour");
+const flashNext = body(checkup, "bool checkup_flash_next(");
+assert.match(flashNext,
+  /logic::checkup_journal_next_target\(after_bucket, newest, live_count, revision\)/,
+  "the writer's next record comes from the pure target rule");
+assert.match(flashNext, /logic::checkup_journal_revision_bucket\(newest, current, s_revision_bucket, live_count\)/,
+  "the monotonic start hour maps through the same live anchor as the record itself");
+assert.match(flashNext, /s_revision_emitted = target; s_revision_acked\.store\(INT64_MIN\);/,
+  "an earlier commit of the same bucket must not retire a new revision");
+assert.match(body(checkup, "void persist_wipe("), /s_revision_armed = false;/,
+  "a wipe withdraws a pending revision together with its hours");
+assert.match(flashNext,
+  /if \(s_revision_armed && s_revision_emitted != INT64_MIN && s_revision_acked\.load\(\) == s_revision_emitted\) \{ s_revision_armed = false;/,
+  "only the confirmed append of the emitted hour retires a revision");
+assert.match(flashNext,
+  /if \(revision == INT64_MIN \|\| after_bucket == INT64_MIN \|\| revision > after_bucket\) \{ s_revision_armed = false;/,
+  "a revision the cursor has not passed is left to the ordinary append");
+// One wall-clock label per monotonic hour for the whole boot, in the writer and in the restore's
+// live records alike; a record's end time is kept inside the bucket its label names.
+assert.equal(count(checkup, /latched_newest_locked\(/g), 3,
+  "the writer and the restore both label hours through the boot latch");
+assert.match(flashNext, /const int64_t newest = latched_newest_locked\(latest_end_unix_s\);/);
+assert.match(flashNext, /logic::checkup_journal_end_in_bucket\( latest_end_unix_s - static_cast<int64_t>\(age\) \* logic::CHECKUP_DT_S, target\)/);
+assert.match(cFlash, /const int64_t newest_label = latched_newest_locked\(latest_end\);/);
+assert.match(cFlash, /rec\.bucket = label;/);
+// A DHW-only restart empties the hours before it: an append made later never presents them as
+// the current circulation source's evidence.
+assert.match(dhwReset, /s_dhw_restart_armed = true; s_dhw_restart_bucket = logic::checkup_bucket\(s_dhw_scope_us\);/,
+  "the DHW-only reset records its monotonic hour");
+assert.match(flashNext,
+  /if \(s_dhw_restart_armed && current - 1 - age < s_dhw_restart_bucket\) \{ payload\.dhw_source_fp = 0; payload\.dhw = kEmptyDhwLossBucket; \}/,
+  "pre-restart hours carry no DHW identity");
+assert.match(body(checkup, "void persist_wipe("), /s_dhw_restart_armed = false;/);
+const appendAt2 = body(history, "esp_err_t flash_append_record_at(");
+assert.match(appendAt2,
+  /s_flash_last_bucket\[src\] = r\.header\.bucket;[^}]*if \(src == static_cast<size_t>\(logic::HistoryJournalSource::Checkup\)\) checkup_flash_appended\(r\.header\.bucket\);/,
+  "only a verified data commit of the checkup source confirms a revision");
+const scan = body(history, "bool flash_journal_scan()");
+assert.match(scan, /if \(src == checkup_src\) \{[^]*?logic::checkup_journal_index_step\(s_flash_checkup_index, r\.header\.bucket\)/,
+  "checkup records are indexed only through the pure revision-aware index");
+assert.match(scan, /logic::checkup_journal_index_retained\(ix, i\)/,
+  "the checkup candidates are clipped to the window ending at the newest indexed hour");
+assert.doesNotMatch(scan, /CHECKUP_COMPLETED_BUCKETS/,
+  "the trend retention path no longer carries a checkup branch");
 console.log("history restore guard contract: ok");

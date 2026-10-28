@@ -225,6 +225,11 @@ A narrowly scoped one-shot DHW handoff may preserve an unfinished candidate; it 
 to completed checks. Disabling diagnostics clears runtime evidence; re-enabling starts a new
 generation. Same-boot journal creation is not proof of reboot restoration. `DIAGNOSTICS.md` explains
 results; `PLANT.md` owns lifecycle.
+A run completes into its start hour. When that hour was already journaled, it and every later live
+hour are appended again; the boot index keeps each hour's newest copy, including the older-sequence
+tail of a replay cut by power loss (`checkup_persist.hpp`). Each boot latches one wall-clock label
+per monotonic hour, so whole-second clock reads cannot relabel a replayed hour; a backward clock
+step stops rewinds as it stops ordinary appends.
 Current source confirmation requires this boot's full profile/link evidence, not cached startup
 identity. Whole live and restored hours expire when their beginning leaves the rolling day,
 independently of producer progress; abandoned open evidence expires too. The current 80-byte
