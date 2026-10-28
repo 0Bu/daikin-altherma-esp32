@@ -2,6 +2,27 @@
   "measurement_records": [
     {
       "runner": "scripts/run-mock-tests.sh --coverage",
+      "scope": "Monotonic endpoint bounds for class/RPS gaps, independent of hourly duration booking. Exact 15-second positive controls and eight late-endpoint negative controls cover both signals, hour rollover and fractional seconds. Ten assertions fail against 61834599 before this correction.",
+      "source": "main/logic/checkup.hpp",
+      "source_sha256": "d919e0e0e3e443b237cbcf404d1911b5544a6850d9130bc9eb6e47f6fe45c0ed",
+      "measured_profiles": {
+        "clang-17-darwin": [
+          966,
+          1049
+        ],
+        "gcc-13-linux-ubuntu24": [
+          1116,
+          1211
+        ],
+        "gcc-15-linux-ubuntu26": [
+          1116,
+          1211
+        ]
+      },
+      "hosted_confirmation": "The existing hosted profile must be confirmed by current-head CI; no local inventory substituted."
+    },
+    {
+      "runner": "scripts/run-mock-tests.sh --coverage",
       "scope": "Readable DHW-mode terminal valve return; 22/30-second positive controls, longer/missing/cooling/recovery negative controls and the DHW-mode population replay. Historical ratios retained or raised.",
       "source": "main/logic/checkup.hpp",
       "source_sha256": "7a3b092da19cb248af715d6210ec8ea9eb24529cb157ef71601d81ae116be6fc",
@@ -780,8 +801,8 @@
         "taken": 6
       },
       "main/logic/checkup.hpp": {
-        "taken": 964,
-        "outcomes": 1047
+        "taken": 966,
+        "outcomes": 1049
       },
       "main/logic/checkup_persist.hpp": {
         "outcomes": 125,

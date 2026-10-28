@@ -491,10 +491,11 @@ struct CheckupState {
     bool     prev_any_known        = false;
     // The last KNOWN compressor state of this continuous segment (a real gap clears it), and the
     // unreadable-RPS seconds in the open run since its last known-running sample (each such sample,
-    // the start included, clears them).
+    // the start included, clears them). This is integration accounting only; bridge admission uses
+    // monotonic witness timestamps, independent of the hour-boundary dt discard.
     bool     last_rps_known = false, last_rps_running = false;
     uint8_t  run_blind_s           = 0;
-    uint16_t pump_run_s      = 0;       // continuous known-on time, reset by off/unknown/gap
+    uint16_t pump_run_s            = 0;       // continuous known-on time, reset by off/unknown/gap
     uint16_t bar_low_run_s    = 0;       // consecutive valid samples at/below documented boundary
     uint8_t  prev_retry_known_mask = 0;
     uint8_t  prev_retry_value[CHECKUP_RETRY_COUNT] = {};
@@ -1152,8 +1153,7 @@ constexpr uint32_t CHECKUP_PRESSURE_CONFIRM_S = 60;
 // Away from a boundary the whole delta is booked into the open bucket.
 inline bool checkup_step(CheckupState& st, CheckupBucket& b, const CheckupSample& s, int64_t now_us,
                          CheckupRing* ring = nullptr) {
-    bool reseal = false;
-    const int64_t  previous_us    = st.last_us;
+    bool           reseal         = false;
     const uint32_t current_bucket = checkup_bucket(now_us);
     // ── continuity ──────────────────────────────────────────────────────────────────────────────
     // A gap longer than CHECKUP_MAX_GAP_S means the firmware was not watching. Seconds are not
@@ -1316,17 +1316,24 @@ inline bool checkup_step(CheckupState& st, CheckupBucket& b, const CheckupSample
         // Bounded interpolation is run classification only; missing seconds never become observed
         // class/RPS coverage. A changed class across a gap cannot certify a handover.
         if (st.run_open) {
-            const bool was_running = st.prev_rps_known && st.prev_rps_running;
+            const bool was_running   = st.prev_rps_known && st.prev_rps_running;
             const auto current_class = checkup_run_class(s);
+            // dt is intentionally zero at a continuous hourly rollover. Bridge admission must
+            // instead bind the complete monotonic interval between the readable endpoints.
+            // Every open run initializes run_rps_seen_us; this continuous segment is monotonic.
+            const bool rps_gap_ok = now_us - st.run_rps_seen_us <=
+                                    static_cast<int64_t>(CHECKUP_CYCLING_GAP_S) * 1000000;
             if (!s.rps_known) {
                 st.run_had_gap = true;
                 st.run_blind_s = checkup_add_u8(st.run_blind_s, dt);
-                if (st.run_blind_s > CHECKUP_CYCLING_GAP_S ||
+                if (!rps_gap_ok ||
                     (current_class != CheckupRunClass::Unknown &&
                      current_class != st.run_last_class) ||
                     st.run_tail_us >= 0)
                     checkup_censor_run(st, CheckupCensorCause::Unreadable);
             } else if (s.rps_running) {
+                if (!st.prev_rps_known && (!rps_gap_ok || current_class != st.run_last_class))
+                    checkup_censor_run(st, CheckupCensorCause::Unreadable);
                 // A pure run after an unknown predecessor can only be resuming from that bounded
                 // pause; a start sample (known OFF before it) books no elapsed time.
                 if (was_running || (!st.prev_rps_known && st.run_class_pure))
@@ -1375,11 +1382,9 @@ inline bool checkup_step(CheckupState& st, CheckupBucket& b, const CheckupSample
                 } else {
                     const bool class_gap = !st.prev_class_known;
                     const bool gap_ok    = st.run_class_seen_us >= 0 &&
-                                        previous_us - st.run_class_seen_us <=
+                                        now_us - st.run_class_seen_us <=
                                             static_cast<int64_t>(CHECKUP_CYCLING_GAP_S) * 1000000;
-                    if ((class_gap && (!gap_ok || current_class != st.run_last_class)) ||
-                        (!st.prev_rps_known && (st.run_blind_s > CHECKUP_CYCLING_GAP_S ||
-                                                current_class != st.run_last_class)))
+                    if (class_gap && (!gap_ok || current_class != st.run_last_class))
                         checkup_censor_run(st, CheckupCensorCause::Unreadable);
                     if (current_class != st.run_last_class && !class_gap && st.prev_rps_known) {
                         const bool handover = (st.run_last_class == CheckupRunClass::SpaceHeating &&

@@ -1,6 +1,6 @@
 # Evidence and limits of the plant diagnostics
 
-<!-- diagnostic-evidence-contract: 04417cbd3084edba5c1628ae1879dce2d7e17b765bb8bb8aa8b22731b98e3eb5 -->
+<!-- diagnostic-evidence-contract: cc05e76d9573ab69fa5734a584a440364637fdf1702d7a9d11c34e6a5a3edb4d -->
 
 For every row in the **Plant diagnostics · 24 h** card, this page answers four questions:
 
@@ -183,7 +183,8 @@ supports the relevance of very short runs but does not provide a universal Daiki
 
 **Firmware rule:** Starts and completed runs are retained separately. Valve/mode inputs classify
 pure space heating, DHW or cooling. Missing class or RPS readings may bridge at most 15 seconds
-only with matching known-running classes on both sides; that bridge does not add readable coverage.
+between matching known-running endpoints, using their monotonic timestamps independently of hourly
+duration booking; that bridge does not add readable coverage.
 A changed recovered class, unknown stop edge or longer gap censors the run. A pure DHW run may
 hold one final valve return to the room circuit for at most 30 seconds, accepted only at a known OFF
 edge. The indoor mode must remain readable and may still say DHW; cooling, a return to the DHW

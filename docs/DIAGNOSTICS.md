@@ -1,6 +1,6 @@
 # Plant diagnostics in plain language
 
-<!-- user-docs-contract: aa287840ef1577697152104c7b3582be776aedac3f4eb1f4cb1ac2c6fdc6605a -->
+<!-- user-docs-contract: 435cf1dc9cb32d528f70c7e85bb29b4c365070a4affea1492e72a208b35a6070 -->
 
 Plant diagnostics **reads measurements and counts events; it does not control the heat pump**.
 It is off by default. Enable **Plant diagnostics** under **Settings → Firmware** to start an evidence
@@ -105,7 +105,7 @@ transitions, heating/DHW handovers, journal boundaries and unwitnessed starts.
 **Meaning:** At least **12 completed space-heating runs** can carry the assessment when both run
 count and runtime coverage reach **90%**. Positively observed heating/DHW handovers remain visible
 but do not enter the pure-run count or heating mean. Uncertain runtime is compared against completed
-heating runtime, so missing long runs cannot leave a misleading short-run average. An average below
+heating runtime to reduce bias from observed but unclassified runs. An average below
 **10 minutes** produces **NOTE** once this population exists. **OK** additionally needs a full day
 and 90% readable classification time.
 Smaller or insufficiently classified populations are **MEASURED**, with the reason shown;
@@ -114,8 +114,9 @@ no usable compressor observation remains **CHECKING**.
 **Important limit:** There is no pooled all-mode assessment, and an unfinished long run cannot dilute
 completed short runs. Twelve runs and ten minutes are project heuristics, not Daikin limits. These
 figures do not identify oversizing or hydraulic imbalance. Optional outdoor min/mean is context for
-accepted heating runs only. A missing class or compressor reading may bridge at most 15 seconds,
-only between matching known-running classes. Unknown readings never become OFF. A pure DHW charge
+accepted heating runs only. A missing class or compressor reading may bridge at most 15 seconds
+between matching known-running readings, measured from their actual timestamps even across an
+hour boundary. Unknown readings never become OFF. A pure DHW charge
 may include a final valve return to the room circuit of at most 30 seconds before a known stop,
 including when the readable indoor mode still says DHW. A cooling mode or unreadable tail is not
 accepted. This project allowance is based on observed 6–22 second tails, not a Daikin specification.

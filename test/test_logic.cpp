@@ -15223,9 +15223,57 @@ static void test_checkup_population() {
           gapped_handover.censored_unreadable_runs == 1 &&
           gapped_handover.censored_runtime_s > 400);
     CHECK(run(0, 16, 0, false, false, false).censored_unreadable_runs == 1);
-    CHECK(run(0, 0, 15, false, false, false).space_runs == 1);
+    CHECK(run(0, 0, 14, false, false, false).space_runs == 1); // 15 s between endpoints
+    CHECK(run(0, 0, 15, false, false, false).censored_unreadable_runs == 1);
     CHECK(run(0, 0, 16, false, false, false).censored_unreadable_runs == 1);
     CHECK(run(0, 0, 1, false, false, true).censored_unreadable_runs == 1);
+
+    auto endpoint_gap = [](bool missing_rps, bool hour_crossing, int64_t endpoint_gap_us) {
+        CheckupState  state;
+        CheckupRing   ring;
+        CheckupSample sample;
+        sample.rps_known = sample.valve_known = true;
+        sample.operating_mode                 = CheckupOperatingMode::Heating;
+        uint32_t previous_bucket              = 0;
+        auto     tick                         = [&](int64_t now) {
+            const auto bucket = checkup_bucket(now);
+            if (bucket != previous_bucket) {
+                const bool continuous_boundary =
+                    state.last_us >= 0 && now >= state.last_us &&
+                    now - state.last_us <= static_cast<int64_t>(CHECKUP_MAX_GAP_S) * 1000000;
+                ring.commit(checkup_skipped(previous_bucket, bucket));
+                if (continuous_boundary) state.last_us = now;
+                previous_bucket = bucket;
+            }
+            checkup_step(state, ring.pending, sample, now, &ring);
+        };
+        const int64_t start = (hour_crossing ? 3590LL : 100LL) * 1000000 + 250000;
+        previous_bucket     = checkup_bucket(start);
+        tick(start - 1000000);
+        sample.rps_running = true;
+        tick(start);
+        sample.rps_known   = !missing_rps;
+        sample.valve_known = missing_rps;
+        tick(start + 1000000);
+        if (hour_crossing) tick(start + 10000000); // production rolls over, discarding this dt
+        sample.rps_known = sample.valve_known = true;
+        tick(start + endpoint_gap_us);
+        sample.rps_running = false;
+        tick(start + endpoint_gap_us + 1000000);
+        return checkup_aggregate(ring);
+    };
+    // The allowance measures the complete monotonic interval between matching readable running
+    // endpoints. Neither a fractional recovery nor the production hour-boundary dt=0 may extend it.
+    for (bool missing_rps : {false, true}) {
+        for (bool hour_crossing : {false, true}) {
+            const auto boundary = endpoint_gap(missing_rps, hour_crossing, 15000000);
+            CHECK(boundary.space_runs == 1 && boundary.censored_runs == 0);
+            for (int64_t endpoint_us : {15000001LL, 15500000LL}) {
+                const auto late = endpoint_gap(missing_rps, hour_crossing, endpoint_us);
+                CHECK(late.space_runs == 0 && late.censored_unreadable_runs == 1);
+            }
+        }
+    }
 
     const auto replay = checkup_population_fixture();
     CHECK(replay.starts == 21 && replay.space_runs == 12 && replay.dhw_runs == 5);
@@ -16033,8 +16081,8 @@ static void test_checkup() {
     {
         // DIAG-03/a: a sweep that read NO row at all (n == 0: the weather/OTA network quiesce, an
         // OOM catch) is the firmware pausing, not a readable sweep that lost the compressor row.
-        // Up to CHECKUP_MAX_GAP_S of it inside a run keeps the class and books the elapsed time;
-        // longer, or a known OFF right after it, still censors (the lost-row case is above).
+        // Matching running/class endpoints at most CHECKUP_CYCLING_GAP_S apart keep the class;
+        // a later recovery, or known OFF after the pause, still censors.
         auto pause_run = [](int pause_s, bool stop_after) {
             CheckupState  st;
             CheckupBucket b;
@@ -16056,9 +16104,10 @@ static void test_checkup() {
         const CheckupBucket paused = pause_run(4, false);
         CHECK(paused.space_runs == 1 && paused.censored_runs == 0);
         CHECK(paused.space_run_s == 299 + 4 + 300); // start sample to last running sample
-        const CheckupBucket at_bound = pause_run(static_cast<int>(CHECKUP_MAX_GAP_S), false);
+        const CheckupBucket at_bound =
+            pause_run(static_cast<int>(CHECKUP_CYCLING_GAP_S) - 1, false);
         CHECK(at_bound.space_runs == 1 && at_bound.censored_runs == 0);
-        const CheckupBucket too_long = pause_run(static_cast<int>(CHECKUP_MAX_GAP_S) + 1, false);
+        const CheckupBucket too_long = pause_run(static_cast<int>(CHECKUP_CYCLING_GAP_S), false);
         CHECK(too_long.space_runs == 0 && too_long.censored_runs == 1);
         const CheckupBucket stopped = pause_run(4, true); // the stop hid inside the pause
         CHECK(stopped.space_runs == 0 && stopped.censored_runs == 1);
