@@ -347,7 +347,10 @@ inline uint32_t room_crc() {
 inline void room_seal_locked() { R().crc = room_crc(); }
 
 inline void room_wipe_locked(uint32_t identity) {
-    std::memset(&R(), 0, sizeof(R()));
+    static_assert(std::is_trivially_copyable<RoomPersistedHistory>::value,
+                  "retained room history must support byte-wise initialization");
+    // Reset the retained object representation without a same-sized stack temporary.
+    std::memset(reinterpret_cast<unsigned char*>(&R()), 0, sizeof(R()));
     R().magic    = logic::HISTORY_PERSIST_MAGIC;
     R().version  = logic::HISTORY_PERSIST_VERSION;
     R().schema   = logic::HISTORY_ROOM_SCHEMA;

@@ -36,6 +36,7 @@ const fixture = String.raw`
 #include <cstring>
 #include <cstdio>
 #include <stdexcept>
+#include <type_traits>
 namespace daik {
 using namespace logic;
 ` + source.slice(structStart, structEnd + 3) + String.raw`
@@ -73,6 +74,17 @@ void read_check(uint32_t id, size_t expected) {
 }
 void run() {
  constexpr uint32_t A=101, B=202;
+ auto* raw=reinterpret_cast<unsigned char*>(&R());
+ std::memset(raw,0xa5,sizeof(R()));room_wipe_locked(A);
+ need(R().magic==HISTORY_PERSIST_MAGIC&&R().version==HISTORY_PERSIST_VERSION&&
+      R().schema==HISTORY_ROOM_SCHEMA&&R().identity==A,"wipe establishes room identity");
+ need(R().boots_since_commit==0&&R().reserved==0&&R().residual_us==0,"wipe clears bookkeeping");
+ need(R().ring.count==0&&R().ring.head==0&&R().ring.pending==HISTORY_NO_READING,"wipe restores absent pending sentinel");
+ for(auto reading:R().ring.buf)need(reading==0,"wipe zeroes old sample bytes");
+ need(R().crc==room_crc(),"wiped room seal matches actual bytes");
+ unsigned char first[sizeof(R())];std::memcpy(first,raw,sizeof(first));
+ std::memset(raw,0x5a,sizeof(R()));room_wipe_locked(A);
+ need(std::memcmp(first,raw,sizeof(first))==0,"wipe deterministic from different retained bytes");
  runtime_boot(A,CrashReason::POWERON);
  auto gen=history_room_generation();
  now_us=1000000; history_record_room(true,23.6,gen);
@@ -288,6 +300,7 @@ try {
     ["late-generation","generation != s_room_generation.load()","(static_cast<void>(generation), false)"],
     ["wrong-warm-source","R().identity == want_room","true"],
     ["warm-gap-booking","R().ring.append_gaps(booking.gaps);","(void)booking.gaps;"],
+    ["missing-byte-wipe","std::memset(reinterpret_cast<unsigned char*>(&R()), 0, sizeof(R()));","(void)sizeof(R());"],
   ]) {
     assert.equal(fixture.split(before).length,2,`one mutation site ${name}`);
     const bad=run(fixture.replace(before,after),name);
@@ -307,5 +320,5 @@ try {
     assert.notEqual(bad.status,0,`${name}: broken production restore must fail`);
     assert.match(bad.stderr,name==="unguarded-restore-index" ? /unguarded restore metadata read/ : /recursive flash acquisition/);
   }
-  console.log("room history: production record/reset/snapshot/adoption plus locked flash/checkup restore and reset interleaving; five negative controls passed");
+  console.log("room history: production record/reset/snapshot/adoption plus locked flash/checkup restore and reset interleaving; six negative controls passed");
 } finally { fs.rmSync(dir,{recursive:true,force:true}); }
