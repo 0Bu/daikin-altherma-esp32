@@ -2039,10 +2039,10 @@ const MODEL_DESCRIPTIONS = {
     de: { what: "Stärkste erfasste Abkühlung pro Stunde am Speichersensor R5T.",
           normal: "Interner Hinweis ≥0,8 K/h ohne Pumpen-/Zapfmerkmale. R5T misst einen Punkt, keine Energie oder den ganzen Speicher. Fehlende Merkmale belegen keine Zapffreiheit; null Nettoabkühlung schließt Wärmeverlust nicht aus. Zirkulationsüberschneidung belegt keine Ursache." } },
   health_cycling: {
-    what: "Compressor OFF-to-ON starts and durations of complete, consistently classified heating runs.",
-    normal: "Project hint: ≥12 heating runs averaging <10 min; ≥90% of all completed runs classified. Excludes hot water, cooling and unclassified runs; no Daikin limit.",
-    de: { what: "Verdichterstarts von OFF zu ON und vollständige, durchgehend zugeordnete Heizläufe.",
-          normal: "Interne Regel: ≥12 Heizläufe im Mittel <10 min; ≥90 % aller abgeschlossenen Läufe zugeordnet. Warmwasser, Kühlung und ungeklärte Läufe zählen nicht; kein Daikin-Grenzwert." } },
+    what: "Starts and completed classified heating runs.",
+    normal: "Project hint: ≥12 heating runs averaging <10 min; ≥90% of all completed runs classified (proven handovers excluded) and ≥90% heating/uncertain runtime coverage. No Daikin limit.",
+    de: { what: "Verdichterstarts von OFF zu ON und zugeordnete abgeschlossene Heizläufe.",
+          normal: "Interne Regel: ≥12 Heizläufe im Mittel <10 min; ≥90 % aller abgeschlossenen Läufe zugeordnet (sichere Übergaben ausgenommen) und ≥90 % Heiz-/ungeklärte Laufzeit abgedeckt. Kein Daikin-Grenzwert." } },
   health_defrost: {
     what: "Defrost starts and their share of compressor runtime with readable compressor and defrost states.",
     normal: "Project hint: ≥3 paired events and >15%. Humidity and whole-coil temperature are unavailable; no Daikin fault limit.",

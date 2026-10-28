@@ -239,8 +239,9 @@ assert.deepEqual(Object.keys(modelSchema), ["health_fault", "health_dhw_loss", "
   "oueeprom"], "model-description locale order drifted");
 const faultCodes = Array.from(faultSchema, (entry) => entry.code);
 assert.equal(faultCodes.length, 63, "fault-code locale order must track every canonical code");
-// Pin the two denominators independently of their numeric thresholds. Classification uses all
-// completed runs; defrost share uses only compressor runtime with both input states readable.
+// Pin the denominators independently of their numeric thresholds. Classification uses completed
+// runs with proven handovers excluded, plus heating/uncertain runtime coverage. Defrost share uses
+// only compressor runtime with both input states readable.
 const checkupDenominators = {
   es: [/todos los ciclos completos/, /estados de compresor y desescarche legibles/, /tiempo de marcha del compresor/],
   fr: [/tous les cycles complets/, /états compresseur et dégivrage lisibles/, /temps de marche du compresseur/],
@@ -342,6 +343,8 @@ for (const code of codes.slice(2)) {
   assert.match(joined("health_cycling"), /\b12\b/, `${code} loses the 12-run population`);
   assert.match(joined("health_cycling"), checkupDenominators[code][0],
     `${code} classification must use all completed runs`);
+  assert.equal((joined("health_cycling").match(/90\s*%/g) || []).length, 2,
+    `${code} must retain both count and runtime coverage requirements`);
   assert.match(joined("health_defrost"), /15\s*%/, `${code} loses the 15% defrost heuristic`);
   assert.match(joined("health_defrost"), /\b3\b/, `${code} loses the three-defrost minimum`);
   assert.match(joined("health_defrost"), checkupDenominators[code][1],

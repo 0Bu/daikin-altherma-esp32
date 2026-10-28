@@ -1489,6 +1489,15 @@ static void append_status_json(JsonOut& j, bool redact) {
                 num("dhw_mean_run_s", ck.f);
                 num("cooling_runs", hr.cycling_cooling_runs);
                 num("censored_runs", ck.g);
+                num("censored_transition_runs", hr.cycling_censored_transition_runs);
+                num("censored_handover_runs", hr.cycling_censored_handover_runs);
+                num("censored_unreadable_runs", hr.cycling_censored_unreadable_runs);
+                num("censored_restart_runs", hr.cycling_censored_restart_runs);
+                num("censored_start_runs", hr.cycling_censored_start_runs);
+                num("classified_runtime_s", hr.cycling_classified_runtime_s);
+                num("censored_runtime_s", hr.cycling_censored_runtime_s);
+                j += ",\"runtime_saturated\":";
+                j += hr.cycling_runtime_saturated ? "true" : "false";
                 j += ",\"split\":";
                 j += hr.cycling_split ? "true" : "false";
                 outdoor_context(hr.cycling_outdoor);

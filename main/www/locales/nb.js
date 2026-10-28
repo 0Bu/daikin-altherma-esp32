@@ -1,4 +1,4 @@
-// translation-source: 33967449acf2e4c68a9c1a1feb866a3378533feeec8e796587881b7dec62ef92
+// translation-source: 5453eeaa5ecebfac9d729776d8b40e937dbfce10d0a431843b3f3298cd22a9ff
 I18N.nb = localeValues([
   /* sys.nodata */ "Ingen data",
   /* sys.unreachable */ "Ikke tilgjengelig",
@@ -198,7 +198,6 @@ I18N.nb = localeValues([
   /* check.detail.fault.past */ "Ingen melding er aktiv nå; en ble registrert i perioden. At den forsvant, beviser verken årsak eller løsning.",
   /* check.detail.fault.past_unknown */ "En melding ble registrert; gjeldende feiltilstand kan ikke leses.",
   /* check.detail.collecting */ (a, b) => `Lesbare signaler: ${a} av påkrevde ${b}.`,
-  /* check.detail.cycling_split */ " Bare fullførte og gjennomgående klassifiserte romoppvarmingskjøringer vurderes. Varmtvann, kjøling og uklassifiserte kjøringer er observasjoner.",
   /* check.detail.outdoor_cycling */ " X10A-utedata er bare ferske målinger fra fullførte kjøringer som hele tiden var romoppvarming. De er kontekst og endrer ikke grensen eller vurderingen.",
   /* check.detail.outdoor_defrost */ " X10A-utedata er bare ferske målinger mens avriming og kompressorstatus var lesbare og kompressoren gikk. De er kontekst og endrer ikke grensen eller vurderingen.",
   /* check.detail.dhw_candidate */ (a, b, c, d) => `Godtatte timesvinduer: ${a}; aktuell kandidat: ${c} av ${d}.`,
@@ -223,6 +222,7 @@ I18N.nb = localeValues([
   /* check.cycling_dhw */ (a, b) => `varmtvann ${a} · snitt ${b}`,
   /* check.cycling_cooling */ (n) => `Kjøling ${n} utelatt`,
   /* check.cycling_censored */ (n) => `${n} uten klasse`,
+  /* check.cycling_causes */ "overgang|omstart/journal|start ikke observert",
   /* check.outdoor_one */ (source, mean) => `${source} ${mean} °C`,
   /* check.outdoor_range */ (source, min, mean) => `${source} min. ${min} °C · snitt ${mean} °C`,
   /* check.min */ (m) => `${m} min`,
@@ -255,7 +255,7 @@ I18N.nb = localeValues([
   /* check.detail.age_label */ "Alder på siste måling:",
   /* check.detail.horizon_wait */ (a) => `Et helt 24-timersvindu mangler fortsatt: ${a} gjenstår.`,
   /* check.detail.fault.ok */ "Ingen aktuell eller lagret melding i lesbare feilsignaler.",
-  /* check.detail.cycling.info */ "≥12 fullførte varmekjøringer med snitt <10 min: prosjekthint.",
+  /* check.detail.cycling.info */ "Varmesnitt <10 min: prosjekthint.",
   /* check.detail.cycling.ok */ "Ingen kortkjøringshint i fullførte varmekjøringer.",
   /* check.detail.defrost.info */ "≥3 parede avriminger overstiger 15% av lesbar kompressortid: prosjekthint.",
   /* check.detail.defrost.ok */ "Ingen avrimingsandelshint; vær og hull ikke vurdert.",
@@ -263,14 +263,14 @@ I18N.nb = localeValues([
   /* check.detail.pressure.warn */ "Registrert sammenhengende ≥60 s ≤1,0 bar; ikke nåtrykket.",
   /* check.detail.pressure.ok */ "Ingen godtatt verdi ≤1,0 bar, prosjektterskelen.",
   /* check.detail.class_missing */ "Ufullstendig klassifisering; ingen samlet syklingsdom.",
-  /* check.detail.heating_runs_insufficient */ "Færre enn 12 egnede fullførte varmekjøringer; ingen syklingsdom.",
+  /* check.detail.heating_runs_insufficient */ "<12 egnede fullførte varmekjøringer; ingen vurdering.",
   /* check.detail.defrost_events_insufficient */ "Færre enn tre parede avriminger; ingen andelsdom.",
   /* check.detail.source_stale */ "Ingen fersk X10A-prøve; aktuell tilstand ukjent. Historikk beholdt.",
   /* check.detail.no_paired_runtime */ "Ingen paret lesbar kjøretid; bare antall.",
   /* check.detail.current_label */ "Aktuelt vanntrykk:",
   /* check.detail.minimum_time_label */ "Minimum registrert:",
   /* check.detail.coverage_missing */ (a) => `Manglende lesbar tid: ${a} s.`,
-  /* check.detail.channel_coverage */ (a, b) => `${a}: ${b} lesbar`,
+  /* check.detail.channel_coverage */ (a, b) => `${a}: ${b} dekket`,
   /* check.summary.warnings */ (n) => `${n} ${n === 1 ? "advarsel" : "advarsler"}`,
   /* check.summary.notes */ (n) => `${n} ${n === 1 ? "merknad" : "merknader"}`,
   /* check.summary.ok */ "Ingen hint i vurderte data",
@@ -1230,7 +1230,7 @@ DESCRIPTION_I18N.nb = descriptionValues([
 MODEL_DESCRIPTION_I18N.nb = modelDescriptionValues([
   ["Enhetens meldinger", "ingen årsaks- eller løsningsbevis."], // health_fault
   ["R5T: ett punkt i lagdelt tank, ikke energi.", "Prosjekthint ≥0,8 K/h uten pumpe-/tappemarkører. Tapping er mulig uten markører; 0 K/h utelukker ikke varmetap. Sirkulasjon beviser ikke årsak."], // health_dhw_loss
-  ["Kompressorstarter", "≥12 fullførte varmekjøringer, snitt <10 min; ≥90% av alle fullførte kjøringer klassifisert. Intern regel, ikke Daikin; varmtvann, kjøling og uklassifiserte utelates."], // health_cycling
+  ["Kompressorstarter", "Intern regel: ≥12 varmekjøringer, snitt <10 min; ≥90% av alle fullførte kjøringer klassifisert uten bekreftede overføringer og ≥90% varme/usikker tidsdekning. Ingen Daikin-grense."], // health_cycling
   ["Avriming", "≥3 parede, >15% av kompressorens driftstid der både kompressor- og avrimingsstatus er lesbar. Intern regel, ikke Daikin; fuktighet og hele varmevekslerens temperatur mangler."], // health_defrost
   ["Trykk", "felles intern regel ≤1,0 bar; 60 s kontinuerlig observert gir advarsel. Ikke universell; modellmanual gjelder."], // health_pressure
   ["Strømning etter 60 s pumpe", "Grense krever samme modell/modus/forhold; ikke nominell eller lavstrømningsbevis."], // health_flow

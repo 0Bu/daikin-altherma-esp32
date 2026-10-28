@@ -46,7 +46,9 @@ for (const key of [
   "full_span", "available", "assessable", "evaluated", "evidence", "observed_s", "required_s",
   "starts", "mean_run_s", "count", "paired_count", "share_pct", "defrost_s", "run_s",
   "space_runs", "space_mean_run_s", "dhw_runs", "dhw_mean_run_s", "cooling_runs",
-  "censored_runs", "split",
+  "censored_runs", "censored_transition_runs", "censored_handover_runs",
+  "censored_unreadable_runs", "censored_restart_runs", "censored_start_runs",
+  "classified_runtime_s", "censored_runtime_s", "runtime_saturated", "split",
   "outdoor_source", "outdoor_min_c", "outdoor_mean_c", "outdoor_samples",
   "min_bar", "current_bar", "min_unix_s", "confirmed_low", "min_l_min",
   "buh_min", "bsh_min", "buh_s", "bsh_s", "buh_observed_s", "bsh_observed_s", "active", "seen",
@@ -312,7 +314,7 @@ ui.setLang("en");
 
 detail = ui.detail({ id: "heater", verdict: "ok", evidence: "observation", buh_s: 0,
   bsh_s: 60, buh_observed_s: 7200, bsh_observed_s: 3600 });
-assert.match(detail, /BUH: 2 h readable · BSH: 1 h readable/);
+assert.match(detail, /BUH: 2 h covered · BSH: 1 h covered/);
 
 // Only completed, fully classified heating-run means are presented. A pooled long DHW run can
 // neither inflate this mean nor restore an assessment after classification becomes insufficient.
@@ -321,12 +323,16 @@ const cycling = {
   split: true, space_runs: 12, space_mean_run_s: 300,
   dhw_runs: 1, dhw_mean_run_s: 7200, cooling_runs: 0, censored_runs: 0,
 };
-assert.equal(ui.metric(cycling), "13 starts · heating 12 · mean 5 min · hot water 1 · mean 2 h");
-assert.match(ui.detail(cycling), /≥12 completed heating runs average &lt;10 min/);
-assert.match(ui.detail(cycling), /Excludes hot water, cooling and unclassified runs/);
+assert.equal(ui.metric(cycling), "13 starts · heating 12 · mean 5:00 min · hot water 1 · mean 2 h");
+assert.match(ui.detail(cycling), /Mean heating run &lt;10 min: project hint/);
+assert.match(ui.detail(cycling), /completed classified heating runs/);
 assert.doesNotMatch(ui.metric(cycling), /830|13 min|\/start/);
 assert.equal(ui.metric({ ...cycling, space_mean_run_s: 599 }),
-             "13 starts · heating 12 · mean 9 min · hot water 1 · mean 2 h");
+             "13 starts · heating 12 · mean 9:59 min · hot water 1 · mean 2 h");
+assert.equal(ui.metric({ ...cycling, space_mean_run_s: 237 }),
+             "13 starts · heating 12 · mean 3:57 min · hot water 1 · mean 2 h");
+assert.equal(ui.metric({ ...cycling, space_mean_run_s: 660 }),
+             "13 starts · heating 12 · mean 11 min · hot water 1 · mean 2 h");
 assert.equal(ui.metric({ ...cycling, space_runs: 0, space_mean_run_s: null,
                         dhw_runs: null, dhw_mean_run_s: null, censored_runs: 9 }),
              "13 starts · heating 0 · 9 unclassified");
@@ -337,7 +343,37 @@ assert.match(detail, /Incomplete classification/);
 assert.doesNotMatch(detail, /Assessed on all runs together|all runs are assessed together/);
 assert.equal(ui.value({ ...cycling, verdict: "ok", evidence: "observation" }), "MEASURED");
 assert.match(ui.detail({ ...cycling, verdict: "ok", evidence: "observation",
-                        reason: "heating_runs_insufficient" }), /Fewer than 12 eligible completed heating runs/);
+                        reason: "heating_runs_insufficient" }), /&lt;12 eligible completed heating runs/);
+
+// Causes are exclusive subcounts of the retained total, never inferred from missing fields.
+// Runtime coverage uses heating and unsafe unclassified time; hot-water duration cannot dilute it.
+const cyclingCensored = { ...cycling, verdict: "ok", evidence: "observation",
+  reason: "class_population_incomplete", censored_runs: 15,
+  censored_transition_runs: 1, censored_handover_runs: 2, censored_unreadable_runs: 3,
+  censored_restart_runs: 4, censored_start_runs: 5,
+  classified_runtime_s: 5400, censored_runtime_s: 600, runtime_saturated: false };
+assert.match(ui.metric(cyclingCensored), /15 unclassified · transition 1 · Heating ↔ Hot water 2 · No data 3 · restart\/journal 4 · start not witnessed 5/);
+const cyclingRuntimeEvidence = { ...cyclingCensored, censored_runs: 6,
+  censored_restart_runs: 0, censored_start_runs: 0 };
+assert.match(ui.detail(cyclingRuntimeEvidence), /Heating: 90% covered/);
+assert.match(ui.detail({ ...cyclingRuntimeEvidence, classified_runtime_s: 89999, censored_runtime_s: 10001 }),
+  /Heating: 89.9% covered/, "runtime below the 90% gate must not round up to eligibility");
+assert.doesNotMatch(ui.detail(cycling), /Heating: \d/,
+  "an older payload without runtime fields must not invent coverage");
+assert.doesNotMatch(ui.detail({ ...cyclingRuntimeEvidence, classified_runtime_s: null }), /Heating: \d/);
+assert.doesNotMatch(ui.metric({ ...cyclingCensored, censored_handover_runs: 0 }), /Heating ↔ Hot water/);
+assert.match(ui.detail({ ...cyclingRuntimeEvidence, runtime_saturated: true }),
+  /6 unclassified: ≥10 min/);
+assert.doesNotMatch(ui.detail({ ...cyclingRuntimeEvidence, runtime_saturated: true }), /Heating: 90%/);
+for (const cause of ["start", "restart"]) {
+  const unbounded = { ...cyclingRuntimeEvidence, [`censored_${cause}_runs`]: 1, censored_runs: 7 };
+  assert.match(ui.detail(unbounded), /7 unclassified: ≥10 min/,
+    `${cause} evidence establishes only a lower runtime bound`);
+  assert.doesNotMatch(ui.detail(unbounded), /Heating: \d/,
+    `${cause} evidence must not invent a bounded coverage percentage`);
+}
+assert.equal(ui.metric({ id: "flow", verdict: "ok", min_l_min: 6.5 }), "6.5 l/min");
+assert.equal(ui.metric({ id: "flow", verdict: "ok", min_l_min: NaN }), "");
 
 // Minimum, timestamp and current pressure are independent facts. A recovered historical low
 // pressure warning remains a historical warning when the present sample is stale.
@@ -413,11 +449,21 @@ assert.equal(ui.card(), "");
 // Every shipped language must have dynamic copies for the changed states, not English fallback keys.
 for (const lang of locales) {
   ui.setLang(lang);
-  const classification = ui.text(lang, "check.detail.cycling_split").trim();
-  assert.ok(ui.detail(cycling).includes(classification),
-    `${lang} classified heating runs retain their continuous-classification limit`);
-  assert.ok(!ui.detail({ ...cycling, space_runs: null }).includes(classification),
-    `${lang} missing classification must not imply classified heating runs`);
+  const labels = ui.text(lang, "check.cycling_causes").split("|");
+  assert.equal(labels.length, 3, `${lang} must name transition, restart and unwitnessed start`);
+  const causeLabels = [labels[0], `${ui.text(lang, "mode.heat")} ↔ ${ui.text(lang, "mode.dhw")}`,
+    ui.text(lang, "sys.nodata"), labels[1], labels[2]];
+  for (const [index, [cause, count]] of [["transition", 1], ["handover", 2], ["unreadable", 3],
+      ["restart", 4], ["start", 5]].entries()) {
+    assert.ok(ui.metric(cyclingCensored).includes(`${causeLabels[index]} ${count}`),
+      `${lang} must show the reported ${cause} count`);
+    assert.doesNotMatch(causeLabels[index], /check\.|undefined|NaN/);
+  }
+  const runtime = ui.text(lang, "check.detail.channel_coverage", ui.text(lang, "mode.heat"), "90%");
+  assert.ok(ui.detail(cyclingRuntimeEvidence).includes(runtime), `${lang} runtime coverage must be visible`);
+  const saturated = `${ui.text(lang, "check.cycling_censored", 6)}: ≥10 min`;
+  assert.ok(ui.detail({ ...cyclingRuntimeEvidence, runtime_saturated: true }).includes(saturated),
+    `${lang} must explain the runtime storage limit without inventing a coverage ratio`);
   const interrupted = { ...dhw, aborts: 3, abort_reasons: ["blind"], best_aborted_s: 2400 };
   const discarded = ui.text(lang, "check.detail.dhw_aborted", 3,
     ui.text(lang, "check.detail.dhw_reason.blind"), "40 min").trim();
@@ -447,6 +493,7 @@ assert.match(ui.detail(dhw), /0,09–0,11 kWh Strom/);
 assert.match(ui.detail({ id: "fault", verdict: "info", active: 0 }), /weder Ursache noch Behebung/);
 assert.equal(ui.metric(pressure), "0 bar");
 assert.match(ui.detail(pressure), /Aktueller Wasserdruck: 1,5 bar/);
+assert.equal(ui.metric({ id: "flow", verdict: "ok", min_l_min: 6.5 }), "6,5 l/min");
 
 // Copy regression pins for corrected diagnosis claims (U3). The DHW loss peak is a highest
 // observed rate, not a bound: no shipped locale may lead it with an "at most" adverb.
@@ -499,6 +546,8 @@ assert.match(JSON.stringify(model.health_dhw_loss), /correlation, not cause/);
 assert.match(JSON.stringify(model.health_cycling), /≥12 heating runs averaging <10 min/);
 assert.match(model.health_cycling.normal, /≥90% of all completed runs classified/);
 assert.match(model.health_cycling.de.normal, /≥90 % aller abgeschlossenen Läufe zugeordnet/);
+assert.match(model.health_cycling.normal, /proven handovers excluded/);
+assert.match(model.health_cycling.normal, /≥90% heating\/uncertain runtime/);
 assert.doesNotMatch(JSON.stringify(model.health_cycling), /all runs are assessed together|alle gemeinsam bewertet/);
 assert.match(model.health_defrost.what, /compressor runtime with readable compressor and defrost states/);
 assert.match(model.health_defrost.de.what, /Verdichterlaufzeit bei lesbarem Verdichter- und Abtaustatus/);

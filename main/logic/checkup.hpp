@@ -195,12 +195,35 @@ static_assert(sizeof(CheckupOutdoorStats) == 12, "outdoor context cost changed")
 // device that has been up for ten minutes, reports the small number it has rather than an implied
 // full day.
 struct CheckupBucket {
-    uint16_t covered_s       = 0; // any continuous X10A observation (card-level context only)
-    uint16_t rps_observed_s  = 0; // compressor witness was readable
-    uint16_t run_s           = 0; // compressor running while that witness was readable
+    // Each clock belongs to one hour and is clamped at 3600 s before assignment. Five 12-bit
+    // clocks share each 64-bit allocation unit: the fifteen clocks use 24 bytes instead of 30.
+    // covered=any signal; rps/run=readable compressor/known running; class=paired RPS+valve+mode.
+    // dfr_pair/dfr_run/defrost require paired compressor+defrost witnesses; buh/bsh are heater
+    // witnesses and active time; bar is valid pressure, flow is valid flow after pump run-up;
+    // retry requires every expected counter and comparable readable compressor endpoints.
+    uint64_t covered_s : 12;
+    uint64_t rps_observed_s : 12;
+    uint64_t run_s : 12;
+    uint64_t class_observed_s : 12;
+    uint64_t dfr_observed_s : 12;
+    uint64_t dfr_pair_observed_s : 12;
+    uint64_t dfr_run_s : 12;
+    uint64_t defrost_s : 12;
+    uint64_t buh_observed_s : 12;
+    uint64_t buh_s : 12;
+    uint64_t bsh_observed_s : 12;
+    uint64_t bsh_s : 12;
+    uint64_t bar_observed_s : 12;
+    uint64_t flow_observed_s : 12;
+    uint64_t retry_observed_s : 12;
+    constexpr CheckupBucket()
+        : covered_s(0), rps_observed_s(0), run_s(0), class_observed_s(0), dfr_observed_s(0),
+          dfr_pair_observed_s(0), dfr_run_s(0), defrost_s(0), buh_observed_s(0), buh_s(0),
+          bsh_observed_s(0), bsh_s(0), bar_observed_s(0), flow_observed_s(0), retry_observed_s(0) {}
     // WHICH LOAD a compressor RUN served. RPS lives on 0x30; the 3-way valve and I/U mode live on
-    // 0x60, so either page can time out alone. `class_observed_s` is the paired class clock: RPS and
-    // valve must be readable together, plus I/U mode whenever the valve points at the room circuit.
+    // 0x60, so either page can time out alone. `class_observed_s` is the paired class clock: RPS
+    // and valve must be readable together, plus I/U mode whenever the valve points at the room
+    // circuit.
     //
     // The two class figures below count COMPLETED RUNS, not seconds attributed sample by sample.
     // That distinction is the whole correctness of this check. Splitting seconds by the valve while
@@ -208,35 +231,31 @@ struct CheckupBucket {
     // describe different populations, and DHW priority makes that a routine event rather than a
     // corner case: twelve continuous 25-minute runs that each hand over to the tank after five
     // minutes then read as a five-minute mean over twelve starts — a short-cycling verdict on a
-    // plant that never short-cycled. A run is therefore the unit, and it is classified only when its
-    // complete load identity stayed known and unchanged for the whole witnessed length.
-    uint16_t class_observed_s = 0;
+    // plant that never short-cycled. A run is therefore the unit, and it is classified only when
+    // its load identity is witnessed start-to-stop, allowing only bounded same-class gaps and the
+    // known-OFF DHW valve-return tail described by the cycling state machine below.
     uint32_t space_run_s =
         0; // complete runs are attributed to their start hour, not capped at 18 h
     uint32_t dhw_run_s           = 0;
-    uint16_t dfr_observed_s  = 0; // defrost flag readable (count evidence)
-    uint16_t dfr_pair_observed_s = 0; // defrost flag AND compressor witness readable (ratio evidence)
-    uint16_t dfr_run_s       = 0; // compressor runtime inside that paired observation
-    uint16_t defrost_s       = 0; // defrost active inside that paired observation
-    uint16_t buh_observed_s  = 0; // backup-heater flag readable
-    uint16_t buh_s           = 0; // backup heater (either step) active — SPACE heating side
-    uint16_t bsh_observed_s  = 0; // tank-heater flag readable
-    uint16_t bsh_s           = 0; // booster heater active — the DHW tank's immersion element
-    uint16_t bar_observed_s  = 0; // valid water-pressure samples continuously observed
-    uint16_t flow_observed_s = 0; // valid flow after the pump run-up
-    uint16_t retry_observed_s = 0;// all counters + compressor state comparable across the interval
     int16_t  min_bar    = CHECKUP_ABSENT;   // tenths of bar, raw lowest valid sample seen
     int16_t  min_flow   = CHECKUP_ABSENT;   // tenths of l/min, lowest seen after pump run-up
     uint32_t min_bar_unix_s   = 0;   // exact observed time when clock is valid; 0 remains unknown
     uint8_t  starts     = 0;   // compressor 0 -> >0 transitions (saturating)
-    // COMPLETED runs, per class — the denominators of the two heating/DHW means above, so each ratio
-    // is formed over one population. A run reaches one of these only if its valve/mode class stayed
-    // readable and unchanged; cooling is counted only to make its exclusion explicit. Everything
+    // COMPLETED runs, per class — the denominators of the two heating/DHW means above, so each
+    // ratio is formed over one population. Only the bounded interpolation/tail rules can preserve a
+    // pure class; cooling is counted only to make its exclusion explicit. Everything
     // else lands in `censored_runs`, so "no verdict" can never be read as "nothing ran".
     uint8_t  space_runs = 0;
     uint8_t  dhw_runs   = 0;
     uint8_t  cooling_runs = 0; // positively identified room-circuit cooling, reported but not judged
     uint8_t  censored_runs = 0; // completed, but mixed / class-unreadable / gapped: judged by neither
+    uint8_t  censored_transition_runs = 0;
+    uint8_t  censored_handover_runs   = 0;
+    uint8_t  censored_unreadable_runs = 0;
+    uint8_t  censored_restart_runs    = 0;
+    // Start-not-witnessed is the remainder of censored_runs after the four exclusive causes above.
+    // A saturated runtime is a lower bound and permanently blocks this window's runtime gate.
+    uint16_t censored_runtime_s = 0;
     uint8_t  defrosts   = 0;   // defrost off -> on transitions (saturating)
     uint8_t  paired_defrosts = 0; // same edge with readable compressor witnesses at both endpoints
     uint8_t  flags      = 0;
@@ -263,6 +282,9 @@ constexpr uint8_t checkup_add_u8(uint8_t v, unsigned add) {
 }
 constexpr uint16_t checkup_add_u16(uint16_t v, unsigned add) {
     return add > 65535u - v ? uint16_t{65535} : static_cast<uint16_t>(v + add);
+}
+constexpr uint16_t checkup_add_hour_s(unsigned v, unsigned add) {
+    return static_cast<uint16_t>(v >= 3600u || add >= 3600u - v ? 3600u : v + add);
 }
 constexpr uint32_t checkup_add_u32(uint32_t v, uint32_t add) {
     return add > UINT32_MAX - v ? UINT32_MAX : v + add;
@@ -423,8 +445,8 @@ struct CheckupSample {
     CheckupOperatingMode operating_mode = CheckupOperatingMode::Unknown;
     bool circulation_configured = false;
     bool circulation_known = false, circulation_on = false;
-    // The caller read no X10A row at all (n == 0: a network/OTA quiesce, an OOM catch, a silent
-    // sweep) — distinct from a readable sweep that lost only some rows. See the run carry below.
+    // Caller context retained for sampling compatibility. Cycling applies the same bounded
+    // missing-witness rule to entirely blind and partially unreadable sweeps.
     bool x10a_blind = false;
 
     bool bar_ok  = false;  int bar_tenths  = 0;
@@ -439,6 +461,11 @@ struct CheckupSample {
 };
 
 enum class CheckupRunClass : uint8_t { Unknown, SpaceHeating, Dhw, Cooling };
+constexpr uint32_t CHECKUP_CYCLING_DHW_TAIL_S = 30;
+constexpr uint32_t CHECKUP_CYCLING_GAP_S      = 15;
+// One completion has one cause. Highest priority wins: expired start/journal, unwitnessed start,
+// unreadable evidence, ambiguous transition, positively witnessed handover.
+enum class CheckupCensorCause : uint8_t { None, Handover, Transition, Unreadable, Start, Restart };
 
 constexpr CheckupRunClass checkup_run_class(const CheckupSample& s) {
     if (!s.valve_known) return CheckupRunClass::Unknown;
@@ -463,28 +490,39 @@ struct CheckupState {
     bool     prev_class_known      = false;
     bool     prev_any_known        = false;
     // The last KNOWN compressor state of this continuous segment (a real gap clears it), and the
-    // all-blind seconds in the open run since its last known-running sample (each such sample, the
-    // start included, clears them). Both sit in existing padding: CheckupState does not grow.
+    // unreadable-RPS seconds in the open run since its last known-running sample (each such sample,
+    // the start included, clears them). This is integration accounting only; bridge admission uses
+    // monotonic witness timestamps, independent of the hour-boundary dt discard.
     bool     last_rps_known = false, last_rps_running = false;
     uint8_t  run_blind_s           = 0;
-    uint16_t pump_run_s      = 0;       // continuous known-on time, reset by off/unknown/gap
+    uint16_t pump_run_s            = 0;       // continuous known-on time, reset by off/unknown/gap
     uint16_t bar_low_run_s    = 0;       // consecutive valid samples at/below documented boundary
     uint8_t  prev_retry_known_mask = 0;
     uint8_t  prev_retry_value[CHECKUP_RETRY_COUNT] = {};
     uint32_t bucket        = 0;
     bool     have_bucket   = false;
     // ── the compressor run in flight ────────────────────────────────────────────────────────────
-    // Transient on purpose, and checkup_persist.hpp deliberately does not restore CheckupState: a
-    // run straddling a reboot is therefore censored by construction, as is one already standing when
-    // the board booted (no start edge ever opened it) and one still running when the window is read
-    // (it has not completed). Those are three of the five censoring cases and none needed code.
+    // Transient on purpose: a run already standing after reboot has an unwitnessed start and can
+    // only complete as censored. An open run does not enter a mean before a known OFF completes it.
     bool     run_open       = false;
-    bool     run_class_pure = false;  // complete class readable and unchanged for every witnessed second
+    bool            run_class_pure = false; // start-to-stop class survives the bounded rules below
     CheckupRunClass run_class = CheckupRunClass::Unknown;
     uint32_t run_start_bucket = 0;    // complete-run facts age with the witnessed start edge
     uint32_t run_s          = 0;
+    int64_t         run_started_us    = -1;
+    int64_t         run_class_seen_us = -1;
+    int64_t         run_rps_seen_us   = -1;
+    int64_t         run_tail_us       = -1;
+    CheckupRunClass run_last_class    = CheckupRunClass::Unknown;
+    CheckupCensorCause  run_cause     = CheckupCensorCause::None;
+    bool                run_had_gap   = false;
     CheckupOutdoorStats run_outdoor; // committed only if this run completes as pure space heating
 };
+
+inline void checkup_censor_run(CheckupState& st, CheckupCensorCause cause) {
+    st.run_class_pure = false;
+    if (static_cast<unsigned>(cause) > static_cast<unsigned>(st.run_cause)) st.run_cause = cause;
+}
 
 // Commit the completed run to its class, or to the censored tally when it could not be classified.
 // One place, because the gap and recovered-OFF paths must reach the same conclusion as the normal
@@ -499,7 +537,7 @@ inline bool checkup_close_run(CheckupState& st, CheckupBucket& b, CheckupRing* r
             // The start is outside the rolling window. Its duration cannot re-enter through the
             // stop bucket, but the completed activity remains visible as censored evidence.
             target = &b;
-            st.run_class_pure = false;
+            checkup_censor_run(st, CheckupCensorCause::Restart);
         }
     }
     const bool reseal = ring && target != &b;
@@ -523,11 +561,37 @@ inline bool checkup_close_run(CheckupState& st, CheckupBucket& b, CheckupRing* r
         }
     } else {
         target->censored_runs = checkup_add_u8(target->censored_runs, 1);
+        auto cause            = st.run_cause;
+        if (cause == CheckupCensorCause::None) cause = CheckupCensorCause::Unreadable;
+        if (cause == CheckupCensorCause::Handover && st.run_had_gap)
+            cause = CheckupCensorCause::Unreadable;
+        if (cause == CheckupCensorCause::Transition)
+            target->censored_transition_runs = checkup_add_u8(target->censored_transition_runs, 1);
+        else if (cause == CheckupCensorCause::Handover)
+            target->censored_handover_runs = checkup_add_u8(target->censored_handover_runs, 1);
+        else if (cause == CheckupCensorCause::Unreadable)
+            target->censored_unreadable_runs = checkup_add_u8(target->censored_unreadable_runs, 1);
+        else if (cause == CheckupCensorCause::Restart)
+            target->censored_restart_runs = checkup_add_u8(target->censored_restart_runs, 1);
+        if (cause != CheckupCensorCause::Handover) {
+            uint64_t elapsed = st.run_s;
+            if (st.run_started_us >= 0 && st.last_us >= st.run_started_us) {
+                const auto elapsed_us = static_cast<uint64_t>(st.last_us - st.run_started_us);
+                elapsed               = elapsed_us / 1000000 + (elapsed_us % 1000000 != 0);
+            }
+            target->censored_runtime_s =
+                checkup_add_u16(target->censored_runtime_s,
+                                static_cast<unsigned>(std::min<uint64_t>(UINT16_MAX, elapsed)));
+        }
     }
     st.run_open = st.run_class_pure = false;
-    st.run_class = CheckupRunClass::Unknown;
+    st.run_class                    = CheckupRunClass::Unknown;
     st.run_start_bucket = 0;
     st.run_s = 0;
+    st.run_started_us = st.run_class_seen_us = st.run_rps_seen_us = st.run_tail_us = -1;
+    st.run_last_class = CheckupRunClass::Unknown;
+    st.run_cause      = CheckupCensorCause::None;
+    st.run_had_gap    = false;
     st.run_outdoor = CheckupOutdoorStats{};
     return reseal;
 }
@@ -1089,7 +1153,7 @@ constexpr uint32_t CHECKUP_PRESSURE_CONFIRM_S = 60;
 // Away from a boundary the whole delta is booked into the open bucket.
 inline bool checkup_step(CheckupState& st, CheckupBucket& b, const CheckupSample& s, int64_t now_us,
                          CheckupRing* ring = nullptr) {
-    bool reseal = false;
+    bool           reseal         = false;
     const uint32_t current_bucket = checkup_bucket(now_us);
     // ── continuity ──────────────────────────────────────────────────────────────────────────────
     // A gap longer than CHECKUP_MAX_GAP_S means the firmware was not watching. Seconds are not
@@ -1125,39 +1189,40 @@ inline bool checkup_step(CheckupState& st, CheckupBucket& b, const CheckupSample
     if (continuous) {
         // Time interpolation needs readable endpoints. A recovering ON sample does not establish
         // the preceding blind interval or when the device changed state inside it.
-        if (any_known && st.prev_any_known) b.covered_s = checkup_add_u16(b.covered_s, dt);
+        if (any_known && st.prev_any_known) b.covered_s = checkup_add_hour_s(b.covered_s, dt);
         if (s.rps_known && st.prev_rps_known) {
-            b.rps_observed_s = checkup_add_u16(b.rps_observed_s, dt);
-            if (s.rps_running && st.prev_rps_running) b.run_s = checkup_add_u16(b.run_s, dt);
+            b.rps_observed_s = checkup_add_hour_s(b.rps_observed_s, dt);
+            if (s.rps_running && st.prev_rps_running) b.run_s = checkup_add_hour_s(b.run_s, dt);
         }
         // BOTH witnesses readable in THIS sample. The pairing is the same bias dfr_pair_observed_s
         // exists to prevent; here it is also the clock that decides whether the class split may be
         // believed at all.
         if (s.rps_known && st.prev_rps_known && class_state_known && st.prev_class_known)
-            b.class_observed_s = checkup_add_u16(b.class_observed_s, dt);
+            b.class_observed_s = checkup_add_hour_s(b.class_observed_s, dt);
         if (s.defrost_known && st.prev_dfr_known)
-            b.dfr_observed_s = checkup_add_u16(b.dfr_observed_s, dt);
+            b.dfr_observed_s = checkup_add_hour_s(b.dfr_observed_s, dt);
         // The defrost share is a ratio of simultaneously-known states. Counting defrost time from
         // one page against compressor time observed on another would bias low whenever the defrost
         // page timed out — exactly the false-clear direction this checkup must avoid.
         if (s.defrost_known && st.prev_dfr_known && s.rps_known && st.prev_rps_known) {
-            b.dfr_pair_observed_s = checkup_add_u16(b.dfr_pair_observed_s, dt);
+            b.dfr_pair_observed_s = checkup_add_hour_s(b.dfr_pair_observed_s, dt);
             if (s.rps_running && st.prev_rps_running) {
-                b.dfr_run_s = checkup_add_u16(b.dfr_run_s, dt);
-                if (s.defrost_on && st.prev_dfr_on) b.defrost_s = checkup_add_u16(b.defrost_s, dt);
+                b.dfr_run_s = checkup_add_hour_s(b.dfr_run_s, dt);
+                if (s.defrost_on && st.prev_dfr_on)
+                    b.defrost_s = checkup_add_hour_s(b.defrost_s, dt);
                 checkup_outdoor_add(b.defrost_outdoor, s.outdoor);
             }
         }
         if (s.buh_known && st.prev_buh_known) {
-            b.buh_observed_s = checkup_add_u16(b.buh_observed_s, dt);
-            if (s.buh_on && st.prev_buh_on) b.buh_s = checkup_add_u16(b.buh_s, dt);
+            b.buh_observed_s = checkup_add_hour_s(b.buh_observed_s, dt);
+            if (s.buh_on && st.prev_buh_on) b.buh_s = checkup_add_hour_s(b.buh_s, dt);
         }
         if (s.bsh_known && st.prev_bsh_known) {
-            b.bsh_observed_s = checkup_add_u16(b.bsh_observed_s, dt);
-            if (s.bsh_on && st.prev_bsh_on) b.bsh_s = checkup_add_u16(b.bsh_s, dt);
+            b.bsh_observed_s = checkup_add_hour_s(b.bsh_observed_s, dt);
+            if (s.bsh_on && st.prev_bsh_on) b.bsh_s = checkup_add_hour_s(b.bsh_s, dt);
         }
         if (bar_valid) {
-            if (st.prev_bar_valid) b.bar_observed_s = checkup_add_u16(b.bar_observed_s, dt);
+            if (st.prev_bar_valid) b.bar_observed_s = checkup_add_hour_s(b.bar_observed_s, dt);
             if (s.bar_tenths <= CHECKUP_BAR_WARN_TENTHS) {
                 st.bar_low_run_s = st.prev_bar_valid && st.prev_bar_low
                                        ? checkup_add_u16(st.bar_low_run_s, dt)
@@ -1184,7 +1249,7 @@ inline bool checkup_step(CheckupState& st, CheckupBucket& b, const CheckupSample
                         : st.pump_run_s - CHECKUP_FLOW_RUNUP_S;
             flow_eligible = st.pump_run_s >= CHECKUP_FLOW_RUNUP_S && flow_valid;
             if (flow_eligible && st.prev_flow_valid && flow_dt)
-                b.flow_observed_s = checkup_add_u16(b.flow_observed_s, flow_dt);
+                b.flow_observed_s = checkup_add_hour_s(b.flow_observed_s, flow_dt);
         } else {
             st.pump_run_s = 0;
         }
@@ -1211,7 +1276,7 @@ inline bool checkup_step(CheckupState& st, CheckupBucket& b, const CheckupSample
             }
         }
         if (retry_comparable) {
-            b.retry_observed_s = checkup_add_u16(b.retry_observed_s, dt);
+            b.retry_observed_s = checkup_add_hour_s(b.retry_observed_s, dt);
             if (retry_increased) b.flags |= CHECKUP_F_RETRY;
         }
 
@@ -1225,7 +1290,7 @@ inline bool checkup_step(CheckupState& st, CheckupBucket& b, const CheckupSample
             // An older run whose stop hid inside an unreadable interval must not be overwritten by
             // the new start. It completed, but neither its duration nor class survived the gap.
             if (st.run_open) {
-                st.run_class_pure = false;
+                checkup_censor_run(st, CheckupCensorCause::Unreadable);
                 reseal |= checkup_close_run(st, b, ring, current_bucket);
             }
             b.starts = checkup_add_u8(b.starts, 1);
@@ -1237,26 +1302,104 @@ inline bool checkup_step(CheckupState& st, CheckupBucket& b, const CheckupSample
             st.run_class_pure   = st.prev_rps_known && st.run_class != CheckupRunClass::Unknown;
             st.run_start_bucket = current_bucket;
             st.run_outdoor = CheckupOutdoorStats{};
+            st.run_started_us = st.run_rps_seen_us = now_us;
+            st.run_class_seen_us = st.run_class == CheckupRunClass::Unknown ? -1 : now_us;
+            st.run_last_class    = st.run_class;
+            st.run_tail_us       = -1;
+            st.run_blind_s       = 0;
+            st.run_had_gap       = !st.prev_rps_known || st.run_class == CheckupRunClass::Unknown;
+            st.run_cause         = !st.prev_rps_known ? CheckupCensorCause::Start
+                                   : st.run_class == CheckupRunClass::Unknown
+                                       ? CheckupCensorCause::Unreadable
+                                       : CheckupCensorCause::None;
         }
-        // Carry the run in flight. A class input that stops answering or changes forfeits the class
-        // but not the run: it still completes and is counted as censored. An unreadable compressor
-        // row forfeits it too — a duration nobody watched must not enter a mean. The one bounded
-        // exception is a sweep that read NO row at all (network/OTA quiesce, OOM catch, a silent
-        // bus): up to CHECKUP_MAX_GAP_S of it keeps the class, and the known-running sample
-        // that ends it books the elapsed seconds. A known OFF after it still censors (below).
+        // Bounded interpolation is run classification only; missing seconds never become observed
+        // class/RPS coverage. A changed class across a gap cannot certify a handover.
         if (st.run_open) {
-            const bool was_running = st.prev_rps_known && st.prev_rps_running;
+            const bool was_running   = st.prev_rps_known && st.prev_rps_running;
+            const auto current_class = checkup_run_class(s);
+            // dt is intentionally zero at a continuous hourly rollover. Bridge admission must
+            // instead bind the complete monotonic interval between the readable endpoints.
+            // Every open run initializes run_rps_seen_us; this continuous segment is monotonic.
+            const bool rps_gap_ok = now_us - st.run_rps_seen_us <=
+                                    static_cast<int64_t>(CHECKUP_CYCLING_GAP_S) * 1000000;
             if (!s.rps_known) {
+                st.run_had_gap = true;
                 st.run_blind_s = checkup_add_u8(st.run_blind_s, dt);
-                if (!s.x10a_blind || st.run_blind_s > CHECKUP_MAX_GAP_S) st.run_class_pure = false;
+                if (!rps_gap_ok ||
+                    (current_class != CheckupRunClass::Unknown &&
+                     current_class != st.run_last_class) ||
+                    st.run_tail_us >= 0)
+                    checkup_censor_run(st, CheckupCensorCause::Unreadable);
             } else if (s.rps_running) {
+                if (!st.prev_rps_known && (!rps_gap_ok || current_class != st.run_last_class))
+                    checkup_censor_run(st, CheckupCensorCause::Unreadable);
                 // A pure run after an unknown predecessor can only be resuming from that bounded
                 // pause; a start sample (known OFF before it) books no elapsed time.
                 if (was_running || (!st.prev_rps_known && st.run_class_pure))
                     st.run_s = checkup_add_u32(st.run_s, dt + st.run_blind_s);
-                const CheckupRunClass current_class = checkup_run_class(s);
-                if (current_class == CheckupRunClass::Unknown || current_class != st.run_class)
-                    st.run_class_pure = false;
+                // A terminal valve return is identified by readable valve+mode witnesses, not
+                // by inventing a space-heating class. "DHW" mode maps to Other while the valve
+                // already points to the room circuit on the reference installation.
+                const bool terminal_room = s.valve_known && !s.valve_dhw &&
+                                           (s.operating_mode == CheckupOperatingMode::Heating ||
+                                            s.operating_mode == CheckupOperatingMode::Other);
+                const bool begin_tail =
+                    st.run_tail_us < 0 && terminal_room && st.run_class == CheckupRunClass::Dhw &&
+                    st.run_last_class == CheckupRunClass::Dhw &&
+                    st.run_cause == CheckupCensorCause::None && st.prev_rps_known &&
+                    st.prev_rps_running && st.prev_class_known;
+                if (begin_tail || st.run_tail_us >= 0) {
+                    if (!terminal_room) {
+                        const bool readable =
+                            s.valve_known && s.operating_mode != CheckupOperatingMode::Unknown;
+                        checkup_censor_run(st, readable ? CheckupCensorCause::Transition
+                                                        : CheckupCensorCause::Unreadable);
+                        if (readable) {
+                            st.run_last_class    = current_class;
+                            st.run_class_seen_us = now_us;
+                        }
+                        st.run_tail_us = -1;
+                    } else {
+                        if (begin_tail)
+                            st.run_tail_us = now_us;
+                        else if (current_class != st.run_last_class)
+                            checkup_censor_run(st, CheckupCensorCause::Transition);
+                        if (now_us - st.run_tail_us >
+                            static_cast<int64_t>(CHECKUP_CYCLING_DHW_TAIL_S) * 1000000)
+                            checkup_censor_run(st, current_class == CheckupRunClass::SpaceHeating
+                                                       ? CheckupCensorCause::Handover
+                                                       : CheckupCensorCause::Transition);
+                        st.run_last_class    = current_class;
+                        st.run_class_seen_us = now_us;
+                    }
+                } else if (current_class == CheckupRunClass::Unknown) {
+                    st.run_had_gap = true;
+                    if (st.run_class_seen_us < 0 ||
+                        now_us - st.run_class_seen_us >
+                            static_cast<int64_t>(CHECKUP_CYCLING_GAP_S) * 1000000)
+                        checkup_censor_run(st, CheckupCensorCause::Unreadable);
+                } else {
+                    // Readable Other/Stop mode is valid coverage but cannot classify a room run.
+                    // Compare the last paired witnesses, not the raw mode-readability flag.
+                    const bool class_gap = st.run_class_seen_us < st.run_rps_seen_us;
+                    const bool gap_ok    = st.run_class_seen_us >= 0 &&
+                                        now_us - st.run_class_seen_us <=
+                                            static_cast<int64_t>(CHECKUP_CYCLING_GAP_S) * 1000000;
+                    if (class_gap && (!gap_ok || current_class != st.run_last_class))
+                        checkup_censor_run(st, CheckupCensorCause::Unreadable);
+                    if (current_class != st.run_last_class && !class_gap && st.prev_rps_known) {
+                        const bool handover = (st.run_last_class == CheckupRunClass::SpaceHeating &&
+                                               current_class == CheckupRunClass::Dhw) ||
+                                              (st.run_last_class == CheckupRunClass::Dhw &&
+                                               current_class == CheckupRunClass::SpaceHeating);
+                        checkup_censor_run(st, handover ? CheckupCensorCause::Handover
+                                                        : CheckupCensorCause::Transition);
+                    }
+                    st.run_last_class    = current_class;
+                    st.run_class_seen_us = now_us;
+                }
+                st.run_rps_seen_us = now_us;
                 // Page 0x20 is read before the 0x30 compressor row and holds the previous run's
                 // values while the unit is idle, so only a sample whose predecessor was already
                 // running is fresh outdoor context.
@@ -1269,7 +1412,15 @@ inline bool checkup_step(CheckupState& st, CheckupBucket& b, const CheckupSample
         // A known OFF completes every open run. With a known ON predecessor it is the normal edge;
         // after an unreadable sample it is still a completion, but necessarily censored.
         if (st.run_open && s.rps_known && !s.rps_running) {
-            if (!rps_edge_known || !st.prev_rps_running) st.run_class_pure = false;
+            if (!rps_edge_known || !st.prev_rps_running ||
+                st.run_class_seen_us < st.run_rps_seen_us)
+                checkup_censor_run(st, CheckupCensorCause::Unreadable);
+            if (st.run_tail_us >= 0 &&
+                now_us - st.run_tail_us >
+                    static_cast<int64_t>(CHECKUP_CYCLING_DHW_TAIL_S) * 1000000)
+                checkup_censor_run(st, st.run_last_class == CheckupRunClass::SpaceHeating
+                                           ? CheckupCensorCause::Handover
+                                           : CheckupCensorCause::Transition);
             reseal |= checkup_close_run(st, b, ring, current_bucket);
         }
         if (st.prev_dfr_known && s.defrost_known && !st.prev_dfr_on && s.defrost_on) {
@@ -1281,14 +1432,31 @@ inline bool checkup_step(CheckupState& st, CheckupBucket& b, const CheckupSample
         // Absolute non-zero values remain baselines, never events; only the comparable delta above
         // says that an increase occurred inside this observation window.
     } else {
-        st.pump_run_s = 0;
-        st.bar_low_run_s = 0;
+        st.pump_run_s     = 0;
+        st.bar_low_run_s  = 0;
         st.last_rps_known = false; // no edge is read across a real gap
-        // Past the gap bound the firmware was not watching, so a run open across it has neither a
-        // witnessed length nor a provable class. It is closed as CENSORED rather than dropped: it
-        // happened, and the count is what stops "no verdict" from reading as "nothing ran".
+        // A long gap forfeits classification, but does not prove a completion. Keep the candidate
+        // until a known OFF rather than counting the same physical run on both sides of the gap.
+        if (st.run_open) {
+            st.run_had_gap = true;
+            checkup_censor_run(st, CheckupCensorCause::Unreadable);
+            if (s.rps_known && !s.rps_running)
+                reseal |= checkup_close_run(st, b, ring, current_bucket);
+        }
+    }
+    // The first readable ON witnesses activity even when previous polls were continuous but
+    // their RPS row was unreadable. Without a known OFF->ON start, keep a censored candidate
+    // until known OFF; do not invent a start count or lose the whole completion.
+    if (!st.run_open && s.rps_known && s.rps_running) {
+        st.run_open       = true;
         st.run_class_pure = false;
-        reseal |= checkup_close_run(st, b, ring, current_bucket);
+        st.run_class = st.run_last_class = checkup_run_class(s);
+        st.run_start_bucket              = current_bucket;
+        st.run_started_us = st.run_rps_seen_us = now_us;
+        st.run_class_seen_us = st.run_class == CheckupRunClass::Unknown ? -1 : now_us;
+        st.run_cause         = CheckupCensorCause::Start;
+        st.run_had_gap       = true;
+        st.run_blind_s       = 0;
     }
 
     // ── minima and flags — sampled, not integrated, so they need no continuity ───────────────────
@@ -1297,7 +1465,7 @@ inline bool checkup_step(CheckupState& st, CheckupBucket& b, const CheckupSample
     // measurement into a more reassuring minimum.
     if (bar_valid && (b.min_bar == CHECKUP_ABSENT || s.bar_tenths < b.min_bar ||
                       (s.bar_tenths == b.min_bar && b.min_bar_unix_s == 0 && s.unix_s != 0))) {
-        b.min_bar = static_cast<int16_t>(s.bar_tenths);
+        b.min_bar        = static_cast<int16_t>(s.bar_tenths);
         b.min_bar_unix_s = s.unix_s;
     }
 
@@ -1346,6 +1514,13 @@ struct CheckupWindow {
     uint32_t dhw_runs        = 0;
     uint32_t cooling_runs    = 0;
     uint32_t censored_runs   = 0;
+    uint32_t censored_transition_runs  = 0;
+    uint32_t censored_handover_runs    = 0;
+    uint32_t censored_unreadable_runs  = 0;
+    uint32_t censored_restart_runs     = 0;
+    uint32_t censored_start_runs       = 0;
+    uint32_t censored_runtime_s        = 0;
+    bool     cycling_runtime_saturated = false;
     uint32_t dfr_observed_s  = 0;
     uint32_t dfr_pair_observed_s = 0;
     uint32_t dfr_run_s       = 0;
@@ -1389,6 +1564,20 @@ inline CheckupWindow checkup_aggregate(const CheckupRing& r) {
         w.dhw_runs        += b.dhw_runs;
         w.cooling_runs    += b.cooling_runs;
         w.censored_runs   += b.censored_runs;
+        w.censored_transition_runs += b.censored_transition_runs;
+        w.censored_handover_runs += b.censored_handover_runs;
+        w.censored_unreadable_runs += b.censored_unreadable_runs;
+        w.censored_restart_runs += b.censored_restart_runs;
+        const unsigned causes = b.censored_transition_runs + b.censored_handover_runs +
+                                b.censored_unreadable_runs + b.censored_restart_runs;
+        w.censored_start_runs += b.censored_runs > causes ? b.censored_runs - causes : 0;
+        w.censored_runtime_s += b.censored_runtime_s;
+        w.cycling_runtime_saturated |=
+            b.censored_runtime_s == UINT16_MAX || b.starts == UINT8_MAX ||
+            b.space_runs == UINT8_MAX || b.dhw_runs == UINT8_MAX || b.cooling_runs == UINT8_MAX ||
+            b.censored_runs == UINT8_MAX || b.censored_transition_runs == UINT8_MAX ||
+            b.censored_handover_runs == UINT8_MAX || b.censored_unreadable_runs == UINT8_MAX ||
+            b.censored_restart_runs == UINT8_MAX || causes > b.censored_runs;
         w.dfr_observed_s  += b.dfr_observed_s;
         w.dfr_pair_observed_s += b.dfr_pair_observed_s;
         w.dfr_run_s       += b.dfr_run_s;
@@ -1420,7 +1609,8 @@ inline CheckupWindow checkup_aggregate(const CheckupRing& r) {
         }
         if (b.min_bar != CHECKUP_ABSENT &&
             (w.min_bar == CHECKUP_ABSENT || b.min_bar < w.min_bar ||
-             (b.min_bar == w.min_bar && b.min_bar_unix_s > w.min_bar_unix_s))) {
+             (b.min_bar == w.min_bar && b.min_bar_unix_s &&
+              (!w.min_bar_unix_s || b.min_bar_unix_s < w.min_bar_unix_s)))) {
             w.min_bar = b.min_bar;
             w.min_bar_unix_s = b.min_bar_unix_s;
         }
@@ -1746,7 +1936,33 @@ struct CheckupOutdoorReport {
     uint32_t samples = 0;
 };
 
-struct CheckupReport {
+struct CheckupCyclingEvidence {
+    int32_t cycling_censored_transition_runs = -1;
+    int32_t cycling_censored_handover_runs   = -1;
+    int32_t cycling_censored_unreadable_runs = -1;
+    int32_t cycling_censored_restart_runs    = -1;
+    int32_t cycling_censored_start_runs      = -1;
+    int32_t cycling_classified_runtime_s     = -1;
+    int32_t cycling_censored_runtime_s       = -1;
+    bool    cycling_runtime_saturated        = false;
+};
+
+inline CheckupCyclingEvidence checkup_cycling_evidence(const CheckupWindow& w,
+                                                       bool                 class_witnessed) {
+    CheckupCyclingEvidence e;
+    if (!class_witnessed) return e;
+    e.cycling_censored_transition_runs = static_cast<int32_t>(w.censored_transition_runs);
+    e.cycling_censored_handover_runs   = static_cast<int32_t>(w.censored_handover_runs);
+    e.cycling_censored_unreadable_runs = static_cast<int32_t>(w.censored_unreadable_runs);
+    e.cycling_censored_restart_runs    = static_cast<int32_t>(w.censored_restart_runs);
+    e.cycling_censored_start_runs      = static_cast<int32_t>(w.censored_start_runs);
+    e.cycling_classified_runtime_s     = static_cast<int32_t>(w.space_run_s);
+    e.cycling_censored_runtime_s       = static_cast<int32_t>(w.censored_runtime_s);
+    e.cycling_runtime_saturated        = w.cycling_runtime_saturated;
+    return e;
+}
+
+struct CheckupReport : CheckupCyclingEvidence {
     uint32_t          covered_s = 0;
     uint32_t          source_age_s        = UINT32_MAX; // unknown is null on the wire
     uint32_t          span_s              = 0; // elapsed observation horizon, capped at 24 hours
@@ -1924,18 +2140,30 @@ inline CheckupReport checkup_evaluate(const CheckupWindow& w, const CheckupCover
     // A witnessed start whose completion is not in the window is an unclassified run too: one may
     // still be open, but a restored window whose hour-crossing completions never reached the
     // journal must not judge only the runs that happened to fit inside one hour.
-    const uint32_t population = std::max<uint32_t>(completed, w.starts ? w.starts - 1 : 0);
-    const bool     population_ready =
-        completed && static_cast<uint64_t>(classified) * 100u >=
-                         static_cast<uint64_t>(population) * CHECKUP_CYCLING_CLASSIFIED_PCT;
+    const uint32_t all_population = std::max<uint32_t>(completed, w.starts ? w.starts - 1 : 0);
+    const uint32_t handovers      = std::min(w.censored_handover_runs, all_population);
+    const uint32_t population     = all_population - handovers;
+    const bool     runtime_ready  = !w.cycling_runtime_saturated && !w.censored_start_runs &&
+                               !w.censored_restart_runs &&
+                               static_cast<uint64_t>(w.space_run_s) * 100u >=
+                                   (static_cast<uint64_t>(w.space_run_s) + w.censored_runtime_s) *
+                                       CHECKUP_CYCLING_CLASSIFIED_PCT;
+    const bool population_ready =
+        completed && runtime_ready &&
+        static_cast<uint64_t>(classified) * 100u >=
+            static_cast<uint64_t>(population) * CHECKUP_CYCLING_CLASSIFIED_PCT;
     const int space_mean = w.space_runs ? static_cast<int>(w.space_run_s / w.space_runs) : -1;
     const int dhw_mean           = w.dhw_runs ? static_cast<int>(w.dhw_run_s / w.dhw_runs) : -1;
     r.cycling_cooling_runs       = class_witnessed ? static_cast<int32_t>(w.cooling_runs) : -1;
+    static_cast<CheckupCyclingEvidence&>(r) = checkup_cycling_evidence(w, class_witnessed);
     CheckupReason cycling_reason = CheckupReason::None;
     if (!cov.valve || !cov.mode)
         cycling_reason = CheckupReason::ClassUnavailable;
     else if (!class_witnessed)
         cycling_reason = CheckupReason::ClassCoverage;
+    else if (!population_ready &&
+             w.space_runs + w.censored_runs - handovers >= CHECKUP_CYCLING_MIN_STARTS)
+        cycling_reason = CheckupReason::ClassPopulationIncomplete;
     else if (w.space_runs < CHECKUP_CYCLING_MIN_STARTS)
         cycling_reason = CheckupReason::HeatingRunsInsufficient;
     else if (!population_ready)

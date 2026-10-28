@@ -112,6 +112,7 @@ daik::Env3Status               env;
 void (*on_env3_status)() = nullptr;
 std::string                    x10a_payload;
 daik::WeatherForecastStatus weather;
+daik::logic::CheckupCyclingEvidence                                cycling;
 daik::CrashInfo             boot, live_crash;
 daik::EthInfo               ethernet;
 daik::NetLink               link            = daik::NetLink::None;
@@ -227,6 +228,7 @@ WeatherForecastStatus weather_forecast_status() { return adapter::weather; }
 void                  history_record_circulation() {}
 void                  history_circulation_reset() {}
 void                  checkup_dhw_reset() {}
+logic::CheckupCyclingEvidence checkup_cycling_evidence() { return adapter::cycling; }
 CrashInfo             diag_crash_info() { return adapter::boot; }
 CrashInfo             diag_crash_info_live() { return adapter::live_crash; }
 WifiInfo              wifi_info() { return adapter::wifi; }
@@ -1421,6 +1423,23 @@ void wire_text(cJSON* object, const char* key, const char* expected, const char*
 }
 void outgoing_heartbeat() {
     initial_config();
+    {
+        daik::JsonGuard root(cJSON_Parse(daik::build_heartbeat_payload().c_str()));
+        require(cJSON_IsNull(cJSON_GetObjectItemCaseSensitive(root.get(),
+                                                              "cycling_censored_unreadable_runs")),
+                "CYCLING_ABSENT_EVIDENCE_NULL");
+        require(
+            cJSON_IsNull(cJSON_GetObjectItemCaseSensitive(root.get(), "cycling_runtime_saturated")),
+            "CYCLING_ABSENT_SATURATION_NULL");
+    }
+    adapter::cycling.cycling_censored_transition_runs = 1;
+    adapter::cycling.cycling_censored_handover_runs   = 2;
+    adapter::cycling.cycling_censored_unreadable_runs = 3;
+    adapter::cycling.cycling_censored_restart_runs    = 4;
+    adapter::cycling.cycling_censored_start_runs      = 0;
+    adapter::cycling.cycling_classified_runtime_s     = 6696;
+    adapter::cycling.cycling_censored_runtime_s       = 65535;
+    adapter::cycling.cycling_runtime_saturated        = true;
     daik::on_mqtt(nullptr, "mqtt", MQTT_EVENT_CONNECTED, nullptr);
     sdk::ticks                  = 123456;
     adapter::cfg.proto          = daik::Protocol::S;
@@ -1464,6 +1483,18 @@ void outgoing_heartbeat() {
         wire_text(root.get(), "platform", "esp32s3", "HEARTBEAT_PLATFORM_ON_WIRE");
         wire_text(root.get(), "uptime", "000+00:02:03.456", "HEARTBEAT_UPTIME_ON_WIRE");
         wire_number(root.get(), "uptime_s", 123, "HEARTBEAT_UPTIME_SECONDS_ON_WIRE");
+        wire_number(root.get(), "cycling_censored_transition_runs", 1,
+                    "CYCLING_TRANSITION_ON_WIRE");
+        wire_number(root.get(), "cycling_censored_handover_runs", 2, "CYCLING_HANDOVER_ON_WIRE");
+        wire_number(root.get(), "cycling_censored_unreadable_runs", 3,
+                    "CYCLING_UNREADABLE_ON_WIRE");
+        wire_number(root.get(), "cycling_censored_restart_runs", 4, "CYCLING_RESTART_ON_WIRE");
+        wire_number(root.get(), "cycling_censored_start_runs", 0, "CYCLING_ZERO_START_ON_WIRE");
+        wire_number(root.get(), "cycling_classified_runtime_s", 6696,
+                    "CYCLING_CLASSIFIED_TIME_ON_WIRE");
+        wire_number(root.get(), "cycling_censored_runtime_s", 65535,
+                    "CYCLING_CENSORED_TIME_ON_WIRE");
+        wire_number(root.get(), "cycling_runtime_saturated", 1, "CYCLING_SATURATED_ON_WIRE");
         wire_number(root.get(), "free_heap", 100000, "HEARTBEAT_FREE_HEAP_ON_WIRE");
         wire_number(root.get(), "min_free_heap", 90000, "HEARTBEAT_MIN_FREE_HEAP_ON_WIRE");
         wire_number(root.get(), "max_alloc", 40000, "HEARTBEAT_LARGEST_INTERNAL_BLOCK_ON_WIRE");

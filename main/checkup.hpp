@@ -81,6 +81,10 @@ void checkup_dhw_reset();
 // inside the critical section (AGENTS.md → Memory, concurrency, and HTTP safety).
 logic::CheckupReport checkup_report();
 
+// Compact completed-run evidence for MQTT. Shares the evaluator's pure projection, without
+// constructing the full eight-check report on the MQTT task's stack. No allocation under its lock.
+logic::CheckupCyclingEvidence checkup_cycling_evidence();
+
 // Copy the next completed hourly pair after `after_bucket` into a journal payload. `now_unix_s`
 // supplies the wall-clock anchor; no record is produced before time is synced or before one hour has
 // completed. Called under the FLASH mutex, and takes only the independent checkup mutex.

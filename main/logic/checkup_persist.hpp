@@ -146,7 +146,7 @@ inline uint32_t checkup_layout_fingerprint() {
     uint32_t crc = CONFIG_CRC32_INIT;
     // Net DHW sensor cooling retains draw-like/pump-active windows with explicit context.
     // Older filtered rates and candidates must not be interpreted under this observation rule.
-    crc = checkup_fp_u32(crc, 4u);
+    crc = checkup_fp_u32(crc, 5u);
     crc = checkup_fp_u32(crc, static_cast<uint32_t>(sizeof(CheckupBucket)));
     crc = checkup_fp_u32(crc, static_cast<uint32_t>(sizeof(DhwLossBucket)));
     crc = checkup_fp_u32(crc, static_cast<uint32_t>(sizeof(CheckupRing)));
@@ -155,6 +155,9 @@ inline uint32_t checkup_layout_fingerprint() {
     crc = checkup_fp_u32(crc, CHECKUP_COMPLETED_BUCKETS);
     crc = checkup_fp_u32(crc, CHECKUP_DT_S);
     crc = checkup_fp_u32(crc, CHECKUP_MAX_GAP_S);
+    crc = checkup_fp_u32(crc, CHECKUP_CYCLING_DHW_TAIL_S);
+    crc = checkup_fp_u32(crc, CHECKUP_CYCLING_GAP_S);
+    crc = checkup_fp_u32(crc, CHECKUP_CYCLING_CLASSIFIED_PCT);
     for (const CheckupLocator& l : {CHECKUP_LOC_BSH, CHECKUP_LOC_PUMP, CHECKUP_LOC_PRESSURE,
                                     CHECKUP_LOC_FLOW, CHECKUP_LOC_VALVE, CHECKUP_LOC_IU_MODE,
                                     CHECKUP_LOC_R5T, CHECKUP_LOC_OUTDOOR,

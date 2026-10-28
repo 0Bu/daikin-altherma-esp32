@@ -51,6 +51,7 @@
 #include "logic/heating_curve_mqtt.hpp"
 #include "logic/error_codes.hpp"
 #include "logic/checkup.hpp"
+#include "checkup_population_fixture.hpp"
 #include "logic/health_gate.hpp"
 #include "logic/version_cmp.hpp"
 #include "logic/ota_channel.hpp"
@@ -5344,12 +5345,33 @@ static void test_heartbeat() {
                "\"net_link\":1,\"eth_present\":0,\"eth_link\":0,"
                "\"mqtt_connected\":1,\"mqtt_count\":89282,\"mqtt_fails\":0,\"mqtt_reconnects\":1,"
                "\"mqtt_skipped\":337,\"mqtt_quiesced\":42,\"poll_skipped\":32,"
+               "\"cycling_censored_transition_runs\":null,\"cycling_censored_handover_runs\":null,"
+               "\"cycling_censored_unreadable_runs\":null,\"cycling_censored_restart_runs\":null,"
+               "\"cycling_censored_start_runs\":null,\"cycling_classified_runtime_s\":null,"
+               "\"cycling_censored_runtime_s\":null,\"cycling_runtime_saturated\":null,"
                "\"bus_connected\":1,\"bus_proto\":\"I\",\"bus_registers\":10,\"bus_values\":48,"
                "\"bus_last_ok_s\":1,\"bus_rx_received\":763732,\"bus_rx_fails\":2,"
                "\"bus_crc_err\":0,\"bus_timeout_err\":2,\"bus_ou_held_over\":0,"
                "\"bus_tx_reads\":763734,"
                "\"modbus_enabled\":0,\"modbus_connected\":0,\"modbus_rx\":0,\"modbus_fails\":0,"
                "\"modbus_stack_min_free_bytes\":null}");
+    HeartbeatFields      cycling_fields;
+    logic::CheckupWindow cycling_window;
+    cycling_fields.cycling = checkup_cycling_evidence(cycling_window, true);
+    auto cycling_json      = build_heartbeat_json(cycling_fields);
+    CHECK(cycling_json.find("\"cycling_censored_handover_runs\":0") != std::string::npos);
+    CHECK(cycling_json.find("\"cycling_censored_runtime_s\":0") != std::string::npos);
+    CHECK(cycling_json.find("\"cycling_runtime_saturated\":0") != std::string::npos);
+    cycling_window.censored_handover_runs    = 4;
+    cycling_window.censored_unreadable_runs  = 2;
+    cycling_window.censored_runtime_s        = 65535;
+    cycling_window.cycling_runtime_saturated = true;
+    cycling_fields.cycling                   = checkup_cycling_evidence(cycling_window, true);
+    cycling_json                             = build_heartbeat_json(cycling_fields);
+    CHECK(cycling_json.find("\"cycling_censored_handover_runs\":4") != std::string::npos);
+    CHECK(cycling_json.find("\"cycling_censored_unreadable_runs\":2") != std::string::npos);
+    CHECK(cycling_json.find("\"cycling_censored_runtime_s\":65535") != std::string::npos);
+    CHECK(cycling_json.find("\"cycling_runtime_saturated\":1") != std::string::npos);
 
     // ── legacy-215: the reset reason has to survive a NUMERIC-ONLY consumer ──
     // Telegraf's json parser keeps numeric fields and drops everything else, so the `reset_reason`
@@ -5653,6 +5675,15 @@ static void test_heartbeat() {
     CHECK(dj.find("\"bus_connected\":0") != std::string::npos);
     CHECK(dj.find("true") == std::string::npos);
     CHECK(dj.find("false") == std::string::npos);
+
+    // An active Ethernet route remains independent of WiFi association. Emit its real numeric
+    // link/presence witnesses while WiFi RSSI stays unavailable.
+    HeartbeatFields wired = down;
+    wired.net_link        = static_cast<uint8_t>(NetLink::Eth);
+    wired.eth_present = wired.eth_link = true;
+    const auto wired_json              = build_heartbeat_json(wired);
+    CHECK(wired_json.find("\"net_link\":2,\"eth_present\":1,\"eth_link\":1") != std::string::npos);
+    CHECK(wired_json.find("\"wifi_connected\":0,\"wifi_rssi\":null") != std::string::npos);
 
     // Diagnostic discovery: separate topics/component types, entity_category diagnostic, and the
     // value_template points at the heartbeat topic (not a heat-pump source topic).
@@ -15068,6 +15099,335 @@ static logic::DhwLossState dhw_past_hold() {
 //      wrong, and there is nothing to compare it against.
 //  (c) the VERDICT boundaries, and the one property that makes the card honest — a window that has
 //      not collected enough can never aggregate to a green overall.
+static void test_checkup_population() {
+    using namespace logic;
+    CHECK(sizeof(CheckupBucket) == 80 && CHECKUP_BYTES == 1920);
+    CHECK(sizeof(CheckupJournalPayload) == 128);
+    CHECK(sizeof(CheckupJournalRecord) * CHECKUP_COMPLETED_BUCKETS == 3128);
+    CHECK(checkup_add_hour_s(3599, 2) == 3600);
+    CHECK(checkup_add_hour_s(4095, UINT32_MAX) == 3600);
+    CheckupBucket clamped;
+    clamped.covered_s = checkup_add_hour_s(3599, UINT32_MAX);
+    CHECK(clamped.covered_s == 3600);
+
+    auto run = [](unsigned tail, unsigned missing_class, unsigned missing_rps,
+                  bool changed_after_gap, bool return_to_dhw, bool stop_in_gap) {
+        CheckupState  state;
+        CheckupBucket bucket;
+        CheckupSample sample;
+        sample.rps_known = sample.valve_known = true;
+        sample.operating_mode                 = CheckupOperatingMode::Heating;
+        int64_t now                           = 0;
+        checkup_step(state, bucket, sample, now);
+        sample.rps_running = true;
+        sample.valve_dhw   = tail != 0;
+        auto tick          = [&]() { checkup_step(state, bucket, sample, now += 1000000); };
+        for (unsigned i = 0; i < 200; ++i) tick();
+        if (missing_class || missing_rps) {
+            sample.valve_known = !missing_class;
+            sample.rps_known   = !missing_rps;
+            for (unsigned i = 0; i < std::max(missing_class, missing_rps); ++i) tick();
+            sample.rps_known = sample.valve_known = true;
+            if (changed_after_gap) sample.valve_dhw = !sample.valve_dhw;
+            if (stop_in_gap) sample.rps_running = false;
+            tick();
+        }
+        if (!stop_in_gap) {
+            for (unsigned i = 0; i < 200; ++i) tick();
+            if (tail) {
+                sample.valve_dhw = false;
+                for (unsigned i = 0; i < tail; ++i) tick();
+                if (return_to_dhw) {
+                    sample.valve_dhw = true;
+                    tick();
+                }
+            }
+            sample.rps_running = false;
+            tick();
+        }
+        return bucket;
+    };
+    for (unsigned tail : {6u, 22u, 30u}) {
+        const auto b = run(tail, 0, 0, false, false, false);
+        CHECK(b.dhw_runs == 1 && b.censored_runs == 0);
+    }
+    const auto over = run(31, 0, 0, false, false, false);
+    CHECK(over.dhw_runs == 0 && over.censored_runs == 1 && over.censored_handover_runs == 1);
+    const auto bounce = run(22, 0, 0, false, true, false);
+    CHECK(bounce.dhw_runs == 0 && bounce.censored_transition_runs == 1);
+    auto terminal_tail = [](CheckupOperatingMode mode, unsigned tail_s, bool missing_valve,
+                            bool missing_mode, bool return_dhw,
+                            CheckupOperatingMode switched_mode = CheckupOperatingMode::Unknown) {
+        CheckupState  state;
+        CheckupBucket bucket;
+        CheckupSample sample;
+        sample.rps_known = sample.valve_known = true;
+        sample.valve_dhw                      = true;
+        sample.operating_mode                 = mode;
+        int64_t now                           = 0;
+        auto    tick = [&]() { checkup_step(state, bucket, sample, now += 1000000); };
+        tick();
+        sample.rps_running = true;
+        for (unsigned second = 0; second < 300; ++second) tick();
+        sample.valve_dhw = false;
+        for (unsigned second = 0; second < tail_s; ++second) {
+            sample.valve_known = !(missing_valve && second == tail_s / 2);
+            const auto current_mode =
+                switched_mode != CheckupOperatingMode::Unknown && second >= tail_s / 2
+                    ? switched_mode
+                    : mode;
+            sample.operating_mode =
+                missing_mode && second == tail_s / 2 ? CheckupOperatingMode::Unknown : current_mode;
+            tick();
+        }
+        if (return_dhw) {
+            sample.valve_dhw = true;
+            tick();
+        }
+        sample.rps_running = false;
+        tick();
+        return bucket;
+    };
+    // "DHW" maps to Other, not Heating. A readable valve return with that mode is a bounded
+    // terminal tail, without fabricating a pure space-heating class for the room circuit.
+    for (unsigned tail : {22u, 30u}) {
+        const auto other = terminal_tail(CheckupOperatingMode::Other, tail, false, false, false);
+        CHECK(other.dhw_runs == 1 && other.censored_runs == 0);
+    }
+    const auto other_long = terminal_tail(CheckupOperatingMode::Other, 31, false, false, false);
+    CHECK(other_long.dhw_runs == 0 && other_long.censored_transition_runs == 1 &&
+          other_long.censored_handover_runs == 0);
+    CHECK(terminal_tail(CheckupOperatingMode::Other, 22, true, false, false)
+              .censored_unreadable_runs == 1);
+    CHECK(terminal_tail(CheckupOperatingMode::Other, 22, false, true, false)
+              .censored_unreadable_runs == 1);
+    CHECK(terminal_tail(CheckupOperatingMode::Cooling, 22, false, false, false)
+              .censored_transition_runs == 1);
+    CHECK(terminal_tail(CheckupOperatingMode::Other, 22, false, false, true)
+              .censored_transition_runs == 1);
+    CHECK(terminal_tail(CheckupOperatingMode::Other, 22, false, false, false,
+                        CheckupOperatingMode::Heating)
+              .censored_transition_runs == 1);
+    CHECK(terminal_tail(CheckupOperatingMode::Heating, 22, false, false, false,
+                        CheckupOperatingMode::Other)
+              .censored_transition_runs == 1);
+    const auto class_gap = run(0, 1, 0, false, false, false);
+    CHECK(class_gap.space_runs == 1 && class_gap.censored_runs == 0);
+    const auto hidden_change = run(0, 1, 0, true, false, false);
+    CHECK(hidden_change.space_runs == 0 && hidden_change.censored_unreadable_runs == 1);
+    const auto hidden_rps_change = run(0, 0, 1, true, false, false);
+    CHECK(hidden_rps_change.space_runs == 0 && hidden_rps_change.dhw_runs == 0 &&
+          hidden_rps_change.censored_unreadable_runs == 1 &&
+          hidden_rps_change.censored_handover_runs == 0);
+    CHECK(hidden_change.censored_handover_runs == 0);
+    // Even a bridged same-class gap prevents a later handover from being excluded as a fully
+    // witnessed mixed run. Its entire elapsed duration remains unsafe population evidence.
+    const auto gapped_handover = run(31, 1, 0, false, false, false);
+    CHECK(gapped_handover.censored_handover_runs == 0 &&
+          gapped_handover.censored_unreadable_runs == 1 &&
+          gapped_handover.censored_runtime_s > 400);
+    CHECK(run(0, 16, 0, false, false, false).censored_unreadable_runs == 1);
+    CHECK(run(0, 0, 14, false, false, false).space_runs == 1); // 15 s between endpoints
+    CHECK(run(0, 0, 15, false, false, false).censored_unreadable_runs == 1);
+    CHECK(run(0, 0, 16, false, false, false).censored_unreadable_runs == 1);
+    CHECK(run(0, 0, 1, false, false, true).censored_unreadable_runs == 1);
+
+    auto endpoint_gap = [](unsigned gap_kind, bool hour_crossing, int64_t endpoint_gap_us,
+                           bool recovered_dhw = false) {
+        CheckupState  state;
+        CheckupRing   ring;
+        CheckupSample sample;
+        sample.rps_known = sample.valve_known = true;
+        sample.operating_mode                 = CheckupOperatingMode::Heating;
+        uint32_t previous_bucket              = 0;
+        auto     tick                         = [&](int64_t now) {
+            const auto bucket = checkup_bucket(now);
+            if (bucket != previous_bucket) {
+                const bool continuous_boundary =
+                    state.last_us >= 0 && now >= state.last_us &&
+                    now - state.last_us <= static_cast<int64_t>(CHECKUP_MAX_GAP_S) * 1000000;
+                ring.commit(checkup_skipped(previous_bucket, bucket));
+                if (continuous_boundary) state.last_us = now;
+                previous_bucket = bucket;
+            }
+            checkup_step(state, ring.pending, sample, now, &ring);
+        };
+        const int64_t start = (hour_crossing ? 3590LL : 100LL) * 1000000 + 250000;
+        previous_bucket     = checkup_bucket(start);
+        tick(start - 1000000);
+        sample.rps_running = true;
+        tick(start);
+        sample.rps_known   = gap_kind != 1;
+        sample.valve_known = gap_kind != 0;
+        if (gap_kind == 2) sample.operating_mode = CheckupOperatingMode::Other;
+        tick(start + 1000000);
+        if (hour_crossing) tick(start + 10000000); // production rolls over, discarding this dt
+        sample.rps_known = sample.valve_known = true;
+        sample.operating_mode                 = CheckupOperatingMode::Heating;
+        sample.valve_dhw                      = recovered_dhw;
+        tick(start + endpoint_gap_us);
+        sample.rps_running = false;
+        tick(start + endpoint_gap_us + 1000000);
+        return checkup_aggregate(ring);
+    };
+    // The allowance measures the complete monotonic interval between matching readable running
+    // endpoints. Neither a fractional recovery nor the production hour-boundary dt=0 may extend it.
+    for (unsigned gap_kind : {0u, 1u, 2u}) { // valve missing, RPS missing, readable Other/Stop mode
+        for (bool hour_crossing : {false, true}) {
+            const auto boundary = endpoint_gap(gap_kind, hour_crossing, 15000000);
+            CHECK(boundary.space_runs == 1 && boundary.censored_runs == 0);
+            for (int64_t endpoint_us : {15000001LL, 15500000LL}) {
+                const auto late = endpoint_gap(gap_kind, hour_crossing, endpoint_us);
+                CHECK(late.space_runs == 0 && late.censored_unreadable_runs == 1);
+            }
+        }
+    }
+    for (bool hour_crossing : {false, true}) {
+        const auto hidden_handover = endpoint_gap(2, hour_crossing, 15000000, true);
+        CHECK(hidden_handover.space_runs == 0 && hidden_handover.censored_unreadable_runs == 1 &&
+              hidden_handover.censored_handover_runs == 0);
+    }
+
+    const auto replay = checkup_population_fixture();
+    CHECK(replay.starts == 21 && replay.space_runs == 12 && replay.dhw_runs == 5);
+    CHECK(replay.censored_runs == 4 && replay.censored_handover_runs == 4);
+    // At most one second per crossed hour is discarded by production's boundary rule. The mean
+    // therefore agrees with the 558 s synthetic reconstruction within one second.
+    CHECK(replay.censored_runtime_s == 0 && replay.space_run_s / replay.space_runs >= 557 &&
+          replay.space_run_s / replay.space_runs <= 558);
+    CheckupCoverage coverage;
+    coverage.rps = coverage.valve = coverage.mode = true;
+    auto verdict = checkup_evaluate(replay, coverage, FaultClass::Normal);
+    CHECK(verdict.cycling_split && verdict[CheckupCheck::Cycling].verdict == CheckupVerdict::Info);
+    CHECK(verdict.cycling_censored_handover_runs == 4);
+    CHECK(verdict.cycling_classified_runtime_s >= 6684 &&
+          verdict.cycling_classified_runtime_s <= 6696);
+    const auto absent = checkup_cycling_evidence(replay, false);
+    CHECK(absent.cycling_classified_runtime_s == -1 && absent.cycling_censored_start_runs == -1);
+
+    // Count coverage passes 12/13, but losing one long run must still block the short-run verdict.
+    auto biased = replay;
+    biased.censored_runs++;
+    biased.censored_unreadable_runs++;
+    biased.censored_runtime_s = 3600;
+    verdict                   = checkup_evaluate(biased, coverage, FaultClass::Normal);
+    CHECK(!verdict.cycling_split &&
+          verdict[CheckupCheck::Cycling].reason == CheckupReason::ClassPopulationIncomplete);
+    biased.space_runs = 5;
+    biased.censored_runs += 7;
+    verdict = checkup_evaluate(biased, coverage, FaultClass::Normal);
+    CHECK(verdict[CheckupCheck::Cycling].reason == CheckupReason::ClassPopulationIncomplete);
+    biased                           = replay;
+    biased.cycling_runtime_saturated = true;
+    CHECK(!checkup_evaluate(biased, coverage, FaultClass::Normal).cycling_split);
+
+    // Append-once journal loss cannot certify the survivors: only five of twelve completed
+    // space runs survive the simulated stored-hour snapshot. An open run accounts for at most one.
+    auto restored        = replay;
+    restored.space_runs  = 5;
+    restored.space_run_s = 5 * 234;
+    CHECK(!checkup_evaluate(restored, coverage, FaultClass::Normal).cycling_split);
+    CheckupState  rebooted;
+    CheckupRing   after_reboot;
+    CheckupSample on;
+    on.rps_known = on.rps_running = on.valve_known = true;
+    on.operating_mode                              = CheckupOperatingMode::Heating;
+    checkup_step(rebooted, after_reboot.pending, on, 0);
+    checkup_step(rebooted, after_reboot.pending, on, 1000000);
+    on.rps_running = false;
+    checkup_step(rebooted, after_reboot.pending, on, 2000000);
+    const auto reboot_window = checkup_aggregate(after_reboot);
+    CHECK(reboot_window.starts == 0 && reboot_window.censored_start_runs == 1);
+    CHECK(reboot_window.censored_runtime_s == 2 && reboot_window.space_runs == 0);
+    // A boot whose first compressor row is unreadable has the same unwitnessed beginning as
+    // booting into known ON. Recovering ON in a continuous poll must not lose that whole run.
+    CheckupState  unknown_boot;
+    CheckupRing   recovered;
+    CheckupSample running;
+    running.valve_known    = true;
+    running.operating_mode = CheckupOperatingMode::Heating;
+    int64_t recovered_us   = 0;
+    checkup_step(unknown_boot, recovered.pending, running, recovered_us);
+    running.rps_known = running.rps_running = true;
+    checkup_step(unknown_boot, recovered.pending, running, recovered_us += 1000000);
+    running.rps_running = false;
+    checkup_step(unknown_boot, recovered.pending, running, recovered_us += 1000000);
+    CHECK(checkup_aggregate(recovered).censored_start_runs == 1);
+    for (unsigned run = 0; run < 12; ++run) {
+        running.rps_running = true;
+        for (unsigned second = 0; second < 241; ++second)
+            checkup_step(unknown_boot, recovered.pending, running, recovered_us += 1000000);
+        running.rps_running = false;
+        checkup_step(unknown_boot, recovered.pending, running, recovered_us += 1000000);
+    }
+    const auto recovered_window = checkup_aggregate(recovered);
+    CHECK(recovered_window.space_runs == 12 && recovered_window.starts == 12 &&
+          recovered_window.censored_start_runs == 1);
+    const auto recovered_report = checkup_evaluate(recovered_window, coverage, FaultClass::Normal);
+    CHECK(!recovered_report.cycling_split &&
+          recovered_report[CheckupCheck::Cycling].observation_only);
+
+    // Censoring runtime is a conservative bound: floor(end)-floor(start) would understate this
+    // 1.8 s known-start interval as one second. Round the elapsed interval upward instead.
+    CheckupState fractional;
+    fractional.run_open       = true;
+    fractional.run_cause      = CheckupCensorCause::Unreadable;
+    fractional.run_started_us = 100000;
+    fractional.last_us        = 1900000;
+    CheckupBucket fractional_bucket;
+    checkup_close_run(fractional, fractional_bucket);
+    CHECK(fractional_bucket.censored_runtime_s == 2);
+    auto fractional_gate        = replay;
+    fractional_gate.space_run_s = 900;
+    fractional_gate.censored_runs++;
+    fractional_gate.censored_unreadable_runs++;
+    fractional_gate.censored_runtime_s = 99 + fractional_bucket.censored_runtime_s;
+    CHECK(!checkup_evaluate(fractional_gate, coverage, FaultClass::Normal).cycling_split);
+    auto unknown_start = replay;
+    unknown_start.censored_runs++;
+    unknown_start.censored_start_runs++;
+    unknown_start.censored_runtime_s = 2;
+    CHECK(!checkup_evaluate(unknown_start, coverage, FaultClass::Normal).cycling_split);
+    unknown_start.censored_start_runs   = 0;
+    unknown_start.censored_restart_runs = 1;
+    CHECK(!checkup_evaluate(unknown_start, coverage, FaultClass::Normal).cycling_split);
+
+    CheckupState long_unknown;
+    long_unknown.run_open       = true;
+    long_unknown.run_cause      = CheckupCensorCause::Unreadable;
+    long_unknown.run_started_us = 0;
+    long_unknown.last_us        = 70000LL * 1000000;
+    CheckupRing saturated;
+    checkup_close_run(long_unknown, saturated.pending);
+    CHECK(saturated.pending.censored_runtime_s == UINT16_MAX);
+    CHECK(checkup_aggregate(saturated).cycling_runtime_saturated);
+    saturated.pending        = CheckupBucket{};
+    saturated.pending.starts = UINT8_MAX;
+    CHECK(checkup_aggregate(saturated).cycling_runtime_saturated);
+    // Every count can saturate independently. None may wrap or silently lend a plausible
+    // population ratio to an assessment, including a cause counter beside a smaller total.
+    uint8_t CheckupBucket::*const counters[] = {
+        &CheckupBucket::space_runs,
+        &CheckupBucket::dhw_runs,
+        &CheckupBucket::cooling_runs,
+        &CheckupBucket::censored_runs,
+        &CheckupBucket::censored_transition_runs,
+        &CheckupBucket::censored_handover_runs,
+        &CheckupBucket::censored_unreadable_runs,
+        &CheckupBucket::censored_restart_runs,
+    };
+    for (const auto counter : counters) {
+        saturated.pending          = CheckupBucket{};
+        saturated.pending.*counter = UINT8_MAX;
+        const auto evidence        = checkup_aggregate(saturated);
+        CHECK(evidence.cycling_runtime_saturated);
+        CHECK(checkup_cycling_evidence(evidence, true).cycling_runtime_saturated);
+    }
+    saturated.pending                          = CheckupBucket{};
+    saturated.pending.censored_unreadable_runs = 1;
+    CHECK(checkup_aggregate(saturated).cycling_runtime_saturated);
+}
+
 static void test_checkup_evidence_overhaul() {
     using namespace logic;
     const std::pair<CheckupReason, const char*> reasons[] = {
@@ -15154,7 +15514,7 @@ static void test_checkup_evidence_overhaul() {
     CheckupBucket same_minimum = bucket;
     same_minimum.min_bar_unix_s++;
     ring.push(same_minimum);
-    CHECK(checkup_aggregate(ring).min_bar_unix_s == 1'800'000'001u);
+    CHECK(checkup_aggregate(ring).min_bar_unix_s == 1'800'000'000u);
     ring.pending.min_bar_unix_s = 0;
     CHECK(checkup_aggregate(ring).min_bar_unix_s == 1'800'000'001u);
     ring.buf[0].min_bar  = 15;
@@ -15671,9 +16031,8 @@ static void test_checkup() {
         CHECK(b2.censored_runs == 1 && b2.space_runs == 0 && b2.dhw_runs == 0);
     }
     {
-        // A valve that stops answering for PART of a run forfeits the run's class — the side cannot
-        // be asserted to have held — while an unreadable COMPRESSOR row forfeits it because the
-        // duration stops being witnessed. Both are censored, not guessed.
+        // A short partial-sweep loss bracketed by identical known-running classes is bridged for
+        // classification only; its seconds still do not enter observed signal coverage.
         CheckupState  st;
         CheckupBucket b;
         CheckupSample s;
@@ -15697,7 +16056,7 @@ static void test_checkup() {
         tick(5, true, false, true); // the valve page timed out mid-run
         tick(200, true, true, true);
         tick(1, false, true, true);
-        CHECK(b.censored_runs == 1 && b.space_runs == 0);
+        CHECK(b.censored_runs == 0 && b.space_runs == 1);
 
         CheckupState  st2;
         CheckupBucket b2;
@@ -15730,13 +16089,13 @@ static void test_checkup() {
         s2.rps_running = false;
         t2 += 1'000'000;
         checkup_step(st2, b2, s2, t2);
-        CHECK(b2.censored_runs == 1 && b2.space_runs == 0);
+        CHECK(b2.censored_runs == 0 && b2.space_runs == 1);
     }
     {
         // DIAG-03/a: a sweep that read NO row at all (n == 0: the weather/OTA network quiesce, an
         // OOM catch) is the firmware pausing, not a readable sweep that lost the compressor row.
-        // Up to CHECKUP_MAX_GAP_S of it inside a run keeps the class and books the elapsed time;
-        // longer, or a known OFF right after it, still censors (the lost-row case is above).
+        // Matching running/class endpoints at most CHECKUP_CYCLING_GAP_S apart keep the class;
+        // a later recovery, or known OFF after the pause, still censors.
         auto pause_run = [](int pause_s, bool stop_after) {
             CheckupState  st;
             CheckupBucket b;
@@ -15758,9 +16117,10 @@ static void test_checkup() {
         const CheckupBucket paused = pause_run(4, false);
         CHECK(paused.space_runs == 1 && paused.censored_runs == 0);
         CHECK(paused.space_run_s == 299 + 4 + 300); // start sample to last running sample
-        const CheckupBucket at_bound = pause_run(static_cast<int>(CHECKUP_MAX_GAP_S), false);
+        const CheckupBucket at_bound =
+            pause_run(static_cast<int>(CHECKUP_CYCLING_GAP_S) - 1, false);
         CHECK(at_bound.space_runs == 1 && at_bound.censored_runs == 0);
-        const CheckupBucket too_long = pause_run(static_cast<int>(CHECKUP_MAX_GAP_S) + 1, false);
+        const CheckupBucket too_long = pause_run(static_cast<int>(CHECKUP_CYCLING_GAP_S), false);
         CHECK(too_long.space_runs == 0 && too_long.censored_runs == 1);
         const CheckupBucket stopped = pause_run(4, true); // the stop hid inside the pause
         CHECK(stopped.space_runs == 0 && stopped.censored_runs == 1);
@@ -15794,7 +16154,9 @@ static void test_checkup() {
         checkup_step(g, gb, lost, after_gap);
         checkup_step(g, gb, on, after_gap + 1'000'000);
         checkup_step(g, gb, on, after_gap + 2'000'000);
-        CHECK(gb.starts == 0 && !g.run_open);
+        CHECK(gb.starts == 0 && g.run_open);
+        checkup_step(g, gb, s, after_gap + 3'000'000);
+        CHECK(gb.censored_runs == 1 && gb.space_runs == 0 && !g.run_open);
     }
     {
         // The compressor page can disappear while the stop occurs and return already OFF. The old
@@ -15837,10 +16199,9 @@ static void test_checkup() {
             checkup_step(st, b, s, t);
         }
         t += static_cast<int64_t>(CHECKUP_MAX_GAP_S + 5) * 1'000'000;
-        checkup_step(st, b, s, t); // the gap itself
-        CHECK(b.censored_runs == 1 && b.space_runs == 0);
-        // …and the post-gap running samples do not resurrect it: no start edge crossed the gap, so
-        // there is no open run to accrue into.
+        checkup_step(st, b, s, t); // the gap itself proves no stop
+        CHECK(b.censored_runs == 0 && b.space_runs == 0);
+        // The same candidate remains censored in flight; only known OFF completes it once.
         for (int i = 0; i < 100; i++) {
             t += 1'000'000;
             checkup_step(st, b, s, t);
@@ -26239,6 +26600,7 @@ int main() {
     test_history_measurement_units();
     test_history();
     test_checkup();
+    test_checkup_population();
     test_checkup_evidence_overhaul();
     test_no_publish();
     test_config_model();

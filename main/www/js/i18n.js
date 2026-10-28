@@ -48,6 +48,11 @@ function localeValues(values) {
   keys.forEach((key, index) => { catalog[key] = values[index]; });
   return catalog;
 }
+// Cause names are translated together; formatting and missing-value handling have one owner.
+function cyclingCauseValues(counts, labels) {
+  return counts.map((n, i) => Number.isFinite(n) && n > 0 ? `${labels[i]} ${n}` : "")
+    .filter(Boolean).join(" · ");
+}
 const INSPECT_LOCALE_KEYS = ("status env3 sgrequest ou comp out ouhx hp disch lp eev r3t phe lwt " +
   "r2t rwt dt pth cop buh bsh valve valve2 tank heat spaceh room pump pel defrost quiet rhot " +
   "rcold wsup wtank wheat wret flow flow_switch wp").split(" ");
@@ -316,7 +321,6 @@ const I18N = {
     "check.detail.fault.past": "No message is active now; a message was recorded in this window. Its disappearance establishes neither cause nor resolution.",
     "check.detail.fault.past_unknown": "A message was recorded in this window; the current fault state is unreadable.",
     "check.detail.collecting": (a, b) => `Readable signals: ${a} of ${b} required.`,
-    "check.detail.cycling_split": " Only completed, continuously classified space-heating runs are assessed. Hot water, cooling and unclassified runs remain observations.",
     "check.detail.outdoor_cycling": " The X10A outdoor figures include only fresh samples from completed, consistently classified space-heating runs. They are context and do not change the cycling threshold or verdict.",
     "check.detail.outdoor_defrost": " The X10A outdoor figures include only fresh samples while both defrost and compressor state were readable and the compressor was running. They are context and do not change the defrost threshold or verdict.",
     "check.detail.dhw_candidate": (a, b, c, d) => `Accepted hourly windows: ${a}; current candidate: ${c} of ${d}.`,
@@ -355,6 +359,7 @@ const I18N = {
     "check.cycling_dhw": (a, b) => `hot water ${a} · mean ${b}`,
     "check.cycling_cooling": (n) => `cooling ${n} excluded`,
     "check.cycling_censored": (n) => `${n} unclassified`,
+    "check.cycling_causes": "transition|restart/journal|start not witnessed",
     "check.outdoor_one": (source, mean) => `${source} ${mean} °C`,
     "check.outdoor_range": (source, min, mean) => `${source} min ${min} °C · mean ${mean} °C`,
     "check.min": (m) => `${m} min`,
@@ -383,7 +388,7 @@ const I18N = {
     "check.detail.age_label": "Last sample age:",
     "check.detail.horizon_wait": (a) => `A full 24-hour window is still missing: ${a} remaining.`,
     "check.detail.fault.ok": "No current or retained message in readable fault signals.",
-    "check.detail.cycling.info": "≥12 completed heating runs average <10 min: project hint.",
+    "check.detail.cycling.info": "Mean heating run <10 min: project hint.",
     "check.detail.cycling.ok": "No project short-run hint in completed heating runs.",
     "check.detail.defrost.info": "≥3 paired defrosts exceed 15% of readable compressor runtime: project hint.",
     "check.detail.defrost.ok": "No project defrost-share hint; weather and gaps remain unassessed.",
@@ -391,14 +396,14 @@ const I18N = {
     "check.detail.pressure.warn": "Recorded continuous ≥60 s at ≤1.0 bar; not a current-pressure statement.",
     "check.detail.pressure.ok": "No accepted pressure at or below the project 1.0 bar threshold.",
     "check.detail.class_missing": "Incomplete classification; no pooled cycling verdict.",
-    "check.detail.heating_runs_insufficient": "Fewer than 12 eligible completed heating runs; no cycling verdict.",
+    "check.detail.heating_runs_insufficient": "<12 eligible completed heating runs; no verdict.",
     "check.detail.defrost_events_insufficient": "Fewer than three paired defrosts; no share verdict.",
     "check.detail.source_stale": "No fresh X10A sample; current state unknown. History retained.",
     "check.detail.no_paired_runtime": "No paired readable runtime; event count only.",
     "check.detail.current_label": "Current water pressure:",
     "check.detail.minimum_time_label": "Minimum recorded at:",
     "check.detail.coverage_missing": (a) => `Missing readable time: ${a} s.`,
-    "check.detail.channel_coverage": (a, b) => `${a}: ${b} readable`,
+    "check.detail.channel_coverage": (a, b) => `${a}: ${b} covered`,
     "check.summary.warnings": (n) => `${n} ${n === 1 ? "warning" : "warnings"}`,
     "check.summary.notes": (n) => `${n} ${n === 1 ? "note" : "notes"}`,
     "check.summary.ok": "No hint in assessed data",

@@ -1,4 +1,4 @@
-// translation-source: 33967449acf2e4c68a9c1a1feb866a3378533feeec8e796587881b7dec62ef92
+// translation-source: 5453eeaa5ecebfac9d729776d8b40e937dbfce10d0a431843b3f3298cd22a9ff
 I18N.fr = localeValues([
   /* sys.nodata */ "Aucune donnée",
   /* sys.unreachable */ "Injoignable",
@@ -198,7 +198,6 @@ I18N.fr = localeValues([
   /* check.detail.fault.past */ "Aucun message actif ; un message a été enregistré. Sa disparition ne prouve ni sa cause ni sa résolution.",
   /* check.detail.fault.past_unknown */ "Un message a été enregistré ; l’état actuel du défaut est illisible.",
   /* check.detail.collecting */ (a, b) => `Signaux lisibles : ${a} sur ${b} requis.`,
-  /* check.detail.cycling_split */ " Seuls les cycles de chauffage terminés et classés en continu sont évalués. ECS, rafraîchissement et cycles non classés restent des observations.",
   /* check.detail.outdoor_cycling */ " Les valeurs extérieures X10A ne comprennent que des mesures récentes issues de cycles de chauffage des locaux terminés et classés de manière cohérente. Elles fournissent du contexte et ne modifient ni le seuil de cyclage ni le verdict.",
   /* check.detail.outdoor_defrost */ " Les valeurs extérieures X10A ne comprennent que des mesures récentes lorsque les états du dégivrage et du compresseur étaient tous deux lisibles et que le compresseur fonctionnait. Elles fournissent du contexte et ne modifient ni le seuil de dégivrage ni le verdict.",
   /* check.detail.dhw_candidate */ (a, b, c, d) => `Fenêtres horaires admises : ${a} ; candidate actuelle : ${c} sur ${d}.`,
@@ -223,6 +222,7 @@ I18N.fr = localeValues([
   /* check.cycling_dhw */ (a, b) => `ECS ${a} · moyenne ${b}`,
   /* check.cycling_cooling */ (n) => `rafraîchissement : ${n} ${n === 1 ? "exclu" : "exclus"}`,
   /* check.cycling_censored */ (n) => `${n} ${n === 1 ? "non classé" : "non classés"}`,
+  /* check.cycling_causes */ "transition|redémarrage/journal|départ non observé",
   /* check.outdoor_one */ (source, mean) => `${source} ${mean} °C`,
   /* check.outdoor_range */ (source, min, mean) => `${source} min. ${min} °C · moyenne ${mean} °C`,
   /* check.min */ (m) => `${m} min`,
@@ -255,7 +255,7 @@ I18N.fr = localeValues([
   /* check.detail.age_label */ "Âge de la dernière mesure :",
   /* check.detail.horizon_wait */ (a) => `La fenêtre complète de 24 heures manque encore : ${a} restantes.`,
   /* check.detail.fault.ok */ "Aucun message actuel ou mémorisé dans les signaux de défaut lisibles.",
-  /* check.detail.cycling.info */ "≥12 cycles de chauffage terminés avec moyenne <10 min : indice du projet.",
+  /* check.detail.cycling.info */ "Chauffage moyen <10 min : indice du projet.",
   /* check.detail.cycling.ok */ "Aucun indice de cycles courts dans les chauffages terminés.",
   /* check.detail.defrost.info */ "≥3 dégivrages associés dépassent 15 % du temps lisible du compresseur : indice du projet.",
   /* check.detail.defrost.ok */ "Aucun indice de part ; météo et lacunes non évaluées.",
@@ -263,14 +263,14 @@ I18N.fr = localeValues([
   /* check.detail.pressure.warn */ "≥60 s continues ≤1,0 bar enregistrées ; pas la pression actuelle.",
   /* check.detail.pressure.ok */ "Aucune pression admise ≤1,0 bar, seuil du projet.",
   /* check.detail.class_missing */ "Classification incomplète ; aucun verdict global de cyclage.",
-  /* check.detail.heating_runs_insufficient */ "Moins de 12 cycles de chauffage terminés admissibles ; aucun verdict.",
+  /* check.detail.heating_runs_insufficient */ "<12 chauffages complets admissibles ; aucun verdict.",
   /* check.detail.defrost_events_insufficient */ "Moins de trois dégivrages associés ; aucun verdict de part.",
   /* check.detail.source_stale */ "Pas de mesure X10A récente ; état actuel inconnu. Historique conservé.",
   /* check.detail.no_paired_runtime */ "Pas de durée lisible associée ; nombre seulement.",
   /* check.detail.current_label */ "Pression d’eau actuelle :",
   /* check.detail.minimum_time_label */ "Minimum enregistré le :",
   /* check.detail.coverage_missing */ (a) => `Temps lisible manquant : ${a} s.`,
-  /* check.detail.channel_coverage */ (a, b) => `${a} : ${b} lisibles`,
+  /* check.detail.channel_coverage */ (a, b) => `${a} : couverture ${b}`,
   /* check.summary.warnings */ (n) => `${n} ${n === 1 ? "avertissement" : "avertissements"}`,
   /* check.summary.notes */ (n) => `${n} ${n === 1 ? "note" : "notes"}`,
   /* check.summary.ok */ "Aucun indice dans les données évaluées",
@@ -1213,7 +1213,7 @@ DESCRIPTION_I18N.fr = descriptionValues([
 MODEL_DESCRIPTION_I18N.fr = modelDescriptionValues([
   ["Messages de la pompe ", "ni cause ni résolution prouvées."], // health_fault
   ["R5T : un point du ballon stratifié, pas une énergie.", "Indice interne ≥0,8 K/h sans indice pompe/puisage. Sans indice, un puisage reste possible ; 0 K/h n’exclut pas les pertes. Circulation ne prouve pas la cause."], // health_dhw_loss
-  ["Démarrages compresseur", "≥12 chauffages complets, moyenne <10 min; ≥90% de tous les cycles complets classés. Règle interne, pas Daikin; ECS, froid et non classés exclus."], // health_cycling
+  ["Démarrages compresseur", "Règle interne : ≥12 chauffages, moyenne <10 min ; ≥90% de tous les cycles complets classés, hors transferts confirmés, et ≥90% de couverture chauffage/durée incertaine. Pas une limite Daikin."], // health_cycling
   ["Dégivrage ", "≥3 associés, >15% du temps de marche du compresseur si états compresseur et dégivrage lisibles. Règle interne, pas Daikin; humidité et température de toute la batterie absentes."], // health_defrost
   ["Pression ", "règle interne commune ≤1,0 bar ; 60 s continues observées donnent ALERTE. Pas universelle ; manuel du modèle."], // health_pressure
   ["Débit après 60 s de pompe", "Seuil selon même modèle/mode/conditions ; pas nominal ni preuve de débit insuffisant."], // health_flow

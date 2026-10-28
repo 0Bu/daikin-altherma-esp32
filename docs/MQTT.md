@@ -17,7 +17,7 @@ under the base with no node segment. `<node>` is the installation identity descr
 | `<base>/modbus` | Yes | Flat HomeHub register JSON while enabled; disconnected source yields `{}`. No HA value discovery. |
 | `<base>/env3` | Yes | Flat optional accessory readings/counters; each fresh sample, normally every 10 s. |
 | `<base>/weather/openmeteo/forecast` | Yes | Atomic weather evidence while location and diagnostics consent are enabled. No HA discovery. |
-| `<base>/heartbeat` | No | Flat board/link diagnostics, every 10 s while connected. |
+| `<base>/heartbeat` | No | Flat board/link diagnostics and rolling cycling evidence, every 10 s while connected. |
 | `<base>/heating_curve` | No | Schema-v3 room/diagnosis evidence on the same 10 s cadence. No HA discovery. |
 | `<base>/crash` | Yes | Pending fault/dump summary; only while a notable record exists. |
 | `<prefix>/<component>/<node>/<group>_<object_id>/config` | Yes | X10A discovery config; `binary_sensor` for converter 300–307 bit flags, `sensor` otherwise. |
@@ -25,6 +25,13 @@ under the base with no node segment. `<node>` is the installation identity descr
 The publisher's nominal cadence includes time spent polling and deliberate TLS pauses; it is not a
 promise of one new physical measurement each second. Retained data can be replayed after its
 source stops, so receipt time alone never establishes measurement freshness.
+
+Heartbeat cycling fields mirror the additive `/status.health` evidence with a `cycling_` prefix:
+`censored_transition_runs`, `censored_handover_runs`, `censored_unreadable_runs`,
+`censored_restart_runs`, `censored_start_runs`, `classified_runtime_s`, `censored_runtime_s`,
+and `runtime_saturated` (numeric 0/1). These are rolling completed-run observations, not per-boot
+cumulative counters or plant-health verdicts. Unestablished/disabled evidence is null; no new HA
+entities are created. [API.md](API.md#history-and-24-hour-checks) owns the field meanings and saturation boundary.
 
 An initial transport-start rejection retains the initialized client and retries with bounded
 backoff. Failed event registration prevents transport start and reports an explicit error.
