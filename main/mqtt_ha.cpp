@@ -1817,9 +1817,10 @@ static logic::HeatingCurveSnapshot evaluate_heating_curve(const Config& cfg, boo
     in.room_age_known = freshness.age_known;
     in.room_age_s = freshness.age_s;
     Lock lk(s_mtx);
-    if (s_ref_requested_epoch.load(std::memory_order_acquire) != scope_epoch ||
-        s_heating_curve_homehub_epoch.load(std::memory_order_acquire) != homehub_epoch)
+    if (s_ref_requested_epoch.load(std::memory_order_acquire) != scope_epoch)
         return s_heating_curve_diagnosis.snapshot(); // stale scope: record nothing this cycle
+    if (s_heating_curve_homehub_epoch.load(std::memory_order_acquire) != homehub_epoch)
+        return s_heating_curve_diagnosis.snapshot(); // likewise across a HomeHub endpoint change
     return s_heating_curve_diagnosis.evaluate(in);
 }
 
@@ -3778,6 +3779,10 @@ logic::HeatingCurveSnapshot heating_curve_status() {
     return s_heating_curve_diagnosis.snapshot_at(esp_timer_get_time() / 1000);
 }
 
+// The one place a scope boundary forgets the heating-curve sample memory and cadence; counters and
+// sequence continue. Callers hold s_mtx.
+static void forget_heating_curve_scope() noexcept { s_heating_curve_diagnosis.forget_samples(); }
+
 void mqtt_reference_reconfigure() {
     Lock     lk(s_mtx);
     uint32_t next = s_ref_requested_epoch.load(std::memory_order_relaxed) + 1;
@@ -3791,16 +3796,17 @@ void mqtt_reference_reconfigure() {
     if (lk.acquired()) s_ref_status = ReferenceTemperatureStatus{};
     // The same consent/room-source boundary ends the heating-curve sample scope at once (counters
     // and sequence continue); without the mutex no task ever evaluated it, so nothing is forgotten.
-    if (lk.acquired()) s_heating_curve_diagnosis.forget_samples();
+    if (lk.acquired()) forget_heating_curve_scope();
 }
 
 void mqtt_heating_curve_homehub_reset() {
     // Bump first: an evaluation that read endpoint A's status before this point and locks after it
-    // records nothing; one that locked before it is forgotten below. Counters and sequence
-    // continue.
+    // records nothing; one that locked before it is forgotten below. Without the mutex no task
+    // ever evaluated the sampler, so nothing is forgotten.
     s_heating_curve_homehub_epoch.fetch_add(1, std::memory_order_acq_rel);
     Lock lk(s_mtx);
-    if (lk.acquired()) s_heating_curve_diagnosis.forget_samples();
+    if (!lk.acquired()) return;
+    forget_heating_curve_scope();
 }
 
 CirculationSourceStatus circulation_source_status(const Config& c) {

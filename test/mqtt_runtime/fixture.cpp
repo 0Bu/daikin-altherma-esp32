@@ -1914,6 +1914,41 @@ void curve_boundary_during_evaluation() {
     curve_new_scope_event("room", R"({"temperature":18.0,"time":1700000400,"enabled":true})", 4.0,
                           "CURVE_CONSENT_BOUNDARY_SAMPLES_NEW_SCOPE_AT_ONCE");
 }
+// POST /set_hp with a new HomeHub host, port or unit: the last event was admitted by the previous
+// endpoint's gates and carries its outdoor reading. Same boundary contract as a room-source change.
+void curve_homehub_boundary() {
+    daik::mqtt_heating_curve_homehub_reset();
+    const auto untouched = daik::heating_curve_status();
+    require(sdk::takes == 0 && untouched.state == daik::logic::HeatingCurveState::Off &&
+                !untouched.has_last_sample && untouched.sequence == 0,
+            "CURVE_HOMEHUB_BOUNDARY_WITHOUT_MUTEX_TOUCHES_NOTHING");
+    initial_config();
+    curve_first_scope_event();
+    curve_boundary([] { daik::mqtt_heating_curve_homehub_reset(); },
+                   "CURVE_HOMEHUB_BOUNDARY_FORGETS_PRIOR_EVENT_IMMEDIATELY");
+    curve_new_scope_event("room", R"({"temperature":18.0,"time":1700000400,"enabled":true})", 4.0,
+                          "CURVE_HOMEHUB_BOUNDARY_SAMPLES_NEW_ENDPOINT_AT_ONCE");
+}
+// The endpoint change lands after the evaluator read the previous endpoint's status and before its
+// evaluation lock: those reads must not become the new endpoint's first event.
+void curve_homehub_boundary_during_evaluation() {
+    initial_config();
+    curve_first_scope_event();
+    const daik::Config task_copy = adapter::cfg;
+    adapter::on_env3_status      = [] {
+        curve_injected = true;
+        daik::mqtt_heating_curve_homehub_reset();
+    };
+    daik::evaluate_heating_curve(task_copy, true);
+    require(curve_injected && !adapter::on_env3_status,
+            "CURVE_HOMEHUB_RESET_INJECTED_BETWEEN_READ_AND_EVALUATION");
+    require(sdk::locks == 0 && sdk::takes == sdk::gives, "CURVE_HOMEHUB_BOUNDARY_MUTEX_RELEASED");
+    const auto now = daik::heating_curve_status();
+    require(!now.has_last_sample && now.last_sample_unix_s == -1,
+            "CURVE_HOMEHUB_BOUNDARY_DURING_EVALUATION_RECORDS_NOTHING");
+    require(now.sequence == 1 && now.samples == 1 && now.evaluations == 2,
+            "CURVE_BOUNDARY_KEEPS_SEQUENCE_AND_COUNTERS");
+}
 void scalar_snapshot_helpers() {
     initial_config();
     daik::on_mqtt(nullptr, "mqtt", MQTT_EVENT_CONNECTED, nullptr);
@@ -4271,6 +4306,10 @@ int main(int argc, char** argv) {
             curve_room_source_boundary();
         else if (std::strcmp(scenario, "curve_boundary_during_evaluation") == 0)
             curve_boundary_during_evaluation();
+        else if (std::strcmp(scenario, "curve_homehub_boundary") == 0)
+            curve_homehub_boundary();
+        else if (std::strcmp(scenario, "curve_homehub_boundary_during_evaluation") == 0)
+            curve_homehub_boundary_during_evaluation();
         else if (std::strcmp(scenario, "scalar_snapshot_helpers") == 0)
             scalar_snapshot_helpers();
         else if (std::strcmp(scenario, "real_json_consumers") == 0)

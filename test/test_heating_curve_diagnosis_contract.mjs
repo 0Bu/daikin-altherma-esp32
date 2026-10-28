@@ -132,12 +132,14 @@ assert.match(mqtt, /void mqtt_circulation_reconfigure\(bool configured\)[\s\S]*c
 const homehubReset = mqtt.slice(mqtt.indexOf("void mqtt_heating_curve_homehub_reset()"),
   mqtt.indexOf("CirculationSourceStatus circulation_source_status("));
 assert.match(homehubReset,
-  /s_heating_curve_homehub_epoch\.fetch_add\([\s\S]*Lock lk\(s_mtx\);[\s\S]*forget_samples\(\)/,
+  /s_heating_curve_homehub_epoch\.fetch_add\([\s\S]*Lock lk\(s_mtx\);[\s\S]*forget_heating_curve_scope\(\)/,
   "the HomeHub reset bumps the scope epoch before forgetting the samples under the owner lock");
+assert.equal((mqtt.match(/s_heating_curve_diagnosis\.forget_samples\(\);/g) || []).length, 1,
+  "every scope boundary forgets the samples through the one shared site");
 assert.ok(evaluator.indexOf("s_heating_curve_homehub_epoch.load") < evaluator.indexOf("mb_status()"),
   "the evaluator captures the HomeHub scope before reading the endpoint's status");
 assert.match(evaluator,
-  /Lock lk\(s_mtx\);\s*if \(s_ref_requested_epoch\.load\([^)]*\) != scope_epoch \|\|\s*s_heating_curve_homehub_epoch\.load\([^)]*\) != homehub_epoch\)/,
+  /Lock lk\(s_mtx\);\s*if \(s_ref_requested_epoch\.load\([^)]*\) != scope_epoch\)\s*return s_heating_curve_diagnosis\.snapshot\(\);[^\n]*\n\s*if \(s_heating_curve_homehub_epoch\.load\([^)]*\) != homehub_epoch\)\s*return s_heating_curve_diagnosis\.snapshot\(\);/,
   "a cycle that straddles either scope change records nothing");
 const setHp = httpConfig.slice(httpConfig.indexOf("if (reset_mb_history) {"));
 assert.match(setHp, /^if \(reset_mb_history\) \{[^}]*mb_reconfigure\(modbus_enabled\);[^}]*mqtt_heating_curve_homehub_reset\(\);/,
