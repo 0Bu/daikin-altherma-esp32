@@ -14,6 +14,8 @@
 #include <cstdint>
 #include <climits>
 
+#include "lwt_select.hpp" // lwt_ci_contains: the row label is part of the liquid-line key
+
 namespace daik::logic {
 
 enum class RefrigerantServiceState : uint8_t {
@@ -131,8 +133,8 @@ struct RefrigerantServiceCoverage {
     bool hydronic_pressure = false;
 };
 
-inline void refrigerant_service_cover_row(RefrigerantServiceCoverage& c, unsigned reg,
-                                          unsigned off, int conv, bool refrigerant_pressure) {
+inline void refrigerant_service_cover_row(RefrigerantServiceCoverage& c, unsigned reg, unsigned off,
+                                          int conv, const char* label, bool refrigerant_pressure) {
     if (reg == 0x30 && off == 0 && conv == 152) c.rps = true;
     if (reg == 0x60 && off == 2 && conv == 315) c.mode = true;
     if (reg == 0x60 && off == 12 && conv == 306) c.valve_dhw = true;
@@ -143,7 +145,10 @@ inline void refrigerant_service_cover_row(RefrigerantServiceCoverage& c, unsigne
     }
     if (reg == 0x20 && off == 4 && conv == 105) c.discharge = true;
     if (reg == 0x20 && off == 6 && conv == 105) c.suction = true;
-    if (reg == 0x20 && off == 10 && conv == 105) c.liquid = true;
+    // Four geothermal profiles carry Leaving brine temp.(R6T) at this coordinate: a water-side
+    // brine reading must not complete the refrigerant temperature context (availability.hpp).
+    if (reg == 0x20 && off == 10 && conv == 105 && lwt_ci_contains(label, "liquid"))
+        c.liquid = true;
     if (reg == 0x30 && off == 3 && conv == 151) c.eev_command = true;
     if (refrigerant_pressure) {
         if (reg == 0x20 && off == 14) c.low_pressure = true;

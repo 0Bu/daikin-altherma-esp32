@@ -2,6 +2,16 @@
   "measurement_records": [
     {
       "compilers": {
+        "gcc-13-linux-ubuntu24": "Ubuntu 24.04 x86-64 GCC 13.3.0"
+      },
+      "hosted_confirmation": "Local GCC 13 measured; GCC 15 profiles carry the same four added taken outcomes pending authoritative hosted confirmation; Apple Clang 17 not measured",
+      "runner": "scripts/run-mock-tests.sh --coverage",
+      "scope": "Label-keyed refrigerant liquid coverage: the added liquid-label condition is taken in both directions by the unit and catalog checks; all other inventories and historical floors unchanged",
+      "source": "main/logic/refrigerant_service.hpp",
+      "source_sha256": "a3725ddb12478f852c901d93805ba5baebd23028fcf8c7a4a109e1bd63755aae"
+    },
+    {
+      "compilers": {
         "clang-17-darwin": "Apple Clang 17.0.0",
         "gcc-13-linux-ubuntu24": "ESP-IDF v6.1 container GCC 13.3.0",
         "gcc-15-linux-ubuntu26": "Ubuntu 26.04 aarch64 GCC 15"
@@ -1454,8 +1464,8 @@
         "taken": 252
       },
       "main/logic/refrigerant_service.hpp": {
-        "outcomes": 302,
-        "taken": 241
+        "outcomes": 306,
+        "taken": 245
       },
       "main/logic/registers.hpp": {
         "outcomes": 12,
@@ -1872,8 +1882,8 @@
         "taken": 252
       },
       "main/logic/refrigerant_service.hpp": {
-        "outcomes": 302,
-        "taken": 241
+        "outcomes": 306,
+        "taken": 245
       },
       "main/logic/registers.hpp": {
         "outcomes": 12,
@@ -2290,8 +2300,8 @@
         "taken": 252
       },
       "main/logic/refrigerant_service.hpp": {
-        "outcomes": 302,
-        "taken": 241
+        "outcomes": 306,
+        "taken": 245
       },
       "main/logic/registers.hpp": {
         "outcomes": 12,
