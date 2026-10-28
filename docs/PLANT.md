@@ -18,12 +18,16 @@ source mappings remain dormant, ready for a later opt-in. Evidence never crosses
 | Open-Meteo forecast | Yes | Explicit saved location, network and synchronized clock. |
 | Refrigerant heating observation | No | Existing X10A sweep; suitable ordinary heating run. |
 | ENV III | No | Supported M5Stack board, enabled/proven I²C mapping. |
+| MQTT room-temperature trend | Yes | Configured broker and room source; fresh, valid temperature, independent of heating-curve eligibility. |
 | Per-row state age and trends | No | Readable supported source rows; compatible retained history. |
 
 X10A, HomeHub Modbus, ENV III, room MQTT, circulation MQTT and forecast keep their own lifecycle,
 identity and freshness. One available source does not make another available, and absent context is
 null rather than a fabricated zero. Only X10A state/discovery requires recent X10A readings;
 independent MQTT sources continue without them. Publication still requires a broker connection.
+The room-temperature inspector compares the independent MQTT actual-temperature history with any
+device/HomeHub room readings. Five-minute intervals retain the last valid reading; missing or stale
+input leaves gaps. Collection cannot reconstruct readings from before it began.
 
 ## Rolling plant checkup (up to 24 h)
 

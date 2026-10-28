@@ -29,6 +29,15 @@ function env3HistRows() {
   const h = histSpec();
   return h && Array.isArray(h.env3_rows) ? h.env3_rows : [];
 }
+function roomHistRows() {
+  const h = histSpec();
+  return h && Array.isArray(h.room_rows) ? h.room_rows : [];
+}
+function roomHistName() {
+  const name = roomHistRows().find((r) => r && r.id === "room_temp")?.label
+    || S.status?.reference_temperature?.name;
+  return name ? `${name} · MQTT` : "MQTT";
+}
 function histFor(label) {
   const h = histSpec();
   return h ? h.rows.find((r) => r && r.label === label) || null : null;
@@ -41,6 +50,7 @@ function histIdFor(label) { const r = histFor(label); return r ? r.id : ""; }
 function hasDeviceHist(id) { return !!id && !!histSpec() && histSpec().rows.some((r) => r && r.id === id); }
 function hasModbusHist(id) { return !!id && modbusHistRows().some((r) => r && r.id === id); }
 function hasEnv3Hist(id) { return !!id && env3HistRows().some((r) => r && r.id === id); }
+function hasRoomHist(id) { return !!id && roomHistRows().some((r) => r && r.id === id); }
 function hasHist(id) {
   const D = DERIVED[id];
   return D ? D.ready(Object.fromEntries(D.ins.map((k) => [k, hasDeviceHist(k)]))) : hasDeviceHist(id);
@@ -186,8 +196,9 @@ const histCacheKey = (id, source) => {
     const ep = modbusEndpointId();
     return ep ? `modbus:${ep}:${id}` : `modbus:${id}`;
   }
-  return source === "env3" ? `env3:${id}` : id;
+  return source === "env3" ? `env3:${id}` : source === "room" ? `room:${id}` : id;
 };
+const histSourceClass = (source) => source === "modbus" ? " mb" : source === "room" ? " room" : "";
 // A reply refused for its source identity (a newer history epoch or boot than the last /status, or
 // the firmware's own "history changed" 503) waits for the next /status lifetime or one status
 // period, whichever comes first. renderApp re-enters ensureHist, so retrying at once only repeated
@@ -202,7 +213,7 @@ async function ensureHist(id, source = "x10a", paint = true, signal = null) {
   const epoch = syncHistSources();
   const key = histCacheKey(id, source);
   const offered = source === "modbus" ? hasModbusHist(id)
-    : source === "env3" ? hasEnv3Hist(id) : hasHist(id);
+    : source === "env3" ? hasEnv3Hist(id) : source === "room" ? hasRoomHist(id) : hasHist(id);
   if (!offered) return;
   if (S.histBusy.has(key)) return S.histRequests.get(key)?.done;
   if (histAwaiting(key, epoch)) return;
@@ -217,7 +228,7 @@ async function ensureHist(id, source = "x10a", paint = true, signal = null) {
   S.histBusy.add(key);
   try {
     const suffix = source === "modbus" ? "&source=modbus"
-      : source === "env3" ? "&source=env3" : "";
+      : source === "env3" ? "&source=env3" : source === "room" ? "&source=room" : "";
     const r = await fetch("/history?row=" + encodeURIComponent(id) + suffix,
                           signal ? { signal } : undefined);
     const j = await r.json();
@@ -277,6 +288,7 @@ async function ensureHistPair(id) {
     hasHist(id) ? ensureHist(id) : null,
     hasModbusHist(id) ? ensureHist(id, "modbus") : null,
     hasEnv3Hist(id) ? ensureHist(id, "env3") : null,
+    hasRoomHist(id) ? ensureHist(id, "room") : null,
     id === "dhw_tank" ? ensureHist("smart_grid_mode") : null,
     id === "dhw_tank" ? ensureHist("smart_grid_mode", "modbus") : null,
     id === "dhw_tank" ? ensureHist("bsh_state") : null,
@@ -528,9 +540,10 @@ function historyView(id, source = "") {
   }
   const x10aName = id === "circulation_state" ? "MQTT" : "X10A";
   const view = alignedHistoryView(id, [
-    { source: "x10a", name: x10aName, h: S.hist.get(id) },
-    { source: "modbus", name: "HomeHub · Modbus", h: S.hist.get(histCacheKey(id, "modbus")) },
-    { source: "env3", name: "ENV III", h: S.hist.get(histCacheKey(id, "env3")) },
+    { source: "x10a", name: x10aName, h: hasHist(id) ? S.hist.get(id) : null },
+    { source: "modbus", name: "HomeHub · Modbus", h: hasModbusHist(id) ? S.hist.get(histCacheKey(id, "modbus")) : null },
+    { source: "env3", name: "ENV III", h: hasEnv3Hist(id) ? S.hist.get(histCacheKey(id, "env3")) : null },
+    { source: "room", name: roomHistName(), h: hasRoomHist(id) ? S.hist.get(histCacheKey(id, "room")) : null },
   ].filter((s) => !source || s.source === source));
   return STATE_HIST[id] ? stateHistoryLiveView(view) : view;
 }
@@ -998,15 +1011,17 @@ function histHtml(id, unit, name, source = "") {
   const offeredX = (!source || source === "x10a") && hasHist(id);
   const offeredM = (!source || source === "modbus") && hasModbusHist(id);
   const offeredE = (!source || source === "env3") && hasEnv3Hist(id);
-  if (!offeredX && !offeredM && !offeredE) return "";
+  const offeredR = (!source || source === "room") && hasRoomHist(id);
+  if (!offeredX && !offeredM && !offeredE && !offeredR) return "";
   const hx = offeredX ? S.hist.get(id) : null;
   const hm = offeredM ? S.hist.get(histCacheKey(id, "modbus")) : null;
   const he = offeredE ? S.hist.get(histCacheKey(id, "env3")) : null;
+  const hr = offeredR ? S.hist.get(histCacheKey(id, "room")) : null;
   const wrap = (body, cls) => `<div class="vhist${cls ? " " + cls : ""}">${body}</div>`;
   const view = historyView(id, source);
-  if (!view && ((offeredX && !hx) || (offeredM && !hm) || (offeredE && !he)))
+  if (!view && ((offeredX && !hx) || (offeredM && !hm) || (offeredE && !he) || (offeredR && !hr)))
     return wrap(`<div class="vhist-note">${esc(t("hist.loading"))}</div>`, "vhist-flat");
-  if (!view && [hx, hm, he].filter(Boolean).every((h) => h.err))
+  if (!view && [hx, hm, he, hr].filter(Boolean).every((h) => h.err))
     return wrap(`<div class="vhist-note">${esc(t("hist.err"))}</div>`, "vhist-flat");
   if (!view) {
     const D = DERIVED[id];
@@ -1042,7 +1057,7 @@ function histHtml(id, unit, name, source = "") {
   let line = "", area = "", dots = "", gaps = 0, held = 0;
   for (const s of view.series) {
     const pts = s.v.map((x) => x == null ? null : x / 10);
-    const sourceCls = s.source === "modbus" ? " mb" : "";
+    const sourceCls = histSourceClass(s.source);
     let run = [];
     const flush = () => {
       if (!run.length) return;
@@ -1058,9 +1073,8 @@ function histHtml(id, unit, name, source = "") {
     let prevGap = false;
     for (let i = 0; i < n; i++) {
       if (pts[i] == null) {
-        // The compact axis summary remains about X10A: held-over is an X10A fact. Modbus dropouts
-        // are visible as breaks in its petrol line without borrowing X10A's reason vocabulary.
-        if (s.source === "x10a" || s.source === "env3") {
+        // Held-over belongs to X10A. MQTT sensor gaps use the ordinary missing-measurement count.
+        if (s.source === "x10a" || s.source === "env3" || s.source === "room") {
           if (histHeld(s, i)) { held++; prevGap = false; }
           else { if (!prevGap) gaps++; prevGap = true; }
         }
@@ -1082,7 +1096,7 @@ function histHtml(id, unit, name, source = "") {
   // scale exactly, and stays right whatever width the panel ends up at.
   const nowDots = view.series.map((s) => {
     const last = s.v[n - 1];
-    return last == null ? "" : `<span class="vhist-now${s.source === "modbus" ? " mb" : ""}"` +
+    return last == null ? "" : `<span class="vhist-now${histSourceClass(s.source)}"` +
       ` style="top:${((Y(last / 10) / HIST_H) * 100).toFixed(2)}%"></span>`;
   }).join("");
   const shownUnit = view.unit || unit;
@@ -1108,7 +1122,7 @@ function histHtml(id, unit, name, source = "") {
     const px = (frac * 100).toFixed(3);
     pinCross = `<span class="vhist-cross vhist-pinned" style="left:${px}%"></span>`;
     pinMarks = view.series.map((s) => s.v[pi] == null ? ""
-      : `<span class="vhist-mark vhist-pinned${s.source === "modbus" ? " mb" : ""}"` +
+      : `<span class="vhist-mark vhist-pinned${histSourceClass(s.source)}"` +
         ` style="left:${px}%;top:${((Y(s.v[pi] / 10) / HIST_H) * 100).toFixed(2)}%"></span>`).join("");
     // Position and SIDE are derived from the sample alone, so a pinned bubble can be placed before
     // layout: left half opens to the right, right half opens to the left. The selected crosshair is
@@ -1118,9 +1132,9 @@ function histHtml(id, unit, name, source = "") {
   }
   const aux = id === "dhw_tank" ? dhwAuxPhases(view) : null;
   let phaseBands = "";
-  const legendItems = (view.series.length > 1 || view.series[0].source === "modbus")
+  const legendItems = (view.series.length > 1 || ["modbus", "room"].includes(view.series[0].source))
     ? view.series.map((s) =>
-        `<span class="vhist-source${s.source === "modbus" ? " mb" : ""}"><i></i>${esc(s.name)}</span>`)
+        `<span class="vhist-source${histSourceClass(s.source)}"><i></i>${esc(s.name)}</span>`)
     : [];
   if (aux) {
     const toRuns = (flags) => {
@@ -1173,7 +1187,7 @@ function histHtml(id, unit, name, source = "") {
         `<svg viewBox="0 0 ${HIST_W} ${HIST_H}" preserveAspectRatio="none" aria-hidden="true">${phaseBands}${area}${line}${dots}</svg>` +
         nowDots + pinCross + pinMarks +
         `<span class="vhist-cross vhist-live" hidden></span>` +
-        view.series.map((s) => `<span class="vhist-mark vhist-live${s.source === "modbus" ? " mb" : ""}" data-source="${s.source}" hidden></span>`).join("") +
+        view.series.map((s) => `<span class="vhist-mark vhist-live${histSourceClass(s.source)}" data-source="${s.source}" hidden></span>`).join("") +
       `</div>` +
     `</div>` +
     `<div class="vhist-axis"><span>${esc(t("hist.ago", spanH))}</span>` +
@@ -1571,7 +1585,7 @@ function scrubText(h, i) {
     }
     return out;
   };
-  const val = h.series && (h.series.length > 1 || h.series[0].source === "modbus")
+  const val = h.series && (h.series.length > 1 || ["modbus", "room"].includes(h.series[0].source))
     ? h.series.map(sourceText).join(h.id === "outdoor_air" ? "\n" : " · ")
     : valueText(h.series ? h.series[0] : h);
   let res = pointWhen() + " · " + val;

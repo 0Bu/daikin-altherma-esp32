@@ -149,13 +149,17 @@ inline constexpr size_t   HISTORY_FLASH_ERASE_BYTES = 4096;
 inline constexpr size_t   HISTORY_FLASH_PAGE_BYTES = 256;
 inline constexpr size_t   HISTORY_JOURNAL_HEADER_BYTES = 64;
 inline constexpr size_t   HISTORY_FLASH_TOTAL_RINGS =
-    TREND_COUNT + HOMEHUB_HISTORY_COUNT + ENV3_HISTORY_COUNT;
+    TREND_COUNT + HOMEHUB_HISTORY_COUNT + ENV3_HISTORY_COUNT + 1;
 // The first three ids are the original v1 trend sources.  Checkup extends the SAME append stream
-// with one hourly diagnostic bucket; keeping the old ids and wire version intact means an update can
-// still restore every existing trend record instead of invalidating the journal it is fixing.
-inline constexpr size_t HISTORY_JOURNAL_SOURCE_COUNT = 4;
+// with one hourly diagnostic bucket; keeping the old ids and wire version intact means an update
+// can still restore every existing trend record instead of invalidating the journal it is fixing.
+inline constexpr size_t HISTORY_JOURNAL_SOURCE_COUNT = 5;
 
-enum class HistoryJournalSource : uint8_t { X10a = 0, Modbus = 1, Env3 = 2, Checkup = 3 };
+enum class HistoryJournalSource : uint8_t { X10a = 0, Modbus = 1, Env3 = 2, Checkup = 3, Room = 4 };
+
+// The independent room source has one fixed actual-temperature series; its schema does not change
+// when an unrelated X10A/HomeHub catalog grows. Existing source numbers and catalogs stay intact.
+inline constexpr uint32_t HISTORY_ROOM_SCHEMA = 0x52544d31u; // "RTM1": actual °C, last sample
 
 inline constexpr size_t history_journal_source_rings(HistoryJournalSource src) {
     switch (src) {
@@ -165,7 +169,10 @@ inline constexpr size_t history_journal_source_rings(HistoryJournalSource src) {
         // The diagnostic payload is a byte-for-byte CheckupJournalPayload rather than a dense
         // HistorySample vector.  Its word count is supplied by checkup.cpp's wire contract at the
         // generic header matcher below, avoiding a dependency cycle between the two persist headers.
-        case HistoryJournalSource::Checkup: return 0;
+        case HistoryJournalSource::Checkup:
+            return 0;
+        case HistoryJournalSource::Room:
+            return 1;
     }
     return 0;
 }
@@ -447,8 +454,24 @@ inline bool history_journal_header_matches_scoped(const HistoryJournalHeader& h,
 inline bool history_journal_header_matches_x10a_scoped(const HistoryJournalHeader& h,
                                                        uint32_t catalog_fp, uint32_t scope_fp) {
     return scope_fp != 0 && history_journal_scope(h) == scope_fp &&
-           history_journal_header_matches_scoped_layout(
-               h, catalog_fp, HistoryJournalSource::X10a);
+           history_journal_header_matches_scoped_layout(h, catalog_fp, HistoryJournalSource::X10a);
+}
+
+inline bool history_journal_room_header_structural_matches(const HistoryJournalHeader& h) {
+    if (h.source != static_cast<uint8_t>(HistoryJournalSource::Room) ||
+        h.flags != HISTORY_JOURNAL_FLAG_TARGET_SCOPED || history_journal_scope(h) == 0 ||
+        h.catalog_fp == 0 || h.rings[0] != 1 || h.rings[1] != 1 || h.rings[2] != 1)
+        return false;
+    HistoryJournalHeader plain = h;
+    plain.flags                = 0;
+    // Preserve the physical append sequence even when this build cannot interpret the schema.
+    return history_journal_header_matches(plain, h.catalog_fp, 1, HISTORY_DT_S);
+}
+
+inline bool history_journal_room_header_matches(const HistoryJournalHeader& h, uint32_t identity) {
+    return identity != 0 && h.catalog_fp == HISTORY_ROOM_SCHEMA &&
+           history_journal_scope(h) == identity &&
+           history_journal_room_header_structural_matches(h);
 }
 
 // CRC normalises the two fields changed after the body was assembled. This makes the exact same
@@ -545,14 +568,15 @@ inline constexpr bool history_journal_retry_due(bool paused, int64_t now_us,
            static_cast<int64_t>(HISTORY_JOURNAL_PAUSED_RETRY_S) * 1000000;
 }
 
-// A capacity guard for the CURRENT catalog. The journal retains at least 72 hours even if all three
-// trend sources close every five-minute bucket and checkup closes every hourly bucket. The remaining
-// slots are wear reserve: records are ignored by age, never erased merely because they passed 72 h.
+// A capacity guard for the CURRENT catalog. The journal retains at least 72 hours even if all four
+// trend sources close every five-minute bucket and checkup closes every hourly bucket. The
+// remaining slots are wear reserve: records are ignored by age, never erased merely because they
+// passed 72 h.
 inline constexpr size_t HISTORY_FLASH_FUTURE_HOURS = 72;
 inline constexpr size_t HISTORY_FLASH_FUTURE_SAMPLES =
     HISTORY_FLASH_FUTURE_HOURS * 60u * 60u / HISTORY_DT_S;
 inline constexpr size_t HISTORY_FLASH_FUTURE_RECORDS =
-    HISTORY_FLASH_FUTURE_SAMPLES * 3u + HISTORY_FLASH_FUTURE_HOURS;
+    HISTORY_FLASH_FUTURE_SAMPLES * 4u + HISTORY_FLASH_FUTURE_HOURS;
 static_assert(HISTORY_FLASH_FUTURE_SAMPLES == 864,
               "72 hours at the five-minute raster must contain 864 samples per ring");
 static_assert(HISTORY_JOURNAL_SLOT_BYTES <= HISTORY_FLASH_ERASE_BYTES &&
@@ -913,6 +937,28 @@ template <typename Cfg> inline uint32_t history_circulation_identity(const Cfg& 
     return history_circulation_identity_clamp(config_crc32_final(crc));
 }
 
+// Actual-temperature evidence has a separate durable generation for delete/re-add and A -> B -> A
+// cutovers. Display names, targets and thermostat gates cannot change the meaning of this series.
+template <typename Cfg> inline uint32_t history_room_identity(const Cfg& c) {
+    if (!c.diagnostics_enabled || c.mqtt_uri.empty() || c.ref_temp_topic.empty()) return 0;
+    uint32_t crc           = history_fp_u32(CONFIG_CRC32_INIT, HISTORY_ROOM_SCHEMA);
+    crc                    = history_fp_u32(crc, c.diagnostics_generation);
+    crc                    = history_fp_u32(crc, c.ref_temp_generation);
+    crc                    = history_fp_str(crc, c.mqtt_uri.c_str());
+    crc                    = history_fp_str(crc, c.ref_temp_topic.c_str());
+    crc                    = history_fp_str(crc, c.ref_temp_path.c_str());
+    const bool mapped_time = !c.ref_temp_time_topic.empty() || !c.ref_temp_time_path.empty();
+    crc                    = history_fp_u32(crc, mapped_time ? 1u : 0u);
+    const char* time_topic = !mapped_time                    ? ""
+                             : c.ref_temp_time_topic.empty() ? c.ref_temp_topic.c_str()
+                                                             : c.ref_temp_time_topic.c_str();
+    crc                    = history_fp_str(crc, time_topic);
+    crc                    = history_fp_str(crc, c.ref_temp_time_path.c_str());
+    crc                    = history_fp_u32(crc, c.ref_temp_max_age_s);
+    const uint32_t out     = config_crc32_final(crc);
+    return out ? out : 1u;
+}
+
 // Stable identity of ONE stored series. The public trend id is the semantic anchor; the source and
 // every field which can change the meaning of its int16 sample are also included. Consequently a
 // label-only edit survives, while a locator/converter/unit/folding change starts only that series
@@ -983,6 +1029,7 @@ inline uint32_t history_series_id(HistoryJournalSource src, size_t index) {
     case HistoryJournalSource::Env3:
         return index < ENV3_HISTORY_COUNT ? history_env3_series_id(ENV3_HISTORIES[index]) : 0;
     case HistoryJournalSource::Checkup:
+    case HistoryJournalSource::Room:
         return 0;
     }
     return 0;
@@ -1208,6 +1255,7 @@ inline const uint32_t* history_legacy_disinfection_id_list(HistoryJournalSource 
             count = sizeof(HISTORY_LEGACY_DISINFECTION_ENV3_IDS) / sizeof(uint32_t);
             return HISTORY_LEGACY_DISINFECTION_ENV3_IDS;
         case HistoryJournalSource::Checkup:
+        case HistoryJournalSource::Room:
             count = 0;
             return nullptr;
     }
@@ -1480,6 +1528,8 @@ inline size_t history_flash_restore_start(int64_t oldest_record_bucket,
 inline constexpr size_t history_restore_next_source_ring(size_t ring) {
     if (ring < TREND_COUNT) return TREND_COUNT;
     if (ring < TREND_COUNT + HOMEHUB_HISTORY_COUNT) return TREND_COUNT + HOMEHUB_HISTORY_COUNT;
+    if (ring < TREND_COUNT + HOMEHUB_HISTORY_COUNT + ENV3_HISTORY_COUNT)
+        return TREND_COUNT + HOMEHUB_HISTORY_COUNT + ENV3_HISTORY_COUNT;
     return HISTORY_FLASH_TOTAL_RINGS;
 }
 

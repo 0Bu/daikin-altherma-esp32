@@ -18,12 +18,12 @@ X10A UART → detection/profile → poll cache ─┬→ HTTP /values → device
 HomeHub TCP → independent register cache ──┬→ separate HTTP/MQTT observations
                                          └→ independent history and plant context
 ENV III I²C → accessory cache ──────────────┬→ status/MQTT/history
-MQTT room + circulation → bounded inputs ──┴→ read-only plant diagnosis
+MQTT room + circulation → bounded inputs ──┴→ read-only plant diagnosis and source history
 Open-Meteo HTTPS → optional forecast ─────────→ status/MQTT comparison evidence
 ```
 
-X10A, HomeHub and ENV III have separate identity, cache, liveness and history. A HomeHub reading
-never replaces X10A. Network transport (WiFi or Ethernet) carries these sources without changing
+X10A, HomeHub, ENV III and the MQTT room source have separate identity, cache, liveness and history.
+A HomeHub reading never replaces X10A. Network transport (WiFi or Ethernet) carries these sources without changing
 what they mean. Presence, freshness, held-over state and validity are separate facts; absent input
 must not become zero, false or a fabricated source time.
 
@@ -207,8 +207,11 @@ Disabled/frozen ENV III RAM is not adopted or journaled unless the producer ran 
 Future journal cursors are reported and never rewound; affected work waits for acceptable time.
 Writes permit one slot retry and two abandoned sectors per failure episode, then retry at 60 seconds.
 
-X10A, HomeHub and ENV III keep three separate source rasters; board memory and the circulation
+X10A, HomeHub, ENV III and MQTT room temperature keep separate source rasters; board memory and the circulation
 witness share the X10A raster but keep RAM trends independent of heat-pump identity.
+The room raster runs on the MQTT task without X10A or HomeHub. Its independent sealed RAM store and
+journal records bind the broker, temperature/time mappings, maximum age and persisted source/consent
+generations. A rename or target-only edit preserves it; source removal/replacement retires it alone.
 X10A journal append requires a resolved identity and no pending source reset; a pending reset also
 skips that source's restoration. `b0`
 aligns monotonic buckets even before SNTP; `t0` is omitted until wall time is known. Missing samples

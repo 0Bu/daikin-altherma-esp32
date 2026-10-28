@@ -202,7 +202,8 @@ context, never sampling gates. An absent sample clears the corresponding prior e
 ### History and 24-hour checks
 
 `history` fields: `epoch`, `dt`, `persist`, `dwell_persist`, `rows[{id,label}]`, `modbus_rows[{id,label}]`,
-`env3_rows[{id,label}]`. Trend ids name concepts; labels follow the detected profile. Unsupported rows
+`env3_rows[{id,label}]`, `room_rows[{id,label}]`. Trend ids name concepts; labels follow the detected profile
+or configured MQTT room-source name. Unsupported rows
 are omitted. RAM adoption verdicts include `accept`, `power_cycle`, `wrong_catalog`, `bad_crc`,
 `wrong_version`, `no_record`, `safe_mode`, `not_committed`, `stale_commit`; they do not report flash
 restoration. `stale_commit` means unmeasurable age, not an ordinary stalled raster (booked as gaps).
@@ -318,7 +319,7 @@ MCP `get_hp_values` uses the same serializer. There is no retained model-sized r
 
 ## GET /history
 
-Query: `row=<trend-id>` and optional `source=x10a|modbus|env3`; absent source means `x10a`.
+Query: `row=<trend-id>` and optional `source=x10a|modbus|env3|room`; absent source means `x10a`.
 Unknown ids return 404. Available rows are listed in `/status.history`. The payload is:
 
 ```text
@@ -333,6 +334,11 @@ responses superseded by a newer status/source generation.
 `held` marks eligible X10A outdoor nulls as held-over; all other source rasters leave it empty.
 The circulation-state trend is selected through `source=x10a` but reports its physical source as
 `"mqtt"` in the response.
+`source=room&row=room_temp` returns the independent MQTT actual-temperature trend with `source:"room"`.
+It is offered outside safe mode while plant diagnostics and a room source with an MQTT broker are
+configured; fresh, valid temperatures are recorded independently of thermostat state or heating-curve
+eligibility. Disabled/unconfigured sources and safe mode return 404; a changed source identity during
+retrieval returns 503.
 Catalog ids and source eligibility are in `main/logic/history.hpp` and `homehub_map.hpp`.
 
 ## Catalog, probes and evidence
@@ -392,7 +398,9 @@ the link blob; it does not migrate or write the service blob.
 | Legacy per-key credentials/services, `rx_pin`, `tx_pin`, `proto`, `board_set` | Read-only fallback inputs on devices upgraded from the per-key era; never written, removed only by a factory reset |
 | `boot_fails`, `heap_rst` | Independent crash-loop and bounded heap-restart counters; which boot or uptime clears which is in [ARCHITECTURE.md](ARCHITECTURE.md#boot-loop-safe-mode-config-recovery) |
 
-The current service layout is v19. Retired v9 actuation and v14 controller-mode bytes keep their
+The current service layout is v20; it appends a room-history generation that defaults to zero for
+older records and prevents a removed or replaced source from restoring its earlier history.
+Retired v9 actuation and v14 controller-mode bytes keep their
 positions, are written zero and ignored. Pre-v18 HomeHub configurations migrate as already searched
 so an old empty target stays opted out; fresh state searches once on its first networked boot and
 persists the result or miss. Pre-v19 diagnostics migrate off. See `logic/config_store.hpp` for exact
