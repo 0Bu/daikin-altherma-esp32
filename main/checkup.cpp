@@ -260,7 +260,7 @@ void checkup_persist_seal() {
     P().source_fp              = s_source_fp;
     P().diagnostics_generation = s_diagnostics_generation;
     P().span_us   = P().ring.span_us();
-    P().crc       = checkup_persist_crc();
+    P().crc                    = checkup_persist_crc();
 }
 
 // `keep_handoff` spares the one-shot DHW checkpoint. Startup consumes it once and holds a
@@ -276,8 +276,9 @@ void persist_wipe(bool keep_handoff = false) {
     s_dhw_scope_us         = -1; // both rings restart together
     s_source_last_us       = -1;
     s_pressure_now         = -1;
-    checkup_persist_seal();     // keeps s_model_fp: the identity belongs to what is recorded NEXT, and the
-} // reset is consumed asynchronously, after checkup_reset_on_detect set it
+    // Retain s_model_fp for the next record; detection confirms it before consuming a reset.
+    checkup_persist_seal();
+}
 
 bool apply_reset_locked() {
     if (!s_reset_requested.exchange(false)) return false;
