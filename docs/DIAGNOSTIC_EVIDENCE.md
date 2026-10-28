@@ -1,6 +1,6 @@
 # Evidence and limits of the plant diagnostics
 
-<!-- diagnostic-evidence-contract: efc67c648fe123df1bdab75f1baed9dc7213cb98e2e34d60372892b224435f77 -->
+<!-- diagnostic-evidence-contract: a3055e13d265b1b12ed27d5d5c272330b6c19b5d2fa14b35b72976fa599998aa -->
 
 For every row in the **Plant diagnostics · 24 h** card, this page answers four questions:
 

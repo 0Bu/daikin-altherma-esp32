@@ -223,7 +223,7 @@ bool reading(const CachedValue* v, size_t n, const logic::CheckupLocator& l, int
 //
 // first/latest_sample_us are excluded because they are MONOTONIC and meaningless in the next boot's
 // clock; the recorded lifecycle rides as `span_us` instead, without establishing durable age.
-uint32_t persist_crc() {
+uint32_t checkup_persist_crc() {
     uint32_t crc = CONFIG_CRC32_INIT;
     const auto& r = P().ring;
     crc = config_crc32_update(crc, reinterpret_cast<const uint8_t*>(r.buf), sizeof(r.buf));
@@ -252,7 +252,7 @@ uint32_t persist_crc() {
 // reconstruction. This is the header writer, keeping its integrity fields together. It leaves
 // `boots_since_commit` alone for layout integrity. It is a reserved legacy age-guard field;
 // completed RAM hours are never adopted by this build.
-void persist_seal() {
+void checkup_persist_seal() {
     P().magic     = logic::CHECKUP_PERSIST_MAGIC;
     P().version   = logic::CHECKUP_PERSIST_VERSION;
     P().layout_fp = logic::checkup_layout_fingerprint();
@@ -260,7 +260,7 @@ void persist_seal() {
     P().source_fp              = s_source_fp;
     P().diagnostics_generation = s_diagnostics_generation;
     P().span_us   = P().ring.span_us();
-    P().crc       = persist_crc();
+    P().crc       = checkup_persist_crc();
 }
 
 // `keep_handoff` spares the one-shot DHW checkpoint. Startup consumes it once and holds a
@@ -276,7 +276,7 @@ void persist_wipe(bool keep_handoff = false) {
     s_dhw_scope_us         = -1; // both rings restart together
     s_source_last_us       = -1;
     s_pressure_now         = -1;
-    persist_seal();     // keeps s_model_fp: the identity belongs to what is recorded NEXT, and the
+    checkup_persist_seal();     // keeps s_model_fp: the identity belongs to what is recorded NEXT, and the
 } // reset is consumed asynchronously, after checkup_reset_on_detect set it
 
 bool apply_reset_locked() {
@@ -303,7 +303,7 @@ bool apply_dhw_reset_locked() {
     s_dhw_state           = kFreshDhwLossState;
     s_dhw_scope_us        = esp_timer_get_time(); // the X10A lifecycle keeps running
     P().dhw_handoff.magic = 0;
-    persist_seal();
+    checkup_persist_seal();
     return true;
 }
 
@@ -372,7 +372,7 @@ void checkup_start(bool diagnostics_enabled, uint32_t diagnostics_generation) {
     const uint32_t want_fp = logic::checkup_layout_fingerprint();
     const uint32_t reason  = static_cast<uint32_t>(esp_reset_reason());
     s_persist_verdict        = logic::checkup_restore_verdict(
-        reason, P().magic, P().version, P().layout_fp, want_fp, P().crc, persist_crc(),
+        reason, P().magic, P().version, P().layout_fp, want_fp, P().crc, checkup_persist_crc(),
         safe_mode_active(), diagnostics_enabled, P().diagnostics_generation, diagnostics_generation,
         P().boots_since_commit);
     const logic::CheckupRestore integrity = s_persist_verdict;
@@ -471,7 +471,7 @@ void checkup_reset_on_detect(const char* profile_id, uint32_t source_fp) {
                         "discarded\n");
         }
         s_boot_handoff_valid = false;
-        persist_seal();
+        checkup_persist_seal();
         return;
     }
     s_boot_handoff_valid = false;
@@ -635,15 +635,15 @@ void checkup_record(const CachedValue* v, size_t n, bool rps_known, bool rps_run
         // Retain the reserved sealed integrity counter's completed-hour bookkeeping. Startup
         // still retires completed RAM hours; this does not authorize their adoption next boot.
         P().boots_since_commit = 0;
-        persist_seal(); // seal this completed-bucket update; see persist_crc()
+        checkup_persist_seal(); // seal this completed-bucket update; see checkup_persist_crc()
         if (continuous_boundary) s_state.last_us = now; // dt=0, edge witnesses intentionally kept
         const bool reseal = logic::checkup_step(s_state, P().ring.pending, s, now, &P().ring);
-        if (reseal) persist_seal();
+        if (reseal) checkup_persist_seal();
         if (!discard_dhw_sample)
             logic::dhw_loss_step(s_dhw_state, P().dhw.pending, s, now);
     } else {
         const bool reseal = logic::checkup_step(s_state, P().ring.pending, s, now, &P().ring);
-        if (reseal) persist_seal();
+        if (reseal) checkup_persist_seal();
         if (!discard_dhw_sample)
             logic::dhw_loss_step(s_dhw_state, P().dhw.pending, s, now);
     }
@@ -674,7 +674,7 @@ void expire_restored_locked() {
         s_pressure_now   = -1;
         changed          = true;
     }
-    if (changed) persist_seal();
+    if (changed) checkup_persist_seal();
 }
 
 logic::CheckupCyclingEvidence checkup_cycling_evidence() {
@@ -927,7 +927,7 @@ CheckupFlashRestoreResult checkup_flash_restore(const CheckupFlashRecord* record
     // selected live intervals keep absolute-age deadlines; only selected stored intervals establish
     // this slug.
     s_persist_verdict = logic::CheckupRestore::Flash;
-    persist_seal();
+    checkup_persist_seal();
     diag_printf("checkup: restored %u hourly bucket(s) from flash (RAM copy refused: %s)\n",
                 static_cast<unsigned>(materialized), logic::checkup_restore_slug(refused));
     return CheckupFlashRestoreResult::Restored;

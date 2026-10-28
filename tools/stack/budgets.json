@@ -2202,11 +2202,11 @@
       "max_bytes": 48
     },
     "cycling_seal": {
-      "pattern": "^daik::\\(anonymous namespace\\)::persist_seal\\(",
+      "pattern": "^daik::\\(anonymous namespace\\)::checkup_persist_seal\\(",
       "max_bytes": 32
     },
     "cycling_crc": {
-      "pattern": "^daik::\\(anonymous namespace\\)::persist_crc\\(",
+      "pattern": "^daik::\\(anonymous namespace\\)::checkup_persist_crc\\(",
       "max_bytes": 32
     }
   },
