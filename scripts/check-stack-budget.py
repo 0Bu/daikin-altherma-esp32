@@ -31,6 +31,8 @@ STACK_MOVSP_RE = re.compile(r"movsp\s+a1,")
 # Only these reviewed SDK functions may use objdump's packed-word rendering. A symbol's
 # first instruction must still be at its entry address and contain the Xtensa ENTRY opcode.
 PACKED_ENTRY_SYMBOLS = frozenset({
+    'esp_http_client_open',
+    'esp_http_client_connect',
     '__wrap_mbedtls_ssl_handshake_client_step',
     '__wrap_mbedtls_ssl_read',
     '__wrap_mbedtls_ssl_write',
@@ -329,6 +331,7 @@ SHUTDOWN_CALLERS = {
     "ota_health_shutdown": ["ota_health_task", "sdk_restart"],
 }
 SDK_PUBLIC_FILES = (
+    "esp_http_client/esp_http_client.c",
     "mbedtls/mbedtls/tf-psa-crypto/include/psa/crypto_sizes.h",
     "mbedtls/mbedtls/tf-psa-crypto/drivers/builtin/src/psa_crypto_rsa.c",
     "mbedtls/mbedtls/tf-psa-crypto/drivers/builtin/src/psa_crypto_ecp.c",
@@ -953,6 +956,25 @@ def validate_shutdown_paths(budgets: dict[str, Any], sources: dict[str, str]) ->
         raise BudgetError("shutdown source: factory-reset journal exclusion changed")
 
 
+def validate_weather_tls_path(budgets: dict[str, Any]) -> None:
+    # The SDK envelope includes the larger WSS prefix. Adding the complete HTTP prefix again
+    # deliberately overcounts shared transport/TLS frames, rather than assuming spare task space.
+    members = ["weather_task", "weather_cycle", "weather_fetch", "weather_download",
+               "sdk_http_client_open", "sdk_http_client_connect", "tls_esp_transport_connect",
+               "tls_ssl_connect", "tls_esp_tls_conn_new_sync", "tls_esp_tls_low_level_conn",
+               "tls_esp_mbedtls_handshake"]
+    owned = budgets["tasks"]["weather"]
+    rule = budgets["paths"].get("weather_task_tls")
+    if (rule is None or "weather_task_tls" not in owned["paths"] or owned["reserve_bytes"] < 1536
+            or rule["symbols"] != members or rule["multipliers"] != {}
+            or rule["base_bytes"] != SDK_TLS_LIMIT
+            or rule["max_bytes"] != owned["stack_bytes"] - owned["reserve_bytes"]):
+        raise BudgetError("Weather TLS path: complete caller/HTTP prefix/TLS envelope required")
+    for name in ("weather_task_download", "weather_task_parse"):
+        if budgets["paths"][name]["base_bytes"] != 2048:
+            raise BudgetError("Weather TLS path: separate error/parse allowances must remain")
+
+
 def validate_task_stacks(budgets: dict[str, Any], sources: dict[str, str]) -> None:
     """Check ceilings against the allocation actually passed to each application task."""
     tasks = budgets["tasks"]
@@ -1493,6 +1515,7 @@ def validate_source_contract(budgets: dict[str, Any]) -> None:
     validate_mqtt_tls_client(sources["main/mqtt_ha.cpp"])
     validate_env_i2c(sources["main/env3.cpp"])
     validate_task_stacks(budgets, sources)
+    validate_weather_tls_path(budgets)
     validate_discovery_builder_paths(budgets)
     validate_mqtt_retirement_paths(budgets)
     validate_mqtt_discovery_paths(
@@ -2214,7 +2237,7 @@ def self_test() -> None:
 0000000e <daik::(anonymous namespace)::health_gate_task(void*)>:
    e: 004136          entry a1, 80
 0000000f <daik::(anonymous namespace)::weather_task(void*)>:
-   f: 004136          entry a1, 1152
+   f: 004136          entry a1, 48
 00000010 <daik::(anonymous namespace)::fetch_forecast(daik::Config const&, daik::WeatherForecastSample&, std::string&, bool&, daik::HttpClientProbe&)>:
   10: 004136          entry a1, 160
 00000011 <daik::(anonymous namespace)::download_json(daik::Config const&, std::string&, std::string&, bool&, daik::HttpClientProbe&)>:
@@ -2643,6 +2666,8 @@ def self_test() -> None:
     # a packed-prologue mutation can also replace an unrelated first instruction at 0x220.
     # Exact current MQTT/journal continuation fixture; omission and growth are rejected below.
     extra_frames.update({
+        'esp_http_client_open': 48,
+        'esp_http_client_connect': 48,
         'esp_event_loop_run': 80,
         'daik::on_mqtt(void*, char const*, long, void*)': 80,
         'daik::capture_discovery_owner_frame(esp_mqtt_event_t*)': 96,
@@ -2869,10 +2894,49 @@ def self_test() -> None:
     assert selected["path:ota_task_manifest_fetch"] == 4672
     assert selected["path:httpd_ota_check"] == 3376
     assert selected["path:http_deadline_watchdog"] == 1536
-    assert selected["weather_task"] == 1152
+    assert selected["weather_task"] == 48
     assert selected["weather_cycle"] == 736
-    assert selected["path:weather_task_download"] == 4528
-    assert selected["path:weather_task_parse"] == 6352
+    assert selected["path:weather_task_download"] == 3424
+    assert selected["path:weather_task_tls"] == 6320
+    assert selected["path:weather_task_parse"] == 5248
+    # Restoring the former 1 KiB read buffer adds 768 bytes to the enclosing download frame.
+    # The separate error path still fits; only the complete caller + HTTP + TLS composition
+    # catches the lost task reserve.
+    old_chunk = fixture.replace("  11: 004136          entry a1, 432",
+                                "  11: 004136          entry a1, 1200")
+    assert old_chunk != fixture
+    try:
+        evaluate(parse_frames(old_chunk), budgets)
+    except BudgetError as exc:
+        assert "weather_task_tls" in str(exc)
+    else:
+        raise AssertionError("self-test accepted the former Weather read-buffer footprint")
+    for member in budgets["paths"]["weather_task_tls"]["symbols"]:
+        changed = json.loads(json.dumps(budgets))
+        changed["paths"]["weather_task_tls"]["symbols"].remove(member)
+        try:
+            validate_weather_tls_path(changed)
+        except BudgetError:
+            pass
+        else:
+            raise AssertionError(f"self-test accepted missing Weather TLS caller {member}")
+    for field, value in (("base_bytes", SDK_TLS_LIMIT - 16), ("max_bytes", 7168)):
+        changed = json.loads(json.dumps(budgets))
+        changed["paths"]["weather_task_tls"][field] = value
+        try:
+            validate_weather_tls_path(changed)
+        except BudgetError:
+            pass
+        else:
+            raise AssertionError(f"self-test accepted changed Weather TLS {field}")
+    changed = json.loads(json.dumps(budgets))
+    changed["tasks"]["weather"]["reserve_bytes"] = 1024
+    try:
+        validate_weather_tls_path(changed)
+    except BudgetError:
+        pass
+    else:
+        raise AssertionError("self-test accepted a smaller Weather task reserve")
     assert selected["ota_health_task"] == 80
     assert selected["path:ota_health_gate"] == 2128
     assert selected["path:httpd_config_hp"] == 6528
@@ -3604,8 +3668,8 @@ def self_test() -> None:
     else:
         raise AssertionError("self-test accepted a larger cJSON adapter depth override")
     assert budgets["paths"]["ota_task_manifest_fetch"]["max_bytes"] == 6144
-    assert budgets["paths"]["weather_task_download"]["max_bytes"] == 11264
-    assert budgets["paths"]["weather_task_parse"]["max_bytes"] == 11264
+    assert budgets["paths"]["weather_task_download"]["max_bytes"] == 6656
+    assert budgets["paths"]["weather_task_parse"]["max_bytes"] == 6656
     assert budgets["paths"]["ota_health_gate"]["max_bytes"] == 3072
 
     too_large = fixture.replace("entry a1, 1120", "entry a1, 2304")
@@ -3640,7 +3704,7 @@ def self_test() -> None:
         raise AssertionError("self-test failed to protect the OTA task path reserve")
 
     weather_path_too_large = (
-        fixture.replace("entry a1, 1152", "entry a1, 6144")
+        fixture.replace("entry a1, 736", "entry a1, 6144")
         .replace("entry a1, 160", "entry a1, 2048")
         .replace("entry a1, 432", "entry a1, 3072")
     )
@@ -3652,7 +3716,7 @@ def self_test() -> None:
         raise AssertionError("self-test failed to protect the Weather task reserve")
 
     weather_parse_path_too_large = (
-        fixture.replace("entry a1, 1152", "entry a1, 6144")
+        fixture.replace("entry a1, 736", "entry a1, 6144")
         .replace("entry a1, 160", "entry a1, 2048")
         .replace("  12: 004136          entry a1, 512",
                  "  12: 004136          entry a1, 3072")

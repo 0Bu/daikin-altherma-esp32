@@ -450,6 +450,24 @@ void transport_completion() {
     REQUIRE(!d.run() && d.error == "empty_payload");
     cleanup_assertions();
 }
+void transport_chunk_boundaries() {
+    for (size_t length : {size_t{255}, size_t{256}, size_t{257}, size_t{511}, size_t{512},
+                          size_t{513}, size_t{8191}, size_t{8192}}) {
+        for (size_t chunk : {size_t{1}, size_t{17}, size_t{255}, size_t{256}, size_t{1024}}) {
+            for (bool known_length : {true, false}) {
+                reset();
+                sdk::body.resize(length);
+                for (size_t i = 0; i < length; ++i)
+                    sdk::body[i] = static_cast<char>('a' + i % 26);
+                sdk::chunk_size = chunk;
+                if (known_length) sdk::claimed = static_cast<int64_t>(length);
+                Download d;
+                REQUIRE(d.run() && d.body == sdk::body && d.error.empty());
+                cleanup_assertions();
+            }
+        }
+    }
+}
 void transport_body_cap() {
     for (bool known_length : {true, false}) {
         reset();
@@ -853,6 +871,7 @@ const Case cases[] = {{"epoch_bounds", epoch_bounds},
                       {"transport_success", transport_success},
                       {"transport_completion", transport_completion},
                       {"transport_body_cap", transport_body_cap},
+                      {"transport_chunk_boundaries", transport_chunk_boundaries},
                       {"transport_deadline", transport_deadline},
                       {"transport_failures", transport_failures},
                       {"transport_admission", transport_admission},

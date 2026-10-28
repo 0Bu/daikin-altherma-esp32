@@ -354,6 +354,9 @@ Validation after transport/buffer cleanup requires two 24/12 KiB samples. Weathe
 fetch keeps the previous evidence unavailable for decisions and retries after five minutes.
 Weather reads only an allocation-free consent/location snapshot; request temporaries are destroyed
 before network ownership returns to MQTT and before the worker sleeps.
+Its 8 KiB task stack uses a 256-byte read buffer. The ELF gate composes the Weather callers,
+HTTP connection prefix and full source-bound SDK TLS envelope, and separately bounds parsing and
+error paths, retaining at least 1 KiB on each path.
 
 `http_deadline.cpp` owns a boot-static absolute socket watchdog. After successful open, a timer
 covers headers and body within the original monotonic deadline; expiry wakes a preallocated worker

@@ -169,7 +169,7 @@ try {
       path.join(cjsonDir, "cJSON.c"), "-o", cjsonObject]);
     assert.equal(result.status, 0, `lock-resolved cJSON must compile\n${result.stdout}${result.stderr}`);
   }
-  for (const [file, count] of [["env3", 8], ["weather", 19]]) {
+  for (const [file, count] of [["env3", 8], ["weather", 20]]) {
     const binary = compile(`production-${file}`, file);
     const result = execute(binary, []);
     assert.equal(result.status, 0, `${result.stdout}${result.stderr}`);
@@ -199,7 +199,7 @@ try {
   for (const [key, source] of Object.entries(sources))
     console.log(`source runtime ${key} sha256=${createHash("sha256").update(source).digest("hex")}`);
   if (cjsonDir) console.log(`source runtime cJSON.c sha256=${createHash("sha256").update(fs.readFileSync(path.join(cjsonDir, "cJSON.c"))).digest("hex")}`);
-  console.log(`production source runtime: 26 cases, ${mutations.length} negative controls, ${cjsonDir ? "real lock-resolved cJSON plus lexer corpus" : "AST adapter; no JSON lexer"}`);
+  console.log(`production source runtime: 28 cases, ${mutations.length} negative controls, ${cjsonDir ? "real lock-resolved cJSON plus lexer corpus" : "AST adapter; no JSON lexer"}`);
 } finally {
   fs.rmSync(temp, { recursive: true, force: true });
 }

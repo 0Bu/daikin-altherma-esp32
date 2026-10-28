@@ -57,7 +57,9 @@ constexpr int         kAllocatorRetryMs     = 250;
 constexpr uint32_t    kValuesQuiesceWaitMs  = 5000;
 constexpr int         kValuesQuiesceStepMs  = 20;
 constexpr TickType_t  kSourceCancelWait     = pdMS_TO_TICKS(4000);
-constexpr int         kTaskStack            = 12288;
+// The ELF gate composes the caller, HTTP prefix and complete SDK TLS envelope separately from
+// parsing/error paths. Keep the bounded read buffer small enough to retain that reserve.
+constexpr int         kTaskStack            = 8192;
 constexpr UBaseType_t kTaskPrio             = TASK_PRIO_WEATHER; // see main/task_config.hpp
 constexpr const char* kProvider             = "open-meteo";
 constexpr const char* kModel                = "icon_seamless";
@@ -314,7 +316,7 @@ __attribute__((noinline)) bool download_json(const WeatherConfigSnapshot& weathe
                 if (claimed > static_cast<int64_t>(kPayloadMax)) {
                     error = "payload_too_large";
                 } else {
-                    char chunk[1024];
+                    char chunk[256];
                     while (out.size() <= kPayloadMax) {
                         if (!set_timeout_to_deadline(download_started)) {
                             error = "download_timeout";
