@@ -1,4 +1,4 @@
-// translation-source: 33967449acf2e4c68a9c1a1feb866a3378533feeec8e796587881b7dec62ef92
+// translation-source: 5453eeaa5ecebfac9d729776d8b40e937dbfce10d0a431843b3f3298cd22a9ff
 const plNoun = (n, one, few, many) => {
   const value = Math.abs(Number(n)), mod10 = value % 10, mod100 = value % 100;
   return value === 1 ? one
@@ -203,7 +203,6 @@ I18N.pl = localeValues([
   /* check.detail.fault.past */ "Obecnie brak komunikatu; w tym okresie zapisano komunikat. Zniknięcie nie potwierdza przyczyny ani usunięcia problemu.",
   /* check.detail.fault.past_unknown */ "Zapisano komunikat; bieżący stan usterki jest nieczytelny.",
   /* check.detail.collecting */ (a, b) => `Czytelne sygnały: ${a} z wymaganych ${b}.`,
-  /* check.detail.cycling_split */ " Oceniane są tylko zakończone cykle ogrzewania sklasyfikowane przez cały czas. CWU, chłodzenie i cykle niesklasyfikowane pozostają obserwacjami.",
   /* check.detail.outdoor_cycling */ " Dane zewnętrzne X10A obejmują tylko świeże próbki z zakończonych, konsekwentnie sklasyfikowanych cykli ogrzewania pomieszczeń. Stanowią kontekst i nie zmieniają progu ani oceny taktowania.",
   /* check.detail.outdoor_defrost */ " Dane zewnętrzne X10A obejmują tylko świeże próbki, gdy stan odszraniania i sprężarki był czytelny, a sprężarka pracowała. Stanowią kontekst i nie zmieniają progu ani oceny odszraniania.",
   /* check.detail.dhw_candidate */ (a, b, c, d) => `Przyjęte okna godzinowe: ${a}; bieżący kandydat: ${c} z ${d}.`,
@@ -228,6 +227,7 @@ I18N.pl = localeValues([
   /* check.cycling_dhw */ (a, b) => `CWU ${a} · średnia ${b}`,
   /* check.cycling_cooling */ (n) => `chłodzenie: wykluczono ${n}`,
   /* check.cycling_censored */ (n) => `${n} ${plNoun(n, "niesklasyfikowany", "niesklasyfikowane", "niesklasyfikowanych")}`,
+  /* check.cycling_causes */ "przejście|restart/dziennik|nieobserwowany start",
   /* check.outdoor_one */ (source, mean) => `${source} ${mean} °C`,
   /* check.outdoor_range */ (source, min, mean) => `${source} min. ${min} °C · średnia ${mean} °C`,
   /* check.min */ (m) => `${m} min`,
@@ -260,7 +260,7 @@ I18N.pl = localeValues([
   /* check.detail.age_label */ "Wiek ostatniego pomiaru:",
   /* check.detail.horizon_wait */ (a) => `Brakuje pełnego okna 24 godzin: pozostało ${a}.`,
   /* check.detail.fault.ok */ "Brak bieżącego lub zapisanego komunikatu w czytelnych sygnałach usterek.",
-  /* check.detail.cycling.info */ "≥12 zakończonych cykli ogrzewania ze średnią <10 min: wskazówka projektu.",
+  /* check.detail.cycling.info */ "Średni cykl ogrzewania <10 min: wskazówka projektu.",
   /* check.detail.cycling.ok */ "Bez wskazówki krótkich zakończonych cykli ogrzewania.",
   /* check.detail.defrost.info */ "≥3 powiązane odszraniania przekraczają 15% czytelnego czasu sprężarki: wskazówka projektu.",
   /* check.detail.defrost.ok */ "Bez wskazówki udziału; pogoda i luki nieocenione.",
@@ -268,14 +268,14 @@ I18N.pl = localeValues([
   /* check.detail.pressure.warn */ "Zapisano ciągłe ≥60 s ≤1,0 bar; nie określa obecnego ciśnienia.",
   /* check.detail.pressure.ok */ "Brak przyjętego ciśnienia ≤1,0 bar, progu projektu.",
   /* check.detail.class_missing */ "Niepełna klasyfikacja; bez wspólnej oceny taktowania.",
-  /* check.detail.heating_runs_insufficient */ "Mniej niż 12 odpowiednich zakończonych cykli ogrzewania; bez oceny.",
+  /* check.detail.heating_runs_insufficient */ "<12 pełnych cykli ogrzewania do oceny.",
   /* check.detail.defrost_events_insufficient */ "Mniej niż trzy powiązane odszraniania; bez oceny udziału.",
   /* check.detail.source_stale */ "Brak świeżego odczytu X10A; bieżący stan nieznany. Historia zachowana.",
   /* check.detail.no_paired_runtime */ "Brak powiązanego czytelnego czasu; tylko liczba.",
   /* check.detail.current_label */ "Bieżące ciśnienie wody:",
   /* check.detail.minimum_time_label */ "Minimum zapisano:",
   /* check.detail.coverage_missing */ (a) => `Brakujący czytelny czas: ${a} s.`,
-  /* check.detail.channel_coverage */ (a, b) => `${a}: czytelne przez ${b}`,
+  /* check.detail.channel_coverage */ (a, b) => `${a}: pokrycie ${b}`,
   /* check.summary.warnings */ (n) => `${n} ${n === 1 ? "ostrzeżenie" : n % 10 >= 2 && n % 10 <= 4 && (n % 100 < 12 || n % 100 > 14) ? "ostrzeżenia" : "ostrzeżeń"}`,
   /* check.summary.notes */ (n) => `${n} ${n === 1 ? "informacja" : n % 10 >= 2 && n % 10 <= 4 && (n % 100 < 12 || n % 100 > 14) ? "informacje" : "informacji"}`,
   /* check.summary.ok */ "Bez wskazówek w ocenionych danych",
@@ -1223,7 +1223,7 @@ DESCRIPTION_I18N.pl = descriptionValues([
 MODEL_DESCRIPTION_I18N.pl = modelDescriptionValues([
   ["Komunikaty pompy", "nie dowodzą przyczyny ani naprawy."], // health_fault
   ["R5T: punkt warstwowego zbiornika, nie energia.", "Próg projektu ≥0,8 K/h bez oznaczeń pompy/poboru. Pobór możliwy bez oznaczeń; 0 K/h nie wyklucza strat. Cyrkulacja nie dowodzi przyczyny."], // health_dhw_loss
-  ["Starty sprężarki", "≥12 pełnych cykli ogrzewania, średnia <10 min; ≥90% wszystkich zakończonych cykli sklasyfikowanych. Reguła projektu, nie Daikin; CWU, chłodzenie i nieklasyfikowane wykluczone."], // health_cycling
+  ["Starty sprężarki", "Reguła projektu: ≥12 cykli ogrzewania, średnia <10 min; ≥90% wszystkich zakończonych cykli sklasyfikowanych bez potwierdzonych przełączeń i ≥90% pokrycia czasu ogrzewania/niepewnego. To nie limit Daikin."], // health_cycling
   ["Odszranianie", "≥3 powiązane, >15% czasu pracy sprężarki przy czytelnych stanach sprężarki i odszraniania. Reguła projektu, nie Daikin; brak wilgotności i temperatury całego wymiennika."], // health_defrost
   ["Ciśnienie", "wspólna reguła projektu ≤1,0 bar; 60 s ciągłej obserwacji daje ostrzeżenie. Nie uniwersalna; obowiązuje instrukcja modelu."], // health_pressure
   ["Przepływ po 60 s pompy", "Limit wymaga tego samego modelu/trybu/warunków; nie nominalny ani dowód małego przepływu."], // health_flow

@@ -1,6 +1,67 @@
 {
   "measurement_records": [
     {
+      "runner": "scripts/run-mock-tests.sh --coverage",
+      "scope": "Monotonic endpoint bounds for class/RPS gaps, independent of hourly duration booking. Exact 15-second positive controls and eight late-endpoint negative controls cover both signals, hour rollover and fractional seconds. Ten assertions fail against 61834599 before this correction.",
+      "source": "main/logic/checkup.hpp",
+      "source_sha256": "d919e0e0e3e443b237cbcf404d1911b5544a6850d9130bc9eb6e47f6fe45c0ed",
+      "measured_profiles": {
+        "clang-17-darwin": [
+          966,
+          1049
+        ],
+        "gcc-13-linux-ubuntu24": [
+          1116,
+          1211
+        ],
+        "gcc-15-linux-ubuntu26": [
+          1116,
+          1211
+        ]
+      },
+      "hosted_confirmation": "The existing hosted profile must be confirmed by current-head CI; no local inventory substituted."
+    },
+    {
+      "runner": "scripts/run-mock-tests.sh --coverage",
+      "scope": "Readable DHW-mode terminal valve return; 22/30-second positive controls, longer/missing/cooling/recovery negative controls and the DHW-mode population replay. Historical ratios retained or raised.",
+      "source": "main/logic/checkup.hpp",
+      "source_sha256": "7a3b092da19cb248af715d6210ec8ea9eb24529cb157ef71601d81ae116be6fc",
+      "measured_profiles": {
+        "clang-17-darwin": [
+          964,
+          1047
+        ],
+        "gcc-13-linux-ubuntu24": [
+          1116,
+          1211
+        ],
+        "gcc-15-linux-ubuntu26": [
+          1116,
+          1211
+        ],
+        "gcc-15-github-linux-ubuntu26": [
+          1116,
+          1211
+        ]
+      },
+      "hosted_confirmation": "Measured GitHub Actions run 40676367864 at 2ebbe43a2c7aa691959df1901a271671c2586e73: 1116/1211 checkup outcomes, 96.98 percent executable lines. All logic tests passed; exact inventory ratchet refreshed from this hosted measurement."
+    },
+    {
+      "compilers": {
+        "clang-17-darwin": "Apple Clang 17.0.0",
+        "gcc-13-linux-ubuntu24": "ESP-IDF v6.1 GCC 13.3.0",
+        "gcc-15-linux-ubuntu26": "Ubuntu 26.04 aarch64 GCC 15.2.0",
+        "gcc-15-github-linux-ubuntu26": "GitHub Ubuntu 26 GCC 15"
+      },
+      "hosted_confirmation": "Observed in GitHub Actions build run 40666355744 at c1bb7814f76cc4b07ee4ee600844e93e3f1058c5; 96.96 percent lines, changed-header branch ratios exceed previous floors",
+      "runner": "scripts/run-mock-tests.sh --coverage",
+      "scope": "Bounded cycling transitions, partial-sweep gaps, exclusive censor causes and runtime/count bias gates; saturation/restart and MQTT snapshot controls. Changed local branch ratios exceed historical floors. Continuous unknown-RPS recovery and upward-rounded censored intervals retain the measured outcome inventory.",
+      "sources": {
+        "main/logic/checkup.hpp": "b7477a99ead97fe3afb41764204ed9b7338a4b9108988fb8113cd295d8d14dc8",
+        "main/logic/heartbeat.hpp": "10e039025fde3f80a1f3d59328a00f51f5b80327e7dadbb60d80652090c7f8d5"
+      }
+    },
+    {
       "compilers": {
         "clang-17-darwin": "Apple Clang 17.0.0",
         "gcc-13-linux-ubuntu24": "ESP-IDF v6.1 container GCC 13.3.0",
@@ -740,8 +801,8 @@
         "taken": 6
       },
       "main/logic/checkup.hpp": {
-        "outcomes": 889,
-        "taken": 815
+        "taken": 966,
+        "outcomes": 1049
       },
       "main/logic/checkup_persist.hpp": {
         "outcomes": 125,
@@ -840,8 +901,8 @@
         "taken": 22
       },
       "main/logic/heartbeat.hpp": {
-        "outcomes": 330,
-        "taken": 180
+        "taken": 203,
+        "outcomes": 372
       },
       "main/logic/heating_curve_diagnosis.hpp": {
         "outcomes": 91,
@@ -1158,8 +1219,8 @@
         "taken": 8
       },
       "main/logic/checkup.hpp": {
-        "outcomes": 1025,
-        "taken": 940
+        "taken": 1116,
+        "outcomes": 1211
       },
       "main/logic/checkup_persist.hpp": {
         "outcomes": 153,
@@ -1258,8 +1319,8 @@
         "taken": 24
       },
       "main/logic/heartbeat.hpp": {
-        "outcomes": 284,
-        "taken": 159
+        "taken": 176,
+        "outcomes": 300
       },
       "main/logic/heating_curve_diagnosis.hpp": {
         "outcomes": 109,
@@ -1322,8 +1383,8 @@
         "taken": 71
       },
       "main/logic/json_integer.hpp": {
-        "outcomes": 178,
-        "taken": 102
+        "taken": 124,
+        "outcomes": 208
       },
       "main/logic/label_override.hpp": {
         "outcomes": 16,
@@ -1576,8 +1637,8 @@
         "taken": 8
       },
       "main/logic/checkup.hpp": {
-        "outcomes": 1025,
-        "taken": 940
+        "taken": 1116,
+        "outcomes": 1211
       },
       "main/logic/checkup_persist.hpp": {
         "outcomes": 153,
@@ -1676,8 +1737,8 @@
         "taken": 24
       },
       "main/logic/heartbeat.hpp": {
-        "outcomes": 236,
-        "taken": 133
+        "taken": 135,
+        "outcomes": 236
       },
       "main/logic/heating_curve_diagnosis.hpp": {
         "outcomes": 109,
@@ -1740,8 +1801,8 @@
         "taken": 71
       },
       "main/logic/json_integer.hpp": {
-        "outcomes": 178,
-        "taken": 102
+        "taken": 124,
+        "outcomes": 208
       },
       "main/logic/label_override.hpp": {
         "outcomes": 16,
@@ -1994,8 +2055,8 @@
         "taken": 8
       },
       "main/logic/checkup.hpp": {
-        "outcomes": 1025,
-        "taken": 940
+        "taken": 1116,
+        "outcomes": 1211
       },
       "main/logic/checkup_persist.hpp": {
         "outcomes": 153,
@@ -2094,8 +2155,8 @@
         "taken": 24
       },
       "main/logic/heartbeat.hpp": {
-        "outcomes": 284,
-        "taken": 159
+        "taken": 176,
+        "outcomes": 300
       },
       "main/logic/heating_curve_diagnosis.hpp": {
         "outcomes": 109,
@@ -2158,8 +2219,8 @@
         "taken": 71
       },
       "main/logic/json_integer.hpp": {
-        "outcomes": 178,
-        "taken": 102
+        "taken": 124,
+        "outcomes": 208
       },
       "main/logic/label_override.hpp": {
         "outcomes": 16,

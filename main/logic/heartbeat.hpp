@@ -10,6 +10,7 @@
 #include "ha_device.hpp"   // device_json — one X10A HA device across values/diagnostics/crash
 #include "json.hpp"        // json_append_escaped
 #include "json_integer.hpp"
+#include "checkup.hpp"
 
 namespace daik {
 
@@ -17,6 +18,7 @@ namespace daik {
 // wifi_reconnect_count(), hp_stats(), the mqtt task's own publish counters, and the IDF heap/timer
 // APIs; nothing here touches hardware.
 struct HeartbeatFields {
+    logic::CheckupCyclingEvidence cycling;
     std::string version;
     std::string platform;
     uint64_t    uptime_ms     = 0;   // monotonic ms since boot; uptime_s + the "Ddd+HH:MM:SS.mmm"
@@ -270,6 +272,31 @@ inline std::string build_heartbeat_json(const HeartbeatFields& f) {
     json_append_integer_field(j, ",\"mqtt_quiesced\":", f.mqtt_quiesced);
     // poll_* — the X10A sweep that never ran, so nothing below was even attempted.
     json_append_integer_field(j, ",\"poll_skipped\":", f.poll_skipped);
+    // Rolling completed-run observations, not board-health verdicts. Missing/disabled source
+    // evidence stays null. Saturation is numeric like the other MQTT diagnostic flags.
+    const auto& c = f.cycling;
+    json_append_integer_field(
+        j, ",\"cycling_censored_transition_runs\":", c.cycling_censored_transition_runs,
+        c.cycling_censored_transition_runs >= 0);
+    json_append_integer_field(
+        j, ",\"cycling_censored_handover_runs\":", c.cycling_censored_handover_runs,
+        c.cycling_censored_handover_runs >= 0);
+    json_append_integer_field(
+        j, ",\"cycling_censored_unreadable_runs\":", c.cycling_censored_unreadable_runs,
+        c.cycling_censored_unreadable_runs >= 0);
+    json_append_integer_field(
+        j, ",\"cycling_censored_restart_runs\":", c.cycling_censored_restart_runs,
+        c.cycling_censored_restart_runs >= 0);
+    json_append_integer_field(j, ",\"cycling_censored_start_runs\":", c.cycling_censored_start_runs,
+                              c.cycling_censored_start_runs >= 0);
+    json_append_integer_field(j,
+                              ",\"cycling_classified_runtime_s\":", c.cycling_classified_runtime_s,
+                              c.cycling_classified_runtime_s >= 0);
+    json_append_integer_field(j, ",\"cycling_censored_runtime_s\":", c.cycling_censored_runtime_s,
+                              c.cycling_censored_runtime_s >= 0);
+    json_append_integer_field(
+        j, ",\"cycling_runtime_saturated\":", static_cast<unsigned>(c.cycling_runtime_saturated),
+        c.cycling_censored_runtime_s >= 0);
     // bus_*
     j += ",\"bus_connected\":"; j += f.bus_connected ? "1" : "0";
     j += ",\"bus_proto\":\""; j += f.bus_proto; j += "\"";

@@ -1,4 +1,4 @@
-// translation-source: 33967449acf2e4c68a9c1a1feb866a3378533feeec8e796587881b7dec62ef92
+// translation-source: 5453eeaa5ecebfac9d729776d8b40e937dbfce10d0a431843b3f3298cd22a9ff
 I18N.zh = localeValues([
   /* sys.nodata */ "无数据",
   /* sys.unreachable */ "无法访问",
@@ -198,7 +198,6 @@ I18N.zh = localeValues([
   /* check.detail.fault.past */ "当前无消息；本时段曾记录消息。消息消失不能证明原因或问题已解决。",
   /* check.detail.fault.past_unknown */ "曾记录消息；当前故障状态无法读取。",
   /* check.detail.collecting */ (a, b) => `可读信号：${a}，要求${b}。`,
-  /* check.detail.cycling_split */ "仅评估全程分类并已结束的空间供暖运行。热水、制冷和未分类运行仅供观察。",
   /* check.detail.outdoor_cycling */ " X10A 室外数据只包含近期已完成且分类一致的空间供暖循环样本，仅提供背景，不改变循环阈值或结论。",
   /* check.detail.outdoor_defrost */ " X10A 室外数据只包含除霜状态和压缩机状态可读且压缩机运行时的近期样本，仅提供背景，不改变除霜阈值或结论。",
   /* check.detail.dhw_candidate */ (a, b, c, d) => `已接受的小时窗口：${a}；当前候选：${c}/${d}。`,
@@ -223,6 +222,7 @@ I18N.zh = localeValues([
   /* check.cycling_dhw */ (a, b) => `热水 ${a} · 平均 ${b}`,
   /* check.cycling_cooling */ (n) => `制冷：排除 ${n} 个`,
   /* check.cycling_censored */ (n) => `${n} 个未分类`,
+  /* check.cycling_causes */ "过渡|重启/日志|未观察到启动",
   /* check.outdoor_one */ (source, mean) => `${source} ${mean} °C`,
   /* check.outdoor_range */ (source, min, mean) => `${source} 最低 ${min} °C · 平均 ${mean} °C`,
   /* check.min */ (m) => `${m} 分钟`,
@@ -255,7 +255,7 @@ I18N.zh = localeValues([
   /* check.detail.age_label */ "最后测量值的年龄：",
   /* check.detail.horizon_wait */ (a) => `尚未形成完整24小时窗口：还需 ${a}。`,
   /* check.detail.fault.ok */ "可读故障信号中无当前或保存的消息。",
-  /* check.detail.cycling.info */ "至少12次完整供暖平均短于10分钟：项目提示。",
+  /* check.detail.cycling.info */ "供暖平均<10分钟：项目提示。",
   /* check.detail.cycling.ok */ "完整供暖未出现项目短周期提示。",
   /* check.detail.defrost.info */ "至少3次配对除霜超过可读压缩机运行时间的15%：项目提示。",
   /* check.detail.defrost.ok */ "无项目除霜比例提示；天气和缺口未评估。",
@@ -263,14 +263,14 @@ I18N.zh = localeValues([
   /* check.detail.pressure.warn */ "记录了连续至少60秒≤1.0 bar；并非当前压力。",
   /* check.detail.pressure.ok */ "无接受的压力≤项目阈值1.0 bar。",
   /* check.detail.class_missing */ "分类不完整；不作合并周期判定。",
-  /* check.detail.heating_runs_insufficient */ "少于12次合格完整供暖；不作周期判定。",
+  /* check.detail.heating_runs_insufficient */ "合格完整供暖<12次；不作判定。",
   /* check.detail.defrost_events_insufficient */ "少于3次配对除霜；不作比例判定。",
   /* check.detail.source_stale */ "无新鲜X10A样本；当前状态未知。保留历史。",
   /* check.detail.no_paired_runtime */ "无配对可读运行时间；仅次数。",
   /* check.detail.current_label */ "当前水压：",
   /* check.detail.minimum_time_label */ "最低值记录时间：",
   /* check.detail.coverage_missing */ (a) => `缺少可读时间：${a} s。`,
-  /* check.detail.channel_coverage */ (a, b) => `${a}：可读 ${b}`,
+  /* check.detail.channel_coverage */ (a, b) => `${a}：覆盖 ${b}`,
   /* check.summary.warnings */ (n) => `${n} 项警告`,
   /* check.summary.notes */ (n) => `${n} 项提示`,
   /* check.summary.ok */ "已评估数据中无提示",
@@ -1213,7 +1213,7 @@ DESCRIPTION_I18N.zh = descriptionValues([
 MODEL_DESCRIPTION_I18N.zh = modelDescriptionValues([
   ["机组消息", "不证明原因或已解决。"], // health_fault
   ["R5T：分层水箱单点，非能量。", "项目提示≥0.8 K/h仅适用无水泵/类似取水标记窗口。无标记也可能取水；0 K/h不排除热损失。循环重叠不证明原因。"], // health_dhw_loss
-  ["压缩机启动", "≥12次完整供暖、平均<10分钟；所有完整运行中≥90%已分类。项目规则非Daikin限值；排除热水、制冷、未分类。"], // health_cycling
+  ["压缩机启动", "项目提示：≥12次供暖、平均<10分钟；所有完整运行中≥90%已分类（排除已确认切换），且供暖/不确定时间覆盖≥90%。非Daikin限值。"], // health_cycling
   ["除霜", "≥3次配对、>15%压缩机运行时间，仅计压缩机及除霜状态均可读时段。项目规则非Daikin限值；缺少湿度及整个盘管温度。"], // health_defrost
   ["水压", "共同项目规则≤1.0 bar；连续观察60秒后警告。非通用，按该机型手册。"], // health_pressure
   ["水泵60秒后流量", "限值需同机型/模式/条件；非额定，也不证明不足。"], // health_flow

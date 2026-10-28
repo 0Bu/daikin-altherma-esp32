@@ -355,7 +355,7 @@ assert.match(body(checkup, "void expire_restored_locked()"),
   /if \(s_state\.have_bucket && s_state\.last_us >= 0 && logic::checkup_restored_expired\(logic::checkup_live_expiry_us\(pending_start_us\), now_us\)\)/,
   "the open hour needs a valid bucket and the same start-based expiry during a producer stall");
 assert.match(body(checkup, "void expire_restored_locked()"),
-  /P\(\)\.ring\.pending = logic::CheckupBucket\{\};[\s\S]*changed = true; \} if \(changed\) persist_seal\(\);/,
+  /P\(\)\.ring\.pending = logic::CheckupBucket\{\};[\s\S]*changed = true; \} if \(changed\) checkup_persist_seal\(\);/,
   "pending-only expiry must reseal even when no completed slot expired");
 const emptyCallback = /checkup_record\(nullptr, 0, false, false, logic::CheckupCoverage\{\}, generation, false\);/g;
 assert.equal(count(task, emptyCallback), 3,
