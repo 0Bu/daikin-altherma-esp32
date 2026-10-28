@@ -3,6 +3,20 @@
     {
       "compilers": {
         "clang-17-darwin": "Apple Clang 17.0.0",
+        "gcc-13-linux-ubuntu24": "ESP-IDF v6.1 GCC 13.3.0",
+        "gcc-15-linux-ubuntu26": "Ubuntu 26.04 aarch64 GCC 15.2.0"
+      },
+      "hosted_confirmation": "GitHub GCC 15 confirmation pending; hosted inventory not inferred from local inventory",
+      "runner": "scripts/run-mock-tests.sh --coverage",
+      "scope": "Bounded cycling transitions, partial-sweep gaps, exclusive censor causes and runtime/count bias gates; saturation/restart and MQTT snapshot controls. Changed local branch ratios exceed historical floors. Continuous unknown-RPS recovery and upward-rounded censored intervals retain the measured outcome inventory.",
+      "sources": {
+        "main/logic/checkup.hpp": "b7477a99ead97fe3afb41764204ed9b7338a4b9108988fb8113cd295d8d14dc8",
+        "main/logic/heartbeat.hpp": "10e039025fde3f80a1f3d59328a00f51f5b80327e7dadbb60d80652090c7f8d5"
+      }
+    },
+    {
+      "compilers": {
+        "clang-17-darwin": "Apple Clang 17.0.0",
         "gcc-13-linux-ubuntu24": "ESP-IDF v6.1 container GCC 13.3.0",
         "gcc-15-linux-ubuntu26": "Ubuntu 26.04 aarch64 GCC 15"
       },
@@ -740,8 +754,8 @@
         "taken": 6
       },
       "main/logic/checkup.hpp": {
-        "outcomes": 889,
-        "taken": 815
+        "taken": 943,
+        "outcomes": 1027
       },
       "main/logic/checkup_persist.hpp": {
         "outcomes": 125,
@@ -840,8 +854,8 @@
         "taken": 22
       },
       "main/logic/heartbeat.hpp": {
-        "outcomes": 330,
-        "taken": 180
+        "taken": 203,
+        "outcomes": 372
       },
       "main/logic/heating_curve_diagnosis.hpp": {
         "outcomes": 91,
@@ -1158,8 +1172,8 @@
         "taken": 8
       },
       "main/logic/checkup.hpp": {
-        "outcomes": 1025,
-        "taken": 940
+        "taken": 1083,
+        "outcomes": 1179
       },
       "main/logic/checkup_persist.hpp": {
         "outcomes": 153,
@@ -1258,8 +1272,8 @@
         "taken": 24
       },
       "main/logic/heartbeat.hpp": {
-        "outcomes": 284,
-        "taken": 159
+        "taken": 176,
+        "outcomes": 300
       },
       "main/logic/heating_curve_diagnosis.hpp": {
         "outcomes": 109,
@@ -1322,8 +1336,8 @@
         "taken": 71
       },
       "main/logic/json_integer.hpp": {
-        "outcomes": 178,
-        "taken": 102
+        "taken": 124,
+        "outcomes": 208
       },
       "main/logic/label_override.hpp": {
         "outcomes": 16,
@@ -1994,8 +2008,8 @@
         "taken": 8
       },
       "main/logic/checkup.hpp": {
-        "outcomes": 1025,
-        "taken": 940
+        "taken": 1083,
+        "outcomes": 1179
       },
       "main/logic/checkup_persist.hpp": {
         "outcomes": 153,
@@ -2094,8 +2108,8 @@
         "taken": 24
       },
       "main/logic/heartbeat.hpp": {
-        "outcomes": 284,
-        "taken": 159
+        "taken": 176,
+        "outcomes": 300
       },
       "main/logic/heating_curve_diagnosis.hpp": {
         "outcomes": 109,
@@ -2158,8 +2172,8 @@
         "taken": 71
       },
       "main/logic/json_integer.hpp": {
-        "outcomes": 178,
-        "taken": 102
+        "taken": 124,
+        "outcomes": 208
       },
       "main/logic/label_override.hpp": {
         "outcomes": 16,

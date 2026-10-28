@@ -457,8 +457,10 @@ use `daik::SemGuard` for unwind-safe ownership. MQTT/Syslog event-side errors us
 pointers; materialize strings outside their status lock. A task catch cannot rescue a stranded mutex.
 
 Diagnosis bucket storage is 1,920 bytes for 23 completed hours and one pending hour. Completed-run
-totals and outdoor sample counts use 32 bits; pressure minima add an observed-at timestamp. The
-23-record static restoration scratch occupies 2,944 bytes, avoiding a poll-task stack array.
+totals and outdoor sample counts use 32 bits; fifteen hourly clocks use 12-bit fields clamped at
+3,600 seconds. This retains the 80-byte bucket while storing exclusive censoring causes and a
+saturating 16-bit unsafe-runtime bound. Saturation blocks assessment. Pressure minima keep the
+earliest dated tie. The 23-record static restoration scratch occupies 3,128 bytes, avoiding a poll-task stack array.
 The history owner reuses its existing 4 KiB sector scratch. These geometry figures do not replace
 the ESP32-S3 ELF's full static-memory and call-path budgets.
 

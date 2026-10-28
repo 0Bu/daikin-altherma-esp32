@@ -287,7 +287,7 @@ INTEGER_LENGTH_SYMBOL = (
 INTEGER_DIGITS_SYMBOL = (
     "void std::__detail::__to_chars_10_impl<unsigned long long>(char*, unsigned int, unsigned long long)")
 INTEGER_BUILDERS = {
-    "daik::build_heartbeat_json[abi:cxx11](daik::HeartbeatFields const&)": 25,
+    "daik::build_heartbeat_json[abi:cxx11](daik::HeartbeatFields const&)": 33,
     "daik::build_heating_curve_mqtt_json[abi:cxx11](daik::HeatingCurveMqttFields const&)": 21,
 }
 STATUS_HEALTH_NUMBER_SYMBOL = (
@@ -678,11 +678,11 @@ def validate_status_numeric_calls(disassembly: str, budgets: dict[str, Any]) -> 
     serializer = re.compile(budgets["symbols"]["status_serializer"]["pattern"])
     direct = re.compile(r"^\s*[0-9a-f]+:\s+[0-9a-f]+\s+call8\s+[0-9a-f]+\s+<"
                         + re.escape(STATUS_HEALTH_NUMBER_SYMBOL) + r">\s*$")
-    # The compiler merges two branch tails from the 30 source invocations into 28 calls.
-    if (len(references) != 28
+    # The compiler merges two branch tails from the 37 source invocations into 35 calls.
+    if (len(references) != 35
             or any(not serializer.search(caller) or not direct.match(line)
                    for caller, line in references)):
-        raise BudgetError("diagnosis numeric calls: 28 direct serializer calls require review")
+        raise BudgetError("diagnosis numeric calls: 35 direct serializer calls require review")
 
 
 def parse_frames(disassembly: str, budgets: dict[str, Any] | None = None) -> dict[str, int]:
@@ -813,7 +813,7 @@ def validate_status_diagnosis_paths(budgets: dict[str, Any], sources: dict[str, 
                              code["main/mcp_server.cpp"])
             or re.search(r"\b(?:checkup_report|http_send_status_json)\s*\(", code["main/hp_poll.cpp"])):
         raise BudgetError("diagnosis status source: direct/MCP-only serializer caller contract changed")
-    if (len(re.findall(r"\bnum\s*\(", status)) != 30
+    if (len(re.findall(r"\bnum\s*\(", status)) != 37
             or not re.search(r"auto num = \[&j\]\(const char\* name, int v\) "
                              r"__attribute__\(\(noinline\)\)\s*\{", status)
             or not re.search(r"if \(v < 0\)\s*\{[^{}]*return;\s*\}\s*"
@@ -1150,7 +1150,7 @@ json_append_integer_field(std::string& out, std::string_view prefix, Integer val
             or len(re.findall(r"\bjson_append_integer_field_impl\s*\(", source)) != 2
             or len(re.findall(r"\bjson_append_integer_field\s*\(", source)) != 1):
         raise BudgetError("integer formatter source: fixed uint64/20-byte/inline magnitude contract changed")
-    expected = {"main/logic/heartbeat.hpp": 25, "main/logic/heating_curve_mqtt.hpp": 21}
+    expected = {"main/logic/heartbeat.hpp": 33, "main/logic/heating_curve_mqtt.hpp": 21}
     if (set(callers) != set(expected)
             or any(len(re.findall(r"\bjson_append_integer_field\s*\(", callers[path])) != count
                    for path, count in expected.items())):
@@ -2300,6 +2300,12 @@ def self_test() -> None:
      'daik::hp_format(daik::ValueDef const&, unsigned char const*, int, int, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >&, daik::ValueDef const*, unsigned int, daik::SaturationWitness)': 64,
      'daik::history_record(daik::CachedValue const*, unsigned int, unsigned long)': 64,
      'daik::checkup_report()': 64,
+     'daik::checkup_cycling_evidence()': 64,
+     'daik::expire_restored_locked()': 48,
+     'daik::(anonymous namespace)::persist_seal()': 32,
+     'daik::(anonymous namespace)::persist_crc()': 32,
+     'daik::logic::checkup_aggregate(daik::logic::CheckupRing const&)': 32,
+     '_ZZN4daik5logic17checkup_aggregateERKNS0_11CheckupRingEENKUlRKNS0_13CheckupBucketEE_clES6_$isra$0': 64,
      STATUS_HEALTH_NUMBER_SYMBOL: 32,
      STATUS_UNSIGNED_NUMBER_SYMBOL: 64,
      'esp_restart': 32,
@@ -2839,7 +2845,7 @@ def self_test() -> None:
 229: fff7a5 call8 200 <{double_body}>
 """
     number_calls = "".join(f"{0x3003 + offset:x}: fff7a5 call8 3000 <{STATUS_HEALTH_NUMBER_SYMBOL}>\n"
-                           for offset in range(28))
+                           for offset in range(35))
     fixture = fixture.replace("   3: 004136          entry a1, 4848\n",
                               "   3: 004136          entry a1, 4848\n" + number_calls)
     budgets = load_budgets(DEFAULT_BUDGETS)

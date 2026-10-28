@@ -132,7 +132,7 @@ int64_t                s_dhw_scope_us      = -1;
 uint8_t                s_live_commit_count = 0; // completed in THIS monotonic clock, max 23
 
 // One-shot journal-reconstruction scratch. Static for the poll task's measured 8 KiB stack: 23
-// diagnostic records are roughly 2 KiB and must never become an automatic array on that task.
+// diagnostic records occupy 3,128 bytes and must never become an automatic array on that task.
 // Unused scratch slots carry no evidence. Each admitted slot is fully assigned below before any
 // read; zero initial bytes keep this private buffer in .bss instead of duplicating it in flash.
 std::array<CheckupFlashRecord, logic::CHECKUP_COMPLETED_BUCKETS> s_restore_live = []() constexpr {
@@ -148,6 +148,7 @@ std::array<CheckupFlashRecord, logic::CHECKUP_COMPLETED_BUCKETS> s_restore_live 
     }
     return records;
 }();
+static_assert(sizeof(s_restore_live) == 3128, "diagnosis restore scratch budget changed");
 
 // The ONE unwind-safe mutex guard, shared by every file in this firmware (main/rtos_guard.hpp).
 // This used to be a private copy here; nine of them had drifted into two different shapes.
@@ -674,6 +675,17 @@ void expire_restored_locked() {
         changed          = true;
     }
     if (changed) persist_seal();
+}
+
+logic::CheckupCyclingEvidence checkup_cycling_evidence() {
+    if (!s_diagnostics_enabled.load(std::memory_order_acquire) || !s_mtx)
+        return logic::CheckupCyclingEvidence{};
+    Lock lk(s_mtx);
+    if (!lk.acquired() || s_reset_requested.load()) return logic::CheckupCyclingEvidence{};
+    expire_restored_locked();
+    const auto window = logic::checkup_aggregate(P().ring);
+    return logic::checkup_cycling_evidence(window, s_cov.valve && s_cov.mode &&
+                                                       window.class_observed_s > 0);
 }
 
 logic::CheckupReport checkup_report() {

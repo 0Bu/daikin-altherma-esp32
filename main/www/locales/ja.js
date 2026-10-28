@@ -1,4 +1,4 @@
-// translation-source: 33967449acf2e4c68a9c1a1feb866a3378533feeec8e796587881b7dec62ef92
+// translation-source: 5453eeaa5ecebfac9d729776d8b40e937dbfce10d0a431843b3f3298cd22a9ff
 I18N.ja = localeValues([
   /* sys.nodata */ "データなし",
   /* sys.unreachable */ "接続不可",
@@ -198,7 +198,6 @@ I18N.ja = localeValues([
   /* check.detail.fault.past */ "現在の通知はありませんが、この期間に記録されました。消えたことは原因や解決の証明ではありません。",
   /* check.detail.fault.past_unknown */ "通知が記録されました。現在の異常状態は読めません。",
   /* check.detail.collecting */ (a, b) => `読取可能な信号：${a}、必要量${b}。`,
-  /* check.detail.cycling_split */ "全期間で分類され完了した暖房運転だけを評価します。給湯、冷房、未分類運転は観測のみです。",
   /* check.detail.outdoor_cycling */ " X10A室外値は、完了し一貫して室内暖房と分類された運転の新鮮な試料だけです。参考情報で、しきい値や判定は変えません。",
   /* check.detail.outdoor_defrost */ " X10A室外値は、霜取り・圧縮機状態を読めて圧縮機が運転中の新鮮な試料だけです。参考情報で、しきい値や判定は変えません。",
   /* check.detail.dhw_candidate */ (a, b, c, d) => `採用した時間窓：${a}。現在の候補：${c}/${d}。`,
@@ -223,6 +222,7 @@ I18N.ja = localeValues([
   /* check.cycling_dhw */ (a, b) => `給湯 ${a} · 平均 ${b}`,
   /* check.cycling_cooling */ (n) => `冷房${n}件を除外`,
   /* check.cycling_censored */ (n) => `未分類${n}件`,
+  /* check.cycling_causes */ "遷移|再起動/記録|開始未観測",
   /* check.outdoor_one */ (source, mean) => `${source} ${mean} °C`,
   /* check.outdoor_range */ (source, min, mean) => `${source} 最低 ${min} °C · 平均 ${mean} °C`,
   /* check.min */ (m) => `${m}分`,
@@ -255,7 +255,7 @@ I18N.ja = localeValues([
   /* check.detail.age_label */ "最終測定からの時間：",
   /* check.detail.horizon_wait */ (a) => `完全な24時間窓にはまだ ${a} 必要です。`,
   /* check.detail.fault.ok */ "読めた異常信号に現在または保存通知はありません。",
-  /* check.detail.cycling.info */ "完了暖房12回以上の平均が10分未満：プロジェクト参考値。",
+  /* check.detail.cycling.info */ "暖房平均<10分：プロジェクト参考値。",
   /* check.detail.cycling.ok */ "完了暖房に短周期の参考所見なし。",
   /* check.detail.defrost.info */ "対応除霜3回以上が読めた圧縮機運転時間の15%超：プロジェクト参考値。",
   /* check.detail.defrost.ok */ "除霜割合の参考所見なし。天候と欠測は未評価。",
@@ -263,14 +263,14 @@ I18N.ja = localeValues([
   /* check.detail.pressure.warn */ "1.0 bar以下の連続60秒以上を記録。現在の圧力ではありません。",
   /* check.detail.pressure.ok */ "プロジェクト基準1.0 bar以下の採用圧力なし。",
   /* check.detail.class_missing */ "分類不完全。全体の周期判定なし。",
-  /* check.detail.heating_runs_insufficient */ "適合する完了暖房12回未満。周期判定なし。",
+  /* check.detail.heating_runs_insufficient */ "適合する完了暖房<12回。判定なし。",
   /* check.detail.defrost_events_insufficient */ "対応除霜3回未満。割合判定なし。",
   /* check.detail.source_stale */ "新鮮なX10A試料なし。現在状態不明。過去記録は保持。",
   /* check.detail.no_paired_runtime */ "対応する読取可能時間なし。回数のみ。",
   /* check.detail.current_label */ "現在の水圧：",
   /* check.detail.minimum_time_label */ "最低値の記録時刻：",
   /* check.detail.coverage_missing */ (a) => `不足する読取可能時間：${a} s。`,
-  /* check.detail.channel_coverage */ (a, b) => `${a}：読取可能 ${b}`,
+  /* check.detail.channel_coverage */ (a, b) => `${a}：網羅 ${b}`,
   /* check.summary.warnings */ (n) => `警告 ${n} 件`,
   /* check.summary.notes */ (n) => `参考所見 ${n} 件`,
   /* check.summary.ok */ "評価データに参考所見なし",
@@ -1070,7 +1070,7 @@ DESCRIPTION_I18N.ja = descriptionValues([
 MODEL_DESCRIPTION_I18N.ja = modelDescriptionValues([
   ["機器の通知", "原因や解決の証明ではありません。"], // health_fault
   ["R5T：成層タンク1点。", "エネルギー実測でない。内部基準≥0.8 K/hはポンプ・取湯に似た低下の印がない窓のみ。印なしでも取湯はあり得ます。0 K/hでも熱損失は否定できません。循環の重複は原因を証明しません。"], // health_dhw_loss
-  ["圧縮機起動", "暖房完了≥12回、平均<10分；全完了運転の≥90%が分類済み。内部基準、Daikin限界ではありません。給湯・冷房・未分類は除外。"], // health_cycling
+  ["圧縮機起動", "内部基準：暖房≥12回、平均<10分。全完了運転の≥90%が分類済み（確認済み切替を除外）、暖房/不確実時間の網羅率≥90%。Daikin限界ではありません。"], // health_cycling
   ["除霜", "対応除霜≥3回、圧縮機と除霜の状態が両方読める圧縮機運転時間の>15%。内部基準、Daikin限界ではありません。湿度とコイル全体の温度なし。"], // health_defrost
   ["水圧", "共通内部基準1.0 bar以下、連続観測60秒で警告。全機種共通ではなく対象説明書が基準。"], // health_pressure
   ["ポンプ60秒後の流量", "限界は同機種・モード・条件が必要。設計値や不足の証明ではありません。"], // health_flow

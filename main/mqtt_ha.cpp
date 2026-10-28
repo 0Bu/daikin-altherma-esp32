@@ -1897,6 +1897,7 @@ static __attribute__((noinline)) std::string build_heartbeat_payload() {
     f.modbus_rx        = mbs.rx_ok;
     f.modbus_fails     = mbs.rx_fail;
     f.modbus_stack_min_free_bytes = stack_watch_min_free_bytes(StackWatch::Modbus);
+    f.cycling                     = checkup_cycling_evidence();
     return build_heartbeat_json(f);
 }
 

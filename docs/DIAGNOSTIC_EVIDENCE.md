@@ -1,6 +1,6 @@
 # Evidence and limits of the plant diagnostics
 
-<!-- diagnostic-evidence-contract: 50e5e9091302632e41b4d0115e807ff26d59d56652f88ab3d11fe258c554d4c1 -->
+<!-- diagnostic-evidence-contract: efc67c648fe123df1bdab75f1baed9dc7213cb98e2e34d60372892b224435f77 -->
 
 For every row in the **Plant diagnostics · 24 h** card, this page answers four questions:
 
@@ -181,14 +181,25 @@ than about six minutes reduced efficiency in the tested systems, while heat emis
 control, and outside temperature also affected the result ([R1], summary and sections 1–2). This
 supports the relevance of very short runs but does not provide a universal Daikin limit.
 
-**Firmware rule:** Starts and continuously witnessed completed runs are retained separately.
-Readable unchanged valve/mode inputs classify completed runs as space heating, DHW or cooling;
-mixed or gapped runs are censored. A sweep that read no X10A row at all (a firmware pause or a
-wholly silent bus sweep) inside a run is bounded blind time and censors only beyond 15 seconds; a
-start hidden by an unreadable sample opens a censored run. The classified share uses the larger of
-completed runs and starts minus one, so completions a restart lost keep the result an observation.
-Only at least 12 completed space-heating runs and at least 90% of all completed runs classified can
-support the heating assessment. A mean below ten minutes then
+**Firmware rule:** Starts and completed runs are retained separately. Valve/mode inputs classify
+pure space heating, DHW or cooling. Missing class or RPS readings may bridge at most 15 seconds
+only with matching known-running classes on both sides; that bridge does not add readable coverage.
+A changed recovered class, unknown stop edge or longer gap censors the run. A pure DHW run may
+hold one final valve-to-heating transition for at most 30 seconds, accepted only at a known OFF
+edge. A return to DHW or unreadable tail is not a pure charge. There is no start-edge allowance.
+Positively observed uninterrupted heating/DHW handovers remain censored with their own cause;
+their space phases never become heating runs. Other causes distinguish unaccepted transitions,
+unreadable class/RPS, journal/window boundaries and unwitnessed starts.
+
+The count population is the larger of completed runs and starts minus one, less proven handovers.
+At least 90% must be classified. At least 90% of completed heating runtime plus unsafe censored
+elapsed runtime must also be completed pure heating runtime; DHW runtime cannot mask missing long
+heating runs. Censored elapsed time includes blind intervals and excludes only proven handovers.
+Unwitnessed starts and journal/window boundaries have unknown full durations and always block
+assessment; their runtime is only an observed lower bound. Saturated runtime/counters or inconsistent
+cause counts also block the assessment. These guards detect
+some lost journal completions but cannot establish complete persistence. Only at least 12 completed
+space-heating runs with both population gates satisfied can support an assessment. A mean below ten minutes then
 produces **NOTE** immediately. An absence-of-short-run assessment additionally requires a full
 24-hour span and at least CHECKUP_REQUIRED_S of paired classification time.
 
@@ -204,8 +215,13 @@ completed heating runs, from samples whose predecessor was also running, and cha
 project heuristics, not limits copied from R1 or specified by Daikin. R1 studied different,
 non-modulating units and supports only the general relevance of short runs and system hydraulics.
 The page-0x20 mapping and positive-compressor freshness pairing are project protocol evidence.
-The 15-second all-blind tolerance and the larger-of-completed-runs-and-starts-minus-one population
-are project rules.
+The 15-second gap allowance, 30-second DHW tail allowance, handover exclusion and both 90% gates
+are project rules. Reference-installation observations dated 22–28 October 2026 contain valve-return
+tails of 6–22 seconds; the 30-second bound adds sampling margin. This is field observation, not
+manufacturer sequencing evidence. The anonymized synthetic equivalent is retained in
+[the population replay](../test/checkup_population_fixture.hpp). Tail lengths on other models are unverified.
+The unchanged R1 publication and report were reopened on 28 October 2026; they do not establish
+these transition or population rules.
 
 **Not established:** The note identifies neither oversizing nor incorrect hydraulic balancing.
 The observed run population and its outdoor context do not establish building load, delivered heat

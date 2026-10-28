@@ -239,7 +239,7 @@
     },
     "mqtt_heartbeat_payload": {
       "pattern": "^daik::build_heartbeat_json\\[abi:cxx11\\]\\(",
-      "max_bytes": 368
+      "max_bytes": 432
     },
     "mqtt_crash": {
       "pattern": "^(?:daik::(?:\\(anonymous namespace\\)::)?publish_crash\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?13publish_crash[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
@@ -275,7 +275,7 @@
     },
     "checkup_report": {
       "pattern": "^(?:daik::(?:\\(anonymous namespace\\)::)?checkup_report\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?14checkup_report[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
-      "max_bytes": 720
+      "max_bytes": 784
     },
     "history_journal": {
       "pattern": "^(?:daik::(?:\\(anonymous namespace\\)::)?history_flash_service_journal\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?29history_flash_service_journal[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
@@ -619,7 +619,7 @@
     },
     "mqtt_heartbeat_builder": {
       "pattern": "^(?:daik::build_heartbeat_payload(?:\\[abi:cxx11\\])?\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daikL23build_heartbeat_payload[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
-      "max_bytes": 768
+      "max_bytes": 832
     },
     "mqtt_curve_builder": {
       "pattern": "^(?:daik::build_heating_curve_payload(?:\\[abi:cxx11\\])?\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daikL27build_heating_curve_payload[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
@@ -2184,6 +2184,30 @@
     "wifi_forget": {
       "pattern": "^daik::wifi_forget_persisted_config\\(",
       "max_bytes": 192
+    },
+    "cycling_evidence": {
+      "pattern": "^daik::checkup_cycling_evidence\\(",
+      "max_bytes": 224
+    },
+    "cycling_aggregate": {
+      "pattern": "^daik::logic::checkup_aggregate\\(",
+      "max_bytes": 32
+    },
+    "cycling_fold": {
+      "pattern": "^_ZZN4daik5logic17checkup_aggregate.*_cl.*",
+      "max_bytes": 64
+    },
+    "cycling_expire": {
+      "pattern": "^daik::expire_restored_locked\\(",
+      "max_bytes": 48
+    },
+    "cycling_seal": {
+      "pattern": "^daik::\\(anonymous namespace\\)::persist_seal\\(",
+      "max_bytes": 32
+    },
+    "cycling_crc": {
+      "pattern": "^daik::\\(anonymous namespace\\)::persist_crc\\(",
+      "max_bytes": 32
     }
   },
   "paths": {
@@ -5738,6 +5762,31 @@
       "multipliers": {},
       "base_bytes": 1536,
       "max_bytes": 2048
+    },
+    "mqtt_cycling_evidence": {
+      "symbols": [
+        "mqtt_task",
+        "mqtt_heartbeat_builder",
+        "cycling_evidence",
+        "cycling_aggregate",
+        "cycling_fold"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "mqtt_cycling_expire": {
+      "symbols": [
+        "mqtt_task",
+        "mqtt_heartbeat_builder",
+        "cycling_evidence",
+        "cycling_expire",
+        "cycling_seal",
+        "cycling_crc"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
     }
   },
   "tasks": {
@@ -5881,7 +5930,9 @@
         "mqtt_retirement_discovery_load_read",
         "mqtt_retirement_discovery_load_close",
         "mqtt_discovery_owner_subscribe_tls",
-        "mqtt_discovery_owner_subscribe_callback"
+        "mqtt_discovery_owner_subscribe_callback",
+        "mqtt_cycling_evidence",
+        "mqtt_cycling_expire"
       ]
     },
     "poll": {

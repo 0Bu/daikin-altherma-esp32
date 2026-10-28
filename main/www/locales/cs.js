@@ -1,4 +1,4 @@
-// translation-source: 33967449acf2e4c68a9c1a1feb866a3378533feeec8e796587881b7dec62ef92
+// translation-source: 5453eeaa5ecebfac9d729776d8b40e937dbfce10d0a431843b3f3298cd22a9ff
 I18N.cs = localeValues([
   /* sys.nodata */ "Žádná data",
   /* sys.unreachable */ "Nedostupné",
@@ -198,7 +198,6 @@ I18N.cs = localeValues([
   /* check.detail.fault.past */ "Nyní není hlášení aktivní; v tomto období bylo zaznamenáno. Zmizení neprokazuje příčinu ani odstranění problému.",
   /* check.detail.fault.past_unknown */ "Bylo zaznamenáno hlášení; aktuální stav poruchy nelze přečíst.",
   /* check.detail.collecting */ (a, b) => `Čitelné signály: ${a} z požadovaných ${b}.`,
-  /* check.detail.cycling_split */ " Hodnotí se jen dokončené běhy vytápění průběžně klasifikované po celou dobu. TUV, chlazení a neklasifikované běhy zůstávají pozorováním.",
   /* check.detail.outdoor_cycling */ " Venkovní hodnoty X10A obsahují jen čerstvé vzorky z dokončených a konzistentně zařazených běhů vytápění prostoru. Slouží jako kontext a nemění práh ani výsledek hodnocení cyklování.",
   /* check.detail.outdoor_defrost */ " Venkovní hodnoty X10A obsahují jen čerstvé vzorky, kdy byly čitelné stav odmrazování i stav kompresoru a kompresor běžel. Slouží jako kontext a nemění práh ani výsledek hodnocení odmrazování.",
   /* check.detail.dhw_candidate */ (a, b, c, d) => `Přijatá hodinová okna: ${a}; aktuální kandidát: ${c} z ${d}.`,
@@ -223,6 +222,7 @@ I18N.cs = localeValues([
   /* check.cycling_dhw */ (a, b) => `TUV ${a} · průměr ${b}`,
   /* check.cycling_cooling */ (n) => `chlazení ${n} vyloučeno`,
   /* check.cycling_censored */ (n) => `${n} ${n === 1 ? "nezařazený" : n >= 2 && n <= 4 ? "nezařazené" : "nezařazených"}`,
+  /* check.cycling_causes */ "přechod|restart/žurnál|nepozorovaný start",
   /* check.outdoor_one */ (source, mean) => `${source} ${mean} °C`,
   /* check.outdoor_range */ (source, min, mean) => `${source} min. ${min} °C · průměr ${mean} °C`,
   /* check.min */ (m) => `${m} min`,
@@ -255,7 +255,7 @@ I18N.cs = localeValues([
   /* check.detail.age_label */ "Stáří posledního měření:",
   /* check.detail.horizon_wait */ (a) => `Úplné 24hodinové okno ještě chybí: zbývá ${a}.`,
   /* check.detail.fault.ok */ "Žádné aktuální ani uložené hlášení v čitelných signálech poruch.",
-  /* check.detail.cycling.info */ "≥12 dokončených běhů vytápění s průměrem <10 min: upozornění projektu.",
+  /* check.detail.cycling.info */ "Průměr vytápění <10 min: upozornění projektu.",
   /* check.detail.cycling.ok */ "Žádné upozornění na krátké dokončené běhy vytápění.",
   /* check.detail.defrost.info */ "≥3 spárovaná odmrazení přesahují 15 % čitelné doby kompresoru: upozornění projektu.",
   /* check.detail.defrost.ok */ "Žádné upozornění podílu; počasí a mezery nehodnoceny.",
@@ -263,14 +263,14 @@ I18N.cs = localeValues([
   /* check.detail.pressure.warn */ "Zaznamenáno souvislých ≥60 s ≤1,0 bar; ne aktuální tlak.",
   /* check.detail.pressure.ok */ "Žádný přijatý tlak ≤1,0 bar, práh projektu.",
   /* check.detail.class_missing */ "Neúplná klasifikace; žádný souhrnný verdikt cyklování.",
-  /* check.detail.heating_runs_insufficient */ "Méně než 12 vhodných dokončených běhů vytápění; bez verdiktu.",
+  /* check.detail.heating_runs_insufficient */ "<12 vhodných dokončených běhů vytápění; bez verdiktu.",
   /* check.detail.defrost_events_insufficient */ "Méně než tři spárovaná odmrazení; bez verdiktu podílu.",
   /* check.detail.source_stale */ "Žádný čerstvý vzorek X10A; aktuální stav neznámý. Historie zachována.",
   /* check.detail.no_paired_runtime */ "Žádná spárovaná čitelná doba; pouze počet.",
   /* check.detail.current_label */ "Aktuální tlak vody:",
   /* check.detail.minimum_time_label */ "Minimum zaznamenáno:",
   /* check.detail.coverage_missing */ (a) => `Chybějící čitelná doba: ${a} s.`,
-  /* check.detail.channel_coverage */ (a, b) => `${a}: čitelné ${b}`,
+  /* check.detail.channel_coverage */ (a, b) => `${a}: pokrytí ${b}`,
   /* check.summary.warnings */ (n) => `${n} ${n === 1 ? "varování" : "varování"}`,
   /* check.summary.notes */ (n) => `${n} ${n === 1 ? "upozornění" : "upozornění"}`,
   /* check.summary.ok */ "Bez upozornění v hodnocených datech",
@@ -1184,7 +1184,7 @@ DESCRIPTION_I18N.cs = descriptionValues([
 MODEL_DESCRIPTION_I18N.cs = modelDescriptionValues([
   ["Hlášení čerpadla", "neprokazují příčinu ani opravu."], // health_fault
   ["R5T: bod vrstveného zásobníku, ne energie.", "Interní práh ≥0,8 K/h bez značek čerpadla/odběru. Odběr možný i bez značek; 0 K/h nevylučuje ztráty. Cirkulace neprokazuje příčinu."], // health_dhw_loss
-  ["Starty kompresoru", "≥12 úplných běhů vytápění, průměr <10 min; klasifikováno ≥90% všech dokončených běhů. Interní pravidlo, ne Daikin; TUV, chlazení a neklasifikované vyloučeny."], // health_cycling
+  ["Starty kompresoru", "Interní pravidlo: ≥12 běhů vytápění, průměr <10 min; ≥90% všech dokončených běhů klasifikováno kromě potvrzených předání a ≥90% pokrytí doby vytápění/nejisté doby. Nejde o mez Daikin."], // health_cycling
   ["Odmrazení", "≥3 spárovaná, >15% doby chodu kompresoru při čitelném stavu kompresoru i odmrazení. Interní pravidlo, ne Daikin; chybí vlhkost a teplota celého výměníku."], // health_defrost
   ["Tlak", "společné interní pravidlo ≤1,0 bar; 60 s souvislého pozorování dává varování. Ne univerzální; platí návod modelu."], // health_pressure
   ["Průtok po 60 s čerpadla", "Mez vyžaduje stejný model/režim/podmínky; ne jmenovitý ani důkaz malého průtoku."], // health_flow
