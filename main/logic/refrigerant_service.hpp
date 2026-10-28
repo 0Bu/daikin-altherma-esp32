@@ -145,8 +145,9 @@ inline void refrigerant_service_cover_row(RefrigerantServiceCoverage& c, unsigne
     }
     if (reg == 0x20 && off == 4 && conv == 105) c.discharge = true;
     if (reg == 0x20 && off == 6 && conv == 105) c.suction = true;
-    // Four geothermal profiles carry Leaving brine temp.(R6T) at this coordinate: a water-side
-    // brine reading must not complete the refrigerant temperature context (availability.hpp).
+    // Four geothermal profiles carry Leaving brine temp.(R6T) at this coordinate: a brine-loop
+    // reading must not complete the refrigerant temperature context. A substring is enough here
+    // because the catalog test pins every spelling at this coordinate in both directions.
     if (reg == 0x20 && off == 10 && conv == 105 && lwt_ci_contains(label, "liquid"))
         c.liquid = true;
     if (reg == 0x30 && off == 3 && conv == 151) c.eev_command = true;

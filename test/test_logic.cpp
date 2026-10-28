@@ -20063,8 +20063,8 @@ static void test_refrigerant_service() {
         }
     }
     CHECK(hydronic_profiles > 0 && outdoor_profiles > 0 && unidentified_outdoor > 0);
-    // Publishable rows only, so the counts sit below the availability ledger's 39 + 4.
-    CHECK(liquid_rows > 0 && brine_rows > 0);
+    // The same reach as the availability ledger: 39 liquid spellings and 4 geothermal brine rows.
+    CHECK(liquid_rows == 39 && brine_rows == 4);
     // A detectable profile that carries BOTH structural rows reads only the hydronic one.
     const auto dual_view = def::resolved(def::lookup("altherma_ebla_edla_d_series_4_8kw_monobloc"));
     RefrigerantServiceCoverage dual;

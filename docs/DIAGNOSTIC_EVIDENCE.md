@@ -1,6 +1,6 @@
 # Evidence and limits of the plant diagnostics
 
-<!-- diagnostic-evidence-contract: d23d399195022f79c5bc19fc4f8c606b4b1f553c65932456f96ef58839444f84 -->
+<!-- diagnostic-evidence-contract: d26cc4651a0a39b7c33961cf8c767ae531d85b89ab5eb5737af0b611910b4efa -->
 
 For every row in the **Plant diagnostics · 24 h** card, this page answers four questions:
 
@@ -89,8 +89,8 @@ generation change resets continuity and may accept the current qualifying sample
 of a new zero-duration window. Optional suction/liquid temperature, both pressure sides, or outdoor
 context missing once latches the window to `limited`; lacking the profile-level full special-phase
 set makes every otherwise qualifying window `limited`. The liquid input needs a liquid label at
-0x20/10: the geothermal Leaving brine temp.(R6T) row at that coordinate is water-side context, so
-those profiles stay `limited` for temperatures.
+0x20/10: the geothermal Leaving brine temp.(R6T) row there is a brine-loop temperature, not
+refrigerant, so a qualifying window on those profiles is `limited` for temperatures.
 
 **Project boundary:** The poll allowance is a transport bound: two fixed poll intervals plus
 one 300 ms UART timeout per publishable register page in the active profile. It is not a physical

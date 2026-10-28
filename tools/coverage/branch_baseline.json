@@ -8,7 +8,7 @@
       "runner": "scripts/run-mock-tests.sh --coverage",
       "scope": "Label-keyed refrigerant liquid coverage: the added liquid-label condition is taken in both directions by the unit and catalog checks; all other inventories and historical floors unchanged",
       "source": "main/logic/refrigerant_service.hpp",
-      "source_sha256": "a3725ddb12478f852c901d93805ba5baebd23028fcf8c7a4a109e1bd63755aae"
+      "source_sha256": "4be858c33a686aa18a01f3d8130caae282a8dd8253d207dc14a67c34f51d4b20"
     },
     {
       "compilers": {
