@@ -820,7 +820,7 @@ void weather_task(void*) {
         vTaskDelay(1);
     TaskFailureEpisode failures;
     for (;;) {
-        // Retrospective high-water mark for the largest firmware-owned task. Sample at the loop
+        // Retrospective high-water mark for the Weather task. Sample at the loop
         // boundary for every lifecycle state, then again immediately after the TLS/HTTP/JSON
         // interval so release HIL cannot observe a successful refresh token before its deepest
         // stack path has been recorded.
