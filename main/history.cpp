@@ -703,6 +703,11 @@ int64_t  s_flash_oldest_bucket[kJournalSources] = {INT64_MIN, INT64_MIN, INT64_M
                                                    INT64_MIN};
 uint16_t s_flash_restore_slots[kJournalSources][HISTORY_SAMPLES] = {};
 uint16_t s_flash_restore_slot_count[kJournalSources] = {};
+// Boot index of the checkup source: up to CHECKUP_JOURNAL_INDEX_CAP candidate hours before the
+// window is clipped to the CHECKUP_COMPLETED_BUCKETS restorable hours.
+logic::CheckupJournalIndex s_flash_checkup_index;
+static_assert(logic::CHECKUP_JOURNAL_INDEX_CAP <= HISTORY_SAMPLES,
+              "checkup index candidates share the per-source restore slot list");
 size_t   s_flash_restore_ring = 0;
 size_t   s_flash_restored_rings = 0;
 size_t   s_flash_service_source = 0;
@@ -1954,10 +1959,12 @@ esp_err_t flash_read_record(size_t slot, FlashJournalRecord& out) {
 }
 
 // Pass 1 finds the newest committed record and each source's latest bucket. Pass 2 walks backwards
-// from that physical head and remembers only slots inside the source's last 24-hour window. The
-// restore index is 1.7 KiB and the bounded manifest cache stays below 1.2 KiB; retaining a second
-// ~30 KiB matrix beside the live rings would defeat the static memory budget this feature was
-// designed around.
+// from that physical head and remembers only slots inside the source's last 24-hour window; the
+// checkup source keeps up to CHECKUP_JOURNAL_INDEX_CAP candidate hours, because a revision
+// re-appends an older hour, and is clipped to the newest copy of each hour afterwards. The restore
+// index holds one uint16_t slot per source and raster sample, and the bounded manifest cache stays
+// below 1.2 KiB; retaining a second ~30 KiB matrix beside the live rings would defeat the static
+// memory budget this feature was designed around.
 bool flash_journal_scan() {
     uint64_t highest_sequence = 0;
     uint64_t newest_sequence[kJournalSources] = {};
@@ -2011,6 +2018,8 @@ bool flash_journal_scan() {
     for (size_t src = 0; src < kJournalSources; src++) {
         newest_sequence[src] = 0;
     }
+    const size_t checkup_src = static_cast<size_t>(logic::HistoryJournalSource::Checkup);
+    s_flash_checkup_index    = logic::CheckupJournalIndex{};
     if (highest_sequence) {
         size_t slot = head_slot;
         size_t seen_valid = 0;
@@ -2033,18 +2042,28 @@ bool flash_journal_scan() {
                     s_flash_newest_bucket[src] = r.header.bucket;
                     s_flash_last_bucket[src]   = r.header.bucket;
                 }
-                if (!done[src]) {
-                    const size_t retain =
-                        src == static_cast<size_t>(logic::HistoryJournalSource::Checkup)
-                            ? logic::CHECKUP_COMPLETED_BUCKETS
-                            : HISTORY_SAMPLES;
+                if (src == checkup_src) {
+                    // Re-appended hours make checkup buckets non-monotonic in sequence order;
+                    // the pure index keeps each hour's newest copy (see checkup_persist.hpp).
+                    if (!done[src]) {
+                        const auto step = logic::checkup_journal_index_step(s_flash_checkup_index,
+                                                                            r.header.bucket);
+                        if (step == logic::CheckupJournalIndexStep::Stop) {
+                            done[src] = true;
+                            remaining--;
+                        } else if (step == logic::CheckupJournalIndexStep::Keep) {
+                            s_flash_restore_slots[src][s_flash_restore_slot_count[src]++] =
+                                static_cast<uint16_t>(slot);
+                        }
+                    }
+                } else if (!done[src]) {
                     const int64_t oldest =
-                        s_flash_newest_bucket[src] - static_cast<int64_t>(retain - 1);
+                        s_flash_newest_bucket[src] - static_cast<int64_t>(HISTORY_SAMPLES - 1);
                     if (r.header.bucket < oldest) {
                         done[src] = true;
                         remaining--;
                     } else if (r.header.bucket <= s_flash_newest_bucket[src] &&
-                               s_flash_restore_slot_count[src] < retain) {
+                               s_flash_restore_slot_count[src] < HISTORY_SAMPLES) {
                         s_flash_restore_slots[src][s_flash_restore_slot_count[src]++] =
                             static_cast<uint16_t>(slot);
                         if (s_flash_oldest_bucket[src] == INT64_MIN ||
@@ -2061,7 +2080,23 @@ bool flash_journal_scan() {
     for (size_t src = 0; src < kJournalSources; ++src)
         if (newest_sequence[src] == 0) done[src] = true;
 
-    const size_t checkup_src = static_cast<size_t>(logic::HistoryJournalSource::Checkup);
+    // Clip the checkup candidates to the newest copy of each hour in the 23-hour window ending at
+    // the newest indexed hour. That hour, not the newest-sequence copy, is the append cursor.
+    if (s_flash_restore_slot_count[checkup_src]) {
+        const logic::CheckupJournalIndex& ix   = s_flash_checkup_index;
+        uint16_t                          kept = 0;
+        for (size_t i = 0; i < s_flash_restore_slot_count[checkup_src]; ++i) {
+            if (!logic::checkup_journal_index_retained(ix, i)) continue;
+            const int64_t bucket = ix.anchor + ix.offset[i];
+            if (s_flash_oldest_bucket[checkup_src] == INT64_MIN ||
+                bucket < s_flash_oldest_bucket[checkup_src])
+                s_flash_oldest_bucket[checkup_src] = bucket;
+            s_flash_restore_slots[checkup_src][kept++] = s_flash_restore_slots[checkup_src][i];
+        }
+        s_flash_restore_slot_count[checkup_src] = kept;
+        s_flash_newest_bucket[checkup_src]      = logic::checkup_journal_index_newest(ix);
+        s_flash_last_bucket[checkup_src]        = s_flash_newest_bucket[checkup_src];
+    }
     s_flash_checkup_restore_done = newest_sequence[checkup_src] == 0;
     if (!highest_sequence) s_flash_restore_done = true;
     diag_printf("history: journal ready (%u valid, %u torn/invalid, next slot %u, %u-byte records)\n",
@@ -2372,8 +2407,12 @@ esp_err_t flash_append_record_at(FlashJournalRecord& r, size_t& slot) {
     if (flash_is_manifest(r.header)) {
         if (!flash_manifest_cache_add(verify)) return ESP_ERR_INVALID_RESPONSE;
     } else {
+        // A re-appended checkup hour moves the cursor back on purpose: the later live hours are
+        // appended again after it, so their newest copies stay in non-decreasing order.
         s_flash_last_bucket[src] = r.header.bucket;
         s_flash_newest_bucket[src] = r.header.bucket;
+        if (src == static_cast<size_t>(logic::HistoryJournalSource::Checkup))
+            checkup_flash_appended(r.header.bucket);
     }
     s_flash_next_slot = (slot + 1) % logic::HISTORY_JOURNAL_SLOT_COUNT;
     s_flash_next_sequence++;
@@ -2531,8 +2570,8 @@ static void history_restore_checkup_flash() {
                   "cold diagnostic restore reuses the 4 KiB journal scan scratch");
     auto* records = reinterpret_cast<CheckupFlashRecord*>(s_flash_sector);
     size_t count = 0;
-    // The index is newest-first. Replay oldest-first so checkup_flash_restore can resolve a
-    // duplicate bucket by taking the later entry, matching the trend splice's rule.
+    // The index holds the newest copy of each hour, newest-first (flash_journal_scan). Replay
+    // oldest-first so checkup_flash_restore would still resolve a duplicate by the later entry.
     for (size_t k = s_flash_restore_slot_count[src]; k > 0; k--) {
         FlashJournalRecord r;
         const esp_err_t e = flash_read_record(s_flash_restore_slots[src][k - 1], r);

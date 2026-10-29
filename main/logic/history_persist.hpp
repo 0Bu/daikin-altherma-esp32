@@ -569,14 +569,16 @@ inline constexpr bool history_journal_retry_due(bool paused, int64_t now_us,
 }
 
 // A capacity guard for the CURRENT catalog. The journal retains at least 72 hours even if all four
-// trend sources close every five-minute bucket and checkup closes every hourly bucket. The
-// remaining slots are wear reserve: records are ignored by age, never erased merely because they
-// passed 72 h.
+// trend sources close every five-minute bucket and checkup writes two records per hour: each hour
+// once when it completes, and at most once more in a late-completion replay. A replay re-appends
+// only hours inside the run that revised its start hour (checkup_journal_revision_bucket), and
+// runs do not overlap, so no hour is replayed twice. The remaining slots are wear reserve: records
+// are ignored by age, never erased merely because they passed 72 h.
 inline constexpr size_t HISTORY_FLASH_FUTURE_HOURS = 72;
 inline constexpr size_t HISTORY_FLASH_FUTURE_SAMPLES =
     HISTORY_FLASH_FUTURE_HOURS * 60u * 60u / HISTORY_DT_S;
 inline constexpr size_t HISTORY_FLASH_FUTURE_RECORDS =
-    HISTORY_FLASH_FUTURE_SAMPLES * 4u + HISTORY_FLASH_FUTURE_HOURS;
+    HISTORY_FLASH_FUTURE_SAMPLES * 4u + 2u * HISTORY_FLASH_FUTURE_HOURS;
 static_assert(HISTORY_FLASH_FUTURE_SAMPLES == 864,
               "72 hours at the five-minute raster must contain 864 samples per ring");
 static_assert(HISTORY_JOURNAL_SLOT_BYTES <= HISTORY_FLASH_ERASE_BYTES &&
