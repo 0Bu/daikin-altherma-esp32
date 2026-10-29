@@ -2,9 +2,10 @@
   "measurement_records": [
     {
       "compilers": {
+        "clang-17-darwin": "Apple clang version 17.0.0 (clang-1700.6.4.2), arm64",
         "gcc-13-linux-ubuntu24": "Ubuntu 24.04 x86-64 GCC 13.3.0"
       },
-      "hosted_confirmation": "Local GCC 13 measured; GCC 15 profiles carry the same four added taken outcomes pending authoritative hosted confirmation; Apple Clang 17 not measured",
+      "hosted_confirmation": "Local GCC 13 measured (four added outcomes, all taken); GCC 15 profiles carry the same four, confirmed by the hosted mechanical_gates job at 1beef9ae. Apple Clang 17 measured locally after the main merge: two added outcomes, both taken (206/252 to 208/254).",
       "runner": "scripts/run-mock-tests.sh --coverage",
       "scope": "Label-keyed refrigerant liquid coverage: the added liquid-label condition is taken in both directions by the unit and catalog checks; all other inventories and historical floors unchanged",
       "source": "main/logic/refrigerant_service.hpp",
@@ -1229,8 +1230,8 @@
         "taken": 216
       },
       "main/logic/refrigerant_service.hpp": {
-        "outcomes": 252,
-        "taken": 206
+        "outcomes": 254,
+        "taken": 208
       },
       "main/logic/registers.hpp": {
         "outcomes": 10,
