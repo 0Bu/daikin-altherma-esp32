@@ -1807,6 +1807,12 @@ async function assertHistoryReadouts(page, context) {
       "width:calc(100% - 32px);max-width:800px;z-index:10000;background:var(--bg)";
     document.body.appendChild(host);
     wireTrendScrub(host);
+    window.__browserHistoryEvents = [];
+    for (const type of ["pointerdown","pointermove","pointerup","pointercancel","lostpointercapture"])
+      host.addEventListener(type,event => {
+        window.__browserHistoryEvents.push({type,x:event.clientX,y:event.clientY,pointer:event.pointerType});
+        window.__browserHistoryEvents = window.__browserHistoryEvents.slice(-12);
+      });
     window.__browserHistoryRender = () => {
       const id = host.dataset.hist;
       host.innerHTML = '<div class="vdesc-body" style="margin:0;transform:none">' +
@@ -1814,6 +1820,7 @@ async function assertHistoryReadouts(page, context) {
     };
     return true;
   })()`);
+  await page.send("Page.bringToFront");
   await page.send("Emulation.setTouchEmulationEnabled", { enabled:true });
   try {
     for (const id of ["dhw_tank", "valve_dhw", "env3_combined"]) {
@@ -1851,9 +1858,35 @@ async function assertHistoryReadouts(page, context) {
         const r = plot.getBoundingClientRect();
         return {x:r.left + r.width * ${fraction},y:r.top + r.height / 2};
       })()`);
-      const touch = async (type, position) => page.send("Input.dispatchTouchEvent", {
-        type, touchPoints:position ? [{...position,id:1,radiusX:1,radiusY:1,force:1}] : [],
-      });
+      const touch = async (type, position) => {
+        await page.send("Input.dispatchTouchEvent", {
+          type, touchPoints:position ? [{...position,id:1,radiusX:1,radiusY:1,force:1}] : [],
+        });
+        // Native touch movement can be coalesced until the compositor's next frame. A real finger
+        // supplies successive frames; sending one jump and then only polling can leave a pending
+        // movement (or one inside platform touch slop) without any pointermove for the UI to read.
+        await page.evaluate("new Promise(resolve => requestAnimationFrame(() => resolve(true)))");
+      };
+      const waitForTime = async (fraction, phase) => {
+        try {
+          await page.waitFor(`(() => {
+            const host=document.getElementById("browserHistoryFixture"),plot=host.querySelector("[data-hist]");
+            const i=scrubIndex(plot,plot.getBoundingClientRect().left + plot.clientWidth * ${fraction});
+            return host.querySelector(".vhist-time.vhist-live").textContent === scrubTime(historyView(plot.dataset.hist),i);
+          })()`);
+        } catch (error) {
+          const state = await page.evaluate(`(() => {
+            const host=document.getElementById("browserHistoryFixture"),plot=host.querySelector("[data-hist]");
+            const r=plot.getBoundingClientRect(),time=host.querySelector(".vhist-time.vhist-live");
+            const i=scrubIndex(plot,r.left + plot.clientWidth * ${fraction});
+            return {id:plot.dataset.hist,scrub:S.scrub,actual:time.textContent,hidden:time.hidden,
+              expected:scrubTime(historyView(plot.dataset.hist),i),sample:i,
+              plot:{left:r.left,top:r.top,width:r.width,height:r.height},events:window.__browserHistoryEvents};
+          })()`);
+          throw new Error(`${context}/${id}/${phase}/${fraction}: native touch selection did not reach its sample; ` +
+            `${JSON.stringify(state)}; ${error.message}`);
+        }
+      };
       const start = await point(0.2);
       await touch("touchStart", start);
       await touch("touchEnd");
@@ -1870,14 +1903,19 @@ async function assertHistoryReadouts(page, context) {
       if(id !== "valve_dhw")
         assert.equal(baseline.tip.includes(baseline.time),false,
           `${context}/${id}: pinned measurement time belongs on the axis rather than in the bubble`);
-      await touch("touchStart", await point(0.3));
+      // Start far from the preceding tap so this is unambiguously a new drag rather than a second
+      // tap. Its first destination also clears movement slop on narrow phone plots.
+      let finger = await point(0.9);
+      await touch("touchStart", finger);
+      await waitForTime(0.9,"start");
+      assert.equal(await page.evaluate("S.scrub"),id,`${context}/${id}: touchstart owns the active scrub`);
       for (const fraction of [0.35,0.8,1,0]) {
-        await touch("touchMove", await point(fraction));
-        await page.waitFor(`(() => {
-          const host=document.getElementById("browserHistoryFixture"),plot=host.querySelector("[data-hist]");
-          const i=scrubIndex(plot,plot.getBoundingClientRect().left + plot.clientWidth * ${fraction});
-          return host.querySelector(".vhist-time.vhist-live").textContent === scrubTime(historyView(plot.dataset.hist),i);
-        })()`);
+        const destination = await point(fraction);
+        const steps = Math.min(8,Math.max(3,Math.ceil(Math.abs(destination.x-finger.x)/48)));
+        for (let step=1;step<=steps;step++)
+          await touch("touchMove",{x:finger.x+(destination.x-finger.x)*step/steps,y:destination.y});
+        finger = destination;
+        await waitForTime(fraction,"move");
         const state = await page.evaluate(`(() => {
           const host = document.getElementById("browserHistoryFixture");
           const plot = host.querySelector("[data-hist]");
@@ -1982,7 +2020,7 @@ async function assertHistoryReadouts(page, context) {
       Object.assign(S,{status:original.status,hist:original.hist,histPin:original.histPin,
         histHidden:original.histHidden,scrub:original.scrub,live:original.live,_values:original.values,_modbus:original.modbus});
       document.getElementById("browserHistoryFixture").remove();
-      delete window.__browserHistoryOriginal; delete window.__browserHistoryRender;
+      delete window.__browserHistoryOriginal; delete window.__browserHistoryRender; delete window.__browserHistoryEvents;
       renderApp(); window.scrollTo(0,0); return true;
     })()`);
   }
