@@ -200,11 +200,9 @@ const histCacheKey = (id, source) => {
 };
 const histSourceClass = (source) => source === "modbus" ? " mb" : source === "room" ? " room" : "";
 
-function histSeriesVisible(id, source) { return !S.histHidden?.get(id)?.has(source); }
-
 function histVisibleSeries(h) {
   if (h.series.length === 1) return h.series;
-  const visible = h.series.filter((s) => histSeriesVisible(h.id, s.source));
+  const visible = h.series.filter((s) => !S.histHidden?.get(h.id)?.has(s.source));
   if (visible.some((s) => s.v.some((v) => v != null))) return visible;
   // A source can disappear or roll into an all-gap ring after a legend choice. Keep an available
   // curve visible without discarding either source's history or the user's saved browser choice.
@@ -215,14 +213,14 @@ function histVisibleSeries(h) {
 // Polls replace whole card containers, while the inspector can replace only its history. Preserve
 // an active legend control in either path so keyboard users can continue toggling the same series.
 function replaceHistoryHtml(host, html) {
-  const active = typeof document === "undefined" ? null : document.activeElement;
-  const id = active?.dataset?.histId, source = active?.dataset?.histSeries;
-  const restore = id && source && host.contains?.(active);
+  const active = globalThis.document?.activeElement;
+  const { histId, histSeries } = active?.dataset || {};
+  const restore = histSeries && host.contains?.(active);
   host.innerHTML = html;
-  if (!restore) return;
-  const next = Array.from(host.querySelectorAll("[data-hist-series]")).find((button) =>
-    button.dataset.histId === id && button.dataset.histSeries === source);
-  next?.focus({ preventScroll: true });
+  if (restore) for (const button of host.querySelectorAll("[data-hist-series]")) {
+    if (button.dataset.histId === histId && button.dataset.histSeries === histSeries)
+      button.focus({ preventScroll: true });
+  }
 }
 
 function histLegendHtml(h, s, cls) {
@@ -238,7 +236,6 @@ function histSeriesToggle(id, source) {
   if (!h || !h.series.some((s) => s.source === source)) return;
   const visible = histVisibleSeries(h).some((s) => s.source === source);
   if (visible && histVisibleSeries(h).filter((s) => s.v.some((v) => v != null)).length <= 1) return;
-  if (!S.histHidden) S.histHidden = new Map();
   const hidden = new Set(S.histHidden.get(id));
   if (visible) hidden.add(source); else hidden.delete(source);
   S.histHidden.set(id, hidden);
@@ -1828,17 +1825,10 @@ function renderTrendHosts() {
   const active = typeof document === "undefined" ? null : document.activeElement;
   const host = active?.closest?.("#valueGroups, #inspHist, #settingsCards");
   const id = active?.dataset?.hist, source = active?.dataset?.source || "", cursor = active?.dataset?.cur;
-  const legendId = active?.dataset?.histId, legendSource = active?.dataset?.histSeries;
   S.trendRebuilding = true;
   try { renderCards(); renderInspect(); renderSettings(); }
   finally { S.trendRebuilding = false; }
   if (!host) return;
-  if (legendId) {
-    const next = Array.from(host.querySelectorAll("[data-hist-series]")).find((button) =>
-      button.dataset.histId === legendId && button.dataset.histSeries === legendSource);
-    next?.focus({ preventScroll: true });
-    return;
-  }
   if (!id) return;
   const next = Array.from(host.querySelectorAll("[data-hist]")).find((plot) =>
     plot.dataset.hist === id && (plot.dataset.source || "") === source);

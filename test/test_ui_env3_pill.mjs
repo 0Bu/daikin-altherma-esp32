@@ -99,7 +99,7 @@ const S = {
                              t0: currentUnix - 600,
                              v: [10050, 10060, 10070] }],
   ]),
-  histBusy: new Set(), histPin: new Map(), insp: "env3", inspSig: "", inspHistSig: "",
+  histBusy: new Set(), histPin: new Map(), histHidden: new Map(), insp: "env3", inspSig: "", inspHistSig: "",
   scrub: null, live: null, _values: [], _modbus: [],
 };
 
@@ -192,11 +192,11 @@ assert.match(style, /\.vhist-graph\s*\{[^}]*--vhist-tip-base:\s*20px;[^}]*paddin
 assert.doesNotMatch(style, /\.vhist-env3 \.vhist-graph\s*\{/,
   "climate tooltip height must not alter graph layout");
 assert.match(style,
-  /\.vhist-env3 \.vhist-tip\s*\{[^}]*grid-template-columns:\s*minmax\(0, 1fr\)/,
+  /\.vhist-env3 \.vhist-tip\s*\{[^}]*display:\s*block/,
   "the three readings must occupy separate tooltip rows on every viewport");
 assert.match(style,
-  /@media \(max-width: 480px\)[\s\S]*\.vhist-env3 \.vhist-tip\s*\{[^}]*display:\s*block/,
-  "phones must stack the same tooltip rows while the plot stays fixed underneath");
+  /\.vhist-env3 \.vhist-tip-line\s*\{[^}]*display:\s*block/,
+  "every viewport must stack the same tooltip rows while the plot stays fixed underneath");
 const measuredClock = new Date(currentUnix * 1000)
   .toLocaleTimeString("de", { hour: "2-digit", minute: "2-digit" });
 assert.equal(sandbox.__api.tooltip(2),

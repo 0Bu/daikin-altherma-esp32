@@ -16,7 +16,7 @@ assert.match(style, /\.vhist-state-graph \.vhist-tip \{[^}]*white-space:\s*pre-w
 assert.match(style,
   /\.vhist-graph\s*\{[^}]*--vhist-tip-base:\s*20px;[^}]*padding-top:\s*var\(--vhist-tip-base\);/,
   "every plot must keep one fixed compact distance below its legend");
-assert.match(style, /\.vhist-tip\s*\{[^}]*z-index:\s*3;[^}]*top:\s*0;/,
+assert.match(style, /\.vhist-tip\s*\{[^}]*position:\s*relative;[^}]*z-index:\s*3;/,
   "the translucent tooltip must start at and paint over the plot instead of moving it");
 assert.doesNotMatch(style, /--vhist-tip-space/,
   "tooltip height must never feed back into graph layout");
@@ -95,7 +95,7 @@ const S = {
     ],
     env3_rows: [{ id: "temperature", label: "Temperature" }],
   }, ntp: { synced: true } },
-  hist: new Map(), histBusy: new Set(), histPin: new Map(), clickHold: false, scrub: null,
+  hist: new Map(), histBusy: new Set(), histPin: new Map(), histHidden: new Map(), clickHold: false, scrub: null,
 };
 let fetched = "";
 let fetchedUrls = [];

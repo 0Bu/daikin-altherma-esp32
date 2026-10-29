@@ -914,7 +914,6 @@ svg .sc-hit:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px
 button.vhist-source { appearance: none; border: 0; background: none; font: inherit;
   padding: 4px 0; cursor: pointer; text-align: left; }
 button.vhist-source[aria-pressed="false"] { opacity: .5; text-decoration: line-through; }
-button.vhist-source:disabled { cursor: default; }
 button.vhist-source:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px; border-radius: 3px; }
 .vhist-source.mb { --vhist-colour: var(--src-mb); }
 .vhist-source.room { --vhist-colour: var(--src-room); overflow-wrap: anywhere; }
@@ -1024,7 +1023,7 @@ button.vhist-source:focus-visible { outline: 2px solid var(--brand); outline-off
    back across the selected instant. Width is never measured; pinned and live bubbles obey the same
    horizontal rule while separate rows keep both readable. */
 .vhist-tip { --tip-p: 0; --vhist-tip-gap: 10px; position: relative; z-index: 3;
-  top: 0; left: calc(var(--tip-p) * 1%); white-space: pre-wrap;
+  left: calc(var(--tip-p) * 1%); white-space: pre-wrap;
   pointer-events: none; font-size: 12px; color: var(--fg);
   /* Transparency belongs only to the surface, never to the text. The small blur preserves contrast
      in both themes while the chart/card remains visibly present behind the readout. */
@@ -1041,12 +1040,10 @@ button.vhist-source:focus-visible { outline: 2px solid var(--brand); outline-off
   height: 1px; background: var(--brand-strong); opacity: .72; }
 .vhist-tip-right::before { right: 100%; }
 .vhist-tip-left::before { left: 100%; }
-.vhist-env3 .vhist-tip { min-width: 0; white-space: normal; display: grid;
-  grid-template-columns: minmax(0, 1fr);
+.vhist-env3 .vhist-tip { min-width: 0; display: block;
   padding: 5px 8px; line-height: 1.35; border-radius: 8px;
   box-shadow: 0 4px 14px rgba(16,20,28,.12); }
 .vhist-env3 .vhist-tip-line { display: block; }
-.vhist-env3 .vhist-tip-meta { grid-column: 1 / -1; }
 .vhist-env3 .vhist-tip-line.env-temperature { color: var(--flow-hot); }
 .vhist-env3 .vhist-tip-line.env-humidity { color: var(--flow-cold); }
 .vhist-env3 .vhist-tip-line.env-pressure { color: var(--env-pressure); }
@@ -1126,17 +1123,14 @@ button.vhist-source:focus-visible { outline: 2px solid var(--brand); outline-off
 .inspect-card .vhist-now { box-shadow: 0 0 0 2.5px var(--brand-tint); }
 .vhist-axis { display: flex; justify-content: space-between; gap: 10px; margin-top: 6px;
   font-size: 11.5px; color: var(--muted); }
-/* A label's anchor moves from its left to its right edge across the domain. This keeps arbitrary
-   localized times inside the card, with the small tick exactly under the selected crosshair. */
-.vhist-times { grid-area: 2 / 1; display: grid; gap: 6px; font-size: 11.5px;
-  line-height: 1.35; color: var(--fg); pointer-events: none; }
-.vhist-time { position: relative; justify-self: start; width: max-content; max-width: 100%;
+/* A label's anchor moves from its left to its right edge across the domain, keeping localized
+   times inside the card even at the first and last sample. */
+.vhist-times { grid-area: 2 / 1; display: grid; font-size: 11.5px;
+  color: var(--fg); pointer-events: none; }
+.vhist-time { position: relative; justify-self: start; max-width: 100%;
   margin-top: 6px; left: calc(var(--tip-p) * 1%);
   transform: translateX(calc(var(--tip-p) * -1%)); }
-.vhist-time::before { content: ""; position: absolute; top: -4px; height: 4px; width: 1px;
-  left: calc(var(--tip-p) * 1%); background: var(--muted); }
 .vhist-time.vhist-pinned { color: var(--brand-strong); font-weight: 600; }
-.vhist-time.vhist-pinned::before { background: var(--brand-strong); }
 .vhist-axis.vhist-axis-future { position: relative; min-height: 18px; }
 .vhist-axis-future .vhist-axis-now { position: absolute; left: calc(var(--now-p) * 1%);
   transform: translateX(-50%); color: var(--muted); font-weight: 700; }
@@ -1423,9 +1417,6 @@ html.modal-open, body.modal-open { overflow: hidden; overscroll-behavior: none; 
      Stack it below the time span instead of squeezing both into narrow multi-line columns. */
   .vhist-head { display: grid; justify-content: stretch; gap: 2px; }
   .vhist-range { text-align: left; }
-  /* Keep the same vertical reading order on phones with a little more line spacing. */
-  .vhist-env3 .vhist-tip { min-width: 0; white-space: pre-wrap;
-    display: block; padding: 7px 10px; line-height: 1.55; }
   .modal-actions { flex-direction: column-reverse; }
   .modal-actions .btn { flex: none; width: 100%; }
   .probe-grid { grid-template-columns: 1fr; }

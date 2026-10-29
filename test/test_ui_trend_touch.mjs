@@ -16,7 +16,7 @@ assert.match(style,
 assert.match(style,
   /\.vhist-graph\s*\{[^}]*padding-top:\s*var\(--vhist-tip-base\);/,
   "tooltip height must not move the chart away from its legend");
-assert.match(style, /\.vhist-tip\s*\{[^}]*z-index:\s*3;[^}]*top:\s*0;/,
+assert.match(style, /\.vhist-tip\s*\{[^}]*position:\s*relative;[^}]*z-index:\s*3;/,
   "the tooltip must start at and overlay the still-visible chart");
 assert.match(style, /\.vhist-tip-right\s*\{[^}]*translateX\(var\(--vhist-tip-gap\)\)/,
   "the tooltip must leave a visible gap beside the selected crosshair");
