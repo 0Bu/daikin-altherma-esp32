@@ -230,7 +230,7 @@ A run is booked into the hour in which it started, but only when it stops. When 
 already journaled, it and every later live hour are appended again; the boot index keeps each
 hour's newest copy, including the older-sequence tail of a replay cut by a restart
 (`checkup_persist.hpp`). Each boot latches one wall-clock label per monotonic hour and moves it only
-for a clock step of two or more hours, so whole-second clock reads cannot relabel a replayed hour.
+for a clock step of more than one hour, so whole-second clock reads cannot relabel a replayed hour.
 While a backward clock step leaves the cursor ahead of the newest live hour, this replay waits like
 an ordinary append.
 Current source confirmation requires this boot's full profile/link evidence, not cached startup

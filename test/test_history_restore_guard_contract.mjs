@@ -429,7 +429,9 @@ assert.match(flashNext,
 assert.match(body(checkup, "void persist_wipe("), /s_revision = \{\};/,
   "a wipe withdraws a pending revision together with its hours");
 assert.match(checkup, /void checkup_flash_appended\(int64_t bucket\) \{ s_revision_acked\.store\(bucket\); \}/,
-  "the journal's commit confirmation is the only other writer of the acknowledgement");
+  "the journal's commit confirmation writes the acknowledgement");
+assert.equal(count(checkup, /s_revision_acked\.store\(/g), 2,
+  "only the emit reset and the journal's commit confirmation write the acknowledgement");
 // One wall-clock label per monotonic hour for the whole boot, in the writer and in the restore's
 // live records alike; a record's end time is kept inside the bucket its label names.
 assert.equal(count(checkup, /latched_newest_locked\(/g), 3,

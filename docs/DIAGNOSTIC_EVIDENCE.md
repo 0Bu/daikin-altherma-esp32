@@ -1,6 +1,6 @@
 # Evidence and limits of the plant diagnostics
 
-<!-- diagnostic-evidence-contract: 1c486240a0498084abc14f2e6236c1cea48940ddcb28ae98fb595f84e5ac5fa9 -->
+<!-- diagnostic-evidence-contract: 7093e2a55b2c44dd3ca7d9404fdcdc5ae014dfd2cd31d913ae9d575db96d9ef7 -->
 
 For every row in the **Plant diagnostics · 24 h** card, this page answers four questions:
 
@@ -207,8 +207,8 @@ A restart between its stop and that append, which needs synchronized time and a 
 can still lose it. Project inference, not measured: the append normally follows within seconds, and
 only runs still open at an hour boundary are exposed, so a loss tends to remove a long run. Under
 the count population above a lost run is not detected; it withholds the assessment only by pushing
-the classified share below 90% or the completed heating runs below 12, and can otherwise shift
-(most likely shorten) the mean and change the result. Only at least 12 completed
+either population gate (classified runs or runtime) below 90% or the completed heating runs below
+12, and can otherwise shift (most likely shorten) the mean and change the result. Only at least 12 completed
 space-heating runs with both population gates satisfied can support an assessment. A mean below ten minutes then
 produces **NOTE** immediately. An absence-of-short-run assessment additionally requires a full
 24-hour span and at least CHECKUP_REQUIRED_S of paired classification time.

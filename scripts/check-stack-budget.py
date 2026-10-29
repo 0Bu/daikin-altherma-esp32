@@ -33,7 +33,7 @@ STACK_MOVSP_RE = re.compile(r"movsp\s+a1,")
 # still be at its entry address and contain the Xtensa ENTRY opcode. The four first-party entries
 # from mqtt_ha.cpp, mcp_post and dns_task render this way in some link layouts; the packed word
 # carries the same ENTRY immediate as the decoded `entry` of an unpacked link (32 bytes, 48 for
-# mqtt_enqueue_id, 1264 for mcp_post, 608 for dns_task), and each stays under its separate first-
+# mqtt_enqueue_id, 1264 for mcp_post, 608 for dns_task), and each stays within its separate first-
 # frame budget in tools/stack/budgets.json. A packed body hides any `movsp a1` from
 # validate_dynamic_stack; none of the six uses alloca or a variable-length array.
 PACKED_ENTRY_SYMBOLS = frozenset({
