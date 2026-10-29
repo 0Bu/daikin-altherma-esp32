@@ -4955,7 +4955,7 @@ static void test_ota_headroom() {
 // The weather fetch's own headroom gate (private issue 10 D) — same predicate shape as the OTA
 // gate above, but with evidence-based floors that reject the measured 15.9 KiB fragmentation
 // trough, admit the production board's repeatable 22 KiB post-quiesce block and preserve aggregate
-// reserve around the fetch's measured ~40 KiB transient claim.
+// reserve around the fetch's measured transient claim (composition: the gate's header comment).
 static void test_weather_fetch_headroom() {
     CHECK(WEATHER_FETCH_MIN_FREE_BYTES == 48u * 1024u);
     CHECK(WEATHER_FETCH_MIN_LARGEST_BLOCK_BYTES == 20u * 1024u);

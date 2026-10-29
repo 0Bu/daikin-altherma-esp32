@@ -182,14 +182,17 @@ inline void weather_refresh_cancel_outstanding(uint64_t  requested_token,
 
 // ── Fetch headroom gate ──────────────────────────────────────────────────────────────────────────
 //
-// One Open-Meteo fetch transiently claims ≈ 16 KiB mbedTLS in-buffer + 4 KiB out-buffer, HTTP/TCP
+// One Open-Meteo fetch transiently claims mbedTLS handshake state, WiFi RX buffers, HTTP/TCP
 // buffers, the response string and the cJSON tree, on a heap whose binding limit is the largest
-// CONTIGUOUS internal block. Live evidence (private issue 10): one fetch landed
-// on a fragmentation trough and pushed the boot's `min_free_heap` low-water to 800 B; it survived
-// only because the claim is brief. The gate below keeps the next fetch OUT of such a trough. Its
-// 20 KiB contiguous floor rejects the measured 15.9 KiB trough while admitting the production
-// board's repeatable 22 KiB post-MQTT-quiesce block. The 48 KiB aggregate floor leaves roughly
-// 8-12 KiB outside the measured ~35-40 KiB transient claim while accommodating the resting
+// CONTIGUOUS internal block. Bench instrumentation of nine fetches (certificate bundle, ESP-IDF
+// 6.1) measured 18.9 KiB of mbedTLS in every handshake and at most 18.3 KiB of WiFi RX buffers,
+// mostly mDNS packets waiting for the starved mDNS task (bounded in sdkconfig.defaults); the whole
+// claim had a median of 30.3 KiB and a maximum of 41.4 KiB. Live evidence (private issue 10): one
+// fetch landed on a fragmentation trough and pushed the boot's `min_free_heap` low-water to 800 B;
+// it survived only because the claim is brief. The gate below keeps the next fetch OUT of such a
+// trough. Its 20 KiB contiguous floor rejects the measured 15.9 KiB trough while admitting the
+// production board's repeatable 22 KiB post-MQTT-quiesce block. The 48 KiB aggregate floor leaves
+// roughly 6.6 KiB beside the largest measured claim while accommodating the resting
 // footprint with Modbus TCP and syslog connected. Requiring 56 KiB made Weather permanently
 // unavailable when Modbus was connected. A refusal uses the ordinary 5-minute retry, not a full
 // 45-minute raster skip, so a valid forecast does not cross its 90-minute stale boundary.

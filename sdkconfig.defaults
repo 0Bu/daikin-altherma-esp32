@@ -48,7 +48,14 @@ CONFIG_SECURE_BOOT_BUILD_SIGNED_BINARIES=n
 
 # WiFi
 CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM=10
-CONFIG_ESP_WIFI_DYNAMIC_RX_BUFFER_NUM=32
+# Every received frame is copied into a dynamic RX buffer (1,700 bytes each, measured on ESP-IDF
+# 6.1) that stays allocated until lwIP's consumer frees the pbuf (LWIP_L2_TO_L3_COPY is off). With
+# the upstream cap of 32, a bench Weather TLS handshake held up to 17 of them (28.9 KB of heap),
+# almost all mDNS packets queued behind the starved mDNS task (see CONFIG_MDNS_ACTION_QUEUE_LEN).
+# The cap covers that bounded mDNS backlog plus one full TCP receive window
+# (CONFIG_LWIP_TCP_WND_DEFAULT / CONFIG_LWIP_TCP_MSS = 8 segments), and the Kconfig help asks for at
+# least the static RX count. A frame arriving above the cap is dropped and TCP retransmits it.
+CONFIG_ESP_WIFI_DYNAMIC_RX_BUFFER_NUM=16
 # Dynamic TX buffers. The policy is a Kconfig CHOICE (ESP_WIFI_TX_BUFFER), whose options are the
 # booleans ESP_WIFI_STATIC_TX_BUFFER / ESP_WIFI_DYNAMIC_TX_BUFFER — so the dynamic option is what a
 # defaults file can actually select. CONFIG_ESP_WIFI_TX_BUFFER_TYPE is a promptless int the choice
@@ -166,6 +173,13 @@ CONFIG_ESP_WIFI_ENTERPRISE_SUPPORT=n
 # the firmware while retaining service advertisement and one-shot queries.
 CONFIG_MDNS_ENABLE_CONSOLE_CLI=n
 CONFIG_MDNS_ENABLE_BROWSE=n
+# The mDNS task runs at priority 1 and keeps every received packet, together with its WiFi RX
+# buffer, in this action queue until it gets the CPU. A higher-priority task that computes for
+# seconds (Weather's TLS certificate verification takes ~2.7 s) therefore filled the default
+# 16-entry queue with 16 x 1,700 bytes. Use the component minimum. A full queue drops further
+# received mDNS packets (queriers retry), defers timed responder sends to the next timer tick, and
+# fails a one-shot query that starts into it like any other lookup miss.
+CONFIG_MDNS_ACTION_QUEUE_LEN=8
 
 # C++ exceptions — HTTP handlers run under a try/catch OOM guard (503 instead of crash), the
 # same memory discipline.

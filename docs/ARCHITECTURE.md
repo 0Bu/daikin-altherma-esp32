@@ -470,6 +470,13 @@ Never allocate while holding a raw semaphore. Stage outside the critical section
 use `daik::SemGuard` for unwind-safe ownership. MQTT/Syslog event-side errors use stable literal
 pointers; materialize strings outside their status lock. A task catch cannot rescue a stranded mutex.
 
+Received WiFi frames are heap allocations too: the driver copies each into a dynamic RX buffer that
+lives until lwIP's consumer frees the pbuf. mDNS runs at priority 1 and queues every received
+packet, so a higher-priority task that computes for seconds, such as Weather's TLS certificate
+verification, parks mDNS traffic in the heap. `sdkconfig.defaults` bounds that backlog with the
+minimum mDNS action queue and caps dynamic RX buffers at the backlog plus one TCP receive window;
+its comments carry the bench measurement and the derivation.
+
 Diagnosis bucket storage is 1,920 bytes for 23 completed hours and one pending hour. Completed-run
 totals and outdoor sample counts use 32 bits; fifteen hourly clocks use 12-bit fields clamped at
 3,600 seconds. This retains the 80-byte bucket while storing exclusive censoring causes and a
