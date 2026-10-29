@@ -213,6 +213,15 @@ try {
     ["dynamic TLS buffers are disabled", () =>
       replaceOnce("sdkconfig.defaults", "CONFIG_MBEDTLS_DYNAMIC_BUFFER=y",
         "CONFIG_MBEDTLS_DYNAMIC_BUFFER=n")],
+    ["mDNS returns to the upstream 16-entry action queue", () =>
+      replaceOnce("sdkconfig.defaults", "CONFIG_MDNS_ACTION_QUEUE_LEN=8",
+        "CONFIG_MDNS_ACTION_QUEUE_LEN=16")],
+    ["WiFi RX buffers return to the upstream cap of 32", () =>
+      replaceOnce("sdkconfig.defaults", "CONFIG_ESP_WIFI_DYNAMIC_RX_BUFFER_NUM=16",
+        "CONFIG_ESP_WIFI_DYNAMIC_RX_BUFFER_NUM=32")],
+    ["the TCP receive window outgrows the WiFi RX cap", () =>
+      replaceOnce("sdkconfig.defaults", "CONFIG_LWIP_TCP_WND_DEFAULT=11520",
+        "CONFIG_LWIP_TCP_WND_DEFAULT=14400")],
     ["the size build folds MQTT helpers back into the fixed task frame", () =>
       replaceOnce("main/CMakeLists.txt", "-fno-inline-functions-called-once",
         "-finline-functions-called-once")],
