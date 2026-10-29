@@ -1020,7 +1020,7 @@ assert.match(sdkconfig, /^CONFIG_MBEDTLS_DYNAMIC_BUFFER=y$/m,
 assert.match(sdkconfig, /^CONFIG_MBEDTLS_DYNAMIC_FREE_CONFIG_DATA=n$/m,
   "TLS config/key/CA lifetime must not be shortened without reconnect redesign");
 // The WiFi RX cap is the mDNS action queue plus one full-size TCP receive window (mechanism,
-// measurement and limits: sdkconfig.defaults). Changing one side without the other either reopens
+// derivation and limits: sdkconfig.defaults). Changing one side without the other either reopens
 // the Weather heap trough or narrows the window TCP can actually use.
 const sdkInt = (name, fallback) => {
   const match = sdkconfig.match(new RegExp(`^${name}=(\\d+)$`, "m"));

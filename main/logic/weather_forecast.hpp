@@ -184,9 +184,9 @@ inline void weather_refresh_cancel_outstanding(uint64_t  requested_token,
 //
 // The response buffer is reserved before the gate samples the heap. From that sample to the
 // deepest point of the TLS open, a fetch claims the HTTP client (~2.5 KiB), mbedTLS handshake
-// state and WiFi RX buffers, on a heap whose binding limit is the largest CONTIGUOUS internal
-// block; reading, and the cJSON tree built after the client is released, claim far less. Bench
-// instrumentation of nine fetches with the mDNS queue and WiFi RX cap of sdkconfig.defaults
+// state, WiFi RX buffers and other socket state, on a heap bounded by its largest CONTIGUOUS
+// internal block; reading, and the cJSON tree built after the client is released, claim far less.
+// Bench instrumentation of nine fetches with the mDNS queue and WiFi RX cap of sdkconfig.defaults
 // (certificate bundle, ESP-IDF 6.1) measured 18.9 KiB of mbedTLS in every handshake, at most
 // 18.3 KiB of WiFi RX buffers and a whole claim of median 32.8 / maximum 44.0 KiB; with the
 // upstream queue and cap the maximum was 48.3 KiB, above the aggregate floor below. Live evidence
@@ -194,10 +194,10 @@ inline void weather_refresh_cancel_outstanding(uint64_t  requested_token,
 // `min_free_heap` low-water to 800 B; it survived only because the claim is brief. The gate keeps
 // the next fetch OUT of such a trough. Its 20 KiB contiguous floor rejects the measured 15.9 KiB
 // trough while admitting the production board's repeatable 22 KiB post-MQTT-quiesce block. The
-// 48 KiB aggregate floor leaves about 4 KiB beside the largest measured claim (a measurement, not
-// a bound: the RX cap alone admits more) and fits the resting footprint with Modbus TCP and syslog
-// connected; 56 KiB made Weather permanently unavailable with Modbus. A refusal uses the ordinary
-// 5-minute retry, not a 45-minute raster skip, so a valid forecast stays within its 90 minutes.
+// 48 KiB aggregate floor leaves about 4 KiB beside the largest measured claim (measured, not a
+// bound: the RX cap admits more) and fits the resting footprint with Modbus TCP and syslog
+// connected; 56 KiB kept Weather unavailable whenever Modbus ran. A refusal uses the ordinary
+// 5-minute retry, not a 45-minute raster skip, so a valid forecast does not expire (90 minutes).
 inline constexpr size_t WEATHER_FETCH_MIN_FREE_BYTES          = 48 * 1024;
 inline constexpr size_t WEATHER_FETCH_MIN_LARGEST_BLOCK_BYTES = 20 * 1024;
 

@@ -179,11 +179,11 @@ CONFIG_MDNS_ENABLE_BROWSE=n
 # buffer, in this action queue until it gets the CPU. A higher-priority task that computes for
 # seconds (Weather's TLS certificate verification takes ~2.7 s) therefore filled the default
 # 16-entry queue (26.6 KiB of RX buffers on the bench). Use the component minimum. While the queue
-# is full (after such starvation, or a burst of browse answers), mDNS drops received packets
-# (queriers resend), defers timed sends to the next timer tick, and fails a one-shot query or
-# hostname change started into it; the HomeHub search retries such an attempt twice. A network
-# event posted then is lost silently: an interface enabled at "got IP" stays silent until the next
-# "got IP", and a disable at disconnect is missed the same way.
+# is full (after such starvation, or a burst of multicast answers to one query), mDNS drops
+# received packets (queriers resend), defers timed sends to the next timer tick, and fails a
+# one-shot query or hostname change started into it; the HomeHub search retries such an attempt
+# twice. A network event posted then is lost silently: an interface enabled at "got IP" stays
+# silent until the next "got IP", and a disable at disconnect is missed the same way.
 CONFIG_MDNS_ACTION_QUEUE_LEN=8
 
 # C++ exceptions — HTTP handlers run under a try/catch OOM guard (503 instead of crash), the
