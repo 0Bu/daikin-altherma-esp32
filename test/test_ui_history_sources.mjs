@@ -16,7 +16,7 @@ assert.match(style, /\.vhist-state-graph \.vhist-tip \{[^}]*white-space:\s*pre-w
 assert.match(style,
   /\.vhist-graph\s*\{[^}]*--vhist-tip-base:\s*20px;[^}]*padding-top:\s*var\(--vhist-tip-base\);/,
   "every plot must keep one fixed compact distance below its legend");
-assert.match(style, /\.vhist-tip\s*\{[^}]*z-index:\s*3;[^}]*top:\s*var\(--vhist-tip-base\);/,
+assert.match(style, /\.vhist-tip\s*\{[^}]*z-index:\s*3;[^}]*top:\s*0;/,
   "the translucent tooltip must start at and paint over the plot instead of moving it");
 assert.doesNotMatch(style, /--vhist-tip-space/,
   "tooltip height must never feed back into graph layout");
@@ -203,7 +203,7 @@ const lifecycleSource = appState.slice(appState.indexOf("// ── History sourc
   appState.indexOf("// ── Navigation (dashboard ⇄ Settings)"));
 vm.runInContext(lifecycleSource + readAppFragments(["history.js"]) +
   "\nthis.__api = { hasHist, hasModbusHist, hasRoomHist, histCacheKey, historyView, histHtml, scrubText," +
-  " scrubMove, ensureHist, ensureHistPair, ensureDerived, DERIVED, syncHistSources, invalidateHistSources };", context,
+  " scrubMove, histSeriesToggle, ensureHist, ensureHistPair, ensureDerived, DERIVED, syncHistSources, invalidateHistSources };", context,
   { filename: "main/www/js/history.js" });
 const h = context.__api;
 
@@ -224,6 +224,31 @@ assert.deepEqual(Array.from(view.series[1].v), [453, 455, 456]);
 assert.match(h.scrubText(view, 1), /X10A nicht gemessen/);
 assert.match(h.scrubText(view, 1), /Modbus 45,5 °C/,
   "the same cursor instant reads both instruments and preserves the X10A gap");
+assert.equal(h.scrubText(view, 1, false), "X10A nicht gemessen\nModbus 45,5 °C",
+  "visible bubbles list one source per row and leave selected time to the axis");
+{
+  h.histSeriesToggle("dhw_tank", "modbus");
+  const hidden = h.histHtml("dhw_tank", "°C", "Tank");
+  assert.doesNotMatch(hidden, /class="vhist-line mb"/);
+  assert.match(hidden, /data-hist-series="modbus" aria-pressed="false"/);
+  assert.match(hidden, /data-hist-series="x10a" aria-pressed="true" disabled/,
+    "the last visible source cannot be disabled");
+  assert.doesNotMatch(h.scrubText(view, 1, false), /Modbus/);
+  h.histSeriesToggle("dhw_tank", "x10a");
+  assert.match(h.histHtml("dhw_tank", "°C", "Tank"), /class="vhist-pt"/,
+    "a stale or programmatic click cannot hide the last visible curve");
+  assert.match(h.histHtml("dhw_tank", "°C", "Tank", "modbus"), /class="vhist-line mb"/,
+    "a source-filtered view must keep its own sole curve visible");
+  const measured = x10a.v;
+  x10a.v = [null, null, null];
+  assert.match(h.histHtml("dhw_tank", "°C", "Tank"), /class="vhist-line mb"/,
+    "an all-gap remaining source must reveal an available curve instead of leaving an empty chart");
+  x10a.v = measured;
+  h.histSeriesToggle("dhw_tank", "modbus");
+  assert.match(h.histHtml("dhw_tank", "°C", "Tank"), /class="vhist-line mb"/);
+  assert.equal(S.hist.get("modbus:dhw_tank"), modbus,
+    "legend choices never discard the recorded source history");
+}
 
 const html = h.histHtml("dhw_tank", "°C", "Warmwasserspeichertemperatur");
 assert.match(html, /Aufzeichnung · 1 h/,
@@ -431,6 +456,7 @@ S.histPin.delete("outdoor_air");
       get offsetWidth() { offsetWidthReads++; return 0; } };
   };
   const tipNode = node("vhist-tip vhist-live");
+  const timeNode = node("vhist-time vhist-live");
   const crossNode = node("vhist-cross vhist-live");
   const markNode = node("vhist-mark vhist-live");     // never spread: that reads the offsetWidth spy
   markNode.dataset.source = "modbus";
@@ -438,7 +464,7 @@ S.histPin.delete("outdoor_air");
     clientWidth: 600, dataset: { hist: "outdoor_air", source: "modbus", n: "4" },
     querySelector: () => crossNode,
     querySelectorAll: () => [markNode],
-    parentElement: { querySelector: () => tipNode },
+    parentElement: { querySelector: (selector) => selector === ".vhist-time.vhist-live" ? timeNode : tipNode },
   };
   h.scrubMove(plot, 3);                                    // the newest sample of the 4-sample ring
   assert.equal(tipNode.style.props.get("--tip-p"), "100.000",
@@ -451,6 +477,11 @@ S.histPin.delete("outdoor_air");
   assert.equal(offsetWidthReads, 0,
     "the bubble's placement must not depend on measuring it: the squeezed width measured as fitting");
   assert.equal(tipNode.hidden, false, "the readout is still revealed by a scrub");
+  assert.equal(timeNode.hidden, false, "scrubbing reveals the separate time-axis label");
+  assert.match(timeNode.textContent, /^\d{2}:\d{2}$/);
+  assert.doesNotMatch(tipNode.textContent, /\d{2}:\d{2} · Modbus/,
+    "the selected time belongs on the axis rather than in the measurement bubble");
+  assert.equal(timeNode.style.props.get("--tip-p"), "100.000");
   h.scrubMove(plot, 0);
   assert.equal(tipNode.classList.contains("vhist-tip-right"), true,
     "a sample in the left half must move its bubble to the right of the crosshair");

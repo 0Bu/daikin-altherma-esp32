@@ -911,6 +911,11 @@ svg .sc-hit:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px
 .vhist-source i { display: inline-block; width: 16px; height: 8px; border-radius: 2px;
   box-sizing: border-box; border-top: 2px solid var(--vhist-colour);
   background: color-mix(in srgb, var(--vhist-colour) 14%, transparent); }
+button.vhist-source { appearance: none; border: 0; background: none; font: inherit;
+  padding: 4px 0; cursor: pointer; text-align: left; }
+button.vhist-source[aria-pressed="false"] { opacity: .5; text-decoration: line-through; }
+button.vhist-source:disabled { cursor: default; }
+button.vhist-source:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px; border-radius: 3px; }
 .vhist-source.mb { --vhist-colour: var(--src-mb); }
 .vhist-source.room { --vhist-colour: var(--src-room); overflow-wrap: anywhere; }
 .vhist-source small { color: inherit; font-size: 10.5px; }
@@ -980,16 +985,18 @@ svg .sc-hit:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px
 .modal-subtitle { margin-top: 8px; padding-top: 14px; border-top: 1px solid var(--line); }
 /* The SVG stretches to the panel width; overflow stays visible so the stroke isn't clipped at the
    extremes (the geometry deliberately uses the full viewBox height — see HIST_H in app.js). */
-/* The plot always starts at the SAME vertical position. The tooltip follows the cursor horizontally
-   and overlays the chart (ApexCharts-style); its translucent surface leaves the data underneath
-   visible. Never derive this padding from the tooltip height: a combined source readout is taller
-   than a shared-state readout, and letting either participate in layout makes the whole chart jump. */
-.vhist-graph { --vhist-tip-base: 20px; position: relative;
+/* The plot always starts at the same position below the legend. Bubbles share its grid cell and
+   stack in normal rows; longer readouts grow only the space below the plot so neither the second
+   bubble nor the time labels are clipped by an explanation panel. */
+.vhist-graph { --vhist-tip-base: 20px; position: relative; display: grid;
+  grid-template-columns: minmax(0, 1fr);
   padding-top: var(--vhist-tip-base); isolation: isolate;
   /* iOS must be able to start the same horizontal scrub on the bubble/graph as on the plot while a
      vertical gesture remains ordinary page scrolling. */
   touch-action: pan-y; }
-.vhist-plot { position: relative; height: 72px; }
+.vhist-plot { position: relative; height: 72px; grid-area: 1 / 1; align-self: start; min-width: 0; }
+.vhist-tips { grid-area: 1 / 1; align-self: start; display: grid; gap: 8px;
+  grid-template-columns: minmax(0, 1fr); min-width: 0; width: 100%; pointer-events: none; z-index: 3; }
 /* pan-y hands VERTICAL gestures back to the page (the user must still be able to scroll past the
    chart) while horizontal movement becomes a scrub. Claiming both axes would trap page scrolling
    inside a 72 px box. */
@@ -1014,10 +1021,10 @@ svg .sc-hit:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px
 /* `--tip-p` is the selected sample (0..100). Keep the vertical crosshair itself unobstructed:
    the left half opens RIGHT and the right half opens LEFT, with a small leader across the gap.
    Each side's max-width is exactly its available half, so even a tall/mobile readout cannot spill
-   back across the selected instant. Width is never measured and height never participates in
-   layout; pinned and live bubbles therefore obey the same stable rule. */
-.vhist-tip { --tip-p: 0; --vhist-tip-gap: 10px; position: absolute; z-index: 3;
-  top: var(--vhist-tip-base); left: calc(var(--tip-p) * 1%); white-space: pre-wrap;
+   back across the selected instant. Width is never measured; pinned and live bubbles obey the same
+   horizontal rule while separate rows keep both readable. */
+.vhist-tip { --tip-p: 0; --vhist-tip-gap: 10px; position: relative; z-index: 3;
+  top: 0; left: calc(var(--tip-p) * 1%); white-space: pre-wrap;
   pointer-events: none; font-size: 12px; color: var(--fg);
   /* Transparency belongs only to the surface, never to the text. The small blur preserves contrast
      in both themes while the chart/card remains visibly present behind the readout. */
@@ -1035,7 +1042,7 @@ svg .sc-hit:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px
 .vhist-tip-right::before { right: 100%; }
 .vhist-tip-left::before { left: 100%; }
 .vhist-env3 .vhist-tip { min-width: 0; white-space: normal; display: grid;
-  grid-template-columns: repeat(3, minmax(0, max-content)); column-gap: 14px;
+  grid-template-columns: minmax(0, 1fr);
   padding: 5px 8px; line-height: 1.35; border-radius: 8px;
   box-shadow: 0 4px 14px rgba(16,20,28,.12); }
 .vhist-env3 .vhist-tip-line { display: block; }
@@ -1119,6 +1126,17 @@ svg .sc-hit:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px
 .inspect-card .vhist-now { box-shadow: 0 0 0 2.5px var(--brand-tint); }
 .vhist-axis { display: flex; justify-content: space-between; gap: 10px; margin-top: 6px;
   font-size: 11.5px; color: var(--muted); }
+/* A label's anchor moves from its left to its right edge across the domain. This keeps arbitrary
+   localized times inside the card, with the small tick exactly under the selected crosshair. */
+.vhist-times { grid-area: 2 / 1; display: grid; gap: 6px; font-size: 11.5px;
+  line-height: 1.35; color: var(--fg); pointer-events: none; }
+.vhist-time { position: relative; justify-self: start; width: max-content; max-width: 100%;
+  margin-top: 6px; left: calc(var(--tip-p) * 1%);
+  transform: translateX(calc(var(--tip-p) * -1%)); }
+.vhist-time::before { content: ""; position: absolute; top: -4px; height: 4px; width: 1px;
+  left: calc(var(--tip-p) * 1%); background: var(--muted); }
+.vhist-time.vhist-pinned { color: var(--brand-strong); font-weight: 600; }
+.vhist-time.vhist-pinned::before { background: var(--brand-strong); }
 .vhist-axis.vhist-axis-future { position: relative; min-height: 18px; }
 .vhist-axis-future .vhist-axis-now { position: absolute; left: calc(var(--now-p) * 1%);
   transform: translateX(-50%); color: var(--muted); font-weight: 700; }
@@ -1405,8 +1423,7 @@ html.modal-open, body.modal-open { overflow: hidden; overscroll-behavior: none; 
      Stack it below the time span instead of squeezing both into narrow multi-line columns. */
   .vhist-head { display: grid; justify-content: stretch; gap: 2px; }
   .vhist-range { text-align: left; }
-  /* The compact two-row climate tooltip is a desktop optimisation. A phone stacks the coloured
-     readings, but the tooltip still overlays the plot so the plot position remains fixed. */
+  /* Keep the same vertical reading order on phones with a little more line spacing. */
   .vhist-env3 .vhist-tip { min-width: 0; white-space: pre-wrap;
     display: block; padding: 7px 10px; line-height: 1.55; }
   .modal-actions { flex-direction: column-reverse; }

@@ -40,6 +40,8 @@ const S = {
   // re-resolves to the same measurement instead of to whatever now occupies that slot
   // (logic/history.hpp's history_pin_index).
   histPin: new Map(),
+  // Browser-only legend choices survive poll rebuilds and are shared by both views of a chart.
+  histHidden: new Map(),
   // The label of the row whose trend is being scrubbed right now (mouse hover or finger down), or
   // null. It FREEZES the #valueGroups rebuild — see renderCards. Without that the innerHTML is
   // replaced on each values-poll render under the pointer: the captured element dies mid-drag and

@@ -108,18 +108,20 @@ const document = {
   querySelectorAll(selector) { return selector === "#schem .sc-hit" ? [elements.gEnv3] : []; },
 };
 const sandbox = vm.createContext({
-  S, document,
+  S, document, renderSettings() {},
   navigator: { language: "de-DE" },
   localStorage: { getItem() { return null; }, setItem() {} },
   setTimeout, clearTimeout,
   fetch() { throw new Error("fresh seeded histories must not be fetched in this test"); },
 });
 vm.runInContext(`${source}
+  renderCards = () => {}; renderSettings = () => {};
   this.__api = {
     render: () => { LANG = "de"; renderEnv3Pill(); renderInspect(); },
     pill: () => { LANG = "de"; renderEnv3Pill(); },
     tooltip: (i) => { LANG = "de"; return scrubText(historyView(ENV3_COMBINED_ID), i); },
     tooltipHtml: (i) => { LANG = "de"; return env3ScrubHtml(historyView(ENV3_COMBINED_ID), i); },
+    toggle: (source) => histSeriesToggle(ENV3_COMBINED_ID, source),
   };`, sandbox, { filename: "main/www/app.sources" });
 
 sandbox.__api.render();
@@ -173,7 +175,7 @@ assert.doesNotMatch(elements.inspHist.innerHTML,
   "Open-Meteo provenance belongs in the forecast tooltip, not the always-visible legend");
 const legendHtml = elements.inspHist.innerHTML.match(/<div class="vhist-legend">([\s\S]*?)<\/div>/)?.[1] || "";
 assert.match(legendHtml,
-  /env-temperature[^>]*><i><\/i>Temperatur<\/span>[\s\S]*env-humidity[^>]*><i><\/i>Luftfeuchte<\/span>[\s\S]*env-pressure[^>]*><i><\/i>Luftdruck<\/span>/,
+  /env-temperature[^>]*><i><\/i>Temperatur<\/button>[\s\S]*env-humidity[^>]*><i><\/i>Luftfeuchte<\/button>[\s\S]*env-pressure[^>]*><i><\/i>Luftdruck<\/button>/,
   "the legend must retain only the three coloured measurement names");
 assert.doesNotMatch(legendHtml, /<small>|°C|%|hPa/,
   "units belong in the tooltip, not the always-visible legend");
@@ -190,8 +192,8 @@ assert.match(style, /\.vhist-graph\s*\{[^}]*--vhist-tip-base:\s*20px;[^}]*paddin
 assert.doesNotMatch(style, /\.vhist-env3 \.vhist-graph\s*\{/,
   "climate tooltip height must not alter graph layout");
 assert.match(style,
-  /\.vhist-env3 \.vhist-tip\s*\{[^}]*grid-template-columns:\s*repeat\(3, minmax\(0, max-content\)\)/,
-  "the three wide-screen readings must share one compact tooltip row");
+  /\.vhist-env3 \.vhist-tip\s*\{[^}]*grid-template-columns:\s*minmax\(0, 1fr\)/,
+  "the three readings must occupy separate tooltip rows on every viewport");
 assert.match(style,
   /@media \(max-width: 480px\)[\s\S]*\.vhist-env3 \.vhist-tip\s*\{[^}]*display:\s*block/,
   "phones must stack the same tooltip rows while the plot stays fixed underneath");
@@ -201,7 +203,6 @@ assert.equal(sandbox.__api.tooltip(2),
   `${measuredClock}\nTemperatur  21,5 °C\nLuftfeuchte  48,0 %\nLuftdruck  1.007,0 hPa`,
   "one readable tooltip must report the selected instant and all three measurements");
 assert.equal(sandbox.__api.tooltipHtml(2),
-  `<span class="vhist-tip-line vhist-tip-meta">${measuredClock}</span>` +
   `<span class="vhist-tip-line env-temperature">Temperatur  21,5 °C</span>` +
   `<span class="vhist-tip-line env-humidity">Luftfeuchte  48,0 %</span>` +
   `<span class="vhist-tip-line env-pressure">Luftdruck  1.007,0 hPa</span>`,
@@ -212,11 +213,27 @@ assert.equal(sandbox.__api.tooltip(3),
   `${forecastClock}\nOpen-Meteo · Prognose\nTemperatur  22,0 °C\nLuftfeuchte  46,0 %\nLuftdruck  1.008,0 hPa`,
   "the same tooltip path must expose every provider-timestamped future value");
 assert.equal(sandbox.__api.tooltipHtml(3),
-  `<span class="vhist-tip-line vhist-tip-meta">${forecastClock} · Open-Meteo · Prognose</span>` +
+  `<span class="vhist-tip-line vhist-tip-meta">Open-Meteo · Prognose</span>` +
   `<span class="vhist-tip-line env-temperature">Temperatur  22,0 °C</span>` +
   `<span class="vhist-tip-line env-humidity">Luftfeuchte  46,0 %</span>` +
   `<span class="vhist-tip-line env-pressure">Luftdruck  1.008,0 hPa</span>`,
   "forecast provenance stays neutral while all three forecast rows keep their series colours");
+
+sandbox.__api.toggle("env3_humidity");
+assert.doesNotMatch(elements.inspHist.innerHTML, /class="vhist-line env-humidity"/,
+  "the actual inspector must redraw immediately when its legend changes");
+assert.doesNotMatch(elements.inspHist.innerHTML, /class="vhist-line env-forecast-humidity"/,
+  "a climate legend controls both measured and forecast curves");
+assert.doesNotMatch(sandbox.__api.tooltipHtml(3), /Luftfeuchte/);
+assert.match(sandbox.__api.tooltipHtml(3), /vhist-tip-line env-pressure">Luftdruck/,
+  "hiding the middle reading must preserve the other measurement colours");
+sandbox.__api.toggle("env3_temperature");
+assert.match(elements.inspHist.innerHTML, /data-hist-series="env3_pressure" aria-pressed="true" disabled/);
+sandbox.__api.toggle("env3_pressure");
+assert.match(elements.inspHist.innerHTML, /class="vhist-line env-pressure"/,
+  "the final visible climate curve must remain visible even for a direct handler call");
+sandbox.__api.toggle("env3_humidity");
+sandbox.__api.toggle("env3_temperature");
 
 // Transport loss retires only the live status claims. The dated historical measurements remain
 // inspectable; a values-only error does not erase independent freshly obtained ENV III status.

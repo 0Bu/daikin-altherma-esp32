@@ -1790,6 +1790,199 @@ async function assertHybridRoom(page, context, locale) {
   }
 }
 
+async function assertHistoryReadouts(page, context) {
+  // Use the shipped chart builders and delegated touch/keyboard wiring inside the same clipping
+  // surface as an expanded value row. Synthetic rings keep this independent of device history.
+  await page.evaluate(`(() => {
+    window.__browserHistoryOriginal = { status:S.status, hist:S.hist, histPin:S.histPin,
+      histHidden:S.histHidden,scrub:S.scrub,live:S.live,values:S._values,modbus:S._modbus };
+    S.status = structuredClone(S.status);
+    S.hist = new Map(); S.histPin = new Map(); S.histHidden = new Map(); S.scrub = null; S.live = null;
+    S._values = []; S._modbus = [];
+    const host = document.createElement("div");
+    host.id = "browserHistoryFixture"; host.className = "vdesc-inner";
+    // Keep the native finger stationary vertically as readouts grow; a fixture appended at the
+    // document tail would invoke browser scroll anchoring and turn a horizontal drag into pan-y.
+    host.style.cssText = "position:fixed;top:24px;left:50%;transform:translateX(-50%);" +
+      "width:calc(100% - 32px);max-width:800px;z-index:10000;background:var(--bg)";
+    document.body.appendChild(host);
+    wireTrendScrub(host);
+    window.__browserHistoryRender = () => {
+      const id = host.dataset.hist;
+      host.innerHTML = '<div class="vdesc-body" style="margin:0;transform:none">' +
+        (id === ENV3_COMBINED_ID ? env3HistHtml() : histHtml(id, id === "dhw_tank" ? "°C" : "", id)) + '</div>';
+    };
+    return true;
+  })()`);
+  await page.send("Emulation.setTouchEmulationEnabled", { enabled:true });
+  try {
+    for (const id of ["dhw_tank", "valve_dhw", "env3_combined"]) {
+      await page.evaluate(`(() => {
+        const id = ${JSON.stringify(id)}, end = Date.parse("2026-08-12T10:00:00Z") / 1000;
+        const ring = (v, unit = "°C") => ({at:Date.now(),gen:1,dt:300,b0:100,
+          t0:end - 5700,unit,held:[],v});
+        S.hist.clear(); S.histPin.clear(); S.histHidden.clear(); S.scrub = null;
+        S.status.history = {rows:[{id,label:id}],modbus_rows:[{id,label:id}],env3_rows:[]};
+        S.status.ntp = {synced:true,time:"2026-08-12T10:00:00Z"};
+        if (id === ENV3_COMBINED_ID) {
+          S.status.history.rows = []; S.status.history.modbus_rows = [];
+          S.status.history.env3_rows = ENV3_COMBINED_SERIES.map(s => ({id:s.id,label:s.id}));
+          S.status.env3 = {supported:true,enabled:true,fresh:true,
+            temperature_c:21.5,humidity_pct:48,pressure_hpa:1007};
+          S.status.weather_forecast = {configured:true,available:true,fresh:true,hourly:[1,2,3].map(hour => ({
+            time_unix_s:end + hour * 3600,temperature_c:22 + hour,humidity_pct:48 - hour,
+            pressure_hpa:1007 + hour}))};
+          for (const [index,s] of ENV3_COMBINED_SERIES.entries())
+            S.hist.set(histCacheKey(s.id,"env3"),ring(Array.from({length:20},(_,i) =>
+              [205 + i,500 - i,10050 + i][index]),["°C","%","hPa"][index]));
+        } else {
+          const values = Array.from({length:20},(_,i) => id === "dhw_tank" ? 480 - i : i < 10 ? 0 : 10);
+          S.hist.set(id,ring(values,id === "dhw_tank" ? "°C" : ""));
+          S.hist.set(histCacheKey(id,"modbus"),ring(values.map(v => id === "dhw_tank" ? v + 2 : v),
+            id === "dhw_tank" ? "°C" : ""));
+        }
+        document.getElementById("browserHistoryFixture").dataset.hist = id;
+        window.__browserHistoryRender();
+        document.getElementById("browserHistoryFixture").scrollIntoView({block:"center",behavior:"instant"});
+        return true;
+      })()`);
+      const point = async (fraction) => page.evaluate(`(() => {
+        const plot = document.querySelector("#browserHistoryFixture [data-hist]");
+        const r = plot.getBoundingClientRect();
+        return {x:r.left + r.width * ${fraction},y:r.top + r.height / 2};
+      })()`);
+      const touch = async (type, position) => page.send("Input.dispatchTouchEvent", {
+        type, touchPoints:position ? [{...position,id:1,radiusX:1,radiusY:1,force:1}] : [],
+      });
+      const start = await point(0.2);
+      await touch("touchStart", start);
+      await touch("touchEnd");
+      assert.equal(await page.evaluate(`S.histPin.has(${JSON.stringify(id)})`),true,
+        `${context}/${id}: a real touch release pins its selected sample`);
+      await page.evaluate("window.__browserHistoryRender(); true");
+      const baseline = await page.evaluate(`(() => {
+        const host = document.getElementById("browserHistoryFixture");
+        const p = host.querySelector("[data-hist]").getBoundingClientRect();
+        return {top:p.top + scrollY,height:p.height,
+          tip:host.querySelector(".vhist-tip.vhist-pinned").textContent,
+          time:host.querySelector(".vhist-time.vhist-pinned").textContent};
+      })()`);
+      if(id !== "valve_dhw")
+        assert.equal(baseline.tip.includes(baseline.time),false,
+          `${context}/${id}: pinned measurement time belongs on the axis rather than in the bubble`);
+      await touch("touchStart", await point(0.3));
+      for (const fraction of [0.35,0.8,1,0]) {
+        await touch("touchMove", await point(fraction));
+        await page.waitFor(`(() => {
+          const host=document.getElementById("browserHistoryFixture"),plot=host.querySelector("[data-hist]");
+          const i=scrubIndex(plot,plot.getBoundingClientRect().left + plot.clientWidth * ${fraction});
+          return host.querySelector(".vhist-time.vhist-live").textContent === scrubTime(historyView(plot.dataset.hist),i);
+        })()`);
+        const state = await page.evaluate(`(() => {
+          const host = document.getElementById("browserHistoryFixture");
+          const plot = host.querySelector("[data-hist]");
+          const pin = host.querySelector(".vhist-tip.vhist-pinned"), live = host.querySelector(".vhist-tip.vhist-live");
+          const pinTime = host.querySelector(".vhist-time.vhist-pinned"), liveTime = host.querySelector(".vhist-time.vhist-live");
+          const rect = el => {const r=el.getBoundingClientRect();return {left:r.left,right:r.right,
+            top:r.top + scrollY,bottom:r.bottom + scrollY,height:r.height,width:r.width};};
+          const p=rect(plot), a=rect(pin), b=rect(live), c=rect(pinTime), d=rect(liveTime), clip=rect(host);
+          const view=historyView(plot.dataset.hist,plot.dataset.source || "");
+          const i=scrubIndex(plot,plot.getBoundingClientRect().left + plot.clientWidth * ${fraction});
+          return {visible:!live.hidden && !liveTime.hidden && a.height > 0 && b.height > 0,
+            stacked:b.top >= a.bottom + 7, timesStacked:d.top >= c.bottom,
+            plotTop:p.top,plotHeight:p.height,pin:pin.textContent,pinTime:pinTime.textContent,
+            axisTime:liveTime.textContent,expectedTime:scrubTime(view,i),
+            selectedTimeInBubble:!STATE_HIST[plot.dataset.hist] && live.textContent.includes(scrubTime(view,i)),
+            axisBelow:c.top >= p.bottom && d.top >= p.bottom,
+            inside:[a,b,c,d].every(r=>r.left >= clip.left - 1 && r.right <= clip.right + 1 && r.bottom <= clip.bottom + 1),
+            bounds:{pin:a,live:b,pinTime:c,liveTime:d,clip},
+            forecast:i >= view.v.length,
+            forecastLabel:live.textContent.includes(t("hist.forecast")),
+            cross:!plot.querySelector(".vhist-cross.vhist-pinned").hidden};
+        })()`);
+        const label = `${context}/${id}/${fraction}`;
+        assert.equal(state.visible,true,`${label}: both selected readouts remain visible`);
+        assert.equal(state.stacked,true,`${label}: the live bubble must be below the pinned bubble`);
+        assert.equal(state.timesStacked,true,`${label}: selected times must not hide each other`);
+        assert.equal(state.inside,true,`${label}: neither readout nor time may be clipped: ${JSON.stringify(state.bounds)}`);
+        assert.equal(state.axisBelow,true,`${label}: selected times belong below the curve`);
+        assert.equal(state.axisTime,state.expectedTime,`${label}: the axis follows the selected sample`);
+        assert.equal(state.selectedTimeInBubble,false,`${label}: measurement tooltips contain values, with time on the axis`);
+        assert.equal(state.pin,baseline.tip,`${label}: movement must preserve the pinned reading`);
+        assert.equal(state.pinTime,baseline.time,`${label}: movement must preserve its pinned instant`);
+        assert.equal(state.cross,true,`${label}: the pinned crosshair remains visible`);
+        assert.ok(Math.abs(state.plotTop-baseline.top)<1,`${label}: tooltip height must not move the plot`);
+        assert.equal(state.plotHeight,baseline.height,`${label}: tooltip height must not stretch the plot`);
+        if(id === "env3_combined" && fraction === 0.8) {
+          assert.equal(state.forecast,true,`${label}: the gesture reaches a provider forecast point`);
+          assert.equal(state.forecastLabel,true,`${label}: forecast provenance remains visible`);
+        }
+        if(fraction === 0.35)
+          await captureNativeEvidence(page,`${context}/${id}/comparison`,"browserHistoryFixture");
+      }
+      await captureNativeEvidence(page,`${context}/${id}`,"browserHistoryFixture");
+      await touch("touchCancel");
+      assert.equal(await page.evaluate(`(() => {
+        const host = document.getElementById("browserHistoryFixture");
+        return host.querySelector(".vhist-tip.vhist-live").hidden && host.querySelector(".vhist-time.vhist-live").hidden &&
+          !host.querySelector(".vhist-tip.vhist-pinned").hidden && !host.querySelector(".vhist-time.vhist-pinned").hidden;
+      })()`),true,`${context}/${id}: cancelling removes only the moving readout and its time`);
+      await page.evaluate('document.querySelector("#browserHistoryFixture [data-hist]").focus(); true');
+      await page.key("End",{code:"End",keyCode:35});
+      assert.equal(await page.evaluate(`(() => {
+        const host=document.getElementById("browserHistoryFixture"),plot=host.querySelector("[data-hist]");
+        return !host.querySelector(".vhist-time.vhist-live").hidden &&
+          host.querySelector(".vhist-time.vhist-live").textContent === scrubTime(historyView(plot.dataset.hist),scrubCount(plot)-1);
+      })()`),true,`${context}/${id}: keyboard selection updates the same axis time`);
+      await page.evaluate('document.querySelector("#browserHistoryFixture [data-hist]").blur(); true');
+      if (id !== "valve_dhw") {
+        const legend = await page.evaluate(`(() => {
+          const host=document.getElementById("browserHistoryFixture"),id=host.dataset.hist;
+          const sources=id === "dhw_tank" ? ["x10a","modbus"]
+            : ["env3_temperature","env3_humidity","env3_pressure"];
+          const pathClass={modbus:"mb",env3_humidity:"env-humidity",env3_pressure:"env-pressure"};
+          const rings=JSON.stringify(Array.from(S.hist));
+          const button=source=>host.querySelector('[data-hist-series="' + source + '"]');
+          const changed=[];
+          for (const source of sources.slice(1)) {
+            const name=historyView(id).series.find(s=>s.source === source).name;
+            button(source).click(); window.__browserHistoryRender();
+            const plot=host.querySelector("[data-hist]");
+            scrubMove(plot,+plot.dataset.n - 1);
+            const cls=pathClass[source];
+            changed.push(button(source).getAttribute("aria-pressed") === "false" && !button(source).disabled &&
+              !host.querySelector(".vhist-line." + cls) && !host.querySelector(".vhist-area." + cls) &&
+              !host.querySelector(".vhist-tip.vhist-pinned").textContent.includes(source === "modbus" ? "Modbus" : name) &&
+              Array.from(host.querySelectorAll('.vhist-mark.vhist-live[data-source="' + source + '"]')).every(mark=>mark.hidden));
+          }
+          const last=sources[0],hidden=JSON.stringify(Array.from(S.histHidden.get(id)));
+          const protectedLast=button(last).disabled && button(last).getAttribute("aria-pressed") === "true";
+          button(last).click(); window.__browserHistoryRender();
+          const unchanged=JSON.stringify(Array.from(S.histHidden.get(id))) === hidden;
+          for (const source of sources.slice(1)) {button(source).click();window.__browserHistoryRender();}
+          return {hidden:changed.every(Boolean),protectedLast,unchanged,
+            restored:sources.every(source=>button(source).getAttribute("aria-pressed") === "true" && !button(source).disabled) &&
+              sources.slice(1).every(source=>!!host.querySelector(".vhist-line." + pathClass[source])),
+            ringsUnchanged:JSON.stringify(Array.from(S.hist)) === rings};
+        })()`);
+        assert.deepEqual(legend,{hidden:true,protectedLast:true,unchanged:true,restored:true,ringsUnchanged:true},
+          `${context}/${id}: legend clicks hide and restore independent series while retaining the final curve and source history`);
+      }
+    }
+    assert.deepEqual(page.diagnostics,[],`${context}: history interactions must emit no browser errors`);
+  } finally {
+    await page.send("Emulation.setTouchEmulationEnabled",{enabled:false});
+    await page.evaluate(`(() => {
+      const original=window.__browserHistoryOriginal;
+      Object.assign(S,{status:original.status,hist:original.hist,histPin:original.histPin,
+        histHidden:original.histHidden,scrub:original.scrub,live:original.live,_values:original.values,_modbus:original.modbus});
+      document.getElementById("browserHistoryFixture").remove();
+      delete window.__browserHistoryOriginal; delete window.__browserHistoryRender;
+      renderApp(); window.scrollTo(0,0); return true;
+    })()`);
+  }
+}
+
 let browser, server;
 try {
   server = await startFixtureServer({ pageFile, projectRoot: ROOT });
@@ -1948,6 +2141,16 @@ try {
     await openModalWithKeyboard(page, "refTempModal", modalTriggers.refTempModal,
       "selftest/desktop/de/refTempModal", { route: false });
     throw new Error("route-isolation-bypass mutation unexpectedly survived the route gate");
+  } else if (process.argv.includes("--history-only")) {
+    for (const viewport of viewports) {
+      await page.viewport(viewport.width, viewport.height);
+      for (const locale of browserLocales) {
+        await activateLocale(page, locale);
+        await assertHistoryReadouts(page, `${viewport.name}/${locale}/history`);
+        console.log(`history readouts checked: ${viewport.name}/${locale}`);
+      }
+    }
+    console.log(`focused history rendering passed: ${browserLocales.length} locales; ${viewports.length} viewports`);
   } else if (process.argv.includes("--room-only")) {
     for (const viewport of viewports) {
       await page.viewport(viewport.width, viewport.height);
@@ -2031,6 +2234,7 @@ try {
       nativeAltherma4Checks++;
       await assertHybridRoom(page, `${viewport.name}/${locale}/hybrid-room`, locale);
       hybridRoomChecks++;
+      await assertHistoryReadouts(page, `${viewport.name}/${locale}/history`);
 
       // Firmware errors are intentionally preserved verbatim because they carry the safe next step.
       // Unlike compact progress labels, they can be a sentence. Exercise the production failure
