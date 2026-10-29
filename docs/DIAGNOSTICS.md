@@ -123,10 +123,10 @@ accepted. This project allowance is based on observed 6–22 second tails, not a
 No start allowance is assumed. Saturated or incomplete evidence keeps the row **MEASURED**.
 A run that crosses an hour boundary is stored again once it stops, normally within seconds, so a
 restart keeps it. A restart before that save, which needs synchronized time and a working history
-store, can still lose the run. A lost run goes unnoticed and is usually a long one, so cycling can
-look shorter than it was; the row stays **MEASURED** only while lost runs are a large enough share
-of all runs. If the compressor stops during a defrost, one heating run counts as several; whether
-it does has not been checked yet.
+store, can still lose the run. A lost run goes unnoticed and tends to be a long one, so cycling
+can look shorter than it was; the row stays **MEASURED** only while lost runs are a large enough
+share of all runs or leave too few completed runs. If the compressor stops during a defrost, one
+heating run counts as several; whether it does has not been checked yet.
 
 **Evidence and limits:** [Compressor cycling](DIAGNOSTIC_EVIDENCE.md#diagnosis-cycling)
 

@@ -11,7 +11,7 @@
       "scope": "Late-completion journal revisions: live revision mapping with the aged-out fallback, boot-latched wall-clock labels and in-bucket end times, the rewind target with its clock-step guard, the revision-aware boot index, the revision arm/take/emit state and the DHW-only-restart identity rule, with every added outcome taken. Against main the header grows from 125/125 (Clang) and 153/153 (GCC) outcomes. Every other header inventory, every historical ratio and the 95-percent executable-line floor are unchanged.",
       "validation_boundary": "All three local compilers passed the pure C++ suite, the 95-percent line floor and the exact branch ratchet apart from this header's reported new counts. Clang completed the canonical entrypoint; GCC 13 and GCC 15 ran in containers until the branch ratchet reported the counts.",
       "source": "main/logic/checkup_persist.hpp",
-      "source_sha256": "7ed35881029b9fde5eb5588d340764496578d72b390093016fc008d3bb14e6e6",
+      "source_sha256": "8fd463e2d27e4c78672b1a400a50ad949685ffdbb5f1e9aa9c4fa5868e8b0211",
       "test_source_sha256": "cabc0746fb9831342218c8a53c425f9172cc77d84deb52ff2f818ac73a41c7e7",
       "measured_profiles": {
         "clang-17-darwin": [

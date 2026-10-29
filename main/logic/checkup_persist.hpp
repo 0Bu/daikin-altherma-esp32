@@ -433,8 +433,8 @@ inline constexpr bool checkup_journal_dhw_withheld(bool restart_armed, uint32_t 
 // at most CHECKUP_JOURNAL_REVISION_SPAN hours newer than R, as long as no backward clock step of
 // more than one bucket re-latched the labels (checkup_journal_latched_newest); a copy that such a
 // step pushed beyond the span is skipped. The newest-sequence bucket (`anchor`) therefore bounds
-// the restorable hours to anchor ± SPAN: an unplanned restart during a replay can leave
-// older-sequence copies of hours beyond the anchor. Keep the first, i.e. newest, copy of each hour.
+// the restorable hours to anchor ± SPAN: a restart during a replay (planned shutdown flushes are
+// bounded) can leave older-sequence copies beyond the anchor. Keep each hour's first, newest, copy.
 // Once a bucket is more than twice the span older than the anchor, nothing earlier can still reach
 // the final window, which ends at the newest kept hour.
 inline constexpr size_t CHECKUP_JOURNAL_INDEX_CAP =
