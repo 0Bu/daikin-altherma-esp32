@@ -130,13 +130,11 @@ int64_t                s_last_commit_us = kNoCommitUs;
 // that dropped DHW hours), in this boot's monotonic clock; -1 while the lifecycle alone decides.
 int64_t                s_dhw_scope_us      = -1;
 uint8_t                s_live_commit_count = 0; // completed in THIS monotonic clock, max 23
-// Oldest completed monotonic hour whose run completed after its journal record may already have
-// been appended. It is appended again and the cursor replays every later live hour; see
-// logic::checkup_journal_next_target. `emitted` and `acked` retire it once that append commits.
-bool                 s_revision_armed   = false;
-uint32_t             s_revision_bucket  = 0;
-int64_t              s_revision_emitted = INT64_MIN;
-std::atomic<int64_t> s_revision_acked{INT64_MIN};
+// Pending re-append of a completed hour whose run completed after its record may already have been
+// appended (logic::CheckupJournalRevision). The journal writer confirms each committed checkup
+// append through `s_revision_acked` without taking s_mtx.
+logic::CheckupJournalRevision s_revision;
+std::atomic<int64_t>          s_revision_acked{INT64_MIN};
 // Monotonic-to-wall-clock label offset, latched once per boot
 // (logic::checkup_journal_latched_newest).
 int64_t s_journal_label_offset = INT64_MIN;
@@ -290,8 +288,7 @@ void persist_wipe(bool keep_handoff = false) {
     s_dhw_scope_us         = -1; // both rings restart together
     s_source_last_us       = -1;
     s_pressure_now         = -1;
-    s_revision_armed       = false; // the withdrawn hours have nothing left to re-append
-    s_revision_emitted     = INT64_MIN;
+    s_revision             = {};    // the withdrawn hours have nothing left to re-append
     s_dhw_restart_armed    = false; // no hour older than the wipe remains to be appended
     // Retain s_model_fp for the next record; detection confirms it before consuming a reset.
     checkup_persist_seal();
@@ -343,11 +340,7 @@ void fold_checkup_locked(const logic::CheckupSample& s, int64_t now) {
     const bool     run_open  = s_state.run_open;
     const uint32_t run_start = s_state.run_start_bucket;
     if (!logic::checkup_step(s_state, P().ring.pending, s, now, &P().ring)) return;
-    if (run_open && (!s_revision_armed || run_start < s_revision_bucket)) {
-        s_revision_armed   = true;
-        s_revision_bucket  = run_start;
-        s_revision_emitted = INT64_MIN;
-    }
+    logic::checkup_journal_revision_arm(s_revision, run_open, run_start);
     checkup_persist_seal();
 }
 
@@ -794,27 +787,13 @@ bool checkup_flash_next(int64_t now_unix_s, int64_t after_bucket,
         ? s_live_commit_count : P().ring.count;
     const auto   current    = static_cast<uint32_t>(
         s_last_commit_us / (static_cast<int64_t>(logic::CHECKUP_DT_S) * 1000000LL));
-    int64_t revision = INT64_MIN;
-    if (s_revision_armed && s_revision_emitted != INT64_MIN &&
-        s_revision_acked.load() == s_revision_emitted) {
-        s_revision_armed = false; // committed; the cursor now replays the later live hours
-    } else if (s_revision_armed) {
-        revision =
-            logic::checkup_journal_revision_bucket(newest, current, s_revision_bucket, live_count);
-        // Not appended yet, or nothing live to anchor it: the ordinary append owns it either way.
-        if (revision == INT64_MIN || after_bucket == INT64_MIN || revision > after_bucket) {
-            s_revision_armed = false;
-            revision         = INT64_MIN;
-        }
-    }
-    if (!s_revision_armed) s_revision_emitted = INT64_MIN;
+    const int64_t revision = logic::checkup_journal_revision_take(
+        s_revision, s_revision_acked.load(), newest, current, live_count, after_bucket);
     const int64_t target =
         logic::checkup_journal_next_target(after_bucket, newest, live_count, revision);
     if (target == INT64_MIN) return false;
-    if (target == revision) {
-        s_revision_emitted = target;
-        s_revision_acked.store(INT64_MIN); // only this append's confirmation retires it
-    }
+    if (logic::checkup_journal_revision_emit(s_revision, target, revision))
+        s_revision_acked.store(INT64_MIN);
 
     const size_t age = static_cast<size_t>(newest - target);
     const size_t ring_i = (static_cast<size_t>(P().ring.head) +
@@ -834,7 +813,8 @@ bool checkup_flash_next(int64_t now_unix_s, int64_t after_bucket,
     payload.dhw = P().dhw.buf[dhw_i];
     // An hour completed before a DHW-only restart was emptied by it: never present that empty
     // bucket as the current circulation source's evidence (a restore then restarts the DHW scope).
-    if (s_dhw_restart_armed && current - 1 - age < s_dhw_restart_bucket) {
+    if (logic::checkup_journal_dhw_withheld(s_dhw_restart_armed, s_dhw_restart_bucket, current,
+                                            age)) {
         payload.dhw_source_fp = 0;
         payload.dhw           = kEmptyDhwLossBucket;
     }

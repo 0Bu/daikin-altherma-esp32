@@ -371,9 +371,69 @@ inline constexpr int64_t checkup_journal_next_target(int64_t after_bucket,
     return checkup_journal_next_live_bucket(after_bucket, newest_live_bucket, live_count);
 }
 
+// The oldest completed monotonic hour whose record the journal may have appended before a run that
+// started in it completed. One is enough: the replay from it covers every later live hour.
+// `emitted` is the wall-clock bucket handed to the writer for it, INT64_MIN while none is.
+struct CheckupJournalRevision {
+    bool     armed   = false;
+    uint32_t bucket  = 0;
+    int64_t  emitted = INT64_MIN;
+};
+
+// A fold just booked the run that was open before it and started in monotonic hour `run_start`.
+inline void checkup_journal_revision_arm(CheckupJournalRevision& r, bool run_was_open,
+                                         uint32_t run_start) {
+    if (!run_was_open || (r.armed && run_start >= r.bucket)) return;
+    r.armed   = true;
+    r.bucket  = run_start;
+    r.emitted = INT64_MIN;
+}
+
+// The wall-clock bucket to re-append on this writer call, or INT64_MIN. `acked` is the bucket of
+// the last committed checkup append. A committed revision retires and the cursor replays the later
+// live hours. One the journal has not appended yet (or that has nothing live to anchor it) is owned
+// by the ordinary append. An emitted revision that never committed is offered again.
+inline int64_t checkup_journal_revision_take(CheckupJournalRevision& r, int64_t acked,
+                                             int64_t newest_live_bucket, uint32_t current,
+                                             size_t live_count, int64_t after_bucket) {
+    int64_t revision = INT64_MIN;
+    if (r.armed && r.emitted != INT64_MIN && acked == r.emitted) {
+        r.armed = false;
+    } else if (r.armed) {
+        revision =
+            checkup_journal_revision_bucket(newest_live_bucket, current, r.bucket, live_count);
+        if (revision == INT64_MIN || after_bucket == INT64_MIN || revision > after_bucket) {
+            r.armed  = false;
+            revision = INT64_MIN;
+        }
+    }
+    if (!r.armed) r.emitted = INT64_MIN;
+    return revision;
+}
+
+// Records that the writer was handed the revision; the caller then clears its commit confirmation,
+// so only this append's commit retires it.
+inline bool checkup_journal_revision_emit(CheckupJournalRevision& r, int64_t target,
+                                          int64_t revision) {
+    if (revision == INT64_MIN || target != revision) return false;
+    r.emitted = target;
+    return true;
+}
+
+// A DHW-only reset at monotonic hour `restart_bucket` emptied the DHW bucket of every hour
+// completed before it. The record for the completed hour `age` hours older than the newest one (the
+// pending hour is `current`) must then not carry the current circulation source's identity.
+inline constexpr bool checkup_journal_dhw_withheld(bool restart_armed, uint32_t restart_bucket,
+                                                   uint32_t current, size_t age) {
+    return restart_armed && static_cast<int64_t>(current) - 1 - static_cast<int64_t>(age) <
+                                static_cast<int64_t>(restart_bucket);
+}
+
 // Boot index over checkup records visited newest-first. Every record appended before a record R is
-// at most CHECKUP_JOURNAL_REVISION_SPAN hours newer than R. The newest-sequence bucket (`anchor`)
-// therefore bounds the restorable hours to anchor ± SPAN: a power loss during a replay can leave
+// at most CHECKUP_JOURNAL_REVISION_SPAN hours newer than R, as long as no backward clock step of
+// more than one bucket re-latched the labels (checkup_journal_latched_newest); a copy that such a
+// step pushed beyond the span is skipped. The newest-sequence bucket (`anchor`) therefore bounds
+// the restorable hours to anchor ± SPAN: an unplanned restart during a replay can leave
 // older-sequence copies of hours beyond the anchor. Keep the first, i.e. newest, copy of each hour.
 // Once a bucket is more than twice the span older than the anchor, nothing earlier can still reach
 // the final window, which ends at the newest kept hour.

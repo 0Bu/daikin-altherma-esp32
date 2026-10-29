@@ -204,7 +204,8 @@ binds space/codec/divisor/unit. A converter change under an unchanged X10A serie
 retain old-scale samples for up to 24 hours. ENV III cannot identify a physical swap or relocation.
 Disabled/frozen ENV III RAM is not adopted or journaled unless the producer ran then and runs now.
 
-Future journal cursors are reported and never rewound; affected work waits for acceptable time.
+Future journal cursors are reported and never rewound; affected work waits for acceptable time. (The
+checkup late-completion replay below re-appends hours deliberately; it is not a cursor repair.)
 Writes permit one slot retry and two abandoned sectors per failure episode, then retry at 60 seconds.
 
 X10A, HomeHub, ENV III and MQTT room temperature keep separate source rasters; board memory and the circulation
@@ -225,11 +226,13 @@ A narrowly scoped one-shot DHW handoff may preserve an unfinished candidate; it 
 to completed checks. Disabling diagnostics clears runtime evidence; re-enabling starts a new
 generation. Same-boot journal creation is not proof of reboot restoration. `DIAGNOSTICS.md` explains
 results; `PLANT.md` owns lifecycle.
-A run completes into its start hour. When that hour was already journaled, it and every later live
-hour are appended again; the boot index keeps each hour's newest copy, including the older-sequence
-tail of a replay cut by power loss (`checkup_persist.hpp`). Each boot latches one wall-clock label
-per monotonic hour, so whole-second clock reads cannot relabel a replayed hour; a backward clock
-step stops rewinds as it stops ordinary appends.
+A run is booked into the hour in which it started, but only when it stops. When that hour was
+already journaled, it and every later live hour are appended again; the boot index keeps each
+hour's newest copy, including the older-sequence tail of a replay cut by a restart
+(`checkup_persist.hpp`). Each boot latches one wall-clock label per monotonic hour and moves it only
+for a clock step of two or more hours, so whole-second clock reads cannot relabel a replayed hour.
+While a backward clock step leaves the cursor ahead of the newest live hour, this replay waits like
+an ordinary append.
 Current source confirmation requires this boot's full profile/link evidence, not cached startup
 identity. Whole live and restored hours expire when their beginning leaves the rolling day,
 independently of producer progress; abandoned open evidence expires too. The current 80-byte

@@ -21329,8 +21329,9 @@ static void test_checkup_persist() {
 // each completed hour shortly after its rollover. A run spanning that rollover was therefore
 // missing from the stored hour: 13 live runs with a 1105 s mean restored as 12 runs with 599 s, and
 // the cycling check turned into a note no live observation supported. This mirrors the firmware
-// wiring: checkup.cpp arms the oldest revised start hour, the journal service appends
-// checkup_journal_next_target and the boot scan feeds checkup_journal_index_step newest-first.
+// wiring through the same rules: a fold arms via checkup_journal_revision_arm, each writer call
+// takes, targets and emits the revision, only a committed append confirms it, and the boot scan
+// feeds checkup_journal_index_step newest-first.
 namespace {
 using namespace logic;
 
@@ -21345,13 +21346,15 @@ struct CheckupJournalSim {
     bool revisions = true; // false: the former append-once journal
     // Whole-second clocks can put a monotonic hour's end on either side of a wall-hour boundary
     // from call to call. `jitter` alternates the computed label by one; `latch` is the firmware's.
-    bool     jitter       = false;
-    bool     latch        = true;
-    unsigned calls        = 0;
-    int64_t  label_offset = INT64_MIN;
-    bool     armed        = false;
-    uint32_t revised      = 0;
-    size_t   first_rewind = SIZE_MAX; // journal index of the first re-appended hour
+    bool                   jitter       = false;
+    bool                   latch        = true;
+    unsigned               calls        = 0;
+    int64_t                label_offset = INT64_MIN;
+    CheckupJournalRevision rev;
+    int64_t                acked          = INT64_MIN; // checkup_flash_appended's confirmation
+    size_t                 fail_revisions = 0; // revision writes that fail before committing
+    size_t                 failed         = 0;
+    size_t                 first_rewind   = SIZE_MAX; // journal index of the first re-appended hour
 
     CheckupJournalSim() {
         s.rps_known      = true;
@@ -21368,17 +21371,19 @@ struct CheckupJournalSim {
     void service() {
         if (!live) return;
         for (;;) {
-            const int64_t newest   = newest_label(); // one record per firmware call
-            int64_t       revision = INT64_MIN;
-            if (armed) {
-                revision = checkup_journal_revision_bucket(newest, st.bucket, revised, live);
-                if (revision == INT64_MIN || cursor == INT64_MIN || revision > cursor) {
-                    armed    = false;
-                    revision = INT64_MIN;
-                }
-            }
+            const int64_t newest = newest_label(); // one record per firmware call
+            const int64_t revision =
+                checkup_journal_revision_take(rev, acked, newest, st.bucket, live, cursor);
             const int64_t target = checkup_journal_next_target(cursor, newest, live, revision);
             if (target == INT64_MIN) return;
+            if (checkup_journal_revision_emit(rev, target, revision)) {
+                acked = INT64_MIN;
+                if (fail_revisions) { // the write fails: nothing commits, the cursor stays
+                    --fail_revisions;
+                    ++failed;
+                    return;
+                }
+            }
             const size_t age = static_cast<size_t>(newest - target);
             const size_t i =
                 (static_cast<size_t>(ring.head) + CHECKUP_COMPLETED_BUCKETS - 1 - age) %
@@ -21386,7 +21391,7 @@ struct CheckupJournalSim {
             if (target == revision && first_rewind == SIZE_MAX) first_rewind = journal.size();
             journal.emplace_back(target, ring.buf[i]);
             cursor = target;
-            if (target == revision) armed = false;
+            acked  = target;
         }
     }
     void step(bool running) {
@@ -21403,11 +21408,8 @@ struct CheckupJournalSim {
         }
         const bool     run_open  = st.run_open;
         const uint32_t run_start = st.run_start_bucket;
-        if (checkup_step(st, ring.pending, s, t, &ring) && run_open && revisions &&
-            (!armed || run_start < revised)) {
-            armed   = true;
-            revised = run_start;
-        }
+        if (checkup_step(st, ring.pending, s, t, &ring) && revisions)
+            checkup_journal_revision_arm(rev, run_open, run_start);
         st.bucket      = bucket;
         st.have_bucket = true;
         service();
@@ -21449,11 +21451,12 @@ CheckupWindow checkup_journal_sim_restore(const CheckupJournalSim& sim, size_t c
 }
 
 CheckupJournalSim checkup_journal_sim_witness(bool revisions, bool jitter = false,
-                                              bool latch = true) {
+                                              bool latch = true, size_t fail_revisions = 0) {
     CheckupJournalSim sim;
-    sim.revisions = revisions;
-    sim.jitter    = jitter;
-    sim.latch     = latch;
+    sim.revisions      = revisions;
+    sim.jitter         = jitter;
+    sim.latch          = latch;
+    sim.fail_revisions = fail_revisions;
     sim.step(false);
     sim.to_hour(0);
     for (int k = 0; k < 3; ++k) sim.run(600, 300); // hour 0: three 599 s space-heating runs
@@ -21507,6 +21510,53 @@ static void test_checkup_journal_revisions() {
     CHECK(checkup_journal_next_target(rt<int64_t>(102), 100, 3, 101) == INT64_MIN);
     // A revision older than the live hours is no target of its own.
     CHECK(checkup_journal_next_target(rt<int64_t>(100), 100, 3, 97) == INT64_MIN);
+
+    // Arming: only a booked run that was open before the fold, and the oldest start hour wins.
+    // Pending monotonic hour 10, live hours 7..9 = wall buckets 98..100.
+    CheckupJournalRevision rev;
+    checkup_journal_revision_arm(rev, false, 5);
+    CHECK(!rev.armed);
+    checkup_journal_revision_arm(rev, true, 7);
+    CHECK(rev.armed && rev.bucket == 7 && rev.emitted == INT64_MIN);
+    checkup_journal_revision_arm(rev, true, 8); // covered by the replay from hour 7
+    CHECK(rev.bucket == 7);
+    rev.emitted = 98; // the same start hour again keeps an outstanding emit
+    checkup_journal_revision_arm(rev, true, 7);
+    CHECK(rev.bucket == 7 && rev.emitted == 98);
+    rev.emitted = INT64_MIN;
+    // Taking and emitting: offered while at or behind the cursor; a failed write is offered again,
+    // a stale confirmation of another bucket does not retire it, its own commit does.
+    CHECK(checkup_journal_revision_take(rev, INT64_MIN, 100, 10, 3, 100) == 98);
+    CHECK(!checkup_journal_revision_emit(rev, 99, 98) && rev.emitted == INT64_MIN);
+    CHECK(!checkup_journal_revision_emit(rev, 99, INT64_MIN));
+    CHECK(checkup_journal_revision_emit(rev, 98, 98) && rev.emitted == 98);
+    CHECK(checkup_journal_revision_take(rev, INT64_MIN, 100, 10, 3, 100) == 98);
+    CHECK(rev.armed && rev.emitted == 98);
+    CHECK(checkup_journal_revision_take(rev, 97, 100, 10, 3, 100) == 98);
+    CHECK(checkup_journal_revision_take(rev, 98, 100, 10, 3, 98) == INT64_MIN);
+    CHECK(!rev.armed && rev.emitted == INT64_MIN);
+    CHECK(checkup_journal_revision_take(rev, 98, 100, 10, 3, 100) == INT64_MIN); // nothing armed
+    // An older start hour re-arms and forgets an outstanding emit.
+    checkup_journal_revision_arm(rev, true, 8);
+    rev.emitted = 99;
+    checkup_journal_revision_arm(rev, true, 7);
+    CHECK(rev.bucket == 7 && rev.emitted == INT64_MIN);
+    // Left to the ordinary append: the cursor has not reached the hour, nothing was appended this
+    // boot, or no live hour anchors it.
+    CHECK(checkup_journal_revision_take(rev, INT64_MIN, 100, 10, 3, 97) == INT64_MIN && !rev.armed);
+    checkup_journal_revision_arm(rev, true, 7);
+    CHECK(checkup_journal_revision_take(rev, INT64_MIN, 100, 10, 3, INT64_MIN) == INT64_MIN);
+    CHECK(!rev.armed);
+    checkup_journal_revision_arm(rev, true, 7);
+    CHECK(checkup_journal_revision_take(rev, INT64_MIN, 100, 10, 0, 100) == INT64_MIN &&
+          !rev.armed);
+
+    // A DHW-only reset in monotonic hour 6 emptied the DHW buckets of hours 0..5. With hour 10
+    // pending, age 3 is hour 6 and keeps its identity; age 4 is hour 5 and loses it.
+    CHECK(!checkup_journal_dhw_withheld(rt<bool>(false), 6, 10, 4));
+    CHECK(!checkup_journal_dhw_withheld(rt<bool>(true), 6, 10, 3));
+    CHECK(checkup_journal_dhw_withheld(rt<bool>(true), 6, 10, 4));
+    CHECK(checkup_journal_dhw_withheld(rt<bool>(true), 6, 1, 0));
 
     // Boot index: newest copy per hour within anchor ± 22; scanning continues to anchor - 44.
     CheckupJournalIndex ix;
@@ -21586,6 +21636,14 @@ static void test_checkup_journal_revisions() {
     CHECK(torn.space_runs == torn_before.space_runs + 1);
     CHECK(torn.space_run_s - torn_before.space_run_s == live.space_run_s - lost.space_run_s);
     CHECK(torn.starts == torn_before.starts);
+
+    // Failed revision writes commit nothing and confirm nothing: the revision is offered again on
+    // the next writer call until one commits, and the restore still matches the live window.
+    const CheckupJournalSim retried = checkup_journal_sim_witness(true, false, true, 2);
+    CHECK(retried.failed == 2 && retried.fail_revisions == 0);
+    const CheckupWindow recovered = checkup_journal_sim_restore(retried, retried.journal.size());
+    CHECK(recovered.space_runs == live.space_runs && recovered.space_run_s == live.space_run_s);
+    CHECK(recovered.starts == live.starts);
 }
 
 // ── logic/history_persist.hpp ───────────────────────────────────────────────────────────────────
@@ -21938,7 +21996,7 @@ static void test_history_persist() {
     }
     CHECK(HISTORY_FLASH_FUTURE_HOURS == 72);
     CHECK(HISTORY_FLASH_FUTURE_SAMPLES == 864);
-    CHECK(HISTORY_FLASH_FUTURE_RECORDS == 3528);
+    CHECK(HISTORY_FLASH_FUTURE_RECORDS == 3600);
     CHECK(HISTORY_JOURNAL_SLOT_COUNT >= HISTORY_FLASH_FUTURE_RECORDS);
     CHECK(HISTORY_FLASH_PARTITION_OFFSET == 0x400000);
 

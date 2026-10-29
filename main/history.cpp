@@ -703,7 +703,8 @@ int64_t  s_flash_oldest_bucket[kJournalSources] = {INT64_MIN, INT64_MIN, INT64_M
                                                    INT64_MIN};
 uint16_t s_flash_restore_slots[kJournalSources][HISTORY_SAMPLES] = {};
 uint16_t s_flash_restore_slot_count[kJournalSources] = {};
-// Boot index of the checkup source: up to 45 candidate hours before the window is clipped to 23.
+// Boot index of the checkup source: up to CHECKUP_JOURNAL_INDEX_CAP candidate hours before the
+// window is clipped to the CHECKUP_COMPLETED_BUCKETS restorable hours.
 logic::CheckupJournalIndex s_flash_checkup_index;
 static_assert(logic::CHECKUP_JOURNAL_INDEX_CAP <= HISTORY_SAMPLES,
               "checkup index candidates share the per-source restore slot list");

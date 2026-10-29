@@ -100,8 +100,9 @@ void checkup_flash_appended(int64_t bucket);
 
 // Splice journal records behind this boot's live pending hour. Deferred until profile detection has
 // confirmed the current profile/link scope and consumed its reset. Current-boot pending/live data
-// takes precedence; completed RAM hours were retired. Records are oldest-first and may contain
-// gaps or other source identities, all rejected explicitly.
+// takes precedence; completed RAM hours were retired. Records come in journal order with at most
+// one copy per hour, not necessarily in bucket order, and may contain gaps or other source
+// identities, all rejected explicitly.
 CheckupFlashRestoreResult checkup_flash_restore(const CheckupFlashRecord* records, size_t count,
                                                 int64_t now_unix_s);
 

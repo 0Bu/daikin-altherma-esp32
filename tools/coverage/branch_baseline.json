@@ -2,27 +2,29 @@
   "measurement_records": [
     {
       "compilers": {
-        "clang-17-darwin": "Apple Clang 17.0.0",
-        "gcc-13-linux-ubuntu24": "ESP-IDF v6.1 container GCC 13.3.0",
-        "gcc-15-linux-ubuntu26": "Ubuntu 26.04 GCC 15.2.0"
+        "clang-17-darwin": "Apple clang version 17.0.0 (clang-1700.6.4.2), arm64",
+        "gcc-13-linux-ubuntu24": "g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0 via CI-pinned ESP-IDF v6.1 container, aarch64",
+        "gcc-15-linux-ubuntu26": "g++ (Ubuntu 15.2.0-16ubuntu1) 15.2.0, Ubuntu 26.04 Docker, aarch64"
       },
-      "hosted_confirmation": "Both local GCC profiles match exactly; the hosted gcc-15-github-linux-ubuntu26 profile is confirmed by current-head CI",
+      "hosted_confirmation": "Hosted confirmation pending: only checkup_persist.hpp uses the measured local GCC 15 aarch64 inventory as the gcc-15-github-linux-ubuntu26 candidate. No hosted execution is claimed; authoritative GitHub CI confirmation is required before merge. All other hosted inventories are unchanged.",
       "runner": "scripts/run-mock-tests.sh --coverage",
-      "scope": "Late-completion journal revisions rebased onto the DHW-tail cycling population. The revision-helper checks route their first argument through rt(), so Clang executes every short-circuit operand instead of folding the literal calls; the Clang inventory of this header is measured for the first time. GCC inventories and all other profiles are unchanged.",
+      "scope": "Late-completion journal revisions: live revision mapping with the aged-out fallback, boot-latched wall-clock labels and in-bucket end times, the rewind target with its clock-step guard, the revision-aware boot index, the revision arm/take/emit state and the DHW-only-restart identity rule, with every added outcome taken. Against main the header grows from 125/125 (Clang) and 153/153 (GCC) outcomes. Every other header inventory, every historical ratio and the 95-percent executable-line floor are unchanged.",
+      "validation_boundary": "All three local compilers passed the pure C++ suite, the 95-percent line floor and the exact branch ratchet apart from this header's reported new counts. Clang completed the canonical entrypoint; GCC 13 and GCC 15 ran in containers until the branch ratchet reported the counts.",
       "source": "main/logic/checkup_persist.hpp",
-      "source_sha256": "eb0d7d0c2acd15023f76aecc34fdaae1307b230d23335087ea54886539a180ed",
+      "source_sha256": "7ed35881029b9fde5eb5588d340764496578d72b390093016fc008d3bb14e6e6",
+      "test_source_sha256": "cabc0746fb9831342218c8a53c425f9172cc77d84deb52ff2f818ac73a41c7e7",
       "measured_profiles": {
         "clang-17-darwin": [
-          179,
-          179
+          207,
+          207
         ],
         "gcc-13-linux-ubuntu24": [
-          211,
-          211
+          241,
+          241
         ],
         "gcc-15-linux-ubuntu26": [
-          211,
-          211
+          241,
+          241
         ]
       }
     },
@@ -86,16 +88,6 @@
         "main/logic/checkup.hpp": "b7477a99ead97fe3afb41764204ed9b7338a4b9108988fb8113cd295d8d14dc8",
         "main/logic/heartbeat.hpp": "10e039025fde3f80a1f3d59328a00f51f5b80327e7dadbb60d80652090c7f8d5"
       }
-    },
-    {
-      "compilers": {
-        "gcc-13-linux-ubuntu24": "Ubuntu 24.04 x86-64 GCC 13.3.0"
-      },
-      "hosted_confirmation": "Local GCC 13 measured; GCC 15 profiles carry the same all-taken inventory pending authoritative hosted confirmation; Apple Clang 17 not measured",
-      "runner": "scripts/run-mock-tests.sh --coverage",
-      "scope": "Late-completion journal revisions: live revision mapping including the aged-out fallback, boot-latched wall-clock labels and in-bucket end times, rewind target with the clock-step guard and the revision-aware boot index, with every added outcome taken; the late-completion witness also takes one further existing checkup.hpp outcome; all other inventories and historical floors unchanged",
-      "source": "main/logic/checkup_persist.hpp",
-      "source_sha256": "0206bac916bee735daa12922d75b2157c074afd693e3538b3abcaaa53a469e3e"
     },
     {
       "compilers": {
@@ -927,8 +919,8 @@
         "outcomes": 1049
       },
       "main/logic/checkup_persist.hpp": {
-        "outcomes": 179,
-        "taken": 179
+        "outcomes": 207,
+        "taken": 207
       },
       "main/logic/chunk_sink.hpp": {
         "outcomes": 272,
@@ -1345,8 +1337,8 @@
         "outcomes": 1211
       },
       "main/logic/checkup_persist.hpp": {
-        "outcomes": 211,
-        "taken": 211
+        "outcomes": 241,
+        "taken": 241
       },
       "main/logic/chunk_sink.hpp": {
         "outcomes": 308,
@@ -1763,8 +1755,8 @@
         "outcomes": 1211
       },
       "main/logic/checkup_persist.hpp": {
-        "outcomes": 211,
-        "taken": 211
+        "outcomes": 241,
+        "taken": 241
       },
       "main/logic/chunk_sink.hpp": {
         "outcomes": 308,
@@ -2181,8 +2173,8 @@
         "outcomes": 1211
       },
       "main/logic/checkup_persist.hpp": {
-        "outcomes": 211,
-        "taken": 211
+        "outcomes": 241,
+        "taken": 241
       },
       "main/logic/chunk_sink.hpp": {
         "outcomes": 308,

@@ -1,6 +1,6 @@
 # Evidence and limits of the plant diagnostics
 
-<!-- diagnostic-evidence-contract: 3fffa718b10f461689cf90663113858c200466fc4618cd39d124ba1a3768a5f0 -->
+<!-- diagnostic-evidence-contract: b736331dbcab0935e45014182ba030473ccf863040482bb22c145f1bc0cbabc3 -->
 
 For every row in the **Plant diagnostics · 24 h** card, this page answers four questions:
 
@@ -201,13 +201,14 @@ elapsed runtime must also be completed pure heating runtime; DHW runtime cannot 
 heating runs. Censored elapsed time includes blind intervals and excludes only proven handovers.
 Unwitnessed starts and journal/window boundaries have unknown full durations and always block
 assessment; their runtime is only an observed lower bound. Saturated runtime/counters or inconsistent
-cause counts also block the assessment. A run completing after its start hour was journaled
-re-appends that hour and every later live hour; a restart restores each hour's newest copy. A
-restart before that append (it needs synchronized time and a writable journal) can still lose the
-run, and a power loss during one replay can lose a second revision it was covering. Every start
-beyond one without a completion counts as an unclassified run, so lost runs withhold the
-assessment only once they push the classified share below 90%; until then a lost run is not
-detected and can change the result. Only at least 12 completed
+cause counts also block the assessment. A run completing after its start hour was journaled is
+journaled again with that hour ([persistence](ARCHITECTURE.md#history-and-diagnosis-persistence)).
+A restart between its stop and that append, which needs synchronized time and a writable journal,
+can still lose it. Project inference, not measured: the append normally follows within seconds, and
+only runs still open at an hour boundary are exposed, so a loss tends to remove a long run. Under
+the count population above a lost run is not detected; it withholds the assessment only by pushing
+the classified share below 90% or the completed heating runs below 12, and can otherwise shorten
+the mean and change the result. Only at least 12 completed
 space-heating runs with both population gates satisfied can support an assessment. A mean below ten minutes then
 produces **NOTE** immediately. An absence-of-short-run assessment additionally requires a full
 24-hour span and at least CHECKUP_REQUIRED_S of paired classification time.
