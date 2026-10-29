@@ -48,13 +48,14 @@ CONFIG_SECURE_BOOT_BUILD_SIGNED_BINARIES=n
 
 # WiFi
 CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM=10
-# Every received frame is copied into a dynamic RX buffer (1,700 bytes each, measured on ESP-IDF
-# 6.1) that stays allocated until lwIP's consumer frees the pbuf (LWIP_L2_TO_L3_COPY is off). With
-# the upstream cap of 32, a bench Weather TLS handshake held up to 17 of them (28.9 KB of heap),
-# almost all mDNS packets queued behind the starved mDNS task (see CONFIG_MDNS_ACTION_QUEUE_LEN).
-# The cap covers that bounded mDNS backlog plus one full TCP receive window
-# (CONFIG_LWIP_TCP_WND_DEFAULT / CONFIG_LWIP_TCP_MSS = 8 segments), and the Kconfig help asks for at
-# least the static RX count. A frame arriving above the cap is dropped and TCP retransmits it.
+# Every received frame is copied into a dynamic RX buffer that stays allocated until lwIP's consumer
+# frees the pbuf (LWIP_L2_TO_L3_COPY is off); the bench driver used 1,700 bytes per buffer. With the
+# upstream mDNS queue of 16 and cap of 32, a bench Weather TLS handshake held up to 17 of them
+# (28.2 KiB), almost all mDNS packets queued behind the starved mDNS task (see
+# CONFIG_MDNS_ACTION_QUEUE_LEN). The cap is that queue plus one full-size TCP receive window
+# (CONFIG_LWIP_TCP_WND_DEFAULT / CONFIG_LWIP_TCP_MSS = 8 segments) and at least the static RX count,
+# as the Kconfig help asks. mDNS holds one more buffer while it parses a packet, so a full window
+# that meets a full mDNS backlog loses one frame at the cap, which TCP retransmits.
 CONFIG_ESP_WIFI_DYNAMIC_RX_BUFFER_NUM=16
 # Dynamic TX buffers. The policy is a Kconfig CHOICE (ESP_WIFI_TX_BUFFER), whose options are the
 # booleans ESP_WIFI_STATIC_TX_BUFFER / ESP_WIFI_DYNAMIC_TX_BUFFER — so the dynamic option is what a
@@ -176,9 +177,10 @@ CONFIG_MDNS_ENABLE_BROWSE=n
 # The mDNS task runs at priority 1 and keeps every received packet, together with its WiFi RX
 # buffer, in this action queue until it gets the CPU. A higher-priority task that computes for
 # seconds (Weather's TLS certificate verification takes ~2.7 s) therefore filled the default
-# 16-entry queue with 16 x 1,700 bytes. Use the component minimum. A full queue drops further
-# received mDNS packets (queriers retry), defers timed responder sends to the next timer tick, and
-# fails a one-shot query that starts into it like any other lookup miss.
+# 16-entry queue (26.6 KiB of RX buffers on the bench). Use the component minimum. While the queue
+# is full, mDNS drops received packets (queriers retry), defers timed sends to the next timer tick,
+# and fails a one-shot query or hostname change started into it. A network-event action posted then
+# is lost silently: an interface enabled at "got IP" stays silent until the next "got IP".
 CONFIG_MDNS_ACTION_QUEUE_LEN=8
 
 # C++ exceptions — HTTP handlers run under a try/catch OOM guard (503 instead of crash), the

@@ -1020,9 +1020,10 @@ assert.match(sdkconfig, /^CONFIG_MBEDTLS_DYNAMIC_BUFFER=y$/m,
 assert.match(sdkconfig, /^CONFIG_MBEDTLS_DYNAMIC_FREE_CONFIG_DATA=n$/m,
   "TLS config/key/CA lifetime must not be shortened without reconnect redesign");
 // A received WiFi frame stays heap-resident until its consumer frees the pbuf. mDNS (priority 1)
-// queues frames while OTA or Weather TLS work holds the CPU, so its action queue is the bounded
-// backlog, and the RX cap is exactly that backlog plus one full TCP receive window. A smaller cap
-// starves the OTA download window; a larger one only widens the heap trough.
+// queues frames while OTA or Weather TLS work holds the CPU, so its action queue bounds that
+// backlog. The design rule sizes the RX cap as that queue plus one full-size TCP receive window
+// (sdkconfig.defaults states the one-frame limit of the rule). Changing one side without the other
+// either reopens the heap trough or narrows the window TCP can actually use.
 const sdkInt = (name, fallback) => {
   const match = sdkconfig.match(new RegExp(`^${name}=(\\d+)$`, "m"));
   assert.ok(match || fallback !== undefined, `${name} must be pinned in sdkconfig.defaults`);
@@ -1038,7 +1039,7 @@ assert.equal(mdnsBacklog, 8,
 assert.ok(wifiRxCap > 0 && wifiRxCap >= sdkInt("CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM"),
   "dynamic WiFi RX buffers must stay bounded and at least the static RX count");
 assert.equal(wifiRxCap, mdnsBacklog + tcpWindowSegments,
-  "the WiFi RX cap must hold the mDNS backlog plus exactly one TCP receive window");
+  "the WiFi RX cap must stay the mDNS queue length plus one full-size TCP receive window");
 assert.equal(occurrences(update, "wait_for_ota_headroom("), 3,
   "the install path needs one TLS gate and a separate RSA gate before both IDF validation passes");
 assert.match(ota,

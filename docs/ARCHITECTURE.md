@@ -474,8 +474,8 @@ Received WiFi frames are heap allocations too: the driver copies each into a dyn
 lives until lwIP's consumer frees the pbuf. mDNS runs at priority 1 and queues every received
 packet, so a higher-priority task that computes for seconds, such as Weather's TLS certificate
 verification, parks mDNS traffic in the heap. `sdkconfig.defaults` bounds that backlog with the
-minimum mDNS action queue and caps dynamic RX buffers at the backlog plus one TCP receive window;
-its comments carry the bench measurement and the derivation.
+minimum mDNS action queue and caps dynamic RX buffers at that queue length plus one full-size TCP
+receive window; its comments carry the bench measurement, the derivation and its one-frame limit.
 
 Diagnosis bucket storage is 1,920 bytes for 23 completed hours and one pending hour. Completed-run
 totals and outdoor sample counts use 32 bits; fifteen hourly clocks use 12-bit fields clamped at
