@@ -1,6 +1,6 @@
 # Evidence and limits of the plant diagnostics
 
-<!-- diagnostic-evidence-contract: 209907158816ee640552fdcf85f7fa137b77d0f3c6307c1a1eac80857aa86810 -->
+<!-- diagnostic-evidence-contract: 7093e2a55b2c44dd3ca7d9404fdcdc5ae014dfd2cd31d913ae9d575db96d9ef7 -->
 
 For every row in the **Plant diagnostics · 24 h** card, this page answers four questions:
 
@@ -27,7 +27,8 @@ a current fault all-clear or reassuring assessment. Temporary TLS/allocation pau
 measurement coverage and do not withdraw profile capabilities. Historical findings remain within
 their admissible age; live, restored and open evidence expires even if the producer stops.
 DHW circulation identity is independent and binds broker, topic, value/time paths and interpretation
-parameters. A mismatch retires only tank-cooling evidence. [PLANT.md](PLANT.md#reboot-and-persistence)
+parameters. A mismatch retires only tank-cooling evidence; an hour that completed before a
+circulation-only reset is stored without that identity. [PLANT.md](PLANT.md#reboot-and-persistence)
 owns restoration and restart limits; HomeHub/ENV III remain separate instruments.
 
 A manufacturer statement is not automatically a limit for every Daikin model. The installation
@@ -200,8 +201,14 @@ elapsed runtime must also be completed pure heating runtime; DHW runtime cannot 
 heating runs. Censored elapsed time includes blind intervals and excludes only proven handovers.
 Unwitnessed starts and journal/window boundaries have unknown full durations and always block
 assessment; their runtime is only an observed lower bound. Saturated runtime/counters or inconsistent
-cause counts also block the assessment. These guards detect
-some lost journal completions but cannot establish complete persistence. Only at least 12 completed
+cause counts also block the assessment. A run completing after its start hour was journaled is
+journaled again with that hour ([persistence](ARCHITECTURE.md#history-and-diagnosis-persistence)).
+A restart between its stop and that append, which needs synchronized time and a writable journal,
+can still lose it. Project inference, not measured: the append normally follows within seconds, and
+only runs still open at an hour boundary are exposed, so a loss tends to remove a long run. Under
+the count population above a lost run is not detected; it withholds the assessment only by pushing
+either population gate (classified runs or runtime) below 90% or the completed heating runs below
+12, and can otherwise shift (most likely shorten) the mean and change the result. Only at least 12 completed
 space-heating runs with both population gates satisfied can support an assessment. A mean below ten minutes then
 produces **NOTE** immediately. An absence-of-short-run assessment additionally requires a full
 24-hour span and at least CHECKUP_REQUIRED_S of paired classification time.

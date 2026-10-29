@@ -1,6 +1,6 @@
 # Plant diagnostics in plain language
 
-<!-- user-docs-contract: 0c08312dd697b8dce5b40e1244ee0510029d7c3777684f0192d09d99608ae936 -->
+<!-- user-docs-contract: 3130a4f96539eff74b39ae010d34ea7230df71d8f92bad9a2c6386206a2592b7 -->
 
 Plant diagnostics **reads measurements and counts events; it does not control the heat pump**.
 It is off by default. Enable **Plant diagnostics** under **Settings → Firmware** to start an evidence
@@ -121,9 +121,12 @@ may include a final valve return to the room circuit of at most 30 seconds befor
 including when the readable indoor mode still says DHW. A cooling mode or unreadable tail is not
 accepted. This project allowance is based on observed 6–22 second tails, not a Daikin specification.
 No start allowance is assumed. Saturated or incomplete evidence keeps the row **MEASURED**.
-After a restart, restored hours can lack an hour-crossing completion. The population guard detects
-some such losses, not every single loss; persistence repair is tracked separately. If the compressor stops during a
-defrost, one heating run counts as several; whether it does has not been checked yet.
+A run that crosses an hour boundary is stored again once it stops, so a restart keeps it. A restart
+before that save, which needs synchronized time and a working history store, can still lose the
+run. A lost run goes unnoticed and tends to be a long one, so cycling can look shorter than it was;
+the row stays **MEASURED** only while lost runs are a large enough share of all runs or of their
+runtime, or leave too few completed runs. If the compressor stops during a defrost, one heating run
+counts as several; whether it does has not been checked yet.
 
 **Evidence and limits:** [Compressor cycling](DIAGNOSTIC_EVIDENCE.md#diagnosis-cycling)
 

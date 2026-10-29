@@ -28,13 +28,20 @@ FUNCTION_RE = re.compile(r"^\s*([0-9a-fA-F]+)\s+<(.+)>:\s*$")
 INSTRUCTION_RE = re.compile(r"^\s*([0-9a-fA-F]+):\s+([0-9a-fA-F]+)(?:\s+(.*))?$")
 SECTION_RE = re.compile(r"^Disassembly of section .+:$")
 STACK_MOVSP_RE = re.compile(r"movsp\s+a1,")
-# Only these reviewed SDK functions may use objdump's packed-word rendering. A symbol's
-# first instruction must still be at its entry address and contain the Xtensa ENTRY opcode.
+# Only these reviewed functions may use objdump's packed-word rendering, which appears where the
+# link leaves a body without .xt.prop instruction coverage. A symbol's first instruction must
+# still be at its entry address and contain the Xtensa ENTRY opcode. The four first-party entries
+# from mqtt_ha.cpp, mcp_post and dns_task render this way in some link layouts; the packed word
+# carries the same ENTRY immediate as the decoded `entry` of an unpacked link (32 bytes, 48 for
+# mqtt_enqueue_id, 1264 for mcp_post, 608 for dns_task), and each stays within its separate first-
+# frame budget in tools/stack/budgets.json. A packed body hides any `movsp a1` from
+# validate_dynamic_stack; none of the six uses alloca or a variable-length array.
 PACKED_ENTRY_SYMBOLS = frozenset({
     'esp_http_client_open',
     'esp_http_client_connect',
     'esp_http_client_fetch_headers',
     'esp_http_client_read',
+    '_ZN4daikL15mqtt_enqueue_idERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEEPKciii$constprop$0$isra$0',
     '__wrap_mbedtls_ssl_handshake_client_step',
     '__wrap_mbedtls_ssl_read',
     '__wrap_mbedtls_ssl_write',
@@ -49,6 +56,11 @@ PACKED_ENTRY_SYMBOLS = frozenset({
     'calculate_rinv',
     'calloc',
     'ccm_auth_crypt',
+    'daik::discovery_owner_block()',
+    'daik::dns_task(void*)',
+    'daik::mcp_post(httpd_req*)',
+    'daik::request_periodic_discovery_retirement()',
+    'daik::retirement_store_note(unsigned long, char const*)',
     'ecp_add_mixed',
     'ecp_double_jac',
     'ecp_mul_comb_after_precomp$isra$0',
@@ -698,6 +710,8 @@ def parse_frames(disassembly: str, budgets: dict[str, Any] | None = None) -> dic
     current: str | None = None
     symbol_address = 0
     strict = False
+    # Report every undecodable required prologue of one link at once; the parse still fails.
+    undecodable: list[str] = []
     for line in disassembly.splitlines():
         if SECTION_RE.match(line):
             if current is not None and strict:
@@ -754,7 +768,9 @@ def parse_frames(disassembly: str, budgets: dict[str, Any] | None = None) -> dic
                     raise BudgetError(f"symbol {current}: wrong packed first prologue")
                 frame = (raw24 >> 12) * 8
             else:
-                raise BudgetError(f"symbol {current}: undecodable first prologue")
+                undecodable.append(f"symbol {current}: undecodable first prologue ({line.strip()})")
+                current = None
+                continue
             if frame == 0:
                 raise BudgetError(f"symbol {current}: empty first stack frame")
             frames[current] = frame
@@ -767,6 +783,8 @@ def parse_frames(disassembly: str, budgets: dict[str, Any] | None = None) -> dic
             current = None
     if current is not None and strict:
         raise BudgetError(f"symbol {current}: missing first prologue")
+    if undecodable:
+        raise BudgetError("; ".join(undecodable))
     validate_dynamic_stack(disassembly, frames, required)
     validate_integer_formatter(disassembly)
     return frames
@@ -2164,7 +2182,7 @@ def raw_detect_self_test(fixture: str, budgets: dict[str, Any]) -> int:
     reject("dynamic stack after valid ENTRY", "unreviewed dynamic stack", elf_bytes=image(dynamic),
            standard=packed(dynamic), nm_text=nm.replace("00000005", "00000008"), decoded=dynamic_raw)
     reject("unknown packed application", "first prologue", standard=fixture.replace(
-        "1: 004136          entry a1, 1232", "1: 00006136"))
+        "   2: 004136          entry a1, 128", "   2: 00006136"))
     return controls
 
 
@@ -3549,7 +3567,7 @@ def self_test() -> None:
                        "1: 004136          entry a1, 1232",
                        "1: 000000          nop\n2: 004136 entry a1, 1232"), "first prologue")
     reject_disassembly("unreviewed packed app prologue", fixture.replace(
-                       "1: 004136          entry a1, 1232", "1: 00006136"), "first prologue")
+                       "   2: 004136          entry a1, 128", "   2: 00006136"), "first prologue")
     i2c_dynamic_controls = 0
     for original, altered in (("707: a5fb addi.n a10, a5, 15", "707: a5fb addi.n a10, a5, 31"),
                                ("71f: 250c movi.n a5, 2", "71f: 250c movi.n a5, 17"),
@@ -3564,6 +3582,17 @@ def self_test() -> None:
                            f"\n00000700 <{name}$isra$9>:\n700: 004136 entry a1, 32\n",
                            "newly outlined SDK recursion")
         sdk_recursion_controls += 1
+    # Every undecodable required prologue of one link is named at once, and the parse still fails.
+    both = fixture.replace("   2: 004136          entry a1, 128\n", "   2: 00413600\n").replace(
+        "   4: 004136          entry a1, 1120\n", "   4: 00413600\n")
+    try:
+        parse_frames(both)
+    except BudgetError as exc:
+        assert ("symbol daik::http_send_status_json(httpd_req*, int): undecodable first prologue"
+                in str(exc)
+                and "symbol daik::mqtt_task(void*): undecodable first prologue" in str(exc)), exc
+    else:
+        raise AssertionError("self-test accepted two undecodable first prologues")
     packed_controls = 0
     for name in sorted(PACKED_ENTRY_SYMBOLS - {"parse_value", "parse_string", "cJSON_Delete",
                                               "cJSON_ParseWithLengthOpts"}):
