@@ -40,6 +40,8 @@ const S = {
   // re-resolves to the same measurement instead of to whatever now occupies that slot
   // (logic/history.hpp's history_pin_index).
   histPin: new Map(),
+  // Browser-only legend choices survive poll rebuilds and are shared by both views of a chart.
+  histHidden: new Map(),
   // The label of the row whose trend is being scrubbed right now (mouse hover or finger down), or
   // null. It FREEZES the #valueGroups rebuild — see renderCards. Without that the innerHTML is
   // replaced on each values-poll render under the pointer: the captured element dies mid-drag and
@@ -128,7 +130,7 @@ function syncHistSources() {
   const s = S.status;
   if (!s) return S.histEpoch || 0;
   const hp = s.hp || {}, detect = s.detect || {}, mb = s.modbus || {};
-  const env = s.env3 || {}, circ = s.circulation_source || {};
+  const env = s.env3 || {}, circ = s.circulation_source || {}, room = s.reference_temperature || {};
   // Configuration/identity only: transient connected/fresh flags and changing measurements do not
   // reset rings. A reboot retires index pins even if the device restores compatible history.
   const identity = JSON.stringify([
@@ -138,6 +140,9 @@ function syncHistSources() {
     env.enabled, env.supported, env.sda, env.scl,
     s.diagnostics?.enabled, circ.configured, circ.topic, circ.power_path, circ.timestamp_path,
     circ.max_age_s, circ.on_threshold_w, circ.off_threshold_w, circ.confirm_s,
+    s.mqtt?.broker, room.configured, room.topic, room.temperature_path, room.timestamp_topic,
+    room.timestamp_path, room.source_id, room.calibration_k, room.max_age_s,
+    room.temperature_min_c, room.temperature_max_c, s.history?.room_rows?.map((r) => r.id),
   ]);
   const uptime = Number.isFinite(s.uptime_s) ? s.uptime_s : null;
   if ((S.histIdentity != null && identity !== S.histIdentity) ||
@@ -428,7 +433,8 @@ function setHtml(id, html) {
   if (S.clickHold) return;
   if (_html[id] === html) return;
   _html[id] = html;
-  $(id).innerHTML = html;
+  if (typeof replaceHistoryHtml === "function") replaceHistoryHtml($(id), html);
+  else $(id).innerHTML = html;
 }
 // The dashboard header (identity + gear) and the back header (chevron + screen title) are the same
 // slot: exactly one shows. The title is re-read from TITLE on every switch rather than stored, so it

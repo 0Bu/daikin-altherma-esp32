@@ -9,6 +9,7 @@ for (const [name, next] of [
   ["void history_reset()", "void history_reset_on_detect"],
   ["void history_reset_on_detect", "void history_modbus_reset"],
   ["void history_modbus_reset", "uint32_t history_modbus_generation"],
+  ["void history_room_reset", "void history_circulation_reset"],
   ["void history_circulation_reset", "void history_checkup_reset"],
 ]) {
   const body = functionBody(name, next);
@@ -17,7 +18,7 @@ for (const [name, next] of [
     name + " changes the browser epoch inside the sample lock");
 }
 for (const name of ["size_t history_snapshot(", "size_t history_modbus_snapshot(",
-  "size_t history_env3_snapshot("]) {
+  "size_t history_env3_snapshot(", "size_t history_room_snapshot("]) {
   const body = functionBody(name, "\nsize_t ");
   assert.ok(body.includes("uint32_t* epoch"));
   const lock = body.indexOf("Lock lk(s_mtx)");
@@ -128,6 +129,7 @@ const resetOwners = [
   functionBody("void history_reset()", "void history_reset_on_detect"),
   functionBody("void history_reset_on_detect", "void history_modbus_reset"),
   functionBody("void history_modbus_reset", "uint32_t history_modbus_generation"),
+  functionBody("void history_room_reset", "void history_circulation_reset"),
   functionBody("void history_checkup_reset", "// The BOARD's own 24-hour trends"),
   functionBody("bool flash_journal_scan()", "esp_err_t flash_region_erased("),
   functionBody("bool history_flash_forget()", "static void history_flash_start()"),
@@ -384,7 +386,8 @@ for (const name of ["history_newest_age_s", "history_modbus_newest_age_s", "hist
 for (const [name, next, ring, commit] of [
   ["size_t history_snapshot(", "\nsize_t ", "P().ring[t].ring", "s_last_commit_us, s_last_commit_bucket"],
   ["size_t history_modbus_snapshot(", "\nsize_t ", "P().mb_ring[t]", "s_mb_last_commit_us, s_mb_last_commit_bucket"],
-  ["size_t history_env3_snapshot(", "\n// Copied out under the lock", "P().env3_ring[t]", "s_env3_last_commit_us, s_env3_last_commit_bucket"],
+  ["size_t history_env3_snapshot(", "\nsize_t ", "P().env3_ring[t]", "s_env3_last_commit_us, s_env3_last_commit_bucket"],
+  ["size_t history_room_snapshot(", "\n// Copied out under the lock", "R().ring", "s_room_last_commit_us, s_room_last_commit_bucket"],
 ]) {
   const body = functionBody(name, next);
   assert.match(body, /logic::HistoryMeta\* meta/);
@@ -407,7 +410,7 @@ for (const [name, next, ring, commit] of [
   const route = http.slice(routeAt, http.indexOf("static esp_err_t h_diag(", routeAt));
   assert.ok(routeAt >= 0 && route.length > 200, "the /history route body");
   assert.match(route, /logic::HistoryMeta\s+history_meta;/);
-  assert.equal((route.match(/&history_meta\)/g) || []).length, 3, "all three sources hand their meta back");
+  assert.equal((route.match(/&history_meta\)/g) || []).length, 4, "all four trend sources hand their meta back");
   assert.match(route, /newest_age\s*=\s*history_meta\.newest_age_s/);
   assert.match(route, /b0\s*=\s*history_meta\.oldest_bucket/);
 }

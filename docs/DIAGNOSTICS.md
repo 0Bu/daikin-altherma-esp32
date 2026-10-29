@@ -1,6 +1,6 @@
 # Plant diagnostics in plain language
 
-<!-- user-docs-contract: 7239cd6b8785600340f9db07e5db09bd5984dbe25b9d3ed4ee84f47fe4443ec1 -->
+<!-- user-docs-contract: 3130a4f96539eff74b39ae010d34ea7230df71d8f92bad9a2c6386206a2592b7 -->
 
 Plant diagnostics **reads measurements and counts events; it does not control the heat pump**.
 It is off by default. Enable **Plant diagnostics** under **Settings → Firmware** to start an evidence
@@ -98,24 +98,35 @@ planned restart preserves the remaining settling time, but unseen charging can s
 <!-- user-docs: health_cycling -->
 ### Compressor cycling
 
-**In plain language:** The board counts starts and completed compressor runs. Continuous valve and
-mode readings separate space heating, domestic hot water (DHW) and cooling; uncertain or mixed runs
-remain unclassified.
+**In plain language:** The board counts starts and completed compressor runs as space heating,
+domestic hot water (DHW), cooling or unclassified. Unclassified counts explain missing readings,
+transitions, heating/DHW handovers, journal boundaries and unwitnessed starts.
 
-**Meaning:** At least **12 completed space-heating runs**, with at least **90% of all completed runs
-classified**, can carry the assessment. An average below **10 minutes** produces **NOTE** as soon as
-this population exists. **OK** additionally needs a full day and 90% readable classification time.
+**Meaning:** At least **12 completed space-heating runs** can carry the assessment when both run
+count and runtime coverage reach **90%**. Positively observed heating/DHW handovers remain visible
+but do not enter the pure-run count or heating mean. Uncertain runtime is compared against completed
+heating runtime to reduce bias from observed but unclassified runs. An average below
+**10 minutes** produces **NOTE** once this population exists. **OK** additionally needs a full day
+and 90% readable classification time.
 Smaller or insufficiently classified populations are **MEASURED**, with the reason shown;
 no usable compressor observation remains **CHECKING**.
 
 **Important limit:** There is no pooled all-mode assessment, and an unfinished long run cannot dilute
 completed short runs. Twelve runs and ten minutes are project heuristics, not Daikin limits. These
 figures do not identify oversizing or hydraulic imbalance. Optional outdoor min/mean is context for
-accepted heating runs only. A pause of up to 15 seconds in which the board read nothing (an update
-check, a weather download or a silent link) does not unclassify a run; a start hidden by an unreadable reading counts as an unclassified run.
-After a restart, restored hours can lack the completion of a run that crossed an hour boundary, so
-the result stays **MEASURED** until those hours leave the window. If the compressor stops during a
-defrost, one heating run counts as several; whether it does has not been checked yet.
+accepted heating runs only. A missing class or compressor reading may bridge at most 15 seconds
+between matching known-running readings, measured from their actual timestamps even across an
+hour boundary. Unknown readings never become OFF. A pure DHW charge
+may include a final valve return to the room circuit of at most 30 seconds before a known stop,
+including when the readable indoor mode still says DHW. A cooling mode or unreadable tail is not
+accepted. This project allowance is based on observed 6–22 second tails, not a Daikin specification.
+No start allowance is assumed. Saturated or incomplete evidence keeps the row **MEASURED**.
+A run that crosses an hour boundary is stored again once it stops, so a restart keeps it. A restart
+before that save, which needs synchronized time and a working history store, can still lose the
+run. A lost run goes unnoticed and tends to be a long one, so cycling can look shorter than it was;
+the row stays **MEASURED** only while lost runs are a large enough share of all runs or of their
+runtime, or leave too few completed runs. If the compressor stops during a defrost, one heating run
+counts as several; whether it does has not been checked yet.
 
 **Evidence and limits:** [Compressor cycling](DIAGNOSTIC_EVIDENCE.md#diagnosis-cycling)
 

@@ -51,6 +51,7 @@
 #include "logic/heating_curve_mqtt.hpp"
 #include "logic/error_codes.hpp"
 #include "logic/checkup.hpp"
+#include "checkup_population_fixture.hpp"
 #include "logic/health_gate.hpp"
 #include "logic/version_cmp.hpp"
 #include "logic/ota_channel.hpp"
@@ -2620,7 +2621,7 @@ static void test_config_load_verdict() {
     CHECK(config_test_cfg_verdict(StoredEntryRead::Present, truncated) ==
           ConfigLoadVerdict::Rejected);
 
-    std::vector<uint8_t> trailing = valid; // one byte past the v19 body, CRC recomputed
+    std::vector<uint8_t> trailing = valid; // one byte past the current body, CRC recomputed
     trailing.insert(trailing.end() - 4, 0x00);
     config_test_reseal(trailing);
     CHECK(config_test_cfg_verdict(StoredEntryRead::Present, trailing) ==
@@ -4954,7 +4955,7 @@ static void test_ota_headroom() {
 // The weather fetch's own headroom gate (private issue 10 D) — same predicate shape as the OTA
 // gate above, but with evidence-based floors that reject the measured 15.9 KiB fragmentation
 // trough, admit the production board's repeatable 22 KiB post-quiesce block and preserve aggregate
-// reserve around the fetch's measured ~40 KiB transient claim.
+// reserve around the fetch's measured transient claim (composition: the gate's header comment).
 static void test_weather_fetch_headroom() {
     CHECK(WEATHER_FETCH_MIN_FREE_BYTES == 48u * 1024u);
     CHECK(WEATHER_FETCH_MIN_LARGEST_BLOCK_BYTES == 20u * 1024u);
@@ -5344,12 +5345,33 @@ static void test_heartbeat() {
                "\"net_link\":1,\"eth_present\":0,\"eth_link\":0,"
                "\"mqtt_connected\":1,\"mqtt_count\":89282,\"mqtt_fails\":0,\"mqtt_reconnects\":1,"
                "\"mqtt_skipped\":337,\"mqtt_quiesced\":42,\"poll_skipped\":32,"
+               "\"cycling_censored_transition_runs\":null,\"cycling_censored_handover_runs\":null,"
+               "\"cycling_censored_unreadable_runs\":null,\"cycling_censored_restart_runs\":null,"
+               "\"cycling_censored_start_runs\":null,\"cycling_classified_runtime_s\":null,"
+               "\"cycling_censored_runtime_s\":null,\"cycling_runtime_saturated\":null,"
                "\"bus_connected\":1,\"bus_proto\":\"I\",\"bus_registers\":10,\"bus_values\":48,"
                "\"bus_last_ok_s\":1,\"bus_rx_received\":763732,\"bus_rx_fails\":2,"
                "\"bus_crc_err\":0,\"bus_timeout_err\":2,\"bus_ou_held_over\":0,"
                "\"bus_tx_reads\":763734,"
                "\"modbus_enabled\":0,\"modbus_connected\":0,\"modbus_rx\":0,\"modbus_fails\":0,"
                "\"modbus_stack_min_free_bytes\":null}");
+    HeartbeatFields      cycling_fields;
+    logic::CheckupWindow cycling_window;
+    cycling_fields.cycling = checkup_cycling_evidence(cycling_window, true);
+    auto cycling_json      = build_heartbeat_json(cycling_fields);
+    CHECK(cycling_json.find("\"cycling_censored_handover_runs\":0") != std::string::npos);
+    CHECK(cycling_json.find("\"cycling_censored_runtime_s\":0") != std::string::npos);
+    CHECK(cycling_json.find("\"cycling_runtime_saturated\":0") != std::string::npos);
+    cycling_window.censored_handover_runs    = 4;
+    cycling_window.censored_unreadable_runs  = 2;
+    cycling_window.censored_runtime_s        = 65535;
+    cycling_window.cycling_runtime_saturated = true;
+    cycling_fields.cycling                   = checkup_cycling_evidence(cycling_window, true);
+    cycling_json                             = build_heartbeat_json(cycling_fields);
+    CHECK(cycling_json.find("\"cycling_censored_handover_runs\":4") != std::string::npos);
+    CHECK(cycling_json.find("\"cycling_censored_unreadable_runs\":2") != std::string::npos);
+    CHECK(cycling_json.find("\"cycling_censored_runtime_s\":65535") != std::string::npos);
+    CHECK(cycling_json.find("\"cycling_runtime_saturated\":1") != std::string::npos);
 
     // ── legacy-215: the reset reason has to survive a NUMERIC-ONLY consumer ──
     // Telegraf's json parser keeps numeric fields and drops everything else, so the `reset_reason`
@@ -5653,6 +5675,15 @@ static void test_heartbeat() {
     CHECK(dj.find("\"bus_connected\":0") != std::string::npos);
     CHECK(dj.find("true") == std::string::npos);
     CHECK(dj.find("false") == std::string::npos);
+
+    // An active Ethernet route remains independent of WiFi association. Emit its real numeric
+    // link/presence witnesses while WiFi RSSI stays unavailable.
+    HeartbeatFields wired = down;
+    wired.net_link        = static_cast<uint8_t>(NetLink::Eth);
+    wired.eth_present = wired.eth_link = true;
+    const auto wired_json              = build_heartbeat_json(wired);
+    CHECK(wired_json.find("\"net_link\":2,\"eth_present\":1,\"eth_link\":1") != std::string::npos);
+    CHECK(wired_json.find("\"wifi_connected\":0,\"wifi_rssi\":null") != std::string::npos);
 
     // Diagnostic discovery: separate topics/component types, entity_category diagnostic, and the
     // value_template points at the heartbeat topic (not a heat-pump source topic).
@@ -11385,8 +11416,10 @@ static void test_config_store() {
     const size_t ref_multi_suffix_bytes   = 2 + 2 + 4;
     const size_t discovery_suffix_bytes   = 1;
     const size_t diagnostics_suffix_bytes = 1 + 4;
-    const size_t current_suffix_bytes     = base_suffix_bytes + ref_multi_suffix_bytes +
-                                        discovery_suffix_bytes + diagnostics_suffix_bytes;
+    const size_t room_generation_suffix_bytes = 4;
+    const size_t current_suffix_bytes         = base_suffix_bytes + ref_multi_suffix_bytes +
+                                        discovery_suffix_bytes + diagnostics_suffix_bytes +
+                                        room_generation_suffix_bytes;
     const size_t circ_suffix_bytes =
         2 + circ.circulation_name.size() + 2 + circ.circulation_topic.size() + 2 +
         circ.circulation_power_path.size() + 2 + circ.circulation_time_path.size() + 16;
@@ -11426,7 +11459,7 @@ static void test_config_store() {
     board.board_preset_id   = static_cast<int32_t>(BoardPresetId::M5StackAtomS3Lite);
     board.board_user_set    = true;
     std::vector<uint8_t> bb = config_blob_serialize(board);
-    CHECK(bb[4] == CONFIG_BLOB_VERSION && CONFIG_BLOB_VERSION == 19);
+    CHECK(bb[4] == CONFIG_BLOB_VERSION && CONFIG_BLOB_VERSION == 20);
     ConfigBlob rt;
     CHECK(config_blob_deserialize(bb.data(), bb.size(), rt));
     CHECK(rt.has_board && rt.led_gpio == 35 && rt.led_type == 1 && !rt.led_inverted);
@@ -11492,6 +11525,14 @@ static void test_config_store() {
     CHECK(base_rt.has_modbus_discovery_state && !base_rt.mb_discovery_done);
     CHECK(base_rt.has_diagnostics && !base_rt.diagnostics_enabled &&
           base_rt.diagnostics_generation == 0);
+    // A CRC-valid v20 body with only one byte of the first string's length is still truncated.
+    // It must not replace the previous configuration with a partially decoded/default record.
+    std::vector<uint8_t> short_prefix(base_buf.begin(), base_buf.begin() + 6);
+    short_prefix.resize(10);
+    restamp(short_prefix);
+    out.wifi_ssid = "test-wifi";
+    CHECK(!config_blob_deserialize(short_prefix.data(), short_prefix.size(), out));
+    CHECK(out.wifi_ssid == "test-wifi");
     ConfigBlob multi_source;
     multi_source.ref_temp_setpoint_topic        = "thermostat/status";
     multi_source.ref_temp_time_topic            = "fixture/room-temperature/time";
@@ -11512,7 +11553,10 @@ static void test_config_store() {
     // A genuine v17 blob has the independent room mappings but no discovery decision. The load
     // layer uses has_modbus_discovery_state=false to apply the conservative pre-v18 migration.
     std::vector<uint8_t> v17 = base_buf;
-    v17.erase(v17.end() - 4 - (discovery_suffix_bytes + diagnostics_suffix_bytes), v17.end() - 4);
+    v17.erase(
+        v17.end() - 4 -
+            (discovery_suffix_bytes + diagnostics_suffix_bytes + room_generation_suffix_bytes),
+        v17.end() - 4);
     v17[4] = 17;
     restamp(v17);
     ConfigBlob v17_rt;
@@ -11521,7 +11565,8 @@ static void test_config_store() {
     // A genuine v16 blob has the base topic but not the v17 room-topic extension.
     std::vector<uint8_t> v16 = base_buf;
     v16.erase(v16.end() - 4 -
-                  (ref_multi_suffix_bytes + discovery_suffix_bytes + diagnostics_suffix_bytes),
+                  (ref_multi_suffix_bytes + discovery_suffix_bytes + diagnostics_suffix_bytes +
+                   room_generation_suffix_bytes),
               v16.end() - 4);
     v16[4] = 16;
     restamp(v16);
@@ -11534,7 +11579,8 @@ static void test_config_store() {
     // and taking the user's credentials down with it.
     std::vector<uint8_t> v15 = base_buf;
     v15.erase(v15.end() - 4 -
-                  (16 + ref_multi_suffix_bytes + discovery_suffix_bytes + diagnostics_suffix_bytes),
+                  (16 + ref_multi_suffix_bytes + discovery_suffix_bytes + diagnostics_suffix_bytes +
+                   room_generation_suffix_bytes),
               v15.end() - 4);
     v15[4] = 15;
     restamp(v15);
@@ -11546,7 +11592,8 @@ static void test_config_store() {
     // a zero generation; a v19 stamp missing that complete five-byte block is truncated and
     // rejected.
     std::vector<uint8_t> v18 = base_buf;
-    v18.erase(v18.end() - 4 - diagnostics_suffix_bytes, v18.end() - 4);
+    v18.erase(v18.end() - 4 - (diagnostics_suffix_bytes + room_generation_suffix_bytes),
+              v18.end() - 4);
     v18[4] = 18;
     restamp(v18);
     ConfigBlob v18_rt;
@@ -11557,6 +11604,27 @@ static void test_config_store() {
     v19_short[4]                   = 19;
     restamp(v19_short);
     CHECK(!config_blob_deserialize(v19_short.data(), v19_short.size(), out));
+
+    // v20 adds only the durable room-source generation. A real v19 remains readable with zero;
+    // claiming v20 without the whole four-byte suffix is rejected even with a valid CRC.
+    std::vector<uint8_t> v19 = base_buf;
+    v19.erase(v19.end() - 8, v19.end() - 4);
+    v19[4] = 19;
+    restamp(v19);
+    ConfigBlob v19_rt;
+    CHECK(config_blob_deserialize(v19.data(), v19.size(), v19_rt));
+    CHECK(v19_rt.has_diagnostics && v19_rt.ref_temp_generation == 0);
+    std::vector<uint8_t> v20_short = v19;
+    v20_short[4]                   = 20;
+    restamp(v20_short);
+    CHECK(!config_blob_deserialize(v20_short.data(), v20_short.size(), out));
+    ConfigBlob room_generation;
+    room_generation.ref_temp_generation = UINT32_MAX;
+    const auto room_generation_blob     = config_blob_serialize(room_generation);
+    ConfigBlob room_generation_rt;
+    CHECK(config_blob_deserialize(room_generation_blob.data(), room_generation_blob.size(),
+                                  room_generation_rt));
+    CHECK(room_generation_rt.ref_temp_generation == UINT32_MAX);
 
     // ── v3: the OTA update channel ───────────────────────────────────────────────────────────────
     ConfigBlob chan;
@@ -11628,7 +11696,7 @@ static void test_config_store() {
     mb.mb_unit_id            = 3;
     mb.homehub_enabled       = false;
     std::vector<uint8_t> mbb = config_blob_serialize(mb);
-    CHECK(mbb[4] == CONFIG_BLOB_VERSION && CONFIG_BLOB_VERSION == 19);
+    CHECK(mbb[4] == CONFIG_BLOB_VERSION && CONFIG_BLOB_VERSION == 20);
     ConfigBlob mrt;
     CHECK(config_blob_deserialize(mbb.data(), mbb.size(), mrt));
     CHECK(mrt.has_modbus && mrt.mb_host == "homehub-524288-example.local");
@@ -15068,6 +15136,335 @@ static logic::DhwLossState dhw_past_hold() {
 //      wrong, and there is nothing to compare it against.
 //  (c) the VERDICT boundaries, and the one property that makes the card honest — a window that has
 //      not collected enough can never aggregate to a green overall.
+static void test_checkup_population() {
+    using namespace logic;
+    CHECK(sizeof(CheckupBucket) == 80 && CHECKUP_BYTES == 1920);
+    CHECK(sizeof(CheckupJournalPayload) == 128);
+    CHECK(sizeof(CheckupJournalRecord) * CHECKUP_COMPLETED_BUCKETS == 3128);
+    CHECK(checkup_add_hour_s(3599, 2) == 3600);
+    CHECK(checkup_add_hour_s(4095, UINT32_MAX) == 3600);
+    CheckupBucket clamped;
+    clamped.covered_s = checkup_add_hour_s(3599, UINT32_MAX);
+    CHECK(clamped.covered_s == 3600);
+
+    auto run = [](unsigned tail, unsigned missing_class, unsigned missing_rps,
+                  bool changed_after_gap, bool return_to_dhw, bool stop_in_gap) {
+        CheckupState  state;
+        CheckupBucket bucket;
+        CheckupSample sample;
+        sample.rps_known = sample.valve_known = true;
+        sample.operating_mode                 = CheckupOperatingMode::Heating;
+        int64_t now                           = 0;
+        checkup_step(state, bucket, sample, now);
+        sample.rps_running = true;
+        sample.valve_dhw   = tail != 0;
+        auto tick          = [&]() { checkup_step(state, bucket, sample, now += 1000000); };
+        for (unsigned i = 0; i < 200; ++i) tick();
+        if (missing_class || missing_rps) {
+            sample.valve_known = !missing_class;
+            sample.rps_known   = !missing_rps;
+            for (unsigned i = 0; i < std::max(missing_class, missing_rps); ++i) tick();
+            sample.rps_known = sample.valve_known = true;
+            if (changed_after_gap) sample.valve_dhw = !sample.valve_dhw;
+            if (stop_in_gap) sample.rps_running = false;
+            tick();
+        }
+        if (!stop_in_gap) {
+            for (unsigned i = 0; i < 200; ++i) tick();
+            if (tail) {
+                sample.valve_dhw = false;
+                for (unsigned i = 0; i < tail; ++i) tick();
+                if (return_to_dhw) {
+                    sample.valve_dhw = true;
+                    tick();
+                }
+            }
+            sample.rps_running = false;
+            tick();
+        }
+        return bucket;
+    };
+    for (unsigned tail : {6u, 22u, 30u}) {
+        const auto b = run(tail, 0, 0, false, false, false);
+        CHECK(b.dhw_runs == 1 && b.censored_runs == 0);
+    }
+    const auto over = run(31, 0, 0, false, false, false);
+    CHECK(over.dhw_runs == 0 && over.censored_runs == 1 && over.censored_handover_runs == 1);
+    const auto bounce = run(22, 0, 0, false, true, false);
+    CHECK(bounce.dhw_runs == 0 && bounce.censored_transition_runs == 1);
+    auto terminal_tail = [](CheckupOperatingMode mode, unsigned tail_s, bool missing_valve,
+                            bool missing_mode, bool return_dhw,
+                            CheckupOperatingMode switched_mode = CheckupOperatingMode::Unknown) {
+        CheckupState  state;
+        CheckupBucket bucket;
+        CheckupSample sample;
+        sample.rps_known = sample.valve_known = true;
+        sample.valve_dhw                      = true;
+        sample.operating_mode                 = mode;
+        int64_t now                           = 0;
+        auto    tick = [&]() { checkup_step(state, bucket, sample, now += 1000000); };
+        tick();
+        sample.rps_running = true;
+        for (unsigned second = 0; second < 300; ++second) tick();
+        sample.valve_dhw = false;
+        for (unsigned second = 0; second < tail_s; ++second) {
+            sample.valve_known = !(missing_valve && second == tail_s / 2);
+            const auto current_mode =
+                switched_mode != CheckupOperatingMode::Unknown && second >= tail_s / 2
+                    ? switched_mode
+                    : mode;
+            sample.operating_mode =
+                missing_mode && second == tail_s / 2 ? CheckupOperatingMode::Unknown : current_mode;
+            tick();
+        }
+        if (return_dhw) {
+            sample.valve_dhw = true;
+            tick();
+        }
+        sample.rps_running = false;
+        tick();
+        return bucket;
+    };
+    // "DHW" maps to Other, not Heating. A readable valve return with that mode is a bounded
+    // terminal tail, without fabricating a pure space-heating class for the room circuit.
+    for (unsigned tail : {22u, 30u}) {
+        const auto other = terminal_tail(CheckupOperatingMode::Other, tail, false, false, false);
+        CHECK(other.dhw_runs == 1 && other.censored_runs == 0);
+    }
+    const auto other_long = terminal_tail(CheckupOperatingMode::Other, 31, false, false, false);
+    CHECK(other_long.dhw_runs == 0 && other_long.censored_transition_runs == 1 &&
+          other_long.censored_handover_runs == 0);
+    CHECK(terminal_tail(CheckupOperatingMode::Other, 22, true, false, false)
+              .censored_unreadable_runs == 1);
+    CHECK(terminal_tail(CheckupOperatingMode::Other, 22, false, true, false)
+              .censored_unreadable_runs == 1);
+    CHECK(terminal_tail(CheckupOperatingMode::Cooling, 22, false, false, false)
+              .censored_transition_runs == 1);
+    CHECK(terminal_tail(CheckupOperatingMode::Other, 22, false, false, true)
+              .censored_transition_runs == 1);
+    CHECK(terminal_tail(CheckupOperatingMode::Other, 22, false, false, false,
+                        CheckupOperatingMode::Heating)
+              .censored_transition_runs == 1);
+    CHECK(terminal_tail(CheckupOperatingMode::Heating, 22, false, false, false,
+                        CheckupOperatingMode::Other)
+              .censored_transition_runs == 1);
+    const auto class_gap = run(0, 1, 0, false, false, false);
+    CHECK(class_gap.space_runs == 1 && class_gap.censored_runs == 0);
+    const auto hidden_change = run(0, 1, 0, true, false, false);
+    CHECK(hidden_change.space_runs == 0 && hidden_change.censored_unreadable_runs == 1);
+    const auto hidden_rps_change = run(0, 0, 1, true, false, false);
+    CHECK(hidden_rps_change.space_runs == 0 && hidden_rps_change.dhw_runs == 0 &&
+          hidden_rps_change.censored_unreadable_runs == 1 &&
+          hidden_rps_change.censored_handover_runs == 0);
+    CHECK(hidden_change.censored_handover_runs == 0);
+    // Even a bridged same-class gap prevents a later handover from being excluded as a fully
+    // witnessed mixed run. Its entire elapsed duration remains unsafe population evidence.
+    const auto gapped_handover = run(31, 1, 0, false, false, false);
+    CHECK(gapped_handover.censored_handover_runs == 0 &&
+          gapped_handover.censored_unreadable_runs == 1 &&
+          gapped_handover.censored_runtime_s > 400);
+    CHECK(run(0, 16, 0, false, false, false).censored_unreadable_runs == 1);
+    CHECK(run(0, 0, 14, false, false, false).space_runs == 1); // 15 s between endpoints
+    CHECK(run(0, 0, 15, false, false, false).censored_unreadable_runs == 1);
+    CHECK(run(0, 0, 16, false, false, false).censored_unreadable_runs == 1);
+    CHECK(run(0, 0, 1, false, false, true).censored_unreadable_runs == 1);
+
+    auto endpoint_gap = [](unsigned gap_kind, bool hour_crossing, int64_t endpoint_gap_us,
+                           bool recovered_dhw = false) {
+        CheckupState  state;
+        CheckupRing   ring;
+        CheckupSample sample;
+        sample.rps_known = sample.valve_known = true;
+        sample.operating_mode                 = CheckupOperatingMode::Heating;
+        uint32_t previous_bucket              = 0;
+        auto     tick                         = [&](int64_t now) {
+            const auto bucket = checkup_bucket(now);
+            if (bucket != previous_bucket) {
+                const bool continuous_boundary =
+                    state.last_us >= 0 && now >= state.last_us &&
+                    now - state.last_us <= static_cast<int64_t>(CHECKUP_MAX_GAP_S) * 1000000;
+                ring.commit(checkup_skipped(previous_bucket, bucket));
+                if (continuous_boundary) state.last_us = now;
+                previous_bucket = bucket;
+            }
+            checkup_step(state, ring.pending, sample, now, &ring);
+        };
+        const int64_t start = (hour_crossing ? 3590LL : 100LL) * 1000000 + 250000;
+        previous_bucket     = checkup_bucket(start);
+        tick(start - 1000000);
+        sample.rps_running = true;
+        tick(start);
+        sample.rps_known   = gap_kind != 1;
+        sample.valve_known = gap_kind != 0;
+        if (gap_kind == 2) sample.operating_mode = CheckupOperatingMode::Other;
+        tick(start + 1000000);
+        if (hour_crossing) tick(start + 10000000); // production rolls over, discarding this dt
+        sample.rps_known = sample.valve_known = true;
+        sample.operating_mode                 = CheckupOperatingMode::Heating;
+        sample.valve_dhw                      = recovered_dhw;
+        tick(start + endpoint_gap_us);
+        sample.rps_running = false;
+        tick(start + endpoint_gap_us + 1000000);
+        return checkup_aggregate(ring);
+    };
+    // The allowance measures the complete monotonic interval between matching readable running
+    // endpoints. Neither a fractional recovery nor the production hour-boundary dt=0 may extend it.
+    for (unsigned gap_kind : {0u, 1u, 2u}) { // valve missing, RPS missing, readable Other/Stop mode
+        for (bool hour_crossing : {false, true}) {
+            const auto boundary = endpoint_gap(gap_kind, hour_crossing, 15000000);
+            CHECK(boundary.space_runs == 1 && boundary.censored_runs == 0);
+            for (int64_t endpoint_us : {15000001LL, 15500000LL}) {
+                const auto late = endpoint_gap(gap_kind, hour_crossing, endpoint_us);
+                CHECK(late.space_runs == 0 && late.censored_unreadable_runs == 1);
+            }
+        }
+    }
+    for (bool hour_crossing : {false, true}) {
+        const auto hidden_handover = endpoint_gap(2, hour_crossing, 15000000, true);
+        CHECK(hidden_handover.space_runs == 0 && hidden_handover.censored_unreadable_runs == 1 &&
+              hidden_handover.censored_handover_runs == 0);
+    }
+
+    const auto replay = checkup_population_fixture();
+    CHECK(replay.starts == 21 && replay.space_runs == 12 && replay.dhw_runs == 5);
+    CHECK(replay.censored_runs == 4 && replay.censored_handover_runs == 4);
+    // At most one second per crossed hour is discarded by production's boundary rule. The mean
+    // therefore agrees with the 558 s synthetic reconstruction within one second.
+    CHECK(replay.censored_runtime_s == 0 && replay.space_run_s / replay.space_runs >= 557 &&
+          replay.space_run_s / replay.space_runs <= 558);
+    CheckupCoverage coverage;
+    coverage.rps = coverage.valve = coverage.mode = true;
+    auto verdict = checkup_evaluate(replay, coverage, FaultClass::Normal);
+    CHECK(verdict.cycling_split && verdict[CheckupCheck::Cycling].verdict == CheckupVerdict::Info);
+    CHECK(verdict.cycling_censored_handover_runs == 4);
+    CHECK(verdict.cycling_classified_runtime_s >= 6684 &&
+          verdict.cycling_classified_runtime_s <= 6696);
+    const auto absent = checkup_cycling_evidence(replay, false);
+    CHECK(absent.cycling_classified_runtime_s == -1 && absent.cycling_censored_start_runs == -1);
+
+    // Count coverage passes 12/13, but losing one long run must still block the short-run verdict.
+    auto biased = replay;
+    biased.censored_runs++;
+    biased.censored_unreadable_runs++;
+    biased.censored_runtime_s = 3600;
+    verdict                   = checkup_evaluate(biased, coverage, FaultClass::Normal);
+    CHECK(!verdict.cycling_split &&
+          verdict[CheckupCheck::Cycling].reason == CheckupReason::ClassPopulationIncomplete);
+    biased.space_runs = 5;
+    biased.censored_runs += 7;
+    verdict = checkup_evaluate(biased, coverage, FaultClass::Normal);
+    CHECK(verdict[CheckupCheck::Cycling].reason == CheckupReason::ClassPopulationIncomplete);
+    biased                           = replay;
+    biased.cycling_runtime_saturated = true;
+    CHECK(!checkup_evaluate(biased, coverage, FaultClass::Normal).cycling_split);
+
+    // Append-once journal loss cannot certify the survivors: only five of twelve completed
+    // space runs survive the simulated stored-hour snapshot. An open run accounts for at most one.
+    auto restored        = replay;
+    restored.space_runs  = 5;
+    restored.space_run_s = 5 * 234;
+    CHECK(!checkup_evaluate(restored, coverage, FaultClass::Normal).cycling_split);
+    CheckupState  rebooted;
+    CheckupRing   after_reboot;
+    CheckupSample on;
+    on.rps_known = on.rps_running = on.valve_known = true;
+    on.operating_mode                              = CheckupOperatingMode::Heating;
+    checkup_step(rebooted, after_reboot.pending, on, 0);
+    checkup_step(rebooted, after_reboot.pending, on, 1000000);
+    on.rps_running = false;
+    checkup_step(rebooted, after_reboot.pending, on, 2000000);
+    const auto reboot_window = checkup_aggregate(after_reboot);
+    CHECK(reboot_window.starts == 0 && reboot_window.censored_start_runs == 1);
+    CHECK(reboot_window.censored_runtime_s == 2 && reboot_window.space_runs == 0);
+    // A boot whose first compressor row is unreadable has the same unwitnessed beginning as
+    // booting into known ON. Recovering ON in a continuous poll must not lose that whole run.
+    CheckupState  unknown_boot;
+    CheckupRing   recovered;
+    CheckupSample running;
+    running.valve_known    = true;
+    running.operating_mode = CheckupOperatingMode::Heating;
+    int64_t recovered_us   = 0;
+    checkup_step(unknown_boot, recovered.pending, running, recovered_us);
+    running.rps_known = running.rps_running = true;
+    checkup_step(unknown_boot, recovered.pending, running, recovered_us += 1000000);
+    running.rps_running = false;
+    checkup_step(unknown_boot, recovered.pending, running, recovered_us += 1000000);
+    CHECK(checkup_aggregate(recovered).censored_start_runs == 1);
+    for (unsigned run = 0; run < 12; ++run) {
+        running.rps_running = true;
+        for (unsigned second = 0; second < 241; ++second)
+            checkup_step(unknown_boot, recovered.pending, running, recovered_us += 1000000);
+        running.rps_running = false;
+        checkup_step(unknown_boot, recovered.pending, running, recovered_us += 1000000);
+    }
+    const auto recovered_window = checkup_aggregate(recovered);
+    CHECK(recovered_window.space_runs == 12 && recovered_window.starts == 12 &&
+          recovered_window.censored_start_runs == 1);
+    const auto recovered_report = checkup_evaluate(recovered_window, coverage, FaultClass::Normal);
+    CHECK(!recovered_report.cycling_split &&
+          recovered_report[CheckupCheck::Cycling].observation_only);
+
+    // Censoring runtime is a conservative bound: floor(end)-floor(start) would understate this
+    // 1.8 s known-start interval as one second. Round the elapsed interval upward instead.
+    CheckupState fractional;
+    fractional.run_open       = true;
+    fractional.run_cause      = CheckupCensorCause::Unreadable;
+    fractional.run_started_us = 100000;
+    fractional.last_us        = 1900000;
+    CheckupBucket fractional_bucket;
+    checkup_close_run(fractional, fractional_bucket);
+    CHECK(fractional_bucket.censored_runtime_s == 2);
+    auto fractional_gate        = replay;
+    fractional_gate.space_run_s = 900;
+    fractional_gate.censored_runs++;
+    fractional_gate.censored_unreadable_runs++;
+    fractional_gate.censored_runtime_s = 99 + fractional_bucket.censored_runtime_s;
+    CHECK(!checkup_evaluate(fractional_gate, coverage, FaultClass::Normal).cycling_split);
+    auto unknown_start = replay;
+    unknown_start.censored_runs++;
+    unknown_start.censored_start_runs++;
+    unknown_start.censored_runtime_s = 2;
+    CHECK(!checkup_evaluate(unknown_start, coverage, FaultClass::Normal).cycling_split);
+    unknown_start.censored_start_runs   = 0;
+    unknown_start.censored_restart_runs = 1;
+    CHECK(!checkup_evaluate(unknown_start, coverage, FaultClass::Normal).cycling_split);
+
+    CheckupState long_unknown;
+    long_unknown.run_open       = true;
+    long_unknown.run_cause      = CheckupCensorCause::Unreadable;
+    long_unknown.run_started_us = 0;
+    long_unknown.last_us        = 70000LL * 1000000;
+    CheckupRing saturated;
+    checkup_close_run(long_unknown, saturated.pending);
+    CHECK(saturated.pending.censored_runtime_s == UINT16_MAX);
+    CHECK(checkup_aggregate(saturated).cycling_runtime_saturated);
+    saturated.pending        = CheckupBucket{};
+    saturated.pending.starts = UINT8_MAX;
+    CHECK(checkup_aggregate(saturated).cycling_runtime_saturated);
+    // Every count can saturate independently. None may wrap or silently lend a plausible
+    // population ratio to an assessment, including a cause counter beside a smaller total.
+    uint8_t CheckupBucket::*const counters[] = {
+        &CheckupBucket::space_runs,
+        &CheckupBucket::dhw_runs,
+        &CheckupBucket::cooling_runs,
+        &CheckupBucket::censored_runs,
+        &CheckupBucket::censored_transition_runs,
+        &CheckupBucket::censored_handover_runs,
+        &CheckupBucket::censored_unreadable_runs,
+        &CheckupBucket::censored_restart_runs,
+    };
+    for (const auto counter : counters) {
+        saturated.pending          = CheckupBucket{};
+        saturated.pending.*counter = UINT8_MAX;
+        const auto evidence        = checkup_aggregate(saturated);
+        CHECK(evidence.cycling_runtime_saturated);
+        CHECK(checkup_cycling_evidence(evidence, true).cycling_runtime_saturated);
+    }
+    saturated.pending                          = CheckupBucket{};
+    saturated.pending.censored_unreadable_runs = 1;
+    CHECK(checkup_aggregate(saturated).cycling_runtime_saturated);
+}
+
 static void test_checkup_evidence_overhaul() {
     using namespace logic;
     const std::pair<CheckupReason, const char*> reasons[] = {
@@ -15154,7 +15551,7 @@ static void test_checkup_evidence_overhaul() {
     CheckupBucket same_minimum = bucket;
     same_minimum.min_bar_unix_s++;
     ring.push(same_minimum);
-    CHECK(checkup_aggregate(ring).min_bar_unix_s == 1'800'000'001u);
+    CHECK(checkup_aggregate(ring).min_bar_unix_s == 1'800'000'000u);
     ring.pending.min_bar_unix_s = 0;
     CHECK(checkup_aggregate(ring).min_bar_unix_s == 1'800'000'001u);
     ring.buf[0].min_bar  = 15;
@@ -15382,6 +15779,9 @@ static void test_checkup() {
     CHECK(sizeof(CheckupBucket) == 80);
     CHECK(CHECKUP_BYTES == 1920);
     CHECK(sizeof(DhwLossBucket) == 20 && DHW_LOSS_BYTES == 480);
+    // checkup.cpp's static 23-record restore scratch asserts the same figure (ARCHITECTURE.md).
+    CHECK(sizeof(CheckupJournalRecord) == 136);
+    CHECK(CHECKUP_COMPLETED_BUCKETS * sizeof(CheckupJournalRecord) == 3128);
 
     // --- saturation -----------------------------------------------------------------------------
     // A wrap would turn the worst imaginable cycling into a perfect score.
@@ -15671,9 +16071,8 @@ static void test_checkup() {
         CHECK(b2.censored_runs == 1 && b2.space_runs == 0 && b2.dhw_runs == 0);
     }
     {
-        // A valve that stops answering for PART of a run forfeits the run's class — the side cannot
-        // be asserted to have held — while an unreadable COMPRESSOR row forfeits it because the
-        // duration stops being witnessed. Both are censored, not guessed.
+        // A short partial-sweep loss bracketed by identical known-running classes is bridged for
+        // classification only; its seconds still do not enter observed signal coverage.
         CheckupState  st;
         CheckupBucket b;
         CheckupSample s;
@@ -15697,7 +16096,7 @@ static void test_checkup() {
         tick(5, true, false, true); // the valve page timed out mid-run
         tick(200, true, true, true);
         tick(1, false, true, true);
-        CHECK(b.censored_runs == 1 && b.space_runs == 0);
+        CHECK(b.censored_runs == 0 && b.space_runs == 1);
 
         CheckupState  st2;
         CheckupBucket b2;
@@ -15730,13 +16129,13 @@ static void test_checkup() {
         s2.rps_running = false;
         t2 += 1'000'000;
         checkup_step(st2, b2, s2, t2);
-        CHECK(b2.censored_runs == 1 && b2.space_runs == 0);
+        CHECK(b2.censored_runs == 0 && b2.space_runs == 1);
     }
     {
         // DIAG-03/a: a sweep that read NO row at all (n == 0: the weather/OTA network quiesce, an
         // OOM catch) is the firmware pausing, not a readable sweep that lost the compressor row.
-        // Up to CHECKUP_MAX_GAP_S of it inside a run keeps the class and books the elapsed time;
-        // longer, or a known OFF right after it, still censors (the lost-row case is above).
+        // Matching running/class endpoints at most CHECKUP_CYCLING_GAP_S apart keep the class;
+        // a later recovery, or known OFF after the pause, still censors.
         auto pause_run = [](int pause_s, bool stop_after) {
             CheckupState  st;
             CheckupBucket b;
@@ -15758,9 +16157,10 @@ static void test_checkup() {
         const CheckupBucket paused = pause_run(4, false);
         CHECK(paused.space_runs == 1 && paused.censored_runs == 0);
         CHECK(paused.space_run_s == 299 + 4 + 300); // start sample to last running sample
-        const CheckupBucket at_bound = pause_run(static_cast<int>(CHECKUP_MAX_GAP_S), false);
+        const CheckupBucket at_bound =
+            pause_run(static_cast<int>(CHECKUP_CYCLING_GAP_S) - 1, false);
         CHECK(at_bound.space_runs == 1 && at_bound.censored_runs == 0);
-        const CheckupBucket too_long = pause_run(static_cast<int>(CHECKUP_MAX_GAP_S) + 1, false);
+        const CheckupBucket too_long = pause_run(static_cast<int>(CHECKUP_CYCLING_GAP_S), false);
         CHECK(too_long.space_runs == 0 && too_long.censored_runs == 1);
         const CheckupBucket stopped = pause_run(4, true); // the stop hid inside the pause
         CHECK(stopped.space_runs == 0 && stopped.censored_runs == 1);
@@ -15794,7 +16194,9 @@ static void test_checkup() {
         checkup_step(g, gb, lost, after_gap);
         checkup_step(g, gb, on, after_gap + 1'000'000);
         checkup_step(g, gb, on, after_gap + 2'000'000);
-        CHECK(gb.starts == 0 && !g.run_open);
+        CHECK(gb.starts == 0 && g.run_open);
+        checkup_step(g, gb, s, after_gap + 3'000'000);
+        CHECK(gb.censored_runs == 1 && gb.space_runs == 0 && !g.run_open);
     }
     {
         // The compressor page can disappear while the stop occurs and return already OFF. The old
@@ -15837,10 +16239,9 @@ static void test_checkup() {
             checkup_step(st, b, s, t);
         }
         t += static_cast<int64_t>(CHECKUP_MAX_GAP_S + 5) * 1'000'000;
-        checkup_step(st, b, s, t); // the gap itself
-        CHECK(b.censored_runs == 1 && b.space_runs == 0);
-        // …and the post-gap running samples do not resurrect it: no start edge crossed the gap, so
-        // there is no open run to accrue into.
+        checkup_step(st, b, s, t); // the gap itself proves no stop
+        CHECK(b.censored_runs == 0 && b.space_runs == 0);
+        // The same candidate remains censored in flight; only known OFF completes it once.
         for (int i = 0; i < 100; i++) {
             t += 1'000'000;
             checkup_step(st, b, s, t);
@@ -20943,11 +21344,459 @@ static void test_checkup_persist() {
     CHECK(checkup_journal_next_live_bucket(INT64_MIN, 6, 0) == INT64_MIN);
 }
 
+// ── Late completions of already appended hours ─────────────────────────────────
+// A run is booked into the hour in which it started, but only when it stops; the journal appends
+// each completed hour shortly after its rollover. A run spanning that rollover was therefore
+// missing from the stored hour: 13 live runs with a 1105 s mean restored as 12 runs with 599 s, and
+// the cycling check turned into a note no live observation supported. This mirrors the firmware
+// wiring through the same rules: a fold arms via checkup_journal_revision_arm, each writer call
+// takes, targets and emits the revision, only a committed append confirms it, and the boot scan
+// feeds checkup_journal_index_step newest-first.
+namespace {
+using namespace logic;
+
+struct CheckupJournalSim {
+    CheckupRing                                    ring;
+    CheckupState                                   st;
+    CheckupSample                                  s;
+    std::vector<std::pair<int64_t, CheckupBucket>> journal; // append (sequence) order
+    int64_t                                        t      = 0;
+    int64_t                                        cursor = INT64_MIN;
+    size_t                                         live   = 0;
+    bool revisions = true; // false: the former append-once journal
+    // Whole-second clocks can put a monotonic hour's end on either side of a wall-hour boundary
+    // from call to call. `jitter` alternates the computed label by one; `latch` is the firmware's.
+    bool                   jitter       = false;
+    bool                   latch        = true;
+    unsigned               calls        = 0;
+    int64_t                label_offset = INT64_MIN;
+    CheckupJournalRevision rev;
+    int64_t                acked          = INT64_MIN; // checkup_flash_appended's confirmation
+    size_t                 fail_revisions = 0; // revision writes that fail before committing
+    size_t                 failed         = 0;
+    size_t                 first_rewind   = SIZE_MAX; // journal index of the first re-appended hour
+
+    CheckupJournalSim() {
+        s.rps_known      = true;
+        s.valve_known    = true;
+        s.valve_dhw      = false;
+        s.operating_mode = CheckupOperatingMode::Heating;
+    }
+    int64_t newest_label() {
+        const int64_t wobble   = jitter && (calls++ & 1u) ? 1 : 0;
+        const int64_t computed = 1000 + static_cast<int64_t>(st.bucket) - 1 + wobble;
+        return latch ? checkup_journal_latched_newest(label_offset, computed, st.bucket - 1)
+                     : computed;
+    }
+    void service() {
+        if (!live) return;
+        for (;;) {
+            const int64_t newest = newest_label(); // one record per firmware call
+            const int64_t revision =
+                checkup_journal_revision_take(rev, acked, newest, st.bucket, live, cursor);
+            const int64_t target = checkup_journal_next_target(cursor, newest, live, revision);
+            if (target == INT64_MIN) return;
+            if (checkup_journal_revision_emit(rev, target, revision)) {
+                acked = INT64_MIN;
+                if (fail_revisions) { // the write fails: nothing commits, the cursor stays
+                    --fail_revisions;
+                    ++failed;
+                    return;
+                }
+            }
+            const size_t age = static_cast<size_t>(newest - target);
+            const size_t i =
+                (static_cast<size_t>(ring.head) + CHECKUP_COMPLETED_BUCKETS - 1 - age) %
+                CHECKUP_COMPLETED_BUCKETS;
+            if (target == revision && first_rewind == SIZE_MAX) first_rewind = journal.size();
+            journal.emplace_back(target, ring.buf[i]);
+            cursor = target;
+            acked  = target;
+        }
+    }
+    void step(bool running) {
+        t += 1'000'000;
+        s.rps_running         = running;
+        const uint32_t bucket = checkup_bucket(t);
+        if (st.have_bucket && bucket != st.bucket) {
+            const bool continuous =
+                st.last_us >= 0 && t - st.last_us <= int64_t{CHECKUP_MAX_GAP_S} * 1'000'000;
+            const uint32_t skipped = checkup_skipped(st.bucket, bucket);
+            ring.commit(skipped);
+            live = std::min<size_t>(live + 1 + skipped, CHECKUP_COMPLETED_BUCKETS);
+            if (continuous) st.last_us = t;
+        }
+        const bool     run_open  = st.run_open;
+        const uint32_t run_start = st.run_start_bucket;
+        if (checkup_step(st, ring.pending, s, t, &ring) && revisions)
+            checkup_journal_revision_arm(rev, run_open, run_start);
+        st.bucket      = bucket;
+        st.have_bucket = true;
+        service();
+    }
+    void run(int on_s, int off_s) {
+        for (int i = 0; i < on_s; ++i) step(true);
+        for (int i = 0; i < off_s; ++i) step(false);
+    }
+    void to_hour(uint32_t h) {
+        while (checkup_bucket(t + 1'000'000) < h) step(false);
+        for (int i = 0; i < 60; ++i) step(false);
+    }
+};
+
+// Boot-scan emulation over the first `count` journal records: newest copy per hour, clipped to the
+// window ending at the newest indexed hour, empty hours for gaps.
+CheckupWindow checkup_journal_sim_restore(const CheckupJournalSim& sim, size_t count) {
+    CheckupJournalIndex ix;
+    std::vector<size_t> kept;
+    for (size_t k = count; k > 0; --k) {
+        const CheckupJournalIndexStep step =
+            checkup_journal_index_step(ix, sim.journal[k - 1].first);
+        if (step == CheckupJournalIndexStep::Stop) break;
+        if (step == CheckupJournalIndexStep::Keep) kept.push_back(k - 1);
+    }
+    std::map<int64_t, CheckupBucket> hours;
+    for (size_t i = 0; i < kept.size(); ++i)
+        if (checkup_journal_index_retained(ix, i))
+            hours[sim.journal[kept[i]].first] = sim.journal[kept[i]].second;
+    CheckupRing restored;
+    int64_t     previous = INT64_MIN;
+    for (const auto& [bucket, hour] : hours) {
+        if (previous != INT64_MIN)
+            for (int64_t gap = previous + 1; gap < bucket; ++gap) restored.push(CheckupBucket{});
+        restored.push(hour);
+        previous = bucket;
+    }
+    return checkup_aggregate(restored);
+}
+
+CheckupJournalSim checkup_journal_sim_witness(bool revisions, bool jitter = false,
+                                              bool latch = true, size_t fail_revisions = 0) {
+    CheckupJournalSim sim;
+    sim.revisions      = revisions;
+    sim.jitter         = jitter;
+    sim.latch          = latch;
+    sim.fail_revisions = fail_revisions;
+    sim.step(false);
+    sim.to_hour(0);
+    for (int k = 0; k < 3; ++k) sim.run(600, 300); // hour 0: three 599 s space-heating runs
+    sim.to_hour(1);
+    sim.run(7191, 0); // starts in hour 1, stops in hour 3: two appended hours later
+    sim.step(false);
+    for (uint32_t h = 4; h <= 6; ++h) {
+        sim.to_hour(h);
+        for (int k = 0; k < 3; ++k) sim.run(600, 300);
+    }
+    sim.to_hour(checkup_bucket(sim.t) + 1); // complete the last hour; the open hour stays empty
+    return sim;
+}
+} // namespace
+
+static void test_checkup_journal_revisions() {
+    using namespace logic;
+
+    // Monotonic start hour -> wall-clock journal bucket, only while it is a live completed hour.
+    CHECK(checkup_journal_revision_bucket(rt<int64_t>(INT64_MIN), 10, 5, 3) == INT64_MIN);
+    // Still the pending hour.
+    CHECK(checkup_journal_revision_bucket(rt<int64_t>(100), 10, 10, 3) == INT64_MIN);
+    CHECK(checkup_journal_revision_bucket(rt<int64_t>(100), 10, 9, 3) == 100);
+    CHECK(checkup_journal_revision_bucket(rt<int64_t>(100), 10, 7, 3) == 98);
+    // Older than this boot's live hours: its replay still has to cover later completions.
+    CHECK(checkup_journal_revision_bucket(rt<int64_t>(100), 10, 6, 3) == 98);
+    CHECK(checkup_journal_revision_bucket(rt<int64_t>(100), 10, 9, 0) == INT64_MIN);
+
+    // One label per monotonic hour for the whole boot: a one-bucket wobble keeps the latch, a real
+    // clock step of two or more buckets moves it.
+    int64_t offset = INT64_MIN;
+    CHECK(checkup_journal_latched_newest(offset, INT64_MIN, 5) == INT64_MIN && offset == INT64_MIN);
+    CHECK(checkup_journal_latched_newest(offset, 1005, 5) == 1005 && offset == 1000);
+    CHECK(checkup_journal_latched_newest(offset, 1007, 6) == 1006); // +1 wobble
+    CHECK(checkup_journal_latched_newest(offset, 1005, 6) == 1006); // -1 wobble
+    CHECK(checkup_journal_latched_newest(offset, 1008, 6) == 1008 && offset == 1002);
+    CHECK(checkup_journal_latched_newest(offset, 1000, 6) == 1000 && offset == 994);
+    CHECK(checkup_journal_end_in_bucket(7'200, 1) == 7'199);
+    CHECK(checkup_journal_end_in_bucket(3'599, 1) == 3'600);
+    CHECK(checkup_journal_end_in_bucket(5'000, 1) == 5'000);
+
+    // A revision at or behind the cursor is appended again; anything else is the ordinary next.
+    CHECK(checkup_journal_next_target(rt<int64_t>(100), 100, 3, 98) == 98);
+    CHECK(checkup_journal_next_target(rt<int64_t>(100), 100, 3, INT64_MIN) == INT64_MIN);
+    // No cursor: the oldest live hour.
+    CHECK(checkup_journal_next_target(rt<int64_t>(INT64_MIN), 100, 3, 98) == 98);
+    CHECK(checkup_journal_next_target(rt<int64_t>(96), 100, 5, 98) == 97); // not appended yet
+    CHECK(checkup_journal_next_target(rt<int64_t>(100), 100, 0, 98) == INT64_MIN);
+    CHECK(checkup_journal_next_target(rt<int64_t>(100), INT64_MIN, 3, 98) == INT64_MIN);
+    // The cursor is ahead of the newest live hour after a backward clock step: no rewind.
+    CHECK(checkup_journal_next_target(rt<int64_t>(102), 100, 3, 101) == INT64_MIN);
+    // A revision older than the live hours is no target of its own.
+    CHECK(checkup_journal_next_target(rt<int64_t>(100), 100, 3, 97) == INT64_MIN);
+
+    // Arming: only a booked run that was open before the fold, and the oldest start hour wins.
+    // Pending monotonic hour 10, live hours 7..9 = wall buckets 98..100.
+    CheckupJournalRevision rev;
+    checkup_journal_revision_arm(rev, false, 5);
+    CHECK(!rev.armed);
+    checkup_journal_revision_arm(rev, true, 7);
+    CHECK(rev.armed && rev.bucket == 7 && rev.emitted == INT64_MIN);
+    checkup_journal_revision_arm(rev, true, 8); // covered by the replay from hour 7
+    CHECK(rev.bucket == 7);
+    rev.emitted = 98; // the same start hour again keeps an outstanding emit
+    checkup_journal_revision_arm(rev, true, 7);
+    CHECK(rev.bucket == 7 && rev.emitted == 98);
+    rev.emitted = INT64_MIN;
+    // Taking and emitting: offered while at or behind the cursor; a failed write is offered again,
+    // a stale confirmation of another bucket does not retire it, its own commit does.
+    CHECK(checkup_journal_revision_take(rev, INT64_MIN, 100, 10, 3, 100) == 98);
+    CHECK(!checkup_journal_revision_emit(rev, 99, 98) && rev.emitted == INT64_MIN);
+    CHECK(!checkup_journal_revision_emit(rev, 99, INT64_MIN));
+    CHECK(checkup_journal_revision_emit(rev, 98, 98) && rev.emitted == 98);
+    CHECK(checkup_journal_revision_take(rev, INT64_MIN, 100, 10, 3, 100) == 98);
+    CHECK(rev.armed && rev.emitted == 98);
+    CHECK(checkup_journal_revision_take(rev, 97, 100, 10, 3, 100) == 98);
+    CHECK(checkup_journal_revision_take(rev, 98, 100, 10, 3, 98) == INT64_MIN);
+    CHECK(!rev.armed && rev.emitted == INT64_MIN);
+    CHECK(checkup_journal_revision_take(rev, 98, 100, 10, 3, 100) == INT64_MIN); // nothing armed
+    // An older start hour re-arms and forgets an outstanding emit.
+    checkup_journal_revision_arm(rev, true, 8);
+    rev.emitted = 99;
+    checkup_journal_revision_arm(rev, true, 7);
+    CHECK(rev.bucket == 7 && rev.emitted == INT64_MIN);
+    // Left to the ordinary append: the cursor has not reached the hour, nothing was appended this
+    // boot, or no live hour anchors it.
+    CHECK(checkup_journal_revision_take(rev, INT64_MIN, 100, 10, 3, 97) == INT64_MIN && !rev.armed);
+    checkup_journal_revision_arm(rev, true, 7);
+    CHECK(checkup_journal_revision_take(rev, INT64_MIN, 100, 10, 3, INT64_MIN) == INT64_MIN);
+    CHECK(!rev.armed);
+    checkup_journal_revision_arm(rev, true, 7);
+    CHECK(checkup_journal_revision_take(rev, INT64_MIN, 100, 10, 0, 100) == INT64_MIN &&
+          !rev.armed);
+
+    // A DHW-only reset in monotonic hour 6 emptied the DHW buckets of hours 0..5. With hour 10
+    // pending, age 3 is hour 6 and keeps its identity; age 4 is hour 5 and loses it.
+    CHECK(!checkup_journal_dhw_withheld(rt<bool>(false), 6, 10, 4));
+    CHECK(!checkup_journal_dhw_withheld(rt<bool>(true), 6, 10, 3));
+    CHECK(checkup_journal_dhw_withheld(rt<bool>(true), 6, 10, 4));
+    CHECK(checkup_journal_dhw_withheld(rt<bool>(true), 6, 1, 0));
+
+    // Boot index: newest copy per hour within anchor ± 22; scanning continues to anchor - 44.
+    CheckupJournalIndex ix;
+    CHECK(checkup_journal_index_newest(ix) == INT64_MIN);
+    CHECK(!checkup_journal_index_retained(ix, 0));
+    CHECK(checkup_journal_index_step(ix, -1) == CheckupJournalIndexStep::Skip);
+    CHECK(ix.anchor == INT64_MIN);
+    CHECK(checkup_journal_index_step(ix, 100) == CheckupJournalIndexStep::Keep); // anchor
+    CHECK(checkup_journal_index_step(ix, 100) == CheckupJournalIndexStep::Skip); // older copy
+    CHECK(checkup_journal_index_step(ix, 101) ==
+          CheckupJournalIndexStep::Keep); // interrupted replay
+    CHECK(checkup_journal_index_step(ix, 122) == CheckupJournalIndexStep::Keep);
+    CHECK(checkup_journal_index_step(ix, 123) == CheckupJournalIndexStep::Skip);
+    CHECK(checkup_journal_index_step(ix, 78) == CheckupJournalIndexStep::Keep);
+    CHECK(checkup_journal_index_step(ix, 77) == CheckupJournalIndexStep::Skip);
+    CHECK(checkup_journal_index_step(ix, 56) == CheckupJournalIndexStep::Skip); // still scanned
+    CHECK(checkup_journal_index_step(ix, 55) == CheckupJournalIndexStep::Stop);
+    CHECK(ix.count == 4);
+    CHECK(checkup_journal_index_newest(ix) == 122);
+    CHECK(checkup_journal_index_retained(ix, 0)); // 100 is exactly 22 hours older
+    CHECK(checkup_journal_index_retained(ix, 1));
+    CHECK(checkup_journal_index_retained(ix, 2));
+    CHECK(!checkup_journal_index_retained(ix, 3)); // 78 left the window ending at 122
+    CHECK(!checkup_journal_index_retained(ix, 4));
+    CheckupJournalIndex full;
+    CHECK(checkup_journal_index_step(full, 1000) == CheckupJournalIndexStep::Keep);
+    for (int64_t b = 1000 - CHECKUP_JOURNAL_REVISION_SPAN;
+         b <= 1000 + CHECKUP_JOURNAL_REVISION_SPAN; ++b)
+        (void)checkup_journal_index_step(full, b);
+    CHECK(full.count == CHECKUP_JOURNAL_INDEX_CAP);
+
+    CheckupCoverage cov;
+    cov.rps = cov.valve = cov.mode = true;
+    auto cycling                   = [&](const CheckupWindow& w) {
+        return checkup_evaluate(w, cov, FaultClass::Normal)[CheckupCheck::Cycling].verdict;
+    };
+
+    // The witness. Append-once loses the long run and invents a short-cycling note.
+    const CheckupJournalSim before = checkup_journal_sim_witness(false);
+    const CheckupWindow     live   = checkup_aggregate(before.ring);
+    CHECK(live.space_runs == 13);
+    CHECK(live.space_run_s / live.space_runs == 1105);
+    // Seven hours cannot clear the check, but they never supported a short-cycling note either.
+    CHECK(cycling(live) == CheckupVerdict::Collecting);
+    const CheckupWindow lost = checkup_journal_sim_restore(before, before.journal.size());
+    CHECK(lost.space_runs == 12);
+    CHECK(lost.space_run_s / lost.space_runs == 599);
+    CHECK(cycling(lost) == CheckupVerdict::Info);
+
+    // Re-appending the start hour restores exactly the live population.
+    const CheckupJournalSim after = checkup_journal_sim_witness(true);
+    CHECK(after.journal.size() > before.journal.size()); // hours 1 and 2 were appended again
+    const CheckupWindow kept = checkup_journal_sim_restore(after, after.journal.size());
+    CHECK(kept.space_runs == live.space_runs);
+    CHECK(kept.space_run_s == live.space_run_s);
+    CHECK(kept.starts == live.starts);
+    CHECK(kept.censored_runs == live.censored_runs);
+    CHECK(cycling(kept) == CheckupVerdict::Collecting);
+
+    // Alternating labels: the latch keeps every hour's newest copy intact; without it the replays
+    // overwrite neighbouring hours.
+    const CheckupJournalSim jittered = checkup_journal_sim_witness(true, true, true);
+    const CheckupWindow     steady = checkup_journal_sim_restore(jittered, jittered.journal.size());
+    CHECK(steady.space_runs == live.space_runs && steady.space_run_s == live.space_run_s);
+    CHECK(steady.starts == live.starts && steady.censored_runs == live.censored_runs);
+    const CheckupJournalSim unlatched = checkup_journal_sim_witness(true, true, false);
+    const CheckupWindow     relabeled =
+        checkup_journal_sim_restore(unlatched, unlatched.journal.size());
+    CHECK(relabeled.starts != live.starts || relabeled.space_run_s != live.space_run_s);
+
+    // Power loss right after the revised hour, before the replay re-appended hour 2: the stored
+    // hour 2 is older in sequence but newer in time than the anchor and must still be restored.
+    CHECK(after.first_rewind != SIZE_MAX);
+    CHECK(after.journal[after.first_rewind].second.space_runs == 1);
+    const CheckupWindow torn        = checkup_journal_sim_restore(after, after.first_rewind + 1);
+    const CheckupWindow torn_before = checkup_journal_sim_restore(after, after.first_rewind);
+    CHECK(torn.space_runs == torn_before.space_runs + 1);
+    CHECK(torn.space_run_s - torn_before.space_run_s == live.space_run_s - lost.space_run_s);
+    CHECK(torn.starts == torn_before.starts);
+
+    // Failed revision writes commit nothing and confirm nothing: the revision is offered again on
+    // the next writer call until one commits, and the restore still matches the live window.
+    const CheckupJournalSim retried = checkup_journal_sim_witness(true, false, true, 2);
+    CHECK(retried.failed == 2 && retried.fail_revisions == 0);
+    const CheckupWindow recovered = checkup_journal_sim_restore(retried, retried.journal.size());
+    CHECK(recovered.space_runs == live.space_runs && recovered.space_run_s == live.space_run_s);
+    CHECK(recovered.starts == live.starts);
+}
+
 // ── logic/history_persist.hpp ───────────────────────────────────────────────────────────────────
 // Persisting the rings is the one feature here whose failure mode is a CONFIDENTLY WRONG chart
 // rather than an absent one, so the tests are written against the ways a restore can be wrong while
 // looking right: adopted after a power cycle, adopted across a catalog change, or placed at the
 // wrong instant on the axis.
+static void test_room_history() {
+    using namespace daik::logic;
+    CHECK(history_room_sample(false, 23.6) == HISTORY_NO_READING);
+    CHECK(history_room_sample(true, 23.6) == 236);
+    CHECK(history_room_sample(true, 23.64) == 236);
+    CHECK(history_room_sample(true, 23.66) == 237);
+    CHECK(history_room_sample(true, -0.16) == -2);
+    CHECK(history_room_sample(true, 0.0) == 0);
+    CHECK(history_room_sample(true, std::numeric_limits<double>::quiet_NaN()) ==
+          HISTORY_NO_READING);
+    CHECK(history_room_sample(true, std::numeric_limits<double>::infinity()) == HISTORY_NO_READING);
+    CHECK(history_room_sample(true, -3276.7) == HISTORY_NO_READING);
+    CHECK(history_room_sample(true, 3276.8) == HISTORY_NO_READING);
+    CHECK(history_room_sample(true, -3276.6) == -32766);
+    CHECK(history_room_sample(true, 3276.7) == INT16_MAX);
+
+    Config c;
+    CHECK(history_room_identity(c) == 0);
+    c.diagnostics_enabled = true;
+    CHECK(history_room_identity(c) == 0);
+    c.mqtt_uri = "mqtt://broker.example";
+    CHECK(history_room_identity(c) == 0);
+    c.ref_temp_topic         = "fixture/room";
+    c.ref_temp_path          = "temperature";
+    c.ref_temp_generation    = 5;
+    c.diagnostics_generation = 8;
+    const uint32_t identity  = history_room_identity(c);
+    CHECK(identity != 0);
+    Config renamed                         = c;
+    renamed.ref_temp_name                  = "Example sensor";
+    renamed.ref_temp_fixed_setpoint_tenths = 215;
+    renamed.ref_temp_setpoint_topic        = "fixture/target";
+    renamed.ref_temp_setpoint_path         = "target";
+    renamed.ref_temp_enabled_path          = "enabled";
+    renamed.ref_temp_hvac_mode_path        = "mode";
+    CHECK(history_room_identity(renamed) == identity);
+    auto   changed = [&](const Config& other) { CHECK(history_room_identity(other) != identity); };
+    Config other   = c;
+    other.ref_temp_generation++;
+    changed(other);
+    other = c;
+    other.diagnostics_generation++;
+    changed(other);
+    other = c;
+    other.mqtt_uri += "2";
+    changed(other);
+    other = c;
+    other.ref_temp_topic += "2";
+    changed(other);
+    other = c;
+    other.ref_temp_path += "2";
+    changed(other);
+    other                     = c;
+    other.ref_temp_time_topic = "fixture/time";
+    changed(other);
+    other                    = c;
+    other.ref_temp_time_path = "time";
+    changed(other);
+    Config explicit_time_topic              = other;
+    explicit_time_topic.ref_temp_time_topic = explicit_time_topic.ref_temp_topic;
+    CHECK(history_room_identity(explicit_time_topic) == history_room_identity(other));
+    other = c;
+    other.ref_temp_max_age_s++;
+    changed(other);
+    other                     = c;
+    other.diagnostics_enabled = false;
+    CHECK(history_room_identity(other) == 0);
+
+    HistoryJournalHeader h{};
+    h.magic       = HISTORY_JOURNAL_MAGIC;
+    h.version     = HISTORY_JOURNAL_VERSION;
+    h.source      = static_cast<uint8_t>(HistoryJournalSource::Room);
+    h.flags       = HISTORY_JOURNAL_FLAG_TARGET_SCOPED;
+    h.catalog_fp  = HISTORY_ROOM_SCHEMA;
+    h.commit      = HISTORY_JOURNAL_COMMITTED;
+    h.value_count = 1;
+    h.slot_bytes  = HISTORY_JOURNAL_SLOT_BYTES;
+    h.sequence    = 1;
+    h.bucket      = 100;
+    h.dt_s        = HISTORY_DT_S;
+    h.rings[0] = h.rings[1] = h.rings[2] = 1;
+    history_journal_set_scope(h, identity);
+    CHECK(history_journal_room_header_structural_matches(h));
+    CHECK(history_journal_room_header_matches(h, identity));
+    CHECK(!history_journal_room_header_matches(h, identity ^ 1u));
+    CHECK(!history_journal_room_header_matches(h, 0));
+    CHECK(!history_journal_trend_header_structural_matches(h));
+    CHECK(!history_journal_manifest_header_matches(h));
+    auto rejects = [&](HistoryJournalHeader bad) {
+        CHECK(!history_journal_room_header_structural_matches(bad));
+    };
+    auto bad   = h;
+    bad.source = 3;
+    rejects(bad);
+    bad       = h;
+    bad.flags = 0;
+    rejects(bad);
+    bad = h;
+    history_journal_set_scope(bad, 0);
+    rejects(bad);
+    for (size_t i = 0; i < 3; ++i) {
+        bad          = h;
+        bad.rings[i] = 2;
+        rejects(bad);
+    }
+    bad = h;
+    bad.catalog_fp ^= 1u;
+    CHECK(history_journal_room_header_structural_matches(bad));
+    CHECK(!history_journal_room_header_matches(bad, identity));
+    bad.catalog_fp = 0;
+    rejects(bad);
+    bad             = h;
+    bad.value_count = 2;
+    rejects(bad);
+    bad      = h;
+    bad.dt_s = 60;
+    rejects(bad);
+    const HistorySample sample  = 236;
+    h.crc                       = history_journal_crc_bytes(h, &sample, sizeof(sample));
+    const HistorySample damaged = 237;
+    CHECK(h.crc != history_journal_crc_bytes(h, &damaged, sizeof(damaged)));
+    bad = h;
+    history_journal_set_scope(bad, identity ^ 1u);
+    CHECK(h.crc != history_journal_crc_bytes(bad, &sample, sizeof(sample)));
+}
+
 static void test_history_persist() {
     using namespace logic;
 
@@ -21028,7 +21877,7 @@ static void test_history_persist() {
     CHECK(history_fp_u32(CONFIG_CRC32_INIT, 1) != history_fp_u32(CONFIG_CRC32_INIT, 256));
 
     // --- the official 8 MB append journal -------------------------------------------------------
-    CHECK(HISTORY_FLASH_TOTAL_RINGS == 48);
+    CHECK(HISTORY_FLASH_TOTAL_RINGS == 49);
     CHECK(HISTORY_FLASH_PARTITION_BYTES == 4u * 1024u * 1024u);
     CHECK(HISTORY_FLASH_ERASE_BYTES == 4096);
     CHECK(HISTORY_JOURNAL_HEADER_BYTES == 64);
@@ -21045,7 +21894,10 @@ static void test_history_persist() {
     CHECK(history_journal_source_rings(HistoryJournalSource::Modbus) == 13);
     CHECK(history_journal_source_rings(HistoryJournalSource::Env3) == 3);
     CHECK(history_journal_source_rings(HistoryJournalSource::Checkup) == 0);
-    CHECK(HISTORY_JOURNAL_SOURCE_COUNT == 4);
+    CHECK(HISTORY_JOURNAL_SOURCE_COUNT == 5);
+    CHECK(history_journal_source_rings(HistoryJournalSource::Room) == 1);
+    CHECK(static_cast<unsigned>(HistoryJournalSource::Checkup) == 3);
+    CHECK(static_cast<unsigned>(HistoryJournalSource::Room) == 4);
     CHECK(history_journal_slot_offset(17) == 17 * 256);
     CHECK(history_journal_sector_first_slot(17) == 16);
     CHECK(history_journal_next_sector_slot(15) == 16);
@@ -21164,7 +22016,7 @@ static void test_history_persist() {
     }
     CHECK(HISTORY_FLASH_FUTURE_HOURS == 72);
     CHECK(HISTORY_FLASH_FUTURE_SAMPLES == 864);
-    CHECK(HISTORY_FLASH_FUTURE_RECORDS == 2664);
+    CHECK(HISTORY_FLASH_FUTURE_RECORDS == 3600);
     CHECK(HISTORY_JOURNAL_SLOT_COUNT >= HISTORY_FLASH_FUTURE_RECORDS);
     CHECK(HISTORY_FLASH_PARTITION_OFFSET == 0x400000);
 
@@ -21606,7 +22458,7 @@ static void test_history_persist() {
     CHECK(history_restore_next_source_ring(kModbusFirst - 1) == kModbusFirst);
     CHECK(history_restore_next_source_ring(kModbusFirst) == kEnv3First);
     CHECK(history_restore_next_source_ring(kEnv3First - 1) == kEnv3First);
-    CHECK(history_restore_next_source_ring(kEnv3First) == HISTORY_FLASH_TOTAL_RINGS);
+    CHECK(history_restore_next_source_ring(kEnv3First) == HISTORY_FLASH_TOTAL_RINGS - 1);
     CHECK(history_restore_next_source_ring(HISTORY_FLASH_TOTAL_RINGS - 1) ==
           HISTORY_FLASH_TOTAL_RINGS);
     for (size_t ring = 0; ring < HISTORY_FLASH_TOTAL_RINGS; ++ring) {
@@ -21620,7 +22472,7 @@ static void test_history_persist() {
             ring = history_restore_next_source_ring(ring);
             steps++;
         }
-        CHECK(ring == HISTORY_FLASH_TOTAL_RINGS && steps == 3);
+        CHECK(ring == HISTORY_FLASH_TOTAL_RINGS && steps == 4);
     }
 
     // --- the splice -----------------------------------------------------------------------------
@@ -26259,6 +27111,7 @@ int main() {
     test_history_measurement_units();
     test_history();
     test_checkup();
+    test_checkup_population();
     test_checkup_evidence_overhaul();
     test_no_publish();
     test_config_model();
@@ -26344,6 +27197,8 @@ int main() {
     test_refrigerant_service();
     test_state_dwell();
     test_checkup_persist();
+    test_room_history();
+    test_checkup_journal_revisions();
     test_history_persist();
     test_history_identity();
     test_checkup_scoped_flash_age();

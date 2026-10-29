@@ -202,7 +202,8 @@ context, never sampling gates. An absent sample clears the corresponding prior e
 ### History and 24-hour checks
 
 `history` fields: `epoch`, `dt`, `persist`, `dwell_persist`, `rows[{id,label}]`, `modbus_rows[{id,label}]`,
-`env3_rows[{id,label}]`. Trend ids name concepts; labels follow the detected profile. Unsupported rows
+`env3_rows[{id,label}]`, `room_rows[{id,label}]`. Trend ids name concepts; labels follow the detected profile
+or configured MQTT room-source name. Unsupported rows
 are omitted. RAM adoption verdicts include `accept`, `power_cycle`, `wrong_catalog`, `bad_crc`,
 `wrong_version`, `no_record`, `safe_mode`, `not_committed`, `stale_commit`; they do not report flash
 restoration. `stale_commit` means unmeasurable age, not an ordinary stalled raster (booked as gaps).
@@ -229,7 +230,7 @@ evidence is a measurement, not a good/bad assessment. The reading order and main
 |---|---|
 | `fault` | `active` |
 | `dhw_loss` | `max_k_h`, `windows`, `high_windows`, `quiet_high_windows`, `draw_windows`, `pump_windows`, `high_with_pump`, `high_pump_off`, `circulation_on_s`, `circulation_known_s`, `candidate_s`, `settle_remaining_s`, `aborts`, `abort_reasons`, `best_aborted_s`, `blocked` |
-| `cycling` | `starts`, `mean_run_s`, `space_runs`, `space_mean_run_s`, `dhw_runs`, `dhw_mean_run_s`, `cooling_runs`, `censored_runs`, `split`, `outdoor_source`, `outdoor_min_c`, `outdoor_mean_c`, `outdoor_samples` |
+| `cycling` | `starts`, `mean_run_s`, `space_runs`, `space_mean_run_s`, `dhw_runs`, `dhw_mean_run_s`, `cooling_runs`, `censored_runs`, `censored_transition_runs`, `censored_handover_runs`, `censored_unreadable_runs`, `censored_restart_runs`, `censored_start_runs`, `classified_runtime_s`, `censored_runtime_s`, `runtime_saturated`, `split`, `outdoor_source`, `outdoor_min_c`, `outdoor_mean_c`, `outdoor_samples` |
 | `defrost` | `count`, `share_pct`, `paired_count`, `defrost_s`, `run_s`, `outdoor_source`, `outdoor_min_c`, `outdoor_mean_c`, `outdoor_samples` |
 | `pressure` | `min_bar`, `current_bar`, `min_unix_s`, `confirmed_low` |
 | `flow` | `min_l_min` |
@@ -250,10 +251,25 @@ Unestablished numeric evidence is null. `reason` is empty when no qualification 
 `class_coverage`, `heating_runs_insufficient`, `class_population_incomplete`, `observation_only`,
 `no_paired_runtime`, `defrost_events_insufficient` or `source_stale`.
 
-Cycling class counts describe completed runs; mixed or gapped runs are censored. `split` identifies
-an eligible heating-only assessment. No pooled all-mode assessment exists; legacy `mean_run_s`
-remains present as null. `min_unix_s` is the pressure minimum's observed-at time, null without a
-synchronized clock; it retains no raw frame or validity context. `current_bar` is null when the
+Cycling class counts describe completed runs. `censored_runs` includes five mutually exclusive
+causes: `transition` (an unaccepted class transition), `handover` (a positively observed continuous
+heating/DHW handover), `unreadable` (class/RPS uncertainty), `restart` (a journal/window boundary),
+and `start` (the start was not witnessed). Their fields are null without class evidence. Proven
+handovers remain visible but are excluded from the 90% run-count denominator. No space phase of
+a handover enters the heating mean. `classified_runtime_s` is completed pure **space-heating**
+runtime; `censored_runtime_s` includes elapsed time of other censored runs, excluding proven
+handovers. Known-start elapsed time includes blind intervals. Unwitnessed starts or journal/window
+boundaries provide only observed lower bounds and always block assessment. Otherwise space runtime
+must cover at least 90% of their sum. A per-hour
+censored runtime saturated at 65,535 seconds makes `runtime_saturated:true`, reports a lower bound,
+and blocks an assessment. Counter saturation or inconsistent cause totals also blocks it.
+`split` identifies an eligible heating-only assessment. No pooled all-mode assessment exists;
+legacy `mean_run_s` remains present as null. Transition/gap rules and limitations are in
+[DIAGNOSTIC_EVIDENCE.md](DIAGNOSTIC_EVIDENCE.md#diagnosis-cycling).
+
+`min_unix_s` is the pressure minimum's earliest dated occurrence in the retained window, null without
+a synchronized clock; equal minima keep the earliest known time, not an inferred pressure dip.
+It retains no raw frame or validity context. `current_bar` is null when the
 latest sample lacks pressure or the source is stale. `confirmed_low` records whether at least
 60 continuously observed seconds at or below the project boundary were witnessed in the window.
 Positive defrost shares below 1% make the whole-percent `share_pct` null; positive heater runtimes
@@ -303,7 +319,7 @@ MCP `get_hp_values` uses the same serializer. There is no retained model-sized r
 
 ## GET /history
 
-Query: `row=<trend-id>` and optional `source=x10a|modbus|env3`; absent source means `x10a`.
+Query: `row=<trend-id>` and optional `source=x10a|modbus|env3|room`; absent source means `x10a`.
 Unknown ids return 404. Available rows are listed in `/status.history`. The payload is:
 
 ```text
@@ -318,6 +334,11 @@ responses superseded by a newer status/source generation.
 `held` marks eligible X10A outdoor nulls as held-over; all other source rasters leave it empty.
 The circulation-state trend is selected through `source=x10a` but reports its physical source as
 `"mqtt"` in the response.
+`source=room&row=room_temp` returns the independent MQTT actual-temperature trend with `source:"room"`.
+It is offered outside safe mode while plant diagnostics and a room source with an MQTT broker are
+configured; fresh, valid temperatures are recorded independently of thermostat state or heating-curve
+eligibility. Disabled/unconfigured sources and safe mode return 404; a changed source identity during
+retrieval returns 503.
 Catalog ids and source eligibility are in `main/logic/history.hpp` and `homehub_map.hpp`.
 
 ## Catalog, probes and evidence
@@ -377,7 +398,9 @@ the link blob; it does not migrate or write the service blob.
 | Legacy per-key credentials/services, `rx_pin`, `tx_pin`, `proto`, `board_set` | Read-only fallback inputs on devices upgraded from the per-key era; never written, removed only by a factory reset |
 | `boot_fails`, `heap_rst` | Independent crash-loop and bounded heap-restart counters; which boot or uptime clears which is in [ARCHITECTURE.md](ARCHITECTURE.md#boot-loop-safe-mode-config-recovery) |
 
-The current service layout is v19. Retired v9 actuation and v14 controller-mode bytes keep their
+The current service layout is v20; it appends a room-history generation that defaults to zero for
+older records and prevents a removed or replaced source from restoring its earlier history.
+Retired v9 actuation and v14 controller-mode bytes keep their
 positions, are written zero and ignored. Pre-v18 HomeHub configurations migrate as already searched
 so an old empty target stays opted out; fresh state searches once on its first networked boot and
 persists the result or miss. Pre-v19 diagnostics migrate off. See `logic/config_store.hpp` for exact

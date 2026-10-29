@@ -1347,6 +1347,27 @@ function checkupDuration(s) {
   return remainder ? `${hours} h ${remainder} min` : `${hours} h`;
 }
 
+// A mean near the ten-minute project rule needs more precision than an elapsed-hour label.
+function checkupRunDuration(s) {
+  const seconds = Math.round(Number(s));
+  if (!Number.isFinite(seconds) || seconds < 0) return "";
+  if (seconds < 600) return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")} min`;
+  return checkupDuration(Math.round(seconds / 60) * 60);
+}
+
+function checkupCyclingRuntime(c) {
+  const known = c.classified_runtime_s, unknown = c.censored_runtime_s;
+  if (!Number.isFinite(known) || known < 0 || !Number.isFinite(unknown) || unknown < 0) return "";
+  // An unwitnessed start or lost journal boundary has no bounded full duration either.
+  if (c.runtime_saturated === true || c.censored_start_runs > 0 || c.censored_restart_runs > 0)
+    return `${t("check.cycling_censored", c.censored_runs)}: ≥${checkupDuration(unknown)}.`;
+  if (known + unknown <= 0) return "";
+  // Do not round an ineligible 89.99% population up to the 90% evidence threshold.
+  const coverage = (Math.floor(1000 * known / (known + unknown)) / 10).toLocaleString(LANG,
+    { maximumFractionDigits: 1 });
+  return `${t("check.detail.channel_coverage", t("mode.heat"), `${coverage}%`)}.`;
+}
+
 function checkupStatusKey(c) {
   const verdict = typeof c === "string" ? c : c?.verdict;
   // Older firmware reported this completed, unsuccessful day as collecting. Keep its
@@ -1470,8 +1491,8 @@ function checkupDetailHtml(c, fullSpan = c.full_span === true, report = {}) {
   }[c.reason];
   if (reasonKey) detail += ` ${t(`check.detail.${reasonKey}`)}`;
   if (compactMetric && parts.length) detail += ` ${parts.join(" · ")}.`;
-  if (c.id === "cycling" && c.space_runs != null)
-    detail += t("check.detail.cycling_split");
+  const cyclingRuntime = c.id === "cycling" ? checkupCyclingRuntime(c) : "";
+  if (cyclingRuntime) detail += ` ${cyclingRuntime}`;
   if (c.id === "dhw_loss" && statusKey !== "collecting" && !c.blocked && Number(c.aborts) > 0)
     detail += t("check.detail.dhw_aborted", Number(c.aborts), checkupDhwReasons(c),
                 checkupDuration(c.best_aborted_s));
@@ -1599,7 +1620,7 @@ function checkupMetricValue(c) {
       const starts = t("check.starts", c.starts);
       if (c.space_runs == null) return checkupWithOutdoor(c, starts);
       const cls = (key, n, mean) => n == null ? "" : mean == null
-        ? t(key, n, "").split(" · ")[0] : t(key, n, checkupDuration(mean));
+        ? t(key, n, "").split(" · ")[0] : t(key, n, checkupRunDuration(mean));
       const parts = [starts];
       parts.push(cls("check.cycling_space", c.space_runs, c.space_mean_run_s));
       parts.push(cls("check.cycling_dhw", c.dhw_runs, c.dhw_mean_run_s));
@@ -1607,6 +1628,11 @@ function checkupMetricValue(c) {
       // Runs that happened and could not be classified. Shown only when there are any: a reader who
       // sees "space 0" needs to know whether nothing ran or nothing could be judged.
       if (c.censored_runs > 0) parts.push(t("check.cycling_censored", c.censored_runs));
+      const labels = t("check.cycling_causes").split("|");
+      const causes = cyclingCauseValues(["transition", "handover", "unreadable", "restart", "start"]
+        .map((cause) => c[`censored_${cause}_runs`]),
+        [labels[0], `${t("mode.heat")} ↔ ${t("mode.dhw")}`, t("sys.nodata"), labels[1], labels[2]]);
+      if (causes) parts.push(causes);
       return checkupWithOutdoor(c, parts.filter(Boolean).join(" · "));
     }
     case "defrost": {
@@ -1622,7 +1648,8 @@ function checkupMetricValue(c) {
         : `${c.min_bar.toLocaleString(LANG, { maximumFractionDigits: 1 })} bar`;
     }
     case "flow": {
-      return c.min_l_min == null ? "" : `${c.min_l_min} l/min`;
+      return typeof c.min_l_min !== "number" || !Number.isFinite(c.min_l_min) ? ""
+        : `${c.min_l_min.toLocaleString(LANG, { maximumFractionDigits: 1 })} l/min`;
     }
     case "heater": {
       const parts = [];

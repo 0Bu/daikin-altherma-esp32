@@ -359,10 +359,22 @@ assert.ok(stackBudgets.paths.ota_task_manifest_fetch.max_bytes <=
 assert.ok(stackBudgets.paths.ota_health_gate.max_bytes <=
   Number(healthTaskStackMatch[1]) - minimumStackReserve,
 "the rollback-critical health-gate ELF ceiling must leave at least 1 KiB on its task stack");
-for (const pathName of ["weather_task_download", "weather_task_parse"]) {
+const weatherTaskBudget = stackBudgets.tasks.weather;
+assert.equal(weatherTaskBudget.stack_bytes, Number(weatherTaskStackMatch[1]),
+  "Weather path ceilings must bind the actual task allocation");
+assert.ok(weatherTaskBudget.reserve_bytes >= 1536,
+  "Weather must retain its reviewed 1536-byte task reserve");
+for (const pathName of ["weather_task_download", "weather_task_parse", "weather_task_tls",
+  "weather_task_tls_headers", "weather_task_tls_body"]) {
+  assert.ok(weatherTaskBudget.paths.includes(pathName),
+    `${pathName} must remain owned by the Weather task`);
   assert.ok(stackBudgets.paths[pathName].max_bytes <=
-    Number(weatherTaskStackMatch[1]) - minimumStackReserve,
-  `${pathName} must leave at least 1 KiB on the Weather task stack`);
+    Number(weatherTaskStackMatch[1]) - weatherTaskBudget.reserve_bytes,
+  `${pathName} must retain the reviewed Weather task reserve`);
+  if (pathName.startsWith("weather_task_tls")) {
+    assert.equal(stackBudgets.paths[pathName].base_bytes, 4608,
+      `${pathName} must include the complete reviewed SDK TLS envelope`);
+  }
 }
 assert.deepEqual(stackBudgets.paths.weather_task_download.symbols,
   ["weather_task", "weather_cycle", "weather_fetch", "weather_download"]);
@@ -1007,6 +1019,25 @@ assert.match(sdkconfig, /^CONFIG_MBEDTLS_DYNAMIC_BUFFER=y$/m,
   "ESP-IDF's handshake-aware dynamic TLS buffers must remain enabled");
 assert.match(sdkconfig, /^CONFIG_MBEDTLS_DYNAMIC_FREE_CONFIG_DATA=n$/m,
   "TLS config/key/CA lifetime must not be shortened without reconnect redesign");
+// The WiFi RX cap is the mDNS action queue plus one full-size TCP receive window (mechanism,
+// derivation and limits: sdkconfig.defaults). Changing one side without the other either reopens
+// the Weather heap trough or narrows the window TCP can actually use.
+const sdkInt = (name, fallback) => {
+  const match = sdkconfig.match(new RegExp(`^${name}=(\\d+)$`, "m"));
+  assert.ok(match || fallback !== undefined, `${name} must be pinned in sdkconfig.defaults`);
+  return match ? Number(match[1]) : fallback;
+};
+const wifiRxCap = sdkInt("CONFIG_ESP_WIFI_DYNAMIC_RX_BUFFER_NUM");
+const mdnsBacklog = sdkInt("CONFIG_MDNS_ACTION_QUEUE_LEN");
+// 1440 is the ESP-IDF lwIP Kconfig default, used only while sdkconfig.defaults does not pin one.
+const tcpWindowSegments = Math.ceil(sdkInt("CONFIG_LWIP_TCP_WND_DEFAULT") /
+                                    sdkInt("CONFIG_LWIP_TCP_MSS", 1440));
+assert.equal(mdnsBacklog, 8,
+  "mDNS must keep the component-minimum action queue so a starved task holds few RX buffers");
+assert.ok(wifiRxCap > 0 && wifiRxCap >= sdkInt("CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM"),
+  "dynamic WiFi RX buffers must stay bounded and at least the static RX count");
+assert.equal(wifiRxCap, mdnsBacklog + tcpWindowSegments,
+  "the WiFi RX cap must stay the mDNS queue length plus one full-size TCP receive window");
 assert.equal(occurrences(update, "wait_for_ota_headroom("), 3,
   "the install path needs one TLS gate and a separate RSA gate before both IDF validation passes");
 assert.match(ota,

@@ -130,9 +130,21 @@ int64_t                s_last_commit_us = kNoCommitUs;
 // that dropped DHW hours), in this boot's monotonic clock; -1 while the lifecycle alone decides.
 int64_t                s_dhw_scope_us      = -1;
 uint8_t                s_live_commit_count = 0; // completed in THIS monotonic clock, max 23
+// Pending re-append of a completed hour whose run completed after its record may already have been
+// appended (logic::CheckupJournalRevision). The journal writer confirms each committed checkup
+// append through `s_revision_acked` without taking s_mtx.
+logic::CheckupJournalRevision s_revision;
+std::atomic<int64_t>          s_revision_acked{INT64_MIN};
+// Monotonic-to-wall-clock label offset, latched once per boot
+// (logic::checkup_journal_latched_newest).
+int64_t s_journal_label_offset = INT64_MIN;
+// Monotonic hour of the last DHW-only restart. Hours completed before it lost their DHW buckets to
+// the reset, so an append made after it carries no DHW identity for them.
+bool     s_dhw_restart_armed  = false;
+uint32_t s_dhw_restart_bucket = 0;
 
 // One-shot journal-reconstruction scratch. Static for the poll task's measured 8 KiB stack: 23
-// diagnostic records are roughly 2 KiB and must never become an automatic array on that task.
+// diagnostic records occupy 3,128 bytes and must never become an automatic array on that task.
 // Unused scratch slots carry no evidence. Each admitted slot is fully assigned below before any
 // read; zero initial bytes keep this private buffer in .bss instead of duplicating it in flash.
 std::array<CheckupFlashRecord, logic::CHECKUP_COMPLETED_BUCKETS> s_restore_live = []() constexpr {
@@ -148,6 +160,7 @@ std::array<CheckupFlashRecord, logic::CHECKUP_COMPLETED_BUCKETS> s_restore_live 
     }
     return records;
 }();
+static_assert(sizeof(s_restore_live) == 3128, "diagnosis restore scratch budget changed");
 
 // The ONE unwind-safe mutex guard, shared by every file in this firmware (main/rtos_guard.hpp).
 // This used to be a private copy here; nine of them had drifted into two different shapes.
@@ -222,7 +235,7 @@ bool reading(const CachedValue* v, size_t n, const logic::CheckupLocator& l, int
 //
 // first/latest_sample_us are excluded because they are MONOTONIC and meaningless in the next boot's
 // clock; the recorded lifecycle rides as `span_us` instead, without establishing durable age.
-uint32_t persist_crc() {
+uint32_t checkup_persist_crc() {
     uint32_t crc = CONFIG_CRC32_INIT;
     const auto& r = P().ring;
     crc = config_crc32_update(crc, reinterpret_cast<const uint8_t*>(r.buf), sizeof(r.buf));
@@ -251,7 +264,7 @@ uint32_t persist_crc() {
 // reconstruction. This is the header writer, keeping its integrity fields together. It leaves
 // `boots_since_commit` alone for layout integrity. It is a reserved legacy age-guard field;
 // completed RAM hours are never adopted by this build.
-void persist_seal() {
+void checkup_persist_seal() {
     P().magic     = logic::CHECKUP_PERSIST_MAGIC;
     P().version   = logic::CHECKUP_PERSIST_VERSION;
     P().layout_fp = logic::checkup_layout_fingerprint();
@@ -259,7 +272,7 @@ void persist_seal() {
     P().source_fp              = s_source_fp;
     P().diagnostics_generation = s_diagnostics_generation;
     P().span_us   = P().ring.span_us();
-    P().crc       = persist_crc();
+    P().crc                    = checkup_persist_crc();
 }
 
 // `keep_handoff` spares the one-shot DHW checkpoint. Startup consumes it once and holds a
@@ -275,8 +288,11 @@ void persist_wipe(bool keep_handoff = false) {
     s_dhw_scope_us         = -1; // both rings restart together
     s_source_last_us       = -1;
     s_pressure_now         = -1;
-    persist_seal();     // keeps s_model_fp: the identity belongs to what is recorded NEXT, and the
-} // reset is consumed asynchronously, after checkup_reset_on_detect set it
+    s_revision             = {};    // the withdrawn hours have nothing left to re-append
+    s_dhw_restart_armed    = false; // no hour older than the wipe remains to be appended
+    // Retain s_model_fp for the next record; detection confirms it before consuming a reset.
+    checkup_persist_seal();
+}
 
 bool apply_reset_locked() {
     if (!s_reset_requested.exchange(false)) return false;
@@ -301,9 +317,31 @@ bool apply_dhw_reset_locked() {
     s_dhw_source_fp       = s_requested_dhw_source_fp.load();
     s_dhw_state           = kFreshDhwLossState;
     s_dhw_scope_us        = esp_timer_get_time(); // the X10A lifecycle keeps running
+    s_dhw_restart_armed   = true;
+    s_dhw_restart_bucket  = logic::checkup_bucket(s_dhw_scope_us);
     P().dhw_handoff.magic = 0;
-    persist_seal();
+    checkup_persist_seal();
     return true;
+}
+
+// This boot's wall-clock label of the newest completed monotonic hour. Caller holds s_mtx and has
+// a commit anchor; the first completed monotonic hour is 0, so the pending one is at least 1.
+int64_t latched_newest_locked(int64_t latest_end_unix_s) {
+    const auto current = static_cast<uint32_t>(
+        s_last_commit_us / (static_cast<int64_t>(logic::CHECKUP_DT_S) * 1000000LL));
+    return logic::checkup_journal_latched_newest(
+        s_journal_label_offset, logic::checkup_journal_bucket(latest_end_unix_s), current - 1);
+}
+
+// Fold one sample into the X10A checkup. A run that completes into its already sealed start hour
+// changes a record the journal may have appended while the run was open: mark that hour for
+// re-appending (the oldest such hour wins, because the replay covers every later one).
+void fold_checkup_locked(const logic::CheckupSample& s, int64_t now) {
+    const bool     run_open  = s_state.run_open;
+    const uint32_t run_start = s_state.run_start_bucket;
+    if (!logic::checkup_step(s_state, P().ring.pending, s, now, &P().ring)) return;
+    logic::checkup_journal_revision_arm(s_revision, run_open, run_start);
+    checkup_persist_seal();
 }
 
 // Best-effort intentional-reboot handoff, attempted once after OTA installation or during
@@ -371,7 +409,7 @@ void checkup_start(bool diagnostics_enabled, uint32_t diagnostics_generation) {
     const uint32_t want_fp = logic::checkup_layout_fingerprint();
     const uint32_t reason  = static_cast<uint32_t>(esp_reset_reason());
     s_persist_verdict        = logic::checkup_restore_verdict(
-        reason, P().magic, P().version, P().layout_fp, want_fp, P().crc, persist_crc(),
+        reason, P().magic, P().version, P().layout_fp, want_fp, P().crc, checkup_persist_crc(),
         safe_mode_active(), diagnostics_enabled, P().diagnostics_generation, diagnostics_generation,
         P().boots_since_commit);
     const logic::CheckupRestore integrity = s_persist_verdict;
@@ -470,7 +508,7 @@ void checkup_reset_on_detect(const char* profile_id, uint32_t source_fp) {
                         "discarded\n");
         }
         s_boot_handoff_valid = false;
-        persist_seal();
+        checkup_persist_seal();
         return;
     }
     s_boot_handoff_valid = false;
@@ -634,15 +672,13 @@ void checkup_record(const CachedValue* v, size_t n, bool rps_known, bool rps_run
         // Retain the reserved sealed integrity counter's completed-hour bookkeeping. Startup
         // still retires completed RAM hours; this does not authorize their adoption next boot.
         P().boots_since_commit = 0;
-        persist_seal(); // seal this completed-bucket update; see persist_crc()
+        checkup_persist_seal(); // seal this completed-bucket update; see checkup_persist_crc()
         if (continuous_boundary) s_state.last_us = now; // dt=0, edge witnesses intentionally kept
-        const bool reseal = logic::checkup_step(s_state, P().ring.pending, s, now, &P().ring);
-        if (reseal) persist_seal();
+        fold_checkup_locked(s, now);
         if (!discard_dhw_sample)
             logic::dhw_loss_step(s_dhw_state, P().dhw.pending, s, now);
     } else {
-        const bool reseal = logic::checkup_step(s_state, P().ring.pending, s, now, &P().ring);
-        if (reseal) persist_seal();
+        fold_checkup_locked(s, now);
         if (!discard_dhw_sample)
             logic::dhw_loss_step(s_dhw_state, P().dhw.pending, s, now);
     }
@@ -673,7 +709,18 @@ void expire_restored_locked() {
         s_pressure_now   = -1;
         changed          = true;
     }
-    if (changed) persist_seal();
+    if (changed) checkup_persist_seal();
+}
+
+logic::CheckupCyclingEvidence checkup_cycling_evidence() {
+    if (!s_diagnostics_enabled.load(std::memory_order_acquire) || !s_mtx)
+        return logic::CheckupCyclingEvidence{};
+    Lock lk(s_mtx);
+    if (!lk.acquired() || s_reset_requested.load()) return logic::CheckupCyclingEvidence{};
+    expire_restored_locked();
+    const auto window = logic::checkup_aggregate(P().ring);
+    return logic::checkup_cycling_evidence(window, s_cov.valve && s_cov.mode &&
+                                                       window.class_observed_s > 0);
 }
 
 logic::CheckupReport checkup_report() {
@@ -734,13 +781,19 @@ bool checkup_flash_next(int64_t now_unix_s, int64_t after_bucket,
     if (now_us < s_last_commit_us) return false;
     const int64_t latest_end_unix_s =
         now_unix_s - (now_us - s_last_commit_us) / 1000000;
-    const int64_t newest = logic::checkup_journal_bucket(latest_end_unix_s);
+    const int64_t newest = latched_newest_locked(latest_end_unix_s);
     if (newest == INT64_MIN) return false;
     const size_t live_count = s_live_commit_count < P().ring.count
         ? s_live_commit_count : P().ring.count;
-    const int64_t target = logic::checkup_journal_next_live_bucket(
-        after_bucket, newest, live_count);
+    const auto   current    = static_cast<uint32_t>(
+        s_last_commit_us / (static_cast<int64_t>(logic::CHECKUP_DT_S) * 1000000LL));
+    const int64_t revision = logic::checkup_journal_revision_take(
+        s_revision, s_revision_acked.load(), newest, current, live_count, after_bucket);
+    const int64_t target =
+        logic::checkup_journal_next_target(after_bucket, newest, live_count, revision);
     if (target == INT64_MIN) return false;
+    if (logic::checkup_journal_revision_emit(s_revision, target, revision))
+        s_revision_acked.store(INT64_MIN);
 
     const size_t age = static_cast<size_t>(newest - target);
     const size_t ring_i = (static_cast<size_t>(P().ring.head) +
@@ -754,13 +807,22 @@ bool checkup_flash_next(int64_t now_unix_s, int64_t after_bucket,
     payload.source_fp              = s_source_fp;
     payload.dhw_source_fp          = s_dhw_source_fp;
     payload.diagnostics_generation = s_diagnostics_generation;
-    payload.end_unix_s = latest_end_unix_s -
-        static_cast<int64_t>(age) * logic::CHECKUP_DT_S;
+    payload.end_unix_s             = logic::checkup_journal_end_in_bucket(
+        latest_end_unix_s - static_cast<int64_t>(age) * logic::CHECKUP_DT_S, target);
     payload.checkup = P().ring.buf[ring_i];
     payload.dhw = P().dhw.buf[dhw_i];
+    // An hour completed before a DHW-only restart was emptied by it: never present that empty
+    // bucket as the current circulation source's evidence (a restore then restarts the DHW scope).
+    if (logic::checkup_journal_dhw_withheld(s_dhw_restart_armed, s_dhw_restart_bucket, current,
+                                            age)) {
+        payload.dhw_source_fp = 0;
+        payload.dhw           = kEmptyDhwLossBucket;
+    }
     bucket = target;
     return logic::checkup_journal_bucket(payload.end_unix_s) == target;
 }
+
+void checkup_flash_appended(int64_t bucket) { s_revision_acked.store(bucket); }
 
 CheckupFlashRestoreResult checkup_flash_restore(const CheckupFlashRecord* records, size_t count,
                                                 int64_t now_unix_s) {
@@ -790,8 +852,10 @@ CheckupFlashRestoreResult checkup_flash_restore(const CheckupFlashRecord* record
     if (P().ring.count && P().ring.count == P().dhw.count &&
         s_last_commit_us != kNoCommitUs && now_us >= s_last_commit_us) {
         const int64_t latest_end = now_unix_s - (now_us - s_last_commit_us) / 1000000;
-        const size_t available = s_live_commit_count < P().ring.count
-            ? s_live_commit_count : P().ring.count;
+        const int64_t newest_label = latched_newest_locked(latest_end);
+        const size_t  available    = newest_label == INT64_MIN              ? 0
+                                     : s_live_commit_count < P().ring.count ? s_live_commit_count
+                                                                            : P().ring.count;
         const size_t oldest_i = (static_cast<size_t>(P().ring.head) +
                                  logic::CHECKUP_COMPLETED_BUCKETS - available) %
                                 logic::CHECKUP_COMPLETED_BUCKETS;
@@ -802,13 +866,14 @@ CheckupFlashRestoreResult checkup_flash_restore(const CheckupFlashRecord* record
             rec.payload.source_fp              = s_source_fp;
             rec.payload.dhw_source_fp          = s_dhw_source_fp;
             rec.payload.diagnostics_generation = s_diagnostics_generation;
-            rec.payload.end_unix_s = latest_end -
-                static_cast<int64_t>(available - 1 - i) * logic::CHECKUP_DT_S;
+            const int64_t label    = newest_label - static_cast<int64_t>(available - 1 - i);
+            rec.payload.end_unix_s = logic::checkup_journal_end_in_bucket(
+                latest_end - static_cast<int64_t>(available - 1 - i) * logic::CHECKUP_DT_S, label);
             rec.payload.checkup =
                 P().ring.buf[(oldest_i + i) % logic::CHECKUP_COMPLETED_BUCKETS];
             rec.payload.dhw =
                 P().dhw.buf[(oldest_i + i) % logic::CHECKUP_COMPLETED_BUCKETS];
-            rec.bucket = logic::checkup_journal_bucket(rec.payload.end_unix_s);
+            rec.bucket = label;
         }
     }
 
@@ -915,7 +980,7 @@ CheckupFlashRestoreResult checkup_flash_restore(const CheckupFlashRecord* record
     // selected live intervals keep absolute-age deadlines; only selected stored intervals establish
     // this slug.
     s_persist_verdict = logic::CheckupRestore::Flash;
-    persist_seal();
+    checkup_persist_seal();
     diag_printf("checkup: restored %u hourly bucket(s) from flash (RAM copy refused: %s)\n",
                 static_cast<unsigned>(materialized), logic::checkup_restore_slug(refused));
     return CheckupFlashRestoreResult::Restored;

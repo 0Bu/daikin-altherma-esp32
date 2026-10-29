@@ -1,6 +1,22 @@
 {
   "version": 1,
   "symbols": {
+    "sdk_http_client_fetch_headers": {
+      "pattern": "^esp_http_client_fetch_headers$",
+      "max_bytes": 32
+    },
+    "sdk_http_client_read": {
+      "pattern": "^esp_http_client_read$",
+      "max_bytes": 64
+    },
+    "sdk_http_client_open": {
+      "pattern": "^esp_http_client_open$",
+      "max_bytes": 48
+    },
+    "sdk_http_client_connect": {
+      "pattern": "^esp_http_client_connect$",
+      "max_bytes": 48
+    },
     "status_serializer": {
       "pattern": "^void daik::append_status_json<daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u> >\\(daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u>&, bool\\)$",
       "max_bytes": 5120
@@ -239,7 +255,7 @@
     },
     "mqtt_heartbeat_payload": {
       "pattern": "^daik::build_heartbeat_json\\[abi:cxx11\\]\\(",
-      "max_bytes": 368
+      "max_bytes": 432
     },
     "mqtt_crash": {
       "pattern": "^(?:daik::(?:\\(anonymous namespace\\)::)?publish_crash\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?13publish_crash[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
@@ -275,7 +291,7 @@
     },
     "checkup_report": {
       "pattern": "^(?:daik::(?:\\(anonymous namespace\\)::)?checkup_report\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?14checkup_report[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
-      "max_bytes": 720
+      "max_bytes": 784
     },
     "history_journal": {
       "pattern": "^(?:daik::(?:\\(anonymous namespace\\)::)?history_flash_service_journal\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?29history_flash_service_journal[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
@@ -619,7 +635,7 @@
     },
     "mqtt_heartbeat_builder": {
       "pattern": "^(?:daik::build_heartbeat_payload(?:\\[abi:cxx11\\])?\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daikL23build_heartbeat_payload[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
-      "max_bytes": 768
+      "max_bytes": 832
     },
     "mqtt_curve_builder": {
       "pattern": "^(?:daik::build_heating_curve_payload(?:\\[abi:cxx11\\])?\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daikL27build_heating_curve_payload[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
@@ -2184,6 +2200,118 @@
     "wifi_forget": {
       "pattern": "^daik::wifi_forget_persisted_config\\(",
       "max_bytes": 192
+    },
+    "cycling_evidence": {
+      "pattern": "^daik::checkup_cycling_evidence\\(",
+      "max_bytes": 224
+    },
+    "cycling_aggregate": {
+      "pattern": "^daik::logic::checkup_aggregate\\(",
+      "max_bytes": 32
+    },
+    "cycling_fold": {
+      "pattern": "^_ZZN4daik5logic17checkup_aggregate.*_cl.*",
+      "max_bytes": 64
+    },
+    "cycling_expire": {
+      "pattern": "^daik::expire_restored_locked\\(",
+      "max_bytes": 48
+    },
+    "cycling_seal": {
+      "pattern": "^daik::\\(anonymous namespace\\)::checkup_persist_seal\\(",
+      "max_bytes": 32
+    },
+    "cycling_crc": {
+      "pattern": "^daik::\\(anonymous namespace\\)::checkup_persist_crc\\(",
+      "max_bytes": 32
+    },
+    "mqtt_room_history": {
+      "pattern": "^daik::record_room_history\\(daik::Config\\ const\\&,\\ unsigned\\ long\\)$",
+      "max_bytes": 256
+    },
+    "room_history_record": {
+      "pattern": "^daik::history_record_room\\(bool,\\ double,\\ unsigned\\ long\\)$",
+      "max_bytes": 64
+    },
+    "room_request_current": {
+      "pattern": "^daik::reference_request_current_locked\\(unsigned\\ long,\\ daik::Config\\ const\\&\\)$",
+      "max_bytes": 192
+    },
+    "room_config_binding": {
+      "pattern": "^daik::reference_config_binding\\(daik::Config\\ const\\&\\)$",
+      "max_bytes": 160
+    },
+    "room_applied_binding": {
+      "pattern": "^daik::reference_applied_binding_locked\\(\\)$",
+      "max_bytes": 32
+    },
+    "room_binding_matches": {
+      "pattern": "^daik::reference_binding_matches\\(daik::ReferenceSourceBinding\\ const\\&,\\ daik::ReferenceSourceBinding\\ const\\&,\\ bool,\\ bool\\)$",
+      "max_bytes": 176
+    },
+    "room_freshness": {
+      "pattern": "^daik::reference_room_freshness\\(bool,\\ bool,\\ bool,\\ bool,\\ long\\ long,\\ unsigned\\ long\\ long,\\ long\\ long,\\ unsigned\\ long\\ long,\\ unsigned\\ long\\)$",
+      "max_bytes": 64
+    },
+    "room_base_freshness": {
+      "pattern": "^daik::reference_freshness\\(bool,\\ bool,\\ bool,\\ long\\ long,\\ unsigned\\ long\\ long,\\ long\\ long,\\ unsigned\\ long\\ long,\\ unsigned\\ long\\)$",
+      "max_bytes": 32
+    },
+    "room_sample": {
+      "pattern": "^daik::reference_room_sample\\(daik::ReferenceRoomRaw\\ const\\&,\\ daik::ReferenceFreshness\\ const\\&\\)$",
+      "max_bytes": 96
+    },
+    "room_sample_reason": {
+      "pattern": "^daik::reference_room_freshness_reason\\(std::basic_string_view<char,\\ std::char_traits<char>\\ >\\)$",
+      "max_bytes": 64
+    },
+    "room_sample_reject": {
+      "pattern": "^_ZZN4daik21reference_room_sampleERKNS_16ReferenceRoomRawERKNS_18ReferenceFreshnessEENKUlNS_19ReferenceRoomReasonEE_clES6_\\$isra\\$0$",
+      "max_bytes": 32
+    },
+    "room_time_now": {
+      "pattern": "^daik::time_now\\(long\\ long\\&,\\ long\\&\\)$",
+      "max_bytes": 48
+    },
+    "room_history_seal": {
+      "pattern": "^daik::\\(anonymous\\ namespace\\)::room_seal_locked\\(\\)$",
+      "max_bytes": 32
+    },
+    "room_history_crc": {
+      "pattern": "^daik::\\(anonymous\\ namespace\\)::room_crc\\(\\)$",
+      "max_bytes": 32
+    },
+    "history_crc_ring": {
+      "pattern": "^daik::\\(anonymous\\ namespace\\)::persist_crc_ring\\(unsigned\\ long,\\ daik::logic::TrendRing\\ const\\&\\)$",
+      "max_bytes": 32
+    },
+    "history_config_crc": {
+      "pattern": "^daik::config_crc32_update\\(unsigned\\ long,\\ unsigned\\ char\\ const\\*,\\ unsigned\\ int\\)$",
+      "max_bytes": 32
+    },
+    "room_liveness_touch": {
+      "pattern": "^daik::logic::history_liveness_touch\\(daik::logic::HistoryLiveness\\&,\\ long\\ long\\)$",
+      "max_bytes": 32
+    },
+    "room_liveness_commit": {
+      "pattern": "^daik::logic::history_liveness_commit\\(daik::logic::HistoryLiveness\\&,\\ daik::logic::HistoryJournalSource,\\ long\\ long\\)$",
+      "max_bytes": 32
+    },
+    "room_liveness_seal": {
+      "pattern": "^daik::logic::history_liveness_seal\\(daik::logic::HistoryLiveness\\&\\)$",
+      "max_bytes": 32
+    },
+    "room_liveness_crc": {
+      "pattern": "^daik::logic::history_liveness_crc\\(daik::logic::HistoryLiveness\\ const\\&\\)$",
+      "max_bytes": 80
+    },
+    "room_ring_commit": {
+      "pattern": "^daik::logic::TrendRing::commit\\(unsigned\\ long\\)$",
+      "max_bytes": 32
+    },
+    "room_ring_reset": {
+      "pattern": "^daik::logic::TrendRing::reset_with_gaps\\(unsigned\\ int\\)$",
+      "max_bytes": 32
     }
   },
   "paths": {
@@ -2279,7 +2407,25 @@
       ],
       "multipliers": {},
       "base_bytes": 2048,
-      "max_bytes": 11264
+      "max_bytes": 6656
+    },
+    "weather_task_tls": {
+      "symbols": [
+        "weather_task",
+        "weather_cycle",
+        "weather_fetch",
+        "weather_download",
+        "sdk_http_client_open",
+        "sdk_http_client_connect",
+        "tls_esp_transport_connect",
+        "tls_ssl_connect",
+        "tls_esp_tls_conn_new_sync",
+        "tls_esp_tls_low_level_conn",
+        "tls_esp_mbedtls_handshake"
+      ],
+      "multipliers": {},
+      "base_bytes": 4608,
+      "max_bytes": 6656
     },
     "weather_task_parse": {
       "symbols": [
@@ -2297,7 +2443,7 @@
         "cjson_delete": 17
       },
       "base_bytes": 2048,
-      "max_bytes": 11264
+      "max_bytes": 6656
     },
     "ota_health_gate": {
       "symbols": [
@@ -5738,6 +5884,106 @@
       "multipliers": {},
       "base_bytes": 1536,
       "max_bytes": 2048
+    },
+    "mqtt_cycling_evidence": {
+      "symbols": [
+        "mqtt_task",
+        "mqtt_heartbeat_builder",
+        "cycling_evidence",
+        "cycling_aggregate",
+        "cycling_fold"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "mqtt_cycling_expire": {
+      "symbols": [
+        "mqtt_task",
+        "mqtt_heartbeat_builder",
+        "cycling_evidence",
+        "cycling_expire",
+        "cycling_seal",
+        "cycling_crc"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "weather_task_tls_headers": {
+      "symbols": [
+        "weather_task",
+        "weather_cycle",
+        "weather_fetch",
+        "weather_download",
+        "sdk_http_client_fetch_headers",
+        "tls_esp_transport_read",
+        "tls_ssl_read",
+        "tls_esp_tls_conn_read",
+        "tls_esp_mbedtls_read"
+      ],
+      "multipliers": {},
+      "base_bytes": 4608,
+      "max_bytes": 6656
+    },
+    "weather_task_tls_body": {
+      "symbols": [
+        "weather_task",
+        "weather_cycle",
+        "weather_fetch",
+        "weather_download",
+        "sdk_http_client_read",
+        "tls_esp_transport_read",
+        "tls_ssl_read",
+        "tls_esp_tls_conn_read",
+        "tls_esp_mbedtls_read"
+      ],
+      "multipliers": {},
+      "base_bytes": 4608,
+      "max_bytes": 6656
+    },
+    "mqtt_room_history_validate": {
+      "symbols": [
+        "mqtt_task",
+        "mqtt_room_history",
+        "room_request_current",
+        "room_config_binding",
+        "room_applied_binding",
+        "room_binding_matches",
+        "room_freshness",
+        "room_base_freshness",
+        "room_sample",
+        "room_sample_reason",
+        "room_sample_reject",
+        "room_time_now",
+        "mqtt_input_lock",
+        "mqtt_input_unlock"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "mqtt_room_history_commit": {
+      "symbols": [
+        "mqtt_task",
+        "mqtt_room_history",
+        "room_history_record",
+        "room_history_seal",
+        "room_history_crc",
+        "history_crc_ring",
+        "history_config_crc",
+        "room_liveness_touch",
+        "room_liveness_commit",
+        "room_liveness_seal",
+        "room_liveness_crc",
+        "room_ring_commit",
+        "room_ring_reset",
+        "mqtt_input_lock",
+        "mqtt_input_unlock"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
     }
   },
   "tasks": {
@@ -5881,7 +6127,11 @@
         "mqtt_retirement_discovery_load_read",
         "mqtt_retirement_discovery_load_close",
         "mqtt_discovery_owner_subscribe_tls",
-        "mqtt_discovery_owner_subscribe_callback"
+        "mqtt_discovery_owner_subscribe_callback",
+        "mqtt_cycling_evidence",
+        "mqtt_cycling_expire",
+        "mqtt_room_history_validate",
+        "mqtt_room_history_commit"
       ]
     },
     "poll": {
@@ -6008,11 +6258,14 @@
       ]
     },
     "weather": {
-      "stack_bytes": 12288,
-      "reserve_bytes": 1024,
+      "stack_bytes": 8192,
+      "reserve_bytes": 1536,
       "paths": [
         "weather_task_download",
-        "weather_task_parse"
+        "weather_task_tls",
+        "weather_task_parse",
+        "weather_task_tls_headers",
+        "weather_task_tls_body"
       ]
     },
     "ota": {
@@ -6062,6 +6315,7 @@
   },
   "sdk": {
     "source_sha256": {
+      "esp_http_client/esp_http_client.c": "b28179259684e4cadbcaff00127ac50ea5c4477536cca1b4df86590694acdf24",
       "mbedtls/mbedtls/tf-psa-crypto/include/psa/crypto_sizes.h": "87693b7058f391a472b34378893452789fdcf0542e6f7bb5612d59b7b4bc2267",
       "mbedtls/mbedtls/tf-psa-crypto/drivers/builtin/src/psa_crypto_rsa.c": "06f3a581c743bced41153e780eebc79e8a90be48c8634d2c070091fdcc74758e",
       "mbedtls/mbedtls/tf-psa-crypto/drivers/builtin/src/psa_crypto_ecp.c": "8d6e2245774ef2f672f3ee29657a9f8bb341fc0224f24d2380d460a2b739b8d5",

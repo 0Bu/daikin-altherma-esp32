@@ -1731,6 +1731,38 @@ static void publish_crash(bool discovery = true) {
 // from a controller mode: heating_curve_diagnosis_armed() answers it from the explicit diagnostics
 // consent plus the room-source and HomeHub configuration the editors show, so withdrawing any
 // required prerequisite disarms on the next cycle.
+// MQTT owns this recorder independently of the heat-pump publication gate. Copy only scalar
+// observations while holding its RAII mutex; history has its own mutex and is entered afterwards.
+static bool reference_request_current_locked(uint32_t epoch, const Config& c);
+static __attribute__((noinline)) void record_room_history(const Config& cfg, uint32_t generation) {
+    const uint64_t now_ms     = static_cast<uint64_t>(esp_timer_get_time() / 1000);
+    int64_t        now_unix_s = -1;
+    int32_t        now_sub_ms = 0;
+    time_now(now_unix_s, now_sub_ms);
+    ReferenceRoomSample room;
+    {
+        Lock           lk(s_mtx);
+        const uint32_t requested = s_ref_requested_epoch.load(std::memory_order_acquire);
+        if (lk.acquired() && cfg.diagnostics_enabled && s_status.broker == cfg.mqtt_uri &&
+            reference_request_current_locked(requested, cfg)) {
+            const auto&              rt        = s_ref_status;
+            const ReferenceFreshness freshness = reference_room_freshness(
+                reference_source_time_mapped(cfg.ref_temp_time_topic, cfg.ref_temp_time_path),
+                rt.has_value, rt.retained, rt.has_source_time, rt.source_unix_s, rt.received_ms,
+                now_unix_s, now_ms, cfg.ref_temp_max_age_s);
+            ReferenceRoomRaw raw;
+            raw.configured      = !cfg.ref_temp_topic.empty();
+            raw.has_temperature = rt.has_value;
+            raw.payload_valid   = rt.error.empty();
+            raw.temperature_c   = rt.temperature_c;
+            raw.payload_reason  = rt.rejection_reason;
+            // Temperature validity is established before setpoint/thermostat eligibility.
+            room = reference_room_sample(raw, freshness);
+        }
+    }
+    history_record_room(room.temperature_valid, room.temperature_c, generation);
+}
+
 static logic::HeatingCurveSnapshot evaluate_heating_curve(const Config& cfg, bool x10a_connected) {
     if (!cfg.diagnostics_enabled) {
         logic::HeatingCurveInputs in;
@@ -1897,6 +1929,7 @@ static __attribute__((noinline)) std::string build_heartbeat_payload() {
     f.modbus_rx        = mbs.rx_ok;
     f.modbus_fails     = mbs.rx_fail;
     f.modbus_stack_min_free_bytes = stack_watch_min_free_bytes(StackWatch::Modbus);
+    f.cycling                     = checkup_cycling_evidence();
     return build_heartbeat_json(f);
 }
 
@@ -3302,6 +3335,7 @@ static void mqtt_task(void*) {
             service_discovery_admission_reset();
             publish_stage = "config";
             const uint32_t reference_epoch = s_ref_requested_epoch.load(std::memory_order_acquire);
+            const uint32_t room_history_generation = history_room_generation();
             const uint32_t circulation_epoch =
                 s_circulation_requested_epoch.load(std::memory_order_acquire);
             const Config ref_config = config();
@@ -3310,6 +3344,7 @@ static void mqtt_task(void*) {
             service_circulation_subscription(ref_config, circulation_epoch);
             service_circulation_probe_subscription(ref_config);
             service_reference_frames(ref_config);
+            record_room_history(ref_config, room_history_generation);
             // The circulation witness is MQTT-owned and remains meaningful while X10A auto-detect
             // is backing off on a silent bus. Record it on this task's independent one-second tick;
             // tying it to hp_poll would leave /status.history.rows empty exactly in that case.

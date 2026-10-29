@@ -184,10 +184,22 @@ try {
         'if False and b"\\\\" in manifest_bytes:')],
     ["the rollback health gate may consume the final 1 KiB reserve", () =>
       replaceBudgetMember("paths", "ota_health_gate", "max_bytes", 3072, 4096)],
-    ["the Weather download path may consume the final 1 KiB reserve", () =>
-      replaceBudgetMember("paths", "weather_task_download", "max_bytes", 11264, 11265)],
-    ["the Weather parse path may consume the final 1 KiB reserve", () =>
-      replaceBudgetMember("paths", "weather_task_parse", "max_bytes", 11264, 11265)],
+    ["the Weather download path may consume its reviewed reserve", () =>
+      replaceBudgetMember("paths", "weather_task_download", "max_bytes", 6656, 6657)],
+    ["the Weather parse path may consume its reviewed reserve", () =>
+      replaceBudgetMember("paths", "weather_task_parse", "max_bytes", 6656, 6657)],
+    ["the Weather task reserve is reduced below its reviewed floor", () =>
+      replaceBudgetMember("tasks", "weather", "reserve_bytes", 1536, 1024)],
+    ...["weather_task_tls", "weather_task_tls_headers", "weather_task_tls_body"].flatMap((name) => [
+      [`${name} consumes its reviewed reserve`, () =>
+        replaceBudgetMember("paths", name, "max_bytes", 6656, 6657)],
+      [`${name} loses the complete SDK TLS allowance`, () =>
+        replaceBudgetMember("paths", name, "base_bytes", 4608, 2048)],
+      [`${name} loses its task owner`, () => mutateBudgets((budgets) => {
+        assert.ok(budgets.tasks.weather.paths.includes(name));
+        budgets.tasks.weather.paths = budgets.tasks.weather.paths.filter((value) => value !== name);
+      })],
+    ]),
     ["the Weather download path omits its live cycle frame", () =>
       omitPathSymbol("weather_task_download", "weather_cycle")],
     ["the Weather parse path omits its live cycle frame", () =>
@@ -201,6 +213,15 @@ try {
     ["dynamic TLS buffers are disabled", () =>
       replaceOnce("sdkconfig.defaults", "CONFIG_MBEDTLS_DYNAMIC_BUFFER=y",
         "CONFIG_MBEDTLS_DYNAMIC_BUFFER=n")],
+    ["mDNS returns to the upstream 16-entry action queue", () =>
+      replaceOnce("sdkconfig.defaults", "CONFIG_MDNS_ACTION_QUEUE_LEN=8",
+        "CONFIG_MDNS_ACTION_QUEUE_LEN=16")],
+    ["WiFi RX buffers return to the upstream cap of 32", () =>
+      replaceOnce("sdkconfig.defaults", "CONFIG_ESP_WIFI_DYNAMIC_RX_BUFFER_NUM=16",
+        "CONFIG_ESP_WIFI_DYNAMIC_RX_BUFFER_NUM=32")],
+    ["the TCP receive window outgrows the WiFi RX cap", () =>
+      replaceOnce("sdkconfig.defaults", "CONFIG_LWIP_TCP_WND_DEFAULT=11520",
+        "CONFIG_LWIP_TCP_WND_DEFAULT=14400")],
     ["the size build folds MQTT helpers back into the fixed task frame", () =>
       replaceOnce("main/CMakeLists.txt", "-fno-inline-functions-called-once",
         "-finline-functions-called-once")],

@@ -244,6 +244,7 @@ void config_load() {
             c.ref_temp_enabled_path = b.ref_temp_enabled_path;
             c.ref_temp_hvac_mode_path = b.ref_temp_hvac_mode_path;
             c.ref_temp_max_age_s = b.ref_temp_max_age_s;
+            c.ref_temp_generation     = b.ref_temp_generation;
         }
         if (b.has_weather) {
             c.weather_enabled = b.weather_enabled;

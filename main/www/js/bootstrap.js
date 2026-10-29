@@ -128,6 +128,12 @@ function trendPlotFromTarget(target) {
 }
 
 function wireTrendScrub(gv) {
+  gv.addEventListener("click", (e) => {
+    const button = e.target.closest("[data-hist-series]");
+    if (!button) return;
+    e.stopPropagation();
+    histSeriesToggle(button.dataset.histId, button.dataset.histSeries);
+  });
   gv.addEventListener("pointermove", (e) => {
     const plot = trendPlotFromTarget(e.target);
     if (!plot) return;

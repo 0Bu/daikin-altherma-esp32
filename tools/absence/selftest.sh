@@ -1954,6 +1954,18 @@ PY4
 expect_red "flash seed discarded the wall-clock milliseconds" run_contract
 restore
 
+# 115. A configured independent room source is omitted from its own history offer.
+python3 - "$TMP/main/www/js/history.js" <<'PY4'
+import sys
+p = sys.argv[1]
+s = open(p).read()
+old = 'function hasRoomHist(id) { return !!id && roomHistRows().some((r) => r && r.id === id); }'
+assert s.count(old) == 1, "seed 115 did not apply - the room history offer moved"
+open(p, "w").write(s.replace(old, 'function hasRoomHist(id) { return false; }', 1))
+PY4
+expect_red "configured independent room history omitted" run_ui
+restore
+
 if [ "$fail" -ne 0 ]; then
   echo
   echo "The source-absence matrix no longer catches a defect it was built for."

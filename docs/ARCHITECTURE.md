@@ -18,12 +18,12 @@ X10A UART → detection/profile → poll cache ─┬→ HTTP /values → device
 HomeHub TCP → independent register cache ──┬→ separate HTTP/MQTT observations
                                          └→ independent history and plant context
 ENV III I²C → accessory cache ──────────────┬→ status/MQTT/history
-MQTT room + circulation → bounded inputs ──┴→ read-only plant diagnosis
+MQTT room + circulation → bounded inputs ──┴→ read-only plant diagnosis and source history
 Open-Meteo HTTPS → optional forecast ─────────→ status/MQTT comparison evidence
 ```
 
-X10A, HomeHub and ENV III have separate identity, cache, liveness and history. A HomeHub reading
-never replaces X10A. Network transport (WiFi or Ethernet) carries these sources without changing
+X10A, HomeHub, ENV III and the MQTT room source have separate identity, cache, liveness and history.
+A HomeHub reading never replaces X10A. Network transport (WiFi or Ethernet) carries these sources without changing
 what they mean. Presence, freshness, held-over state and validity are separate facts; absent input
 must not become zero, false or a fabricated source time.
 
@@ -204,11 +204,15 @@ binds space/codec/divisor/unit. A converter change under an unchanged X10A serie
 retain old-scale samples for up to 24 hours. ENV III cannot identify a physical swap or relocation.
 Disabled/frozen ENV III RAM is not adopted or journaled unless the producer ran then and runs now.
 
-Future journal cursors are reported and never rewound; affected work waits for acceptable time.
+Future journal cursors are reported and never rewound; affected work waits for acceptable time. (The
+checkup late-completion replay below re-appends hours deliberately; it is not a cursor repair.)
 Writes permit one slot retry and two abandoned sectors per failure episode, then retry at 60 seconds.
 
-X10A, HomeHub and ENV III keep three separate source rasters; board memory and the circulation
+X10A, HomeHub, ENV III and MQTT room temperature keep separate source rasters; board memory and the circulation
 witness share the X10A raster but keep RAM trends independent of heat-pump identity.
+The room raster runs on the MQTT task without X10A or HomeHub. Its independent sealed RAM store and
+journal records bind the broker, temperature/time mappings, maximum age and persisted source/consent
+generations. A rename or target-only edit preserves it; source removal/replacement retires it alone.
 X10A journal append requires a resolved identity and no pending source reset; a pending reset also
 skips that source's restoration. `b0`
 aligns monotonic buckets even before SNTP; `t0` is omitted until wall time is known. Missing samples
@@ -222,6 +226,13 @@ A narrowly scoped one-shot DHW handoff may preserve an unfinished candidate; it 
 to completed checks. Disabling diagnostics clears runtime evidence; re-enabling starts a new
 generation. Same-boot journal creation is not proof of reboot restoration. `DIAGNOSTICS.md` explains
 results; `PLANT.md` owns lifecycle.
+A run is booked into the hour in which it started, but only when it stops. When that hour was
+already journaled, it and every later live hour are appended again; the boot index keeps each
+hour's newest copy, including the older-sequence tail of a replay cut by a restart
+(`checkup_persist.hpp`). Each boot latches one wall-clock label per monotonic hour and moves it only
+for a clock step of more than one hour, so whole-second clock reads cannot relabel a replayed hour.
+While a backward clock step leaves the cursor ahead of the newest live hour, this replay waits like
+an ordinary append.
 Current source confirmation requires this boot's full profile/link evidence, not cached startup
 identity. Whole live and restored hours expire when their beginning leaves the rolling day,
 independently of producer progress; abandoned open evidence expires too. The current 80-byte
@@ -354,6 +365,9 @@ Validation after transport/buffer cleanup requires two 24/12 KiB samples. Weathe
 fetch keeps the previous evidence unavailable for decisions and retries after five minutes.
 Weather reads only an allocation-free consent/location snapshot; request temporaries are destroyed
 before network ownership returns to MQTT and before the worker sleeps.
+Its 8 KiB task stack uses a 256-byte read buffer. The ELF gate composes the Weather callers,
+HTTP connection/read prefixes and full source-bound SDK TLS envelope, and separately bounds parsing and
+error paths, retaining at least 1 KiB on each path.
 
 `http_deadline.cpp` owns a boot-static absolute socket watchdog. After successful open, a timer
 covers headers and body within the original monotonic deadline; expiry wakes a preallocated worker
@@ -456,9 +470,20 @@ Never allocate while holding a raw semaphore. Stage outside the critical section
 use `daik::SemGuard` for unwind-safe ownership. MQTT/Syslog event-side errors use stable literal
 pointers; materialize strings outside their status lock. A task catch cannot rescue a stranded mutex.
 
+Received WiFi frames are heap allocations too: the driver copies each into a dynamic RX buffer that
+lives until lwIP's consumer frees the pbuf. mDNS runs at priority 1 and queues every received
+packet, so a higher-priority task that computes for seconds, such as Weather's TLS certificate
+verification, parks mDNS traffic in the heap. `sdkconfig.defaults` bounds that backlog with the
+minimum mDNS action queue and caps dynamic RX buffers at that queue length plus one full-size TCP
+receive window; its comments carry the derivation, its limits and the measurement with the upstream
+values. The Weather headroom gate comment in `main/logic/weather_forecast.hpp` carries the
+measurement with the bounded values.
+
 Diagnosis bucket storage is 1,920 bytes for 23 completed hours and one pending hour. Completed-run
-totals and outdoor sample counts use 32 bits; pressure minima add an observed-at timestamp. The
-23-record static restoration scratch occupies 2,944 bytes, avoiding a poll-task stack array.
+totals and outdoor sample counts use 32 bits; fifteen hourly clocks use 12-bit fields clamped at
+3,600 seconds. This retains the 80-byte bucket while storing exclusive censoring causes and a
+saturating 16-bit unsafe-runtime bound. Saturation blocks assessment. Pressure minima keep the
+earliest dated tie. The 23-record static restoration scratch occupies 3,128 bytes, avoiding a poll-task stack array.
 The history owner reuses its existing 4 KiB sector scratch. These geometry figures do not replace
 the ESP32-S3 ELF's full static-memory and call-path budgets.
 
