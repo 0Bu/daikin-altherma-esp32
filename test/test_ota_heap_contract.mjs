@@ -1019,11 +1019,9 @@ assert.match(sdkconfig, /^CONFIG_MBEDTLS_DYNAMIC_BUFFER=y$/m,
   "ESP-IDF's handshake-aware dynamic TLS buffers must remain enabled");
 assert.match(sdkconfig, /^CONFIG_MBEDTLS_DYNAMIC_FREE_CONFIG_DATA=n$/m,
   "TLS config/key/CA lifetime must not be shortened without reconnect redesign");
-// A received WiFi frame stays heap-resident until its consumer frees the pbuf. mDNS (priority 1)
-// queues frames while OTA or Weather TLS work holds the CPU, so its action queue bounds that
-// backlog. The design rule sizes the RX cap as that queue plus one full-size TCP receive window
-// (sdkconfig.defaults states the one-frame limit of the rule). Changing one side without the other
-// either reopens the heap trough or narrows the window TCP can actually use.
+// The WiFi RX cap is the mDNS action queue plus one full-size TCP receive window (mechanism,
+// measurement and limits: sdkconfig.defaults). Changing one side without the other either reopens
+// the Weather heap trough or narrows the window TCP can actually use.
 const sdkInt = (name, fallback) => {
   const match = sdkconfig.match(new RegExp(`^${name}=(\\d+)$`, "m"));
   assert.ok(match || fallback !== undefined, `${name} must be pinned in sdkconfig.defaults`);

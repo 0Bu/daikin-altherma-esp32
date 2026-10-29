@@ -54,8 +54,9 @@ CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM=10
 # (28.2 KiB), almost all mDNS packets queued behind the starved mDNS task (see
 # CONFIG_MDNS_ACTION_QUEUE_LEN). The cap is that queue plus one full-size TCP receive window
 # (CONFIG_LWIP_TCP_WND_DEFAULT / CONFIG_LWIP_TCP_MSS = 8 segments) and at least the static RX count,
-# as the Kconfig help asks. mDNS holds one more buffer while it parses a packet, so a full window
-# that meets a full mDNS backlog loses one frame at the cap, which TCP retransmits.
+# as the Kconfig help asks. The rule budgets one receiving TCP connection only: mDNS holds one more
+# buffer while it parses, and every other receiver (another socket, ARP, DHCP, DNS) shares the cap,
+# so at the cap the driver drops the next frame of whatever kind; each of these protocols retries.
 CONFIG_ESP_WIFI_DYNAMIC_RX_BUFFER_NUM=16
 # Dynamic TX buffers. The policy is a Kconfig CHOICE (ESP_WIFI_TX_BUFFER), whose options are the
 # booleans ESP_WIFI_STATIC_TX_BUFFER / ESP_WIFI_DYNAMIC_TX_BUFFER — so the dynamic option is what a
@@ -178,9 +179,11 @@ CONFIG_MDNS_ENABLE_BROWSE=n
 # buffer, in this action queue until it gets the CPU. A higher-priority task that computes for
 # seconds (Weather's TLS certificate verification takes ~2.7 s) therefore filled the default
 # 16-entry queue (26.6 KiB of RX buffers on the bench). Use the component minimum. While the queue
-# is full, mDNS drops received packets (queriers retry), defers timed sends to the next timer tick,
-# and fails a one-shot query or hostname change started into it. A network-event action posted then
-# is lost silently: an interface enabled at "got IP" stays silent until the next "got IP".
+# is full (after such starvation, or a burst of browse answers), mDNS drops received packets
+# (queriers resend), defers timed sends to the next timer tick, and fails a one-shot query or
+# hostname change started into it; the HomeHub search retries such an attempt twice. A network
+# event posted then is lost silently: an interface enabled at "got IP" stays silent until the next
+# "got IP", and a disable at disconnect is missed the same way.
 CONFIG_MDNS_ACTION_QUEUE_LEN=8
 
 # C++ exceptions — HTTP handlers run under a try/catch OOM guard (503 instead of crash), the
