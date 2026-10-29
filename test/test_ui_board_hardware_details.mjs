@@ -197,7 +197,7 @@ assert.match(style, /\.vhist-graph\s*\{[^}]*--vhist-tip-base:\s*20px;[^}]*paddin
   "the combined chart must share the fixed compact legend-to-plot distance");
 assert.doesNotMatch(style, /\.vhist-env3 \.vhist-graph\s*\{/,
   "the taller climate tooltip must overlay rather than shift its plot");
-assert.match(style, /@media \(max-width: 480px\)[\s\S]*\.vhist-env3 \.vhist-tip\s*\{[^}]*white-space:\s*pre-wrap;/,
+assert.match(style, /\.vhist-tip\s*\{[^}]*white-space:\s*pre-wrap;/,
   "the ENV III tooltip must retain readable lines while staying beside the selected crosshair");
 for (const text of [
   "Das M5Stack AtomS3 Lite ist ein kompaktes ESP32-S3-Board mit integrierter WS2812-RGB-Status-LED.",
