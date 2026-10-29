@@ -40,6 +40,8 @@ const S = {
   // re-resolves to the same measurement instead of to whatever now occupies that slot
   // (logic/history.hpp's history_pin_index).
   histPin: new Map(),
+  // Browser-only legend choices survive poll rebuilds and are shared by both views of a chart.
+  histHidden: new Map(),
   // The label of the row whose trend is being scrubbed right now (mouse hover or finger down), or
   // null. It FREEZES the #valueGroups rebuild — see renderCards. Without that the innerHTML is
   // replaced on each values-poll render under the pointer: the captured element dies mid-drag and
@@ -431,7 +433,8 @@ function setHtml(id, html) {
   if (S.clickHold) return;
   if (_html[id] === html) return;
   _html[id] = html;
-  $(id).innerHTML = html;
+  if (typeof replaceHistoryHtml === "function") replaceHistoryHtml($(id), html);
+  else $(id).innerHTML = html;
 }
 // The dashboard header (identity + gear) and the back header (chevron + screen title) are the same
 // slot: exactly one shows. The title is re-read from TITLE on every switch rather than stored, so it
