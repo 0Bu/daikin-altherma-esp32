@@ -16,7 +16,7 @@ assert.match(style,
 assert.match(style,
   /\.vhist-graph\s*\{[^}]*padding-top:\s*var\(--vhist-tip-base\);/,
   "tooltip height must not move the chart away from its legend");
-assert.match(style, /\.vhist-tip\s*\{[^}]*z-index:\s*3;[^}]*top:\s*var\(--vhist-tip-base\);/,
+assert.match(style, /\.vhist-tip\s*\{[^}]*position:\s*relative;[^}]*z-index:\s*3;/,
   "the tooltip must start at and overlay the still-visible chart");
 assert.match(style, /\.vhist-tip-right\s*\{[^}]*translateX\(var\(--vhist-tip-gap\)\)/,
   "the tooltip must leave a visible gap beside the selected crosshair");
@@ -142,4 +142,28 @@ assert.deepEqual(calls, [
   assert.equal(moves.at(-1), 2);
 }
 
-console.log("UI trend touch and keyboard pin/rebuild focus tests passed");
+// Ordinary values polls use setHtml directly, outside the explicit pin/legend rebuild path.
+{
+  const document = { activeElement: null };
+  const makeLegend = () => ({
+    dataset: { histId: "dhw_tank", histSeries: "modbus" },
+    focus() { document.activeElement = this; },
+  });
+  let current = makeLegend(); current.focus();
+  const host = {
+    contains: (el) => el === current,
+    querySelectorAll: () => [current],
+    set innerHTML(_html) { current = makeLegend(); document.activeElement = null; },
+  };
+  const stateSource = readAppFragments(["app_state.js"]);
+  const writer = stateSource.slice(stateSource.indexOf("const _html = {}"), stateSource.indexOf("function renderHeader()"));
+  const ctx = vm.createContext({ S: { clickHold: false }, document, $: () => host });
+  vm.runInContext(readAppFragments(["history.js"]) + "\n" + writer + "\nthis.repaint = setHtml;", ctx);
+  const first = current;
+  ctx.repaint("valueGroups", "updated readings");
+  assert.notEqual(current, first, "the poll must replace the real container");
+  assert.equal(document.activeElement, current,
+    "changing readings must preserve the focused legend button across a normal poll");
+}
+
+console.log("UI trend touch and keyboard pin/rebuild/poll focus tests passed");
