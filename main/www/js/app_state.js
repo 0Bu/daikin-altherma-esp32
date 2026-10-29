@@ -433,7 +433,8 @@ function setHtml(id, html) {
   if (S.clickHold) return;
   if (_html[id] === html) return;
   _html[id] = html;
-  $(id).innerHTML = html;
+  if (typeof replaceHistoryHtml === "function") replaceHistoryHtml($(id), html);
+  else $(id).innerHTML = html;
 }
 // The dashboard header (identity + gear) and the back header (chevron + screen title) are the same
 // slot: exactly one shows. The title is re-read from TITLE on every switch rather than stored, so it

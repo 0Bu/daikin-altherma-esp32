@@ -209,7 +209,20 @@ function histVisibleSeries(h) {
   // A source can disappear or roll into an all-gap ring after a legend choice. Keep an available
   // curve visible without discarding either source's history or the user's saved browser choice.
   const fallback = h.series.find((s) => s.v.some((v) => v != null));
-  return fallback ? [...visible, fallback] : visible;
+  return fallback ? h.series.filter((s) => visible.includes(s) || s === fallback) : visible;
+}
+
+// Polls replace whole card containers, while the inspector can replace only its history. Preserve
+// an active legend control in either path so keyboard users can continue toggling the same series.
+function replaceHistoryHtml(host, html) {
+  const active = typeof document === "undefined" ? null : document.activeElement;
+  const id = active?.dataset?.histId, source = active?.dataset?.histSeries;
+  const restore = id && source && host.contains?.(active);
+  host.innerHTML = html;
+  if (!restore) return;
+  const next = Array.from(host.querySelectorAll("[data-hist-series]")).find((button) =>
+    button.dataset.histId === id && button.dataset.histSeries === source);
+  next?.focus({ preventScroll: true });
 }
 
 function histLegendHtml(h, s, cls) {
@@ -1243,7 +1256,7 @@ function env3SeriesClass(source) {
 // ENV III has three different units, so putting the raw values on one Y axis would flatten
 // temperature and humidity underneath pressure. One full-width chart therefore gives every line
 // its own honest local range while sharing the exact same time raster. The legend explicitly says
-// so, and the cursor always reports the three raw measurements together at the selected instant.
+// so, and the cursor reports each visible raw measurement at the selected instant.
 function env3HistHtml() {
   const offered = ENV3_COMBINED_SERIES.filter((s) => hasEnv3Hist(s.id));
   if (!offered.length) return "";
@@ -1675,7 +1688,7 @@ function env3ScrubHtml(h, i) {
 
 // Keep the selected instant visible: samples in the left half open their bubble to the right and
 // samples in the right half open it to the left. The small CSS leader bridges the deliberate gap
-// back to the crosshair. This is position-only; tooltip dimensions never feed into graph layout.
+// back to the crosshair. Horizontal placement never measures or changes the plot geometry.
 function tipSideClass(frac) {
   return frac > 0.5 ? "vhist-tip-left" : "vhist-tip-right";
 }

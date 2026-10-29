@@ -1671,7 +1671,7 @@ function renderInspectHist(e, row) {
     S.inspHistSig = sig;
     const el = $("inspHist");
     el.hidden = !offered.length;
-    el.innerHTML = offered.length ? env3HistHtml() : "";
+    replaceHistoryHtml(el, offered.length ? env3HistHtml() : "");
     return;
   }
   // A plain pill drawn from a ROW charts that row. A COMPUTED pill (ΔT, heat output, electrical
@@ -1732,11 +1732,11 @@ function renderInspectHist(e, row) {
   // a chart, which is the failure cop_scope exists to prevent.
   const mb = pairedId ? mbByConcept(pairedId) : null;
   const chartName = DERIVED[id] && e && e.aria ? inspFieldText(e, "aria", null) : null;
-  el.innerHTML = !id ? ""
+  replaceHistoryHtml(el, !id ? ""
     : row ? histHtml(id, displayUnit(row), chartName || displayReadingLabel(row.label, row), trendSource)
     : pairedId ? histHtml(id, mb ? displayUnit(mb) : "", mb ? displayHomeHubLabel(mb) : inspTitleText(e, null), trendSource)
                : histHtml(id, DERIVED[id]?.unit || "",
-                          e.aria ? inspFieldText(e, "aria", null) : inspTitleText(e, null), trendSource);
+                          e.aria ? inspFieldText(e, "aria", null) : inspTitleText(e, null), trendSource));
 }
 
 function renderInspect() {

@@ -1960,12 +1960,17 @@ async function assertHistoryReadouts(page, context) {
           button(last).click(); window.__browserHistoryRender();
           const unchanged=JSON.stringify(Array.from(S.histHidden.get(id))) === hidden;
           for (const source of sources.slice(1)) {button(source).click();window.__browserHistoryRender();}
+          const beforePoll=button(sources[1]);
+          beforePoll.focus(); S.clickHold=false;
+          setHtml(host.id,host.innerHTML + "<!-- changed poll -->");
+          const pollFocus=button(sources[1]) !== beforePoll && document.activeElement === button(sources[1]);
           return {hidden:changed.every(Boolean),protectedLast,unchanged,
+            pollFocus,
             restored:sources.every(source=>button(source).getAttribute("aria-pressed") === "true" && !button(source).disabled) &&
               sources.slice(1).every(source=>!!host.querySelector(".vhist-line." + pathClass[source])),
             ringsUnchanged:JSON.stringify(Array.from(S.hist)) === rings};
         })()`);
-        assert.deepEqual(legend,{hidden:true,protectedLast:true,unchanged:true,restored:true,ringsUnchanged:true},
+        assert.deepEqual(legend,{hidden:true,protectedLast:true,unchanged:true,pollFocus:true,restored:true,ringsUnchanged:true},
           `${context}/${id}: legend clicks hide and restore independent series while retaining the final curve and source history`);
       }
     }

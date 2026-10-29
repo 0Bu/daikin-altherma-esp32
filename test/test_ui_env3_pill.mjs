@@ -232,6 +232,14 @@ assert.match(elements.inspHist.innerHTML, /data-hist-series="env3_pressure" aria
 sandbox.__api.toggle("env3_pressure");
 assert.match(elements.inspHist.innerHTML, /class="vhist-line env-pressure"/,
   "the final visible climate curve must remain visible even for a direct handler call");
+const pressureRing = S.hist.get("env3:env3_pressure");
+const pressureValues = pressureRing.v;
+pressureRing.v = pressureValues.map(() => null);
+assert.match(sandbox.__api.tooltipHtml(3), /env-temperature">Temperatur  22,0 °C/,
+  "source fallback must keep forecast temperature on its own colour");
+assert.match(sandbox.__api.tooltipHtml(3), /env-pressure">Luftdruck  1.008,0 hPa/,
+  "source fallback must keep forecast pressure on its own colour");
+pressureRing.v = pressureValues;
 sandbox.__api.toggle("env3_humidity");
 sandbox.__api.toggle("env3_temperature");
 
