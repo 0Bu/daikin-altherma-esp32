@@ -1958,10 +1958,12 @@ esp_err_t flash_read_record(size_t slot, FlashJournalRecord& out) {
 }
 
 // Pass 1 finds the newest committed record and each source's latest bucket. Pass 2 walks backwards
-// from that physical head and remembers only slots inside the source's last 24-hour window. The
-// restore index is 1.7 KiB and the bounded manifest cache stays below 1.2 KiB; retaining a second
-// ~30 KiB matrix beside the live rings would defeat the static memory budget this feature was
-// designed around.
+// from that physical head and remembers only slots inside the source's last 24-hour window; the
+// checkup source keeps up to CHECKUP_JOURNAL_INDEX_CAP candidate hours, because a revision
+// re-appends an older hour, and is clipped to the newest copy of each hour afterwards. The restore
+// index holds one uint16_t slot per source and raster sample, and the bounded manifest cache stays
+// below 1.2 KiB; retaining a second ~30 KiB matrix beside the live rings would defeat the static
+// memory budget this feature was designed around.
 bool flash_journal_scan() {
     uint64_t highest_sequence = 0;
     uint64_t newest_sequence[kJournalSources] = {};
