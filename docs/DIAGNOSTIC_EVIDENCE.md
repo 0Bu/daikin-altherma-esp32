@@ -1,6 +1,6 @@
 # Evidence and limits of the plant diagnostics
 
-<!-- diagnostic-evidence-contract: cddd3146cc7e5fac7891d3682c8f47fb61b488a597c5f1a70930aa9a13fa3512 -->
+<!-- diagnostic-evidence-contract: d27944523a46382b901c129bccc7740dd2a9a528899d0234363ca133db4ae46e -->
 
 For every row in the **Plant diagnostics · 24 h** card, this page answers four questions:
 
@@ -203,8 +203,11 @@ elapsed runtime must also be completed pure heating runtime; DHW runtime cannot 
 heating runs. Censored elapsed time includes blind intervals and excludes only proven handovers.
 Unwitnessed starts and journal/window boundaries have unknown full durations and always block
 assessment; their runtime is only an observed lower bound. Saturated runtime/counters or inconsistent
-cause counts also block the assessment. A run completing after its start hour was journaled is
-journaled again with that hour ([persistence](ARCHITECTURE.md#history-and-diagnosis-persistence)).
+cause counts also block the assessment. A run still open at a software restart keeps its witnessed
+start in the journaled open hour; the next boot books only its remainder, as a censored `start` run,
+and adds no start ([PLANT.md](PLANT.md#reboot-and-persistence)). A run completing after its start
+hour was journaled is journaled again with that hour
+([persistence](ARCHITECTURE.md#history-and-diagnosis-persistence)).
 A restart between its stop and that append, which needs synchronized time and a writable journal,
 can still lose it. Project inference, not measured: the append normally follows within seconds, and
 only runs still open at an hour boundary are exposed, so a loss tends to remove a long run. Under

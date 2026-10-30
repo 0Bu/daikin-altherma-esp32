@@ -57,7 +57,7 @@ Tank cooling retains completed/high-rate window counts and the greatest one-hour
 Pump-active and draw-like windows remain measured with separate context counts; only unmarked high
 rates raise a project note. Exclusions explain missing evidence, not a defect. The UI's assumed-tank
 heat/electricity example is not calorimetry or a green loss assessment; [DIAGNOSTICS.md](DIAGNOSTICS.md)
-explains it. A fresh filter waits 45 minutes; planned restarts carry the remaining settle. Unseen
+explains it. A fresh filter waits 45 minutes; software restarts carry the remaining settle. Unseen
 charging can still affect a later window.
 
 The independent circulation witness's broker, topic, value/time paths, maximum age, thresholds and
@@ -72,8 +72,35 @@ can restore only from compatible, dated history-journal records after clock sync
 **current-boot confirmation of the full X10A source**. Records bind endpoint, full profile/link scope,
 diagnostics-consent generation, layout/threshold fingerprint and CRC. DHW additionally binds the
 circulation configuration; a mismatch empties only its bucket, preserving independent X10A evidence.
-Old unscoped formats are rejected; a cached model guess cannot admit records. The open hour and
-completed hours not yet saved are missing.
+Old unscoped formats are rejected; a cached model guess cannot admit records.
+
+**A software restart (any `esp_restart()`) tries to save the open hour.**
+Software restarts include:
+- an OTA installation or rollback;
+- a settings save that restarts the board;
+- a WiFi credential rollback or an Ethernet-to-WiFi fallback;
+- a heap-watchdog restart.
+
+Saving it needs all of the following:
+- a synchronized clock;
+- a confirmed X10A source;
+- diagnostics enabled;
+- no queued X10A or diagnostics reset (a circulation-only reset empties just the hour's tank-cooling
+  part);
+- a writable history journal;
+- at least one observed second in the open hour.
+
+The open hour becomes a dated short record, labelled with the wall-clock hour of its newest sample.
+The bounded shutdown drain appends it after every completed hour. It is skipped when that label is
+not newer than the newest completed or already journaled hour, because a second record could only
+replace that hour. A drain that reaches its record budget or cannot take its locks loses it as well.
+
+A run still open at the restart keeps its witnessed start, and its completion is never invented.
+Once the remainder stops, the next boot books it as a censored run whose start it did not witness,
+without adding a start.
+
+A power loss, a crash or a task or interrupt watchdog panic still loses the open hour. Completed
+hours not yet saved stay missing.
 
 Current observations take precedence. A whole completed or open hour expires when its beginning
 leaves the rolling day, even if polling stops. A completed record therefore lasts at most 23 hours
@@ -88,9 +115,9 @@ restore for this boot, even if the same profile is selected again. HomeHub-only 
 the X10A lifecycle. Safe mode and disabled diagnostics admit no old hours; unidentified-source
 empty samples advance time without booking observations.
 
-An intentional restart can carry only the ongoing tank-loss filter through a separately sealed
-**one-shot handoff**, adopted after the same full X10A and circulation scopes are confirmed with
-diagnostics enabled and no reset requested. It preserves the hourly cooling candidate/settling timer,
+Apart from the journaled open hour, a software restart can carry only the ongoing tank-loss filter
+through a separately sealed **one-shot handoff**, adopted after the same full X10A and circulation
+scopes are confirmed with diagnostics enabled and no reset requested. It preserves the hourly cooling candidate/settling timer,
 never undated completed counters or transient compressor edges. Power loss, crash, changed source
 or incompatible/absent format starts a fresh filter. The current bucket geometry changes the diagnosis journal fingerprint,
 so previous-format hourly records are rejected; handoff v3 also rejects v2. Trend-journal sources

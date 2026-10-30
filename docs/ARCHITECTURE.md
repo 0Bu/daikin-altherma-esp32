@@ -238,8 +238,12 @@ identity. Whole live and restored hours expire when their beginning leaves the r
 independently of producer progress; abandoned open evidence expires too. The current 80-byte
 diagnosis bucket changes its journal fingerprint and starts fresh after a format update; ordinary
 trend records are unaffected.
-The intentional-restart DHW handoff is consumed once; downtime/startup remains blind and can
+The software-restart DHW handoff is consumed once; downtime/startup remains blind and can
 invalidate it without incrementing ordinary abort counters.
+Every `esp_restart()` runs the checkup shutdown handler before the history drain, because ESP-IDF
+calls handlers in reverse registration order. The handler dates the open hour by its newest sample
+and freezes it. The drain then offers it after every live hour as a short record
+(`checkup_seal_*` in `checkup_persist.hpp`). `PLANT.md` owns when it is skipped.
 
 The former small history partition is unsupported. OTA cannot install a partition table: an
 old-layout device needs an explicitly authorized signed USB/Web Serial update to the official
@@ -399,8 +403,8 @@ The boot guard runs after NVS initialization and its static lock, before config,
 startup. It classifies each boot once: a crash, a heap-watchdog restart (a software reset the
 watchdog marked in `.noinit` RAM just before restarting) or a clean boot. A crash counts toward
 crash-loop safe mode and carries the heap-restart count; a watchdog restart carries the crash
-count; only a clean boot (any other non-crash reset: power cycle, any software restart such as a
-rebooting save, OTA install, Ethernet fallback or factory reset) clears both.
+count; only a clean boot (any other non-crash reset: power cycle, any other software restart such as
+a rebooting save, OTA install, Ethernet fallback or factory reset) clears both.
 Four crash boots latch crash-loop safe mode: retain network/HTTP recovery if mandatory startup
 succeeds and skip optional plant workers. Ten minutes of uptime clear the crash count; that timer
 is never armed while safe mode is latched, because suppressed workers prove nothing. NVS init

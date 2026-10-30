@@ -213,7 +213,7 @@ blind time itself, so its verdict can be `accept` beside trend age refusals.
 `health` fields: `covered_s`, `span_s`, `source_fresh`, `source_age_s`, `persist`, `full_span`,
 `available`, `assessable`, `evaluated`, `status`, `checks`. Disabled diagnostics, and a reset that is
 still pending, keep the object with placeholder checks: each reads `unavailable`/`unsupported` and
-carries no accumulated evidence, so read `persist` and `diagnostics.enabled` rather than the reason. `span_s` is elapsed lifecycle time capped at 24 hours; `covered_s` is observed
+carries no accumulated evidence, so read `persist` and `diagnostics.enabled` rather than the reason. `span_s` is elapsed lifecycle time capped at 24 hours (after a flash restore, each admitted stored hour counts as a whole hour); `covered_s` is observed
 bus context. Each check has its own `observed_s`/`required_s`, so one signal cannot lend coverage to
 another. `source_age_s` is null before a nonempty X10A sample; empty pause/failure callbacks cannot
 renew it. `source_fresh` applies the 15-second observation-age bound at read time. A stale source
