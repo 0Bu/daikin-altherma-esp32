@@ -21792,6 +21792,310 @@ static void test_checkup_planned_restart_seal() {
     CHECK(skipped.space_run_s == dropped.space_run_s);
 }
 
+namespace {
+using namespace logic;
+
+// One restoration input: both rings as the boot left them, this boot's completed hours, the
+// stored records and every admission input.
+struct CheckupRestoreCase {
+    CheckupRing                       ring;
+    DhwLossRing                       dhw;
+    CheckupJournalLiveSpan            live;
+    std::vector<CheckupJournalRecord> stored;
+    int64_t                           earliest = 0, latest = 0, now_unix_s = 0, now_us = 0;
+    bool                              confirmed = true, reset = false, dhw_reset = false;
+    uint32_t                          model = 0, source = 0, generation = 0, dhw_fp = 0;
+};
+
+struct CheckupRestoreOut {
+    CheckupRing ring;
+    DhwLossRing dhw;
+    int64_t     expiry[CHECKUP_COMPLETED_BUCKETS] = {};
+    bool        dhw_retired                       = false;
+};
+
+// The former restore, verbatim in substance: copy this boot's completed hours into records, clear
+// both rings, then push the selected interval of every bucket oldest first.
+CheckupRestoreOut checkup_restore_reference(const CheckupRestoreCase& c) {
+    constexpr size_t                  kSlots = CHECKUP_COMPLETED_BUCKETS;
+    std::vector<CheckupJournalRecord> live;
+    const size_t oldest_i = (static_cast<size_t>(c.ring.head) + kSlots - c.live.count) % kSlots;
+    for (size_t i = 0; i < c.live.count; i++) {
+        CheckupJournalRecord rec;
+        rec.payload.model_fp               = c.model;
+        rec.payload.source_fp              = c.source;
+        rec.payload.dhw_source_fp          = c.dhw_fp;
+        rec.payload.diagnostics_generation = c.generation;
+        const int64_t back                 = static_cast<int64_t>(c.live.count - 1 - i);
+        const int64_t label                = c.live.newest_label - back;
+        rec.payload.end_unix_s             = checkup_journal_end_in_bucket(
+            c.live.newest_end_unix_s - back * int64_t{CHECKUP_DT_S}, label);
+        rec.payload.checkup = c.ring.buf[(oldest_i + i) % kSlots];
+        rec.payload.dhw     = c.dhw.buf[(oldest_i + i) % kSlots];
+        rec.bucket          = label;
+        live.push_back(rec);
+    }
+    CheckupRestoreOut out;
+    out.ring = c.ring;
+    out.dhw  = c.dhw;
+    out.ring.reset();
+    out.dhw.reset();
+    for (int64_t b = c.earliest; b <= c.latest; b++) {
+        CheckupBucket cb;
+        DhwLossBucket db;
+        int64_t       expiry     = 0;
+        bool          from_flash = false;
+        if (const auto* rec = checkup_journal_select_slot(
+                b, live.data(), live.size(), c.stored.data(), c.stored.size(), c.now_unix_s,
+                c.confirmed, c.model, c.source, c.generation, c.reset, from_flash)) {
+            cb = rec->payload.checkup;
+            if (!c.dhw_reset && checkup_journal_dhw_identity_matches(rec->payload, c.dhw_fp))
+                db = rec->payload.dhw;
+            else
+                out.dhw_retired = true;
+            expiry = checkup_restore_expiry_us(rec->payload.end_unix_s, c.now_unix_s, c.now_us);
+        }
+        out.expiry[out.ring.head] = expiry;
+        out.ring.push(cb);
+        out.dhw.push(db);
+    }
+    return out;
+}
+
+CheckupRestoreOut checkup_restore_in_place(const CheckupRestoreCase& c) {
+    CheckupRestoreOut out;
+    out.ring = c.ring;
+    out.dhw  = c.dhw;
+    for (auto& e : out.expiry) e = -7; // every slot must be assigned
+    out.dhw_retired = checkup_journal_rebuild(
+        out.ring, out.dhw, out.expiry, c.live, c.stored.data(), c.stored.size(), c.earliest,
+        c.latest, c.now_unix_s, c.now_us, c.confirmed, c.model, c.source, c.generation, c.reset,
+        c.dhw_fp, c.dhw_reset);
+    return out;
+}
+
+// Markers that identify a bucket's origin; the rest of each bucket is default-constructed.
+uint32_t checkup_restore_marker(const CheckupBucket& b) {
+    return b.starts | (static_cast<uint32_t>(b.covered_s) << 8) | (b.space_run_s << 20);
+}
+uint32_t checkup_restore_marker(const DhwLossBucket& b) {
+    return b.observed_s | (static_cast<uint32_t>(b.windows) << 16);
+}
+
+// Same oldest-to-newest window, slot deadlines and DHW retirement; nothing left outside it.
+bool checkup_restore_same(const CheckupRestoreOut& ref, const CheckupRestoreOut& got) {
+    constexpr size_t kSlots = CHECKUP_COMPLETED_BUCKETS;
+    if (ref.ring.count != got.ring.count || ref.dhw.count != got.dhw.count ||
+        got.ring.head != got.dhw.head || ref.dhw_retired != got.dhw_retired)
+        return false;
+    const size_t n = got.ring.count;
+    for (size_t i = 0; i < kSlots; i++) {
+        const size_t g = (got.ring.head + kSlots - n + i) % kSlots;
+        if (i >= n) { // outside the window: empty and without a deadline
+            if (checkup_restore_marker(got.ring.buf[g]) || checkup_restore_marker(got.dhw.buf[g]) ||
+                got.expiry[g])
+                return false;
+            continue;
+        }
+        const size_t r = (ref.ring.head + kSlots - n + i) % kSlots;
+        if (checkup_restore_marker(ref.ring.buf[r]) != checkup_restore_marker(got.ring.buf[g]) ||
+            checkup_restore_marker(ref.dhw.buf[r]) != checkup_restore_marker(got.dhw.buf[g]) ||
+            ref.expiry[r] != got.expiry[g])
+            return false;
+    }
+    return true;
+}
+
+struct CheckupRestoreRng {
+    uint64_t s;
+    uint64_t next() {
+        s ^= s << 13;
+        s ^= s >> 7;
+        s ^= s << 17;
+        return s;
+    }
+    uint64_t below(uint64_t n) { return next() % n; }
+    bool     chance(unsigned pct) { return below(100) < pct; }
+};
+} // namespace
+
+// This boot's completed hours are described in place, and the rings are rebuilt around them,
+// instead of being copied into a 23-record static scratch.
+static void test_checkup_journal_rebuild_in_place() {
+    using namespace logic;
+    constexpr size_t  kSlots = CHECKUP_COMPLETED_BUCKETS;
+    constexpr int64_t hour   = CHECKUP_DT_S;
+    const uint32_t    model = 0x11u, source = 0x22u, generation = 3u;
+
+    // The span: consecutive labels and slots, measured ends clamped into their labels.
+    CheckupJournalLiveSpan span;
+    span.count             = 3;
+    span.oldest_slot       = 21;
+    span.newest_label      = 500;
+    span.newest_end_unix_s = 500 * hour + 40;
+    CHECK(checkup_journal_live_label(span, rt<size_t>(0)) == 498);
+    CHECK(checkup_journal_live_end(span, rt<size_t>(0)) == 498 * hour + 40);
+    CHECK(checkup_journal_live_slot(span, rt<size_t>(2)) == 0); // wraps past the last slot
+    CheckupJournalLiveSpan late = span;
+    late.newest_end_unix_s      = 501 * hour + 2; // a latched label one hour behind the clock
+    CHECK(checkup_journal_live_end(late, rt<size_t>(2)) == 500 * hour + hour - 1);
+
+    const int64_t now = 500 * hour + 100;
+    auto index = [&](const CheckupJournalLiveSpan& s, int64_t wanted, int64_t at, bool confirmed,
+                     uint32_t profile, bool reset) {
+        return checkup_journal_live_index(s, rt<int64_t>(wanted), at, rt<bool>(confirmed), profile,
+                                          source, rt<bool>(reset));
+    };
+    CHECK(index(span, 499, now, true, model, false) == 1);
+    CHECK(index(span, 497, now, true, model, false) == SIZE_MAX); // older than the span
+    CHECK(index(span, 501, now, true, model, false) == SIZE_MAX); // newer than the span
+    CHECK(index(span, INT64_MIN, now, true, model, false) == SIZE_MAX);
+    CHECK(index(span, 500, now, false, model, false) == SIZE_MAX); // cached startup scope
+    CHECK(index(span, 500, now, true, 0, false) == SIZE_MAX);      // no detected profile
+    CHECK(index(span, 500, now, true, model, true) == SIZE_MAX);   // reset not yet consumed
+    CHECK(index(span, 500, 500 * hour + 39, true, model, false) == SIZE_MAX); // ends in the future
+    CHECK(index(span, 498, 498 * hour + 40 + CHECKUP_RECORD_MAX_AGE_S, true, model, false) ==
+          SIZE_MAX); // left the rolling day
+    CheckupJournalLiveSpan none = span;
+    none.count                  = 0;
+    CHECK(index(none, 500, now, true, model, false) == SIZE_MAX);
+    none.count        = 3;
+    none.newest_label = INT64_MIN;
+    CHECK(index(none, 500, now, true, model, false) == SIZE_MAX);
+    CheckupJournalLiveSpan negative = span; // labels before the epoch have no valid end
+    negative.newest_label           = 0;
+    negative.newest_end_unix_s      = 40;
+    CHECK(index(negative, -1, 100, true, model, false) == SIZE_MAX);
+    CHECK(index(negative, 0, 100, true, model, false) == 2);
+
+    // A live hour wins over a stored duplicate; an expired live hour yields to it.
+    CheckupJournalRecord dup{499, {}};
+    dup.payload.model_fp               = model;
+    dup.payload.source_fp              = source;
+    dup.payload.diagnostics_generation = generation;
+    dup.payload.end_unix_s             = 499 * hour + 3000; // ends after the live copy
+
+    auto choose = [&](int64_t wanted, int64_t at) {
+        return checkup_journal_choose(rt<int64_t>(wanted), span, &dup, 1, at, true, model, source,
+                                      generation, false);
+    };
+    CHECK(choose(499, now).live == 1 && !choose(499, now).stored);
+    const int64_t live_gone = 499 * hour + 40 + CHECKUP_RECORD_MAX_AGE_S;
+    CHECK(choose(499, live_gone).live == SIZE_MAX && choose(499, live_gone).stored == &dup);
+    CHECK(choose(497, now).live == SIZE_MAX && !choose(497, now).stored);
+
+    // A window wider than the ring, or reversed, rebuilds nothing and clears every slot.
+    for (const auto& bounds : {std::pair<int64_t, int64_t>{0, int64_t{kSlots}}, {5, 4}}) {
+        CheckupRestoreCase c;
+        c.ring.buf[3].starts = 9;
+        c.ring.count = c.dhw.count = 4;
+        c.earliest                 = bounds.first;
+        c.latest                   = bounds.second;
+
+        const CheckupRestoreOut out = checkup_restore_in_place(c);
+        CHECK(out.ring.count == 0 && out.dhw.count == 0 && out.ring.buf[3].starts == 0);
+        CHECK(out.expiry[3] == 0 && !out.dhw_retired);
+    }
+
+    // Differential check against the former copy-clear-push restore over seeded random states.
+    CheckupRestoreRng rng{0x9e3779b97f4a7c15ull};
+    size_t compared = 0, rotated = 0, with_live = 0, retired = 0, admitted_live = 0, mismatch = 0;
+    for (int iteration = 0; iteration < 20000; ++iteration) {
+        CheckupRestoreCase c;
+        c.model      = rng.chance(97) ? model : 0;
+        c.source     = source;
+        c.generation = generation;
+        c.confirmed  = rng.chance(95);
+        c.reset      = rng.chance(4);
+        c.dhw_fp     = rng.chance(80) ? 0x33u : 0;
+        c.dhw_reset  = rng.chance(10);
+        c.now_unix_s = 480'000 * hour + static_cast<int64_t>(rng.below(hour));
+        c.now_us     = static_cast<int64_t>(rng.below(4)) * 3'600'000'000LL + 1;
+        for (size_t s = 0; s < kSlots; s++) {
+            c.ring.buf[s].starts      = static_cast<uint8_t>(s + 1);
+            c.ring.buf[s].covered_s   = static_cast<uint16_t>(rng.below(3600));
+            c.ring.buf[s].space_run_s = static_cast<uint32_t>(rng.below(4000));
+            c.dhw.buf[s].observed_s   = static_cast<uint16_t>(s + 1);
+            c.dhw.buf[s].windows      = static_cast<uint8_t>(rng.below(200));
+        }
+        c.ring.head = c.dhw.head = static_cast<uint8_t>(rng.below(kSlots));
+        c.ring.count = c.dhw.count = static_cast<uint8_t>(rng.below(kSlots + 1));
+        const int64_t newest_label =
+            checkup_journal_bucket(c.now_unix_s) - 1 - static_cast<int64_t>(rng.below(3));
+        if (c.ring.count && rng.chance(70)) {
+            c.live.count        = 1 + rng.below(c.ring.count);
+            c.live.oldest_slot  = (c.ring.head + kSlots - c.live.count) % kSlots;
+            c.live.newest_label = newest_label;
+            c.live.newest_end_unix_s =
+                newest_label * hour - 5 + static_cast<int64_t>(rng.below(3620));
+        }
+        const size_t records = rng.below(kSlots + 1);
+        for (size_t r = 0; r < records; r++) {
+            CheckupJournalRecord rec;
+            rec.bucket            = newest_label + 2 - static_cast<int64_t>(rng.below(28));
+            rec.payload.model_fp  = rng.chance(92) ? model : 0x44u;
+            rec.payload.source_fp = rng.chance(95) ? source : 0x55u;
+            rec.payload.diagnostics_generation = rng.chance(97) ? generation : generation + 1;
+            rec.payload.dhw_source_fp          = rng.chance(85) ? 0x33u : 0x66u;
+            // -1 s: an end that belongs to the previous bucket, so the label is wrong.
+            const int64_t into_hour = rng.chance(95) ? static_cast<int64_t>(rng.below(hour)) : -1;
+            rec.payload.end_unix_s  = rec.bucket * hour + into_hour;
+            rec.payload.checkup.starts      = static_cast<uint8_t>(100 + r);
+            rec.payload.checkup.space_run_s = static_cast<uint32_t>(rng.below(4000));
+            rec.payload.dhw.observed_s      = static_cast<uint16_t>(100 + r);
+            c.stored.push_back(rec);
+        }
+        // The caller's bounds (checkup_flash_restore): admitted stored and live labels, the empty
+        // hour before the open one when no live hour exists, then the ring's capacity.
+        int64_t earliest = INT64_MAX, latest = INT64_MIN;
+        size_t  accepted = 0;
+        for (const auto& rec : c.stored)
+            if (checkup_journal_restore_admits(rec.payload, rec.bucket, c.now_unix_s, c.confirmed,
+                                               c.model, c.source, c.generation, c.reset)) {
+                earliest = std::min(earliest, rec.bucket);
+                latest   = std::max(latest, rec.bucket);
+                accepted++;
+            }
+        for (size_t k = 0; k < c.live.count; k++) {
+            const int64_t label = checkup_journal_live_label(c.live, k);
+            // A described live hour is admitted exactly when its former copy was.
+            CheckupJournalPayload copy;
+            copy.model_fp               = c.model;
+            copy.source_fp              = c.source;
+            copy.diagnostics_generation = c.generation;
+            copy.end_unix_s             = checkup_journal_live_end(c.live, k);
+            const bool admitted         = checkup_journal_restore_admits(
+                copy, label, c.now_unix_s, c.confirmed, c.model, c.source, c.generation, c.reset);
+            const bool described =
+                checkup_journal_live_index(c.live, label, c.now_unix_s, c.confirmed, c.model,
+                                           c.source, c.reset) == k;
+            mismatch += admitted != described;
+            if (!described) continue;
+            admitted_live++;
+            earliest = std::min(earliest, label);
+            latest   = std::max(latest, label);
+        }
+        if (!accepted) continue;
+        if (!c.live.count) latest = std::max(latest, checkup_journal_bucket(c.now_unix_s) - 1);
+        earliest   = std::max(earliest, latest - static_cast<int64_t>(kSlots - 1));
+        c.earliest = earliest;
+        c.latest   = latest;
+
+        const CheckupRestoreOut ref = checkup_restore_reference(c);
+        const CheckupRestoreOut got = checkup_restore_in_place(c);
+        CHECK(checkup_restore_same(ref, got));
+        compared++;
+        with_live += c.live.count != 0;
+        rotated += c.live.count && got.ring.head != got.ring.count % kSlots;
+        retired += got.dhw_retired;
+    }
+    CHECK(mismatch == 0 && admitted_live > 10000);
+    CHECK(compared > 10000);
+    CHECK(with_live > 5000);
+    CHECK(rotated > 1000); // live hours kept their slots in a rotated window
+    CHECK(retired > 1000);
+}
+
 // ── logic/history_persist.hpp ───────────────────────────────────────────────────────────────────
 // Persisting the rings is the one feature here whose failure mode is a CONFIDENTLY WRONG chart
 // rather than an absent one, so the tests are written against the ways a restore can be wrong while
@@ -27326,6 +27630,7 @@ int main() {
     test_room_history();
     test_checkup_journal_revisions();
     test_checkup_planned_restart_seal();
+    test_checkup_journal_rebuild_in_place();
     test_history_persist();
     test_history_identity();
     test_checkup_scoped_flash_age();
