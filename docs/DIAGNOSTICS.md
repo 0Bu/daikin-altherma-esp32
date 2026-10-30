@@ -1,6 +1,6 @@
 # Plant diagnostics in plain language
 
-<!-- user-docs-contract: 7147362d5bba681c3e4513f0312f2aa7b2a656561fcb5dfc712134ee541f14d5 -->
+<!-- user-docs-contract: f5996900aa7000ac651aad60aca0c7996edacd30e6a2209d3b8a5e2acf1123e6 -->
 
 Plant diagnostics **reads measurements and counts events; it does not control the heat pump**.
 It is off by default. Enable **Plant diagnostics** under **Settings → Firmware** to start an evidence
@@ -35,9 +35,9 @@ current all-clear; retained observations can still explain an earlier finding. F
 timeouts reduce evidence without pretending that the profile no longer has the sensor.
 
 Completed hours can return after a restart only from compatible dated flash records and current
-source confirmation. A planned restart, such as an update or a reboot request, also saves the open
-hour, unless it falls in the same clock hour as the previous saved hour. Other open and unsaved hours
-may be lost. Whole hourly records expire when their
+source confirmation. A software restart, such as an update or a settings change, also tries to save
+the open hour. It cannot when that hour shares its clock hour with the previous saved hour. Other
+open and unsaved hours may be lost. Whole hourly records expire when their
 beginning leaves the rolling day, even if polling stops. Changed X10A identity or incompatible
 diagnosis format starts fresh collection; changing the independent circulation witness clears only
 tank-cooling evidence.

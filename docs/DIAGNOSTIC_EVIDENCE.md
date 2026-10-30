@@ -1,6 +1,6 @@
 # Evidence and limits of the plant diagnostics
 
-<!-- diagnostic-evidence-contract: bbd952245946bdf6c559128ae86deb6aaceb6e0abaf7d3e4b216c491b68ff7f8 -->
+<!-- diagnostic-evidence-contract: 2ad3d4871c6e754531dbe9382753111a8a70faf8755db37c3fe145fe55afd6b3 -->
 
 For every row in the **Plant diagnostics · 24 h** card, this page answers four questions:
 
@@ -202,9 +202,10 @@ At least 90% must be classified. At least 90% of completed heating runtime plus 
 elapsed runtime must also be completed pure heating runtime; DHW runtime cannot mask missing long
 heating runs. Censored elapsed time includes blind intervals and excludes only proven handovers.
 Unwitnessed starts and journal/window boundaries have unknown full durations and always block
-assessment; their runtime is only an observed lower bound. A run still open at a planned restart
-keeps its witnessed start in the journaled open hour; the next boot sees only its remainder, as an
-unwitnessed start ([PLANT.md](PLANT.md#reboot-and-persistence)). Saturated runtime/counters or inconsistent
+assessment; their runtime is only an observed lower bound. A run still open at a software restart
+keeps its witnessed start in the journaled open hour. The next boot books only its remainder, as a
+censored run with an unwitnessed start that adds no start
+([PLANT.md](PLANT.md#reboot-and-persistence)). Saturated runtime/counters or inconsistent
 cause counts also block the assessment. A run completing after its start hour was journaled is
 journaled again with that hour ([persistence](ARCHITECTURE.md#history-and-diagnosis-persistence)).
 A restart between its stop and that append, which needs synchronized time and a writable journal,

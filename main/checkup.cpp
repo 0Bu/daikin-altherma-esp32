@@ -349,8 +349,8 @@ void fold_checkup_locked(const logic::CheckupSample& s, int64_t now) {
     checkup_persist_seal();
 }
 
-// Planned restart: date the open hour so history_flash_save() can journal it. esp_restart runs
-// shutdown handlers in reverse registration order, and checkup_start() registers after
+// Software restart: date the open hour so history_flash_save() can try to journal it. esp_restart
+// runs shutdown handlers in reverse registration order, and checkup_start() registers after
 // history_start(), so this runs before that drain. The seal needs the identity a journal append
 // needs.
 void seal_open_hour_locked() {

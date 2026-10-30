@@ -351,8 +351,8 @@ belong in the evaluated headline.
 
 Evidence clocks are per signal, not inferred from board uptime. Completed hours restore only from
 compatible dated flash records after clock sync and current-boot X10A confirmation; RAM completed
-hours are retired. A planned restart journals the open hour when its clock hour allows; other
-open/unsaved hours may be lost. `flash_pending`, `fresh` and `flash` distinguish
+hours are retired. An intentional restart tries to journal the open hour; other open/unsaved hours
+may be lost. `flash_pending`, `fresh` and `flash` distinguish
 waiting, new collection and reconstruction. `full_span` uses observed lifecycle and admitted dated
 intervals. Consent, layout, profile, protocol and RX/TX bind the scope; legacy unscoped records cannot
 restore. Besides dated journal records, only a separately sealed scoped ongoing DHW filter may cross

@@ -74,20 +74,30 @@ diagnostics-consent generation, layout/threshold fingerprint and CRC. DHW additi
 circulation configuration; a mismatch empties only its bucket, preserving independent X10A evidence.
 Old unscoped formats are rejected; a cached model guess cannot admit records.
 
-**A planned restart saves the open hour** in the following cases:
-- an OTA installation or a reboot request;
+**A software restart tries to save the open hour.** Software restarts include:
+- an OTA installation or rollback;
+- a settings save that reboots;
+- a WiFi or Ethernet fallback;
+- a heap-watchdog restart.
+
+Saving it needs all of the following:
 - a synchronized clock;
-- a confirmed source.
+- a confirmed X10A source;
+- diagnostics enabled;
+- no queued reset;
+- at least one observed second in the open hour.
 
-It is saved as a dated short record, labelled with the wall-clock hour of its newest sample. When
-that is still the newest completed hour's label, the open hour is not saved, because a second record
-could only replace that hour.
+The open hour becomes a dated short record, labelled with the wall-clock hour of its newest sample.
+The bounded shutdown drain appends it after every completed hour. It is skipped when that label is
+not newer than the newest completed or already journaled hour, because a second record could only
+replace that hour. A drain that runs out of time loses it as well.
 
-A run still open at the restart keeps its witnessed start. Its completion is never invented, and
-the next boot reports any remainder as a start it did not witness.
+A run still open at the restart keeps its witnessed start, and its completion is never invented.
+Once the remainder stops, the next boot books it as a censored run whose start it did not witness,
+without adding a start.
 
-The open hour is missing after a power loss, crash or watchdog reset. Completed hours not yet saved
-are missing too.
+A power loss, a crash or a task or interrupt watchdog panic still loses the open hour. Completed
+hours not yet saved stay missing.
 
 Current observations take precedence. A whole completed or open hour expires when its beginning
 leaves the rolling day, even if polling stops. A completed record therefore lasts at most 23 hours
@@ -102,7 +112,8 @@ restore for this boot, even if the same profile is selected again. HomeHub-only 
 the X10A lifecycle. Safe mode and disabled diagnostics admit no old hours; unidentified-source
 empty samples advance time without booking observations.
 
-An intentional restart can carry only the ongoing tank-loss filter through a separately sealed
+Apart from the journaled open hour, an intentional restart can carry only the ongoing tank-loss
+filter through a separately sealed
 **one-shot handoff**, adopted after the same full X10A and circulation scopes are confirmed with
 diagnostics enabled and no reset requested. It preserves the hourly cooling candidate/settling timer,
 never undated completed counters or transient compressor edges. Power loss, crash, changed source

@@ -372,13 +372,15 @@ inline constexpr int64_t checkup_journal_next_target(int64_t after_bucket,
 }
 
 // ── The open hour at a planned restart ───────────────────────────────────────────────────────────
-// A planned restart (OTA installation, reboot request) dates the open hour by its newest observed
-// sample, so the bounded shutdown drain can journal it as a short hour. Like every record it is
+// A software restart (any esp_restart: OTA installation or rollback, a rebooting settings save, a
+// network fallback, the heap watchdog) dates the open hour by its newest observed sample, so the
+// bounded shutdown drain can try to journal it as a short hour. Like every record it is
 // labelled with the wall-clock bucket of its end. When that bucket is still the newest completed
 // hour's label, the open hour began and ended in the same wall-clock hour as the hour before it:
 // a second record there could only replace that whole hour, so the open hour is lost as before.
 // The next boot's first completed hour ends at least one hour after the restart, so it never
-// shares the sealed label. Power loss, panics and watchdog resets never reach the seal.
+// shares the sealed label. Power loss, brownouts and panics, including task and interrupt watchdog
+// resets, never reach the seal.
 
 // The open hour's end in wall-clock seconds, or INT64_MIN. Its newest sample must lie in the open
 // monotonic hour; an unsynchronised clock (`now_unix_s < 0`) dates nothing.

@@ -226,12 +226,6 @@ A narrowly scoped one-shot DHW handoff may preserve an unfinished candidate; it 
 to completed checks. Disabling diagnostics clears runtime evidence; re-enabling starts a new
 generation. Same-boot journal creation is not proof of reboot restoration. `DIAGNOSTICS.md` explains
 results; `PLANT.md` owns lifecycle.
-
-On a planned restart, the checkup shutdown handler dates the open hour by its newest sample and
-freezes it. ESP-IDF calls shutdown handlers in reverse registration order, so this handler runs
-before the history drain. The drain appends the open hour after every live hour, as a short record
-labelled with that wall-clock hour (`checkup_seal_*`, `checkup_persist.hpp`). The record is skipped
-when that label equals the newest completed hour's label or is not ahead of the journal cursor.
 A run is booked into the hour in which it started, but only when it stops. When that hour was
 already journaled, it and every later live hour are appended again; the boot index keeps each
 hour's newest copy, including the older-sequence tail of a replay cut by a restart
@@ -246,6 +240,10 @@ diagnosis bucket changes its journal fingerprint and starts fresh after a format
 trend records are unaffected.
 The intentional-restart DHW handoff is consumed once; downtime/startup remains blind and can
 invalidate it without incrementing ordinary abort counters.
+Every `esp_restart()` runs the checkup shutdown handler before the history drain, because ESP-IDF
+calls handlers in reverse registration order. The handler dates the open hour by its newest sample
+and freezes it. The drain then offers it after every live hour as a short record
+(`checkup_seal_*` in `checkup_persist.hpp`). `PLANT.md` owns when it is skipped.
 
 The former small history partition is unsupported. OTA cannot install a partition table: an
 old-layout device needs an explicitly authorized signed USB/Web Serial update to the official
