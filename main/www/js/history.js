@@ -979,13 +979,11 @@ function stateHistHtml(id, name, view, wrap, cfg) {
 
   const pi = histPinIndex(id, view);
   const sourceAttr = view.series.length === 1 ? ` data-source="${esc(view.series[0].source)}"` : "";
-  let pinTip = "", pinCross = "";
+  let pinCross = "";
   if (pi >= 0) {
     const frac = scrubFrac(pi, n);
     const px = (frac * 100).toFixed(3);
     pinCross = `<span class="vhist-cross vhist-pinned" style="left:${px}%"></span>`;
-    pinTip = `<div class="vhist-tip vhist-pinned ${tipSideClass(frac)} mono num" ` +
-      `style="--tip-p:${px}">${esc(scrubText(view, pi, false))}</div>`;
   }
   const totalText = t(cfg.total, histDuration(total)) + (cfg.inactiveTotal
     ? ` · ${t(cfg.inactiveTotal, histDuration(inactiveSeconds))}` : "");
@@ -993,7 +991,7 @@ function stateHistHtml(id, name, view, wrap, cfg) {
     `<div class="vhist-head"><span class="vhist-t">${esc(full ? t("hist.title") : t("hist.recorded", spanH))}</span>` +
       `<span class="vhist-range mono num">${esc(totalText)}</span></div>` + levelLegend +
     `<div class="vhist-graph vhist-state-graph">` +
-      histTipsHtml(pinTip) +
+      histTipsHtml(view, pi, pi >= 0 ? scrubFrac(pi, n) : 0) +
       `<div class="vhist-plot vhist-state-plot" data-hist="${esc(id)}"${sourceAttr} data-n="${n}" tabindex="0" role="img"` +
         ` aria-label="${esc(t(cfg.aria, name || id, totalText))}">` + tracks + pinCross +
         `<span class="vhist-cross vhist-live" hidden></span>` +
@@ -1162,7 +1160,7 @@ function histHtml(id, unit, name, source = "") {
   // rolls and disappears once that measurement has left the day.
   const pi = histPinIndex(id, view);
   const sourceAttr = view.series.length === 1 ? ` data-source="${esc(view.series[0].source)}"` : "";
-  let pinTip = "", pinCross = "", pinMarks = "";
+  let pinCross = "", pinMarks = "";
   if (pi >= 0) {
     const frac = scrubFrac(pi, n);
     const px = (frac * 100).toFixed(3);
@@ -1170,11 +1168,6 @@ function histHtml(id, unit, name, source = "") {
     pinMarks = histVisibleSeries(view).map((s) => s.v[pi] == null ? ""
       : `<span class="vhist-mark vhist-pinned${histSourceClass(s.source)}"` +
         ` style="left:${px}%;top:${((Y(s.v[pi] / 10) / HIST_H) * 100).toFixed(2)}%"></span>`).join("");
-    // Position and SIDE are derived from the sample alone, so a pinned bubble can be placed before
-    // layout: left half opens to the right, right half opens to the left. The selected crosshair is
-    // therefore never hidden behind its own readout.
-    pinTip = `<div class="vhist-tip vhist-pinned ${tipSideClass(frac)} mono num" ` +
-      `style="--tip-p:${px}">${esc(scrubText(view, pi, false))}</div>`;
   }
   const aux = id === "dhw_tank" ? dhwAuxPhases(view) : null;
   let phaseBands = "";
@@ -1226,7 +1219,7 @@ function histHtml(id, unit, name, source = "") {
     `<div class="vhist-head"><span class="vhist-t">${esc(full ? t("hist.title") : t("hist.recorded", spanH))}</span>` +
     `<span class="vhist-range mono num">${esc(rng)}</span></div>` + legend +
     `<div class="vhist-graph">` +
-      histTipsHtml(pinTip) +
+      histTipsHtml(view, pi, pi >= 0 ? scrubFrac(pi, n) : 0) +
       `<div class="vhist-plot" data-hist="${esc(id)}"${sourceAttr} data-n="${n}" tabindex="0" role="img"` +
         ` aria-label="${esc(t(pi >= 0 ? "hist.aria_pinned" : "hist.aria", name || id, pi >= 0 ? scrubText(view, pi) : ""))}">` +
         `<svg viewBox="0 0 ${HIST_W} ${HIST_H}" preserveAspectRatio="none" aria-hidden="true">${phaseBands}${area}${line}${dots}</svg>` +
@@ -1372,7 +1365,7 @@ function env3HistHtml() {
 
   const pi = histPinIndex(ENV3_COMBINED_ID, view);
   let pinFrac = 0;
-  let pinTip = "", pinCross = "", pinMarks = "";
+  let pinCross = "", pinMarks = "";
   if (pi >= 0) {
     const forecastPin = pi >= n ? forecastScrubView(view) : null;
     const point = forecastPin?.points[pi - n];
@@ -1391,15 +1384,13 @@ function env3HistHtml() {
           return `<span class="vhist-mark vhist-pinned ${env3SeriesClass(s.source)}" ` +
             `style="left:${px}%;top:${((Y(s.v[pi] / 10) / HIST_H) * 100).toFixed(2)}%"></span>`;
         }).join("");
-    pinTip = `<div class="vhist-tip vhist-pinned ${tipSideClass(frac)} mono num" style="--tip-p:${px}">` +
-      `${env3ScrubHtml(view, pi)}</div>`;
   }
 
   return wrap(
     `<div class="vhist-head"><span class="vhist-t">${esc(full ? t("hist.title") : t("hist.recorded", spanH))}</span>` +
       `<span class="vhist-range">${esc(t("env.history_scales"))}</span></div>` + legend +
     `<div class="vhist-graph">` +
-      histTipsHtml(pinTip) +
+      histTipsHtml(view, pi, pinFrac) +
       `<div class="vhist-plot" data-hist="${ENV3_COMBINED_ID}" data-n="${n}" ` +
         `data-measured-p="${(measuredEndFrac * 100).toFixed(3)}" tabindex="0" role="img" ` +
         `aria-label="${esc(t(pi >= 0 ? "hist.aria_pinned" : "hist.aria", t("env.history_title"),
@@ -1482,7 +1473,7 @@ function scrubCount(plot) {
 
 // ── Pinning ─────────────────────────────────────────────────────────────────────────────────────
 // A tap PINS the readout so the value stays legible after the finger lifts; holding is no longer
-// required. Hover remains transient and previews below the pin without disturbing it.
+// required. Hover remains transient and paints its preview in front of the pin without changing it.
 //
 // The pin is stored as the sample's INSTANT and re-resolved on every render — the host-tested
 // history_pin_index() rule (logic/history.hpp). A pin whose instant has rolled off the back of the
@@ -1537,17 +1528,27 @@ function scrubTime(h, i) {
   return ageH < 0.05 ? t("hist.now") : t("hist.rel", histFmt1(ageH));
 }
 
-// Shared by numeric, categorical and climate charts. Normal grid rows separate the bubbles without
-// measuring them; the plot overlays their cell and keeps its fixed starting position.
-function histTipsHtml(pinTip) {
-  return `<div class="vhist-tips">${pinTip}` +
-    `<div class="vhist-tip vhist-live vhist-tip-right mono num" hidden></div></div>`;
+function histReadout(h, i) {
+  return h.id === ENV3_COMBINED_ID ? env3ScrubHtml(h, i) : esc(scrubText(h, i, false));
+}
+
+// Measure every distinct readout shape in a hidden grid cell. Tabular digits have equal widths;
+// replacing them deduplicates samples without losing a possible wrapped line or phase label.
+// The reserved row stays present, so a comparison never moves the plot or its time labels.
+function histTipsHtml(h, pi, frac) {
+  const shapes = new Set(Array.from({length:h.v.length + (forecastScrubView(h)?.points.length || 0)},
+    (_, i) => scrubText(h, i, false).replace(/\d/g, "8")));
+  return `<div class="vhist-tips"><div class="vhist-tip vhist-reserve mono num" aria-hidden="true">` +
+    [...shapes].map(text => `<span>${esc(text)}</span>`).join("") +
+    `</div><div class="vhist-tip vhist-live mono num" hidden></div>` + (pi >= 0
+      ? `<div class="vhist-tip vhist-pinned mono num" style="--tip-p:${(frac * 100).toFixed(3)}">${histReadout(h, pi)}</div>`
+      : "") + `</div>`;
 }
 
 function histTimesHtml(h, pi, frac) {
-  return `<div class="vhist-times mono num">` + (pi >= 0
-    ? `<span class="vhist-time vhist-pinned" style="--tip-p:${(frac * 100).toFixed(3)}">${esc(scrubTime(h, pi))}</span>`
-    : "") + `<span class="vhist-time vhist-live" hidden></span></div>`;
+  return (pi >= 0
+    ? `<span class="vhist-time vhist-pinned mono num" style="--tip-p:${(frac * 100).toFixed(3)}">${esc(scrubTime(h, pi))}</span>`
+    : "") + `<span class="vhist-time vhist-live mono num" hidden></span>`;
 }
 
 // Accessibility keeps time and readings together. Visible numeric bubbles omit the selected time;
@@ -1557,14 +1558,10 @@ function scrubText(h, i, includeTime = true) {
     const forecast = forecastScrubView(h);
     const point = forecast?.points[i - h.v.length];
     if (!point) return "";
-    const locale = LANG;
-    const value = (raw) => raw.toLocaleString(locale, {
-      minimumFractionDigits: 1, maximumFractionDigits: 1,
-    });
     const specs = includeTime ? WEATHER_FORECAST_SERIES
       : WEATHER_FORECAST_SERIES.filter((spec) => histVisibleSeries(h).some((s) => s.source === spec.measured));
     return (includeTime ? scrubTime(h, i) + "\n" : "") + t("hist.forecast") + specs.map((spec) =>
-      `\n${t(spec.label)}  ${value(point[spec.key])} ${spec.unit}`).join("");
+      `\n${t(spec.label)}  ${histFmt1(point[spec.key])} ${spec.unit}`).join("");
   }
   const valueText = (s) => {
     const v = s.v[i];
@@ -1586,14 +1583,8 @@ function scrubText(h, i, includeTime = true) {
          : histHeld(s, i) ? t("hist.held") : cfg?.missing ? t(cfg.missing) : t("hist.nm");
   };
   if (h.id === ENV3_COMBINED_ID) {
-    const locale = LANG;
-    const rows = (includeTime ? h.series : histVisibleSeries(h)).map((s) => {
-      const v = s.v[i];
-      const shown = v == null ? t("hist.nm")
-        : (v / 10).toLocaleString(locale, { minimumFractionDigits: 1, maximumFractionDigits: 1 }) +
-          (s.unit ? " " + s.unit : "");
-      return `${s.name}  ${shown}`;
-    });
+    const rows = (includeTime ? h.series : histVisibleSeries(h)).map((s) =>
+      `${s.name}  ${s.v[i] == null ? t("hist.nm") : valueText(s)}`);
     return (includeTime ? [scrubTime(h, i), ...rows] : rows).join("\n");
   }
   const cfg = STATE_HIST[h.id];
@@ -1683,29 +1674,19 @@ function env3ScrubHtml(h, i) {
     ).join("");
 }
 
-// Keep the selected instant visible: samples in the left half open their bubble to the right and
-// samples in the right half open it to the left. The small CSS leader bridges the deliberate gap
-// back to the crosshair. Horizontal placement never measures or changes the plot geometry.
-function tipSideClass(frac) {
-  return frac > 0.5 ? "vhist-tip-left" : "vhist-tip-right";
-}
-
-function placeScrubTip(tip, frac) {
-  const left = frac > 0.5;
-  tip.classList.toggle("vhist-tip-left", left);
-  tip.classList.toggle("vhist-tip-right", !left);
-  tip.style.setProperty("--tip-p", (frac * 100).toFixed(3));
-}
-
-function placeScrubTime(graph, h, i, frac) {
+function placeScrubReadout(graph, h, i, frac) {
+  const tip = graph.querySelector(".vhist-tip.vhist-live");
   const time = graph.querySelector(".vhist-time.vhist-live");
+  tip.innerHTML = histReadout(h, i);
   time.textContent = scrubTime(h, i);
-  time.style.setProperty("--tip-p", (frac * 100).toFixed(3));
-  time.hidden = false;
+  for (const el of [tip, time]) {
+    el.style.setProperty("--tip-p", (frac * 100).toFixed(3));
+    el.hidden = false;
+  }
 }
 
-// Paint the crosshair for sample `i` on the existing nodes. A drag never rebuilds the plot; only
-// the ENV III bubble replaces its tiny, fully escaped set of coloured line spans.
+// Paint the crosshair for sample `i` on the existing nodes. A drag never rebuilds the plot;
+// only the small escaped readout changes.
 function scrubMove(plot, i) {
   const h = historyView(plot.dataset.hist, plot.dataset.source || "");
   const n = +plot.dataset.n;
@@ -1717,7 +1698,6 @@ function scrubMove(plot, i) {
   // .vhist-live, never the bare class: a PINNED crosshair carries the same visual classes and sits
   // EARLIER in the DOM, so a bare querySelector returned the pin — the hover then wrote into it and
   // scrubEnd hid it, silently deleting the readout the user had just pinned.
-  const tip = graph.querySelector(".vhist-tip.vhist-live");
   const cross = plot.querySelector(".vhist-cross.vhist-live");
   const marks = [...plot.querySelectorAll(".vhist-mark.vhist-live")];
   const w = plot.clientWidth;
@@ -1734,11 +1714,7 @@ function scrubMove(plot, i) {
       mark.style.left = x.toFixed(1) + "px";
       mark.style.top = ((forecast.Y(spec.key, point[spec.key]) / HIST_H) * 100).toFixed(2) + "%";
     }
-    tip.hidden = false;
-    if (h.id === ENV3_COMBINED_ID) tip.innerHTML = env3ScrubHtml(h, i);
-    else tip.textContent = scrubText(h, i, false);
-    placeScrubTip(tip, frac);
-    placeScrubTime(graph, h, i, frac);
+    placeScrubReadout(graph, h, i, frac);
     return;
   }
   const measuredFrac = Number.isFinite(+plot.dataset.measuredP)
@@ -1765,13 +1741,7 @@ function scrubMove(plot, i) {
     mark.style.left = x.toFixed(1) + "px";
     mark.style.top = ((Y(v / 10) / HIST_H) * 100).toFixed(2) + "%";
   }
-  tip.hidden = false;
-  if (h.id === ENV3_COMBINED_ID) tip.innerHTML = env3ScrubHtml(h, i);
-  else tip.textContent = scrubText(h, i, false);
-  // The side changes at the midpoint, but the crosshair does not: the bubble leaves a fixed clear
-  // gap beside the chosen sample rather than hanging over the value it describes.
-  placeScrubTip(tip, frac);
-  placeScrubTime(graph, h, i, frac);
+  placeScrubReadout(graph, h, i, frac);
 }
 
 function scrubIndex(plot, clientX) {
