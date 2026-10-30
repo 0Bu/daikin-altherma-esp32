@@ -3,6 +3,8 @@
 //
 // Checks two surfaces a mechanical file-content scan never sees: the commit messages this PR/push
 // carries, and — when running under a GitHub `pull_request` event — the PR title and description.
+// The title also needs a Conventional Commits type, because it becomes the squash commit subject
+// that the public OTA changelog selects from (see checkTitleType below).
 // Firmware, test and doc DIFF content is deliberately out of scope; tools/pr_hygiene/personal_info.mjs
 // explains why a value-shaped heuristic cannot safely run over this codebase's diffs. Repository
 // documentation's own English-only coverage already lives in tools/user_docs/english_docs.mjs; this
@@ -166,6 +168,42 @@ if (base && head) {
   }
 }
 
+// The PR title becomes the squash commit subject on main, and scripts/generate-ota-changelog.py
+// lists a subject in the public OTA changelog only under one of its PUBLIC_TYPES; a title without
+// one silently turns that version's entry into the generic maintenance line. The public types are
+// read from the generator itself so the two cannot drift; maintenance work uses a type the
+// generator omits. This is a rule, not a heuristic, so no fingerprint waives it: retitle the PR.
+const CHANGELOG_GENERATOR = path.join(moduleDir, "..", "..", "scripts", "generate-ota-changelog.py");
+const MAINTENANCE_TYPES = ["build", "chore", "ci", "docs", "style", "test"];
+const CONVENTIONAL_TITLE = /^([a-z]+)(?:\([^)]*\))?!?:\s*(\S.*)$/iu;
+
+function loadPublicTypes(file) {
+  let source = "";
+  try {
+    source = fs.readFileSync(file, "utf8");
+  } catch {
+    die(2, `changelog generator is not readable: ${file}`);
+  }
+  const declaration = source.match(/^PUBLIC_TYPES\s*=\s*\{([^}]*)\}/mu);
+  const types = declaration ? [...declaration[1].matchAll(/"([a-z]+)"/gu)].map((match) => match[1]) : [];
+  if (!types.length) die(2, `no PUBLIC_TYPES set found in ${file}`);
+  return types.sort();
+}
+
+function checkTitleType(title) {
+  const match = title.trim().match(CONVENTIONAL_TITLE);
+  const type = match ? match[1].toLowerCase() : "";
+  const publicTypes = loadPublicTypes(CHANGELOG_GENERATOR);
+  if (publicTypes.includes(type) || MAINTENANCE_TYPES.includes(type)) return;
+  findings.push({
+    code: "T001",
+    subject: "PR title",
+    message: `must start with a Conventional Commits type and a description: ${publicTypes.join(", ")} ` +
+      `(listed in the public OTA changelog) or ${MAINTENANCE_TYPES.join(", ")} (not listed); retitle the PR`,
+    fingerprint: fingerprint(title.trim()),
+  });
+}
+
 let prTitleChecked = false;
 let prBodyChecked = false;
 if (eventFile && fs.existsSync(eventFile)) {
@@ -178,6 +216,7 @@ if (eventFile && fs.existsSync(eventFile)) {
   if (event && typeof event === "object" && event.pull_request && typeof event.pull_request === "object") {
     const { title, body } = event.pull_request;
     checkText("PR title", typeof title === "string" ? title : "");
+    checkTitleType(typeof title === "string" ? title : "");
     prTitleChecked = true;
     checkText("PR description", typeof body === "string" ? body : "");
     prBodyChecked = true;
@@ -204,6 +243,7 @@ if (findings.length) {
   console.error("     If this is a false positive, add its fingerprint (never the flagged text) to");
   const exceptionsDisplay = path.relative(process.cwd(), exceptionsFile);
   console.error(`     ${exceptionsDisplay.startsWith("..") ? exceptionsFile : exceptionsDisplay} with a reason.`);
+  console.error("     A T001 title finding is a rule, not a heuristic: only a new PR title clears it.");
   die(1, `${findings.length} finding(s)`);
 }
 

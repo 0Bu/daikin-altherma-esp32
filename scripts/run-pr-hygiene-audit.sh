@@ -2,7 +2,8 @@
 # Contributor-authored-text privacy and language gate: the commit range and, under a `pull_request`
 # event, the PR title/description — does either carry personal information (an email outside GitHub's
 # own noreply/example patterns, a phone number, a GPS coordinate pair, a pasted key or credential) or
-# high-confidence German prose? See tools/pr_hygiene/check_pr_hygiene.mjs and personal_info.mjs for
+# high-confidence German prose? Does the PR title start with a Conventional Commits type, which the
+# public OTA changelog selects on? See tools/pr_hygiene/check_pr_hygiene.mjs and personal_info.mjs for
 # the exact shapes and why diff content is deliberately out of scope; other non-English prose stays
 # in the required human $pr-hygiene-review.
 #
