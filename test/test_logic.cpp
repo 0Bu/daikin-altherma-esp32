@@ -15779,7 +15779,8 @@ static void test_checkup() {
     CHECK(sizeof(CheckupBucket) == 80);
     CHECK(CHECKUP_BYTES == 1920);
     CHECK(sizeof(DhwLossBucket) == 20 && DHW_LOSS_BYTES == 480);
-    // checkup.cpp's static 23-record restore scratch asserts the same figure (ARCHITECTURE.md).
+    // history_restore_checkup_flash() reads up to 23 stored records into the 4 KiB sector scratch
+    // and static_asserts that they fit (main/history.cpp).
     CHECK(sizeof(CheckupJournalRecord) == 136);
     CHECK(CHECKUP_COMPLETED_BUCKETS * sizeof(CheckupJournalRecord) == 3128);
 
@@ -21840,6 +21841,8 @@ CheckupRestoreOut checkup_restore_reference(const CheckupRestoreCase& c) {
     out.dhw  = c.dhw;
     out.ring.reset();
     out.dhw.reset();
+    out.ring.pending = c.ring.pending; // the former restore saved and put back the open hour
+    out.dhw.pending  = c.dhw.pending;
     for (int64_t b = c.earliest; b <= c.latest; b++) {
         CheckupBucket cb;
         DhwLossBucket db;
@@ -21882,28 +21885,23 @@ uint32_t checkup_restore_marker(const DhwLossBucket& b) {
     return b.observed_s | (static_cast<uint32_t>(b.windows) << 16);
 }
 
-// Same oldest-to-newest window, slot deadlines and DHW retirement; nothing left outside it.
+// The same physical layout, slot by slot, as a cleared ring refilled in order: geometry, buckets,
+// deadlines and DHW retirement. The two aggregates the report reads must agree as well.
 bool checkup_restore_same(const CheckupRestoreOut& ref, const CheckupRestoreOut& got) {
-    constexpr size_t kSlots = CHECKUP_COMPLETED_BUCKETS;
-    if (ref.ring.count != got.ring.count || ref.dhw.count != got.dhw.count ||
-        got.ring.head != got.dhw.head || ref.dhw_retired != got.dhw_retired)
+    if (ref.ring.count != got.ring.count || ref.ring.head != got.ring.head ||
+        ref.dhw.count != got.dhw.count || ref.dhw.head != got.dhw.head ||
+        ref.dhw_retired != got.dhw_retired)
         return false;
-    const size_t n = got.ring.count;
-    for (size_t i = 0; i < kSlots; i++) {
-        const size_t g = (got.ring.head + kSlots - n + i) % kSlots;
-        if (i >= n) { // outside the window: empty and without a deadline
-            if (checkup_restore_marker(got.ring.buf[g]) || checkup_restore_marker(got.dhw.buf[g]) ||
-                got.expiry[g])
-                return false;
-            continue;
-        }
-        const size_t r = (ref.ring.head + kSlots - n + i) % kSlots;
-        if (checkup_restore_marker(ref.ring.buf[r]) != checkup_restore_marker(got.ring.buf[g]) ||
-            checkup_restore_marker(ref.dhw.buf[r]) != checkup_restore_marker(got.dhw.buf[g]) ||
-            ref.expiry[r] != got.expiry[g])
+    for (size_t s = 0; s < CHECKUP_COMPLETED_BUCKETS; s++)
+        if (checkup_restore_marker(ref.ring.buf[s]) != checkup_restore_marker(got.ring.buf[s]) ||
+            checkup_restore_marker(ref.dhw.buf[s]) != checkup_restore_marker(got.dhw.buf[s]) ||
+            ref.expiry[s] != got.expiry[s])
             return false;
-    }
-    return true;
+    const CheckupWindow rw = checkup_aggregate(ref.ring), gw = checkup_aggregate(got.ring);
+    const DhwLossWindow rd = dhw_loss_aggregate(ref.dhw), gd = dhw_loss_aggregate(got.dhw);
+    return rw.covered_s == gw.covered_s && rw.starts == gw.starts &&
+           rw.space_run_s == gw.space_run_s && rd.observed_s == gd.observed_s &&
+           rd.windows == gd.windows;
 }
 
 struct CheckupRestoreRng {
@@ -21999,7 +21997,9 @@ static void test_checkup_journal_rebuild_in_place() {
 
     // Differential check against the former copy-clear-push restore over seeded random states.
     CheckupRestoreRng rng{0x9e3779b97f4a7c15ull};
-    size_t compared = 0, rotated = 0, with_live = 0, retired = 0, admitted_live = 0, mismatch = 0;
+
+    size_t compared = 0, moved = 0, production_shaped = 0, with_live = 0, retired = 0;
+    size_t admitted_live = 0, mismatch = 0;
     for (int iteration = 0; iteration < 20000; ++iteration) {
         CheckupRestoreCase c;
         c.model      = rng.chance(97) ? model : 0;
@@ -22018,12 +22018,18 @@ static void test_checkup_journal_rebuild_in_place() {
             c.dhw.buf[s].observed_s   = static_cast<uint16_t>(s + 1);
             c.dhw.buf[s].windows      = static_cast<uint8_t>(rng.below(200));
         }
-        c.ring.head = c.dhw.head = static_cast<uint8_t>(rng.below(kSlots));
+        c.ring.pending.covered_s = static_cast<uint16_t>(rng.below(3600));
+        c.dhw.pending.observed_s = static_cast<uint16_t>(rng.below(3600));
         c.ring.count = c.dhw.count = static_cast<uint8_t>(rng.below(kSlots + 1));
+        // Production shape: every ring hour completed in this boot, and a ring that is not full
+        // has its head at its count. Other shapes check the same layout from any starting point.
+        const bool production = rng.chance(50);
+        c.ring.head = c.dhw.head = static_cast<uint8_t>(
+            production && c.ring.count < kSlots ? c.ring.count : rng.below(kSlots));
         const int64_t newest_label =
             checkup_journal_bucket(c.now_unix_s) - 1 - static_cast<int64_t>(rng.below(3));
-        if (c.ring.count && rng.chance(70)) {
-            c.live.count        = 1 + rng.below(c.ring.count);
+        if (c.ring.count && (production || rng.chance(70))) {
+            c.live.count        = production ? c.ring.count : 1 + rng.below(c.ring.count);
             c.live.oldest_slot  = (c.ring.head + kSlots - c.live.count) % kSlots;
             c.live.newest_label = newest_label;
             c.live.newest_end_unix_s =
@@ -22085,14 +22091,26 @@ static void test_checkup_journal_rebuild_in_place() {
         const CheckupRestoreOut got = checkup_restore_in_place(c);
         CHECK(checkup_restore_same(ref, got));
         compared++;
+        production_shaped += production;
         with_live += c.live.count != 0;
-        rotated += c.live.count && got.ring.head != got.ring.count % kSlots;
         retired += got.dhw_retired;
+        // A selected live hour whose slot differs from its window position had to move.
+        bool any_moved = false;
+        for (size_t k = 0; k < c.live.count; k++) {
+            const int64_t label = checkup_journal_live_label(c.live, k);
+            if (label < c.earliest || label > c.latest ||
+                checkup_journal_live_index(c.live, label, c.now_unix_s, c.confirmed, c.model,
+                                           c.source, c.reset) != k)
+                continue;
+            any_moved |=
+                checkup_journal_live_slot(c.live, k) != static_cast<size_t>(label - c.earliest);
+        }
+        moved += any_moved;
     }
     CHECK(mismatch == 0 && admitted_live > 10000);
-    CHECK(compared > 10000);
+    CHECK(compared > 10000 && production_shaped > 5000);
     CHECK(with_live > 5000);
-    CHECK(rotated > 1000); // live hours kept their slots in a rotated window
+    CHECK(moved > 1000); // live hours that cannot stay where a cleared ring would put them
     CHECK(retired > 1000);
 }
 

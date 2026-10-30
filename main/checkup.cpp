@@ -967,8 +967,8 @@ CheckupFlashRestoreResult checkup_flash_restore(const CheckupFlashRecord* record
     const int64_t live_span_us =
         first_sample_us >= 0 && latest_sample_us >= first_sample_us
             ? latest_sample_us - first_sample_us : 0;
-    // In place: selected live hours keep their slots, the pending hour and lifecycle stay. A
-    // circulation reconfiguration retires only DHW evidence; dated X10A findings keep their expiry.
+    // In place, without copying the live hours; the pending hour and lifecycle stay. A circulation
+    // reconfiguration retires only DHW evidence; dated X10A findings keep their expiry.
     if (logic::checkup_journal_rebuild(P().ring, P().dhw, s_restored_expiry_us, live, records,
                                        count, earliest_bucket, latest_bucket, now_unix_s, now_us,
                                        s_source_confirmed, s_model_fp, s_source_fp,

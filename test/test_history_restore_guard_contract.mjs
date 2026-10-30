@@ -330,6 +330,9 @@ assert.match(persistRebuild, /checkup_restore_expiry_us/);
 assert.match(persistRebuild,
   /const bool keep_dhw = !dhw_reset_requested && checkup_journal_dhw_identity_matches\( ?c\.stored->payload, dhw_source_fp\);/,
   "a stored hour keeps DHW evidence only under the current circulation identity");
+assert.match(persistRebuild,
+  /std::rotate\(ring\.buf, ring\.buf \+ start, ring\.buf \+ kSlots\); std::rotate\(dhw\.buf, dhw\.buf \+ start, dhw\.buf \+ kSlots\); std::rotate\(expiry_us, expiry_us \+ start, expiry_us \+ kSlots\); ring\.count = dhw\.count = static_cast<uint8_t>\(n\); ring\.head = dhw\.head = static_cast<uint8_t>\(n % kSlots\);/,
+  "a ring that is not full keeps its oldest hour in slot 0, which both aggregates read first");
 assert.match(cFlash, /s_persist_verdict = logic::CheckupRestore::Flash;/);
 assert.doesNotMatch(cFlash, /s_persist_verdict = logic::CheckupRestore::Accept/);
 assert.match(body(checkup, "logic::CheckupReport checkup_report()"), /expire_restored_locked\(\);/);

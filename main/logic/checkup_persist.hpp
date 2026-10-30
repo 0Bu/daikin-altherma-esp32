@@ -21,6 +21,7 @@
 #include "logic/config_store.hpp"     // config_crc32_* — the firmware's ONE CRC implementation
 #include "logic/history_persist.hpp"  // history_reset_preserves_ram — ONE answer to "did DRAM survive?"
 
+#include <algorithm> // std::rotate in checkup_journal_rebuild
 #include <cstddef>
 #include <cstdint>
 
@@ -642,8 +643,9 @@ inline bool checkup_journal_restore_admits(const CheckupJournalPayload& p, int64
 }
 
 // Select exactly one admissible record for a retained slot. Current-boot evidence wins only
-// while it is itself valid; otherwise the newest valid stored duplicate wins. The caller uses
-// this same selection for provenance counting and reconstruction after capacity clipping.
+// while it is itself valid; otherwise the newest valid stored duplicate wins. The restore passes
+// no current-boot records here: checkup_journal_choose applies that precedence to the described
+// live hours, then asks this selection for the stored duplicate.
 inline const CheckupJournalRecord*
 checkup_journal_select_slot(int64_t wanted, const CheckupJournalRecord* live, size_t live_count,
                             const CheckupJournalRecord* stored, size_t stored_count,
@@ -685,11 +687,10 @@ inline constexpr int64_t checkup_restore_expiry_us(int64_t end_unix_s, int64_t n
 }
 
 // ── This boot's completed hours at restoration ───────────────────────────────────────────────────
-// A deferred restore (the wall clock arrived late) can meet hours this boot already completed.
-// They compete with stored records without being copied: they sit in the ring at consecutive
-// slots, carry consecutive latched labels, and their identity is the current one by construction.
-// Four numbers describe all of them. A copy of each cost a static 23-record scratch of internal
-// RAM that was used once per boot.
+// A restore that runs late (clock synchronization or source confirmation) can meet hours this boot
+// already completed. They compete with stored records without being copied: they sit in the ring
+// at consecutive slots, carry consecutive latched labels, and their identity is the current one by
+// construction. Four numbers describe all of them.
 struct CheckupJournalLiveSpan {
     size_t  count             = 0;         // completed hours of this boot still in the ring
     size_t  oldest_slot       = 0;         // ring slot of the oldest of them
@@ -751,12 +752,14 @@ checkup_journal_choose(int64_t wanted, const CheckupJournalLiveSpan& live,
 }
 
 // Rebuild both completed-hour rings over [earliest, latest] IN PLACE. Selected live hours already
-// hold their buckets, so the window is rotated until each keeps its slot and only the other slots
-// are written; clearing the ring first would need every live hour copied beforehand. Without a
-// selected live hour the window starts at slot 0, like a cleared ring. Every slot gets its restore
-// deadline (zero for a gap or outside the window). A window wider than the ring rebuilds nothing.
-// A circulation reconfiguration retires the DHW bucket alone; true tells the caller to restart the
-// DHW scope.
+// hold their buckets, so the window is first laid out where each of them keeps its slot and only
+// the other slots receive a stored hour or a gap; clearing the ring first would need every live
+// hour copied beforehand. Every slot gets its restore deadline (zero for a gap or outside the
+// window). The three arrays are then rotated together so the window's oldest hour sits in slot 0
+// and `head` follows its newest: the layout of a cleared ring refilled in order, which
+// checkup_aggregate and dhw_loss_aggregate assume while a ring is not full. A reversed or
+// wider-than-ring window leaves both rings empty and every deadline zero. A circulation
+// reconfiguration retires the DHW bucket alone; true tells the caller to restart the DHW scope.
 inline bool checkup_journal_rebuild(CheckupRing& ring, DhwLossRing& dhw,
                                     int64_t (&expiry_us)[CHECKUP_COMPLETED_BUCKETS],
                                     const CheckupJournalLiveSpan& live,
@@ -807,8 +810,11 @@ inline bool checkup_journal_rebuild(CheckupRing& ring, DhwLossRing& dhw,
             expiry_us[p] = 0;
         }
     }
+    std::rotate(ring.buf, ring.buf + start, ring.buf + kSlots);
+    std::rotate(dhw.buf, dhw.buf + start, dhw.buf + kSlots);
+    std::rotate(expiry_us, expiry_us + start, expiry_us + kSlots);
     ring.count = dhw.count = static_cast<uint8_t>(n);
-    ring.head = dhw.head = static_cast<uint8_t>((start + n) % kSlots);
+    ring.head = dhw.head = static_cast<uint8_t>(n % kSlots);
     return dhw_retired;
 }
 } // namespace daik::logic

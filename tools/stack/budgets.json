@@ -293,6 +293,30 @@
       "pattern": "^(?:daik::(?:\\(anonymous namespace\\)::)?checkup_report\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?14checkup_report[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
       "max_bytes": 784
     },
+    "history_flash_restore": {
+      "pattern": "^(?:daik::(?:\\(anonymous namespace\\)::)?history_service_flash_restore\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?29history_service_flash_restore[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
+      "max_bytes": 416
+    },
+    "checkup_flash_restore": {
+      "pattern": "^(?:daik::(?:\\(anonymous namespace\\)::)?checkup_flash_restore\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?21checkup_flash_restore[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
+      "max_bytes": 224
+    },
+    "checkup_journal_rebuild": {
+      "pattern": "^daik::logic::checkup_journal_rebuild\\(",
+      "max_bytes": 176
+    },
+    "checkup_journal_choose": {
+      "pattern": "^daik::logic::checkup_journal_choose\\(",
+      "max_bytes": 128
+    },
+    "checkup_journal_select": {
+      "pattern": "^daik::logic::checkup_journal_select_slot\\(",
+      "max_bytes": 64
+    },
+    "checkup_journal_admits": {
+      "pattern": "^daik::logic::checkup_journal_restore_admits\\(",
+      "max_bytes": 32
+    },
     "history_journal": {
       "pattern": "^(?:daik::(?:\\(anonymous namespace\\)::)?history_flash_service_journal\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?29history_flash_service_journal[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
       "max_bytes": 576
@@ -3977,6 +4001,43 @@
       "base_bytes": 1536,
       "max_bytes": 7168
     },
+    "poll_board_restore": {
+      "symbols": [
+        "poll_task",
+        "history_board",
+        "history_flash_restore",
+        "checkup_flash_restore",
+        "checkup_journal_rebuild",
+        "checkup_journal_choose",
+        "checkup_journal_select",
+        "checkup_journal_admits"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 7168
+    },
+    "poll_board_restore_diagnostic": {
+      "symbols": [
+        "poll_task",
+        "history_board",
+        "history_flash_restore",
+        "checkup_flash_restore",
+        "diag_log",
+        "diag_syslog",
+        "sdk_queue_send",
+        "sdk_queue_remove_event",
+        "sdk_queue_yield_required",
+        "sdk_queue_yield_other",
+        "sdk_queue_crosscore_yield",
+        "sdk_queue_crosscore_send",
+        "sdk_queue_critical",
+        "sdk_queue_compare_swap",
+        "runtime_task_entry"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 7168
+    },
     "httpd_mcp_health_number": {
       "symbols": [
         "mcp_post",
@@ -6145,7 +6206,9 @@
         "poll_board_history",
         "poll_shutdown_journal",
         "poll_shutdown_checkup",
-        "poll_board_journal"
+        "poll_board_journal",
+        "poll_board_restore",
+        "poll_board_restore_diagnostic"
       ]
     },
     "modbus": {
