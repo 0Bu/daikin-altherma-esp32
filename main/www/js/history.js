@@ -1534,7 +1534,7 @@ function histReadout(h, i) {
 
 // Measure every distinct readout shape in a hidden grid cell. Tabular digits have equal widths;
 // replacing them deduplicates samples without losing a possible wrapped line or phase label.
-// Both reserved rows stay present, so a comparison never moves the plot or its time labels.
+// The reserved row stays present, so a comparison never moves the plot or its time labels.
 function histTipsHtml(h, pi, frac) {
   const shapes = new Set(Array.from({length:h.v.length + (forecastScrubView(h)?.points.length || 0)},
     (_, i) => scrubText(h, i, false).replace(/\d/g, "8")));
@@ -1682,11 +1682,6 @@ function placeScrubReadout(graph, h, i, frac) {
   for (const el of [tip, time]) {
     el.style.setProperty("--tip-p", (frac * 100).toFixed(3));
     el.hidden = false;
-  }
-  const pin = graph.querySelector(".vhist-tip.vhist-pinned");
-  if (pin) {
-    const a = pin.getBoundingClientRect(), b = tip.getBoundingClientRect();
-    tip.classList.toggle("vhist-stacked", a.right + 8 > b.left && b.right + 8 > a.left);
   }
 }
 

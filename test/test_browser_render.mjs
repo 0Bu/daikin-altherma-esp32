@@ -1911,8 +1911,8 @@ async function assertHistoryReadouts(page, context) {
       await touch("touchStart", finger);
       await waitForTime(0.9,"start");
       assert.equal(await page.evaluate("S.scrub"),id,`${context}/${id}: touchstart owns the active scrub`);
-      const rows = new Set();
-      for (const fraction of [0.35,0.8,1,0]) {
+      const overlaps = {tip:false,time:false};
+      for (const fraction of [0.35,0.25,0.2,0.8,1,0]) {
         const destination = await point(fraction);
         const steps = Math.min(8,Math.max(3,Math.ceil(Math.abs(destination.x-finger.x)/48)));
         for (let step=1;step<=steps;step++)
@@ -1927,16 +1927,20 @@ async function assertHistoryReadouts(page, context) {
           const rect = el => {const r=el.getBoundingClientRect();return {left:r.left,right:r.right,
             top:r.top + scrollY,bottom:r.bottom + scrollY,height:r.height,width:r.width};};
           const p=rect(plot), a=rect(pin), b=rect(live), c=rect(pinTime), d=rect(liveTime), clip=rect(host);
+          const layer = el => parseInt(getComputedStyle(el).zIndex) || 0;
+          const foreground = (el,behind) => layer(el)>layer(behind) &&
+            /^rgb\\(/.test(getComputedStyle(el).backgroundColor) && getComputedStyle(el).opacity === "1";
           const view=historyView(plot.dataset.hist,plot.dataset.source || "");
           const i=scrubIndex(plot,plot.getBoundingClientRect().left + plot.clientWidth * ${fraction});
           return {visible:!live.hidden && !liveTime.hidden && a.height > 0 && b.height > 0,
-            overlap:a.right + 8 > b.left && b.right + 8 > a.left,
-            stacked:a.top >= b.bottom + 7, shared:Math.abs(a.bottom-b.bottom)<1,
-            abovePlot:a.bottom <= d.top && b.bottom <= d.top, timesStacked:d.bottom <= p.top - 4,
+            overlap:a.right > b.left && b.right > a.left, timeOverlap:c.right>d.left && d.right>c.left,
+            shared:Math.abs(a.bottom-b.bottom)<1, sameAxis:Math.abs(c.top-d.top)<1,
+            tipFront:foreground(live,pin),timeFront:foreground(liveTime,pinTime),
+            abovePlot:a.bottom <= p.top - 8 && b.bottom <= p.top - 8,
             plotTop:p.top,plotHeight:p.height,pin:pin.textContent,pinTime:pinTime.textContent,
             axisTime:liveTime.textContent,expectedTime:scrubTime(view,i),
             selectedTimeInBubble:!STATE_HIST[plot.dataset.hist] && live.textContent.includes(scrubTime(view,i)),
-            axisBelow:c.top >= p.bottom, pinTimeTop:c.top,
+            axisBelow:c.top >= p.bottom + 4 && d.top >= p.bottom + 4, pinTimeTop:c.top,
             inside:[a,b,c,d].every(r=>r.left >= clip.left - 1 && r.right <= clip.right + 1 && r.bottom <= clip.bottom + 1),
             bounds:{pin:a,live:b,pinTime:c,liveTime:d,clip},
             forecast:i >= view.v.length,
@@ -1944,14 +1948,15 @@ async function assertHistoryReadouts(page, context) {
             cross:!plot.querySelector(".vhist-cross.vhist-pinned").hidden};
         })()`);
         const label = `${context}/${id}/${fraction}`;
-        assert.equal(state.visible,true,`${label}: both selected readouts remain visible`);
-        assert.equal(state.overlap ? state.stacked : state.shared,true,
-          `${label}: the preview moves above the pin only when their horizontal boxes would overlap`);
-        rows.add(state.overlap ? "stacked" : "shared");
-        assert.equal(state.abovePlot,true,`${label}: both bubbles must remain above the time strip and curve`);
-        assert.equal(state.timesStacked,true,`${label}: the moving time belongs above the plot`);
+        assert.equal(state.visible,true,`${label}: both selected readouts remain available`);
+        assert.equal(state.shared,true,`${label}: both bubbles share one compact row`);
+        assert.equal(state.tipFront,true,`${label}: the opaque moving bubble must cover the pinned bubble`);
+        assert.equal(state.timeFront,true,`${label}: the opaque moving time must cover the pinned time`);
+        assert.equal(state.sameAxis,true,`${label}: both times share one lower axis row`);
+        overlaps.tip ||= state.overlap; overlaps.time ||= state.timeOverlap;
+        assert.equal(state.abovePlot,true,`${label}: both bubbles must remain above the curve`);
         assert.equal(state.inside,true,`${label}: neither readout nor time may be clipped: ${JSON.stringify(state.bounds)}`);
-        assert.equal(state.axisBelow,true,`${label}: the pinned time remains below the curve`);
+        assert.equal(state.axisBelow,true,`${label}: both selected times remain below the curve`);
         assert.ok(Math.abs(state.pinTimeTop-baseline.timeTop)<1,`${label}: showing or moving a preview must not move the pinned time: ${JSON.stringify({baseline,state:state.bounds})}`);
         assert.equal(state.axisTime,state.expectedTime,`${label}: the axis follows the selected sample`);
         assert.equal(state.selectedTimeInBubble,false,`${label}: measurement tooltips contain values, with time on the axis`);
@@ -1966,10 +1971,10 @@ async function assertHistoryReadouts(page, context) {
         }
         if(fraction === 0.35)
           await captureNativeEvidence(page,`${context}/${id}/comparison`,"browserHistoryFixture");
+        if(fraction === 0.2)
+          await captureNativeEvidence(page,`${context}/${id}/overlap`,"browserHistoryFixture");
       }
-      assert.ok(rows.has("stacked"),`${context}/${id}: the touch sequence must exercise a collision`);
-      if(context.startsWith("desktop/") && id === "dhw_tank")
-        assert.ok(rows.has("shared"),`${context}/${id}: separated readouts must also exercise sharing a row`);
+      assert.deepEqual(overlaps,{tip:true,time:true},`${context}/${id}: native gestures must exercise both overlapping bubbles and times`);
       await captureNativeEvidence(page,`${context}/${id}`,"browserHistoryFixture");
       await touch("touchCancel");
       assert.equal(await page.evaluate(`(() => {

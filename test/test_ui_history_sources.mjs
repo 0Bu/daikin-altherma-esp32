@@ -14,8 +14,8 @@ const mqtt = fs.readFileSync(new URL("../main/mqtt_ha.cpp", import.meta.url), "u
 assert.match(style, /\.vhist-state-graph \.vhist-tip \{[^}]*white-space:\s*pre-wrap;/,
   "state tooltips must honor deliberate breaks");
 assert.match(style,
-  /\.vhist-graph\s*\{[^}]*grid-template-rows:\s*auto 28px auto auto;/,
-  "readouts, moving time, plot and pinned time occupy separate rows");
+  /\.vhist-graph\s*\{[^}]*grid-template-rows:\s*auto 12px auto 24px;/,
+  "one readout row and one reserved time axis keep the curve stable");
 assert.match(style, /\.vhist-tip\s*\{[^}]*position:\s*relative;[^}]*z-index:\s*3;/,
   "the translucent tooltip must participate in the reserved readout layout");
 assert.doesNotMatch(style, /--vhist-tip-space/,
@@ -428,8 +428,8 @@ assert.match(h.histHtml("outdoor_air", "°C", "Außentemperatur"),
 S.histPin.delete("outdoor_air");
 
 // The LIVE half is the handler, not a stylesheet, so execute it rather than grep it: scrubMove must
-// place the bubble from the sample's position. Collision checks may choose a reserved vertical row;
-// they must never squeeze the bubble's horizontal width or change the plot's geometry.
+// place the bubble from the sample's position. Overlapping readouts use paint order rather than
+// geometry measurements, changing the bubble's width or adding another vertical row.
 {
   const styleSpy = () => {
     const props = new Map(), written = [];
@@ -462,7 +462,7 @@ S.histPin.delete("outdoor_air");
   const timeNode = node("vhist-time vhist-live");
   const crossNode = node("vhist-cross vhist-live");
   const markNode = node("vhist-mark vhist-live");     // never spread: that reads the offsetWidth spy
-  let pinned = null;
+  const pinned = { getBoundingClientRect() { throw Error("Readout overlap must not measure geometry"); } };
   markNode.dataset.source = "modbus";
   const plot = {
     clientWidth: 600, dataset: { hist: "outdoor_air", source: "modbus", n: "4" },
@@ -486,13 +486,8 @@ S.histPin.delete("outdoor_air");
   assert.equal(timeNode.style.props.get("--tip-p"), "100.000");
   h.scrubMove(plot, 0);
   assert.equal(tipNode.style.props.get("--tip-p"), "0.000");
-  pinned = { getBoundingClientRect: () => ({left:100,right:200}) };
-  for (const [left,right,stacked] of [[110,210,true],[208,308,false],[207,307,true],[-8,92,false],[-7,93,true]]) {
-    tipNode.getBoundingClientRect = () => ({left,right});
-    h.scrubMove(plot, 0);
-    assert.equal(tipNode.classList.contains("vhist-stacked"),stacked,
-      "a preview uses the upper row only when the horizontal boxes need more than the available gap");
-  }
+  assert.equal(tipNode.classList.contains("vhist-stacked"),false,
+    "moving readouts must remain in the same compact row");
 }
 
 // Smart-Grid mode is a complete categorical state timeline, not a misleading numeric 0..3 line.

@@ -320,10 +320,10 @@ Hover previews a sample; tap pins it, a second tap on the same sample/Escape cle
 to the sample instant and row, not array index or a particular chart. The two views of one row
 share the pin and freeze while either is scrubbed. Expired pins drop rather than clamp to a different
 instant. Closing the inspector preserves a pin for an open value row; collapsing the value panel
-clears it. Bubbles occupy reserved space above the plot, with one measurement per line. A preview
-shares the pinned bubble's row when they fit side by side, otherwise it moves to the row above.
-The preview time appears above the plot; the pinned time stays below it. Both time labels and the
-plot keep their positions during a comparison. Phase intervals remain in categorical readouts.
+clears it. Bubbles share one reserved row above the plot, with one measurement per line. The moving
+bubble paints over the pinned bubble with an opaque surface when they overlap. Both selected times
+share the time axis below the plot; the moving time likewise paints over the pinned time. Comparisons
+do not add height or move the plot or pinned time. Phase intervals remain in categorical readouts.
 Source legends toggle individual numeric series and retain at least one visible series. Choices
 survive polling within the page and apply to both views of the same chart.
 Pointer-loss and a watchdog always release suspended rendering.

@@ -14,8 +14,12 @@ assert.match(style,
   /\.vhist-tip\s*\{[^}]*background:\s*color-mix\(in srgb,\s*var\(--card\)\s+60%,\s*transparent\);/,
   "tooltip surfaces must be translucent without fading their text");
 assert.match(style,
-  /\.vhist-graph\s*\{[^}]*grid-template-rows:\s*auto 28px auto auto;/,
-  "readouts and moving time have separate rows above the chart");
+  /\.vhist-graph\s*\{[^}]*grid-template-rows:\s*auto 12px auto 24px;/,
+  "one readout row and a shared lower time axis keep the chart compact");
+assert.match(style, /\.vhist-tip\.vhist-live\s*\{[^}]*z-index:\s*4;[^}]*background:\s*var\(--card\);/,
+  "the moving bubble must cover the pinned bubble without ghost text");
+assert.match(style, /\.vhist-time\.vhist-live\s*\{[^}]*z-index:\s*4;[^}]*background:\s*var\(--brand-tint\);/,
+  "the moving time must cover the pinned time on the shared lower axis");
 assert.match(style, /\.vhist-tip\s*\{[^}]*position:\s*relative;[^}]*z-index:\s*3;/,
   "the readout remains in normal layout above the chart");
 assert.match(style, /\.vhist-tip\s*\{[^}]*translateX\(calc\(var\(--tip-p\) \* -1%\)\)/,

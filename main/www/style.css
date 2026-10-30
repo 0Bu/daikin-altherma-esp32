@@ -923,9 +923,7 @@ button.vhist-source:focus-visible { outline: 2px solid var(--brand); outline-off
    lanes, while a missing interval is hatched only for the source that did not measure it. Exact
    readings and phase timing remain available in the shared tooltip. A genuinely single-source
    history keeps its one source label and outline. */
-/* State readouts can stack source/state/interval/duration fields vertically. They deliberately
-   overlay the lanes like an ordinary chart tooltip; the translucent surface keeps the underlying
-   phase visible while the fixed plot position prevents the card from jumping between readouts. */
+/* State readouts retain deliberate source/state/interval rows above the categorical lanes. */
 .vhist-state-graph .vhist-tip { white-space: pre-wrap; }
 .vhist-state-plot { height: auto; display: grid; gap: 7px; padding: 4px 0; }
 .vhist-state-lane { display: grid; gap: 3px; }
@@ -984,22 +982,21 @@ button.vhist-source:focus-visible { outline: 2px solid var(--brand); outline-off
 .modal-subtitle { margin-top: 8px; padding-top: 14px; border-top: 1px solid var(--line); }
 /* The SVG stretches to the panel width; overflow stays visible so the stroke isn't clipped at the
    extremes (the geometry deliberately uses the full viewBox height — see HIST_H in app.js). */
-/* Two reserved readout rows and a separate time strip keep every bubble above the plot.
-   A preview uses the upper row only when it would overlap the pinned readout horizontally. */
+/* One readout row above the plot and one shared time row below it. The moving readout paints over
+   the pin without adding height or shifting the curve when the two overlap. */
 .vhist-graph { position: relative; display: grid;
   grid-template-columns: minmax(0, 1fr);
-  grid-template-rows: auto 28px auto auto; isolation: isolate;
+  grid-template-rows: auto 12px auto 24px; isolation: isolate;
   /* iOS must be able to start the same horizontal scrub on the bubble/graph as on the plot while a
      vertical gesture remains ordinary page scrolling. */
   touch-action: pan-y; }
 .vhist-plot { position: relative; height: 72px; grid-area: 3 / 1; align-self: start; min-width: 0; }
-.vhist-tips { grid-area: 1 / 1; align-self: start; display: grid; gap: 8px;
-  grid-template: repeat(2, 1fr) / minmax(0, 1fr);
+.vhist-tips { grid-area: 1 / 1; align-self: start; display: grid;
+  grid-template-columns: minmax(0, 1fr);
   min-width: 0; width: 100%; pointer-events: none; z-index: 3; }
 .vhist-tip.vhist-reserve { grid-area: 1 / 1; display: grid; visibility: hidden; font-weight: 600; }
 .vhist-reserve > span { grid-area: 1 / 1; }
-.vhist-tip.vhist-live, .vhist-tip.vhist-pinned { grid-area: 2 / 1; }
-.vhist-tip.vhist-stacked { grid-area: 1 / 1; }
+.vhist-tip.vhist-live { z-index: 4; background: var(--card); }
 /* pan-y hands VERTICAL gestures back to the page (the user must still be able to scroll past the
    chart) while horizontal movement becomes a scrub. Claiming both axes would trap page scrolling
    inside a 72 px box. */
@@ -1022,7 +1019,7 @@ button.vhist-source:focus-visible { outline: 2px solid var(--brand); outline-off
 .vhist-mark.vhist-pinned { background: var(--brand-strong); }
 .vhist-tip.vhist-pinned { border-color: var(--brand); color: var(--fg); font-weight: 600; }
 /* Proportional anchoring keeps the full bubble inside the card even at either endpoint. */
-.vhist-tip { --tip-p: 0; position: relative; z-index: 3; align-self: end;
+.vhist-tip { --tip-p: 0; grid-area: 1 / 1; position: relative; z-index: 3; align-self: end;
   left: calc(var(--tip-p) * 1%); transform: translateX(calc(var(--tip-p) * -1%));
   max-width: 100%; white-space: pre-wrap;
   pointer-events: none; font-size: 12px; color: var(--fg);
@@ -1118,12 +1115,13 @@ button.vhist-source:focus-visible { outline: 2px solid var(--brand); outline-off
   font-size: 11.5px; color: var(--muted); }
 /* A label's anchor moves from its left to its right edge across the domain, keeping localized
    times inside the card even at the first and last sample. */
-.vhist-time { position: relative; justify-self: start; width: max-content; max-width: 100%;
+.vhist-time { grid-area: 4 / 1; position: relative; justify-self: start; align-self: start;
+  width: max-content; max-width: 100%;
   font-size: 11.5px; color: var(--fg); pointer-events: none;
   margin-top: 6px; left: calc(var(--tip-p) * 1%);
   transform: translateX(calc(var(--tip-p) * -1%)); }
-.vhist-time.vhist-pinned { grid-area: 4 / 1; color: var(--brand-strong); font-weight: 600; }
-.vhist-time.vhist-live { grid-area: 2 / 1; align-self: start; margin-top: 4px; }
+.vhist-time.vhist-pinned { color: var(--brand-strong); font-weight: 600; }
+.vhist-time.vhist-live { z-index: 4; background: var(--brand-tint); }
 .vhist-axis.vhist-axis-future { position: relative; min-height: 18px; }
 .vhist-axis-future .vhist-axis-now { position: absolute; left: calc(var(--now-p) * 1%);
   transform: translateX(-50%); color: var(--muted); font-weight: 700; }

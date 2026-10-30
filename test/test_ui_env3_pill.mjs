@@ -186,8 +186,8 @@ assert.match(style, /\.vhist-line\.env-forecast-temperature\s*\{[^}]*opacity:\s*
 assert.match(style, /\.vhist-env3 \.vhist-tip-line\.env-temperature\s*\{[^}]*color:\s*var\(--flow-hot\)/);
 assert.match(style, /\.vhist-env3 \.vhist-tip-line\.env-humidity\s*\{[^}]*color:\s*var\(--flow-cold\)/);
 assert.match(style, /\.vhist-env3 \.vhist-tip-line\.env-pressure\s*\{[^}]*color:\s*var\(--env-pressure\)/);
-assert.match(style, /\.vhist-graph\s*\{[^}]*grid-template-rows:\s*auto 28px auto auto;/,
-  "climate readouts and time must have reserved rows above the plot");
+assert.match(style, /\.vhist-graph\s*\{[^}]*grid-template-rows:\s*auto 12px auto 24px;/,
+  "climate readouts share the compact row above the curve and times share the lower axis");
 assert.doesNotMatch(style, /\.vhist-env3 \.vhist-graph\s*\{/,
   "climate tooltip height must not alter graph layout");
 assert.match(style,
