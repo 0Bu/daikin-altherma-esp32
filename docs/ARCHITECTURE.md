@@ -226,6 +226,12 @@ A narrowly scoped one-shot DHW handoff may preserve an unfinished candidate; it 
 to completed checks. Disabling diagnostics clears runtime evidence; re-enabling starts a new
 generation. Same-boot journal creation is not proof of reboot restoration. `DIAGNOSTICS.md` explains
 results; `PLANT.md` owns lifecycle.
+
+On a planned restart, the checkup shutdown handler dates the open hour by its newest sample and
+freezes it. ESP-IDF calls shutdown handlers in reverse registration order, so this handler runs
+before the history drain. The drain appends the open hour after every live hour, as a short record
+labelled with that wall-clock hour (`checkup_seal_*`, `checkup_persist.hpp`). The record is skipped
+when that label equals the newest completed hour's label or is not ahead of the journal cursor.
 A run is booked into the hour in which it started, but only when it stops. When that hour was
 already journaled, it and every later live hour are appended again; the boot index keeps each
 hour's newest copy, including the older-sequence tail of a replay cut by a restart

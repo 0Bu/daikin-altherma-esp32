@@ -142,6 +142,10 @@ int64_t s_journal_label_offset = INT64_MIN;
 // the reset, so an append made after it carries no DHW identity for them.
 bool     s_dhw_restart_armed  = false;
 uint32_t s_dhw_restart_bucket = 0;
+// The open hour a planned restart dated for the shutdown drain (logic::checkup_seal_bucket) and its
+// end, INT64_MIN otherwise. Once sealed, the record path stops folding into it.
+int64_t s_seal_bucket     = INT64_MIN;
+int64_t s_seal_end_unix_s = INT64_MIN;
 
 // One-shot journal-reconstruction scratch. Static for the poll task's measured 8 KiB stack: 23
 // diagnostic records occupy 3,128 bytes and must never become an automatic array on that task.
@@ -290,6 +294,7 @@ void persist_wipe(bool keep_handoff = false) {
     s_pressure_now         = -1;
     s_revision             = {};    // the withdrawn hours have nothing left to re-append
     s_dhw_restart_armed    = false; // no hour older than the wipe remains to be appended
+    s_seal_bucket = s_seal_end_unix_s = INT64_MIN; // a wiped open hour has nothing to journal
     // Retain s_model_fp for the next record; detection confirms it before consuming a reset.
     checkup_persist_seal();
 }
@@ -344,6 +349,52 @@ void fold_checkup_locked(const logic::CheckupSample& s, int64_t now) {
     checkup_persist_seal();
 }
 
+// Planned restart: date the open hour so history_flash_save() can journal it. esp_restart runs
+// shutdown handlers in reverse registration order, and checkup_start() registers after
+// history_start(), so this runs before that drain. The seal needs the identity a journal append
+// needs.
+void seal_open_hour_locked() {
+    if (s_seal_bucket != INT64_MIN || !s_state.have_bucket || !s_model_fp || !s_source_confirmed ||
+        !s_source_fp || P().ring.count != P().dhw.count)
+        return;
+    int64_t unix_s = -1;
+    int32_t ms     = 0;
+    time_now(unix_s, ms);
+    const int64_t now_us = esp_timer_get_time();
+    const int64_t end =
+        logic::checkup_seal_end_unix_s(unix_s, now_us, P().ring.latest_sample_us, s_state.bucket);
+    int64_t newest = INT64_MIN;
+    if (end != INT64_MIN && s_last_commit_us != kNoCommitUs && s_live_commit_count &&
+        now_us >= s_last_commit_us)
+        newest = latched_newest_locked(unix_s - (now_us - s_last_commit_us) / 1000000);
+    const auto    covered = static_cast<unsigned>(P().ring.pending.covered_s);
+    const int64_t bucket  = logic::checkup_seal_bucket(end, newest, covered);
+    if (bucket == INT64_MIN) {
+        diag_printf("checkup: open hour not journaled before reboot (%u s covered)\n", covered);
+        return;
+    }
+    s_seal_bucket     = bucket;
+    s_seal_end_unix_s = end;
+    diag_printf("checkup: open hour sealed for the journal (%u s covered)\n", covered);
+}
+
+// The open hour a planned restart sealed, offered once every live hour is appended.
+bool sealed_flash_next_locked(int64_t after_bucket, int64_t& bucket,
+                              logic::CheckupJournalPayload& payload) {
+    if (!logic::checkup_seal_emits(s_seal_bucket, after_bucket) || !P().ring.pending.covered_s)
+        return false;
+    payload                        = logic::CheckupJournalPayload{};
+    payload.model_fp               = s_model_fp;
+    payload.source_fp              = s_source_fp;
+    payload.dhw_source_fp          = s_dhw_source_fp;
+    payload.diagnostics_generation = s_diagnostics_generation;
+    payload.end_unix_s             = s_seal_end_unix_s;
+    payload.checkup                = P().ring.pending;
+    payload.dhw                    = P().dhw.pending;
+    bucket                         = s_seal_bucket;
+    return logic::checkup_journal_bucket(payload.end_unix_s) == bucket;
+}
+
 // Best-effort intentional-reboot handoff, attempted once after OTA installation or during
 // shutdown. Further shutdown work can follow. Bounded-lock failure may lose one candidate;
 // waiting forever could strand a device that already switched its boot partition.
@@ -363,6 +414,7 @@ void checkup_reboot_save() {
     // here rather than handing the old source's candidate to the next boot.
     apply_reset_locked();
     apply_dhw_reset_locked();
+    seal_open_hour_locked();
 
     PersistedDhwHandoff& h = P().dhw_handoff;
     h.magic     = logic::CHECKUP_DHW_HANDOFF_MAGIC;
@@ -616,6 +668,8 @@ void checkup_record(const CachedValue* v, size_t n, bool rps_known, bool rps_run
     if (!lk.acquired()) return;
     if (!s_diagnostics_enabled.load(std::memory_order_acquire)) return;
     if (!hp_poll_generation_matches(source_generation)) return;
+    // A planned restart sealed the open hour for the shutdown drain: keep it as it was dated.
+    if (s_seal_bucket != INT64_MIN) return;
 
     // A request can arrive while an old-link sweep is in flight. If this cycle consumes it, discard
     // the whole sample after clearing state; otherwise the tail of old poll A would seed the window
@@ -773,9 +827,10 @@ bool checkup_flash_next(int64_t now_unix_s, int64_t after_bucket,
     if (!s_mtx || now_unix_s < 0) return false;
     Lock lk(s_mtx, 0);
     if (!lk.acquired() || s_reset_requested.load() || !s_model_fp || !s_source_confirmed ||
-        !s_source_fp || s_last_commit_us == kNoCommitUs || !s_live_commit_count ||
-        !P().ring.count || P().ring.count != P().dhw.count)
+        !s_source_fp || P().ring.count != P().dhw.count)
         return false;
+    if (s_last_commit_us == kNoCommitUs || !s_live_commit_count || !P().ring.count)
+        return sealed_flash_next_locked(after_bucket, bucket, payload);
 
     const int64_t now_us = esp_timer_get_time();
     if (now_us < s_last_commit_us) return false;
@@ -791,7 +846,7 @@ bool checkup_flash_next(int64_t now_unix_s, int64_t after_bucket,
         s_revision, s_revision_acked.load(), newest, current, live_count, after_bucket);
     const int64_t target =
         logic::checkup_journal_next_target(after_bucket, newest, live_count, revision);
-    if (target == INT64_MIN) return false;
+    if (target == INT64_MIN) return sealed_flash_next_locked(after_bucket, bucket, payload);
     if (logic::checkup_journal_revision_emit(s_revision, target, revision))
         s_revision_acked.store(INT64_MIN);
 

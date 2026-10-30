@@ -35,7 +35,9 @@ current all-clear; retained observations can still explain an earlier finding. F
 timeouts reduce evidence without pretending that the profile no longer has the sensor.
 
 Completed hours can return after a restart only from compatible dated flash records and current
-source confirmation. Open and unsaved hours may be lost. Whole hourly records expire when their
+source confirmation. A planned restart, such as an update or a reboot request, also saves the open
+hour, unless it falls in the same clock hour as the previous saved hour. Other open and unsaved hours
+may be lost. Whole hourly records expire when their
 beginning leaves the rolling day, even if polling stops. Changed X10A identity or incompatible
 diagnosis format starts fresh collection; changing the independent circulation witness clears only
 tank-cooling evidence.

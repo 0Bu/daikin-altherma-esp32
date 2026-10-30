@@ -1591,7 +1591,7 @@
     },
     "checkup_shutdown": {
       "pattern": "^daik::.*checkup_reboot_save\\(",
-      "max_bytes": 80
+      "max_bytes": 96
     },
     "config_wifi": {
       "pattern": "^daik::set_wifi\\(",

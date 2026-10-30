@@ -72,8 +72,22 @@ can restore only from compatible, dated history-journal records after clock sync
 **current-boot confirmation of the full X10A source**. Records bind endpoint, full profile/link scope,
 diagnostics-consent generation, layout/threshold fingerprint and CRC. DHW additionally binds the
 circulation configuration; a mismatch empties only its bucket, preserving independent X10A evidence.
-Old unscoped formats are rejected; a cached model guess cannot admit records. The open hour and
-completed hours not yet saved are missing.
+Old unscoped formats are rejected; a cached model guess cannot admit records.
+
+**A planned restart saves the open hour** in the following cases:
+- an OTA installation or a reboot request;
+- a synchronized clock;
+- a confirmed source.
+
+It is saved as a dated short record, labelled with the wall-clock hour of its newest sample. When
+that is still the newest completed hour's label, the open hour is not saved, because a second record
+could only replace that hour.
+
+A run still open at the restart keeps its witnessed start. Its completion is never invented, and
+the next boot reports any remainder as a start it did not witness.
+
+The open hour is missing after a power loss, crash or watchdog reset. Completed hours not yet saved
+are missing too.
 
 Current observations take precedence. A whole completed or open hour expires when its beginning
 leaves the rolling day, even if polling stops. A completed record therefore lasts at most 23 hours
