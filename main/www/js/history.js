@@ -1528,15 +1528,20 @@ function scrubTime(h, i) {
   return ageH < 0.05 ? t("hist.now") : t("hist.rel", histFmt1(ageH));
 }
 
-// Reserve the moving row, including forecast provenance, while hidden so a comparison cannot push
-// the pinned time down. The reserve uses the narrowest bubble width; the moving row comes first.
+function histReadout(h, i) {
+  return h.id === ENV3_COMBINED_ID ? env3ScrubHtml(h, i) : esc(scrubText(h, i, false));
+}
+
+// Measure every distinct readout shape in a hidden grid cell. Tabular digits have equal widths;
+// replacing them deduplicates samples without losing a possible wrapped line or phase label.
+// Both reserved rows stay present, so a comparison never moves the plot or its time labels.
 function histTipsHtml(h, pi, frac) {
-  const reading = (i) => h.id === ENV3_COMBINED_ID ? env3ScrubHtml(h, i) : esc(scrubText(h, i, false));
-  const pin = pi >= 0 ? reading(pi) : "";
-  const reserve = pi >= 0 && forecastScrubView(h) ? reading(h.v.length) : pin;
-  return `<div class="vhist-tips"><div class="vhist-tip vhist-reserve vhist-tip-right mono num" aria-hidden="true">` +
-    reserve + `</div><div class="vhist-tip vhist-live vhist-tip-right mono num" hidden></div>` + (pi >= 0
-      ? `<div class="vhist-tip vhist-pinned ${tipSideClass(frac)} mono num" style="--tip-p:${(frac * 100).toFixed(3)}">${pin}</div>`
+  const shapes = new Set(Array.from({length:h.v.length + (forecastScrubView(h)?.points.length || 0)},
+    (_, i) => scrubText(h, i, false).replace(/\d/g, "8")));
+  return `<div class="vhist-tips"><div class="vhist-tip vhist-reserve mono num" aria-hidden="true">` +
+    [...shapes].map(text => `<span>${esc(text)}</span>`).join("") +
+    `</div><div class="vhist-tip vhist-live mono num" hidden></div>` + (pi >= 0
+      ? `<div class="vhist-tip vhist-pinned mono num" style="--tip-p:${(frac * 100).toFixed(3)}">${histReadout(h, pi)}</div>`
       : "") + `</div>`;
 }
 
@@ -1669,22 +1674,19 @@ function env3ScrubHtml(h, i) {
     ).join("");
 }
 
-// Keep the selected instant visible: samples in the left half open their bubble to the right and
-// samples in the right half open it to the left. The small CSS leader bridges the deliberate gap
-// back to the crosshair. Horizontal placement never measures or changes the plot geometry.
-function tipSideClass(frac) {
-  return frac > 0.5 ? "vhist-tip-left" : "vhist-tip-right";
-}
-
 function placeScrubReadout(graph, h, i, frac) {
   const tip = graph.querySelector(".vhist-tip.vhist-live");
   const time = graph.querySelector(".vhist-time.vhist-live");
-  tip.className = `vhist-tip vhist-live ${tipSideClass(frac)} mono num`;
-  tip.innerHTML = h.id === ENV3_COMBINED_ID ? env3ScrubHtml(h, i) : esc(scrubText(h, i, false));
+  tip.innerHTML = histReadout(h, i);
   time.textContent = scrubTime(h, i);
   for (const el of [tip, time]) {
     el.style.setProperty("--tip-p", (frac * 100).toFixed(3));
     el.hidden = false;
+  }
+  const pin = graph.querySelector(".vhist-tip.vhist-pinned");
+  if (pin) {
+    const a = pin.getBoundingClientRect(), b = tip.getBoundingClientRect();
+    tip.classList.toggle("vhist-stacked", a.right + 8 > b.left && b.right + 8 > a.left);
   }
 }
 
@@ -1744,8 +1746,6 @@ function scrubMove(plot, i) {
     mark.style.left = x.toFixed(1) + "px";
     mark.style.top = ((Y(v / 10) / HIST_H) * 100).toFixed(2) + "%";
   }
-  // The side changes at the midpoint, but the crosshair does not: the bubble leaves a fixed clear
-  // gap beside the chosen sample rather than hanging over the value it describes.
   placeScrubReadout(graph, h, i, frac);
 }
 

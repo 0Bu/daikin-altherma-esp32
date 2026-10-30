@@ -1823,7 +1823,7 @@ async function assertHistoryReadouts(page, context) {
   await page.send("Page.bringToFront");
   await page.send("Emulation.setTouchEmulationEnabled", { enabled:true });
   try {
-    for (const id of ["dhw_tank", "valve_dhw", "env3_combined"]) {
+    for (const id of ["dhw_tank", "valve_dhw", "smart_grid_mode", "env3_combined"]) {
       await page.evaluate(`(() => {
         const id = ${JSON.stringify(id)}, end = Date.parse("2026-08-12T10:00:00Z") / 1000;
         const ring = (v, unit = "°C") => ({at:Date.now(),gen:1,dt:300,b0:100,
@@ -1841,10 +1841,11 @@ async function assertHistoryReadouts(page, context) {
             pressure_hpa:1007 + hour}))};
           for (const [index,s] of ENV3_COMBINED_SERIES.entries())
             S.hist.set(histCacheKey(s.id,"env3"),ring(Array.from({length:20},(_,i) =>
-              [205 + i,500 - i,10050 + i][index]),["°C","%","hPa"][index]));
+              i === 7 && index === 1 ? null : [205 + i,500 - i,10050 + i][index]),["°C","%","hPa"][index]));
         } else {
-          const values = Array.from({length:20},(_,i) => id === "dhw_tank" ? 480 - i : i < 10 ? 0 : 10);
-          S.hist.set(id,ring(values,id === "dhw_tank" ? "°C" : ""));
+          const values = Array.from({length:20},(_,i) => id === "dhw_tank" ? 480 - i
+            : id === "smart_grid_mode" ? (i % 4) * 10 : i < 10 ? 0 : 10);
+          S.hist.set(id,ring(values.map((v,i) => id === "dhw_tank" && i === 7 ? null : v),id === "dhw_tank" ? "°C" : ""));
           S.hist.set(histCacheKey(id,"modbus"),ring(values.map(v => id === "dhw_tank" ? v + 2 : v),
             id === "dhw_tank" ? "°C" : ""));
         }
@@ -1901,7 +1902,7 @@ async function assertHistoryReadouts(page, context) {
           time:host.querySelector(".vhist-time.vhist-pinned").textContent,
           timeTop:host.querySelector(".vhist-time.vhist-pinned").getBoundingClientRect().top + scrollY};
       })()`);
-      if(id !== "valve_dhw")
+      if(["dhw_tank","env3_combined"].includes(id))
         assert.equal(baseline.tip.includes(baseline.time),false,
           `${context}/${id}: pinned measurement time belongs on the axis rather than in the bubble`);
       // Start far from the preceding tap so this is unambiguously a new drag rather than a second
@@ -1910,6 +1911,7 @@ async function assertHistoryReadouts(page, context) {
       await touch("touchStart", finger);
       await waitForTime(0.9,"start");
       assert.equal(await page.evaluate("S.scrub"),id,`${context}/${id}: touchstart owns the active scrub`);
+      const rows = new Set();
       for (const fraction of [0.35,0.8,1,0]) {
         const destination = await point(fraction);
         const steps = Math.min(8,Math.max(3,Math.ceil(Math.abs(destination.x-finger.x)/48)));
@@ -1928,7 +1930,9 @@ async function assertHistoryReadouts(page, context) {
           const view=historyView(plot.dataset.hist,plot.dataset.source || "");
           const i=scrubIndex(plot,plot.getBoundingClientRect().left + plot.clientWidth * ${fraction});
           return {visible:!live.hidden && !liveTime.hidden && a.height > 0 && b.height > 0,
-            stacked:a.top >= b.bottom + 7, timesStacked:d.bottom <= p.top,
+            overlap:a.right + 8 > b.left && b.right + 8 > a.left,
+            stacked:a.top >= b.bottom + 7, shared:Math.abs(a.bottom-b.bottom)<1,
+            abovePlot:a.bottom <= d.top && b.bottom <= d.top, timesStacked:d.bottom <= p.top - 4,
             plotTop:p.top,plotHeight:p.height,pin:pin.textContent,pinTime:pinTime.textContent,
             axisTime:liveTime.textContent,expectedTime:scrubTime(view,i),
             selectedTimeInBubble:!STATE_HIST[plot.dataset.hist] && live.textContent.includes(scrubTime(view,i)),
@@ -1941,7 +1945,10 @@ async function assertHistoryReadouts(page, context) {
         })()`);
         const label = `${context}/${id}/${fraction}`;
         assert.equal(state.visible,true,`${label}: both selected readouts remain visible`);
-        assert.equal(state.stacked,true,`${label}: the live bubble must be above the pinned bubble`);
+        assert.equal(state.overlap ? state.stacked : state.shared,true,
+          `${label}: the preview moves above the pin only when their horizontal boxes would overlap`);
+        rows.add(state.overlap ? "stacked" : "shared");
+        assert.equal(state.abovePlot,true,`${label}: both bubbles must remain above the time strip and curve`);
         assert.equal(state.timesStacked,true,`${label}: the moving time belongs above the plot`);
         assert.equal(state.inside,true,`${label}: neither readout nor time may be clipped: ${JSON.stringify(state.bounds)}`);
         assert.equal(state.axisBelow,true,`${label}: the pinned time remains below the curve`);
@@ -1960,6 +1967,9 @@ async function assertHistoryReadouts(page, context) {
         if(fraction === 0.35)
           await captureNativeEvidence(page,`${context}/${id}/comparison`,"browserHistoryFixture");
       }
+      assert.ok(rows.has("stacked"),`${context}/${id}: the touch sequence must exercise a collision`);
+      if(context.startsWith("desktop/") && id === "dhw_tank")
+        assert.ok(rows.has("shared"),`${context}/${id}: separated readouts must also exercise sharing a row`);
       await captureNativeEvidence(page,`${context}/${id}`,"browserHistoryFixture");
       await touch("touchCancel");
       assert.equal(await page.evaluate(`(() => {
@@ -1977,7 +1987,7 @@ async function assertHistoryReadouts(page, context) {
           host.querySelector(".vhist-time.vhist-live").textContent === scrubTime(historyView(plot.dataset.hist),scrubCount(plot)-1);
       })()`),true,`${context}/${id}: keyboard selection updates the same axis time`);
       await page.evaluate('document.querySelector("#browserHistoryFixture [data-hist]").blur(); true');
-      if (id !== "valve_dhw") {
+      if (["dhw_tank","env3_combined"].includes(id)) {
         const legend = await page.evaluate(`(() => {
           const host=document.getElementById("browserHistoryFixture"),id=host.dataset.hist;
           const sources=id === "dhw_tank" ? ["x10a","modbus"]

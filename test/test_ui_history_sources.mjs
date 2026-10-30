@@ -12,12 +12,12 @@ const appState = fs.readFileSync(new URL("../main/www/js/app_state.js", import.m
 const firmwareHistory = fs.readFileSync(new URL("../main/history.cpp", import.meta.url), "utf8");
 const mqtt = fs.readFileSync(new URL("../main/mqtt_ha.cpp", import.meta.url), "utf8");
 assert.match(style, /\.vhist-state-graph \.vhist-tip \{[^}]*white-space:\s*pre-wrap;/,
-  "state tooltips must honor deliberate breaks but remain confined to their side of the crosshair");
+  "state tooltips must honor deliberate breaks");
 assert.match(style,
-  /\.vhist-graph\s*\{[^}]*padding-top:\s*20px;/,
-  "every plot must keep one fixed compact distance below its legend");
+  /\.vhist-graph\s*\{[^}]*grid-template-rows:\s*auto 28px auto auto;/,
+  "readouts, moving time, plot and pinned time occupy separate rows");
 assert.match(style, /\.vhist-tip\s*\{[^}]*position:\s*relative;[^}]*z-index:\s*3;/,
-  "the translucent tooltip must start at and paint over the plot instead of moving it");
+  "the translucent tooltip must participate in the reserved readout layout");
 assert.doesNotMatch(style, /--vhist-tip-space/,
   "tooltip height must never feed back into graph layout");
 assert.doesNotMatch(style, /\.vhist-state-graph\s*\{[^}]*padding-top:/,
@@ -410,36 +410,26 @@ S.hist.set("modbus:outdoor_air", { at: 1, gen: 1, dt: 300, unit: "°C", t0: 1768
   held: [], v: [205, 205, 205, 295] });
 const outdoorView = h.historyView("outdoor_air");
 const outdoorHtml = h.histHtml("outdoor_air", "°C", "Außentemperatur");
-assert.doesNotMatch(outdoorHtml, /Messalter unbekannt/,
+assert.doesNotMatch(outdoorHtml.slice(outdoorHtml.indexOf('<div class="vhist-axis">')), /Messalter unbekannt/,
   "the freshness qualification must not become another static line below the chart");
 assert.match(h.scrubText(outdoorView, 1),
   /Modbus 20,5 °C · Register unverändert .* ca\. 15 min · Messalter unbekannt/,
   "the popup distinguishes a repeated register value from a proven fresh measurement");
 
-// THE READOUT BESIDE THE SELECTED INSTANT. The bubble must never cover its own crosshair: a sample
-// in the left half opens right and one in the right half opens left, with the deliberate gap bridged
-// by a leader. Side-specific max widths keep the selected line clear even on narrow screens.
+// Readouts belong above the selected instant, with position-independent widths at both edges.
 assert.match(style, /\.vhist-tip \{[^}]*width:\s*max-content;/,
   "the readout's width must not depend on its position, or the last sample wraps it to one word per line");
-assert.match(style,
-  /\.vhist-tip-right \{[^}]*transform:\s*translateX\(var\(--vhist-tip-gap\)\);[^}]*max-width:/,
-  "a left-half sample must render the readout after, not on top of, its crosshair");
-assert.match(style,
-  /\.vhist-tip-left \{[^}]*transform:\s*translateX\(calc\(-100% - var\(--vhist-tip-gap\)\)\);[^}]*max-width:/,
-  "a right-half sample must render the readout before, not on top of, its crosshair");
-assert.match(style, /\.vhist-tip::before \{[^}]*width:\s*var\(--vhist-tip-gap\);/,
-  "a short leader must preserve the visual association between the displaced bubble and crosshair");
+assert.match(style, /\.vhist-tip \{[^}]*translateX\(calc\(var\(--tip-p\) \* -1%\)\)/,
+  "the anchor must keep the readout inside the card at either end of the time axis");
 S.histPin.set("outdoor_air", { t: 1768720000 + 3 * 300 });        // the newest sample: p = 100
 assert.match(h.histHtml("outdoor_air", "°C", "Außentemperatur"),
-  /<div class="vhist-tip vhist-pinned vhist-tip-left mono num" style="--tip-p:100\.000">/,
-  "a pinned readout at the right edge is emitted on the left before layout too");
+  /<div class="vhist-tip vhist-pinned mono num" style="--tip-p:100\.000">/,
+  "the pinned readout uses the same anchor as the selected instant");
 S.histPin.delete("outdoor_air");
 
 // The LIVE half is the handler, not a stylesheet, so execute it rather than grep it: scrubMove must
-// place the bubble from the sample's position and must not MEASURE ITS WIDTH. That measurement made
-// the old defect self-reinforcing — offsetWidth was read while the squeezed `left` was still applied.
-// Height is deliberately irrelevant to layout. `left` is likewise never written on the tip; the
-// cross and marker keep their own px placement inside the plot.
+// place the bubble from the sample's position. Collision checks may choose a reserved vertical row;
+// they must never squeeze the bubble's horizontal width or change the plot's geometry.
 {
   const styleSpy = () => {
     const props = new Map(), written = [];
@@ -472,19 +462,18 @@ S.histPin.delete("outdoor_air");
   const timeNode = node("vhist-time vhist-live");
   const crossNode = node("vhist-cross vhist-live");
   const markNode = node("vhist-mark vhist-live");     // never spread: that reads the offsetWidth spy
+  let pinned = null;
   markNode.dataset.source = "modbus";
   const plot = {
     clientWidth: 600, dataset: { hist: "outdoor_air", source: "modbus", n: "4" },
     querySelector: () => crossNode,
     querySelectorAll: () => [markNode],
-    parentElement: { querySelector: (selector) => selector === ".vhist-time.vhist-live" ? timeNode : tipNode },
+    parentElement: { querySelector: (selector) => selector === ".vhist-time.vhist-live" ? timeNode
+      : selector === ".vhist-tip.vhist-pinned" ? pinned : tipNode },
   };
   h.scrubMove(plot, 3);                                    // the newest sample of the 4-sample ring
   assert.equal(tipNode.style.props.get("--tip-p"), "100.000",
     "the live readout is placed from the sample's position, like the pinned one");
-  assert.equal(tipNode.classList.contains("vhist-tip-left"), true,
-    "a sample in the right half must move its bubble to the left of the crosshair");
-  assert.equal(tipNode.classList.contains("vhist-tip-right"), false);
   assert.deepEqual(tipNode.style.written, ["--tip-p"],
     "scrubMove must write only --tip-p on the bubble — a px `left` reintroduces the edge squeeze");
   assert.equal(offsetWidthReads, 0,
@@ -496,9 +485,14 @@ S.histPin.delete("outdoor_air");
     "the selected time belongs on the axis rather than in the measurement bubble");
   assert.equal(timeNode.style.props.get("--tip-p"), "100.000");
   h.scrubMove(plot, 0);
-  assert.equal(tipNode.classList.contains("vhist-tip-right"), true,
-    "a sample in the left half must move its bubble to the right of the crosshair");
-  assert.equal(tipNode.classList.contains("vhist-tip-left"), false);
+  assert.equal(tipNode.style.props.get("--tip-p"), "0.000");
+  pinned = { getBoundingClientRect: () => ({left:100,right:200}) };
+  for (const [left,right,stacked] of [[110,210,true],[208,308,false],[207,307,true],[-8,92,false],[-7,93,true]]) {
+    tipNode.getBoundingClientRect = () => ({left,right});
+    h.scrubMove(plot, 0);
+    assert.equal(tipNode.classList.contains("vhist-stacked"),stacked,
+      "a preview uses the upper row only when the horizontal boxes need more than the available gap");
+  }
 }
 
 // Smart-Grid mode is a complete categorical state timeline, not a misleading numeric 0..3 line.
