@@ -1473,7 +1473,7 @@ function scrubCount(plot) {
 
 // ── Pinning ─────────────────────────────────────────────────────────────────────────────────────
 // A tap PINS the readout so the value stays legible after the finger lifts; holding is no longer
-// required. Hover remains transient and previews below the pin without disturbing it.
+// required. Hover remains transient and paints its preview in front of the pin without changing it.
 //
 // The pin is stored as the sample's INSTANT and re-resolved on every render — the host-tested
 // history_pin_index() rule (logic/history.hpp). A pin whose instant has rolled off the back of the
