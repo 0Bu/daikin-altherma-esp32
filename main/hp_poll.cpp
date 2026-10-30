@@ -293,7 +293,7 @@ static void poll_once() {
         }
         logic::checkup_cover_row(checkup_coverage, row.reg, row.offset, row.conv, row.label);
         logic::refrigerant_service_cover_row(service_coverage, row.reg, row.offset, row.conv,
-                                              logic::fg_is_refrigerant_pressure(view, i));
+                                             row.label, logic::fg_is_refrigerant_pressure(view, i));
     }
     // A healthy gap is the fixed sleep plus at most one transport timeout per queried page.  A
     // second poll interval is deliberate scheduling margin; unlike the former universal 3 s rule,
