@@ -21518,7 +21518,7 @@ CheckupJournalSim checkup_journal_sim_witness(bool revisions, bool jitter = fals
     return sim;
 }
 
-// A planned restart of `sim`: the shutdown handler dates the open hour, then the drain appends
+// A software restart of `sim`: the shutdown handler dates the open hour, then the drain appends
 // every live hour and offers the sealed one. At each monotonic hour boundary the wall clock reads
 // `phase_s` past a wall-hour boundary, so hour k still ends in bucket 1000 + k.
 bool checkup_journal_sim_seal(CheckupJournalSim& sim, int64_t phase_s) {
@@ -21723,7 +21723,7 @@ static void test_checkup_journal_revisions() {
     CHECK(recovered.starts == live.starts);
 }
 
-// A planned restart journals the open hour as a dated short hour instead of losing it.
+// A software restart journals the open hour as a dated short hour instead of losing it.
 static void test_checkup_planned_restart_seal() {
     using namespace logic;
     constexpr int64_t hour_us = int64_t{CHECKUP_DT_S} * 1'000'000;

@@ -403,8 +403,8 @@ The boot guard runs after NVS initialization and its static lock, before config,
 startup. It classifies each boot once: a crash, a heap-watchdog restart (a software reset the
 watchdog marked in `.noinit` RAM just before restarting) or a clean boot. A crash counts toward
 crash-loop safe mode and carries the heap-restart count; a watchdog restart carries the crash
-count; only a clean boot (any other non-crash reset: power cycle, any software restart such as a
-rebooting save, OTA install, Ethernet fallback or factory reset) clears both.
+count; only a clean boot (any other non-crash reset: power cycle, any other software restart such as
+a rebooting save, OTA install, Ethernet fallback or factory reset) clears both.
 Four crash boots latch crash-loop safe mode: retain network/HTTP recovery if mandatory startup
 succeeds and skip optional plant workers. Ten minutes of uptime clear the crash count; that timer
 is never armed while safe mode is latched, because suppressed workers prove nothing. NVS init

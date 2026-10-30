@@ -74,8 +74,8 @@ diagnostics-consent generation, layout/threshold fingerprint and CRC. DHW additi
 circulation configuration; a mismatch empties only its bucket, preserving independent X10A evidence.
 Old unscoped formats are rejected; a cached model guess cannot admit records.
 
-**A software restart (any `esp_restart()`) tries to save the open hour.** Software restarts
-include:
+**A software restart (any `esp_restart()`) tries to save the open hour.**
+Software restarts include:
 - an OTA installation or rollback;
 - a settings save that restarts the board;
 - a WiFi credential rollback or an Ethernet-to-WiFi fallback;
@@ -116,8 +116,8 @@ the X10A lifecycle. Safe mode and disabled diagnostics admit no old hours; unide
 empty samples advance time without booking observations.
 
 Apart from the journaled open hour, a software restart can carry only the ongoing tank-loss filter
-through a separately sealed **one-shot handoff**, adopted after the same full X10A and circulation scopes are confirmed with
-diagnostics enabled and no reset requested. It preserves the hourly cooling candidate/settling timer,
+through a separately sealed **one-shot handoff**, adopted after the same full X10A and circulation
+scopes are confirmed with diagnostics enabled and no reset requested. It preserves the hourly cooling candidate/settling timer,
 never undated completed counters or transient compressor edges. Power loss, crash, changed source
 or incompatible/absent format starts a fresh filter. The current bucket geometry changes the diagnosis journal fingerprint,
 so previous-format hourly records are rejected; handoff v3 also rejects v2. Trend-journal sources
