@@ -20464,8 +20464,35 @@ static void test_refrigerant_service() {
         }
     }
     CHECK(hydronic_profiles > 0 && outdoor_profiles > 0 && unidentified_outdoor > 0);
-    // The same reach as the availability ledger: 39 liquid spellings and 4 geothermal brine rows.
+    // The same reach as the availability ledger: 39 liquid rows and 4 geothermal brine rows.
     CHECK(liquid_rows == 39 && brine_rows == 4);
+    // End to end on a real brine profile: hp_poll still reads the 0x20/10 brine value, so a
+    // qualifying sample has liquid_ok; the coverage alone must keep the temperature context
+    // incomplete. The control with liquid coverage forced on shows the bit comes from that input.
+    const auto                 geo_view = def::resolved(def::lookup("altherma_gshp2"));
+    RefrigerantServiceCoverage geo;
+    for (size_t i = 0; i < geo_view.count(); i++) {
+        if (!row_publishable(geo_view[i])) continue;
+        const ValueDef d = adjudicated(geo_view, i);
+        refrigerant_service_cover_row(geo, d.reg, d.offset, d.conv, d.label,
+                                      fg_is_refrigerant_pressure(geo_view, i));
+    }
+    CHECK(refrigerant_service_supported(geo) && !geo.liquid && geo.suction);
+    RefrigerantServiceSample geo_sample;
+    geo_sample.rps_known = geo_sample.rps_running = true;
+    geo_sample.rps_tenths = 450;
+    geo_sample.mode = RefrigerantServiceMode::Heating;
+    geo_sample.valve_known = geo_sample.defrost_known = geo_sample.fault_known = true;
+    geo_sample.discharge_ok = geo_sample.suction_ok = geo_sample.liquid_ok = true;
+    geo_sample.eev_ok = geo_sample.high_pressure_ok = geo_sample.low_pressure_ok = true;
+    geo_sample.outdoor_air_ok = geo_sample.outdoor_hx_ok = true;
+    const RefrigerantServiceDecision geo_d = refrigerant_service_decide(geo, geo_sample);
+    CHECK(geo_d.eligible && geo_d.state == RefrigerantServiceState::Limited);
+    CHECK(geo_d.limitation_mask & RefrigerantServiceTemperatures);
+    RefrigerantServiceCoverage geo_liquid = geo;
+    geo_liquid.liquid = true;
+    CHECK(!(refrigerant_service_decide(geo_liquid, geo_sample).limitation_mask &
+            RefrigerantServiceTemperatures));
     // A detectable profile that carries BOTH structural rows reads only the hydronic one.
     const auto dual_view = def::resolved(def::lookup("altherma_ebla_edla_d_series_4_8kw_monobloc"));
     RefrigerantServiceCoverage dual;
