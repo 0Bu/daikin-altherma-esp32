@@ -16,8 +16,10 @@ report analysis, changes, and verification separately.
 SHAPE in a commit message or the PR title/description: an email outside GitHub's own
 noreply/example patterns, a phone number, a GPS coordinate pair, a pasted private key or
 credential-shaped token, and high-confidence German prose (reusing the same German-detection
-predicate `tools/user_docs/english_docs.mjs` applies to maintained documentation). It cannot
-reliably see other languages, a real name in running text, a street address spelled out in words,
+predicate `tools/user_docs/english_docs.mjs` applies to maintained documentation). It also requires
+the PR title to start with a Conventional Commits type (`T001`), because the title becomes the squash
+subject the public OTA changelog selects from; judge whether a published type (`feat`, `fix`, ...)
+fits an owner-visible change. It cannot reliably see other languages, a real name in running text, a street address spelled out in words,
 a WiFi SSID/password pasted as plain text
 instead of through this project's own redacted report flow, or a phrase too short or too mixed to
 trip the language heuristic. This skill is that second pass — for the same reason `$user-docs-review`

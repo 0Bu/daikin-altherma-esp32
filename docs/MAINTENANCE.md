@@ -31,8 +31,10 @@ provenance. Stack and image-size gates run against the exact ELF/image.
 Dev versions use `<next-release>-dev.<n>`. A saved channel follows one feed; switching from dev to the
 preceding stable release is an explicit downgrade confirmation, not an automatic cross-feed update.
 Each feed also has public `artifacts.json` and bounded `changelog.json`. Artifact provenance binds
-source, target, version, application SHA and signing identity. Notes select only approved normalized
-subjects; they do not authorize installation. No private detail belongs in selected commit subjects.
+source, target, version, application SHA and signing identity. Notes select only squash subjects
+whose Conventional Commits type the generator publishes (PR titles, see CONTRIBUTING.md); a version
+without one gets a generic line. Notes do not authorize installation. No private detail belongs in
+selected commit subjects.
 Equal-version resume requires the original source and every original offered byte, including
 signature, artifact index and changelog; a rebuild of the same source cannot substitute for them.
 Recover the original handoff or use the next version. The authorized `$deploy-prod` chain handles

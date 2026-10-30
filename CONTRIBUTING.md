@@ -151,6 +151,14 @@ squash merges and passing `gates` and `build` checks, with no bypass actors. Sig
 possible; incoming commit signing is requested rather than enforced. Do not force-push or rewrite
 shared history without explicit authorization.
 
+The squash commit subject is the PR title, and the public OTA changelog is built from those
+subjects. Start every PR title with a Conventional Commits type, optionally with a scope and `!`,
+for example `fix(ui): keep the legend visible`. A change an owner can notice uses a type the
+changelog generator publishes (`PUBLIC_TYPES` in `scripts/generate-ota-changelog.py`, such as
+`feat` or `fix`). Maintenance uses a type it omits, such as `docs`, `test` or `chore`. The PR-hygiene
+audit enforces this in CI and lists every accepted type; a title without one gives that version only
+a generic changelog line.
+
 The template's review records are maintainer evidence. Outside contributors leave them unchecked
 and provide script results and hardware limitations. Every required record must name the actual PR
 head; any later commit invalidates it.
