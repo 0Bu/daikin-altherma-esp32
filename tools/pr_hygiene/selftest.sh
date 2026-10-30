@@ -113,7 +113,7 @@ echo "== 10. trailer-like prefixes do NOT bypass ordinary prose checks =="
 seed_commit "fix: check trailer parsing" "Reviewed-by: Call the reserved fixture number (202) 555-0101."; base="$SEED_BASE"; head="$SEED_HEAD"
 run_case "trailer-prefixed phone is caught" 1 "P002 commit" "$base" "$head"
 EVENT_10="$WORK/event10.json"
-printf '{"pull_request":{"title":"Add board support","body":"Reviewed-by: Dieser Text ist nicht auf Englisch geschrieben."}}' > "$EVENT_10"
+printf '{"pull_request":{"title":"feat: add board support","body":"Reviewed-by: Dieser Text ist nicht auf Englisch geschrieben."}}' > "$EVENT_10"
 run_case "trailer-prefixed PR prose is caught" 1 "L001 PR description" "$base" "$base" "$EVENT_10"
 
 echo "== 11. fine-grained GitHub token shape is caught =="
@@ -132,12 +132,12 @@ run_case "numeric-shaped false positives stay clean" 0 "pr hygiene audit: clean"
 echo "== 13. PR title carries personal information =="
 seed_commit "fix: no-op"; base="$SEED_BASE"; head="$SEED_HEAD"
 EVENT_13="$WORK/event13.json"
-printf '{"pull_request":{"title":"Contact jane.doe@privacy-fixture.example.com for questions","body":""}}' > "$EVENT_13"
+printf '{"pull_request":{"title":"docs: contact jane.doe@privacy-fixture.example.com for questions","body":""}}' > "$EVENT_13"
 run_case "PII in PR title is caught" 1 "P001 PR title" "$base" "$base" "$EVENT_13"
 
 echo "== 14. PR description carries a phone number, on its third line =="
 EVENT_14="$WORK/event14.json"
-printf '{"pull_request":{"title":"Add board support","body":"Great feature.\\n\\nCall the reserved fixture number +1 202 555 0102."}}' > "$EVENT_14"
+printf '{"pull_request":{"title":"feat: add board support","body":"Great feature.\\n\\nCall the reserved fixture number +1 202 555 0102."}}' > "$EVENT_14"
 run_case "phone number in PR description is caught" 1 "P002 PR description:3" "$base" "$base" "$EVENT_14"
 
 echo "== 15. malformed or missing event payload fails closed with a usage error =="
@@ -148,7 +148,7 @@ run_case "explicitly missing event file is a usage error" 2 "event file not foun
 
 echo "== 16. an adjudicated fingerprint is suppressed =="
 EVENT_16="$WORK/event16.json"
-printf '{"pull_request":{"title":"Add board support","body":"Demo contact: demo.reviewer@privacy-fixture.example.com"}}' > "$EVENT_16"
+printf '{"pull_request":{"title":"feat: add board support","body":"Demo contact: demo.reviewer@privacy-fixture.example.com"}}' > "$EVENT_16"
 if raw_out="$(node "$CHECK" --repo-root "$REPO" --base "$base" --head "$base" \
     --exceptions-file "$EMPTY_EXCEPTIONS" --event-file "$EVENT_16" 2>&1)"; then raw_rc=0; else raw_rc=$?; fi
 fp="$(printf '%s\n' "$raw_out" | awk '/^    fingerprint: /{print $2; exit}')"
@@ -194,6 +194,39 @@ else
     pass=$((pass + 1))
 fi
 run_case "invalid explicit range is a usage error" 2 "could not read commit range" definitely-not-a-ref HEAD
+
+echo "== 19. PR title needs a Conventional Commits type (it becomes the changelog subject) =="
+title_event() {
+    local file="$WORK/title-$1.json"
+    printf '{"pull_request":{"title":"%s","body":""}}' "$2" > "$file"
+    printf '%s' "$file"
+}
+run_case "title without a type is caught" 1 "T001 PR title" "$base" "$base" \
+    "$(title_event none "Keep moving history readouts in front of pinned values")"
+run_case "unknown type is caught" 1 "T001 PR title" "$base" "$base" \
+    "$(title_event unknown "update: bump the runner action")"
+run_case "type without a description is caught" 1 "T001 PR title" "$base" "$base" \
+    "$(title_event empty "fix:")"
+run_case "public type with scope and breaking marker passes" 0 "pr hygiene audit: clean" "$base" "$base" \
+    "$(title_event public "feat(ui)!: show the room trend")"
+run_case "Renovate's semantic maintenance title passes" 0 "pr hygiene audit: clean" "$base" "$base" \
+    "$(title_event renovate "chore(deps): update renovatebot/github-action action to v46.3.10")"
+run_case "type case matches the changelog generator" 0 "pr hygiene audit: clean" "$base" "$base" \
+    "$(title_event upper "Fix: correct the outdoor sensor label")"
+NO_TYPE_EVENT="$(title_event waive "Keep moving history readouts in front of pinned values")"
+if raw_out="$(node "$CHECK" --repo-root "$REPO" --base "$base" --head "$base" \
+    --exceptions-file "$EMPTY_EXCEPTIONS" --event-file "$NO_TYPE_EVENT" 2>&1)"; then raw_rc=0; else raw_rc=$?; fi
+title_fp="$(printf '%s\n' "$raw_out" | awk '/^    fingerprint: /{print $2; exit}')"
+WAIVED="$WORK/waived_title_exceptions.txt"
+printf '%s  # selftest: a fingerprint must not waive the title rule\n' "$title_fp" > "$WAIVED"
+if [ "$raw_rc" -eq 1 ] && [ -n "$title_fp" ] && ! node "$CHECK" --repo-root "$REPO" --base "$base" \
+    --head "$base" --exceptions-file "$WAIVED" --event-file "$NO_TYPE_EVENT" >/dev/null 2>&1; then
+    echo "  PASS  a fingerprint does not waive the title rule"
+    pass=$((pass + 1))
+else
+    echo "  MISSED: a fingerprint should not waive the title rule"
+    fail=$((fail + 1))
+fi
 
 echo
 if [ "$fail" -eq 0 ]; then
