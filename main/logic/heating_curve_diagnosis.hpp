@@ -317,12 +317,12 @@ public:
         return s_;
     }
 
-    // A consent or room-source boundary: the previous scope's event must not stand as the last
-    // sample, and its cadence must not delay the first eligible reading of the new scope. Waiting
-    // for a disarmed evaluate() is not enough — an opt-out and opt-in inside one task cycle, or a
-    // skipped cycle, never produces one. Counters and `sequence` continue: a sequence reset is the
-    // documented reboot signal. POD stores only, so a caller may hold a raw mutex. One out-of-line
-    // body serves this boundary and the disarm path above (flash headroom).
+    // A consent, room-source or HomeHub endpoint boundary: the previous scope's event must not
+    // stand as the last sample, and its cadence must not delay the first eligible reading of the
+    // new scope. Waiting for a disarmed evaluate() is not enough — an opt-out and opt-in inside one
+    // task cycle, or a skipped cycle, never produces one. Counters and `sequence` continue: a
+    // sequence reset is the documented reboot signal. POD stores only, so a caller may hold a raw
+    // mutex. One out-of-line body serves this boundary and the disarm path above (flash headroom).
     __attribute__((noinline)) void forget_samples() noexcept {
         reset_samples();
         last_now_ms_ = -1;
