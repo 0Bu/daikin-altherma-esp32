@@ -458,8 +458,9 @@ S.histPin.delete("outdoor_air");
       },
       get innerHTML() { return html; }, set innerHTML(value) { html = String(value); },
       get textContent() {
-        const entities = { "&amp;":"&", "&lt;":"<", "&gt;":">", "&quot;":'"', "&#39;":"'" };
-        return html.replace(/<[^>]*>/g, "").replace(/&(?:amp|lt|gt|quot|#39);/g, entity => entities[entity]);
+        const entities = { "&amp;":"&", "&lt;":"<", "&gt;":">", "&quot;":'"' };
+        return html.replace(/<[^>]*>/g, "").replace(/&(?:amp|lt|gt|quot);/g, entity => entities[entity])
+          .replace(/&#(\d+);/g, (_, code) => String.fromCodePoint(+code));
       },
       set textContent(value) { html = String(value).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); },
       hidden: true, dataset: {}, style: styleSpy(),
