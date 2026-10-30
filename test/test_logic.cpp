@@ -20360,30 +20360,41 @@ static void test_refrigerant_service() {
     using namespace daik::logic;
 
     RefrigerantServiceCoverage c;
-    refrigerant_service_cover_row(c, 0x30, 0, 152, false);
-    refrigerant_service_cover_row(c, 0x60, 2, 315, false);
-    refrigerant_service_cover_row(c, 0x60, 12, 306, false);
-    refrigerant_service_cover_row(c, 0x10, 1, 304, false);
-    refrigerant_service_cover_row(c, 0x20, 4, 105, false);
-    refrigerant_service_cover_row(c, 0x20, 6, 105, false);
-    refrigerant_service_cover_row(c, 0x20, 10, 105, false);
-    refrigerant_service_cover_row(c, 0x30, 3, 151, false);
-    refrigerant_service_cover_row(c, 0x62, 15, 105, true);
-    refrigerant_service_cover_row(c, 0x20, 14, 105, true);
-    refrigerant_service_cover_row(c, 0x20, 0, 105, false);
-    refrigerant_service_cover_row(c, 0x20, 2, 105, false);
-    refrigerant_service_cover_row(c, 0x10, 1, 306, false);
-    refrigerant_service_cover_row(c, 0x10, 1, 305, false);
-    refrigerant_service_cover_row(c, 0x10, 1, 303, false);
-    refrigerant_service_cover_row(c, 0x10, 1, 302, false);
-    refrigerant_service_cover_row(c, 0x60, 3, 203, false);
+    refrigerant_service_cover_row(c, 0x30, 0, 152, "", false);
+    refrigerant_service_cover_row(c, 0x60, 2, 315, "", false);
+    refrigerant_service_cover_row(c, 0x60, 12, 306, "", false);
+    refrigerant_service_cover_row(c, 0x10, 1, 304, "", false);
+    refrigerant_service_cover_row(c, 0x20, 4, 105, "", false);
+    refrigerant_service_cover_row(c, 0x20, 6, 105, "", false);
+    refrigerant_service_cover_row(c, 0x20, 10, 105, "Liquid pipe temp.(R6T)", false);
+    refrigerant_service_cover_row(c, 0x30, 3, 151, "", false);
+    refrigerant_service_cover_row(c, 0x62, 15, 105, "", true);
+    refrigerant_service_cover_row(c, 0x20, 14, 105, "", true);
+    refrigerant_service_cover_row(c, 0x20, 0, 105, "", false);
+    refrigerant_service_cover_row(c, 0x20, 2, 105, "", false);
+    refrigerant_service_cover_row(c, 0x10, 1, 306, "", false);
+    refrigerant_service_cover_row(c, 0x10, 1, 305, "", false);
+    refrigerant_service_cover_row(c, 0x10, 1, 303, "", false);
+    refrigerant_service_cover_row(c, 0x10, 1, 302, "", false);
+    refrigerant_service_cover_row(c, 0x60, 3, 203, "", false);
     CHECK(refrigerant_service_supported(c));
     CHECK(refrigerant_service_special_phases_known(c));
     CHECK(c.high_pressure && c.low_pressure && c.fault_rows == 1);
+    CHECK(c.liquid);
+
+    // The label is part of the liquid-line key: a geothermal brine reading at the same coordinate
+    // never completes the refrigerant temperature context.
+    RefrigerantServiceCoverage brine;
+    refrigerant_service_cover_row(brine, 0x20, 10, 105, "Leaving brine temp.(R6T)", false);
+    CHECK(!brine.liquid);
+    refrigerant_service_cover_row(brine, 0x20, 10, 105, nullptr, false);
+    CHECK(!brine.liquid);
+    refrigerant_service_cover_row(brine, 0x20, 10, 105, "Liquid temperature(R3T)", false);
+    CHECK(brine.liquid);
 
     // Water pressure never becomes either refrigerant side, even though its datatype is also bar.
     RefrigerantServiceCoverage water;
-    refrigerant_service_cover_row(water, 0x62, 11, 105, false);
+    refrigerant_service_cover_row(water, 0x62, 11, 105, "", false);
     CHECK(!water.high_pressure && !water.low_pressure);
     CHECK(!refrigerant_service_supported(water));
     CHECK(!refrigerant_service_high_pressure_row(water).available);
@@ -20393,18 +20404,18 @@ static void test_refrigerant_service() {
     // unidentified row at either address (no saturation twin) selects nothing.
     CHECK(c.hydronic_pressure);
     RefrigerantServiceCoverage both_rows = c;
-    refrigerant_service_cover_row(both_rows, 0x20, 12, 105, true);
+    refrigerant_service_cover_row(both_rows, 0x20, 12, 105, "", true);
     const RefrigerantServiceRow both = refrigerant_service_high_pressure_row(both_rows);
     CHECK(both.available && both.reg == 0x62 && both.off == 15);
     RefrigerantServiceCoverage outdoor_only;
-    refrigerant_service_cover_row(outdoor_only, 0x62, 15, 105, false);
-    refrigerant_service_cover_row(outdoor_only, 0x20, 12, 105, true);
+    refrigerant_service_cover_row(outdoor_only, 0x62, 15, 105, "", false);
+    refrigerant_service_cover_row(outdoor_only, 0x20, 12, 105, "", true);
     const RefrigerantServiceRow outdoor = refrigerant_service_high_pressure_row(outdoor_only);
     CHECK(!outdoor_only.hydronic_pressure && outdoor_only.high_pressure);
     CHECK(outdoor.available && outdoor.reg == 0x20 && outdoor.off == 12);
     RefrigerantServiceCoverage unidentified;
-    refrigerant_service_cover_row(unidentified, 0x62, 15, 105, false);
-    refrigerant_service_cover_row(unidentified, 0x20, 12, 105, false);
+    refrigerant_service_cover_row(unidentified, 0x62, 15, 105, "", false);
+    refrigerant_service_cover_row(unidentified, 0x20, 12, 105, "", false);
     CHECK(!unidentified.high_pressure && !unidentified.hydronic_pressure);
     CHECK(!refrigerant_service_high_pressure_row(unidentified).available);
 
@@ -20413,19 +20424,26 @@ static void test_refrigerant_service() {
     // two-address meaning, and a profile whose 0x20/12 conv-105 row is something else (a heat-sink
     // or fin temperature) never selects it.
     int hydronic_profiles = 0, outdoor_profiles = 0, unidentified_outdoor = 0;
+    int liquid_rows = 0, brine_rows = 0;
     for (const auto& p : def::profiles) {
         const auto                 v = def::resolved(p);
         RefrigerantServiceCoverage pc;
         bool                       former_high = false, other_outdoor = false;
+        bool                       liquid_expected = false;
         for (size_t i = 0; i < v.count(); i++) {
             if (!row_publishable(v[i])) continue;
             const ValueDef d    = adjudicated(v, i);
             const bool     refp = fg_is_refrigerant_pressure(v, i);
-            refrigerant_service_cover_row(pc, d.reg, d.offset, d.conv, refp);
+            refrigerant_service_cover_row(pc, d.reg, d.offset, d.conv, d.label, refp);
             if (refp && ((d.reg == 0x20 && d.offset == 12) || (d.reg == 0x62 && d.offset == 15)))
                 former_high = true;
             if (!refp && d.reg == 0x20 && d.offset == 12 && d.conv == 105) other_outdoor = true;
+            if (d.reg == 0x20 && d.offset == 10 && d.conv == 105) {
+                (lwt_ci_contains(d.label, "brine") ? brine_rows : liquid_rows)++;
+                liquid_expected = liquid_expected || !lwt_ci_contains(d.label, "brine");
+            }
         }
+        CHECK(pc.liquid == liquid_expected);
         CHECK(pc.high_pressure == former_high);
         const RefrigerantServiceRow row = refrigerant_service_high_pressure_row(pc);
         CHECK(row.available == pc.high_pressure);
@@ -20446,6 +20464,35 @@ static void test_refrigerant_service() {
         }
     }
     CHECK(hydronic_profiles > 0 && outdoor_profiles > 0 && unidentified_outdoor > 0);
+    // The same reach as the availability ledger: 39 liquid rows and 4 geothermal brine rows.
+    CHECK(liquid_rows == 39 && brine_rows == 4);
+    // End to end on a real brine profile: hp_poll still reads the 0x20/10 brine value, so a
+    // qualifying sample has liquid_ok; the coverage alone must keep the temperature context
+    // incomplete. The control with liquid coverage forced on shows the bit comes from that input.
+    const auto                 geo_view = def::resolved(def::lookup("altherma_gshp2"));
+    RefrigerantServiceCoverage geo;
+    for (size_t i = 0; i < geo_view.count(); i++) {
+        if (!row_publishable(geo_view[i])) continue;
+        const ValueDef d = adjudicated(geo_view, i);
+        refrigerant_service_cover_row(geo, d.reg, d.offset, d.conv, d.label,
+                                      fg_is_refrigerant_pressure(geo_view, i));
+    }
+    CHECK(refrigerant_service_supported(geo) && !geo.liquid && geo.suction);
+    RefrigerantServiceSample geo_sample;
+    geo_sample.rps_known = geo_sample.rps_running = true;
+    geo_sample.rps_tenths                         = 450;
+    geo_sample.mode                               = RefrigerantServiceMode::Heating;
+    geo_sample.valve_known = geo_sample.defrost_known = geo_sample.fault_known = true;
+    geo_sample.discharge_ok = geo_sample.suction_ok = geo_sample.liquid_ok = true;
+    geo_sample.eev_ok = geo_sample.high_pressure_ok = geo_sample.low_pressure_ok = true;
+    geo_sample.outdoor_air_ok = geo_sample.outdoor_hx_ok = true;
+    const RefrigerantServiceDecision geo_d = refrigerant_service_decide(geo, geo_sample);
+    CHECK(geo_d.eligible && geo_d.state == RefrigerantServiceState::Limited);
+    CHECK(geo_d.limitation_mask & RefrigerantServiceTemperatures);
+    RefrigerantServiceCoverage geo_liquid = geo;
+    geo_liquid.liquid                     = true;
+    CHECK(!(refrigerant_service_decide(geo_liquid, geo_sample).limitation_mask &
+            RefrigerantServiceTemperatures));
     // A detectable profile that carries BOTH structural rows reads only the hydronic one.
     const auto dual_view = def::resolved(def::lookup("altherma_ebla_edla_d_series_4_8kw_monobloc"));
     RefrigerantServiceCoverage dual;
@@ -20454,7 +20501,7 @@ static void test_refrigerant_service() {
         if (!row_publishable(dual_view[i])) continue;
         const ValueDef d    = adjudicated(dual_view, i);
         const bool     refp = fg_is_refrigerant_pressure(dual_view, i);
-        refrigerant_service_cover_row(dual, d.reg, d.offset, d.conv, refp);
+        refrigerant_service_cover_row(dual, d.reg, d.offset, d.conv, d.label, refp);
         if (refp && d.reg == 0x20 && d.offset == 12) dual_outdoor = true;
     }
     CHECK(dual_outdoor && dual.hydronic_pressure &&
