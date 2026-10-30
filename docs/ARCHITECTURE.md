@@ -238,7 +238,7 @@ identity. Whole live and restored hours expire when their beginning leaves the r
 independently of producer progress; abandoned open evidence expires too. The current 80-byte
 diagnosis bucket changes its journal fingerprint and starts fresh after a format update; ordinary
 trend records are unaffected.
-The intentional-restart DHW handoff is consumed once; downtime/startup remains blind and can
+The software-restart DHW handoff is consumed once; downtime/startup remains blind and can
 invalidate it without incrementing ordinary abort counters.
 Every `esp_restart()` runs the checkup shutdown handler before the history drain, because ESP-IDF
 calls handlers in reverse registration order. The handler dates the open hour by its newest sample

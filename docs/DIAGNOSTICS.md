@@ -1,6 +1,6 @@
 # Plant diagnostics in plain language
 
-<!-- user-docs-contract: f5996900aa7000ac651aad60aca0c7996edacd30e6a2209d3b8a5e2acf1123e6 -->
+<!-- user-docs-contract: 74d035c5997a230c78d7d945e11ed166337510e768479346dfb88afeabaf3fa6 -->
 
 Plant diagnostics **reads measurements and counts events; it does not control the heat pump**.
 It is off by default. Enable **Plant diagnostics** under **Settings → Firmware** to start an evidence
@@ -35,9 +35,9 @@ current all-clear; retained observations can still explain an earlier finding. F
 timeouts reduce evidence without pretending that the profile no longer has the sensor.
 
 Completed hours can return after a restart only from compatible dated flash records and current
-source confirmation. A software restart, such as an update or a settings change, also tries to save
-the open hour. It cannot when that hour shares its clock hour with the previous saved hour. Other
-open and unsaved hours may be lost. Whole hourly records expire when their
+source confirmation. A software restart, such as an update or a settings save that restarts the
+board, also tries to save the open hour. It cannot when that hour shares its clock hour with the
+previous saved hour. Other open and unsaved hours may be lost. Whole hourly records expire when their
 beginning leaves the rolling day, even if polling stops. Changed X10A identity or incompatible
 diagnosis format starts fresh collection; changing the independent circulation witness clears only
 tank-cooling evidence.
@@ -93,7 +93,7 @@ remove useful heat; zero net cooling does not prove zero loss. Neither a missing
 a valve command proves an undisturbed tank, and optional external circulation overlap proves no
 cause. Charging, its 45-minute settle, a fresh filter's 45-minute hold, invalid temperatures and
 excessive missing readings exclude time; unread charge witnesses extend the wait. A compatible
-planned restart preserves the remaining settling time, but unseen charging can still affect a window.
+software restart preserves the remaining settling time, but unseen charging can still affect a window.
 
 **Evidence and limits:** [Tank cooling](DIAGNOSTIC_EVIDENCE.md#diagnosis-dhw-loss)
 

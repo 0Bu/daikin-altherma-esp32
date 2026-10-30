@@ -371,7 +371,7 @@ inline constexpr int64_t checkup_journal_next_target(int64_t after_bucket,
     return checkup_journal_next_live_bucket(after_bucket, newest_live_bucket, live_count);
 }
 
-// ── The open hour at a planned restart ───────────────────────────────────────────────────────────
+// ── The open hour at a software restart ──────────────────────────────────────────────────────────
 // A software restart (any esp_restart: OTA installation or rollback, a rebooting settings save, a
 // network fallback, the heap watchdog) dates the open hour by its newest observed sample, so the
 // bounded shutdown drain can try to journal it as a short hour. Like every record it is

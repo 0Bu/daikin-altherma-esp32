@@ -142,8 +142,8 @@ int64_t s_journal_label_offset = INT64_MIN;
 // the reset, so an append made after it carries no DHW identity for them.
 bool     s_dhw_restart_armed  = false;
 uint32_t s_dhw_restart_bucket = 0;
-// The open hour a planned restart dated for the shutdown drain (logic::checkup_seal_bucket) and its
-// end, INT64_MIN otherwise. Once sealed, the record path stops folding into it.
+// Label (logic::checkup_seal_bucket) and end of the open hour a software restart dated for the
+// shutdown drain, INT64_MIN otherwise. Once sealed, the record path stops folding into it.
 int64_t s_seal_bucket     = INT64_MIN;
 int64_t s_seal_end_unix_s = INT64_MIN;
 
@@ -378,7 +378,7 @@ void seal_open_hour_locked() {
     diag_printf("checkup: open hour sealed for the journal (%u s covered)\n", covered);
 }
 
-// The open hour a planned restart sealed, offered once every live hour is appended.
+// The open hour a software restart sealed, offered once every live hour is appended.
 bool sealed_flash_next_locked(int64_t after_bucket, int64_t& bucket,
                               logic::CheckupJournalPayload& payload) {
     if (!logic::checkup_seal_emits(s_seal_bucket, after_bucket) || !P().ring.pending.covered_s)
@@ -668,7 +668,7 @@ void checkup_record(const CachedValue* v, size_t n, bool rps_known, bool rps_run
     if (!lk.acquired()) return;
     if (!s_diagnostics_enabled.load(std::memory_order_acquire)) return;
     if (!hp_poll_generation_matches(source_generation)) return;
-    // A planned restart sealed the open hour for the shutdown drain: keep it as it was dated.
+    // A software restart sealed the open hour for the shutdown drain: keep it as it was dated.
     if (s_seal_bucket != INT64_MIN) return;
 
     // A request can arrive while an old-link sweep is in flight. If this cycle consumes it, discard
