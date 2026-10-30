@@ -371,6 +371,44 @@ inline constexpr int64_t checkup_journal_next_target(int64_t after_bucket,
     return checkup_journal_next_live_bucket(after_bucket, newest_live_bucket, live_count);
 }
 
+// ── The open hour at a software restart ──────────────────────────────────────────────────────────
+// A software restart (any esp_restart: OTA installation or rollback, a rebooting settings save, a
+// network fallback, the heap watchdog) dates the open hour by its newest observed sample, so the
+// bounded shutdown drain can try to journal it as a short hour. Like every record it is
+// labelled with the wall-clock bucket of its end. When that bucket is still the newest completed
+// hour's label, the open hour began and ended in the same wall-clock hour as the hour before it:
+// a second record there could only replace that whole hour, so the open hour is lost as before.
+// The next boot's first completed hour ends at least one hour after the restart, so it never
+// shares the sealed label. Power loss, brownouts and panics, including task and interrupt watchdog
+// resets, never reach the seal.
+
+// The open hour's end in wall-clock seconds, or INT64_MIN. Its newest sample must lie in the open
+// monotonic hour; an unsynchronised clock (`now_unix_s < 0`) dates nothing.
+inline constexpr int64_t checkup_seal_end_unix_s(int64_t now_unix_s, int64_t now_us,
+                                                 int64_t latest_sample_us, uint32_t open_bucket) {
+    if (now_unix_s < 0 || latest_sample_us < 0 || now_us < latest_sample_us ||
+        checkup_bucket(latest_sample_us) != open_bucket)
+        return INT64_MIN;
+    const int64_t end = now_unix_s - (now_us - latest_sample_us) / 1000000;
+    return end >= 0 ? end : INT64_MIN;
+}
+
+// The sealed hour's label, or INT64_MIN when it must not be journaled: no date, no observed second,
+// or the label of this boot's newest completed hour (`newest_live_bucket`, INT64_MIN without one).
+inline constexpr int64_t checkup_seal_bucket(int64_t end_unix_s, int64_t newest_live_bucket,
+                                             uint32_t covered_s) {
+    const int64_t bucket = checkup_journal_bucket(end_unix_s);
+    if (bucket == INT64_MIN || !covered_s) return INT64_MIN;
+    if (newest_live_bucket != INT64_MIN && bucket <= newest_live_bucket) return INT64_MIN;
+    return bucket;
+}
+
+// The writer offers the sealed hour only after every live hour is appended (the caller's order)
+// and only ahead of the cursor, so it neither replaces a journaled hour nor repeats itself.
+inline constexpr bool checkup_seal_emits(int64_t seal_bucket, int64_t after_bucket) {
+    return seal_bucket != INT64_MIN && (after_bucket == INT64_MIN || seal_bucket > after_bucket);
+}
+
 // The oldest completed monotonic hour whose record the journal may have appended before a run that
 // started in it completed. One is enough: the replay from it covers every later live hour.
 // `emitted` is the wall-clock bucket handed to the writer for it, INT64_MIN while none is.

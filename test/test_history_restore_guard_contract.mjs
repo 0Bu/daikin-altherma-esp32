@@ -434,8 +434,8 @@ assert.equal(count(checkup, /s_revision_acked\.store\(/g), 2,
   "only the emit reset and the journal's commit confirmation write the acknowledgement");
 // One wall-clock label per monotonic hour for the whole boot, in the writer and in the restore's
 // live records alike; a record's end time is kept inside the bucket its label names.
-assert.equal(count(checkup, /latched_newest_locked\(/g), 3,
-  "the writer and the restore both label hours through the boot latch");
+assert.equal(count(checkup, /latched_newest_locked\(/g), 4,
+  "the writer, the restore and the planned-restart seal label hours through the boot latch");
 assert.match(flashNext, /const int64_t newest = latched_newest_locked\(latest_end_unix_s\);/);
 assert.match(flashNext, /logic::checkup_journal_end_in_bucket\( latest_end_unix_s - static_cast<int64_t>\(age\) \* logic::CHECKUP_DT_S, target\)/);
 assert.match(cFlash, /const int64_t newest_label = latched_newest_locked\(latest_end\);/);
@@ -459,4 +459,32 @@ assert.match(scan, /logic::checkup_journal_index_retained\(ix, i\)/,
   "the checkup candidates are clipped to the window ending at the newest indexed hour");
 assert.doesNotMatch(scan, /CHECKUP_COMPLETED_BUCKETS/,
   "the trend retention path no longer carries a checkup branch");
+
+// A software restart dates the open hour for the shutdown drain. esp_restart runs shutdown
+// handlers in reverse registration order, so the seal registers after the history drain; it runs
+// after the queued resets, freezes the record path, and is offered only after every live hour.
+const startup = code("main/main.cpp");
+assert.ok(startup.indexOf("daik::history_start();") >= 0 &&
+  startup.indexOf("daik::history_start();") < startup.indexOf("daik::checkup_start("),
+  "the checkup shutdown handler must register after history's drain so it runs first");
+const rebootSave = body(checkup, "void checkup_reboot_save()");
+assert.ok(rebootSave.indexOf("apply_dhw_reset_locked();") < rebootSave.indexOf("seal_open_hour_locked();"),
+  "queued resets retire the open hour before it can be sealed");
+const sealOpen = body(checkup, "void seal_open_hour_locked()");
+assert.match(sealOpen, /time_now\(unix_s, ms\);/);
+assert.match(sealOpen,
+  /logic::checkup_seal_end_unix_s\(unix_s, now_us, P\(\)\.ring\.latest_sample_us, s_state\.bucket\)/);
+assert.match(sealOpen, /newest = latched_newest_locked\(unix_s - \(now_us - s_last_commit_us\) \/ 1000000\);/);
+assert.match(sealOpen, /logic::checkup_seal_bucket\(end, newest, covered\)/);
+assert.match(cRecord, /if \(s_seal_bucket != INT64_MIN\) return;/,
+  "a sealed open hour must not change before the drain journals it");
+assert.equal(count(flashNext, /return sealed_flash_next_locked\(after_bucket, bucket, payload\);/g), 1,
+  "the sealed hour is offered only when no live hour is due, from one inlinable call site");
+assert.ok(flashNext.indexOf("checkup_journal_next_target") <
+  flashNext.lastIndexOf("sealed_flash_next_locked"), "every live target is appended first");
+const sealedNext = body(checkup, "bool sealed_flash_next_locked(");
+assert.match(sealedNext, /logic::checkup_seal_emits\(s_seal_bucket, after_bucket\)/);
+assert.match(sealedNext, /payload\.checkup = P\(\)\.ring\.pending; payload\.dhw = P\(\)\.dhw\.pending;/);
+assert.match(body(checkup, "void persist_wipe("), /s_seal_bucket = s_seal_end_unix_s = INT64_MIN;/,
+  "a wipe leaves no sealed hour to journal");
 console.log("history restore guard contract: ok");

@@ -21517,6 +21517,36 @@ CheckupJournalSim checkup_journal_sim_witness(bool revisions, bool jitter = fals
     sim.to_hour(checkup_bucket(sim.t) + 1); // complete the last hour; the open hour stays empty
     return sim;
 }
+
+// A software restart of `sim`: the shutdown handler dates the open hour, then the drain appends
+// every live hour and offers the sealed one. At each monotonic hour boundary the wall clock reads
+// `phase_s` past a wall-hour boundary, so hour k still ends in bucket 1000 + k.
+bool checkup_journal_sim_seal(CheckupJournalSim& sim, int64_t phase_s) {
+    const int64_t now_unix = 999 * int64_t{CHECKUP_DT_S} + phase_s + sim.t / 1'000'000;
+    const int64_t end      = checkup_seal_end_unix_s(now_unix, sim.t, sim.t, sim.st.bucket);
+    const int64_t newest   = sim.live ? sim.newest_label() : INT64_MIN;
+    const int64_t bucket   = checkup_seal_bucket(end, newest, sim.ring.pending.covered_s);
+    sim.service();
+    if (!checkup_seal_emits(bucket, sim.cursor)) return false;
+    sim.journal.emplace_back(bucket, sim.ring.pending);
+    sim.cursor = bucket;
+    return true;
+}
+
+// Hours 0-2 each hold three completed 599 s runs; open hour 3 holds one completed run and one still
+// running when the restart comes 1,860 s into it.
+CheckupJournalSim checkup_journal_sim_restart() {
+    CheckupJournalSim sim;
+    sim.step(false);
+    for (uint32_t h = 0; h <= 2; ++h) {
+        sim.to_hour(h);
+        for (int k = 0; k < 3; ++k) sim.run(600, 300);
+    }
+    sim.to_hour(3);
+    sim.run(600, 300);
+    sim.run(900, 0);
+    return sim;
+}
 } // namespace
 
 static void test_checkup_journal_revisions() {
@@ -21691,6 +21721,75 @@ static void test_checkup_journal_revisions() {
     const CheckupWindow recovered = checkup_journal_sim_restore(retried, retried.journal.size());
     CHECK(recovered.space_runs == live.space_runs && recovered.space_run_s == live.space_run_s);
     CHECK(recovered.starts == live.starts);
+}
+
+// A software restart journals the open hour as a dated short hour instead of losing it.
+static void test_checkup_planned_restart_seal() {
+    using namespace logic;
+    constexpr int64_t hour_us = int64_t{CHECKUP_DT_S} * 1'000'000;
+
+    // Dating needs a synchronised clock and a newest sample inside the open monotonic hour.
+    CHECK(checkup_seal_end_unix_s(rt<int64_t>(50'000), 2 * hour_us + 5'000'000,
+                                  2 * hour_us + 1'000'000, 2) == 49'996);
+    CHECK(checkup_seal_end_unix_s(rt<int64_t>(-1), 2 * hour_us + 5'000'000, 2 * hour_us + 1'000'000,
+                                  2) == INT64_MIN);
+    CHECK(checkup_seal_end_unix_s(rt<int64_t>(50'000), 2 * hour_us + 5'000'000, -1, 2) ==
+          INT64_MIN);
+    CHECK(checkup_seal_end_unix_s(rt<int64_t>(50'000), 2 * hour_us, 2 * hour_us + 1, 2) ==
+          INT64_MIN); // a sample after "now"
+    CHECK(checkup_seal_end_unix_s(rt<int64_t>(50'000), 3 * hour_us + 5'000'000,
+                                  2 * hour_us + 1'000'000, 3) == INT64_MIN); // stale open hour
+    CHECK(checkup_seal_end_unix_s(rt<int64_t>(3), 2 * hour_us + 5'000'000, 2 * hour_us + 1'000'000,
+                                  2) == INT64_MIN); // before the epoch
+
+    // Labelled like every record by its end; never the newest completed hour's label.
+    const int64_t end = 3 * int64_t{CHECKUP_DT_S} + 10;
+    CHECK(checkup_seal_bucket(rt<int64_t>(end), INT64_MIN, 60) == 3); // no completed hour yet
+    CHECK(checkup_seal_bucket(rt<int64_t>(end), 2, 60) == 3);
+    CHECK(checkup_seal_bucket(rt<int64_t>(end), 3, 60) == INT64_MIN); // same wall-clock hour
+    CHECK(checkup_seal_bucket(rt<int64_t>(end), 4, 60) == INT64_MIN); // behind a stepped label
+    CHECK(checkup_seal_bucket(rt<int64_t>(end), 2, 0) == INT64_MIN);  // nothing observed
+    CHECK(checkup_seal_bucket(rt<int64_t>(INT64_MIN), INT64_MIN, 60) == INT64_MIN);
+    // The next boot's first completed hour ends at least one hour after the restart.
+    CHECK(checkup_journal_bucket(end + int64_t{CHECKUP_DT_S}) > checkup_seal_bucket(end, 2, 60));
+
+    // Offered only ahead of the cursor: never over a journaled hour, never twice.
+    CHECK(!checkup_seal_emits(rt<int64_t>(INT64_MIN), INT64_MIN));
+    CHECK(checkup_seal_emits(rt<int64_t>(5), INT64_MIN));
+    CHECK(checkup_seal_emits(rt<int64_t>(5), 4));
+    CHECK(!checkup_seal_emits(rt<int64_t>(5), 5)); // already appended, or a previous boot's seal
+    CHECK(!checkup_seal_emits(rt<int64_t>(5), 6));
+
+    // Restart 1,860 s into open hour 3 with the wall clock 1,800 s past each hour boundary: the
+    // restart falls in the wall-clock hour after hour 2's end, so the open hour is journaled as
+    // 1003 and the restored window equals the live one.
+    CheckupJournalSim sealed = checkup_journal_sim_restart();
+    CHECK(sealed.live == 3 && sealed.st.bucket == 3 && sealed.st.run_open);
+    const CheckupWindow live = checkup_aggregate(sealed.ring);
+    CHECK(checkup_journal_sim_seal(sealed, 1'800));
+    CHECK(sealed.journal.back().first == 1003);
+    const CheckupWindow kept = checkup_journal_sim_restore(sealed, sealed.journal.size());
+    CHECK(kept.covered_s == live.covered_s && kept.run_s == live.run_s);
+    CHECK(kept.starts == live.starts && kept.censored_runs == live.censored_runs);
+    CHECK(kept.space_runs == live.space_runs && kept.space_run_s == live.space_run_s);
+    // The run still open at the restart keeps its witnessed start and gets no invented completion.
+    CHECK(kept.starts == kept.space_runs + kept.censored_runs + 1);
+
+    // Today's loss, for comparison: without the seal the open hour and both of its starts vanish.
+    CheckupJournalSim lost = checkup_journal_sim_restart();
+    lost.service();
+    const CheckupWindow dropped = checkup_journal_sim_restore(lost, lost.journal.size());
+    CHECK(dropped.covered_s + sealed.ring.pending.covered_s == live.covered_s);
+    CHECK(dropped.starts + 2 == live.starts && dropped.space_runs + 1 == live.space_runs);
+
+    // With the wall clock only 600 s past each boundary the restart shares hour 2's wall-clock
+    // hour: nothing is sealed, hour 2 stays the newest record and the loss is as before.
+    CheckupJournalSim same_hour = checkup_journal_sim_restart();
+    CHECK(!checkup_journal_sim_seal(same_hour, 600));
+    CHECK(same_hour.journal.back().first == 1002);
+    const CheckupWindow skipped = checkup_journal_sim_restore(same_hour, same_hour.journal.size());
+    CHECK(skipped.covered_s == dropped.covered_s && skipped.starts == dropped.starts);
+    CHECK(skipped.space_run_s == dropped.space_run_s);
 }
 
 // ── logic/history_persist.hpp ───────────────────────────────────────────────────────────────────
@@ -27226,6 +27325,7 @@ int main() {
     test_checkup_persist();
     test_room_history();
     test_checkup_journal_revisions();
+    test_checkup_planned_restart_seal();
     test_history_persist();
     test_history_identity();
     test_checkup_scoped_flash_age();
