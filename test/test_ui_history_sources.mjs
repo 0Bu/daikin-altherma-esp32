@@ -14,7 +14,7 @@ const mqtt = fs.readFileSync(new URL("../main/mqtt_ha.cpp", import.meta.url), "u
 assert.match(style, /\.vhist-state-graph \.vhist-tip \{[^}]*white-space:\s*pre-wrap;/,
   "state tooltips must honor deliberate breaks but remain confined to their side of the crosshair");
 assert.match(style,
-  /\.vhist-graph\s*\{[^}]*--vhist-tip-base:\s*20px;[^}]*padding-top:\s*var\(--vhist-tip-base\);/,
+  /\.vhist-graph\s*\{[^}]*padding-top:\s*20px;/,
   "every plot must keep one fixed compact distance below its legend");
 assert.match(style, /\.vhist-tip\s*\{[^}]*position:\s*relative;[^}]*z-index:\s*3;/,
   "the translucent tooltip must start at and paint over the plot instead of moving it");
@@ -450,7 +450,19 @@ S.histPin.delete("outdoor_air");
   let offsetWidthReads = 0;
   const node = (cls) => {
     const classes = new Set(cls.split(" "));
-    return { className: cls, hidden: true, dataset: {}, style: styleSpy(),
+    let html = "";
+    return { get className() { return [...classes].join(" "); },
+      set className(value) {
+        classes.clear();
+        for (const name of value.split(/\s+/)) if (name) classes.add(name);
+      },
+      get innerHTML() { return html; }, set innerHTML(value) { html = String(value); },
+      get textContent() {
+        const entities = { "&amp;":"&", "&lt;":"<", "&gt;":">", "&quot;":'"', "&#39;":"'" };
+        return html.replace(/<[^>]*>/g, "").replace(/&(?:amp|lt|gt|quot|#39);/g, entity => entities[entity]);
+      },
+      set textContent(value) { html = String(value).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); },
+      hidden: true, dataset: {}, style: styleSpy(),
       classList: { toggle: (name, on) => on ? classes.add(name) : classes.delete(name),
         contains: (name) => classes.has(name) },
       get offsetWidth() { offsetWidthReads++; return 0; } };

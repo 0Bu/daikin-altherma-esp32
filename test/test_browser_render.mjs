@@ -1898,7 +1898,8 @@ async function assertHistoryReadouts(page, context) {
         const p = host.querySelector("[data-hist]").getBoundingClientRect();
         return {top:p.top + scrollY,height:p.height,
           tip:host.querySelector(".vhist-tip.vhist-pinned").textContent,
-          time:host.querySelector(".vhist-time.vhist-pinned").textContent};
+          time:host.querySelector(".vhist-time.vhist-pinned").textContent,
+          timeTop:host.querySelector(".vhist-time.vhist-pinned").getBoundingClientRect().top + scrollY};
       })()`);
       if(id !== "valve_dhw")
         assert.equal(baseline.tip.includes(baseline.time),false,
@@ -1927,11 +1928,11 @@ async function assertHistoryReadouts(page, context) {
           const view=historyView(plot.dataset.hist,plot.dataset.source || "");
           const i=scrubIndex(plot,plot.getBoundingClientRect().left + plot.clientWidth * ${fraction});
           return {visible:!live.hidden && !liveTime.hidden && a.height > 0 && b.height > 0,
-            stacked:b.top >= a.bottom + 7, timesStacked:d.top >= c.bottom,
+            stacked:a.top >= b.bottom + 7, timesStacked:d.bottom <= p.top,
             plotTop:p.top,plotHeight:p.height,pin:pin.textContent,pinTime:pinTime.textContent,
             axisTime:liveTime.textContent,expectedTime:scrubTime(view,i),
             selectedTimeInBubble:!STATE_HIST[plot.dataset.hist] && live.textContent.includes(scrubTime(view,i)),
-            axisBelow:c.top >= p.bottom && d.top >= p.bottom,
+            axisBelow:c.top >= p.bottom, pinTimeTop:c.top,
             inside:[a,b,c,d].every(r=>r.left >= clip.left - 1 && r.right <= clip.right + 1 && r.bottom <= clip.bottom + 1),
             bounds:{pin:a,live:b,pinTime:c,liveTime:d,clip},
             forecast:i >= view.v.length,
@@ -1940,10 +1941,11 @@ async function assertHistoryReadouts(page, context) {
         })()`);
         const label = `${context}/${id}/${fraction}`;
         assert.equal(state.visible,true,`${label}: both selected readouts remain visible`);
-        assert.equal(state.stacked,true,`${label}: the live bubble must be below the pinned bubble`);
-        assert.equal(state.timesStacked,true,`${label}: selected times must not hide each other`);
+        assert.equal(state.stacked,true,`${label}: the live bubble must be above the pinned bubble`);
+        assert.equal(state.timesStacked,true,`${label}: the moving time belongs above the plot`);
         assert.equal(state.inside,true,`${label}: neither readout nor time may be clipped: ${JSON.stringify(state.bounds)}`);
-        assert.equal(state.axisBelow,true,`${label}: selected times belong below the curve`);
+        assert.equal(state.axisBelow,true,`${label}: the pinned time remains below the curve`);
+        assert.ok(Math.abs(state.pinTimeTop-baseline.timeTop)<1,`${label}: showing or moving a preview must not move the pinned time: ${JSON.stringify({baseline,state:state.bounds})}`);
         assert.equal(state.axisTime,state.expectedTime,`${label}: the axis follows the selected sample`);
         assert.equal(state.selectedTimeInBubble,false,`${label}: measurement tooltips contain values, with time on the axis`);
         assert.equal(state.pin,baseline.tip,`${label}: movement must preserve the pinned reading`);
@@ -1965,6 +1967,8 @@ async function assertHistoryReadouts(page, context) {
         return host.querySelector(".vhist-tip.vhist-live").hidden && host.querySelector(".vhist-time.vhist-live").hidden &&
           !host.querySelector(".vhist-tip.vhist-pinned").hidden && !host.querySelector(".vhist-time.vhist-pinned").hidden;
       })()`),true,`${context}/${id}: cancelling removes only the moving readout and its time`);
+      assert.equal(await page.evaluate(`document.querySelector("#browserHistoryFixture .vhist-time.vhist-pinned").getBoundingClientRect().top + scrollY`),
+        baseline.timeTop,`${context}/${id}: hiding the preview preserves the pinned time position`);
       await page.evaluate('document.querySelector("#browserHistoryFixture [data-hist]").focus(); true');
       await page.key("End",{code:"End",keyCode:35});
       assert.equal(await page.evaluate(`(() => {

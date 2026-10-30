@@ -984,18 +984,19 @@ button.vhist-source:focus-visible { outline: 2px solid var(--brand); outline-off
 .modal-subtitle { margin-top: 8px; padding-top: 14px; border-top: 1px solid var(--line); }
 /* The SVG stretches to the panel width; overflow stays visible so the stroke isn't clipped at the
    extremes (the geometry deliberately uses the full viewBox height — see HIST_H in app.js). */
-/* The plot always starts at the same position below the legend. Bubbles share its grid cell and
-   stack in normal rows; longer readouts grow only the space below the plot so neither the second
-   bubble nor the time labels are clipped by an explanation panel. */
-.vhist-graph { --vhist-tip-base: 20px; position: relative; display: grid;
+/* The preview time uses the reserved strip above the fixed plot. Bubbles share the plot's cell;
+   the hidden comparison reserve keeps the pinned time below them from jumping when scrubbing. */
+.vhist-graph { position: relative; display: grid;
   grid-template-columns: minmax(0, 1fr);
-  padding-top: var(--vhist-tip-base); isolation: isolate;
+  padding-top: 20px; isolation: isolate;
   /* iOS must be able to start the same horizontal scrub on the bubble/graph as on the plot while a
      vertical gesture remains ordinary page scrolling. */
   touch-action: pan-y; }
 .vhist-plot { position: relative; height: 72px; grid-area: 1 / 1; align-self: start; min-width: 0; }
 .vhist-tips { grid-area: 1 / 1; align-self: start; display: grid; gap: 8px;
   grid-template-columns: minmax(0, 1fr); min-width: 0; width: 100%; pointer-events: none; z-index: 3; }
+.vhist-tip.vhist-live, .vhist-reserve { grid-area: 1 / 1; }
+.vhist-tip.vhist-reserve { visibility: hidden; --tip-p: 50; }
 /* pan-y hands VERTICAL gestures back to the page (the user must still be able to scroll past the
    chart) while horizontal movement becomes a scrub. Claiming both axes would trap page scrolling
    inside a 72 px box. */
@@ -1016,7 +1017,7 @@ button.vhist-source:focus-visible { outline: 2px solid var(--brand); outline-off
    somewhere else would need two taps. */
 .vhist-cross.vhist-pinned { opacity: 1; background: var(--brand-strong); }
 .vhist-mark.vhist-pinned { background: var(--brand-strong); }
-.vhist-tip.vhist-pinned { border-color: var(--brand); color: var(--fg); font-weight: 600; }
+.vhist-tip.vhist-pinned { grid-area: 2 / 1; border-color: var(--brand); color: var(--fg); font-weight: 600; }
 /* `--tip-p` is the selected sample (0..100). Keep the vertical crosshair itself unobstructed:
    the left half opens RIGHT and the right half opens LEFT, with a small leader across the gap.
    Each side's max-width is exactly its available half, so even a tall/mobile readout cannot spill
@@ -1125,12 +1126,12 @@ button.vhist-source:focus-visible { outline: 2px solid var(--brand); outline-off
   font-size: 11.5px; color: var(--muted); }
 /* A label's anchor moves from its left to its right edge across the domain, keeping localized
    times inside the card even at the first and last sample. */
-.vhist-times { grid-area: 2 / 1; display: grid; font-size: 11.5px;
-  color: var(--fg); pointer-events: none; }
-.vhist-time { position: relative; justify-self: start; max-width: 100%;
+.vhist-time { position: relative; justify-self: start; width: max-content; max-width: 100%;
+  font-size: 11.5px; color: var(--fg); pointer-events: none;
   margin-top: 6px; left: calc(var(--tip-p) * 1%);
   transform: translateX(calc(var(--tip-p) * -1%)); }
-.vhist-time.vhist-pinned { color: var(--brand-strong); font-weight: 600; }
+.vhist-time.vhist-pinned { grid-area: 2 / 1; color: var(--brand-strong); font-weight: 600; }
+.vhist-time.vhist-live { position: absolute; top: 0; margin-top: 0; }
 .vhist-axis.vhist-axis-future { position: relative; min-height: 18px; }
 .vhist-axis-future .vhist-axis-now { position: absolute; left: calc(var(--now-p) * 1%);
   transform: translateX(-50%); color: var(--muted); font-weight: 700; }

@@ -193,7 +193,7 @@ assert.doesNotMatch(rendered, /ENV-III-Messwerte|data-hist="env3_combined"/,
 assert.equal(renderSandbox.__env3Tooltip("de", 2),
   "jetzt\nTemperatur  21,5 °C\nLuftfeuchte  48,0 %\nLuftdruck  1.007,0 hPa",
   "one readable localized tooltip must report time and all three measurements together");
-assert.match(style, /\.vhist-graph\s*\{[^}]*--vhist-tip-base:\s*20px;[^}]*padding-top:\s*var\(--vhist-tip-base\);/,
+assert.match(style, /\.vhist-graph\s*\{[^}]*padding-top:\s*20px;/,
   "the combined chart must share the fixed compact legend-to-plot distance");
 assert.doesNotMatch(style, /\.vhist-env3 \.vhist-graph\s*\{/,
   "the taller climate tooltip must overlay rather than shift its plot");

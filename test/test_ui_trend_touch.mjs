@@ -14,8 +14,8 @@ assert.match(style,
   /\.vhist-tip\s*\{[^}]*background:\s*color-mix\(in srgb,\s*var\(--card\)\s+60%,\s*transparent\);/,
   "tooltip surfaces must be translucent without fading their text");
 assert.match(style,
-  /\.vhist-graph\s*\{[^}]*padding-top:\s*var\(--vhist-tip-base\);/,
-  "tooltip height must not move the chart away from its legend");
+  /\.vhist-graph\s*\{[^}]*padding-top:\s*20px;/,
+  "the moving time has reserved space above the chart");
 assert.match(style, /\.vhist-tip\s*\{[^}]*position:\s*relative;[^}]*z-index:\s*3;/,
   "the tooltip must start at and overlay the still-visible chart");
 assert.match(style, /\.vhist-tip-right\s*\{[^}]*translateX\(var\(--vhist-tip-gap\)\)/,
