@@ -251,12 +251,14 @@ journal record, and 23 stored records must still fit the 4 KiB sector scratch (s
 constraints). No other hourly diagnosis source exists yet. An observation that needs more hourly
 state must add one: one record per hour within `HISTORY_JOURNAL_PAYLOAD_BYTES`, with its own
 fingerprint, coverage clocks and late-completion replay. In RAM it keeps the open hour, the sum of
-its completed hours and a restore index sized for 23 hours rather than the trend raster. The history
-owner rebuilds that sum at restoration, at each hour commit and after a replay, one stored record at
-a time on a measured stack path and outside the observation's lock. An hour leaves the sum when it
-expires, even if the producer stops; a missing record leaves it unobserved and is never inferred
-from the core bucket. The journal capacity assertion in `history_persist.hpp` must count the new
-records; static memory and stack paths are measured on the target ELF.
+its completed hours and a restore index bounded like `CHECKUP_JOURNAL_INDEX_CAP`, not like the
+trend raster. The history owner rebuilds that sum at restoration, after each of its hourly records
+is committed to the journal, after a replay, and when its oldest hour expires, even if the producer
+stops. It reads one stored record at a time on a measured stack path under its own flash lock and
+swaps the result in under a zero-wait take of the observation's lock; report and record paths never
+read the journal. A missing record leaves its hour unobserved; it is never inferred from the core
+bucket. The journal capacity assertion in `history_persist.hpp` must count the new records; static
+memory and stack paths are measured on the target ELF.
 
 The former small history partition is unsupported. OTA cannot install a partition table: an
 old-layout device needs an explicitly authorized signed USB/Web Serial update to the official
