@@ -21723,7 +21723,7 @@ static void test_checkup_journal_revisions() {
     CHECK(recovered.starts == live.starts);
 }
 
-// #258: a planned restart journals the open hour as a dated short hour instead of losing it.
+// A planned restart journals the open hour as a dated short hour instead of losing it.
 static void test_checkup_planned_restart_seal() {
     using namespace logic;
     constexpr int64_t hour_us = int64_t{CHECKUP_DT_S} * 1'000'000;

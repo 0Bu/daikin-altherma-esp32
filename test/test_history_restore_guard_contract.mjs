@@ -460,7 +460,7 @@ assert.match(scan, /logic::checkup_journal_index_retained\(ix, i\)/,
 assert.doesNotMatch(scan, /CHECKUP_COMPLETED_BUCKETS/,
   "the trend retention path no longer carries a checkup branch");
 
-// #258: a planned restart dates the open hour for the shutdown drain. esp_restart runs shutdown
+// A planned restart dates the open hour for the shutdown drain. esp_restart runs shutdown
 // handlers in reverse registration order, so the seal registers after the history drain; it runs
 // after the queued resets, freezes the record path, and is offered only after every live hour.
 const startup = code("main/main.cpp");
