@@ -6,6 +6,18 @@
         "gcc-13-linux-ubuntu24": "g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0 via CI-pinned ESP-IDF v6.1 container, aarch64",
         "gcc-15-linux-ubuntu26": "g++ (Ubuntu 15.2.0-16ubuntu1) 15.2.0, Ubuntu 26.04 Docker, aarch64"
       },
+      "hosted_confirmation": "After the main merge, measured locally on all three compilers with the end-to-end test: Apple Clang 17 209/254, GCC 13 (ESP-IDF container) and GCC 15 (Ubuntu 26.04 container) 246/306. The hosted GCC 15 profile carries the local GCC 15 inventory as its candidate; this head's CI is the confirmation.",
+      "runner": "scripts/run-mock-tests.sh --coverage",
+      "scope": "Label-keyed refrigerant liquid coverage: the added liquid-label condition is taken in both directions by the unit and catalog checks, and an end-to-end decision on the altherma_gshp2 table takes one more outcome (temperature limitation from coverage while the sample has liquid_ok). All other inventories and historical floors unchanged",
+      "source": "main/logic/refrigerant_service.hpp",
+      "source_sha256": "4be858c33a686aa18a01f3d8130caae282a8dd8253d207dc14a67c34f51d4b20"
+    },
+    {
+      "compilers": {
+        "clang-17-darwin": "Apple clang version 17.0.0 (clang-1700.6.4.2), arm64",
+        "gcc-13-linux-ubuntu24": "g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0 via CI-pinned ESP-IDF v6.1 container, aarch64",
+        "gcc-15-linux-ubuntu26": "g++ (Ubuntu 15.2.0-16ubuntu1) 15.2.0, Ubuntu 26.04 Docker, aarch64"
+      },
       "hosted_confirmation": "Hosted confirmation pending: only checkup_persist.hpp uses the measured local GCC 15 aarch64 inventory as the gcc-15-github-linux-ubuntu26 candidate. No hosted execution is claimed; authoritative GitHub CI confirmation is required before merge. All other hosted inventories are unchanged.",
       "runner": "scripts/run-mock-tests.sh --coverage",
       "scope": "Late-completion journal revisions: live revision mapping with the aged-out fallback, boot-latched wall-clock labels and in-bucket end times, the rewind target with its clock-step guard, the revision-aware boot index, the revision arm/take/emit state and the DHW-only-restart identity rule, with every added outcome taken. Against main the header grows from 125/125 (Clang) and 153/153 (GCC) outcomes. Every other header inventory, every historical ratio and the 95-percent executable-line floor are unchanged.",
@@ -1219,8 +1231,8 @@
         "taken": 216
       },
       "main/logic/refrigerant_service.hpp": {
-        "outcomes": 252,
-        "taken": 206
+        "outcomes": 254,
+        "taken": 209
       },
       "main/logic/registers.hpp": {
         "outcomes": 10,
@@ -1629,8 +1641,8 @@
         "taken": 252
       },
       "main/logic/refrigerant_service.hpp": {
-        "outcomes": 302,
-        "taken": 241
+        "outcomes": 306,
+        "taken": 246
       },
       "main/logic/registers.hpp": {
         "outcomes": 12,
@@ -2047,8 +2059,8 @@
         "taken": 252
       },
       "main/logic/refrigerant_service.hpp": {
-        "outcomes": 302,
-        "taken": 241
+        "outcomes": 306,
+        "taken": 246
       },
       "main/logic/registers.hpp": {
         "outcomes": 12,
@@ -2465,8 +2477,8 @@
         "taken": 252
       },
       "main/logic/refrigerant_service.hpp": {
-        "outcomes": 302,
-        "taken": 241
+        "outcomes": 306,
+        "taken": 246
       },
       "main/logic/registers.hpp": {
         "outcomes": 12,
