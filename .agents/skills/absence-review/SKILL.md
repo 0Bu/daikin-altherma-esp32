@@ -76,7 +76,7 @@ nothing else is:
 | retained MQTT topic | an explicit empty retained publish | every other topic |
 | HA discovery config with established ownership | an explicit retraction before any replacement | other entities |
 | a checkup verdict's evidence | `checkup_dhw_reset()` and friends | the other checks |
-| the heating-curve sample memory | disarming, or saving the consent or room source | the sequence contract |
+| the heating-curve sample memory | disarming, saving the consent or room source, or changing the HomeHub host/port/unit | the sequence contract |
 
 Unproven discovery ownership delegates that config's retirement to the
 [operator migration](../../../docs/MQTT.md#migrations). Check that raw state still withdraws and
