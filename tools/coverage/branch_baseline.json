@@ -2,6 +2,95 @@
   "measurement_records": [
     {
       "compilers": {
+        "clang-17-darwin": "Apple clang version 17.0.0 (clang-1700.6.4.2), arm64",
+        "gcc-13-linux-ubuntu24": "g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0 via CI-pinned ESP-IDF v6.1 container, aarch64",
+        "gcc-15-linux-ubuntu26": "g++ (Ubuntu 15.2.0-16ubuntu1) 15.2.0, Ubuntu 26.04 Docker, aarch64"
+      },
+      "hosted_confirmation": "Hosted confirmation pending: only checkup_persist.hpp uses the measured local GCC 15 aarch64 inventory as the gcc-15-github-linux-ubuntu26 candidate. No hosted execution is claimed; authoritative GitHub CI confirmation is required before merge. All other hosted inventories are unchanged.",
+      "runner": "scripts/run-mock-tests.sh --coverage",
+      "scope": "Late-completion journal revisions: live revision mapping with the aged-out fallback, boot-latched wall-clock labels and in-bucket end times, the rewind target with its clock-step guard, the revision-aware boot index, the revision arm/take/emit state and the DHW-only-restart identity rule, with every added outcome taken. Against main the header grows from 125/125 (Clang) and 153/153 (GCC) outcomes. Every other header inventory, every historical ratio and the 95-percent executable-line floor are unchanged.",
+      "validation_boundary": "All three local compilers passed the pure C++ suite, the 95-percent line floor and the exact branch ratchet apart from this header's reported new counts. Clang completed the canonical entrypoint; GCC 13 and GCC 15 ran in containers until the branch ratchet reported the counts.",
+      "source": "main/logic/checkup_persist.hpp",
+      "source_sha256": "8fd463e2d27e4c78672b1a400a50ad949685ffdbb5f1e9aa9c4fa5868e8b0211",
+      "test_source_sha256": "cabc0746fb9831342218c8a53c425f9172cc77d84deb52ff2f818ac73a41c7e7",
+      "measured_profiles": {
+        "clang-17-darwin": [
+          207,
+          207
+        ],
+        "gcc-13-linux-ubuntu24": [
+          241,
+          241
+        ],
+        "gcc-15-linux-ubuntu26": [
+          241,
+          241
+        ]
+      }
+    },
+    {
+      "runner": "scripts/run-mock-tests.sh --coverage",
+      "scope": "Monotonic endpoint bounds for class/RPS gaps, independent of hourly duration booking. Exact 15-second positive controls and eight late-endpoint negative controls cover both signals, hour rollover and fractional seconds. Ten assertions fail against 61834599 before this correction.",
+      "source": "main/logic/checkup.hpp",
+      "source_sha256": "d919e0e0e3e443b237cbcf404d1911b5544a6850d9130bc9eb6e47f6fe45c0ed",
+      "measured_profiles": {
+        "clang-17-darwin": [
+          966,
+          1049
+        ],
+        "gcc-13-linux-ubuntu24": [
+          1116,
+          1211
+        ],
+        "gcc-15-linux-ubuntu26": [
+          1116,
+          1211
+        ]
+      },
+      "hosted_confirmation": "The existing hosted profile must be confirmed by current-head CI; no local inventory substituted."
+    },
+    {
+      "runner": "scripts/run-mock-tests.sh --coverage",
+      "scope": "Readable DHW-mode terminal valve return; 22/30-second positive controls, longer/missing/cooling/recovery negative controls and the DHW-mode population replay. Historical ratios retained or raised.",
+      "source": "main/logic/checkup.hpp",
+      "source_sha256": "7a3b092da19cb248af715d6210ec8ea9eb24529cb157ef71601d81ae116be6fc",
+      "measured_profiles": {
+        "clang-17-darwin": [
+          964,
+          1047
+        ],
+        "gcc-13-linux-ubuntu24": [
+          1116,
+          1211
+        ],
+        "gcc-15-linux-ubuntu26": [
+          1116,
+          1211
+        ],
+        "gcc-15-github-linux-ubuntu26": [
+          1116,
+          1211
+        ]
+      },
+      "hosted_confirmation": "Measured GitHub Actions run 40676367864 at 2ebbe43a2c7aa691959df1901a271671c2586e73: 1116/1211 checkup outcomes, 96.98 percent executable lines. All logic tests passed; exact inventory ratchet refreshed from this hosted measurement."
+    },
+    {
+      "compilers": {
+        "clang-17-darwin": "Apple Clang 17.0.0",
+        "gcc-13-linux-ubuntu24": "ESP-IDF v6.1 GCC 13.3.0",
+        "gcc-15-linux-ubuntu26": "Ubuntu 26.04 aarch64 GCC 15.2.0",
+        "gcc-15-github-linux-ubuntu26": "GitHub Ubuntu 26 GCC 15"
+      },
+      "hosted_confirmation": "Observed in GitHub Actions build run 40666355744 at c1bb7814f76cc4b07ee4ee600844e93e3f1058c5; 96.96 percent lines, changed-header branch ratios exceed previous floors",
+      "runner": "scripts/run-mock-tests.sh --coverage",
+      "scope": "Bounded cycling transitions, partial-sweep gaps, exclusive censor causes and runtime/count bias gates; saturation/restart and MQTT snapshot controls. Changed local branch ratios exceed historical floors. Continuous unknown-RPS recovery and upward-rounded censored intervals retain the measured outcome inventory.",
+      "sources": {
+        "main/logic/checkup.hpp": "b7477a99ead97fe3afb41764204ed9b7338a4b9108988fb8113cd295d8d14dc8",
+        "main/logic/heartbeat.hpp": "10e039025fde3f80a1f3d59328a00f51f5b80327e7dadbb60d80652090c7f8d5"
+      }
+    },
+    {
+      "compilers": {
         "clang-17-darwin": "Apple Clang 17.0.0",
         "gcc-13-linux-ubuntu24": "ESP-IDF v6.1 container GCC 13.3.0",
         "gcc-15-linux-ubuntu26": "Ubuntu 26.04 aarch64 GCC 15"
@@ -702,6 +791,92 @@
           9505
         ]
       }
+    },
+    {
+      "runner": "scripts/run-mock-tests.sh --coverage",
+      "compilers": {
+        "clang-17-darwin": "Apple clang version 17.0.0 (clang-1700.6.4.2)",
+        "gcc-13-linux-ubuntu24": "g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0 via CI-pinned ESP-IDF v6.1 container",
+        "gcc-15-linux-ubuntu26": "g++ (Ubuntu 15.2.0-16ubuntu1) 15.2.0, Ubuntu 26.04 Docker"
+      },
+      "architectures": {
+        "clang-17-darwin": "arm64",
+        "gcc-13-linux-ubuntu24": "aarch64",
+        "gcc-15-linux-ubuntu26": "aarch64"
+      },
+      "hosted_confirmation": "Hosted confirmation pending: only the three scoped headers use the measured local GCC 15 aarch64 inventory as a CI candidate. No hosted execution is claimed; authoritative GitHub CI confirmation remains required. All other hosted inventories are unchanged.",
+      "scope": "Independent MQTT room-temperature quantization, source and consent identity, source-scoped journal admission and the appended v20 configuration generation. A CRC-valid truncated v20 string prefix exercises an additional ordinary decode outcome. Every historical per-header ratio, all other inventories and the 95-percent executable-line floor are retained.",
+      "validation_boundary": "All three local compilers passed the pure C++ suite, 95-percent line floor and exact 104-file branch ratchet through the unchanged canonical runner. GCC measurements preceded final whitespace-only clang-format 18.1.8 changes and reviewed synthetic test-literal substitutions; the final integrated Clang rerun confirmed unchanged exact inventories after both. Source/test hashes identify the final equivalents; earlier observed snapshots are retained. Clang and local GCC 15 completed presenter parity and 127 installer/serial tests. The pinned GCC 13 image stopped only at the later missing-Node prerequisite. Hosted execution, device behavior and physical persistence remain unverified.",
+      "sources": {
+        "main/logic/config_store.hpp": "844852f83e874d3817cfed5139989c8b38a17b891cec84d416bb8b1c69cbc224",
+        "main/logic/history.hpp": "6beab1d9d92afbb9cf2fb9c7f5502286151db313fee06baa23d4df072bc0a777",
+        "main/logic/history_persist.hpp": "3f4249908af245e5056b63906992acb7d2aa492802e4d0847ee4389589e9fe6e"
+      },
+      "test_source_sha256": "1b5826a7dd3e5a5a6fc29077c408204a7dff7bfc9e1a43dce71ae0555652160f",
+      "measured_branch_counts": {
+        "clang-17-darwin": {
+          "main/logic/config_store.hpp": {
+            "taken": 319,
+            "outcomes": 494
+          },
+          "main/logic/history.hpp": {
+            "taken": 154,
+            "outcomes": 160
+          },
+          "main/logic/history_persist.hpp": {
+            "taken": 466,
+            "outcomes": 521
+          }
+        },
+        "gcc-13-linux-ubuntu24": {
+          "main/logic/config_store.hpp": {
+            "taken": 327,
+            "outcomes": 468
+          },
+          "main/logic/history.hpp": {
+            "taken": 197,
+            "outcomes": 202
+          },
+          "main/logic/history_persist.hpp": {
+            "taken": 549,
+            "outcomes": 610
+          }
+        },
+        "gcc-15-linux-ubuntu26": {
+          "main/logic/config_store.hpp": {
+            "taken": 327,
+            "outcomes": 468
+          },
+          "main/logic/history.hpp": {
+            "taken": 195,
+            "outcomes": 200
+          },
+          "main/logic/history_persist.hpp": {
+            "taken": 547,
+            "outcomes": 608
+          }
+        }
+      },
+      "local_executable_lines": {
+        "clang-17-darwin": [
+          9794,
+          9968
+        ],
+        "gcc-13-linux-ubuntu24": [
+          9477,
+          9761
+        ],
+        "gcc-15-linux-ubuntu26": [
+          9473,
+          9763
+        ]
+      },
+      "earlier_source_snapshots": {
+        "main/logic/config_store.hpp": "f927d5151f9fe13d845f92cbc50af9b647d3e4d9401aa1296b27227a2b38e94b",
+        "main/logic/history.hpp": "6beab1d9d92afbb9cf2fb9c7f5502286151db313fee06baa23d4df072bc0a777",
+        "main/logic/history_persist.hpp": "b906935a7930c1595f6cd66a79dd06674acc63ed2420714671b25f917305e76c"
+      },
+      "earlier_test_source_sha256": "04d28f86cbd1b208078f44ab7d3dcc8b2b7079cbae26d497d355ab87653c4717"
     }
   ],
   "method": "Exact taken/outcome inventories are measured by scripts/run-mock-tests.sh --coverage and bound to compiler family, major version and platform; hosted profiles additionally bind the runner image. The gate rejects inventory mismatches and any historical ratio decrease. Updated hosted inventories require authoritative CI confirmation. Historical measurement notes remain in Git; profiles contain the enforced counts. Measurements below identify changed sources and local compiler provenance without changing checker rules or the 95-percent executable-line floor.",
@@ -740,12 +915,12 @@
         "taken": 6
       },
       "main/logic/checkup.hpp": {
-        "outcomes": 889,
-        "taken": 815
+        "taken": 966,
+        "outcomes": 1049
       },
       "main/logic/checkup_persist.hpp": {
-        "outcomes": 125,
-        "taken": 125
+        "outcomes": 207,
+        "taken": 207
       },
       "main/logic/chunk_sink.hpp": {
         "outcomes": 272,
@@ -760,8 +935,8 @@
         "taken": 261
       },
       "main/logic/config_store.hpp": {
-        "outcomes": 486,
-        "taken": 313
+        "outcomes": 494,
+        "taken": 319
       },
       "main/logic/config_transaction.hpp": {
         "outcomes": 114,
@@ -840,8 +1015,8 @@
         "taken": 22
       },
       "main/logic/heartbeat.hpp": {
-        "outcomes": 330,
-        "taken": 180
+        "taken": 203,
+        "outcomes": 372
       },
       "main/logic/heating_curve_diagnosis.hpp": {
         "outcomes": 91,
@@ -856,12 +1031,12 @@
         "taken": 14
       },
       "main/logic/history.hpp": {
-        "outcomes": 152,
-        "taken": 146
+        "outcomes": 160,
+        "taken": 154
       },
       "main/logic/history_persist.hpp": {
-        "outcomes": 484,
-        "taken": 431
+        "outcomes": 521,
+        "taken": 466
       },
       "main/logic/homehub_map.hpp": {
         "outcomes": 68,
@@ -1158,12 +1333,12 @@
         "taken": 8
       },
       "main/logic/checkup.hpp": {
-        "outcomes": 1025,
-        "taken": 940
+        "taken": 1116,
+        "outcomes": 1211
       },
       "main/logic/checkup_persist.hpp": {
-        "outcomes": 153,
-        "taken": 153
+        "outcomes": 241,
+        "taken": 241
       },
       "main/logic/chunk_sink.hpp": {
         "outcomes": 308,
@@ -1178,8 +1353,8 @@
         "taken": 294
       },
       "main/logic/config_store.hpp": {
-        "outcomes": 460,
-        "taken": 320
+        "outcomes": 468,
+        "taken": 327
       },
       "main/logic/config_transaction.hpp": {
         "outcomes": 110,
@@ -1258,8 +1433,8 @@
         "taken": 24
       },
       "main/logic/heartbeat.hpp": {
-        "outcomes": 284,
-        "taken": 159
+        "taken": 176,
+        "outcomes": 300
       },
       "main/logic/heating_curve_diagnosis.hpp": {
         "outcomes": 109,
@@ -1274,12 +1449,12 @@
         "taken": 16
       },
       "main/logic/history.hpp": {
-        "outcomes": 192,
-        "taken": 187
+        "outcomes": 202,
+        "taken": 197
       },
       "main/logic/history_persist.hpp": {
-        "outcomes": 563,
-        "taken": 504
+        "outcomes": 610,
+        "taken": 549
       },
       "main/logic/homehub_map.hpp": {
         "outcomes": 74,
@@ -1322,8 +1497,8 @@
         "taken": 71
       },
       "main/logic/json_integer.hpp": {
-        "outcomes": 178,
-        "taken": 102
+        "taken": 124,
+        "outcomes": 208
       },
       "main/logic/label_override.hpp": {
         "outcomes": 16,
@@ -1576,12 +1751,12 @@
         "taken": 8
       },
       "main/logic/checkup.hpp": {
-        "outcomes": 1025,
-        "taken": 940
+        "taken": 1116,
+        "outcomes": 1211
       },
       "main/logic/checkup_persist.hpp": {
-        "outcomes": 153,
-        "taken": 153
+        "outcomes": 241,
+        "taken": 241
       },
       "main/logic/chunk_sink.hpp": {
         "outcomes": 308,
@@ -1596,8 +1771,8 @@
         "taken": 294
       },
       "main/logic/config_store.hpp": {
-        "outcomes": 460,
-        "taken": 320
+        "outcomes": 468,
+        "taken": 327
       },
       "main/logic/config_transaction.hpp": {
         "outcomes": 110,
@@ -1676,8 +1851,8 @@
         "taken": 24
       },
       "main/logic/heartbeat.hpp": {
-        "outcomes": 236,
-        "taken": 133
+        "taken": 135,
+        "outcomes": 236
       },
       "main/logic/heating_curve_diagnosis.hpp": {
         "outcomes": 109,
@@ -1692,12 +1867,12 @@
         "taken": 16
       },
       "main/logic/history.hpp": {
-        "outcomes": 190,
-        "taken": 185
+        "outcomes": 200,
+        "taken": 195
       },
       "main/logic/history_persist.hpp": {
-        "outcomes": 561,
-        "taken": 502
+        "outcomes": 608,
+        "taken": 547
       },
       "main/logic/homehub_map.hpp": {
         "outcomes": 74,
@@ -1740,8 +1915,8 @@
         "taken": 71
       },
       "main/logic/json_integer.hpp": {
-        "outcomes": 178,
-        "taken": 102
+        "taken": 124,
+        "outcomes": 208
       },
       "main/logic/label_override.hpp": {
         "outcomes": 16,
@@ -1994,12 +2169,12 @@
         "taken": 8
       },
       "main/logic/checkup.hpp": {
-        "outcomes": 1025,
-        "taken": 940
+        "taken": 1116,
+        "outcomes": 1211
       },
       "main/logic/checkup_persist.hpp": {
-        "outcomes": 153,
-        "taken": 153
+        "outcomes": 241,
+        "taken": 241
       },
       "main/logic/chunk_sink.hpp": {
         "outcomes": 308,
@@ -2014,8 +2189,8 @@
         "taken": 294
       },
       "main/logic/config_store.hpp": {
-        "outcomes": 460,
-        "taken": 320
+        "outcomes": 468,
+        "taken": 327
       },
       "main/logic/config_transaction.hpp": {
         "outcomes": 110,
@@ -2094,8 +2269,8 @@
         "taken": 24
       },
       "main/logic/heartbeat.hpp": {
-        "outcomes": 284,
-        "taken": 159
+        "taken": 176,
+        "outcomes": 300
       },
       "main/logic/heating_curve_diagnosis.hpp": {
         "outcomes": 109,
@@ -2110,12 +2285,12 @@
         "taken": 16
       },
       "main/logic/history.hpp": {
-        "outcomes": 190,
-        "taken": 185
+        "outcomes": 200,
+        "taken": 195
       },
       "main/logic/history_persist.hpp": {
-        "outcomes": 561,
-        "taken": 502
+        "outcomes": 608,
+        "taken": 547
       },
       "main/logic/homehub_map.hpp": {
         "outcomes": 74,
@@ -2158,8 +2333,8 @@
         "taken": 71
       },
       "main/logic/json_integer.hpp": {
-        "outcomes": 178,
-        "taken": 102
+        "taken": 124,
+        "outcomes": 208
       },
       "main/logic/label_override.hpp": {
         "outcomes": 16,

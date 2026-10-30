@@ -110,8 +110,14 @@ daik::Env3Status               env;
 // One-shot seam: the heating-curve evaluator reads ENV III after the room status and before its
 // evaluation lock, so a scenario can land a concurrent HTTP reconfiguration exactly there.
 void (*on_env3_status)() = nullptr;
+void (*on_config)()                            = nullptr;
+uint32_t                       room_generation = 1, room_last_generation = 0;
+unsigned                       room_history_calls = 0, room_history_accepted = 0;
+bool                           room_history_valid       = false;
+double                         room_history_temperature = 0.0;
 std::string                    x10a_payload;
 daik::WeatherForecastStatus weather;
+daik::logic::CheckupCyclingEvidence                                cycling;
 daik::CrashInfo             boot, live_crash;
 daik::EthInfo               ethernet;
 daik::NetLink               link            = daik::NetLink::None;
@@ -153,7 +159,13 @@ bool mqtt_retirement_store_save(const MqttRetirementRecord& record) noexcept {
     }
     return accepted;
 }
-Config      config() { return adapter::cfg; }
+Config config() {
+    if (void (*hook)() = adapter::on_config) {
+        adapter::on_config = nullptr;
+        hook();
+    }
+    return adapter::cfg;
+}
 std::string config_profile() { return adapter::cfg.profile; }
 Protocol    config_x10a_protocol() { return adapter::cfg.proto; }
 namespace detail {
@@ -226,7 +238,17 @@ Env3Status            env3_status() {
 WeatherForecastStatus weather_forecast_status() { return adapter::weather; }
 void                  history_record_circulation() {}
 void                  history_circulation_reset() {}
+uint32_t              history_room_generation() noexcept { return adapter::room_generation; }
+void                  history_record_room(bool valid, double temperature, uint32_t generation) {
+    // Record the production caller's admission witness; this adapter does not model a trend ring.
+    ++adapter::room_history_calls;
+    adapter::room_history_valid       = valid;
+    adapter::room_history_temperature = temperature;
+    adapter::room_last_generation     = generation;
+    if (generation == adapter::room_generation) ++adapter::room_history_accepted;
+}
 void                  checkup_dhw_reset() {}
+logic::CheckupCyclingEvidence checkup_cycling_evidence() { return adapter::cycling; }
 CrashInfo             diag_crash_info() { return adapter::boot; }
 CrashInfo             diag_crash_info_live() { return adapter::live_crash; }
 WifiInfo              wifi_info() { return adapter::wifi; }
@@ -287,6 +309,85 @@ void check_cycle(TickType_t delay) {
     require(sdk::locks == 0 && !sdk::mutex.held, "MQTT_MUTEX_RELEASED_AT_DELAY");
     require(sdk::takes == sdk::gives, "MQTT_LOCK_OWNERSHIP_BALANCED");
     require(adapter::config_locks == 0, "CONFIG_LOCK_OWNERSHIP_BALANCED");
+}
+void room_history_observation() {
+    initial_config();
+    adapter::cfg.ref_temp_fixed_setpoint_tenths = 0;
+    adapter::cfg.ref_temp_setpoint_topic        = "target";
+    adapter::cfg.ref_temp_setpoint_path         = "target";
+    feed("room", R"({"temperature":23.6,"time":1700000100,"enabled":false})");
+    sdk::on_delay = [](TickType_t delay) {
+        check_cycle(delay);
+        require(adapter::room_history_calls == static_cast<unsigned>(sdk::delays),
+                "ROOM_HISTORY_TICKS_WITHOUT_X10A_PUBLICATION");
+        switch (sdk::delays) {
+        case 1:
+            require(adapter::room_history_valid && adapter::room_history_temperature == 23.6 &&
+                        !daik::s_ref_status.has_setpoint && !daik::s_ref_status.enabled,
+                    "ROOM_HISTORY_ACCEPTS_VALID_TEMPERATURE_WITHOUT_TARGET_OR_HEAT_PERMISSION");
+            adapter::clock_shift_s = 601;
+            break;
+        case 2:
+            require(!adapter::room_history_valid, "ROOM_HISTORY_STALE_VALUE_IS_GAP");
+            adapter::clock_shift_s = 0;
+            feed("room", R"({"temperature":"invalid","time":1700000102})");
+            break;
+        case 3:
+            require(!adapter::room_history_valid, "ROOM_HISTORY_INVALID_PAYLOAD_IS_GAP");
+            adapter::cfg.ref_temp_time_topic = "room-time";
+            daik::mqtt_reference_reconfigure();
+            feed("room", R"({"temperature":23.7,"enabled":false})");
+            break;
+        case 4:
+            require(!adapter::room_history_valid && daik::s_ref_status.has_value &&
+                        !daik::s_ref_status.has_source_time,
+                    "ROOM_HISTORY_MISSING_MAPPED_TIME_IS_GAP");
+            adapter::cfg.ref_temp_time_topic.clear();
+            adapter::cfg.ref_temp_time_path.clear();
+            daik::mqtt_reference_reconfigure();
+            feed("room", R"({"temperature":23.8,"enabled":false})", true);
+            break;
+        case 5:
+            require(!adapter::room_history_valid, "ROOM_HISTORY_RETAINED_UNDATED_VALUE_IS_GAP");
+            feed("room", R"({"temperature":23.9,"enabled":false})");
+            break;
+        case 6:
+            require(adapter::room_history_valid && adapter::room_history_temperature == 23.9,
+                    "ROOM_HISTORY_LIVE_ARRIVAL_CAN_ESTABLISH_FRESHNESS");
+            adapter::cfg.diagnostics_enabled = false;
+            daik::mqtt_reference_reconfigure();
+            break;
+        case 7:
+            require(!adapter::room_history_valid, "ROOM_HISTORY_CONSENT_OFF_WITHHOLDS_OBSERVATION");
+            throw StopTask{};
+        }
+    };
+    try {
+        sdk::task_fn(nullptr);
+    } catch (const StopTask&) {}
+}
+void room_history_scope() {
+    initial_config();
+    feed("room", R"({"temperature":23.6,"time":1700000100,"enabled":true})");
+    sdk::on_delay = [](TickType_t delay) {
+        check_cycle(delay);
+        if (sdk::delays == 1) {
+            require(adapter::room_history_valid && adapter::room_history_accepted == 1,
+                    "ROOM_HISTORY_BASELINE_ADMITTED");
+            adapter::on_config = [] {
+                ++adapter::room_generation;
+                ++adapter::cfg.ref_temp_generation;
+            };
+        } else if (sdk::delays == 2) {
+            require(adapter::room_last_generation == 1 && adapter::room_generation == 2 &&
+                        adapter::room_history_accepted == 1,
+                    "ROOM_HISTORY_GENERATION_CAPTURE_PRECEDES_CONFIG_CUTOVER");
+            throw StopTask{};
+        }
+    };
+    try {
+        sdk::task_fn(nullptr);
+    } catch (const StopTask&) {}
 }
 void startup_failure_recovery() {
     initial_config();
@@ -1421,6 +1522,23 @@ void wire_text(cJSON* object, const char* key, const char* expected, const char*
 }
 void outgoing_heartbeat() {
     initial_config();
+    {
+        daik::JsonGuard root(cJSON_Parse(daik::build_heartbeat_payload().c_str()));
+        require(cJSON_IsNull(cJSON_GetObjectItemCaseSensitive(root.get(),
+                                                              "cycling_censored_unreadable_runs")),
+                "CYCLING_ABSENT_EVIDENCE_NULL");
+        require(
+            cJSON_IsNull(cJSON_GetObjectItemCaseSensitive(root.get(), "cycling_runtime_saturated")),
+            "CYCLING_ABSENT_SATURATION_NULL");
+    }
+    adapter::cycling.cycling_censored_transition_runs = 1;
+    adapter::cycling.cycling_censored_handover_runs   = 2;
+    adapter::cycling.cycling_censored_unreadable_runs = 3;
+    adapter::cycling.cycling_censored_restart_runs    = 4;
+    adapter::cycling.cycling_censored_start_runs      = 0;
+    adapter::cycling.cycling_classified_runtime_s     = 6696;
+    adapter::cycling.cycling_censored_runtime_s       = 65535;
+    adapter::cycling.cycling_runtime_saturated        = true;
     daik::on_mqtt(nullptr, "mqtt", MQTT_EVENT_CONNECTED, nullptr);
     sdk::ticks                  = 123456;
     adapter::cfg.proto          = daik::Protocol::S;
@@ -1464,6 +1582,18 @@ void outgoing_heartbeat() {
         wire_text(root.get(), "platform", "esp32s3", "HEARTBEAT_PLATFORM_ON_WIRE");
         wire_text(root.get(), "uptime", "000+00:02:03.456", "HEARTBEAT_UPTIME_ON_WIRE");
         wire_number(root.get(), "uptime_s", 123, "HEARTBEAT_UPTIME_SECONDS_ON_WIRE");
+        wire_number(root.get(), "cycling_censored_transition_runs", 1,
+                    "CYCLING_TRANSITION_ON_WIRE");
+        wire_number(root.get(), "cycling_censored_handover_runs", 2, "CYCLING_HANDOVER_ON_WIRE");
+        wire_number(root.get(), "cycling_censored_unreadable_runs", 3,
+                    "CYCLING_UNREADABLE_ON_WIRE");
+        wire_number(root.get(), "cycling_censored_restart_runs", 4, "CYCLING_RESTART_ON_WIRE");
+        wire_number(root.get(), "cycling_censored_start_runs", 0, "CYCLING_ZERO_START_ON_WIRE");
+        wire_number(root.get(), "cycling_classified_runtime_s", 6696,
+                    "CYCLING_CLASSIFIED_TIME_ON_WIRE");
+        wire_number(root.get(), "cycling_censored_runtime_s", 65535,
+                    "CYCLING_CENSORED_TIME_ON_WIRE");
+        wire_number(root.get(), "cycling_runtime_saturated", 1, "CYCLING_SATURATED_ON_WIRE");
         wire_number(root.get(), "free_heap", 100000, "HEARTBEAT_FREE_HEAP_ON_WIRE");
         wire_number(root.get(), "min_free_heap", 90000, "HEARTBEAT_MIN_FREE_HEAP_ON_WIRE");
         wire_number(root.get(), "max_alloc", 40000, "HEARTBEAT_LARGEST_INTERNAL_BLOCK_ON_WIRE");
@@ -4143,7 +4273,11 @@ int main(int argc, char** argv) {
     try {
         cJSON_Hooks hooks{json_witness::allocate, json_witness::release};
         cJSON_InitHooks(&hooks);
-        if (std::strcmp(scenario, "discovery_guard_retry_deleted") == 0)
+        if (std::strcmp(scenario, "room_history_observation") == 0)
+            room_history_observation();
+        else if (std::strcmp(scenario, "room_history_scope") == 0)
+            room_history_scope();
+        else if (std::strcmp(scenario, "discovery_guard_retry_deleted") == 0)
             discovery_guard_retry_abandon(false);
         else if (std::strcmp(scenario, "discovery_guard_retry_stop") == 0)
             discovery_guard_retry_abandon(true);

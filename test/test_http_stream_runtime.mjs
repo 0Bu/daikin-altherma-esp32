@@ -114,6 +114,16 @@ const mutations=[
     before:"if (!weather_tls) weather_values_reader_leave();",after:"/* mutation: keep a refused reader counted */"},
   {name:"history-epoch-bypass",file:"status",scenario:"history_epoch_refusal",
     before:"if (history_snapshot_epoch != history_epoch())",after:"if (false)"},
+  {name:"room-source-attribution",file:"status",scenario:"room_history_completed",
+    before:': room_source ? "room"',after:': room_source ? "mqtt"'},
+  {name:"room-config-admission",file:"status",scenario:"room_history_refusals",
+    before:'(room_source && (!room_identity || std::strcmp(id, "room_temp") != 0))',
+    after:'(room_source && (std::strcmp(id, "room_temp") != 0))'},
+  {name:"room-label-escape",file:"status",scenario:"room_history_completed",
+    before:String.raw`json_append_quoted(j, lbl);
+    j += ",\"dt\":";`,
+    after:String.raw`j += "\""; j += lbl; j += "\"";
+    j += ",\"dt\":";`},
   {name:"dwell-identity-bypass",file:"dwell",scenario:"dwell_state_and_identity",
     before:"!hp_values_identity_matches(identity, s_published_identity)",after:"false"},
   {name:"dwell-code-bypass",file:"dwellLogic",scenario:"dwell_state_and_identity",
@@ -136,7 +146,7 @@ try {
   const compiler=execute(cxx,["--version"]).stdout.trim();
   const baseline=execute(compile("production"),[]);
   const caseCount=Number(baseline.stdout.match(/^PASS total=(\d+)$/m)?.[1]);
-  assert.equal(caseCount,15);
+  assert.equal(caseCount,19);
   assert.equal(caseCount,[...baseline.stdout.matchAll(/^PASS (?!total=)\S+$/gm)].length);
   const wires=[]; const decoder=new TextDecoder("utf-8",{fatal:true});
   const configCases=new Map([
@@ -147,6 +157,13 @@ try {
     ["config-absent-plain",{unreadable:false,redact:false,absent:true}],
     ["config-absent-redacted",{unreadable:false,redact:true,absent:true}],
   ]);
+  const roomWires=new Set([
+    "room-history","room-history-renamed","room-disabled-diagnostics","room-disabled-broker",
+    "room-disabled-mapping","room-unknown-row","room-unknown-source","room-unavailable",
+    "room-identity-refusal","room-epoch-refusal","room-status-plain","room-status-redacted",
+    "room-status-absent",
+  ]);
+  const roomName='Example sensor Café "quote"\\line\n';
   for(const line of baseline.stdout.trim().split("\n")) {
     if(!line.startsWith("WIRE ")) {console.log(line);continue;}
     const [,name,type,hex]=line.match(/^WIRE (\S+) (json|text) ([0-9a-f]*)$/)||[];
@@ -180,6 +197,29 @@ try {
       assert.deepEqual(doc.v,Array.from({length:288},(_,i)=>i%2?null:i-100));
       assert.deepEqual(doc.held,Array.from({length:144},(_,i)=>[i*2+1,1]));
     }
+    if(name==="room-history"||name==="room-history-renamed") {
+      assert.equal(doc.id,"room_temp"); assert.equal(doc.source,"room"); assert.equal(doc.epoch,42);
+      assert.equal(doc.label,name==="room-history"?roomName:"Living room");
+      assert.equal(doc.unit,"°C"); assert.equal(doc.dt,300);
+      assert.equal(typeof doc.boot_id,"string"); assert.match(doc.boot_id,/^[0-9a-f]{16}$/);
+      assert.equal(doc.b0,700); assert.equal(doc.t0,2000000000-17-287*300);
+      assert.deepEqual(doc.v,Array.from({length:288},(_,i)=>i%4===1?null:201+i%50));
+      assert.equal(doc.v[0]/10,20.1); assert.equal(doc.v[1],null);
+      assert.deepEqual(doc.held,[],"MQTT gaps cannot borrow an outdoor-unit held-over reason");
+    }
+    if(["room-disabled-diagnostics","room-disabled-broker","room-disabled-mapping","room-unknown-row"].includes(name))
+      assert.deepEqual(doc,{ok:false,error:"unknown trend"},name);
+    if(name==="room-unknown-source") assert.deepEqual(doc,{ok:false,error:"unknown source"});
+    if(name==="room-unavailable"||name==="room-identity-refusal")
+      assert.deepEqual(doc,{ok:false,error:"history unavailable"},name);
+    if(name==="room-epoch-refusal") assert.deepEqual(doc,{ok:false,error:"history changed; retry"});
+    if(name==="room-status-plain"||name==="room-status-redacted") {
+      const label=name==="room-status-plain"?roomName:"<redacted>";
+      assert.deepEqual(doc.history.room_rows,[{id:"room_temp",label}]);
+      assert.equal(doc.reference_temperature.name,label);
+    }
+    if(name==="room-status-absent") assert.deepEqual(doc.history.room_rows,[]);
+    roomWires.delete(name);
     if(name==="invalid-ssid") assert.equal(doc.wifi.ssid,"bad"+"�".repeat(5));
     if(name==="dwell-mismatch") assert.equal(Object.hasOwn(doc.values[0],"dwell_s"),false);
     if(name==="dwell-match") assert.equal(doc.values[0].dwell_s,5);
@@ -212,6 +252,7 @@ try {
     wires.push({name,type,hex});
   }
   assert.equal(configCases.size,0,"all plain/redacted stored and absent configuration cases must run");
+  assert.equal(roomWires.size,0,"all room-history and room-label wire oracles must run");
   const controls=[];
   if(!process.argv.includes("--no-mutations")) for(const mutation of mutations) {
     const result=execute(compile(mutation.name,mutation),[mutation.scenario],false);

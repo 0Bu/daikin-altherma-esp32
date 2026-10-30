@@ -575,6 +575,31 @@ function renderEnv3Pill() {
   if (title) title.textContent = label;
 }
 
+// An independent MQTT room source keeps its history reachable during plant or sensor outages.
+function roomReferencePresent() {
+  return S.status?.reference_temperature?.configured === true && hasRoomHist("room_temp");
+}
+function roomReferenceValue() {
+  const r = S.status?.reference_temperature || {};
+  return roomReferencePresent() && S.transportUnavailable !== "status" && r.has_value === true &&
+    r.fresh === true && r.temperature_valid === true && typeof r.temperature_c === "number" &&
+    Number.isFinite(r.temperature_c) ? r.temperature_c : null;
+}
+function renderRoomReference(d) {
+  const external = d?.room == null && roomReferencePresent();
+  $("svRoom")?.closest("text")?.classList.toggle("sc-room", external);
+  if (external) {
+    setTxt("svRoom", fmt1(roomReferenceValue()));
+    setTxt("svRoomSet", "—");
+  }
+  const target = $("svRoom")?.closest('[data-insp="room"]');
+  if (!target) return;
+  const label = inspTitleText(INSPECT.room, d) + (external ? ` · ${roomHistName()}` : "");
+  target.setAttribute("aria-label", label);
+  const title = target.querySelector(":scope > title");
+  if (title) title.textContent = label;
+}
+
 function clearSchematic() {
   SCHEM_PILL_IDS.forEach((id) => setTxt(id, "—"));
   setTxt("svBuh", "");                 // no BUH step to report
@@ -585,7 +610,8 @@ function clearSchematic() {
   ["fan-on", "pump-on", "buh-on", "bsh-on", "defrost-on", "quiet-on", "sg-boost-on",
    "cooling-mode", "water-neutral", "valve2-on", "flow-switch-on"].forEach((c) => sc.classList.remove(c));
   updateSchematicStateA11y(null);
-  sc.classList.add("no-room");         // no X10A room reading: let the emitter bars use the empty box
+  sc.classList.toggle("no-room", !roomReferencePresent());
+  renderRoomReference(null);
   sc.classList.add("no-spaceh");       // no flag to show; the pill would otherwise sit stale
   $("schem").querySelectorAll(".sc-flow, .sc-rflow, .sc-tank-flow, .sc-space-flow").forEach((el) => el.classList.remove("on", "rev"));
 }
@@ -692,7 +718,8 @@ function renderLive() {
   // A BSH row is itself evidence that this profile has a DHW tank, even if its temperature did not
   // answer in this snapshot. Keep the branch visible so the active heater cannot disappear with it.
   sc.classList.toggle("no-dhw", d.tank == null && d.bsh == null);
-  sc.classList.toggle("no-room", d.room == null);
+  sc.classList.toggle("no-room", d.room == null && !roomReferencePresent());
+  renderRoomReference(d);
   sc.classList.toggle("no-spaceh", d.spaceOp == null);
   const onCls = (id, on) => $(id).classList.toggle("on", !!on);
   onCls("fPhe", pumping);
@@ -1580,6 +1607,12 @@ const inspTitleText = (e, d) => inspFieldText(e, "t", d);
 // still repaints while an idle second does not.
 const inspectModbusSignature = (row) => row
   ? JSON.stringify([row.value, row.label, row.unit, row.off, row.profile, row.enum, row.binary]) : "";
+function inspectSourceStyle(mb = false, room = false) {
+  for (const id of ["inspSrc", "inspNow"]) {
+    $(id).classList.toggle("src-val-mb", mb);
+    $(id).classList.toggle("src-val-room", room);
+  }
+}
 function inspectSig(e) {
   if (!e) return "";
   if (e.env3) {
@@ -1588,6 +1621,12 @@ function inspectSig(e) {
             env.temperature_c, env.humidity_pct, env.pressure_hpa].join("|");
   }
   const d = S.live;
+  const room = S.insp === "room" ? S.status?.reference_temperature || {} : {};
+  const roomSig = S.insp === "room" ? JSON.stringify([
+    roomReferencePresent(), S.transportUnavailable, S.status?.mqtt?.configured, room.name,
+    room.temperature_c, room.has_value, room.fresh, room.temperature_valid, room.reason,
+    room.freshness_reason, room.error,
+  ]) : "";
   const row = d ? inspCurRow(e) : null;
   // The fallback headline is a value like any other and moves like any other, so it is in the key.
   const fb = row ? null : mbForInspect(S.insp);
@@ -1605,7 +1644,7 @@ function inspectSig(e) {
   // happens to be spelled identically in both dictionaries.
   return [LANG, S.insp, inspTitleText(e, d), inspVal(row, d), inspectModbusSignature(fb),
           d && e.head ? e.head(d) : "",
-          inspNowText(e, d) || "", inspHeld(e, d) ? "held" : "", rows].join("|");
+          inspNowText(e, d) || "", inspHeld(e, d) ? "held" : "", rows, roomSig].join("|");
 }
 
 // The trend under the inspector: the same chart the value list draws. A resolved X10A row chooses
@@ -1632,7 +1671,7 @@ function renderInspectHist(e, row) {
     S.inspHistSig = sig;
     const el = $("inspHist");
     el.hidden = !offered.length;
-    el.innerHTML = offered.length ? env3HistHtml() : "";
+    replaceHistoryHtml(el, offered.length ? env3HistHtml() : "");
     return;
   }
   // A plain pill drawn from a ROW charts that row. A COMPUTED pill (ΔT, heat output, electrical
@@ -1647,9 +1686,10 @@ function renderInspectHist(e, row) {
   const trendSource = (e && (typeof e.trendSource === "function" ? e.trendSource(S.live)
                                                                  : e.trendSource)) || "";
   const offered = (id) => trendSource === "modbus" ? hasModbusHist(id)
-    : trendSource === "x10a" ? hasHist(id) : hasHist(id) || hasModbusHist(id);
+    : trendSource === "x10a" ? hasHist(id) : hasHist(id) || hasModbusHist(id) || hasRoomHist(id);
   const explicitId = trendId && offered(trendId) ? trendId : "";
-  const id = explicitId || (row ? histIdFor(row.label) : pairedId);
+  const id = explicitId || (row ? histIdFor(row.label) : pairedId)
+    || (S.insp === "room" && hasRoomHist("room_temp") ? "room_temp" : "");
   if (id) {
     if (trendSource) ensureHist(id, trendSource);
     else ensureHistPair(id);                // throttled to once a minute inside; no-op once cached
@@ -1662,6 +1702,7 @@ function renderInspectHist(e, row) {
   }
   const h = id && trendSource !== "modbus" ? S.hist.get(id) : null;
   const mh = id && trendSource !== "x10a" ? S.hist.get(histCacheKey(id, "modbus")) : null;
+  const rh = id && !trendSource ? S.hist.get(histCacheKey(id, "room")) : null;
   const pin = id ? S.histPin.get(id) : null;
   // Categorical histories append a display-only live sample. Include only that derived state in the
   // chart signature, so an actual change repaints the current cap while unchanged values polls
@@ -1677,6 +1718,7 @@ function renderInspectHist(e, row) {
   // histHtml carries localised axis/readout copy. A language switch must therefore invalidate the
   // inspector chart even when the series generation and pinned sample are unchanged.
   const sig = [LANG, id, trendSource, h ? (h.err ? "e" : h.gen) : "", mh ? (mh.err ? "e" : mh.gen) : "",
+               rh ? (rh.err ? "e" : rh.gen) : "", id === "room_temp" ? roomHistName() : "",
                liveGen, auxGen, pin ? (pin.t ?? `${pin.i}/${pin.gen}`) : ""].join("|");
   if (sig === S.inspHistSig) return;
   S.inspHistSig = sig;
@@ -1690,11 +1732,11 @@ function renderInspectHist(e, row) {
   // a chart, which is the failure cop_scope exists to prevent.
   const mb = pairedId ? mbByConcept(pairedId) : null;
   const chartName = DERIVED[id] && e && e.aria ? inspFieldText(e, "aria", null) : null;
-  el.innerHTML = !id ? ""
+  replaceHistoryHtml(el, !id ? ""
     : row ? histHtml(id, displayUnit(row), chartName || displayReadingLabel(row.label, row), trendSource)
     : pairedId ? histHtml(id, mb ? displayUnit(mb) : "", mb ? displayHomeHubLabel(mb) : inspTitleText(e, null), trendSource)
                : histHtml(id, DERIVED[id]?.unit || "",
-                          e.aria ? inspFieldText(e, "aria", null) : inspTitleText(e, null), trendSource);
+                          e.aria ? inspFieldText(e, "aria", null) : inspTitleText(e, null), trendSource));
 }
 
 function renderInspect() {
@@ -1737,10 +1779,9 @@ function renderInspect() {
     setTxt("inspTitle", inspTitleText(e, null));
     setTxt("inspSrc", "ENV III");
     $("inspSrc").hidden = false;
-    $("inspSrc").classList.toggle("src-val-mb", false);
+    inspectSourceStyle();
     $("inspNow").hidden = false;
     setTxt("inspNow", env3Value(env, "temperature_c", 1, "°C"));
-    $("inspNow").classList.toggle("src-val-mb", false);
     // Values precede the chart so the combined timeline is the final, full-width evidence block in
     // the infobox. Temperature is repeated deliberately: the header mirrors the pill while this
     // list keeps the three ENV III instruments directly comparable and independently labelled.
@@ -1765,6 +1806,19 @@ function renderInspect() {
   // everything below is the panel it always was unless the drawing itself has switched source.
   const fb = row ? null : mbForInspect(S.insp);
   const fbUnit = fb ? displayUnit(fb) : "";
+  inspectSourceStyle(!!fb);
+  if (S.insp === "room" && !row && !fb && roomReferencePresent()) {
+    const r = S.status.reference_temperature;
+    setTxt("inspTitle", inspTitleText(e, d));
+    setTxt("inspSrc", roomHistName());
+    $("inspSrc").hidden = false;
+    inspectSourceStyle(false, true);
+    setTxt("inspNow", `${fmt1(roomReferenceValue())} °C`);
+    $("inspNow").hidden = false;
+    $("inspBody").innerHTML = descParaHtml(esc(roomSourceStatusText(roomSourceStatus(r, S.status?.mqtt || {}))));
+    $("inspRows").innerHTML = "";
+    return;
+  }
   setTxt("inspTitle", inspTitleText(e, d));
   // The source line names the reading's origin, so a number in the picture can be traced to the row
   // it came from. On the fallback it names the MODBUS row — the X10A label would credit the wrong
@@ -1779,7 +1833,6 @@ function renderInspect() {
   $("inspSrc").innerHTML = esc(srcName) +
     (fb ? ` <span class="mb-tag">${esc(t("src.modbus_tag"))}</span>` : "");
   $("inspSrc").hidden = !(row || fb || e.sample);
-  $("inspSrc").classList.toggle("src-val-mb", !!fb);
   // Headline = the ONE compact reading this target stands for (its row, or a derived `head` for the
   // computed pills). An assembly like the outdoor unit has no single number, so it gets no headline
   // at all rather than a "—" that would read as a missing value.
@@ -1796,7 +1849,6 @@ function renderInspect() {
                      : fb ? displayValue(fb) + (fbUnit ? " " + fbUnit : "")
                      : "—");
   }
-  $("inspNow").classList.toggle("src-val-mb", !!fb);
   // `now` is always prose — the live "what is it doing" sentence — and it CLOSES the body, as its
   // own paragraph after the timeless explainer and its "Normal:" note, in the body's own ink. It
   // used to open the body in bold, which inverted the panel: a reader opens an explainer BECAUSE
@@ -1841,6 +1893,10 @@ function renderInspect() {
         inspComparisonHtml(m, d);
     })
     .join("");
+  if (S.insp === "room" && roomReferencePresent()) {
+    $("inspRows").innerHTML += `<div class="inspect-row room-row"><span>${esc(roomHistName())}</span>` +
+      `<span>${esc(fmt1(roomReferenceValue()))} °C</span></div>`;
+  }
 }
 
 // Name every schematic hit target from its INSPECT entry. An SVG <title> is BOTH the native hover

@@ -19,6 +19,8 @@ function productionApi(source, exports, context) {
   return { sandbox, api: sandbox.__productionApi };
 }
 
+const historyWriter = productionApi(readAppFragments(["history.js"]), ["replaceHistoryHtml"], {}).api.replaceHistoryHtml;
+
 function element() {
   return {
     dataset: {},
@@ -302,6 +304,7 @@ assertPersistentBannerRepaints(
     ensureHistPair: () => {},
     histCacheKey: (id, source) => source === "modbus" ? `modbus:${id}` : id,
     histHtml: () => `${context.LANG}:chart`,
+    replaceHistoryHtml: historyWriter,
     displayUnit: (row) => row?.unit || "",
     displayReadingLabel: String,
     DERIVED: {},
@@ -331,6 +334,7 @@ assertPersistentBannerRepaints(
     ensureHistPair: () => {},
     histCacheKey: (id) => id,
     histHtml: (_id, _unit, name) => name,
+    replaceHistoryHtml: historyWriter,
     displayUnit: () => "kW",
     displayReadingLabel: String,
     DERIVED: { pth: { unit: "kW" } },

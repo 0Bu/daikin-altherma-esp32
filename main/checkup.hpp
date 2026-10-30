@@ -81,16 +81,28 @@ void checkup_dhw_reset();
 // inside the critical section (AGENTS.md → Memory, concurrency, and HTTP safety).
 logic::CheckupReport checkup_report();
 
+// Compact completed-run evidence for MQTT. Shares the evaluator's pure projection, without
+// constructing the full eight-check report on the MQTT task's stack. No allocation under its lock.
+logic::CheckupCyclingEvidence checkup_cycling_evidence();
+
 // Copy the next completed hourly pair after `after_bucket` into a journal payload. `now_unix_s`
-// supplies the wall-clock anchor; no record is produced before time is synced or before one hour has
-// completed. Called under the FLASH mutex, and takes only the independent checkup mutex.
+// supplies the wall-clock anchor; no record is produced before time is synced or before one hour
+// has completed. A run that completes into an already appended start hour makes that hour the next
+// record again (logic::checkup_journal_next_target). Called under the FLASH mutex, and takes only
+// the independent checkup mutex.
 bool checkup_flash_next(int64_t now_unix_s, int64_t after_bucket,
                         int64_t& bucket, logic::CheckupJournalPayload& payload);
 
+// The journal confirms that the record for `bucket` is committed. Takes no mutex (one atomic
+// store): it only retires a re-appended hour, and the next checkup_flash_next applies it under the
+// checkup mutex.
+void checkup_flash_appended(int64_t bucket);
+
 // Splice journal records behind this boot's live pending hour. Deferred until profile detection has
 // confirmed the current profile/link scope and consumed its reset. Current-boot pending/live data
-// takes precedence; completed RAM hours were retired. Records are oldest-first and may contain
-// gaps or other source identities, all rejected explicitly.
+// takes precedence; completed RAM hours were retired. Records come in journal order with at most
+// one copy per hour, not necessarily in bucket order, and may contain gaps or other source
+// identities, all rejected explicitly.
 CheckupFlashRestoreResult checkup_flash_restore(const CheckupFlashRecord* records, size_t count,
                                                 int64_t now_unix_s);
 

@@ -75,6 +75,8 @@ function ctx({ x10a, mbEnabled, mbConnected, values = [], modbus = [], elements 
       .replace(/\s*\((kW|A|rps|pls|step|l\/min)\)\s*$/i, "")
       .replace(/\s*\([^)]*On\s*:[^)]*Off\s*:[^)]*\)\s*$/i, "").trim(),
     displayHomeHubLabel: (r) => String(r?.label ?? "").trim(),
+    hasRoomHist: (id) => !!context.S.status.history?.room_rows?.some((r) => r.id === id),
+    roomHistName: () => `${context.S.status.reference_temperature?.name || "Room"} · MQTT`,
     t: (k, a, b) => (k === "src.disagree" ? "sources disagree"
                    : k === "src.agree" ? "agree"
                    : k === "src.delta" ? `Difference ${a} ${b}`
@@ -120,7 +122,7 @@ function ctx({ x10a, mbEnabled, mbConnected, values = [], modbus = [], elements 
   const elements = new Proxy({}, { get: (_, id) => {
     if (!nodes.has(id)) {
       const classes = new Set();
-      nodes.set(id, { textContent: "", setAttribute() {}, closest: () => null,
+      nodes.set(id, { textContent: "", setAttribute() {}, closest: () => null, querySelectorAll: () => [],
         classList: { add: (c) => classes.add(c), remove: (c) => classes.delete(c),
           contains: (c) => classes.has(c),
           toggle: (c, on) => { if (on) classes.add(c); else classes.delete(c); } } });
@@ -149,6 +151,32 @@ function ctx({ x10a, mbEnabled, mbConnected, values = [], modbus = [], elements 
     assert.equal(nodes.get("schem").classList.contains("no-room"), true);
     assert.equal(nodes.get("svRoom").textContent, "—");
   }
+  c.S.status.reference_temperature = { configured: true, name: "Example room", has_value: true,
+    fresh: true, temperature_valid: true, temperature_c: 23.6, control_eligible: false };
+  c.S.status.history = { room_rows: [{ id: "room_temp", label: "Example room" }] };
+  c.S.live = null;
+  c.renderLiveFixture();
+  assert.equal(nodes.get("schem").classList.contains("no-room"), false,
+    "an independent MQTT room instrument stays reachable without a plant snapshot");
+  assert.equal(nodes.get("svRoom").textContent, "23.6",
+    "diagnosis ineligibility cannot blank a fresh, valid room measurement");
+  assert.equal(nodes.get("svRoomSet").textContent, "—",
+    "the actual-temperature extension cannot substitute the MQTT target for the plant target");
+  c.S.status.reference_temperature.fresh = false;
+  c.renderLiveFixture();
+  assert.equal(nodes.get("svRoom").textContent, "—", "stale MQTT current data is withheld");
+  assert.equal(nodes.get("schem").classList.contains("no-room"), false,
+    "a stale current sample cannot hide the source's measured history");
+  c.S._values = [room, setpoint];
+  c.S.live = c.liveData();
+  c.renderLiveFixture();
+  assert.equal(nodes.get("svRoom").textContent, "21.5", "the device room reading remains primary");
+  assert.equal(nodes.get("svRoomSet").textContent, "22.0");
+  c.S.status.history.room_rows = [];
+  c.S.live = null;
+  c.renderLiveFixture();
+  assert.equal(nodes.get("schem").classList.contains("no-room"), true,
+    "without either instrument the no-data path restores the empty room layout");
   for (const label of ["RT Temp.", "Indoor ambient temp. (R1T)"]) {
     const measured = { ...room, label };
     const both = ctx({ x10a: true, mbEnabled: true, mbConnected: true,
@@ -229,8 +257,8 @@ function ctx({ x10a, mbEnabled, mbConnected, values = [], modbus = [], elements 
   // so an unreachable plant looked like a live charging one.
   assert.match(SOURCE, /function clearSchematic\(\)[\s\S]*?querySelectorAll\([^)]*\.sc-tank-flow[^)]*\.sc-space-flow[^)]*\)/,
     "clearSchematic resets the box-perimeter flows (sc-tank-flow/sc-space-flow), not just sc-flow/sc-rflow");
-  assert.match(SOURCE, /function clearSchematic\(\)[\s\S]*?classList\.add\("no-room"\)/,
-    "the total no-data path also expands the emitter bars instead of retaining the previous room layout");
+  assert.match(SOURCE, /function clearSchematic\(\)[\s\S]*?classList\.toggle\("no-room", !roomReferencePresent\(\)\)/,
+    "the no-plant path preserves an independent room instrument while hiding an absent one");
   assert.match(style, /svg \.sc-sg-request-box \{[^}]*fill:\s*var\(--hatch\)/,
     "inactive Boost pill uses the neutral light-grey fill");
   assert.match(style, /\.sg-boost-on \.sc-sg-request-box \{[^}]*stroke:\s*var\(--src-mb\)/,

@@ -234,7 +234,7 @@ an authorized signing invocation passes the offline key by path without wrapping
 
 ## Report redaction contract
 
-`GET /status?redact=1` redacts the following 28 identifying fields at emission, with `<redacted>`
+`GET /status?redact=1` redacts the following 29 identifying fields at emission, with `<redacted>`
 for set identifying values. HVAC mode preserves only its allowlisted public vocabulary; unknown
 source text is hidden without changing control evaluation.
 Unset strings remain empty, unset coordinates null; keys/types and configured-source evidence stay
@@ -254,6 +254,7 @@ machine contract; the redaction audit compares it with this table and the serial
 | `net.eth.ip` | the wired interface's internal address |
 | `net.eth.mac` | identifies this specific wired controller |
 | `reference_temperature.name` | a name you typed, usually naming a room or a person |
+| `history.room_rows.label` | the same user-provided room-source name in the history offer array |
 | `reference_temperature.topic` | a path through your own broker — normally carries a room or device name |
 | `reference_temperature.temperature_path` | user-typed JSON path; may contain room, person or device names |
 | `reference_temperature.setpoint_topic` | a second broker path when the target temperature is published separately |

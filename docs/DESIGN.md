@@ -284,7 +284,10 @@ when its numeric values do not change.
 A trended reading has a 24-hour sparkline in its inspector and value expander, with no separate
 history card or range picker. Numeric charts share a light area/darker line grammar; gaps break both,
 and a lone sample is a dot. Paired X10A/HomeHub series share axes and cursor time, with blue/petrol
-source legends. Source replacement never splices two instruments into one series.
+source legends. Room temperature can add the configured MQTT source as a third, separately coloured
+series with its name and MQTT attribution, including when no device room sensor is available.
+The device sensor and MQTT source keep distinct current values and explanations. Source replacement
+never splices two instruments into one series.
 
 Computed readings chart their own units and expressions, not an input relabelled as output.
 Heat output retains signed balance across heating, cooling and defrost; the live pill also applies
@@ -317,7 +320,11 @@ Hover previews a sample; tap pins it, a second tap on the same sample/Escape cle
 to the sample instant and row, not array index or a particular chart. The two views of one row
 share the pin and freeze while either is scrubbed. Expired pins drop rather than clamp to a different
 instant. Closing the inspector preserves a pin for an open value row; collapsing the value panel
-clears it. Bubble width is independent of cursor position and remains inside the card at both ends.
+clears it. Pinned and preview bubbles stack vertically, with one measurement per line. Selected
+times appear below the plot on the time axis; phase intervals remain in categorical readouts.
+The plot keeps its position while taller bubbles gain space below it. Bubbles stay inside the card.
+Source legends toggle individual numeric series and retain at least one visible series. Choices
+survive polling within the page and apply to both views of the same chart.
 Pointer-loss and a watchdog always release suspended rendering.
 
 **Model, diagnoses and values**

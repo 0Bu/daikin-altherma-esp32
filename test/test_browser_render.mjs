@@ -1059,9 +1059,20 @@ async function captureNativeEvidence(page, context, target = "valueGroups", ance
   if (!directory || !/^(desktop\/en|phone\/de)(\/|$)/.test(context)) return;
   assert.ok(path.isAbsolute(directory), "browser evidence directory must be absolute");
   fs.mkdirSync(directory, { recursive: true });
+  const elementQuery = ancestor
+    ? `document.querySelector(${JSON.stringify(target)}).closest(${JSON.stringify(ancestor)})`
+    : `document.getElementById(${JSON.stringify(target)})`;
+  // Accordion classes change before their first expanded layout. Capture the settled surface,
+  // while allowing the schematic's intentional, continuously running CSS animations.
+  await page.waitFor(`(() => {
+    const element = ${elementQuery};
+    if (!element) return false;
+    const rect = element.getBoundingClientRect();
+    return rect.width > 0 && rect.height > 0 && element.getAnimations({subtree:true})
+      .every(animation => !(animation instanceof CSSTransition) || animation.playState !== "running");
+  })()`);
   const clip = await page.evaluate(`(() => {
-    const element = ${ancestor ? `document.querySelector(${JSON.stringify(target)}).closest(${JSON.stringify(ancestor)})`
-                              : `document.getElementById(${JSON.stringify(target)})`};
+    const element = ${elementQuery};
     const rect = element.getBoundingClientRect();
     return { x: rect.left + scrollX, y: rect.top + scrollY,
       width: rect.width, height: rect.height, scale: 1 };
@@ -1582,6 +1593,163 @@ async function assertHybridRoom(page, context, locale) {
     await captureNativeEvidence(page, `${context}/schematic`, "schem");
     await captureNativeEvidence(page, `${context}/inspector`, "inspect");
 
+    // Render the real third-source curve in the same inspector, retaining the device headline.
+    await page.evaluate(`(() => {
+      S.status.diagnostics.enabled = true;
+      S.status.reference_temperature = { configured: true, name: "Meross MTS200B",
+        topic: "fixture/room", temperature_path: "temperature", has_value: true,
+        temperature_c: 23.6, fresh: true, temperature_valid: true, control_eligible: false,
+        reason: "disabled", freshness_reason: "fresh" };
+      S.status.mqtt = { ...S.status.mqtt, configured: true };
+      S.status.history = { ...S.status.history,
+        rows: [{id: "room_temp", label: "RT Temp."}],
+        modbus_rows: [{id: "room_temp", label: "Remote controller room temperature Main"}],
+        room_rows: [{id: "room_temp", label: "Meross MTS200B"}] };
+      syncHistSources();
+      const ring = (v) => ({ at: Date.now(), gen: 1, dt: 300, unit: "°C", b0: 100, held: [], v });
+      S.hist.set("room_temp", ring(Array(288).fill(215)));
+      S.hist.set(histCacheKey("room_temp", "modbus"), ring(Array(288).fill(216)));
+      S.hist.set(histCacheKey("room_temp", "room"), ring(Array.from({length:288},
+        (_, i) => i >= 140 && i < 145 ? null : 230 + Math.round(i / 48))));
+      S.inspHistSig = null;
+      renderApp();
+      return true;
+    })()`);
+    await page.frame();
+    assert.deepEqual(await page.evaluate(`(() => ({
+      sources: historyView("room_temp").series.map(s => s.source),
+      headline: document.getElementById("inspNow").textContent,
+      mqttRow: document.querySelector("#inspRows .room-row").textContent,
+      legend: Array.from(document.querySelectorAll("#inspHist .vhist-source"), el => el.textContent),
+      roomLine: !!document.querySelector("#inspHist .vhist-line.room"),
+      roomArea: !!document.querySelector("#inspHist .vhist-area.room"),
+      gap: historyView("room_temp").series.find(s => s.source === "room").v[142],
+    }))()`), {
+      sources: ["x10a", "modbus", "room"], headline: "21.5 °C",
+      mqttRow: `Meross MTS200B · MQTT${decimal.format(23.6)} °C`,
+      legend: ["X10A", "HomeHub · Modbus", "Meross MTS200B · MQTT"],
+      roomLine: true, roomArea: true, gap: null,
+    }, `${context}: the additional MQTT curve retains all three instruments and the device headline`);
+    assert.ok(await page.evaluate('scrubText(historyView("room_temp"), 142).includes("Meross MTS200B · MQTT " + t("hist.nm"))'),
+      `${context}: a missing MQTT sample is named independently in the common cursor readout`);
+    assertLayout(await page.evaluate(layoutAudit), `${context}/mqtt-room-paired`);
+    await captureNativeEvidence(page, `${context}/mqtt-room-paired`, "inspect");
+
+    // With no plant instrument the independent source stays clickable and owns the current value.
+    await page.evaluate(`(() => {
+      const roomRing = S.hist.get(histCacheKey("room_temp", "room"));
+      S.status.hp.connected = false;
+      S.status.modbus = { ...S.status.modbus, host: "", enabled: false, connected: false };
+      S._values = [];
+      S._modbus = [];
+      S.status.history.rows = [];
+      S.status.history.modbus_rows = [];
+      syncHistSources();
+      S.hist.set(histCacheKey("room_temp", "room"), roomRing);
+      S.insp = null;
+      renderApp();
+      return true;
+    })()`);
+    await page.waitFor(`!document.getElementById("inspect").classList.contains("open") &&
+      document.getElementById("inspect").getAnimations({subtree:true})
+        .every(animation => animation.playState !== "running")`);
+    await page.evaluate('document.querySelector("#schem [data-insp=room]").scrollIntoView({block:"center",behavior:"instant"}); true');
+    await page.frame();
+    const mqttPoint = await page.evaluate(`(() => {
+      const hit = document.querySelector("#schem [data-insp=room] .sc-hitarea");
+      const rect = hit.getBoundingClientRect();
+      return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+    })()`);
+    await page.send("Input.dispatchMouseEvent", {type:"mouseMoved", ...mqttPoint});
+    await page.send("Input.dispatchMouseEvent", {type:"mousePressed", button:"left", clickCount:1, ...mqttPoint});
+    await page.send("Input.dispatchMouseEvent", {type:"mouseReleased", button:"left", clickCount:1, ...mqttPoint});
+    await page.waitFor(`(() => {
+      const panel = document.getElementById("inspect");
+      const rect = panel.getBoundingClientRect();
+      return S.insp === "room" && panel.classList.contains("open") && rect.width > 0 && rect.height > 0 &&
+        panel.getAnimations({subtree:true}).every(animation => animation.playState !== "running");
+    })()`);
+    assert.deepEqual(await page.evaluate(`(() => ({
+      plantSnapshot: S.live, visible: !document.getElementById("schem").classList.contains("no-room"),
+      pill: document.getElementById("svRoom").textContent,
+      source: document.getElementById("inspSrc").textContent,
+      headline: document.getElementById("inspNow").textContent,
+      sourceStatus: document.getElementById("inspBody").textContent ===
+        roomSourceStatusText(roomSourceStatus(S.status.reference_temperature, S.status.mqtt)),
+      sources: historyView("room_temp").series.map(s => s.source),
+      legend: document.querySelector("#inspHist .vhist-source.room")?.textContent,
+    }))()`), { plantSnapshot:null, visible:true, pill:decimal.format(23.6),
+      source:"Meross MTS200B · MQTT", headline:`${decimal.format(23.6)} °C`, sourceStatus:true,
+      sources:["room"], legend:"Meross MTS200B · MQTT" },
+    `${context}: an actual click opens the MQTT-only room instrument without inventing a device sensor`);
+    await page.evaluate(`S.status.reference_temperature.fresh = false;
+      S.status.reference_temperature.freshness_reason = "stale";
+      renderApp(); true`);
+    assert.deepEqual(await page.evaluate(`({
+      headline: document.getElementById("inspNow").textContent,
+      pill: document.getElementById("svRoom").textContent,
+      history: !!document.querySelector("#inspHist .vhist-line.room"),
+      stale: document.getElementById("inspBody").textContent.includes(t("ref.detail.stale"))
+    })`), {headline:"— °C", pill:"—", history:true, stale:true},
+    `${context}: a stale MQTT sample blanks current values while preserving the dated curve`);
+    await page.frame();
+    assertLayout(await page.evaluate(layoutAudit), `${context}/mqtt-room-only`);
+    await assertAccessibility(page, `${context}/mqtt-room-only`, {nativeTree:true});
+    await captureNativeEvidence(page, `${context}/mqtt-room-only`, "inspect");
+
+    await page.evaluate(`(() => {
+      const name = "Meross <img src=x onerror=alert(1)>";
+      S.status.reference_temperature.name = name;
+      S.status.history.room_rows[0].label = name;
+      renderApp();
+      return true;
+    })()`);
+    assert.equal(await page.evaluate(`document.getElementById("inspSrc").textContent ===
+      "Meross <img src=x onerror=alert(1)> · MQTT" &&
+      !document.querySelector("#inspect img") &&
+      document.querySelector("#inspHist .vhist-source.room").textContent ===
+      "Meross <img src=x onerror=alert(1)> · MQTT"`), true,
+    `${context}: configured source names remain escaped text in both inspector and legend`);
+    await page.evaluate(`(() => {
+      S.status.reference_temperature = { ...S.status.reference_temperature, name:"Replacement room",
+        topic:"fixture/replacement", temperature_c:24.1, fresh:true, freshness_reason:"fresh" };
+      S.status.history.room_rows[0].label = "Replacement room";
+      syncHistSources();
+      S.hist.set(histCacheKey("room_temp", "room"),
+        {at:Date.now(), gen:1, dt:300, unit:"°C", b0:388, held:[], v:[241]});
+      renderApp();
+      return true;
+    })()`);
+    assert.deepEqual(await page.evaluate(`({
+      source:document.getElementById("inspSrc").textContent,
+      headline:document.getElementById("inspNow").textContent,
+      readings:historyView("room_temp").series[0].v,
+      single:!!document.querySelector("#inspHist .vhist-pt.room"),
+      oldLine:!!document.querySelector("#inspHist .vhist-line.room")
+    })`), {source:"Replacement room · MQTT", headline:`${decimal.format(24.1)} °C`,
+      readings:[241], single:true, oldLine:false},
+    `${context}: a replacement source starts its own readings instead of inheriting the previous curve`);
+
+    // Retire the mapping, then resume the existing device-only missing-room checks below.
+    await page.evaluate(`(() => {
+      S.status.reference_temperature = { configured:false };
+      S.status.history.room_rows = [];
+      S.status.hp.connected = true;
+      S.status.diagnostics.enabled = false;
+      S._values = [
+        {label:"I/U operation mode",value:"Heating",reg:0x60},
+        {label:"Outlet Water Heat Exch. Temp. (R1T)",value:"35.0",unit:"°C",reg:0x61,off:2},
+        {label:"Outlet Water BUH Temp. (R2T)",value:"35.2",unit:"°C",reg:0x61,off:4},
+        {label:"Inlet water temp.(R4T)",value:"30.0",unit:"°C",reg:0x61,off:8},
+        {label:"RT Temp.",value:"21.5",unit:"°C",reg:0x61,off:12,concept:"room_temp"},
+        {label:"RT setpoint",value:"22.0",unit:"°C",reg:0x62,off:5},
+      ];
+      renderApp();
+      return true;
+    })()`);
+    assert.equal(await page.evaluate('document.querySelector("#inspHist .vhist-source.room") === null'), true,
+      `${context}: removed MQTT mapping cannot leave its former curve behind`);
+
     for (const withheld of [false, true]) {
       await page.evaluate(`(() => {
         S._values = S._values.filter(row => row.label !== "RT Temp.");
@@ -1619,6 +1787,242 @@ async function assertHybridRoom(page, context, locale) {
         document.getElementById("inspect").classList.contains("open") === !!INSPECT[S.insp];
     })()`), true, `${context}: the original source and inspector state must be restored`);
     await page.frame();
+  }
+}
+
+async function assertHistoryReadouts(page, context) {
+  // Use the shipped chart builders and delegated touch/keyboard wiring inside the same clipping
+  // surface as an expanded value row. Synthetic rings keep this independent of device history.
+  await page.evaluate(`(() => {
+    window.__browserHistoryOriginal = { status:S.status, hist:S.hist, histPin:S.histPin,
+      histHidden:S.histHidden,scrub:S.scrub,live:S.live,values:S._values,modbus:S._modbus };
+    S.status = structuredClone(S.status);
+    S.hist = new Map(); S.histPin = new Map(); S.histHidden = new Map(); S.scrub = null; S.live = null;
+    S._values = []; S._modbus = [];
+    const host = document.createElement("div");
+    host.id = "browserHistoryFixture"; host.className = "vdesc-inner";
+    // Keep the native finger stationary vertically as readouts grow; a fixture appended at the
+    // document tail would invoke browser scroll anchoring and turn a horizontal drag into pan-y.
+    host.style.cssText = "position:fixed;top:24px;left:50%;transform:translateX(-50%);" +
+      "width:calc(100% - 32px);max-width:800px;z-index:10000;background:var(--bg)";
+    document.body.appendChild(host);
+    wireTrendScrub(host);
+    window.__browserHistoryEvents = [];
+    for (const type of ["pointerdown","pointermove","pointerup","pointercancel","lostpointercapture"])
+      host.addEventListener(type,event => {
+        window.__browserHistoryEvents.push({type,x:event.clientX,y:event.clientY,pointer:event.pointerType});
+        window.__browserHistoryEvents = window.__browserHistoryEvents.slice(-12);
+      });
+    window.__browserHistoryRender = () => {
+      const id = host.dataset.hist;
+      host.innerHTML = '<div class="vdesc-body" style="margin:0;transform:none">' +
+        (id === ENV3_COMBINED_ID ? env3HistHtml() : histHtml(id, id === "dhw_tank" ? "°C" : "", id)) + '</div>';
+    };
+    return true;
+  })()`);
+  await page.send("Page.bringToFront");
+  await page.send("Emulation.setTouchEmulationEnabled", { enabled:true });
+  try {
+    for (const id of ["dhw_tank", "valve_dhw", "env3_combined"]) {
+      await page.evaluate(`(() => {
+        const id = ${JSON.stringify(id)}, end = Date.parse("2026-08-12T10:00:00Z") / 1000;
+        const ring = (v, unit = "°C") => ({at:Date.now(),gen:1,dt:300,b0:100,
+          t0:end - 5700,unit,held:[],v});
+        S.hist.clear(); S.histPin.clear(); S.histHidden.clear(); S.scrub = null;
+        S.status.history = {rows:[{id,label:id}],modbus_rows:[{id,label:id}],env3_rows:[]};
+        S.status.ntp = {synced:true,time:"2026-08-12T10:00:00Z"};
+        if (id === ENV3_COMBINED_ID) {
+          S.status.history.rows = []; S.status.history.modbus_rows = [];
+          S.status.history.env3_rows = ENV3_COMBINED_SERIES.map(s => ({id:s.id,label:s.id}));
+          S.status.env3 = {supported:true,enabled:true,fresh:true,
+            temperature_c:21.5,humidity_pct:48,pressure_hpa:1007};
+          S.status.weather_forecast = {configured:true,available:true,fresh:true,hourly:[1,2,3].map(hour => ({
+            time_unix_s:end + hour * 3600,temperature_c:22 + hour,humidity_pct:48 - hour,
+            pressure_hpa:1007 + hour}))};
+          for (const [index,s] of ENV3_COMBINED_SERIES.entries())
+            S.hist.set(histCacheKey(s.id,"env3"),ring(Array.from({length:20},(_,i) =>
+              [205 + i,500 - i,10050 + i][index]),["°C","%","hPa"][index]));
+        } else {
+          const values = Array.from({length:20},(_,i) => id === "dhw_tank" ? 480 - i : i < 10 ? 0 : 10);
+          S.hist.set(id,ring(values,id === "dhw_tank" ? "°C" : ""));
+          S.hist.set(histCacheKey(id,"modbus"),ring(values.map(v => id === "dhw_tank" ? v + 2 : v),
+            id === "dhw_tank" ? "°C" : ""));
+        }
+        document.getElementById("browserHistoryFixture").dataset.hist = id;
+        window.__browserHistoryRender();
+        document.getElementById("browserHistoryFixture").scrollIntoView({block:"center",behavior:"instant"});
+        return true;
+      })()`);
+      const point = async (fraction) => page.evaluate(`(() => {
+        const plot = document.querySelector("#browserHistoryFixture [data-hist]");
+        const r = plot.getBoundingClientRect();
+        return {x:r.left + r.width * ${fraction},y:r.top + r.height / 2};
+      })()`);
+      const touch = async (type, position) => {
+        await page.send("Input.dispatchTouchEvent", {
+          type, touchPoints:position ? [{...position,id:1,radiusX:1,radiusY:1,force:1}] : [],
+        });
+        // Native touch movement can be coalesced until the compositor's next frame. A real finger
+        // supplies successive frames; sending one jump and then only polling can leave a pending
+        // movement (or one inside platform touch slop) without any pointermove for the UI to read.
+        await page.evaluate("new Promise(resolve => requestAnimationFrame(() => resolve(true)))");
+      };
+      const waitForTime = async (fraction, phase) => {
+        try {
+          await page.waitFor(`(() => {
+            const host=document.getElementById("browserHistoryFixture"),plot=host.querySelector("[data-hist]");
+            const i=scrubIndex(plot,plot.getBoundingClientRect().left + plot.clientWidth * ${fraction});
+            return host.querySelector(".vhist-time.vhist-live").textContent === scrubTime(historyView(plot.dataset.hist),i);
+          })()`);
+        } catch (error) {
+          const state = await page.evaluate(`(() => {
+            const host=document.getElementById("browserHistoryFixture"),plot=host.querySelector("[data-hist]");
+            const r=plot.getBoundingClientRect(),time=host.querySelector(".vhist-time.vhist-live");
+            const i=scrubIndex(plot,r.left + plot.clientWidth * ${fraction});
+            return {id:plot.dataset.hist,scrub:S.scrub,actual:time.textContent,hidden:time.hidden,
+              expected:scrubTime(historyView(plot.dataset.hist),i),sample:i,
+              plot:{left:r.left,top:r.top,width:r.width,height:r.height},events:window.__browserHistoryEvents};
+          })()`);
+          throw new Error(`${context}/${id}/${phase}/${fraction}: native touch selection did not reach its sample; ` +
+            `${JSON.stringify(state)}; ${error.message}`);
+        }
+      };
+      const start = await point(0.2);
+      await touch("touchStart", start);
+      await touch("touchEnd");
+      assert.equal(await page.evaluate(`S.histPin.has(${JSON.stringify(id)})`),true,
+        `${context}/${id}: a real touch release pins its selected sample`);
+      await page.evaluate("window.__browserHistoryRender(); true");
+      const baseline = await page.evaluate(`(() => {
+        const host = document.getElementById("browserHistoryFixture");
+        const p = host.querySelector("[data-hist]").getBoundingClientRect();
+        return {top:p.top + scrollY,height:p.height,
+          tip:host.querySelector(".vhist-tip.vhist-pinned").textContent,
+          time:host.querySelector(".vhist-time.vhist-pinned").textContent};
+      })()`);
+      if(id !== "valve_dhw")
+        assert.equal(baseline.tip.includes(baseline.time),false,
+          `${context}/${id}: pinned measurement time belongs on the axis rather than in the bubble`);
+      // Start far from the preceding tap so this is unambiguously a new drag rather than a second
+      // tap. Its first destination also clears movement slop on narrow phone plots.
+      let finger = await point(0.9);
+      await touch("touchStart", finger);
+      await waitForTime(0.9,"start");
+      assert.equal(await page.evaluate("S.scrub"),id,`${context}/${id}: touchstart owns the active scrub`);
+      for (const fraction of [0.35,0.8,1,0]) {
+        const destination = await point(fraction);
+        const steps = Math.min(8,Math.max(3,Math.ceil(Math.abs(destination.x-finger.x)/48)));
+        for (let step=1;step<=steps;step++)
+          await touch("touchMove",{x:finger.x+(destination.x-finger.x)*step/steps,y:destination.y});
+        finger = destination;
+        await waitForTime(fraction,"move");
+        const state = await page.evaluate(`(() => {
+          const host = document.getElementById("browserHistoryFixture");
+          const plot = host.querySelector("[data-hist]");
+          const pin = host.querySelector(".vhist-tip.vhist-pinned"), live = host.querySelector(".vhist-tip.vhist-live");
+          const pinTime = host.querySelector(".vhist-time.vhist-pinned"), liveTime = host.querySelector(".vhist-time.vhist-live");
+          const rect = el => {const r=el.getBoundingClientRect();return {left:r.left,right:r.right,
+            top:r.top + scrollY,bottom:r.bottom + scrollY,height:r.height,width:r.width};};
+          const p=rect(plot), a=rect(pin), b=rect(live), c=rect(pinTime), d=rect(liveTime), clip=rect(host);
+          const view=historyView(plot.dataset.hist,plot.dataset.source || "");
+          const i=scrubIndex(plot,plot.getBoundingClientRect().left + plot.clientWidth * ${fraction});
+          return {visible:!live.hidden && !liveTime.hidden && a.height > 0 && b.height > 0,
+            stacked:b.top >= a.bottom + 7, timesStacked:d.top >= c.bottom,
+            plotTop:p.top,plotHeight:p.height,pin:pin.textContent,pinTime:pinTime.textContent,
+            axisTime:liveTime.textContent,expectedTime:scrubTime(view,i),
+            selectedTimeInBubble:!STATE_HIST[plot.dataset.hist] && live.textContent.includes(scrubTime(view,i)),
+            axisBelow:c.top >= p.bottom && d.top >= p.bottom,
+            inside:[a,b,c,d].every(r=>r.left >= clip.left - 1 && r.right <= clip.right + 1 && r.bottom <= clip.bottom + 1),
+            bounds:{pin:a,live:b,pinTime:c,liveTime:d,clip},
+            forecast:i >= view.v.length,
+            forecastLabel:live.textContent.includes(t("hist.forecast")),
+            cross:!plot.querySelector(".vhist-cross.vhist-pinned").hidden};
+        })()`);
+        const label = `${context}/${id}/${fraction}`;
+        assert.equal(state.visible,true,`${label}: both selected readouts remain visible`);
+        assert.equal(state.stacked,true,`${label}: the live bubble must be below the pinned bubble`);
+        assert.equal(state.timesStacked,true,`${label}: selected times must not hide each other`);
+        assert.equal(state.inside,true,`${label}: neither readout nor time may be clipped: ${JSON.stringify(state.bounds)}`);
+        assert.equal(state.axisBelow,true,`${label}: selected times belong below the curve`);
+        assert.equal(state.axisTime,state.expectedTime,`${label}: the axis follows the selected sample`);
+        assert.equal(state.selectedTimeInBubble,false,`${label}: measurement tooltips contain values, with time on the axis`);
+        assert.equal(state.pin,baseline.tip,`${label}: movement must preserve the pinned reading`);
+        assert.equal(state.pinTime,baseline.time,`${label}: movement must preserve its pinned instant`);
+        assert.equal(state.cross,true,`${label}: the pinned crosshair remains visible`);
+        assert.ok(Math.abs(state.plotTop-baseline.top)<1,`${label}: tooltip height must not move the plot`);
+        assert.equal(state.plotHeight,baseline.height,`${label}: tooltip height must not stretch the plot`);
+        if(id === "env3_combined" && fraction === 0.8) {
+          assert.equal(state.forecast,true,`${label}: the gesture reaches a provider forecast point`);
+          assert.equal(state.forecastLabel,true,`${label}: forecast provenance remains visible`);
+        }
+        if(fraction === 0.35)
+          await captureNativeEvidence(page,`${context}/${id}/comparison`,"browserHistoryFixture");
+      }
+      await captureNativeEvidence(page,`${context}/${id}`,"browserHistoryFixture");
+      await touch("touchCancel");
+      assert.equal(await page.evaluate(`(() => {
+        const host = document.getElementById("browserHistoryFixture");
+        return host.querySelector(".vhist-tip.vhist-live").hidden && host.querySelector(".vhist-time.vhist-live").hidden &&
+          !host.querySelector(".vhist-tip.vhist-pinned").hidden && !host.querySelector(".vhist-time.vhist-pinned").hidden;
+      })()`),true,`${context}/${id}: cancelling removes only the moving readout and its time`);
+      await page.evaluate('document.querySelector("#browserHistoryFixture [data-hist]").focus(); true');
+      await page.key("End",{code:"End",keyCode:35});
+      assert.equal(await page.evaluate(`(() => {
+        const host=document.getElementById("browserHistoryFixture"),plot=host.querySelector("[data-hist]");
+        return !host.querySelector(".vhist-time.vhist-live").hidden &&
+          host.querySelector(".vhist-time.vhist-live").textContent === scrubTime(historyView(plot.dataset.hist),scrubCount(plot)-1);
+      })()`),true,`${context}/${id}: keyboard selection updates the same axis time`);
+      await page.evaluate('document.querySelector("#browserHistoryFixture [data-hist]").blur(); true');
+      if (id !== "valve_dhw") {
+        const legend = await page.evaluate(`(() => {
+          const host=document.getElementById("browserHistoryFixture"),id=host.dataset.hist;
+          const sources=id === "dhw_tank" ? ["x10a","modbus"]
+            : ["env3_temperature","env3_humidity","env3_pressure"];
+          const pathClass={modbus:"mb",env3_humidity:"env-humidity",env3_pressure:"env-pressure"};
+          const rings=JSON.stringify(Array.from(S.hist));
+          const button=source=>host.querySelector('[data-hist-series="' + source + '"]');
+          const changed=[];
+          for (const source of sources.slice(1)) {
+            const name=historyView(id).series.find(s=>s.source === source).name;
+            button(source).click(); window.__browserHistoryRender();
+            const plot=host.querySelector("[data-hist]");
+            scrubMove(plot,+plot.dataset.n - 1);
+            const cls=pathClass[source];
+            changed.push(button(source).getAttribute("aria-pressed") === "false" && !button(source).disabled &&
+              !host.querySelector(".vhist-line." + cls) && !host.querySelector(".vhist-area." + cls) &&
+              !host.querySelector(".vhist-tip.vhist-pinned").textContent.includes(source === "modbus" ? "Modbus" : name) &&
+              Array.from(host.querySelectorAll('.vhist-mark.vhist-live[data-source="' + source + '"]')).every(mark=>mark.hidden));
+          }
+          const last=sources[0],hidden=JSON.stringify(Array.from(S.histHidden.get(id)));
+          const protectedLast=button(last).disabled && button(last).getAttribute("aria-pressed") === "true";
+          button(last).click(); window.__browserHistoryRender();
+          const unchanged=JSON.stringify(Array.from(S.histHidden.get(id))) === hidden;
+          for (const source of sources.slice(1)) {button(source).click();window.__browserHistoryRender();}
+          const beforePoll=button(sources[1]);
+          beforePoll.focus(); S.clickHold=false;
+          setHtml(host.id,host.innerHTML + "<!-- changed poll -->");
+          const pollFocus=button(sources[1]) !== beforePoll && document.activeElement === button(sources[1]);
+          return {hidden:changed.every(Boolean),protectedLast,unchanged,
+            pollFocus,
+            restored:sources.every(source=>button(source).getAttribute("aria-pressed") === "true" && !button(source).disabled) &&
+              sources.slice(1).every(source=>!!host.querySelector(".vhist-line." + pathClass[source])),
+            ringsUnchanged:JSON.stringify(Array.from(S.hist)) === rings};
+        })()`);
+        assert.deepEqual(legend,{hidden:true,protectedLast:true,unchanged:true,pollFocus:true,restored:true,ringsUnchanged:true},
+          `${context}/${id}: legend clicks hide and restore independent series while retaining the final curve and source history`);
+      }
+    }
+    assert.deepEqual(page.diagnostics,[],`${context}: history interactions must emit no browser errors`);
+  } finally {
+    await page.send("Emulation.setTouchEmulationEnabled",{enabled:false});
+    await page.evaluate(`(() => {
+      const original=window.__browserHistoryOriginal;
+      Object.assign(S,{status:original.status,hist:original.hist,histPin:original.histPin,
+        histHidden:original.histHidden,scrub:original.scrub,live:original.live,_values:original.values,_modbus:original.modbus});
+      document.getElementById("browserHistoryFixture").remove();
+      delete window.__browserHistoryOriginal; delete window.__browserHistoryRender; delete window.__browserHistoryEvents;
+      renderApp(); window.scrollTo(0,0); return true;
+    })()`);
   }
 }
 
@@ -1780,6 +2184,28 @@ try {
     await openModalWithKeyboard(page, "refTempModal", modalTriggers.refTempModal,
       "selftest/desktop/de/refTempModal", { route: false });
     throw new Error("route-isolation-bypass mutation unexpectedly survived the route gate");
+  } else if (process.argv.includes("--history-only")) {
+    for (const viewport of viewports) {
+      await page.viewport(viewport.width, viewport.height);
+      for (const locale of browserLocales) {
+        await activateLocale(page, locale);
+        await assertHistoryReadouts(page, `${viewport.name}/${locale}/history`);
+        console.log(`history readouts checked: ${viewport.name}/${locale}`);
+      }
+    }
+    console.log(`focused history rendering passed: ${browserLocales.length} locales; ${viewports.length} viewports`);
+  } else if (process.argv.includes("--room-only")) {
+    for (const viewport of viewports) {
+      await page.viewport(viewport.width, viewport.height);
+      for (const locale of browserLocales) {
+        await activateLocale(page, locale);
+        await page.evaluate("showStage('dashboard'); window.scrollTo(0, 0); true");
+        await assertHybridRoom(page, `${viewport.name}/${locale}/hybrid-room`, locale);
+        console.log(`room render checked: ${viewport.name}/${locale}`);
+      }
+    }
+    assert.deepEqual(page.diagnostics, [], "room source states must emit no browser errors");
+    console.log(`focused room rendering passed: ${browserLocales.length} locales; ${viewports.length} viewports`);
   } else if (process.argv.includes("--cards-only")) {
     // Small prototype-parity pass for sidebar iterations. The normal invocation still owns the
     // complete locale/modal matrix and the supervisor's independent negative controls.
@@ -1851,6 +2277,7 @@ try {
       nativeAltherma4Checks++;
       await assertHybridRoom(page, `${viewport.name}/${locale}/hybrid-room`, locale);
       hybridRoomChecks++;
+      await assertHistoryReadouts(page, `${viewport.name}/${locale}/history`);
 
       // Firmware errors are intentionally preserved verbatim because they carry the safe next step.
       // Unlike compact progress labels, they can be a sentence. Exercise the production failure

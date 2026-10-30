@@ -120,7 +120,7 @@ scenarios = ['discovery_guard_clean', 'discovery_guard_default', 'discovery_guar
              'discovery_topic_roundtrip',
              'callback_fragments', 'callback_payload_bounds', 'callback_epoch_cutover',
              'callback_queue_full', 'callback_timestamp_order', 'probe_capture_generation',
-             'probe_proof_expiry']
+             'probe_proof_expiry', 'room_history_observation', 'room_history_scope']
 if args.scenario:
     assert set(args.scenario) <= set(scenarios), 'unknown requested scenario'
     scenarios = [scenario for scenario in scenarios if scenario in args.scenario]
@@ -354,6 +354,10 @@ mutations = [
      'mqtt_publish(s_heartbeat, js.c_str(), static_cast<int>(js.size()), 0, 0);',
      'mqtt_publish(s_heartbeat, js.c_str(), static_cast<int>(js.size()), 0, 1);',
      'HEARTBEAT_USES_OWN_TOPIC_AND_NONRETAINED_PUBLISH', 1),
+    ('heartbeat-missing-cycling-snapshot', 'outgoing_heartbeat',
+     'f.cycling = checkup_cycling_evidence();',
+     'f.cycling = logic::CheckupCyclingEvidence{};',
+     'CYCLING_TRANSITION_ON_WIRE', 1),
     ('heartbeat-aggregate-heap-as-largest', 'outgoing_heartbeat',
      'f.max_alloc = heap_largest_internal_block();',
      'f.max_alloc = esp_get_free_heap_size();',
@@ -675,6 +679,24 @@ mutations.extend([
      'evaluate_heating_curve(ref_config, x10a_connected);',
      'if (sdk::delays < 5) evaluate_heating_curve(ref_config, x10a_connected);',
      'CURVE_OWNER_RESUMES_WITHOUT_DUPLICATE_EVENT', 1),
+])
+mutations.extend([
+    ('room-history-heating-eligibility', 'room_history_observation',
+     'history_record_room(room.temperature_valid, room.temperature_c, generation);',
+     'history_record_room(room.control_eligible, room.temperature_c, generation);',
+     'ROOM_HISTORY_ACCEPTS_VALID_TEMPERATURE_WITHOUT_TARGET_OR_HEAT_PERMISSION', 1),
+    ('room-history-stale-admission', 'room_history_observation',
+     'room = reference_room_sample(raw, freshness);',
+     'ReferenceFreshness trusted = freshness; trusted.fresh = true; room = reference_room_sample(raw, trusted);',
+     'ROOM_HISTORY_STALE_VALUE_IS_GAP', 1),
+    ('room-history-x10a-gate', 'room_history_observation',
+     'record_room_history(ref_config, room_history_generation);',
+     'if (gate.publish_cycle) record_room_history(ref_config, room_history_generation);',
+     'ROOM_HISTORY_TICKS_WITHOUT_X10A_PUBLICATION', 1),
+    ('room-history-generation-reloaded', 'room_history_scope',
+     'record_room_history(ref_config, room_history_generation);',
+     '(void)room_history_generation; record_room_history(ref_config, history_room_generation());',
+     'ROOM_HISTORY_GENERATION_CAPTURE_PRECEDES_CONFIG_CUTOVER', 1),
 ])
 for name, scenario, before, after, assertion, count in mutations:
     if scenario not in scenarios:

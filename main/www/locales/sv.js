@@ -1,4 +1,4 @@
-// translation-source: 33967449acf2e4c68a9c1a1feb866a3378533feeec8e796587881b7dec62ef92
+// translation-source: 5453eeaa5ecebfac9d729776d8b40e937dbfce10d0a431843b3f3298cd22a9ff
 I18N.sv = localeValues([
   /* sys.nodata */ "Inga data",
   /* sys.unreachable */ "Inte tillgänglig",
@@ -198,7 +198,6 @@ I18N.sv = localeValues([
   /* check.detail.fault.past */ "Inget meddelande är aktivt nu; ett registrerades under perioden. Att det försvann bevisar varken orsak eller lösning.",
   /* check.detail.fault.past_unknown */ "Ett meddelande registrerades; aktuellt feltillstånd kan inte läsas.",
   /* check.detail.collecting */ (a, b) => `Läsbara signaler: ${a} av ${b} krävs.`,
-  /* check.detail.cycling_split */ " Endast avslutade och genomgående klassificerade värmekörningar bedöms. Varmvatten, kylning och oklassificerade körningar är observationer.",
   /* check.detail.outdoor_cycling */ " X10A-utomhusdata är endast aktuella mätningar från slutförda körningar som hela tiden var rumsuppvärmning. De är sammanhang och ändrar inte gränsen eller bedömningen.",
   /* check.detail.outdoor_defrost */ " X10A-utomhusdata är endast aktuella mätningar medan avfrostning och kompressorstatus var läsbara och kompressorn gick. De är sammanhang och ändrar inte gränsen eller bedömningen.",
   /* check.detail.dhw_candidate */ (a, b, c, d) => `Godkända timfönster: ${a}; aktuell kandidat: ${c} av ${d}.`,
@@ -223,6 +222,7 @@ I18N.sv = localeValues([
   /* check.cycling_dhw */ (a, b) => `varmvatten ${a} · medel ${b}`,
   /* check.cycling_cooling */ (n) => `Kylning ${n} ${n === 1 ? "utelämnad" : "utelämnade"}`,
   /* check.cycling_censored */ (n) => `${n} utan klass`,
+  /* check.cycling_causes */ "övergång|omstart/journal|start ej observerad",
   /* check.outdoor_one */ (source, mean) => `${source} ${mean} °C`,
   /* check.outdoor_range */ (source, min, mean) => `${source} min. ${min} °C · medel ${mean} °C`,
   /* check.min */ (m) => `${m} min`,
@@ -255,7 +255,7 @@ I18N.sv = localeValues([
   /* check.detail.age_label */ "Senaste mätningens ålder:",
   /* check.detail.horizon_wait */ (a) => `Ett helt 24-timmarsfönster saknas ännu: ${a} återstår.`,
   /* check.detail.fault.ok */ "Inget aktuellt eller sparat meddelande i läsbara felsignaler.",
-  /* check.detail.cycling.info */ "≥12 avslutade värmekörningar med medel <10 min: projekttips.",
+  /* check.detail.cycling.info */ "Värmemedel <10 min: projekttips.",
   /* check.detail.cycling.ok */ "Inget kortkörningstips i avslutade värmekörningar.",
   /* check.detail.defrost.info */ "≥3 parade avfrostningar överstiger 15% av läsbar kompressortid: projekttips.",
   /* check.detail.defrost.ok */ "Inget avfrostningsandelstips; väder och luckor ej bedömda.",
@@ -263,14 +263,14 @@ I18N.sv = localeValues([
   /* check.detail.pressure.warn */ "Registrerat sammanhängande ≥60 s ≤1,0 bar; inte trycket nu.",
   /* check.detail.pressure.ok */ "Inget godkänt värde ≤1,0 bar, projektets tröskel.",
   /* check.detail.class_missing */ "Ofullständig klassificering; ingen gemensam cykelbedömning.",
-  /* check.detail.heating_runs_insufficient */ "Färre än 12 lämpliga avslutade värmekörningar; ingen cykelbedömning.",
+  /* check.detail.heating_runs_insufficient */ "<12 lämpliga avslutade värmekörningar; ingen bedömning.",
   /* check.detail.defrost_events_insufficient */ "Färre än tre parade avfrostningar; ingen andelsbedömning.",
   /* check.detail.source_stale */ "Inget färskt X10A-prov; aktuellt tillstånd okänt. Historik behålls.",
   /* check.detail.no_paired_runtime */ "Ingen parad läsbar drifttid; bara antal.",
   /* check.detail.current_label */ "Aktuellt vattentryck:",
   /* check.detail.minimum_time_label */ "Minimum registrerat:",
   /* check.detail.coverage_missing */ (a) => `Saknad läsbar tid: ${a} s.`,
-  /* check.detail.channel_coverage */ (a, b) => `${a}: ${b} läsbart`,
+  /* check.detail.channel_coverage */ (a, b) => `${a}: täckning ${b}`,
   /* check.summary.warnings */ (n) => `${n} ${n === 1 ? "varning" : "varningar"}`,
   /* check.summary.notes */ (n) => `${n} ${n === 1 ? "notering" : "noteringar"}`,
   /* check.summary.ok */ "Inga tips i bedömda data",
@@ -1230,7 +1230,7 @@ DESCRIPTION_I18N.sv = descriptionValues([
 MODEL_DESCRIPTION_I18N.sv = modelDescriptionValues([
   ["Enhetens meddelanden", "inga bevis på orsak eller lösning."], // health_fault
   ["R5T: en punkt i skiktad tank, inte energi.", "Projekttips ≥0,8 K/h utan pump-/tappmarkörer. Tappning möjlig utan markörer; 0 K/h utesluter inte värmeförlust. Cirkulation bevisar inte orsak."], // health_dhw_loss
-  ["Kompressorstarter", "≥12 avslutade värmekörningar, medel <10 min; ≥90% av alla avslutade körningar klassificerade. Intern regel, inte Daikin; varmvatten, kylning och oklassificerade utesluts."], // health_cycling
+  ["Kompressorstarter", "Intern regel: ≥12 värmekörningar, medel <10 min; ≥90% av alla avslutade körningar klassificerade utan bekräftade övergångar och ≥90% värme/osäker tidstäckning. Ingen Daikin-gräns."], // health_cycling
   ["Avfrostning", "≥3 parade, >15% av kompressorns drifttid där både kompressor- och avfrostningsstatus kan läsas. Intern regel, inte Daikin; fuktighet och hela värmeväxlarens temperatur saknas."], // health_defrost
   ["Tryck", "gemensam intern regel ≤1,0 bar; 60 s kontinuerligt observerat ger varning. Inte universell; modellmanual gäller."], // health_pressure
   ["Flöde efter 60 s pump", "Gräns kräver samma modell/läge/förhållanden; inte nominellt eller bevis på för lågt flöde."], // health_flow

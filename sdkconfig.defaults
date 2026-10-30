@@ -48,7 +48,16 @@ CONFIG_SECURE_BOOT_BUILD_SIGNED_BINARIES=n
 
 # WiFi
 CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM=10
-CONFIG_ESP_WIFI_DYNAMIC_RX_BUFFER_NUM=32
+# Every received frame is copied into a dynamic RX buffer that stays allocated until lwIP's consumer
+# frees the pbuf (LWIP_L2_TO_L3_COPY is off); the bench driver used 1,700 bytes per buffer. With the
+# upstream mDNS queue of 16 and cap of 32, a bench Weather TLS handshake held up to 17 of them
+# (28.2 KiB), almost all mDNS packets queued behind the starved mDNS task (see
+# CONFIG_MDNS_ACTION_QUEUE_LEN). The cap is that queue plus one full-size TCP receive window
+# (CONFIG_LWIP_TCP_WND_DEFAULT / CONFIG_LWIP_TCP_MSS = 8 segments) and at least the static RX count,
+# as the Kconfig help asks. The rule budgets one receiving TCP connection only: mDNS holds one more
+# buffer while it parses, and every other receiver (another socket, ARP, DHCP, DNS) shares the cap,
+# so at the cap the driver drops the next frame of whatever kind; each of these protocols retries.
+CONFIG_ESP_WIFI_DYNAMIC_RX_BUFFER_NUM=16
 # Dynamic TX buffers. The policy is a Kconfig CHOICE (ESP_WIFI_TX_BUFFER), whose options are the
 # booleans ESP_WIFI_STATIC_TX_BUFFER / ESP_WIFI_DYNAMIC_TX_BUFFER — so the dynamic option is what a
 # defaults file can actually select. CONFIG_ESP_WIFI_TX_BUFFER_TYPE is a promptless int the choice
@@ -125,6 +134,10 @@ CONFIG_COMPILER_OPTIMIZATION_SIZE=y
 # Drop code paths this firmware never uses.
 # mbedTLS human-readable error-string tables — we only log numeric TLS codes (MQTTS/OTA). ~6 KB.
 CONFIG_MBEDTLS_ERROR_STRINGS=n
+# TLS client only: OTA, Weather and optional MQTTS connect out; the HTTP service is plain
+# trusted-LAN HTTP and an HTTPS server is not adopted (ESP_IDF_MATRIX.md N07). Without the server
+# role mbedTLS drops its server handshake state machine.
+CONFIG_MBEDTLS_TLS_CLIENT_ONLY=y
 # No TLS session-ticket resumption: our TLS clients (OTA fetch, MQTTS bridge) open few,
 # long-lived connections where resumption buys nothing. ~1.8 KB.
 CONFIG_MBEDTLS_CLIENT_SSL_SESSION_TICKETS=n
@@ -153,12 +166,25 @@ CONFIG_ESP_WIFI_ENABLE_WPA3_OWE_STA=n
 CONFIG_ESP_WIFI_ENABLE_WPA3_OWE_SOFTAP=n
 CONFIG_ESP_WIFI_ENABLE_SAE_PK=n
 CONFIG_ESP_WIFI_SOFTAP_SAE_SUPPORT=n
+# Provisioning stores a PSK station only; no path configures an EAP identity, certificate or
+# WPA2/WPA3-Enterprise network, so the supplicant's enterprise methods are unreachable.
+CONFIG_ESP_WIFI_ENTERPRISE_SUPPORT=n
 
 # The HomeHub lookup uses bounded one-shot mdns_query_ptr calls. It never registers the component's
 # interactive console or continuous mdns_browse_* daemon, so keep those optional 1.12.0 paths out of
 # the firmware while retaining service advertisement and one-shot queries.
 CONFIG_MDNS_ENABLE_CONSOLE_CLI=n
 CONFIG_MDNS_ENABLE_BROWSE=n
+# The mDNS task runs at priority 1 and keeps every received packet, together with its WiFi RX
+# buffer, in this action queue until it gets the CPU. A higher-priority task that computes for
+# seconds (Weather's TLS certificate verification takes ~2.7 s) therefore filled the default
+# 16-entry queue (26.6 KiB of RX buffers on the bench). Use the component minimum. While the queue
+# is full (after such starvation, or a burst of multicast answers to one query), mDNS drops
+# received packets (queriers resend), defers timed sends to the next timer tick, and fails a
+# one-shot query or hostname change started into it; the HomeHub search retries such an attempt
+# twice. A network event posted then is lost silently: an interface enabled at "got IP" stays
+# silent until the next "got IP", and a disable at disconnect is missed the same way.
+CONFIG_MDNS_ACTION_QUEUE_LEN=8
 
 # C++ exceptions — HTTP handlers run under a try/catch OOM guard (503 instead of crash), the
 # same memory discipline.
