@@ -2450,7 +2450,7 @@ def self_test() -> None:
      'daik::checkup_flash_restore(daik::logic::CheckupJournalRecord const*, unsigned int, long long)': 224,
      'daik::logic::checkup_journal_rebuild(daik::logic::CheckupRing&)': 176,
      'daik::logic::checkup_journal_choose(long long)': 128,
-     'daik::logic::checkup_journal_select_slot(long long)::{lambda(daik::logic::CheckupJournalRecord const&)#1}::operator()(daik::logic::CheckupJournalRecord const&) const': 64,
+     'daik::logic::checkup_journal_select_slot(long long)::{lambda(daik::logic::CheckupJournalRecord const&)}::operator()(daik::logic::CheckupJournalRecord const&) const': 64,
      'daik::logic::checkup_journal_restore_admits(daik::logic::CheckupJournalPayload const&)': 32,
      'daik::logic::checkup_journal_in_window(long long, long long)': 32,
      'daik::(anonymous namespace)::checkup_persist_seal()': 32,
