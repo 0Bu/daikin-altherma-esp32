@@ -478,8 +478,8 @@ assert.match(sealOpen, /newest = latched_newest_locked\(unix_s - \(now_us - s_la
 assert.match(sealOpen, /logic::checkup_seal_bucket\(end, newest, covered\)/);
 assert.match(cRecord, /if \(s_seal_bucket != INT64_MIN\) return;/,
   "a sealed open hour must not change before the drain journals it");
-assert.equal(count(flashNext, /return sealed_flash_next_locked\(after_bucket, bucket, payload\);/g), 2,
-  "the sealed hour is offered only when no live hour is due");
+assert.equal(count(flashNext, /return sealed_flash_next_locked\(after_bucket, bucket, payload\);/g), 1,
+  "the sealed hour is offered only when no live hour is due, from one inlinable call site");
 assert.ok(flashNext.indexOf("checkup_journal_next_target") <
   flashNext.lastIndexOf("sealed_flash_next_locked"), "every live target is appended first");
 const sealedNext = body(checkup, "bool sealed_flash_next_locked(");

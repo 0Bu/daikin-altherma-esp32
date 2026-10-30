@@ -829,52 +829,56 @@ bool checkup_flash_next(int64_t now_unix_s, int64_t after_bucket,
     if (!lk.acquired() || s_reset_requested.load() || !s_model_fp || !s_source_confirmed ||
         !s_source_fp || P().ring.count != P().dhw.count)
         return false;
-    if (s_last_commit_us == kNoCommitUs || !s_live_commit_count || !P().ring.count)
-        return sealed_flash_next_locked(after_bucket, bucket, payload);
 
-    const int64_t now_us = esp_timer_get_time();
-    if (now_us < s_last_commit_us) return false;
-    const int64_t latest_end_unix_s =
-        now_unix_s - (now_us - s_last_commit_us) / 1000000;
-    const int64_t newest = latched_newest_locked(latest_end_unix_s);
-    if (newest == INT64_MIN) return false;
-    const size_t live_count = s_live_commit_count < P().ring.count
-        ? s_live_commit_count : P().ring.count;
-    const auto   current    = static_cast<uint32_t>(
-        s_last_commit_us / (static_cast<int64_t>(logic::CHECKUP_DT_S) * 1000000LL));
-    const int64_t revision = logic::checkup_journal_revision_take(
-        s_revision, s_revision_acked.load(), newest, current, live_count, after_bucket);
-    const int64_t target =
-        logic::checkup_journal_next_target(after_bucket, newest, live_count, revision);
-    if (target == INT64_MIN) return sealed_flash_next_locked(after_bucket, bucket, payload);
-    if (logic::checkup_journal_revision_emit(s_revision, target, revision))
-        s_revision_acked.store(INT64_MIN);
+    // Live hours first. The open hour a software restart sealed is offered only when none is due;
+    // its single call site lets the compiler inline it into this frame.
+    if (s_last_commit_us != kNoCommitUs && s_live_commit_count && P().ring.count) {
+        const int64_t now_us = esp_timer_get_time();
+        if (now_us < s_last_commit_us) return false;
+        const int64_t latest_end_unix_s = now_unix_s - (now_us - s_last_commit_us) / 1000000;
+        const int64_t newest            = latched_newest_locked(latest_end_unix_s);
+        if (newest == INT64_MIN) return false;
+        const size_t live_count =
+            s_live_commit_count < P().ring.count ? s_live_commit_count : P().ring.count;
+        const auto current = static_cast<uint32_t>(
+            s_last_commit_us / (static_cast<int64_t>(logic::CHECKUP_DT_S) * 1000000LL));
+        const int64_t revision = logic::checkup_journal_revision_take(
+            s_revision, s_revision_acked.load(), newest, current, live_count, after_bucket);
+        const int64_t target =
+            logic::checkup_journal_next_target(after_bucket, newest, live_count, revision);
+        if (target != INT64_MIN) {
+            if (logic::checkup_journal_revision_emit(s_revision, target, revision))
+                s_revision_acked.store(INT64_MIN);
 
-    const size_t age = static_cast<size_t>(newest - target);
-    const size_t ring_i = (static_cast<size_t>(P().ring.head) +
-                           logic::CHECKUP_COMPLETED_BUCKETS - 1 - age) %
-                          logic::CHECKUP_COMPLETED_BUCKETS;
-    const size_t dhw_i = (static_cast<size_t>(P().dhw.head) +
-                          logic::CHECKUP_COMPLETED_BUCKETS - 1 - age) %
-                         logic::CHECKUP_COMPLETED_BUCKETS;
-    payload = logic::CheckupJournalPayload{};
-    payload.model_fp = s_model_fp;
-    payload.source_fp              = s_source_fp;
-    payload.dhw_source_fp          = s_dhw_source_fp;
-    payload.diagnostics_generation = s_diagnostics_generation;
-    payload.end_unix_s             = logic::checkup_journal_end_in_bucket(
-        latest_end_unix_s - static_cast<int64_t>(age) * logic::CHECKUP_DT_S, target);
-    payload.checkup = P().ring.buf[ring_i];
-    payload.dhw = P().dhw.buf[dhw_i];
-    // An hour completed before a DHW-only restart was emptied by it: never present that empty
-    // bucket as the current circulation source's evidence (a restore then restarts the DHW scope).
-    if (logic::checkup_journal_dhw_withheld(s_dhw_restart_armed, s_dhw_restart_bucket, current,
-                                            age)) {
-        payload.dhw_source_fp = 0;
-        payload.dhw           = kEmptyDhwLossBucket;
+            const size_t age = static_cast<size_t>(newest - target);
+            const size_t ring_i =
+                (static_cast<size_t>(P().ring.head) + logic::CHECKUP_COMPLETED_BUCKETS - 1 - age) %
+                logic::CHECKUP_COMPLETED_BUCKETS;
+            const size_t dhw_i =
+                (static_cast<size_t>(P().dhw.head) + logic::CHECKUP_COMPLETED_BUCKETS - 1 - age) %
+                logic::CHECKUP_COMPLETED_BUCKETS;
+            payload                        = logic::CheckupJournalPayload{};
+            payload.model_fp               = s_model_fp;
+            payload.source_fp              = s_source_fp;
+            payload.dhw_source_fp          = s_dhw_source_fp;
+            payload.diagnostics_generation = s_diagnostics_generation;
+            payload.end_unix_s             = logic::checkup_journal_end_in_bucket(
+                latest_end_unix_s - static_cast<int64_t>(age) * logic::CHECKUP_DT_S, target);
+            payload.checkup = P().ring.buf[ring_i];
+            payload.dhw     = P().dhw.buf[dhw_i];
+            // An hour completed before a DHW-only restart was emptied by it: never present that
+            // empty bucket as the current circulation source's evidence (a restore then restarts
+            // the DHW scope).
+            if (logic::checkup_journal_dhw_withheld(s_dhw_restart_armed, s_dhw_restart_bucket,
+                                                    current, age)) {
+                payload.dhw_source_fp = 0;
+                payload.dhw           = kEmptyDhwLossBucket;
+            }
+            bucket = target;
+            return logic::checkup_journal_bucket(payload.end_unix_s) == target;
+        }
     }
-    bucket = target;
-    return logic::checkup_journal_bucket(payload.end_unix_s) == target;
+    return sealed_flash_next_locked(after_bucket, bucket, payload);
 }
 
 void checkup_flash_appended(int64_t bucket) { s_revision_acked.store(bucket); }
