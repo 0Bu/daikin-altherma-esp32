@@ -14,14 +14,16 @@ assert.match(style,
   /\.vhist-tip\s*\{[^}]*background:\s*color-mix\(in srgb,\s*var\(--card\)\s+60%,\s*transparent\);/,
   "tooltip surfaces must be translucent without fading their text");
 assert.match(style,
-  /\.vhist-graph\s*\{[^}]*padding-top:\s*var\(--vhist-tip-base\);/,
-  "tooltip height must not move the chart away from its legend");
+  /\.vhist-graph\s*\{[^}]*grid-template-rows:\s*auto 12px auto 24px;/,
+  "one readout row and a shared lower time axis keep the chart compact");
+assert.match(style, /\.vhist-tip\.vhist-live\s*\{[^}]*z-index:\s*4;[^}]*background:\s*var\(--card\);/,
+  "the moving bubble must cover the pinned bubble without ghost text");
+assert.match(style, /\.vhist-time\.vhist-live\s*\{[^}]*z-index:\s*4;[^}]*background:\s*var\(--brand-tint\);/,
+  "the moving time must cover the pinned time on the shared lower axis");
 assert.match(style, /\.vhist-tip\s*\{[^}]*position:\s*relative;[^}]*z-index:\s*3;/,
-  "the tooltip must start at and overlay the still-visible chart");
-assert.match(style, /\.vhist-tip-right\s*\{[^}]*translateX\(var\(--vhist-tip-gap\)\)/,
-  "the tooltip must leave a visible gap beside the selected crosshair");
-assert.match(style, /\.vhist-tip-left\s*\{[^}]*translateX\(calc\(-100% - var\(--vhist-tip-gap\)\)\)/,
-  "the tooltip must switch to the other side after the midpoint");
+  "the readout remains in normal layout above the chart");
+assert.match(style, /\.vhist-tip\s*\{[^}]*translateX\(calc\(var\(--tip-p\) \* -1%\)\)/,
+  "proportional anchoring keeps the tooltip inside both card edges");
 assert.doesNotMatch(style, /\.vhist-tip\s*\{[^}]*\bopacity\s*:/,
   "transparency must not reduce tooltip text opacity");
 

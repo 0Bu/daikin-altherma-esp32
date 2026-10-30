@@ -170,10 +170,9 @@ assert.doesNotMatch(elements.inspHist.innerHTML,
 assert.doesNotMatch(elements.inspHist.innerHTML,
   /<span class="vhist-source env-forecast-/,
   "the measured-variable legend must not repeat Open-Meteo forecast entries");
-assert.doesNotMatch(elements.inspHist.innerHTML,
-  /Open-Meteo · Prognose/,
-  "Open-Meteo provenance belongs in the forecast tooltip, not the always-visible legend");
 const legendHtml = elements.inspHist.innerHTML.match(/<div class="vhist-legend">([\s\S]*?)<\/div>/)?.[1] || "";
+assert.doesNotMatch(legendHtml, /Open-Meteo · Prognose/,
+  "Open-Meteo provenance belongs in the forecast tooltip, not the always-visible legend");
 assert.match(legendHtml,
   /env-temperature[^>]*><i><\/i>Temperatur<\/button>[\s\S]*env-humidity[^>]*><i><\/i>Luftfeuchte<\/button>[\s\S]*env-pressure[^>]*><i><\/i>Luftdruck<\/button>/,
   "the legend must retain only the three coloured measurement names");
@@ -187,13 +186,10 @@ assert.match(style, /\.vhist-line\.env-forecast-temperature\s*\{[^}]*opacity:\s*
 assert.match(style, /\.vhist-env3 \.vhist-tip-line\.env-temperature\s*\{[^}]*color:\s*var\(--flow-hot\)/);
 assert.match(style, /\.vhist-env3 \.vhist-tip-line\.env-humidity\s*\{[^}]*color:\s*var\(--flow-cold\)/);
 assert.match(style, /\.vhist-env3 \.vhist-tip-line\.env-pressure\s*\{[^}]*color:\s*var\(--env-pressure\)/);
-assert.match(style, /\.vhist-graph\s*\{[^}]*--vhist-tip-base:\s*20px;[^}]*padding-top:\s*var\(--vhist-tip-base\);/,
-  "climate charts must share the fixed compact legend-to-plot distance");
+assert.match(style, /\.vhist-graph\s*\{[^}]*grid-template-rows:\s*auto 12px auto 24px;/,
+  "climate readouts share the compact row above the curve and times share the lower axis");
 assert.doesNotMatch(style, /\.vhist-env3 \.vhist-graph\s*\{/,
   "climate tooltip height must not alter graph layout");
-assert.match(style,
-  /\.vhist-env3 \.vhist-tip\s*\{[^}]*display:\s*block/,
-  "the three readings must occupy separate tooltip rows on every viewport");
 assert.match(style,
   /\.vhist-env3 \.vhist-tip-line\s*\{[^}]*display:\s*block/,
   "every viewport must stack the same tooltip rows while the plot stays fixed underneath");
