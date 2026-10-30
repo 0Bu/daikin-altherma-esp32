@@ -20480,8 +20480,8 @@ static void test_refrigerant_service() {
     CHECK(refrigerant_service_supported(geo) && !geo.liquid && geo.suction);
     RefrigerantServiceSample geo_sample;
     geo_sample.rps_known = geo_sample.rps_running = true;
-    geo_sample.rps_tenths = 450;
-    geo_sample.mode = RefrigerantServiceMode::Heating;
+    geo_sample.rps_tenths                         = 450;
+    geo_sample.mode                               = RefrigerantServiceMode::Heating;
     geo_sample.valve_known = geo_sample.defrost_known = geo_sample.fault_known = true;
     geo_sample.discharge_ok = geo_sample.suction_ok = geo_sample.liquid_ok = true;
     geo_sample.eev_ok = geo_sample.high_pressure_ok = geo_sample.low_pressure_ok = true;
@@ -20490,7 +20490,7 @@ static void test_refrigerant_service() {
     CHECK(geo_d.eligible && geo_d.state == RefrigerantServiceState::Limited);
     CHECK(geo_d.limitation_mask & RefrigerantServiceTemperatures);
     RefrigerantServiceCoverage geo_liquid = geo;
-    geo_liquid.liquid = true;
+    geo_liquid.liquid                     = true;
     CHECK(!(refrigerant_service_decide(geo_liquid, geo_sample).limitation_mask &
             RefrigerantServiceTemperatures));
     // A detectable profile that carries BOTH structural rows reads only the hydronic one.
