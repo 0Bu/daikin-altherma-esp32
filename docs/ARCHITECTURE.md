@@ -42,7 +42,7 @@ tasks and transport.
 | HomeHub observations | `hp_modbus.cpp` | `modbus.hpp`, `modbus_plan.hpp`, `homehub_map.hpp` |
 | Local accessory | `env3.cpp` | `env3.hpp` |
 | MQTT publishing and external inputs | `mqtt_ha.cpp` | `ha_device.hpp`, `discovery.hpp`, `x10a_snapshot.hpp`, `mqtt_group.hpp`, `reference_temperature.hpp`, `circulation_source.hpp` |
-| Forecast and diagnosis | `weather_forecast.cpp`, `checkup.cpp`, MQTT sampler | `weather_forecast.hpp`, `checkup.hpp`, `heating_curve_diagnosis.hpp` |
+| Forecast and diagnosis | `weather_forecast.cpp`, `checkup.cpp`, MQTT sampler | `weather_forecast.hpp`, `checkup.hpp`, `heating_curve_diagnosis.hpp`, `instrument.hpp` |
 | History and duration evidence | `history.cpp`, `state_dwell.cpp` | `history.hpp`, `history_persist.hpp`, `state_dwell.hpp` |
 | HTTP and MCP | `http_common.cpp`, `http_status.cpp`, `http_config.cpp`, `http_ota.cpp`, `mcp_server.cpp` | `http_surface.hpp`, `http_request.hpp`, `mcp.hpp`, `redact.hpp` |
 | OTA and absolute download deadlines | `ota_update.cpp`, `http_deadline.cpp`, `http_client_diag.cpp` | `ota_manifest.hpp`, `ota_headroom.hpp`, `ota_quiesce.hpp`, `ota_transport.hpp`, `health_gate.hpp` |
@@ -69,6 +69,38 @@ are maintained in [REGISTERS.md](REGISTERS.md), framing in [X10A_PROTOCOL.md](X1
 New pure logic needs a focused host `CHECK`. Do not bury a converter, config validation or discovery
 rule in a hardware-only adapter. Test the real catalog and published semantics, including invalid,
 missing, sentinel and boundary inputs.
+
+<a id="physical-instruments"></a>
+### Physical instruments
+
+A new diagnosis observation finds its inputs through `logic/instrument.hpp`, never by matching rows
+itself; no firmware code calls it yet. Each instrument has exact page/offset/converter locators.
+Where one coordinate means different instruments on different profiles, a label token also
+decides; refrigerant pressures use the structural rule in `convert.hpp`. On a resolved profile an
+instrument is:
+
+- **Supported**: exactly one publishable row is identified as it, and no other publishable row
+  decodes the same bits, except a refrigerant pressure's own saturation twin;
+- **Absent**: no row is identified as it, although a row may sit at the coordinate under an
+  identity the registry does not accept;
+- **Withheld**: it is identified only in detect-only or quarantined rows;
+- **Ambiguous**: two publishable rows are identified as it, or another quantity decodes the same
+  bits.
+
+Table order never settles an Ambiguous instrument. Where 0x65/0 also decodes a hydro-split outlet
+temperature or a mix-valve position, the bizone kit's mixed water stays unusable until the catalog
+establishes which quantity is real. The host catalog test pins each state count and every label at
+every locator's page/offset/converter key, accepted or rejected, with its profile count. It also
+binds the registry to the C++ checkup, trend, refrigerant-service and leaving/return-water
+selectors and names and counts their remaining differences; the browser's label patterns are not
+bound to it.
+
+Resolution is a static profile fact. Whether a value is current, held over or from the right source
+generation is decided at runtime, as described in [Polling and source truth](#polling-and-source-truth)
+and [History and diagnosis persistence](#history-and-diagnosis-persistence). A sub-observation runs
+only when every instrument it reads is Supported (`instrument_require`), so a missing input disables
+only the observations that read it. An OFF state built from several instruments needs every one of
+them readable.
 
 <a id="value-definition-profiles-runtime-selectable-models"></a>
 <a id="auto-detection-protocol--model--hp_detectcpp--logicdetecthpp"></a>
@@ -135,7 +167,9 @@ witness, the conditional liquid-line zero filter leaves the reading available.
 
 Outdoor pages can keep returning a previous run's values while the compressor rests.
 `logic/ou_stale.hpp` classifies them from the page and a live compressor witness. HTTP keeps the
-reading with `held:true`, history records a held gap, and MQTT withholds that row. A new payload
+reading with `held:true`, history records a held gap, and MQTT withholds that row. Without a
+readable witness (no compressor-speed row, or page 0x30 unanswered in that sweep) a held value cannot
+be told from a live one: it is published unmarked and gives no X10A outdoor evidence. A new payload
 timestamp cannot make a frozen measurement fresh. Binary selectors and raw overlay bits keep their
 specific semantics; a selected valve path or heater stage is not automatically an ON/OFF state.
 
