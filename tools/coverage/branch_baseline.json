@@ -6,6 +6,19 @@
         "gcc-13-linux-ubuntu24": "g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0 via CI-pinned ESP-IDF v6.1 container, aarch64",
         "gcc-15-linux-ubuntu26": "g++ (Ubuntu 15.2.0-16ubuntu1) 15.2.0, Ubuntu 26.04 Docker, aarch64"
       },
+      "hosted_confirmation": "Hosted confirmation pending: only instrument.hpp uses the measured local GCC 15 aarch64 inventory as the gcc-15-github-linux-ubuntu26 candidate. No hosted execution is claimed; authoritative GitHub CI confirmation is required before merge. All other hosted inventories are unchanged.",
+      "runner": "scripts/run-mock-tests.sh --coverage",
+      "scope": "New header: the physical-instrument registry. Its footprint rules (bit flags, retry counters, mode nibbles, whole bytes, zero-byte identifiers and layout markers), the saturation-twin exemption, the coordinate, label-token and refrigerant-pressure identities, the four resolution states and the per-sub-observation requirement are exercised by synthetic rows and by the sweep over every detectable profile, with every outcome taken: 82/82 (Clang), 92/92 (GCC 13) and 92/92 (GCC 15). Every other header inventory, every historical ratio and the 95-percent executable-line floor are unchanged.",
+      "source": "main/logic/instrument.hpp",
+      "source_sha256": "bdebc6360cf5ca91f8b06249cbe5c0f21b64e1cdb1cad4037dc3311adc86308f",
+      "test_source_sha256": "fba6cf5d325c191b03090431917ca4a4c7552c88ba6828d3267e943986c52f09"
+    },
+    {
+      "compilers": {
+        "clang-17-darwin": "Apple clang version 17.0.0 (clang-1700.6.4.2), arm64",
+        "gcc-13-linux-ubuntu24": "g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0 via CI-pinned ESP-IDF v6.1 container, aarch64",
+        "gcc-15-linux-ubuntu26": "g++ (Ubuntu 15.2.0-16ubuntu1) 15.2.0, Ubuntu 26.04 Docker, aarch64"
+      },
       "hosted_confirmation": "Hosted confirmation pending: checkup.hpp uses the measured local GCC 15 aarch64 inventory as the gcc-15-github-linux-ubuntu26 candidate. No hosted execution is claimed; authoritative GitHub CI confirmation is required before merge.",
       "runner": "scripts/run-mock-tests.sh --coverage",
       "scope": "The header is unchanged. The differential reference for the in-place diagnosis restore clears a DhwLossRing, so DhwLossRing::reset's clearing loop now runs on the host and adds its two outcomes, both taken: 966/1049 to 968/1051 (Clang) and 1116/1211 to 1118/1213 (GCC 13) and 1118/1213 (GCC 15). Every other header inventory, every historical ratio and the 95-percent executable-line floor are unchanged.",
@@ -1348,6 +1361,10 @@
       "main/logic/values_identity.hpp": {
         "taken": 14,
         "outcomes": 16
+      },
+      "main/logic/instrument.hpp": {
+        "outcomes": 82,
+        "taken": 82
       }
     },
     "gcc-13-linux-ubuntu24": {
@@ -1766,6 +1783,10 @@
       "main/logic/values_identity.hpp": {
         "taken": 14,
         "outcomes": 14
+      },
+      "main/logic/instrument.hpp": {
+        "outcomes": 92,
+        "taken": 92
       }
     },
     "gcc-15-github-linux-ubuntu26": {
@@ -2184,6 +2205,10 @@
       "main/logic/values_identity.hpp": {
         "taken": 14,
         "outcomes": 14
+      },
+      "main/logic/instrument.hpp": {
+        "outcomes": 92,
+        "taken": 92
       }
     },
     "gcc-15-linux-ubuntu26": {
@@ -2602,6 +2627,10 @@
       "main/logic/values_identity.hpp": {
         "taken": 14,
         "outcomes": 14
+      },
+      "main/logic/instrument.hpp": {
+        "outcomes": 92,
+        "taken": 92
       }
     }
   },
