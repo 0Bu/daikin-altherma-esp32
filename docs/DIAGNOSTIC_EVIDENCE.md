@@ -64,7 +64,13 @@ it activates no additional source or controller action and changes no heat-pump 
 **Evidence boundary:** No model-specific Altherma primary source in this repository establishes a
 universal hot-gas, pressure, EEV-pulse, or twenty-minute settling range for this feature. The
 implementation therefore transfers no numeric threshold, superheat formula, defrost-end rule,
-refrigerant-shortage pattern, or claim that a valve fault cannot produce an error code.
+refrigerant-shortage pattern, or claim that a valve fault cannot produce an error code. For pressure
+sides it uses one installer reference guide, for the EBLQ05+07CAV3 and EDLQ05+07CAV3 monobloc units
+(German edition, document 4P405544-1E, revision 2018-06, section 14.1, piping diagram 3D097222-1,
+printed page 101: [official PDF][monobloc-ca-pdf], checked 31 October 2026). Their outdoor unit has
+one refrigerant pressure sensor, S1NPH, on the line between the 4-way valve and the plate heat
+exchanger, and a high-pressure switch, S1PH; the diagram shows no other pressure device. The guide
+states no pressure range.
 
 **Firmware rule:** `/status` omits the complete object until this boot has detected an X10A profile
 and the current source generation has evaluated that resolved profile's structural signal coverage.
@@ -83,27 +89,42 @@ per profile, fixed by coverage: the hydronic transducer (0x62/15) when it is a s
 pressure, otherwise the outdoor high-pressure row (0x20/12); a sweep that lost that page leaves the side
 missing instead of substituting the other transducer. Whether real units of the profiles that rely on
 0x20/12 alone populate it while running is unverified; one that does not shows a missing side, not a
-value. Cooling is excluded because the available
-pressure-side evidence is heating-specific. Missing required data, a mode/valve/fault/phase change,
-non-monotonic time, or a gap beyond the profile-sized poll allowance ends the window. A source
-generation change resets continuity and may accept the current qualifying sample as the first sample
-of a new zero-duration window. Optional suction/liquid temperature, both pressure sides, or outdoor
-context missing once latches the window to `limited`; lacking the profile-level full special-phase
-set makes every otherwise qualifying window `limited`. The liquid input needs a liquid label at
-0x20/10: the geothermal Leaving brine temp.(R6T) row there is a brine-loop temperature, not
-refrigerant, so a qualifying window on those profiles is `limited` for temperatures.
+value. Cooling is excluded because the available pressure-side evidence is heating-specific. Missing
+required data, a mode/valve/fault/phase change, non-monotonic time, or a gap beyond the
+profile-sized poll allowance ends the window. A source generation change resets continuity and may
+accept the current qualifying sample as the first sample of a new zero-duration window. Optional
+suction/liquid temperature, both pressure sides, or outdoor context missing once latches the window
+to `limited`; lacking the profile-level full special-phase set makes every otherwise qualifying
+window `limited`. The liquid input needs a liquid label at 0x20/10: the geothermal Leaving brine
+temp.(R6T) row there is a brine-loop temperature, not refrigerant, so a qualifying window on those
+profiles is `limited` for temperatures.
+
+This observation, and the instrument registry, count a low side only as the outdoor pair: a 0x20/14
+refrigerant pressure beside a structural 0x20/12 pressure. An unpaired 0x20/14 row is the profile's
+only outdoor refrigerant-pressure row, and its label is no evidence of a side. The observation reads
+it as neither side, so a profile without another structural pressure is `unsupported_profile`.
+Other surfaces still show that row under its catalog label. The pair is a fact of the generated
+tables, not of measured hardware: as for 0x20/12 alone, whether real units of the paired profiles
+populate 0x20/14 while running is unverified, and two catalogs for the same ERGA04-08D outdoor
+family disagree (the DA table has a heat-sink temperature and an unpaired "Pressure sensor", the
+DJ table a "High Pressure" and "Low Pressure" pair).
 
 **Project boundary:** The poll allowance is a transport bound: two fixed poll intervals plus
 one 300 ms UART timeout per publishable register page in the active profile. It is not a physical
 settling time. The firmware publishes continuous seconds, sample count, limitations, and min/mean/max
 figures; it has no `complete`, `OK`, `ready`, charge, or full-load state. `/status` explicitly reports
-`load_proven:false` and `eev_feedback:false`.
+`load_proven:false` and `eev_feedback:false`. The project reads the Monobloc CA profile
+(`altherma_monobloc_ca_05_07kw`) as those monobloc units and its only outdoor pressure row, labelled
+"Low Pressure", as S1NPH. In heating the plate heat exchanger condenses, so that row would carry the
+high side; this is why a label is not taken as side evidence. The other unpaired profiles label the
+row "Pressure" or "Pressure sensor".
 
 **Not established:** Hot-gas temperature, pressure, targets, and EEV commands vary with exact model,
 mode, compressor speed, load, and outdoor conditions. A stable-looking window does not establish
 full load, thermodynamic equilibrium, correct refrigerant charge, sensor calibration, mechanical EEV
 movement, or the cause of a difference from a controller target. Official model-specific procedures
-and suitable service instruments remain necessary.
+and suitable service instruments remain necessary. Which side an unpaired 0x20/14 row measures on
+any profile other than the Monobloc CA is not established.
 
 ## Evidence matrix for all eight diagnoses
 
@@ -457,6 +478,7 @@ prove that a source is technically applicable; that remains the human part of th
 [R2]: #source-r2
 [D1-pdf]: https://my.daikin.eu/content/dam/document-library/Installer-reference-guide/heat/EHBH-D6V%2C%20EHBH-D9W%2C%20EHBX-D6V%2C%20EHBX-D9W%2C%20ERGA04-08DV%2C%20ERGA04-08DVA_4PEN496758-1B_2019_10_Installer%20reference%20guide_English.pdf
 [D2-pdf]: https://www.daikin.eu/content/dam/document-library/Installer-reference-guide/heat/air-to-water-heat-pump-high-temperature/epra14-18dw7/EPRA014-018D%28V.W%29.EPRA14-18D%28V.W%297.ETVH16UE6V%287%29_Installer%20reference%20guide_4PEN644738-1D_English.pdf
+[monobloc-ca-pdf]: https://www.daikin.at/content/dam/document-library/Installer-reference-guide/heat/air-to-water-heat-pump-low-temperature/EBLQ05-07CV3-EDLQ04-07CV3_4PDE405544-1E_Installer%20Reference%20Guide_German.pdf
 [E1-web]: https://eur-lex.europa.eu/eli/reg/2013/814/oj/eng
 [E2-web]: https://webbook.nist.gov/cgi/cbook.cgi?ID=C7732185&Units=SI&Mask=2#Thermo-Condensed
 [R1-web]: https://www.gov.uk/government/publications/heat-pump-performance-effects-of-cycling

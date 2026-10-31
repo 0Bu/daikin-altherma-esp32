@@ -227,7 +227,7 @@ established for heating. Optional missing comparison data remains an explicit li
 
 | Row status | Meaning |
 |---|---|
-| **N/A** | The detected profile lacks a required signal. |
+| **N/A** | The detected profile lacks a required signal. A profile whose only structurally identified refrigerant-pressure reading has no established pressure side counts as lacking one. |
 | **WAITING** | No suitable ordinary heating run now; recording starts automatically when conditions fit. |
 | **RECORDING** | Continuous fresh observation with the complete optional context. |
 | **PARTIAL** | Recording, with optional temperature/pressure-side/outdoor/controller-phase context missing at least once. |

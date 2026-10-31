@@ -30,8 +30,9 @@
 // The locators are exact page/offset/converter keys, as in checkup.hpp, because a byte such as
 // 0x60/12 holds seven flags that only the converter separates. Where one coordinate means different
 // instruments on different profiles, the locator also requires a label token: 0x20/2 is the
-// outdoor coil on air-source units but a two-phase thermistor on the ground-source ones, 0x20/10 is
-// the liquid pipe or the leaving brine, and 0x20/14 names its pressure side on some profiles only.
+// outdoor coil on air-source units but a two-phase thermistor on the ground-source ones, and
+// 0x20/10 is the liquid pipe or the leaving brine. 0x20/14 is the low side only beside a 0x20/12
+// pressure, whatever its label says.
 // test_instrument_registry() pins every label at every locator's page/offset/converter key,
 // accepted or rejected, with its profile count, so a generator change cannot move an identity
 // silently.
@@ -118,8 +119,9 @@ enum class InstrumentIdentity : uint8_t {
     Coordinate,          // the key alone names the instrument on every profile that carries it
     LabelToken,          // the key means different instruments across profiles; the label decides
     RefrigerantPressure, // convert.hpp's structural rule: bar, and on page 0x62 only with its
-                         // conv-405 saturation twin (Water pressure is bar on the same page);
-                         // with a token, the label must also name the pressure side
+                         // conv-405 saturation twin (Water pressure is bar on the same page)
+    LowSidePressure,     // a refrigerant pressure that is the low side only while the HighPressure
+                         // locator's row is itself a publishable structural refrigerant pressure
 };
 
 struct InstrumentLocator {
@@ -164,12 +166,11 @@ inline constexpr InstrumentLocator INSTRUMENT_LOCATORS[] = {
      nullptr},
     {Instrument::HighPressure, 0x20, 12, 105, InstrumentIdentity::RefrigerantPressure, nullptr,
      nullptr},
-    // Where 0x20/14 is labelled "Pressure" or "Pressure sensor", 0x20/12 is no pressure: the row is
-    // the profile's only outdoor transducer and names no side. Nothing in the repository
-    // establishes which side it measures (refrigerant_service.hpp still counts it as the low side),
-    // so only a row that says "low" is the low side here.
-    {Instrument::LowPressure, 0x20, 14, 105, InstrumentIdentity::RefrigerantPressure, "low",
-     nullptr},
+    // Without a 0x20/12 pressure, 0x20/14 is the profile's only outdoor refrigerant-pressure row
+    // and its label is no evidence of a side, "Low Pressure" on the Monobloc CA included
+    // (docs/DIAGNOSTIC_EVIDENCE.md#refrigerant-service-observation). Only the outdoor pair names a
+    // low side.
+    {Instrument::LowPressure, 0x20, 14, 105, InstrumentIdentity::LowSidePressure, nullptr, nullptr},
     {Instrument::InverterPrimaryCurrent, 0x21, 0, 105, InstrumentIdentity::Coordinate, nullptr,
      nullptr},
     {Instrument::CtL1, 0x63, 14, 161, InstrumentIdentity::Coordinate, nullptr, nullptr},
@@ -332,14 +333,32 @@ inline constexpr bool instrument_saturation_twin(const ValueDef& pressure, const
     return other.conv == 405 && other.reg == pressure.reg && other.offset == pressure.offset;
 }
 
+// Does a publishable row carry the profile's outdoor high-side transducer, a refrigerant pressure
+// at the HighPressure locator's key? The refrigerant service sees only publishable rows, so a
+// withheld partner names no low side either.
+inline bool instrument_outdoor_high_pressure(const ProfileView& v) {
+    for (const auto& l : INSTRUMENT_LOCATORS) {
+        if (l.id != Instrument::HighPressure) continue;
+        for (size_t j = 0; j < v.count(); j++) {
+            const ValueDef row = adjudicated(v, j);
+            if (row.reg == l.reg && row.offset == l.off && row.conv == l.conv &&
+                row_publishable(v[j]) && fg_is_refrigerant_pressure(v, j))
+                return true;
+        }
+    }
+    return false;
+}
+
 // Does view row `i` (adjudicated as `row`) carry the instrument this locator names?
 inline bool instrument_locator_matches(const InstrumentLocator& l, const ProfileView& v, size_t i,
                                        const ValueDef& row) {
     if (row.reg != l.reg || row.offset != l.off || row.conv != l.conv) return false;
-    const bool named = lwt_ci_contains(row.label, l.token) || lwt_ci_contains(row.label, l.token2);
-    if (l.identity == InstrumentIdentity::LabelToken) return named;
+    if (l.identity == InstrumentIdentity::LabelToken)
+        return lwt_ci_contains(row.label, l.token) || lwt_ci_contains(row.label, l.token2);
     if (l.identity == InstrumentIdentity::RefrigerantPressure)
-        return fg_is_refrigerant_pressure(v, i) && (!l.token || named);
+        return fg_is_refrigerant_pressure(v, i);
+    if (l.identity == InstrumentIdentity::LowSidePressure)
+        return fg_is_refrigerant_pressure(v, i) && instrument_outdoor_high_pressure(v);
     return true; // Coordinate
 }
 
@@ -360,7 +379,8 @@ inline InstrumentResolution instrument_resolve(const ProfileView& v, Instrument 
             }
             if (match >= 0) return {InstrumentState::Ambiguous, -1};
             match    = static_cast<int>(i);
-            pressure = l.identity == InstrumentIdentity::RefrigerantPressure;
+            pressure = l.identity == InstrumentIdentity::RefrigerantPressure ||
+                       l.identity == InstrumentIdentity::LowSidePressure;
         }
     }
     if (match < 0) return {withheld ? InstrumentState::Withheld : InstrumentState::Absent, -1};

@@ -6,6 +6,32 @@
         "gcc-13-linux-ubuntu24": "g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0 via CI-pinned ESP-IDF v6.1 container, aarch64",
         "gcc-15-linux-ubuntu26": "g++ (Ubuntu 15.2.0-16ubuntu1) 15.2.0, Ubuntu 26.04 Docker, aarch64"
       },
+      "hosted_confirmation": "Hosted confirmation pending: instrument.hpp and refrigerant_service.hpp use the measured local GCC 15 aarch64 inventory as the gcc-15-github-linux-ubuntu26 candidate. No hosted execution is claimed; authoritative GitHub CI confirmation is required before merge. All other hosted inventories are unchanged.",
+      "runner": "scripts/run-mock-tests.sh --coverage",
+      "scope": "Outdoor pressure pair: the low-side identity now needs a publishable structural refrigerant pressure at the HighPressure key instead of a label token, read without recursing through the locator matcher so that GCC proves the path non-throwing. Synthetic rows cover the pair in both orders, the saturation twin ahead of the partner, the twin alone, a bar row under another converter, a heat-sink temperature, the hydronic transducer and a withheld partner; the catalog sweep binds the registry to the refrigerant service on every detectable profile. Every outcome is taken: 86/86 to 104/104 (Clang), 100/100 to 122/122 (GCC 13 and GCC 15). Every other header inventory, every historical ratio and the 95-percent executable-line floor are unchanged.",
+      "source": "main/logic/instrument.hpp",
+      "source_sha256": "0012a62c77f94cfadd32b6559a2ceb4dc2e259c1b4846fc797f62ad16b1b2aca",
+      "test_source_sha256": "d5785ccbb3420d6fe00416b64747dddb517122147560720a1d7a5473454acd60"
+    },
+    {
+      "compilers": {
+        "clang-17-darwin": "Apple clang version 17.0.0 (clang-1700.6.4.2), arm64",
+        "gcc-13-linux-ubuntu24": "g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0 via CI-pinned ESP-IDF v6.1 container, aarch64",
+        "gcc-15-linux-ubuntu26": "g++ (Ubuntu 15.2.0-16ubuntu1) 15.2.0, Ubuntu 26.04 Docker, aarch64"
+      },
+      "hosted_confirmation": "Hosted confirmation pending: instrument.hpp and refrigerant_service.hpp use the measured local GCC 15 aarch64 inventory as the gcc-15-github-linux-ubuntu26 candidate. No hosted execution is claimed; authoritative GitHub CI confirmation is required before merge. All other hosted inventories are unchanged.",
+      "runner": "scripts/run-mock-tests.sh --coverage",
+      "scope": "Outdoor pressure pair: the low-side coverage flag is re-derived on every refrigerant-pressure row from the 0x20/12 and 0x20/14 flags, and both added outcomes are taken by the unit checks in either row order; the paired base coverage also takes one previously untaken outcome. 209/254 to 212/256 (Clang), 246/306 to 253/310 (GCC 13 and GCC 15). Every other header inventory, every historical ratio and the 95-percent executable-line floor are unchanged.",
+      "source": "main/logic/refrigerant_service.hpp",
+      "source_sha256": "ac26b479ff36a3108c30c13aa42a53204a73df46a2428b9785e7906ca0e18fbe",
+      "test_source_sha256": "d5785ccbb3420d6fe00416b64747dddb517122147560720a1d7a5473454acd60"
+    },
+    {
+      "compilers": {
+        "clang-17-darwin": "Apple clang version 17.0.0 (clang-1700.6.4.2), arm64",
+        "gcc-13-linux-ubuntu24": "g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0 via CI-pinned ESP-IDF v6.1 container, aarch64",
+        "gcc-15-linux-ubuntu26": "g++ (Ubuntu 15.2.0-16ubuntu1) 15.2.0, Ubuntu 26.04 Docker, aarch64"
+      },
       "hosted_confirmation": "Hosted confirmation pending: only instrument.hpp uses the measured local GCC 15 aarch64 inventory as the gcc-15-github-linux-ubuntu26 candidate. No hosted execution is claimed; authoritative GitHub CI confirmation is required before merge. All other hosted inventories are unchanged.",
       "runner": "scripts/run-mock-tests.sh --coverage",
       "scope": "New header: the physical-instrument registry. Its footprint rules (bit flags, retry counters, mode nibbles, whole bytes, zero-byte identifiers and layout markers), the saturation-twin exemption, the coordinate, label-token and refrigerant-pressure identities, the four resolution states and the per-sub-observation requirement are exercised by synthetic rows and by the sweep over every detectable profile, with every outcome taken: 86/86 (Clang), 100/100 (GCC 13) and 100/100 (GCC 15). Every other header inventory, every historical ratio and the 95-percent executable-line floor are unchanged.",
@@ -1283,8 +1309,8 @@
         "taken": 216
       },
       "main/logic/refrigerant_service.hpp": {
-        "outcomes": 254,
-        "taken": 209
+        "outcomes": 256,
+        "taken": 212
       },
       "main/logic/registers.hpp": {
         "outcomes": 10,
@@ -1363,8 +1389,8 @@
         "outcomes": 16
       },
       "main/logic/instrument.hpp": {
-        "outcomes": 86,
-        "taken": 86
+        "outcomes": 104,
+        "taken": 104
       }
     },
     "gcc-13-linux-ubuntu24": {
@@ -1697,8 +1723,8 @@
         "taken": 252
       },
       "main/logic/refrigerant_service.hpp": {
-        "outcomes": 306,
-        "taken": 246
+        "outcomes": 310,
+        "taken": 253
       },
       "main/logic/registers.hpp": {
         "outcomes": 12,
@@ -1785,8 +1811,8 @@
         "outcomes": 14
       },
       "main/logic/instrument.hpp": {
-        "outcomes": 100,
-        "taken": 100
+        "outcomes": 122,
+        "taken": 122
       }
     },
     "gcc-15-github-linux-ubuntu26": {
@@ -2119,8 +2145,8 @@
         "taken": 252
       },
       "main/logic/refrigerant_service.hpp": {
-        "outcomes": 306,
-        "taken": 246
+        "outcomes": 310,
+        "taken": 253
       },
       "main/logic/registers.hpp": {
         "outcomes": 12,
@@ -2207,8 +2233,8 @@
         "outcomes": 14
       },
       "main/logic/instrument.hpp": {
-        "outcomes": 100,
-        "taken": 100
+        "outcomes": 122,
+        "taken": 122
       }
     },
     "gcc-15-linux-ubuntu26": {
@@ -2541,8 +2567,8 @@
         "taken": 252
       },
       "main/logic/refrigerant_service.hpp": {
-        "outcomes": 306,
-        "taken": 246
+        "outcomes": 310,
+        "taken": 253
       },
       "main/logic/registers.hpp": {
         "outcomes": 12,
@@ -2629,8 +2655,8 @@
         "outcomes": 14
       },
       "main/logic/instrument.hpp": {
-        "outcomes": 100,
-        "taken": 100
+        "outcomes": 122,
+        "taken": 122
       }
     }
   },
