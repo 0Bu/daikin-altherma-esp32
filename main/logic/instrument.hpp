@@ -32,8 +32,9 @@
 // instruments on different profiles, the locator also requires a label token: 0x20/2 is the
 // outdoor coil on air-source units but a two-phase thermistor on the ground-source ones, 0x20/10 is
 // the liquid pipe or the leaving brine, and 0x20/14 names its pressure side on some profiles only.
-// test_instrument_registry() pins every label at every locator coordinate, accepted or rejected,
-// with its profile count, so a generator change cannot move an identity silently.
+// test_instrument_registry() pins every label at every locator's page/offset/converter key,
+// accepted or rejected, with its profile count, so a generator change cannot move an identity
+// silently.
 #include <cstddef>
 #include <cstdint>
 
@@ -163,9 +164,10 @@ inline constexpr InstrumentLocator INSTRUMENT_LOCATORS[] = {
      nullptr},
     {Instrument::HighPressure, 0x20, 12, 105, InstrumentIdentity::RefrigerantPressure, nullptr,
      nullptr},
-    // Where 0x20/12 is no pressure, 0x20/14 is the profile's only outdoor transducer and its label
-    // ("Pressure", "Pressure sensor") names no side. Nothing in the repository establishes which
-    // side it measures, so only a row that says "low" is the low side.
+    // Where 0x20/14 is labelled "Pressure" or "Pressure sensor", 0x20/12 is no pressure: the row is
+    // the profile's only outdoor transducer and names no side. Nothing in the repository
+    // establishes which side it measures (refrigerant_service.hpp still counts it as the low side),
+    // so only a row that says "low" is the low side here.
     {Instrument::LowPressure, 0x20, 14, 105, InstrumentIdentity::RefrigerantPressure, "low",
      nullptr},
     {Instrument::InverterPrimaryCurrent, 0x21, 0, 105, InstrumentIdentity::Coordinate, nullptr,
@@ -284,9 +286,10 @@ inline constexpr const char* instrument_slug(Instrument id) {
 enum class InstrumentState : uint8_t { Absent, Withheld, Ambiguous, Supported };
 
 // `row` indexes the resolved profile VIEW, not hp_poll's cache, which holds only publishable rows
-// of pages that answered. A caller finds the cached value by the row's page/offset/converter key,
-// which Supported makes unique among publishable rows. Resolution scans every row per locator, so a
-// caller resolves once per profile change, outside the cache mutex, rather than every sweep.
+// of pages that answered. A caller finds the cached value by the adjudicated row's
+// page/offset/converter key, which Supported makes unique among publishable rows. Resolution scans
+// every row per locator, so a caller resolves once per profile change, outside the cache mutex,
+// rather than every sweep.
 struct InstrumentResolution {
     InstrumentState state = InstrumentState::Absent;
     int             row   = -1; // view index, set only when Supported

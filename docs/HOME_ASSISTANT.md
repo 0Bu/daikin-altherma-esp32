@@ -93,7 +93,7 @@ explanation before using a flag as an operating-mode witness.
 |---|---|
 | X10A entities unavailable | Check the broker connection and X10A link; board diagnostics can remain available while X10A is offline. |
 | One value unknown | Its state key may be absent because the input is unreadable, unimplemented, implausible or not fitted. |
-| Outdoor readings absent while resting | The outdoor unit may answer with values held from its last run. The firmware withholds those MQTT readings when it can read the compressor speed; **Outdoor Data Held Over** explains that boundary. On a model without that reading, outdoor values are published even while they may be held. |
+| Outdoor readings absent while resting | The outdoor unit may answer with values held from its last run. The firmware withholds those MQTT readings when it can read the compressor speed; **Outdoor Data Held Over** explains that boundary. On a model without that reading, outdoor values are published even while they may be held, and **Outdoor Data Held Over** stays off. |
 | Only ENV III unavailable | Its corresponding fresh reading keys are missing; an accessory fault does not make other plant entities unavailable. |
 | A zero | A real decoded zero, where that row permits it. It is not a substitute for missing evidence. |
 

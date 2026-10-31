@@ -74,23 +74,26 @@ missing, sentinel and boundary inputs.
 ### Physical instruments
 
 A new diagnosis observation finds its inputs through `logic/instrument.hpp`, never by matching rows
-itself; no firmware code calls it yet. Each instrument has exact page/offset/converter locators. Where one coordinate means
-different instruments on different profiles, a label token also decides; refrigerant pressures use
-the structural rule in `convert.hpp`. On a resolved profile an instrument is:
+itself; no firmware code calls it yet. Each instrument has exact page/offset/converter locators.
+Where one coordinate means different instruments on different profiles, a label token also
+decides; refrigerant pressures use the structural rule in `convert.hpp`. On a resolved profile an
+instrument is:
 
 - **Supported**: exactly one publishable row is identified as it, and no other publishable row
   decodes the same bits, except a refrigerant pressure's own saturation twin;
 - **Absent**: no row is identified as it, although a row may sit at the coordinate under an
   identity the registry does not accept;
-- **Withheld**: only detect-only or quarantined rows carry it;
-- **Ambiguous**: two publishable rows carry it, or another quantity decodes the same bits.
+- **Withheld**: it is identified only in detect-only or quarantined rows;
+- **Ambiguous**: two publishable rows are identified as it, or another quantity decodes the same
+  bits.
 
 Table order never settles an Ambiguous instrument. Where 0x65/0 also decodes a hydro-split outlet
 temperature or a mix-valve position, the bizone kit's mixed water stays unusable until the catalog
 establishes which quantity is real. The host catalog test pins each state count and every label at
-every locator coordinate, accepted or rejected, with its profile count. It also binds the registry
-to the C++ checkup, trend, refrigerant-service and leaving/return-water selectors and names and
-counts their remaining differences; the browser's label patterns are not bound to it.
+every locator's page/offset/converter key, accepted or rejected, with its profile count. It also
+binds the registry to the C++ checkup, trend, refrigerant-service and leaving/return-water
+selectors and names and counts their remaining differences; the browser's label patterns are not
+bound to it.
 
 Resolution is a static profile fact. Whether a value is current, held over or from the right source
 generation is decided at runtime, as described in [Polling and source truth](#polling-and-source-truth)
