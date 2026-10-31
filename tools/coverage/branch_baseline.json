@@ -8,10 +8,10 @@
       },
       "hosted_confirmation": "Hosted confirmation pending: only instrument.hpp uses the measured local GCC 15 aarch64 inventory as the gcc-15-github-linux-ubuntu26 candidate. No hosted execution is claimed; authoritative GitHub CI confirmation is required before merge. All other hosted inventories are unchanged.",
       "runner": "scripts/run-mock-tests.sh --coverage",
-      "scope": "New header: the physical-instrument registry. Its footprint rules (bit flags, retry counters, mode nibbles, whole bytes, zero-byte identifiers and layout markers), the saturation-twin exemption, the coordinate, label-token and refrigerant-pressure identities, the four resolution states and the per-sub-observation requirement are exercised by synthetic rows and by the sweep over every detectable profile, with every outcome taken: 82/82 (Clang), 92/92 (GCC 13) and 92/92 (GCC 15). Every other header inventory, every historical ratio and the 95-percent executable-line floor are unchanged.",
+      "scope": "New header: the physical-instrument registry. Its footprint rules (bit flags, retry counters, mode nibbles, whole bytes, zero-byte identifiers and layout markers), the saturation-twin exemption, the coordinate, label-token and refrigerant-pressure identities, the four resolution states and the per-sub-observation requirement are exercised by synthetic rows and by the sweep over every detectable profile, with every outcome taken: 86/86 (Clang), 100/100 (GCC 13) and 100/100 (GCC 15). Every other header inventory, every historical ratio and the 95-percent executable-line floor are unchanged.",
       "source": "main/logic/instrument.hpp",
-      "source_sha256": "bdebc6360cf5ca91f8b06249cbe5c0f21b64e1cdb1cad4037dc3311adc86308f",
-      "test_source_sha256": "fba6cf5d325c191b03090431917ca4a4c7552c88ba6828d3267e943986c52f09"
+      "source_sha256": "ff4aaa21e3e3a431ac9cd8d9040e7ff08a09db04003c88c0174b6e526260d88e",
+      "test_source_sha256": "45b1f8ace402e6ebfba78611d135fe246cd49e36e998149b8fac800a16623b8a"
     },
     {
       "compilers": {
@@ -1363,8 +1363,8 @@
         "outcomes": 16
       },
       "main/logic/instrument.hpp": {
-        "outcomes": 82,
-        "taken": 82
+        "outcomes": 86,
+        "taken": 86
       }
     },
     "gcc-13-linux-ubuntu24": {
@@ -1785,8 +1785,8 @@
         "outcomes": 14
       },
       "main/logic/instrument.hpp": {
-        "outcomes": 92,
-        "taken": 92
+        "outcomes": 100,
+        "taken": 100
       }
     },
     "gcc-15-github-linux-ubuntu26": {
@@ -2207,8 +2207,8 @@
         "outcomes": 14
       },
       "main/logic/instrument.hpp": {
-        "outcomes": 92,
-        "taken": 92
+        "outcomes": 100,
+        "taken": 100
       }
     },
     "gcc-15-linux-ubuntu26": {
@@ -2629,8 +2629,8 @@
         "outcomes": 14
       },
       "main/logic/instrument.hpp": {
-        "outcomes": 92,
-        "taken": 92
+        "outcomes": 100,
+        "taken": 100
       }
     }
   },
