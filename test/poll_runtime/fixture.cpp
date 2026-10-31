@@ -880,7 +880,8 @@ static bool cached_tenths(uint8_t reg, uint8_t off, int& tenths) {
 
 // The refrigerant service reads ONE high-side sensor per profile through the real sampler: a lost
 // hydronic page leaves the side missing rather than splicing in the outdoor transducer, and a
-// temperature at 0x20/12 never stands in for a pressure. Synthetic bytes, not physical readings.
+// temperature at 0x20/12 never stands in for a pressure. An unpaired 0x20/14 transducer is read as
+// neither side. Synthetic bytes, not physical readings.
 static void run_refrigerant(const char* name) {
     using namespace daik;
     const auto& sample = s_refrigerant_service_cycle_sample;
@@ -914,6 +915,21 @@ static void run_refrigerant(const char* name) {
         oracle(cached_tenths(0x20, 12, heat_sink) && heat_sink == 450,
                "refrigerant_unidentified_row_fresh_in_sweep");
         oracle(!sample.high_pressure_ok, "refrigerant_unidentified_row_never_high_side");
+    } else if (!std::strcmp(name, "refrigerant_unpaired_pressure")) {
+        setup("altherma_lt_ca_cb_11_16kw"); // 0x20/14 "Pressure" is the only outdoor pressure row
+        adapter::populated = true;
+        for (unsigned reg = 0; reg < 256; ++reg) {
+            adapter::available[reg]    = true;
+            adapter::page_lengths[reg] = 40;
+        }
+        adapter::pages[0x30][0] = 42;
+        put16(0x20, 14, 260);
+        poll_once();
+        int unpaired = 0;
+        oracle(cached_tenths(0x20, 14, unpaired) && unpaired > 0,
+               "refrigerant_unpaired_pressure_fresh_in_sweep");
+        oracle(!sample.low_pressure_ok && !sample.high_pressure_ok,
+               "refrigerant_unpaired_pressure_never_low_side");
     } else
         oracle(false, "known_refrigerant_case");
 }

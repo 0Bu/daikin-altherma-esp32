@@ -222,12 +222,12 @@ is absent. It does not affect `/status.health` or the eight-row summary.
 A window admits only fresh same-sweep values with a running space-heating compressor, non-DHW valve,
 no defrost, readable normal fault rows, no active profile-provided startup/restart/oil-return/pressure-
 equalising phase, and required discharge-temperature, EEV-command and structurally identified
-refrigerant-pressure readings. Cooling is excluded because the pressure-side roles here are
-established for heating. Optional missing comparison data remains an explicit limitation.
+refrigerant-pressure readings. Cooling is excluded because the available pressure-side evidence is
+heating-specific. Optional missing comparison data remains an explicit limitation.
 
 | Row status | Meaning |
 |---|---|
-| **N/A** | The detected profile lacks a required signal. |
+| **N/A** | The detected profile lacks a required signal. A profile whose only structurally identified refrigerant-pressure reading has no established pressure side counts as lacking one. |
 | **WAITING** | No suitable ordinary heating run now; recording starts automatically when conditions fit. |
 | **RECORDING** | Continuous fresh observation with the complete optional context. |
 | **PARTIAL** | Recording, with optional temperature/pressure-side/outdoor/controller-phase context missing at least once. |
