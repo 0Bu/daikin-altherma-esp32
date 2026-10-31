@@ -10,7 +10,7 @@
       "runner": "scripts/run-mock-tests.sh --coverage",
       "scope": "New header: the physical-instrument registry. Its footprint rules (bit flags, retry counters, mode nibbles, whole bytes, zero-byte identifiers and layout markers), the saturation-twin exemption, the coordinate, label-token and refrigerant-pressure identities, the four resolution states and the per-sub-observation requirement are exercised by synthetic rows and by the sweep over every detectable profile, with every outcome taken: 86/86 (Clang), 100/100 (GCC 13) and 100/100 (GCC 15). Every other header inventory, every historical ratio and the 95-percent executable-line floor are unchanged.",
       "source": "main/logic/instrument.hpp",
-      "source_sha256": "ff4aaa21e3e3a431ac9cd8d9040e7ff08a09db04003c88c0174b6e526260d88e",
+      "source_sha256": "358e390cf14c9f311243e8afb1d64abeb4b7a76cf7564b64039ea7a7f9acead8",
       "test_source_sha256": "45b1f8ace402e6ebfba78611d135fe246cd49e36e998149b8fac800a16623b8a"
     },
     {

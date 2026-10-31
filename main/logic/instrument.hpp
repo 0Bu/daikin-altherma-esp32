@@ -283,6 +283,10 @@ inline constexpr const char* instrument_slug(Instrument id) {
 
 enum class InstrumentState : uint8_t { Absent, Withheld, Ambiguous, Supported };
 
+// `row` indexes the resolved profile VIEW, not hp_poll's cache, which holds only publishable rows
+// of pages that answered. A caller finds the cached value by the row's page/offset/converter key,
+// which Supported makes unique among publishable rows. Resolution scans every row per locator, so a
+// caller resolves once per profile change, outside the cache mutex, rather than every sweep.
 struct InstrumentResolution {
     InstrumentState state = InstrumentState::Absent;
     int             row   = -1; // view index, set only when Supported

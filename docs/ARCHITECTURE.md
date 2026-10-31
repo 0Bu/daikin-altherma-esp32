@@ -74,7 +74,7 @@ missing, sentinel and boundary inputs.
 ### Physical instruments
 
 A new diagnosis observation finds its inputs through `logic/instrument.hpp`, never by matching rows
-itself. Each instrument has exact page/offset/converter locators. Where one coordinate means
+itself; no firmware code calls it yet. Each instrument has exact page/offset/converter locators. Where one coordinate means
 different instruments on different profiles, a label token also decides; refrigerant pressures use
 the structural rule in `convert.hpp`. On a resolved profile an instrument is:
 
