@@ -42,7 +42,7 @@ tasks and transport.
 | HomeHub observations | `hp_modbus.cpp` | `modbus.hpp`, `modbus_plan.hpp`, `homehub_map.hpp` |
 | Local accessory | `env3.cpp` | `env3.hpp` |
 | MQTT publishing and external inputs | `mqtt_ha.cpp` | `ha_device.hpp`, `discovery.hpp`, `x10a_snapshot.hpp`, `mqtt_group.hpp`, `reference_temperature.hpp`, `circulation_source.hpp` |
-| Forecast and diagnosis | `weather_forecast.cpp`, `checkup.cpp`, MQTT sampler | `weather_forecast.hpp`, `checkup.hpp`, `heating_curve_diagnosis.hpp` |
+| Forecast and diagnosis | `weather_forecast.cpp`, `checkup.cpp`, MQTT sampler | `weather_forecast.hpp`, `checkup.hpp`, `heating_curve_diagnosis.hpp`, `instrument.hpp` |
 | History and duration evidence | `history.cpp`, `state_dwell.cpp` | `history.hpp`, `history_persist.hpp`, `state_dwell.hpp` |
 | HTTP and MCP | `http_common.cpp`, `http_status.cpp`, `http_config.cpp`, `http_ota.cpp`, `mcp_server.cpp` | `http_surface.hpp`, `http_request.hpp`, `mcp.hpp`, `redact.hpp` |
 | OTA and absolute download deadlines | `ota_update.cpp`, `http_deadline.cpp`, `http_client_diag.cpp` | `ota_manifest.hpp`, `ota_headroom.hpp`, `ota_quiesce.hpp`, `ota_transport.hpp`, `health_gate.hpp` |
@@ -69,6 +69,41 @@ are maintained in [REGISTERS.md](REGISTERS.md), framing in [X10A_PROTOCOL.md](X1
 New pure logic needs a focused host `CHECK`. Do not bury a converter, config validation or discovery
 rule in a hardware-only adapter. Test the real catalog and published semantics, including invalid,
 missing, sentinel and boundary inputs.
+
+<a id="physical-instruments"></a>
+### Physical instruments
+
+A new diagnosis observation finds its inputs through `logic/instrument.hpp`, never by matching rows
+itself. Each instrument has exact page/offset/converter locators. Where one coordinate means
+different instruments on different profiles, a label token also decides; refrigerant pressures use
+the structural rule in `convert.hpp`. On a resolved profile an instrument is:
+
+- **Supported**: exactly one publishable row carries it, and no other publishable row decodes the
+  same bits;
+- **Absent**: no row carries it;
+- **Withheld**: only detect-only or quarantined rows carry it;
+- **Ambiguous**: two rows carry it, or another quantity decodes the same bits.
+
+Table order never settles an Ambiguous instrument. Where 0x65/0 also decodes a hydro-split outlet
+temperature, the bizone kit's mixed water stays unusable until the catalog establishes which
+quantity is real. The host catalog test pins each state and label spelling. It also binds the
+registry to the checkup, trend, refrigerant-service and leaving/return-water selectors, and names
+and counts their remaining differences.
+
+Resolution is a static profile fact. At runtime:
+
+- A Supported value is current only when its page answered in the sweep being read. Paired values
+  come from one cache snapshot. A missing page is unknown; it is never replaced by another row or the
+  last value.
+- Outdoor pages count as diagnosis evidence only while the compressor witness reads running
+  (`logic/outdoor_evidence.hpp`). Publication withholds them only when the witness reads stopped. A
+  profile without the witness therefore publishes a frozen outdoor value unmarked, and has no X10A
+  outdoor evidence.
+- Each source (X10A, HomeHub, ENV III, room, circulation, weather) keeps its own identity and
+  freshness. An accumulator is bound to one source generation, and no source stands in for another.
+- A sub-observation runs only when every instrument it reads is Supported (`instrument_require`),
+  so a missing input disables only the observations that read it. A missing value is unknown, never
+  zero or OFF; OFF of an instrument made of several rows needs all of them readable.
 
 <a id="value-definition-profiles-runtime-selectable-models"></a>
 <a id="auto-detection-protocol--model--hp_detectcpp--logicdetecthpp"></a>
