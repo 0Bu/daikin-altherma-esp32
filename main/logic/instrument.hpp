@@ -1,35 +1,39 @@
 #pragma once
 // WHICH ROW IS PHYSICAL INSTRUMENT X ON THIS PROFILE — one owner for that question, so that a new
 // diagnosis observation never resolves its inputs by itself (docs/ARCHITECTURE.md "Physical
-// instruments", epic F1).
+// instruments").
 //
-// Before this header the question had six answers: the checkup locators, the trend table, the
-// refrigerant-service coverage, the lwt/rwt label selectors, the browser's label patterns and the
-// binary-semantics table. Each picks the FIRST row that fits, and the catalog tests compare them
-// only pairwise. A first match is table order, not a rule. Here a role resolves to exactly one of
-// four states, and "more than one candidate" is a state of its own rather than a silent pick:
+// Several places still answer it their own way: the checkup locators, the trend table, the
+// refrigerant-service coverage flags, the lwt/rwt label selectors and the browser's label patterns.
+// The selectors pick the FIRST row that fits, which is table order, not a rule.
+// test_instrument_registry() binds the C++ ones to this registry; the browser's patterns are not
+// bound. Here an instrument resolves to exactly one of four states, and "more than one candidate"
+// is a state of its own rather than a silent pick:
 //
-//   Supported  exactly one publishable row carries the instrument, and no other publishable row
-//              decodes overlapping bits of the same page;
-//   Absent     no row of this profile carries it;
-//   Withheld   the profile carries it only in rows that may not be published (detect-only
-//              `no_publish` placeholders or rows the availability ledger quarantines as Unproven);
-//   Ambiguous  two publishable rows carry it, or another quantity decodes the same bits. Neither
-//              row is trusted: one of them is false on any installation, and nothing here can tell
-//              which.
+//   Supported  exactly one publishable row is identified as the instrument, and no other
+//              publishable row decodes overlapping bits of the same page (a refrigerant pressure's
+//              own conv-405 saturation twin excepted);
+//   Absent     no row is identified as it. A row can still sit at the coordinate under an identity
+//              the registry does not accept, such as a 0x62/15 bar row without its saturation twin;
+//   Withheld   it is identified only in rows that may not be published (detect-only `no_publish`
+//              placeholders or rows the availability ledger quarantines as Unproven);
+//   Ambiguous  two publishable rows are identified as it, or another quantity decodes the same
+//              bits. Neither row is trusted: at least one identity is unproven, and nothing here
+//              can tell which.
 //
 // Resolution is STATIC, a fact about the resolved profile view. Whether a Supported row answered
 // in the current poll cycle, is held over while the compressor rests, or comes from the source
 // generation an accumulator is bound to are runtime facts with their own owners (hp_poll.cpp's
-// per-cycle cache, outdoor_evidence.hpp); this header does not repeat them.
+// per-cycle cache, ou_stale.hpp for held-over pages, outdoor_evidence.hpp for outdoor-air context);
+// this header does not repeat them.
 //
 // The locators are exact page/offset/converter keys, as in checkup.hpp, because a byte such as
 // 0x60/12 holds seven flags that only the converter separates. Where one coordinate means different
 // instruments on different profiles, the locator also requires a label token: 0x20/2 is the
-// outdoor coil on air-source units but a two-phase thermistor on the ground-source ones, and
-// 0x20/10 is the liquid pipe or the leaving brine. test_instrument_registry() pins every label
-// spelling at every locator against the shipped catalog, so a generator change cannot move an
-// identity silently.
+// outdoor coil on air-source units but a two-phase thermistor on the ground-source ones, 0x20/10 is
+// the liquid pipe or the leaving brine, and 0x20/14 names its pressure side on some profiles only.
+// test_instrument_registry() pins every label at every locator coordinate, accepted or rejected,
+// with its profile count, so a generator change cannot move an identity silently.
 #include <cstddef>
 #include <cstdint>
 
@@ -55,7 +59,8 @@ enum class Instrument : uint8_t {
     PumpRunning,
     IndoorRefrigerantPressure,
     MixedWaterEkmik,
-    // Outdoor unit. Pages 0x20/0x21 hold their last values while the compressor rests.
+    // Outdoor unit. Pages 0x20/0x21 hold their last values while the compressor rests; page 0x30,
+    // which carries the compressor speed, stays live.
     CompressorRps,
     ExpansionValve,
     DischargePipe,
@@ -66,6 +71,7 @@ enum class Instrument : uint8_t {
     HighPressure,
     LowPressure,
     InverterPrimaryCurrent,
+    // Current clamps on the indoor page 0x63.
     CtL1,
     CtL2,
     CtL3,
@@ -111,7 +117,8 @@ enum class InstrumentIdentity : uint8_t {
     Coordinate,          // the key alone names the instrument on every profile that carries it
     LabelToken,          // the key means different instruments across profiles; the label decides
     RefrigerantPressure, // convert.hpp's structural rule: bar, and on page 0x62 only with its
-                         // conv-405 saturation twin (Water pressure is bar on the same page)
+                         // conv-405 saturation twin (Water pressure is bar on the same page);
+                         // with a token, the label must also name the pressure side
 };
 
 struct InstrumentLocator {
@@ -120,8 +127,8 @@ struct InstrumentLocator {
     uint8_t            off;
     uint16_t           conv;
     InstrumentIdentity identity;
-    const char*        token;  // LabelToken: accepted case-insensitive label substring
-    const char*        token2; // LabelToken: optional second accepted substring
+    const char*        token;  // accepted case-insensitive label substring (required by LabelToken)
+    const char*        token2; // optional second accepted substring
 };
 
 // An instrument may have one locator per coordinate it occupies across the catalog. All of an
@@ -156,7 +163,10 @@ inline constexpr InstrumentLocator INSTRUMENT_LOCATORS[] = {
      nullptr},
     {Instrument::HighPressure, 0x20, 12, 105, InstrumentIdentity::RefrigerantPressure, nullptr,
      nullptr},
-    {Instrument::LowPressure, 0x20, 14, 105, InstrumentIdentity::RefrigerantPressure, nullptr,
+    // Where 0x20/12 is no pressure, 0x20/14 is the profile's only outdoor transducer and its label
+    // ("Pressure", "Pressure sensor") names no side. Nothing in the repository establishes which
+    // side it measures, so only a row that says "low" is the low side.
+    {Instrument::LowPressure, 0x20, 14, 105, InstrumentIdentity::RefrigerantPressure, "low",
      nullptr},
     {Instrument::InverterPrimaryCurrent, 0x21, 0, 105, InstrumentIdentity::Coordinate, nullptr,
      nullptr},
@@ -309,20 +319,20 @@ inline constexpr bool instrument_rows_overlap(const ValueDef& a, const ValueDef&
 }
 
 // The conv-405 saturation temperature is derived from the same transducer as a refrigerant
-// pressure row and is published beside it on purpose. It is the same instrument, not a competitor.
+// pressure row and is published beside it on purpose: the same instrument, not a competitor. The
+// caller applies this only to a row identified as a refrigerant pressure.
 inline constexpr bool instrument_saturation_twin(const ValueDef& pressure, const ValueDef& other) {
-    return pressure.type == 2 && other.conv == 405 && other.reg == pressure.reg &&
-           other.offset == pressure.offset;
+    return other.conv == 405 && other.reg == pressure.reg && other.offset == pressure.offset;
 }
 
 // Does view row `i` (adjudicated as `row`) carry the instrument this locator names?
 inline bool instrument_locator_matches(const InstrumentLocator& l, const ProfileView& v, size_t i,
                                        const ValueDef& row) {
     if (row.reg != l.reg || row.offset != l.off || row.conv != l.conv) return false;
-    if (l.identity == InstrumentIdentity::LabelToken)
-        return lwt_ci_contains(row.label, l.token) || lwt_ci_contains(row.label, l.token2);
+    const bool named = lwt_ci_contains(row.label, l.token) || lwt_ci_contains(row.label, l.token2);
+    if (l.identity == InstrumentIdentity::LabelToken) return named;
     if (l.identity == InstrumentIdentity::RefrigerantPressure)
-        return fg_is_refrigerant_pressure(v, i);
+        return fg_is_refrigerant_pressure(v, i) && (!l.token || named);
     return true; // Coordinate
 }
 
@@ -330,6 +340,7 @@ inline bool instrument_locator_matches(const InstrumentLocator& l, const Profile
 // admitted only through row_publishable(), the predicate hp_poll and HA discovery share.
 inline InstrumentResolution instrument_resolve(const ProfileView& v, Instrument id) {
     int  match    = -1;
+    bool pressure = false;
     bool withheld = false;
     for (const auto& l : INSTRUMENT_LOCATORS) {
         if (l.id != id) continue;
@@ -341,7 +352,8 @@ inline InstrumentResolution instrument_resolve(const ProfileView& v, Instrument 
                 continue;
             }
             if (match >= 0) return {InstrumentState::Ambiguous, -1};
-            match = static_cast<int>(i);
+            match    = static_cast<int>(i);
+            pressure = l.identity == InstrumentIdentity::RefrigerantPressure;
         }
     }
     if (match < 0) return {withheld ? InstrumentState::Withheld : InstrumentState::Absent, -1};
@@ -350,7 +362,7 @@ inline InstrumentResolution instrument_resolve(const ProfileView& v, Instrument 
     for (size_t j = 0; j < v.count(); j++) {
         if (static_cast<int>(j) == match || !row_publishable(v[j])) continue;
         const ValueDef other = adjudicated(v, j);
-        if (instrument_saturation_twin(mine, other)) continue;
+        if (pressure && instrument_saturation_twin(mine, other)) continue;
         if (instrument_rows_overlap(mine, other)) return {InstrumentState::Ambiguous, -1};
     }
     return {InstrumentState::Supported, match};

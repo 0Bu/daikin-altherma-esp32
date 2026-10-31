@@ -113,7 +113,9 @@ not `0`, false or “no fault”. An unreadable fault class emits neither numeri
 `error_active` is 1 for Error; `warning_active` is 1 for Warning/Caution.
 
 Outdoor pages `0x20/0x21` can keep answering with the previous run's bytes while the compressor
-rests. Those held readings are omitted from MQTT, with `bus_ou_held_over=1` on the heartbeat.
+rests. Those held readings are omitted from MQTT, with `bus_ou_held_over=1` on the heartbeat. The
+firmware can recognise them only while it reads the compressor speed: a profile without that row,
+or a sweep in which its page did not answer, publishes the outdoor values unmarked.
 HTTP `/values` can instead retain them with `held:true`, so the two surfaces intentionally differ.
 Row/model-specific refusal rules and converter evidence belong in [REGISTERS.md](REGISTERS.md).
 

@@ -78,32 +78,26 @@ itself. Each instrument has exact page/offset/converter locators. Where one coor
 different instruments on different profiles, a label token also decides; refrigerant pressures use
 the structural rule in `convert.hpp`. On a resolved profile an instrument is:
 
-- **Supported**: exactly one publishable row carries it, and no other publishable row decodes the
-  same bits;
-- **Absent**: no row carries it;
+- **Supported**: exactly one publishable row is identified as it, and no other publishable row
+  decodes the same bits, except a refrigerant pressure's own saturation twin;
+- **Absent**: no row is identified as it, although a row may sit at the coordinate under an
+  identity the registry does not accept;
 - **Withheld**: only detect-only or quarantined rows carry it;
-- **Ambiguous**: two rows carry it, or another quantity decodes the same bits.
+- **Ambiguous**: two publishable rows carry it, or another quantity decodes the same bits.
 
 Table order never settles an Ambiguous instrument. Where 0x65/0 also decodes a hydro-split outlet
-temperature, the bizone kit's mixed water stays unusable until the catalog establishes which
-quantity is real. The host catalog test pins each state and label spelling. It also binds the
-registry to the checkup, trend, refrigerant-service and leaving/return-water selectors, and names
-and counts their remaining differences.
+temperature or a mix-valve position, the bizone kit's mixed water stays unusable until the catalog
+establishes which quantity is real. The host catalog test pins each state count and every label at
+every locator coordinate, accepted or rejected, with its profile count. It also binds the registry
+to the C++ checkup, trend, refrigerant-service and leaving/return-water selectors and names and
+counts their remaining differences; the browser's label patterns are not bound to it.
 
-Resolution is a static profile fact. At runtime:
-
-- A Supported value is current only when its page answered in the sweep being read. Paired values
-  come from one cache snapshot. A missing page is unknown; it is never replaced by another row or the
-  last value.
-- Outdoor pages count as diagnosis evidence only while the compressor witness reads running
-  (`logic/outdoor_evidence.hpp`). Publication withholds them only when the witness reads stopped. A
-  profile without the witness therefore publishes a frozen outdoor value unmarked, and has no X10A
-  outdoor evidence.
-- Each source (X10A, HomeHub, ENV III, room, circulation, weather) keeps its own identity and
-  freshness. An accumulator is bound to one source generation, and no source stands in for another.
-- A sub-observation runs only when every instrument it reads is Supported (`instrument_require`),
-  so a missing input disables only the observations that read it. A missing value is unknown, never
-  zero or OFF; OFF of an instrument made of several rows needs all of them readable.
+Resolution is a static profile fact. Whether a value is current, held over or from the right source
+generation is decided at runtime, as described in [Polling and source truth](#polling-and-source-truth)
+and [History and diagnosis persistence](#history-and-diagnosis-persistence). A sub-observation runs
+only when every instrument it reads is Supported (`instrument_require`), so a missing input disables
+only the observations that read it. An OFF state built from several instruments needs every one of
+them readable.
 
 <a id="value-definition-profiles-runtime-selectable-models"></a>
 <a id="auto-detection-protocol--model--hp_detectcpp--logicdetecthpp"></a>
@@ -170,7 +164,9 @@ witness, the conditional liquid-line zero filter leaves the reading available.
 
 Outdoor pages can keep returning a previous run's values while the compressor rests.
 `logic/ou_stale.hpp` classifies them from the page and a live compressor witness. HTTP keeps the
-reading with `held:true`, history records a held gap, and MQTT withholds that row. A new payload
+reading with `held:true`, history records a held gap, and MQTT withholds that row. Without a
+readable witness (no compressor-speed row, or page 0x30 unanswered in that sweep) a held value cannot
+be told from a live one: it is published unmarked and gives no X10A outdoor evidence. A new payload
 timestamp cannot make a frozen measurement fresh. Binary selectors and raw overlay bits keep their
 specific semantics; a selected valve path or heater stage is not automatically an ON/OFF state.
 

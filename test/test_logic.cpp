@@ -20684,8 +20684,8 @@ static void test_refrigerant_service() {
 
 // ── logic/instrument.hpp ────────────────────────────────────────────────────────────────────────
 // One owner for "which row is instrument X". The synthetic half proves each state and each rule;
-// the catalog half pins the shipped profiles and binds the registry to every older selector that
-// answers the same question, so a disagreement is a named, counted exception or a failure.
+// the catalog half pins the shipped profiles and binds the registry to the older C++ selectors that
+// answer the same question, so a disagreement is a named, counted exception or a failure.
 static void test_instrument_registry() {
     using namespace logic;
     using logic::Instrument;
@@ -20713,8 +20713,9 @@ static void test_instrument_registry() {
     for (size_t a = 0; a < kLocators; a++) {
         const auto& l = INSTRUMENT_LOCATORS[a];
         CHECK(l.id != Instrument::Count);
-        CHECK((l.identity == InstrumentIdentity::LabelToken) == (l.token != nullptr));
-        if (l.identity != InstrumentIdentity::LabelToken) CHECK(l.token2 == nullptr);
+        if (l.identity == InstrumentIdentity::LabelToken) CHECK(l.token != nullptr);
+        if (l.identity == InstrumentIdentity::Coordinate) CHECK(l.token == nullptr);
+        if (!l.token) CHECK(l.token2 == nullptr);
         for (size_t b = a + 1; b < kLocators; b++) {
             const auto& m = INSTRUMENT_LOCATORS[b];
             CHECK(l.reg != m.reg || l.off != m.off || l.conv != m.conv);
@@ -20850,6 +20851,24 @@ static void test_instrument_registry() {
                                    {0x62, 15, 405, 2, 1, "Pressure sensor(T)"}};
     r                           = resolve(hydro_pair, 2, Instrument::IndoorRefrigerantPressure);
     CHECK(r.state == InstrumentState::Supported && r.row == 0);
+    // The exemption covers only the transducer's own twin: a conv-405 row one byte over, or beside
+    // a row that is no refrigerant pressure, is an ordinary competitor.
+    const ValueDef high_shifted_twin[] = {high, {0x20, 13, 405, 2, 1, "shifted twin"}};
+    CHECK(resolve(high_shifted_twin, 2, Instrument::HighPressure).state ==
+          InstrumentState::Ambiguous);
+    const ValueDef r1t_with_405[] = {r1t, {0x61, 2, 405, 2, 1, "synthetic saturation"}};
+    CHECK(resolve(r1t_with_405, 2, Instrument::LeavingWaterPreBuh).state ==
+          InstrumentState::Ambiguous);
+    // The low side needs a label that says so; the unsided outdoor transducer is not it.
+    const ValueDef low_pair[] = {{0x20, 14, 105, 2, 2, "Low Pressure"},
+                                 {0x20, 14, 405, 2, 1, "Low Pressure(T)"}};
+    r                         = resolve(low_pair, 2, Instrument::LowPressure);
+    CHECK(r.state == InstrumentState::Supported && r.row == 0);
+    const ValueDef unsided[] = {{0x20, 14, 105, 2, 2, "Pressure"},
+                                {0x20, 14, 405, 2, 1, "Pressure(T)"}};
+    CHECK(resolve(unsided, 2, Instrument::LowPressure).state == InstrumentState::Absent);
+    const ValueDef low_in_celsius[] = {{0x20, 14, 105, 2, 1, "Low Pressure"}};
+    CHECK(resolve(low_in_celsius, 1, Instrument::LowPressure).state == InstrumentState::Absent);
 
     // Label tokens: 0x20/2 is the outdoor coil and 0x20/10 the liquid pipe only where the label
     // says so; the ground-source profiles put other sensors there.
@@ -20903,12 +20922,13 @@ static void test_instrument_registry() {
     };
     static const Partial kPartial[] = {
         {Instrument::IndoorRefrigerantPressure, 7, 0}, // 0x62/15 with its saturation twin
-        {Instrument::MixedWaterEkmik, 4, 5},           // 0x65/0 shared with DLWB2 or M1S on five
-        {Instrument::CompressorRps, 26, 0},            // 13 profiles do not read page 0x30
+        {Instrument::MixedWaterEkmik, 4, 5}, // 0x65/0 shared with DLWB2 on five, also M1S on four
+        {Instrument::CompressorRps, 26, 0},  // 13 profiles do not read page 0x30
         {Instrument::ExpansionValve, 26, 0},
         {Instrument::OutdoorHeatExchanger, 35, 0},     // ground source: two-phase thermistor
         {Instrument::RefrigerantLiquidOutdoor, 35, 0}, // ground source: leaving brine
-        {Instrument::HighPressure, 22, 0}, // elsewhere 0x20/12 is a heat-sink temperature
+        {Instrument::HighPressure, 22, 0}, // elsewhere 0x20/12 is a heat-sink or fin temperature
+        {Instrument::LowPressure, 23, 0},  // elsewhere 0x20/14 names no pressure side
         {Instrument::CtL1, 20, 0},
         {Instrument::CtL2, 20, 0},
         {Instrument::CtL3, 20, 0},
@@ -20918,70 +20938,103 @@ static void test_instrument_registry() {
         {Instrument::PowerLimit3, 2, 0},
         {Instrument::PowerLimit4, 2, 0},
     };
-    // Every resolved row must also read as its instrument to a human: one of these tokens appears
-    // in its label. This is independent of the header's own label tokens.
+    // Every label at every locator coordinate and converter, whether the locator accepts it, and
+    // in how many detectable profiles it occurs. A new spelling, a moved row or a changed count
+    // fails here, in both directions.
     struct Spelling {
-        Instrument  id;
-        const char* token;
-        const char* token2;
+        const char* slug;
+        uint8_t     reg;
+        uint8_t     off;
+        const char* label;
+        bool        accepted;
+        int         profiles;
     };
     static const Spelling kSpelling[] = {
-        {Instrument::LeavingWaterPreBuh, "r1t", nullptr},
-        {Instrument::LeavingWaterPostBuh, "r2t", nullptr},
-        {Instrument::ReturnWater, "r4t", nullptr},
-        {Instrument::DhwTank, "dhw tank", nullptr},
-        {Instrument::RefrigerantLiquidIndoor, "liquid side", nullptr},
-        {Instrument::Flow, "flow sensor", nullptr},
-        {Instrument::WaterPressure, "water pressure", nullptr},
-        {Instrument::PumpCommand, "water pump signal", nullptr},
-        {Instrument::PumpRunning, "water pump operation", nullptr},
-        {Instrument::IndoorRefrigerantPressure, "pressure sensor", nullptr},
-        {Instrument::MixedWaterEkmik, "mixed leaving water", nullptr},
-        {Instrument::CompressorRps, "inv frequency", nullptr},
-        {Instrument::ExpansionValve, "expansion valve 1", nullptr},
-        {Instrument::DischargePipe, "discharge pipe", nullptr},
-        {Instrument::OutdoorAir, "outdoor air", nullptr},
-        {Instrument::OutdoorHeatExchanger, "o/u heat exch", "deicer"},
-        {Instrument::SuctionPipe, "suction pipe", nullptr},
-        {Instrument::RefrigerantLiquidOutdoor, "liquid", nullptr},
-        {Instrument::HighPressure, "high pressure", nullptr},
-        {Instrument::LowPressure, "pressure", nullptr},
-        {Instrument::InverterPrimaryCurrent, "inv primary current", nullptr},
-        {Instrument::CtL1, "ct sensor of l1", nullptr},
-        {Instrument::CtL2, "ct sensor of l2", nullptr},
-        {Instrument::CtL3, "ct sensor of l3", nullptr},
-        {Instrument::OperationMode, "operation mode", nullptr},
-        {Instrument::Defrost, "defrost", nullptr},
-        {Instrument::LowNoise, "low noise", nullptr},
-        {Instrument::SilentMode, "silent mode", nullptr},
-        {Instrument::IndoorThermostat, "thermostat", nullptr},
-        {Instrument::IuOperationMode, "i/u operation mode", nullptr},
-        {Instrument::Bsh, "bsh", nullptr},
-        {Instrument::BuhStep1, "buh step1", nullptr},
-        {Instrument::BuhStep2, "buh step2", nullptr},
-        {Instrument::DhwValve, "3way valve", nullptr},
-        {Instrument::SpaceHeatingOperation, "space heating operation", nullptr},
-        {Instrument::Emergency, "emergency", nullptr},
-        {Instrument::LwSetpointMain, "lw setpoint (main)", nullptr},
-        {Instrument::LwSetpointAdd, "lw setpoint (add)", nullptr},
-        {Instrument::DropInvCurrent, "inv current drop", nullptr},
-        {Instrument::DropDischarge, "discharge temp. drop", nullptr},
-        {Instrument::DropLp, "lp drop", nullptr},
-        {Instrument::DropHp, "hp drop", nullptr},
-        {Instrument::DropOther, "other drop", nullptr},
-        {Instrument::DropFin, "fin temp. drop", nullptr},
-        {Instrument::RetryDischarge, "discharge temp. protection retry", nullptr},
-        {Instrument::RetryInvCurrent, "inv current protection retry", nullptr},
-        {Instrument::RetryHp, "hp protection retry", nullptr},
-        {Instrument::RetryLp, "lp protection retry", nullptr},
-        {Instrument::RetryFin, "fin temp. protection retry", nullptr},
-        {Instrument::PowerLimit1, "consumption limit 1", nullptr},
-        {Instrument::PowerLimit2, "consumption limit 2", nullptr},
-        {Instrument::PowerLimit3, "consumption limit 3", nullptr},
-        {Instrument::PowerLimit4, "consumption limit 4", nullptr},
+        {"leaving_water_pre_buh", 0x61, 2, "Leaving water temp. before BUH (R1T)", true, 35},
+        {"leaving_water_pre_buh", 0x61, 2, "Outlet Water Heat Exch. Temp. (R1T)", true, 2},
+        {"leaving_water_pre_buh", 0x61, 2, "[HPSU] Tv inflow Temp  (R1T)", true, 2},
+        {"leaving_water_post_buh", 0x61, 4, "Leaving water temp. after BUH (R2T)", true, 35},
+        {"leaving_water_post_buh", 0x61, 4, "Outlet Water BUH Temp. (R2T)", true, 2},
+        {"leaving_water_post_buh", 0x61, 4, "[HPSU] Tvbh inflow Temp after Buffer/BUH (R2T)", true,
+         2},
+        {"return_water", 0x61, 8, "Inlet water temp.(R4T)", true, 38},
+        {"return_water", 0x61, 8, "[HPSU] Tr return Temp (R4T)", true, 1},
+        {"dhw_tank", 0x61, 10, "DHW tank temp. (R5T)", true, 39},
+        {"refrigerant_liquid_indoor", 0x61, 6, "Refrig. Temp. liquid side (R3T)", true, 39},
+        {"flow", 0x62, 9, "Flow sensor (l/min)", true, 39},
+        {"water_pressure", 0x62, 11, "Water pressure", true, 39},
+        {"pump_command", 0x62, 12, "Water pump signal (0:max-100:stop)", true, 39},
+        {"pump_running", 0x60, 12, "Water pump operation", true, 39},
+        {"indoor_refrigerant_pressure", 0x62, 15, "Pressure sensor", false, 1},
+        {"indoor_refrigerant_pressure", 0x62, 15, "Refrigerant pressure sensor", false, 16},
+        {"indoor_refrigerant_pressure", 0x62, 15, "Refrigerant pressure sensor", true, 7},
+        {"mixed_water_ekmik", 0x65, 0, "Mixed water temp.", false, 1},
+        {"mixed_water_ekmik", 0x65, 0, "Outlet water heat exchanger temp (hydro split model) DLWB2",
+         false, 5},
+        {"mixed_water_ekmik", 0x65, 0, "[EKMIK] Bizone kit mixed leaving water temperature R1T",
+         true, 6},
+        {"mixed_water_ekmik", 0x65, 4, "[EKMIK] Bizone kit mixed leaving water temperature R1T",
+         true, 3},
+        {"compressor_rps", 0x30, 0, "INV frequency (rps)", true, 26},
+        {"expansion_valve", 0x30, 3, "Expansion valve 1 (pls)", true, 26},
+        {"discharge_pipe", 0x20, 4, "Discharge pipe temp.", true, 25},
+        {"discharge_pipe", 0x20, 4, "Discharge pipe temp.(R2T)", true, 13},
+        {"discharge_pipe", 0x20, 4, "R2T-INV discharge pipe temp.", true, 1},
+        {"outdoor_air", 0x20, 0, "Outdoor air temp.", true, 2},
+        {"outdoor_air", 0x20, 0, "R1T-Outdoor air temp.", true, 37},
+        {"outdoor_heat_exchanger", 0x20, 2, "2 phase thermistor (R4T)", false, 4},
+        {"outdoor_heat_exchanger", 0x20, 2, "O/U Heat Exch. Temp.", true, 21},
+        {"outdoor_heat_exchanger", 0x20, 2, "O/U Heat Exch. Temp.(R4T)", true, 13},
+        {"outdoor_heat_exchanger", 0x20, 2, "R4T-Deicer temp.", true, 1},
+        {"suction_pipe", 0x20, 6, "Suction pipe temp.", true, 22},
+        {"suction_pipe", 0x20, 6, "Suction pipe temp.(R3T)", true, 17},
+        {"refrigerant_liquid_outdoor", 0x20, 10, "Leaving brine temp.(R6T)", false, 4},
+        {"refrigerant_liquid_outdoor", 0x20, 10, "Liquid pipe temp.", true, 2},
+        {"refrigerant_liquid_outdoor", 0x20, 10, "Liquid pipe temp.(R6T)", true, 28},
+        {"refrigerant_liquid_outdoor", 0x20, 10, "Liquid temperature(R3T)", true, 5},
+        {"high_pressure", 0x20, 12, "Heat sink temp.", false, 13},
+        {"high_pressure", 0x20, 12, "Heat sink temp.(R10T)", false, 2},
+        {"high_pressure", 0x20, 12, "High Pressure", true, 22},
+        {"high_pressure", 0x20, 12, "INV fin temp.", false, 2},
+        {"low_pressure", 0x20, 14, "Low Pressure", true, 23},
+        {"low_pressure", 0x20, 14, "Pressure", false, 10},
+        {"low_pressure", 0x20, 14, "Pressure sensor", false, 6},
+        {"inverter_primary_current", 0x21, 0, "INV primary current (A)", true, 39},
+        {"ct_l1", 0x63, 14, "Current measured by CT sensor of L1", true, 20},
+        {"ct_l2", 0x63, 15, "Current measured by CT sensor of L2", true, 20},
+        {"ct_l3", 0x63, 16, "Current measured by CT sensor of L3", true, 20},
+        {"operation_mode", 0x10, 0, "Operation Mode", true, 39},
+        {"defrost", 0x10, 1, "Defrost Operation", true, 39},
+        {"low_noise", 0x10, 1, "Low noise control", true, 2},
+        {"silent_mode", 0x60, 2, "Silent Mode", true, 39},
+        {"indoor_thermostat", 0x60, 2, "Thermostat ON/OFF", true, 39},
+        {"iu_operation_mode", 0x60, 2, "I/U operation mode", true, 39},
+        {"bsh", 0x60, 12, "BSH", true, 39},
+        {"buh_step1", 0x60, 12, "BUH Step1", true, 39},
+        {"buh_step2", 0x60, 12, "BUH Step2", true, 39},
+        {"dhw_valve", 0x60, 12, "3way valve(On:DHW_Off:Space)", true, 39},
+        {"space_heating_operation", 0x62, 2, "Space heating Operation ON/OFF", true, 39},
+        {"emergency", 0x62, 2, "Emergency (indoor) active/not active", true, 39},
+        {"lw_setpoint_main", 0x60, 9, "LW setpoint (main)", true, 39},
+        {"lw_setpoint_add", 0x62, 3, "LW setpoint (add)", true, 39},
+        {"drop_inv_current", 0x10, 10, "Comp. INV Current Drop", true, 39},
+        {"drop_discharge", 0x10, 10, "Discharge Temp. Drop", true, 39},
+        {"drop_lp", 0x10, 11, "LP Drop Control", true, 39},
+        {"drop_hp", 0x10, 11, "HP Drop Control", true, 39},
+        {"drop_other", 0x10, 12, "Other Drop Control", true, 39},
+        {"drop_fin", 0x10, 12, "Fin Temp. Drop Control", true, 39},
+        {"retry_discharge", 0x10, 10, "Discharge Temp. Protection Retry Qty", true, 39},
+        {"retry_inv_current", 0x10, 10, "Comp. INV Current Protection Retry Qty", true, 39},
+        {"retry_hp", 0x10, 11, "HP Protection Retry Qty", true, 39},
+        {"retry_lp", 0x10, 11, "LP Protection Retry Qty", true, 39},
+        {"retry_fin", 0x10, 12, "Fin Temp. Protection Retry Qty", true, 39},
+        {"power_limit_1", 0x62, 7, "Pwr consumption limit 1", true, 2},
+        {"power_limit_2", 0x62, 7, "Pwr consumption limit 2", true, 2},
+        {"power_limit_3", 0x62, 7, "Pwr consumption limit 3", true, 2},
+        {"power_limit_4", 0x62, 7, "Pwr consumption limit 4", true, 2},
     };
-    static_assert(sizeof(kSpelling) / sizeof(kSpelling[0]) == logic::INSTRUMENT_COUNT,
-                  "every instrument needs a catalog spelling");
+    constexpr size_t kSpellings          = sizeof(kSpelling) / sizeof(kSpelling[0]);
+    int              spelled[kSpellings] = {0};
     // The older selectors that answer the same question. Each must pick the registry's row, or the
     // difference must be one of the named, counted cases below.
     struct CheckupPair {
@@ -21035,7 +21088,8 @@ static void test_instrument_registry() {
     int ambiguous[logic::INSTRUMENT_COUNT] = {0};
     int withheld                           = 0;
     int profiles                           = 0;
-    int trend_two_phase = 0, trend_untwinned = 0, service_two_phase = 0, reference_checked = 0;
+    int trend_two_phase = 0, trend_untwinned = 0, service_two_phase = 0, service_unsided = 0;
+    int reference_checked = 0;
     for (const auto& p : def::profiles) {
         if (!def::is_detection_model(p.id)) continue;
         profiles++;
@@ -21068,12 +21122,29 @@ static void test_instrument_registry() {
                 CHECK(static_cast<Instrument>(k) == Instrument::MixedWaterEkmik);
             }
             if (res[k].state == InstrumentState::Withheld) withheld++;
-            if (res[k].state != InstrumentState::Supported) continue;
-            const ValueDef  row = adjudicated(view, static_cast<size_t>(res[k].row));
-            const Spelling& s   = kSpelling[k];
-            CHECK(s.id == static_cast<Instrument>(k));
-            CHECK(row.label && (lwt_ci_contains(row.label, s.token) ||
-                                (s.token2 && lwt_ci_contains(row.label, s.token2))));
+        }
+        // Every row at every locator key, accepted or not, must be a listed spelling.
+        for (const auto& l : INSTRUMENT_LOCATORS) {
+            for (size_t i = 0; i < n; i++) {
+                const ValueDef row = adjudicated(view, i);
+                if (row.reg != l.reg || row.offset != l.off || row.conv != l.conv) continue;
+                const bool accepted = logic::instrument_locator_matches(l, view, i, row);
+                bool       listed   = false;
+                for (size_t s = 0; s < kSpellings && !listed; s++) {
+                    const Spelling& e = kSpelling[s];
+                    if (std::strcmp(e.slug, logic::instrument_slug(l.id)) != 0 || e.reg != l.reg ||
+                        e.off != l.off || e.accepted != accepted ||
+                        std::strcmp(e.label, row.label ? row.label : "") != 0)
+                        continue;
+                    spelled[s]++;
+                    listed = true;
+                }
+                if (!listed)
+                    std::printf("instrument %s: unlisted label \"%s\" (%s) on %s\n",
+                                logic::instrument_slug(l.id), row.label ? row.label : "",
+                                accepted ? "accepted" : "rejected", p.id);
+                CHECK(listed);
+            }
         }
         auto row_of = [&](Instrument id) {
             const auto& x = res[static_cast<size_t>(id)];
@@ -21142,7 +21213,17 @@ static void test_instrument_registry() {
         CHECK(svc.suction == is_supported(Instrument::SuctionPipe));
         CHECK(svc.liquid == is_supported(Instrument::RefrigerantLiquidOutdoor));
         CHECK(svc.eev_command == is_supported(Instrument::ExpansionValve));
-        CHECK(svc.low_pressure == is_supported(Instrument::LowPressure));
+        if (svc.low_pressure != is_supported(Instrument::LowPressure)) {
+            // The service counts any outdoor 0x20/14 refrigerant pressure as its low side; the
+            // registry needs the label to name it.
+            bool unsided_row = false;
+            for (size_t k = 0; k < m; k++)
+                if (regs[k] == 0x20 && view[pub[k]].offset == 14 && view[pub[k]].type == 2 &&
+                    !lwt_ci_contains(labels[k], "low"))
+                    unsided_row = true;
+            CHECK(svc.low_pressure && unsided_row);
+            service_unsided++;
+        }
         CHECK(svc.hydronic_pressure == is_supported(Instrument::IndoorRefrigerantPressure));
         CHECK(svc.high_pressure == (is_supported(Instrument::HighPressure) ||
                                     is_supported(Instrument::IndoorRefrigerantPressure)));
@@ -21194,6 +21275,22 @@ static void test_instrument_registry() {
     CHECK(trend_two_phase == 4);
     CHECK(service_two_phase == 4);
     CHECK(trend_untwinned == 17);
+    CHECK(service_unsided == 16);
+    for (size_t s = 0; s < kSpellings; s++) {
+        if (spelled[s] != kSpelling[s].profiles)
+            std::printf("instrument %s: \"%s\" seen on %d profiles, listed %d\n", kSpelling[s].slug,
+                        kSpelling[s].label, spelled[s], kSpelling[s].profiles);
+        CHECK(spelled[s] == kSpelling[s].profiles);
+    }
+    // Every instrument the catalog supports has at least one accepted spelling.
+    for (size_t k = 0; k < logic::INSTRUMENT_COUNT; k++) {
+        bool accepted = false;
+        for (size_t s = 0; s < kSpellings; s++)
+            accepted |= kSpelling[s].accepted &&
+                        std::strcmp(kSpelling[s].slug,
+                                    logic::instrument_slug(static_cast<Instrument>(k))) == 0;
+        CHECK(accepted == (supported[k] + ambiguous[k] > 0));
+    }
     for (size_t k = 0; k < logic::INSTRUMENT_COUNT; k++) {
         int want_supported = profiles, want_ambiguous = 0;
         for (const auto& x : kPartial)
