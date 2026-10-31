@@ -916,7 +916,7 @@ static void run_refrigerant(const char* name) {
                "refrigerant_unidentified_row_fresh_in_sweep");
         oracle(!sample.high_pressure_ok, "refrigerant_unidentified_row_never_high_side");
     } else if (!std::strcmp(name, "refrigerant_unpaired_pressure")) {
-        setup("altherma_lt_ca_cb_11_16kw"); // 0x20/14 "Pressure" is the only outdoor transducer
+        setup("altherma_lt_ca_cb_11_16kw"); // 0x20/14 "Pressure" is the only outdoor pressure row
         adapter::populated = true;
         for (unsigned reg = 0; reg < 256; ++reg) {
             adapter::available[reg]    = true;
@@ -925,8 +925,8 @@ static void run_refrigerant(const char* name) {
         adapter::pages[0x30][0] = 42;
         put16(0x20, 14, 260);
         poll_once();
-        int gas_line = 0;
-        oracle(cached_tenths(0x20, 14, gas_line) && gas_line > 0,
+        int unpaired = 0;
+        oracle(cached_tenths(0x20, 14, unpaired) && unpaired > 0,
                "refrigerant_unpaired_pressure_fresh_in_sweep");
         oracle(!sample.low_pressure_ok && !sample.high_pressure_ok,
                "refrigerant_unpaired_pressure_never_low_side");

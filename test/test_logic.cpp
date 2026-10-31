@@ -20402,8 +20402,8 @@ static void test_refrigerant_service() {
     CHECK(!refrigerant_service_supported(water));
     CHECK(!refrigerant_service_high_pressure_row(water).available);
 
-    // The low side is the outdoor pair's second transducer, in either row order. Alone, 0x20/14 is
-    // the unit's single gas-line transducer whatever its label says; neither the hydronic
+    // The low side is the outdoor pair's second row, in either row order. Alone, 0x20/14 is the
+    // profile's only outdoor refrigerant-pressure row whatever its label says; neither the hydronic
     // transducer nor a temperature at 0x20/12 makes it a pair.
     RefrigerantServiceCoverage unpaired;
     refrigerant_service_cover_row(unpaired, 0x20, 14, 105, "Low Pressure", true);
@@ -20881,9 +20881,9 @@ static void test_instrument_registry() {
     const ValueDef r1t_with_405[] = {r1t, {0x61, 2, 405, 2, 1, "synthetic saturation"}};
     CHECK(resolve(r1t_with_405, 2, Instrument::LeavingWaterPreBuh).state ==
           InstrumentState::Ambiguous);
-    // The low side is the outdoor pair's second transducer, whatever either label says. Alone,
-    // 0x20/14 is the unit's single gas-line transducer, also where it is labelled "Low Pressure";
-    // a withheld or non-pressure 0x20/12 row makes no pair.
+    // The low side is the outdoor pair's second row, whatever either label says. Alone, 0x20/14 is
+    // the profile's only outdoor refrigerant-pressure row, also where it is labelled "Low
+    // Pressure"; a withheld or non-pressure 0x20/12 row makes no pair.
     const ValueDef low{0x20, 14, 105, 2, 2, "Low Pressure"};
     const ValueDef low_t{0x20, 14, 405, 2, 1, "Low Pressure(T)"};
     const ValueDef outdoor_pair[] = {low, low_t, high};
@@ -21259,9 +21259,9 @@ static void test_instrument_registry() {
         CHECK(svc.eev_command == is_supported(Instrument::ExpansionValve));
         CHECK(svc.low_pressure == is_supported(Instrument::LowPressure));
         if (svc.outdoor_second_pressure && !svc.low_pressure) {
-            // The unit's single gas-line transducer: 16 unsided labels and the Monobloc CA's "Low
-            // Pressure". Where it was the service's only pressure input, the service is now
-            // unsupported instead of publishing it under the low side's name.
+            // The profile's only outdoor refrigerant-pressure row: 16 unsided labels and the
+            // Monobloc CA's "Low Pressure". Where it would be the service's only pressure input,
+            // the service is unsupported instead of publishing it under the low side's name.
             unpaired_pressure++;
             RefrigerantServiceCoverage former = svc;
             former.low_pressure               = true;

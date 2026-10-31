@@ -1,6 +1,6 @@
 # Evidence and limits of the plant diagnostics
 
-<!-- diagnostic-evidence-contract: 0cea7ffa7602acaecd0d8224dbc62530f31acb2ff144cb2ed0ab33e6633a1533 -->
+<!-- diagnostic-evidence-contract: b53273cb68e94c0ff64969360d0e102b927597b1e923c1c5df975639d2eed171 -->
 
 For every row in the **Plant diagnostics · 24 h** card, this page answers four questions:
 
@@ -33,8 +33,9 @@ owns restoration and restart limits; HomeHub/ENV III remain separate instruments
 
 A manufacturer statement is not automatically a limit for every Daikin model. The installation
 manual for the exact indoor and outdoor units remains authoritative. The primary sources linked here
-were last reviewed on **11 October 2026**. The research paper [R2] was checked through its
-publisher abstract; its full text was not accessible during that review.
+were last reviewed on **11 October 2026**, unless an entry gives its own check date. The research
+paper [R2] was checked through its publisher abstract; its full text was not accessible during
+that review.
 
 ## How strong is each kind of claim?
 
@@ -64,13 +65,13 @@ it activates no additional source or controller action and changes no heat-pump 
 **Evidence boundary:** No model-specific Altherma primary source in this repository establishes a
 universal hot-gas, pressure, EEV-pulse, or twenty-minute settling range for this feature. The
 implementation therefore transfers no numeric threshold, superheat formula, defrost-end rule,
-refrigerant-shortage pattern, or claim that a valve fault cannot produce an error code. For pressure
-sides it uses one installer reference guide, for the EBLQ05+07CAV3 and EDLQ05+07CAV3 monobloc units
-(German edition, document 4P405544-1E, revision 2018-06, section 14.1, piping diagram 3D097222-1,
-printed page 101: [official PDF][monobloc-ca-pdf], checked 31 October 2026). Their outdoor unit has
-one refrigerant pressure sensor, S1NPH, on the line between the 4-way valve and the plate heat
-exchanger, and a high-pressure switch, S1PH; the diagram shows no other pressure device. The guide
-states no pressure range.
+refrigerant-shortage pattern, or claim that a valve fault cannot produce an error code. For
+pressure-side labels the project checked one installer reference guide, for the EBLQ05+07CAV3 and
+EDLQ05+07CAV3 monobloc units (German edition, document 4P405544-1E, revision 2018-06, section
+14.1, piping diagram 3D097222-1, printed page 101: [official PDF][monobloc-ca-pdf], checked
+31 October 2026). Their outdoor unit has one refrigerant pressure sensor, S1NPH, on the line between
+the 4-way valve and the plate heat exchanger, and a high-pressure switch, S1PH; the diagram shows
+no other pressure device. The guide states no pressure range.
 
 **Firmware rule:** `/status` omits the complete object until this boot has detected an X10A profile
 and the current source generation has evaluated that resolved profile's structural signal coverage.
@@ -99,15 +100,17 @@ window `limited`. The liquid input needs a liquid label at 0x20/10: the geotherm
 temp.(R6T) row there is a brine-loop temperature, not refrigerant, so a qualifying window on those
 profiles is `limited` for temperatures.
 
-This observation, and the instrument registry, count a low side only as the outdoor pair: a 0x20/14
-refrigerant pressure beside a structural 0x20/12 pressure. An unpaired 0x20/14 row is the profile's
-only outdoor refrigerant-pressure row, and its label is no evidence of a side. The observation reads
-it as neither side, so a profile without another structural pressure is `unsupported_profile`.
+This observation, and the instrument registry, count 0x20/14 as the low side only within the outdoor
+pair: a 0x20/14 refrigerant pressure beside a structural 0x20/12 pressure. An unpaired 0x20/14 row
+is the profile's only outdoor refrigerant-pressure row, and its label is no evidence of a side. The
+observation reads it as neither side, so a profile without another structural pressure is
+`unsupported_profile`.
 Other surfaces still show that row under its catalog label. The pair is a fact of the generated
 tables, not of measured hardware: as for 0x20/12 alone, whether real units of the paired profiles
 populate 0x20/14 while running is unverified, and two catalogs for the same ERGA04-08D outdoor
-family disagree (the DA table has a heat-sink temperature and an unpaired "Pressure sensor", the
-DJ table a "High Pressure" and "Low Pressure" pair).
+family disagree: `altherma_erga_d_ehv_ehb_ehvz_da_series_04_08kw` has a heat-sink temperature and an
+unpaired "Pressure sensor", `altherma_erga_d_ehv_ehb_ehvz_dj_series_04_08_kw` a "High Pressure" and
+"Low Pressure" pair.
 
 **Project boundary:** The poll allowance is a transport bound: two fixed poll intervals plus
 one 300 ms UART timeout per publishable register page in the active profile. It is not a physical
@@ -116,15 +119,14 @@ figures; it has no `complete`, `OK`, `ready`, charge, or full-load state. `/stat
 `load_proven:false` and `eev_feedback:false`. The project reads the Monobloc CA profile
 (`altherma_monobloc_ca_05_07kw`) as those monobloc units and its only outdoor pressure row, labelled
 "Low Pressure", as S1NPH. In heating the plate heat exchanger condenses, so that row would carry the
-high side; this is why a label is not taken as side evidence. The other unpaired profiles label the
-row "Pressure" or "Pressure sensor".
+high side. The other unpaired profiles label the row "Pressure" or "Pressure sensor".
 
 **Not established:** Hot-gas temperature, pressure, targets, and EEV commands vary with exact model,
 mode, compressor speed, load, and outdoor conditions. A stable-looking window does not establish
 full load, thermodynamic equilibrium, correct refrigerant charge, sensor calibration, mechanical EEV
 movement, or the cause of a difference from a controller target. Official model-specific procedures
-and suitable service instruments remain necessary. Which side an unpaired 0x20/14 row measures on
-any profile other than the Monobloc CA is not established.
+and suitable service instruments remain necessary. Which side an unpaired 0x20/14 row measures is
+not established by any field reading; on the Monobloc CA it rests on the project reading above.
 
 ## Evidence matrix for all eight diagnoses
 
@@ -457,8 +459,9 @@ observation, project heuristic, or experimental rule.
 The CI gate `scripts/run-diagnostic-evidence-audit.sh` binds these claims to the current diagnosis
 implementation, visible diagnosis IDs, five protection counters, and the related project evidence
 in `docs/REGISTERS.md`. It also checks the complete evidence matrix, source references, HTTPS
-resolution, and each Daikin source's models, document number, revision, and used section. A change to
-any of those inputs or this page raises `E010`. Refresh the fingerprint only after a content review
+resolution, and each catalogued Daikin source's models, document number, revision, and used section.
+The refrigerant observation's inline source is outside the catalog and checked by review only. A
+change to any of those inputs or this page raises `E010`. Refresh the fingerprint only after a content review
 with `$diagnostic-evidence-review`:
 
 ```bash
