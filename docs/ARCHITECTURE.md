@@ -245,6 +245,21 @@ calls handlers in reverse registration order. The handler dates the open hour by
 and freezes it. The drain then offers it after every live hour as a short record
 (`checkup_seal_*` in `checkup_persist.hpp`). `PLANT.md` owns when it is skipped.
 
+Hourly diagnosis state grows by source, not by bucket. Each byte added to `CheckupBucket` or
+`DhwLossBucket` is held 24 times in `.noinit` (23 completed hours and the open one) and once per
+journal record, and 23 stored records must still fit the 4 KiB sector scratch (see Memory
+constraints). No other hourly diagnosis source exists yet. An observation that needs more hourly
+state must add one: one record per hour within `HISTORY_JOURNAL_PAYLOAD_BYTES`, with its own
+fingerprint, coverage clocks and late-completion replay. In RAM it keeps the open hour, the sum of
+its completed hours and a restore index bounded like `CHECKUP_JOURNAL_INDEX_CAP`, not like the
+trend raster. The history owner rebuilds that sum at restoration, after each of its hourly records
+is committed to the journal, after a replay, and when its oldest hour expires, even if the producer
+stops. It reads one stored record at a time on a measured stack path under its own flash lock and
+swaps the result in under a zero-wait take of the observation's lock; report and record paths never
+read the journal. A missing record leaves its hour unobserved; it is never inferred from the core
+bucket. The journal capacity assertion in `history_persist.hpp` must count the new records; static
+memory and stack paths are measured on the target ELF.
+
 The former small history partition is unsupported. OTA cannot install a partition table: an
 old-layout device needs an explicitly authorized signed USB/Web Serial update to the official
 8 MiB table. Existing NVS, coredump and OTA addresses remain fixed.
