@@ -84,6 +84,7 @@
 #include "logic/ota_quiesce.hpp"
 #include "logic/link_watch.hpp"
 #include "logic/feature_gate.hpp"
+#include "logic/instrument.hpp"
 #include "logic/fixed_text.hpp"
 #include "logic/history.hpp"
 #include "logic/checkup_persist.hpp"
@@ -20681,6 +20682,631 @@ static void test_refrigerant_service() {
     CHECK(lt.blocker == RefrigerantServiceBlocker::PollGap);
 }
 
+// ── logic/instrument.hpp ────────────────────────────────────────────────────────────────────────
+// One owner for "which row is instrument X". The synthetic half proves each state and each rule;
+// the catalog half pins the shipped profiles and binds the registry to the older C++ selectors that
+// answer the same question, so a disagreement is a named, counted exception or a failure.
+static void test_instrument_registry() {
+    using namespace logic;
+    using logic::Instrument;
+    using logic::INSTRUMENT_COUNT;
+    using logic::INSTRUMENT_LOCATORS;
+    using logic::InstrumentIdentity;
+    using logic::InstrumentState;
+
+    // The table: every role has a locator and a unique slug, no two locators share a key, and only
+    // label-token locators carry tokens.
+    for (size_t k = 0; k < INSTRUMENT_COUNT; k++) {
+        const Instrument id   = static_cast<Instrument>(k);
+        const char*      slug = logic::instrument_slug(id);
+        CHECK(slug != nullptr);
+        int locators = 0;
+        for (const auto& l : INSTRUMENT_LOCATORS)
+            if (l.id == id) locators++;
+        CHECK(locators >= 1);
+        for (size_t j = k + 1; j < INSTRUMENT_COUNT; j++)
+            CHECK(slug &&
+                  std::strcmp(slug, logic::instrument_slug(static_cast<Instrument>(j))) != 0);
+    }
+    CHECK(logic::instrument_slug(rt(Instrument::Count)) == nullptr);
+    constexpr size_t kLocators = sizeof(INSTRUMENT_LOCATORS) / sizeof(INSTRUMENT_LOCATORS[0]);
+    for (size_t a = 0; a < kLocators; a++) {
+        const auto& l = INSTRUMENT_LOCATORS[a];
+        CHECK(l.id != Instrument::Count);
+        if (l.identity == InstrumentIdentity::LabelToken) CHECK(l.token != nullptr);
+        if (l.identity == InstrumentIdentity::Coordinate) CHECK(l.token == nullptr);
+        if (!l.token) CHECK(l.token2 == nullptr);
+        for (size_t b = a + 1; b < kLocators; b++) {
+            const auto& m = INSTRUMENT_LOCATORS[b];
+            CHECK(l.reg != m.reg || l.off != m.off || l.conv != m.conv);
+        }
+    }
+
+    // Footprints follow convert.hpp: a flag reads one bit, the retry counters three, the mode
+    // nibbles four, every other converter its whole bytes, and the refrigerant identifiers none.
+    const ValueDef buh1{0x60, 12, 304, 1, -1, "BUH Step1"};
+    const ValueDef bsh{0x60, 12, 305, 1, -1, "BSH"};
+    const ValueDef retry{0x10, 10, 310, 1, -1, "Discharge Temp. Protection Retry Qty"};
+    const ValueDef retry_low{0x10, 10, 311, 1, -1, "Comp. INV Current Protection Retry Qty"};
+    const ValueDef drop3{0x10, 10, 303, 1, -1, "Comp. INV Current Drop"};
+    const ValueDef drop7{0x10, 10, 307, 1, -1, "Discharge Temp. Drop"};
+    const ValueDef bit4{0x10, 10, 304, 1, -1, "synthetic bit 4"};
+    const ValueDef bit1{0x10, 10, 301, 1, -1, "synthetic bit 1"};
+    const ValueDef mode{0x60, 2, 315, 1, -1, "I/U operation mode"};
+    const ValueDef thermostat{0x60, 2, 303, 1, -1, "Thermostat ON/OFF"};
+    const ValueDef mode_bit7{0x60, 2, 307, 1, -1, "synthetic bit 7"};
+    CHECK(!logic::instrument_rows_overlap(buh1, bsh));
+    CHECK(!logic::instrument_rows_overlap(retry, drop3));
+    CHECK(!logic::instrument_rows_overlap(retry, drop7));
+    CHECK(!logic::instrument_rows_overlap(retry, retry_low));
+    CHECK(logic::instrument_rows_overlap(retry, bit4));
+    CHECK(logic::instrument_rows_overlap(retry_low, bit1));
+    CHECK(!logic::instrument_rows_overlap(mode, thermostat));
+    CHECK(logic::instrument_rows_overlap(mode, mode_bit7));
+    const ValueDef temp2{0x65, 0, 105, 2, 1, "two bytes"};
+    const ValueDef second_byte{0x65, 1, 101, 1, -1, "second byte"};
+    const ValueDef next_field{0x65, 2, 105, 2, 1, "next field"};
+    const ValueDef other_page{0x64, 0, 105, 2, 1, "other page"};
+    const ValueDef refrigerant_id{0x65, 0, 801, 1, -1, "Refrigerant type"};
+    const ValueDef layout_marker{0x65, 0, 0, 1, -1, "layout"};
+    CHECK(logic::instrument_rows_overlap(temp2, second_byte));
+    CHECK(logic::instrument_rows_overlap(second_byte, temp2));
+    CHECK(!logic::instrument_rows_overlap(temp2, next_field));
+    CHECK(!logic::instrument_rows_overlap(next_field, temp2));
+    CHECK(!logic::instrument_rows_overlap(temp2, other_page));
+    CHECK(!logic::instrument_rows_overlap(temp2, refrigerant_id));
+    CHECK(!logic::instrument_rows_overlap(layout_marker, temp2));
+    CHECK(logic::instrument_byte_count(ValueDef{0x65, 0, 997, 1, -1, "marker"}) == 0);
+    CHECK(logic::instrument_bit_mask(rt<uint16_t>(316)) == 0xF0);
+    // The same rules on rows the compiler cannot fold, so their branches run under coverage.
+    auto opaque = [](ValueDef d) {
+        d.conv = rt(d.conv);
+        return d;
+    };
+    CHECK(!logic::instrument_rows_overlap(opaque(layout_marker), opaque(temp2)));
+    CHECK(!logic::instrument_rows_overlap(opaque(temp2), opaque(refrigerant_id)));
+    CHECK(logic::instrument_rows_overlap(opaque(second_byte), opaque(temp2)));
+    CHECK(logic::instrument_rows_overlap(opaque(temp2), opaque(second_byte)));
+    CHECK(logic::instrument_byte_count(opaque(ValueDef{0x65, 0, 997, 1, -1, "marker"})) == 0);
+    CHECK(logic::instrument_byte_count(opaque(ValueDef{0x65, 0, 900, 2, -1, "no marker"})) == 2);
+    CHECK(logic::instrument_byte_count(opaque(ValueDef{0x65, 0, 1000, 2, -1, "no marker"})) == 2);
+    const ValueDef fan{0x30, 1, 211, 1, -1, "Fan 1 (step)"};
+    const ValueDef raw_byte{0x30, 1, 200, 1, -1, "synthetic raw byte"};
+    CHECK(logic::instrument_rows_overlap(opaque(fan), opaque(raw_byte)));
+    CHECK(logic::instrument_rows_overlap(opaque(mode), opaque(mode_bit7)));
+    CHECK(!logic::instrument_rows_overlap(opaque(retry), opaque(drop3)));
+
+    auto resolve = [](const ValueDef* rows, size_t n, Instrument id) {
+        return logic::instrument_resolve(logic::profile_view(rows, n, nullptr, 0, 0), id);
+    };
+
+    // Supported and Absent.
+    const ValueDef              r1t{0x61, 2, 105, 2, 1, "Leaving water temp. before BUH (R1T)"};
+    const ValueDef              just_r1t[] = {r1t};
+    logic::InstrumentResolution r          = resolve(just_r1t, 1, Instrument::LeavingWaterPreBuh);
+    CHECK(r.state == InstrumentState::Supported && r.row == 0);
+    r = resolve(just_r1t, 1, Instrument::ReturnWater);
+    CHECK(r.state == InstrumentState::Absent && r.row == -1);
+
+    // Withheld: carried only by a detect-only placeholder. Beside a publishable row, a placeholder
+    // neither confers the instrument nor competes with it.
+    const ValueDef placeholder{0x61, 2, 105, 2, 1, "Leaving water temp. before BUH (R1T)", true};
+    const ValueDef just_placeholder[] = {placeholder};
+    r = resolve(just_placeholder, 1, Instrument::LeavingWaterPreBuh);
+    CHECK(r.state == InstrumentState::Withheld && r.row == -1);
+    const ValueDef placeholder_then_live[] = {placeholder, r1t};
+    r = resolve(placeholder_then_live, 2, Instrument::LeavingWaterPreBuh);
+    CHECK(r.state == InstrumentState::Supported && r.row == 1);
+
+    // Ambiguous: two rows carry it, or another quantity decodes the same bytes (the 0x65/0 shape).
+    const ValueDef duplicate[] = {r1t, {0x61, 2, 105, 2, 1, "Outlet Water Heat Exch. Temp. (R1T)"}};
+    r                          = resolve(duplicate, 2, Instrument::LeavingWaterPreBuh);
+    CHECK(r.state == InstrumentState::Ambiguous && r.row == -1);
+    const ValueDef ekmik{0x65, 0, 105,
+                         2,    1, "[EKMIK] Bizone kit mixed leaving water temperature R1T"};
+    const ValueDef dlwb2{0x65, 0, 105,
+                         2,    1, "Outlet water heat exchanger temp (hydro split model) DLWB2"};
+    const ValueDef m1s{0x65, 0, 101, 1, -1, "[EKMIK] Bizone kit mix valve position M1S"};
+    const ValueDef ekmik_alone[] = {ekmik};
+    CHECK(resolve(ekmik_alone, 1, Instrument::MixedWaterEkmik).state == InstrumentState::Supported);
+    const ValueDef ekmik_dlwb2[] = {dlwb2, ekmik};
+    CHECK(resolve(ekmik_dlwb2, 2, Instrument::MixedWaterEkmik).state == InstrumentState::Ambiguous);
+    const ValueDef ekmik_m1s[] = {ekmik, m1s};
+    CHECK(resolve(ekmik_m1s, 2, Instrument::MixedWaterEkmik).state == InstrumentState::Ambiguous);
+    const ValueDef just_dlwb2[] = {dlwb2};
+    CHECK(resolve(just_dlwb2, 1, Instrument::MixedWaterEkmik).state == InstrumentState::Absent);
+    // A competitor that may not be published does not compete.
+    const ValueDef m1s_withheld{0x65, 0, 101, 1, -1, "[EKMIK] Bizone kit mix valve position M1S",
+                                true};
+    const ValueDef ekmik_hidden_m1s[] = {ekmik, m1s_withheld};
+    CHECK(resolve(ekmik_hidden_m1s, 2, Instrument::MixedWaterEkmik).state ==
+          InstrumentState::Supported);
+    // Two locators of one instrument matching on one profile are Ambiguous too, not a preference.
+    const ValueDef ekmik_twice[] = {
+        ekmik, {0x65, 4, 105, 2, 1, "[EKMIK] Bizone kit mixed leaving water temperature R1T"}};
+    CHECK(resolve(ekmik_twice, 2, Instrument::MixedWaterEkmik).state == InstrumentState::Ambiguous);
+
+    // Flags on other bits of the same byte are separate instruments, not competitors.
+    const ValueDef flags[] = {bsh, buh1, {0x60, 12, 303, 1, -1, "BUH Step2"}};
+    r                      = resolve(flags, 3, Instrument::Bsh);
+    CHECK(r.state == InstrumentState::Supported && r.row == 0);
+    r = resolve(flags, 3, Instrument::BuhStep2);
+    CHECK(r.state == InstrumentState::Supported && r.row == 2);
+
+    // Refrigerant pressure: bar on an outdoor page; on page 0x62 only with its saturation twin. The
+    // twin is the same transducer, never a competitor; any other row on those bytes is.
+    const ValueDef high{0x20, 12, 105, 2, 2, "High Pressure"};
+    const ValueDef high_t{0x20, 12, 405, 2, 1, "High Pressure(T)"};
+    const ValueDef high_pair[] = {high_t, high};
+    r                          = resolve(high_pair, 2, Instrument::HighPressure);
+    CHECK(r.state == InstrumentState::Supported && r.row == 1);
+    const ValueDef high_intruded[] = {high, high_t, {0x20, 13, 101, 1, -1, "intruder"}};
+    CHECK(resolve(high_intruded, 3, Instrument::HighPressure).state == InstrumentState::Ambiguous);
+    const ValueDef heat_sink[] = {{0x20, 12, 105, 2, 1, "Heat sink temp."}};
+    CHECK(resolve(heat_sink, 1, Instrument::HighPressure).state == InstrumentState::Absent);
+    const ValueDef hydro_alone[] = {{0x62, 15, 105, 2, 2, "Refrigerant pressure sensor"}};
+    CHECK(resolve(hydro_alone, 1, Instrument::IndoorRefrigerantPressure).state ==
+          InstrumentState::Absent);
+    const ValueDef hydro_pair[] = {{0x62, 15, 105, 2, 2, "Refrigerant pressure sensor"},
+                                   {0x62, 15, 405, 2, 1, "Pressure sensor(T)"}};
+    r                           = resolve(hydro_pair, 2, Instrument::IndoorRefrigerantPressure);
+    CHECK(r.state == InstrumentState::Supported && r.row == 0);
+    // The exemption covers only the transducer's own twin: a conv-405 row one byte over, or beside
+    // a row that is no refrigerant pressure, is an ordinary competitor.
+    const ValueDef high_shifted_twin[] = {high, {0x20, 13, 405, 2, 1, "shifted twin"}};
+    CHECK(resolve(high_shifted_twin, 2, Instrument::HighPressure).state ==
+          InstrumentState::Ambiguous);
+    const ValueDef r1t_with_405[] = {r1t, {0x61, 2, 405, 2, 1, "synthetic saturation"}};
+    CHECK(resolve(r1t_with_405, 2, Instrument::LeavingWaterPreBuh).state ==
+          InstrumentState::Ambiguous);
+    // The low side needs a label that says so; the unsided outdoor transducer is not it.
+    const ValueDef low_pair[] = {{0x20, 14, 105, 2, 2, "Low Pressure"},
+                                 {0x20, 14, 405, 2, 1, "Low Pressure(T)"}};
+    r                         = resolve(low_pair, 2, Instrument::LowPressure);
+    CHECK(r.state == InstrumentState::Supported && r.row == 0);
+    const ValueDef unsided[] = {{0x20, 14, 105, 2, 2, "Pressure"},
+                                {0x20, 14, 405, 2, 1, "Pressure(T)"}};
+    CHECK(resolve(unsided, 2, Instrument::LowPressure).state == InstrumentState::Absent);
+    const ValueDef low_in_celsius[] = {{0x20, 14, 105, 2, 1, "Low Pressure"}};
+    CHECK(resolve(low_in_celsius, 1, Instrument::LowPressure).state == InstrumentState::Absent);
+
+    // Label tokens: 0x20/2 is the outdoor coil and 0x20/10 the liquid pipe only where the label
+    // says so; the ground-source profiles put other sensors there.
+    const ValueDef coil[] = {{0x20, 2, 105, 2, 1, "O/U Heat Exch. Temp."}};
+    CHECK(resolve(coil, 1, Instrument::OutdoorHeatExchanger).state == InstrumentState::Supported);
+    const ValueDef deicer[] = {{0x20, 2, 105, 2, 1, "R4T-Deicer temp."}};
+    CHECK(resolve(deicer, 1, Instrument::OutdoorHeatExchanger).state == InstrumentState::Supported);
+    const ValueDef two_phase[] = {{0x20, 2, 105, 2, 1, "2 phase thermistor (R4T)"}};
+    CHECK(resolve(two_phase, 1, Instrument::OutdoorHeatExchanger).state == InstrumentState::Absent);
+    const ValueDef unlabelled[] = {{0x20, 2, 105, 2, 1, nullptr}};
+    CHECK(resolve(unlabelled, 1, Instrument::OutdoorHeatExchanger).state ==
+          InstrumentState::Absent);
+    const ValueDef liquid[] = {{0x20, 10, 105, 2, 1, "Liquid pipe temp.(R6T)"}};
+    CHECK(resolve(liquid, 1, Instrument::RefrigerantLiquidOutdoor).state ==
+          InstrumentState::Supported);
+    const ValueDef brine[] = {{0x20, 10, 105, 2, 1, "Leaving brine temp.(R6T)"}};
+    CHECK(resolve(brine, 1, Instrument::RefrigerantLiquidOutdoor).state == InstrumentState::Absent);
+    // The converter is part of the key: the same bytes under another converter are not the row.
+    const ValueDef r1t_other_conv[] = {
+        {0x61, 2, 119, 2, 1, "Leaving water temp. before BUH (R1T)"}};
+    CHECK(resolve(r1t_other_conv, 1, Instrument::LeavingWaterPreBuh).state ==
+          InstrumentState::Absent);
+
+    // A sub-observation needs every instrument; the first one missing is named.
+    const ValueDef           hydronic[]    = {r1t,
+                                              {0x61, 8, 105, 2, 1, "Inlet water temp.(R4T)"},
+                                              {0x62, 9, 105, 2, -1, "Flow sensor (l/min)"}};
+    const logic::ProfileView hydronic_view = logic::profile_view(hydronic, 3, nullptr, 0, 0);
+    const Instrument         spread[] = {Instrument::LeavingWaterPreBuh, Instrument::ReturnWater,
+                                         Instrument::Flow};
+    logic::InstrumentRequirement q    = logic::instrument_require(hydronic_view, spread, 3);
+    CHECK(q.state == InstrumentState::Supported && q.missing == Instrument::Count);
+    const Instrument with_rps[] = {Instrument::LeavingWaterPreBuh, Instrument::CompressorRps,
+                                   Instrument::ReturnWater, Instrument::DhwTank};
+    q                           = logic::instrument_require(hydronic_view, with_rps, 4);
+    CHECK(q.state == InstrumentState::Absent && q.missing == Instrument::CompressorRps);
+    const Instrument just_lwt[] = {Instrument::LeavingWaterPreBuh};
+    q = logic::instrument_require(logic::profile_view(just_placeholder, 1, nullptr, 0, 0), just_lwt,
+                                  1);
+    CHECK(q.state == InstrumentState::Withheld && q.missing == Instrument::LeavingWaterPreBuh);
+    q = logic::instrument_require(hydronic_view, nullptr, 0);
+    CHECK(q.state == InstrumentState::Supported && q.missing == Instrument::Count);
+
+    // ── The shipped catalog ──────────────────────────────────────────────────────────────────────
+    // Instruments not Supported on every detectable profile, with their measured counts. Every
+    // instrument not listed must be Supported on all of them.
+    struct Partial {
+        Instrument id;
+        int        supported;
+        int        ambiguous;
+    };
+    static const Partial kPartial[] = {
+        {Instrument::IndoorRefrigerantPressure, 7, 0}, // 0x62/15 with its saturation twin
+        {Instrument::MixedWaterEkmik, 4, 5}, // 0x65/0 shared with DLWB2 on five, also M1S on four
+        {Instrument::CompressorRps, 26, 0},  // 13 profiles do not read page 0x30
+        {Instrument::ExpansionValve, 26, 0},
+        {Instrument::OutdoorHeatExchanger, 35, 0},     // ground source: two-phase thermistor
+        {Instrument::RefrigerantLiquidOutdoor, 35, 0}, // ground source: leaving brine
+        {Instrument::HighPressure, 22, 0}, // elsewhere 0x20/12 is a heat-sink or fin temperature
+        {Instrument::LowPressure, 23, 0},  // elsewhere 0x20/14 names no pressure side
+        {Instrument::CtL1, 20, 0},
+        {Instrument::CtL2, 20, 0},
+        {Instrument::CtL3, 20, 0},
+        {Instrument::LowNoise, 2, 0}, // observability supplement, def/overlay.hpp
+        {Instrument::PowerLimit1, 2, 0},
+        {Instrument::PowerLimit2, 2, 0},
+        {Instrument::PowerLimit3, 2, 0},
+        {Instrument::PowerLimit4, 2, 0},
+    };
+    // Every label at every locator coordinate and converter, whether the locator accepts it, and
+    // in how many detectable profiles it occurs. A new spelling, a moved row or a changed count
+    // fails here, in both directions.
+    struct Spelling {
+        const char* slug;
+        uint8_t     reg;
+        uint8_t     off;
+        const char* label;
+        bool        accepted;
+        int         profiles;
+    };
+    static const Spelling kSpelling[] = {
+        {"leaving_water_pre_buh", 0x61, 2, "Leaving water temp. before BUH (R1T)", true, 35},
+        {"leaving_water_pre_buh", 0x61, 2, "Outlet Water Heat Exch. Temp. (R1T)", true, 2},
+        {"leaving_water_pre_buh", 0x61, 2, "[HPSU] Tv inflow Temp  (R1T)", true, 2},
+        {"leaving_water_post_buh", 0x61, 4, "Leaving water temp. after BUH (R2T)", true, 35},
+        {"leaving_water_post_buh", 0x61, 4, "Outlet Water BUH Temp. (R2T)", true, 2},
+        {"leaving_water_post_buh", 0x61, 4, "[HPSU] Tvbh inflow Temp after Buffer/BUH (R2T)", true,
+         2},
+        {"return_water", 0x61, 8, "Inlet water temp.(R4T)", true, 38},
+        {"return_water", 0x61, 8, "[HPSU] Tr return Temp (R4T)", true, 1},
+        {"dhw_tank", 0x61, 10, "DHW tank temp. (R5T)", true, 39},
+        {"refrigerant_liquid_indoor", 0x61, 6, "Refrig. Temp. liquid side (R3T)", true, 39},
+        {"flow", 0x62, 9, "Flow sensor (l/min)", true, 39},
+        {"water_pressure", 0x62, 11, "Water pressure", true, 39},
+        {"pump_command", 0x62, 12, "Water pump signal (0:max-100:stop)", true, 39},
+        {"pump_running", 0x60, 12, "Water pump operation", true, 39},
+        {"indoor_refrigerant_pressure", 0x62, 15, "Pressure sensor", false, 1},
+        {"indoor_refrigerant_pressure", 0x62, 15, "Refrigerant pressure sensor", false, 16},
+        {"indoor_refrigerant_pressure", 0x62, 15, "Refrigerant pressure sensor", true, 7},
+        {"mixed_water_ekmik", 0x65, 0, "Mixed water temp.", false, 1},
+        {"mixed_water_ekmik", 0x65, 0, "Outlet water heat exchanger temp (hydro split model) DLWB2",
+         false, 5},
+        {"mixed_water_ekmik", 0x65, 0, "[EKMIK] Bizone kit mixed leaving water temperature R1T",
+         true, 6},
+        {"mixed_water_ekmik", 0x65, 4, "[EKMIK] Bizone kit mixed leaving water temperature R1T",
+         true, 3},
+        {"compressor_rps", 0x30, 0, "INV frequency (rps)", true, 26},
+        {"expansion_valve", 0x30, 3, "Expansion valve 1 (pls)", true, 26},
+        {"discharge_pipe", 0x20, 4, "Discharge pipe temp.", true, 25},
+        {"discharge_pipe", 0x20, 4, "Discharge pipe temp.(R2T)", true, 13},
+        {"discharge_pipe", 0x20, 4, "R2T-INV discharge pipe temp.", true, 1},
+        {"outdoor_air", 0x20, 0, "Outdoor air temp.", true, 2},
+        {"outdoor_air", 0x20, 0, "R1T-Outdoor air temp.", true, 37},
+        {"outdoor_heat_exchanger", 0x20, 2, "2 phase thermistor (R4T)", false, 4},
+        {"outdoor_heat_exchanger", 0x20, 2, "O/U Heat Exch. Temp.", true, 21},
+        {"outdoor_heat_exchanger", 0x20, 2, "O/U Heat Exch. Temp.(R4T)", true, 13},
+        {"outdoor_heat_exchanger", 0x20, 2, "R4T-Deicer temp.", true, 1},
+        {"suction_pipe", 0x20, 6, "Suction pipe temp.", true, 22},
+        {"suction_pipe", 0x20, 6, "Suction pipe temp.(R3T)", true, 17},
+        {"refrigerant_liquid_outdoor", 0x20, 10, "Leaving brine temp.(R6T)", false, 4},
+        {"refrigerant_liquid_outdoor", 0x20, 10, "Liquid pipe temp.", true, 2},
+        {"refrigerant_liquid_outdoor", 0x20, 10, "Liquid pipe temp.(R6T)", true, 28},
+        {"refrigerant_liquid_outdoor", 0x20, 10, "Liquid temperature(R3T)", true, 5},
+        {"high_pressure", 0x20, 12, "Heat sink temp.", false, 13},
+        {"high_pressure", 0x20, 12, "Heat sink temp.(R10T)", false, 2},
+        {"high_pressure", 0x20, 12, "High Pressure", true, 22},
+        {"high_pressure", 0x20, 12, "INV fin temp.", false, 2},
+        {"low_pressure", 0x20, 14, "Low Pressure", true, 23},
+        {"low_pressure", 0x20, 14, "Pressure", false, 10},
+        {"low_pressure", 0x20, 14, "Pressure sensor", false, 6},
+        {"inverter_primary_current", 0x21, 0, "INV primary current (A)", true, 39},
+        {"ct_l1", 0x63, 14, "Current measured by CT sensor of L1", true, 20},
+        {"ct_l2", 0x63, 15, "Current measured by CT sensor of L2", true, 20},
+        {"ct_l3", 0x63, 16, "Current measured by CT sensor of L3", true, 20},
+        {"operation_mode", 0x10, 0, "Operation Mode", true, 39},
+        {"defrost", 0x10, 1, "Defrost Operation", true, 39},
+        {"low_noise", 0x10, 1, "Low noise control", true, 2},
+        {"silent_mode", 0x60, 2, "Silent Mode", true, 39},
+        {"indoor_thermostat", 0x60, 2, "Thermostat ON/OFF", true, 39},
+        {"iu_operation_mode", 0x60, 2, "I/U operation mode", true, 39},
+        {"bsh", 0x60, 12, "BSH", true, 39},
+        {"buh_step1", 0x60, 12, "BUH Step1", true, 39},
+        {"buh_step2", 0x60, 12, "BUH Step2", true, 39},
+        {"dhw_valve", 0x60, 12, "3way valve(On:DHW_Off:Space)", true, 39},
+        {"space_heating_operation", 0x62, 2, "Space heating Operation ON/OFF", true, 39},
+        {"emergency", 0x62, 2, "Emergency (indoor) active/not active", true, 39},
+        {"lw_setpoint_main", 0x60, 9, "LW setpoint (main)", true, 39},
+        {"lw_setpoint_add", 0x62, 3, "LW setpoint (add)", true, 39},
+        {"drop_inv_current", 0x10, 10, "Comp. INV Current Drop", true, 39},
+        {"drop_discharge", 0x10, 10, "Discharge Temp. Drop", true, 39},
+        {"drop_lp", 0x10, 11, "LP Drop Control", true, 39},
+        {"drop_hp", 0x10, 11, "HP Drop Control", true, 39},
+        {"drop_other", 0x10, 12, "Other Drop Control", true, 39},
+        {"drop_fin", 0x10, 12, "Fin Temp. Drop Control", true, 39},
+        {"retry_discharge", 0x10, 10, "Discharge Temp. Protection Retry Qty", true, 39},
+        {"retry_inv_current", 0x10, 10, "Comp. INV Current Protection Retry Qty", true, 39},
+        {"retry_hp", 0x10, 11, "HP Protection Retry Qty", true, 39},
+        {"retry_lp", 0x10, 11, "LP Protection Retry Qty", true, 39},
+        {"retry_fin", 0x10, 12, "Fin Temp. Protection Retry Qty", true, 39},
+        {"power_limit_1", 0x62, 7, "Pwr consumption limit 1", true, 2},
+        {"power_limit_2", 0x62, 7, "Pwr consumption limit 2", true, 2},
+        {"power_limit_3", 0x62, 7, "Pwr consumption limit 3", true, 2},
+        {"power_limit_4", 0x62, 7, "Pwr consumption limit 4", true, 2},
+    };
+    constexpr size_t kSpellings          = sizeof(kSpelling) / sizeof(kSpelling[0]);
+    int              spelled[kSpellings] = {0};
+    // The older selectors that answer the same question. Each must pick the registry's row, or the
+    // difference must be one of the named, counted cases below.
+    struct CheckupPair {
+        const CheckupLocator* loc;
+        Instrument            id;
+    };
+    static const CheckupPair kCheckupPairs[] = {
+        {&CHECKUP_LOC_DEFROST, Instrument::Defrost},
+        {&CHECKUP_LOC_BUH1, Instrument::BuhStep1},
+        {&CHECKUP_LOC_BUH2, Instrument::BuhStep2},
+        {&CHECKUP_LOC_BSH, Instrument::Bsh},
+        {&CHECKUP_LOC_PUMP, Instrument::PumpRunning},
+        {&CHECKUP_LOC_PRESSURE, Instrument::WaterPressure},
+        {&CHECKUP_LOC_FLOW, Instrument::Flow},
+        {&CHECKUP_LOC_VALVE, Instrument::DhwValve},
+        {&CHECKUP_LOC_R5T, Instrument::DhwTank},
+        {&CHECKUP_LOC_IU_MODE, Instrument::IuOperationMode},
+        {&CHECKUP_LOC_OUTDOOR, Instrument::OutdoorAir},
+    };
+    struct TrendPair {
+        const char* trend;
+        Instrument  id;
+    };
+    static const TrendPair kTrendPairs[] = {
+        {"dhw_tank", Instrument::DhwTank},
+        {"leaving_water", Instrument::LeavingWaterPreBuh},
+        {"return_water", Instrument::ReturnWater},
+        {"leaving_water_post_buh", Instrument::LeavingWaterPostBuh},
+        {"refrigerant_liquid", Instrument::RefrigerantLiquidIndoor},
+        {"water_pressure", Instrument::WaterPressure},
+        {"flow", Instrument::Flow},
+        {"pump_signal", Instrument::PumpCommand},
+        {"circuit_pressure", Instrument::IndoorRefrigerantPressure},
+        {"comp_rps", Instrument::CompressorRps},
+        {"eev", Instrument::ExpansionValve},
+        {"outdoor_air", Instrument::OutdoorAir},
+        {"outdoor_heat_exchanger", Instrument::OutdoorHeatExchanger},
+        {"discharge", Instrument::DischargePipe},
+        {"defrost_state", Instrument::Defrost},
+        {"quiet_state", Instrument::SilentMode},
+        {"bsh_state", Instrument::Bsh},
+        {"buh_step1", Instrument::BuhStep1},
+        {"buh_step2", Instrument::BuhStep2},
+        {"valve_dhw", Instrument::DhwValve},
+    };
+    static const Instrument kRetries[] = {Instrument::RetryDischarge, Instrument::RetryInvCurrent,
+                                          Instrument::RetryHp, Instrument::RetryLp,
+                                          Instrument::RetryFin};
+
+    int supported[logic::INSTRUMENT_COUNT] = {0};
+    int ambiguous[logic::INSTRUMENT_COUNT] = {0};
+    int withheld                           = 0;
+    int profiles                           = 0;
+    int trend_two_phase = 0, trend_untwinned = 0, service_two_phase = 0, service_unsided = 0;
+    int reference_checked = 0;
+    for (const auto& p : def::profiles) {
+        if (!def::is_detection_model(p.id)) continue;
+        profiles++;
+        const logic::ProfileView view = def::resolved(p);
+        const size_t             n    = view.count() < 512 ? view.count() : 512;
+        CHECK(view.count() <= 512);
+
+        // The published rows exactly as the poller caches them, with their view indices.
+        size_t      pub[512];
+        const char* labels[512];
+        const char* units[512];
+        unsigned    regs[512];
+        size_t      m = 0;
+        for (size_t i = 0; i < n; i++) {
+            if (!row_publishable(view[i])) continue;
+            const ValueDef row = adjudicated(view, i);
+            pub[m]             = i;
+            labels[m]          = row.label;
+            units[m]           = unit_for_row(row);
+            regs[m]            = row.reg;
+            m++;
+        }
+
+        logic::InstrumentResolution res[logic::INSTRUMENT_COUNT];
+        for (size_t k = 0; k < logic::INSTRUMENT_COUNT; k++) {
+            res[k] = logic::instrument_resolve(view, static_cast<Instrument>(k));
+            if (res[k].state == InstrumentState::Supported) supported[k]++;
+            if (res[k].state == InstrumentState::Ambiguous) {
+                ambiguous[k]++;
+                CHECK(static_cast<Instrument>(k) == Instrument::MixedWaterEkmik);
+            }
+            if (res[k].state == InstrumentState::Withheld) withheld++;
+        }
+        // Every row at every locator key, accepted or not, must be a listed spelling.
+        for (const auto& l : INSTRUMENT_LOCATORS) {
+            for (size_t i = 0; i < n; i++) {
+                const ValueDef row = adjudicated(view, i);
+                if (row.reg != l.reg || row.offset != l.off || row.conv != l.conv) continue;
+                const bool accepted = logic::instrument_locator_matches(l, view, i, row);
+                bool       listed   = false;
+                for (size_t s = 0; s < kSpellings && !listed; s++) {
+                    const Spelling& e = kSpelling[s];
+                    if (std::strcmp(e.slug, logic::instrument_slug(l.id)) != 0 || e.reg != l.reg ||
+                        e.off != l.off || e.accepted != accepted ||
+                        std::strcmp(e.label, row.label ? row.label : "") != 0)
+                        continue;
+                    spelled[s]++;
+                    listed = true;
+                }
+                if (!listed)
+                    std::printf("instrument %s: unlisted label \"%s\" (%s) on %s\n",
+                                logic::instrument_slug(l.id), row.label ? row.label : "",
+                                accepted ? "accepted" : "rejected", p.id);
+                CHECK(listed);
+            }
+        }
+        auto row_of = [&](Instrument id) {
+            const auto& x = res[static_cast<size_t>(id)];
+            return x.state == InstrumentState::Supported ? x.row : -1;
+        };
+        auto is_supported = [&](Instrument id) { return row_of(id) >= 0; };
+
+        for (const auto& c : kCheckupPairs) {
+            int pick = -1;
+            for (size_t k = 0; k < m && pick < 0; k++) {
+                const ValueDef row = adjudicated(view, pub[k]);
+                if (checkup_row_matches(*c.loc, row.reg, row.offset, row.conv))
+                    pick = static_cast<int>(pub[k]);
+            }
+            CHECK(pick == row_of(c.id));
+        }
+        for (size_t k = 0; k < sizeof(kRetries) / sizeof(kRetries[0]); k++) {
+            const int at = row_of(kRetries[k]);
+            if (at < 0) continue;
+            const ValueDef row = adjudicated(view, static_cast<size_t>(at));
+            CHECK(checkup_retry_index(row.reg, row.offset, row.conv) == static_cast<int>(k));
+        }
+
+        for (const auto& t : kTrendPairs) {
+            const TrendDef* d = trend_by_id(t.trend);
+            CHECK(d != nullptr);
+            if (!d) continue;
+            int pick = -1;
+            for (size_t k = 0; k < m && pick < 0; k++) {
+                const ValueDef row = adjudicated(view, pub[k]);
+                if (trend_row_matches(*d, row.reg, row.offset, units[k], row.conv))
+                    pick = static_cast<int>(pub[k]);
+            }
+            const int mine = row_of(t.id);
+            if (pick == mine) continue;
+            // The two known disagreements, both stricter in the registry: the outdoor-coil trend
+            // charts the ground-source two-phase thermistor, and the refrigerant-pressure trend
+            // charts a 0x62/15 bar row that has no saturation twin, which convert.hpp's structural
+            // rule does not accept as a refrigerant pressure.
+            const ValueDef picked = adjudicated(view, static_cast<size_t>(pick < 0 ? 0 : pick));
+            if (mine < 0 && pick >= 0 && t.id == Instrument::OutdoorHeatExchanger &&
+                lwt_ci_contains(picked.label, "2 phase thermistor")) {
+                trend_two_phase++;
+            } else if (mine < 0 && pick >= 0 && t.id == Instrument::IndoorRefrigerantPressure &&
+                       picked.reg == 0x62 && picked.offset == 15 && picked.type == 2 &&
+                       !fg_is_refrigerant_pressure(view, static_cast<size_t>(pick))) {
+                trend_untwinned++;
+            } else {
+                std::printf("instrument %s: trend %s picks row %d on %s, registry %d\n",
+                            logic::instrument_slug(t.id), t.trend, pick, p.id, mine);
+                CHECK(false);
+            }
+        }
+
+        RefrigerantServiceCoverage svc;
+        for (size_t k = 0; k < m; k++) {
+            const ValueDef row = adjudicated(view, pub[k]);
+            refrigerant_service_cover_row(svc, row.reg, row.offset, row.conv, row.label,
+                                          fg_is_refrigerant_pressure(view, pub[k]));
+        }
+        CHECK(svc.rps == is_supported(Instrument::CompressorRps));
+        CHECK(svc.mode == is_supported(Instrument::IuOperationMode));
+        CHECK(svc.valve_dhw == is_supported(Instrument::DhwValve));
+        CHECK(svc.defrost == is_supported(Instrument::Defrost));
+        CHECK(svc.discharge == is_supported(Instrument::DischargePipe));
+        CHECK(svc.suction == is_supported(Instrument::SuctionPipe));
+        CHECK(svc.liquid == is_supported(Instrument::RefrigerantLiquidOutdoor));
+        CHECK(svc.eev_command == is_supported(Instrument::ExpansionValve));
+        if (svc.low_pressure != is_supported(Instrument::LowPressure)) {
+            // The service counts any outdoor 0x20/14 refrigerant pressure as its low side; the
+            // registry needs the label to name it.
+            bool unsided_row = false;
+            for (size_t k = 0; k < m; k++)
+                if (regs[k] == 0x20 && view[pub[k]].offset == 14 && view[pub[k]].type == 2 &&
+                    !lwt_ci_contains(labels[k], "low"))
+                    unsided_row = true;
+            CHECK(svc.low_pressure && unsided_row);
+            service_unsided++;
+        }
+        CHECK(svc.hydronic_pressure == is_supported(Instrument::IndoorRefrigerantPressure));
+        CHECK(svc.high_pressure == (is_supported(Instrument::HighPressure) ||
+                                    is_supported(Instrument::IndoorRefrigerantPressure)));
+        CHECK(svc.outdoor_air == is_supported(Instrument::OutdoorAir));
+        if (svc.outdoor_hx != is_supported(Instrument::OutdoorHeatExchanger)) {
+            // The service's coil context accepts 0x20/2 by coordinate alone, so it also counts the
+            // ground-source two-phase thermistor.
+            bool two_phase_row = false;
+            for (size_t k = 0; k < m; k++)
+                if (regs[k] == 0x20 && view[pub[k]].offset == 2 &&
+                    lwt_ci_contains(labels[k], "2 phase thermistor"))
+                    two_phase_row = true;
+            CHECK(svc.outdoor_hx && two_phase_row);
+            service_two_phase++;
+        }
+
+        // The label selectors and the compressor witness pick the registry's rows.
+        const int lwt = lwt_select(labels, m);
+        CHECK((lwt < 0 ? -1 : static_cast<int>(pub[lwt])) ==
+              row_of(Instrument::LeavingWaterPreBuh));
+        const int rwt = rwt_select(labels, m);
+        CHECK((rwt < 0 ? -1 : static_cast<int>(pub[rwt])) == row_of(Instrument::ReturnWater));
+        const int post = cop_post_buh_select(labels, regs, m);
+        CHECK((post < 0 ? -1 : static_cast<int>(pub[post])) ==
+              row_of(Instrument::LeavingWaterPostBuh));
+        int witness = -1;
+        for (size_t k = 0; k < m && witness < 0; k++)
+            if (ou_is_rps_witness(labels[k], regs[k])) witness = static_cast<int>(pub[k]);
+        CHECK(witness == row_of(Instrument::CompressorRps));
+
+        // The reference installation's profile carries every hydronic and refrigerant input the
+        // planned observations read.
+        if (std::strcmp(p.id, "altherma_ebla_edla_d_series_4_8kw_monobloc") == 0) {
+            reference_checked++;
+            const Instrument reference[] = {
+                Instrument::LeavingWaterPreBuh, Instrument::LeavingWaterPostBuh,
+                Instrument::ReturnWater,        Instrument::Flow,
+                Instrument::CompressorRps,      Instrument::OutdoorHeatExchanger,
+                Instrument::HighPressure,       Instrument::IndoorRefrigerantPressure,
+                Instrument::LowNoise,           Instrument::PowerLimit1};
+            const logic::InstrumentRequirement all = logic::instrument_require(
+                view, reference, sizeof(reference) / sizeof(reference[0]));
+            CHECK(all.state == InstrumentState::Supported);
+        }
+    }
+    CHECK(profiles == 39);
+    CHECK(reference_checked == 1);
+    CHECK(withheld == 0); // the detect-only 0x64 rows carry no registry instrument
+    CHECK(trend_two_phase == 4);
+    CHECK(service_two_phase == 4);
+    CHECK(trend_untwinned == 17);
+    CHECK(service_unsided == 16);
+    for (size_t s = 0; s < kSpellings; s++) {
+        if (spelled[s] != kSpelling[s].profiles)
+            std::printf("instrument %s: \"%s\" seen on %d profiles, listed %d\n", kSpelling[s].slug,
+                        kSpelling[s].label, spelled[s], kSpelling[s].profiles);
+        CHECK(spelled[s] == kSpelling[s].profiles);
+    }
+    // Every instrument the catalog supports has at least one accepted spelling.
+    for (size_t k = 0; k < logic::INSTRUMENT_COUNT; k++) {
+        bool accepted = false;
+        for (size_t s = 0; s < kSpellings; s++)
+            accepted |= kSpelling[s].accepted &&
+                        std::strcmp(kSpelling[s].slug,
+                                    logic::instrument_slug(static_cast<Instrument>(k))) == 0;
+        CHECK(accepted == (supported[k] + ambiguous[k] > 0));
+    }
+    for (size_t k = 0; k < logic::INSTRUMENT_COUNT; k++) {
+        int want_supported = profiles, want_ambiguous = 0;
+        for (const auto& x : kPartial)
+            if (static_cast<size_t>(x.id) == k) {
+                want_supported = x.supported;
+                want_ambiguous = x.ambiguous;
+            }
+        if (supported[k] != want_supported || ambiguous[k] != want_ambiguous)
+            std::printf("instrument %s: %d supported, %d ambiguous\n",
+                        logic::instrument_slug(static_cast<Instrument>(k)), supported[k],
+                        ambiguous[k]);
+        CHECK(supported[k] == want_supported);
+        CHECK(ambiguous[k] == want_ambiguous);
+    }
+}
+
 // ── logic/state_dwell.hpp ───────────────────────────────────────────────────────────────────────
 // How long a switched row has read what it reads. The interesting half is every case where the
 // answer is NOTHING: this number is a claim about a stretch of time, and the board can only make it
@@ -27643,6 +28269,7 @@ int main() {
     test_mqtt_discovery_owner();
     test_feature_gate();
     test_refrigerant_service();
+    test_instrument_registry();
     test_state_dwell();
     test_checkup_persist();
     test_room_history();
