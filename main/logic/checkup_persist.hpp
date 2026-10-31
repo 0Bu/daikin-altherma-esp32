@@ -21,6 +21,7 @@
 #include "logic/config_store.hpp"     // config_crc32_* — the firmware's ONE CRC implementation
 #include "logic/history_persist.hpp"  // history_reset_preserves_ram — ONE answer to "did DRAM survive?"
 
+#include <algorithm> // std::rotate in checkup_journal_rebuild
 #include <cstddef>
 #include <cstdint>
 
@@ -642,8 +643,9 @@ inline bool checkup_journal_restore_admits(const CheckupJournalPayload& p, int64
 }
 
 // Select exactly one admissible record for a retained slot. Current-boot evidence wins only
-// while it is itself valid; otherwise the newest valid stored duplicate wins. The caller uses
-// this same selection for provenance counting and reconstruction after capacity clipping.
+// while it is itself valid; otherwise the newest valid stored duplicate wins. The restore passes
+// no current-boot records here: checkup_journal_choose applies that precedence to the described
+// live hours, then asks this selection for the stored duplicate.
 inline const CheckupJournalRecord*
 checkup_journal_select_slot(int64_t wanted, const CheckupJournalRecord* live, size_t live_count,
                             const CheckupJournalRecord* stored, size_t stored_count,
@@ -682,5 +684,137 @@ inline constexpr int64_t checkup_restore_expiry_us(int64_t end_unix_s, int64_t n
     const int64_t remaining_us =
         (static_cast<int64_t>(CHECKUP_RECORD_MAX_AGE_S) - (now_unix_s - end_unix_s)) * 1000000LL;
     return now_us > INT64_MAX - remaining_us ? INT64_MAX : now_us + remaining_us;
+}
+
+// ── This boot's completed hours at restoration ───────────────────────────────────────────────────
+// A restore that runs late (clock synchronization or source confirmation) can meet hours this boot
+// already completed. They compete with stored records without being copied: they sit in the ring
+// at consecutive slots, carry consecutive latched labels, and their identity is the current one by
+// construction. Four numbers describe all of them.
+struct CheckupJournalLiveSpan {
+    size_t  count             = 0;         // completed hours of this boot still in the ring
+    size_t  oldest_slot       = 0;         // ring slot of the oldest of them
+    int64_t newest_label      = INT64_MIN; // latched wall-clock bucket of the newest
+    int64_t newest_end_unix_s = -1;        // measured end of the newest, before label clamping
+};
+
+inline constexpr int64_t checkup_journal_live_label(const CheckupJournalLiveSpan& live, size_t k) {
+    return live.newest_label - static_cast<int64_t>(live.count - 1 - k);
+}
+inline constexpr int64_t checkup_journal_live_end(const CheckupJournalLiveSpan& live, size_t k) {
+    return checkup_journal_end_in_bucket(
+        live.newest_end_unix_s - static_cast<int64_t>(live.count - 1 - k) * CHECKUP_DT_S,
+        checkup_journal_live_label(live, k));
+}
+inline constexpr size_t checkup_journal_live_slot(const CheckupJournalLiveSpan& live, size_t k) {
+    return (live.oldest_slot + k) % CHECKUP_COMPLETED_BUCKETS;
+}
+
+// The live hour labelled `wanted`, or SIZE_MAX. It meets checkup_journal_restore_admits: its
+// identity is the expected one, so source readiness, its label and the rolling day decide.
+inline constexpr size_t checkup_journal_live_index(const CheckupJournalLiveSpan& live,
+                                                   int64_t wanted, int64_t now_unix_s,
+                                                   bool confirmed, uint32_t model_fp,
+                                                   uint32_t source_fp, bool reset_requested) {
+    if (!live.count || live.newest_label == INT64_MIN) return SIZE_MAX;
+    const int64_t oldest = live.newest_label - static_cast<int64_t>(live.count - 1);
+    if (wanted < oldest || wanted > live.newest_label) return SIZE_MAX;
+    const auto    k   = static_cast<size_t>(wanted - oldest);
+    const int64_t end = checkup_journal_live_end(live, k);
+    return checkup_flash_source_ready(confirmed, model_fp, source_fp, reset_requested) &&
+                   wanted == checkup_journal_bucket(end) &&
+                   checkup_journal_in_window(end, now_unix_s)
+               ? k
+               : SIZE_MAX;
+}
+
+// What a retained slot restores: the admissible live hour, else the newest admissible stored
+// duplicate (checkup_journal_select_slot), else neither, an explicit gap.
+struct CheckupJournalChoice {
+    size_t                      live   = SIZE_MAX;
+    const CheckupJournalRecord* stored = nullptr;
+};
+inline CheckupJournalChoice
+checkup_journal_choose(int64_t wanted, const CheckupJournalLiveSpan& live,
+                       const CheckupJournalRecord* stored, size_t stored_count, int64_t now_unix_s,
+                       bool confirmed, uint32_t model_fp, uint32_t source_fp, uint32_t generation,
+                       bool reset_requested) {
+    CheckupJournalChoice c;
+    c.live = checkup_journal_live_index(live, wanted, now_unix_s, confirmed, model_fp, source_fp,
+                                        reset_requested);
+    if (c.live == SIZE_MAX) {
+        bool from_flash = false;
+        c.stored = checkup_journal_select_slot(wanted, nullptr, 0, stored, stored_count, now_unix_s,
+                                               confirmed, model_fp, source_fp, generation,
+                                               reset_requested, from_flash);
+    }
+    return c;
+}
+
+// Rebuild both completed-hour rings over [earliest, latest] IN PLACE. Selected live hours already
+// hold their buckets, so the window is first laid out where each of them keeps its slot and only
+// the other slots receive a stored hour or a gap; clearing the ring first would need every live
+// hour copied beforehand. Every slot gets its restore deadline (zero for a gap or outside the
+// window). The three arrays are then rotated together so the window's oldest hour sits in slot 0
+// and `head` follows its newest: the layout of a cleared ring refilled in order, which
+// checkup_aggregate and dhw_loss_aggregate assume while a ring is not full. A reversed or
+// wider-than-ring window leaves both rings empty and every deadline zero. A circulation
+// reconfiguration retires the DHW bucket alone; true tells the caller to restart the DHW scope.
+inline bool checkup_journal_rebuild(CheckupRing& ring, DhwLossRing& dhw,
+                                    int64_t (&expiry_us)[CHECKUP_COMPLETED_BUCKETS],
+                                    const CheckupJournalLiveSpan& live,
+                                    const CheckupJournalRecord* stored, size_t stored_count,
+                                    int64_t earliest, int64_t latest, int64_t now_unix_s,
+                                    int64_t now_us, bool confirmed, uint32_t model_fp,
+                                    uint32_t source_fp, uint32_t generation, bool reset_requested,
+                                    uint32_t dhw_source_fp, bool dhw_reset_requested) {
+    constexpr size_t kSlots = CHECKUP_COMPLETED_BUCKETS;
+    const size_t     n      = latest >= earliest && latest - earliest < static_cast<int64_t>(kSlots)
+                                  ? static_cast<size_t>(latest - earliest) + 1
+                                  : 0;
+    size_t           start  = 0;
+    for (size_t j = 0; j < n; ++j) {
+        const size_t k =
+            checkup_journal_live_index(live, earliest + static_cast<int64_t>(j), now_unix_s,
+                                       confirmed, model_fp, source_fp, reset_requested);
+        if (k == SIZE_MAX) continue;
+        start = (checkup_journal_live_slot(live, k) + kSlots - j) % kSlots;
+        break;
+    }
+    bool dhw_retired = false;
+    for (size_t j = 0; j < kSlots; ++j) {
+        const size_t               p = (start + j) % kSlots;
+        const CheckupJournalChoice c =
+            j < n ? checkup_journal_choose(earliest + static_cast<int64_t>(j), live, stored,
+                                           stored_count, now_unix_s, confirmed, model_fp, source_fp,
+                                           generation, reset_requested)
+                  : CheckupJournalChoice{};
+        if (c.live != SIZE_MAX) { // already in slot p, under the current circulation identity
+            if (dhw_reset_requested || !dhw_source_fp) {
+                dhw.buf[p]  = DhwLossBucket{};
+                dhw_retired = true;
+            }
+            expiry_us[p] = checkup_restore_expiry_us(checkup_journal_live_end(live, c.live),
+                                                     now_unix_s, now_us);
+        } else if (c.stored) {
+            const bool keep_dhw = !dhw_reset_requested && checkup_journal_dhw_identity_matches(
+                                                              c.stored->payload, dhw_source_fp);
+            ring.buf[p] = c.stored->payload.checkup;
+            dhw.buf[p]  = keep_dhw ? c.stored->payload.dhw : DhwLossBucket{};
+            dhw_retired = dhw_retired || !keep_dhw;
+            expiry_us[p] =
+                checkup_restore_expiry_us(c.stored->payload.end_unix_s, now_unix_s, now_us);
+        } else {
+            ring.buf[p]  = CheckupBucket{};
+            dhw.buf[p]   = DhwLossBucket{};
+            expiry_us[p] = 0;
+        }
+    }
+    std::rotate(ring.buf, ring.buf + start, ring.buf + kSlots);
+    std::rotate(dhw.buf, dhw.buf + start, dhw.buf + kSlots);
+    std::rotate(expiry_us, expiry_us + start, expiry_us + kSlots);
+    ring.count = dhw.count = static_cast<uint8_t>(n);
+    ring.head = dhw.head = static_cast<uint8_t>(n % kSlots);
+    return dhw_retired;
 }
 } // namespace daik::logic
