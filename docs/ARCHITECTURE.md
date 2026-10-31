@@ -487,9 +487,11 @@ Diagnosis bucket storage is 1,920 bytes for 23 completed hours and one pending h
 totals and outdoor sample counts use 32 bits; fifteen hourly clocks use 12-bit fields clamped at
 3,600 seconds. This retains the 80-byte bucket while storing exclusive censoring causes and a
 saturating 16-bit unsafe-runtime bound. Saturation blocks assessment. Pressure minima keep the
-earliest dated tie. The 23-record static restoration scratch occupies 3,128 bytes, avoiding a poll-task stack array.
-The history owner reuses its existing 4 KiB sector scratch. These geometry figures do not replace
-the ESP32-S3 ELF's full static-memory and call-path budgets.
+earliest dated tie. Stored records are read into the history owner's existing 4 KiB sector scratch.
+Hours this boot already completed are described by their ring position and labels rather than copied,
+and the rings are rebuilt in place around them (`checkup_journal_rebuild` in
+`main/logic/checkup_persist.hpp`). These geometry figures do not replace the ESP32-S3 ELF's full
+static-memory and call-path budgets.
 
 <a id="the-stack-the-second-budget-and-how-it-was-measured"></a>
 ### Stack verification

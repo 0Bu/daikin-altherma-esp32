@@ -312,17 +312,27 @@ assert.ok(cFlash.indexOf("checkup_flash_restore_retired") < cFlash.indexOf("chec
   "explicit resets retire old journal adoption even after same-source manual confirmation");
 assert.match(cFlash, /checkup_flash_source_ready/);
 assert.match(cFlash, /checkup_journal_restore_admits/);
-assert.match(cFlash, /checkup_journal_select_slot/);
+assert.match(cFlash, /logic::checkup_journal_choose\(/);
+assert.doesNotMatch(checkup, /s_restore_live/,
+  "this boot's completed hours compete in place, never through a static copy");
 assert.match(cFlash,
-  /cb = rec->payload\.checkup; if \(!s_dhw_reset_requested\.load\(\) && logic::checkup_journal_dhw_identity_matches\(rec->payload, s_dhw_source_fp\)\) db = rec->payload\.dhw;/,
+  /if \(logic::checkup_journal_rebuild\(P\(\)\.ring, P\(\)\.dhw, s_restored_expiry_us, live, records, count, earliest_bucket, latest_bucket, now_unix_s, now_us, s_source_confirmed, s_model_fp, s_source_fp, s_diagnostics_generation, reset_requested, s_dhw_source_fp, s_dhw_reset_requested\.load\(\)\)\) s_dhw_scope_us = now_us;/,
   "a mismatched circulation mapping must retire DHW alone, while admitting dated X10A checks");
+assert.doesNotMatch(cFlash, /\.reset\(\);/, "the rebuild must not clear the live hours it keeps");
 const noMaterialized = cFlash.indexOf("if (!materialized)");
-assert.ok(noMaterialized >= 0 && noMaterialized < cFlash.indexOf("P().ring.reset();"),
+assert.ok(noMaterialized >= 0 && noMaterialized < cFlash.indexOf("logic::checkup_journal_rebuild("),
   "zero selected flash intervals must not rebuild the ring or report restoration");
-assert.match(cFlash, /const auto\* rec = find\(b, from_flash\); if \(!rec \|\| !from_flash\) continue;/);
+assert.match(cFlash, /\.stored; if \(!rec\) continue; \+\+materialized;/);
 assert.match(cFlash, /static_cast<unsigned>\(materialized\)/,
   "restoration count describes selected flash intervals, not admitted candidates");
-assert.match(cFlash, /checkup_restore_expiry_us/);
+const persistRebuild = body(code("main/logic/checkup_persist.hpp"), "inline bool checkup_journal_rebuild(");
+assert.match(persistRebuild, /checkup_restore_expiry_us/);
+assert.match(persistRebuild,
+  /const bool keep_dhw = !dhw_reset_requested && checkup_journal_dhw_identity_matches\( ?c\.stored->payload, dhw_source_fp\);/,
+  "a stored hour keeps DHW evidence only under the current circulation identity");
+assert.match(persistRebuild,
+  /std::rotate\(ring\.buf, ring\.buf \+ start, ring\.buf \+ kSlots\); std::rotate\(dhw\.buf, dhw\.buf \+ start, dhw\.buf \+ kSlots\); std::rotate\(expiry_us, expiry_us \+ start, expiry_us \+ kSlots\); ring\.count = dhw\.count = static_cast<uint8_t>\(n\); ring\.head = dhw\.head = static_cast<uint8_t>\(n % kSlots\);/,
+  "a ring that is not full keeps its oldest hour in slot 0, which both aggregates read first");
 assert.match(cFlash, /s_persist_verdict = logic::CheckupRestore::Flash;/);
 assert.doesNotMatch(cFlash, /s_persist_verdict = logic::CheckupRestore::Accept/);
 assert.match(body(checkup, "logic::CheckupReport checkup_report()"), /expire_restored_locked\(\);/);
@@ -375,9 +385,11 @@ assert.equal(count(checkup, /\.x10a_blind =/g), 1,
 // window cannot claim full-day coverage across that restart.
 assert.match(dhwReset, /s_dhw_scope_us = esp_timer_get_time\(\);/,
   "the DHW-only reset must stamp the DHW scope start");
-assert.match(cFlash,
-  /logic::checkup_journal_dhw_identity_matches\(rec->payload, s_dhw_source_fp\)\) db = rec->payload\.dhw; else s_dhw_scope_us = now_us;/,
+assert.match(cFlash, /s_dhw_reset_requested\.load\(\)\)\) s_dhw_scope_us = now_us;/,
   "a restore that refuses DHW identity must stamp the DHW scope at the restore instant");
+assert.match(persistRebuild, /dhw_retired = dhw_retired \|\| !keep_dhw;/);
+assert.match(persistRebuild, /if \(dhw_reset_requested \|\| !dhw_source_fp\) \{ dhw\.buf\[p\] = DhwLossBucket\{\}; dhw_retired = true; \}/,
+  "a kept live hour loses only its DHW bucket when the circulation identity is gone");
 assert.match(cFlash, /const int64_t now_us = esp_timer_get_time\(\);/,
   "the restore instant must be the current monotonic time");
 assert.equal(count(checkup, /(?<!int64_t )s_dhw_scope_us = /g), 3,
@@ -439,7 +451,10 @@ assert.equal(count(checkup, /latched_newest_locked\(/g), 4,
 assert.match(flashNext, /const int64_t newest = latched_newest_locked\(latest_end_unix_s\);/);
 assert.match(flashNext, /logic::checkup_journal_end_in_bucket\( latest_end_unix_s - static_cast<int64_t>\(age\) \* logic::CHECKUP_DT_S, target\)/);
 assert.match(cFlash, /const int64_t newest_label = latched_newest_locked\(latest_end\);/);
-assert.match(cFlash, /rec\.bucket = label;/);
+assert.match(cFlash, /live\.newest_label = newest_label; live\.newest_end_unix_s = latest_end;/);
+assert.match(body(code("main/logic/checkup_persist.hpp"), "inline constexpr int64_t checkup_journal_live_end("),
+  /return checkup_journal_end_in_bucket\( live\.newest_end_unix_s - static_cast<int64_t>\(live\.count - 1 - k\) \* CHECKUP_DT_S, checkup_journal_live_label\(live, k\)\);/,
+  "a live hour's end stays inside the bucket its latched label names");
 // A DHW-only restart empties the hours before it: an append made later never presents them as
 // the current circulation source's evidence.
 assert.match(dhwReset, /s_dhw_restart_armed = true; s_dhw_restart_bucket = logic::checkup_bucket\(s_dhw_scope_us\);/,
