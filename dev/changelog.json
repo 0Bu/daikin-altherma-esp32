@@ -1,1 +1,1 @@
-{"version":"1.0.14-dev.1","changelog":"v1.0.14-dev.1 — Journal the open diagnosis hour on a software restart"}
+{"version":"1.0.14-dev.2","changelog":"v1.0.14-dev.1 — Journal the open diagnosis hour on a software restart\nv1.0.14-dev.2 — Rebuild the diagnosis window in place and free 3 KiB of internal RAM"}
