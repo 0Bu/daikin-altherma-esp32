@@ -22,6 +22,7 @@ CASES = [
     'probe_no_task', 'probe_busy', 'probe_drain', 'probe_deadline', 'probe_late', 'probe_wrap',
     'raw_recovery', 'raw_empty', 'raw_stopped_recovery', 'raw_one_page', 'raw_budget',
     'mqtt_scalar_source', 'refrigerant_one_sensor', 'refrigerant_unidentified_row',
+    'refrigerant_unpaired_pressure',
     'outdoor_hx_scale',
 ]
 REGRESSION_ORACLES = {
@@ -42,6 +43,7 @@ REGRESSION_ORACLES = {
     'raw_empty': 'raw_empty_payloads_do_not_consume_round',
     'refrigerant_one_sensor': 'refrigerant_lost_page_never_substitutes_other_sensor',
     'refrigerant_unidentified_row': 'refrigerant_unidentified_row_never_high_side',
+    'refrigerant_unpaired_pressure': 'refrigerant_unpaired_pressure_never_low_side',
     'outdoor_hx_scale': 'outdoor_hx_profile_scale_reaches_cache',
 }
 parser = argparse.ArgumentParser(description=__doc__)
@@ -282,6 +284,10 @@ mutations = {
         'const auto high = logic::refrigerant_service_high_pressure_row(coverage);\n    s.high_pressure_ok =\n        high.available &&\n        refrigerant_service_reading(values, count, high.reg, high.off, 105, s.high_pressure_tenths);',
         's.high_pressure_ok = refrigerant_service_reading(values, count, 0x20, 12, 105, s.high_pressure_tenths);',
         'refrigerant_unidentified_row_never_high_side', 'refrigerant_unidentified_row'),
+    'read_unpaired_pressure_as_low_side': (
+        's.low_pressure_ok =\n        coverage.low_pressure &&\n        refrigerant_service_reading(values, count, 0x20, 14, 105, s.low_pressure_tenths);',
+        's.low_pressure_ok = refrigerant_service_reading(values, count, 0x20, 14, 105, s.low_pressure_tenths);',
+        'refrigerant_unpaired_pressure_never_low_side', 'refrigerant_unpaired_pressure'),
     'copy_model_arguments_after_link_commit': (
         'link_revision, std::move(detected_profile), d.page_mask, d.kw_tenths, d.iu_kw_tenths, std::move(d.eeprom)',
         'link_revision, detected_profile, d.page_mask, d.kw_tenths, d.iu_kw_tenths, d.eeprom',

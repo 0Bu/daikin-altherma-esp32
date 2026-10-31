@@ -76,8 +76,9 @@ missing, sentinel and boundary inputs.
 A new diagnosis observation finds its inputs through `logic/instrument.hpp`, never by matching rows
 itself; no firmware code calls it yet. Each instrument has exact page/offset/converter locators.
 Where one coordinate means different instruments on different profiles, a label token also
-decides; refrigerant pressures use the structural rule in `convert.hpp`. On a resolved profile an
-instrument is:
+decides; refrigerant pressures use the structural rule in `convert.hpp`, and 0x20/14 is the low
+side only beside a 0x20/12 pressure, whatever its label says. On a resolved profile an instrument
+is:
 
 - **Supported**: exactly one publishable row is identified as it, and no other publishable row
   decodes the same bits, except a refrigerant pressure's own saturation twin;

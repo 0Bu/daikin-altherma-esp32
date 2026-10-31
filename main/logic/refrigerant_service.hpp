@@ -107,8 +107,9 @@ inline const char* refrigerant_service_mode_name(RefrigerantServiceMode m) {
 
 // Capability comes from publishable, converter-adjudicated profile rows.  `high_pressure` includes
 // the hydronic-page refrigerant transducer where structurally identified; it never includes Water
-// pressure.  The four special phases are profile-specific today, so their absence limits claim
-// strength instead of disabling useful raw observation.
+// pressure.  `low_pressure` needs the outdoor pressure pair.  The four special phases are
+// profile-specific today, so their absence limits claim strength instead of disabling useful raw
+// observation.
 struct RefrigerantServiceCoverage {
     bool rps = false;
     bool mode = false;
@@ -131,6 +132,10 @@ struct RefrigerantServiceCoverage {
     // The high side's ONE sensor for this profile: the hydronic transducer (0x62/15) when it is a
     // structural refrigerant pressure, otherwise the outdoor row (0x20/12). Never chosen per sweep.
     bool hydronic_pressure = false;
+    // The outdoor page's two pressure coordinates as structural refrigerant pressures. 0x20/14 is
+    // the low side only while 0x20/12 is itself one (refrigerant_service_cover_row).
+    bool outdoor_high_pressure   = false;
+    bool outdoor_second_pressure = false;
 };
 
 inline void refrigerant_service_cover_row(RefrigerantServiceCoverage& c, unsigned reg, unsigned off,
@@ -152,11 +157,17 @@ inline void refrigerant_service_cover_row(RefrigerantServiceCoverage& c, unsigne
         c.liquid = true;
     if (reg == 0x30 && off == 3 && conv == 151) c.eev_command = true;
     if (refrigerant_pressure) {
-        if (reg == 0x20 && off == 14) c.low_pressure = true;
+        if (reg == 0x20 && off == 14)
+            c.outdoor_second_pressure = true;
         else if (reg == 0x20 && off == 12)
-            c.high_pressure = true;
+            c.high_pressure = c.outdoor_high_pressure = true;
         else if (reg == 0x62 && off == 15)
             c.high_pressure = c.hydronic_pressure = true;
+        // Only the outdoor pair names a low side. Alone, 0x20/14 is the profile's only outdoor
+        // refrigerant-pressure row and its label is no evidence of a side
+        // (docs/DIAGNOSTIC_EVIDENCE.md#refrigerant-service-observation), so it is neither side.
+        // Re-derived on every pressure row, so the result does not depend on row order.
+        c.low_pressure = c.outdoor_second_pressure && c.outdoor_high_pressure;
     }
     if (reg == 0x20 && off == 0 && conv == 105) c.outdoor_air = true;
     if (reg == 0x20 && off == 2 && conv == 105) c.outdoor_hx = true;

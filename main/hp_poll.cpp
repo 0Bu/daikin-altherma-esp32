@@ -246,8 +246,10 @@ static void refrigerant_service_sample(
     s.high_pressure_ok =
         high.available &&
         refrigerant_service_reading(values, count, high.reg, high.off, 105, s.high_pressure_tenths);
-    s.low_pressure_ok = refrigerant_service_reading(values, count, 0x20, 14, 105,
-                                                     s.low_pressure_tenths);
+    // An unpaired 0x20/14 row has no established pressure side: never read as the low side.
+    s.low_pressure_ok =
+        coverage.low_pressure &&
+        refrigerant_service_reading(values, count, 0x20, 14, 105, s.low_pressure_tenths);
     s.outdoor_air_ok = refrigerant_service_reading(values, count, 0x20, 0, 105,
                                                     s.outdoor_air_tenths);
     s.outdoor_hx_ok = refrigerant_service_reading(values, count, 0x20, 2, 105,

@@ -29,7 +29,8 @@ tallies, saturation carry, tickets and the boot capture budget do not leak betwe
   one available page, the 32-byte line bound and at most eight successful rounds per boot.
 - Refrigerant cases run the real service sampler on shipped profiles: with both structural high-side
   rows fresh it reads the hydronic one, a lost 0x62 page leaves the side missing while 0x20/12 is
-  fresh, and a heat-sink temperature at 0x20/12 is never read as the high-side pressure.
+  fresh, a heat-sink temperature at 0x20/12 is never read as the high-side pressure, and a fresh
+  unpaired 0x20/14 pressure is read as neither side.
 
 Every semantic mutation must compile and fail its named oracle. Compile commands, complete input
 hashes, case results and mutation output are retained in the printed temporary `evidence.json`.

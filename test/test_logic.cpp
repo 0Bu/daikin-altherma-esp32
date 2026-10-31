@@ -20372,6 +20372,7 @@ static void test_refrigerant_service() {
     refrigerant_service_cover_row(c, 0x30, 3, 151, "", false);
     refrigerant_service_cover_row(c, 0x62, 15, 105, "", true);
     refrigerant_service_cover_row(c, 0x20, 14, 105, "", true);
+    refrigerant_service_cover_row(c, 0x20, 12, 105, "", true); // after 0x20/14: order-free pair
     refrigerant_service_cover_row(c, 0x20, 0, 105, "", false);
     refrigerant_service_cover_row(c, 0x20, 2, 105, "", false);
     refrigerant_service_cover_row(c, 0x10, 1, 306, "", false);
@@ -20400,6 +20401,24 @@ static void test_refrigerant_service() {
     CHECK(!water.high_pressure && !water.low_pressure);
     CHECK(!refrigerant_service_supported(water));
     CHECK(!refrigerant_service_high_pressure_row(water).available);
+
+    // The low side is the outdoor pair's second row, in either row order. Alone, 0x20/14 is the
+    // profile's only outdoor refrigerant-pressure row whatever its label says; neither the hydronic
+    // transducer nor a temperature at 0x20/12 makes it a pair.
+    RefrigerantServiceCoverage unpaired;
+    refrigerant_service_cover_row(unpaired, 0x20, 14, 105, "Low Pressure", true);
+    CHECK(unpaired.outdoor_second_pressure && !unpaired.low_pressure);
+    refrigerant_service_cover_row(unpaired, 0x62, 15, 105, "", true);
+    CHECK(unpaired.high_pressure && !unpaired.low_pressure);
+    refrigerant_service_cover_row(unpaired, 0x20, 12, 105, "Heat sink temp.", false);
+    CHECK(!unpaired.outdoor_high_pressure && !unpaired.low_pressure);
+    refrigerant_service_cover_row(unpaired, 0x20, 12, 105, "High Pressure", true);
+    CHECK(unpaired.outdoor_high_pressure && unpaired.low_pressure);
+    RefrigerantServiceCoverage high_first;
+    refrigerant_service_cover_row(high_first, 0x20, 12, 105, "", true);
+    CHECK(high_first.high_pressure && !high_first.low_pressure);
+    refrigerant_service_cover_row(high_first, 0x20, 14, 105, "", true);
+    CHECK(high_first.low_pressure);
 
     // ONE high-side sensor per profile, fixed by coverage. A structural hydronic transducer is that
     // sensor even when the outdoor row exists too; the outdoor row is used only without it; an
@@ -20714,7 +20733,10 @@ static void test_instrument_registry() {
         const auto& l = INSTRUMENT_LOCATORS[a];
         CHECK(l.id != Instrument::Count);
         if (l.identity == InstrumentIdentity::LabelToken) CHECK(l.token != nullptr);
-        if (l.identity == InstrumentIdentity::Coordinate) CHECK(l.token == nullptr);
+        if (l.identity != InstrumentIdentity::LabelToken) CHECK(l.token == nullptr);
+        // instrument_outdoor_high_pressure() reads the HighPressure key as a structural pressure.
+        if (l.id == Instrument::HighPressure)
+            CHECK(l.identity == InstrumentIdentity::RefrigerantPressure);
         if (!l.token) CHECK(l.token2 == nullptr);
         for (size_t b = a + 1; b < kLocators; b++) {
             const auto& m = INSTRUMENT_LOCATORS[b];
@@ -20859,16 +20881,36 @@ static void test_instrument_registry() {
     const ValueDef r1t_with_405[] = {r1t, {0x61, 2, 405, 2, 1, "synthetic saturation"}};
     CHECK(resolve(r1t_with_405, 2, Instrument::LeavingWaterPreBuh).state ==
           InstrumentState::Ambiguous);
-    // The low side needs a label that says so; the unsided outdoor transducer is not it.
-    const ValueDef low_pair[] = {{0x20, 14, 105, 2, 2, "Low Pressure"},
-                                 {0x20, 14, 405, 2, 1, "Low Pressure(T)"}};
-    r                         = resolve(low_pair, 2, Instrument::LowPressure);
+    // The low side is the outdoor pair's second row, whatever either label says. Alone, 0x20/14 is
+    // the profile's only outdoor refrigerant-pressure row, also where it is labelled "Low
+    // Pressure"; a withheld or non-pressure 0x20/12 row makes no pair.
+    const ValueDef low{0x20, 14, 105, 2, 2, "Low Pressure"};
+    const ValueDef low_t{0x20, 14, 405, 2, 1, "Low Pressure(T)"};
+    const ValueDef outdoor_pair[] = {low, low_t, high};
+    r                             = resolve(outdoor_pair, 3, Instrument::LowPressure);
     CHECK(r.state == InstrumentState::Supported && r.row == 0);
-    const ValueDef unsided[] = {{0x20, 14, 105, 2, 2, "Pressure"},
-                                {0x20, 14, 405, 2, 1, "Pressure(T)"}};
-    CHECK(resolve(unsided, 2, Instrument::LowPressure).state == InstrumentState::Absent);
-    const ValueDef low_in_celsius[] = {{0x20, 14, 105, 2, 1, "Low Pressure"}};
-    CHECK(resolve(low_in_celsius, 1, Instrument::LowPressure).state == InstrumentState::Absent);
+    const ValueDef unsided_pair[] = {high, {0x20, 14, 105, 2, 2, "Pressure"}};
+    r                             = resolve(unsided_pair, 2, Instrument::LowPressure);
+    CHECK(r.state == InstrumentState::Supported && r.row == 1);
+    const ValueDef twin_first[] = {high_t, high, low, low_t};
+    r                           = resolve(twin_first, 4, Instrument::LowPressure);
+    CHECK(r.state == InstrumentState::Supported && r.row == 2);
+    const ValueDef low_alone[] = {low, low_t};
+    CHECK(resolve(low_alone, 2, Instrument::LowPressure).state == InstrumentState::Absent);
+    const ValueDef beside_twin_only[] = {high_t, low, low_t};
+    CHECK(resolve(beside_twin_only, 3, Instrument::LowPressure).state == InstrumentState::Absent);
+    // The partner is the HighPressure locator's row: a bar row under another converter is not it.
+    const ValueDef beside_other_conv[] = {{0x20, 12, 101, 1, 2, "High Pressure"}, low, low_t};
+    CHECK(resolve(beside_other_conv, 3, Instrument::LowPressure).state == InstrumentState::Absent);
+    const ValueDef beside_heat_sink[] = {{0x20, 12, 105, 2, 1, "Heat sink temp."}, low, low_t};
+    CHECK(resolve(beside_heat_sink, 3, Instrument::LowPressure).state == InstrumentState::Absent);
+    const ValueDef beside_hydronic[] = {hydro_pair[0], hydro_pair[1], low, low_t};
+    CHECK(resolve(beside_hydronic, 4, Instrument::LowPressure).state == InstrumentState::Absent);
+    const ValueDef high_withheld{0x20, 12, 105, 2, 2, "High Pressure", true};
+    const ValueDef beside_withheld[] = {high_withheld, low, low_t};
+    CHECK(resolve(beside_withheld, 3, Instrument::LowPressure).state == InstrumentState::Absent);
+    const ValueDef low_in_celsius[] = {high, {0x20, 14, 105, 2, 1, "Low Pressure"}};
+    CHECK(resolve(low_in_celsius, 2, Instrument::LowPressure).state == InstrumentState::Absent);
 
     // Label tokens: 0x20/2 is the outdoor coil and 0x20/10 the liquid pipe only where the label
     // says so; the ground-source profiles put other sensors there.
@@ -20928,7 +20970,7 @@ static void test_instrument_registry() {
         {Instrument::OutdoorHeatExchanger, 35, 0},     // ground source: two-phase thermistor
         {Instrument::RefrigerantLiquidOutdoor, 35, 0}, // ground source: leaving brine
         {Instrument::HighPressure, 22, 0}, // elsewhere 0x20/12 is a heat-sink or fin temperature
-        {Instrument::LowPressure, 23, 0},  // elsewhere 0x20/14 names no pressure side
+        {Instrument::LowPressure, 22, 0},  // elsewhere 0x20/14 is no outdoor pressure pair
         {Instrument::CtL1, 20, 0},
         {Instrument::CtL2, 20, 0},
         {Instrument::CtL3, 20, 0},
@@ -20996,7 +21038,8 @@ static void test_instrument_registry() {
         {"high_pressure", 0x20, 12, "Heat sink temp.(R10T)", false, 2},
         {"high_pressure", 0x20, 12, "High Pressure", true, 22},
         {"high_pressure", 0x20, 12, "INV fin temp.", false, 2},
-        {"low_pressure", 0x20, 14, "Low Pressure", true, 23},
+        {"low_pressure", 0x20, 14, "Low Pressure", true, 22},
+        {"low_pressure", 0x20, 14, "Low Pressure", false, 1}, // Monobloc CA: no 0x20/12 pressure
         {"low_pressure", 0x20, 14, "Pressure", false, 10},
         {"low_pressure", 0x20, 14, "Pressure sensor", false, 6},
         {"inverter_primary_current", 0x21, 0, "INV primary current (A)", true, 39},
@@ -21088,7 +21131,8 @@ static void test_instrument_registry() {
     int ambiguous[logic::INSTRUMENT_COUNT] = {0};
     int withheld                           = 0;
     int profiles                           = 0;
-    int trend_two_phase = 0, trend_untwinned = 0, service_two_phase = 0, service_unsided = 0;
+    int trend_two_phase = 0, trend_untwinned = 0, service_two_phase = 0;
+    int unpaired_pressure = 0, unpaired_disabled = 0;
     int reference_checked = 0;
     for (const auto& p : def::profiles) {
         if (!def::is_detection_model(p.id)) continue;
@@ -21213,16 +21257,25 @@ static void test_instrument_registry() {
         CHECK(svc.suction == is_supported(Instrument::SuctionPipe));
         CHECK(svc.liquid == is_supported(Instrument::RefrigerantLiquidOutdoor));
         CHECK(svc.eev_command == is_supported(Instrument::ExpansionValve));
-        if (svc.low_pressure != is_supported(Instrument::LowPressure)) {
-            // The service counts any outdoor 0x20/14 refrigerant pressure as its low side; the
-            // registry needs the label to name it.
-            bool unsided_row = false;
-            for (size_t k = 0; k < m; k++)
-                if (regs[k] == 0x20 && view[pub[k]].offset == 14 && view[pub[k]].type == 2 &&
-                    !lwt_ci_contains(labels[k], "low"))
-                    unsided_row = true;
-            CHECK(svc.low_pressure && unsided_row);
-            service_unsided++;
+        CHECK(svc.low_pressure == is_supported(Instrument::LowPressure));
+        if (svc.outdoor_second_pressure && !svc.low_pressure) {
+            // The profile's only outdoor refrigerant-pressure row: 16 unsided labels and the
+            // Monobloc CA's "Low Pressure". Where it would be the service's only pressure input,
+            // the service is unsupported instead of publishing it under the low side's name.
+            unpaired_pressure++;
+            RefrigerantServiceCoverage former = svc;
+            former.low_pressure               = true;
+            if (refrigerant_service_supported(former) && !refrigerant_service_supported(svc)) {
+                static const char* const kDisabled[] = {
+                    "altherma_hpsu6_ultra", "altherma_lt_11_16kw_hydrosplit_hydro_unit",
+                    "altherma_lt_ca_cb_11_16kw", "altherma_lt_da_pair_bml"};
+                bool named = false;
+                for (const char* id : kDisabled) named = named || std::strcmp(id, p.id) == 0;
+                if (!named)
+                    std::printf("refrigerant service: unexpectedly unsupported on %s\n", p.id);
+                CHECK(named);
+                unpaired_disabled++;
+            }
         }
         CHECK(svc.hydronic_pressure == is_supported(Instrument::IndoorRefrigerantPressure));
         CHECK(svc.high_pressure == (is_supported(Instrument::HighPressure) ||
@@ -21275,7 +21328,8 @@ static void test_instrument_registry() {
     CHECK(trend_two_phase == 4);
     CHECK(service_two_phase == 4);
     CHECK(trend_untwinned == 17);
-    CHECK(service_unsided == 16);
+    CHECK(unpaired_pressure == 17);
+    CHECK(unpaired_disabled == 4);
     for (size_t s = 0; s < kSpellings; s++) {
         if (spelled[s] != kSpelling[s].profiles)
             std::printf("instrument %s: \"%s\" seen on %d profiles, listed %d\n", kSpelling[s].slug,
