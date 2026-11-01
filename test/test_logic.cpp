@@ -8167,6 +8167,9 @@ static void test_homehub_map() {
     CHECK(x10a_concept_for(0x60, 12, "", 302) ==
           nullptr); // another bit sharing the byte stays unpaired
     CHECK(x10a_concept_for(0x62, 2, "", 304) == nullptr); // the DHW BOOST is deliberately unpaired
+    // The high-side trend's row is a profile fact, so no single row carries its concept.
+    CHECK(x10a_concept_for(0x62, 15, "bar", 105) == nullptr);
+    CHECK(x10a_concept_for(0x20, 12, "bar", 105) == nullptr);
 
     // Over the catalog: each state locator resolves to EXACTLY ONE row per detectable profile, and
     // that row is the one the pairing names. Identity, not just count — a locator that resolves
@@ -14505,13 +14508,37 @@ static void test_history_measurement_units() {
     const auto* pressure = trend_by_id("circuit_pressure");
     CHECK(pressure && trend_row_matches(*pressure, 0x62, 15, "bar"));
     CHECK(pressure && !trend_row_matches(*pressure, 0x62, 15, "°C"));
+    // The high side resolves as the refrigerant service does (B5): the hydronic 0x62/15 row only
+    // beside its conv-405 twin, otherwise the outdoor 0x20/12 bar row, and nothing while page 0x62
+    // is missing from the set.
+    CHECK(pressure && pressure->high_side);
+    if (pressure) {
+        const uint8_t     r[]  = {0x20, 0x62, 0x62, 0x62};
+        const uint8_t     o[]  = {12, 11, 15, 15};
+        const char* const u[]  = {"bar", "bar", "bar", "°C"};
+        const int16_t     c[]  = {105, 105, 105, 405};
+        const int16_t     nc[] = {105, 105, 105, 105};
+        CHECK(trend_select(*pressure, r, o, u, c, 4) == 2);  // twinned: the indoor transducer
+        CHECK(trend_select(*pressure, r, o, u, nc, 4) == 0); // twinless: the outdoor high side
+        CHECK(trend_select(*pressure, r, o, u, c, 1) == -1); // page 0x62 timed out: a gap
+        CHECK(trend_select(*pressure, r, o, u, nullptr, 4) == -1);
+        CHECK(trend_select(*pressure, r, o, u, 4) == -1); // the converter-free overload refuses
+        const char* const heat_sink[] = {"°C", "bar", "bar", "°C"};
+        CHECK(trend_select(*pressure, r, o, heat_sink, nc, 4) == -1); // 0x20/12 is no pressure
+        const uint8_t     tr[] = {0x20, 0x62, 0x62};
+        const uint8_t     to[] = {12, 11, 15};
+        const char* const tu[] = {"bar", "bar", "°C"};
+        const int16_t     tc[] = {105, 105, 405};
+        CHECK(trend_select(*pressure, tr, to, tu, tc, 3) == -1); // twin without its bar row
+    }
     const TrendDef temperature_twin{"pressure_temperature", TrendKind::Row, 0x62, 15, "°C", ""};
     CHECK(trend_row_matches(temperature_twin, 0x62, 15, "°C"));
     CHECK(!trend_row_matches(temperature_twin, 0x62, 15, "bar"));
     CHECK(!trend_row_matches(temperature_twin, 0x62, 15, ""));
-    // The upgrade changes accepted cache metadata, never the catalog bytes used by persisted
-    // series ids. This is the pre-upgrade fingerprint, not a newly accepted replacement.
-    CHECK(history_catalog_fingerprint() == 0xa1783c86u);
+    // The unit upgrade changed accepted cache metadata, never the catalog bytes used by persisted
+    // series ids. The fingerprint moved once since, with the high-side trend's series id (B5,
+    // test_history_identity); 0xa1783c86 was the generation before it.
+    CHECK(history_catalog_fingerprint() == 0x537c75e6u);
 }
 
 static void test_history() {
@@ -14915,7 +14942,7 @@ static void test_history() {
         {"water_pressure", 39, 2, 1}, // the one bar row that is WATER, not refrigerant
         {"flow", 39, -1, 2},          // unit lives in the label ("Flow sensor (l/min)")
         {"pump_signal", 39, -1, 1},
-        {"circuit_pressure", 24, 2, 2}, // refrigerant, on the hydronic page — stays live
+        {"circuit_pressure", 25, 2, 2}, // the refrigerant high side: 0x62/15 on 7, 0x20/12 on 18
         {"comp_rps", 26, -1, 1},        // 13 detection profiles carry no 0x30 page at all
         {"eev", 26, -1, 2},             // same 0x30 page as comp_rps — the same 26 profiles
         {"outdoor_air", 39, 1, 2},
@@ -14991,9 +15018,14 @@ static void test_history() {
             // ONE row, not merely a first one. Ambiguity is what a label token had and a locator is
             // supposed to remove; if a profile ever carries two rows in the same byte window with
             // the same unit, the pick becomes table order — which is not a rule anyone stated.
+            // The high-side trend has no single locator, so its own pick is the window it must
+            // address alone.
             int hits = 0;
             for (size_t i = 0; i < n; i++)
-                if (trend_row_matches(*d, regs[i], offs[i], units[i], convs[i])) hits++;
+                if (d->high_side ? regs[i] == regs[picked[t]] && offs[i] == offs[picked[t]] &&
+                                       trend_cstr_eq(units[i], units[picked[t]])
+                                 : trend_row_matches(*d, regs[i], offs[i], units[i], convs[i]))
+                    hits++;
             CHECK(hits == 1);
 
             CHECK(view[picked[t]].type == kExpect[t].unit_type);
@@ -15017,6 +15049,32 @@ static void test_history() {
         for (size_t a = 0; a < TREND_COUNT; a++)
             for (size_t b = a + 1; b < TREND_COUNT; b++)
                 CHECK(picked[a] < 0 || picked[b] < 0 || picked[a] != picked[b]);
+
+        // The high side never flaps: with any one page missing from the cycle (a timeout), it
+        // resolves to the same row as with the full set or to nothing, never to the other sensor —
+        // a switch would read as a changed identity and reset every X10A ring.
+        for (size_t t = 0; t < TREND_COUNT; t++) {
+            if (!TRENDS[t].high_side) continue;
+            for (size_t drop = 0; drop < n; drop++) {
+                if (drop > 0 && regs[drop] == regs[drop - 1]) continue; // one pass per page run
+                const char* pu[512];
+                uint8_t     pr[512];
+                uint8_t     po[512];
+                int16_t     pc[512];
+                size_t      pn = 0;
+                for (size_t i = 0; i < n; i++) {
+                    if (regs[i] == regs[drop]) continue;
+                    pu[pn] = units[i];
+                    pr[pn] = regs[i];
+                    po[pn] = offs[i];
+                    pc[pn] = convs[i];
+                    pn++;
+                }
+                const int partial = trend_select(TRENDS[t], pr, po, pu, pc, pn);
+                CHECK(partial < 0 || (picked[t] >= 0 && pr[partial] == regs[picked[t]] &&
+                                      po[partial] == offs[picked[t]]));
+            }
+        }
 
         // The leaving-water trend must be the row lwt_select picks — not "a leaving-water row".
         // legacy-121 is what happens when a second, looser rule answers this question: a setpoint
@@ -21142,7 +21200,7 @@ static void test_instrument_registry() {
     int ambiguous[logic::INSTRUMENT_COUNT] = {0};
     int withheld                           = 0;
     int profiles                           = 0;
-    int trend_two_phase = 0, trend_untwinned = 0, service_two_phase = 0;
+    int trend_two_phase = 0, service_two_phase = 0, high_side_indoor = 0, high_side_outdoor = 0;
     int unpaired_pressure = 0, unpaired_disabled = 0;
     int reference_checked = 0;
     for (const auto& p : def::profiles) {
@@ -21157,6 +21215,9 @@ static void test_instrument_registry() {
         const char* labels[512];
         const char* units[512];
         unsigned    regs[512];
+        uint8_t     regs8[512];
+        uint8_t     offs8[512];
+        int16_t     convs[512];
         size_t      m = 0;
         for (size_t i = 0; i < n; i++) {
             if (!row_publishable(view[i])) continue;
@@ -21165,8 +21226,12 @@ static void test_instrument_registry() {
             labels[m]          = row.label;
             units[m]           = unit_for_row(row);
             regs[m]            = row.reg;
+            regs8[m]           = row.reg;
+            offs8[m]           = row.offset;
+            convs[m]           = static_cast<int16_t>(row.conv);
             m++;
         }
+        int high_side_pick = -1; // the circuit_pressure trend's row, bound to the service below
 
         logic::InstrumentResolution res[logic::INSTRUMENT_COUNT];
         for (size_t k = 0; k < logic::INSTRUMENT_COUNT; k++) {
@@ -21227,26 +21292,21 @@ static void test_instrument_registry() {
             const TrendDef* d = trend_by_id(t.trend);
             CHECK(d != nullptr);
             if (!d) continue;
-            int pick = -1;
-            for (size_t k = 0; k < m && pick < 0; k++) {
-                const ValueDef row = adjudicated(view, pub[k]);
-                if (trend_row_matches(*d, row.reg, row.offset, units[k], row.conv))
-                    pick = static_cast<int>(pub[k]);
-            }
-            const int mine = row_of(t.id);
+            // Resolved exactly as history.cpp resolves it, over the published rows.
+            const int at   = trend_select(*d, regs8, offs8, units, convs, m);
+            const int pick = at < 0 ? -1 : static_cast<int>(pub[at]);
+            // The high-side trend charts the indoor transducer where the registry supports one
+            // and the outdoor high pressure otherwise — never a twinless 0x62/15 row.
+            const int mine = d->high_side && !is_supported(t.id) ? row_of(Instrument::HighPressure)
+                                                                 : row_of(t.id);
+            if (d->high_side) high_side_pick = pick;
             if (pick == mine) continue;
-            // The two known disagreements, both stricter in the registry: the outdoor-coil trend
-            // charts the ground-source two-phase thermistor, and the refrigerant-pressure trend
-            // charts a 0x62/15 bar row that has no saturation twin, which convert.hpp's structural
-            // rule does not accept as a refrigerant pressure.
+            // The one known disagreement, stricter in the registry: the outdoor-coil trend charts
+            // the ground-source two-phase thermistor.
             const ValueDef picked = adjudicated(view, static_cast<size_t>(pick < 0 ? 0 : pick));
             if (mine < 0 && pick >= 0 && t.id == Instrument::OutdoorHeatExchanger &&
                 lwt_ci_contains(picked.label, "2 phase thermistor")) {
                 trend_two_phase++;
-            } else if (mine < 0 && pick >= 0 && t.id == Instrument::IndoorRefrigerantPressure &&
-                       picked.reg == 0x62 && picked.offset == 15 && picked.type == 2 &&
-                       !fg_is_refrigerant_pressure(view, static_cast<size_t>(pick))) {
-                trend_untwinned++;
             } else {
                 std::printf("instrument %s: trend %s picks row %d on %s, registry %d\n",
                             logic::instrument_slug(t.id), t.trend, pick, p.id, mine);
@@ -21292,6 +21352,14 @@ static void test_instrument_registry() {
         CHECK(svc.hydronic_pressure == is_supported(Instrument::IndoorRefrigerantPressure));
         CHECK(svc.high_pressure == (is_supported(Instrument::HighPressure) ||
                                     is_supported(Instrument::IndoorRefrigerantPressure)));
+        // B5: the circuit_pressure trend and the refrigerant service read ONE high-side sensor.
+        const RefrigerantServiceRow high_side = refrigerant_service_high_pressure_row(svc);
+        CHECK(high_side.available == (high_side_pick >= 0));
+        if (high_side_pick >= 0) {
+            const ValueDef row = adjudicated(view, static_cast<size_t>(high_side_pick));
+            CHECK(row.reg == high_side.reg && row.offset == high_side.off);
+            (row.reg == 0x62 ? high_side_indoor : high_side_outdoor)++;
+        }
         CHECK(svc.outdoor_air == is_supported(Instrument::OutdoorAir));
         if (svc.outdoor_hx != is_supported(Instrument::OutdoorHeatExchanger)) {
             // The service's coil context accepts 0x20/2 by coordinate alone, so it also counts the
@@ -21341,7 +21409,12 @@ static void test_instrument_registry() {
     CHECK(withheld == 6);
     CHECK(trend_two_phase == 4);
     CHECK(service_two_phase == 4);
-    CHECK(trend_untwinned == 17);
+    // Indoor on the seven profiles whose 0x62/15 row carries its saturation twin. Outdoor on 18:
+    // the 16 profiles whose twinless 0x62/15 row the trend used to chart (all but hpsu6_ultra,
+    // which has no outdoor high pressure), plus the EPGA D and LT gas-injection tables, which carry
+    // no 0x62/15 row and used to have no trend at all.
+    CHECK(high_side_indoor == 7);
+    CHECK(high_side_outdoor == 18);
     CHECK(unpaired_pressure == 17);
     CHECK(unpaired_disabled == 4);
     for (size_t s = 0; s < kSpellings; s++) {
@@ -22982,8 +23055,9 @@ static void test_history_persist() {
     // HIST-01/c: the fingerprint is now a fold of every ring's series id, so it moved from the
     // previous generation (0xda95bbc0, legacy-8's catalog). Records of that generation are no
     // longer on the direct fast path; they are read through their manifests
-    // (test_history_identity pins both the mapping and how the old constant was built).
-    CHECK(fp == 0xa1783c86u);
+    // (test_history_identity pins both the mapping and how the old constant was built). B5 moved
+    // it again (0xa1783c86 -> this) by giving the high-side trend a new series id.
+    CHECK(fp == 0x537c75e6u);
     const uint32_t sw = static_cast<uint32_t>(CrashReason::SW);
     CHECK(history_restore_verdict(sw, HISTORY_PERSIST_MAGIC, HISTORY_PERSIST_VERSION, fp, fp, 7,
                                   7) == HistoryRestore::Accept);
@@ -23968,7 +24042,28 @@ static void test_history_identity() {
             crc = history_fp_u32(crc, history_series_id(HistoryJournalSource::Env3, i));
         CHECK(history_catalog_fingerprint() == config_crc32_final(crc));
         // Pinned: this is the generation the flash records of this build carry.
-        CHECK(history_catalog_fingerprint() == 0xa1783c86u);
+        CHECK(history_catalog_fingerprint() == 0x537c75e6u);
+    }
+    {
+        // B5: the high-side trend changed what its samples mean on twinless profiles (hydronic
+        // 0x62/15 before, outdoor 0x20/12 now), so its series id moved and the journal's pre-change
+        // column restores into nothing. Every other X10A series keeps its id and its column.
+        uint32_t ids[TREND_COUNT];
+        CHECK(history_current_series_ids(HistoryJournalSource::X10a, ids, TREND_COUNT) ==
+              TREND_COUNT);
+        int moved = 0;
+        for (size_t t = 0; t < TREND_COUNT; t++) {
+            TrendDef before  = TRENDS[t];
+            before.high_side = false;
+            const int at = history_series_index(ids, TREND_COUNT, history_x10a_series_id(before));
+            if (TRENDS[t].high_side) {
+                moved++;
+                CHECK(at == -1);
+            } else {
+                CHECK(at == static_cast<int>(t));
+            }
+        }
+        CHECK(moved == 1);
     }
     {
         // The defect, reproduced. The hand-written fingerprint hashed the HomeHub offset and trend
@@ -24072,15 +24167,16 @@ static void test_history_identity() {
                                        history_series_id(HistoryJournalSource::Env3, i)) ==
                   static_cast<int>(i));
 
-        // X10A: the series-id formula did not move — 31 of today's 32 ids are still the ones the
-        // frozen list holds — so the previous manifest maps them. The X10A scope did not move
-        // either (block d below), so those records stay restorable.
+        // X10A: the series-id formula did not move — 30 of today's 32 ids are still the ones the
+        // frozen list holds (the newest trend, and circuit_pressure since B5 gave the high side its
+        // own id) — so the previous manifest maps them. The X10A scope did not move either (block d
+        // below), so those records stay restorable.
         size_t mapped_x10a = 0;
         for (size_t i = 0; i < TREND_COUNT; i++)
             if (history_series_index(HISTORY_LEGACY_DISINFECTION_X10A_IDS, 31,
                                      history_series_id(HistoryJournalSource::X10a, i)) >= 0)
                 mapped_x10a++;
-        CHECK(mapped_x10a == 31);
+        CHECK(mapped_x10a == 30);
 
         // HomeHub: the previous build's ids — reproduced with its formula, which is also the one
         // that built the frozen pre-manifest list — match none of today's. Accepted, one-time.

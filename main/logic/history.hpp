@@ -162,6 +162,9 @@ struct TrendDef {
     const char* unit;
     const char* label;
     int16_t     conv = -1; // shared-bit discriminator; ordinary rows do not need it
+    // The refrigerant high side: resolved by trend_select_high_side() rather than by the locator
+    // alone. Part of the persisted series identity: history_x10a_series_id folds it in.
+    bool high_side = false;
 };
 
 // Adding a trend is one row here — the ring, the route and the browser are already generic over it.
@@ -180,18 +183,15 @@ inline constexpr TrendDef TRENDS[] = {
     {"water_pressure", TrendKind::Row, 0x62, 11, "bar", ""}, // the WATER circuit, not refrigerant
     {"flow", TrendKind::Row, 0x62, 9, "", ""},         // Flow sensor (l/min) — unit in label
     {"pump_signal", TrendKind::Row, 0x62, 12, "", ""}, // INVERTED (0 = max, 100 = stop)
-    // The high-side refrigerant pressure the UI actually draws. NOT the 0x20/12+14 transducers: the
-    // pill already falls back off them (they freeze with their page), and on the measured unit they
-    // read exactly 0.0 bar at rest AND at 42 rps — which reading_plausible() refuses as impossible
-    // for a sealed circuit — while this sensor read a correct 15.3 bar. A ring on them would be a
-    // permanently empty chart bought with 576 bytes. That is why the schematic's LOW-pressure pill
-    // has no trend while every other numeric pill now does: it is the SAME 0x20 transducer pair,
-    // and
-    // the reference install has published a flat 0.0 bar from both for 30 days. There is no
-    // low-side
-    // equivalent of the 0x62/15 fallback, so the honest answer is no chart rather than an empty one
-    // — the absent-feature rule (feature_gate.hpp), applied to a sensor that reports nothing.
-    {"circuit_pressure", TrendKind::Row, 0x62, 15, "bar", ""},
+    // The refrigerant HIGH SIDE, the one sensor refrigerant_service.hpp reads for it
+    // (trend_select_high_side). On the twinned profiles, Altherma 3 R and its register-identical
+    // tables, that is 0x62/15: the reference install's outdoor 0x20/12 and 0x20/14 rows
+    // read 0.0 bar at rest and at 42 rps alike, while 0x62/15 read a correct 15.3 bar. Elsewhere
+    // it is the outdoor 0x20/12 row. The LOW-pressure pill has no trend: there is no low-side
+    // equivalent of the 0x62/15 sensor, and the reference install has published a flat 0.0 bar
+    // from 0x20/14 for 30 days, so the honest answer is no chart rather than an empty one
+    // (feature_gate.hpp's absent-feature rule).
+    {"circuit_pressure", TrendKind::Row, 0x62, 15, "bar", "", -1, true},
     {"comp_rps", TrendKind::Row, 0x30, 0, "", ""}, // INV frequency (rps) — run/idle
     {"eev", TrendKind::Row, 0x30, 3, "", ""},      // Expansion valve 1 (pls) — live page
     // Outdoor — 0x20/0x21 freeze while the compressor rests, so every sample passes the held-over
@@ -338,8 +338,36 @@ constexpr bool trend_row_matches(const TrendDef& d, unsigned reg, unsigned off, 
 // Memory, concurrency, and HTTP safety; the v1.0.12 overflow), so it is spent by the byte.
 inline int trend_select(const TrendDef& d, const uint8_t* regs, const uint8_t* offs,
                         const char* const* units, size_t n) {
+    if (d.high_side) return -1; // needs the converters: see the overload below
     for (size_t i = 0; i < n; ++i)
         if (trend_row_matches(d, regs[i], offs[i], units[i])) return static_cast<int>(i);
+    return -1;
+}
+
+// The refrigerant high side, resolved as refrigerant_service_high_pressure_row() resolves it. The
+// hydronic 0x62/15 bar row counts only beside its conv-405 saturation twin, which the documented
+// Altherma 3 R units carry and whose single refrigerant transducer sits indoors (B1PR/B2PR). The
+// twinless units documented so far have no indoor refrigerant sensor at all and their one
+// transducer is outdoors (S1NPH; the evidence is in convert.hpp's known-gap note), so the outdoor
+// 0x20/12 bar row is charted instead and inherits that page's held-over gaps. The choice is a
+// profile fact, so it is made only while page 0x62 is in the set: a cycle in which that page timed
+// out leaves a gap rather than switching to the outdoor row, which would read as a changed sensor
+// identity and reset every X10A ring.
+inline int trend_select_high_side(const uint8_t* regs, const uint8_t* offs,
+                                  const char* const* units, const int16_t* convs, size_t n) {
+    if (!convs) return -1;
+    bool hydronic_page = false, twin = false;
+    for (size_t i = 0; i < n; ++i) {
+        if (regs[i] != 0x62) continue;
+        hydronic_page = true;
+        if (offs[i] == 15 && convs[i] == 405) twin = true;
+    }
+    if (!hydronic_page) return -1;
+    const uint8_t reg = twin ? 0x62 : 0x20;
+    const uint8_t off = twin ? 15 : 12;
+    for (size_t i = 0; i < n; ++i)
+        if (regs[i] == reg && offs[i] == off && trend_cstr_eq(units[i], "bar"))
+            return static_cast<int>(i);
     return -1;
 }
 
@@ -348,6 +376,7 @@ inline int trend_select(const TrendDef& d, const uint8_t* regs, const uint8_t* o
 // overload above.
 inline int trend_select(const TrendDef& d, const uint8_t* regs, const uint8_t* offs,
                         const char* const* units, const int16_t* convs, size_t n) {
+    if (d.high_side) return trend_select_high_side(regs, offs, units, convs, n);
     for (size_t i = 0; i < n; ++i)
         if (trend_row_matches(d, regs[i], offs[i], units[i], convs ? convs[i] : -1))
             return static_cast<int>(i);
