@@ -68,6 +68,11 @@ POST_STRESS_HEADROOM_SAMPLE_INTERVAL_S = 1
 POST_STRESS_MIN_FREE_HEAP = 48 * 1024
 POST_STRESS_MIN_LARGEST_BLOCK = 20 * 1024
 POST_STRESS_WEATHER_TIMEOUT_S = 120
+# The board starts no Weather fetch before SNTP has set its clock (main/weather_forecast.cpp, reason
+# clock_unsynced). SNTP usually needs seconds after boot; one production boot needed 161 s
+# (2026-10-31). While the board itself reports `ntp.synced: false`, the explicit refresh's wait and
+# the pressure window are extended by that time, at most by this bound.
+CLOCK_SYNC_WAIT_MAX_S = 300
 # Firmware permits a 30 s re-manifest plus a five-minute binary deadline after bounded quiesce /
 # headroom waits, two verifier passes and reboot. The observer must outlive the only accepted write.
 OTA_TIMEOUT_S = 480
@@ -2044,8 +2049,10 @@ def stress_board(
     weather_refresh_status: dict[str, Any] | None = None
     weather_headroom_deferred = False
     weather_headroom_rearms = 0
+    clock_wait_s = 0.0
     if require_weather:
         weather_deadline = min(deadline, time.monotonic() + OTA_CHECK_TIMEOUT_S)
+        clock_sampled_at = time.monotonic()
         while time.monotonic() < weather_deadline:
             remaining = weather_deadline - time.monotonic()
             if remaining <= 0:
@@ -2063,6 +2070,19 @@ def stress_board(
                 time.sleep(0.1)
                 continue
             validate_identity(candidate, host=host, mac=mac, version=version, elf=elf)
+            sampled_at = time.monotonic()
+            ntp_state = candidate.get("ntp")
+            if isinstance(ntp_state, dict) and ntp_state.get("synced") is False:
+                # The queued refresh cannot start yet. Only the board's explicit report extends
+                # both deadlines, by the time since the previous sample and within the bound.
+                extension = min(sampled_at - clock_sampled_at, CLOCK_SYNC_WAIT_MAX_S - clock_wait_s)
+                clock_wait_s += extension
+                deadline += extension
+                weather_deadline += extension
+                if clock_wait_s >= CLOCK_SYNC_WAIT_MAX_S:
+                    fail(f"{host} clock did not synchronize within {CLOCK_SYNC_WAIT_MAX_S}s; the "
+                         "board starts no Weather fetch before SNTP sets its clock")
+            clock_sampled_at = sampled_at
             weather_candidate = candidate.get("weather_forecast", {})
             if isinstance(weather_candidate, dict):
                 refresh_fields = {
@@ -2103,7 +2123,10 @@ def stress_board(
                     break
             time.sleep(0.1)
         if weather_refresh_status is None and not weather_headroom_deferred:
-            fail(f"{host} did not complete the explicitly triggered weather TLS refresh")
+            clock_detail = f" (clock unsynchronized for {clock_wait_s:.0f}s of it)" \
+                if clock_wait_s > 0 else ""
+            fail(f"{host} did not complete the explicitly triggered weather TLS refresh"
+                 f"{clock_detail}")
     # Each constrained network owner destroys its active flag before publishing final state. Keep
     # the 503 allowance for one scheduler turn after both exact completion observations.
     time.sleep(0.25)
@@ -2447,6 +2470,7 @@ def stress_board(
             "successes_before": weather_successes_before,
             "successes_after": weather_refresh_status.get("successes"),
             "fetched_at": weather_refresh_status.get("fetched_at"),
+            "clock_wait_s": round(clock_wait_s),
         },
     }
 

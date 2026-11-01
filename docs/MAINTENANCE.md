@@ -223,7 +223,11 @@ a paused or unsafe-heap baseline is not accepted as a healthy start.
 
 Configured production Weather additionally needs an exact non-zero requested/started/completed/
 success token and a success-counter advance. OTA serialization may defer the same outstanding
-attempt, but unrelated scheduled fetches cannot satisfy it. Only a completed `waiting/heap_headroom`
+attempt, but unrelated scheduled fetches cannot satisfy it. The firmware starts no fetch before
+SNTP sets its clock. While the board reports `ntp.synced: false`, that time extends the refresh
+wait and the pressure window, at most `CLOCK_SYNC_WAIT_MAX_S` in total, and the receipt records it
+as `weather_refresh.clock_wait_s`. A clock still unsynchronized at that bound blocks with its own
+message; without the board's report nothing is extended. Only a completed `waiting/heap_headroom`
 refusal may wait until all pressure workers stop, then passively await two stable 48/20-KiB samples
 for at most 420 seconds and issue one different token under a 120-second bound. That retry must
 succeed with MQTT/X10A recovered and invariant uptime/counters/heap. A second refusal or another
