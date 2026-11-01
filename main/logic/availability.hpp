@@ -21,10 +21,11 @@
 //   ZeroMeansAbsent   raw 0x0000 behaves as "this field is not populated on this unit". A GLOBAL
 //                     "0 °C means unavailable" rule is unsafe (a real thermistor crosses zero every
 //                     winter), so the decision has to be per row and on record.
-//   Unproven          the decode is faithful to the catalog and the result is still physically
-//                     false. The row is withheld from every publish surface until the wire evidence
-//                     settles the scale; the raw page dump (logic/raw_capture.hpp) is what
-//                     preserves the evidence in the meantime.
+//   Unproven          the decode is faithful to the catalog, and either the result is physically
+//                     false or the catalog itself does not establish which quantity the bytes
+//                     carry. The row is withheld from every publish surface until wire evidence
+//                     settles the scale or the layout; a raw page dump (logic/raw_capture.hpp) or
+//                     a POST /hp/query probe is what supplies it.
 //   AboveRangeIsAbsent  the row is a real measurement almost always, and occasionally carries a
 //                     single fixed out-of-band integer that no position/count could be. Unlike the
 //                     two above this is a VALUE test — but it cannot live in reading_plausible(),
@@ -458,6 +459,27 @@ inline constexpr AvailabilityRule AVAILABILITY_RULES[] = {
     {0x63, 16, 161, nullptr, AvailabilityPolicy::Bit7MeansAbsent, 0.0,
      "docs/REGISTERS.md: HP Forced FG bit 7 overlays the one-byte CT-L3 field; an unmasked bit "
      "would fabricate +64 A"},
+
+    // ── Page 0x65 byte 0: accessory rows on the enable-flag byte (docs/REGISTERS.md, register
+    // 0x65). On pages 0x60-0x64 every vendor catalog file has the enable flag at byte 0 and a
+    // one-byte unit address at 1, and no other row there; yet seven files put two or three
+    // accessory quantities on byte 0 of this page, while the files with distinct offsets use 2, 4
+    // and 6. No 0x65 reply has been captured, so the layout is not established and no row at byte 0
+    // is trusted. The catalog's Enabled/IsDisplay flags settle nothing: they are off on about a
+    // quarter of all kept rows, the O/U capacity that detection relies on included.
+    //
+    // NOT covered: three of the seven files also widen the address to bytes 1-2, which the two ERLA
+    // D tables' outlet at byte 2 would overlap. That row stays published on the one-byte address
+    // every other hydronic page and every distinct-offset 0x65 file shows; it is unproven too.
+    //
+    // Keyed on the coordinate without a label: the verdict is about the bytes, whatever the catalog
+    // calls them, and the catalog test pins the reach. A raw 0x65 reply from such a unit lifts it.
+    {0x65, 0, 105, nullptr, AvailabilityPolicy::Unproven, 0.0,
+     "catalog: up to three quantities on the 0x65 enable-flag byte; distinct-offset files use "
+     "bytes 2-6; no 0x65 reply captured"},
+    {0x65, 0, 101, nullptr, AvailabilityPolicy::Unproven, 0.0,
+     "catalog: the mix-valve position shares byte 0 with the temperatures; distinct-offset files "
+     "put it at byte 6"},
 
     // The four 0xA1 rows USED TO BE HERE, one ZeroPageMeansAbsent entry each. The verdict has not
     // changed — it moved to PAGE_ABSENCE_RULES above, where a fact about a page is stated once and
