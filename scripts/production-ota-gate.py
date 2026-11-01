@@ -73,8 +73,8 @@ POST_STRESS_WEATHER_TIMEOUT_S = 120
 # clock_unsynced). On 2026-10-31 a production boot logged `sntp: time synced` only at 161 s of uptime,
 # and the gate's refresh timed out behind it; the other boots that month logged it within 14 s. The
 # gate waits while the board reports `ntp.synced: false`, before its TLS window, at most this long:
-# about twice the observed delay. The Weather task re-checks the clock only every 60 s, so its fetch
-# may start up to a minute after the sync; the unchanged refresh wait covers that.
+# about twice the observed delay. The refresh request posted after the sync wakes the Weather task,
+# so its 60-s unsynchronized re-check does not delay the explicit fetch.
 CLOCK_SYNC_WAIT_MAX_S = 300
 # Firmware permits a 30 s re-manifest plus a five-minute binary deadline after bounded quiesce /
 # headroom waits, two verifier passes and reboot. The observer must outlive the only accepted write.
@@ -101,8 +101,9 @@ WEATHER_TLS_EVIDENCE_MARGIN_S = 1.0
 # interval); two still cover a fetch of about ten seconds. Longer Weather ownership blocks the gate.
 MAX_WEATHER_REFUSALS_PER_EPISODE = 2
 # Outside the gate's own window the board starts only the fetch resumed after the gate's OTA check
-# pre-empted it, plus explicit refreshes: its retries wait WEATHER_RETRY_INTERVAL_S
-# (main/logic/weather_forecast.hpp), longer than the window. Four covers two fetches at the cap above.
+# pre-empted it, or its own first fetch right after a late clock sync, plus explicit refreshes: its
+# retries wait WEATHER_RETRY_INTERVAL_S (main/logic/weather_forecast.hpp), longer than the window
+# after the clock wait. Four covers two fetches at the cap above.
 MAX_WEATHER_REFUSALS_PER_WINDOW = 4
 HTTP_ERROR_TEXT_MAX = 80
 PROMOTION_READY_STABLE_SAMPLES = 2
@@ -2026,6 +2027,8 @@ def stress_board(
         clock_wait_started = time.monotonic()
         clock_wait_deadline = clock_wait_started + CLOCK_SYNC_WAIT_MAX_S
         clock_checked_at = clock_wait_started
+        clock_answered_at = clock_wait_started
+        clock_uptime = started_uptime
         while True:
             now = time.monotonic()
             deadline += now - clock_checked_at
@@ -2039,10 +2042,15 @@ def stress_board(
                 break
             remaining = clock_wait_deadline - time.monotonic()
             if remaining <= 0:
+                silent_s = time.monotonic() - clock_answered_at
+                if silent_s > 2 * HTTP_TIMEOUT_S:
+                    fail(f"{host} /status stopped answering for the last {silent_s:.0f}s of the "
+                         "clock wait")
                 if unsynced:
                     fail(f"{host} clock did not synchronize within {CLOCK_SYNC_WAIT_MAX_S}s; the "
                          "board starts no Weather fetch before SNTP sets its clock")
-                fail(f"{host} weather did not become idle before its HIL refresh")
+                fail(f"{host} weather stayed busy after its clock synchronized, within "
+                     f"{CLOCK_SYNC_WAIT_MAX_S}s of the clock wait")
             time.sleep(min(0.5, remaining))
             try:
                 started = request_status_deadline(
@@ -2054,9 +2062,19 @@ def stress_board(
                 continue
             except (CompactTransportError, OSError, TimeoutError):
                 continue
+            clock_answered_at = time.monotonic()
             validate_identity(started, host=host, mac=mac, version=version, elf=elf)
             if preserve_saved_channel:
                 require_saved_channel(started, expected_channel)
+            # A reboot or an allocation failure ends the wait at once instead of after it.
+            sampled_uptime = required_uptime(started, f"{host} clock-wait status")
+            if sampled_uptime < clock_uptime:
+                fail(f"{host} rebooted while waiting for its clock")
+            clock_uptime = sampled_uptime
+            clock_counters = board_counters(started)
+            if any(clock_counters[key] != initial_counters[key] for key in readiness_keys):
+                fail(f"{host} clock wait recorded an allocation failure "
+                     f"({initial_counters} -> {clock_counters})")
     # Schedule a same-value, non-persistent weather refresh before the OTA manifest check while all
     # three probes are already active. The firmware serializes these two constrained TLS owners; the
     # bounded window therefore exercises both real clients under the same HTTP/MQTT/X10A pressure
@@ -2501,8 +2519,8 @@ def stress_board(
             "successes_before": weather_successes_before,
             "successes_after": weather_refresh_status.get("successes"),
             "fetched_at": weather_refresh_status.get("fetched_at"),
-            "clock_wait_s": round(clock_wait_s),
         },
+        "clock_wait_s": round(clock_wait_s),
     }
 
 

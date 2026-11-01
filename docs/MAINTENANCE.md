@@ -212,8 +212,8 @@ The transaction has two distinct stages:
    three. Bind the completed target check generation/feed/version/SHA, require successor generation,
    capture validation/heap/stack evidence, then observe target identity, rollback/crash/safe mode,
    live values and retained X10A MQTT through a separate three-minute read-only canary (longer after
-   a clock wait, below). Before
-   success, require an explicit valid/disarmed image with stable identity, uptime and counters.
+   a clock wait, below). Before success, require an explicit valid/disarmed image with stable
+   identity, uptime and counters.
 
 **Do not publish either participating feed during this transaction.** The old release cannot retain
 transient feed headers; its return reads the mutable official dev path. Manifest drift, failed return,
@@ -231,13 +231,16 @@ succeed with MQTT/X10A recovered and invariant uptime/counters/heap. A second re
 failure blocks. Successful idle fetch afterward must not be described as Weather TLS success under
 load. Cross-subsystem streamed snapshots require later owner evidence, never assumed simultaneity.
 
-The firmware starts no Weather fetch before SNTP sets its clock. A pressure run that requires Weather
-therefore first waits, with its probes running but before the excused TLS window, while the board
-reports `ntp.synced: false` and until its Weather client is idle, at most `CLOCK_SYNC_WAIT_MAX_S`.
-The three-minute pressure window is extended by that wait, and the sample minima scale with it. The
-journaled pressure sample records the wait as `clock_wait_s`. During the wait every refusal and MQTT
-gap still counts. A clock still unsynchronized at the bound blocks with its own message. Without the
-board's report the gate does not wait.
+The firmware starts no Weather fetch before SNTP sets its clock. A pressure run that requires
+Weather therefore first waits, with its probes running but before the gate's own
+Weather-refresh/manifest-TLS window, while the board reports `ntp.synced: false` and until its
+Weather client is idle, at most `CLOCK_SYNC_WAIT_MAX_S`. The three-minute pressure window is
+extended by that wait, and the sample minima scale with it; absolute allowances such as the three
+X10A timeouts do not. The stress receipt records the wait as `clock_wait_s`. Refusals and MQTT gaps
+during the wait are judged as outside that window, and a reboot or allocation failure ends it at
+once. A clock still unsynchronized at the bound blocks with its own message. Without the board's
+report the gate does not wait for the clock. After such a wait the gate's TLS runs after the
+firmware's probation commit; the production canary claims no probation coverage.
 
 The gate observes transfer status at a bounded 2 Hz with fixed-size reads and a one-second request
 budget. Only read-only GETs interrupted by reboot are sampled again; malformed complete replies
