@@ -239,11 +239,13 @@ inline const char* homehub_concept_for(uint16_t offset, bool quiet_activity = tr
 
 // The concept an X10A row carries, or nullptr. TRENDED rows resolve through trend_row_matches() —
 // the SAME predicate the trend rings use, so a row pairs here exactly when it is the row the trend
-// buffers. STATES resolve on their own (reg, offset, conv) triple. Never keyed on the label (see the
-// header note).
+// buffers. STATES resolve on their own (reg, offset, conv) triple. Never keyed on the label (see
+// the header note). The high-side trend is left out: which row it buffers depends on the whole
+// profile (trend_select_high_side), and one row alone cannot say. It has no HomeHub counterpart
+// either.
 inline const char* x10a_concept_for(unsigned reg, unsigned off, const char* unit, int conv) {
     for (const auto& d : TRENDS)
-        if (trend_row_matches(d, reg, off, unit, conv)) return d.id;
+        if (!d.high_side && trend_row_matches(d, reg, off, unit, conv)) return d.id;
     for (const auto& s : HOMEHUB_STATES)
         if (s.reg == reg && s.off == off && s.conv == static_cast<unsigned>(conv)) return s.concept_id;
     return nullptr;

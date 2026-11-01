@@ -451,13 +451,19 @@ inline constexpr double TEMP_MAX_C = 200.0;
 //
 // KNOWN GAP, deliberately left rather than papered over: 16 of the 24 "Refrigerant pressure sensor"
 // rows (and one "Pressure sensor") sit on 0x62 with NO 405 twin, so neither signal reaches them and
-// they still publish a 0.0 bar. Closing that would mean keying on the label, which is the one thing
-// this must not do. Those rows are no worse off than before this filter existed, and the
-// catalog-wide test pins both the coverage and — the direction that actually matters — that no
-// water-pressure row is ever caught by either signal. The structural half is shared with
-// feature_gate.hpp.  Keeping the page/twin decision here avoids the future inference gate growing a
-// second, label-based definition of "refrigerant pressure" and accidentally accepting the hydronic
-// Water pressure row merely because both use dataType 2 (bar).
+// they still publish a 0.0 bar. On the families documented so far the missing twin marks a unit
+// with no indoor refrigerant sensor: the EPRA D hydrosplit and the ERLA D split each carry one
+// refrigerant transducer, S1NPH, on the outdoor gas line, and their indoor units list none (Daikin
+// installer reference guides 4P644738-1D §16.2-16.3 and 4P643604-1C §17.2-17.3), while the
+// documented Altherma 3 R units, which are twinned, carry theirs indoors (B1PR/B2PR). The
+// high-side trend and the refrigerant service never read a twinless row (logic/history.hpp).
+// Accepting one here would mean keying on the label, which is the one thing this must not do. Those
+// rows are no worse off than before this filter existed, and the catalog-wide test pins both the
+// coverage and — the direction that actually matters — that no water-pressure row is ever caught by
+// either signal. The structural half is shared with feature_gate.hpp. Keeping the page/twin
+// decision here avoids the future inference gate growing a second, label-based definition of
+// "refrigerant pressure" and accidentally accepting the hydronic Water pressure row merely because
+// both use dataType 2 (bar).
 inline bool is_refrigerant_pressure_structure(const ValueDef& def, bool has_saturation_twin) {
     if (def.type != 2) return false;
     if (def.reg == 0x20 || def.reg == 0x21 || def.reg == 0x50 || def.reg == 0xA0 || def.reg == 0xA1)

@@ -995,6 +995,11 @@ inline uint32_t history_x10a_series_id(const TrendDef& d) {
     crc          = history_fp_u32(crc, d.off);
     crc          = history_fp_str(crc, d.unit);
     crc          = history_fp_u32(crc, static_cast<uint32_t>(d.conv));
+    // A high-side trend picks its row per profile (trend_select_high_side), so its samples are not
+    // the samples a plain locator series at the same coordinates stored: on a twinless profile the
+    // locator row was the hydronic 0x62/15 reading, the high side is outdoor 0x20/12. Folded in
+    // only when set, so every other series keeps its id and returns from the journal.
+    if (d.high_side) crc = history_fp_u32(crc, 0x48494748u); // "HIGH"
     return history_series_id_end(crc);
 }
 
