@@ -19224,8 +19224,9 @@ static void test_metric_identity() {
 //
 // The property actually wanted is that register-equivalent profiles agree on what they publish —
 // then a tie-break can never move an identifier. Measured over the detectable catalog: TWELVE
-// equivalence classes exist and, since legacy-230 A's fan step was closed by
-// logic/label_override.hpp, FIVE still violate it — so this is a class of hazard, not one instance.
+// equivalence classes exist and, since legacy-230 A's fan step and the Monobloc CA's unpaired
+// pressure were closed by logic/label_override.hpp, FOUR still violate it — so this is a class of
+// hazard, not one instance.
 // They are not all defects, and the difference is a judgement rather than something a test can
 // settle:
 //   • legacy-230 A's fan step was the "simply false" kind — one spelling asserted a rate, the other
@@ -19280,12 +19281,8 @@ static void test_tie_break_identity() {
         "outdoor_sensors_heat_exchanger_mid_temp_r5t",
         "outdoor_sensors_liquid_pipe_temp_r6t",
         "outdoor_sensors_liquid_temperature_r3t",
-        "outdoor_sensors_low_pressure",
-        "outdoor_sensors_low_pressure_t",
         "outdoor_sensors_o_u_heat_exch_temp",
         "outdoor_sensors_o_u_heat_exch_temp_r4t",
-        "outdoor_sensors_pressure",
-        "outdoor_sensors_pressure_t",
         "outdoor_sensors_suction_pipe_temp",
         "outdoor_sensors_suction_pipe_temp_r3t",
         "outdoor_state_target_discharge_temp",
@@ -19374,10 +19371,11 @@ static void test_tie_break_identity() {
 //     than the row tables. So a tie can hold between profiles that are NOT register-equivalent (98
 //     of 152 measured ties, row multisets up to 8 rows apart), and the register-equivalence set
 //     misses 32 of the identifiers a tie-break can really move;
-//   • and conversely 2 identifiers (`outdoor_sensors_low_pressure{,_t}`) diverge between
-//     register-equivalent profiles yet are NOT reachable, because a tighter kW class always wins on
-//     criterion (3) before the tie-break is consulted. A gate that only measured reachability would
-//     call that pair safe while a catalog edit could still expose it.
+//   • and conversely an identifier can diverge between register-equivalent profiles yet NOT be
+//     reachable, because a tighter kW class always wins on criterion (3) before the tie-break is
+//     consulted. The Monobloc CA's `outdoor_sensors_low_pressure{,_t}` were such a pair until
+//     logic/label_override.hpp made that class agree. A gate that only measured reachability would
+//     call such a pair safe while a catalog edit could still expose it.
 //
 // The sweep below is every fingerprint a real unit can present: each distinct page mask the catalog
 // carries (plus the live reference unit's 0x1bff), crossed with the capacity in 0.5 kW steps, in
@@ -21039,8 +21037,7 @@ static void test_instrument_registry() {
         {"high_pressure", 0x20, 12, "High Pressure", true, 22},
         {"high_pressure", 0x20, 12, "INV fin temp.", false, 2},
         {"low_pressure", 0x20, 14, "Low Pressure", true, 22},
-        {"low_pressure", 0x20, 14, "Low Pressure", false, 1}, // Monobloc CA: no 0x20/12 pressure
-        {"low_pressure", 0x20, 14, "Pressure", false, 10},
+        {"low_pressure", 0x20, 14, "Pressure", false, 11}, // incl. the Monobloc CA's relabelled row
         {"low_pressure", 0x20, 14, "Pressure sensor", false, 6},
         {"inverter_primary_current", 0x21, 0, "INV primary current (A)", true, 39},
         {"ct_l1", 0x63, 14, "Current measured by CT sensor of L1", true, 20},
@@ -21259,9 +21256,10 @@ static void test_instrument_registry() {
         CHECK(svc.eev_command == is_supported(Instrument::ExpansionValve));
         CHECK(svc.low_pressure == is_supported(Instrument::LowPressure));
         if (svc.outdoor_second_pressure && !svc.low_pressure) {
-            // The profile's only outdoor refrigerant-pressure row: 16 unsided labels and the
-            // Monobloc CA's "Low Pressure". Where it would be the service's only pressure input,
-            // the service is unsupported instead of publishing it under the low side's name.
+            // The profile's only outdoor refrigerant-pressure row: 17 unsided labels, the Monobloc
+            // CA's relabelled "Low Pressure" among them. Where it would be the service's only
+            // pressure input, the service is unsupported instead of publishing it under the low
+            // side's name.
             unpaired_pressure++;
             RefrigerantServiceCoverage former = svc;
             former.low_pressure               = true;
@@ -24599,7 +24597,8 @@ static void test_outdoor_hx_profile_scale() {
     CHECK(logic::adjudicated(renamed, proven).conv == 119);
     // Real catalog self-retirement pin: the proven profile and its known runtime representative
     // change one row each. Identical coordinates on other profiles do not inherit this evidence.
-    size_t changes = 0;
+    // The only other profile-scoped rewrite is the Monobloc CA's label pair (test_label_override).
+    size_t changes = 0, relabels = 0;
     for (const auto& profile : def::profiles) {
         const auto view = def::resolved(profile);
         CHECK(view.profile_id == profile.id);
@@ -24608,7 +24607,13 @@ static void test_outdoor_hx_profile_scale() {
             const auto scoped   = logic::adjudicated(view, i);
             CHECK(scoped.reg == baseline.reg && scoped.offset == baseline.offset &&
                   scoped.size == baseline.size && scoped.type == baseline.type &&
-                  scoped.label == baseline.label && scoped.no_publish == baseline.no_publish);
+                  scoped.no_publish == baseline.no_publish);
+            if (scoped.label != baseline.label) {
+                ++relabels;
+                CHECK(std::strcmp(profile.id, "altherma_monobloc_ca_05_07kw") == 0 &&
+                      baseline.reg == 0x20 && baseline.offset == 14 &&
+                      scoped.conv == baseline.conv);
+            }
             if (scoped.conv != baseline.conv) {
                 ++changes;
                 CHECK(std::strcmp(profile.id, proven) == 0 ||
@@ -24620,6 +24625,7 @@ static void test_outdoor_hx_profile_scale() {
         }
     }
     CHECK(changes == 2);
+    CHECK(relabels == 2);
     const uint8_t bytes[][2] = {{0x80, 0xFF}, {0x00, 0x01}, {0x00, 0xFA}, {0x80, 0x17}};
     const double  expected[] = {-0.5, 1.0, -6.0, 23.5};
     for (size_t i = 0; i < 4; ++i) {
@@ -24720,7 +24726,7 @@ static void test_label_override() {
     CHECK(logic::label_str_eq(logic::effective_label(0x31, 1, 211, "Fan 1 (10 rpm)"),
                               "Fan 1 (10 rpm)")); // wrong page: no match
     CHECK(logic::label_str_eq(logic::effective_label(0x30, 1, 211, "Fan 1 (10 rpm)"),
-                              "Fan 1 (step)")); // THE entry
+                              "Fan 1 (step)")); // the catalog-wide fan entry
 
     // The corrected row publishes as actuators_fan_1_step — one identifier, two surfaces
     // (legacy-221): the group-scoped HA entity id AND the un-grouped state key / VictoriaMetrics
@@ -24733,8 +24739,8 @@ static void test_label_override() {
     // SELF-RETIRE PIN, exactly as test_conv_override() pins conv 114's 44 rows. The GENERATED
     // tables still carry the wrong label on precisely FOUR profiles; the day gen_profiles.py emits
     // "Fan 1 (step)" this count hits 0, the override matches nothing and is dead code, and this
-    // CHECK trips — the signal to delete the label_override entry, this pin, and
-    // retract_relabeled_values.
+    // CHECK trips — the signal to delete the fan entry and this pin. The relabel half of
+    // mqtt_ha.cpp's retract_stale_values stays while any ledger entry remains.
     int raw_wrong = 0;
     for (const auto& p : def::profiles)
         for (size_t i = 0; i < p.count; i++) {
@@ -24744,6 +24750,61 @@ static void test_label_override() {
                 raw_wrong++;
         }
     CHECK(raw_wrong == 4);
+
+    // The profile-scoped pair: the Monobloc CA's unpaired 0x20/14 and its saturation twin. The
+    // coordinates and spelling alone, or another profile's id, leave the generated label, and so
+    // does a row without a label.
+    const char* const monobloc_ca = "altherma_monobloc_ca_05_07kw";
+    const char* const paired_erga = "altherma_erga_e_ehv_ehb_ehvz_e_ej_series_04_08kw";
+    CHECK(
+        logic::label_str_eq(logic::effective_label(0x20, 14, 105, "Low Pressure"), "Low Pressure"));
+    CHECK(logic::label_str_eq(logic::effective_label(0x20, 14, 105, "Low Pressure", paired_erga),
+                              "Low Pressure"));
+    CHECK(logic::label_str_eq(logic::effective_label(0x20, 14, 105, "Low Pressure", monobloc_ca),
+                              "Pressure"));
+    CHECK(logic::label_str_eq(logic::effective_label(0x20, 14, 405, "Low Pressure(T)", monobloc_ca),
+                              "Pressure(T)"));
+    CHECK(logic::label_str_eq(logic::effective_label(0x20, 12, 105, "Low Pressure", monobloc_ca),
+                              "Low Pressure")); // wrong offset: no match
+    CHECK(logic::label_str_eq(logic::effective_label(0x20, 14, 105, "Pressure", monobloc_ca),
+                              "Pressure")); // already neutral: no `from` match
+    CHECK(logic::effective_label(0x20, 14, 105, nullptr, monobloc_ca) == nullptr);
+    const ValueDef ca_low =
+        logic::adjudicated(ValueDef{0x20, 14, 105, 2, 2, "Low Pressure"}, monobloc_ca);
+    const ValueDef ca_low_t =
+        logic::adjudicated(ValueDef{0x20, 14, 405, 2, 1, "Low Pressure(T)"}, monobloc_ca);
+    CHECK(row_object_id(ca_low) == "outdoor_sensors_pressure");
+    CHECK(row_object_id(ca_low_t) == "outdoor_sensors_pressure_t");
+    CHECK(row_object_id(logic::adjudicated(ValueDef{0x20, 14, 105, 2, 2, "Low Pressure"})) ==
+          "outdoor_sensors_low_pressure");
+
+    // Against the real catalog: a "Low Pressure" 0x20/14 row keeps its label exactly where the
+    // profile carries the structural 0x20/12 partner, and every unpaired one is published under the
+    // neutral spelling. A new unpaired table fails here until its id joins the ledger; the day the
+    // generator stops emitting the unpaired "Low Pressure", the count pin trips and the two
+    // profile-scoped entries are to be deleted.
+    int unpaired_low = 0, unpaired_low_t = 0, paired_low = 0;
+    for (const auto& p : def::profiles) {
+        const logic::ProfileView view   = def::resolved(p);
+        const bool               paired = logic::instrument_outdoor_high_pressure(view);
+        for (size_t i = 0; i < view.count(); i++) {
+            const ValueDef& raw = view[i];
+            if (raw.reg != 0x20 || raw.offset != 14) continue;
+            const ValueDef pub = logic::adjudicated(view, i);
+            if (raw.conv == 105 && logic::label_str_eq(raw.label, "Low Pressure")) {
+                (paired ? paired_low : unpaired_low)++;
+                if (!logic::label_str_eq(pub.label, paired ? "Low Pressure" : "Pressure"))
+                    std::printf("label ledger: 0x20/14 on %s publishes \"%s\"\n", p.id, pub.label);
+                CHECK(logic::label_str_eq(pub.label, paired ? "Low Pressure" : "Pressure"));
+            }
+            if (raw.conv == 405 && logic::label_str_eq(raw.label, "Low Pressure(T)")) {
+                if (!paired) unpaired_low_t++;
+                CHECK(logic::label_str_eq(pub.label, paired ? "Low Pressure(T)" : "Pressure(T)"));
+            }
+        }
+    }
+    CHECK(paired_low == 23);
+    CHECK(unpaired_low == 1 && unpaired_low_t == 1);
 }
 
 // ── The availability ledger (logic/availability.hpp) — legacy-209 defects 1, 2 and 6

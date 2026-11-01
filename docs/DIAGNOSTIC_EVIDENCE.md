@@ -1,6 +1,6 @@
 # Evidence and limits of the plant diagnostics
 
-<!-- diagnostic-evidence-contract: b53273cb68e94c0ff64969360d0e102b927597b1e923c1c5df975639d2eed171 -->
+<!-- diagnostic-evidence-contract: a6ed42d4f1aea101daaebe0c8fe3672754d520d88c216227820c81566bc86057 -->
 
 For every row in the **Plant diagnostics · 24 h** card, this page answers four questions:
 
@@ -105,8 +105,10 @@ pair: a 0x20/14 refrigerant pressure beside a structural 0x20/12 pressure. An un
 is the profile's only outdoor refrigerant-pressure row, and its label is no evidence of a side. The
 observation reads it as neither side, so a profile without another structural pressure is
 `unsupported_profile`.
-Other surfaces still show that row under its catalog label. The pair is a fact of the generated
-tables, not of measured hardware: as for 0x20/12 alone, whether real units of the paired profiles
+`/values`, MQTT and Home Assistant publish that row under its catalog label, apart from the one
+relabel described under [register 0x20](REGISTERS.md#register-0x20); the register picker always
+lists the catalog label. The pair is a fact of the generated tables, not of
+measured hardware: as for 0x20/12 alone, whether real units of the paired profiles
 populate 0x20/14 while running is unverified, and two catalogs for the same ERGA04-08D outdoor
 family disagree: `altherma_erga_d_ehv_ehb_ehvz_da_series_04_08kw` has a heat-sink temperature and an
 unpaired "Pressure sensor", `altherma_erga_d_ehv_ehb_ehvz_dj_series_04_08_kw` a "High Pressure" and
@@ -117,9 +119,10 @@ one 300 ms UART timeout per publishable register page in the active profile. It 
 settling time. The firmware publishes continuous seconds, sample count, limitations, and min/mean/max
 figures; it has no `complete`, `OK`, `ready`, charge, or full-load state. `/status` explicitly reports
 `load_proven:false` and `eev_feedback:false`. The project reads the Monobloc CA profile
-(`altherma_monobloc_ca_05_07kw`) as those monobloc units and its only outdoor pressure row, labelled
-"Low Pressure", as S1NPH. In heating the plate heat exchanger condenses, so that row would carry the
-high side. The other unpaired profiles label the row "Pressure" or "Pressure sensor".
+(`altherma_monobloc_ca_05_07kw`) as those monobloc units, and its only outdoor pressure row as
+S1NPH. The catalog labels that row "Low Pressure"; it is published as "Pressure". In heating the
+plate heat exchanger condenses, so that row would carry the high side. The other unpaired catalogs
+spell the row "Pressure" or "Pressure sensor".
 
 **Not established:** Hot-gas temperature, pressure, targets, and EEV commands vary with exact model,
 mode, compressor speed, load, and outdoor conditions. A stable-looking window does not establish

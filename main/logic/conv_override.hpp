@@ -142,7 +142,7 @@ inline constexpr bool outdoor_hx_q8_8(const ValueDef& d, const char* profile_id)
 inline constexpr ValueDef adjudicated(const ValueDef& d, const char* profile_id = nullptr) {
     ValueDef out = d;
     out.conv     = outdoor_hx_q8_8(d, profile_id) ? 103 : effective_conv(d.reg, d.offset, d.conv);
-    out.label = effective_label(d.reg, d.offset, d.conv, d.label);
+    out.label    = effective_label(d.reg, d.offset, d.conv, d.label, profile_id);
     return out;
 }
 
