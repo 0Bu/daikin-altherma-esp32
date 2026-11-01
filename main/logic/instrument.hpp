@@ -167,7 +167,7 @@ inline constexpr InstrumentLocator INSTRUMENT_LOCATORS[] = {
     {Instrument::HighPressure, 0x20, 12, 105, InstrumentIdentity::RefrigerantPressure, nullptr,
      nullptr},
     // Without a 0x20/12 pressure, 0x20/14 is the profile's only outdoor refrigerant-pressure row
-    // and its label is no evidence of a side, "Low Pressure" on the Monobloc CA included
+    // and its label is no evidence of a side, the Monobloc CA's catalog "Low Pressure" included
     // (docs/DIAGNOSTIC_EVIDENCE.md#refrigerant-service-observation). Only the outdoor pair names a
     // low side.
     {Instrument::LowPressure, 0x20, 14, 105, InstrumentIdentity::LowSidePressure, nullptr, nullptr},

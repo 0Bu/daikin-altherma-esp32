@@ -872,7 +872,7 @@ int main(int argc, char** argv) {
             // raw conv: conv_override is a decode decision they must see the intrinsic semantics of,
             // exactly as they always have. Each check thus resolves through the override that governs
             // its own subject.
-            d.label = logic::effective_label(d.reg, d.offset, d.conv, d.label);
+            d.label = logic::effective_label(d.reg, d.offset, d.conv, d.label, p.id);
             rows.push_back({p.id, d, norm_label(d.label)});
         }
     }

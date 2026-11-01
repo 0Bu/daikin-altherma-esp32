@@ -308,6 +308,7 @@ latest reset remain unknown. Preserve private memory evidence before dismissal; 
 | Custom-base unique IDs / lossy base slugs | Every custom base is encoded exactly; IDs separate node and entity with `__`. Export customizations, identify the exact former configs, remove only abandoned IDs and reconcile HA references/history. Default and bench entity IDs remain unchanged. |
 | Three-byte MAC aliases / MAC-era discovery | Complete-MAC hardware IDs replace ambiguous aliases without advertising the old alias. Owner reconciliation is required for old discovery or already merged registry devices; do not delete a short-MAC namespace that another board may own. |
 | Current-namespace ungrouped X10A discovery | Confirmed deletions precede replacements; keep HA connected. Unique-id customizations do not migrate automatically. |
+| Relabelled X10A rows (`main/logic/label_override.hpp`) | The old current-namespace discovery configs are deleted before the replacements. Entity id, state key and metric series follow the new label; history does not carry over. Update consumers that use the old name. |
 | Textual bit-flag sensors | Now `binary_sensor`; update domain references. Old-domain history does not migrate automatically. |
 | Device Time, WiFi Quality, Last Reset Reason | Retired discovery removed; use `/status.ntp`, WiFi Signal and Reset Reason respectively. `time` / `wifi_quality_pct` heartbeat fields are gone. |
 | Non-hybrid `0x64` boiler/hybrid entities | Detect-only rows retracted; use **LW setpoint (main)** for the legitimate heating target. |

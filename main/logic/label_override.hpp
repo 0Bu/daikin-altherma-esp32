@@ -22,7 +22,7 @@
 // suffix (logic/discovery.hpp row_object_id/object_id), so the word inside it is a PUBLISHED CLAIM
 // about the quantity — test_metric_identity() (legacy-217) and test_tie_break_identity()
 // (legacy-230 B) both gate on it. That is also why a rename is a MIGRATION, not a free edit: it
-// retires the old series and starts the new one at zero (mqtt_ha.cpp's retract_relabeled_values
+// retires the old series and starts the new one at zero (mqtt_ha.cpp's retract_stale_values
 // deletes the stale HA entity on upgrade; a VictoriaMetrics series cannot be carried across a
 // rename by any firmware action).
 //
@@ -31,7 +31,7 @@
 // merely reads nicer. This is a weaker claim than a conv_override — it changes the field's NAME,
 // not its decoded value — but it is still a claim about the wire, so it is keyed the same way.
 //
-// ── The one entry: Fan 1 step (0x30/1, conv 211), "Fan 1 (10 rpm)" -> "Fan 1 (step)" ─────────────
+// ── The catalog-wide entry: Fan 1 step (0x30/1, conv 211), "Fan 1 (10 rpm)" -> "Fan 1 (step)" ────
 //
 // legacy-230 A: page 0x30 offset 1 (conv 211) reads "Fan 1 (10 rpm)" on four profiles
 // (altherma_erga_d_ehv_ehb_ehvz_dj_series_04_08_kw, altherma_hpsu6_ultra,
@@ -56,6 +56,27 @@
 // nobody established. The moment gen_profiles.py emits "Fan 1 (step)" the `from` label matches
 // nothing, this becomes dead code, and test_label_override()'s raw-count pin (== 4 today) trips to
 // force its deletion — the self-retiring guarantee conv_override.hpp's own count pin gives.
+//
+// ── The profile-scoped pair: the Monobloc CA's unpaired 0x20/14, "Low Pressure" -> "Pressure" ────
+//
+// The firmware reads 0x20/14 as the low side only beside a structural 0x20/12 refrigerant pressure
+// (the outdoor pair rule of logic/refrigerant_service.hpp and logic/instrument.hpp). Without that
+// partner it is the profile's only outdoor pressure row and its side is not established; on the
+// Monobloc CA alone the project reads it as S1NPH, which would carry the high side in heating
+// (docs/DIAGNOSTIC_EVIDENCE.md). Of the 24 generated tables that spell the row "Low Pressure", 23
+// carry the partner. The Monobloc CA (0x20/12 is "Heat sink temp." there) does not, and its two
+// register-identical tables, altherma_bizone_cb_04_08kw and altherma_lt_ca_cb_04_08kw, already
+// spell the row and its conv-405 saturation twin "Pressure" and "Pressure(T)". Like the fan step,
+// the identifier was therefore in test_tie_break_identity's catalog set, though no real
+// fingerprint reaches that tie (test_tie_break_reach). The pair joins its siblings'
+// spelling, which the other unpaired "Pressure" tables share — again not a new label.
+//
+// WHY A PROFILE KEY HERE — the (reg, offset, conv, from) key is right on the 23 paired tables, so
+// what separates the wrong row is its own table, not its coordinates. The id is not a free claim:
+// test_label_override() derives the unpaired set from the real catalog, requires it to be exactly
+// these entries and pins the 23/1 split. A caller without a profile id gets the generated label,
+// as the outdoor_hx_q8_8 converter rule in conv_override.hpp fails closed without one; every
+// publishing caller passes one.
 #include "value_def.hpp"
 
 #include <cstddef>
@@ -75,22 +96,31 @@ struct LabelOverride {
     const char* from;   // the label the generated table carries
     const char* to;     // the label the row must be published under
     const char* why;    // evidence, in one line; the header block above carries the full argument
+    const char* profile = nullptr; // nullptr: every profile; otherwise only this exact profile id
 };
 
 inline constexpr LabelOverride LABEL_OVERRIDES[] = {
     {0x30, 1, 211, "Fan 1 (10 rpm)", "Fan 1 (step)",
-     "#230A: conv 211 is a step index (REGISTERS.md §3.3, 0=stopped); 22 profiles say (step), 4 a rate"},
+     "#230A: conv 211 is a step index (REGISTERS.md §3.3, 0=stopped); "
+     "22 profiles say (step), 4 a rate"},
+    {0x20, 14, 105, "Low Pressure", "Pressure",
+     "no 0x20/12 partner, side not established; its 2 register-identical tables say Pressure",
+     "altherma_monobloc_ca_05_07kw"},
+    {0x20, 14, 405, "Low Pressure(T)", "Pressure(T)",
+     "the saturation twin of the unpaired 0x20/14 row above", "altherma_monobloc_ca_05_07kw"},
 };
 
 inline constexpr size_t LABEL_OVERRIDE_COUNT = sizeof(LABEL_OVERRIDES) / sizeof(LABEL_OVERRIDES[0]);
 
 // The label this row must be published under. Identity for every row the ledger is silent about,
-// which is all but four rows of the catalog.
-inline constexpr const char* effective_label(uint8_t reg, uint8_t offset, int conv, const char* label) {
+// which is all but six rows of the catalog. A profile-scoped entry needs the row's profile id.
+inline constexpr const char* effective_label(uint8_t reg, uint8_t offset, int conv,
+                                             const char* label, const char* profile_id = nullptr) {
     for (size_t i = 0; i < LABEL_OVERRIDE_COUNT; i++) {
         const LabelOverride& o = LABEL_OVERRIDES[i];
-        if (o.reg == reg && o.offset == offset && o.conv == conv && label_str_eq(label, o.from))
-            return o.to;
+        if (o.reg != reg || o.offset != offset || o.conv != conv || !label) continue;
+        if (o.profile && !(profile_id && label_str_eq(profile_id, o.profile))) continue;
+        if (label_str_eq(label, o.from)) return o.to;
     }
     return label;
 }

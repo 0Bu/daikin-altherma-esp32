@@ -416,6 +416,13 @@ the I/U capacity code (`0x60` offset 6).
 | 14 | 2 | 105 |  | bar | Low Pressure |
 | 14 | 2 | 405 |  | °C | Low Pressure(T) |
 
+> **Offset 14 is read as the low side only beside a pressure at offset 12** (the
+> [outdoor pair rule](DIAGNOSTIC_EVIDENCE.md#refrigerant-service-observation)); without that partner
+> its label is no evidence of a side, and the firmware reads it as neither side. The Monobloc CA is
+> the one profile whose catalog spells such an unpaired row "Low Pressure".
+> `logic/label_override.hpp` publishes it and its saturation twin as "Pressure" and "Pressure(T)",
+> the spelling of its two register-identical tables.
+
 #### Register `0x21`
 
 | Off | Len | Conv | Bit | Type | Value |
