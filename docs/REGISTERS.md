@@ -693,6 +693,19 @@ and an absent outdoor unit remains absent.
 | 0 | 2 | 105 |  | °C | [EKMIK] Bizone kit mixed leaving water temperature R1T |
 | 0 | 1 | 101 |  |  | [EKMIK] Bizone kit mix valve position M1S |
 
+> **Nothing at offset 0 is published (`AvailabilityPolicy::Unproven`).** Every hydronic page opens
+> with the enable flag and the unit address, and on pages `0x60`–`0x64` no measurement row in the
+> profile tables starts at byte 0 or 1. On this page seven tables put accessory rows at offset 0: the
+> EBLA/EDLA D 9–16 kW monobloc and the four EPRA tables stack two or three on that byte, and the two
+> ERLA D tables put their mixed water there, beside a valve position the vendor catalog lists on the
+> same byte. Tables that give these rows distinct offsets use 2 (outlet), 4 (mixed water) and 6
+> (valve position). No `0x65` reply has been captured, so the layout of the seven is unknown. The
+> firmware withholds every offset-0 row and keeps the distinct-offset rows. The ERLA D outlet at
+> byte 2 stays published although their catalog files also list the address across bytes 1–2: on
+> every other hydronic page the address is one byte. A raw `0x65` reply from
+> one of those units settles it: **Settings → Protocol → Protocol diagnostics** or `POST /hp/query`
+> ([API.md](API.md#catalog-probes-and-evidence)) still offers those rows.
+
 ### Protocol S Registers (UNVERIFIED)
 
 > [!WARNING]

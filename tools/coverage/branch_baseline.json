@@ -6,6 +6,20 @@
         "gcc-13-linux-ubuntu24": "g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0 via CI-pinned ESP-IDF v6.1 container, aarch64",
         "gcc-15-linux-ubuntu26": "g++ (Ubuntu 15.2.0-16ubuntu1) 15.2.0, Ubuntu 26.04 Docker, aarch64"
       },
+      "hosted_confirmation": "Hosted confirmation pending: only availability.hpp uses the measured local GCC 15 aarch64 inventory as the gcc-15-github-linux-ubuntu26 candidate. No hosted execution is claimed; authoritative GitHub CI confirmation is required before merge. All other hosted inventories are unchanged.",
+      "runner": "scripts/run-mock-tests.sh --coverage",
+      "scope": "Page-0x65 header rules: two Unproven ledger entries withhold every row at 0x65 offset 0 (conv 105 and conv 101). The unit checks and the catalog sweep now reach the Unproven outcome of value_available() and row_publishable(), which no ledger entry reached before: 76/81 to 77/81 (Clang), 83/87 to 85/87 (GCC 13 and GCC 15). No outcome is lost; every other header inventory, every historical ratio and the 95-percent executable-line floor are unchanged.",
+      "validation_boundary": "Clang, GCC 13 and GCC 15 measured the same source and test revision.",
+      "source": "main/logic/availability.hpp",
+      "source_sha256": "7b20cde534d90e110c9078a09230921e74415950e01138588fcc26cdce6eb837",
+      "test_source_sha256": "5b9807a105415df6abd59fbbf20c9c99dd0a2cc7c3131a582662afe4637162f7"
+    },
+    {
+      "compilers": {
+        "clang-17-darwin": "Apple clang version 17.0.0 (clang-1700.6.4.2), arm64",
+        "gcc-13-linux-ubuntu24": "g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0 via CI-pinned ESP-IDF v6.1 container, aarch64",
+        "gcc-15-linux-ubuntu26": "g++ (Ubuntu 15.2.0-16ubuntu1) 15.2.0, Ubuntu 26.04 Docker, aarch64"
+      },
       "hosted_confirmation": "Hosted confirmation pending: only label_override.hpp uses the measured local GCC 15 aarch64 inventory as the gcc-15-github-linux-ubuntu26 candidate. No hosted execution is claimed; authoritative GitHub CI confirmation is required before merge. All other hosted inventories are unchanged.",
       "runner": "scripts/run-mock-tests.sh --coverage",
       "scope": "Profile-scoped label pair: effective_label gains an optional profile id, a null-label guard and a profile key on two entries (the Monobloc CA's unpaired 0x20/14 and its saturation twin). Unit checks take each new outcome: no id, another id, the scoped id, a wrong offset, an already neutral label and a null label; the catalog sweep binds the entries to the profiles without a 0x20/12 partner. Every added outcome is taken: 13/14 to 21/22 (Clang), 16/16 to 24/24 (GCC 13 and GCC 15). Every other header inventory, every historical ratio and the 95-percent executable-line floor are unchanged.",
@@ -987,7 +1001,7 @@
   "profiles": {
     "clang-17-darwin": {
       "main/logic/availability.hpp": {
-        "taken": 76,
+        "taken": 77,
         "outcomes": 81
       },
       "main/logic/binary_semantics.hpp": {
@@ -1409,7 +1423,7 @@
     },
     "gcc-13-linux-ubuntu24": {
       "main/logic/availability.hpp": {
-        "taken": 83,
+        "taken": 85,
         "outcomes": 87
       },
       "main/logic/binary_semantics.hpp": {
@@ -1831,7 +1845,7 @@
     },
     "gcc-15-github-linux-ubuntu26": {
       "main/logic/availability.hpp": {
-        "taken": 83,
+        "taken": 85,
         "outcomes": 87
       },
       "main/logic/binary_semantics.hpp": {
@@ -2253,7 +2267,7 @@
     },
     "gcc-15-linux-ubuntu26": {
       "main/logic/availability.hpp": {
-        "taken": 83,
+        "taken": 85,
         "outcomes": 87
       },
       "main/logic/binary_semantics.hpp": {

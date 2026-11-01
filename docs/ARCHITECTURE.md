@@ -88,9 +88,9 @@ is:
 - **Ambiguous**: two publishable rows are identified as it, or another quantity decodes the same
   bits.
 
-Table order never settles an Ambiguous instrument. Where 0x65/0 also decodes a hydro-split outlet
-temperature or a mix-valve position, the bizone kit's mixed water stays unusable until the catalog
-establishes which quantity is real. The host catalog test pins each state count and every label at
+Table order never settles an Ambiguous instrument. An Unproven row is Withheld and competes with
+nothing: the bizone kit's mixed water is Withheld at 0x65/0 and Supported at 0x65/4
+([register 0x65](REGISTERS.md#register-0x65)). The host catalog test pins each state count and every label at
 every locator's page/offset/converter key, accepted or rejected, with its profile count. It also
 binds the registry to the C++ checkup, trend, refrigerant-service and leaving/return-water
 selectors and names and counts their remaining differences; the browser's label patterns are not

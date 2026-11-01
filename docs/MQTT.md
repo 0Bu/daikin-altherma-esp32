@@ -312,6 +312,7 @@ latest reset remain unknown. Preserve private memory evidence before dismissal; 
 | Textual bit-flag sensors | Now `binary_sensor`; update domain references. Old-domain history does not migrate automatically. |
 | Device Time, WiFi Quality, Last Reset Reason | Retired discovery removed; use `/status.ntp`, WiFi Signal and Reset Reason respectively. `time` / `wifi_quality_pct` heartbeat fields are gone. |
 | Non-hybrid `0x64` boiler/hybrid entities | Detect-only rows retracted; use **LW setpoint (main)** for the legitimate heating target. |
+| `0x65` offset-0 mixing entities | Withheld on the seven profiles whose tables place them at byte 0; their discovery is retracted and their state keys are no longer published, without replacement ([register 0x65](REGISTERS.md#register-0x65)). Old history stays unverified. |
 | Old Target Evap. Temp. samples | Corrected converter keeps its id; pre-correction history remains wrong and must be excluded from comparisons. |
 
 The preserved default/bench discovery nodes can also contain a historical custom base that once

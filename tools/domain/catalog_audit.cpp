@@ -771,9 +771,11 @@ void check_semantics(const std::vector<Row>& rows, std::vector<Finding>& out) {
 // ── Check 6: OVERLAP — two rows fighting over the same wire bytes ─────────────────────────────
 // Two rows may share a field ON PURPOSE, and both legitimate shapes start at the SAME offset:
 //   • identical window — one field, two views (raw pressure + its saturation temperature);
-//   • nested window — mutually exclusive per-accessory variants of one field. The spec itself
-//     lists three of these at 0x65 off 0 (docs/REGISTERS.md:493-496): a 2-byte water temperature
-//     or a 1-byte bizone valve position, depending on what is installed.
+//   • nested window — rows the catalog stacks at one start, such as the 2-byte water temperatures
+//     and the 1-byte bizone valve position at 0x65 off 0 (docs/REGISTERS.md, register 0x65).
+//     Nesting is not proof of a legitimate variant: the catalog puts those rows on the page's
+//     enable-flag byte, and logic/availability.hpp withholds them. A nested window still never
+//     assembles one value from two fields.
 // A STRADDLING overlap — two windows starting at different offsets and colliding — has no
 // legitimate reading: one row is eating a neighbour's byte, so its value is assembled from two
 // unrelated fields and the neighbour's own value is gone. That is the expansion-valve/Fan-2 bug.

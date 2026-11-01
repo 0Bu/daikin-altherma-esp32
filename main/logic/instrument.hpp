@@ -151,8 +151,9 @@ inline constexpr InstrumentLocator INSTRUMENT_LOCATORS[] = {
     {Instrument::PumpRunning, 0x60, 12, 301, InstrumentIdentity::Coordinate, nullptr, nullptr},
     {Instrument::IndoorRefrigerantPressure, 0x62, 15, 105, InstrumentIdentity::RefrigerantPressure,
      nullptr, nullptr},
-    // The bizone kit's mixed leaving water sits at 0x65/0 on some profiles and at 0x65/4 on others;
-    // at 0x65/0 several profiles also decode a hydro-split outlet temperature from the same bytes.
+    // The bizone kit's mixed leaving water sits at 0x65/0 on some profiles and at 0x65/4 on others.
+    // Byte 0 is the page's enable-flag byte in the catalog, and availability.hpp holds every row
+    // there Unproven, so a copy at byte 0 is Withheld.
     {Instrument::MixedWaterEkmik, 0x65, 0, 105, InstrumentIdentity::LabelToken, "ekmik", nullptr},
     {Instrument::MixedWaterEkmik, 0x65, 4, 105, InstrumentIdentity::LabelToken, "ekmik", nullptr},
     {Instrument::CompressorRps, 0x30, 0, 152, InstrumentIdentity::Coordinate, nullptr, nullptr},
