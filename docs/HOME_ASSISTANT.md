@@ -73,7 +73,7 @@ Code** are separate entities. HA may choose or retain its own `entity_id`; inspe
 installation instead of constructing it from a sample name.
 
 The globally qualified names include Outdoor State/Hydronic **Error Code**, **Error Type** and
-**Thermostat ON/OFF**; Hybrid/Mixing **Mixed Water Temp.**; Outdoor Sensors/Hydronic State **Pressure
+**Thermostat ON/OFF**; Hybrid **Mixed Water Temp.**; Outdoor Sensors/Hydronic State **Pressure
 Sensor(T)**; and Outdoor State/Water Hx **Target Discharge Temp.** Which pairs exist depends on the
 profile. Qualified names remain stable even when only one member exists on that model.
 

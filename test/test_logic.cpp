@@ -1360,10 +1360,10 @@ static void test_convert() {
     CHECK(t312_checked >= 1);
 
     // Catalog guard (generalises legacy-37): within one register, no two rows may STRADDLE each
-    // other's bytes. Sharing a field on purpose is an idiom here (raw pressure + its saturation
-    // temp; the per-accessory 0x65 variants) and those windows start at the SAME offset. Two
-    // windows starting at DIFFERENT offsets and overlapping have no legitimate reading: one value
-    // is assembled from two unrelated fields and its neighbour's is lost.
+    // other's bytes. Sharing a field is an idiom here (raw pressure + its saturation temp; the
+    // 0x65 byte-0 stack the availability ledger withholds) and those windows start at the SAME
+    // offset. Two windows starting at DIFFERENT offsets and overlapping have no legitimate
+    // reading: one value is assembled from two unrelated fields and its neighbour's is lost.
     for (const auto& p : def::profiles)
         for (size_t i = 0; i < p.count; i++)
             for (size_t j = i + 1; j < p.count; j++) {
@@ -19026,7 +19026,6 @@ static void test_metric_identity() {
         "mains_current_mixed_water_temp_r7t",
         "mixing_ekmik_bizone_kit_mix_valve_position_m1s",
         "mixing_ekmik_bizone_kit_mixed_leaving_water_temperature_r1t",
-        "mixing_mixed_water_temp",
         "mixing_outlet_water_heat_exchanger_temp_hydro_split_model_dlwb2",
         "outdoor_aux_compressor_port_temperature",
         "outdoor_aux_expansion_valve_3_pls_ou_ii",
@@ -19119,7 +19118,7 @@ static void test_metric_identity() {
     for (const auto& p : def::profiles)
         for (size_t i = 0; i < p.count; i++) {
             const auto& v = p.values[i];
-            if (v.no_publish) continue; // detect-only: never announced, never a series
+            if (!row_publishable(v)) continue; // detect-only or Unproven: never a series
             // Through adjudicated(): the store is keyed on what the bridge PUBLISHES, and a label
             // override (logic/label_override.hpp, legacy-230 A) changes that word — so a row's
             // series suffix is its adjudicated label's slug, not the generator's.
@@ -19149,7 +19148,7 @@ static void test_metric_identity() {
     for (const auto& p : def::profiles)
         for (size_t i = 0; i < p.count; i++) {
             const auto& v = p.values[i];
-            if (v.no_publish) continue;
+            if (!row_publishable(v)) continue;
             CHECK(expected.count(row_object_id(logic::adjudicated(v, p.id))) == 1);
         }
 
@@ -19177,6 +19176,10 @@ static void test_metric_identity() {
         const auto                           view = def::resolved(p);
         for (size_t i = 0; i < view.count(); i++) {
             const auto& v = view[i];
+            // no_publish, NOT row_publishable(): the qualified names are a naming contract. The
+            // Unproven 0x65/0 "Mixed water temp." keeps `mixed_water_temp` qualified, so the
+            // published Hybrid row keeps its name (docs/HOME_ASSISTANT.md: qualified names stay
+            // stable when only one member exists).
             if (v.no_publish) continue;
             by_obj[object_id(v.label)].insert(v.reg);
         }
@@ -19273,8 +19276,6 @@ static void test_tie_break_identity() {
         "hydronic_temps_leaving_water_temp_before_buh_r1t",
         "mains_current_hpsu_mixed_leaving_water_temperature_after_the_tank_r7t_dlwa2",
         "mains_current_mixed_water_temp_r7t",
-        "mixing_ekmik_bizone_kit_mixed_leaving_water_temperature_r1t",
-        "mixing_mixed_water_temp",
         "outdoor_sensors_discharge_pipe_temp",
         "outdoor_sensors_discharge_pipe_temp_r2t",
         "outdoor_sensors_heat_exchanger_mid_temp",
@@ -19561,7 +19562,10 @@ static void test_tie_break_reach() {
         "mains_current_mixed_water_temp_r7t",
         "mixing_ekmik_bizone_kit_mix_valve_position_m1s",
         "mixing_ekmik_bizone_kit_mixed_leaving_water_temperature_r1t",
-        "mixing_mixed_water_temp",
+        // EPRA E ties ERRA E on every fingerprint, and the EPRA tables' byte-0 copy of this row is
+        // Unproven (logic/availability.hpp) while ERRA's at byte 2 publishes. Both winners used to
+        // publish the id from different bytes; now the tie decides whether it exists.
+        "mixing_outlet_water_heat_exchanger_temp_hydro_split_model_dlwb2",
         "outdoor_state_demand_signal",
         "outdoor_state_low_noise_control",
         "outdoor_state_oil_return_operation",
@@ -20818,15 +20822,16 @@ static void test_instrument_registry() {
     r = resolve(placeholder_then_live, 2, Instrument::LeavingWaterPreBuh);
     CHECK(r.state == InstrumentState::Supported && r.row == 1);
 
-    // Ambiguous: two rows carry it, or another quantity decodes the same bytes (the 0x65/0 shape).
+    // Ambiguous: two rows carry it, or another quantity decodes the same bytes. The fixtures sit at
+    // 0x65/4, where the availability ledger is silent; 0x65/0 itself is Unproven.
     const ValueDef duplicate[] = {r1t, {0x61, 2, 105, 2, 1, "Outlet Water Heat Exch. Temp. (R1T)"}};
     r                          = resolve(duplicate, 2, Instrument::LeavingWaterPreBuh);
     CHECK(r.state == InstrumentState::Ambiguous && r.row == -1);
-    const ValueDef ekmik{0x65, 0, 105,
+    const ValueDef ekmik{0x65, 4, 105,
                          2,    1, "[EKMIK] Bizone kit mixed leaving water temperature R1T"};
-    const ValueDef dlwb2{0x65, 0, 105,
+    const ValueDef dlwb2{0x65, 4, 105,
                          2,    1, "Outlet water heat exchanger temp (hydro split model) DLWB2"};
-    const ValueDef m1s{0x65, 0, 101, 1, -1, "[EKMIK] Bizone kit mix valve position M1S"};
+    const ValueDef m1s{0x65, 4, 101, 1, -1, "[EKMIK] Bizone kit mix valve position M1S"};
     const ValueDef ekmik_alone[] = {ekmik};
     CHECK(resolve(ekmik_alone, 1, Instrument::MixedWaterEkmik).state == InstrumentState::Supported);
     const ValueDef ekmik_dlwb2[] = {dlwb2, ekmik};
@@ -20836,15 +20841,24 @@ static void test_instrument_registry() {
     const ValueDef just_dlwb2[] = {dlwb2};
     CHECK(resolve(just_dlwb2, 1, Instrument::MixedWaterEkmik).state == InstrumentState::Absent);
     // A competitor that may not be published does not compete.
-    const ValueDef m1s_withheld{0x65, 0, 101, 1, -1, "[EKMIK] Bizone kit mix valve position M1S",
+    const ValueDef m1s_withheld{0x65, 4, 101, 1, -1, "[EKMIK] Bizone kit mix valve position M1S",
                                 true};
     const ValueDef ekmik_hidden_m1s[] = {ekmik, m1s_withheld};
     CHECK(resolve(ekmik_hidden_m1s, 2, Instrument::MixedWaterEkmik).state ==
           InstrumentState::Supported);
-    // Two locators of one instrument matching on one profile are Ambiguous too, not a preference.
-    const ValueDef ekmik_twice[] = {
-        ekmik, {0x65, 4, 105, 2, 1, "[EKMIK] Bizone kit mixed leaving water temperature R1T"}};
-    CHECK(resolve(ekmik_twice, 2, Instrument::MixedWaterEkmik).state == InstrumentState::Ambiguous);
+    // Byte 0 is the instrument's other locator, but the ledger holds it Unproven: a copy there is
+    // Withheld on its own and never competes with byte 4. Two publishable matches stay Ambiguous.
+    const ValueDef ekmik_0{0x65, 0, 105,
+                           2,    1, "[EKMIK] Bizone kit mixed leaving water temperature R1T"};
+    const ValueDef ekmik_0_alone[] = {ekmik_0};
+    CHECK(resolve(ekmik_0_alone, 1, Instrument::MixedWaterEkmik).state ==
+          InstrumentState::Withheld);
+    const ValueDef ekmik_twice[] = {ekmik_0, ekmik};
+    r                            = resolve(ekmik_twice, 2, Instrument::MixedWaterEkmik);
+    CHECK(r.state == InstrumentState::Supported && r.row == 1);
+    const ValueDef ekmik_same_twice[] = {ekmik, ekmik};
+    CHECK(resolve(ekmik_same_twice, 2, Instrument::MixedWaterEkmik).state ==
+          InstrumentState::Ambiguous);
 
     // Flags on other bits of the same byte are separate instruments, not competitors.
     const ValueDef flags[] = {bsh, buh1, {0x60, 12, 303, 1, -1, "BUH Step2"}};
@@ -20962,8 +20976,8 @@ static void test_instrument_registry() {
     };
     static const Partial kPartial[] = {
         {Instrument::IndoorRefrigerantPressure, 7, 0}, // 0x62/15 with its saturation twin
-        {Instrument::MixedWaterEkmik, 4, 5}, // 0x65/0 shared with DLWB2 on five, also M1S on four
-        {Instrument::CompressorRps, 26, 0},  // 13 profiles do not read page 0x30
+        {Instrument::MixedWaterEkmik, 3, 0},           // 0x65/4; the byte-0 copy is Unproven on six
+        {Instrument::CompressorRps, 26, 0},            // 13 profiles do not read page 0x30
         {Instrument::ExpansionValve, 26, 0},
         {Instrument::OutdoorHeatExchanger, 35, 0},     // ground source: two-phase thermistor
         {Instrument::RefrigerantLiquidOutdoor, 35, 0}, // ground source: leaving brine
@@ -21160,7 +21174,7 @@ static void test_instrument_registry() {
             if (res[k].state == InstrumentState::Supported) supported[k]++;
             if (res[k].state == InstrumentState::Ambiguous) {
                 ambiguous[k]++;
-                CHECK(static_cast<Instrument>(k) == Instrument::MixedWaterEkmik);
+                CHECK(false); // none since page 0x65 byte 0 is Unproven (logic/availability.hpp)
             }
             if (res[k].state == InstrumentState::Withheld) withheld++;
         }
@@ -21322,7 +21336,9 @@ static void test_instrument_registry() {
     }
     CHECK(profiles == 39);
     CHECK(reference_checked == 1);
-    CHECK(withheld == 0); // the detect-only 0x64 rows carry no registry instrument
+    // Only the bizone kit's Unproven byte-0 copy (logic/availability.hpp) on six profiles; the
+    // detect-only 0x64 rows carry no registry instrument.
+    CHECK(withheld == 6);
     CHECK(trend_two_phase == 4);
     CHECK(service_two_phase == 4);
     CHECK(trend_untwinned == 17);
@@ -25090,18 +25106,48 @@ static void test_availability() {
     CHECK(!row_publishable(hybrid));
     CHECK(availability_policy(hybrid) == AvailabilityPolicy::Always); // orthogonal reasons
 
+    // Page 0x65 byte 0 is the enable-flag byte of every other hydronic page, and the catalog
+    // stacks two or three accessory quantities on it. Every row there is Unproven — whatever it
+    // decoded to and whatever it is called — while the same quantities at their distinct offsets
+    // stay untouched.
+    const ValueDef dlwb2_0{0x65, 0, 105,
+                           2,    1, "Outlet water heat exchanger temp (hydro split model) DLWB2"};
+    const ValueDef ekmik_0{0x65, 0, 105,
+                           2,    1, "[EKMIK] Bizone kit mixed leaving water temperature R1T"};
+    const ValueDef mixed_0{0x65, 0, 105, 2, 1, "Mixed water temp."};
+    const ValueDef m1s_0{0x65, 0, 101, 1, -1, "[EKMIK] Bizone kit mix valve position M1S"};
+    for (const ValueDef* d : {&dlwb2_0, &ekmik_0, &mixed_0, &m1s_0}) {
+        CHECK(availability_policy(*d) == AvailabilityPolicy::Unproven);
+        CHECK(!row_publishable(*d));
+        CHECK(!value_available(*d, true, 12.8));
+        CHECK(!value_available(*d, false, 0.0)); // a verdict on the row, not on the number
+    }
+    const ValueDef dlwb2_2{0x65, 2, 105,
+                           2,    1, "Outlet water heat exchanger temp (hydro split model) DLWB2"};
+    const ValueDef ekmik_4{0x65, 4, 105,
+                           2,    1, "[EKMIK] Bizone kit mixed leaving water temperature R1T"};
+    const ValueDef m1s_6{0x65, 6, 152, 1, -1, "[EKMIK] Bizone kit mix valve position M1S"};
+    for (const ValueDef* d : {&dlwb2_2, &ekmik_4, &m1s_6}) {
+        CHECK(availability_policy(*d) == AvailabilityPolicy::Always);
+        CHECK(row_publishable(*d));
+    }
+    // The header bytes of every other hydronic page carry no rule: the verdict is about 0x65.
+    CHECK(availability_policy(ValueDef{0x64, 0, 105, 2, 1, "x"}) == AvailabilityPolicy::Always);
+
     // ── Against the real catalog
     // ──────────────────────────────────────────────────────────────────
     int profiles_total = 0, evap_rows = 0, cond_rows = 0, suppressed = 0, odd_label = 0;
     int eev_rows = 0, conv151_rows = 0, page_absence_rows = 0, ct_l3_rows = 0;
     int zero_rows = 0, fan1_rows = 0, fan2_rows = 0, cout_rows = 0, geo_shared_rows = 0;
     int liq_rows = 0, liq_brine_rows = 0;
+    int header65_rows = 0, header65_m1s = 0, header65_profiles = 0, header65_page_still_read = 0;
     for (const auto& p : def::profiles) {
         if (std::strcmp(p.id, "protocol_s") == 0)
             continue; // Protocol S legacy profile (pages 0x50-0x56)
         profiles_total++;
         const auto view                = def::resolved(p);
         int        publishable_on_0x10 = 0;
+        bool       header65 = false, publishable_on_0x65 = false;
         for (size_t i = 0; i < view.count(); i++) {
             const ValueDef&          d   = view[i];
             const AvailabilityPolicy pol = availability_policy(d);
@@ -25240,7 +25286,28 @@ static void test_availability() {
             // them may fall under a rule.
             if (d.reg >= 0x60 && d.reg <= 0x62) CHECK(pol == AvailabilityPolicy::Always);
             if (d.reg == 0x10 && row_publishable(d)) publishable_on_0x10++;
+            // The premise of the page-0x65 verdict: on every other hydronic page no measurement
+            // row starts on the enable-flag or unit-address byte, in any profile.
+            if (d.reg >= 0x60 && d.reg <= 0x64) CHECK(d.offset >= 2);
+            // Unproven and page-0x65 byte 0 must be the SAME set, in both directions: every row
+            // stacked on that header is withheld, and nothing anywhere else acquires the verdict.
+            if (pol == AvailabilityPolicy::Unproven) {
+                CHECK(d.reg == 0x65 && d.offset == 0);
+                CHECK(!row_publishable(d));
+            }
+            if (d.reg == 0x65 && d.offset == 0) {
+                CHECK(pol == AvailabilityPolicy::Unproven);
+                header65_rows++;
+                header65 = true;
+                if (d.conv == 101)
+                    header65_m1s++;
+                else
+                    CHECK(d.conv == 105 && logic::lwt_ci_contains(d.label, "temp"));
+            }
+            if (d.reg == 0x65 && row_publishable(d)) publishable_on_0x65 = true;
         }
+        if (header65) header65_profiles++;
+        if (header65 && publishable_on_0x65) header65_page_still_read++;
         // Page 0x10 must still be QUERIED on every profile after the quarantine — the error class,
         // the error code and the protection words live there, and so does the raw dump that is
         // meant to settle legacy-194. A page whose rows are all unpublishable is not read at all
@@ -25308,6 +25375,14 @@ static void test_availability() {
     // count moves, the catalog has put another quantity behind a zero rule and the label key needs
     // re-reading before the rule is allowed to follow it there.
     CHECK(geo_shared_rows == 10);
+    // The page-0x65 header verdict's reach. Seven profiles carry rows at byte 0: twelve two-byte
+    // temperatures (two each on the EBLA/EDLA 9-16 kW monobloc and the four EPRA tables, one on
+    // each ERLA D table) and the four EPRA mix-valve positions. Only the two ERLA D tables keep a
+    // publishable 0x65 row (the hydro-split outlet at byte 2), so 0x65 stops being queried on the
+    // other five (hp_poll reads no page whose rows are all unpublishable).
+    CHECK(header65_profiles == 7);
+    CHECK(header65_rows == 16 && header65_m1s == 4);
+    CHECK(header65_page_still_read == 2);
 }
 
 // ── Numeric fault state beside the textual code (logic/fault_state.hpp) — legacy-209 defect 4
