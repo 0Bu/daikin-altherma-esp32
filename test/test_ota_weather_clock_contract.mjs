@@ -1,9 +1,9 @@
-// The board starts no Weather fetch before SNTP has set its clock, so the gate's explicit refresh
-// must not time out while the board itself reports `ntp.synced: false`: that time extends the
-// refresh wait and the pressure window, within CLOCK_SYNC_WAIT_MAX_S, and a clock that never syncs
-// blocks with a message that names it. Without the board's own report nothing is extended. Runs the
-// real stress_board loop against fake board responses on a virtual clock; this is no network or
-// hardware proof.
+// The board starts no Weather fetch before SNTP has set its clock. While the board itself reports
+// `ntp.synced: false`, the gate waits before its excused TLS window, within CLOCK_SYNC_WAIT_MAX_S,
+// and extends the pressure window as it waits; the sample minima scale with the longer window, and
+// a clock that never syncs blocks with a message that names it. Without the board's own report it
+// does not wait. Runs the real stress_board main loop against fake board responses on a virtual
+// clock with the probe workers stubbed; this is no network or hardware proof.
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
@@ -34,22 +34,28 @@ heap = {"free_heap": max(ns["POST_STRESS_MIN_FREE_HEAP"], ns["MIN_FINAL_FREE_HEA
 LIVE = {"connected": True, "values": 129, "last_ok_s": 1, "crc_err": 0, "timeout_err": 0}
 FETCH_S = 4.0
 # Later than both the refresh wait (OTA_CHECK_TIMEOUT_S) and the pressure window (STRESS_SECONDS),
-# so only an extension of both lets the refresh complete with probes still running.
+# so only a wait that also keeps the window open lets the refresh complete with probes running.
 LATE_SYNC_S = float(max(ns["OTA_CHECK_TIMEOUT_S"], ns["STRESS_SECONDS"]) + 20)
 check(LATE_SYNC_S + FETCH_S < ns["CLOCK_SYNC_WAIT_MAX_S"], "FIXTURE_LATE_SYNC_WITHIN_BOUND")
-# scenario: (ntp report as a function of window-relative seconds or None for absent, fetch start)
+BASE = {"status": ns["MIN_STATUS_SAMPLES"], "values": ns["MIN_VALUES_SAMPLES"],
+        "diag": ns["MIN_DIAG_SAMPLES"]}
+AMPLE = {kind: 10 * count for kind, count in BASE.items()}
+# scenario: (ntp "synced" as a function of window-relative seconds, or None for no report and
+# "null" for a non-boolean report; fetch start; injected probe samples)
 scenarios = {
-    "synced": (lambda relative: True, 2.0),
-    "late sync": (lambda relative: relative >= LATE_SYNC_S, LATE_SYNC_S + 2.0),
-    "never syncs": (lambda relative: False, None),
-    "no ntp report": (None, LATE_SYNC_S + 2.0),
+    "synced": (lambda relative: True, 2.0, AMPLE),
+    "late sync": (lambda relative: relative >= LATE_SYNC_S, LATE_SYNC_S + 2.0, AMPLE),
+    "late sync at base rate": (lambda relative: relative >= LATE_SYNC_S, LATE_SYNC_S + 2.0, BASE),
+    "never syncs": (lambda relative: False, None, AMPLE),
+    "no ntp report": (None, LATE_SYNC_S + 2.0, AMPLE),
+    "null ntp report": ("null", LATE_SYNC_S + 2.0, AMPLE),
 }
 
 def forbidden(*args, **kwargs):
     raise AssertionError("PROBE_UNEXPECTED_IO")
 
 def run(name):
-    synced_at, fetch_at = scenarios[name]
+    synced_at, fetch_at, injected = scenarios[name]
     virtual, start_at, refreshes, joins = [0.0], [], [], []
     def board(relative):
         requested = 1 if refreshes else 0
@@ -67,7 +73,9 @@ def run(name):
             "sys": {"safe_mode": False, "heap_restarts": 0, "poll_skipped": 0, "mqtt_skipped": 0,
                     **heap},
             "hp": dict(LIVE)}
-        if synced_at is not None:
+        if synced_at == "null":
+            status["ntp"] = {"server": "pool.ntp.org", "synced": None, "time": None}
+        elif synced_at is not None:
             status["ntp"] = {"server": "pool.ntp.org", "synced": synced_at(relative),
                              "time": "2026-01-01T00:00:00.000Z"}
         return status
@@ -97,12 +105,12 @@ def run(name):
         if phase == "production_pressure_started":
             stress = updates["production"]["stress"]
             stress["tls_busy_503"].update({"status": 1, "values": 1})
-            stress["samples"].update({"status": 300, "values": 120, "diag": 10})
+            stress["samples"].update(injected)
         original_checkpoint(phase, **updates)
     output = io.StringIO()
     with contextlib.redirect_stdout(output), contextlib.redirect_stderr(output):
         journal = ns["GateJournal"]()
-    result, rejection = None, None
+    result, rejection, journaled = None, None, {}
     try:
         with patch.dict(ns, {"ACTIVE_JOURNAL": journal, "resolve_http_endpoint": lambda value: value,
                              "request_status_deadline": lambda endpoint, **kwargs:
@@ -122,38 +130,46 @@ def run(name):
                     expected_channel="dev")
             except ns["GateError"] as error:
                 rejection = str(error)
+        document = json.loads(journal.path.read_text())
+        journaled = document["receipt"]["production"].get("stress", {})
     finally:
         shutil.rmtree(journal.directory)
-    return result, rejection, refreshes, joins
+    return result, rejection, refreshes, joins, journaled
 
 results = {name: run(name) for name in scenarios}
 slack = ns["HTTP_TIMEOUT_S"] + 1
 
-result, rejection, refreshes, joins = results["synced"]
+result, rejection, refreshes, joins, journaled = results["synced"]
 check(rejection is None and result is not None, "WEATHER_CLOCK_SYNCED_RUN_PASSES: " + str(rejection))
-check(result["weather_refresh"]["clock_wait_s"] == 0 and refreshes == [1],
-      "WEATHER_CLOCK_SYNCED_RUN_WAITS_FOR_NOTHING")
+check(result["weather_refresh"]["clock_wait_s"] == 0 and journaled.get("clock_wait_s") == 0 and
+      refreshes == [1], "WEATHER_CLOCK_SYNCED_RUN_WAITS_FOR_NOTHING")
 
-result, rejection, refreshes, joins = results["late sync"]
+result, rejection, refreshes, joins, journaled = results["late sync"]
 check(rejection is None and result is not None,
       "WEATHER_CLOCK_LATE_SYNC_PASSES: " + str(rejection))
 wait = result["weather_refresh"]["clock_wait_s"] if result else -1
-check(LATE_SYNC_S - 10 <= wait <= LATE_SYNC_S and refreshes == [1],
-      "WEATHER_CLOCK_LATE_SYNC_RECORDS_ITS_WAIT: " + str(wait))
+check(LATE_SYNC_S - 2 <= wait <= LATE_SYNC_S + 2 and journaled.get("clock_wait_s") == wait and
+      refreshes == [1], "WEATHER_CLOCK_LATE_SYNC_RECORDS_ITS_WAIT: " + str(wait))
 # Without the extension the window would already be over when the refresh completes (join gets only
 # its fixed slack); with it, the probes still have most of their window left.
 check(len(joins) == 3 and all(timeout > slack + ns["STRESS_SECONDS"] / 2 for timeout in joins),
       "WEATHER_CLOCK_EXTENDS_PRESSURE_WINDOW: " + str(joins))
 
-result, rejection, refreshes, joins = results["never syncs"]
+result, rejection, refreshes, joins, journaled = results["late sync at base rate"]
 check(result is None and rejection is not None and
+      "live stress produced too few successful samples" in rejection,
+      "WEATHER_CLOCK_SCALES_SAMPLE_MINIMA: " + str(rejection))
+
+result, rejection, refreshes, joins, journaled = results["never syncs"]
+check(result is None and rejection is not None and refreshes == [] and
       "clock did not synchronize within " + str(ns["CLOCK_SYNC_WAIT_MAX_S"]) + "s" in rejection,
       "WEATHER_CLOCK_NEVER_SYNCS_NAMES_THE_CLOCK: " + str(rejection))
 
-result, rejection, refreshes, joins = results["no ntp report"]
-check(result is None and rejection is not None and
-      rejection.endswith("did not complete the explicitly triggered weather TLS refresh"),
-      "WEATHER_CLOCK_NEEDS_THE_BOARD_REPORT: " + str(rejection))
+for name in ("no ntp report", "null ntp report"):
+    result, rejection, refreshes, joins, journaled = results[name]
+    check(result is None and rejection is not None and refreshes == [1] and
+          rejection.endswith("did not complete the explicitly triggered weather TLS refresh"),
+          "WEATHER_CLOCK_NEEDS_THE_BOARD_REPORT[" + name + "]: " + str(rejection))
 print(json.dumps({"checks": checks, "scenarios": len(results)}))
 `;
 
@@ -164,21 +180,24 @@ const run = file => spawnSync("python3", ["-I", "-B", "-c", probe, file], {
 const actual = run(gatePath);
 assert.equal(actual.status, 0, `weather clock probe failed: ${actual.stderr}`);
 const { checks, scenarios } = JSON.parse(actual.stdout);
-assert.equal(scenarios, 4);
+assert.equal(scenarios, 6);
 
-// Negative controls on scratch copies of the real gate, never on the source: no extension at all,
-// and an extension of the refresh wait that leaves the pressure window unextended.
+// Negative controls on scratch copies of the real gate, never on the source: no clock wait at all,
+// a wait that leaves the pressure window unextended, and minima that ignore the longer window.
 const source = fs.readFileSync(gatePath, "utf8");
-const report = 'if isinstance(ntp_state, dict) and ntp_state.get("synced") is False:';
-const window = "\n                deadline += extension\n";
-for (const marker of [report, window]) {
+const report = 'unsynced = isinstance(ntp_state, dict) and ntp_state.get("synced") is False';
+const window = "\n            deadline += now - clock_checked_at\n";
+const scale = "window_scale = max(1.0, (deadline - stress_started) / STRESS_SECONDS)";
+for (const marker of [report, window, scale]) {
   assert.equal(source.split(marker).length, 2, `the gate must contain ${JSON.stringify(marker)} once`);
 }
 const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "weather-clock-"));
 try {
   for (const [old, replacement, failure] of [
-    [report, "if False:", /WEATHER_CLOCK_LATE_SYNC_PASSES/],
-    [window, "\n                pass\n", /WEATHER_CLOCK_EXTENDS_PRESSURE_WINDOW/],
+    [report, "unsynced = False", /WEATHER_CLOCK_LATE_SYNC_PASSES/],
+    // Without it the stale window also caps the refresh wait, so the refresh cannot even finish.
+    [window, "\n            pass\n", /WEATHER_CLOCK_(EXTENDS_PRESSURE_WINDOW|LATE_SYNC_PASSES)/],
+    [scale, "window_scale = 1.0", /WEATHER_CLOCK_SCALES_SAMPLE_MINIMA/],
   ]) {
     const mutant = path.join(scratch, "gate.py");
     fs.writeFileSync(mutant, source.replace(old, replacement));
@@ -189,4 +208,4 @@ try {
 } finally {
   fs.rmSync(scratch, { recursive: true, force: true });
 }
-console.log(`OTA weather clock contract passed (${checks} checks, ${scenarios} scenarios, two mutation controls)`);
+console.log(`OTA weather clock contract passed (${checks} checks, ${scenarios} scenarios, three mutation controls)`);

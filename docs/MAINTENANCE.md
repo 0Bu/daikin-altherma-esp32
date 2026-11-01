@@ -211,7 +211,8 @@ The transaction has two distinct stages:
    Heap-restart, MQTT-skip, poll-skip and CRC counters must not change; X10A timeout delta stays within
    three. Bind the completed target check generation/feed/version/SHA, require successor generation,
    capture validation/heap/stack evidence, then observe target identity, rollback/crash/safe mode,
-   live values and retained X10A MQTT through a separate three-minute read-only canary. Before
+   live values and retained X10A MQTT through a separate three-minute read-only canary (longer after
+   a clock wait, below). Before
    success, require an explicit valid/disarmed image with stable identity, uptime and counters.
 
 **Do not publish either participating feed during this transaction.** The old release cannot retain
@@ -223,16 +224,20 @@ a paused or unsafe-heap baseline is not accepted as a healthy start.
 
 Configured production Weather additionally needs an exact non-zero requested/started/completed/
 success token and a success-counter advance. OTA serialization may defer the same outstanding
-attempt, but unrelated scheduled fetches cannot satisfy it. The firmware starts no fetch before
-SNTP sets its clock. While the board reports `ntp.synced: false`, that time extends the refresh
-wait and the pressure window, at most `CLOCK_SYNC_WAIT_MAX_S` in total, and the receipt records it
-as `weather_refresh.clock_wait_s`. A clock still unsynchronized at that bound blocks with its own
-message; without the board's report nothing is extended. Only a completed `waiting/heap_headroom`
+attempt, but unrelated scheduled fetches cannot satisfy it. Only a completed `waiting/heap_headroom`
 refusal may wait until all pressure workers stop, then passively await two stable 48/20-KiB samples
 for at most 420 seconds and issue one different token under a 120-second bound. That retry must
 succeed with MQTT/X10A recovered and invariant uptime/counters/heap. A second refusal or another
 failure blocks. Successful idle fetch afterward must not be described as Weather TLS success under
 load. Cross-subsystem streamed snapshots require later owner evidence, never assumed simultaneity.
+
+The firmware starts no Weather fetch before SNTP sets its clock. A pressure run that requires Weather
+therefore first waits, with its probes running but before the excused TLS window, while the board
+reports `ntp.synced: false` and until its Weather client is idle, at most `CLOCK_SYNC_WAIT_MAX_S`.
+The three-minute pressure window is extended by that wait, and the sample minima scale with it. The
+journaled pressure sample records the wait as `clock_wait_s`. During the wait every refusal and MQTT
+gap still counts. A clock still unsynchronized at the bound blocks with its own message. Without the
+board's report the gate does not wait.
 
 The gate observes transfer status at a bounded 2 Hz with fixed-size reads and a one-second request
 budget. Only read-only GETs interrupted by reboot are sampled again; malformed complete replies

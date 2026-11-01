@@ -1620,10 +1620,16 @@ assert.match(stress,
   "live Weather acceptance must require the exact requested, started, completed and successful token");
 assert.equal(occurrences(stress, "\n        weather_deadline ="), 1,
   "the under-pressure Weather observation must retain one absolute HIL deadline");
+assert.equal((stress.match(/\bweather_deadline\s*[-+]?=/g) || []).length, 1,
+  "nothing may move that absolute Weather deadline after it is set");
 assert.match(gate, /^CLOCK_SYNC_WAIT_MAX_S = 300$/m,
-  "the only extension of that deadline, an unsynchronized board clock, must stay bounded");
-assert.equal(occurrences(stress, "weather_deadline += extension"), 1,
-  "only the bounded clock wait may extend the Weather deadline (test_ota_weather_clock_contract)");
+  "the wait for an unsynchronized board clock must stay bounded");
+const clockWait = stress.indexOf("clock_wait_deadline = clock_wait_started + CLOCK_SYNC_WAIT_MAX_S");
+const excusedWindow = stress.indexOf("scheduled_tls_active.set()");
+assert.ok(clockWait >= 0 && excusedWindow > clockWait &&
+  occurrences(stress, "scheduled_tls_active.set()") === 1,
+  "the clock wait must end before the excused TLS window starts, so every refusal and MQTT gap " +
+  "during it still counts (test_ota_weather_clock_contract)");
 assert.match(stress,
   /remaining = weather_deadline - time\.monotonic\(\)[\s\S]{0,140}?if remaining <= 0:[\s\S]{0,100}?request_status_deadline\([\s\S]{0,100}?timeout=min\(remaining, 1\)/,
   "each Weather status poll must be clamped to the remaining absolute deadline");
