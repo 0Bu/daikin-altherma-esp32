@@ -239,8 +239,9 @@ extended by that wait, and the sample minima scale with it; absolute allowances 
 X10A timeouts do not. The stress receipt records the wait as `clock_wait_s`. Refusals and MQTT gaps
 during the wait are judged as outside that window, and a reboot or allocation failure ends it at
 once. A clock still unsynchronized at the bound blocks with its own message. Without the board's
-report the gate does not wait for the clock. After such a wait the gate's TLS runs after the
-firmware's probation commit; the production canary claims no probation coverage.
+report the gate does not wait for the clock. A clock wait can move the gate's TLS past the
+firmware's probation commit (a healthy image commits after `kHealthBaseWindowS`,
+`main/ota_update.cpp`); the production canary claims no probation coverage.
 
 The gate observes transfer status at a bounded 2 Hz with fixed-size reads and a one-second request
 budget. Only read-only GETs interrupted by reboot are sampled again; malformed complete replies
