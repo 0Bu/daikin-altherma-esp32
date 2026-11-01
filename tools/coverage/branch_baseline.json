@@ -6,6 +6,20 @@
         "gcc-13-linux-ubuntu24": "g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0 via CI-pinned ESP-IDF v6.1 container, aarch64",
         "gcc-15-linux-ubuntu26": "g++ (Ubuntu 15.2.0-16ubuntu1) 15.2.0, Ubuntu 26.04 Docker, aarch64"
       },
+      "hosted_confirmation": "Hosted confirmation pending: only label_override.hpp uses the measured local GCC 15 aarch64 inventory as the gcc-15-github-linux-ubuntu26 candidate. No hosted execution is claimed; authoritative GitHub CI confirmation is required before merge. All other hosted inventories are unchanged.",
+      "runner": "scripts/run-mock-tests.sh --coverage",
+      "scope": "Profile-scoped label pair: effective_label gains an optional profile id, a null-label guard and a profile key on two entries (the Monobloc CA's unpaired 0x20/14 and its saturation twin). Unit checks take each new outcome: no id, another id, the scoped id, a wrong offset, an already neutral label and a null label; the catalog sweep binds the entries to the profiles without a 0x20/12 partner. Every added outcome is taken: 13/14 to 21/22 (Clang), 16/16 to 24/24 (GCC 13 and GCC 15). Every other header inventory, every historical ratio and the 95-percent executable-line floor are unchanged.",
+      "validation_boundary": "GCC 13 and GCC 15 measured the first revision of this change; the final revision changes only comments, documentation and one evidence string, and Clang re-measured it unchanged.",
+      "source": "main/logic/label_override.hpp",
+      "source_sha256": "0c40f4106cdd26883ceca33e3259201c72bde3a0452e732b070aac7332af776e",
+      "test_source_sha256": "8812f5f5fe3c4a9edffc8b4205c19f237a1ff389b24114430ecbdbcc30877b35"
+    },
+    {
+      "compilers": {
+        "clang-17-darwin": "Apple clang version 17.0.0 (clang-1700.6.4.2), arm64",
+        "gcc-13-linux-ubuntu24": "g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0 via CI-pinned ESP-IDF v6.1 container, aarch64",
+        "gcc-15-linux-ubuntu26": "g++ (Ubuntu 15.2.0-16ubuntu1) 15.2.0, Ubuntu 26.04 Docker, aarch64"
+      },
       "hosted_confirmation": "Hosted confirmation pending: instrument.hpp and refrigerant_service.hpp use the measured local GCC 15 aarch64 inventory as the gcc-15-github-linux-ubuntu26 candidate. No hosted execution is claimed; authoritative GitHub CI confirmation is required before merge. All other hosted inventories are unchanged.",
       "runner": "scripts/run-mock-tests.sh --coverage",
       "scope": "Outdoor pressure pair: the low-side identity now needs a publishable structural refrigerant pressure at the HighPressure key instead of a label token, read without recursing through the locator matcher so that GCC proves the path non-throwing. Synthetic rows cover the pair in both orders, the saturation twin ahead of the partner, the twin alone, a bar row under another converter, a heat-sink temperature, the hydronic transducer and a withheld partner; the catalog sweep binds the registry to the refrigerant service on every detectable profile. Every outcome is taken: 86/86 to 104/104 (Clang), 100/100 to 122/122 (GCC 13 and GCC 15). Every other header inventory, every historical ratio and the 95-percent executable-line floor are unchanged.",
@@ -1173,8 +1187,8 @@
         "taken": 10
       },
       "main/logic/label_override.hpp": {
-        "outcomes": 14,
-        "taken": 13
+        "outcomes": 22,
+        "taken": 21
       },
       "main/logic/led_pattern.hpp": {
         "outcomes": 35,
@@ -1595,8 +1609,8 @@
         "outcomes": 208
       },
       "main/logic/label_override.hpp": {
-        "outcomes": 16,
-        "taken": 16
+        "outcomes": 24,
+        "taken": 24
       },
       "main/logic/led_pattern.hpp": {
         "outcomes": 40,
@@ -2017,8 +2031,8 @@
         "outcomes": 208
       },
       "main/logic/label_override.hpp": {
-        "outcomes": 16,
-        "taken": 16
+        "outcomes": 24,
+        "taken": 24
       },
       "main/logic/led_pattern.hpp": {
         "outcomes": 40,
@@ -2439,8 +2453,8 @@
         "outcomes": 208
       },
       "main/logic/label_override.hpp": {
-        "outcomes": 16,
-        "taken": 16
+        "outcomes": 24,
+        "taken": 24
       },
       "main/logic/led_pattern.hpp": {
         "outcomes": 40,

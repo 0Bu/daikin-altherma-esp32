@@ -3545,6 +3545,34 @@ void stale_value_retirement() {
                 "STALE_VALUES_ONLY_PROVEN_CURRENT_INSTALLATION_NAMESPACE");
 }
 
+// A profile-scoped relabel (logic/label_override.hpp) retires its predecessor like the
+// catalog-wide fan rename: the Monobloc CA's former low-side configs go, the neutral grouped ids
+// it now announces stay.
+void profile_scoped_label_retirement() {
+    cleanup_fixture();
+    const std::string     profile = "altherma_monobloc_ca_05_07kw";
+    std::set<std::string> retired;
+    bool                  done = false;
+    for (int cycles = 0; cycles < 2048 && !done; ++cycles) {
+        for (int i = 0; i < sdk::publish_calls; ++i) {
+            const auto& row = sdk::published[i];
+            require(row.length == 0 && row.qos == 1 && row.retain == 1 && row.enqueued,
+                    "STALE_VALUES_EVERY_TOPIC_USES_TRACKED_TOMBSTONE");
+            if (row.accepted) retired.insert(row.topic.data());
+        }
+        reset_cleanup_trace();
+        if (daik::s_retirement_delivery.in_flight())
+            cleanup_event(daik::s_retirement_delivery.msg_id());
+        done = daik::retract_stale_values(profile);
+    }
+    const std::string base = "homeassistant/sensor/daikin_altherma_esp32_install/";
+    require(done && retired.count(base + "outdoor_sensors_low_pressure/config") &&
+                retired.count(base + "outdoor_sensors_low_pressure_t/config") &&
+                !retired.count(base + "outdoor_sensors_pressure/config") &&
+                !retired.count(base + "outdoor_sensors_pressure_t/config"),
+            "STALE_VALUES_PROFILE_SCOPED_RELABEL_RETIRES_ITS_PREDECESSOR");
+}
+
 std::set<std::string> fixture_profile_topics(const std::string& profile) {
     std::set<std::string> topics;
     const auto            rows = daik::def::resolved(daik::def::lookup(profile.c_str()));
@@ -4317,6 +4345,8 @@ int main(int argc, char** argv) {
             retained_probe_delivery();
         else if (std::strcmp(scenario, "stale_value_retirement") == 0)
             stale_value_retirement();
+        else if (std::strcmp(scenario, "profile_scoped_label_retirement") == 0)
+            profile_scoped_label_retirement();
         else if (std::strcmp(scenario, "profile_cutover_delivery") == 0)
             profile_cutover_delivery();
         else if (std::strcmp(scenario, "periodic_discovery_delivery") == 0)
