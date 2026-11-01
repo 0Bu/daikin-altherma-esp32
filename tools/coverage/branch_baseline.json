@@ -6,6 +6,48 @@
         "gcc-13-linux-ubuntu24": "g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0 via CI-pinned ESP-IDF v6.1 container, aarch64",
         "gcc-15-linux-ubuntu26": "g++ (Ubuntu 15.2.0-16ubuntu1) 15.2.0, Ubuntu 26.04 Docker, aarch64"
       },
+      "hosted_confirmation": "Hosted confirmation pending: only homehub_map.hpp uses the measured local GCC 15 aarch64 inventory as the gcc-15-github-linux-ubuntu26 candidate. No hosted execution is claimed; authoritative GitHub CI confirmation is required before merge. All other hosted inventories are unchanged.",
+      "runner": "scripts/run-mock-tests.sh --coverage",
+      "scope": "High-side trend selector: x10a_concept_for skips the high-side trend, whose row is a profile fact no single row can carry. The concept checks take both outcomes: 68/68 to 70/70 (Clang), 74/74 to 78/78 (GCC 13 and GCC 15). Every added outcome is taken; every other header inventory, every historical ratio and the 95-percent executable-line floor are unchanged.",
+      "validation_boundary": "Clang, GCC 13 and GCC 15 measured the same source and test revision.",
+      "source": "main/logic/homehub_map.hpp",
+      "source_sha256": "52c05f6d81ead75394a552915545dc7253f6464a0c7b6120b9c7727d02d5b534",
+      "test_source_sha256": "84a99e6a96f7e425b49206056ffd6a6e58df3dabd5f8a48cb53401cc289892bb"
+    },
+    {
+      "compilers": {
+        "clang-17-darwin": "Apple clang version 17.0.0 (clang-1700.6.4.2), arm64",
+        "gcc-13-linux-ubuntu24": "g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0 via CI-pinned ESP-IDF v6.1 container, aarch64",
+        "gcc-15-linux-ubuntu26": "g++ (Ubuntu 15.2.0-16ubuntu1) 15.2.0, Ubuntu 26.04 Docker, aarch64"
+      },
+      "hosted_confirmation": "Hosted confirmation pending: only history_persist.hpp uses the measured local GCC 15 aarch64 inventory as the gcc-15-github-linux-ubuntu26 candidate. No hosted execution is claimed; authoritative GitHub CI confirmation is required before merge. All other hosted inventories are unchanged.",
+      "runner": "scripts/run-mock-tests.sh --coverage",
+      "scope": "High-side trend selector: history_x10a_series_id folds the high_side switch in when it is set, so the circuit_pressure series gets a new id while every other series keeps its own. Both outcomes are taken by the catalog-wide id sweep: 466/521 to 468/523 (Clang), 549/610 to 551/612 (GCC 13), 547/608 to 549/610 (GCC 15). Every added outcome is taken; every other header inventory, every historical ratio and the 95-percent executable-line floor are unchanged.",
+      "validation_boundary": "Clang, GCC 13 and GCC 15 measured the same source and test revision.",
+      "source": "main/logic/history_persist.hpp",
+      "source_sha256": "19b17cb72b26684655c6ae2d2b11422041ddf3f0ea53448f3ae4b20c7f01ff03",
+      "test_source_sha256": "84a99e6a96f7e425b49206056ffd6a6e58df3dabd5f8a48cb53401cc289892bb"
+    },
+    {
+      "compilers": {
+        "clang-17-darwin": "Apple clang version 17.0.0 (clang-1700.6.4.2), arm64",
+        "gcc-13-linux-ubuntu24": "g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0 via CI-pinned ESP-IDF v6.1 container, aarch64",
+        "gcc-15-linux-ubuntu26": "g++ (Ubuntu 15.2.0-16ubuntu1) 15.2.0, Ubuntu 26.04 Docker, aarch64"
+      },
+      "hosted_confirmation": "Hosted confirmation pending: only history.hpp uses the measured local GCC 15 aarch64 inventory as the gcc-15-github-linux-ubuntu26 candidate. No hosted execution is claimed; authoritative GitHub CI confirmation is required before merge. All other hosted inventories are unchanged.",
+      "runner": "scripts/run-mock-tests.sh --coverage",
+      "scope": "High-side trend selector: trend_select_high_side() and the TrendDef high_side switch resolve the circuit_pressure trend like refrigerant_service_high_pressure_row(): 0x62/15 beside its conv-405 twin, otherwise the outdoor 0x20/12 bar row, and nothing while page 0x62 is missing. Unit checks reach every new outcome (twinned, twinless, page missing, no converters, the converter-free overload, a heat sink at 0x20/12, a twin without its bar row): 154/160 to 178/184 (Clang), 197/202 to 227/232 (GCC 13), 195/200 to 225/230 (GCC 15). Every added outcome is taken; every other header inventory, every historical ratio and the 95-percent executable-line floor are unchanged.",
+      "validation_boundary": "Clang, GCC 13 and GCC 15 measured the same source and test revision.",
+      "source": "main/logic/history.hpp",
+      "source_sha256": "a49efd4baf85b3b1e63511824a1390c0f81945b300cde565c925fa38b30396f6",
+      "test_source_sha256": "84a99e6a96f7e425b49206056ffd6a6e58df3dabd5f8a48cb53401cc289892bb"
+    },
+    {
+      "compilers": {
+        "clang-17-darwin": "Apple clang version 17.0.0 (clang-1700.6.4.2), arm64",
+        "gcc-13-linux-ubuntu24": "g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0 via CI-pinned ESP-IDF v6.1 container, aarch64",
+        "gcc-15-linux-ubuntu26": "g++ (Ubuntu 15.2.0-16ubuntu1) 15.2.0, Ubuntu 26.04 Docker, aarch64"
+      },
       "hosted_confirmation": "Hosted confirmation pending: only availability.hpp uses the measured local GCC 15 aarch64 inventory as the gcc-15-github-linux-ubuntu26 candidate. No hosted execution is claimed; authoritative GitHub CI confirmation is required before merge. All other hosted inventories are unchanged.",
       "runner": "scripts/run-mock-tests.sh --coverage",
       "scope": "Page-0x65 header rules: two Unproven ledger entries withhold every row at 0x65 offset 0 (conv 105 and conv 101). The unit checks and the catalog sweep now reach the Unproven outcome of value_available() and row_publishable(), which no ledger entry reached before: 76/81 to 77/81 (Clang), 83/87 to 85/87 (GCC 13 and GCC 15). No outcome is lost; every other header inventory, every historical ratio and the 95-percent executable-line floor are unchanged.",
@@ -1149,16 +1191,16 @@
         "taken": 14
       },
       "main/logic/history.hpp": {
-        "outcomes": 160,
-        "taken": 154
+        "outcomes": 184,
+        "taken": 178
       },
       "main/logic/history_persist.hpp": {
-        "outcomes": 521,
-        "taken": 466
+        "outcomes": 523,
+        "taken": 468
       },
       "main/logic/homehub_map.hpp": {
-        "outcomes": 68,
-        "taken": 68
+        "outcomes": 70,
+        "taken": 70
       },
       "main/logic/hp_probe.hpp": {
         "outcomes": 143,
@@ -1571,16 +1613,16 @@
         "taken": 16
       },
       "main/logic/history.hpp": {
-        "outcomes": 202,
-        "taken": 197
+        "outcomes": 232,
+        "taken": 227
       },
       "main/logic/history_persist.hpp": {
-        "outcomes": 610,
-        "taken": 549
+        "outcomes": 612,
+        "taken": 551
       },
       "main/logic/homehub_map.hpp": {
-        "outcomes": 74,
-        "taken": 74
+        "outcomes": 78,
+        "taken": 78
       },
       "main/logic/hp_probe.hpp": {
         "outcomes": 151,
@@ -1993,16 +2035,16 @@
         "taken": 16
       },
       "main/logic/history.hpp": {
-        "outcomes": 200,
-        "taken": 195
+        "outcomes": 230,
+        "taken": 225
       },
       "main/logic/history_persist.hpp": {
-        "outcomes": 608,
-        "taken": 547
+        "outcomes": 610,
+        "taken": 549
       },
       "main/logic/homehub_map.hpp": {
-        "outcomes": 74,
-        "taken": 74
+        "outcomes": 78,
+        "taken": 78
       },
       "main/logic/hp_probe.hpp": {
         "outcomes": 151,
@@ -2415,16 +2457,16 @@
         "taken": 16
       },
       "main/logic/history.hpp": {
-        "outcomes": 200,
-        "taken": 195
+        "outcomes": 230,
+        "taken": 225
       },
       "main/logic/history_persist.hpp": {
-        "outcomes": 608,
-        "taken": 547
+        "outcomes": 610,
+        "taken": 549
       },
       "main/logic/homehub_map.hpp": {
-        "outcomes": 74,
-        "taken": 74
+        "outcomes": 78,
+        "taken": 78
       },
       "main/logic/hp_probe.hpp": {
         "outcomes": 151,
