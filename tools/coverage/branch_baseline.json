@@ -6,6 +6,34 @@
         "gcc-13-linux-ubuntu24": "g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0 via CI-pinned ESP-IDF v6.1 container, aarch64",
         "gcc-15-linux-ubuntu26": "g++ (Ubuntu 15.2.0-16ubuntu1) 15.2.0, Ubuntu 26.04 Docker, aarch64"
       },
+      "hosted_confirmation": "Hosted confirmation pending: only ou_stale.hpp uses the measured local GCC 15 aarch64 inventory as the gcc-15-github-linux-ubuntu26 candidate. No hosted execution is claimed; authoritative GitHub CI confirmation is required before merge. All other hosted inventories are unchanged.",
+      "runner": "scripts/run-mock-tests.sh --coverage",
+      "scope": "Three-state outdoor freshness: ou_unit_freshness(), ou_reading_held_unknown() and ou_reading_dropped() add the third answer about the outdoor pages and what a missing speed does to a reading after a stop. Unit checks take every outcome: 8/10 to 12/12 (Clang), 16/16 to 28/28 (GCC 13 and GCC 15). Every other header inventory, every historical ratio and the 95-percent executable-line floor are unchanged.",
+      "validation_boundary": "Clang, GCC 13 and GCC 15 measured the same source and test revision.",
+      "source": "main/logic/ou_stale.hpp",
+      "source_sha256": "b2e1c4fc0a399e0ab1d14ea86930854857d924aef77885f3e01c603ace32473f",
+      "test_source_sha256": "71f9a6d6b6736b3c6d0610e9cba7b925441fe938ea46117a60601833c10805e9"
+    },
+    {
+      "compilers": {
+        "clang-17-darwin": "Apple clang version 17.0.0 (clang-1700.6.4.2), arm64",
+        "gcc-13-linux-ubuntu24": "g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0 via CI-pinned ESP-IDF v6.1 container, aarch64",
+        "gcc-15-linux-ubuntu26": "g++ (Ubuntu 15.2.0-16ubuntu1) 15.2.0, Ubuntu 26.04 Docker, aarch64"
+      },
+      "hosted_confirmation": "Hosted confirmation pending: heartbeat.hpp's hosted x86-64 inventory differs from the local aarch64 one, so its candidate adds the GCC 13 delta to the previous hosted counts (135/236). No hosted execution is claimed; authoritative GitHub CI confirmation is required before merge. All other hosted inventories are unchanged.",
+      "runner": "scripts/run-mock-tests.sh --coverage",
+      "scope": "Three-state outdoor freshness: the heartbeat omits bus_ou_held_over while the compressor state is unknown and discovery reads a may_be_absent key through .get(), so the entity becomes unknown. Unit checks reach all three states and both template forms; the outcomes left untaken are the unwind edges of the added string appends: 203/372 to 211/384 (Clang), 176/300 to 184/312 (GCC 13 and GCC 15). Every other header inventory, every historical ratio and the 95-percent executable-line floor are unchanged.",
+      "validation_boundary": "Clang, GCC 13 and GCC 15 measured the same source and test revision.",
+      "source": "main/logic/heartbeat.hpp",
+      "source_sha256": "cdf035b49559cdac8ca49d2c9d9e78341f3859a09a8b21a601efbb4f1edb71d9",
+      "test_source_sha256": "71f9a6d6b6736b3c6d0610e9cba7b925441fe938ea46117a60601833c10805e9"
+    },
+    {
+      "compilers": {
+        "clang-17-darwin": "Apple clang version 17.0.0 (clang-1700.6.4.2), arm64",
+        "gcc-13-linux-ubuntu24": "g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0 via CI-pinned ESP-IDF v6.1 container, aarch64",
+        "gcc-15-linux-ubuntu26": "g++ (Ubuntu 15.2.0-16ubuntu1) 15.2.0, Ubuntu 26.04 Docker, aarch64"
+      },
       "hosted_confirmation": "Hosted confirmation pending: only homehub_map.hpp uses the measured local GCC 15 aarch64 inventory as the gcc-15-github-linux-ubuntu26 candidate. No hosted execution is claimed; authoritative GitHub CI confirmation is required before merge. All other hosted inventories are unchanged.",
       "runner": "scripts/run-mock-tests.sh --coverage",
       "scope": "High-side trend selector: x10a_concept_for skips the high-side trend, whose row is a profile fact no single row can carry. The concept checks take both outcomes: 68/68 to 70/70 (Clang), 74/74 to 78/78 (GCC 13 and GCC 15). Every added outcome is taken; every other header inventory, every historical ratio and the 95-percent executable-line floor are unchanged.",
@@ -1175,8 +1203,8 @@
         "taken": 22
       },
       "main/logic/heartbeat.hpp": {
-        "taken": 203,
-        "outcomes": 372
+        "taken": 211,
+        "outcomes": 384
       },
       "main/logic/heating_curve_diagnosis.hpp": {
         "outcomes": 91,
@@ -1347,8 +1375,8 @@
         "taken": 123
       },
       "main/logic/ou_stale.hpp": {
-        "outcomes": 10,
-        "taken": 8
+        "outcomes": 12,
+        "taken": 12
       },
       "main/logic/outdoor_evidence.hpp": {
         "outcomes": 21,
@@ -1597,8 +1625,8 @@
         "taken": 24
       },
       "main/logic/heartbeat.hpp": {
-        "taken": 176,
-        "outcomes": 300
+        "taken": 184,
+        "outcomes": 312
       },
       "main/logic/heating_curve_diagnosis.hpp": {
         "outcomes": 109,
@@ -1761,8 +1789,8 @@
         "taken": 151
       },
       "main/logic/ou_stale.hpp": {
-        "outcomes": 16,
-        "taken": 16
+        "outcomes": 28,
+        "taken": 28
       },
       "main/logic/outdoor_evidence.hpp": {
         "outcomes": 29,
@@ -2019,8 +2047,8 @@
         "taken": 24
       },
       "main/logic/heartbeat.hpp": {
-        "taken": 135,
-        "outcomes": 236
+        "taken": 143,
+        "outcomes": 248
       },
       "main/logic/heating_curve_diagnosis.hpp": {
         "outcomes": 109,
@@ -2183,8 +2211,8 @@
         "taken": 151
       },
       "main/logic/ou_stale.hpp": {
-        "outcomes": 16,
-        "taken": 16
+        "outcomes": 28,
+        "taken": 28
       },
       "main/logic/outdoor_evidence.hpp": {
         "outcomes": 29,
@@ -2441,8 +2469,8 @@
         "taken": 24
       },
       "main/logic/heartbeat.hpp": {
-        "taken": 176,
-        "outcomes": 300
+        "taken": 184,
+        "outcomes": 312
       },
       "main/logic/heating_curve_diagnosis.hpp": {
         "outcomes": 109,
@@ -2605,8 +2633,8 @@
         "taken": 151
       },
       "main/logic/ou_stale.hpp": {
-        "outcomes": 16,
-        "taken": 16
+        "outcomes": 28,
+        "taken": 28
       },
       "main/logic/outdoor_evidence.hpp": {
         "outcomes": 29,

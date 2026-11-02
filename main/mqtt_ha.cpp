@@ -1928,7 +1928,7 @@ static __attribute__((noinline)) std::string build_heartbeat_payload() {
     f.rx_received     = hp.rx_ok;
     f.rx_fails        = hp.rx_fail_total;
     f.last_ok_s       = hp.last_ok_s;
-    f.ou_held_over    = hp.ou_held_over;
+    f.ou_freshness                = hp.ou_freshness;
     const ModbusStatus mbs = mb_status();
     f.modbus_enabled   = mbs.enabled;
     f.modbus_connected = mbs.connected;

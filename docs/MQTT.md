@@ -113,10 +113,12 @@ not `0`, false or “no fault”. An unreadable fault class emits neither numeri
 `error_active` is 1 for Error; `warning_active` is 1 for Warning/Caution.
 
 Outdoor pages `0x20/0x21` can keep answering with the previous run's bytes while the compressor
-rests. Those held readings are omitted from MQTT, with `bus_ou_held_over=1` on the heartbeat. The
-firmware can recognize them only while it reads the compressor speed: a profile without that row,
-or a sweep in which its page did not answer, publishes the outdoor values unmarked.
-HTTP `/values` can instead retain them with `held:true`, so the two surfaces intentionally differ.
+rests. Those held readings are omitted from MQTT, with `bus_ou_held_over=1` on the heartbeat. HTTP
+`/values` can instead retain them with `held:true`, so the two surfaces intentionally differ. The
+firmware can recognize them only while it reads the compressor speed. If the speed goes missing after
+it last read as stopped, the outdoor values stay omitted until it returns or the
+[source age](#outbound-availability) passes. In every other case without a speed, as on a profile
+without that row, the outdoor values are published even though they may be held.
 Row/model-specific refusal rules and converter evidence belong in [REGISTERS.md](REGISTERS.md).
 
 ### Protection fields
@@ -185,7 +187,9 @@ Permanently retired discovery cleanup can run outside the X10A gate. Source impl
 ## Heartbeat
 
 The payload is flat. Fields are numeric except the stated text fields; connectivity/held flags are
-`1`/`0`. Counters reset with a boot unless stated otherwise.
+`1`/`0`. `bus_ou_held_over` is absent while the compressor state is unknown: the latest sweep has no
+readable speed (always so on a profile without that row), or the X10A link is not live. Counters reset
+with a boot unless stated otherwise.
 
 | Category | Fields |
 |---|---|
@@ -313,6 +317,8 @@ latest reset remain unknown. Preserve private memory evidence before dismissal; 
 | Device Time, WiFi Quality, Last Reset Reason | Retired discovery removed; use `/status.ntp`, WiFi Signal and Reset Reason respectively. `time` / `wifi_quality_pct` heartbeat fields are gone. |
 | Non-hybrid `0x64` boiler/hybrid entities | Detect-only rows retracted; use **LW setpoint (main)** for the legitimate heating target. |
 | `0x65` offset-0 mixing entities | Withheld on the seven profiles whose tables place them at byte 0; their discovery is retracted and their state keys are no longer published, without replacement ([register 0x65](REGISTERS.md#register-0x65)). Old history stays unverified. |
+| `bus_ou_held_over=0` without a compressor reading | The key is now absent and **Outdoor Data Held Over** reads unknown instead of off. Treat a missing key as unknown, never as current. |
+| Last-run outdoor values after a lost speed reply at rest | No longer published within the source age; the rule is under [X10A state](#x10a-state-and-missing-values). |
 | Old Target Evap. Temp. samples | Corrected converter keeps its id; pre-correction history remains wrong and must be excluded from comparisons. |
 
 The preserved default/bench discovery nodes can also contain a historical custom base that once

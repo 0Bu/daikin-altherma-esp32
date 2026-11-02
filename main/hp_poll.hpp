@@ -8,6 +8,7 @@
 #include <string>
 #include "logic/crc.hpp"        // Protocol — the framing a probe reply was read with
 #include "logic/hp_probe.hpp"   // ProbeStatus — the outcomes hp_probe_run() reports
+#include "logic/ou_stale.hpp"   // OuFreshness — the outdoor pages: current, held over or unknown
 #include "logic/refrigerant_service.hpp"
 #include "logic/values_identity.hpp"
 
@@ -28,33 +29,33 @@ struct CachedValue {
                           // row's IDENTITY — how logic/history.hpp addresses a trended row, since
                           // the catalog's labels neither name one quantity consistently nor name
                           // different quantities differently (see that header). Never displayed.
-    bool held = false; // the source PAGE was not refreshed this cycle: the outdoor unit is
-                       // resting and is answering with its last run's numbers
-                       // (logic/ou_stale.hpp). The value is kept — the trend ring needs to
-                       // tell "held over" from "no reading" — but it is not a measurement,
-                       // so the MQTT bridge withholds it (legacy-209 defect 5).
-                       //
-                       // ORDER MATTERS HERE, which is why the one-byte fields are grouped:
-                       // `conv` is 4-byte aligned, so putting it between `off` and `held`
-                       // pads twice and costs 4 bytes MORE per row than putting it last.
-                       // Two snapshot buffers hold one resolved profile as a CONTIGUOUS block
-                       // each (build_values_array on the httpd task, current_x10a_values on the
-                       // publish task), and the binding limit on this board is the largest
-                       // contiguous block — so a field-ordering slip is a real ~460 B of
-                       // extra peak, not a style point.
+    bool held = false;    // the source PAGE was not refreshed this cycle: the outdoor unit is
+                          // resting and is answering with its last run's numbers
+                          // (logic/ou_stale.hpp). The value is kept — the trend ring needs to
+                          // tell "held over" from "no reading" — but it is not a measurement,
+                          // so the MQTT bridge withholds it (legacy-209 defect 5).
+                          //
+                          // A snapshot holds one resolved profile as a CONTIGUOUS block
+                          // (take_values_snapshot on the httpd task), and the binding limit on
+                          // this board is the largest contiguous block — so every byte of this
+                          // row counts, once per row: the static_assert below is the budget.
+    bool held_unknown = false; // the row is on one of those pages, but this sweep read no
+                               // compressor speed, so `held == false` is no evidence that
+                               // the page is current (logic/ou_stale.hpp). /values says so
+                               // beside the row.
     uint8_t modbus_definition =
-        0;        // immutable catalog row that decoded this Modbus value; 0 = none.
-                  // Uses the padding byte: provenance does not enlarge X10A snapshots.
-    int conv = 0; // the X10A row's converter id — the metadata its consumers
-                  // need, and the reason none of the DERIVED facts are cached beside
-                  // it: `conv_is_binary(conv)` says whether /values should mark the
-                  // row as a 1/0 flag for the browser, `published_kind(conv)` says
-                  // what JSON type the MQTT bridge must give it, and conv 203 is what
-                  // earns a derived numeric fault companion (logic/fault_state.hpp).
-                  // Re-deriving any of those from the formatted TEXT instead is how a
-                  // field ends up changing type between states (legacy-209 defect 3), and
-                  // caching each as its own flag would grow the struct once per
-                  // question asked.
+        0;             // immutable catalog row that decoded this Modbus value; 0 = none.
+                       // Uses a padding byte: provenance does not enlarge X10A snapshots.
+    uint16_t conv = 0; // the X10A row's converter id, in ValueDef's own type — the metadata
+                       // its consumers need, and the reason none of the DERIVED facts are
+                       // cached beside it: `conv_is_binary(conv)` says whether /values should
+                       // mark the row as a 1/0 flag for the browser, `published_kind(conv)`
+                       // says what JSON type the MQTT bridge must give it, and conv 203 is what
+                       // earns a derived numeric fault companion (logic/fault_state.hpp).
+                       // Re-deriving any of those from the formatted TEXT instead is how a
+                       // field ends up changing type between states (legacy-209 defect 3), and
+                       // caching each as its own flag would grow the struct once per
+                       // question asked.
 };
 #ifdef ESP_PLATFORM
 static_assert(sizeof(CachedValue) == 40, "CachedValue grew beyond the contiguous snapshot budget");
@@ -76,7 +77,7 @@ struct HpStats {
     // SOURCE freshness of the outdoor unit's own pages this cycle (logic/ou_stale.hpp) — the
     // heartbeat's bus_ou_held_over. Bus health and source freshness are different facts, and a
     // consumer that only has the first one reads a resting unit as a broken link.
-    bool     ou_held_over  = false;
+    logic::OuFreshness ou_freshness = logic::OuFreshness::Unknown;
     std::string last_error;
 };
 
