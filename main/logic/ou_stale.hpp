@@ -31,6 +31,8 @@
 // reading still current", not "how should it be drawn" — which is exactly why the rule lives here
 // and the presentation does not.
 
+#include <cstdint>
+
 #include "lwt_select.hpp"   // lwt_ci_contains — the compressor witness still matches by label
 
 namespace daik::logic {
@@ -51,6 +53,27 @@ constexpr bool ou_page_holds_over(unsigned reg) { return reg == 0x20u || reg == 
 // compressor is evidence that the outdoor pages have gone stale.
 constexpr bool ou_reading_held_over(unsigned reg, bool rps_known, bool rps_running) {
     return rps_known && !rps_running && ou_page_holds_over(reg);
+}
+
+// The unit-level answer has THREE values, and the third is the reason it is not a bool. "Not held
+// over" is a claim that the pages are current; with no readable compressor speed the bridge has no
+// evidence for that claim, only no evidence against it. A consumer handed `false` there cannot tell
+// a running unit from one this firmware could not ask.
+enum class OuFreshness : uint8_t { Unknown, Current, HeldOver };
+
+constexpr OuFreshness ou_unit_freshness(bool rps_known, bool rps_running) {
+    return !rps_known    ? OuFreshness::Unknown
+           : rps_running ? OuFreshness::Current
+                         : OuFreshness::HeldOver;
+}
+
+// The per-row form of Unknown: an outdoor-page reading in a sweep with no compressor reading. It
+// may be live and it may be the last run's number. Kept apart from ou_reading_held_over() because
+// the two are acted on differently: a held reading is withheld from MQTT, while this one stays
+// published, since withholding on a guess would blank a unit for good on every profile without a
+// witness.
+constexpr bool ou_reading_held_unknown(unsigned reg, bool rps_known) {
+    return !rps_known && ou_page_holds_over(reg);
 }
 
 // Is THIS row the compressor witness — "INV frequency (rps)" — that makes the rule above decidable

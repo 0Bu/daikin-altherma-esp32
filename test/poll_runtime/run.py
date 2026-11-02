@@ -24,6 +24,7 @@ CASES = [
     'mqtt_scalar_source', 'refrigerant_one_sensor', 'refrigerant_unidentified_row',
     'refrigerant_unpaired_pressure',
     'outdoor_hx_scale',
+    'held_witness_lost', 'held_expired_verdict', 'held_no_witness_profile',
 ]
 REGRESSION_ORACLES = {
     'detect_silent': 'detect_silence_breaks_confirmation',
@@ -45,6 +46,9 @@ REGRESSION_ORACLES = {
     'refrigerant_unidentified_row': 'refrigerant_unidentified_row_never_high_side',
     'refrigerant_unpaired_pressure': 'refrigerant_unpaired_pressure_never_low_side',
     'outdoor_hx_scale': 'outdoor_hx_profile_scale_reaches_cache',
+    'held_witness_lost': 'held_lost_witness_is_not_a_verdict',
+    'held_expired_verdict': 'held_verdict_expires_with_source',
+    'held_no_witness_profile': 'held_no_witness_profile_stays_unknown',
 }
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--root', type=Path, default=HERE.parents[1], help='Repository root; defaults to installed test directory parent')
@@ -292,6 +296,22 @@ mutations = {
         'link_revision, std::move(detected_profile), d.page_mask, d.kw_tenths, d.iu_kw_tenths, std::move(d.eeprom)',
         'link_revision, detected_profile, d.page_mask, d.kw_tenths, d.iu_kw_tenths, d.eeprom',
         'detect_model_commit_moves_staged_arguments', 'detect_model_arguments'),
+    'report_lost_witness_as_current': (
+        'const logic::OuFreshness ou_freshness = logic::ou_unit_freshness(rps_known, rps_running);',
+        'const logic::OuFreshness ou_freshness = rps_known && !rps_running ? logic::OuFreshness::HeldOver : logic::OuFreshness::Current;',
+        'held_lost_witness_is_not_a_verdict', 'held_witness_lost'),
+    'never_mark_unknown_rows': (
+        'cv.held_unknown = logic::ou_reading_held_unknown(cv.reg, rps_known);',
+        '/* mutation: only the two-valued held flag travels with the row */',
+        'held_lost_witness_marks_outdoor_rows', 'held_witness_lost'),
+    'mark_every_row_unknown': (
+        'cv.held_unknown = logic::ou_reading_held_unknown(cv.reg, rps_known);',
+        'cv.held_unknown = !rps_known;',
+        'held_lost_witness_leaves_hydronic_rows', 'held_witness_lost'),
+    'report_expired_verdict': (
+        'if (!st.connected) st.ou_freshness = logic::OuFreshness::Unknown;',
+        '/* mutation: the last verdict outlives the link */',
+        'held_verdict_expires_with_source', 'held_expired_verdict'),
 }
 MUTANT_POSITIVE_CASES = {'narrow_detection_catch_to_transport': ['detect_throw']}
 results = []

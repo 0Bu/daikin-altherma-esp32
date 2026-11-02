@@ -492,9 +492,11 @@ static void poll_once() {
         }
         break;
     }
-    for (auto& cv : fresh)
-        cv.held = logic::ou_reading_held_over(cv.reg, rps_known, rps_running);
-    const bool ou_held = rps_known && !rps_running;
+    for (auto& cv : fresh) {
+        cv.held         = logic::ou_reading_held_over(cv.reg, rps_known, rps_running);
+        cv.held_unknown = logic::ou_reading_held_unknown(cv.reg, rps_known);
+    }
+    const logic::OuFreshness ou_freshness = logic::ou_unit_freshness(rps_known, rps_running);
     refrigerant_service_sample(fresh.data(), fresh.size(), rps_known, rps_running,
                                service_coverage, s_refrigerant_service_cycle_sample);
 
@@ -575,7 +577,7 @@ static void poll_once() {
         s_stats.connected  = any_ok;
         s_stats.registers  = regs;
         s_stats.values     = static_cast<int>(s_cache.size());
-        s_stats.ou_held_over = ou_held;
+        s_stats.ou_freshness = ou_freshness;
         s_stats.rx_ok         += d_rx_ok;
         s_stats.rx_fail_total += d_rx_fail;
         s_stats.timeout_err   += d_timeout;
@@ -1143,6 +1145,8 @@ HpStats hp_stats() {
     const bool recent = x10a_source_is_recent(st.last_ok_s);
     st.connected      = st.connected && recent;
     if (!recent) st.values = 0;
+    // A frozen verdict is not a verdict: with no live link nothing says what the unit does now.
+    if (!st.connected) st.ou_freshness = logic::OuFreshness::Unknown;
     return st;
 }
 
@@ -1269,7 +1273,7 @@ void hp_poll_reconfigure() {
     s_stats.connected = false;
     s_stats.registers = 0;
     s_stats.values = 0;
-    s_stats.ou_held_over = false;
+    s_stats.ou_freshness = logic::OuFreshness::Unknown;
     s_stats.last_error.clear();
     s_last_ok_us = -1;
     s_refrigerant_service = logic::RefrigerantServiceTracker{};

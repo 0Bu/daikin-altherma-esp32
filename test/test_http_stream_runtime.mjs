@@ -186,6 +186,8 @@ try {
     if(name==="/values") {
       assert.equal(doc.values.length,129); assert.equal(doc.values[0].value,"0");
       assert.equal(doc.values[0].dwell_s,5); assert.equal(doc.values[1].held,true);
+      assert.equal(Object.hasOwn(doc.values[1],"held_unknown"),false);
+      assert.equal(doc.values[2].held_unknown,true); assert.equal(Object.hasOwn(doc.values[2],"held"),false);
       assert.equal(doc.values[1].label,'Temp Café "quote"\\unit\n'); assert.equal(doc.values[1].unit,"°C");
       assert.equal(Object.hasOwn(doc,"modbus"),false);
     }

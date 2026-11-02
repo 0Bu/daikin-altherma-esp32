@@ -173,7 +173,8 @@ static bool                           cache_preserved() {
         const auto& b = daik::s_cache[i];
         if (std::strcmp(a.label, b.label) || a.value != b.value || std::strcmp(a.unit, b.unit) ||
             a.reg != b.reg || a.off != b.off || a.held != b.held ||
-            a.modbus_definition != b.modbus_definition || a.conv != b.conv)
+            a.held_unknown != b.held_unknown || a.modbus_definition != b.modbus_definition ||
+            a.conv != b.conv)
             return false;
     }
     return true;
@@ -934,6 +935,66 @@ static void run_refrigerant(const char* name) {
         oracle(false, "known_refrigerant_case");
 }
 
+static const daik::CachedValue& cached_row(uint8_t reg) {
+    for (const auto& row : daik::s_cache)
+        if (row.reg == reg) return row;
+    oracle(false, "held_page_has_a_row");
+    return daik::s_cache.front();
+}
+
+// The three answers about the outdoor pages through the real sweep: the row marks and the
+// heartbeat's source travel together, and only a read compressor speed may ever say "current" or
+// "held over". Synthetic bytes, not physical readings.
+static void run_held(const char* name) {
+    using daik::hp_stats;
+    using daik::poll_once;
+    using daik::logic::OuFreshness;
+    if (!std::strcmp(name, "held_witness_lost")) {
+        setup_populated();
+        poll_once();
+        oracle(hp_stats().ou_freshness == OuFreshness::Current && !cached_row(0x20).held &&
+                   !cached_row(0x20).held_unknown,
+               "held_running_reads_current");
+        adapter::pages[0x30][0] = 0;
+        sdk::now_us += 1000000;
+        poll_once();
+        oracle(hp_stats().ou_freshness == OuFreshness::HeldOver && cached_row(0x20).held &&
+                   !cached_row(0x20).held_unknown,
+               "held_stopped_reads_held_over");
+        // The outdoor page still answers; only the page that says whether it is current was lost.
+        adapter::available[0x30] = false;
+        sdk::now_us += 1000000;
+        poll_once();
+        oracle(hp_stats().ou_freshness == OuFreshness::Unknown,
+               "held_lost_witness_is_not_a_verdict");
+        oracle(!cached_row(0x20).held && cached_row(0x20).held_unknown && !cached_row(0x21).held &&
+                   cached_row(0x21).held_unknown,
+               "held_lost_witness_marks_outdoor_rows");
+        oracle(!cached_row(0x61).held && !cached_row(0x61).held_unknown,
+               "held_lost_witness_leaves_hydronic_rows");
+    } else if (!std::strcmp(name, "held_expired_verdict")) {
+        setup_populated();
+        adapter::pages[0x30][0] = 0;
+        poll_once();
+        oracle(hp_stats().ou_freshness == OuFreshness::HeldOver, "held_expiry_starts_held_over");
+        sdk::now_us += 16000000; // past the X10A liveness window, with no sweep in between
+        oracle(hp_stats().ou_freshness == OuFreshness::Unknown, "held_verdict_expires_with_source");
+    } else if (!std::strcmp(name, "held_no_witness_profile")) {
+        setup("altherma_lt_ca_cb_04_08kw"); // outdoor pages, no "INV frequency (rps)" row
+        adapter::populated = true;
+        for (unsigned reg = 0; reg < 256; ++reg) {
+            adapter::available[reg]    = true;
+            adapter::page_lengths[reg] = 40;
+        }
+        poll_once();
+        oracle(hp_stats().ou_freshness == OuFreshness::Unknown,
+               "held_no_witness_profile_stays_unknown");
+        oracle(!cached_row(0x20).held && cached_row(0x20).held_unknown,
+               "held_no_witness_profile_marks_outdoor_rows");
+    } else
+        oracle(false, "known_held_case");
+}
+
 int main(int argc, char** argv) {
     const char* name = argc > 1 ? argv[1] : "oom_raii";
     if (!std::strcmp(name, "oom_raii"))
@@ -952,6 +1013,8 @@ int main(int argc, char** argv) {
         run_raw(name);
     else if (!std::strncmp(name, "refrigerant_", 12))
         run_refrigerant(name);
+    else if (!std::strncmp(name, "held_", 5))
+        run_held(name);
     else
         oracle(false, "known_runtime_case");
     std::printf("PASS CASE %s\n", name);

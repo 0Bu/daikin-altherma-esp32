@@ -11,6 +11,7 @@
 #include "json.hpp"        // json_append_escaped
 #include "json_integer.hpp"
 #include "checkup.hpp"
+#include "ou_stale.hpp" // OuFreshness — bus_ou_held_over's three answers
 
 namespace daik {
 
@@ -143,8 +144,9 @@ struct HeartbeatFields {
     // state topic, so a consumer sees the field disappear — and this flag is what tells it WHY,
     // without a per-field timestamp in a payload published every second. "The device is publishing,
     // the bus is healthy, and the outdoor unit is simply not measuring right now" is otherwise
-    // indistinguishable from a broken link on the consumer's side.
-    bool        ou_held_over   = false;
+    // indistinguishable from a broken link on the consumer's side. Unknown is the default because
+    // no evidence is the state a field starts in: it omits the key rather than reporting "current".
+    logic::OuFreshness ou_freshness = logic::OuFreshness::Unknown;
 
     // The HomeHub Modbus stack (issue legacy-32) — a SECOND, INDEPENDENT source, so these are its
     // OWN counters and say nothing about the X10A bus above (that is the point: the two fail
@@ -307,8 +309,12 @@ inline std::string build_heartbeat_json(const HeartbeatFields& f) {
     json_append_integer_field(j, ",\"bus_rx_fails\":", f.rx_fails);
     json_append_integer_field(j, ",\"bus_crc_err\":", f.crc_err);
     json_append_integer_field(j, ",\"bus_timeout_err\":", f.timeout_err);
-    // 1/0 NUMBER like the three connectivity flags above, and for the same measured reason.
-    j += ",\"bus_ou_held_over\":"; j += f.ou_held_over ? "1" : "0";
+    // 1/0 NUMBER like the three connectivity flags above, and for the same measured reason. ABSENT,
+    // not 0, without a compressor reading: 0 would claim that the outdoor pages are current.
+    if (f.ou_freshness != logic::OuFreshness::Unknown) {
+        j += ",\"bus_ou_held_over\":";
+        j += f.ou_freshness == logic::OuFreshness::HeldOver ? "1" : "0";
+    }
     // Read commands actually sent. There is no bus_tx_writes/bus_tx_fails companion: the X10A
     // protocol has no write command (docs/ARCHITECTURE.md → the MQTT bridge is read-only), so both
     // were hardcoded 0 and could never become anything else. They were carried for parity with the
@@ -341,6 +347,7 @@ struct HeartbeatSensor {
     const char* unit;          // "" = none
     const char* device_class;  // "" = none
     const char* state_class;   // "" | "measurement" | "total_increasing"
+    bool may_be_absent = false; // the payload can omit the key; discovery maps that to `unknown`
 };
 
 inline const HeartbeatSensor HEARTBEAT_SENSORS[] = {
@@ -374,7 +381,8 @@ inline const HeartbeatSensor HEARTBEAT_SENSORS[] = {
     // Source freshness, not link health — deliberately NOT device_class "connectivity"/"problem":
     // an outdoor unit resting is the normal state of a heat pump for most of the day, and typing it
     // as a fault would turn every quiet afternoon into an alert.
-    {"binary_sensor", "ou_held_over", "Outdoor Data Held Over", "bus_ou_held_over", "", "", ""},
+    {"binary_sensor", "ou_held_over", "Outdoor Data Held Over", "bus_ou_held_over", "", "", "",
+     true},
     {"sensor", "bus_crc_err", "X10A CRC Errors", "bus_crc_err", "", "", "total_increasing"},
     {"sensor", "bus_timeout_err", "X10A Timeout Errors", "bus_timeout_err", "", "",
      "total_increasing"},
@@ -442,7 +450,18 @@ inline std::string heartbeat_discovery_config(const std::string& node, const std
     std::string j = "{";
     ha_discovery_identity(j, node, s.name, s.object_id);
     json_append_literal_string_member(j, "\"stat_t\":\"", hb_topic);
-    j += "\"val_tpl\":\"{{ value_json."; j += s.json_path; j += " }}\",";
+    // A bare `value_json.key` on an omitted key renders nothing, and HA keeps the entity's previous
+    // state; 'None' is its explicit `unknown` (append_x10a_value_template, logic/discovery.hpp).
+    j += "\"val_tpl\":\"{{ value_json";
+    if (s.may_be_absent) {
+        j += ".get('";
+        j += s.json_path;
+        j += "', 'None')";
+    } else {
+        j += ".";
+        j += s.json_path;
+    }
+    j += " }}\",";
     json_append_literal_string_member(j, "\"avty_t\":\"", avail_topic);
     // A binary_sensor here reads a 1/0 NUMBER (see build_heartbeat_json), so it must say so: HA's
     // pl_on/pl_off default to "ON"/"OFF" and match neither 1/0 nor the `True`/`False` a JSON bool used

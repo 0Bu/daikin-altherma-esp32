@@ -297,12 +297,14 @@ proof of refrigerant charge or valve position.
 The response object has a `values` (X10A) array and a separate `modbus` array only while the staged
 HomeHub snapshot is live. An omitted `modbus` is different from an empty array. Do not merge sources.
 X10A rows contain `label`, `value`, `unit`, `reg`, plus applicable `binary`, `binary_semantic`,
-`held`, `x10a_group`, `concept`, `dwell_s`, `dwell_min`, `dwell_blind_s`.
+`held`, `held_unknown`, `x10a_group`, `concept`, `dwell_s`, `dwell_min`, `dwell_blind_s`.
 Their `value` is a string or null.
 
 `reg` is the page, not a per-value address. `x10a_group` disambiguates labels reused across pages;
 `concept` is structural HomeHub pairing. Selector semantics prevent valve/heater paths being shown
-as generic switches. `held:true` means the outdoor page has stopped refreshing. An absent duration
+as generic switches. `held:true` means the outdoor page has stopped refreshing. `held_unknown:true`
+marks a row on such a page in a sweep without a readable compressor speed: it may be live or held,
+so it is evidence of neither. An absent duration
 is unknown, zero is a newly observed transition, and `dwell_min:true` makes duration a lower bound.
 Dwell metadata must match the copied cache revision, source identity and decoded state; a mismatch
 is unknown rather than a duration borrowed from another reading.
@@ -332,6 +334,9 @@ age and omitted before clock sync. `epoch` is captured with the samples; `boot_i
 Unavailable age metadata or an epoch changed before emission returns 503. Clients must reject
 responses superseded by a newer status/source generation.
 `held` marks eligible X10A outdoor nulls as held-over; all other source rasters leave it empty.
+The rings have no third state: an outdoor sample taken without a readable compressor speed stays a
+number, so a number outside `held` is not proof that the page was current. `/values` reports that
+state for the current sweep.
 The circulation-state trend is selected through `source=x10a` but reports its physical source as
 `"mqtt"` in the response.
 `source=room&row=room_temp` returns the independent MQTT actual-temperature trend with `source:"room"`.

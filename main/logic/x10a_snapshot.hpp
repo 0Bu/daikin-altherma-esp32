@@ -53,12 +53,14 @@ inline X10aSnapshotAlignResult x10a_snapshot_align(Row* out, size_t count,
     for (size_t i = 0; i < count; i++) {
         out[i].value.clear();
         out[i].held = false;
+        out[i].held_unknown = false;
     }
     for (size_t src = 0; src < source_count; src++) {
         for (size_t dst = 0; dst < count; dst++) {
             if (!x10a_snapshot_identity_equal(out[dst], source[src])) continue;
             out[dst].value.assign(source[src].value.data(), source[src].value.size());
             out[dst].held = source[src].held;
+            out[dst].held_unknown = source[src].held_unknown;
             break;
         }
     }

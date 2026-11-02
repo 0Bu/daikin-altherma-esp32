@@ -2078,6 +2078,9 @@ static void append_values_array(JsonOut& j, const std::vector<CachedValue>& v,
         // and so the marker travels with the row rather than being recomputed from a snapshot taken
         // elsewhere.
         if (v[i].held) j += ",\"held\":true";
+        // Same rule, third answer: the row sits on an outdoor page and the sweep read no compressor
+        // speed. Without this the consumer sees only an absent `held`, which reads as current.
+        if (v[i].held_unknown) j += ",\"held_unknown\":true";
         // HOW LONG THIS STATE HAS STOOD (logic/state_dwell.hpp). Emitted only for the switched rows
         // the table tracks, so the ~65 measurement rows cost no bytes — the same rule `binary`,
         // `held` and `concept` already follow. "OFF" answers what a flag is; for a flag that is most
