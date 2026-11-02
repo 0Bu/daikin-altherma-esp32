@@ -152,6 +152,12 @@ static SaturationWitness      s_sat_witness;
 static uint32_t               s_sat_witness_generation = 0;  // poll-task-owned
 static int64_t                s_sat_witness_us         = -1;
 
+// When the compressor witness last read as stopped, and -1 once it reads as running: what a sweep
+// without a readable speed is judged against (logic/ou_stale.hpp). Poll-task-owned, and bound by
+// the same age limit as above.
+static uint32_t s_rps_stopped_generation = 0;
+static int64_t  s_rps_stopped_us         = -1;
+
 static void retire_saturation_witness() noexcept {
     s_sat_witness            = SaturationWitness{};
     s_sat_witness_generation = 0;
@@ -474,9 +480,9 @@ static void poll_once() {
     // point while the compressor ran, a mean 1.19 K (max 2.0 K) error over the 195 points while it
     // rested.
     //
-    // The value is MARKED, not dropped. history.cpp needs the number to distinguish HELD_OVER from
-    // NO_READING (a gap in the chart for the right reason), and the browser already renders "—" on
-    // its own. What the mark buys is the MQTT bridge withholding it — a consumer that has no
+    // A held value is MARKED, not dropped. history.cpp needs the number to distinguish HELD_OVER
+    // from NO_READING (a gap in the chart for the right reason), and the browser already renders
+    // "—" on its own. What the mark buys is the MQTT bridge withholding it — a consumer that has no
     // compressor state cannot make that call for itself.
     // The parse is logic/history.hpp's own history_parse_tenths, not a local strtod: history.cpp
     // asks the same question of the same string one call later (its trends distinguish HELD_OVER
@@ -492,9 +498,20 @@ static void poll_once() {
         }
         break;
     }
-    for (auto& cv : fresh)
-        cv.held = logic::ou_reading_held_over(cv.reg, rps_known, rps_running);
-    const bool ou_held = rps_known && !rps_running;
+    const int64_t witness_now_us   = esp_timer_get_time();
+    const bool    recently_stopped = s_rps_stopped_generation == cycle_generation &&
+                                  x10a_source_time_is_recent(witness_now_us, s_rps_stopped_us);
+    if (rps_known) {
+        s_rps_stopped_us         = rps_running ? -1 : witness_now_us;
+        s_rps_stopped_generation = cycle_generation;
+    }
+    for (auto& cv : fresh) {
+        cv.held         = logic::ou_reading_held_over(cv.reg, rps_known, rps_running);
+        cv.held_unknown = logic::ou_reading_held_unknown(cv.reg, rps_known);
+        // Non-allocating: the row stays, as for a value that failed to decode.
+        if (logic::ou_reading_dropped(cv.reg, rps_known, recently_stopped)) cv.value.clear();
+    }
+    const logic::OuFreshness ou_freshness = logic::ou_unit_freshness(rps_known, rps_running);
     refrigerant_service_sample(fresh.data(), fresh.size(), rps_known, rps_running,
                                service_coverage, s_refrigerant_service_cycle_sample);
 
@@ -575,7 +592,7 @@ static void poll_once() {
         s_stats.connected  = any_ok;
         s_stats.registers  = regs;
         s_stats.values     = static_cast<int>(s_cache.size());
-        s_stats.ou_held_over = ou_held;
+        s_stats.ou_freshness = ou_freshness;
         s_stats.rx_ok         += d_rx_ok;
         s_stats.rx_fail_total += d_rx_fail;
         s_stats.timeout_err   += d_timeout;
@@ -1143,6 +1160,8 @@ HpStats hp_stats() {
     const bool recent = x10a_source_is_recent(st.last_ok_s);
     st.connected      = st.connected && recent;
     if (!recent) st.values = 0;
+    // A frozen verdict is not a verdict: with no live link nothing says what the unit does now.
+    if (!st.connected) st.ou_freshness = logic::OuFreshness::Unknown;
     return st;
 }
 
@@ -1269,7 +1288,7 @@ void hp_poll_reconfigure() {
     s_stats.connected = false;
     s_stats.registers = 0;
     s_stats.values = 0;
-    s_stats.ou_held_over = false;
+    s_stats.ou_freshness = logic::OuFreshness::Unknown;
     s_stats.last_error.clear();
     s_last_ok_us = -1;
     s_refrigerant_service = logic::RefrigerantServiceTracker{};

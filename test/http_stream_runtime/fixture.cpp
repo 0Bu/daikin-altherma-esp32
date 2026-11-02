@@ -103,6 +103,7 @@ void reset() {
         row.off   = i == 0 ? 12 : static_cast<uint8_t>(i);
         row.conv  = i == 0 ? 300 : 217;
         row.held  = i == 1;
+        row.held_unknown = i == 2;
         rows.push_back(std::move(row));
     }
     log.clear();

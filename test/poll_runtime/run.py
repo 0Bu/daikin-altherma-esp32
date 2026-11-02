@@ -24,6 +24,10 @@ CASES = [
     'mqtt_scalar_source', 'refrigerant_one_sensor', 'refrigerant_unidentified_row',
     'refrigerant_unpaired_pressure',
     'outdoor_hx_scale',
+    'held_witness_lost', 'held_witness_lost_while_running', 'held_witness_unreadable',
+    'held_standing_unknown',
+    'held_new_generation', 'held_expired_verdict', 'held_link_lost',
+    'held_no_witness_profile',
 ]
 REGRESSION_ORACLES = {
     'detect_silent': 'detect_silence_breaks_confirmation',
@@ -292,6 +296,83 @@ mutations = {
         'link_revision, std::move(detected_profile), d.page_mask, d.kw_tenths, d.iu_kw_tenths, std::move(d.eeprom)',
         'link_revision, detected_profile, d.page_mask, d.kw_tenths, d.iu_kw_tenths, d.eeprom',
         'detect_model_commit_moves_staged_arguments', 'detect_model_arguments'),
+    'report_lost_witness_as_current': (
+        'const logic::OuFreshness ou_freshness = logic::ou_unit_freshness(rps_known, rps_running);',
+        'const logic::OuFreshness ou_freshness = rps_known && !rps_running ? logic::OuFreshness::HeldOver : logic::OuFreshness::Current;',
+        'held_lost_witness_is_not_a_verdict', 'held_witness_lost'),
+    'report_absent_witness_as_current': (
+        'const logic::OuFreshness ou_freshness = logic::ou_unit_freshness(rps_known, rps_running);',
+        'const logic::OuFreshness ou_freshness = rps_known && !rps_running ? logic::OuFreshness::HeldOver : logic::OuFreshness::Current;',
+        'held_no_witness_profile_stays_unknown', 'held_no_witness_profile'),
+    'never_mark_unknown_rows': (
+        'cv.held_unknown = logic::ou_reading_held_unknown(cv.reg, rps_known);',
+        '/* mutation: only the two-valued held flag travels with the row */',
+        'held_lost_witness_marks_outdoor_rows', 'held_witness_lost'),
+    'mark_every_row_unknown': (
+        'cv.held_unknown = logic::ou_reading_held_unknown(cv.reg, rps_known);',
+        'cv.held_unknown = !rps_known;',
+        'held_lost_witness_leaves_hydronic_rows', 'held_witness_lost'),
+    'keep_readings_after_lost_witness': (
+        'if (logic::ou_reading_dropped(cv.reg, rps_known, recently_stopped)) cv.value.clear();',
+        '/* mutation: a lost reply at rest publishes the last run */',
+        'held_lost_witness_leaves_mqtt', 'held_witness_lost'),
+    'drop_readings_after_the_trend_saw_them': (
+        ['if (logic::ou_reading_dropped(cv.reg, rps_known, recently_stopped)) cv.value.clear();', 'history_record(fresh.data(), fresh.size(), cycle_generation);'],
+        ['/* mutation: dropped too late for the rings */',
+         'history_record(fresh.data(), fresh.size(), cycle_generation); for (auto& cv : fresh) if (logic::ou_reading_dropped(cv.reg, rps_known, recently_stopped)) cv.value.clear();'],
+        'held_lost_witness_reaches_no_trend', 'held_witness_lost'),
+    'drop_every_page_after_lost_witness': (
+        'if (logic::ou_reading_dropped(cv.reg, rps_known, recently_stopped)) cv.value.clear();',
+        'if (!rps_known && recently_stopped) cv.value.clear();',
+        'held_lost_witness_leaves_hydronic_rows', 'held_witness_lost'),
+    'drop_after_a_running_witness': (
+        's_rps_stopped_us         = rps_running ? -1 : witness_now_us;',
+        's_rps_stopped_us         = witness_now_us;',
+        'held_lost_witness_while_running_keeps_readings', 'held_witness_lost_while_running'),
+    'keep_the_stop_through_a_running_read': (
+        's_rps_stopped_us         = rps_running ? -1 : witness_now_us;',
+        'if (!rps_running) s_rps_stopped_us = witness_now_us;',
+        'held_lost_witness_while_running_keeps_readings', 'held_witness_lost_while_running'),
+    'forget_the_stop_on_the_first_lost_sweep': (
+        'if (rps_known) {\n        s_rps_stopped_us         = rps_running ? -1 : witness_now_us;\n        s_rps_stopped_generation = cycle_generation;\n    }',
+        'if (rps_known) { s_rps_stopped_us = rps_running ? -1 : witness_now_us; s_rps_stopped_generation = cycle_generation; } else { s_rps_stopped_us = -1; }',
+        'held_recent_stop_keeps_dropping', 'held_standing_unknown'),
+    'treat_unreadable_witness_as_stopped': (
+        'if (logic::history_parse_tenths(cv.value.c_str(), rps_tenths)) {',
+        'if (logic::history_parse_tenths(cv.value.c_str(), rps_tenths) || true) {',
+        'held_unreadable_witness_is_not_stopped', 'held_witness_unreadable'),
+    'drop_without_a_witness': (
+        'const bool recently_stopped = s_rps_stopped_generation == cycle_generation &&\n                                  x10a_source_time_is_recent(witness_now_us, s_rps_stopped_us);',
+        'const bool recently_stopped = true;',
+        'held_never_read_witness_keeps_readings', 'held_standing_unknown'),
+    'drop_without_a_witness_on_its_profile': (
+        'const bool recently_stopped = s_rps_stopped_generation == cycle_generation &&\n                                  x10a_source_time_is_recent(witness_now_us, s_rps_stopped_us);',
+        'const bool recently_stopped = true;',
+        'held_no_witness_profile_keeps_readings', 'held_no_witness_profile'),
+    'stamp_witness_on_every_sweep': (
+        'if (rps_known) {\n        s_rps_stopped_us         = rps_running ? -1 : witness_now_us;\n        s_rps_stopped_generation = cycle_generation;\n    }',
+        's_rps_stopped_us = rps_running ? -1 : witness_now_us; s_rps_stopped_generation = cycle_generation;',
+        'held_no_witness_profile_keeps_readings', 'held_no_witness_profile'),
+    'stamp_a_silent_witness_on_every_sweep': (
+        'if (rps_known) {\n        s_rps_stopped_us         = rps_running ? -1 : witness_now_us;\n        s_rps_stopped_generation = cycle_generation;\n    }',
+        's_rps_stopped_us = rps_running ? -1 : witness_now_us; s_rps_stopped_generation = cycle_generation;',
+        'held_never_read_witness_keeps_readings', 'held_standing_unknown'),
+    'drop_on_an_old_stop': (
+        'const bool recently_stopped = s_rps_stopped_generation == cycle_generation &&\n                                  x10a_source_time_is_recent(witness_now_us, s_rps_stopped_us);',
+        'const bool recently_stopped = s_rps_stopped_generation == cycle_generation && s_rps_stopped_us >= 0;',
+        'held_old_stop_keeps_readings', 'held_standing_unknown'),
+    'carry_witness_across_generations': (
+        'const bool recently_stopped = s_rps_stopped_generation == cycle_generation &&\n                                  x10a_source_time_is_recent(witness_now_us, s_rps_stopped_us);',
+        'const bool recently_stopped = x10a_source_time_is_recent(witness_now_us, s_rps_stopped_us);',
+        'held_new_generation_forgets_witness', 'held_new_generation'),
+    'report_expired_verdict': (
+        'if (!st.connected) st.ou_freshness = logic::OuFreshness::Unknown;',
+        '/* mutation: the last verdict outlives the link */',
+        'held_verdict_expires_with_source', 'held_expired_verdict'),
+    'end_verdict_only_with_source_age': (
+        'if (!st.connected) st.ou_freshness = logic::OuFreshness::Unknown;',
+        'if (!recent) st.ou_freshness = logic::OuFreshness::Unknown;',
+        'held_verdict_ends_with_link', 'held_link_lost'),
 }
 MUTANT_POSITIVE_CASES = {'narrow_detection_catch_to_transport': ['detect_throw']}
 results = []

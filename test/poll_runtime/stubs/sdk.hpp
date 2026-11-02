@@ -26,6 +26,7 @@ inline unsigned          delay_count = 0, lock_depth = 0, takes = 0, gives = 0;
 inline unsigned          watchdog_resets = 0, watchdog_adds = 0, stack_samples = 0;
 inline unsigned          queries = 0, uart_inits = 0, failures = 0, failed_lock_depth = 999;
 inline unsigned          checkup_unread = 0, dwell_unread = 0, history_commits = 0;
+inline unsigned          history_outdoor_values = 0;
 inline unsigned          skipped_logs      = 0;
 inline size_t            failed_bytes      = 0;
 inline size_t            last_new_bytes    = 0;

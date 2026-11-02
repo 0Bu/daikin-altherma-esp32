@@ -295,7 +295,8 @@ if [ "$REQUIRE_HP" -eq 1 ]; then
                 (.label | type == "string") and (.unit | type == "string") and
                 (.reg | type == "number" and . >= 0 and . <= 255 and floor == .) and
                 (.value == null or (.value | type == "string")) and
-                ((has("held") | not) or (.held | type == "boolean")))' >/dev/null 2>&1; then
+                ((has("held") | not) or (.held | type == "boolean")) and
+                ((has("held_unknown") | not) or (.held_unknown | type == "boolean")))' >/dev/null 2>&1; then
             err "/values has an invalid X10A values envelope or metric type"
             failures=$((failures + 1))
         else

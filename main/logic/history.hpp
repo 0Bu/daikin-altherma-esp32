@@ -195,7 +195,8 @@ inline constexpr TrendDef TRENDS[] = {
     {"comp_rps", TrendKind::Row, 0x30, 0, "", ""}, // INV frequency (rps) — run/idle
     {"eev", TrendKind::Row, 0x30, 3, "", ""},      // Expansion valve 1 (pls) — live page
     // Outdoor — 0x20/0x21 freeze while the compressor rests, so every sample passes the held-over
-    // gate below and the chart shows gaps rather than a staircase of the last run's numbers.
+    // gate below and the chart shows gaps rather than a staircase of the last run's numbers. Only
+    // a profile or unit without a compressor witness cannot have that gate (logic/ou_stale.hpp).
     {"outdoor_air", TrendKind::Row, 0x20, 0, "°C", ""},            // R1T-Outdoor air temp.
     {"outdoor_heat_exchanger", TrendKind::Row, 0x20, 2, "°C", ""}, // outdoor coil R4T
     {"discharge", TrendKind::Row, 0x20, 4, "°C", ""},  // Discharge pipe temp. — the hot side

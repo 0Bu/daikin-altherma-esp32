@@ -1548,7 +1548,7 @@ void outgoing_heartbeat() {
     adapter::hp.values          = 11;
     adapter::hp.rx_ok           = 23;
     adapter::hp.rx_fail_total   = 4;
-    adapter::hp.ou_held_over    = true;
+    adapter::hp.ou_freshness    = daik::logic::OuFreshness::HeldOver;
     adapter::wifi.connected     = true;
     adapter::wifi.rssi          = -47;
     const uint8_t device_mac[6] = {0x02, 0, 0, 0, 0, 1};

@@ -4605,11 +4605,12 @@ static void test_x10a_snapshot_align() {
         uint8_t     off;
         bool        held;
         int         conv;
+        bool        held_unknown = false;
     };
     std::vector<Row> layout = {
         {"A", "old-a", 0x10, 0, false, 217},
         {"B", "old-b", 0x20, 2, false, 105},
-        {"C", "old-c", 0x21, 4, true, 105},
+        {"C", "old-c", 0x21, 4, true, 105, true},
     };
     CHECK(logic::x10a_snapshot_source_matches("generic", 0x1234, "generic", 0x1234));
     CHECK(!logic::x10a_snapshot_source_matches("generic", 0x1234, "altherma_bizone_cb_04_08kw",
@@ -4624,13 +4625,13 @@ static void test_x10a_snapshot_align() {
     const std::string      copied_b = "B";
     const std::vector<Row> source   = {
         {copied_b.c_str(), "2.5", 0x20, 2, true, 105},
-        {"A", "Heating", 0x10, 0, false, 217},
+        {"A", "Heating", 0x10, 0, false, 217, true},
     };
     CHECK(logic::x10a_snapshot_align(layout.data(), layout.size(), source.data(), source.size()) ==
           logic::X10aSnapshotAlignResult::Ok);
-    CHECK(layout[0].value == "Heating" && !layout[0].held);
-    CHECK(layout[1].value == "2.5" && layout[1].held);
-    CHECK(layout[2].value.empty() && !layout[2].held);
+    CHECK(layout[0].value == "Heating" && !layout[0].held && layout[0].held_unknown);
+    CHECK(layout[1].value == "2.5" && layout[1].held && !layout[1].held_unknown);
+    CHECK(layout[2].value.empty() && !layout[2].held && !layout[2].held_unknown);
     for (size_t i = 0; i < layout.size(); i++) CHECK(layout[i].value.capacity() == capacities[i]);
 
     // Validation is transactional: an extra/changed identity, a duplicate source or a value over
@@ -5312,6 +5313,7 @@ static void test_heartbeat() {
     f.values            = 48;
     f.crc_err           = 0;
     f.timeout_err       = 2;
+    f.ou_freshness      = logic::OuFreshness::Current;
     f.rx_received       = 763732;
     f.rx_fails          = 2;
     f.last_ok_s         = 1;
@@ -5643,10 +5645,31 @@ static void test_heartbeat() {
     // SOURCE freshness is its own field, and it is independent of bus health (legacy-209 defect 5):
     // the link is up, the device is publishing, and the outdoor unit is simply not measuring. A
     // consumer that only had bus_connected would read the vanished outdoor keys as a broken link.
-    f.ou_held_over = true;
+    f.ou_freshness = logic::OuFreshness::HeldOver;
     CHECK(build_heartbeat_json(f).find("\"bus_connected\":1,") != std::string::npos);
     CHECK(build_heartbeat_json(f).find("\"bus_ou_held_over\":1,") != std::string::npos);
-    f.ou_held_over = false;
+    // UNKNOWN is the third answer, and the key's absence is how it travels: a 0 here would tell a
+    // consumer the outdoor data is current on the very sweeps no compressor speed was read.
+    f.ou_freshness = logic::OuFreshness::Unknown;
+    CHECK(build_heartbeat_json(f).find("\"bus_connected\":1,") != std::string::npos);
+    CHECK(build_heartbeat_json(f).find("bus_ou_held_over") == std::string::npos);
+    CHECK(HeartbeatFields{}.ou_freshness == logic::OuFreshness::Unknown); // no evidence by default
+    f.ou_freshness = logic::OuFreshness::Current;
+    CHECK(build_heartbeat_json(f).find("\"bus_ou_held_over\":0,") != std::string::npos);
+    // …and the entity has to read that absence as HA's `unknown`. A bare value_json.key renders
+    // empty on a missing key and HA keeps the previous state, so "off" would simply stay on screen.
+    for (int i = 0; i < HEARTBEAT_SENSOR_COUNT; i++) {
+        const std::string cfg =
+            heartbeat_discovery_config("n", "b", "s", "a", HEARTBEAT_SENSORS[i]);
+        const std::string path = HEARTBEAT_SENSORS[i].json_path;
+        const bool optional = path == "bus_ou_held_over"; // the payload's only omitted entity key
+        CHECK(HEARTBEAT_SENSORS[i].may_be_absent == optional);
+        const std::string want =
+            optional ? "\"val_tpl\":\"{{ value_json.get('" + path + "', 'None') }}\""
+                     : "\"val_tpl\":\"{{ value_json." + path + " }}\"";
+        CHECK(cfg.find(want) != std::string::npos);
+        if (optional) CHECK(cfg.find("\"pl_on\":\"1\",\"pl_off\":\"0\",") != std::string::npos);
+    }
 
     // The SNTP wall clock and the dBm->% remap are gone from the payload with the two entities they
     // fed (RETIRED_HEARTBEAT_SENSORS). `time` said what HA's own last_updated already said, at one
@@ -14197,6 +14220,34 @@ static void test_ou_stale() {
     CHECK(!ou_reading_held_over(0x20, /*known=*/false, /*running=*/false)); // unknown -> current
     CHECK(!ou_reading_held_over(0x61, /*known=*/true, /*running=*/false));  // hydronic stays live
 
+    // …but "not held over" is not "current" either. The unit-level answer has three values, the
+    // row-level form marks exactly the outdoor pages, and no combination is both held and unknown.
+    using logic::ou_reading_held_unknown;
+    using logic::ou_unit_freshness;
+    using logic::OuFreshness;
+    CHECK(ou_unit_freshness(/*known=*/true, /*running=*/true) == OuFreshness::Current);
+    CHECK(ou_unit_freshness(/*known=*/true, /*running=*/false) == OuFreshness::HeldOver);
+    CHECK(ou_unit_freshness(/*known=*/false, /*running=*/false) == OuFreshness::Unknown);
+    CHECK(ou_unit_freshness(/*known=*/false, /*running=*/true) == OuFreshness::Unknown);
+    CHECK(ou_reading_held_unknown(0x20, /*known=*/false));
+    CHECK(ou_reading_held_unknown(0x21, /*known=*/false));
+    CHECK(!ou_reading_held_unknown(0x20, /*known=*/true));
+    CHECK(!ou_reading_held_unknown(0x30, /*known=*/false)); // the witness's own page
+    CHECK(!ou_reading_held_unknown(0x61, /*known=*/false)); // hydronic stays live
+    for (unsigned reg : {0x10u, 0x20u, 0x21u, 0x30u, 0x61u})
+        for (bool known : {false, true})
+            for (bool running : {false, true}) {
+                const bool held    = ou_reading_held_over(reg, known, running);
+                const bool unknown = ou_reading_held_unknown(reg, known);
+                CHECK(!(held && unknown));
+            }
+    // Only a compressor that read as stopped moments ago drops an unqualified outdoor reading.
+    using logic::ou_reading_dropped;
+    CHECK(ou_reading_dropped(0x20, /*known=*/false, /*recently_stopped=*/true));
+    CHECK(!ou_reading_dropped(0x20, /*known=*/false, /*recently_stopped=*/false));
+    CHECK(!ou_reading_dropped(0x20, /*known=*/true, /*recently_stopped=*/true));
+    CHECK(!ou_reading_dropped(0x61, /*known=*/false, /*recently_stopped=*/true));
+
     // The compressor WITNESS, now a shared predicate: the poll engine marks its cache with it
     // (main/hp_poll.cpp, so the MQTT bridge can withhold a held-over reading — legacy-209 defect 5)
     // and the trend ring's trend_rps_row() finds its row with it. Two callers, one rule; a second
@@ -14215,9 +14266,18 @@ static void test_ou_stale() {
     // compressor witness must NOT. A future generated profile that moves "INV frequency (rps)" onto
     // 0x20/0x21 would make the run state stale-derived and must fail loudly here.
     int rps_rows = 0, out_rows = 0, disch_rows = 0, inv_rows = 0, ct_rows = 0, rp_rows = 0,
-        checked = 0;
+        checked = 0, unknown_only_profiles = 0;
     for (const auto& p : def::profiles) {
         if (!def::is_detection_model(p.id)) continue;
+        // A profile with outdoor rows and no witness never leaves Unknown, so the third answer is a
+        // standing state on part of the catalog rather than a transient of a lost page.
+        bool has_witness = false, has_outdoor_page = false;
+        for (size_t i = 0; i < p.count; i++) {
+            has_witness =
+                has_witness || logic::ou_is_rps_witness(p.values[i].label, p.values[i].reg);
+            has_outdoor_page = has_outdoor_page || ou_page_holds_over(p.values[i].reg);
+        }
+        if (has_outdoor_page && !has_witness) unknown_only_profiles++;
         for (size_t i = 0; i < p.count; i++) {
             const char*    l   = p.values[i].label;
             const unsigned reg = p.values[i].reg;
@@ -14263,6 +14323,7 @@ static void test_ou_stale() {
     }
     CHECK(checked >= 39);  // the current detectable Altherma catalog (mirrors test_lwt_select)
     CHECK(rps_rows >= 20); // the witness exists across the catalog, not on one profile
+    CHECK(unknown_only_profiles > 0);
     CHECK(out_rows >= 20);
     CHECK(disch_rows >= 20);
     // Every detectable profile carries the INV row, and only about half carry CT clamps — so the

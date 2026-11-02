@@ -63,7 +63,7 @@ IDs are stable and never reused; gaps identify retired entries. Each feature is 
 | 49 | Converter-derived JSON types remain stable across state changes | ✅ 🧪 | [`logic/convert.hpp`](../main/logic/convert.hpp), [`logic/mqtt_group.hpp`](../main/logic/mqtt_group.hpp) |
 | 50 | Structural availability adjudication, including absent hardware, conditional zeros and bit-overlay ambiguity | ✅ 🧪 | [`logic/availability.hpp`](../main/logic/availability.hpp) |
 | 51 | Evidence-backed converter overrides for demonstrably incorrect generated definitions | ✅ 🧪 | [`logic/conv_override.hpp`](../main/logic/conv_override.hpp) |
-| 52 | Held outdoor-unit pages are withheld as current measurements | ✅ 🧪 | [`logic/ou_stale.hpp`](../main/logic/ou_stale.hpp), [`hp_poll.cpp`](../main/hp_poll.cpp) |
+| 52 | Held outdoor-unit pages are withheld as current measurements; an unread compressor state is reported as unknown | ✅ 🧪 | [`logic/ou_stale.hpp`](../main/logic/ou_stale.hpp), [`hp_poll.cpp`](../main/hp_poll.cpp) |
 | 53 | Numeric error/warning flags alongside textual fault codes | ✅ 🧪 | [`logic/fault_state.hpp`](../main/logic/fault_state.hpp) |
 | 54 | Stale/unverifiable dashboard GIF blocks merge; replacement also requires current-head review | ✅ | [`check_ui_gif.mjs`](../tools/uigif/check_ui_gif.mjs), [`require-pr-gates.sh`](../tools/agent-hooks/require-pr-gates.sh), [`record-dashboard-gif.sh`](../scripts/record-dashboard-gif.sh) |
 | 56 | Group-qualified discovery and unique IDs prevent duplicate-label entity collisions | ✅ 🧪 | [`logic/discovery.hpp`](../main/logic/discovery.hpp), [`HOME_ASSISTANT.md`](HOME_ASSISTANT.md) |

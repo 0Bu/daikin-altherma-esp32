@@ -297,13 +297,17 @@ proof of refrigerant charge or valve position.
 The response object has a `values` (X10A) array and a separate `modbus` array only while the staged
 HomeHub snapshot is live. An omitted `modbus` is different from an empty array. Do not merge sources.
 X10A rows contain `label`, `value`, `unit`, `reg`, plus applicable `binary`, `binary_semantic`,
-`held`, `x10a_group`, `concept`, `dwell_s`, `dwell_min`, `dwell_blind_s`.
+`held`, `held_unknown`, `x10a_group`, `concept`, `dwell_s`, `dwell_min`, `dwell_blind_s`.
 Their `value` is a string or null.
 
 `reg` is the page, not a per-value address. `x10a_group` disambiguates labels reused across pages;
 `concept` is structural HomeHub pairing. Selector semantics prevent valve/heater paths being shown
-as generic switches. `held:true` means the outdoor page has stopped refreshing. An absent duration
-is unknown, zero is a newly observed transition, and `dwell_min:true` makes duration a lower bound.
+as generic switches. `held:true` means the outdoor page has stopped refreshing. `held_unknown:true`
+marks a row from an outdoor page (`0x20`/`0x21`) in a sweep without a readable compressor speed: the
+page may be live or held. If the speed last read as stopped within the
+[X10A source age](MQTT.md#outbound-availability), `value` is null; otherwise the value stays. An
+absent duration is unknown, zero is a newly observed transition, and `dwell_min:true` makes duration a
+lower bound.
 Dwell metadata must match the copied cache revision, source identity and decoded state; a mismatch
 is unknown rather than a duration borrowed from another reading.
 
@@ -332,6 +336,9 @@ age and omitted before clock sync. `epoch` is captured with the samples; `boot_i
 Unavailable age metadata or an epoch changed before emission returns 503. Clients must reject
 responses superseded by a newer status/source generation.
 `held` marks eligible X10A outdoor nulls as held-over; all other source rasters leave it empty.
+`v` does not record an unknown compressor state. A sweep dropped after a stop cannot put a number into
+its bucket, but any other outdoor sample without a readable speed stays a number, so a number is not
+proof that the page was current.
 The circulation-state trend is selected through `source=x10a` but reports its physical source as
 `"mqtt"` in the response.
 `source=room&row=room_temp` returns the independent MQTT actual-temperature trend with `source:"room"`.

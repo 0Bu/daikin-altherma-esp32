@@ -171,6 +171,7 @@ An active BSH may explain electrical tank heating while compressor/pump/flow are
 | X10A unavailable/held, structurally paired live HomeHub | Show the independent HomeHub reading in petrol; inspector names its Modbus row |
 | Neither instrument can supply a current valid reading | Show `—`; explain the specific reason without substituting zero |
 | Stopped outdoor unit | Withhold held X10A outdoor-page readings; independently polled HomeHub may continue |
+| Outdoor page, compressor state unknown | Interim, until the dashboard reads `held_unknown`: draw a kept value as current X10A; a value the firmware dropped after a stop shows `—`. Neither takes a HomeHub stand-in, even when one is paired and live |
 | HTTP unreachable | Stop unsupported motion, identify lost device contact and keep retrying |
 
 A successful Modbus read proves transport freshness. With no source timestamp, the underlying
