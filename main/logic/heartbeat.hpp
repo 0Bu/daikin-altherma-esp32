@@ -310,7 +310,7 @@ inline std::string build_heartbeat_json(const HeartbeatFields& f) {
     json_append_integer_field(j, ",\"bus_crc_err\":", f.crc_err);
     json_append_integer_field(j, ",\"bus_timeout_err\":", f.timeout_err);
     // 1/0 NUMBER like the three connectivity flags above, and for the same measured reason. ABSENT,
-    // not 0, without a compressor reading: 0 would claim that the outdoor pages are current.
+    // not 0, without a compressor reading: 0 would claim the unit is refreshing its outdoor pages.
     if (f.ou_freshness != logic::OuFreshness::Unknown) {
         j += ",\"bus_ou_held_over\":";
         j += f.ou_freshness == logic::OuFreshness::HeldOver ? "1" : "0";

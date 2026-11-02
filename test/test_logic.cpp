@@ -14236,9 +14236,17 @@ static void test_ou_stale() {
     CHECK(!ou_reading_held_unknown(0x61, /*known=*/false)); // hydronic stays live
     for (unsigned reg : {0x10u, 0x20u, 0x21u, 0x30u, 0x61u})
         for (bool known : {false, true})
-            for (bool running : {false, true})
-                CHECK(!(ou_reading_held_over(reg, known, running) &&
-                        ou_reading_held_unknown(reg, known)));
+            for (bool running : {false, true}) {
+                const bool held    = ou_reading_held_over(reg, known, running);
+                const bool unknown = ou_reading_held_unknown(reg, known);
+                CHECK(!(held && unknown));
+            }
+    // Only one lost reply drops the reading. A witness that is not there to lose keeps it.
+    using logic::ou_reading_dropped;
+    CHECK(ou_reading_dropped(0x20, /*known=*/false, /*recent=*/true));
+    CHECK(!ou_reading_dropped(0x20, /*known=*/false, /*recent=*/false));
+    CHECK(!ou_reading_dropped(0x20, /*known=*/true, /*recent=*/true));
+    CHECK(!ou_reading_dropped(0x61, /*known=*/false, /*recent=*/true));
 
     // The compressor WITNESS, now a shared predicate: the poll engine marks its cache with it
     // (main/hp_poll.cpp, so the MQTT bridge can withhold a held-over reading — legacy-209 defect 5)

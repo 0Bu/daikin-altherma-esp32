@@ -152,6 +152,11 @@ static SaturationWitness      s_sat_witness;
 static uint32_t               s_sat_witness_generation = 0;  // poll-task-owned
 static int64_t                s_sat_witness_us         = -1;
 
+// When the compressor witness last answered, which tells one lost reply from a witness this profile
+// or unit does not provide (logic/ou_stale.hpp). The same ownership and age boundary as above.
+static uint32_t s_rps_witness_generation = 0; // poll-task-owned
+static int64_t  s_rps_witness_us         = -1;
+
 static void retire_saturation_witness() noexcept {
     s_sat_witness            = SaturationWitness{};
     s_sat_witness_generation = 0;
@@ -492,9 +497,14 @@ static void poll_once() {
         }
         break;
     }
+    const int64_t witness_now_us = esp_timer_get_time();
+    const bool    witness_recent = s_rps_witness_generation == cycle_generation &&
+                                x10a_source_time_is_recent(witness_now_us, s_rps_witness_us);
     for (auto& cv : fresh) {
         cv.held         = logic::ou_reading_held_over(cv.reg, rps_known, rps_running);
         cv.held_unknown = logic::ou_reading_held_unknown(cv.reg, rps_known);
+        // Non-allocating: the row stays, as for a value that failed to decode.
+        if (logic::ou_reading_dropped(cv.reg, rps_known, witness_recent)) cv.value.clear();
     }
     const logic::OuFreshness ou_freshness = logic::ou_unit_freshness(rps_known, rps_running);
     refrigerant_service_sample(fresh.data(), fresh.size(), rps_known, rps_running,
@@ -563,6 +573,10 @@ static void poll_once() {
         s_sat_witness = sat_out;
         s_sat_witness_generation = cycle_generation;
         s_sat_witness_us               = sat_out_us;
+        if (rps_known) {
+            s_rps_witness_us         = witness_now_us;
+            s_rps_witness_generation = cycle_generation;
+        }
         s_refrigerant_service_coverage = service_coverage;
         logic::refrigerant_service_record(s_refrigerant_service, service_coverage,
                                           s_refrigerant_service_cycle_sample,

@@ -8,11 +8,11 @@
       },
       "hosted_confirmation": "Hosted confirmation pending: only ou_stale.hpp uses the measured local GCC 15 aarch64 inventory as the gcc-15-github-linux-ubuntu26 candidate. No hosted execution is claimed; authoritative GitHub CI confirmation is required before merge. All other hosted inventories are unchanged.",
       "runner": "scripts/run-mock-tests.sh --coverage",
-      "scope": "Three-state outdoor freshness: ou_unit_freshness() and ou_reading_held_unknown() add the third answer about the outdoor pages. Unit checks take every outcome: 8/10 to 11/12 (Clang), 16/16 to 24/24 (GCC 13 and GCC 15). Every other header inventory, every historical ratio and the 95-percent executable-line floor are unchanged.",
+      "scope": "Three-state outdoor freshness: ou_unit_freshness(), ou_reading_held_unknown() and ou_reading_dropped() add the third answer about the outdoor pages and what one lost reply does to a reading. Unit checks take every outcome: 8/10 to 12/12 (Clang), 16/16 to 28/28 (GCC 13 and GCC 15). Every other header inventory, every historical ratio and the 95-percent executable-line floor are unchanged.",
       "validation_boundary": "Clang, GCC 13 and GCC 15 measured the same source and test revision.",
       "source": "main/logic/ou_stale.hpp",
-      "source_sha256": "8056031432a6560660edcc027c86582aaf62cfa45dffcfefdc48cb0707731e9d",
-      "test_source_sha256": "f5731e0eeeea8bfc9073e97b08c433eeb0c62466bc5607c2149f878f592276b2"
+      "source_sha256": "634c9213b191acf18da39508ee1944c1473f5d4c4d0d480848a2cb32c0fab89b",
+      "test_source_sha256": "ce51f3f8dff60586f43d14d8a5d2b93f02477442a3917cfb0fb713f8169d9ea0"
     },
     {
       "compilers": {
@@ -25,8 +25,8 @@
       "scope": "Three-state outdoor freshness: the heartbeat omits bus_ou_held_over while the compressor state is unknown and discovery reads a may_be_absent key through .get(), so the entity becomes unknown. Unit checks reach all three states and both template forms; the outcomes left untaken are the unwind edges of the added string appends: 203/372 to 211/384 (Clang), 176/300 to 184/312 (GCC 13 and GCC 15). Every other header inventory, every historical ratio and the 95-percent executable-line floor are unchanged.",
       "validation_boundary": "Clang, GCC 13 and GCC 15 measured the same source and test revision.",
       "source": "main/logic/heartbeat.hpp",
-      "source_sha256": "89a4b93eb0791f3ec65356b438ebdbfc3f7ebea745a960476011d33e17e7ca45",
-      "test_source_sha256": "f5731e0eeeea8bfc9073e97b08c433eeb0c62466bc5607c2149f878f592276b2"
+      "source_sha256": "cdf035b49559cdac8ca49d2c9d9e78341f3859a09a8b21a601efbb4f1edb71d9",
+      "test_source_sha256": "ce51f3f8dff60586f43d14d8a5d2b93f02477442a3917cfb0fb713f8169d9ea0"
     },
     {
       "compilers": {
@@ -1376,7 +1376,7 @@
       },
       "main/logic/ou_stale.hpp": {
         "outcomes": 12,
-        "taken": 11
+        "taken": 12
       },
       "main/logic/outdoor_evidence.hpp": {
         "outcomes": 21,
@@ -1789,8 +1789,8 @@
         "taken": 151
       },
       "main/logic/ou_stale.hpp": {
-        "outcomes": 24,
-        "taken": 24
+        "outcomes": 28,
+        "taken": 28
       },
       "main/logic/outdoor_evidence.hpp": {
         "outcomes": 29,
@@ -2211,8 +2211,8 @@
         "taken": 151
       },
       "main/logic/ou_stale.hpp": {
-        "outcomes": 24,
-        "taken": 24
+        "outcomes": 28,
+        "taken": 28
       },
       "main/logic/outdoor_evidence.hpp": {
         "outcomes": 29,
@@ -2633,8 +2633,8 @@
         "taken": 151
       },
       "main/logic/ou_stale.hpp": {
-        "outcomes": 24,
-        "taken": 24
+        "outcomes": 28,
+        "taken": 28
       },
       "main/logic/outdoor_evidence.hpp": {
         "outcomes": 29,

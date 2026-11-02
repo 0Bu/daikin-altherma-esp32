@@ -17,12 +17,12 @@
 // readings, not a stale one … a held-over reading would assert a value nobody is still measuring" —
 // and this applies the same rule to one sleeping UNIT instead of one silent BUS.
 //
-// Host-testable twin of www/js/schematic.js's `d.ouHeldOver` (like logic/lwt_select.hpp there is no
-// firmware caller): the rule keys on the generated def/ profile REGISTER ids, which are C++, so the
-// CI logic-test gates it against the whole catalog — every profile must keep the readings the UI
-// BLANKS on a held-over page, AND must keep the readings that DECIDE the run state on a live one.
-// That second half is the load-bearing one: it is what makes "Standby — not running" trustworthy
-// while the pills around it are blank.
+// The poll engine and the trend rings apply this directly, and www/js/schematic.js's `d.ouHeldOver`
+// is its twin for held-over: the rule keys on the generated def/ profile REGISTER ids, which are
+// C++, so the CI logic-test gates it against the whole catalog — every profile must keep the
+// readings the UI BLANKS on a held-over page, AND must keep the readings that DECIDE the run state
+// on a live one. That second half is the load-bearing one: it is what makes "Standby — not running"
+// trustworthy while the pills around it are blank.
 //
 // WHAT the UI does with a held-over reading is the UI's call, and it has moved once and back:
 // v1.0.13 showed the pills GREYED with a caption, which is reverted — the drawing keeps ONE
@@ -56,9 +56,9 @@ constexpr bool ou_reading_held_over(unsigned reg, bool rps_known, bool rps_runni
 }
 
 // The unit-level answer has THREE values, and the third is the reason it is not a bool. "Not held
-// over" is a claim that the pages are current; with no readable compressor speed the bridge has no
-// evidence for that claim, only no evidence against it. A consumer handed `false` there cannot tell
-// a running unit from one this firmware could not ask.
+// over" is a claim that the unit is refreshing these pages; with no readable compressor speed the
+// bridge has no evidence for that claim, only no evidence against it. A consumer handed `false`
+// there cannot tell a running unit from one this firmware could not ask.
 enum class OuFreshness : uint8_t { Unknown, Current, HeldOver };
 
 constexpr OuFreshness ou_unit_freshness(bool rps_known, bool rps_running) {
@@ -68,12 +68,21 @@ constexpr OuFreshness ou_unit_freshness(bool rps_known, bool rps_running) {
 }
 
 // The per-row form of Unknown: an outdoor-page reading in a sweep with no compressor reading. It
-// may be live and it may be the last run's number. Kept apart from ou_reading_held_over() because
-// the two are acted on differently: a held reading is withheld from MQTT, while this one stays
-// published, since withholding on a guess would blank a unit for good on every profile without a
-// witness.
+// may be live and it may be the last run's number, so it is kept apart from ou_reading_held_over().
 constexpr bool ou_reading_held_unknown(unsigned reg, bool rps_known) {
     return !rps_known && ou_page_holds_over(reg);
+}
+
+// What happens to that reading depends on WHY the speed is missing. A witness that answered moments
+// ago and not in this sweep is one lost reply: the reading is dropped, exactly as if its own page
+// had not answered. Measured on a resting 4-8 kW unit (2026-11-02): those sweeps put the last run's
+// numbers on the MQTT state topic about three times an hour, and the 24-hour outdoor chart showed
+// them as points inside its held gaps. With no recent witness the state is standing rather than one
+// sweep long (a profile without the row, a unit that never answers that page): dropping there would
+// blank the outdoor unit for good on a guess, so the reading stays and only `held_unknown`
+// qualifies it.
+constexpr bool ou_reading_dropped(unsigned reg, bool rps_known, bool witness_recent) {
+    return witness_recent && ou_reading_held_unknown(reg, rps_known);
 }
 
 // Is THIS row the compressor witness — "INV frequency (rps)" — that makes the rule above decidable
@@ -87,10 +96,10 @@ constexpr bool ou_reading_held_unknown(unsigned reg, bool rps_known) {
 // of them. There is nothing to alias.
 //
 // A per-row predicate rather than a search, because there are now TWO callers with different row
-// containers — the poll engine's cache (main/hp_poll.cpp, which blanks the held-over readings
-// before they reach MQTT) and the trend ring's parallel arrays (history.hpp's trend_rps_row below
-// it). One predicate, two loops; a second copy of the pattern is what would re-open legacy-209
-// defect 5.
+// containers — the poll engine's cache (main/hp_poll.cpp, which marks the held-over readings so
+// that they do not reach MQTT) and the trend ring's parallel arrays (history.hpp's trend_rps_row
+// below it). One predicate, two loops; a second copy of the pattern is what would re-open
+// legacy-209 defect 5.
 inline bool ou_is_rps_witness(const char* label, unsigned reg) {
     return label && lwt_ci_contains(label, "inv frequency") && !ou_page_holds_over(reg);
 }

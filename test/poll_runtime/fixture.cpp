@@ -942,43 +942,117 @@ static const daik::CachedValue& cached_row(uint8_t reg) {
     return daik::s_cache.front();
 }
 
-// The three answers about the outdoor pages through the real sweep: the row marks and the
-// heartbeat's source travel together, and only a read compressor speed may ever say "current" or
-// "held over". Synthetic bytes, not physical readings.
+static int page_values(uint8_t reg) {
+    int values = 0;
+    for (const auto& row : daik::s_cache)
+        if (row.reg == reg && !row.value.empty()) ++values;
+    return values;
+}
+
+static std::string cached_mqtt_json() {
+    std::string out;
+    daik::append_x10a_cache_json(out, daik::s_cache);
+    return out;
+}
+
+static void next_sweep() {
+    sdk::now_us += 1000000;
+    daik::poll_once();
+}
+
+// The three answers about the outdoor pages through the real sweep: the row marks, the values and
+// the heartbeat's source travel together, and only a read compressor speed may ever say "current"
+// or "held over". Synthetic bytes, not physical readings.
 static void run_held(const char* name) {
     using daik::hp_stats;
-    using daik::poll_once;
     using daik::logic::OuFreshness;
     if (!std::strcmp(name, "held_witness_lost")) {
         setup_populated();
-        poll_once();
+        put16(0x20, 0, 95);
+        put16(0x21, 0, 50);
+        next_sweep();
         oracle(hp_stats().ou_freshness == OuFreshness::Current && !cached_row(0x20).held &&
-                   !cached_row(0x20).held_unknown,
+                   !cached_row(0x20).held_unknown && page_values(0x20) > 0,
                "held_running_reads_current");
+        oracle(cached_mqtt_json().find("outdoor_air") != std::string::npos,
+               "held_running_publishes_outdoor_readings");
         adapter::pages[0x30][0] = 0;
-        sdk::now_us += 1000000;
-        poll_once();
+        next_sweep();
         oracle(hp_stats().ou_freshness == OuFreshness::HeldOver && cached_row(0x20).held &&
-                   !cached_row(0x20).held_unknown,
+                   !cached_row(0x20).held_unknown && page_values(0x20) > 0,
                "held_stopped_reads_held_over");
-        // The outdoor page still answers; only the page that says whether it is current was lost.
+        // The outdoor pages still answer; only the page that says whether they are current was
+        // lost.
         adapter::available[0x30] = false;
-        sdk::now_us += 1000000;
-        poll_once();
+        next_sweep();
         oracle(hp_stats().ou_freshness == OuFreshness::Unknown,
                "held_lost_witness_is_not_a_verdict");
         oracle(!cached_row(0x20).held && cached_row(0x20).held_unknown && !cached_row(0x21).held &&
                    cached_row(0x21).held_unknown,
                "held_lost_witness_marks_outdoor_rows");
-        oracle(!cached_row(0x61).held && !cached_row(0x61).held_unknown,
+        oracle(page_values(0x20) == 0 && page_values(0x21) == 0,
+               "held_lost_witness_drops_outdoor_readings");
+        oracle(cached_mqtt_json().find("outdoor_air") == std::string::npos,
+               "held_lost_witness_leaves_mqtt");
+        oracle(!cached_row(0x61).held && !cached_row(0x61).held_unknown && page_values(0x61) > 0,
                "held_lost_witness_leaves_hydronic_rows");
+        adapter::available[0x30] = true;
+        next_sweep();
+        oracle(hp_stats().ou_freshness == OuFreshness::HeldOver && cached_row(0x20).held &&
+                   page_values(0x20) > 0,
+               "held_witness_returns");
+    } else if (!std::strcmp(name, "held_witness_unreadable")) {
+        setup_populated();
+        put16(0x20, 0, 95);
+        next_sweep();
+        // The page answers with nothing to decode: the row exists, the speed does not.
+        adapter::page_lengths[0x30] = 0;
+        next_sweep();
+        oracle(hp_stats().ou_freshness == OuFreshness::Unknown && cached_row(0x20).held_unknown &&
+                   !cached_row(0x20).held && page_values(0x20) == 0,
+               "held_unreadable_witness_is_not_stopped");
+    } else if (!std::strcmp(name, "held_standing_unknown")) {
+        setup_populated();
+        put16(0x20, 0, 95);
+        adapter::available[0x30] = false;
+        next_sweep();
+        oracle(hp_stats().ou_freshness == OuFreshness::Unknown && cached_row(0x20).held_unknown &&
+                   page_values(0x20) > 0,
+               "held_never_read_witness_keeps_readings");
+        adapter::available[0x30] = true;
+        next_sweep();
+        adapter::available[0x30] = false;
+        next_sweep();
+        oracle(page_values(0x20) == 0, "held_recent_witness_drops_readings");
+        sdk::now_us += 16000000; // past the source-age boundary: no longer one lost reply
+        next_sweep();
+        oracle(cached_row(0x20).held_unknown && page_values(0x20) > 0,
+               "held_old_witness_keeps_readings");
+    } else if (!std::strcmp(name, "held_new_generation")) {
+        setup_populated();
+        put16(0x20, 0, 95);
+        next_sweep();
+        daik::hp_poll_reconfigure();
+        adapter::available[0x30] = false;
+        next_sweep();
+        oracle(cached_row(0x20).held_unknown && page_values(0x20) > 0,
+               "held_new_generation_forgets_witness");
     } else if (!std::strcmp(name, "held_expired_verdict")) {
         setup_populated();
         adapter::pages[0x30][0] = 0;
-        poll_once();
+        next_sweep();
         oracle(hp_stats().ou_freshness == OuFreshness::HeldOver, "held_expiry_starts_held_over");
         sdk::now_us += 16000000; // past the X10A liveness window, with no sweep in between
         oracle(hp_stats().ou_freshness == OuFreshness::Unknown, "held_verdict_expires_with_source");
+    } else if (!std::strcmp(name, "held_link_lost")) {
+        setup_populated();
+        adapter::pages[0x30][0] = 0;
+        next_sweep();
+        oracle(hp_stats().ou_freshness == OuFreshness::HeldOver, "held_link_lost_starts_held_over");
+        adapter::uart_ok = false; // the source age is still recent; the link is not connected
+        next_sweep();
+        oracle(hp_stats().last_ok_s < 15 && hp_stats().ou_freshness == OuFreshness::Unknown,
+               "held_verdict_ends_with_link");
     } else if (!std::strcmp(name, "held_no_witness_profile")) {
         setup("altherma_lt_ca_cb_04_08kw"); // outdoor pages, no "INV frequency (rps)" row
         adapter::populated = true;
@@ -986,11 +1060,12 @@ static void run_held(const char* name) {
             adapter::available[reg]    = true;
             adapter::page_lengths[reg] = 40;
         }
-        poll_once();
+        put16(0x20, 0, 95);
+        next_sweep();
         oracle(hp_stats().ou_freshness == OuFreshness::Unknown,
                "held_no_witness_profile_stays_unknown");
-        oracle(!cached_row(0x20).held && cached_row(0x20).held_unknown,
-               "held_no_witness_profile_marks_outdoor_rows");
+        oracle(!cached_row(0x20).held && cached_row(0x20).held_unknown && page_values(0x20) > 0,
+               "held_no_witness_profile_keeps_readings");
     } else
         oracle(false, "known_held_case");
 }

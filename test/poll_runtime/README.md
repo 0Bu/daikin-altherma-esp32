@@ -31,6 +31,11 @@ tallies, saturation carry, tickets and the boot capture budget do not leak betwe
   rows fresh it reads the hydronic one, a lost 0x62 page leaves the side missing while 0x20/12 is
   fresh, a heat-sink temperature at 0x20/12 is never read as the high-side pressure, and a fresh
   unpaired 0x20/14 pressure is read as neither side.
+- Held cases run the compressor witness through the real sweep: running, stopped, a lost or
+  unreadable speed reply (that sweep's outdoor readings dropped, also from the MQTT state), a witness
+  that never answered, answered too long ago or belongs to an older target generation, and a profile
+  without one (readings kept and marked unknown), plus the heartbeat source ending with the link and
+  with the source age.
 
 Every semantic mutation must compile and fail its named oracle. Compile commands, complete input
 hashes, case results and mutation output are retained in the printed temporary `evidence.json`.
