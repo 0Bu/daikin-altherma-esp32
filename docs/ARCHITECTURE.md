@@ -170,11 +170,11 @@ Outdoor pages can keep returning a previous run's values while the compressor re
 `logic/ou_stale.hpp` classifies them from the page and a live compressor witness. HTTP keeps the
 reading with `held:true`, history records a held gap, and MQTT withholds that row. Without a
 readable witness a held value cannot be told from a live one, which is a third state rather than
-"not held"; HTTP and the heartbeat report it as unknown. A witness read within the 15-second source
-age makes this one lost reply, and the sweep's outdoor readings are dropped like an unanswered page.
-Without one (no compressor-speed row, or a page that stays silent) the readings stay in MQTT and
-history, and no firmware diagnosis takes them as X10A outdoor evidence. A new payload timestamp cannot
-make a frozen measurement fresh. Binary selectors and raw overlay bits keep their
+"not held"; HTTP and the heartbeat report it as unknown. If the witness last read as stopped within
+the same source age, the sweep's outdoor readings are dropped. Otherwise (a running compressor, no
+compressor-speed row, or a speed that stays unread) they stay in MQTT and history. Either way no
+firmware diagnosis takes them as X10A outdoor evidence. A new payload timestamp cannot make a frozen
+measurement fresh. Binary selectors and raw overlay bits keep their
 specific semantics; a selected valve path or heater stage is not automatically an ON/OFF state.
 
 `state_dwell.cpp` measures eligible switched/fault states. Its v4 record publishes observed elapsed

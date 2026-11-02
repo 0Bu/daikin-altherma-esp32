@@ -14241,12 +14241,12 @@ static void test_ou_stale() {
                 const bool unknown = ou_reading_held_unknown(reg, known);
                 CHECK(!(held && unknown));
             }
-    // Only one lost reply drops the reading. A witness that is not there to lose keeps it.
+    // Only a compressor that read as stopped moments ago drops an unqualified outdoor reading.
     using logic::ou_reading_dropped;
-    CHECK(ou_reading_dropped(0x20, /*known=*/false, /*recent=*/true));
-    CHECK(!ou_reading_dropped(0x20, /*known=*/false, /*recent=*/false));
-    CHECK(!ou_reading_dropped(0x20, /*known=*/true, /*recent=*/true));
-    CHECK(!ou_reading_dropped(0x61, /*known=*/false, /*recent=*/true));
+    CHECK(ou_reading_dropped(0x20, /*known=*/false, /*recently_stopped=*/true));
+    CHECK(!ou_reading_dropped(0x20, /*known=*/false, /*recently_stopped=*/false));
+    CHECK(!ou_reading_dropped(0x20, /*known=*/true, /*recently_stopped=*/true));
+    CHECK(!ou_reading_dropped(0x61, /*known=*/false, /*recently_stopped=*/true));
 
     // The compressor WITNESS, now a shared predicate: the poll engine marks its cache with it
     // (main/hp_poll.cpp, so the MQTT bridge can withhold a held-over reading — legacy-209 defect 5)

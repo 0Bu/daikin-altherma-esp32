@@ -73,16 +73,17 @@ constexpr bool ou_reading_held_unknown(unsigned reg, bool rps_known) {
     return !rps_known && ou_page_holds_over(reg);
 }
 
-// What happens to that reading depends on WHY the speed is missing. A witness that answered moments
-// ago and not in this sweep is one lost reply: the reading is dropped, exactly as if its own page
-// had not answered. Measured on a resting 4-8 kW unit (2026-11-02): those sweeps put the last run's
-// numbers on the MQTT state topic about three times an hour, and the 24-hour outdoor chart showed
-// them as points inside its held gaps. With no recent witness the state is standing rather than one
-// sweep long (a profile without the row, a unit that never answers that page): dropping there would
-// blank the outdoor unit for good on a guess, so the reading stays and only `held_unknown`
-// qualifies it.
-constexpr bool ou_reading_dropped(unsigned reg, bool rps_known, bool witness_recent) {
-    return witness_recent && ou_reading_held_unknown(reg, rps_known);
+// What happens to that reading depends on the last thing the witness said. A compressor that read
+// as stopped moments ago is most likely still stopped, and this number the last run's: the reading
+// is dropped, as for a value that failed to decode. Measured on a resting 4-8 kW unit (2026-11-02):
+// those sweeps put the last run's numbers on the MQTT state topic about three times an hour, and
+// the 24-hour outdoor chart showed them as points inside its held gaps. Every other reading stays,
+// and only `held_unknown` qualifies it. A compressor that read as running moments ago is refreshing
+// these pages. With no recent reading at all the state is standing (a profile without the row, a
+// unit that never answers that page), and dropping would blank the outdoor unit for good on a
+// guess.
+constexpr bool ou_reading_dropped(unsigned reg, bool rps_known, bool recently_stopped) {
+    return recently_stopped && ou_reading_held_unknown(reg, rps_known);
 }
 
 // Is THIS row the compressor witness — "INV frequency (rps)" — that makes the rule above decidable
@@ -95,10 +96,10 @@ constexpr bool ou_reading_dropped(unsigned reg, bool rps_known, bool witness_rec
 // row is spelled "INV frequency (rps)" in all 27 profiles that carry one, on page 0x30 in every one
 // of them. There is nothing to alias.
 //
-// A per-row predicate rather than a search, because there are now TWO callers with different row
-// containers — the poll engine's cache (main/hp_poll.cpp, which marks the held-over readings so
-// that they do not reach MQTT) and the trend ring's parallel arrays (history.hpp's trend_rps_row
-// below it). One predicate, two loops; a second copy of the pattern is what would re-open
+// A per-row predicate rather than a search, because its callers keep their rows differently — the
+// poll engine's cache (main/hp_poll.cpp, which marks the held-over readings so that they do not
+// reach MQTT) and the trend ring's parallel arrays (history.hpp's trend_rps_row below it), among
+// others. One predicate, several loops; a second copy of the pattern is what would re-open
 // legacy-209 defect 5.
 inline bool ou_is_rps_witness(const char* label, unsigned reg) {
     return label && lwt_ci_contains(label, "inv frequency") && !ou_page_holds_over(reg);

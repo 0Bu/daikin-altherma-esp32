@@ -152,10 +152,11 @@ static SaturationWitness      s_sat_witness;
 static uint32_t               s_sat_witness_generation = 0;  // poll-task-owned
 static int64_t                s_sat_witness_us         = -1;
 
-// When the compressor witness last answered, which tells one lost reply from a witness this profile
-// or unit does not provide (logic/ou_stale.hpp). The same ownership and age boundary as above.
-static uint32_t s_rps_witness_generation = 0; // poll-task-owned
-static int64_t  s_rps_witness_us         = -1;
+// When the compressor witness last read as stopped, and -1 once it reads as running: what a sweep
+// without a readable speed is judged against (logic/ou_stale.hpp). Poll-task-owned, and bound by
+// the same age limit as above.
+static uint32_t s_rps_stopped_generation = 0;
+static int64_t  s_rps_stopped_us         = -1;
 
 static void retire_saturation_witness() noexcept {
     s_sat_witness            = SaturationWitness{};
@@ -479,9 +480,9 @@ static void poll_once() {
     // point while the compressor ran, a mean 1.19 K (max 2.0 K) error over the 195 points while it
     // rested.
     //
-    // The value is MARKED, not dropped. history.cpp needs the number to distinguish HELD_OVER from
-    // NO_READING (a gap in the chart for the right reason), and the browser already renders "—" on
-    // its own. What the mark buys is the MQTT bridge withholding it — a consumer that has no
+    // A held value is MARKED, not dropped. history.cpp needs the number to distinguish HELD_OVER
+    // from NO_READING (a gap in the chart for the right reason), and the browser already renders
+    // "—" on its own. What the mark buys is the MQTT bridge withholding it — a consumer that has no
     // compressor state cannot make that call for itself.
     // The parse is logic/history.hpp's own history_parse_tenths, not a local strtod: history.cpp
     // asks the same question of the same string one call later (its trends distinguish HELD_OVER
@@ -497,14 +498,18 @@ static void poll_once() {
         }
         break;
     }
-    const int64_t witness_now_us = esp_timer_get_time();
-    const bool    witness_recent = s_rps_witness_generation == cycle_generation &&
-                                x10a_source_time_is_recent(witness_now_us, s_rps_witness_us);
+    const int64_t witness_now_us   = esp_timer_get_time();
+    const bool    recently_stopped = s_rps_stopped_generation == cycle_generation &&
+                                  x10a_source_time_is_recent(witness_now_us, s_rps_stopped_us);
+    if (rps_known) {
+        s_rps_stopped_us         = rps_running ? -1 : witness_now_us;
+        s_rps_stopped_generation = cycle_generation;
+    }
     for (auto& cv : fresh) {
         cv.held         = logic::ou_reading_held_over(cv.reg, rps_known, rps_running);
         cv.held_unknown = logic::ou_reading_held_unknown(cv.reg, rps_known);
         // Non-allocating: the row stays, as for a value that failed to decode.
-        if (logic::ou_reading_dropped(cv.reg, rps_known, witness_recent)) cv.value.clear();
+        if (logic::ou_reading_dropped(cv.reg, rps_known, recently_stopped)) cv.value.clear();
     }
     const logic::OuFreshness ou_freshness = logic::ou_unit_freshness(rps_known, rps_running);
     refrigerant_service_sample(fresh.data(), fresh.size(), rps_known, rps_running,
@@ -573,10 +578,6 @@ static void poll_once() {
         s_sat_witness = sat_out;
         s_sat_witness_generation = cycle_generation;
         s_sat_witness_us               = sat_out_us;
-        if (rps_known) {
-            s_rps_witness_us         = witness_now_us;
-            s_rps_witness_generation = cycle_generation;
-        }
         s_refrigerant_service_coverage = service_coverage;
         logic::refrigerant_service_record(s_refrigerant_service, service_coverage,
                                           s_refrigerant_service_cycle_sample,

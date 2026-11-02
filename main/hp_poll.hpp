@@ -35,11 +35,10 @@ struct CachedValue {
                           // tell "held over" from "no reading" — but it is not a measurement,
                           // so the MQTT bridge withholds it (legacy-209 defect 5).
                           //
-                          // Two snapshot buffers hold one resolved profile as a CONTIGUOUS block
-                          // each (build_values_array on the httpd task, current_x10a_values on the
-                          // publish task), and the binding limit on this board is the largest
-                          // contiguous block — so every byte of this row counts, once per row:
-                          // the static_assert below is the budget.
+                          // A snapshot holds one resolved profile as a CONTIGUOUS block
+                          // (take_values_snapshot on the httpd task), and the binding limit on
+                          // this board is the largest contiguous block — so every byte of this
+                          // row counts, once per row: the static_assert below is the budget.
     bool held_unknown = false; // the row is on one of those pages, but this sweep read no
                                // compressor speed, so `held == false` is no evidence that
                                // the page is current (logic/ou_stale.hpp). /values says so

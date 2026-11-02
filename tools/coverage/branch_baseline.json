@@ -8,11 +8,11 @@
       },
       "hosted_confirmation": "Hosted confirmation pending: only ou_stale.hpp uses the measured local GCC 15 aarch64 inventory as the gcc-15-github-linux-ubuntu26 candidate. No hosted execution is claimed; authoritative GitHub CI confirmation is required before merge. All other hosted inventories are unchanged.",
       "runner": "scripts/run-mock-tests.sh --coverage",
-      "scope": "Three-state outdoor freshness: ou_unit_freshness(), ou_reading_held_unknown() and ou_reading_dropped() add the third answer about the outdoor pages and what one lost reply does to a reading. Unit checks take every outcome: 8/10 to 12/12 (Clang), 16/16 to 28/28 (GCC 13 and GCC 15). Every other header inventory, every historical ratio and the 95-percent executable-line floor are unchanged.",
+      "scope": "Three-state outdoor freshness: ou_unit_freshness(), ou_reading_held_unknown() and ou_reading_dropped() add the third answer about the outdoor pages and what a missing speed does to a reading after a stop. Unit checks take every outcome: 8/10 to 12/12 (Clang), 16/16 to 28/28 (GCC 13 and GCC 15). Every other header inventory, every historical ratio and the 95-percent executable-line floor are unchanged.",
       "validation_boundary": "Clang, GCC 13 and GCC 15 measured the same source and test revision.",
       "source": "main/logic/ou_stale.hpp",
-      "source_sha256": "634c9213b191acf18da39508ee1944c1473f5d4c4d0d480848a2cb32c0fab89b",
-      "test_source_sha256": "ce51f3f8dff60586f43d14d8a5d2b93f02477442a3917cfb0fb713f8169d9ea0"
+      "source_sha256": "b2e1c4fc0a399e0ab1d14ea86930854857d924aef77885f3e01c603ace32473f",
+      "test_source_sha256": "71f9a6d6b6736b3c6d0610e9cba7b925441fe938ea46117a60601833c10805e9"
     },
     {
       "compilers": {
@@ -26,7 +26,7 @@
       "validation_boundary": "Clang, GCC 13 and GCC 15 measured the same source and test revision.",
       "source": "main/logic/heartbeat.hpp",
       "source_sha256": "cdf035b49559cdac8ca49d2c9d9e78341f3859a09a8b21a601efbb4f1edb71d9",
-      "test_source_sha256": "ce51f3f8dff60586f43d14d8a5d2b93f02477442a3917cfb0fb713f8169d9ea0"
+      "test_source_sha256": "71f9a6d6b6736b3c6d0610e9cba7b925441fe938ea46117a60601833c10805e9"
     },
     {
       "compilers": {

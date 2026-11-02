@@ -303,10 +303,11 @@ Their `value` is a string or null.
 `reg` is the page, not a per-value address. `x10a_group` disambiguates labels reused across pages;
 `concept` is structural HomeHub pairing. Selector semantics prevent valve/heater paths being shown
 as generic switches. `held:true` means the outdoor page has stopped refreshing. `held_unknown:true`
-marks a row on an outdoor page (`0x20`/`0x21`) in a sweep without a readable compressor speed, which
-is evidence of neither a live nor a held page. If the speed was read within the 15-second X10A source
-age, this is one lost reply and `value` is null; otherwise the value stays. An absent duration
-is unknown, zero is a newly observed transition, and `dwell_min:true` makes duration a lower bound.
+marks a row from an outdoor page (`0x20`/`0x21`) in a sweep without a readable compressor speed: the
+page may be live or held. If the speed last read as stopped within the
+[X10A source age](MQTT.md#outbound-availability), `value` is null; otherwise the value stays. An
+absent duration is unknown, zero is a newly observed transition, and `dwell_min:true` makes duration a
+lower bound.
 Dwell metadata must match the copied cache revision, source identity and decoded state; a mismatch
 is unknown rather than a duration borrowed from another reading.
 
@@ -335,8 +336,8 @@ age and omitted before clock sync. `epoch` is captured with the samples; `boot_i
 Unavailable age metadata or an epoch changed before emission returns 503. Clients must reject
 responses superseded by a newer status/source generation.
 `held` marks eligible X10A outdoor nulls as held-over; all other source rasters leave it empty.
-`v` does not record an unknown compressor state: an X10A outdoor sample after one lost speed reply is
-a plain null, but on a profile or unit without a speed reading it stays a number, so a number is not
+`v` does not record an unknown compressor state. A sweep dropped after a stop cannot put a number into
+its bucket, but any other outdoor sample without a readable speed stays a number, so a number is not
 proof that the page was current.
 The circulation-state trend is selected through `source=x10a` but reports its physical source as
 `"mqtt"` in the response.

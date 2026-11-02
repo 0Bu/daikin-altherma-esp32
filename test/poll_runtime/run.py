@@ -24,7 +24,8 @@ CASES = [
     'mqtt_scalar_source', 'refrigerant_one_sensor', 'refrigerant_unidentified_row',
     'refrigerant_unpaired_pressure',
     'outdoor_hx_scale',
-    'held_witness_lost', 'held_witness_unreadable', 'held_standing_unknown',
+    'held_witness_lost', 'held_witness_lost_while_running', 'held_witness_unreadable',
+    'held_standing_unknown',
     'held_new_generation', 'held_expired_verdict', 'held_link_lost',
     'held_no_witness_profile',
 ]
@@ -312,32 +313,49 @@ mutations = {
         'cv.held_unknown = !rps_known;',
         'held_lost_witness_leaves_hydronic_rows', 'held_witness_lost'),
     'keep_readings_after_lost_witness': (
-        'if (logic::ou_reading_dropped(cv.reg, rps_known, witness_recent)) cv.value.clear();',
-        '/* mutation: one lost reply publishes the last run */',
-        'held_lost_witness_drops_outdoor_readings', 'held_witness_lost'),
+        'if (logic::ou_reading_dropped(cv.reg, rps_known, recently_stopped)) cv.value.clear();',
+        '/* mutation: a lost reply at rest publishes the last run */',
+        'held_lost_witness_leaves_mqtt', 'held_witness_lost'),
+    'drop_readings_after_the_trend_saw_them': (
+        ['if (logic::ou_reading_dropped(cv.reg, rps_known, recently_stopped)) cv.value.clear();', 'history_record(fresh.data(), fresh.size(), cycle_generation);'],
+        ['/* mutation: dropped too late for the rings */',
+         'history_record(fresh.data(), fresh.size(), cycle_generation); for (auto& cv : fresh) if (logic::ou_reading_dropped(cv.reg, rps_known, recently_stopped)) cv.value.clear();'],
+        'held_lost_witness_reaches_no_trend', 'held_witness_lost'),
     'drop_every_page_after_lost_witness': (
-        'if (logic::ou_reading_dropped(cv.reg, rps_known, witness_recent)) cv.value.clear();',
-        'if (!rps_known && witness_recent) cv.value.clear();',
+        'if (logic::ou_reading_dropped(cv.reg, rps_known, recently_stopped)) cv.value.clear();',
+        'if (!rps_known && recently_stopped) cv.value.clear();',
         'held_lost_witness_leaves_hydronic_rows', 'held_witness_lost'),
+    'drop_after_a_running_witness': (
+        's_rps_stopped_us         = rps_running ? -1 : witness_now_us;',
+        's_rps_stopped_us         = witness_now_us;',
+        'held_lost_witness_while_running_keeps_readings', 'held_witness_lost_while_running'),
     'treat_unreadable_witness_as_stopped': (
         'if (logic::history_parse_tenths(cv.value.c_str(), rps_tenths)) {',
         'if (logic::history_parse_tenths(cv.value.c_str(), rps_tenths) || true) {',
         'held_unreadable_witness_is_not_stopped', 'held_witness_unreadable'),
     'drop_without_a_witness': (
-        'const bool    witness_recent = s_rps_witness_generation == cycle_generation &&\n                                x10a_source_time_is_recent(witness_now_us, s_rps_witness_us);',
-        'const bool witness_recent = true;',
+        'const bool recently_stopped = s_rps_stopped_generation == cycle_generation &&\n                                  x10a_source_time_is_recent(witness_now_us, s_rps_stopped_us);',
+        'const bool recently_stopped = true;',
         'held_never_read_witness_keeps_readings', 'held_standing_unknown'),
     'drop_without_a_witness_on_its_profile': (
-        'const bool    witness_recent = s_rps_witness_generation == cycle_generation &&\n                                x10a_source_time_is_recent(witness_now_us, s_rps_witness_us);',
-        'const bool witness_recent = true;',
+        'const bool recently_stopped = s_rps_stopped_generation == cycle_generation &&\n                                  x10a_source_time_is_recent(witness_now_us, s_rps_stopped_us);',
+        'const bool recently_stopped = true;',
         'held_no_witness_profile_keeps_readings', 'held_no_witness_profile'),
-    'drop_on_an_old_witness': (
-        'const bool    witness_recent = s_rps_witness_generation == cycle_generation &&\n                                x10a_source_time_is_recent(witness_now_us, s_rps_witness_us);',
-        'const bool witness_recent = s_rps_witness_generation == cycle_generation && s_rps_witness_us >= 0;',
-        'held_old_witness_keeps_readings', 'held_standing_unknown'),
+    'stamp_witness_on_every_sweep': (
+        'if (rps_known) {\n        s_rps_stopped_us         = rps_running ? -1 : witness_now_us;\n        s_rps_stopped_generation = cycle_generation;\n    }',
+        's_rps_stopped_us = rps_running ? -1 : witness_now_us; s_rps_stopped_generation = cycle_generation;',
+        'held_no_witness_profile_keeps_readings', 'held_no_witness_profile'),
+    'stamp_a_silent_witness_on_every_sweep': (
+        'if (rps_known) {\n        s_rps_stopped_us         = rps_running ? -1 : witness_now_us;\n        s_rps_stopped_generation = cycle_generation;\n    }',
+        's_rps_stopped_us = rps_running ? -1 : witness_now_us; s_rps_stopped_generation = cycle_generation;',
+        'held_never_read_witness_keeps_readings', 'held_standing_unknown'),
+    'drop_on_an_old_stop': (
+        'const bool recently_stopped = s_rps_stopped_generation == cycle_generation &&\n                                  x10a_source_time_is_recent(witness_now_us, s_rps_stopped_us);',
+        'const bool recently_stopped = s_rps_stopped_generation == cycle_generation && s_rps_stopped_us >= 0;',
+        'held_old_stop_keeps_readings', 'held_standing_unknown'),
     'carry_witness_across_generations': (
-        'const bool    witness_recent = s_rps_witness_generation == cycle_generation &&\n                                x10a_source_time_is_recent(witness_now_us, s_rps_witness_us);',
-        'const bool witness_recent = x10a_source_time_is_recent(witness_now_us, s_rps_witness_us);',
+        'const bool recently_stopped = s_rps_stopped_generation == cycle_generation &&\n                                  x10a_source_time_is_recent(witness_now_us, s_rps_stopped_us);',
+        'const bool recently_stopped = x10a_source_time_is_recent(witness_now_us, s_rps_stopped_us);',
         'held_new_generation_forgets_witness', 'held_new_generation'),
     'report_expired_verdict': (
         'if (!st.connected) st.ou_freshness = logic::OuFreshness::Unknown;',
