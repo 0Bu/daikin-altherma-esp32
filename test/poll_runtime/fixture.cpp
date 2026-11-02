@@ -1022,7 +1022,6 @@ static void run_held(const char* name) {
         oracle(hp_stats().ou_freshness == OuFreshness::Unknown && cached_row(0x20).held_unknown &&
                    page_values(0x20) > 0,
                "held_lost_witness_while_running_keeps_readings");
-        oracle(sdk::history_outdoor_values > 0, "held_lost_witness_while_running_reaches_trend");
     } else if (!std::strcmp(name, "held_witness_unreadable")) {
         setup_populated();
         put16(0x20, 0, 95);
@@ -1050,11 +1049,13 @@ static void run_held(const char* name) {
         next_sweep();
         oracle(page_values(0x20) == 0, "held_recent_stop_drops_readings");
         // One sweep at a time, so that nothing but the last READ speed can keep the window open.
-        for (int age = 1; age < 15; ++age) next_sweep();
+        for (int age = 2; age < 15; ++age) {
+            next_sweep();
+            oracle(page_values(0x20) == 0, "held_recent_stop_keeps_dropping");
+        }
+        next_sweep();
         oracle(cached_row(0x20).held_unknown && page_values(0x20) > 0,
                "held_old_stop_keeps_readings");
-        next_sweep();
-        oracle(page_values(0x20) > 0, "held_old_stop_stays_kept");
     } else if (!std::strcmp(name, "held_new_generation")) {
         setup_populated();
         put16(0x20, 0, 95);

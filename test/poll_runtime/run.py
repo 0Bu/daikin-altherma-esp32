@@ -329,6 +329,14 @@ mutations = {
         's_rps_stopped_us         = rps_running ? -1 : witness_now_us;',
         's_rps_stopped_us         = witness_now_us;',
         'held_lost_witness_while_running_keeps_readings', 'held_witness_lost_while_running'),
+    'keep_the_stop_through_a_running_read': (
+        's_rps_stopped_us         = rps_running ? -1 : witness_now_us;',
+        'if (!rps_running) s_rps_stopped_us = witness_now_us;',
+        'held_lost_witness_while_running_keeps_readings', 'held_witness_lost_while_running'),
+    'forget_the_stop_on_the_first_lost_sweep': (
+        'if (rps_known) {\n        s_rps_stopped_us         = rps_running ? -1 : witness_now_us;\n        s_rps_stopped_generation = cycle_generation;\n    }',
+        'if (rps_known) { s_rps_stopped_us = rps_running ? -1 : witness_now_us; s_rps_stopped_generation = cycle_generation; } else { s_rps_stopped_us = -1; }',
+        'held_recent_stop_keeps_dropping', 'held_standing_unknown'),
     'treat_unreadable_witness_as_stopped': (
         'if (logic::history_parse_tenths(cv.value.c_str(), rps_tenths)) {',
         'if (logic::history_parse_tenths(cv.value.c_str(), rps_tenths) || true) {',
