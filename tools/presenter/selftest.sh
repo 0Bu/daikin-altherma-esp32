@@ -92,14 +92,26 @@ expect_red "the post-BUH pick no longer excludes the held-over pages" \
 expect_red "the inverter page dropped out of OU_HELD_PAGES" \
   's/^const OU_HELD_PAGES = \[0x20, 0x21\];/const OU_HELD_PAGES = [0x20];/'
 
-# A label pattern matching the second outdoor unit's row again, so that a sweep missing the first
-# unit's page draws the other unit's coil under this unit's name.
-expect_red "the outdoor heat exchanger pattern matches page 0xA0 again" \
-  's/|R4T-Deicer temp\\\.)\$\/i;/|Outdoor heat exchanger temp\\.|R4T-Deicer temp\\.)$\/i;/'
+# A label pattern gaining a second row: the mid-temperature row shares the coil's page, so the one-row
+# scan has to find it on the catalog.
+expect_red "the outdoor heat exchanger pattern matches a second row" \
+  's/|R4T-Deicer temp\\\.)\$\/i;/|R4T-Deicer temp\\.|Heat exchanger mid-temp\\.)$\/i;/'
+
+# The coil pattern losing the spelling a chiller uses for this row, which is how that row went blank.
+expect_red "the outdoor heat exchanger pattern loses the chiller spelling" \
+  's/|Outdoor heat exchanger temp\\\.|/|/'
+
+# The coil picker losing its page: a sweep without page 0x20 draws the second outdoor unit's coil.
+expect_red "the outdoor heat exchanger picker drops its page" \
+  's/vFind((x) => x\.reg === 0x20 \&\& OUTDOOR_HX_RE/vFind((x) => OUTDOOR_HX_RE/'
+
+# A pattern that matches no row anywhere, which reads as absent on every profile.
+expect_red "a label pattern matches no row on any profile" \
+  's/out: vNum(\/outdoor air\/i)/out: vNum(\/outdoor airX\/i)/'
 
 # The picker going back to the first row that has a value.
-expect_red "vRow falls through to the next matching row with a value" \
-  's/^  const r = (S\._values || \[\])\.find((x) => re\.test(x\.label || ""));/  const r = (S._values || []).find((x) => re.test(x.label || "") \&\& x.value != null);/'
+expect_red "vFind falls through to the next matching row with a value" \
+  's/^  const r = (S\._values || \[\])\.find(match);/  const r = (S._values || []).find((x) => match(x) \&\& x.value != null);/'
 
 # UNKNOWN treated as OFF for the tank heater. Off is the PERMISSIVE branch, so this is the exact
 # direction that ships the collapsed quotient — a plant COP that reads as a failing heat pump.

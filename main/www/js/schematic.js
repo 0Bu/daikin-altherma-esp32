@@ -6,39 +6,42 @@
 // static (index.html) and updated in place: an innerHTML rebuild like #valueGroups' would restart
 // the CSS flow animations on every poll.
 //
-// A pattern names ONE row. The row that row has no value this sweep reads as absent; it never falls
-// through to the next row the pattern happens to match, because that row is another instrument under
-// a label the reader takes for this one. tools/presenter/presenter_parity.mjs holds every pattern to
-// one row on every detectable profile, so a catalog change cannot reintroduce the choice.
-const vRow = (re) => {
-  const r = (S._values || []).find((x) => re.test(x.label || ""));
+// A pattern names ONE row. A row without a value this sweep reads as absent; the reader never falls
+// through to the next match, because that row is another instrument under a label the reader takes
+// for this one. tools/presenter/presenter_parity.mjs holds each pattern to one row on every profile
+// a device can run, and its SEVERAL_ROWS table lists the few that match several rows on purpose.
+const vFind = (match) => {
+  const r = (S._values || []).find(match);
   return r && r.value != null ? r : undefined;
 };
-const vRowGroup = (re, group) => {
-  const r = (S._values || []).find((x) => re.test(x.label || "") && x.x10a_group === group);
-  return r && r.value != null ? r : undefined;
-};
-const vNum =(re) => { const r = vRow(re); if (!r) return null; const n = parseFloat(r.value); return Number.isFinite(n) ? n : null; };
+const vRow = (re) => vFind((x) => re.test(x.label || ""));
+const vRowGroup = (re, group) => vFind((x) => re.test(x.label || "") && x.x10a_group === group);
+const rowNum = (r) => { if (!r) return null; const n = parseFloat(r.value); return Number.isFinite(n) ? n : null; };
+const vNum = (re) => rowNum(vRow(re));
 // Bit-flag values arrive as numeric 1/0 (logic/convert.hpp conv 300-307). null = row absent.
 const vOn = (re) => { const r = vRow(re); return r ? String(r.value).trim() === "1" : null; };
 
 // Page 0x20 / offset 2 across the supported model catalog. The sensor's physical role is stable
 // while Daikin's labels are not: ordinary air-source units call it the outdoor heat exchanger,
 // other families call the same location a deicer or two-phase thermistor. Keep the alternatives
-// exact so "Heat exchanger mid-temp." at offset 8 can never substitute for this R4T curve, and the
-// second outdoor unit's "Outdoor heat exchanger temp." on page 0xA0 can never stand in for it.
-const OUTDOOR_HX_RE = /^(?:2 phase thermistor \(R4T\)|O\/U Heat Exch\. Temp\.(?:\(R4T\))?|O\/U Heat Exchanger Temp|R4T-Deicer temp\.)$/i;
+// exact so "Heat exchanger mid-temp." at offset 8 can never substitute for this R4T curve. The page
+// is part of the selection: "Outdoor heat exchanger temp." is this row on a chiller and the second
+// outdoor unit's row, on page 0xA0, on other profiles.
+const OUTDOOR_HX_RE = /^(?:2 phase thermistor \(R4T\)|O\/U Heat Exch\. Temp\.(?:\(R4T\))?|O\/U Heat Exchanger Temp|Outdoor heat exchanger temp\.|R4T-Deicer temp\.)$/i;
+const ouHxRow = () => vFind((x) => x.reg === 0x20 && OUTDOOR_HX_RE.test(x.label || ""));
 const ROOM_TEMP_RE = /^(?:indoor ambient temp|RT Temp\.$)/i;
 
 // The refrigerant high side is one row per profile, and the firmware names it: /status.history's
 // `circuit_pressure` trend resolves the same structural rule as the refrigerant service
 // (logic/history.hpp trend_select_high_side). A browser pattern cannot make that choice, because the
 // 0x62/15 row is spelled alike on profiles where it is a sensor and on those where the installer
-// guides document no such sensor. Null when this profile charts no high side.
+// guides document no such sensor. Null when this profile charts no high side, and on no value or an
+// exact 0.0, which a sealed R32 circuit uses as an absent reading rather than a pressure. A row that
+// is not measuring stays selected whatever it holds, so that the panel can say why the pill is blank.
 const highSideRow = () => {
   const entry = (S.status?.history?.rows || []).find((r) => r.id === "circuit_pressure");
   const row = entry && (S._values || []).find((x) => x.label === entry.label);
-  return row && row.value != null ? row : null;
+  return row && (parseFloat(row.value) > 0 || rowNotMeasuring(row)) ? row : null;
 };
 
 // The outdoor unit's OWN register pages — logic/ou_stale.hpp's ou_page_holds_over(), transcribed:
@@ -251,7 +254,7 @@ function liveData() {
     lwt, ret,
     dt: lwt != null && ret != null ? lwt - ret : null,
     out: vNum(/outdoor air/i),
-    ouHx: vNum(OUTDOOR_HX_RE),
+    ouHx: rowNum(ouHxRow()),
     flow: vNum(/flow sensor/i),
     wp: vNum(/^water pressure$/i),
     rps: vNum(/inv frequency/i),
@@ -264,9 +267,6 @@ function liveData() {
     tankSet: vNum(/dhw setpoint/i),
     room: vNum(ROOM_TEMP_RE),
     roomSet: vNum(/^rt setpoint/i),
-    // The catalog currently exposes only the HEATING target. Quoting it while cooling would compare
-    // a valid measured ΔT with the wrong controller target, so it is attached after mode resolution.
-    dtSet: null,
     pumpSig: vNum(/water pump signal/i),
     pumpOn: stateOf(/water pump operation/i, 30),
     // Through stateOf, like every other plant state: X10A while its link is live, else a live
@@ -333,7 +333,6 @@ function liveData() {
   // Otherwise the I/U mode decides which direction across the PHE is useful output.
   d.thermalMode = d.defrost === true ? "defrost"
                 : d.valveDhw === true ? "heat" : d.spaceMode;
-  if (d.spaceMode === "heat") d.dtSet = vNum(/target delta t heating/i);
   // Pump % — the wire value is inverted ("Water pump signal (0:max-100:stop)").
   d.pump = d.pumpSig == null ? null : Math.min(100, Math.max(0, 100 - d.pumpSig));
   // The outdoor unit refreshes its OWN register pages (0x20 sensors, 0x21 inverter) only while it
@@ -344,12 +343,15 @@ function liveData() {
   // dead-bus rule ("an idle plant with no readings, not a stale one"), applied to one sleeping unit.
   // A held-over 19.0 °C is exactly the legacy-35–legacy-39 shape: well-formed, plausible, and false — and it is
   // what made an idle plant look like a running one next to a "not running" headline.
-  d.ouHeldOver = d.rps != null && d.rps === 0;
-  // The third answer: the firmware marks these pages `held_unknown` in a sweep without a readable
-  // speed (logic/ou_stale.hpp), on a profile without that row for good. That is absence of evidence
-  // either way. A reading stays drawn, because blanking on a guess would cost one that may well be
-  // live; only the inspector says it may be old, and anything DERIVED from it is refused below.
-  d.ouUnknown = d.rps == null && (S._values || []).some((x) => x.held_unknown === true);
+  //
+  // Without a readable speed the firmware marks these pages `held_unknown` (logic/ou_stale.hpp), on a
+  // profile without that row for good. The HomeHub's compressor flag answers independently where it
+  // exists: OFF means held over, ON means current. With neither, the state is unknown. A reading then
+  // stays drawn, because blanking on a guess would cost one that may well be live; the inspector and
+  // the value table say it may be old, and anything DERIVED from it is refused below.
+  const speedUnread = d.rps == null && (S._values || []).some((x) => x.held_unknown === true);
+  d.ouHeldOver = d.rps === 0 || (speedUnread && d.compressorOn === false);
+  d.ouUnknown = speedUnread && d.compressorOn == null;
   // X10A's outdoor-air row is held over at rest, but the independently polled HomeHub register can
   // continue changing. Prefer that register value to a blank pill, while retaining ouHeldOver so every
   // other page-0x20/0x21 value (notably discharge temperature) is still withheld. The pairing is the
@@ -366,12 +368,10 @@ function liveData() {
   // Circuit refrigerant pressure for the schematic's high-side badge: the row the chart and the
   // refrigerant service read (highSideRow). On a profile whose high side is the outdoor 0x20/12
   // transducer the pill is blank at rest, since that page holds over and no other row is a sensor for
-  // it. A sealed R32 circuit uses exact 0.0 as an absent value, so that blanks too rather than paint a
-  // live-looking fault. The ROW is kept with its number: the inspector names it beside the headline.
+  // it.
   const hsRow = highSideRow();
-  const hsBar = hsRow && !rowHeldOver(hsRow, d) ? parseFloat(hsRow.value) : NaN;
-  d.circPRow = hsBar > 0 ? hsRow : null;
-  d.circP = hsBar > 0 ? hsBar : null;
+  const hsBar = rowNum(hsRow);
+  d.circP = hsBar > 0 && !rowHeldOver(hsRow, d) ? hsBar : null;
   // ΔT is a WORKING POINT across the exchanger — it needs water moving to mean anything. With the
   // pump off, R1T and R4T are two stagnant sensors cooling at different rates, and their difference
   // (measured: 14.6 K on a plant idle for an hour) is not a small ΔT, it is no ΔT at all. Decided
@@ -396,10 +396,10 @@ function liveData() {
   // amps as a live kW figure right beside the "not running" headline: plausible, well-formed, false
   // — the legacy-35–legacy-39 shape, and the same reason d.circP already gates. Asserted against the whole
   // catalog by logic/ou_stale.hpp's test (which page each of these two rows lives on).
-  // A row of unknown age is refused for the same reason unless the HomeHub's independent flag says
-  // the compressor runs. Unlike a reading under its own name, a kW figure is a claim built on the row,
-  // and on every profile without a speed row this inverter current is the only electrical source.
-  const invLive = !d.ouHeldOver && inv != null && (!d.ouUnknown || d.compressorOn === true);
+  // A row of unknown age is refused for the same reason. Unlike a reading under its own name, a kW
+  // figure is a claim built on the row, and on every profile without a speed row this inverter current
+  // is the only electrical source.
+  const invLive = !d.ouHeldOver && !d.ouUnknown && inv != null;
   const ctLive  = ctComplete && ct > 0;
   d.pel = ctLive ? ct * 230 / 1000 : invLive ? inv * 230 / 1000 : null;
   // NULL when neither source is usable — the third state the old two-way expression could not say.
@@ -408,11 +408,11 @@ function liveData() {
   // Why the pill is blank, when it is: the INV source EXISTS but is frozen, which is a different
   // statement from "this profile has no current sensor" (the sub-label's other empty case) — so the
   // sub-label stays silent here and the explainer says which of the two it is. With the speed unread
-  // it is a third statement again: the source exists and may be frozen, or (the HomeHub says the
-  // compressor is off) it is.
+  // it is a third statement again: the source may be frozen. Asked of the row and not of its value,
+  // since a value the firmware dropped leaves this profile's source in place.
   const invRowExists = (S._values || []).some((x) => /inv primary current/i.test(x.label || ""));
-  d.pelHeld = d.pel == null && inv != null && (d.ouHeldOver || (d.ouUnknown && d.compressorOn === false));
-  d.pelUnknown = d.pel == null && !d.pelHeld && d.ouUnknown && invRowExists;
+  d.pelHeld = d.pel == null && invRowExists && d.ouHeldOver;
+  d.pelUnknown = d.pel == null && !d.pelHeld && speedUnread;
   // ── WHICH COP this quotient is, and when it is none ─────────────────────────────────────────
   // Transcribed from logic/cop_scope.hpp's cop_plan() — same branches, same order, so a change
   // there is visibly a change here (test_cop_scope gates the rule against the whole catalog).
@@ -687,9 +687,8 @@ function renderLive() {
   // keeps the ordinary "—". Petrol makes the replacement source visible without adding a caption.
   setTxt("svOut", ouReadingText(d, "out", d.out, fmt1)); setTxt("svRps", fmt0(d.rps));
   setTxt("svOuHx", ouReadingText(d, "ouHx", d.ouHx, fmt1));
-  // High-side badge shows the circuit pressure (real refrigerant sensor when the compressor's own HP
-  // transducer is idle-zero — see d.circP). Low/suction side has no equivalent at-rest gauge, so show
-  // "—" rather than a misleading 0.0 bar when the compressor is off.
+  // High-side badge: the circuit pressure (d.circP). Low/suction side has no equivalent at-rest gauge,
+  // so show "—" rather than a misleading 0.0 bar when the compressor is off.
   setTxt("svHp", fmt1(d.circP));
   setTxt("svLp", !d.ouHeldOver && d.lp != null && d.lp > 0 ? fmt1(d.lp) : "—");
   setTxt("svDisch", ouReadingText(d, "disch", d.disch, fmt0)); setTxt("svEev", fmt0(d.eev));
@@ -817,7 +816,8 @@ const PEL_INSPECT = {
   head: (d) => (d.pel == null ? "—" : pelApproxText(d) + fmt1(d.pel) + " kW"),
   // Four cases: the measured gateway row, either X10A current source, a held-over inverter row, or
   // no usable electrical source. Keeping this source-aware prevents a HomeHub measurement from
-  // being explained as compressor current merely because it is not a CT estimate.
+  // being explained as compressor current merely because it is not a CT estimate. An inverter row of
+  // unknown age is a fifth, which inspNowText answers before this runs.
   now: (d) => d.pelHeld
     ? { en: "The compressor is off, so the inverter current this profile reads is left over from the last run rather than measured now — no input power or efficiency quotient can be stated.",
         de: "Der Verdichter steht, daher stammt der Inverterstrom dieses Profils vom letzten Lauf und ist kein aktueller Messwert — Leistungsaufnahme und Effizienzquotient lassen sich nicht angeben." }
@@ -933,7 +933,7 @@ const INSPECT = {
               de: "Standby — der Verdichter steht, daher findet kein aktiver Heiz- oder Kühltransfer statt. X10A aktualisiert die eigenen Sensoren der Außeneinheit im Stillstand nicht mehr; die Außentemperatur stammt deshalb aus dem HomeHub-Modbus-Register, die Heißgastemperatur bleibt „—“. Das Register wird erfolgreich gelesen, trägt aber keinen Quellzeitstempel; das Alter der zugrunde liegenden Messung ist daher unbekannt." }
           : { en: "Idle — the compressor is stopped, so no active heating or cooling transfer is taking place. The outdoor unit also stops refreshing its own sensors while it rests, so outdoor air and discharge temperature read \"—\" rather than repeat the last run's values.",
               de: "Standby — der Verdichter steht, daher findet kein aktiver Heiz- oder Kühltransfer statt. Die Außeneinheit aktualisiert im Stillstand auch ihre eigenen Sensoren nicht mehr; Außenluft und Heißgastemperatur zeigen daher „—“ statt die Werte des letzten Laufs zu wiederholen." },
-    rows: [/outdoor air/i, OUTDOOR_HX_RE, /inv frequency/i, highSideRow, /discharge pipe temp/i, /expansion valve ?1/i, /defrost operation/i],
+    rows: [/outdoor air/i, ouHxRow, /inv frequency/i, highSideRow, /discharge pipe temp/i, /expansion valve ?1/i, /defrost operation/i],
   },
   comp: {
     t: { en: "Compressor", de: "Verdichter" },
@@ -946,7 +946,7 @@ const INSPECT = {
       en: "Outdoor heat-exchanger temperature (R4T)",
       de: "Außengeräte-Wärmetauschertemperatur · R4T",
     },
-    re: OUTDOOR_HX_RE,
+    pick: ouHxRow,
     sample: "O/U Heat Exch. Temp.(R4T)",
     trend: "outdoor_heat_exchanger",
     what: {
@@ -964,10 +964,12 @@ const INSPECT = {
   // describe one point in the circuit.
   hp: {
     // The pill draws d.circP from this profile's one high-side row, so the headline resolves THE SAME
-    // row. It stays selected while held over, so that the panel can say why the pill is blank.
+    // row. It stays selected while held over, so that the panel can say why the pill is blank, and the
+    // curve keeps the last run's samples as the discharge panel's does.
     pick: highSideRow,
     t: { en: "High pressure", de: "Hochdruck" },
     sample: "High pressure",
+    trend: "circuit_pressure",
     rows: [highSideRow, /discharge pipe temp/i],
   },
   disch: {
@@ -1066,9 +1068,9 @@ const INSPECT = {
       : d.thermalMode === "cool"
       ? { en: `${fmt1(d.dt)} K. In active cooling R1T should be below R4T, so this signed difference is negative.`,
           de: `${fmt1(d.dt)} K. Beim aktiven Kühlen soll R1T unter R4T liegen; die vorzeichenbehaftete Differenz ist daher negativ.` }
-      : { en: `${fmt1(d.dt)} K${d.dtSet != null ? ` against a ${fmt1(d.dtSet)} K heating target` : ""}. Positive means the PHE is adding heat to the water.`,
-          de: `${fmt1(d.dt)} K${d.dtSet != null ? ` bei ${fmt1(d.dtSet)} K Heiz-Ziel` : ""}. Positiv bedeutet, dass der PHE dem Wasser Wärme zuführt.` },
-    rows: [lwtRow, rwtRow, /target delta t heating/i],
+      : { en: `${fmt1(d.dt)} K. Positive means the PHE is adding heat to the water.`,
+          de: `${fmt1(d.dt)} K. Positiv bedeutet, dass der PHE dem Wasser Wärme zuführt.` },
+    rows: [lwtRow, rwtRow],
   },
   pth: {
     t: (d) => d && d.pthKind === "cooling"
@@ -1107,7 +1109,7 @@ const INSPECT = {
           de: `≈ ${fmt1(d.pth)} kW Kälteleistung${d.cop != null ? `; EER ${fmt1(d.cop)}` : ""}.` }
       : { en: `≈ ${fmt1(d.pth)} kW${d.cop != null && !d.copPostBuh ? `, COP ${fmt1(d.cop)}` : ""}.`,
           de: `≈ ${fmt1(d.pth)} kW${d.cop != null && !d.copPostBuh ? `; COP ${fmt1(d.cop)}` : ""}.` },
-    rows: [/flow sensor/i, /target delta t heating/i, /current measured by ct/i, /inv primary current/i],
+    rows: [/flow sensor/i, /current measured by ct/i, /inv primary current/i],
   },
   // Its own pill next to the heat output, so its own entry — and the one derived figure with no
   // catalog row behind it at all, hence copy written here rather than pulled from DESCRIPTIONS.
@@ -1156,7 +1158,8 @@ const INSPECT = {
           de: "Derzeit kein COP — der X10A-Bus schweigt, daher stammen diese Messwerte vom HomeHub. Dessen Leistungswert erfasst das gesamte Gerät einschließlich beider Elektroheizer, der Wärmewert dagegen nur den Wärmetauscher; zudem meldet diese Quelle weder den Heizerzustand noch einen Fühler hinter dem Heizer, um beide Bilanzgrenzen anzugleichen. Ein Quotient aus beiden beschriebe zwei verschiedene Systeme." }
       // No usable electrical input at all. Which of the two reasons it is matters — the pill's own
       // explainer draws the same distinction, and saying "this profile has no row" about a profile
-      // that has one would substitute a second wrong claim for the suppressed one.
+      // that has one would substitute a second wrong claim for the suppressed one. The third reason,
+      // an inverter row of unknown age, is answered by inspNowText before this runs.
       : d.copBlock === "no_pel"
       ? (d.pelHeld
         ? { en: "No COP right now — the compressor is off, so the inverter current this profile reads is left over from the last run rather than measured now. Without a current electrical input there is nothing to divide by.",
@@ -1355,7 +1358,7 @@ const INSPECT = {
             de: "Durchströmt — der HomeHub bestätigt Verdichterbetrieb; Druck und Heißgastemperatur benötigen X10A." }
       : { en: "No active refrigerant circulation — the compressor is stopped. Pressure equalisation depends on the circuit and how long it has been idle.",
           de: "Kein aktiver Kältemittelumlauf — der Verdichter steht. Ob und wie weit sich die Drücke angeglichen haben, hängt vom Kältekreis und der Stillstandszeit ab." },
-    rows: [/^high pressure$/i, /discharge pipe temp/i],
+    rows: [highSideRow, /discharge pipe temp/i],
   },
   rcold: {
     t: { en: "Liquid line", de: "Flüssigkeitsleitung" },
@@ -1502,7 +1505,7 @@ const inspRow = (e) => (e.pick ? e.pick() : e.re ? vRow(e.re) : null);
 // that decides which one.
 const inspCurRow = (e) => {
   const r = inspRow(e);
-  return x10aDown() || rowHeldOver(r, S.live) ? null : r;
+  return x10aDown() || rowHeldOver(r, S.live) || (r?.held_unknown === true && mbForInspect(S.insp)) ? null : r;
 };
 
 // One member reading, resolved for BOTH the body and the change signature. Returns the pair the
@@ -1613,25 +1616,30 @@ const HELD_OVER_NOW = {
 // row and must not append a contradictory "No current reading" note.
 const inspHeld = (e, d) => !!d && rowHeldOver(inspRow(e), d) && !mbForInspect(S.insp);
 const inspHeldHtml = (e, d) => {
-  if (inspUnknownAge(e, d)) return heldUnknownNoteHtml();
+  if (inspUnknownAge(e, d)) return inspNowText(e, d) === heldUnknownText() ? "" : heldUnknownNoteHtml();
   if (!inspHeld(e, d)) return "";
   const localized = INSPECT_I18N[LANG]?.held;
   return descNoteHtml(localized?.lead || tx(HELD_OVER_NOW.lead),
                       localized?.why || tx(HELD_OVER_NOW.why));
 };
-const inspUnknownAge = (e, d) => {
-  const r = inspRow(e);
-  return !!d && !!r && r.held_unknown === true && !mbForInspect(S.insp);
-};
+// The headline or a listed member row: every number in the panel carries the same doubt.
+const inspUnknownAge = (e, d) => !!d && d.ouUnknown && (inspCurRow(e)?.held_unknown === true ||
+  inspMembers(e, null, null).some((m) => m.x10a?.held_unknown === true));
 const heldUnknownText = () => INSPECT_I18N[LANG]?.held_unknown || tx(HELD_OVER_NOW.unknown);
 // One note for the panel and the value table, which both state a reading of unknown age as a number.
 const heldUnknownNoteHtml = () => descNoteHtml("", heldUnknownText());
 
+// The panels whose sentence is decided by compressorRunning(), which reads an unknown compressor as
+// stopped. The unknown-age sentence replaces theirs, so that no panel states a stop nobody measured.
+const COMPRESSOR_NOW = /^(?:ou|phe|rhot|rcold|dt)$/;
 // The live sentence above the timeless description — dropped entirely while the reading is held
 // over, where the note below the description answers instead.
 const inspNowText = (e, d) => {
   if (!d || inspHeld(e, d)) return null;
   if (d.pelUnknown && (e.i18nKey === "pel" || e.i18nKey === "cop")) return heldUnknownText();
+  // The outdoor unit's defrost is a fact, and a ΔT without measured water movement has its own reason.
+  if (d.ouUnknown && COMPRESSOR_NOW.test(e.i18nKey) &&
+      !(e.i18nKey === "ou" ? d.defrost : e.i18nKey === "dt" && d.dtStale)) return heldUnknownText();
   return (e.now || INSPECT_I18N[LANG]?.[e.i18nKey]?.now) ? inspFieldText(e, "now", d) : null;
 };
 

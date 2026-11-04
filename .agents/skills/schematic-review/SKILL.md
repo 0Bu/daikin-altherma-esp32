@@ -79,8 +79,9 @@ it, and this is where the review earns its keep.
    restore the stale X10A one or claim there is no current reading. Its trend may overlay the blue
    X10A gap with the independent petrol HomeHub ring, but must label both sources and align the same
    5-minute bucket — never splice them into one repaired line. ΔT blanks with the pump stopped.
-   A row of unknown age (`held_unknown`) keeps its number with the inspector's note, takes the same
-   HomeHub stand-in, and feeds no estimate unless the HomeHub confirms that the compressor runs.
+   The HomeHub's compressor flag settles a row of unknown age (`held_unknown`) where it answers.
+   Otherwise the row keeps its number with the inspector's note, takes the same HomeHub stand-in,
+   and feeds no estimate.
    A new pill on page `0x20`/`0x21` needs the same held-over treatment, and the gate cannot see that
    the value it draws is stale.
 

@@ -1,4 +1,4 @@
-// translation-source: 0453076e060746fab49e69b0c361605fc752f497de371724830903a4370462c3
+// translation-source: ae54a3d3a4b46bd4bb60e5c88b1c9678a18bd1110ec3a9d3460df47df5eb2353
 I18N.fr = localeValues([
   /* sys.nodata */ "Aucune donnée",
   /* sys.unreachable */ "Injoignable",
@@ -984,7 +984,7 @@ INSPECT_I18N.fr = inspectValues(
       : d.dt == null ? null
       : !compressorRunning(d, 5) ? `${fmt1(d.dt)} K avec pompe seule : égalisation de chaleur résiduelle, pas puissance thermique.`
       : d.thermalMode === "cool" ? `${fmt1(d.dt)} K. En froid actif R1T doit être sous R4T ; la différence signée est donc négative.`
-      : `${fmt1(d.dt)} K${d.dtSet != null ? ` pour une cible chauffage de ${fmt1(d.dtSet)} K` : ""}. Positif signifie que le PHE apporte de la chaleur à l’eau.`], // dt
+      : `${fmt1(d.dt)} K. Positif signifie que le PHE apporte de la chaleur à l’eau.`], // dt
     [(d) => d && d.pthKind === "cooling" ? "Puissance froid estimée" : "Puissance thermique estimée", "Puissance thermique estimée au PHE", (d) => d && d.pthKind === "cooling"
       ? "Estimation de la chaleur retirée : débit/60 × (R4T−R1T) × ρ·cp (≈ 4,186 kJ/(l·K)) en supposant de l’eau. Dépend du débit, des capteurs et du fluide ; le glycol change le calcul. Affichée seulement avec compresseur en marche et écart dans le sens froid."
       : "Estimation de la chaleur transmise : débit/60 × (R1T−R4T) × ρ·cp (≈ 4,186 kJ/(l·K)) en supposant de l’eau. Dépend du débit, des capteurs et du fluide ; le glycol change le calcul. Le BUH est après R1T et hors de cette valeur.", (d) => d.dtStale ? d.bsh === true

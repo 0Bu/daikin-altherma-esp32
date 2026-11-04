@@ -1,4 +1,4 @@
-// translation-source: 0453076e060746fab49e69b0c361605fc752f497de371724830903a4370462c3
+// translation-source: ae54a3d3a4b46bd4bb60e5c88b1c9678a18bd1110ec3a9d3460df47df5eb2353
 const plNoun = (n, one, few, many) => {
   const value = Math.abs(Number(n)), mod10 = value % 10, mod100 = value % 100;
   return value === 1 ? one
@@ -991,7 +991,7 @@ INSPECT_I18N.pl = inspectValues(
       : d.dt == null ? null
       : !compressorRunning(d, 5) ? `${fmt1(d.dt)} K przy pracy samej pompy — wyrównywanie ciepła resztkowego, nie moc ogrzewania ani chłodzenia.`
       : d.thermalMode === "cool" ? `${fmt1(d.dt)} K. Przy aktywnym chłodzeniu R1T powinno być niższe od R4T, więc różnica jest ujemna.`
-      : `${fmt1(d.dt)} K${d.dtSet != null ? ` przy celu ogrzewania ${fmt1(d.dtSet)} K` : ""}. Wartość dodatnia oznacza oddawanie ciepła do wody.`], // dt
+      : `${fmt1(d.dt)} K. Wartość dodatnia oznacza oddawanie ciepła do wody.`], // dt
     [(d) => d && d.pthKind === "cooling" ? "Moc chłodnicza (szacunek)" : "Moc cieplna (szacunek)", "Szacowana moc cieplna na PHE", (d) => d && d.pthKind === "cooling"
       ? "Szacunek ciepła odbieranego wodzie: przepływ × (R4T−R1T) × 4,186, przy założeniu czystej wody. Czujniki, glikol i brak pomiaru za odbiornikami ograniczają dokładność; wartość pojawia się tylko przy potwierdzonym chłodzeniu."
       : "Szacunek ciepła oddawanego wodzie: przepływ × (R1T−R4T) × 4,186, przy założeniu czystej wody. Czujniki i glikol ograniczają dokładność; BUH za R1T nie jest ujęty.", (d) => d.dtStale

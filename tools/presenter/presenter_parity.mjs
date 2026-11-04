@@ -43,7 +43,7 @@ try {
   vm.runInContext(
     SOURCE +
       "\nthis.__api = { lwtIsPreBuh, lwtIsMeasurement, rwtIsR4t, rwtIsMeasurement, isPostBuhRow, copPlan, OU_HELD_PAGES," +
-      " lwtRow, rwtRow, postBuhRow, vLwt, vRwt, vRow, OUTDOOR_HX_RE, ROOM_TEMP_RE };",
+      " lwtRow, rwtRow, postBuhRow, vLwt, vRwt, vRow, ouHxRow, OUTDOOR_HX_RE, ROOM_TEMP_RE };",
     context, { filename: "main/www/app.sources" });
 } catch (e) {
   // A renamed or inlined-away rule lands here as a bare ReferenceError. Say what it means instead of
@@ -75,7 +75,7 @@ const lines = fs.readFileSync(goldenPath, "utf8").split("\n");
 const fails = [];
 const counts = { ROW: 0, PICK: 0, COP: 0 };
 const picks = new Map();   // case id -> rows, in the order the dumper emitted them
-const profileRows = new Map();   // detectable profile -> its publishable rows
+const profileRows = new Map();   // profile a device can run -> its publishable rows
 
 const bad = (kind, subject, field, want, got) =>
   fails.push(`${kind} ${JSON.stringify(subject)} — ${field}: C++ says ${want}, browser says ${got}`);
@@ -146,9 +146,9 @@ for (const raw of lines) {
       break;
     }
     case "PROFILEROW": {
-      const [, profile, reg, off, label] = f;
+      const [, profile, reg, off, conv, label] = f;
       if (!profileRows.has(profile)) profileRows.set(profile, []);
-      profileRows.get(profile).push({ reg: Number(reg), off: Number(off), label });
+      profileRows.get(profile).push({ reg: Number(reg), off: Number(off), conv, label });
       break;
     }
     default:
@@ -195,11 +195,13 @@ if (ui.vRow(/outdoor air/i) !== undefined) {
 }
 context.S._values = [];
 
-// ── One pattern, one row, on every detectable profile ──────────────────────────────────────────
+// ── One pattern, one row, on every profile a device can run ──────────────────────────────────────────
 // vRow reads one row, so a pattern that matches two would silently ignore the second, or read it
 // whenever the first is missing from a sweep. The patterns come from the production source, because
 // a list kept here would stop covering a pattern the moment one was added there. Each entry below
-// is a pattern that matches several rows on purpose, with the reason it is not a substitution.
+// is a pattern that matches several rows on purpose, with the reason it is not a substitution. In
+// PAGE_PINNED the reader also requires a page.
+const PAGE_PINNED = new Map([[String(ui.OUTDOOR_HX_RE), 0x20]]);
 const SEVERAL_ROWS = new Map([
   // The status panel lists the first code; faultValue() is what reads both controllers.
   ["/(error|fault) code/i", "each controller carries its own Error Code"],
@@ -221,12 +223,30 @@ for (const m of schematic.matchAll(/\brows:\s*\[([^\]]*)\]/g)) (m[1].match(liter
 addPattern(String(ui.OUTDOOR_HX_RE));
 addPattern(String(ui.ROOM_TEMP_RE));
 for (const [text, regex] of patterns) {
+  // A pattern no profile answers reads as absent everywhere, which looks exactly like a missing row.
+  if (![...profileRows.values()].some((rows) => rows.some((r) => regex.test(r.label)))) {
+    bad("NO_ROW", text, "the catalog", "a row on some profile", "none");
+  }
   if (SEVERAL_ROWS.has(text)) continue;
   for (const [profile, rows] of profileRows) {
-    const places = new Set(rows.filter((r) => regex.test(r.label)).map((r) => `0x${r.reg.toString(16)}/${r.off}`));
+    const page = PAGE_PINNED.get(text);
+    const places = new Set(rows.filter((r) => (page === undefined || r.reg === page) && regex.test(r.label))
+                               .map((r) => `0x${r.reg.toString(16)}/${r.off}/conv${r.conv}`));
     if (places.size > 1) bad("ONE_ROW", text, profile, "at most one row", [...places].join(" "));
   }
 }
+
+// The outdoor coil is the one selector that also needs a page, so it runs against each profile: it
+// must find that profile's 0x20/2 row, and nothing once a sweep has lost the page.
+for (const [profile, rows] of profileRows) {
+  const sweep = rows.map((r) => ({ ...r, value: "1" }));
+  const own = sweep.find((r) => r.reg === 0x20 && r.off === 2);
+  context.S._values = sweep;
+  if (ui.ouHxRow() !== own) bad("HX_ROW", profile, "ouHxRow", own?.label, ui.ouHxRow()?.label);
+  context.S._values = sweep.filter((r) => r.reg !== 0x20);
+  if (ui.ouHxRow() !== undefined) bad("HX_ROW", profile, "ouHxRow without the page", "no row", ui.ouHxRow().label);
+}
+context.S._values = [];
 
 // A vector file that produced no comparisons passes every assertion above. Refuse it: "no vectors
 // found" must never read as "the two copies agree", which is the one thing a parity gate exists to

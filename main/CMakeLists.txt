@@ -249,7 +249,7 @@ add_custom_target(gen_index_gz DEPENDS "${CMAKE_CURRENT_BINARY_DIR}/index.html.g
 add_dependencies(${COMPONENT_LIB} gen_index_gz)
 
 # Non-English dashboard catalogs are device-local, separately compressed assets. Keeping them out
-# of index.html preserves the 160 KiB single-response startup contract while /locale.js selects one
+# of index.html preserves the UI_GZIP_MAX_BYTES single-response contract while /locale.js selects one
 # asset by its query parameter. Each file is still linked into the signed application image; no
 # network service participates in localization. A separate tight cap prevents a catalog from
 # quietly becoming another large response even though it is served straight from flash.

@@ -84,8 +84,6 @@ function completeCtCurrent(s, has) {
 // carries the held-over rule through for free: a reading the outdoor unit was not taking is null in
 // its own ring, so the figure derived from it is null too — never last run's amps drawn as a live
 // kilowatt, which is the exact failure the live pill's gate exists to prevent (logic/ou_stale.hpp).
-// The firmware can only store that gap where it can read the compressor speed. A profile without a
-// speed row keeps numbers in the ring whatever the unit was doing, so `pel` refuses that input there.
 //
 // `ins` = every series to fetch. `ready(has)` = may this figure be offered at all on this profile
 // (feature_gate.hpp's DISABLE-NEVER-DEGRADE: no honest inputs, no curve — never a substitute one).
@@ -136,15 +134,16 @@ const DERIVED = {
   // liveData()'s rule, one sample at a time. The live version needs `d.ouHeldOver` to gate the INV
   // fallback because /values still carries last run's number; here the ring has already withheld
   // it, so a null is simply a null. An idle plant reads 0 A on fitted clamps, and the fallback is
-  // what makes that a compressor figure rather than a flat zero. Without a compressor-speed ring the
-  // firmware could not withhold anything, so the live pill's refusal has to apply here as well.
+  // what makes that a compressor figure rather than a flat zero. The firmware can only store that gap
+  // where it can read the compressor speed. Without a speed sample it withheld nothing, so the live
+  // pill's refusal applies here as well.
   pel: {
     unit: "kW", ins: ["ct_l1", "ct_l2", "ct_l3", "inv_current", "comp_rps"],
     ready: (h) => (h.inv_current && h.comp_rps) || h.ct_l1 || h.ct_l2 || h.ct_l3,
     fn: (s, has) => {
       const ct = completeCtCurrent(s, has);
       if (ct != null && ct > 0) return (ct * 230) / 1000;
-      if (!has || !has.comp_rps) return null;
+      if (!has || !has.comp_rps || s.comp_rps == null) return null;
       return s.inv_current == null ? null : (s.inv_current * 230) / 1000;
     },
   },
@@ -2041,7 +2040,7 @@ function vDescRow(v) {
   // refused, which is the failure ou_stale.hpp's inspector rule already had to fix once.
   const dwell = notCurrent ? "" : dwellNoteHtml(v, displayValue(src));
   // This table states the number as the exact reference, so it has to carry the doubt about its age.
-  const unknownAge = v.held_unknown === true && v.value != null && !fb && !notCurrent
+  const unknownAge = v.held_unknown === true && S.live?.ouUnknown && v.value != null && !fb && !notCurrent
     ? heldUnknownNoteHtml() : "";
   if (!d && !hid && !cmp && !dwell && !unknownAge) {
     return `<div class="vrow"><span class="vrow-label">${esc(shownLabel)}</span>` +

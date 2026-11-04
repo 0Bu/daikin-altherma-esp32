@@ -288,6 +288,17 @@ en.state._values = [OUTDOOR_MODE, { ...HYDRONIC_MODE, value: null }];
 assert.equal(en.schematicOperationMode(), null, "a hydronic row without a value does not fall through");
 en.state._values = [OUTDOOR_MODE];
 assert.equal(en.schematicOperationMode(), null, "nor does a hydronic page missing from the sweep");
+en.state._values = [{ label: "Operation Mode", value: "Heating", reg: 0x55 }];
+assert.equal(en.schematicOperationMode(), "Heating", "Protocol S carries its one mode row on another page");
+// The value table states a number as the exact reference, so it carries the doubt about the row's age
+// for as long as liveData has not settled it.
+const UNKNOWN_AGE = { label: "Discharge pipe temp.", value: "58.0", unit: "°C", reg: 0x20, held_unknown: true };
+en.state.live = { ouUnknown: true };
+assert.match(en.vDescRow(UNKNOWN_AGE), /may be from the last run/, "a row of unknown age says so");
+en.state.live = { ouUnknown: false };
+assert.doesNotMatch(en.vDescRow(UNKNOWN_AGE), /may be from the last run/,
+  "and stops once the HomeHub's compressor flag has settled it");
+en.state.live = null;
 en.state._values = [];
 const modelLabels = {
   capacity: "Nennleistung der Außeneinheit",

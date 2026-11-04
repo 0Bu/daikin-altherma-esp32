@@ -938,9 +938,12 @@ function operationModeFromFlags(dhw, space) {
 function schematicOperationMode() {
   const hp = S.status?.hp || {};
   if (hp.connected) {
-    // Only the hydronic row. The outdoor controller's "Operation Mode" is a different quantity, and
-    // a lost hydronic page must blank this headline rather than print that row under its name.
-    return operationModeText(pickValue(/i\/u operation mode/i));
+    // The hydronic row. The outdoor controller's "Operation Mode" on page 0x10 is a different quantity,
+    // and a lost hydronic page must blank this headline rather than print that row under its name.
+    // Protocol S has no hydronic row: its one mode row, on another page, is the answer there.
+    const row = (S._values || []).find((x) => /i\/u operation mode/i.test(x.label || "") ||
+                                              (x.reg !== 0x10 && /^operation mode$/i.test(x.label || "")));
+    return operationModeText(row?.value);
   }
   return mbLive() ? operationModeFromFlags(mbBool(52), mbBool(53)) : null;
 }

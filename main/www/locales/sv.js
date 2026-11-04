@@ -1,4 +1,4 @@
-// translation-source: 0453076e060746fab49e69b0c361605fc752f497de371724830903a4370462c3
+// translation-source: ae54a3d3a4b46bd4bb60e5c88b1c9678a18bd1110ec3a9d3460df47df5eb2353
 I18N.sv = localeValues([
   /* sys.nodata */ "Inga data",
   /* sys.unreachable */ "Inte tillgänglig",
@@ -940,7 +940,7 @@ I18N.sv = localeValues([
 ]);
 
 INSPECT_I18N.sv = inspectValues(
-  ["Ingen aktuell mätning:", "Kompressorn står; utomhusgivare som bara uppdateras i drift döljer gamla värden.", "Kompressorvarvtalet kan inte läsas, så utomhusdelens värden kan vara från senaste drift."],
+  ["Ingen aktuell mätning:", "Kompressorn står; utomhusgivare som bara uppdateras i drift döljer gamla värden.", "Kompressorvarvtalet kan inte läsas, så utomhusenhetens värden kan vara från den senaste körningen."],
   [
     ["Driftläge", 0, "Inomhusenhetens läge; bevisar inte kompressor- eller vattendrift."], // status
     ["Uteklimat", "Uteklimat från ENV III", "ENV III mäter temperatur, fukt och tryck; placeringen avgör om värdet är uteluft."], // env3
@@ -987,7 +987,7 @@ INSPECT_I18N.sv = inspectValues(
       : d.dt == null ? null
       : !compressorRunning(d, 5) ? `${fmt1(d.dt)} K med endast pump: restvärmeutjämning, inte värmeeffekt.`
       : d.thermalMode === "cool" ? `${fmt1(d.dt)} K; vid kylning ska R1T<R4T och värdet vara negativt.`
-      : `${fmt1(d.dt)} K${d.dtSet != null ? `; mål ${fmt1(d.dtSet)} K` : ""}; positivt betyder att PHE värmer vattnet.`], // dt
+      : `${fmt1(d.dt)} K; positivt betyder att PHE värmer vattnet.`], // dt
     [(d) => d && d.pthKind === "cooling" ? "Uppskattad kyleffekt" : "Uppskattad värmeeffekt", "Uppskattad PHE-effekt", (d) => d && d.pthKind === "cooling"
       ? "Flöde × (R4T−R1T) × 4,186 uppskattar vattenkylning med givar-/vätskeosäkerhet."
       : "Flöde × (R1T−R4T) × 4,186 uppskattar vattenvärme med givar-/vätskeosäkerhet; BUH saknas.", (d) => d.dtStale

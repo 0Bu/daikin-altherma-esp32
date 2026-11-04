@@ -535,11 +535,10 @@ try {
   fs.rmSync(work, { recursive: true, force: true });
 }
 // Native Altherma 4 labels, enums and bounded explanations total 288626 measured locale bytes.
-// The three explicit interpretation limits add 1869 bytes, and the unknown-age sentence 675. Retain
-// a tight 283.5 KiB growth guard, the per-locale 32 KiB cap and the independent firmware image-size
-// gate.
-assert.ok(localeGzipTotal <= 290304,
-  `locale assets use ${localeGzipTotal} bytes and exceed the 283.5 KiB aggregate-growth guard`);
+// The three explicit interpretation limits add 1869 bytes. Retain a tight 283 KiB growth guard,
+// the per-locale 32 KiB cap and the independent firmware image-size gate.
+assert.ok(localeGzipTotal <= 289792,
+  `locale assets use ${localeGzipTotal} bytes and exceed the 283 KiB aggregate-growth guard`);
 assert.ok(firmwareLocaleGzipTotal <= localeGzipTotal - 4096,
   "firmware catalog compression must recover at least one flash sector without dropping copy");
 

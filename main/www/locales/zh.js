@@ -1,4 +1,4 @@
-// translation-source: 0453076e060746fab49e69b0c361605fc752f497de371724830903a4370462c3
+// translation-source: ae54a3d3a4b46bd4bb60e5c88b1c9678a18bd1110ec3a9d3460df47df5eb2353
 I18N.zh = localeValues([
   /* sys.nodata */ "无数据",
   /* sys.unreachable */ "无法访问",
@@ -984,7 +984,7 @@ INSPECT_I18N.zh = inspectValues(
       : d.dt == null ? null
       : !compressorRunning(d, 5) ? `${fmt1(d.dt)} K，仅水泵余热均衡，不是热功率。`
       : d.thermalMode === "cool" ? `${fmt1(d.dt)} K；制冷时 R1T<R4T，故为负。`
-      : `${fmt1(d.dt)} K${d.dtSet != null ? `；目标 ${fmt1(d.dtSet)} K` : ""}；正值表示 PHE 向水供热。`], // dt
+      : `${fmt1(d.dt)} K；正值表示 PHE 向水供热。`], // dt
     [(d) => d && d.pthKind === "cooling" ? "制冷功率估算" : "热功率估算", "PHE 热功率估算", (d) => d && d.pthKind === "cooling"
       ? "流量×(R4T−R1T)×4.186，按水估算制冷；受传感器/介质影响，仅压缩机运行且方向有效时显示。"
       : "流量×(R1T−R4T)×4.186，按水估算供热；受传感器/介质影响，不含 R1T 下游 BUH。", (d) => d.dtStale ? d.bsh === true

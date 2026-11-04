@@ -1,4 +1,4 @@
-// translation-source: 0453076e060746fab49e69b0c361605fc752f497de371724830903a4370462c3
+// translation-source: ae54a3d3a4b46bd4bb60e5c88b1c9678a18bd1110ec3a9d3460df47df5eb2353
 I18N.es = localeValues([
   /* sys.nodata */ "Sin datos",
   /* sys.unreachable */ "No accesible",
@@ -986,7 +986,7 @@ INSPECT_I18N.es = inspectValues(
       : d.dt == null ? null
       : !compressorRunning(d, 5) ? `${fmt1(d.dt)} K con solo circulación de bomba: igualación de calor residual, no potencia térmica.`
       : d.thermalMode === "cool" ? `${fmt1(d.dt)} K. En refrigeración activa R1T debe estar por debajo de R4T, por eso la diferencia es negativa.`
-      : `${fmt1(d.dt)} K${d.dtSet != null ? ` frente al objetivo de calefacción de ${fmt1(d.dtSet)} K` : ""}. Un valor positivo indica que el PHE aporta calor al agua.`], // dt
+      : `${fmt1(d.dt)} K. Un valor positivo indica que el PHE aporta calor al agua.`], // dt
     [(d) => d && d.pthKind === "cooling" ? "Potencia de frío estimada" : "Potencia térmica estimada", "Potencia térmica estimada en el PHE", (d) => d && d.pthKind === "cooling"
       ? "Estimación del calor extraído: caudal/60 × (R4T−R1T) × ρ·cp (≈ 4,186 kJ/(l·K)) suponiendo agua. Depende de caudal, sensores y fluido; con glicol cambia. Solo se muestra con compresor en marcha y diferencia en dirección de refrigeración."
       : "Estimación del calor entregado: caudal/60 × (R1T−R4T) × ρ·cp (≈ 4,186 kJ/(l·K)) suponiendo agua. Depende de caudal, sensores y fluido; con glicol cambia. BUH está después de R1T y queda fuera de esta cifra.", (d) => d.dtStale

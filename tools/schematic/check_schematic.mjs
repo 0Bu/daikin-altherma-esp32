@@ -303,8 +303,8 @@ catch (e) { die(2, `ROOM_TEMP_RE does not evaluate: ${e.message}`); }
 if (Object.prototype.toString.call(ROOM_TEMP_RE) !== '[object RegExp]')
   die(2, 'ROOM_TEMP_RE is not a regular expression');
 const INSPECT = evalTable('const INSPECT = {', '\n};', '{', 'INSPECT', {
-  lwtRow: noop, rwtRow: noop, postBuhRow: noop, vRow: noop, pickValue: noop, PEL_INSPECT, ROOM_TEMP_RE,
-  OUTDOOR_HX_RE: /^(?:2 phase thermistor \(R4T\)|O\/U Heat Exch\. Temp\.(?:\(R4T\))?|O\/U Heat Exchanger Temp|Outdoor heat exchanger temp\.|R4T-Deicer temp\.)$/i,
+  lwtRow: noop, rwtRow: noop, postBuhRow: noop, vRow: noop, pickValue: noop, highSideRow: noop, ouHxRow: noop,
+  PEL_INSPECT, ROOM_TEMP_RE,
 });
 function loadI18n() {
   if (!APP.endsWith('.sources')) return evalTable('const I18N = {', '\n};', '{', 'I18N');

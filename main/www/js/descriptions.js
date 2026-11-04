@@ -899,10 +899,10 @@ const rowNotMeasuring = (v) => !!v && (v.held === true || rowHeldOver(v, S.live)
 // follows: an independent sensor that IS still measuring may stand in, and nothing else may. The
 // schematic and the inspector have refused a held reading since legacy-209; this is what lets the value
 // tables refuse it the same way instead of printing it as an ordinary current row.
-// A row of unknown age (`held_unknown`) is not refused, since it may be live, but a reading known to
-// be current outranks it.
+// A row of unknown age is not refused, since it may be live, but a reading known to be current
+// outranks it. liveData decides whether its age is still unknown (d.ouUnknown).
 const mbStandInFor = (v) =>
-  v && (x10aDown() || rowNotMeasuring(v) || v.held_unknown === true) && mbLive()
+  v && (x10aDown() || rowNotMeasuring(v) || (v.held_unknown === true && S.live?.ouUnknown)) && mbLive()
     ? mbByConcept(v.concept) : null;
 // The Modbus reading of the SAME quantity as an X10A row — its second opinion, for the explainer.
 // Takes the row rather than a concept id so every caller resolves it the one way: `concept` is put

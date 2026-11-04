@@ -229,7 +229,7 @@ try {
 
   const cmake = fs.readFileSync(path.join(root, "main/CMakeLists.txt"), "utf8");
   assert.match(cmake, /set\(UI_GZIP_MAX_BYTES 164352\)/,
-    "CMake and the host contract must share the 160 KiB budget");
+    "CMake and the host contract must share the UI_GZIP_MAX_BYTES budget");
   assert.match(cmake, /minify_and_gzip\.py[\s\S]*--max-gzip-bytes \$\{UI_GZIP_MAX_BYTES\}/,
     "firmware build must execute the checked minifier and size gate");
   const status = fs.readFileSync(path.join(root, "main/http_status.cpp"), "utf8");

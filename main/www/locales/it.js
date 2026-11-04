@@ -1,4 +1,4 @@
-// translation-source: 0453076e060746fab49e69b0c361605fc752f497de371724830903a4370462c3
+// translation-source: ae54a3d3a4b46bd4bb60e5c88b1c9678a18bd1110ec3a9d3460df47df5eb2353
 I18N.it = localeValues([
   /* sys.nodata */ "Nessun dato",
   /* sys.unreachable */ "Non raggiungibile",
@@ -984,7 +984,7 @@ INSPECT_I18N.it = inspectValues(
       : d.dt == null ? null
       : !compressorRunning(d, 5) ? `${fmt1(d.dt)} K con sola pompa: equalizzazione del calore residuo, non potenza termica.`
       : d.thermalMode === "cool" ? `${fmt1(d.dt)} K. Nel raffrescamento attivo R1T deve essere sotto R4T; la differenza con segno è quindi negativa.`
-      : `${fmt1(d.dt)} K${d.dtSet != null ? ` rispetto all’obiettivo di riscaldamento di ${fmt1(d.dtSet)} K` : ""}. Positivo significa che il PHE cede calore all’acqua.`], // dt
+      : `${fmt1(d.dt)} K. Positivo significa che il PHE cede calore all’acqua.`], // dt
     [(d) => d && d.pthKind === "cooling" ? "Potenza frigorifera stimata" : "Potenza termica stimata", "Potenza termica stimata sul PHE", (d) => d && d.pthKind === "cooling"
       ? "Stima del calore sottratto: portata/60 × (R4T−R1T) × ρ·cp (≈ 4,186 kJ/(l·K)) assumendo acqua. Dipende da portata, sensori e fluido; il glicole cambia il calcolo. Mostrata solo con compressore in marcia e differenza nella direzione di raffrescamento."
       : "Stima del calore ceduto: portata/60 × (R1T−R4T) × ρ·cp (≈ 4,186 kJ/(l·K)) assumendo acqua. Dipende da portata, sensori e fluido; il glicole cambia il calcolo. BUH è dopo R1T e resta fuori dal valore.", (d) => d.dtStale ? d.bsh === true
