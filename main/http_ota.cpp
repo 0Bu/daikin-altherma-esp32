@@ -1,6 +1,8 @@
-// /ota/check, /ota/update, /ota/status, /ota/changelog — thin HTTP layer over ota_update.cpp.
+// Feed updates and dev-only binary uploads — thin HTTP layer over ota_update.cpp.
 #include "http_handlers.hpp"
 #include "ota_update.hpp"
+#include "config.hpp"
+#include "logic/ota_upload.hpp"
 #include "logic/json.hpp" // json_append_quoted — the ONE RFC 8259 encoder every payload uses
 #include "logic/redact.hpp"
 #include "logic/query_flag.hpp" // query_flag_on — a flag fires on "1" and nothing else
@@ -134,6 +136,51 @@ static esp_err_t ota_do(httpd_req_t* req) {
     snprintf(response, sizeof(response), "{\"ok\":true,\"generation\":%lu}",
              static_cast<unsigned long>(generation));
     return http_send_json(req, response);
+}
+
+static int upload_read(void* context, char* bytes, size_t size) {
+    // Any timeout or disconnect fails this one upload. There is no implicit retry/write loop.
+    return httpd_req_recv(static_cast<httpd_req_t*>(context), bytes, size);
+}
+
+static void upload_complete(void* context, bool installed, uint32_t generation) noexcept {
+    auto* req = static_cast<httpd_req_t*>(context);
+    char  response[64];
+    snprintf(response, sizeof(response), "{\"ok\":%s,\"generation\":%lu}",
+             installed ? "true" : "false", static_cast<unsigned long>(generation));
+    httpd_resp_set_status(req, installed ? "200 OK" : "422 Unprocessable Entity");
+    httpd_resp_set_hdr(req, "Connection", "close");
+    httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+    (void)http_send_json(req, response);
+    http_complete_ota_upload(req);
+}
+
+static esp_err_t ota_upload(httpd_req_t* req) {
+    if (config_ota_channel() != OtaChannel::Dev) {
+        httpd_resp_set_status(req, "403 Forbidden");
+        return http_send_json(req, "{\"ok\":false,\"error\":\"dev channel required\"}");
+    }
+    char query[80] = {}, sha256[65] = {};
+    if (httpd_req_get_url_query_str(req, query, sizeof(query)) != ESP_OK ||
+        httpd_query_key_value(query, "sha256", sha256, sizeof(sha256)) != ESP_OK ||
+        !ota_sha256_hex_valid(sha256) || req->content_len == 0) {
+        httpd_resp_set_status(req, "400 Bad Request");
+        return http_send_json(req,
+                              "{\"ok\":false,\"error\":\"image length and SHA-256 required\"}");
+    }
+
+    httpd_req_t* copy = nullptr;
+    if (http_begin_ota_upload(req, &copy) != ESP_OK) {
+        httpd_resp_set_status(req, "503 Service Unavailable");
+        return http_send_json(req, "{\"ok\":false,\"error\":\"upload worker unavailable\"}");
+    }
+    const OtaUploadSource source{copy, req->content_len, upload_read, upload_complete};
+    if (!ota_upload_async(source, sha256)) {
+        httpd_resp_set_status(copy, "503 Service Unavailable");
+        (void)http_send_json(copy, "{\"ok\":false,\"error\":\"upload not accepted\"}");
+        http_complete_ota_upload(copy);
+    }
+    return HTTP_ASYNC_ACCEPTED;
 }
 
 static esp_err_t ota_stat(httpd_req_t* req) {
@@ -271,9 +318,10 @@ static esp_err_t ota_changelog(httpd_req_t* req) {
 
 void http_register_ota(httpd_handle_t s, HttpSurface surface) {
     // OTA is trusted-LAN only — never exposed on the open setup AP (F01). http_register_on
-    // withholds all four on the SetupAp surface.
+    // withholds all five on the SetupAp surface.
     http_register_on(s, surface, "/ota/check", HTTP_GET, ota_check);
     http_register_on(s, surface, "/ota/update", HTTP_POST, ota_do);
+    http_register_on(s, surface, "/ota/upload", HTTP_POST, ota_upload);
     http_register_on(s, surface, "/ota/status", HTTP_GET, ota_stat);
     http_register_on(s, surface, "/ota/changelog", HTTP_GET, ota_changelog);
 }

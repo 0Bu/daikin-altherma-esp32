@@ -45,10 +45,40 @@ function replaceOnce(text, before, after, name) {
 try {
   const baseline = execute(compile(sourcePath, "production"), []);
   assert.equal(baseline.status, 0, `production OTA cases\n${baseline.stdout}${baseline.stderr}`);
-  assert.match(baseline.stdout, /PASS total=51\b/);
+  assert.match(baseline.stdout, /PASS total=81\b/);
   console.log(baseline.stdout.trim());
 
   const mutations = [
+    {
+      name: "upload-channel-admission", scenario: "upload_admission", header: "ota_upload.hpp",
+      before: "channel == OtaChannel::Dev && length >= 4096",
+      after: "(static_cast<void>(channel), true) && length >= 4096",
+    },
+    {
+      name: "upload-channel-handoff", scenario: "upload_channel_changed",
+      before: "ota_upload_allowed(config_ota_channel(), request.upload.length,",
+      after: "ota_upload_allowed(OtaChannel::Dev, request.upload.length,",
+    },
+    {
+      name: "upload-sha-binding", scenario: "upload_sha",
+      before: "!ota_sha256_matches(digest, request.offer.app_sha256.data())",
+      after: "(static_cast<void>(ota_sha256_matches(digest, request.offer.app_sha256.data())), false)",
+    },
+    {
+      name: "upload-signature-before-selection", scenario: "upload_signature",
+      before: /e\s*= esp_ota_end\(ota_handle\);\n\s*if \(e != ESP_OK\) \{/,
+      after: "e = esp_ota_end(ota_handle);\n    if ((static_cast<void>(e), false)) {",
+    },
+    {
+      name: "upload-complete-once", scenario: "upload_success",
+      before: "source.context = nullptr;",
+      after: "/* mutation: keep a completed ingress owned */",
+    },
+    {
+      name: "upload-project-binding", scenario: "upload_project",
+      before: "std::memcmp(image.project_name, running->project_name, sizeof(image.project_name)) != 0",
+      after: "(static_cast<void>(std::memcmp(image.project_name, running->project_name, sizeof(image.project_name))), false)",
+    },
     {
       name: "mutex-heap-allocation", scenario: "mutex_storage",
       before: "SemaphoreHandle_t s_mtx = xSemaphoreCreateMutexStatic(&s_mtx_storage);",
@@ -233,7 +263,7 @@ try {
       `${mutation.name}: only the specific assertion failure counts`);
     console.log(`negative control ${mutation.name}: rejected by ${mutation.scenario}`);
   }
-  console.log(`production OTA runtime: 51 cases, ${mutations.length} negative controls; source sha256=`
+  console.log(`production OTA runtime: 81 cases, ${mutations.length} negative controls; source sha256=`
     + createHash("sha256").update(source).digest("hex"));
 } finally {
   fs.rmSync(dir, { recursive: true, force: true });

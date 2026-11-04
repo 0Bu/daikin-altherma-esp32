@@ -45,7 +45,7 @@ tasks and transport.
 | Forecast and diagnosis | `weather_forecast.cpp`, `checkup.cpp`, MQTT sampler | `weather_forecast.hpp`, `checkup.hpp`, `heating_curve_diagnosis.hpp`, `instrument.hpp` |
 | History and duration evidence | `history.cpp`, `state_dwell.cpp` | `history.hpp`, `history_persist.hpp`, `state_dwell.hpp` |
 | HTTP and MCP | `http_common.cpp`, `http_status.cpp`, `http_config.cpp`, `http_ota.cpp`, `mcp_server.cpp` | `http_surface.hpp`, `http_request.hpp`, `mcp.hpp`, `redact.hpp` |
-| OTA and absolute download deadlines | `ota_update.cpp`, `http_deadline.cpp`, `http_client_diag.cpp` | `ota_manifest.hpp`, `ota_headroom.hpp`, `ota_quiesce.hpp`, `ota_transport.hpp`, `health_gate.hpp` |
+| OTA and absolute download deadlines | `ota_update.cpp`, `http_deadline.cpp`, `http_client_diag.cpp` | `ota_manifest.hpp`, `ota_headroom.hpp`, `ota_quiesce.hpp`, `ota_transport.hpp`, `ota_upload.hpp`, `health_gate.hpp` |
 | Crash, heap, stack and recovery | `diag_crash.cpp`, `heap_guard.cpp`, `safe_mode.cpp`, `stack_watch.hpp`, `recovery_button.cpp` | `crashinfo.hpp`, `heap_watchdog.hpp`, `reset_reason.hpp` |
 | Logs, time and indicator | [diag_log.cpp](../main/diag_log.cpp), `syslog.cpp`, `sntp_time.cpp`, `status_led.cpp` | `timestamp.hpp`, `bootlog.hpp` |
 
@@ -324,7 +324,7 @@ backs off to 30 seconds while unreachable, and suspends ordinary polling while h
 
 Registration goes through the common exception boundary. The open setup AP exposes provisioning;
 the configured LAN exposes the full API. The surface follows whether that AP is running, not the
-radio's STA mode. The exact trusted-LAN route count of 39 is checked against registration; fields,
+radio's STA mode. The exact trusted-LAN route count of 40 is checked against registration; fields,
 route aliases, body limits and error behavior belong in [API.md](API.md).
 
 The common HTTP admission guard rejects every non-OTA route during active OTA, including assets
@@ -411,12 +411,18 @@ that earlier boots did not occur.
 <a id="ota-signing-partitions"></a>
 ## OTA and shared heap coordination
 
-A boot-resident OTA worker owns manifest check, optional changelog and image download. The 11,776-byte
+A boot-resident OTA worker owns feed checks, changelog, downloads and direct dev test uploads. Its 11,776-byte
 stack and control block are static and created before network services. Requests notify it; they do
 not allocate a new delivery task beside a fragmented TLS heap. Artifact identity is one completed
 check generation plus channel, version and application SHA. Acceptance atomically captures that
 lease; the worker rechecks the manifest and complete downloaded digest before signed-image
-validation and boot selection. [SECURITY.md](SECURITY.md) owns trust and rollback conditions.
+validation and boot selection. A local upload instead pins the complete signed binary's digest;
+the saved `dev` channel grants this separate test mode, including equal/older versions. It uses
+the same worker, signature/boot-selection path and health gate. The HTTP handler transfers an
+ESP-IDF async request to that worker, which closes/releases it on every exit; binary reception and
+RSA validation never occupy the HTTP task. Its receive budget is bounded from the first header,
+as specified in [API.md](API.md#ota-operation-contract). [SECURITY.md](SECURITY.md) owns trust and
+rollback conditions.
 
 OTA and Weather announce network ownership before TLS. MQTT stops its complete transport and
 acknowledges; X10A, HomeHub and Syslog stand aside before allocation-rich work. An in-flight Weather

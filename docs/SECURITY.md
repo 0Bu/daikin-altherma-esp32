@@ -9,13 +9,13 @@ observations without user authentication. [API.md](API.md) owns request/field co
 | Surface | Protection and limit |
 |---|---|
 | Device HTTP/UI | No authentication or TLS. Anyone reaching the operational LAN API can read data and change device configuration. Never expose port 80 directly to the internet. |
-| Browser requests | LAN Host must name the fixed mDNS hostname or current WiFi/Ethernet IPv4 address. Present Origin is checked independently; cross-site/unknown Fetch Metadata is refused. Body-bearing POSTs require JSON. Native clients may omit browser headers; a supplied Host must still match. |
+| Browser requests | LAN Host must name the fixed mDNS hostname or current WiFi/Ethernet IPv4 address. Present Origin is checked independently; cross-site/unknown Fetch Metadata is refused. POST bodies require JSON except the exact binary upload route. Native clients may omit browser headers; a supplied Host must still match. |
 | Open setup AP | Unauthenticated `daikin-altherma-esp32-setup` exposes provisioning only. Nearby clients can submit WiFi credentials, but cannot read live state, logs, dumps or the full config/OTA/MCP API. The captive GET fallback serves setup; withheld POSTs are 404. |
 | Ethernet | A wired boot with a lease starts no setup AP. The HTTP surface follows whether an open AP is running, not STA mode or the existence of a cable. Registration is server-wide, not per-interface. |
 | LAN discovery | DHCP/mDNS announce product, root HTTP path and version, never board identity, MAC/serial, SSID, broker or configured services. |
 | X10A/HomeHub | Both are read-only. No Modbus write builder, command subscription, writable HA entity or raw Modbus proxy exists. `/hp/query` can issue only an X10A read. |
 | HomeHub itself | Its Modbus TCP port has no protocol credential or encryption. Other LAN clients can write it. Restrict port 502 to intended clients; this firmware cannot secure other clients or the hub. |
-| MCP | LAN-only stateless read tools, using existing snapshots. No session, SSE or write tool. Its setup page uses `connect-src 'none'`. |
+| MCP | LAN-only stateless status/value reads and OTA endpoint discovery. No session, SSE or write tool. Its setup page uses `connect-src 'none'`. |
 | MQTT | Stored credentials require `mqtts://` or `wss://` with common-root certificate verification; plaintext with credentials is refused. An anonymous broker may use plaintext on the trusted LAN. Uncovered/private roots are rejected. |
 | Syslog | Optional cleartext unauthenticated UDP. Logs plus boot/crash summary reveal operational metadata, version and code addresses, but do not export raw memory or credentials. Use a trusted collector. |
 | Weather | Explicit location plus diagnostics consent permits provider HTTPS requests, disclosing coordinates and source IP. Removing/replacing a source clears old decision/retained evidence. |
@@ -26,11 +26,14 @@ an external Origin or cross-site Fetch Metadata. A plain port forward supplies n
 The device guards browser-origin attacks; they are not LAN-client authentication.
 
 Config, MQTT and Weather JSON ingress permits one complete document, at most 16 container levels,
-no raw or decoded NUL or trailing non-whitespace. HTTP body acceptance has a 30-second absolute budget;
+no raw or decoded NUL or trailing non-whitespace. Ordinary HTTP body acceptance has a 30-second absolute budget;
 unread-body cleanup admits receives for two seconds and checks its 8 KiB cap after each 128-byte
 read. One in-progress read can add a socket timeout and the cap can reach 8 KiB + 128 bytes.
 Beyond those bounds the connection closes. During active OTA or below a 6,144-byte internal block,
 the common guard refuses every non-OTA route, including assets and both `/diag` forms.
+The admitted dev-only binary upload has a separate 300-second receive budget from the same
+first-header start; progress cannot extend it. It closes its connection instead of purging an
+unread image. [API.md](API.md#ota-operation-contract) owns its framing and error contract.
 
 The two transient HIL HTTPS headers on `/ota/check` add outbound-HTTPS/SSRF capability for trusted
 LAN clients. They carry no controller bearer token/device credential, cap URLs at 255 bytes and
@@ -50,13 +53,22 @@ signed USB/browser installation establishes the signing identity; later OTA must
 identity. The bootloader does not perform hardware Secure Boot verification. An unsigned application
 aborts before `app_main`, so application-level recovery cannot intercept it.
 
-An accepted install captures a completed check generation, channel, version and application SHA.
+An accepted feed install captures a completed check generation, channel, version and application SHA.
 The worker re-fetches that feed, verifies the same manifest identity, checks the image's embedded
 version before writing, hashes the complete download and validates its signature before selecting
 an inactive slot. A valid signature alone does not prove freshness: numeric SemVer comparison
 (including dev identifiers) refuses an older/equal or unparseable version. Explicit per-request
 `downgrade=1` allows an older channel-switch target, never an equal version, and changes no digest
 or signature condition.
+
+An explicit local test can instead upload a signed application directly while the saved channel
+is `dev`. Channel admission is rechecked before flash acquisition; the shared OTA busy guard blocks
+configuration POSTs during the operation. It permits equal/older versions and skips the published
+feed, so signature authenticity does not imply release freshness or PR acceptance. Project/chip
+checks, the complete uploaded-byte digest, inactive-slot signature/boot validation and pending-image
+health probation remain active. The endpoint is trusted-LAN only and requires no separate password;
+any LAN client that can select `dev` can use it. MCP only discovers it. This is an intentional local
+test capability, not official artifact promotion; see [MAINTENANCE.md](MAINTENANCE.md#local-dev-ota-tests).
 
 ### Heap and transport bounds
 
@@ -163,9 +175,14 @@ An equal-version publication resume requires the original source and complete or
 bytes, including signature, index and changelog. Rebuilding the same source is insufficient;
 recover the original handoff or publish the next version.
 
-Authorized bench and production gates separately bind inventory roles, exact artifacts, source,
+Official bench and production gates separately bind inventory roles, exact artifacts, source,
 current version, observed verifier/heap/stack evidence, probation and pressure. The canonical
 commands and their abort behavior are in [MAINTENANCE.md](MAINTENANCE.md#role-pinned-ota).
+An explicitly authorized local dev upload follows the separate test procedure there and does not
+waive the PR gates or establish acceptance of a later published artifact.
+Its receipt binds the complete local source, check/review transcripts, isolated unsigned build and
+signed-image correspondence. Transcript binding does not prove a review's meaning or effective
+permissions; the coordinator verifies the actual independent read-only runtime before upload.
 Running version plus ELF build id is not cryptographic readback of complete flash. Host/CI,
 artifact identity, injection, reboot, API and rendered UI evidence must be reported separately.
 

@@ -47,6 +47,16 @@ uint32_t ota_check_async(int64_t            browser_epoch_ms,
 uint32_t ota_update_async(uint32_t after_generation, const char* expected_channel,
                           const char* expected_version, const char* expected_app_sha256,
                           bool allow_downgrade = false);
+
+// Bounded binary ingress owned by the existing OTA worker after acceptance. On refusal the
+// caller still owns context. On acceptance complete runs exactly once, including errors/OOM.
+struct OtaUploadSource {
+    void*  context                                   = nullptr;
+    size_t length                                    = 0;
+    int (*read)(void*, char*, size_t)                = nullptr;
+    void (*complete)(void*, bool, uint32_t) noexcept = nullptr;
+};
+uint32_t ota_upload_async(const OtaUploadSource& source, const char* expected_sha256);
 void     ota_health_gate_arm(); // main.cpp: arm rollback health gate
 
 // Is an OTA network operation in flight RIGHT NOW — manifest TLS check or image download? Read

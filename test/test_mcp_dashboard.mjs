@@ -28,8 +28,8 @@ assert.ok(assembled.includes("Model Context Protocol") && assembled.includes("St
   "page must explain what the endpoint is and name its transport");
 assert.ok(assembled.includes("mcpServers") && assembled.includes("curl -sS"),
   "page must provide client configuration and a wire example");
-assert.ok(assembled.includes("get_status") && assembled.includes("get_hp_values"),
-  "page must document both read-only tools");
+assert.ok(["get_status", "get_hp_values", "get_ota_info"].every(tool => assembled.includes(tool)),
+  "page must document all three read-only tools");
 assert.ok(assembled.includes("trusted LAN") && assembled.includes("no authentication"),
   "page must make the endpoint security boundary clear");
 assert.doesNotMatch(assembled, /<(?:script|link|img)\b[^>]*(?:src|href)=["']https?:/i,

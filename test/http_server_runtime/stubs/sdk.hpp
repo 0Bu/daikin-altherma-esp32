@@ -52,6 +52,7 @@ struct httpd_config_t {
 };
 inline httpd_config_t HTTPD_DEFAULT_CONFIG() { return {}; }
 namespace sdk {
+inline unsigned async_begun = 0, async_completed = 0;
 struct Session {
     void*               context      = nullptr;
     httpd_free_ctx_fn_t free_context = nullptr;
@@ -86,6 +87,17 @@ template <typename... Args> void record(const char* format, Args... args) {
     log += '\n';
 }
 } // namespace sdk
+inline esp_err_t httpd_req_async_handler_begin(httpd_req_t* req, httpd_req_t** copy) {
+    *copy         = new httpd_req_t(*req);
+    req->consumed = req->body.size(); // the SDK transfers remaining_len to the async copy
+    ++sdk::async_begun;
+    return ESP_OK;
+}
+inline esp_err_t httpd_req_async_handler_complete(httpd_req_t* req) {
+    delete req;
+    ++sdk::async_completed;
+    return ESP_OK;
+}
 inline int   httpd_req_to_sockfd(httpd_req_t* req) { return req->sockfd; }
 inline void* httpd_sess_get_transport_ctx(httpd_handle_t, int fd) {
     const auto it = sdk::sessions.find(fd);

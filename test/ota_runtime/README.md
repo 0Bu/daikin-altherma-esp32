@@ -7,6 +7,11 @@ checks, range-resume orchestration, ownership guards, network lease and health t
 No production function body is copied into the fixture.
 Successful original, chunked and resumed streams preserve exact byte order in independent write/hash
 ledgers; a wrong resumed range, premature chunked EOF and body deadline failure cannot select boot.
+Direct-upload cases use the same production worker and activation routine. They cover saved-channel
+admission and handoff checks, fragmented body reads, equal/older versions, project/chip descriptors,
+SHA binding, bounded read/write/hash failures, signature and boot-selection refusal, low validation
+heap, probation, factory-reset holds and exactly one ingress completion after every accepted request.
+Refused requests retain caller ownership; copied source/digest storage survives caller mutation.
 
 The cases check ordinary SDK null/error returns and separately labelled C++ unwind injections at
 resource-owning boundaries. The latter deliberately throw `std::bad_alloc` through host adapters;

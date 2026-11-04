@@ -15,6 +15,7 @@
 #include "logic/http_body.hpp"
 #include "logic/http_ingress.hpp"
 #include "logic/http_request.hpp"
+#include "logic/ota_upload.hpp"
 #include "wifi.hpp"
 #include "esp_err.h"
 #include "esp_timer.h"
@@ -106,8 +107,8 @@ bool json_post_allowed(httpd_req_t* req) {
     if (req->method != HTTP_POST || req->content_len == 0) return true;
     char content_type[96] = {};
     bool present = false;
-    return read_header(req, "Content-Type", content_type, sizeof(content_type), present) && present &&
-           http_json_content_type(content_type);
+    return read_header(req, "Content-Type", content_type, sizeof(content_type), present) &&
+           present && http_post_content_type(req->uri, content_type);
 }
 
 bool request_framing_allowed(httpd_req_t* req) {
@@ -182,7 +183,8 @@ static esp_err_t handle_all(httpd_req_t* req) {
         if (heap_largest_internal_block() < 6144 && !ota_route)
             return reject_request(req, "503 Service Unavailable", "heap low");
 
-        // All body-bearing POST handlers parse JSON. text/plain and HTML-form bodies are
+        // Body-bearing POST handlers require JSON, except the exact binary OTA upload route.
+        // text/plain and HTML-form bodies are
         // deliberately refused: both are CORS-safelisted request shapes a hostile page can emit
         // without preflight. Bodyless actions (/detect, /ota/update, /crash/dismiss and the clear
         // endpoints) remain available to native clients without inventing an empty JSON envelope.
@@ -206,10 +208,28 @@ static esp_err_t handle_all(httpd_req_t* req) {
 // purge.
 static esp_err_t handle_then_settle_body(httpd_req_t* req) {
     const esp_err_t result = handle_all(req);
+    if (result == HTTP_ASYNC_ACCEPTED) return ESP_OK;
     if (result != ESP_OK) return result;
     if (!discard_unread_body(req)) return ESP_FAIL;
     finish_receive_budget(req);
     return ESP_OK;
+}
+
+esp_err_t http_begin_ota_upload(httpd_req_t* req, httpd_req_t** copy) {
+    auto* state = static_cast<HttpIngressSession*>(
+        httpd_sess_get_transport_ctx(req->handle, httpd_req_to_sockfd(req)));
+    if (!state || state->budget.expired(esp_timer_get_time())) return ESP_FAIL;
+    const esp_err_t result = httpd_req_async_handler_begin(req, copy);
+    // Retain the first-header start time. Only this admitted binary route gets the larger bound.
+    if (result == ESP_OK) state->budget.limit_us = OTA_UPLOAD_BUDGET_US;
+    return result;
+}
+
+void http_complete_ota_upload(httpd_req_t* req) noexcept {
+    // Never let an unread binary suffix become a keep-alive request. Shutdown while the async
+    // lease still protects the session, then release it; the server observes EOF and closes it.
+    shutdown(httpd_req_to_sockfd(req), SHUT_RDWR);
+    (void)httpd_req_async_handler_complete(req);
 }
 
 esp_err_t http_open_session(httpd_handle_t server, int socket) {

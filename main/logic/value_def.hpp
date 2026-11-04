@@ -15,7 +15,6 @@ struct ValueDef {
     uint16_t    conv;   // converter id (see logic/convert.hpp)
     uint8_t     size;   // number of bytes
     int8_t      type;   // dataType / HA unit code: 1=°C, 2=bar, 3=A, -1=generic
-    const char* label;  // human label (English)
 
     // DETECT-ONLY row: the page exists on this model (so it must keep contributing to the profile's
     // detection signature) but the VALUE is an absent-feature placeholder that must never be
@@ -31,14 +30,20 @@ struct ValueDef {
     // mis-detects and the same garbage returns through the wrong table. Keeping the row preserves
     // detection; the flag stops only the publish (poll cache -> /values, MQTT state, HA discovery).
     bool no_publish = false;
+    // Keep the flag in the scalar padding before the naturally aligned pointer: catalog rows
+    // occupy 12 bytes on ESP32-S3 instead of 16, without changing constructor argument order.
+    const char* label; // human label (English)
 
     constexpr ValueDef()
-        : reg(0), offset(0), conv(0), size(0), type(0), label(nullptr), no_publish(false) {}
+        : reg(0), offset(0), conv(0), size(0), type(0), no_publish(false), label(nullptr) {}
 
     constexpr ValueDef(int r, int o, int c, int s, int t, const char* l = nullptr, bool np = false)
         : reg(static_cast<uint8_t>(r)), offset(static_cast<uint8_t>(o)),
           conv(static_cast<uint16_t>(c)), size(static_cast<uint8_t>(s)),
-          type(static_cast<int8_t>(t)), label(l), no_publish(np) {}
+          type(static_cast<int8_t>(t)), no_publish(np), label(l) {}
 };
+
+static_assert(sizeof(ValueDef) == 8 + sizeof(const char*),
+              "catalog rows must retain natural compact alignment");
 
 } // namespace daik

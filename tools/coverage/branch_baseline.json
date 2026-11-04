@@ -1079,6 +1079,141 @@
         "main/logic/history_persist.hpp": "b906935a7930c1595f6cd66a79dd06674acc63ed2420714671b25f917305e76c"
       },
       "earlier_test_source_sha256": "04d28f86cbd1b208078f44ab7d3dcc8b2b7079cbae26d497d355ab87653c4717"
+    },
+    {
+      "runner": "scripts/run-mock-tests.sh --coverage compiler and gcov commands with isolated per-profile output directories",
+      "compilers": {
+        "clang-17-darwin": "Apple clang version 17.0.0 (clang-1700.6.4.2)",
+        "gcc-13-linux-ubuntu24": "g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+        "gcc-15-linux-ubuntu26": "g++ (Ubuntu 15.2.0-16ubuntu1) 15.2.0"
+      },
+      "architectures": {
+        "clang-17-darwin": "arm64",
+        "gcc-13-linux-ubuntu24": "aarch64",
+        "gcc-15-linux-ubuntu26": "aarch64"
+      },
+      "hosted_confirmation": "Changed-header hosted GCC 15 expectations use measured local aarch64 counts; authoritative GitHub x86_64 confirmation remains pending. Unchanged hosted inventories are retained.",
+      "scope": "Dev-only signed binary upload admission and saved-channel/length/digest refusals, binary-only media routing, and read-only MCP OTA capability dispatch. Existing per-file ratios increase or remain complete, all other inventories and line floors remain unchanged. The new upload predicate takes every ordinary branch; Apple Clang additionally counts an untaken exception edge at the allocation-free SHA helper. Final formatting changed source layout only; measured inventories are unchanged.",
+      "sources": {
+        "main/logic/http_ingress.hpp": "be0ccd51bffb9d4d88a1dcf7ef0c6e3272152b5638670edae78c6ac7629504c5",
+        "main/logic/http_request.hpp": "64d26c454a7e34b98b3ec4c0c0cf4f89bef47b8bd093bf05e2580e5b3bd02d53",
+        "main/logic/mcp.hpp": "6ec4450d3ff5179b7058837927ff787cbb7a1ac527c5a5de41fc08b0760d2e20",
+        "main/logic/ota_upload.hpp": "c228c3cb896da3baec6d6a02e32f7223c8360747c9f28b3e49a5e221ee825e54"
+      },
+      "test_source_sha256": "87823b8ff6daa8749a4b72f10ee64cd95c0f3ec3628e6848a762cdefe561e91d",
+      "local_executable_lines": {
+        "clang-17-darwin": [
+          9575,
+          9747
+        ],
+        "gcc-13-linux-ubuntu24": [
+          9281,
+          9564
+        ],
+        "gcc-15-linux-ubuntu26": [
+          9283,
+          9566
+        ]
+      }
+    },
+    {
+      "runner": "scripts/run-mock-tests.sh --coverage",
+      "integration_base_commit": "d3392ade3dc42e4cfbb1c1eeb22b306c6dd80574",
+      "compilers": {
+        "clang-17-darwin": "Apple clang version 17.0.0 (clang-1700.6.4.2)",
+        "gcc-13-linux-ubuntu24": "g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0 via CI-pinned ESP-IDF v6.1 container",
+        "gcc-15-linux-ubuntu26": "g++ (Ubuntu 15.2.0-16ubuntu1) 15.2.0, Ubuntu 26.04 Docker"
+      },
+      "architectures": {
+        "clang-17-darwin": "arm64",
+        "gcc-13-linux-ubuntu24": "aarch64",
+        "gcc-15-linux-ubuntu26": "aarch64"
+      },
+      "hosted_confirmation": "The changed http_request.hpp, mcp.hpp and new ota_upload.hpp hosted GCC 15 expectations are candidates measured locally on aarch64. Authoritative GitHub x86_64 confirmation remains required; all other hosted inventories are retained unchanged.",
+      "scope": "Integration of the dev-only signed HTTP upload and read-only MCP capability with current main. All 420 existing per-profile header ratios are retained or increased; all latest-main measurement records, new instrument coverage and the 95-percent executable-line floor are preserved. The upload predicate takes every ordinary branch; Apple Clang also counts an untaken exception edge.",
+      "validation_boundary": "All three local compilers passed the pure C++ suite, executable-line floor and exact 106-file branch ratchet across 110 logic files. Apple Clang and local GCC 15 completed the canonical entrypoint including presenter parity and 127 installer/serial fixtures. The pinned GCC 13 run stopped only at the later missing-Node prerequisite. Local ARM runs do not establish hosted x86_64 coverage or device behavior.",
+      "sources": {
+        "main/logic/http_ingress.hpp": "be0ccd51bffb9d4d88a1dcf7ef0c6e3272152b5638670edae78c6ac7629504c5",
+        "main/logic/http_request.hpp": "64d26c454a7e34b98b3ec4c0c0cf4f89bef47b8bd093bf05e2580e5b3bd02d53",
+        "main/logic/mcp.hpp": "6ec4450d3ff5179b7058837927ff787cbb7a1ac527c5a5de41fc08b0760d2e20",
+        "main/logic/ota_upload.hpp": "c228c3cb896da3baec6d6a02e32f7223c8360747c9f28b3e49a5e221ee825e54"
+      },
+      "test_source_sha256": "fcf336c6e457b27d591e7bdd872744229b4a41bb7535caeb3d3acac336e6b098",
+      "measured_branch_counts": {
+        "clang-17-darwin": {
+          "main/logic/http_ingress.hpp": {
+            "taken": 30,
+            "outcomes": 30
+          },
+          "main/logic/http_request.hpp": {
+            "taken": 154,
+            "outcomes": 164
+          },
+          "main/logic/mcp.hpp": {
+            "taken": 454,
+            "outcomes": 621
+          },
+          "main/logic/ota_upload.hpp": {
+            "taken": 7,
+            "outcomes": 8
+          }
+        },
+        "gcc-13-linux-ubuntu24": {
+          "main/logic/http_ingress.hpp": {
+            "taken": 36,
+            "outcomes": 36
+          },
+          "main/logic/http_request.hpp": {
+            "taken": 203,
+            "outcomes": 232
+          },
+          "main/logic/mcp.hpp": {
+            "taken": 486,
+            "outcomes": 673
+          },
+          "main/logic/ota_upload.hpp": {
+            "taken": 8,
+            "outcomes": 8
+          }
+        },
+        "gcc-15-linux-ubuntu26": {
+          "main/logic/http_ingress.hpp": {
+            "taken": 36,
+            "outcomes": 36
+          },
+          "main/logic/http_request.hpp": {
+            "taken": 203,
+            "outcomes": 232
+          },
+          "main/logic/mcp.hpp": {
+            "taken": 486,
+            "outcomes": 673
+          },
+          "main/logic/ota_upload.hpp": {
+            "taken": 8,
+            "outcomes": 8
+          }
+        }
+      },
+      "local_executable_lines": {
+        "clang-17-darwin": [
+          10180,
+          10354
+        ],
+        "gcc-13-linux-ubuntu24": [
+          9819,
+          10103
+        ],
+        "gcc-15-linux-ubuntu26": [
+          9815,
+          10105
+        ]
+      },
+      "raw_report_sha256": {
+        "clang-17-darwin": "575ca99e4e55b4693d421739d63b3730f51414ba952d32191cb4b1a3f12eec3e",
+        "gcc-13-linux-ubuntu24": "c138193d669b8afec1075e971c0afc69e2b3714ef5d39d731b0f24d106c8a936",
+        "gcc-15-linux-ubuntu26": "9607f04dfd6fff16d2544133133c6ca694aabf8efc12122ecd027ba1d7b38d78"
+      }
     }
   ],
   "method": "Exact taken/outcome inventories are measured by scripts/run-mock-tests.sh --coverage and bound to compiler family, major version and platform; hosted profiles additionally bind the runner image. The gate rejects inventory mismatches and any historical ratio decrease. Updated hosted inventories require authoritative CI confirmation. Historical measurement notes remain in Git; profiles contain the enforced counts. Measurements below identify changed sources and local compiler provenance without changing checker rules or the 95-percent executable-line floor.",
@@ -1265,8 +1400,8 @@
         "taken": 2
       },
       "main/logic/http_request.hpp": {
-        "taken": 150,
-        "outcomes": 160
+        "taken": 154,
+        "outcomes": 164
       },
       "main/logic/http_surface.hpp": {
         "outcomes": 8,
@@ -1301,8 +1436,8 @@
         "taken": 58
       },
       "main/logic/mcp.hpp": {
-        "taken": 450,
-        "outcomes": 617
+        "taken": 454,
+        "outcomes": 621
       },
       "main/logic/modbus.hpp": {
         "outcomes": 108,
@@ -1503,6 +1638,10 @@
       "main/logic/instrument.hpp": {
         "outcomes": 104,
         "taken": 104
+      },
+      "main/logic/ota_upload.hpp": {
+        "taken": 7,
+        "outcomes": 8
       }
     },
     "gcc-13-linux-ubuntu24": {
@@ -1687,8 +1826,8 @@
         "taken": 2
       },
       "main/logic/http_request.hpp": {
-        "taken": 197,
-        "outcomes": 226
+        "taken": 203,
+        "outcomes": 232
       },
       "main/logic/http_surface.hpp": {
         "outcomes": 12,
@@ -1723,8 +1862,8 @@
         "taken": 69
       },
       "main/logic/mcp.hpp": {
-        "taken": 475,
-        "outcomes": 661
+        "taken": 486,
+        "outcomes": 673
       },
       "main/logic/modbus.hpp": {
         "outcomes": 120,
@@ -1925,6 +2064,10 @@
       "main/logic/instrument.hpp": {
         "outcomes": 122,
         "taken": 122
+      },
+      "main/logic/ota_upload.hpp": {
+        "taken": 8,
+        "outcomes": 8
       }
     },
     "gcc-15-github-linux-ubuntu26": {
@@ -2109,8 +2252,8 @@
         "taken": 2
       },
       "main/logic/http_request.hpp": {
-        "taken": 197,
-        "outcomes": 226
+        "taken": 203,
+        "outcomes": 232
       },
       "main/logic/http_surface.hpp": {
         "outcomes": 12,
@@ -2145,8 +2288,8 @@
         "taken": 69
       },
       "main/logic/mcp.hpp": {
-        "taken": 475,
-        "outcomes": 661
+        "taken": 486,
+        "outcomes": 673
       },
       "main/logic/modbus.hpp": {
         "outcomes": 120,
@@ -2347,6 +2490,10 @@
       "main/logic/instrument.hpp": {
         "outcomes": 122,
         "taken": 122
+      },
+      "main/logic/ota_upload.hpp": {
+        "taken": 8,
+        "outcomes": 8
       }
     },
     "gcc-15-linux-ubuntu26": {
@@ -2531,8 +2678,8 @@
         "taken": 2
       },
       "main/logic/http_request.hpp": {
-        "taken": 197,
-        "outcomes": 226
+        "taken": 203,
+        "outcomes": 232
       },
       "main/logic/http_surface.hpp": {
         "outcomes": 12,
@@ -2567,8 +2714,8 @@
         "taken": 69
       },
       "main/logic/mcp.hpp": {
-        "taken": 475,
-        "outcomes": 661
+        "taken": 486,
+        "outcomes": 673
       },
       "main/logic/modbus.hpp": {
         "outcomes": 120,
@@ -2769,6 +2916,10 @@
       "main/logic/instrument.hpp": {
         "outcomes": 122,
         "taken": 122
+      },
+      "main/logic/ota_upload.hpp": {
+        "taken": 8,
+        "outcomes": 8
       }
     }
   },
