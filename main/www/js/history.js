@@ -1531,10 +1531,6 @@ function scrubTime(h, i) {
   return ageH < 0.05 ? t("hist.now") : t("hist.rel", histFmt1(ageH));
 }
 
-function histReadout(h, i) {
-  return h.id === ENV3_COMBINED_ID ? env3ScrubHtml(h, i) : esc(scrubText(h, i, false));
-}
-
 // Measure every distinct readout shape in a hidden grid cell. Tabular digits have equal widths;
 // replacing them deduplicates samples without losing a possible wrapped line or phase label.
 // The reserved row stays present, so a comparison never moves the plot or its time labels.
@@ -1665,8 +1661,10 @@ function scrubText(h, i, includeTime = true) {
 // content formatter for accessibility and tests. Every line is escaped before this helper returns
 // markup, so switching the live bubble from textContent to innerHTML below does not create an HTML
 // injection path through translations, units or device data.
-function env3ScrubHtml(h, i) {
-  const lines = scrubText(h, i, false).split("\n");
+function histReadout(h, i) {
+  const text = scrubText(h, i, false);
+  if (h.id !== ENV3_COMBINED_ID) return esc(text);
+  const lines = text.split("\n");
   // Forecast provenance precedes the coloured measurement rows; measured bubbles need no header.
   const meta = i >= h.v.length ? lines.shift() : "";
   return (meta ? `<span class="vhist-tip-line vhist-tip-meta">${esc(meta)}</span>` : "") +
