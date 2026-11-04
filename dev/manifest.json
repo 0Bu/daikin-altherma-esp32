@@ -1,11 +1,11 @@
 {
   "name": "daikin-altherma-esp32",
-  "version": "1.0.14-dev.15",
+  "version": "1.0.14-dev.16",
   "provenance": {
-    "source_sha": "d3392ade3dc42e4cfbb1c1eeb22b306c6dd80574",
+    "source_sha": "21e1440f532308abbf974aecd5b9755a9db607d5",
     "idf_version": "v6.1",
     "dependencies_lock_sha256": "fad0727c2be56158adeb3ab6347b538b6acd1a88aa5cd53bedf34371f249ec42",
-    "app_sha256": "7629fbfcad6e2bf5fca94e35afea5bec41c48672dbac246c2891fd75614abf6c",
+    "app_sha256": "8d1d059d15107c7d71f1faf7ac4cc58c80dbefbc03d4b0b4ea3f17881da84f82",
     "signing_key_sha256": "ef1101b50965230dfb90f1bc34c9e84ab8af40c5433a63c04f08ba916ec71757"
   },
   "new_install_prompt_erase": true,
