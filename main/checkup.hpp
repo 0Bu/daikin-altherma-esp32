@@ -63,7 +63,8 @@ const char* checkup_persist_state();
 
 // Confirm this boot's detected or explicitly selected profile/link scope. Startup's cached scope
 // cannot unlock flash restore. The first confirmation may resume a matching one-shot ongoing DHW
-// filter; later confirmation changes retire the old window through the reset barrier.
+// filter; later confirmation changes retire the old window through the reset barrier. Confirmation
+// also requires the exact resolved consumer schema; an unknown name cannot borrow generic's scope.
 void checkup_reset_on_detect(const char* profile_id, uint32_t source_fp);
 
 // Start a new observation identity after explicit X10A re-detection, link rewiring or profile

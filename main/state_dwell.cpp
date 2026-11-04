@@ -196,7 +196,7 @@ void dwell_reset_on_detect(const char* profile_id) {
     // The same "which unit is this" hash the checkup uses, reused rather than copied: a second
     // six-line CRC over the same string is a second thing that can disagree about whether the unit
     // changed, and both features answer that question for the same reason on the same event.
-    const uint32_t fp = logic::checkup_model_fingerprint(profile_id);
+    const uint32_t fp = logic::checkup_profile_name_fingerprint(profile_id);
     if (!s_mtx) return;
     Lock lk(s_mtx);
     if (!lk.acquired()) return;

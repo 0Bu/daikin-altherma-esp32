@@ -258,7 +258,15 @@ stay gaps. Browser storage holds only a transient render frame during OTA, not m
 
 Completed diagnosis hours restore only from the dated flash journal after SNTP and current source
 confirmation; retained `.noinit` hours are never adopted. Records require a compatible fingerprint,
-configuration, source identity and diagnostics generation. Circulation broker/mapping/interpretation
+configuration, source identity and diagnostics generation. The checkup model identity binds its
+resolved, adjudicated consumer rows: locator/converter, byte size, datatype, effective availability
+and pressure plausibility, including base-table saturation twins. Cosmetic labels and unique-row
+reordering preserve it; competing selectors refuse confirmation. Unknown profile names cannot
+borrow the generic fallback's identity. The named `CHECKUP_EVIDENCE_METHOD_VERSION` additionally
+requires a bump for changes to converter arithmetic, formatting/plausibility or counting that
+metadata cannot express. This is a maintenance contract, not automatic recognition of every code
+change. The separate trend identity and its old-scale retention rule above are unchanged.
+Circulation broker/mapping/interpretation
 identity gates only DHW buckets; changed circulation must not retire independent X10A evidence.
 A narrowly scoped one-shot DHW handoff may preserve an unfinished candidate; it cannot lend coverage
 to completed checks. Disabling diagnostics clears runtime evidence; re-enabling starts a new
@@ -285,8 +293,9 @@ and freezes it. The drain then offers it after every live hour as a short record
 
 Hourly diagnosis state grows by source, not by bucket. Each byte added to `CheckupBucket` or
 `DhwLossBucket` is held 24 times in `.noinit` (23 completed hours and the open one) and once per
-journal record, and 23 stored records must still fit the 4 KiB sector scratch (see Memory
-constraints). No other hourly diagnosis source exists yet. An observation that needs more hourly
+journal record. Restore reads one record at a time into the existing destination; it has no
+multi-record sector scratch (see Memory constraints). No other hourly diagnosis source exists yet.
+An observation that needs more hourly
 state must add one: one record per hour within `HISTORY_JOURNAL_PAYLOAD_BYTES`, with its own
 fingerprint, coverage clocks and late-completion replay. In RAM it keeps the open hour, the sum of
 its completed hours and a restore index bounded like `CHECKUP_JOURNAL_INDEX_CAP`, not like the
